@@ -41,6 +41,44 @@ public class AgentJobGrainSpecs : AgentJobGrainTestSupport
     }
 
     [Fact]
+    public async Task PrepareManualLaunchAsync_FreezesReasoningEffort_OnCanonicalInput()
+    {
+        // Issue-557 T-002: the manual-launch coordinator freezes the
+        // canonical effort onto the durable manual plan; the canonical
+        // AgentJobInput carries it beside model and variant so recovery
+        // and dispatch never re-read the (possibly edited or deleted)
+        // Agent definition.
+        var projectId = $"manual-effort-freeze-{Guid.NewGuid():N}";
+        var jobKey = $"agent-job-manual-effort-{Guid.NewGuid():N}";
+        var job = JobGrain(jobKey);
+
+        var command = new PrepareManualLaunchCommand(
+            SessionId: $"agent-session-manual-effort-{Guid.NewGuid():N}",
+            InputId: Guid.NewGuid().ToString("N"),
+            TurnId: Guid.NewGuid().ToString("N"),
+            Prompt: "review with effort",
+            Model: "openai/gpt-5.5",
+            ProjectId: projectId,
+            AgentId: "agent-manual-effort",
+            Variant: "balanced",
+            ReasoningEffort: "high");
+
+        var canonical = await job.PrepareManualLaunchAsync(command);
+        Assert.Equal("high", canonical.ReasoningEffort);
+        Assert.Equal("balanced", canonical.Variant);
+        Assert.Equal("openai/gpt-5.5", canonical.Model);
+
+        // Re-delivery of the same plan is idempotent.
+        var replay = await job.PrepareManualLaunchAsync(command);
+        Assert.Equal("high", replay.ReasoningEffort);
+
+        // A later delivery that resolved a different (post-edit) effort
+        // cannot rewrite the frozen manual plan.
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            job.PrepareManualLaunchAsync(command with { ReasoningEffort = "low" }));
+    }
+
+    [Fact]
     public async Task SubmitAsync_TransitionsPendingToRunning_WhenRunnerAcceptsDispatch()
     {
         var (runnerId, projectId) = await RegisterAgentJobRunnerAsync($"agent-job-dispatch-runner-{Guid.NewGuid():N}");

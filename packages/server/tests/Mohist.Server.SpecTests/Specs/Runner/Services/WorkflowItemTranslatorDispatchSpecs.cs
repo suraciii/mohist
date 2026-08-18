@@ -104,7 +104,7 @@ public partial class WorkflowItemTranslatorSpecs
         await issueVariables.SetVariablesAsync(projectId, 42, new VariableBundle(
             Vars: JsonSerializer.SerializeToElement(new
             {
-                agent = new { model = "old-issue-model", variant = "old-issue-variant" },
+                agent = new { model = "old-issue-model", variant = "old-issue-variant", reasoningEffort = "low" },
             })));
 
         var item = WorkItem.Task("build", "task-1.1", "Task 1", "spec/task",
@@ -115,6 +115,41 @@ public partial class WorkflowItemTranslatorSpecs
         var agent = document.RootElement.GetProperty("vars").GetProperty("agent");
         Assert.Equal("stage-model", agent.GetProperty("model").GetString());
         Assert.Equal("stage-variant", agent.GetProperty("variant").GetString());
+        Assert.Equal("low", agent.GetProperty("reasoningEffort").GetString());
+    }
+
+    [Fact]
+    public async Task TranslateToDispatch_AgentTask_ForwardsEffectiveAgentOptions()
+    {
+        var runId = $"wr-{Guid.NewGuid():N}";
+        var projectId = "proj-agent-effective-options";
+        var run = await SeedRunningWorkflowAsync(runId, projectId);
+        var factory = new TestDbContextFactory(_database.Options);
+        var issueVariables = new IssueVariableStore(factory);
+        await issueVariables.SetVariablesAsync(projectId, 42, new VariableBundle(
+            Vars: JsonSerializer.SerializeToElement(new
+            {
+                agent = new
+                {
+                    model = "issue-model",
+                    variant = "issue-variant",
+                    reasoningEffort = "high",
+                },
+            })));
+
+        _agentResolver.Snapshot = new AgentExecutionDefinition(
+            "Review the change.", "pi", null, null, []);
+        var item = WorkItem.Task("build", "task-1.1", "Task 1", "mohist/agent",
+            With("""{"name":"reviewer","prompt":"Review the change."}"""));
+
+        var dispatch = await _translator.TranslateToDispatchAsync(item, runId, run, "runner-1");
+
+        using var with = JsonDocument.Parse(dispatch.With!);
+        var options = with.RootElement.GetProperty("options");
+        Assert.Equal("issue-model", options.GetProperty("model").GetString());
+        Assert.Equal("issue-variant", options.GetProperty("variant").GetString());
+        Assert.Equal("high", options.GetProperty("reasoningEffort").GetString());
+        Assert.DoesNotContain("runtime", options.EnumerateObject().Select(property => property.Name));
     }
 
     [Fact]
@@ -155,6 +190,44 @@ public partial class WorkflowItemTranslatorSpecs
 
         Assert.Contains("with.agent", error.Message, StringComparison.Ordinal);
         Assert.Equal("invalid_input", error.Error.Code);
+    }
+
+    [Fact]
+    public async Task TranslateToDispatch_AgentTask_FreezesReasoningEffortOnTheDispatchSnapshot()
+    {
+        // Issue-557 T-002: the workflow-task launch path freezes the
+        // canonical effort member of the execution tuple onto the
+        // dispatch's AgentDefinition beside model and variant. The
+        // snapshot is resolved once at translation time; a later Agent
+        // edit cannot rewrite the delivered dispatch.
+        var runId = $"wr-{Guid.NewGuid():N}";
+        var run = await SeedRunningWorkflowAsync(runId, "proj-agent-effort");
+        _agentResolver.Snapshot = new AgentExecutionDefinition(
+            "Review the change.", "opencode", "model-a", "balanced",
+            ["mohist"], AllowedSubagents: null, ReasoningEffort: "high");
+
+        var item = WorkItem.Task("build", "task-1.1", "Task 1", "mohist/agent",
+            With("""{"name":"reviewer","prompt":"Review the change."}"""));
+        var dispatch = await _translator.TranslateToDispatchAsync(item, runId, run, "runner-1");
+
+        Assert.Equal("high", dispatch.AgentDefinition!.ReasoningEffort);
+        Assert.Equal("model-a", dispatch.AgentDefinition.Model);
+        Assert.Equal("balanced", dispatch.AgentDefinition.Variant);
+    }
+
+    [Fact]
+    public async Task TranslateToDispatch_AgentTask_LeavesEffortUnset_WhenSnapshotCarriesNone()
+    {
+        var runId = $"wr-{Guid.NewGuid():N}";
+        var run = await SeedRunningWorkflowAsync(runId, "proj-agent-no-effort");
+        _agentResolver.Snapshot = new AgentExecutionDefinition(
+            "Review the change.", "opencode", "model-a", "fast", []);
+
+        var item = WorkItem.Task("build", "task-1.1", "Task 1", "mohist/agent",
+            With("""{"name":"reviewer","prompt":"Review the change."}"""));
+        var dispatch = await _translator.TranslateToDispatchAsync(item, runId, run, "runner-1");
+
+        Assert.Null(dispatch.AgentDefinition!.ReasoningEffort);
     }
 
     [Fact]

@@ -6,7 +6,8 @@ public sealed record AgentSessionTranscriptSummary(
     int? ToolCallCount,
     int? ToolErrorCount,
     string? FailureReason = null,
-    string? LastTerminalStatus = null)
+    string? LastTerminalStatus = null,
+    string? AppliedReasoningEffort = null)
 {
-    public static readonly AgentSessionTranscriptSummary Empty = new(null, null, null, null, null, null);
+    public static readonly AgentSessionTranscriptSummary Empty = new(null, null, null, null, null, null, null);
 }

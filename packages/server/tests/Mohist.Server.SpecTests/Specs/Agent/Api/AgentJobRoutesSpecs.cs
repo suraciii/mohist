@@ -547,6 +547,7 @@ public class AgentJobDispatchRouteSpecs : AgentSessionLaunchRoutesTestSupport
             capabilities = new[] { "spec/*" },
             hostname = $"{runnerId}-host",
             projectId,
+            runtimeCatalogs = CapabilityCatalogTestHelpers.Create(),
         });
         await _fixture.Client.PatchOkAsync($"/api/runner/{runnerId}", new { slots = maxWorkflowSlots });
 

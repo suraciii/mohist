@@ -1,73 +1,83 @@
-import type { ActionResult, JsonObject } from "../../src/core/types.js"
-import type { ActionTestContext as ActionContext } from "./action-test-context.js"
-import type { ActionHost, AgentTurn, AgentTurnRequest, IssueFieldsHost } from "../../src/actions/host.js"
-import { resolveIssueFields } from "../../src/actions/issue-fields.js"
-import { composeOpencodePrompt, DEFAULT_TURN_DEADLINE_MS } from "../../src/actions/opencode.js"
-import { parseModelIdentifier } from "../../src/runtime/opencode/index.js"
-import { WorkflowAgentSessionReporter } from "../../src/actions/workflow-agent-session-reporter.js"
-import { fail as actionFail, succeed as actionSucceed } from "../../src/actions/action-result.js"
-import { actionErrorMessage } from "../../src/actions/action-result.js"
+import type { ActionResult, JsonObject } from '../../src/core/types.js'
+import type { ActionTestContext as ActionContext } from './action-test-context.js'
+import type { ActionHost, AgentTurn, AgentTurnRequest, IssueFieldsHost } from '../../src/actions/host.js'
+import { resolveIssueFields } from '../../src/actions/issue-fields.js'
+import { composeOpencodePrompt, DEFAULT_TURN_DEADLINE_MS } from '../../src/actions/opencode.js'
+import { parseModelIdentifier } from '../../src/runtime/opencode/index.js'
+import { WorkflowAgentSessionReporter } from '../../src/actions/workflow-agent-session-reporter.js'
+import { fail as actionFail, succeed as actionSucceed } from '../../src/actions/action-result.js'
+import { actionErrorMessage } from '../../src/actions/action-result.js'
 
 export function hostFromActionContext(context: ActionContext): ActionHost {
-  const issueNumber = typeof context.issueNumber === "number" && context.issueNumber > 0 ? context.issueNumber : null
+  const issueNumber = typeof context.issueNumber === 'number' && context.issueNumber > 0 ? context.issueNumber : null
   const projectId = context.projectId ?? null
 
-  const issue: IssueFieldsHost | undefined = issueNumber !== null && projectId ? {
-    async fields() {
-      return resolveIssueFields({
-        workDir: context.workDir,
-        signal: context.signal,
-        issueNumber,
-        projectId,
-      } as any)
-    },
-  } : undefined
+  const issue: IssueFieldsHost | undefined =
+    issueNumber !== null && projectId
+      ? {
+          async fields() {
+            return resolveIssueFields({
+              workDir: context.workDir,
+              signal: context.signal,
+              issueNumber,
+              projectId,
+            } as any)
+          },
+        }
+      : undefined
 
   return {
     workDir: context.workDir,
     signal: context.signal,
     log: context.log ?? null,
-    exec: async () => ({ exitCode: 0, stdout: "", stderr: "" }),
+    exec: async () => ({ exitCode: 0, stdout: '', stderr: '' }),
     issue,
-    checkpoint: context.workflowRunId ? {
-      async token(_scope: string) {
-        return context.workflowRunId
-      },
-    } : undefined,
+    checkpoint: context.workflowRunId
+      ? {
+          async token(_scope: string) {
+            return context.workflowRunId
+          },
+        }
+      : undefined,
   }
 }
 
-function runtimeModel(options: { model?: string; variant?: string } | undefined) {
+function runtimeModel(options: { model?: string; variant?: string; reasoningEffort?: string } | undefined) {
   if (!options?.model) return null
   const parsed = parseModelIdentifier(options.model)
-  if (parsed.kind !== "ok") return null
+  if (parsed.kind !== 'ok') return null
   return { providerID: parsed.value.providerID, modelID: parsed.value.modelID }
 }
 
 function runtimeErrorCode(kind: string): string {
-  if (kind === "deadline-exceeded") return "timeout"
-  if (kind === "missing-session") return "runtime-session-missing"
+  if (kind === 'deadline-exceeded') return 'timeout'
+  if (kind === 'missing-session') return 'runtime-session-missing'
+  if (kind === 'unsupported-execution-configuration') return 'unsupported_execution_configuration'
   return kind
 }
 
 function buildTurnRequest(
   binding: { runtimeSessionId: string | null; workDir: string },
   prompt: string,
-  options: { model?: string; variant?: string } | undefined,
+  options: { model?: string; variant?: string; reasoningEffort?: string } | undefined,
   deadlineMs: number | undefined,
 ) {
   const modelOptions = options?.model ? parseModelIdentifier(options.model) : null
   return {
     target: {
-      runtime: "opencode" as const,
+      runtime: 'opencode' as const,
       runtimeSessionId: binding.runtimeSessionId,
       workDir: binding.workDir,
     },
     prompt,
     deadlineMs: deadlineMs ?? DEFAULT_TURN_DEADLINE_MS,
     options: {
-      model: modelOptions?.kind === "ok" ? { providerID: modelOptions.value.providerID, modelID: modelOptions.value.modelID } : null,
+      model:
+        modelOptions?.kind === 'ok'
+          ? { providerID: modelOptions.value.providerID, modelID: modelOptions.value.modelID }
+          : null,
       variant: options?.variant ?? null,
+      reasoningEffort: options?.reasoningEffort ?? null,
       unknownKeys: undefined as readonly string[] | undefined,
     },
   }
@@ -90,12 +100,12 @@ function createReporter(
     workMetadata: {
       workId: context.workId,
       taskRunId: context.taskRunId ?? context.workId,
-      runnerId: context.serverConnection?.runnerId ?? "runner-test",
-      agentSessionId: context.agentSessionId ?? "agent-session-test",
+      runnerId: context.serverConnection?.runnerId ?? 'runner-test',
+      agentSessionId: context.agentSessionId ?? 'agent-session-test',
       workType: context.workType,
       stage: context.stage ?? null,
     },
-    runtime: "opencode",
+    runtime: 'opencode',
     randomId: context.runtimeEventRecordId ?? (() => `${Date.now()}_${Math.random().toString(36).slice(2)}`),
   })
 }
@@ -109,13 +119,13 @@ function enqueueClose(
   if (reporter.inputWasRejected()) return
   if (runtimeSessionId === null) return
   if (result.ok) {
-    reporter.registerClose({ status: "completed", exitCode: 0, runtimeSessionId })
+    reporter.registerClose({ status: 'completed', exitCode: 0, runtimeSessionId })
     return
   }
   reporter.registerClose({
-    status: "failed",
+    status: 'failed',
     exitCode: 1,
-    failureReason: result.error?.message ?? "",
+    failureReason: result.error?.message ?? '',
     runtimeSessionId,
   })
 }
@@ -130,7 +140,10 @@ function opencodeAgent(context: ActionContext): AgentTurn | undefined {
 
       if (!runtime.ready()) {
         const diagnostic = runtime.diagnostic()
-        return actionFail("runtime-unavailable", `mohist/opencode requires the OpenCode runtime to be ready: ${diagnostic?.message ?? "no readiness diagnostic"}`)
+        return actionFail(
+          'runtime-unavailable',
+          `mohist/opencode requires the OpenCode runtime to be ready: ${diagnostic?.message ?? 'no readiness diagnostic'}`,
+        )
       }
 
       const sessionName = request.session ?? context.workId
@@ -150,19 +163,25 @@ function opencodeAgent(context: ActionContext): AgentTurn | undefined {
               issueNumber: context.issueNumber,
               epicNumber: context.epicNumber,
               workDir: context.workDir,
-              runtime: "opencode",
+              runtime: 'opencode',
             },
             context.signal,
           )
           if (opened.workDir && opened.workDir !== context.workDir) {
-            return actionFail("session-workspace-mismatch", "Workflow AgentSession is bound to a different workspace; rerun the stage with a new task attempt before retrying")
+            return actionFail(
+              'session-workspace-mismatch',
+              'Workflow AgentSession is bound to a different workspace; rerun the stage with a new task attempt before retrying',
+            )
           }
           binding = {
             runtimeSessionId: opened.runtimeSessionId ?? null,
             workDir: context.workDir,
           }
         } catch (error) {
-          return actionFail("session-binding-failed", `Failed to resolve the Workflow AgentSession binding: ${actionErrorMessage(error)}`)
+          return actionFail(
+            'session-binding-failed',
+            `Failed to resolve the Workflow AgentSession binding: ${actionErrorMessage(error)}`,
+          )
         }
       }
 
@@ -172,11 +191,14 @@ function opencodeAgent(context: ActionContext): AgentTurn | undefined {
 
       if (binding.runtimeSessionId === null && sessionName && context.serverConnection && context.projectId) {
         const created = await runtime.createSession({
-          target: { runtime: "opencode", runtimeSessionId: null, workDir: binding.workDir },
+          target: { runtime: 'opencode', runtimeSessionId: null, workDir: binding.workDir },
           model: runtimeModel(request.options),
         })
         if (!created.ok) {
-          return actionFail(runtimeErrorCode(created.error.kind), created.error.message, { exitCode: 1, turnFact: { finalAssistantText: null } })
+          return actionFail(runtimeErrorCode(created.error.kind), created.error.message, {
+            exitCode: 1,
+            turnFact: { finalAssistantText: null },
+          })
         }
         try {
           await context.serverConnection.attachWorkflowAgentSession(
@@ -188,12 +210,16 @@ function opencodeAgent(context: ActionContext): AgentTurn | undefined {
               workDir: created.value.workDir,
               model: request.options?.model ?? null,
               workId: context.workId,
-              runtime: "opencode",
+              runtime: 'opencode',
             },
             context.signal,
           )
         } catch (error) {
-          return actionFail("session-binding-failed", `Failed to persist the Workflow AgentSession binding: ${actionErrorMessage(error)}`, { exitCode: 1, turnFact: { finalAssistantText: null } })
+          return actionFail(
+            'session-binding-failed',
+            `Failed to persist the Workflow AgentSession binding: ${actionErrorMessage(error)}`,
+            { exitCode: 1, turnFact: { finalAssistantText: null } },
+          )
         }
         binding = {
           runtimeSessionId: created.value.runtimeSessionId,
@@ -207,7 +233,10 @@ function opencodeAgent(context: ActionContext): AgentTurn | undefined {
         try {
           await reporter.awaitInput(prompt, binding.runtimeSessionId)
         } catch (error) {
-          return actionFail("execution-unavailable", `failed to durably enqueue the Workflow AgentSession input: ${actionErrorMessage(error)}`)
+          return actionFail(
+            'execution-unavailable',
+            `failed to durably enqueue the Workflow AgentSession input: ${actionErrorMessage(error)}`,
+          )
         }
       }
       const observer = reporter ? { onEvent: (event: any) => reporter.registerEvent(event) } : undefined
@@ -215,12 +244,15 @@ function opencodeAgent(context: ActionContext): AgentTurn | undefined {
       enqueueClose(reporter, result, binding.runtimeSessionId)
       await reporter?.settle()
       if (!result.ok) {
-        return actionFail(runtimeErrorCode(result.error.kind), result.error.message, { exitCode: 1, turnFact: { finalAssistantText: null } })
+        return actionFail(runtimeErrorCode(result.error.kind), result.error.message, {
+          exitCode: 1,
+          turnFact: { finalAssistantText: null },
+        })
       }
       const facts = result.value.facts
       const output: JsonObject = {
-        kind: "opencode",
-        status: "success",
+        kind: 'opencode',
+        status: 'success',
         runtimeSessionId: facts.runtimeSessionId,
         model: request.options?.model ?? null,
         variant: request.options?.variant ?? null,

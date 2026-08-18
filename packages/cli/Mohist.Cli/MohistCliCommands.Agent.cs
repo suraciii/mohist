@@ -316,17 +316,7 @@ internal static partial class AgentCommands
                             return CommandHelpHook.RenderUsageFailure(ctx, api.Error, "--name is required");
                         }
 
-                        var config = ResolveTypedAgentConfig(
-                            current: null,
-                            agentConfig,
-                            runtime,
-                            model,
-                            reasoningEffort,
-                            variant,
-                            clearRuntime: false,
-                            clearModel: false,
-                            clearReasoningEffort: false,
-                            clearVariant: false);
+                        var config = ResolveNewAgentConfig(agentConfig, runtime, model, reasoningEffort, variant);
                         if (config.Error is not null)
                             return CommandHelpHook.RenderUsageFailure(ctx, api.Error, config.Error);
                         if (maxConcurrentRuns is <= 0)
@@ -656,6 +646,10 @@ internal static partial class AgentCommands
 
                         if (agentConfig is not null)
                             return CommandHelpHook.RenderUsageFailure(ctx, api.Error, "--agent-config is retired; use --runtime, --model, --reasoning-effort, and --variant");
+
+                        // Validate typed config locally before resolving the project or agent.
+                        var localConfigError = ValidateAgentConfigInput(agentConfig, runtime, model, variant, reasoningEffort, clearRuntime, clearModel, clearVariant, clearReasoningEffort);
+                        if (localConfigError is not null) return CommandHelpHook.RenderUsageFailure(ctx, api.Error, localConfigError);
 
                         var (resolvedProjectId, resolveExit) = await api.ResolveProject(project);
                         if (resolveExit != 0) return resolveExit;

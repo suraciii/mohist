@@ -5,6 +5,7 @@ namespace Mohist.Server.Sessions.Domain;
 internal sealed record AgentSessionActivitySummaryState
 {
     public string? ResolvedModel { get; init; }
+    public string? AppliedReasoningEffort { get; init; }
     public string? FailureCategory { get; init; }
     public int? ToolCallCount { get; init; }
     public int? ToolErrorCount { get; init; }
@@ -26,7 +27,8 @@ internal sealed record AgentSessionActivitySummaryState
         ToolCallCount,
         ToolErrorCount,
         FailureReason,
-        LastTerminalStatus);
+        LastTerminalStatus,
+        AppliedReasoningEffort);
 
     public AgentSessionActivitySummaryState Normalize() => this with
     {

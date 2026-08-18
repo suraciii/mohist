@@ -44,9 +44,9 @@ stages:
 The `agent` Variable follows the same merge rules as other Workflow Variables:
 Issue overrides Project, and Run overrides Issue. See the
 [`mohist/opencode`](opencode.md) basic usage. The same `agent` object can bind
-to either backend Action. For `mohist/pi`, the valid keys are `model` and
-`variant`. Other keys, such as `runtime` for a Mohist Agent, are ignored and
-recorded in diagnostics. They do not fail execution.
+to either backend Action. For `mohist/pi`, `model`, `reasoningEffort`, and true
+`variant` are separate keys. Other keys, such as `runtime` for a Mohist Agent,
+are ignored and recorded in diagnostics. They do not fail execution.
 
 When `${{ vars.agent }}` occupies the entire `options` value, its expansion is
 still an object. Without an explicit `options` binding, the Action uses the
@@ -61,7 +61,8 @@ execution.
 | `session` | No | - | Logical Session name within the WorkflowRun; the current Work ID is used when omitted |
 | `options` | No | - | Object that selects the Pi model for this execution |
 | `options.model` | No | - | Pi model in `provider/model` form |
-| `options.variant` | No | - | Pi reasoning level, such as `low`, `medium`, or `high` |
+| `options.reasoningEffort` | No | - | Canonical effort mapped privately to a Pi thinking level |
+| `options.variant` | No | - | Pi true model variant; it no longer selects thinking level |
 | `timeout` | No | `3600000` | Execution deadline in milliseconds; reaching it interrupts the current execution |
 
 Tools, Skills, system prompts, and automatic compaction remain Pi

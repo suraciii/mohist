@@ -269,7 +269,7 @@ describe('AgentDetailPage', () => {
 
   describe('profile summary', () => {
     it('renders the active Agent definition identity, instructions, and config', async () => {
-      mockAgent(makeAgent())
+      mockAgent(makeAgent({ agentConfig: { model: 'gpt-4', reasoningEffort: 'high', variant: 'balanced' } }))
       renderPage()
       await screen.findByTestId('agent-detail-page')
       expect(screen.getByText('Test Agent')).toBeInTheDocument()
@@ -280,7 +280,8 @@ describe('AgentDetailPage', () => {
       expect(screen.getByTestId('agent-detail-instructions')).toHaveTextContent('You are a helpful assistant.')
       expect(screen.getByTestId('agent-detail-config')).toBeInTheDocument()
       expect(screen.getByText('gpt-4')).toBeInTheDocument()
-      expect(screen.getByText('high')).toBeInTheDocument()
+      expect(screen.getByTestId('agent-detail-reasoning-effort')).toHaveTextContent('high')
+      expect(screen.getByTestId('agent-detail-variant')).toHaveTextContent('balanced')
     })
 
     it('renders the archived Agent definition identity and lifecycle', async () => {
@@ -290,6 +291,15 @@ describe('AgentDetailPage', () => {
       await screen.findByTestId('agent-detail-page')
       expect(screen.getByTestId('agent-detail-purpose')).toHaveTextContent('Retained for audit')
       expect(screen.getByTestId('agent-detail-lifecycle')).toHaveTextContent('Archived')
+    })
+
+    it('omits the effort value when the Agent has no stored effort', async () => {
+      mockAgent(makeAgent({ agentConfig: { model: 'gpt-4', variant: 'balanced' } }))
+      renderPage()
+
+      const config = await screen.findByTestId('agent-detail-config')
+      expect(config.querySelector('[data-testid="agent-detail-reasoning-effort"]')).not.toBeInTheDocument()
+      expect(config.textContent ?? '').not.toMatch(/Reasoning Effort.*high/i)
     })
 
     it('renders runtime, max concurrent runs, and edit timing in the definition summary', async () => {
@@ -304,6 +314,7 @@ describe('AgentDetailPage', () => {
       await screen.findByTestId('agent-detail-page')
       expect(screen.getByTestId('agent-detail-runtime')).toHaveTextContent('Pi')
       expect(screen.getByTestId('agent-detail-max-concurrent-runs')).toHaveTextContent('3')
+      expect(screen.getByTestId('agent-detail-edit-timing')).toHaveTextContent(/Reasoning Effort/i)
       expect(screen.getByTestId('agent-detail-edit-timing')).toHaveTextContent(/Jobs created after saving/i)
       expect(screen.getByTestId('agent-detail-edit-timing')).toHaveTextContent(/already in progress/i)
     })

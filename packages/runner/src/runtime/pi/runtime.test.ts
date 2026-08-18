@@ -138,7 +138,7 @@ describe('PiRuntime shutdown', () => {
 })
 
 describe('PiRuntime followup', () => {
-  it('applies the requested model and variant before accepting an idle follow-up', async () => {
+  it('applies the requested model and reasoningEffort before accepting an idle follow-up', async () => {
     const setModel = vi.fn(async () => undefined)
     const setThinkingLevel = vi.fn()
     const prompt = vi.fn(async (_text: string, options?: { preflight?: (accepted: boolean) => void }) => {
@@ -178,7 +178,7 @@ describe('PiRuntime followup', () => {
     const result = await runtime.followup({
       target: { runtime: 'pi', runtimeSessionId: '/workspace/session.json', workDir: '/workspace' },
       prompt: 'continue',
-      options: { model: 'provider/configured-model', variant: 'high' },
+      options: { model: 'provider/configured-model', reasoningEffort: 'high' },
     })
 
     expect(result.ok).toBe(true)

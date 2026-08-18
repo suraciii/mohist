@@ -446,6 +446,7 @@ public class GenericAgentSessionTranscriptAxisSpecs : GenericAgentSessionTranscr
             capabilities = new[] { "spec/*" },
             hostname = $"{_runnerId}-host",
             projectId = project.Id,
+            runtimeCatalogs = CapabilityCatalogTestHelpers.Create(),
         });
         await _fixture.Client.PatchOkAsync($"/api/runner/{_runnerId}", new { slots = 2 });
 

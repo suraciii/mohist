@@ -83,6 +83,7 @@ public abstract class GenericAgentSessionFollowupApiTestSupport : IAsyncLifetime
             capabilities = new[] { "spec/*" },
             hostname = $"{runnerId}-host",
             projectId = project.Id,
+            runtimeCatalogs = CapabilityCatalogTestHelpers.Create(),
         });
         await _fixture.Client.PatchOkAsync($"/api/runner/{runnerId}", new { slots = 2 });
 
@@ -155,7 +156,12 @@ public abstract class GenericAgentSessionFollowupApiTestSupport : IAsyncLifetime
     {
         var project = await CreateProjectAsync(name);
         var runner = _fixture.Grains.GetGrain<IRunnerGrain>(_runnerId);
-        await runner.RegisterAsync(new RunnerInfo(_runnerId, ["spec/*"], $"{_runnerId}-host", project.Id));
+        await runner.RegisterAsync(new RunnerInfo(
+            _runnerId,
+            ["spec/*"],
+            $"{_runnerId}-host",
+            project.Id,
+            RuntimeCatalogs: CapabilityCatalogTestHelpers.Create()));
 
         var sessionId = $"idle-{Guid.NewGuid():N}";
         var runtimeSessionId = $"runtime-{Guid.NewGuid():N}";
@@ -201,11 +207,17 @@ public abstract class GenericAgentSessionFollowupApiTestSupport : IAsyncLifetime
             capabilities = new[] { "spec/*" },
             hostname = $"{runnerId}-host",
             projectId = project.Id,
+            runtimeCatalogs = CapabilityCatalogTestHelpers.Create(),
         });
         await _fixture.Client.PatchOkAsync($"/api/runner/{runnerId}", new { slots = 2 });
 
         var runnerGrain = _fixture.Grains.GetGrain<IRunnerGrain>(runnerId);
-        await runnerGrain.RegisterAsync(new RunnerInfo(runnerId, ["spec/*"], $"{runnerId}-host", project.Id));
+        await runnerGrain.RegisterAsync(new RunnerInfo(
+            runnerId,
+            ["spec/*"],
+            $"{runnerId}-host",
+            project.Id,
+            RuntimeCatalogs: CapabilityCatalogTestHelpers.Create()));
 
         var issueGrain = _fixture.Grains.GetGrain<IIssueGrain>(GrainKey.Issue(new IssueKey(project.Id, issue.Number)));
         await issueGrain.StartWorkAsync();

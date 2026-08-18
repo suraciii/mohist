@@ -105,6 +105,7 @@ function buildAgentTurnCapability(
       )
       const modelName = definition?.model ?? request.options?.model
       const variant = definition?.variant ?? request.options?.variant
+      const reasoningEffort = definition?.reasoningEffort ?? request.options?.reasoningEffort
 
       const runtime = self.openCodeRuntime
       const sessionName = request.session ?? work.workId
@@ -239,8 +240,7 @@ function buildAgentTurnCapability(
         }
         if (!created.ok) {
           const kind = created.error.kind
-          const code =
-            kind === 'deadline-exceeded' ? 'timeout' : kind === 'missing-session' ? 'runtime-session-missing' : kind
+          const code = opencodeFailureCode(kind)
           return runtimeActionFailure(code, created.error.message)
         }
         try {
@@ -321,8 +321,7 @@ function buildAgentTurnCapability(
         }
         if (!created.ok) {
           const kind = created.error.kind
-          const code =
-            kind === 'deadline-exceeded' ? 'timeout' : kind === 'missing-session' ? 'runtime-session-missing' : kind
+          const code = opencodeFailureCode(kind)
           return runtimeActionFailure(code, created.error.message)
         }
 
@@ -455,6 +454,7 @@ function buildAgentTurnCapability(
               ? { providerID: modelOptions.value.providerID, modelID: modelOptions.value.modelID }
               : null,
           variant: variant ?? null,
+          reasoningEffort: reasoningEffort ?? null,
           ...(resolvedSkills.skills.length > 0 ? { skills: resolvedSkills.skills } : {}),
           unknownKeys: undefined as readonly string[] | undefined,
         },
@@ -506,9 +506,7 @@ function buildAgentTurnCapability(
       await reporter?.settle()
 
       if (!result.ok) {
-        const kind = result.error.kind
-        const code =
-          kind === 'deadline-exceeded' ? 'timeout' : kind === 'missing-session' ? 'runtime-session-missing' : kind
+        const code = opencodeFailureCode(result.error.kind)
         return runtimeActionFailure(
           code,
           result.error.message,
@@ -597,6 +595,21 @@ function isUnsettledWorkflowSessionStatus(status: string | null | undefined): st
 
 function runtimeActionFailure(code: string, message: string, outcome?: 'unknown'): ActionResult {
   return actionFail(code, message, { exitCode: 1, outcome, turnFact: { finalAssistantText: null } })
+}
+
+/**
+ * OpenCode error kind → Workflow action failure category. Mirrors the
+ * AgentJob projection (`agent-job-turn.ts`): the
+ * `unsupported-execution-configuration` rejection carries the
+ * capability contract's `unsupported_execution_configuration`
+ * category verbatim; the existing deadline/missing-session mappings
+ * are unchanged.
+ */
+function opencodeFailureCode(kind: string): string {
+  if (kind === 'deadline-exceeded') return 'timeout'
+  if (kind === 'missing-session') return 'runtime-session-missing'
+  if (kind === 'unsupported-execution-configuration') return 'unsupported_execution_configuration'
+  return kind
 }
 
 async function workflowActionFailure(

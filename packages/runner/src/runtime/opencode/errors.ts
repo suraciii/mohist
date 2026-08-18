@@ -184,6 +184,48 @@ export function normalizeIncompatibleRuntime(diagnostics: readonly RuntimeDiagno
   }
 }
 
+/**
+ * Failure category carried by the `unsupported-execution-configuration`
+ * rejection. The value is a Mohist failure category (snake case, as
+ * recorded by the Server), not a runtime-internal kind: the runner
+ * projections surface it verbatim so AgentJob/Workflow failures land
+ * in the EventCatalog category the capability contract specifies.
+ */
+export const UNSUPPORTED_EXECUTION_CONFIGURATION_CATEGORY = 'unsupported_execution_configuration'
+
+/**
+ * OpenCode is a variant-only runtime: upstream has no reasoning-effort
+ * surface, so an explicit `options.reasoningEffort` is a configuration
+ * failure. The effort is never appended to the model id, written to
+ * the variant, or silently ignored — the turn fails before any
+ * provider interaction (design D6 / issue-557).
+ */
+export function normalizeUnsupportedExecutionConfiguration(effort: string): RuntimeError {
+  const detail = `options.reasoningEffort '${effort}' is not supported by the OpenCode runtime; it was not applied to the model, the variant, or ignored`
+  return {
+    kind: 'unsupported-execution-configuration',
+    message:
+      'OpenCode does not support a reasoning effort; remove the reasoning effort or select a runtime that supports it',
+    diagnostics: [{ severity: 'error', code: UNSUPPORTED_EXECUTION_CONFIGURATION_CATEGORY, message: detail }],
+  }
+}
+
+/**
+ * Shared option validation for the turn and follow-up entry points:
+ * returns the execution-configuration failure when the options carry
+ * an explicit reasoning effort, `null` when the effort is unset
+ * (absent, null, or empty — unset imposes no requirement).
+ */
+export function unsupportedReasoningEffortError(
+  options: { readonly reasoningEffort?: unknown } | null | undefined,
+): RuntimeError | null {
+  const effort = options?.reasoningEffort
+  if (effort === undefined || effort === null) return null
+  if (typeof effort !== 'string') return normalizeInvalidInput('options.reasoningEffort must be a string when present')
+  if (effort.length === 0) return null
+  return normalizeUnsupportedExecutionConfiguration(effort)
+}
+
 export function normalizeInvalidInput(message: string, diagnostics: readonly RuntimeDiagnostic[] = []): RuntimeError {
   return {
     kind: 'invalid-input',

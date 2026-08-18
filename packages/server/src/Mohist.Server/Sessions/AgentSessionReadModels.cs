@@ -38,7 +38,8 @@ public sealed record AgentEventSummaryDto(
     bool? ContextExhaustion,
     bool? ContextExhaustionSuspected,
     int? ToolCallCount,
-    int? ToolErrorCount);
+    int? ToolErrorCount,
+    string? AppliedReasoningEffort = null);
 
 public sealed record AgentSessionMetadataDto(
     string Id,
@@ -286,7 +287,8 @@ public sealed record GenericAgentSessionSummaryDto(
     [property: JsonPropertyName("interruption")] AgentWorkInterruptionTransitionDto? Interruption = null,
     [property: JsonPropertyName("interruptionHistory")] IReadOnlyList<AgentWorkInterruptionTransitionDto>? InterruptionHistory = null,
     string? Origin = null,
-    string? TargetId = null);
+    string? TargetId = null,
+    [property: JsonPropertyName("appliedReasoningEffort")] string? AppliedReasoningEffort = null);
 
 public sealed record AgentSessionInputObservationDto(
     string Id,
@@ -474,7 +476,8 @@ public sealed record UnifiedSessionSummaryDto(
     [property: JsonPropertyName("interruption")] AgentWorkInterruptionTransitionDto? Interruption = null,
     [property: JsonPropertyName("interruptionHistory")] IReadOnlyList<AgentWorkInterruptionTransitionDto>? InterruptionHistory = null,
     string? Origin = null,
-    string? TargetId = null);
+    string? TargetId = null,
+    [property: JsonPropertyName("appliedReasoningEffort")] string? AppliedReasoningEffort = null);
 
 /// <summary>
 /// Lightweight unified read shape for an AgentSession in the source-filtered

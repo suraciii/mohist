@@ -8,6 +8,7 @@ public sealed class PhysicalSecretKeyFile : ISecretKeyFile
     public const string PathEnvironmentVariable = "MOHIST_SECRET_KEY_PATH";
     public const string DefaultFileName = "slack-master.key";
     public const int KeyLengthBytes = 32;
+    private const int ConcurrentCreateReadRetries = 8;
 
     private readonly ISecretKeyFileOperations _ops;
     private readonly IEnvironmentVariableProvider _environment;
@@ -32,11 +33,20 @@ public sealed class PhysicalSecretKeyFile : ISecretKeyFile
         if (!string.IsNullOrEmpty(directory))
             _ops.CreateDirectory(directory);
 
+        // Create-if-absent is exclusive so that concurrent hosts racing to
+        // initialize the same key file converge on a single persisted key.
+        // Without this, two hosts can each generate a fresh random key and
+        // cache it in memory while the on-disk file ends up with only the
+        // last writer's bytes, leaving siblings unable to decrypt secrets
+        // the first host encrypted (SecretStoreKeyException on load).
         var key = RandomNumberGenerator.GetBytes(KeyLengthBytes);
-        await _ops.WriteAllBytesAtomicAsync(path, key, OwnerOnlyMode(), ct).ConfigureAwait(false);
-        if (!OperatingSystem.IsWindows())
-            _ops.SetUnixFileMode(path, OwnerOnlyMode());
-        return key;
+        if (_ops.TryCreateExclusive(path, key, OwnerOnlyMode()))
+            return key;
+
+        // Another host created the key file between our existence check and
+        // our create; adopt the persisted key so every host in the process
+        // shares the same master key.
+        return await LoadInternalAsync(path, ct).ConfigureAwait(false);
     }
 
     public async Task<byte[]?> TryLoadAsync(string path, CancellationToken ct = default)
@@ -85,6 +95,26 @@ public sealed class PhysicalSecretKeyFile : ISecretKeyFile
     }
 
     private async Task<byte[]> LoadInternalAsync(string path, CancellationToken ct)
+    {
+        // Reading the freshly created key file can transiently hit "file in
+        // use" while the host that just won the create-if-absent race is
+        // still holding its no-share write handle. Back off briefly so the
+        // winner can finish before we read, then re-run the full key-file
+        // discipline checks (symlink, permissions, length) on the result.
+        for (var attempt = 0; ; attempt++)
+        {
+            try
+            {
+                return await LoadInternalCoreAsync(path, ct).ConfigureAwait(false);
+            }
+            catch (IOException) when (attempt + 1 < ConcurrentCreateReadRetries)
+            {
+                await Task.Delay(10, ct).ConfigureAwait(false);
+            }
+        }
+    }
+
+    private async Task<byte[]> LoadInternalCoreAsync(string path, CancellationToken ct)
     {
         if (_ops.IsReparsePoint(path))
         {

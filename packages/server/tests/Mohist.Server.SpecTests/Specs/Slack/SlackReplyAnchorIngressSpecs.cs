@@ -208,6 +208,7 @@ public sealed class SlackReplyAnchorIngressSpecs : IAsyncLifetime
             capabilities = new[] { "spec/*" },
             hostname = $"{runnerId}-host",
             projectId,
+            runtimeCatalogs = CapabilityCatalogTestHelpers.Create(),
         });
         register.EnsureSuccessStatusCode();
         using var slots = await _fixture.Client.PatchAsJsonAsync($"/api/runner/{runnerId}", new { slots = 1 });

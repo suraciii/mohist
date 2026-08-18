@@ -19,6 +19,7 @@ internal static class TranscriptEventSummaryProjector
     public static AgentSessionTranscriptSummary Summarize(IEnumerable<TranscriptSummaryEvent> events)
     {
         string? resolvedModel = null;
+        string? appliedReasoningEffort = null;
         string? failureReason = null;
         string? failureCategory = null;
         string? lastTerminalStatus = null;
@@ -34,7 +35,16 @@ internal static class TranscriptEventSummaryProjector
             if (e.Type == TranscriptPartTypes.Model)
             {
                 var payload = AgentSessionJsonHelper.ParsePayload(e.PayloadJson);
-                resolvedModel = AgentSessionJsonHelper.GetStringProp(payload, "resolvedModel") ?? resolvedModel;
+                var model = AgentSessionJsonHelper.GetStringProp(payload, "resolvedModel");
+                if (!string.IsNullOrWhiteSpace(model))
+                {
+                    resolvedModel = model;
+                    // The adapter owns whether an effort was applied. A
+                    // model fact without this member explicitly means that
+                    // this model selection had no recorded effort.
+                    var effort = AgentSessionJsonHelper.GetStringProp(payload, "appliedReasoningEffort");
+                    appliedReasoningEffort = string.IsNullOrWhiteSpace(effort) ? null : effort;
+                }
             }
             else if (e.Type == TranscriptPartTypes.SessionActivity)
             {
@@ -71,7 +81,8 @@ internal static class TranscriptEventSummaryProjector
             toolCallIds.Count == 0 ? null : toolCallIds.Count,
             failedToolCallIds.Count == 0 ? null : failedToolCallIds.Count,
             string.IsNullOrWhiteSpace(failureReason) ? null : failureReason,
-            string.IsNullOrWhiteSpace(lastTerminalStatus) ? null : lastTerminalStatus);
+            string.IsNullOrWhiteSpace(lastTerminalStatus) ? null : lastTerminalStatus,
+            appliedReasoningEffort);
     }
 
     private static bool IsLater(TranscriptSummaryEvent? current, TranscriptSummaryEvent candidate)

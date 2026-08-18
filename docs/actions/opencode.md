@@ -48,9 +48,10 @@ Variables, or inlined in the task. Issue values override Project values, and
 Run values override Issue values. A Workflow Profile references Variables but
 does not store their values.
 
-`agent` is an existing Workflow Variable name. In this Action, it supplies only
-`model` and `variant`. It does not identify a Mohist Agent or select an OpenCode
-agent.
+`agent` is an existing Workflow Variable name. In this Action, it supplies
+`model` and true `variant` values. An explicit `reasoningEffort` is rejected as
+`unsupported_execution_configuration`; it does not identify a Mohist Agent or
+select an OpenCode agent.
 
 The expanded Action Input is the only configuration fact for this execution.
 `mohist/opencode` does not read `vars.agent` implicitly. Without an explicit
@@ -65,7 +66,8 @@ the OpenCode default for the first execution.
 | `session` | No | - | Logical Session name within the WorkflowRun; the current Work ID is used when omitted |
 | `options` | No | - | Object that selects the OpenCode model for this execution |
 | `options.model` | No | - | OpenCode model in `provider/model` form |
-| `options.variant` | No | - | OpenCode `variant` for the model |
+| `options.variant` | No | - | OpenCode true variant for the model |
+| `options.reasoningEffort` | No | - | Rejected as `unsupported_execution_configuration` when set |
 | `timeout` | No | `3600000` | Execution deadline in milliseconds; reaching it interrupts the current execution |
 
 Tools, plugins, permissions, default execution behavior, and automatic

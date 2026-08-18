@@ -197,6 +197,7 @@ public abstract class GenericAgentSessionTranscriptAxisTestSupport : IAsyncLifet
             capabilities = new[] { "spec/*" },
             hostname = $"{_runnerId}-host",
             projectId,
+            runtimeCatalogs = CapabilityCatalogTestHelpers.Create(),
         });
         await _fixture.Client.PatchOkAsync($"/api/runner/{_runnerId}", new { slots = 2 });
         return await CreateRunnerHomeWorkspaceAsync(projectId, _runnerId, workspacePrefix);

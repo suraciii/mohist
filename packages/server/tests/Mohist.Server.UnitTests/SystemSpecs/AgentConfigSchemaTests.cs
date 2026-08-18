@@ -44,32 +44,6 @@ public class AgentConfigSchemaTests
     }
 
     [Theory]
-    [InlineData("off")]
-    [InlineData("minimal")]
-    [InlineData("low")]
-    [InlineData("medium")]
-    [InlineData("high")]
-    [InlineData("xhigh")]
-    [InlineData("max")]
-    public void Validate_CanonicalReasoningEffortAccepted(string effort)
-    {
-        var element = JsonDocument.Parse($$"""{"model":"openai/gpt-5.5","reasoningEffort":"{{effort}}"}""").RootElement;
-        Assert.Null(AgentConfigSchema.Validate(element));
-    }
-
-    [Theory]
-    [InlineData("highest")]
-    [InlineData(" High")]
-    public void Validate_NonCanonicalReasoningEffortIsRejected(string effort)
-    {
-        var element = JsonDocument.Parse($$"""{"reasoningEffort":"{{effort}}"}""").RootElement;
-        var error = AgentConfigSchema.Validate(element);
-
-        Assert.NotNull(error);
-        Assert.Contains("agentConfig.reasoningEffort", error);
-    }
-
-    [Theory]
     [InlineData("opencode")]
     [InlineData("pi")]
     public void Validate_RuntimeAccepted(string runtime)
@@ -150,17 +124,16 @@ public class AgentConfigSchemaTests
     }
 
     [Fact]
-    public void Project_StripsEverythingExceptExecutionConfiguration()
+    public void Project_StripsEverythingExceptModelAndVariant()
     {
         var element = JsonDocument.Parse("""
-            {"type":"opencode","model":"openai/gpt-5.5","reasoningEffort":"high","variant":"balanced","livenessQuietThresholdMs":1200000,"probeTimeoutMs":30000}
+            {"type":"opencode","model":"openai/gpt-5.5","variant":"high","livenessQuietThresholdMs":1200000,"probeTimeoutMs":30000}
             """).RootElement;
         var projected = AgentConfigSchema.Project(element);
         Assert.NotNull(projected);
-        Assert.Equal(3, projected!.Count);
+        Assert.Equal(2, projected!.Count);
         Assert.Equal("openai/gpt-5.5", projected["model"]?.ToString());
-        Assert.Equal("high", projected["reasoningEffort"]?.ToString());
-        Assert.Equal("balanced", projected["variant"]?.ToString());
+        Assert.Equal("high", projected["variant"]?.ToString());
     }
 
     [Fact]
@@ -256,6 +229,177 @@ public class AgentConfigSchemaTests
         };
         var filtered = AgentConfigSchema.Filter(input);
         Assert.Null(filtered);
+    }
+
+    [Fact]
+    public void CanonicalReasoningEfforts_ExactlyMatchCanonicalVocabulary()
+    {
+        Assert.Equal(
+            new[] { "off", "minimal", "low", "medium", "high", "xhigh", "max" },
+            AgentConfigSchema.CanonicalReasoningEffortsOrdered);
+        Assert.Equal(AgentConfigSchema.CanonicalReasoningEffortsOrdered.Count, AgentConfigSchema.CanonicalReasoningEfforts.Count);
+        foreach (var effort in AgentConfigSchema.CanonicalReasoningEffortsOrdered)
+            Assert.Contains(effort, AgentConfigSchema.CanonicalReasoningEfforts);
+    }
+
+    [Theory]
+    [InlineData("off")]
+    [InlineData("minimal")]
+    [InlineData("low")]
+    [InlineData("medium")]
+    [InlineData("high")]
+    [InlineData("xhigh")]
+    [InlineData("max")]
+    public void Validate_ReasoningEffortCanonicalValue_IsAccepted(string effort)
+    {
+        var element = JsonDocument.Parse($$"""{"model":"openai/gpt-5.5","variant":"balanced","reasoningEffort":"{{effort}}"}""").RootElement;
+        Assert.Null(AgentConfigSchema.Validate(element));
+        Assert.Null(AgentConfigSchema.ValidateReasoningEffort(element));
+    }
+
+    [Fact]
+    public void Validate_ReasoningEffortNonCanonical_IsRejectedNamingAllAcceptedValues()
+    {
+        var element = JsonDocument.Parse("""{"model":"openai/gpt-5.5","reasoningEffort":"extreme"}""").RootElement;
+        var error = AgentConfigSchema.Validate(element);
+
+        Assert.NotNull(error);
+        Assert.Contains("agentConfig.reasoningEffort 'extreme'", error);
+        foreach (var effort in AgentConfigSchema.CanonicalReasoningEffortsOrdered)
+            Assert.Contains(effort, error);
+    }
+
+    [Fact]
+    public void Validate_ReasoningEffortWrongType_IsRejectedLikeModelAndVariant()
+    {
+        var element = JsonDocument.Parse("""{"model":"m","reasoningEffort":42}""").RootElement;
+        var error = AgentConfigSchema.Validate(element);
+
+        Assert.NotNull(error);
+        Assert.Contains("agentConfig.reasoningEffort", error);
+        Assert.Contains("string", error);
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData(" ")]
+    public void Validate_ReasoningEffortEmpty_IsRejectedLikeModelAndVariant(string effort)
+    {
+        var element = JsonDocument.Parse($$"""{"model":"m","reasoningEffort":"{{effort}}"}""").RootElement;
+        var error = AgentConfigSchema.Validate(element);
+
+        Assert.NotNull(error);
+        Assert.Contains("agentConfig.reasoningEffort", error);
+        Assert.Contains("empty", error);
+    }
+
+    [Fact]
+    public void Validate_ReasoningEffortNullOrAbsent_IsValid()
+    {
+        Assert.Null(AgentConfigSchema.Validate(JsonDocument.Parse("""{"model":"m","reasoningEffort":null}""").RootElement));
+        Assert.Null(AgentConfigSchema.Validate(JsonDocument.Parse("""{"model":"m"}""").RootElement));
+        Assert.Null(AgentConfigSchema.ValidateReasoningEffort(null));
+        Assert.Null(AgentConfigSchema.ValidateReasoningEffort(JsonDocument.Parse("{}" ).RootElement));
+    }
+
+    [Fact]
+    public void Validate_ReasoningEffortAndVariantStayIndependent()
+    {
+        // A model can have both a true variant and a reasoning effort; both
+        // persist as separate fields, neither derived from the other.
+        var element = JsonDocument.Parse("""{"model":"m","variant":"balanced","reasoningEffort":"high"}""").RootElement;
+
+        Assert.Null(AgentConfigSchema.Validate(element));
+
+        var projected = AgentConfigSchema.Project(element);
+        Assert.NotNull(projected);
+        Assert.Equal(3, projected!.Count);
+        Assert.Equal("balanced", projected["variant"]?.ToString());
+        Assert.Equal("high", projected["reasoningEffort"]?.ToString());
+    }
+
+    [Theory]
+    [InlineData("off")]
+    [InlineData("minimal")]
+    [InlineData("low")]
+    [InlineData("medium")]
+    [InlineData("high")]
+    [InlineData("xhigh")]
+    [InlineData("max")]
+    public void ValidateIssue_ReasoningEffortAcceptedBesideModelAndVariant(string effort)
+    {
+        var element = JsonDocument.Parse($$"""{"model":"openai/gpt-5.5","variant":"balanced","reasoningEffort":"{{effort}}"}""").RootElement;
+        Assert.Null(AgentConfigSchema.ValidateIssue(element));
+    }
+
+    [Fact]
+    public void ValidateIssue_StillRejectsAgentOwnedRuntime()
+    {
+        var element = JsonDocument.Parse("""{"reasoningEffort":"high","runtime":"pi"}""").RootElement;
+        var error = AgentConfigSchema.ValidateIssue(element);
+
+        Assert.NotNull(error);
+        Assert.Contains("agentConfig.runtime", error);
+        Assert.Contains("configure runtime on the Agent definition", error);
+    }
+
+    [Fact]
+    public void ValidateIssue_NonCanonicalReasoningEffort_IsRejectedNamingAllAcceptedValues()
+    {
+        var element = JsonDocument.Parse("""{"model":"m","reasoningEffort":"extreme"}""").RootElement;
+        var error = AgentConfigSchema.ValidateIssue(element);
+
+        Assert.NotNull(error);
+        Assert.Contains("agentConfig.reasoningEffort 'extreme'", error);
+        foreach (var effort in AgentConfigSchema.CanonicalReasoningEffortsOrdered)
+            Assert.Contains(effort, error);
+    }
+
+    [Fact]
+    public void ValidateIssue_ReasoningEffortWrongTypeOrEmpty_IsRejected()
+    {
+        var wrongType = JsonDocument.Parse("""{"reasoningEffort":42}""").RootElement;
+        Assert.Contains("must be a string or null", AgentConfigSchema.ValidateIssue(wrongType));
+
+        var empty = JsonDocument.Parse("""{"reasoningEffort":""}""").RootElement;
+        Assert.Contains("must not be empty", AgentConfigSchema.ValidateIssue(empty));
+
+        var absent = JsonDocument.Parse("""{"reasoningEffort":null}""").RootElement;
+        Assert.Null(AgentConfigSchema.ValidateIssue(absent));
+    }
+
+    [Fact]
+    public void Filter_KeepsReasoningEffort_BesideModelAndVariant()
+    {
+        var input = new Dictionary<string, object?>
+        {
+            ["model"] = "openai/gpt-5.5",
+            ["variant"] = "balanced",
+            ["reasoningEffort"] = "high",
+            ["runtime"] = "pi",
+            ["type"] = "opencode",
+        };
+        var filtered = AgentConfigSchema.Filter(input);
+        Assert.NotNull(filtered);
+        Assert.Equal(3, filtered!.Count);
+        Assert.Equal("openai/gpt-5.5", filtered["model"]?.ToString());
+        Assert.Equal("balanced", filtered["variant"]?.ToString());
+        Assert.Equal("high", filtered["reasoningEffort"]?.ToString());
+        Assert.DoesNotContain("runtime", filtered.Keys);
+    }
+
+    [Fact]
+    public void Project_KeepsReasoningEffortAlongsideModelVariantAndRuntime()
+    {
+        var element = JsonDocument.Parse("""
+            {"model":"openai/gpt-5.5","variant":"balanced","reasoningEffort":"high","runtime":"pi"}
+            """).RootElement;
+        var projected = AgentConfigSchema.Project(element);
+        Assert.NotNull(projected);
+        Assert.Equal(4, projected!.Count);
+        Assert.Equal("high", projected["reasoningEffort"]?.ToString());
+        Assert.Equal("balanced", projected["variant"]?.ToString());
+        Assert.Equal("pi", projected["runtime"]?.ToString());
     }
 
     [Fact]

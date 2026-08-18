@@ -107,6 +107,7 @@ export interface FollowupCallRequest {
   readonly options?: {
     readonly model?: string | null
     readonly variant?: string | null
+    readonly reasoningEffort?: string | null
     readonly skills?: readonly { readonly name: string; readonly instructions: string }[]
   }
 }
@@ -213,6 +214,7 @@ async function callOpenCodeFollowup(
           options: {
             model: parseFollowupModel(request.options.model),
             variant: request.options.variant ?? null,
+            reasoningEffort: request.options.reasoningEffort ?? null,
             ...(request.options.skills ? { skills: request.options.skills } : {}),
           },
         }
@@ -234,6 +236,7 @@ async function callPiFollowup(
           options: {
             model: request.options.model ?? null,
             variant: request.options.variant ?? null,
+            reasoningEffort: request.options.reasoningEffort ?? null,
             ...(request.options.skills ? { skills: request.options.skills } : {}),
           },
         }

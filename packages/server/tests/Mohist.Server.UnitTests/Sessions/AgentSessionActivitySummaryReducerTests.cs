@@ -31,6 +31,25 @@ public sealed class AgentSessionActivitySummaryReducerTests
             ]);
 
         Assert.Equal("new", state.Summary.ResolvedModel);
+        Assert.Null(state.Summary.AppliedReasoningEffort);
+    }
+
+    [Fact]
+    public void Reduce_ModelFact_RecordsAppliedEffortAndDoesNotSynthesizeAbsentEffort()
+    {
+        var state = AgentSessionActivitySummaryReducer.Reduce(
+            AgentSessionActivitySummaryState.Empty,
+            [
+                Part(TranscriptPartTypes.Model, "model", "{\"resolvedModel\":\"model\",\"appliedReasoningEffort\":\"high\"}"),
+            ]);
+
+        Assert.Equal("high", state.Summary.AppliedReasoningEffort);
+
+        var absent = AgentSessionActivitySummaryReducer.Reduce(
+            state,
+            [Part(TranscriptPartTypes.Model, "model", "{\"resolvedModel\":\"model\"}")]);
+
+        Assert.Null(absent.Summary.AppliedReasoningEffort);
     }
 
     [Fact]

@@ -32,6 +32,47 @@ public sealed class PhysicalSecretKeyFileOperations : ISecretKeyFileOperations
 
     public void CreateDirectory(string path) => Directory.CreateDirectory(path);
 
+    public bool TryCreateExclusive(string path, byte[] bytes, UnixFileMode ownerOnlyMode)
+    {
+        if (File.Exists(path))
+            return false;
+
+        var directory = Path.GetDirectoryName(path);
+        if (!string.IsNullOrEmpty(directory))
+            Directory.CreateDirectory(directory);
+
+        try
+        {
+            // CreateNew gives the create-if-absent semantics at the OS
+            // level: exactly one racer opens the key file and wins, and
+            // every other host observes the file as already existing.
+            var options = new FileStreamOptions
+            {
+                Mode = FileMode.CreateNew,
+                Access = FileAccess.Write,
+                Share = FileShare.None,
+                Options = FileOptions.WriteThrough,
+            };
+            if (!OperatingSystem.IsWindows())
+            {
+                options.UnixCreateMode = ownerOnlyMode;
+            }
+
+            using (var stream = new FileStream(path, options))
+            {
+                stream.Write(bytes, 0, bytes.Length);
+                stream.Flush();
+            }
+            return true;
+        }
+        catch (IOException) when (File.Exists(path))
+        {
+            // Another host won the create-if-absent race; leave its key
+            // untouched and let the caller adopt the persisted key.
+            return false;
+        }
+    }
+
     public async Task WriteAllBytesAtomicAsync(
         string path,
         byte[] bytes,

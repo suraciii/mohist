@@ -61,6 +61,7 @@ import {
   normalizeMissingSession,
   normalizeTurnFailed,
   normalizeUnavailableRuntime,
+  unsupportedReasoningEffortError,
 } from './errors.js'
 import { parseModelIdentifier } from './model-string.js'
 import type { RuntimeEventSubscription, RuntimeGlobalEvent } from './event-subscription.js'
@@ -442,6 +443,14 @@ function validateTurnInput(request: RuntimeTurnRequest, diagnostics: RuntimeDiag
       message: `Ignored unknown option keys: ${options.unknownKeys.join(', ')}`,
       details: { keys: options.unknownKeys },
     })
+  }
+  // An explicit reasoning effort is an execution-configuration
+  // failure on this variant-only runtime — never folded into the
+  // model/variant path and never silently ignored. Validated before
+  // any provider interaction.
+  const effortError = unsupportedReasoningEffortError(options)
+  if (effortError) {
+    return { kind: 'failure', error: effortError }
   }
   let model: { providerID: string; modelID: string } | null = null
   if (options?.model !== undefined && options.model !== null) {

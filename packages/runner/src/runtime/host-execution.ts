@@ -39,6 +39,46 @@ export interface HostExecutionContext {
   readonly inFlight: Map<string, InFlightEntry>
   readonly awaitingAck: Map<string, { work: DispatchWorkItem; entry: AwaitingAckEntry }>
   readonly hostShutdown: RunnerHostShutdown
+  /**
+   * The runner's currently-registered capability snapshot revision for a
+   * runtime (issue-557 T-006). Used to reject a dispatch frozen against
+   * an older catalog instead of executing with changed capability
+   * semantics. Returns null when the runtime has no authoritative catalog.
+   */
+  readonly currentCatalogRevision: (runtime: string) => string | null
+}
+
+/**
+ * The runtime a work item executes against, for capability-revision
+ * validation. Mirrors `isWorkflowAgentWork` in work-report.ts so the
+ * two runtime classification helpers stay consistent.
+ */
+function workRuntime(work: DispatchWorkItem): string | null {
+  if (work.agentDefinition?.runtime) return work.agentDefinition.runtime.trim().toLowerCase()
+  const uses = work.uses?.trim().toLowerCase()
+  if (uses === 'mohist/opencode' || uses === 'mohist/pi') return uses.replace('mohist/', '')
+  if ((work.ownerKind ?? '').trim().toLowerCase() === 'agent-job') {
+    const runtime = typeof work.with?.runtime === 'string' ? work.with.runtime.trim().toLowerCase() : ''
+    return runtime || null
+  }
+  return null
+}
+
+/**
+ * A digestible rejection for a dispatch frozen against a catalog the
+ * runner no longer holds. Carried to the server with `requeue` so the
+ * work is re-pended for re-resolution rather than recorded as a
+ * terminal (or silently executed) outcome.
+ */
+function staleCapabilityResult(work: DispatchWorkItem): WorkItemResult {
+  const message = `dispatch capability revision '${work.capabilityRevision ?? ''}' no longer matches the runner's current catalog; the work was requeued for re-resolution`
+  return {
+    status: 'failed',
+    message,
+    requeue: true,
+    error: { code: 'stale-capability-snapshot', message },
+    exitCode: 1,
+  }
 }
 
 export function markResultPersistencePending(context: HostExecutionContext, key: string): void {
@@ -161,13 +201,35 @@ export async function executeAndTransition(
 ): Promise<void> {
   let result: WorkItemResult
   try {
-    result = await executeWork(
-      context.taskLogDeps(),
-      context.workExecutorRef()!,
-      context.terminalTaskLogDeliveryInFlight,
-      work,
-      signal,
-    )
+    const runtime = workRuntime(work)
+    if (work.capabilityRevision && runtime) {
+      const current = context.currentCatalogRevision(runtime)
+      if (current !== work.capabilityRevision) {
+        log.warn('rejecting stale capability snapshot before execution', {
+          work: work.workId,
+          runtime,
+          frozen: work.capabilityRevision,
+          current,
+        })
+        result = staleCapabilityResult(work)
+      } else {
+        result = await executeWork(
+          context.taskLogDeps(),
+          context.workExecutorRef()!,
+          context.terminalTaskLogDeliveryInFlight,
+          work,
+          signal,
+        )
+      }
+    } else {
+      result = await executeWork(
+        context.taskLogDeps(),
+        context.workExecutorRef()!,
+        context.terminalTaskLogDeliveryInFlight,
+        work,
+        signal,
+      )
+    }
   } catch (error) {
     if (signal.aborted) return
     log.error('work failed before report', { work: work.workId, exception: error })

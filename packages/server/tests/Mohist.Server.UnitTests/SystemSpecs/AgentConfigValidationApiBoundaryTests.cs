@@ -64,6 +64,28 @@ public class AgentConfigValidationApiBoundaryTests
         Assert.Null(IssueModelMetadata.ValidateAgentConfig(raw));
     }
 
+    [Fact]
+    public void IssueModelMetadata_AcceptsReasoningEffortBesideModelAndVariant()
+    {
+        // issue-557 T-001: the issue-level agentConfig override accepts the
+        // canonical reasoningEffort key beside model and variant.
+        var raw = JsonDocument.Parse("""{"model":"openai/gpt-5.6","variant":"balanced","reasoningEffort":"high"}""").RootElement;
+
+        Assert.Null(IssueModelMetadata.ValidateAgentConfig(raw));
+    }
+
+    [Fact]
+    public void IssueModelMetadata_RejectsNonCanonicalReasoningEffort()
+    {
+        var raw = JsonDocument.Parse("""{"model":"openai/gpt-5.6","reasoningEffort":"extreme"}""").RootElement;
+
+        var error = IssueModelMetadata.ValidateAgentConfig(raw);
+
+        Assert.NotNull(error);
+        Assert.Contains("agentConfig.reasoningEffort", error);
+        Assert.Contains("off, minimal, low, medium, high, xhigh, max", error);
+    }
+
     [Theory]
     [InlineData("opencode")]
     [InlineData("pi")]

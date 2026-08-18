@@ -67,6 +67,22 @@ public interface ISecretKeyFileOperations
 
     void CreateDirectory(string path);
 
+    /// <summary>
+    /// Atomically creates <paramref name="path"/> with
+    /// <paramref name="bytes"/> and <paramref name="ownerOnlyMode"/>,
+    /// returning <c>true</c> only when this call created the file. If the
+    /// file already exists — because the caller is racing another host that
+    /// initialized the same master-key path first — the method leaves the
+    /// existing file untouched and returns <c>false</c>. This is the
+    /// create-if-absent primitive that lets concurrent hosts converge on a
+    /// single persisted key instead of overwriting each other with freshly
+    /// generated ones.
+    /// </summary>
+    bool TryCreateExclusive(
+        string path,
+        byte[] bytes,
+        UnixFileMode ownerOnlyMode);
+
     Task WriteAllBytesAtomicAsync(
         string path,
         byte[] bytes,

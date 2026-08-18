@@ -18,8 +18,8 @@ complete product boundary.
   an Agent, continue its conversation, read results, and handle exceptions
   without Slack or another external connection.
 - **Configuration has one owner**: The Mohist Agent owns its Instructions,
-  execution backend, Model, Variant, Skills, and concurrency limit. Its name,
-  avatar, and description form the same Agent identity. The Web UI, CLI, and
+  execution backend, Model, Reasoning Effort, Variant, Skills, and concurrency
+  limit. Its name, avatar, and description form the same Agent identity. The Web UI, CLI, and
   Agent Connections cannot store or override another definition.
 - **An entry point does not change semantics**: A new delegation creates an
   AgentJob, AgentSession, first SessionInput, and first AgentTurn. Continuing an
@@ -106,16 +106,23 @@ A Mohist Agent is a first-class resource in a Project. It stores:
 | Description | When should this Agent be selected? | Used only for discovery and selection; not included in execution Instructions |
 | Instructions | What role does the Agent have, how does it work, and when does it stop? | Fixed when each new AgentJob starts |
 | Runtime | Which execution backend runs the Agent? | Owned by the Agent; an ordinary client cannot override it for one request |
+<<<<<<< HEAD
 | Model / Variant | Which model and reasoning level does the Agent use? | Owned by the Agent; a missing Model or Variant falls back to the Project default execution configuration, then to the Runtime default |
+=======
+| Model / Reasoning Effort / Variant | Which model, canonical reasoning effort, and true model variant does the Agent use? | Owned by the Agent; each value is independent and uses the Runtime default when not configured |
+>>>>>>> f33dd4c57 (T-008: add catalog-driven effort Web surfaces and docs)
 | Skills | Which capability descriptions load at startup? | Fixed with the AgentJob; an entry point cannot add or remove them for one request |
 | Max concurrent runs | How many executions can this Agent run at once, including launches and follow-ups? | Applies to subsequent scheduling immediately; lowering it does not stop running executions, and excess work queues |
 | State | Can the Agent accept new delegations? | An archived Agent rejects new delegations; existing Sessions remain readable and can continue |
 
 Configure model providers and Runtime credentials in protected Runtime settings.
 Do not put them in Instructions or copy them to an Agent or Agent Connection.
-An Agent references only a Runtime, Model, and Variant. Readiness summarizes
+An Agent references a Runtime, Model, optional Reasoning Effort, and optional true
+Variant. Reasoning Effort uses `off`, `minimal`, `low`, `medium`, `high`,
+`xhigh`, or `max`; it is never encoded as a Variant. Readiness summarizes
 whether those references can currently execute and directs a missing credential
-to the single settings entry point.
+to the single settings entry point. OpenCode does not support an explicit
+Reasoning Effort; choose Pi or leave the effort unset for OpenCode.
 
 ### Project Default Execution Configuration
 
@@ -163,8 +170,9 @@ Slack.
 Name, avatar, and description form the presentation identity. Edits apply
 immediately to discovery and presentation in Mohist. Agent Connections
 asynchronously synchronize external identities that support updates and show
-an explicit out-of-sync state. Instructions, Runtime, Model, Variant, and Skills
-form the execution definition and affect only later AgentJobs. Each AgentJob
+an explicit out-of-sync state. Instructions, Runtime, Model, Reasoning Effort,
+Variant, and Skills form the execution definition and affect only later
+AgentJobs. Each AgentJob
 stores its execution snapshot at launch. Follow-ups in an existing AgentSession
 continue with the configuration and context established for that session; an
 Agent edit does not silently change its model or capabilities. Max concurrent
@@ -174,8 +182,8 @@ execution definition.
 
 A Workflow `mohist/agent` task also fixes the complete Agent definition when
 each attempt starts. Editing the Agent does not change an already dispatched
-attempt. A retry reads the definition again when it starts, so only a new retry
-uses repaired Runtime, Model, Variant, Instructions, or Skills.
+attempt. A retry reads the definition again when it starts, so only a new retry uses
+repaired Runtime, Model, Reasoning Effort, Variant, Instructions, or Skills.
 
 ## Readiness and Availability
 
@@ -210,9 +218,9 @@ and does not mean that the Runner is offline again.
 
 1. In **Agents**, create or open an Agent and enter its name, avatar,
    description, and Instructions.
-2. Select a Runtime. Show only the Model, Variant, and credential requirements
-   that Runtime supports. Then select Skills and a concurrency limit. The page
-   must show Readiness and every gap.
+2. Select a Runtime. Show only the Model, catalog-backed Reasoning Effort,
+   true Variant, and credential requirements that Runtime supports. Then select
+   Skills and a concurrency limit. The page must show Readiness and every gap.
 3. When Readiness is Ready, use **Start session** to submit a real task. You can
    also submit when it is Unknown, but the page must state that the task will
    wait for Runner validation. Open the AgentSession after successful creation.

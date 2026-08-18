@@ -96,6 +96,23 @@ public static class EventCatalog
     /// Transcript-only vocabulary carried on the dedicated session channel.
     /// These are not CloudEvents protocol entries.
     /// </summary>
+    /// <summary>
+    /// Stable failure categories carried by execution evidence. These are
+    /// intentionally catalogued beside event types so preflight failures do
+    /// not become ad-hoc strings at individual admission sites.
+    /// </summary>
+    public static class FailureCategories
+    {
+        public const string UnsupportedExecutionConfiguration = "unsupported_execution_configuration";
+        public const string IncompatibleExecutionConfiguration = "incompatible_execution_configuration";
+
+        public static readonly IReadOnlyList<string> All =
+        [
+            UnsupportedExecutionConfiguration,
+            IncompatibleExecutionConfiguration,
+        ];
+    }
+
     public static readonly IReadOnlyList<string> TranscriptTypes = new[]
     {
         "tool_call",

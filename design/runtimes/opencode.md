@@ -47,6 +47,7 @@ type OpenCodeActionInput = {
   session?: string
   options?: {
     model?: string
+    reasoningEffort?: string
     variant?: string
   }
 }
@@ -62,16 +63,21 @@ not read Workflow variables or expand templates independently.
 
 `model` uses OpenCode's `providerID/modelID` form and splits only at the first
 `/`, because the model ID may contain additional slashes. `variant` remains a
-separate execution parameter and may be supplied with or without `model`.
-Changing either selection does not rotate a physical Session; omission preserves
-the Session selection or OpenCode default.
+separate true model-variant parameter and may be supplied with or without
+`model`. `reasoningEffort` is accepted as a wire-level Agent configuration key,
+but OpenCode currently does not support it and rejects an explicit value as
+`unsupported_execution_configuration`. Changing either selection does not
+rotate a physical Session; omission preserves the Session selection or
+OpenCode default.
 
 Selecting `uses: mohist/opencode` already selects the Runtime, so the input has no
 `agent`, `kind`, or `type`. OpenCode remains authoritative for native Agent, tool,
 plugin, permission, and automatic-compaction configuration. Unknown `options`
 keys are ignored with a diagnostic so persisted Agent options can converge without
 turning unrelated legacy keys into execution failure. Present `model` and
-`variant` values must be strings.
+`variant` values must be strings. An explicit `reasoningEffort` is rejected
+before Session or provider acquisition; it is never folded into the model ID,
+treated as a variant, or silently ignored.
 
 Action output deliberately excludes Runtime identity, transcript, model, usage,
 diagnostics, and expectation detail. The work owner evaluates `expect` against
@@ -479,7 +485,9 @@ diagnostics to keep unreviewed external content out of TaskRun.
 The model catalog assists configuration; it is not execution or readiness
 authority. `RunnerHost`, not `OpenCodeRuntime`, discovers it from the
 operator-provided CLI using a bounded, shell-free process. OpenCode still validates
-the selected model and variant when execution starts.
+the selected model and variant when execution starts. OpenCode reports
+`supportsReasoningEffort=false` and publishes no reasoning-effort values today;
+an explicit effort remains an execution-configuration failure.
 
 A complete non-empty result replaces the snapshot. A parseable non-empty result
 from a timed-out process is marked incomplete and may add models or variants but

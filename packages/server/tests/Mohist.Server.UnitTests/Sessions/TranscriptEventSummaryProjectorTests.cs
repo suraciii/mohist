@@ -19,6 +19,35 @@ public class TranscriptEventSummaryProjectorTests
         var summary = TranscriptEventSummaryProjector.Summarize(events);
 
         Assert.Equal("anthropic/claude-sonnet-4-20250514", summary.ResolvedModel);
+        Assert.Null(summary.AppliedReasoningEffort);
+    }
+
+    [Fact]
+    public void Summarize_ModelFact_RecordsAdapterAppliedEffortBesideResolvedModel()
+    {
+        var summary = TranscriptEventSummaryProjector.Summarize(new[]
+        {
+            ModelPart(
+                turnSequence: 1,
+                sequence: 1,
+                partId: "model-effort",
+                payload: new { resolvedModel = "openai/gpt-5.6", appliedReasoningEffort = "high" }),
+        });
+
+        Assert.Equal("openai/gpt-5.6", summary.ResolvedModel);
+        Assert.Equal("high", summary.AppliedReasoningEffort);
+    }
+
+    [Fact]
+    public void Summarize_LatestModelFactWithoutEffortLeavesEffortAbsent()
+    {
+        var summary = TranscriptEventSummaryProjector.Summarize(new[]
+        {
+            ModelPart(1, 1, "model-effort", new { resolvedModel = "openai/gpt-5.6", appliedReasoningEffort = "high" }),
+            ModelPart(1, 2, "model-unset", new { resolvedModel = "openai/gpt-5.6" }),
+        });
+
+        Assert.Null(summary.AppliedReasoningEffort);
     }
 
     [Fact]
