@@ -213,7 +213,12 @@ public class SessionFollowupApiSpecs : IAsyncDisposable
             Title: $"Session followup {name}",
             Issue: new WorkIssueRef(project.Id, issue.Number));
 
-        await _fixture.Grains.GetGrain<IRunnerGrain>(_runnerId).RegisterAsync(new RunnerInfo(_runnerId, ["spec/*"], "followup-host", project.Id));
+        await _fixture.Grains.GetGrain<IRunnerGrain>(_runnerId).RegisterAsync(new RunnerInfo(
+            _runnerId,
+            ["spec/*"],
+            "followup-host",
+            project.Id,
+            RuntimeCatalogs: CapabilityCatalogTestHelpers.Create()));
 
         var issueGrain = _fixture.Grains.GetGrain<IIssueGrain>(GrainKey.Issue(new IssueKey(project.Id, issue.Number)));
         var wrId = await issueGrain.StartWorkAsync();

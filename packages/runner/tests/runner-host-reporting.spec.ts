@@ -215,6 +215,51 @@ function newRunnerHost(pollIntervalMs: number = QUIET_INTERVAL_MS): RunnerHost {
 }
 
 describe('RunnerHost', () => {
+  it('rejects a stale capability snapshot and asks the server to requeue it', async () => {
+    const reported = deferred<void>()
+    const work = {
+      workflowRunId: 'wr-stale-capability',
+      workId: 'work-stale-capability',
+      taskRunId: 'task-stale-capability',
+      workType: 'task',
+      uses: 'mohist/opencode',
+      ownerKind: 'workflow',
+      capabilityRevision: 'revision-from-an-older-catalog',
+      variables: { workspace: { path: '/virtual/stale-capability' } },
+    }
+    let pollCount = 0
+    poll.mockImplementation(async () => {
+      pollCount += 1
+      return pollCount === 1 ? [work] : []
+    })
+    report.mockImplementation(
+      async (_reportedWork: unknown, result: { requeue?: boolean; error?: { code?: string } }) => {
+        expect(result.requeue).toBe(true)
+        expect(result.error?.code).toBe('stale-capability-snapshot')
+        reported.resolve()
+        return { tracked: true, reason: 'requeued' }
+      },
+    )
+    const controller = new AbortController()
+    const host = new RunnerHost({
+      serverUrl: 'https://runner.test',
+      runnerId: 'runner-stale-capability',
+      projectId: 'project-1',
+      runnerRoot: '/virtual/stale-capability',
+      pollIntervalMs: POLL_INTERVAL_MS,
+      heartbeatIntervalMs: QUIET_INTERVAL_MS,
+      dispatchLivenessProbeIntervalMs: QUIET_INTERVAL_MS,
+    })
+    const run = host.run(controller.signal)
+    try {
+      await reported.promise
+      expect(blockingAction).not.toHaveBeenCalled()
+    } finally {
+      controller.abort()
+      await run.catch(() => undefined)
+    }
+  })
+
   it('Restart_RedrivesDurablyCompletedResultWithoutExecutingTheWorkAgain', async () => {
     const redriven = deferred<void>()
     const work = {

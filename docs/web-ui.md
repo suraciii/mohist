@@ -89,8 +89,9 @@ This page lists every file changed by one Issue and includes a diff view.
 
 The Agent list discovers and manages Mohist Agents in the Project. Before the
 user opens a Session, it shows avatar, name, description, active or archived
-state, Ready, Needs setup, or Unknown Readiness, Runtime and model, active and
-queued work counts, and external Connection health. Runner availability and
+state, Ready, Needs setup, or Unknown Readiness, Runtime, model, stored
+Reasoning Effort, true Variant, active and queued work counts, and external
+Connection health. Runner availability and
 capacity are shown separately and cannot appear as Needs setup.
 
 The primary entry point for a Project without Agents is the task-first session
@@ -122,8 +123,11 @@ remains available as the secondary definition-first entry point.
 Agent details contain four continuous areas:
 
 1. **Definition:** Avatar, name, description, Instructions, Runtime, Model,
-   Variant, Skills, concurrency limit, and active or archived state. Mohist
-   Runtime capabilities and Readiness drive the controls. A gap links directly
+   catalog-backed Reasoning Effort, true Variant, Skills, concurrency limit,
+   and active or archived state. A saved Pi thinking-level Variant is not
+   migrated; the user must re-enter it as Reasoning Effort. Mohist Runtime
+   capabilities and Readiness drive the controls. Effort options come from the
+   selected model catalog, never from true Variants. A gap links directly
    to the corresponding field or credential setting. Needs setup disables
    launch. Unknown still accepts work and reports "Waiting for Runner
    validation." Ready without Runner capacity queues work instead of showing a

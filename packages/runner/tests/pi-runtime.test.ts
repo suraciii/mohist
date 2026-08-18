@@ -225,7 +225,10 @@ describe('PiRuntime', () => {
     await Promise.resolve()
     expect(session.promptCalls).toEqual(['/literal prompt'])
     expect(session.modelCalls).toEqual([{ provider: 'provider', id: 'family/model' }])
-    expect(session.thinkingCalls).toEqual(['high'])
+    // Issue-557 T-004: variants no longer smuggle a thinking level. A
+    // Pi dispatch carrying a variant (but no effort) must NOT apply it
+    // to the native thinking-level input.
+    expect(session.thinkingCalls).toEqual([])
     session.complete('answer')
     await expect(resultPromise).resolves.toMatchObject({
       ok: true,

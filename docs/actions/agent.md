@@ -22,11 +22,12 @@ between Agent, AgentJob, and AgentSession.
 ```
 
 The Agent selected by `name` provides identity instructions, execution backend
-(OpenCode or Pi), model, variant, and Skills. `prompt` is the input for this
-task. Use this Action when the same role must be reused by multiple tasks or
-Profiles, or when routing rules and `@` mentions must use the same Agent
-identity. Continue to use [`mohist/opencode`](opencode.md) or
-[`mohist/pi`](pi.md) inline for one-time tasks.
+(OpenCode or Pi), model, optional Reasoning Effort, true model variant, and
+Skills. `prompt` is the input for this task. Use this Action when the same role
+must be reused by multiple tasks or Profiles, or when routing rules and `@`
+mentions must use the same Agent identity. Continue to use
+[`mohist/opencode`](opencode.md) or [`mohist/pi`](pi.md) inline for one-time
+tasks.
 
 ## Action Inputs
 
@@ -37,11 +38,14 @@ identity. Continue to use [`mohist/opencode`](opencode.md) or
 | `session` | No | - | Logical Session name within the WorkflowRun. The current Work ID is used when omitted. |
 | `timeout` | No | Same as the backend Action | Deadline for this execution. |
 
-The Agent configuration selects the execution backend, model, variant, and
-Skills. The task cannot override them. `prompt` supplies only the goal for this
-work and cannot modify the Agent definition. Task-level constructs such as
-`expect`, `artifacts`, `setVars`, and recovery behave as they do for other
-Actions.
+The Agent configuration selects the execution backend, model, optional
+Reasoning Effort, true model variant, and Skills. Reasoning Effort is one of
+`off`, `minimal`, `low`, `medium`, `high`, `xhigh`, or `max`; it is independent
+from Variant. OpenCode does not support an explicit Reasoning Effort, so choose
+Pi or leave the effort unset for OpenCode. The task cannot override these
+values. `prompt` supplies only the goal for this work and cannot modify the
+Agent definition. Task-level constructs such as `expect`, `artifacts`,
+`setVars`, and recovery behave as they do for other Actions.
 
 `name` uses the same resolution order as the `mo` command surface. A reference
 that starts with `agent_` resolves only as an ID. Other references resolve by
@@ -50,13 +54,17 @@ name first and fall back to ID when no name matches.
 ## Resolution and Snapshot
 
 - Each dispatch resolves `name` to a snapshot of the current definition. The
-  instructions, execution backend, model, variant, and ordered Skills remain
-  fixed for that attempt.
+  instructions, execution backend, model, Reasoning Effort, true model
+  variant, and ordered Skills remain fixed for that attempt.
 - Editing the Agent does not affect an attempt that was already dispatched. A
   retry resolves the definition again, so a repaired definition takes effect
   immediately on retry.
 - An ordinary client may provide a prompt and context. It cannot use task input
-  or context to select a different Runtime, model, variant, or set of Skills.
+  or context to select a different Runtime, model, Reasoning Effort, Variant, or
+  set of Skills.
+- Pi thinking-level values previously saved as `variant` are not migrated or
+  reinterpreted. Re-enter the value as `reasoningEffort` in the Agent profile;
+  until then, the saved configuration is rejected explicitly.
 - Profile save and `mo workflow validate` check only the input shape and require
   `name` and `prompt`. They do not check whether the Agent exists, so Agent
   creation and removal do not block the Profile lifecycle.

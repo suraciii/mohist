@@ -2420,6 +2420,7 @@
           "Mohist.Server.SpecTests.Support.InProcessTestClusterBuilderExtensions",
           "Mohist.Server.SpecTests.Support.LogicalTestClusterPortAllocator",
           "Mohist.Server.TestSupport.AgentSessionPersistenceTestProbe",
+          "Mohist.Server.TestSupport.CapabilityCatalogTestHelpers",
           "Mohist.Server.TestSupport.DispatchTestExtensions",
           "Mohist.Server.TestSupport.FakeRunnerWorkspaceClient",
           "Mohist.Server.TestSupport.InMemoryAttachmentStorage",
@@ -2437,8 +2438,7 @@
           "TestTime"
         ],
         "digest": "925bbae144c1470d6800a3d96159bf5ba2e5b2b8fa69fa97e7607c054f0242b1",
-        "evidence": "source-path=Mohist.Server.SpecTests/Specs/Workflow/Grain/FailIfMarkerSpecs.cs source-fqn=Mohist.Server.SpecTests.Specs.Workflow.Grain.FailIfMarkerSpecs case-digest=25a439440f70f32fc5b519713bd2630e001aec7a5a054d004ac91bed03fa6884 source-content-digest=9402ed5f1ce4a0efc73709bce887bc064f1fecf10da27eab3f8f743b87e33a2b executable-closure-digest=925bbae144c1470d6800a3d96159bf5ba2e5b2b8fa69fa97e7607c054f0242b1 edges-digest=84393871f2806ab8005e4424896ac0f178c7839813cf9f771a036932414ad8ab move-contract-schema=1"
-      },
+        "evidence": "source-path=Mohist.Server.SpecTests/Specs/Workflow/Grain/FailIfMarkerSpecs.cs source-fqn=Mohist.Server.SpecTests.Specs.Workflow.Grain.FailIfMarkerSpecs case-digest=25a439440f70f32fc5b519713bd2630e001aec7a5a054d004ac91bed03fa6884 source-content-digest=9402ed5f1ce4a0efc73709bce887bc064f1fecf10da27eab3f8f743b87e33a2b executable-closure-digest=925bbae144c1470d6800a3d96159bf5ba2e5b2b8fa69fa97e7607c054f0242b1 edges-digest=84393871f2806ab8005e4424896ac0f178c7839813cf9f771a036932414ad8ab move-contract-schema=1"      },
       "owner": "Mohist.Server.UnitTests.Workflow.Grain.FailIfMarkerSemanticTests",
       "moveContract": {
         "owner": "Mohist.Server.UnitTests.Workflow.Grain.FailIfMarkerSemanticTests",
@@ -2470,8 +2470,7 @@
         "note": "Explicit closure review; no migration PR is created.",
         "sourcePath": "Mohist.Server.SpecTests/Specs/Workflow/Grain/FailIfMarkerSpecs.cs",
         "sourceFqn": "Mohist.Server.SpecTests.Specs.Workflow.Grain.FailIfMarkerSpecs",
-        "sourceContentDigest": "9402ed5f1ce4a0efc73709bce887bc064f1fecf10da27eab3f8f743b87e33a2b"
-      },
+        "sourceContentDigest": "9402ed5f1ce4a0efc73709bce887bc064f1fecf10da27eab3f8f743b87e33a2b"      },
       "validationHead": "2c96e43e2bc89fcfbd4e051576faec8f2861a8a8",
       "executable": {
         "path": "Mohist.Server.SpecTests/Specs/Workflow/Grain/FailIfMarkerSpecs.cs",
@@ -2485,8 +2484,7 @@
         "sourcePath": "Mohist.Server.SpecTests/Specs/Workflow/Grain/FailIfMarkerSpecs.cs",
         "sourceFqn": "Mohist.Server.SpecTests.Specs.Workflow.Grain.FailIfMarkerSpecs",
         "targetPath": "Mohist.Server.UnitTests/Workflow/Grain/FailIfMarkerSemanticTests.cs",
-        "targetFqn": "Mohist.Server.UnitTests.Workflow.Grain.FailIfMarkerSemanticTests"
-      }
+        "targetFqn": "Mohist.Server.UnitTests.Workflow.Grain.FailIfMarkerSemanticTests"      }
     },
     {
       "id": "current-mohist-hub",

@@ -368,7 +368,7 @@ export function AgentDetailPage({
 
   useDocumentTitle(agent ? `${agent.name} — Mohist` : 'Agent — Mohist')
 
-  const { model, variant, runtime } = useMemo(() => readAgentModelAndVariant(agent), [agent])
+  const { model, variant, runtime, reasoningEffort } = useMemo(() => readAgentModelAndVariant(agent), [agent])
   const isArchived = agent?.status === 'archived'
   const executability = agent?.executability
   const executabilityState = executability?.state ?? 'unknown'
@@ -560,8 +560,18 @@ export function AgentDetailPage({
                 </div>
                 <div className="flex justify-between items-center">
                   <span className="text-xs text-muted-foreground">Variant</span>
-                  <span className="text-xs font-medium text-foreground">{variant ?? 'Default'}</span>
+                  <span data-testid="agent-detail-variant" className="text-xs font-medium text-foreground">
+                    {variant ?? 'Default'}
+                  </span>
                 </div>
+                {reasoningEffort ? (
+                  <div className="flex justify-between items-center">
+                    <span className="text-xs text-muted-foreground">Reasoning Effort</span>
+                    <span data-testid="agent-detail-reasoning-effort" className="text-xs font-medium text-foreground">
+                      {reasoningEffort}
+                    </span>
+                  </div>
+                ) : null}
                 <div className="flex justify-between items-center">
                   <span className="text-xs text-muted-foreground">Max concurrent runs</span>
                   <span data-testid="agent-detail-max-concurrent-runs" className="text-xs font-medium text-foreground">
@@ -581,8 +591,8 @@ export function AgentDetailPage({
                   data-testid="agent-detail-edit-timing"
                   className="border-t border-border pt-2 text-[10px] leading-relaxed text-muted-foreground"
                 >
-                  Purpose, Instructions, Permissions, Runtime, Model, Variant, and Skills edits apply only to Jobs
-                  created after saving. Executions already in progress keep the configuration from launch.
+                  Purpose, Instructions, Permissions, Runtime, Model, Variant, Reasoning Effort, and Skills edits apply
+                  only to Jobs created after saving. Executions already in progress keep the configuration from launch.
                 </p>
               </div>
             </div>

@@ -50,6 +50,7 @@ type PiActionInput = {
   session?: string
   options?: {
     model?: string
+    reasoningEffort?: string
     variant?: string
   }
 }
@@ -65,13 +66,15 @@ The input shape, expansion timing, and output projection are identical to
 
 - `model` uses Pi's `provider/model` form and is likewise split only at the
   first `/`. Pi remains the final authority on whether the model is valid.
-- `variant` maps to a Pi thinking level: `off`, `minimal`, `low`, `medium`,
-  `high`, `xhigh`, or `max`. It remains a separate field and must not be joined
-  to the model ID. Pi rejects invalid values, which Mohist normalizes as an
-  execution failure; Mohist does not prevalidate the set.
+- `reasoningEffort` uses Mohist's canonical vocabulary: `off`, `minimal`, `low`,
+  `medium`, `high`, `xhigh`, or `max`. Pi maps that value privately to its
+  native thinking level and reports the canonical effort in execution evidence.
+- `variant` is a true model variant and is independent from reasoning effort. It
+  never selects a Pi thinking level and must not be joined to the model ID.
+  Pi remains the final authority for native model and variant validity.
 
-Keys in `options` other than `model` and `variant` are ignored with a diagnostic
-and do not fail execution. This allows persisted `vars.agent` values containing
+Keys in `options` other than `model`, `reasoningEffort`, and `variant` are
+ignored with a diagnostic and do not fail execution. This allows persisted `vars.agent` values containing
 a `runtime` key, used by the Mohist Agent path, or legacy keys to remain
 bindable to this Action. `options` does not carry `runtime`; the Workflow path
 selects its backend through `uses`.
@@ -345,16 +348,18 @@ never becomes Action output.
 
 Pi's catalog contains only models whose providers have configured credentials.
 That makes it useful for configuration assistance, but not final execution
-authority. Thinking levels are the model variants; Pi still validates the selected
-model and level when execution begins.
+authority. It publishes native thinking levels as per-model
+`reasoningEfforts`; its `variants` map contains true model variants only. Pi
+still validates the selected model, effort, and variant when execution begins.
 
-Runtime selection is frozen into the Agent execution snapshot and current Session
-binding. Server routes launch and Session commands by that value; Runner dispatches
-to the corresponding independent deep module; clients request the catalog for the
-selected Runtime. Shared Session projections carry normalized transcript, model,
-cost, and usage facts, including cache-read and cache-write tokens, without
-exposing Pi SDK types. This capability boundary replaces component-by-component
-Pi special cases in Server and Web.
+Runtime selection and the canonical reasoning effort are frozen into the Agent
+execution snapshot and current Session binding. Server routes launch and Session
+commands by those values; Runner dispatches to the corresponding independent
+deep module; clients request the catalog for the selected Runtime. Shared
+Session projections carry normalized transcript, model, applied effort, cost,
+and usage facts, including cache-read and cache-write tokens, without exposing
+Pi SDK types. This capability boundary replaces component-by-component Pi
+special cases in Server and Web.
 
 ## Verification Boundary
 

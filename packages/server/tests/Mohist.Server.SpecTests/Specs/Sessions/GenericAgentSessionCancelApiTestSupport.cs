@@ -61,7 +61,12 @@ public abstract class GenericAgentSessionCancelApiTestSupport : IAsyncLifetime
     {
         var project = await CreateProjectAsync($"preserves-{sourceKind}");
         await _fixture.Grains.GetGrain<IRunnerGrain>(_runnerId)
-            .RegisterAsync(new RunnerInfo(_runnerId, ["spec/*"], $"{_runnerId}-host", project.Id));
+            .RegisterAsync(new RunnerInfo(
+                _runnerId,
+                ["spec/*"],
+                $"{_runnerId}-host",
+                project.Id,
+                RuntimeCatalogs: CapabilityCatalogTestHelpers.Create()));
         var tracker = _fixture.Services.GetRequiredService<RunnerConnectionTracker>();
         tracker.Register(_runnerId, $"{_runnerId}-conn");
 
@@ -139,7 +144,12 @@ public abstract class GenericAgentSessionCancelApiTestSupport : IAsyncLifetime
     {
         var project = await CreateProjectAsync("executing");
         await _fixture.Grains.GetGrain<IRunnerGrain>(_runnerId)
-            .RegisterAsync(new RunnerInfo(_runnerId, ["spec/*"], $"{_runnerId}-host", project.Id));
+            .RegisterAsync(new RunnerInfo(
+                _runnerId,
+                ["spec/*"],
+                $"{_runnerId}-host",
+                project.Id,
+                RuntimeCatalogs: CapabilityCatalogTestHelpers.Create()));
         _fixture.Services.GetRequiredService<RunnerConnectionTracker>()
             .Register(_runnerId, $"{_runnerId}-conn");
 
@@ -170,7 +180,12 @@ public abstract class GenericAgentSessionCancelApiTestSupport : IAsyncLifetime
     {
         var project = await CreateProjectAsync("launch-stop");
         await _fixture.Grains.GetGrain<IRunnerGrain>(_runnerId)
-            .RegisterAsync(new RunnerInfo(_runnerId, ["spec/*"], $"{_runnerId}-host", project.Id));
+            .RegisterAsync(new RunnerInfo(
+                _runnerId,
+                ["spec/*"],
+                $"{_runnerId}-host",
+                project.Id,
+                RuntimeCatalogs: CapabilityCatalogTestHelpers.Create()));
         _fixture.Services.GetRequiredService<RunnerConnectionTracker>().Register(_runnerId, $"{_runnerId}-conn");
 
         var sessionId = $"launch-stop-{Guid.NewGuid():N}";
@@ -246,6 +261,7 @@ public abstract class GenericAgentSessionCancelApiTestSupport : IAsyncLifetime
             capabilities = new[] { "spec/*" },
             hostname = $"{runnerId}-host",
             projectId = project.Id,
+            runtimeCatalogs = CapabilityCatalogTestHelpers.Create(),
         });
         await _fixture.Client.PatchOkAsync($"/api/runner/{runnerId}", new { slots = 2 });
 

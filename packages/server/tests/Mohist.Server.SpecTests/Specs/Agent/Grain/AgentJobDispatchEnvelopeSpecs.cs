@@ -256,4 +256,82 @@ public class AgentJobDispatchEnvelopeSpecs : AgentJobGrainTestSupport
         var with = JsonSerializer.Deserialize<JsonElement>(polled.With!);
         Assert.Equal(runtime, with.GetProperty("runtime").GetString());
     }
+
+    [Fact]
+    public async Task SubmitAsync_WithReasoningEffort_DeliversEffortOnDispatchEnvelopeBesideModelAndVariant()
+    {
+        // Issue-557 T-002: the frozen execution tuple's canonical effort
+        // member is written into the dispatch `with` payload exactly when
+        // non-empty, beside model and variant, so the runner applies the
+        // launch-time effort without re-reading the Agent definition.
+        var (runnerId, projectId) = await RegisterAgentJobRunnerAsync(
+            $"agent-job-effort-dispatch-runner-{Guid.NewGuid():N}");
+        await InstallCapabilityFenceAsync(runnerId, projectId, "opencode");
+        var jobKey = $"agent-job-effort-dispatch-{Guid.NewGuid():N}";
+        var job = JobGrain(jobKey);
+
+        var input = new AgentJobInput(
+            Prompt: "summarize with effort",
+            Model: "openai/gpt-5.5",
+            WorkspacePath: "/tmp/agent-job-effort-dispatch",
+            ProjectId: projectId,
+            AgentId: "agent-effort",
+            AgentInstructions: "be terse",
+            Variant: "balanced",
+            Runtime: "opencode",
+            ReasoningEffort: "high");
+
+        await job.SubmitAsync(input);
+        await WaitForStatusAsync(
+            job,
+            AgentJobStatus.Running,
+            TimeSpan.FromSeconds(5),
+            CapabilityFencePollRequest("opencode"));
+
+        var polled = await Grains.GetGrain<IRunnerGrain>(runnerId).PollAsync(_fixture.Cluster.GetSiloServiceProvider(null));
+        Assert.NotNull(polled);
+
+        Assert.False(string.IsNullOrWhiteSpace(polled!.With));
+        var with = JsonSerializer.Deserialize<JsonElement>(polled.With!);
+        Assert.Equal("openai/gpt-5.5", with.GetProperty("model").GetString());
+        Assert.Equal("balanced", with.GetProperty("variant").GetString());
+        Assert.Equal("high", with.GetProperty("reasoningEffort").GetString());
+
+        // The AgentDefinition snapshot on the dispatch carries the same
+        // frozen tuple member.
+        Assert.NotNull(polled.AgentDefinition);
+        Assert.Equal("high", polled.AgentDefinition!.ReasoningEffort);
+        Assert.Equal("balanced", polled.AgentDefinition.Variant);
+    }
+
+    [Fact]
+    public async Task SubmitAsync_WithoutReasoningEffort_OmitsKeyAndFreezesNullOnDefinition()
+    {
+        // Absent effort is written as absent — no `reasoningEffort` key in
+        // the `with` payload, no synthesized default on the definition.
+        var (runnerId, projectId) = await RegisterAgentJobRunnerAsync(
+            $"agent-job-no-effort-dispatch-runner-{Guid.NewGuid():N}");
+        var jobKey = $"agent-job-no-effort-dispatch-{Guid.NewGuid():N}";
+        var job = JobGrain(jobKey);
+
+        var input = new AgentJobInput(
+            Prompt: "summarize without effort",
+            Model: "openai/gpt-5.5",
+            WorkspacePath: "/tmp/agent-job-no-effort-dispatch",
+            ProjectId: projectId,
+            AgentId: "agent-no-effort",
+            Variant: "balanced");
+
+        await job.SubmitAsync(input);
+        await WaitForStatusAsync(job, AgentJobStatus.Running, TimeSpan.FromSeconds(5));
+
+        var polled = await Grains.GetGrain<IRunnerGrain>(runnerId).PollAsync(_fixture.Cluster.GetSiloServiceProvider(null));
+        Assert.NotNull(polled);
+
+        var with = JsonSerializer.Deserialize<JsonElement>(polled!.With!);
+        Assert.False(with.TryGetProperty("reasoningEffort", out _),
+            "an absent effort must not be written into the dispatch payload");
+        Assert.NotNull(polled.AgentDefinition);
+        Assert.Null(polled.AgentDefinition!.ReasoningEffort);
+    }
 }

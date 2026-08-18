@@ -1,4 +1,5 @@
 {
+  "Agent/Services/AgentExecutionCapabilityResolver.cs": 1,
   "Infrastructure/Data/Workflow/WorkflowRunQuerier.cs": 2,
   "Runner/Services/WorkflowReportService.cs": 1
 }

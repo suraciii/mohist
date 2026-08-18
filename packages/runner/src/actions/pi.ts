@@ -59,6 +59,8 @@ export function composePiPrompt(prompt: string, parentIssueContext?: ParentIssue
 export interface PiOptions {
   model?: string
   variant?: string
+  /** Canonical reasoning effort frozen beside model/variant in the dispatch options. */
+  reasoningEffort?: string
   timeoutMs?: number
   unknownKeys?: readonly string[]
 }
@@ -100,6 +102,7 @@ export async function piAction(
   const executionPrompt = buildExecutionEnvelope(prompt, definition?.instructions, resolvedSkills.skills)
   const model = definition?.model ?? options.model
   const variant = definition?.variant ?? options.variant
+  const reasoningEffort = definition?.reasoningEffort ?? options.reasoningEffort
   const runtime = context.piRuntime
   if (!runtime) return fail('runtime-unavailable', 'mohist/pi requires the Pi runtime')
   if (!runtime.ready())
@@ -245,6 +248,7 @@ export async function piAction(
     options: {
       model: model ?? null,
       variant: variant ?? null,
+      reasoningEffort: reasoningEffort ?? null,
       ...(resolvedSkills.skills.length > 0 ? { skills: resolvedSkills.skills } : {}),
       unknownKeys: options.unknownKeys,
     },
@@ -444,7 +448,7 @@ async function parseInput(
   const options: PiOptions = {}
   if (typeof timeout === 'number') options.timeoutMs = timeout
   const record = (rawOptions ?? {}) as Record<string, unknown>
-  for (const key of ['model', 'variant'] as const) {
+  for (const key of ['model', 'variant', 'reasoningEffort'] as const) {
     const value = record[key]
     if (value === undefined || value === null) continue
     if (typeof value !== 'string')
@@ -459,7 +463,9 @@ async function parseInput(
     }
     options[key] = value
   }
-  const unknownKeys = Object.keys(record).filter((key) => key !== 'model' && key !== 'variant')
+  const unknownKeys = Object.keys(record).filter(
+    (key) => key !== 'model' && key !== 'variant' && key !== 'reasoningEffort',
+  )
   if (unknownKeys.length > 0) options.unknownKeys = unknownKeys
   return { kind: 'ok', prompt: composePiPrompt(prompt, context.parentIssueContext), options }
 }

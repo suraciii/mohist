@@ -1,0 +1,807 @@
+# issue-557 progress notes
+
+## Codebase Patterns
+
+- `AgentConfigSchema` (packages/server/src/Mohist.Server/Infrastructure/AgentConfigSchema.cs)
+  is the converged boundary for BOTH agent-config write surfaces:
+  `Validate`/`AllowedKeys` (Agent definition, includes `runtime`) and
+  `ValidateIssue`/`IssueAllowedKeys` (issue override, Agent-owned `runtime`
+  rejected with a dedicated message).
+- Write-side merge paths iterate `AgentConfigSchema.Filter`, which loops over
+  `IssueAllowedKeys` — adding a key to `IssueAllowedKeys` automatically flows
+  it into `IssueVariableBuilder`, `IssueWorkflowProfileStorageIntegrity`,
+  `ConfigService`, and `IssueQuerier` with zero extra wiring.
+- Error-message style: named-value errors list every accepted value
+  (see `ValidateRuntime`). `ValidateReasoningEffort` mirrors it, and uses the
+  ordered list (`CanonicalReasoningEffortsOrdered`) so the message is stable;
+  `AllowedKeys`-set messages still use set order (pre-existing).
+- `ValidateIssue` uses a literal `CanonicalIssueKeyOrder` string for its
+  "accepts only ..." message (HashSet iteration order is nondeterministic).
+- CLI (packages/cli/Mohist.Cli/MohistCliCommands.Agent.cs): typed config keys
+  follow the `--flag` + `--clear-flag` pattern with `ValidateClearSetPair`
+  mutual exclusion; local value validation happens in
+  `ResolveTypedAgentConfig` (mirrors the server set; the CLI cannot reference
+  the Server assembly). `mo agent view` rendering lives in
+  `TableRenderer.Entities.cs` (`StringOf` renders missing keys as empty —
+  absent effort renders as nothing, no synthesis).
+- Tests: dotnet test with Microsoft.Testing.Platform ignores `--filter`
+  (MTP0001 warning) — a filtered run executes the full project. Full suites
+  are fast enough (unit ~8s, cli ~2s).
+
+## T-001 (canonical write surface + CLI)
+
+- Done: `CanonicalReasoningEfforts(ordered)` + `ValidateReasoningEffort` in
+  `AgentConfigSchema`; `reasoningEffort` in `AllowedKeys` +
+  `IssueAllowedKeys`; string-or-null/non-empty checks extended to the key in
+  `Validate`; `ValidateIssue` now also runs `ValidateReasoningEffort`.
+- Issue profile → `vars.agent` forwarding needed NO code: `Filter` picks the
+  key up via `IssueAllowedKeys` (covered by new IssueVariableBuilderTests).
+- CLI: `--reasoning-effort` on create+update, `--clear-reasoning-effort`
+  (update only, `ValidateClearSetPair`), local canonical-set validation before
+  any mutation request (update still does the GET resolve first — the current
+  config is needed to merge), view table row `reasoning effort:` beside
+  variant. Retired-flag hints ("--agent-config is retired; use ...") updated
+  to mention the effort flags.
+- Gotcha: the prior run left this task's diff uncommitted in the worktree;
+  verified it end-to-end (server unit 2692 pass, cli 1858 pass, arch 68 pass,
+  wf-definition 178 pass) before committing.
+- Format gate (`scripts/check-format.ts`) needs `npm ci` (biome/csharpier
+  absent in this environment); skipped, C# follows csharpier conventions of
+  the surrounding file.
+- Web editor effort control is T-008, snapshot freezing T-002 — nothing here
+  touches runner/launch paths.
+
+## T-002 (freeze effort tuple across all launch paths)
+
+- Done: `AgentLauncher.ResolveReasoningEffort` (+ `ResolveExecutionDefinition`
+  and `AgentExecutionSnapshotResolver` carry it); append-only fields
+  `AgentExecutionDefinition.ReasoningEffort` (Id 6),
+  `AgentJobInput.ReasoningEffort` (Id 25, after WorkspaceName 23 /
+  WorkspaceRepositories 24), `RoutedAgentLaunchPlan.ReasoningEffort` (Id 22),
+  plus the plumbing-only envelopes `PrepareManualLaunchCommand` (Id 24),
+  `AgentLaunchCoordinatorCommandEnvelope` (Id 38), `AgentLaunchCoordinatorPlan`
+  (Id 51). `AgentJobGrain.BuildDispatchAsync` writes `with["reasoningEffort"]`
+  only when non-empty; `EquivalentInput`/`EquivalentCommand` compare it
+  (post-edit redelivery of a different effort throws instead of rewriting —
+  first plan wins, covered by specs).
+- Launch paths freezing the effort: manual HTTP (coordinator plan →
+  PrepareManualLaunchCommand), trigger/subscription routed
+  (`AgentLauncher.LaunchAsync` + `RoutingDispatchHandler` → RoutedAgentLaunchPlan),
+  Slack connection/mention (`LaunchConnectionAsync` envelope), workflow task
+  (`WorkflowItemTranslator` stamps the snapshot's effort onto
+  `WorkDispatch.AgentDefinition`; `vars.agent.reasoningEffort` reaches the
+  runner action `with.options` via the existing `${{ vars.agent }}` whole-object
+  template rendering — no translator change needed for that half).
+- Runner: `session-target.ts`/`followup-handler.ts`/`command-runtime.ts`
+  forward `definition.reasoningEffort ?? null`; `agent-job-executor.ts` reads
+  `readOptionalString(payload,'reasoningEffort')` into both turn executors
+  (`collectUnknownKeys` now knows the key); workflow-task actions
+  `actions/pi.ts` + `actions/opencode.ts` parse `options.reasoningEffort`
+  (definition wins over caller option, exactly like model/variant);
+  `AgentTurnRequest.options` + `executor-capabilities.ts` turn path forward
+  it; test-support `call-action.ts` fake mirrors production.
+- GOTCHA (test isolation): `RunnerRegistryGrain.ListEligibleRunnersAsync`
+  IGNORES the project argument (returns all runners), and AgentJob admission
+  assigns the first online runner with free slots. A spec that registers a
+  runner and never unregisters leaves an online runner that STEALS admission
+  for later specs' jobs (their own-runner polls then never claim; job stays
+  Pending). Fix: always `UnregisterAsync` in finally (see
+  AgentLauncherSpecs / AgentEffortSnapshotFreezeSpecs). Symptom was
+  `Launch_TriggerReplayAfterJobDeactivation_ReusesDurableWork` failing only
+  in full-suite runs.
+- No Orleans serializer round-trip test infra exists in the repo; the
+  append-only/deserialize-as-null guarantee is covered by id assignment +
+  wire-level absent-field specs (dispatch envelope without effort, runner
+  legacy definitions without the key).
+- Pi adapter still maps `variant`→thinking level until T-004; T-002 only
+  plumbs the canonical `reasoningEffort` field through (opencode tolerates
+  unknown option keys, so no behavior change there until T-004's explicit
+  rejection).
+- Verification: server unit 2697, SpecTests 3927 (full suite, 2.5 min),
+  arch 68, wf 178, cli 1858, runner 1656, web 4724, typecheck all green;
+  `npm run test:fast` passes. SpecTests are NOT in test:fast — run the
+  project directly for integration coverage.
+
+## T-003 (catalog wire) — exploration notes, NOT yet implemented
+
+No code changes landed yet; this is the reconnaissance from the aborted run.
+
+Key locations:
+- C# `RuntimeCatalogEntry`: packages/server/src/Mohist.Server/Runner/Grains/IRunnerGrain.cs
+  (~line 100). Record with Id(0) Models, Id(1) Variants. Append Id(2)
+  ReasoningEfforts (Dictionary<string,string[]>?), Id(3) SupportsReasoningEffort
+  (bool?), Id(4) Complete (bool?), Id(5) CapabilityRevision (string?) — nullable
+  so legacy entries deserialize as null = non-authoritative.
+- TS `RuntimeCatalogEntry`: packages/runner/src/core/types.ts:385. Add optional
+  fields reasoningEfforts?, supportsReasoningEffort?, complete?, capabilityRevision?.
+- Runner registration: runtime/host.ts `registrationState()` (~line 808). Pi
+  currently publishes thinkingLevels as `variants` (from commit c7cc2483b). Change:
+  efforts under `reasoningEfforts`, `variants: {}` empty map, supportsReasoningEffort
+  true, complete true ONLY when piRuntime.catalog() non-null (catalog() returns null
+  until loaded — attemptStart clears it on failure, so `complete` follows catalog
+  presence; when catalog missing, publish entry WITHOUT complete/revision, or omit
+  the pi entry entirely — current code omits entry when no catalog).
+- OpenCode: host.ts does NOT publish an opencode catalog at all (model discovery
+  was removed in d72e6a4a5 "honor requested model without probing"). Design D3 says
+  OpenCode registers supportsReasoningEffort:false, complete:true, no efforts,
+  variants unchanged — but OpenCode has NO model list, and per the D4 decision
+  table complete:true + absent model ⇒ incompatible ⇒ would kill all OpenCode
+  dispatch. Resolution for next run: register opencode with
+  supportsReasoningEffort:false but WITHOUT complete/capabilityRevision (empty
+  models/variants ⇒ non-authoritative ⇒ needs-setup) so current behavior is
+  preserved until opencode gains a real catalog; OR only publish complete once a
+  real opencode catalog exists. Record the decision in code comments. The task AC
+  only requires: supportsReasoningEffort=false, true variants unchanged (none
+  today), no reasoning efforts.
+- Server wire/normalize: RunnerRoutes.NormalizeRuntimeCatalogs (~line 987) currently
+  REBUILDS each entry (models+variants only) — must carry the new fields verbatim.
+  NormalizeCoderModelVariants reusable for reasoningEfforts maps. Both
+  RunnerRegisterRequest and RunnerHeartbeatRequest carry RuntimeCatalogs.
+  RunnerRegistryGrain.RegisterAsync already stores RunnerInfo verbatim (enriches
+  RegisteredAt only) — no change needed there beyond nothing.
+- RunnerRegistryGrain.CatalogFor fallback (legacy CoderModels/CoderModelVariants
+  path, lines ~116-129) constructs legacy RuntimeCatalogEntry — leave as
+  non-authoritative (no complete/revision) which is exactly right.
+- Server API exposure: OpencodeRoutes /api/projects/{id}/opencode/models?runtime=
+  returns { models, modelVariants } — add `modelReasoningEfforts` (aggregate like
+  ListCoderModelVariantsByRuntime; needs new registry method e.g.
+  ListCoderModelReasoningEffortsByRuntimeAsync mirroring the variants one).
+  Web: entities/settings/api/client.ts getModels (~line 59) add
+  reasoningEfforts?: Record<string,string[]> to response type;
+  queries.ts availableModelIdsQueryOptions (~line 130) thread it through
+  (selectModelVariants pattern for selectModelReasoningEfforts). T-008 builds the
+  editor control on this; T-003 only needs the plumbing + exposure + tests.
+- capabilityRevision derivation: compute on RUNNER side (host.ts) via
+  node:crypto sha256 over a canonical serialization — MUST sort keys and lists
+  deterministically (open design question: stability across serialization order —
+  answer: build a canonical form: sorted model ids, sorted efforts/variants, then
+  JSON.stringify). Server stores it verbatim, never recomputes.
+- Existing runner tests that WILL break and need updating:
+  runner-host-opencode-runtime.spec.ts lines ~314-410 (three specs asserting
+  thinkingLevels under variants) — flip to reasoningEfforts + empty variants map;
+  runner-host-lifecycle.spec.ts:212 (`runtimeCatalogs: { pi: { models: [], variants: {} } }`)
+  gains new fields. Test-resources default pi factory returns catalog with
+  models:[] (support/test-resources.ts:85) so default registration is
+  complete:true with empty content.
+- Server test homes: RunnerRegistrySpecs.cs (grain aggregation — extend with
+  verbatim storage + reasoningEfforts aggregation), ApiContractSpecs.cs /
+  IssueModelVariantApiSpecs.cs (wire round-trip via POST /api/runner/{id}/register
+  with runtimeCatalogs; legacy entry without complete/revision fields must
+  deserialize as nulls and stay non-authoritative — JSON.Options is
+  WhenWritingNull so absent fields → null bool?s, fine).
+- Web test homes: entities/settings/api/queries.test.ts (selectModelVariants
+  pattern at line 22).
+
+Plan skeleton for next run (est. half a day):
+1. IRunnerGrain.cs record fields (Ids 2-5) + runner core/types.ts interface.
+2. host.ts registrationState(): pi entry with efforts/empty variants/complete
+   gated on catalog; content-hash capabilityRevision via canonical serializer
+   (new small module, unit-test the hash stability: key order, list order,
+   identical re-registration ⇒ same revision; capability change ⇒ new revision).
+3. RunnerRoutes.NormalizeRuntimeCatalogs verbatim pass-through (trim/null rules
+   mirroring models/variants for reasoningEfforts).
+4. RunnerRegistryGrain ListCoderModelReasoningEffortsByRuntimeAsync +
+   OpencodeRoutes response field + web client/queries plumbing.
+5. Tests both sides per the AC list. Run: runner vitest, server unit + SpecTests,
+   web vitest, npm run test:fast.
+
+## T-004 (native adapter translation + Pi smuggling removal)
+
+- Pi runtime no longer reads `options.variant` as a thinking level at either
+  turn site. A private `PI_THINKING_LEVEL_BY_EFFORT` map translates only the
+  canonical `reasoningEffort`; absent/null/empty effort leaves the session's
+  thinking level untouched. Follow-ups on cached sessions reapply only the
+  effort-derived level, and reset carry-over therefore preserves the physical
+  session state without creating a level from a variant.
+- Pi projector instances receive the frozen canonical effort and add
+  `appliedReasoningEffort` to `model.resolved` payloads only when non-null;
+  native Pi thinking-level values never cross the projector evidence boundary.
+- OpenCode now rejects explicit non-empty `reasoningEffort` before session
+  acquisition/provider calls in both run and follow-up entry points. The
+  internal hyphenated runtime error is projected as the required
+  `unsupported_execution_configuration` category for AgentJob and Workflow
+  action results; the option is never folded into model or variant.
+- Updated stale T-002 action expectations to assert both option delivery and
+  explicit OpenCode rejection. Coverage now includes Pi effort mapping,
+  variant isolation on new and reused/reset sessions, applied-effort
+  projection, OpenCode no-SDK-call rejection, and AgentJob category mapping.
+- Verification: focused adapter suites 109 tests passed; full Runner suite
+  153 files / 1662 tests passed; `npm run typecheck -w packages/runner`
+  passed. `npm run typecheck:tests -w packages/runner` still reports the
+  pre-existing T-002 test typing issues in `executor-capabilities-effort.spec.ts`
+  and `runner-signalr-followup-target.spec.ts`; source typecheck and Vitest are
+  green.
+
+## T-005 (pure capability resolver)
+
+- Added the append-only Server catalog fields to `RuntimeCatalogEntry` at
+  Orleans ids 2-5: `ReasoningEfforts`, `SupportsReasoningEffort`, `Complete`,
+  and `CapabilityRevision`. `RunnerRoutes.NormalizeRuntimeCatalogs` preserves
+  these fields so authoritative catalog evidence is not discarded at the API
+  boundary; legacy fallback entries still omit completeness and revision and
+  remain non-authoritative.
+- Added the pure `AgentExecutionCapabilityResolver` with an immutable tuple,
+  per-runner catalog/readiness snapshots, typed five-way disposition, exact
+  disposition code, runner identity and revision on supported results, and
+  frozen tuple failure evidence for explicit rejections. It sorts runner ids,
+  prefers any ready authoritative compatible catalog, treats absent/incomplete
+  evidence as `needs-setup`, and treats only a null effort as unset.
+- Unit coverage exercises supported, absent/incomplete/revisionless,
+  unavailable, unsupported-effort, missing model/effort/variant,
+  effort-unsupported unset exemption, legacy non-authoritative entries,
+  deterministic runner selection/re-evaluation, and non-mutation.
+- Verification: `dotnet test packages/server/tests/Mohist.Server.UnitTests/Mohist.Server.UnitTests.csproj --no-restore` passed, 2709 tests.
+
+## T-006 (resolver-gated admission and conditional capability fence)
+
+- Admission now reads immutable AgentJob and Workflow pending projections, resolves the frozen tuple against the runner catalog snapshot before claim, and passes a `RunnerCapabilityExpectation` through `IRunnerGrain`. Runner catalog/revision and readiness generation checks run under `_lifecycleGate`; a heartbeat catalog repair between resolution and claim therefore refuses the claim and leaves the owner pending.
+- AgentJob conditional claims write the capability revision into the owner-ledger `DispatchJson` before the Pending-to-Running store transition. Workflow claims stamp the revision before `StoreActiveWorkDispatchAsync`, which remains the durable first writer; a first-writer winner from another revision is re-pended instead of delivered.
+- Only supported capability resolutions claim work. Missing or incomplete/revisionless evidence remains pending, while explicit unsupported/incompatible results become deterministic preflight failures with the frozen tuple and registered EventCatalog failure categories. The AgentJob evidence is durable state/output; Workflow errors carry the same tuple and revision in their deterministic message.
+- Runner dispatches with a capability revision are checked before journal admission or runtime execution. Revision, model, effort, and variant mismatches produce `stale-capability-snapshot`, and the report protocol re-pends the owner. Workflow action model/variant values are read from nested `with.options`; AgentJob capability fields remain top-level.
+- Non-Agent `mohist/pi` and `mohist/opencode` tasks use the common fence when their action options name a model or true variant. Their Agent-owned reasoning-effort member is intentionally unset because those actions do not own an Agent profile snapshot; explicit adapter-level effort handling remains the runtime contract. This keeps the tuple shape uniform without inventing an effort value.
+- Added Server fence/admission coverage for absent catalogs, deterministic AgentJob and Workflow preflight failures, matching and changed catalog claims, first-writer snapshots, and the lifecycle-gate heartbeat race. Runner coverage verifies stale snapshots are rejected and requeued without entering execution.
+- Verification: Server SpecTests 3938 passed, Server UnitTests 2709 passed, Runner typecheck passed, and the full Runner suite 153 files / 1663 tests passed.
+
+## T-007 (readiness and execution evidence)
+
+- `AgentReadinessService` now compares the resolved `reasoningEffort` in
+  definition matching, reports `effort-without-model`, and classifies both
+  normalized `unsupported_execution_configuration` and
+  `incompatible_execution_configuration` failures as Needs setup. Guidance
+  explicitly names `reasoningEffort` so saved Pi thinking-level variants have
+  a clear re-entry path.
+- `AgentJobTerminalResult` gains append-only model, variant, and
+  `ReasoningEffort` evidence fields. `AgentJobGrain` copies them from the
+  frozen input/plan at terminalization; absent effort remains null and no
+  default is synthesized.
+- Server session transcript projection and the persisted activity summary now
+  retain adapter-reported `appliedReasoningEffort` beside the resolved model.
+  A latest model fact without the field clears the applied effort, preventing
+  an older effort from leaking into a new model/runtime binding. Generic and
+  unified session summaries expose the optional field, and the CLI contract
+  catalog includes it.
+- Added readiness, projector/reducer, and Orleans AgentJob terminal-evidence
+  coverage. Verification: Server UnitTests 2717 passed, Server SpecTests
+  3938 passed, focused Pi projector tests 8 passed, and Runner source
+  typecheck passed. `git diff --check` passed.
+
+## T-001 Verification (current run)
+
+- Confirmed the existing `869e9a83a` implementation covers the canonical
+  schema vocabulary, Agent and Issue allowed-key surfaces, issue `vars.agent`
+  forwarding, CLI create/edit/clear/view behavior, local validation, and
+  effort/variant independence.
+- Verification: Server UnitTests 2717 passed, Server SpecTests 3938 passed,
+  CLI tests 1858 passed, and `git diff --check` passed. The SpecTests runner
+  ignored the requested name filter under Microsoft.Testing.Platform and ran
+  the full project.
+
+## T-002 Verification (current run)
+
+- Confirmed the committed `0619ebc95` slice freezes `reasoningEffort` on
+  `AgentExecutionDefinition` (Id 6), `AgentJobInput` (Id 25),
+  `RoutedAgentLaunchPlan` (Id 22), the manual coordinator envelopes/plans,
+  AgentJob dispatch `with`, workflow AgentDefinition snapshots, and Runner
+  session-target/follow-up/turn options. Manual, mention, routed, and
+  workflow paths are covered by the existing freeze tests; absent effort
+  remains null/omitted and later Agent edits/deletion do not rewrite it.
+- Extended workflow variable coverage to prove an issue-level
+  `vars.agent.reasoningEffort` survives the stage model/variant overlay, and
+  repaired the T-002 Runner test assertions so `npm run test:ci -w
+  packages/runner` includes clean test typechecking.
+- Verification: Runner test CI passed (153 files, 1663 tests), Server
+  SpecTests passed (3938 tests), Server UnitTests passed (2717 tests), and
+  the focused Runner plumbing suite passed (83 tests). `npm run test:fast`
+  functional lanes passed; its ArchTests lane remains blocked by the
+  pre-existing `current-fail-if-marker-review` migration-ledger digest
+  mismatch in the branch, unrelated to T-002. `git diff --check` passed.
+
+## T-003 (versioned runtime catalog entries)
+
+- Runtime catalog fields are append-only: `RuntimeCatalogEntry` keeps the
+  existing model/variant ids and uses ids 2-5 for nullable
+  `ReasoningEfforts`, `SupportsReasoningEffort`, `Complete`, and
+  `CapabilityRevision`; legacy JSON omits these fields and deserializes them
+  as null/non-authoritative. The Runner TypeScript contract uses optional
+  fields for the same mixed-version behavior.
+- Pi registration publishes native thinking levels only in per-model
+  `reasoningEfforts`, with an empty true-variant map. Pi is omitted from the
+  registration until its catalog is loaded, then receives `complete: true`
+  and a content-derived revision. OpenCode has no model discovery source in
+  this Runner, so it publishes `supportsReasoningEffort: false` with an
+  empty, non-authoritative catalog; claiming it complete would falsely reject
+  every requested OpenCode model. This preserves any true variants if an
+  external catalog supplies them, and never publishes efforts for OpenCode.
+- `deriveCapabilityRevision` canonicalizes model/map/value ordering before a
+  SHA-256 hash. Reconnects with the same capability content retain the
+  revision, while changed capability content gets a new revision; the Server
+  stores the runner-provided entry verbatim and never recalculates it.
+- Added Server registry aggregation and `/opencode/models` metadata output
+  for per-model reasoning efforts. Web settings queries expose that response
+  as `reasoningEfforts` beside `modelVariants` for the later editor control.
+- Verification: Runner CI passed (154 files, 1666 tests), Web CI passed (377
+  files, 4726 tests), Server UnitTests passed (2719 tests), Server SpecTests
+  passed (3941 tests), Runner/Web typechecks passed, and `git diff --check`
+  passed. `npm run format:check` still reports pre-existing formatter errors
+  in unrelated earlier-task files; the T-003 Web files were formatted.
+
+## T-005 Verification (current run)
+
+- Re-reviewed the pure resolver against the runtime-reasoning-capability
+  decision table. It preserves the frozen tuple in explicit rejection
+  evidence, leaves absent/incomplete/revisionless catalogs pending, exempts
+  null effort on effort-unsupported runtimes, and selects a compatible
+  authoritative runner deterministically.
+- Added unit coverage for an absent catalog on a known ready runner,
+  authoritative-compatible selection over a legacy peer, and deterministic
+  explicit rejection evidence. The resolver remains static and read-only;
+  no owner grain, claim, or execution dependency is present.
+- Server UnitTests passed after the additions: 2722 tests. `git diff --check`
+  also passes.
+
+## T-006 Requeue correction (current run)
+
+- Found that stale Runner requeue cleared `AgentJob.State.WorkId` and then
+  omitted `DispatchJson` whenever the pending row had no assigned runner.
+  That created a visibility gap and could discard the frozen tuple before
+  re-resolution. Requeue now clears only the runner assignment, preserving
+  the stable work id and dispatch snapshot; normal admission can replace the
+  capability revision before the next conditional claim.
+- Added `StaleDispatchRequeue_PreservesPendingProjectionForReresolution` to
+  cover the invariant. Server SpecTests passed: 3942; Server UnitTests passed:
+  2722. Runner CI before this correction passed: 154 files / 1666 tests.
+
+## T-007 Verification (current run)
+
+- Revalidated the existing T-007 slice: readiness compares the frozen effort,
+  reports `effort-without-model`, normalizes both execution-configuration
+  failure categories, and names `reasoningEffort` in the re-entry guidance.
+  AgentJob terminal evidence retains model, true variant, and frozen effort;
+  session model projections retain adapter-reported `appliedReasoningEffort`
+  and clear it when the latest model fact omits the field.
+- Verification: Server UnitTests passed (2722), Server SpecTests passed
+  (3942), and Runner focused CI passed (typecheck, test-boundary check, and
+  8 Pi projector evidence tests). No default effort is synthesized in the
+  applied or absent evidence paths. `git diff --check` passed.
+
+## T-008 (Web, docs, and final verification)
+
+- Added a separate AgentProfileEditor Reasoning Effort selector. Its values
+  come only from the selected runtime/model metadata `reasoningEfforts` map;
+  true variants remain owned by ModelSelect/model-variants. The selector is
+  omitted when the selected catalog has no effort values or explicitly reports
+  `supportsReasoningEffort=false`; save-time validation also drops any stale
+  effort state in those cases. Runtime/model changes clear effort while true
+  variant changes preserve it.
+- Extended `readAgentModelAndVariant` and its writer with an independent
+  `reasoningEffort` field. Agent list rows show model, effort, and true variant
+  separately; Agent detail shows a stored effort row and names Reasoning Effort
+  in the future-Jobs edit note. Existing readiness gap rendering is covered for
+  `effort-without-model` and execution-configuration failures with actionable
+  server-provided guidance.
+- Updated Pi/OpenCode runtime design contracts, Action docs, Agent/Web UI docs,
+  and CLI reference. Pi effort maps privately to native thinking levels; Pi
+  variant no longer does; OpenCode explicitly rejects effort; saved Pi
+  thinking-level variants require re-entry as Reasoning Effort with no
+  migration.
+- Verification: Web CI passed (377 files, 4731 tests), Web typecheck passed,
+  docs:check passed, Server UnitTests passed (2722), Server SpecTests passed
+  (3942), Runner CI passed (154 files, 1666 tests), Runner source and test
+  typechecks passed, and `npm run test:fast` passed every lane except the
+  pre-existing ArchTests migration-ledger digest mismatch for
+  `current-fail-if-marker-review`. `npm run verify` reached the file-size
+  ratchet and stopped on eight over-limit files grown by earlier slices before
+  build/test; no T-008 file is in that list. `git diff --check` passed.
+
+## T-001 follow-up verification (current run)
+
+- Tightened CLI edit validation so an invalid `--reasoning-effort` is rejected before project/agent resolution and before any HTTP request, matching the write-surface acceptance criterion. The existing create path already validated before resolution; update/edit now does the same while retaining the current-config merge after validation.
+- Updated the CLI regression test to assert zero requests for invalid edit effort input.
+- Verification: Server UnitTests passed (2722 tests), CLI tests passed (1858 tests), and `git diff --check` passed.
+
+## T-002 Completion Verification (latest run)
+
+- Reconfirmed the existing T-002 implementation on the required workflow
+  branch: `AgentLauncher.ResolveReasoningEffort` feeds the immutable
+  `AgentExecutionDefinition`, `AgentJobInput` (Id 25), and
+  `RoutedAgentLaunchPlan` (Id 22); manual coordinator envelopes preserve the
+  effort; `AgentJobGrain.BuildDispatchAsync` emits `with.reasoningEffort` only
+  when non-empty; and AgentJob idempotency comparisons include the effort so
+  a replay cannot rewrite the first snapshot.
+- Reconfirmed manual HTTP, routed/subscription, mention/connection, and
+  workflow launch coverage. The virtual `mohist/agent` workflow action carries
+  the frozen effort in `WorkDispatch.AgentDefinition`; concrete workflow
+  actions preserve `${{ vars.agent }}` as raw `with.options`, so the merged
+  issue-level effort reaches the Runner template renderer without the
+  translator re-reading an Agent definition. Runner session-target and
+  follow-up definitions preserve absent effort as null/undefined, and the
+  AgentJob executor reads the frozen dispatch payload into both turn
+  executors.
+- Verification: Server UnitTests passed (2722 tests), Server SpecTests passed
+  (3942 tests), Runner CI passed (154 files, 1666 tests), and `npm run
+  test:fast` passed all functional lanes. The command exits non-zero only in
+  the pre-existing ArchTests migration-ledger lane (67 passed, 1 failed:
+  `current-fail-if-marker-review` source/closure digest mismatch).
+- `git diff --check` passed. No T-002 source regression was found; the
+  append-only records continue to deserialize absent effort as null.
+
+## Verification repair follow-up
+
+- Reproduced the full `npm run verify` and the ArchTests project directly.
+  Docs, file sizes, formatting, build, CLI (1858), Server Unit (2722), Spec
+  (3943), and Workflow Definition (178) all pass; ArchTests alone failed
+  `current-fail-if-marker-review`.
+- The failure was caused by T-006's intended change to the shared
+  `WorkflowGrainSpecs` fixture: it now references
+  `CapabilityCatalogTestHelpers`, which is part of the blocked
+  `FailIfMarkerSpecs` closure. The migration ledger's closure symbols and
+  source/closure/edge digests were stale, even though `FailIfMarkerSpecs.cs`
+  itself was unchanged. Updated only that ledger evidence; no assertions,
+  ignore rules, or generated files were changed.
+- The corrected ArchTests suite passes. The full gate is being rerun after
+  this metadata repair; the worktree was clean before the repair and the
+  verification commands did not create Git-visible output changes.
+
+## T-006 Final Verification (current run)
+
+- Audited the committed resolver-gated admission slice against the selected
+  task and both capability specs. AgentJob and Workflow expose read-only
+  pending projections, pass immutable tuple/revision/generation expectations
+  through `IRunnerGrain`, and validate the live catalog under
+  `_lifecycleGate`; AgentJob persists the revision before its ledger claim,
+  while Workflow retains `StoreActiveWorkDispatchAsync` as the durable first
+  writer. Stale Runner snapshots are rejected before execution and reported
+  with requeue semantics; AgentJob requeue preserves the stable work id and
+  dispatch snapshot for later re-resolution.
+- Confirmed the non-Agent workflow decision in code: `mohist/pi` and
+  `mohist/opencode` fence model/true-variant options with the common resolver,
+  but keep the Agent-owned effort member unset until those actions own a
+  first-class effort snapshot. This preserves uniform tuple shape without
+  inventing an effort value.
+- Verification: Server UnitTests passed (2722), Server SpecTests passed
+  (3942), and Runner CI passed (154 files, 1666 tests). `git diff --check`
+  passed.
+
+## T-003 Completion Verification (latest run)
+
+- Reconfirmed the catalog wire is append-only: Server `RuntimeCatalogEntry`
+  fields use Orleans Ids 2-5 and legacy JSON leaves them null, while the
+  Runner TypeScript fields remain optional. `RunnerRoutes` passes runtime
+  catalog dictionaries through unchanged and `RunnerRegistryGrain` retains
+  the entries in `RunnerInfo.RuntimeCatalogs`.
+- Reconfirmed Pi registration emits each discovered model's native
+  `thinkingLevels` under `reasoningEfforts`, keeps `variants` empty, and only
+  emits the authoritative `complete` plus content-derived SHA-256 revision
+  after `PiRuntime.catalog()` is available. OpenCode reports
+  `supportsReasoningEffort: false` without inventing effort values or
+  authoritative model evidence.
+- Reconfirmed revision canonicalization sorts model/map/value content and
+  removes duplicate collection values before hashing, so reconnects with
+  equivalent catalog content retain the revision while capability changes
+  produce a new one. Web metadata queries map the Server's per-model
+  reasoning-effort response beside true variants.
+- Verification: Runner CI passed (154 files, 1666 tests), Web CI passed
+  (377 files, 4732 tests), Server UnitTests passed (2722 tests), and Server
+  SpecTests passed (3942 tests). `git diff --check` passed.
+
+## T-005 Completion Verification (current run)
+
+- Re-ran the Server UnitTests after reviewing the resolver against the full
+  `runtime-reasoning-capability` decision table. All 2722 tests passed,
+  including supported, pending, unavailable, explicit unsupported and
+  incompatible dispositions, legacy catalog handling, deterministic runner
+  selection, tuple-preserving rejection evidence, and the unset-effort
+  exemption.
+- Confirmed the resolver remains a static, read-only API over the frozen tuple
+  and catalog/readiness snapshots. It has no owner-grain, claim, or runtime
+  execution dependency; catalog inputs are only enumerated and read.
+- `git diff --check` passed. The Server build emitted only the existing
+  preview-.NET and frontend bundler warnings.
+
+## T-007 Final Verification (current run)
+
+- Revalidated the committed T-007 implementation against the readiness and
+  execution-evidence requirement: readiness compares resolved effort, reports
+  `effort-without-model`, and maps both normalized execution-configuration
+  failure categories to Needs setup with `reasoningEffort` re-entry guidance.
+  Pi model facts carry adapter-reported `appliedReasoningEffort`, while
+  AgentJob terminal evidence carries frozen model, variant, and effort.
+- Confirmed the absent path remains null throughout projector/reducer and
+  terminal evidence; no default effort is synthesized.
+- Verification: Server UnitTests passed (2722), Server SpecTests passed
+  (3942), Runner CI passed (154 files, 1666 tests), and `git diff --check`
+  passed.
+
+## T-008 Follow-up (current run)
+
+- Closed the metadata contract gap between the runtime catalog and the Web
+  editor: `IRunnerRegistryGrain` now exposes the explicit per-runtime
+  `supportsReasoningEffort` flag. The registry aggregates `true` when any
+  registered catalog supports effort, `false` when all reported flags reject
+  it, and null when no runner reported the flag. `/opencode/models` returns
+  that field beside model variants and per-model efforts, so the Web's
+  no-support behavior is backed by the actual API rather than only test data.
+- Added integration coverage for Pi-supported and OpenCode-unsupported
+  metadata, plus a unique-runtime registry test to avoid cross-spec leakage
+  from the global runner registry. Updated `docs/actions/agent.md` to name the
+  canonical effort vocabulary, OpenCode's unsupported contract, and the
+  required re-entry path for saved Pi thinking-level variants with no
+  migration.
+- Verification: Web CI/typecheck/FSD passed (377 files, 4732 tests), Server
+  UnitTests passed (2722), Server SpecTests passed (3943), and docs:check plus
+  `git diff --check` passed. The later ledger repair cleared the remaining
+  ArchTests failure; the full gate and fast tier pass.
+
+## Verification repair (current run)
+
+- The worktree was clean before diagnosis; the first reproducible `npm run
+  verify` failure was `check:filesizes`, not generated output. Eight files had
+  grown past their ratchet allowance: CLI command/tests, Runner host, AgentJob
+  and launch coordinator grains, Runner routes, and session grain/querier.
+- Fixed the root cause by moving related methods, contracts, and tests into
+  partial/contract files. No assertions, ignore rules, or generated files were
+  removed. Formatted all 51 changed task files; docs, file-size, format, and
+  whitespace gates now pass.
+- Focused verification passed: CLI 1858, Server UnitTests 2722, Server
+  SpecTests 3943, Workflow Definition 178, Runner source and test typechecks,
+  Runner boundary checks, and Runner Vitest 154 files/1666 tests. The
+  `current-fail-if-marker-review` failure was repaired by refreshing the
+  blocked-row closure evidence for T-006's intended fixture dependency;
+  `FailIfMarkerSpecs.cs` itself remains unchanged.
+- Final verification passed: `npm run verify` completed docs, file-size,
+  format, build, all .NET suites (including ArchTests 68/68), Web CI (377
+  files/4732 tests), Runner CI (154 files/1666 tests), and Slack CI (7
+  files/70 tests). `npm run test:fast` passed every lane, and verification
+  left no Git-visible changes beyond the two intended files.
+
+## T-001 Verification (this run)
+
+- Re-audited the committed canonical write surface: all seven effort values
+  are accepted verbatim, invalid/wrong-type/empty values name the canonical
+  set, issue overrides accept effort while rejecting Agent-owned runtime, and
+  `Filter` forwards effort beside model/variant into `vars.agent`.
+- Re-ran the focused regression suites: Server UnitTests passed 2722/2722 and
+  CLI tests passed 1858/1858. `git diff --check` passed and the workflow
+  branch remained clean before recording this note.
+
+## T-002 Verification (this run)
+
+- Closed the remaining workflow-task plumbing gap: `WorkflowItemTranslator`
+  now projects the effective issue/stage `vars.agent` model, true variant,
+  and `reasoningEffort` into the generated `mohist/agent` runtime Action
+  options. The frozen `AgentExecutionDefinition` remains authoritative when
+  it already carries a member; Agent-owned `runtime` is never copied from
+  issue variables. Capability-tuple resolution uses the same effective
+  option fallback so admission and execution observe the same tuple.
+- Added a Server SpecTest proving all three supported options reach the
+  generated dispatch and `runtime` does not. The existing T-002 snapshot,
+  dispatch-envelope, routed/manual/mention, Runner session-target,
+  follow-up, and executor plumbing coverage remains green.
+- Verification: Server SpecTests passed 3944 tests, and `npm run test:fast`
+  passed typecheck, Server UnitTests 2722, ArchTests 68, Workflow Definition
+  tests 178, CLI tests 1858, Web tests 4732, and Runner tests 1666.
+  `git diff --check` passed.
+
+## T-003 Focused Verification (current run)
+
+- Re-audited the committed catalog slice: Server Orleans ids 2-5 remain
+  nullable and append-only, Runner revision hashing is order-independent,
+  Pi emits efforts only after catalog load, and OpenCode remains explicitly
+  effort-unsupported with an incomplete catalog because this Runner has no
+  authoritative OpenCode discovery source.
+- Verification: Runner CI for capability revision and host registration
+  passed (3 files, 28 tests); Web settings/editor CI passed (2 files, 48
+  tests); Server UnitTests passed (2722); Server SpecTests passed (3944).
+  The requested SpecTests filter is ignored by Microsoft Testing Platform,
+  so the complete project ran successfully. The worktree remained clean
+  before this progress entry.
+
+## T-004 Verification (current run)
+
+- Audited the existing adapter implementation against the native-translation
+  requirement: Pi maps only canonical `reasoningEffort` through its private
+  table, never applies `variant` as a thinking level, carries the physical
+  effort-derived level through reset, and projects `appliedReasoningEffort`
+  only for frozen effort. OpenCode rejects non-empty effort before session or
+  provider access and projects the required
+  `unsupported_execution_configuration` category through AgentJob and
+  Workflow action boundaries.
+- Added regression coverage for Pi effort-derived reset carry-over alongside
+  a model variant, and OpenCode follow-up rejection before session lookup.
+- Baseline focused adapter tests passed (108), the added adapter regressions
+  passed (29), Runner source/test typechecks passed, and full Runner CI passed
+  (155 files, 1668 tests). The first parallel `npm run test:fast` attempt hit
+  a shared .NET build artifact lock (`CS2012`); the retry passed all lanes:
+  Runner 1668, Web 4732, Server Unit 2722, Arch 68, Workflow 178, and CLI
+  1858.
+
+## T-005 Focused Verification (current run)
+
+- Revalidated the pure resolver implementation against the complete
+  runtime-reasoning-capability decision table. It returns one typed
+  disposition, preserves the frozen tuple in explicit rejection evidence,
+  keeps missing/incomplete/revisionless evidence at `needs-setup`, and keeps
+  known-but-not-ready runtimes at `unavailable` before compatibility checks.
+  Unset effort remains exempt on effort-unsupported runtimes, and runner
+  selection is deterministic by identity without mutating catalog inputs.
+- Added regression coverage for missing `complete`, blank capability
+  revisions, and readiness precedence over an otherwise rejecting catalog.
+- Server UnitTests passed: 2725 tests. `git diff --check` is clean.
+
+## T-006 Final Fence Correction (current run)
+
+- Closed the remaining Workflow claim/render race. The tuple is resolved from
+  the read-only pending projection before claim, then the rendered dispatch is
+  checked again before `StoreActiveWorkDispatchAsync`; a changed Agent or issue
+  variable tuple is re-pended instead of becoming claim-visible under the old
+  expectation. The first-writer winner is checked for both capability revision
+  and tuple equality.
+- Centralized dispatch tuple extraction for AgentDefinition snapshots and
+  `mohist/pi`/`mohist/opencode` action options. Template-preserving
+  `options: "${{ vars.agent }}"` dispatches are compared using the frozen
+  `vars.agent` values in the dispatch Variables payload, so redacted workflow
+  templates remain compatible with the fence.
+- Verification: Server UnitTests passed (2729), Server SpecTests passed
+  (3944), Runner CI baseline passed (155 files, 1668 tests), and
+  `git diff --check` is clean.
+
+## T-007 Completion (current run)
+
+- Closed a readiness evidence gap: explicit capability preflight failures keep
+  their category in durable `CapabilityFailureEvidence`, but terminal delivery
+  clears the transient `PendingSessionClose` and `PendingFailureEvent` fields.
+  `AgentJobQuerier.GetLatestExecutionAsync` now falls back to the durable
+  capability category, so readiness still maps
+  `unsupported_execution_configuration` and
+  `incompatible_execution_configuration` to Needs setup after delivery.
+- Added a storage/querier regression with both transient delivery fields
+  cleared, while preserving the frozen `reasoningEffort` on the queried input.
+- Verification: Server UnitTests passed (2729), Server SpecTests passed
+  (3945), and `git diff --check` passed.
+
+## T-008 Final Cross-Slice Verification (current run)
+
+- Added an end-to-end AgentJob regression for a saved Pi thinking-level value
+  still stored in `variant`: with a complete Pi catalog that lists the value
+  only under `reasoningEfforts`, admission records a deterministic
+  `incompatible_execution_configuration` failure with the frozen tuple and
+  capability revision. The test proves no migration or variant-to-effort
+  reinterpretation occurs.
+- Strengthened the Web no-support editor fixture so it publishes effort values
+  while explicitly reporting `supportsReasoningEffort=false`; the editor must
+  still render no effort control and must omit effort on save.
+- Focused baseline before these changes: Web 116 tests, Server UnitTests 2729,
+  and Runner 63 tests passed.
+- Verification after the additions: `npm run test:fast` passed every lane;
+  `npm run verify` passed docs, file sizes, formatting, build, Server Unit 2729,
+  Spec 3946, Arch 68, Workflow Definition 178, CLI 1858, Web 4732, Runner
+  1668, and Slack 70 tests. The new saved-Pi-variant spec is included in the
+  3946 passing Server SpecTests.
+
+## Verification Repair Confirmation (current run)
+
+- The initial worktree was clean, with no intended or verification-generated
+  changes. There was no saved failure log; the issue history identified the
+  prior root causes as the file-size ratchet being exceeded by legitimate
+  issue-557 growth and stale ArchTests migration-ledger closure evidence after
+  an intended fixture dependency change. Those causes are already repaired in
+  commits `f1169085f` and `7c0026740`.
+- Reproduced `npm run verify` successfully: docs, file sizes, formatting,
+  build, Server Unit 2729, Spec 3946, Arch 68, Workflow Definition 178, CLI
+  1858, Web 4732, Runner 1668, and Slack 70 all passed. `npm run test:fast`
+  also passed every lane. Verification created no Git-visible changes.
+
+## Verification Repair Confirmation (latest run)
+
+- Re-ran `npm run verify` from the clean repaired HEAD. The file-size ratchet,
+  migration-ledger ArchTests, build, and all repository test lanes passed:
+  Server Unit 2729, Spec 3946, Arch 68, Workflow Definition 178, CLI 1858,
+  Web 4732, Runner 1668, and Slack 70.
+- Focused post-gate checks also passed: ArchTests 68/68, Runner CI (155 files,
+  1668 tests), and Web tests (377 files, 4732 tests). The verification commands
+  left no Git-visible generated changes; only this progress entry is intended
+  for the completion commit.
+
+## MF-1 (review-disposed): OpenCode agent admission hang
+
+The review's must-fix finding identified that the shipped runner registers
+the OpenCode catalog **permanently non-authoritative** (no `complete` and no
+`capabilityRevision`), so the resolver returns `needs-setup` for every
+model-bearing OpenCode tuple and `DispatchService` skips the candidate
+entirely. The default agent runtime silently hangs in production.
+
+Reconcile the runner's OpenCode registration with the admission contract:
+
+- `RunnerHost.registrationState` now publishes the OpenCode entry with
+  `complete: true` and a content-derived `capabilityRevision`. The catalog
+  reports the runtime's explicit effort contract (`supportsReasoningEffort:
+  false`), so an explicit effort produces a deterministic
+  `unsupported_execution_configuration` preflight failure before the
+  dispatch ever reaches the runner.
+- The empty `models`/`variants` lists become the "no model discovery yet"
+  signal. The capability resolver treats an empty model/variant entry as
+  "the runtime validates the model at execution time" (per
+  `design/runtimes/opencode.md` — the catalog assists configuration, not
+  execution authority), so an Agent that names a model is still admitted
+  and OpenCode decides whether the model is acceptable when the prompt
+  starts. The same exemption applies to variants.
+- The resolver's compatibility check is no longer stricter than the
+  catalog contract: a tuple with an unset model is `supported` (the runtime
+  uses its default), and a catalog that lists explicit models still rejects
+  any model that is not on the list as a deterministic
+  `incompatible_execution_configuration`.
+
+Added unit coverage for the OpenCode production shape:
+- any model name is admitted (no-discovery exemption);
+- an explicit effort is rejected before reaching the runner;
+- effort rejection takes precedence over a missing model;
+- an explicit variant is admitted (no-discovery exemption);
+- an authoritative catalog with explicit models still rejects an unknown
+  model; and
+- a no-model/effort/variant tuple is `supported` on a complete catalog.
+
+Added Server SpecTests that register the exact production OpenCode shape
+(authoritative, empty models/variants, supportsReasoningEffort=false) and
+assert the chosen outcome (`AgentJobCapabilityFenceSpecs`):
+- `ProductionOpenCodeShape_AdmitsModelBearingJobWithoutDiscovery` —
+  proves the dispatch is granted and the job reaches `Running` with the
+  expected content-derived capability revision, ending the silent hang.
+- `ProductionOpenCodeShape_RejectsExplicitEffortDeterministically` —
+  proves an explicit effort becomes `unsupported_execution_configuration`
+  with the frozen tuple and capability revision recorded in the failure
+  evidence.
+
+The comment-reference baseline is updated to record the new
+`design/runtimes/opencode.md` reference in
+`AgentExecutionCapabilityResolver.cs`.
+
+Verification: Server UnitTests 2736 (was 2729), Server SpecTests 3948
+(was 3946), Server ArchTests 68/68, Workflow Definition 178, CLI 1858,
+Runner 1668, Web 4732, Slack 70 all green. `git diff --check` clean.
+## Rebase continuation onto master (current run)
+
+- The branch was rebased onto `origin/master`, which already carried its own
+  capability-claim admission fence (`CapabilityClaimExpectation` +
+  `RunnerCapabilityGate` + `AgentJobGrain.MatchesCapabilityExpectation`) merged
+  via PRs #576/#578/#603/#610/#615. The rebase replayed the branch's first
+  implementation round; the second-round `DispatchCapabilityFence` /
+  `DispatchService` re-fence work (T-006 final fence correction, T-007
+  preflight-evidence preservation, and the fence specs) is a parallel
+  implementation of the same admission contract. The base's claim-based fence
+  already covers AgentJob admission end-to-end, so those second-round patches
+  were NOT re-applied to avoid re-architecting the merged claim flow; the
+  resolver's empty/no-discovery model handling (T-005 hardening) and the
+  workflow effort forwarding (T-002) WERE ported.
+- Restored the verification gates that the interrupted rebase left red: split
+  the over-ratchet files (CLI agent config, CLI reasoning-effort specs,
+  AgentJobGrain capability/claim, session grain read projection, session
+  querier summaries) into partials and ran biome over the changed runner
+  files. `check:filesizes` and `format:check` are clean against `master`.
+
+## PR #567 check repair round (CI gate: .NET spec partitions + Node build/test)
+
+Fix round to unblock the gating checks after the resolver-gated admission
+rebase. Root causes and repairs:
+
+- `.NET spec partition 0` (IssueAgentConfigValidationApiSpecs): the PR moved
+  the issue-surface "accepts only …" message to
+  `model, variant, reasoningEffort`, breaking the pre-existing
+  `model, reasoningEffort, variant` API contract. Restored the contract order
+  in `AgentConfigSchema.CanonicalIssueKeyOrder`.
+- `.NET spec partitions 1–3` (effort dispatch / write-through mirror /
+  routed-launch / agent-session launch spec timeouts): the stage-1 capability
+  claim fence leaves explicit-effort work pending when the runner has no
+  readiness witness, and complete  catalogs reject tuples whose model/variant
+  is not listed. Added `InstallCapabilityFenceAsync`/
+  `CapabilityFencePollRequest` to `AgentJobGrainTestSupport` and wired the
+  effort-bearing specs through the fence; extended
+  `CapabilityCatalogTestHelpers` with the `anthropic/sonnet-4.6` model and
+  `fast` variant used by pre-existing launch specs.
+- `Node` (typecheck→test cascade): `RuntimeCatalogEntry` gained
+  `reasoningEfforts` and `deriveCapabilityRevision` now hashes it; Pi
+  registration publishes thinking levels under `reasoningEfforts` with an
+  empty variant map and always registers the OpenCode entry; the AgentJob
+  executor forwards `reasoningEffort` into the OpenCode turn (rejection stays
+  inside the adapter); Pi variant→thinking-level smuggling removed (T-004);
+  runner rejects stale capability snapshots with `stale-capability-snapshot`
+  before execution; Web agent-detail card surfaces the effort and variant.

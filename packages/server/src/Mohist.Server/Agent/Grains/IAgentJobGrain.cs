@@ -22,14 +22,22 @@ public interface IAgentJobGrain : IGrainWithStringKey, IRemindable
     Task<string?> GetCurrentWorkIdAsync();
 
     /// <summary>
+    /// Read-only offer for poll-time capability resolution. The dispatch
+    /// remains pending until a conditional claim persists its capability
+    /// revision and transitions the owner ledger.
+    /// </summary>
+    Task<AgentJobPendingDispatch?> GetPendingDispatchAsync() =>
+        Task.FromResult<AgentJobPendingDispatch?>(null);
+
+    /// <summary>
     /// Owner-led poll-time claim. Atomically transitions a pending
     /// AgentJob assigned to <paramref name="runnerId"/> into Running and
-    /// returns the persisted dispatch snapshot. Returns <c>null</c>
-    /// when the job is not assigned to <paramref name="runnerId"/>,
-    /// not pending, or no longer exists. Revision-checked; concurrent
-    /// claims retry safely.
+    /// returns the persisted dispatch snapshot. When supplied, the
+    /// expectation is checked against the immutable pending tuple and its
+    /// capability revision is persisted before the claim becomes visible.
     /// </summary>
-    Task<ClaimResult?> ClaimNextAsync(string runnerId);
+    Task<ClaimResult?> ClaimNextAsync(string runnerId) =>
+        Task.FromResult<ClaimResult?>(null);
 
     Task<ClaimResult?> ClaimNextAsync(
         string runnerId,
@@ -154,6 +162,12 @@ public sealed record ClaimResult(
     [property: Id(1)] string RunnerId,
     [property: Id(2)] string WorkId,
     [property: Id(3)] WorkDispatch Dispatch);
+
+[GenerateSerializer]
+public sealed record AgentJobPendingDispatch(
+    [property: Id(0)] string AgentJobId,
+    [property: Id(1)] string WorkId,
+    [property: Id(2)] WorkDispatch Dispatch);
 
 [GenerateSerializer]
 public sealed record PrepareManualLaunchCommand(
@@ -707,4 +721,12 @@ public sealed record AgentJobTerminalResult(
     [property: Id(2)] string? Output,
     [property: Id(3)] string[]? ArtifactUploadIds,
     [property: Id(4)] string? FailureReason,
-    [property: Id(5)] int? ExitCode);
+    [property: Id(5)] int? ExitCode,
+    /// <summary>
+    /// Frozen execution tuple evidence copied from the AgentJob input when
+    /// the terminal result is recorded. These append-only fields are null
+    /// for legacy jobs and for an unset configuration member.
+    /// </summary>
+    [property: Id(6)] string? Model = null,
+    [property: Id(7)] string? Variant = null,
+    [property: Id(8)] string? ReasoningEffort = null);

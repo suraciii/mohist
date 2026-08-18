@@ -58,6 +58,7 @@ public partial class AgentSessionInputAttachmentAcceptanceSpecs
             capabilities = new[] { "spec/*" },
             hostname = $"{runnerId}-host",
             projectId,
+            runtimeCatalogs = CapabilityCatalogTestHelpers.Create(),
         });
         await _fixture.Client.PatchOkAsync($"/api/runner/{runnerId}", new { slots = 2 });
 

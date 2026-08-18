@@ -230,7 +230,6 @@ export class PiRuntime {
       }
     }
     if (request.options?.reasoningEffort) session.setThinkingLevel(request.options.reasoningEffort)
-    if (request.options?.variant) session.setThinkingLevel(request.options.variant)
     const clock = this.deps.clock ?? defaultClock
     const duration = request.durationMs ?? null
     const deadline =
@@ -512,7 +511,6 @@ export class PiRuntime {
       }
     }
     if (options?.reasoningEffort) session.setThinkingLevel(options.reasoningEffort)
-    if (options?.variant) session.setThinkingLevel(options.variant)
     return null
   }
 

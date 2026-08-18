@@ -323,11 +323,11 @@ public sealed class RoutingDispatchHandler : ICloudEventHandler
             AgentConfigJson: agent.AgentConfig is { ValueKind: not System.Text.Json.JsonValueKind.Undefined } config ? config.GetRawText() : null,
             Model: definition.Model,
             Variant: definition.Variant,
+            ReasoningEffort: definition.ReasoningEffort,
             Prompt: prompt,
             Runtime: definition.Runtime,
             Skills: definition.Skills,
-            WorkflowRunId: CloudEventLineage.ReadValue(evt.Extensions, EventCatalog.Lineage.WorkflowRunId),
-            ReasoningEffort: definition.ReasoningEffort);
+            WorkflowRunId: CloudEventLineage.ReadValue(evt.Extensions, EventCatalog.Lineage.WorkflowRunId));
         await jobGrain.EnsurePreparedAsync(preflightPlan);
         await jobGrain.AdvancePreparedLaunchAsync();
     }
@@ -398,11 +398,11 @@ public sealed class RoutingDispatchHandler : ICloudEventHandler
             AgentConfigJson: agent.AgentConfig is { ValueKind: not System.Text.Json.JsonValueKind.Undefined } config ? config.GetRawText() : null,
             Model: definition.Model,
             Variant: definition.Variant,
+            ReasoningEffort: definition.ReasoningEffort,
             Prompt: outcome.RenderedPromptPreview,
             Runtime: definition.Runtime,
             Skills: definition.Skills,
-            WorkflowRunId: CloudEventLineage.ReadValue(evt.Extensions, EventCatalog.Lineage.WorkflowRunId),
-            ReasoningEffort: definition.ReasoningEffort);
+            WorkflowRunId: CloudEventLineage.ReadValue(evt.Extensions, EventCatalog.Lineage.WorkflowRunId));
         await jobGrain.EnsurePreparedAsync(preflightPlan);
         await jobGrain.AdvancePreparedLaunchAsync();
     }

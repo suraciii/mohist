@@ -130,6 +130,61 @@ public class IssueVariableBuilderTests
     }
 
     [Fact]
+    public void AgentConfigReasoningEffort_ForwardedIntoVarsAgent()
+    {
+        // issue-557 T-001: the reasoningEffort key accepted by the issue
+        // write surface is forwarded verbatim into vars.agent (the
+        // execution options consumed by workflow agent tasks), beside
+        // model and variant, while runtime stays Agent-owned.
+        var agentConfig = new Dictionary<string, object?>
+        {
+            ["model"] = "openai/gpt-5.5",
+            ["variant"] = "balanced",
+            ["reasoningEffort"] = "high",
+            ["runtime"] = "pi",
+            ["type"] = "legacy",
+        };
+
+        var result = IssueVariableBuilder.Build(
+            "wr_x", TestIssue(), Project, Workspace, agentConfig);
+
+        using var doc = JsonDocument.Parse(result.Vars!.Value.GetRawText());
+        var agent = doc.RootElement.GetProperty("agent");
+
+        Assert.Equal("openai/gpt-5.5", agent.GetProperty("model").GetString());
+        Assert.Equal("balanced", agent.GetProperty("variant").GetString());
+        Assert.Equal("high", agent.GetProperty("reasoningEffort").GetString());
+        Assert.False(agent.TryGetProperty("runtime", out _));
+        Assert.False(agent.TryGetProperty("type", out _));
+    }
+
+    [Fact]
+    public void MergedVarsAgent_KeepsReasoningEffort_AndDropsLegacyKeys()
+    {
+        // The converged-surface projection (Filter over IssueAllowedKeys)
+        // keeps the canonical reasoningEffort while dropping legacy keys,
+        // regardless of which layer supplied the agent block.
+        var globalBundle = BundleFrom(JsonSerializer.Serialize(new
+        {
+            vars = new
+            {
+                agent = new { model = "openai/gpt-5.5", variant = "balanced", reasoningEffort = "high", type = "openai-acp" }
+            }
+        }));
+        var projectBundle = VariableBundle.Empty;
+
+        var result = IssueVariableBuilder.Build(
+            globalBundle, projectBundle, "wr_x", TestIssue(), Project, Workspace);
+
+        using var doc = JsonDocument.Parse(result.Vars!.Value.GetRawText());
+        var agent = doc.RootElement.GetProperty("agent");
+
+        Assert.Equal("high", agent.GetProperty("reasoningEffort").GetString());
+        Assert.Equal("balanced", agent.GetProperty("variant").GetString());
+        Assert.False(agent.TryGetProperty("type", out _));
+    }
+
+    [Fact]
     public void BuiltInContext_IsNotPersistedInVariables()
     {
         var result = IssueVariableBuilder.Build(

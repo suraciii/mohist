@@ -1,5 +1,6 @@
 using System.Globalization;
 using System.Text.Json;
+using Mohist.Server.Agent.Services;
 using Mohist.Server.Infrastructure;
 using Mohist.Server.Infrastructure.Hosting;
 using Mohist.Server.Infrastructure.Serialization;
@@ -114,6 +115,78 @@ public sealed class WorkflowItemTranslator : IScopedService
         return runtime is null ? [] : [runtime];
     }
 
+    /// <summary>
+    /// Returns the capability tuple visible before a workflow claim. Agent
+    /// profile tasks use their immutable profile snapshot. Legacy direct
+    /// runtime actions may expose model/variant in literal options; their
+    /// effort is deliberately unset until the per-launch action contract is
+    /// made a first-class snapshot owner.
+    /// </summary>
+    public async Task<AgentExecutionCapabilityTuple?> ResolveCapabilityTupleAsync(
+        WorkItem item,
+        WorkflowRun run)
+    {
+        if (!item.IsTask)
+            return null;
+
+        if (string.Equals(item.Uses, "mohist/agent", StringComparison.Ordinal))
+        {
+            var effective = await _variableResolver.ResolveEffectiveVariableBundleAsync(run.Id, item.Stage);
+            var agentOptions = ReadAgentOptions(effective.Vars);
+            var resolved = await ResolveAgentTaskAsync(item, run, item.Id ?? "unknown", agentOptions);
+            return new AgentExecutionCapabilityTuple(
+                resolved.Definition.Runtime,
+                resolved.Definition.Model ?? ReadOptionString(agentOptions, "model"),
+                resolved.Definition.ReasoningEffort ?? ReadOptionString(agentOptions, "reasoningEffort"),
+                resolved.Definition.Variant ?? ReadOptionString(agentOptions, "variant"));
+        }
+
+        var runtime = RuntimeForUses(item.Uses);
+        if (runtime is null)
+            return null;
+
+        // Non-Agent actions keep their model and true variant in the action
+        // options, but they have no Agent-owned effort snapshot. They still
+        // use the same claim fence when those options name capabilities; the
+        // effort member is intentionally frozen as unset for uniformity.
+        var (model, variant) = await ResolveDirectActionOptionsAsync(item, run);
+        return new AgentExecutionCapabilityTuple(runtime, model, null, variant);
+    }
+
+    private async Task<(string? Model, string? Variant)> ResolveDirectActionOptionsAsync(
+        WorkItem item,
+        WorkflowRun run)
+    {
+        if (item.With is null || !item.With.TryGetValue("options", out var raw) || raw is null)
+            return (null, null);
+
+        var options = raw.Value.ValueKind == JsonValueKind.Object
+            ? raw.Value
+            : raw.Value.ValueKind == JsonValueKind.String
+                && string.Equals(raw.Value.GetString()?.Trim(), "${{ vars.agent }}", StringComparison.Ordinal)
+                ? (await _variableResolver.ResolveEffectiveVariableBundleAsync(run.Id, item.Stage)).ResolveStageVars(item.Stage) is { } vars
+                    && vars.ValueKind == JsonValueKind.Object
+                    && vars.TryGetProperty("agent", out var agent)
+                    && agent.ValueKind == JsonValueKind.Object
+                    ? agent
+                    : (JsonElement?)null
+                : null;
+        if (options is not { ValueKind: JsonValueKind.Object })
+            return (null, null);
+
+        return (
+            ReadString(options.Value, "model"),
+            ReadString(options.Value, "variant"));
+    }
+
+    private static string? ReadString(JsonElement value, string property)
+    {
+        return value.TryGetProperty(property, out var candidate)
+            && candidate.ValueKind == JsonValueKind.String
+            ? candidate.GetString()
+            : null;
+    }
+
     private async Task<WorkDispatch> BuildTaskDispatchAsync(
         WorkItem item,
         string workflowRunId,
@@ -150,7 +223,10 @@ public sealed class WorkflowItemTranslator : IScopedService
         AgentExecutionDefinition? agentDefinition = null;
         if (string.Equals(item.Uses, "mohist/agent", StringComparison.Ordinal))
         {
-            (uses, with, agentDefinition) = await ResolveAgentTaskAsync(item, run, workId);
+            var agentOptions = payload.TryGetValue("vars", out var effectiveVars)
+                ? ReadAgentOptions(effectiveVars)
+                : null;
+            (uses, with, agentDefinition) = await ResolveAgentTaskAsync(item, run, workId, agentOptions);
         }
         var withStr = SerializeRaw(with);
         var expectStr = SerializeRaw(item.Expect);
@@ -310,7 +386,8 @@ public sealed class WorkflowItemTranslator : IScopedService
     private async Task<(string Uses, Dictionary<string, JsonElement?> With, AgentExecutionDefinition Definition)> ResolveAgentTaskAsync(
         WorkItem item,
         WorkflowRun run,
-        string workId)
+        string workId,
+        IReadOnlyDictionary<string, JsonElement?>? agentOptions = null)
     {
         if (_agentSnapshots is null)
             throw new WorkflowDispatchRejectedException(
@@ -354,6 +431,8 @@ public sealed class WorkflowItemTranslator : IScopedService
         };
         CopyIfPresent(with, transformed, "session");
         CopyIfPresent(with, transformed, "timeout");
+        if (agentOptions is { Count: > 0 })
+            transformed["options"] = JSON.SerializeToElement(agentOptions);
 
         return (snapshot.Runtime switch
         {
@@ -369,6 +448,38 @@ public sealed class WorkflowItemTranslator : IScopedService
     {
         if (source.TryGetValue(key, out var value))
             target[key] = value?.Clone();
+    }
+
+    private static Dictionary<string, JsonElement?>? ReadAgentOptions(JsonElement? vars)
+    {
+        if (vars is not { ValueKind: JsonValueKind.Object }
+            || !vars.Value.TryGetProperty("agent", out var agent)
+            || agent.ValueKind != JsonValueKind.Object)
+            return null;
+
+        var options = new Dictionary<string, JsonElement?>(StringComparer.Ordinal);
+        foreach (var key in new[] { "model", "variant", "reasoningEffort" })
+        {
+            if (agent.TryGetProperty(key, out var value)
+                && (value.ValueKind == JsonValueKind.String || value.ValueKind == JsonValueKind.Null))
+            {
+                options[key] = value.Clone();
+            }
+        }
+
+        return options.Count > 0 ? options : null;
+    }
+
+    private static string? ReadOptionString(
+        IReadOnlyDictionary<string, JsonElement?>? options,
+        string key)
+    {
+        if (options is null
+            || !options.TryGetValue(key, out var value)
+            || value is null
+            || value.Value.ValueKind != JsonValueKind.String)
+            return null;
+        return value.Value.GetString();
     }
 
     private static string? RuntimeForUses(string? uses) => uses switch

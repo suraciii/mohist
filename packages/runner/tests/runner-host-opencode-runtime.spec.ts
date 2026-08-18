@@ -325,12 +325,56 @@ describe('RunnerHost wires the OpenCodeRuntime lifecycle', () => {
       const connectArg = connect.mock.calls[0]?.[0] as Record<string, unknown>
       expect(connectArg).toMatchObject({
         runtimeCatalogs: {
-          pi: { models: [], variants: {} },
+          opencode: { models: [], variants: {}, supportsReasoningEffort: false },
+          pi: {
+            models: [],
+            variants: {},
+            reasoningEfforts: {},
+            supportsReasoningEffort: true,
+            complete: true,
+            capabilityRevision: expect.any(String),
+          },
         },
       })
       expect(connectArg?.actionCatalog).toEqual(expectedActionCatalog())
       expect(JSON.stringify(connectArg?.actionCatalog)).not.toContain('run')
       expect(JSON.stringify(connectArg?.actionCatalog)).not.toContain('private')
+    } finally {
+      controller.abort()
+      await run.catch(() => undefined)
+    }
+  })
+
+  it('does not publish an authoritative Pi catalog before discovery has loaded', async (resources) => {
+    installFakeOpenCodeRuntimeFactory(resources)
+    resources.piRuntimeFactory = () =>
+      ({
+        start: vi.fn(async () => ({
+          ok: true as const,
+          value: { ready: true, diagnostic: null, catalog: null },
+          diagnostics: [],
+        })),
+        ready: () => true,
+        diagnostic: () => null,
+        catalog: () => null,
+        shutdown: vi.fn(async () => undefined),
+      }) as unknown as PiRuntime
+    const connected = deferred<void>()
+    connect.mockImplementation(async () => {
+      connected.resolve()
+    })
+    const controller = new AbortController()
+    const host = hostWithFakeTerminalDelivery()
+    const run = host.run(controller.signal)
+    try {
+      await connected.promise
+      const registration = connect.mock.calls[0]?.[0] as Record<string, unknown>
+      expect(registration).toMatchObject({
+        runtimeCatalogs: {
+          opencode: { models: [], variants: {}, supportsReasoningEffort: false },
+        },
+      })
+      expect((registration.runtimeCatalogs as Record<string, unknown>).pi).toBeUndefined()
     } finally {
       controller.abort()
       await run.catch(() => undefined)
@@ -372,7 +416,8 @@ describe('RunnerHost wires the OpenCodeRuntime lifecycle', () => {
         runtimeCatalogs: {
           pi: {
             models: ['anthropic/claude-sonnet-4', 'openai/gpt-5.5'],
-            variants: {
+            variants: {},
+            reasoningEfforts: {
               'anthropic/claude-sonnet-4': ['off'],
               'openai/gpt-5.5': ['low', 'high'],
             },
@@ -405,7 +450,19 @@ describe('RunnerHost wires the OpenCodeRuntime lifecycle', () => {
       const heartbeatBodies = heartbeat.mock.calls.map((call) => call[0] as Record<string, unknown>)
       expect(heartbeatBodies.length).toBeGreaterThan(0)
       for (const body of heartbeatBodies) {
-        expect(body).toMatchObject({ runtimeCatalogs: { pi: { models: [], variants: {} } } })
+        expect(body).toMatchObject({
+          runtimeCatalogs: {
+            opencode: { models: [], variants: {}, supportsReasoningEffort: false },
+            pi: {
+              models: [],
+              variants: {},
+              reasoningEfforts: {},
+              supportsReasoningEffort: true,
+              complete: true,
+              capabilityRevision: expect.any(String),
+            },
+          },
+        })
         expect(body.actionCatalog).toEqual(expectedActionCatalog())
       }
     } finally {

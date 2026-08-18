@@ -123,6 +123,7 @@ internal sealed partial class TableRenderer
         _out.WriteLine($"runtime:             {(!string.IsNullOrWhiteSpace(effectiveRuntime) ? effectiveRuntime : StringOf(config, "runtime"))}");
         _out.WriteLine($"model:               {(!string.IsNullOrWhiteSpace(effectiveModel) ? effectiveModel : StringOf(config, "model"))}");
         _out.WriteLine($"variant:             {(!string.IsNullOrWhiteSpace(effectiveVariant) ? effectiveVariant : StringOf(config, "variant"))}");
+        _out.WriteLine($"reasoning effort:    {StringOf(config, "reasoningEffort")}");
         _out.WriteLine($"max concurrent runs: {NumberOf(data, "maxConcurrentRuns")}");
         _out.WriteLine($"skills:              {skillText}");
         _out.WriteLine($"permissions:         {permissionText}");

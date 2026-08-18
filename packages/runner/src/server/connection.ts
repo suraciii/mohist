@@ -163,9 +163,8 @@ export class ServerConnection {
       cleanupAttempts: result.cleanupAttempts ?? null,
       addTasks: result.addTasks ?? null,
     }
-    if (ownerKind) {
-      body.ownerKind = ownerKind
-    }
+    if (ownerKind) body.ownerKind = ownerKind
+    body.requeue = result.requeue ?? false
     if (work.agentJobId) {
       body.agentJobId = work.agentJobId
     }
@@ -908,6 +907,7 @@ function parseDispatchWorkItem(dispatch: WorkDispatchResponse): DispatchWorkItem
     work.initialInputId = dispatch.initialInputId ?? undefined
   if (Object.prototype.hasOwnProperty.call(dispatch, 'initialTurnId'))
     work.initialTurnId = dispatch.initialTurnId ?? undefined
+  if (dispatch.capabilityRevision != null) work.capabilityRevision = dispatch.capabilityRevision ?? undefined
   return work
 }
 

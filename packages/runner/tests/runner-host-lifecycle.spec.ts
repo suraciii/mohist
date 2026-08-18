@@ -1,21 +1,38 @@
-import { AsyncLocalStorage } from "node:async_hooks"
-import { describe, expect, it as vitestIt, vi } from "vitest"
-import { RunnerHost } from "../src/runtime/host.js"
-import { getOpenCodeRuntimeFactory } from "../src/runtime/opencode/index.js"
-import type { SessionTarget } from "../src/server/session-target.js"
-import type { FollowupTargetResolution } from "../src/server/session-target.js"
-import { deferred } from "./support/deferred.js"
-import { capturedLogs, onCapturedLog } from "./support/logger-test.js"
-import { withDefaultRunnerTestResources, withTestRunnerResources, type DefaultRunnerTestResources } from "./support/test-resources.js"
+import { AsyncLocalStorage } from 'node:async_hooks'
+import { describe, expect, it as vitestIt, vi } from 'vitest'
+import { RunnerHost } from '../src/runtime/host.js'
+import { getOpenCodeRuntimeFactory } from '../src/runtime/opencode/index.js'
+import type { SessionTarget } from '../src/server/session-target.js'
+import type { FollowupTargetResolution } from '../src/server/session-target.js'
+import { deferred } from './support/deferred.js'
+import { capturedLogs, onCapturedLog } from './support/logger-test.js'
+import {
+  withDefaultRunnerTestResources,
+  withTestRunnerResources,
+  type DefaultRunnerTestResources,
+} from './support/test-resources.js'
 
 const POLL_INTERVAL_MS = 10
 const QUIET_INTERVAL_MS = 60_000
 
 type LifecycleMock = ReturnType<typeof vi.fn>
 type LifecycleMocks = Record<
-  "connect" | "heartbeat" | "disconnect" | "poll" | "report" | "uploadTaskLog" | "fetchConfig" |
-  "workflowAgentSessionRuntimeEvents" | "agentSessionRuntimeEvents" | "startSignalR" | "stopSignalR" |
-  "disconnectSignalR" | "getConnectionId" | "probeLiveness" | "blockingAction" | "forceReconnect",
+  | 'connect'
+  | 'heartbeat'
+  | 'disconnect'
+  | 'poll'
+  | 'report'
+  | 'uploadTaskLog'
+  | 'fetchConfig'
+  | 'workflowAgentSessionRuntimeEvents'
+  | 'agentSessionRuntimeEvents'
+  | 'startSignalR'
+  | 'stopSignalR'
+  | 'disconnectSignalR'
+  | 'getConnectionId'
+  | 'probeLiveness'
+  | 'blockingAction'
+  | 'forceReconnect',
   LifecycleMock
 >
 
@@ -23,27 +40,29 @@ interface LifecycleTestState {
   readonly resources: DefaultRunnerTestResources
   readonly mocks: LifecycleMocks
   onReconnected: ((connectionId: string) => void) | null
-  followupTargetResolver: ((target: SessionTarget) => FollowupTargetResolution | Promise<FollowupTargetResolution>) | null
+  followupTargetResolver:
+    | ((target: SessionTarget) => FollowupTargetResolution | Promise<FollowupTargetResolution>)
+    | null
 }
 
 const lifecycleTestStorage = new AsyncLocalStorage<LifecycleTestState>()
 
 function currentLifecycleTestState(): LifecycleTestState {
   const state = lifecycleTestStorage.getStore()
-  if (!state) throw new Error("runner host lifecycle test context is not active")
+  if (!state) throw new Error('runner host lifecycle test context is not active')
   return state
 }
 
 function scopedMock(name: keyof LifecycleMocks): LifecycleMock {
   const target = (() => undefined) as (...args: unknown[]) => unknown
-  Object.defineProperty(target, "_isMockFunction", { value: true })
+  Object.defineProperty(target, '_isMockFunction', { value: true })
   return new Proxy(target, {
     apply(_target, thisArg, args) {
       return Reflect.apply(currentLifecycleTestState().mocks[name], thisArg, args)
     },
     get(_target, property) {
       const value = Reflect.get(currentLifecycleTestState().mocks[name], property)
-      return typeof value === "function" ? value.bind(currentLifecycleTestState().mocks[name]) : value
+      return typeof value === 'function' ? value.bind(currentLifecycleTestState().mocks[name]) : value
     },
     set(_target, property, value) {
       return Reflect.set(currentLifecycleTestState().mocks[name], property, value)
@@ -51,24 +70,24 @@ function scopedMock(name: keyof LifecycleMocks): LifecycleMock {
   }) as unknown as LifecycleMock
 }
 
-const connect = scopedMock("connect")
-const heartbeat = scopedMock("heartbeat")
-const disconnect = scopedMock("disconnect")
-const poll = scopedMock("poll")
-const report = scopedMock("report")
-const uploadTaskLog = scopedMock("uploadTaskLog")
-const fetchConfig = scopedMock("fetchConfig")
-const workflowAgentSessionRuntimeEvents = scopedMock("workflowAgentSessionRuntimeEvents")
-const agentSessionRuntimeEvents = scopedMock("agentSessionRuntimeEvents")
-const startSignalR = scopedMock("startSignalR")
-const stopSignalR = scopedMock("stopSignalR")
-const disconnectSignalR = scopedMock("disconnectSignalR")
-const getConnectionId = scopedMock("getConnectionId")
-const probeLiveness = scopedMock("probeLiveness")
-const blockingAction = scopedMock("blockingAction")
-const forceReconnect = scopedMock("forceReconnect")
+const connect = scopedMock('connect')
+const heartbeat = scopedMock('heartbeat')
+const disconnect = scopedMock('disconnect')
+const poll = scopedMock('poll')
+const report = scopedMock('report')
+const uploadTaskLog = scopedMock('uploadTaskLog')
+const fetchConfig = scopedMock('fetchConfig')
+const workflowAgentSessionRuntimeEvents = scopedMock('workflowAgentSessionRuntimeEvents')
+const agentSessionRuntimeEvents = scopedMock('agentSessionRuntimeEvents')
+const startSignalR = scopedMock('startSignalR')
+const stopSignalR = scopedMock('stopSignalR')
+const disconnectSignalR = scopedMock('disconnectSignalR')
+const getConnectionId = scopedMock('getConnectionId')
+const probeLiveness = scopedMock('probeLiveness')
+const blockingAction = scopedMock('blockingAction')
+const forceReconnect = scopedMock('forceReconnect')
 
-vi.mock("../src/server/connection.js", () => ({
+vi.mock('../src/server/connection.js', () => ({
   ServerConnection: class {
     connect = connect
     heartbeat = heartbeat
@@ -82,7 +101,7 @@ vi.mock("../src/server/connection.js", () => ({
   },
 }))
 
-vi.mock("../src/server/runner-signalr.js", () => ({
+vi.mock('../src/server/runner-signalr.js', () => ({
   RunnerSignalRClient: class {
     start = startSignalR
     stop = stopSignalR
@@ -90,26 +109,38 @@ vi.mock("../src/server/runner-signalr.js", () => ({
     getConnectionId = getConnectionId
     probeLiveness = probeLiveness
     forceReconnect = forceReconnect
-    constructor(_serverUrl: string, _runnerId: string, _runnerRoot: string, _buildGitHash: string | null, options: { onReconnected?: (id: string) => void; followupTargetResolver?: (target: SessionTarget) => FollowupTargetResolution | Promise<FollowupTargetResolution> } = {}) {
+    constructor(
+      _serverUrl: string,
+      _runnerId: string,
+      _runnerRoot: string,
+      _buildGitHash: string | null,
+      options: {
+        onReconnected?: (id: string) => void
+        followupTargetResolver?: (target: SessionTarget) => FollowupTargetResolution | Promise<FollowupTargetResolution>
+      } = {},
+    ) {
       currentLifecycleTestState().onReconnected = options.onReconnected ?? null
       currentLifecycleTestState().followupTargetResolver = options.followupTargetResolver ?? null
     }
   },
 }))
 
-vi.mock("../src/actions/registry.js", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("../src/actions/registry.js")>()
+vi.mock('../src/actions/registry.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../src/actions/registry.js')>()
   return {
     ...actual,
-    createDefaultRegistry: () => new actual.ActionRegistry([{
-      manifest: {
-        name: "test/block",
-        inputs: {},
-        outputs: [],
-        errors: [{ code: "action-failed", description: "The test Action failed" }],
-      },
-      run: blockingAction as never,
-    }]),
+    createDefaultRegistry: () =>
+      new actual.ActionRegistry([
+        {
+          manifest: {
+            name: 'test/block',
+            inputs: {},
+            outputs: [],
+            errors: [{ code: 'action-failed', description: 'The test Action failed' }],
+          },
+          run: blockingAction as never,
+        },
+      ]),
   }
 })
 
@@ -120,21 +151,25 @@ function createLifecycleMocks(): LifecycleMocks {
     disconnect: vi.fn(async () => undefined),
     poll: vi.fn(async () => []),
     report: vi.fn(async () => undefined),
-    uploadTaskLog: vi.fn(async () => ({ status: "changed", accepted: 0, truncated: false })),
+    uploadTaskLog: vi.fn(async () => ({ status: 'changed', accepted: 0, truncated: false })),
     fetchConfig: vi.fn(async () => null),
     workflowAgentSessionRuntimeEvents: vi.fn(async () => undefined),
     agentSessionRuntimeEvents: vi.fn(async () => undefined),
     startSignalR: vi.fn(async () => undefined),
     stopSignalR: vi.fn(async () => undefined),
     disconnectSignalR: vi.fn(async () => undefined),
-    getConnectionId: vi.fn(() => "conn-1"),
+    getConnectionId: vi.fn(() => 'conn-1'),
     probeLiveness: vi.fn(async () => true),
     blockingAction: vi.fn(async ({ signal }: { signal: AbortSignal }) => {
       const aborted = deferred<{ error: { code: string; message: string } }>()
       if (signal.aborted) {
-        aborted.resolve({ error: { code: "action-failed", message: "aborted" } })
+        aborted.resolve({ error: { code: 'action-failed', message: 'aborted' } })
       } else {
-        signal.addEventListener("abort", () => aborted.resolve({ error: { code: "action-failed", message: "aborted" } }), { once: true })
+        signal.addEventListener(
+          'abort',
+          () => aborted.resolve({ error: { code: 'action-failed', message: 'aborted' } }),
+          { once: true },
+        )
       }
       return aborted.promise
     }),
@@ -145,7 +180,12 @@ function createLifecycleMocks(): LifecycleMocks {
 function it(name: string, body: (state: LifecycleTestState) => Promise<void> | void): void {
   vitestIt(name, async () => {
     await withDefaultRunnerTestResources(async (resources) => {
-      const state: LifecycleTestState = { resources, mocks: createLifecycleMocks(), onReconnected: null, followupTargetResolver: null }
+      const state: LifecycleTestState = {
+        resources,
+        mocks: createLifecycleMocks(),
+        onReconnected: null,
+        followupTargetResolver: null,
+      }
       await lifecycleTestStorage.run(state, async () => {
         vi.useFakeTimers()
         try {
@@ -158,7 +198,7 @@ function it(name: string, body: (state: LifecycleTestState) => Promise<void> | v
   })
 }
 
-describe("RunnerHost", () => {
+describe('RunnerHost', () => {
   it("treats 'opencode' (any casing) as the configured runtime", () => {
     // Issue-410 T-004 retired the SessionCommand handler. The runner
     // host no longer wires a sessionCommandHandler on the SignalR
@@ -167,9 +207,9 @@ describe("RunnerHost", () => {
     expect(getOpenCodeRuntimeFactory()).toBe(currentLifecycleTestState().resources.openCodeRuntimeFactory)
   })
 
-  it("RunnerRegistration_DoesNotReportWorkflowSlots", async () => {
+  it('RunnerRegistration_DoesNotReportWorkflowSlots', async () => {
     const connected = deferred<void>()
-    getConnectionId.mockReturnValue("conn-1")
+    getConnectionId.mockReturnValue('conn-1')
     probeLiveness.mockResolvedValue(true)
     forceReconnect.mockResolvedValue(undefined)
     connect.mockImplementation(async () => {
@@ -182,10 +222,10 @@ describe("RunnerHost", () => {
     stopSignalR.mockResolvedValue(undefined)
     const controller = new AbortController()
     const host = new RunnerHost({
-      serverUrl: "https://runner.test",
-      runnerId: "runner-test",
-      projectId: "project-1",
-      runnerRoot: "/virtual/mohist-runner-test",
+      serverUrl: 'https://runner.test',
+      runnerId: 'runner-test',
+      projectId: 'project-1',
+      runnerRoot: '/virtual/mohist-runner-test',
       pollIntervalMs: POLL_INTERVAL_MS,
       heartbeatIntervalMs: QUIET_INTERVAL_MS,
       dispatchLivenessProbeIntervalMs: QUIET_INTERVAL_MS,
@@ -199,28 +239,38 @@ describe("RunnerHost", () => {
 
       expect(connect).toHaveBeenCalledWith(
         expect.objectContaining({
-          projectId: "project-1",
+          projectId: 'project-1',
         }),
         expect.any(AbortSignal),
       )
       const registration = connect.mock.calls[0][0]
       expect(registration).toMatchObject({
-        projectId: "project-1",
-        runnerId: "runner-test",
+        projectId: 'project-1',
+        runnerId: 'runner-test',
       })
       expect(registration).toMatchObject({
-        runtimeCatalogs: { pi: { models: [], variants: {} } },
+        runtimeCatalogs: {
+          opencode: { models: [], variants: {}, supportsReasoningEffort: false },
+          pi: {
+            models: [],
+            variants: {},
+            reasoningEfforts: {},
+            supportsReasoningEffort: true,
+            complete: true,
+            capabilityRevision: expect.any(String),
+          },
+        },
       })
       for (const identityField of [
-        "buildGitHash",
-        "component",
-        "version",
-        "sourceRevision",
-        "treeHash",
-        "artifactDigest",
-        "releaseId",
-        "generation",
-        "runnerId",
+        'buildGitHash',
+        'component',
+        'version',
+        'sourceRevision',
+        'treeHash',
+        'artifactDigest',
+        'releaseId',
+        'generation',
+        'runnerId',
       ]) {
         expect(registration).toHaveProperty(identityField)
       }
@@ -231,48 +281,57 @@ describe("RunnerHost", () => {
     }
   })
 
-  it("does not claim work when provider policy configuration is invalid", async () => {
+  it('does not claim work when provider policy configuration is invalid', async () => {
     const resources = currentLifecycleTestState().resources
-    await withTestRunnerResources(async () => {
-      const connected = deferred<void>()
-      connect.mockImplementation(async () => {
-        connected.resolve()
-      })
-      heartbeat.mockResolvedValue(undefined)
-      disconnect.mockResolvedValue(undefined)
-      poll.mockResolvedValue([])
-      startSignalR.mockResolvedValue(undefined)
-      stopSignalR.mockResolvedValue(undefined)
-      const controller = new AbortController()
-      const host = new RunnerHost({
-        serverUrl: "https://runner.test",
-        runnerId: "runner-test",
-        projectId: "project-1",
-        runnerRoot: "/virtual/mohist-runner-test",
-        pollIntervalMs: POLL_INTERVAL_MS,
-        heartbeatIntervalMs: QUIET_INTERVAL_MS,
-        dispatchLivenessProbeIntervalMs: QUIET_INTERVAL_MS,
-      })
+    await withTestRunnerResources(
+      async () => {
+        const connected = deferred<void>()
+        connect.mockImplementation(async () => {
+          connected.resolve()
+        })
+        heartbeat.mockResolvedValue(undefined)
+        disconnect.mockResolvedValue(undefined)
+        poll.mockResolvedValue([])
+        startSignalR.mockResolvedValue(undefined)
+        stopSignalR.mockResolvedValue(undefined)
+        const controller = new AbortController()
+        const host = new RunnerHost({
+          serverUrl: 'https://runner.test',
+          runnerId: 'runner-test',
+          projectId: 'project-1',
+          runnerRoot: '/virtual/mohist-runner-test',
+          pollIntervalMs: POLL_INTERVAL_MS,
+          heartbeatIntervalMs: QUIET_INTERVAL_MS,
+          dispatchLivenessProbeIntervalMs: QUIET_INTERVAL_MS,
+        })
 
-      const run = host.run(controller.signal)
-      try {
-        await connected.promise
-        await vi.advanceTimersByTimeAsync(POLL_INTERVAL_MS * 2)
-        expect(poll).not.toHaveBeenCalled()
-        expect(capturedLogs()).toEqual(expect.arrayContaining([
-          expect.objectContaining({ level: "ERROR", message: "provider error policy invalid", component: "host" }),
-          expect.objectContaining({ level: "WARN", message: "runner not ready; skipping poll", fields: expect.objectContaining({ reason: expect.stringContaining("provider error policy invalid") }) }),
-        ]))
-      } finally {
-        controller.abort()
-        await run.catch(() => undefined)
-      }
-    }, { ...resources, environment: { MOHIST_PROVIDER_RETRY_THRESHOLD: "0" } })
+        const run = host.run(controller.signal)
+        try {
+          await connected.promise
+          await vi.advanceTimersByTimeAsync(POLL_INTERVAL_MS * 2)
+          expect(poll).not.toHaveBeenCalled()
+          expect(capturedLogs()).toEqual(
+            expect.arrayContaining([
+              expect.objectContaining({ level: 'ERROR', message: 'provider error policy invalid', component: 'host' }),
+              expect.objectContaining({
+                level: 'WARN',
+                message: 'runner not ready; skipping poll',
+                fields: expect.objectContaining({ reason: expect.stringContaining('provider error policy invalid') }),
+              }),
+            ]),
+          )
+        } finally {
+          controller.abort()
+          await run.catch(() => undefined)
+        }
+      },
+      { ...resources, environment: { MOHIST_PROVIDER_RETRY_THRESHOLD: '0' } },
+    )
   })
 
-  it("WorkerPool_PollsUntilServerReturnsNoWorkWithoutLocalConcurrencyCap", async () => {
+  it('WorkerPool_PollsUntilServerReturnsNoWorkWithoutLocalConcurrencyCap', async () => {
     const pollCalls = [deferred<void>(), deferred<void>(), deferred<void>(), deferred<void>()]
-    getConnectionId.mockReturnValue("conn-1")
+    getConnectionId.mockReturnValue('conn-1')
     probeLiveness.mockResolvedValue(true)
     forceReconnect.mockResolvedValue(undefined)
     connect.mockResolvedValue(undefined)
@@ -283,13 +342,13 @@ describe("RunnerHost", () => {
     stopSignalR.mockResolvedValue(undefined)
     const controller = new AbortController()
     const work = (id: string) => ({
-      workflowRunId: "",
+      workflowRunId: '',
       workId: `work-${id}`,
-      workType: "task",
-      uses: "test/block",
-      ownerKind: "agent-job",
+      workType: 'task',
+      uses: 'test/block',
+      ownerKind: 'agent-job',
       agentJobId: `job-${id}`,
-      variables: { workspace: { path: "/virtual/mohist-runner-test" } },
+      variables: { workspace: { path: '/virtual/mohist-runner-test' } },
     })
     let pollIndex = 0
     poll.mockImplementation(async () => {
@@ -302,10 +361,10 @@ describe("RunnerHost", () => {
       return [work(String(pollIndex))]
     })
     const host = new RunnerHost({
-      serverUrl: "https://runner.test",
-      runnerId: "runner-test",
-      projectId: "project-1",
-      runnerRoot: "/virtual/mohist-runner-test",
+      serverUrl: 'https://runner.test',
+      runnerId: 'runner-test',
+      projectId: 'project-1',
+      runnerRoot: '/virtual/mohist-runner-test',
       pollIntervalMs: POLL_INTERVAL_MS,
       heartbeatIntervalMs: QUIET_INTERVAL_MS,
       dispatchLivenessProbeIntervalMs: QUIET_INTERVAL_MS,
@@ -327,12 +386,12 @@ describe("RunnerHost", () => {
     }
   })
 
-  it("WorkerPool_PollFailure_RetriesWithoutRestartingRunner", async () => {
+  it('WorkerPool_PollFailure_RetriesWithoutRestartingRunner', async () => {
     const firstPollStarted = deferred<void>()
     const retryPollStarted = deferred<void>()
     const failureLogged = deferred<void>()
-    const pollFailure = new Error("server unavailable")
-    getConnectionId.mockReturnValue("conn-1")
+    const pollFailure = new Error('server unavailable')
+    getConnectionId.mockReturnValue('conn-1')
     probeLiveness.mockResolvedValue(true)
     forceReconnect.mockResolvedValue(undefined)
     connect.mockResolvedValue(undefined)
@@ -352,16 +411,16 @@ describe("RunnerHost", () => {
         return []
       })
     const host = new RunnerHost({
-      serverUrl: "https://runner.test",
-      runnerId: "runner-test",
-      projectId: "project-1",
-      runnerRoot: "/virtual/mohist-runner-test",
+      serverUrl: 'https://runner.test',
+      runnerId: 'runner-test',
+      projectId: 'project-1',
+      runnerRoot: '/virtual/mohist-runner-test',
       pollIntervalMs: POLL_INTERVAL_MS,
       heartbeatIntervalMs: QUIET_INTERVAL_MS,
       dispatchLivenessProbeIntervalMs: QUIET_INTERVAL_MS,
     })
     const stopLog = onCapturedLog((record) => {
-      if (record.message === "runner poll failed; retrying") failureLogged.resolve()
+      if (record.message === 'runner poll failed; retrying') failureLogged.resolve()
     })
     const run = host.run(controller.signal)
 
@@ -374,9 +433,15 @@ describe("RunnerHost", () => {
 
       expect(connect).toHaveBeenCalledTimes(1)
       expect(startSignalR).toHaveBeenCalledTimes(1)
-      expect(capturedLogs()).toEqual(expect.arrayContaining([
-        expect.objectContaining({ level: "WARN", message: "runner poll failed; retrying", fields: expect.objectContaining({ exception: pollFailure }) }),
-      ]))
+      expect(capturedLogs()).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            level: 'WARN',
+            message: 'runner poll failed; retrying',
+            fields: expect.objectContaining({ exception: pollFailure }),
+          }),
+        ]),
+      )
     } finally {
       controller.abort()
       await run.catch(() => undefined)
@@ -384,11 +449,11 @@ describe("RunnerHost", () => {
     }
   })
 
-  it("WorkerPool_PollTimeout_AbortsAttemptAndContinuesPolling", async () => {
+  it('WorkerPool_PollTimeout_AbortsAttemptAndContinuesPolling', async () => {
     const firstPollStarted = deferred<void>()
     const retryPollStarted = deferred<void>()
     const pollAbort = deferred<void>()
-    getConnectionId.mockReturnValue("conn-1")
+    getConnectionId.mockReturnValue('conn-1')
     probeLiveness.mockResolvedValue(true)
     forceReconnect.mockResolvedValue(undefined)
     connect.mockResolvedValue(undefined)
@@ -398,23 +463,30 @@ describe("RunnerHost", () => {
     stopSignalR.mockResolvedValue(undefined)
     const controller = new AbortController()
     poll
-      .mockImplementationOnce((signal: AbortSignal) => new Promise((_, reject) => {
-        firstPollStarted.resolve()
-        signal.addEventListener("abort", () => {
-          pollAbort.resolve()
-          reject(signal.reason)
-        }, { once: true })
-      }))
+      .mockImplementationOnce(
+        (signal: AbortSignal) =>
+          new Promise((_, reject) => {
+            firstPollStarted.resolve()
+            signal.addEventListener(
+              'abort',
+              () => {
+                pollAbort.resolve()
+                reject(signal.reason)
+              },
+              { once: true },
+            )
+          }),
+      )
       .mockImplementationOnce(async () => {
         retryPollStarted.resolve()
         controller.abort()
         return []
       })
     const host = new RunnerHost({
-      serverUrl: "https://runner.test",
-      runnerId: "runner-test",
-      projectId: "project-1",
-      runnerRoot: "/virtual/mohist-runner-test",
+      serverUrl: 'https://runner.test',
+      runnerId: 'runner-test',
+      projectId: 'project-1',
+      runnerRoot: '/virtual/mohist-runner-test',
       pollIntervalMs: POLL_INTERVAL_MS,
       heartbeatIntervalMs: QUIET_INTERVAL_MS,
       dispatchLivenessProbeIntervalMs: QUIET_INTERVAL_MS,
@@ -428,18 +500,24 @@ describe("RunnerHost", () => {
       await retryPollStarted.promise
       await expect(run).resolves.toBeUndefined()
 
-      expect(capturedLogs()).toEqual(expect.arrayContaining([
-        expect.objectContaining({ level: "WARN", message: "runner poll failed; retrying", fields: expect.objectContaining({ exception: expect.any(Error) }) }),
-      ]))
+      expect(capturedLogs()).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            level: 'WARN',
+            message: 'runner poll failed; retrying',
+            fields: expect.objectContaining({ exception: expect.any(Error) }),
+          }),
+        ]),
+      )
     } finally {
       controller.abort()
       await run.catch(() => undefined)
     }
   })
 
-  it("RunnerShutdown_UnregistersRunner", async () => {
+  it('RunnerShutdown_UnregistersRunner', async () => {
     const connected = deferred<void>()
-    getConnectionId.mockReturnValue("conn-1")
+    getConnectionId.mockReturnValue('conn-1')
     probeLiveness.mockResolvedValue(true)
     forceReconnect.mockResolvedValue(undefined)
     connect.mockImplementation(async () => {
@@ -452,9 +530,9 @@ describe("RunnerHost", () => {
     stopSignalR.mockResolvedValue(undefined)
     const controller = new AbortController()
     const host = new RunnerHost({
-      serverUrl: "https://runner.test",
-      runnerId: "runner-test",
-      runnerRoot: "/virtual/mohist-runner-test",
+      serverUrl: 'https://runner.test',
+      runnerId: 'runner-test',
+      runnerRoot: '/virtual/mohist-runner-test',
       pollIntervalMs: POLL_INTERVAL_MS,
       heartbeatIntervalMs: QUIET_INTERVAL_MS,
       dispatchLivenessProbeIntervalMs: QUIET_INTERVAL_MS,
@@ -474,7 +552,7 @@ describe("RunnerHost", () => {
     }
   })
 
-  it("RunnerConnection_WhenSignalRFails_DoesNotPollAndRetriesCleanly", async () => {
+  it('RunnerConnection_WhenSignalRFails_DoesNotPollAndRetriesCleanly', async () => {
     const firstSignalRStarted = deferred<void>()
     const secondSignalRStarted = deferred<void>()
     const secondSignalRRelease = deferred<void>()
@@ -482,7 +560,7 @@ describe("RunnerHost", () => {
     const retryWaitStarted = deferred<number>()
     const retryWaitRelease = deferred<void>()
     const firstPollStarted = deferred<void>()
-    getConnectionId.mockReturnValue("conn-1")
+    getConnectionId.mockReturnValue('conn-1')
     probeLiveness.mockResolvedValue(true)
     forceReconnect.mockResolvedValue(undefined)
     connect.mockResolvedValue(undefined)
@@ -494,7 +572,7 @@ describe("RunnerHost", () => {
       firstPollStarted.resolve()
       return []
     })
-    const signalRUnavailable = new Error("signalr unavailable")
+    const signalRUnavailable = new Error('signalr unavailable')
     startSignalR
       .mockImplementationOnce(async () => {
         firstSignalRStarted.resolve()
@@ -511,14 +589,18 @@ describe("RunnerHost", () => {
       if (signal.aborted) throw signal.reason
     })
     const controller = new AbortController()
-    const host = new RunnerHost({
-      serverUrl: "https://runner.test",
-      runnerId: "runner-test",
-      runnerRoot: "/virtual/mohist-runner-test",
-      pollIntervalMs: POLL_INTERVAL_MS,
-      heartbeatIntervalMs: QUIET_INTERVAL_MS,
-      dispatchLivenessProbeIntervalMs: QUIET_INTERVAL_MS,
-    }, undefined, { waitForConnectionRetry })
+    const host = new RunnerHost(
+      {
+        serverUrl: 'https://runner.test',
+        runnerId: 'runner-test',
+        runnerRoot: '/virtual/mohist-runner-test',
+        pollIntervalMs: POLL_INTERVAL_MS,
+        heartbeatIntervalMs: QUIET_INTERVAL_MS,
+        dispatchLivenessProbeIntervalMs: QUIET_INTERVAL_MS,
+      },
+      undefined,
+      { waitForConnectionRetry },
+    )
 
     const run = host.run(controller.signal)
     try {
@@ -538,9 +620,15 @@ describe("RunnerHost", () => {
       controller.abort()
       await expect(run).resolves.toBeUndefined()
 
-      expect(capturedLogs()).toEqual(expect.arrayContaining([
-        expect.objectContaining({ level: "ERROR", message: "runner connection failed; retrying", fields: expect.objectContaining({ exception: signalRUnavailable }) }),
-      ]))
+      expect(capturedLogs()).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            level: 'ERROR',
+            message: 'runner connection failed; retrying',
+            fields: expect.objectContaining({ exception: signalRUnavailable }),
+          }),
+        ]),
+      )
     } finally {
       retryWaitRelease.resolve()
       secondSignalRRelease.resolve()
@@ -549,11 +637,11 @@ describe("RunnerHost", () => {
     }
   })
 
-  it("GenericFollowupResolver_ProjectsBindingIntoRuntimeTarget", async () => {
+  it('GenericFollowupResolver_ProjectsBindingIntoRuntimeTarget', async () => {
     const host = new RunnerHost({
-      serverUrl: "https://runner.test",
-      runnerId: "runner-test",
-      runnerRoot: "/virtual/mohist-runner-test",
+      serverUrl: 'https://runner.test',
+      runnerId: 'runner-test',
+      runnerRoot: '/virtual/mohist-runner-test',
       pollIntervalMs: 1,
       heartbeatIntervalMs: 60_000,
       dispatchLivenessProbeIntervalMs: 60_000,
@@ -561,43 +649,43 @@ describe("RunnerHost", () => {
     host.openCodeRuntime = { ready: () => true }
 
     const resolved = currentLifecycleTestState().followupTargetResolver?.({
-      kind: "generic",
-      projectId: "project-from-payload",
-      sessionId: "gen-1",
+      kind: 'generic',
+      projectId: 'project-from-payload',
+      sessionId: 'gen-1',
       binding: {
-        runtime: "opencode",
-        runtimeSessionId: "runtime-1",
-        runnerId: "runner-test",
-        workDir: "/virtual/work",
+        runtime: 'opencode',
+        runtimeSessionId: 'runtime-1',
+        runnerId: 'runner-test',
+        workDir: '/virtual/work',
       },
     })
 
     expect(resolved).toEqual({
-      runtimeSessionId: "runtime-1",
-      workDir: "/virtual/work",
-      projectId: "project-from-payload",
+      runtimeSessionId: 'runtime-1',
+      workDir: '/virtual/work',
+      projectId: 'project-from-payload',
     })
   })
 
-  it("GenericFollowupResolver_StartupBeforeRuntimeReady_ResolvesBindingOnly", () => {
+  it('GenericFollowupResolver_StartupBeforeRuntimeReady_ResolvesBindingOnly', () => {
     new RunnerHost({
-      serverUrl: "https://runner.test",
-      runnerId: "runner-test",
-      runnerRoot: "/virtual/mohist-runner-test",
+      serverUrl: 'https://runner.test',
+      runnerId: 'runner-test',
+      runnerRoot: '/virtual/mohist-runner-test',
       pollIntervalMs: 1,
       heartbeatIntervalMs: 60_000,
       dispatchLivenessProbeIntervalMs: 60_000,
     })
 
     const resolved = currentLifecycleTestState().followupTargetResolver?.({
-      kind: "generic",
-      projectId: "project-1",
-      sessionId: "gen-1",
+      kind: 'generic',
+      projectId: 'project-1',
+      sessionId: 'gen-1',
       binding: {
-        runtime: "opencode",
-        runtimeSessionId: "runtime-1",
-        runnerId: "runner-test",
-        workDir: "/virtual/work",
+        runtime: 'opencode',
+        runtimeSessionId: 'runtime-1',
+        runnerId: 'runner-test',
+        workDir: '/virtual/work',
       },
     })
 
@@ -605,17 +693,17 @@ describe("RunnerHost", () => {
     // or worker claim) gates admission on runtime readiness; the resolver
     // never inspects runtime or outbox state.
     expect(resolved).toEqual({
-      runtimeSessionId: "runtime-1",
-      workDir: "/virtual/work",
-      projectId: "project-1",
+      runtimeSessionId: 'runtime-1',
+      workDir: '/virtual/work',
+      projectId: 'project-1',
     })
   })
 
-  it("ClaimReadiness_RequiresHealthyRuntimeEventOutbox", () => {
+  it('ClaimReadiness_RequiresHealthyRuntimeEventOutbox', () => {
     const host = new RunnerHost({
-      serverUrl: "https://runner.test",
-      runnerId: "runner-test",
-      runnerRoot: "/virtual/mohist-runner-test",
+      serverUrl: 'https://runner.test',
+      runnerId: 'runner-test',
+      runnerRoot: '/virtual/mohist-runner-test',
       pollIntervalMs: 1,
       heartbeatIntervalMs: 60_000,
       dispatchLivenessProbeIntervalMs: 60_000,
@@ -633,11 +721,11 @@ describe("RunnerHost", () => {
     expect(host.isOpenCodeReadyForClaim()).toBe(true)
   })
 
-  it("GenericFollowupResolver_NonOpencodeBinding_IsMissingTarget", () => {
+  it('GenericFollowupResolver_NonOpencodeBinding_IsMissingTarget', () => {
     new RunnerHost({
-      serverUrl: "https://runner.test",
-      runnerId: "runner-test",
-      runnerRoot: "/virtual/mohist-runner-test",
+      serverUrl: 'https://runner.test',
+      runnerId: 'runner-test',
+      runnerRoot: '/virtual/mohist-runner-test',
       pollIntervalMs: 1,
       heartbeatIntervalMs: 60_000,
       dispatchLivenessProbeIntervalMs: 60_000,
@@ -645,63 +733,63 @@ describe("RunnerHost", () => {
     // legacy ACP-bound session: the runner must report missing
     // (per issue-410 D6 — Reset hint), not forward to the runtime
     const resolved = currentLifecycleTestState().followupTargetResolver?.({
-      kind: "generic",
-      projectId: "project-1",
-      sessionId: "gen-1",
+      kind: 'generic',
+      projectId: 'project-1',
+      sessionId: 'gen-1',
       binding: {
-        runtime: "acp",
-        runtimeSessionId: "runtime-1",
-        runnerId: "runner-test",
-        workDir: "/virtual/work",
+        runtime: 'acp',
+        runtimeSessionId: 'runtime-1',
+        runnerId: 'runner-test',
+        workDir: '/virtual/work',
       },
     } as SessionTarget)
 
     expect(resolved).toBeNull()
   })
 
-  it("GenericFollowupResolver_MismatchedRunnerId_IsMissingTarget", () => {
+  it('GenericFollowupResolver_MismatchedRunnerId_IsMissingTarget', () => {
     new RunnerHost({
-      serverUrl: "https://runner.test",
-      runnerId: "runner-test",
-      runnerRoot: "/virtual/mohist-runner-test",
+      serverUrl: 'https://runner.test',
+      runnerId: 'runner-test',
+      runnerRoot: '/virtual/mohist-runner-test',
       pollIntervalMs: 1,
       heartbeatIntervalMs: 60_000,
       dispatchLivenessProbeIntervalMs: 60_000,
     })
 
     const resolved = currentLifecycleTestState().followupTargetResolver?.({
-      kind: "generic",
-      projectId: "project-1",
-      sessionId: "gen-1",
+      kind: 'generic',
+      projectId: 'project-1',
+      sessionId: 'gen-1',
       binding: {
-        runtime: "opencode",
-        runtimeSessionId: "runtime-1",
-        runnerId: "different-runner",
-      workDir: "/virtual/work",
+        runtime: 'opencode',
+        runtimeSessionId: 'runtime-1',
+        runnerId: 'different-runner',
+        workDir: '/virtual/work',
       },
     })
 
     expect(resolved).toBeNull()
   })
 
-  it("GenericFollowupResolver_MissingWorkDir_IsMissingTarget", () => {
+  it('GenericFollowupResolver_MissingWorkDir_IsMissingTarget', () => {
     new RunnerHost({
-      serverUrl: "https://runner.test",
-      runnerId: "runner-test",
-      runnerRoot: "/virtual/mohist-runner-test",
+      serverUrl: 'https://runner.test',
+      runnerId: 'runner-test',
+      runnerRoot: '/virtual/mohist-runner-test',
       pollIntervalMs: 1,
       heartbeatIntervalMs: 60_000,
       dispatchLivenessProbeIntervalMs: 60_000,
     })
 
     const resolved = currentLifecycleTestState().followupTargetResolver?.({
-      kind: "generic",
-      projectId: "project-1",
-      sessionId: "gen-1",
+      kind: 'generic',
+      projectId: 'project-1',
+      sessionId: 'gen-1',
       binding: {
-        runtime: "opencode",
-        runtimeSessionId: "runtime-1",
-        runnerId: "runner-test",
+        runtime: 'opencode',
+        runtimeSessionId: 'runtime-1',
+        runnerId: 'runner-test',
         workDir: null,
       },
     })
@@ -709,31 +797,31 @@ describe("RunnerHost", () => {
     expect(resolved).toBeNull()
   })
 
-  it("GenericFollowupResolver_NoBinding_IsMissingTarget", () => {
+  it('GenericFollowupResolver_NoBinding_IsMissingTarget', () => {
     new RunnerHost({
-      serverUrl: "https://runner.test",
-      runnerId: "runner-test",
-      runnerRoot: "/virtual/mohist-runner-test",
+      serverUrl: 'https://runner.test',
+      runnerId: 'runner-test',
+      runnerRoot: '/virtual/mohist-runner-test',
       pollIntervalMs: 1,
       heartbeatIntervalMs: 60_000,
       dispatchLivenessProbeIntervalMs: 60_000,
     })
 
     const resolved = currentLifecycleTestState().followupTargetResolver?.({
-      kind: "generic",
-      projectId: "project-1",
-      sessionId: "gen-1",
+      kind: 'generic',
+      projectId: 'project-1',
+      sessionId: 'gen-1',
     })
 
     expect(resolved).toBeNull()
   })
 
-  it("GenericFollowupResolver_RejectsMismatchedConfiguredRunnerProject", async () => {
+  it('GenericFollowupResolver_RejectsMismatchedConfiguredRunnerProject', async () => {
     const host = new RunnerHost({
-      serverUrl: "https://runner.test",
-      runnerId: "runner-test",
-      projectId: "runner-project",
-      runnerRoot: "/virtual/mohist-runner-test",
+      serverUrl: 'https://runner.test',
+      runnerId: 'runner-test',
+      projectId: 'runner-project',
+      runnerRoot: '/virtual/mohist-runner-test',
       pollIntervalMs: 1,
       heartbeatIntervalMs: 60_000,
       dispatchLivenessProbeIntervalMs: 60_000,
@@ -741,14 +829,14 @@ describe("RunnerHost", () => {
     host.openCodeRuntime = { ready: () => true }
 
     const resolved = currentLifecycleTestState().followupTargetResolver?.({
-      kind: "generic",
-      projectId: "other-project",
-      sessionId: "gen-1",
+      kind: 'generic',
+      projectId: 'other-project',
+      sessionId: 'gen-1',
       binding: {
-        runtime: "opencode",
-        runtimeSessionId: "runtime-1",
-        runnerId: "runner-test",
-        workDir: "/virtual/work",
+        runtime: 'opencode',
+        runtimeSessionId: 'runtime-1',
+        runnerId: 'runner-test',
+        workDir: '/virtual/work',
       },
     })
 
