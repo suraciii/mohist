@@ -758,3 +758,22 @@ The comment-reference baseline is updated to record the new
 Verification: Server UnitTests 2736 (was 2729), Server SpecTests 3948
 (was 3946), Server ArchTests 68/68, Workflow Definition 178, CLI 1858,
 Runner 1668, Web 4732, Slack 70 all green. `git diff --check` clean.
+## Rebase continuation onto master (current run)
+
+- The branch was rebased onto `origin/master`, which already carried its own
+  capability-claim admission fence (`CapabilityClaimExpectation` +
+  `RunnerCapabilityGate` + `AgentJobGrain.MatchesCapabilityExpectation`) merged
+  via PRs #576/#578/#603/#610/#615. The rebase replayed the branch's first
+  implementation round; the second-round `DispatchCapabilityFence` /
+  `DispatchService` re-fence work (T-006 final fence correction, T-007
+  preflight-evidence preservation, and the fence specs) is a parallel
+  implementation of the same admission contract. The base's claim-based fence
+  already covers AgentJob admission end-to-end, so those second-round patches
+  were NOT re-applied to avoid re-architecting the merged claim flow; the
+  resolver's empty/no-discovery model handling (T-005 hardening) and the
+  workflow effort forwarding (T-002) WERE ported.
+- Restored the verification gates that the interrupted rebase left red: split
+  the over-ratchet files (CLI agent config, CLI reasoning-effort specs,
+  AgentJobGrain capability/claim, session grain read projection, session
+  querier summaries) into partials and ran biome over the changed runner
+  files. `check:filesizes` and `format:check` are clean against `master`.
