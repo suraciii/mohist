@@ -701,3 +701,60 @@ Plan skeleton for next run (est. half a day):
   1668 tests), and Web tests (377 files, 4732 tests). The verification commands
   left no Git-visible generated changes; only this progress entry is intended
   for the completion commit.
+
+## MF-1 (review-disposed): OpenCode agent admission hang
+
+The review's must-fix finding identified that the shipped runner registers
+the OpenCode catalog **permanently non-authoritative** (no `complete` and no
+`capabilityRevision`), so the resolver returns `needs-setup` for every
+model-bearing OpenCode tuple and `DispatchService` skips the candidate
+entirely. The default agent runtime silently hangs in production.
+
+Reconcile the runner's OpenCode registration with the admission contract:
+
+- `RunnerHost.registrationState` now publishes the OpenCode entry with
+  `complete: true` and a content-derived `capabilityRevision`. The catalog
+  reports the runtime's explicit effort contract (`supportsReasoningEffort:
+  false`), so an explicit effort produces a deterministic
+  `unsupported_execution_configuration` preflight failure before the
+  dispatch ever reaches the runner.
+- The empty `models`/`variants` lists become the "no model discovery yet"
+  signal. The capability resolver treats an empty model/variant entry as
+  "the runtime validates the model at execution time" (per
+  `design/runtimes/opencode.md` — the catalog assists configuration, not
+  execution authority), so an Agent that names a model is still admitted
+  and OpenCode decides whether the model is acceptable when the prompt
+  starts. The same exemption applies to variants.
+- The resolver's compatibility check is no longer stricter than the
+  catalog contract: a tuple with an unset model is `supported` (the runtime
+  uses its default), and a catalog that lists explicit models still rejects
+  any model that is not on the list as a deterministic
+  `incompatible_execution_configuration`.
+
+Added unit coverage for the OpenCode production shape:
+- any model name is admitted (no-discovery exemption);
+- an explicit effort is rejected before reaching the runner;
+- effort rejection takes precedence over a missing model;
+- an explicit variant is admitted (no-discovery exemption);
+- an authoritative catalog with explicit models still rejects an unknown
+  model; and
+- a no-model/effort/variant tuple is `supported` on a complete catalog.
+
+Added Server SpecTests that register the exact production OpenCode shape
+(authoritative, empty models/variants, supportsReasoningEffort=false) and
+assert the chosen outcome (`AgentJobCapabilityFenceSpecs`):
+- `ProductionOpenCodeShape_AdmitsModelBearingJobWithoutDiscovery` —
+  proves the dispatch is granted and the job reaches `Running` with the
+  expected content-derived capability revision, ending the silent hang.
+- `ProductionOpenCodeShape_RejectsExplicitEffortDeterministically` —
+  proves an explicit effort becomes `unsupported_execution_configuration`
+  with the frozen tuple and capability revision recorded in the failure
+  evidence.
+
+The comment-reference baseline is updated to record the new
+`design/runtimes/opencode.md` reference in
+`AgentExecutionCapabilityResolver.cs`.
+
+Verification: Server UnitTests 2736 (was 2729), Server SpecTests 3948
+(was 3946), Server ArchTests 68/68, Workflow Definition 178, CLI 1858,
+Runner 1668, Web 4732, Slack 70 all green. `git diff --check` clean.
