@@ -39,7 +39,6 @@ public sealed partial class ManagedRuntimeTransactionSpecs
         Assert.Equal("server", session.Targets.Server!.Component);
         Assert.StartsWith("0.0.0+", session.Targets.Server.Identity.Version, StringComparison.Ordinal);
         Assert.DoesNotContain("/repo", session.ReleaseRoot, StringComparison.Ordinal);
-
         Assert.Equal(0, await fixture.Transaction.CommitAsync(session));
         var verified = Parse(fixture.Files.Read(fixture.VerifiedPath));
         Assert.Equal("verified", verified.Status);
@@ -1046,6 +1045,7 @@ public sealed partial class ManagedRuntimeTransactionSpecs
     {
         public int ApplyCalls { get; private set; }
         public int RestoreCalls { get; private set; }
+        public int RestoreCode { get; set; }
         public RuntimeTargetSet? LastTargets { get; private set; }
 
         public Task<(RunnerLaunchIdentity? Identity, string? Error)> ResolveRunnerLaunchIdentityAsync(
@@ -1084,7 +1084,7 @@ public sealed partial class ManagedRuntimeTransactionSpecs
         {
             RestoreCalls++;
             return inner?.RestoreManagedRuntimeAsync(targets, scope, unitDir, cancellationToken, snapshot)
-                ?? Task.FromResult(ManagedRuntimeRestoreResult.FromExitCode(0, scope));
+                ?? Task.FromResult(ManagedRuntimeRestoreResult.FromExitCode(RestoreCode, scope));
         }
     }
 }
