@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest"
+import { describe, expect, it, vi } from 'vitest'
 import {
   buildClient,
   emitFollowup,
@@ -7,151 +7,164 @@ import {
   invokeFollowup,
   lastBuilder,
   followupIt,
-} from "./support/followup-handler-fixture.js"
+} from './support/followup-handler-fixture.js'
 
-describe("RunnerSignalRClient routes follow-ups to generic sessions", () => {
-  followupIt("GenericFollowup_LocatesSessionByGenericKey_AndCallsRuntimeFollowup", async ({ runtime, recording }) => {
+describe('RunnerSignalRClient routes follow-ups to generic sessions', () => {
+  followupIt('GenericFollowup_LocatesSessionByGenericKey_AndCallsRuntimeFollowup', async ({ runtime, recording }) => {
     const resolver = vi.fn((target: { kind: string }) => {
-      expect(target.kind).toBe("generic")
-      return { runtimeSessionId: "runtime-1", workDir: "/work/project", projectId: "proj-1" }
+      expect(target.kind).toBe('generic')
+      return { runtimeSessionId: 'runtime-1', workDir: '/work/project', projectId: 'proj-1' }
     })
 
     buildClient({ resolver: resolver as never, outbox: recording.outbox, openCodeRuntime: runtime.runtime })
     const builder = lastBuilder()
 
-    emitFollowup(builder, genericPayload("add a logout route"))
+    emitFollowup(builder, genericPayload('add a logout route'))
     await flush()
 
     expect(runtime.followupCalls).toHaveLength(1)
-    expect(runtime.followupCalls[0].prompt).toBe("add a logout route")
-    expect(runtime.followupCalls[0].target).toEqual({ runtime: "opencode", runtimeSessionId: "runtime-1", workDir: "/work/project" })
+    expect(runtime.followupCalls[0].prompt).toBe('add a logout route')
+    expect(runtime.followupCalls[0].target).toEqual({
+      runtime: 'opencode',
+      runtimeSessionId: 'runtime-1',
+      workDir: '/work/project',
+    })
   })
 
-  followupIt("GenericFollowup_OmittedLegacyWorkDir_StillUsesCachedRuntimeTarget", async ({ runtime, recording }) => {
+  followupIt('GenericFollowup_OmittedLegacyWorkDir_StillUsesCachedRuntimeTarget', async ({ runtime, recording }) => {
     const resolver = vi.fn((target: { kind: string; binding?: unknown }) => {
-      expect(target.kind).toBe("generic")
+      expect(target.kind).toBe('generic')
       expect(target.binding).toEqual({
-        runtime: "opencode",
-        runtimeSessionId: "runtime-1",
-        runnerId: "runner-1",
+        runtime: 'opencode',
+        runtimeSessionId: 'runtime-1',
+        runnerId: 'runner-1',
         workDir: null,
       })
-      return { runtimeSessionId: "runtime-1", workDir: "/work/project", projectId: "proj-1" }
+      return { runtimeSessionId: 'runtime-1', workDir: '/work/project', projectId: 'proj-1' }
     })
 
     buildClient({ resolver: resolver as never, outbox: recording.outbox, openCodeRuntime: runtime.runtime })
-    await expect(invokeFollowup(lastBuilder(), {
-      target: {
-        kind: "generic",
-        projectId: "proj-1",
-        sessionId: "gen-session-1",
-        binding: {
-          runtime: "opencode",
-          runtimeSessionId: "runtime-1",
-          runnerId: "runner-1",
+    await expect(
+      invokeFollowup(lastBuilder(), {
+        target: {
+          kind: 'generic',
+          projectId: 'proj-1',
+          sessionId: 'gen-session-1',
+          binding: {
+            runtime: 'opencode',
+            runtimeSessionId: 'runtime-1',
+            runnerId: 'runner-1',
+          },
         },
-      },
-      text: "continue",
-      turnId: "turn-1",
-    })).resolves.toEqual({ accepted: true })
+        text: 'continue',
+        turnId: 'turn-1',
+      }),
+    ).resolves.toEqual({ accepted: true })
 
     expect(runtime.followupCalls).toHaveLength(1)
-    expect(runtime.followupCalls[0].target.runtimeSessionId).toBe("runtime-1")
-    expect(runtime.followupCalls[0].prompt).toBe("continue")
+    expect(runtime.followupCalls[0].target.runtimeSessionId).toBe('runtime-1')
+    expect(runtime.followupCalls[0].prompt).toBe('continue')
   })
 
-  followupIt("GenericFollowup_InputEntersExactSessionTurnProducerFamily", async ({ runtime, recording }) => {
-    const resolver = vi.fn(() => ({ runtimeSessionId: "runtime-1", workDir: "/work/project", projectId: "proj-1" }))
+  followupIt('GenericFollowup_InputEntersExactSessionTurnProducerFamily', async ({ runtime, recording }) => {
+    const resolver = vi.fn(() => ({ runtimeSessionId: 'runtime-1', workDir: '/work/project', projectId: 'proj-1' }))
     buildClient({ resolver: resolver as never, outbox: recording.outbox, openCodeRuntime: runtime.runtime })
 
-    emitFollowup(lastBuilder(), genericPayload("kind tag"))
+    emitFollowup(lastBuilder(), genericPayload('kind tag'))
     await flush()
 
     expect(recording.beforeExecutionCalls).toHaveLength(1)
     expect(recording.beforeExecutionCalls[0]).toMatchObject({
-      producerFamily: "session-followup",
-      target: { kind: "session", sessionId: "gen-session-1" },
-      sessionTurnId: "turn-1",
+      producerFamily: 'session-followup',
+      target: { kind: 'session', sessionId: 'gen-session-1' },
+      sessionTurnId: 'turn-1',
       event: {
-        type: "session.input",
+        type: 'session.input',
         payload: expect.objectContaining({
-          kind: "followup",
-          text: "kind tag",
-          role: "user",
-          runtimeSessionId: "runtime-1",
-          source: "followup",
+          kind: 'followup',
+          text: 'kind tag',
+          role: 'user',
+          runtimeSessionId: 'runtime-1',
+          source: 'followup',
         }),
       },
     })
   })
 
-  followupIt("GenericFollowup_Outcome_EntersSameSequenceKey_AsInput", async ({ runtime, recording }) => {
-    const resolver = vi.fn(() => ({ runtimeSessionId: "runtime-1", workDir: "/work/project", projectId: "proj-1" }))
+  followupIt('GenericFollowup_Outcome_EntersSameSequenceKey_AsInput', async ({ runtime, recording }) => {
+    const resolver = vi.fn(() => ({ runtimeSessionId: 'runtime-1', workDir: '/work/project', projectId: 'proj-1' }))
     buildClient({ resolver: resolver as never, outbox: recording.outbox, openCodeRuntime: runtime.runtime })
 
-    emitFollowup(lastBuilder(), { ...genericPayload("continue"), operationId: "followup-1" })
+    emitFollowup(lastBuilder(), { ...genericPayload('continue'), operationId: 'followup-1' })
     await flush()
     await flush()
 
     const types = recording.records.map((r) => r.event.type)
-    expect(types).toEqual([
-      "session.input",
-      "session.activity",
-    ])
+    expect(types).toEqual(['session.input', 'session.activity'])
     for (const record of recording.records) {
-      expect(record.target).toMatchObject({ kind: "session", sessionId: "gen-session-1" })
-      expect(record.runtimeSessionId).toBe("runtime-1")
-      expect(record.sessionTurnId).toBe("turn-1")
+      expect(record.target).toMatchObject({ kind: 'session', sessionId: 'gen-session-1' })
+      expect(record.runtimeSessionId).toBe('runtime-1')
+      expect(record.sessionTurnId).toBe('turn-1')
     }
   })
 
-  followupIt("GenericFollowup_AcknowledgesDeliveryBeforeRuntimeCompletion", async ({ runtime, recording }) => {
-    let resolveFollowup!: (value: { ok: true; value: { facts: { runtimeSessionId: string; workDir: string }; diagnostics: readonly never[] }; diagnostics: readonly never[] }) => void
-    const promise = new Promise<{ ok: true; value: { facts: { runtimeSessionId: string; workDir: string }; diagnostics: readonly never[] }; diagnostics: readonly never[] }>((resolve) => { resolveFollowup = resolve })
+  followupIt('GenericFollowup_AcknowledgesDeliveryBeforeRuntimeCompletion', async ({ runtime, recording }) => {
+    let resolveFollowup!: (value: {
+      ok: true
+      value: { facts: { runtimeSessionId: string; workDir: string }; diagnostics: readonly never[] }
+      diagnostics: readonly never[]
+    }) => void
+    const promise = new Promise<{
+      ok: true
+      value: { facts: { runtimeSessionId: string; workDir: string }; diagnostics: readonly never[] }
+      diagnostics: readonly never[]
+    }>((resolve) => {
+      resolveFollowup = resolve
+    })
     const followupCalls = runtime.followupCalls
     runtime.runtime.followup = async () => {
       followupCalls.push({
-        target: { runtime: "opencode", runtimeSessionId: "runtime-1", workDir: "/work/project" },
-        prompt: "continue",
+        target: { runtime: 'opencode', runtimeSessionId: 'runtime-1', workDir: '/work/project' },
+        prompt: 'continue',
       })
       return await promise
     }
-    const resolver = vi.fn(() => ({ runtimeSessionId: "runtime-1", workDir: "/work/project", projectId: "proj-1" }))
+    const resolver = vi.fn(() => ({ runtimeSessionId: 'runtime-1', workDir: '/work/project', projectId: 'proj-1' }))
 
     buildClient({ resolver: resolver as never, outbox: recording.outbox, openCodeRuntime: runtime.runtime })
 
-    const delivery = invokeFollowup(lastBuilder(), genericPayload("continue"))
+    const delivery = invokeFollowup(lastBuilder(), genericPayload('continue'))
 
     await expect(delivery).resolves.toEqual({ accepted: true })
     expect(followupCalls).toHaveLength(1)
     resolveFollowup({
       ok: true,
-      value: { facts: { runtimeSessionId: "runtime-1", workDir: "/work/project" }, diagnostics: [] },
+      value: { facts: { runtimeSessionId: 'runtime-1', workDir: '/work/project' }, diagnostics: [] },
       diagnostics: [],
     })
     await flush()
   })
 
-  followupIt("GenericFollowup_DropsUnknownSessionWithoutThrowing", async ({ runtime, recording }) => {
+  followupIt('GenericFollowup_DropsUnknownSessionWithoutThrowing', async ({ runtime, recording }) => {
     const resolver = vi.fn(() => null)
     buildClient({ resolver: resolver as never, outbox: recording.outbox, openCodeRuntime: runtime.runtime })
     const builder = lastBuilder()
 
-    expect(() => emitFollowup(builder, genericPayload("ignored"))).not.toThrow()
+    expect(() => emitFollowup(builder, genericPayload('ignored'))).not.toThrow()
     await flush()
 
     expect(runtime.followupCalls).toHaveLength(0)
     expect(recording.beforeExecutionCalls).toHaveLength(0)
   })
 
-  followupIt("GenericFollowup_DropsWhenTargetSessionIdMissing", async ({ runtime, recording }) => {
-    const resolver = vi.fn(() => ({ runtimeSessionId: "runtime-1", workDir: "/work/project", projectId: "proj-1" }))
+  followupIt('GenericFollowup_DropsWhenTargetSessionIdMissing', async ({ runtime, recording }) => {
+    const resolver = vi.fn(() => ({ runtimeSessionId: 'runtime-1', workDir: '/work/project', projectId: 'proj-1' }))
     buildClient({ resolver: resolver as never, outbox: recording.outbox, openCodeRuntime: runtime.runtime })
     const builder = lastBuilder()
 
     emitFollowup(builder, {
-      target: { kind: "generic", projectId: "proj-1" },
-      text: "no sessionId",
+      target: { kind: 'generic', projectId: 'proj-1' },
+      text: 'no sessionId',
     })
     await flush()
 
@@ -159,114 +172,128 @@ describe("RunnerSignalRClient routes follow-ups to generic sessions", () => {
     expect(recording.beforeExecutionCalls).toHaveLength(0)
   })
 
-  followupIt("GenericFollowup_DropsWhenTextMissing", async ({ runtime, recording }) => {
-    const resolver = vi.fn(() => ({ runtimeSessionId: "runtime-1", workDir: "/work/project", projectId: "proj-1" }))
+  followupIt('GenericFollowup_DropsWhenTextMissing', async ({ runtime, recording }) => {
+    const resolver = vi.fn(() => ({ runtimeSessionId: 'runtime-1', workDir: '/work/project', projectId: 'proj-1' }))
     buildClient({ resolver: resolver as never, outbox: recording.outbox, openCodeRuntime: runtime.runtime })
     const builder = lastBuilder()
 
-    emitFollowup(builder, { ...genericPayload(""), text: "" })
+    emitFollowup(builder, { ...genericPayload(''), text: '' })
     await flush()
 
     expect(runtime.followupCalls).toHaveLength(0)
     expect(recording.beforeExecutionCalls).toHaveLength(0)
   })
 
-  followupIt("WorkflowFollowup_InputEntersExactSessionTurnProducerFamily", async ({ runtime, recording }) => {
+  followupIt('WorkflowFollowup_InputEntersExactSessionTurnProducerFamily', async ({ runtime, recording }) => {
     const resolver = vi.fn((target: { kind: string }) => {
-      expect(target.kind).toBe("workflow")
-      return { runtimeSessionId: "runtime-1", workDir: "/work/project", projectId: "proj-1" }
+      expect(target.kind).toBe('workflow')
+      return { runtimeSessionId: 'runtime-1', workDir: '/work/project', projectId: 'proj-1' }
     })
     buildClient({ resolver: resolver as never, outbox: recording.outbox, openCodeRuntime: runtime.runtime })
 
     emitFollowup(lastBuilder(), {
       target: {
-        kind: "workflow",
-        projectId: "proj-1",
-        workflowRunId: "wr-1",
-        sessionName: "work-1",
-        sessionId: "session-1",
-        binding: { runtime: "opencode", runtimeSessionId: "runtime-1", runnerId: "runner-1", workDir: "/work/project" },
+        kind: 'workflow',
+        projectId: 'proj-1',
+        workflowRunId: 'wr-1',
+        sessionName: 'work-1',
+        sessionId: 'session-1',
+        binding: { runtime: 'opencode', runtimeSessionId: 'runtime-1', runnerId: 'runner-1', workDir: '/work/project' },
       },
-      text: "tag me",
-      turnId: "turn-1",
+      text: 'tag me',
+      turnId: 'turn-1',
     })
     await flush()
 
     expect(recording.beforeExecutionCalls[0]).toMatchObject({
-      producerFamily: "session-followup",
-      target: { kind: "session", sessionId: "session-1" },
-      sessionTurnId: "turn-1",
+      producerFamily: 'session-followup',
+      target: { kind: 'session', sessionId: 'session-1' },
+      sessionTurnId: 'turn-1',
     })
   })
 
-  followupIt("GenericFollowup_ForwardsFrozenDefinitionEffortIntoFollowupOptions", async ({ runtime, recording }) => {
+  followupIt('GenericFollowup_ForwardsFrozenDefinitionEffortIntoFollowupOptions', async ({ runtime, recording }) => {
     // Issue-557 T-002: the follow-up options carry the frozen
     // reasoning effort from the session definition beside model and
     // variant; the runtime applies it, the handler only forwards it.
     // The resolver mirrors the host's production resolver: it projects
     // the wire definition onto the FollowupTarget for generic sessions.
     const resolver = vi.fn((target: { kind: string; definition?: unknown }) => ({
-      runtimeSessionId: "runtime-1",
-      workDir: "/work/project",
-      projectId: "proj-1",
-      ...(target.kind === "generic" && target.definition ? { definition: target.definition } : {}),
+      runtimeSessionId: 'runtime-1',
+      workDir: '/work/project',
+      projectId: 'proj-1',
+      ...(target.kind === 'generic' && target.definition ? { definition: target.definition } : {}),
     }))
     buildClient({ resolver: resolver as never, outbox: recording.outbox, openCodeRuntime: runtime.runtime })
 
-    await expect(invokeFollowup(lastBuilder(), {
-      target: {
-        kind: "generic",
-        projectId: "proj-1",
-        sessionId: "gen-session-1",
-        definition: {
-          instructions: "be terse",
-          runtime: "opencode",
-          model: "openai/gpt-5.5",
-          variant: "balanced",
-          reasoningEffort: "high",
-          skills: [],
+    await expect(
+      invokeFollowup(lastBuilder(), {
+        target: {
+          kind: 'generic',
+          projectId: 'proj-1',
+          sessionId: 'gen-session-1',
+          definition: {
+            instructions: 'be terse',
+            runtime: 'opencode',
+            model: 'openai/gpt-5.5',
+            variant: 'balanced',
+            reasoningEffort: 'high',
+            skills: [],
+          },
+          binding: {
+            runtime: 'opencode',
+            runtimeSessionId: 'runtime-1',
+            runnerId: 'runner-1',
+            workDir: '/work/project',
+          },
         },
-        binding: { runtime: "opencode", runtimeSessionId: "runtime-1", runnerId: "runner-1", workDir: "/work/project" },
-      },
-      text: "continue with effort",
-      turnId: "turn-effort",
-    })).resolves.toEqual({ accepted: true })
+        text: 'continue with effort',
+        turnId: 'turn-effort',
+      }),
+    ).resolves.toEqual({ accepted: true })
 
     expect(runtime.followupCalls).toHaveLength(1)
     expect(runtime.followupCalls[0].options).toMatchObject({
-      model: { providerID: "openai", modelID: "gpt-5.5" },
-      variant: "balanced",
-      reasoningEffort: "high",
+      model: { providerID: 'openai', modelID: 'gpt-5.5' },
+      variant: 'balanced',
+      reasoningEffort: 'high',
     })
   })
 
-  followupIt("GenericFollowup_LeavesEffortNull_WhenDefinitionCarriesNone", async ({ runtime, recording }) => {
+  followupIt('GenericFollowup_LeavesEffortNull_WhenDefinitionCarriesNone', async ({ runtime, recording }) => {
     // Absent effort is forwarded as null — never synthesized into a
     // default — and a definition without effort still produces options.
     const resolver = vi.fn((target: { kind: string; definition?: unknown }) => ({
-      runtimeSessionId: "runtime-1",
-      workDir: "/work/project",
-      projectId: "proj-1",
-      ...(target.kind === "generic" && target.definition ? { definition: target.definition } : {}),
+      runtimeSessionId: 'runtime-1',
+      workDir: '/work/project',
+      projectId: 'proj-1',
+      ...(target.kind === 'generic' && target.definition ? { definition: target.definition } : {}),
     }))
     buildClient({ resolver: resolver as never, outbox: recording.outbox, openCodeRuntime: runtime.runtime })
 
-    await expect(invokeFollowup(lastBuilder(), {
-      target: {
-        kind: "generic",
-        projectId: "proj-1",
-        sessionId: "gen-session-1",
-        definition: {
-          instructions: "be terse",
-          runtime: "opencode",
-          model: "openai/gpt-5.5",
-          skills: [],
+    await expect(
+      invokeFollowup(lastBuilder(), {
+        target: {
+          kind: 'generic',
+          projectId: 'proj-1',
+          sessionId: 'gen-session-1',
+          definition: {
+            instructions: 'be terse',
+            runtime: 'opencode',
+            model: 'openai/gpt-5.5',
+            skills: [],
+          },
+          binding: {
+            runtime: 'opencode',
+            runtimeSessionId: 'runtime-1',
+            runnerId: 'runner-1',
+            workDir: '/work/project',
+          },
         },
-        binding: { runtime: "opencode", runtimeSessionId: "runtime-1", runnerId: "runner-1", workDir: "/work/project" },
-      },
-      text: "continue without effort",
-      turnId: "turn-no-effort",
-    })).resolves.toEqual({ accepted: true })
+        text: 'continue without effort',
+        turnId: 'turn-no-effort',
+      }),
+    ).resolves.toEqual({ accepted: true })
 
     expect(runtime.followupCalls).toHaveLength(1)
     expect(runtime.followupCalls[0].options).toMatchObject({
@@ -274,34 +301,42 @@ describe("RunnerSignalRClient routes follow-ups to generic sessions", () => {
     })
   })
 
-  followupIt("WorkflowFollowup_PreservesWorkflowResolverContextWhileRoutingByExactSession", async ({ runtime, recording }) => {
-    const resolver = vi.fn((target: { kind: string; workflowRunId?: string; sessionName?: string }) => {
-      expect(target.kind).toBe("workflow")
-      expect(target.workflowRunId).toBe("wr-legacy")
-      expect(target.sessionName).toBe("work-legacy")
-      return { runtimeSessionId: "runtime-1", workDir: "/work/project", projectId: "proj-legacy" }
-    })
-    buildClient({ resolver: resolver as never, outbox: recording.outbox, openCodeRuntime: runtime.runtime })
+  followupIt(
+    'WorkflowFollowup_PreservesWorkflowResolverContextWhileRoutingByExactSession',
+    async ({ runtime, recording }) => {
+      const resolver = vi.fn((target: { kind: string; workflowRunId?: string; sessionName?: string }) => {
+        expect(target.kind).toBe('workflow')
+        expect(target.workflowRunId).toBe('wr-legacy')
+        expect(target.sessionName).toBe('work-legacy')
+        return { runtimeSessionId: 'runtime-1', workDir: '/work/project', projectId: 'proj-legacy' }
+      })
+      buildClient({ resolver: resolver as never, outbox: recording.outbox, openCodeRuntime: runtime.runtime })
 
-    emitFollowup(lastBuilder(), {
-      target: {
-        kind: "workflow",
-        projectId: "proj-legacy",
-        workflowRunId: "wr-legacy",
-        sessionName: "work-legacy",
-        sessionId: "session-legacy",
-        binding: { runtime: "opencode", runtimeSessionId: "runtime-1", runnerId: "runner-1", workDir: "/work/project" },
-      },
-      text: "continue",
-      turnId: "turn-legacy",
-    })
-    await flush()
+      emitFollowup(lastBuilder(), {
+        target: {
+          kind: 'workflow',
+          projectId: 'proj-legacy',
+          workflowRunId: 'wr-legacy',
+          sessionName: 'work-legacy',
+          sessionId: 'session-legacy',
+          binding: {
+            runtime: 'opencode',
+            runtimeSessionId: 'runtime-1',
+            runnerId: 'runner-1',
+            workDir: '/work/project',
+          },
+        },
+        text: 'continue',
+        turnId: 'turn-legacy',
+      })
+      await flush()
 
-    expect(recording.beforeExecutionCalls).toHaveLength(1)
-    expect(recording.beforeExecutionCalls[0]).toMatchObject({
-      target: { kind: "session", sessionId: "session-legacy" },
-      sessionTurnId: "turn-legacy",
-    })
-    expect(runtime.followupCalls[0]?.target).toMatchObject({ runtimeSessionId: "runtime-1" })
-  })
+      expect(recording.beforeExecutionCalls).toHaveLength(1)
+      expect(recording.beforeExecutionCalls[0]).toMatchObject({
+        target: { kind: 'session', sessionId: 'session-legacy' },
+        sessionTurnId: 'turn-legacy',
+      })
+      expect(runtime.followupCalls[0]?.target).toMatchObject({ runtimeSessionId: 'runtime-1' })
+    },
+  )
 })

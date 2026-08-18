@@ -583,59 +583,6 @@ public partial class AgentSessionQuerier : IScopedService
     /// <see cref="GenericAgentSessionMetadata"/> labels stamped at
     /// launch.
     /// </remarks>
-    public async Task<GenericAgentSessionSummaryDto?> GetGenericSessionSummaryAsync(string projectId, string sessionId, CancellationToken ct = default)
-    {
-        await using var db = await _dbFactory.CreateDbContextAsync(ct);
-        var record = await FindGenericSessionAsync(projectId, sessionId, ct);
-        if (record is null) return null;
-
-        var session = record.Session;
-        var loaded = await TranscriptPartLoader.LoadAsync(db, new[] { session.Id }, ct: ct);
-        var transcriptEvents = ToTranscriptProjectionsInSequenceOrder(loaded);
-        var turnSequenceByTurnId = loaded.Turns.ToDictionary(t => t.Id, t => t.Sequence);
-        var runtimeSessionId = session.Status.AgentRuntimeSessionId;
-
-        var summary = TranscriptEventSummaryProjector.Summarize(
-            transcriptEvents
-                .Where(e => IsApplicableToCurrentRuntime(e, turnSequenceByTurnId, runtimeSessionId, loaded))
-                .Select(e => new TranscriptSummaryEvent(
-                    TurnSequence: turnSequenceByTurnId.GetValueOrDefault(e.TurnId, 0),
-                    Sequence: e.Sequence,
-                    PartId: e.Id.ToString(),
-                    Type: e.Type,
-                    PayloadJson: e.PayloadJson)));
-
-        var activity = ResolveAgentSessionActivity(record);
-        var interruption = AgentSessionObservationMapper.Current(session.Status);
-
-        var usage = AgentSessionJsonHelper.Usage(session);
-
-        return new GenericAgentSessionSummaryDto(
-            session.Id,
-            record.Label(GenericAgentSessionMetadata.AgentId) ?? string.Empty,
-            record.Label(GenericAgentSessionMetadata.AgentName) ?? string.Empty,
-            session.Status.AgentRuntimeSessionId,
-            session.Runtime.Runtime,
-            activity,
-            session.Status.CreatedAt.ToString("o"),
-            AgentSessionJsonHelper.LastActivityAt(session).ToString("o"),
-            summary.ResolvedModel,
-            interruption is null ? summary.FailureCategory : null,
-            interruption is null ? summary.FailureReason : null,
-            summary.ToolCallCount,
-            summary.ToolErrorCount,
-            BuildGenericSessionSummaryContextRefs(record),
-            AgentSessionDtoMapper.ToUsageDto(usage),
-            session.Status.Activity == AgentSessionActivity.Idle,
-            CurrentTurnId(session),
-            AgentSessionObservationMapper.Inputs(session.Status),
-            AgentSessionObservationMapper.Turns(session.Status),
-            Interruption: interruption,
-            InterruptionHistory: AgentSessionObservationMapper.History(session.Status),
-            Origin: record.Label(GenericAgentSessionMetadata.Origin),
-            TargetId: record.Label(GenericAgentSessionMetadata.TargetId),
-            AppliedReasoningEffort: summary.AppliedReasoningEffort);
-    }
 
     private static bool IsApplicableToCurrentRuntime(
         TranscriptEventProjection projection,
@@ -712,56 +659,6 @@ public partial class AgentSessionQuerier : IScopedService
     /// unknown source kind — the caller maps null to 404.
     /// </para>
     /// </remarks>
-    public async Task<UnifiedSessionSummaryDto?> GetUnifiedSessionSummaryAsync(string projectId, string sessionId, CancellationToken ct = default)
-    {
-        var record = await FindUnifiedSessionAsync(projectId, sessionId, ct);
-        if (record is null) return null;
-
-        var session = record.Session;
-        var sourceKind = record.Label(AgentSessionQueryMetadataKeys.SourceKind);
-        var isWorkflow = string.Equals(sourceKind, "workflow", StringComparison.Ordinal);
-        var isAgentSession = string.Equals(sourceKind, AgentLaunchSourceKind, StringComparison.Ordinal)
-            || string.Equals(sourceKind, AgentConnectionSourceKind, StringComparison.Ordinal);
-        if (!isWorkflow && !isAgentSession) return null;
-
-        await using var db = await _dbFactory.CreateDbContextAsync(ct);
-        var transcriptSummary = await ResolveTranscriptSummaryAsync(db, session.Id, session, ct);
-
-        var activity = ResolveAgentSessionActivity(record);
-        var interruption = AgentSessionObservationMapper.Current(session.Status);
-        var usage = AgentSessionJsonHelper.Usage(session);
-
-        return new UnifiedSessionSummaryDto(
-            Id: session.Id,
-            Source: sourceKind!,
-            RuntimeSessionId: session.Status.AgentRuntimeSessionId,
-            Runtime: session.Runtime.Runtime,
-            Activity: activity,
-            CreatedAt: session.Status.CreatedAt.ToString("o"),
-            LastActivityAt: AgentSessionJsonHelper.LastActivityAt(session).ToString("o"),
-            Model: session.Settings.Model,
-            ResolvedModel: transcriptSummary.ResolvedModel,
-            FailureCategory: interruption is null ? transcriptSummary.FailureCategory : null,
-            FailureReason: interruption is null ? transcriptSummary.FailureReason : null,
-            ToolCallCount: transcriptSummary.ToolCallCount,
-            ToolErrorCount: transcriptSummary.ToolErrorCount,
-            AgentId: isAgentSession ? record.Label(GenericAgentSessionMetadata.AgentId) : null,
-            AgentName: isAgentSession ? record.Label(GenericAgentSessionMetadata.AgentName) : null,
-            WorkflowRunId: isWorkflow ? record.Label(AgentSessionQueryMetadataKeys.WorkflowRunId) : null,
-            SessionName: isWorkflow ? record.Label(AgentSessionQueryMetadataKeys.SessionName) : null,
-            ContextRefs: BuildUnifiedContextRefs(record),
-            Usage: AgentSessionDtoMapper.ToUsageDto(usage),
-            RecoveryAvailable: IsRecoveryAvailable(session),
-            CurrentTurnId: CurrentTurnId(session),
-            Inputs: AgentSessionObservationMapper.Inputs(session.Status),
-            Turns: AgentSessionObservationMapper.Turns(session.Status),
-            RecoveryHistory: transcriptSummary.RecoveryHistory,
-            Interruption: interruption,
-            InterruptionHistory: AgentSessionObservationMapper.History(session.Status),
-            Origin: record.Label(GenericAgentSessionMetadata.Origin),
-            TargetId: record.Label(GenericAgentSessionMetadata.TargetId),
-            AppliedReasoningEffort: transcriptSummary.AppliedReasoningEffort);
-    }
 
     /// <summary>
     /// Builds the unified source-agnostic transcript surfaced by

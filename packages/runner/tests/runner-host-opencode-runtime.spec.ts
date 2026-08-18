@@ -347,17 +347,18 @@ describe('RunnerHost wires the OpenCodeRuntime lifecycle', () => {
 
   it('does not publish an authoritative Pi catalog before discovery has loaded', async (resources) => {
     installFakeOpenCodeRuntimeFactory(resources)
-    resources.piRuntimeFactory = () => ({
-      start: vi.fn(async () => ({
-        ok: true as const,
-        value: { ready: true, diagnostic: null, catalog: null },
-        diagnostics: [],
-      })),
-      ready: () => true,
-      diagnostic: () => null,
-      catalog: () => null,
-      shutdown: vi.fn(async () => undefined),
-    }) as unknown as PiRuntime
+    resources.piRuntimeFactory = () =>
+      ({
+        start: vi.fn(async () => ({
+          ok: true as const,
+          value: { ready: true, diagnostic: null, catalog: null },
+          diagnostics: [],
+        })),
+        ready: () => true,
+        diagnostic: () => null,
+        catalog: () => null,
+        shutdown: vi.fn(async () => undefined),
+      }) as unknown as PiRuntime
     const connected = deferred<void>()
     connect.mockImplementation(async () => {
       connected.resolve()

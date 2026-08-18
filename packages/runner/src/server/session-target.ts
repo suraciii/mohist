@@ -29,8 +29,21 @@ export interface AgentExecutionDefinition {
 }
 
 export type SessionTarget =
-  | { kind: "workflow"; projectId: string; workflowRunId: string; sessionName: string; agentSessionId?: string; binding?: RuntimeSessionBinding }
-  | { kind: "generic"; projectId: string; sessionId: string; definition?: AgentExecutionDefinition; binding?: RuntimeSessionBinding }
+  | {
+      kind: 'workflow'
+      projectId: string
+      workflowRunId: string
+      sessionName: string
+      agentSessionId?: string
+      binding?: RuntimeSessionBinding
+    }
+  | {
+      kind: 'generic'
+      projectId: string
+      sessionId: string
+      definition?: AgentExecutionDefinition
+      binding?: RuntimeSessionBinding
+    }
 
 /**
  * The resolver's return value. A pure Mohist-owned value object:
@@ -63,7 +76,9 @@ export interface FollowupTarget {
  */
 export type FollowupTargetResolution = FollowupTarget | null
 
-export type FollowupTargetResolver = (target: SessionTarget) => FollowupTargetResolution | Promise<FollowupTargetResolution>
+export type FollowupTargetResolver = (
+  target: SessionTarget,
+) => FollowupTargetResolution | Promise<FollowupTargetResolution>
 
 /**
  * Discriminated session target carried in the unified
@@ -81,7 +96,7 @@ export type FollowupTargetResolver = (target: SessionTarget) => FollowupTargetRe
  * the existing missing taxonomy + Reset hint.
  */
 export interface ReceiveFollowupSessionTarget {
-  kind: "workflow" | "generic"
+  kind: 'workflow' | 'generic'
   projectId: string
   workflowRunId?: string
   sessionName?: string
@@ -190,16 +205,18 @@ export function resolveSessionTarget(payload: ReceiveFollowupPayload): SessionTa
   return sessionTargetFromWireTarget(payload.target)
 }
 
-export function sessionTargetFromWireTarget(target: ReceiveFollowupSessionTarget | null | undefined): SessionTarget | null {
+export function sessionTargetFromWireTarget(
+  target: ReceiveFollowupSessionTarget | null | undefined,
+): SessionTarget | null {
   if (!target) return null
-  const projectId = target.projectId ?? ""
+  const projectId = target.projectId ?? ''
   if (!projectId) return null
   const binding = runtimeBindingFromWireTarget(target.binding)
   if (target.binding !== undefined && !binding) return null
 
-  if (target.kind === "workflow" && target.workflowRunId && target.sessionName) {
+  if (target.kind === 'workflow' && target.workflowRunId && target.sessionName) {
     return {
-      kind: "workflow",
+      kind: 'workflow',
       projectId,
       workflowRunId: target.workflowRunId,
       sessionName: target.sessionName,
@@ -207,9 +224,9 @@ export function sessionTargetFromWireTarget(target: ReceiveFollowupSessionTarget
       ...(binding ? { binding } : {}),
     }
   }
-  if (target.kind === "generic" && target.sessionId) {
+  if (target.kind === 'generic' && target.sessionId) {
     return {
-      kind: "generic",
+      kind: 'generic',
       projectId,
       sessionId: target.sessionId,
       ...(target.definition ? { definition: target.definition } : {}),
@@ -220,12 +237,17 @@ export function sessionTargetFromWireTarget(target: ReceiveFollowupSessionTarget
 }
 
 function runtimeBindingFromWireTarget(value: unknown): RuntimeSessionBinding | null {
-  if (!value || typeof value !== "object") return null
+  if (!value || typeof value !== 'object') return null
   const binding = value as Partial<RuntimeSessionBinding>
-  return typeof binding.runtime === "string" && binding.runtime.length > 0
-    && typeof binding.runtimeSessionId === "string" && binding.runtimeSessionId.length > 0
-    && typeof binding.runnerId === "string" && binding.runnerId.length > 0
-    && (binding.workDir === undefined || binding.workDir === null || (typeof binding.workDir === "string" && binding.workDir.length > 0))
+  return typeof binding.runtime === 'string' &&
+    binding.runtime.length > 0 &&
+    typeof binding.runtimeSessionId === 'string' &&
+    binding.runtimeSessionId.length > 0 &&
+    typeof binding.runnerId === 'string' &&
+    binding.runnerId.length > 0 &&
+    (binding.workDir === undefined ||
+      binding.workDir === null ||
+      (typeof binding.workDir === 'string' && binding.workDir.length > 0))
     ? {
         runtime: binding.runtime,
         runtimeSessionId: binding.runtimeSessionId,

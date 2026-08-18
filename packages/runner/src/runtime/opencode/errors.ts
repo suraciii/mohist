@@ -191,7 +191,7 @@ export function normalizeIncompatibleRuntime(diagnostics: readonly RuntimeDiagno
  * projections surface it verbatim so AgentJob/Workflow failures land
  * in the EventCatalog category the capability contract specifies.
  */
-export const UNSUPPORTED_EXECUTION_CONFIGURATION_CATEGORY = "unsupported_execution_configuration"
+export const UNSUPPORTED_EXECUTION_CONFIGURATION_CATEGORY = 'unsupported_execution_configuration'
 
 /**
  * OpenCode is a variant-only runtime: upstream has no reasoning-effort
@@ -203,11 +203,10 @@ export const UNSUPPORTED_EXECUTION_CONFIGURATION_CATEGORY = "unsupported_executi
 export function normalizeUnsupportedExecutionConfiguration(effort: string): RuntimeError {
   const detail = `options.reasoningEffort '${effort}' is not supported by the OpenCode runtime; it was not applied to the model, the variant, or ignored`
   return {
-    kind: "unsupported-execution-configuration",
-    message: "OpenCode does not support a reasoning effort; remove the reasoning effort or select a runtime that supports it",
-    diagnostics: [
-      { severity: "error", code: UNSUPPORTED_EXECUTION_CONFIGURATION_CATEGORY, message: detail },
-    ],
+    kind: 'unsupported-execution-configuration',
+    message:
+      'OpenCode does not support a reasoning effort; remove the reasoning effort or select a runtime that supports it',
+    diagnostics: [{ severity: 'error', code: UNSUPPORTED_EXECUTION_CONFIGURATION_CATEGORY, message: detail }],
   }
 }
 
@@ -222,7 +221,7 @@ export function unsupportedReasoningEffortError(
 ): RuntimeError | null {
   const effort = options?.reasoningEffort
   if (effort === undefined || effort === null) return null
-  if (typeof effort !== "string") return normalizeInvalidInput("options.reasoningEffort must be a string when present")
+  if (typeof effort !== 'string') return normalizeInvalidInput('options.reasoningEffort must be a string when present')
   if (effort.length === 0) return null
   return normalizeUnsupportedExecutionConfiguration(effort)
 }

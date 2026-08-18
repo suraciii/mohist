@@ -232,12 +232,14 @@ describe('RunnerHost', () => {
       pollCount += 1
       return pollCount === 1 ? [work] : []
     })
-    report.mockImplementation(async (_reportedWork: unknown, result: { requeue?: boolean; error?: { code?: string } }) => {
-      expect(result.requeue).toBe(true)
-      expect(result.error?.code).toBe('stale-capability-snapshot')
-      reported.resolve()
-      return { tracked: true, reason: 'requeued' }
-    })
+    report.mockImplementation(
+      async (_reportedWork: unknown, result: { requeue?: boolean; error?: { code?: string } }) => {
+        expect(result.requeue).toBe(true)
+        expect(result.error?.code).toBe('stale-capability-snapshot')
+        reported.resolve()
+        return { tracked: true, reason: 'requeued' }
+      },
+    )
     const controller = new AbortController()
     const host = new RunnerHost({
       serverUrl: 'https://runner.test',
