@@ -6,7 +6,8 @@ public union AgentSessionEvent(
     AgentSessionModelChanged,
     AgentSessionContextCompacted,
     AgentSessionContextExhausted,
-    AgentSessionContextHealthUpdated);
+    AgentSessionContextHealthUpdated,
+    AgentSessionInterruptionLifecycleChanged);
 
 public sealed record AgentSessionRuntimeBound(
     string AgentRuntimeSessionId,
@@ -49,3 +50,11 @@ public sealed record AgentSessionContextHealthUpdated(
     long? ContextWindowUsed,
     long? ContextWindowSize,
     DateTime RecordedAt);
+
+/// <summary>
+/// Durable visibility event for an update-caused work interruption. The
+/// transition payload is shared with workflow and AgentJob owners so replayed
+/// events use the same generation/idempotence rule everywhere.
+/// </summary>
+public sealed record AgentSessionInterruptionLifecycleChanged(
+    Mohist.Server.Contracts.AgentWorkInterruptionTransition Transition);

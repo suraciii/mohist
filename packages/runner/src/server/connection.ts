@@ -14,8 +14,15 @@ import type { BuildInfo } from '../runtime/build-info.js'
 import { parseObject } from '../core/json.js'
 import { getSegments } from '../core/json-path.js'
 import type { TaskLogBatch } from '../runtime/task-log.js'
+import type {
+  PendingUpdateOperation,
+  RecoveryReceiptAcknowledgement,
+  RuntimeRecoveryReceipt,
+} from '../runtime/recovery-receipt.js'
+import * as recoveryRequests from './connection.update-recovery.js'
 import { WorkspaceHomeClaimedError } from '../runtime/workspace-entity.js'
 import { currentRunnerTransport } from '../system/filesystem.js'
+import { extractErrorMessage } from './connection-errors.js'
 
 export class ServerConnection {
   private readonly buildGitHash: string | null
@@ -97,6 +104,23 @@ export class ServerConnection {
     const payload = (await response.json()) as { dispatches?: WorkDispatchResponse[] }
     return (payload.dispatches ?? []).map(parseDispatchWorkItem)
   }
+
+  async fetchPendingUpdateOperation(signal: AbortSignal): Promise<PendingUpdateOperation | null> {
+    return recoveryRequests.fetchPendingUpdateOperation(this.fetchWithAuth.bind(this), this.url.bind(this), signal)
+  }
+
+  async sendRecoveryReceipt(
+    receipt: RuntimeRecoveryReceipt,
+    signal: AbortSignal,
+  ): Promise<RecoveryReceiptAcknowledgement> {
+    return recoveryRequests.sendRecoveryReceipt(this.fetchWithAuth.bind(this), this.url.bind(this), receipt, signal)
+  }
+
+  readonly reportRecoveryStopFailure = (
+    failure: recoveryRequests.RecoveryStopFailure,
+    signal: AbortSignal,
+  ): Promise<void> =>
+    recoveryRequests.reportRecoveryStopFailure(this.fetchWithAuth.bind(this), this.url.bind(this), failure, signal)
 
   async fetchConfig(signal: AbortSignal): Promise<CleanupPolicy | null> {
     const response = await this.fetchWithAuth(this.url('config'), { method: 'GET', signal })
@@ -871,6 +895,7 @@ function parseDispatchWorkItem(dispatch: WorkDispatchResponse): DispatchWorkItem
     agentJobId: dispatch.agentJobId ?? undefined,
     agentSessionId: dispatch.agentSessionId ?? undefined,
     recovery: parseObject(dispatch.recovery),
+    recoveryGeneration: dispatch.recoveryGeneration ?? undefined,
     agentDefinition: dispatch.agentDefinition ?? undefined,
     agentSessionStartup: dispatch.agentSessionStartup ?? undefined,
     agentRecovery: dispatch.agentRecovery ?? undefined,
@@ -942,8 +967,7 @@ function readBoolean(value: unknown, path: string[]): boolean | null {
 /**
  * Answer shape for
  * `POST /api/runner/{runnerId}/workspaces/{projectId}/{workspaceName}/materialized`.
- * `runnerId` is the workspace home runner recorded by the server (this
- * runner on success).
+ * `runnerId` is the workspace home runner recorded by the server (this runner on success).
  */
 export interface WorkspaceMaterializedReport {
   readonly runnerId: string
@@ -953,8 +977,8 @@ export interface WorkspaceMaterializedReport {
 /**
  * Answer shape for
  * `GET /api/runner/{runnerId}/workspaces/{projectId}/{workspaceName}/reclaimable`.
- * `status` is the Workspace entity lifecycle status; `activeBoundSessions`
- * counts sessions currently bound to and actively using the workspace.
+ * `status` is the Workspace lifecycle status; `activeBoundSessions` counts
+ * sessions bound to and actively using the workspace.
  */
 export interface WorkspaceReclaimability {
   readonly status: 'active' | 'archived'
@@ -972,16 +996,4 @@ export function parseWorkspaceReclaimability(payload: unknown): WorkspaceReclaim
     throw new Error('workspace reclaimability returned an invalid session count')
   }
   return { status, activeBoundSessions: count }
-}
-
-function extractErrorMessage(payload: Record<string, unknown> | null, fallback: string) {
-  if (!payload) return null
-  const data = readObject(payload, ['data'])
-  if (data) {
-    const message = readString(data, ['message'])
-    if (message) return message
-  }
-  const error = readString(payload, ['error'])
-  if (error) return error
-  return null
 }

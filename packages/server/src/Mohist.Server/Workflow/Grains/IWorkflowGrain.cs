@@ -31,12 +31,30 @@ public interface IWorkflowGrain : IGrainWithStringKey, IRemindable
     Task<ReportAck> InterruptActiveWorkAsync(string workerId, string reason);
     Task<ReportAck> AbandonActiveWorkAsync(string workerId, string workId, string reason);
     Task<ReportAck> BindAgentExecutionAsync(AgentExecutionBinding binding);
+    Task<ReportAck> MarkUpdateInterruptedAsync(
+        string taskRunId,
+        string workId,
+        string runnerId,
+        string updateOperationId,
+        DateTimeOffset? interruptedAt = null,
+        TimeSpan? settlementTimeout = null) => Task.FromResult(ReportAck.Stale);
+    Task<ReportAck> MarkUpdateStopFailureAsync(
+        string taskRunId,
+        string workId,
+        string runnerId,
+        string updateOperationId,
+        string failure) => Task.FromResult(ReportAck.Stale);
     Task<bool> CanStartAgentCleanupAsync(AgentExecutionBinding binding);
     Task<ReportAck> ObserveAgentExecutionAsync(AgentExecutionObservation observation);
     Task<ReportAck> ObserveAgentResultUnknownAsync(string workerId, string taskRunId, string workId, string reasonCode, string? message = null);
     Task<ReportAck> ObserveAgentRunnerDisconnectedAsync(string workerId);
     Task<ReportAck> RejectActiveWorkDispatchAsync(string workerId, string workId, ExecutionError error);
     Task<ReportAck> ReceiveTaskReportAsync(string workerId, string workId, TaskReport report);
+    Task<RuntimeRecoveryReceiptAcknowledgement> ReceiveRecoveryReceiptAsync(RuntimeRecoveryReceipt receipt) =>
+        Task.FromResult(new RuntimeRecoveryReceiptAcknowledgement(
+            receipt?.ReceiptId ?? string.Empty,
+            RuntimeRecoveryReceiptAckStatuses.Stale,
+            "unsupported"));
     Task<ReportAck> ReceiveCheckReportAsync(string workerId, string workId, CheckReport report);
 
     Task ReleaseStageLocksAsync(string stage, string reason);

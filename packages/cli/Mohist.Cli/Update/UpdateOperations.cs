@@ -171,7 +171,6 @@ internal sealed class UpdateOperations
 
         _out.WriteLine(
             $"Runner update interrupt: status=interrupted runnerId={interruption.RunnerId} interruptedWorkCount={interruption.InterruptedWorkCount}.");
-        _out.WriteLine("Runner updated successfully.");
 
         try
         {
@@ -191,8 +190,19 @@ internal sealed class UpdateOperations
             {
                 _err.WriteLine("Runner update recovery: status=unconfirmed; refreshed runner identity was not confirmed.");
                 await ReleaseRunnerUpdateInterruptAsync(runnerRefreshVerifier, interruption);
+                return outcome.ExitCode;
             }
-            return outcome.ExitCode;
+
+            var recovery = await runnerRefreshVerifier.WaitForRecoveryAsync(interruption, cancellationToken);
+            recovery.WriteSummary(_out, _err);
+            if (recovery.HasAffectedWork && !recovery.FullyRecovered)
+            {
+                _err.WriteLine("Runner update recovery: status=unresolved; affected work was not acknowledged before the bounded wait expired.");
+                return recovery.ExitCode;
+            }
+
+            _out.WriteLine("Runner updated successfully.");
+            return 0;
         }
         catch
         {

@@ -31,6 +31,8 @@ public static class EventCatalog
         ReverseDns.TaskFailed,
         ReverseDns.TaskInterrupted,
         ReverseDns.TaskCancelled,
+        ReverseDns.AgentTaskUpdateInterrupted,
+        ReverseDns.AgentTaskInterruptionLifecycleChanged,
         ReverseDns.AgentTaskResultUnconfirmed,
         ReverseDns.TaskBlocked,
         ReverseDns.StageBlocked,
@@ -47,8 +49,10 @@ public static class EventCatalog
         ReverseDns.AgentSessionContextCompacted,
         ReverseDns.AgentSessionContextExhausted,
         ReverseDns.AgentSessionContextHealthUpdated,
+        ReverseDns.AgentSessionInterruptionLifecycleChanged,
         ReverseDns.RunnerDisconnected,
         ReverseDns.AgentJobFailed,
+        ReverseDns.AgentJobUpdateInterrupted,
         ReverseDns.AgentJobTerminalDelivery,
         ReverseDns.AgentJobSubagentTerminal,
         ReverseDns.AgentSessionFollowupDelivery,
@@ -171,6 +175,8 @@ public static class EventCatalog
         public const string TaskFailed = "com.mohist.workflow.task.failed";
         public const string TaskInterrupted = "com.mohist.workflow.task.interrupted";
         public const string TaskCancelled = "com.mohist.workflow.task.cancelled";
+        public const string AgentTaskUpdateInterrupted = "com.mohist.workflow.agent.task.update-interrupted";
+        public const string AgentTaskInterruptionLifecycleChanged = "com.mohist.workflow.agent.task.interruption-lifecycle-changed";
         public const string AgentTaskResultUnconfirmed = "com.mohist.workflow.agent-result-unconfirmed";
         public const string TaskBlocked = "com.mohist.workflow.task.blocked";
         public const string StageBlocked = "com.mohist.workflow.stage.blocked";
@@ -188,10 +194,12 @@ public static class EventCatalog
         public const string AgentSessionContextCompacted = "com.mohist.agent-session.context-compacted";
         public const string AgentSessionContextExhausted = "com.mohist.agent-session.context-exhausted";
         public const string AgentSessionContextHealthUpdated = "com.mohist.agent-session.context-health-updated";
+        public const string AgentSessionInterruptionLifecycleChanged = "com.mohist.agent-session.interruption-lifecycle-changed";
 
         public const string RunnerDisconnected = "com.mohist.runner.disconnected";
 
         public const string AgentJobFailed = "com.mohist.agent.job.failed";
+        public const string AgentJobUpdateInterrupted = "com.mohist.agent.job.update-interrupted";
         public const string AgentJobTerminalDelivery = "com.mohist.agent.job.terminal-delivery";
         public const string AgentJobSubagentTerminal = "com.mohist.agent.job.subagent-terminal";
         public const string AgentSessionFollowupDelivery = "com.mohist.agent.session.followup-delivery";

@@ -107,7 +107,9 @@ public static partial class WorkflowRunExtensions
             string workerId)
         {
             var match = FindTaskAttempt(run, taskRunId, workId, workerId);
-            return match is { } found && found.Task.Status == TaskRunStatus.Running
+            return match is { } found
+                && found.Task.Status == TaskRunStatus.Running
+                && found.Task.AgentResultSettlement?.State != AgentResultSettlementState.RecoverablyInterrupted
                 ? new WorkflowReportableTaskAttempt(
                     found.Stage.Id,
                     found.Task.Id,
@@ -123,8 +125,14 @@ public static partial class WorkflowRunExtensions
                 return null;
 
             var active = run.FindActiveWork(workId, workerId);
-            if (active is not null)
+            if (active is not null
+                && (active.TaskRunId is null
+                    || run.Stages.SelectMany(stage => stage.Tasks)
+                        .FirstOrDefault(task => string.Equals(task.Id, active.TaskRunId, StringComparison.Ordinal))
+                        ?.AgentResultSettlement?.State != AgentResultSettlementState.RecoverablyInterrupted))
+            {
                 return active;
+            }
 
             var matches = run.Stages
                 .SelectMany(stage => stage.Tasks.Select(task => (Stage: stage, Task: task)))
@@ -157,6 +165,24 @@ public static partial class WorkflowRunExtensions
                 string.Equals(candidate.Id, attempt.TaskRunId, StringComparison.Ordinal));
             return stage is not null && task is not null
                 ? ActiveTask(stage, task)
+                : null;
+        }
+
+        /// <summary>
+        /// A terminal recovery receipt has already passed the frozen binding
+        /// check in the grain. It may therefore settle the original task even
+        /// after the update fence marked its settlement recoverably interrupted;
+        /// ordinary reports must remain blocked from that state.
+        /// </summary>
+        public WorkflowActiveWork? FindRecoveryReceiptWork(
+            string taskRunId,
+            string workId,
+            string workerId)
+        {
+            var found = FindTaskAttempt(run, taskRunId, workId, workerId);
+            return found is { } match
+                && match.Task.Status == TaskRunStatus.Running
+                ? ActiveTask(match.Stage, match.Task)
                 : null;
         }
 
@@ -208,7 +234,10 @@ public static partial class WorkflowRunExtensions
         public bool HasUnresolvedAgentResult() =>
             run.Stages.SelectMany(stage => stage.Tasks)
                 .Any(task => task.Status == TaskRunStatus.Running
-                    && task.AgentResultSettlement?.State is AgentResultSettlementState.Unknown or AgentResultSettlementState.Blocked);
+                    && task.AgentResultSettlement?.State is
+                        AgentResultSettlementState.RecoverablyInterrupted
+                        or AgentResultSettlementState.Unknown
+                        or AgentResultSettlementState.Blocked);
 
         public bool HasBlockedAgentResult() =>
             run.Stages.SelectMany(stage => stage.Tasks)
@@ -224,6 +253,13 @@ public static partial class WorkflowRunExtensions
                 : null;
         }
 
+        public TaskRun? FindTaskForRecoveryReceipt(string taskRunId, string workId) =>
+            run.Stages
+                .SelectMany(stage => stage.Tasks)
+                .SingleOrDefault(task =>
+                    string.Equals(task.Id, taskRunId, StringComparison.Ordinal)
+                    && string.Equals(task.WorkId, workId, StringComparison.Ordinal));
+
         public AgentExecutionBinding? FindBoundAgentExecution(
             string taskRunId,
             string workId,
@@ -234,6 +270,7 @@ public static partial class WorkflowRunExtensions
             return found is not null
                 && found.Value.Task.Status == TaskRunStatus.Running
                 && settlement is not null
+                && settlement.State != AgentResultSettlementState.RecoverablyInterrupted
                 && HasFullExecutionBinding(settlement)
                 ? new AgentExecutionBinding(
                     settlement.TaskRunId,
@@ -250,7 +287,10 @@ public static partial class WorkflowRunExtensions
             run.Stages
                 .SelectMany(stage => stage.Tasks.Select(task => new WorkflowAgentResultSettlementTask(stage.Id, task)))
                 .SingleOrDefault(candidate => candidate.Task.Status == TaskRunStatus.Running
-                    && candidate.Task.AgentResultSettlement?.State is AgentResultSettlementState.Unknown or AgentResultSettlementState.Blocked);
+                    && candidate.Task.AgentResultSettlement?.State is
+                        AgentResultSettlementState.RecoverablyInterrupted
+                        or AgentResultSettlementState.Unknown
+                        or AgentResultSettlementState.Blocked);
 
         public WorkflowAgentResultSettlementTask? FindCancelledAgentResultSettlementTask() =>
             run.Stages
@@ -264,6 +304,50 @@ public static partial class WorkflowRunExtensions
                 .SingleOrDefault(candidate => candidate.Task.Status is TaskRunStatus.Completed or TaskRunStatus.Failed
                     && candidate.Task.AgentResultSettlement is not null);
 
+        public AgentExecutionUpdate MarkUpdateInterrupted(
+            string taskRunId,
+            string workId,
+            string runnerId,
+            string updateOperationId,
+            DateTimeOffset now,
+            TimeSpan settlementTimeout)
+        {
+            if (string.IsNullOrWhiteSpace(taskRunId)
+                || string.IsNullOrWhiteSpace(workId)
+                || string.IsNullOrWhiteSpace(runnerId)
+                || string.IsNullOrWhiteSpace(updateOperationId))
+            {
+                return AgentExecutionUpdate.Rejected;
+            }
+
+            var match = FindTaskAttempt(run, taskRunId, workId, runnerId);
+            if (match is not { } found
+                || found.Task.Status != TaskRunStatus.Running
+                || found.Task.AgentResultSettlement is not { } settlement)
+            {
+                return AgentExecutionUpdate.Rejected;
+            }
+
+            if (settlement.State == AgentResultSettlementState.RecoverablyInterrupted)
+            {
+                return string.Equals(settlement.UpdateOperationId, updateOperationId, StringComparison.Ordinal)
+                    ? AgentExecutionUpdate.Unchanged
+                    : AgentExecutionUpdate.Rejected;
+            }
+
+            if (settlementTimeout <= TimeSpan.Zero)
+                throw new ArgumentOutOfRangeException(nameof(settlementTimeout));
+
+            settlement.State = AgentResultSettlementState.RecoverablyInterrupted;
+            settlement.UpdateOperationId = updateOperationId;
+            settlement.FirstUnknownAt = now;
+            settlement.DeadlineAt = now + settlementTimeout;
+            settlement.LastObservation = AgentExecutionObservationKind.Stopped;
+            settlement.ReasonCode = "update-interrupted";
+            settlement.Message = "Agent execution was interrupted by a Runner update.";
+            return AgentExecutionUpdate.Updated;
+        }
+
         public AgentExecutionUpdate BindAgentExecution(AgentExecutionBinding binding)
         {
             if (!IsValid(binding))
@@ -272,16 +356,28 @@ public static partial class WorkflowRunExtensions
             var match = FindTaskAttempt(run, binding.TaskRunId, binding.WorkId, binding.RunnerId);
             if (match is not { } found
                 || found.Task.Status != TaskRunStatus.Running
-                || found.Task.AgentResultSettlement is not { } settlement)
+                || found.Task.AgentResultSettlement is not { } settlement
+                || settlement.State == AgentResultSettlementState.RecoverablyInterrupted)
             {
                 return AgentExecutionUpdate.Rejected;
             }
 
-            if (!MatchesAttempt(settlement, binding) || !MatchesBoundFields(settlement, binding))
+            if (!MatchesAttempt(settlement, binding))
                 return AgentExecutionUpdate.Rejected;
 
             if (HasFullExecutionBinding(settlement))
-                return AgentExecutionUpdate.Unchanged;
+            {
+                return MatchesBoundFields(settlement, binding)
+                    ? AgentExecutionUpdate.Unchanged
+                    : AgentExecutionUpdate.Rejected;
+            }
+
+            // A replacement turn is allocated before the Runner creates its
+            // physical Session turn. The first complete binding is allowed to
+            // replace that logical placeholder; subsequent bindings remain
+            // immutable and must match it exactly.
+            if (settlement.RecoveryGeneration == 0 && !MatchesBoundFields(settlement, binding))
+                return AgentExecutionUpdate.Rejected;
 
             settlement.AgentSessionId = binding.AgentSessionId;
             settlement.AgentTurnId = binding.AgentTurnId;
@@ -298,7 +394,8 @@ public static partial class WorkflowRunExtensions
             var match = FindTaskAttempt(run, binding.TaskRunId, binding.WorkId, binding.RunnerId);
             if (match is not { } found
                 || found.Task.Status != TaskRunStatus.Running
-                || found.Task.AgentResultSettlement is not { } settlement)
+                || found.Task.AgentResultSettlement is not { } settlement
+                || settlement.State == AgentResultSettlementState.RecoverablyInterrupted)
             {
                 return false;
             }
@@ -323,6 +420,7 @@ public static partial class WorkflowRunExtensions
             if (match is not { } found
                 || found.Task.Status != TaskRunStatus.Running
                 || found.Task.AgentResultSettlement is not { } settlement
+                || settlement.State == AgentResultSettlementState.RecoverablyInterrupted
                 || !MatchesAttempt(settlement, binding)
                 || !HasFullExecutionBinding(settlement)
                 || !MatchesBoundFields(settlement, binding)
@@ -356,7 +454,8 @@ public static partial class WorkflowRunExtensions
             var found = FindTaskAttempt(run, taskRunId, workId, runnerId);
             if (found is not { } match
                 || match.Task.Status != TaskRunStatus.Running
-                || match.Task.AgentResultSettlement is not { } settlement)
+                || match.Task.AgentResultSettlement is not { } settlement
+                || settlement.State == AgentResultSettlementState.RecoverablyInterrupted)
             {
                 return AgentExecutionUpdate.Rejected;
             }
@@ -388,6 +487,9 @@ public static partial class WorkflowRunExtensions
                 return AgentExecutionUpdate.Rejected;
             }
 
+            if (settlement.State == AgentResultSettlementState.RecoverablyInterrupted)
+                return AgentExecutionUpdate.Unchanged;
+
             return RecordObservation(
                 settlement,
                 AgentExecutionObservationKind.Disconnected,
@@ -403,7 +505,7 @@ public static partial class WorkflowRunExtensions
             var unresolved = run.FindUnresolvedAgentResultSettlementTask();
             var settlement = unresolved?.Task.AgentResultSettlement;
             if (unresolved is null
-                || settlement?.State != AgentResultSettlementState.Unknown
+                || settlement?.State is not (AgentResultSettlementState.RecoverablyInterrupted or AgentResultSettlementState.Unknown)
                 || settlement.DeadlineAt is not { } deadline
                 || deadline > now)
             {
@@ -428,9 +530,9 @@ public static partial class WorkflowRunExtensions
 
             var current = run.Stages.FirstOrDefault(s => s.Id == run.CurrentStageId);
             if (current is null) return null;
-            var task = current.Tasks.FirstOrDefault(t => t.Status is not (TaskRunStatus.Completed or TaskRunStatus.Failed or TaskRunStatus.Cancelled));
+            var task = current.Tasks.FirstOrDefault(t => t.Status is not (TaskRunStatus.Completed or TaskRunStatus.Failed or TaskRunStatus.Cancelled or TaskRunStatus.Interrupted));
             if (task is not null)
-                return new WorkflowPendingWork(task.Id, WorkItemTypes.Task, current.Id, task.Title);
+                return new WorkflowPendingWork(task.WorkId ?? task.Id, WorkItemTypes.Task, current.Id, task.Title);
 
             if (current.Checks.Count > 0 && current.Checks.Any(c => c.Status != StageCheckStatus.Passed))
                 return new WorkflowPendingWork("checks", WorkItemTypes.Checks, current.Id, "Checks");
@@ -462,7 +564,7 @@ public static partial class WorkflowRunExtensions
                 throw new InvalidOperationException("Cannot add runtime task to stage " + stage + "; current stage is " + current.Id);
 
             var runningIndex = current.Tasks.FindIndex(t => t.Status == TaskRunStatus.Running);
-            var firstIncompleteIndex = current.Tasks.FindIndex(t => t.Status is not (TaskRunStatus.Completed or TaskRunStatus.Failed or TaskRunStatus.Cancelled));
+            var firstIncompleteIndex = current.Tasks.FindIndex(t => t.Status is not (TaskRunStatus.Completed or TaskRunStatus.Failed or TaskRunStatus.Cancelled or TaskRunStatus.Interrupted));
             var insertIndex = runningIndex >= 0
                 ? runningIndex + 1
                 : firstIncompleteIndex >= 0
@@ -512,7 +614,7 @@ public static partial class WorkflowRunExtensions
                 throw new InvalidOperationException("agent_result_unresolved");
             var current = run.CurrentStage();
             var runningIndex = current.Tasks.FindIndex(t => t.Status == TaskRunStatus.Running);
-            var firstIncompleteIndex = current.Tasks.FindIndex(t => t.Status is not (TaskRunStatus.Completed or TaskRunStatus.Failed or TaskRunStatus.Cancelled));
+            var firstIncompleteIndex = current.Tasks.FindIndex(t => t.Status is not (TaskRunStatus.Completed or TaskRunStatus.Failed or TaskRunStatus.Cancelled or TaskRunStatus.Interrupted));
             var insertIndex = runningIndex >= 0
                 ? runningIndex + 1
                 : firstIncompleteIndex >= 0

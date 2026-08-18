@@ -5,6 +5,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Mohist.Server.Infrastructure;
 using Mohist.Server.Infrastructure.Data.Workflow;
 using Mohist.Server.Infrastructure.Data.Db;
+using Mohist.Server.Contracts;
 using Mohist.Server.Runner.Grains;
 using Mohist.Server.Runner.Services;
 using Mohist.Server.Workflow.Domain.Run;
@@ -770,6 +771,7 @@ public sealed class AgentResultSettlementSpecs : WorkflowGrainSpecs
         var completed = await LoadRunAsync(_workflowId!);
         Assert.Equal(TaskRunStatus.Completed, Assert.Single(completed.CurrentStage().Tasks).Status);
     }
+
 
     [Fact]
     public async Task BlockedSettlement_FencesMismatchedLateReportLeavingBlockedStateUntouched()

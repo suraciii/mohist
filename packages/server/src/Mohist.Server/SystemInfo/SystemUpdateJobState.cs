@@ -16,7 +16,8 @@ public sealed record SystemUpdateJobState(
     DateTimeOffset UpdatedAt,
     DateTimeOffset? CompletedAt,
     string? Outcome = null,
-    string? UnavailableCapability = null)
+    string? UnavailableCapability = null,
+    IReadOnlyList<SystemUpdateRecoveryWorkOutcome>? Recovery = null)
 {
     public static readonly IReadOnlyList<string> ActiveStatuses = ["running", "waiting-for-reconnect"];
     public static readonly IReadOnlyList<string> TerminalStatuses = ["succeeded", "failed", "recovered", "superseded", "cancelled"];

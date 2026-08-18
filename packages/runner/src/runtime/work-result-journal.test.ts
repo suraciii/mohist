@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { DispatchWorkItem, WorkItemResult } from '../core/types.js'
+import type { RuntimeRecoveryReceipt } from './recovery-receipt.js'
 import { WorkResultJournal, workKey } from './work-result-journal.js'
 import { runnerRestartedResult } from './work-report.js'
 import { MemoryFileSystem } from '../../tests/support/memory-filesystem.js'
@@ -19,6 +20,24 @@ const work: DispatchWorkItem = {
 const result: WorkItemResult = {
   status: 'completed',
   output: { answer: 'done' },
+}
+
+const interruptedReceipt: RuntimeRecoveryReceipt = {
+  workflowRunId: 'workflow-1',
+  taskRunId: 'task-1',
+  workId: 'work-1',
+  runnerId: 'runner-1',
+  agentSessionId: 'session-1',
+  agentTurnId: 'turn-1',
+  runtime: 'pi',
+  runtimeSessionId: '/workspace/session.jsonl',
+  recoveryGeneration: 0,
+  receiptId: 'receipt-1',
+  payload: {
+    type: 'update-interrupted',
+    updateOperationId: 'runner-update:1',
+    stopConfirmed: true,
+  },
 }
 
 class FailingWriteFileSystem extends MemoryFileSystem {
@@ -46,6 +65,40 @@ describe('WorkResultJournal', () => {
     })
   })
 
+  it('WritesReloadsAndRetiresAnInterruptedReceiptOnlyAfterAcknowledgement', async () => {
+    await withTestRunnerResources(async (fileSystem) => {
+      const journal = new WorkResultJournal('/runner')
+      await journal.load()
+      await journal.begin(work)
+      await journal.interrupt(work, interruptedReceipt)
+
+      const raw = await fileSystem.readText('/runner/.mohist/runner-state/work-results.json')
+      expect(JSON.parse(raw).entries[workKey(work)]).toMatchObject({
+        state: 'interrupted',
+        receipt: interruptedReceipt,
+      })
+
+      const restarted = new WorkResultJournal('/runner')
+      await restarted.load()
+      expect(restarted.interrupted()).toEqual([{ work, state: 'interrupted', receipt: interruptedReceipt }])
+      await expect(restarted.acknowledge(work)).resolves.toBeUndefined()
+      expect(restarted.interrupted()).toEqual([])
+    })
+  })
+
+  it('KeepsExactlyOneTerminalRecordPerWork', async () => {
+    await withTestRunnerResources(async () => {
+      const journal = new WorkResultJournal('/runner')
+      await journal.load()
+      await journal.begin(work)
+      await journal.interrupt(work, interruptedReceipt)
+      await expect(journal.complete(work, result)).rejects.toThrow('already has an interruption receipt')
+      await expect(journal.interrupt(work, { ...interruptedReceipt, receiptId: 'other' })).rejects.toThrow(
+        'receipt conflict',
+      )
+    })
+  })
+
   it('FencesStartedWorkAfterRestartWithoutReplayingThePhysicalEffect', async () => {
     await withTestRunnerResources(async (_fileSystem) => {
       const journal = new WorkResultJournal('/runner')
@@ -55,6 +108,7 @@ describe('WorkResultJournal', () => {
       const restarted = new WorkResultJournal('/runner')
       await restarted.load()
       expect(await restarted.begin(work)).toBe('started')
+      expect(restarted.started()).toEqual([{ work, state: 'started' }])
       expect(restarted.completed()).toEqual([])
       expect(restarted.started()).toEqual([{ work, state: 'started' }])
       await expect(restarted.acknowledge(work)).rejects.toThrow('unfinished work')

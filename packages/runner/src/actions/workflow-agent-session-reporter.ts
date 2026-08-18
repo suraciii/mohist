@@ -85,6 +85,10 @@ export class WorkflowAgentSessionReporter {
           )
   }
 
+  getAgentTurnId(): string | null {
+    return this.agentTurnId
+  }
+
   async awaitInput(prompt: string, runtimeSessionId: string): Promise<void> {
     if (this.closed) return
     if (this.cleanupOperationId !== null) {

@@ -1,6 +1,14 @@
 using Mohist.Server.Agent.Grains;
+using Mohist.Server.Contracts;
+using Mohist.Server.Infrastructure.Events;
 using Mohist.Server.Runner.Grains;
 using Mohist.Server.TestSupport;
+using Mohist.Server.Sessions.Domain;
+using Mohist.Server.Sessions.Grains;
+using Mohist.Server.Sessions.Services;
+using Mohist.Server.Workflow.Domain.Run;
+using Mohist.Server.Workflow.Grains;
+using Mohist.Workflow.Definition;
 using Orleans;
 using Xunit;
 
@@ -11,6 +19,142 @@ public sealed class RunnerUpdateInterruptSpecs : Mohist.Server.SpecTests.Specs.W
 {
     public RunnerUpdateInterruptSpecs(Mohist.Server.SpecTests.Specs.Workflow.WorkflowGrainFixture fixture)
         : base(fixture) { }
+
+    [Fact]
+    public async Task UpdateInterrupt_FencesActiveWorkflowAgentAndDisconnectDoesNotUnfenceIt()
+    {
+        var workflow = await StartWorkflowAsync(SingleStage(
+            tasks: [new TaskDefinition("agent", "Agent", "mohist/opencode")],
+            checks: []));
+        var (work, runnerId) = await PollWorkAnyAsync();
+        var run = await LoadRunAsync(_workflowId!);
+        var task = Assert.Single(run.CurrentStage().Tasks);
+        var operationId = $"runner-update:{Guid.NewGuid():N}";
+
+        Assert.Equal(ReportAck.Accepted, await workflow.BindAgentExecutionAsync(
+            new AgentExecutionBinding(
+                task.Id,
+                work.WorkId,
+                runnerId,
+                "session-update",
+                "turn-update",
+                "opencode",
+                "runtime-update")));
+
+        Assert.Equal(ReportAck.Accepted, await workflow.MarkUpdateInterruptedAsync(
+            task.Id,
+            work.WorkId,
+            runnerId,
+            operationId));
+        Assert.Equal(ReportAck.Accepted, await workflow.MarkUpdateInterruptedAsync(
+            task.Id,
+            work.WorkId,
+            runnerId,
+            operationId));
+
+        var marked = await LoadRunAsync(_workflowId!);
+        var settlement = Assert.Single(marked.CurrentStage().Tasks).AgentResultSettlement;
+        Assert.NotNull(settlement);
+        Assert.Equal(AgentResultSettlementState.RecoverablyInterrupted, settlement!.State);
+        Assert.Equal(operationId, settlement.UpdateOperationId);
+        Assert.Equal(ReportAck.Accepted, await workflow.ObserveAgentRunnerDisconnectedAsync(runnerId));
+        Assert.Equal(
+            AgentResultSettlementState.RecoverablyInterrupted,
+            (await LoadRunAsync(_workflowId!)).CurrentStage().Tasks.Single().AgentResultSettlement!.State);
+        Assert.Contains(await EventStore.ListAsync(_workflowId!), entry =>
+            entry.Envelope.Type == EventCatalog.ReverseDns.AgentTaskUpdateInterrupted);
+    }
+
+    [Fact]
+    public async Task UpdateInterrupt_MissingSessionRetainsVisibilityDeliveryUntilSessionMaterializes()
+    {
+        var workflow = await StartWorkflowAsync(SingleStage(
+            tasks: [new TaskDefinition("agent", "Agent", "mohist/opencode")],
+            checks: []));
+        var (work, runnerId) = await PollWorkAnyAsync();
+        var task = Assert.Single((await LoadRunAsync(_workflowId!)).CurrentStage().Tasks);
+        var sessionId = $"missing-session-{Guid.NewGuid():N}";
+        var operationId = $"runner-update:{Guid.NewGuid():N}";
+
+        Assert.Equal(ReportAck.Accepted, await workflow.BindAgentExecutionAsync(
+            new AgentExecutionBinding(
+                task.Id,
+                work.WorkId,
+                runnerId,
+                sessionId,
+                "turn-missing-session",
+                "opencode",
+                "runtime-missing-session")));
+        Assert.Equal(ReportAck.Accepted, await workflow.MarkUpdateInterruptedAsync(
+            task.Id,
+            work.WorkId,
+            runnerId,
+            operationId));
+
+        var pending = (await LoadRunAsync(_workflowId!)).PendingSessionInterruptionDeliveries;
+        Assert.Equal(2, pending.Count);
+        Assert.All(pending, delivery => Assert.Equal(sessionId, delivery.SessionId));
+        Assert.Null(await Grains.GetGrain<IAgentSessionGrain>(sessionId).GetAsync());
+
+        var session = Grains.GetGrain<IAgentSessionGrain>(sessionId);
+        await session.OpenAsync(new OpenAgentSessionCommand(
+            runnerId,
+            "opencode",
+            Metadata: new AgentSessionMetadata(new Dictionary<string, string>(StringComparer.Ordinal)
+            {
+                [AgentSessionQueryMetadataKeys.ProjectId] = TestProjectId(_workflowId!),
+                [AgentSessionQueryMetadataKeys.SourceKind] = "agent-launch",
+                [GenericAgentSessionMetadata.AgentId] = "agent-test",
+            })));
+        await workflow.ReceiveReminder(WorkflowGrain.AgentSessionInterruptionReminderName, default);
+
+        var repaired = await session.GetAsync();
+        Assert.NotNull(repaired);
+        Assert.Contains(repaired!.InterruptionHistory!, transition =>
+            transition.State == AgentWorkInterruptionStates.Interrupted
+            && transition.UpdateOperationId == operationId);
+        Assert.Empty((await LoadRunAsync(_workflowId!)).PendingSessionInterruptionDeliveries);
+    }
+
+    [Fact]
+    public async Task UpdateInterruptedWorkWithoutReceipt_BlocksAtTheSettlementDeadline()
+    {
+        var workflow = await StartWorkflowAsync(SingleStage(
+            tasks: [new TaskDefinition("agent", "Agent", "mohist/opencode")],
+            checks: []));
+        var (work, runnerId) = await PollWorkAnyAsync();
+        var run = await LoadRunAsync(_workflowId!);
+        var task = Assert.Single(run.CurrentStage().Tasks);
+
+        Assert.Equal(ReportAck.Accepted, await workflow.BindAgentExecutionAsync(
+            new AgentExecutionBinding(
+                task.Id,
+                work.WorkId,
+                runnerId,
+                "session-deadline",
+                "turn-deadline",
+                "opencode",
+                "runtime-deadline")));
+        Assert.Equal(ReportAck.Accepted, await workflow.MarkUpdateInterruptedAsync(
+            task.Id,
+            work.WorkId,
+            runnerId,
+            $"runner-update:{Guid.NewGuid():N}"));
+
+        var marked = await LoadRunAsync(_workflowId!);
+        var settlement = Assert.Single(marked.CurrentStage().Tasks).AgentResultSettlement!;
+        var deadline = Assert.IsType<DateTimeOffset>(settlement.DeadlineAt);
+        Assert.True(marked.HasUnresolvedAgentResult());
+
+        _fixture.TimeProvider.Advance(deadline - _fixture.TimeProvider.GetUtcNow());
+        await workflow.ReceiveReminder(WorkflowGrain.AgentResultSettlementReminderName, default);
+
+        var blocked = await LoadRunAsync(_workflowId!);
+        var blockedTask = Assert.Single(blocked.CurrentStage().Tasks);
+        Assert.Equal(AgentResultSettlementState.Blocked, blockedTask.AgentResultSettlement!.State);
+        Assert.True(blocked.HasBlockedAgentResult());
+        Assert.Equal(TaskRunStatus.Running, blockedTask.Status);
+    }
 
     [Fact]
     public async Task BeginUpdateInterrupt_PreservesActiveWorkAndClosesAdmissionIdempotently()

@@ -110,17 +110,18 @@ internal sealed class WorkflowWorkLifecycle
     public async Task<string?> MarkTaskRunningAsync(
         WorkflowRun run,
         string logicalTaskId,
-        string workerId)
+        string workerId,
+        string? allocatedWorkId = null)
     {
         var current = run.CurrentStage();
-        var currentTask = current.Tasks.FirstOrDefault(t => t.Id == logicalTaskId);
+        var currentTask = current.Tasks.FirstOrDefault(t => string.Equals(t.Id, logicalTaskId, StringComparison.Ordinal));
         if (currentTask?.Status == TaskRunStatus.Running)
         {
             _owner.CacheAssignedWorkerId(workerId);
             return currentTask.WorkId ?? logicalTaskId;
         }
 
-        var workId = logicalTaskId;
+        var workId = allocatedWorkId ?? logicalTaskId;
         var now = _owner.Now();
         var events = run.StartTask(workId, workerId, now);
         await _owner.SaveAsyncWithEvents(events);
@@ -154,9 +155,12 @@ internal sealed class WorkflowWorkLifecycle
         {
             case WorkflowTaskWork t:
             {
+                var taskWorkId = run.CurrentStage().Tasks
+                    .FirstOrDefault(task => string.Equals(task.Id, t.Id, StringComparison.Ordinal))?.WorkId
+                    ?? t.Id;
                 return WorkItem.Task(
                     stage: work.Stage,
-                    id: t.Id,
+                    id: taskWorkId,
                     title: t.Title,
                     uses: t.Uses,
                     with: t.With,
@@ -183,7 +187,10 @@ internal sealed class WorkflowWorkLifecycle
     {
         var currentStage = run.CurrentStage();
 
-        var task = currentStage.Tasks.FirstOrDefault(t => t.Id == workId);
+        var task = currentStage.Tasks.FirstOrDefault(t =>
+            string.Equals(t.Id, workId, StringComparison.Ordinal)
+            || (t.Status == TaskRunStatus.Pending
+                && string.Equals(t.WorkId, workId, StringComparison.Ordinal)));
         if (task is not null)
         {
             if (task.Status == TaskRunStatus.Running)
@@ -193,7 +200,11 @@ internal sealed class WorkflowWorkLifecycle
             }
             if (task.Status != TaskRunStatus.Pending) return null;
 
-            var claimedWorkId = await MarkTaskRunningAsync(run, task.Id, workerId);
+            var claimedWorkId = await MarkTaskRunningAsync(
+                run,
+                task.Id,
+                workerId,
+                task.WorkId ?? workId);
             return claimedWorkId;
         }
 
@@ -220,6 +231,60 @@ internal sealed class WorkflowWorkLifecycle
         return null;
     }
 
+    /// <summary>
+    /// Converts a fenced Agent attempt into one new pending attempt. The old
+    /// TaskRun remains in the stage as immutable interruption history; the
+    /// returned work id is already persisted on the replacement so a poll can
+    /// offer exactly that identity after the commit.
+    /// </summary>
+    public WorkflowRecoveryAttempt AllocateRecoveryAttempt(
+        WorkflowRun run,
+        TaskRun interrupted,
+        int recoveryGeneration,
+        DateTimeOffset now)
+    {
+        var stage = run.Stages.Single(candidate => candidate.Tasks.Contains(interrupted));
+        var workId = AllocateRecoveryWorkId(run, interrupted.WorkId!, recoveryGeneration);
+        var turnId = $"recovery-turn:{workId}";
+        var replacement = TaskRun.MakeRecoveryAttempt(
+            interrupted,
+            stage.Tasks,
+            stage.Attempt,
+            recoveryGeneration,
+            workId,
+            turnId,
+            run.Stages.SelectMany(candidate => candidate.Tasks),
+            now);
+
+        interrupted.Status = TaskRunStatus.Interrupted;
+        interrupted.FinishedAt = now;
+        var index = stage.Tasks.IndexOf(interrupted);
+        stage.Tasks.Insert(index + 1, replacement);
+        stage.Status = StageRunStatus.Running;
+        run.Status = WorkflowRunStatus.Ready;
+        run.ReadySince = now;
+        return new WorkflowRecoveryAttempt(stage.Id, interrupted.Id, replacement.Id, workId, turnId, recoveryGeneration);
+    }
+
+    private static string AllocateRecoveryWorkId(WorkflowRun run, string originalWorkId, int recoveryGeneration)
+    {
+        var candidate = $"{originalWorkId}.recovery.{recoveryGeneration}";
+        var occupied = run.Stages
+            .SelectMany(stage => stage.Tasks)
+            .SelectMany(task => new[] { task.Id, task.WorkId })
+            .Where(value => !string.IsNullOrWhiteSpace(value))
+            .ToHashSet(StringComparer.Ordinal);
+        if (occupied.Add(candidate))
+            return candidate;
+
+        for (var suffix = 2; ; suffix++)
+        {
+            var disambiguated = $"{candidate}.run{suffix}";
+            if (occupied.Add(disambiguated))
+                return disambiguated;
+        }
+    }
+
     public void RequeueRunningChecks(WorkflowRun run)
     {
         var currentStage = run.CurrentStage();
@@ -232,3 +297,11 @@ internal sealed class WorkflowWorkLifecycle
         }
     }
 }
+
+internal sealed record WorkflowRecoveryAttempt(
+    string StageId,
+    string InterruptedTaskRunId,
+    string ReplacementTaskRunId,
+    string WorkId,
+    string AgentTurnId,
+    int RecoveryGeneration);

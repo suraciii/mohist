@@ -15,6 +15,7 @@ import { buildExecutionEnvelope } from '../runtime/execution-envelope.js'
 import type { AgentExecutionDefinition } from '../core/types.js'
 import { WorkflowAgentSessionReporter } from './workflow-agent-session-reporter.js'
 import type { AgentSessionRuntimeEventOutbox } from '../server/runtime-event-outbox.js'
+import type { RuntimeTurnRegistry } from '../runtime/runtime-turn-registry.js'
 
 export const PI_USES = 'mohist/pi'
 export const PI_TURN_DURATION_MS = 60 * 60 * 1000
@@ -37,6 +38,8 @@ interface ActionInvocationContext {
   piRuntime?: PiRuntime | null
   skillResolver?: SkillResolver
   agentDefinition?: AgentExecutionDefinition | null
+  runtimeTurnRegistry?: RuntimeTurnRegistry | null
+  runtimeTurnKey?: string | null
   serverConnection?: ServerConnection | null
   runtimeEventOutbox?: AgentSessionRuntimeEventOutbox | null
   runtimeEventRecordId?: () => string
@@ -78,6 +81,8 @@ export async function piAction(
         piRuntime: host.piRuntime,
         skillResolver: host.skillResolver,
         agentDefinition: host.agentDefinition,
+        runtimeTurnRegistry: host.runtimeTurnRegistry,
+        runtimeTurnKey: host.runtimeTurnKey ?? null,
         log: host.log,
         cleanupAttempt: host.cleanupAttempt,
       }
@@ -224,6 +229,14 @@ export async function piAction(
       turnFact: { finalAssistantText: null },
     })
   }
+
+  context.runtimeTurnRegistry?.register(context.runtimeTurnKey ?? '', {
+    agentSessionId: agentSessionId ?? '',
+    agentTurnId: reporter?.getAgentTurnId() ?? null,
+    runtime: 'pi',
+    runtimeSessionId,
+    workDir: context.workDir,
+  })
 
   const request: PiTurnRequest = {
     target: { runtime: 'pi', runtimeSessionId, workDir: context.workDir },

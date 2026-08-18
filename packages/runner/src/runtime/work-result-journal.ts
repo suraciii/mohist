@@ -2,10 +2,11 @@ import { dirname, join, resolve } from 'node:path'
 import { currentRunnerFileSystem } from '../system/filesystem.js'
 import type { DispatchWorkItem, WorkItemResult } from '../core/types.js'
 import type { WorkInterruptionFact } from './work-report.js'
+import type { RuntimeRecoveryReceipt } from './recovery-receipt.js'
 
 export const DEFAULT_WORK_RESULT_JOURNAL_FILE = '.mohist/runner-state/work-results.json'
 
-export type WorkResultJournalState = 'started' | 'completed'
+export type WorkResultJournalState = 'started' | 'completed' | 'interrupted'
 
 export interface WorkResultJournalEntry {
   work: DispatchWorkItem
@@ -13,6 +14,8 @@ export interface WorkResultJournalEntry {
   result?: WorkItemResult
   /** Present when the result was surfaced because a started execution died. */
   interruption?: WorkInterruptionFact
+  /** Receipt-shaped terminal identity when the bound Agent turn is known. */
+  receipt?: RuntimeRecoveryReceipt
 }
 
 export type WorkResultJournalBegin = 'new' | WorkResultJournalState
@@ -143,19 +146,28 @@ export class WorkResultJournal {
     }, true)
   }
 
-  async complete(work: DispatchWorkItem, result: WorkItemResult): Promise<WorkResultJournalPersistence> {
+  async complete(
+    work: DispatchWorkItem,
+    result: WorkItemResult,
+    receipt?: RuntimeRecoveryReceipt,
+  ): Promise<WorkResultJournalPersistence> {
     return await this.mutate(async () => {
       const key = workKey(work)
       const existing = this.entries.get(key)
       if (!existing || !sameWork(existing.work, work)) {
         throw new Error(`Work result journal cannot complete unknown work ${key}`)
       }
+      if (existing.state === 'interrupted')
+        throw new Error(`Work result journal already has an interruption receipt for ${key}`)
       if (existing.state === 'completed') {
-        if (!sameResult(existing.result, result)) throw new Error(`Work result journal result conflict for ${key}`)
+        if (!sameResult(existing.result, result) || !sameReceipt(existing.receipt, receipt)) {
+          throw new Error(`Work result journal result conflict for ${key}`)
+        }
         return this.persistencePending ? await this.persistOrRetain() : { state: 'durable' }
       }
       existing.state = 'completed'
       existing.result = cloneResult(result)
+      if (receipt) existing.receipt = cloneReceipt(receipt)
       return await this.persistOrRetain()
     })
   }
@@ -182,6 +194,13 @@ export class WorkResultJournal {
   started(): WorkResultJournalEntry[] {
     this.ensureReady()
     return [...this.entries.values()].filter((entry) => entry.state === 'started').map(cloneEntry)
+  }
+
+  interrupted(): WorkResultJournalEntry[] {
+    this.ensureReady()
+    return [...this.entries.values()]
+      .filter((entry) => entry.state === 'interrupted' && entry.receipt !== undefined)
+      .map(cloneEntry)
   }
 
   async completeInterrupted(
@@ -216,13 +235,39 @@ export class WorkResultJournal {
     })
   }
 
+  async interrupt(work: DispatchWorkItem, receipt: RuntimeRecoveryReceipt): Promise<void> {
+    await this.mutate(async () => {
+      const key = workKey(work)
+      const existing = this.entries.get(key)
+      if (!existing || !sameWork(existing.work, work)) {
+        throw new Error(`Work result journal cannot interrupt unknown work ${key}`)
+      }
+      if (existing.state === 'interrupted') {
+        if (!sameReceipt(existing.receipt, receipt)) throw new Error(`Work result journal receipt conflict for ${key}`)
+        return
+      }
+      if (existing.state === 'completed')
+        throw new Error(`Work result journal already has a terminal result for ${key}`)
+      existing.state = 'interrupted'
+      existing.receipt = cloneReceipt(receipt)
+      try {
+        await this.persist()
+      } catch (error) {
+        this.unavailable = true
+        existing.state = 'started'
+        delete existing.receipt
+        throw error
+      }
+    }, true)
+  }
+
   async acknowledge(work: DispatchWorkItem): Promise<void> {
     await this.mutate(async () => {
       const key = workKey(work)
       const existing = this.entries.get(key)
       if (!existing) return
       if (!sameWork(existing.work, work)) throw new Error(`Work result journal identity conflict for ${key}`)
-      if (existing.state !== 'completed')
+      if (existing.state !== 'completed' && existing.state !== 'interrupted')
         throw new Error(`Work result journal cannot acknowledge unfinished work ${key}`)
       this.entries.delete(key)
       try {
@@ -329,12 +374,17 @@ function parseJournal(raw: string): WorkResultJournalFile | null {
 
 function isEntry(value: unknown): value is WorkResultJournalEntry {
   if (!isRecord(value) || !isWork(value.work)) return false
-  if (value.state === 'started') return value.result === undefined && value.interruption === undefined
-  return (
-    value.state === 'completed' &&
-    isResult(value.result) &&
-    (value.interruption === undefined || isInterruption(value.interruption))
-  )
+  if (value.state === 'started') {
+    return value.result === undefined && value.interruption === undefined && value.receipt === undefined
+  }
+  if (value.state === 'completed') {
+    return (
+      isResult(value.result) &&
+      (value.interruption === undefined || isInterruption(value.interruption)) &&
+      (value.receipt === undefined || isReceipt(value.receipt))
+    )
+  }
+  return value.state === 'interrupted' && isReceipt(value.receipt) && value.result === undefined
 }
 
 function isWork(value: unknown): value is DispatchWorkItem {
@@ -350,6 +400,42 @@ function isResult(value: unknown): value is WorkItemResult {
   return isRecord(value) && typeof value.status === 'string'
 }
 
+function isReceipt(value: unknown): value is RuntimeRecoveryReceipt {
+  if (!isRecord(value)) return false
+  if (
+    typeof value.workflowRunId !== 'string' ||
+    typeof value.taskRunId !== 'string' ||
+    typeof value.workId !== 'string' ||
+    typeof value.runnerId !== 'string' ||
+    typeof value.agentSessionId !== 'string' ||
+    typeof value.agentTurnId !== 'string' ||
+    typeof value.runtime !== 'string' ||
+    typeof value.runtimeSessionId !== 'string' ||
+    typeof value.recoveryGeneration !== 'number' ||
+    !Number.isInteger(value.recoveryGeneration) ||
+    value.recoveryGeneration < 0 ||
+    typeof value.receiptId !== 'string' ||
+    !isRecord(value.payload) ||
+    typeof value.payload.type !== 'string'
+  )
+    return false
+  if (value.payload.type === 'terminal-result') {
+    return (
+      isResult(value.payload.result) &&
+      typeof value.payload.fingerprint === 'string' &&
+      value.payload.updateOperationId === undefined &&
+      value.payload.stopConfirmed === undefined
+    )
+  }
+  return (
+    value.payload.type === 'update-interrupted' &&
+    value.payload.result === undefined &&
+    value.payload.fingerprint === undefined &&
+    typeof value.payload.updateOperationId === 'string' &&
+    value.payload.stopConfirmed === true
+  )
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === 'object' && !Array.isArray(value)
 }
@@ -362,6 +448,10 @@ function sameResult(left: WorkItemResult | undefined, right: WorkItemResult): bo
   return JSON.stringify(left) === JSON.stringify(right)
 }
 
+function sameReceipt(left: RuntimeRecoveryReceipt | undefined, right: RuntimeRecoveryReceipt | undefined): boolean {
+  return JSON.stringify(left) === JSON.stringify(right)
+}
+
 function cloneWork(work: DispatchWorkItem): DispatchWorkItem {
   return structuredClone(work)
 }
@@ -370,12 +460,17 @@ function cloneResult(result: WorkItemResult): WorkItemResult {
   return structuredClone(result)
 }
 
+function cloneReceipt(receipt: RuntimeRecoveryReceipt): RuntimeRecoveryReceipt {
+  return structuredClone(receipt)
+}
+
 function cloneEntry(entry: WorkResultJournalEntry): WorkResultJournalEntry {
   return {
     work: cloneWork(entry.work),
     state: entry.state,
-    ...(entry.result ? { result: cloneResult(entry.result) } : {}),
+    ...(entry.result !== undefined ? { result: cloneResult(entry.result) } : {}),
     ...(entry.interruption ? { interruption: structuredClone(entry.interruption) } : {}),
+    ...(entry.receipt !== undefined ? { receipt: cloneReceipt(entry.receipt) } : {}),
   }
 }
 

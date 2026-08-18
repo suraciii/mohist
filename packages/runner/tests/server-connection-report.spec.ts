@@ -252,6 +252,94 @@ describe('ServerConnection.poll recovery state', () => {
   })
 })
 
+describe('ServerConnection update interruption handoff', () => {
+  it('readsTheWrappedPendingOperationAndAffectedWorkInventory', async () => {
+    fetchMock.mockResolvedValueOnce(
+      mockResponse({
+        status: 200,
+        body: JSON.stringify({
+          data: {
+            operation: {
+              operationId: 'runner-update:1',
+              runnerId: 'runner-1',
+              createdAt: '2026-08-15T00:00:00Z',
+              affectedWorks: [
+                { ownerKind: 'workflow', ownerId: 'wf-1', workId: 'work-1', taskRunId: 'task-1', workType: 'task' },
+              ],
+            },
+          },
+        }),
+      }),
+    )
+    const connection = new ServerConnection(options())
+    await expect(connection.fetchPendingUpdateOperation(new AbortController().signal)).resolves.toEqual({
+      operationId: 'runner-update:1',
+      runnerId: 'runner-1',
+      createdAt: '2026-08-15T00:00:00Z',
+      affectedWorks: [
+        { ownerKind: 'workflow', ownerId: 'wf-1', workId: 'work-1', taskRunId: 'task-1', workType: 'task' },
+      ],
+    })
+  })
+
+  it('sendsTheExactReceiptAndTreatsAcknowledgeAsTerminal', async () => {
+    const receipt = {
+      workflowRunId: 'wf-1',
+      taskRunId: 'task-1',
+      workId: 'work-1',
+      runnerId: 'runner-1',
+      agentSessionId: 'session-1',
+      agentTurnId: 'turn-1',
+      runtime: 'pi',
+      runtimeSessionId: '/workspace/session.jsonl',
+      recoveryGeneration: 0,
+      receiptId: 'receipt-1',
+      payload: { type: 'update-interrupted', updateOperationId: 'runner-update:1', stopConfirmed: true },
+    } as const
+    fetchMock.mockResolvedValueOnce(
+      mockResponse({
+        status: 200,
+        body: JSON.stringify({ appliedReceiptId: 'receipt-1', status: 'accepted' }),
+      }),
+    )
+    const connection = new ServerConnection(options())
+    await expect(connection.sendRecoveryReceipt(receipt, new AbortController().signal)).resolves.toEqual({
+      appliedReceiptId: 'receipt-1',
+      status: 'accepted',
+    })
+    const init = fetchMock.mock.calls[0][1] as RequestInit
+    expect(JSON.parse(init.body as string)).toEqual(receipt)
+  })
+
+  it('keepsRetryableReceiptResponsesAsDeliveryFailures', async () => {
+    fetchMock.mockResolvedValueOnce(
+      mockResponse({
+        status: 409,
+        body: JSON.stringify({ appliedReceiptId: 'receipt-1', status: 'retryable', reason: 'replacement-pending' }),
+      }),
+    )
+    const connection = new ServerConnection(options())
+    await expect(
+      connection.sendRecoveryReceipt(
+        {
+          workflowRunId: 'wf-1',
+          taskRunId: 'task-1',
+          workId: 'work-1',
+          runnerId: 'runner-1',
+          agentSessionId: 'session-1',
+          agentTurnId: 'turn-1',
+          runtime: 'pi',
+          runtimeSessionId: '/workspace/session.jsonl',
+          recoveryGeneration: 0,
+          receiptId: 'receipt-1',
+          payload: { type: 'update-interrupted', updateOperationId: 'runner-update:1', stopConfirmed: true },
+        },
+        new AbortController().signal,
+      ),
+    ).rejects.toMatchObject({ retryable: true })
+  })
+})
+
 describe('ServerConnection.patchRunVars', () => {
   it('patchesWorkflowRunProfileVariablesWithVariableBundleShape', async () => {
     fetchMock.mockResolvedValueOnce(mockResponse({ status: 200, body: '{}' }))

@@ -99,6 +99,17 @@ export interface SystemUpdateStatus {
   completedAt: string | null
   outcome?: SystemUpdateOutcome | null
   unavailableCapability?: string | null
+  recovery?: SystemUpdateRecoveryWork[] | null
+}
+
+export interface SystemUpdateRecoveryWork {
+  ownerKind: string
+  ownerId: string
+  workId: string
+  taskRunId?: string | null
+  workType: string
+  status: string
+  state: string
 }
 
 export interface SystemUpdateStatusEnvelope {

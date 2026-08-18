@@ -5,6 +5,7 @@ import type { ActionResult } from '../core/types.js'
 import type { IssueFields } from './issue-fields.js'
 import type { PiRuntime } from '../runtime/pi/index.js'
 import type { SkillResolver } from '../runtime/skill-resolver.js'
+import type { RuntimeTurnRegistry } from '../runtime/runtime-turn-registry.js'
 
 export const ALL_CAPABILITIES: ReadonlySet<ActionCapability> = new Set([
   'agent-turn',
@@ -50,6 +51,8 @@ export interface ActionHost {
   piRuntime?: PiRuntime | null
   skillResolver?: SkillResolver
   agentDefinition?: AgentExecutionDefinition | null
+  runtimeTurnRegistry?: RuntimeTurnRegistry | null
+  runtimeTurnKey?: string | null
   exec(command: string, args?: string[]): Promise<{ exitCode: number; stdout: string; stderr: string }>
   agent?: AgentTurn
   issue?: IssueFieldsHost

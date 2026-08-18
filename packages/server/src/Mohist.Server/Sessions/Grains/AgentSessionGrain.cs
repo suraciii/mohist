@@ -2648,16 +2648,6 @@ public sealed partial class AgentSessionGrain : Grain, IAgentSessionGrain, IRemi
         _persistTimer = null;
     }
 
-    public async Task<AgentSessionInfo?> GetAsync()
-    {
-        // A quarantined activation holds a session mutated past a rolled-back
-        // state/event transaction. Do not expose that dirty view; reject until
-        // the grain reactivates and reloads from storage.
-        if (_sessionReloadRequired)
-            throw new InvalidOperationException($"Agent session {SessionId} must reload after a failed event-aware save");
-        return _session is null ? null : await ToInfoAsync(_session);
-    }
-
     public async Task EnsureRuntimeSessionPresentAsync()
     {
         var session = await GetRequiredAsync();
@@ -2704,12 +2694,6 @@ public sealed partial class AgentSessionGrain : Grain, IAgentSessionGrain, IRemi
             throw new InvalidOperationException($"Agent session {SessionId} does not exist.");
         _session.PersistedActivitySummary = (_session.PersistedActivitySummary ?? AgentSessionActivitySummaryState.Empty).Normalize();
         return _session;
-    }
-
-    private void RejectIfReloadRequired()
-    {
-        if (_sessionReloadRequired)
-            throw new InvalidOperationException($"Agent session {SessionId} must reload after a failed event-aware save");
     }
 
     private async Task CommitAsync(AgentSession session, IReadOnlyList<AgentSessionEvent> events)
@@ -2763,7 +2747,9 @@ public sealed partial class AgentSessionGrain : Grain, IAgentSessionGrain, IRemi
             s.Runtime.Runtime,
             usage.CachedWriteTokens,
             s.BindingEpoch,
-            s.ActivitySummary.LastTerminalStatus ?? eventSummary.LastTerminalStatus);
+            s.ActivitySummary.LastTerminalStatus ?? eventSummary.LastTerminalStatus,
+            AgentWorkInterruptionProjection.Latest(s.Status.InterruptionHistory),
+            s.Status.InterruptionHistory);
     }
 
     private async Task<AgentSessionTranscriptSummary> LoadEventSummaryAsync(string sessionId)
@@ -3678,8 +3664,13 @@ public sealed partial class AgentSessionGrain : Grain, IAgentSessionGrain, IRemi
             throw new ArgumentException("Input id is required.", nameof(command));
         if (string.IsNullOrWhiteSpace(command.TurnId))
             throw new ArgumentException("Turn id is required.", nameof(command));
-        if (string.IsNullOrWhiteSpace(command.Prompt))
-            throw new ArgumentException("Prompt is required.", nameof(command));
+        if (string.IsNullOrWhiteSpace(command.Prompt)
+            && (command.Attachments is null || command.Attachments.Count == 0))
+        {
+            throw new ArgumentException(
+                "Prompt is required unless at least one attachment is accepted.",
+                nameof(command));
+        }
         if (string.IsNullOrWhiteSpace(command.Source))
             throw new ArgumentException("Source is required.", nameof(command));
 

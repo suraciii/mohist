@@ -113,6 +113,84 @@ public class DispatchServiceReconciliationSpecs : Mohist.Server.SpecTests.Specs.
     }
 
     [Fact]
+    public async Task ReconnectPoll_OffersOnlyOneReplacementAndSuppressesReportedReplacementIdentity()
+    {
+        var workflow = await StartWorkflowAsync(SingleStage(
+            tasks: [new TaskDefinition("agent", "Agent", "mohist/opencode")],
+            checks: []));
+        var runnerId = _runnerId!;
+        var originalDispatch = Assert.Single((await Dispatch.PollAsync(
+            runnerId,
+            new RunnerPollRequest([], []))).Dispatches);
+        var original = Assert.Single((await LoadRunAsync(_workflowId!)).CurrentStage().Tasks);
+        var binding = new AgentExecutionBinding(
+            original.Id,
+            originalDispatch.WorkId,
+            runnerId,
+            "reconnect-session",
+            "reconnect-turn",
+            "opencode",
+            "reconnect-runtime-session");
+        Assert.Equal(ReportAck.Accepted, await workflow.BindAgentExecutionAsync(binding));
+
+        var operation = await Grains.GetGrain<IRunnerUpdateOperationGrain>(runnerId).StartOrGetAsync(
+            new RunnerUpdateOperation(
+                $"runner-update:{Guid.NewGuid():N}",
+                runnerId,
+                _fixture.TimeProvider.GetUtcNow(),
+                new[] { new RunnerUpdateWork(
+                    WorkDispatchOwnerKinds.Workflow,
+                    _workflowId!,
+                    originalDispatch.WorkId,
+                    original.Id,
+                    WorkItemTypes.Task) }));
+        await Grains.GetGrain<IRunnerUpdateOperationGrain>(runnerId).MarkWorkAsync(
+            operation.OperationId,
+            WorkDispatchOwnerKinds.Workflow,
+            _workflowId!,
+            originalDispatch.WorkId,
+            original.Id,
+            RunnerUpdateWorkStatus.Marked);
+        Assert.Equal(ReportAck.Accepted, await workflow.MarkUpdateInterruptedAsync(
+            original.Id,
+            originalDispatch.WorkId,
+            runnerId,
+            operation.OperationId));
+        Assert.Empty((await Dispatch.PollAsync(runnerId, new RunnerPollRequest([], []))).Dispatches);
+
+        var receipt = new RuntimeRecoveryReceipt(
+            _workflowId!,
+            original.Id,
+            originalDispatch.WorkId,
+            runnerId,
+            binding.AgentSessionId,
+            binding.AgentTurnId,
+            binding.Runtime,
+            binding.RuntimeSessionId,
+            0,
+            "reconnect-interruption-receipt",
+            new RuntimeRecoveryReceiptPayload(
+                RuntimeRecoveryReceiptPayloadTypes.UpdateInterrupted,
+                UpdateOperationId: operation.OperationId,
+                StopConfirmed: true));
+        var acknowledgement = await workflow.ReceiveRecoveryReceiptAsync(receipt);
+        Assert.Equal(RuntimeRecoveryReceiptAckStatuses.Accepted, acknowledgement.Status);
+
+        var replacementPoll = await Dispatch.PollAsync(runnerId, new RunnerPollRequest([], []));
+        var replacementDispatch = Assert.Single(replacementPoll.Dispatches);
+        Assert.Equal(_workflowId, replacementDispatch.WorkflowRunId);
+        Assert.Equal(1, replacementDispatch.RecoveryGeneration);
+        Assert.NotEqual(originalDispatch.WorkId, replacementDispatch.WorkId);
+        Assert.DoesNotContain(replacementPoll.Dispatches, dispatch => dispatch.WorkId == originalDispatch.WorkId);
+
+        var replacementKey = WorkKey(_workflowId!, replacementDispatch.WorkId);
+        var reportedPoll = await Dispatch.PollAsync(
+            runnerId,
+            new RunnerPollRequest([replacementKey], []));
+        Assert.Empty(reportedPoll.Dispatches);
+    }
+
+    [Fact]
     public async Task Redelivery_UsesPersistedDispatchSnapshotAfterGrainActivation()
     {
         var workflow = await StartWorkflowAsync(SingleStage(checks: []));

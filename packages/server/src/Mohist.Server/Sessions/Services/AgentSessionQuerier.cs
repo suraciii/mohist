@@ -606,6 +606,7 @@ public partial class AgentSessionQuerier : IScopedService
                     PayloadJson: e.PayloadJson)));
 
         var activity = ResolveAgentSessionActivity(record);
+        var interruption = AgentSessionObservationMapper.Current(session.Status);
 
         var usage = AgentSessionJsonHelper.Usage(session);
 
@@ -619,8 +620,8 @@ public partial class AgentSessionQuerier : IScopedService
             session.Status.CreatedAt.ToString("o"),
             AgentSessionJsonHelper.LastActivityAt(session).ToString("o"),
             summary.ResolvedModel,
-            summary.FailureCategory,
-            summary.FailureReason,
+            interruption is null ? summary.FailureCategory : null,
+            interruption is null ? summary.FailureReason : null,
             summary.ToolCallCount,
             summary.ToolErrorCount,
             BuildGenericSessionSummaryContextRefs(record),
@@ -629,6 +630,8 @@ public partial class AgentSessionQuerier : IScopedService
             CurrentTurnId(session),
             AgentSessionObservationMapper.Inputs(session.Status),
             AgentSessionObservationMapper.Turns(session.Status),
+            Interruption: interruption,
+            InterruptionHistory: AgentSessionObservationMapper.History(session.Status),
             Origin: record.Label(GenericAgentSessionMetadata.Origin),
             TargetId: record.Label(GenericAgentSessionMetadata.TargetId));
     }
@@ -724,6 +727,7 @@ public partial class AgentSessionQuerier : IScopedService
         var transcriptSummary = await ResolveTranscriptSummaryAsync(db, session.Id, session, ct);
 
         var activity = ResolveAgentSessionActivity(record);
+        var interruption = AgentSessionObservationMapper.Current(session.Status);
         var usage = AgentSessionJsonHelper.Usage(session);
 
         return new UnifiedSessionSummaryDto(
@@ -736,8 +740,8 @@ public partial class AgentSessionQuerier : IScopedService
             LastActivityAt: AgentSessionJsonHelper.LastActivityAt(session).ToString("o"),
             Model: session.Settings.Model,
             ResolvedModel: transcriptSummary.ResolvedModel,
-            FailureCategory: transcriptSummary.FailureCategory,
-            FailureReason: transcriptSummary.FailureReason,
+            FailureCategory: interruption is null ? transcriptSummary.FailureCategory : null,
+            FailureReason: interruption is null ? transcriptSummary.FailureReason : null,
             ToolCallCount: transcriptSummary.ToolCallCount,
             ToolErrorCount: transcriptSummary.ToolErrorCount,
             AgentId: isAgentSession ? record.Label(GenericAgentSessionMetadata.AgentId) : null,
@@ -751,6 +755,8 @@ public partial class AgentSessionQuerier : IScopedService
             Inputs: AgentSessionObservationMapper.Inputs(session.Status),
             Turns: AgentSessionObservationMapper.Turns(session.Status),
             RecoveryHistory: transcriptSummary.RecoveryHistory,
+            Interruption: interruption,
+            InterruptionHistory: AgentSessionObservationMapper.History(session.Status),
             Origin: record.Label(GenericAgentSessionMetadata.Origin),
             TargetId: record.Label(GenericAgentSessionMetadata.TargetId));
     }
@@ -965,7 +971,9 @@ public partial class AgentSessionQuerier : IScopedService
             new AgentSessionMetadataCounts(partCount, toolCount),
             CurrentTurnId(domainSession),
             AgentSessionObservationMapper.Inputs(domainSession.Status),
-            AgentSessionObservationMapper.Turns(domainSession.Status));
+            AgentSessionObservationMapper.Turns(domainSession.Status),
+            AgentSessionObservationMapper.Current(domainSession.Status),
+            AgentSessionObservationMapper.History(domainSession.Status));
     }
 
     private static string? CurrentTurnId(AgentSession session) =>
@@ -1086,7 +1094,9 @@ public partial class AgentSessionQuerier : IScopedService
         s.Status.CreatedAt.ToString("o"), s.Status.BoundAt?.ToString("o"), s.Status.LastDataAt?.ToString("o"),
         null, null, null,
         new AgentEventSummaryDto(null, null, null, null, null, null),
-        AgentSessionDtoMapper.ToUsageDto(s));
+        AgentSessionDtoMapper.ToUsageDto(s),
+        AgentSessionObservationMapper.Current(s.Status),
+        AgentSessionObservationMapper.History(s.Status));
     }
 
     private AgentSessionSummaryDto ToSummaryDto(AgentSessionRecord record)
@@ -1103,7 +1113,9 @@ public partial class AgentSessionQuerier : IScopedService
             s.Status.LastDataAt?.ToString("o"), null, null, null,
             new AgentEventSummaryDto(null, null, null, null, null, null),
             AgentSessionDtoMapper.ToUsageDto(s),
-            record.Label(AgentSessionQueryMetadataKeys.WorkflowRunId));
+            record.Label(AgentSessionQueryMetadataKeys.WorkflowRunId),
+            AgentSessionObservationMapper.Current(s.Status),
+            AgentSessionObservationMapper.History(s.Status));
     }
 
     private static async Task<AgentSessionTranscriptData> LoadTranscriptAsync(
@@ -1160,29 +1172,6 @@ public sealed record FollowupTarget(
     string WorkflowRunId,
     string SessionName,
     bool IsActive);
-
-/// <summary>
-/// Followup target for a generic (non-workflow) <see cref="AgentSession"/>
-///. Identifies a session by its minted
-/// <see cref="SessionId"/> alone — there is no <c>workflowRunId</c> /
-/// <c>sessionName</c> pair to carry. The runner resolves the session
-/// through the OpenCode runtime's <c>generic:</c>-prefixed binding
-/// lookup at Follow-up / stop dispatch time.
-/// </summary>
-public sealed record GenericFollowupTarget(
-    string RunnerId,
-    string SessionId,
-    bool IsActive);
-
-public sealed record SessionStopTarget(
-    string RunnerId,
-    string SessionId,
-    string SourceKind,
-    string? WorkflowRunId,
-    string? SessionName,
-    string? Runtime,
-    string? RuntimeSessionId,
-    string? WorkDir);
 
 internal sealed record UnifiedTranscriptSummary(
     string? ResolvedModel,

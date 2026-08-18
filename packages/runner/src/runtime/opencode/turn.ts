@@ -531,6 +531,7 @@ export async function abortAndConfirmSession(
   client: OpencodeClient,
   sessionId: string,
   directory: string,
+  options: { readonly requireActiveTurn?: boolean } = {},
 ): Promise<
   | { ok: true }
   | {
@@ -540,6 +541,36 @@ export async function abortAndConfirmSession(
       missingSession?: boolean
     }
 > {
+  if (options.requireActiveTurn) {
+    try {
+      const beforeAbort = await withCleanupTimeout(
+        () => client.session.status({ directory }, { throwOnError: true }),
+        'status',
+      )
+      const statuses = beforeAbort.data
+      const status =
+        statuses && typeof statuses === 'object'
+          ? (statuses as Record<string, ProviderRetryStatus>)[sessionId]
+          : undefined
+      if (!status || status.type === 'idle') {
+        return {
+          ok: false,
+          code: 'abort-unconfirmed',
+          message: 'OpenCode session status did not confirm an active turn before abort',
+        }
+      }
+    } catch (cause) {
+      const timedOut = isCleanupTimeout(cause, 'status')
+      return {
+        ok: false,
+        code: timedOut ? 'status-cleanup-timeout' : 'abort-unconfirmed',
+        message: timedOut
+          ? `OpenCode session.status cleanup timed out after ${CLEANUP_OPERATION_TIMEOUT_MS}ms`
+          : `OpenCode session.status failed before abort: ${errorMessage(cause, 'unknown status error')}`,
+      }
+    }
+  }
+
   let aborted: Awaited<ReturnType<OpencodeClient['session']['abort']>>
   try {
     aborted = await withCleanupTimeout(
@@ -581,6 +612,13 @@ export async function abortAndConfirmSession(
       }
     }
     const status = (statuses as Record<string, ProviderRetryStatus>)[sessionId]
+    if (status === undefined && options.requireActiveTurn) {
+      return {
+        ok: false,
+        code: 'abort-unconfirmed',
+        message: 'OpenCode session.status did not report the bound session after abort',
+      }
+    }
     if (status !== undefined && status.type !== 'idle') {
       return {
         ok: false,

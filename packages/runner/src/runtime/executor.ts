@@ -36,6 +36,7 @@ import type { AgentJobExecutor } from './agent-job-executor.js'
 import type { ActionEffects } from '../actions/host.js'
 import { capabilitySet } from '../actions/host.js'
 import type { BindingRecoveryCoordinator } from './binding-recovery.js'
+import type { RuntimeTurnRegistry } from './runtime-turn-registry.js'
 import { SkillResolver } from './skill-resolver.js'
 import { renderWithDeferred, buildActionHost, type ExecutorCapabilityDeps } from './executor-capabilities.js'
 
@@ -65,6 +66,7 @@ export class WorkExecutor {
     private readonly bindingRecoveryCoordinator: BindingRecoveryCoordinator | null = null,
     private readonly skillResolver: SkillResolver = new SkillResolver(),
     private readonly namedWorkspaceManager: NamedWorkspaceManager | null = null,
+    private readonly runtimeTurnRegistry: RuntimeTurnRegistry | null = null,
   ) {}
 
   updateOpenCodeRuntime(runtime: OpenCodeRuntime | null) {
@@ -302,6 +304,7 @@ export class WorkExecutor {
       agentSessionRuntimeEventOutbox: this.agentSessionRuntimeEventOutbox,
       runtimeEventRecordId: this.runtimeEventRecordId,
       bindingRecoveryCoordinator: this.bindingRecoveryCoordinator,
+      runtimeTurnRegistry: this.runtimeTurnRegistry,
     }
   }
 

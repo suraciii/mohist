@@ -8,11 +8,14 @@ internal abstract record RunnerRefreshOutcome
 {
     private RunnerRefreshOutcome() { }
 
+    public RunnerRecoveryReport? Recovery { get; init; }
+
     public int ExitCode => this switch
     {
         StaleRunnerRuntime => 1,
         NotReconnected => 1,
         UnknownIdentity => 1,
+        _ when Recovery is { ExitCode: not 0 } => 1,
         _ => 0,
     };
 
@@ -30,7 +33,10 @@ internal abstract record RunnerRefreshOutcome
         private Current() { }
 
         public override void WriteSummary(TextWriter output, TextWriter error)
-            => output.WriteLine("Runner runtime verification: current (matches repo HEAD).");
+        {
+            output.WriteLine("Runner runtime verification: current (matches repo HEAD).");
+            Recovery?.WriteSummary(output, error);
+        }
     }
 
     /// <summary>Runner runtime identity could not be determined.</summary>
@@ -101,21 +107,72 @@ internal sealed record RunnerIdentityView(
     string ConnectionState,
     string? ConnectionGeneration = null);
 
+internal sealed record RunnerUpdateWorkIdentity(
+    string OwnerKind,
+    string OwnerId,
+    string WorkId,
+    string? TaskRunId,
+    string WorkType);
+
+internal sealed record RunnerRecoveryWorkOutcome(
+    RunnerUpdateWorkIdentity Identity,
+    string Status,
+    string State)
+{
+    public bool Recovered => string.Equals(Status, "recovered", StringComparison.Ordinal);
+}
+
+internal sealed record RunnerRecoveryReport(IReadOnlyList<RunnerRecoveryWorkOutcome> Works)
+{
+    public bool HasAffectedWork => Works.Count > 0;
+    public bool FullyRecovered => HasAffectedWork && Works.All(work => work.Recovered);
+    public int ExitCode => HasAffectedWork && !FullyRecovered ? 1 : 0;
+
+    public void WriteSummary(TextWriter output, TextWriter error)
+    {
+        if (Works.Count == 0)
+        {
+            output.WriteLine("Runner update recovery: affected work=none; no recovery claimed.");
+            return;
+        }
+
+        foreach (var work in Works)
+        {
+            var identity = work.Identity;
+            var task = string.IsNullOrWhiteSpace(identity.TaskRunId)
+                ? string.Empty
+                : $" taskRunId={identity.TaskRunId}";
+            var owner = string.IsNullOrWhiteSpace(identity.OwnerId)
+                ? string.Empty
+                : $" ownerId={identity.OwnerId}";
+            var state = string.IsNullOrWhiteSpace(work.State) ? work.Status : work.State;
+            var line = $"Runner update recovery: workId={identity.WorkId} ownerKind={identity.OwnerKind}{owner}{task} state={state} status={work.Status}.";
+            if (work.Recovered)
+                output.WriteLine(line);
+            else
+                error.WriteLine(line);
+        }
+    }
+}
+
 internal sealed record RunnerInterruptResult(
     string? RunnerId,
     string? Status,
     string? UpdateInterruptId,
     IReadOnlyList<string> InterruptedWorkIds,
     int InterruptedWorkCount,
-    string? Error)
+    string? Error,
+    string? OperationId = null,
+    DateTimeOffset? CreatedAt = null,
+    IReadOnlyList<RunnerUpdateWorkIdentity>? AffectedWorks = null)
 {
     public bool Succeeded => Error is null
         && string.Equals(Status, "interrupted", StringComparison.Ordinal)
-        && !string.IsNullOrWhiteSpace(RunnerId)
-        && !string.IsNullOrWhiteSpace(UpdateInterruptId);
+        && !string.IsNullOrWhiteSpace(RunnerId);
 
     public static RunnerInterruptResult Failed(string error) =>
-        new(null, null, null, Array.Empty<string>(), 0, error);
+        new(null, null, null, Array.Empty<string>(), 0, error, null, null, Array.Empty<RunnerUpdateWorkIdentity>());
+
 }
 
 /// <summary>
@@ -127,6 +184,8 @@ internal sealed record RunnerInterruptResult(
 internal sealed class RunnerRefreshVerifier
 {
     private static readonly TimeSpan DefaultRunnerIdentityPollInterval = TimeSpan.FromMilliseconds(500);
+    internal static readonly TimeSpan DefaultRunnerRecoveryTimeout = TimeSpan.FromSeconds(30);
+    internal static readonly TimeSpan DefaultRunnerRecoveryPollInterval = TimeSpan.FromMilliseconds(500);
     private static readonly string RunnerDistBuildInfoRelativePath = Path.Combine("packages", "runner", "dist", "build-info.json");
 
     private readonly HttpClient _http;
@@ -135,6 +194,8 @@ internal sealed class RunnerRefreshVerifier
     private readonly Func<string?> _getLocalHostname;
     private readonly TimeSpan _runnerIdentityTimeout;
     private readonly TimeSpan _runnerIdentityPollInterval;
+    private readonly TimeSpan _runnerRecoveryTimeout;
+    private readonly TimeSpan _runnerRecoveryPollInterval;
     private readonly TimeProvider _timeProvider;
     private readonly Func<TimeSpan, CancellationToken, Task> _pollWait;
 
@@ -146,7 +207,10 @@ internal sealed class RunnerRefreshVerifier
         TimeSpan? runnerIdentityTimeout = null,
         TimeSpan? runnerIdentityPollInterval = null,
         TimeProvider? timeProvider = null,
-        Func<TimeSpan, CancellationToken, Task>? pollWait = null)
+        Func<TimeSpan, CancellationToken, Task>? pollWait = null,
+        TimeSpan? runnerRecoveryTimeout = null,
+        TimeSpan? runnerRecoveryPollInterval = null)
+
     {
         _http = http;
         _commandExecutor = commandExecutor;
@@ -154,6 +218,8 @@ internal sealed class RunnerRefreshVerifier
         _getLocalHostname = getLocalHostname ?? (() => Environment.MachineName);
         _runnerIdentityTimeout = runnerIdentityTimeout ?? TimeSpan.FromSeconds(30);
         _runnerIdentityPollInterval = runnerIdentityPollInterval ?? DefaultRunnerIdentityPollInterval;
+        _runnerRecoveryTimeout = runnerRecoveryTimeout ?? DefaultRunnerRecoveryTimeout;
+        _runnerRecoveryPollInterval = runnerRecoveryPollInterval ?? DefaultRunnerRecoveryPollInterval;
         _timeProvider = timeProvider ?? TimeProvider.System;
         _pollWait = pollWait
             ?? ((delay, cancellationToken) => Task.Delay(delay, _timeProvider, cancellationToken));
@@ -270,6 +336,84 @@ internal sealed class RunnerRefreshVerifier
         {
             return $"request failed: {ex.Message}";
         }
+    }
+
+    public async Task<RunnerRecoveryReport> WaitForRecoveryAsync(
+        RunnerInterruptResult interruption,
+        CancellationToken cancellationToken = default)
+    {
+        var identities = interruption.AffectedWorks is { Count: > 0 }
+            ? interruption.AffectedWorks
+            : interruption.InterruptedWorkIds
+                .Select(workId => new RunnerUpdateWorkIdentity(
+                    "unknown",
+                    string.Empty,
+                    workId,
+                    null,
+                    string.Empty))
+                .ToArray();
+        if (identities.Count == 0)
+            return new RunnerRecoveryReport(Array.Empty<RunnerRecoveryWorkOutcome>());
+
+        var unresolved = identities
+            .Select(identity => new RunnerRecoveryWorkOutcome(identity, "unresolved", "receipt-pending"))
+            .ToArray();
+        if (string.IsNullOrWhiteSpace(interruption.OperationId))
+            return new RunnerRecoveryReport(unresolved);
+
+        var deadline = _timeProvider.GetUtcNow() + _runnerRecoveryTimeout;
+        var latest = unresolved;
+        while (!cancellationToken.IsCancellationRequested)
+        {
+            var remaining = deadline - _timeProvider.GetUtcNow();
+            if (remaining <= TimeSpan.Zero)
+                break;
+
+            var status = await TryReadRecoveryStatusAsync(
+                interruption.RunnerId!,
+                interruption.OperationId,
+                remaining,
+                cancellationToken);
+            if (status is not null)
+            {
+                latest = identities
+                    .Select(identity =>
+                    {
+                        var serverWork = status.Works.FirstOrDefault(work =>
+                            string.Equals(work.Identity.OwnerKind, identity.OwnerKind, StringComparison.Ordinal)
+                            && string.Equals(work.Identity.OwnerId, identity.OwnerId, StringComparison.Ordinal)
+                            && string.Equals(work.Identity.WorkId, identity.WorkId, StringComparison.Ordinal)
+                            && string.Equals(work.Identity.TaskRunId, identity.TaskRunId, StringComparison.Ordinal));
+                        return serverWork is { Recovered: true }
+                            ? serverWork
+                            : new RunnerRecoveryWorkOutcome(identity, "unresolved", serverWork?.State ?? "receipt-pending");
+                    })
+                    .ToArray();
+                if (latest.All(work => work.Recovered))
+                    break;
+            }
+
+            remaining = deadline - _timeProvider.GetUtcNow();
+            if (remaining <= TimeSpan.Zero)
+                break;
+            try
+            {
+                await Task.Delay(
+                    remaining < _runnerRecoveryPollInterval ? remaining : _runnerRecoveryPollInterval,
+                    _timeProvider,
+                    cancellationToken);
+            }
+            catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+            {
+                break;
+            }
+        }
+
+        if (cancellationToken.IsCancellationRequested)
+            cancellationToken.ThrowIfCancellationRequested();
+
+        return new RunnerRecoveryReport(latest);
+
     }
 
     public async Task<RunnerRefreshOutcome> VerifyRunnerRuntimeAsync(string repoRoot)
@@ -469,6 +613,91 @@ internal sealed class RunnerRefreshVerifier
         }
     }
 
+    private async Task<RunnerRecoveryReport?> TryReadRecoveryStatusAsync(
+        string runnerId,
+        string operationId,
+        TimeSpan timeout,
+        CancellationToken cancellationToken)
+    {
+        using var requestCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        using var timeoutTimer = StartTimeoutTimer(requestCts, timeout);
+        var readTask = ReadRecoveryStatusAsync(runnerId, operationId, requestCts.Token);
+        try
+        {
+            // WaitAsync keeps the CLI deadline authoritative even when a fake or
+            // transport handler does not observe cancellation promptly. The late
+            // task is observed below so a delayed response cannot become an
+            // unobserved failure or leak its response body.
+            return await readTask.WaitAsync(requestCts.Token);
+        }
+        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+        {
+            _ = ObserveRecoveryStatusAsync(readTask);
+            return null;
+        }
+        catch (HttpRequestException)
+        {
+            return null;
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
+    }
+
+    private async Task<RunnerRecoveryReport?> ReadRecoveryStatusAsync(
+        string runnerId,
+        string operationId,
+        CancellationToken cancellationToken)
+    {
+        using var response = await _http.GetAsync(
+            $"/api/runner/{Uri.EscapeDataString(runnerId)}/update-operation/{Uri.EscapeDataString(operationId)}/recovery-status",
+            cancellationToken);
+        if (!response.IsSuccessStatusCode)
+            return null;
+
+        await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken);
+        using var document = await JsonDocument.ParseAsync(stream, cancellationToken: cancellationToken);
+        var data = document.RootElement.TryGetProperty("data", out var envelopeData)
+            ? envelopeData
+            : document.RootElement;
+        if (data.ValueKind != JsonValueKind.Object
+            || !string.Equals(ReadString(data, "operationId"), operationId, StringComparison.Ordinal)
+            || !string.Equals(ReadString(data, "runnerId"), runnerId, StringComparison.Ordinal)
+            || !data.TryGetProperty("affectedWorks", out var works)
+            || works.ValueKind != JsonValueKind.Array)
+            return null;
+
+        var parsed = new List<RunnerRecoveryWorkOutcome>();
+        foreach (var item in works.EnumerateArray())
+        {
+            var identity = new RunnerUpdateWorkIdentity(
+                ReadString(item, "ownerKind") ?? "unknown",
+                ReadString(item, "ownerId") ?? string.Empty,
+                ReadString(item, "workId") ?? string.Empty,
+                ReadString(item, "taskRunId"),
+                ReadString(item, "workType") ?? string.Empty);
+            var status = ReadString(item, "status") ?? "unresolved";
+            parsed.Add(new RunnerRecoveryWorkOutcome(
+                identity,
+                status is "receipt-acked" or "replacement-settled" ? "recovered" : "unresolved",
+                status));
+        }
+        return new RunnerRecoveryReport(parsed);
+    }
+
+    private static async Task ObserveRecoveryStatusAsync(Task<RunnerRecoveryReport?> readTask)
+    {
+        try
+        {
+            await readTask.ConfigureAwait(false);
+        }
+        catch
+        {
+            // The bounded caller has already classified this poll as unresolved.
+        }
+    }
+
     private async Task<RunnerIdentityView?> TryReadRunnerIdentityAsync(string hostname, CancellationToken ct)
     {
         try
@@ -507,7 +736,10 @@ internal sealed class RunnerRefreshVerifier
             return RunnerInterruptResult.Failed($"response status was '{status ?? "<missing>"}', expected 'interrupted'");
 
         var updateInterruptId = ReadString(data, "updateInterruptId");
-        if (!string.Equals(updateInterruptId, expectedUpdateInterruptId, StringComparison.Ordinal))
+        // Servers that echo the fence id must match the requested one; operation-id
+        // based responses carry no fence id and are accepted as-is.
+        if (updateInterruptId is not null
+            && !string.Equals(updateInterruptId, expectedUpdateInterruptId, StringComparison.Ordinal))
         {
             return RunnerInterruptResult.Failed(
                 "response updateInterruptId does not match the requested update interrupt");
@@ -536,7 +768,46 @@ internal sealed class RunnerRefreshVerifier
         if (count != workIds.Count)
             return RunnerInterruptResult.Failed("interruptedWorkCount does not match interruptedWorkIds");
 
-        return new RunnerInterruptResult(runnerId, status, updateInterruptId, workIds, count, null);
+        var operationId = ReadString(data, "operationId");
+        DateTimeOffset? createdAt = null;
+        if (data.TryGetProperty("createdAt", out var createdAtElement)
+            && createdAtElement.ValueKind == JsonValueKind.String
+            && DateTimeOffset.TryParse(createdAtElement.GetString(), out var parsedCreatedAt))
+        {
+            createdAt = parsedCreatedAt;
+        }
+
+        var affectedWorks = new List<RunnerUpdateWorkIdentity>();
+        if (data.TryGetProperty("affectedWorks", out var affectedElement)
+            && affectedElement.ValueKind == JsonValueKind.Array)
+        {
+            foreach (var item in affectedElement.EnumerateArray())
+            {
+                if (item.ValueKind != JsonValueKind.Object)
+                    return RunnerInterruptResult.Failed("response contains an invalid affectedWorks entry");
+                affectedWorks.Add(new RunnerUpdateWorkIdentity(
+                    ReadString(item, "ownerKind") ?? "unknown",
+                    ReadString(item, "ownerId") ?? string.Empty,
+                    ReadString(item, "workId") ?? string.Empty,
+                    ReadString(item, "taskRunId"),
+                    ReadString(item, "workType") ?? string.Empty));
+            }
+            if (affectedWorks.Count != workIds.Count)
+                return RunnerInterruptResult.Failed("affectedWorks does not match interruptedWorkIds");
+        }
+
+        if (affectedWorks.Count == 0 && workIds.Count > 0)
+        {
+            affectedWorks.AddRange(workIds.Select(workId => new RunnerUpdateWorkIdentity(
+                "unknown",
+                string.Empty,
+                workId,
+                null,
+                string.Empty)));
+        }
+
+        return new RunnerInterruptResult(runnerId, status, updateInterruptId, workIds, count, null, operationId, createdAt, affectedWorks);
+
     }
 
     private static string? ReadString(JsonElement data, string property)

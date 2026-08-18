@@ -49,7 +49,8 @@ public sealed record SystemUpdateStatusResponse(
     DateTimeOffset UpdatedAt,
     DateTimeOffset? CompletedAt,
     string? Outcome = null,
-    string? UnavailableCapability = null);
+    string? UnavailableCapability = null,
+    IReadOnlyList<SystemUpdateRecoveryWorkOutcome>? Recovery = null);
 
 public sealed record SystemUpdateStatusEnvelope(bool HasJob, SystemUpdateStatusResponse? Job);
 
@@ -65,9 +66,19 @@ public sealed record SystemUpdateOutcomeRequest(
     string? SourceHead = null,
     string? SourcePath = null,
     string? ServerUnit = null,
-    string? RunnerUnit = null);
+    string? RunnerUnit = null,
+    IReadOnlyList<SystemUpdateRecoveryWorkOutcome>? Recovery = null);
 
 public sealed record SystemUpdateOutcomeResponse(SystemUpdateStatusResponse Job);
+
+public sealed record SystemUpdateRecoveryWorkOutcome(
+    string OwnerKind,
+    string OwnerId,
+    string WorkId,
+    string? TaskRunId,
+    string WorkType,
+    string Status,
+    string State);
 
 public sealed record RuntimeConsistencyComponent(
     string Name,

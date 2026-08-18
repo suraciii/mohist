@@ -277,7 +277,8 @@ public sealed class SystemUpdateService : ISingletonService
             Outcome = outcome,
             UnavailableCapability = unavailableCapability,
             CompletedAt = completedAt,
-            Logs = logs
+            Logs = logs,
+            Recovery = request.Recovery ?? baseState.Recovery
         };
 
         await SupersedeStaleWebJobsAsync(next, cancellationToken);
@@ -742,6 +743,7 @@ public sealed class SystemUpdateService : ISingletonService
             state.UpdatedAt,
             state.CompletedAt,
             state.Outcome,
-            state.UnavailableCapability);
+            state.UnavailableCapability,
+            state.Recovery);
     }
 }

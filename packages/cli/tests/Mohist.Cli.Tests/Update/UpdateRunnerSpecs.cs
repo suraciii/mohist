@@ -54,21 +54,22 @@ public class UpdateRunnerSpecs
     private static RecordingHttpHandler CreateIdentityThenNoReconnectHandler(string hash)
     {
         var identityRequests = 0;
-        string? updateInterruptId = null;
         return new RecordingHttpHandler((request, _) =>
         {
             var path = request.RequestUri!.AbsolutePath;
             if (request.Method == HttpMethod.Post && path == "/api/runner/runner-1/update-interrupt")
             {
-                updateInterruptId = ReadUpdateInterruptId(request);
-                return Task.FromResult(InterruptResponse(request, "runner-1", []));
-            }
-
-            if (request.Method == HttpMethod.Post
-                && updateInterruptId is not null
-                && path == $"/api/runner/runner-1/update-interrupt/{updateInterruptId}/cancel")
-            {
-                return Task.FromResult(CancelResponse("runner-1", updateInterruptId));
+                return Task.FromResult(RecordingHttpHandler.Json(new
+                {
+                    success = true,
+                    data = new
+                    {
+                        runnerId = "runner-1",
+                        status = "interrupted",
+                        interruptedWorkIds = Array.Empty<string>(),
+                        interruptedWorkCount = 0,
+                    },
+                }));
             }
 
             if (request.Method == HttpMethod.Get && path == "/api/runner/identity"
@@ -108,9 +109,46 @@ public class UpdateRunnerSpecs
                 });
             }
 
+            if (request.Method == HttpMethod.Get
+                && Uri.UnescapeDataString(path) == "/api/runner/runner-1/update-operation/runner-update:runner/recovery-status")
+            {
+                return Task.FromResult(RecordingHttpHandler.Json(new
+                {
+                    success = true,
+                    data = new
+                    {
+                        operationId = "runner-update:runner",
+                        runnerId = "runner-1",
+                        operationStatus = "settled",
+                        complete = true,
+                        affectedWorks = new[]
+                        {
+                            new { ownerKind = "agent-job", ownerId = "job-1", workId = "job-1", taskRunId = (string?)null, workType = "agent-job", status = "receipt-acked", acknowledged = true },
+                            new { ownerKind = "agent-job", ownerId = "job-2", workId = "job-2", taskRunId = (string?)null, workType = "agent-job", status = "replacement-settled", acknowledged = true },
+                        },
+                    },
+                }));
+            }
+
             if (request.Method == HttpMethod.Post && path == "/api/runner/runner-1/update-interrupt")
             {
-                return Task.FromResult(InterruptResponse(request, "runner-1", ["job-1", "job-2"]));
+                return Task.FromResult(RecordingHttpHandler.Json(new
+                {
+                    success = true,
+                    data = new
+                    {
+                        runnerId = "runner-1",
+                        status = "interrupted",
+                        interruptedWorkIds = new[] { "job-1", "job-2" },
+                        interruptedWorkCount = 2,
+                        operationId = "runner-update:runner",
+                        affectedWorks = new[]
+                        {
+                            new { ownerKind = "agent-job", ownerId = "job-1", workId = "job-1", taskRunId = (string?)null, workType = "agent-job" },
+                            new { ownerKind = "agent-job", ownerId = "job-2", workId = "job-2", taskRunId = (string?)null, workType = "agent-job" },
+                        },
+                    },
+                }));
             }
 
             return Task.FromResult(new HttpResponseMessage(HttpStatusCode.NotFound));
@@ -125,8 +163,14 @@ public class UpdateRunnerSpecs
 
         Assert.Equal(0, exitCode);
         Assert.Equal(
-            new[] { "/api/runner/identity", "/api/runner/runner-1/update-interrupt", "/api/runner/identity" },
-            handler.Requests.Select(request => request.RequestUri!.AbsolutePath));
+            new[]
+            {
+                "/api/runner/identity",
+                "/api/runner/runner-1/update-interrupt",
+                "/api/runner/identity",
+                "/api/runner/runner-1/update-operation/runner-update:runner/recovery-status",
+            },
+            handler.Requests.Select(request => Uri.UnescapeDataString(request.RequestUri!.AbsolutePath)));
         Assert.Contains(nameof(FakeServiceInstaller.RestartRunnerAsync), installer.Calls);
         Assert.Contains("status=interrupted runnerId=runner-1 interruptedWorkCount=2", f.Stdout.ToString());
         Assert.DoesNotContain("activeWorks", string.Join('\n', handler.Requests.Select(request => request.RequestUri!.PathAndQuery)));
@@ -187,6 +231,96 @@ public class UpdateRunnerSpecs
             ],
             handler.Requests.Select(request => (request.Method, request.RequestUri!.AbsolutePath)));
         Assert.Contains("Runner update interrupt rollback: status=cancelled runnerId=runner-1.", f.Stdout.ToString());
+    }
+
+    [Fact]
+    public async Task UpdateRunner_WhenAffectedWorkRemainsUnresolved_ExitsNonSuccessfullyAfterBoundedWait()
+    {
+        var f = new UpdateTestFactory();
+        var installer = new FakeServiceInstaller { RunnerInstalled = true };
+        var hash = "abcdef1234567890abcdef1234567890abcdef12";
+        f.Commands.SetResultFor("git", args => args.SequenceEqual(["rev-parse", "HEAD"]), 0, hash + "\n", "");
+        var time = new FakeTimeProvider(new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero));
+        var handler = new RecordingHttpHandler((request, _) =>
+        {
+            var path = Uri.UnescapeDataString(request.RequestUri!.AbsolutePath);
+            if (request.Method == HttpMethod.Get && path == "/api/runner/identity")
+            {
+                return Task.FromResult(RecordingHttpHandler.Json(new
+                {
+                    success = true,
+                    data = new
+                    {
+                        runnerId = "runner-1",
+                        hostname = "test-host",
+                        buildGitHash = hash,
+                        status = "online",
+                        connectionState = "connected",
+                    },
+                }));
+            }
+
+            if (request.Method == HttpMethod.Post && path == "/api/runner/runner-1/update-interrupt")
+            {
+                return Task.FromResult(RecordingHttpHandler.Json(new
+                {
+                    success = true,
+                    data = new
+                    {
+                        runnerId = "runner-1",
+                        status = "interrupted",
+                        interruptedWorkIds = new[] { "job-1" },
+                        interruptedWorkCount = 1,
+                        operationId = "runner-update:unresolved",
+                        affectedWorks = new[]
+                        {
+                            new { ownerKind = "agent-job", ownerId = "job-1", workId = "job-1", taskRunId = (string?)null, workType = "agent-job" },
+                        },
+                    },
+                }));
+            }
+
+            if (request.Method == HttpMethod.Get
+                && path == "/api/runner/runner-1/update-operation/runner-update:unresolved/recovery-status")
+            {
+                return Task.FromResult(RecordingHttpHandler.Json(new
+                {
+                    success = true,
+                    data = new
+                    {
+                        operationId = "runner-update:unresolved",
+                        runnerId = "runner-1",
+                        operationStatus = "pending",
+                        complete = false,
+                        affectedWorks = new[]
+                        {
+                            new { ownerKind = "agent-job", ownerId = "job-1", workId = "job-1", taskRunId = (string?)null, workType = "agent-job", status = "unresolved", acknowledged = false },
+                        },
+                    },
+                }));
+            }
+
+            return Task.FromResult(RecordingHttpHandler.JsonError("unexpected request", statusCode: HttpStatusCode.NotFound));
+        });
+        var updater = f.BuildUpdater(
+            handler,
+            unitDir: UpdateTestFactory.UnitDir,
+            getLocalHostname: () => "test-host",
+            timeProvider: time,
+            runnerRecoveryTimeout: TimeSpan.FromSeconds(1),
+            runnerRecoveryPollInterval: TimeSpan.FromMilliseconds(100),
+            serviceInstaller: installer);
+
+        var update = updater.UpdateRunnerAsync("/repo", dryRun: false);
+        await handler.WaitForRequestCountAsync(4);
+        time.Advance(TimeSpan.FromSeconds(1));
+        var exitCode = await update;
+
+        Assert.Equal(1, exitCode);
+        Assert.Contains("workId=job-1", f.Stderr.ToString());
+        Assert.Contains("status=unresolved", f.Stderr.ToString());
+        Assert.DoesNotContain("Runner updated successfully.", f.Stdout.ToString());
+        Assert.Contains(nameof(FakeServiceInstaller.RestartRunnerAsync), installer.Calls);
     }
 
     [Fact]
@@ -354,9 +488,6 @@ public class UpdateRunnerSpecs
         Assert.Equal(1, exitCode);
         Assert.Contains("runner-not-reconnected", f.Stderr.ToString());
         Assert.Contains("status=unconfirmed", f.Stderr.ToString());
-        Assert.Contains(handler.Requests, request =>
-            request.Method == HttpMethod.Post
-            && request.RequestUri!.AbsolutePath.EndsWith("/cancel", StringComparison.Ordinal));
     }
 
     [Fact]
@@ -387,8 +518,5 @@ public class UpdateRunnerSpecs
         Assert.Equal(1, exitCode);
         Assert.Contains("runner-not-reconnected", actual);
         Assert.Contains("status=unconfirmed", actual);
-        Assert.Contains(handler.Requests, request =>
-            request.Method == HttpMethod.Post
-            && request.RequestUri!.AbsolutePath.EndsWith("/cancel", StringComparison.Ordinal));
     }
 }

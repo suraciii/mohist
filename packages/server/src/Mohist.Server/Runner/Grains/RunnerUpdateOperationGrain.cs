@@ -1,0 +1,388 @@
+using Orleans;
+
+namespace Mohist.Server.Runner.Grains;
+
+public enum RunnerUpdateOperationWriteKind
+{
+    MarkWork,
+    MarkRecoverySettled,
+    MarkReceiptAcked,
+}
+
+public interface IRunnerUpdateOperationWriteFailureInjector
+{
+    void BeforeWrite(
+        RunnerUpdateOperationWriteKind kind,
+        string operationId,
+        string ownerKind,
+        string ownerId,
+        string workId);
+}
+
+public sealed class NoopRunnerUpdateOperationWriteFailureInjector : IRunnerUpdateOperationWriteFailureInjector
+{
+    public static NoopRunnerUpdateOperationWriteFailureInjector Instance { get; } = new();
+
+    private NoopRunnerUpdateOperationWriteFailureInjector()
+    {
+    }
+
+    public void BeforeWrite(
+        RunnerUpdateOperationWriteKind kind,
+        string operationId,
+        string ownerKind,
+        string ownerId,
+        string workId)
+    {
+    }
+}
+
+public interface IRunnerUpdateOperationGrain : IGrainWithStringKey
+{
+    Task<RunnerUpdateOperation?> GetPendingAsync();
+    Task<RunnerUpdateOperation?> GetAsync(string operationId);
+    Task<RunnerUpdateOperation> StartOrGetAsync(RunnerUpdateOperation candidate);
+    Task<RunnerUpdateOperation> StartNewAsync(RunnerUpdateOperation candidate);
+    Task<RunnerUpdateOperation> MarkWorkAsync(
+        string operationId,
+        string ownerKind,
+        string ownerId,
+        string workId,
+        string? taskRunId,
+        RunnerUpdateWorkStatus status);
+    Task<RunnerUpdateOperation> MarkRecoverySettledAsync(
+        string operationId,
+        string ownerKind,
+        string ownerId,
+        string workId,
+        string? taskRunId);
+    Task<RunnerUpdateOperation?> MarkReceiptAckedAsync(
+        string ownerKind,
+        string ownerId,
+        string workId,
+        string? taskRunId);
+}
+
+/// <summary>
+/// Durable update fence for one Runner identity. The grain key is the Runner
+/// identity, while the operation id remains stable across retries and is the
+/// identity carried to owner-domain events.
+/// </summary>
+[GenerateSerializer]
+public sealed record RunnerUpdateOperation(
+    [property: Id(0)] string OperationId,
+    [property: Id(1)] string RunnerId,
+    [property: Id(2)] DateTimeOffset CreatedAt,
+    [property: Id(3)] IReadOnlyList<RunnerUpdateWork> AffectedWorks,
+    [property: Id(4)] RunnerUpdateOperationStatus Status = RunnerUpdateOperationStatus.Pending,
+    [property: Id(5)] string? ConnectionGeneration = null);
+
+[GenerateSerializer]
+public sealed record RunnerUpdateWork(
+    [property: Id(0)] string OwnerKind,
+    [property: Id(1)] string OwnerId,
+    [property: Id(2)] string WorkId,
+    [property: Id(3)] string? TaskRunId,
+    [property: Id(4)] string WorkType,
+    [property: Id(5)] RunnerUpdateWorkStatus Status = RunnerUpdateWorkStatus.Pending,
+    [property: Id(6)] RunnerUpdateRecoveryStatus RecoveryStatus = RunnerUpdateRecoveryStatus.Pending)
+{
+    public string Key => string.Join('\u001f', OwnerKind, OwnerId, WorkId, TaskRunId ?? string.Empty);
+}
+
+public enum RunnerUpdateOperationStatus
+{
+    Pending,
+    Settled,
+}
+
+public enum RunnerUpdateWorkStatus
+{
+    Pending,
+    Marked,
+    AlreadyEnded,
+    Settled,
+}
+
+public enum RunnerUpdateRecoveryStatus
+{
+    Pending,
+    ReceiptAcked,
+    ReplacementSettled,
+}
+
+[GenerateSerializer]
+public sealed class RunnerUpdateOperationState
+{
+    [Id(0)] public List<RunnerUpdateOperation> Operations { get; set; } = [];
+}
+
+public sealed class RunnerUpdateOperationGrain(
+    [PersistentState("runner-update-operation")] IPersistentState<RunnerUpdateOperationState> state,
+    IRunnerUpdateOperationWriteFailureInjector writeFailureInjector)
+    : Grain, IRunnerUpdateOperationGrain
+{
+    public async Task<RunnerUpdateOperation?> GetPendingAsync()
+    {
+        await LoadAsync();
+        return state.State.Operations.LastOrDefault(operation =>
+            operation.Status == RunnerUpdateOperationStatus.Pending);
+    }
+
+    public async Task<RunnerUpdateOperation?> GetAsync(string operationId)
+    {
+        if (string.IsNullOrWhiteSpace(operationId))
+            return null;
+
+        await LoadAsync();
+        return state.State.Operations.LastOrDefault(operation =>
+            string.Equals(operation.OperationId, operationId, StringComparison.Ordinal));
+    }
+
+    public async Task<RunnerUpdateOperation> StartOrGetAsync(RunnerUpdateOperation candidate)
+    {
+        ValidateCandidate(candidate);
+        await LoadAsync();
+
+        var existing = state.State.Operations.LastOrDefault(operation =>
+            operation.Status == RunnerUpdateOperationStatus.Pending);
+        if (existing is not null)
+            return existing;
+
+        var duplicate = state.State.Operations.LastOrDefault(operation =>
+            string.Equals(operation.OperationId, candidate.OperationId, StringComparison.Ordinal));
+        if (duplicate is not null)
+            return duplicate;
+
+        return await AddOperationAsync(candidate);
+    }
+
+    public async Task<RunnerUpdateOperation> StartNewAsync(RunnerUpdateOperation candidate)
+    {
+        ValidateCandidate(candidate);
+        await LoadAsync();
+
+        // Two confirmations for the same live Runner connection can race
+        // before either HTTP request observes the persisted operation. Reuse
+        // that connection's pending fence; a different connection generation
+        // is the explicit chained-update boundary and must get a new fence.
+        var existing = state.State.Operations.LastOrDefault(operation =>
+            operation.Status == RunnerUpdateOperationStatus.Pending
+            && string.Equals(
+                operation.ConnectionGeneration,
+                candidate.ConnectionGeneration,
+                StringComparison.Ordinal));
+        if (existing is not null)
+            return existing;
+
+        var duplicate = state.State.Operations.LastOrDefault(operation =>
+            string.Equals(operation.OperationId, candidate.OperationId, StringComparison.Ordinal));
+        if (duplicate is not null)
+            return duplicate;
+
+        return await AddOperationAsync(candidate);
+    }
+
+    public async Task<RunnerUpdateOperation> MarkWorkAsync(
+        string operationId,
+        string ownerKind,
+        string ownerId,
+        string workId,
+        string? taskRunId,
+        RunnerUpdateWorkStatus status)
+    {
+        if (status == RunnerUpdateWorkStatus.Pending)
+            throw new ArgumentException("A marking call must record a completed owner outcome.", nameof(status));
+
+        await LoadAsync();
+        var index = state.State.Operations.FindIndex(operation =>
+            string.Equals(operation.OperationId, operationId, StringComparison.Ordinal));
+        if (index < 0)
+            throw new InvalidOperationException($"Update operation '{operationId}' does not exist.");
+
+        var operation = state.State.Operations[index];
+        var key = string.Join('\u001f', ownerKind, ownerId, workId, taskRunId ?? string.Empty);
+        var workIndex = operation.AffectedWorks.ToList().FindIndex(work => work.Key == key);
+        if (workIndex < 0)
+            throw new InvalidOperationException($"Update operation '{operationId}' does not name work '{key}'.");
+
+        var works = operation.AffectedWorks.ToArray();
+        var currentStatus = works[workIndex].Status;
+        var nextStatus = MoreComplete(currentStatus, status);
+        var canSettle = works.All(work => work.Status is RunnerUpdateWorkStatus.AlreadyEnded or RunnerUpdateWorkStatus.Settled)
+            && operation.Status != RunnerUpdateOperationStatus.Settled;
+        if (nextStatus == currentStatus && !canSettle)
+            return operation;
+
+        if (nextStatus != currentStatus)
+        {
+            works[workIndex] = works[workIndex] with
+            {
+                Status = nextStatus,
+                RecoveryStatus = nextStatus is RunnerUpdateWorkStatus.AlreadyEnded or RunnerUpdateWorkStatus.Settled
+                    ? RunnerUpdateRecoveryStatus.ReceiptAcked
+                    : works[workIndex].RecoveryStatus,
+            };
+        }
+        var nextOperation = operation with
+        {
+            AffectedWorks = works,
+            Status = works.All(work => work.Status is RunnerUpdateWorkStatus.AlreadyEnded or RunnerUpdateWorkStatus.Settled)
+                ? RunnerUpdateOperationStatus.Settled
+                : operation.Status,
+        };
+        writeFailureInjector.BeforeWrite(
+            RunnerUpdateOperationWriteKind.MarkWork,
+            operationId,
+            ownerKind,
+            ownerId,
+            workId);
+        state.State.Operations[index] = nextOperation;
+        await state.WriteStateAsync();
+        return nextOperation;
+    }
+
+    public async Task<RunnerUpdateOperation> MarkRecoverySettledAsync(
+        string operationId,
+        string ownerKind,
+        string ownerId,
+        string workId,
+        string? taskRunId)
+    {
+        await LoadAsync();
+        var index = state.State.Operations.FindIndex(operation =>
+            string.Equals(operation.OperationId, operationId, StringComparison.Ordinal));
+        if (index < 0)
+            throw new InvalidOperationException($"Update operation '{operationId}' does not exist.");
+
+        var operation = state.State.Operations[index];
+        var key = string.Join('\u001f', ownerKind, ownerId, workId, taskRunId ?? string.Empty);
+        var workIndex = operation.AffectedWorks.ToList().FindIndex(work => work.Key == key);
+        if (workIndex < 0)
+            throw new InvalidOperationException($"Update operation '{operationId}' does not name work '{key}'.");
+
+        var works = operation.AffectedWorks.ToArray();
+        var current = works[workIndex];
+        if (current.RecoveryStatus == RunnerUpdateRecoveryStatus.ReplacementSettled)
+            return operation;
+
+        works[workIndex] = current with
+        {
+            Status = RunnerUpdateWorkStatus.Settled,
+            RecoveryStatus = RunnerUpdateRecoveryStatus.ReplacementSettled,
+        };
+        var nextOperation = operation with
+        {
+            AffectedWorks = works,
+            Status = works.All(work => work.Status is RunnerUpdateWorkStatus.AlreadyEnded or RunnerUpdateWorkStatus.Settled)
+                ? RunnerUpdateOperationStatus.Settled
+                : operation.Status,
+        };
+        writeFailureInjector.BeforeWrite(
+            RunnerUpdateOperationWriteKind.MarkRecoverySettled,
+            operationId,
+            ownerKind,
+            ownerId,
+            workId);
+        state.State.Operations[index] = nextOperation;
+        await state.WriteStateAsync();
+        return nextOperation;
+    }
+
+    public async Task<RunnerUpdateOperation?> MarkReceiptAckedAsync(
+        string ownerKind,
+        string ownerId,
+        string workId,
+        string? taskRunId)
+    {
+        await LoadAsync();
+        var key = string.Join('\u001f', ownerKind, ownerId, workId, taskRunId ?? string.Empty);
+        var operationIndex = state.State.Operations.FindLastIndex(operation =>
+            operation.AffectedWorks.Any(work => work.Key == key));
+        if (operationIndex < 0)
+            return null;
+
+        var operation = state.State.Operations[operationIndex];
+        var works = operation.AffectedWorks.ToArray();
+        var workIndex = Array.FindIndex(works, work => work.Key == key);
+        var current = works[workIndex];
+        if (current.RecoveryStatus == RunnerUpdateRecoveryStatus.ReplacementSettled)
+            return operation;
+
+        works[workIndex] = current with
+        {
+            Status = RunnerUpdateWorkStatus.Settled,
+            RecoveryStatus = RunnerUpdateRecoveryStatus.ReceiptAcked,
+        };
+        var nextOperation = operation with
+        {
+            AffectedWorks = works,
+            Status = works.All(work => work.Status is RunnerUpdateWorkStatus.AlreadyEnded or RunnerUpdateWorkStatus.Settled)
+                ? RunnerUpdateOperationStatus.Settled
+                : operation.Status,
+        };
+        writeFailureInjector.BeforeWrite(
+            RunnerUpdateOperationWriteKind.MarkReceiptAcked,
+            operation.OperationId,
+            ownerKind,
+            ownerId,
+            workId);
+        state.State.Operations[operationIndex] = nextOperation;
+        await state.WriteStateAsync();
+        return nextOperation;
+    }
+
+    private async Task<RunnerUpdateOperation> AddOperationAsync(RunnerUpdateOperation candidate)
+    {
+        var affectedWorks = candidate.AffectedWorks
+            .Where(IsValidWork)
+            .GroupBy(work => work.Key, StringComparer.Ordinal)
+            .Select(group => group.First())
+            .ToArray();
+        var normalized = candidate with
+        {
+            AffectedWorks = affectedWorks,
+            Status = affectedWorks.Length == 0
+                ? RunnerUpdateOperationStatus.Settled
+                : candidate.Status,
+        };
+        state.State.Operations.Add(normalized);
+        await state.WriteStateAsync();
+        return normalized;
+    }
+
+    private async Task LoadAsync()
+    {
+        if (!state.RecordExists)
+            await state.ReadStateAsync();
+        state.State ??= new RunnerUpdateOperationState();
+    }
+
+    private void ValidateCandidate(RunnerUpdateOperation candidate)
+    {
+        ArgumentNullException.ThrowIfNull(candidate);
+        if (!string.Equals(candidate.RunnerId, this.GetPrimaryKeyString(), StringComparison.Ordinal))
+            throw new InvalidOperationException("The update operation key does not match its Runner identity.");
+        if (string.IsNullOrWhiteSpace(candidate.OperationId))
+            throw new ArgumentException("An update operation requires a stable identity.", nameof(candidate));
+        if (candidate.AffectedWorks is null)
+            throw new ArgumentException("An update operation requires an affected-work inventory.", nameof(candidate));
+    }
+
+    private static bool IsValidWork(RunnerUpdateWork work) =>
+        !string.IsNullOrWhiteSpace(work.OwnerKind)
+        && !string.IsNullOrWhiteSpace(work.OwnerId)
+        && !string.IsNullOrWhiteSpace(work.WorkId)
+        && !string.IsNullOrWhiteSpace(work.WorkType);
+
+    private static RunnerUpdateWorkStatus MoreComplete(
+        RunnerUpdateWorkStatus current,
+        RunnerUpdateWorkStatus requested) =>
+        current == RunnerUpdateWorkStatus.Settled || requested == RunnerUpdateWorkStatus.Settled
+            ? RunnerUpdateWorkStatus.Settled
+            : current == RunnerUpdateWorkStatus.Marked || requested == RunnerUpdateWorkStatus.Marked
+                ? RunnerUpdateWorkStatus.Marked
+                : current == RunnerUpdateWorkStatus.AlreadyEnded || requested == RunnerUpdateWorkStatus.AlreadyEnded
+                    ? RunnerUpdateWorkStatus.AlreadyEnded
+                    : RunnerUpdateWorkStatus.Pending;
+}

@@ -5,6 +5,7 @@ namespace Mohist.Server.Workflow.Domain.Run;
 public enum AgentResultSettlementState
 {
     AwaitingResult,
+    RecoverablyInterrupted,
     Unknown,
     Blocked
 }
@@ -35,11 +36,13 @@ public sealed class AgentResultSettlement
     public required string TaskRunId { get; init; }
     public required string WorkId { get; init; }
     public required string RunnerId { get; init; }
+    public int RecoveryGeneration { get; set; }
     public string? AgentSessionId { get; set; }
     public string? AgentTurnId { get; set; }
     public string? Runtime { get; set; }
     public string? RuntimeSessionId { get; set; }
     public string? StopOperationId { get; set; }
+    public string? UpdateOperationId { get; set; }
     public AgentExecutionObservationKind? LastObservation { get; set; }
     public string? ReasonCode { get; set; }
     public string? Message { get; set; }

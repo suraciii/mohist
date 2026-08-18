@@ -1,4 +1,5 @@
 using System.Text.Json;
+using Mohist.Server.Contracts;
 using Mohist.Server.Workflow.Domain.Run;
 
 namespace Mohist.Server.Workflow.Services;
@@ -22,7 +23,8 @@ public sealed record WorkflowStatusView(
     string? AssignedTo = null,
     MetadataView? Metadata = null,
     AgentResultAttentionView? AgentResultAttention = null,
-    WorkInterruptionView? Interruption = null);
+    WorkInterruptionView? Interruption = null,
+    AgentInterruptionAttentionView? InterruptionAttention = null);
 
 /// <summary>
 /// Read-only projection of the durable interruption fact. The workflow and
@@ -54,6 +56,9 @@ public sealed record AgentResultAttentionView(
     string? RunnerId = null,
     string? AgentSessionId = null,
     string? AgentTurnId = null,
+    string? UpdateOperationId = null,
+    string? ExpectedRecoveryPath = null,
+    string? StopFailure = null,
     string? NextAction = null,
     IReadOnlyList<string>? RecoveryActions = null);
 
@@ -62,6 +67,33 @@ public sealed record AgentResultAttentionView(
 /// present while the task is awaiting a result, unknown, or blocked; the
 /// aggregate clears it only after an authoritative result wins.
 /// </summary>
+[GenerateSerializer]
+public sealed record AgentInterruptionAttentionView(
+    string State,
+    string Message,
+    string UpdateOperationId,
+    string WorkId,
+    string? TaskRunId,
+    int RecoveryGeneration,
+    string? AgentSessionId,
+    string? AgentTurnId,
+    string? ReplacementTurnId,
+    string ExpectedRecoveryPath,
+    string? StopFailure = null);
+
+[GenerateSerializer]
+public sealed record AgentWorkInterruptionView(
+    string State,
+    string UpdateOperationId,
+    string WorkId,
+    string? TaskRunId,
+    int RecoveryGeneration,
+    string? OriginalTurnId,
+    string? ReplacementTurnId,
+    string? StopFailure,
+    string ExpectedRecoveryPath,
+    DateTimeOffset RecordedAt);
+
 [GenerateSerializer]
 public sealed record AgentResultSettlementView(
     string State,
@@ -77,6 +109,10 @@ public sealed record AgentResultSettlementView(
     string? Runtime = null,
     string? RuntimeSessionId = null,
     string? StopOperationId = null,
+    string? UpdateOperationId = null,
+    string? ExpectedRecoveryPath = null,
+    string? StopFailure = null,
+    AgentWorkInterruptionView? Interruption = null,
     string? NextAction = null,
     IReadOnlyList<string>? RecoveryActions = null);
 
@@ -166,7 +202,8 @@ public sealed record TaskStatusView(
     JsonElement? Output = null,
     ExecutionError? Error = null,
     AgentResultSettlementView? AgentResultSettlement = null,
-    WorkInterruptionView? Interruption = null);
+    WorkInterruptionView? Interruption = null,
+    AgentWorkInterruptionView? AgentInterruption = null);
 
 [GenerateSerializer]
 public sealed record CheckStatusView(
