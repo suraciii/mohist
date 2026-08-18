@@ -114,6 +114,58 @@ public sealed class WorkflowProfileYamlParserTests
     }
 
     [Fact]
+    public void Parse_RejectsNewCoreScriptResourceProfileUsage()
+    {
+        var exception = Assert.Throws<WorkflowDefinitionValidationException>(() =>
+            WorkflowProfileYamlParser.Parse("""
+                stages:
+                  - stage: build
+                    tasks:
+                      - id: script
+                        uses: core/script
+                        with:
+                          run: "echo ok"
+                          shell: bash
+                          timeout: 1000
+                          resourceProfile:
+                            limits:
+                              cpu: 1
+                """, "profile", CurrentCoreScriptCatalog()));
+
+        var error = Assert.Single(exception.Errors);
+        Assert.Equal("stages[0].tasks[0].with.resourceProfile", error.Path);
+        Assert.Equal(ValidationSource.Action, error.Source);
+        Assert.Contains("unknown input", error.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void Parse_CurrentCoreScriptCatalogExposesOnlySupportedInputs()
+    {
+        var catalog = CurrentCoreScriptCatalog();
+
+        Assert.Equal(
+            ["run", "shell", "timeout"],
+            catalog.Actions.Single(action => action.Name == "core/script").Inputs.Select(input => input.Name));
+        Assert.DoesNotContain(
+            "resourceProfile",
+            catalog.Actions.Single(action => action.Name == "core/script").Inputs.Select(input => input.Name));
+
+        var profile = WorkflowProfileYamlParser.Parse("""
+            stages:
+              - stage: build
+                tasks:
+                  - id: script
+                    uses: core/script
+                    with:
+                      run: "echo ok"
+                      shell: bash
+                      timeout: 1000
+            """, "profile", catalog);
+
+        Assert.Equal("core/script", profile.Definition.Stages[0].Tasks[0].Uses);
+    }
+
+    [Fact]
     public void Parse_RejectsOverrideForProfileWithoutBinding()
     {
         var exception = Assert.Throws<WorkflowDefinitionValidationException>(() =>
@@ -124,6 +176,19 @@ public sealed class WorkflowProfileYamlParserTests
 
         Assert.Contains(exception.Errors, error => error.Path == "agentAction");
     }
+
+    private static ActionCatalog CurrentCoreScriptCatalog() =>
+        new(
+            [new ActionCatalogEntry(
+                "core/script",
+                [
+                    new ActionCatalogInput("run", ["string"], Required: true),
+                    new ActionCatalogInput("shell", ["string"], Required: false),
+                    new ActionCatalogInput("timeout", ["number"], Required: false),
+                ],
+                [],
+                [])],
+            []);
 
     private const string BoundProfileYaml = """
         agentAction: mohist/opencode

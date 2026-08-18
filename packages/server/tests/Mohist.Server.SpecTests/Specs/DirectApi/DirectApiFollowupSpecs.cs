@@ -10,6 +10,7 @@ using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Infrastructure.Data.Project;
 using Mohist.Server.Infrastructure.DirectApi;
 using Mohist.Server.Infrastructure.Data.Sessions;
+using Mohist.Server.Infrastructure.PublicApi;
 using Mohist.Server.Sessions.Domain;
 using Mohist.Server.SpecTests.Support;
 using Mohist.Server.TestSupport;
@@ -170,6 +171,11 @@ public sealed class DirectApiFollowupSpecs(MohistIntegrationFixture fixture)
         Assert.False(string.IsNullOrWhiteSpace(originalInputId));
 
         await InvalidateSessionTargetAsync(sessionId);
+        // The invalidation is a direct durable write that bypasses the
+        // canonical write path's projector nudge; wake the projector so
+        // the replayed observation converges instead of racing the hourly
+        // fixture sweep (see PublicExecutionReadRouteSpecs).
+        await NudgeProjectorAsync();
 
         using var replayBody = await PostObservationAsync(client, projectId, sessionId, key, text);
         Assert.Equal(originalInputId, replayBody.RootElement.GetProperty("inputId").GetString());
@@ -595,6 +601,12 @@ public sealed class DirectApiFollowupSpecs(MohistIntegrationFixture fixture)
         session.Metadata = session.Metadata.WithLabel("mohist.io/source-kind", "invalidated");
         row.State = JSON.Serialize(session);
         await db.SaveChangesAsync();
+    }
+
+    private async Task NudgeProjectorAsync()
+    {
+        await using var scope = fixture.Services.CreateAsyncScope();
+        scope.ServiceProvider.GetRequiredService<IPublicProjectionNudge>().Nudge();
     }
 
     private async Task<int> MappingCountAsync()

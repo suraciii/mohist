@@ -69,9 +69,13 @@ public partial class WorkflowItemTranslatorSpecs : IAsyncLifetime
     private async Task<WorkflowRun> SeedRunningWorkflowAsync(
         string workflowRunId,
         string projectId,
-        string workId = "task-1.1")
+        string workId = "task-1.1",
+        TaskDefinition? taskDefinition = null)
     {
-        var tasks = new List<TaskDefinition> { new("task-1", "Task 1", "spec/task") };
+        var tasks = new List<TaskDefinition>
+        {
+            taskDefinition ?? new TaskDefinition("task-1", "Task 1", "spec/task"),
+        };
         var checks = new List<CheckDefinition> { new("check-1", "Check 1", "spec/check") };
         var run = WorkflowRunExtensions.Create(
             workflowRunId,
@@ -153,6 +157,72 @@ public partial class WorkflowItemTranslatorSpecs : IAsyncLifetime
         Assert.Equal(1, continuation.RecoveryRemaining);
         Assert.Equal(JSON.Serialize(recovery), fresh.Recovery);
         Assert.Equal(fresh.Recovery, continuation.Recovery);
+    }
+
+    [Fact]
+    public async Task TranslateToDispatch_PersistedCoreScriptTask_PreservesRawDeclarationAndTaskContract()
+    {
+        var runId = $"wr-{Guid.NewGuid():N}";
+        var projectId = "proj-translate-core-script-replay";
+        var rawWith = With("""
+            {
+              "resourceProfile": { "limits": { "cpu": "legacy" } },
+              "run": "${{ vars.script }}",
+              "shell": "${{ vars.shell }}",
+              "timeout": "${{ vars.timeout }}"
+            }
+            """);
+        var expect = With("""
+            { "markers": [{ "path": "report.txt", "oneOf": ["PASS"] }] }
+            """);
+        var artifacts = new TaskArtifactCapture([new TaskArtifactDeclaration("report.txt")]);
+        var setVars = new Dictionary<string, string> { ["result"] = "output.value" };
+        var recovery = new RecoveryDefinition(
+            2,
+            [new RecoveryHandlerDefinition("error.code=script-failed", [], RetrySelf: true)]);
+        var taskDefinition = new TaskDefinition(
+            "script",
+            "Historical script",
+            "core/script",
+            rawWith,
+            expect,
+            artifacts,
+            setVars,
+            recovery);
+        var run = await SeedRunningWorkflowAsync(
+            runId,
+            projectId,
+            workId: "script.1",
+            taskDefinition: taskDefinition);
+        var persistedStateBefore = JSON.Serialize(run);
+        var persistedTask = Assert.Single(run.CurrentStage().Tasks);
+        var activeWork = run.CurrentActiveWorkFor("runner-1");
+        Assert.NotNull(activeWork);
+        var item = activeWork!.Item with
+        {
+            RecoveryRemaining = 1,
+        };
+
+        var dispatch = await _translator.TranslateToDispatchAsync(item, runId, run, "runner-1");
+
+        Assert.Equal(runId, dispatch.WorkflowRunId);
+        Assert.Equal("script.1", dispatch.WorkId);
+        Assert.Equal(persistedTask.Id, dispatch.TaskRunId);
+        Assert.Equal("Historical script", dispatch.Title);
+        Assert.Equal("core/script", dispatch.Uses);
+        Assert.Equal(WorkDispatchOwnerKinds.Workflow, dispatch.OwnerKind);
+        Assert.Equal(JSON.Serialize(rawWith), dispatch.With);
+        Assert.Equal(JSON.Serialize(artifacts), dispatch.Artifacts);
+        Assert.Equal(JSON.Serialize(setVars), dispatch.SetVars);
+        Assert.Equal(JSON.Serialize(expect), dispatch.Expect);
+        Assert.Equal(JSON.Serialize(recovery), dispatch.Recovery);
+        Assert.Equal(1, dispatch.RecoveryRemaining);
+        using (var variables = JsonDocument.Parse(dispatch.Variables!))
+            Assert.True(variables.RootElement.TryGetProperty("vars", out _));
+
+        Assert.Equal(persistedStateBefore, JSON.Serialize(run));
+        Assert.Equal(JSON.Serialize(rawWith), JSON.Serialize(persistedTask.WithInput));
+        Assert.Equal(JSON.Serialize(recovery), JSON.Serialize(persistedTask.Recovery));
     }
 
     [Fact]
