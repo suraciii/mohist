@@ -123,8 +123,16 @@ async function run(mode: BodyMode): Promise<{ last: string | undefined; seen: st
 }
 
 beforeAll(async () => {
+  // The patched reader resolves its timeout from this env var at module
+  // load; set it before importing so both freshly-patched and
+  // already-patched (postbuild) trees use the short test timeout.
+  process.env.PI_SSE_IDLE_TIMEOUT_MS = String(IDLE_TIMEOUT_MS)
   const result = applyIdleTimeoutPatch(SSE_TARGET, IDLE_TIMEOUT_MS)
-  expect(result.applied, `patch failed: ${result.reason ?? "unknown"}`).toBe(true)
+  // The postbuild step may have already patched the tree; both states carry
+  // the patched behavior under test.
+  if (!result.applied && result.reason !== "already-applied") {
+    throw new Error(`patch failed: ${result.reason ?? "unknown"}`)
+  }
   const mod = (await import(`${pathToFileURL(SSE_TARGET).href}?idle=${Date.now()}`)) as { stream: StreamFn }
   stream = mod.stream
 })
@@ -134,6 +142,7 @@ afterAll(() => {
     clearInterval(timer)
   }
   keepAliveTimers.clear()
+  delete process.env.PI_SSE_IDLE_TIMEOUT_MS
   writeFileSync(SSE_TARGET, ORIGINAL)
 })
 
