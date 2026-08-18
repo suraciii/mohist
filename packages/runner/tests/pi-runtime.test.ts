@@ -287,6 +287,7 @@ describe('PiRuntime', () => {
     await new Promise<void>((resolve) => setImmediate(resolve))
     expect(session.promptCalls).toEqual(['once'])
     clock.advance(100)
+    await new Promise<void>((resolve) => setImmediate(resolve))
     expect(session.abortCalls).toBe(1)
     session.complete('late')
     await expect(resultPromise).resolves.toMatchObject({ ok: false, error: { kind: 'deadline-exceeded' } })

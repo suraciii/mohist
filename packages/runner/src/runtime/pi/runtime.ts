@@ -57,6 +57,8 @@ const defaultClock: PiClock = {
   clearTimeout: (handle) => clearTimeout(handle as ReturnType<typeof setTimeout>),
 }
 const CANCEL_CONFIRMATION_TIMEOUT_MS = 5_000
+const SETTLE_POLL_MS = 5_000
+const SETTLE_POLLS_REQUIRED = 3
 
 export class PiRuntime {
   private readonly deps: PiRuntimeDeps
@@ -204,7 +206,12 @@ export class PiRuntime {
     const fixAndAbort = (result: PiResult<PiTurnResult>) => {
       if (fixed) return
       fixed = result
-      void abortAndDiagnose(session, diagnostics, this.mask.bind(this)).finally(resolveFixed)
+      // The outcome is already decided (deadline exceeded, interrupted, or
+      // provider failure). Resolve the race first so the turn returns even if
+      // the abort below never completes; abort is diagnostic-only and must
+      // never gate settlement on a dead/ended SDK session.
+      resolveFixed()
+      void abortAndDiagnose(session, diagnostics, this.mask.bind(this))
     }
     const unsubscribe = session.subscribe((event) => {
       const facts = projector.project(event)
@@ -252,7 +259,67 @@ export class PiRuntime {
       if (!fixed) fixAndAbort(this.finishFailure('interrupted', 'Pi turn was interrupted', diagnostics))
     }
     signal.addEventListener('abort', cancel, { once: true })
+    // pi's prompt() promise can fail to resolve even after the session has
+    // reached a terminal state (an SSE body that never ends, or a settlement
+    // step stuck after the final message). The session stays streaming while
+    // the agent loop is blocked, so detect the terminal assistant message
+    // itself rather than waiting on isStreaming or the stuck prompt. The
+    // terminal-state predicate is the same one reattach uses to adopt a
+    // completed turn, so settling here produces the identical outcome a
+    // healthy prompt() would have returned.
+    const initialMessageCount = session.messages.length
+    let settleTimer: unknown = null
+    let terminalStreak = 0
+    const stopSettleGuard = () => {
+      if (settleTimer !== null) {
+        clock.clearTimeout(settleTimer)
+        settleTimer = null
+      }
+    }
+    const settleFromTerminalState = () => {
+      if (fixed) return
+      report(projector.reconcile(session.messages))
+      diagnostics.push(...projector.diagnostics().map((item) => diagnostic(item.code, this.mask(item.message), 'info')))
+      const failed = lastMessageFailed(session.messages)
+      fixed = failed
+        ? this.finishFailure('turn-failed', 'Pi turn failed', [
+            diagnostic('turn-failed', this.mask(lastMessageError(session.messages) ?? 'Pi reported an error')),
+          ])
+        : {
+            ok: true as const,
+            value: {
+              facts: {
+                finalAssistantText: finalText(session.messages),
+                runtimeSessionId: path,
+                workDir: request.target.workDir,
+              },
+              diagnostics,
+            },
+            diagnostics,
+          }
+      resolveFixed()
+      // The stuck prompt() still holds the per-session mutex; release it so
+      // later turns on this session do not queue behind a promise that never
+      // settles. The orphaned promise is already caught by withSessionLock.
+      this.sessionMutexes.delete(path)
+    }
+    const pollSettleState = () => {
+      if (fixed) return
+      // Only a message produced after this turn started counts; a terminal
+      // assistant message from an earlier turn on a reused session must not
+      // trigger a settle while the new turn is still in flight.  The streak
+      // (rather than a wall-clock comparison) keeps the guard independent of
+      // the injected clock's now() implementation.
+      const terminal = session.messages.length > initialMessageCount && lastMessageTerminal(session.messages)
+      terminalStreak = terminal ? terminalStreak + 1 : 0
+      if (terminalStreak >= SETTLE_POLLS_REQUIRED) {
+        settleFromTerminalState()
+        return
+      }
+      settleTimer = clock.setTimeout(pollSettleState, SETTLE_POLL_MS)
+    }
     try {
+      settleTimer = clock.setTimeout(pollSettleState, SETTLE_POLL_MS)
       const promptOperation = this.withSessionLock(path, () =>
         session.prompt(request.prompt, { expandPromptTemplates: false }).then(() => 'completed' as const),
       )
@@ -283,6 +350,7 @@ export class PiRuntime {
       signal.removeEventListener('abort', cancel)
       if (deadline !== null) clock.clearTimeout(deadline)
       if (warning !== null) clock.clearTimeout(warning)
+      stopSettleGuard()
       unsubscribe()
     }
   }
@@ -909,6 +977,10 @@ function lastMessageFailed(messages: readonly { role?: string; stopReason?: stri
   const item = [...messages].reverse().find((entry) => entry.role === 'assistant')
   return item?.stopReason === 'error'
 }
+function lastMessageTerminal(messages: readonly { role?: string; stopReason?: string }[]): boolean {
+  const item = [...messages].reverse().find((entry) => entry.role === 'assistant')
+  return item?.stopReason === 'stop' || item?.stopReason === 'error' || item?.stopReason === 'aborted'
+}
 function lastMessageError(messages: readonly { role?: string; errorMessage?: string }[]): string | undefined {
   return [...messages].reverse().find((entry) => entry.role === 'assistant')?.errorMessage
 }
@@ -963,9 +1035,8 @@ async function abortAndDiagnose(
   mask: (text: string) => string,
 ): Promise<void> {
   try {
-    await session.abort()
-    await Promise.resolve()
-    if (session.isStreaming)
+    const completed = await boundedWait(() => session.abort(), CANCEL_CONFIRMATION_TIMEOUT_MS)
+    if (!completed || session.isStreaming)
       diagnostics.push(diagnostic('abort-unconfirmed', mask('Pi did not confirm that the turn stopped')))
   } catch (cause) {
     diagnostics.push(diagnostic('abort-unconfirmed', mask(message(cause))))
