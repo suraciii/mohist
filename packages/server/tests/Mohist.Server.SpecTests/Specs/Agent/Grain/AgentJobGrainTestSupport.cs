@@ -181,4 +181,52 @@ public abstract class AgentJobGrainTestSupport
     protected static AgentJobInput MakeInput(string prompt, string projectId, string workspacePath = "/tmp/agent-job") =>
         new(Prompt: prompt, WorkspacePath: workspacePath, ProjectId: projectId, AgentId: "agent-test");
 
+    /// <summary>
+    /// Connection generation shared by the capability-fence helpers.
+    /// Re-registering the test runner with this identity and seeding
+    /// the readiness witness is what lets an explicit reasoning-effort
+    /// dispatch clear the stage-1 capability claim fence (issue-557
+    /// T-006) instead of being left pending forever.
+    /// </summary>
+    protected const string CapabilityFenceConnection = "test-connection";
+
+    /// <summary>
+    /// Re-register the runner with a connection-generation identity and
+    /// seed the server-side readiness witness for each <paramref name="runtimes"/>
+    /// so a later effort-bearing claim matches the fence. The poll request
+    /// must also carry the same witnesses via
+    /// <see cref="CapabilityFencePollRequest"/>.
+    /// </summary>
+    protected async Task InstallCapabilityFenceAsync(
+        string runnerId,
+        string projectId,
+        params string[] runtimes)
+    {
+        var runner = Grains.GetGrain<IRunnerGrain>(runnerId);
+        await runner.RegisterAsync(new RunnerInfo(
+            runnerId,
+            ["spec/*"],
+            "agent-job-host",
+            projectId,
+            ConnectionGeneration: CapabilityFenceConnection,
+            RuntimeCatalogs: CapabilityCatalogTestHelpers.Create()));
+        await runner.ObserveRuntimeReadinessAsync(
+            CapabilityFenceConnection,
+            runtimes
+                .Select(runtime => new RuntimeReadinessWitness(runtime, Ready: true, Generation: 1))
+                .ToList());
+    }
+
+    /// <summary>
+    /// A poll request that carries the fence witnesses for the registered
+    /// connection, so AgentJob dispatch claims clear the capability gate.
+    /// </summary>
+    protected static RunnerPollRequest CapabilityFencePollRequest(params string[] runtimes) =>
+        new(
+            [],
+            [],
+            RuntimeReadiness: runtimes
+                .Select(runtime => new RuntimeReadinessWitness(runtime, Ready: true, Generation: 1))
+                .ToList(),
+            ConnectionGeneration: CapabilityFenceConnection);
 }

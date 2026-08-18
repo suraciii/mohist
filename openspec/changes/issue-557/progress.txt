@@ -777,3 +777,31 @@ Runner 1668, Web 4732, Slack 70 all green. `git diff --check` clean.
   AgentJobGrain capability/claim, session grain read projection, session
   querier summaries) into partials and ran biome over the changed runner
   files. `check:filesizes` and `format:check` are clean against `master`.
+
+## PR #567 check repair round (CI gate: .NET spec partitions + Node build/test)
+
+Fix round to unblock the gating checks after the resolver-gated admission
+rebase. Root causes and repairs:
+
+- `.NET spec partition 0` (IssueAgentConfigValidationApiSpecs): the PR moved
+  the issue-surface "accepts only …" message to
+  `model, variant, reasoningEffort`, breaking the pre-existing
+  `model, reasoningEffort, variant` API contract. Restored the contract order
+  in `AgentConfigSchema.CanonicalIssueKeyOrder`.
+- `.NET spec partitions 1–3` (effort dispatch / write-through mirror /
+  routed-launch / agent-session launch spec timeouts): the stage-1 capability
+  claim fence leaves explicit-effort work pending when the runner has no
+  readiness witness, and complete  catalogs reject tuples whose model/variant
+  is not listed. Added `InstallCapabilityFenceAsync`/
+  `CapabilityFencePollRequest` to `AgentJobGrainTestSupport` and wired the
+  effort-bearing specs through the fence; extended
+  `CapabilityCatalogTestHelpers` with the `anthropic/sonnet-4.6` model and
+  `fast` variant used by pre-existing launch specs.
+- `Node` (typecheck→test cascade): `RuntimeCatalogEntry` gained
+  `reasoningEfforts` and `deriveCapabilityRevision` now hashes it; Pi
+  registration publishes thinking levels under `reasoningEfforts` with an
+  empty variant map and always registers the OpenCode entry; the AgentJob
+  executor forwards `reasoningEffort` into the OpenCode turn (rejection stays
+  inside the adapter); Pi variant→thinking-level smuggling removed (T-004);
+  runner rejects stale capability snapshots with `stale-capability-snapshot`
+  before execution; Web agent-detail card surfaces the effort and variant.

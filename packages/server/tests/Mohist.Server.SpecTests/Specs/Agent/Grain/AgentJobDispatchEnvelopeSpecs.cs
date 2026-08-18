@@ -266,6 +266,7 @@ public class AgentJobDispatchEnvelopeSpecs : AgentJobGrainTestSupport
         // launch-time effort without re-reading the Agent definition.
         var (runnerId, projectId) = await RegisterAgentJobRunnerAsync(
             $"agent-job-effort-dispatch-runner-{Guid.NewGuid():N}");
+        await InstallCapabilityFenceAsync(runnerId, projectId, "opencode");
         var jobKey = $"agent-job-effort-dispatch-{Guid.NewGuid():N}";
         var job = JobGrain(jobKey);
 
@@ -281,7 +282,11 @@ public class AgentJobDispatchEnvelopeSpecs : AgentJobGrainTestSupport
             ReasoningEffort: "high");
 
         await job.SubmitAsync(input);
-        await WaitForStatusAsync(job, AgentJobStatus.Running, TimeSpan.FromSeconds(5));
+        await WaitForStatusAsync(
+            job,
+            AgentJobStatus.Running,
+            TimeSpan.FromSeconds(5),
+            CapabilityFencePollRequest("opencode"));
 
         var polled = await Grains.GetGrain<IRunnerGrain>(runnerId).PollAsync(_fixture.Cluster.GetSiloServiceProvider(null));
         Assert.NotNull(polled);

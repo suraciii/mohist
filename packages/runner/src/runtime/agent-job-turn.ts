@@ -46,6 +46,7 @@ export async function executeOpenCodeTurn(
   model: ParsedModel,
   modelInput: string | null,
   variant: string | null,
+  reasoningEffort: string | null,
   workDir: string,
   binding: BindingResolution,
   skills: readonly ResolvedSkill[],
@@ -127,6 +128,7 @@ export async function executeOpenCodeTurn(
     options: {
       model: model.kind === 'ok' ? { providerID: model.value.providerID, modelID: model.value.modelID } : null,
       variant: variant ?? null,
+      reasoningEffort: reasoningEffort ?? null,
       ...(skills.length > 0 ? { skills } : {}),
       unknownKeys: collectUnknownKeys(payload),
     },

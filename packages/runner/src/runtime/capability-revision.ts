@@ -26,6 +26,7 @@ export function deriveCapabilityRevision(entry: RuntimeCatalogEntry): string {
   const canonical = JSON.stringify({
     models: [...new Set(entry.models)].sort(compareStrings),
     variants: canonicalMap(entry.variants),
+    reasoningEfforts: canonicalMap(entry.reasoningEfforts),
     supportsReasoningEffort: entry.supportsReasoningEffort ?? null,
     complete: entry.complete ?? null,
   })

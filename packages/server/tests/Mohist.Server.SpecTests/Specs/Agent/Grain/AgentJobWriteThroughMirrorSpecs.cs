@@ -71,6 +71,7 @@ public class AgentJobWriteThroughMirrorSpecs : AgentJobGrainTestSupport
     public async Task Mirror_TerminalTransitionWritesRowWithTerminalStatusAndAt()
     {
         var (runnerId, projectId) = await RegisterAgentJobRunnerAsync($"mirror-terminal-runner-{Guid.NewGuid():N}");
+        await InstallCapabilityFenceAsync(runnerId, projectId, "opencode");
         var jobKey = $"mirror-terminal-{Guid.NewGuid():N}";
         var job = JobGrain(jobKey);
 
@@ -83,7 +84,11 @@ public class AgentJobWriteThroughMirrorSpecs : AgentJobGrainTestSupport
             Variant: "balanced",
             ReasoningEffort: "high"));
 
-        await WaitForStatusAsync(job, AgentJobStatus.Running, TimeSpan.FromSeconds(5));
+        await WaitForStatusAsync(
+            job,
+            AgentJobStatus.Running,
+            TimeSpan.FromSeconds(5),
+            CapabilityFencePollRequest("opencode"));
         var workId = (await job.GetRuntimeSnapshotAsync()).CurrentWorkId!;
 
         await job.ReportResultAsync(runnerId, workId,

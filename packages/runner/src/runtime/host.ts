@@ -334,7 +334,18 @@ export class RunnerHost {
       inFlight: this.inFlight,
       awaitingAck: this.awaitingAck,
       hostShutdown: this.hostShutdown,
+      currentCatalogRevision: (runtime) => this.currentCatalogRevision(runtime),
     }
+  }
+
+  private currentCatalogRevision(runtime: string): string | null {
+    const normalized = runtime.trim().toLowerCase()
+    const catalogs = this.registrationState().runtimeCatalogs
+    if (!catalogs) return null
+    for (const [key, entry] of Object.entries(catalogs)) {
+      if (key.trim().toLowerCase() === normalized) return entry.capabilityRevision ?? null
+    }
+    return null
   }
 
   private taskLogDepsForExecution(): HostTaskLogDeps {

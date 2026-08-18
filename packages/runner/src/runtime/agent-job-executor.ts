@@ -191,13 +191,6 @@ export class AgentJobExecutor {
         skills,
       )
     }
-    if (reasoningEffort) {
-      return failureResult(
-        'unsupported-execution-configuration',
-        'AgentJob reasoningEffort is unsupported by the selected opencode runtime',
-        'opencode',
-      )
-    }
     return executeOpenCodeTurn(
       this.turnDeps(),
       work,
@@ -207,6 +200,7 @@ export class AgentJobExecutor {
       model,
       modelInput,
       variant,
+      reasoningEffort,
       workDir,
       binding,
       skills,

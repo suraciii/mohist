@@ -181,6 +181,14 @@ export type WorkDispatchResponse = {
    * reconciliation probe. Mirrors `WorkDispatch.AgentRecovery`.
    */
   agentRecovery?: AgentRecoveryBinding | null
+  /**
+   * Content-derived revision of the runner catalog the server froze the
+   * dispatch snapshot against. The runner rejects a work whose revision
+   * no longer matches its own current catalog (stale capability
+   * snapshot) instead of executing with silently changed capability
+   * semantics (issue-557 T-006).
+   */
+  capabilityRevision?: string | null
 }
 
 /**
@@ -277,6 +285,12 @@ export interface DispatchWorkItem {
    */
   initialTurnId?: string | null
   agentRecovery?: AgentRecoveryBinding | null
+  /**
+   * Frozen capability revision the snapshot was admitted against.
+   * The runner rejects the work when this differs from its current
+   * catalog revision (issue-557 T-006).
+   */
+  capabilityRevision?: string | null
 }
 
 export interface AddTaskInput {
@@ -313,6 +327,12 @@ export interface WorkItemResult {
   capturedOutputs?: JsonObject | null
   cleanupAttempts?: number | null
   addTasks?: AddTaskInput[] | null
+  /**
+   * Runner-side rejection of a work whose frozen capability snapshot no
+   * longer matches the runner's current catalog. The server re-pends the
+   * work for re-resolution instead of treating it as a terminal failure.
+   */
+  requeue?: boolean
 }
 
 export interface ActionError {
@@ -412,6 +432,7 @@ export interface RunnerOptions {
 export interface RuntimeCatalogEntry {
   models: string[]
   variants: Record<string, string[]>
+  reasoningEfforts?: Record<string, string[]>
   supportsReasoningEffort?: boolean
   complete?: boolean
   capabilityRevision?: string | null

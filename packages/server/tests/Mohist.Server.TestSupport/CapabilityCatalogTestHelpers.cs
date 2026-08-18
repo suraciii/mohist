@@ -18,6 +18,7 @@ public static class CapabilityCatalogTestHelpers
         "openai/gpt-5.5",
         "openai/gpt-5.6",
         "openai/gpt-test",
+        "anthropic/sonnet-4.6",
         "anthropic/claude-opus-4-20250514",
         "anthropic/claude-sonnet-4-20250514",
         "anthropic/claude-sonnet-4-6",
@@ -44,6 +45,7 @@ public static class CapabilityCatalogTestHelpers
     private static readonly string[] Variants =
     [
         "balanced",
+        "fast",
         "high",
         "xhigh",
         "old-issue-variant",

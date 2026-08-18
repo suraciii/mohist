@@ -287,6 +287,7 @@ public class AgentJobGrainRoutedLaunchSpecs : AgentJobGrainTestSupport
     {
         var (runnerId, projectId) = await RegisterAgentJobRunnerAsync(
             $"routed-effort-dispatch-runner-{Guid.NewGuid():N}");
+        await InstallCapabilityFenceAsync(runnerId, projectId, "opencode");
         var eventId = "evt-routed-effort-dispatch";
         var ruleId = "rule-routed-effort-dispatch";
         var plan = BuildExecutablePlan(projectId, eventId, ruleId, "/tmp/routed-effort-dispatch")
@@ -308,7 +309,11 @@ public class AgentJobGrainRoutedLaunchSpecs : AgentJobGrainTestSupport
         Assert.Equal("high", snapshot.ExecutionDefinition?.ReasoningEffort);
         Assert.Equal("balanced", snapshot.ExecutionDefinition?.Variant);
 
-        await WaitForStatusAsync(job, AgentJobStatus.Running, TimeSpan.FromSeconds(5));
+        await WaitForStatusAsync(
+            job,
+            AgentJobStatus.Running,
+            TimeSpan.FromSeconds(5),
+            CapabilityFencePollRequest("opencode"));
 
         var polled = await Grains.GetGrain<IRunnerGrain>(runnerId)
             .PollAsync(_fixture.Cluster.GetSiloServiceProvider(null));

@@ -76,8 +76,10 @@ public static class AgentConfigSchema
     /// <summary>
     /// Stable display order for <see cref="IssueAllowedKeys"/> so the
     /// issue-surface "accepts only …" error message reads deterministically.
+    /// The order is the long-standing contract asserted by the API
+    /// boundary spec (model, reasoningEffort, variant).
     /// </summary>
-    private static readonly string CanonicalIssueKeyOrder = "model, variant, reasoningEffort";
+    private static readonly string CanonicalIssueKeyOrder = "model, reasoningEffort, variant";
 
     public static string? ValidateIssue(JsonElement? agentConfig)
     {
