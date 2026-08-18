@@ -269,7 +269,7 @@ public class MohistGithubPrIssueWorkflowProfileTests
     }
 
     [Fact]
-    public void GithubPrWorkflowDefinition_BuildStage_PreservesLoadTasksAndVerify()
+    public void GithubPrWorkflowDefinition_BuildStage_OrdersLanesBeforePushWithoutAggregateVerify()
     {
         var def = WorkflowProfileCatalog.Definition;
         var pr = GithubPrDefinition;
@@ -277,26 +277,99 @@ public class MohistGithubPrIssueWorkflowProfileTests
         var prBuild = pr.Stages.Single(s => s.Stage == "build");
         var defBuild = def.Stages.Single(s => s.Stage == "build");
 
-        Assert.Equal(new[] { "workspace-prepare", "load-tasks", "verify", "push" }, prBuild.Tasks.Select(t => t.Id).ToArray());
+        Assert.Equal(
+            new[] { "workspace-prepare", "load-tasks" }.Concat(VerificationLaneCatalog.LaneIds).Append("push"),
+            prBuild.Tasks.Select(t => t.Id).ToArray());
         var prLoad = prBuild.Tasks.Single(t => t.Id == "load-tasks");
         var defLoad = defBuild.Tasks.Single(t => t.Id == "load-tasks");
         AssertTaskWithMapsMatchExcept(prLoad, defLoad);
 
         Assert.Empty(prBuild.Checks);
-        var verify = prBuild.Tasks.Single(t => t.Id == "verify");
-        Assert.Equal("core/script", verify.Uses);
-        Assert.Equal("${{ vars.ci.verify }}", ReadStringWith(verify, "run"));
-        Assert.Equal(300000, verify.With!["timeout"]!.Value.GetInt32());
-        Assert.Equal(300000, defBuild.Tasks.Single(t => t.Id == "verify").With!["timeout"]!.Value.GetInt32());
-        Assert.False(verify.With!.ContainsKey("resourceProfile"));
-        Assert.False(defBuild.Tasks.Single(t => t.Id == "verify").With!.ContainsKey("resourceProfile"));
-        Assert.NotNull(verify.Recovery);
-        Assert.True(verify.Recovery!.Budget >= 2);
-        var handler = Assert.Single(verify.Recovery.Handlers);
+
+        // No aggregate verify task and no aggregate command or enclosing
+        // timeout remain in the built-in gate.
+        Assert.DoesNotContain(prBuild.Tasks, t => t.Id == "verify");
+        Assert.DoesNotContain(JsonSerializer.Serialize(prBuild.Tasks), "vars.ci.verify");
+        Assert.DoesNotContain(JsonSerializer.Serialize(prBuild.Tasks), "300000");
+        Assert.DoesNotContain(JsonSerializer.Serialize(defBuild.Tasks), "vars.ci.verify");
+        Assert.DoesNotContain(JsonSerializer.Serialize(defBuild.Tasks), "300000");
+
+        // The six lanes are core/script tasks with their own literal positive
+        // finite timeouts and the profile-specific fix-ci recovery contract.
+        var lanes = VerificationLaneCatalog.LaneIds.Select(id => prBuild.Tasks.Single(t => t.Id == id)).ToList();
+        Assert.Equal(6, lanes.Count);
+        foreach (var lane in lanes)
+        {
+            Assert.Equal("core/script", lane.Uses);
+            Assert.True(lane.With!.TryGetValue("timeout", out var timeout));
+            Assert.True(timeout.HasValue && timeout.Value.ValueKind == JsonValueKind.Number);
+            Assert.True(timeout.Value.GetInt32() > 0, $"lane {lane.Id} must declare a positive finite timeout");
+            Assert.False(lane.With.ContainsKey("resourceProfile"));
+            AssertLaneFixCiRecovery(lane, agentAction: "mohist/opencode", expectMarkers: false);
+        }
+
+        Assert.Equal("HEAD", ReadStringWith(prBuild.Tasks.Single(t => t.Id == "push"), "source"));
+    }
+
+    [Fact]
+    public void GithubPrWorkflowDefinition_BuildStage_LanesCarryExactCommandsInCatalogOrder()
+    {
+        var pr = GithubPrDefinition;
+        var build = pr.Stages.Single(s => s.Stage == "build");
+
+        Assert.Equal(VerificationLaneCatalog.LaneIds, build.Tasks.Where(t => VerificationLaneCatalog.IsKnownLane(t.Id)).Select(t => t.Id).ToArray());
+
+        Assert.Equal("npm ci", ReadStringWith(build.Tasks.Single(t => t.Id == VerificationLaneCatalog.VerifyInstall), "run"));
+
+        // The .NET lane carries only the runtime prelude before the unchanged
+        // dotnet command; the prelude is setup in the same lane shell, not an
+        // extra verification command.
+        var dotnetRun = ReadStringWith(build.Tasks.Single(t => t.Id == VerificationLaneCatalog.VerifyDotnet), "run");
+        // The literal block scalar "|" preserves the trailing newline; the
+        // lane body is the prelude plus the unchanged dotnet command.
+        Assert.Equal(
+            "export DOTNET_ROOT=/home/szf/.dotnet\ndotnet test Mohist.sln --nologo -m:1 -p:UseSharedCompilation=false",
+            dotnetRun?.TrimEnd('\n'));
+
+        Assert.Equal("npm run typecheck -w packages/web", ReadStringWith(build.Tasks.Single(t => t.Id == VerificationLaneCatalog.VerifyWebTypecheck), "run"));
+        Assert.Equal("npm run test:run -w packages/web", ReadStringWith(build.Tasks.Single(t => t.Id == VerificationLaneCatalog.VerifyWebTests), "run"));
+        Assert.Equal("npm run typecheck -w packages/runner", ReadStringWith(build.Tasks.Single(t => t.Id == VerificationLaneCatalog.VerifyRunnerTypecheck), "run"));
+        Assert.Equal("npm run test:run -w packages/runner -- --no-file-parallelism", ReadStringWith(build.Tasks.Single(t => t.Id == VerificationLaneCatalog.VerifyRunnerTests), "run"));
+    }
+
+    private static void AssertLaneFixCiRecovery(
+        Mohist.Workflow.Definition.TaskDefinition lane,
+        string agentAction,
+        bool expectMarkers)
+    {
+        var recovery = lane.Recovery;
+        Assert.NotNull(recovery);
+        Assert.Equal(2, recovery!.Budget);
+        var handler = Assert.Single(recovery.Handlers);
         Assert.Null(handler.When);
         Assert.True(handler.RetrySelf);
-        Assert.Equal("recover:fix-ci", Assert.Single(handler.Tasks).Id);
-        Assert.Equal("HEAD", ReadStringWith(prBuild.Tasks.Single(t => t.Id == "push"), "source"));
+        var fixCi = Assert.Single(handler.Tasks);
+        Assert.Equal("recover:fix-ci", fixCi.Id);
+        Assert.Equal("Fix CI verification", fixCi.Title);
+        Assert.Equal(agentAction, fixCi.Uses);
+        Assert.Equal("${{ prompts.fix-ci }}", ReadStringWith(fixCi, "prompt"));
+        Assert.Equal("${{ vars.agent }}", ReadStringWith(fixCi, "options"));
+        Assert.Equal("build", ReadStringWith(fixCi, "session"));
+        if (expectMarkers)
+        {
+            Assert.NotNull(fixCi.Expect);
+            var expectElement = JsonSerializer.SerializeToElement(fixCi.Expect);
+            Assert.True(expectElement.TryGetProperty("markers", out var markers));
+            var marker = Assert.Single(markers.EnumerateArray());
+            Assert.Equal("_output", marker.GetProperty("path").GetString());
+            var oneOf = marker.GetProperty("oneOf").EnumerateArray().Select(v => v.GetString()).ToList();
+            Assert.Contains("<promise>done</promise>", oneOf);
+            Assert.Contains("<promise>unfinished</promise>", oneOf);
+        }
+        else
+        {
+            Assert.Null(fixCi.Expect);
+        }
     }
 
     [Fact]

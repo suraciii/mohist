@@ -160,12 +160,41 @@ public sealed class WorkflowBoundDefinitionResolverTests
     }
 
     [Fact]
-    public void IsLaneEnabledBuildStage_FalseWhenExtraBuildTaskPresent()
+    public void IsLaneEnabledBuildStage_TrueWhenExtraBuildTasksSurroundConsecutiveLanes()
     {
-        var tasks = VerificationLaneCatalog.LaneIds
-            .Select(id => new TaskDefinition(id, id, "core/script"))
-            .Append(new TaskDefinition("extra", "Extra", "core/script"))
-            .ToList();
+        // The built-in profiles keep orchestration tasks around the six lanes
+        // (workspace-prepare/load-tasks before, push after), so a run is lane
+        // enabled when the six lanes appear as consecutive core/script tasks.
+        var tasks = new List<TaskDefinition>
+        {
+            new("workspace-prepare", "Prepare workspace", "mohist/workspace-prepare"),
+            new("load-tasks", "Load tasks", "mohist/openspec-tasks"),
+        };
+        tasks.AddRange(VerificationLaneCatalog.LaneIds.Select(id => new TaskDefinition(id, id, "core/script")));
+        tasks.Add(new TaskDefinition("push", "Push", "mohist/push"));
+        var definition = new WorkflowDefinition(new[]
+        {
+            new StageDefinition("build", tasks, Array.Empty<CheckDefinition>()),
+        });
+
+        Assert.True(WorkflowBoundDefinitionResolver.IsLaneEnabledBuildStage(definition));
+    }
+
+    [Fact]
+    public void IsLaneEnabledBuildStage_FalseWhenExtraBuildTaskInterleavesTheLanes()
+    {
+        // An extra task inside the six-lane run breaks the consecutive
+        // sequence, so the run is not lane enabled.
+        var tasks = new List<TaskDefinition>
+        {
+            new("workspace-prepare", "Prepare workspace", "mohist/workspace-prepare"),
+        };
+        foreach (var id in VerificationLaneCatalog.LaneIds)
+        {
+            tasks.Add(new TaskDefinition(id, id, "core/script"));
+            if (string.Equals(id, VerificationLaneCatalog.VerifyDotnet, StringComparison.Ordinal))
+                tasks.Add(new TaskDefinition("interleaved", "Interleaved", "core/script"));
+        }
         var definition = new WorkflowDefinition(new[]
         {
             new StageDefinition("build", tasks, Array.Empty<CheckDefinition>()),

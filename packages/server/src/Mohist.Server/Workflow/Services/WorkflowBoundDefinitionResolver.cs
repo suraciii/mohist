@@ -117,24 +117,40 @@ public static class WorkflowBoundDefinitionResolver
     }
 
     /// <summary>
-    /// True when the bound definition's <c>build</c> stage carries the
-    /// complete six-lane sequence in catalog order, with each task using
-    /// <c>core/script</c>. Profile edits after binding cannot change this:
-    /// the predicate reads the snapshot captured at run-bind time.
+    /// True when the bound definition's <c>build</c> stage contains the
+    /// complete six-lane sequence as six consecutive <c>core/script</c> tasks
+    /// in catalog order. Profile edits after binding cannot change this: the
+    /// predicate reads the snapshot captured at run-bind time.
+    ///
+    /// The built-in profiles keep stage-orchestration tasks
+    /// (<c>workspace-prepare</c>, <c>load-tasks</c>, build health, and the
+    /// PR push) around the verification lanes, so a run is lane-enabled when
+    /// the lanes appear as a whole sequence in the declared order rather than
+    /// when the build stage consists of exactly six tasks. The sequence must
+    /// be consecutive so interleaved tasks cannot shift the lane order.
     /// </summary>
     public static bool IsLaneEnabledBuildStage(WorkflowDefinition definition)
     {
         var build = definition.Stages.FirstOrDefault(s => string.Equals(s.Stage, "build", StringComparison.Ordinal));
         if (build is null) return false;
-        if (build.Tasks.Count != VerificationLaneCatalog.LaneIds.Count) return false;
-        for (var i = 0; i < VerificationLaneCatalog.LaneIds.Count; i++)
+        if (build.Tasks.Count < VerificationLaneCatalog.LaneIds.Count) return false;
+        for (var start = 0; start + VerificationLaneCatalog.LaneIds.Count <= build.Tasks.Count; start++)
         {
-            var task = build.Tasks[i];
-            var expectedId = VerificationLaneCatalog.LaneIds[i];
-            if (!string.Equals(task.Id, expectedId, StringComparison.Ordinal)) return false;
-            if (!string.Equals(task.Uses, "core/script", StringComparison.Ordinal)) return false;
+            var matches = true;
+            for (var i = 0; i < VerificationLaneCatalog.LaneIds.Count; i++)
+            {
+                var task = build.Tasks[start + i];
+                var expectedId = VerificationLaneCatalog.LaneIds[i];
+                if (!string.Equals(task.Id, expectedId, StringComparison.Ordinal)
+                    || !string.Equals(task.Uses, "core/script", StringComparison.Ordinal))
+                {
+                    matches = false;
+                    break;
+                }
+            }
+            if (matches) return true;
         }
-        return true;
+        return false;
     }
 
     /// <summary>

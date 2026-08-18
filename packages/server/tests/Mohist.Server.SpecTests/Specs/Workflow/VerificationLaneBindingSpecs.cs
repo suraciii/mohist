@@ -272,6 +272,123 @@ public class VerificationLaneBindingSpecs : WorkflowGrainSpecs
         Assert.Empty(WorkflowBoundDefinitionResolver.CollectLaneAttempts(run));
     }
 
+    [Theory]
+    [InlineData("mohist/local")]
+    [InlineData("mohist/github-pr")]
+    public async Task BuiltInProfile_CleanRun_CompletesAllSixLanesInOrderAndOpensBuildGate(string profileId)
+    {
+        var workflow = await CreateWorkflowAsync();
+        var projectId = TestProjectId(_workflowId!);
+
+        // Representative clean run over the built-in profile's own build
+        // stage: keep the profile's exact build-stage tasks (orchestration
+        // tasks plus the six verification lanes) as the single stage so the
+        // run starts directly in build and every lane must execute once.
+        var builtIn = string.Equals(profileId, "mohist/local", StringComparison.Ordinal)
+            ? WorkflowProfileCatalog.Definition
+            : WorkflowProfileCatalog.GithubPrWorkflowDefinition;
+        var buildStage = builtIn.Stages.Single(s => s.Stage == "build");
+        var definition = new WorkflowDefinition(new[] { buildStage });
+
+        await SeedWorkflowTemplateAsync(_workflowId!, definition, projectId);
+        var coordinator = Grains.GetGrain<IWorkflowProfileReferenceCoordinatorGrain>(projectId);
+        var bind = await coordinator.BindWorkflowRunAsync(
+            new WorkflowProfileCommandPayload.BindWorkflowRun(
+                ProjectId: projectId,
+                WorkflowRunId: _workflowId!,
+                IssueNumber: 1,
+                EpicNumber: null,
+                ExplicitProfileId: null,
+                Metadata: TestInput(projectId).Metadata!),
+            $"cmd-clean-{Guid.NewGuid():N}",
+            expectedRevision: null);
+        Assert.True(bind.IsApplied);
+
+        await workflow.StartAsync(TestInput(projectId));
+
+        var run = await LoadRunAsync(_workflowId!);
+        Assert.True(VerificationLaneGate.IsLaneEnabledRun(run));
+        var runnerId = await RegisterRunnerAsync();
+
+        // Drive the orchestration tasks that precede the lanes to completion
+        // (workspace-prepare, load-tasks, and the local build-health check);
+        // none of them is a verification lane. Tasks that follow the lanes
+        // (the PR profile's push) are driven after all six lanes pass.
+        run = await LoadRunAsync(_workflowId!);
+        var build = run.Stages.Single(s => s.Id == "build");
+        var preLaneOrchestration = build.Tasks
+            .TakeWhile(t => !VerificationLaneCatalog.IsKnownLane(t.DefinitionId))
+            .Select(t => t.DefinitionId)
+            .ToList();
+        foreach (var orchestrationId in preLaneOrchestration)
+        {
+            var dispatched = await PollWorkAsync(runnerId);
+            Assert.Equal(orchestrationId, dispatched.Work.WorkId.Split('.')[0]);
+            await ReportAsync(runnerId, dispatched.Work.WorkId, "completed");
+        }
+
+        // Each lane is claimed and reported in catalog order; a later lane is
+        // never exposed while its predecessor has not passed, and the gate
+        // stays closed until the sixth lane passes.
+        for (var i = 0; i < VerificationLaneCatalog.LaneIds.Count; i++)
+        {
+            var expectedId = VerificationLaneCatalog.LaneIds[i];
+            var dispatched = await PollWorkAsync(runnerId);
+            Assert.StartsWith($"{expectedId}.", dispatched.Work.WorkId);
+
+            if (expectedId == VerificationLaneCatalog.VerifyDotnet)
+            {
+                // The .NET lane is dispatched with the runtime prelude inside
+                // its own shell script, before the unchanged dotnet command.
+                var dispatchedWith = dispatched.Work.With
+                    ?? throw new InvalidOperationException("verify-dotnet dispatch must carry its run script");
+                Assert.Contains("export DOTNET_ROOT=/home/szf/.dotnet", dispatchedWith);
+                Assert.Contains("dotnet test Mohist.sln --nologo -m:1 -p:UseSharedCompilation=false", dispatchedWith);
+                Assert.True(
+                    dispatchedWith.IndexOf("export DOTNET_ROOT=/home/szf/.dotnet", StringComparison.Ordinal)
+                    < dispatchedWith.IndexOf("dotnet test", StringComparison.Ordinal));
+            }
+
+            await ReportAsync(runnerId, dispatched.Work.WorkId, "completed");
+
+            run = await LoadRunAsync(_workflowId!);
+            var laneRun = run.Stages.Single(s => s.Id == "build")
+                .Tasks.Single(t => string.Equals(t.DefinitionId, expectedId, StringComparison.Ordinal));
+            Assert.Equal(VerificationLaneOutcome.Pass, laneRun.Lane!.Outcome);
+            Assert.Equal(i, laneRun.Lane.Order);
+            Assert.True(laneRun.Lane.ConfiguredBudgetMs > 0);
+
+            var isFinalLane = i == VerificationLaneCatalog.LaneIds.Count - 1;
+            if (!isFinalLane)
+            {
+                Assert.False(VerificationLaneGate.CanAdvanceBuildStage(run),
+                    $"build gate must stay closed while {VerificationLaneCatalog.LaneIds[i + 1]} is still pending");
+            }
+        }
+
+        // The PR profile keeps its push task after the lanes; drive it (and
+        // any other remaining orchestration) to complete the clean run.
+        while (true)
+        {
+            run = await LoadRunAsync(_workflowId!);
+            var pending = run.Stages.Single(s => s.Id == "build")
+                .Tasks.FirstOrDefault(t => t.Status == TaskRunStatus.Pending);
+            if (pending is null) break;
+            var dispatched = await PollWorkAsync(runnerId);
+            await ReportAsync(runnerId, dispatched.Work.WorkId, "completed");
+        }
+
+        run = await LoadRunAsync(_workflowId!);
+        Assert.True(VerificationLaneGate.CanAdvanceBuildStage(run));
+        Assert.Equal(StageRunStatus.Completed, run.Stages.Single(s => s.Id == "build").Status);
+        Assert.Equal(WorkflowRunStatus.Completed, run.Status);
+        Assert.All(
+            VerificationLaneCatalog.LaneIds,
+            id => Assert.Equal(
+                VerificationLaneOutcome.Pass,
+                run.Stages.Single(s => s.Id == "build").Tasks.Single(t => t.DefinitionId == id).Lane!.Outcome));
+    }
+
     private static WorkflowDefinition BuildSixLaneDefinition(bool extraBuildTask = false)
     {
         var tasks = VerificationLaneCatalog.LaneIds

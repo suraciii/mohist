@@ -37,6 +37,15 @@ internal sealed class WorkflowWorkLifecycle
             }
         }
 
+        // Classify the report at the verification boundary BEFORE the normal
+        // task transition so the lane outcome (pass/fail/timeout) is visible
+        // to the stage gate in the same state commit that advances the stage.
+        // The final lane is usually the last build task: if the outcome were
+        // applied after CompleteTask/Advance, the gate would evaluate while
+        // that lane is still pending and a fully passed run would never
+        // advance past the build stage.
+        ApplyLaneOutcome(currentTask, report, now);
+
         if (report.Status == TaskReportStatus.Succeeded)
         {
             if (currentTask is not null)
@@ -79,11 +88,8 @@ internal sealed class WorkflowWorkLifecycle
             events.AddRange(run.FailTask(stageId, taskRunId, taskResult, now));
         }
 
-        // Classify the report at the verification boundary and persist the
-        // lane outcome (pass/fail/timeout) in the same state transition that
-        // committed the normal task result, so the lane evidence is durable
-        // with the attempt that produced it.
-        ApplyLaneOutcome(currentTask, report, now);
+        // ApplyLaneOutcome already ran before the task transition; it must not
+        // run again here (the lane metadata is write-once per attempt).
 
         return events;
     }
