@@ -75,24 +75,26 @@ public partial class WorkflowGrain
             if (EnsureSettlementDeadline(settlement))
                 await CommitAsync([]);
 
-            await DeleteAgentResultSettlementSnapshotAsync(settlement.WorkId);
             if (settlement.DeadlineAt <= Now())
             {
                 await BlockUnresolvedAgentResultIfDueAsync();
                 return;
             }
 
+            await DeleteAgentResultSettlementSnapshotAsync(settlement.WorkId);
             await EnsureAgentResultSettlementReminderAsync(settlement.DeadlineAt!.Value);
             return;
         }
 
         if (settlement.State == AgentResultSettlementState.Blocked)
-        {
-            await DeleteAgentResultSettlementSnapshotAsync(settlement.WorkId);
-            await RemoveAgentResultSettlementReminderAsync();
-        }
+            await ReleaseBlockedAgentResultSettlementAsync(unresolved!);
     }
 
+    /// <summary>
+    /// Applies the durable release boundary for a due unknown settlement: the
+    /// blocked transition and the assignment release are committed together,
+    /// before any independently retryable external cleanup is attempted.
+    /// </summary>
     private async Task BlockUnresolvedAgentResultIfDueAsync()
     {
         if (_run is null)
@@ -100,11 +102,70 @@ public partial class WorkflowGrain
 
         var events = _run.BlockUnresolvedAgentResult(Now());
         if (events.Count > 0)
+        {
             await CommitAsync(events);
+            _cachedAssignedWorkerId = null;
+            _log.LogWarning(
+                "Workflow {Id} released its unresolved Agent attempt at the settlement deadline; the attempt stays addressable but no longer holds active work",
+                GrainKey);
+        }
 
         var unresolved = _run.FindUnresolvedAgentResultSettlementTask();
         if (unresolved?.Task.AgentResultSettlement?.State == AgentResultSettlementState.Blocked)
-            await RemoveAgentResultSettlementReminderAsync();
+            await ReleaseBlockedAgentResultSettlementAsync(unresolved);
+    }
+
+    /// <summary>
+    /// Converges a blocked settlement: it first repairs a stale assignment left
+    /// by an older release (or an interrupted one) and persists that repair,
+    /// then retries the external cleanup steps. Every step is idempotent and a
+    /// failing step never undoes the durable boundary nor reacquires ownership;
+    /// the reminder is only removed once the other resources are released, so a
+    /// replay or the next activation retries whatever is left.
+    /// </summary>
+    private async Task ReleaseBlockedAgentResultSettlementAsync(
+        WorkflowAgentResultSettlementTask blocked)
+    {
+        if (_run is null || blocked.Task.AgentResultSettlement is not { } settlement)
+            return;
+
+        if (_run.ReleaseBlockedAgentResultOwnership())
+        {
+            await CommitAsync([]);
+            _cachedAssignedWorkerId = null;
+        }
+
+        var snapshotReleased = await TryReleaseBlockedResourceAsync(
+            "dispatch snapshot",
+            () => DeleteAgentResultSettlementSnapshotAsync(settlement.WorkId));
+        var locksReleased = await TryReleaseBlockedResourceAsync(
+            "stage locks",
+            () => ReleaseAgentResultSettlementStageLocksAsync(
+                blocked.Stage,
+                "blocked-unresolved-agent-result"));
+
+        if (snapshotReleased && locksReleased)
+        {
+            await TryReleaseBlockedResourceAsync(
+                "settlement reminder",
+                RemoveAgentResultSettlementReminderAsync);
+        }
+    }
+
+    private async Task<bool> TryReleaseBlockedResourceAsync(string resource, Func<Task> release)
+    {
+        try
+        {
+            await release();
+            return true;
+        }
+        catch (Exception ex)
+        {
+            _log.LogError(ex,
+                "Workflow {Id} could not release {Resource} for its blocked Agent settlement; the attempt stays released and cleanup is retried on the next reconciliation",
+                GrainKey, resource);
+            return false;
+        }
     }
 
     private async Task ReconcileAgentResultSettlementCleanupAsync()
@@ -114,7 +175,9 @@ public partial class WorkflowGrain
 
         await DeleteAgentResultSettlementSnapshotAsync(cancelled.Task.AgentResultSettlement!.WorkId);
         await RemoveAgentResultSettlementReminderAsync();
-        await ReleaseUnresolvedAgentResultSettlementStageLocksAsync(cancelled.Stage);
+        await ReleaseAgentResultSettlementStageLocksAsync(
+            cancelled.Stage,
+            "stopped-unresolved-agent-result");
     }
 
     private async Task ReconcileTerminalAgentResultSettlementAsync()
@@ -181,6 +244,6 @@ public partial class WorkflowGrain
     protected virtual Task DeleteAgentResultSettlementSnapshotAsync(string workId) =>
         DeleteSnapshotBestEffortAsync(workId);
 
-    protected virtual Task ReleaseUnresolvedAgentResultSettlementStageLocksAsync(string stage) =>
-        ReleaseStageLocksAsync(stage, "stopped-unresolved-agent-result");
+    protected virtual Task ReleaseAgentResultSettlementStageLocksAsync(string stage, string reason) =>
+        ReleaseStageLocksAsync(stage, reason);
 }

@@ -287,7 +287,7 @@ public class DispatchServiceReconciliationSpecs : Mohist.Server.SpecTests.Specs.
     }
 
     [Fact]
-    public async Task Redelivery_BlockedUnresolvedAgentWork_StopsRedeliveringAfterDurableBlocked()
+    public async Task Redelivery_BlockedUnresolvedAgentWork_StopsAfterReleaseButStillAcceptsAnAuthoritativeResult()
     {
         // Issue-628 T-005: a durably Blocked Agent settlement is the
         // sole exactly-once release boundary for the Runner control
@@ -320,12 +320,13 @@ public class DispatchServiceReconciliationSpecs : Mohist.Server.SpecTests.Specs.
         var blocked = await LoadRunAsync(_workflowId!);
         Assert.Equal(AgentResultSettlementState.Blocked, Assert.Single(blocked.CurrentStage().Tasks).AgentResultSettlement!.State);
 
-        // Same exactly-once boundary: the post-commit poll must not
-        // redeliver the now-Blocked attempt.
+        // The deadline released the attempt's active-work lease, so the Runner
+        // must no longer be asked to recover it; the original attempt stays
+        // addressable for a late authoritative result.
         Assert.Empty((await Dispatch.PollAsync(runnerId, new RunnerPollRequest([], []))).Dispatches);
-        // Repeating the poll is idempotent — the release is durable, not
-        // a per-poll observation.
         Assert.Empty((await Dispatch.PollAsync(runnerId, new RunnerPollRequest([], []))).Dispatches);
+        Assert.Null(blocked.Assignment);
+        Assert.Equal(first.WorkId, Assert.Single(blocked.CurrentStage().Tasks).WorkId);
 
         Assert.Equal(ReportAck.Accepted, await workflow.ReceiveTaskReportAsync(
             runnerId,

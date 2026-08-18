@@ -1,0 +1,61 @@
+# Issue 627 progress
+
+## Codebase Patterns
+
+- Domain settlement logic lives in `packages/server/src/Mohist.Server/Workflow/Domain/Run/WorkflowRun.Work.cs`
+  (`extension(WorkflowRun run)` blocks). Grain-side reconciliation lives in
+  `packages/server/src/Mohist.Server/Workflow/Grains/WorkflowGrain.AgentResultSettlement.cs`.
+- `WorkflowRun.Assignment` is the *active-work lease*; `TaskRun.WorkId`/`WorkerId`
+  plus `AgentResultSettlement` are the *identity record*. Release clears only the lease.
+- `CommitAsync(events)` = mark dirty + `SaveRunAsync(events)` (durable boundary).
+  `CommitAsync([])` is the idiom for a state-only save.
+- Deterministic grain tests with fake time + failure injection: use the harness in
+  `packages/server/tests/Mohist.Server.SpecTests/Specs/Workflow/Grain/WorkflowGrainStateSaveFailureSpecs.cs`
+  (`CreateReminderGrain`, `ReminderCalls`, static `FakeTimeProvider TimeProvider`,
+  directly-constructed `WorkflowGrain` + manual `OnActivateAsync`). Partial-class
+  files split by scenario (e.g. `WorkflowGrainSettlementCleanupRecoverySpecs.cs`).
+  Orleans-cluster level settlement specs live in `Specs/Workflow/Grain/AgentResultSettlementSpecs.cs`.
+- Running the spec suite: `dotnet build ... -p:SkipWebBuild=true` then run the
+  xUnit v3 in-process runner directly:
+  `packages/server/tests/Mohist.Server.SpecTests/bin/Debug/net11.0/Mohist.Server.SpecTests -class "<FQN>"`.
+  (`dotnet test --filter` is ignored under Microsoft.Testing.Platform; `-- --filter-class`
+  works via `dotnet test` but gives no failure detail.)
+  Building `Mohist.Server` without `-p:SkipWebBuild=true` fails in this sandbox (no npm web build).
+
+## T-001 (durable deadline release + repairable cleanup)
+
+- `WorkflowRun.BlockUnresolvedAgentResult(now)` now also sets `run.Assignment = null`
+  in the same aggregate mutation as the `Unknown -> Blocked` transition, so the
+  blocked-and-released state is one durable save. Task/run stay `Running`; every
+  settlement field and the task's `WorkId`/`WorkerId` are untouched.
+- Added `WorkflowRun.ReleaseBlockedAgentResultOwnership()`: repairs an already-`Blocked`
+  run that still holds a lease (legacy rows / interrupted release). Returns true only
+  when the run changed; emits no events.
+- Grain: `BlockUnresolvedAgentResultIfDueAsync` commits the boundary, clears
+  `_cachedAssignedWorkerId`, then calls `ReleaseBlockedAgentResultSettlementAsync`,
+  which (a) repairs+persists a stale assignment, (b) deletes the dispatch snapshot,
+  (c) releases stage/resource locks, and (d) removes the settlement reminder **only
+  when (b) and (c) succeeded**, so a replay/activation retries the rest. Each step is
+  wrapped in `TryReleaseBlockedResourceAsync` (log + continue) so a cleanup failure
+  never undoes the durable boundary.
+- Snapshot deletion for a still-`Unknown` settlement now happens only when the
+  deadline is *not* yet due; the due path deletes it after the release commit
+  (cleanup strictly after the durable boundary).
+- `ReleaseUnresolvedAgentResultSettlementStageLocksAsync(stage)` became
+  `ReleaseAgentResultSettlementStageLocksAsync(stage, reason)`; the deadline path uses
+  reason `blocked-unresolved-agent-result`, explicit stop keeps
+  `stopped-unresolved-agent-result`. The failure-injection harness override was renamed.
+- Gotcha: `ReminderCalls.FailNextSnapshotDelete` does not throw (base snapshot delete is
+  already best-effort/internally caught), so only the stage-lock and reminder boundaries
+  are useful for exercising the "cleanup step failed" branch.
+- Contract changes to existing tests (old behavior was the bug):
+  - `AgentResultSettlementSpecs.UnknownAndBlockedSettlement_HoldsSequentialStageLockUntilExplicitStop`
+    -> `UnknownSettlement_HoldsSequentialStageLockUntilTheDeadlineReleasesIt` (lock is now
+    released at the deadline, not at explicit stop).
+  - `DispatchServiceReconciliationSpecs.Redelivery_BlockedUnresolvedAgentWork_*`: a blocked,
+    released attempt gets **no** recovery dispatch anymore, but a late authoritative report
+    still settles the original task. Remaining Runner capacity/active-work exclusion is T-002.
+- Two-concurrent-attempt coverage at this layer uses two runs sharing one worker id
+  (grain-level; Runner slot accounting assertions belong to T-002). Note run-scoped work
+  ids repeat across runs (`agent.1`), so identity must be compared per run route.
+- Verified: full `Mohist.Server.UnitTests` (2768) and full `Mohist.Server.SpecTests` (3878) green.

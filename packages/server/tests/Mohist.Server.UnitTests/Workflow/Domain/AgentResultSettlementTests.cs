@@ -341,6 +341,111 @@ public sealed class AgentResultSettlementTests
         Assert.Null(run.CurrentStage().Failure);
     }
 
+    [Fact]
+    public void DeadlineBoundary_ReleasesTheAssignmentOnceAndKeepsTheAttemptIdentity()
+    {
+        var run = BuildRun(new TaskDefinition("agent", "Agent", "mohist/pi"));
+        var task = StartTask(run, "agent-work");
+        var binding = Binding(task, sessionId: "session-release", turnId: "turn-release");
+        Assert.Equal(AgentExecutionUpdate.Updated, run.BindAgentExecution(binding));
+        Assert.Equal(AgentExecutionUpdate.Updated, run.ObserveAgentExecution(
+            new AgentExecutionObservation(
+                binding,
+                AgentExecutionObservationKind.StopUnconfirmed,
+                "stop-unconfirmed",
+                "transport did not confirm stop",
+                "stop-op-1"),
+            Now,
+            SettlementTimeout));
+        var settlement = task.AgentResultSettlement!;
+        var deadline = Assert.IsType<DateTimeOffset>(settlement.DeadlineAt);
+        var identityBefore = Identity(settlement);
+
+        Assert.Empty(run.BlockUnresolvedAgentResult(deadline.AddTicks(-1)));
+        Assert.NotNull(run.Assignment);
+
+        var events = run.BlockUnresolvedAgentResult(deadline);
+
+        Assert.Equal(3, events.Count);
+        Assert.Null(run.Assignment);
+        Assert.Null(run.AssignedTo);
+        Assert.Equal(AgentResultSettlementState.Blocked, settlement.State);
+        Assert.Equal(TaskRunStatus.Running, task.Status);
+        Assert.Equal(WorkflowRunStatus.Running, run.Status);
+        Assert.Equal("agent-work", task.WorkId);
+        Assert.Equal("runner-1", task.WorkerId);
+        Assert.Equal(identityBefore, Identity(settlement));
+
+        Assert.Empty(run.BlockUnresolvedAgentResult(deadline.AddMinutes(10)));
+        Assert.False(run.ReleaseBlockedAgentResultOwnership());
+        Assert.Null(run.Assignment);
+        Assert.Equal(AgentResultSettlementState.Blocked, settlement.State);
+        Assert.True(run.HasBlockedAgentResult());
+        Assert.True(run.HasUnresolvedAgentResult());
+        Assert.False(run.HasDispatchableWork());
+        Assert.Null(run.NextWork());
+        AssertReportable(run, task);
+    }
+
+    [Fact]
+    public void ReleaseBlockedOwnership_RepairsAStaleAssignmentWithoutTouchingTheSettlement()
+    {
+        var run = BuildRun(new TaskDefinition("agent", "Agent", "mohist/opencode"));
+        var task = StartTask(run, "agent-work");
+        var binding = Binding(task, sessionId: "session-repair", turnId: "turn-repair");
+        Assert.Equal(AgentExecutionUpdate.Updated, run.BindAgentExecution(binding));
+        Assert.Equal(AgentExecutionUpdate.Updated, run.ObserveAgentExecution(
+            new AgentExecutionObservation(binding, AgentExecutionObservationKind.Disconnected, "runner-disconnected"),
+            Now,
+            SettlementTimeout));
+        var settlement = task.AgentResultSettlement!;
+        settlement.State = AgentResultSettlementState.Blocked;
+        // A run blocked before the release boundary existed still holds its lease.
+        run.Assignment = new WorkflowAssignment("runner-1", Now);
+        var settlementBefore = Identity(settlement);
+
+        Assert.True(run.ReleaseBlockedAgentResultOwnership());
+
+        Assert.Null(run.Assignment);
+        Assert.Equal(settlementBefore, Identity(settlement));
+        Assert.Equal(TaskRunStatus.Running, task.Status);
+        Assert.False(run.ReleaseBlockedAgentResultOwnership());
+        AssertReportable(run, task);
+    }
+
+    [Fact]
+    public void ReleaseBlockedOwnership_LeavesAnUnknownSettlementAssigned()
+    {
+        var run = BuildRun(new TaskDefinition("agent", "Agent", "mohist/opencode"));
+        var task = StartTask(run, "agent-work");
+        var binding = Binding(task);
+        Assert.Equal(AgentExecutionUpdate.Updated, run.BindAgentExecution(binding));
+        Assert.Equal(AgentExecutionUpdate.Updated, run.ObserveAgentExecution(
+            new AgentExecutionObservation(binding, AgentExecutionObservationKind.Idle, "agent-idle"),
+            Now,
+            SettlementTimeout));
+
+        Assert.Equal(AgentResultSettlementState.Unknown, task.AgentResultSettlement!.State);
+        Assert.False(run.ReleaseBlockedAgentResultOwnership());
+        Assert.Equal("runner-1", run.AssignedTo);
+    }
+
+    private static string Identity(AgentResultSettlement settlement) => string.Join(
+        '|',
+        settlement.TaskRunId,
+        settlement.WorkId,
+        settlement.RunnerId,
+        settlement.AgentSessionId,
+        settlement.AgentTurnId,
+        settlement.Runtime,
+        settlement.RuntimeSessionId,
+        settlement.StopOperationId,
+        settlement.LastObservation,
+        settlement.ReasonCode,
+        settlement.Message,
+        settlement.FirstUnknownAt,
+        settlement.DeadlineAt);
+
     private static WorkflowRun BuildRun(params TaskDefinition[] tasks)
     {
         var run = WorkflowRun.Create(

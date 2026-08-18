@@ -517,7 +517,7 @@ public sealed partial class WorkflowGrainStateSaveFailureSpecs
             return base.DeleteAgentResultSettlementSnapshotAsync(workId);
         }
 
-        protected override Task ReleaseUnresolvedAgentResultSettlementStageLocksAsync(string stage)
+        protected override Task ReleaseAgentResultSettlementStageLocksAsync(string stage, string reason)
         {
             _calls.LockReleaseAttempts++;
             if (_calls.FailNextLockRelease)

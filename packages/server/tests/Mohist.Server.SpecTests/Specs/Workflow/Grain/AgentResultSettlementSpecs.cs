@@ -880,7 +880,7 @@ public sealed class AgentResultSettlementSpecs : WorkflowGrainSpecs
     }
 
     [Fact]
-    public async Task UnknownAndBlockedSettlement_HoldsSequentialStageLockUntilExplicitStop()
+    public async Task UnknownSettlement_HoldsSequentialStageLockUntilTheDeadlineReleasesIt()
     {
         var suffix = Guid.NewGuid().ToString("N");
         var resource = $"agent-settlement-{suffix}";
@@ -923,9 +923,18 @@ public sealed class AgentResultSettlementSpecs : WorkflowGrainSpecs
         _fixture.TimeProvider.Advance(deadline - _fixture.TimeProvider.GetUtcNow());
         await workflow.ReceiveReminder(WorkflowGrain.AgentResultSettlementReminderName, default);
 
-        Assert.Equal(AgentResultSettlementState.Blocked,
-            Assert.Single((await LoadRunAsync(_workflowId!)).CurrentStage().Tasks).AgentResultSettlement!.State);
-        Assert.Equal(_workflowId, (await lockGrain.GetStateAsync())?.Owner?.WorkflowRunId);
+        var blocked = await LoadRunAsync(_workflowId!);
+        var blockedTask = Assert.Single(blocked.CurrentStage().Tasks);
+        Assert.Equal(AgentResultSettlementState.Blocked, blockedTask.AgentResultSettlement!.State);
+        Assert.Null(blocked.Assignment);
+        Assert.Equal(work.WorkId, blockedTask.WorkId);
+        Assert.Equal(runnerId, blockedTask.WorkerId);
+        Assert.Null((await lockGrain.GetStateAsync())?.Owner);
+
+        await workflow.ReceiveReminder(WorkflowGrain.AgentResultSettlementReminderName, default);
+
+        Assert.Null((await lockGrain.GetStateAsync())?.Owner);
+        Assert.Null((await LoadRunAsync(_workflowId!)).Assignment);
 
         await workflow.StopAsync("operator stop");
 
