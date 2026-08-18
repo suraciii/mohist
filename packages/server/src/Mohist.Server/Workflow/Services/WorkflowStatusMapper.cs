@@ -209,7 +209,8 @@ public static class WorkflowStatusMapper
             interruption?.ExpectedRecoveryPath,
             interruption?.StopFailure,
             AgentResultSettlementNextAction,
-            AgentResultSettlementRecoveryActions);
+            AgentResultSettlementRecoveryActions,
+            ReasonCode: settlement.ReasonCode);
     }
 
     private static AgentResultSettlementView? MapAgentResultSettlement(TaskRun task)
@@ -229,6 +230,7 @@ public static class WorkflowStatusMapper
                 _ => throw new SwitchExpressionException($"No settlement view mapping for {settlement.State}"),
             },
             Reason: blocked ? AgentResultUnconfirmedReason : settlement.ReasonCode,
+            ReasonCode: settlement.ReasonCode,
             Message: settlement.Message,
             FirstUnknownAt: settlement.FirstUnknownAt,
             DeadlineAt: settlement.DeadlineAt,

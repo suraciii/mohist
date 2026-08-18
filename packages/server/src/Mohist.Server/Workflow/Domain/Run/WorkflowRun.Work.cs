@@ -544,12 +544,15 @@ public static partial class WorkflowRunExtensions
 
             settlement.State = AgentResultSettlementState.Blocked;
             run.Assignment = null;
+            // The stable consumer category stays on the events for existing
+            // Issue/Inbox/event consumers; the settlement's original reason
+            // code rides along additively so projections can expose it.
             const string reason = "agent-result-unconfirmed";
             return
             [
-                new TaskBlocked(unresolved.Stage, unresolved.Task.Id, reason, deadline),
-                new StageBlocked(unresolved.Stage, unresolved.Task.Id, reason),
-                new WorkflowRunBlocked(unresolved.Stage, unresolved.Task.Id, reason, deadline)
+                new TaskBlocked(unresolved.Stage, unresolved.Task.Id, reason, deadline, settlement.ReasonCode),
+                new StageBlocked(unresolved.Stage, unresolved.Task.Id, reason, settlement.ReasonCode),
+                new WorkflowRunBlocked(unresolved.Stage, unresolved.Task.Id, reason, deadline, settlement.ReasonCode)
             ];
         }
 

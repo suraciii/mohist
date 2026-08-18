@@ -10,6 +10,7 @@ using Mohist.Server.Runner.Grains;
 using Mohist.Server.Runner.Services;
 using Mohist.Server.Workflow.Domain.Run;
 using Mohist.Server.Workflow.Grains;
+using Mohist.Server.Workflow.Services;
 using Mohist.Server.SpecTests.Specs.Workflow;
 using Mohist.Workflow.Definition;
 using Xunit;
@@ -383,6 +384,108 @@ public sealed class AgentResultSettlementSpecs : WorkflowGrainSpecs
         Assert.Equal(TaskRunStatus.Completed, completedTask.Status);
         Assert.Null(completedTask.AgentResultSettlement);
         Assert.Equal(WorkflowRunStatus.Completed, completed.Status);
+    }
+
+    [Fact]
+    public async Task BlockedProjection_ExposesStableCategoryWithPersistedFactsAndReplayIsConsistent()
+    {
+        var workflow = await StartWorkflowAsync(SingleStage(
+            tasks: [new TaskDefinition("agent", "Agent", "mohist/opencode")],
+            checks: []));
+        var (work, runnerId) = await PollWorkAnyAsync();
+        var initial = await LoadRunAsync(_workflowId!);
+        var task = Assert.Single(initial.CurrentStage().Tasks);
+        var binding = new AgentExecutionBinding(
+            task.Id, work.WorkId, runnerId, "session-proj-1", "turn-proj-1", "opencode", "runtime-proj-1");
+        Assert.Equal(ReportAck.Accepted, await workflow.BindAgentExecutionAsync(binding));
+        Assert.Equal(ReportAck.Accepted, await workflow.ObserveAgentExecutionAsync(new AgentExecutionObservation(
+            binding, AgentExecutionObservationKind.StopUnconfirmed, "stop-unconfirmed", "transport did not confirm stop", "stop-op-proj")));
+
+        var unknown = await LoadRunAsync(_workflowId!);
+        var unknownSettlement = Assert.IsType<AgentResultSettlement>(Assert.Single(unknown.CurrentStage().Tasks).AgentResultSettlement);
+        var deadline = Assert.IsType<DateTimeOffset>(unknownSettlement.DeadlineAt);
+
+        // Before the deadline the status surface exposes Unknown with the
+        // persisted reason, message, execution identity, and deadline, and the
+        // attempt still owns its active Runner reservation.
+        var beforeView = WorkflowStatusMapper.BuildStatusView(unknown, definition: null)!;
+        Assert.Equal("running", beforeView.Status);
+        Assert.Equal("running", beforeView.Stages[0].Status);
+        Assert.Equal("running", beforeView.Stages[0].Tasks[0].Status);
+        Assert.Null(beforeView.Failure);
+        Assert.Equal(runnerId, beforeView.AssignedTo);
+        Assert.Null(beforeView.AgentResultAttention);
+        var beforeSettlement = beforeView.Stages[0].Tasks[0].AgentResultSettlement!;
+        Assert.Equal("unknown", beforeSettlement.State);
+        Assert.Equal("stop-unconfirmed", beforeSettlement.Reason);
+        Assert.Equal("stop-unconfirmed", beforeSettlement.ReasonCode);
+        Assert.Equal("transport did not confirm stop", beforeSettlement.Message);
+        Assert.Equal("stop-op-proj", beforeSettlement.StopOperationId);
+        Assert.Equal("session-proj-1", beforeSettlement.AgentSessionId);
+        Assert.Equal("turn-proj-1", beforeSettlement.AgentTurnId);
+        Assert.Equal(deadline, beforeSettlement.DeadlineAt);
+
+        _fixture.TimeProvider.Advance(deadline - _fixture.TimeProvider.GetUtcNow());
+        await workflow.ReceiveReminder(WorkflowGrain.AgentResultSettlementReminderName, default);
+
+        var blocked = await LoadRunAsync(_workflowId!);
+        var blockedView = WorkflowStatusMapper.BuildStatusView(blocked, definition: null)!;
+        Assert.Equal("blocked", blockedView.Status);
+        Assert.Equal("blocked", blockedView.Stages[0].Status);
+        Assert.Equal("blocked", blockedView.Stages[0].Tasks[0].Status);
+        Assert.Null(blockedView.Failure);
+        Assert.Null(blockedView.AssignedTo);
+        Assert.Contains(blockedView.AvailableActions, a => a.Name == "stop");
+        var attention = blockedView.AgentResultAttention!;
+        Assert.Equal("blocked", attention.State);
+        Assert.Equal("agent-result-unconfirmed", attention.Reason);
+        Assert.Equal("stop-unconfirmed", attention.ReasonCode);
+        Assert.Equal("transport did not confirm stop", attention.Message);
+        Assert.Equal(deadline, attention.DeadlineAt);
+        Assert.Equal("session-proj-1", attention.AgentSessionId);
+        Assert.Equal("turn-proj-1", attention.AgentTurnId);
+        var blockedSettlement = blockedView.Stages[0].Tasks[0].AgentResultSettlement!;
+        Assert.Equal("blocked", blockedSettlement.State);
+        Assert.Equal("agent-result-unconfirmed", blockedSettlement.Reason);
+        Assert.Equal("stop-unconfirmed", blockedSettlement.ReasonCode);
+        Assert.Equal("transport did not confirm stop", blockedSettlement.Message);
+        Assert.Equal(deadline, blockedSettlement.DeadlineAt);
+
+        // The blocked events carry the stable category AND the persisted
+        // reason so event consumers observe both without a separate lookup.
+        var blockedEvents = (await EventStore.ListAsync(_workflowId!))
+            .Where(entry => entry.Envelope.Type is EventCatalog.ReverseDns.TaskBlocked
+                or EventCatalog.ReverseDns.StageBlocked
+                or EventCatalog.ReverseDns.WorkflowRunBlocked)
+            .ToArray();
+        Assert.Equal(3, blockedEvents.Length);
+        var taskBlockedData = blockedEvents.Single(entry => entry.Envelope.Type == EventCatalog.ReverseDns.TaskBlocked).Envelope.Data!.Value;
+        Assert.Equal("agent-result-unconfirmed", taskBlockedData.GetProperty("reason").GetString());
+        Assert.Equal("stop-unconfirmed", taskBlockedData.GetProperty("reasonCode").GetString());
+        Assert.Equal(deadline, taskBlockedData.GetProperty("deadlineAt").GetDateTimeOffset());
+        var runBlockedData = blockedEvents.Single(entry => entry.Envelope.Type == EventCatalog.ReverseDns.WorkflowRunBlocked).Envelope.Data!.Value;
+        Assert.Equal("stop-unconfirmed", runBlockedData.GetProperty("reasonCode").GetString());
+        Assert.DoesNotContain((await EventStore.ListAsync(_workflowId!)), entry =>
+            entry.Envelope.Type is EventCatalog.ReverseDns.TaskFailed
+                or EventCatalog.ReverseDns.StageFailed
+                or EventCatalog.ReverseDns.WorkflowRunFailed
+                or EventCatalog.ReverseDns.TaskCompleted
+                or EventCatalog.ReverseDns.WorkflowRunCompleted);
+
+        // Replaying the reminder and re-reading across activation produces one
+        // consistent projection: same blocked attention, same facts, no
+        // duplicate blocked events or failure/completion notifications.
+        await workflow.ReceiveReminder(WorkflowGrain.AgentResultSettlementReminderName, default);
+        var replayEvents = (await EventStore.ListAsync(_workflowId!));
+        Assert.Equal(blockedEvents.Length, replayEvents.Count(entry => entry.Envelope.Type is EventCatalog.ReverseDns.TaskBlocked
+            or EventCatalog.ReverseDns.StageBlocked
+            or EventCatalog.ReverseDns.WorkflowRunBlocked));
+        var replayed = await LoadRunAsync(_workflowId!);
+        var replayedView = WorkflowStatusMapper.BuildStatusView(replayed, definition: null)!;
+        Assert.Equal("blocked", replayedView.Status);
+        Assert.Equal(attention.ReasonCode, replayedView.AgentResultAttention!.ReasonCode);
+        Assert.Equal(attention.DeadlineAt, replayedView.AgentResultAttention.DeadlineAt);
+        Assert.Equal(attention.Message, replayedView.AgentResultAttention.Message);
     }
 
     [Fact]

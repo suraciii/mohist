@@ -108,3 +108,47 @@
     and extended `TwoConcurrentUnknownAttempts_ReleaseBothLeasesAtTheirOwnBoundaries`
     with DB-layer active-work assertions under injected cleanup failure.
 - Full suites green: SpecTests 3881, UnitTests 2768, ArchTests 68.
+
+## T-003 (preserve blocked attention across Workflow and consumer projections)
+
+- Status/task/stage wire status for a blocked settlement stays "blocked" (derived from
+  the settlement at projection time), never failed/completed, and the run's
+  `AssignedTo` goes null at release (no active Runner reservation). Before the
+  deadline the Unknown settlement view exposes `Reason == ReasonCode == persisted
+  reason code`, message, execution identity, and deadline.
+- AgentResultSettlementView and AgentResultAttentionView gained an additive,
+  trailing `ReasonCode` param; the mapper sets it from `settlement.ReasonCode`.
+  For Unknown/awaiting states `Reason` stays the persisted reason code; for Blocked,
+  `Reason` is the stable `agent-result-unconfirmed` category while `ReasonCode`
+  keeps the persisted original reason. Views keep the run "running" pre-deadline
+  (Attention null) and "blocked" post-deadline.
+- Issue attention: `WorkflowAttention.AgentResultUnconfirmed` now carries the
+  persisted `ReasonCode` and `RecoveryDeadlineAt` (reusing the field already used
+  by recoverable interruptions). `MohistDefaultWorkflowProjection` passes the
+  AgentResultAttention values when status == "blocked". Stable reason stays
+  `AgentResultUnconfirmed` — never `WorkflowFailed`/`Blocked`.
+- Blocked events (`TaskBlocked`/`StageBlocked`/`WorkflowRunBlocked`) gained an
+  additive trailing `string? ReasonCode = null`. `BlockUnresolvedAgentResult`
+  emits the stable `agent-result-unconfirmed` category in `Reason` and the
+  settlement's original reason code in `ReasonCode`. Legacy persisted events
+  deserialize with null ReasonCode (verified by a legacy-JSON round-trip test).
+  Events still carry `deadlineAt`; the message stays on the settlement record as
+  the source of truth.
+- Inbox: `WorkflowRunBlocked` was already mapped to
+  `NotificationKinds.AgentResultUnconfirmed` (non-failure) and `InboxStore` dedupes
+  by source+event id, so replay is idempotent by construction. No reason/deadline
+  fields exist on the inbox item view ("where the view supports them" — stable
+  category only). Hermes notifications do NOT subscribe to run.blocked, so blocked
+  replay never emits an external failure/completion notification.
+- Run-store projection: AttentionStatus "blocked", ActiveWorkId/ActiveWorkerId null
+  for a released blocked row; `WorkflowRunQuerier.FindBlockedAsync` is the indexed
+  blocked-attention reader. Round-tripping + re-saving the same blocked run rebuilds
+  the identical row (no duplicate blocked state).
+- Web API contract: the detail endpoint (`GET /api/workflow-runs/{id}`) composes
+  `WorkflowStatusView` directly so the new fields flow over the wire. The web TS
+  model `WorkflowAgentResultSettlement` gained `reasonCode?: string | null` for
+  contract parity (additive, client ignores unknown fields).
+- Gotcha: `AgentResultSettlementView.RecoveryActions` is nullable; `Assert.DoesNotContain`
+  on it needs `!` (warnings-as-errors in UnitTests). New SpecTests that call
+  `WorkflowStatusMapper.BuildStatusView` need `using Mohist.Server.Workflow.Services;`.
+- Verified: full UnitTests 2772, SpecTests 3885, ArchTests 68 green.

@@ -95,6 +95,7 @@ export interface WorkflowAgentInterruption {
 export interface WorkflowAgentResultSettlement {
   state: 'awaiting-result' | 'interrupted' | 'unknown' | 'blocked'
   reason?: string | null
+  reasonCode?: string | null
   message?: string | null
   firstUnknownAt?: string | null
   deadlineAt?: string | null
