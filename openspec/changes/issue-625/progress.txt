@@ -31,3 +31,17 @@ Implemented T-001 end to end on top of the plan-review fixes above.
 ## Verification
 - dotnet build Mohist.sln -p:SkipWebBuild=true: 0 warnings/errors (TreatWarningsAsErrors on).
 - UnitTests 2824 passed, SpecTests 3881 passed, ArchTests 68 passed, Workflow.Definition.Tests 178 passed.
+
+# Progress: T-002 implementation
+
+## Codebase Patterns (Runner lane timeout + journal)
+- Runner `scriptAction` (packages/runner/src/actions/built-in-core.ts) reads `with.timeout` via `numberInput` and passes it to `runCommand` as `timeoutMs`; `runCommand` arms a layer timeout signal that kills the whole process group (`process.kill(-pid, SIGTERM)` then SIGKILL after 5s grace) and resolves `{ exitCode, stdout, stderr, status: 'timeout', timeoutMs }` — never rejects (not runner loss).
+- T-002 hardened `scriptAction`: the `status === 'timeout'` check now comes BEFORE the `exitCode !== 0` check so a shell that traps SIGTERM and exits 0 still maps to `error.code='timeout'` (a timeout can never masquerade as a pass). Message keeps `scriptFailureMessage` shape (exit code + stdout/stderr tails up to 10k each) so the Server lane projection gets command outcome + diagnostics. The `timeout` error code is a RESERVED_PLATFORM_ERROR_CODE in actions/manifest.ts — you MUST NOT declare it in a manifest `errors` array (`define-action.ts` rejects reserved codes as business errors) — it passes through `normalizeActionResult` unremapped.
+- Runner unit tests stub runCommand via the `commandRunner` test resource (options param carries `{ timeoutMs }`) — the cleanest seam to assert timeout propagation without spawning a process. Process-group kill tests use FakeProcessSpawner + `processKiller` resource and record `[pid, signal]` pairs (negative pid = group kill).
+- WorkResultJournal fence semantics tested with lane-shaped DispatchWorkItem (`workflowRunId` + `workId` like `verify-install.1`): after restart `begin()` on a completed entry returns `'completed'` (awaiting-ack owns reporting), `beginRecovery()` returns `'completed'` too; only `acknowledge()` retires the fence so the same work identity can run again. `workKey` = `ownerKind:ownerId:workId` is the lane fence identity.
+- Host-level report retry (`AwaitingAck_RetriesReportUntilAcked`), restart redelivery without re-execution (`Restart_RedrivesDurablyCompletedResultWithoutExecutingTheWorkAgain`), and pending-journal-not-reported-until-durable tests already existed and were re-verified unchanged.
+
+## Verification (T-002)
+- `npm run typecheck` + `npm run typecheck:tests` + `npm run check:test-boundaries` in packages/runner: all pass.
+- Focused suites (built-in-core action, src/system/process, tests/process-timeout, work-result-journal, runner-host-reporting, runner-host-recovery): 41 tests pass.
+- Full runner default suite: 155 files / 1685 tests pass; `git diff --check` clean.

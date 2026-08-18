@@ -42,9 +42,22 @@ export async function scriptAction(inputs: JsonObject, host: ActionHost): Promis
       ...commandOptions(host, 'action:script'),
       timeoutMs,
     })
+    if (result.status === 'timeout') {
+      // A structured timeout is authoritative regardless of the shell's exit
+      // code: some shells trap SIGTERM and exit 0, but the lane budget must
+      // still surface as a `timeout` error so the Server classifies the lane
+      // as timed out rather than passed or failed. The command outcome
+      // (exit code) and captured stdout/stderr diagnostic tails are retained
+      // for the Server lane projection.
+      return fail(
+        'timeout',
+        scriptFailureMessage(run, result.exitCode, result.stdout, result.stderr),
+        { exitCode: result.exitCode },
+      )
+    }
     if (result.exitCode !== 0) {
       return fail(
-        result.status === 'timeout' ? 'timeout' : 'script-failed',
+        'script-failed',
         scriptFailureMessage(run, result.exitCode, result.stdout, result.stderr),
         { exitCode: result.exitCode },
       )
