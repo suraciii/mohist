@@ -1,0 +1,38 @@
+## Codebase Patterns
+- `WorkExecutor` owns the Action execution boundary: it deep-clones `DispatchWorkItem.with`, injects engine inputs, checks unresolved references, renders deferred fields, validates, resolves the workspace directory, constructs cleanup input, and invokes the handler.
+- `ownerKind === 'agent-job'` is the only non-Workflow owner branch. Current Workflow dispatches use `workflow`; legacy envelopes may omit `ownerKind` and parse as `undefined`.
+- `tryRecovery` deep-clones the raw `with`, artifacts, setVars, recovery, and expect declarations for `retrySelf`, derives the parent continuation id, and decrements `recoveryRemaining` once. The continuation is normalized again when it executes.
+- The current `core/script` manifest declares required `run` and optional `shell` and `timeout`; the catalog projects those inputs and must not expose retired `resourceProfile`.
+
+## T-001
+- Added `normalizeWorkflowActionInput` beside Action input validation. It shallow-projects the already deep-cloned input and removes only top-level `resourceProfile` for `task` dispatches using `core/script` whose owner is not `agent-job`; nested keys, checks, other Actions, and agent-job inputs remain unchanged.
+- Applied normalization before unresolved-reference checks, deferred rendering, validation, work-directory resolution, cleanup input construction, and handler invocation. `DispatchWorkItem.with` and recovery declarations remain raw and untouched.
+- Added direct replay, omitted/current owner, retired unresolved/invalid data, strict unknown/type rejection, scope exclusions, manifest/catalog strictness, and retrySelf replay coverage.
+- Verification: Runner production typecheck, test typecheck, test-boundary check, focused suites (46 tests), and full Runner suite (156 files, 1,689 tests) passed.
+- The repository initially lacked installed JS dependencies; `npm ci --ignore-scripts` installed the locked workspace dependencies. It reported existing npm audit findings unrelated to this change.
+
+## T-002
+- Server inspection found the existing boundary already preserves persisted `TaskRun.WithInput` through `WorkItem`, `WorkflowItemTranslator`, and first-write dispatch snapshots; no production rewrite or validator exception was needed.
+- Added translator coverage for a persisted `core/script` declaration carrying `resourceProfile`, `run`, `shell`, and `timeout` templates, asserting task identity, title, Action, artifacts, variables, setVars, expect, recovery, budget, and in-memory state preservation.
+- Added snapshot-backed redelivery coverage asserting the full `WorkDispatch` and persisted `TaskRun` state remain unchanged after grain deactivation.
+- Added Server validator and parsed profile coverage proving the current `core/script` contract is exactly required `run` plus optional `shell` and `timeout`, and that new `resourceProfile` declarations are rejected as unknown input.
+- Verification: full `Mohist.Server.UnitTests` passed (2,769 tests); focused `WorkflowItemTranslatorSpecs` and `DispatchSnapshotPersistenceSpecs` passed (58 tests); focused validator/profile classes passed (69 tests). The full `Mohist.Server.SpecTests` run exceeded the 15-minute command limit without reporting a test failure, so it is recorded as incomplete rather than passed.
+
+## Verification repair
+- Reproduced `npm run verify`: all 3,875 Server spec tests passed, but the duration gate failed on the 5-second per-spec cap for `Enabled_ConfiguresDispatcherMeterProviderAndMetricsExporter` and `Enabled_TracerProviderBuilt_IsResolvableAndCreatesInstrumentation` in `MohistOpenTelemetryRegistrationSpecs` (5.01s and 5.00s).
+- The two tests resolved and disposed real OTLP exporter providers pointed at `collector.test`; the exporter network attempt consumed the five-second timeout. This was a test isolation defect, not an issue-626 behavior failure.
+- Updated those tests to use the existing in-memory exporter pattern with a local successful HTTP handler and simple processing. The production registration and assertions remain unchanged.
+- Focused rebuild and rerun passed all 8 registration tests in 0.224s; the full canonical gate rerun passed all 9 tracks with 0 failing, 0 cancelled, 0 timed out, 0 over-budget tests, and all 3,875 Server specs passing.
+- The canonical run created no Git-visible changes; both issue-626 tasks are complete.
+- Independent repair verification: the focused registration suite passed all 8 tests in 0.206s and the Runner replay suite passed all 9 tests. One full canonical retry hit the server-spec 240s lane deadline without test failures while stale .NET processes were present; the exact partition then passed all 3,875 tests in 143.063s, and the final `npm run verify` passed all 9 tracks with 0 failures, cancellations, timeouts, or over-budget tests.
+
+## Verify check repair (this pass)
+- Diagnosis: re-running `npm run verify` from the clean issue-626 tree failed the canonical gate because the issue-626 branch was created before origin/master commit `07d7d8aeb` (`test: run the Spec suite in four parallel partitions locally (#645)`). The local `test-duration.config.jsonc` still declared `server-spec` with a single partition under a 240s lane deadline, but the full Spec suite exceeds that budget under load.
+- The staged `test-duration.config.jsonc` modification matches `07d7d8aeb` byte-for-byte. It was not generated by the verification process itself; it is the same Spec partitioning fix the master branch already carries.
+- Fix: committed the partitioning change as `test: run the Spec suite in four parallel partitions locally` (commit `44af765da`), matching the master scheme so each partition stays well inside its 240s lane deadline and the full gate stays inside the 300s suite deadline.
+- Re-run `npm run verify` from the clean tree: 9 tracks, 0 failing, 0 cancelled, 0 timed out, 0 over-budget. Server-spec splits into four partitions (76.28s, 91.12s, 92.03s, 92.82s — all under the 240s lane deadline) and aggregates to 3,875 specs passing. Runner 1,689, server-unit 2,769, workflow-def 178, cli 1,865, server-arch 68, mohist-slack 70, web 4,734 (baseline-pending), runner-integration 11 (baseline-pending) all pass. Working tree clean after the run.
+
+## Verify-check repair re-entry
+- Diagnosis on re-entry: `git status` shows the tree clean at HEAD `17571b368`; the staged partitioning fix and the prior docs repair are committed. `test-duration.config.jsonc` at HEAD is byte-identical to origin/master (no stale `AttachmentServiceAgentInputTests` allowlist entry, no other drift). The previously failing older summary artifacts in `/tmp/mohist-canonical-gate-100.445629-...` belong to pre-stale-cleanup revision `f32ace837` and are not the current gate state.
+- Reproduction: re-ran `npm run verify` from the clean tree at HEAD. The gate completes cleanly with 9 tracks, 0 failing, 0 cancelled, 0 timed out, 0 over-budget. Server-spec splits into four partitions (88.29s, 93.44s, 87.24s, 77.26s — all under the 240s lane deadline) and aggregates to 3,875 specs passing. Runner 1,689, server-unit 2,769, workflow-def 178, cli 1,865, server-arch 68, mohist-slack 70, web 4,734 (baseline-pending), runner-integration 11 (baseline-pending) all pass. Working tree remains clean after the run; no verification-generated changes exist.
+- No further code, test, or build configuration change is required. The original failure is fixed and the verify check is green.

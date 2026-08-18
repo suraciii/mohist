@@ -22,6 +22,7 @@ import { enforceCleanWorktree, resolveCleanupAgentAction } from './worktree-enfo
 import { createCredentialMaskerFromEnvironment, TaskLogCollector, TaskLogger } from './task-log.js'
 import { isActionFailure } from '../actions/action-result.js'
 import type { ActionCapabilitySet } from '../actions/manifest.js'
+import { normalizeWorkflowActionInput } from '../actions/input-compatibility.js'
 import { validateActionInput, deferredInputFields, injectEngineInputs } from '../actions/input-validation.js'
 import {
   malformedToUnexpectedError,
@@ -160,7 +161,8 @@ export class WorkExecutor {
       const variables = await this.variables(work, resolvedWorkspace, signal)
       const deferred = deferredInputFields(definition.manifest)
       const clonedWith = work.with ? structuredClone(work.with) : null
-      const actionWith = injectEngineInputs(definition.manifest, clonedWith, variables)
+      const normalizedWith = normalizeWorkflowActionInput(work, clonedWith)
+      const actionWith = injectEngineInputs(definition.manifest, normalizedWith, variables)
       const unresolved = [
         ...unresolvedReferences(removeDeferredFields(actionWith, deferred), variables),
         ...unresolvedReferences(work.expect, variables),

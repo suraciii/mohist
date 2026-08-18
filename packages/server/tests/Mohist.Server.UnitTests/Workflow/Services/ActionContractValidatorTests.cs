@@ -27,6 +27,15 @@ public partial class ActionContractValidatorTests
     private static ActionCatalogInput UnionInput(string name, string[] kinds, bool required = false) =>
         new(name, kinds, required);
 
+    private static ActionCatalog CoreScriptCatalog() =>
+        new(
+            [CreateAction(
+                "core/script",
+                StringInput("run", required: true),
+                StringInput("shell"),
+                NumberInput("timeout"))],
+            []);
+
     private static ActionCatalogTombstone CreateTombstone(string name, string guidance) =>
         new(name, guidance);
 
@@ -208,6 +217,53 @@ public partial class ActionContractValidatorTests
         Assert.Contains("mohist/opencode", error.Message);
     }
 
+
+    [Fact]
+    public void Validate_CoreScript_RejectsRetiredResourceProfileWithoutRelaxingCurrentInputs()
+    {
+        var catalog = CoreScriptCatalog();
+        var task = new TaskDefinition(
+            "script",
+            Uses: "core/script",
+            With: With(
+                ("run", JsonString("echo ok")),
+                ("shell", JsonString("bash")),
+                ("timeout", JsonNumber(1_000)),
+                ("resourceProfile", JsonObject("""{ "limits": { "cpu": 1 } }"""))));
+        var definition = new WorkflowDefinition([
+            new StageDefinition("build", [task], []),
+        ]);
+
+        var errors = ActionContractValidator.Validate(definition, catalog);
+
+        var error = Assert.Single(errors);
+        Assert.Equal("stages[0].tasks[0].with.resourceProfile", error.Path);
+        Assert.Equal(ValidationSource.Action, error.Source);
+        Assert.Contains("unknown input", error.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain(
+            "resourceProfile",
+            catalog.Actions.Single(action => action.Name == "core/script").Inputs.Select(input => input.Name));
+        Assert.Equal(
+            ["run", "shell", "timeout"],
+            catalog.Actions.Single(action => action.Name == "core/script").Inputs.Select(input => input.Name));
+    }
+
+    [Fact]
+    public void Validate_CoreScript_AcceptsOnlyTheCurrentSupportedInputShapes()
+    {
+        var task = new TaskDefinition(
+            "script",
+            Uses: "core/script",
+            With: With(
+                ("run", JsonString("echo ok")),
+                ("shell", JsonString("bash")),
+                ("timeout", JsonNumber(1_000))));
+        var definition = new WorkflowDefinition([
+            new StageDefinition("build", [task], []),
+        ]);
+
+        Assert.Empty(ActionContractValidator.Validate(definition, CoreScriptCatalog()));
+    }
 
     [Fact]
     public void Validate_WorkingDirectory_IsNotTreatedAsUnknown()
