@@ -400,14 +400,31 @@ public class WorkflowRunQuerierSchedulingSpecs
         string? activeWorkerId = null)
     {
         var state = stateOverride ?? BuildStatusJson(workflowRunId, projectId, status, assignedWorkerId);
+        // For generated rows, keep the row consistent with the store's
+        // materialized columns: the Runner capacity queries filter
+        // ActiveWorkId/ActiveWorkerId and the indexed AttentionStatus, not
+        // just status + assignment. Corrupt override rows intentionally stay
+        // unprojected — their tests assert the DB layer never deserializes.
+        string? projectedWorkId = null;
+        string? projectedWorkerId = null;
+        string? attentionStatus = null;
+        if (stateOverride is null)
+        {
+            var run = JSON.Deserialize<WorkflowRun>(state);
+            var projection = WorkflowRunWorkProjectionBuilder.Build(run!);
+            projectedWorkId = projection.ActiveWorkId;
+            projectedWorkerId = projection.ActiveWorkerId;
+            attentionStatus = run!.HasBlockedAgentResult() ? "blocked" : null;
+        }
         using var scope = _fixture.Services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<MohistDbContext>();
         db.WorkflowRuns.Add(new WorkflowRunRow
         {
             WorkflowRunId = workflowRunId,
             State = state,
-            ActiveWorkId = activeWork ? $"{workflowRunId}-work" : null,
-            ActiveWorkerId = activeWork ? activeWorkerId ?? assignedWorkerId : null,
+            ActiveWorkId = activeWork ? projectedWorkId : null,
+            ActiveWorkerId = activeWork ? activeWorkerId ?? projectedWorkerId : null,
+            AttentionStatus = attentionStatus,
         });
         await db.SaveChangesAsync();
     }
@@ -454,7 +471,16 @@ public class WorkflowRunQuerierSchedulingSpecs
         run.Assignment = assignedWorkerId is null
             ? null
             : new WorkflowAssignment(assignedWorkerId, TestTime.UtcNow);
-
+        if (status == "Running" && assignedWorkerId is not null)
+        {
+            // A Running row that owns a slot carries a running task bound to
+            // the assigned worker; that is what materializes the active-work
+            // projection the capacity queries filter.
+            var task = run.Stages.Single().Tasks.Single();
+            task.Status = TaskRunStatus.Running;
+            task.WorkId = "task-work";
+            task.WorkerId = assignedWorkerId;
+        }
         return JSON.Serialize(run);
     }
 

@@ -252,6 +252,7 @@ public class RunnerPollSchedulingSpecs : Mohist.Server.SpecTests.Specs.Workflow.
                     Status = status == "Running"
                         ? TaskRunStatus.Running
                         : TaskRunStatus.Pending,
+                    WorkerId = runnerId,
                 },
             },
         });
@@ -259,12 +260,16 @@ public class RunnerPollSchedulingSpecs : Mohist.Server.SpecTests.Specs.Workflow.
         run.Status = Enum.Parse<WorkflowRunStatus>(status);
         run.Assignment = new WorkflowAssignment(runnerId, TestTime.UtcNow);
 
+        // The capacity queries filter the materialized active-work projection
+        // plus indexed attention, so raw inserts must mirror the store layout.
+        var projection = WorkflowRunWorkProjectionBuilder.Build(run);
         db.WorkflowRuns.Add(new WorkflowRunRow
         {
             WorkflowRunId = workflowRunId,
             State = JSON.Serialize(run),
-            ActiveWorkId = activeWork ? $"{workflowRunId}-work" : null,
-            ActiveWorkerId = activeWork ? activeWorkerId ?? runnerId : null,
+            ActiveWorkId = activeWork ? projection.ActiveWorkId : null,
+            ActiveWorkerId = activeWork ? activeWorkerId ?? projection.ActiveWorkerId : null,
+            AttentionStatus = run.HasBlockedAgentResult() ? "blocked" : null,
         });
         await db.SaveChangesAsync();
     }

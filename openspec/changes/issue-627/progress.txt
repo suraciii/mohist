@@ -59,3 +59,52 @@
   (grain-level; Runner slot accounting assertions belong to T-002). Note run-scoped work
   ids repeat across runs (`agent.1`), so identity must be compared per run route.
 - Verified: full `Mohist.Server.UnitTests` (2768) and full `Mohist.Server.SpecTests` (3878) green.
+
+## T-002 (exclude released attempts from active work and Runner capacity)
+
+- Active-work is now defined by active ownership, not a running task:
+  - `WorkflowRunQuerier.CountRunningAssignedToAsync` / `FindRunningAssignedToAsync`
+    filter on the materialized active-work projection (`ActiveWorkId != null`,
+    `ActiveWorkerId == workerId`) AND `AttentionStatus != "blocked"`. The
+    attention filter protects capacity for pre-existing blocked rows whose
+    stale assignment/active columns the grain repair has not cleared yet
+    (rollout window). No `State` deserialization.
+  - `WorkflowRunWorkProjectionBuilder` keys off `HasBlockedAgentResult()` (was
+    `HasUnresolvedAgentResult()`): Unknown keeps its lease until the deadline;
+    Blocked drops ActiveWorkId/ActiveWorkerId in the persisted row.
+  - `WorkflowGrain.GetCurrentWorkIdAsync` and `WorkflowReadModel.GetActiveWork`
+    return null for a blocked run (task stays Running for late-result arbitration,
+    but it is not active work; artifact upload bound to active work is rejected).
+  - `DispatchService`: reported work keys reserve a slot only when they are still
+    in the desired active set (`AddMissingRedeliveriesAsync` result), and
+    `RenderUnresolvedAgentRecoveryAsync` returns (null, null, ReserveSlot:false)
+    for any settlement that is not Unknown. Polling a released/blocked run yields
+    no redelivery/recovery dispatch and no slot reservation even with a stale
+    dispatch snapshot present.
+- Test-helper gotcha: raw `WorkflowRunRow` inserts that bypass the store must fill
+  the ActiveWorkId/ActiveWorkerId/AttentionStatus columns (use
+  `WorkflowRunWorkProjectionBuilder.Build`) or the new queries return 0/empty and
+  tests fail for the wrong reason. Corrupt `stateOverride` rows must stay
+  unprojected (their tests assert the DB layer never deserializes).
+- New tests:
+  - Specs/Workflow/Storage/WorkflowRunStoreProjectionSpecs:
+    `SaveAsync_KeepsUnknownActiveLeaseAndClearsBlockedProjectionForCapacity`
+    (Unknown holds lease + rows; after Blocked release the row drops
+    ActiveWorkId/ActiveWorkerId, sets blocked attention, and the querier excludes
+    it; late-result clearing drops attention).
+  - Specs/Runner/Grain/DispatchServiceReconciliationSpecs:
+    `DeadlineRelease_TwoConcurrentUnknownAttempts_FreeBothSlotsForAnotherWorkflow`
+    (two attempts on a 2-slot runner, deadline releases both at the same boundary,
+    activeWorks + used-slot empty, a fresh workflow claims the capacity, both
+    original identities preserved) and
+    `PollAfterBlockedRelease_SafeWithStaleSnapshot_AndReleasesCapacity` (legacy
+    blocked row with stale assignment + active columns + indexed blocked attention
+    + leftover snapshot: excluded from query/status/poll and another workflow
+    claims the slot).
+  - Specs/Workflow/Grain/WorkflowGrainSettlementDeadlineReleaseSpecs:
+    `DeadlineRelease_RemovesAttemptFromActiveWorkViewsAndKeepsIdentityReadable`
+    (grain-level: GetCurrentWorkIdAsync/GetActiveWorkAsync/GetAssignedWorkerIdAsync
+    null after release, ClaimNextAsync null, single task, full identity preserved)
+    and extended `TwoConcurrentUnknownAttempts_ReleaseBothLeasesAtTheirOwnBoundaries`
+    with DB-layer active-work assertions under injected cleanup failure.
+- Full suites green: SpecTests 3881, UnitTests 2768, ArchTests 68.

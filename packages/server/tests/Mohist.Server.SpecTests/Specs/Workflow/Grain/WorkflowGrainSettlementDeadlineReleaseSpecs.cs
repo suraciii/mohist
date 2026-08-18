@@ -1,4 +1,6 @@
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
+using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Infrastructure.Data.Workflow;
 using Mohist.Server.Infrastructure.Events;
 using Mohist.Server.Workflow.Domain.Run;
@@ -163,6 +165,58 @@ public sealed partial class WorkflowGrainStateSaveFailureSpecs
     }
 
     [Fact]
+    public async Task DeadlineRelease_RemovesAttemptFromActiveWorkViewsAndKeepsIdentityReadable()
+    {
+        const string workflowRunId = "wr-settlement-deadline-active-views";
+        const string projectId = "proj-settlement-deadline-active-views";
+        const string workerId = "worker-settlement-deadline-active-views";
+        var calls = new ReminderCalls();
+
+        await SeedWorkflowTemplateAsync(projectId, AgentWorkflowDefinition());
+        await using var scope = _fixture.Services.CreateAsyncScope();
+        var store = scope.ServiceProvider.GetRequiredService<IWorkflowRunStore>();
+        var grain = CreateReminderGrain(scope.ServiceProvider, store, workflowRunId, calls);
+        await grain.OnActivateAsync(CancellationToken.None);
+        var binding = await StartAgentWorkAsync(grain, store, workflowRunId, projectId, workerId);
+        await grain.ObserveAgentExecutionAsync(new AgentExecutionObservation(
+            binding, AgentExecutionObservationKind.StopUnconfirmed, "stop-unconfirmed"));
+
+        // While unknown the attempt still owns its active lease and remains
+        // visible through the work views.
+        Assert.Equal(binding.WorkId, await grain.GetCurrentWorkIdAsync());
+        Assert.NotNull(await grain.GetActiveWorkAsync(binding.WorkId));
+        Assert.Equal(workerId, await grain.GetAssignedWorkerIdAsync());
+        var settlement = SettlementOf(await store.LoadAsync(workflowRunId));
+        var identity = Identity(settlement);
+        var deadline = Assert.IsType<DateTimeOffset>(settlement.DeadlineAt);
+
+        TimeProvider.Advance(deadline - TimeProvider.GetUtcNow());
+        await grain.ReceiveReminder(WorkflowGrain.AgentResultSettlementReminderName, default);
+
+        // After the durable release boundary the attempt is no longer active
+        // work, is not claimable, and its task/settlement identity stays intact
+        // for late-result routing.
+        await AssertBlockedAndReleasedAsync(store, workflowRunId, workerId, identity, deadline);
+        Assert.Null(await grain.GetCurrentWorkIdAsync());
+        Assert.Null(await grain.GetActiveWorkAsync(binding.WorkId));
+        Assert.Null(await grain.GetAssignedWorkerIdAsync());
+        Assert.Null(await grain.ClaimNextAsync(workerId));
+        var released = Assert.IsType<WorkflowRun>(await store.LoadAsync(workflowRunId));
+        var releasedTask = Assert.Single(released.CurrentStage().Tasks);
+        Assert.Equal(TaskRunStatus.Running, releasedTask.Status);
+        Assert.Equal(WorkflowRunStatus.Running, released.Status);
+        Assert.Equal(binding.WorkId, releasedTask.WorkId);
+        Assert.Equal(workerId, releasedTask.WorkerId);
+        Assert.Equal(binding.TaskRunId, releasedTask.AgentResultSettlement!.TaskRunId);
+        Assert.Equal(binding.AgentSessionId, releasedTask.AgentResultSettlement.AgentSessionId);
+        Assert.Equal(binding.AgentTurnId, releasedTask.AgentResultSettlement.AgentTurnId);
+        Assert.Equal(binding.Runtime, releasedTask.AgentResultSettlement.Runtime);
+        Assert.Equal(binding.RuntimeSessionId, releasedTask.AgentResultSettlement.RuntimeSessionId);
+        Assert.Equal(identity, Identity(releasedTask.AgentResultSettlement));
+        Assert.Single(released.CurrentStage().Tasks);
+    }
+
+    [Fact]
     public async Task TwoConcurrentUnknownAttempts_ReleaseBothLeasesAtTheirOwnBoundaries()
     {
         const string projectId = "proj-settlement-two-attempts";
@@ -207,6 +261,13 @@ public sealed partial class WorkflowGrainStateSaveFailureSpecs
             Assert.Equal(3, (await BlockedEventTypesAsync(events, attempt.RunId)).Length);
             Assert.Equal(attempt.Binding.WorkId, SettlementOf(await store.LoadAsync(attempt.RunId)).WorkId);
         }
+
+        // Even with cleanup failure injected, neither released attempt may hold
+        // a Runner active-work row or a used slot at its durable boundary.
+        var querier = new WorkflowRunQuerier(
+            scope.ServiceProvider.GetRequiredService<IDbContextFactory<MohistDbContext>>());
+        Assert.Empty(await querier.FindRunningAssignedToAsync(workerId));
+        Assert.Equal(0, await querier.CountRunningAssignedToAsync(workerId));
 
         foreach (var attempt in attempts)
         {
