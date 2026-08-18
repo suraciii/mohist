@@ -2,6 +2,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest"
 import { readFileSync, writeFileSync, existsSync } from "node:fs"
 import { dirname, join } from "node:path"
 import { fileURLToPath, pathToFileURL } from "node:url"
+// @ts-expect-error the patch script ships without type declarations
 import { applyIdleTimeoutPatch } from "../../../scripts/patch-pi-idle-timeout.mjs"
 
 function findUp(startDir: string, name: string): string {

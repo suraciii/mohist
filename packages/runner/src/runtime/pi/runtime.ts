@@ -1,5 +1,6 @@
 import { createCredentialMaskerFromEnvironment, CredentialMasker } from '../task-log.js'
 import { resolve } from 'node:path'
+import { closeSync, fstatSync, openSync, readSync, statSync } from 'node:fs'
 import { boundedTimeoutMs, boundedWait } from '../bounded-wait.js'
 import { diagnostic, piError, resetDiagnostic } from './errors.js'
 import { isProviderFailure, DEFAULT_PI_PROVIDER_ERROR_POLICY } from './policy.js'
@@ -270,17 +271,26 @@ export class PiRuntime {
     const initialMessageCount = session.messages.length
     let settleTimer: unknown = null
     let terminalStreak = 0
+    // The agent state can diverge from the persisted session file (pi removes
+    // the last assistant message from memory on overflow recovery while the
+    // file keeps it, and a follow-up continue can then hang before any event
+    // reaches memory). The file is what reattach trusts, so watch it too.
+    let fileQuietTerminalStreak = 0
+    // A reused session file already ends in the previous turn's terminal
+    // message when this turn starts; only a file that has grown since then
+    // counts as evidence for THIS turn.
+    const initialFileSize = fileSizeOf(path)
     const stopSettleGuard = () => {
       if (settleTimer !== null) {
         clock.clearTimeout(settleTimer)
         settleTimer = null
       }
     }
-    const settleFromTerminalState = () => {
+    const settleFromTerminalState = (fileTerminal: string | null = null) => {
       if (fixed) return
       report(projector.reconcile(session.messages))
       diagnostics.push(...projector.diagnostics().map((item) => diagnostic(item.code, this.mask(item.message), 'info')))
-      const failed = lastMessageFailed(session.messages)
+      const failed = lastMessageFailed(session.messages) || fileTerminal === 'error'
       fixed = failed
         ? this.finishFailure('turn-failed', 'Pi turn failed', [
             diagnostic('turn-failed', this.mask(lastMessageError(session.messages) ?? 'Pi reported an error')),
@@ -316,12 +326,28 @@ export class PiRuntime {
         settleFromTerminalState()
         return
       }
+      const fileTerminal = fileSizeOf(path) > initialFileSize ? readTerminalFromFile(path) : null
+      fileQuietTerminalStreak = fileTerminal !== null ? fileQuietTerminalStreak + 1 : 0
+      if (fileQuietTerminalStreak >= SETTLE_POLLS_REQUIRED) {
+        settleFromTerminalState(fileTerminal)
+        return
+      }
       settleTimer = clock.setTimeout(pollSettleState, SETTLE_POLL_MS)
     }
+    let promptSettled = false
     try {
       settleTimer = clock.setTimeout(pollSettleState, SETTLE_POLL_MS)
       const promptOperation = this.withSessionLock(path, () =>
         session.prompt(request.prompt, { expandPromptTemplates: false }).then(() => 'completed' as const),
+      ).then(
+        (value) => {
+          promptSettled = true
+          return value
+        },
+        (error) => {
+          promptSettled = true
+          throw error
+        },
       )
       const promptOutcome = await Promise.race([promptOperation, fixedSignal.then(() => 'fixed' as const)])
       if (fixed) return fixed
@@ -352,6 +378,11 @@ export class PiRuntime {
       if (warning !== null) clock.clearTimeout(warning)
       stopSettleGuard()
       unsubscribe()
+      // A prompt that never settles keeps holding the per-session mutex; every
+      // later session operation on this path would queue behind it forever.
+      // The orphaned lock entry is harmless: withSessionLock replaces it on
+      // the next acquisition.
+      if (!promptSettled) this.sessionMutexes.delete(path)
     }
   }
 
@@ -973,6 +1004,53 @@ function contentText(content: unknown): string | null {
     .join('')
   return text || null
 }
+// The persisted session file is the ground truth reattach trusts; agent state
+// can diverge from it (overflow recovery removes the last assistant message
+// from memory while the file keeps it). Reads the tail of the jsonl file and
+// reports the stopReason of the last message entry when it is a terminal
+// assistant message.
+function readTerminalFromFile(filePath: string): string | null {
+  try {
+    const fd = openSync(filePath, 'r')
+    try {
+      const size = fstatSync(fd).size
+      const start = Math.max(0, size - 65_536)
+      const length = size - start
+      if (length <= 0) return null
+      const buffer = Buffer.alloc(length)
+      readSync(fd, buffer, 0, length, start)
+      const lines = buffer.toString('utf8').split('\n')
+      for (let i = lines.length - 1; i >= 0; i--) {
+        const line = lines[i].trim()
+        if (!line) continue
+        try {
+          const entry: unknown = JSON.parse(line)
+          if (!(entry instanceof Object) || (entry as { type?: string }).type !== 'message') continue
+          const message = (entry as { message?: { role?: string; stopReason?: string } }).message
+          if (message?.role !== 'assistant') return null
+          const stop = message.stopReason
+          return stop === 'stop' || stop === 'error' || stop === 'aborted' ? stop : null
+        } catch {
+          continue
+        }
+      }
+      return null
+    } finally {
+      closeSync(fd)
+    }
+  } catch {
+    return null
+  }
+}
+
+function fileSizeOf(filePath: string): number {
+  try {
+    return statSync(filePath).size
+  } catch {
+    return -1
+  }
+}
+
 function lastMessageFailed(messages: readonly { role?: string; stopReason?: string }[]): boolean {
   const item = [...messages].reverse().find((entry) => entry.role === 'assistant')
   return item?.stopReason === 'error'

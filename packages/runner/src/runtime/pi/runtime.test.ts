@@ -1,5 +1,15 @@
 import { describe, expect, it, vi } from 'vitest'
+import { mkdtempSync, writeFileSync } from 'node:fs'
+import { join } from 'node:path'
+import { tmpdir } from 'node:os'
 import { PiRuntime } from './runtime.js'
+
+type FixtureMessage = {
+  role: string
+  content: unknown
+  stopReason?: string
+  errorMessage?: string
+}
 
 function sessionFixture(overrides: Partial<Record<string, unknown>> = {}) {
   return {
@@ -8,7 +18,7 @@ function sessionFixture(overrides: Partial<Record<string, unknown>> = {}) {
     messages: [
       { role: 'user', content: 'do the work' },
       { role: 'assistant', content: [{ type: 'text', text: 'adopted final text' }] },
-    ],
+    ] as FixtureMessage[],
     isStreaming: false,
     subscribe: () => () => undefined,
     prompt: vi.fn(async () => undefined),
@@ -178,7 +188,7 @@ describe('PiRuntime runTurn deadline', () => {
       session.messages = [
         { role: 'user', content: 'do the work' },
         { role: 'assistant', content: [{ type: 'text', text: 'the final answer' }], stopReason: 'stop' },
-      ]
+      ] as never
       await vi.advanceTimersByTimeAsync(30_000)
 
       const result = await turn
@@ -216,13 +226,70 @@ describe('PiRuntime runTurn deadline', () => {
       session.messages = [
         { role: 'user', content: 'do the work' },
         { role: 'assistant', content: [], stopReason: 'error', errorMessage: 'provider exploded' },
-      ]
+      ] as never
       await vi.advanceTimersByTimeAsync(30_000)
 
       const result = await turn
       expect(result.ok).toBe(false)
       if (result.ok) return
       expect(result.error.kind).toBe('turn-failed')
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('settles from a terminal session file when memory diverges from it', async () => {
+    vi.useFakeTimers()
+    try {
+      const dir = mkdtempSync(join(tmpdir(), 'pi-file-settle-'))
+      const sessionFile = join(dir, 'session.jsonl')
+      writeFileSync(
+        sessionFile,
+        [
+          JSON.stringify({ type: 'message', message: { role: 'user', content: 'do the work' } }),
+          JSON.stringify({ type: 'message', message: { role: 'toolResult', content: [] } }),
+        ].join('\n') + '\n',
+      )
+      const appendTerminal = () =>
+        writeFileSync(
+          sessionFile,
+          JSON.stringify({
+            type: 'message',
+            message: { role: 'assistant', content: [{ type: 'text', text: 'file final' }], stopReason: 'stop' },
+          }) + '\n',
+          { flag: 'a' },
+        )
+      // Memory keeps a stale toolResult as its last message: overflow recovery
+      // can remove the terminal assistant message from agent state while the
+      // file keeps it, and the follow-up continue call can hang before any
+      // event reaches memory.
+      const session = {
+        ...sessionFixture({
+          messages: [{ role: 'user', content: 'do the work' }],
+          isStreaming: true,
+          prompt: vi.fn(() => new Promise<void>(() => {})),
+        }),
+      }
+      const runtime = runtimeFor(session)
+      await runtime.start()
+
+      const controller = new AbortController()
+      const turn = runtime.runTurn(
+        {
+          target: { runtime: 'pi', runtimeSessionId: sessionFile, workDir: '/workspace' },
+          prompt: 'do the work',
+        },
+        controller.signal,
+      )
+      for (let i = 0; i < 6; i++) await Promise.resolve()
+      expect(session.prompt).toHaveBeenCalled()
+      // Memory never gains a terminal message, but the file grows a terminal
+      // assistant message while the prompt stays stuck.
+      appendTerminal()
+      await vi.advanceTimersByTimeAsync(30_000)
+
+      const result = await turn
+      expect(result.ok).toBe(true)
     } finally {
       vi.useRealTimers()
     }
