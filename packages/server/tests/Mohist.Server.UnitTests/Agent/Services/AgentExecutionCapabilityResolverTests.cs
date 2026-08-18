@@ -126,7 +126,6 @@ public sealed class AgentExecutionCapabilityResolverTests
                 CompleteCatalogEntry() with
                 {
                     SupportsReasoningEffort = false,
-                    ReasoningEfforts = null,
                 },
                 RuntimeReady: false)]);
 
@@ -276,6 +275,170 @@ public sealed class AgentExecutionCapabilityResolverTests
 
         Assert.Equal(first, second);
         Assert.Equal("runner-a", first.RunnerId);
+    }
+
+    [Fact]
+    public void UnsetModelOnCompleteCatalog_IsSupported()
+    {
+        // No model supplied means the runtime uses its default. The
+        // catalog is the configuration source, not the execution
+        // authority, so an unset model is not a compatibility
+        // violation.
+        var result = AgentExecutionCapabilityResolver.Resolve(
+            Runtime,
+            model: null,
+            reasoningEffort: null,
+            variant: null,
+            catalogSnapshot: [new AgentExecutionCapabilitySnapshot("runner-a", Runtime, CompleteCatalogEntry())]);
+
+        Assert.Equal(AgentExecutionCapabilityDisposition.Supported, result.Disposition);
+        Assert.Equal("runner-a", result.RunnerId);
+    }
+
+    [Fact]
+    public void UnsetModelOnEffortUnsupportedRuntime_IsSupported()
+    {
+        // An unset model is allowed even when the runtime opts out of
+        // effort — the effort exemption is the same one that lets
+        // `UnsetEffortDoesNotRequireSupportFromRuntime` pass.
+        var catalog = CompleteCatalogEntry() with
+        {
+            SupportsReasoningEffort = false,
+        };
+        var result = AgentExecutionCapabilityResolver.Resolve(
+            Runtime,
+            model: null,
+            reasoningEffort: null,
+            variant: null,
+            catalogSnapshot: [new AgentExecutionCapabilitySnapshot("runner-a", Runtime, catalog)]);
+
+        Assert.Equal(AgentExecutionCapabilityDisposition.Supported, result.Disposition);
+    }
+
+    [Fact]
+    public void OpenCodeProductionShape_AcceptsAnyModelWithoutDiscovery()
+    {
+        // The shipped OpenCode catalog reports the explicit effort
+        // contract (supportsReasoningEffort=false) but has no model
+        // discovery yet. The empty model list is the "no discovery"
+        // signal: the runtime validates any supplied model at
+        // execution time, so any model name is admitted.
+        var catalog = new RuntimeCatalogEntry(
+            Models: [],
+            Variants: [],
+            SupportsReasoningEffort: false,
+            Complete: true,
+            CapabilityRevision: "test-opencode-no-discovery-v1");
+
+        var result = AgentExecutionCapabilityResolver.Resolve(
+            "opencode",
+            "anthropic/claude-sonnet-4-20250514",
+            null,
+            null,
+            [new AgentExecutionCapabilitySnapshot("runner-a", "opencode", catalog)]);
+
+        Assert.Equal(AgentExecutionCapabilityDisposition.Supported, result.Disposition);
+        Assert.Equal("test-opencode-no-discovery-v1", result.CapabilityRevision);
+    }
+
+    [Fact]
+    public void OpenCodeProductionShape_RejectsExplicitEffortDeterministically()
+    {
+        // The shipped OpenCode catalog reports the explicit effort
+        // contract (supportsReasoningEffort=false). An explicit effort
+        // on OpenCode is a deterministic unsupported_execution_configuration
+        // preflight failure — never a silent drop.
+        var catalog = new RuntimeCatalogEntry(
+            Models: [],
+            Variants: [],
+            SupportsReasoningEffort: false,
+            Complete: true,
+            CapabilityRevision: "test-opencode-no-discovery-v1");
+
+        var result = AgentExecutionCapabilityResolver.Resolve(
+            "opencode",
+            "anthropic/claude-sonnet-4-20250514",
+            "high",
+            null,
+            [new AgentExecutionCapabilitySnapshot("runner-a", "opencode", catalog)]);
+
+        Assert.Equal(
+            AgentExecutionCapabilityDisposition.UnsupportedExecutionConfiguration,
+            result.Disposition);
+        Assert.Equal("unsupported_execution_configuration", result.DispositionCode);
+        Assert.Equal(
+            new AgentExecutionCapabilityTuple("opencode", "anthropic/claude-sonnet-4-20250514", "high", null),
+            result.FailureEvidence!.FrozenTuple);
+        Assert.Equal("test-opencode-no-discovery-v1", result.FailureEvidence.CapabilityRevision);
+    }
+
+    [Fact]
+    public void OpenCodeProductionShape_RejectsExplicitEffortEvenWithoutModel()
+    {
+        // Effort rejection takes precedence over a missing model
+        // (the OpenCode design contract is "supportsReasoningEffort=
+        // false", so any explicit effort is rejected before the
+        // model check runs).
+        var catalog = new RuntimeCatalogEntry(
+            Models: [],
+            Variants: [],
+            SupportsReasoningEffort: false,
+            Complete: true,
+            CapabilityRevision: "test-opencode-no-discovery-v1");
+
+        var result = AgentExecutionCapabilityResolver.Resolve(
+            "opencode",
+            null,
+            "high",
+            null,
+            [new AgentExecutionCapabilitySnapshot("runner-a", "opencode", catalog)]);
+
+        Assert.Equal(
+            AgentExecutionCapabilityDisposition.UnsupportedExecutionConfiguration,
+            result.Disposition);
+    }
+
+    [Fact]
+    public void OpenCodeProductionShape_AcceptsExplicitVariant()
+    {
+        // The shipped OpenCode catalog has no variant discovery yet;
+        // an empty variant map means the runtime validates the
+        // variant at execution time, so any variant name is admitted.
+        var catalog = new RuntimeCatalogEntry(
+            Models: [],
+            Variants: [],
+            SupportsReasoningEffort: false,
+            Complete: true,
+            CapabilityRevision: "test-opencode-no-discovery-v1");
+
+        var result = AgentExecutionCapabilityResolver.Resolve(
+            "opencode",
+            "anthropic/claude-sonnet-4-20250514",
+            null,
+            "balanced",
+            [new AgentExecutionCapabilitySnapshot("runner-a", "opencode", catalog)]);
+
+        Assert.Equal(AgentExecutionCapabilityDisposition.Supported, result.Disposition);
+    }
+
+    [Fact]
+    public void AuthoritativeCatalogWithExplicitModelRejectsUnknownModel()
+    {
+        // A catalog that DOES list explicit models still rejects an
+        // unknown model as a deterministic incompatibility — the
+        // "no discovery" carve-out only applies to empty model
+        // lists.
+        var catalog = CompleteCatalogEntry();
+        var result = AgentExecutionCapabilityResolver.Resolve(
+            Runtime,
+            model: "unknown/model",
+            reasoningEffort: null,
+            variant: null,
+            catalogSnapshot: [new AgentExecutionCapabilitySnapshot("runner-a", Runtime, catalog)]);
+
+        Assert.Equal(
+            AgentExecutionCapabilityDisposition.IncompatibleExecutionConfiguration,
+            result.Disposition);
     }
 
     private static AgentExecutionCapabilityResolution Resolve(RuntimeCatalogEntry catalog) =>

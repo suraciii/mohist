@@ -157,26 +157,51 @@ public static class AgentExecutionCapabilityResolver
         RuntimeCatalogEntry catalog,
         AgentExecutionCapabilityTuple tuple)
     {
-        if (string.IsNullOrWhiteSpace(tuple.Model)
-            || !Contains(catalog.Models, tuple.Model, StringComparison.OrdinalIgnoreCase))
-            return false;
+        // The catalog is a configuration hint, not the execution
+        // authority (`design/runtimes/opencode.md` — the model catalog
+        // assists configuration; the runtime validates the model at
+        // execution time). An unset model means the runtime uses its
+        // default; an empty catalog model list means the catalog has no
+        // model discovery and the runtime validates any supplied model
+        // at execution time. Either case is `supported` rather than
+        // `incompatible_execution_configuration`. A catalog that lists
+        // explicit models still rejects any model that is not on the
+        // list as a deterministic incompatibility.
+        if (tuple.Model is not null)
+        {
+            if (catalog.Models is { Length: > 0 }
+                && !Contains(catalog.Models, tuple.Model, StringComparison.OrdinalIgnoreCase))
+                return false;
+        }
 
         if (tuple.ReasoningEffort is not null)
         {
+            // The catalog's explicit `supportsReasoningEffort` flag is
+            // the source of truth for effort support. A non-true value
+            // (false or null) means the runtime does not support effort
+            // — explicit rejection per the design contract.
             if (catalog.SupportsReasoningEffort != true)
                 return false;
         }
 
-        return tuple.Variant is null
-            || ContainsForModel(catalog.Variants, tuple.Model, tuple.Variant);
+        // Variant validation is only enforced when the catalog has
+        // explicit per-model variant definitions. An empty variant map
+        // means the runtime validates the variant at execution time,
+        // matching the model-validation rule above.
+        if (tuple.Variant is not null
+            && catalog.Variants is { Count: > 0 }
+            && !ContainsForModel(catalog.Variants, tuple.Model, tuple.Variant))
+            return false;
+
+        return true;
     }
 
     private static bool ContainsForModel(
         Dictionary<string, string[]>? valuesByModel,
-        string model,
+        string? model,
         string value)
     {
-        if (valuesByModel is null)
+        if (valuesByModel is null || model is null)
             return false;
 
         var values = valuesByModel.FirstOrDefault(entry =>
