@@ -28,6 +28,8 @@ public class WorkflowGrainFixture : IAsyncLifetime
     public FakeTimeProvider TimeProvider { get; } = new(new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero));
     public AgentSessionPersistenceTestProbe Persistence { get; }
     public ControllableDispatchPollObserver DispatchPollObserver { get; } = new();
+    public RunnerUpdateOperationWriteFailureProbe OperationWriteFailures =>
+        Cluster.GetSiloServiceProvider(null).GetRequiredService<RunnerUpdateOperationWriteFailureProbe>();
 
     private readonly RecordingEventStore _sharedEventStore = new();
     private readonly InMemoryEventBus _sharedEventBus;

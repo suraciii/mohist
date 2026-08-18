@@ -10,6 +10,7 @@ export type StageTaskStatus =
   | 'failed'
   | 'skipped'
   | 'blocked'
+  | 'interrupted'
 export type StageCheckStatus =
   | 'pending'
   | 'running'
@@ -78,8 +79,21 @@ export interface WorkInterruption {
   recoveryDeadlineAt: string
 }
 
+export interface WorkflowAgentInterruption {
+  state: 'interrupting' | 'interrupted' | 'recovering' | 'recovered'
+  updateOperationId: string
+  workId: string
+  taskRunId?: string | null
+  recoveryGeneration: number
+  originalTurnId?: string | null
+  replacementTurnId?: string | null
+  stopFailure?: string | null
+  expectedRecoveryPath: string
+  recordedAt: string
+}
+
 export interface WorkflowAgentResultSettlement {
-  state: 'awaiting-result' | 'unknown' | 'blocked'
+  state: 'awaiting-result' | 'interrupted' | 'unknown' | 'blocked'
   reason?: string | null
   message?: string | null
   firstUnknownAt?: string | null
@@ -94,6 +108,10 @@ export interface WorkflowAgentResultSettlement {
   stopOperationId?: string | null
   nextAction?: string | null
   recoveryActions?: string[] | null
+  updateOperationId?: string | null
+  expectedRecoveryPath?: string | null
+  stopFailure?: string | null
+  interruption?: WorkflowAgentInterruption | null
 }
 
 export interface WorkflowAgentResultAttention extends WorkflowAgentResultSettlement {
@@ -125,6 +143,7 @@ export interface StageTaskState {
   classification?: 'UserFacing' | 'Orchestration'
   agentResultSettlement?: WorkflowAgentResultSettlement | null
   interruption?: WorkInterruption | null
+  agentInterruption?: WorkflowAgentInterruption | null
 }
 
 export interface StageCheckState {

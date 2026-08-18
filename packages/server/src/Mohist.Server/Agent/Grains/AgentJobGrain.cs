@@ -96,6 +96,9 @@ public sealed partial class AgentJobGrain : Grain, IAgentJobGrain
     {
         await HydrateAsync();
 
+        if (State.PendingSessionInterruptionDeliveries is { Count: > 0 })
+            await DeliverPendingSessionInterruptionAsync();
+
         if (IsTerminal && State.TerminalResult is not null)
             _terminalCompletion.TrySetResult(State.TerminalResult);
 
@@ -160,6 +163,29 @@ public sealed partial class AgentJobGrain : Grain, IAgentJobGrain
             return;
         }
 
+        if (State.Status == AgentJobStatus.RecoverablyInterrupted)
+        {
+            if (EnsureUpdateInterruptionDeadline())
+                await PersistAsync();
+            if (UpdateInterruptionDeadlineExceeded())
+            {
+                await EnterRecoveryTerminalStateAsync("agent-result-unconfirmed");
+                return;
+            }
+
+            await DeliverPendingSessionInterruptionAsync();
+            if (State.PendingUpdateInterruptionEvent is { } pending)
+                await EmitUpdateInterruptionEventAsync(pending);
+            // Keep the reminder armed until the receipt deadline even after
+            // the interruption event has been durably delivered.
+            if (State.PendingUpdateInterruptionEvent is null
+                && State.UpdateInterruptionDeadlineAt is null
+                && State.PendingSessionInterruptionDeliveries is not { Count: > 0 })
+                await UnregisterSelfAsync(RecoveryReminderName);
+
+            return;
+        }
+
         if (State.Status == AgentJobStatus.Pending)
             await EvaluatePendingAsync();
     }
@@ -179,7 +205,8 @@ public sealed partial class AgentJobGrain : Grain, IAgentJobGrain
         $"AgentJob '{Key}' state accessed before hydration");
     private bool IsTerminal => State.Status is AgentJobStatus.Completed
         or AgentJobStatus.Failed
-        or AgentJobStatus.Cancelled;
+        or AgentJobStatus.Cancelled
+        or AgentJobStatus.Interrupted;
 
     private bool IsDispatchable => State.Status is AgentJobStatus.Pending;
 
@@ -231,7 +258,198 @@ public sealed partial class AgentJobGrain : Grain, IAgentJobGrain
             InitialInputId: State.Input?.InitialInputId,
             InitialTurnId: State.Input?.InitialTurnId,
             RecoveryDeadlineAt: State.RecoveryDeadlineAt,
-            IsRecovering: IsRecovering));
+            IsRecovering: IsRecovering,
+            RecoveryGeneration: State.RecoveryGeneration,
+            OriginalWorkId: State.RecoveryAttempts.FirstOrDefault()?.WorkId,
+            UpdateInterruptionDeadlineAt: State.UpdateInterruptionDeadlineAt,
+            Interruption: State.Interruption,
+            InterruptionHistory: State.InterruptionHistory));
+
+    private bool MatchesRecoveryReceiptBinding(RuntimeRecoveryReceipt receipt)
+    {
+        var input = State.Input;
+        var expectedRuntime = input?.Runtime ?? AgentConfigSchema.OpenCodeRuntime;
+        return string.Equals(receipt.RunnerId, State.RunnerId, StringComparison.Ordinal)
+            && string.Equals(receipt.WorkId, State.WorkId, StringComparison.Ordinal)
+            && string.Equals(receipt.AgentSessionId, input?.AgentSessionId, StringComparison.Ordinal)
+            && string.Equals(receipt.AgentTurnId, input?.InitialTurnId, StringComparison.Ordinal)
+            && string.Equals(receipt.Runtime, expectedRuntime, StringComparison.Ordinal)
+            && string.Equals(receipt.RuntimeSessionId, State.RuntimeSessionId, StringComparison.Ordinal);
+    }
+
+    private bool CanContinueAfterUpdateInterruption() =>
+        State.LaunchVisibility == AgentLaunchVisibility.Visible
+        && State.Input is { } input
+        && !string.IsNullOrWhiteSpace(input.AgentId)
+        && (!string.IsNullOrWhiteSpace(input.Prompt)
+            || input.Attachments is { Count: > 0 });
+
+    private async Task AllocateRecoveryAttemptAsync(string interruptedWorkId)
+    {
+        State.RecoveryAttempts ??= [];
+        var input = State.Input
+            ?? throw new InvalidOperationException($"AgentJob '{Key}' has no input for recovery.");
+        var runnerId = State.RunnerId;
+        var runtimeSessionId = State.RuntimeSessionId;
+        var generation = State.RecoveryGeneration + 1;
+        var workId = RecoveryWorkId(interruptedWorkId, generation);
+        var inputId = $"recovery-input:{Key}:{generation}";
+        var turnId = $"recovery-turn:{workId}";
+        var now = _timeProvider.GetUtcNow();
+
+        // A normal Session-backed launch gets a fresh durable input/turn
+        // envelope. The prompt and execution configuration remain the
+        // original immutable AgentJob snapshot; only coordinator identities
+        // advance with the recovery generation.
+        if (!string.IsNullOrWhiteSpace(input.AgentSessionId)
+            && (!string.IsNullOrWhiteSpace(input.Prompt)
+                || input.Attachments is { Count: > 0 }))
+        {
+            var session = _grains.GetGrain<IAgentSessionGrain>(input.AgentSessionId);
+            if (!string.IsNullOrWhiteSpace(input.InitialTurnId))
+            {
+                // The Session coordinator will not queue a second turn
+                // while the old job turn is active. Cancelled here describes
+                // the physical turn's cooperative stop; it is not a failed
+                // or completed AgentJob verdict. The receipt and owner ledger
+                // remain the interruption authority.
+                await session.MarkTurnTerminalAsync(
+                    input.InitialTurnId,
+                    AgentTurnStatus.Cancelled,
+                    new AgentTurnResult(
+                        Message: "update-interrupted",
+                        FailureReason: "update-interrupted",
+                        FailureCategory: "update-interruption"));
+            }
+            await session.RecordFollowupTurnAsync(new RecordFollowupTurnCommand(
+                inputId,
+                turnId,
+                input.Prompt,
+                "agent-job-recovery",
+                input.Attachments));
+        }
+
+        RecordInterruptedAttempt(interruptedWorkId, now);
+        State.RecoveryAttempts.Add(new AgentJobRecoveryAttempt(
+            generation,
+            workId,
+            null,
+            input.AgentSessionId,
+            inputId,
+            turnId,
+            input.Runtime,
+            null,
+            AgentJobStatus.Pending,
+            now));
+
+        State.RecoveryGeneration = generation;
+        State.Input = input with { InitialInputId = inputId, InitialTurnId = turnId };
+        State.Status = AgentJobStatus.Pending;
+        State.RunnerId = null;
+        State.WorkId = null;
+        State.RunnerAccepted = false;
+        State.RuntimeSessionId = null;
+        State.RunningSince = null;
+        State.ReadySince = null;
+        State.WaitingReason = null;
+        State.InterruptedWorkId = interruptedWorkId;
+        State.TerminalResult = null;
+        State.TerminalAt = null;
+        DisposeJobTimeoutTimer();
+        await EnsureRecoveryReminderAsync();
+    }
+
+    private async Task ApplyRecoveryTerminalResultAsync(WorkResult result)
+    {
+        var isSuccess = string.Equals(result.Status, "completed", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(result.Status, "pass", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(result.Status, "ok", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(result.Status, "success", StringComparison.OrdinalIgnoreCase);
+        var failureReason = isSuccess
+            ? null
+            : (string.IsNullOrWhiteSpace(result.Message) ? result.Status : result.Message);
+        var failureCategory = isSuccess
+            ? null
+            : FailureCategoryFromOutput(result.Output)
+                ?? FailureCategoryFromErrorCode(result.ErrorCode)
+                ?? FailureCategoryFromStatus(result.Status);
+
+        await EnterTerminalStateAsync(
+            isSuccess ? AgentJobStatus.Completed : AgentJobStatus.Failed,
+            isSuccess ? 0 : (result.ExitCode ?? 1),
+            failureReason,
+            failureCategory,
+            failureReason,
+            result.Message,
+            result.Output?.ValueKind == JsonValueKind.Object || result.Output?.ValueKind == JsonValueKind.Array
+                ? result.Output.Value.GetRawText()
+                : null,
+            result.ArtifactUploadIds,
+            result.ExitCode);
+        if (State.Interruption is { } interruption)
+        {
+            var recovered = interruption with
+            {
+                State = AgentWorkInterruptionStates.Recovered,
+                RecordedAt = _timeProvider.GetUtcNow(),
+            };
+            State.InterruptionHistory = AgentWorkInterruptionProjection.Apply(
+                State.InterruptionHistory,
+                recovered).ToList();
+            State.Interruption = recovered;
+            await PersistAsync();
+            await ApplySessionInterruptionAsync(State.Input?.AgentSessionId, recovered);
+        }
+    }
+
+    private async Task EnterRecoveryTerminalStateAsync(string reason)
+    {
+        if (IsTerminal)
+            return;
+
+        RecordInterruptedAttempt(State.InterruptedWorkId, _timeProvider.GetUtcNow());
+        State.Status = AgentJobStatus.Interrupted;
+        State.RecoveryTerminalReason = reason;
+        State.UpdateInterruptionDeadlineAt = null;
+        State.FailureReason = null;
+        State.RunningSince = null;
+        State.TerminalAt = _timeProvider.GetUtcNow();
+        State.TerminalResult = new AgentJobTerminalResult(
+            AgentJobStatus.Interrupted,
+            reason,
+            null,
+            null,
+            null,
+            null);
+        State.ConcurrencyGateStatus = AgentConcurrencyPermitStatus.Terminal;
+        State.ConcurrencyReleasePending = State.ConcurrencyPermitId is not null
+            || State.ConcurrencyPermitHeld
+            || State.ConcurrencyWaiterId is not null;
+        DisposeJobTimeoutTimer();
+        await EnsureRecoveryReminderAsync();
+        await PersistAsync();
+        await TryReleaseConcurrencyPermitAsync();
+        _terminalCompletion.TrySetResult(State.TerminalResult);
+    }
+
+    private async Task SettleUpdateOperationWorkAsync(RuntimeRecoveryReceipt receipt)
+    {
+        if (receipt.Payload?.UpdateOperationId is not { } operationId)
+            return;
+
+        await GrainFactory
+            .GetGrain<IRunnerUpdateOperationGrain>(receipt.RunnerId)
+            .MarkWorkAsync(
+                operationId,
+                WorkDispatchOwnerKinds.AgentJob,
+                Key,
+                receipt.WorkId,
+                taskRunId: null,
+                RunnerUpdateWorkStatus.Settled);
+    }
+
+    private static string RecoveryWorkId(string interruptedWorkId, int generation) =>
+        $"{interruptedWorkId}.recovery.{generation}";
 
     public Task<AgentJobTerminalResult> GetTerminalResultAsync()
     {
@@ -781,6 +999,40 @@ public sealed partial class AgentJobGrain : Grain, IAgentJobGrain
             terminalExitCode: null);
     }
 
+    internal async Task EnterUnknownStateAsync(string reason)
+    {
+        if (IsTerminal)
+            return;
+
+        if (State.Status == AgentJobStatus.Unknown)
+        {
+            if (EnsureUnknownInitialTurnDelivery(State.FailureReason ?? reason))
+                await PersistAsync();
+            await EnsureRecoveryReminderAsync();
+            return;
+        }
+
+        var previousStatus = State.Status;
+        State.Status = AgentJobStatus.Unknown;
+        State.FailureReason = reason;
+        State.RunningSince = null;
+        State.TerminalResult = null;
+        State.TerminalAt = null;
+
+        DisposeJobTimeoutTimer();
+
+        EnsureUnknownInitialTurnDelivery(reason);
+        StageTerminalDeliveryEvent(AgentJobStatus.Unknown, reason, null, reason, "unknown", null, null);
+        await EnsureRecoveryReminderAsync();
+        await PersistAsync();
+        if (State.PendingTerminalDeliveryEvent is not null)
+            await EmitTerminalDeliveryEventAsync(State.PendingTerminalDeliveryEvent);
+
+        _log.LogInformation(
+            "AgentJob {Id} unknown: previous={Previous}, reason={Reason}",
+            Key, previousStatus, reason);
+    }
+
     private bool EnsureUnknownInitialTurnDelivery(string reason)
     {
         var sessionId = State.Input?.AgentSessionId;
@@ -1009,364 +1261,7 @@ public sealed partial class AgentJobGrain : Grain, IAgentJobGrain
         }
     }
 
-    private async Task TryAdmitAsync()
-    {
-        if (State.LaunchVisibility != AgentLaunchVisibility.Visible)
-            return;
-        if (State.Status != AgentJobStatus.Pending || State.Input is null || State.SubmittedAt is null)
-            return;
 
-        // If the row already carries a dispatch snapshot (a previous
-        // admission succeeded), the next claim race is owned by the
-        // poll path. Re-admitting here would clobber ReadySince and
-        // extend the deadline; only re-admit when no runner was found.
-        var pinnedRunnerId = State.Input.PinnedRunnerId;
-        if (!string.IsNullOrWhiteSpace(State.RunnerId)
-            && !string.IsNullOrWhiteSpace(_ledger?.DispatchJson)
-            && !string.IsNullOrWhiteSpace(State.WorkId))
-        {
-            if (!string.IsNullOrWhiteSpace(pinnedRunnerId)
-                && !string.Equals(State.RunnerId, pinnedRunnerId, StringComparison.Ordinal))
-            {
-                State.RunnerId = null;
-                State.WorkId = null;
-                State.RunnerAccepted = false;
-                State.RunningSince = null;
-                State.ReadySince = null;
-                await PersistAsync();
-            }
-            else
-            {
-            var assignedRunner = GrainFactory.GetGrain<IRunnerGrain>(State.RunnerId);
-            if ((await assignedRunner.GetRuntimeStateAsync()).Status == RunnerStatus.Online)
-                return;
-
-            State.RunnerId = null;
-            State.RunnerAccepted = false;
-            State.RunningSince = null;
-            State.ReadySince = null;
-            await PersistAsync();
-            }
-        }
-
-        if (!await AcquireConcurrencyPermitAsync())
-            return;
-
-        State.WaitingReason = null;
-        await PersistAsync();
-
-        var projectId = State.Input.ProjectId ?? string.Empty;
-        if (!string.IsNullOrWhiteSpace(pinnedRunnerId))
-        {
-            State.WaitingReason = null;
-            if (!await TryAdmitOnRunnerAsync(pinnedRunnerId))
-            {
-                State.WaitingReason = AgentAvailabilityWaitReasons.NoOnlineRunner;
-                await ReleaseConcurrencyPermitAsync();
-                await PersistAsync();
-            }
-            return;
-        }
-
-        var registry = GrainFactory.GetGrain<IRunnerRegistryGrain>(RunnerRegistryKeys.Global);
-        var runners = await registry.ListEligibleRunnersAsync(projectId);
-        if (runners.Count == 0)
-        {
-            State.WaitingReason = AgentAvailabilityWaitReasons.NoOnlineRunner;
-            await ReleaseConcurrencyPermitAsync();
-            return;
-        }
-
-        // Workspace affinity: a bound job routes to the workspace's home
-        // runner first. A stale home (runner offline) is cleared and the
-        // job falls back to the generic election; the runner that wins
-        // materializes the workspace and reports the new home.
-        if (!string.IsNullOrWhiteSpace(State.Input.WorkspaceName)
-            && !string.IsNullOrWhiteSpace(State.Input.ProjectId))
-        {
-            var workspace = GrainFactory.GetGrain<IWorkspaceGrain>(
-                GrainKey.Workspace(State.Input.ProjectId, State.Input.WorkspaceName));
-            var home = await workspace.GetHomeAsync();
-            if (home is not null)
-            {
-                var homeRunner = GrainFactory.GetGrain<IRunnerGrain>(home.RunnerId);
-                var homeState = await homeRunner.GetRuntimeStateAsync();
-                if (homeState.Status == RunnerStatus.Online
-                    && await TryAdmitOnRunnerAsync(home.RunnerId))
-                {
-                    return;
-                }
-
-                if (homeState.Status != RunnerStatus.Online)
-                    await workspace.ClearHomeIfAsync(home.RunnerId);
-            }
-        }
-
-        foreach (var runnerInfo in runners)
-        {
-            if (await TryAdmitOnRunnerAsync(runnerInfo.RunnerId))
-                return;
-        }
-
-        State.WaitingReason = AgentAvailabilityWaitReasons.CapacityFull;
-        await ReleaseConcurrencyPermitAsync();
-        await PersistAsync();
-    }
-
-    private async Task<bool> AcquireConcurrencyPermitAsync()
-    {
-        if (State.Input is null)
-            return false;
-
-        var projectId = State.Input.ProjectId;
-        var agentId = State.Input.AgentId;
-        if (string.IsNullOrWhiteSpace(projectId) || string.IsNullOrWhiteSpace(agentId))
-            return true;
-
-        var token = State.ConcurrencyPermitToken ??= $"{Key}:execution";
-        var dispatchId = State.ConcurrencyDispatchId ??= $"job:{Key}";
-        var gate = _grains.GetGrain<IAgentConcurrencyGrain>(GrainKey.Agent(projectId, agentId));
-        var result = await gate.AcquireAsync(
-            projectId,
-            agentId,
-            token,
-            Key,
-            AgentConcurrencyPermitOwnerKind.Job,
-            dispatchId);
-        if (result == AgentConcurrencyAcquireResult.Waiting)
-        {
-            var waiter = (await gate.GetSnapshotAsync()).Waiters.FirstOrDefault(candidate =>
-                string.Equals(candidate.Token, token, StringComparison.Ordinal)
-                && string.Equals(candidate.OwnerId, Key, StringComparison.Ordinal));
-            State.ConcurrencyPermitHeld = false;
-            State.ConcurrencyPermitId = null;
-            State.ConcurrencyWaiterId = waiter?.WaiterId;
-            State.ConcurrencyGeneration = waiter?.Generation ?? State.ConcurrencyGeneration;
-            State.ConcurrencyGateStatus = AgentConcurrencyPermitStatus.DispatchPending;
-            State.WaitingReason = AgentAvailabilityWaitReasons.CapacityFull;
-            await PersistAsync();
-            return false;
-        }
-
-        var permit = await gate.GetPermitAsync(token);
-        State.ConcurrencyPermitHeld = permit is not null;
-        State.ConcurrencyPermitId = permit?.PermitId;
-        State.ConcurrencyWaiterId = null;
-        State.ConcurrencyGeneration = permit?.Generation ?? 0;
-        State.ConcurrencyDispatchId = permit?.DispatchId ?? dispatchId;
-        State.ConcurrencyGateStatus = AgentConcurrencyPermitStatus.DispatchPending;
-        State.WaitingReason = AgentAvailabilityWaitReasons.DispatchPending;
-        await PersistAsync();
-        if (permit is not null)
-            await gate.ConfirmDispatchPendingAsync(projectId, agentId, token, permit.PermitId!, permit.DispatchId!);
-        return true;
-    }
-
-    public async Task ConcurrencyPermitGrantedAsync(
-        string? token = null,
-        string? permitId = null,
-        string? dispatchId = null)
-    {
-        await HydrateAsync();
-        if (token is not null
-            && !string.Equals(State.ConcurrencyPermitToken, token, StringComparison.Ordinal))
-            return;
-        if (permitId is not null
-            && State.ConcurrencyPermitId is not null
-            && !string.Equals(State.ConcurrencyPermitId, permitId, StringComparison.Ordinal))
-            return;
-        if (dispatchId is not null
-            && State.ConcurrencyDispatchId is not null
-            && !string.Equals(State.ConcurrencyDispatchId, dispatchId, StringComparison.Ordinal))
-            return;
-        if (State.Status == AgentJobStatus.Pending)
-            await TryAdmitAsync();
-    }
-
-    private async Task ReleaseConcurrencyPermitAsync()
-    {
-        if (State.Input is null)
-            return;
-
-        var projectId = State.Input.ProjectId;
-        var agentId = State.Input.AgentId;
-        var token = State.ConcurrencyPermitToken;
-        if (string.IsNullOrWhiteSpace(projectId)
-            || string.IsNullOrWhiteSpace(agentId)
-            || string.IsNullOrWhiteSpace(token))
-        {
-            State.ConcurrencyPermitHeld = false;
-            return;
-        }
-
-        State.ConcurrencyPermitHeld = false;
-        State.ConcurrencyReleasePending = true;
-        await PersistAsync();
-        await TryReleaseConcurrencyPermitAsync();
-    }
-
-    private async Task TryReleaseConcurrencyPermitAsync()
-    {
-        if (!State.ConcurrencyReleasePending
-            || State.Input is null
-            || string.IsNullOrWhiteSpace(State.Input.ProjectId)
-            || string.IsNullOrWhiteSpace(State.Input.AgentId)
-            || string.IsNullOrWhiteSpace(State.ConcurrencyPermitToken))
-            return;
-
-        try
-        {
-            var projectId = State.Input.ProjectId;
-            var agentId = State.Input.AgentId;
-            var gate = _grains.GetGrain<IAgentConcurrencyGrain>(GrainKey.Agent(projectId, agentId));
-            if (State.ConcurrencyPermitId is not null
-                && State.ConcurrencyDispatchId is not null)
-            {
-                await gate.MarkTerminalAsync(
-                    projectId,
-                    agentId,
-                    State.ConcurrencyPermitToken,
-                    State.ConcurrencyPermitId,
-                    State.ConcurrencyDispatchId,
-                    State.Status == AgentJobStatus.Cancelled);
-            }
-            await gate.ReleaseAsync(
-                projectId,
-                agentId,
-                State.ConcurrencyPermitToken,
-                State.ConcurrencyPermitId,
-                State.ConcurrencyGeneration == 0 ? null : State.ConcurrencyGeneration,
-                State.ConcurrencyWaiterId);
-            State.ConcurrencyReleasePending = false;
-            await PersistAsync();
-        }
-        catch (Exception ex)
-        {
-            _log.LogWarning(ex,
-                "AgentJob {Id} could not release concurrency permit {Token}; recovery reminder will retry",
-                Key,
-                State.ConcurrencyPermitToken);
-        }
-    }
-
-    private async Task<bool> TryAdmitOnRunnerAsync(string runnerId)
-    {
-        var runner = GrainFactory.GetGrain<IRunnerGrain>(runnerId);
-        var state = await runner.GetRuntimeStateAsync();
-        if (state.Status != RunnerStatus.Online)
-            return false;
-
-        var maxSlots = await runner.GetSlotsAsync();
-        var activeWorkCount = state.ActiveWorks
-            .Select(w => w.OwnerId)
-            .Distinct(StringComparer.Ordinal)
-            .Count();
-        if (activeWorkCount >= maxSlots)
-            return false;
-
-        // Admission writes the ledger row directly. The grain does not
-        // call RunnerGrain.AssignAgentJobAsync and does not transition
-        // the job to Running; the next poll claim does that.
-        var now = _timeProvider.GetUtcNow();
-        var workId = StableWorkId(Key);
-        var dispatch = await BuildDispatchAsync(workId);
-
-        State.RunnerId = runnerId;
-        State.WorkId = workId;
-        State.ReadySince = now;
-        State.RunnerAccepted = false;
-        State.RunningSince = null;
-
-        var record = new AgentJobLedgerRecord(
-            JobKey: Key,
-            StateJson: JsonSerializer.Serialize(State, JSON.Options),
-            Revision: _ledger?.Revision ?? 0,
-            AssignedRunnerId: runnerId,
-            WorkId: workId,
-            ReadySince: now,
-            RunningSince: null,
-            DispatchJson: JsonSerializer.Serialize(dispatch, JSON.Options),
-            WorkType: "agent-job",
-            Stage: "agent",
-            Title: "Agent Job",
-            IssueProjectId: State.Input?.ProjectId,
-            IssueNumber: State.Input?.IssueNumber,
-            AgentSessionId: State.Input?.AgentSessionId,
-            InitialInputId: State.Input?.InitialInputId,
-            InitialTurnId: State.Input?.InitialTurnId,
-            PinnedRunnerId: State.Input?.PinnedRunnerId,
-            LaunchVisibility: State.LaunchVisibility.ToString().ToLowerInvariant());
-
-        if (_ledger is null)
-        {
-            var inserted = await _jobStore.InsertLedgerAsync(record);
-            _ledger = inserted;
-            await HydrateAsync();
-        }
-        else
-        {
-            var saved = await _jobStore.SaveLedgerAsync(record);
-            _ledger = saved;
-            await HydrateAsync();
-        }
-
-        _log.LogInformation(
-            "AgentJob {Id} admitted to runner {Runner} as work {Work} (readySince={ReadySince})",
-            Key, runnerId, workId, now);
-
-        await EnsureRecoveryReminderAsync();
-
-        if (State.ConcurrencyPermitHeld
-            && State.ConcurrencyPermitId is not null
-            && State.ConcurrencyDispatchId is not null
-            && State.Input?.ProjectId is { } projectId
-            && State.Input.AgentId is { } agentId)
-        {
-            await _grains.GetGrain<IAgentConcurrencyGrain>(GrainKey.Agent(projectId, agentId))
-                .MarkDispatchedAsync(
-                    projectId,
-                    agentId,
-                    State.ConcurrencyPermitToken!,
-                    State.ConcurrencyPermitId,
-                    State.ConcurrencyDispatchId);
-            State.ConcurrencyGateStatus = AgentConcurrencyPermitStatus.Dispatched;
-            await PersistAsync();
-        }
-
-        // The test-only signal is the admission boundary: all durable
-        // assignment and concurrency state must be visible before polling.
-        await SafeAssignmentPreparedAsync(runnerId, workId);
-
-        return true;
-    }
-
-    private async Task SafeAssignmentPreparedAsync(string runnerId, string workId)
-    {
-        try
-        {
-            await _dispatchObserver.AssignmentPreparedAsync(Key, runnerId, workId);
-        }
-        catch (Exception ex)
-        {
-            _log.LogWarning(ex,
-                "AgentJob {Id} dispatch observer AssignmentPrepared threw; ledger row remains authoritative",
-                Key);
-        }
-    }
-
-    private async Task SafeRunnerAcceptedAsync(string runnerId, string workId)
-    {
-        try
-        {
-            await _dispatchObserver.RunnerAcceptedAsync(Key, runnerId, workId);
-        }
-        catch (Exception ex)
-        {
-            _log.LogWarning(ex,
-                "AgentJob {Id} dispatch observer RunnerAccepted threw; claim remains authoritative",
-                Key);
-        }
-    }
 
     private static WorkDispatch? DeserializeDispatch(string? json)
     {
@@ -1579,6 +1474,38 @@ public sealed partial class AgentJobGrain : Grain, IAgentJobGrain
             new AgentTurnResult(message, output, failureReason, failureCategory, exitCode));
     }
 
+    private async Task EmitUpdateInterruptionEventAsync(PendingUpdateInterruptionEvent obligation)
+    {
+        try
+        {
+            await _eventStore.AppendAsync(BuildUpdateInterruptionEnvelope(obligation), CancellationToken.None);
+            EventDispatcherPoke.PokeAfterCommit(GrainFactory, _log, nameof(AgentJobGrain), _backgroundTasks);
+        }
+        catch (Exception ex)
+        {
+            _log.LogWarning(ex,
+                "AgentJob {Id} could not append update interruption event (eventId={EventId}); reminder will retry",
+                Key,
+                obligation.EventId);
+            await EnsureRecoveryReminderAsync();
+            return;
+        }
+
+        State.PendingUpdateInterruptionEvent = null;
+        await PersistAsync();
+        _log.LogInformation(
+            "AgentJob {Id} emitted {Type} event (eventId={EventId}, operationId={OperationId})",
+            Key,
+            EventCatalog.ReverseDns.AgentJobUpdateInterrupted,
+            obligation.EventId,
+            obligation.UpdateOperationId);
+    }
+
+    internal CloudEvent BuildUpdateInterruptionEnvelope(PendingUpdateInterruptionEvent obligation)
+    {
+        var extensions = AgentJobLineage.BuildExtensions(State.Input, State.RoutedPlan);
+        return AgentJobLineage.BuildUpdateInterruptionEnvelope(Key, obligation, extensions);
+    }
     private async Task EmitFailureEventAsync(PendingFailureEvent obligation)
     {
         var envelope = BuildFailureEnvelope(obligation);
@@ -1631,104 +1558,6 @@ public sealed partial class AgentJobGrain : Grain, IAgentJobGrain
                 ProjectId: projectId,
                 AgentId: agentId),
             extensions);
-    }
-
-    private async Task EnsureRecoveryReminderAsync()
-    {
-        await this.RegisterOrUpdateReminder(
-            RecoveryReminderName,
-            RecoveryReminderDue,
-            RecoveryReminderPeriod);
-    }
-
-    private PendingSessionClose BuildPendingSessionClose(
-        AgentJobStatus terminalStatus,
-        int? exitCode,
-        string? failureReason,
-        string? failureCategory,
-        string? pendingReason)
-    {
-        if (State.PendingSessionClose is { } existing)
-            return existing;
-
-        var statusText = terminalStatus switch
-        {
-            AgentJobStatus.Completed => "completed",
-            AgentJobStatus.Cancelled => "cancelled",
-            _ => "failed",
-        };
-        return new PendingSessionClose(
-            DeliveryId: AgentJobSessionDeliveryIds.TerminalDeliveryId(Key),
-            Status: statusText,
-            ExitCode: exitCode,
-            FailureReason: failureReason ?? pendingReason,
-            FailureCategory: failureCategory,
-            RecordedAt: _timeProvider.GetUtcNow());
-    }
-
-    private async Task DeliverTerminalToSessionAsync(PendingSessionClose pending)
-    {
-        var sessionId = State.Input?.AgentSessionId;
-        if (string.IsNullOrWhiteSpace(sessionId))
-        {
-            await ClearPendingSessionCloseAndMaybeReminderAsync();
-            return;
-        }
-
-        try
-        {
-            var grain = GrainFactory.GetGrain<IAgentSessionGrain>(sessionId);
-            var payloadJson = JSON.Serialize(new Dictionary<string, object?>
-            {
-                ["status"] = pending.Status,
-                ["exitCode"] = pending.ExitCode,
-                ["failureReason"] = pending.FailureReason,
-                ["failureCategory"] = pending.FailureCategory,
-                ["recordedAt"] = pending.RecordedAt.ToString("o"),
-                ["agentJobId"] = Key,
-                ["deliveryId"] = pending.DeliveryId,
-            });
-            await grain.AppendTerminalCloseAsync(new AppendTerminalCloseCommand(
-                SessionId: sessionId,
-                DeliveryId: pending.DeliveryId,
-                Status: pending.Status,
-                ExitCode: pending.ExitCode,
-                FailureReason: pending.FailureReason,
-                FailureCategory: pending.FailureCategory,
-                RecordedAt: pending.RecordedAt,
-                PayloadJson: payloadJson,
-                RuntimeSessionId: State.RuntimeSessionId));
-
-            await ClearPendingSessionCloseAndMaybeReminderAsync();
-        }
-        catch (Exception ex)
-        {
-            _log.LogWarning(ex,
-                "AgentJob {Id} terminal delivery to session {SessionId} failed; deliveryId={DeliveryId} retained for retry",
-                Key, sessionId, pending.DeliveryId);
-        }
-    }
-
-    private async Task ClearPendingSessionCloseAndMaybeReminderAsync()
-    {
-        State.PendingSessionClose = null;
-        await PersistAsync();
-        if (State.PendingFailureEvent is not null
-            || State.PendingTerminalDeliveryEvent is not null
-            || State.PendingSubagentTerminalEvent is not null)
-            return;
-        try
-        {
-            var reminder = await this.GetReminder(RecoveryReminderName);
-            if (reminder is not null)
-                await this.UnregisterReminder(reminder);
-        }
-        catch (Exception ex)
-        {
-            _log.LogDebug(ex,
-                "AgentJob {Id} could not unregister recovery reminder; orphan tick will self-clean",
-                Key);
-        }
     }
 
     private void StageTerminalDeliveryEvent(
@@ -1964,9 +1793,32 @@ public sealed partial class AgentJobGrain : Grain, IAgentJobGrain
     /// <summary>
     /// The dispatch snapshot is owned by the row. Subsequent saves
     /// (terminal transition, session close, etc.) must not clobber it
-    /// with null.
+    /// with null. A recovery generation is different: while its fresh
+    /// identity is still waiting for a Runner, retaining the old snapshot
+    /// would leave a misleading copy of the fenced dispatch in the owner
+    /// ledger. The replacement admission writes a new snapshot atomically.
     /// </summary>
-    private string? ResolveDispatchJsonForPersist() => _ledger?.DispatchJson;
+    private string? ResolveDispatchJsonForPersist() =>
+        State.Status == AgentJobStatus.Pending
+            && State.RecoveryGeneration > 0
+            && State.RunnerId is null
+            ? null
+            : _ledger?.DispatchJson;
+
+    private void UpdateRecoveryAttempt(string workId, string? runnerId, AgentJobStatus status)
+    {
+        var index = State.RecoveryAttempts.FindIndex(attempt =>
+            attempt.RecoveryGeneration == State.RecoveryGeneration
+            && string.Equals(attempt.WorkId, workId, StringComparison.Ordinal));
+        if (index < 0)
+            return;
+
+        State.RecoveryAttempts[index] = State.RecoveryAttempts[index] with
+        {
+            RunnerId = runnerId,
+            Status = status,
+        };
+    }
 
     private static string StableWorkId(string key)
     {

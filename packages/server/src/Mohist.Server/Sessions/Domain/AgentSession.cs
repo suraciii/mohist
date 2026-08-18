@@ -375,7 +375,12 @@ public sealed record AgentSessionStatusSnapshot(
     /// unconfirmable activity can never retain a stale idle time. A
     /// <c>null</c> value is fail-closed (never confirmed idle).
     /// </summary>
-    [property: JsonPropertyName("idleSince")] DateTime? IdleSince = null)
+    [property: JsonPropertyName("idleSince")] DateTime? IdleSince = null,
+    /// <summary>
+    /// Additive update-interruption projection. Entries are unique by work id
+    /// and recovery generation and retain the latest durable transition.
+    /// </summary>
+    IReadOnlyList<AgentWorkInterruptionTransition>? InterruptionHistory = null)
 {
     public static AgentSessionStatusSnapshot Created(DateTime now) =>
         new(CreatedAt: now, UsageSummary: new AgentUsageSummary(), ContextUsageHistory: [], IdleSince: now);
@@ -620,7 +625,8 @@ public sealed record AgentTurnRecord(
     [property: Id(5)] AgentTurnResult? Result = null,
     [property: Id(6)] DateTime? RecordedAt = null,
     [property: Id(7)] DateTime? UpdatedAt = null,
-    [property: Id(8)] SessionWorkflowExecutionBinding? WorkflowExecution = null);
+    [property: Id(8)] SessionWorkflowExecutionBinding? WorkflowExecution = null,
+    [property: Id(9)] AgentWorkInterruptionTransition? Interruption = null);
 
 /// <summary>
 /// Immutable Workflow execution identity frozen on the Agent turn before its

@@ -7,7 +7,8 @@ namespace Mohist.Server.Agent.Grains;
 /// </summary>
 /// <remarks>
 /// Documented defaults: backoff 1s → 60s cap, total retry bound 10 min,
-/// job timeout 10 min, and runner-loss recovery 15 min. Bind from
+/// job timeout 10 min, runner-loss recovery 15 min, and update-interruption
+/// settlement 5 min. Bind from
 /// <c>Mohist:AgentJob</c> in <c>~/.mohist/config.jsonc</c>.
 /// </remarks>
 public sealed class AgentJobOptions
@@ -27,6 +28,13 @@ public sealed class AgentJobOptions
     /// timeout so closeout records the interruption first.
     /// </summary>
     public TimeSpan RunnerLossRecoveryTimeout { get; set; } = TimeSpan.FromMinutes(15);
+
+    /// Bounded arbitration window for an update-interrupted job whose
+    /// Runner never delivers a confirmed receipt. Expiry is explicit
+    /// Interrupted terminal state, never a synthesized task verdict.
+    /// </summary>
+    public TimeSpan UpdateInterruptionTimeout { get; set; } = TimeSpan.FromMinutes(5);
+
 
     public AgentJobBackoffSchedule ResolveBackoffSchedule()
     {

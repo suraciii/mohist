@@ -28,6 +28,16 @@ internal partial class SourceCodeUpdater
             .Select(e => new CliOutcomeLogEntry(e.At, e.Stage, e.Message))
             .ToList();
 
+        var recovery = context.RunnerRecovery?.Works
+            .Select(work => new CliRecoveryWorkOutcome(
+                work.Identity.OwnerKind,
+                work.Identity.OwnerId,
+                work.Identity.WorkId,
+                work.Identity.TaskRunId,
+                work.Identity.WorkType,
+                work.Status,
+                work.State))
+            .ToArray();
         var payload = new CliOutcomeRequest(
             JobId: context.JobId,
             Status: status,
@@ -35,7 +45,8 @@ internal partial class SourceCodeUpdater
             Outcome: outcomeLabel,
             UnavailableCapability: unavailableCapability,
             Logs: logs,
-            SourceHead: context.SourceHead);
+            SourceHead: context.SourceHead,
+            Recovery: recovery);
 
         using var postCts = CancellationTokenSource.CreateLinkedTokenSource(token);
         postCts.CancelAfter(TimeSpan.FromSeconds(10));
@@ -67,6 +78,9 @@ internal partial class SourceCodeUpdater
 
         if (context.Interrupted)
             return ("cancelled", "failed");
+
+        if (context.RunnerRecovery is { HasAffectedWork: true, FullyRecovered: false })
+            return ("failed", "failed");
 
         return context.Outcome switch
         {

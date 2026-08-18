@@ -1,0 +1,184 @@
+{
+  "project": "mohist-local",
+  "description": "Managed runner/full updates interrupt active Agent work recoverably: a durable Server-side update-operation fence marks every affected work at confirmation, the Runner writes runtime-confirmed receipts and retries until acknowledged, the Server arbitrates at-most-once and allocates replacement attempts, interrupted work resumes after reconnect without duplicate execution, and CLI reporting never claims success over unresolved work.",
+  "tasks": [
+    {
+      "id": "T-001",
+      "title": "Create the durable update-operation fence and recoverable-interruption marking",
+      "spec": "specs/runner-update-work-interruption/spec.md#a-confirmed-interrupt-creates-a-durable-update-operation-fence-immediately",
+      "description": "Persist a `RunnerUpdateOperation` (stable id, Runner identity, creation time, per-work entries naming Workflow Agent task attempts and AgentJobs) before the `/update-interrupt` route responds, then synchronously instruct each owning grain (`WorkflowGrain`, `AgentJobGrain`) to mark its named work recoverably interrupted with a committed domain event referencing the operation id, adding a dedicated AgentJob status alongside `Unknown`. Repeated interrupts for the same Runner return the same operation and complete partially-marked entries instead of creating a second operation. Additionally expose a runner-authenticated pending-operation query (e.g. `GET /api/runner/{id}/update-operation/pending`) returning the Runner's most recent not-yet-settled operation — id, creation time, and affected-work inventory — or an explicit empty result; this query is the Server→Runner handoff the shutdown receipt protocol (T-003, design D3) consumes.",
+      "acceptanceCriteria": [
+        "The `/update-interrupt` route persists the update operation (stable id, Runner identity, creation time, every affected work with owner kind: WorkflowRun/task-attempt/work identity or AgentJob id) before responding, and the response carries the operation id while admission stays closed from confirmation.",
+        "A runner-authenticated pending-operation query returns the most recent not-yet-settled update operation for the Runner's identity — stable id, creation time, and per-work inventory — or an explicit empty result when none exists, performing no state change.",
+        "Each affected Workflow Agent task and AgentJob is marked recoverably interrupted by its owning grain's committed domain event referencing the operation id, effective immediately at confirmation without disconnect observation, settlement timeout, or later reconciliation; work not active at confirmation is never marked.",
+        "AgentJob marking uses a dedicated recoverably-interrupted status distinct from non-dispatchable `Unknown`; an update-caused interruption does not leave the job drifting through disconnect handling.",
+        "Repeating the interrupt for the same Runner with a pending operation returns the same confirmation and completes any partially-marked entries without creating a second operation or duplicating markings.",
+        "A crash mid-marking is recoverable: the persisted operation record plus idempotent marking calls let a retried interrupt finish the marking set, and the confirmation (restart authorization) is returned only once every marking is committed.",
+        "Server spec tests cover fence-at-confirmation before old-Runner stop, Workflow task and AgentJob fencing, abrupt old-Runner loss not unfencing the work, idempotent repeats, and crash-mid-marking repair, using fake storage and injectable time.",
+        "Relevant Server tests and `npm run test:fast` pass."
+      ],
+      "priority": 1,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Durable RunnerUpdateOperation storage, grain/read model, marking protocol in the update-interrupt route, and the runner-facing pending-operation query; Workflow and AgentJob recoverable-interruption states; passing deterministic spec tests.",
+      "dependsOn": [],
+      "passes": false,
+      "notes": "Storage layout follows D1: a `RunnerUpdateOperationGrain` or a storage row behind `RunnerGrain`, whichever the existing Orleans persistence favors, plus a storage-backed read model for later CLI/UI queries (consumed by T-008). The pending-operation query is a read-only projection over that record, authenticated like the other runner API routes (machine credential); T-003 consumes it as the bounded shutdown handoff (D3). Additive migration only; existing `Unknown` AgentJob and `agent-result-unconfirmed` meanings stay untouched. The landed CLI admission fence keeps requiring a confirmed interrupt before activation/restart."
+    },
+    {
+      "id": "T-002",
+      "title": "Add the recovery-receipt port with at-most-once terminal-result arbitration",
+      "spec": "specs/runtime-agent-recovery-receipt/spec.md#server-arbitration-applies-receipts-at-most-once-and-rejects-mismatches",
+      "description": "Add `POST /api/runner/{id}/recovery-receipt` accepting one `RuntimeRecoveryReceipt` (immutable identity: WorkflowRun/task attempt/work/Runner, AgentSession/AgentTurn, runtime/runtime-session, recovery generation, stable receipt id; exactly one payload of `terminal-result` or `update-interrupted`), route it to the owning grain, and arbitrate terminal-result receipts inside the Workflow grain transaction: validate identity, binding, and fingerprint against the recorded settlement, apply through the existing authoritative settlement exactly once, and return a durable acknowledgement carrying the applied receipt id.",
+      "acceptanceCriteria": [
+        "The endpoint validates the receipt contract — complete immutable identity and exactly one payload, where `update-interrupted` names the update operation and carries no task outcome — and rejects malformed receipts without side effects.",
+        "A matching `terminal-result` receipt applies through the existing authoritative result settlement exactly once, and normal report acknowledgement retires the Runner-local receipt.",
+        "An exact duplicate of an already-applied receipt returns the same durable acknowledgement and performs no second application, attempt allocation, or event emission.",
+        "A receipt with a mismatched identity, binding, or fingerprint, or one targeting a terminal task, stopped execution, or different binding, is rejected while the original settlement stays unchanged; accepted, stale, and rejected-mismatch acknowledgements are all terminal for runner retry purposes.",
+        "An `update-interrupted` receipt that no durable update operation names is rejected; a fence-matching one is validated against the update operation and — until replacement arbitration lands in T-004 — returns a retryable response so the Runner retains and replays it instead of losing it.",
+        "Server spec tests cover the receipt contract validation, duplicate idempotence, mismatch/binding rejection, apply-once through settlement, and acknowledgement semantics using fakes and injectable time.",
+        "Relevant Server tests and `npm run test:fast` pass."
+      ],
+      "priority": 2,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Recovery-receipt HTTP endpoint with the runtime-neutral receipt contract, owning-grain routing, Workflow terminal-result arbitration with durable acknowledgements, and passing deterministic spec tests.",
+      "dependsOn": ["T-001"],
+      "passes": false,
+      "notes": "Acknowledgement semantics mirror `/report`'s accepted/stale terminal contract (D4). A work entry has exactly one terminal record and one ordering lifecycle; the runner-side journal state arrives in T-003. This task unifies the landed returned-result retention into the receipt-shaped protocol."
+    },
+    {
+      "id": "T-003",
+      "title": "Emit and durably replay Runner interruption receipts on shutdown",
+      "spec": "specs/runtime-agent-recovery-receipt/spec.md#the-runner-retries-the-exact-receipt-until-the-server-acknowledges-it",
+      "description": "Extend `WorkResultJournal` with an `interrupted` entry state carrying the frozen binding, update operation id, recovery generation, stable receipt id, and the runtime stop-confirmation fact, written atomically before first delivery and retired only on durable acknowledgement. On shutdown, `RunnerHost` first establishes whether the shutdown is update-caused through the bounded pending-operation handoff (design D3, T-001's query): with in-flight work it fetches its most recent not-yet-settled update operation — id, creation time, affected-work inventory — within a small fixed budget that includes brief retries, skipping the fetch when nothing is in flight; the CLI's `/update-interrupt` confirmation never reaches the Runner process. It then performs a bounded cooperative interruption of each in-flight turn through the runtime adapters' confirmed-stop paths (Pi `session.abort()` + `isStreaming` watch; OpenCode lifecycle stop) and maps outcomes: returned result → `terminal-result` receipt; runtime-confirmed stop for a work the inventory names → `update-interrupted` receipt; unconfirmed/unreachable/expired budget, work not named by the inventory, or no operation known → no receipt with the `started` fence standing. Delivery retries the exact same receipt id and payload until the Server acknowledges, across restarts.",
+      "acceptanceCriteria": [
+        "An `interrupted` journal entry is written atomically before its first delivery attempt, reloaded on startup, and retired only after a durable acknowledgement, exactly like `completed`; a work entry has exactly one terminal record, never both.",
+        "The shutdown handoff is bounded and is the receipts' sole source of the update-operation fact: with in-flight work the Runner fetches its pending update operation (id + affected-work inventory) within a small fixed budget before the cooperative stop; receipts reference only that operation's id and are written only for in-flight works its inventory names, while an ordinary restart with no pending operation — and a handoff failure or budget expiry — writes no receipts and leaves `started` fences standing.",
+        "The update never waits for long Agent turns: shutdown bounds the cooperative stop with a fixed budget, the restart proceeds when the budget expires, and admission stays closed from interrupt confirmation until shutdown with no new claims or server-side dispatch to the draining Runner.",
+        "A turn that returned a result before or after the abort signal becomes a `terminal-result` receipt with the original work identity; the Action is never re-executed after restart.",
+        "An `update-interrupted` receipt exists only when the runtime confirms the exact bound physical turn is no longer executing and a pending update operation's inventory names that work; stop-unconfirmed, runtime-unreachable, budget-expired, no-operation-known, work-not-named, idle observation, or transcript text produce no receipt and leave the `started` fence unresolved.",
+        "A delivery failure retains the receipt unchanged; the Runner retries the exact same receipt id and payload, and a restart reloads unacknowledged receipts and continues replay without re-executing the work.",
+        "Update-caused stop failures (for example a `session.abort` transport failure while the old runtime host tears down) are classified as update-interruption context, never surfaced as raw fetch/transport errors.",
+        "Runner vitest suites cover the journal `interrupted` write/reload/retire lifecycle, budget expiry, outcome mapping per runtime adapter with fake runtimes, the shutdown handoff (pending operation found / absent for an ordinary restart / unreachable within budget / inventory not naming a held work), retry-exact-receipt, restart replay, and stop-failure classification, all deterministically.",
+        "Relevant Runner tests and `npm run test:fast` pass."
+      ],
+      "priority": 3,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "WorkResultJournal `interrupted` state, bounded cooperative shutdown with runtime-confirmed stop mapping for Pi and OpenCode, receipt delivery retry loop with restart replay, and passing deterministic Runner tests.",
+      "dependsOn": ["T-001", "T-002"],
+      "passes": false,
+      "notes": "Extend the existing journal rather than adding a sibling file (D2): one writeChain serializes started/completed/interrupted for a work identity. The runner learns the update fact only from the bounded shutdown handoff over T-001's pending-operation query (D3) — the CLI's `/update-interrupt` confirmation response is never a party to the Runner process, so the fetched operation (id + inventory) is the receipts' sole operation-id source; see the spec requirement 'The Runner learns the update-interrupt fact at shutdown'. Start handoff- and stop-budget constants fixed, make configurable only where ops needs vary. Also satisfies the prompt-stop requirement in `runner-update-work-interruption` (admission closes at confirmation; the handoff and cooperative stop never delay restart beyond the bounded shutdown)."
+    },
+    {
+      "id": "T-004",
+      "title": "Arbitrate update interruptions into one replacement Workflow attempt",
+      "spec": "specs/runtime-agent-recovery-receipt/spec.md#a-confirmed-update-interruption-creates-a-distinct-replacement-attempt",
+      "description": "In the same persistence transaction as task state, `WorkflowGrain` arbitrates an `update-interrupted` receipt that matches the durable update-operation fence for the exact work and binding: record the original attempt as interrupted history, allocate recoveryGeneration+1, a new AgentTurn, and — via `WorkflowWorkLifecycle` — a new work id, make exactly one replacement dispatch eligible, commit, and only then acknowledge (retiring the Runner journal entry). The original `AgentResultSettlement` stays frozen; late events or reports carrying the original AgentTurn/work identity are stale.",
+      "acceptanceCriteria": [
+        "A fence-matching `update-interrupted` receipt records the original attempt as interrupted history, allocates the next recovery generation, a new AgentTurn, and a new work delivery identity, and makes exactly one replacement dispatch eligible — committed before the interruption receipt is acknowledged.",
+        "Replaying the same interruption receipt returns the same durable acknowledgement and creates no second replacement attempt, recovery generation, or dispatch.",
+        "The original `AgentResultSettlement` binding is never mutated; once a replacement exists, late events or reports carrying the original AgentTurn/work identity are rejected as stale and cannot settle or change the replacement attempt.",
+        "An `update-interrupted` receipt that no durable update operation names, or that mismatches the work or binding, is rejected without creating a replacement attempt or changing the existing settlement.",
+        "The original attempt identity is never re-dispatched, and `HasUnresolvedAgentResult` redelivery suppression naturally ends once the replacement settles.",
+        "Server spec tests cover replacement creation, commit-before-ack ordering, duplicate idempotence, stale old-turn event/report rejection after replacement, no-fence and mismatch rejection, and frozen-settlement verification.",
+        "Relevant Server tests and `npm run test:fast` pass."
+      ],
+      "priority": 4,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Workflow grain update-interrupted arbitration with interrupted-history recording, recovery generation, replacement AgentTurn and delivery identity, stale old-turn rejection, and passing deterministic spec tests.",
+      "dependsOn": ["T-001", "T-002"],
+      "passes": false,
+      "notes": "The interruption is a physical-stop fact, not a task result. The original turn stays immutable for transcripts. Resumption itself needs no new mechanism (reconciliation offers the replacement like any dispatch); T-006 closes the remaining reconciliation and dedup gaps."
+    },
+    {
+      "id": "T-005",
+      "title": "Resume interrupted AgentJobs through receipts or explicit terminal states",
+      "spec": "specs/interrupted-work-resumption/spec.md#interrupted-work-resumes-through-its-replacement-dispatch-after-reconnect",
+      "description": "Route job-owned receipts from `/recovery-receipt` into `AgentJobGrain` and apply the same arbitration rule as Workflow tasks: a confirmed interruption matching the update-operation fence moves the job out of recoverably-interrupted into a fresh dispatch with a new delivery identity, or into an explicit terminal state when the job cannot continue; the original work identity stays fenced and duplicates are idempotent no-ops.",
+      "acceptanceCriteria": [
+        "A fence-matching interruption receipt for an AgentJob allocates a fresh dispatch with a new delivery identity and makes the job dispatchable again; the job never remains silently parked in a non-dispatchable state with no recovery path.",
+        "Duplicate delivery of the same job receipt returns the same acknowledgement and creates no second dispatch; mismatched, no-fence, or already-terminal receipts are rejected without state change.",
+        "A job that cannot continue enters an explicit terminal state with its durable identities preserved; the interruption never synthesises a failed or completed verdict.",
+        "The original job work identity is fenced against re-execution and is never re-offered by reconciliation.",
+        "Server spec tests cover job receipt arbitration, duplicate idempotence, no-fence/mismatch rejection, fresh-dispatch resumption, and cannot-continue terminal states using fakes and injectable time.",
+        "Relevant Server tests and `npm run test:fast` pass."
+      ],
+      "priority": 5,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "AgentJob grain receipt arbitration with fresh-dispatch resumption or explicit terminal fallback, original-identity fencing, and passing deterministic spec tests.",
+      "dependsOn": ["T-001", "T-002"],
+      "passes": false,
+      "notes": "Resolve the open question about reusing the job's prompt/input as-is versus a fresh input envelope for turn-coordinator bookkeeping in this task, and record the decision. Keep recovery-generation semantics aligned with T-004."
+    },
+    {
+      "id": "T-006",
+      "title": "Resume interrupted work after reconnect without duplicate execution",
+      "spec": "specs/interrupted-work-resumption/spec.md#duplicate-delivery-of-a-dispatch-identity-never-causes-duplicate-execution",
+      "description": "After the new Runner reconnects and reconciliation runs, make each replacement dispatch resumable exactly once: reconciliation/poll offers the single replacement dispatch (never the original identity), the Server suppresses redelivery of work identities the Runner already holds, and Runner-side journal fencing refuses replay of a started-but-unfinished dispatch across restarts while reloading completed-but-unacknowledged results. Interrupted work with no confirmed receipt reaches its explicit blocked or terminal state through the existing settlement deadline.",
+      "acceptanceCriteria": [
+        "After reconnect and reconciliation, the Server offers exactly one replacement dispatch per interrupted Workflow Agent task, and the Runner executes it as a new AgentTurn with its own delivery identity; the original attempt identity is never re-dispatched or re-executed.",
+        "Reconciliation redelivery of a work identity the Runner already reports as in flight or awaiting acknowledgement causes no second execution, and the Server suppresses further redelivery of that identity to the same Runner.",
+        "A replacement dispatch journaled `started` but unfinished across a Runner restart stays a fence that refuses re-execution; the work resolves only through receipt or unresolved-result arbitration, never a second physical execution.",
+        "A replacement result durably journaled but unacknowledged at restart is reloaded and replayed with its original work identity, and the Server acknowledges it without triggering another execution.",
+        "Interrupted work with no confirmed receipt reaches its explicit `agent-result-unconfirmed` blocked or terminal state at its settlement deadline after the update; it never remains indefinitely in a silently running state.",
+        "Server and Runner tests cover the full sequence active work → interrupt → restart → reconnect → resume, plus duplicate delivery across restarts and the no-receipt deadline path, deterministically with fake processes, filesystems, and injectable time.",
+        "Relevant Server and Runner tests plus `npm run test:fast` pass."
+      ],
+      "priority": 6,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Reconnect resumption with exactly-once replacement delivery, server-side redelivery suppression, cross-restart journal fencing for replacement identities, and passing end-to-end recovery tests.",
+      "dependsOn": ["T-003", "T-004", "T-005"],
+      "passes": false,
+      "notes": "Mostly closes gaps over existing mechanisms (journal `begin` fence, `HasUnresolvedAgentResult` suppression, poll reconciliation); verify and extend them for replacement identities rather than building new dispatch machinery."
+    },
+    {
+      "id": "T-007",
+      "title": "Expose interruption and recovery states across read models, DTOs, and web",
+      "spec": "specs/agent-work-interruption-visibility/spec.md#interruption-and-recovery-transitions-are-exposed-per-affected-work",
+      "description": "Emit durable lifecycle events at the update transitions — interrupting/interrupted at fence marking (T-001), recovering at replacement allocation (T-004/T-005), recovered at replacement settlement — each carrying the update-operation id, work identity, recovery generation, and replacement turn identity. Project them idempotently (keyed by work identity + recovery generation) into the AgentSession/AgentTurn and workflow-task read models and API DTOs, surface update-caused stop failures as actionable states, and render the lifecycle with update context in the web session/workflow views.",
+      "acceptanceCriteria": [
+        "Session, turn, and workflow-task read models and API DTOs expose interrupting/interrupted from fence creation (before the old Runner stops), recovering carrying the new recovery generation and replacement turn identity, and recovered referencing the update operation; the original attempt remains visible as interrupted history.",
+        "Projections are idempotent: replayed events, duplicate receipts, and repeated reconciliation for the same update operation produce a single transition keyed by (work identity, recovery generation) with no duplicate transitions or oscillation.",
+        "Work not named by the durable update operation exposes no interruption or recovery states.",
+        "Update-caused stop failures for fenced work surface the update operation, affected work identity, current interruption state, and expected recovery path — never raw fetch or transport text such as a `session.abort fetch failed` style message.",
+        "Web session and workflow views render interrupting/interrupted/recovering/recovered states with update context and never an un-actionable runtime error for that work.",
+        "Server projection and DTO specs, web unit tests, and browser tests cover interrupting→interrupted→recovering→recovered, idempotent replay projection, unaffected-work isolation, and stop-failure presentation.",
+        "Relevant Server and Web tests plus `npm run test:fast` pass."
+      ],
+      "priority": 7,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Interruption lifecycle events, idempotent read-model projections, API DTO fields, actionable stop-failure surfacing, web session/workflow presentation, and passing projection and UI tests.",
+      "dependsOn": ["T-001", "T-004", "T-005"],
+      "passes": false,
+      "notes": "Transitions derive only from the durable update operation and receipt-arbitration records (D6), never from transport failures or idle observations. Additive read-model storage/columns; no existing state meanings are repurposed."
+    },
+    {
+      "id": "T-008",
+      "title": "Report per-work recovery outcomes with a bounded CLI wait",
+      "spec": "specs/runner-update-recovery-reporting/spec.md#success-is-never-claimed-while-affected-work-is-unresolved",
+      "description": "Add the Server recovery-status query over the update-operation read model (per affected work: receipt-acked / replacement-settled / unresolved), and after activation and restart verification make the CLI poll it on a fixed interval up to a bounded, configurable deadline. `UpdateOutcomeReporter`/`RunnerRefreshOutcome` list every affected work as recovered or unresolved with its identity and state, persist the same per-work results, and exit semantics are non-successful while any affected work is unresolved.",
+      "acceptanceCriteria": [
+        "The CLI waits no longer than the bounded interval for per-work recovery acknowledgement; when the bound expires it stops waiting and reports outstanding work as unresolved without blocking further completion on that work.",
+        "Every work id named by the confirmed interrupt is listed with its identity and recovered/unresolved state in the CLI output, and the persisted update outcome records the same per-work results.",
+        "An update with any unresolved affected work is never reported as complete success and exits non-successfully, even when candidate activation, service restart, and identity verification all succeeded; a fully acknowledged update may claim success including the per-work recovered results it is based on.",
+        "A confirmed interrupt with zero affected work reports no affected work and claims no recovery.",
+        "Old-Runner loss before a receipt exists leaves that work unresolved; the service restart itself is never converted into a recovery claim.",
+        "CLI tests cover bounded-wait expiry, mixed recovered/unresolved listing, non-success exit semantics, zero-work updates, and old-runner loss using fake HTTP and injectable time.",
+        "The full `npm run verify` gate passes (Server, Runner, CLI, Web)."
+      ],
+      "priority": 8,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Update-operation recovery-status endpoint, bounded CLI recovery wait, per-work recovered/unresolved outcome reporting with persisted results and non-success exit semantics, and a passing full verification gate.",
+      "dependsOn": ["T-001", "T-003", "T-006"],
+      "passes": false,
+      "notes": "This final slice owns the full `npm run verify` gate. Start the recovery-wait bound as a constant, make it configurable where ops needs vary (open question). Rollback path: reverting the CLI to the landed admission-fence behavior keeps updates gated on a confirmed interrupt."
+    }
+  ]
+}

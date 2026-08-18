@@ -35,4 +35,5 @@ public record WorkDispatchResponse(
     AgentExecutionDefinition? AgentDefinition = null,
     AgentSessionStartup? AgentSessionStartup = null,
     string? TaskRunId = null,
+    int RecoveryGeneration = 0,
     AgentRecoveryBinding? AgentRecovery = null);

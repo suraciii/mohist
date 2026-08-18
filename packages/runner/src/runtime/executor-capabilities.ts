@@ -18,6 +18,8 @@ import { resolveOrRecoverBinding, type BindingRecoveryCoordinator } from './bind
 import { resolveIssueFields, type IssueFields } from '../actions/issue-fields.js'
 import type { SkillResolver } from './skill-resolver.js'
 import { buildExecutionEnvelope } from './execution-envelope.js'
+import type { RuntimeTurnRegistry } from './runtime-turn-registry.js'
+import { workKey } from './work-result-journal.js'
 
 export interface ExecutorCapabilityDeps {
   readonly connection: ServerConnection
@@ -27,6 +29,7 @@ export interface ExecutorCapabilityDeps {
   readonly agentSessionRuntimeEventOutbox: AgentSessionRuntimeEventOutbox | null
   readonly runtimeEventRecordId: () => string
   readonly bindingRecoveryCoordinator: BindingRecoveryCoordinator | null
+  readonly runtimeTurnRegistry?: RuntimeTurnRegistry | null
 }
 
 export function renderWithDeferred(
@@ -54,6 +57,8 @@ export function buildActionHost(
     piRuntime: deps.piRuntime,
     skillResolver: deps.skillResolver,
     agentDefinition: work.agentDefinition,
+    runtimeTurnRegistry: deps.runtimeTurnRegistry,
+    runtimeTurnKey: workKey(work),
     exec: async (command, args) => {
       const { runCommand } = await import('../system/process.js')
       const result = await runCommand(command, args?.map(String) ?? [], workDir, signal, undefined, undefined)
@@ -481,6 +486,14 @@ function buildAgentTurnCapability(
         }
       }
 
+      self.runtimeTurnRegistry?.register(workKey(work), {
+        agentSessionId: selectedBinding.agentSessionId,
+        agentTurnId: reporter?.getAgentTurnId() ?? work.initialTurnId ?? null,
+        runtime: 'opencode',
+        runtimeSessionId: selectedBinding.runtimeSessionId,
+        workDir: selectedBinding.workDir,
+      })
+
       const observer = createWorkflowObserver(reporter)
       let result: RuntimeResult<RuntimeTurnResult>
       try {
@@ -546,6 +559,8 @@ async function runPiAgentTurn(
     runtimeEventOutbox: deps.agentSessionRuntimeEventOutbox,
     runtimeEventRecordId: deps.runtimeEventRecordId,
     runnerId: deps.connection.runnerId,
+    runtimeTurnRegistry: deps.runtimeTurnRegistry,
+    runtimeTurnKey: workKey(work),
     cleanupAttempt,
     agentRecovery: work.agentRecovery ?? null,
     preparedPrompt: composePiPrompt(request.prompt, work.parentIssueContext),

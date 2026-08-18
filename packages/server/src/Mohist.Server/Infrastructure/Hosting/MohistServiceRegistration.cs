@@ -89,6 +89,8 @@ public static class MohistServiceRegistration
         services.AddSingleton<IWorkflowRunDeserializer>(sp =>
             sp.GetRequiredService<WorkflowRunDeserializer>());
         services.TryAddSingleton<IBackgroundTaskLauncher, BackgroundTaskLauncher>();
+        services.TryAddSingleton<IRunnerUpdateOperationWriteFailureInjector>(
+            NoopRunnerUpdateOperationWriteFailureInjector.Instance);
 
         services.AddRouting(options =>
         {

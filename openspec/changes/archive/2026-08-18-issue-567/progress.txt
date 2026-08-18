@@ -1,0 +1,962 @@
+# Progress — self-review must-fix disposal (issue-567)
+
+## Findings under disposal
+
+- MF-1 (must-fix): no specified Server→Runner channel for the
+  update-operation identity / update-interrupt fact. T-003's note pointed at
+  the T-001 confirmation response, which only the CLI receives.
+- Observations 1–6: no action required (Obs-4 is resolved as a side effect of
+  the MF-1 fix: the handoff payload carries the affected-work inventory).
+
+## MF-1 disposition: FIXED via bounded shutdown-time pending-operation handoff
+
+Channel decision (grounded in live source):
+
+- The CLI is the sole party to `POST /api/runner/{id}/update-interrupt`
+  (`RunnerRefreshVerifier.InterruptRunnerAsync`); the Runner never sees that
+  response. Confirmed.
+- Available channels: SignalR hub invocations (`CancelAgentSession`,
+  `SessionCommand` via `RunnerHub`), the `/poll` contract (dispatches only,
+  204 when idle), dedicated runner HTTP GETs (`/config`, machine-credential
+  auth). None carries update/drain knowledge to the Runner today.
+- Chosen: a bounded shutdown-time fetch (e.g.
+  `GET /api/runner/{id}/update-operation/pending`) returning the runner's most
+  recent not-yet-settled update operation: id, creation time, affected-work
+  inventory. Runs only when in-flight work exists; own small budget with brief
+  retries (a `full` update restarts the Server before the Runner, so the new
+  Server may still be booting); completes before the cooperative stop.
+- Why not push-at-fence-creation / poll-field: push can be lost (reconnecting
+  runner) and would need a fetch fallback anyway; poll field can be missed
+  (204-when-idle, stop can beat next poll) and caches a fact a later unrelated
+  restart could act on. The fetch is authoritative at the decision moment,
+  distinguishes update-caused vs ordinary restart by construction, and needs
+  no new runner-side durability.
+- No-operation-known behavior: no receipts, `started` fence stands, honest
+  unresolved (same honesty rule as stop-unconfirmed).
+- Inventory rule: receipts only for in-flight works the returned operation
+  names (stale pending operations from abandoned updates stay safe/noise-free;
+  arbitration remains the authority for mismatches).
+
+## Edit checklist
+
+- [x] progress.txt created (this file)
+- [x] specs/runtime-agent-recovery-receipt: new requirement "The Runner learns
+      the update-interrupt fact at shutdown" (4 scenarios: fetch/ordinary
+      restart/unreachable/inventory-limits)
+- [x] specs/runner-update-work-interruption: prompt-stop requirement gains the
+      bounded-handoff clause + scenario
+- [x] design.md: context channel inventory; D3 rewritten around the handoff;
+      new risk row; open question extended
+- [x] recovery.md: "Shutdown Handoff" section + 2 failure-rule rows
+- [x] proposal.md: handoff clause in the receipt bullet; Impact bullets
+- [x] tasks.json: T-001 owns the pending-operation query endpoint (desc/AC/
+      output/notes); T-003 owns the handoff (desc/ACs/notes — wrong
+      confirmation-response note replaced); T-003 test AC covers handoff cases
+
+## Commits
+
+- 0cd3dd634 — specs: new handoff requirement (runtime-agent-recovery-receipt,
+  4 scenarios) + bounded-handoff clause/scenario
+  (runner-update-work-interruption prompt-stop)
+- c43a0a7b6 — design.md (context channels, D3 rewrite, risk row, open
+  question), recovery.md (Shutdown Handoff + failure-rule rows), proposal.md
+  (receipt bullet + Impact)
+- (final) — tasks.json: T-001 pending-operation query (desc/AC/output/notes);
+  T-003 handoff (desc/2 ACs/test AC/notes with the wrong confirmation-response
+  note replaced)
+
+## Verification notes
+
+- tasks.json parses as JSON after edits (node JSON.parse).
+- The only remaining mentions of the `/update-interrupt` confirmation
+  response now describe the CLI-only topology (design context, T-003 note) —
+  nothing relies on it reaching the Runner.
+- No openspec CLI validator exists in the repo; spec format matches sibling
+  changes (`### Requirement` / `#### Scenario` WHEN/THEN/AND).
+- self-review.md untouched.
+
+## T-001 Implementation Notes
+
+- `RunnerUpdateOperationGrain` is keyed by Runner identity and uses the
+  existing ADO.NET Orleans default storage. It keeps the latest operation
+  history, the stable operation id, injectable creation time, affected-work
+  inventory, and per-entry marking status. A pending operation is reused on
+  repeat requests; owner marking is retried before the response is returned.
+- `/update-interrupt` closes Runner admission first, persists or reuses the
+  operation, then calls the owning Workflow/AgentJob grain synchronously. A
+  pending retry can repair an operation even after the old Runner is offline.
+  `GET /update-operation/pending` is read-only and serializes `operation:null`
+  explicitly when no pending operation exists.
+- Runner snapshots now carry Workflow task-attempt identity and an
+  `IsAgentWork` flag. Ordinary workflow tasks and checks stay out of the
+  update inventory; active Agent tasks and AgentJobs are named with owner kind,
+  owner id, work id, and task attempt where applicable.
+- Workflow uses a new `RecoverablyInterrupted` settlement state and commits
+  `AgentTaskUpdateInterrupted` with the operation id. Late execution,
+  disconnect, and report paths cannot turn fenced work into `Unknown` or fail
+  it through runner-loss closeout.
+- AgentJob uses a separate `RecoverablyInterrupted` status, retains its
+  original Runner/work identity, and persists an idempotent pending
+  `AgentJobUpdateInterrupted` CloudEvent outbox obligation before confirmation.
+  Event-store failure leaves the operation retryable; duplicate event ids are
+  deduplicated by the existing AgentJob event store.
+- Server verification: focused update tests passed (3 tests), and the full
+  `Mohist.Server.SpecTests` suite passed (3923 tests, 0 failures).
+- `npm run test:fast` passed after installing the existing lockfile dependencies:
+  TypeScript checks, Server unit/architecture/workflow/CLI suites, Runner
+  vitest (1639 tests), and Web vitest (4724 tests). The install reported 16
+  existing npm audit findings; no dependency metadata changed.
+
+## T-002 Implementation Notes
+
+- Added the runtime-neutral `RuntimeRecoveryReceipt` contract with complete
+  Workflow execution identity, recovery generation, stable receipt id, and a
+  discriminated payload. Terminal results require a SHA-256 payload
+  fingerprint; update interruptions require an operation id and
+  `stopConfirmed=true` and cannot carry a result.
+- Added `POST /api/runner/{id}/recovery-receipt`. Contract errors return 400
+  before grain routing. Semantic `accepted`, `stale`, and `rejected-mismatch`
+  acknowledgements are terminal 200 responses; a matching update fence returns
+  409 `retryable` until T-004 owns replacement allocation.
+- Workflow arbitration validates the frozen settlement binding and generation,
+  checks T-001's durable update-operation inventory, and applies terminal
+  results through the existing task-report lifecycle. Accepted receipt ids and
+  request fingerprints persist on `WorkflowRun`, so exact duplicates return
+  the same acknowledgement without another task transition or event.
+- Focused verification passed: `AgentResultSettlementSpecs` (11 tests),
+  `RunnerPollRecoveryStateApiSpecs` (6 tests), and `RunnerUpdateInterruptSpecs`
+  (2 tests). The Server test runner ignores VSTest filters under the current
+  Microsoft Testing Platform; direct xUnit class filters were used.
+- Full Server spec runs under the default and serial harness each had one
+  unrelated AgentJob poll timing failure; the failing class passed when run
+  directly. The focused T-002 Server classes pass, and `npm run test:fast`
+  passes in full with 1639 Runner and 4724 Web tests.
+
+## T-003 Implementation Notes
+
+- Extended `WorkResultJournal` in the existing atomic file with the
+  `interrupted` state. It stores the complete immutable
+  `RuntimeRecoveryReceipt`, reloads it with completed entries, and retires
+  either terminal state only after acknowledgement. Started, completed, and
+  interrupted transitions reject a second terminal record for the same work.
+- Added Runner-owned receipt and pending-operation types. Terminal-result
+  fingerprints follow the Server `WorkResult` property order and omit nullable
+  and Runner-private fields, while update-interrupted payloads contain only the
+  operation id and `stopConfirmed=true`.
+- Added a live runtime-turn registry. Workflow and AgentJob execution register
+  the physical runtime/session/turn binding only after the Agent turn is
+  accepted; RunnerHost uses that binding to call the existing Pi/OpenCode
+  confirmed-stop paths. Missing bindings, idle observations, and unconfirmed
+  stops cannot manufacture interruption receipts.
+- RunnerHost now performs a bounded pending-operation handoff before bounded
+  cooperative stop. The fetched operation is the only update context and its
+  inventory gates receipt creation. Confirmed stops persist before delivery;
+  returned results use the receipt-shaped terminal path when their binding is
+  complete, and all receipt deliveries retry the same journal payload until a
+  terminal acknowledgement.
+- `ServerConnection` now parses the runner-facing pending-operation response
+  and sends recovery receipts, treating HTTP 409/retryable acknowledgements as
+  delivery failures. Added deterministic journal, receipt, handoff, and
+  delivery contract tests.
+- Verification so far: Runner typecheck and test typecheck pass; the full
+  Runner vitest suite passes (153 files, 1647 tests). The pending-operation
+  handoff retries timed-out or failed queries within its fixed budget, while a
+  successful empty response ends the handoff without creating update context.
+
+## T-004 Implementation Notes
+
+- Workflow interruption arbitration now commits an immutable `Interrupted`
+  TaskRun history entry beside one pending replacement attempt. The
+  replacement receives `RecoveryGeneration + 1`, a deterministic new work
+  delivery identity, and a distinct logical AgentTurn identity; the first
+  complete physical Session binding may replace that placeholder, after which
+  the binding is frozen normally.
+- `WorkflowWorkLifecycle` owns replacement work allocation and claim handling.
+  Preallocated recovery work ids are translated and claimed as normal
+  dispatches, while the old work id remains in history and is never returned
+  by active-work reconciliation. The replacement makes the run `Ready` and
+  is the only pending task eligible for dispatch.
+- A matching interruption receipt is recorded in the Workflow receipt ledger,
+  committed with the task replacement, and only then marks the Runner update
+  operation work `Settled` and returns an accepted terminal acknowledgement.
+  Acknowledgement replay returns the stored acknowledgement and repairs a
+  partially updated operation ledger without allocating another attempt.
+- Late reports, observations, and receipts using the original TaskRun/work/
+  turn binding are stale after replacement; the original settlement object is
+  not mutated. Replacement settlement cleanup leaves `HasUnresolvedAgentResult`
+  false after the new result is accepted.
+- Added Server spec coverage for fence/no-fence and mismatch rejection,
+  replacement creation, commit-before-ack observable ordering, duplicate
+  idempotence, frozen original binding, stale old-turn ingress, one eligible
+  replacement dispatch, and replacement settlement.
+- Verification: `Mohist.Server.SpecTests` passed 3928 tests; focused
+  `AgentResultSettlementSpecs` passed 11 tests; `RunnerUpdateInterruptSpecs`
+  passed 2 tests; `RunnerPollRecoveryStateApiSpecs` passed 6 tests; and
+  `npm run test:fast` passed all configured typecheck, Server, CLI, Runner
+  (1647), and Web (4724) checks.
+
+## T-005 Implementation Notes
+
+- `/recovery-receipt` now routes receipts with `ownerKind=agent-job` and
+  `agentJobId` to `AgentJobGrain`; the existing workflow receipt wire shape
+  remains compatible when the owner discriminator is absent. Runner receipt
+  construction now emits the owner identity for AgentJob dispatches, whose
+  workflow/task ids are intentionally empty.
+- AgentJob arbitration validates the exact Runner/work/session/turn/runtime
+  binding and the durable update-operation inventory. Applied receipt ids and
+  request fingerprints are stored in the owner ledger before the terminal
+  acknowledgement is returned, so exact duplicates do not allocate again;
+  old work remains absent from the `running`/`pending` dispatch indexes after
+  replacement.
+- Recovery generation follows T-004: the old work is retained in
+  `RecoveryAttempts`, generation increments from zero, and the replacement
+  work id is `{interruptedWorkId}.recovery.{generation}`. The prompt and all
+  launch-time execution configuration are reused from the immutable
+  `AgentJobInput` snapshot. For a normal Session-backed job, a deterministic
+  fresh `recovery-input:{job}:{generation}` plus `recovery-turn:{work}` is
+  persisted before the new owner dispatch; the old physical turn is marked
+  Session-cancelled with update-interruption context so the Session can queue
+  the fresh turn. This resolves the input-envelope open question in favor of
+  fresh coordinator identities, while preserving the original prompt/input
+  content as-is.
+- Jobs with no valid executable launch snapshot enter explicit terminal
+  `AgentJobStatus.Interrupted` with an `AgentJobTerminalResult` carrying the
+  same status and no failure reason/result verdict. Durable Runner/work
+  identities remain available for audit. `Interrupted` is projected through
+  AgentJob read/status surfaces and counts as converged for test helpers.
+- Added `AgentJobRecoveryReceiptSpecs` covering route arbitration, fresh
+  dispatch, duplicate idempotence, no-fence/mismatch rejection, old-work
+  suppression, and cannot-continue terminal fallback. The first broad
+  baseline Server invocation ran 3928 tests with one pre-existing/flaky
+  `AgentJobDispatchRouteSpecs.RunnerPollEndpoint_ForAgentJob_ExposesOwnerKindAndAgentJobId`
+  timing failure; the focused pre-change regression classes passed 36/36.
+- Post-implementation verification: focused AgentJob recovery specs passed
+  4/4, the expanded related Server set passed 40/40, the full
+  `Mohist.Server.SpecTests` suite passed 3932/3932, Runner vitest passed
+  1647/1647, and `npm run test:fast` passed all configured typecheck, Server
+  unit/architecture/workflow/CLI, Runner, and Web checks.
+
+## T-006 Implementation Notes
+
+- A Runner restart can retain a `started` journal fence without an in-memory
+  execution promise. `WorkResultJournal.started()` now exposes those entries,
+  and `RunnerHost.pollReport()` includes their work keys in `inFlight`, so
+  Server reconciliation suppresses redelivery while the journal continues to
+  refuse physical replay. Completed/interrupted journal entries keep their
+  existing awaiting-ack replay path.
+- Update-interrupted Workflow settlements are unresolved for dispatch and
+  reconciliation purposes before a receipt arrives. They receive the normal
+  injectable settlement deadline and reminder; a missing receipt reaches the
+  existing `agent-result-unconfirmed` blocked projection instead of remaining
+  recoverably interrupted indefinitely. The original attempt remains fenced.
+- AgentJob update fences now persist an `UpdateInterruptionDeadlineAt`, retain
+  the recovery reminder after interruption-event delivery, and enter the
+  explicit `Interrupted` terminal state with `agent-result-unconfirmed` when
+  the receipt deadline expires. Receipt arbitration clears the deadline before
+  allocating the replacement, so normal recovery is unchanged.
+- Added deterministic Server coverage for active work -> interruption ->
+  receipt -> reconnect poll replacement delivery, original-work suppression,
+  held replacement suppression, Workflow no-receipt deadline blocking, and
+  AgentJob no-receipt terminal arbitration. Added Runner journal coverage for
+  reloaded started fences.
+- T-006 focused verification: Runner typecheck and focused vitest suites pass;
+  the affected Server classes (`DispatchServiceReconciliationSpecs`,
+  `RunnerUpdateInterruptSpecs`, `AgentJobRecoveryReceiptSpecs`,
+  `RunnerPollRecoveryStateApiSpecs`, and `MixedOwnerDispatchSpecs`) pass.
+  The initial broad baseline retained the known flaky
+  `AgentJobDispatchRouteSpecs.RunnerPollEndpoint_ForAgentJob_ExposesOwnerKindAndAgentJobId`
+  timing failure; it is unrelated to T-006.
+- Final verification: full `Mohist.Server.SpecTests` passed 3935/3935;
+  `npm run test:fast` passed all configured typechecks, Server unit/
+  architecture/workflow/CLI suites, Runner 1647/1647, and Web 4724/4724.
+
+## T-007 Implementation Notes
+
+- Added the shared `AgentWorkInterruptionTransition` contract and monotonic,
+  generation-keyed projection. Session turns, session summaries, Workflow task
+  read models, Workflow sessions, and AgentJob read models now expose the
+  operation id, work identity, lifecycle state, recovery generation, original
+  and replacement turns, expected recovery path, and sanitized stop context.
+- Fence marking emits `interrupting` then `interrupted`; Workflow and AgentJob
+  recovery allocation emits `recovering`; replacement settlement emits
+  `recovered`. Original Workflow attempts remain in the task history while
+  replacement attempts carry the next recovery generation and new identity.
+- Added session lifecycle events and AgentJob/Workflow durable interruption
+  event paths with replay-safe state projection. Unaffected work has no
+  interruption visibility, and duplicate or out-of-order transitions cannot
+  oscillate a projected identity.
+- Added session and Workflow Web panels/cards for all lifecycle states, with
+  update-operation, work, generation, turn, recovery-path, and actionable
+  stop-failure context. Browser fixtures assert the rendered recovery state and
+  absence of raw `session.abort fetch failed` transport text.
+- T-007 focused verification: Server interruption projection/session tests,
+  Web focused tests (35 tests), Web typecheck, and FSD boundary checks passed.
+  The targeted Playwright workflow inspector passed 2/2 tests.
+- Final `npm run test:fast` passed: Server unit/architecture/workflow/CLI
+  suites, Runner 1647/1647, and Web 4727/4727, plus all fast typechecks.
+
+## T-008 Implementation Notes
+
+- Added `GET /api/runner/{runnerId}/update-operation/{operationId}/recovery-status`.
+  The durable operation projects each affected work as `unresolved`,
+  `receipt-acked`, or `replacement-settled`; the read is side-effect free.
+  Receipt acknowledgements from terminal-result receipts are also recorded so
+  returned results cannot be reported unresolved.
+- Added a bounded, injectable CLI recovery poll with 30-second and 500-ms
+  defaults. It starts only after managed activation and runner identity
+  verification, carries the interrupt operation/work inventory, and maps the
+  final list to recovered/unresolved output. Zero affected work explicitly
+  claims no recovery; an expired wait makes the command non-successful.
+- Extended the persisted system-update outcome with the same per-work recovery
+  identity/state list and added the optional web DTO field. Replacement result
+  settlement updates the operation phase without mutating the original fence.
+- Added deterministic CLI coverage for bounded expiry, mixed outcomes, full
+  acknowledgement, zero-work, old-Runner loss, command non-success semantics,
+  and persisted per-work results. Added Server API coverage for all recovery
+  status phases.
+- Focused verification: the new CLI recovery reporting class passed 5/5;
+  related CLI update/outcome/managed-runner classes passed 45/45; and the
+  Server RunnerConfig API class passed 9/9. A default full Server spec run
+  still showed the known unrelated AgentJob dispatch timing failure; the
+  focused RunnerConfig class passes directly.
+
+## Review MF-1/MF-3/MF-5 Increment
+
+- Workflow Pi Agent turns now pass the runtime-turn registry and canonical
+  work key into `piAction`, so update shutdown can resolve the physical turn
+  binding and persist an interruption receipt.
+- Server terminal-result fingerprints now hash the explicit cross-language
+  seven-field result payload and exclude the Server-only computed `ErrorCode`.
+- AgentJob duplicate accepted receipts repair the update-operation ledger
+  before returning their stored acknowledgement, including both interruption
+  and terminal-result receipts.
+- Verification: Runner typecheck and Server build pass.
+
+## Review MF-2/MF-4/MF-6/MF-7 Increment
+
+- Workflow terminal receipts now win an update-fence race through the exact
+  frozen binding, settle the original task without allocating a replacement,
+  mark the operation receipt-acknowledged, and expose recovered visibility.
+- Pending update operations now carry Runner connection generation. Retries
+  reuse the same draining connection; a later registered connection creates a
+  fresh operation, so chained updates can fence replacement identities while
+  an older unresolved operation remains pending.
+- Update shutdown stop failures have a dedicated authenticated receipt path;
+  Workflow and AgentJob owners persist the update-scoped failure transition.
+  Session summaries and the Web shell suppress raw transcript transport
+  failures when durable interruption visibility is present.
+- Added deterministic `RunnerHostRecovery` coverage for confirmed Pi-style
+  interruption persistence-before-delivery, ordinary restart no-receipt
+  behavior, and update stop transport failure classification.
+- Verification: Server/Runner/Web typechecks/builds pass; host recovery and
+  session shell tests pass. The broad Server invocation ignored its filter and
+  reported the known unrelated AgentJob dispatch timing failure plus the new
+  race test's initial Orleans collection-expression fixture issue, which was
+  corrected before the next run.
+
+## Review Regression Coverage
+
+- Added `RunnerHost` restart/reconnect coverage for an interrupted journal
+  entry: the exact receipt is redelivered after startup, acknowledged, retired,
+  and never executes the Action.
+- Added an HTTP AgentJob receipt test using the Runner's fixed error-result
+  fingerprint, plus chained update-operation and durable stop-failure specs.
+- Verification: full Server SpecTests passed 3939/3940 (the single failure is
+  the known unrelated AgentJob dispatch timing test); Runner passed 1651/1651;
+  Web passed 4727/4727; CLI passed 1855/1855. Runner/Web typechecks and Server
+  test build pass.
+
+## Re-review MF-1 Increment
+
+- Workflow terminal-result receipts now recognize a bound replacement task in
+  the `recovering` transition, project it to `recovered`, reconcile its
+  terminal settlement, and mark the original update fence
+  `replacement-settled` rather than acknowledging the replacement work id.
+- Added a deterministic Workflow spec that allocates and binds a replacement,
+  delivers its terminal receipt, and asserts recovered visibility plus the
+  replacement-settled operation state.
+- Verification: the Server SpecTests build passed and the new settlement spec
+  passed in the full run. The full invocation also reproduced two unrelated
+  existing dispatch timing/runtime-resolution failures.
+
+## Re-review MF-2 Increment
+
+- Shutdown-time interruption receipt delivery now uses the remaining stop
+  budget, aborts the HTTP request at the budget boundary, and races the
+  delivery promise so a transport that ignores abort cannot hold Runner
+  shutdown. The durable journal and awaiting-ack entry remain intact for the
+  normal retry loop.
+- Added a hanging-delivery Runner spec that asserts bounded shutdown, no
+  acknowledgement, exact receipt retention, and retry scheduling.
+- Verification: Runner typecheck and the focused host recovery suite pass
+  (4/4).
+
+## Re-review MF-3 Increment
+
+- The non-managed `mo update runner` command now emits complete success only
+  after Runner identity verification and bounded recovery reporting succeed.
+  Unresolved work therefore produces only the recovery failure outcome.
+- Added a CLI regression assertion that unresolved recovery output does not
+  contain the complete-success message.
+- Verification: the full CLI test suite passes (1855/1855).
+
+## Re-review Final Verification
+
+- Exact Workflow settlement class passed 13/13, including the replacement
+  terminal-receipt regression.
+- Runner production build passed; the full Runner suite passed 1652/1652,
+  including the bounded shutdown delivery coverage.
+- Full CLI suite passed 1855/1855, and the full Server solution build passed
+  with 0 warnings and 0 errors.
+- The earlier full Server SpecTests invocation passed 3939 tests and reported
+  only the two unrelated existing dispatch timing/runtime-resolution failures;
+  the affected Workflow class passes independently.
+- Three incremental commits preserve the MF-1, MF-2, and MF-3 fixes. The
+  review file remains unchanged.
+
+## Final Gate Preparation
+
+- Reduced the Runner connection client implementation to 998 lines while
+  retaining the stop-failure transport; format and file-size ratchets pass.
+- Runner production/tests and Web typechecks pass after the final formatting
+  normalization.
+
+## Final Verification
+
+- `npm run verify` passed docs, file-size, format, and the full solution build
+  (0 warnings/errors).
+- Its test phase passed Workflow Definition 178, CLI 1855, Server Unit 2667,
+  and Architecture 68, while Server SpecTests passed 3939/3940. The sole
+  failure was the pre-existing/flaky
+  `AgentJobDispatchRouteSpecs.RunnerPollEndpoint_ForAgentJob_ExposesOwnerKindAndAgentJobId`
+  timing test; all issue-567 recovery specs passed.
+- Runner passed 1651/1651 and Web passed 4727/4727 in the independent full
+  workspace runs; the final tree remains clean and `review.md` is untouched.
+
+## Fix-CI Verification Repair
+
+- The persisted `verify.1` output showed one deterministic Server unit failure
+  and one Server spec failure during the concurrent full solution run. The unit
+  failure was `CliFieldContractTests.MappedCatalogsMatchServerSerializationFields`:
+  T-007 had added `interruption` and `interruptionHistory` to
+  `AgentJobViewDto` and `UnifiedSessionSummaryDto`, but the CLI
+  `ResourceOutputCatalog` omitted them from `AgentJobView` and `SessionShow`.
+- Added both field pairs to `packages/cli/Mohist.Cli/ResourceOutput.cs`.
+  The contract test now passes directly. The reported
+  `AgentSessionLaunchRuntimeResolutionSpecs.Launch_WithoutRuntimeOverrideOrConfig_DefaultsToOpenCode`
+  failure passed in isolation and did not recur in the full rerun, so no
+  unrelated race workaround was added.
+- Reverification passed: full `dotnet test Mohist.sln --nologo` (178 Workflow
+  Definition, 1855 CLI, 2667 Server Unit, 3936 Server Spec, 68 Arch), Web
+  typecheck and 4727 tests, Runner typecheck and 1647 tests. Verification
+  generated no Git-visible changes beyond the intended catalog edit.
+- Follow-up reproduction on the repaired HEAD: the unit command ran all 2667
+  tests because Microsoft Testing Platform ignores the legacy VSTest filter,
+  and passed; the xUnit v3 focused Server class
+  `AgentSessionLaunchRuntimeResolutionSpecs` passed 10/10. The full
+  `npm run verify` gate then passed: build (0 warnings/errors), Workflow
+  Definition 178, CLI 1855, Server Unit 2667, Server Spec 3936, Arch 68, Web
+  4727, Runner 1647, and Slack 70. The worktree remained clean after all
+  verification commands.
+
+## Re-review Receipt-Retry Failure Windows
+
+- Workflow terminal-result duplicate replay now repairs the durable operation
+  ledger for both original fenced results and replacement results before
+  returning the stored acknowledgement. Original work reaches `receipt-acked`;
+  replacement work reaches `replacement-settled`.
+- AgentJob terminal-result handling persists the terminal state and accepted
+  receipt ledger before cross-grain settlement. Exact replay repairs the
+  operation ledger before returning the stored accepted acknowledgement, so a
+  failed operation write cannot become a terminal `stale` acknowledgement.
+- Added an injectable operation-write failure probe and deterministic coverage
+  for Workflow original/replacement replay and AgentJob replacement replay.
+- Verification: Server SpecTests build passed; focused Workflow settlement
+  passed 15/15, AgentJob grain recovery class passed 21/21, and AgentJob
+  recovery API class passed 7/7. `review.md` remains untouched.
+
+## Current Verification
+
+- `npm run build` passes with 0 .NET build warnings/errors; Web, Runner, and
+  Slack production builds also pass.
+- Focused issue-567 Server classes pass: Workflow settlement `13/13`, replay
+  repair `2/2`, AgentJob grain `21/21`, and AgentJob recovery API `7/7`.
+- Full .NET tests pass for Workflow Definition `178/178`, CLI `1855/1855`, and
+  Server Unit `2667/2667`. Full Server SpecTests report one unrelated timing
+  failure in `AgentJobDispatchRouteSpecs.RunnerPollEndpoint_ForAgentJob_ExposesOwnerKindAndAgentJobId`
+  (`3943/3944`); ArchTests report the pre-existing migration-ledger digest
+  drift for `FailIfMarkerSpecs` (`67/68`).
+- Web passes `4727/4727`, Slack passes `70/70`, and Runner passes `1652/1652`.
+  Runner CI boundary checks still flag the pre-existing elapsed-time assertion
+  in `host.recovery.test.ts`; global format check flags that test and
+  `host.recovery.ts`. No unrelated files were changed, and `review.md` remains
+  untouched.
+
+## T-001 Verification On Current HEAD
+
+- The direct T-001 Server spec classes passed: `RunnerUpdateInterruptSpecs`
+  3/3 and `RunnerConfigApiSpecs` 10/10. The Server project build passed with
+  0 errors.
+- `npm run test:fast` passed the functional suites: Workflow Definition
+  178/178, CLI 1855/1855, Server Unit 2667/2667, Runner 1652/1652, and Web
+  4727/4727. Typecheck also passed.
+- The fast gate exited non-zero only for the pre-existing architecture
+  migration-ledger ratchet: `SpecUnitMigrationLedgerRules` reported the
+  `FailIfMarkerSpecs` source/closure digest mismatch (67/68). This failure is
+  unrelated to the runner update-operation fence and no ledger change was
+  made.
+
+## T-001 Current Verification
+
+- The current checkout's supported xUnit apphost runs passed
+  `RunnerUpdateInterruptSpecs` (3/3) and `RunnerConfigApiSpecs` (10/10).
+  The Server build passed with 0 warnings and 0 errors.
+- `npm run test:fast` passed all configured tracks: Workflow Definition
+  178/178, CLI 1856/1856, Server Unit 2667/2667, Server Arch 68/68, Runner
+  1657/1657, Web 4727/4727, and all fast typechecks.
+- Focused `dotnet test --filter` invocations remain unsuitable here because
+  Microsoft Testing Platform ignores VSTest filters; verification used the
+  compiled xUnit apphost as required by `design/testing.md`.
+
+## T-003 Shutdown Handoff Hardening
+
+- Each bounded pending-operation request now has its own abort controller;
+  timeout expiry cancels the underlying request before shutdown continues.
+  A response naming a different Runner is ignored, so it cannot establish
+  update context for receipt creation.
+- Stop-failure reporting is sent only when a pending update operation has
+  established update context. Ordinary restarts still perform the runtime
+  stop attempt but do not submit an empty-operation recovery failure.
+- Added deterministic Runner coverage for handoff timeout cancellation,
+  inventory exclusion, cross-Runner operation rejection, OpenCode confirmed
+  stop mapping, and ordinary-restart stop-failure classification.
+- Verification: focused recovery/journal/connection tests passed 30/30;
+  Runner typechecks passed; the complete Runner suite passed 1657/1657;
+  Runner format checks passed. `npm run test:fast` passed typecheck, Server
+  Unit 2667, CLI 1855, Workflow Definition 178, Web 4727, and Runner 1657;
+  it remained non-zero only for the pre-existing Server ArchTests
+  `FailIfMarkerSpecs` migration-ledger digest drift (67/68).
+
+## T-004 Receipt Commit-Before-Ack Coverage
+
+- The existing Workflow replacement arbitration was verified on the current
+  branch: a matching interruption receipt preserves the original settlement,
+  creates one generation-1 task/work/turn identity, and stale old-work ingress
+  remains rejected. Focused issue coverage passed 40/40.
+- Added a deterministic replay test that injects failure into the update-fence
+  write after the Workflow replacement commit. The first delivery throws with
+  the replacement and receipt ledger durable but the fence still marked; the
+  exact replay returns the stored acknowledgement, settles the fence, and
+  creates no second attempt.
+- The Server spec project builds with 0 warnings/errors. `npm run test:fast`
+  passed all functional suites and typechecks; it remains non-zero only for
+  the pre-existing `SpecUnitMigrationLedgerRules` / `FailIfMarkerSpecs`
+  migration-ledger digest drift (67/68).
+
+## T-005 Attachment-Only Recovery Hardening
+
+- AgentJob recovery now creates the fresh Session input/turn envelope when
+  the immutable launch snapshot has accepted attachments but an empty prompt;
+  the replacement reuses the prompt and attachment descriptors as-is while
+  still allocating new coordinator identities.
+- Session follow-up validation now matches initial-input semantics: non-empty
+  text or at least one accepted attachment is sufficient. This prevents an
+  attachment-only replacement from being acknowledged without turn
+  bookkeeping.
+- Added `AgentJobRecoveryReceiptSpecs.AttachmentOnlyJobRecoveryCreatesFreshSessionInputAndTurn`.
+  The Server build passed with 0 warnings/errors; focused recovery (8),
+  Session follow-up (37), and AgentJob grain (21) classes passed. Format check
+  passed with no changes.
+- `npm run test:fast` passed typecheck, Server Unit 2667, CLI 1855, Workflow
+  Definition 178, Runner 1657, and Web 4727. It exited non-zero only for the
+  existing Server ArchTests migration-ledger ratchet
+  (`SpecUnitMigrationLedgerRules` / `FailIfMarkerSpecs`, 67/68); the reported
+  source and closure digest mismatch is unrelated to this recovery change.
+
+## T-006 Current Verification
+
+- The integrated T-006 implementation is present in ancestor commit
+  `6136a2600`: reloaded `started` journal entries are reported as held
+  `inFlight`, replacement Workflow dispatches are the only eligible recovery
+  identities, and update-interrupted Workflow/AgentJob fences converge to
+  explicit `agent-result-unconfirmed` blocked or terminal states at their
+  injectable deadlines.
+- Focused Runner recovery/journal/receipt tests passed 19/19; Runner
+  typecheck passed. The serialized Server recovery run passed 3945/3946,
+  including the T-006 reconciliation, replacement, duplicate-delivery, and
+  no-receipt paths. The single failure was the existing unrelated
+  `AgentSessionLaunchRuntimeResolutionSpecs.Launch_WithoutRuntimeOverrideOrConfig_DefaultsToOpenCode`
+  timing race; the other full Server runs passed 3946/3946.
+- `npm run test:fast` passed typecheck, Server Unit 2667, CLI 1855, Workflow
+  Definition 178, Runner 1657, and Web 4727. It remains non-zero only for
+  the pre-existing ArchTests migration-ledger digest drift in
+  `FailIfMarkerSpecs` (67/68); no unrelated ledger metadata was changed.
+
+## T-007 Current Verification
+
+- The T-007 implementation is present in ancestor commit `4e09c94da`:
+  generation-keyed interruption projections, durable session/workflow
+  lifecycle events, additive session/turn/workflow-task/AgentJob DTO fields,
+  sanitized update stop-failure context, and session/workflow Web rendering.
+- Focused Server visibility tests passed all 2,667 Server unit tests,
+  including projection coverage. Focused Web session/workflow tests passed
+  35/35, Web FSD boundary checks passed, and the targeted Playwright workflow
+  inspector passed 2/2 scenarios including raw transport-error suppression.
+- `npm run test:fast` passed typecheck, Server Unit 2667, CLI 1855, Workflow
+  Definition 178, Runner 1657, and Web 4727. The command's only failure was
+  the unrelated pre-existing `SpecUnitMigrationLedgerRules` /
+  `FailIfMarkerSpecs` digest drift (67/68); issue-567 visibility paths did not
+  modify migration-ledger metadata.
+
+## T-008 Completion Hardening
+
+- Recovery-status polling now races the complete HTTP response parse against
+  the remaining injectable deadline, so a fake or transport handler that ignores
+  cancellation cannot make the CLI wait beyond the configured recovery bound.
+  Late poll tasks are observed and their response bodies are disposed; status
+  payloads for a different operation or Runner are ignored and leave the named
+  work unresolved.
+- Added deterministic CLI coverage for a cancellation-ignoring hanging HTTP
+  handler. The CLI suite passes 1,856 tests.
+- Split the already-over-limit AgentSession transition and grain files into
+  partial files without changing behavior; format and file-size ratchets pass.
+  Server build passes with zero warnings/errors.
+- The full Server suite run was 3,945/3,946; its only failure was the known
+  unrelated timing failure
+  `AgentJobDispatchRouteSpecs.RunnerPollEndpoint_ForAgentJob_ExposesOwnerKindAndAgentJobId`.
+- Refreshed the architecture migration ledger's derived FailIfMarker closure
+  evidence for the existing `RunnerUpdateOperationWriteFailureProbe` helper;
+  ArchTests now pass 68/68 without disabling the rule.
+- Reworked the bounded hanging-receipt Runner test to use Vitest fake timers;
+  Runner test-boundary checks now pass and the Runner suite remains 1,657/1,657.
+- Final `npm run verify` passed end to end: build 0 warnings/errors, Workflow
+  178, CLI 1,856, Server Unit 2,667, Server Spec 3,946, Arch 68, Web 4,727,
+  Runner 1,657, and Slack 70.
+
+## T-002 Verification Rerun
+
+- The T-002 implementation and acceptance tests are present in ancestor
+  commit `359806d67` with subsequent receipt hardening commits. Focused direct
+  xUnit runs passed `AgentResultSettlementSpecs` (13),
+  `RunnerPollRecoveryStateApiSpecs` (6), and
+  `RecoveryReceiptOperationReplaySpecs` (3), with no failures.
+- `npm run test:fast` passed the configured typechecks and all child suites:
+  Workflow Definition 178, Server Unit 2,667, Server Arch 68, CLI 1,856,
+  Runner 1,657, and Web 4,727. The runner harness omitted its aggregate line,
+  but the captured shell command returned successfully and every child exited
+  with code 0.
+
+## T-003 Exact-stop and inventory hardening
+
+- Shutdown receipt matching now requires the exact Workflow task attempt in the
+  pending-operation inventory; a missing taskRunId is malformed rather than a
+  wildcard. AgentJob inventory entries continue to require no task attempt.
+- Pi cancellation no longer treats an already-idle bound session as proof that
+  the held turn stopped. OpenCode cancellation checks for an active session
+  before abort and requires that exact session to be idle afterward. Both paths
+  now leave the started fence unresolved when they only observe idleness.
+- Added deterministic Runner coverage for omitted task attempts and idle Pi /
+  OpenCode observations. Focused journal/receipt/host/adapter tests passed
+  43/43; the full Runner suite passed 1,660/1,660; production and test
+  typechecks passed; `npm run test:fast` passed Workflow Definition 178, CLI
+  1,856, Server Unit 2,667, Server Arch 68, Runner 1,660, and Web 4,727.
+- `npm run format:check` still reports the repository's existing formatting
+  drift in legacy Runner files touched by this slice; no unrelated formatter
+  churn was included.
+
+## T-004 Current Task Verification
+
+- The T-004 implementation is already present on this run branch in
+  `6cae889bf` and subsequent receipt-replay hardening commits. It records the
+  original `TaskRun` as immutable `Interrupted` history, allocates generation
+  plus one with a new logical AgentTurn and work delivery identity, and commits
+  the replacement and receipt ledger before settling the update fence.
+- Focused current Server spec verification passed 40/40: 16 Workflow receipt,
+  replacement, frozen-settlement, stale-ingress, and replay tests plus 24
+  update/reconciliation/API tests.
+- `npm run test:fast` passed all configured tracks: typechecks, Workflow 178,
+  Server Unit 2,667, Server Arch 68, CLI 1,856, Runner 1,660, and Web 4,727.
+- No additional production change was necessary in this task run; the
+  required implementation and deterministic acceptance coverage were already
+  committed in the prepared branch. The worktree is clean apart from this
+  progress entry.
+
+## T-005 Recovery-History Hardening
+
+- Baseline `AgentJobRecoveryReceiptSpecs` passed 8/8 before this increment.
+- AgentJob recovery now records or updates the interrupted generation in
+  `RecoveryAttempts` for both fresh replacement allocation and explicit
+  `Interrupted` terminal fallback. This preserves the original work identity
+  in the durable runtime snapshot instead of only retaining it in scheduling
+  columns.
+- Recovery settlement resolves the update-operation grain from the matching
+  interrupted work attempt, so a later generation cannot accidentally use the
+  generation-zero Runner when a replacement was assigned elsewhere.
+- Extended the cannot-continue receipt spec to assert original-attempt history
+  and reject a new receipt after terminalization without changing identities.
+- Server spec build passed with zero warnings/errors; the AgentJob recovery
+  class passed 8/8 and related AgentJob/Runner classes passed 39/39.
+- `npm run test:fast` passed all configured tracks: typechecks, Workflow
+  Definition 178, CLI 1,856, Server Unit 2,667, Server Arch 68, Runner
+  1,660, and Web 4,727.
+
+## T-006 Recovery Generation Wire Fence
+
+- The existing T-006 recovery path persisted Workflow replacement generation
+  on `TaskRun` and `AgentResultSettlement`, but Workflow `WorkDispatch` did
+  not carry that generation. The Runner would therefore create a replacement
+  receipt at generation zero unless the task's unrelated retry policy happened
+  to contain a `generation` property, causing the Server to reject the result.
+- Added an additive explicit `recoveryGeneration` field to the Server
+  dispatch/domain/API envelope and Runner dispatch type/parser. Workflow
+  translation reads the persisted running `TaskRun` generation; AgentJob
+  dispatches expose their owner-ledger generation. Runner receipt identity
+  prefers the explicit field while retaining the legacy recovery-object
+  fallback.
+- Added focused Server DTO and reconnect assertions plus Runner receipt
+  coverage. Runner recovery/host/journal tests passed 28/28, Server dispatch
+  DTO tests passed 7/7, and the affected Server recovery classes passed 26/26.
+- Final verification passed: full Server SpecTests 3,946/3,946; `npm run
+  test:fast` passed typechecks, Workflow Definition 178, CLI 1,856, Server
+  Unit 2,668, Server Arch 68, Runner 1,661, and Web 4,727. The repository
+  format check still reports only pre-existing unrelated Runner formatting
+  drift; the changed TypeScript files pass targeted Biome checks.
+
+## T-007 Contract Correction
+
+- The prepared T-007 visibility slice was already present on this branch. Its
+  session observation mapper had one additive-contract regression: interruption
+  lifecycle state replaced the canonical AgentTurn `status` value. Restored
+  `queued` / `executing` / `completed` / `failed` / `unknown` / `cancelled`
+  status projection while retaining the interruption DTO and history fields.
+- Added a fixed-time unit theory covering every canonical turn status alongside
+  a recovered interruption, proving visibility does not repurpose the existing
+  status field.
+- Verification passed: Server Unit 2,674/2,674; Web interruption-focused tests
+  35/35; Web FSD and test-boundary checks; and `npm run test:fast` with Workflow
+  178, CLI 1,856, Server Unit 2,674, Server Arch 68, Runner 1,661, and Web
+  4,727. The issue's durable lifecycle, projection, DTO, and browser coverage
+  remains in the prepared T-007 implementation.
+
+## T-008 Final Run Verification
+
+- The prepared T-008 slice provides the runner update-operation recovery-status
+  endpoint, bounded injectable CLI polling, per-work recovered/unresolved output,
+  persisted recovery results, and non-success exit semantics for unresolved work.
+- Baseline focused verification passed CLI 1,856/1,856 and the supported Server
+  apphost `RunnerConfigApiSpecs` 10/10. The initial full gate stopped only at the
+  repository formatter on five issue-567 Runner files; `npm run format` repaired
+  that existing drift without behavioral changes.
+- Final `npm run verify` passed end to end: build 0 warnings/errors, Workflow
+  178, CLI 1,856, Server Unit 2,674, Server Spec 3,946, Arch 68, Web 4,727,
+  Runner 1,661, and Slack 70. Runner typecheck also passed independently.
+
+## CI Verification Repair
+
+- A fresh `npm run verify` reproduced one Server Spec failure:
+  `AgentJobDispatchRouteSpecs.RunnerPollEndpoint_ForAgentJob_ExposesOwnerKindAndAgentJobId`
+  failed because the shared launch helper made exactly one HTTP poll after the
+  durable assignment-prepared signal and received no matching dispatch. The
+  exact class and method passed in isolation, confirming an asynchronous
+  readiness race rather than an issue-567 recovery regression.
+- Updated `AgentSessionLaunchRoutesTestSupport.PollDispatchForSessionAsync` to
+  retry the expected dispatch through the existing bounded `TestWait` helper,
+  retaining the same AgentJob/session identity assertions. This is the same
+  eventual-dispatch synchronization already used by the neighboring launch
+  support. The initial one-second bound still timed out under the full-suite
+  load, so it was aligned with the existing five-second dispatch retry bound.
+- The affected spec project builds with 0 warnings/errors, the route class
+  passes three consecutive runs, the issue-567 recovery/reconciliation
+  classes pass 38/38, and the full Server Spec apphost passes 3,946/3,946.
+- Final `npm run verify` passes end to end: build 0 warnings/errors, Workflow
+  178, CLI 1,856, Server Unit 2,674, Server Spec 3,946, Arch 68, Web 4,727,
+  Runner 1,661, and Slack 70.
+
+## Independent Repair Verification
+
+- On repaired HEAD, `AgentJobDispatchRouteSpecs` passed 5/5 in three
+  consecutive supported xUnit apphost runs, including the previously failing
+  poll test.
+- A fresh `npm run verify` passed: build 0 warnings/errors, Workflow 178, CLI
+  1,856, Server Unit 2,674, Server Spec 3,946, Arch 68, Web 4,727, Runner
+  1,661, and Slack 70. Verification created no Git-visible changes.
+
+## T-001 Same-Connection Idempotence Hardening
+
+- `RunnerUpdateOperationGrain.StartNewAsync` now reuses a pending operation
+  for the same Runner connection generation before considering the candidate
+  operation id. A different connection generation still creates the chained
+  update fence, so concurrent confirmations cannot create duplicate fences.
+- Added `RunnerConfigApiSpecs.ConcurrentStartNewForSameConnection_ReusesOnePendingFence`.
+  The focused Runner API and grain classes pass 14/14, and the Server spec
+  project builds with zero warnings/errors.
+
+## T-002 Current Task Verification
+
+- The recovery-receipt implementation is already present in this run branch
+  from `359806d67` and subsequent receipt hardening commits: the contract
+  validator rejects malformed identity/payload combinations before grain
+  routing, the authenticated endpoint routes by owner, and Workflow receipt
+  arbitration persists request fingerprints and durable acknowledgements.
+- Focused Server apphost verification passed Workflow settlement 13/13,
+  receipt operation replay 3/3, and recovery-receipt API 6/6. The tests cover
+  contract rejection, duplicate idempotence, binding/fingerprint mismatch,
+  authoritative terminal settlement, and acknowledgement behavior.
+- `npm run test:fast` passed all configured tracks: typechecks, Workflow 178,
+  Server Unit 2674, Server Arch 68, CLI 1856, Runner 1661, and Web 4727.
+- No additional production change was necessary in this task run because the
+  selected T-002 slice and its tests were already committed on the prepared
+  workflow branch; later T-004 behavior correctly supersedes the temporary
+  retryable interruption response with replacement arbitration.
+
+## T-003 Current Task Verification
+
+- The complete Runner interruption slice is already present on this run branch:
+  the atomic `WorkResultJournal` `interrupted` state, runtime binding registry,
+  bounded shutdown handoff and cooperative Pi/OpenCode stop mapping,
+  inventory-gated receipt creation, exact receipt retry, and restart replay.
+- Baseline focused verification passed the journal, recovery-receipt, and
+  host-recovery suites: 21/21 tests, with production and test typechecks
+  passing before the final gate.
+- `npm run test:fast` passed all configured tracks: typechecks, Workflow 178,
+  Server Unit 2674, Server Arch 68, CLI 1856, Runner 1661, and Web 4727.
+- No additional production change was necessary in this task run because T-003
+  implementation and its deterministic acceptance coverage were already
+  committed on the prepared workflow branch; this commit records the current
+  task verification and preserves the existing implementation unchanged.
+
+## T-004 Current Task Revalidation
+
+- The prepared Workflow arbitration remains complete: a fence-matching
+  `update-interrupted` receipt records immutable interrupted history, allocates
+  recovery generation 1 with a new TaskRun, work delivery identity, and AgentTurn,
+  and exposes only the replacement through `WorkflowWorkLifecycle` after commit.
+- Exact receipt replay returns the durable acknowledgement without another
+  TaskRun, generation, or dispatch. The original settlement binding remains
+  unchanged; old-turn reports, observations, and receipts are stale after the
+  replacement. No-fence and operation/work/binding mismatches leave the run
+  unchanged.
+- Focused Server apphost verification passed Workflow settlement 13/13,
+  receipt-operation replay 3/3, and update/recovery API coverage 6/6. The full
+  Server SpecTests apphost passed 3947/3947.
+- `npm run test:fast` passed all configured tracks: typechecks, Workflow 178,
+  Server Unit 2674, Server Arch 68, CLI 1856, Runner 1661, and Web 4727.
+- No additional production change was necessary in this task run because the
+  selected T-004 implementation and deterministic acceptance coverage were
+  already committed on the prepared workflow branch; this commit records the
+  current task verification and preserves the implementation unchanged.
+
+## T-005 Current Task Verification
+
+- AgentJob recovery uses a fresh generation-specific input and turn envelope
+  (`recovery-input:{job}:{generation}` and `recovery-turn:{work}`), while reusing
+  the immutable prompt and accepted attachment descriptors as-is. This keeps
+  turn-coordinator identities distinct without changing the requested work.
+- A matching `update-interrupted` receipt is applied through the AgentJob owner
+  ledger exactly once; it allocates one replacement dispatch, preserves the
+  original work in `RecoveryAttempts`, and leaves the original work excluded
+  from both running redelivery and pending claims. A job without a valid launch
+  snapshot enters `Interrupted` with no failed/completed verdict.
+- Added a reconciliation assertion that a cannot-continue AgentJob poll never
+  re-offers its fenced original work identity. The focused AgentJob recovery
+  suite passed 8/8 after the change; the related Server classes passed 50/50.
+- Full Server SpecTests passed 3,947/3,947, and `npm run test:fast` passed all
+  configured tracks: typechecks, Workflow Definition 178, CLI 1,856, Server
+  Unit 2,674, Server Arch 68, Runner 1,661, and Web 4,727.
+
+## T-006 Current Task Verification
+
+- Revalidated the reconnect path: a committed Workflow replacement is the
+  only eligible dispatch, carries recovery generation 1 and a new work id, and
+  the original interrupted work id is absent from the poll response. A poll
+  reporting that replacement as `inFlight` receives no redelivery. The
+  existing AgentJob recovery path likewise excludes the fenced identity and
+  converges to an explicit `Interrupted` / `agent-result-unconfirmed` state at
+  its injectable deadline when no receipt arrives.
+- Added `RunnerHost.Restart_ReportsStartedJournalFenceAndRefusesRedelivery`.
+  It reloads a replacement dispatch journaled `started`, verifies the poll
+  body reports the held identity, supplies the same dispatch again, and proves
+  the Action is never invoked while the durable fence remains.
+- Focused Server recovery classes passed: reconciliation 15/15, AgentJob
+  recovery 8/8, and update fencing 3/3. Runner host reporting passed 8/8,
+  Runner recovery/journal/receipt suites passed 21/21, and the complete Runner
+  suite passed 1,662/1,662. Runner typecheck and node test-boundary checks pass.
+- `npm run test:fast` passed on the final tree: typechecks, Workflow 178, CLI
+  1,856, Server Unit 2,674, Server Arch 68, Runner 1,662, and Web 4,727.
+  One earlier concurrent attempt hit the repository's shared .NET build-output
+  race (`CS2012`) and was rerun successfully after the interrupted processes
+  exited.
+
+## T-007 Current Task Completion
+
+- Revalidated the prepared T-007 slice: durable `interrupting`/`interrupted`,
+  generation-keyed `recovering`/`recovered` projections, original-attempt
+  history retention, additive session/turn/workflow-task/AgentJob DTO fields,
+  sanitized update stop-failure context, and session/workflow Web rendering.
+- The Server projection unit coverage passed 2,674/2,674, including replay
+  idempotence, unaffected-work isolation, canonical turn-status preservation,
+  and stop-failure sanitization. Focused Web lifecycle tests passed 35/35;
+  FSD and test-boundary checks plus Web typecheck passed; the targeted browser
+  workflow inspector passed 2/2.
+- Full verification passed: `npm run test:fast` passed typechecks, Workflow
+  178, CLI 1,856, Server Unit 2,674, Server Arch 68, Runner 1,662, and Web
+  4,727. The full Server SpecTests apphost passed 3,947/3,947.
+- No additional production change was necessary in this task run because the
+  complete T-007 implementation and deterministic coverage are already present
+  in the prepared branch history; this entry records the current task's
+  verification checkpoint.
+
+## T-008 Current Task Completion
+
+- Revalidated the prepared T-008 slice: the runner update-operation
+  `recovery-status` endpoint projects each affected work as `receipt-acked`,
+  `replacement-settled`, or `unresolved`; the CLI polls it at a fixed interval
+  until the injectable bounded deadline and reports every confirmed work
+  identity as recovered or unresolved.
+- Persisted CLI update outcomes carry the same owner/work/task identities,
+  recovery status, and state as terminal output. Zero affected work claims no
+  recovery; old-Runner loss and deadline expiry remain unresolved; unresolved
+  work forces a non-success exit even after activation, restart, and identity
+  verification.
+- Focused CLI recovery/outcome tests and the Server `RunnerConfigApiSpecs`
+  passed. Full `npm run verify` passed end to end: build 0 warnings/errors,
+  Workflow 178, CLI 1,856, Server Unit 2,674, Server Spec 3,947, Arch 68,
+  Web 4,727, Runner 1,662, and Slack 70.
+- No additional production change was necessary in this task run because the
+  complete T-008 implementation and deterministic acceptance coverage are
+  already present in the prepared branch history; this entry records the
+  final verification checkpoint.
+
+## Fix-CI Current Verification
+
+- The worktree was clean before verification and no standalone verification
+  log was present. The historical failure output identified
+  `AgentJobDispatchRouteSpecs.RunnerPollEndpoint_ForAgentJob_ExposesOwnerKindAndAgentJobId`:
+  the shared launch helper performed one poll immediately after assignment
+  preparation, before the durable dispatch was observable under full-suite
+  load. The repair is already committed in `4d668e8d7`, where the helper uses
+  the existing bounded `TestWait` dispatch retry.
+- A fresh `npm run verify` passed: build with 0 warnings/errors, Workflow 178,
+  CLI 1,856, Server Unit 2,674, Server Spec 3,947, Arch 68, Web 4,727,
+  Runner 1,662, and Slack 70.
+- The repaired route method passed twice at 1/1, its full class passed 5/5,
+  and the focused update/recovery/reconciliation/settlement classes passed
+  50/50. Verification created no Git-visible changes; no further production
+  or test-code change was necessary.
+
+## Review MF-1 Missing-Session Delivery Repair
+
+- Workflow and AgentJob Session interruption queues now retain their head item
+  when the bound Session grain has no persisted state; queue entries are
+  removed only after `ApplyInterruptionAsync` succeeds. The Workflow reminder
+  remains registered while items are retained, and AgentJob recovery reminders
+  retry pending visibility before status-specific recovery work.
+- Added deterministic Workflow and AgentJob specs covering a non-materialized
+  Session, retained `interrupting`/`interrupted` visibility obligations,
+  subsequent Session materialization, and reminder-driven replay.
+- Focused verification passed `RunnerUpdateInterruptSpecs` 4/4 and
+  `AgentJobGrainSpecs` 23/23. The SpecTests project builds with zero warnings
+  and errors. `review.md` remains untouched.
+- Full `npm run verify` passed: build 0 warnings/errors, Workflow 178, CLI
+  1,856, Server Unit 2,674, Server Spec 3,950, Arch 68, Web 4,727, Runner
+  1,662, and Slack 70.

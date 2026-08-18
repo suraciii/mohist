@@ -544,7 +544,9 @@ export class PiRuntime {
 
     const diagnostics: PiDiagnostic[] = []
     const wasStreaming = session.value.isStreaming
-    let stopConfirmed = !wasStreaming
+    // An already-idle session is only an observation; it does not prove that
+    // this bound turn stopped during the cancel request.
+    let stopConfirmed = false
     const confirmation = wasStreaming ? watchPiStop(session.value, this.deps.clock ?? defaultClock) : null
     try {
       await session.value.abort()

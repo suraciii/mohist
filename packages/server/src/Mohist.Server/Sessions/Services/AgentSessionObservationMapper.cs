@@ -43,7 +43,8 @@ internal static class AgentSessionObservationMapper
                     turn.Result.Output,
                     turn.Result.FailureReason,
                     turn.Result.FailureCategory,
-                    turn.Result.ExitCode))).ToArray();
+                    turn.Result.ExitCode),
+            ToDto(turn.Interruption))).ToArray();
 
     public static string InputAcceptance(AgentSessionInputAcceptance acceptance) => acceptance switch
     {
@@ -63,4 +64,30 @@ internal static class AgentSessionObservationMapper
         AgentTurnStatus.Cancelled => "cancelled",
         _ => "unknown",
     };
+
+    public static AgentWorkInterruptionTransitionDto? ToDto(
+        AgentWorkInterruptionTransition? transition) =>
+        transition is null
+            ? null
+            : new AgentWorkInterruptionTransitionDto(
+                transition.State,
+                transition.UpdateOperationId,
+                transition.WorkId,
+                transition.TaskRunId,
+                transition.RecoveryGeneration,
+                transition.OriginalTurnId,
+                transition.ReplacementTurnId,
+                AgentWorkInterruptionProjection.SanitizeStopFailure(transition.StopFailure),
+                transition.ExpectedRecoveryPath,
+                transition.RecordedAt.ToString("o"));
+
+    public static IReadOnlyList<AgentWorkInterruptionTransitionDto>? History(
+        AgentSessionStatusSnapshot status) =>
+        status.InterruptionHistory is not { Count: > 0 } history
+            ? null
+            : history.Select(ToDto).Where(item => item is not null).Cast<AgentWorkInterruptionTransitionDto>().ToArray();
+
+    public static AgentWorkInterruptionTransitionDto? Current(
+        AgentSessionStatusSnapshot status) =>
+        ToDto(AgentWorkInterruptionProjection.Latest(status.InterruptionHistory));
 }

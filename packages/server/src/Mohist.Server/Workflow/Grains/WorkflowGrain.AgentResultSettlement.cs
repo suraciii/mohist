@@ -5,8 +5,10 @@ namespace Mohist.Server.Workflow.Grains;
 public partial class WorkflowGrain
 {
     public const string AgentResultSettlementReminderName = "agent-result-settlement";
+    public const string AgentSessionInterruptionReminderName = "agent-session-interruption";
 
     private static readonly TimeSpan AgentResultSettlementReminderPeriod = TimeSpan.FromDays(1);
+    private static readonly TimeSpan AgentSessionInterruptionReminderPeriod = TimeSpan.FromSeconds(1);
 
     public async Task ReceiveReminder(string reminderName, TickStatus status)
     {
@@ -17,13 +19,21 @@ public partial class WorkflowGrain
             return;
         }
 
-        if (!string.Equals(reminderName, AgentResultSettlementReminderName, StringComparison.Ordinal))
+        if (!string.Equals(reminderName, AgentResultSettlementReminderName, StringComparison.Ordinal)
+            && !string.Equals(reminderName, AgentSessionInterruptionReminderName, StringComparison.Ordinal))
             return;
 
         RejectIfRunReloadRequired();
         if (_run is null)
             return;
 
+        if (string.Equals(reminderName, AgentSessionInterruptionReminderName, StringComparison.Ordinal))
+        {
+            await DeliverPendingSessionInterruptionAsync();
+            return;
+        }
+
+        await DeliverPendingSessionInterruptionAsync();
         await ReconcileAgentResultSettlementAsync();
     }
 
@@ -60,7 +70,7 @@ public partial class WorkflowGrain
             return;
         }
 
-        if (settlement.State == AgentResultSettlementState.Unknown)
+        if (settlement.State is AgentResultSettlementState.RecoverablyInterrupted or AgentResultSettlementState.Unknown)
         {
             if (EnsureSettlementDeadline(settlement))
                 await CommitAsync([]);
@@ -138,6 +148,27 @@ public partial class WorkflowGrain
             AgentResultSettlementReminderName,
             due,
             AgentResultSettlementReminderPeriod);
+    }
+
+    private Task EnsureAgentSessionInterruptionReminderAsync() =>
+        this.RegisterOrUpdateReminder(
+            AgentSessionInterruptionReminderName,
+            TimeSpan.FromMilliseconds(1),
+            AgentSessionInterruptionReminderPeriod);
+
+    private async Task RemoveAgentSessionInterruptionReminderAsync()
+    {
+        try
+        {
+            var reminder = await this.GetReminder(AgentSessionInterruptionReminderName);
+            if (reminder is not null)
+                await this.UnregisterReminder(reminder);
+        }
+        catch (ArgumentNullException)
+        {
+            // Directly constructed grain tests have no reminder registry. A
+            // missing registry cannot leave a durable delivery outstanding.
+        }
     }
 
     protected virtual async Task RemoveAgentResultSettlementReminderAsync()

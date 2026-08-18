@@ -122,13 +122,15 @@ public sealed class WorkflowItemTranslator : IScopedService
     {
         var workId = item.Id ?? throw new InvalidOperationException(
             $"Task work item for workflow '{workflowRunId}' is missing work id");
-        var taskRunId = run.Stages
+        var task = run.Stages
             .SelectMany(stage => stage.Tasks)
-            .SingleOrDefault(task => task.Status == TaskRunStatus.Running
-                && string.Equals(task.WorkId, workId, StringComparison.Ordinal)
-                && string.Equals(task.WorkerId, runnerId, StringComparison.Ordinal))?.Id
+            .SingleOrDefault(candidate => candidate.Status == TaskRunStatus.Running
+                && string.Equals(candidate.WorkId, workId, StringComparison.Ordinal)
+                && string.Equals(candidate.WorkerId, runnerId, StringComparison.Ordinal))
             ?? throw new InvalidOperationException(
                 $"Task work item '{workId}' for workflow '{workflowRunId}' has no running task attempt");
+        var taskRunId = task.Id;
+        var recoveryGeneration = task.RecoveryGeneration;
         var attempt = WorkflowDispatchHelpers.TaskAttempt(workId);
 
         var payload = await BuildPayloadAsync(item.Stage, workId, "task", item.Title ?? string.Empty, attempt, workflowRunId, run);
@@ -173,7 +175,8 @@ public sealed class WorkflowItemTranslator : IScopedService
             EpicNumber: ReadEpicNumber(run),
             Expect: expectStr,
             AgentDefinition: agentDefinition,
-            TaskRunId: taskRunId);
+            TaskRunId: taskRunId,
+            RecoveryGeneration: recoveryGeneration);
     }
 
     private async Task<WorkDispatch> BuildChecksDispatchAsync(

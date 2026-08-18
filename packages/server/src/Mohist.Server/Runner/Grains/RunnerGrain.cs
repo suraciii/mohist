@@ -141,10 +141,9 @@ public partial class RunnerGrain : Grain, IRunnerGrain, IRemindable
 
     public Task ReceiveReminder(string reminderName, TickStatus status)
     {
-        // The presence reminder is a no-op tick carrier; the actual presence
-        // check is driven by the grain timer registered on register or poll.
-        // The reminder exists only so presence-expiry survives silo restart
-        // (a grain timer does not). Kept minimal here.
+        // Presence reminder is a no-op tick carrier; the actual check runs on
+        // the register/poll grain timer. The reminder exists only so
+        // presence-expiry survives silo restart (a grain timer does not).
         return Task.CompletedTask;
     }
 
@@ -563,7 +562,9 @@ public partial class RunnerGrain : Grain, IRunnerGrain, IRemindable
                     Stage: stage.Id,
                     Title: task.Title,
                     Issue: issue,
-                    TakenAt: task.StartedAt));
+                    TakenAt: task.StartedAt,
+                    TaskRunId: task.Id,
+                    IsAgentWork: task.AgentResultSettlement is not null));
                 continue;
             }
             if (!string.IsNullOrWhiteSpace(stage.ChecksWorkId))
@@ -600,7 +601,8 @@ public partial class RunnerGrain : Grain, IRunnerGrain, IRemindable
             _lastPresenceAt,
             activeWorks,
             _draining,
-            _state.State?.UpdateInterruptFence?.PendingId);
+            _state.State?.UpdateInterruptFence?.PendingId,
+            _info?.ConnectionGeneration);
     }
 
     public async Task UpdateBuildGitHashAsync(string? buildGitHash)

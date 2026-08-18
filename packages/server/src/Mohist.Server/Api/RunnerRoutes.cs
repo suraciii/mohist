@@ -57,7 +57,7 @@ public static partial class RunnerRoutes
 
         group.MapPost("/heartbeat", HandleHeartbeatAsync);
         MapUpdateInterruptRoutes(group);
-
+        MapRunnerUpdateRecoveryRoutes(group);
         group.MapPatch("", async (string runnerId, RunnerSlotsPatchRequest req, IGrainFactory grains) =>
         {
             if (req is null || req.Slots <= 0)
@@ -805,6 +805,7 @@ public static partial class RunnerRoutes
             AgentDefinition: work.AgentDefinition,
             AgentSessionStartup: work.AgentSessionStartup,
             TaskRunId: work.TaskRunId,
+            RecoveryGeneration: work.RecoveryGeneration,
             AgentRecovery: work.AgentRecovery);
     }
 
@@ -963,6 +964,7 @@ public static partial class RunnerRoutes
     {
         DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.Never,
     };
+
 }
 
 public record RunnerRegisterRequest(
@@ -1140,7 +1142,6 @@ public record CleanupPolicyDto(
 /// runner-facing config fields to be added additively.
 /// </summary>
 public record RunnerConfigResponse(CleanupPolicyDto? CleanupPolicy);
-
 /// <summary>
 /// Body for <c>POST /api/runner/{runnerId}/workflow-runs/status</c>. The
 /// runner lists its still-active registry entries; the server answers
@@ -1161,7 +1162,6 @@ public record RunnerWorkflowStatusResponse(Dictionary<string, string> Statuses);
 /// wins) so later dispatches bind to this runner.
 /// </summary>
 public record WorkspaceMaterializedRequest(string? Path);
-
 public record WorkspaceMaterializedResponse(string RunnerId, string Path);
 
 /// <summary>

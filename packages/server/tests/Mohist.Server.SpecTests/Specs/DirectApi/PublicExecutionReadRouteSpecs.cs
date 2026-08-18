@@ -248,18 +248,41 @@ public sealed class PublicExecutionReadRouteSpecs(MohistIntegrationFixture fixtu
 
         // Rewind the stored checkpoint below the durable source head: the
         // same request must now refuse to serve the (still existing)
-        // snapshot as current state.
-        await RewindJobCheckpointAsync(jobId);
-        using var lagged = await client.GetAsync($"/api/v1/projects/{projectId}/agent-jobs/{jobId}");
+        // snapshot as current state. The hosted projector re-advances a
+        // rewound checkpoint as soon as its drain observes the mismatch,
+        // so the checkpoint is re-pinned on each attempt until the read
+        // actually observes the gate — a bounded probe that fails loudly
+        // if the 503 never appears.
+        HttpResponseMessage? lagged = null;
+        try
+        {
+            await TestWait.ForAsync(
+                probe: async () =>
+                {
+                    await RewindJobCheckpointAsync(jobId);
+                    lagged?.Dispose();
+                    var response = await client.GetAsync($"/api/v1/projects/{projectId}/agent-jobs/{jobId}");
+                    lagged = response;
+                    return response.StatusCode == HttpStatusCode.ServiceUnavailable;
+                },
+                isDone: ok => ok,
+                timeout: TimeSpan.FromSeconds(10),
+                step: TimeSpan.FromMilliseconds(30),
+                description: "the rewound job checkpoint to gate job reads with projection_lag");
 
-        Assert.Equal(HttpStatusCode.ServiceUnavailable, lagged.StatusCode);
-        Assert.Equal(
-            DirectApiResults.ProjectionLagRetryAfterSeconds,
-            lagged.Headers.RetryAfter?.ToString());
-        await AssertErrorAsync(lagged, HttpStatusCode.ServiceUnavailable, "projection_lag");
-        var laggedBody = await lagged.Content.ReadAsStringAsync();
-        Assert.DoesNotContain("\"status\"", laggedBody, StringComparison.Ordinal);
-        Assert.DoesNotContain("\"jobId\"", laggedBody, StringComparison.Ordinal);
+            Assert.Equal(HttpStatusCode.ServiceUnavailable, lagged!.StatusCode);
+            Assert.Equal(
+                DirectApiResults.ProjectionLagRetryAfterSeconds,
+                lagged.Headers.RetryAfter?.ToString());
+            await AssertErrorAsync(lagged, HttpStatusCode.ServiceUnavailable, "projection_lag");
+            var laggedBody = await lagged.Content.ReadAsStringAsync();
+            Assert.DoesNotContain("\"status\"", laggedBody, StringComparison.Ordinal);
+            Assert.DoesNotContain("\"jobId\"", laggedBody, StringComparison.Ordinal);
+        }
+        finally
+        {
+            lagged?.Dispose();
+        }
 
         // The projector repairs the checkpoint from the durable source;
         // the same read then serves the current projection again.
@@ -290,18 +313,44 @@ public sealed class PublicExecutionReadRouteSpecs(MohistIntegrationFixture fixtu
         // The Session ledger digest is the session anchor's required
         // source watermark: a checkpoint holding an older digest gates
         // Input and Turn reads with projection_lag, and never surfaces
-        // the stale snapshot as the five-state unknown.
-        await RewindSessionCheckpointAsync(ids.SessionId);
+        // the stale snapshot as the five-state unknown. The hosted
+        // projector re-advances a rewound checkpoint as soon as its
+        // drain observes the mismatch, so the checkpoint is re-pinned on
+        // each attempt until both reads actually observe the gate — a
+        // bounded probe that fails loudly if the gate never fires.
+        HttpResponseMessage? inputLagged = null;
+        HttpResponseMessage? turnLagged = null;
+        try
+        {
+            await TestWait.ForAsync(
+                probe: async () =>
+                {
+                    await RewindSessionCheckpointAsync(ids.SessionId);
+                    inputLagged?.Dispose();
+                    turnLagged?.Dispose();
+                    var laggedReads = await Task.WhenAll(
+                        client.GetAsync(inputPath),
+                        client.GetAsync($"/api/v1/projects/{projectId}/agent-turns/{ids.TurnId}"));
+                    inputLagged = laggedReads[0];
+                    turnLagged = laggedReads[1];
+                    return inputLagged.StatusCode == HttpStatusCode.ServiceUnavailable
+                        && turnLagged.StatusCode == HttpStatusCode.ServiceUnavailable;
+                },
+                isDone: ok => ok,
+                timeout: TimeSpan.FromSeconds(10),
+                step: TimeSpan.FromMilliseconds(30),
+                description: "the rewound session checkpoint to gate input and turn reads with projection_lag");
 
-        var laggedReads = await Task.WhenAll(
-            client.GetAsync(inputPath),
-            client.GetAsync($"/api/v1/projects/{projectId}/agent-turns/{ids.TurnId}"));
-        using var inputLagged = laggedReads[0];
-        using var turnLagged = laggedReads[1];
-        Assert.Equal(HttpStatusCode.ServiceUnavailable, inputLagged.StatusCode);
-        await AssertErrorAsync(inputLagged, HttpStatusCode.ServiceUnavailable, "projection_lag");
-        Assert.Equal(HttpStatusCode.ServiceUnavailable, turnLagged.StatusCode);
-        await AssertErrorAsync(turnLagged, HttpStatusCode.ServiceUnavailable, "projection_lag");
+            Assert.Equal(HttpStatusCode.ServiceUnavailable, inputLagged!.StatusCode);
+            await AssertErrorAsync(inputLagged, HttpStatusCode.ServiceUnavailable, "projection_lag");
+            Assert.Equal(HttpStatusCode.ServiceUnavailable, turnLagged!.StatusCode);
+            await AssertErrorAsync(turnLagged, HttpStatusCode.ServiceUnavailable, "projection_lag");
+        }
+        finally
+        {
+            inputLagged?.Dispose();
+            turnLagged?.Dispose();
+        }
 
         await NudgeProjectorAsync();
         using var inputRecovered = await ReadAsync(client, inputPath);

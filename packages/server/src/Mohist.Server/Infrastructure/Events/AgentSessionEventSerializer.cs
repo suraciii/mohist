@@ -14,6 +14,7 @@ internal static class AgentSessionEventSerializer
         [typeof(AgentSessionContextCompacted)] = EventCatalog.ReverseDns.AgentSessionContextCompacted,
         [typeof(AgentSessionContextExhausted)] = EventCatalog.ReverseDns.AgentSessionContextExhausted,
         [typeof(AgentSessionContextHealthUpdated)] = EventCatalog.ReverseDns.AgentSessionContextHealthUpdated,
+        [typeof(AgentSessionInterruptionLifecycleChanged)] = EventCatalog.ReverseDns.AgentSessionInterruptionLifecycleChanged,
     };
 
     internal static IReadOnlyCollection<string> ProducedTypes => BusTypes.Values.ToArray();
@@ -45,6 +46,7 @@ internal static class AgentSessionEventSerializer
         AgentSessionContextCompacted x => x,
         AgentSessionContextExhausted x => x,
         AgentSessionContextHealthUpdated x => x,
+        AgentSessionInterruptionLifecycleChanged x => x,
         null => throw new InvalidOperationException("Null agent session event"),
     };
 }

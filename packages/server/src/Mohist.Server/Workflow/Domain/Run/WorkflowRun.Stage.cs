@@ -99,10 +99,10 @@ public static partial class WorkflowRunExtensions
             || (stage.Initialized
                 && stage.Tasks.Any(t =>
                     t.CausedByFeedbackId is not null
-                    && t.Status is not (TaskRunStatus.Completed or TaskRunStatus.Failed or TaskRunStatus.Cancelled)));
+                    && t.Status is not (TaskRunStatus.Completed or TaskRunStatus.Failed or TaskRunStatus.Cancelled or TaskRunStatus.Interrupted)));
 
         private TaskRun? CurrentTask()
-            => stage.Tasks.FirstOrDefault(t => t.Status is not (TaskRunStatus.Completed or TaskRunStatus.Failed or TaskRunStatus.Cancelled));
+            => stage.Tasks.FirstOrDefault(t => t.Status is not (TaskRunStatus.Completed or TaskRunStatus.Failed or TaskRunStatus.Cancelled or TaskRunStatus.Interrupted));
 
         private StageCheck FindCheck(string name)
             => stage.Checks.FirstOrDefault(c => c.Name == name)
@@ -111,7 +111,7 @@ public static partial class WorkflowRunExtensions
         public bool HasNoPendingTasksAndPassedChecks()
         {
             if (!stage.Initialized) return false;
-            var hasPendingTask = stage.Tasks.Any(t => t.Status is not (TaskRunStatus.Completed or TaskRunStatus.Failed or TaskRunStatus.Cancelled));
+            var hasPendingTask = stage.Tasks.Any(t => t.Status is not (TaskRunStatus.Completed or TaskRunStatus.Failed or TaskRunStatus.Cancelled or TaskRunStatus.Interrupted));
             if (hasPendingTask) return false;
             return stage.Checks.All(c => c.Status == StageCheckStatus.Passed);
         }

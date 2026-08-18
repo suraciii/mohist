@@ -5,6 +5,7 @@ using Mohist.Server.Infrastructure;
 using Mohist.Server.Infrastructure.Orleans;
 using Mohist.Server.Infrastructure.Events;
 using Mohist.Server.Runner.Grains;
+using Mohist.Server.Runner.Services;
 
 using Mohist.Server.Sessions.Grains;
 using Mohist.Server.Sessions.Services;
@@ -36,6 +37,7 @@ public partial class WorkflowGrain : Grain, IWorkflowGrain, IWorkflowGrainContex
     private readonly WorkflowStageLockCoordinator _stageLockCoordinator;
     private readonly WorkflowStageInitializer _stageInitializer;
     private readonly WorkflowWorkLifecycle _workLifecycle;
+    private readonly WorkflowItemTranslator? _workflowItemTranslator;
     private readonly TimeSpan _agentResultSettlementTimeout;
     private readonly TimeSpan _runnerLossRecoveryTimeout;
 
@@ -49,7 +51,8 @@ public partial class WorkflowGrain : Grain, IWorkflowGrain, IWorkflowGrainContex
         IWorkflowArtifactBindService artifactBindService,
         IOptions<WorkflowOptions> options,
         TimeProvider timeProvider,
-        ILogger<WorkflowGrain> log)
+        ILogger<WorkflowGrain> log,
+        WorkflowItemTranslator? workflowItemTranslator = null)
         : base(context, runtime)
     {
         _runStore = runStore;
@@ -63,6 +66,7 @@ public partial class WorkflowGrain : Grain, IWorkflowGrain, IWorkflowGrainContex
         _stageLockCoordinator = new WorkflowStageLockCoordinator(this);
         _stageInitializer = new WorkflowStageInitializer(this);
         _workLifecycle = new WorkflowWorkLifecycle(this);
+        _workflowItemTranslator = workflowItemTranslator;
         _agentResultSettlementTimeout = ValidateSettlementTimeout(options.Value.AgentResultSettlementTimeout);
         _runnerLossRecoveryTimeout = ValidateRunnerLossRecoveryTimeout(options.Value.RunnerLossRecoveryTimeout);
     }
@@ -77,7 +81,8 @@ public partial class WorkflowGrain : Grain, IWorkflowGrain, IWorkflowGrainContex
         IWorkflowArtifactBindService artifactBindService,
         IOptions<WorkflowOptions> options,
         TimeProvider timeProvider,
-        ILogger<WorkflowGrain> log)
+        ILogger<WorkflowGrain> log,
+        WorkflowItemTranslator? workflowItemTranslator = null)
     {
         _runStore = runStore;
         _dispatchSnapshotStore = dispatchSnapshotStore;
@@ -90,6 +95,7 @@ public partial class WorkflowGrain : Grain, IWorkflowGrain, IWorkflowGrainContex
         _stageLockCoordinator = new WorkflowStageLockCoordinator(this);
         _stageInitializer = new WorkflowStageInitializer(this);
         _workLifecycle = new WorkflowWorkLifecycle(this);
+        _workflowItemTranslator = workflowItemTranslator;
         _agentResultSettlementTimeout = ValidateSettlementTimeout(options.Value.AgentResultSettlementTimeout);
         _runnerLossRecoveryTimeout = ValidateRunnerLossRecoveryTimeout(options.Value.RunnerLossRecoveryTimeout);
     }
@@ -117,6 +123,7 @@ public partial class WorkflowGrain : Grain, IWorkflowGrain, IWorkflowGrainContex
 
         await ClearStoppedRunStaleApprovalGateAsync(ct);
 
+        await DeliverPendingSessionInterruptionAsync();
         await ReconcileAgentResultSettlementAsync();
         await ReconcileRunnerLossRecoveryAsync();
 

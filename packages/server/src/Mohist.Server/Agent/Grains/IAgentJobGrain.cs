@@ -11,6 +11,11 @@ namespace Mohist.Server.Agent.Grains;
 public interface IAgentJobGrain : IGrainWithStringKey, IRemindable
 {
     Task<AgentJobReportResult> ReportResultAsync(string runnerId, string workId, WorkResult result);
+    Task<RuntimeRecoveryReceiptAcknowledgement> ReceiveRecoveryReceiptAsync(RuntimeRecoveryReceipt receipt) =>
+        Task.FromResult(new RuntimeRecoveryReceiptAcknowledgement(
+            receipt?.ReceiptId ?? string.Empty,
+            RuntimeRecoveryReceiptAckStatuses.Stale,
+            "recovery-receipt-not-supported"));
     Task<AgentJobStatus> GetStatusAsync();
     Task<AgentJobCancelResult> CancelAsync() =>
         Task.FromResult(new AgentJobCancelResult(AgentJobCancelDisposition.AlreadyEnded, AgentJobStatus.Unknown));
@@ -112,6 +117,15 @@ public interface IAgentJobGrain : IGrainWithStringKey, IRemindable
     /// never overwritten.
     /// </summary>
     Task MarkUnknownAsync(string reason) => Task.CompletedTask;
+    Task<bool> MarkUpdateInterruptedAsync(
+        string runnerId,
+        string workId,
+        string updateOperationId) => Task.FromResult(false);
+    Task<bool> MarkUpdateStopFailureAsync(
+        string runnerId,
+        string workId,
+        string updateOperationId,
+        string failure) => Task.FromResult(false);
 
     /// <summary>
     /// Enters the existing Unknown arbitration with a durable runner-loss
@@ -268,7 +282,30 @@ public sealed record AgentJobRuntimeSnapshot(
     /// Read projection computed from the persisted deadline and the grain's
     /// injected clock. The wire status remains <see cref="AgentJobStatus.Unknown"/>.
     /// </summary>
-    [property: Id(13)] bool IsRecovering = false);
+    [property: Id(13)] bool IsRecovering = false,
+    /// <summary>
+    /// Monotonic replacement generation. Generation zero is the original
+    /// dispatch; every accepted update interruption allocates the next value.
+    /// </summary>
+    [property: Id(14)] int RecoveryGeneration = 0,
+    /// <summary>
+    /// The work identity of the original attempt, preserved for arbitration
+    /// after an update interruption allocated a replacement.
+    /// </summary>
+    [property: Id(15)] string? OriginalWorkId = null,
+    /// <summary>
+    /// Bounded arbitration deadline for an update-interrupted job awaiting a
+    /// confirmed receipt. Expiry is explicit Interrupted terminal state.
+    /// </summary>
+    [property: Id(16)] DateTimeOffset? UpdateInterruptionDeadlineAt = null,
+    /// <summary>
+    /// Current agent work interruption transition projection.
+    /// </summary>
+    [property: Id(17)] AgentWorkInterruptionTransition? Interruption = null,
+    /// <summary>
+    /// History of agent work interruption transitions.
+    /// </summary>
+    [property: Id(18)] IReadOnlyList<AgentWorkInterruptionTransition>? InterruptionHistory = null);
 
 /// <summary>
 /// Durable payload persisted on the AgentJob grain for a pending
@@ -321,6 +358,15 @@ public sealed record PendingFailureEvent(
     [property: Id(2)] string? FailureCategory,
     [property: Id(3)] DateTimeOffset RecordedAt);
 
+[GenerateSerializer]
+public sealed record PendingUpdateInterruptionEvent(
+    [property: Id(0)] string EventId,
+    [property: Id(1)] string UpdateOperationId,
+    [property: Id(2)] string RunnerId,
+    [property: Id(3)] string WorkId,
+    [property: Id(4)] DateTimeOffset RecordedAt,
+    [property: Id(5)] int RecoveryGeneration = 0);
+
 public static class AgentJobSessionDeliveryIds
 {
     public static string TerminalDeliveryId(string jobKey) =>
@@ -331,6 +377,9 @@ public static class AgentJobSessionDeliveryIds
 
     public static string FailureEventId(string jobKey) =>
         $"agent-job:{jobKey}:failed";
+
+    public static string UpdateInterruptionEventId(string jobKey, string operationId) =>
+        $"agent-job:{jobKey}:update-interrupted:{operationId}";
 
     public static string TerminalDeliveryEventId(string jobKey) =>
         $"agent-job:{jobKey}:terminal-delivery";
@@ -371,6 +420,19 @@ public enum AgentJobStatus
     /// Runner evidence.
     /// </summary>
     Unknown,
+    /// <summary>
+    /// The Server confirmed that the active physical turn was interrupted by
+    /// a Runner update. This is distinct from Unknown, which means the
+    /// original outcome could not be classified after an ordinary loss.
+    /// </summary>
+    RecoverablyInterrupted,
+    /// <summary>
+    /// The update interruption was confirmed, but the job had no valid
+    /// durable launch snapshot from which a replacement could be created.
+    /// This is terminal recovery state, not a failed or completed task
+    /// verdict.
+    /// </summary>
+    Interrupted,
 }
 
 [GenerateSerializer]

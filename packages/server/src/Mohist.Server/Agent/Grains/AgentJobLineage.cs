@@ -73,6 +73,33 @@ public static class AgentJobLineage
         return extensions;
     }
 
+    public static CloudEvent BuildUpdateInterruptionEnvelope(
+        string jobKey,
+        PendingUpdateInterruptionEvent payload,
+        IReadOnlyDictionary<string, string> extensions)
+    {
+        var data = JsonSerializer.SerializeToElement(new
+        {
+            jobKey,
+            workId = payload.WorkId,
+            runnerId = payload.RunnerId,
+            updateOperationId = payload.UpdateOperationId,
+            status = "recoverably-interrupted",
+            lifecycleState = "interrupted",
+            recoveryGeneration = payload.RecoveryGeneration,
+            replacementTurnId = (string?)null,
+            expectedRecoveryPath = "The Runner will deliver a confirmed interruption receipt; a fresh AgentJob dispatch will resume this work.",
+        }, JSON.Options);
+        return new CloudEvent(
+            id: payload.EventId,
+            source: new Uri(AgentJobEventPersistence.AgentJobSource(jobKey), UriKind.Relative),
+            type: EventCatalog.ReverseDns.AgentJobUpdateInterrupted,
+            time: payload.RecordedAt,
+            data: data,
+            subject: jobKey,
+            extensions: extensions);
+    }
+
     public static CloudEvent BuildFailureEnvelope(
         string jobKey,
         DateTimeOffset now,

@@ -77,6 +77,7 @@ public sealed partial class AgentJobGrain
             InitialTurnId: string.IsNullOrWhiteSpace(input.InitialTurnId) ? null : input.InitialTurnId,
             AgentDefinition: ExecutionDefinitionFrom(input),
             PinnedRunnerId: input.PinnedRunnerId,
-            AgentSessionStartup: input.AgentSessionStartup);
+            AgentSessionStartup: input.AgentSessionStartup,
+            RecoveryGeneration: State.RecoveryGeneration);
     }
 }

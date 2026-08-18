@@ -73,6 +73,8 @@ internal sealed class UpdateTestFactory
         string? userHome = null,
         TimeSpan? runnerIdentityTimeout = null,
         TimeSpan? runnerIdentityPollInterval = null,
+        TimeSpan? runnerRecoveryTimeout = null,
+        TimeSpan? runnerRecoveryPollInterval = null,
         Func<string?>? getLocalHostname = null,
         string? unitDir = null,
         TimeProvider? timeProvider = null,
@@ -111,6 +113,8 @@ internal sealed class UpdateTestFactory
             getUserHome: home is null ? null : () => home,
             runnerIdentityTimeout: runnerIdentityTimeout,
             runnerIdentityPollInterval: runnerIdentityPollInterval,
+            runnerRecoveryTimeout: runnerRecoveryTimeout,
+            runnerRecoveryPollInterval: runnerRecoveryPollInterval,
             getLocalHostname: getLocalHostname,
             unitDir: unitDir,
             timeProvider: timeProvider,
@@ -564,6 +568,26 @@ internal sealed class OutcomeCapturingHttpHandler : HttpMessageHandler
         public string? SourceHead { get; set; }
         [System.Text.Json.Serialization.JsonPropertyName("logs")]
         public List<CliOutcomeLogPayload>? Logs { get; set; }
+        [System.Text.Json.Serialization.JsonPropertyName("recovery")]
+        public List<CliRecoveryWorkPayload>? Recovery { get; set; }
+    }
+
+    public sealed class CliRecoveryWorkPayload
+    {
+        [System.Text.Json.Serialization.JsonPropertyName("ownerKind")]
+        public string? OwnerKind { get; set; }
+        [System.Text.Json.Serialization.JsonPropertyName("ownerId")]
+        public string? OwnerId { get; set; }
+        [System.Text.Json.Serialization.JsonPropertyName("workId")]
+        public string? WorkId { get; set; }
+        [System.Text.Json.Serialization.JsonPropertyName("taskRunId")]
+        public string? TaskRunId { get; set; }
+        [System.Text.Json.Serialization.JsonPropertyName("workType")]
+        public string? WorkType { get; set; }
+        [System.Text.Json.Serialization.JsonPropertyName("status")]
+        public string? Status { get; set; }
+        [System.Text.Json.Serialization.JsonPropertyName("state")]
+        public string? State { get; set; }
     }
 
     public sealed class CliOutcomeLogPayload

@@ -161,6 +161,40 @@ describe('TaskItem', () => {
     expect(screen.queryByText('failed')).not.toBeInTheDocument()
   })
 
+  it('renders update interruption context without exposing runtime transport failures', async () => {
+    renderTask(
+      makeTask({
+        status: 'interrupted',
+        agentInterruption: {
+          state: 'interrupted',
+          updateOperationId: 'update-567',
+          workId: 'work-old',
+          taskRunId: 'build.1',
+          recoveryGeneration: 0,
+          originalTurnId: 'turn-old',
+          replacementTurnId: null,
+          expectedRecoveryPath:
+            'The Runner will deliver a confirmed interruption receipt; the replacement dispatch will then resume this work.',
+          stopFailure: 'Stop confirmation is pending; recovery remains durable and will be retried.',
+          recordedAt: '2026-08-15T00:00:00.000Z',
+        },
+      }),
+    )
+
+    const disclosure = screen.getByRole('button', { name: /Canonical workflow task title/ })
+    expect(disclosure).toHaveTextContent('interrupted')
+    await act(async () => {
+      fireEvent.click(disclosure)
+      await Promise.resolve()
+    })
+
+    const attention = screen.getByTestId('workflow-task-interruption-attention')
+    expect(attention).toHaveTextContent('update-567')
+    expect(attention).toHaveTextContent('work-old')
+    expect(attention).toHaveTextContent('recovery remains durable')
+    expect(attention).not.toHaveTextContent('session.abort fetch failed')
+  })
+
   it('keeps title primary, metadata actions separate, and expands all inspection details', async () => {
     const title = 'Complete the intentionally long workflow task title without allowing metadata to replace it'
     renderTask(

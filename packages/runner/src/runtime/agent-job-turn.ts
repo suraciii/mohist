@@ -11,6 +11,8 @@ import type { PiRuntimeEvent, PiResult, PiTurnObserver, PiTurnRequest, PiTurnRes
 import { resolveAccessor } from '../server/command-runtime.js'
 import type { ServerConnection } from '../server/connection.js'
 import { resolveOrRecoverBinding, type BindingRecoveryCoordinator, type RuntimeBinding } from './binding-recovery.js'
+import type { RuntimeTurnRegistry } from './runtime-turn-registry.js'
+import { workKey } from './work-result-journal.js'
 import type { ResolvedSkill } from './skill-resolver.js'
 import { runnerLogger } from '../system/logger.js'
 import type { DeliveredAttachment } from './attachment-delivery.js'
@@ -32,6 +34,7 @@ export interface AgentJobTurnDeps {
   readonly runtimes: AgentJobRuntimeAccessors
   readonly bindingRecoveryCoordinator: BindingRecoveryCoordinator | null
   readonly options: AgentJobExecutorOptions
+  readonly runtimeTurnRegistry?: RuntimeTurnRegistry | null
 }
 
 export async function executeOpenCodeTurn(
@@ -130,6 +133,7 @@ export async function executeOpenCodeTurn(
   }
 
   const eventSink = createAgentSessionEventSink(deps.connection, work, signal, binding.agentSessionId)
+  const turnKey = workKey(work)
   // Issue-512 T-001: when the coordinator durably recorded the
   // initial input on the AgentSession before dispatch, the runner
   // must NOT re-publish a `session.input` runtime event. The
@@ -143,6 +147,10 @@ export async function executeOpenCodeTurn(
     ? {
         onSessionReady: async (session) => {
           attachedRuntimeSessionId = session.runtimeSessionId
+          deps.runtimeTurnRegistry?.update(turnKey, {
+            runtimeSessionId: session.runtimeSessionId,
+            workDir: session.workDir,
+          })
           await eventSink.attachSession(session.runtimeSessionId, session.workDir, modelInput)
           if (!skipInitialInput && !attachedInputPublished) {
             attachedInputPublished = true
@@ -154,6 +162,14 @@ export async function executeOpenCodeTurn(
         },
       }
     : undefined
+
+  deps.runtimeTurnRegistry?.register(turnKey, {
+    agentSessionId: binding.agentSessionId ?? '',
+    agentTurnId: work.initialTurnId ?? null,
+    runtime: 'opencode',
+    runtimeSessionId: selected,
+    workDir,
+  })
 
   let result: RuntimeResult<RuntimeTurnResult>
   try {
@@ -288,6 +304,14 @@ export async function executePiTurn(
         },
       }
     : undefined
+
+  deps.runtimeTurnRegistry?.register(workKey(work), {
+    agentSessionId: binding.agentSessionId ?? '',
+    agentTurnId: work.initialTurnId ?? null,
+    runtime: 'pi',
+    runtimeSessionId,
+    workDir,
+  })
 
   let result: PiResult<PiTurnResult>
   try {
