@@ -90,7 +90,6 @@ export interface WorkflowAgentInterruption {
   stopFailure?: string | null
   expectedRecoveryPath: string
   recordedAt: string
-
 }
 
 export interface WorkflowAgentResultSettlement {

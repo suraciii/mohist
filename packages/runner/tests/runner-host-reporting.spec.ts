@@ -202,6 +202,18 @@ function it(name: string, body: () => Promise<void> | void): void {
   })
 }
 
+function newRunnerHost(pollIntervalMs: number = QUIET_INTERVAL_MS): RunnerHost {
+  return new RunnerHost({
+    serverUrl: 'https://runner.test',
+    runnerId: 'runner-test',
+    projectId: 'project-1',
+    runnerRoot: '/virtual/mohist-runner-test',
+    pollIntervalMs,
+    heartbeatIntervalMs: QUIET_INTERVAL_MS,
+    dispatchLivenessProbeIntervalMs: QUIET_INTERVAL_MS,
+  })
+}
+
 describe('RunnerHost', () => {
   it('Restart_RedrivesDurablyCompletedResultWithoutExecutingTheWorkAgain', async () => {
     const redriven = deferred<void>()
@@ -230,15 +242,7 @@ describe('RunnerHost', () => {
     connect.mockResolvedValue(undefined)
     heartbeat.mockResolvedValue(undefined)
     disconnect.mockResolvedValue(undefined)
-    const host = new RunnerHost({
-      serverUrl: 'https://runner.test',
-      runnerId: 'runner-test',
-      projectId: 'project-1',
-      runnerRoot: '/virtual/mohist-runner-test',
-      pollIntervalMs: QUIET_INTERVAL_MS,
-      heartbeatIntervalMs: QUIET_INTERVAL_MS,
-      dispatchLivenessProbeIntervalMs: QUIET_INTERVAL_MS,
-    })
+    const host = newRunnerHost()
 
     const run = host.run(controller.signal)
     try {
@@ -292,15 +296,7 @@ describe('RunnerHost', () => {
     })
     poll.mockResolvedValue([])
     const controller = new AbortController()
-    const host = new RunnerHost({
-      serverUrl: 'https://runner.test',
-      runnerId: 'runner-test',
-      projectId: 'project-1',
-      runnerRoot: '/virtual/mohist-runner-test',
-      pollIntervalMs: QUIET_INTERVAL_MS,
-      heartbeatIntervalMs: QUIET_INTERVAL_MS,
-      dispatchLivenessProbeIntervalMs: QUIET_INTERVAL_MS,
-    })
+    const host = newRunnerHost()
 
     const run = host.run(controller.signal)
     try {
@@ -342,15 +338,7 @@ describe('RunnerHost', () => {
       return [work]
     })
     const controller = new AbortController()
-    const host = new RunnerHost({
-      serverUrl: 'https://runner.test',
-      runnerId: 'runner-test',
-      projectId: 'project-1',
-      runnerRoot: '/virtual/mohist-runner-test',
-      pollIntervalMs: QUIET_INTERVAL_MS,
-      heartbeatIntervalMs: QUIET_INTERVAL_MS,
-      dispatchLivenessProbeIntervalMs: QUIET_INTERVAL_MS,
-    })
+    const host = newRunnerHost()
     const run = host.run(controller.signal)
 
     try {
@@ -410,15 +398,7 @@ describe('RunnerHost', () => {
     report.mockRejectedValueOnce(new Error('first report transport failed'))
 
     const firstController = new AbortController()
-    const firstHost = new RunnerHost({
-      serverUrl: 'https://runner.test',
-      runnerId: 'runner-test',
-      projectId: 'project-1',
-      runnerRoot: '/virtual/mohist-runner-test',
-      pollIntervalMs: QUIET_INTERVAL_MS,
-      heartbeatIntervalMs: QUIET_INTERVAL_MS,
-      dispatchLivenessProbeIntervalMs: QUIET_INTERVAL_MS,
-    })
+    const firstHost = newRunnerHost()
     const firstRun = firstHost.run(firstController.signal)
     const originalAcknowledge = WorkResultJournal.prototype.acknowledge
     const acknowledge = vi.spyOn(WorkResultJournal.prototype, 'acknowledge').mockImplementation(async function (
@@ -451,15 +431,7 @@ describe('RunnerHost', () => {
       report.mockResolvedValue({ tracked: true })
       poll.mockResolvedValue([])
       const controller = new AbortController()
-      const host = new RunnerHost({
-        serverUrl: 'https://runner.test',
-        runnerId: 'runner-test',
-        projectId: 'project-1',
-        runnerRoot: '/virtual/mohist-runner-test',
-        pollIntervalMs: QUIET_INTERVAL_MS,
-        heartbeatIntervalMs: QUIET_INTERVAL_MS,
-        dispatchLivenessProbeIntervalMs: QUIET_INTERVAL_MS,
-      })
+      const host = newRunnerHost()
       restarted = { controller, run: host.run(controller.signal) }
 
       await receiptAcknowledged.promise
@@ -516,15 +488,7 @@ describe('RunnerHost', () => {
       return []
     })
     blockingAction.mockResolvedValue({ output: { message: 'ok' } })
-    const host = new RunnerHost({
-      serverUrl: 'https://runner.test',
-      runnerId: 'runner-test',
-      projectId: 'project-1',
-      runnerRoot: '/virtual/mohist-runner-test',
-      pollIntervalMs: POLL_INTERVAL_MS,
-      heartbeatIntervalMs: QUIET_INTERVAL_MS,
-      dispatchLivenessProbeIntervalMs: QUIET_INTERVAL_MS,
-    })
+    const host = newRunnerHost(POLL_INTERVAL_MS)
     const run = host.run(controller.signal)
 
     try {
@@ -579,15 +543,7 @@ describe('RunnerHost', () => {
       pollIndex += 1
       return pollIndex <= 3 ? [same] : []
     })
-    const host = new RunnerHost({
-      serverUrl: 'https://runner.test',
-      runnerId: 'runner-test',
-      projectId: 'project-1',
-      runnerRoot: '/virtual/mohist-runner-test',
-      pollIntervalMs: POLL_INTERVAL_MS,
-      heartbeatIntervalMs: QUIET_INTERVAL_MS,
-      dispatchLivenessProbeIntervalMs: QUIET_INTERVAL_MS,
-    })
+    const host = newRunnerHost(POLL_INTERVAL_MS)
     blockingAction.mockResolvedValue({ error: { code: 'action-failed', message: 'runtime turn failed' }, exitCode: 1 })
     const run = host.run(controller.signal)
 
@@ -653,15 +609,7 @@ describe('RunnerHost', () => {
       variables: { workspace: { path: '/virtual/mohist-runner-test' } },
     }
     poll.mockResolvedValueOnce([work]).mockResolvedValue([])
-    const host = new RunnerHost({
-      serverUrl: 'https://runner.test',
-      runnerId: 'runner-test',
-      projectId: 'project-1',
-      runnerRoot: '/virtual/mohist-runner-test',
-      pollIntervalMs: QUIET_INTERVAL_MS,
-      heartbeatIntervalMs: QUIET_INTERVAL_MS,
-      dispatchLivenessProbeIntervalMs: QUIET_INTERVAL_MS,
-    })
+    const host = newRunnerHost()
     blockingAction.mockResolvedValue({ output: { message: 'ok' } })
     const stopLog = onCapturedLog((record) => {
       if (record.message === 'first work report failed; will retry') firstFailureLogged.resolve()
@@ -748,15 +696,7 @@ describe('RunnerHost', () => {
         },
         collector: collector!,
       }))
-    const host = new RunnerHost({
-      serverUrl: 'https://runner.test',
-      runnerId: 'runner-test',
-      projectId: 'project-1',
-      runnerRoot: '/virtual/mohist-runner-test',
-      pollIntervalMs: QUIET_INTERVAL_MS,
-      heartbeatIntervalMs: QUIET_INTERVAL_MS,
-      dispatchLivenessProbeIntervalMs: QUIET_INTERVAL_MS,
-    })
+    const host = newRunnerHost()
     const stopLog = onCapturedLog((record) => {
       if (record.message === 'first work report failed; will retry') firstFailureLogged.resolve()
     })
@@ -802,15 +742,7 @@ describe('RunnerHost', () => {
     })
     poll.mockResolvedValueOnce([work]).mockResolvedValue([])
     const controller = new AbortController()
-    const host = new RunnerHost({
-      serverUrl: 'https://runner.test',
-      runnerId: 'runner-test',
-      projectId: 'project-1',
-      runnerRoot: '/virtual/mohist-runner-test',
-      pollIntervalMs: QUIET_INTERVAL_MS,
-      heartbeatIntervalMs: QUIET_INTERVAL_MS,
-      dispatchLivenessProbeIntervalMs: QUIET_INTERVAL_MS,
-    })
+    const host = newRunnerHost()
     const run = host.run(controller.signal)
     try {
       await reported.promise
@@ -854,15 +786,7 @@ describe('RunnerHost', () => {
     })
     poll.mockResolvedValueOnce([work]).mockResolvedValue([])
     const controller = new AbortController()
-    const host = new RunnerHost({
-      serverUrl: 'https://runner.test',
-      runnerId: 'runner-test',
-      projectId: 'project-1',
-      runnerRoot: '/virtual/mohist-runner-test',
-      pollIntervalMs: QUIET_INTERVAL_MS,
-      heartbeatIntervalMs: QUIET_INTERVAL_MS,
-      dispatchLivenessProbeIntervalMs: QUIET_INTERVAL_MS,
-    })
+    const host = newRunnerHost()
     const run = host.run(controller.signal)
     try {
       await reported.promise
@@ -901,15 +825,7 @@ describe('RunnerHost', () => {
     })
     poll.mockResolvedValueOnce([work]).mockResolvedValueOnce([work]).mockResolvedValue([])
     const controller = new AbortController()
-    const host = new RunnerHost({
-      serverUrl: 'https://runner.test',
-      runnerId: 'runner-test',
-      projectId: 'project-1',
-      runnerRoot: '/virtual/mohist-runner-test',
-      pollIntervalMs: POLL_INTERVAL_MS,
-      heartbeatIntervalMs: QUIET_INTERVAL_MS,
-      dispatchLivenessProbeIntervalMs: QUIET_INTERVAL_MS,
-    })
+    const host = newRunnerHost(POLL_INTERVAL_MS)
     const run = host.run(controller.signal)
     try {
       await reportStarted.promise
@@ -969,15 +885,7 @@ describe('RunnerHost', () => {
     })
     poll.mockResolvedValueOnce([work]).mockResolvedValue([])
     const controller = new AbortController()
-    const host = new RunnerHost({
-      serverUrl: 'https://runner.test',
-      runnerId: 'runner-test',
-      projectId: 'project-1',
-      runnerRoot: '/virtual/mohist-runner-test',
-      pollIntervalMs: QUIET_INTERVAL_MS,
-      heartbeatIntervalMs: QUIET_INTERVAL_MS,
-      dispatchLivenessProbeIntervalMs: QUIET_INTERVAL_MS,
-    })
+    const host = newRunnerHost()
     const run = host.run(controller.signal)
     try {
       await reported.promise

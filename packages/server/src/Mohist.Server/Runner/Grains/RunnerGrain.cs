@@ -141,10 +141,9 @@ public partial class RunnerGrain : Grain, IRunnerGrain, IRemindable
 
     public Task ReceiveReminder(string reminderName, TickStatus status)
     {
-        // The presence reminder is a no-op tick carrier; the actual presence
-        // check is driven by the grain timer registered on register or poll.
-        // The reminder exists only so presence-expiry survives silo restart
-        // (a grain timer does not). Kept minimal here.
+        // Presence reminder is a no-op tick carrier; the actual check runs on
+        // the register/poll grain timer. The reminder exists only so
+        // presence-expiry survives silo restart (a grain timer does not).
         return Task.CompletedTask;
     }
 

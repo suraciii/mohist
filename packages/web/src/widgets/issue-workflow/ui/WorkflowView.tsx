@@ -1,7 +1,12 @@
 import { useState, useEffect, useMemo } from 'react'
 import { CircleAlertIcon } from 'lucide-react'
 import { IssueStatus, IssueHealth, WorkflowStage, useWorkflowTimeline } from '../../../entities/issue'
-import type { Issue, WorkInterruption, WorkflowAgentInterruption, WorkflowAgentResultAttention } from '../../../entities/issue'
+import type {
+  Issue,
+  WorkInterruption,
+  WorkflowAgentInterruption,
+  WorkflowAgentResultAttention,
+} from '../../../entities/issue'
 import { StageBar, workflowTimelineToStageStateMap, WORKFLOW_STAGES } from './StageBar'
 import { StepList, type StepListDependencies } from './InlineApproval'
 import { SpecialStatePanel, IntegrateFailurePanel } from './failure-panels'

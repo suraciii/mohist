@@ -70,3 +70,25 @@ export function boundedSignal(parent: AbortSignal, timeoutMs: number): { signal:
     },
   }
 }
+
+/**
+ * Race a promise against a timeout. Returns `null` when the timeout wins;
+ * the caller distinguishes a value-equals-null completion from a timed-out
+ * race and surfaces the difference as its own error. The internal timer is
+ * always cleared so a late settlement cannot leak an unref'd handle.
+ */
+export async function withTimeout<T>(promise: Promise<T>, timeoutMs: number): Promise<T | null> {
+  if (timeoutMs <= 0) return null
+  let timer: ReturnType<typeof setTimeout> | undefined
+  try {
+    return await Promise.race([
+      promise,
+      new Promise<null>((resolve) => {
+        timer = setTimeout(() => resolve(null), timeoutMs)
+        timer.unref?.()
+      }),
+    ])
+  } finally {
+    if (timer !== undefined) clearTimeout(timer)
+  }
+}

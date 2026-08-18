@@ -967,8 +967,7 @@ function readBoolean(value: unknown, path: string[]): boolean | null {
 /**
  * Answer shape for
  * `POST /api/runner/{runnerId}/workspaces/{projectId}/{workspaceName}/materialized`.
- * `runnerId` is the workspace home runner recorded by the server (this
- * runner on success).
+ * `runnerId` is the workspace home runner recorded by the server (this runner on success).
  */
 export interface WorkspaceMaterializedReport {
   readonly runnerId: string
@@ -978,8 +977,8 @@ export interface WorkspaceMaterializedReport {
 /**
  * Answer shape for
  * `GET /api/runner/{runnerId}/workspaces/{projectId}/{workspaceName}/reclaimable`.
- * `status` is the Workspace entity lifecycle status; `activeBoundSessions`
- * counts sessions currently bound to and actively using the workspace.
+ * `status` is the Workspace lifecycle status; `activeBoundSessions` counts
+ * sessions bound to and actively using the workspace.
  */
 export interface WorkspaceReclaimability {
   readonly status: 'active' | 'archived'

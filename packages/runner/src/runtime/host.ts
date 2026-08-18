@@ -25,7 +25,21 @@ import { AgentJobExecutor } from './agent-job-executor.js'
 import { TaskLogCollector } from './task-log.js'
 import { createHostCleanup } from './host-cleanup.js'
 import { executeWork, retryPendingTerminalTaskLogs, type HostTaskLogDeps } from './host-task-log.js'
-import { AWAITING_ACK_RETRY_INTERVAL_MS, POLL_TIMEOUT_MS } from './host-timing.js'
+import {
+  AWAITING_ACK_RETRY_INTERVAL_MS,
+  POLL_TIMEOUT_MS,
+  boundedSignal,
+  delay as hostDelay,
+  raceInterval,
+  withTimeout,
+} from './host-timing.js'
+import {
+  createHostShutdown,
+  isShutdownFailureResult,
+  isSyntheticStopResult,
+  positiveBudget,
+  SHUTDOWN_HANDOFF_BUDGET_MS,
+} from './host-update-shutdown.js'
 import { TerminalTaskLogDeliveryStoreImpl, type TerminalTaskLogDeliveryStore } from './terminal-task-log-delivery.js'
 import { getOpenCodeRuntimeFactory, type OpenCodeRuntime } from './opencode/index.js'
 import { getPiRuntimeFactory, parseProviderErrorPolicy, type PiRuntime } from './pi/index.js'
@@ -35,13 +49,11 @@ import { CancelOperationJournal } from './cancel-operation-journal.js'
 import { WorkResultJournal, workKey as journalWorkKey } from './work-result-journal.js'
 import { RecoveredStartedWork } from './recovered-started-work.js'
 import {
-  createInterruptedRecoveryReceipt,
   createTerminalRecoveryReceipt,
   type PendingUpdateOperation,
   type RuntimeRecoveryReceipt,
 } from './recovery-receipt.js'
 import { RuntimeTurnRegistry } from './runtime-turn-registry.js'
-import { callCancel, readCancelFacts, resolveCommandRuntime } from '../server/command-runtime.js'
 import { loadBuildInfo } from './build-info.js'
 import type { DispatchWorkItem } from '../core/types.js'
 import type { WorkItemResult } from '../core/types.js'
@@ -52,6 +64,19 @@ import { runnerLogger } from '../system/logger.js'
 import { type FollowupTarget, type FollowupTargetResolution, type SessionTarget } from '../server/session-target.js'
 import { isAgentRecoveryDispatch, usesOpenCode } from './host-helpers.js'
 import { reconcileStartedDispatch, type HostRecoveryContext } from './host-recovery.js'
+import { type AwaitingAckEntry, type InFlightEntry, type ShutdownWorkState } from './host-state.js'
+import {
+  executeAndTransition,
+  markResultPersistencePending,
+  nextReconciliationInterval,
+  promoteAndReportDurableJournalResults,
+  promoteDurableJournalResults,
+  reportOnce,
+  retryDueReports,
+  retryPendingWorkResultPersistence,
+  scheduleReportRetry,
+  type HostExecutionContext,
+} from './host-execution.js'
 
 export { startTaskLogFlushTrigger } from './host-task-log.js'
 
@@ -69,44 +94,6 @@ export interface RunnerHostDependencies {
   shutdownHandoffBudgetMs?: number
   shutdownStopBudgetMs?: number
   receiptId?: () => string
-}
-
-/**
- * The runner-process reported set is PROCESS-LIFETIME state, not per-poll.
- * It tracks works the process is executing (`inFlight`) and works whose
- * result has not yet been acked (`awaitingAck`). Both survive poll
- * exceptions and connection resets: a poll that throws must not discard
- * works still executing or awaiting ack, or the next poll's report will
- * drop them and the server will re-dispatch — a rollback storm that
- * duplicates execution and eventually fails works as runner-lost.
- */
-interface InFlightEntry {
-  /** The execution promise; resolves when the work settles (success or failure). */
-  done: Promise<void>
-  readonly work: DispatchWorkItem
-  /** A settled result held only in memory must not turn the loop into a busy poll. */
-  awaitingResultPersistence: boolean
-  readonly controller: AbortController
-  shutdown?: ShutdownWorkState
-  terminalPersisted?: boolean
-}
-
-interface ShutdownWorkState {
-  requested: boolean
-  stopConfirmed: boolean
-  operationId: string | null
-  stopFailure?: string | null
-}
-
-interface AwaitingAckEntry {
-  /** The result to (re-)report until the owner acks (Accepted or Stale). */
-  result: WorkItemResult
-  /** A receipt-shaped terminal identity when the bound Agent turn is known. */
-  receipt?: RuntimeRecoveryReceipt
-  /** Monotonic attempt count for diagnostics. */
-  attempts: number
-  /** Earliest wall-clock time for the next bounded report attempt. */
-  retryAt: number | null
 }
 
 /**
@@ -176,6 +163,7 @@ export class RunnerHost {
   private readonly shutdownStopBudgetMs: number
   private readonly receiptId: () => string
   private readonly terminalTaskLogDelivery: TerminalTaskLogDeliveryStore
+  private readonly hostShutdown: ReturnType<typeof createHostShutdown>
   private readonly waitForConnectionRetry: (delayMs: number, signal: AbortSignal) => Promise<void>
   private readonly skillResolver = new SkillResolver()
 
@@ -257,10 +245,10 @@ export class RunnerHost {
     this.recoveredStartedWork = new RecoveredStartedWork(this.workResultJournal, this.connection)
     this.terminalTaskLogDelivery =
       dependencies.terminalTaskLogDelivery ?? new TerminalTaskLogDeliveryStoreImpl(options.runnerRoot)
-    this.waitForConnectionRetry = dependencies.waitForConnectionRetry ?? delay
+    this.waitForConnectionRetry = dependencies.waitForConnectionRetry ?? hostDelay
     this.shutdownHandoffBudgetMs = positiveBudget(dependencies.shutdownHandoffBudgetMs, SHUTDOWN_HANDOFF_BUDGET_MS)
-    this.shutdownStopBudgetMs = positiveBudget(dependencies.shutdownStopBudgetMs, SHUTDOWN_STOP_BUDGET_MS)
-    this.receiptId = dependencies.receiptId ?? (() => cryptoRandomId())
+    this.shutdownStopBudgetMs = positiveBudget(dependencies.shutdownStopBudgetMs, 2_000)
+    this.receiptId = dependencies.receiptId ?? (() => `receipt-${randomUUID()}`)
     this.fetchPendingUpdateOperation =
       dependencies.fetchPendingUpdateOperation ??
       (async (signal) => {
@@ -306,6 +294,55 @@ export class RunnerHost {
       bindingConvergence: this.bindingConvergence,
       openCodeRuntime: () => this.openCodeRuntime,
     })
+    this.hostShutdown = createHostShutdown({
+      options: this.options,
+      connection: this.connection,
+      openCodeRuntime: () => this.openCodeRuntime,
+      piRuntime: () => this.piRuntime,
+      inFlight: this.inFlight,
+      awaitingAck: this.awaitingAck,
+      runtimeTurnRegistry: this.runtimeTurnRegistry,
+      workResultJournal: this.workResultJournal,
+      receiptId: this.receiptId,
+      reportOnce: (key, signal) => reportOnce(this.executionContext, key, signal),
+      scheduleReportRetry: (key) => scheduleReportRetry(this.executionContext, key),
+      syncOpenCodeWorkOwners: () => this.syncOpenCodeWorkOwners(),
+      fetchPendingUpdateOperation: this.fetchPendingUpdateOperation,
+      shutdownHandoffBudgetMs: this.shutdownHandoffBudgetMs,
+      shutdownStopBudgetMs: this.shutdownStopBudgetMs,
+    })
+  }
+
+  /**
+   * Lightweight projection of the host's process-lifetime state for the
+   * helpers under {@link ./host-execution.ts}. The host passes this object
+   * by reference; the helpers see only the surface they were designed for.
+   */
+  private get executionContext(): HostExecutionContext {
+    return {
+      options: this.options,
+      connection: this.connection,
+      receiptId: this.receiptId,
+      taskLogDeps: () => this.taskLogDepsForExecution(),
+      workExecutorRef: () => this.workExecutor,
+      workResultJournal: this.workResultJournal,
+      runtimeTurnRegistry: this.runtimeTurnRegistry,
+      recoveredStartedWork: this.recoveredStartedWork,
+      terminalTaskLogDelivery: this.terminalTaskLogDelivery,
+      terminalTaskLogDeliveryInFlight: this.terminalTaskLogDeliveryInFlight,
+      syncOpenCodeWorkOwners: () => this.syncOpenCodeWorkOwners(),
+      inFlight: this.inFlight,
+      awaitingAck: this.awaitingAck,
+      hostShutdown: this.hostShutdown,
+    }
+  }
+
+  private taskLogDepsForExecution(): HostTaskLogDeps {
+    return {
+      connection: this.connection,
+      terminalTaskLogDelivery: this.terminalTaskLogDelivery,
+      options: this.options,
+    }
   }
 
   private resolveFollowupTarget(target: SessionTarget): FollowupTargetResolution {
@@ -407,7 +444,8 @@ export class RunnerHost {
   private onDispatchReconnected() {
     void this.sendImmediateHeartbeat()
     const signal = this.activeSignal
-    if (signal) void retryPendingTerminalTaskLogs(this.taskLogDeps(), this.terminalTaskLogDeliveryInFlight, signal)
+    if (signal)
+      void retryPendingTerminalTaskLogs(this.taskLogDepsForExecution(), this.terminalTaskLogDeliveryInFlight, signal)
     // Convergence on every reconnect: the SignalR transport just
     // recovered, which is the cheapest moment to ask the server for the
     // truth about every active registry entry. Push may also have queued
@@ -532,7 +570,7 @@ export class RunnerHost {
       log.warn('work result journal unavailable; runner admission gated')
       return
     }
-    this.promoteDurableJournalResults(0)
+    promoteDurableJournalResults(this.executionContext, 0)
     this.recoveredStartedWork.recover()
     for (const entry of this.workResultJournal.interrupted()) {
       const key = workKey(entry.work)
@@ -548,7 +586,6 @@ export class RunnerHost {
       })
     }
     this.syncOpenCodeWorkOwners()
-
   }
 
   private async shutdownSharedConnection() {
@@ -577,8 +614,8 @@ export class RunnerHost {
     // and report retries share this one process-critical reconciliation loop;
     // no sibling lifetime task can prevent a failed poll from being retried.
     while (!signal.aborted) {
-      void retryPendingTerminalTaskLogs(this.taskLogDeps(), this.terminalTaskLogDeliveryInFlight, signal)
-      await this.retryDueReports()
+      void retryPendingTerminalTaskLogs(this.taskLogDepsForExecution(), this.terminalTaskLogDeliveryInFlight, signal)
+      await retryDueReports(this.executionContext)
 
       // Runtime readiness is sent as a claim-time witness. Polling must stay
       // alive while a runtime is unhealthy so held work can be reconciled and
@@ -588,7 +625,7 @@ export class RunnerHost {
           log.warn('runner not ready; skipping poll', { reason: this.providerPolicyDiagnostic })
           this.lastProviderPolicyDiagnosticLogged = this.providerPolicyDiagnostic
         }
-        await raceInterval(this.nextReconciliationInterval(), signal, [])
+        await raceInterval(nextReconciliationInterval(this.executionContext), signal, [])
         continue
       }
       this.lastProviderPolicyDiagnosticLogged = null
@@ -604,14 +641,14 @@ export class RunnerHost {
       } catch (error) {
         if (signal.aborted) break
         log.warn('runner poll failed; retrying', { reason: `in ${this.options.pollIntervalMs}ms`, exception: error })
-        await raceInterval(this.nextReconciliationInterval(), signal, [])
+        await raceInterval(nextReconciliationInterval(this.executionContext), signal, [])
         continue
       }
 
       // A successful control-plane round is the recovery boundary for a
       // result held in memory after a local journal write failure. No result
       // becomes reportable until this retry restores its durable receipt.
-      await this.retryPendingWorkResultPersistence()
+      await retryPendingWorkResultPersistence(this.executionContext)
 
       await this.prepareOpenCodeWork(works, signal)
 
@@ -698,7 +735,7 @@ export class RunnerHost {
           awaitingResultPersistence: false,
           controller,
         }
-        entry.done = this.executeAndTransition(work, controller.signal, key, entry)
+        entry.done = executeAndTransition(this.executionContext, work, controller.signal, key, entry)
         this.inFlight.set(key, entry)
 
         this.syncOpenCodeWorkOwners()
@@ -714,7 +751,7 @@ export class RunnerHost {
       // also bounds the wait: report retries must not inherit a long poll
       // interval.
       await raceInterval(
-        this.nextReconciliationInterval(),
+        nextReconciliationInterval(this.executionContext),
         signal,
         [...this.inFlight.values()].filter((entry) => !entry.awaitingResultPersistence).map((entry) => entry.done),
       )
@@ -723,7 +760,7 @@ export class RunnerHost {
     // Shutdown is deliberately bounded. The handoff identifies an update
     // operation before runtime stop is attempted; a missing or unavailable
     // handoff leaves the started fences untouched.
-    await this.shutdownInFlight()
+    await this.hostShutdown.shutdownInFlight()
     await withTimeout(Promise.allSettled([...this.inFlight.values()].map((e) => e.done)), this.shutdownStopBudgetMs)
   }
 
@@ -828,8 +865,8 @@ export class RunnerHost {
       queueAwaitingAck: (key, work, result) =>
         this.awaitingAck.set(key, { work, entry: { result, attempts: 0, retryAt: null } }),
       syncOpenCodeWorkOwners: () => this.syncOpenCodeWorkOwners(),
-      reportOnce: (key) => this.reportOnce(key),
-      scheduleReportRetry: (key) => this.scheduleReportRetry(key),
+      reportOnce: (key) => reportOnce(this.executionContext, key),
+      scheduleReportRetry: (key) => scheduleReportRetry(this.executionContext, key),
     }
   }
 
@@ -842,426 +879,6 @@ export class RunnerHost {
    * `signal` is the run-lifetime signal; reporting uses a fresh signal so
    * a host teardown (SIGINT) still reaches the owner instead of aborting.
    */
-  private async executeAndTransition(
-    work: DispatchWorkItem,
-    signal: AbortSignal,
-    key: string,
-    entry: InFlightEntry,
-  ): Promise<void> {
-    let result: WorkItemResult
-    try {
-      result = await executeWork(
-        this.taskLogDeps(),
-        this.workExecutor,
-        this.terminalTaskLogDeliveryInFlight,
-        work,
-        signal,
-      )
-    } catch (error) {
-      if (signal.aborted) return
-      log.error('work failed before report', { work: work.workId, exception: error })
-      result = { status: 'failed', message: String(error) }
-    }
-
-    if (entry.terminalPersisted) {
-      this.runtimeTurnRegistry.remove(key)
-      return
-    }
-
-    // Runtime cancellation returns an internal interrupted result so the
-    // action can unwind. It is not a task outcome. A normal result that wins
-    // the race remains authoritative and follows the terminal-result path.
-    if (
-      entry.shutdown?.requested &&
-      (isSyntheticStopResult(result) || (!entry.shutdown.stopConfirmed && isShutdownFailureResult(result)))
-    ) {
-      if (entry.shutdown.stopConfirmed && entry.shutdown.operationId) {
-        await this.persistInterrupted(entry, entry.shutdown.operationId)
-      } else {
-        this.inFlight.delete(key)
-        this.runtimeTurnRegistry.remove(key)
-        this.syncOpenCodeWorkOwners()
-      }
-      return
-    }
-
-    const binding = this.runtimeTurnRegistry.get(key)
-    const receipt = binding
-      ? createTerminalRecoveryReceipt(work, binding, this.options.runnerId, result, this.receiptId())
-      : undefined
-    // A returned result is authoritative even when shutdown raced with its
-    // delivery. Persist it before the host releases the work; only an abort
-    // that prevented a result from returning stays as the started fence above.
-    let persistence: Awaited<ReturnType<WorkResultJournal['complete']>>
-    try {
-      persistence = await this.workResultJournal.complete(work, result, receipt ?? undefined)
-    } catch (error) {
-      log.error('work result journal could not persist settled result', { work: work.workId, exception: error })
-      // Keep the work in `inFlight` and stop admission. Reporting a result
-      // without a durable local copy would turn a restart into result loss.
-      this.markResultPersistencePending(key)
-      this.workResultJournal.disable()
-      return
-    }
-
-    if (persistence.state === 'pending' || !this.workResultJournal.ready()) {
-      this.markResultPersistencePending(key)
-      if (persistence.state === 'pending') {
-        log.warn('work result journal persistence deferred; retaining result in memory', {
-          work: work.workId,
-          exception: persistence.error,
-        })
-      }
-      this.runtimeTurnRegistry.remove(key)
-      return
-    }
-    this.syncOpenCodeWorkOwners()
-
-    await this.promoteAndReportDurableJournalResults()
-    if (!this.workResultJournal.ready()) this.markResultPersistencePending(key)
-  }
-
-  private async retryPendingWorkResultPersistence(): Promise<void> {
-    if (!this.workResultJournal.needsPersistenceRecovery()) return
-    const persistence = await this.workResultJournal.retryPendingPersistence()
-    if (persistence.state === 'pending') {
-      log.warn('work result journal persistence recovery is still unavailable', { exception: persistence.error })
-      return
-    }
-    await this.promoteAndReportDurableJournalResults()
-  }
-
-  private markResultPersistencePending(key: string): void {
-    const held = this.inFlight.get(key)
-    if (held) held.awaitingResultPersistence = true
-  }
-
-  private promoteDurableJournalResults(retryAt: number | null = null): string[] {
-    if (!this.workResultJournal.ready()) return []
-    const promoted: string[] = []
-    for (const entry of this.workResultJournal.completed()) {
-      const key = workKey(entry.work)
-      if (this.awaitingAck.has(key)) continue
-      this.inFlight.delete(key)
-      this.awaitingAck.set(key, {
-        work: entry.work,
-        entry: {
-          result: entry.result!,
-          ...(entry.receipt ? { receipt: entry.receipt } : {}),
-          attempts: 0,
-          retryAt,
-        },
-      })
-      promoted.push(key)
-    }
-    this.syncOpenCodeWorkOwners()
-    return promoted
-  }
-
-  private async promoteAndReportDurableJournalResults(): Promise<void> {
-    for (const key of this.promoteDurableJournalResults()) {
-      const held = this.awaitingAck.get(key)
-      if (!held) continue
-      try {
-        await this.reportOnce(key)
-      } catch (error) {
-        this.scheduleReportRetry(key)
-        log.warn('first work report failed; will retry', { work: held.work.workId, exception: error })
-      }
-    }
-  }
-
-  private async persistInterrupted(entry: InFlightEntry, operationId: string, deliveryBudgetMs?: number): Promise<boolean> {
-    if (entry.terminalPersisted) return true
-    const key = workKey(entry.work)
-    const binding = this.runtimeTurnRegistry.get(key)
-    if (!binding) return false
-    const receipt = createInterruptedRecoveryReceipt(
-      entry.work,
-      binding,
-      this.options.runnerId,
-      operationId,
-      this.receiptId(),
-    )
-    if (!receipt) return false
-    try {
-      await this.workResultJournal.interrupt(entry.work, receipt)
-    } catch (error) {
-      log.warn('update interruption receipt could not be persisted', {
-        work: entry.work.workId,
-        context: 'update-interruption',
-        exception: error,
-      })
-      this.workResultJournal.disable()
-      return false
-    }
-    entry.terminalPersisted = true
-    this.inFlight.delete(key)
-    this.runtimeTurnRegistry.remove(key)
-    this.awaitingAck.set(key, {
-      work: entry.work,
-      entry: { result: { status: 'interrupted' }, receipt, attempts: 0, retryAt: null },
-    })
-    this.syncOpenCodeWorkOwners()
-    try {
-      if (deliveryBudgetMs === undefined) {
-        await this.reportOnce(key)
-      } else {
-        await this.reportWithinBudget(key, deliveryBudgetMs)
-      }
-    } catch (error) {
-      this.scheduleReportRetry(key)
-      log.warn('update interruption receipt delivery failed; will retry', {
-        work: entry.work.workId,
-        context: 'update-interruption',
-        exception: error,
-      })
-    }
-    return true
-  }
-
-  private async shutdownInFlight(): Promise<void> {
-    const entries = [...this.inFlight.values()]
-    if (entries.length === 0) return
-
-    // This is the only source of update context. The CLI confirmation is not
-    // delivered to the Runner process, so a failed or empty handoff is
-    // intentionally indistinguishable from an ordinary restart here.
-    const operation = await this.pendingUpdateOperationForShutdown()
-    const deadline = Date.now() + this.shutdownStopBudgetMs
-    await Promise.all(entries.map((entry) => this.requestCooperativeStop(entry, operation, deadline)))
-
-    await withTimeout(Promise.allSettled(entries.map((entry) => entry.done)), Math.max(0, deadline - Date.now()))
-
-    // A runtime may have confirmed the physical stop while its action wrapper
-    // is still unwinding. The receipt can be committed after the bounded wait;
-    // the execution path checks terminalPersisted and cannot create a second
-    // terminal record.
-    for (const entry of entries) {
-      if (entry.shutdown?.stopConfirmed && entry.shutdown.operationId && this.inFlight.has(workKey(entry.work))) {
-        await this.persistInterrupted(entry, entry.shutdown.operationId, Math.max(0, deadline - Date.now()))
-      }
-      if (this.inFlight.has(workKey(entry.work))) {
-        entry.controller.abort()
-        this.inFlight.delete(workKey(entry.work))
-        this.runtimeTurnRegistry.remove(workKey(entry.work))
-      }
-    }
-    this.syncOpenCodeWorkOwners()
-  }
-
-  private async pendingUpdateOperationForShutdown(): Promise<PendingUpdateOperation | null> {
-    const deadline = Date.now() + this.shutdownHandoffBudgetMs
-    let attempt = 0
-    while (Date.now() <= deadline && attempt < SHUTDOWN_HANDOFF_ATTEMPTS) {
-      attempt += 1
-      const remaining = Math.max(1, deadline - Date.now())
-      const request = new AbortController()
-      try {
-        const response = await withTimeout(
-          this.fetchPendingUpdateOperation(request.signal).then((value) => ({ value })),
-          remaining,
-        )
-        if (response) {
-          if (response.value?.runnerId && response.value.runnerId !== this.options.runnerId) {
-            log.warn('update shutdown handoff named a different Runner; ignoring operation', {
-              context: 'update-interruption',
-              expectedRunnerId: this.options.runnerId,
-              actualRunnerId: response.value.runnerId,
-            })
-            return null
-          }
-          return response.value
-        }
-        // A timed-out request does not establish that this is an ordinary
-        // restart; spend the remaining handoff budget on the brief retry.
-        continue
-      } catch (error) {
-        if (Date.now() >= deadline) break
-        log.warn('update shutdown handoff failed; retrying within bounded budget', {
-          context: 'update-interruption',
-          attempt,
-          exception: error,
-        })
-        await Promise.resolve()
-      } finally {
-        request.abort()
-      }
-    }
-    return null
-  }
-
-  private async requestCooperativeStop(
-    entry: InFlightEntry,
-    operation: PendingUpdateOperation | null,
-    deadline: number,
-  ): Promise<void> {
-    const key = workKey(entry.work)
-    const operationId = operation && operationNamesWork(operation, entry.work) ? operation.operationId : null
-    entry.shutdown = { requested: true, stopConfirmed: false, operationId }
-    const binding = this.runtimeTurnRegistry.get(key)
-    let confirmed = false
-    let stopFailure: string | null = null
-    if (binding?.runtimeSessionId) {
-      const handle = resolveCommandRuntime(
-        { runtime: binding.runtime },
-        {
-          openCode: () => this.openCodeRuntime,
-          pi: () => this.piRuntime,
-        },
-      )
-      if (handle) {
-        const remaining = Math.max(1, deadline - Date.now())
-        try {
-          const result = await withTimeout(
-            callCancel(handle, {
-              runtime: binding.runtime,
-              runtimeSessionId: binding.runtimeSessionId,
-              workDir: binding.workDir,
-            }),
-            remaining,
-          )
-          confirmed = result !== null && readCancelFacts(result)?.stopConfirmed === true
-        } catch (error) {
-          stopFailure =
-            'The Runner could not confirm the stop before shutdown; the recorded recovery path remains active.'
-          log.warn('cooperative stop failed during shutdown', {
-            work: entry.work.workId,
-            context: operationId ? 'update-interruption' : 'shutdown',
-            reason: 'runtime-stop-unconfirmed',
-            ...(operationId ? { updateOperationId: operationId } : {}),
-            exception: error,
-          })
-        }
-      }
-    }
-    if (operationId && !confirmed && stopFailure === null) {
-      stopFailure = 'The Runner could not confirm the stop before shutdown; the recorded recovery path remains active.'
-    }
-    entry.shutdown.stopConfirmed = confirmed
-    if (stopFailure !== null) {
-      entry.shutdown.stopFailure = stopFailure
-      if (operationId) {
-        try {
-          await withTimeout(
-            this.connection.reportRecoveryStopFailure(
-              {
-                runnerId: this.options.runnerId,
-                ownerKind: entry.work.ownerKind === 'agent-job' ? 'agent-job' : 'workflow',
-                ownerId: entry.work.ownerKind === 'agent-job' ? (entry.work.agentJobId ?? '') : entry.work.workflowRunId,
-                workId: entry.work.workId,
-                taskRunId: entry.work.taskRunId ?? null,
-                operationId,
-                message: stopFailure,
-              },
-              new AbortController().signal,
-            ),
-            Math.max(1, deadline - Date.now()),
-          )
-        } catch (error) {
-          log.warn('update stop failure could not be persisted', {
-            work: entry.work.workId,
-            context: 'update-interruption',
-            updateOperationId: operationId,
-            exception: error,
-          })
-        }
-      }
-    }
-    // The runtime stop is authoritative when it confirms. The child signal is
-    // still aborted to release action wrappers and non-runtime work promptly.
-    entry.controller.abort()
-  }
-
-  /**
-   * Reports a single awaitingAck entry. Accepted and stale reports are both
-   * durable acknowledgements. An untracked response leaves the original
-   * result in place for reconciliation rather than silently dropping it.
-   */
-  private async reportWithinBudget(key: string, budgetMs: number): Promise<void> {
-    if (budgetMs <= 0) throw new Error('shutdown receipt delivery budget expired')
-    const controller = new AbortController()
-    const timer = setTimeout(
-      () => controller.abort(new Error(`shutdown receipt delivery timed out after ${budgetMs}ms`)),
-      budgetMs,
-    )
-    timer.unref?.()
-    try {
-      const completed = await withTimeout(this.reportOnce(key, controller.signal), budgetMs)
-      if (completed === null) throw new Error('shutdown receipt delivery budget expired')
-    } finally {
-      clearTimeout(timer)
-    }
-  }
-
-  private async reportOnce(key: string, signal: AbortSignal = new AbortController().signal): Promise<void> {
-    const held = this.awaitingAck.get(key)
-    if (!held) return
-    held.entry.attempts += 1
-    if (held.entry.receipt) {
-      const acknowledgement = await this.connection.sendRecoveryReceipt(
-        held.entry.receipt,
-        signal,
-      )
-      if (acknowledgement.appliedReceiptId !== held.entry.receipt.receiptId)
-        throw new Error('recovery receipt acknowledgement identity mismatch')
-      if (acknowledgement.status === 'retryable') throw new Error('recovery receipt acknowledgement is retryable')
-    } else {
-      await reportAndRequireDurableAck(this.connection, held.work, held.entry.result)
-    }
-    await this.workResultJournal.acknowledge(held.work)
-    this.awaitingAck.delete(key)
-    this.syncOpenCodeWorkOwners()
-  }
-
-  private scheduleReportRetry(key: string): void {
-    const held = this.awaitingAck.get(key)
-    if (held) held.entry.retryAt = Date.now() + AWAITING_ACK_RETRY_INTERVAL_MS
-  }
-
-  private async retryDueReports(): Promise<void> {
-    const now = Date.now()
-    const due = [...this.awaitingAck.entries()].filter(
-      ([, held]) => held.entry.retryAt !== null && held.entry.retryAt <= now,
-    )
-
-    await Promise.all(
-      due.map(async ([key, held]) => {
-        held.entry.retryAt = null
-        try {
-          await this.reportOnce(key)
-        } catch (error) {
-          this.scheduleReportRetry(key)
-          log.warn('work report retry failed', {
-            work: held.work.workId,
-            attempt: held.entry.attempts,
-            exception: error,
-          })
-        }
-      }),
-    )
-  }
-
-  private nextReconciliationInterval(): number {
-    let earliestRetryAt: number | null = null
-    for (const { entry } of this.awaitingAck.values()) {
-      if (entry.retryAt !== null && (earliestRetryAt === null || entry.retryAt < earliestRetryAt)) {
-        earliestRetryAt = entry.retryAt
-      }
-    }
-    earliestRetryAt = this.recoveredStartedWork.earlierRetryAt(earliestRetryAt)
-    if (earliestRetryAt === null) return this.options.pollIntervalMs
-    return Math.min(this.options.pollIntervalMs, Math.max(0, earliestRetryAt - Date.now()))
-  }
-
-  private taskLogDeps(): HostTaskLogDeps {
-    return {
-      connection: this.connection,
-      terminalTaskLogDelivery: this.terminalTaskLogDelivery,
-      options: this.options,
-    }
-  }
-
   private async shutdownConnection() {
     const cleanup = new AbortController()
     const timeout = setTimeout(() => cleanup.abort(), 5_000)
@@ -1319,130 +936,5 @@ export class RunnerHost {
     } finally {
       clearTimeout(timeout)
     }
-  }
-}
-
-const SHUTDOWN_HANDOFF_BUDGET_MS = 1_000
-const SHUTDOWN_HANDOFF_ATTEMPTS = 2
-const SHUTDOWN_STOP_BUDGET_MS = 2_000
-
-function positiveBudget(value: number | undefined, fallback: number): number {
-  return value !== undefined && Number.isFinite(value) && value > 0 ? Math.floor(value) : fallback
-}
-
-function cryptoRandomId(): string {
-  return `receipt-${randomUUID()}`
-}
-
-function operationNamesWork(operation: PendingUpdateOperation, work: DispatchWorkItem): boolean {
-  const ownerKind = work.ownerKind === 'agent-job' ? 'agent-job' : 'workflow'
-  const ownerId = ownerKind === 'agent-job' ? (work.agentJobId ?? '') : work.workflowRunId
-  return operation.affectedWorks.some(
-    (candidate) =>
-      candidate.ownerKind.toLowerCase() === ownerKind &&
-      candidate.ownerId === ownerId &&
-      candidate.workId === work.workId &&
-      (candidate.taskRunId === undefined || candidate.taskRunId === null || candidate.taskRunId === work.taskRunId),
-  )
-}
-
-function isSyntheticStopResult(result: WorkItemResult): boolean {
-  const code = result.error?.code?.toLowerCase()
-  if (result.status.toLowerCase() === 'unknown') return true
-  if (code === 'interrupted' || code === 'timeout' || code === 'deadline-exceeded') return true
-  const message = `${result.message ?? ''} ${result.error?.message ?? ''}`.toLowerCase()
-  return message.includes('could not be confirmed stopped') || message.includes('did not confirm')
-}
-
-function isShutdownFailureResult(result: WorkItemResult): boolean {
-  const code = result.error?.code?.toLowerCase() ?? ''
-  const message = `${result.message ?? ''} ${result.error?.message ?? ''}`.toLowerCase()
-  return (
-    code === 'turn-failed' ||
-    code === 'runtime-unavailable' ||
-    code === 'session-binding-failed' ||
-    message.includes('abort') ||
-    message.includes('transport') ||
-    message.includes('unreachable')
-  )
-}
-
-async function withTimeout<T>(promise: Promise<T>, timeoutMs: number): Promise<T | null> {
-  if (timeoutMs <= 0) return null
-  let timer: ReturnType<typeof setTimeout> | undefined
-  try {
-    return await Promise.race([
-      promise,
-      new Promise<null>((resolve) => {
-        timer = setTimeout(() => resolve(null), timeoutMs)
-        timer.unref?.()
-      }),
-    ])
-  } finally {
-    if (timer !== undefined) clearTimeout(timer)
-  }
-}
-
-async function delay(ms: number, signal: AbortSignal) {
-  if (signal.aborted) throw signal.reason
-  await new Promise<void>((resolve, reject) => {
-    const timer = setTimeout(() => {
-      signal.removeEventListener('abort', onAbort)
-      resolve()
-    }, ms)
-    const onAbort = () => {
-      clearTimeout(timer)
-      reject(signal.reason)
-    }
-    signal.addEventListener('abort', onAbort, { once: true })
-  })
-}
-
-/**
- * Race a poll-interval timer against in-flight work promises. Unlike
- * {@link delay} wrapped in `Promise.race`, the interval timer is owned here:
- * whichever racer settles first, the timer is cleared and its promise
- * resolved, so no pending promise lingers to reject on a later abort and
- * surface as an unhandled rejection. The `signal` aborts the wait promptly
- * (resolving, since every caller re-checks `signal.aborted` afterwards).
- */
-function raceInterval(ms: number, signal: AbortSignal, racers: Promise<unknown>[]): Promise<void> {
-  return new Promise((resolve) => {
-    let timer: ReturnType<typeof setTimeout> | null = null
-    let settled = false
-    const done = () => {
-      if (settled) return
-      settled = true
-      if (timer) clearTimeout(timer)
-      signal.removeEventListener('abort', onAbort)
-      resolve()
-    }
-    const onAbort = done
-    if (signal.aborted) {
-      done()
-      return
-    }
-    timer = setTimeout(done, ms)
-    timer.unref?.()
-    signal.addEventListener('abort', onAbort, { once: true })
-    for (const r of racers) r.then(done, done)
-  })
-}
-
-function boundedSignal(parent: AbortSignal, timeoutMs: number): { signal: AbortSignal; dispose: () => void } {
-  const controller = new AbortController()
-  const abortFromParent = () => controller.abort(parent.reason)
-  if (parent.aborted) abortFromParent()
-  else parent.addEventListener('abort', abortFromParent, { once: true })
-
-  const timeout = setTimeout(() => controller.abort(new Error(`request timed out after ${timeoutMs}ms`)), timeoutMs)
-  timeout.unref?.()
-
-  return {
-    signal: controller.signal,
-    dispose: () => {
-      clearTimeout(timeout)
-      parent.removeEventListener('abort', abortFromParent)
-    },
   }
 }

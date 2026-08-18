@@ -655,12 +655,9 @@ export class OpenCodeRuntime {
           return { ok: false, error, diagnostics: error.diagnostics }
         }
         lease.markUsed()
-        const confirmation = await abortAndConfirmSession(
-          server.client,
-          runtimeSessionId,
-          request.target.workDir,
-          { requireActiveTurn: true },
-        )
+        const confirmation = await abortAndConfirmSession(server.client, runtimeSessionId, request.target.workDir, {
+          requireActiveTurn: true,
+        })
         if (!confirmation.ok && confirmation.missingSession) {
           const error = normalizeMissingSession()
           return { ok: false, error, diagnostics: [...diagnostics, ...error.diagnostics] }

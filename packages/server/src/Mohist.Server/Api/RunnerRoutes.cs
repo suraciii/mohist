@@ -1142,7 +1142,6 @@ public record CleanupPolicyDto(
 /// runner-facing config fields to be added additively.
 /// </summary>
 public record RunnerConfigResponse(CleanupPolicyDto? CleanupPolicy);
-
 /// <summary>
 /// Body for <c>POST /api/runner/{runnerId}/workflow-runs/status</c>. The
 /// runner lists its still-active registry entries; the server answers
@@ -1163,7 +1162,6 @@ public record RunnerWorkflowStatusResponse(Dictionary<string, string> Statuses);
 /// wins) so later dispatches bind to this runner.
 /// </summary>
 public record WorkspaceMaterializedRequest(string? Path);
-
 public record WorkspaceMaterializedResponse(string RunnerId, string Path);
 
 /// <summary>

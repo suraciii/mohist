@@ -213,11 +213,11 @@ export function TaskItem({
   const isDeliveryTask = isDeliveryFailureTask(task)
   const taskReason = isInterruption
     ? null
-    : task.error?.message ??
+    : (task.error?.message ??
       (typeof task.reason === 'string' ? task.reason : null) ??
       settlement?.message ??
       task.interruption?.reasonCode ??
-      null
+      null)
   const deliveryFailure = isFailed && isDeliveryTask ? getDeliveryFailureGuidance(task.error?.code) : null
   const resolvedTaskLogHook = taskLogHook ?? useDefaultTaskLogData
   const taskLogResult = resolvedTaskLogHook({
@@ -384,10 +384,18 @@ export function TaskItem({
                 data-testid="workflow-task-interruption-attention"
               >
                 <div className="font-semibold">Runner update interruption: {agentInterruption.state}</div>
-                <div>Update: <span className="font-mono break-all">{agentInterruption.updateOperationId}</span></div>
-                <div>Work: <span className="font-mono break-all">{agentInterruption.workId}</span></div>
+                <div>
+                  Update: <span className="font-mono break-all">{agentInterruption.updateOperationId}</span>
+                </div>
+                <div>
+                  Work: <span className="font-mono break-all">{agentInterruption.workId}</span>
+                </div>
                 <div>Recovery generation: {agentInterruption.recoveryGeneration}</div>
-                {agentInterruption.replacementTurnId && <div>Replacement turn: <span className="font-mono break-all">{agentInterruption.replacementTurnId}</span></div>}
+                {agentInterruption.replacementTurnId && (
+                  <div>
+                    Replacement turn: <span className="font-mono break-all">{agentInterruption.replacementTurnId}</span>
+                  </div>
+                )}
                 <div>{agentInterruption.expectedRecoveryPath}</div>
                 {agentInterruption.stopFailure && <div>{agentInterruption.stopFailure}</div>}
               </div>
