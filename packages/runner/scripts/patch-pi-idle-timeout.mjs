@@ -26,18 +26,31 @@
  * Override the default timeout with PI_SSE_IDLE_TIMEOUT_MS.
  */
 import { readFileSync, writeFileSync, existsSync } from "node:fs";
-import { resolve } from "node:path";
+import { dirname, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 const IDLE_TIMEOUT_MS = Number(process.env.PI_SSE_IDLE_TIMEOUT_MS || 90_000);
 
 const here = fileURLToPath(new URL(".", import.meta.url));
-// packages/runner/scripts -> packages/runner
-const runnerRoot = resolve(here, "..");
-const DEFAULT_TARGET = resolve(
-  runnerRoot,
-  "node_modules/@earendil-works/pi-coding-agent/node_modules/@earendil-works/pi-ai/dist/api/anthropic-messages.js",
-);
+
+// Locate the pi-ai Anthropic SSE file by walking up from this script. The
+// workspace hoists pi-ai under the root node_modules while a packaged release
+// keeps it under its own node_modules; both resolve to the same relative
+// pattern from the repo/release root.
+function findPiAiTarget(startDir) {
+  let dir = startDir;
+  for (;;) {
+    const candidate = resolve(
+      dir,
+      "node_modules/@earendil-works/pi-coding-agent/node_modules/@earendil-works/pi-ai/dist/api/anthropic-messages.js",
+    );
+    if (existsSync(candidate)) return candidate;
+    const parent = dirname(dir);
+    if (parent === dir) return null;
+    dir = parent;
+  }
+}
+const DEFAULT_TARGET = findPiAiTarget(here);
 
 /**
  * Apply the no-event idle timeout to the given anthropic-messages.js file.
@@ -156,6 +169,13 @@ export function applyIdleTimeoutPatch(targetPath, idleTimeoutMs = IDLE_TIMEOUT_M
 
 const isMain = process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href;
 if (isMain) {
+  if (DEFAULT_TARGET === null) {
+    // The pi-ai dependency may not be installed in this tree (e.g. runner
+    // built standalone). The patch is only required for deployment; do not
+    // fail the build.
+    console.warn("[patch-pi-idle-timeout] pi-ai not found, skipping (build only, not deployment)");
+    process.exit(0);
+  }
   const result = applyIdleTimeoutPatch(DEFAULT_TARGET, IDLE_TIMEOUT_MS);
   if (result.applied) {
     console.log(`[patch-pi-idle-timeout] applied no-event idle timeout of ${IDLE_TIMEOUT_MS}ms`);
