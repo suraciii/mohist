@@ -200,7 +200,8 @@ public sealed record BoundWorkflowStart(
     [property: Id(6)] string? AgentAction,
     [property: Id(7)] List<BoundStageStructure> Stages,
     [property: Id(8)] WorkflowRunMetadata Metadata,
-    [property: Id(9)] WorkspaceIdentity? Workspace);
+    [property: Id(9)] WorkspaceIdentity? Workspace,
+    [property: Id(10)] string? DefinitionJson = null);
 
 [GenerateSerializer]
 public sealed record BoundStageStructure(

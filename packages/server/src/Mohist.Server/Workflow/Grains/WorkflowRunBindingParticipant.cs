@@ -60,6 +60,7 @@ public sealed class WorkflowRunBindingParticipant : Grain, IWorkflowRunBindingPa
         run.ExplicitWorkflowProfileId = payload.ExplicitProfileId;
         run.AgentAction = payload.AgentAction;
         run.Workspace = payload.Workspace;
+        run.BoundWorkflowDefinitionJson = payload.DefinitionJson;
         await _runs.SaveAsync(run);
         return new WorkflowRunBindingResult(WorkflowRunBindingOutcome.Applied, ToBinding(run) with
         {
@@ -87,7 +88,8 @@ public sealed class WorkflowRunBindingParticipant : Grain, IWorkflowRunBindingPa
         && string.Equals(existing.AgentAction, requested.AgentAction, StringComparison.Ordinal)
         && existing.Stages.SequenceEqual(requested.Stages)
         && MetadataMatches(existing.Metadata, requested.Metadata)
-        && Equals(existing.Workspace, requested.Workspace);
+        && Equals(existing.Workspace, requested.Workspace)
+        && string.Equals(existing.DefinitionJson, requested.DefinitionJson, StringComparison.Ordinal);
 
     private static bool MetadataMatches(WorkflowRunMetadata existing, WorkflowRunMetadata requested) =>
         string.Equals(existing.Name, requested.Name, StringComparison.Ordinal)
@@ -117,5 +119,6 @@ public sealed class WorkflowRunBindingParticipant : Grain, IWorkflowRunBindingPa
         run.AgentAction,
         run.Stages.Select(stage => new BoundStageStructure(stage.Id, stage.RequiresApproval)).ToList(),
         run.Metadata,
-        run.Workspace);
+        run.Workspace,
+        DefinitionJson: run.BoundWorkflowDefinitionJson);
 }

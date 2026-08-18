@@ -61,6 +61,19 @@ public sealed class TaskRun
     public string? CausedByFailedTaskId { get; init; }
     public JsonElement? Output { get; set; }
     public ExecutionError? Error { get; set; }
+
+    /// <summary>
+    /// Additive verification metadata populated only for tasks whose
+    /// <see cref="DefinitionId"/> matches a built-in lane id from
+    /// <c>VerificationLaneCatalog</c>. The presence of this value
+    /// identifies a recognized lane attempt and stores its identity, order,
+    /// configured budget, terminal outcome, and the underlying attempt/task
+    /// identity so a later <c>TaskReport</c> classification can be
+    /// persisted in the same state transition as the normal task result.
+    /// Recovery helpers (<c>recover:fix-ci</c>) and arbitrary user tasks
+    /// leave this null and never participate in the lane gate.
+    /// </summary>
+    public VerificationLaneAttempt? Lane { get; set; }
 }
 
 public static class TaskRunExtensions

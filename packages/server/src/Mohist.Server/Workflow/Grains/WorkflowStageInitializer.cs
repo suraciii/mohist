@@ -5,7 +5,11 @@ namespace Mohist.Server.Workflow.Grains;
 /// <summary>
 /// Enforces the commit invariant <c>StageStarted => Initialized</c>. Empty
 /// stages may advance immediately, so one commit can materialize multiple
-/// newly started stages.
+/// newly started stages. Stage definitions are resolved from the run's
+/// persisted <c>BoundWorkflowDefinitionJson</c> snapshot when present; a
+/// missing snapshot falls back to the retained pre-change aggregate
+/// definition for the affected built-in profiles, so a profile edit after
+/// binding cannot change a run's task materialization.
 /// </summary>
 internal sealed class WorkflowStageInitializer
 {
@@ -45,11 +49,10 @@ internal sealed class WorkflowStageInitializer
 
             initializedStages.Add(pendingStart.Stage);
 
-            var stageDef = await _owner.DefinitionResolver.LoadStageSpecsAsync(
-                _owner.GrainKey, pendingStart.Stage,
-                _owner.GetProjectId(),
-                _owner.GetIssueNumber(),
-                _owner.GetWorkflowProfileId());
+            var stageDef = _owner.DefinitionResolver.ResolveStageFromBoundSnapshot(
+                _owner.GrainKey,
+                pendingStart.Stage,
+                run);
             var initEvents = run.InitializeStage(
                 stageDef.Tasks,
                 stageDef.Checks.ToList(),

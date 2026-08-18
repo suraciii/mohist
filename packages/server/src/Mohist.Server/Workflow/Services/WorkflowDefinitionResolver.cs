@@ -95,9 +95,15 @@ public class WorkflowDefinitionResolver : IScopedService
 
     /// <summary>
     /// Returns the per-stage spec (tasks + checks + lock behavior) for a
-    /// single stage. Re-runs the cascade on every call so subsequent stages
-    /// see live profile edits (hot reload per stage-enter). Throws if the
-    /// resolved template does not contain <paramref name="stageId"/>.
+    /// single stage. Snapshot-backed runs read from
+    /// <c>WorkflowRun.BoundWorkflowDefinitionJson</c> and never from the live
+    /// profile provider, so a profile edit after binding cannot change a
+    /// run's task definitions, commands, or per-lane timeouts. Pre-snapshot
+    /// runs (no <c>BoundWorkflowDefinitionJson</c>) fall back to the live
+    /// cascade for backward compatibility; the affected built-in profiles
+    /// keep their pre-issue-625 aggregate path through
+    /// <c>RetainedLegacyAggregate</c>. Throws if neither the snapshot nor
+    /// the resolved template contains <paramref name="stageId"/>.
     /// </summary>
     public async Task<StageDefinition> LoadStageSpecsAsync(
         string runId,
@@ -106,17 +112,119 @@ public class WorkflowDefinitionResolver : IScopedService
         int? issueNumber = null,
         string? boundProfileId = null)
     {
+        var inMemory = await TryLoadRunAsync(runId);
+        var fromMemory = ResolveFromBoundSnapshot(inMemory, stageId);
+        if (fromMemory is not null) return fromMemory;
+
         var template = string.IsNullOrWhiteSpace(boundProfileId)
             ? await LoadTemplateAsync(runId, projectId, issueNumber)
             : await LoadBoundTemplateAsync(runId, boundProfileId!, projectId);
         var definition = template.Structure
             ?? throw new InvalidOperationException(
                 $"Workflow '{runId}' has no effective workflow template");
-        var stage = definition.Stages.FirstOrDefault(s => string.Equals(s.Stage, stageId, StringComparison.Ordinal))
+        var resolved = definition.Stages.FirstOrDefault(s => string.Equals(s.Stage, stageId, StringComparison.Ordinal))
             ?? throw new WorkflowDefinitionResolutionException(
                 WorkflowDefinitionResolutionException.ResolutionReason.NoStageDefinition,
                 $"Workflow '{runId}' has no definition for stage '{stageId}'");
-        return stage;
+        return resolved;
+    }
+
+    private static StageDefinition? ResolveFromBoundSnapshot(WorkflowRun? run, string stageId)
+    {
+        if (run is null) return null;
+        if (string.IsNullOrWhiteSpace(run.BoundWorkflowDefinitionJson)) return null;
+        try
+        {
+            var definition = WorkflowYamlSerializer.FromJson(run.BoundWorkflowDefinitionJson);
+            return definition.Stages
+                .FirstOrDefault(s => string.Equals(s.Stage, stageId, StringComparison.Ordinal));
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// Snapshot-only stage resolver used by the Workflow grain's stage
+    /// initializer and stage-lock coordinator. Reads the bound definition
+    /// from the in-memory run first, falling back to a database load, and
+    /// never calls the live profile provider. A run without a snapshot
+    /// resolves its stage from the retained pre-change aggregate definition
+    /// for the affected built-in profiles; legacy aggregate state must not
+    /// be made to wait for synthesized lane state.
+    /// </summary>
+    public StageDefinition ResolveStageFromBoundSnapshot(
+        string runId,
+        string stageId,
+        WorkflowRun? inMemoryRun)
+    {
+        var fromMemory = ResolveFromBoundSnapshot(inMemoryRun, stageId);
+        if (fromMemory is not null) return fromMemory;
+
+        if (inMemoryRun is not null
+            && !string.IsNullOrWhiteSpace(inMemoryRun.WorkflowProfileId)
+            && string.IsNullOrWhiteSpace(inMemoryRun.BoundWorkflowDefinitionJson))
+        {
+            var legacy = RetainedLegacyAggregate.TryGetLegacyDefinition(
+                inMemoryRun.WorkflowProfileId,
+                stageId);
+            if (legacy is not null) return legacy;
+        }
+
+        return LoadStageSpecsAsync(runId, stageId).GetAwaiter().GetResult();
+    }
+
+    private async Task<WorkflowRun?> TryLoadRunAsync(string runId)
+    {
+        await using var db = await _dbFactory.CreateDbContextAsync();
+        var row = await db.WorkflowRuns.AsNoTracking()
+            .FirstOrDefaultAsync(x => x.WorkflowRunId == runId);
+        if (row is null) return null;
+        try
+        {
+            return JSON.Deserialize<WorkflowRun>(row.State);
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// Loads the bound definition snapshot for a run, if one was persisted
+    /// at <c>BindWorkflowRun</c> time. Returns <c>null</c> when the run is
+    /// pre-snapshot legacy; legacy resolution stays on the existing profile
+    /// cascade and, for the affected built-in profiles, the retained
+    /// pre-change aggregate definition.
+    /// </summary>
+    private async Task<WorkflowDefinition?> LoadBoundSnapshotAsync(
+        string runId,
+        string? projectId,
+        int? issueNumber)
+    {
+        await using var db = await _dbFactory.CreateDbContextAsync();
+        var row = await db.WorkflowRuns.AsNoTracking()
+            .FirstOrDefaultAsync(x => x.WorkflowRunId == runId);
+        if (row is null) return null;
+        var state = row.State;
+        if (string.IsNullOrWhiteSpace(state)) return null;
+        try
+        {
+            using var doc = JsonDocument.Parse(state);
+            if (!doc.RootElement.TryGetProperty("boundWorkflowDefinitionJson", out var boundElement)
+                || boundElement.ValueKind != JsonValueKind.String)
+            {
+                return null;
+            }
+            var json = boundElement.GetString();
+            if (string.IsNullOrWhiteSpace(json)) return null;
+            return WorkflowYamlSerializer.FromJson(json);
+        }
+        catch
+        {
+            return null;
+        }
     }
 
     /// <summary>
