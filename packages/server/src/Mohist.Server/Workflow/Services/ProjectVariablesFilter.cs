@@ -13,7 +13,7 @@ namespace Mohist.Server.Workflow.Services;
 /// stamp <c>type</c>, <c>livenessQuietThresholdMs</c>, etc. into
 /// <c>vars.agent</c>. The filter projects both the top-level agent block
 /// and each per-stage agent block down to the converged
-/// <c>{model, variant}</c> whitelist so legacy keys never enter the
+/// <c>{model, reasoningEffort, variant}</c> whitelist so legacy keys never enter the
 /// bundle from the project write path. Already-persisted legacy keys
 /// elsewhere (issue-level vars.agent, global config.jsonc) remain
 /// untouched — this filter applies only to the project-layer write
@@ -97,7 +97,7 @@ public static class ProjectVariablesFilter
     private static JsonElement? FilterAgentElement(JsonElement agent)
     {
         Dictionary<string, object?>? filteredDict = null;
-        foreach (var key in new[] { "model", "variant" })
+        foreach (var key in new[] { "model", "reasoningEffort", "variant" })
         {
             if (!agent.TryGetProperty(key, out var value)) continue;
             if (value.ValueKind == JsonValueKind.Null) continue;

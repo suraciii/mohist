@@ -341,14 +341,15 @@ export function IssueModelSelector({
     async (modelId: string, effort: string) => {
       try {
         if (!projectId) throw new Error('Project is required')
+        const preservedVariant = modelId === localWorkflowModel ? localWorkflowVariant : null
         await patchIssueWorkflowDefinitionVar(
           issueNumber,
           'agent',
-          { model: modelId, variant: null, reasoningEffort: effort },
+          { model: modelId, variant: preservedVariant, reasoningEffort: effort },
           projectId,
         )
         setLocalWorkflowModel(modelId)
-        setLocalWorkflowVariant(null)
+        setLocalWorkflowVariant(preservedVariant)
         setLocalWorkflowReasoningEffort(effort)
         addRecent(modelId)
         queryClient.invalidateQueries({ queryKey: issueDetailKeys.detail(projectId, issueNumber), exact: true })
@@ -358,7 +359,7 @@ export function IssueModelSelector({
         console.error('Failed to update issue model reasoning effort:', err)
       }
     },
-    [issueNumber, projectId, queryClient],
+    [issueNumber, localWorkflowModel, localWorkflowVariant, projectId, queryClient],
   )
 
   const handleSelectLevel = useCallback(
@@ -503,17 +504,19 @@ export function IssueModelSelector({
     async (stage: string, modelId: string, effort: string | null) => {
       try {
         if (!projectId) throw new Error('Project is required')
+        const preservedVariant = modelId === localStageModels[stage] ? (localStageVariants[stage] ?? null) : null
         await patchIssueWorkflowStageDefinitionVar(
           issueNumber,
           stage,
           'agent',
-          { model: modelId, variant: null, reasoningEffort: effort },
+          { model: modelId, variant: preservedVariant, reasoningEffort: effort },
           projectId,
         )
         setLocalStageModels((prev) => ({ ...prev, [stage]: modelId }))
         setLocalStageVariants((prev) => {
           const next = { ...prev }
-          delete next[stage]
+          if (preservedVariant) next[stage] = preservedVariant
+          else delete next[stage]
           return next
         })
         setLocalStageReasoningEfforts((prev) => {
@@ -528,7 +531,7 @@ export function IssueModelSelector({
         console.error('Failed to update stage model reasoning effort:', err)
       }
     },
-    [issueNumber, projectId, queryClient],
+    [issueNumber, localStageModels, localStageVariants, projectId, queryClient],
   )
 
   const handleChipKeyDown = useCallback(
