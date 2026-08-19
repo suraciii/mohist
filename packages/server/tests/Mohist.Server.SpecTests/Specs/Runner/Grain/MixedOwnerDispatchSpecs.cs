@@ -81,7 +81,11 @@ public sealed class MixedOwnerDispatchSpecs : Mohist.Server.SpecTests.Specs.Work
                     },
                     SupportsReasoningEffort: true,
                     Complete: true,
-                    CapabilityRevision: "catalog-rev-1"),
+                    CapabilityRevision: "catalog-rev-1",
+                    ReasoningEfforts: new Dictionary<string, string[]>
+                    {
+                        ["openai/model"] = ["high"],
+                    }),
             }));
         await runner.ObserveRuntimeReadinessAsync(
             "connection-1",

@@ -188,7 +188,8 @@ public class IssueModelVariantApiSpecs
                 pi = new
                 {
                     models = new[] { "anthropic/catalog-pi" },
-                    variants = new Dictionary<string, string[]> { ["anthropic/catalog-pi"] = ["high"] },
+                    variants = new Dictionary<string, string[]> { ["anthropic/catalog-pi"] = ["balanced"] },
+                    reasoningEfforts = new Dictionary<string, string[]> { ["anthropic/catalog-pi"] = ["high"] },
                 },
             },
         });
@@ -201,7 +202,8 @@ public class IssueModelVariantApiSpecs
 
             Assert.Contains("anthropic/catalog-pi", pi.Models);
             Assert.DoesNotContain("openai/catalog-opencode", pi.Models);
-            Assert.Equal(["high"], pi.ModelVariants["anthropic/catalog-pi"]);
+            Assert.Equal(["balanced"], pi.ModelVariants["anthropic/catalog-pi"]);
+            Assert.Equal(["high"], pi.ReasoningEfforts["anthropic/catalog-pi"]);
             Assert.Contains("openai/catalog-opencode", opencode.Models);
             Assert.Equal(["low"], opencode.ModelVariants["openai/catalog-opencode"]);
             Assert.Contains("openai/catalog-opencode", defaultCatalog.Models);
@@ -214,7 +216,10 @@ public class IssueModelVariantApiSpecs
         }
     }
 
-    private sealed record CatalogDto(string[] Models, Dictionary<string, string[]> ModelVariants);
+    private sealed record CatalogDto(
+        string[] Models,
+        Dictionary<string, string[]> ModelVariants,
+        Dictionary<string, string[]> ReasoningEfforts);
 
     private async Task<string> CreateProjectAsync(string prefix)
     {

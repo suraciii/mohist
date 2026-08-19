@@ -143,7 +143,8 @@ public sealed record RuntimeCatalogEntry(
     [property: Id(1)] Dictionary<string, string[]>? Variants = null,
     [property: Id(2)] bool? SupportsReasoningEffort = null,
     [property: Id(3)] bool? Complete = null,
-    [property: Id(4)] string? CapabilityRevision = null);
+    [property: Id(4)] string? CapabilityRevision = null,
+    [property: Id(5)] Dictionary<string, string[]>? ReasoningEfforts = null);
 
 /// <summary>
 /// Immutable evidence used at the Runner-to-owner claim boundary. The

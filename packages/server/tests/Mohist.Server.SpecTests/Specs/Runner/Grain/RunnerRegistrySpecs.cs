@@ -142,6 +142,9 @@ public class RunnerRegistrySpecs : WorkflowGrainSpecs
             ["pi"] = new(["anthropic/pi-a"], new Dictionary<string, string[]>
             {
                 ["anthropic/pi-a"] = ["medium"],
+            }, ReasoningEfforts: new Dictionary<string, string[]>
+            {
+                ["anthropic/pi-a"] = ["low", "high"],
             }),
         };
         var secondCatalogs = new Dictionary<string, RuntimeCatalogEntry>
@@ -173,8 +176,10 @@ public class RunnerRegistrySpecs : WorkflowGrainSpecs
             Assert.DoesNotContain("anthropic/pi-a", opencodeModels);
             Assert.DoesNotContain("openai/pi-b", opencodeModels);
             var piVariants = await registry.ListCoderModelVariantsByRuntimeAsync("pi");
+            var piReasoningEfforts = await registry.ListCoderReasoningEffortsByRuntimeAsync("pi");
             Assert.Equal(["medium"], piVariants["anthropic/pi-a"]);
             Assert.Equal(["low", "high"], piVariants["openai/pi-b"]);
+            Assert.Equal(["low", "high"], piReasoningEfforts["anthropic/pi-a"]);
         }
         finally
         {

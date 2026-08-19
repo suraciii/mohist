@@ -182,6 +182,8 @@ public static class AgentExecutionCapabilityResolver
             // — explicit rejection per the design contract.
             if (catalog.SupportsReasoningEffort != true)
                 return false;
+            if (!ContainsForModel(catalog.ReasoningEfforts, tuple.Model, tuple.ReasoningEffort))
+                return false;
         }
 
         // Variant validation is only enforced when the catalog has

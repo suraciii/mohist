@@ -223,7 +223,8 @@ export function IssueModelSelector({
   const { data: availableModels, isLoading, error } = catalog
   const { data: opencodeModelData } = useOpencodeModel()
   const modelVariantsMap = availableModels?.modelVariants ?? {}
-  const levelMap = modelVariantsMap
+  const reasoningEffortsMap = availableModels?.reasoningEfforts ?? {}
+  const levelMap = selectedRuntime === 'pi' ? reasoningEffortsMap : modelVariantsMap
   const [searchQuery, setSearchQuery] = useState('')
   const chipRefs = useRef<Record<string, Array<HTMLButtonElement | null>>>({})
   const [advancedOpen, setAdvancedOpen] = useState(false)
@@ -882,7 +883,7 @@ export function IssueModelSelector({
                       allowClear={!!stageModel}
                       size="compact"
                       modelVariants={stageVariants}
-                      modelReasoningEfforts={selectedRuntime === 'pi' ? stageVariants : undefined}
+                      modelReasoningEfforts={selectedRuntime === 'pi' ? reasoningEffortsMap : undefined}
                       valueVariant={stageVariant}
                       valueReasoningEffort={localStageReasoningEfforts[stage] ?? null}
                       onChangeModelVariant={(modelId, variant) => handleSetStageVariant(stage, modelId, variant)}

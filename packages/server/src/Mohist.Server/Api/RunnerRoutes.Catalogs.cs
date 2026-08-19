@@ -26,7 +26,8 @@ public static partial class RunnerRoutes
                 NormalizeCoderModelVariants(entry.Value.Variants),
                 entry.Value.SupportsReasoningEffort,
                 entry.Value.Complete,
-                NormalizeIdentity(entry.Value.CapabilityRevision));
+                NormalizeIdentity(entry.Value.CapabilityRevision),
+                NormalizeCoderModelVariants(entry.Value.ReasoningEfforts));
         }
 
         return normalized.Count == 0 ? null : normalized;

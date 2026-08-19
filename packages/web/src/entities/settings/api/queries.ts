@@ -104,7 +104,7 @@ export function useUpdateConfig() {
 
 export function useOpencodeModel() {
   const { projectId } = useProject()
-  return useQuery<{ model: string | null; variant: string | null }>({
+  return useQuery<{ model: string | null; variant: string | null; reasoningEffort: string | null }>({
     queryKey: ['opencode-model', projectId],
     queryFn: () => getOpencodeModel(projectId),
     enabled: !!projectId,
@@ -115,11 +115,12 @@ export function useUpdateOpencodeModel() {
   const queryClient = useQueryClient()
   const { projectId } = useProject()
   return useMutation<
-    { model: string | null; variant: string | null },
+    { model: string | null; variant: string | null; reasoningEffort: string | null },
     Error,
-    { model: string | null; variant?: string | null }
+    { model: string | null; variant?: string | null; reasoningEffort?: string | null }
   >({
-    mutationFn: ({ model, variant }) => updateOpencodeModel(projectId, model, variant),
+    mutationFn: ({ model, variant, reasoningEffort }) =>
+      updateOpencodeModel(projectId, model, variant, reasoningEffort),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['opencode-model', projectId] })
       queryClient.invalidateQueries({ queryKey: ['stage-models', projectId] })
@@ -139,11 +140,12 @@ export function availableModelIdsQueryOptions(
   return {
     queryKey: ['opencode-model-ids', normalized, projectId],
     queryFn: async () => {
-      if (normalized === null) return { models: [], modelVariants: {} }
+      if (normalized === null) return { models: [], modelVariants: {}, reasoningEfforts: {} }
       const response = await getModels(projectId, normalized)
       return {
         models: response.models,
         modelVariants: response.modelVariants ?? {},
+        reasoningEfforts: response.reasoningEfforts ?? {},
       }
     },
     enabled: !!projectId && normalized !== null,
@@ -155,6 +157,7 @@ export function useAvailableModelIds(runtime: AgentRuntime | string | null = DEF
   return useQuery<{
     models: string[]
     modelVariants: OpencodeModelVariants
+    reasoningEfforts: OpencodeModelVariants
   }>(availableModelIdsQueryOptions(projectId, runtime))
 }
 
@@ -297,7 +300,11 @@ export function useSetAgentRuntime() {
 
 export function useStageModels() {
   const { projectId } = useProject()
-  return useQuery<{ stageModels: Record<string, string> | null; stageModelVariants: Record<string, string> | null }>({
+  return useQuery<{
+    stageModels: Record<string, string> | null
+    stageModelVariants: Record<string, string> | null
+    stageReasoningEfforts: Record<string, string> | null
+  }>({
     queryKey: ['stage-models', projectId],
     queryFn: () => getStageModels(projectId),
     enabled: !!projectId,
@@ -308,8 +315,17 @@ export function useSetStageModels() {
   const queryClient = useQueryClient()
   const { projectId } = useProject()
   return useMutation({
-    mutationFn: ({ stage, model, variant }: { stage: string; model: string | null; variant?: string | null }) =>
-      setStageModel(projectId, stage, model, variant),
+    mutationFn: ({
+      stage,
+      model,
+      variant,
+      reasoningEffort,
+    }: {
+      stage: string
+      model: string | null
+      variant?: string | null
+      reasoningEffort?: string | null
+    }) => setStageModel(projectId, stage, model, variant, reasoningEffort),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['stage-models', projectId] })
       toast.success('Stage models updated')

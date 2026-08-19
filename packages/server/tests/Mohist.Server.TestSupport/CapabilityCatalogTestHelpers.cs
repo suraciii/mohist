@@ -65,13 +65,15 @@ public static class CapabilityCatalogTestHelpers
                 variants,
                 SupportsReasoningEffort: true,
                 Complete: true,
-                CapabilityRevision: "test-opencode-capability-v1"),
+                CapabilityRevision: "test-opencode-capability-v1",
+                ReasoningEfforts: variants),
             ["pi"] = new RuntimeCatalogEntry(
                 Models,
                 variants,
                 SupportsReasoningEffort: true,
                 Complete: true,
-                CapabilityRevision: "test-pi-capability-v1"),
+                CapabilityRevision: "test-pi-capability-v1",
+                ReasoningEfforts: variants),
         };
     }
 }

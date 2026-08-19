@@ -1,6 +1,17 @@
 import { useEffect, useMemo, useState } from 'react'
 import { ChevronRightIcon } from 'lucide-react'
-import { getWorkflowProfileAgentRuntime, resolveEffectiveDefaultWorkflowProfile, useAvailableModelIds, useOpencodeModel, useProjectDefaultWorkflowProfile, useSetStageModels, useStageModels, useUpdateOpencodeModel, useWorkflowProfiles } from '../../../entities/settings'
+import {
+  AGENT_RUNTIME_PI,
+  getWorkflowProfileAgentRuntime,
+  resolveEffectiveDefaultWorkflowProfile,
+  useAvailableModelIds,
+  useOpencodeModel,
+  useProjectDefaultWorkflowProfile,
+  useSetStageModels,
+  useStageModels,
+  useUpdateOpencodeModel,
+  useWorkflowProfiles,
+} from '../../../entities/settings'
 import type { Model } from '../../../entities/settings'
 import { ModelSelect } from '../../../shared/ui/ModelSelect'
 import { resolveVariantAgainstModel } from '../../../shared/ui/model-variants'
@@ -38,12 +49,21 @@ export const AI_SETTINGS_DESCRIPTORS: SettingsSearchEntry[] = [
 
 export function AiSettingsSection() {
   const { data: workflowProfiles, isLoading: profilesLoading, error: profilesError } = useWorkflowProfiles()
-  const { data: projectWorkflowProfile, isLoading: defaultProfileLoading, error: defaultProfileError } = useProjectDefaultWorkflowProfile()
+  const {
+    data: projectWorkflowProfile,
+    isLoading: defaultProfileLoading,
+    error: defaultProfileError,
+  } = useProjectDefaultWorkflowProfile()
   const { effectiveTemplateId } = resolveEffectiveDefaultWorkflowProfile(projectWorkflowProfile, workflowProfiles)
-  const selectedRuntime = profilesLoading || defaultProfileLoading
-    ? null
-    : getWorkflowProfileAgentRuntime(workflowProfiles, effectiveTemplateId)
-  const { data: availableModelIds, isLoading: modelsLoading, error: modelsError } = useAvailableModelIds(selectedRuntime)
+  const selectedRuntime =
+    profilesLoading || defaultProfileLoading
+      ? null
+      : getWorkflowProfileAgentRuntime(workflowProfiles, effectiveTemplateId)
+  const {
+    data: availableModelIds,
+    isLoading: modelsLoading,
+    error: modelsError,
+  } = useAvailableModelIds(selectedRuntime)
   const { data: opencodeModelData } = useOpencodeModel()
   const setOpencodeModel = useUpdateOpencodeModel()
   const { data: stageModelsData } = useStageModels()
@@ -51,12 +71,15 @@ export function AiSettingsSection() {
   const [stageOverridesOpen, setStageOverridesOpen] = useState(false)
   const [localStageModels, setLocalStageModels] = useState<Record<string, string>>({})
   const [localStageModelVariants, setLocalStageModelVariants] = useState<Record<string, string>>({})
+  const [localStageReasoningEfforts, setLocalStageReasoningEfforts] = useState<Record<string, string>>({})
   const { label: sectionLabel } = getSectionMeta('ai')
 
   useEffect(() => {
     if (stageModelsData?.stageModels) setLocalStageModels(stageModelsData.stageModels)
     if (stageModelsData?.stageModelVariants) setLocalStageModelVariants(stageModelsData.stageModelVariants)
     else setLocalStageModelVariants({})
+    if (stageModelsData?.stageReasoningEfforts) setLocalStageReasoningEfforts(stageModelsData.stageReasoningEfforts)
+    else setLocalStageReasoningEfforts({})
   }, [stageModelsData])
 
   useEffect(() => {
@@ -69,6 +92,7 @@ export function AiSettingsSection() {
 
   const modelIds = availableModelIds?.models ?? []
   const modelVariantsMap = availableModelIds?.modelVariants ?? {}
+  const reasoningEffortsMap = availableModelIds?.reasoningEfforts ?? {}
 
   const coderModels = useMemo(() => {
     return modelIds
@@ -78,7 +102,9 @@ export function AiSettingsSection() {
 
   const storedDefaultModel = opencodeModelData?.model ?? null
   const storedDefaultVariant = opencodeModelData?.variant ?? null
+  const storedDefaultReasoningEffort = opencodeModelData?.reasoningEffort ?? null
   const hasSelectedRuntime = selectedRuntime !== null
+  const usesReasoningEffort = selectedRuntime === AGENT_RUNTIME_PI
   const configuredStageEntries = STAGES.filter((stage) => !!localStageModels[stage])
   const displayModelVariants = useMemo(() => {
     if (hasSelectedRuntime) return modelVariantsMap
@@ -91,19 +117,61 @@ export function AiSettingsSection() {
       if (model && variant) variants[model] = [...(variants[model] ?? []), variant]
     }
     return variants
-  }, [configuredStageEntries, hasSelectedRuntime, localStageModelVariants, localStageModels, modelVariantsMap, storedDefaultModel, storedDefaultVariant])
-  const resolvedDefaultVariant = resolveVariantAgainstModel(storedDefaultModel, storedDefaultVariant, displayModelVariants)
+  }, [
+    configuredStageEntries,
+    hasSelectedRuntime,
+    localStageModelVariants,
+    localStageModels,
+    modelVariantsMap,
+    storedDefaultModel,
+    storedDefaultVariant,
+  ])
+  const resolvedDefaultVariant = resolveVariantAgainstModel(
+    storedDefaultModel,
+    storedDefaultVariant,
+    displayModelVariants,
+  )
+  const displayReasoningEfforts = useMemo(() => {
+    if (hasSelectedRuntime) return reasoningEffortsMap
+
+    const efforts: Record<string, string[]> = {}
+    if (storedDefaultModel && storedDefaultReasoningEffort) efforts[storedDefaultModel] = [storedDefaultReasoningEffort]
+    for (const stage of configuredStageEntries) {
+      const model = localStageModels[stage]
+      const effort = localStageReasoningEfforts[stage]
+      if (model && effort) efforts[model] = [...(efforts[model] ?? []), effort]
+    }
+    return efforts
+  }, [
+    configuredStageEntries,
+    hasSelectedRuntime,
+    localStageModels,
+    localStageReasoningEfforts,
+    reasoningEffortsMap,
+    storedDefaultModel,
+    storedDefaultReasoningEffort,
+  ])
+  const resolvedDefaultReasoningEffort = resolveVariantAgainstModel(
+    storedDefaultModel,
+    storedDefaultReasoningEffort,
+    displayReasoningEfforts,
+  )
 
   const handleSetOpencodeModel = (modelId: string) => {
-    setOpencodeModel.mutate({ model: modelId, variant: null })
+    setOpencodeModel.mutate({ model: modelId, variant: null, reasoningEffort: null })
   }
 
   const handleClearOpencodeModel = () => {
-    setOpencodeModel.mutate({ model: null, variant: null })
+    setOpencodeModel.mutate({ model: null, variant: null, reasoningEffort: null })
   }
 
   const handleSetDefaultVariant = (modelId: string, variant: string | null) => {
-    setOpencodeModel.mutate({ model: modelId, variant })
+    setOpencodeModel.mutate({ model: modelId, variant, reasoningEffort: null })
+  }
+
+  const handleSetDefaultReasoningEffort = (modelId: string, reasoningEffort: string | null) => {
+    const variant = modelId === storedDefaultModel ? storedDefaultVariant : null
+    setOpencodeModel.mutate({ model: modelId, variant, reasoningEffort })
   }
 
   const handleSetStageModel = (stage: string, modelId: string) => {
@@ -114,7 +182,12 @@ export function AiSettingsSection() {
       delete next[stage]
       return next
     })
-    setStageModels.mutate({ stage, model: modelId, variant: null })
+    setLocalStageReasoningEfforts((prev) => {
+      const next = { ...prev }
+      delete next[stage]
+      return next
+    })
+    setStageModels.mutate({ stage, model: modelId, variant: null, reasoningEffort: null })
   }
 
   const handleClearStageModel = (stage: string) => {
@@ -126,7 +199,12 @@ export function AiSettingsSection() {
       delete next[stage]
       return next
     })
-    setStageModels.mutate({ stage, model: null, variant: null })
+    setLocalStageReasoningEfforts((prev) => {
+      const next = { ...prev }
+      delete next[stage]
+      return next
+    })
+    setStageModels.mutate({ stage, model: null, variant: null, reasoningEffort: null })
   }
 
   const handleSetStageVariant = (stage: string, variant: string | null, selectedModel?: string | null) => {
@@ -138,7 +216,29 @@ export function AiSettingsSection() {
       else delete next[stage]
       return next
     })
-    setStageModels.mutate({ stage, model: stageModel, variant })
+    setLocalStageReasoningEfforts((prev) => {
+      const next = { ...prev }
+      delete next[stage]
+      return next
+    })
+    setStageModels.mutate({ stage, model: stageModel, variant, reasoningEffort: null })
+  }
+
+  const handleSetStageReasoningEffort = (
+    stage: string,
+    reasoningEffort: string | null,
+    selectedModel?: string | null,
+  ) => {
+    const stageModel = selectedModel ?? localStageModels[stage] ?? null
+    if (!stageModel) return
+    setLocalStageReasoningEfforts((prev) => {
+      const next = { ...prev }
+      if (reasoningEffort) next[stage] = reasoningEffort
+      else delete next[stage]
+      return next
+    })
+    const variant = stageModel === localStageModels[stage] ? (localStageModelVariants[stage] ?? null) : null
+    setStageModels.mutate({ stage, model: stageModel, variant, reasoningEffort })
   }
 
   if (profilesLoading || defaultProfileLoading || modelsLoading) {
@@ -163,12 +263,16 @@ export function AiSettingsSection() {
           <CardSection>
             <div className="space-y-1.5">
               <div className="flex items-baseline justify-between gap-2">
-                <label id={DEFAULT_MODEL_LABEL_ID} className="block text-xs font-medium text-muted-foreground">Default Coder Agent Model</label>
+                <label id={DEFAULT_MODEL_LABEL_ID} className="block text-xs font-medium text-muted-foreground">
+                  Default Coder Agent Model
+                </label>
                 {hasSelectedRuntime && (
                   <span className="text-xs text-muted-foreground">{coderModels.length} models available</span>
                 )}
               </div>
-              <p className="text-xs text-muted-foreground">Passed to the selected workflow profile runtime when tasks run.</p>
+              <p className="text-xs text-muted-foreground">
+                Passed to the selected workflow profile runtime when tasks run.
+              </p>
               <ModelSelect
                 id="settings-default-model"
                 value={storedDefaultModel}
@@ -181,6 +285,9 @@ export function AiSettingsSection() {
                 modelVariants={displayModelVariants}
                 valueVariant={resolvedDefaultVariant}
                 onChangeModelVariant={handleSetDefaultVariant}
+                modelReasoningEfforts={usesReasoningEffort ? displayReasoningEfforts : undefined}
+                valueReasoningEffort={resolvedDefaultReasoningEffort}
+                onChangeModelReasoningEffort={handleSetDefaultReasoningEffort}
                 disabled={!hasSelectedRuntime}
               />
             </div>
@@ -188,7 +295,7 @@ export function AiSettingsSection() {
         </SettingsSection>
       )}
 
-      {((hasSelectedRuntime || configuredStageEntries.length > 0) && (
+      {(hasSelectedRuntime || configuredStageEntries.length > 0) && (
         <>
           {storedDefaultModel || hasSelectedRuntime ? <hr className="border" /> : null}
 
@@ -211,10 +318,24 @@ export function AiSettingsSection() {
               <div id={STAGE_OVERRIDES_ID} className="mt-4 space-y-3 pl-6">
                 {(hasSelectedRuntime ? STAGES : configuredStageEntries).map((stage) => {
                   const stageModel = localStageModels[stage] ?? null
-                  const stageVariant = resolveVariantAgainstModel(stageModel, localStageModelVariants[stage], displayModelVariants)
+                  const stageVariant = resolveVariantAgainstModel(
+                    stageModel,
+                    localStageModelVariants[stage],
+                    displayModelVariants,
+                  )
+                  const stageReasoningEffort = resolveVariantAgainstModel(
+                    stageModel,
+                    localStageReasoningEfforts[stage],
+                    displayReasoningEfforts,
+                  )
                   return (
                     <div key={stage} className="space-y-1">
-                      <label id={`settings-stage-model-${stage}-label`} className="block text-xs font-medium text-muted-foreground capitalize">{stage}</label>
+                      <label
+                        id={`settings-stage-model-${stage}-label`}
+                        className="block text-xs font-medium text-muted-foreground capitalize"
+                      >
+                        {stage}
+                      </label>
                       <ModelSelect
                         id={`settings-stage-model-${stage}`}
                         value={stageModel}
@@ -228,6 +349,11 @@ export function AiSettingsSection() {
                         modelVariants={displayModelVariants}
                         valueVariant={stageVariant}
                         onChangeModelVariant={(modelId, variant) => handleSetStageVariant(stage, variant, modelId)}
+                        modelReasoningEfforts={usesReasoningEffort ? displayReasoningEfforts : undefined}
+                        valueReasoningEffort={stageReasoningEffort}
+                        onChangeModelReasoningEffort={(modelId, effort) =>
+                          handleSetStageReasoningEffort(stage, effort, modelId)
+                        }
                         disabled={!hasSelectedRuntime}
                       />
                     </div>
@@ -237,7 +363,7 @@ export function AiSettingsSection() {
             )}
           </div>
         </>
-      ))}
+      )}
     </div>
   )
 }

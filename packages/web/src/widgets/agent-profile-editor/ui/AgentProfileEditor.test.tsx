@@ -41,6 +41,8 @@ useMswServer(
         modelVariants: {
           'openai/gpt-4': ['standard'],
           'anthropic/claude': ['low', 'medium', 'high'],
+        },
+        reasoningEfforts: {
           'pi/anthropic/claude': ['low', 'medium', 'high'],
         },
       },

@@ -175,6 +175,20 @@ public sealed class AgentExecutionCapabilityResolverTests
     }
 
     [Fact]
+    public void CompleteCatalogMissingReasoningEffort_IsIncompatibleConfiguration()
+    {
+        var result = Resolve(CompleteCatalogEntry() with
+        {
+            ReasoningEfforts = new Dictionary<string, string[]>
+            {
+                [Model] = ["other"],
+            },
+        });
+
+        AssertIncompatible(result);
+    }
+
+    [Fact]
     public void UnsetEffortDoesNotRequireSupportFromRuntime()
     {
         var catalog = CompleteCatalogEntry() with
@@ -460,7 +474,11 @@ public sealed class AgentExecutionCapabilityResolverTests
         },
         SupportsReasoningEffort: true,
         Complete: true,
-        CapabilityRevision: "revision-1");
+        CapabilityRevision: "revision-1",
+        ReasoningEfforts: new Dictionary<string, string[]>
+        {
+            [Model] = [Effort],
+        });
 
     private static void AssertIncompatible(AgentExecutionCapabilityResolution result)
     {
