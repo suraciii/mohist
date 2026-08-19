@@ -3,6 +3,7 @@ using Microsoft.EntityFrameworkCore;
 using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Infrastructure.Data.Workflow;
 using Mohist.Server.Workflow.Domain;
+using Mohist.Server.Runner.Grains;
 using Mohist.Workflow.Definition;
 using Mohist.Server.Workflow.Domain.Run;
 using Mohist.Server.Workflow.Grains;
@@ -388,6 +389,151 @@ public class VerificationLaneBindingSpecs : WorkflowGrainSpecs
                 VerificationLaneOutcome.Pass,
                 run.Stages.Single(s => s.Id == "build").Tasks.Single(t => t.DefinitionId == id).Lane!.Outcome));
     }
+
+    [Theory]
+    [InlineData("mohist/local")]
+    [InlineData("mohist/github-pr")]
+    public async Task BuiltInProfile_TimeoutRecovery_PreservesEarlierPassesAndRunsDownstreamOnce(string profileId)
+    {
+        var workflow = await CreateWorkflowAsync();
+        var projectId = TestProjectId(_workflowId!);
+        var builtIn = string.Equals(profileId, "mohist/local", StringComparison.Ordinal)
+            ? WorkflowProfileCatalog.Definition
+            : WorkflowProfileCatalog.GithubPrWorkflowDefinition;
+        var buildStage = builtIn.Stages.Single(s => s.Stage == "build");
+        var definition = new WorkflowDefinition(new[] { buildStage });
+
+        await SeedWorkflowTemplateAsync(_workflowId!, definition, projectId);
+        var coordinator = Grains.GetGrain<IWorkflowProfileReferenceCoordinatorGrain>(projectId);
+        var bind = await coordinator.BindWorkflowRunAsync(
+            new WorkflowProfileCommandPayload.BindWorkflowRun(
+                ProjectId: projectId,
+                WorkflowRunId: _workflowId!,
+                IssueNumber: 1,
+                EpicNumber: null,
+                ExplicitProfileId: null,
+                Metadata: TestInput(projectId).Metadata!),
+            $"cmd-recovery-{Guid.NewGuid():N}",
+            expectedRevision: null);
+        Assert.True(bind.IsApplied);
+
+        await workflow.StartAsync(TestInput(projectId));
+        var runnerId = await RegisterRunnerAsync();
+
+        var run = await LoadRunAsync(_workflowId!);
+        var build = run.Stages.Single(s => s.Id == "build");
+        foreach (var orchestrationId in build.Tasks
+            .TakeWhile(task => !VerificationLaneCatalog.IsKnownLane(task.DefinitionId))
+            .Select(task => task.DefinitionId))
+        {
+            var dispatched = await PollWorkAsync(runnerId);
+            Assert.Equal(orchestrationId, dispatched.Work.WorkId.Split('.')[0]);
+            await ReportAsync(runnerId, dispatched.Work.WorkId, "completed");
+        }
+
+        var first = await PollWorkAsync(runnerId);
+        Assert.StartsWith($"{VerificationLaneCatalog.VerifyInstall}.", first.Work.WorkId);
+        await ReportAsync(runnerId, first.Work.WorkId, "completed");
+
+        var timedOut = await PollWorkAsync(runnerId);
+        Assert.StartsWith($"{VerificationLaneCatalog.VerifyDotnet}.", timedOut.Work.WorkId);
+        var laneDefinition = buildStage.Tasks.Single(task => task.Id == VerificationLaneCatalog.VerifyDotnet);
+        var timedOutRun = await LoadRunAsync(_workflowId!);
+        Assert.Equal(timedOut.Work.TaskRunId, timedOutRun.CurrentStage().RunningTask!.Id);
+        var repairTask = laneDefinition.Recovery!.Handlers
+            .Single(handler => handler.When is null)
+            .Tasks.Single();
+        await ReportAsync(runnerId, timedOut.Work.WorkId, new WorkResult(
+            "completed",
+            "recovery scheduled",
+            Error: new ExecutionError("timeout", "dotnet lane exceeded its budget"),
+            AddTasks:
+            [
+                ToRuntimeTask(repairTask),
+                ToRuntimeTask(laneDefinition, recoveryRemaining: 1),
+            ]));
+
+        run = await LoadRunAsync(_workflowId!);
+        var stageAfterSchedule = run.CurrentStage();
+        var originalLane = stageAfterSchedule.Tasks.Single(task => task.Id == timedOut.Work.TaskRunId);
+        Assert.Equal(VerificationLaneOutcome.Timeout, originalLane.Lane!.Outcome);
+        Assert.Equal("dotnet lane exceeded its budget", originalLane.Lane.Error!.Message);
+        Assert.Equal(TaskRunStatus.Completed, originalLane.Status);
+        Assert.DoesNotContain(
+            stageAfterSchedule.Tasks.SkipWhile(task => task.Id != timedOut.Work.TaskRunId).Skip(1),
+            task => task.DefinitionId == VerificationLaneCatalog.VerifyInstall);
+
+        var helper = await PollWorkAsync(runnerId);
+        Assert.Equal(repairTask.Id, helper.Work.WorkId.Split('.')[0]);
+        var helperRun = (await LoadRunAsync(_workflowId!)).CurrentStage().Tasks
+            .Single(task => task.Id == helper.Work.TaskRunId);
+        Assert.Null(helperRun.Lane);
+        Assert.Equal(timedOut.Work.TaskRunId, helperRun.CausedByFailedTaskId);
+        await ReportAsync(runnerId, helper.Work.WorkId, "completed");
+
+        var retry = await PollWorkAsync(runnerId);
+        Assert.StartsWith($"{VerificationLaneCatalog.VerifyDotnet}.", retry.Work.WorkId);
+        Assert.NotEqual(timedOut.Work.TaskRunId, retry.Work.TaskRunId);
+        var statusWhileRetryPending = await GetQuerier().GetStatusAsync(_workflowId!);
+        var retryLane = statusWhileRetryPending!.VerificationLanes!.Lanes
+            .Single(lane => lane.LaneId == VerificationLaneCatalog.VerifyDotnet);
+        Assert.Equal("timeout", retryLane.Outcome);
+        Assert.Equal(retry.Work.TaskRunId, retryLane.TaskRunId);
+
+        var stale = await workflow.ReceiveTaskReportAsync(
+            runnerId,
+            timedOut.Work.WorkId,
+            new TaskReport(
+                timedOut.Work.WorkId,
+                TaskReportStatus.Succeeded,
+                Output: null,
+                Artifacts: null,
+                TaskRunId: timedOut.Work.TaskRunId));
+        Assert.Equal(ReportAck.Stale, stale);
+
+        await ReportAsync(runnerId, retry.Work.WorkId, "completed");
+        for (var i = 2; i < VerificationLaneCatalog.LaneIds.Count; i++)
+        {
+            var next = await PollWorkAsync(runnerId);
+            Assert.StartsWith($"{VerificationLaneCatalog.LaneIds[i]}.", next.Work.WorkId);
+            await ReportAsync(runnerId, next.Work.WorkId, "completed");
+        }
+
+        var downstreamIds = new List<string>();
+        while (true)
+        {
+            run = await LoadRunAsync(_workflowId!);
+            var pending = run.CurrentStage().Tasks.FirstOrDefault(task => task.Status == TaskRunStatus.Pending);
+            if (pending is null) break;
+
+            var downstream = await PollWorkAsync(runnerId);
+            downstreamIds.Add(downstream.Work.WorkId.Split('.')[0]);
+            await ReportAsync(runnerId, downstream.Work.WorkId, "completed");
+        }
+
+        run = await LoadRunAsync(_workflowId!);
+        Assert.Equal(WorkflowRunStatus.Completed, run.Status);
+        Assert.Equal(
+            downstreamIds.Count,
+            run.CurrentStage().Tasks.Count(task => downstreamIds.Contains(task.DefinitionId, StringComparer.Ordinal)));
+        Assert.All(
+            VerificationLaneCatalog.LaneIds,
+            id => Assert.Equal(
+                VerificationLaneOutcome.Pass,
+                run.CurrentStage().Tasks.Last(task => task.DefinitionId == id).Lane!.Outcome));
+    }
+
+    private static RuntimeTaskInput ToRuntimeTask(TaskDefinition task, int? recoveryRemaining = null) =>
+        new(
+            task.Id,
+            task.Title ?? task.Id,
+            task.Uses,
+            task.With is null ? null : JsonSerializer.SerializeToElement(task.With),
+            Recovery: task.Recovery,
+            Artifacts: task.Artifacts,
+            SetVars: task.SetVars,
+            RecoveryRemaining: recoveryRemaining,
+            Expect: task.Expect is null ? null : JsonSerializer.SerializeToElement(task.Expect));
 
     private static WorkflowDefinition BuildSixLaneDefinition(bool extraBuildTask = false)
     {

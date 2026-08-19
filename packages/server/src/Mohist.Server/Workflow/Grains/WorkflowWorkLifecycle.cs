@@ -69,7 +69,13 @@ internal sealed class WorkflowWorkLifecycle
 
             if (hasFollowUpTasks)
             {
-                var followUpEvents = run.AddRuntimeTaskAttempts(taskAttempts, now);
+                var recoverySourceTaskId = currentTask?.Lane is not null
+                    ? currentTask.Id
+                    : null;
+                var followUpEvents = run.AddRuntimeTaskAttempts(
+                    taskAttempts,
+                    now,
+                    recoverySourceTaskId);
                 events.AddRange(followUpEvents);
                 _owner.Log.LogInformation(
                     "Workflow {Id} task {TaskId} produced {Count} follow-up tasks",
@@ -115,7 +121,9 @@ internal sealed class WorkflowWorkLifecycle
         {
             Outcome = outcome.Value,
             WorkId = task.WorkId ?? task.Lane.WorkId,
-            Error = report.Error ?? task.Lane.Error,
+            Error = outcome.Value == VerificationLaneOutcome.Pass
+                ? null
+                : report.Error ?? task.Lane.Error,
             // Pass evidence needs no diagnostic; fail/timeout keep the exact
             // detail text from the report or its output payload.
             Detail = outcome.Value == VerificationLaneOutcome.Pass ? null : detail,

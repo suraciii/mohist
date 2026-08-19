@@ -116,6 +116,48 @@ public sealed class VerificationLaneStatusProjectionTests
     }
 
     [Fact]
+    public void BuildStatusView_PendingRetryKeepsOriginalFailureAndUsesRetryIdentity()
+    {
+        var run = CreateLaneEnabledRun();
+        var stage = run.Stages[0];
+        stage.Tasks[0].Lane = stage.Tasks[0].Lane! with { Outcome = VerificationLaneOutcome.Pass };
+        stage.Tasks[1].Lane = stage.Tasks[1].Lane! with
+        {
+            Outcome = VerificationLaneOutcome.Timeout,
+            Error = new ExecutionError("timeout", "original timeout"),
+            Detail = "command exceeded its budget",
+        };
+
+        var retry = new TaskRun
+        {
+            Id = $"{VerificationLaneCatalog.VerifyDotnet}.2",
+            DefinitionId = VerificationLaneCatalog.VerifyDotnet,
+            Attempt = 2,
+            Title = VerificationLaneCatalog.VerifyDotnet,
+            Uses = "core/script",
+            Status = TaskRunStatus.Pending,
+            Lane = new VerificationLaneAttempt(
+                VerificationLaneCatalog.VerifyDotnet,
+                1,
+                120000,
+                VerificationLaneOutcome.Pending,
+                $"{VerificationLaneCatalog.VerifyDotnet}.2"),
+        };
+        stage.Tasks.Insert(2, retry);
+
+        var view = WorkflowStatusMapper.BuildStatusView(run, definition: null);
+
+        var lane = Assert.Single(
+            view!.VerificationLanes!.Lanes,
+            candidate => candidate.LaneId == VerificationLaneCatalog.VerifyDotnet);
+        Assert.Equal("timeout", lane.Outcome);
+        Assert.Equal("original timeout", lane.Error!.Message);
+        Assert.Equal("command exceeded its budget", lane.Detail);
+        Assert.Equal($"{VerificationLaneCatalog.VerifyDotnet}.2", lane.TaskRunId);
+        Assert.Equal(VerificationLaneCatalog.VerifyDotnet, view.VerificationLanes.FirstNonPassingLane);
+    }
+
+    [Fact]
     public void MapTasks_LaneTask_ExposesLaneView()
     {
         var run = CreateLaneEnabledRun();

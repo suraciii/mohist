@@ -65,6 +65,31 @@ public sealed class VerificationLaneClassifierTests
     }
 
     [Fact]
+    public void Classify_TimeoutRecoverySchedulingEnvelope_RemainsTimeout()
+    {
+        var outcome = VerificationLaneClassifier.Classify(
+            VerificationLaneCatalog.VerifyDotnet,
+            new TaskReport(
+                WorkId: "verify-dotnet.1",
+                Status: TaskReportStatus.Succeeded,
+                Output: null,
+                Artifacts: null,
+                Detail: "Command exceeded its budget",
+                AddTasks: new[]
+                {
+                    new RuntimeTaskInput("recover:fix-ci", "Fix CI"),
+                    new RuntimeTaskInput(
+                        VerificationLaneCatalog.VerifyDotnet,
+                        "Verify dotnet",
+                        "core/script",
+                        RecoveryRemaining: 1),
+                },
+                Error: new ExecutionError("timeout", "Command exceeded its budget")));
+
+        Assert.Equal(VerificationLaneOutcome.Timeout, outcome);
+    }
+
+    [Fact]
     public void Classify_NormalScriptFailure_IsFail()
     {
         var outcome = VerificationLaneClassifier.Classify(

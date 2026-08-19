@@ -612,11 +612,27 @@ public static partial class WorkflowRunExtensions
 
         internal IReadOnlyList<WorkflowEvent> AddRuntimeTaskAttempts(
             IReadOnlyList<(TaskDefinition Definition, int? RecoveryRemaining)> tasks,
-            DateTimeOffset now)
+            DateTimeOffset now,
+            string? causedByFailedTaskId = null)
         {
             if (run.HasUnresolvedAgentResult())
                 throw new InvalidOperationException("agent_result_unresolved");
             var current = run.CurrentStage();
+            var sourceTask = causedByFailedTaskId is null
+                ? null
+                : current.Tasks.FirstOrDefault(task =>
+                    string.Equals(task.Id, causedByFailedTaskId, StringComparison.Ordinal));
+
+            // A recovery report is fenced by the source task's durable
+            // identity. Keep the same fence at task insertion so a replayed
+            // scheduling envelope cannot create a second repair/retry chain.
+            if (sourceTask is not null
+                && current.Tasks.Any(task =>
+                    string.Equals(task.CausedByFailedTaskId, sourceTask.Id, StringComparison.Ordinal)))
+            {
+                return [];
+            }
+
             var runningIndex = current.Tasks.FindIndex(t => t.Status == TaskRunStatus.Running);
             var firstIncompleteIndex = current.Tasks.FindIndex(t => t.Status is not (TaskRunStatus.Completed or TaskRunStatus.Failed or TaskRunStatus.Cancelled or TaskRunStatus.Interrupted));
             var insertIndex = runningIndex >= 0
@@ -627,18 +643,48 @@ public static partial class WorkflowRunExtensions
 
             foreach (var task in tasks)
             {
+                // The Runner normally echoes the source lane definition. The
+                // source remains authoritative for a recovery retry's lane
+                // budget and recovery contract if a replayed envelope is
+                // incomplete or was rendered by an older Runner.
+                var definition = sourceTask?.Lane is not null
+                    && string.Equals(task.Definition.Id, sourceTask.DefinitionId, StringComparison.Ordinal)
+                    ? task.Definition with
+                    {
+                        With = sourceTask.WithInput,
+                        Expect = sourceTask.ExpectInput,
+                        Artifacts = sourceTask.Artifacts,
+                        SetVars = sourceTask.SetVars,
+                        Recovery = sourceTask.Recovery,
+                    }
+                    : task.Definition;
                 var newTask = task.RecoveryRemaining is { } remaining
                     ? TaskRun.MakeContinuationTask(
                         current.Tasks,
-                        task.Definition,
+                        definition,
                         current.Attempt,
                         remaining,
-                        run.Stages.SelectMany(candidate => candidate.Tasks))
+                        run.Stages.SelectMany(candidate => candidate.Tasks),
+                        causedByFailedTaskId: sourceTask?.Id)
                     : TaskRun.MakeTask(
                         current.Tasks,
-                        task.Definition,
+                        definition,
                         current.Attempt,
-                        run.Stages.SelectMany(candidate => candidate.Tasks));
+                        run.Stages.SelectMany(candidate => candidate.Tasks),
+                        causedByFailedTaskId: sourceTask?.Id);
+
+                if (sourceTask?.Lane is { } sourceLane
+                    && newTask.Lane is { } retryLane
+                    && string.Equals(newTask.DefinitionId, sourceTask.DefinitionId, StringComparison.Ordinal))
+                {
+                    newTask.Lane = retryLane with
+                    {
+                        LaneId = sourceLane.LaneId,
+                        Order = sourceLane.Order,
+                        ConfiguredBudgetMs = sourceLane.ConfiguredBudgetMs,
+                    };
+                }
+
                 current.Tasks.Insert(insertIndex, newTask);
                 insertIndex++;
             }

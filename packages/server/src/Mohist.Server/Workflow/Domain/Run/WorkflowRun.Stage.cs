@@ -148,7 +148,8 @@ public static partial class WorkflowRunExtensions
                 // gate is scoped to the run's persisted bound definition, so
                 // a profile or deployment change cannot flip the mode; legacy
                 // aggregate runs are never held by it.
-                if (!VerificationLaneGate.CanAdvanceBuildStage(run))
+                if (string.Equals(stage.Id, "build", StringComparison.Ordinal)
+                    && !VerificationLaneGate.CanAdvanceBuildStage(run))
                 {
                     stage.Status = StageRunStatus.Running;
                     return;
@@ -173,7 +174,8 @@ public static partial class WorkflowRunExtensions
                 stage.Tasks,
                 failedTask.ToDefinition(),
                 stage.Attempt,
-                run.Stages.SelectMany(candidate => candidate.Tasks));
+                run.Stages.SelectMany(candidate => candidate.Tasks),
+                causedByFailedTaskId: failedTask.Lane is not null ? failedTask.Id : null);
             var failedTaskIndex = stage.Tasks.IndexOf(failedTask);
             stage.Tasks.Insert(failedTaskIndex + 1, newTask);
             stage.Failure = null;

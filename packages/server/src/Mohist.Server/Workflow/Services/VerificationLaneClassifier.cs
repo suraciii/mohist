@@ -38,7 +38,11 @@ public static class VerificationLaneClassifier
             // though the underlying status is "completed". A pass requires a
             // direct successful lane report with no recovery follow-ups.
             if (report.AddTasks is { Count: > 0 })
-                return VerificationLaneOutcome.Fail;
+            {
+                return string.Equals(report.Error?.Code, "timeout", StringComparison.Ordinal)
+                    ? VerificationLaneOutcome.Timeout
+                    : VerificationLaneOutcome.Fail;
+            }
             return VerificationLaneOutcome.Pass;
         }
 

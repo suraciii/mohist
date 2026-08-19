@@ -45,3 +45,19 @@ Implemented T-001 end to end on top of the plan-review fixes above.
 - `npm run typecheck` + `npm run typecheck:tests` + `npm run check:test-boundaries` in packages/runner: all pass.
 - Focused suites (built-in-core action, src/system/process, tests/process-timeout, work-result-journal, runner-host-reporting, runner-host-recovery): 41 tests pass.
 - Full runner default suite: 155 files / 1685 tests pass; `git diff --check` clean.
+
+# Progress: T-004 implementation
+
+## Codebase Patterns
+- Recovery scheduling is already fenced by the original task report tuple. Server recovery now carries that same source `TaskRun.Id` into every repair/retry task via `CausedByFailedTaskId`; insertion treats an existing child for the source identity as an idempotent replay and does not create another chain.
+- A lane retry inherits the source lane's `WithInput`, `ExpectInput`, artifacts, variables, recovery declaration, catalog order, and configured budget. `recover:fix-ci` remains a normal non-lane task because lane metadata is created only for catalog IDs.
+- Authoritative lane projection uses the latest lane attempt identity. While that attempt is pending, a prior fail/timeout outcome and diagnostics are overlaid; a later direct pass replaces the overlay. This keeps the build gate closed and exposes the new retry identity without discarding the original evidence.
+- Runner recovery envelopes with outer `status=completed` and `addTasks` classify as fail, or timeout when the preserved error has `code=timeout`; only a direct successful lane report classifies as pass. Failure-context translation now also exposes error-only lane diagnostics to recovery children.
+
+## Verification (T-004)
+- Server project build: 0 warnings/errors.
+- Server unit suite: 2,833 passed.
+- Workflow lane binding/recovery specs: 12 passed, including both built-in profiles; workflow retry specs: 26 passed; failure specs: 2 passed.
+- Added coverage for recovery scheduling classification, helper exclusion, source-identity idempotence, preserved timeout diagnostics during a pending retry, stale old reports, ordered lane recovery, and one-time downstream completion.
+- Full SpecTests initially exposed the lane gate being applied to approved non-build stages; narrowed the gate to `stage.Id == build`, restoring the existing approval workflow contract. The focused approval API class then passed 41 tests.
+- Final full SpecTests run passed all 3,885 tests. Solution build passed with 0 warnings/errors; ArchTests passed 68 and Workflow Definition tests passed 178.

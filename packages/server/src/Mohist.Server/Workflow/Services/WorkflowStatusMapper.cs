@@ -311,10 +311,7 @@ public static class WorkflowStatusMapper
     {
         if (!VerificationLaneGate.IsLaneEnabledRun(run)) return null;
 
-        var byLaneId = new Dictionary<string, VerificationLaneAttempt>(StringComparer.Ordinal);
-        foreach (var attempt in WorkflowBoundDefinitionResolver.CollectLaneAttempts(run))
-            byLaneId[attempt.LaneId] = attempt;
-
+        var byLaneId = VerificationLaneGate.AuthoritativeLaneAttempts(run);
         var ordered = new List<VerificationLaneView>(VerificationLaneCatalog.LaneIds.Count);
         string? firstNonPassing = null;
         foreach (var laneId in VerificationLaneCatalog.LaneIds)

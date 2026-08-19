@@ -36,20 +36,57 @@ public static class VerificationLaneGate
     }
 
     /// <summary>
-    /// Returns the next lane index whose durable outcome is not <c>pass</c>,
-    /// or -1 when all six lanes have a durable pass. Used by ordered
-    /// dispatch and recovery to skip already-passing lanes and gate on the
-    /// first non-passing one. The catalog order is authoritative; runs without a
-    /// snapshot return -1 so legacy runs never enter the lane gate.
+    /// Returns one authoritative lane view per catalog id. A pending retry
+    /// keeps the prior failed or timed-out evidence as the lane outcome while
+    /// exposing the retry's new attempt identity. A later direct pass replaces
+    /// that evidence; a repair helper never enters this map because it has no
+    /// lane metadata.
+    /// </summary>
+    public static IReadOnlyDictionary<string, VerificationLaneAttempt> AuthoritativeLaneAttempts(WorkflowRun run)
+    {
+        if (!IsLaneEnabledRun(run))
+            return new Dictionary<string, VerificationLaneAttempt>(StringComparer.Ordinal);
+
+        var result = new Dictionary<string, VerificationLaneAttempt>(StringComparer.Ordinal);
+        foreach (var group in WorkflowBoundDefinitionResolver
+            .CollectLaneAttempts(run)
+            .GroupBy(attempt => attempt.LaneId, StringComparer.Ordinal))
+        {
+            var latest = group.Last();
+            if (latest.Outcome == VerificationLaneOutcome.Pending)
+            {
+                var latestTerminal = group.LastOrDefault(attempt =>
+                    attempt.Outcome is VerificationLaneOutcome.Pass
+                        or VerificationLaneOutcome.Fail
+                        or VerificationLaneOutcome.Timeout);
+                if (latestTerminal is not null
+                    && latestTerminal.Outcome is VerificationLaneOutcome.Fail or VerificationLaneOutcome.Timeout)
+                {
+                    latest = latest with
+                    {
+                        Outcome = latestTerminal.Outcome,
+                        Error = latestTerminal.Error,
+                        Detail = latestTerminal.Detail,
+                        FinishedAt = latestTerminal.FinishedAt,
+                    };
+                }
+            }
+            result[group.Key] = latest;
+        }
+        return result;
+    }
+
+    /// <summary>
+    /// Returns the next lane index whose authoritative outcome is not
+    /// <c>pass</c>, or -1 when all six lanes have a durable pass. The catalog
+    /// order is authoritative; runs without a snapshot return -1 so legacy
+    /// runs never enter the lane gate.
     /// </summary>
     public static int FirstNonPassingLaneIndex(WorkflowRun run)
     {
         if (!IsLaneEnabledRun(run)) return -1;
 
-        var laneAttempts = new Dictionary<string, VerificationLaneAttempt>(StringComparer.Ordinal);
-        foreach (var attempt in WorkflowBoundDefinitionResolver.CollectLaneAttempts(run))
-            laneAttempts[attempt.LaneId] = attempt;
-
+        var laneAttempts = AuthoritativeLaneAttempts(run);
         for (var i = 0; i < VerificationLaneCatalog.LaneIds.Count; i++)
         {
             var laneId = VerificationLaneCatalog.LaneIds[i];
