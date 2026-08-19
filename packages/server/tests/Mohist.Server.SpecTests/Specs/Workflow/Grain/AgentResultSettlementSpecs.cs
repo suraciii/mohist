@@ -10,6 +10,7 @@ using Mohist.Server.Runner.Grains;
 using Mohist.Server.Runner.Services;
 using Mohist.Server.Workflow.Domain.Run;
 using Mohist.Server.Workflow.Grains;
+using Mohist.Server.Workflow.Services;
 using Mohist.Server.SpecTests.Specs.Workflow;
 using Mohist.Workflow.Definition;
 using Xunit;
@@ -17,7 +18,7 @@ using Xunit;
 namespace Mohist.Server.SpecTests.Specs.Workflow.Grain;
 
 [Collection("WorkflowGrain")]
-public sealed class AgentResultSettlementSpecs : WorkflowGrainSpecs
+public sealed partial class AgentResultSettlementSpecs : WorkflowGrainSpecs
 {
     public AgentResultSettlementSpecs(WorkflowGrainFixture fixture) : base(fixture)
     {
@@ -105,12 +106,40 @@ public sealed class AgentResultSettlementSpecs : WorkflowGrainSpecs
             ArtifactUploadIds: ["missing-upload"],
             AddTasks: [new RuntimeTaskInput("follow-up", "Must not be projected", "spec/task")]);
 
-        var (ack, status) = await service.ReportAsync(
+        var incomplete = await service.ReportAsync(
             runnerId,
             _workflowId!,
             work.WorkId,
             work.TaskRunId,
             result);
+        Assert.Equal("stale", incomplete.Ack);
+        Assert.Null(incomplete.WorkflowStatus);
+
+        var mismatched = await service.ReportAsync(
+            runnerId,
+            _workflowId!,
+            work.WorkId,
+            work.TaskRunId,
+            result,
+            CancellationToken.None,
+            binding.AgentSessionId,
+            binding.AgentTurnId,
+            binding.Runtime,
+            "other-runtime-session");
+        Assert.Equal("stale", mismatched.Ack);
+        Assert.Equal("Running", mismatched.WorkflowStatus);
+
+        var (ack, status) = await service.ReportAsync(
+            runnerId,
+            _workflowId!,
+            work.WorkId,
+            work.TaskRunId,
+            result,
+            CancellationToken.None,
+            binding.AgentSessionId,
+            binding.AgentTurnId,
+            binding.Runtime,
+            binding.RuntimeSessionId);
 
         Assert.Equal("accepted", ack);
         Assert.Equal("Running", status);
@@ -145,8 +174,8 @@ public sealed class AgentResultSettlementSpecs : WorkflowGrainSpecs
             work.WorkId,
             work.TaskRunId,
             observation);
-        Assert.Equal("accepted", accepted.Ack);
-        Assert.Equal("Running", accepted.WorkflowStatus);
+        Assert.Equal("stale", accepted.Ack);
+        Assert.Null(accepted.WorkflowStatus);
 
         var stale = await service.ReportAsync(
             runnerId,
@@ -159,7 +188,7 @@ public sealed class AgentResultSettlementSpecs : WorkflowGrainSpecs
         var unresolved = await LoadRunAsync(_workflowId!);
         var task = Assert.Single(unresolved.CurrentStage().Tasks);
         Assert.Equal(TaskRunStatus.Running, task.Status);
-        Assert.Equal(AgentResultSettlementState.Unknown, task.AgentResultSettlement!.State);
+        Assert.Equal(AgentResultSettlementState.AwaitingResult, task.AgentResultSettlement!.State);
         Assert.Equal(work.TaskRunId, task.AgentResultSettlement.TaskRunId);
         Assert.Equal(work.WorkId, task.AgentResultSettlement.WorkId);
         Assert.Equal(runnerId, task.AgentResultSettlement.RunnerId);
@@ -218,6 +247,11 @@ public sealed class AgentResultSettlementSpecs : WorkflowGrainSpecs
             tasks: [new TaskDefinition("agent", "Agent", "mohist/pi")],
             checks: []));
         var (work, runnerId) = await PollWorkAnyAsync();
+        var initial = await LoadRunAsync(_workflowId!);
+        var task = Assert.Single(initial.CurrentStage().Tasks);
+        var binding = new AgentExecutionBinding(
+            task.Id, work.WorkId, runnerId, "session-recovered", "turn-recovered", "pi", "runtime-recovered");
+        Assert.Equal(ReportAck.Accepted, await workflow.BindAgentExecutionAsync(binding));
         var service = Services.GetRequiredService<WorkflowReportService>();
 
         Assert.Equal(("accepted", "Running"), await service.ReportAsync(
@@ -225,7 +259,12 @@ public sealed class AgentResultSettlementSpecs : WorkflowGrainSpecs
             _workflowId!,
             work.WorkId,
             work.TaskRunId,
-            new WorkResult("unknown", "Runner restarted before a result was durably recorded")));
+            new WorkResult("unknown", "Runner restarted before a result was durably recorded"),
+            CancellationToken.None,
+            binding.AgentSessionId,
+            binding.AgentTurnId,
+            binding.Runtime,
+            binding.RuntimeSessionId));
 
         var unknown = await LoadRunAsync(_workflowId!);
         var unknownTask = Assert.Single(unknown.CurrentStage().Tasks);
@@ -247,7 +286,12 @@ public sealed class AgentResultSettlementSpecs : WorkflowGrainSpecs
             _workflowId!,
             work.WorkId,
             work.TaskRunId,
-            receipt));
+            receipt,
+            CancellationToken.None,
+            binding.AgentSessionId,
+            binding.AgentTurnId,
+            binding.Runtime,
+            binding.RuntimeSessionId));
 
         var completed = await LoadRunAsync(_workflowId!);
         var completedTask = Assert.Single(completed.CurrentStage().Tasks);
@@ -263,7 +307,12 @@ public sealed class AgentResultSettlementSpecs : WorkflowGrainSpecs
             _workflowId!,
             work.WorkId,
             work.TaskRunId,
-            receipt));
+            receipt,
+            CancellationToken.None,
+            binding.AgentSessionId,
+            binding.AgentTurnId,
+            binding.Runtime,
+            binding.RuntimeSessionId));
     }
 
     [Fact]
@@ -293,6 +342,16 @@ public sealed class AgentResultSettlementSpecs : WorkflowGrainSpecs
         Assert.Equal(runnerId, buildRunnerId);
         Assert.NotEqual(plan.TaskRunId, build.TaskRunId);
         Assert.NotEqual(plan.WorkId, build.WorkId);
+        var buildTask = Assert.Single((await LoadRunAsync(_workflowId!)).CurrentStage().Tasks);
+        var buildBinding = new AgentExecutionBinding(
+            buildTask.Id,
+            build.WorkId,
+            runnerId,
+            "session-repeat",
+            "turn-repeat",
+            "opencode",
+            "runtime-repeat");
+        Assert.Equal(ReportAck.Accepted, await workflow.BindAgentExecutionAsync(buildBinding));
 
         var service = Services.GetRequiredService<WorkflowReportService>();
         var (ack, status) = await service.ReportAsync(
@@ -300,7 +359,12 @@ public sealed class AgentResultSettlementSpecs : WorkflowGrainSpecs
             _workflowId!,
             build.WorkId,
             build.TaskRunId,
-            new WorkResult("unknown", "Agent cleanup was not confirmed"));
+            new WorkResult("unknown", "Agent cleanup was not confirmed"),
+            CancellationToken.None,
+            buildBinding.AgentSessionId,
+            buildBinding.AgentTurnId,
+            buildBinding.Runtime,
+            buildBinding.RuntimeSessionId);
 
         Assert.Equal("accepted", ack);
         Assert.Equal("Running", status);
@@ -383,6 +447,108 @@ public sealed class AgentResultSettlementSpecs : WorkflowGrainSpecs
         Assert.Equal(TaskRunStatus.Completed, completedTask.Status);
         Assert.Null(completedTask.AgentResultSettlement);
         Assert.Equal(WorkflowRunStatus.Completed, completed.Status);
+    }
+
+    [Fact]
+    public async Task BlockedProjection_ExposesStableCategoryWithPersistedFactsAndReplayIsConsistent()
+    {
+        var workflow = await StartWorkflowAsync(SingleStage(
+            tasks: [new TaskDefinition("agent", "Agent", "mohist/opencode")],
+            checks: []));
+        var (work, runnerId) = await PollWorkAnyAsync();
+        var initial = await LoadRunAsync(_workflowId!);
+        var task = Assert.Single(initial.CurrentStage().Tasks);
+        var binding = new AgentExecutionBinding(
+            task.Id, work.WorkId, runnerId, "session-proj-1", "turn-proj-1", "opencode", "runtime-proj-1");
+        Assert.Equal(ReportAck.Accepted, await workflow.BindAgentExecutionAsync(binding));
+        Assert.Equal(ReportAck.Accepted, await workflow.ObserveAgentExecutionAsync(new AgentExecutionObservation(
+            binding, AgentExecutionObservationKind.StopUnconfirmed, "stop-unconfirmed", "transport did not confirm stop", "stop-op-proj")));
+
+        var unknown = await LoadRunAsync(_workflowId!);
+        var unknownSettlement = Assert.IsType<AgentResultSettlement>(Assert.Single(unknown.CurrentStage().Tasks).AgentResultSettlement);
+        var deadline = Assert.IsType<DateTimeOffset>(unknownSettlement.DeadlineAt);
+
+        // Before the deadline the status surface exposes Unknown with the
+        // persisted reason, message, execution identity, and deadline, and the
+        // attempt still owns its active Runner reservation.
+        var beforeView = WorkflowStatusMapper.BuildStatusView(unknown, definition: null)!;
+        Assert.Equal("running", beforeView.Status);
+        Assert.Equal("running", beforeView.Stages[0].Status);
+        Assert.Equal("running", beforeView.Stages[0].Tasks[0].Status);
+        Assert.Null(beforeView.Failure);
+        Assert.Equal(runnerId, beforeView.AssignedTo);
+        Assert.Null(beforeView.AgentResultAttention);
+        var beforeSettlement = beforeView.Stages[0].Tasks[0].AgentResultSettlement!;
+        Assert.Equal("unknown", beforeSettlement.State);
+        Assert.Equal("stop-unconfirmed", beforeSettlement.Reason);
+        Assert.Equal("stop-unconfirmed", beforeSettlement.ReasonCode);
+        Assert.Equal("transport did not confirm stop", beforeSettlement.Message);
+        Assert.Equal("stop-op-proj", beforeSettlement.StopOperationId);
+        Assert.Equal("session-proj-1", beforeSettlement.AgentSessionId);
+        Assert.Equal("turn-proj-1", beforeSettlement.AgentTurnId);
+        Assert.Equal(deadline, beforeSettlement.DeadlineAt);
+
+        _fixture.TimeProvider.Advance(deadline - _fixture.TimeProvider.GetUtcNow());
+        await workflow.ReceiveReminder(WorkflowGrain.AgentResultSettlementReminderName, default);
+
+        var blocked = await LoadRunAsync(_workflowId!);
+        var blockedView = WorkflowStatusMapper.BuildStatusView(blocked, definition: null)!;
+        Assert.Equal("blocked", blockedView.Status);
+        Assert.Equal("blocked", blockedView.Stages[0].Status);
+        Assert.Equal("blocked", blockedView.Stages[0].Tasks[0].Status);
+        Assert.Null(blockedView.Failure);
+        Assert.Null(blockedView.AssignedTo);
+        Assert.Contains(blockedView.AvailableActions, a => a.Name == "stop");
+        var attention = blockedView.AgentResultAttention!;
+        Assert.Equal("blocked", attention.State);
+        Assert.Equal("agent-result-unconfirmed", attention.Reason);
+        Assert.Equal("stop-unconfirmed", attention.ReasonCode);
+        Assert.Equal("transport did not confirm stop", attention.Message);
+        Assert.Equal(deadline, attention.DeadlineAt);
+        Assert.Equal("session-proj-1", attention.AgentSessionId);
+        Assert.Equal("turn-proj-1", attention.AgentTurnId);
+        var blockedSettlement = blockedView.Stages[0].Tasks[0].AgentResultSettlement!;
+        Assert.Equal("blocked", blockedSettlement.State);
+        Assert.Equal("agent-result-unconfirmed", blockedSettlement.Reason);
+        Assert.Equal("stop-unconfirmed", blockedSettlement.ReasonCode);
+        Assert.Equal("transport did not confirm stop", blockedSettlement.Message);
+        Assert.Equal(deadline, blockedSettlement.DeadlineAt);
+
+        // The blocked events carry the stable category AND the persisted
+        // reason so event consumers observe both without a separate lookup.
+        var blockedEvents = (await EventStore.ListAsync(_workflowId!))
+            .Where(entry => entry.Envelope.Type is EventCatalog.ReverseDns.TaskBlocked
+                or EventCatalog.ReverseDns.StageBlocked
+                or EventCatalog.ReverseDns.WorkflowRunBlocked)
+            .ToArray();
+        Assert.Equal(3, blockedEvents.Length);
+        var taskBlockedData = blockedEvents.Single(entry => entry.Envelope.Type == EventCatalog.ReverseDns.TaskBlocked).Envelope.Data!.Value;
+        Assert.Equal("agent-result-unconfirmed", taskBlockedData.GetProperty("reason").GetString());
+        Assert.Equal("stop-unconfirmed", taskBlockedData.GetProperty("reasonCode").GetString());
+        Assert.Equal(deadline, taskBlockedData.GetProperty("deadlineAt").GetDateTimeOffset());
+        var runBlockedData = blockedEvents.Single(entry => entry.Envelope.Type == EventCatalog.ReverseDns.WorkflowRunBlocked).Envelope.Data!.Value;
+        Assert.Equal("stop-unconfirmed", runBlockedData.GetProperty("reasonCode").GetString());
+        Assert.DoesNotContain((await EventStore.ListAsync(_workflowId!)), entry =>
+            entry.Envelope.Type is EventCatalog.ReverseDns.TaskFailed
+                or EventCatalog.ReverseDns.StageFailed
+                or EventCatalog.ReverseDns.WorkflowRunFailed
+                or EventCatalog.ReverseDns.TaskCompleted
+                or EventCatalog.ReverseDns.WorkflowRunCompleted);
+
+        // Replaying the reminder and re-reading across activation produces one
+        // consistent projection: same blocked attention, same facts, no
+        // duplicate blocked events or failure/completion notifications.
+        await workflow.ReceiveReminder(WorkflowGrain.AgentResultSettlementReminderName, default);
+        var replayEvents = (await EventStore.ListAsync(_workflowId!));
+        Assert.Equal(blockedEvents.Length, replayEvents.Count(entry => entry.Envelope.Type is EventCatalog.ReverseDns.TaskBlocked
+            or EventCatalog.ReverseDns.StageBlocked
+            or EventCatalog.ReverseDns.WorkflowRunBlocked));
+        var replayed = await LoadRunAsync(_workflowId!);
+        var replayedView = WorkflowStatusMapper.BuildStatusView(replayed, definition: null)!;
+        Assert.Equal("blocked", replayedView.Status);
+        Assert.Equal(attention.ReasonCode, replayedView.AgentResultAttention!.ReasonCode);
+        Assert.Equal(attention.DeadlineAt, replayedView.AgentResultAttention.DeadlineAt);
+        Assert.Equal(attention.Message, replayedView.AgentResultAttention.Message);
     }
 
     [Fact]
@@ -719,7 +885,12 @@ public sealed class AgentResultSettlementSpecs : WorkflowGrainSpecs
                 "Runner restarted before the durably-Blocked attempt could be reclaimed",
                 Output: JsonSerializer.SerializeToElement(new { leaked = "must-not-fail" }),
                 ArtifactUploadIds: ["leaked-upload-id"],
-                AddTasks: [new RuntimeTaskInput("leaked-follow-up", "Must not be projected", "spec/task")]));
+                AddTasks: [new RuntimeTaskInput("leaked-follow-up", "Must not be projected", "spec/task")]),
+            CancellationToken.None,
+            binding.AgentSessionId,
+            binding.AgentTurnId,
+            binding.Runtime,
+            binding.RuntimeSessionId);
 
         Assert.Equal("stale", report.Ack);
         Assert.Equal("Running", report.WorkflowStatus);
@@ -773,162 +944,4 @@ public sealed class AgentResultSettlementSpecs : WorkflowGrainSpecs
     }
 
 
-    [Fact]
-    public async Task BlockedSettlement_FencesMismatchedLateReportLeavingBlockedStateUntouched()
-    {
-        // Issue-628 T-005: any late authoritative report whose
-        // taskRunId/workId/runnerId tuple does not match the durably
-        // Blocked attempt must be rejected as stale without reviving or
-        // clearing the blocked settlement, and must not alter Runner
-        // projections. Only an identity-matching authoritative report may
-        // settle the attempt.
-        var workflow = await StartWorkflowAsync(SingleStage(
-            tasks: [new TaskDefinition("agent", "Agent", "mohist/opencode")],
-            checks: []));
-        var runnerId = _runnerId!;
-        var runner = Grains.GetGrain<IRunnerGrain>(runnerId);
-        var (work, _) = await PollWorkAnyAsync();
-        var initial = await LoadRunAsync(_workflowId!);
-        var task = Assert.Single(initial.CurrentStage().Tasks);
-        var binding = new AgentExecutionBinding(
-            task.Id, work.WorkId, runnerId, "session-mismatch", "turn-mismatch", "opencode", "runtime-mismatch");
-        var observation = new AgentExecutionObservation(
-            binding, AgentExecutionObservationKind.StopUnconfirmed, "stop-unconfirmed");
-
-        Assert.Equal(ReportAck.Accepted, await workflow.BindAgentExecutionAsync(binding));
-        Assert.Equal(ReportAck.Accepted, await workflow.ObserveAgentExecutionAsync(observation));
-
-        var unknown = await LoadRunAsync(_workflowId!);
-        var deadline = Assert.IsType<DateTimeOffset>(
-            Assert.Single(unknown.CurrentStage().Tasks).AgentResultSettlement!.DeadlineAt);
-        _fixture.TimeProvider.Advance(deadline - _fixture.TimeProvider.GetUtcNow());
-        await workflow.ReceiveReminder(WorkflowGrain.AgentResultSettlementReminderName, default);
-
-        var blocked = await LoadRunAsync(_workflowId!);
-        var blockedTask = Assert.Single(blocked.CurrentStage().Tasks);
-        Assert.Equal(AgentResultSettlementState.Blocked, blockedTask.AgentResultSettlement!.State);
-        var beforeEventCount = (await EventStore.ListAsync(_workflowId!)).Count;
-
-        // Mismatched taskRunId → stale.
-        Assert.Equal(ReportAck.Stale, await workflow.ReceiveTaskReportAsync(
-            runnerId,
-            work.WorkId,
-            new TaskReport(
-                work.WorkId,
-                TaskReportStatus.Succeeded,
-                Output: null,
-                Artifacts: null,
-                TaskRunId: "other-task.1")));
-        // Mismatched workId → stale.
-        Assert.Equal(ReportAck.Stale, await workflow.ReceiveTaskReportAsync(
-            runnerId,
-            "other-work",
-            new TaskReport(
-                "other-work",
-                TaskReportStatus.Succeeded,
-                Output: null,
-                Artifacts: null,
-                TaskRunId: task.Id)));
-        // Mismatched runnerId → stale (ForeignRunner fence).
-        Assert.Equal(ReportAck.Stale, await workflow.ReceiveTaskReportAsync(
-            "other-runner",
-            work.WorkId,
-            new TaskReport(
-                work.WorkId,
-                TaskReportStatus.Succeeded,
-                Output: null,
-                Artifacts: null,
-                TaskRunId: task.Id)));
-
-        var afterMismatches = await LoadRunAsync(_workflowId!);
-        var afterTask = Assert.Single(afterMismatches.CurrentStage().Tasks);
-        Assert.Equal(TaskRunStatus.Running, afterTask.Status);
-        Assert.Equal(AgentResultSettlementState.Blocked, afterTask.AgentResultSettlement!.State);
-        Assert.Equal(task.Id, afterTask.Id);
-        Assert.Equal(work.WorkId, afterTask.WorkId);
-        Assert.Equal(runnerId, afterTask.WorkerId);
-        var eventTypes = (await EventStore.ListAsync(_workflowId!))
-            .Select(entry => entry.Envelope.Type)
-            .ToArray();
-        Assert.DoesNotContain(EventCatalog.ReverseDns.TaskFailed, eventTypes);
-        Assert.DoesNotContain(EventCatalog.ReverseDns.TaskCompleted, eventTypes);
-        Assert.DoesNotContain(EventCatalog.ReverseDns.StageFailed, eventTypes);
-        Assert.DoesNotContain(EventCatalog.ReverseDns.WorkflowRunFailed, eventTypes);
-        Assert.Equal(beforeEventCount, (await EventStore.ListAsync(_workflowId!)).Count);
-
-        // Runner projections must still omit the blocked run.
-        var dispatch = Services.GetRequiredService<DispatchService>();
-        var querier = Services.GetRequiredService<WorkflowRunQuerier>();
-        Assert.Empty(await querier.FindRunningAssignedToAsync(runnerId));
-        Assert.Equal(0, await querier.CountRunningAssignedToAsync(runnerId));
-        Assert.DoesNotContain((await runner.GetRuntimeStateAsync()).ActiveWorks, item =>
-            string.Equals(item.OwnerId, _workflowId, StringComparison.Ordinal));
-        Assert.Empty((await dispatch.PollAsync(runnerId, new RunnerPollRequest([], []))).Dispatches);
-
-        // A matching late authoritative report still settles the attempt.
-        Assert.Equal(ReportAck.Accepted, await workflow.ReceiveTaskReportAsync(
-            runnerId,
-            work.WorkId,
-            new TaskReport(
-                work.WorkId,
-                TaskReportStatus.Succeeded,
-                Output: null,
-                Artifacts: null,
-                TaskRunId: task.Id)));
-        var completed = await LoadRunAsync(_workflowId!);
-        Assert.Equal(TaskRunStatus.Completed, Assert.Single(completed.CurrentStage().Tasks).Status);
-    }
-
-    [Fact]
-    public async Task UnknownAndBlockedSettlement_HoldsSequentialStageLockUntilExplicitStop()
-    {
-        var suffix = Guid.NewGuid().ToString("N");
-        var resource = $"agent-settlement-{suffix}";
-        var workflow = await StartWorkflowAsync(new WorkflowDefinition(
-        [
-            new StageDefinition(
-                "build",
-                [new TaskDefinition("agent", "Agent", "mohist/opencode")],
-                [],
-                LockBehavior: "sequential",
-                Resources: [resource])
-        ]), id: $"wf-agent-settlement-lock-{suffix}");
-        var projectId = TestProjectId(_workflowId!);
-        var (work, runnerId) = await PollWorkAnyAsync();
-        var run = await LoadRunAsync(_workflowId!);
-        var task = Assert.Single(run.CurrentStage().Tasks);
-        var binding = new AgentExecutionBinding(
-            task.Id,
-            work.WorkId,
-            runnerId,
-            "session-lock",
-            "turn-lock",
-            "opencode",
-            "runtime-session-lock");
-        var lockGrain = Grains.GetGrain<IWorkflowStageLockGrain>(
-            WorkflowStageLockKeys.ForProjectResource(projectId, resource));
-
-        Assert.Equal(_workflowId, (await lockGrain.GetStateAsync())?.Owner?.WorkflowRunId);
-        Assert.Equal(ReportAck.Accepted, await workflow.BindAgentExecutionAsync(binding));
-        Assert.Equal(ReportAck.Accepted, await workflow.ObserveAgentExecutionAsync(
-            new AgentExecutionObservation(
-                binding,
-                AgentExecutionObservationKind.Disconnected,
-                "runner-disconnected")));
-        Assert.Equal(_workflowId, (await lockGrain.GetStateAsync())?.Owner?.WorkflowRunId);
-
-        var unknown = await LoadRunAsync(_workflowId!);
-        var deadline = Assert.IsType<DateTimeOffset>(
-            Assert.Single(unknown.CurrentStage().Tasks).AgentResultSettlement!.DeadlineAt);
-        _fixture.TimeProvider.Advance(deadline - _fixture.TimeProvider.GetUtcNow());
-        await workflow.ReceiveReminder(WorkflowGrain.AgentResultSettlementReminderName, default);
-
-        Assert.Equal(AgentResultSettlementState.Blocked,
-            Assert.Single((await LoadRunAsync(_workflowId!)).CurrentStage().Tasks).AgentResultSettlement!.State);
-        Assert.Equal(_workflowId, (await lockGrain.GetStateAsync())?.Owner?.WorkflowRunId);
-
-        await workflow.StopAsync("operator stop");
-
-        Assert.Null((await lockGrain.GetStateAsync())?.Owner);
-    }
 }

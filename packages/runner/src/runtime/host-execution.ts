@@ -129,9 +129,17 @@ export async function reportOnce(
   const held = context.awaitingAck.get(key)
   if (!held) return
   held.entry.attempts += 1
-  if (held.entry.receipt) {
-    const acknowledgement = await context.connection.sendRecoveryReceipt(held.entry.receipt, signal)
-    if (acknowledgement.appliedReceiptId !== held.entry.receipt.receiptId)
+  const receipt = held.entry.receipt
+  if (receipt?.payload.type === 'terminal-result' && receipt.ownerKind !== 'agent-job') {
+    await reportAndRequireDurableAck(context.connection, held.work, receipt.payload.result, {
+      agentSessionId: receipt.agentSessionId,
+      agentTurnId: receipt.agentTurnId,
+      runtime: receipt.runtime,
+      runtimeSessionId: receipt.runtimeSessionId,
+    })
+  } else if (receipt) {
+    const acknowledgement = await context.connection.sendRecoveryReceipt(receipt, signal)
+    if (acknowledgement.appliedReceiptId !== receipt.receiptId)
       throw new Error('recovery receipt acknowledgement identity mismatch')
     if (acknowledgement.status === 'retryable') throw new Error('recovery receipt acknowledgement is retryable')
   } else {

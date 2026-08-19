@@ -61,7 +61,8 @@ public sealed record AgentResultAttentionView(
     string? ExpectedRecoveryPath = null,
     string? StopFailure = null,
     string? NextAction = null,
-    IReadOnlyList<string>? RecoveryActions = null);
+    IReadOnlyList<string>? RecoveryActions = null,
+    string? ReasonCode = null);
 
 /// <summary>
 /// The durable result-settlement state for an Agent task attempt. This is
@@ -115,7 +116,8 @@ public sealed record AgentResultSettlementView(
     string? StopFailure = null,
     AgentWorkInterruptionView? Interruption = null,
     string? NextAction = null,
-    IReadOnlyList<string>? RecoveryActions = null);
+    IReadOnlyList<string>? RecoveryActions = null,
+    string? ReasonCode = null);
 
 [GenerateSerializer]
 public sealed record StageStatusView(

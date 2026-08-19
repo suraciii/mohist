@@ -136,7 +136,12 @@ public class RunnerOutstandingWorkSpecs : WorkflowGrainSpecs
             work.WorkflowRunId,
             work.WorkId,
             work.TaskRunId,
-            new WorkResult("completed"));
+            new WorkResult("completed"),
+            CancellationToken.None,
+            binding.AgentSessionId,
+            binding.AgentTurnId,
+            binding.Runtime,
+            binding.RuntimeSessionId);
         Assert.Equal("accepted", ack);
 
         var completed = await LoadRunAsync(work.WorkflowRunId);

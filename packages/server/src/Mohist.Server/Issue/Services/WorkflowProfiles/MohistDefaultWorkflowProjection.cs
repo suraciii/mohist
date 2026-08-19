@@ -87,7 +87,9 @@ public static class MohistDefaultWorkflowProjection
         if (workflow?.Status == "blocked")
             return WorkflowAttention.AgentResultUnconfirmed(
                 workflow.WorkflowRunId,
-                workflow.AgentResultAttention?.Message ?? "Agent result unconfirmed");
+                workflow.AgentResultAttention?.Message ?? "Agent result unconfirmed",
+                workflow.AgentResultAttention?.ReasonCode,
+                workflow.AgentResultAttention?.DeadlineAt);
         return null;
     }
 

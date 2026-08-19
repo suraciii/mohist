@@ -59,6 +59,48 @@ public sealed class RecoveryReceiptSpecs : WorkflowGrainSpecs
     }
 
     [Fact]
+    public async Task RecoveryReceipt_AtDeadlineCommitsBlockedBoundaryBeforeApplyingResult()
+    {
+        var workflow = await StartWorkflowAsync(SingleStage(
+            tasks: [new TaskDefinition("agent", "Agent", "mohist/opencode")],
+            checks: []));
+        var (work, runnerId) = await PollWorkAnyAsync();
+        var task = Assert.Single((await LoadRunAsync(_workflowId!)).CurrentStage().Tasks);
+        var binding = new AgentExecutionBinding(
+            task.Id,
+            work.WorkId,
+            runnerId,
+            "receipt-deadline-session",
+            "receipt-deadline-turn",
+            "opencode",
+            "receipt-deadline-runtime-session");
+        Assert.Equal(ReportAck.Accepted, await workflow.BindAgentExecutionAsync(binding));
+        Assert.Equal(ReportAck.Accepted, await workflow.ObserveAgentExecutionAsync(
+            new AgentExecutionObservation(binding, AgentExecutionObservationKind.Disconnected, "runner-disconnected")));
+
+        var unknown = await LoadRunAsync(_workflowId!);
+        var deadline = Assert.IsType<DateTimeOffset>(
+            Assert.Single(unknown.CurrentStage().Tasks).AgentResultSettlement!.DeadlineAt);
+        _fixture.TimeProvider.Advance(deadline - _fixture.TimeProvider.GetUtcNow());
+
+        var receipt = TerminalReceipt(
+            binding,
+            _workflowId!,
+            new WorkResult("completed", "late authoritative result"),
+            "receipt-deadline-terminal");
+        var acknowledgement = await workflow.ReceiveRecoveryReceiptAsync(receipt);
+
+        Assert.Equal(RuntimeRecoveryReceiptAckStatuses.Accepted, acknowledgement.Status);
+        var settled = await LoadRunAsync(_workflowId!);
+        Assert.Equal(TaskRunStatus.Completed, Assert.Single(settled.CurrentStage().Tasks).Status);
+        var eventTypes = (await EventStore.ListAsync(_workflowId!))
+            .Select(entry => entry.Envelope.Type)
+            .ToArray();
+        Assert.Single(eventTypes, type => type == EventCatalog.ReverseDns.TaskBlocked);
+        Assert.Contains(EventCatalog.ReverseDns.TaskCompleted, eventTypes);
+    }
+
+    [Fact]
     public async Task RecoveryReceipt_RejectsBindingAndFingerprintMismatchWithoutChangingSettlement()
     {
         var workflow = await StartWorkflowAsync(SingleStage(

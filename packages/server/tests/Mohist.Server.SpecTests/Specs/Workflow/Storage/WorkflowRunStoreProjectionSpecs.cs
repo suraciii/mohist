@@ -140,14 +140,14 @@ public partial class WorkflowRunStoreSpecs
     }
 
     [Fact]
-    public async Task SaveAsync_KeepsUnknownActiveAndRemovesBlockedSettlementFromCapacity()
+    public async Task SaveAsync_KeepsUnknownActiveLeaseAndClearsBlockedProjectionForCapacity()
     {
         using var database = TestSqliteDatabase.CreateMigrated();
         var factory = new TestDbContextFactory(database.Options);
         var store = CreateStore(factory, new EventStore(factory, NullLogger<EventStore>.Instance));
-        var blocked = new WorkflowRun
+        var unknown = new WorkflowRun
         {
-            Id = "wr_blocked_attention",
+            Id = "wr_unknown_attention",
             Metadata = new WorkflowRunMetadata(null, FixedTime, ProjectId: ProjectId, IssueNumber: IssueNumber),
             Status = WorkflowRunStatus.Running,
             Assignment = new WorkflowAssignment("runner-1", FixedTime),
@@ -178,7 +178,7 @@ public partial class WorkflowRunStoreSpecs
                                 TaskRunId = "build.1",
                                 WorkId = "build-work",
                                 RunnerId = "runner-1",
-                                ReasonCode = "agent-result-unconfirmed",
+                                ReasonCode = "stop-unconfirmed",
                                 DeadlineAt = FixedTime.AddMinutes(5),
                             },
                         },
@@ -186,51 +186,168 @@ public partial class WorkflowRunStoreSpecs
                 },
             ],
         };
-        var running = new WorkflowRun
-        {
-            Id = "wr_running_attention",
-            Metadata = new WorkflowRunMetadata(null, FixedTime, ProjectId: ProjectId, IssueNumber: IssueNumber + 1),
-            Status = WorkflowRunStatus.Running,
-            Stages = [],
-        };
 
-        await store.SaveAsync(blocked);
-        await store.SaveAsync(running);
+        await store.SaveAsync(unknown);
 
         var querier = new WorkflowRunQuerier(factory);
+        Assert.Equal([unknown.Id], await querier.FindRunningAssignedToAsync("runner-1"));
+        Assert.Equal(1, await querier.CountRunningAssignedToAsync("runner-1"));
         Assert.Empty(await querier.FindBlockedAsync(ProjectId));
         Assert.Empty(await querier.FindBlockedAsync("other-project"));
-        await using (var blockedDb = new MohistDbContext(database.Options))
+        await using (var unknownDb = new MohistDbContext(database.Options))
         {
-            var blockedRow = await blockedDb.WorkflowRuns.SingleAsync(run => run.WorkflowRunId == blocked.Id);
-            Assert.Equal("build-work", blockedRow.ActiveWorkId);
-            Assert.Equal("runner-1", blockedRow.ActiveWorkerId);
+            var row = await unknownDb.WorkflowRuns.SingleAsync(run => run.WorkflowRunId == unknown.Id);
+            Assert.Equal("build-work", row.ActiveWorkId);
+            Assert.Equal("runner-1", row.ActiveWorkerId);
+            Assert.Null(row.AttentionStatus);
         }
-        Assert.Equal(1, await querier.CountRunningAssignedToAsync("runner-1"));
-        Assert.Equal([blocked.Id], await querier.FindRunningAssignedToAsync("runner-1"));
 
-        blocked.CurrentStage().Tasks.Single().AgentResultSettlement!.State = AgentResultSettlementState.Blocked;
-        await store.SaveAsync(blocked);
-        Assert.Equal([blocked.Id], await querier.FindBlockedAsync(ProjectId));
-        await using (var blockedDb = new MohistDbContext(database.Options))
-        {
-            var blockedRow = await blockedDb.WorkflowRuns.SingleAsync(run => run.WorkflowRunId == blocked.Id);
-            Assert.Null(blockedRow.ActiveWorkId);
-            Assert.Null(blockedRow.ActiveWorkerId);
-        }
-        Assert.Equal(0, await querier.CountRunningAssignedToAsync("runner-1"));
+        unknown.CurrentStage().Tasks.Single().AgentResultSettlement!.State = AgentResultSettlementState.Blocked;
+        unknown.Assignment = null;
+        await store.SaveAsync(unknown);
+
+        Assert.Equal([unknown.Id], await querier.FindBlockedAsync(ProjectId));
         Assert.Empty(await querier.FindRunningAssignedToAsync("runner-1"));
+        Assert.Equal(0, await querier.CountRunningAssignedToAsync("runner-1"));
+        await using (var blockedDb = new MohistDbContext(database.Options))
+        {
+            var row = await blockedDb.WorkflowRuns.SingleAsync(run => run.WorkflowRunId == unknown.Id);
+            Assert.Null(row.ActiveWorkId);
+            Assert.Null(row.ActiveWorkerId);
+            Assert.Equal("blocked", row.AttentionStatus);
+        }
 
-        var task = blocked.CurrentStage().Tasks.Single();
+        // A matching late authoritative result clears the settlement through
+        // the terminal path; the projection then drops blocked attention and
+        // the row stays clear of active-work queries.
+        var task = unknown.CurrentStage().Tasks.Single();
         task.AgentResultSettlement = null;
         task.Status = TaskRunStatus.Completed;
-        blocked.Status = WorkflowRunStatus.Completed;
-        await store.SaveAsync(blocked);
+        unknown.Status = WorkflowRunStatus.Completed;
+        await store.SaveAsync(unknown);
 
         Assert.Empty(await querier.FindBlockedAsync(ProjectId));
-        await using var db = new MohistDbContext(database.Options);
-        var row = await db.WorkflowRuns.SingleAsync(run => run.WorkflowRunId == blocked.Id);
-        Assert.Null(row.AttentionStatus);
+        Assert.Empty(await querier.FindRunningAssignedToAsync("runner-1"));
+        Assert.Equal(0, await querier.CountRunningAssignedToAsync("runner-1"));
+        await using (var completedDb = new MohistDbContext(database.Options))
+        {
+            var row = await completedDb.WorkflowRuns.SingleAsync(run => run.WorkflowRunId == unknown.Id);
+            Assert.Null(row.AttentionStatus);
+            Assert.Null(row.ActiveWorkId);
+            Assert.Null(row.ActiveWorkerId);
+        }
+    }
+
+    [Fact]
+    public async Task SaveAsync_RoundTripsBlockedSettlementFactsAndKeepsStableAttentionAcrossRebuilds()
+    {
+        using var database = TestSqliteDatabase.CreateMigrated();
+        var factory = new TestDbContextFactory(database.Options);
+        var store = CreateStore(factory, new EventStore(factory, NullLogger<EventStore>.Instance));
+        var deadline = FixedTime.AddMinutes(5);
+        var run = new WorkflowRun
+        {
+            Id = "wr_blocked_facts",
+            Metadata = new WorkflowRunMetadata(null, FixedTime, ProjectId: ProjectId, IssueNumber: IssueNumber),
+            Status = WorkflowRunStatus.Running,
+            CurrentStageId = "build",
+            Stages =
+            [
+                new StageRun
+                {
+                    Id = "build",
+                    Attempt = 1,
+                    RequiresApproval = false,
+                    Status = StageRunStatus.Running,
+                    Tasks =
+                    [
+                        new TaskRun
+                        {
+                            Id = "build.1",
+                            DefinitionId = "build",
+                            Attempt = 1,
+                            Title = "Build",
+                            Uses = "mohist/opencode",
+                            Status = TaskRunStatus.Running,
+                            WorkId = "build-work",
+                            WorkerId = "runner-1",
+                            AgentResultSettlement = new AgentResultSettlement
+                            {
+                                State = AgentResultSettlementState.Blocked,
+                                TaskRunId = "build.1",
+                                WorkId = "build-work",
+                                RunnerId = "runner-1",
+                                AgentSessionId = "session-1",
+                                AgentTurnId = "turn-1",
+                                Runtime = "opencode",
+                                RuntimeSessionId = "runtime-session-1",
+                                StopOperationId = "stop-op-1",
+                                LastObservation = AgentExecutionObservationKind.StopUnconfirmed,
+                                ReasonCode = "stop-unconfirmed",
+                                Message = "transport did not confirm stop",
+                                FirstUnknownAt = FixedTime,
+                                DeadlineAt = deadline,
+                            },
+                        },
+                    ],
+                },
+            ],
+        };
+
+        await store.SaveAsync(run);
+
+        var first = Assert.IsType<WorkflowRun>(await store.LoadAsync(run.Id));
+        var firstSettlement = Assert.IsType<AgentResultSettlement>(
+            Assert.Single(first.CurrentStage().Tasks).AgentResultSettlement);
+        Assert.Equal(AgentResultSettlementState.Blocked, firstSettlement.State);
+        Assert.Equal("stop-unconfirmed", firstSettlement.ReasonCode);
+        Assert.Equal("transport did not confirm stop", firstSettlement.Message);
+        Assert.Equal(deadline, firstSettlement.DeadlineAt);
+        Assert.Equal("build.1", firstSettlement.TaskRunId);
+        Assert.Equal("build-work", firstSettlement.WorkId);
+        Assert.Equal("runner-1", firstSettlement.RunnerId);
+        Assert.Equal("session-1", firstSettlement.AgentSessionId);
+        Assert.Equal("turn-1", firstSettlement.AgentTurnId);
+        Assert.Equal("opencode", firstSettlement.Runtime);
+        Assert.Equal("runtime-session-1", firstSettlement.RuntimeSessionId);
+        Assert.Equal("stop-op-1", firstSettlement.StopOperationId);
+        Assert.Equal(AgentExecutionObservationKind.StopUnconfirmed, firstSettlement.LastObservation);
+
+        // The released attempt is indexed with stable blocked attention, is
+        // excluded from active-work/Runner capacity, and is discoverable as a
+        // blocked run.
+        var querier = new WorkflowRunQuerier(factory);
+        Assert.Equal([run.Id], await querier.FindBlockedAsync(ProjectId));
+        Assert.Empty(await querier.FindRunningAssignedToAsync("runner-1"));
+        Assert.Equal(0, await querier.CountRunningAssignedToAsync("runner-1"));
+        await using (var db = new MohistDbContext(database.Options))
+        {
+            var row = await db.WorkflowRuns.SingleAsync(candidate => candidate.WorkflowRunId == run.Id);
+            Assert.Equal("blocked", row.AttentionStatus);
+            Assert.Null(row.ActiveWorkId);
+            Assert.Null(row.ActiveWorkerId);
+        }
+
+        // Rebuilding the projection (a subsequent save with unchanged facts) is
+        // idempotent: the same stable attention and the same persisted facts
+        // come back, and no duplicate blocked state appears.
+        await store.SaveAsync(first);
+        var rebuilt = Assert.IsType<WorkflowRun>(await store.LoadAsync(run.Id));
+        var rebuiltSettlement = Assert.IsType<AgentResultSettlement>(
+            Assert.Single(rebuilt.CurrentStage().Tasks).AgentResultSettlement);
+        Assert.Equal(AgentResultSettlementState.Blocked, rebuiltSettlement.State);
+        Assert.Equal("stop-unconfirmed", rebuiltSettlement.ReasonCode);
+        Assert.Equal("transport did not confirm stop", rebuiltSettlement.Message);
+        Assert.Equal(deadline, rebuiltSettlement.DeadlineAt);
+        Assert.Equal("session-1", rebuiltSettlement.AgentSessionId);
+        await using (var db = new MohistDbContext(database.Options))
+        {
+            var row = await db.WorkflowRuns.SingleAsync(candidate => candidate.WorkflowRunId == run.Id);
+            Assert.Equal("blocked", row.AttentionStatus);
+            Assert.Null(row.ActiveWorkId);
+            Assert.Null(row.ActiveWorkerId);
+        }
+        Assert.Equal([run.Id], await querier.FindBlockedAsync(ProjectId));
     }
 
     [Fact]

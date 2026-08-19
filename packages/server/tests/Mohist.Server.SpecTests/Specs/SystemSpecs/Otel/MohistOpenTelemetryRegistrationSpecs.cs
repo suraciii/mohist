@@ -81,14 +81,14 @@ public class MohistOpenTelemetryRegistrationSpecs
     public void Enabled_ConfiguresDispatcherMeterProviderAndMetricsExporter()
     {
         var services = new ServiceCollection();
-        services.AddMohistOpenTelemetry(BuildConfig(enabled: true, endpoint: "http://collector.test/otel"));
+        services.AddMohistOpenTelemetry(BuildConfig(enabled: true, endpoint: "http://127.0.0.1:1/otel"));
         UseInMemoryOtlpExporters(services);
 
         using var provider = services.BuildServiceProvider();
         Assert.NotNull(provider.GetService<MeterProvider>());
         var exporterOptions = provider.GetRequiredService<IOptionsMonitor<OtlpExporterOptions>>().Get("metrics");
         Assert.Equal(OtlpExportProtocol.HttpProtobuf, exporterOptions.Protocol);
-        Assert.Equal(new Uri("http://collector.test/otel/v1/metrics"), exporterOptions.Endpoint);
+        Assert.Equal(new Uri("http://127.0.0.1:1/otel/v1/metrics"), exporterOptions.Endpoint);
     }
 
     [Fact]
@@ -99,7 +99,7 @@ public class MohistOpenTelemetryRegistrationSpecs
         // returns a non-null instance. The pipeline is the chain of
         // processor(s) + exporter(s) wired inside the WithTracing
         // block; if the registration short-circuits, this would be null.
-        var config = BuildConfig(enabled: true, endpoint: "http://collector.test/otel");
+        var config = BuildConfig(enabled: true, endpoint: "http://127.0.0.1:1/otel");
 
         var services = new ServiceCollection();
         services.AddMohistOpenTelemetry(config);

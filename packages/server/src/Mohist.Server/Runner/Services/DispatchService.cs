@@ -83,16 +83,21 @@ public sealed class DispatchService : IScopedService
         var dispatches = new List<WorkDispatch>();
         var reportedWorkKeys = ReportedWorkKeys(req);
         ct.ThrowIfCancellationRequested();
-        var activeWorkKeys = await AddMissingRedeliveriesAsync(
+        var desiredActiveKeys = await AddMissingRedeliveriesAsync(
             runnerId,
             reportedWorkKeys,
             dispatches,
             ct);
-        // Recovering Agent work is absent while its recorded runner is away;
-        // once that same runner reconnects, its persisted ledger snapshot is
-        // part of desired redelivery as a recovery probe. A connected Runner
-        // that reports the key suppresses the re-delivery until it settles.
-        activeWorkKeys.UnionWith(reportedWorkKeys);
+        // Only reported keys whose underlying run is still in the desired
+        // active set reserve a slot. Stale keys (e.g. for a blocked run
+        // the deadline already released) are filtered out so a different
+        // eligible work item can claim the released capacity.
+        var activeWorkKeys = new HashSet<string>(desiredActiveKeys, StringComparer.Ordinal);
+        foreach (var reportedKey in reportedWorkKeys)
+        {
+            if (desiredActiveKeys.Contains(reportedKey))
+                activeWorkKeys.Add(reportedKey);
+        }
         var spare = slots - activeWorkKeys.Count;
         if (spare <= 0)
             return new RunnerPollResponse(dispatches);
@@ -404,10 +409,13 @@ public sealed class DispatchService : IScopedService
         if (settlementTask is null)
             return (null, null, ReserveSlot: false);
 
+        // A blocked settlement has already crossed the durable release
+        // boundary; nothing should be redelivered or recovered for it.
         var settlement = settlementTask.Task.AgentResultSettlement!;
         // Update-interrupted work waits for a recovery receipt and a fresh
         // replacement dispatch; it never reconciles through redelivery.
-        if (!string.IsNullOrWhiteSpace(settlement.UpdateOperationId))
+        if (settlement.State != AgentResultSettlementState.Unknown
+            || !string.IsNullOrWhiteSpace(settlement.UpdateOperationId))
             return (null, null, ReserveSlot: false);
         var binding = settlement.Runtime is not null && settlement.RuntimeSessionId is not null
             ? new AgentRecoveryBinding(settlement.Runtime, settlement.RuntimeSessionId)
