@@ -269,9 +269,10 @@ function loadArtifacts(directory: string): PartitionArtifact[] {
 async function runCommand(
   command: string,
   args: readonly string[],
+  cwd: string = repoRoot,
 ): Promise<{ readonly exitCode: number | null; readonly output: string }> {
   const child = spawn(command, args as string[], {
-    cwd: repoRoot,
+    cwd,
     stdio: ['ignore', 'pipe', 'pipe'],
   })
   let output = ''
@@ -298,19 +299,25 @@ async function runPartition(
 ): Promise<void> {
   if (!existsSync(apphost)) throw new Error(`apphost does not exist: ${apphost}`)
   const discoveryArgs = ['-noColor', '-noLogo', '-noAutoReporters']
-  const discovery = await runCommand(apphost, ['-list', 'classes', ...discoveryArgs])
+  const workingDirectory = dirname(reportPath)
+  mkdirSync(workingDirectory, { recursive: true })
+  const discovery = await runCommand(apphost, ['-list', 'classes', ...discoveryArgs], workingDirectory)
   if (discovery.exitCode !== 0) throw new Error('xUnit class discovery failed')
-  const testDiscovery = await runCommand(apphost, ['-list', 'tests', '-preEnumerateTheories', ...discoveryArgs])
+  const testDiscovery = await runCommand(
+    apphost,
+    ['-list', 'tests', '-preEnumerateTheories', ...discoveryArgs],
+    workingDirectory,
+  )
   if (testDiscovery.exitCode !== 0) throw new Error('xUnit test discovery failed')
   const plan = planPartitionClasses(discovery.output, partitionIndex, partitionCount, testDiscovery.output)
   writePlan(manifestDirectory, plan)
   console.log(
     `Spec partition ${plan.index + 1}/${plan.count}: ${plan.selectedClasses.length} of ${plan.allClasses.length} classes (${plan.selectedCaseCount}/${plan.totalCaseCount} cases)`,
   )
-  mkdirSync(dirname(reportPath), { recursive: true })
   const execution = await runCommand(
     apphost,
     partitionExecutionArguments(reportPath, plan.selectedClasses, partitionMaxThreads),
+    workingDirectory,
   )
   writeFileSync(resolve(manifestDirectory, 'spec.log'), execution.output)
   if (execution.exitCode !== 0)

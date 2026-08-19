@@ -17,11 +17,12 @@ public interface IPublicProjectionNudge
 
 public sealed class PublicProjectionNudge : IPublicProjectionNudge
 {
-    private readonly Channel<bool> _signals = Channel.CreateUnbounded<bool>(
-        new UnboundedChannelOptions
+    private readonly Channel<bool> _signals = Channel.CreateBounded<bool>(
+        new BoundedChannelOptions(1)
         {
             SingleReader = true,
             SingleWriter = false,
+            FullMode = BoundedChannelFullMode.DropWrite,
         });
 
     /// <summary>Awaitable signal used by the hosted projector's wait loop.</summary>

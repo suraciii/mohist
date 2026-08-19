@@ -565,7 +565,8 @@ public sealed class WorkflowProfileReferenceCoordinatorGrain : Grain, IWorkflowP
             entry.AgentAction,
             definition.Stages.Select(stage => new BoundStageStructure(stage.Stage, stage.RequiresApproval)).ToList(),
             metadata,
-            request.Workspace);
+            request.Workspace,
+            DefinitionJson: WorkflowYamlSerializer.ToJson(definition));
     }
 
     private async Task<string?> ResolveEffectiveProfileIdAsync(
