@@ -640,9 +640,26 @@ public static partial class WorkflowRunExtensions
                 : firstIncompleteIndex >= 0
                     ? firstIncompleteIndex
                     : current.Tasks.Count;
+            var sourceLaneRetryAdded = false;
 
             foreach (var task in tasks)
             {
+                if (sourceTask?.Lane is { } sourceLaneForEnvelope
+                    && VerificationLaneCatalog.IsKnownLane(task.Definition.Id))
+                {
+                    // A recovery envelope for one lane may contain helpers,
+                    // but it must not introduce another catalog lane or a
+                    // second retry for the source identity. Otherwise a
+                    // replayed or malformed envelope could run a later lane
+                    // twice after the target retry passes.
+                    if (!string.Equals(task.Definition.Id, sourceLaneForEnvelope.LaneId, StringComparison.Ordinal)
+                        || sourceLaneRetryAdded)
+                    {
+                        continue;
+                    }
+                    sourceLaneRetryAdded = true;
+                }
+
                 // The Runner normally echoes the source lane definition. The
                 // source remains authoritative for a recovery retry's lane
                 // budget and recovery contract if a replayed envelope is

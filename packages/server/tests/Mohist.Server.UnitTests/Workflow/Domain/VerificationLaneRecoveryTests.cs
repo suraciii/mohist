@@ -32,18 +32,26 @@ public sealed class VerificationLaneRecoveryTests
             WorkId = failed.WorkId,
         };
 
+        var retryDefinition = new TaskDefinition(
+            VerificationLaneCatalog.VerifyDotnet,
+            "Verify dotnet",
+            "core/script",
+            With: new Dictionary<string, JsonElement?>
+            {
+                ["timeout"] = JsonSerializer.SerializeToElement(1),
+            },
+            Recovery: recovery);
         var followUps = new[]
         {
             (new TaskDefinition("recover:fix-ci", "Fix CI", "core/script"), (int?)null),
+            (retryDefinition, (int?)1),
+            // A duplicate retry and a later catalog lane must not be admitted
+            // into the same source-attempt recovery chain.
+            (retryDefinition, (int?)1),
             (new TaskDefinition(
-                VerificationLaneCatalog.VerifyDotnet,
-                "Verify dotnet",
-                "core/script",
-                With: new Dictionary<string, JsonElement?>
-                {
-                    ["timeout"] = JsonSerializer.SerializeToElement(1),
-                },
-                Recovery: recovery), (int?)1),
+                VerificationLaneCatalog.VerifyWebTypecheck,
+                "Verify web typecheck",
+                "core/script"), (int?)null),
         };
 
         var firstEvents = run.AddRuntimeTaskAttempts(followUps, Now, failed.Id);

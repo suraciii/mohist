@@ -43,8 +43,9 @@ public static class VerificationLaneClassifier
             // The Runner's recovery scheduling envelope marks outer
             // status=completed with addTasks; that is NOT a lane pass even
             // though the underlying status is "completed". A pass requires a
-            // direct successful lane report with no recovery follow-ups.
-            return report.AddTasks is { Count: > 0 }
+            // direct successful lane report with no error or recovery
+            // follow-ups.
+            return report.Error is not null || report.AddTasks is { Count: > 0 }
                 ? VerificationLaneOutcome.Fail
                 : VerificationLaneOutcome.Pass;
         }

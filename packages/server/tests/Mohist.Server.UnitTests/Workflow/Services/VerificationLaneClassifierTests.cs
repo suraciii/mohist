@@ -42,6 +42,21 @@ public sealed class VerificationLaneClassifierTests
     }
 
     [Fact]
+    public void Classify_SuccessfulScriptWithError_IsFailNotPass()
+    {
+        var outcome = VerificationLaneClassifier.Classify(
+            VerificationLaneCatalog.VerifyInstall,
+            new TaskReport(
+                WorkId: "verify-install.1",
+                Status: TaskReportStatus.Succeeded,
+                Output: null,
+                Artifacts: null,
+                Error: new ExecutionError("script-failed", "the shell reported an error")));
+
+        Assert.Equal(VerificationLaneOutcome.Fail, outcome);
+    }
+
+    [Fact]
     public void Classify_SuccessfulScriptWithAddTasks_IsFailNotPass()
     {
         // The Runner's recovery scheduling envelope marks the task outer
