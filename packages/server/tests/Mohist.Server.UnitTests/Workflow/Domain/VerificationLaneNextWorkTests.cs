@@ -82,6 +82,47 @@ public sealed class VerificationLaneNextWorkTests
     }
 
     [Fact]
+    public void NextWork_LaneEnabledRun_BlocksDownstreamTaskWhenLaneResultIsMissing()
+    {
+        var run = CreateLaneEnabledRun();
+        var stage = run.Stages[0];
+        foreach (var task in stage.Tasks)
+        {
+            task.Status = TaskRunStatus.Completed;
+            task.Lane = task.Lane! with { Outcome = VerificationLaneOutcome.Pass };
+        }
+        stage.Tasks[0].Lane = null;
+        AddPendingDownstreamTask(stage);
+
+        Assert.False(VerificationLaneGate.CanAdvanceBuildStage(run));
+        Assert.Null(run.NextWork());
+        Assert.Null(run.CurrentPendingWork());
+    }
+
+    [Fact]
+    public void NextWork_LaneEnabledRun_BlocksDownstreamTaskWhenLaneIsNotPassing()
+    {
+        var run = CreateLaneEnabledRun();
+        var stage = run.Stages[0];
+        foreach (var task in stage.Tasks)
+        {
+            task.Status = TaskRunStatus.Completed;
+            task.Lane = task.Lane! with { Outcome = VerificationLaneOutcome.Pass };
+        }
+        stage.Tasks[2].Status = TaskRunStatus.Failed;
+        stage.Tasks[2].Lane = stage.Tasks[2].Lane! with
+        {
+            Outcome = VerificationLaneOutcome.Fail,
+            Error = new ExecutionError("script-failed", "lane failed"),
+        };
+        AddPendingDownstreamTask(stage);
+
+        Assert.False(VerificationLaneGate.CanAdvanceBuildStage(run));
+        Assert.Null(run.NextWork());
+        Assert.Null(run.CurrentPendingWork());
+    }
+
+    [Fact]
     public void NextWork_LaneRecoveryBarrier_DoesNotFallThroughToChecks()
     {
         var run = CreateLaneEnabledRun();
@@ -199,4 +240,17 @@ public sealed class VerificationLaneNextWorkTests
     }
 
     private static WorkflowRun CreateLaneEnabledRun() => CreateRun(aggregateOnly: false);
+
+    private static void AddPendingDownstreamTask(StageRun stage)
+    {
+        stage.Tasks.Add(new TaskRun
+        {
+            Id = "push.1",
+            DefinitionId = "push",
+            Attempt = 1,
+            Title = "Push",
+            Uses = "mohist/push",
+            Status = TaskRunStatus.Pending,
+        });
+    }
 }

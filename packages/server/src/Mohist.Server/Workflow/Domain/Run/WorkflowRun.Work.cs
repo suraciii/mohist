@@ -66,6 +66,15 @@ public static partial class WorkflowRunExtensions
                 return new WorkflowTaskWork(current.Id, pendingTask.Id, pendingTask.Title, pendingTask.Uses, pendingTask.WithInput, pendingTask.ExpectInput, pendingTask.Artifacts, pendingTask.SetVars, pendingTask.Recovery, pendingTask.RecoveryRemaining);
             }
 
+            // A lane-enabled stage with no claimable task may still have a
+            // failed, timed-out, or missing lane and pending checks. Checks
+            // must not bypass the all-lanes-pass gate.
+            if (VerificationLaneGate.IsLaneEnabledRun(run)
+                && !VerificationLaneGate.CanAdvanceBuildStage(run))
+            {
+                return null;
+            }
+
             var pendingChecks = current.Checks
                 .Where(c => c.Status == StageCheckStatus.Pending)
                 .Select(c => new CheckItem(c.Name, c.Title, c.Uses, c.WithInput))
@@ -545,6 +554,12 @@ public static partial class WorkflowRunExtensions
                 if (!VerificationLaneGate.IsClaimableLaneTask(run, task))
                     return null;
                 return new WorkflowPendingWork(task.WorkId ?? task.Id, WorkItemTypes.Task, current.Id, task.Title);
+            }
+
+            if (VerificationLaneGate.IsLaneEnabledRun(run)
+                && !VerificationLaneGate.CanAdvanceBuildStage(run))
+            {
+                return null;
             }
 
             if (current.Checks.Count > 0 && current.Checks.Any(c => c.Status != StageCheckStatus.Passed))

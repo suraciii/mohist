@@ -112,21 +112,49 @@ public static class VerificationLaneGate
     }
 
     /// <summary>
-    /// Returns true when the supplied task is a verification lane task the
-    /// dispatcher may claim right now. A later catalog lane is blocked while
-    /// an earlier lane has not yet reached a durable pass outcome. Non-lane
-    /// tasks are always eligible.
+    /// Returns true when the supplied task may be claimed by the ordered
+    /// dispatcher. In a lane-enabled build, orchestration before the lane
+    /// sequence and recovery helpers linked to a lane attempt remain
+    /// claimable. Catalog lanes are limited to the first non-passing lane;
+    /// downstream tasks remain blocked until every lane has a durable pass.
     /// </summary>
     public static bool IsClaimableLaneTask(WorkflowRun run, TaskRun task)
     {
         if (!IsLaneEnabledRun(run)) return true;
-        if (!VerificationLaneCatalog.IsKnownLane(task.DefinitionId)) return true;
 
         var laneOrder = VerificationLaneCatalog.OrderOf(task.DefinitionId);
-        if (laneOrder < 0) return true;
+        if (laneOrder >= 0)
+        {
+            // The first non-passing lane is the only claimable lane task;
+            // every later lane is blocked until that one passes.
+            return laneOrder == FirstNonPassingLaneIndex(run);
+        }
 
-        // The first non-passing lane is the only claimable lane task; every
-        // later lane is blocked until that one passes.
-        return laneOrder == FirstNonPassingLaneIndex(run);
+        if (IsLaneRecoveryHelper(run, task)) return true;
+        if (CanAdvanceBuildStage(run)) return true;
+
+        // Preserve the built-in orchestration tasks before the lane sequence,
+        // but do not let an arbitrary task after the sequence bypass the gate.
+        var stage = run.Stages.FirstOrDefault(candidate =>
+            candidate.Tasks.Any(candidateTask =>
+                string.Equals(candidateTask.Id, task.Id, StringComparison.Ordinal)));
+        if (stage is null) return false;
+
+        var taskIndex = stage.Tasks.FindIndex(candidate =>
+            string.Equals(candidate.Id, task.Id, StringComparison.Ordinal));
+        var firstLaneIndex = stage.Tasks.FindIndex(candidate =>
+            VerificationLaneCatalog.IsKnownLane(candidate.DefinitionId));
+        return taskIndex >= 0 && firstLaneIndex >= 0 && taskIndex < firstLaneIndex;
+    }
+
+    private static bool IsLaneRecoveryHelper(WorkflowRun run, TaskRun task)
+    {
+        if (string.IsNullOrWhiteSpace(task.CausedByFailedTaskId)) return false;
+
+        return run.Stages
+            .SelectMany(stage => stage.Tasks)
+            .Any(source =>
+                string.Equals(source.Id, task.CausedByFailedTaskId, StringComparison.Ordinal)
+                && source.Lane is not null);
     }
 }
