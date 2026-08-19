@@ -213,3 +213,10 @@
 - Targeted verification: Server Agent settlement/state-save/recovery suites
   54/54, Runner identity/outbox/recovery tests 44/44, Runner typecheck, Server
   SpecTests build, file-size ratchet, and diff checks passed.
+- The shared direct-report test helper now reads an existing Agent binding from
+  the owning Workflow grain and only seeds a synthetic binding when the task is
+  unbound. This removes a duplicate full WorkflowRun database load from every
+  Agent report fixture while preserving existing-bound identities.
+- Commit b0c867f35 was deployed to the local server and Runner; `/api/health`
+  and the Runner heartbeat both report that build hash, with zero active work
+  and all eight slots available after deployment.
