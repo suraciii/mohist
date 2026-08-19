@@ -1,4 +1,3 @@
-using Microsoft.AspNetCore.SignalR;
 using Microsoft.Extensions.Logging;
 using Mohist.Server.Infrastructure.Events;
 using Mohist.Server.Contracts;
@@ -6,13 +5,13 @@ using Mohist.Server.Runner.Grains;
 using Mohist.Server.Workflow.Domain.Run;
 using Mohist.Server.Workflow.Grains;
 
-namespace Mohist.Server.Runner.Services.SignalR;
+namespace Mohist.Server.Runner.Services;
 
 /// <summary>
 /// Server-side router that delivers workflow terminal lifecycle events
 /// (<c>WorkflowRunCompleted</c>, <c>WorkflowRunStopped</c>)
-/// to the runner currently mapped to the workflow worker via the SignalR method
-/// <c>ReceiveWorkflowRunStatus({ workflowRunId, status })</c>.
+/// to the runner currently mapped to the workflow worker via the
+/// <c>workflow.status-changed</c> control notification.
 ///
 /// The server stays the source of truth for workflow lifecycle facts but
 /// never schedules, scans, or performs runner filesystem deletion. The
@@ -22,15 +21,15 @@ namespace Mohist.Server.Runner.Services.SignalR;
 ///
 /// Routing rules:
 /// <list type="bullet">
-/// <item>If the mapped runner is offline (no <see cref="RunnerConnectionTracker"/> entry), the notification is dropped — the runner's convergence backstop (POST /workflow-runs/status) is authoritative.</item>
+/// <item>If the mapped runner is offline, the notification is dropped — the runner's convergence backstop (POST /workflow-runs/status) is authoritative.</item>
 /// <item>If the workflow has no assigned worker, the notification is dropped.</item>
-/// <item>Push failures are logged but do not fail the workflow event handler; lifecycle events must never be blocked on SignalR delivery.</item>
+/// <item>Push failures are logged but do not fail the workflow event handler; lifecycle events must never be blocked on control delivery.</item>
 /// </list>
 /// </summary>
 public interface IRunnerWorkflowStatusRouter
 {
     /// <summary>
-    /// Push <c>ReceiveWorkflowRunStatus</c> to the runner currently
+    /// Push <c>workflow.status-changed</c> to the runner currently
     /// assigned to <paramref name="workflowRunId"/>. No-op when the run
     /// has no assignment or the assigned worker has no connected runner.
     /// </summary>
@@ -39,19 +38,16 @@ public interface IRunnerWorkflowStatusRouter
 
 public sealed class RunnerWorkflowStatusRouter : IRunnerWorkflowStatusRouter
 {
-    private readonly IHubContext<RunnerHub> _hub;
-    private readonly RunnerConnectionTracker _connections;
+    private readonly IRunnerControlTransport _control;
     private readonly IGrainFactory _grains;
     private readonly ILogger<RunnerWorkflowStatusRouter> _log;
 
     public RunnerWorkflowStatusRouter(
-        IHubContext<RunnerHub> hub,
-        RunnerConnectionTracker connections,
+        IRunnerControlTransport control,
         IGrainFactory grains,
         ILogger<RunnerWorkflowStatusRouter> log)
     {
-        _hub = hub;
-        _connections = connections;
+        _control = control;
         _grains = grains;
         _log = log;
     }
@@ -95,26 +91,19 @@ public sealed class RunnerWorkflowStatusRouter : IRunnerWorkflowStatusRouter
             return;
         }
 
-        var connectionId = _connections.GetConnectionId(assignedWorkerId);
-        if (string.IsNullOrWhiteSpace(connectionId))
-        {
-            _log.LogDebug(
-                "Terminal status router: worker {WorkerId} for {WorkflowRunId} has no connected runner, skipping push (convergence backstop will reconcile)",
-                assignedWorkerId, workflowRunId);
-            return;
-        }
-
         var payload = new WorkflowRunStatusNotification(workflowRunId, status.ToString());
         try
         {
-            await _hub.Clients
-                .Client(connectionId)
-                .SendCoreAsync("ReceiveWorkflowRunStatus", new object?[] { payload }, ct);
+            await _control.SendNotificationAsync(
+                assignedWorkerId,
+                "workflow.status-changed",
+                payload,
+                ct);
         }
         catch (Exception ex)
         {
             _log.LogWarning(ex,
-                "Terminal status router: failed to push ReceiveWorkflowRunStatus to {WorkerId} for {WorkflowRunId}",
+                "Terminal status router: failed to push workflow.status-changed to {WorkerId} for {WorkflowRunId}",
                 assignedWorkerId, workflowRunId);
         }
     }

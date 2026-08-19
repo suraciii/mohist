@@ -1,6 +1,7 @@
 using System.Net;
 using System.Net.Http.Headers;
 using System.Text.Json;
+using Microsoft.AspNetCore.Routing;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Mohist.Server.Auth.Domain;
@@ -109,22 +110,15 @@ public sealed class ScopeAuthorizationSpecs(MohistIntegrationFixture fixture)
     }
 
     [Fact]
-    public async Task RunnerACredential_OnHubQueryForRunnerB_Answers403()
+    public void RunnerHubRoute_IsGone()
     {
-        var runnerA = await InsertRunnerCredentialAsync("scope-hub-runner-a");
+        var patterns = fixture.Services.GetRequiredService<EndpointDataSource>().Endpoints
+            .OfType<RouteEndpoint>()
+            .Select(endpoint => endpoint.RoutePattern.RawText)
+            .ToArray();
 
-        using var client = fixture.CreateClient();
-        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", runnerA);
-
-        using var own = await client.PostAsync(
-            "/hubs/runner/negotiate?negotiateVersion=1&runnerId=scope-hub-runner-a",
-            new StringContent(string.Empty));
-        Assert.Equal(HttpStatusCode.OK, own.StatusCode);
-
-        using var other = await client.PostAsync(
-            "/hubs/runner/negotiate?negotiateVersion=1&runnerId=scope-hub-runner-b",
-            new StringContent(string.Empty));
-        Assert.Equal(HttpStatusCode.Forbidden, other.StatusCode);
+        Assert.DoesNotContain(patterns, pattern =>
+            pattern?.StartsWith("/hubs/runner", StringComparison.OrdinalIgnoreCase) == true);
     }
 
     [Fact]

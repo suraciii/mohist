@@ -87,7 +87,7 @@ public class RunnerBuildIdentitySpecs : WorkflowGrainSpecs
     }
 
     [Fact]
-    public async Task UpdateBuildGitHashAsync_ClearsStaleHashWhenSignalRHandshakeOmitsIdentity()
+    public async Task UpdateBuildGitHashAsync_ClearsStaleHashWhenControlHandshakeOmitsIdentity()
     {
         var runnerId = $"runner-clear-{Guid.NewGuid():N}";
         var runner = Grains.GetGrain<IRunnerGrain>(runnerId);

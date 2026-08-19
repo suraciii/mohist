@@ -62,7 +62,7 @@ public sealed class AuthResolutionSpecs(MohistIntegrationFixture fixture)
     public async Task MissingCredential_OnSignalRHubs_Answers401()
     {
         using var client = fixture.CreateClient();
-        using var negotiate = await client.GetAsync("/hubs/runner/negotiate?negotiateVersion=1");
+        using var negotiate = await client.GetAsync("/hubs/events/negotiate?negotiateVersion=1");
 
         Assert.Equal(HttpStatusCode.Unauthorized, negotiate.StatusCode);
         Assert.Equal(
@@ -239,7 +239,7 @@ public sealed class AuthResolutionSpecs(MohistIntegrationFixture fixture)
             new AuthenticationHeaderValue("Bearer", MohistIntegrationFixture.AdminToken);
 
         using var response = await client.PostAsync(
-            "/hubs/runner/negotiate?negotiateVersion=1",
+            "/hubs/events/negotiate?negotiateVersion=1",
             new StringContent(string.Empty));
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);

@@ -1,36 +1,23 @@
-using Microsoft.AspNetCore.SignalR;
 using Mohist.Server.Contracts;
 using Mohist.Server.Sessions.Services;
 
-namespace Mohist.Server.Runner.Services.SignalR;
+namespace Mohist.Server.Runner.Services;
 
 public sealed class RunnerFollowupDeliveryDispatcher : IFollowupDeliveryDispatcher
 {
-    private static readonly TimeSpan RequestTimeout = TimeSpan.FromSeconds(15);
-
-    private readonly IHubContext<RunnerHub> _runnerHub;
-    private readonly RunnerConnectionTracker _connections;
-    private readonly TimeProvider _timeProvider;
+    private readonly IRunnerControlTransport _control;
     private readonly ILogger<RunnerFollowupDeliveryDispatcher> _log;
 
     public RunnerFollowupDeliveryDispatcher(
-        IHubContext<RunnerHub> runnerHub,
-        RunnerConnectionTracker connections,
-        TimeProvider timeProvider,
+        IRunnerControlTransport control,
         ILogger<RunnerFollowupDeliveryDispatcher> log)
     {
-        _runnerHub = runnerHub;
-        _connections = connections;
-        _timeProvider = timeProvider;
+        _control = control;
         _log = log;
     }
 
     public async Task<FollowupDeliveryResult> DispatchAsync(FollowupDeliveryRequest request, CancellationToken ct = default)
     {
-        var connectionId = _connections.GetConnectionId(request.RunnerId);
-        if (string.IsNullOrWhiteSpace(connectionId))
-            return new FollowupDeliveryResult(false);
-
         var binding = new RunnerSessionBinding(
             request.Runtime,
             request.RuntimeSessionId,
@@ -69,18 +56,12 @@ public sealed class RunnerFollowupDeliveryDispatcher : IFollowupDeliveryDispatch
 
         try
         {
-            using var timeoutCancellation = new CancellationTokenSource();
-            var timeout = Task.Delay(RequestTimeout, _timeProvider, timeoutCancellation.Token);
-            var invocation = _runnerHub.Clients.Client(connectionId).InvokeAsync<RunnerFollowupDeliveryResult?>(
-                "ReceiveFollowup",
+            var response = await _control.SendRequestAsync<FollowupParams, RunnerFollowupDeliveryResult>(
+                request.RunnerId,
+                "session.followup",
                 payload,
-                ct);
-            var response = invocation.WaitAsync(ct);
-            if (await Task.WhenAny(response, timeout) == timeout)
-                return new FollowupDeliveryResult(false);
-
-            timeoutCancellation.Cancel();
-            return new FollowupDeliveryResult((await response)?.Accepted == true);
+                ct: ct);
+            return new FollowupDeliveryResult(response.Accepted);
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {

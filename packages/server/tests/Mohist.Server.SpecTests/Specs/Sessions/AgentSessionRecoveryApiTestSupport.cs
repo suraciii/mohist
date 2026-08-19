@@ -8,7 +8,7 @@ using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Infrastructure.Orleans;
 using Mohist.Server.Issue.Grains;
 using Mohist.Server.Runner.Grains;
-using Mohist.Server.Runner.Services.SignalR;
+using Mohist.Server.Runner.Services;
 using Mohist.Server.Sessions.Domain;
 using Mohist.Server.Sessions.Grains;
 using Mohist.Server.SpecTests.Support;
@@ -24,7 +24,7 @@ public abstract class AgentSessionRecoveryApiTestSupport : IAsyncLifetime
     protected readonly HttpClient _client;
     protected readonly string _runnerId = $"recovery-api-{Guid.NewGuid():N}";
     private readonly string _connectionId;
-    protected readonly RecordingRunnerHubOwner RunnerHub;
+    protected readonly RecordingRunnerControlOwner RunnerControl;
 
     protected AgentSessionRecoveryApiTestSupport(MohistIntegrationFixture fixture)
     {
@@ -32,13 +32,13 @@ public abstract class AgentSessionRecoveryApiTestSupport : IAsyncLifetime
         _client = fixture.Client;
         _connectionId = $"connection-{_runnerId}";
 
-        var runnerHub = fixture.Services.GetRequiredService<RecordingRunnerHubContext>();
-        RunnerHub = runnerHub.CreateOwner(_connectionId);
+        var runnerControl = fixture.Services.GetRequiredService<RecordingRunnerControlTransport>();
+        RunnerControl = runnerControl.CreateOwner(_runnerId);
         var tracker = fixture.Services.GetRequiredService<RunnerConnectionTracker>();
         var registered = false;
         try
         {
-            RunnerHub.SetInvocationResponseFactory("SessionCommand", arguments =>
+            RunnerControl.SetInvocationResponseFactory("session.command", arguments =>
             {
                 var request = Assert.IsType<SessionCommandRequest>(Assert.Single(arguments));
                 return request.Command switch
@@ -57,7 +57,7 @@ public abstract class AgentSessionRecoveryApiTestSupport : IAsyncLifetime
         {
             if (registered)
                 tracker.Unregister(_runnerId, _connectionId);
-            RunnerHub.Dispose();
+            RunnerControl.Dispose();
             throw;
         }
     }
@@ -73,7 +73,7 @@ public abstract class AgentSessionRecoveryApiTestSupport : IAsyncLifetime
         }
         finally
         {
-            RunnerHub.Dispose();
+            RunnerControl.Dispose();
         }
 
         return ValueTask.CompletedTask;
@@ -142,10 +142,10 @@ public abstract class AgentSessionRecoveryApiTestSupport : IAsyncLifetime
     protected void AssertNoSessionCommandInvocations() =>
         Assert.Empty(SessionCommandInvocations());
 
-    private RecordedRunnerHubInvocation[] SessionCommandInvocations() =>
-        RunnerHub.Invocations
-            .Where(invocation => invocation.ConnectionId == $"connection-{_runnerId}")
-            .Where(invocation => invocation.Method == "SessionCommand")
+    private RecordedRunnerControlRequest[] SessionCommandInvocations() =>
+        RunnerControl.Invocations
+            .Where(invocation => invocation.ConnectionId == _runnerId)
+            .Where(invocation => invocation.Method == "session.command")
             .ToArray();
 
     protected async Task<AgentSessionInfo> CreateAgentLaunchSessionAsync(

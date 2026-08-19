@@ -1,7 +1,7 @@
 using Microsoft.Extensions.DependencyInjection;
 using Mohist.Server.Events.Grains;
 using Mohist.Server.Infrastructure.Workspace;
-using Mohist.Server.Runner.Services.SignalR;
+using Mohist.Server.Runner.Services;
 using Mohist.Server.Contracts;
 using Mohist.Server.SpecTests.Support;
 using Mohist.Server.TestSupport;

@@ -1,11 +1,10 @@
 using Mohist.Server.SpecTests.Support;
-using Microsoft.AspNetCore.SignalR;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using Microsoft.Extensions.Time.Testing;
 using Mohist.Server.Events.Grains;
 using Mohist.Server.Infrastructure.Events;
-using Mohist.Server.Runner.Services.SignalR;
+using Mohist.Server.Runner.Services;
 using Mohist.Server.Contracts;
 using Mohist.Server.Runner.Grains;
 using Mohist.Server.Workflow.Domain.Run;
@@ -14,7 +13,7 @@ using Mohist.Server.TestSupport;
 using Orleans;
 using Xunit;
 
-namespace Mohist.Server.SpecTests.Specs.Runner.SignalR;
+namespace Mohist.Server.SpecTests.Specs.Runner.Services;
 
 public class RunnerWorkflowStatusRouterSpecs
 {
@@ -22,22 +21,22 @@ public class RunnerWorkflowStatusRouterSpecs
     private const string RunnerId = "runner-router-1";
 
     [Fact]
-    public async Task RouteAsync_RunnerIsConnected_PushesReceiveWorkflowRunStatus()
+    public async Task RouteAsync_RunnerIsConnected_PushesStatusChangedNotification()
     {
         var tracker = new RunnerConnectionTracker();
         tracker.Register(RunnerId, "conn-1");
 
-        var hub = new RecordingRunnerHubContext();
+        var transport = new RecordingRunnerControlTransport();
         var workflow = new StubWorkflowGrain { AssignedWorkerId = RunnerId, Status = WorkflowRunStatus.Completed };
         var grains = new StubGrainFactory(workflow);
 
-        var router = new RunnerWorkflowStatusRouter(hub, tracker, grains, NullLogger<RunnerWorkflowStatusRouter>.Instance);
+        var router = new RunnerWorkflowStatusRouter(transport, grains, NullLogger<RunnerWorkflowStatusRouter>.Instance);
 
         await router.RouteAsync(WorkflowRunId, WorkflowRunStatus.Completed);
 
-        var message = Assert.Single(hub.SentMessages);
-        Assert.Equal("conn-1", message.ConnectionId);
-        Assert.Equal("ReceiveWorkflowRunStatus", message.Method);
+        var message = Assert.Single(transport.SentMessages);
+        Assert.Equal(RunnerId, message.ConnectionId);
+        Assert.Equal("workflow.status-changed", message.Method);
         var payload = Assert.IsType<WorkflowRunStatusNotification>(Assert.Single(message.Arguments));
         Assert.Equal(WorkflowRunId, payload.WorkflowRunId);
         Assert.Equal("Completed", payload.Status);
@@ -47,15 +46,14 @@ public class RunnerWorkflowStatusRouterSpecs
     public async Task RouteAsync_RunnerIsOffline_NoPushAndBackstopIsReliedOn()
     {
         var tracker = new RunnerConnectionTracker();
-        var hub = new RecordingRunnerHubContext();
+        var transport = new ThrowingControlTransport();
         var workflow = new StubWorkflowGrain { AssignedWorkerId = RunnerId, Status = WorkflowRunStatus.Stopped };
         var grains = new StubGrainFactory(workflow);
 
-        var router = new RunnerWorkflowStatusRouter(hub, tracker, grains, NullLogger<RunnerWorkflowStatusRouter>.Instance);
+        var router = new RunnerWorkflowStatusRouter(transport, grains, NullLogger<RunnerWorkflowStatusRouter>.Instance);
 
         await router.RouteAsync(WorkflowRunId, WorkflowRunStatus.Stopped);
 
-        Assert.Empty(hub.SentMessages);
     }
 
     [Fact]
@@ -63,15 +61,15 @@ public class RunnerWorkflowStatusRouterSpecs
     {
         var tracker = new RunnerConnectionTracker();
         tracker.Register(RunnerId, "conn-1");
-        var hub = new RecordingRunnerHubContext();
+        var transport = new RecordingRunnerControlTransport();
         var workflow = new StubWorkflowGrain { AssignedWorkerId = null, Status = WorkflowRunStatus.Completed };
         var grains = new StubGrainFactory(workflow);
 
-        var router = new RunnerWorkflowStatusRouter(hub, tracker, grains, NullLogger<RunnerWorkflowStatusRouter>.Instance);
+        var router = new RunnerWorkflowStatusRouter(transport, grains, NullLogger<RunnerWorkflowStatusRouter>.Instance);
 
         await router.RouteAsync(WorkflowRunId, WorkflowRunStatus.Completed);
 
-        Assert.Empty(hub.SentMessages);
+        Assert.Empty(transport.SentMessages);
     }
 
     [Fact]
@@ -79,27 +77,27 @@ public class RunnerWorkflowStatusRouterSpecs
     {
         var tracker = new RunnerConnectionTracker();
         tracker.Register(RunnerId, "conn-failed");
-        var hub = new RecordingRunnerHubContext();
+        var transport = new RecordingRunnerControlTransport();
         var workflow = new StubWorkflowGrain { AssignedWorkerId = RunnerId, Status = WorkflowRunStatus.Failed };
         var grains = new StubGrainFactory(workflow);
 
-        var router = new RunnerWorkflowStatusRouter(hub, tracker, grains, NullLogger<RunnerWorkflowStatusRouter>.Instance);
+        var router = new RunnerWorkflowStatusRouter(transport, grains, NullLogger<RunnerWorkflowStatusRouter>.Instance);
 
         await router.RouteAsync(WorkflowRunId, WorkflowRunStatus.Failed);
 
-        Assert.Empty(hub.SentMessages);
+        Assert.Empty(transport.SentMessages);
     }
 
     [Fact]
-    public async Task RouteAsync_HubThrows_DoesNotPropagate()
+    public async Task RouteAsync_TransportThrows_DoesNotPropagate()
     {
         var tracker = new RunnerConnectionTracker();
         tracker.Register(RunnerId, "conn-throws");
-        var hub = new ThrowingHubContext();
+        var transport = new ThrowingControlTransport();
         var workflow = new StubWorkflowGrain { AssignedWorkerId = RunnerId, Status = WorkflowRunStatus.Completed };
         var grains = new StubGrainFactory(workflow);
 
-        var router = new RunnerWorkflowStatusRouter(hub, tracker, grains, NullLogger<RunnerWorkflowStatusRouter>.Instance);
+        var router = new RunnerWorkflowStatusRouter(transport, grains, NullLogger<RunnerWorkflowStatusRouter>.Instance);
 
         await router.RouteAsync(WorkflowRunId, WorkflowRunStatus.Completed);
     }
@@ -109,18 +107,18 @@ public class RunnerWorkflowStatusRouterSpecs
     {
         var tracker = new RunnerConnectionTracker();
         tracker.Register(RunnerId, "conn-1");
-        var hub = new RecordingRunnerHubContext();
+        var transport = new RecordingRunnerControlTransport();
         var grains = new StubGrainFactory(new StubWorkflowGrain());
 
-        var router = new RunnerWorkflowStatusRouter(hub, tracker, grains, NullLogger<RunnerWorkflowStatusRouter>.Instance);
+        var router = new RunnerWorkflowStatusRouter(transport, grains, NullLogger<RunnerWorkflowStatusRouter>.Instance);
 
         await router.RouteAsync(string.Empty, WorkflowRunStatus.Completed);
 
-        Assert.Empty(hub.SentMessages);
+        Assert.Empty(transport.SentMessages);
     }
 
     [Fact]
-    public async Task RouteAsync_UsesPushWorkerFakeTimeCancellationForSignalRSend()
+    public async Task RouteAsync_UsesPushWorkerFakeTimeCancellationForControlSend()
     {
         var time = new FakeTimeProvider();
         var options = Options.Create(new EventDispatcherOptions
@@ -130,10 +128,9 @@ public class RunnerWorkflowStatusRouterSpecs
         });
         var tracker = new RunnerConnectionTracker();
         tracker.Register(RunnerId, "conn-timeout");
-        var hub = new BlockingHubContext();
+        var transport = new BlockingControlTransport();
         var router = new RunnerWorkflowStatusRouter(
-            hub,
-            tracker,
+            transport,
             new StubGrainFactory(new StubWorkflowGrain { AssignedWorkerId = RunnerId }),
             NullLogger<RunnerWorkflowStatusRouter>.Instance);
         var worker = new EventPushWorker(
@@ -151,9 +148,9 @@ public class RunnerWorkflowStatusRouterSpecs
             new CloudEvent("evt-timeout", new Uri("/mohist/test", UriKind.Relative), "com.mohist.test", DateTimeOffset.UnixEpoch, null),
             CancellationToken.None);
 
-        await hub.SendStarted.Task;
+        await transport.SendStarted.Task;
         time.Advance(TimeSpan.FromMinutes(1));
-        await hub.SendCancelled.Task;
+        await transport.SendCancelled.Task;
         await delivery;
     }
 
@@ -271,67 +268,36 @@ public class RunnerWorkflowStatusRouterSpecs
         void IGrainFactory.DeleteObjectReference<TGrainObserverInterface>(IGrainObserver obj) => throw new NotSupportedException();
     }
 
-    private sealed class ThrowingHubContext : IHubContext<RunnerHub>
+    private sealed class ThrowingControlTransport : IRunnerControlTransport
     {
-        public IHubClients Clients => new ThrowingClients();
-        public IGroupManager Groups => throw new NotSupportedException();
-
-        private sealed class ThrowingClients : IHubClients
-        {
-            public IClientProxy All => throw new InvalidOperationException("all unreachable");
-            public IClientProxy AllExcept(IReadOnlyList<string> excludedConnectionIds) => throw new InvalidOperationException("all-except unreachable");
-            public IClientProxy Client(string connectionId) => new ThrowingClientProxy();
-            public IClientProxy Clients(IReadOnlyList<string> connectionIds) => throw new InvalidOperationException("clients unreachable");
-            public IClientProxy Group(string groupName) => throw new InvalidOperationException("group unreachable");
-            public IClientProxy GroupExcept(string groupName, IReadOnlyList<string> excludedConnectionIds) => throw new InvalidOperationException("group-except unreachable");
-            public IClientProxy Groups(IReadOnlyList<string> groupNames) => throw new InvalidOperationException("groups unreachable");
-            public IClientProxy User(string userId) => throw new InvalidOperationException("user unreachable");
-            public IClientProxy Users(IReadOnlyList<string> userIds) => throw new InvalidOperationException("users unreachable");
-        }
-
-        private sealed class ThrowingClientProxy : IClientProxy
-        {
-            public Task SendCoreAsync(string method, object?[] args, CancellationToken cancellationToken = default) =>
-                throw new InvalidOperationException("signalR transport failure (test simulation)");
-        }
+        public bool IsConnected(string runnerId) => true;
+        public Task<TResult> SendRequestAsync<TParams, TResult>(string runnerId, string method, TParams parameters, Action? requestEnqueued = null, CancellationToken ct = default) =>
+            throw new NotSupportedException();
+        public Task SendNotificationAsync<TParams>(string runnerId, string method, TParams parameters, CancellationToken ct = default) =>
+            throw new InvalidOperationException("control transport failure (test simulation)");
     }
 
-    private sealed class BlockingHubContext : IHubContext<RunnerHub>
+    private sealed class BlockingControlTransport : IRunnerControlTransport
     {
         public TaskCompletionSource SendStarted { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
         public TaskCompletionSource SendCancelled { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
-        public IHubClients Clients => new BlockingClients(this);
-        public IGroupManager Groups => throw new NotSupportedException();
+        public bool IsConnected(string runnerId) => true;
 
-        private sealed class BlockingClients(BlockingHubContext context) : IHubClients
-        {
-            public IClientProxy All => throw new NotSupportedException();
-            public IClientProxy AllExcept(IReadOnlyList<string> excludedConnectionIds) => throw new NotSupportedException();
-            public IClientProxy Client(string connectionId) => new BlockingClientProxy(context);
-            public IClientProxy Clients(IReadOnlyList<string> connectionIds) => throw new NotSupportedException();
-            public IClientProxy Group(string groupName) => throw new NotSupportedException();
-            public IClientProxy GroupExcept(string groupName, IReadOnlyList<string> excludedConnectionIds) => throw new NotSupportedException();
-            public IClientProxy Groups(IReadOnlyList<string> groupNames) => throw new NotSupportedException();
-            public IClientProxy User(string userId) => throw new NotSupportedException();
-            public IClientProxy Users(IReadOnlyList<string> userIds) => throw new NotSupportedException();
-        }
+        public Task<TResult> SendRequestAsync<TParams, TResult>(string runnerId, string method, TParams parameters, Action? requestEnqueued = null, CancellationToken ct = default) =>
+            throw new NotSupportedException();
 
-        private sealed class BlockingClientProxy(BlockingHubContext context) : IClientProxy
+        public async Task SendNotificationAsync<TParams>(string runnerId, string method, TParams parameters, CancellationToken ct = default)
         {
-            public async Task SendCoreAsync(string method, object?[] args, CancellationToken cancellationToken = default)
+            SendStarted.TrySetResult();
+            try
             {
-                context.SendStarted.TrySetResult();
-                try
-                {
-                    await new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously)
-                        .Task.WaitAsync(cancellationToken);
-                }
-                catch (OperationCanceledException)
-                {
-                    context.SendCancelled.TrySetResult();
-                    throw;
-                }
+                await new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously).Task.WaitAsync(ct);
+            }
+            catch (OperationCanceledException)
+            {
+                SendCancelled.TrySetResult();
+                throw;
             }
         }
     }

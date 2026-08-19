@@ -125,11 +125,18 @@ internal static partial class SpecUnitMigrationLedgerValidator
             violations.Add($"{row.Id}: history operation {change.Operation} has invalid status {row.Status}");
         if (history.SourceContentDigest != change.SourceContentDigest)
             violations.Add($"{row.Id}: history source-content digest differs from PR #388 source object");
-        if (!inventory.TryGetExecutable(row.Target.Fqn ?? "", row.Target.Path ?? "", out _))
+        var targetExists = inventory.TryGetExecutable(row.Target.Fqn ?? "", row.Target.Path ?? "", out _);
+        if (row.Retired)
         {
-            violations.Add(
-                $"{row.Id}: historical target is not a compiled discoverable type: {row.Target.Path}/{row.Target.Fqn}");
+            if (targetExists)
+                violations.Add($"{row.Id}: retired historical target is still a compiled discoverable type");
+            if (string.IsNullOrWhiteSpace(row.RetirementReason))
+                violations.Add($"{row.Id}: retired historical target requires a retirement reason");
         }
+        else if (!targetExists)
+            violations.Add($"{row.Id}: historical target is not a compiled discoverable type: {row.Target.Path}/{row.Target.Fqn}");
+        else if (row.RetirementReason is not null)
+            violations.Add($"{row.Id}: active historical target cannot carry a retirement reason");
         ValidateRequiredRowFields(row, violations);
     }
 

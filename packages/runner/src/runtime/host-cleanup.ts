@@ -1,7 +1,7 @@
 import { join } from 'node:path'
 import type { CleanupPolicy } from '../core/types.js'
 import type { ServerConnection } from '../server/connection.js'
-import type { RunnerSignalRClient } from '../server/runner-signalr.js'
+import type { RunnerControlWebSocketClient } from '../server/runner-control-websocket.js'
 import type { WorkspaceRegistry, NamedWorkspaceRegistry } from './workspace-registry.js'
 import { createNamedWorkspaceCleanupLoop, type NamedWorkspaceReclaimProbe } from './named-workspace-cleanup.js'
 import type { ConvergenceBackstop } from './cleanup-convergence.js'
@@ -18,7 +18,7 @@ const cleanupLog = runnerLogger.child('cleanup')
 export interface HostCleanupDeps {
   readonly runnerRoot: string
   readonly connection: ServerConnection
-  readonly signalR: RunnerSignalRClient
+  readonly control: RunnerControlWebSocketClient
   readonly workspaceRegistry: WorkspaceRegistry
   readonly namedWorkspaceRegistry: NamedWorkspaceRegistry
   readonly namedWorkspaceReclaimProbe: NamedWorkspaceReclaimProbe
@@ -145,12 +145,12 @@ export function createHostCleanup(deps: HostCleanupDeps) {
 
   async function runSelfCheck(signal: AbortSignal) {
     if (signal.aborted) return
-    const alive = await deps.signalR.probeLiveness(signal).catch(() => false)
+    const alive = await deps.control.probeLiveness(signal).catch(() => false)
     if (signal.aborted) return
     if (alive) return
     log.warn('dispatch liveness probe failed; forcing reconnect', { reason: 'liveness' })
     try {
-      await deps.signalR.forceReconnect(signal)
+      await deps.control.forceReconnect(signal)
     } catch (error) {
       log.error('forceReconnect failed', { exception: error, reason: 'reconnect' })
     }

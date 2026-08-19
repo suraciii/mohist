@@ -2,7 +2,6 @@ using System.Net;
 using System.Net.Http.Headers;
 using System.Text;
 using System.Text.Json;
-using Microsoft.AspNetCore.SignalR;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Mohist.Server.Agent.Grains;
@@ -14,7 +13,7 @@ using Mohist.Server.Infrastructure.Data.Project;
 using Mohist.Server.Infrastructure.Data.Sessions;
 using Mohist.Server.Infrastructure.DirectApi;
 using Mohist.Server.Infrastructure.PublicApi;
-using Mohist.Server.Runner.Services.SignalR;
+using Mohist.Server.Runner.Services;
 using Mohist.Server.Contracts;
 using Mohist.Server.Sessions.Domain;
 using Mohist.Server.Sessions.Grains;
@@ -53,8 +52,8 @@ public sealed class DirectApiStopSpecs(PublicProjectionIntegrationFixture fixtur
             AgentSessionActivity.Idle);
         var token = await CreatePatAsync(projectId);
         using var client = DirectClient(token);
-        var hub = GetRunnerHub();
-        hub.Clear();
+        var transport = GetRunnerControlTransport();
+        transport.Clear();
 
         using var response = await PostUntilProjectedAsync(
             client,
@@ -66,7 +65,7 @@ public sealed class DirectApiStopSpecs(PublicProjectionIntegrationFixture fixtur
         Assert.Equal("terminal", response.RootElement.GetProperty("status").GetString());
         Assert.Equal("completed", response.RootElement.GetProperty("outcome").GetString());
         Assert.Equal(turnId, response.RootElement.GetProperty("turnId").GetString());
-        Assert.Empty(hub.Invocations);
+        Assert.Empty(transport.Invocations);
         AssertPublicObservation(response.RootElement);
 
         await using var db = await fixture.Services
@@ -90,8 +89,8 @@ public sealed class DirectApiStopSpecs(PublicProjectionIntegrationFixture fixtur
             AgentSessionActivity.Active);
         var token = await CreatePatAsync(projectId);
         using var client = DirectClient(token);
-        var hub = GetRunnerHub();
-        hub.Clear();
+        var transport = GetRunnerControlTransport();
+        transport.Clear();
 
         using var response = await PostUntilProjectedAsync(
             client,
@@ -102,7 +101,7 @@ public sealed class DirectApiStopSpecs(PublicProjectionIntegrationFixture fixtur
 
         Assert.Equal("terminal", response.RootElement.GetProperty("status").GetString());
         Assert.Equal("cancelled", response.RootElement.GetProperty("outcome").GetString());
-        Assert.Empty(hub.Invocations);
+        Assert.Empty(transport.Invocations);
         Assert.Equal(
             AgentTurnStatus.Cancelled,
             Assert.Single(await fixture.Grains.GetGrain<IAgentSessionGrain>(sessionId).ListTurnsAsync()).Status);
@@ -118,9 +117,9 @@ public sealed class DirectApiStopSpecs(PublicProjectionIntegrationFixture fixtur
             AgentSessionActivity.Active);
         var token = await CreatePatAsync(projectId);
         using var client = DirectClient(token);
-        var hub = GetRunnerHub();
-        hub.Clear();
-        hub.SetInvocationResponse("CancelAgentSession", new RunnerStopReply("unknown"));
+        var transport = GetRunnerControlTransport();
+        transport.Clear();
+        transport.SetInvocationResponse("session.stop", new RunnerStopReply("unknown"));
 
         using (var first = await client.SendAsync(StopRequest(projectId, turnId, "unknown-a")))
         {
@@ -133,7 +132,7 @@ public sealed class DirectApiStopSpecs(PublicProjectionIntegrationFixture fixtur
 
         using var second = await client.SendAsync(StopRequest(projectId, turnId, "unknown-b"));
         await AssertErrorAsync(second, HttpStatusCode.Conflict, DirectApiErrorCodes.StopOutcomeUnknown);
-        Assert.Single(hub.Invocations);
+        Assert.Single(transport.Invocations);
 
         await using var db = await fixture.Services
             .GetRequiredService<IDbContextFactory<MohistDbContext>>()
@@ -163,9 +162,9 @@ public sealed class DirectApiStopSpecs(PublicProjectionIntegrationFixture fixtur
             AgentSessionActivity.Active);
         var token = await CreatePatAsync(projectId);
         using var client = DirectClient(token);
-        var hub = GetRunnerHub();
-        hub.Clear();
-        hub.SetInvocationResponse("CancelAgentSession", null);
+        var transport = GetRunnerControlTransport();
+        transport.Clear();
+        transport.SetInvocationResponse("session.stop", null);
 
         using (var first = await client.SendAsync(StopRequest(projectId, turnId, "frozen-retry")))
         {
@@ -187,16 +186,16 @@ public sealed class DirectApiStopSpecs(PublicProjectionIntegrationFixture fixtur
         {
             await AssertErrorAsync(retry, HttpStatusCode.ServiceUnavailable, DirectApiErrorCodes.StopPending);
         }
-        Assert.Single(hub.Invocations);
+        Assert.Single(transport.Invocations);
 
         // Canonical recovery owns the redelivery and keeps the original
         // operation identity. The direct mapping resolves on the next retry.
-        hub.SetInvocationResponse("CancelAgentSession", new RunnerStopReply("not-cancellable"));
+        transport.SetInvocationResponse("session.stop", new RunnerStopReply("not-cancellable"));
         var session = fixture.Grains.GetGrain<IAgentSessionGrain>(sessionId);
         await session.RunStopRecoveryAsync();
-        Assert.Equal(2, hub.Invocations.Count);
-        var firstPayload = JsonSerializer.SerializeToElement(hub.Invocations[0].Arguments.Single());
-        var recoveryPayload = JsonSerializer.SerializeToElement(hub.Invocations[1].Arguments.Single());
+        Assert.Equal(2, transport.Invocations.Count);
+        var firstPayload = JsonSerializer.SerializeToElement(transport.Invocations[0].Arguments.Single());
+        var recoveryPayload = JsonSerializer.SerializeToElement(transport.Invocations[1].Arguments.Single());
         Assert.Equal(
             firstPayload.GetProperty("operationId").GetString(),
             recoveryPayload.GetProperty("operationId").GetString());
@@ -317,9 +316,9 @@ public sealed class DirectApiStopSpecs(PublicProjectionIntegrationFixture fixtur
         return client;
     }
 
-    private RecordingRunnerHubContext GetRunnerHub() =>
-        fixture.Services.GetRequiredService<IHubContext<RunnerHub>>() as RecordingRunnerHubContext
-        ?? throw new InvalidOperationException("Recording runner hub context was not registered.");
+    private RecordingRunnerControlTransport GetRunnerControlTransport() =>
+        fixture.Services.GetRequiredService<IRunnerControlTransport>() as RecordingRunnerControlTransport
+        ?? throw new InvalidOperationException("Recording Runner control transport was not registered.");
 
     private async Task<string> SeedProjectAsync()
     {

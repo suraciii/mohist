@@ -3,7 +3,7 @@ using Mohist.Server.Infrastructure.Orleans;
 using Mohist.Server.Infrastructure.Workspace;
 using Mohist.Server.Issue.Grains;
 using Mohist.Server.Issue.Services;
-using Mohist.Server.Runner.Services.SignalR;
+using Mohist.Server.Runner.Services;
 using Mohist.Server.Contracts;
 using Mohist.Server.Workflow.Domain.Run;
 using Mohist.Server.Workflow.Services;

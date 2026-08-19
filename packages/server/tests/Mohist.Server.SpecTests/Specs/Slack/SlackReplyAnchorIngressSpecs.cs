@@ -1,7 +1,6 @@
 using System.Net.Http.Json;
 using System.Text;
 using System.Text.Json;
-using Microsoft.AspNetCore.SignalR;
 using Microsoft.Extensions.DependencyInjection;
 using Mohist.Server.Agent.Domain;
 using Mohist.Server.Agent.Grains;
@@ -13,7 +12,7 @@ using Mohist.Server.Infrastructure.Data.Slack;
 using Mohist.Server.Infrastructure.Orleans;
 using Mohist.Server.Infrastructure.Security.Secrets;
 using Mohist.Server.Runner.Grains;
-using Mohist.Server.Runner.Services.SignalR;
+using Mohist.Server.Runner.Services;
 using Mohist.Server.Sessions.Domain;
 using Mohist.Server.Sessions.Grains;
 using Mohist.Server.Slack.Domain;
@@ -148,7 +147,7 @@ public sealed class SlackReplyAnchorIngressSpecs : IAsyncLifetime
             root.GetProperty("turnId").GetString()!, AgentTurnStatus.Completed, null);
 
         var tracker = _fixture.Services.GetRequiredService<RunnerConnectionTracker>();
-        var runnerHub = _fixture.Services.GetRequiredService<IHubContext<RunnerHub>>() as RecordingRunnerHubContext
+        var runnerHub = _fixture.Services.GetRequiredService<IRunnerControlTransport>() as RecordingRunnerControlTransport
             ?? throw new InvalidOperationException("Recording runner hub context was not registered.");
         runnerHub.Clear();
         tracker.Register(runnerId, runnerConnectionId);
@@ -166,7 +165,7 @@ public sealed class SlackReplyAnchorIngressSpecs : IAsyncLifetime
             Assert.Equal(sessionId, accepted.GetProperty("sessionId").GetString());
             var delivery = Assert.Single(
                 runnerHub.SentMessages,
-                message => message.ConnectionId == runnerConnectionId && message.Method == "ReceiveFollowup");
+                message => message.ConnectionId == runnerId && message.Method == "session.followup");
             var payload = JsonSerializer.SerializeToElement(delivery.Arguments.Single(), JSON.Options);
             var operationId = payload.GetProperty("operationId").GetString()!;
 
@@ -192,7 +191,7 @@ public sealed class SlackReplyAnchorIngressSpecs : IAsyncLifetime
             Assert.Equal(accepted.GetProperty("turnId").GetString(), replay.GetProperty("turnId").GetString());
             Assert.Single(
                 runnerHub.SentMessages,
-                message => message.ConnectionId == runnerConnectionId && message.Method == "ReceiveFollowup");
+                message => message.ConnectionId == runnerId && message.Method == "session.followup");
         }
         finally
         {

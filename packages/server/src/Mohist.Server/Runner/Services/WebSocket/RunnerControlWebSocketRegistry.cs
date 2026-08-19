@@ -7,14 +7,14 @@ using Mohist.Server.Contracts;
 using Mohist.Server.Infrastructure;
 using Mohist.Server.Infrastructure.Hosting;
 using Mohist.Server.Runner.Grains;
-using Mohist.Server.Runner.Services.SignalR;
+using Mohist.Server.Runner.Services;
 using Mohist.Server.Sessions.Grains;
 using Mohist.Server.Sessions.Services;
 using Mohist.Server.Infrastructure.Workspace;
 
 namespace Mohist.Server.Runner.Services.WebSocket;
 
-public sealed class RunnerControlWebSocketRegistry : ISingletonService
+public sealed class RunnerControlWebSocketRegistry : ISingletonService, IRunnerControlTransport
 {
     private static readonly IReadOnlyDictionary<string, (Type Params, Type Result, bool AllowsNull)> RequestMethods =
         new Dictionary<string, (Type, Type, bool)>(StringComparer.Ordinal)
@@ -111,12 +111,14 @@ public sealed class RunnerControlWebSocketRegistry : ISingletonService
                     await InstallationAcquiredAsync(runnerId, connectionId, ct);
                 try
                 {
+                    Task? replacedFence = null;
                     if (_connections.TryGetValue(runnerId, out var replaced))
-                        await replaced.FenceAsync(WebSocketCloseStatus.NormalClosure, "Replaced");
+                        replacedFence = replaced.FenceAsync(WebSocketCloseStatus.NormalClosure, "Replaced");
 
                     var canonicalConnectionId = connectionId.ToString("D");
                     var generation = _tracker.Register(runnerId, canonicalConnectionId);
                     trackerInstalled = true;
+                    if (replacedFence is not null) await replacedFence;
                     await _grains.GetGrain<IRunnerGrain>(runnerId).UpdateRuntimeIdentityAsync(
                         handshake.BuildGitHash,
                         handshake.Component,
@@ -178,14 +180,29 @@ public sealed class RunnerControlWebSocketRegistry : ISingletonService
         string runnerId,
         string method,
         TParams parameters,
+        Action? requestEnqueued = null,
         CancellationToken ct = default)
     {
         if (!RequestMethods.TryGetValue(method, out var contract)
             || contract.Params != typeof(TParams)
             || contract.Result != typeof(TResult))
             throw new ArgumentException($"Unsupported Runner control request contract '{method}'", nameof(method));
-        return GetConnection(runnerId).SendRequestAsync<TParams, TResult>(method, parameters, contract.AllowsNull, ct);
+        return GetConnection(runnerId).SendRequestAsync<TParams, TResult>(
+            method,
+            parameters,
+            contract.AllowsNull,
+            requestEnqueued,
+            ct);
     }
+
+    public bool IsConnected(string runnerId) => HasReadyConnection(runnerId);
+
+    public Task<TResult> SendRequestAsync<TParams, TResult>(
+        string runnerId,
+        string method,
+        TParams parameters,
+        CancellationToken ct) =>
+        SendRequestAsync<TParams, TResult>(runnerId, method, parameters, requestEnqueued: null, ct);
 
     public Task SendNotificationAsync<TParams>(
         string runnerId,
@@ -410,12 +427,20 @@ internal sealed class RunnerControlWebSocketConnection
     }
 
     public Task<TResult> SendRequestAsync<TParams, TResult>(string method, TParams parameters, CancellationToken ct) =>
-        SendRequestAsync<TParams, TResult>(method, parameters, allowsNull: false, ct);
+        SendRequestAsync<TParams, TResult>(method, parameters, allowsNull: false, requestEnqueued: null, ct);
+
+    public Task<TResult> SendRequestAsync<TParams, TResult>(
+        string method,
+        TParams parameters,
+        bool allowsNull,
+        CancellationToken ct) =>
+        SendRequestAsync<TParams, TResult>(method, parameters, allowsNull, requestEnqueued: null, ct);
 
     public async Task<TResult> SendRequestAsync<TParams, TResult>(
         string method,
         TParams parameters,
         bool allowsNull,
+        Action? requestEnqueued,
         CancellationToken ct)
     {
         ct.ThrowIfCancellationRequested();
@@ -446,6 +471,7 @@ internal sealed class RunnerControlWebSocketConnection
             await FenceAsync(WebSocketCloseStatus.MessageTooBig, "Message too large");
             throw new RunnerControlUnavailableException("Runner control message is too large");
         }
+        Task<object?> resultWait;
         try
         {
             ct.ThrowIfCancellationRequested();
@@ -455,6 +481,7 @@ internal sealed class RunnerControlWebSocketConnection
                 await FenceAsync((WebSocketCloseStatus)1013, "Outgoing queue saturated");
                 throw new RunnerControlUnavailableException("Runner control outgoing queue is saturated");
             }
+            resultWait = pending.Task.WaitAsync(RequestTimeout, _timeProvider, ct);
         }
         catch
         {
@@ -464,7 +491,16 @@ internal sealed class RunnerControlWebSocketConnection
 
         try
         {
-            var result = await pending.Task.WaitAsync(RequestTimeout, _timeProvider, ct);
+            requestEnqueued?.Invoke();
+        }
+        catch (Exception ex)
+        {
+            _log.LogWarning(ex, "Runner {RunnerId} control request {RequestId} enqueue callback failed", _runnerId, id);
+        }
+
+        try
+        {
+            var result = await resultWait;
             return result is null ? default! : (TResult)result;
         }
         catch (TimeoutException ex)

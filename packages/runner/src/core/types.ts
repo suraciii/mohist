@@ -382,7 +382,7 @@ export interface RunnerOptions {
    * The runner's machine credential (Bearer token) issued by the server
    * during install registration. Resolved by the CLI bootstrap from
    * <c>$RUNNER_ROOT/credential</c> or a fresh enrollment-token
-   * registration; every server call and the SignalR hub connection
+   * registration; every server call and the control WebSocket hub connection
    * present it as <c>Authorization: Bearer</c>.
    */
   credential?: string

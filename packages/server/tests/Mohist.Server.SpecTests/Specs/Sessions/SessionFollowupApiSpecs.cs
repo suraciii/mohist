@@ -3,12 +3,11 @@ using System.Net.Http.Json;
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
-using Microsoft.AspNetCore.SignalR;
 using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Infrastructure.Orleans;
 using Mohist.Server.Issue.Grains;
 using Mohist.Server.Runner.Grains;
-using Mohist.Server.Runner.Services.SignalR;
+using Mohist.Server.Runner.Services;
 using Mohist.Server.Sessions.Domain;
 using Mohist.Server.Sessions.Grains;
 using Mohist.Server.SpecTests.Support;
@@ -61,7 +60,7 @@ public class SessionFollowupApiSpecs : IAsyncDisposable
         Assert.Equal("idle", sessionState?.Status);
         var tasksBefore = await WaitForWorkflowTasksAsync(project.Id, issue.Number);
         var tracker = _fixture.Services.GetRequiredService<RunnerConnectionTracker>();
-        var runnerHub = _fixture.Services.GetRequiredService<IHubContext<RunnerHub>>() as RecordingRunnerHubContext
+        var runnerHub = _fixture.Services.GetRequiredService<IRunnerControlTransport>() as RecordingRunnerControlTransport
             ?? throw new InvalidOperationException("Recording runner hub context was not registered.");
         runnerHub.Clear();
         tracker.Register(_runnerId, "conn-followup-1");
@@ -79,8 +78,8 @@ public class SessionFollowupApiSpecs : IAsyncDisposable
             Assert.False(string.IsNullOrEmpty(data.GetProperty("turnId").GetString()));
 
             var sent = Assert.Single(runnerHub.SentMessages);
-            Assert.Equal("conn-followup-1", sent.ConnectionId);
-            Assert.Equal("ReceiveFollowup", sent.Method);
+            Assert.Equal(_runnerId, sent.ConnectionId);
+            Assert.Equal("session.followup", sent.Method);
             var payload = JsonSerializer.SerializeToElement(sent.Arguments.Single());
             var wireTarget = payload.GetProperty("target");
             Assert.Equal(workflowRunId, wireTarget.GetProperty("workflowRunId").GetString());
@@ -151,7 +150,7 @@ public class SessionFollowupApiSpecs : IAsyncDisposable
     public async Task FollowupEndpoint_MissingRuntimeBinding_ReturnsRuntimeSessionMissing()
     {
         var (project, issue, _, session) = await CreateAndStartSessionAsync("followup-missing-runtime", sessionName: "plan");
-        var runnerHub = _fixture.Services.GetRequiredService<IHubContext<RunnerHub>>() as RecordingRunnerHubContext
+        var runnerHub = _fixture.Services.GetRequiredService<IRunnerControlTransport>() as RecordingRunnerControlTransport
             ?? throw new InvalidOperationException("Recording runner hub context was not registered.");
         runnerHub.Clear();
 

@@ -1,6 +1,6 @@
 using Microsoft.Extensions.Logging;
 using Mohist.Server.Infrastructure.Events;
-using Mohist.Server.Runner.Services.SignalR;
+using Mohist.Server.Runner.Services;
 using Mohist.Server.Workflow.Domain.Run;
 
 namespace Mohist.Server.Runner.Subscriptions;
@@ -21,8 +21,8 @@ namespace Mohist.Server.Runner.Subscriptions;
 /// The server never performs filesystem deletion; it only delivers the
 /// notification. The runner's convergence backstop
 /// (POST /api/runner/{runnerId}/workflow-runs/status) catches missed
-/// events when the SignalR push cannot be delivered (runner offline at
-/// terminal moment, transient SignalR failure, etc.).
+/// events when the control notification cannot be delivered (runner
+/// offline at terminal moment, transient transport failure, etc.).
 ///
 /// Push subscriptions for the two terminal event types are registered as a
 /// pipe-separated pattern so a single handler instance serves both types.

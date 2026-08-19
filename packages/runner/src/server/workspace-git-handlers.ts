@@ -1,5 +1,4 @@
 import { existsSync as defaultExistsSync } from 'node:fs'
-import * as signalR from '@microsoft/signalr'
 import { NETWORK_COMMAND_TIMEOUT_MS } from '../actions/git.js'
 import { runCommand as defaultRunCommand, type CommandLineOptions } from '../system/process.js'
 import { currentRunnerResources } from '../system/filesystem.js'
@@ -23,6 +22,10 @@ export interface WorkspaceGitHandlers {
   getFileContent(query: WorkspaceQuery, path: string): Promise<unknown>
 }
 
+interface HandlerRegistrar {
+  on(method: string, handler: (...args: never[]) => Promise<unknown>): void
+}
+
 export function createWorkspaceGitHandlers(deps: WorkspaceGitHandlerDeps): WorkspaceGitHandlers {
   const handlers = new Map<string, (...args: never[]) => Promise<unknown>>()
   registerWorkspaceGitHandlers(
@@ -30,7 +33,7 @@ export function createWorkspaceGitHandlers(deps: WorkspaceGitHandlerDeps): Works
       on(method: string, handler: (...args: never[]) => Promise<unknown>) {
         handlers.set(method, handler)
       },
-    } as signalR.HubConnection,
+    },
     deps,
   )
   return {
@@ -43,27 +46,27 @@ export function createWorkspaceGitHandlers(deps: WorkspaceGitHandlerDeps): Works
 }
 
 export async function git(workDir: string, args: string[], signal: AbortSignal, options?: CommandLineOptions) {
-  const runner = currentRunnerResources()?.signalRGitRunner ?? defaultRunCommand
+  const runner = currentRunnerResources()?.controlGitRunner ?? defaultRunCommand
   return runner('git', args, workDir, signal, undefined, options)
 }
 
 export async function isGitWorkTree(workDir: string, signal: AbortSignal): Promise<boolean> {
-  const checker = currentRunnerResources()?.signalRExistsChecker ?? defaultExistsSync
+  const checker = currentRunnerResources()?.controlExistsChecker ?? defaultExistsSync
   if (!checker(workDir)) return false
   const result = await git(workDir, ['rev-parse', '--is-inside-work-tree'], signal)
   return result.exitCode === 0 && result.stdout.trim() === 'true'
 }
 
-export function registerWorkspaceGitHandlers(conn: signalR.HubConnection, deps: WorkspaceGitHandlerDeps): void {
+function registerWorkspaceGitHandlers(conn: HandlerRegistrar, deps: WorkspaceGitHandlerDeps): void {
   const resolveQuery = deps.resolveQuery
 
   async function runGit(workDir: string, args: string[], signal: AbortSignal, options?: CommandLineOptions) {
-    const runner = deps.runCommand ?? currentRunnerResources()?.signalRGitRunner ?? defaultRunCommand
+    const runner = deps.runCommand ?? currentRunnerResources()?.controlGitRunner ?? defaultRunCommand
     return runner('git', args, workDir, signal, undefined, options)
   }
 
   async function isWorkTree(workDir: string, signal: AbortSignal): Promise<boolean> {
-    const checker = deps.pathExists ?? currentRunnerResources()?.signalRExistsChecker ?? defaultExistsSync
+    const checker = deps.pathExists ?? currentRunnerResources()?.controlExistsChecker ?? defaultExistsSync
     if (!checker(workDir)) return false
     const result = await runGit(workDir, ['rev-parse', '--is-inside-work-tree'], signal)
     return result.exitCode === 0 && result.stdout.trim() === 'true'

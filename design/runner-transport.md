@@ -80,11 +80,12 @@ generation with Runner runtime identity. For a matching poll, Server injects
 the generation before dispatch. A nonmatching poll may reconcile already-held
 work, but Server does not accept its Runtime readiness or give it fresh work.
 
-At cutover, Server applies a metadata heartbeat only when its connection ID
-matches the current lease. In the target behavior, heartbeat repair does not
-register or replace a control connection; only a successfully installed
-WebSocket changes the current connection ID and generation. Until that atomic
-cutover, the existing SignalR heartbeat repair remains active.
+Server applies heartbeat metadata repair only when the heartbeat connection ID
+exactly matches the current control lease. A missing or stale connection ID
+refreshes ordinary Runner presence only; it cannot change Runtime identity,
+connection generation, registry metadata, or the current lease. Heartbeat never
+registers or replaces a control connection. Only a successfully installed
+WebSocket changes the current connection ID and generation.
 
 Runner reconnects with bounded backoff and jitter. WebSocket Ping and Pong
 detect a dead connection. They do not replace HTTP presence, heartbeat, or
@@ -326,6 +327,27 @@ keeps its current pending or unknown state and decides whether to redeliver,
 query, or stop under its existing operation contract. The transport neither
 stores that state nor converts a timeout into a domain result.
 
+The Server control transport accepts an optional request-enqueued callback. It
+invokes that callback exactly once after the request enters the connection's
+write queue and before awaiting the response. The request timeout starts at the
+same enqueue boundary. Stop delivery reports `DispatchStarted: false` when the
+binding is incomplete, no live connection exists, or dispatch fails before
+enqueue. Once the callback runs, timeout, disconnect, remote error, or protocol
+failure returns no reply with `DispatchStarted: true`.
+
+Server adapters map transport failures at their existing domain boundaries:
+
+- caller cancellation always propagates;
+- Follow-up logs unavailable, timeout, disconnect, remote, and protocol errors
+  and returns `Accepted: false`;
+- Session command maps transport, remote, and protocol errors to
+  `SessionCommandError.Unavailable`;
+- Workspace status, file content, and removal retain their existing
+  `runner_unavailable` or domain fallback results; Workspace read RPCs retain
+  their existing route-level unavailable behavior, and cleanup never exposes a
+  remote transport exception as an HTTP 500; and
+- Workflow notification failures are logged and dropped.
+
 `workspace.remove` remains an idempotent, checkable local operation. Repeating
 the same Workspace removal may report already absent. It must still use the
 existing Runtime removal fence before deleting a directory. This migration does
@@ -376,13 +398,12 @@ one only when an independent product requirement needs it.
 
 ## Status
 
-Server hosts the dormant native WebSocket endpoint and connection registry.
-Runner contains the matching dormant native client, JSON-RPC dispatcher, and
-transport-neutral handler catalog. `RunnerHost` is not wired to that client.
-Production control callers and Runner therefore still use SignalR client-result
-calls for the nine request methods above and a SignalR send for the Workflow
-status notification; no production Runner opens the WebSocket yet. While the
-endpoint is dormant, the existing SignalR heartbeat repair behavior remains
-unchanged. It is removed atomically with the production caller cutover, not in
-this phase. Existing HTTP dispatch, result delivery, operation journals, and
-Workflow status reconciliation remain the preserved baseline.
+The final cutover is active. Server control callers use the native WebSocket
+registry for all nine request methods and the Workflow status notification.
+RunnerHost opens the matching native client after HTTP registration and binds
+the transport-neutral handler catalog. Runner-specific SignalR endpoints,
+clients, handlers, test fakes, and dependencies are removed; `/hubs/events`
+remains SignalR for operator event delivery. Existing HTTP registration,
+heartbeat, work poll and report, Runtime events, operation journals, and
+Workflow status reconciliation remain unchanged. Mixed old and new Runner
+control clients are unsupported.
