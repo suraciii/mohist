@@ -360,7 +360,14 @@ describe('PiRuntime', () => {
       errorMessage: 'sentinel-provider-key quota exhausted',
     })
     const failed = await turn
-    expect(failed).toMatchObject({ ok: false, error: { kind: 'turn-failed' } })
+    expect(failed).toMatchObject({
+      ok: false,
+      error: {
+        kind: 'turn-failed',
+        message: expect.stringContaining('quota exhausted'),
+        diagnostics: [{ code: 'provider-quota-exhausted' }],
+      },
+    })
     expect(JSON.stringify(events)).not.toContain('sentinel-provider-key')
     const missingFactory: PiSdkFactory = {
       create: async () => ({
