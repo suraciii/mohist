@@ -427,6 +427,31 @@ describe('AgentProfileEditor', () => {
       )
     })
 
+    it('preserves an independent variant when changing reasoning effort', async () => {
+      renderEditor({
+        agent: {
+          ...existingAgent,
+          agentConfig: {
+            runtime: 'pi',
+            model: 'pi/anthropic/claude',
+            reasoningEffort: 'low',
+            variant: 'balanced',
+          },
+        },
+      })
+      fireEvent.click(document.querySelector('#agent-model') as HTMLElement)
+      fireEvent.click(await screen.findByTestId('agent-model-row-pi/anthropic/claude-variant-high'))
+      fireEvent.click(screen.getByTestId('editor-save'))
+
+      const updateCall = (mocks.updateMutation.mutate as ReturnType<typeof vi.fn>).mock.calls[0][0]
+      expect(updateCall.data.agentConfig).toEqual({
+        model: 'pi/anthropic/claude',
+        reasoningEffort: 'high',
+        runtime: 'pi',
+        variant: 'balanced',
+      })
+    })
+
     it('selecting the model body clears only the stored variant', async () => {
       renderEditor({ agent: existingAgent })
       await openAgentModelSelect()

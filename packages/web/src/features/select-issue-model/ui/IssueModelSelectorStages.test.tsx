@@ -1,7 +1,12 @@
 import '@testing-library/jest-dom'
 import { beforeEach, describe, expect, it } from 'vitest'
 import { cleanup, fireEvent, screen, waitFor } from '@testing-library/react'
-import { mocks, openAdvanced, renderSelector, resetIssueModelSelectorTestState } from './IssueModelSelectorTestSupport'
+import {
+  mocks,
+  openAdvanced,
+  renderSelector,
+  resetIssueModelSelectorTestState,
+} from './IssueModelSelectorTestSupport'
 
 beforeEach(() => {
   cleanup()
@@ -103,9 +108,7 @@ describe('IssueModelSelector per-stage variant chips', () => {
     const buildTrigger = await waitFor(() => document.getElementById('issue-stage-model-build') as HTMLElement)
     fireEvent.click(buildTrigger)
 
-    const highChip = await waitFor(() =>
-      screen.getByTestId('issue-stage-model-build-row-anthropic/claude-variant-high'),
-    )
+    const highChip = await waitFor(() => screen.getByTestId('issue-stage-model-build-row-anthropic/claude-variant-high'))
     fireEvent.click(highChip)
 
     await waitFor(() => {
@@ -137,9 +140,7 @@ describe('IssueModelSelector per-stage variant chips', () => {
     const buildTrigger = await waitFor(() => document.getElementById('issue-stage-model-build') as HTMLElement)
     fireEvent.click(buildTrigger)
 
-    const highChip = await waitFor(() =>
-      screen.getByTestId('issue-stage-model-build-row-anthropic/claude-variant-high'),
-    )
+    const highChip = await waitFor(() => screen.getByTestId('issue-stage-model-build-row-anthropic/claude-variant-high'))
     fireEvent.click(highChip)
 
     await waitFor(() => {
@@ -149,6 +150,51 @@ describe('IssueModelSelector per-stage variant chips', () => {
         'build',
         'agent',
         { model: 'anthropic/claude', variant: 'high' },
+        'proj_test',
+      )
+    })
+  })
+
+  it('preserves the stage true variant when changing Pi reasoning effort', async () => {
+    mocks.useWorkflowProfiles.mockReturnValue({
+      data: [{ id: 'team/pi', displayName: 'Pi workflow', description: '', isDefault: false, agentRuntime: 'pi' }],
+    })
+    mocks.useEffectiveDefaultWorkflowProfile.mockReturnValue({ effectiveTemplateId: 'team/pi' })
+    mocks.useAvailableModelIds.mockReturnValue({
+      data: {
+        models: ['pi/anthropic/claude'],
+        modelVariants: { 'pi/anthropic/claude': ['balanced'] },
+        reasoningEfforts: { 'pi/anthropic/claude': ['low', 'high'] },
+      },
+      isLoading: false,
+      error: null,
+    })
+    mocks.getIssueWorkflowVariables.mockResolvedValue({
+      vars: {},
+      stages: {
+        build: {
+          vars: {
+            agent: {
+              model: 'pi/anthropic/claude',
+              reasoningEffort: 'low',
+              variant: 'balanced',
+            },
+          },
+        },
+      },
+    })
+    renderSelector({ currentStageModels: { build: 'pi/anthropic/claude' } })
+
+    openAdvanced()
+    fireEvent.click(await waitFor(() => document.getElementById('issue-stage-model-build') as HTMLElement))
+    fireEvent.click(await screen.findByTestId('issue-stage-model-build-row-pi/anthropic/claude-variant-high'))
+
+    await waitFor(() => {
+      expect(mocks.patchIssueWorkflowStageDefinitionVar).toHaveBeenCalledWith(
+        42,
+        'build',
+        'agent',
+        { model: 'pi/anthropic/claude', reasoningEffort: 'high', variant: 'balanced' },
         'proj_test',
       )
     })
@@ -174,9 +220,7 @@ describe('IssueModelSelector per-stage variant chips', () => {
     const buildTrigger = await waitFor(() => document.getElementById('issue-stage-model-build') as HTMLElement)
     fireEvent.click(buildTrigger)
 
-    const activeChip = await waitFor(() =>
-      screen.getByTestId('issue-stage-model-build-row-anthropic/claude-variant-high'),
-    )
+    const activeChip = await waitFor(() => screen.getByTestId('issue-stage-model-build-row-anthropic/claude-variant-high'))
     expect(activeChip.getAttribute('data-variant-active')).toBe('true')
     const lowChip = screen.getByTestId('issue-stage-model-build-row-anthropic/claude-variant-low')
     expect(lowChip.getAttribute('data-variant-active')).toBe('false')
@@ -202,7 +246,9 @@ describe('IssueModelSelector per-stage variant chips', () => {
     const buildTrigger = await waitFor(() => document.getElementById('issue-stage-model-build') as HTMLElement)
     fireEvent.click(buildTrigger)
 
-    const claudeRow = await waitFor(() => document.querySelector('[data-model-id="anthropic/claude"]') as HTMLElement)
+    const claudeRow = await waitFor(() =>
+      document.querySelector('[data-model-id="anthropic/claude"]') as HTMLElement,
+    )
     fireEvent.click(claudeRow)
 
     await waitFor(() => {
@@ -243,7 +289,9 @@ describe('IssueModelSelector per-stage variant chips', () => {
     const planTrigger = await waitFor(() => document.getElementById('issue-stage-model-plan') as HTMLElement)
     fireEvent.click(planTrigger)
 
-    const claudeRow = await waitFor(() => document.querySelector('[data-model-id="anthropic/claude"]') as HTMLElement)
+    const claudeRow = await waitFor(() =>
+      document.querySelector('[data-model-id="anthropic/claude"]') as HTMLElement,
+    )
     fireEvent.click(claudeRow)
 
     await waitFor(() => {
