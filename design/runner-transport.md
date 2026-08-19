@@ -1,10 +1,9 @@
 # Runner Control Transport Migration
 
 Mohist currently uses HTTP for durable Runner work and SignalR client-result
-calls for Server-to-Runner control. The Go rewrite cannot depend on that SignalR
-client behavior. This change replaces only the SignalR control transport. It
-does not redesign work dispatch, Session operations, Workspace identity, or the
-domain event bus.
+calls for Server-to-Runner control. This change replaces only the SignalR
+control transport. It does not redesign work dispatch, Session operations,
+Workspace identity, or the domain event bus.
 
 ## Migration Scope
 
@@ -277,7 +276,7 @@ or duplicating the notification changes latency, not the cleanup decision.
 2. Implement the Server WebSocket endpoint, connection registry, correlation,
    timeout, bounded queues, connection-ID upgrade header, and preserved Hub
    lifecycle hooks. Replace heartbeat registration with current-lease matching.
-3. Implement the Go Runner WebSocket client and bind the typed methods to the
+3. Implement the Runner WebSocket client and bind the typed methods to the
    existing handlers and journals.
 4. In one release candidate, switch every Server control caller to the
    WebSocket registry and delete `RunnerHub`, the Runner SignalR client,
