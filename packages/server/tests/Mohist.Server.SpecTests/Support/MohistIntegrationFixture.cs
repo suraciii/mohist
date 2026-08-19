@@ -189,6 +189,10 @@ public sealed class PublicProjectionIntegrationFixture : MohistIntegrationFixtur
         while (await engine.ProcessSessionAsync(sessionId, ct))
         {
         }
+
+        while (await engine.ProcessPendingAsync(ct))
+        {
+        }
     }
 }
 

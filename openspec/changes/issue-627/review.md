@@ -31,8 +31,9 @@ Snapshot deletion is now an awaited operation whose exception reaches `TryReleas
 - PR CI run `32281570222` passed: Detect Changed Paths, .NET spec tests, .NET build and test, and Node build and test.
 - The current PR head is rebased onto `master` at `6dfddc5772064ae3a3ec5990a5580f7cd46acc7e` and is mergeable.
 - Local post-rebase `RunnerPollRecoveryStateApiSpecs`: 6/6 passed.
-- Local post-fix `DirectApiFollowupSpecs`: 9/9 passed.
-- Prior focused settlement, state-save, recovery, and Runner identity suites passed 54/54 and 44/44 respectively; the full CI Spec and Node gates passed again after the rebase and projection-drain repair.
+- Local post-fix `DirectApiFollowupSpecs`: 9/9 passed in five consecutive runs.
+- The manual public-projection fixture drains the targeted session and then all remaining checkpoint work before retrying a read, so the CI-only projection-lag race is synchronized at a durable boundary rather than by time.
+- Prior focused settlement, state-save, recovery, and Runner identity suites passed 54/54 and 44/44 respectively; CI run `32281570222` passed after the rebase and initial projection-drain repair, and the current head reruns the complete CI gate with the final global drain.
 - The local server and Runner were deployed from the preceding implementation head and verified healthy before the final rebase; the final post-merge deployment remains a separate verification step.
 
 No must-fix findings remain.
