@@ -114,3 +114,9 @@ Implemented T-001 end to end on top of the plan-review fixes above.
 - The selected T-001 implementation is present in the committed tree: the six-lane catalog, immutable definition snapshot and legacy resolver, additive lane attempt metadata, boundary classification, status projection, ordered dispatch, and build gate are all wired and tested.
 - Verification on the current HEAD: Server build passed with 0 warnings/errors; all 2,961 Server UnitTests passed; all 12 `VerificationLaneBindingSpecs` passed through the direct Server Spec apphost; and the focused Workflow Definition tests passed 26/26. The repository's `dotnet test --filter` path emits MTP0001 because Microsoft Testing Platform ignores VSTest filters, so the affected Spec class was run with its supported `-class` argument.
 - No source correction was required during the audit. `git diff --check` passed and the worktree remained clean apart from this progress entry.
+
+# Progress: T-002 completion verification
+
+- The committed Runner implementation satisfies the lane-scoped timeout and durable-result requirements: `core/script` forwards its positive finite timeout, `runCommand` returns structured timeout results after process-group termination, and `WorkResultJournal` holds exact terminal results until durable report acknowledgement without duplicate execution for the workflow work identity.
+- Runner production typecheck, test typecheck, and test-boundary validation passed. The focused action, process, host-reporting, host-recovery, and journal suites passed 54/54 tests; the full Runner suite passed 1,820/1,820 tests across 164 files.
+- No source correction was needed for this verification pass. `git diff --check` passed; the pre-existing baseline test mentioning a resource profile was not changed or extended.
