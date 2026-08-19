@@ -69,7 +69,8 @@ public static partial class WorkflowRunExtensions
             // A lane-enabled stage with no claimable task may still have a
             // failed, timed-out, or missing lane and pending checks. Checks
             // must not bypass the all-lanes-pass gate.
-            if (VerificationLaneGate.IsLaneEnabledRun(run)
+            if (string.Equals(current.Id, "build", StringComparison.Ordinal)
+                && VerificationLaneGate.IsLaneEnabledRun(run)
                 && !VerificationLaneGate.CanAdvanceBuildStage(run))
             {
                 return null;
@@ -556,7 +557,8 @@ public static partial class WorkflowRunExtensions
                 return new WorkflowPendingWork(task.WorkId ?? task.Id, WorkItemTypes.Task, current.Id, task.Title);
             }
 
-            if (VerificationLaneGate.IsLaneEnabledRun(run)
+            if (string.Equals(current.Id, "build", StringComparison.Ordinal)
+                && VerificationLaneGate.IsLaneEnabledRun(run)
                 && !VerificationLaneGate.CanAdvanceBuildStage(run))
             {
                 return null;

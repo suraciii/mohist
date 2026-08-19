@@ -122,6 +122,12 @@ public static class VerificationLaneGate
     {
         if (!IsLaneEnabledRun(run)) return true;
 
+        var stage = run.Stages.FirstOrDefault(candidate =>
+            candidate.Tasks.Any(candidateTask =>
+                string.Equals(candidateTask.Id, task.Id, StringComparison.Ordinal)));
+        if (stage is null || !string.Equals(stage.Id, "build", StringComparison.Ordinal))
+            return true;
+
         var laneOrder = VerificationLaneCatalog.OrderOf(task.DefinitionId);
         if (laneOrder >= 0)
         {
@@ -135,11 +141,6 @@ public static class VerificationLaneGate
 
         // Preserve the built-in orchestration tasks before the lane sequence,
         // but do not let an arbitrary task after the sequence bypass the gate.
-        var stage = run.Stages.FirstOrDefault(candidate =>
-            candidate.Tasks.Any(candidateTask =>
-                string.Equals(candidateTask.Id, task.Id, StringComparison.Ordinal)));
-        if (stage is null) return false;
-
         var taskIndex = stage.Tasks.FindIndex(candidate =>
             string.Equals(candidate.Id, task.Id, StringComparison.Ordinal));
         var firstLaneIndex = stage.Tasks.FindIndex(candidate =>

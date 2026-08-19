@@ -18,6 +18,34 @@ public sealed class VerificationLaneNextWorkTests
     private static readonly DateTimeOffset CreatedAt = new(2026, 8, 14, 0, 0, 0, TimeSpan.Zero);
 
     [Fact]
+    public void NextWork_LaneEnabledRun_AllowsWorkInEarlierStage()
+    {
+        var run = CreateLaneEnabledRun();
+        var plan = new StageRun
+        {
+            Id = "plan",
+            Attempt = 1,
+            RequiresApproval = false,
+            Status = StageRunStatus.Running,
+            Initialized = true,
+        };
+        plan.Tasks.Add(new TaskRun
+        {
+            Id = "plan-task.1",
+            DefinitionId = "plan-task",
+            Attempt = 1,
+            Title = "Plan task",
+            Uses = "mohist/opencode",
+            Status = TaskRunStatus.Pending,
+        });
+        run.Stages.Insert(0, plan);
+        run.CurrentStageId = "plan";
+
+        var work = Assert.IsType<WorkflowTaskWork>(run.NextWork());
+        Assert.Equal("plan-task.1", work.Id);
+    }
+
+    [Fact]
     public void NextWork_LegacyRun_ReturnsFirstPendingTask_NoLaneGate()
     {
         var run = CreateRun(aggregateOnly: true);
