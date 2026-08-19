@@ -172,3 +172,10 @@
   2974, Arch 69, Workflow Definition 178, CLI 1887, Web 4768, Runner 1820, all
   typechecks); full Server SpecTests passed 3842/3842 in 2m45s. No verification
   timeout was increased.
+
+## Verification repair
+
+- The saved failing canonical runs identified two real file-size ratchet violations: `DispatchServiceReconciliationSpecs.cs` (1147 lines) and `AgentResultSettlementSpecs.cs` (1047 lines). An earlier attempted split also failed the architecture rule because `DispatchServiceReconciliationSpecs.Persistence.cs` does not have a `Specs` or `Collection` filename suffix.
+- Moved persistence/seed helpers into `DispatchServiceReconciliationPersistenceSpecs.cs` and the stage-lock case into `AgentResultSettlementResourceSpecs.cs`, both partial-class companions with valid `*Specs.cs` names. `npm run check:filesizes`, `npm run format:check`, the affected Runner class (25/25), Agent settlement class (17/17), and architecture rules (28/28) pass.
+- The first post-fix `npm run verify` stopped before any lane because the canonical guard requires a clean index and worktree. The fix is now ready to verify from a clean commit; no verification-only Git changes were observed.
+- Clean committed verification passed from `/tmp/issue-627-verify-clean.log`: all 9 tracks completed with zero failures, cancellations, or timeouts. Totals were Server Spec 3842, Server Unit 2974, Server Architecture 69, Workflow Definition 178, CLI 1887, Web 4768, Runner 1820, Runner integration 11, and Slack 70; file-size and format checks were clean.

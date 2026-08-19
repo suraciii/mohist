@@ -18,7 +18,7 @@ using Xunit;
 namespace Mohist.Server.SpecTests.Specs.Workflow.Grain;
 
 [Collection("WorkflowGrain")]
-public sealed class AgentResultSettlementSpecs : WorkflowGrainSpecs
+public sealed partial class AgentResultSettlementSpecs : WorkflowGrainSpecs
 {
     public AgentResultSettlementSpecs(WorkflowGrainFixture fixture) : base(fixture)
     {
@@ -982,65 +982,4 @@ public sealed class AgentResultSettlementSpecs : WorkflowGrainSpecs
         Assert.Equal(TaskRunStatus.Completed, Assert.Single(completed.CurrentStage().Tasks).Status);
     }
 
-    [Fact]
-    public async Task UnknownSettlement_HoldsSequentialStageLockUntilTheDeadlineReleasesIt()
-    {
-        var suffix = Guid.NewGuid().ToString("N");
-        var resource = $"agent-settlement-{suffix}";
-        var workflow = await StartWorkflowAsync(new WorkflowDefinition(
-        [
-            new StageDefinition(
-                "build",
-                [new TaskDefinition("agent", "Agent", "mohist/opencode")],
-                [],
-                LockBehavior: "sequential",
-                Resources: [resource])
-        ]), id: $"wf-agent-settlement-lock-{suffix}");
-        var projectId = TestProjectId(_workflowId!);
-        var (work, runnerId) = await PollWorkAnyAsync();
-        var run = await LoadRunAsync(_workflowId!);
-        var task = Assert.Single(run.CurrentStage().Tasks);
-        var binding = new AgentExecutionBinding(
-            task.Id,
-            work.WorkId,
-            runnerId,
-            "session-lock",
-            "turn-lock",
-            "opencode",
-            "runtime-session-lock");
-        var lockGrain = Grains.GetGrain<IWorkflowStageLockGrain>(
-            WorkflowStageLockKeys.ForProjectResource(projectId, resource));
-
-        Assert.Equal(_workflowId, (await lockGrain.GetStateAsync())?.Owner?.WorkflowRunId);
-        Assert.Equal(ReportAck.Accepted, await workflow.BindAgentExecutionAsync(binding));
-        Assert.Equal(ReportAck.Accepted, await workflow.ObserveAgentExecutionAsync(
-            new AgentExecutionObservation(
-                binding,
-                AgentExecutionObservationKind.Disconnected,
-                "runner-disconnected")));
-        Assert.Equal(_workflowId, (await lockGrain.GetStateAsync())?.Owner?.WorkflowRunId);
-
-        var unknown = await LoadRunAsync(_workflowId!);
-        var deadline = Assert.IsType<DateTimeOffset>(
-            Assert.Single(unknown.CurrentStage().Tasks).AgentResultSettlement!.DeadlineAt);
-        _fixture.TimeProvider.Advance(deadline - _fixture.TimeProvider.GetUtcNow());
-        await workflow.ReceiveReminder(WorkflowGrain.AgentResultSettlementReminderName, default);
-
-        var blocked = await LoadRunAsync(_workflowId!);
-        var blockedTask = Assert.Single(blocked.CurrentStage().Tasks);
-        Assert.Equal(AgentResultSettlementState.Blocked, blockedTask.AgentResultSettlement!.State);
-        Assert.Null(blocked.Assignment);
-        Assert.Equal(work.WorkId, blockedTask.WorkId);
-        Assert.Equal(runnerId, blockedTask.WorkerId);
-        Assert.Null((await lockGrain.GetStateAsync())?.Owner);
-
-        await workflow.ReceiveReminder(WorkflowGrain.AgentResultSettlementReminderName, default);
-
-        Assert.Null((await lockGrain.GetStateAsync())?.Owner);
-        Assert.Null((await LoadRunAsync(_workflowId!)).Assignment);
-
-        await workflow.StopAsync("operator stop");
-
-        Assert.Null((await lockGrain.GetStateAsync())?.Owner);
-    }
 }
