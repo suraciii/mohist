@@ -309,9 +309,7 @@ describe('IssueModelSelector default-model variant chips', () => {
 
     const clearOption = await waitFor(() => {
       const items = document.querySelectorAll('[cmdk-item]')
-      const found = Array.from(items).find(
-        (el) => el.textContent?.includes('Use default'),
-      )
+      const found = Array.from(items).find((el) => el.textContent?.includes('Use default'))
       if (!found) throw new Error('clear option not found')
       return found as HTMLElement
     })
@@ -463,18 +461,13 @@ describe('IssueModelSelector default-model popover accessibility and keyboard', 
     const options = await waitFor(() => screen.getAllByRole('option'))
     expect(options.length).toBeGreaterThanOrEqual(2)
 
-    const claudeOption = options.find(
-      (o) => o.getAttribute('data-model-id') === 'anthropic/claude',
-    )
+    const claudeOption = options.find((o) => o.getAttribute('data-model-id') === 'anthropic/claude')
     expect(claudeOption).toBeTruthy()
     expect(claudeOption!.getAttribute('aria-selected')).toBe('true')
   })
 
   it('renders Override, Recent, and All-models sections as labeled groups', async () => {
-    window.localStorage.setItem(
-      'mohist:recent-issue-models',
-      JSON.stringify(['openai/gpt-4']),
-    )
+    window.localStorage.setItem('mohist:recent-issue-models', JSON.stringify(['openai/gpt-4']))
     mocks.useAvailableModelIds.mockReturnValue({
       data: {
         models: ['anthropic/claude', 'openai/gpt-4'],
