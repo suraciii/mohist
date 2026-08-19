@@ -1,0 +1,96 @@
+{
+  "project": "mohist-local",
+  "description": "Replace aggregate build verification with six ordered, independently bounded lanes whose results are durable and recoverable without repeating downstream workflow effects.",
+  "tasks": [
+    {
+      "id": "T-001",
+      "title": "Persist the immutable run definition, lane evidence, and build-stage gate",
+      "spec": "specs/verification-lanes/spec.md#lane-outcomes-are-durable-and-gate-stage-advancement",
+      "description": "At BindWorkflowRun time, serialize the complete effective WorkflowDefinition into BoundWorkflowStart.DefinitionJson and persist it as the write-once WorkflowRun.BoundWorkflowDefinitionJson snapshot, including all stage task/check/lock/resource data and top-level approval/recovery fields. Make stage initialization and stage-lock resolution use that snapshot rather than hot-reloading the current profile; treat old state without a snapshot as legacy and keep it on the retained aggregate definition path. Then add the built-in six-lane catalog and additive verification metadata to Server workflow task attempts, including stable lane identity, order, configured budget, pass/fail/timeout outcome, attempt identity, and diagnostics. Classify existing task reports at the verification boundary, expose all lane states through the build-stage status projection, and make ordered dispatch and stage advancement require every required lane to have a durable pass for lane-enabled runs only, without adding a generic third task report status.",
+      "acceptanceCriteria": [
+        "The Server catalog contains exactly the six stable lane IDs in declared order: verify-install, verify-dotnet, verify-web-typecheck, verify-web-tests, verify-runner-typecheck, and verify-runner-tests.",
+        "BindWorkflowRun serializes the complete effective WorkflowDefinition into BoundWorkflowStart.DefinitionJson and persists it as the nullable, write-once WorkflowRun.BoundWorkflowDefinitionJson field, including every stage task/check/lock/resource value and top-level approval/recovery value; binding idempotency compares the snapshot.",
+        "WorkflowStageInitializer and WorkflowStageLockCoordinator resolve snapshot-backed runs only from WorkflowRun.BoundWorkflowDefinitionJson and never from the current profile provider; state without a snapshot is explicit legacy mode and uses the retained pre-change aggregate definition for affected built-in profiles without synthesizing lane state.",
+        "A mixed-version test binds a run while build contains aggregate verify, changes the profile to six lanes, starts build afterward, and proves the run materializes aggregate verify; a second case binds six lanes before a profile edit and proves the stored six-lane tasks remain authoritative.",
+        "Each recognized lane attempt persists its lane ID, order, configured positive finite budget, outcome, TaskRun/WorkId identity, and failure or timeout diagnostics in the same state transition as the normal task result.",
+        "A successful script report classifies as pass, a normal script failure classifies as fail, and an error with code timeout classifies as timeout while TaskReportStatus remains limited to its existing protocol states.",
+        "Reloaded workflow status projects all six lanes for lane-enabled runs, including pending or missing lanes, and preserves pass, fail, and timeout evidence and diagnostics; legacy workflow state without lane fields remains readable and is not made to wait for synthesized lanes.",
+        "For a lane-enabled run, NextWork exposes verification lanes only in catalog order, does not expose a later lane before its predecessor passes, and the build stage cannot advance while any required lane is pending, missing, failed, or timed out; a legacy aggregate run keeps its existing dispatch and gate behavior.",
+        "Server unit and specification tests cover report classification, durable serialization and reload, status projection, ordered dispatch, all-pass gating, and compatibility with legacy state.",
+        "The affected Server test suites pass with warnings treated as errors."
+      ],
+      "priority": 1,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Server workflow lane catalog, durable TaskRun lane metadata, build-stage lane status projection, ordered verification gate, and passing Server lane-state tests.",
+      "dependsOn": [],
+      "passes": false,
+      "notes": "Use existing StageRun, TaskRun, WorkId, report fencing, and workflow serialization boundaries. Keep lane timeout as verification metadata rather than introducing TaskReportStatus.Timeout."
+    },
+    {
+      "id": "T-002",
+      "title": "Enforce lane-scoped script budgets and journal terminal results",
+      "spec": "specs/verification-recovery/spec.md#runner-timeout-and-result-reporting-are-lane-scoped",
+      "description": "Ensure the Runner passes each core/script lane budget to runCommand, terminates the command process group at that budget, and returns a structured timeout failure that the Server can attribute to the lane. Preserve exact terminal results in WorkResultJournal across persistence or report-delivery failures, retry delivery, and keep the work identity fenced so the same lane is never executed twice.",
+      "acceptanceCriteria": [
+        "A core/script invocation with a positive finite timeout passes that value to runCommand, and an over-budget command is process-group terminated with a timeout result rather than runner loss.",
+        "The timeout action result uses error code timeout and retains the lane command outcome and diagnostics needed by the Server lane projection; successful and ordinary failed scripts retain their existing strict behavior.",
+        "WorkResultJournal persists a returned lane result before report delivery, retains the exact result when persistence or delivery is unavailable, retries it later, and prevents a second execution for the same workflow work identity.",
+        "Runner tests cover timeout propagation, process-group termination, timeout error mapping, report retry, restart recovery, and duplicate-execution fencing.",
+        "Runner typecheck and the focused Runner action, process, host-reporting, host-recovery, and journal test suites pass."
+      ],
+      "priority": 1,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Lane-scoped Runner timeout/reporting behavior with durable WorkResultJournal fencing and passing Runner execution and journal tests.",
+      "dependsOn": [],
+      "passes": false,
+      "notes": "Do not add, restore, configure, or reference any per-work resource containment mechanism, resource profile, cgroup or memory limit, process-tree containment policy, resource budget, or resource-containment failure code. Preserve only the existing process-group termination, result protocol, and Runner slot policy."
+    },
+    {
+      "id": "T-003",
+      "title": "Replace aggregate CI verification with six bounded built-in lanes",
+      "spec": "specs/verification-lanes/spec.md#built-in-workflows-execute-verification-as-ordered-lanes",
+      "description": "Update the build stages in the built-in mohist/local and mohist/github-pr workflow profiles to use six stable core/script tasks in the required order. Give every lane an explicit positive finite timeout, preserve the exact existing commands and test scope, carry the live export DOTNET_ROOT=/home/szf/.dotnet prelude in each verify-dotnet run body because every core/script task has a fresh shell, remove the aggregate vars.ci.verify task and former 300000 millisecond enclosing timeout, attach the existing profile-specific fix-ci recovery declaration to every lane, and extend profile and clean-run contract tests to validate the rollout.",
+      "acceptanceCriteria": [
+        "Both built-in profile YAML files define verify-install, verify-dotnet, verify-web-typecheck, verify-web-tests, verify-runner-typecheck, and verify-runner-tests as ordered core/script tasks in the build stage.",
+        "The six verification command lines are exactly npm ci; dotnet test Mohist.sln --nologo -m:1 -p:UseSharedCompilation=false; npm run typecheck -w packages/web; npm run test:run -w packages/web; npm run typecheck -w packages/runner; and npm run test:run -w packages/runner -- --no-file-parallelism, respectively. The verify-dotnet run body has only the required export DOTNET_ROOT=/home/szf/.dotnet prelude before its unchanged dotnet command; the prelude is setup, not a replacement or additional verification command.",
+        "Every lane declares a literal positive finite timeout, the old aggregate 300000 millisecond timeout is absent from the build verification gate, and no timeout encloses all six lanes.",
+        "The built-in profiles do not add skips, allowlists, reduced test scopes, altered thresholds, resource-containment settings, or Runner slot-policy changes; the aggregate vars.ci.verify task is no longer referenced by the gate.",
+        "Profile definition and Runner workflow-profile tests inspect both built-in profiles for lane IDs, exact command lines, ordering, finite budgets, the verify-dotnet export DOTNET_ROOT=/home/szf/.dotnet prelude before the unchanged dotnet command, absence of the aggregate timeout, and the same profile-specific fix-ci recovery declaration on every lane: budget 2, an unconditional recover:fix-ci handler, retrySelf true, and the existing profile-specific action, build session, prompt/options, and expectation fields. Clean-run contract tests execute each lane in its own shell and prove the .NET lane sees DOTNET_ROOT; a representative clean run completes all six lanes for both built-in profiles.",
+        "Both built-in profiles parse and validate successfully, and the affected profile contract tests pass.",
+        "The rollout contract captures the full effective definition at BindWorkflowRun before profile activation, makes stage and lock initialization read that snapshot, and retains the pre-change aggregate definition for pre-snapshot legacy runs; no run can acquire lane mode from the current profile, and historical tasks are not rewritten or rerun."
+      ],
+      "priority": 2,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Updated mohist-local.workflow.yaml and mohist-github-pr.workflow.yaml with six ordered bounded verification tasks and passing profile contract tests.",
+      "dependsOn": ["T-001", "T-002"],
+      "passes": false,
+      "notes": "The profile YAML remains authoritative for command text, the verify-dotnet runtime prelude, and timeout values. Retain or deprecate the unused project variable only according to the rollout decision; it must not remain part of the built-in gate. The DOTNET_ROOT export must not be placed only in verify-install or assumed to cross the fresh-shell boundary."
+    },
+    {
+      "id": "T-004",
+      "title": "Recover the first non-passing lane without repeating downstream effects",
+      "spec": "specs/verification-recovery/spec.md#recovery-resumes-at-the-first-lane-without-a-durable-pass",
+      "description": "Extend Server recovery to preserve completed lane evidence and the original failed or timed-out diagnostics, create one new attempt for the first lane without a durable pass, and keep later lanes blocked until ordered recovery succeeds. Treat the Runner's recovery scheduling result as non-pass lane evidence, keep the declared fix-ci helper outside the lane catalog, and require a later direct lane-attempt success before changing the outcome to pass. Reconcile repeated recovery requests and stale reports against durable task/work identities, then verify through built-in workflow execution that downstream push, review, and merge work remains ordered and runs only once after all six lanes pass.",
+      "acceptanceCriteria": [
+        "When a later lane fails or times out, every earlier durable pass remains unchanged, the blocking lane retains its original outcome and diagnostics, and all later lanes remain pending or unstarted.",
+        "Recovery selects the first catalog lane whose authoritative outcome is not pass, creates one new attempt for that lane with the same lane ID, order, budget, and recovery declaration, does not rerun earlier passing lanes, and does not dispatch later lanes before the target and its predecessors pass.",
+        "A Runner recovery scheduling report with outer status completed, addTasks, and an underlying error remains fail or timeout evidence rather than pass; recover:fix-ci is recorded outside the lane catalog, and only a later direct successful retry changes the lane to pass.",
+        "Repeated recovery requests reconcile to one active or completed repair/retry chain for the failed attempt's durable identity; a late report from an old failed or timed-out attempt is acknowledged as stale and cannot overwrite the newer lane result.",
+        "The build gate remains closed until all six lanes have durable pass outcomes, and after recovery succeeds the existing downstream push, review, and merge task identities each have one durable completion with no duplicate side effects.",
+        "Server recovery tests cover preservation after a second-lane timeout, failed-lane repair diagnostics, recovery scheduling classification, helper-not-a-lane behavior, first-non-passing selection, duplicate recovery, stale reports, and downstream gating.",
+        "End-to-end workflow tests cover a clean six-lane run and a timeout after an earlier pass for both built-in workflow profiles, including report-delivery retry and repeated recovery without duplicate downstream execution.",
+        "The affected Server, Runner, and workflow integration test suites pass with the existing build, typecheck, and test thresholds unchanged."
+      ],
+      "priority": 3,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Idempotent ordered lane recovery with preserved evidence, stale-report fencing, downstream side-effect protection, and passing Server/end-to-end recovery tests.",
+      "dependsOn": ["T-001", "T-002", "T-003"],
+      "passes": false,
+      "notes": "Use the existing Orleans grain serialization and task/work/runner report fences. Do not rewrite active legacy aggregate runs in place; keep additive state readers compatible with stored runs that have no lane history."
+    }
+  ]
+}

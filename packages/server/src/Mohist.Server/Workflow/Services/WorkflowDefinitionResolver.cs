@@ -95,9 +95,15 @@ public class WorkflowDefinitionResolver : IScopedService
 
     /// <summary>
     /// Returns the per-stage spec (tasks + checks + lock behavior) for a
-    /// single stage. Re-runs the cascade on every call so subsequent stages
-    /// see live profile edits (hot reload per stage-enter). Throws if the
-    /// resolved template does not contain <paramref name="stageId"/>.
+    /// single stage. Snapshot-backed runs read from
+    /// <c>WorkflowRun.BoundWorkflowDefinitionJson</c> and never from the live
+    /// profile provider, so a profile edit after binding cannot change a
+    /// run's task definitions, commands, or per-lane timeouts. Pre-snapshot
+    /// runs (no <c>BoundWorkflowDefinitionJson</c>) fall back to the live
+    /// cascade for backward compatibility; the affected built-in profiles
+    /// keep their pre-change aggregate path through
+    /// <c>RetainedLegacyAggregate</c>. Throws if neither the snapshot nor
+    /// the resolved template contains <paramref name="stageId"/>.
     /// </summary>
     public async Task<StageDefinition> LoadStageSpecsAsync(
         string runId,
@@ -106,17 +112,90 @@ public class WorkflowDefinitionResolver : IScopedService
         int? issueNumber = null,
         string? boundProfileId = null)
     {
+        var inMemory = await TryLoadRunAsync(runId);
+        if (HasBoundSnapshot(inMemory))
+            return ResolveBoundSnapshotStage(inMemory!, stageId);
+
         var template = string.IsNullOrWhiteSpace(boundProfileId)
             ? await LoadTemplateAsync(runId, projectId, issueNumber)
             : await LoadBoundTemplateAsync(runId, boundProfileId!, projectId);
         var definition = template.Structure
             ?? throw new InvalidOperationException(
                 $"Workflow '{runId}' has no effective workflow template");
-        var stage = definition.Stages.FirstOrDefault(s => string.Equals(s.Stage, stageId, StringComparison.Ordinal))
+        var resolved = definition.Stages.FirstOrDefault(s => string.Equals(s.Stage, stageId, StringComparison.Ordinal))
             ?? throw new WorkflowDefinitionResolutionException(
                 WorkflowDefinitionResolutionException.ResolutionReason.NoStageDefinition,
                 $"Workflow '{runId}' has no definition for stage '{stageId}'");
-        return stage;
+        return resolved;
+    }
+
+    private static bool HasBoundSnapshot(WorkflowRun? run) =>
+        run is not null && !string.IsNullOrWhiteSpace(run.BoundWorkflowDefinitionJson);
+
+    private static StageDefinition ResolveBoundSnapshotStage(WorkflowRun run, string stageId)
+    {
+        WorkflowDefinition definition;
+        try
+        {
+            definition = WorkflowYamlSerializer.FromJson(run.BoundWorkflowDefinitionJson!);
+        }
+        catch (Exception ex)
+        {
+            throw new WorkflowDefinitionResolutionException(
+                WorkflowDefinitionResolutionException.ResolutionReason.NoCurrentDefinition,
+                $"Workflow '{run.Id}' has an unreadable BoundWorkflowDefinitionJson: {ex.Message}");
+        }
+
+        return definition.Stages.FirstOrDefault(s => string.Equals(s.Stage, stageId, StringComparison.Ordinal))
+            ?? throw new WorkflowDefinitionResolutionException(
+                WorkflowDefinitionResolutionException.ResolutionReason.NoStageDefinition,
+                $"Workflow '{run.Id}' has no definition for stage '{stageId}' in its bound workflow snapshot");
+    }
+
+    /// <summary>
+    /// Snapshot-only stage resolver used by the Workflow grain's stage
+    /// initializer and stage-lock coordinator. Reads the bound definition
+    /// from the in-memory run first, falling back to a database load, and
+    /// never calls the live profile provider for snapshot-backed runs. A run
+    /// without a snapshot resolves its stage from the retained pre-change
+    /// aggregate definition for the affected built-in profiles; legacy
+    /// aggregate state must not be made to wait for synthesized lane state.
+    /// </summary>
+    public async Task<StageDefinition> ResolveStageFromBoundSnapshotAsync(
+        string runId,
+        string stageId,
+        WorkflowRun? inMemoryRun)
+    {
+        if (HasBoundSnapshot(inMemoryRun))
+            return ResolveBoundSnapshotStage(inMemoryRun!, stageId);
+
+        if (inMemoryRun is not null
+            && !string.IsNullOrWhiteSpace(inMemoryRun.WorkflowProfileId)
+            && string.IsNullOrWhiteSpace(inMemoryRun.BoundWorkflowDefinitionJson))
+        {
+            var legacy = RetainedLegacyAggregate.TryGetLegacyDefinition(
+                inMemoryRun.WorkflowProfileId,
+                stageId);
+            if (legacy is not null) return legacy;
+        }
+
+        return await LoadStageSpecsAsync(runId, stageId);
+    }
+
+    private async Task<WorkflowRun?> TryLoadRunAsync(string runId)
+    {
+        await using var db = await _dbFactory.CreateDbContextAsync();
+        var row = await db.WorkflowRuns.AsNoTracking()
+            .FirstOrDefaultAsync(x => x.WorkflowRunId == runId);
+        if (row is null) return null;
+        try
+        {
+            return JSON.Deserialize<WorkflowRun>(row.State);
+        }
+        catch
+        {
+            return null;
+        }
     }
 
     /// <summary>

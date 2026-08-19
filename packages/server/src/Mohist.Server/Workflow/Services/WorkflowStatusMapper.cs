@@ -125,7 +125,8 @@ public static class WorkflowStatusMapper
             run.Metadata is null ? null : new MetadataView(run.Metadata.Name, run.Metadata.Labels, run.Metadata.Annotations, run.Metadata.CreatedAt),
             MapAgentResultAttention(blocked),
             MapInterruption(interruption),
-            MapInterruptionAttention(agentInterruption));
+            MapInterruptionAttention(agentInterruption),
+            MapVerificationLanes(run));
     }
 
     /// <summary>
@@ -298,6 +299,103 @@ public static class WorkflowStatusMapper
                 transition.ExpectedRecoveryPath,
                 transition.RecordedAt);
 
+    /// <summary>
+    /// Build the verification-lane projection. Returns <c>null</c> for
+    /// runs that are not lane-enabled so legacy aggregate state remains
+    /// readable and is not asked to wait for synthesized lanes. For
+    /// lane-enabled runs the projection always contains one entry per
+    /// catalog lane (in catalog order), filling in pending placeholders
+    /// for lanes that have not yet reported.
+    /// </summary>
+    public static VerificationLanesView? MapVerificationLanes(WorkflowRun run)
+    {
+        if (!VerificationLaneGate.IsLaneEnabledRun(run)) return null;
+
+        var byLaneId = VerificationLaneGate.AuthoritativeLaneAttempts(run);
+        var configuredBudgets = BoundLaneBudgets(run);
+        var ordered = new List<VerificationLaneView>(VerificationLaneCatalog.LaneIds.Count);
+        string? firstNonPassing = null;
+        foreach (var laneId in VerificationLaneCatalog.LaneIds)
+        {
+            var order = VerificationLaneCatalog.OrderOf(laneId);
+            if (byLaneId.TryGetValue(laneId, out var attempt))
+            {
+                ordered.Add(new VerificationLaneView(
+                    laneId,
+                    attempt.Order,
+                    attempt.ConfiguredBudgetMs,
+                    attempt.Outcome.WireValue(),
+                    attempt.TaskRunId,
+                    attempt.WorkId,
+                    attempt.Detail,
+                    attempt.Error,
+                    attempt.FinishedAt));
+                if (firstNonPassing is null && attempt.Outcome != VerificationLaneOutcome.Pass)
+                    firstNonPassing = laneId;
+            }
+            else
+            {
+                // Pending placeholder preserves the lane's catalog order and
+                // configured budget from the bound definition so downstream
+                // consumers can render a complete six-lane summary even before
+                // every lane attempt materializes.
+                ordered.Add(new VerificationLaneView(
+                    laneId,
+                    order,
+                    configuredBudgets.TryGetValue(laneId, out var budget) ? budget : 0,
+                    Outcome: VerificationLaneOutcome.Pending.WireValue(),
+                    TaskRunId: string.Empty));
+                firstNonPassing ??= laneId;
+            }
+        }
+
+        return new VerificationLanesView(
+            AllPassing: firstNonPassing is null,
+            FirstNonPassingLane: firstNonPassing,
+            Lanes: ordered);
+    }
+
+    private static IReadOnlyDictionary<string, int> BoundLaneBudgets(WorkflowRun run)
+    {
+        if (string.IsNullOrWhiteSpace(run.BoundWorkflowDefinitionJson))
+            return new Dictionary<string, int>(StringComparer.Ordinal);
+
+        try
+        {
+            var definition = WorkflowYamlSerializer.FromJson(run.BoundWorkflowDefinitionJson);
+            var build = definition.Stages.FirstOrDefault(stage =>
+                string.Equals(stage.Stage, "build", StringComparison.Ordinal));
+            if (build is null) return new Dictionary<string, int>(StringComparer.Ordinal);
+
+            var budgets = new Dictionary<string, int>(StringComparer.Ordinal);
+            foreach (var task in build.Tasks)
+            {
+                if (VerificationLaneCatalog.IsKnownLane(task.Id))
+                    budgets.TryAdd(task.Id, TaskRunExtensions.TryGetConfiguredBudgetMs(task.With));
+            }
+            return budgets;
+        }
+        catch
+        {
+            return new Dictionary<string, int>(StringComparer.Ordinal);
+        }
+    }
+
+    public static TaskLaneView? MapTaskLane(TaskRun task)
+    {
+        if (task.Lane is null) return null;
+        return new TaskLaneView(
+            task.Lane.LaneId,
+            task.Lane.Order,
+            task.Lane.ConfiguredBudgetMs,
+            task.Lane.Outcome.WireValue(),
+            task.Lane.TaskRunId,
+            task.Lane.WorkId,
+            task.Lane.Detail,
+            task.Lane.Error,
+            task.Lane.FinishedAt);
+    }
+
     public static List<StageFeedbackView> MapFeedback(WorkflowRun run, string stageId)
     {
         if (run.Feedback.Count == 0) return [];
@@ -342,7 +440,8 @@ public static class WorkflowStatusMapper
                     Output: MapTaskOutput(t.Output),
                     Error: t.Error,
                     AgentResultSettlement: MapAgentResultSettlement(t),
-                    Interruption: MapInterruption(t.Interruption)))
+                    Interruption: MapInterruption(t.Interruption),
+                    Lane: MapTaskLane(t)))
                 .ToList();
 
         var stageDefinition = definition?.Stages.FirstOrDefault(d => d.Stage == stage.Id);

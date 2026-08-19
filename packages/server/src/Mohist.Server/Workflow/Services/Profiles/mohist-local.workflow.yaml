@@ -168,12 +168,134 @@ stages:
                       Keep changes focused on whitespace and patch formatting issues.
                     options: ${{ vars.agent }}
               retrySelf: true
-      - id: verify
-        title: Build & full test suite
+      - id: verify-install
+        title: Install dependencies
         uses: core/script
         with:
-          run: ${{ vars.ci.verify }}
-          timeout: 300000
+          run: npm ci
+          timeout: 900000
+        recovery:
+          budget: 2
+          handlers:
+            - tasks:
+                - id: recover:fix-ci
+                  title: Fix CI verification
+                  uses: mohist/opencode
+                  with:
+                    session: build
+                    prompt: ${{ prompts.fix-ci }}
+                    options: ${{ vars.agent }}
+                  expect:
+                    markers:
+                      - path: _output
+                        oneOf:
+                          - <promise>done</promise>
+                          - <promise>unfinished</promise>
+              retrySelf: true
+      - id: verify-dotnet
+        title: Verify .NET tests
+        uses: core/script
+        with:
+          run: |
+            export DOTNET_ROOT=/home/szf/.dotnet
+            dotnet test Mohist.sln --nologo -m:1 -p:UseSharedCompilation=false
+          timeout: 1200000
+        recovery:
+          budget: 2
+          handlers:
+            - tasks:
+                - id: recover:fix-ci
+                  title: Fix CI verification
+                  uses: mohist/opencode
+                  with:
+                    session: build
+                    prompt: ${{ prompts.fix-ci }}
+                    options: ${{ vars.agent }}
+                  expect:
+                    markers:
+                      - path: _output
+                        oneOf:
+                          - <promise>done</promise>
+                          - <promise>unfinished</promise>
+              retrySelf: true
+      - id: verify-web-typecheck
+        title: Verify web typecheck
+        uses: core/script
+        with:
+          run: npm run typecheck -w packages/web
+          timeout: 600000
+        recovery:
+          budget: 2
+          handlers:
+            - tasks:
+                - id: recover:fix-ci
+                  title: Fix CI verification
+                  uses: mohist/opencode
+                  with:
+                    session: build
+                    prompt: ${{ prompts.fix-ci }}
+                    options: ${{ vars.agent }}
+                  expect:
+                    markers:
+                      - path: _output
+                        oneOf:
+                          - <promise>done</promise>
+                          - <promise>unfinished</promise>
+              retrySelf: true
+      - id: verify-web-tests
+        title: Verify web tests
+        uses: core/script
+        with:
+          run: npm run test:run -w packages/web
+          timeout: 900000
+        recovery:
+          budget: 2
+          handlers:
+            - tasks:
+                - id: recover:fix-ci
+                  title: Fix CI verification
+                  uses: mohist/opencode
+                  with:
+                    session: build
+                    prompt: ${{ prompts.fix-ci }}
+                    options: ${{ vars.agent }}
+                  expect:
+                    markers:
+                      - path: _output
+                        oneOf:
+                          - <promise>done</promise>
+                          - <promise>unfinished</promise>
+              retrySelf: true
+      - id: verify-runner-typecheck
+        title: Verify runner typecheck
+        uses: core/script
+        with:
+          run: npm run typecheck -w packages/runner
+          timeout: 600000
+        recovery:
+          budget: 2
+          handlers:
+            - tasks:
+                - id: recover:fix-ci
+                  title: Fix CI verification
+                  uses: mohist/opencode
+                  with:
+                    session: build
+                    prompt: ${{ prompts.fix-ci }}
+                    options: ${{ vars.agent }}
+                  expect:
+                    markers:
+                      - path: _output
+                        oneOf:
+                          - <promise>done</promise>
+                          - <promise>unfinished</promise>
+              retrySelf: true
+      - id: verify-runner-tests
+        title: Verify runner tests
+        uses: core/script
+        with:
+          run: npm run test:run -w packages/runner -- --no-file-parallelism
+          timeout: 900000
         recovery:
           budget: 2
           handlers:

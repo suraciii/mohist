@@ -1,5 +1,6 @@
 using Mohist.Server.Workflow.Domain.Artifacts;
 using Mohist.Server.Workflow.Domain.Run;
+using Mohist.Server.Workflow.Services;
 
 namespace Mohist.Server.Workflow.Grains;
 
@@ -36,6 +37,15 @@ internal sealed class WorkflowWorkLifecycle
             }
         }
 
+        // Classify the report at the verification boundary BEFORE the normal
+        // task transition so the lane outcome (pass/fail/timeout) is visible
+        // to the stage gate in the same state commit that advances the stage.
+        // The final lane is usually the last build task: if the outcome were
+        // applied after CompleteTask/Advance, the gate would evaluate while
+        // that lane is still pending and a fully passed run would never
+        // advance past the build stage.
+        ApplyLaneOutcome(currentTask, report, now);
+
         if (report.Status == TaskReportStatus.Succeeded)
         {
             if (currentTask is not null)
@@ -59,7 +69,13 @@ internal sealed class WorkflowWorkLifecycle
 
             if (hasFollowUpTasks)
             {
-                var followUpEvents = run.AddRuntimeTaskAttempts(taskAttempts, now);
+                var recoverySourceTaskId = currentTask?.Lane is not null
+                    ? currentTask.Id
+                    : null;
+                var followUpEvents = run.AddRuntimeTaskAttempts(
+                    taskAttempts,
+                    now,
+                    recoverySourceTaskId);
                 events.AddRange(followUpEvents);
                 _owner.Log.LogInformation(
                     "Workflow {Id} task {TaskId} produced {Count} follow-up tasks",
@@ -78,7 +94,41 @@ internal sealed class WorkflowWorkLifecycle
             events.AddRange(run.FailTask(stageId, taskRunId, taskResult, now));
         }
 
+        // ApplyLaneOutcome already ran before the task transition; it must not
+        // run again here (the lane metadata is write-once per attempt).
+
         return events;
+    }
+
+    /// <summary>
+    /// Persists the additive verification-lane outcome for a recognized lane
+    /// attempt on the same commit as the normal task transition. A
+    /// <c>recover:fix-ci</c> helper is not a lane, so its report leaves the
+    /// lane metadata untouched (it can never promote a lane to <c>pass</c>).
+    /// The lane carries its stable identity, order, configured budget,
+    /// attempt identity (<see cref="TaskRun.Id"/> / <see cref="TaskRun.WorkId"/>),
+    /// and the failure or timeout diagnostics when applicable.
+    /// </summary>
+    private static void ApplyLaneOutcome(TaskRun? task, TaskReport report, DateTimeOffset now)
+    {
+        if (task?.Lane is null) return;
+
+        var outcome = VerificationLaneClassifier.Classify(task.DefinitionId, report);
+        if (outcome is null) return;
+
+        var detail = report.Detail ?? (report.Output.HasValue ? report.Output.Value.GetRawText() : null);
+        task.Lane = task.Lane with
+        {
+            Outcome = outcome.Value,
+            WorkId = task.WorkId ?? task.Lane.WorkId,
+            Error = outcome.Value == VerificationLaneOutcome.Pass
+                ? null
+                : report.Error ?? task.Lane.Error,
+            // Pass evidence needs no diagnostic; fail/timeout keep the exact
+            // detail text from the report or its output payload.
+            Detail = outcome.Value == VerificationLaneOutcome.Pass ? null : detail,
+            FinishedAt = now,
+        };
     }
 
     public Task<IReadOnlyList<WorkflowEvent>> ApplyCheckReportAsync(WorkflowRun run, CheckReport report)
