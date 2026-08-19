@@ -22,7 +22,6 @@ namespace Mohist.Server.SpecTests.Specs.DirectApi;
 /// delegate, validation, idempotency, or admission — so every 401/403
 /// path is terminal and leaves no side effects.
 /// </summary>
-[Collection("IntegrationMisc")]
 public sealed class DirectApiAuthPipelineSpecs(MohistIntegrationFixture fixture)
 {
     private const string CreatePatPath = "/api/auth/tokens";

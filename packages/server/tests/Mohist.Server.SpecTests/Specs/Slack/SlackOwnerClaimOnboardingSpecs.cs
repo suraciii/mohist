@@ -24,7 +24,6 @@ namespace Mohist.Server.SpecTests.Specs.Slack;
 /// first-use guide without echoing the code, and does not repeat the guide on
 /// an owner transfer.
 /// </summary>
-[Collection("MohistIntegration")]
 public sealed class SlackOwnerClaimOnboardingSpecs
 {
     private readonly Dictionary<string, string> _connectionLeases = new(StringComparer.Ordinal);

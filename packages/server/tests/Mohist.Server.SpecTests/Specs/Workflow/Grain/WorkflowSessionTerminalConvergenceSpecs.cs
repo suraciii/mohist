@@ -22,7 +22,6 @@ namespace Mohist.Server.SpecTests.Specs.Workflow.Grain;
 // session.closed drives the Workflow session read model toward its
 // terminal state. One final deterministic flush surfaces both turns
 // through Workflow-labelled session reads.
-[Collection("IntegrationWorkflow")]
 public class WorkflowSessionTerminalConvergenceSpecs
 {
     private readonly HttpClient _client;

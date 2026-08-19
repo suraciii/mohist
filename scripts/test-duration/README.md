@@ -13,8 +13,8 @@ evidence.
 
 The gate records the exact `HEAD` and requires a clean index and worktree. It
 checks source identity before and after the build and after duration execution.
-Every report, log, temporary directory, and Spec partition manifest belongs to
-the same run. Before a lane starts, the gate creates its report parent and
+Every report, log, and temporary directory belongs to the same run. Before a
+lane starts, the gate creates its report parent and
 removes the declared report target. A passing lane exits zero and writes a
 fresh, non-empty report at that path.
 
@@ -37,8 +37,7 @@ the other. Only after both succeed and source identity is revalidated does the
 gate write the matching build stamp.
 
 Duration-measurement lanes run in configured order. Bounded throughput lanes
-follow the measurement barrier. The Spec coverage check and shared report
-evaluation finish the run.
+follow the measurement barrier. Shared report evaluation finishes the run.
 
 ## Deadline And Cleanup
 
@@ -60,20 +59,16 @@ a failure, not a green omission.
 ## Scheduling And Resources
 
 The configuration declares host, .NET, and Node capacities. A lane starts only
-when its dependencies and every claimed resource are available. Partitioned
-tracks declare inner and outer concurrency, and configuration fails when their
-product exceeds track capacity.
+when its dependencies and every claimed resource are available.
 
-Each lane owns its temporary and runtime IPC directories. Server Spec
-partitions also own their database, telemetry database, logical endpoint scope,
-report, and manifest paths. Fixtures use Orleans in-memory transport and never
-probe or bind host ports. Node TypeScript checks run through `node --import tsx`
-without a shared IPC server.
+Each lane owns its temporary and runtime IPC directories, database, telemetry
+database, logical endpoint scope, and report path. Fixtures use Orleans
+in-memory transport and never probe or bind host ports. Node TypeScript checks
+run through `node --import tsx` without a shared IPC server.
 
 The duration-measurement tracks claim an exclusive measurement resource and run
-in deterministic order. Throughput lanes begin after the measurement and Spec
-coverage barriers. A focused `--track` run does not add hidden prerequisite
-tracks.
+in deterministic order. Throughput lanes begin after the measurement barrier.
+A focused `--track` run does not add hidden prerequisite tracks.
 
 ## Host-Exclusive Duration Evidence
 
@@ -100,6 +95,5 @@ global serialization are not gate recovery mechanisms.
 
 On Windows, the gate resolves npm through the current Node executable and does
 not pass a `.cmd` file directly to `CreateProcess` or enable a shell. Missing
-npm identity fails before child admission. On every platform, the Node-hosted
-Spec partition executor and compiled test reporters produce the canonical
-reports.
+npm identity fails before child admission. On every platform, compiled test
+reporters produce the canonical reports.

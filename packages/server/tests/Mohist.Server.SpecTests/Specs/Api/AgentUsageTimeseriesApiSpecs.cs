@@ -13,7 +13,6 @@ namespace Mohist.Server.SpecTests.Specs.Api;
 /// the <c>AgentUsageReporter</c> calculation matrix and lives in
 /// <c>AgentUsageTimeseriesQuerierSpecs</c>.
 /// </summary>
-[Collection("IntegrationApi")]
 public class AgentUsageTimeseriesApiSpecs
 {
     private readonly HttpClient _client;

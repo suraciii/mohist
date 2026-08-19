@@ -4,22 +4,22 @@ using Microsoft.Extensions.Logging.Abstractions;
 using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Infrastructure.Data.Events;
 using Mohist.Server.Infrastructure.Events;
-using Mohist.Server.SpecTests.Support;
 using Mohist.Server.TestSupport;
+using Mohist.Server.UnitTests.Support;
 using Xunit;
 
-namespace Mohist.Server.SpecTests.Specs.Events;
+namespace Mohist.Server.UnitTests.Events;
 
-public class EventStoreScopedAppendSpecs : IAsyncLifetime
+public class EventStoreScopedAppendTests : IAsyncLifetime
 {
     private static readonly DateTimeOffset FixedTime = new(2026, 7, 8, 0, 0, 0, TimeSpan.Zero);
 
     private readonly TestSqliteDatabase _database;
     private EventStore _store = null!;
 
-    public EventStoreScopedAppendSpecs()
+    public EventStoreScopedAppendTests()
     {
-        _database = TestSqliteDatabase.CreateMigrated();
+        _database = TestSqliteDatabase.CreateModelSchema();
         _store = new EventStore(new TestDbContextFactory(_database.Options), NullLogger<EventStore>.Instance);
     }
 

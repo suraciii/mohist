@@ -6,7 +6,6 @@ using Xunit;
 
 namespace Mohist.Server.SpecTests.Specs.Workflow;
 
-[Collection("IntegrationRunner")]
 public sealed class ProjectWorkflowProfileReadApiSpecs
 {
     private readonly HttpClient _client;

@@ -475,13 +475,12 @@ interface PlannedLane {
   readonly policyTrack?: TrackConfig
   readonly executionTrack?: TrackConfig
   readonly reportPath?: string
-  readonly partition?: number
   readonly sandboxOrdinal: number
   readonly deadlineMs: number
 }
 
 function laneResources(track: TrackConfig): string[] {
-  return ['host', track.kind === 'vitest' ? 'node' : 'dotnet']
+  return ['host', track.kind === 'vitest' ? 'node' : 'dotnet', ...(track.id === 'server-spec' ? ['server-spec'] : [])]
 }
 
 function withLaneConstraints(
@@ -558,38 +557,11 @@ export function planTracks(
 ): PlannedLane[] {
   const planned: PlannedLane[] = []
   for (const track of selected) {
-    if (track.partitions === undefined) {
-      planned.push({
-        lane: { id: track.id, resources: laneResources(track) },
-        policyTrack: track,
-        executionTrack: track,
-        reportPath: resolve(artifactRoot, track.report),
-        sandboxOrdinal: planned.length,
-        deadlineMs: track.deadlineMs,
-      })
-      continue
-    }
-
-    const partitionLaneIds: string[] = []
-    for (let partition = 0; partition < track.partitions; partition++) {
-      const id = `${track.id}-${partition}`
-      partitionLaneIds.push(id)
-      const report = track.report.replace('{partition}', String(partition))
-      planned.push({
-        lane: {
-          id,
-          resources: [...laneResources(track), 'server-spec', `spec-report-${partition}`, `spec-temp-${partition}`],
-        },
-        policyTrack: track,
-        executionTrack: { ...track, id, report },
-        reportPath: resolve(artifactRoot, report),
-        partition,
-        sandboxOrdinal: planned.length,
-        deadlineMs: track.deadlineMs,
-      })
-    }
     planned.push({
-      lane: { id: `${track.id}-coverage`, dependsOn: partitionLaneIds, resources: ['host'] },
+      lane: { id: track.id, resources: laneResources(track) },
+      policyTrack: track,
+      executionTrack: track,
+      reportPath: resolve(artifactRoot, track.report),
       sandboxOrdinal: planned.length,
       deadlineMs: track.deadlineMs,
     })
@@ -665,16 +637,6 @@ async function killTree(
   processTreeOps: ProcessTreeOps,
 ): Promise<boolean> {
   return terminateProcessTree(child, hardDeadlineAt, graceMs, processTreeOps)
-}
-
-export function specPartitionCommand(args: readonly string[]): {
-  readonly command: string
-  readonly args: readonly string[]
-} {
-  return {
-    command: process.execPath,
-    args: ['--import', 'tsx', resolve(repoRoot, 'scripts/test-duration/spec-partition.ts'), ...args],
-  }
 }
 
 function startLane(
@@ -785,9 +747,6 @@ function startLane(
       if (plan.reportPath) prepareReportTarget(plan.reportPath)
       const executionTrack = plan.executionTrack
       if (executionTrack?.executionLedger) {
-        if (executionTrack.partitions !== undefined) {
-          throw new Error('execution ledger tracks cannot be partitioned')
-        }
         if (!executionTrack.executionProvenance || !executionTrack.executionSourceRoots?.length) {
           throw new Error(`track "${executionTrack.id}" has incomplete execution ledger configuration`)
         }
@@ -839,22 +798,10 @@ function startLane(
       }
 
       if (cancellationRequested) throw new Error('lane was cancelled before test execution')
-      if (executionTrack && plan.partition !== undefined) {
-        const apphost = apphostFor(executionTrack)
-        const manifestDir = join(artifactRoot, 'manifests', 'server-spec', `partition-${plan.partition}`)
-        ;({ command, args } = specPartitionCommand([
-          'run',
-          apphost,
-          String(plan.partition),
-          String(executionTrack.partitions),
-          String(executionTrack.partitionMaxThreads),
-          manifestDir,
-          plan.reportPath!,
-        ]))
-      } else if (executionTrack) {
+      if (executionTrack) {
         ;({ command, args } = commandFor(executionTrack, artifactRoot))
       } else {
-        ;({ command, args } = specPartitionCommand(['verify', resolve(artifactRoot, 'manifests', 'server-spec')]))
+        throw new Error(`lane "${plan.lane.id}" has no execution track`)
       }
 
       const outcome = await runStage(command, args, { ...sandbox.environment, ...executionEnvironment }, evidence)
@@ -1402,12 +1349,9 @@ export async function main(
         dependsOn: plan.lane.dependsOn ?? [],
         resources: plan.lane.resources ?? [],
         reportPath: plan.reportPath,
-        partition: plan.partition,
-        partitionMaxThreads: plan.executionTrack?.partitionMaxThreads,
         sandboxOrdinal: plan.sandboxOrdinal,
         deadlineMs: plan.deadlineMs,
       })),
-      partitionExecutionCapacity: config.canonical?.partitionExecutionCapacity,
     })
   )
     return 1

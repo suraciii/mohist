@@ -29,7 +29,6 @@ namespace Mohist.Server.SpecTests.Specs.Api;
 /// isolation, cursor pagination in seq order, empty page for unknown
 /// owner) lives in <c>TaskLogStoreSpecs</c>.
 /// </summary>
-[Collection("IntegrationApi")]
 public class TaskLogRouteSpecs
 {
     private readonly MohistIntegrationFixture _fixture;

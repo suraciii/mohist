@@ -90,6 +90,7 @@ public sealed class SlackAdapterLeaseRoutesFixture : IAsyncLifetime
         var connectionString = $"Data Source=slack-leases-{Guid.NewGuid():N};Mode=Memory;Cache=Shared";
         _keeper = new SqliteConnection(connectionString);
         await _keeper.OpenAsync();
+        MigratedSqliteTemplate.CopyTo(_keeper);
 
         Factory = new SlackAdapterLeaseRoutesFactory(
             connectionString,

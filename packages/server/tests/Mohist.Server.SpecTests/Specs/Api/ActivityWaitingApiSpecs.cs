@@ -20,7 +20,6 @@ namespace Mohist.Server.SpecTests.Specs.Api;
 /// exercised without an HTTP round-trip; see
 /// <see cref="Mohist.Server.SpecTests.Specs.AgentOps.ActivityEvidenceAssemblerSpecs"/>.
 /// </summary>
-[Collection("IntegrationApi")]
 public class ActivityWaitingApiSpecs
 {
     private readonly MohistIntegrationFixture _fixture;

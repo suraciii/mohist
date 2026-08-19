@@ -7,12 +7,12 @@ using Mohist.Server.Infrastructure.Data.Sessions;
 using Mohist.Server.Infrastructure.Events;
 using Mohist.Server.Sessions.Domain;
 using Mohist.Server.Sessions.Services;
-using Mohist.Server.SpecTests.Support;
 using Mohist.Server.TestSupport;
+using Mohist.Server.UnitTests.Support;
 using Orleans;
 using Xunit;
 
-namespace Mohist.Server.SpecTests.Specs.Events;
+namespace Mohist.Server.UnitTests.Events;
 
 /// <summary>
 /// Specs for the <c>transactional-event-append</c> requirement on the
@@ -33,7 +33,7 @@ namespace Mohist.Server.SpecTests.Specs.Events;
 /// value (D6); and every emitted envelope satisfies the AgentSession
 /// producer-family rule.
 /// </summary>
-public class AgentSessionTransactionalEventAppendSpecs : IAsyncLifetime
+public class AgentSessionTransactionalEventAppendTests : IAsyncLifetime
 {
     private static readonly DateTime FixedTime = new(2026, 7, 15, 0, 0, 0, DateTimeKind.Utc);
     private readonly TestSqliteDatabase _database;
@@ -41,9 +41,9 @@ public class AgentSessionTransactionalEventAppendSpecs : IAsyncLifetime
     private readonly NullEventDispatchGrainFactory _grainFactory = new();
     private EventStore _eventStore = null!;
 
-    public AgentSessionTransactionalEventAppendSpecs()
+    public AgentSessionTransactionalEventAppendTests()
     {
-        _database = TestSqliteDatabase.CreateMigrated();
+        _database = TestSqliteDatabase.CreateModelSchema();
         _dbFactory = new TestDbContextFactory(_database.Options);
         _eventStore = new EventStore(_dbFactory, NullLogger<EventStore>.Instance);
     }

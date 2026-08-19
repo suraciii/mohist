@@ -15,7 +15,6 @@ using Xunit;
 
 namespace Mohist.Server.SpecTests.Specs.GitHub;
 
-[Collection("IntegrationRunner")]
 public sealed class GitHubIngressSpecs(MohistIntegrationFixture fixture)
 {
     private HttpClient Client => fixture.Client;

@@ -6,7 +6,8 @@ namespace Mohist.Server.Api.DirectApi;
 /// <summary>
 /// Serializes the one public observation that can exist without a live
 /// canonical anchor: a durable pre-admission rejection. Accepted outcomes
-/// always come from the persisted projection snapshots.
+/// originate from persisted projection snapshots before the idempotency
+/// mapping freezes their replay body.
 /// </summary>
 public static class DirectApiPublicObservation
 {

@@ -8,7 +8,6 @@ using Xunit;
 
 namespace Mohist.Server.SpecTests.Specs.Project.Api;
 
-[Collection("IntegrationRunner")]
 public class RepositoryUpdateProtectionSpecs
 {
     private readonly HttpClient _client;

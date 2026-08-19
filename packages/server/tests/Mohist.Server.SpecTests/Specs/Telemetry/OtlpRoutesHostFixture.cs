@@ -32,6 +32,7 @@ public sealed class OtlpRoutesHostFixture : IAsyncLifetime
         var connectionString = $"Data Source=otel-int-{Guid.NewGuid():N};Mode=Memory;Cache=Shared";
         _keeper = new SqliteConnection(connectionString);
         await _keeper.OpenAsync();
+        MigratedSqliteTemplate.CopyTo(_keeper);
 
         Factory = new OtlpRoutesWebApplicationFactory(
             connectionString,

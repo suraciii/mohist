@@ -99,6 +99,7 @@ public sealed class GitHubFeedFixture : IAsyncLifetime
     {
         _keeper = new SqliteConnection(_connectionString);
         await _keeper.OpenAsync();
+        MigratedSqliteTemplate.CopyTo(_keeper);
         Client = _factory.CreateClient();
         Client.DefaultRequestHeaders.Add("Authorization", $"Bearer {MohistIntegrationFixture.OperatorToken}");
         await _factory.EnsureSchemaAsync();

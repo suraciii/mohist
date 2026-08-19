@@ -13,7 +13,6 @@ using Xunit;
 
 namespace Mohist.Server.SpecTests.Specs.Issue.Grain;
 
-[Collection("IssueLifecycle")]
 public class IssueCompositeLifecycleGrainSpecs
 {
     private readonly MohistIntegrationFixture _fixture;

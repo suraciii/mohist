@@ -24,7 +24,6 @@ using Xunit;
 
 namespace Mohist.Server.SpecTests.Specs.Sessions;
 
-[Collection("PlatformIntegration")]
 public class AgentActivityObservabilitySpecs : AgentSessionTestSupport
 {
     public AgentActivityObservabilitySpecs(MohistIntegrationFixture fixture) : base(fixture)

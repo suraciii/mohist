@@ -6,14 +6,14 @@ using Mohist.Server.Infrastructure.Data.Epic;
 using Mohist.Server.Infrastructure.Data.Events;
 using Mohist.Server.Infrastructure.Data.Workflow;
 using Mohist.Server.Infrastructure.Events;
-using Mohist.Server.SpecTests.Support;
 using Mohist.Server.TestSupport;
+using Mohist.Server.UnitTests.Support;
 using Mohist.Server.Workflow.Domain.Artifacts;
 using Mohist.Server.Workflow.Domain.Run;
 using Orleans;
 using Xunit;
 
-namespace Mohist.Server.SpecTests.Specs.Events;
+namespace Mohist.Server.UnitTests.Events;
 
 /// <summary>
 /// Specs for the <c>transactional-event-append</c> requirement on the
@@ -28,7 +28,7 @@ namespace Mohist.Server.SpecTests.Specs.Events;
 /// <c>stage</c> from structural inspection of the union variant (D2);
 /// every emitted envelope satisfies the WorkflowRun producer-family rule.
 /// </summary>
-public class TransactionalEventAppendSpecs : IAsyncLifetime
+public class TransactionalEventAppendTests : IAsyncLifetime
 {
     private const string ProjectId = "proj_txn";
     private static readonly DateTimeOffset FixedTime = new(2026, 7, 15, 0, 0, 0, TimeSpan.Zero);
@@ -38,9 +38,9 @@ public class TransactionalEventAppendSpecs : IAsyncLifetime
     private readonly NullEventDispatchGrainFactory _grainFactory = new();
     private EventStore _eventStore = null!;
 
-    public TransactionalEventAppendSpecs()
+    public TransactionalEventAppendTests()
     {
-        _database = TestSqliteDatabase.CreateMigrated();
+        _database = TestSqliteDatabase.CreateModelSchema();
         _dbFactory = new TestDbContextFactory(_database.Options);
         _eventStore = new EventStore(_dbFactory, NullLogger<EventStore>.Instance);
     }
