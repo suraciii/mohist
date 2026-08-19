@@ -1,9 +1,11 @@
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
+using Mohist.Server.Infrastructure;
 using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Infrastructure.Data.Workflow;
 using Mohist.Server.TestSupport;
 using Mohist.Server.Workflow.Domain;
+using Mohist.Server.Workflow.Domain.Run;
 using Mohist.Workflow.Definition;
 using Mohist.Server.Workflow.Services;
 using Xunit;
@@ -123,6 +125,48 @@ public class WorkflowStageSpecs : WorkflowDefinitionResolverTestFactory
             WorkflowDefinitionResolutionException.ResolutionReason.NoStageDefinition,
             ex.Reason);
         Assert.Contains("no-such-stage", ex.Message);
+    }
+
+    [Fact]
+    public async Task LoadStageSpecsAsync_SnapshotBackedRunDoesNotHotReloadMissingStage()
+    {
+        var runId = "wr_snapshot_stage_boundary";
+        var currentProfile = SerializeDefinitionWithStages(
+            "mohist/local",
+            ("plan", new[] { new TaskDefinition("edited-plan", "Edited plan", "spec/task") }, Array.Empty<CheckDefinition>(), false),
+            ("build", new[] { new TaskDefinition("verify", "Verify", "core/script") }, Array.Empty<CheckDefinition>(), false));
+        await SeedProjectTemplateAsync("snapshot_stage_boundary", runId, "mohist/local", currentProfile);
+
+        var boundDefinition = new WorkflowDefinition(new[]
+        {
+            new StageDefinition(
+                "build",
+                new[] { new TaskDefinition("verify", "Verify", "core/script") },
+                Array.Empty<CheckDefinition>()),
+        });
+        var run = new WorkflowRun
+        {
+            Id = runId,
+            Metadata = new WorkflowRunMetadata(
+                "Snapshot stage boundary",
+                DateTimeOffset.UnixEpoch,
+                ProjectId: "snapshot_stage_boundary",
+                IssueNumber: 1),
+            Status = WorkflowRunStatus.Failed,
+            WorkflowProfileId = "mohist/local",
+            CurrentStageId = "build",
+            Stages = new List<StageRun>(),
+            BoundWorkflowDefinitionJson = WorkflowYamlSerializer.ToJson(boundDefinition),
+        };
+        await ReplaceRunStateJsonAsync(runId, JSON.Serialize(run));
+
+        var ex = await Assert.ThrowsAsync<WorkflowDefinitionResolutionException>(
+            () => DefinitionResolver.LoadStageSpecsAsync(runId, "plan"));
+
+        Assert.Equal(
+            WorkflowDefinitionResolutionException.ResolutionReason.NoStageDefinition,
+            ex.Reason);
+        Assert.Contains("bound workflow snapshot", ex.Message, StringComparison.Ordinal);
     }
 
     [Fact]

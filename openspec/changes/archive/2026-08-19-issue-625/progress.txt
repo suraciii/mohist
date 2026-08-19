@@ -1,0 +1,148 @@
+# Progress: Issue 625 plan review fixes
+
+- Reviewed the first self-review and mapped must-fix findings M-1, M-2, and M-3 to the plan artifacts.
+- M-1 fixed: T-002 now explicitly forbids adding, restoring, configuring, or referencing resource-containment mechanisms and related failure codes while preserving only the existing timeout, report, and Runner-slot behavior.
+- M-3 fixed: every lane carries the existing profile-specific `fix-ci` repair/retry declaration; Server classification uses the preserved underlying error rather than the Runner's outer scheduling status, keeps helpers outside the lane catalog, and requires a later direct same-lane success before `pass`.
+- Verification from the prior review: `jq empty openspec/changes/issue-625/tasks.json` and `git diff --check` passed. `npm run verify` could not start because `tsx` is not installed in the workspace (`sh: 1: tsx: not found`).
+- Re-review fix completed: plan artifacts now specify the concrete persisted definition boundary; `self-review.md` remains untouched. Artifact checks after the fix: `jq empty openspec/changes/issue-625/tasks.json` and `git diff --check` passed.
+- M-2 fixed in the plan: `BindWorkflowRun` now captures the complete effective definition as `BoundWorkflowStart.DefinitionJson` and persists it as the write-once `WorkflowRun.BoundWorkflowDefinitionJson`; stage initialization and lock resolution read that snapshot instead of hot-reloading the current profile. Pre-snapshot runs are explicit legacy mode and use retained pre-change aggregate definitions without synthesized lanes or rewritten attempts. The plan now requires mixed-version tests for aggregate binding before six-lane profile activation and build initialization afterward, plus the inverse six-lane binding case.
+- M-4 fixed in the plan: both built-in `verify-dotnet` lane run bodies explicitly export `DOTNET_ROOT=/home/szf/.dotnet` before the unchanged `dotnet test Mohist.sln --nologo -m:1 -p:UseSharedCompilation=false` command. Profile contract tests assert the prelude, and clean-run tests execute lanes in fresh shells and complete all six lanes for both built-in profiles; the setup is not delegated to `verify-install` or the unused aggregate variable.
+
+# Progress: T-001 implementation (final)
+
+Implemented T-001 end to end on top of the plan-review fixes above.
+
+## Codebase Patterns (established here)
+- Lane evidence is additive `TaskRun.Lane` (`VerificationLaneAttempt`): populated at task creation (`TaskRun.MakeTask`) for any DefinitionId in `VerificationLaneCatalog` — lane id, catalog order, configured budget from `with.timeout` (int ms, positive), Pending outcome, and TaskRunId. So a pending lane exists in the same commit that materializes the task.
+- Report classification happens at the verification boundary in `WorkflowWorkLifecycle.ApplyTaskReportAsync` via `VerificationLaneClassifier.Classify` (Succeeded->pass unless AddTasks present->fail; Failed with error.code=timeout->timeout; else fail) and persists on the same transition. `TaskReportStatus` stays Succeeded/Failed (no third state).
+- `ResolveStageFromBoundSnapshotAsync` (WorkflowDefinitionResolver) is the ONLY stage/lock resolution path for the grain (stage initializer + stage-lock coordinator). Snapshot parsed from in-memory run first; no snapshot + built-in profile -> `RetainedLegacyAggregate` (single verify task build stage); other missing cases fall back to `LoadStageSpecsAsync` (which itself checks the DB snapshot first). It is async (no sync-over-async).
+- Ordered dispatch: `WorkflowRun.NextWork` filters the candidate pending task through `VerificationLaneGate.IsClaimableLaneTask` — for lane-enabled runs only the first non-passing lane is exposed; later lanes are blocked while predecessors are non-pass; legacy runs unaffected.
+- Stage gate: `WorkflowRun.Stage.TryRequestApproval` now takes the run and refuses to mark the build stage Completed unless `VerificationLaneGate.CanAdvanceBuildStage(run)` (all six lanes durable pass). Non-lane runs always advance as before.
+- `WorkflowStatusMapper.MapVerificationLanes` projects all six lanes (pending placeholders for missing) with pass/fail/timeout wire values + diagnostics; null for legacy runs.
+- Binding: coordinator serializes the entire effective `WorkflowDefinition` with `WorkflowYamlSerializer.ToJson` into `BoundWorkflowStart.DefinitionJson`; participant persists write-once `WorkflowRun.BoundWorkflowDefinitionJson`; idempotency compares the snapshot string.
+
+## Gotchas
+- MTP runner ignores VSTest `--filter`; use `dotnet test` without filter (full suite) or the MTP-native filter syntax.
+- Comment-reference arch rule scans comments for `issue-\d+`: NEVER write `issue-625` in production comments — reword to "pre-change"/"legacy" or add a baseline entry. (WorkflowDefinitionResolver.cs hit this once.)
+- `RetainedLegacyAggregate` is intentionally the minimal pre-change build definition (single aggregate `verify` task, 300000ms, fix-ci recovery) — unit tests pin that shape; non-build stages of predefined legacy runs resolve via the live cascade (unchanged by this task).
+- `verification-lanes` catalog lives in Services but TaskRun (Domain.Run) calls it — same assembly, allowed; no arch-rule hit.
+- Round-trip test `ReloadedRun_JsonRoundTrip...` proved `JSON.Serialize/Deserialize<WorkflowRun>` preserves `BoundWorkflowDefinitionJson` + Lane metadata; use `VerificationLaneCatalog.LaneIds[i]` (0-based) for FirstNonPassingLane assertions.
+
+## Verification
+- dotnet build Mohist.sln -p:SkipWebBuild=true: 0 warnings/errors (TreatWarningsAsErrors on).
+- UnitTests 2824 passed, SpecTests 3881 passed, ArchTests 68 passed, Workflow.Definition.Tests 178 passed.
+
+# Progress: T-002 implementation
+
+## Codebase Patterns (Runner lane timeout + journal)
+- Runner `scriptAction` (packages/runner/src/actions/built-in-core.ts) reads `with.timeout` via `numberInput` and passes it to `runCommand` as `timeoutMs`; `runCommand` arms a layer timeout signal that kills the whole process group (`process.kill(-pid, SIGTERM)` then SIGKILL after 5s grace) and resolves `{ exitCode, stdout, stderr, status: 'timeout', timeoutMs }` — never rejects (not runner loss).
+- T-002 hardened `scriptAction`: the `status === 'timeout'` check now comes BEFORE the `exitCode !== 0` check so a shell that traps SIGTERM and exits 0 still maps to `error.code='timeout'` (a timeout can never masquerade as a pass). Message keeps `scriptFailureMessage` shape (exit code + stdout/stderr tails up to 10k each) so the Server lane projection gets command outcome + diagnostics. The `timeout` error code is a RESERVED_PLATFORM_ERROR_CODE in actions/manifest.ts — you MUST NOT declare it in a manifest `errors` array (`define-action.ts` rejects reserved codes as business errors) — it passes through `normalizeActionResult` unremapped.
+- Runner unit tests stub runCommand via the `commandRunner` test resource (options param carries `{ timeoutMs }`) — the cleanest seam to assert timeout propagation without spawning a process. Process-group kill tests use FakeProcessSpawner + `processKiller` resource and record `[pid, signal]` pairs (negative pid = group kill).
+- WorkResultJournal fence semantics tested with lane-shaped DispatchWorkItem (`workflowRunId` + `workId` like `verify-install.1`): after restart `begin()` on a completed entry returns `'completed'` (awaiting-ack owns reporting), `beginRecovery()` returns `'completed'` too; only `acknowledge()` retires the fence so the same work identity can run again. `workKey` = `ownerKind:ownerId:workId` is the lane fence identity.
+- Host-level report retry (`AwaitingAck_RetriesReportUntilAcked`), restart redelivery without re-execution (`Restart_RedrivesDurablyCompletedResultWithoutExecutingTheWorkAgain`), and pending-journal-not-reported-until-durable tests already existed and were re-verified unchanged.
+
+## Verification (T-002)
+- `npm run typecheck` + `npm run typecheck:tests` + `npm run check:test-boundaries` in packages/runner: all pass.
+- Focused suites (built-in-core action, src/system/process, tests/process-timeout, work-result-journal, runner-host-reporting, runner-host-recovery): 41 tests pass.
+- Full runner default suite: 155 files / 1685 tests pass; `git diff --check` clean.
+
+# Progress: T-004 implementation
+
+## Codebase Patterns
+- Recovery scheduling is already fenced by the original task report tuple. Server recovery now carries that same source `TaskRun.Id` into every repair/retry task via `CausedByFailedTaskId`; insertion treats an existing child for the source identity as an idempotent replay and does not create another chain.
+- A lane retry inherits the source lane's `WithInput`, `ExpectInput`, artifacts, variables, recovery declaration, catalog order, and configured budget. `recover:fix-ci` remains a normal non-lane task because lane metadata is created only for catalog IDs.
+- Authoritative lane projection uses the latest lane attempt identity. While that attempt is pending, a prior fail/timeout outcome and diagnostics are overlaid; a later direct pass replaces the overlay. This keeps the build gate closed and exposes the new retry identity without discarding the original evidence.
+- Runner recovery envelopes with outer `status=completed` and `addTasks` classify as fail, or timeout when the preserved error has `code=timeout`; only a direct successful lane report classifies as pass. Failure-context translation now also exposes error-only lane diagnostics to recovery children.
+
+## Verification (T-004)
+- Server project build: 0 warnings/errors.
+- Server unit suite: 2,833 passed.
+- Workflow lane binding/recovery specs: 12 passed, including both built-in profiles; workflow retry specs: 26 passed; failure specs: 2 passed.
+- Added coverage for recovery scheduling classification, helper exclusion, source-identity idempotence, preserved timeout diagnostics during a pending retry, stale old reports, ordered lane recovery, and one-time downstream completion.
+- Full SpecTests initially exposed the lane gate being applied to approved non-build stages; narrowed the gate to `stage.Id == build`, restoring the existing approval workflow contract. The focused approval API class then passed 41 tests.
+- Final full SpecTests run passed all 3,885 tests. Solution build passed with 0 warnings/errors; ArchTests passed 68 and Workflow Definition tests passed 178.
+
+# Progress: Verification recovery
+
+- Reproduced the recorded prerequisite failure: the earlier `npm run verify` could not start because `tsx` was unavailable. The current workspace has the declared dependency installed, so the gate proceeded past that point.
+- The first current canonical run failed at `npm run format:check` because the T-002/T-003 Runner changes were not Biome-formatted. `npm run format` changed only `packages/runner/src/actions/built-in-core.ts` and `packages/runner/tests/workflow-profile.spec.ts`; no verification-only artifacts became Git-visible.
+- Focused verification now passes: Runner typecheck, test typecheck, test-boundary validation, format check, and the action/profile/journal suites (3 files, 58 tests).
+- A canonical rerun before committing correctly stopped at its clean-worktree guard. The formatting correction is intended task work and must be committed before the full canonical gate can execute.
+- The clean canonical run then reached the duration gate but found two pre-existing OpenTelemetry registration specs just over the enforced 5-second per-spec cap (5.0037s and 5.0033s), despite both passing. Focused apphost reproduction confirmed each waited on the unresolved `collector.test` OTLP exporter during provider disposal.
+- Updated those two tests to use the existing in-memory OTLP handler through `ConfigureTelemetry` while preserving exporter protocol/endpoint assertions. The affected project builds with 0 warnings/errors; the two methods now take about 49ms and 5ms, and the full registration class passes 8/8 in 213ms.
+- A subsequent canonical attempt was interrupted by concurrent/stale processes from other workspaces: the server-spec lane reached the suite cutoff without a report. After those processes ended, the same one-partition lane passed all 3,885 tests in 145.171s.
+- Final clean `npm run verify` passed: all 9 duration tracks passed with 0 failing, 0 cancelled, and 0 timed out; server-spec passed 3,885/3,885 with p95 183.1ms. The final Runner/Web/Slack, Server, definition, unit, architecture, and integration checks also passed.
+
+# Progress: T-001 boundary audit fixes
+
+- Snapshot-backed `LoadStageSpecsAsync` and grain stage/lock resolution now fail from the persisted `BoundWorkflowDefinitionJson` when a requested stage is absent or the snapshot is unreadable; they cannot fall through to the current profile provider. Added a mixed-state spec with an edited current profile to pin this boundary.
+- Verification classification now gives `error.code=timeout` precedence over the outer task report status, including malformed successful timeout envelopes, while `TaskReportStatus` remains unchanged.
+- Missing lane status placeholders derive their configured budget from the bound build definition, and artifact-enriched task status views retain additive lane metadata.
+- Verification after these fixes: all 2,835 Server unit tests, all 3,886 Server specification tests, and `dotnet build Mohist.sln --no-restore -p:SkipWebBuild=true` passed with zero build warnings/errors.
+
+# Progress: T-002 final audit
+
+- Re-audited the existing Runner implementation against the recovery specification: positive lane timeouts propagate to `runCommand`, timeout process-group termination returns a structured `timeout` result, and terminal results are journaled before report delivery.
+- Runner production and test typechecks, test-boundary validation, all six focused suites (48 tests), and the full Runner suite (164 files, 1,819 tests) pass. `git diff --check` is clean.
+- The T-002 implementation and tests are already committed in `64a170890`; this audit required only the progress record update.
+
+# Progress: T-003 profile contract verification
+
+- Both built-in build profiles contain the six ordered `core/script` lanes with literal budgets: `verify-install` (900000), `verify-dotnet` (1200000), `verify-web-typecheck` (600000), `verify-web-tests` (900000), `verify-runner-typecheck` (600000), and `verify-runner-tests` (900000).
+- The exact required commands and the `export DOTNET_ROOT=/home/szf/.dotnet` prelude are present in both profile definitions. The aggregate `vars.ci.verify` gate and its 300000 ms verification timeout are absent; unrelated health timeouts and the retained legacy compatibility definition remain intentional.
+- Each lane preserves its profile-specific unconditional `recover:fix-ci` declaration with budget 2 and `retrySelf: true`; local retains the existing `_output` done/unfinished expectation, while GitHub PR retains its existing agent-action declaration without that expectation.
+- Verification passed: Runner workflow-profile contract tests 41/41; Runner production/test typechecks and test-boundary checks; all 2,960 Server unit tests; all 3,829 Server specification tests, including both built-in clean-run cases; and `git diff --check`.
+
+# Progress: T-004 recovery hardening
+
+- A direct successful lane report now requires both no recovery follow-ups and no error; a successful envelope carrying an ordinary error cannot promote a lane to pass.
+- Recovery follow-up insertion admits at most one recognized retry for the failed source lane and ignores any other recognized catalog lane in the same envelope. Helpers remain unrestricted non-lane tasks, and source-definition metadata remains authoritative for the admitted retry.
+- Verification after hardening: Server build passed with 0 warnings/errors; Server UnitTests passed 2,961/2,961; Server SpecTests passed 3,829/3,829; and `git diff --check` passed. The Microsoft Testing Platform ignored the requested filter and ran each complete suite.
+- Final canonical `npm run verify` passed all 9 tracks with 0 failing, cancelled, or timed out: Runner 1,819/1,819 plus 11 integration tests, Server Unit 2,961/2,961, Server Spec 3,829/3,829, Server Arch 69/69, and all CLI/Web/Slack/workflow-definition tracks green.
+
+# Progress: Verification rerun
+
+- Reproduced the canonical `npm run verify` gate after the recorded fixes: all 9 tracks passed with 0 failing, cancelled, or timed out. Focused Runner typechecks, test-boundary validation, format validation, and the action/profile/journal suites passed 61/61 tests. Verification artifacts remained outside the repository and `git status` stayed clean before this progress entry.
+
+# Progress: Failed verification diagnosis
+
+- The stored failed gate was `/tmp/mohist-canonical-gate-205.682704-3494843-MsxCft` from source revision `a4eb1520b85dd83aa1ee56f7fb0205513207fd7f`, not the current issue-625 revision. `server-spec-0` used the older single-partition/two-thread plan, exceeded its 240-second lane deadline without producing a report, and fail-fast cancelled the other eight tracks; its available test summary contained no failed tests. This was an external stale-process/resource contention timeout, not an issue-625 implementation or assertion defect.
+- Re-ran `npm run verify` on the current clean HEAD `78fa4617c`: all 9 tracks passed with zero failures, cancellations, timeouts, or over-budget tests. Server Spec used four partitions and completed in 81-88 seconds per partition; expected OTLP port-binding warnings did not affect results. The focused Runner typecheck, test-boundary, and six issue-625 suites passed 87/87 tests.
+
+# Progress: T-001 completion audit
+
+- The selected T-001 implementation is present in the committed tree: the six-lane catalog, immutable definition snapshot and legacy resolver, additive lane attempt metadata, boundary classification, status projection, ordered dispatch, and build gate are all wired and tested.
+- Verification on the current HEAD: Server build passed with 0 warnings/errors; all 2,961 Server UnitTests passed; all 12 `VerificationLaneBindingSpecs` passed through the direct Server Spec apphost; and the focused Workflow Definition tests passed 26/26. The repository's `dotnet test --filter` path emits MTP0001 because Microsoft Testing Platform ignores VSTest filters, so the affected Spec class was run with its supported `-class` argument.
+- No source correction was required during the audit. `git diff --check` passed and the worktree remained clean apart from this progress entry.
+
+# Progress: T-002 completion verification
+
+- The committed Runner implementation satisfies the lane-scoped timeout and durable-result requirements: `core/script` forwards its positive finite timeout, `runCommand` returns structured timeout results after process-group termination, and `WorkResultJournal` holds exact terminal results until durable report acknowledgement without duplicate execution for the workflow work identity.
+- Runner production typecheck, test typecheck, and test-boundary validation passed. The focused action, process, host-reporting, host-recovery, and journal suites passed 54/54 tests; the full Runner suite passed 1,820/1,820 tests across 164 files.
+- No source correction was needed for this verification pass. `git diff --check` passed; the pre-existing baseline test mentioning a resource profile was not changed or extended.
+
+# Progress: T-003 completion verification
+
+- The committed built-in profiles define the six ordered `core/script` lanes with exact commands, per-lane positive finite budgets, the in-shell `DOTNET_ROOT` export for `verify-dotnet`, and the unchanged profile-specific unconditional `recover:fix-ci` declarations. The aggregate `verify` task, `${{ vars.ci.verify }}` gate reference, and aggregate verification timeout are absent; unrelated health-task budgets remain outside the verification lane gate.
+- The rollout contract remains snapshot-authoritative: binding persists the complete effective definition before profile activation, later stage and lock resolution use that snapshot, and pre-snapshot built-in runs use the retained aggregate definition without synthesized lane state or historical task rewrites.
+- Final verification passed: Runner workflow-profile contract tests 41/41; Runner production and test typechecks, test-boundary validation, and format check; Server UnitTests 2,961/2,961; Workflow Definition tests 178/178; ArchTests 69/69; Server SpecTests 3,829/3,829, including both built-in clean-run and recovery cases; and `git diff --check`.
+
+# Progress: T-004 ordered recovery boundary hardening
+
+- Recovery retries now rebuild the recognized lane from the persisted source `TaskRun` definition. Runner follow-up metadata cannot change the lane's title, action, command/options, or recovery declaration; the source lane still supplies the stable lane order and configured budget.
+- `NextWork` and `CurrentPendingWork` treat the first non-passing lane as an ordered barrier. They no longer fall through to stage checks or advertise later work while a lane recovery is pending, failed, or timed out.
+- Verification after the hardening: Server UnitTests passed 2,962/2,962; the Server project build passed with zero compiler warnings/errors when run separately; `VerificationLaneBindingSpecs` passed all 12 cases; `WorkflowRetrySpecs` passed all 26 cases; the full Server SpecTests apphost passed 3,829/3,829 with no errors or skips; and `git diff --check` passed. A parallel build/test invocation produced one transient MSBuild file-lock retry only.
+
+# Progress: Verification repair
+
+- The stored failed gate was diagnosed before editing: the old single-partition `server-spec-0` run timed out without failed tests, and a current reproduction showed partition 1 could stall only when concurrent partitions shared the apphost working directory. An unrelated one-hour-old SpecTests process in this workspace had also been left running with a deleted executable; terminating it removed that verification side effect.
+- The root cause of the repeatable current failure was shared Microsoft Testing Platform default output: `spec-partition.ts` launched every partition from the repository root, so concurrent apphosts contended on `TestResults/Mohist.Server.SpecTests_net11.0_x64.log`. Individual partitions passed, while the concurrent partition-1/partition-3 pair reproduced the stall. The attempted `--results-directory` option was rejected by this apphost and was removed.
+- Commit `7acf50256` fixes the boundary by running each partition's class discovery, test discovery, and execution from `dirname(reportPath)`, which is already unique per partition. This isolates the default TestResults output without changing test selection, thresholds, or assertions.
+- Focused validation passed: the partition test (4/4), all script architecture tests (157/157), script typecheck, format check, and a concurrent partition-1/partition-3 reproduction (959 + 956 tests, zero failures).
+- Final clean `npm run verify` passed all 9 tracks with 0 failing, 0 cancelled, 0 timed out, 3,829/3,829 Server Spec tests, and 0 over-budget tests. Verification artifacts stayed outside the repository.
+
+# Progress: Review M-1 disposition
+
+- Commit `b3f1810a5` closes the ordered-dispatch bypass: in a lane-enabled `build` stage, downstream tasks are claimable only after every catalog lane has a durable pass. Missing and failed lane results with a pending `push` now return no work, and pending checks cannot bypass the same gate.
+- Pre-build stages remain dispatchable, and recovery helpers linked to a failed lane remain claimable; commit `c3965070d` scopes the gate to `build` after the first full SpecTests run exposed the pre-build regression.
+- Added regressions for missing/non-passing lanes with a pending downstream task and for earlier-stage dispatch. Verification: solution build passed with 0 warnings/errors; Server UnitTests passed 2,965/2,965; Server SpecTests passed 3,829/3,829; `git diff --check` passed.

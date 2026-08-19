@@ -61,6 +61,19 @@ public sealed class TaskRun
     public string? CausedByFailedTaskId { get; init; }
     public JsonElement? Output { get; set; }
     public ExecutionError? Error { get; set; }
+
+    /// <summary>
+    /// Additive verification metadata populated only for tasks whose
+    /// <see cref="DefinitionId"/> matches a built-in lane id from
+    /// <c>VerificationLaneCatalog</c>. The presence of this value
+    /// identifies a recognized lane attempt and stores its identity, order,
+    /// configured budget, terminal outcome, and the underlying attempt/task
+    /// identity so a later <c>TaskReport</c> classification can be
+    /// persisted in the same state transition as the normal task result.
+    /// Recovery helpers (<c>recover:fix-ci</c>) and arbitrary user tasks
+    /// leave this null and never participate in the lane gate.
+    /// </summary>
+    public VerificationLaneAttempt? Lane { get; set; }
 }
 
 public static class TaskRunExtensions
@@ -294,9 +307,10 @@ public static class TaskRunExtensions
                               .Max() + 1;
             var requiredFiles = ExtractRequiredFiles(input.Expect);
             var classification = DeriveClassification(input.Uses, requiredFiles);
-            return new TaskRun
+            var id = TaskRunId(input.Id, stageAttempt, attempt, occupiedTaskRuns);
+            var task = new TaskRun
             {
-                Id = TaskRunId(input.Id, stageAttempt, attempt, occupiedTaskRuns),
+                Id = id,
                 DefinitionId = input.Id,
                 Attempt = attempt,
                 Title = input.Title ?? input.Id,
@@ -313,6 +327,48 @@ public static class TaskRunExtensions
                 CausedByFeedbackId = causedByFeedbackId,
                 CausedByFailedTaskId = causedByFailedTaskId
             };
+
+            // Recognize the task at creation time so a lane attempt exists in
+            // the same state transition that materializes the task. A pending
+            // lane is then visible to the status projection and the gate
+            // before any report arrives, and a retry for the same lane gets a
+            // new attempt identity with the same lane id, order, and budget.
+            if (VerificationLaneCatalog.IsKnownLane(input.Id))
+            {
+                task.Lane = new VerificationLaneAttempt(
+                    LaneId: input.Id,
+                    Order: VerificationLaneCatalog.OrderOf(input.Id),
+                    ConfiguredBudgetMs: TryGetConfiguredBudgetMs(input.With),
+                    Outcome: VerificationLaneOutcome.Pending,
+                    TaskRunId: id);
+            }
+
+            return task;
+        }
+
+        /// <summary>
+        /// Reads the lane's configured execution budget from the task's
+        /// <c>with.timeout</c> value, in milliseconds. A literal positive
+        /// finite number is the only valid budget; anything else (missing,
+        /// non-numeric, zero, or negative) is treated as <c>0</c> so the lane
+        /// projection never fabricates a budget the profile did not declare.
+        /// </summary>
+        internal static int TryGetConfiguredBudgetMs(Dictionary<string, JsonElement?>? with)
+        {
+            if (with is null
+                || !with.TryGetValue("timeout", out var timeout)
+                || !timeout.HasValue)
+            {
+                return 0;
+            }
+
+            var parsed = timeout.Value.ValueKind switch
+            {
+                JsonValueKind.Number when timeout.Value.TryGetInt32(out var ms) => ms,
+                JsonValueKind.String when int.TryParse(timeout.Value.GetString(), out var ms) => ms,
+                _ => 0,
+            };
+            return parsed > 0 ? parsed : 0;
         }
 
         private static string TaskRunId(

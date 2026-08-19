@@ -578,7 +578,14 @@ public sealed class WorkflowItemTranslator : IScopedService
         foreach (var stage in run.Stages)
         {
             var task = stage.Tasks.FirstOrDefault(t => t.Id == taskId || t.WorkId == taskId);
-            if (task is not null && task.Output.HasValue) return task;
+            if (task is not null
+                && (task.Output.HasValue
+                    || task.Error is not null
+                    || task.Status == TaskRunStatus.Failed
+                    || task.Lane?.Outcome is VerificationLaneOutcome.Fail or VerificationLaneOutcome.Timeout))
+            {
+                return task;
+            }
         }
         return null;
     }

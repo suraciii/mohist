@@ -185,6 +185,45 @@ describe('WorkResultJournal', () => {
     })
   })
 
+  it('FencesACompletedLaneResultUnderItsWorkflowWorkIdentityAfterRestart', async () => {
+    await withTestRunnerResources(async () => {
+      const laneWork: DispatchWorkItem = {
+        workflowRunId: 'workflow-lane-run',
+        workId: 'verify-install.1',
+        taskRunId: 'verify-install.1',
+        workType: 'task',
+        ownerKind: 'workflow',
+        uses: 'core/script',
+        with: { run: 'npm ci', timeout: 600000 },
+        variables: { workspace: { path: '/workspace' } },
+      }
+      const laneResult: WorkItemResult = {
+        status: 'failed',
+        error: { code: 'timeout', message: 'Script failed with exit code 143: npm ci' },
+        exitCode: 143,
+      }
+
+      const journal = new WorkResultJournal('/runner')
+      await journal.load()
+      expect(await journal.begin(laneWork)).toBe('new')
+      await journal.complete(laneWork, laneResult)
+
+      // A restarted runner holds the durable completed fence under the same
+      // workflow work identity: re-delivery must never re-execute the lane.
+      const restarted = new WorkResultJournal('/runner')
+      await restarted.load()
+      expect(await restarted.begin(laneWork)).toBe('completed')
+      expect(restarted.started()).toEqual([])
+      expect(restarted.completed()).toEqual([{ work: laneWork, state: 'completed', result: laneResult }])
+
+      // The awaited-ack machinery reports the exact retained result and only
+      // an acknowledgement retires the fence.
+      await restarted.acknowledge(laneWork)
+      expect(restarted.completed()).toEqual([])
+      expect(await restarted.begin(laneWork)).toBe('new')
+    })
+  })
+
   it('KeepsACompletedEntryUnarmedForARecoveryDispatch', async () => {
     await withTestRunnerResources(async () => {
       const journal = new WorkResultJournal('/runner')

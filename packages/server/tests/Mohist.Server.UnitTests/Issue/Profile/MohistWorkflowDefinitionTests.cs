@@ -27,9 +27,23 @@ public class MohistWorkflowDefinitionTests
         Assert.Equal("load-tasks", loadTask.Id);
         Assert.Equal("mohist/openspec-tasks", loadTask.Uses);
         Assert.Contains("tasks.json", JsonSerializer.Serialize(loadTask.With));
-        var verify = build.Tasks.Single(t => t.Id == "verify");
-        Assert.Equal("core/script", verify.Uses);
-        Assert.False(verify.With!.ContainsKey("resourceProfile"));
+
+        // Verification is six ordered core/script lanes, not the removed
+        // aggregate verify task; every lane keeps its own positive budget.
+        Assert.Equal(
+            new[] { "workspace-prepare", "load-tasks", "build-health" }.Concat(VerificationLaneCatalog.LaneIds),
+            build.Tasks.Select(t => t.Id).ToArray());
+        foreach (var lane in VerificationLaneCatalog.LaneIds)
+        {
+            var laneTask = build.Tasks.Single(t => t.Id == lane);
+            Assert.Equal("core/script", laneTask.Uses);
+            Assert.True(laneTask.With!.TryGetValue("timeout", out var timeout));
+            Assert.True(timeout.HasValue && timeout.Value.ValueKind == JsonValueKind.Number && timeout.Value.GetInt32() > 0);
+            Assert.False(laneTask.With.ContainsKey("resourceProfile"));
+        }
+        Assert.DoesNotContain(build.Tasks, t => t.Id == "verify");
+        Assert.DoesNotContain(JsonSerializer.Serialize(build.Tasks), "vars.ci.verify");
+        Assert.DoesNotContain(JsonSerializer.Serialize(build.Tasks), "300000");
 
         var archiveChange = definition.Stages[3].Tasks.Single(t => t.Id == "integrate:archive-change");
         var rebase = definition.Stages[3].Tasks.Single(t => t.Id == "integrate:rebase");
@@ -427,4 +441,97 @@ public class MohistWorkflowDefinitionTests
         Assert.Equal("${{ vars.agent }}", task.With["options"]?.GetString());
     }
 
+    [Fact]
+    public void DefaultWorkflowDefinition_BuildStage_LanesCarryExactCommandsAndRuntimePrelude()
+    {
+        var build = WorkflowProfileCatalog.Definition.Stages.Single(s => s.Stage == "build");
+
+        Assert.Equal(VerificationLaneCatalog.LaneIds, build.Tasks.Where(t => VerificationLaneCatalog.IsKnownLane(t.Id)).Select(t => t.Id).ToArray());
+        Assert.Equal("npm ci", ReadString(build, VerificationLaneCatalog.VerifyInstall));
+
+        // The .NET lane run body has only the required runtime prelude before
+        // the unchanged dotnet command; the export is setup in the same lane
+        // shell because every core/script task runs in a fresh shell. The
+        // literal block scalar retains a trailing newline that the runner
+        // shell ignores.
+        Assert.Equal(
+            "export DOTNET_ROOT=/home/szf/.dotnet\ndotnet test Mohist.sln --nologo -m:1 -p:UseSharedCompilation=false",
+            ReadString(build, VerificationLaneCatalog.VerifyDotnet)?.TrimEnd('\n'));
+
+        Assert.Equal("npm run typecheck -w packages/web", ReadString(build, VerificationLaneCatalog.VerifyWebTypecheck));
+        Assert.Equal("npm run test:run -w packages/web", ReadString(build, VerificationLaneCatalog.VerifyWebTests));
+        Assert.Equal("npm run typecheck -w packages/runner", ReadString(build, VerificationLaneCatalog.VerifyRunnerTypecheck));
+        Assert.Equal("npm run test:run -w packages/runner -- --no-file-parallelism", ReadString(build, VerificationLaneCatalog.VerifyRunnerTests));
+    }
+
+    [Fact]
+    public void DefaultWorkflowDefinition_EveryBuildLaneCarriesTheSameFixCiRecovery()
+    {
+        var build = WorkflowProfileCatalog.Definition.Stages.Single(s => s.Stage == "build");
+
+        foreach (var lane in VerificationLaneCatalog.LaneIds)
+        {
+            var laneTask = build.Tasks.Single(t => t.Id == lane);
+            AssertFixCiRecovery(laneTask);
+        }
+    }
+
+    [Fact]
+    public void DefaultWorkflowDefinition_GithubPrBuildLaneRecoveryUsesAgentActionWithoutExpect()
+    {
+        var build = WorkflowProfileCatalog.GithubPrWorkflowDefinition.Stages.Single(s => s.Stage == "build");
+
+        foreach (var lane in VerificationLaneCatalog.LaneIds)
+        {
+            var laneTask = build.Tasks.Single(t => t.Id == lane);
+            var recovery = laneTask.Recovery;
+            Assert.NotNull(recovery);
+            Assert.Equal(2, recovery!.Budget);
+            var handler = Assert.Single(recovery.Handlers);
+            Assert.Null(handler.When);
+            Assert.True(handler.RetrySelf);
+            var fixCi = Assert.Single(handler.Tasks);
+            Assert.Equal("recover:fix-ci", fixCi.Id);
+            Assert.Equal("mohist/opencode", fixCi.Uses);
+            Assert.Equal("${{ prompts.fix-ci }}", fixCi.With!["prompt"]!.Value.GetString());
+            Assert.Equal("${{ vars.agent }}", fixCi.With!["options"]!.Value.GetString());
+            Assert.Equal("build", fixCi.With!["session"]!.Value.GetString());
+            Assert.Null(fixCi.Expect);
+        }
+    }
+
+    private static string? ReadString(StageDefinition stage, string taskId)
+    {
+        var task = stage.Tasks.Single(t => t.Id == taskId);
+        return task.With!.TryGetValue("run", out var run) && run.HasValue
+            ? (run.Value.ValueKind == JsonValueKind.String ? run.Value.GetString() : run.Value.GetRawText())
+            : null;
+    }
+
+    private static void AssertFixCiRecovery(Mohist.Workflow.Definition.TaskDefinition lane)
+    {
+        var recovery = lane.Recovery;
+        Assert.NotNull(recovery);
+        Assert.Equal(2, recovery!.Budget);
+        var handler = Assert.Single(recovery.Handlers);
+        Assert.Null(handler.When);
+        Assert.True(handler.RetrySelf);
+        var fixCi = Assert.Single(handler.Tasks);
+        Assert.Equal("recover:fix-ci", fixCi.Id);
+        Assert.Equal("Fix CI verification", fixCi.Title);
+        Assert.Equal("mohist/opencode", fixCi.Uses);
+        Assert.Equal("${{ prompts.fix-ci }}", fixCi.With!["prompt"]!.Value.GetString());
+        Assert.Equal("${{ vars.agent }}", fixCi.With!["options"]!.Value.GetString());
+        Assert.Equal("build", fixCi.With!["session"]!.Value.GetString());
+
+        // The local profile's recovery declaration keeps the existing
+        // expected-output markers (done/unfinished) on the fix-ci helper.
+        var expectElement = JsonSerializer.SerializeToElement(fixCi.Expect);
+        Assert.True(expectElement.TryGetProperty("markers", out var markers));
+        var marker = Assert.Single(markers.EnumerateArray());
+        Assert.Equal("_output", marker.GetProperty("path").GetString());
+        var oneOf = marker.GetProperty("oneOf").EnumerateArray().Select(v => v.GetString()).ToList();
+        Assert.Contains("<promise>done</promise>", oneOf);
+        Assert.Contains("<promise>unfinished</promise>", oneOf);
+    }
 }
