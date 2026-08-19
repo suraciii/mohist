@@ -55,6 +55,7 @@ public sealed class ProjectVariableStoreSpecs : IAsyncLifetime
                 agent = new
                 {
                     model = "gpt-5",
+                    reasoningEffort = "max",
                     variant = "high",
                     runtime = "opencode",
                     type = "legacy",
@@ -68,6 +69,7 @@ public sealed class ProjectVariableStoreSpecs : IAsyncLifetime
                     agent = new
                     {
                         model = "claude-sonnet-4",
+                        reasoningEffort = "high",
                         variant = "low",
                         runtime = "opencode",
                         type = "legacy",
@@ -78,10 +80,10 @@ public sealed class ProjectVariableStoreSpecs : IAsyncLifetime
         var written = await _store.SetVariablesAsync("proj-sanitize", bundle);
         var persisted = await _store.GetVariablesAsync("proj-sanitize");
 
-        AssertAgent(written.Vars, "gpt-5", "high");
-        AssertStageAgent(written, "plan", "claude-sonnet-4", "low");
-        AssertAgent(persisted.Vars, "gpt-5", "high");
-        AssertStageAgent(persisted, "plan", "claude-sonnet-4", "low");
+        AssertAgent(written.Vars, "gpt-5", "high", "max");
+        AssertStageAgent(written, "plan", "claude-sonnet-4", "low", "high");
+        AssertAgent(persisted.Vars, "gpt-5", "high", "max");
+        AssertStageAgent(persisted, "plan", "claude-sonnet-4", "low", "high");
     }
 
     [Fact]
@@ -100,7 +102,7 @@ public sealed class ProjectVariableStoreSpecs : IAsyncLifetime
         await _store.SetVariablesAsync("proj-patch", initial);
 
         var patch = new VariableBundle(
-            JsonSerializer.SerializeToElement(new { agent = new { variant = "high" } }),
+            JsonSerializer.SerializeToElement(new { agent = new { variant = "high", reasoningEffort = "max" } }),
             new Dictionary<string, StageVariables>(StringComparer.OrdinalIgnoreCase)
             {
                 ["build"] = new(JsonSerializer.SerializeToElement(new { added = 2 })),
@@ -108,7 +110,7 @@ public sealed class ProjectVariableStoreSpecs : IAsyncLifetime
 
         var merged = await _store.PatchVariablesAsync("proj-patch", patch);
 
-        AssertAgent(merged.Vars, "gpt-5", "high");
+        AssertAgent(merged.Vars, "gpt-5", "high", "max");
         Assert.True(merged.Vars!.Value.GetProperty("settings").GetProperty("keep").GetBoolean());
         Assert.Equal(1, merged.Stages!["plan"].Vars!.Value.GetProperty("existing").GetInt32());
         Assert.Equal(2, merged.Stages["build"].Vars!.Value.GetProperty("added").GetInt32());
@@ -133,18 +135,25 @@ public sealed class ProjectVariableStoreSpecs : IAsyncLifetime
         Assert.Same(VariableBundle.Empty, await _store.GetVariablesAsync(projectId));
     }
 
-    private static void AssertStageAgent(VariableBundle bundle, string stage, string model, string variant)
+    private static void AssertStageAgent(
+        VariableBundle bundle,
+        string stage,
+        string model,
+        string variant,
+        string? reasoningEffort = null)
     {
         Assert.NotNull(bundle.Stages);
-        AssertAgent(bundle.Stages[stage].Vars, model, variant);
+        AssertAgent(bundle.Stages[stage].Vars, model, variant, reasoningEffort);
     }
 
-    private static void AssertAgent(JsonElement? vars, string model, string variant)
+    private static void AssertAgent(JsonElement? vars, string model, string variant, string? reasoningEffort = null)
     {
         Assert.True(vars.HasValue);
         var agent = vars.Value.GetProperty("agent");
-        Assert.Equal(2, agent.EnumerateObject().Count());
+        Assert.Equal(reasoningEffort is null ? 2 : 3, agent.EnumerateObject().Count());
         Assert.Equal(model, agent.GetProperty("model").GetString());
         Assert.Equal(variant, agent.GetProperty("variant").GetString());
+        if (reasoningEffort is not null)
+            Assert.Equal(reasoningEffort, agent.GetProperty("reasoningEffort").GetString());
     }
 }
