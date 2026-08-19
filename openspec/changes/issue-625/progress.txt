@@ -140,3 +140,9 @@ Implemented T-001 end to end on top of the plan-review fixes above.
 - Commit `7acf50256` fixes the boundary by running each partition's class discovery, test discovery, and execution from `dirname(reportPath)`, which is already unique per partition. This isolates the default TestResults output without changing test selection, thresholds, or assertions.
 - Focused validation passed: the partition test (4/4), all script architecture tests (157/157), script typecheck, format check, and a concurrent partition-1/partition-3 reproduction (959 + 956 tests, zero failures).
 - Final clean `npm run verify` passed all 9 tracks with 0 failing, 0 cancelled, 0 timed out, 3,829/3,829 Server Spec tests, and 0 over-budget tests. Verification artifacts stayed outside the repository.
+
+# Progress: Review M-1 disposition
+
+- Commit `b3f1810a5` closes the ordered-dispatch bypass: in a lane-enabled `build` stage, downstream tasks are claimable only after every catalog lane has a durable pass. Missing and failed lane results with a pending `push` now return no work, and pending checks cannot bypass the same gate.
+- Pre-build stages remain dispatchable, and recovery helpers linked to a failed lane remain claimable; commit `c3965070d` scopes the gate to `build` after the first full SpecTests run exposed the pre-build regression.
+- Added regressions for missing/non-passing lanes with a pending downstream task and for earlier-stage dispatch. Verification: solution build passed with 0 warnings/errors; Server UnitTests passed 2,965/2,965; Server SpecTests passed 3,829/3,829; `git diff --check` passed.
