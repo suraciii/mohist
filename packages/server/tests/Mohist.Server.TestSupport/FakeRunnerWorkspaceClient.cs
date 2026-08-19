@@ -1,6 +1,7 @@
 using Mohist.Server.Infrastructure.Workspace;
 using Mohist.Server.Runner.Grains;
 using Mohist.Server.Runner.Services.SignalR;
+using Mohist.Server.Contracts;
 using Mohist.Server.Workflow.Domain.Run;
 
 namespace Mohist.Server.TestSupport;

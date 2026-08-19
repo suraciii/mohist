@@ -164,8 +164,6 @@ public static class AgentSessionStopRoutes
 
 public sealed record SessionStopRequest(string? TurnId);
 
-public sealed record RunnerStopReply(string? State, bool? InterruptUnconfirmed = null);
-
 public sealed record SessionTreeStopResponse(
     string OperationId,
     string RootSessionId,

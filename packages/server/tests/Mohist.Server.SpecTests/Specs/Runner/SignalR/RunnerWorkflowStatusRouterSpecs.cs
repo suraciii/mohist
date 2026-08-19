@@ -6,6 +6,7 @@ using Microsoft.Extensions.Time.Testing;
 using Mohist.Server.Events.Grains;
 using Mohist.Server.Infrastructure.Events;
 using Mohist.Server.Runner.Services.SignalR;
+using Mohist.Server.Contracts;
 using Mohist.Server.Runner.Grains;
 using Mohist.Server.Workflow.Domain.Run;
 using Mohist.Server.Workflow.Grains;

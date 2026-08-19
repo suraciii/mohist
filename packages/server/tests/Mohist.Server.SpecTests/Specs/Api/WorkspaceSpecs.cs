@@ -2,6 +2,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Mohist.Server.Events.Grains;
 using Mohist.Server.Infrastructure.Workspace;
 using Mohist.Server.Runner.Services.SignalR;
+using Mohist.Server.Contracts;
 using Mohist.Server.SpecTests.Support;
 using Mohist.Server.TestSupport;
 using Mohist.Server.Workflow.Services;
@@ -376,6 +377,6 @@ public class WorkspaceSpecs
     private sealed record CleanupResourceDto(string Type, string Status, string? Path, string? Reason);
     private sealed record WorkspaceRemovalResultDto(bool Removed, string Status, string? Path, string? Reason, string Message)
     {
-        public Mohist.Server.Runner.Services.SignalR.WorkspaceRemovalResult ToDomain() => new(Removed, Status, Path, Reason, Message);
+        public WorkspaceRemovalResult ToDomain() => new(Removed, Status, Path, Reason, Message);
     }
 }

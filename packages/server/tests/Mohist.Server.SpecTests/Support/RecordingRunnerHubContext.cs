@@ -1,6 +1,7 @@
 using System.Collections.Concurrent;
 using Microsoft.AspNetCore.SignalR;
 using Mohist.Server.Runner.Services.SignalR;
+using Mohist.Server.Contracts;
 using Mohist.Server.Sessions.Services;
 
 namespace Mohist.Server.SpecTests.Support;

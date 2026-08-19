@@ -92,6 +92,13 @@ export interface AgentExecutionDefinition {
    */
   reasoningEffort?: string | null
   skills: readonly string[]
+  allowedSubagents?:
+    | readonly {
+        agentId: string
+        nameAtLaunch: string
+        descriptionAtLaunch: string
+      }[]
+    | null
 }
 
 export interface AgentSessionStartup {

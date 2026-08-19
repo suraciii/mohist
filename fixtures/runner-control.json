@@ -1,0 +1,391 @@
+{
+  "requests": [
+    {
+      "method": "workspace.diff",
+      "request": {
+        "jsonrpc": "2.0",
+        "id": "rpc_workspace_diff",
+        "method": "workspace.diff",
+        "params": {
+          "query": {
+            "workflowRunId": "run_101",
+            "projectId": "project_1",
+            "issueNumber": 657,
+            "repositoryName": "mohist",
+            "gitUrl": "https://example.test/mohist.git",
+            "workspacePath": "/work/run_101",
+            "branch": "mohist/run-run_101",
+            "baseBranch": "main"
+          }
+        }
+      },
+      "success": {
+        "jsonrpc": "2.0",
+        "id": "rpc_workspace_diff",
+        "result": {
+          "base": "main",
+          "head": "mohist/run-run_101",
+          "mergeBase": "abc123",
+          "ahead": 1,
+          "behind": 0,
+          "commitCount": 1,
+          "totalAdditions": 3,
+          "totalDeletions": 1,
+          "files": [
+            {
+              "file": "src/control.ts",
+              "additions": 3,
+              "deletions": 1,
+              "diff": "@@ -1 +1 @@",
+              "isBinary": false
+            }
+          ]
+        }
+      },
+      "nullableSuccess": {
+        "jsonrpc": "2.0",
+        "id": "rpc_workspace_diff",
+        "result": null
+      },
+      "error": {
+        "jsonrpc": "2.0",
+        "id": null,
+        "error": { "code": -32700, "message": "Parse error" }
+      }
+    },
+    {
+      "method": "workspace.commits",
+      "request": {
+        "jsonrpc": "2.0",
+        "id": "rpc_workspace_commits",
+        "method": "workspace.commits",
+        "params": {
+          "query": {
+            "workflowRunId": "run_101",
+            "projectId": "project_1",
+            "issueNumber": 657,
+            "repositoryName": "mohist",
+            "gitUrl": "https://example.test/mohist.git",
+            "workspacePath": "/work/run_101",
+            "branch": "mohist/run-run_101",
+            "baseBranch": "main"
+          }
+        }
+      },
+      "success": {
+        "jsonrpc": "2.0",
+        "id": "rpc_workspace_commits",
+        "result": {
+          "base": "main",
+          "head": "mohist/run-run_101",
+          "mergeBase": "abc123",
+          "ahead": 1,
+          "behind": 0,
+          "filesChanged": 1,
+          "totalAdditions": 3,
+          "totalDeletions": 1,
+          "commits": [
+            {
+              "hash": "def4567890",
+              "shortHash": "def4567",
+              "message": "Add control contracts",
+              "author": "Mohist",
+              "date": "2026-08-19 10:00:00 +0000",
+              "files": ["src/control.ts"]
+            }
+          ]
+        }
+      },
+      "nullableSuccess": {
+        "jsonrpc": "2.0",
+        "id": "rpc_workspace_commits",
+        "result": null
+      },
+      "error": {
+        "jsonrpc": "2.0",
+        "id": null,
+        "error": { "code": -32600, "message": "Invalid Request" }
+      }
+    },
+    {
+      "method": "workspace.commit-diff",
+      "request": {
+        "jsonrpc": "2.0",
+        "id": "rpc_workspace_commit_diff",
+        "method": "workspace.commit-diff",
+        "params": {
+          "query": {
+            "workflowRunId": "run_101",
+            "projectId": "project_1",
+            "issueNumber": 657,
+            "repositoryName": "mohist",
+            "gitUrl": "https://example.test/mohist.git",
+            "workspacePath": "/work/run_101",
+            "branch": "mohist/run-run_101",
+            "baseBranch": "main"
+          },
+          "hash": "def4567890"
+        }
+      },
+      "success": {
+        "jsonrpc": "2.0",
+        "id": "rpc_workspace_commit_diff",
+        "result": { "diff": "@@ -1 +1 @@\n-old\n+new\n" }
+      },
+      "nullableSuccess": {
+        "jsonrpc": "2.0",
+        "id": "rpc_workspace_commit_diff",
+        "result": null
+      },
+      "error": {
+        "jsonrpc": "2.0",
+        "id": "rpc_workspace_commit_diff",
+        "error": { "code": -32601, "message": "Method not found" }
+      }
+    },
+    {
+      "method": "workspace.status",
+      "request": {
+        "jsonrpc": "2.0",
+        "id": "rpc_workspace_status",
+        "method": "workspace.status",
+        "params": {
+          "query": {
+            "workflowRunId": "run_101",
+            "projectId": "project_1",
+            "issueNumber": 657,
+            "repositoryName": "mohist",
+            "gitUrl": "https://example.test/mohist.git",
+            "workspacePath": "/work/run_101",
+            "branch": "mohist/run-run_101",
+            "baseBranch": "main"
+          }
+        }
+      },
+      "success": {
+        "jsonrpc": "2.0",
+        "id": "rpc_workspace_status",
+        "result": {
+          "exists": true,
+          "branch": "mohist/run-run_101",
+          "baseBranch": "main",
+          "ahead": 1,
+          "behind": 0,
+          "rebaseInProgress": false,
+          "conflictingFiles": []
+        }
+      },
+      "error": {
+        "jsonrpc": "2.0",
+        "id": "rpc_workspace_status",
+        "error": { "code": -32602, "message": "Invalid params" }
+      }
+    },
+    {
+      "method": "workspace.file-content",
+      "request": {
+        "jsonrpc": "2.0",
+        "id": "rpc_workspace_file_content",
+        "method": "workspace.file-content",
+        "params": {
+          "query": {
+            "workflowRunId": "run_101",
+            "projectId": "project_1",
+            "issueNumber": 657,
+            "repositoryName": "mohist",
+            "gitUrl": "https://example.test/mohist.git",
+            "workspacePath": "/work/run_101",
+            "branch": "mohist/run-run_101",
+            "baseBranch": "main"
+          },
+          "path": "src/control.ts"
+        }
+      },
+      "success": {
+        "jsonrpc": "2.0",
+        "id": "rpc_workspace_file_content",
+        "result": { "base": "old\n", "head": "new\n" }
+      },
+      "error": {
+        "jsonrpc": "2.0",
+        "id": "rpc_workspace_file_content",
+        "error": { "code": -32603, "message": "Internal error" }
+      }
+    },
+    {
+      "method": "workspace.remove",
+      "request": {
+        "jsonrpc": "2.0",
+        "id": "rpc_workspace_remove",
+        "method": "workspace.remove",
+        "params": {
+          "query": {
+            "workflowRunId": "run_101",
+            "projectId": "project_1",
+            "issueNumber": 657,
+            "repositoryName": "mohist",
+            "gitUrl": "https://example.test/mohist.git",
+            "workspacePath": "/work/run_101",
+            "branch": "mohist/run-run_101",
+            "baseBranch": "main"
+          }
+        }
+      },
+      "success": {
+        "jsonrpc": "2.0",
+        "id": "rpc_workspace_remove",
+        "result": {
+          "removed": true,
+          "status": "removed",
+          "path": "/work/run_101",
+          "reason": null,
+          "message": "Workspace removed"
+        }
+      },
+      "error": {
+        "jsonrpc": "2.0",
+        "id": "rpc_workspace_remove",
+        "error": { "code": -32001, "message": "Response too large" }
+      }
+    },
+    {
+      "method": "session.followup",
+      "request": {
+        "jsonrpc": "2.0",
+        "id": "rpc_session_followup",
+        "method": "session.followup",
+        "params": {
+          "target": {
+            "kind": "generic",
+            "projectId": "project_1",
+            "binding": {
+              "runtime": "opencode",
+              "runtimeSessionId": "runtime_session_1",
+              "runnerId": "runner_1",
+              "workDir": "/work/run_101"
+            },
+            "sessionId": "session_1",
+            "definition": {
+              "instructions": "Implement the requested change.",
+              "runtime": "opencode",
+              "model": "gpt-5",
+              "skills": ["software-design"],
+              "reasoningEffort": "high"
+            }
+          },
+          "text": "Continue with the contract tests.",
+          "operationId": "operation_followup_1",
+          "inputId": "input_1",
+          "turnId": "turn_followup_1",
+          "slackExecutionContext": {
+            "version": 1,
+            "replyAnchor": {
+              "workspaceId": "T1",
+              "conversationId": "C1",
+              "threadRootMessageId": "100.1",
+              "triggeringMessageId": "100.2",
+              "initiatingMemberId": "U1",
+              "connectionId": "slack_connection_1",
+              "sessionId": "session_1",
+              "dispatchRef": "dispatch_1"
+            },
+            "collaborationSkill": {
+              "name": "mohist-slack-collaboration",
+              "version": "1.0.0",
+              "instructions": "Reply precisely.",
+              "contentHash": "899e496f24a2c6db0f6904d488a65189598776a8b4d421675e1ce2a9f604204d"
+            }
+          },
+          "attachments": [
+            { "id": "attachment_1", "name": "trace.txt", "contentType": "text/plain", "size": 42 }
+          ]
+        }
+      },
+      "success": {
+        "jsonrpc": "2.0",
+        "id": "rpc_session_followup",
+        "result": { "accepted": true }
+      },
+      "error": {
+        "jsonrpc": "2.0",
+        "id": "rpc_session_followup",
+        "error": { "code": -32602, "message": "Invalid params" }
+      }
+    },
+    {
+      "method": "session.stop",
+      "request": {
+        "jsonrpc": "2.0",
+        "id": "rpc_session_stop",
+        "method": "session.stop",
+        "params": {
+          "target": {
+            "kind": "workflow",
+            "projectId": "project_1",
+            "binding": {
+              "runtime": "opencode",
+              "runtimeSessionId": "runtime_session_1",
+              "runnerId": "runner_1",
+              "workDir": "/work/run_101"
+            },
+            "workflowRunId": "run_101",
+            "sessionName": "implementation",
+            "sessionId": "session_1"
+          },
+          "sessionId": "session_1",
+          "turnId": "turn_stop_1",
+          "operationId": "operation_stop_1"
+        }
+      },
+      "success": {
+        "jsonrpc": "2.0",
+        "id": "rpc_session_stop",
+        "result": { "state": "stopped", "interruptUnconfirmed": false }
+      },
+      "error": {
+        "jsonrpc": "2.0",
+        "id": "rpc_session_stop",
+        "error": { "code": -32602, "message": "Invalid params" }
+      }
+    },
+    {
+      "method": "session.command",
+      "request": {
+        "jsonrpc": "2.0",
+        "id": "rpc_session_command",
+        "method": "session.command",
+        "params": {
+          "sessionId": "session_1",
+          "runtime": "opencode",
+          "runtimeSessionId": "runtime_session_1",
+          "runnerId": "runner_1",
+          "workDir": "/work/run_101",
+          "command": "reset",
+          "expectedRuntimeSessionId": "runtime_session_1",
+          "operationId": "operation_command_1",
+          "projectId": "project_1"
+        }
+      },
+      "success": {
+        "jsonrpc": "2.0",
+        "id": "rpc_session_command",
+        "result": { "ok": true, "runtimeSessionId": "runtime_session_2" }
+      },
+      "error": {
+        "jsonrpc": "2.0",
+        "id": "rpc_session_command",
+        "error": { "code": -32603, "message": "Internal error" }
+      }
+    }
+  ],
+  "notifications": [
+    {
+      "method": "workflow.status-changed",
+      "notification": {
+        "jsonrpc": "2.0",
+        "method": "workflow.status-changed",
+        "params": { "workflowRunId": "run_101", "status": "Completed" }
+      }
+    }
+  ]
+}

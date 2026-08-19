@@ -1,5 +1,6 @@
 using Microsoft.AspNetCore.SignalR;
 using Mohist.Server.Infrastructure.Workspace;
+using Mohist.Server.Contracts;
 using Mohist.Server.Runner.Grains;
 using Mohist.Server.Workflow.Domain.Run;
 using Mohist.Server.Workflow.Grains;
@@ -141,45 +142,3 @@ public sealed class RunnerWorkspaceClient : IRunnerWorkspaceClient
             BaseBranch: repository.BaseBranch);
     }
 }
-
-public sealed record RunnerWorkspaceQuery(
-    string? WorkflowRunId,
-    string? ProjectId,
-    int? IssueNumber,
-    string? RepositoryName,
-    string? GitUrl,
-    string? WorkspacePath,
-    string? Branch,
-    string? BaseBranch);
-
-public sealed record RunnerWorkspaceDiffResult(
-    string Base,
-    string Head,
-    string MergeBase,
-    int Ahead,
-    int Behind,
-    int CommitCount,
-    int TotalAdditions,
-    int TotalDeletions,
-    IReadOnlyList<DiffFile> Files);
-
-public sealed record RunnerWorkspaceCommitsResult(
-    string Base,
-    string Head,
-    string MergeBase,
-    int Ahead,
-    int Behind,
-    int FilesChanged,
-    int TotalAdditions,
-    int TotalDeletions,
-    IReadOnlyList<GitCommit> Commits);
-
-public sealed record RunnerWorkspaceCommitDiffResult(string Diff);
-
-public sealed record RunnerWorkspaceFileContentResult(string? Base, string? Head, string? Reason = null);
-
-public sealed record DiffFile(string File, int Additions, int Deletions, string Diff, bool IsBinary);
-
-public sealed record GitCommit(string Hash, string ShortHash, string Message, string Author, string Date, string[] Files);
-
-public sealed record WorkspaceRemovalResult(bool Removed, string Status, string? Path, string? Reason, string Message);

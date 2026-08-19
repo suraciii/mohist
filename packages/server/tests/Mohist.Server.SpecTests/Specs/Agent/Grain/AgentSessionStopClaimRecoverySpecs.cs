@@ -1,5 +1,6 @@
 using Mohist.Server.Infrastructure;
 using Mohist.Server.Api;
+using Mohist.Server.Contracts;
 using Mohist.Server.Agent.Grains;
 using Mohist.Server.Sessions.Domain;
 using Mohist.Server.Sessions.Grains;

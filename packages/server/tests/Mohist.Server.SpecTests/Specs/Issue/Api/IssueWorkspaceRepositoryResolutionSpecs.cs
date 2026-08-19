@@ -10,6 +10,7 @@ using Mohist.Server.Issue.Grains;
 using Mohist.Server.Project.Grains;
 using Mohist.Server.Runner.Grains;
 using Mohist.Server.Runner.Services.SignalR;
+using Mohist.Server.Contracts;
 using Mohist.Server.SpecTests.Support;
 using Mohist.Server.TestSupport;
 using Mohist.Server.Workflow.Grains;
@@ -50,7 +51,7 @@ public class IssueWorkspaceRepositoryResolutionSpecs : IAsyncLifetime
         };
         _fixture.RunnerWorkspace.Diff = new RunnerWorkspaceDiffResult(
             "release", "mohist/run-test", "merge-base", 1, 0, 1, 1, 1,
-            [new Mohist.Server.Runner.Services.SignalR.DiffFile("a.txt", 1, 0, "@@ -1 +1 @@\n-x\n+y\n", false)]);
+            [new DiffFile("a.txt", 1, 0, "@@ -1 +1 @@\n-x\n+y\n", false)]);
 
         var projectId = await CreateProjectWithSecondaryRepositoryAsync("/proj/secondary-old", "develop");
         var issue = await CreateIssueAsync(projectId, "Repo path drifts", "secondary");

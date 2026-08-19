@@ -18,4 +18,8 @@
     <ProjectReference Include="..\Mohist.Server.TestSupport\Mohist.Server.TestSupport.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <EmbeddedResource Include="..\..\..\..\fixtures\runner-control.json" LogicalName="Mohist.RunnerControlFixtures.json" />
+  </ItemGroup>
+
 </Project>
