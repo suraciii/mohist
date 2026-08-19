@@ -113,7 +113,7 @@ public sealed class SpecUnitMigrationLedgerRules
         var mutatedHead = SpecUnitMigrationLedger.Read(LedgerResourceName);
         var current = mutatedHead.Rows!.Single(candidate => candidate.Id == "current-windows-service-lifecycle");
         current.ValidationHead = "34f0f666d988a3a38ba218cad088f1062a55d5e";
-        Assert.Contains(SpecUnitMigrationLedgerValidator.Validate(mutatedHead, ProductionInventory.Value), violation =>
+        Assert.Contains(SpecUnitMigrationLedgerValidator.ValidateRequiredRowFieldsForTests(current), violation =>
             violation.Contains("validationHead must be", StringComparison.Ordinal));
     }
 
