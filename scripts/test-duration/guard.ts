@@ -578,6 +578,9 @@ export function planTracks(
       planned.push({
         lane: {
           id,
+          // Stable weighted assignment puts process-global host cases in the
+          // first two partitions; running them together can deadlock teardown.
+          ...(partition === 1 ? { dependsOn: [`${track.id}-0`] } : {}),
           resources: [...laneResources(track), 'server-spec', `spec-report-${partition}`, `spec-temp-${partition}`],
         },
         policyTrack: track,

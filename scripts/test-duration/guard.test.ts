@@ -654,6 +654,7 @@ test('planTracks gives every Server Spec partition its own report, temp, and end
     ],
   )
   assert.deepEqual(planned[1].lane.resources?.slice(-2), ['spec-report-1', 'spec-temp-1'])
+  assert.deepEqual(planned[1].lane.dependsOn, ['server-spec-0'])
   assert.equal(planned[0].executionTrack?.partitionMaxThreads, 1)
   assert.deepEqual(planned[4].lane.dependsOn, ['server-spec-0', 'server-spec-1', 'server-spec-2', 'server-spec-3'])
   assert.deepEqual(
