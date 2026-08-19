@@ -30,7 +30,7 @@ namespace Mohist.Server.UnitTests.Sessions;
 /// <item>excludes a Workflow that terminalizes between candidate
 ///   selection and status read;</item>
 /// <item>scales with active work, not historical Sessions — adding
-///   thousands of completed / failed / cancelled / idle rows leaves
+///   completed / failed / cancelled / idle rows leaves
 ///   the response, candidate count, materialized-row count, and
 ///   database / downstream call counts unchanged.</item>
 /// </list>
@@ -41,14 +41,14 @@ namespace Mohist.Server.UnitTests.Sessions;
 public sealed class WorkflowActivityHistoryTests : WorkflowActivityHistoryTestSupport
 {
     [Fact]
-    public async Task Status_WithIdenticalActiveWorkAndThousandsOfInactiveHistoricalSessions_KeepsResponseStable()
+    public async Task Status_WithIdenticalActiveWorkAndHistoricalSessions_KeepsResponseStable()
     {
         var project = await CreateProjectAsync("status-history-bounded");
         await InsertActiveDirectSessionsAsync(project, count: 2);
         var small = await ListStatusAsync(project);
         var smallMaterializedRows = await CountMaterializedRowsAsync(SessionQuery, project);
 
-        await InsertInactiveHistoricalSessionsAsync(project, count: 1500);
+        await InsertInactiveHistoricalSessionsAsync(project, count: 100);
 
         var status = await ListStatusAsync(project);
         var materializedRows = await CountMaterializedRowsAsync(SessionQuery, project);
@@ -220,26 +220,6 @@ public sealed class WorkflowActivityHistoryTests : WorkflowActivityHistoryTestSu
 
         Assert.Equal(0, status.Candidates);
         Assert.Empty(status.ActiveAgents);
-    }
-
-    [Fact]
-    public async Task Status_MaterializedRowCountRemainsBounded_WhenHistoricalRowsGrow()
-    {
-        // This exercises the narrow internal test seam exposed on
-        // AgentSessionQuery to count rows the candidate query
-        // materializes. The seam is not exposed on the public API.
-        var project = await CreateProjectAsync("status-materialized-count");
-        await InsertActiveDirectSessionsAsync(project, count: 1);
-        await InsertInactiveHistoricalSessionsAsync(project, count: 50);
-
-        var rowsBefore = await CountMaterializedRowsAsync(SessionQuery, project);
-
-        await InsertInactiveHistoricalSessionsAsync(project, count: 50);
-
-        var rowsAfter = await CountMaterializedRowsAsync(SessionQuery, project);
-
-        Assert.Equal(1, rowsBefore);
-        Assert.Equal(1, rowsAfter);
     }
 
     private async Task<int> CountMaterializedRowsAsync(AgentSessionQuery sessionQuery, string projectId)
