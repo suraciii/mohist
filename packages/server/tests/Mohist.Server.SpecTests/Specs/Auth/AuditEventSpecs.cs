@@ -20,8 +20,8 @@ namespace Mohist.Server.SpecTests.Specs.Auth;
 /// are all queryable through <c>GET /api/audit/events</c> — with
 /// subject, time and target, and never a token plaintext value.
 /// </summary>
+[Collection("IsolatedIntegration")]
 public sealed class AuditEventSpecs(IsolatedMohistIntegrationFixture fixture)
-    : IClassFixture<IsolatedMohistIntegrationFixture>
 {
     private const string AuditPath = "/api/audit/events";
 

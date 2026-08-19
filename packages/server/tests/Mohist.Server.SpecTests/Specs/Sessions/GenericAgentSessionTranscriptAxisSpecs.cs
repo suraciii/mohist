@@ -16,8 +16,8 @@ using Xunit;
 
 namespace Mohist.Server.SpecTests.Specs.Sessions;
 
-public class GenericAgentSessionTranscriptAxisSpecs
-    : GenericAgentSessionTranscriptAxisTestSupport, IClassFixture<IsolatedMohistIntegrationFixture>
+[Collection("IsolatedIntegration")]
+public class GenericAgentSessionTranscriptAxisSpecs : GenericAgentSessionTranscriptAxisTestSupport
 {
     public GenericAgentSessionTranscriptAxisSpecs(IsolatedMohistIntegrationFixture fixture) : base(fixture)
     {

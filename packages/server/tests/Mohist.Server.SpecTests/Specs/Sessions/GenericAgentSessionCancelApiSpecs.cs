@@ -15,7 +15,8 @@ using Xunit;
 
 namespace Mohist.Server.SpecTests.Specs.Sessions;
 
-public class GenericAgentSessionCancelApiSpecs : GenericAgentSessionCancelApiTestSupport, IClassFixture<IsolatedMohistIntegrationFixture>
+[Collection("IsolatedIntegration")]
+public class GenericAgentSessionCancelApiSpecs : GenericAgentSessionCancelApiTestSupport
 {
     public GenericAgentSessionCancelApiSpecs(IsolatedMohistIntegrationFixture fixture) : base(fixture)
     {

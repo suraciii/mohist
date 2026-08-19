@@ -17,8 +17,8 @@ namespace Mohist.Server.SpecTests.Specs.Agent.Api;
 /// model Readiness resolved, resolution happens once at launch, and without
 /// a default the existing Needs-setup gating is unchanged.
 /// </summary>
-public sealed class AgentSessionLaunchDefaultExecutionConfigSpecs
-    : AgentSessionLaunchRoutesTestSupport, IClassFixture<IsolatedMohistIntegrationFixture>
+[Collection("IsolatedIntegration")]
+public sealed class AgentSessionLaunchDefaultExecutionConfigSpecs : AgentSessionLaunchRoutesTestSupport
 {
     public AgentSessionLaunchDefaultExecutionConfigSpecs(IsolatedMohistIntegrationFixture fixture) : base(fixture)
     {

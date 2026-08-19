@@ -32,6 +32,12 @@ public class PublicProjectionIntegrationCollection
 [CollectionDefinition("RunnerMutationIntegration")]
 public class RunnerMutationIntegrationCollection : ICollectionFixture<MohistIntegrationFixture>;
 
+// Specs whose contract depends on process- or cluster-wide state share one
+// dedicated host. The collection is serial; ordinary project-scoped specs
+// continue to run in parallel on the assembly fixture.
+[CollectionDefinition("IsolatedIntegration")]
+public class IsolatedIntegrationCollection : ICollectionFixture<IsolatedMohistIntegrationFixture>;
+
 [CollectionDefinition("RepositoryDataUpgrade")]
 public class RepositoryDataUpgradeCollection
     : ICollectionFixture<Specs.Issue.Api.RepositoryDataUpgradeFixture>;

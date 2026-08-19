@@ -50,7 +50,8 @@ namespace Mohist.Server.SpecTests.Specs.Agent.Services;
 ///   </item>
 /// </list>
 /// </summary>
-public class AgentLauncherSpecs : IClassFixture<IsolatedMohistIntegrationFixture>
+[Collection("IsolatedIntegration")]
+public class AgentLauncherSpecs
 {
     private readonly MohistIntegrationFixture _fixture;
 

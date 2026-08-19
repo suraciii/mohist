@@ -21,7 +21,8 @@ using Xunit;
 
 namespace Mohist.Server.SpecTests.Specs.Workflow.Grain;
 
-public class WorkflowRerunFromStageApiSpecs : IClassFixture<IsolatedMohistIntegrationFixture>
+[Collection("IsolatedIntegration")]
+public class WorkflowRerunFromStageApiSpecs : IAsyncLifetime
 {
     private static readonly JsonSerializerOptions ReadJsonOptions = new()
     {
@@ -34,6 +35,7 @@ public class WorkflowRerunFromStageApiSpecs : IClassFixture<IsolatedMohistIntegr
     private readonly IGrainFactory _grains;
     private readonly IServiceProvider _services;
     private readonly string _connectionString;
+    private readonly List<string> _runnerIds = [];
 
     public WorkflowRerunFromStageApiSpecs(IsolatedMohistIntegrationFixture fixture)
     {
@@ -42,6 +44,14 @@ public class WorkflowRerunFromStageApiSpecs : IClassFixture<IsolatedMohistIntegr
         _grains = fixture.Grains;
         _services = fixture.Services;
         _connectionString = fixture.ConnectionString;
+    }
+
+    public ValueTask InitializeAsync() => ValueTask.CompletedTask;
+
+    public async ValueTask DisposeAsync()
+    {
+        foreach (var runnerId in _runnerIds)
+            await _grains.GetGrain<IRunnerGrain>(runnerId).UnregisterAsync();
     }
 
     [Fact]
@@ -307,6 +317,7 @@ public class WorkflowRerunFromStageApiSpecs : IClassFixture<IsolatedMohistIntegr
         var runnerId = $"rerun-stage-runner-{Guid.NewGuid():N}";
         var runner = _grains.GetGrain<IRunnerGrain>(runnerId);
         await runner.RegisterAsync(new RunnerInfo(runnerId, ["spec/*"], "test-host", projectId));
+        _runnerIds.Add(runnerId);
         return runnerId;
     }
 

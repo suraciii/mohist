@@ -10,7 +10,8 @@ using Xunit;
 
 namespace Mohist.Server.SpecTests.Specs.Agent.Api;
 
-public class AgentSessionLaunchIdempotencySpecs : AgentSessionLaunchRoutesTestSupport, IClassFixture<IsolatedMohistIntegrationFixture>
+[Collection("IsolatedIntegration")]
+public class AgentSessionLaunchIdempotencySpecs : AgentSessionLaunchRoutesTestSupport
 {
     public AgentSessionLaunchIdempotencySpecs(IsolatedMohistIntegrationFixture fixture) : base(fixture)
     {

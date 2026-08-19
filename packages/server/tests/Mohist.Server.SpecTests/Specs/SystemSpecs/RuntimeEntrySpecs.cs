@@ -22,7 +22,8 @@ using Xunit;
 
 namespace Mohist.Server.SpecTests.Specs.SystemSpecs;
 
-public class RuntimeEntrySpecs : IClassFixture<IsolatedMohistIntegrationFixture>
+[Collection("IsolatedIntegration")]
+public class RuntimeEntrySpecs
 {
     private readonly MohistIntegrationFixture _fixture;
 

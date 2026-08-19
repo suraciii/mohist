@@ -135,12 +135,11 @@ serially.
   default collection.
 - Product-global state such as clocks, runner discovery, instrumentation, or
   hosted dispatchers is not project-isolated. A full-stack class that mutates
-  it owns a dedicated class or resource-suite apphost. A resource suite may
-  share its host only when its classes use unique identities and can run
-  serially against that resource. Isolated class hosts keep their default
-  collections and may run concurrently. Only truly process-static state uses
-  a non-parallel collection. Behavior matrices still move below the full-stack
-  boundary.
+  it belongs to a resource suite with one dedicated apphost. Classes in that
+  suite use unique identities and run serially against the resource. A separate
+  resource suite is justified only by an incompatible host configuration, not
+  by a class boundary. Only truly process-static state uses a non-parallel
+  collection. Behavior matrices still move below the full-stack boundary.
 - Specs that deliberately rewind public-projection checkpoints use a dedicated
   apphost without the background projector and drive complete batches through
   the projection engine. The hosted-loop contract stays in its own apphost.

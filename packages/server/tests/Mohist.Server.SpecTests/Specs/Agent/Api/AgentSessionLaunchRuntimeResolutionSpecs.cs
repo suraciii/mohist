@@ -10,8 +10,8 @@ using Xunit;
 
 namespace Mohist.Server.SpecTests.Specs.Agent.Api;
 
-public class AgentSessionLaunchRuntimeResolutionSpecs
-    : AgentSessionLaunchRoutesTestSupport, IClassFixture<IsolatedMohistIntegrationFixture>
+[Collection("IsolatedIntegration")]
+public class AgentSessionLaunchRuntimeResolutionSpecs : AgentSessionLaunchRoutesTestSupport
 {
     public AgentSessionLaunchRuntimeResolutionSpecs(IsolatedMohistIntegrationFixture fixture) : base(fixture)
     {

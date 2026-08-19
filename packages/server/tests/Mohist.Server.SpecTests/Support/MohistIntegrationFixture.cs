@@ -163,7 +163,7 @@ public class MohistIntegrationFixture : IAsyncLifetime
 }
 
 /// <summary>
-/// Class-scoped host for specs whose behavior is defined over process or
+/// Resource-suite host for specs whose behavior is defined over process or
 /// cluster state rather than a single project.
 /// </summary>
 public sealed class IsolatedMohistIntegrationFixture : MohistIntegrationFixture;

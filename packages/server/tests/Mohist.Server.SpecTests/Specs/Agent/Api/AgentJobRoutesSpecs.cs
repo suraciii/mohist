@@ -303,7 +303,8 @@ internal sealed class SingleAgentJobGrainFactory : IGrainFactory
     public IAddressable GetGrain(Type interfaceType, IdSpan grainKey) => throw new NotSupportedException();
 }
 
-public class AgentJobDispatchRouteSpecs : AgentSessionLaunchRoutesTestSupport, IClassFixture<IsolatedMohistIntegrationFixture>
+[Collection("IsolatedIntegration")]
+public class AgentJobDispatchRouteSpecs : AgentSessionLaunchRoutesTestSupport
 {
     public AgentJobDispatchRouteSpecs(IsolatedMohistIntegrationFixture fixture)
         : base(fixture)

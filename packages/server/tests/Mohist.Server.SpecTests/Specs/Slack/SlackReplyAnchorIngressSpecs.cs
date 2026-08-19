@@ -23,8 +23,8 @@ using Xunit;
 
 namespace Mohist.Server.SpecTests.Specs.Slack;
 
-public sealed class SlackReplyAnchorIngressSpecs
-    : IAsyncLifetime, IClassFixture<IsolatedMohistIntegrationFixture>
+[Collection("IsolatedIntegration")]
+public sealed class SlackReplyAnchorIngressSpecs : IAsyncLifetime
 {
     private readonly MohistIntegrationFixture _fixture;
     private readonly List<string> _runnerIds = [];

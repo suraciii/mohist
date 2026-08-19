@@ -16,7 +16,8 @@ using Xunit;
 
 namespace Mohist.Server.SpecTests.Specs.Runner.Api;
 
-public sealed class RunnerPollRecoveryStateApiSpecs : IClassFixture<IsolatedMohistIntegrationFixture>
+[Collection("IsolatedIntegration")]
+public sealed class RunnerPollRecoveryStateApiSpecs
 {
     private readonly MohistIntegrationFixture _fixture;
 
