@@ -42,8 +42,14 @@ export interface SessionCommandHandlerDeps {
 }
 
 export function registerSessionCommandHandler(conn: signalR.HubConnection, deps: SessionCommandHandlerDeps): void {
+  conn.on('SessionCommand', createSessionCommandHandler(deps))
+}
+
+export function createSessionCommandHandler(
+  deps: SessionCommandHandlerDeps,
+): (request: SessionCommandRequest | null | undefined) => Promise<SessionCommandResult> {
   const inFlight = new Map<string, { request: SessionCommandRequest; operation: Promise<SessionCommandResult> }>()
-  conn.on('SessionCommand', async (request: SessionCommandRequest | null | undefined) => {
+  return async (request: SessionCommandRequest | null | undefined) => {
     const handler = deps.handler
     const journal = deps.journal
     if (!isValidSessionCommandRequest(request) || !handler || !journal) {
@@ -67,7 +73,7 @@ export function registerSessionCommandHandler(conn: signalR.HubConnection, deps:
     } finally {
       if (inFlight.get(key)?.operation === operation) inFlight.delete(key)
     }
-  })
+  }
 }
 
 async function handleCommand(

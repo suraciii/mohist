@@ -55,8 +55,14 @@ export interface CancelHandlerDeps {
 }
 
 export function registerCancelHandler(conn: signalR.HubConnection, deps: CancelHandlerDeps): void {
+  conn.on('CancelAgentSession', createCancelHandler(deps))
+}
+
+export function createCancelHandler(
+  deps: CancelHandlerDeps,
+): (payload: CancelAgentSessionPayload | null | undefined) => Promise<CancelAgentSessionReply> {
   const inFlight = new Map<string, Promise<CancelAgentSessionReply>>()
-  conn.on('CancelAgentSession', async (payload: CancelAgentSessionPayload | null | undefined) => {
+  return async (payload: CancelAgentSessionPayload | null | undefined) => {
     const key = operationKey(payload)
     if (!key) return await handleCancel(payload, deps)
     const existing = inFlight.get(key)
@@ -68,7 +74,7 @@ export function registerCancelHandler(conn: signalR.HubConnection, deps: CancelH
     } finally {
       if (inFlight.get(key) === operation) inFlight.delete(key)
     }
-  })
+  }
 }
 
 async function handleJournaledCancel(

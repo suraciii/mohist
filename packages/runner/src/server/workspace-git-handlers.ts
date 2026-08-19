@@ -15,6 +15,33 @@ export interface WorkspaceGitHandlerDeps {
   allowUnverifiedWorkspaceQueriesForTest?: boolean
 }
 
+export interface WorkspaceGitHandlers {
+  getDiff(query: WorkspaceQuery): Promise<unknown>
+  getCommits(query: WorkspaceQuery): Promise<unknown>
+  getCommitDiff(query: WorkspaceQuery, hash: string): Promise<unknown>
+  getWorkspaceStatus(query: WorkspaceQuery): Promise<unknown>
+  getFileContent(query: WorkspaceQuery, path: string): Promise<unknown>
+}
+
+export function createWorkspaceGitHandlers(deps: WorkspaceGitHandlerDeps): WorkspaceGitHandlers {
+  const handlers = new Map<string, (...args: never[]) => Promise<unknown>>()
+  registerWorkspaceGitHandlers(
+    {
+      on(method: string, handler: (...args: never[]) => Promise<unknown>) {
+        handlers.set(method, handler)
+      },
+    } as signalR.HubConnection,
+    deps,
+  )
+  return {
+    getDiff: handlers.get('GetDiff')!,
+    getCommits: handlers.get('GetCommits')!,
+    getCommitDiff: handlers.get('GetCommitDiff')!,
+    getWorkspaceStatus: handlers.get('GetWorkspaceStatus')!,
+    getFileContent: handlers.get('GetFileContent')!,
+  }
+}
+
 export async function git(workDir: string, args: string[], signal: AbortSignal, options?: CommandLineOptions) {
   const runner = currentRunnerResources()?.signalRGitRunner ?? defaultRunCommand
   return runner('git', args, workDir, signal, undefined, options)

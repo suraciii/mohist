@@ -80,8 +80,15 @@ export interface FollowupDeliveryResult {
 }
 
 export function registerFollowupHandler(conn: signalR.HubConnection, deps: FollowupHandlerDeps): void {
+  const handler = createFollowupHandler(deps)
+  conn.on('ReceiveFollowup', handler)
+}
+
+export function createFollowupHandler(
+  deps: FollowupHandlerDeps,
+): (payload: ReceiveFollowupPayload | null | undefined) => Promise<FollowupDeliveryResult> {
   const inFlight = new Map<string, Promise<FollowupDeliveryResult>>()
-  conn.on('ReceiveFollowup', async (payload: ReceiveFollowupPayload | null | undefined) => {
+  return async (payload: ReceiveFollowupPayload | null | undefined) => {
     const key = followupOperationKey(payload)
     if (!key) return await handleFollowup(payload, deps)
 
@@ -95,7 +102,7 @@ export function registerFollowupHandler(conn: signalR.HubConnection, deps: Follo
     } finally {
       if (inFlight.get(key) === operation) inFlight.delete(key)
     }
-  })
+  }
 }
 
 export function defaultFollowupRecordId(): string {

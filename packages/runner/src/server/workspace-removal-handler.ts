@@ -40,6 +40,21 @@ export interface WorkspaceRemovalHandlerDeps {
   removalFence?: () => WorkspaceRemovalFence | null
 }
 
+export function createWorkspaceRemovalHandler(
+  deps: WorkspaceRemovalHandlerDeps,
+): (query: WorkspaceQuery) => Promise<unknown> {
+  let handler: ((query: WorkspaceQuery) => Promise<unknown>) | undefined
+  registerWorkspaceRemovalHandler(
+    {
+      on(_method: string, registered: (query: WorkspaceQuery) => Promise<unknown>) {
+        handler = registered
+      },
+    } as signalR.HubConnection,
+    deps,
+  )
+  return (query) => handler!(query)
+}
+
 export function registerWorkspaceRemovalHandler(conn: signalR.HubConnection, deps: WorkspaceRemovalHandlerDeps): void {
   const pathExists = deps.pathExists ?? currentRunnerResources()?.signalRExistsChecker ?? defaultExistsSync
 
