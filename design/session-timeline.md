@@ -35,23 +35,9 @@ TimelineItem
   Detail?       # Expanded content: arguments, full output, diff, raw payload
 ```
 
-Presentation classes:
-
-| RenderClass | Source fact | Example reading |
-|---|---|---|
-| `input` | SessionInput | Input content plus acceptance/delivery state |
-| `message` | text | Agent response |
-| `reasoning` | reasoning | Reasoning, collapsed by default |
-| `file-read` | tool (read / grep / glob / list, and so on) | `Read x.ts` |
-| `file-edit` | tool (edit / write, and so on) | `Edited x.ts (+12/-3)` |
-| `shell` | tool (bash, and so on) | `Ran npm test -> passed` |
-| `domain-action` | Recognized Mohist domain operation | `Commented on #42`; `Approved the Plan stage for #42` |
-| `plan` | todo / plan tool | Plan and completion progress |
-| `tool` | Any other tool | Honest fallback: `Ran X` |
-| `status` | session.activity, model, usage, provider.retry, and so on | Muted status row |
-| `boundary` | compaction, session.context_reset | `Context reset` boundary |
-| `error` | turn.failed or any failed item | Prominent failure card |
-| `suppressed` | Deliberately de-emphasized noise fact | Single muted line |
+Presentation classes: `input`, `message`, `reasoning`, `file-read`,
+`file-edit`, `shell`, `domain-action`, `plan`, `tool`, `status`, `boundary`,
+`error`, and `suppressed`.
 
 Items have no terminal lifecycle. In-progress items, such as an executing tool call, are updated
 in place as facts arrive.
@@ -164,4 +150,4 @@ There is no raw event view.
 
 Transcript facts, persistence, and real-time delivery are already implemented. This model needs
 no new transcript facts and does not change Server responsibilities; all derivation can happen
-locally in the Web client. An implementation issue still needs to be created from this spec.
+locally in the Web client.

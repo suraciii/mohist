@@ -26,30 +26,31 @@ supporting context, with the same placement rule as Slack integration; see
 [`domain-analysis.md`](domain-analysis.md). It declares which GitHub repository
 connects to which Project under which policy and owns no execution state.
 
-| Field | Description |
-|---|---|
-| `Id` / `ProjectId` | Identity and owning Project |
-| `Owner` / `Repo` | GitHub repository coordinates; `(Owner, Repo)` is unique across the Server, so one GitHub repository connects to one Project |
-| `RepositoryName` | Bound Repository resource name; connect matches a registered repository by Git URL, and writes validate its existence |
-| `IntakeLabel` | Feed label, default `mohist`; cannot start with `mohist:`, which is reserved for write-back labels |
-| `FeedMode` | `start`, the default, starts fed work; `backlog` only adds it to the backlog |
-| `Approvers` | GitHub login list; an empty list disables review Approval |
-| `Status` | `Active` or `Disabled` |
-| `IdentityKind` | `app`, the default GitHub App identity; `pat`, a fallback fine-grained PAT used only for write-back |
-| `InstallationId` | Required for `IdentityKind=app` and parsed from the GitHub installation URL during connect |
+A GitHubConnection declares:
+
+- `Id` and `ProjectId`: identity and owning Project.
+- `Owner` and `Repo`: GitHub repository coordinates. `(Owner, Repo)` is unique
+  across the Server, so one GitHub repository connects to one Project.
+- `RepositoryName`: the bound Repository resource name. Connect matches a
+  registered repository by Git URL, and writes validate its existence.
+- `IntakeLabel`: the feed label, default `mohist`. It cannot start with
+  `mohist:`, which is reserved for write-back labels.
+- `FeedMode`: `start`, the default, starts fed work; `backlog` only adds it to
+  the backlog.
+- `Approvers`: a GitHub login list. An empty list disables review Approval.
+- `Status`: `Active` or `Disabled`.
+- `IdentityKind`: `app`, the default GitHub App identity, or `pat`, a fallback
+  fine-grained PAT used only for write-back.
+- `InstallationId`: required for `IdentityKind=app` and parsed from the GitHub
+  installation URL during connect.
 
 Credentials do not enter the connection table. They are encrypted in
 [`ISecretStore`](../packages/server/src/Mohist.Server/Infrastructure/Security/Secrets/ISecretStore.cs)
-using the namespace precedent in
-[`outbound-webhook.md`](outbound-webhook.md):
-
-- `SecretStoreAddress(projectId, "<connectionId>:webhook")`: Inbound signature
-  secret.
-- `SecretStoreAddress(projectId, "<connectionId>:api")`: Fallback write-back
-  PAT with Issues read and write only and no code permission.
-- `SecretStoreAddress("_server", "github-app:key")`: GitHub App private key,
-  using `SecretKind.AppToken`. One deployment key is shared by every `app`
-  connection.
+following the namespace precedent in
+[`outbound-webhook.md`](outbound-webhook.md): an inbound signature secret and a
+fallback write-back PAT with Issues read and write only and no code permission
+per connection, plus one deployment-level GitHub App private key shared by
+every `app` connection.
 
 Credential boundaries always hold:
 
@@ -111,21 +112,15 @@ idempotent.
 
 ### Feed Translator
 
-A durable handler subscribes to `com.mohist.github.issues.labeled`:
-
-```text literal
-if event label != connection.IntakeLabel: skip
-if GitHubIssueLink exists: skip                          # idempotent
-issue = create Issue(title and body snapshot,
-                     target repository = connection.RepositoryName,
-                     priority = p0-p4 from event labels,
-                     origin = GitHub coordinates)
-write GitHubIssueLink
-if FeedMode == start:
-    start Issue
-    if rejected by prerequisite or repository availability:
-        leave in backlog and write one explanatory comment
-```
+A durable handler subscribes to `com.mohist.github.issues.labeled`. It skips
+the event when the label is not the connection's `IntakeLabel` and when a
+GitHubIssueLink already exists, which makes feeding idempotent. Otherwise it
+creates an Issue with the GitHub title and body as a snapshot, the connection's
+`RepositoryName` as target repository, a `p0`-`p4` priority from the event
+labels, and the GitHub coordinates as origin, then writes the GitHubIssueLink.
+With `FeedMode = start` it starts the Issue. When a prerequisite or repository
+availability rejects the start, the Issue stays in the backlog and the handler
+writes one explanatory comment.
 
 ### Close Translator
 
@@ -138,16 +133,13 @@ terminal check, without identifying who closed it.
 
 ### Approval Translator
 
-A handler subscribes to `com.mohist.github.pull-request.reviewed`:
-
-```text literal
-issue number = parse branch name mohist/ws-issue-N; if invalid, ignore
-if reviewer.login not in connection.Approvers: ignore
-if Issue is not at the Check approval point: ignore
-APPROVED          -> approve(decidedBy = "github:" + login)
-CHANGES_REQUESTED -> reject(decidedBy = "github:" + login, message = review body)
-COMMENTED         -> ignore
-```
+A handler subscribes to `com.mohist.github.pull-request.reviewed`. It parses
+the Issue number from the branch name `mohist/ws-issue-N` and ignores an
+unparseable branch. It ignores a reviewer whose login is not in the
+connection's `Approvers` list and an Issue that is not at the Check approval
+point. An `APPROVED` review approves with `decidedBy = "github:" + login`; a
+`CHANGES_REQUESTED` review rejects with the same `decidedBy` and the review
+body as message; a `COMMENTED` review is ignored.
 
 The Approvers list is deterministic configuration read directly by the
 translator. No Agent or prompt decides Approval.
@@ -251,13 +243,11 @@ Open questions:
   accepts this edge. Observe it before deciding whether feed must first confirm
   that the GitHub Issue is still open.
 - `check-suite.completed` enters the event set for routing consumption. Workflow
-  PR-check waiting still polls; an event-driven replacement is follow-up work.
+  PR-check waiting still polls.
 - Reuse of the mention channel in
   [`agent-mentions.md`](agent-mentions.md) for an Agent invoked by a GitHub
   comment mention waits for concrete demand.
 - App installation tokens creating PRs in repositories under personal accounts
   may have compatibility limits. Some reports say PR creation requires a
   collaborator role that a GitHub App cannot hold, despite long-running
-  practices such as Dependabot. Implementation first verifies with a test App.
-  If the limitation is real, a separate design adds a machine-user plus
-  fine-grained-PAT identity for personal repositories.
+  practices such as Dependabot.

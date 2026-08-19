@@ -31,12 +31,9 @@ The first installation requests a one-time enrollment from the running Server.
 Runner exchanges it for a machine credential and stores that credential under
 its root. Later starts reuse the credential.
 
-After startup, Runner:
-
-1. Connects to local Server at `http://localhost:3456` by default.
-2. Registers itself and declares its capacity and capabilities.
-3. Waits for work.
-4. Starts execution when Server assigns a task.
+After startup, Runner connects to the local Server at
+`http://localhost:3456` by default, registers itself with its capacity and
+capabilities, and then waits for Server to assign work.
 
 Start Runner **after Server**. It cannot connect while Server is unavailable.
 
@@ -148,13 +145,16 @@ mo session list --issue <number>     # AgentSessions for the Issue
 
 ### Common Runner Problems
 
-| Symptom | Cause | Resolution |
-|---|---|---|
-| The board shows "No runner is connected" | Runner is not running | Run `mo service start runner` |
-| An Issue waits after starting | No Runner has capacity | Start Runner; the Workflow continues automatically |
-| A task produces no output for a long time | OpenCode is stuck | Run `mo run pause --issue <number>` and inspect logs |
-| Workspace identity error | Marker, branch, or origin was changed manually | Preserve required commits, remove that workspace, and retry |
-| Git push failed | Remote Repository permission | Configure an SSH key or token |
+- The board shows "No runner is connected": Runner is not running. Run
+  `mo service start runner`.
+- An Issue waits after starting: no Runner has capacity. Start Runner; the
+  Workflow continues automatically.
+- A task produces no output for a long time: OpenCode is stuck. Run
+  `mo run pause --issue <number>` and inspect logs.
+- Workspace identity error: the marker, branch, or origin was changed
+  manually. Preserve required commits, remove that workspace, and retry.
+- Git push failed: a remote Repository permission problem. Configure an SSH
+  key or token.
 
 `mo service start runner` preserves the enrolled managed-service configuration.
 Use `npm run dev:runner` only when running Runner from a source checkout for
@@ -186,22 +186,13 @@ task's `uses` value selects an execution-backend Action such as
 `mohist/opencode` or `mohist/pi`. Action Input supplies model options. See
 [Action Contracts](actions/README.md).
 
-Runtime replacement and shutdown are bounded by host-local settings:
-
-- `QUARANTINE_DRAIN_TIMEOUT_MS` controls how long a quarantined OpenCode
-  generation may drain before active turns fail with
-  `generation-drain-timeout`; the default is 60 seconds.
-- `RUNTIME_SHUTDOWN_TIMEOUT_MS` controls graceful OpenCode dispatcher/process
-  teardown and Pi service shutdown; the default is 30 seconds. On expiry the
-  runner abandons the wait, destroys the transport, and proceeds with the
-  replacement or shutdown. OpenCode termination sends the graceful stop first
-  and uses a best-effort process-group `SIGKILL` when a process handle is
-  available.
-
-Both settings are millisecond values and should be set in the service manager
-configuration. A forced generation release only fails turns still active at
-the deadline; results already waiting for acknowledgement remain journaled and
-are reported under their original work identities.
+Runtime replacement and shutdown are bounded by two host-local settings, both
+millisecond values set in the service manager configuration:
+`QUARANTINE_DRAIN_TIMEOUT_MS` (default 60 seconds) bounds how long a
+quarantined Runtime generation drains before its active turns fail, and
+`RUNTIME_SHUTDOWN_TIMEOUT_MS` (default 30 seconds) bounds graceful Runtime
+shutdown. See [Runner design](../design/runner.md) for the drain and shutdown
+protocol.
 
 ## Self-hosting
 

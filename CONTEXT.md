@@ -53,8 +53,8 @@ Agent ID.
 
 **Agent Definition Reference**:
 A use of Agent capability in which a Workflow task references a Mohist Agent
-definition with `uses: mohist/agent`. Its definition snapshot resolves at
-dispatch, and it creates neither an AgentJob nor an Agent identity.
+definition. Its definition snapshot resolves at dispatch, and it creates
+neither an AgentJob nor an Agent identity.
 
 **Mohist Agent**:
 A predefined, reusable Agent resource within a Project that has a stable
@@ -65,12 +65,7 @@ routing, and comment mentions are entry points to the same Agent.
 Mohist's unified diagnosis of whether an Agent execution configuration is
 complete, with value `ready`, `needs-setup`, or `unknown`; it is not the
 `active` or `archived` lifecycle. `needs-setup` includes an actionable gap, and
-an entry point cannot infer Ready or Failed from `unknown`.
-
-**Agent Availability**:
-Whether a matching Runner can execute an Agent definition immediately or the
-work must wait for a Runner, capacity, or validation. It is a transient
-execution condition and does not change Agent Readiness.
+an entry point cannot infer `ready` or failed from `unknown`.
 
 **AgentJob**:
 One unit of work created when a Mohist Agent starts, owning launch scheduling
@@ -106,11 +101,6 @@ A physical conversation owned by OpenCode, Pi, or another execution backend
 that can be cached, resumed, replaced, or reclaimed. It does not determine
 whether an AgentSession can accept more input.
 
-**Runtime Binding**:
-The routing facts that associate an AgentSession with its current Runtime,
-physical Session, Runner, and related resources and that can be replaced as one
-unit. It is neither the AgentSession identity nor physical Session history.
-
 ## Workflow Decisions
 
 **Approval**:
@@ -137,9 +127,8 @@ determines its capabilities.
 
 **Credential**:
 A token that proves a Principal's identity and can be issued, revoked, or
-expired independently, with only its hash stored by Mohist. A service
-Credential is a deployment-level machine identity, such as one held by a Slack
-adapter, and is not a user.
+expired independently. A service Credential is a deployment-level machine
+identity, such as one held by a Slack adapter, and is not a user.
 
 **Agent Identity**:
 The attribution identity of a Mohist Agent as a Principal, to which Mohist

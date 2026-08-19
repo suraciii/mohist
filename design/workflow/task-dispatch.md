@@ -118,25 +118,17 @@ during that attempt's rendering stage.
 
 ## Dispatch Context
 
-The [Template Expressions](../../docs/workflow-definition.md#template-expressions) product
-reference is authoritative for author-visible namespaces. This table adds only the implementation
-source and evaluation timing:
+The [Template Expressions](../../docs/workflow-definition.md#template-expressions)
+product reference is authoritative for author-visible namespaces. Dispatch
+fixes `workflow.runId`, `stage.name`, `work.*`, `issue.*`, `repository.*`, and
+previous `tasks.<id>.outputs.*` facts. Tasks produced by ApprovalFeedback also
+receive fixed `work.approvalFeedback.*` facts.
 
-| Variable | Source | Timing |
-|---|---|---|
-| `workflow.runId` | dispatch | fixed at dispatch |
-| `stage.name` | dispatch | fixed at dispatch |
-| `work.*` | dispatch; includes `id`, `type`, `title`, and `attempt` | fixed at dispatch |
-| `work.approvalFeedback.*` | tasks produced only by ApprovalFeedback; includes `id`, `stage`, `createdAt`, `summary` | fixed at dispatch |
-| `issue.*` | Issue context; includes `projectId`, `number`, `title`, and `body` | fixed at dispatch |
-| `repository.*` | target repository reference from Issue; resolved from the Project Repository resource at dispatch | fixed at dispatch |
-| `workspace.*` | workspace resolved during Runner execution | Runner execution entry point |
-| `vars.*` | Effective Stage Variables | resolved and frozen in the attempt snapshot at dispatch |
-| `tasks.<id>.outputs.*` | previous task output | fixed at dispatch |
-| `prompts.<key>` | Project Prompt body, read by key | loaded into the snapshot at dispatch; evaluated during Runner rendering |
-| `failure.output` | output of the task that triggered recovery; expanded when Runner constructs the recovery task | available only to recovery tasks |
-| `failure.error.code` | error code of the task that triggered recovery | available only to recovery tasks |
-| `failure.error.message` | actionable error text from the task that triggered recovery | available only to recovery tasks |
+Effective Stage Variables under `vars.*` and Project Prompt bodies under
+`prompts.<key>` are loaded into the attempt snapshot at dispatch. Runner
+evaluates the Prompt during rendering. Runner resolves `workspace.*` at the
+execution entry point. Recovery tasks alone receive `failure.output`,
+`failure.error.code`, and `failure.error.message` from the triggering task.
 
 Runtime context, Workflow Variables, and Project Prompts are independent namespaces. Their sources
 and evaluation timing remain distinct in the attempt snapshot. See
@@ -189,18 +181,12 @@ a non-retryable error.
 
 ### Parent Context for a Sub-Issue Plan
 
-When mapping internal `WorkDispatch` to an HTTP poll response, the API route may append the current
-title and body of the parent Issue. It does so only when `workType = task`, `stage = plan`, `uses`
-belongs to the explicit Inline Agent Action set, currently `mohist/opencode` and `mohist/pi`, and
-the current Issue still has a resolvable parent. Checks, other Stages, other Actions, AgentJob, and
-ordinary Issues receive no parent context.
-
-Parent context is optional execution context in the HTTP dispatch response. It does not enter
-Workflow `WorkDispatch`, WorkflowRun metadata or state, task `with`, Variables, or Prompts, and does
-not add a template-expression namespace. Runner only forwards it. On each applicable execution,
-the selected Inline Agent Action places the JSON-encoded parent title and body as read-only context
-before the resolved task Prompt and explicitly identifies the current sub-Issue body as the
-authority for delivery scope. Without parent context, the resolved Prompt remains unchanged.
+A sub-Issue Plan task executed by an Inline Agent may receive the current parent
+Issue title and body as optional read-only context. Other Stages, Actions,
+AgentJobs, and ordinary Issues do not receive it. Parent context is not persisted
+in WorkflowRun state, task input, Variables, or Prompts, and it creates no
+template namespace. The current sub-Issue body remains authoritative for
+delivery scope.
 
 Repository does not enter a WorkflowRun snapshot or Run Variables. Issue stores only the resource
 name of its target repository. Dispatch uses that reference to read the Project Repository

@@ -28,9 +28,6 @@ stages, tasks, `expect`, and recovery configuration. See
 [Agents and AgentSessions](../agent-sessions.md) for the relationship among
 Actions, Inline Agents, and Mohist Agents.
 
-Write the active documentation in English. Preserve product terms,
-configuration fields, and commands exactly.
-
 ## Current Actions
 
 - [`mohist/opencode`](opencode.md): Executes one input through OpenCode and
@@ -81,11 +78,7 @@ Pi is an independent peer Action, not an input extension of
 ### Workflow Model Selection
 
 For an Inline Agent, `uses` selects the execution backend:
-
-| Action | Runtime |
-|---|---|
-| `mohist/opencode` | OpenCode |
-| `mohist/pi` | Pi |
+`mohist/opencode` runs on OpenCode, and `mohist/pi` runs on Pi.
 
 Project, create-Issue, and Issue selectors without an active bound Run use the
 effective Workflow Profile to show models reported by that backend. While a
@@ -123,15 +116,17 @@ task, task retry, or change to `options.model` or `options.variant` cannot
 replace it. Model selection affects only the current execution and takes effect
 in the existing Session.
 
-| Change | Physical Session |
-|---|---|
-| A later task or retry uses the same `session` name | Unchanged |
-| `options.model` or `options.variant` changes | Unchanged |
-| Compact | Unchanged |
-| Reset | Creates a new empty Session; the AgentSession keeps its conversation content |
-| The current Session is confirmed missing before a new independent input is submitted | Creates a new empty Session automatically |
-| Working directory changes | Rejects execution; use a new logical `session` name |
-| Execution backend changes | Creates a new empty physical Session |
+- A later task or retry that uses the same `session` name leaves the physical
+  Session unchanged.
+- A change to `options.model` or `options.variant` leaves it unchanged.
+- Compact leaves it unchanged.
+- Reset creates a new empty Session; the AgentSession keeps its conversation
+  content.
+- When the current Session is confirmed missing before a new independent input
+  is submitted, Mohist creates a new empty Session automatically.
+- A working-directory change rejects execution; use a new logical `session`
+  name.
+- An execution-backend change creates a new empty physical Session.
 
 Automatic recovery applies only when the responsible Runner still owns the
 current binding, the backend explicitly confirms that the old Session is
@@ -153,11 +148,12 @@ and starts a new execution when the Session is idle.
 
 ### Session Operations
 
-| Operation | Result |
-|---|---|
-| Follow-up | Sends user text to the current physical Session and returns after the backend accepts it |
-| Compact | Uses native backend compaction; the Runtime Session identity remains unchanged |
-| Reset | Creates an empty physical Session while idle; the AgentSession keeps its conversation content |
+- Follow-up sends user text to the current physical Session and returns after
+  the backend accepts it.
+- Compact uses native backend compaction; the Runtime Session identity remains
+  unchanged.
+- Reset creates an empty physical Session while idle; the AgentSession keeps
+  its conversation content.
 
 Compact is a user operation within a Session, not a Workflow Action. Mohist
 does not simulate compaction with a synthetic summary and does not silently
@@ -197,19 +193,14 @@ unconfirmed instead of presenting a possibly running Session as safely idle.
 The two execution Actions share these business error codes. Their own pages
 list only additional codes.
 
-| Error code | Meaning |
-|---|---|
-| `runtime-unavailable` | Backend execution capability is not ready or available |
-| `session-workspace-mismatch` | The working directory does not match the Session binding |
-| `session-binding-failed` | Logical Session binding resolution or persistence failed |
-| `runtime-session-missing` | The physical Session is missing, but this operation cannot rebuild or resubmit safely |
-| `unavailable-runtime` | The backend reports that it is unavailable |
-| `execution-failed` | Execution failed, including exhausted provider quota, balance, or billing |
-
-## Implementation Status
-
-- `mohist/opencode`, `mohist/pi`, and `mohist/agent` are implemented. Their own
-  pages describe remaining capability gaps.
-- Runner dispatch validates unknown fields, required fields, and types against
-  the manifest. A custom Profile must bind every required Variable explicitly
-  in `with`.
+- `runtime-unavailable`: backend execution capability is not ready or
+  available.
+- `session-workspace-mismatch`: the working directory does not match the
+  Session binding.
+- `session-binding-failed`: logical Session binding resolution or persistence
+  failed.
+- `runtime-session-missing`: the physical Session is missing, but this
+  operation cannot rebuild or resubmit safely.
+- `unavailable-runtime`: the backend reports that it is unavailable.
+- `execution-failed`: execution failed, including exhausted provider quota,
+  balance, or billing.

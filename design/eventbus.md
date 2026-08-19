@@ -13,16 +13,11 @@ one self-driven dispatcher.
 
 ## Durable Sources
 
-One dispatch cycle queries undispatched rows from five event tables. These five
-aggregates are the durable sources for this bus.
-
-| Aggregate | Events | On bus |
-|---|---|---|
-| WorkflowRun | State transitions, Completed, Failed | Yes |
-| Issue | work-started, work-completed, closed | Yes |
-| Epic | State transitions and automatic revival | Yes |
-| AgentSession | Runtime bound and state changes | Yes |
-| AgentJob | Failed | Yes |
+One dispatch cycle queries undispatched rows from five event tables, one per
+durable source aggregate: WorkflowRun (state transitions, Completed, Failed),
+Issue (work-started, work-completed, closed), Epic (state transitions and
+automatic revival), AgentSession (Runtime bound and state changes), and
+AgentJob (Failed).
 
 These sources cover all current cross-aggregate processes advanced by the event
 bus. Other domains such as Runner and Project either produce no dispatchable
@@ -48,22 +43,17 @@ surface:
 Any event routable to a system handler must also be subscribable through a user
 expression.
 
-`[Subscription]` type matching supports:
-
-| Pattern | Match |
-|---|---|
-| `com.mohist.workflow.run.completed` | Exact |
-| `com.mohist.workflow.*` | Prefix wildcard |
-| `*` | All |
-| `a\|b\|c` | Any listed value |
-| `foo.*.bar` | Rejected |
+`[Subscription]` type matching supports an exact type such as
+`com.mohist.workflow.run.completed`, a prefix wildcard such as
+`com.mohist.workflow.*`, `*` for all events, and `a|b|c` for any listed value.
+A wildcard in the middle, such as `foo.*.bar`, is rejected.
 
 ## Persistence
 
-Each event table has one nullable `DispatchedAt` column as its only delivery
+Each event table carries one nullable delivery timestamp as its only delivery
 marker.
 
-- `NULL` means undispatched.
+- Null means undispatched.
 - A timestamp means dispatched.
 - There is no cursor table or per-stream offset.
 
@@ -95,7 +85,7 @@ Producer transaction -- append row --> commit -- poke after commit --+
 |   query undispatched rows ordered by Source and Id                    |
 |   fan out each row to matching handlers                               |
 |   apply EventDispatcherOptions exponential backoff                    |
-|   after excess attempts, write DLQ and mark DispatchedAt              |
+|   after excess attempts, dead-letter the row and mark it dispatched   |
 +-----------------------------------------------------------------------+
 ```
 
@@ -114,30 +104,6 @@ from at most `ReminderPeriod` later to the next dispatcher scheduling yield. A
 lost poke, failed process, or reminder that ticks before the event cannot lose
 the row. The reminder later finds it and delivers in FIFO order.
 
-### Test observation boundary
-
-Tests must observe this same real chain. A fixture may replace
-`IBackgroundTaskLauncher`, but the fake must still execute the production poke
-work and provide independent `enqueued`, `started`, and `completed` signals for
-each launch. A real registered handler provides an invocation acknowledgment
-bound to CloudEvent source, type, `EventId`, and handler. The fake joins that
-acknowledgment to the exact persisted row identity: origin, source, row ID,
-type, and `EventId`. Ambiguous rows fail closed. The fake does not use an
-uncontrolled `Task.Run`: `Launch` places
-the callback in a test-owned queue. After the producer commits and the spec
-observes the unique pending event row for the expected source and type, it
-registers that row's full delivery identity and explicitly starts that work.
-The spec then waits for `producer commit -> poke enqueued -> exact persisted row
-registered -> poke work started -> handler invocation -> durable settlement of
-that origin/source/row ID/type/EventId -> delivery acknowledgment -> poke work
-completed`. Settlement failure or cancellation does not acknowledge delivery.
-Queued and running work belong to the fake; cancellation, failure, and fixture
-teardown must settle or drain their signals. This boundary
-belongs only to tests: it adds no acknowledgment contract to the production poke
-and does not change `EventDispatcherGrain` or `EventDispatcherService`. It
-replaces causal-less cluster-turn pings, polling, retries, and fixed waits. A
-lost-poke test still verifies reminder recovery separately.
-
 ### Backoff
 
 Use custom exponential backoff, with no third-party retry or resilience
@@ -145,9 +111,9 @@ library. Each handler matched to one event has independent attempt count and
 next retry time. Compute delay as
 `EventDispatcherOptions.BaseBackoff * 2^(attempt-1)`, capped by
 `EventDispatcherOptions.MaxBackoff`. At
-`EventDispatcherOptions.MaxAttempts`, stop retries, write the dead letter to
-`IDeadLetterStore`, and mark the event dispatched. Attempt count and next retry
-time are not persisted.
+`EventDispatcherOptions.MaxAttempts`, stop retries, write the row to the
+dead-letter queue (DLQ) through `IDeadLetterStore`, and mark the event
+dispatched. Attempt count and next retry time are not persisted.
 
 Failure of one handler does not affect another handler's attempt count. Each
 handler for one row advances independently.
@@ -171,18 +137,16 @@ If a row has a handler waiting for its next retry time, skip later rows for that
 Source during the cycle to preserve FIFO. Other Sources advance independently.
 
 After each cycle, dispatcher writes the number of blocked Sources to an
-attribute-free ObservableGauge with unit `1`:
-`mohist.server.event_dispatcher.blocked_sources`. Source identifiers, event IDs,
-and attempts must never be metric attributes because they create high
-cardinality. The Gauge reports the most recently completed cycle and is zero
-during a cycle or immediately after dispatcher startup. This is the only
-current operations signal for blocking.
+attribute-free gauge. Source identifiers, event IDs, and attempts must never be
+metric attributes because they create high cardinality. The gauge reports the
+most recently completed cycle and is zero during a cycle or immediately after
+dispatcher startup. This is the only current operations signal for blocking.
 
 ### Crash and Recovery
 
-- After a crash during any cycle, a row without `DispatchedAt` remains. The
-  reminder redelivers it. Every handler must be idempotent by `EventId`.
-- A DLQ row receives `DispatchedAt` immediately. It remains queryable and can be
+- After a crash during any cycle, a row without a delivery timestamp remains.
+  The reminder redelivers it. Every handler must be idempotent by `EventId`.
+- A DLQ row is marked dispatched immediately. It remains queryable and can be
   redelivered manually through `IDeadLetterStore.StartRedeliveryAsync`,
   `ResolveAsync`, and `RecordRedeliveryFailureAsync`. HTTP contracts remain
   unchanged. This design adds no DLQ query or redelivery API.

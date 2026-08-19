@@ -1,4 +1,4 @@
-# Epic State Reflects Reality (issue-392)
+# Epic State Reflects Reality
 
 > The product decision in this record remains valid. The write authority and
 > transaction design for membership are superseded by

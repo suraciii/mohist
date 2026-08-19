@@ -6,25 +6,21 @@ Loads `tasks.json` and adds its tasks to the current Workflow execution.
 
 ### Inputs
 
-| Field | Required | Default | Meaning |
-|---|---:|---|---|
-| `path` | Yes | - | Path to `tasks.json`. The value is text. |
-| `task` | Yes | - | Default task fields applied to every task entry. `task.uses` is required and is resolved by the Profile before the Action runs. |
-| `items` | No | `tasks` | Top-level path to the task list in the JSON document. The value is text. |
-| `buildPrompt` | No | - | Text used to build each task prompt. |
+- `path` is the required text path to `tasks.json`.
+- `task` is required and supplies defaults for every generated task.
+  `task.uses` is required and is resolved by the Profile before the Action runs.
+- `items` is the optional top-level path to the task list. It defaults to
+  `tasks`.
+- `buildPrompt` is optional text used to build each task prompt.
 
 ### Outputs
 
-| Field | Meaning |
-|---|---|
-| `loaded` | Number of tasks added to this run. |
+The output field `loaded` is the number of tasks added to this run.
 
 ### Business Error Codes
 
-| Error code | Meaning |
-|---|---|
-| `missing-source` | The `tasks.json` file does not exist. |
-| `server-unavailable` | The Server cannot be reached. |
+- `missing-source` means the `tasks.json` file does not exist.
+- `server-unavailable` means the Server cannot be reached.
 
 ### Example
 
@@ -51,24 +47,17 @@ Checks whether all required artifacts exist in an OpenSpec change directory.
 
 ### Inputs
 
-| Field | Required | Default | Meaning |
-|---|---:|---|---|
-| `changeDir` | Yes | - | Path to the OpenSpec change directory. The value is text. |
+`changeDir` is the required text path to the OpenSpec change directory.
 
 ### Outputs
 
-| Field | Meaning |
-|---|---|
-| `kind` | Output type identifier. |
-| `changeDir` | Resolved change directory. |
-| `present` | Whether all required artifacts exist. |
-| `missing` | Paths of missing artifacts. |
+The output contains the type identifier in `kind`, the resolved directory in
+`changeDir`, the result in `present`, and any absent artifact paths in
+`missing`.
 
 ### Business Error Codes
 
-| Error code | Meaning |
-|---|---|
-| `artifacts-missing` | A required OpenSpec artifact does not exist. |
+`artifacts-missing` means a required OpenSpec artifact does not exist.
 
 ### Example
 
@@ -85,38 +74,26 @@ Archives an OpenSpec change directory and commits the resulting move.
 
 ### Inputs
 
-| Field | Required | Default | Meaning |
-|---|---:|---|---|
-| `changeDir` | Yes | - | Path to the OpenSpec change directory. The value is text. |
-| `archiveHint` | No | `vars.archive` when present | Runner-owned archive destination from a prior successful attempt. It is injected from the dispatch snapshot, not declared in profile `with`. |
-
-When no `archive` Run Variable exists, Runner omits `archiveHint` and the Action selects a fresh
-dated destination. A successful Action writes the chosen workspace-relative destination to the Run
-Variables. A later retry or rerun then receives that destination as `archiveHint` and succeeds
-idempotently when the source is already archived.
+- `changeDir` is the required text path to the OpenSpec change directory.
+- `archiveHint` is an optional Runner-owned retry destination. Workflow authors
+  do not declare it in `with`. See
+  [Task Dispatch](../../design/workflow/task-dispatch.md#engine-sourced-action-inputs)
+  for its snapshot and retry semantics.
 
 ### Outputs
 
-| Field | Meaning |
-|---|---|
-| `kind` | Output type identifier. |
-| `source` | Source change directory. |
-| `destination` | Archive destination directory. |
-| `changed` | Whether the archive step modified the repository. |
-| `noChange` | Whether the archive step produced no change. |
-| `commitMessage` | Commit message used when the archive step modified the repository. |
-| `commitSha` | Commit SHA produced when the archive step modified the repository. |
-| `commitOutput` | Raw Git commit output. |
-| `changedFiles` | Files modified by the archive commit. |
+The output contains the type identifier, source, destination, and whether the
+repository changed. When it creates a commit, it also reports the commit
+message, SHA, output, and changed files. `noChange` reports an idempotent run
+that needed no repository change.
 
 ### Business Error Codes
 
-| Error code | Meaning |
-|---|---|
-| `retry-safe` | The archive step can be retried safely. |
-| `partial-archive` | Both source and archive directories contain files, so overwrite is refused. |
-| `missing-source` | The source change directory does not exist. |
-| `config-error` | The archive configuration is invalid. |
+- `retry-safe` means the archive step can be retried safely.
+- `partial-archive` means both source and archive directories contain files,
+  so overwrite is refused.
+- `missing-source` means the source change directory does not exist.
+- `config-error` means the archive configuration is invalid.
 
 ### Example
 

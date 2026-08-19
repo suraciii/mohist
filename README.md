@@ -79,18 +79,18 @@ the owner. See [Agent Event Routing](docs/event-routing.md) and
 
 ## Implementation Status
 
-| Available | Integration in progress | Not implemented or proposal |
-|---|---|---|
-| Five-stage Workflow, approval points, Epics, composite Issues, and sub-issues | Workflow Profile UI migration | Mobile PWA and Web Push proposal |
-| `mo` CLI, authenticated Web UI, direct Mohist Agent launch and sessions, PAT-authenticated External Agent API | | |
-| Hermes notifications, event routing, Agent supervision, mentions, and Issue watch | Automatic observability anomaly notifications | |
-| Agent Skills execution and concurrency limits | | |
-| OpenCode / Pi Runtime, GitHub PR Profile, and Slack Agent Connections | | |
-| Metrics, route diagnostics, and the application log contract | | |
+Available: the five-stage Workflow with approval points; Epics, composite
+Issues, and sub-issues; the `mo` CLI; the authenticated Web UI; direct Mohist
+Agent launch and sessions; the External Agent API with personal access token
+(PAT) authentication; Hermes notifications, event routing, Agent supervision,
+mentions, and Issue watch; Agent Skills execution and concurrency limits;
+OpenCode and Pi Runtimes, the GitHub PR Profile, and Slack Agent Connections;
+metrics, route diagnostics, and the application log contract.
 
-The corresponding Issues track items that are in progress or have a finalized
-spec. Current capability notes live in each document's Status or implementation
-notes.
+Integration in progress: Workflow Profile UI migration; automatic observability
+anomaly notifications.
+
+Not implemented or proposal: Mobile PWA and Web Push.
 
 ## Documentation
 
@@ -101,16 +101,13 @@ Architecture and design documents are under [`design/`](design/README.md).
 
 ## Repository Structure
 
-```text diagram
-packages/
-  server/    Control plane (ASP.NET Core + Orleans)
-  runner/    Execution plane (TypeScript)
-  web/       Web UI (React)
-  cli/       mo CLI
-docs/        User documentation
-design/      Architecture and design documentation
-openspec/    Change artifacts produced by Workflows
-```
+- `packages/server/`: control plane (ASP.NET Core + Orleans)
+- `packages/runner/`: execution plane (TypeScript)
+- `packages/web/`: Web UI (React)
+- `packages/cli/`: `mo` CLI
+- `docs/`: user documentation
+- `design/`: architecture and design documentation
+- `openspec/`: change artifacts produced by Workflows
 
 ## Contributing
 

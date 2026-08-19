@@ -2,9 +2,10 @@
 
 A Workspace is a persistent execution environment under a Project. It contains
 a set of working directories and access to one or more repositories. It
-persists across Sessions and Agents. Multiple Sessions and Agents can continue
-work in the same Workspace. A later participant sees the same directories,
-installed dependencies, research material, and uncommitted changes.
+persists across AgentSessions and Agents. Multiple AgentSessions and Agents
+can continue work in the same Workspace. A later participant sees the same
+directories, installed dependencies, research material, and uncommitted
+changes.
 
 Work happens in a Workspace; repositories are its inputs. Repository checkouts
 live under the Workspace. Plans, research, notes, and other work products belong
@@ -20,36 +21,37 @@ When an Issue first starts, it automatically receives a Workspace named
 repository. It does not share directories with other Issues, so many Issues can
 run in parallel without interfering with each other.
 
-All Stages, retries, Sessions, and invited Agents for the same Issue share this
-Workspace. Mohist archives it when the Issue completes or is cancelled.
+All Stages, retries, AgentSessions, and invited Agents for the same Issue
+share this Workspace. Mohist archives it when the Issue completes or is
+cancelled.
 
 ### Workspace for an Interactive Entry Point
 
-A Session started directly from Slack, Web, or CLI also runs in a Workspace.
-By default, each interaction location has one Workspace:
+An AgentSession started directly from Slack, Web, or CLI also runs in a
+Workspace. By default, each interaction location has one Workspace:
 
-- **Slack**: Each channel has one Workspace. All Sessions and invited Agents in
-  the channel use that Workspace.
+- **Slack**: Each channel has one Workspace. All AgentSessions and invited
+  Agents in the channel use that Workspace.
 - **Web**: Each conversation has one Workspace.
-- **CLI**: Create one explicitly with `mo workspace create <name>` and bind a
-  Session with `--workspace <name>`. Without `--workspace`,
+- **CLI**: Create one explicitly with `mo workspace create <name>` and bind an
+  AgentSession with `--workspace <name>`. Without `--workspace`,
   `mo agent launch` binds the current Project's default Workspace. When needed,
   Mohist creates `cli-current` with source `cli`. CLI output shows the actual
   binding so that the default scope is not hidden.
 
 Mohist does not initialize an interactive Workspace from a clean state. It
-accumulates work over time, which enables reuse across Sessions.
+accumulates work over time, which enables reuse across AgentSessions.
 
 ## Binding and Sharing
 
-- A new Session uses the Workspace resolved from its interaction location by
-  default. Another Session in the same channel uses the same Workspace.
-- An Agent invited into a Session or channel enters the same Workspace and sees
-  the same files.
-- A delegated child Session inherits the same Workspace. To isolate a child,
-  let the Agent create a Git worktree inside the inherited directory. Spawn
-  cannot select another Workspace. A Git worktree is a Git tool; Mohist does
-  not provide a child-specific Workspace primitive.
+- A new AgentSession uses the Workspace resolved from its interaction location
+  by default. Another AgentSession in the same channel uses the same Workspace.
+- An Agent invited into an AgentSession or channel enters the same Workspace
+  and sees the same files.
+- A delegated child AgentSession inherits the same Workspace. To isolate a
+  child, let the Agent create a Git worktree inside the inherited directory.
+  Spawn cannot select another Workspace. A Git worktree is a Git tool; Mohist
+  does not provide a child-specific Workspace primitive.
 - At any time, one interaction location maps to one active Workspace. There is
   always one answer to the question, "Which directory is the Agent using here?"
 
@@ -61,13 +63,13 @@ mo workspace create payment-refactor --repo server --repo web
 mo agent launch coder --workspace payment-refactor
 mo agent launch reviewer --workspace payment-refactor
 
-# Inspect the source, repositories, and bound Sessions.
+# Inspect the source, repositories, and bound AgentSessions.
 mo workspace list --status active
 mo workspace view payment-refactor
 mo session list --workspace payment-refactor
 
 # Change repository membership, then archive the Workspace.
-# Archive is rejected with a recovery instruction while Sessions are active.
+# Archive is rejected with a recovery instruction while AgentSessions are active.
 mo workspace repo add payment-refactor infra
 mo workspace close payment-refactor
 ```
@@ -99,33 +101,28 @@ are not enforced by the platform.
   channel automatically starts a new Workspace. To discard a disordered
   environment and continue, close it and send another message.
 - An archived Workspace remains available for history but accepts no new
-  Sessions.
+  AgentSessions.
 
 ## Events
 
-Workspace creation and archival produce the `com.mohist.workspace.created` and
-`com.mohist.workspace.archived` platform events. Each event includes the Project,
-Workspace name, and source: `issue`, `manual`, `slack`, `web`, or `cli`.
-Subscribers can filter by source. For example, a channel Agent can perform
-cleanup after an archive event, or a create event can trigger dependency
-installation. See [Event Routing](event-routing.md) and
-[Event Protocol](../design/event-protocol.md).
+Workspace creation and archival produce platform events that subscribers can
+filter by source and answer. For example, a channel Agent can perform cleanup
+after an archive event, or a create event can trigger dependency installation.
+See [Event Routing](event-routing.md) for the event contract.
 
 ## Missing Directory
 
 The Runner that executes a Workspace hosts its directories. The Workspace still
 exists after Runner failure or disk cleanup, but its directory contents are not
-guaranteed to return. A missing directory can be rematerialized empty on the same
-home Runner. AgentJob scheduling can clear an offline home and select another
-Runner, but a WorkflowRun remains assigned and does not migrate automatically.
-Unpushed work is lost in either case. A Workflow preserves completed work by
+guaranteed to return. A missing directory can be rematerialized empty on the
+same home Runner, and unpushed work is lost. A Workflow preserves completed work by
 pushing its Workflow branch to the remote. Important work in an interactive
 Workspace must be committed and pushed.
 
 ## Implementation Gaps
 
 Workspace identity, create and archive lifecycle, Issue and interactive source
-resolution, named Runner materialization, and cross-Session reuse are
+resolution, named Runner materialization, and cross-AgentSession reuse are
 implemented. AgentJobs can replace an offline home; WorkflowRuns cannot yet move
 their assignment to another Runner. Slack channel archival also does not yet
 archive its Workspace; until that linkage exists, close the interactive

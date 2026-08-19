@@ -37,44 +37,25 @@ WebhookSubscription is a Project-scoped resource. It declares which events to
 send, where to send them, and which authentication to use. It owns no Session,
 execution, or receiver state.
 
-| Field | Description |
-|---|---|
-| `Id` / `ProjectId` | Identity and owning Project |
-| `Name` | Readable subscription name for CLI and Web |
-| `TargetUrl` | Delivery target; only `http` and `https` are allowed |
-| `EventSelectionMode` | `all`, the default, delivers every event; `selected` delivers only `EventTypes` |
-| `EventTypes` | JSON array used when `EventSelectionMode = selected` |
-| `AuthType` | Receiver authentication: `none`, `bearer`, `basic`, or `custom`; default `none` |
-| `Match` | Optional advanced CEL filter after event selection; empty means no additional filter |
-| `Status` | `Active` delivers, `Disabled` pauses, and `Archived` removes |
-| `CreatedAt` / `UpdatedAt` | Storage timestamps |
+The resource has a stable Project-scoped identity and a readable name. Its
+target is an `http` or `https` URL. Event selection is either all event types or
+a non-empty selected set, with an optional CEL filter. Authentication is
+`none`, `bearer`, `basic`, or `custom`. Lifecycle is active, disabled, or
+archived.
 
-Credentials do not enter the subscription table. V1 authentication credentials,
-including a bearer token, Basic `user:pass`, or a JSON map of custom headers,
-are stored in
-[`ISecretStore`](../packages/server/src/Mohist.Server/Infrastructure/Security/Secrets/ISecretStore.cs)
-with kind `WebhookSecret` and address
-`SecretStoreAddress(projectId, "<subscriptionId>:auth")`. The `:auth` namespace
-on the connection ID lets it coexist with the old HMAC signature secret at
-`SecretStoreAddress(projectId, subscriptionId)` without a new SecretKind or
-table change. Plaintext lives only in process memory and never enters the
-subscription, logs, or transcript. Read surfaces call `ISecretStore.Redact`,
-so no API, CLI output, or failure record exposes the value.
+Credentials are stored separately from the subscription. Plaintext lives only
+in process memory and never enters the subscription, logs, transcript, API,
+CLI output, or failure record.
 
 The following invariants always hold:
 
-- With `EventSelectionMode = selected`, `EventTypes` is nonempty and every type
-  exists in
-  [`EventCatalog.All`](../packages/server/src/Mohist.Server/Infrastructure/Events/EventCatalog.cs).
-  Writing a subscription rejects an unknown type.
-- A provided `Match` compiles through
-  [`EventMatchExpression`](../packages/server/src/Mohist.Server/Infrastructure/Events/Matching/EventMatchExpression.cs).
-  Writing rejects an invalid expression. Empty `Match` is valid and means no
+- With selected event types, the set is nonempty and every type exists in the
+  event catalog. Writing rejects an unknown type.
+- Writing rejects an invalid CEL filter. An empty filter is valid and means no
   additional filter.
 - `TargetUrl` is a valid `http` or `https` URL; writing rejects another value.
 - `AuthType` is one of `none`, `bearer`, `basic`, or `custom`.
-- `ISecretStore` encrypts credentials at rest and `ISecretStore.Redact` redacts
-  every read surface.
+- Credentials are encrypted at rest and redacted from every read surface.
 
 Web and CLI configure the same WebhookSubscription and do not create separate
 local configurations.
@@ -88,10 +69,8 @@ and evaluate each one:
 
 1. **Event selection**: With `EventSelectionMode = selected`, the event `type`
    must be in `EventTypes`. `all` passes every type.
-2. **Optional advanced CEL**: When `Match` is nonempty, evaluate it through
-   [`EventMatchExpression`](../packages/server/src/Mohist.Server/Infrastructure/Events/Matching/EventMatchExpression.cs)
-   using `CloudEventEventMatchInput` and the same semantics as the routing
-   table. Delivery requires both checks to pass.
+2. **Optional advanced CEL**: When `Match` is nonempty, evaluate it with the
+   same semantics as the routing table. Delivery requires both checks to pass.
 
 - Every matching subscription delivers independently as fanout. There is no
   first match or ordering. Those semantics belong to routing-table Approval,
@@ -123,9 +102,7 @@ Extensions become top-level custom properties according to the standard:
 ```
 
 `data` is the event payload. Top-level `projectid`, `issue`, `epic`,
-`workflowrunid`, and similar properties come from business-lineage extensions
-in
-[`CloudEventLineage`](../packages/server/src/Mohist.Server/Infrastructure/Events/CloudEventLineage.cs).
+`workflowrunid`, and similar properties come from business-lineage extensions.
 They are the only authority for downstream business location and receive no
 second transformation.
 
@@ -166,8 +143,8 @@ status when available, duration, and error summary for Web and CLI inspection.
 Delivery uncertainty is visible rather than silent. A 2xx response succeeds
 and writes no record.
 
-> Automatic retry, outbox, successful-delivery history, manual redelivery, and
-> test delivery belong to a later slice outside v1.
+Automatic retry, successful-delivery history, manual redelivery, and test
+delivery are outside v1.
 
 ## Examples
 
@@ -192,16 +169,6 @@ mo webhook subscription create my-fine-hook \
   --target-url 'https://ci.internal/mohist'
 ```
 
-```text literal
-mo webhook subscription list
-mo webhook subscription view <id>
-mo webhook subscription edit <id> --event ... --target-url '...'
-mo webhook subscription disable <id>
-mo webhook subscription enable <id>
-mo webhook subscription delete <id> --yes
-mo webhook subscription failures [--subscription-id <id>]
-```
-
 After a matching `issue.completed` event, the receiver gets:
 
 ```http
@@ -222,12 +189,9 @@ event, `issue`, `epic`, and `workflowrunid` identify its business location, and
 The v1 contract is implemented: general HTTP, configurable endpoint
 authentication with none, bearer, basic, and custom; event selection with CEL
 as an advanced filter; the CloudEvents media type; 2xx success semantics; and
-failure records containing HTTP status and duration. Migration
-`20260802000000_WebhookV1AuthAndEvents` backfills old subscriptions with
-`AuthType=none`, `EventSelectionMode=all`, and `EventTypes=[]`. Old HMAC
-signature secrets remain readable, so behavior does not change silently.
+failure records containing HTTP status and duration. Existing subscriptions can
+still use their HMAC signature secret, so behavior does not change silently.
 
-Explicitly outside v1 and reserved for later slices: test delivery; successful
-and failed delivery-attempt history; manual redelivery; a Web management UI;
-automatic retry and outbox; and a Mohist-specific signature protocol with key
-rotation.
+V1 does not include test delivery, successful-delivery history, manual
+redelivery, a Web management UI, automatic retry, or a Mohist-specific signature
+protocol with key rotation.

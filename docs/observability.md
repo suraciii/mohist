@@ -52,11 +52,3 @@ manually to discover a problem.
 
 Run `mo otel status` to see whether observation is `healthy`, `degraded`, or
 `off`, and to inspect current resource protection.
-
-## Status
-
-Built-in traces, metrics, bounded route diagnostics, runtime status, and the
-application log contract are implemented. They let a user detect and inspect a
-problem without making observation part of the work path. Automatic anomaly
-notifications are not implemented, so users must still inspect status instead
-of receiving a proactive notice.

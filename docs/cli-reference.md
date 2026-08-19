@@ -5,10 +5,6 @@ operational language. Commands express intent, help provides the exact syntax
 for the current version, and Skills add decision rules that are specific to
 Mohist.
 
-This document defines the target product. The final section lists current
-implementation gaps. Until the migration is complete, the local `mo --help`
-output is the executable authority.
-
 ## Product Contract
 
 - **Predictable**: A resource and an action imply the command. Each capability
@@ -37,13 +33,19 @@ mo run --help
 mo run retry --help
 ```
 
-| Level | Question | Contents |
-|---|---|---|
-| Root help | What capabilities exist? | A task-grouped command index, one sentence for each group, and a few starting examples |
-| Command-group help | Which action applies? | The resource boundary, action list, and commonly confused adjacent resources |
-| Leaf help | How do I run this command correctly? | Result, usage, arguments, state preconditions, JSON fields, and two or three examples |
-| `mo help <topic>` | Which rules are shared by multiple commands? | Cross-cutting conventions such as `output`, `environment`, and `exit-codes` |
-| Mohist Skill | What is the correct next action in this situation? | Initial reads, recovery decisions, scenario Skill routing, and a small set of strict rules |
+Each level answers one question:
+
+- Root help: what capabilities exist? A task-grouped command index, one
+  sentence for each group, and a few starting examples.
+- Command-group help: which action applies? The resource boundary, action
+  list, and commonly confused adjacent resources.
+- Leaf help: how do I run this command correctly? Result, usage, arguments,
+  state preconditions, JSON fields, and two or three examples.
+- `mo help <topic>`: which rules are shared by multiple commands?
+  Cross-cutting conventions such as `output`, `environment`, and `exit-codes`.
+- Mohist Skill: what is the correct next action in this situation? Initial
+  reads, recovery decisions, scenario Skill routing, and a small set of strict
+  rules.
 
 Help must not show internal service names, communication paths, source
 locations, historical Issues, or migration aliases. It describes the current
@@ -84,17 +86,20 @@ need all three commands for symmetry. User shell aliases are not part of the
 
 ### Verb Vocabulary
 
-| Intent | Canonical Verb | Rule |
-|---|---|---|
-| List resources | `list` | Returns a collection |
-| View one resource | `view` | Returns the current state of one resource |
-| Create an independent resource | `create` | Creates a resource with a stable identity |
-| Modify a resource | `edit` | Changes properties of an existing resource |
-| Delete permanently | `delete` | The resource stops existing |
-| Join or leave a collection | `add` / `remove` | Does not delete the linked object |
-| Soft delete and recovery | `archive` / `restore` | Preserves identity and history |
-| Key-value configuration | `get` / `set` / `unset` | Provides only the key-value behavior defined for that resource, without adding commands for symmetry |
-| Domain action | `start`, `approve`, `retry`, and others | Uses Mohist state-transition language directly |
+- `list`: returns a collection.
+- `view`: returns the current state of one resource.
+- `create`: creates an independent resource with a stable identity.
+- `edit`: changes properties of an existing resource.
+- `delete`: deletes permanently; the resource stops existing.
+- `add` / `remove`: join or leave a collection without deleting the linked
+  object.
+- `archive` / `restore`: soft delete and recovery; preserves identity and
+  history.
+- `get` / `set` / `unset`: key-value configuration; provides only the
+  key-value behavior defined for that resource, without adding commands for
+  symmetry.
+- Domain actions such as `start`, `approve`, and `retry` use Mohist
+  state-transition language directly.
 
 `retry`, `rerun`, `pause`, and `stop` are not synonyms:
 
@@ -131,12 +136,16 @@ two meanings:
 
 Root help groups commands by user task. It must not show one long, flat list.
 
-| Group | Command Groups | Managed Objects |
-|---|---|---|
-| Work | `project`, `repo`, `workspace`, `issue`, `epic`, `label` | Project space, execution environments, work items, and organization relationships |
-| Automation | `workflow`, `run`, `agent`, `session`, `activity`, `routing`, `webhook` | Workflow definitions and execution, Agent work, conversations, Project activity, and outbound webhook subscriptions |
-| Operations | `runner`, `server`, `service`, `event`, `audit`, `github`, `slack`, `notification`, `otel`, `auth` | Execution resources, Server, integrations, event delivery, observability, and credentials |
-| Tools | `help`, `skill`, `install`, `update`, `info` | Help topics, Skills, installation, and maintenance |
+- Work: `project`, `repo`, `workspace`, `issue`, `epic`, `label` manage Project
+  space, execution environments, work items, and organization relationships.
+- Automation: `workflow`, `run`, `agent`, `session`, `activity`, `routing`,
+  `webhook` manage Workflow definitions and execution, Agent work,
+  conversations, Project activity, and outbound webhook subscriptions.
+- Operations: `runner`, `server`, `service`, `event`, `audit`, `github`,
+  `slack`, `notification`, `otel`, `auth` manage execution resources, Server,
+  integrations, event delivery, observability, and credentials.
+- Tools: `help`, `skill`, `install`, `update`, `info` cover Help topics,
+  Skills, installation, and maintenance.
 
 ### Core Command Groups
 
@@ -145,41 +154,59 @@ Similar actions on adjacent resources are not enough reason to add a command.
 A symmetric command without an independent scenario and semantics does not
 enter the language.
 
-| Command Group | Canonical Actions |
-|---|---|
-| `project` | `list`, `view`, `create`, `use`, `delete`; `workflow set-default`; `workflow prompt get/set/clear/preview`; `repo set-default`; `variable list/get/set/unset` |
-| `repo` | `list`, `create`, `edit`, `delete` |
-| `workspace` | `list`, `view`, `create`, `close`; `repo add/remove` |
-| `issue` | `list`, `view`, `create`, `edit`, `start`, `done`, `close`, `reopen`, `archive`, `restore`, `rebase`, `diff`, `commits`, `logs`, `events`; `comment create`; `prereq add/remove`; `template list/view`; `variable list/get/set/unset`; `watch list/add/remove` |
-| `epic` | `list`, `view`, `create`, `edit`, `add`, `remove`, `start`, `pause`, `resume`, `done`, `close`, `reopen` |
-| `label` | `list`, `create`, `edit`, `delete` |
-| `workflow` | `list`, `view`, `create`, `edit`, `delete`, `validate`; `view --yaml` reads the raw Workflow Definition |
-| `run` | `list`, `view`, `watch`, `approve`, `reject`, `retry`, `rerun`, `pause`, `resume`, `stop`; `view --yaml` reads the current Definition of the Profile bound to the Run; `feedback list/view`; `variable list/get/set/unset`, where `list/get --effective` reads merged values |
-| `agent` | `list`, `view`, `start`, `create`, `edit`, `archive`, `restore`, `launch`, `spawn`, `install`; `job list/view`; `subscription list/create/edit/delete`; read-only `model list --runtime` |
-| `session` | `list`, `tree`, `view`, `transcript`, `followup`, `compact`, `reset`, `stop`, `detach`; `schedule create/list/cancel` |
-| `activity` | `list` |
-| `routing` | `rule list/view/create/edit/archive/move`; `test` evaluates the complete routing table |
+- `project`: `list`, `view`, `create`, `use`, `delete`;
+  `workflow set-default`; `workflow prompt get/set/clear/preview`;
+  `repo set-default`; `variable list/get/set/unset`.
+- `repo`: `list`, `create`, `edit`, `delete`.
+- `workspace`: `list`, `view`, `create`, `close`; `repo add/remove`.
+- `issue`: `list`, `view`, `create`, `edit`, `start`, `done`, `close`,
+  `reopen`, `archive`, `restore`, `rebase`, `diff`, `commits`, `logs`,
+  `events`; `comment create`; `prereq add/remove`; `template list/view`;
+  `variable list/get/set/unset`; `watch list/add/remove`.
+- `epic`: `list`, `view`, `create`, `edit`, `add`, `remove`, `start`, `pause`,
+  `resume`, `done`, `close`, `reopen`.
+- `label`: `list`, `create`, `edit`, `delete`.
+- `workflow`: `list`, `view`, `create`, `edit`, `delete`, `validate`;
+  `view --yaml` reads the raw Workflow Definition.
+- `run`: `list`, `view`, `watch`, `approve`, `reject`, `retry`, `rerun`,
+  `pause`, `resume`, `stop`; `view --yaml` reads the current Definition of the
+  Profile bound to the Run; `feedback list/view`;
+  `variable list/get/set/unset`, where `list/get --effective` reads merged
+  values.
+- `agent`: `list`, `view`, `start`, `create`, `edit`, `archive`, `restore`,
+  `launch`, `spawn`, `install`; `job list/view`;
+  `subscription list/create/edit/delete`; read-only `model list --runtime`.
+- `session`: `list`, `tree`, `view`, `transcript`, `followup`, `compact`,
+  `reset`, `stop`, `detach`; `schedule create/list/cancel`.
+- `activity`: `list`.
+- `routing`: `rule list/view/create/edit/archive/move`; `test` evaluates the
+  complete routing table.
 
 ### Operations and Tool Command Groups
 
-| Command Group | Canonical Actions |
-|---|---|
-| `runner` | `list`, `view`, `status`, `revoke` |
-| `audit` | `list` |
-| `auth` | `login`, `logout`, `status`; `token list/create/revoke` |
-| `server` | `status`, `health`, `info`, `logs` |
-| `service` | `start`, `stop`, `restart`, `status`, `logs`, `uninstall`, with target `server`, `runner`, or `slack` |
-| `event` | `tail`; `dead-letter list/redeliver` |
-| `webhook` | `event-types`; `subscription list/view/create/edit/enable/disable/delete/rotate-secret/failures` |
-| `github` | `connect`; `edit` for feed policy and approver list |
-| `notification` | `setup` |
-| `slack` | `setup`, `status`, `install-agent`; `list`, `view`, `claim-owner`, `edit`, `transfer-owner`, `enable`, `disable`, `remove-binding`, `permanent-delete`; `message send`; `deliveries`, `resend-delivery`, `clear-gap`, `reconcile-create`, `reconcile-delete` |
-| `otel` | `status`, `query <sql>`, `traces`; `query` runs through the Server and supports `--json <fields>` field selection |
-| `skill` | `list`, `view`, `install`, `path`, `sync` |
-| `help` | Views shared rules such as `output`, `environment`, and `exit-codes` |
-| `install` | Installs `server`, `runner`, or `slack` |
-| `update` | Updates all components or one selected component |
-| `info` | Shows the local CLI, installation source, and effective environment |
+- `runner`: `list`, `view`, `status`, `revoke`.
+- `audit`: `list`.
+- `auth`: `login`, `logout`, `status`; `token list/create/revoke`.
+- `server`: `status`, `health`, `info`, `logs`.
+- `service`: `start`, `stop`, `restart`, `status`, `logs`, `uninstall`, with
+  target `server`, `runner`, or `slack`.
+- `event`: `tail`; `dead-letter list/redeliver`.
+- `webhook`: `event-types`;
+  `subscription list/view/create/edit/enable/disable/delete/rotate-secret/failures`.
+- `github`: `connect`; `edit` for feed policy and approver list.
+- `notification`: `setup`.
+- `slack`: `setup`, `status`, `install-agent`; `list`, `view`, `claim-owner`,
+  `edit`, `transfer-owner`, `enable`, `disable`, `remove-binding`,
+  `permanent-delete`; `message send`; `deliveries`, `resend-delivery`,
+  `clear-gap`, `reconcile-create`, `reconcile-delete`.
+- `otel`: `status`, `query <sql>`, `traces`; `query` runs through the Server
+  and supports `--json <fields>` field selection.
+- `skill`: `list`, `view`, `install`, `path`, `sync`.
+- `help`: views shared rules such as `output`, `environment`, and
+  `exit-codes`.
+- `install`: installs `server`, `runner`, or `slack`.
+- `update`: updates all components or one selected component.
+- `info`: shows the local CLI, installation source, and effective environment.
 
 Only leaf help contains the complete argument list. Root help and this command
 map do not copy every flag.
@@ -199,12 +226,13 @@ mo agent subscription edit <agent> <subscription-id> [--name <name>] [--match <e
 mo agent subscription delete <agent> <subscription-id> [--project <project>]
 ```
 
-Create and edit use the stable fields `id`, `projectId`, `agentId`, `name`,
-`match`, `responsePrompt`, `continue`, `position`, `status`, `createdAt`, and
-`updatedAt`. Subscription status is `active` or `archived`. Delete confirmation
-uses `status: deleted`. A list also returns `subscriptions`, `state`,
-`agentStatus`, `readiness`, and `connection`. `state` can be `configured`,
-`empty`, `unconfigured`, `unavailable`, or `no_connection`.
+Create and edit return one subscription resource; its stable fields include
+`id`, `name`, `match`, `responsePrompt`, `continue`, and `status`.
+Subscription status is `active` or `archived`. Delete confirmation uses
+`status: deleted`. A list also returns the collection `state` — one of
+`configured`, `empty`, `unconfigured`, `unavailable`, or `no_connection` —
+plus the Agent's `agentStatus`, `readiness`, and `connection`. Leaf help lists
+the complete selectable field catalog.
 
 An empty list is a successful result and does not mean the Agent is missing. A
 request failure remains a failure and returns a nonzero exit code.
@@ -302,7 +330,7 @@ the mutually exclusive `--value-json <json>` instead. An Agent therefore does
 not need to guess whether shell text is converted automatically:
 
 ```bash
-mo project variable set agent.model openai/gpt-5
+mo project variable set agent.model provider-a/model-a
 mo issue variable set 42 review.strict --value-json true --stage check
 mo issue variable unset 42 review.strict --stage check
 mo run variable get --issue 42 agent.model --effective --stage check
@@ -360,13 +388,12 @@ addressable, continuing conversation. It contains messages, context, and usage.
 The CLI must not use Session state as the AgentJob result. It must not interpret
 Job completion as a closed conversation or a delivered user goal.
 
-<<<<<<< HEAD
 - `mo agent start --prompt <task>` is the default task-first path when you
   have work but do not need a preconfigured Agent. It creates the Agent and
   launches its first AgentJob, AgentSession, SessionInput, and AgentTurn in one
   accepted request. Use `--prompt-file` instead of `--prompt`, and optionally
-  pass `--attach`, `--name`, `--runtime`, `--model`, `--variant`, `--issue`,
-  `--epic`, `--repo`, and `--workspace`. A Project default execution
+  pass `--attach`, `--name`, `--runtime`, `--model`, `--reasoning-effort`,
+  `--variant`, `--issue`, `--epic`, `--repo`, and `--workspace`. A Project default execution
   configuration supplies omitted execution hints; without one, pass the
   execution hints explicitly. `--runtime` accepts `opencode` or `pi`, and
   `--model` uses `provider/model`. The command sends the CLI launch origin and
@@ -387,29 +414,19 @@ Job completion as a closed conversation or a delivered user goal.
   request. After a lost response, the caller must retry with that key.
 - `mo agent create/edit` remains the deliberate definition-first configuration
   path. It configures an Agent with typed `--runtime`, `--model`,
-  `--variant`, `--skills`, and `--max-concurrent-runs` flags. `--avatar-file`
-=======
-- `mo agent launch <agent>` creates an AgentJob, AgentSession, first
-  SessionInput, and first AgentTurn. It returns stable Agent, Job, Session,
-  Input, Turn, Workspace, and target identities, plus the canonical Session URL,
-  transcript URL, and composite observation URL. `--workspace <name>` binds the
-  new Session to an existing Workspace. Without it, the command binds the
-  current Project default Workspace. See [Workspace](#workspace). The command
-  accepts `--idempotency-key`. When omitted, it prints a generated key before
-  the request. After a lost response, the caller must retry with that key.
-- `mo agent create/edit` configures an Agent with typed `--runtime`, `--model`,
-  `--variant`, `--reasoning-effort`, `--skills`, and `--max-concurrent-runs` flags. `--avatar-file`
->>>>>>> f33dd4c57 (T-008: add catalog-driven effort Web surfaces and docs)
+  `--variant`, `--reasoning-effort`, `--skills`, and
+  `--max-concurrent-runs` flags. `--avatar-file`
   supplies the avatar. Mutually exclusive `--instructions` or
   `--instructions-file` supplies Instructions. `--runtime` accepts only
   `opencode` or `pi`. `--skills` must contain at least one nonempty Skill name.
   An empty string does not clear Skills; `edit` must use `--clear-skills`
   explicitly. `--avatar-file` reads a UTF-8 avatar URL or data URI. The caller
   does not need to construct Agent config JSON. The `--agent-config`
-  passthrough is retired, and the old entry point returns migration guidance.
+  surface has no generic Agent-config JSON input.
   `edit` clears fields with `--clear-runtime`, `--clear-model`,
-  `--clear-variant`, `--clear-reasoning-effort`, `--clear-avatar`, `--clear-skills`, and
-  `--clear-max-concurrent-runs`. Set and clear options are mutually exclusive.
+  `--clear-variant`, `--clear-reasoning-effort`, `--clear-avatar`,
+  `--clear-skills`, and `--clear-max-concurrent-runs`. Set and clear options are
+  mutually exclusive.
   `mo agent view` shows unified Readiness, configuration gaps, and current
   execution availability. The concurrency limit constrains launch and
   follow-up immediately but does not stop an execution that is already running.
@@ -679,12 +696,10 @@ hint: start it with `mo issue start 42`
 
 Exit codes are small and stable:
 
-| Code | Meaning |
-|---|---|
-| `0` | Success |
-| `1` | Operation failure, disallowed state, or unavailable service |
-| `2` | Command or argument usage error |
-| `130` | User interruption |
+- `0`: success.
+- `1`: operation failure, disallowed state, or unavailable service.
+- `2`: command or argument usage error.
+- `130`: user interruption.
 
 `--json` does not change errors to another envelope. The caller always uses the
 exit code for success or failure and reads the same diagnostic from stderr.
@@ -711,7 +726,7 @@ mo session transcript session_abc123
 mo issue comment create 42 --body-file -
 
 # Change Variables for the current Run. A later attempt uses the new value.
-mo run variable set --issue 42 agent.model openai/gpt-5
+mo run variable set --issue 42 agent.model provider-a/model-a
 mo run variable get --issue 42 agent.model --effective --stage check
 
 # Distinguish a remote Runner resource from the local Runner service.
@@ -740,92 +755,8 @@ generated by the current binary instead of a stale copy.
 
 ## Implementation Gaps
 
-### Spec First, Implementation Follows
-
-- `agent restore`.
+- `agent restore` is not implemented.
 - The `github` command group declares `connect` and `edit` for connection
-  changes. The current implementation uses `update`; it must converge on
-  `edit` according to the verb vocabulary.
-
-### Completed
-
-- The Issue field catalog is complete. `issue view/list --json` includes `risk`,
-  `prereq`, `epic`, `createdAt`, and `updatedAt`. `issue list` supports the
-  `--epic` filter. `issue edit` supports `--risk`, which `create` already had.
-  Dependency Issue reads include Epic membership and prerequisites.
-- Agent create and edit use typed Runtime, model, variant, avatar, Skill, and
-  concurrency flags. Readiness reports the resolved configuration, and the old
-  `--agent-config` passthrough is retired.
-- The Epic field catalog reflects real fields and includes `progress`, with
-  `nextIssueNumber` and `nextIssueReason`.
-- Input channels are unified. `workflow create/edit --file` replaces
-  `--yaml <source|@file>`. File flags such as `--stage-models-file` are complete.
-  The `@<file>` form is retired everywhere.
-- `routing test --last` changed to `--limit`.
-  `agent launch --repository` changed to `--repo`.
-- Short flags use the allowlist `-l/-p/-b/-m/-y/-f/-n/-v` and appear in leaf
-  help. The old `-s/-d/-u/-i` flags are removed. `-b` is no longer reused for
-  `--base-branch`; it belongs only to `--body`. Skill examples no longer use
-  `-d` or `-p` for the old meanings.
-- Argument definitions declare mutual exclusion and leaf help shows it. This
-  includes `--all/--archived`, `--before/--after`, `--feedback/--latest`,
-  `--yaml/--json`, and
-  `--inherit-workflow-profile/--workflow-profile`.
-- Bare `--json` field discovery occurs before other argument validation. The
-  current `session list --json` behavior still reports a missing filter first.
-- The root `slack` command group and its `setup` and `status` actions are
-  delivered. Integration actions use only the `mo slack` command surface.
-- The local `mo slack setup` and `mo slack install-agent` guides and the managed
-  `mo install/update/service ... slack` service are delivered. The guides
-  resume idempotently from durable progress, create and configure Apps
-  automatically, and stop only for Slack installation confirmation and local
-  credential input. Low-level `configure-manager`, `create`, `configure`,
-  `create-child-app`, and `rotate-credentials` actions are removed. Rerunning
-  `setup` or `install-agent` rotates credentials.
-- Agent launch and follow-up return stable SessionInput and AgentTurn identities.
-  Slack input also retains the Server-generated reply anchor and collaboration
-  context.
-- Every mutation that returns a resource accepts `--json`, including Agent
-  create, edit, and archive. `issue rebase` returns a queued response instead of
-  a resource and is not in this category.
-- `project repo set-default` replaces `repo set-default`.
-- JSON FIELDS for commands such as `project workflow prompt` use real field
-  catalogs, with no fallback default field set.
-- `issue workflow status/timeline` was retired with issue #498. Run reads use
-  `run`.
-- The `runner`, `server`, and `service` layers have separate responsibilities.
-  `runner` represents only Server-registered remote execution resources through
-  `list/view/status`. `server` represents only the current Mohist Server
-  application through `status/health/info/logs`; its `logs` are application
-  logs. Managed local processes use `mo service <verb> server|runner`, and the
-  target adds the optional `slack` service. `project status` moved to
-  `server status`. `system logs` merged into `server logs`, and the `system`
-  command group is retired.
-- Agent launch exposes stable Job and Session identities.
-  `mo agent launch <agent>` is directly under `agent`, not
-  `agent session launch`. It prints stable Job and Session IDs and their read
-  commands. `agent job view` accepts the Job ID directly without conversion.
-- AgentSession conversations use the root `mo session` surface. `view`,
-  `transcript`, `followup`, `compact`, `reset`, and `stop` use a stable Session
-  ID regardless of whether Agent launch or a Workflow Run created the Session.
-  `list` requires one of `--agent <agent>`, `--issue <number>`, or
-  `--run <run-id>`. Mohist does not create duplicate `mo issue session` and
-  `mo agent session` capabilities. `mo issue sessions <number>` and
-  `mo agent session ...` are retired and return command-not-found.
-- `workflow` manages Project-scoped Workflow Profiles, while `run` manages
-  WorkflowRun execution and control. Their help links to each other. Run control
-  verbs exist only under `run`; `--issue` selects a Run by Issue number.
-- Resource reads and changes use `view` and `edit`. `show`, `get`, and `update`
-  are retired, fail parsing, and exit with `2`.
-- The root `opencode` and generic `config` entries are removed. The model
-  catalog is available through `agent model list --runtime`.
-- An unknown area or action returns usage error `2`, shows only the nearest
-  relevant usage, and does not fall back to root help with a successful exit.
-- Project scope and output modes are unified. Project-scoped commands share
-  `--project <name-or-id>`, and resource results share field-selecting `--json`.
-- Project Prompt is implemented through
-  `project workflow prompt get/set/clear/preview`.
-- `run view --yaml` reads the current Definition of the Profile bound to the Run
-  and is mutually exclusive with `--json`.
+  changes. The current implementation uses `update` instead of `edit`.
 
 Implementation source: `packages/cli/`.

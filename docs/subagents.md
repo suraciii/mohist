@@ -133,24 +133,12 @@ Context rules:
 
 ## Messages Between Parent and Child
 
-```text diagram
-                 terminal report (automatic pointer)
-  [Child] ----------------------------------------------> [Parent]
-
-  [Parent] -- steer ------------------------------------> [Child]
-  [Parent] <-- request help ----------------------------- [Child]
-                    Both use mo session followup.
-
-  mo session stop S1 --idempotency-key <key>
-                         -> stop active work in the current subtree
-  mo session detach S3  -> detach S3 and exempt it from the cascade
-```
-
-| Message | Direction | Method |
-|---|---|---|
-| Terminal report | Child -> Parent, automatic | When the child's first delegation ends, the parent receives an Input that identifies the child session, result, and result location |
-| Steer | Parent -> Child, active | `mo session followup` |
-| Request help | Child -> Parent, active | `mo session followup`; the child learns its parent session during spawn |
+Three messages flow between parent and child. A terminal report goes from
+child to parent automatically: when the child's first delegation ends, the
+parent receives an Input that identifies the child session, its result, and
+the result location. A steer goes from parent to child, and a request for help
+goes from child to parent; both use `mo session followup`, and the child
+learns its parent session during spawn.
 
 A terminal report is only a pointer. The parent retrieves details from the
 transcript, working directory, and git state. The Input wakes an idle parent and
@@ -176,17 +164,9 @@ Sessions added or detached during pagination appear only in a new read.
   still attached below it at that time. A queued Turn ends locally; a running
   Turn ends after Runtime confirmation; both are recorded cancelled. The
   sessions remain and can be continued explicitly later. An unconfirmed stop
-  result is shown accurately and can be retried.
-
-  When stop, attachment of a new child, and detach occur concurrently, the
-  operation that actually completes first determines scope. A subtree detached
-  first is outside the stop. A subtree recorded in stop scope first remains in
-  that stop even if it detaches later. An attached child is included. A new
-  spawn request first observed during stop remains validation-pending with no
-  child artifacts; retry the same idempotency key after stop finishes. A spawn
-  plan that already reserved attachment but loses the final race to the stop is
-  rejected durably; a later delegation then needs a new key. Retrying the stop
-  itself always reuses its frozen scope.
+  result is shown accurately and can be retried. Stop, detach, and spawn can
+  race; [Subagent Design](../design/subagents.md) defines how the Session
+  owner arbitrates them.
 
 ```bash
 mo session stop <session-id> --idempotency-key <key>
