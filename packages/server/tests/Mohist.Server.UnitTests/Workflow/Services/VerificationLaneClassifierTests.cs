@@ -90,6 +90,22 @@ public sealed class VerificationLaneClassifierTests
     }
 
     [Fact]
+    public void Classify_SuccessReportWithTimeoutError_IsTimeout()
+    {
+        var outcome = VerificationLaneClassifier.Classify(
+            VerificationLaneCatalog.VerifyDotnet,
+            new TaskReport(
+                WorkId: "verify-dotnet.1",
+                Status: TaskReportStatus.Succeeded,
+                Output: null,
+                Artifacts: null,
+                Detail: "timeout was reported by the execution boundary",
+                Error: new ExecutionError("timeout", "Command exceeded its budget")));
+
+        Assert.Equal(VerificationLaneOutcome.Timeout, outcome);
+    }
+
+    [Fact]
     public void Classify_NormalScriptFailure_IsFail()
     {
         var outcome = VerificationLaneClassifier.Classify(

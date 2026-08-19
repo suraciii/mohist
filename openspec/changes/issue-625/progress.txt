@@ -72,3 +72,10 @@ Implemented T-001 end to end on top of the plan-review fixes above.
 - Updated those two tests to use the existing in-memory OTLP handler through `ConfigureTelemetry` while preserving exporter protocol/endpoint assertions. The affected project builds with 0 warnings/errors; the two methods now take about 49ms and 5ms, and the full registration class passes 8/8 in 213ms.
 - A subsequent canonical attempt was interrupted by concurrent/stale processes from other workspaces: the server-spec lane reached the suite cutoff without a report. After those processes ended, the same one-partition lane passed all 3,885 tests in 145.171s.
 - Final clean `npm run verify` passed: all 9 duration tracks passed with 0 failing, 0 cancelled, and 0 timed out; server-spec passed 3,885/3,885 with p95 183.1ms. The final Runner/Web/Slack, Server, definition, unit, architecture, and integration checks also passed.
+
+# Progress: T-001 boundary audit fixes
+
+- Snapshot-backed `LoadStageSpecsAsync` and grain stage/lock resolution now fail from the persisted `BoundWorkflowDefinitionJson` when a requested stage is absent or the snapshot is unreadable; they cannot fall through to the current profile provider. Added a mixed-state spec with an edited current profile to pin this boundary.
+- Verification classification now gives `error.code=timeout` precedence over the outer task report status, including malformed successful timeout envelopes, while `TaskReportStatus` remains unchanged.
+- Missing lane status placeholders derive their configured budget from the bound build definition, and artifact-enriched task status views retain additive lane metadata.
+- Verification after these fixes: all 2,835 Server unit tests, all 3,886 Server specification tests, and `dotnet build Mohist.sln --no-restore -p:SkipWebBuild=true` passed with zero build warnings/errors.

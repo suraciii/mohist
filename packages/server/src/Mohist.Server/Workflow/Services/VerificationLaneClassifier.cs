@@ -31,26 +31,26 @@ public static class VerificationLaneClassifier
     {
         if (!IsRecognizedLaneTask(definitionId)) return null;
 
+        // A timeout-coded error is authoritative regardless of the outer
+        // report status. Recovery scheduling normally carries addTasks, but
+        // the verification boundary must not turn a timeout envelope or a
+        // malformed successful timeout report into a lane pass.
+        if (string.Equals(report.Error?.Code, "timeout", StringComparison.Ordinal))
+            return VerificationLaneOutcome.Timeout;
+
         if (report.Status == TaskReportStatus.Succeeded)
         {
             // The Runner's recovery scheduling envelope marks outer
             // status=completed with addTasks; that is NOT a lane pass even
             // though the underlying status is "completed". A pass requires a
             // direct successful lane report with no recovery follow-ups.
-            if (report.AddTasks is { Count: > 0 })
-            {
-                return string.Equals(report.Error?.Code, "timeout", StringComparison.Ordinal)
-                    ? VerificationLaneOutcome.Timeout
-                    : VerificationLaneOutcome.Fail;
-            }
-            return VerificationLaneOutcome.Pass;
+            return report.AddTasks is { Count: > 0 }
+                ? VerificationLaneOutcome.Fail
+                : VerificationLaneOutcome.Pass;
         }
 
-        // TaskReportStatus.Failed: distinguish timeout from ordinary failure
-        // via the underlying ExecutionError code. The Runner's core/script
-        // timeout code is `timeout` per the runner timeout contract.
-        if (string.Equals(report.Error?.Code, "timeout", StringComparison.Ordinal))
-            return VerificationLaneOutcome.Timeout;
+        // TaskReportStatus.Failed with any non-timeout error is an ordinary
+        // lane failure. TaskReportStatus has no separate timeout state.
         return VerificationLaneOutcome.Fail;
     }
 }

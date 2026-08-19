@@ -113,8 +113,8 @@ public class WorkflowDefinitionResolver : IScopedService
         string? boundProfileId = null)
     {
         var inMemory = await TryLoadRunAsync(runId);
-        var fromMemory = ResolveFromBoundSnapshot(inMemory, stageId);
-        if (fromMemory is not null) return fromMemory;
+        if (HasBoundSnapshot(inMemory))
+            return ResolveBoundSnapshotStage(inMemory!, stageId);
 
         var template = string.IsNullOrWhiteSpace(boundProfileId)
             ? await LoadTemplateAsync(runId, projectId, issueNumber)
@@ -129,20 +129,27 @@ public class WorkflowDefinitionResolver : IScopedService
         return resolved;
     }
 
-    private static StageDefinition? ResolveFromBoundSnapshot(WorkflowRun? run, string stageId)
+    private static bool HasBoundSnapshot(WorkflowRun? run) =>
+        run is not null && !string.IsNullOrWhiteSpace(run.BoundWorkflowDefinitionJson);
+
+    private static StageDefinition ResolveBoundSnapshotStage(WorkflowRun run, string stageId)
     {
-        if (run is null) return null;
-        if (string.IsNullOrWhiteSpace(run.BoundWorkflowDefinitionJson)) return null;
+        WorkflowDefinition definition;
         try
         {
-            var definition = WorkflowYamlSerializer.FromJson(run.BoundWorkflowDefinitionJson);
-            return definition.Stages
-                .FirstOrDefault(s => string.Equals(s.Stage, stageId, StringComparison.Ordinal));
+            definition = WorkflowYamlSerializer.FromJson(run.BoundWorkflowDefinitionJson!);
         }
-        catch
+        catch (Exception ex)
         {
-            return null;
+            throw new WorkflowDefinitionResolutionException(
+                WorkflowDefinitionResolutionException.ResolutionReason.NoCurrentDefinition,
+                $"Workflow '{run.Id}' has an unreadable BoundWorkflowDefinitionJson: {ex.Message}");
         }
+
+        return definition.Stages.FirstOrDefault(s => string.Equals(s.Stage, stageId, StringComparison.Ordinal))
+            ?? throw new WorkflowDefinitionResolutionException(
+                WorkflowDefinitionResolutionException.ResolutionReason.NoStageDefinition,
+                $"Workflow '{run.Id}' has no definition for stage '{stageId}' in its bound workflow snapshot");
     }
 
     /// <summary>
@@ -159,8 +166,8 @@ public class WorkflowDefinitionResolver : IScopedService
         string stageId,
         WorkflowRun? inMemoryRun)
     {
-        var fromMemory = ResolveFromBoundSnapshot(inMemoryRun, stageId);
-        if (fromMemory is not null) return fromMemory;
+        if (HasBoundSnapshot(inMemoryRun))
+            return ResolveBoundSnapshotStage(inMemoryRun!, stageId);
 
         if (inMemoryRun is not null
             && !string.IsNullOrWhiteSpace(inMemoryRun.WorkflowProfileId)

@@ -48,6 +48,32 @@ public sealed class VerificationLaneStatusProjectionTests
     }
 
     [Fact]
+    public void BuildStatusView_LaneEnabledRun_MissingLanesKeepConfiguredBudgets()
+    {
+        var definition = BuildDefinition(
+            VerificationLaneCatalog.LaneIds
+                .Select(id => new TaskDefinition(
+                    id,
+                    id,
+                    "core/script",
+                    new Dictionary<string, JsonElement?>
+                    {
+                        ["timeout"] = JsonDocument.Parse("120000").RootElement.Clone(),
+                    }))
+                .ToList());
+        var run = CreateRun(definition, WorkflowYamlSerializer.ToJson(definition));
+
+        var view = WorkflowStatusMapper.BuildStatusView(run, definition: null);
+
+        Assert.NotNull(view!.VerificationLanes);
+        Assert.All(view.VerificationLanes!.Lanes, lane =>
+        {
+            Assert.Equal("pending", lane.Outcome);
+            Assert.Equal(120000, lane.ConfiguredBudgetMs);
+        });
+    }
+
+    [Fact]
     public void BuildStatusView_LaneEnabledRun_AllPassing()
     {
         var run = CreateLaneEnabledRun();

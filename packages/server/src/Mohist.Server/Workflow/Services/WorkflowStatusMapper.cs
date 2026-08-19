@@ -312,6 +312,7 @@ public static class WorkflowStatusMapper
         if (!VerificationLaneGate.IsLaneEnabledRun(run)) return null;
 
         var byLaneId = VerificationLaneGate.AuthoritativeLaneAttempts(run);
+        var configuredBudgets = BoundLaneBudgets(run);
         var ordered = new List<VerificationLaneView>(VerificationLaneCatalog.LaneIds.Count);
         string? firstNonPassing = null;
         foreach (var laneId in VerificationLaneCatalog.LaneIds)
@@ -335,12 +336,13 @@ public static class WorkflowStatusMapper
             else
             {
                 // Pending placeholder preserves the lane's catalog order and
-                // budget so downstream consumers can render a complete six-lane
-                // summary even before every lane attempt materializes.
+                // configured budget from the bound definition so downstream
+                // consumers can render a complete six-lane summary even before
+                // every lane attempt materializes.
                 ordered.Add(new VerificationLaneView(
                     laneId,
                     order,
-                    ConfiguredBudgetMs: 0,
+                    configuredBudgets.TryGetValue(laneId, out var budget) ? budget : 0,
                     Outcome: VerificationLaneOutcome.Pending.WireValue(),
                     TaskRunId: string.Empty));
                 firstNonPassing ??= laneId;
@@ -351,6 +353,32 @@ public static class WorkflowStatusMapper
             AllPassing: firstNonPassing is null,
             FirstNonPassingLane: firstNonPassing,
             Lanes: ordered);
+    }
+
+    private static IReadOnlyDictionary<string, int> BoundLaneBudgets(WorkflowRun run)
+    {
+        if (string.IsNullOrWhiteSpace(run.BoundWorkflowDefinitionJson))
+            return new Dictionary<string, int>(StringComparer.Ordinal);
+
+        try
+        {
+            var definition = WorkflowYamlSerializer.FromJson(run.BoundWorkflowDefinitionJson);
+            var build = definition.Stages.FirstOrDefault(stage =>
+                string.Equals(stage.Stage, "build", StringComparison.Ordinal));
+            if (build is null) return new Dictionary<string, int>(StringComparer.Ordinal);
+
+            var budgets = new Dictionary<string, int>(StringComparer.Ordinal);
+            foreach (var task in build.Tasks)
+            {
+                if (VerificationLaneCatalog.IsKnownLane(task.Id))
+                    budgets.TryAdd(task.Id, TaskRunExtensions.TryGetConfiguredBudgetMs(task.With));
+            }
+            return budgets;
+        }
+        catch
+        {
+            return new Dictionary<string, int>(StringComparer.Ordinal);
+        }
     }
 
     public static TaskLaneView? MapTaskLane(TaskRun task)
