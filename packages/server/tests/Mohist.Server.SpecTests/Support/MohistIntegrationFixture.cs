@@ -50,6 +50,7 @@ public class MohistIntegrationFixture : IAsyncLifetime
     public HttpClient Client { get; private set; } = null!;
     public IServiceProvider Services => _factory.Services;
     public HttpClient CreateClient() => _factory.CreateClient();
+    public WebSocketClient CreateWebSocketClient() => _factory.Server.CreateWebSocketClient();
     public FakeRunnerWorkspaceClient RunnerWorkspace => _factory.Services.GetRequiredService<FakeRunnerWorkspaceClient>();
     public AgentJobDispatchProbe AgentJobDispatches => _factory.Services.GetRequiredService<AgentJobDispatchProbe>();
     public AgentLaunchParticipantProbe LaunchFaults => _factory.Services.GetRequiredService<AgentLaunchParticipantProbe>();
