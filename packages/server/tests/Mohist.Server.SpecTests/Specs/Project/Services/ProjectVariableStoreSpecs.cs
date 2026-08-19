@@ -116,6 +116,42 @@ public sealed class ProjectVariableStoreSpecs : IAsyncLifetime
         Assert.Equal(2, merged.Stages["build"].Vars!.Value.GetProperty("added").GetInt32());
     }
 
+    [Fact]
+    public async Task PatchVariables_PreservesRootAndStageAgentDeletionMarkers()
+    {
+        var initial = new VariableBundle(
+            JsonSerializer.SerializeToElement(new
+            {
+                agent = new { model = "old-model", reasoningEffort = "high", variant = "balanced" },
+            }),
+            new Dictionary<string, StageVariables>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["build"] = new(JsonSerializer.SerializeToElement(new
+                {
+                    agent = new { model = "old-stage-model", reasoningEffort = "max", variant = "fast" },
+                })),
+            });
+        await _store.SetVariablesAsync("proj-delete-agent-options", initial);
+
+        var patch = new VariableBundle(
+            JsonSerializer.SerializeToElement(new
+            {
+                agent = new { model = "new-model", reasoningEffort = (string?)null, variant = (string?)null },
+            }),
+            new Dictionary<string, StageVariables>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["build"] = new(JsonSerializer.SerializeToElement(new
+                {
+                    agent = new { model = "new-stage-model", reasoningEffort = (string?)null, variant = (string?)null },
+                })),
+            });
+
+        var merged = await _store.PatchVariablesAsync("proj-delete-agent-options", patch);
+
+        AssertModelOnly(merged.Vars, "new-model");
+        AssertModelOnly(merged.Stages!["build"].Vars, "new-stage-model");
+    }
+
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
@@ -155,5 +191,13 @@ public sealed class ProjectVariableStoreSpecs : IAsyncLifetime
         Assert.Equal(variant, agent.GetProperty("variant").GetString());
         if (reasoningEffort is not null)
             Assert.Equal(reasoningEffort, agent.GetProperty("reasoningEffort").GetString());
+    }
+
+    private static void AssertModelOnly(JsonElement? vars, string model)
+    {
+        Assert.True(vars.HasValue);
+        var agent = vars.Value.GetProperty("agent");
+        Assert.Single(agent.EnumerateObject());
+        Assert.Equal(model, agent.GetProperty("model").GetString());
     }
 }

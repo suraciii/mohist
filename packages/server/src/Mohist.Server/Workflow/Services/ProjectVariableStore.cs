@@ -54,9 +54,8 @@ public class ProjectVariableStore : IScopedService
     public async Task<VariableBundle> PatchVariablesAsync(string projectId, VariableBundle patch)
     {
         VariableBundleShapeValidator.Validate(patch);
-        var sanitizedPatch = ProjectVariablesFilter.Sanitize(patch);
         var current = await GetVariablesAsync(projectId);
-        var merged = VariableBundle.Patch(current, sanitizedPatch);
+        var merged = VariableBundle.Patch(current, patch);
         return await SetVariablesAsync(projectId, merged);
     }
 }

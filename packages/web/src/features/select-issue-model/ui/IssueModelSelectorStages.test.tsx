@@ -199,6 +199,54 @@ describe('IssueModelSelector per-stage variant chips', () => {
     })
   })
 
+  it('clears the stage true variant when selecting Pi effort for another model', async () => {
+    mocks.useWorkflowProfiles.mockReturnValue({
+      data: [{ id: 'team/pi', displayName: 'Pi workflow', description: '', isDefault: false, agentRuntime: 'pi' }],
+    })
+    mocks.useEffectiveDefaultWorkflowProfile.mockReturnValue({ effectiveTemplateId: 'team/pi' })
+    mocks.useAvailableModelIds.mockReturnValue({
+      data: {
+        models: ['pi/anthropic/claude', 'pi/openai/gpt'],
+        modelVariants: { 'pi/anthropic/claude': ['balanced'] },
+        reasoningEfforts: {
+          'pi/anthropic/claude': ['low'],
+          'pi/openai/gpt': ['high'],
+        },
+      },
+      isLoading: false,
+      error: null,
+    })
+    mocks.getIssueWorkflowVariables.mockResolvedValue({
+      vars: {},
+      stages: {
+        build: {
+          vars: {
+            agent: {
+              model: 'pi/anthropic/claude',
+              reasoningEffort: 'low',
+              variant: 'balanced',
+            },
+          },
+        },
+      },
+    })
+    renderSelector({ currentStageModels: { build: 'pi/anthropic/claude' } })
+
+    openAdvanced()
+    fireEvent.click(await waitFor(() => document.getElementById('issue-stage-model-build') as HTMLElement))
+    fireEvent.click(await screen.findByTestId('issue-stage-model-build-row-pi/openai/gpt-variant-high'))
+
+    await waitFor(() => {
+      expect(mocks.patchIssueWorkflowStageDefinitionVar).toHaveBeenCalledWith(
+        42,
+        'build',
+        'agent',
+        { model: 'pi/openai/gpt', reasoningEffort: 'high', variant: null },
+        'proj_test',
+      )
+    })
+  })
+
   it('highlights the active per-stage variant chip', async () => {
     mocks.useAvailableModelIds.mockReturnValue({
       data: {

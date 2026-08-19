@@ -220,6 +220,48 @@ describe('IssueModelSelector default-model variant chips', () => {
     })
   })
 
+  it('clears the default true variant when selecting Pi effort for another model', async () => {
+    mocks.useWorkflowProfiles.mockReturnValue({
+      data: [{ id: 'team/pi', displayName: 'Pi workflow', description: '', isDefault: false, agentRuntime: 'pi' }],
+    })
+    mocks.useEffectiveDefaultWorkflowProfile.mockReturnValue({ effectiveTemplateId: 'team/pi' })
+    mocks.useAvailableModelIds.mockReturnValue({
+      data: {
+        models: ['pi/anthropic/claude', 'pi/openai/gpt'],
+        modelVariants: { 'pi/anthropic/claude': ['balanced'] },
+        reasoningEfforts: {
+          'pi/anthropic/claude': ['low'],
+          'pi/openai/gpt': ['high'],
+        },
+      },
+      isLoading: false,
+      error: null,
+    })
+    mocks.getIssueWorkflowVariables.mockResolvedValue({
+      vars: {
+        agent: {
+          model: 'pi/anthropic/claude',
+          reasoningEffort: 'low',
+          variant: 'balanced',
+        },
+      },
+      stages: {},
+    })
+    renderSelector({ currentModel: 'pi/anthropic/claude' })
+
+    fireEvent.click(await waitFor(() => screen.getByTestId('issue-coder-model-trigger')))
+    fireEvent.click(await screen.findByTestId('issue-coder-model-variant-pi/openai/gpt-high'))
+
+    await waitFor(() => {
+      expect(mocks.patchIssueWorkflowDefinitionVar).toHaveBeenCalledWith(
+        42,
+        'agent',
+        { model: 'pi/openai/gpt', reasoningEffort: 'high', variant: null },
+        'proj_test',
+      )
+    })
+  })
+
   it('selects the default variant (no variant) when the model body is clicked', async () => {
     mocks.useAvailableModelIds.mockReturnValue({
       data: {

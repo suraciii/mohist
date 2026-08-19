@@ -32,7 +32,7 @@ useMswServer(
   http.get('*/api/projects/:projectId/opencode/models', ({ request }) => {
     const models =
       new URL(request.url).searchParams.get('runtime') === 'pi'
-        ? ['pi/anthropic/claude']
+        ? ['pi/anthropic/claude', 'pi/openai/gpt']
         : ['openai/gpt-4', 'anthropic/claude']
     return HttpResponse.json({
       success: true,
@@ -44,6 +44,7 @@ useMswServer(
         },
         reasoningEfforts: {
           'pi/anthropic/claude': ['low', 'medium', 'high'],
+          'pi/openai/gpt': ['low', 'high'],
         },
       },
     })
@@ -449,6 +450,30 @@ describe('AgentProfileEditor', () => {
         reasoningEffort: 'high',
         runtime: 'pi',
         variant: 'balanced',
+      })
+    })
+
+    it('clears the previous variant when selecting effort for another model', async () => {
+      renderEditor({
+        agent: {
+          ...existingAgent,
+          agentConfig: {
+            runtime: 'pi',
+            model: 'pi/anthropic/claude',
+            reasoningEffort: 'low',
+            variant: 'balanced',
+          },
+        },
+      })
+      fireEvent.click(document.querySelector('#agent-model') as HTMLElement)
+      fireEvent.click(await screen.findByTestId('agent-model-row-pi/openai/gpt-variant-high'))
+      fireEvent.click(screen.getByTestId('editor-save'))
+
+      const updateCall = (mocks.updateMutation.mutate as ReturnType<typeof vi.fn>).mock.calls[0][0]
+      expect(updateCall.data.agentConfig).toEqual({
+        model: 'pi/openai/gpt',
+        reasoningEffort: 'high',
+        runtime: 'pi',
       })
     })
 
