@@ -36,11 +36,8 @@ public class MohistIntegrationCollection : ICollectionFixture<MohistIntegrationF
 [CollectionDefinition("SlackReplyAnchorIngress")]
 public class SlackReplyAnchorIngressCollection : ICollectionFixture<MohistIntegrationFixture>;
 
-[CollectionDefinition("AgentLaunchObservationRoutes", DisableParallelization = true)]
-public class AgentLaunchObservationRoutesCollection : ICollectionFixture<MohistIntegrationFixture>;
-
-[CollectionDefinition("DirectApiJobRead", DisableParallelization = true)]
-public class DirectApiJobReadCollection : ICollectionFixture<MohistIntegrationFixture>;
+[CollectionDefinition("SerialIntegration", DisableParallelization = true)]
+public class SerialIntegrationCollection : ICollectionFixture<MohistIntegrationFixture>;
 
 [CollectionDefinition("PlatformIntegration")]
 public class PlatformIntegrationCollection : ICollectionFixture<MohistIntegrationFixture>;
@@ -56,12 +53,6 @@ public class IssueProfileCollection : ICollectionFixture<MohistIntegrationFixtur
 
 [CollectionDefinition("IntegrationApi")]
 public class IntegrationApiCollection : ICollectionFixture<MohistIntegrationFixture>;
-
-[CollectionDefinition("WorkspaceSpecs", DisableParallelization = true)]
-public class WorkspaceSpecsCollection : ICollectionFixture<MohistIntegrationFixture>;
-
-[CollectionDefinition("PathContractRegression", DisableParallelization = true)]
-public class PathContractRegressionCollection : ICollectionFixture<MohistIntegrationFixture>;
 
 [CollectionDefinition("IntegrationSessions")]
 public class IntegrationSessionsCollection : ICollectionFixture<MohistIntegrationFixture>;
@@ -81,9 +72,6 @@ public class GitHubFeedCollection : ICollectionFixture<GitHubFeedFixture>;
 
 [CollectionDefinition("IntegrationMisc")]
 public class IntegrationMiscCollection : ICollectionFixture<MohistIntegrationFixture>;
-
-[CollectionDefinition("PublicSessionEventStream", DisableParallelization = true)]
-public class PublicSessionEventStreamCollection : ICollectionFixture<MohistIntegrationFixture>;
 
 // OTLP/query route specs share one OtlpRoutesWebApplicationFactory (web host
 // + in-memory silo). Tests reset the otel

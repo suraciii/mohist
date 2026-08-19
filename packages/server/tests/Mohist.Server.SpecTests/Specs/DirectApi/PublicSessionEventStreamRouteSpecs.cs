@@ -23,7 +23,7 @@ namespace Mohist.Server.SpecTests.Specs.DirectApi;
 /// reader. These specs exercise the durable journal page shape and the
 /// cursor lifecycle without using the live event bus or UI timeline.
 /// </summary>
-[Collection("PublicSessionEventStream")]
+[Collection("SerialIntegration")]
 public sealed class PublicSessionEventStreamRouteSpecs(MohistIntegrationFixture fixture)
 {
     private static readonly string[] ExecutionKeys =

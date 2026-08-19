@@ -10,7 +10,7 @@ using Xunit;
 
 namespace Mohist.Server.SpecTests.Specs.Api;
 
-[Collection("WorkspaceSpecs")]
+[Collection("SerialIntegration")]
 public class WorkspaceSpecs
 {
     private readonly HttpClient _client;
