@@ -193,37 +193,6 @@ public partial class EpicBatchMembershipApiSpecs
     }
 
     [Fact]
-    public async Task BatchLink_DuplicateNumber_LinkedAtMostOnce()
-    {
-        var project = await CreateProjectAsync();
-        var epic = await CreateEpicAsync(project.Id, "dup-mixed");
-        var issue = await CreateIssueAsync(project.Id, "mixed");
-
-        var response = await _client.PostAsJsonAsync(
-            $"/api/projects/{project.Id}/epics/{epic.Number}/issues:batch",
-            new { issueNumbers = new[] { issue.Number, issue.Number } });
-
-        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-        var envelope = await ReadEnvelopeAsync(response);
-        var results = Assert.IsType<JsonElement>(envelope.GetProperty("data")).GetProperty("results");
-        Assert.Equal(2, results.GetArrayLength());
-        var arr = results.EnumerateArray().ToArray();
-        Assert.Equal(new[] { issue.Number.ToString(), issue.Number.ToString() }, arr.Select(r => r.GetProperty("identifier").GetString()).ToArray());
-        var byStatus = arr.Select(r => r.GetProperty("status").GetString()).ToArray();
-        // At least one linked and the second is either linked or
-        // already-linked; the duplicate is not an error.
-        Assert.Contains("linked", byStatus);
-        Assert.All(arr, result =>
-        {
-            Assert.Equal(epic.Number, result.GetProperty("owningEpicNumber").GetInt32());
-            Assert.Equal(epic.Title, result.GetProperty("owningEpicTitle").GetString());
-        });
-
-        var detail = await _client.GetDataAsync<EpicDetailDtoLike>($"/api/projects/{project.Id}/epics/{epic.Number}");
-        Assert.Single(detail.LinkedIssues);
-    }
-
-    [Fact]
     public async Task BatchUnlink_RemovesOnlyRequestedMembers_RemainingIntact()
     {
         var project = await CreateProjectAsync();

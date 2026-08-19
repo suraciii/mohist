@@ -143,8 +143,11 @@ public sealed class DirectApiFollowupSpecs(MohistIntegrationFixture fixture)
             DirectApiWriteValidation.FollowupFingerprint(sessionId, text),
             mapping.Fingerprint);
         var outcome = JsonDocument.Parse(mapping.Outcome!).RootElement;
+        Assert.Equal(projectId, outcome.GetProperty("projectId").GetString());
         Assert.Equal(firstInputId, outcome.GetProperty("inputId").GetString());
         Assert.Equal(firstTurnId, outcome.GetProperty("turnId").GetString());
+        using var snapshot = JsonDocument.Parse(outcome.GetProperty("snapshotJson").GetString()!);
+        Assert.Equal(firstInputId, snapshot.RootElement.GetProperty("inputId").GetString());
 
         var row = await db.AgentSessions.AsNoTracking().SingleAsync(item => item.Id == sessionId);
         var session = AgentSessionJson.Deserialize(row)!;
@@ -365,34 +368,27 @@ public sealed class DirectApiFollowupSpecs(MohistIntegrationFixture fixture)
         string key,
         string text)
     {
-        var body = await TestWait.ForAsync(
-            probe: async () =>
-            {
-                using var response = await SendAsync(client, projectId, sessionId, key, text);
-                if (response.StatusCode is HttpStatusCode.ServiceUnavailable or HttpStatusCode.NotFound)
-                {
-                    if (response.StatusCode == HttpStatusCode.ServiceUnavailable)
-                    {
-                        var error = await response.Content.ReadAsStringAsync();
-                        using var errorJson = JsonDocument.Parse(error);
-                        Assert.Equal(
-                            DirectApiErrorCodes.ProjectionLag,
-                            errorJson.RootElement.GetProperty("error").GetProperty("code").GetString());
-                    }
-                    return null;
-                }
+        await NudgeProjectorAsync();
+        using (var submitted = await SendAsync(client, projectId, sessionId, key, text))
+        {
+            if (submitted.StatusCode == HttpStatusCode.OK)
+                return JsonDocument.Parse(await submitted.Content.ReadAsStringAsync());
 
-                Assert.Equal(
-                    HttpStatusCode.OK,
-                    response.StatusCode);
-                return await response.Content.ReadAsStringAsync();
-            },
-            isDone: value => value is not null,
-            timeout: TimeSpan.FromSeconds(30),
-            step: TimeSpan.FromMilliseconds(20),
-            description: "follow-up public observation to become projected",
-            advance: () => fixture.Client.GetAsync("/api/health"));
-        return JsonDocument.Parse(body!);
+            Assert.True(
+                submitted.StatusCode == HttpStatusCode.ServiceUnavailable,
+                $"Follow-up submission answered {submitted.StatusCode}: {await submitted.Content.ReadAsStringAsync()}");
+            using var error = JsonDocument.Parse(await submitted.Content.ReadAsStringAsync());
+            Assert.Equal(
+                DirectApiErrorCodes.ProjectionLag,
+                error.RootElement.GetProperty("error").GetProperty("code").GetString());
+        }
+
+        await NudgeProjectorAsync();
+        using var response = await SendAsync(client, projectId, sessionId, key, text);
+        Assert.True(
+            response.StatusCode == HttpStatusCode.OK,
+            $"Follow-up observation answered {response.StatusCode}: {await response.Content.ReadAsStringAsync()}");
+        return JsonDocument.Parse(await response.Content.ReadAsStringAsync());
     }
 
     private static async Task<HttpResponseMessage> SendAsync(
@@ -606,7 +602,7 @@ public sealed class DirectApiFollowupSpecs(MohistIntegrationFixture fixture)
     private async Task NudgeProjectorAsync()
     {
         await using var scope = fixture.Services.CreateAsyncScope();
-        scope.ServiceProvider.GetRequiredService<IPublicProjectionNudge>().Nudge();
+        await scope.ServiceProvider.GetRequiredService<PublicProjectionNudge>().NudgeAndWaitAsync();
     }
 
     private async Task<int> MappingCountAsync()

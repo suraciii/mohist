@@ -130,8 +130,12 @@ downstream-call counts rather than elapsed time.
 An xUnit collection is the scheduling unit. Classes inside one collection run
 serially.
 
+- The complete Server Spec suite runs once in one apphost. CI and the canonical
+  local gate do not split classes across processes.
 - Collections express shared fixture lifetime or real isolation needs, never
   speed or cost.
+- A Spec that no longer needs a distinct clock, database, or cluster joins an
+  existing compatible collection; it does not retain a dedicated host.
 - Process-global instrumentation may disable parallelism. Cluster-scoped state
   is per fixture and is not a reason to serialize.
 - `WebApplicationFactory` and `InProcessTestCluster` use in-memory transport and

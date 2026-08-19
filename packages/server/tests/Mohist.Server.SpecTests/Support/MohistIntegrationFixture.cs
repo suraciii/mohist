@@ -76,6 +76,7 @@ public class MohistIntegrationFixture : IAsyncLifetime
         ConnectionString = $"Data Source={dbName};Mode=Memory;Cache=Shared";
         _keeper = new SqliteConnection(ConnectionString);
         await _keeper.OpenAsync();
+        MigratedSqliteTemplate.CopyTo(_keeper);
 
         _factory = new MohistWebApplicationFactory(
             ConnectionString,

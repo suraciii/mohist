@@ -7,15 +7,15 @@ using Mohist.Server.Infrastructure.Data.Issue;
 using Mohist.Server.Infrastructure.Events;
 using Mohist.Server.Infrastructure.Orleans;
 using Mohist.Server.Issue.Domain.Events;
-using Mohist.Server.SpecTests.Support;
 using Mohist.Server.TestSupport;
+using Mohist.Server.UnitTests.Support;
 using Orleans;
 using Xunit;
 using DomainIssue = Mohist.Server.Issue.Domain.Issue;
 
-namespace Mohist.Server.SpecTests.Specs.Events;
+namespace Mohist.Server.UnitTests.Events;
 
-public class IssueTransactionalEventAppendSpecs : IAsyncLifetime
+public class IssueTransactionalEventAppendTests : IAsyncLifetime
 {
     private const string ProjectId = "proj_issue_txn";
     private readonly TestSqliteDatabase _database;
@@ -23,9 +23,9 @@ public class IssueTransactionalEventAppendSpecs : IAsyncLifetime
     private readonly NullDispatchGrainFactory _grainFactory = new();
     private EventStore _eventStore = null!;
 
-    public IssueTransactionalEventAppendSpecs()
+    public IssueTransactionalEventAppendTests()
     {
-        _database = TestSqliteDatabase.CreateMigrated();
+        _database = TestSqliteDatabase.CreateModelSchema();
         _dbFactory = new TestDbContextFactory(_database.Options);
         _eventStore = new EventStore(_dbFactory, NullLogger<EventStore>.Instance);
     }

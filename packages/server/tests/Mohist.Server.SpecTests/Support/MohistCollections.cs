@@ -85,9 +85,6 @@ public class IntegrationMiscCollection : ICollectionFixture<MohistIntegrationFix
 [CollectionDefinition("PublicSessionEventStream", DisableParallelization = true)]
 public class PublicSessionEventStreamCollection : ICollectionFixture<MohistIntegrationFixture>;
 
-[CollectionDefinition("RunnerEnrollment")]
-public class RunnerEnrollmentCollection : ICollectionFixture<MohistIntegrationFixture>;
-
 // OTLP/query route specs share one OtlpRoutesWebApplicationFactory (web host
 // + in-memory silo). Tests reset the otel
 // tables and collector status via OtlpRoutesHostFixture.ResetOtelStateAsync
