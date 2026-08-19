@@ -55,9 +55,14 @@ public static partial class WorkflowRunExtensions
             if (current is null) return null;
 
             var pendingTask = NextUnclaimedTask(current);
-            if (pendingTask is not null
-                && VerificationLaneGate.IsClaimableLaneTask(run, pendingTask))
+            if (pendingTask is not null)
             {
+                // A blocked lane is an ordered-stage barrier. Do not fall
+                // through to checks or any other later work while recovery is
+                // still waiting on the first non-passing lane.
+                if (!VerificationLaneGate.IsClaimableLaneTask(run, pendingTask))
+                    return null;
+
                 return new WorkflowTaskWork(current.Id, pendingTask.Id, pendingTask.Title, pendingTask.Uses, pendingTask.WithInput, pendingTask.ExpectInput, pendingTask.Artifacts, pendingTask.SetVars, pendingTask.Recovery, pendingTask.RecoveryRemaining);
             }
 
@@ -536,7 +541,11 @@ public static partial class WorkflowRunExtensions
             if (current is null) return null;
             var task = current.Tasks.FirstOrDefault(t => t.Status is not (TaskRunStatus.Completed or TaskRunStatus.Failed or TaskRunStatus.Cancelled or TaskRunStatus.Interrupted));
             if (task is not null)
+            {
+                if (!VerificationLaneGate.IsClaimableLaneTask(run, task))
+                    return null;
                 return new WorkflowPendingWork(task.WorkId ?? task.Id, WorkItemTypes.Task, current.Id, task.Title);
+            }
 
             if (current.Checks.Count > 0 && current.Checks.Any(c => c.Status != StageCheckStatus.Passed))
                 return new WorkflowPendingWork("checks", WorkItemTypes.Checks, current.Id, "Checks");
@@ -666,14 +675,10 @@ public static partial class WorkflowRunExtensions
                 // incomplete or was rendered by an older Runner.
                 var definition = sourceTask?.Lane is not null
                     && string.Equals(task.Definition.Id, sourceTask.DefinitionId, StringComparison.Ordinal)
-                    ? task.Definition with
-                    {
-                        With = sourceTask.WithInput,
-                        Expect = sourceTask.ExpectInput,
-                        Artifacts = sourceTask.Artifacts,
-                        SetVars = sourceTask.SetVars,
-                        Recovery = sourceTask.Recovery,
-                    }
+                    // The persisted source attempt owns the lane contract.
+                    // Runner follow-ups carry a scheduling hint, not a new
+                    // command, action, title, or recovery declaration.
+                    ? sourceTask.ToDefinition()
                     : task.Definition;
                 var newTask = task.RecoveryRemaining is { } remaining
                     ? TaskRun.MakeContinuationTask(

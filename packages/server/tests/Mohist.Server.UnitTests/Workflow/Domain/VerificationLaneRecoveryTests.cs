@@ -34,8 +34,8 @@ public sealed class VerificationLaneRecoveryTests
 
         var retryDefinition = new TaskDefinition(
             VerificationLaneCatalog.VerifyDotnet,
-            "Verify dotnet",
-            "core/script",
+            "Runner supplied title",
+            "runner/changed-action",
             With: new Dictionary<string, JsonElement?>
             {
                 ["timeout"] = JsonSerializer.SerializeToElement(1),
@@ -66,6 +66,8 @@ public sealed class VerificationLaneRecoveryTests
         Assert.Equal(failed.Lane.ConfiguredBudgetMs, retry.Lane!.ConfiguredBudgetMs);
         Assert.Equal(failed.Lane.Order, retry.Lane.Order);
         Assert.Equal(failed.Lane.LaneId, retry.Lane.LaneId);
+        Assert.Equal(failed.Title, retry.Title);
+        Assert.Equal(failed.Uses, retry.Uses);
         Assert.Equal(recovery, retry.Recovery);
 
         var duplicateEvents = run.AddRuntimeTaskAttempts(followUps, Now, failed.Id);

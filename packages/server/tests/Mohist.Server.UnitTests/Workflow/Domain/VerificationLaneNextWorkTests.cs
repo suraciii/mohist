@@ -82,6 +82,28 @@ public sealed class VerificationLaneNextWorkTests
     }
 
     [Fact]
+    public void NextWork_LaneRecoveryBarrier_DoesNotFallThroughToChecks()
+    {
+        var run = CreateLaneEnabledRun();
+        var stage = run.Stages[0];
+        stage.Tasks[0].Status = TaskRunStatus.Failed;
+        stage.Tasks[0].Lane = stage.Tasks[0].Lane! with
+        {
+            Outcome = VerificationLaneOutcome.Timeout,
+            Error = new ExecutionError("timeout", "lane timed out"),
+        };
+        stage.Checks.Add(new StageCheck
+        {
+            Name = "build-check",
+            Title = "Build check",
+            Status = StageCheckStatus.Pending,
+        });
+
+        Assert.Null(run.NextWork());
+        Assert.Null(run.CurrentPendingWork());
+    }
+
+    [Fact]
     public void CanAdvanceBuildStage_LegacyRun_AlwaysTrue()
     {
         var run = CreateRun(aggregateOnly: true);
