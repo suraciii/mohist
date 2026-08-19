@@ -9,7 +9,7 @@ import { isAbsolute, relative, resolve } from 'node:path'
 export interface WorkspaceQuery {
   workflowRunId?: string | null
   projectId?: string | null
-  issueNumber?: number
+  issueNumber?: number | null
   repositoryName?: string | null
   gitUrl?: string | null
   workspacePath?: string | null
