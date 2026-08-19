@@ -7,6 +7,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Mohist.Server.Api.DirectApi;
 using Mohist.Server.Infrastructure;
 using Mohist.Server.Infrastructure.Data.Db;
+using Mohist.Server.Infrastructure.Data.DirectApi;
 using Mohist.Server.Infrastructure.Data.Project;
 using Mohist.Server.Infrastructure.DirectApi;
 using Mohist.Server.Infrastructure.Data.Sessions;
@@ -190,15 +191,30 @@ public sealed class DirectApiFollowupSpecs(PublicProjectionIntegrationFixture fi
         var ownerProjectId = await SeedProjectAsync();
         var attackerProjectId = await SeedProjectAsync();
         var sessionId = $"session-followup-cross-project-{Guid.NewGuid():N}";
-        await SeedSessionAsync(sessionId, ownerProjectId, "agent-canonical", AgentSessionActivity.Active);
         var token = await CreatePatForProjectsAsync(ownerProjectId, attackerProjectId);
         using var client = DirectClient(token);
         const string key = "followup-cross-project";
         const string text = "must remain project scoped";
-
-        using (var first = await PostObservationAsync(client, ownerProjectId, sessionId, key, text))
+        await using (var scope = fixture.Services.CreateAsyncScope())
         {
-            Assert.Equal(ownerProjectId, first.RootElement.GetProperty("projectId").GetString());
+            var setupDb = scope.ServiceProvider.GetRequiredService<MohistDbContext>();
+            setupDb.DirectApiIdempotencyMappings.Add(new DirectApiIdempotencyMappingRow
+            {
+                Command = DirectApiCommands.Followup,
+                ScopeKey = $"{sessionId}|{key}",
+                CallerKeyId = "owner-caller",
+                Fingerprint = DirectApiWriteValidation.FollowupFingerprint(sessionId, text),
+                State = DirectApiMappingStates.Completed,
+                Outcome = JSON.Serialize(new DirectApiFollowupOutcome(
+                    ownerProjectId,
+                    sessionId,
+                    "agent-canonical",
+                    "input-owner",
+                    "turn-owner")),
+                CreatedAt = fixture.TimeProvider.GetUtcNow(),
+                CompletedAt = fixture.TimeProvider.GetUtcNow(),
+            });
+            await setupDb.SaveChangesAsync();
         }
 
         using var replay = Request(attackerProjectId, sessionId, key, text);
