@@ -17,7 +17,6 @@ using Xunit;
 
 namespace Mohist.Server.SpecTests.Specs.Slack;
 
-[Collection("MohistIntegration")]
 public sealed class SlackDeliveryOutcomesSpecs
 {
     private readonly MohistIntegrationFixture _fixture;

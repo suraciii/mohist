@@ -22,7 +22,6 @@ namespace Mohist.Server.SpecTests.Specs.Api;
 /// projection/attention filters) lives in
 /// <c>ProjectEventFeedAssemblerSpecs</c>.
 /// </summary>
-[Collection("IntegrationApi")]
 public class ProjectEventsApiSpecs : ProjectEventsApiTestSupport
 {
     public ProjectEventsApiSpecs(MohistIntegrationFixture fixture) : base(fixture)

@@ -16,7 +16,6 @@ namespace Mohist.Server.SpecTests.Specs.Api;
 /// persistence, and project isolation live in
 /// <c>InboxSubscriptionStoreSpecs</c>.
 /// </summary>
-[Collection("IntegrationApi")]
 public class InboxSubscriptionApiSpecs
 {
     private readonly HttpClient _client;

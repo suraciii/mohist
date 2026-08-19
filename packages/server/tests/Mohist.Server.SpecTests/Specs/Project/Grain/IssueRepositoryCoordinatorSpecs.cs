@@ -44,7 +44,6 @@ namespace Mohist.Server.SpecTests.Specs.Project.Grain;
 /// these null, so the test seam has zero overhead in real runs.
 /// </para>
 /// </summary>
-[Collection("IntegrationIssue")]
 public class IssueRepositoryCoordinatorSpecs
 {
     private readonly MohistIntegrationFixture _fixture;

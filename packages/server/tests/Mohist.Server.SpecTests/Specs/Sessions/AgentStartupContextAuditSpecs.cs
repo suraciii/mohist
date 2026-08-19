@@ -23,7 +23,6 @@ namespace Mohist.Server.SpecTests.Specs.Sessions;
 /// Also verifies follow-up inputs do not inherit, replace, or
 /// append any startup context from the launch-time input.
 /// </summary>
-[Collection("MohistIntegration")]
 public sealed class AgentStartupContextAuditSpecs : IAsyncLifetime
 {
     private readonly MohistIntegrationFixture _fixture;

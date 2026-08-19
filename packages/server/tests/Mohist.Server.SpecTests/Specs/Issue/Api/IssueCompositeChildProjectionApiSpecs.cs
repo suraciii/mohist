@@ -25,7 +25,6 @@ namespace Mohist.Server.SpecTests.Specs.Issue.Api;
 /// Spec:
 /// <c>openspec/changes/issue-420/specs/composite-issue-detail/spec.md</c>.
 /// </summary>
-[Collection("IssueLifecycle")]
 public class IssueCompositeChildProjectionApiSpecs
 {
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);

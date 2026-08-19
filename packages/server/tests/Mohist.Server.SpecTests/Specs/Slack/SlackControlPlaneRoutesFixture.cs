@@ -79,6 +79,7 @@ public sealed class SlackControlPlaneRoutesFixture : IAsyncLifetime
         var connectionString = $"Data Source=slack-control-plane-{Guid.NewGuid():N};Mode=Memory;Cache=Shared";
         _keeper = new SqliteConnection(connectionString);
         await _keeper.OpenAsync();
+        MigratedSqliteTemplate.CopyTo(_keeper);
 
         Factory = new SlackControlPlaneRoutesFactory(
             connectionString,

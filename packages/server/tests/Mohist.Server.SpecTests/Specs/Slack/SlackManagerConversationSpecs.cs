@@ -20,7 +20,6 @@ using Xunit;
 
 namespace Mohist.Server.SpecTests.Specs.Slack;
 
-[Collection("MohistIntegration")]
 public sealed class SlackManagerConversationSpecs
 {
     private readonly MohistIntegrationFixture _fixture;
@@ -78,14 +77,13 @@ public sealed class SlackManagerConversationSpecs
             enrollment!.Id,
             team,
             "D_MANAGER_CONVERSATION"))}";
-        var launch = await _fixture.Grains.GetGrain<Mohist.Server.Sessions.Grains.IAgentSessionGrain>(sessionId)
-            .GetInitialLaunchAsync();
+        var session = _fixture.Grains.GetGrain<Mohist.Server.Sessions.Grains.IAgentSessionGrain>(sessionId);
+        var launch = await session.GetInitialLaunchAsync();
         Assert.NotNull(launch);
         Assert.Contains("Manager request", launch!.Input!.Text, StringComparison.Ordinal);
         Assert.Contains(firstPrompt, launch.Input.Text, StringComparison.Ordinal);
         Assert.DoesNotContain(claimCode, launch.Input.Text, StringComparison.Ordinal);
-        await _fixture.Grains.GetGrain<Mohist.Server.Sessions.Grains.IAgentSessionGrain>(sessionId)
-            .AttachPhysicalSessionAsync(new Mohist.Server.Sessions.Grains.AttachPhysicalSessionCommand(
+        await session.AttachPhysicalSessionAsync(new Mohist.Server.Sessions.Grains.AttachPhysicalSessionCommand(
                 "runtime-manager-conversation",
                 "/mohist-tests/manager-conversation"));
         var followup = await SendManagerMessageAsync(
@@ -95,10 +93,10 @@ public sealed class SlackManagerConversationSpecs
             "1710000000.000004",
             "Please keep the same release-helper conversation and ask for confirmation.");
         Assert.Equal("accepted", followup.GetProperty("decision").GetString());
-        var sessionStateBeforeRedrive = await database.AgentSessions
-            .Where(row => row.Id == sessionId)
-            .Select(row => row.State)
-            .SingleAsync();
+        var turnIdsBeforeRedrive = (await session.ListTurnsAsync())
+            .Select(turn => turn.Id)
+            .Order(StringComparer.Ordinal)
+            .ToArray();
 
         var firstInbox = await database.SlackProviderInboxRows.SingleAsync(row =>
             row.ConnectionId == enrollment.Id
@@ -115,11 +113,11 @@ public sealed class SlackManagerConversationSpecs
         database.ChangeTracker.Clear();
         var redrivenInbox = await database.SlackProviderInboxRows.SingleAsync(row => row.Id == firstInbox.Id);
         Assert.NotNull(redrivenInbox.DispatchedAt);
-        var sessionStateAfterRedrive = await database.AgentSessions
-            .Where(row => row.Id == sessionId)
-            .Select(row => row.State)
-            .SingleAsync();
-        Assert.Equal(sessionStateBeforeRedrive, sessionStateAfterRedrive);
+        var turnIdsAfterRedrive = (await session.ListTurnsAsync())
+            .Select(turn => turn.Id)
+            .Order(StringComparer.Ordinal)
+            .ToArray();
+        Assert.Equal(turnIdsBeforeRedrive, turnIdsAfterRedrive);
         var currentSession = await scope.ServiceProvider.GetRequiredService<SlackDmSessionMappingStore>()
             .GetCurrentSessionIdAsync(
                 BuiltInAgentCatalog.MohistSlackProjectId,

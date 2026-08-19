@@ -13,7 +13,6 @@ namespace Mohist.Server.SpecTests.Specs.Sessions;
 /// runtime-id transcript filter) live in
 /// <c>IssueWorkflowSessionHistoryQuerierSpecs</c>.
 /// </summary>
-[Collection("IntegrationSessions")]
 public class IssueWorkflowSessionHistorySpecs
 {
     private readonly MohistIntegrationFixture _fixture;

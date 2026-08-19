@@ -15,8 +15,8 @@ namespace Mohist.Server.SpecTests.Specs.Auth;
 /// rejects that runner's requests immediately while others keep working;
 /// re-running the install flow restores a revoked runner.
 /// </summary>
-[Collection("RunnerEnrollment")]
-public sealed class RunnerEnrollmentSpecs(MohistIntegrationFixture fixture)
+[Collection("WorkflowRuntimeIntegration")]
+public sealed class RunnerEnrollmentSpecs(IsolatedMohistIntegrationFixture fixture)
 {
     private const string EnrollmentTokensPath = "/api/runners/enrollment-tokens";
     private const string RegisterPath = "/api/runners/register";
@@ -51,36 +51,6 @@ public sealed class RunnerEnrollmentSpecs(MohistIntegrationFixture fixture)
         using var anonymous = fixture.CreateClient();
         using var rejected = await anonymous.GetAsync("/api/runner/runner-installed/config");
         Assert.Equal(HttpStatusCode.Unauthorized, rejected.StatusCode);
-    }
-
-    [Fact]
-    public async Task EnrollmentToken_IsSingleUse()
-    {
-        var enrollmentToken = await CreateEnrollmentTokenAsync();
-        await RegisterAsync(enrollmentToken, "runner-single-use");
-
-        using var second = await fixture.Client.PostAsJsonAsync(RegisterPath, new
-        {
-            token = enrollmentToken,
-            runnerId = "runner-single-use",
-        });
-
-        Assert.Equal(HttpStatusCode.Unauthorized, second.StatusCode);
-    }
-
-    [Fact]
-    public async Task EnrollmentToken_ExpiresAfter15Minutes()
-    {
-        var enrollmentToken = await CreateEnrollmentTokenAsync();
-        fixture.TimeProvider.Advance(TimeSpan.FromMinutes(16));
-
-        using var register = await fixture.Client.PostAsJsonAsync(RegisterPath, new
-        {
-            token = enrollmentToken,
-            runnerId = "runner-expired",
-        });
-
-        Assert.Equal(HttpStatusCode.Unauthorized, register.StatusCode);
     }
 
     [Fact]
@@ -142,31 +112,6 @@ public sealed class RunnerEnrollmentSpecs(MohistIntegrationFixture fixture)
         using var response = await anonymous.DeleteAsync("/api/runners/runner-anon/credentials");
 
         Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
-    }
-
-    [Fact]
-    public async Task Register_WithAnUnknownToken_IsRejected()
-    {
-        using var response = await fixture.Client.PostAsJsonAsync(RegisterPath, new
-        {
-            token = "moh_enroll_not-a-real-token",
-            runnerId = "runner-bogus",
-        });
-
-        Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
-    }
-
-    [Fact]
-    public async Task Register_WithoutRunnerId_IsRejected()
-    {
-        var enrollmentToken = await CreateEnrollmentTokenAsync();
-
-        using var response = await fixture.Client.PostAsJsonAsync(RegisterPath, new
-        {
-            token = enrollmentToken,
-        });
-
-        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
     }
 
     [Fact]

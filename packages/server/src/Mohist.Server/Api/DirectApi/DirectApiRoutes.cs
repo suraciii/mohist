@@ -243,13 +243,6 @@ public static class DirectApiRoutes
         var scopeKey = DirectApiWriteValidation.FollowupScopeKey(sessionId, publicKey);
         var caller = context.Items[ExternalAgentCaller.HttpContextItemKey] as ExternalAgentCaller
             ?? throw new InvalidOperationException("The direct API caller was not resolved.");
-        // Idempotency mappings are keyed by session and caller key, not by
-        // project. Prove the canonical Session still belongs to the selected
-        // project before an existing mapping can be replayed or admitted.
-        if (await sessions.ResolveGenericFollowupTargetAsync(projectId, sessionId, ct) is null)
-        {
-            return DirectApiResults.ResourceNotFound(DirectApiErrorCodes.SessionNotFound);
-        }
 
         var existing = await idempotency.FindAsync(
             DirectApiCommands.Followup,
@@ -267,6 +260,7 @@ public static class DirectApiRoutes
             }
 
             var initialOutcome = new DirectApiFollowupOutcome(
+                ProjectId: projectId,
                 SessionId: sessionId,
                 AgentId: target.AgentId,
                 InputId: inputId,
@@ -282,6 +276,12 @@ public static class DirectApiRoutes
         }
         else
         {
+            var existingOutcome = DirectApiIdempotencyService.ReadOutcome<DirectApiFollowupOutcome>(existing);
+            if (!string.Equals(existingOutcome.ProjectId, projectId, StringComparison.Ordinal))
+            {
+                return DirectApiResults.ResourceNotFound(DirectApiErrorCodes.SessionNotFound);
+            }
+
             claim = new DirectApiMappingClaim(existing, Created: false);
         }
 
@@ -435,10 +435,29 @@ public static class DirectApiRoutes
                 "The follow-up is still being admitted; retry with the same Idempotency-Key.");
         }
 
+        if (outcome.SnapshotJson is not null)
+        {
+            return DirectApiResults.Snapshot(outcome.SnapshotJson);
+        }
+
         var observation = await publicReads.ReadInputAsync(projectId, outcome.InputId, ct);
-        return observation.Status == PublicReadStatus.NotFound
-            ? DirectApiResults.ProjectionLag()
-            : DirectApiResults.PublicRead(observation, DirectApiErrorCodes.InputNotFound);
+        if (observation.Status != PublicReadStatus.Found)
+        {
+            return DirectApiResults.ProjectionLag();
+        }
+
+        var frozenOutcome = outcome with { SnapshotJson = observation.SnapshotJson! };
+        claim = claim with
+        {
+            Mapping = await idempotency.FreezeCompletedOutcomeAsync(
+                DirectApiCommands.Followup,
+                scopeKey,
+                claim.Mapping.Outcome!,
+                JSON.Serialize(frozenOutcome),
+                ct),
+        };
+        frozenOutcome = DirectApiIdempotencyService.ReadOutcome<DirectApiFollowupOutcome>(claim.Mapping);
+        return DirectApiResults.Snapshot(frozenOutcome.SnapshotJson!);
     }
 
     private static async Task<IResult> LaunchAsync(

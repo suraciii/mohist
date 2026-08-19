@@ -11,7 +11,6 @@ using Xunit;
 
 namespace Mohist.Server.SpecTests.Specs.Epic.Api;
 
-[Collection("MohistIntegration")]
 public class EpicApiSpecs : EpicApiTestSupport
 {
     public EpicApiSpecs(MohistIntegrationFixture fixture) : base(fixture)

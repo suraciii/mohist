@@ -11,7 +11,6 @@ using Xunit;
 
 namespace Mohist.Server.SpecTests.Specs.Api;
 
-[Collection("IntegrationApi")]
 public sealed class RoutingTestRoutesSpecs : ProjectEventsApiTestSupport
 {
     public RoutingTestRoutesSpecs(MohistIntegrationFixture fixture) : base(fixture) { }

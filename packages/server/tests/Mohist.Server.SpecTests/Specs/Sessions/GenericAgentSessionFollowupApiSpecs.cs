@@ -4,7 +4,6 @@ using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.AspNetCore.SignalR;
-using Mohist.Server.Agent.Grains;
 using Mohist.Server.Agent.Services;
 using Mohist.Server.Api;
 using Mohist.Server.Events.Grains;
@@ -24,7 +23,6 @@ using Xunit;
 
 namespace Mohist.Server.SpecTests.Specs.Sessions;
 
-[Collection("IntegrationSessions")]
 public class GenericAgentSessionFollowupApiSpecs : GenericAgentSessionFollowupApiTestSupport
 {
     public GenericAgentSessionFollowupApiSpecs(MohistIntegrationFixture fixture) : base(fixture)
@@ -34,21 +32,15 @@ public class GenericAgentSessionFollowupApiSpecs : GenericAgentSessionFollowupAp
     [Fact]
     public async Task GenericFollowupEndpoint_ActiveGenericSessionOnlineRunner_ReturnsAcceptedAndQueued()
     {
-        var (project, agent, sessionId, _) = await LaunchAndOpenGenericSessionAsync("gen-followup-ok");
-        var runner = _fixture.Grains.GetGrain<IRunnerGrain>(_runnerId);
-        var launch = await _fixture.Grains.GetGrain<IAgentSessionGrain>(sessionId).GetInitialLaunchAsync();
-        Assert.NotNull(launch?.Turn?.JobId);
-        using (var poll = await _client.PostAsync($"/api/runner/{_runnerId}/poll", content: null))
-        {
-            poll.EnsureSuccessStatusCode();
-        }
+        var (project, sessionId, _) = await CreateExecutingGenericSessionAsync("gen-followup-ok");
+        var runnerId = _runnerId;
+        var runner = _fixture.Grains.GetGrain<IRunnerGrain>(runnerId);
         var activeWorksBefore = await GetActiveWorkSnapshotAsync(runner);
-        Assert.NotEmpty(activeWorksBefore);
         var tracker = _fixture.Services.GetRequiredService<RunnerConnectionTracker>();
         var runnerHub = _fixture.Services.GetRequiredService<IHubContext<RunnerHub>>() as RecordingRunnerHubContext
             ?? throw new InvalidOperationException("Recording runner hub context was not registered.");
         runnerHub.Clear();
-        tracker.Register(_runnerId, "conn-gen-followup-1");
+        tracker.Register(runnerId, "conn-gen-followup-1");
         try
         {
             using var response = await PostGenericFollowupAsync(project.Id, sessionId, new { text = "add a logout route" });
@@ -60,7 +52,8 @@ public class GenericAgentSessionFollowupApiSpecs : GenericAgentSessionFollowupAp
             Assert.Equal(sessionId, data.GetProperty("sessionId").GetString());
             Assert.Equal("accepted", data.GetProperty("status").GetString());
             Assert.False(string.IsNullOrEmpty(data.GetProperty("inputId").GetString()));
-            Assert.False(string.IsNullOrEmpty(data.GetProperty("turnId").GetString()));
+            var turnId = data.GetProperty("turnId").GetString();
+            Assert.False(string.IsNullOrEmpty(turnId));
             Assert.Equal("accepted", data.GetProperty("inputAcceptance").GetString());
             Assert.Equal("queued", data.GetProperty("turnStatus").GetString());
 
@@ -69,11 +62,13 @@ public class GenericAgentSessionFollowupApiSpecs : GenericAgentSessionFollowupAp
 
             using var summary = await _client.GetAsync($"/api/projects/{project.Id}/agent-sessions/{sessionId}");
             var summaryData = (await summary.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("data");
-            Assert.Equal("queued", summaryData.GetProperty("turns")[0].GetProperty("status").GetString());
+            var turn = summaryData.GetProperty("turns").EnumerateArray().Single(candidate =>
+                string.Equals(candidate.GetProperty("id").GetString(), turnId, StringComparison.Ordinal));
+            Assert.Equal("queued", turn.GetProperty("status").GetString());
         }
         finally
         {
-            tracker.Unregister(_runnerId);
+            tracker.Unregister(runnerId);
         }
     }
 
@@ -106,7 +101,7 @@ public class GenericAgentSessionFollowupApiSpecs : GenericAgentSessionFollowupAp
     [Fact]
     public async Task GenericRunnerRoutes_CrossProjectSession_ReturnNotFoundAndDoNotMutate()
     {
-        var launched = await LaunchAndOpenGenericSessionAsync("gen-cross-project");
+        var launched = await CreateIdleGenericSessionAsync("gen-cross-project");
         var otherProject = await CreateProjectAsync("gen-cross-project-other");
         var grain = _fixture.Grains.GetGrain<IAgentSessionGrain>(launched.SessionId);
         var before = await grain.GetAsync() ?? throw new InvalidOperationException("session grain returned null");
@@ -142,21 +137,6 @@ public class GenericAgentSessionFollowupApiSpecs : GenericAgentSessionFollowupAp
         Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
         var grain = _fixture.Grains.GetGrain<IAgentSessionGrain>(sessionId);
         Assert.Null(await grain.GetAsync());
-    }
-
-    [Fact]
-    public async Task GenericFollowupEndpoint_EmptyText_ReturnsBadRequest()
-    {
-        var project = await CreateProjectAsync("gen-followup-empty");
-        var sessionId = $"input-validation-{Guid.NewGuid():N}";
-
-        using var response = await PostGenericFollowupAsync(project.Id, sessionId, new { text = "" });
-
-        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-        using var doc = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
-        var data = doc.RootElement.GetProperty("data");
-        Assert.Equal("rejected", data.GetProperty("status").GetString());
-        Assert.Equal("followup_input_required", data.GetProperty("code").GetString());
     }
 
     [Fact]

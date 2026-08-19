@@ -50,7 +50,7 @@ public static class RunnerEnrollmentRoutes
             statusCode: StatusCodes.Status201Created);
     }
 
-    private static async Task<IResult> RegisterAsync(
+    internal static async Task<IResult> RegisterAsync(
         RunnerEnrollmentRegisterRequest request,
         ICredentialStore store,
         IAuthAuditRecorder audit,

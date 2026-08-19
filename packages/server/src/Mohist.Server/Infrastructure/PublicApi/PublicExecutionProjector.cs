@@ -59,8 +59,12 @@ public sealed class PublicExecutionProjector : BackgroundService
         {
             while (!stoppingToken.IsCancellationRequested)
             {
-                await WaitForNudgeOrSweepAsync(stoppingToken);
-                await DrainAsync(stoppingToken);
+                var generation = await WaitForNudgeOrSweepAsync(stoppingToken);
+                var error = await DrainAsync(stoppingToken);
+                if (error is null)
+                    _nudge.Complete(generation);
+                else
+                    _nudge.Fail(generation, error);
             }
         }
         catch (OperationCanceledException)
@@ -74,21 +78,22 @@ public sealed class PublicExecutionProjector : BackgroundService
         }
     }
 
-    private async Task WaitForNudgeOrSweepAsync(CancellationToken ct)
+    private async Task<long> WaitForNudgeOrSweepAsync(CancellationToken ct)
     {
         try
         {
             using var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct);
             timeout.CancelAfter(_options.SweepInterval);
-            await _nudge.WaitAsync(timeout.Token);
+            return await _nudge.WaitAsync(timeout.Token);
         }
         catch (OperationCanceledException) when (!ct.IsCancellationRequested)
         {
             // Timer sweep elapsed without a nudge.
+            return _nudge.LatestGeneration;
         }
     }
 
-    private async Task DrainAsync(CancellationToken ct)
+    private async Task<Exception?> DrainAsync(CancellationToken ct)
     {
         while (!ct.IsCancellationRequested)
         {
@@ -99,21 +104,23 @@ public sealed class PublicExecutionProjector : BackgroundService
             }
             catch (OperationCanceledException) when (ct.IsCancellationRequested)
             {
-                return;
+                return null;
             }
             catch (Exception ex)
             {
                 _log.LogError(ex, "A public projection batch failed; the next sweep retries from the checkpoint");
-                return;
+                return ex;
             }
 
             if (!worked)
             {
-                return;
+                return null;
             }
 
             await DelayAsync(_options.BatchPause, ct);
         }
+
+        return null;
     }
 
     private async Task<bool> RunBatchWithBusyRetryAsync(CancellationToken ct)

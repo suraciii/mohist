@@ -28,7 +28,6 @@ namespace Mohist.Server.SpecTests.Specs.Api;
 /// boundary. Driven through the in-memory fake — the durable event
 /// dispatcher and a wall clock are not touched.
 /// </summary>
-[Collection("IntegrationApi")]
 public class ProjectEventTailApiSpecs
 {
     private static readonly DateTimeOffset FixedTime = new(2026, 1, 1, 12, 0, 0, TimeSpan.Zero);

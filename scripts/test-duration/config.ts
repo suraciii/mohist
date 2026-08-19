@@ -60,9 +60,6 @@ export function validateConfig(config: SuiteConfig): string[] {
     ids.add(track.id)
     errors.push(...validateTrack(track))
   }
-  if (config.canonical === undefined && config.tracks.some((track) => track.partitions !== undefined)) {
-    errors.push('canonical configuration is required when partitioned tracks exist')
-  }
   if (config.canonical !== undefined) errors.push(...validateCanonical(config.canonical, config.tracks))
   return errors
 }
@@ -100,33 +97,6 @@ function validateTrack(track: TrackConfig): string[] {
     errors.push(`${prefix}: apphostArgs must contain only strings`)
   }
   if (track.deadlineMs <= 0) errors.push(`${prefix}: deadlineMs must be positive`)
-  if (track.partitions !== undefined && (!Number.isInteger(track.partitions) || track.partitions < 1)) {
-    errors.push(`${prefix}: partitions must be a positive integer`)
-  }
-  if (
-    track.partitions !== undefined &&
-    (!Number.isInteger(track.partitionMaxThreads) || track.partitionMaxThreads! <= 0)
-  ) {
-    errors.push(`${prefix}: partitions require a positive integer partitionMaxThreads`)
-  }
-  if (track.partitions === undefined && track.partitionMaxThreads !== undefined) {
-    errors.push(`${prefix}: partitionMaxThreads requires partitions`)
-  }
-  if (track.partitions !== undefined && (track.apphostArgs?.length ?? 0) > 0) {
-    errors.push(`${prefix}: partitioned tracks use partitionMaxThreads instead of apphostArgs`)
-  }
-  if (track.partitions !== undefined && track.kind !== 'dotnet-apphost') {
-    errors.push(`${prefix}: partitions require kind dotnet-apphost`)
-  }
-  if (track.partitions !== undefined && track.id !== 'server-spec') {
-    errors.push(`${prefix}: only server-spec supports partitioned execution`)
-  }
-  if (track.partitions !== undefined && !track.report.includes('{partition}')) {
-    errors.push(`${prefix}: partitioned reports must include {partition}`)
-  }
-  if (track.partitions !== undefined && track.executionLedger !== undefined) {
-    errors.push(`${prefix}: executionLedger tracks cannot be partitioned`)
-  }
   if (track.kind !== 'report-only' && !track.run && !track.csproj && !track.apphost) {
     errors.push(`${prefix}: needs a run command, csproj, or apphost`)
   }
@@ -180,28 +150,6 @@ function validateCanonical(config: CanonicalGateConfig, tracks: readonly TrackCo
       errors.push(`canonical.resourceLimits.${resource} must be a positive integer`)
     }
   }
-  const partitionedTracks = tracks.filter((track) => track.partitions !== undefined)
-  if (partitionedTracks.length > 0) {
-    if (!Number.isInteger(config.partitionExecutionCapacity) || config.partitionExecutionCapacity! <= 0) {
-      errors.push('canonical.partitionExecutionCapacity must be a positive integer when partitioned tracks exist')
-    }
-    for (const track of partitionedTracks) {
-      const outerLimit = config.resourceLimits[track.id]
-      if (!Number.isInteger(outerLimit) || outerLimit <= 0) {
-        errors.push(`canonical.resourceLimits.${track.id} must bound partitioned track "${track.id}"`)
-        continue
-      }
-      if (
-        Number.isInteger(config.partitionExecutionCapacity) &&
-        config.partitionExecutionCapacity! > 0 &&
-        Number.isInteger(track.partitionMaxThreads) &&
-        track.partitionMaxThreads! > 0 &&
-        Math.min(track.partitions!, outerLimit) * track.partitionMaxThreads! > config.partitionExecutionCapacity!
-      ) {
-        errors.push(`track "${track.id}" partition concurrency exceeds canonical.partitionExecutionCapacity`)
-      }
-    }
-  }
   if (config.durationMeasurementTracks !== undefined) {
     if (!Array.isArray(config.durationMeasurementTracks) || config.durationMeasurementTracks.length === 0) {
       errors.push('canonical.durationMeasurementTracks must be a non-empty array of track ids')
@@ -238,10 +186,6 @@ function validateCanonical(config: CanonicalGateConfig, tracks: readonly TrackCo
       const track = new Map(tracks.map((candidate) => [candidate.id, candidate])).get(config.durationIsolationTrack)
       if (!track)
         errors.push(`canonical.durationIsolationTrack references unknown track: ${config.durationIsolationTrack}`)
-      else if (track.partitions !== undefined)
-        errors.push(
-          `canonical.durationIsolationTrack cannot include partitioned track: ${config.durationIsolationTrack}`,
-        )
       else if (track.kind !== 'vitest')
         errors.push(`canonical.durationIsolationTrack must reference a vitest track: ${config.durationIsolationTrack}`)
     }

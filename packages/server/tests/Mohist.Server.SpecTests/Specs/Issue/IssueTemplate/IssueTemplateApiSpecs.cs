@@ -13,7 +13,6 @@ namespace Mohist.Server.SpecTests.Specs.Issue.IssueTemplate;
 /// and 400 missing projectId. The disable/shadow/cross-project-isolation
 /// calculation matrix lives in <c>IssueTemplateRegistrySpecs</c>.
 /// </summary>
-[Collection("IssueProfile")]
 public class IssueTemplateApiSpecs
 {
     private readonly HttpClient _client;

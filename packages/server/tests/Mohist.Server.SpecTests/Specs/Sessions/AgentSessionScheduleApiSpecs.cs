@@ -17,7 +17,6 @@ namespace Mohist.Server.SpecTests.Specs.Sessions;
 // are grain-level (AgentSessionScheduleGrainSpecs); this file proves the
 // real HTTP surface rejects/accepts exactly the documented contract and
 // never requires a binding or activity at creation time.
-[Collection("IntegrationSessions")]
 public sealed class AgentSessionScheduleApiSpecs
 {
     private readonly MohistIntegrationFixture _fixture;

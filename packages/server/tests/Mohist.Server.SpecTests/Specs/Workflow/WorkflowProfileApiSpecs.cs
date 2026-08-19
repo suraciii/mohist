@@ -13,7 +13,7 @@ using Xunit;
 
 namespace Mohist.Server.SpecTests.Specs.Workflow;
 
-[Collection("IntegrationRunner")]
+[Collection("RunnerMutationIntegration")]
 public class WorkflowProfileApiSpecs
 {
     private readonly HttpClient _client;

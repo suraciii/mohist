@@ -19,15 +19,15 @@ using Xunit;
 
 namespace Mohist.Server.SpecTests.Specs.Issue.Api;
 
-[Collection("IssueProfile")]
+[Collection("RepositoryDataUpgrade")]
 public class IssueWorkflowRepositoryResolutionSpecs
 {
-    private readonly MohistIntegrationFixture _fixture;
+    private readonly RepositoryDataUpgradeFixture _fixture;
     private readonly HttpClient _client;
     private readonly IGrainFactory _grains;
     private readonly IServiceProvider _services;
 
-    public IssueWorkflowRepositoryResolutionSpecs(MohistIntegrationFixture fixture)
+    public IssueWorkflowRepositoryResolutionSpecs(RepositoryDataUpgradeFixture fixture)
     {
         _fixture = fixture;
         _client = fixture.Client;
@@ -303,3 +303,5 @@ public class IssueWorkflowRepositoryResolutionSpecs
         });
     }
 }
+
+public sealed class RepositoryDataUpgradeFixture : MohistIntegrationFixture;

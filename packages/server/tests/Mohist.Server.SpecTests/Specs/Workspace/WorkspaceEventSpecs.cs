@@ -11,7 +11,6 @@ using Xunit;
 
 namespace Mohist.Server.SpecTests.Specs.Workspace;
 
-[Collection("MohistIntegration")]
 public class WorkspaceEventSpecs
 {
     private readonly MohistIntegrationFixture _fixture;

@@ -17,10 +17,10 @@ namespace Mohist.Server.SpecTests.Specs.Agent.Api;
 /// model Readiness resolved, resolution happens once at launch, and without
 /// a default the existing Needs-setup gating is unchanged.
 /// </summary>
-[Collection("MohistIntegration")]
+[Collection("LaunchIntegration")]
 public sealed class AgentSessionLaunchDefaultExecutionConfigSpecs : AgentSessionLaunchRoutesTestSupport
 {
-    public AgentSessionLaunchDefaultExecutionConfigSpecs(MohistIntegrationFixture fixture) : base(fixture)
+    public AgentSessionLaunchDefaultExecutionConfigSpecs(IsolatedMohistIntegrationFixture fixture) : base(fixture)
     {
     }
 
@@ -71,7 +71,7 @@ public sealed class AgentSessionLaunchDefaultExecutionConfigSpecs : AgentSession
             var sessionId = payload.GetProperty("data").GetProperty("sessionId").GetString()!;
             var jobId = payload.GetProperty("data").GetProperty("jobId").GetString()!;
 
-            var snapshot = await PollDispatchForSessionAsync(jobId, runnerId, sessionId);
+            var snapshot = await ClaimDispatchForSessionAsync(jobId, runnerId, sessionId);
             var dispatch = await PollDispatchEnvelopeForWorkAsync(runnerId, snapshot.WorkId!);
             Assert.Equal("openai/gpt-5.6", ReadModelFromDispatch(dispatch));
             Assert.Equal("high", ReadVariantFromDispatch(dispatch));
@@ -107,7 +107,7 @@ public sealed class AgentSessionLaunchDefaultExecutionConfigSpecs : AgentSession
             var sessionInfo = await _fixture.Grains.GetGrain<IAgentSessionGrain>(sessionId).GetAsync();
             Assert.Equal("pi", sessionInfo!.Runtime);
 
-            var snapshot = await PollDispatchForSessionAsync(jobId, runnerId, sessionId);
+            var snapshot = await ClaimDispatchForSessionAsync(jobId, runnerId, sessionId);
             var dispatch = await PollDispatchEnvelopeForWorkAsync(runnerId, snapshot.WorkId!);
             Assert.Equal("pi", ReadRuntimeFromDispatch(dispatch));
             Assert.Equal("openai/gpt-5.6", ReadModelFromDispatch(dispatch));
@@ -142,7 +142,7 @@ public sealed class AgentSessionLaunchDefaultExecutionConfigSpecs : AgentSession
             var sessionId = payload.GetProperty("data").GetProperty("sessionId").GetString()!;
             var jobId = payload.GetProperty("data").GetProperty("jobId").GetString()!;
 
-            var snapshot = await PollDispatchForSessionAsync(jobId, runnerId, sessionId);
+            var snapshot = await ClaimDispatchForSessionAsync(jobId, runnerId, sessionId);
             var dispatch = await PollDispatchEnvelopeForWorkAsync(runnerId, snapshot.WorkId!);
             Assert.Equal("anthropic/sonnet-4.6", ReadModelFromDispatch(dispatch));
         }
@@ -230,7 +230,7 @@ public sealed class AgentSessionLaunchDefaultExecutionConfigSpecs : AgentSession
             var sessionId = payload.GetProperty("data").GetProperty("sessionId").GetString()!;
             var jobId = payload.GetProperty("data").GetProperty("jobId").GetString()!;
 
-            var snapshot = await PollDispatchForSessionAsync(jobId, runnerId, sessionId);
+            var snapshot = await ClaimDispatchForSessionAsync(jobId, runnerId, sessionId);
             var dispatch = await PollDispatchEnvelopeForWorkAsync(runnerId, snapshot.WorkId!);
             Assert.Equal("openai/gpt-5.6", ReadModelFromDispatch(dispatch));
             Assert.Equal("fast", ReadVariantFromDispatch(dispatch));
@@ -270,7 +270,7 @@ public sealed class AgentSessionLaunchDefaultExecutionConfigSpecs : AgentSession
             Assert.Equal("openai/gpt-5.6", jobSnapshot!.ExecutionDefinition!.Model);
 
             var sessionInfo = await _fixture.Grains.GetGrain<IAgentSessionGrain>(sessionId).GetAsync();
-            var snapshot = await PollDispatchForSessionAsync(jobId, runnerId, sessionId);
+            var snapshot = await ClaimDispatchForSessionAsync(jobId, runnerId, sessionId);
             var dispatch = await PollDispatchEnvelopeForWorkAsync(runnerId, snapshot.WorkId!);
             Assert.Equal("openai/gpt-5.6", ReadModelFromDispatch(dispatch));
             Assert.NotNull(sessionInfo);

@@ -27,7 +27,6 @@ namespace Mohist.Server.SpecTests.Specs.AgentOps;
 /// these specs assert the reporter-level contract directly so reporting
 /// regressions are caught without spinning a full route.
 /// </summary>
-[Collection("IntegrationSessions")]
 public class AgentUsageReporterSpecs
 {
     private readonly MohistIntegrationFixture _fixture;

@@ -11,7 +11,6 @@ using Xunit;
 
 namespace Mohist.Server.SpecTests.Specs.Api;
 
-[Collection("IntegrationApi")]
 public class AgentSessionAttachmentApiSpecs
 {
     private readonly MohistIntegrationFixture _fixture;

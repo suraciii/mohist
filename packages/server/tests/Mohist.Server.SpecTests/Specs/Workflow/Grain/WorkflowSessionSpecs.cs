@@ -17,7 +17,6 @@ using Xunit;
 
 namespace Mohist.Server.SpecTests.Specs.Workflow.Grain;
 
-[Collection("IntegrationWorkflow")]
 public class WorkflowSessionSpecs
 {
     private readonly HttpClient _client;

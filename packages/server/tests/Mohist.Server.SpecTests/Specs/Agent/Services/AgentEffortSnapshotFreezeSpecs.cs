@@ -24,7 +24,7 @@ namespace Mohist.Server.SpecTests.Specs.Agent.Services;
 /// <see cref="AgentJobRuntimeSnapshot.ExecutionDefinition"/> must keep the
 /// launch-time effort after the Agent is edited or deleted.
 /// </summary>
-[Collection("IntegrationRunner")]
+[Collection("RunnerMutationIntegration")]
 public class AgentEffortSnapshotFreezeSpecs
 {
     private readonly MohistIntegrationFixture _fixture;

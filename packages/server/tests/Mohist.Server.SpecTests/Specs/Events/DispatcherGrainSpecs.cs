@@ -110,27 +110,19 @@ public class DispatcherGrainSpecs
     }
 
     [Fact]
-    public async Task EventDispatcherGrain_NonFixedKey_SilentlyNoOpsAndDoesNotDispatch()
+    public async Task EventDispatcherGrain_NonFixedKey_DoesNotRegisterReminderOrRedeliver()
     {
-        // The cluster-singleton dispatcher grain refuses to register its
-        // reminder under any key other than the well-known Global key,
-        // so a rogue activation no-ops without throwing. No dispatch
-        // work or reminder registration must run on the rogue grain.
-        var eventId = $"evt_non_fixed_{Guid.NewGuid():N}";
-        await PublishWorkflowCompletedAsync(eventId, "issue_non_fixed");
         var rogue = _fixture.Grains.GetGrain<IEventDispatcherGrain>($"rogue-{Guid.NewGuid():N}");
 
-        // Soft no-op: the call completes (does not throw) and no work
-        // runs on the rogue grain.
         await rogue.DispatchNowAsync();
+        var redelivery = await rogue.RedeliverAsync(1);
 
         Assert.Null(await _fixture.ReminderTable.ReadRow(
             rogue.GetGrainId(),
             EventDispatcherGrain.ReminderName));
-        Assert.Equal(1, _fixture.EventStore.PendingCount);
-        Assert.DoesNotContain(eventId, _fixture.SpecificInvocations);
-
-        await _fixture.EventDispatcher.DispatchNowAsync();
+        Assert.False(redelivery.Found);
+        Assert.False(redelivery.Delivered);
+        Assert.Equal("Non-fixed key", redelivery.Error);
     }
 
     [Fact]

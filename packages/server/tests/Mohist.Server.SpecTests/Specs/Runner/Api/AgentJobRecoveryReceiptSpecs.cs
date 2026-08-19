@@ -20,7 +20,8 @@ namespace Mohist.Server.SpecTests.Specs.Runner.Api;
 /// Workflow work, but the AgentJob owner replaces its owner-ledger dispatch
 /// identity instead of mutating a Workflow settlement.
 /// </summary>
-public sealed class AgentJobRecoveryReceiptSpecs : IClassFixture<RunnerConfigFixture>, IAsyncLifetime
+[Collection("RunnerConfig")]
+public sealed class AgentJobRecoveryReceiptSpecs : IAsyncLifetime
 {
     private readonly RunnerConfigFixture _fixture;
 

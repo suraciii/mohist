@@ -24,7 +24,6 @@ using Xunit;
 
 namespace Mohist.Server.SpecTests.Specs.Sessions;
 
-[Collection("PlatformIntegration")]
 public class AgentSessionRuntimeEventSpecs : AgentSessionTestSupport
 {
     public AgentSessionRuntimeEventSpecs(MohistIntegrationFixture fixture) : base(fixture)

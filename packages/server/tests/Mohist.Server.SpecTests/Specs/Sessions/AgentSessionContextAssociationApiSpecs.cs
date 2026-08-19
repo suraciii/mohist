@@ -14,7 +14,6 @@ namespace Mohist.Server.SpecTests.Specs.Sessions;
 /// scoping, agent-launch source filter) live in
 /// <c>IssueSessionAssociationQuerierSpecs</c>.
 /// </summary>
-[Collection("IntegrationSessions")]
 public class AgentSessionContextAssociationApiSpecs
 {
     private readonly MohistIntegrationFixture _fixture;

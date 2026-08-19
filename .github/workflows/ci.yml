@@ -18,10 +18,8 @@ concurrency:
   group: ci-${{ github.workflow }}-${{ github.event_name == 'pull_request' && github.ref || github.sha }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
-# The Spec suite is split across four independent jobs. Each job discovers the
-# same compiled class list, selects a deterministic disjoint subset, and keeps
-# the existing xUnit collection and thread limits. A final job verifies that
-# the partition manifests cover every discovered class exactly once.
+# The Spec suite runs once in one apphost. Collection parallelism is bounded
+# inside xUnit so every CI run exercises the same process and fixture graph.
 jobs:
   changes:
     name: Detect Changed Paths
@@ -76,15 +74,14 @@ jobs:
           echo "node=$node" >> "$GITHUB_OUTPUT"
 
   dotnet-spec:
-    name: .NET spec tests (partition ${{ matrix.partition }})
+    name: .NET spec tests
     needs: [changes]
     if: github.event_name != 'pull_request' || needs.changes.outputs.dotnet == 'true'
-    strategy:
-      fail-fast: false
-      matrix:
-        partition: [0, 1, 2, 3]
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    # Setup and compilation consumed about 95s on hosted runners. Keep the
+    # test process's independent 240s hard limit reachable instead of letting
+    # the outer job cancel it around 197s.
+    timeout-minutes: 6
     env:
       DOTNET_NOLOGO: true
       DOTNET_CLI_TELEMETRY: false
@@ -118,44 +115,29 @@ jobs:
       - name: Build
         run: timeout --signal=TERM --kill-after=30s 300s dotnet build packages/server/tests/Mohist.Server.SpecTests/Mohist.Server.SpecTests.csproj -p:SkipWebBuild=true --no-restore
 
-      - name: Test Spec partition
+      - name: Test Spec suite
+        shell: bash
         run: |
-          timeout --signal=TERM -k 10s 240s ./scripts/ci-spec-partition.sh run \
+          mkdir -p artifacts/spec
+          set -o pipefail
+          timeout --signal=TERM -k 10s 240s \
             packages/server/tests/Mohist.Server.SpecTests/bin/Debug/net11.0/Mohist.Server.SpecTests \
-            "${{ matrix.partition }}" "${{ strategy.job-total }}" \
-            "artifacts/spec-partition-${{ matrix.partition }}" \
-            "artifacts/spec-partition-${{ matrix.partition }}/spec.trx"
+            -noColor -noLogo -noAutoReporters \
+            -parallel collections -parallelAlgorithm conservative -maxThreads 2 \
+            -trx artifacts/spec/spec.trx \
+            2>&1 | tee artifacts/spec/spec.log
+          test -s artifacts/spec/spec.trx
+          grep -Eq 'Total:[[:space:]]*[1-9][0-9]*' artifacts/spec/spec.log
         timeout-minutes: 5
 
-      - name: Upload Spec partition artifacts
+      - name: Upload Spec artifacts
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: dotnet-spec-partition-${{ matrix.partition }}-${{ github.run_attempt }}
-          path: artifacts/spec-partition-${{ matrix.partition }}
+          name: dotnet-spec-${{ github.run_attempt }}
+          path: artifacts/spec
           if-no-files-found: error
           retention-days: 7
-
-  dotnet-spec-coverage:
-    name: .NET spec coverage
-    needs: [changes, dotnet-spec]
-    if: ${{ always() && (github.event_name != 'pull_request' || needs.changes.outputs.dotnet == 'true') }}
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v6
-
-      - name: Download Spec partition artifacts
-        uses: actions/download-artifact@v4
-        with:
-          pattern: dotnet-spec-partition-*-${{ github.run_attempt }}
-          path: artifacts/spec-partitions
-          merge-multiple: false
-
-      - name: Verify complete Spec coverage
-        run: timeout --signal=TERM -k 10s 60s ./scripts/ci-spec-partition.sh verify artifacts/spec-partitions
 
   dotnet-core:
     name: .NET build and test

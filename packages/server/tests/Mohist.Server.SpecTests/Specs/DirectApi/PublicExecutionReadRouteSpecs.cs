@@ -27,8 +27,8 @@ namespace Mohist.Server.SpecTests.Specs.DirectApi;
 /// turns an unconsumed source watermark into 503 projection_lag with a
 /// retry hint — never a stale snapshot and never the five-state unknown.
 /// </summary>
-[Collection("IntegrationMisc")]
-public sealed class PublicExecutionReadRouteSpecs(MohistIntegrationFixture fixture)
+[Collection("PublicProjectionIntegration")]
+public sealed class PublicExecutionReadRouteSpecs(PublicProjectionIntegrationFixture fixture)
 {
     private const string Prompt = "Investigate the failed deployment";
 
@@ -82,8 +82,9 @@ public sealed class PublicExecutionReadRouteSpecs(MohistIntegrationFixture fixtu
             turnStatus: AgentTurnStatus.Completed,
             turnResult: new AgentTurnResult(Output: """{"text":"The deployment failure was a bad config."}"""));
 
+        await NudgeProjectorAsync();
         using var reader = await CreateReaderAsync(projectId);
-        using var job = await ReadAsync(
+        using var job = await ReadProjectedAsync(
             reader,
             $"/api/v1/projects/{projectId}/agent-jobs/{ids.JobId}",
             root => string.Equals(
@@ -101,12 +102,16 @@ public sealed class PublicExecutionReadRouteSpecs(MohistIntegrationFixture fixtu
         Assert.True(Json(job).GetProperty("sequence").GetInt64() > 0);
         await AssertAllowlistAsync(job);
 
-        using var input = await ReadInputAsync(projectId, ids.InputId);
+        using var input = await ReadProjectedAsync(
+            reader,
+            $"/api/v1/projects/{projectId}/agent-inputs/{ids.InputId}");
         Assert.Equal(ids.InputId, Json(input).GetProperty("inputId").GetString());
         Assert.Equal(PublicExecutionFieldValues.InputAccepted, Json(input).GetProperty("inputStatus").GetString());
         await AssertAllowlistAsync(input);
 
-        using var turn = await ReadTurnAsync(projectId, ids.TurnId);
+        using var turn = await ReadProjectedAsync(
+            reader,
+            $"/api/v1/projects/{projectId}/agent-turns/{ids.TurnId}");
         Assert.Equal(ids.TurnId, Json(turn).GetProperty("turnId").GetString());
         Assert.Equal(PublicExecutionFieldValues.OutcomeCompleted, Json(turn).GetProperty("outcome").GetString());
         await AssertAllowlistAsync(turn);
@@ -247,42 +252,18 @@ public sealed class PublicExecutionReadRouteSpecs(MohistIntegrationFixture fixtu
         Assert.Equal(PublicExecutionFieldValues.StatusAccepted, Json(current).GetProperty("status").GetString());
 
         // Rewind the stored checkpoint below the durable source head: the
-        // same request must now refuse to serve the (still existing)
-        // snapshot as current state. The hosted projector re-advances a
-        // rewound checkpoint as soon as its drain observes the mismatch,
-        // so the checkpoint is re-pinned on each attempt until the read
-        // actually observes the gate — a bounded probe that fails loudly
-        // if the 503 never appears.
-        HttpResponseMessage? lagged = null;
-        try
-        {
-            await TestWait.ForAsync(
-                probe: async () =>
-                {
-                    await RewindJobCheckpointAsync(jobId);
-                    lagged?.Dispose();
-                    var response = await client.GetAsync($"/api/v1/projects/{projectId}/agent-jobs/{jobId}");
-                    lagged = response;
-                    return response.StatusCode == HttpStatusCode.ServiceUnavailable;
-                },
-                isDone: ok => ok,
-                timeout: TimeSpan.FromSeconds(10),
-                step: TimeSpan.FromMilliseconds(30),
-                description: "the rewound job checkpoint to gate job reads with projection_lag");
+        // same request must refuse to serve the existing snapshot as current.
+        await RewindJobCheckpointAsync(jobId);
+        using var lagged = await client.GetAsync($"/api/v1/projects/{projectId}/agent-jobs/{jobId}");
 
-            Assert.Equal(HttpStatusCode.ServiceUnavailable, lagged!.StatusCode);
-            Assert.Equal(
-                DirectApiResults.ProjectionLagRetryAfterSeconds,
-                lagged.Headers.RetryAfter?.ToString());
-            await AssertErrorAsync(lagged, HttpStatusCode.ServiceUnavailable, "projection_lag");
-            var laggedBody = await lagged.Content.ReadAsStringAsync();
-            Assert.DoesNotContain("\"status\"", laggedBody, StringComparison.Ordinal);
-            Assert.DoesNotContain("\"jobId\"", laggedBody, StringComparison.Ordinal);
-        }
-        finally
-        {
-            lagged?.Dispose();
-        }
+        Assert.Equal(HttpStatusCode.ServiceUnavailable, lagged.StatusCode);
+        Assert.Equal(
+            DirectApiResults.ProjectionLagRetryAfterSeconds,
+            lagged.Headers.RetryAfter?.ToString());
+        await AssertErrorAsync(lagged, HttpStatusCode.ServiceUnavailable, "projection_lag");
+        var laggedBody = await lagged.Content.ReadAsStringAsync();
+        Assert.DoesNotContain("\"status\"", laggedBody, StringComparison.Ordinal);
+        Assert.DoesNotContain("\"jobId\"", laggedBody, StringComparison.Ordinal);
 
         // The projector repairs the checkpoint from the durable source;
         // the same read then serves the current projection again.
@@ -310,47 +291,20 @@ public sealed class PublicExecutionReadRouteSpecs(MohistIntegrationFixture fixtu
         using var current = await ReadAsync(client, inputPath);
         Assert.Equal(PublicExecutionFieldValues.StatusRunning, Json(current).GetProperty("status").GetString());
 
-        // The Session ledger digest is the session anchor's required
-        // source watermark: a checkpoint holding an older digest gates
-        // Input and Turn reads with projection_lag, and never surfaces
-        // the stale snapshot as the five-state unknown. The hosted
-        // projector re-advances a rewound checkpoint as soon as its
-        // drain observes the mismatch, so the checkpoint is re-pinned on
-        // each attempt until both reads actually observe the gate — a
-        // bounded probe that fails loudly if the gate never fires.
-        HttpResponseMessage? inputLagged = null;
-        HttpResponseMessage? turnLagged = null;
-        try
-        {
-            await TestWait.ForAsync(
-                probe: async () =>
-                {
-                    await RewindSessionCheckpointAsync(ids.SessionId);
-                    inputLagged?.Dispose();
-                    turnLagged?.Dispose();
-                    var laggedReads = await Task.WhenAll(
-                        client.GetAsync(inputPath),
-                        client.GetAsync($"/api/v1/projects/{projectId}/agent-turns/{ids.TurnId}"));
-                    inputLagged = laggedReads[0];
-                    turnLagged = laggedReads[1];
-                    return inputLagged.StatusCode == HttpStatusCode.ServiceUnavailable
-                        && turnLagged.StatusCode == HttpStatusCode.ServiceUnavailable;
-                },
-                isDone: ok => ok,
-                timeout: TimeSpan.FromSeconds(10),
-                step: TimeSpan.FromMilliseconds(30),
-                description: "the rewound session checkpoint to gate input and turn reads with projection_lag");
+        // The Session ledger digest is the session anchor's required source
+        // watermark. An older digest gates both reads without exposing stale
+        // snapshots as the five-state unknown.
+        await RewindSessionCheckpointAsync(ids.SessionId);
+        var laggedReads = await Task.WhenAll(
+            client.GetAsync(inputPath),
+            client.GetAsync($"/api/v1/projects/{projectId}/agent-turns/{ids.TurnId}"));
+        using var inputLagged = laggedReads[0];
+        using var turnLagged = laggedReads[1];
 
-            Assert.Equal(HttpStatusCode.ServiceUnavailable, inputLagged!.StatusCode);
-            await AssertErrorAsync(inputLagged, HttpStatusCode.ServiceUnavailable, "projection_lag");
-            Assert.Equal(HttpStatusCode.ServiceUnavailable, turnLagged!.StatusCode);
-            await AssertErrorAsync(turnLagged, HttpStatusCode.ServiceUnavailable, "projection_lag");
-        }
-        finally
-        {
-            inputLagged?.Dispose();
-            turnLagged?.Dispose();
-        }
+        Assert.Equal(HttpStatusCode.ServiceUnavailable, inputLagged.StatusCode);
+        await AssertErrorAsync(inputLagged, HttpStatusCode.ServiceUnavailable, "projection_lag");
+        Assert.Equal(HttpStatusCode.ServiceUnavailable, turnLagged.StatusCode);
+        await AssertErrorAsync(turnLagged, HttpStatusCode.ServiceUnavailable, "projection_lag");
 
         await NudgeProjectorAsync();
         using var inputRecovered = await ReadAsync(client, inputPath);
@@ -553,41 +507,26 @@ public sealed class PublicExecutionReadRouteSpecs(MohistIntegrationFixture fixtu
         return await ReadAsync(client, $"/api/v1/projects/{projectId}/agent-turns/{turnId}");
     }
 
-    /// <summary>
-    /// Polls a public read until it serves the current projection. A
-    /// 404 or 503 answer is part of convergence — the anchor appears
-    /// only once the projector consumes the seeded facts — so the
-    /// probe keeps waiting on both; any other failure is fatal. A caller
-    /// may also require a specific public state when the fixture writes
-    /// the canonical Job and Session in separate commits.
-    /// </summary>
     private async Task<JsonDocument> ReadAsync(
         HttpClient client,
         string path,
         Func<JsonElement, bool>? isReady = null)
     {
-        var body = await TestWait.ForAsync(
-            probe: async () =>
-            {
-                using var response = await client.GetAsync(path);
-                if (response.StatusCode is HttpStatusCode.ServiceUnavailable or HttpStatusCode.NotFound)
-                {
-                    return null;
-                }
+        await NudgeProjectorAsync();
+        return await ReadProjectedAsync(client, path, isReady);
+    }
 
-                Assert.True(
-                    response.IsSuccessStatusCode,
-                    $"{path} answered {response.StatusCode}: {await response.Content.ReadAsStringAsync()}");
-                var content = await response.Content.ReadAsStringAsync();
-                using var document = JsonDocument.Parse(content);
-                return isReady is null || isReady(document.RootElement) ? content : null;
-            },
-            isDone: content => content is not null,
-            timeout: TimeSpan.FromSeconds(30),
-            step: TimeSpan.FromMilliseconds(20),
-            description: $"the public read of {path} to become current",
-            advance: () => fixture.Client.GetAsync("/api/health"));
-        return JsonDocument.Parse(body!);
+    private static async Task<JsonDocument> ReadProjectedAsync(
+        HttpClient client,
+        string path,
+        Func<JsonElement, bool>? isReady = null)
+    {
+        using var response = await client.GetAsync(path);
+        var content = await response.Content.ReadAsStringAsync();
+        Assert.True(response.IsSuccessStatusCode, $"{path} answered {response.StatusCode}: {content}");
+        var document = JsonDocument.Parse(content);
+        Assert.True(isReady is null || isReady(document.RootElement), content);
+        return document;
     }
     private async Task RewindJobCheckpointAsync(string jobKey)
     {
@@ -615,8 +554,7 @@ public sealed class PublicExecutionReadRouteSpecs(MohistIntegrationFixture fixtu
 
     private async Task NudgeProjectorAsync()
     {
-        await using var scope = fixture.Services.CreateAsyncScope();
-        scope.ServiceProvider.GetRequiredService<IPublicProjectionNudge>().Nudge();
+        await fixture.DrainPublicProjectionAsync();
     }
 
     private static JsonElement Json(JsonDocument document) => document.RootElement;

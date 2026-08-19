@@ -8,7 +8,6 @@ using Xunit;
 
 namespace Mohist.Server.SpecTests.Specs.Issue.Api;
 
-[Collection("IssueLifecycle")]
 public class IssueManualDoneApiSpecs
 {
     private readonly HttpClient _client;

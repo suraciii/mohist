@@ -21,7 +21,6 @@ namespace Mohist.Server.SpecTests.Specs.Auth;
 /// header or session cookie, and every rejection is an indistinguishable
 /// 401 with an RFC 6750 invalid_token challenge (docs/auth.md).
 /// </summary>
-[Collection("IntegrationMisc")]
 public sealed class AuthResolutionSpecs(MohistIntegrationFixture fixture)
 {
     private const string RepoName = "hello-world";

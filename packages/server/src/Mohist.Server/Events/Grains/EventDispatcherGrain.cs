@@ -33,7 +33,7 @@ public sealed class EventDispatcherGrain : Grain, IEventDispatcherGrain
 
     public override async Task OnActivateAsync(CancellationToken ct)
     {
-        if (!string.Equals(this.GetPrimaryKeyString(), Global, StringComparison.Ordinal))
+        if (!IsGlobalKey(this.GetPrimaryKeyString()))
         {
             // Silently no-op rather than throw: the rogue-grain path
             // exercises a non-fixed key in tests, and a transient race
@@ -79,6 +79,8 @@ public sealed class EventDispatcherGrain : Grain, IEventDispatcherGrain
         return _dispatcher.DispatchAsync(CancellationToken.None);
     }
 
-    private bool IsFixedKey =>
-        string.Equals(this.GetPrimaryKeyString(), Global, StringComparison.Ordinal);
+    internal static bool IsGlobalKey(string key) =>
+        string.Equals(key, Global, StringComparison.Ordinal);
+
+    private bool IsFixedKey => IsGlobalKey(this.GetPrimaryKeyString());
 }

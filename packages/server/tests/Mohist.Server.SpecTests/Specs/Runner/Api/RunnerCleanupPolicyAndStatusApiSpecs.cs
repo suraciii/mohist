@@ -11,7 +11,7 @@ using Xunit;
 
 namespace Mohist.Server.SpecTests.Specs.Runner.Api;
 
-[Collection("IntegrationRunner")]
+[Collection("RunnerMutationIntegration")]
 public class RunnerCleanupPolicyAndStatusApiSpecs : IAsyncLifetime
 {
     private readonly MohistIntegrationFixture _fixture;

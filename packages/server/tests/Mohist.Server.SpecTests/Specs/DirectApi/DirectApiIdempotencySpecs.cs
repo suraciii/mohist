@@ -13,6 +13,7 @@ using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Infrastructure.Data.DirectApi;
 using Mohist.Server.Infrastructure.Data.Project;
 using Mohist.Server.Infrastructure.DirectApi;
+using Mohist.Server.Infrastructure.PublicApi;
 using Mohist.Server.SpecTests.Support;
 using Mohist.Server.TestSupport;
 using Xunit;
@@ -25,8 +26,8 @@ namespace Mohist.Server.SpecTests.Specs.DirectApi;
 /// rejected request can be checked for both mapping and canonical side
 /// effects.
 /// </summary>
-[Collection("IntegrationMisc")]
-public sealed class DirectApiIdempotencySpecs(MohistIntegrationFixture fixture)
+[Collection("PublicProjectionIntegration")]
+public sealed class DirectApiIdempotencySpecs(PublicProjectionIntegrationFixture fixture)
 {
     [Fact]
     public async Task KeyAndBodyValidation_HappensBeforeMappingOrAdmission()
@@ -314,22 +315,15 @@ public sealed class DirectApiIdempotencySpecs(MohistIntegrationFixture fixture)
         string body,
         string key)
     {
-        var responseBody = await TestWait.ForAsync(
-            probe: async () =>
-            {
-                using var response = await client.SendAsync(Request(projectId, agentId, body, key));
-                if (response.StatusCode == HttpStatusCode.ServiceUnavailable)
-                    return null;
+        using var first = await client.SendAsync(Request(projectId, agentId, body, key));
+        if (first.StatusCode == HttpStatusCode.OK)
+            return JsonDocument.Parse(await first.Content.ReadAsStringAsync());
 
-                Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-                return await response.Content.ReadAsStringAsync();
-            },
-            isDone: body => body is not null,
-            timeout: TimeSpan.FromSeconds(30),
-            step: TimeSpan.FromMilliseconds(20),
-            description: "direct launch public observation to become current",
-            advance: () => fixture.Client.GetAsync("/api/health"));
-        return JsonDocument.Parse(responseBody!);
+        Assert.Equal(HttpStatusCode.ServiceUnavailable, first.StatusCode);
+        await fixture.DrainPublicProjectionAsync();
+        using var replay = await client.SendAsync(Request(projectId, agentId, body, key));
+        Assert.Equal(HttpStatusCode.OK, replay.StatusCode);
+        return JsonDocument.Parse(await replay.Content.ReadAsStringAsync());
     }
 
     private async Task ArchiveAgentAsync(string projectId, string agentId)

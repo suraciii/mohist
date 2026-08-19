@@ -10,7 +10,6 @@ using Xunit;
 
 namespace Mohist.Server.SpecTests.Specs.Agent.Api;
 
-[Collection("IntegrationApi")]
 public sealed class AgentSessionSpawnRouteSpecs
 {
     private readonly MohistIntegrationFixture _fixture;

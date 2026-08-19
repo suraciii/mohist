@@ -22,7 +22,6 @@ namespace Mohist.Server.SpecTests.Specs.Api;
 /// task-run filtering and the directory listing / entry-bytes calculation
 /// live in <c>WorkflowArtifactQuerySpecs</c>.
 /// </summary>
-[Collection("IntegrationApi")]
 public class WorkflowArtifactQueryRouteSpecs
 {
     private readonly MohistIntegrationFixture _fixture;

@@ -13,7 +13,6 @@ namespace Mohist.Server.SpecTests.Specs.Project.Api;
 /// configuration time, and the read surface exposed through the Project
 /// read so Web and CLI can branch without a second endpoint.
 /// </summary>
-[Collection("MohistIntegration")]
 public sealed class ProjectDefaultExecutionConfigRoutesSpecs : AgentSessionLaunchRoutesTestSupport
 {
     public ProjectDefaultExecutionConfigRoutesSpecs(MohistIntegrationFixture fixture) : base(fixture)

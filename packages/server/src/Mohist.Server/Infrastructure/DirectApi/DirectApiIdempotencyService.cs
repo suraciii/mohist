@@ -35,12 +35,14 @@ public sealed record DirectApiLaunchOutcome(
     string? RejectionReason = null);
 
 public sealed record DirectApiFollowupOutcome(
+    string ProjectId,
     string SessionId,
     string? AgentId,
     string? InputId = null,
     string? TurnId = null,
     string? RejectionCode = null,
-    string? RejectionReason = null);
+    string? RejectionReason = null,
+    string? SnapshotJson = null);
 
 public sealed record DirectApiStopOutcome(
     string ProjectId,
@@ -232,6 +234,29 @@ public sealed class DirectApiIdempotencyService : IScopedService
         }
 
         return mapping;
+    }
+
+    public async Task<DirectApiIdempotencyMappingRow> FreezeCompletedOutcomeAsync(
+        string command,
+        string scopeKey,
+        string expectedOutcome,
+        string frozenOutcome,
+        CancellationToken ct = default)
+    {
+        await using var db = await _dbFactory.CreateDbContextAsync(ct);
+        await db.DirectApiIdempotencyMappings
+            .Where(row => row.Command == command
+                && row.ScopeKey == scopeKey
+                && row.State == DirectApiMappingStates.Completed
+                && row.Outcome == expectedOutcome)
+            .ExecuteUpdateAsync(
+                setters => setters.SetProperty(row => row.Outcome, frozenOutcome),
+                ct);
+        return await db.DirectApiIdempotencyMappings.AsNoTracking()
+            .FirstOrDefaultAsync(
+                row => row.Command == command && row.ScopeKey == scopeKey,
+                ct)
+            ?? throw new InvalidOperationException("The direct API mapping disappeared while freezing its response.");
     }
 
     public static T ReadOutcome<T>(DirectApiIdempotencyMappingRow mapping)

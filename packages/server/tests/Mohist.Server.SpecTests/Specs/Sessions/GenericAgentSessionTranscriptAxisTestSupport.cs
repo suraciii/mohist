@@ -44,15 +44,15 @@ public abstract class GenericAgentSessionTranscriptAxisTestSupport : IAsyncLifet
         }
     }
 
-    protected async Task OpenGenericSessionAsync(string projectId, string sessionId, PollResult polledWork)
+    protected async Task OpenGenericSessionAsync(string projectId, string sessionId, ClaimedDispatch claimedWork)
     {
         await _fixture.Client.PostOkAsync(
             $"/api/runner/{_runnerId}/agent-sessions/{projectId}/{sessionId}/open",
             new
             {
-                workId = polledWork.WorkId,
-                workType = polledWork.WorkType,
-                stage = polledWork.Stage,
+                workId = claimedWork.WorkId,
+                workType = claimedWork.WorkType,
+                stage = claimedWork.Stage,
                 title = "Agent Job",
             });
         await _fixture.Client.PostOkAsync(
@@ -62,43 +62,43 @@ public abstract class GenericAgentSessionTranscriptAxisTestSupport : IAsyncLifet
                 runtimeSessionId = sessionId,
                 workDir = projectId,
                 processPid = 4321,
-                agentJobId = polledWork.AgentJobId,
-                workId = polledWork.WorkId,
+                agentJobId = claimedWork.AgentJobId,
+                workId = claimedWork.WorkId,
             });
     }
 
     protected async Task<FakeAgentRunResult> RunFakeAcpAgentThroughRuntimeEventsEndpointAsync(
         string projectId,
         string sessionId,
-        PollResult polledWork,
+        ClaimedDispatch claimedWork,
         object[] runtimeEvents)
     {
-        Assert.Equal(sessionId, polledWork.AgentSessionId);
-        Assert.Equal(projectId, polledWork.ProjectId);
-        Assert.Equal(WorkDispatchOwnerKinds.AgentJob, polledWork.OwnerKind);
-        Assert.Equal(string.Empty, polledWork.WorkflowRunId);
-        Assert.False(string.IsNullOrWhiteSpace(polledWork.WorkId));
-        Assert.False(string.IsNullOrWhiteSpace(polledWork.WorkType));
-        Assert.False(string.IsNullOrWhiteSpace(polledWork.Stage));
+        Assert.Equal(sessionId, claimedWork.AgentSessionId);
+        Assert.Equal(projectId, claimedWork.ProjectId);
+        Assert.Equal(WorkDispatchOwnerKinds.AgentJob, claimedWork.OwnerKind);
+        Assert.Equal(string.Empty, claimedWork.WorkflowRunId);
+        Assert.False(string.IsNullOrWhiteSpace(claimedWork.WorkId));
+        Assert.False(string.IsNullOrWhiteSpace(claimedWork.WorkType));
+        Assert.False(string.IsNullOrWhiteSpace(claimedWork.Stage));
 
-        await OpenGenericSessionAsync(projectId, sessionId, polledWork);
+        await OpenGenericSessionAsync(projectId, sessionId, claimedWork);
         await _fixture.Client.PostOkAsync(
             $"/api/runner/{_runnerId}/agent-sessions/{projectId}/{sessionId}/runtime-events",
             new
             {
-                workId = polledWork.WorkId,
-                workType = polledWork.WorkType,
-                stage = polledWork.Stage,
+                workId = claimedWork.WorkId,
+                workType = claimedWork.WorkType,
+                stage = claimedWork.Stage,
                 runtimeSessionId = sessionId,
                 runtimeEvents,
             });
-        await ReportDispatchCompletedAsync(_runnerId, polledWork);
+        await ReportDispatchCompletedAsync(_runnerId, claimedWork);
 
         return new FakeAgentRunResult(
             sessionId,
-            polledWork.WorkId,
-            polledWork.WorkType,
-            polledWork.Stage,
+            claimedWork.WorkId,
+            claimedWork.WorkType,
+            claimedWork.Stage,
             runtimeEvents.Select(ReadRuntimeEventType).ToArray());
     }
 
@@ -110,13 +110,13 @@ public abstract class GenericAgentSessionTranscriptAxisTestSupport : IAsyncLifet
         return type;
     }
 
-    protected async Task ReportDispatchCompletedAsync(string runnerId, PollResult polledWork)
+    protected async Task ReportDispatchCompletedAsync(string runnerId, ClaimedDispatch claimedWork)
     {
-        Assert.False(string.IsNullOrWhiteSpace(polledWork.AgentJobId));
-        var jobGrain = _fixture.Grains.GetGrain<IAgentJobGrain>(polledWork.AgentJobId!);
+        Assert.False(string.IsNullOrWhiteSpace(claimedWork.AgentJobId));
+        var jobGrain = _fixture.Grains.GetGrain<IAgentJobGrain>(claimedWork.AgentJobId!);
         var report = await jobGrain.ReportResultAsync(
             runnerId,
-            polledWork.WorkId,
+            claimedWork.WorkId,
             new Mohist.Server.Runner.Grains.WorkResult(
                 Status: "completed",
                 Message: "ok",
@@ -203,7 +203,7 @@ public abstract class GenericAgentSessionTranscriptAxisTestSupport : IAsyncLifet
         return await CreateRunnerHomeWorkspaceAsync(projectId, _runnerId, workspacePrefix);
     }
 
-    protected async Task<PollResult> PollOnceAsync(
+    protected async Task<ClaimedDispatch> ClaimPreparedDispatchAsync(
         string agentJobId,
         string runnerId,
         string expectedSessionId)
@@ -216,103 +216,22 @@ public abstract class GenericAgentSessionTranscriptAxisTestSupport : IAsyncLifet
             .GetRuntimeSnapshotAsync();
         Assert.Equal(runnerId, assignment.RunnerId);
 
-        var dispatch = await PollDispatchOnceAsync(runnerId, expectedSessionId);
-        Assert.NotNull(dispatch);
-        Assert.Equal(agentJobId, dispatch.AgentJobId);
-        return dispatch;
-    }
+        var claim = await _fixture.Grains
+            .GetGrain<IAgentJobGrain>(agentJobId)
+            .ClaimNextAsync(runnerId);
+        var claimed = Assert.IsType<ClaimResult>(claim);
+        Assert.Equal(agentJobId, claimed.AgentJobId);
+        Assert.Equal(expectedSessionId, claimed.Dispatch.AgentSessionId);
 
-    private async Task<PollResult?> PollDispatchOnceAsync(string runnerId, string expectedSessionId)
-    {
-        using var poll = await _fixture.Client.PostAsync($"/api/runner/{runnerId}/poll", content: null);
-        var dispatches = await poll.ReadDispatchElementsAsync();
-        PollResult? match = null;
-        foreach (var data in dispatches)
-        {
-            var polledSessionId = data.TryGetProperty("agentSessionId", out var agentSessionIdElement)
-                && agentSessionIdElement.ValueKind != JsonValueKind.Null
-                ? agentSessionIdElement.GetString()
-                : null;
-            if (match is null && polledSessionId == expectedSessionId)
-            {
-                var workId = data.GetProperty("workId").GetString() ?? string.Empty;
-                var agentJobId = data.TryGetProperty("agentJobId", out var agentJobIdElement) && agentJobIdElement.ValueKind != JsonValueKind.Null
-                    ? agentJobIdElement.GetString()
-                    : null;
-                var projectId = data.TryGetProperty("projectId", out var projectIdElement) && projectIdElement.ValueKind != JsonValueKind.Null
-                    ? projectIdElement.GetString()
-                    : null;
-                var ownerKind = data.TryGetProperty("ownerKind", out var ownerKindElement) && ownerKindElement.ValueKind != JsonValueKind.Null
-                    ? ownerKindElement.GetString()
-                    : null;
-                match = new PollResult(
-                    WorkflowRunId: data.GetProperty("workflowRunId").GetString() ?? string.Empty,
-                    WorkId: workId,
-                    WorkType: data.GetProperty("workType").GetString() ?? string.Empty,
-                    Stage: data.GetProperty("stage").GetString() ?? string.Empty,
-                    AgentJobId: agentJobId,
-                    ProjectId: projectId,
-                    AgentSessionId: polledSessionId,
-                    OwnerKind: ownerKind);
-            }
-            else
-            {
-                await DrainDispatchElementAsync(runnerId, data);
-            }
-        }
-
-        return match;
-    }
-
-    protected async Task DrainRemainingDispatchAsync(string runnerId, string? expectedSessionId = null)
-    {
-        var attempts = 30;
-        for (var i = 0; i < attempts; i++)
-        {
-            using var poll = await _fixture.Client.PostAsync($"/api/runner/{runnerId}/poll", content: null);
-            var dispatches = await poll.ReadDispatchElementsAsync();
-            if (dispatches.Count == 0) return;
-            foreach (var data in dispatches)
-            {
-                var polledSessionId = data.TryGetProperty("agentSessionId", out var agentSessionIdElement)
-                    && agentSessionIdElement.ValueKind != JsonValueKind.Null
-                    ? agentSessionIdElement.GetString()
-                    : null;
-                if (expectedSessionId is not null && polledSessionId != expectedSessionId)
-                    return;
-
-                await DrainDispatchElementAsync(runnerId, data);
-            }
-        }
-    }
-
-    protected async Task DrainDispatchElementAsync(string runnerId, JsonElement data)
-    {
-        var workId = data.GetProperty("workId").GetString();
-        var ownerKind = data.TryGetProperty("ownerKind", out var ownerKindElement) && ownerKindElement.ValueKind != JsonValueKind.Null
-            ? ownerKindElement.GetString()
-            : null;
-
-        if (!string.Equals(ownerKind, WorkDispatchOwnerKinds.AgentJob, StringComparison.Ordinal))
-            return;
-
-        var agentJobId = data.TryGetProperty("agentJobId", out var agentJobIdElement) && agentJobIdElement.ValueKind != JsonValueKind.Null
-            ? agentJobIdElement.GetString()
-            : null;
-        if (string.IsNullOrWhiteSpace(agentJobId) || string.IsNullOrWhiteSpace(workId))
-            return;
-
-        var jobGrain = _fixture.Grains.GetGrain<IAgentJobGrain>(agentJobId!);
-        var report = await jobGrain.ReportResultAsync(
-            runnerId,
-            workId!,
-            new Mohist.Server.Runner.Grains.WorkResult(
-                Status: "completed",
-                Message: "ok",
-                Output: JSON.DeserializeElement("{}"),
-                ArtifactUploadIds: null,
-                ExitCode: 0));
-        Assert.True(report.Accepted, "AgentJob rejected drain report");
+        return new ClaimedDispatch(
+            WorkflowRunId: claimed.Dispatch.WorkflowRunId,
+            WorkId: claimed.Dispatch.WorkId,
+            WorkType: claimed.Dispatch.WorkType,
+            Stage: claimed.Dispatch.Stage ?? string.Empty,
+            AgentJobId: claimed.AgentJobId,
+            ProjectId: claimed.Dispatch.ProjectId,
+            AgentSessionId: claimed.Dispatch.AgentSessionId,
+            OwnerKind: claimed.Dispatch.OwnerKind);
     }
 
     protected async Task<ProjectRef> CreateProjectAsync(string name)
@@ -348,7 +267,7 @@ public abstract class GenericAgentSessionTranscriptAxisTestSupport : IAsyncLifet
         return new AgentRef(body.GetProperty("data").GetProperty("id").GetString()!, agentName);
     }
 
-    protected sealed record PollResult(
+    protected sealed record ClaimedDispatch(
         string WorkflowRunId,
         string WorkId,
         string WorkType,

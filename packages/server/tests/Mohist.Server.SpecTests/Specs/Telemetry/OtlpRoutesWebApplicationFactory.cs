@@ -10,6 +10,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Time.Testing;
 using Mohist.Server.Auth.Identity;
 using Mohist.Server.Infrastructure.Data.Db;
@@ -114,6 +115,8 @@ public class OtlpRoutesWebApplicationFactory : WebApplicationFactory<Program>
 
         builder.ConfigureTestServices(services =>
         {
+            services.RemoveAll<ILoggerProvider>();
+            services.AddSingleton<ILoggerProvider, InMemoryLoggerProvider>();
             services.RemoveAll<IFileCredentialStore>();
             services.AddSingleton<IFileCredentialStore>(new InMemoryFileCredentialStore());
             services.RemoveAll<IWebContentProvider>();

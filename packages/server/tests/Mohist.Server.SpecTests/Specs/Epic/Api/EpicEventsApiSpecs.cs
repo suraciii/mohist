@@ -19,7 +19,6 @@ namespace Mohist.Server.SpecTests.Specs.Epic.Api;
 /// <item>honours the <c>?limit=</c> query parameter.</item>
 /// </list>
 /// </summary>
-[Collection("PlatformIntegration")]
 public class EpicEventsApiSpecs
 {
     private readonly MohistIntegrationFixture _fixture;

@@ -20,8 +20,8 @@ namespace Mohist.Server.SpecTests.Specs.Auth;
 /// are all queryable through <c>GET /api/audit/events</c> — with
 /// subject, time and target, and never a token plaintext value.
 /// </summary>
-[Collection("IntegrationMisc")]
-public sealed class AuditEventSpecs(MohistIntegrationFixture fixture)
+[Collection("WorkflowRuntimeIntegration")]
+public sealed class AuditEventSpecs(IsolatedMohistIntegrationFixture fixture)
 {
     private const string AuditPath = "/api/audit/events";
 
@@ -90,18 +90,21 @@ public sealed class AuditEventSpecs(MohistIntegrationFixture fixture)
     public async Task RunnerEnrollment_Registration_AndRevocation_AreRecorded()
     {
         var enrollmentToken = await CreateEnrollmentTokenAsync();
+        var enrollmentTokenHash = CredentialToken.Hash(enrollmentToken);
+        var runnerId = $"runner-audited-{Guid.NewGuid():N}";
 
         var afterIssuance = await GetEventsAsync();
         var issued = afterIssuance.Single(auditEvent =>
-            auditEvent.GetProperty("eventType").GetString() == "enrollmentTokenIssued");
+            auditEvent.GetProperty("eventType").GetString() == "enrollmentTokenIssued"
+            && auditEvent.GetProperty("targetId").GetString() == enrollmentTokenHash);
         Assert.Equal("service", issued.GetProperty("subjectId").GetString());
         Assert.Equal("enrollmentToken", issued.GetProperty("targetKind").GetString());
-        Assert.Equal(CredentialToken.Hash(enrollmentToken), issued.GetProperty("targetId").GetString());
+        Assert.Equal(enrollmentTokenHash, issued.GetProperty("targetId").GetString());
 
         using var register = await fixture.Client.PostAsJsonAsync("/api/runners/register", new
         {
             token = enrollmentToken,
-            runnerId = "runner-audited",
+            runnerId,
         });
         Assert.Equal(HttpStatusCode.Created, register.StatusCode);
         var runnerCredential = JsonDocument.Parse(await register.Content.ReadAsStringAsync())
@@ -109,24 +112,27 @@ public sealed class AuditEventSpecs(MohistIntegrationFixture fixture)
 
         var afterRegistration = await GetEventsAsync();
         var consumed = afterRegistration.Single(auditEvent =>
-            auditEvent.GetProperty("eventType").GetString() == "enrollmentTokenConsumed");
-        Assert.Equal(CredentialToken.Hash(enrollmentToken), consumed.GetProperty("targetId").GetString());
-        Assert.Equal("runner-audited", consumed.GetProperty("metadata").GetProperty("runnerId").GetString());
+            auditEvent.GetProperty("eventType").GetString() == "enrollmentTokenConsumed"
+            && auditEvent.GetProperty("targetId").GetString() == enrollmentTokenHash);
+        Assert.Equal(enrollmentTokenHash, consumed.GetProperty("targetId").GetString());
+        Assert.Equal(runnerId, consumed.GetProperty("metadata").GetProperty("runnerId").GetString());
 
         var runnerIssued = afterRegistration.Single(auditEvent =>
             auditEvent.GetProperty("eventType").GetString() == "credentialIssued"
-            && auditEvent.GetProperty("metadata").GetProperty("kind").GetString() == "runner");
+            && auditEvent.GetProperty("metadata").GetProperty("kind").GetString() == "runner"
+            && auditEvent.GetProperty("metadata").GetProperty("name").GetString() == runnerId);
         Assert.Equal(MohistPrincipal.AdminPrincipalId, runnerIssued.GetProperty("subjectId").GetString());
-        Assert.Equal("runner-audited", runnerIssued.GetProperty("metadata").GetProperty("name").GetString());
+        Assert.Equal(runnerId, runnerIssued.GetProperty("metadata").GetProperty("name").GetString());
 
-        using var revoke = await fixture.Client.DeleteAsync("/api/runners/runner-audited/credentials");
+        using var revoke = await fixture.Client.DeleteAsync($"/api/runners/{runnerId}/credentials");
         Assert.Equal(HttpStatusCode.OK, revoke.StatusCode);
 
         var afterRevocation = await GetEventsAsync();
         var revoked = afterRevocation.Single(auditEvent =>
             auditEvent.GetProperty("eventType").GetString() == "credentialRevoked"
-            && auditEvent.GetProperty("metadata").GetProperty("kind").GetString() == "runner");
-        Assert.Equal("runner-audited", revoked.GetProperty("targetId").GetString());
+            && auditEvent.GetProperty("metadata").GetProperty("kind").GetString() == "runner"
+            && auditEvent.GetProperty("targetId").GetString() == runnerId);
+        Assert.Equal(runnerId, revoked.GetProperty("targetId").GetString());
         Assert.Equal("service", revoked.GetProperty("subjectId").GetString());
 
         var body = await ReadAuditRawAsync();

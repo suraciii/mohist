@@ -120,8 +120,6 @@ export interface TrackConfig {
   readonly executionProvenance?: string
   readonly executionSourceRoots?: readonly string[]
   readonly reportFormat: ReportFormat
-  readonly partitions?: number
-  readonly partitionMaxThreads?: number
   readonly deadlineMs: number
   readonly enforce: boolean
   readonly status?: string
@@ -139,7 +137,6 @@ export interface SuiteConfig {
 export interface CanonicalGateConfig {
   readonly maxConcurrentLanes: number
   readonly resourceLimits: Readonly<Record<string, number>>
-  readonly partitionExecutionCapacity?: number
   readonly durationMeasurementTracks?: readonly string[]
   readonly durationIsolationTrack?: string
 }

@@ -19,7 +19,6 @@ using Xunit;
 
 namespace Mohist.Server.SpecTests.Specs.Slack;
 
-[Collection("MohistIntegration")]
 public sealed partial class SlackMultiAgentIngressSpecs
 {
     private readonly MohistIntegrationFixture _fixture;

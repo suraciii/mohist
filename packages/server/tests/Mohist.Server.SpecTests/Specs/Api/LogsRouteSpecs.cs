@@ -16,7 +16,6 @@ namespace Mohist.Server.SpecTests.Specs.Api;
 /// unavailable detection) lives in <c>LogTailReaderSpecs</c> against
 /// <see cref="Mohist.Server.Logging.LogTailReader"/> directly.
 /// </summary>
-[Collection("IntegrationApi")]
 public class LogsRouteSpecs
 {
     private readonly MohistIntegrationFixture _fixture;

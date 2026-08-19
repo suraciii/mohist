@@ -12,7 +12,6 @@ using Xunit;
 
 namespace Mohist.Server.SpecTests.Specs.Sessions;
 
-[Collection("IntegrationSessions")]
 public sealed class AgentPathAmplificationSpecs
 {
     private static readonly string[] AmplificationFields =

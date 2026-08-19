@@ -12,6 +12,7 @@ using Mohist.Server.Runner.Grains;
 using Mohist.Server.Sessions.Grains;
 using Mohist.Server.TestSupport;
 using Orleans;
+using Xunit;
 
 namespace Mohist.Server.SpecTests.Specs.Api;
 
@@ -132,97 +133,26 @@ public partial class AgentSessionInputAttachmentAcceptanceSpecs
         return unreadableId;
     }
 
-    private async Task<PollSnapshot> PollDispatchForSessionAsync(string runnerId, string expectedSessionId)
+    private async Task<ClaimResult> ClaimPreparedDispatchForSessionAsync(
+        string agentJobId,
+        string runnerId,
+        string expectedSessionId)
     {
-        return (await TestWait.ForAsync(
-            () => PollDispatchOnceAsync(runnerId, expectedSessionId),
-            found => found is not null,
-            TimeSpan.FromSeconds(1),
-            TimeSpan.FromMilliseconds(100),
-            $"a polled dispatch on runner '{runnerId}' carrying AgentSessionId='{expectedSessionId}'",
-            _fixture.ReleaseDispatchBackoffAsync))!;
-    }
+        await _fixture.AgentJobDispatches.WaitForAssignmentPreparedAsync(
+            agentJobId,
+            TimeSpan.FromSeconds(5));
+        var job = _fixture.Grains.GetGrain<IAgentJobGrain>(agentJobId);
+        var assignment = await job.GetRuntimeSnapshotAsync();
+        Assert.Equal(runnerId, assignment.RunnerId);
 
-    private async Task<PollSnapshot?> PollDispatchOnceAsync(string runnerId, string expectedSessionId)
-    {
-        using var poll = await _fixture.Client.PostAsync($"/api/runner/{runnerId}/poll", content: null);
-        var dispatches = await poll.ReadDispatchElementsAsync();
-        PollSnapshot? match = null;
-        var others = new List<JsonElement>();
-        foreach (var data in dispatches)
-        {
-            var polledSessionId = data.TryGetProperty("agentSessionId", out var sessionIdElement)
-                && sessionIdElement.ValueKind != JsonValueKind.Null
-                ? sessionIdElement.GetString()
-                : null;
-            if (match is null && polledSessionId == expectedSessionId)
-            {
-                match = new PollSnapshot(
-                    WorkflowRunId: data.GetProperty("workflowRunId").GetString() ?? string.Empty,
-                    WorkId: data.GetProperty("workId").GetString() ?? string.Empty);
-            }
-            else
-            {
-                others.Add(data);
-            }
-        }
-
-        foreach (var other in others)
-            await DrainDispatchElementAsync(runnerId, other);
-
-        return match;
-    }
-
-    private async Task DrainDispatchElementAsync(string runnerId, JsonElement data)
-    {
-        var workId = data.GetProperty("workId").GetString();
-        var ownerKind = data.TryGetProperty("ownerKind", out var ownerKindElement)
-            && ownerKindElement.ValueKind != JsonValueKind.Null
-            ? ownerKindElement.GetString()
-            : null;
-
-        if (!string.Equals(ownerKind, WorkDispatchOwnerKinds.AgentJob, StringComparison.Ordinal))
-            return;
-
-        var agentJobId = data.TryGetProperty("agentJobId", out var agentJobIdElement)
-            && agentJobIdElement.ValueKind != JsonValueKind.Null
-            ? agentJobIdElement.GetString()
-            : null;
-        if (string.IsNullOrWhiteSpace(agentJobId) || string.IsNullOrWhiteSpace(workId))
-            return;
-
-        var jobGrain = _fixture.Grains.GetGrain<IAgentJobGrain>(agentJobId!);
-        await jobGrain.ReportResultAsync(
-            runnerId,
-            workId!,
-            new WorkResult(
-                Status: "completed",
-                Message: "drained",
-                Output: JSON.DeserializeElement("{}"),
-                ArtifactUploadIds: null,
-                ExitCode: 0));
-    }
-
-    private async Task<JsonElement> PollDispatchEnvelopeAsync(string runnerId, string workId)
-    {
-        for (var i = 0; i < 50; i++)
-        {
-            using var poll = await _fixture.Client.PostAsync($"/api/runner/{runnerId}/poll", content: null);
-            var dispatches = await poll.ReadDispatchElementsAsync();
-            foreach (var data in dispatches)
-            {
-                if (string.Equals(data.GetProperty("workId").GetString(), workId, StringComparison.Ordinal))
-                    return data;
-                await DrainDispatchElementAsync(runnerId, data);
-            }
-        }
-
-        throw new InvalidOperationException($"No polled dispatch for workId '{workId}'");
+        var claim = Assert.IsType<ClaimResult>(await job.ClaimNextAsync(runnerId));
+        Assert.Equal(agentJobId, claim.AgentJobId);
+        Assert.Equal(expectedSessionId, claim.Dispatch.AgentSessionId);
+        return claim;
     }
 
     private sealed record AgentRef(string Id, string Name);
 
     private sealed record UploadResult(string Id, string FileName);
 
-    private sealed record PollSnapshot(string WorkflowRunId, string WorkId);
 }

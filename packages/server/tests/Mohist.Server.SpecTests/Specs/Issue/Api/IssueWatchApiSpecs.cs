@@ -19,7 +19,6 @@ namespace Mohist.Server.SpecTests.Specs.Issue.Api;
 ///   <item>200 + re-enriched detail JSON shape for the basic success path</item>
 /// </list>
 /// </summary>
-[Collection("IntegrationIssue")]
 public class IssueWatchApiSpecs
 {
     private readonly HttpClient _client;

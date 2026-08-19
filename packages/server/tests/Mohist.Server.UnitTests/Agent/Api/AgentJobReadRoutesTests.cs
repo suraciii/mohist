@@ -13,15 +13,15 @@ using Mohist.Server.Infrastructure.Data.AgentJobs;
 using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Project.Services;
 using Mohist.Server.Runner.Grains;
-using Mohist.Server.SpecTests.Support;
 using Mohist.Server.TestSupport;
+using Mohist.Server.UnitTests.Support;
 using Orleans;
 using Orleans.Runtime;
 using Xunit;
 
-namespace Mohist.Server.SpecTests.Specs.Agent.Api;
+namespace Mohist.Server.UnitTests.Agent.Api;
 
-public class AgentJobReadRoutesSpecs
+public class AgentJobReadRoutesTests
 {
     private static readonly ProjectInfo Project = new()
     {
@@ -289,7 +289,7 @@ public class AgentJobReadRoutesSpecs
         return (element, context.Response.StatusCode);
     }
 
-    private static IGrainFactory FactoryFor(IAgentJobGrain grain) => new SingleAgentJobGrainFactory(grain);
+    private static IGrainFactory FactoryFor(IAgentJobGrain grain) => new SingleReadAgentJobGrainFactory(grain);
 
     private static async Task SeedJobAsync(
         AgentJobStore store, string agentId, string projectId, string key,
@@ -305,6 +305,48 @@ public class AgentJobReadRoutesSpecs
         };
         await store.SaveAsync(key, JsonSerializer.Serialize(state, JSON.Options));
     }
+}
+
+internal sealed class SingleReadAgentJobGrainFactory(IAgentJobGrain grain) : IGrainFactory
+{
+    public TGrainInterface GetGrain<TGrainInterface>(Guid primaryKey, string? grainClassNamePrefix = null)
+        where TGrainInterface : IGrainWithGuidKey => throw new NotSupportedException();
+
+    public TGrainInterface GetGrain<TGrainInterface>(long primaryKey, string? grainClassNamePrefix = null)
+        where TGrainInterface : IGrainWithIntegerKey => throw new NotSupportedException();
+
+    public TGrainInterface GetGrain<TGrainInterface>(string primaryKey, string? grainClassNamePrefix = null)
+        where TGrainInterface : IGrainWithStringKey
+        => typeof(TGrainInterface) == typeof(IAgentJobGrain)
+            ? (TGrainInterface)grain
+            : throw new NotSupportedException(typeof(TGrainInterface).FullName);
+
+    public TGrainInterface GetGrain<TGrainInterface>(Guid primaryKey, string keyExtension, string? grainClassNamePrefix = null)
+        where TGrainInterface : IGrainWithGuidCompoundKey => throw new NotSupportedException();
+
+    public TGrainInterface GetGrain<TGrainInterface>(long primaryKey, string keyExtension, string? grainClassNamePrefix = null)
+        where TGrainInterface : IGrainWithIntegerCompoundKey => throw new NotSupportedException();
+
+    public TGrainObserverInterface CreateObjectReference<TGrainObserverInterface>(IGrainObserver obj)
+        where TGrainObserverInterface : IGrainObserver => throw new NotSupportedException();
+
+    public void DeleteObjectReference<TGrainObserverInterface>(IGrainObserver obj)
+        where TGrainObserverInterface : IGrainObserver => throw new NotSupportedException();
+
+    public IGrain GetGrain(Type grainInterfaceType, Guid grainPrimaryKey) => throw new NotSupportedException();
+    public IGrain GetGrain(Type grainInterfaceType, long grainPrimaryKey) => throw new NotSupportedException();
+    public IGrain GetGrain(Type grainInterfaceType, string grainPrimaryKey)
+        => grainInterfaceType == typeof(IAgentJobGrain)
+            ? grain
+            : throw new NotSupportedException(grainInterfaceType.FullName);
+    public IGrain GetGrain(Type grainInterfaceType, Guid grainPrimaryKey, string keyExtension) => throw new NotSupportedException();
+    public IGrain GetGrain(Type grainInterfaceType, long grainPrimaryKey, string keyExtension) => throw new NotSupportedException();
+    public TGrainInterface GetGrain<TGrainInterface>(GrainId grainId)
+        where TGrainInterface : IAddressable => throw new NotSupportedException();
+    public IAddressable GetGrain(GrainId grainId) => throw new NotSupportedException();
+    public IAddressable GetGrain(GrainId grainId, GrainInterfaceType interfaceType) => throw new NotSupportedException();
+    public IAddressable GetGrain(Type interfaceType, IdSpan grainKey, string? grainClassNamePrefix = null) => throw new NotSupportedException();
+    public IAddressable GetGrain(Type interfaceType, IdSpan grainKey) => throw new NotSupportedException();
 }
 
 internal sealed class AgentJobReadTestDb : IDisposable
@@ -325,7 +367,7 @@ internal sealed class AgentJobReadTestDb : IDisposable
 
     public static AgentJobReadTestDb WithAgent(string projectId, string agentId, string name)
     {
-        var database = TestSqliteDatabase.CreateMigrated();
+        var database = TestSqliteDatabase.CreateModelSchema();
         var factory = new TestDbContextFactory(database.Options);
         var domain = new DomainAgent
         {

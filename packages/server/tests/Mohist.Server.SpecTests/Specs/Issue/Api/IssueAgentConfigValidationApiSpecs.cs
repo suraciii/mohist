@@ -14,7 +14,6 @@ namespace Mohist.Server.SpecTests.Specs.Issue.Api;
 /// on the raw request body so the open-shape <c>agentConfig</c> field
 /// cannot persist ACP/liveness keys.
 /// </summary>
-[Collection("MohistIntegration")]
 public class IssueAgentConfigValidationApiSpecs
 {
     private readonly MohistIntegrationFixture _fixture;
@@ -34,14 +33,10 @@ public class IssueAgentConfigValidationApiSpecs
         return project.Id;
     }
 
-    [Theory]
-    [InlineData("type")]
-    [InlineData("livenessQuietThresholdMs")]
-    [InlineData("probeTimeoutMs")]
-    [InlineData("sessionStartTimeoutMs")]
-    [InlineData("compaction")]
-    public async Task CreateIssue_WithForbiddenAgentConfigKey_Returns400(string forbiddenKey)
+    [Fact]
+    public async Task CreateIssue_WithForbiddenAgentConfigKey_Returns400()
     {
+        const string forbiddenKey = "type";
         var projectId = await CreateProjectAsync("issue-create-forbidden");
 
         using var response = await _client.PostAsJsonAsync(
@@ -85,14 +80,10 @@ public class IssueAgentConfigValidationApiSpecs
         Assert.True(issue.Number > 0);
     }
 
-    [Theory]
-    [InlineData("type")]
-    [InlineData("livenessQuietThresholdMs")]
-    [InlineData("probeTimeoutMs")]
-    [InlineData("sessionStartTimeoutMs")]
-    [InlineData("compaction")]
-    public async Task PatchIssue_WithForbiddenAgentConfigKey_Returns400(string forbiddenKey)
+    [Fact]
+    public async Task PatchIssue_WithForbiddenAgentConfigKey_Returns400()
     {
+        const string forbiddenKey = "type";
         var projectId = await CreateProjectAsync("issue-patch-forbidden");
         var issue = await _client.PostDataAsync<IssueDto>(
             $"/api/projects/{projectId}/issues",

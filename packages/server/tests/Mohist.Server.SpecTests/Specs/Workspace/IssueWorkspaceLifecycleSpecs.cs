@@ -9,7 +9,6 @@ using Xunit;
 
 namespace Mohist.Server.SpecTests.Specs.Workspace;
 
-[Collection("MohistIntegration")]
 public class IssueWorkspaceLifecycleSpecs
 {
     private readonly MohistIntegrationFixture _fixture;

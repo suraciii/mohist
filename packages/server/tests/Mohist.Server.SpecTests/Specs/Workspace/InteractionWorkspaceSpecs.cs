@@ -24,7 +24,6 @@ using Xunit;
 
 namespace Mohist.Server.SpecTests.Specs.Workspace;
 
-[Collection("MohistIntegration")]
 public sealed class InteractionWorkspaceSpecs
 {
     private readonly MohistIntegrationFixture _fixture;

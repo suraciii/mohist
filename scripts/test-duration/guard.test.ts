@@ -17,7 +17,6 @@ import {
   planTracks,
   prepareReportTarget,
   reportEvaluationFailureReason,
-  specPartitionCommand,
   writeExecutionProvenance,
 } from './guard.js'
 import { formatEvaluation, formatSummary, formatTrackRun, summarize } from './diagnostics.js'
@@ -429,7 +428,7 @@ test('prepareReportTarget creates the report parent and removes stale output bef
 test('lane sandbox gives every lane distinct temporary resources and isolates server runtime only when requested', () => {
   const web = laneSandbox('/evidence', 'web', { PATH: '/bin' }, 0)
   const runner = laneSandbox('/evidence', 'runner', { PATH: '/bin' }, 1)
-  const serverSpec = laneSandbox('/evidence', 'server-spec-0', { PATH: '/bin' }, 2, true)
+  const serverSpec = laneSandbox('/evidence', 'server-spec', { PATH: '/bin' }, 2, true)
 
   assert.equal(web.environment.TMPDIR, web.tempDir)
   assert.equal(web.environment.TEMP, web.tempDir)
@@ -452,8 +451,8 @@ test('lane sandbox gives every lane distinct temporary resources and isolates se
   assert.notEqual(web.homeDir, runner.homeDir)
   assert.notEqual(web.databasePath, serverSpec.databasePath)
   assert.notEqual(web.otelDatabasePath, serverSpec.otelDatabasePath)
-  assert.match(serverSpec.databasePath, /^\/evidence\/tmp\/server-spec-0\/mohist\/mohist\.db$/)
-  assert.match(serverSpec.otelDatabasePath, /^\/evidence\/tmp\/server-spec-0\/mohist\/otel\.db$/)
+  assert.match(serverSpec.databasePath, /^\/evidence\/tmp\/server-spec\/mohist\/mohist\.db$/)
+  assert.match(serverSpec.otelDatabasePath, /^\/evidence\/tmp\/server-spec\/mohist\/otel\.db$/)
   assert.match(web.homeDir, /^\/evidence\/tmp\/web\/home$/)
 })
 
@@ -614,54 +613,6 @@ test('report evaluation fails closed at the execution cutoff and after external 
   )
 })
 
-test('Spec partition lanes launch a Node-hosted executor instead of a shell script', () => {
-  const command = specPartitionCommand(['run', '/tests/spec', '0', '4', '1', '/tmp/manifests', '/tmp/report.trx'])
-  assert.equal(command.command, process.execPath)
-  assert.deepEqual(command.args.slice(0, 4), [
-    '--import',
-    'tsx',
-    `${process.cwd()}/scripts/test-duration/spec-partition.ts`,
-    'run',
-  ])
-  assert.doesNotMatch(command.args.join(' '), /ci-spec-partition\.sh/)
-})
-
-test('planTracks gives every Server Spec partition its own report, temp, and endpoint claim', () => {
-  const spec: TrackConfig = {
-    id: 'server-spec',
-    kind: 'dotnet-apphost',
-    apphost: 'bin/spec',
-    report: 'reports/server-spec/partition-{partition}.trx',
-    reportFormat: 'trx',
-    partitions: 4,
-    partitionMaxThreads: 1,
-    deadlineMs: 1000,
-    enforce: true,
-    rules: [{ id: 'spec', absoluteMs: 5000 }],
-  }
-  const planned = planTracks([spec], '/evidence')
-  assert.deepEqual(
-    planned.map((lane) => lane.lane.id),
-    ['server-spec-0', 'server-spec-1', 'server-spec-2', 'server-spec-3', 'server-spec-coverage'],
-  )
-  assert.deepEqual(
-    planned.slice(0, 4).map((lane) => lane.reportPath),
-    [
-      '/evidence/reports/server-spec/partition-0.trx',
-      '/evidence/reports/server-spec/partition-1.trx',
-      '/evidence/reports/server-spec/partition-2.trx',
-      '/evidence/reports/server-spec/partition-3.trx',
-    ],
-  )
-  assert.deepEqual(planned[1].lane.resources?.slice(-2), ['spec-report-1', 'spec-temp-1'])
-  assert.equal(planned[0].executionTrack?.partitionMaxThreads, 1)
-  assert.deepEqual(planned[4].lane.dependsOn, ['server-spec-0', 'server-spec-1', 'server-spec-2', 'server-spec-3'])
-  assert.deepEqual(
-    planned.map((lane) => lane.sandboxOrdinal),
-    [0, 1, 2, 3, 4],
-  )
-})
-
 test('planTracks isolates the bounded Spec duration phase before remaining fan-out', () => {
   const cli: TrackConfig = {
     id: 'cli',
@@ -703,10 +654,9 @@ test('planTracks isolates the bounded Spec duration phase before remaining fan-o
     id: 'server-spec',
     kind: 'dotnet-apphost',
     apphost: 'bin/spec',
-    report: 'reports/spec-{partition}.trx',
+    apphostArgs: ['-parallel', 'collections', '-parallelAlgorithm', 'conservative', '-maxThreads', '2'],
+    report: 'reports/spec.trx',
     reportFormat: 'trx',
-    partitions: 4,
-    partitionMaxThreads: 1,
     deadlineMs: 1000,
     enforce: false,
   }
@@ -715,23 +665,14 @@ test('planTracks isolates the bounded Spec duration phase before remaining fan-o
 
   assert.deepEqual(byId.get('cli')?.dependsOn, undefined)
   assert.ok(byId.get('cli')?.resources?.includes('duration-measurement'))
-  assert.deepEqual(byId.get('server-unit')?.dependsOn, ['server-spec-coverage'])
+  assert.deepEqual(byId.get('server-unit')?.dependsOn, ['server-spec'])
   assert.ok(!byId.get('server-unit')?.resources?.includes('duration-measurement'))
-  assert.deepEqual(byId.get('runner')?.dependsOn, ['server-spec-coverage'])
+  assert.deepEqual(byId.get('runner')?.dependsOn, ['server-spec'])
   assert.ok(byId.get('runner')?.resources?.includes('duration-measurement'))
   assert.deepEqual(byId.get('web')?.dependsOn, ['runner'])
-  assert.deepEqual(byId.get('server-spec-0')?.dependsOn, ['cli'])
-  assert.deepEqual(byId.get('server-spec-coverage')?.dependsOn, [
-    'server-spec-0',
-    'server-spec-1',
-    'server-spec-2',
-    'server-spec-3',
-    'cli',
-  ])
-  assert.ok(!byId.get('server-spec-0')?.resources?.includes('duration-measurement'))
-  assert.ok(!byId.get('server-spec-1')?.resources?.includes('duration-measurement'))
-  assert.ok(!byId.get('server-spec-2')?.resources?.includes('duration-measurement'))
-  assert.ok(!byId.get('server-spec-3')?.resources?.includes('duration-measurement'))
+  assert.deepEqual(byId.get('server-spec')?.dependsOn, ['cli'])
+  assert.ok(byId.get('server-spec')?.resources?.includes('duration-measurement'))
+  assert.ok(byId.get('server-spec')?.resources?.includes('server-spec'))
 
   const focused = planTracks([unit], '/evidence', ['cli', 'server-spec'], 'runner')
   assert.deepEqual(focused[0].lane.dependsOn, undefined)

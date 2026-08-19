@@ -13,7 +13,6 @@ using Xunit;
 
 namespace Mohist.Server.SpecTests.Specs.Workspace;
 
-[Collection("MohistIntegration")]
 public class WorkspaceEntityApiSpecs
 {
     private readonly MohistIntegrationFixture _fixture;

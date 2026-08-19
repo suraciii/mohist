@@ -28,7 +28,8 @@ namespace Mohist.Server.SpecTests.Specs.Runner.Api;
 /// is what breaks the "cleanupPolicy is hostage to work dispatch"
 /// failure mode (issue #359).
 /// </summary>
-public class RunnerConfigApiSpecs : IClassFixture<RunnerConfigFixture>, IAsyncLifetime
+[Collection("RunnerConfig")]
+public class RunnerConfigApiSpecs : IAsyncLifetime
 {
     private readonly RunnerConfigFixture _fixture;
 
@@ -505,6 +506,7 @@ public class RunnerConfigFixture : IAsyncLifetime
         var connectionString = $"Data Source={dbName};Mode=Memory;Cache=Shared";
         _keeper = new SqliteConnection(connectionString);
         await _keeper.OpenAsync();
+        MigratedSqliteTemplate.CopyTo(_keeper);
 
         _factory = new ConfigWebApplicationFactory(
             connectionString,

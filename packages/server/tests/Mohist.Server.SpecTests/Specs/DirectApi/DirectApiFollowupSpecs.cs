@@ -7,6 +7,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Mohist.Server.Api.DirectApi;
 using Mohist.Server.Infrastructure;
 using Mohist.Server.Infrastructure.Data.Db;
+using Mohist.Server.Infrastructure.Data.DirectApi;
 using Mohist.Server.Infrastructure.Data.Project;
 using Mohist.Server.Infrastructure.DirectApi;
 using Mohist.Server.Infrastructure.Data.Sessions;
@@ -24,8 +25,8 @@ namespace Mohist.Server.SpecTests.Specs.DirectApi;
 /// Session input. These tests pin replay, conflict, durable rejection, and
 /// the write-scope pipeline for the follow-up route.
 /// </summary>
-[Collection("IntegrationMisc")]
-public sealed class DirectApiFollowupSpecs(MohistIntegrationFixture fixture)
+[Collection("PublicProjectionIntegration")]
+public sealed class DirectApiFollowupSpecs(PublicProjectionIntegrationFixture fixture)
 {
     [Fact]
     public async Task MissingOrForeignSession_ReturnsSessionNotFoundWithoutMapping()
@@ -110,14 +111,8 @@ public sealed class DirectApiFollowupSpecs(MohistIntegrationFixture fixture)
         const string key = "followup-replay";
         const string text = "continue the investigation";
 
-        JsonDocument? first = null;
-        for (var attempt = 0; attempt < 4; attempt++)
-        {
-            first?.Dispose();
-            first = await PostObservationAsync(client, projectId, sessionId, key, text);
-        }
-
-        var firstInputId = first!.RootElement.GetProperty("inputId").GetString();
+        using var first = await PostObservationAsync(client, projectId, sessionId, key, text);
+        var firstInputId = first.RootElement.GetProperty("inputId").GetString();
         var firstTurnId = first.RootElement.GetProperty("turnId").GetString();
         Assert.Null(first.RootElement.GetProperty("jobId").GetString());
         Assert.Equal(projectId, first.RootElement.GetProperty("projectId").GetString());
@@ -130,8 +125,6 @@ public sealed class DirectApiFollowupSpecs(MohistIntegrationFixture fixture)
         Assert.Equal(
             DirectApiWriteValidation.FollowupTurnId(sessionId, key),
             firstTurnId);
-        first.Dispose();
-
         await using var db = await fixture.Services
             .GetRequiredService<IDbContextFactory<MohistDbContext>>()
             .CreateDbContextAsync();
@@ -143,8 +136,11 @@ public sealed class DirectApiFollowupSpecs(MohistIntegrationFixture fixture)
             DirectApiWriteValidation.FollowupFingerprint(sessionId, text),
             mapping.Fingerprint);
         var outcome = JsonDocument.Parse(mapping.Outcome!).RootElement;
+        Assert.Equal(projectId, outcome.GetProperty("projectId").GetString());
         Assert.Equal(firstInputId, outcome.GetProperty("inputId").GetString());
         Assert.Equal(firstTurnId, outcome.GetProperty("turnId").GetString());
+        using var snapshot = JsonDocument.Parse(outcome.GetProperty("snapshotJson").GetString()!);
+        Assert.Equal(firstInputId, snapshot.RootElement.GetProperty("inputId").GetString());
 
         var row = await db.AgentSessions.AsNoTracking().SingleAsync(item => item.Id == sessionId);
         var session = AgentSessionJson.Deserialize(row)!;
@@ -175,7 +171,7 @@ public sealed class DirectApiFollowupSpecs(MohistIntegrationFixture fixture)
         // canonical write path's projector nudge; wake the projector so
         // the replayed observation converges instead of racing the hourly
         // fixture sweep (see PublicExecutionReadRouteSpecs).
-        await NudgeProjectorAsync();
+        await ProjectSessionAsync(sessionId);
 
         using var replayBody = await PostObservationAsync(client, projectId, sessionId, key, text);
         Assert.Equal(originalInputId, replayBody.RootElement.GetProperty("inputId").GetString());
@@ -187,15 +183,30 @@ public sealed class DirectApiFollowupSpecs(MohistIntegrationFixture fixture)
         var ownerProjectId = await SeedProjectAsync();
         var attackerProjectId = await SeedProjectAsync();
         var sessionId = $"session-followup-cross-project-{Guid.NewGuid():N}";
-        await SeedSessionAsync(sessionId, ownerProjectId, "agent-canonical", AgentSessionActivity.Active);
         var token = await CreatePatForProjectsAsync(ownerProjectId, attackerProjectId);
         using var client = DirectClient(token);
         const string key = "followup-cross-project";
         const string text = "must remain project scoped";
-
-        using (var first = await PostObservationAsync(client, ownerProjectId, sessionId, key, text))
+        await using (var scope = fixture.Services.CreateAsyncScope())
         {
-            Assert.Equal(ownerProjectId, first.RootElement.GetProperty("projectId").GetString());
+            var setupDb = scope.ServiceProvider.GetRequiredService<MohistDbContext>();
+            setupDb.DirectApiIdempotencyMappings.Add(new DirectApiIdempotencyMappingRow
+            {
+                Command = DirectApiCommands.Followup,
+                ScopeKey = $"{sessionId}|{key}",
+                CallerKeyId = "owner-caller",
+                Fingerprint = DirectApiWriteValidation.FollowupFingerprint(sessionId, text),
+                State = DirectApiMappingStates.Completed,
+                Outcome = JSON.Serialize(new DirectApiFollowupOutcome(
+                    ownerProjectId,
+                    sessionId,
+                    "agent-canonical",
+                    "input-owner",
+                    "turn-owner")),
+                CreatedAt = fixture.TimeProvider.GetUtcNow(),
+                CompletedAt = fixture.TimeProvider.GetUtcNow(),
+            });
+            await setupDb.SaveChangesAsync();
         }
 
         using var replay = Request(attackerProjectId, sessionId, key, text);
@@ -365,34 +376,33 @@ public sealed class DirectApiFollowupSpecs(MohistIntegrationFixture fixture)
         string key,
         string text)
     {
-        var body = await TestWait.ForAsync(
-            probe: async () =>
-            {
-                using var response = await SendAsync(client, projectId, sessionId, key, text);
-                if (response.StatusCode is HttpStatusCode.ServiceUnavailable or HttpStatusCode.NotFound)
-                {
-                    if (response.StatusCode == HttpStatusCode.ServiceUnavailable)
-                    {
-                        var error = await response.Content.ReadAsStringAsync();
-                        using var errorJson = JsonDocument.Parse(error);
-                        Assert.Equal(
-                            DirectApiErrorCodes.ProjectionLag,
-                            errorJson.RootElement.GetProperty("error").GetProperty("code").GetString());
-                    }
-                    return null;
-                }
+        await ProjectSessionAsync(sessionId);
+        using (var submitted = await SendAsync(client, projectId, sessionId, key, text))
+        {
+            if (submitted.StatusCode == HttpStatusCode.OK)
+                return JsonDocument.Parse(await submitted.Content.ReadAsStringAsync());
 
-                Assert.Equal(
-                    HttpStatusCode.OK,
-                    response.StatusCode);
-                return await response.Content.ReadAsStringAsync();
-            },
-            isDone: value => value is not null,
-            timeout: TimeSpan.FromSeconds(30),
-            step: TimeSpan.FromMilliseconds(20),
-            description: "follow-up public observation to become projected",
-            advance: () => fixture.Client.GetAsync("/api/health"));
-        return JsonDocument.Parse(body!);
+            Assert.True(
+                submitted.StatusCode == HttpStatusCode.ServiceUnavailable,
+                $"Follow-up submission answered {submitted.StatusCode}: {await submitted.Content.ReadAsStringAsync()}");
+            using var error = JsonDocument.Parse(await submitted.Content.ReadAsStringAsync());
+            Assert.Equal(
+                DirectApiErrorCodes.ProjectionLag,
+                error.RootElement.GetProperty("error").GetProperty("code").GetString());
+        }
+
+        await ProjectSessionAsync(sessionId);
+        // The replay is meaningful only after the exact projection is readable;
+        // do not let the disabled background projector define this boundary.
+        var observation = await fixture.Services
+            .GetRequiredService<PublicExecutionReadQuerier>()
+            .ReadInputAsync(projectId, DirectApiWriteValidation.FollowupInputId(sessionId, key));
+        Assert.Equal(PublicReadStatus.Found, observation.Status);
+        using var response = await SendAsync(client, projectId, sessionId, key, text);
+        Assert.True(
+            response.StatusCode == HttpStatusCode.OK,
+            $"Follow-up observation answered {response.StatusCode}: {await response.Content.ReadAsStringAsync()}");
+        return JsonDocument.Parse(await response.Content.ReadAsStringAsync());
     }
 
     private static async Task<HttpResponseMessage> SendAsync(
@@ -603,11 +613,8 @@ public sealed class DirectApiFollowupSpecs(MohistIntegrationFixture fixture)
         await db.SaveChangesAsync();
     }
 
-    private async Task NudgeProjectorAsync()
-    {
-        await using var scope = fixture.Services.CreateAsyncScope();
-        scope.ServiceProvider.GetRequiredService<IPublicProjectionNudge>().Nudge();
-    }
+    private Task ProjectSessionAsync(string sessionId) =>
+        fixture.ProjectSessionAsync(sessionId);
 
     private async Task<int> MappingCountAsync()
     {

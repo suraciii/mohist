@@ -6,7 +6,7 @@ using Xunit;
 
 namespace Mohist.Server.SpecTests.Specs.Runner.Api;
 
-[Collection("IntegrationRunner")]
+[Collection("RunnerMutationIntegration")]
 public class RunnerActionCatalogApiSpecs
 {
     private readonly MohistIntegrationFixture _fixture;

@@ -18,7 +18,6 @@ using Mohist.Server.Sessions.Services;
 using Xunit;
 namespace Mohist.Server.SpecTests.Specs.Sessions;
 
-[Collection("IntegrationSessions")]
 public class AgentSessionRecoveryConflictApiSpecs : AgentSessionRecoveryApiTestSupport
 {
     public AgentSessionRecoveryConflictApiSpecs(MohistIntegrationFixture fixture) : base(fixture)

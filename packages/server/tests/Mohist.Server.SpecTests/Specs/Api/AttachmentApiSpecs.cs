@@ -18,7 +18,6 @@ using Xunit;
 
 namespace Mohist.Server.SpecTests.Specs.Api;
 
-[Collection("IntegrationApi")]
 public class AttachmentApiSpecs
 {
     private readonly MohistIntegrationFixture _fixture;

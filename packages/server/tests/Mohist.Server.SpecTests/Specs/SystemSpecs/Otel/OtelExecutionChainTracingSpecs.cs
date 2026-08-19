@@ -26,8 +26,8 @@ namespace Mohist.Server.SpecTests.Specs.SystemSpecs.Otel;
 /// criterion for T-002's "traces form one unbroken execution chain
 /// across all segments" requirement.
 /// </summary>
-[Collection("OtelTracing")]
-public class OtelExecutionChainTracingSpecs : IClassFixture<OtelIntegrationFixture>
+[Collection("OtelFullStackIntegration")]
+public class OtelExecutionChainTracingSpecs
 {
     private readonly OtelIntegrationFixture _fixture;
 

@@ -18,7 +18,6 @@ using Xunit;
 
 namespace Mohist.Server.SpecTests.Specs.Agent.Api;
 
-[Collection("MohistIntegration")]
 public class AgentJobRoutesSpecs
 {
     private readonly MohistIntegrationFixture _fixture;
@@ -304,10 +303,10 @@ internal sealed class SingleAgentJobGrainFactory : IGrainFactory
     public IAddressable GetGrain(Type interfaceType, IdSpan grainKey) => throw new NotSupportedException();
 }
 
-[Collection("MohistIntegration")]
+[Collection("LaunchIntegration")]
 public class AgentJobDispatchRouteSpecs : AgentSessionLaunchRoutesTestSupport
 {
-    public AgentJobDispatchRouteSpecs(MohistIntegrationFixture fixture)
+    public AgentJobDispatchRouteSpecs(IsolatedMohistIntegrationFixture fixture)
         : base(fixture)
     {
     }
@@ -491,7 +490,7 @@ public class AgentJobDispatchRouteSpecs : AgentSessionLaunchRoutesTestSupport
                 jobKey,
                 TimeSpan.FromSeconds(5));
 
-            var dispatch = await PollDispatchForSessionAsync(
+            var dispatch = await ClaimDispatchForSessionAsync(
                 jobKey,
                 runnerId,
                 expectedSessionId: null);

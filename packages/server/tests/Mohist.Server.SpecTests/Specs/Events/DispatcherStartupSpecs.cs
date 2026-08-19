@@ -8,7 +8,6 @@ using Xunit;
 
 namespace Mohist.Server.SpecTests.Specs.Events;
 
-[Collection("IntegrationMisc")]
 public sealed class DispatcherStartupSpecs
 {
     private readonly MohistIntegrationFixture _fixture;
