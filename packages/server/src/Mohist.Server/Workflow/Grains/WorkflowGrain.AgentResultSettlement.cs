@@ -242,7 +242,7 @@ public partial class WorkflowGrain
     }
 
     protected virtual Task DeleteAgentResultSettlementSnapshotAsync(string workId) =>
-        DeleteSnapshotBestEffortAsync(workId);
+        _dispatchSnapshotStore.DeleteAsync(GrainKey, workId);
 
     protected virtual Task ReleaseAgentResultSettlementStageLocksAsync(string stage, string reason) =>
         ReleaseStageLocksAsync(stage, reason);

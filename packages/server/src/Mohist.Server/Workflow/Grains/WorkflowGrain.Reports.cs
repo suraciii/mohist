@@ -394,6 +394,12 @@ public partial class WorkflowGrain
         if (!string.Equals(receipt.WorkflowRunId, GrainKey, StringComparison.Ordinal))
             return new RuntimeRecoveryReceiptAcknowledgement(receipt.ReceiptId, RuntimeRecoveryReceiptAckStatuses.RejectedMismatch, "workflow-identity-mismatch");
 
+        // The persisted deadline is the arbitration boundary even when the
+        // reminder has not fired yet. Reconcile before task lookup or result
+        // application so an overdue receipt can only settle the original
+        // attempt after Unknown -> Blocked has been durably committed.
+        await ReconcileAgentResultSettlementIfDueAsync();
+
         var task = _run.FindTaskForRecoveryReceipt(receipt.TaskRunId, receipt.WorkId);
         if (task is null)
             return new RuntimeRecoveryReceiptAcknowledgement(receipt.ReceiptId, RuntimeRecoveryReceiptAckStatuses.Stale, "work-not-found");
@@ -593,7 +599,11 @@ public partial class WorkflowGrain
             RuntimeRecoveryReceiptAckStatuses.Accepted);
     }
 
-    public async Task<ReportAck> ReceiveTaskReportAsync(string workerId, string workId, TaskReport report)
+    public async Task<ReportAck> ReceiveTaskReportAsync(
+        string workerId,
+        string workId,
+        TaskReport report,
+        AgentExecutionBinding? agentBinding = null)
     {
         RejectIfRunReloadRequired();
         if (_run is null) return ReportAck.Stale;
@@ -605,6 +615,23 @@ public partial class WorkflowGrain
 
         if (!string.Equals(report.WorkId, workId, StringComparison.Ordinal)) return ReportAck.Stale;
         if (string.IsNullOrWhiteSpace(report.TaskRunId)) return ReportAck.Stale;
+        if (agentBinding is not null)
+        {
+            if (!string.Equals(agentBinding.RunnerId, workerId, StringComparison.Ordinal)
+                || !string.Equals(agentBinding.WorkId, workId, StringComparison.Ordinal)
+                || !string.Equals(agentBinding.TaskRunId, report.TaskRunId, StringComparison.Ordinal))
+            {
+                return ReportAck.Stale;
+            }
+
+            // A Workflow Agent result must prove the complete execution
+            // identity, including the binding persisted by the same turn.
+            await ReconcileAgentResultSettlementIfDueAsync();
+            var bound = _run.FindBoundAgentExecution(agentBinding.TaskRunId, workId, workerId);
+            if (bound is null || !MatchesExecutionBinding(bound, agentBinding))
+                return ReportAck.Stale;
+        }
+
         var activeWork = _run.FindReportableWork(report.TaskRunId, workId, workerId);
         if (activeWork is null || !activeWork.IsTask || activeWork.TaskRunId is null)
             return ReportAck.Stale;
@@ -915,6 +942,17 @@ public partial class WorkflowGrain
                 receipt.TaskRunId,
                 RunnerUpdateWorkStatus.Settled);
     }
+
+    private static bool MatchesExecutionBinding(
+        AgentExecutionBinding expected,
+        AgentExecutionBinding actual) =>
+        string.Equals(expected.TaskRunId, actual.TaskRunId, StringComparison.Ordinal)
+        && string.Equals(expected.WorkId, actual.WorkId, StringComparison.Ordinal)
+        && string.Equals(expected.RunnerId, actual.RunnerId, StringComparison.Ordinal)
+        && string.Equals(expected.AgentSessionId, actual.AgentSessionId, StringComparison.Ordinal)
+        && string.Equals(expected.AgentTurnId, actual.AgentTurnId, StringComparison.Ordinal)
+        && string.Equals(expected.Runtime, actual.Runtime, StringComparison.Ordinal)
+        && string.Equals(expected.RuntimeSessionId, actual.RuntimeSessionId, StringComparison.Ordinal);
 
     private static bool MatchesReceiptBinding(
         AgentResultSettlement settlement,

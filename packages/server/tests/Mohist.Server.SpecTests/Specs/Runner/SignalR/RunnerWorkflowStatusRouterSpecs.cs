@@ -208,7 +208,11 @@ public class RunnerWorkflowStatusRouterSpecs
             => Task.FromResult(Mohist.Server.Workflow.Grains.ReportAck.Stale);
         public Task<Mohist.Server.Workflow.Grains.ReportAck> RejectActiveWorkDispatchAsync(string workerId, string workId, ExecutionError error)
             => Task.FromResult(Mohist.Server.Workflow.Grains.ReportAck.Stale);
-        public Task<Mohist.Server.Workflow.Grains.ReportAck> ReceiveTaskReportAsync(string workerId, string workId, TaskReport report)
+        public Task<Mohist.Server.Workflow.Grains.ReportAck> ReceiveTaskReportAsync(
+            string workerId,
+            string workId,
+            TaskReport report,
+            AgentExecutionBinding? agentBinding = null)
             => Task.FromResult(Mohist.Server.Workflow.Grains.ReportAck.Stale);
         public Task<Mohist.Server.Workflow.Grains.ReportAck> ReceiveCheckReportAsync(string workerId, string workId, CheckReport report)
             => Task.FromResult(Mohist.Server.Workflow.Grains.ReportAck.Stale);

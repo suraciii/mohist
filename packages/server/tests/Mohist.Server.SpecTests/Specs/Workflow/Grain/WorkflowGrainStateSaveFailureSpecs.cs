@@ -260,6 +260,52 @@ public sealed partial class WorkflowGrainStateSaveFailureSpecs
     }
 
     [Fact]
+    public async Task BlockedSettlement_SnapshotDeletionFailureRetainsReminderForReplay()
+    {
+        const string workflowRunId = "wr-blocked-snapshot-retry";
+        const string projectId = "proj-blocked-snapshot-retry";
+        const string workerId = "worker-blocked-snapshot-retry";
+        var calls = new ReminderCalls();
+
+        await SeedWorkflowTemplateAsync(projectId, AgentWorkflowDefinition());
+            await using var scope = _fixture.Services.CreateAsyncScope();
+            var store = scope.ServiceProvider.GetRequiredService<IWorkflowRunStore>();
+            var snapshots = scope.ServiceProvider.GetRequiredService<IDispatchSnapshotStore>();
+            var events = scope.ServiceProvider.GetRequiredService<IEventStore>();
+            var grain = CreateReminderGrain(scope.ServiceProvider, store, workflowRunId, calls);
+            await grain.OnActivateAsync(CancellationToken.None);
+            var binding = await StartAgentWorkAsync(grain, store, workflowRunId, projectId, workerId);
+            await grain.ObserveAgentExecutionAsync(new AgentExecutionObservation(
+                binding,
+                AgentExecutionObservationKind.Disconnected,
+                "runner-disconnected"));
+
+            await snapshots.SaveFirstJsonAsync(workflowRunId, binding.WorkId, "{}");
+            var unknown = await store.LoadAsync(workflowRunId);
+            var deadline = Assert.IsType<DateTimeOffset>(
+                Assert.Single(unknown!.CurrentStage().Tasks).AgentResultSettlement!.DeadlineAt);
+            calls.FailNextSnapshotDelete = true;
+            TimeProvider.Advance(deadline - TimeProvider.GetUtcNow());
+
+            await grain.ReceiveReminder(WorkflowGrain.AgentResultSettlementReminderName, default);
+
+            var blocked = await store.LoadAsync(workflowRunId);
+            Assert.Equal(
+                AgentResultSettlementState.Blocked,
+                Assert.Single(blocked!.CurrentStage().Tasks).AgentResultSettlement!.State);
+            Assert.NotNull(await snapshots.LoadJsonAsync(workflowRunId, binding.WorkId));
+            Assert.Equal(0, calls.RemoveAttempts);
+
+            await grain.ReceiveReminder(WorkflowGrain.AgentResultSettlementReminderName, default);
+
+            Assert.Null(await snapshots.LoadJsonAsync(workflowRunId, binding.WorkId));
+            Assert.Equal(1, calls.RemoveAttempts);
+        Assert.Single(
+            await events.ListAsync(workflowRunId),
+            entry => entry.Envelope.Type == EventCatalog.ReverseDns.TaskBlocked);
+    }
+
+    [Fact]
     public async Task ExplicitStop_ReminderRemovalFailureIsRepairedOnActivation()
     {
         const string workflowRunId = "wr-settlement-remove-recovery";
@@ -511,7 +557,7 @@ public sealed partial class WorkflowGrainStateSaveFailureSpecs
             if (_calls.FailNextSnapshotDelete)
             {
                 _calls.FailNextSnapshotDelete = false;
-                return Task.CompletedTask;
+                throw new InvalidOperationException("simulated dispatch snapshot deletion failure");
             }
 
             return base.DeleteAgentResultSettlementSnapshotAsync(workId);

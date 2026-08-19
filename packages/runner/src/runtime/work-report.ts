@@ -1,5 +1,6 @@
 import type { DispatchWorkItem, WorkItemResult } from '../core/types.js'
 import type { ServerConnection } from '../server/connection.js'
+import type { RuntimeRecoveryReceipt } from './recovery-receipt.js'
 
 export const RUNNER_RESTARTED_REASON = 'runner-restarted'
 
@@ -69,12 +70,13 @@ export async function reportAndRequireDurableAck(
   connection: Pick<ServerConnection, 'report'>,
   work: DispatchWorkItem,
   result: WorkItemResult,
+  binding?: Pick<RuntimeRecoveryReceipt, 'agentSessionId' | 'agentTurnId' | 'runtime' | 'runtimeSessionId'>,
 ): Promise<void> {
   const controller = new AbortController()
   const timeout = setTimeout(() => controller.abort(), REPORT_TIMEOUT_MS)
   timeout.unref?.()
   try {
-    const acknowledgement = await connection.report(work, result, controller.signal)
+    const acknowledgement = await connection.report(work, result, controller.signal, binding)
     if (acknowledgement.tracked !== true) {
       const reason = typeof acknowledgement.reason === 'string' ? `: ${acknowledgement.reason}` : ''
       throw new Error(`work report was not durably acknowledged${reason}`)

@@ -192,3 +192,24 @@
   second server idempotency protocol.
 - Added a focused store regression:
   `KeepsTheFirstPendingSnapshotWhenARecoveryExecutionDiffers`.
+
+## Review must-fix repair
+
+- Extended the existing Runner `/report` envelope with nullable
+  `AgentSessionId`, `AgentTurnId`, `Runtime`, and `RuntimeSessionId` fields.
+  Workflow Agent results without all four fields are acknowledged `stale`;
+  complete fields are validated against the persisted binding before task
+  mutation. Non-Agent reports retain their existing path.
+- Terminal workflow Agent receipts now use the full-bound `/report` path with
+  the four identity fields; update-interrupted receipts retain the dedicated
+  recovery-receipt path. Added Runner transport coverage for the wire body.
+- `ReceiveRecoveryReceiptAsync` now reconciles a due settlement before receipt
+  lookup, so a late receipt cannot skip the durable Unknown-to-Blocked
+  boundary. Added a fake-time regression proving blocked events precede the
+  accepted late result.
+- Settlement snapshot deletion no longer swallows exceptions. A blocked
+  cleanup failure keeps the reminder retryable; added a real throwing failure
+  injection and replay coverage without duplicate blocked events.
+- Targeted verification: Server Agent settlement/state-save/recovery suites
+  54/54, Runner identity/outbox/recovery tests 44/44, Runner typecheck, Server
+  SpecTests build, file-size ratchet, and diff checks passed.
