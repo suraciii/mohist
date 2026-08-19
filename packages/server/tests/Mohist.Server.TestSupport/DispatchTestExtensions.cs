@@ -1,7 +1,6 @@
 using Microsoft.Extensions.DependencyInjection;
 using Mohist.Server.Runner.Grains;
 using Mohist.Server.Runner.Services;
-using Mohist.Server.Infrastructure.Data.Workflow;
 using Mohist.Server.Workflow.Domain.Run;
 using Mohist.Server.Workflow.Grains;
 using Orleans;
@@ -66,33 +65,26 @@ public static class DispatchTestExtensions
         string workId,
         WorkResult result)
     {
-        var active = await grains.GetGrain<IWorkflowGrain>(workflowRunId).GetActiveWorkAsync(workId);
+        var workflow = grains.GetGrain<IWorkflowGrain>(workflowRunId);
+        var active = await workflow.GetActiveWorkAsync(workId);
         var taskRunId = active?.WorkType == WorkItemTypes.Task ? active.TaskRunId : null;
-        var run = taskRunId is null
-            ? null
-            : await ResolveScoped<WorkflowRunQuerier>(serviceProvider).LoadAsync(workflowRunId);
-        var task = taskRunId is null
-            ? null
-            : run?.FindTaskForRecoveryReceipt(taskRunId, workId);
-        var settlement = task?.AgentResultSettlement;
-        var runtime = task?.Uses switch
-        {
-            "mohist/opencode" => "opencode",
-            "mohist/pi" => "pi",
-            _ => null,
-        };
         AgentExecutionBinding? binding = null;
-        if (taskRunId is not null && runtime is not null && settlement is not null)
+        if (taskRunId is not null)
         {
-            binding = new AgentExecutionBinding(
-                taskRunId,
-                workId,
-                runnerId,
-                settlement.AgentSessionId ?? $"test-session:{workId}",
-                settlement.AgentTurnId ?? $"test-turn:{workId}",
-                settlement.Runtime ?? runtime,
-                settlement.RuntimeSessionId ?? $"test-runtime-session:{workId}");
-            await grains.GetGrain<IWorkflowGrain>(workflowRunId).BindAgentExecutionAsync(binding);
+            binding = await workflow.GetBoundAgentExecutionAsync(taskRunId, workId, runnerId);
+            if (binding is null)
+            {
+                var candidate = new AgentExecutionBinding(
+                    taskRunId,
+                    workId,
+                    runnerId,
+                    $"test-session:{workId}",
+                    $"test-turn:{workId}",
+                    "opencode",
+                    $"test-runtime-session:{workId}");
+                if (await workflow.BindAgentExecutionAsync(candidate) == ReportAck.Accepted)
+                    binding = candidate;
+            }
         }
 
         var report = ResolveScoped<WorkflowReportService>(serviceProvider);

@@ -20,6 +20,15 @@ public partial class WorkflowGrain
         return ReportAck.Accepted;
     }
 
+    public Task<AgentExecutionBinding?> GetBoundAgentExecutionAsync(
+        string taskRunId,
+        string workId,
+        string runnerId)
+    {
+        RejectIfRunReloadRequired();
+        return Task.FromResult(_run?.FindBoundAgentExecution(taskRunId, workId, runnerId));
+    }
+
     public async Task<ReportAck> MarkUpdateInterruptedAsync(
         string taskRunId,
         string workId,

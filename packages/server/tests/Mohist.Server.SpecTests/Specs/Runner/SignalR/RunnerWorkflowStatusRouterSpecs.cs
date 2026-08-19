@@ -199,6 +199,8 @@ public class RunnerWorkflowStatusRouterSpecs
             => Task.FromResult(Mohist.Server.Workflow.Grains.ReportAck.Stale);
         public Task<Mohist.Server.Workflow.Grains.ReportAck> BindAgentExecutionAsync(AgentExecutionBinding binding)
             => Task.FromResult(Mohist.Server.Workflow.Grains.ReportAck.Stale);
+        public Task<AgentExecutionBinding?> GetBoundAgentExecutionAsync(string taskRunId, string workId, string runnerId)
+            => Task.FromResult<AgentExecutionBinding?>(null);
         public Task<bool> CanStartAgentCleanupAsync(AgentExecutionBinding binding) => Task.FromResult(false);
         public Task<Mohist.Server.Workflow.Grains.ReportAck> ObserveAgentExecutionAsync(AgentExecutionObservation observation)
             => Task.FromResult(Mohist.Server.Workflow.Grains.ReportAck.Stale);
