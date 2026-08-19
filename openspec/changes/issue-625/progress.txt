@@ -108,3 +108,9 @@ Implemented T-001 end to end on top of the plan-review fixes above.
 
 - The stored failed gate was `/tmp/mohist-canonical-gate-205.682704-3494843-MsxCft` from source revision `a4eb1520b85dd83aa1ee56f7fb0205513207fd7f`, not the current issue-625 revision. `server-spec-0` used the older single-partition/two-thread plan, exceeded its 240-second lane deadline without producing a report, and fail-fast cancelled the other eight tracks; its available test summary contained no failed tests. This was an external stale-process/resource contention timeout, not an issue-625 implementation or assertion defect.
 - Re-ran `npm run verify` on the current clean HEAD `78fa4617c`: all 9 tracks passed with zero failures, cancellations, timeouts, or over-budget tests. Server Spec used four partitions and completed in 81-88 seconds per partition; expected OTLP port-binding warnings did not affect results. The focused Runner typecheck, test-boundary, and six issue-625 suites passed 87/87 tests.
+
+# Progress: T-001 completion audit
+
+- The selected T-001 implementation is present in the committed tree: the six-lane catalog, immutable definition snapshot and legacy resolver, additive lane attempt metadata, boundary classification, status projection, ordered dispatch, and build gate are all wired and tested.
+- Verification on the current HEAD: Server build passed with 0 warnings/errors; all 2,961 Server UnitTests passed; all 12 `VerificationLaneBindingSpecs` passed through the direct Server Spec apphost; and the focused Workflow Definition tests passed 26/26. The repository's `dotnet test --filter` path emits MTP0001 because Microsoft Testing Platform ignores VSTest filters, so the affected Spec class was run with its supported `-class` argument.
+- No source correction was required during the audit. `git diff --check` passed and the worktree remained clean apart from this progress entry.
