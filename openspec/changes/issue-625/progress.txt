@@ -79,3 +79,9 @@ Implemented T-001 end to end on top of the plan-review fixes above.
 - Verification classification now gives `error.code=timeout` precedence over the outer task report status, including malformed successful timeout envelopes, while `TaskReportStatus` remains unchanged.
 - Missing lane status placeholders derive their configured budget from the bound build definition, and artifact-enriched task status views retain additive lane metadata.
 - Verification after these fixes: all 2,835 Server unit tests, all 3,886 Server specification tests, and `dotnet build Mohist.sln --no-restore -p:SkipWebBuild=true` passed with zero build warnings/errors.
+
+# Progress: T-002 final audit
+
+- Re-audited the existing Runner implementation against the recovery specification: positive lane timeouts propagate to `runCommand`, timeout process-group termination returns a structured `timeout` result, and terminal results are journaled before report delivery.
+- Runner production and test typechecks, test-boundary validation, all six focused suites (48 tests), and the full Runner suite (164 files, 1,819 tests) pass. `git diff --check` is clean.
+- The T-002 implementation and tests are already committed in `64a170890`; this audit required only the progress record update.
