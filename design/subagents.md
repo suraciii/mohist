@@ -74,14 +74,20 @@ an environment variable or temporary client input.
 
 Name and state rules are:
 
-| Situation | Rule |
-|---|---|
-| Configuration declaration | Store only the target's stable ID; the target must belong to the same Project. |
-| Target renamed after parent launch | The parent snapshot retains the old name/description. At spawn, a current name or ID that resolves to the same Agent ID remains authorized. |
-| Target archived after parent launch | An unaccepted spawn is rejected with terminal pre-plan result `target_agent_archived`. A child already accepted by the launch coordinator is not revoked by later archival. |
-| Target restored to active | New spawns may again use the declared ID; an existing snapshot needs no change. |
-| Self-spawn | Allowed only when this Agent's stable ID is explicitly declared; it follows ordinary launch scheduling like every other target. |
-| Cross-Project | Always rejected. The parent Session, target Agent, child Job, and child Session must belong to the same Project. |
+- **Configuration declaration.** Store only the target's stable ID; the
+  target must belong to the same Project.
+- **Target renamed after parent launch.** The parent snapshot retains the old
+  name/description. At spawn, a current name or ID that resolves to the same
+  Agent ID remains authorized.
+- **Target archived after parent launch.** An unaccepted spawn is rejected
+  with terminal pre-plan result `target_agent_archived`. A child already
+  accepted by the launch coordinator is not revoked by later archival.
+- **Target restored to active.** New spawns may again use the declared ID; an
+  existing snapshot needs no change.
+- **Self-spawn.** Allowed only when this Agent's stable ID is explicitly
+  declared; it follows ordinary launch scheduling like every other target.
+- **Cross-Project.** Always rejected. The parent Session, target Agent, child
+  Job, and child Session must belong to the same Project.
 
 Archiving an Agent does not automatically remove its ID from configuration. The declaration
 therefore retains deterministic meaning if the Agent becomes active again, but archival never
@@ -178,15 +184,37 @@ dedicated reconciliation proves the state of the child link/index and pending co
 therefore remains the sole link write authority, and tree reads never expose a half-finished
 cross-store mutation. Reserved/rejected reservations never appear in `mo session tree`.
 
-| fence phase | `Reserve` | `BeginFinalize` | `BeginStopSnapshot` | `BeginDetach` |
-|---|---|---|---|---|
-| One or more `Reserved` | allow | allow; one command gets the next revision | allow; reject affected reservations before materializing the snapshot | allow; one command gets the next revision |
-| `AttachAwaitingAck` | allow; a new reservation remains invisible | replay same command; other commands get `finalize_busy` | `session_tree_mutation_pending`; recover and publish attach first | `session_tree_mutation_pending` |
-| `DetachAwaitingAck` | allow; a new reservation remains invisible | `session_tree_mutation_pending` | `session_tree_mutation_pending`; recover and publish detach first | replay same command; other commands get `detach_in_progress` |
-| Snapshot materializing | do not create a reservation; request fence remains `validation-pending` | retryable; do not change the plan | replay same command; other stop is busy | retryable |
-| Published nonterminal stop; parent is in frozen membership | do not create a reservation; `parent_tree_stop_in_progress` | reject and abort existing plan/reservation | replay same operation; other stop is busy | allow; do not change frozen targets |
-| Published nonterminal stop; parent is outside frozen membership | allow | allow | replay same operation; other stop is busy | allow |
-| `ReconciliationRequired` | reject | reject | reject | reject |
+The fence answers each command from its current phase:
+
+- **One or more `Reserved` reservations exist.** `Reserve` is allowed.
+  `BeginFinalize` is allowed, and one command gets the next revision.
+  `BeginStopSnapshot` is allowed and rejects affected reservations before
+  materializing the snapshot. `BeginDetach` is allowed, and one command gets
+  the next revision.
+- **`AttachAwaitingAck`.** `Reserve` is allowed; a new reservation remains
+  invisible. `BeginFinalize` replays the same command; other commands get
+  `finalize_busy`. `BeginStopSnapshot` fails with
+  `session_tree_mutation_pending`; the attach must recover and publish first.
+  `BeginDetach` fails with `session_tree_mutation_pending`.
+- **`DetachAwaitingAck`.** `Reserve` is allowed; a new reservation remains
+  invisible. `BeginFinalize` fails with `session_tree_mutation_pending`.
+  `BeginStopSnapshot` fails with `session_tree_mutation_pending`; the detach
+  must recover and publish first. `BeginDetach` replays the same command;
+  other commands get `detach_in_progress`.
+- **Snapshot materializing.** `Reserve` does not create a reservation; the
+  request fence remains `validation-pending`. `BeginFinalize` is retryable
+  and does not change the plan. `BeginStopSnapshot` replays the same command;
+  another stop is busy. `BeginDetach` is retryable.
+- **Published nonterminal stop, and the parent is in frozen membership.**
+  `Reserve` does not create a reservation and returns
+  `parent_tree_stop_in_progress`. `BeginFinalize` is rejected and aborts the
+  existing plan or reservation. `BeginStopSnapshot` replays the same
+  operation; another stop is busy. `BeginDetach` is allowed and does not
+  change frozen targets.
+- **Published nonterminal stop, and the parent is outside frozen
+  membership.** `Reserve`, `BeginFinalize`, and `BeginDetach` are allowed.
+  `BeginStopSnapshot` replays the same operation; another stop is busy.
+- **`ReconciliationRequired`.** All four commands are rejected.
 
 Snapshot materializing is only a short fence phase used to create an authoritative snapshot; it
 does not yet have executable targets. A published stop constrains only its frozen membership and
@@ -314,14 +342,20 @@ workDir from condition 5 and is pinned to the Runner in the parent binding.
 
 When these facts cannot be confirmed, reject rather than fall back:
 
-| Condition | Result |
-|---|---|
-| Parent has no workDir | Terminal pre-plan result `parent_workdir_unavailable`; create no child. |
-| Parent binding is missing, unknown, stale, or has no usable Runner | `parent_runner_binding_unavailable`; keep the request fence `validation-pending`, create no child, and revalidate on same-key retry. |
-| Target is absent from the snapshot | Terminal pre-plan result `subagent_not_allowed`; create no child. |
-| Target is archived | Terminal pre-plan result `target_agent_archived`; create no child. |
-| Target AgentReadiness is `NeedsSetup` | Terminal pre-plan result `agent_needs_setup`; create no child. |
-| Parent belongs to cascade-stop membership without a terminal outcome | `parent_tree_stop_in_progress`; keep the request fence `validation-pending`, create no child, and revalidate on same-key retry. |
+- **Parent has no workDir.** Terminal pre-plan result
+  `parent_workdir_unavailable`; create no child.
+- **Parent binding is missing, unknown, stale, or has no usable Runner.**
+  `parent_runner_binding_unavailable`; keep the request fence
+  `validation-pending`, create no child, and revalidate on same-key retry.
+- **Target is absent from the snapshot.** Terminal pre-plan result
+  `subagent_not_allowed`; create no child.
+- **Target is archived.** Terminal pre-plan result `target_agent_archived`;
+  create no child.
+- **Target Agent Readiness is `needs-setup`.** Terminal pre-plan result
+  `agent_needs_setup`; create no child.
+- **Parent belongs to cascade-stop membership without a terminal outcome.**
+  `parent_tree_stop_in_progress`; keep the request fence `validation-pending`,
+  create no child, and revalidate on same-key retry.
 
 An offline Runner does not authorize switching Runner while the binding remains current. The
 result is still `parent_runner_binding_unavailable` and is recorded only on a
@@ -349,15 +383,15 @@ This fence is the canonical request authority for
 creates nor reserves Job, Session, Input, Turn, edge, or reservation identity.
 `validation-pending` is a retryable observation before child acceptance: replay with the same
 fingerprint revalidates current facts and advances the same request to an admitted plan when
-conditions recover. `parent_runner_binding_unavailable`, `AgentReadiness.Unknown`, other ordinary
+conditions recover. `parent_runner_binding_unavailable`, `unknown` Agent Readiness, other ordinary
 launch readiness that is temporarily unconfirmed, and `parent_tree_stop_in_progress` may only
 retain this outcome; they cannot freeze the key as a rejection.
 
 Only definite canonical or authorization invalidity advances it to `preplan-rejected`: the caller
 does not belong to the Project or is not a delegating Mohist Agent Session; the parent has no
 authoritative workDir; the target ref cannot resolve to an Agent ID in the parent's immutable
-snapshot; the target is absent from that snapshot or archived; or target AgentReadiness is
-`NeedsSetup`, for example because Instructions, Model, or Runtime is invalid or missing. Same-
+snapshot; the target is absent from that snapshot or archived; or target Agent Readiness is
+`needs-setup`, for example because Instructions, Model, or Runtime is invalid or missing. Same-
 fingerprint replay always returns this terminal pre-plan result; a different fingerprint always
 returns an HTTP 409 idempotency conflict.
 
@@ -373,18 +407,17 @@ After writing the plan, the coordinator does not reread the mutable target Agent
 capability snapshot. It uses the existing `PrepareJob -> EnsureInitialLaunch -> SubmitJob` fences,
 extended into one launch pipeline with reservation, final check, and abort:
 
-```text diagram
-persist request fence with target + exact prompt fingerprint
-  -> pre-plan validation
-  -> keep validation-pending with no child artifacts, terminally preplan-reject with no child artifacts,
-       or persist launch plan and reserve EdgeId
-       at SessionTreeMutationFence
-  -> prepare child AgentJob with pinned RunnerId and child workDir
-  -> create child AgentSession(workDir immutable) + initial SessionInput + initial AgentTurn
-  -> final check reservation, parent workDir, binding, stop admission
-  -> finalize the child-owned SessionParentLink through the fence mutation protocol
-  -> submit the same prepared AgentJob to its pinned Runner
-```
+1. Persist the request fence with target and exact prompt fingerprint.
+2. Run pre-plan validation: keep `validation-pending` with no child
+   artifacts, terminally preplan-reject with no child artifacts, or persist
+   the launch plan and reserve EdgeId at `SessionTreeMutationFence`.
+3. Prepare the child AgentJob with pinned RunnerId and child workDir.
+4. Create the child AgentSession (workDir immutable), the initial
+   SessionInput, and the initial AgentTurn.
+5. Final-check the reservation, parent workDir, binding, and stop admission.
+6. Finalize the child-owned `SessionParentLink` through the fence mutation
+   protocol.
+7. Submit the same prepared AgentJob to its pinned Runner.
 
 If pre-plan validation observes temporary unavailability, `SpawnRequestFence` remains
 `validation-pending`. It persists no launch plan, reservation, or child identity and creates no Job,
@@ -494,13 +527,12 @@ that link is the sole state of the delivery obligation.
 
 The Server at-least-once event handler processes a terminal report in this order:
 
-```text diagram
-AgentJob terminal event
-  -> child Session atomically claims report on its attached link
-  -> append a normal parent SessionInput
-  -> parent Session accepts/reuses its AgentTurn according to normal rules
-  -> child link records delivered parent InputId
-```
+1. The AgentJob terminal event arrives.
+2. The child Session atomically claims the report on its attached link.
+3. The handler appends a normal parent SessionInput.
+4. The parent Session accepts or reuses its AgentTurn according to normal
+   rules.
+5. The child link records the delivered parent InputId.
 
 Claim and `attached -> detached` compete in one child Session transaction:
 
@@ -524,6 +556,10 @@ recovery. It never silently discards the report or rolls the terminal child Agen
 incomplete. Report delivery and the child Job result are separate durable facts.
 
 ## Cascade stop and detach
+
+Stop, detach, and spawn can race. The Session owner arbitrates: a stop that
+lands before a spawn completes cancels the spawn; a detach that lands first
+removes the subtree from stop scope.
 
 ### Cascade stop
 
@@ -551,13 +587,21 @@ selecting bindings again. A started attachment/detach mutation must recover thro
 materialization begins. The same fence also handles reservation, final attachment, and detach, with
 this ordering:
 
-| Operation linearized first | Consequence |
-|---|---|
-| Detach before stop snapshot | The subtree is outside the snapshot; the later stop does not affect it. |
-| Finalized attachment before stop snapshot | The child is in the snapshot; ordinary target rules handle its current work. |
-| Stop snapshot before detach | IDs of the then-attached subtree are frozen in the snapshot; later detach does not remove them and the snapshot still stops them. |
-| Stop snapshot encounters an earlier unfinalized reservation whose parent is in membership | Mark the reservation rejected; exclude the child from the snapshot; the coordinator may only abort and never submit. |
-| New spawn, reservation, or final attachment inside membership while a published stop operation is nonterminal | A request fence without a plan returns `parent_tree_stop_in_progress` and remains `validation-pending`; same-key retry revalidates after the operation becomes terminal. An existing plan/reservation may only abort and never submit. |
+- **Detach linearized before the stop snapshot.** The subtree is outside the
+  snapshot; the later stop does not affect it.
+- **Finalized attachment linearized before the stop snapshot.** The child is
+  in the snapshot; ordinary target rules handle its current work.
+- **Stop snapshot linearized before detach.** IDs of the then-attached
+  subtree are frozen in the snapshot; later detach does not remove them and
+  the snapshot still stops them.
+- **Stop snapshot encounters an earlier unfinalized reservation whose parent
+  is in membership.** Mark the reservation rejected; exclude the child from
+  the snapshot; the coordinator may only abort and never submit.
+- **New spawn, reservation, or final attachment inside membership while a
+  published stop operation is nonterminal.** A request fence without a plan
+  returns `parent_tree_stop_in_progress` and remains `validation-pending`;
+  same-key retry revalidates after the operation becomes terminal. An
+  existing plan or reservation may only abort and never submit.
 
 Concurrent operations therefore have no intermediate state that "reads a changing tree." Stop
 retry recovers from persisted target IDs, expected turn/binding, and child stop-operation IDs. It
@@ -571,14 +615,17 @@ report rules. This differs from abort after reservation rejection, which has no 
 
 Each target executes only existing Server turn-control semantics:
 
-| Target state at snapshot | Operation result |
-|---|---|
-| No nonterminal Turn | `already-idle`; Session continues to exist. |
-| Queued Turn | `cancelled`; do not contact the Runner. |
-| Executing Turn | Server requests stop from the target's expected-binding Runner and records `stop-requested`. |
-| Runner did not receive the request | `pending`; safely retry the same sub-operation. |
-| Runner may have acted but the result is unconfirmed | `unknown`; never fabricate idle or cancellation. |
-| Target replaced binding/Turn | `rejected`; do not stop work that appeared later. |
+- **No nonterminal Turn at snapshot.** `already-idle`; the Session continues
+  to exist.
+- **Queued Turn at snapshot.** `cancelled`; do not contact the Runner.
+- **Executing Turn at snapshot.** Server requests stop from the target's
+  expected-binding Runner and records `stop-requested`.
+- **Runner did not receive the request.** `pending`; safely retry the same
+  sub-operation.
+- **Runner may have acted but the result is unconfirmed.** `unknown`; never
+  fabricate idle or cancellation.
+- **Target replaced binding/Turn.** `rejected`; do not stop work that
+  appeared later.
 
 Operation summary derives only from per-target facts: all determinate targets produce
 `completed`; a mix of determinate success and `rejected` produces `partial`; any unconfirmed
@@ -660,59 +707,3 @@ ordinary Session API, but the tree link neither owns the schedule nor changes it
   binding.
 - Do not claim that the tree relationship replaces Issue, Workflow, or Project Space ownership and
   isolation models.
-
-## Verification
-
-Server specs must cover at least these behaviors with a fake Runner, fake clock, and in-memory
-stores:
-
-- capability snapshot outcomes for rename, archive, self-spawn, cross-Project, and same-key
-  conflict;
-- SpawnOrigin parent identity; `validation-pending` observation for missing/unknown/stale binding;
-  same-key revalidation; terminal pre-plan rejection for missing authoritative workDir; workDir
-  inheritance and exact Runner pin; and proof that Job admission cannot choose another eligible
-  Runner;
-- a controlled reset-versus-acquire race for parent `BindingEpoch`/`BindingUseReceipt`: when reset
-  linearizes first, reject/abort the plan; when acquire linearizes first, reset cannot replace the
-  binding. Attach receipt must match the complete tuple field by field before publish or release;
-- terminal pre-plan workDir/authorization/archive/NeedsSetup rejection (`agent_needs_setup`)
-  persists only the request fence, supports stable same-key replay and mismatched-payload conflict,
-  while `AgentReadiness.Unknown` and every temporary pre-plan observation revalidate under the same
-  key without a child artifact. Post-plan reservation/final-check rejection produces cancelled Job,
-  cancelled initial Turn, idle Session, no visible link/input/callback, and replay must-not-submit;
-- activation loss/retry at every durable coordinator fence produces exactly one Job, Session,
-  Input, Turn, edge, and dispatch, or the same durable rejection;
-- one parent, no reparent/cycle, indexed read cost for subtree query after detach, batching,
-  revision-pinned stable BFS page/continuation, and concurrent attach/detach visible only to a new
-  query;
-- every otherwise eligible parent source is accepted when it has authoritative workDir and a
-  current Runner binding, while Workflow inline and any parent missing required facts are rejected.
-  When target Agent `MaxConcurrentRuns` is full, the child queues under ordinary Job semantics
-  instead of being rejected;
-- AgentJob terminal, not Session/Turn terminal, triggers one parent SessionInput, including handler
-  replay, parent busy/capacity, unknown, and detach races;
-- the minimal deterministic tree lifecycle matrix: sequential coexistence of multiple `Reserved`
-  values without graph changes, strictly increasing finalize revisions, and atomic snapshot
-  rejection of unfinalized reservations in membership. Controlled barriers and `Task.WhenAll`
-  prove that while attach/detach awaits acknowledgement, a second finalize or snapshot cannot pass
-  the pending mutation, while a new invisible reservation assigns no revision;
-- stop snapshot source generates root, deterministic BFS membership, durable turn/binding, and
-  targets only from the revision-pinned child-owned projection. Public commands can neither submit
-  nor omit them. The first published fence command decides snapshot/detach concurrency, and later
-  detach does not change frozen targets;
-- any mismatch in command, edge, parent/child identity, child launch Job, or assigned revision on an
-  attach/detach participant receipt prevents publish and graph advancement and enters
-  reconciliation. The four recovery windows replay only the same tuple after activation loss/replay
-  and publish exactly once;
-- detach does not depend on CLI retry. Begin is accepted only after fence recovery-reminder
-  registration is ensured. The reminder independently recovers or returns the historical result
-  after activation loss following Begin, child apply, acknowledgement, or commit. Activation
-  reregisters it, and a tick with no pending work changes no state;
-- revision-pinned tree/stop source queries each frontier raw-candidate-first. A reachable malformed
-  child, duplicate, or cycle returns `session_tree_projection_inconsistent`, no partial tree, and no
-  persisted stop snapshot/targets;
-- cascade target queued/executing/idle/unknown, pre-submit child cancellation, partial outcome,
-  same-operation retry, unknown retaining the membership stop-admission fence, and a later Turn
-  not stopped by the old operation;
-- startup context contains own Session ID, parent ID when present, snapshot, and canonical CLI
-  command before the first turn, and dispatch does not depend on a per-session environment variable;

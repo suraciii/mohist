@@ -17,18 +17,38 @@ happened, whether a person must act, and which actions are currently safe.
 
 ## Page Map
 
-| Page | Purpose |
-|---|---|
-| **Board (Home)** | Default page for global progress and Issues that need attention |
-| **Issue details** | Execution state, evidence, and manual operations for one Issue |
-| **Issue files** | Changed files and diff for one Issue |
-| **Agents** | Configure, test, and start Mohist Agents; inspect Jobs, Sessions, and external Connections |
-| **AgentSession** | Understand session ownership, state, result, diagnostic evidence, and recovery |
-| **Epics** | Epic list and details |
-| **Activity** | Live Activity feed |
-| **Logs** | System logs |
-| **Settings** | Project configuration |
-| **Archived** | Archived Issues |
+Most pages belong to one Project and live under `/<projectName>/`; opening `/`
+redirects to the current Project. Only application Settings sections and the
+device authorization confirmation page (`/device`) live outside this prefix.
+
+- **Board (Home):** `/<projectName>/` — default page for global progress and
+  Issues that need attention.
+- **Issues:** `/<projectName>/issues` — the Issue list.
+- **Issue details:** `/<projectName>/issues/<number>` — execution state,
+  evidence, and manual operations for one Issue.
+- **Issue files:** `/<projectName>/issues/<number>/files` — changed files and
+  diff for one Issue.
+- **Agents:** `/<projectName>/agents` and `/<projectName>/agents/<agentId>` —
+  configure, test, and start Mohist Agents; inspect Jobs, Sessions, and
+  external Connections. `/<projectName>/agent-sessions/new` starts a task-first
+  session, and `/<projectName>/connections/<connectionId>` diagnoses one
+  Connection.
+- **AgentSession:** `/<projectName>/sessions/<sessionId>` — session ownership,
+  state, result, diagnostic evidence, and recovery.
+- **Epics:** `/<projectName>/epics` and `/<projectName>/epics/<number>` — Epic
+  list and details.
+- **Inbox:** `/<projectName>/inbox` — the notification history.
+- **Insights:** `/<projectName>/insights` — delivery trends such as
+  throughput, completion, stage duration, and cost.
+- **Activity:** `/<projectName>/activity` — live Activity feed.
+- **Runners:** `/<projectName>/runners` and `/<projectName>/runners/<runnerId>`
+  — connected Runners and their state.
+- **Workspaces:** `/<projectName>/workspaces` and
+  `/<projectName>/workspaces/<name>` — Project Workspaces.
+- **Logs:** `/<projectName>/logs` — system logs.
+- **Settings:** `/settings/<section>` for application sections and
+  `/<projectName>/settings/<section>` for Project sections.
+- **Archived:** `/<projectName>/archived` — archived Issues.
 
 Use the top navigation to change pages.
 
@@ -71,17 +91,15 @@ them. Layout does not change their meaning or the available operations.
 
 ### Available Buttons
 
-| State | Buttons | Meaning |
-|---|---|---|
-| Backlog | Start | Start the Workflow |
-| Running | Running indicator and Force Stop | An Inline Agent is executing and can be stopped forcibly |
-| Awaiting Approval | Approve and Reject | Decide the Approval |
-| Blocked | Retry, Resume, Rerun, and Stop | The page emphasizes the recommended action available now |
-| Done | Close and Archive | Handle terminal work |
+The buttons follow the authoritative state. Backlog offers Start. Running
+shows a running indicator and Force Stop, because an Inline Agent is executing
+and can be stopped forcibly. Awaiting Approval offers Approve and Reject.
+Blocked offers Retry, Resume, Rerun, and Stop, and the page emphasizes the
+recommended action available now. Done offers Close and Archive.
 
 ## Issue Files
 
-URL: `/issues/<number>/files`
+URL: `/<projectName>/issues/<number>/files`
 
 This page lists every file changed by one Issue and includes a diff view.
 
@@ -89,13 +107,13 @@ This page lists every file changed by one Issue and includes a diff view.
 
 The Agent list discovers and manages Mohist Agents in the Project. Before the
 user opens a Session, it shows avatar, name, description, active or archived
-state, Ready, Needs setup, or Unknown Readiness, Runtime, model, stored
+state, `ready`, `needs-setup`, or `unknown` Readiness, Runtime, model, stored
 Reasoning Effort, true Variant, active and queued work counts, and external
-Connection health. Runner availability and
-capacity are shown separately and cannot appear as Needs setup.
+Connection health. Runner availability and capacity are shown separately and
+cannot appear as `needs-setup`.
 
 The primary entry point for a Project without Agents is the task-first session
-composer at `/<project>/agent-sessions/new`. Enter the prompt, attachments, and
+composer at `/<projectName>/agent-sessions/new`. Enter the prompt, attachments, and
 context references first. The Agent field defaults to **New Agent for this task**;
 leaving it unchanged creates and launches a new Agent through one task-first
 request. Selecting an existing Agent keeps the definition-first launch path and
@@ -106,8 +124,8 @@ Execution configuration follows the Project surface. A configured
 for tasks in the Project. It requires no extra question; **Adjust** opens the
 catalog-backed Runtime and Model selectors, and adjusted values are submitted as
 hints. When no Project default exists, the create-new path requires Runtime and
-Model inline. Models and variants come from the selected Runtime catalog, the
-same catalog used by the Agent definition editor.
+Model inline. Models, Reasoning Efforts, and true Variants come from the
+selected Runtime catalog, the same catalog used by the Agent definition editor.
 
 A successful launch opens the returned AgentSession URL. The session header links
 to the created Agent detail page, where name, description, Instructions, and
@@ -124,14 +142,14 @@ Agent details contain four continuous areas:
 
 1. **Definition:** Avatar, name, description, Instructions, Runtime, Model,
    catalog-backed Reasoning Effort, true Variant, Skills, concurrency limit,
-   and active or archived state. A saved Pi thinking-level Variant is not
-   migrated; the user must re-enter it as Reasoning Effort. Mohist Runtime
-   capabilities and Readiness drive the controls. Effort options come from the
-   selected model catalog, never from true Variants. A gap links directly
-   to the corresponding field or credential setting. Needs setup disables
-   launch. Unknown still accepts work and reports "Waiting for Runner
-   validation." Ready without Runner capacity queues work instead of showing a
-   configuration error.
+   and active or archived state. Pi thinking levels are stored as Reasoning
+   Effort, never as Variants. Mohist Runtime capabilities and Readiness drive
+   the controls. Effort options come from the selected model catalog, never
+   from true Variants. A gap links directly
+   to the corresponding field or credential setting. `needs-setup` disables
+   launch. `unknown` still accepts work and reports "Waiting for Runner
+   validation." `ready` without Runner capacity queues work instead of showing
+   a configuration error.
 2. **Start session:** Submit a real task and optional Issue, Epic, or Repository
    context. This creates AgentJob, AgentSession, the first SessionInput, and the
    first AgentTurn. It is the normative test entry point before a Slack
@@ -158,9 +176,9 @@ work, configuration, direct launch, and Session history. Slack Connections have
 guided setup, diagnostics, access policy management, identity facts, and
 uncertain-delivery recovery.
 
-Agent definitions still have no avatar setting or avatar display. AgentJob has
+Agent definitions have no avatar setting or avatar display. AgentJob has
 no result view separate from its continuing AgentSession. The Web UI does not
-yet expose Slack Connection owner transfer, credential rotation or revalidation,
+expose Slack Connection owner transfer, credential rotation or revalidation,
 Enable, Disable, or Delete.
 
 ## AgentSession
@@ -229,9 +247,9 @@ and identity.
 
 ### Implementation Gaps
 
-The current page is a conversational message view. Tool calls have categorized
-rendering, but entries do not yet use sentence phrasing, salience, or collapse
-rules. Mohist domain actions are not recognized for separate presentation.
+The page is a conversational message view. Tool calls have categorized
+rendering, but entries do not use sentence phrasing, salience, or collapse
+rules. Mohist domain actions have no separate presentation.
 SessionInput acceptance and AgentTurn state have independent evidence but are
 not part of the timeline. There is no raw event view. Confirmed-missing recovery,
 Compact, and Reset are implemented, and their context boundaries appear in the
@@ -239,7 +257,7 @@ timeline.
 
 ## Epics
 
-URLs: `/epics` and `/epics/<id>`
+URLs: `/<projectName>/epics` and `/<projectName>/epics/<number>`
 
 ### List
 
@@ -263,7 +281,7 @@ See [Planning with Epics](epics.md) for action availability and transitions.
 
 ## Activity
 
-URL: `/activity`
+URL: `/<projectName>/activity`
 
 The live Activity feed shows fine-grained events:
 
@@ -276,51 +294,53 @@ Use it to answer what happened recently.
 
 ## Logs
 
-URL: `/logs`
+URL: `/<projectName>/logs`
 
 This page shows Server and Runner system logs for failure diagnosis.
 
 ## Settings
 
-URL: `/settings/<section>`
+URL: `/settings/<section>` for application sections and
+`/<projectName>/settings/<section>` for Project sections.
 
-Settings has six sections:
+Application sections:
 
-| Section | Purpose |
-|---|---|
-| **OpenCode** | OpenCode models and configuration |
-| **Runtime** | Runner state and concurrent capacity |
-| **Repositories** | Git Repositories associated with the Project |
-| **Workflows** | Project Workflow Profile collection and default Profile |
-| **Prompts** | Project Prompt editing |
-| **System** | System configuration |
+- **Coder Agent:** The coder-agent model, with per-stage overrides.
+- **Runtime:** How Mohist schedules external coder agent sessions.
+- **System:** Logging, runtime identity, and local-source update status.
+- **Preferences:** User preferences and read-only reference information.
+
+Project sections:
+
+- **Repositories:** Git Repositories associated with the Project.
+- **Workflows:** The Workflow new Issues inherit, plus the read-only system
+  catalog.
+- **Templates:** Project Prompt templates, which can override system templates
+  or add project-unique keys.
+- **Label catalog:** The labels the Project suggests for Issues. The catalog
+  is advisory; edits do not change existing Issue labels.
+- **Inbox:** Which notification kinds the Web inbox receives.
 
 See [Workflow Profiles](workflow-profiles.md) and [Runner Guide](runner.md).
 
 ## Archived
 
-URL: `/archived`
+URL: `/<projectName>/archived`
 
 This page lists archived Issues and can unarchive them.
 
 ## Mobile
 
 The Web UI has basic mobile adaptation, including a mobile board layout, but it
-is not currently a core scenario.
+is not a core scenario.
 
 Current mobile support:
 
 - Board columns through stage tabs.
 - Readable basic Issue details.
 
-Current limitations:
-
-- Approval buttons are small and easy to activate accidentally.
-- Long Issue bodies are difficult to read on a small screen.
-- Settings are not mobile-friendly.
-
-See [Mobile PWA and Push Notifications](mobile-pwa.md) for the unimplemented
-proposal for a complete mobile Workflow.
+See [Mobile PWA and Push Notifications](../design/decisions/mobile-pwa.md) for
+the open decision record on a complete mobile Workflow.
 
 ---
 

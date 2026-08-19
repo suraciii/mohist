@@ -22,15 +22,11 @@ and respond with a command so work can continue.
 
 ## Notification Events
 
-Four of the five event types are enabled by default:
-
-| Event | Default |
-|---|---|
-| An Approval point is waiting for a decision | On |
-| The Workflow failed and blocked the Issue | On |
-| The Issue completed | On |
-| An Agent response failed to handle its work | On |
-| The Issue started work | **Off**, because the user usually started it and the notice is noise |
+Four of the five event types are enabled by default. On by default: an
+Approval point is waiting for a decision, the Workflow failed and blocked the
+Issue, the Issue completed, and an Agent response failed to handle its work.
+Off by default: the Issue started work, because the user usually started it
+and the notice is noise.
 
 Each notification says what happened, identifies the Issue by number and title,
 and suggests a next action. A suggested command always includes the Issue
@@ -137,9 +133,8 @@ such as `hi`, reopens the window until it expires again.
 ## Implementation Gaps
 
 - There is no command surface for per-event toggles, such as enabling the
-  default-off Issue-started notification. For now, rerun the guide or edit
-  Server configuration manually. A unified command surface remains future
-  work.
+  default-off Issue-started notification. Rerun the guide or edit Server
+  configuration manually to change the defaults.
 
 See [`design/hermes-webhook.md`](../design/hermes-webhook.md) for the authority,
 wire, signature, and failure-isolation contracts.

@@ -6,9 +6,13 @@ See [Agents and AgentSessions](agent-sessions.md) for their relationship.
 
 ## Problem
 
-Workflow, Issue, Epic, Runner, and AgentSession all produce events. A stage
-waits for an Approval, a task fails, an Issue completes, an Epic has no Issue
-that can advance, or a Runner disconnects.
+Workflow, Issue, Epic, Runner, Workspace, and AgentSession all produce events.
+A stage waits for an Approval, a task fails, an Issue completes, an Epic has no
+Issue that can advance, or a Runner disconnects.
+
+Workspace lifecycle publishes `com.mohist.workspace.created` and
+`com.mohist.workspace.archived`; the payload carries the Workspace identity,
+and the source records what created it (issue, manual, slack, web, or cli).
 
 Event routing delegates responses to Agents. A Project maintains an ordered
 **routing table**. Each rule declares the event it matches, the Agent that
@@ -115,19 +119,22 @@ The user owns configuration correctness. The system owns observability.
 
 The same routing table supports other scenarios:
 
-| Scenario | Matched event | Response prompt asks the Agent to |
-|---|---|---|
-| Automatic completion summary | Issue completed | Summarize artifacts and write release notes |
-| Follow-up generation | Issue completed or review found risk | Create a follow-up Issue |
-| Production maintenance | Runner disconnected or Epic cannot advance an Issue | Analyze the cause, notify the owner, or create a maintenance Issue |
+- **Automatic completion summary:** when an Issue completes, summarize
+  artifacts and write release notes.
+- **Follow-up generation:** when an Issue completes or a review finds risk,
+  create a follow-up Issue.
+- **Production maintenance:** when a Runner disconnects or an Epic cannot
+  advance an Issue, analyze the cause, notify the owner, or create a
+  maintenance Issue.
 
 These rules use one table and expression language. Only the condition and
 response prompt differ.
 
 ## Responsibility Boundary
 
-| Owner | Responsibility |
-|---|---|
-| **User** | Write correct and safe response prompts; use table order and `continue` for exclusivity, fallback, or parallel response |
-| **System** | Match events accurately, start Agents, and record the relationship between event and response |
-| **Not the system** | Judge whether a prompt is correct or give Agents a privileged Approval path. Agents use the same supported path as the owner and scripts; see [Workflow](the-workflow.md) |
+The user writes correct and safe response prompts and uses table order and
+`continue` for exclusivity, fallback, or parallel response. The system matches
+events accurately, starts Agents, and records the relationship between event
+and response. The system does not judge whether a prompt is correct or give
+Agents a privileged Approval path: Agents use the same supported path as the
+owner and scripts; see [Workflow](the-workflow.md).

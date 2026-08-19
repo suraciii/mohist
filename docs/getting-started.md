@@ -7,12 +7,9 @@ plane. You can also use it to configure and use a Mohist Agent directly.
 
 ## Prerequisites
 
-| Tool | Version | Check command |
-|---|---|---|
-| .NET SDK | 11.0+ | `dotnet --version` |
-| Node.js | 22.19.0+ | `node --version` |
-| npm | 10+ | `npm --version` |
-| Agent Runtime | OpenCode CLI or configured Pi Runtime | `opencode --version` for OpenCode |
+You need .NET SDK 11.0 or later (`dotnet --version`), Node.js 22.19.0 or later
+(`node --version`), npm 10 or later (`npm --version`), and an Agent Runtime:
+the OpenCode CLI (`opencode --version`) or a configured Pi Runtime.
 
 For OpenCode, follow the [official opencode documentation](https://opencode.ai)
 when the CLI is not installed. Pi runs through the Runner's in-process Pi SDK
@@ -307,8 +304,3 @@ In your repository, verify that `GET /hello` works.
   style
 - [CLI Reference](cli-reference.md): See all `mo` commands, options, and exit
   codes
-
----
-
-Implementation source: `package.json`, `global.json`, and
-`Directory.Build.props` in the repository root.

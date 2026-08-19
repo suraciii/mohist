@@ -12,15 +12,23 @@ contracts. Direct use of a runtime-specific Action is an Inline Agent execution,
 
 ### Supporting
 
-| Subdomain | Problem | Ubiquitous language |
-|---|---|---|
-| Issue | what work is, how organized, what progress | issue, epic, sub-issue, parent issue, status, prerequisite, priority, risk, draft, done |
-| Project Space | environment, isolation, config | project, repository (named resource, default, git URL, base branch), workspace (origin, materialization), variable, prompt |
-| Agent | reusable named intelligence, execution jobs and external connections | Mohist Agent, Agent Readiness, Agent Availability, AgentJob, Agent Connection, provider identity, access policy, WorkResult |
-| Session | logical execution conversation, input delivery, turn execution, compression, query, audit | AgentSession, SessionInput, AgentTurn, Runtime Binding, Activity, Transcript, Context, Usage |
-| Runner | execution resource availability and capacity | resource, presence, registration, capacity |
-| Skill·Explore | refine vague needs into bounded issues | — |
-| Slack integration | Server-side workspace Mohist App enrollment and managed Agent App external lifecycle (App create/install approval, manifest, Socket readiness, operation fence, unknown outcome) | Slack workspace, Mohist App, Agent App, enrollment, App lifecycle, authorization, manifest drift, Socket readiness |
+- Issue: what work is, how organized, what progress. Ubiquitous language: issue, epic, sub-issue,
+  parent issue, status, prerequisite, priority, risk, draft, done.
+- Project Space: environment, isolation, config. Ubiquitous language: project, repository (named
+  resource, default, git URL, base branch), workspace (origin, materialization), variable, prompt.
+- Agent: reusable named intelligence, execution jobs and external connections. Ubiquitous language:
+  Mohist Agent, Agent Readiness, Agent Availability, AgentJob, Agent Connection, provider identity,
+  access policy, WorkResult.
+- Session: logical execution conversation, input delivery, turn execution, compression, query,
+  audit. Ubiquitous language: AgentSession, SessionInput, AgentTurn, Runtime Binding, Activity,
+  Transcript, Context, Usage.
+- Runner: execution resource availability and capacity. Ubiquitous language: resource, presence,
+  registration, capacity.
+- Skill·Explore: refine vague needs into bounded issues.
+- Slack integration: Server-side workspace Mohist App enrollment and managed Agent App external
+  lifecycle (App create/install approval, manifest, Socket readiness, operation fence, unknown
+  outcome). Ubiquitous language: Slack workspace, Mohist App, Agent App, enrollment, App lifecycle,
+  authorization, manifest drift, Socket readiness.
 
 Epic is Issue granularity (organizing facet), not a separate subdomain.
 Issue and Epic are two aggregates in the same bounded context. Issue holds its current `EpicNumber?`.
@@ -59,7 +67,7 @@ Cross-domain read-only reports (activity feed, delivery cost, cross-aggregate bo
   adapters, not business domains. Agent Connection belongs to Agent because its binding, access policy and
   lifecycle are persistent Agent-facing product behavior; Slack protocol state does not. The Server-side
   Slack integration control plane (Slack workspace enrollment and managed Agent App lifecycle) is a separate
-  supporting context (see table above): it holds external-App business facts that must survive restarts, and
+  supporting context (see the Slack integration entry above): it holds external-App business facts that must survive restarts, and
   is distinct from the stateless protocol adapter and from the Agent domain.
 - Generic: Label, User, SystemInfo — infrastructure.
 - Technical layers: Events, Api, Infrastructure — not business domains.
@@ -68,47 +76,31 @@ Cross-domain read-only reports (activity feed, delivery cost, cross-aggregate bo
 
 DDD patterns: Customer/Supplier (C/S), Conformist (C), ACL, OHS, Published Language (PL), Shared Kernel (SK).
 
-The following ASCII diagram is an orientation map. Its arrows show selected DDD upstream-to-downstream
-relationships. They do not show static source-code dependencies. The table after the diagram is the
-normative and complete relationship map.
+The following list is the normative and complete relationship map. Each entry gives the DDD
+upstream, the downstream, the relationship pattern, and what flows. These are DDD
+upstream-to-downstream relationships, not static source-code dependencies.
 
-```text diagram
-DDD upstream ---> downstream (selected overview)
-
-Project Space ---> Workflow ---> Runner
-       |               |
-       +---------------+-------> Issue
-
-Agent -----------> runner process <----------- Runner
-Runner / Agent --> Session ---> Issue / Workflow / API / AgentOps
-Session / Issue / Workflow / Runner ----------> AgentOps
-Agent / Session ------------------------------> Web / CLI / provider adapters
-Server ---------------------------------------> Web / CLI
-Generic --------------------------------------> Issue and other contexts
-Issue / Project Space ---> IssueRepositoryCoordinator
-```
-
-In particular, row 1 makes Workflow the DDD upstream of Issue. This does not conflict with the static
+In particular, entry 1 makes Workflow the DDD upstream of Issue. This does not conflict with the static
 `Issue -> Workflow` code dependency defined in [Dependency invariants](#dependency-invariants).
 
-| # | Upstream | Downstream | Pattern | What flows |
-|---|---|---|---|---|
-| 1 | Workflow | Issue | C/S | WorkflowProfile, run creation, verdict/output |
-| 2 | Workflow | Runner | OHS+PL | task dispatch, fact report |
-| 3 | Project Space | Workflow | PL | default Profile ref, Repository resource, Workspace resource, Project Variables, Prompt key/body |
-| 4 | Project Space | Issue | SK | ProjectId, repo ref |
-| 5 | Issue | Skill·Explore | OHS+PL | issue body/template |
-| 6 | Agent | runner process | C | AgentJob dispatch with Agent definition snapshot |
-| 7 | Runner | runner process | PL | registration, poll presence |
-| 8 | Server | Web | OHS+PL | API DTO |
-| 9 | Server | CLI | OHS+PL | API DTO |
-| 10 | Generic | Issue etc. | SK/PL | labels, user identity |
-| 11 | Session | Issue/Workflow/API/AgentOps | OHS+PL | session DTO |
-| 12 | Runner/Agent | Session | PL | Session input, activity, Runtime observations |
-| 13 | Session/Issue/Workflow/Runner | AgentOps | OHS | cross-domain report assembly |
-| 14 | Issue | IssueRepositoryCoordinator | C | narrow participant commands (create / reassign / reopen) |
-| 15 | Project Space | IssueRepositoryCoordinator | C | narrow participant commands (repository removal) |
-| 16 | Agent/Session | Web, CLI, provider adapters | OHS+PL | Agent and Connection management, launch, Job result, Session Input/Turn/transcript/events |
+1. Workflow -> Issue (C/S): WorkflowProfile, run creation, verdict/output.
+2. Workflow -> Runner (OHS+PL): task dispatch, fact report.
+3. Project Space -> Workflow (PL): default Profile ref, Repository resource, Workspace resource,
+   Project Variables, Prompt key/body.
+4. Project Space -> Issue (SK): ProjectId, repo ref.
+5. Issue -> Skill·Explore (OHS+PL): issue body/template.
+6. Agent -> runner process (C): AgentJob dispatch with Agent definition snapshot.
+7. Runner -> runner process (PL): registration, poll presence.
+8. Server -> Web (OHS+PL): API DTO.
+9. Server -> CLI (OHS+PL): API DTO.
+10. Generic -> Issue etc. (SK/PL): labels, user identity.
+11. Session -> Issue/Workflow/API/AgentOps (OHS+PL): session DTO.
+12. Runner/Agent -> Session (PL): Session input, activity, Runtime observations.
+13. Session/Issue/Workflow/Runner -> AgentOps (OHS): cross-domain report assembly.
+14. Issue -> IssueRepositoryCoordinator (C): narrow participant commands (create / reassign / reopen).
+15. Project Space -> IssueRepositoryCoordinator (C): narrow participant commands (repository removal).
+16. Agent/Session -> Web, CLI, provider adapters (OHS+PL): Agent and Connection management, launch,
+    Job result, Session Input/Turn/transcript/events.
 
 Runner process (TS) is infrastructure, not a context. It follows Workflow Action contracts
 and AgentJob dispatch contracts.
@@ -117,8 +109,8 @@ and AgentJob dispatch contracts.
 [Durable application process manager](architecture.md#durable-application-process-manager). It is not
 an independent business bounded context. It holds no Issue, Project, or Repository facts and does not
 participate in read projections. It provides Project-level serialization and failure-redelivery safety
-only for the issue 417 command class that establishes or breaks a non-terminal binding. Its two relationship
-rows, 14 and 15, mean that the coordinator calls narrow Issue and Project participant interfaces in one
+only for the command class that establishes or breaks a non-terminal binding. Its two relationship
+entries, 14 and 15, mean that the coordinator calls narrow Issue and Project participant interfaces in one
 direction. A participant does not call the coordinator back in that synchronous call stack.
 
 ## Dependency invariants
@@ -176,14 +168,14 @@ direction. A participant does not call the coordinator back in that synchronous 
 
 ## Judgment rules
 
-| If it defines... | It goes in... |
-|---|---|
-| stages, tasks, checks, state advance, scheduling, approval | Workflow |
-| work unit properties, lifecycle, deps, organization | Issue |
-| repo binding, isolation, execution config, prompt library | Project Space |
-| agent definition, job dispatch, report validation | Agent |
-| external Agent binding, provider identity, access policy, connection lifecycle | Agent |
-| execution recording, transcript, context, usage, query | Session |
-| resource registration, presence, capacity | Runner |
-| cross-domain read report assembly | AgentOps |
-| labels, users, system info | Generic |
+- If it defines stages, tasks, checks, state advance, scheduling, or approval, it goes in Workflow.
+- If it defines work unit properties, lifecycle, deps, or organization, it goes in Issue.
+- If it defines repo binding, isolation, execution config, or the prompt library, it goes in
+  Project Space.
+- If it defines agent definition, job dispatch, or report validation, it goes in Agent.
+- If it defines External Agent binding, provider identity, access policy, or connection lifecycle,
+  it goes in Agent.
+- If it defines execution recording, transcript, context, usage, or query, it goes in Session.
+- If it defines resource registration, presence, or capacity, it goes in Runner.
+- If it defines cross-domain read report assembly, it goes in AgentOps.
+- If it defines labels, users, or system info, it goes in Generic.

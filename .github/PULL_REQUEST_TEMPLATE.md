@@ -64,5 +64,5 @@ baseline and result.
 
 ---
 
-<!-- Merged with squash — the PR title becomes the commit on main. Use
+<!-- Merged with squash — the PR title becomes the commit on master. Use
 Conventional Commits: feat(scope): subject, fix(scope): subject, ... -->

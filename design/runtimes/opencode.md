@@ -41,21 +41,9 @@ differences are why the two modules intentionally share no SDK-shaped interface.
 
 ## Action Input and Output Contract
 
-```ts
-type OpenCodeActionInput = {
-  prompt: PromptSpec
-  session?: string
-  options?: {
-    model?: string
-    reasoningEffort?: string
-    variant?: string
-  }
-}
-
-type OpenCodeActionOutput = null | {
-  promise: string
-}
-```
+The Action input and output contract is owned by
+[`../workflow/actions.md`](../workflow/actions.md). This section defines only
+OpenCode-specific input semantics.
 
 `prompt` is rendered upstream to non-empty text under the authority of
 [`task-dispatch.md`](../workflow/task-dispatch.md). The Action and Runtime do
@@ -247,8 +235,8 @@ Prompt.
 A worktree-cleanup Follow-up is subsequent execution of the original task. The
 executor invokes the original resolved Action again and preserves WorkflowRun,
 Session name, Work ID, and working directory so it reaches the same Runtime and
-physical Session. It must not hard-code cleanup to another Action or ACP
-fallback. Cleanup is not Reset and does not replace a binding for housekeeping.
+physical Session. It must not hard-code cleanup to another Action. Cleanup is
+not Reset and does not replace a binding for housekeeping.
 
 At most one work-originated Prompt may run in a logical AgentSession at once,
 whether TaskRun or AgentJob owns the work. Different logical Sessions may run
@@ -413,8 +401,8 @@ retry event remains covered by the executor deadline.
 Use the retry event's `attempt` field directly. OpenCode resets it per Prompt
 execution. After Runner restart or event-stream reconnection, restore from a
 `session.status()` snapshot instead of maintaining a second counter. On a
-classification or threshold match, use the locked SDK's typed call:
-`client.session.abort({ sessionID, directory }, { throwOnError: true })`.
+classification or threshold match, use the locked SDK's typed abort call with
+`throwOnError` enabled.
 Stopping is confirmed only when abort returns exactly `data: true` and the same
 directory's status snapshot either omits the Session or marks it idle. Then
 return a failure fact containing the original provider message. Keep the
@@ -436,12 +424,21 @@ may have started, timeout, connection loss, or an unconfirmed reply returns
 `unavailable`; Server retains the original operation identity and must not replay
 or replace it with a new reservation.
 
-| Command | OpenCode-specific contract |
-|---|---|
-| Follow-up | Uses native asynchronous input. Active execution receives it at an iteration boundary; idle execution starts after binding preparation. Acceptance returns immediately, and completion remains event-driven. Active or unknown state never triggers binding replacement. |
-| Compact | Allowed only while idle. Uses native compaction with the current model, keeps the physical Session and logical Session identity, and fails actionably when no current model is known. |
-| Reset | Allowed only while idle. Creates an empty physical Session in the same directory, then replaces the complete expected binding. A definitely missing old Session may skip model inheritance; every other read failure remains explicit. |
-| Stop | Requests interruption of the current execution. Success requires the same stop-confirmation rule used by deadline and provider-error handling; request acceptance alone does not prove execution stopped. |
+The OpenCode-specific command contracts are:
+
+- **Follow-up:** Uses native asynchronous input. Active execution receives it at an
+  iteration boundary; idle execution starts after binding preparation. Acceptance
+  returns immediately, and completion remains event-driven. Active or unknown state
+  never triggers binding replacement.
+- **Compact:** Allowed only while idle. Uses native compaction with the current
+  model, keeps the physical Session and logical Session identity, and fails
+  actionably when no current model is known.
+- **Reset:** Allowed only while idle. Creates an empty physical Session in the same
+  directory, then replaces the complete expected binding. A definitely missing old
+  Session may skip model inheritance; every other read failure remains explicit.
+- **Stop:** Requests interruption of the current execution. Success requires the
+  same stop-confirmation rule used by deadline and provider-error handling; request
+  acceptance alone does not prove execution stopped.
 
 Every command carries the complete expected binding. A replacement is applied only
 if that tuple is still current, so a stale Reset cannot overwrite newer state.
@@ -453,8 +450,8 @@ the physical binding and starts empty provider context.
 OpenCode native permission configuration is authoritative. Allowed operations
 execute directly and explicit denials remain denied. `ask` delegates one
 operation's choice to the caller. For a `permission.asked` belonging to the
-current headless execution, `OpenCodeRuntime` replies with
-`client.permission.reply({ requestID, directory, reply: "once" })`.
+current headless execution, `OpenCodeRuntime` answers the permission request
+with `once` through the SDK permission reply operation.
 
 The reply affects only that permission request. It does not write OpenCode
 configuration or Session permission rules and does not create a Workflow
@@ -496,32 +493,6 @@ non-empty snapshot. Only a changed snapshot prompts an immediate registration
 heartbeat. This best-effort path never makes an otherwise healthy Runtime
 unready.
 
-## Verification Boundary
-
-Default verification replaces the Server, Client, event stream, model-discovery
-process, Workspace registry, and clock with deterministic fakes. It proves
-readiness gating, binding-before-effect, missing versus unknown classification,
-no replay after uncertain submission, completion authority, two-phase closeout,
-permission handling, event reconciliation, and directory fencing. A real smoke
-test is upgrade evidence for the locked external surface; it is not a substitute
-for these state and failure assertions.
-
-## Legacy Boundary
-
-ACP is removed as an execution path, dependency, wire term, and fallback. Built-in
-Workflows select `mohist/opencode`, and AgentJob execution calls the same deep
-Runtime capability without going through the public Workflow Action contract.
-There is no compatibility alias, feature flag, synthetic ACP compaction, liveness
-probe, log-scanning fallback, or lockfile cleanup.
-
-Existing durable data is not rewritten into a physical Session history. An ACP-era
-current binding is treated as unavailable to the new Runtime: a later independent
-input may establish a new OpenCode binding through the canonical missing-recovery
-contract, while commands that require the old provider fail explicitly and Reset
-may intentionally create a new binding. A persisted Workflow that still names the
-removed Action fails actionably; an already running WorkflowRun is not silently
-migrated to different execution semantics.
-
 ## Upgrade Boundary
 
 Mohist locks `@opencode-ai/sdk` at 1.18.3, while the operator supplies the
@@ -537,6 +508,3 @@ upgrade. Moving surfaces requires a locked-version smoke that proves every used
 capability and preserves completion, missing/unknown, abort-confirmation, and
 no-replay semantics. The change remains inside `OpenCodeRuntime` and cannot alter
 the Workflow Action or AgentSession contracts.
-
-The reference smoke record is
-[`sdk-smoke-verification.json`](../../openspec/changes/archive/2026-07-18-issue-409/sdk-smoke-verification.json).

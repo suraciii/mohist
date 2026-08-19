@@ -8,38 +8,40 @@ Use this guide when an Issue stops advancing.
 mo issue view <number>
 ```
 
-You can also open Issue details in the Web UI. Inspect three fields:
-
-| Field | Meaning |
-|---|---|
-| `health` | `blocked`, `cancelled`, or `done` |
-| `status` | `in-progress`, `done`, or `cancelled` |
-| `blockedReason` | Cause when health is `blocked` |
+You can also open Issue details in the Web UI. Inspect three fields: `health`
+is `blocked`, `cancelled`, or `done`; `status` is `in-progress`, `done`, or
+`cancelled`; `blockedReason` gives the cause when health is `blocked`.
 
 ## Health Actions
 
 See [Workflow Health](the-workflow.md#health) for the meaning of each value.
-This table maps each value to an operator action:
+Each value maps to an operator action:
 
-| Health | Action |
-|---|---|
-| `active` | Wait |
-| `paused` | Approve, reject, or resume |
-| `blocked` | Use a recovery action below |
-| `cancelled` | Reopen when necessary |
-| `done` | Accept or archive |
+- `active`: wait.
+- `paused`: approve, reject, or resume.
+- `blocked`: use a recovery action below.
+- `cancelled`: reopen when necessary.
+- `done`: accept or archive.
 
 ## Recovery Commands
 
-| Scenario | Command | Meaning |
-|---|---|---|
-| An automated Check failed | `mo run retry --issue <n>` | Retry the current failure point |
-| Runner crashed and current work failed | `mo run retry --issue <n>` | Retry after Runner recovers |
-| Rebuild the current stage completely | `mo run rerun --issue <n> --from-stage <stage>` | Discard output from the target stage and later stages, then rerun |
-| The current stage is stuck | `mo run pause --issue <n>` | Pause current execution and resume later |
-| Work must not continue | `mo run stop --issue <n> --yes` | Stop the run permanently; it cannot resume |
-| Workflow stopped, but work was delivered another way | `mo issue done <n>` | Enter Done and retain Workflow history |
-| Abandon the Issue | `mo issue close <n>` | Enter the cancelled terminal state |
+- An automated Check failed: `mo run retry --issue <n>` retries the current
+  failure point.
+- Runner crashed and current work failed: `mo run retry --issue <n>` retries
+  after Runner recovers.
+- Repeat the current stage and discard its artifacts:
+  `mo run rerun --issue <n>` starts the current stage again as a new attempt.
+- Repeat from a selected stage: `mo run rerun --issue <n> --from-stage <stage>`
+  discards output from the target stage and later stages, then reruns.
+- The current stage is stuck: `mo run pause --issue <n>` pauses current
+  execution so it can resume later.
+- The Issue is paused and work should continue: `mo run resume --issue <n>`
+  continues the paused run.
+- Work must not continue: `mo run stop --issue <n> --yes` stops the run
+  permanently; it cannot resume.
+- The Workflow stopped, but the work was delivered another way:
+  `mo issue done <n>` enters Done and retains Workflow history.
+- Abandon the Issue: `mo issue close <n>` enters the cancelled terminal state.
 
 Every recovery command preserves Issue history. State and artifacts remain
 unless the Issue is closed and archived.
@@ -175,12 +177,12 @@ mo run retry --issue <n>     # Retry the failure point
 **Meaning:** The base branch advanced while the Issue was running. Execution has
 not failed, but Integrate can fail later.
 
-| Decision | Meaning | Action |
-|---|---|---|
-| `needs-attention` | Drift must be handled | Rebase now |
-| `defer` | Mohist can handle it automatically later | Wait |
-| `suggest` | Handling is recommended | Decide from current context |
-| `enqueue` | Handling is queued | Wait |
+The panel shows one of four decisions:
+
+- `needs-attention`: drift must be handled; rebase now.
+- `defer`: Mohist can handle it automatically later; wait.
+- `suggest`: handling is recommended; decide from current context.
+- `enqueue`: handling is queued; wait.
 
 Rebase explicitly with:
 

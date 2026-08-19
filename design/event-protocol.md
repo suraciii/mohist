@@ -12,12 +12,8 @@ expression language can subscribe to important events from any entity. See
 ## Three Orthogonal Axes
 
 Every event envelope answers three questions through separate properties:
-
-| Axis | Envelope property | Question answered |
-|---|---|---|
-| What | `type` | What happened? |
-| Who | `source` | Which entity emitted it? |
-| Where | Context extension attributes | Which business lineage contains it? |
+`type` says what happened, `source` says which entity emitted it, and context
+extension attributes say which business lineage contains it.
 
 `type` and `source` already have stable conventions. This protocol adds
 mandatory **business-lineage context stamping**. It makes "subscribe to
@@ -75,17 +71,21 @@ An envelope does not carry both `issue` and `issueid`, or both `epic` and
 `epicid`. Issues and Epics have no second internal ID, so `issueno` and
 `epicno` aliases also do not exist.
 
-### Stamping Matrix
+### Stamping Rules by Event Family
 
-| Event family | projectid | epic | issue | workflowrunid | agentid | sessionid | runnerid |
-|---|---|---|---|---|---|---|---|
-| `workflow.*` | Required | If present | If present | Required | - | - | - |
-| `issue.*` | Required | If present | Required | - | - | - | - |
-| `epic.*` | Required | Required | - | - | - | - | - |
-| `agent-session.*` | Required | If present for Workflow origin | For Workflow origin | For Workflow origin | For Agent origin | Required | - |
-| `runner.*` | If present | - | - | - | - | - | Required |
-| `workspace.*` | Required | - | If present | - | - | - | - |
-| `inbox.item-persisted` | Required | From source event if present | Required | From source event if present | - | - | - |
+Each event family stamps a fixed base context:
+
+- `workflow.*`: `projectid` and `workflowrunid` required; `epic` and `issue`
+  if present.
+- `issue.*`: `projectid` and `issue` required; `epic` if present.
+- `epic.*`: `projectid` and `epic` required.
+- `agent-session.*`: `projectid` and `sessionid` required; `epic` if present
+  for Workflow origin; `issue` and `workflowrunid` for Workflow origin;
+  `agentid` for Agent origin.
+- `runner.*`: `runnerid` required; `projectid` if present.
+- `workspace.*`: `projectid` required; `issue` if present.
+- `inbox.item-persisted`: `projectid` and `issue` required; `epic` and
+  `workflowrunid` copied from the source event if present.
 
 "If present" means that production must stamp an existing association and
 must omit the attribute rather than stamp an empty value when none exists.
@@ -180,8 +180,7 @@ system handler can receive an event that no user expression can subscribe to.
   handwritten type list, decides whether to stamp `stage`.
 - A spec suite traverses every real event-production path and asserts its
   envelope by producer family and event structure. Forgetting lineage on a new
-  producer or emitted event fails the suite without a `CatalogOnlyTypes`
-  exception list.
+  producer or emitted event fails the suite without an exception list.
 - The expression evaluator has an independent conformance suite for syntax,
   missing attributes, regular-expression timeout, and determinism.
 
@@ -192,5 +191,5 @@ stamping with Lineage and ProducerConformance coverage for each production
 path; the CEL-subset evaluator and user routing evaluation; promotion of the
 `stage` attribute; and Workspace create and archive events
 (`com.mohist.workspace.created` and `com.mohist.workspace.archived`) carrying
-`workspace` and `workspaceoriginkind`. Issue #412 removed dual Issue and Epic
-identities and the old `issueid`, `epicid`, `issueno`, and `epicno` attributes.
+`workspace` and `workspaceoriginkind`. Dual Issue and Epic identities and the
+old `issueid`, `epicid`, `issueno`, and `epicno` attributes are removed.

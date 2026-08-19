@@ -6,18 +6,16 @@ A domain identity is the smallest key that identifies an entity permanently and 
 ambiguity. It does not have to be a single random ID. When an entity naturally belongs to a
 parent scope, the parent identity and the number within that scope form the identity together.
 
-| Concept | Domain identity | Example |
-|---|---|---|
-| Project | `ProjectId` | `proj_123` |
-| Issue | (`ProjectId`, `IssueNumber`) | (`proj_123`, `42`) |
-| Epic | (`ProjectId`, `EpicNumber`) | (`proj_123`, `7`) |
-| WorkflowRun | `WorkflowRunId` | `wr_123` |
-| Runner | `RunnerId` | `runner_123` |
-| AgentSession | `SessionId` | `session_123` |
-| SessionOperation | `operationId` | `op_123` |
-| Event | `EventId` | `evt_123` |
-| Principal | `PrincipalId` | `prin_123` |
-| Credential | `CredentialId` | `cred_123` |
+- Project: `ProjectId` (for example `proj_123`).
+- Issue: (`ProjectId`, `IssueNumber`) (for example (`proj_123`, `42`)).
+- Epic: (`ProjectId`, `EpicNumber`) (for example (`proj_123`, `7`)).
+- WorkflowRun: `WorkflowRunId` (for example `wr_123`).
+- Runner: `RunnerId` (for example `runner_123`).
+- AgentSession: `SessionId` (for example `session_123`).
+- SessionOperation: `operationId` (for example `op_123`).
+- Event: `EventId` (for example `evt_123`).
+- Principal: `PrincipalId` (for example `prin_123`).
+- Credential: `CredentialId` (for example `cred_123`).
 
 - An Issue or Epic number is a permanent part of its identity within a Project, not a display
   alias. Do not maintain a second random ID for either entity.
@@ -34,14 +32,16 @@ parent scope, the parent identity and the number within that scope form the iden
 Uncertainty enters the system only at its edges; the interior is deterministic
 and decides from recorded facts alone.
 
-| Term | Meaning |
-|---|---|
-| Edge | A point where the system touches what it does not control: a peer process, an external runtime, a human-readable message, the clock. Uncertainty is born only here. |
-| Fact | Recorded once, by the one witness present when it became true. Interior state consists of facts alone. |
-| Witness | The party present when a fact became true; only the witness records it. |
-| Claim | Anything that crosses an edge asserting a fact but is not one yet. Claims are settled, never trusted. |
-| Settlement | The edge action that turns a claim into a fact or an explicit unknown. |
-| Unknown | A first-class value, not a failure. What settlement cannot establish stays an explicit unknown. |
+- **Edge**: A point where the system touches what it does not control: a peer process, an external
+  runtime, a human-readable message, the clock. Uncertainty is born only here.
+- **Fact**: Recorded once, by the one witness present when it became true. Interior state consists
+  of facts alone.
+- **Witness**: The party present when a fact became true; only the witness records it.
+- **Claim**: Anything that crosses an edge asserting a fact but is not one yet. Claims are settled,
+  never trusted.
+- **Settlement**: The edge action that turns a claim into a fact or an explicit unknown.
+- **Unknown**: A first-class value, not a failure. What settlement cannot establish stays an
+  explicit unknown.
 
 - Split facts until each has exactly one witness; a dispute means the fact was
   too coarse.
@@ -57,25 +57,23 @@ and decides from recorded facts alone.
   copy of another owner's state is either rebuildable or refetchable.
 
 Estimating unrecorded state and fabricating certainty are defects. Existing
-instances are known defects tracked for removal; new code must not add them.
+instances are known defects; new code must not add them.
 
 ## Role suffixes
 
-| Suffix | Scope | Example |
-|---|---|---|
-| Querier | single-domain read projection | IssueQuerier |
-| Assembler | cross-domain read assembly (AgentOps) | AgentActivityFeedAssembler |
-| Reporter | cross-domain metrics (AgentOps) | AgentUsageReporter |
-| Resolver | external name -> canonical resource | ProjectResolver |
-| Manager | config or lifecycle policy | WorkflowProfileManager |
-| Store | persistence boundary for one shape | WorkflowRunStore |
+- `Querier`: single-domain read projection (for example `IssueQuerier`).
+- `Assembler`: cross-domain read assembly in AgentOps (for example `AgentActivityFeedAssembler`).
+- `Reporter`: cross-domain metrics in AgentOps (for example `AgentUsageReporter`).
+- `Resolver`: external name to canonical resource (for example `ProjectResolver`).
+- `Manager`: config or lifecycle policy (for example `WorkflowProfileManager`).
+- `Store`: persistence boundary for one shape (for example `WorkflowRunStore`).
 
 - No new `*QueryService` names.
 - Assembler/Reporter belong to AgentOps. Never in leaf domains like Session.
 
 ## ResourceKey
 
-```
+```text literal
 /projects/{projectId}
 /projects/{projectId}/issues/{issueNumber}
 /projects/{projectId}/epics/{epicNumber}
@@ -86,28 +84,33 @@ Leading slash. Plural nouns. URL path segments. No trailing slash.
 
 ## Entity map
 
-| Concept | Domain identity | GrainKey source | ResourceKey |
-|---|---|---|---|
-| Project | projectId | projectId | /projects/{projectId} |
-| Issue | projectId + issueNumber | projectId + issueNumber | /projects/{projectId}/issues/{issueNumber} |
-| Epic | projectId + epicNumber | projectId + epicNumber | /projects/{projectId}/epics/{epicNumber} |
-| WorkflowRun | workflowRunId | workflowRunId | /workflow-runs/{workflowRunId} |
-| Runner | runnerId | runnerId | /projects/{projectId}/runners/{runnerId} |
-| WorkflowBacklog | — | projectId | /projects/{projectId}/workflow-backlog |
-| StageLock | — | internal id | /projects/{projectId}/workflow-stage-locks/{resource} |
-| AgentSession | sessionId | sessionId | /projects/{projectId}/agent-sessions/{sessionId} |
-| Event | eventId | — | /events/{eventId} |
+- Project: domain identity and GrainKey `projectId`; ResourceKey `/projects/{projectId}`.
+- Issue: domain identity and GrainKey `projectId + issueNumber`; ResourceKey
+  `/projects/{projectId}/issues/{issueNumber}`.
+- Epic: domain identity and GrainKey `projectId + epicNumber`; ResourceKey
+  `/projects/{projectId}/epics/{epicNumber}`.
+- WorkflowRun: domain identity and GrainKey `workflowRunId`; ResourceKey
+  `/workflow-runs/{workflowRunId}`.
+- Runner: domain identity and GrainKey `runnerId`; ResourceKey
+  `/projects/{projectId}/runners/{runnerId}`.
+- WorkflowBacklog: no own identity; GrainKey `projectId`; ResourceKey
+  `/projects/{projectId}/workflow-backlog`.
+- StageLock: no own identity; GrainKey is an internal id; ResourceKey
+  `/projects/{projectId}/workflow-stage-locks/{resource}`.
+- AgentSession: domain identity and GrainKey `sessionId`; ResourceKey
+  `/projects/{projectId}/agent-sessions/{sessionId}`.
+- Event: domain identity `eventId`; no GrainKey; ResourceKey `/events/{eventId}`.
 
 ## External Agent API serialization
 
-The canonical schemas in this document are Server/control-plane read models.
-They are not an external serialization allowlist. In particular,
+The canonical Server/control-plane read models are not an external serialization allowlist. In
+particular,
 `AgentJobLaunchRead`, `AgentSessionRead`, `SessionInputRead`, `TurnResultRead`,
 `TurnDispatchRead`, `BindingTuple`, `LaunchWorkspaceRead`, and
 `SessionOperationRead` may contain facts needed by a trusted adapter or
 recovery coordinator that a direct caller must never receive.
 
-The direct external Agent API serializes only the explicit public projection in
+The direct External Agent API serializes only the explicit public projection in
 [`agent-api.md`](agent-api.md). It may expose canonical IDs, public
 status/output/error/reason code, timestamps, per-Session public sequence, and
 opaque cursor continuation. That projection is a durable Server-owned view fed
@@ -168,825 +171,44 @@ Concept ownership and origin rules are defined in
 
 ### Canonical AgentSession, launch, and Turn result projections
 
-`AgentSessionRead` is the only Session admission projection. The durable Session row uses the same
-fields; callers use `admission=ready|blocked` and do not invent another safety field.
-
-```text literal
-AgentSessionRead {
-  sessionId
-  activity = idle | active | unknown
-  currentContextActivity = idle | active | unknown
-  contextGeneration
-  admission = ready | blocked
-  reason                    # admission reason; explicit null only when admission=ready
-  nextAction                # admission action; explicit inspect_session when ready
-  currentBinding: BindingTuple | null
-  unresolvedPrevious = [UnresolvedTargetRead]
-  unresolvedPreviousCount
-  revision
-  observedAt
-}
-
-AgentJobLaunchRead {
-  jobId
-  launchRequestId
-  launchRequestFingerprint
-  launchOperationId
-  status = preparing | queued | running | unknown | terminal
-  outcome = completed | rejected | failed | cancelled | blocked | null
-  reason
-  nextAction
-  sessionId, sessionIdReason
-  inputId, inputIdReason
-  turnId, turnIdReason
-  workspace: LaunchWorkspaceRead | null
-  workspaceReason
-  target: ResourceKey | null
-  targetReason
-  revision
-  observedAt
-}
-
-LaunchWorkspaceRead {
-  projectId
-  workspaceId
-  path
-}
-
-TurnResultRead {
-  sessionId
-  inputId
-  turnId
-  status = queued | running | outcome_pending | terminal | unknown
-  outcome = completed | failed | cancelled | blocked | null
-  reason                    # the Turn result reason, distinct from dispatch blockedReason
-  nextAction
-  result                    # nullable; non-null only for persisted outcome=completed
-  dispatch: TurnDispatchRead
-  contextGeneration
-  revision
-  observedAt
-}
-```
-
-`result` is null for every non-terminal Turn and for terminal failed/cancelled/blocked Turns. A
-completed Turn may still have a null result only when the product explicitly defines a result-less
-success; otherwise completion requires the persisted result. `Turn.reason` and `Turn.nextAction`
-are the only result-level reason/action fields. `TurnDispatchRead.blockedReason` describes only
-dispatch refusal and never replaces the Turn result fields.
-
-`AgentJobLaunchRead.workspace` is the resolved workspace actually persisted for the launch, not a
-reservation or a caller hint. A non-null workspace has all three non-empty fields and
-`workspaceReason=null`; a null workspace has a non-empty `workspaceReason`. `target` is the existing
-target resource key (`ResourceKey`), not a reservation or a new target model. An accepted launch must
-return non-null `workspace` and `target` with null reasons. Before Session acceptance, or for a rejected
-or unresolved launch, either value may be null but its corresponding reason must be non-empty. A non-null
-target has `targetReason=null`; a null target has a non-empty `targetReason`. Clients never turn a
-reservation ID into either live context value.
+The canonical Session admission, launch, and Turn result projections are Server-owned read models
+whose field lists the code expresses. Only the public projection allowlist in
+[`agent-api.md`](agent-api.md) may cross the external serialization boundary.
 
 ### Canonical SessionInput and dispatch schema
 
-All launch and follow-up inputs use the same input identity contract. The first launch input copies
+All launch and follow-up inputs share one input identity contract. The first launch input copies
 the caller's `launchRequestId` into `requestId`; a follow-up caller must provide its own stable
-`requestId`. Server never invents one after a response is lost.
-
-```text literal
-SessionInputRead {
-  sessionId
-  inputId                   # null unless state=accepted
-  requestId                 # caller-provided idempotency identity
-  requestFingerprint        # canonical hash of the accepted input envelope
-  state = accepted | rejected | unknown
-  acceptanceReason
-  turnId                    # null unless state=accepted
-  turnRelation = new-turn | steer | none
-  steerOperationId          # same as requestId when turnRelation=steer; null otherwise
-  steerStatus = none | pending | accepted | unknown | terminal
-  steerRetryAllowed         # null unless turnRelation=steer
-  steerNextAction           # null unless turnRelation=steer
-  contextGeneration
-  revision
-  observedAt
-}
-
-TurnDispatchRead {
-  sessionId
-  inputId
-  turnId
-  dispatchStatus = queued | retrying | blocked | dispatched | unknown | terminal
-  dispatchOperationId       # stable operation identity for this dispatch lifecycle
-  dispatchAttemptCount
-  dispatchAttemptId         # current/last attempt identity; null before any attempt
-  dispatchLastResult = none | accepted | definitely-rejected | unknown
-  dispatchDeadline
-  expectedBinding: BindingTuple | null
-  candidateBinding: BindingTuple | null
-  dispatchRetryId           # current durable retry work identity; null when no wake-up exists
-  retryAllowed              # true only when durable repair/retry may recreate work
-  dispatchRetryKind = none | outbox | command | timer
-  dispatchRetryDueAt        # due time for the current durable retry signal; null when none
-  dispatchRetryState = none | pending | claimed
-  dispatchRetryOwnerId      # null unless dispatchRetryState=claimed
-  dispatchRetryClaimGeneration # null unless dispatchRetryState=claimed
-  dispatchRetryLeaseUntil   # null unless dispatchRetryState=claimed
-  blockedReason             # present for blocked or terminal/outcome=blocked only
-  dispatchFence: DispatchFenceToken | null
-  nextAction
-  revision
-  observedAt
-}
-
-DispatchFenceToken = {
-  sessionId,
-  operationId,
-  ownerId,
-  ownerFence,
-  claimGeneration,
-  revision,
-  dispatchAttemptId,
-  dispatchRetryId,
-  leaseUntil,
-  deadline,
-  expectedBinding: BindingTuple | null,
-  candidateBinding: BindingTuple | null,
-  bindingAtEffect: BindingTuple | null
-}
-```
-
-dispatchFenceRecordMatches(session, dispatch, token) =
-  token is a complete DispatchFenceToken
-  && session.id == token.sessionId
-  && dispatch.sessionId == token.sessionId
-  && dispatch.dispatchOperationId == token.operationId
-  && dispatch.dispatchAttemptId == token.dispatchAttemptId
-  && dispatch.dispatchRetryId == token.dispatchRetryId
-  && dispatch.dispatchFence == token
-
-fullDispatchFenceMatches(session, dispatch, token, now) =
-  dispatchFenceRecordMatches(session, dispatch, token)
-  && fenceMatch(session, dispatch.dispatchFence, token, now)
-
-Every dispatch claim, takeover, enqueue/query, reschedule, blocked write, unknown write, terminal
-write, and retry-work repair uses this predicate atomically. `dispatch.dispatchFence` is the same complete
-token, not a shortened owner or retry identity.
-
-```text literal
-claimDueOrTakeOver(record, work, previousFence, now, coordinatorId):
-  atomically:
-    require work.sessionId == record.sessionId
-    require work.operationId == record.dispatchOperationId
-    require work.dispatchRetryId == record.dispatchRetryId
-    require record.dispatchRetryId != null and record.retryAllowed == true
-    require record.dispatchStatus in {queued, blocked, retrying, unknown}
-    require work.deadline == record.dispatchDeadline
-    # Close the bounded dispatch before creating another lease. This branch does not claim work.
-    if now >= record.dispatchDeadline:
-      return persistDispatchDeadlineOutcomeIfFenceRecordMatches(record, previousFence, now)
-    if work.dueAt > now:
-      return retry_waiting
-    if previousFence == null:
-      require record.dispatchFence == null
-    else:
-      require previousFence is a complete DispatchFenceToken
-      require dispatchFenceRecordMatches(session, record, previousFence)
-      require previousFence.dispatchRetryId == work.dispatchRetryId
-      if previousFence.leaseUntil > now:
-        return retry_waiting
-      require previousFence.leaseUntil <= now
-    claimedWork = work with
-      ownerId = coordinatorId
-      ownerFence = nextOwnerFence()
-      claimGeneration = nextClaimGeneration()
-      leaseUntil = min(now + dispatchLease, work.deadline)
-    newRevision = nextRevision()
-    token = { sessionId = record.sessionId,
-      operationId = record.dispatchOperationId,
-      ownerId = claimedWork.ownerId, ownerFence = claimedWork.ownerFence,
-      claimGeneration = claimedWork.claimGeneration, revision = newRevision,
-      dispatchAttemptId = record.dispatchAttemptId,
-      dispatchRetryId = record.dispatchRetryId,
-      leaseUntil = claimedWork.leaseUntil, deadline = record.dispatchDeadline,
-      expectedBinding = record.expectedBinding,
-      candidateBinding = record.candidateBinding,
-      bindingAtEffect = currentBinding }
-    persist claimedWork.revision = newRevision,
-      record.revision = newRevision, session.revision = newRevision,
-      record.dispatchFence = token
-    return { work = claimedWork, dispatchFence = token }
-
-persistDispatchDeadlineOutcomeIfFenceRecordMatches(record, previousFence, now):
-  atomically:
-    require now >= record.dispatchDeadline
-    if previousFence == null:
-      require record.dispatchFence == null
-    else:
-      require previousFence is a complete DispatchFenceToken
-      require dispatchFenceRecordMatches(session, record, previousFence)
-      require record.dispatchFence == previousFence
-    require record.dispatchStatus in {queued, blocked, retrying, unknown}
-    if record.dispatchRetryId != null:
-      mark DispatchRetryWork(record.dispatchRetryId) = cancelled
-    newRevision = nextRevision()
-    if record.dispatchAttemptId != null
-       and record.dispatchLastResult == definitely-rejected:
-      persist dispatchStatus = terminal, dispatchLastResult = definitely-rejected,
-        retryAllowed = false, blockedReason = dispatch_retry_exhausted,
-        Turn.status = terminal, Turn.outcome = blocked,
-        Turn.reason = dispatch_terminal_rejected,
-        Turn.nextAction = inspect_or_explicit_requeue, Turn.result = null,
-        record.revision = newRevision, session.revision = newRevision,
-        dispatchFence = null
-      clear dispatchRetryId, dispatchRetryKind, dispatchRetryDueAt,
-        dispatchRetryState, dispatchRetryOwnerId, dispatchRetryClaimGeneration,
-        dispatchRetryLeaseUntil
-      return terminal_blocked
-    persist dispatchStatus = unknown, dispatchLastResult = unknown,
-      retryAllowed = false, Turn.status = unknown, Turn.outcome = null,
-      Turn.reason = dispatch_outcome_unknown,
-      Turn.nextAction = query_same_dispatch_attempt_or_manual_reconcile,
-      nextAction = query_same_dispatch_attempt_or_manual_reconcile,
-      record.revision = newRevision, session.revision = newRevision,
-      dispatchFence = null
-    clear dispatchRetryId, dispatchRetryKind, dispatchRetryDueAt,
-      dispatchRetryState, dispatchRetryOwnerId, dispatchRetryClaimGeneration,
-      dispatchRetryLeaseUntil
-    return unknown
-
-rescheduleDispatch(record, dispatchFence, work, dueAt):
-  atomically:
-    require fullDispatchFenceMatches(session, record, dispatchFence, now)
-    require work.sessionId == record.sessionId
-    require work.operationId == record.dispatchOperationId
-    require work.dispatchRetryId == dispatchFence.dispatchRetryId
-    require record.retryAllowed == true
-    require dueAt <= record.dispatchDeadline
-    newRevision = nextRevision()
-    persist the same DispatchRetryWork with
-      dueAt = dueAt, ownerId = null, ownerFence = null,
-      claimGeneration = null, leaseUntil = null, revision = newRevision,
-      dispatchStatus = unknown, dispatchLastResult = unknown
-    persist record.dispatchStatus = unknown,
-      dispatchLastResult = unknown, dispatchFence = null,
-      Turn.status = unknown, Turn.outcome = null,
-      Turn.reason = dispatch_outcome_unknown,
-      Turn.nextAction = query_same_dispatch_attempt,
-      nextAction = query_same_dispatch_attempt,
-      revision = newRevision, session.revision = newRevision
-    return retry_scheduled
-```
-
-```text literal
-DispatchRetryWork {
-  sessionId
-  inputId
-  turnId
-  operationId
-  dispatchStatus = queued | retrying | blocked | dispatched | unknown | terminal
-  dispatchLastResult = none | accepted | definitely-rejected | unknown
-  dispatchAttemptId
-  dispatchRetryId
-  retryAllowed
-  dueAt
-  attemptCount
-  deadline
-  ownerId
-  ownerFence
-  claimGeneration
-  leaseUntil
-  revision
-  expectedBinding: BindingTuple | null
-  candidateBinding: BindingTuple | null
-  dispatchFence: DispatchFenceToken | null
-}
-```
-
-The durable request map has a unique constraint on `(sessionId, requestId)` and stores the
-`requestFingerprint`, nullable `inputId`, nullable `turnId`, `turnRelation`, acceptance state,
-`acceptanceReason`, `nextAction` and current revision. The Session accept transaction creates the
-map and the Input/Turn together. A duplicate key with the same fingerprint returns the stored
-mapping or stored rejection tombstone; a duplicate key with a different fingerprint is
-`rejected(idempotency_key_reused)` and creates nothing. A unique-key race rereads the winner.
-When queue capacity is full, this design makes the rejection definitive: before returning
-`rejected(queue_full)`, the Session transaction inserts a durable map tombstone with the caller's
-fingerprint, `inputId=null`, `turnId=null`, `acceptanceReason=queue_full` and an actionable
-`nextAction`. The same request ID and fingerprint therefore always returns the same rejection,
-including after response loss; a changed payload can never pass the same key. The caller must use a
-new request ID after capacity is available. Different request IDs are different inputs and still
-pass the Session's canonical `admission=ready` and queue capacity checks.
-
-For `turnRelation=steer`, the same Session transaction also creates one canonical
-`SessionOperationRead(kind=steer)`, a durable effect record/outbox, and the Input mapping. Its
-`operationId` is the caller's `requestId`; `inputId` and `turnId` are the other durable effect
-identities. The operation is the retry record, so steer creates no second Turn, dispatch attempt,
-queue entry, or `dispatchRetryId`. The Input may be returned as `state=accepted` only when that
-transaction has committed the complete operation and replayable effect (`steerRetryAllowed=true`);
-the Runtime has not yet been claimed by that response. A duplicate follow-up returns `accepted`
-when the stored steer operation is already confirmed `outcome=succeeded`, or while a pending or
-response-loss operation still has a replayable effect that can be retried with the same operation
-identity. If the acceptance transaction cannot be confirmed, the result is `unknown` and no new
-Input is created.
-
-Dispatch states are deliberately not interchangeable:
-
-| `dispatchStatus` | Meaning | Automatic transition |
-|---|---|---|
-| `queued` | accepted Turn has no active attempt, or waits for the Session's serialized predecessor | `retrying` when the durable coordinator claims an attempt |
-| `retrying` | one bounded attempt is owned and its result is being obtained | `dispatched`, `blocked`, `unknown`, or terminal `blocked` only after the same attempt is definitely-rejected at the bound |
-| `blocked` | the last enqueue attempt was definitely refused temporarily; the Turn is still non-terminal | `retrying` while attempt/deadline budget remains |
-| `dispatched` | Runner durably accepted this dispatch identity | Turn execution states decide the next result |
-| `unknown` | the current attempt's acceptance cannot yet be confirmed; the Turn is also `status=unknown` | query the same `dispatchAttemptId`; never create a new attempt implicitly |
-| `terminal` | the Server stopped automatic dispatch permanently (normally at an attempt/deadline bound, or because a stop operation cancelled a queued Turn) | no retry; Turn is `terminal` with its persisted terminal outcome |
-
-The only valid cross-projection combinations are:
-
-```text literal
-dispatchStatus=queued|blocked  -> Turn.status=queued, outcome=null
-dispatchStatus=retrying        -> Turn.status=queued, outcome=null
-dispatchStatus=unknown         -> Turn.status=unknown, outcome=null,
-                                  Turn.reason and Turn.nextAction are non-empty
-dispatchStatus=dispatched      -> Turn.status=queued|running|outcome_pending
-dispatchStatus=terminal        -> Turn.status=terminal,
-                                  Turn.outcome=completed|failed|cancelled|blocked
-```
-
-When a same-attempt query resolves `unknown`, `accepted-before-start` returns to
-`dispatchStatus=dispatched, Turn.status=queued`; `accepted-and-started` returns to
-`dispatchStatus=dispatched, Turn.status=running`; a terminal Runtime result writes the canonical
-terminal Turn result; and `definitely-rejected` returns to temporary `blocked` only when a valid
-retry remains. Response loss never creates a new Input, Turn, or attempt.
-
-`blocked` is therefore never a terminal return value. It is legal only after a persisted dispatch
-attempt returned `definitely-rejected`, and it must have `retryAllowed=true`, a non-null
-`dispatchRetryId`, and a valid future `dispatchRetryDueAt`. A handler seeing it must resume
-reconciliation when that durable signal is due; it may not return merely because the stored value is
-`blocked`. At the fixed attempt/deadline bound, one atomic write may set
-`dispatchStatus=terminal`, `Turn.status=terminal`, `Turn.outcome=blocked`, a stable
-`blockedReason`, and an actionable `nextAction`, but only while the current attempt exists and its
-persisted `dispatchLastResult=definitely-rejected`. Without an attempt, with a missing outbox, after
-response loss, or with `dispatchLastResult=unknown`, the state remains `unknown` and never becomes
-terminal blocked.
-
-`dispatchRetryId` is the unique identity of the current durable retry work. The outbox command,
-durable timer and coordinator claim all carry this same identity; none may derive a replacement
-identity from a delivery attempt. `dispatchRetryDueAt`, `dispatchAttemptCount`, the current
-`dispatchAttemptId`, fixed `dispatchDeadline`, `retryAllowed`, the full `DispatchFenceToken`, and
-claim fields are persisted in the same Session transaction as every transition to `blocked`,
-`retrying`, or `unknown`. Consuming the same retry signal twice is an idempotent no-op after the
-first claim; an expired lease is taken over by incrementing ownerFence and claimGeneration before
-another effect. `retainUnknownWithoutRetry` persists `retryAllowed=false`,
-`dispatchRetryId=null`, `dispatchRetryDueAt=null`, no retry lease/owner, and the query/manual
-reconcile `nextAction`. Generic repair may recreate work only when `dispatchRetryId != null`,
-`retryAllowed=true`, `dispatchRetryDueAt` is valid, the state permits retry, and the full fence
-matches. Reconcile after restart cannot wake an unknown-no-retry record.
-
-The Turn result projection carries the persisted `Turn.reason` and `Turn.nextAction`; these are
-distinct from `TurnDispatchRead.blockedReason`, which is only the dispatch-specific reason. No
-client invents a second reason schema.
+`requestId`. Server never invents one after a response is lost. The SessionInput, dispatch, and
+retry-work field lists and the dispatch state machine are code-expressed; the lifecycle rules they
+implement stay in [`agent-execution.md`](agent-execution.md).
 
 ### Canonical effect fence
 
-`BindingTuple` is either `null` or the complete tuple below. `null` is explicit and is not the same
-as an omitted field.
-
-```text literal
-BindingTuple = {
-  runnerId,
-  runtime,
-  runtimeSessionId,
-  bindingEpoch
-}
-
-FenceToken = {
-  sessionId,
-  operationId,
-  ownerId,
-  ownerFence,
-  claimGeneration,
-  revision,
-  dispatchAttemptId,
-  dispatchRetryId,
-  expectedBinding: BindingTuple | null,
-  candidateBinding: BindingTuple | null,
-  leaseUntil,
-  deadline,
-  bindingAtEffect: BindingTuple | null
-}
-```
-
-`dispatchAttemptId` and `dispatchRetryId` are explicit null on non-dispatch operations.
-`bindingAtEffect` is explicit: it is the expected binding for a pre-CAS effect and the candidate
-binding only for an explicitly post-CAS effect. It is never inferred from the same old token. The
-following predicate is the only `fenceMatch` definition:
-
-```text literal
-fenceMatch(session, operationFence, token, now) =
-  session.id == token.sessionId
-  && operationFence.sessionId == token.sessionId
-  && operationFence.operationId == token.operationId
-  && operationFence.ownerId == token.ownerId
-  && operationFence.ownerFence == token.ownerFence
-  && operationFence.claimGeneration == token.claimGeneration
-  && operationFence.revision == token.revision
-  && operationFence.dispatchAttemptId == token.dispatchAttemptId
-  && operationFence.dispatchRetryId == token.dispatchRetryId
-  && operationFence.expectedBinding == token.expectedBinding
-  && operationFence.candidateBinding == token.candidateBinding
-  && operationFence.bindingAtEffect == token.bindingAtEffect
-  && operationFence.leaseUntil == token.leaseUntil
-  && operationFence.deadline == token.deadline
-  && operationFence.leaseUntil > now
-  && now <= operationFence.deadline
-  && session.revision == token.revision
-  && session.currentBinding == token.bindingAtEffect
-```
-
-The comparison is atomic. `operationFence` may be an ActiveOperation, a cleanup fence, or a
-Turn stop or dispatch fence, but all use exactly this token and predicate. `recheckBeforeExternalEffect`
-loads the durable fence and Session, runs `fenceMatch`, persists the in-flight attempt identity,
-and returns the same token. If it fails, no effect is called. The caller must run the predicate
-again before recording the result or completing the operation. A stale pre-CAS or post-CAS owner
-returns `stale_operation_fence`; it cannot repair its token by changing only the expected binding.
-
-The only binding replacement protocol is this atomic Server operation:
-
-```text literal
-compareAndSwapBinding(preToken, boundaryKind):
-  atomically:
-    require preToken.bindingAtEffect == preToken.expectedBinding
-    require preToken.expectedBinding != null
-    require preToken.candidateBinding != null
-    require fenceMatch(session, operationFence, preToken, serverNow)
-    require session.currentBinding == preToken.expectedBinding
-    require preToken.candidateBinding.runnerId/runtime/runtimeSessionId are complete
-    candidate = preToken.candidateBinding
-    require candidate.bindingEpoch == preToken.expectedBinding.bindingEpoch + 1
-    session.currentBinding = candidate
-    session.revision += 1
-    persist ContextBoundary(boundaryKind, newContextGenerationIfRequired)
-    persist operation phase = rebound and candidateState = adopted
-    postToken = preToken with
-      revision = session.revision
-      candidateBinding = candidate
-      bindingAtEffect = candidate
-    persist the postToken fields in the operation row
-    return { currentBinding = candidate, postFence = postToken }
-```
-
-The CAS compares session, operation, ownerFence, claimGeneration, revision, expected binding,
-candidate binding, lease and deadline before changing anything. It increments the Server revision
-and binding epoch in the same transaction and returns the post fence. Every later phase write,
-input write, Runtime submit, result write, and completion uses that returned post token. The old
-pre token is never valid after CAS, even when it has the same operationId; a takeover also makes
-both old pre and old post tokens fail closed.
-
-Every non-CAS effect follows this shape, including `Runtime.resolve`, `Runtime.createOrGetEmpty`,
-`Runtime.submitInputExactlyOnce`, cleanup `Runtime.getByKey` and `Runtime.discardCandidate`,
-`recordCandidate`, dispatch enqueue/query, `complete`, Compact, and per-target stop. Binding CAS uses
-`compareAndSwapBinding` above and does not use `effectWithFence` with a pre-CAS token:
-
-```text literal
-effectWithFence(token, effect):
-  token = Server.recheckBeforeExternalEffect(token)
-  result = effect(token)
-  Server.recheckBeforePersistingEffectResult(token)
-  return Server.persistEffectResultIfFenceMatches(token, result)
-```
-
-An expired operation or a binding CAS change never renews the original fence. It creates an
-independent bounded cleanup fence with a new `operationId`, owner, ownerFence, claimGeneration,
-revision, expected/candidate binding, leaseUntil and cleanup `deadline`. Cleanup first fences
-`getByKey`, then fences `discardCandidate`; if the candidate is adopted or current binding changed,
-cleanup returns `already_adopted` and never discards it. If cleanup cannot decide before its own
-deadline, it remains a durable `cleanup-pending` unresolved target, while the original operation
-is terminal `blocked` and a new binding operation may proceed.
+Every effect carries one complete fence token, summarized under
+[AgentSession runtime identity](#agentsession-runtime-identity). The token fields, the match
+predicate, and the binding compare-and-swap procedure are code-expressed.
 
 ### Canonical SessionOperationRead
 
-`Compact`, `Reset`, confirmed-missing recovery, `force-reset`, `handoff`, `rebind`, and `steer` are
-durable Session operations whose caller supplies a reusable `operationId`; steer reuses its
-caller-provided `requestId`. Server never creates an unqueryable operation key for those commands.
-Stop is the sole public end-work verb and has two scopes. A single-Turn stop maps the caller key to
-one per-target stop operation. A cascade stop takes only root Session plus `Idempotency-Key`, and
-Server derives the tree operation identity, fingerprint, frozen membership, and stable
-per-target stop-operation identities. [`subagents.md#cascade-stop`](subagents.md#cascade-stop) is the
-sole authority for cascade membership. Each target still projects its derived internal operation through the
-same `SessionOperationRead` shape below. This is the only authoritative `SessionOperationRead`
-schema. `agent-api.md` and `agent-execution.md` link to it; they do not define another operation
-field list.
-
-```text literal
-SessionOperationRead {
-  sessionId
-  operationId
-  kind = compact | reset | recovery | force-reset | handoff | rebind | stop | steer
-  requestFingerprint       # canonical hash of the complete command envelope
-  phase = claimed | resolving | candidate-created | cas-pending | stopping | rebound |
-          steer-queued | steer-dispatching | steer-accepted | completed | superseded |
-          expired | failed | cleanup-pending
-  outcome = pending | succeeded | rejected | failed | unknown | blocked
-  reason                    # explicit null while no stable reason is known
-  ownerId
-  ownerFence
-  claimGeneration
-  leaseUntil
-  revision
-  expectedRevision
-  expectedContextGeneration
-  deadline
-  contextGeneration
-  expectedBinding
-  candidateBinding
-  bindingAtEffect
-  candidateKey
-  candidateState = none | created | adopted | orphan | cleanup-pending | discarded | unknown
-  retryAllowed               # required for steer; false when no replay is safe
-  targetRunnerId
-  targetRuntime
-  targetInputId              # required for kind=steer, otherwise explicit null
-  targetTurnId               # required for kind=stop|steer, otherwise explicit null
-  supersededTargets = [UnresolvedTargetRead]
-  supersededByOperationId
-  cleanupFence = null | FenceToken
-  admission = blocked | ready
-  nextAction
-  observedAt
-}
-
-UnresolvedTargetRead {
-  targetKind = operation | input | turn | dispatch-attempt | runtime-effect
-  targetId
-  requestId                 # required for input/turn/dispatch when known; null for operation
-  contextGeneration
-  originalOperationId       # operation target points to itself; null only when no origin is known
-  outcome = unknown | blocked
-  expectedBinding
-  nextAction
-  supersededByOperationId
-}
-```
-
-`expectedBinding`, `candidateBinding` and `bindingAtEffect` are always present in a read. They are either `null` or
-the complete `(runnerId, runtime, runtimeSessionId, bindingEpoch)` tuple; omitted identity is not
-equivalent to `null`. `candidateKey`, `targetRunnerId` and `targetRuntime` are persisted before
-any Runtime effect. `candidateState=orphan` means a candidate exists but was never adopted;
-`candidateState=cleanup-pending` belongs to an independent cleanup fence, not to a live recovery
-owner.
-
-`kind=steer` is the durable runtime effect for one accepted steer Input. Its `operationId` is the
-same caller-provided `requestId`, `targetInputId` and `targetTurnId` are fixed before dispatch, and
-its complete `FenceToken` carries explicit null `dispatchAttemptId`/`dispatchRetryId` values. The
-operation phases are `steer-queued` (durable replay record exists), `steer-dispatching` (one fenced
-owner is invoking the adapter), `steer-accepted` (the adapter confirmed the Runtime accepted the
-effect), and `completed`/`failed`/`superseded` as applicable. `outcome=succeeded` maps to
-`steerStatus=accepted`; `outcome=unknown` maps to `steerStatus=unknown`; a definitive refusal or a
-bounded failure maps to `steerStatus=terminal`. The terminal-race `outcome=blocked` also maps to
-`steerStatus=terminal` and means that no provider result is authoritative. `retryAllowed` is
-persisted, and `nextAction` is not a retry signal by itself. The OpenCode `session.promptAsync` and
-Pi `session.steer` calls are adapter internals behind this effect identity; they do not define a
-second idempotency contract.
+Durable Session operations (compact, reset, recovery, force-reset, handoff, rebind, stop, steer)
+share one operation read shape keyed by a caller-supplied `operationId`; Server never creates an
+unqueryable operation key for those commands.
+[`subagents.md#cascade-stop`](subagents.md#cascade-stop) is the sole authority for cascade
+membership. The launch identities are separate: the caller provides `launchRequestId`, Server
+creates `launchOperationId` exactly once and durably maps `launchRequestId -> launchOperationId`,
+and neither identity is a Session operation ID. The field list is code-expressed.
 
 #### Durable steer adapter seam
 
-The Server-to-Runner contract for a steer effect is the following target seam. It is a design
-contract even while the current Runner routes and Runtime adapters remain on the pre-migration
-implementation. `sessionId` is the logical target Session; `binding.runtimeSessionId` is the
-physical target Runtime Session.
-
-```text literal
-SteerEffectId = {
-  sessionId,
-  operationId                 # operationId == caller-provided requestId
-}
-
-SteerEffectRequest = {
-  effectId: SteerEffectId    # derived from the durable operation; no second random key
-  sessionId                   # logical target AgentSession
-  targetSessionId             # must equal sessionId; explicit logical target field
-  targetInputId
-  targetTurnId
-  requestFingerprint          # canonical accepted Input envelope hash
-  text                        # exact accepted Input text; immutable after acceptance
-  binding: BindingTuple       # complete target runner/runtime/physical session/epoch
-  bindingAtEffect: BindingTuple
-  fence: FenceToken            # complete token; dispatch IDs are explicit null
-}
-
-SteerEffectQuery = {
-  effectId: SteerEffectId
-  sessionId
-  targetSessionId
-  targetInputId
-  targetTurnId
-  requestFingerprint
-  binding: BindingTuple
-  fence: FenceToken
-}
-
-SteerEffectReplay = SteerEffectRequest
-
-RunnerSteerAdapter = {
-  apply(request: SteerEffectRequest): SteerEffectResult
-  query(request: SteerEffectQuery): SteerEffectResult
-  replay(request: SteerEffectReplay): SteerEffectResult
-}
-
-SteerEffectResult =
-    ProviderAccepted(effectId)
-  | DefinitelyRejected(effectId, reason)
-  | DefinitelyAbsent(effectId)       # query only; same identity may be replayed
-  | ResponseLost(effectId)
-  | Unknown(effectId, reason)
-  | StaleFence(effectId, reason)     # Server must not persist this as provider acceptance
-```
-
-`effectId` is the persisted pair `(sessionId, operationId)`, not a hidden replacement for the
-caller key. `apply` is used for the first attempt, `query` reads the provider's durable record for
-the same effect, and `replay` repeats the same effect identity only when the operation's complete
-fence and `retryAllowed=true` still match. The adapter must make repeated `apply`/`replay` calls for
-the same `effectId` and identical target, binding and text return the original provider result
-without creating another provider effect. A reused effect identity with a different target,
-binding, text or fingerprint returns `DefinitelyRejected(..., effect_identity_conflict)` and does
-not call the provider. Query and replay never create a new Input, Turn, operation, binding or
-effect identity.
-
-`ProviderAccepted` is the only adapter result that may settle `outcome=succeeded`; it is written
-only after the Server rechecks the exact fence after the adapter returns. `DefinitelyRejected`
-and `DefinitelyAbsent` never authorize a CAS. `ResponseLost` means the effect may exist and must
-first be queried by the same `effectId`; `Unknown` means the adapter cannot classify it. Both keep
-the operation queryable and cannot be translated into provider acceptance. `StaleFence` is a
-fail-closed Server result, not evidence that the provider rejected or accepted the text.
-
-Immediately before `apply`, `query` or `replay`, Server atomically checks the complete `fence`,
-current binding, owner lease and target Input/Turn identity, persists the in-flight phase, and
-passes that exact fence and binding to Runner. Immediately after the call, Server checks the same
-fence again before persisting any result. A changed owner, revision, binding, Turn, stop or
-force-reset makes the result stale; the old owner cannot write it, clear a newer owner, or create
-a retry. The current Session transaction then either returns the already-settled operation or
-executes the terminal-race settle below. Server restart scans the stored operation/effect by the
-same `effectId`, queries first, and replays only through this seam and the same identity. A
-duplicate follow-up reads the existing request map and operation and returns its complete
-projection; it never invokes `apply` for a second effect.
-
-When a target Turn is terminal before an adapter call, or a stop/force-reset transaction makes the
-target no longer admissible, the target operation is settled atomically under its current fence:
-
-```text literal
-settleSteerTargetTerminal(operation, fence, cause, adapterAttemptStarted):
-  atomically:
-    require operation.kind == steer
-    require operation.operationId == fence.operationId
-    require operation.targetTurnId is unchanged
-    require current Turn is terminal
-       or a stop/force-reset operation has superseded this target
-    require current operation fence is fence, or the stop/force-reset write
-      is the transaction that invalidates fence
-    if adapterAttemptStarted == false:
-      outcome = rejected
-      reason = cause                  # target_turn_terminal|target_turn_stopped|target_turn_superseded
-    else:
-      outcome = blocked               # provider result is no longer authoritative
-      reason = steer_target_changed_after_effect_attempt
-    persist phase = failed, outcome, retryAllowed = false,
-      steerStatus = terminal, steerNextAction = inspect_steer_operation,
-      operation.reason = reason, operation.nextAction = inspect_steer_operation,
-      Input.state = accepted, Input.inputId and Input.turnId unchanged
-    clear ActiveOperation only when it is this operation
-    increment Session/operation revision and return the stored terminal projection
-```
-
-The stop/force-reset transaction calls this settle before or as it invalidates the steer fence;
-the adapter handler calls it before an effect and after every query/replay result. If the post-call
-fence is stale, an adapter `ProviderAccepted` is ignored and this settle/re-read path returns the
-stored terminal projection. Terminal outcomes are replay-only, so restart and duplicate
-reconciliation return the same `steerStatus=terminal`, `outcome`, `retryAllowed=false`, reason and
-next action and cannot loop or report provider acceptance. If a force-reset has to preserve an
-independent unresolved provider side effect, that fact is recorded in its superseded target; it
-does not reopen or replay this steer operation.
-
-The steer effect result has three externally distinct meanings. `accepted` means the Input and
-the durable effect are confirmed or replayable; a replayable pending effect does not claim that the
-provider has already accepted the text. `unknown` means Input acceptance or Runtime acceptance cannot be confirmed; admission stays
-blocked and the same operation may be queried or retried only while its complete fence and
-`retryAllowed=true` remain valid. `terminal` means the effect is definitively not going to be
-retried; an already accepted Input remains accepted, while the operation exposes a stable reason
-and next action. A response-loss or restart reconciliation never creates a new Input, Turn,
-operation, or binding. It first queries the same effect identity, then retries the same operation
-only when the adapter can reconcile/replay it idempotently; otherwise it persists `unknown` with
-`retryAllowed=false` and must not report `accepted`.
-
-For force-reset candidate reconciliation, a `definitely-rejected` result from `getByKey` has an
-explicit result and is not treated as a missing candidate with an unconfirmed binding. In both the
-create-response-loss lookup and the restart/duplicate same-key lookup, it persists
-`candidateState=none`, `candidateBinding=null`, and `reason=force_reset_candidate_rejected`. While
-the original bounded deadline remains, the operation stays `outcome=pending` with
-`nextAction=retry_same_force_reset_candidate` and retries `createOrGetEmpty` using the same
-`candidateKey`; at the deadline it becomes terminal `outcome=blocked` with
-`nextAction=inspect_force_reset_operation`. Neither branch starts cleanup, reads a binding, or
-constructs a CAS. `response_lost` or generic `unknown` instead persists
-`candidateState=unknown`, `outcome=unknown`, `admission=blocked`, and
-`nextAction=query_same_candidate_or_manual`; only an exact complete candidate may become
-`candidateState=created` and authorize CAS. A complete mismatched candidate alone enters an
-independent cleanup fence.
-
-The canonical candidate identity is the pair `(SessionOperationRead.candidateKey,
-SessionOperationRead.candidateBinding)`. A candidate is ready for adoption only when its key is the
-operation's `candidateKey`, its binding is complete, and `candidateState=created`. The atomic
-adopted predicate is:
-
-```text literal
-candidateIsCurrent(operation, candidate, session) =
-  candidate.key == operation.candidateKey
-  && operation.candidateBinding == candidate.binding
-  && candidate.binding is complete
-  && operation.candidateState in {created, adopted}
-  && session.currentBinding == operation.candidateBinding
-```
-
-Cleanup stores the same candidate key and complete candidate binding in its owning operation read,
-and its `cleanupFence` protects that pair. It compares the pair atomically before `getByKey` and
-`discardCandidate`; `BindingTuple` has no separate adopted-candidate field. A changed current
-binding or an already-current candidate therefore fails closed without deleting the candidate.
-
-In cleanup pseudocode, `cleanupFence` means the durable cleanup operation read plus its
-`cleanupFence: FenceToken`; `candidateKey`, `candidateBinding` and `candidateState` come from that
-operation read, while lease, owner, revision, expected binding and `bindingAtEffect` come from the
-token. Reloading a cleanup fence reloads both parts. This is an internal projection of the one
-canonical `SessionOperationRead`, not a second public candidate schema.
-
-`supersededTargets` is present on every operation read (an empty array when none were superseded).
-It is the durable target mapping for force-reset, including unknown Input, Turn, dispatch, Runtime
-effect, and ActiveOperation records. ActiveOperation is included in this same array as
-`targetKind=operation`, `targetId=ActiveOperation.operationId`, `requestId=null`, and
-`originalOperationId=targetId`; it is not a separate supersession field. `unresolvedPrevious` in the Session read is the same
-`UnresolvedTargetRead` shape, not a second summary shape. When force-reset has no ActiveOperation,
-these targets still make the supersession and old facts queryable.
-
-The required/null rules are:
-
-`targetInputId` is explicitly null unless `kind=steer`; `targetTurnId` is explicitly null unless
-`kind=stop|steer`; `retryAllowed` is a boolean only for `kind=steer` and is explicitly null for
-other operation kinds.
-
-| kind | required values | explicitly null before completion |
-|---|---|---|
-| `compact` | `expectedBinding`, `contextGeneration`, `ownerId`, `ownerFence`, `claimGeneration`, `deadline`, `nextAction` | `candidateBinding`, `candidateKey`, `targetRunnerId`, `targetRuntime`, `supersededByOperationId` |
-| `reset` | `expectedBinding`, `candidateKey`, `targetRunnerId`, `targetRuntime`, `contextGeneration` | `candidateBinding` until recorded; `supersededByOperationId` unless it supersedes an operation |
-| `recovery` | `expectedBinding`, `candidateKey`, target runner/runtime equal to the expected binding, `contextGeneration` | `candidateBinding` until recorded; `supersededByOperationId` unless explicitly superseded |
-| `force-reset` | `expectedBinding`, `candidateKey`, `targetRunnerId`, `targetRuntime`, `contextGeneration` and a new `operationId` | `candidateBinding` until recorded; `supersededByOperationId` when no old operation was superseded |
-| `handoff` | `expectedBinding`, `candidateKey`, target runner/runtime, with target runner different from expected | `candidateBinding` until recorded; `supersededByOperationId` unless explicitly superseded |
-| `rebind` | `expectedBinding`, `candidateKey`, target runner equal to expected and target runtime | `candidateBinding` until recorded; `supersededByOperationId` unless explicitly superseded |
-| `stop` | `targetTurnId`, `ownerId`, `ownerFence`, `claimGeneration`, `deadline`, `nextAction`; `expectedBinding` and target runner/runtime when a binding exists | `expectedBinding`, `targetRunnerId`, `targetRuntime` when the queued Turn has no binding, `candidateBinding`, `candidateKey`, `supersededByOperationId` unless explicitly superseded |
-| `steer` | `targetInputId`, `targetTurnId`, `expectedBinding`, `targetRunnerId`, `targetRuntime`, `ownerId`, `ownerFence`, `claimGeneration`, `deadline`, `nextAction`, `retryAllowed` | `candidateBinding`, `candidateKey`, `supersededByOperationId` unless explicitly superseded |
-
-`sessionId`, `ownerId`, `ownerFence`, `claimGeneration`, `leaseUntil`, `revision`, `deadline`,
-`expectedRevision`, `expectedContextGeneration`, `contextGeneration`, `supersededTargets`,
-`cleanupFence`, `admission`, `reason` and `nextAction` are present on every
-operation read. `reason` is explicitly nullable while an operation is pending or succeeded; a
-rejected, failed, blocked or unknown operation must expose a stable non-empty reason. `outcome=blocked` is terminal for the
-operation that can no longer make progress under its original deadline. A `cleanup-pending`
-candidate may still have a separate cleanup fence; that fence never keeps a new binding operation
-from being claimed after the original operation is terminal.
-
-`kind=stop` uses the operation row itself as the durable Turn-stop fence. Its `targetTurnId`,
-`expectedBinding`, complete owner/claim/deadline fields and `reason` are queryable; there is no
-in-memory `stopFence` model. The operation ID is the stable per-target identity derived by the
-caller key mapping or the cascade stop; it is not a second public caller key. A queued target
-settles locally in the same Session transaction and is recorded `Cancelled`.
-For a running target, the owner claims or takes over this operation, rechecks the complete
-`FenceToken` immediately before and immediately after `Runtime.stop`, and only then persists the
-Turn outcome. A confirmed stop records the Turn `Cancelled`; a not-cancellable answer leaves the
-Turn executing and is reported as not-cancellable, never as stopped. A lost or unknown Runtime
-response keeps the operation and Turn `unknown`, with an
-actionable `nextAction` to query the same `operationId` or perform bounded same-operation retry;
-it never creates a new stop operation or claims success.
-An accepted stop is Server-owned: a recovery pass re-delivers a claimed but undelivered or
-unconfirmed delivery with the same operation identity and fence. It never creates another
-operation, and caller disconnect does not abandon delivery. Redelivery is bounded by the operation
-deadline; exhausting the deadline settles the operation `blocked` with a stable non-empty reason
-rather than retrying without limit. The delivery protocol and the reply arbitration have one owner,
-shared by the request path and the recovery pass, so the unconfirmed-result branch behaves
-identically on both.
-
-The launch identities are separate. The caller provides `launchRequestId`; Server creates
-`launchOperationId` exactly once and durably maps `launchRequestId -> launchOperationId`. Neither
-identity is a Session operation ID.
-
-Every operation projection returns all fields above, plus the current Server `revision` and
-`observedAt` used to read it. Job, Session, Input and Turn projections may reference an operation
-by `operationId`, but must not invent a second operation shape. A response-loss query or retry must
-return the same `operationId`, `kind`, `phase`, `outcome`, `ownerFence`, `claimGeneration`,
-`revision`, `deadline`, `contextGeneration`, expected/candidate bindings, supersession link and
-`nextAction`; a missing response never creates a new operation or a partial acknowledgement.
-
-`ContextBoundary.Kind` is `compact | reset | runtime-change | missing-recovery | force-reset |
-handoff | rebind`. Compact keeps `ContextGeneration`; reset, runtime change, missing recovery,
-force-reset, handoff and rebind increment it after their binding/context commit. A RunnerId change
-requires a durable `handoff` operation; same-Runner replacement requires `rebind` or confirmed
-missing `recovery`. Reconnect, timeout, or a stale event cannot infer either operation.
+The Server-to-Runner steer effect uses one stable effect identity, the `(sessionId, operationId)`
+pair with `operationId` equal to the caller-provided `requestId`, for apply, query, and replay. A
+reused effect identity with a different target, binding, text, or fingerprint is rejected without
+calling the provider. The seam shapes are code-expressed.
 
 ## WorkflowRun metadata
 
-```
+```text literal
 WorkflowRun.Metadata
   ProjectId
   IssueNumber

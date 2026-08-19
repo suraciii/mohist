@@ -19,9 +19,9 @@ Project, Issue, and WorkflowRun Variables use the same shape:
 
 ```json
 {
-  "vars": { "agent": { "model": "gpt-5" } },
+  "vars": { "agent": { "model": "model-a" } },
   "stages": {
-    "check": { "vars": { "agent": { "variant": "high" } } }
+    "check": { "vars": { "agent": { "variant": "variant-a" } } }
   }
 }
 ```
@@ -99,26 +99,19 @@ overrides Project.
 
 ### Merge
 
-| Later value | Result |
-|---|---|
-| Field is absent | Inherit the existing value |
-| object | Merge recursively by field |
-| scalar | Replace the existing value |
-| array | Replace the complete array; do not merge by element |
+An absent field inherits the existing value. An object merges recursively by
+field. A scalar replaces the existing value. An array replaces the complete
+array and never merges by element.
 
 The root of `vars` and each `stages.<stage>.vars` must be an object. Merge does not modify a source
 resource. A persisted Variables document does not accept a `null` value.
 
 ### Writes
 
-The three Variables resources use the same methods and body semantics. The address determines only which
-scope is modified:
-
-| Scope | Variables resource |
-|---|---|
-| Project | `/api/projects/{projectRef}/variables` |
-| Issue | `/api/projects/{projectRef}/issues/{number}/variables` |
-| Run | `/api/workflow-runs/{workflowRunId}/variables` |
+The three Variables resources use the same methods and body semantics. The
+address selects Project (`/api/projects/{projectRef}/variables`), Issue
+(`/api/projects/{projectRef}/issues/{number}/variables`), or Run
+(`/api/workflow-runs/{workflowRunId}/variables`) scope.
 
 - `GET` reads the Variables stored in that scope. It does not resolve across scopes.
 - `PUT` replaces the scope value with a complete Variables document.
@@ -186,58 +179,47 @@ stage: check
 
 projectVariables:
   vars:
-    agent: { model: sonnet, variant: medium }
+    agent: { model: model-a, variant: variant-a }
   stages:
     check:
       vars:
-        agent: { variant: high }
+        agent: { variant: variant-b }
 
 issueVariables:
   vars:
-    agent: { model: gpt-5 }
+    agent: { model: model-b }
     review: { strict: true }
   stages:
     check:
       vars:
-        agent: { variant: xhigh }
+        agent: { variant: variant-c }
 
 runVariables:
   vars:
     change: { prNumber: 42 }
 
 effectiveWorkflowVariables:
-  agent: { model: gpt-5, variant: medium }
+  agent: { model: model-b, variant: variant-a }
   review: { strict: true }
   change: { prNumber: 42 }
 
 effectiveStageVariables:
-  agent: { model: gpt-5, variant: xhigh }
+  agent: { model: model-b, variant: variant-c }
   review: { strict: true }
   change: { prNumber: 42 }
 ```
 
-Merge process:
-
-| Applied source | `agent.model` | `agent.variant` |
-|---|---|---|
-| Project Workflow Variables | `sonnet` | `medium` |
-| Issue Workflow Variables | `gpt-5` | `medium` |
-| Effective Workflow Variables | `gpt-5` | `medium` |
-| Project `check` Stage Variables | `gpt-5` | `high` |
-| Issue `check` Stage Variables | `gpt-5` | `xhigh` |
-| Effective Stage Variables | `gpt-5` | `xhigh` |
-
-Run does not override `agent`. The Project's `check` Stage Variables first override the `medium` value in
-Effective Workflow Variables. The Issue value for the same field then overrides it with `xhigh`.
+Run does not override `agent`. Issue Workflow Variables replace the Project
+model with `model-b`, while the Project variant remains `variant-a`. The
+Project's `check` Stage Variables then select `variant-b`, and the Issue Stage
+Variables replace it with `variant-c`.
 
 ### Live adjustment
 
-| Time | Action | Model used by task |
-|---|---|---|
-| 1 | The model in Project Variables is `model-a`; dispatch task-1 | `model-a` |
-| 2 | Change the model in Project Variables to `model-b` | task-1 is unchanged |
-| 3 | Dispatch task-2 | `model-b` |
-| 4 | retry task-1 | `model-b` |
+1. Project Variables select `model-a`, so task-1 is dispatched with `model-a`.
+2. The Project value changes to `model-b`; task-1 remains unchanged.
+3. Task-2 is dispatched with `model-b`.
+4. A retry creates a new attempt for task-1 and uses `model-b`.
 
 ## Status
 
@@ -247,26 +229,7 @@ of a non-object root; dispatch carrying only the original declarations and an im
 common rendering at the Runner execution entry point; and task `setVars` projection through a Run Variables
 PATCH.
 
-The former open question is resolved. The "Dispatch snapshot persistence" section in
-[`task-dispatch.md`](task-dispatch.md) defines attempt snapshot semantics, including immutability and
-byte-for-byte replay on redelivery, and its storage lifecycle, including discard at terminal state instead
-of full persistence with Run State. Audit needs do not justify retaining complete per-attempt snapshots.
-
-## `WorkflowRunProfile` row/table name: historical misnomer
-
-The C# row type, DbSet, and database table are deliberately named
-`WorkflowRunProfileRow`, `WorkflowRunProfiles`, and `WorkflowRunProfiles`, even
-though they store Variables rather than a Profile. This is a historical
-misnomer, not a second domain meaning of Profile.
-
-Decision: keep them. The cosmetic rename would require an EF Core
-migration rewriting a live production table plus coordinated down/up scripts, for
-zero behavioral gain. This decision keeps the misnomer explicit instead of
-letting readers infer a second responsibility. When the table is next
-restructured for a behavioral reason, such as normalization or archival, rename
-the row and DbSet in the same change.
-
-The `Run-scoped Variables` table/row rename is rejected **only** on cost/benefit
-grounds; the rename is correct in target. The current persisted
-`VariableBundle` JSON shape and ETag behavior are not affected by the type-name
-keep and remain unchanged.
+The dispatch snapshot lifecycle is defined in
+[`task-dispatch.md`](task-dispatch.md). The historical persistence-name decision
+is recorded in
+[`../decisions/workflow-run-profile-naming.md`](../decisions/workflow-run-profile-naming.md).

@@ -1,34 +1,83 @@
 # External Agent API
 
-An external Agent or automation process can delegate work to a configured
+An External Agent or automation process can delegate work to a configured
 Mohist Agent without opening the Web UI or using a Runner credential. The direct
 API also makes response loss recoverable: the caller repeats the same keyed
 request or resumes a persisted Session event stream instead of creating new
 work.
 
-The API is available under `/api/v1`. It uses the existing AgentJob,
-AgentSession, SessionInput, and AgentTurn lifecycle. It does not expose Runner,
-Runtime, workspace, prompt, transcript, or provider details.
+The versioned direct API is available under `/api/v1`. Project default
+configuration and task-first launch use the control-plane `/api/projects`
+routes described below. Task-first launch and versioned direct commands use the
+existing AgentJob, AgentSession, SessionInput, and AgentTurn lifecycle. The
+versioned direct API does not expose Runner, Runtime, workspace, prompt,
+transcript, or provider details.
 
 ## Routes
 
 Route IDs are canonical Mohist IDs. The `projectId` in every route is the
-selected private Project.
+selected private Project. Every request carries a Bearer personal access token
+(PAT); see [Authentication](#authentication). Every write also carries an
+`Idempotency-Key` header.
 
-| Method and route | Scope | Request | Response |
-|---|---|---|---|
-| `POST /api/v1/projects/{projectId}/agents/{agentId}/launch` | `operator` | Bearer PAT, `Idempotency-Key`, `{"text":"..."}` | `PublicExecutionRead` for the launch |
-| `POST /api/v1/projects/{projectId}/agent-sessions/{sessionId}/inputs` | `operator` | Bearer PAT, `Idempotency-Key`, `{"text":"..."}` | `PublicExecutionRead` for the Input and Turn |
-| `GET /api/v1/projects/{projectId}/agent-jobs/{jobId}` | `readonly` or `operator` | Bearer PAT | `PublicExecutionRead` anchored to the Job |
-| `GET /api/v1/projects/{projectId}/agent-inputs/{inputId}` | `readonly` or `operator` | Bearer PAT | `PublicExecutionRead` anchored to the Input |
-| `GET /api/v1/projects/{projectId}/agent-turns/{turnId}` | `readonly` or `operator` | Bearer PAT | `PublicExecutionRead` anchored to the Turn |
-| `GET /api/v1/projects/{projectId}/agent-sessions/{sessionId}/events` | `readonly` or `operator` | Bearer PAT, optional `after` and `limit` | `PublicEventPage` |
-| `POST /api/v1/projects/{projectId}/agent-turns/{turnId}/stop` | `operator` | Bearer PAT, `Idempotency-Key`, empty body | `PublicExecutionRead` for the Turn |
+Writes require the `operator` Scope:
+
+- `POST /api/v1/projects/{projectId}/agents/{agentId}/launch` with body
+  `{"text":"..."}` returns `PublicExecutionRead` for the launch.
+- `POST /api/v1/projects/{projectId}/agent-sessions/{sessionId}/inputs` with
+  body `{"text":"..."}` returns `PublicExecutionRead` for the Input and Turn.
+- `POST /api/v1/projects/{projectId}/agent-turns/{turnId}/stop` with an empty
+  body returns `PublicExecutionRead` for the Turn.
+
+Reads accept the `readonly` or `operator` Scope:
+
+- `GET /api/v1/projects/{projectId}/agent-jobs/{jobId}` returns
+  `PublicExecutionRead` anchored to the Job.
+- `GET /api/v1/projects/{projectId}/agent-inputs/{inputId}` returns
+  `PublicExecutionRead` anchored to the Input.
+- `GET /api/v1/projects/{projectId}/agent-turns/{turnId}` returns
+  `PublicExecutionRead` anchored to the Turn.
+- `GET /api/v1/projects/{projectId}/agent-sessions/{sessionId}/events` accepts
+  optional `after` and `limit` query parameters and returns `PublicEventPage`.
 
 A command returns `200` when its durable keyed outcome is known. `200` does
 not mean that execution has finished. The response body is the current public
 observation. A command that is still converging can return a retryable `503`;
 repeat the same keyed request.
+
+## Project Default Execution Configuration
+
+`PUT /api/projects/{projectRef}/default-execution-config` sets the Project
+default execution configuration. The body carries `runtime`, `model`, and an
+optional `variant`. The Project read reports `defaultExecutionConfig`, `null`
+when unset. Setting a new default replaces the previous one; an invalid
+default is rejected and leaves the previous default untouched. See
+[Agents and AgentSessions](agent-sessions.md#project-default-execution-configuration)
+for how the default resolves into a launch.
+
+## Task-First Launch
+
+`POST /api/projects/{projectRef}/agent-tasks` starts work for a caller that
+has a task but does not yet need to configure an Agent. The body accepts
+exactly these JSON fields: `prompt`, `attachments`, `context`, `name`,
+`runtime`, `model`, `variant`, `allowedSubagentAgentIds`, and
+`maxConcurrentRuns`. A non-null collaborator list contains Agent IDs from the
+same Project. A non-null concurrency limit must be a positive integer. `context`
+uses the same `issueNumber`, `epicNumber`, `repository`, `workspace`,
+`workspacePath`, and `targetId` references as a definition-first launch. The
+request must include an `Idempotency-Key` header. The Server derives missing
+definition fields, materializes the resolved execution configuration, creates
+the Agent, and then uses the canonical AgentJob and AgentSession launch pipeline.
+
+Task-first replay uses the same key space as definition-first launches. A
+retry with the same key and caller-visible inputs returns the original Agent,
+Job, Session, Input, Turn, workspace, attachment result, and canonical URLs.
+A changed prompt, context, attachment list, name, runtime, model, variant,
+collaborator list, or concurrency limit returns `409
+launch_idempotency_conflict`. A still-converging launch returns `503
+launch_setup_pending` and keeps the same key. A recorded rejection is replayed
+as the same rejection. Callers must retry a pending launch with the original
+key, not generate a new task.
 
 ## Authentication
 
@@ -42,14 +91,14 @@ Create a PAT with a persisted Project grant before calling the direct API. Use
 an explicit grant for one or more Projects:
 
 ~~~text literal
-mo auth token create --name release-agent --scope operator --ttl 720h --project proj_123
-mo auth token create --name observer --scope readonly --ttl 720h --project proj_123
+mo auth token create --name release-agent --scope operator --ttl 720 --project proj_123
+mo auth token create --name observer --scope readonly --ttl 720 --project proj_123
 ~~~
 
 An operator PAT may instead use the explicit `operator_all` grant:
 
 ~~~text literal
-mo auth token create --name owner-agent --scope operator --ttl 720h --all-projects
+mo auth token create --name owner-agent --scope operator --ttl 720 --all-projects
 ~~~
 
 `--project` and `--all-projects` are mutually exclusive. `--all-projects`
@@ -86,15 +135,15 @@ a missing `text`, and an empty string return `400 invalid_request` before
 admission. Whitespace is significant and is preserved. The stop body must be
 empty.
 
-The Server parses the accepted body once and computes a versioned SHA-256
-fingerprint from the command, canonical route IDs, and accepted body. It does
-not trim or case-fold the text. The durable scopes are:
-
-| Command | Durable scope | Replay identity |
-|---|---|---|
-| Launch | `projectId`, `agentId`, `Idempotency-Key` | The original Job, Session, Input, and Turn mapping |
-| Follow-up | `sessionId`, `Idempotency-Key` | The original Input and Turn mapping; Project and Agent come from the Session |
-| Stop | `turnId`, caller identity, `Idempotency-Key` | The original fenced stop mapping and Turn observation |
+The durable scope of a key depends on the command. A launch key is scoped to
+`projectId`, `agentId`, and the `Idempotency-Key`; a replay returns the
+original Job, Session, Input, and Turn mapping. A follow-up key is scoped to
+`sessionId` and the `Idempotency-Key`; a replay returns the original Input
+and Turn mapping, and the Project and Agent come from the Session. A stop key
+is scoped to `turnId`, the caller identity, and the `Idempotency-Key`; a
+replay returns the original stop mapping and Turn observation. See
+[External Agent API design](../design/agent-api.md#normalized-fingerprint-and-idempotency)
+for the fingerprint mechanics.
 
 The mapping is written before the canonical command completes. A retry with the
 same scope, key, and body returns the original IDs and current observation. It
@@ -114,10 +163,11 @@ the response was lost before the caller learned the Job ID.
 
 Stop targets one canonical Turn. Stopping an already-terminal Turn is a durable
 no-op. A queued Turn is cancelled locally without a Runtime call. A running
-Turn uses the existing fenced stop lifecycle. The first terminal completion or
-stop result wins. A matching retry uses the same frozen target and does not
-issue another stop effect. While a stop outcome is unresolved, another key for
-the Turn returns `409 stop_outcome_unknown` and cannot supersede it.
+Turn is recorded cancelled only after the Runtime confirms the stop. The first
+terminal completion or stop result wins. A matching retry uses the same frozen
+target and does not issue another stop effect. While a stop outcome is
+unresolved, another key for the Turn returns `409 stop_outcome_unknown` and
+cannot supersede it.
 
 ## Public Execution Reads
 
@@ -152,29 +202,27 @@ shape. Every key is present; a fact that does not exist is represented by
 }
 ~~~
 
-The aggregate `status` has exactly five values:
-
-| Status | Meaning |
-|---|---|
-| `accepted` | Mohist accepted the request, but the current work is not yet queued. |
-| `queued` | Work is accepted and waiting for capacity or another retryable condition. |
-| `running` | The current Turn is running or its outcome is still being confirmed. |
-| `terminal` | Work completed, failed, was cancelled, was blocked permanently, or was rejected before execution. |
-| `unknown` | Consumed durable facts do not confirm acceptance, dispatch, binding, stop, or outcome. |
+The aggregate `status` has exactly five values. `accepted` means Mohist
+accepted the request, but the current work is not yet queued. `queued` means
+work is accepted and waiting for capacity or another retryable condition.
+`running` means the current Turn is running or its outcome is still being
+confirmed. `terminal` means work completed, failed, was cancelled, was
+blocked permanently, or was rejected before execution. `unknown` means the
+consumed durable facts do not confirm acceptance, dispatch, binding, stop, or
+outcome.
 
 The component fields preserve detail beside the aggregate. `jobStatus` is
 `preparing`, `queued`, `running`, `terminal`, `unknown`, or `null`.
 `sessionActivity` is `idle`, `active`, `unknown`, or `null`. `admission` is
 `ready`, `blocked`, or `null`. `inputStatus` is `accepted`, `rejected`,
 `unknown`, or `null`. `turnStatus` is `queued`, `running`,
-`outcome_pending`, `terminal`, `unknown`, or `null`.
+`outcome_pending`, `terminal`, `unknown`, or `null`. `outcome` is
+`completed`, `rejected`, `failed`, `cancelled`, `blocked`, or `null`.
 
-The aggregate precedence is fixed: a fenced terminal fact wins, then a durable
-rejection, then an unresolved fact produces `unknown`, then `outcome_pending`
-produces `running`, then a retryable blocked dispatch remains `queued`, and
-finally `running` wins over `queued`, which wins over `accepted`. A terminal
-Input or Turn stays terminal even when its Session is active because a later
-Turn is running.
+A terminal Input or Turn stays terminal even when its Session is active
+because a later Turn is running. See
+[External Agent API design](../design/agent-api.md#five-state-mapping-and-precedence)
+for the precedence rules that derive the aggregate from the components.
 
 A prepared launch is anchored by its Job. Its first public observation can have
 `status=accepted`, `jobStatus=preparing`, and null Session, Input, and Turn IDs.
@@ -192,11 +240,11 @@ provider errors, or other internal execution fields.
 ## Projection Freshness And Errors
 
 Public Job, Input, Turn, command-replay, and event responses come from the
-persisted public projection. The Server compares the required canonical source
-watermark with the projection checkpoint before serving current state. If the
-checkpoint is behind, the response is `503 projection_lag` with a `Retry-After`
-hint and no stale execution body. Retry the same read or the same keyed command.
-Projection lag is not the public `unknown` state and does not create an effect.
+persisted public projection. When the projection has not caught up with the
+required source facts, the response is `503 projection_lag` with a
+`Retry-After` hint and no stale execution body. Retry the same read or the
+same keyed command. Projection lag is not the public `unknown` state and does
+not create an effect.
 
 Errors use this envelope:
 
@@ -211,19 +259,27 @@ Errors use this envelope:
 
 Common responses are:
 
-| HTTP | Code | Meaning |
-|---|---|---|
-| `400` | `invalid_request` | The body or query is invalid. |
-| `400` | `idempotency_key_required` or `idempotency_key_invalid` | The write key is missing or outside the accepted form. |
-| `400` | `cursor_invalid` | The cursor is malformed, tampered with, or bound to another stream. |
-| `401` | `unauthenticated` | The request has no usable Bearer PAT. The response includes the Bearer challenge. |
-| `403` | `forbidden` | Scope or persisted Project authorization failed before lookup. |
-| `404` | `agent_not_found`, `job_not_found`, `session_not_found`, `input_not_found`, or `turn_not_found` | The resource is absent from the authorized Project. |
-| `409` | `idempotency_key_reused` | The same key was used with a different accepted request. |
-| `409` | `stop_outcome_unknown` | Another stop for the Turn is unresolved. |
-| `410` | `cursor_expired` | The valid cursor is before the retained event floor; safe sequence bounds are included. |
-| `503` | `projection_lag` | The public projection has not caught up with the required source facts. |
-| `503` | `stop_pending` | The fenced stop outcome is not confirmed yet; retry the same keyed stop request. |
+- `400 invalid_request`: the body or query is invalid.
+- `400 idempotency_key_required` or `idempotency_key_invalid`: the write key
+  is missing or outside the accepted form.
+- `400 cursor_invalid`: the cursor is malformed, tampered with, or bound to
+  another stream.
+- `401 unauthenticated`: the request has no usable Bearer PAT. The response
+  includes the Bearer challenge.
+- `403 forbidden`: Scope or persisted Project authorization failed before
+  lookup.
+- `404 agent_not_found`, `job_not_found`, `session_not_found`,
+  `input_not_found`, or `turn_not_found`: the resource is absent from the
+  authorized Project.
+- `409 idempotency_key_reused`: the same key was used with a different
+  accepted request.
+- `409 stop_outcome_unknown`: another stop for the Turn is unresolved.
+- `410 cursor_expired`: the valid cursor is before the retained event floor;
+  safe sequence bounds are included.
+- `503 projection_lag`: the public projection has not caught up with the
+  required source facts.
+- `503 stop_pending`: the stop outcome is not confirmed yet; retry the same
+  keyed stop request.
 
 ## Resume Session Events
 
@@ -237,10 +293,9 @@ strictly greater than the cursor position. A request without `after` starts at
 the beginning of the retained stream. The response contains `sessionId`, an
 ascending `events` array, `nextCursor`, and `highWaterSequence`.
 
-A cursor is tamper-evident and bound to the Project, Session, stream generation,
-and exclusive sequence position. Treat it as opaque data. Do not parse or
-construct it. `nextCursor` is the last event cursor on a non-empty page. On an
-empty page it is positioned at `highWaterSequence`.
+Treat a cursor as opaque data. Do not parse or construct it. `nextCursor` is
+the last event cursor on a non-empty page. On an empty page it is positioned
+at `highWaterSequence`.
 
 Execution events are limited to `input.accepted`, `input.rejected`,
 `turn.queued`, `turn.running`, `turn.outcome_pending`, `turn.terminal`, and

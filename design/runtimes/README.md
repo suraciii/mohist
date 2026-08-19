@@ -36,16 +36,9 @@ its catalog before becoming ready as defined in [`pi.md`](pi.md); the host then
 projects `PiRuntime.catalog()` into `runtimeCatalogs.pi`. OpenCode and Pi discover
 their catalogs independently.
 
-The current read contract remains:
-
-```text literal
-GET /api/projects/{projectRef}/opencode/models?runtime={runtimeId}
-```
-
-It returns `{ models, modelVariants }`. Profile-backed callers must provide the
-derived Runtime explicitly; they must not rely on the endpoint's historical
-OpenCode default. Renaming this route is unrelated to correcting model
-selection and is outside this change.
+The catalog query returns the models and model variants of the requested
+Runtime. Profile-backed callers must provide the derived Runtime explicitly;
+they must not rely on a historical OpenCode default.
 
 The catalog is a configuration aid, not execution authority. The selected
 Action or Agent still owns Runtime selection, and the Runtime validates the

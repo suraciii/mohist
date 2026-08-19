@@ -77,9 +77,9 @@ The current claim APIs cannot produce this expectation:
   replace the catalog before claim.
 
 The Runner poll body must carry the generation-bound readiness witness defined
-in `design/runner-runtime-readiness.md`; catalogs are capability witnesses,
-not readiness witnesses. The Server validates that witness against the
-registration connection before constructing either owner expectation.
+in `design/runner.md#runtime-readiness-witness`; catalogs are capability
+witnesses, not readiness witnesses. The Server validates that witness against
+the registration connection before constructing either owner expectation.
 
 This is intentionally one cross-owner protocol. Adding catalog fields or an
 adapter before these conditional claims would create a dispatch snapshot that

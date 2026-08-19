@@ -55,7 +55,7 @@ advancement.
   `mo issue edit 43 --parent 42`. To detach it, use
   `mo issue edit 43 --parent none`.
 - A child Issue without an explicit priority inherits the parent's priority.
-- You or an external Agent acting for you decide how to split the work. Mohist
+- You or an External Agent acting for you decide how to split the work. Mohist
   does not split it automatically.
 - When a child enters Plan, Mohist gives the Inline Agent the parent title and
   body as background context. You do not need to copy shared context into each
@@ -100,14 +100,11 @@ The parent has no Workflow and no approval points.
 ## State and Progress
 
 The parent state is derived from the child Issues and does not need manual
-maintenance:
-
-| Parent State | Condition |
-|---|---|
-| `backlog` | Composite advancement has not started, and no child has started |
-| `in-progress` | Composite advancement has started, or any child has started |
-| `done` | All children are terminal and at least one is `done`; set automatically |
-| `cancelled` | All children are cancelled; set automatically |
+maintenance. The parent is `backlog` when composite advancement has not
+started and no child has started. It is `in-progress` when composite
+advancement has started or any child has started. It becomes `done`
+automatically when all children are terminal and at least one is `done`, and
+`cancelled` automatically when all children are cancelled.
 
 - A parent has no Workflow Stage. Its details show the child list, delivered
   progress such as X/Y Done, and the blocked count. Its board card shows a
@@ -159,8 +156,8 @@ of multi-repository changes is a Non-goal. See [Repositories](repositories.md).
 ## Status
 
 Parent-child relationships, composite advancement, derived parent state, Epic
-isolation, and read-only parent context during a child Plan are implemented in
-CLI, Web, Server, and Runner. Cross-repository integration remains an explicit
+isolation, and read-only parent context during a child Plan are implemented.
+Cross-repository integration remains an explicit
 final-child workflow when a requirement needs it; Mohist does not infer or hide
 that acceptance boundary. See
 [`design/issue-breakdown.md`](../design/issue-breakdown.md) for the design.

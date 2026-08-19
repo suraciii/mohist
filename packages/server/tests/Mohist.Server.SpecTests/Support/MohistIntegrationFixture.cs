@@ -354,7 +354,7 @@ public class MohistWebApplicationFactory : WebApplicationFactory<Program>
             // Replace the file-backed production OtelDb (which would otherwise
             // resolve to $HOME/.mohist/otel.db) with an in-memory instance so
             // the integration factory never creates a real otel.db file
-            // (design/testing.md hard-constraint 1). The keeper connection is
+            // (design/testing.md "No External Environment"). The keeper connection is
             // owned by this factory and disposed in Dispose(bool).
             var (otelDb, otelKeeper) = InMemoryOtelDb.Create();
             _otelKeeper = otelKeeper;

@@ -77,21 +77,6 @@ proxy, analyze failures, summarize progress, create follow-up Issues, and notify
 the owner. See [Agent Event Routing](docs/event-routing.md) and
 [Agent Supervision](docs/agent-supervision.md).
 
-## Implementation Status
-
-| Available | Integration in progress | Not implemented or proposal |
-|---|---|---|
-| Five-stage Workflow, approval points, Epics, composite Issues, and sub-issues | Workflow Profile UI migration | Mobile PWA and Web Push proposal |
-| `mo` CLI, authenticated Web UI, direct Mohist Agent launch and sessions, PAT-authenticated External Agent API | | |
-| Hermes notifications, event routing, Agent supervision, mentions, and Issue watch | Automatic observability anomaly notifications | |
-| Agent Skills execution and concurrency limits | | |
-| OpenCode / Pi Runtime, GitHub PR Profile, and Slack Agent Connections | | |
-| Metrics, route diagnostics, and the application log contract | | |
-
-The corresponding Issues track items that are in progress or have a finalized
-spec. Current capability notes live in each document's Status or implementation
-notes.
-
 ## Documentation
 
 Start with [Getting Started](docs/getting-started.md). See
@@ -101,16 +86,13 @@ Architecture and design documents are under [`design/`](design/README.md).
 
 ## Repository Structure
 
-```text diagram
-packages/
-  server/    Control plane (ASP.NET Core + Orleans)
-  runner/    Execution plane (TypeScript)
-  web/       Web UI (React)
-  cli/       mo CLI
-docs/        User documentation
-design/      Architecture and design documentation
-openspec/    Change artifacts produced by Workflows
-```
+- `packages/server/`: control plane (ASP.NET Core + Orleans)
+- `packages/runner/`: execution plane (TypeScript)
+- `packages/web/`: Web UI (React)
+- `packages/cli/`: `mo` CLI
+- `docs/`: user documentation
+- `design/`: architecture and design documentation
+- `openspec/`: change artifacts produced by Workflows
 
 ## Contributing
 

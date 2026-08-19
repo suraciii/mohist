@@ -22,32 +22,90 @@ authoritative Server state but not responsibilities.
 
 ## Core Decisions
 
-| Topic | Decision | Reason |
-|---|---|---|
-| Agent and Slack relationship | An Agent works independently first; a Connection is only another ingress for it | Slack cannot be a prerequisite for Agent execution |
-| Slack identity | One Agent has one independent App / Bot in one Workspace | the visible identity tells users which Agent they invoke; a shared Bot never guesses |
-| Installation authority | Server owns Slack control-plane state; `mohist-slack` handles only the Socket wire protocol | App creation, installation, and credential verification are recoverable product facts and belong in Server |
-| Separate `mohist-slack` process | Yes, as a toolchain choice | Slack's primary client is Node and shares the Runner TypeScript toolchain |
-| Adapter persistence | None | a process boundary is not a state boundary; Server is the sole authority |
-| Ingress, conversation mapping, outbound delivery | Owned by Server, in the same backup boundary as Sessions | removes dual authority and cross-process unknown outcomes |
-| Outbound delivery | One outbox; only an adapter holding a valid Socket lease may claim | one sender per App at a time prevents duplicate delivery |
-| Agent configuration | A Connection stores no second Instructions, Runtime, Model, or Skills | there is one execution definition |
-| Access control | A Connection decides who may invoke; it neither reduces nor expands execution capability | invocation scope and execution capability are separate decisions |
-| Conversation mapping | A channel root mention starts a Session and thread replies continue it; a DM is one continuing Session | each Slack context keeps its native conversation convention |
-| Reliability | Slack may redeliver; Mohist deduplicates and retains accepted input | capacity is never recovered by dropping accepted messages |
-| Operating mode | Local Socket Mode only; each App has independent Bot and App-level tokens | self-hosting needs no public ingress and no Mohist-hosted control plane |
-| Agent App credential source | CLI accepts the installed Bot token and the manually generated App-level token through protected input | a local deployment has no HTTPS OAuth callback, and App-management responses do not return a usable App-level token; never request a login session |
-| Web role | Fallback surface for configuration, diagnostics, and takeover | Web is not a required workstation for using a Slack Agent |
-| Mohist App form | The Mohist App binds the built-in Agent `mohist-slack` with preset Instructions and a Slack management Skill; it performs management through the ordinary agent command surface under an operator-bound capability credential, delegating to the same application services as the CLI | capability exists once in Server; CLI and conversation are two entry points, not two installation semantics; authority travels as a credential, never as parsed model text |
-| Agent effects | An Agent changes Slack or Mohist resources only through explicit command calls — the reply action and the ordinary `mo` CLI surface; Server never parses model output into commands or messages | model text is reasoning; parsing it as a protocol is fragile, leaks internal shapes to users, and duplicates authority outside the API boundary |
-| Installation DSL | `mo slack setup` installs the Workspace-level Mohist App; `mo slack install-agent <agent>` installs an existing Agent | `setup-agent` conflicts with Agent Readiness setup; `create` falsely claims a resource is created when the user is installing an Agent into Slack |
-| Conversational Agent creation | The Mohist App asks at most for name and daily responsibility, creates a real Agent with defaults, then guides Slack installation | a Mohist App DM is already an authorization boundary and needs no draft approval state |
-| Reply location | Server chooses the delivery target and injects a reply anchor with the input: thread root, triggering message, or DM | the model does not guess a thread from memory; the anchor is a system fact |
-| Structured control in Slack | Signed action buttons with Server-verified payloads, plus Server-consumed boundary messages such as claim; no Slack-native slash commands | buttons reuse one verified mechanism and the same operations as CLI and Web; slash commands are a third grammar that forces manifest changes and reinstalls while doing nothing messages plus buttons cannot |
-| Liveness honesty | Reactions and status messages project only real state-machine facts; timers are cleanup backstops, never sources of narrative | Buzz's welcome-kickoff failure mode: announcing ignorance on a deadline writes the wrong story in permanent ink — facts decide, timers are a last-resort backstop |
-| Interruption | New input for the same active Session defaults to Steer, joining the current Turn or waiting in queue; only explicit Stop is Interrupt | matches SessionInput / AgentTurn semantics and prevents ordinary messages from aborting long work |
-| Collaboration rules | Injected as a built-in Skill: no empty acknowledgement, callback after delegation, silence by default, self-contained replies, no guessed reply location | behavior stays inspectable and evolvable rather than hard-coded in adapter or renderer |
-| Process transparency | Slack carries liveness and final replies; Open in Mohist links to the Web Session timeline | a quiet channel and an owner-visible timeline are separate signals with separate homes |
+- **Agent and Slack relationship.** An Agent works independently first; a
+  Connection is only another ingress for it. Slack cannot be a prerequisite
+  for Agent execution.
+- **Slack identity.** One Agent has one independent App / Bot in one
+  Workspace. The visible identity tells users which Agent they invoke; a
+  shared Bot never guesses.
+- **Installation authority.** Server owns Slack control-plane state;
+  `mohist-slack` handles only the Socket wire protocol. App creation,
+  installation, and credential verification are recoverable product facts
+  and belong in Server.
+- **Separate `mohist-slack` process.** Yes, as a toolchain choice. Slack's
+  primary client is Node and shares the Runner TypeScript toolchain.
+- **Adapter persistence.** None. A process boundary is not a state boundary;
+  Server is the sole authority.
+- **Ingress, conversation mapping, outbound delivery.** Owned by Server, in
+  the same backup boundary as Sessions. This removes dual authority and
+  cross-process unknown outcomes.
+- **Outbound delivery.** One outbox; only an adapter holding a valid Socket
+  lease may claim. One sender per App at a time prevents duplicate delivery.
+- **Agent configuration.** A Connection stores no second Instructions,
+  Runtime, Model, or Skills. There is one execution definition.
+- **Access control.** A Connection decides who may invoke; it neither reduces
+  nor expands execution capability. Invocation scope and execution capability
+  are separate decisions.
+- **Conversation mapping.** A channel root mention starts a Session and
+  thread replies continue it; a DM is one continuing Session. Each Slack
+  context keeps its native conversation convention.
+- **Reliability.** Slack may redeliver; Mohist deduplicates and retains
+  accepted input. Capacity is never recovered by dropping accepted messages.
+- **Operating mode.** Local Socket Mode only; each App has independent Bot
+  and App-level tokens. Self-hosting needs no public ingress and no
+  Mohist-hosted control plane.
+- **Agent App credential source.** The CLI accepts the installed Bot token
+  and the manually generated App-level token through protected input. A local
+  deployment has no HTTPS OAuth callback, and App-management responses do not
+  return a usable App-level token; never request a login session.
+- **Web role.** Fallback surface for configuration, diagnostics, and
+  takeover. Web is not a required workstation for using a Slack Agent.
+- **Mohist App form.** The Mohist App binds the built-in Agent `mohist-slack`
+  with preset Instructions and a Slack management Skill; it performs
+  management through the ordinary agent command surface under an
+  operator-bound capability credential, delegating to the same application
+  services as the CLI. Capability exists once in Server; CLI and conversation
+  are two entry points, not two installation semantics; authority travels as
+  a credential, never as parsed model text.
+- **Agent effects.** An Agent changes Slack or Mohist resources only through
+  explicit command calls — the reply action and the ordinary `mo` CLI
+  surface; Server never parses model output into commands or messages. Model
+  text is reasoning; parsing it as a protocol is fragile, leaks internal
+  shapes to users, and duplicates authority outside the API boundary.
+- **Installation DSL.** `mo slack setup` installs the Workspace-level Mohist
+  App; `mo slack install-agent <agent>` installs an existing Agent.
+  `setup-agent` conflicts with Agent Readiness setup; `create` falsely claims
+  a resource is created when the user is installing an Agent into Slack.
+- **Conversational Agent creation.** The Mohist App asks at most for name
+  and daily responsibility, creates a real Agent with defaults, then guides
+  Slack installation. A Mohist App DM is already an authorization boundary
+  and needs no draft approval state.
+- **Reply location.** Server chooses the delivery target and injects a reply
+  anchor with the input: thread root, triggering message, or DM. The model
+  does not guess a thread from memory; the anchor is a system fact.
+- **Structured control in Slack.** Signed action buttons with Server-verified
+  payloads, plus Server-consumed boundary messages such as claim; no
+  Slack-native slash commands. Buttons reuse one verified mechanism and the
+  same operations as CLI and Web; slash commands are a third grammar that
+  forces manifest changes and reinstalls while doing nothing messages plus
+  buttons cannot.
+- **Liveness honesty.** Reactions and status messages project only real
+  state-machine facts; timers are cleanup backstops, never sources of
+  narrative. Buzz, a separate agent product used here as an industry study,
+  showed the failure mode in its welcome kickoff: announcing ignorance on a
+  deadline writes the wrong story in permanent ink. Facts decide; timers are
+  a last-resort backstop.
+- **Interruption.** New input for the same active Session defaults to Steer,
+  joining the current Turn or waiting in queue; only explicit Stop is
+  Interrupt. This matches SessionInput / AgentTurn semantics and prevents
+  ordinary messages from aborting long work.
+- **Collaboration rules.** Injected as a built-in Skill: no empty
+  acknowledgement, callback after delegation, silence by default,
+  self-contained replies, no guessed reply location. Behavior stays
+  inspectable and evolvable rather than hard-coded in adapter or renderer.
+- **Process transparency.** Slack carries liveness and final replies; Open in
+  Mohist links to the Web Session timeline. A quiet channel and an
+  owner-visible timeline are separate signals with separate homes.
 
 ## System Boundary
 
@@ -71,14 +129,25 @@ SlackWorkspaceEnrollment -> manages -> ManagedSlackAgentApp, one per managed Age
                                         AgentConnection
 ```
 
-| Component | Owns | Does not own |
-|---|---|---|
-| Slack | member identity, channels and message interaction, event and reply transport | Agent configuration, execution, work results |
-| `mohist-slack` | translation between Slack Socket Mode protocol and normalized ingress / delivery intent; short leases granted by Server | persisted state, thread ownership, Agent execution, work-state arbitration, App creation / installation |
-| Server Connection boundary (data plane) | provider identity and access decisions, durable ingress, conversation mapping, pending delivery, Agent API calls | Slack wire payloads, Agent execution, result arbitration |
-| Server Slack control plane | Workspace enrollment, external App lifecycle and authorization, manifests, credential references, audit | Agent execution, thread ownership, wire protocol |
-| Agent API | unified start, continue, observe, and stop operations | Slack mentions, threads, member directory, provider rate limits |
-| Runner | execution from the resolved Mohist Agent definition | Slack identity, access policy, thread routing |
+- **Slack** owns member identity, channels and message interaction, and event
+  and reply transport. It does not own Agent configuration, execution, or
+  work results.
+- **`mohist-slack`** owns translation between the Slack Socket Mode protocol
+  and normalized ingress / delivery intent, and short leases granted by
+  Server. It does not own persisted state, thread ownership, Agent execution,
+  work-state arbitration, or App creation / installation.
+- **Server Connection boundary (data plane)** owns provider identity and
+  access decisions, durable ingress, conversation mapping, pending delivery,
+  and Agent API calls. It does not own Slack wire payloads, Agent execution,
+  or result arbitration.
+- **Server Slack control plane** owns Workspace enrollment, external App
+  lifecycle and authorization, manifests, credential references, and audit.
+  It does not own Agent execution, thread ownership, or the wire protocol.
+- **Agent API** owns unified start, continue, observe, and stop operations.
+  It does not own Slack mentions, threads, member directory, or provider rate
+  limits.
+- **Runner** owns execution from the resolved Mohist Agent definition. It
+  does not own Slack identity, access policy, or thread routing.
 
 One `mohist-slack` process per Server carries the Socket connections for the
 Mohist App and every Agent App. A shared process does not imply a shared Bot
@@ -197,7 +266,7 @@ Generic Connection edits cannot mutate identity fields.
 A Connection expresses four independent facts: external installation progress,
 operator desired state (Enabled/Disabled), Slack connection health, and Agent
 Readiness. `Connected` cannot replace them: a Connection may be connected while
-its Agent Needs setup, or its Agent may be Ready while Slack is offline.
+its Agent is `needs-setup`, or its Agent may be `ready` while Slack is offline.
 Product views may expose all four, but a summary highlights one current state
 and exactly one next action.
 
@@ -264,7 +333,7 @@ AgentApp state is not one enum. It has four axes and one derived next action:
    `authorized` / `expired-or-cancelled` / `revoked`.
 3. **Manifest:** `desired` / `applied` / `drift-known`.
 4. **Socket readiness:** both runtime credentials persisted, both identities
-   verified, adapter lease alive. Missing either credential forbids Ready.
+   verified, adapter lease alive. Missing either credential forbids `ready`.
 
 The unknown states may be left only through reconciliation or explicit human
 arbitration. A process restart never repeats create/delete automatically. A
@@ -297,16 +366,20 @@ credentials that step requires; the caller cannot supply a credential address.
 Credentials come from hidden CLI input or a protected, user-owned file.
 Responses, status, errors, logs, audit, and documentation examples contain no
 credentials. Status exposes Bot and App-level provisioning and verification
-separately. The Mohist App becomes Ready only after both are valid and Socket
-hello is confirmed.
+separately. The Mohist App becomes `ready` only after both are valid and
+Socket hello is confirmed.
 
-Credential submission converges in a fixed order: verify Bot and Workspace
-first; write an App-level token only as an unverified candidate; a validation
-lease accepts no business traffic; bind and grant a runtime lease only after
-Socket App-identity verification. The system must never reach "Connection bound
-and usable, token not persisted." Repeating the same verified credential set
-returns the same result without rebinding. A candidate for a different
-App/team/Bot is deleted and remains unusable.
+Credential submission holds these invariants:
+
+- Bot and Workspace verification succeeds before any App-level token write.
+- An App-level token is written only as an unverified candidate, and a
+  validation lease accepts no business traffic.
+- Binding and a runtime lease are granted only after Socket App-identity
+  verification. The system must never reach "Connection bound and usable,
+  token not persisted."
+- Repeating the same verified credential set returns the same result without
+  rebinding.
+- A candidate for a different App/team/Bot is deleted and remains unusable.
 
 ### App Provisioning Credentials (Configuration Token)
 
@@ -356,17 +429,17 @@ progress with one next action. The ordering invariants:
 - Returned `app_id`, client credentials, and installation link are persisted
   before any user-visible link is exposed. An unknown create outcome persists
   the operation fence and stops; it is never resent.
-- Runtime credentials are verified as Bot identity first, persisted as
-  unverified candidates second, and marked verified only after the adapter
-  reports the expected App's first Socket hello under a validation lease. On
+- A runtime credential is marked verified only after the adapter reports the
+  expected App's first Socket hello under a validation lease; before that it
+  is persisted only as an unverified candidate with Bot identity verified. On
   mismatch the candidate is deleted and the Connection stays unbound.
 - AgentApp then commits a bindable fact, and a durable handler idempotently
-  fills Connection App/Bot identity. Installation projects Ready only after the
-  adapter first obtains a runtime lease.
-- A rerun repairs drift, missing or invalid credentials, and connection without
-  creating another Connection or Agent App. Explicitly reprovisioning valid
-  credentials on a Ready record rotates them, but they must resolve to the same
-  team/App/Bot identity.
+  fills Connection App/Bot identity. Installation projects `ready` only after
+  the adapter first obtains a runtime lease.
+- A rerun repairs drift, missing or invalid credentials, and connection
+  without creating another Connection or Agent App. Explicitly reprovisioning
+  valid credentials on a `ready` record rotates them, but they must resolve
+  to the same team/App/Bot identity.
 
 The idempotency key for `install-agent` is `(enrollment_id, AgentId)`. The
 conversational install-Agent operation performs only the non-secret steps of
@@ -425,7 +498,7 @@ Three rules follow:
   unmentioned reply arrives, ask the user to choose instead of guessing. The
   chooser is an interactive Slack selection, not a free-text reply to parse.
 - Do not start work when the target Agent cannot run it. When admission finds
-  the Agent not Ready or its Connection unavailable, Server posts one
+  the Agent not `ready` or its Connection unavailable, Server posts one
   Server-authored guidance message — safe summary for the caller, specific gap
   only for Owner and operators — without creating a Session, Turn, or queued
   input. This is Buzz's setup-mode nudge: the platform answers for an agent
@@ -568,10 +641,8 @@ mo slack message send --conversation <id> --text "architecture diagram" --image 
 - **Multiple sends coalesce.** Within one Turn, Server coalesces sends into one
   final answer for that dispatch reference. The invariant remains at most one
   final answer per input.
-- **First version scope.** No broadcast across channels and no distinct message
-  types. `mo slack message` is a command group; future `message get` and
-  `message thread` may let an Agent fetch context. Only send is implemented
-  first.
+- **Scope.** No broadcast across channels and no distinct message types.
+  `mo slack message` is a command group; only `send` is implemented.
 
 ### Signed Action Buttons
 
@@ -587,9 +658,8 @@ they carry no free text, and their effects are exactly the effects of the
 operation they name.
 
 Current actions: Stop a queued or running Turn, Retry from a failure notice,
-and Agent selection for a multi-Bot mention. Routing Mohist approval gates into
-Slack as actionable notifications requires a notification routing policy and
-belongs to a future phase.
+and Agent selection for a multi-Bot mention. Mohist approval gates are not
+Slack actions; routing them into Slack requires a notification routing policy.
 
 ### Delivery Intent, Claim/Ack, and Unknown Results
 
@@ -694,9 +764,9 @@ AgentSession.
   installer, Agent owner, Connection owner, and ordinary caller are four
   distinct roles.
 
-The first version provides no public marketplace, multi-tenant hosting,
+The integration provides no public marketplace, multi-tenant hosting,
 billing, or cross-organization identity federation. Those change installation,
-authorization, and operations and belong to another product phase.
+authorization, and operations.
 
 ## Non-Goals
 
@@ -743,10 +813,10 @@ preserved for compatibility. Its conversation-side delivery is a current gap:
 the running build still acknowledges Manager requests with a text message and
 executes management through that protocol.
 
-Slack-native slash commands, message shortcuts, streaming replies, and
-Slack-native Agent ingress remain excluded. Approval-gate notifications routed
-into Slack, public marketplace, multi-tenant hosting, coordination across
-Mohist Servers, App Home, and complete scale and operations experience remain
-future phases. Future capabilities must still enter through Agent API and the
-existing Connection boundary. The adapter must never parse Runner logs,
-override Agent configuration, or write the Mohist database directly.
+Slack-native slash commands, message shortcuts, streaming replies,
+Slack-native Agent ingress, approval-gate notifications routed into Slack,
+public marketplace, multi-tenant hosting, coordination across Mohist Servers,
+App Home, and complete scale and operations experience remain excluded. Any
+added capability must still enter through Agent API and the existing
+Connection boundary. The adapter must never parse Runner logs, override Agent
+configuration, or write the Mohist database directly.

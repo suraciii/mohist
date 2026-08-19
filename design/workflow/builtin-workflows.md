@@ -66,7 +66,7 @@ See [`recovery.md`](recovery.md) for recovery and
 ## `mohist/local`
 
 This is the shortest delivery path and has no GitHub dependency or Pull Request.
-Because no remote review gate proves mergeability, Check verifies that the Issue
+Because no remote approval point proves mergeability, Check verifies that the Issue
 branch can merge before asking for Approval. Integrate then archives the change,
 rebases and squashes onto the current base, and pushes. Keeping the mergeability
 check before Approval prevents a stale branch from turning an approved result
@@ -122,7 +122,7 @@ Stage hook from changing the branch without a Task record.
 - Pull Request checks appear at two explicit boundaries. The first runs after
   Check work so a failed external check becomes visible repair work before
   delivery. The second runs immediately before merge so external state that
-  changed after Approval cannot bypass the delivery gate; it is an internal
+  changed after Approval cannot bypass the delivery approval point; it is an internal
   merge prerequisite, not a Stage Check.
 - Exact Task IDs, Action inputs, failure codes, ordering, and recovery behavior
   belong only to the authoritative Profile YAML linked above.

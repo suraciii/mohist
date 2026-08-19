@@ -47,7 +47,7 @@ has a persistent Workspace. See [Workspace](workspaces.md).
 An Issue is one unit of work that can enter the production line.
 
 - A title and body that describe the requirement
-- Priority from p0, the highest, to p4, the lowest
+- A priority
 - Free-text labels
 - A target repository in which the work executes; see
   [Repositories](repositories.md)
@@ -60,16 +60,6 @@ If one requirement crosses multiple repositories, split one Issue into
 sub-issue moves through its own Workflow. See
 [Composite Issues and Sub-issues](sub-issues.md).
 
-**Key Issue properties**:
-
-| Property | Meaning |
-|---|---|
-| `status` | backlog / in-progress / done / cancelled |
-| `isDraft` | Whether the requirement is still being prepared and therefore cannot start |
-| `workflowStage` | plan / build / check / integrate / done, the position in the Workflow |
-| `health` | active / queued / attention / paused / blocked / cancelled / done, the execution health |
-| `approvalState` | Whether the Issue is at an approval point and waiting for an `approve` or `reject` decision |
-
 See [Issue Management](issues.md).
 
 ## Workflow
@@ -77,15 +67,7 @@ See [Issue Management](issues.md).
 A Workflow is the production line that moves a ready Issue from an idea to
 merged code. Draft and Backlog remain outside the Workflow so requirement
 readiness and execution state cannot be confused. The default Mohist Workflow
-has five stages:
-
-```text diagram
-Draft --mark ready--> Backlog --start--> Plan
-Plan --approve--> Build --automatic--> Check
-Plan --reject--> Plan
-Check --approve--> Integrate --automatic--> Done
-Check --reject--> Build
-```
+has five stages: Plan, Build, Check, Integrate, and Done.
 
 Before the Workflow starts, Draft protects an incomplete requirement and
 Backlog identifies work that may start. Each Workflow stage then has one
@@ -101,7 +83,7 @@ Some stages, Plan and Check by default, enter an **approval point** after
 completion. They wait for an `approve` or `reject` decision. The approver does
 not have to be a specific type of actor. See [Approval](#approval).
 
-See [The Workflow](the-workflow.md).
+See [The Workflow](the-workflow.md) for the complete state machine.
 
 ### Workflow Profile
 
@@ -150,18 +132,20 @@ connection does not copy Agent configuration and cannot switch to another Agent
 within one conversation.
 
 A Slack connection presents two types of App to the user. The **Mohist App** is
-the workspace management entry point and is itself a built-in Mohist Agent.
-Users talk to it in natural language to connect, adjust, diagnose, and create
-Agents. An **Agent App** is an execution entry point. Each connected Mohist Agent
-has a separate Slack App and bot identity that accepts work and returns results
-directly. Management operations and work tasks use clear, separate identities.
-One identity does not send on behalf of the other.
+the management entry point installed once in a Slack workspace. It establishes
+the workspace connection and manages Agent Connections; it is neither a
+business Agent nor an Agent App. Users talk to it in natural language to
+connect, adjust, diagnose, and create Agents. An **Agent App** is an execution
+entry point. Each connected Mohist Agent has a separate Slack App and bot
+identity that accepts work and returns results directly. Management operations
+and work tasks use clear, separate identities. One identity does not send on
+behalf of the other.
 
 An AgentSession is not an Agent or a work result. It records the messages,
 context, usage, Activity, and current Runtime Session for a conversation. A
-Workflow TaskRun owns Workflow work. An AgentJob owns the first execution of one
-Mohist Agent launch. Subsequent input continues the same AgentSession but does
-not rewrite the AgentJob. Each accepted input in an AgentSession is a
+Workflow TaskRun, one task execution, owns Workflow work. An AgentJob owns the
+first execution of one Mohist Agent launch. Subsequent input continues the same
+AgentSession but does not rewrite the AgentJob. Each accepted input in an AgentSession is a
 SessionInput. One continuous Runtime processing period is an AgentTurn. One
 AgentTurn can process multiple SessionInputs in order. Messages, execution, and
 work results therefore do not share one state.
@@ -202,14 +186,9 @@ operating boundaries. A Mohist Agent can select Skills in its configuration and
 use the same capabilities through every entry point. An entry point cannot add
 or remove Skills for the Agent.
 
-Mohist distributes four Skills:
-
-| Skill | Purpose |
-|---|---|
-| `mohist` | Operate Mohist from an External Agent, including Issue creation, Approval, and status queries |
-| `mohist-explore` | Explore a requirement from the product perspective and produce a structured Issue that can enter a Workflow |
-| `mohist-create-issue` | Create an independently deliverable Issue from an established requirement |
-| `mohist-create-epic` | Create a product goal and organize and advance its Issues |
+Mohist distributes a Skill catalog that covers its domain actions, such as
+operating Mohist from an External Agent, exploring a requirement, and creating
+Issues and Epics.
 
 An External Agent typically loads these Skills as necessary, sends intent to
 Mohist through `mo`, and returns execution state and results to its original

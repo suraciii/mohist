@@ -1,6 +1,6 @@
 {
   // Test-duration policy. Drives scripts/test-duration/guard.ts.
-  // See design/testing.md "Test-duration guard" for the full model.
+  // See scripts/test-duration/README.md for the gate implementation model.
   //
   // Hard constraints per enforced track (all FAIL, never warnings):
   //   - unit:  p95 <= 50ms (population, "most are fast") AND per-test <= 500ms.

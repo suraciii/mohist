@@ -152,7 +152,7 @@ public sealed class MohistDbFixture : IAsyncLifetime
 
         // Replace the file-backed production OtelDb with an in-memory instance
         // so the service graph never creates a real otel.db file
-        // (design/testing.md hard-constraint 1). The keeper connection keeps
+        // (design/testing.md "No External Environment"). The keeper connection keeps
         // the database alive until DisposeAsync.
         var (otelDb, otelKeeper) = InMemoryOtelDb.Create();
         _otelKeeper = otelKeeper;

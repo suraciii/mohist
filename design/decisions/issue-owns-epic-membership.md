@@ -1,4 +1,4 @@
-# Issue Owns Epic Membership (issue-412)
+# Issue Owns Epic Membership
 
 ## Background
 
@@ -72,13 +72,19 @@ protocol while hiding domain language.
 
 ## Failure Recovery
 
-| Failure point | Committed fact | Recovery |
-|---|---|---|
-| After Epic validation and before Issue commit | No new membership | Retry `LinkIssue` |
-| After Issue commit and before the Epic response | Issue has new `EpicNumber` | Retry reaches the idempotent `AssignEpic` result; `IssueEpicChanged` still delivers |
-| Epic recomputation save fails | Issue membership is committed | Durable handler redelivers `Epic.Recompute` |
-| Issue starts before WorkflowRun creation | Issue persisted `WorkflowRunId` | `IssueWorkStarted` redelivers `EnsureStarted` |
-| Old membership event arrives late | Issue can have newer membership | Handler rereads current Issue state instead of applying the old payload |
+Each failure point has a committed fact and a recovery:
+
+- After Epic validation and before Issue commit, no new membership exists;
+  retry `LinkIssue`.
+- After Issue commit and before the Epic response, Issue has the new
+  `EpicNumber`; the retry reaches the idempotent `AssignEpic` result, and
+  `IssueEpicChanged` still delivers.
+- If the Epic recomputation save fails, Issue membership is committed, and the
+  durable handler redelivers `Epic.Recompute`.
+- If the Issue starts before WorkflowRun creation, the Issue has persisted
+  `WorkflowRunId`, and `IssueWorkStarted` redelivers `EnsureStarted`.
+- If an old membership event arrives late, the Issue can have newer membership;
+  the handler rereads current Issue state instead of applying the old payload.
 
 No recovery needs a cross-aggregate transaction, distributed lock, or manual
 repair of intermediate state.

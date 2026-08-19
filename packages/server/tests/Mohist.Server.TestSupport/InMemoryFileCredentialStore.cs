@@ -4,7 +4,7 @@ namespace Mohist.Server.TestSupport;
 
 /// <summary>
 /// In-memory <see cref="IFileCredentialStore"/> so spec hosts never touch
-/// a real credential file (design/testing.md hard-constraint 1). Loaded
+/// a real credential file (design/testing.md "No External Environment"). Loaded
 /// tokens come from configuration; this store only backstops hosts whose
 /// configuration omits a token.
 /// </summary>

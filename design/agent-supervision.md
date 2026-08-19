@@ -20,13 +20,15 @@ Installation produces an ordinary Mohist Agent and ordinary RoutingRules. Once i
 resources are detached from the preset: users may modify them with `mo agent edit` and
 `mo routing rule edit`. A later `install` neither writes over them nor tracks drift.
 
-The preset contains:
+The preset contains one Agent and two RoutingRules:
 
-| Resource | Name | Content |
-|---|---|---|
-| Agent | `supervisor` | Identity instructions (see [Preset policy and sources](#preset-policy-and-sources)); no AgentConfig, Skills, or concurrency override |
-| RoutingRule | `supervisor-approval` | Matches approval-request events; response policy in [Preset policy and sources](#preset-policy-and-sources) |
-| RoutingRule | `supervisor-failure` | Matches terminal run-failure events; response policy in [Preset policy and sources](#preset-policy-and-sources) |
+- An Agent named `supervisor`, with identity instructions (see
+  [Preset policy and sources](#preset-policy-and-sources)) and no AgentConfig, Skills, or
+  concurrency override.
+- A RoutingRule named `supervisor-approval` that matches approval-request events, with response
+  policy in [Preset policy and sources](#preset-policy-and-sources).
+- A RoutingRule named `supervisor-failure` that matches terminal run-failure events, with response
+  policy in [Preset policy and sources](#preset-policy-and-sources).
 
 The two rule match expressions are:
 
@@ -190,7 +192,7 @@ exists, skipped: routing rule supervisor-failure
 Implemented: `mo agent install supervisor` idempotently creates the preset Agent and two
 tail-position routing rules by name; `mo issue watch` supports watching and muting; Agent response
 failures (`agent.job.failed`) enter the inbox and Hermes notifications; approval decisions record
-the actor (`--author` -> `decidedBy`).
+the display alias (`--display-name` -> `decidedBy`).
 
 Agent Skills are pinned into each execution definition. The preset adds no Skills override;
 discovery of the `mohist` skill still depends on the stub file in the execution workspace, so
