@@ -90,6 +90,22 @@ Runner reconnects with bounded backoff and jitter. WebSocket Ping and Pong
 detect a dead connection. They do not replace HTTP presence, heartbeat, or
 Runtime readiness.
 
+Runner uses `ws` 8.18.x rather than Node's global WHATWG `WebSocket`. The
+control connection requires a Bearer header, the custom
+`X-Runner-Connection-Id` upgrade header, and client Ping frames; the WHATWG
+surface does not provide those capabilities. Each attempt uses a fresh
+canonical lowercase UUID. The production socket disables compression, limits
+received messages to 4 MiB, and gives the HTTP upgrade 15 seconds.
+
+Runner retries immediately, then after 2, 5, 10, and 30 seconds, repeating 30
+seconds thereafter. Every non-zero delay receives independent plus-or-minus
+20 percent jitter from an injected random source. The sequence resets only
+after the first Pong on a connection. Merely accepting and then closing a
+connection does not restore the immediate retry and cannot create a zero-delay
+loop. Runner sends Ping every 15 seconds and fences a connection that does not
+Pong within 10 seconds. Graceful close owns socket output for at most five
+seconds before terminating the socket.
+
 Each side uses one 64-message write queue shared by requests and notifications.
 Queue saturation fences the connection and closes it with `1013`. Server permits
 at most 32 in-flight requests per Runner; a 33rd request fails locally as
@@ -102,6 +118,15 @@ constants, not deployment configuration. Socket sends and close output are
 serialized. Fencing cancels an active send, waits at most five seconds to own
 socket output, and gives `CloseOutputAsync` at most five seconds; either bound
 expiring aborts the socket.
+
+On Runner, the 64-message queue contains waiting JSON-RPC success and error
+responses; the response currently owned by the writer is not in the queue.
+Runner handlers have no transport timeout and Runner does not apply the
+Server's 32-request in-flight cap. With one active send, 64 additional responses
+are accepted; the next queued response fences the connection
+and closes it with `1013`. The `ws.send` callback is the response completion
+boundary. One output owner serializes data, Ping, and close so those operations
+cannot race.
 
 ### Preserved Hub lifecycle
 
@@ -186,6 +211,24 @@ response for an expired or otherwise completed request is ignored and logged;
 normal timeout races must not close a healthy connection. The receiver closes
 the connection after three protocol errors on that connection. A notification
 never receives a response, including when its method or params are invalid.
+
+Runner counts every response-producing protocol failure toward the
+per-connection threshold and closes with `1008` after the third. An unknown
+notification method is ignored without a response and is not itself a protocol
+error. A malformed envelope, or malformed params for the known notification,
+is a protocol error even though notifications never receive responses.
+
+If Runner receives a second live request with the same `id`, it returns
+Invalid Request (`-32600`) without invoking the duplicate and without removing
+or replacing the original pending operation. The error necessarily shares the
+duplicate ID. Server may therefore treat either same-ID response as malformed
+or unavailable; that is acceptable because duplicate live IDs violate the
+profile and preserving the original operation is safer than transferring its
+identity.
+
+JSON object properties not named by a DTO are ignored, matching the default
+System.Text.Json contract behavior. Required properties and all nested values
+are still validated before a handler can produce side effects.
 
 The request methods are:
 
@@ -293,6 +336,8 @@ not add a Workspace removal aggregate or another Runner journal.
 `workflow.status-changed` has no response and no replay cursor. Runner treats it
 as a prompt to perform its existing HTTP Workflow status reconciliation. Losing
 or duplicating the notification changes latency, not the cleanup decision.
+It never marks a Workspace eligible directly; final host wiring maps the
+notification callback to one status-convergence pass.
 
 ## Implementation Order
 
@@ -332,10 +377,12 @@ one only when an independent product requirement needs it.
 ## Status
 
 Server hosts the dormant native WebSocket endpoint and connection registry.
-Production control callers still use SignalR client-result calls for the nine
-request methods above and a SignalR send for the Workflow status notification;
-no production Runner opens the WebSocket yet. While the endpoint is dormant,
-the existing SignalR heartbeat repair behavior remains unchanged. It is removed
-atomically with the production caller cutover, not in this phase. Existing HTTP
-dispatch, result delivery, operation journals, and Workflow status
-reconciliation remain the preserved baseline.
+Runner contains the matching dormant native client, JSON-RPC dispatcher, and
+transport-neutral handler catalog. `RunnerHost` is not wired to that client.
+Production control callers and Runner therefore still use SignalR client-result
+calls for the nine request methods above and a SignalR send for the Workflow
+status notification; no production Runner opens the WebSocket yet. While the
+endpoint is dormant, the existing SignalR heartbeat repair behavior remains
+unchanged. It is removed atomically with the production caller cutover, not in
+this phase. Existing HTTP dispatch, result delivery, operation journals, and
+Workflow status reconciliation remain the preserved baseline.
