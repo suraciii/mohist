@@ -20,18 +20,18 @@
 // fence, and `pathExists` (kept as an optional injection point, falling
 // through to `existsSync` from `node:fs` when no test seam is supplied).
 
-import { existsSync as defaultExistsSync } from "node:fs"
-import { resolve } from "node:path"
-import * as signalR from "@microsoft/signalr"
-import { deleteDirectory } from "../system/process.js"
-import { hasCompleteWorkspaceIdentity, isUnderRunnerRoot, type WorkspaceQuery } from "../runtime/workspace-query.js"
-import type { WorkspaceRemovalFence } from "../runtime/workspace-removal-fence.js"
-import type { WorkspaceRegistry } from "../runtime/workspace-registry.js"
-import { issueWorkspacePath, validateWorkspaceIdentity, type IssueWorkspaceMarker } from "../runtime/workspace.js"
-import { runnerLogger } from "../system/logger.js"
-import { currentRunnerResources } from "../system/filesystem.js"
+import { existsSync as defaultExistsSync } from 'node:fs'
+import { resolve } from 'node:path'
+import * as signalR from '@microsoft/signalr'
+import { deleteDirectory } from '../system/process.js'
+import { hasCompleteWorkspaceIdentity, isUnderRunnerRoot, type WorkspaceQuery } from '../runtime/workspace-query.js'
+import type { WorkspaceRemovalFence } from '../runtime/workspace-removal-fence.js'
+import type { WorkspaceRegistry } from '../runtime/workspace-registry.js'
+import { issueWorkspacePath, validateWorkspaceIdentity, type IssueWorkspaceMarker } from '../runtime/workspace.js'
+import { runnerLogger } from '../system/logger.js'
+import { currentRunnerResources } from '../system/filesystem.js'
 
-const log = runnerLogger.child("cleanup")
+const log = runnerLogger.child('cleanup')
 
 export interface WorkspaceRemovalHandlerDeps {
   runnerRoot: string
@@ -40,46 +40,80 @@ export interface WorkspaceRemovalHandlerDeps {
   removalFence?: () => WorkspaceRemovalFence | null
 }
 
-export function registerWorkspaceRemovalHandler(
-  conn: signalR.HubConnection,
-  deps: WorkspaceRemovalHandlerDeps,
-): void {
+export function registerWorkspaceRemovalHandler(conn: signalR.HubConnection, deps: WorkspaceRemovalHandlerDeps): void {
   const pathExists = deps.pathExists ?? currentRunnerResources()?.signalRExistsChecker ?? defaultExistsSync
 
-  conn.on("RemoveWorkspace", async (query: WorkspaceQuery) => {
+  conn.on('RemoveWorkspace', async (query: WorkspaceQuery) => {
     if (!query?.workspacePath) {
-      return removal(false, "missing", query?.workspacePath ?? null, "workspace_missing", "Workspace already removed")
+      return removal(false, 'missing', query?.workspacePath ?? null, 'workspace_missing', 'Workspace already removed')
     }
     const workspacePath = resolve(query.workspacePath)
     if (!hasCompleteWorkspaceIdentity(query)) {
-      return removal(false, "failed", workspacePath, "workspace_identity_mismatch", "Workspace query requires complete identity")
+      return removal(
+        false,
+        'failed',
+        workspacePath,
+        'workspace_identity_mismatch',
+        'Workspace query requires complete identity',
+      )
     }
     if (!isUnderRunnerRoot(deps.runnerRoot, workspacePath)) {
-      return removal(false, "failed", workspacePath, "workspace_cleanup_refused", "Workspace path is outside the runner-managed root")
+      return removal(
+        false,
+        'failed',
+        workspacePath,
+        'workspace_cleanup_refused',
+        'Workspace path is outside the runner-managed root',
+      )
     }
     if (workspacePath !== issueWorkspacePath(deps.runnerRoot, query.workflowRunId)) {
-      return removal(false, "failed", workspacePath, "workspace_cleanup_refused", "Workspace path does not belong to the workflow run")
+      return removal(
+        false,
+        'failed',
+        workspacePath,
+        'workspace_cleanup_refused',
+        'Workspace path does not belong to the workflow run',
+      )
     }
     const removeWorkspace = async () => {
       if (!pathExists(workspacePath)) {
         await dropRegistryEntryForPath(deps.registry ?? null, workspacePath)
-        return removal(false, "missing", workspacePath, "workspace_missing", "Workspace already removed")
+        return removal(false, 'missing', workspacePath, 'workspace_missing', 'Workspace already removed')
       }
       const expected: IssueWorkspaceMarker = {
         workflowRunId: query.workflowRunId,
         runBranch: query.branch,
       }
       try {
-        await validateWorkspaceIdentity(workspacePath, expected, query.gitUrl, new AbortController().signal, null, deps.runnerRoot)
+        await validateWorkspaceIdentity(
+          workspacePath,
+          expected,
+          query.gitUrl,
+          new AbortController().signal,
+          null,
+          deps.runnerRoot,
+        )
       } catch (error) {
-        return removal(false, "failed", workspacePath, "workspace_identity_mismatch", error instanceof Error ? error.message : String(error))
+        return removal(
+          false,
+          'failed',
+          workspacePath,
+          'workspace_identity_mismatch',
+          error instanceof Error ? error.message : String(error),
+        )
       }
       try {
         await deleteDirectory(workspacePath)
         await dropRegistryEntryForPath(deps.registry ?? null, workspacePath)
-        return removal(true, "removed", workspacePath, null, "Workspace removed")
+        return removal(true, 'removed', workspacePath, null, 'Workspace removed')
       } catch (error) {
-        return removal(false, "failed", workspacePath, "workspace_cleanup_failed", error instanceof Error ? error.message : String(error))
+        return removal(
+          false,
+          'failed',
+          workspacePath,
+          'workspace_cleanup_failed',
+          error instanceof Error ? error.message : String(error),
+        )
       }
     }
 
@@ -87,13 +121,20 @@ export function registerWorkspaceRemovalHandler(
     if (!fence) return await removeWorkspace()
     try {
       const result = await fence.withRemovalFence(workspacePath, removeWorkspace)
-      if (result.kind === "completed") return result.value
-      const message = result.kind === "busy"
-        ? "Workspace is busy and cannot be safely released"
-        : "Workspace cannot be safely released because the removal fence failed"
-      return removal(false, "failed", workspacePath, "workspace_cleanup_failed", message)
+      if (result.kind === 'completed') return result.value
+      const message =
+        result.kind === 'busy'
+          ? 'Workspace is busy and cannot be safely released'
+          : 'Workspace cannot be safely released because the removal fence failed'
+      return removal(false, 'failed', workspacePath, 'workspace_cleanup_failed', message)
     } catch (error) {
-      return removal(false, "failed", workspacePath, "workspace_cleanup_failed", error instanceof Error ? error.message : String(error))
+      return removal(
+        false,
+        'failed',
+        workspacePath,
+        'workspace_cleanup_failed',
+        error instanceof Error ? error.message : String(error),
+      )
     }
   })
 }
@@ -114,7 +155,7 @@ async function dropRegistryEntryForPath(
   try {
     await registry.remove(entry.workflowRunId)
   } catch (error) {
-    log.error("workspace registry remove failed", { path: workspacePath, run: entry.workflowRunId, exception: error })
+    log.error('workspace registry remove failed', { path: workspacePath, run: entry.workflowRunId, exception: error })
   }
 }
 
