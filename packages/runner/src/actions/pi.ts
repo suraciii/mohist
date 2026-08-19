@@ -1,4 +1,10 @@
-import type { ActionResult, AgentRecoveryBinding, JsonObject, ParentIssueContext } from '../core/types.js'
+import {
+  NON_RECOVERABLE_PROVIDER_ERROR_CODE,
+  type ActionResult,
+  type AgentRecoveryBinding,
+  type JsonObject,
+  type ParentIssueContext,
+} from '../core/types.js'
 import type { ServerConnection } from '../server/connection.js'
 import type { TaskLogger } from '../runtime/task-log.js'
 import type { PiRuntime } from '../runtime/pi/index.js'
@@ -289,7 +295,7 @@ export async function piAction(
 
   const unknownOutcome = !result.ok && hasUnconfirmedCleanup(result.diagnostics ?? result.error.diagnostics ?? [])
   const finalText = result.ok ? result.value.facts.finalAssistantText : null
-  const runtimeCode = result.ok ? null : runtimeErrorCode(result.error.kind)
+  const runtimeCode = result.ok ? null : runtimeErrorCode(result.error.kind, result.error.diagnostics)
   const finalFacts = [...events]
   const submittedFailure =
     !result.ok &&
@@ -364,7 +370,9 @@ async function reconcileRecoveredTurn(context: ActionInvocationContext): Promise
     target: { runtime: 'pi', runtimeSessionId: recovery.runtimeSessionId, workDir: context.workDir },
   })
   if (!inspected.ok) {
-    return fail(runtimeErrorCode(inspected.error.kind), inspected.error.message, { outcome: 'unknown' })
+    return fail(runtimeErrorCode(inspected.error.kind, inspected.error.diagnostics), inspected.error.message, {
+      outcome: 'unknown',
+    })
   }
   const facts = inspected.value
   if (facts.activeTurn) {
@@ -537,7 +545,9 @@ function activityEvent(
   }
 }
 
-function runtimeErrorCode(kind: string): string {
+function runtimeErrorCode(kind: string, diagnostics: readonly { code: string }[] = []): string {
+  if (diagnostics.some((item) => item.code === NON_RECOVERABLE_PROVIDER_ERROR_CODE))
+    return NON_RECOVERABLE_PROVIDER_ERROR_CODE
   if (kind === 'deadline-exceeded') return 'timeout'
   if (kind === 'missing-session') return 'runtime-session-missing'
   return kind
@@ -548,7 +558,7 @@ function runtimeFailure(
   message: string,
   diagnostics: readonly { code: string; message: string }[],
 ): ActionResult {
-  const code = runtimeErrorCode(kind)
+  const code = runtimeErrorCode(kind, diagnostics)
   const hint = kind === 'missing-session' ? ' Reset the Workflow Session before retrying.' : ''
   return fail(code, `${message}${hint}`, { exitCode: 1, turnFact: { finalAssistantText: null } })
 }

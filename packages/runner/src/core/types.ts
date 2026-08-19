@@ -5,6 +5,9 @@ export type JsonObject = { [key: string]: JsonValue }
 
 export type WorkType = 'task' | 'checks'
 
+/** Internal Action error used when the runtime has exhausted a provider quota or usage limit. */
+export const NON_RECOVERABLE_PROVIDER_ERROR_CODE = 'provider-quota-exhausted'
+
 export interface RuntimeReadinessWitness {
   runtime: string
   ready: boolean

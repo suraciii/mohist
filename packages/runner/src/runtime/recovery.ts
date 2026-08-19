@@ -1,4 +1,11 @@
-import type { AddTaskInput, JsonObject, JsonValue, DispatchWorkItem, WorkItemResult } from '../core/types.js'
+import {
+  NON_RECOVERABLE_PROVIDER_ERROR_CODE,
+  type AddTaskInput,
+  type JsonObject,
+  type JsonValue,
+  type DispatchWorkItem,
+  type WorkItemResult,
+} from '../core/types.js'
 import { isObject } from '../core/json.js'
 import { getPath } from '../core/json-path.js'
 
@@ -32,6 +39,10 @@ export function tryRecovery(
 ): WorkItemResult | null {
   const recovery = readRecoveryConfig(work.recovery)
   if (!recovery) return null
+
+  // The runtime has already exhausted its bounded provider retry policy. The
+  // failure is real, but another Agent cannot repair a provider-side quota.
+  if (result.error?.code === NON_RECOVERABLE_PROVIDER_ERROR_CODE) return null
 
   if (!Object.prototype.hasOwnProperty.call(work, 'recoveryRemaining')) return null
   const rawRemaining = work.recoveryRemaining

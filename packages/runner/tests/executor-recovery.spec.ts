@@ -32,6 +32,24 @@ describe('recovery action error protocol', () => {
     expect(result).toMatchObject({ status: 'completed' })
   })
 
+  it('does not schedule recovery for an exhausted provider quota', () => {
+    const result = tryRecovery(
+      work({
+        budget: 2,
+        handlers: [{ tasks: [{ id: 'fix-ci' }], retrySelf: true }],
+      }),
+      {
+        status: 'failed',
+        error: {
+          code: 'provider-quota-exhausted',
+          message: 'Token Plan usage limit reached',
+        },
+      },
+    )
+
+    expect(result).toBeNull()
+  })
+
   it('matches an Action error by error.code and preserves the error', () => {
     const result = tryRecovery(
       work({
