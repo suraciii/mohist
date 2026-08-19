@@ -55,11 +55,23 @@ Runner registers through HTTP, then opens
 match the route identity; `operator` retains its existing Scope override. For
 each connection attempt, Runner generates a new UUID and sends it in
 `X-Runner-Connection-Id`. The identifier is not a credential; it names this
-physical connection for replacement and poll readiness fencing.
+physical connection for replacement and poll readiness fencing. The header must
+be the canonical lowercase D-format UUID string produced by `Guid.ToString("D")`
+and must not equal any active WebSocket connection ID. Runner's
+existing `buildGitHash`, `component`, `version`, `sourceRevision`, `treeHash`,
+`artifactDigest`, `releaseId`, and `generation` query fields remain handshake
+metadata on this endpoint.
 
 Server keeps one current control connection for each Runner. A new connection
 replaces the old connection. Request correlation belongs to one connection and
-cannot cross a reconnect.
+cannot cross a reconnect. Replacement immediately fences the old transport,
+then closes it normally with reason `Replaced`. A stale close from the old
+transport cannot unregister the replacement.
+Replacement installation is serialized per Runner. A candidate does not fence
+or otherwise supersede the current connection until it owns that Runner's
+installation slot; cancelling a candidate waiting for the slot has no effect on
+the current or installing connection. Connection ID reservations are also
+owned: cleanup can release only the exact reservation it acquired.
 
 Runner includes the current `X-Runner-Connection-Id` value in its existing HTTP
 poll and heartbeat payloads. On upgrade, Server maps that public connection ID
@@ -68,21 +80,28 @@ generation with Runner runtime identity. For a matching poll, Server injects
 the generation before dispatch. A nonmatching poll may reconcile already-held
 work, but Server does not accept its Runtime readiness or give it fresh work.
 
-Server applies a metadata heartbeat only when its connection ID matches the
-current lease. Heartbeat repair must not register or replace a control
-connection. Only a successful WebSocket upgrade changes the current connection
-ID and generation.
+At cutover, Server applies a metadata heartbeat only when its connection ID
+matches the current lease. In the target behavior, heartbeat repair does not
+register or replace a control connection; only a successfully installed
+WebSocket changes the current connection ID and generation. Until that atomic
+cutover, the existing SignalR heartbeat repair remains active.
 
 Runner reconnects with bounded backoff and jitter. WebSocket Ping and Pong
 detect a dead connection. They do not replace HTTP presence, heartbeat, or
 Runtime readiness.
 
-Each side uses a 64-message write queue. Server permits at most 32 in-flight
-requests per Runner and applies the current 15-second control request timeout.
-A JSON-RPC text message is at most 4 MiB. An oversized message closes with
-WebSocket code `1009`; queue saturation closes with `1013`. A disconnect
+Each side uses one 64-message write queue shared by requests and notifications.
+Queue saturation fences the connection and closes it with `1013`. Server permits
+at most 32 in-flight requests per Runner; a 33rd request fails locally as
+unavailable without closing a healthy connection. The current 15-second control
+request timeout begins when a request is enqueued. A JSON-RPC text message is at
+most 4 MiB, measured as the aggregate UTF-8 bytes in one fragmented text
+message. An oversized message closes with WebSocket code `1009`. A disconnect
 completes all pending transport requests as unavailable. These are protocol
-constants, not deployment configuration.
+constants, not deployment configuration. Socket sends and close output are
+serialized. Fencing cancels an active send, waits at most five seconds to own
+socket output, and gives `CloseOutputAsync` at most five seconds; either bound
+expiring aborts the socket.
 
 ### Preserved Hub lifecycle
 
@@ -197,6 +216,11 @@ Every method has one named `params` object:
 | `session.command` | `SessionCommandRequest` | `SessionCommandResult` |
 | `workflow.status-changed` | `WorkflowRunStatusNotification` | none |
 
+JSON `null` is a valid result only for `workspace.diff`, `workspace.commits`,
+and `workspace.commit-diff`. Every other request method requires a non-null
+result matching its DTO. `workspace.status` additionally requires the `exists`
+member; omission is a malformed result rather than `exists: false`.
+
 `WorkspaceQueryParams` contains `query: RunnerWorkspaceQuery`.
 `WorkspaceCommitDiffParams` contains `query` and `hash`.
 `WorkspaceFileContentParams` contains `query` and `path`. `FollowupParams`
@@ -275,12 +299,13 @@ or duplicating the notification changes latency, not the cleanup decision.
 1. Introduce the named `params` DTOs and freeze shared JSON contract fixtures.
 2. Implement the Server WebSocket endpoint, connection registry, correlation,
    timeout, bounded queues, connection-ID upgrade header, and preserved Hub
-   lifecycle hooks. Replace heartbeat registration with current-lease matching.
+   lifecycle hooks. Keep the endpoint dormant and heartbeat behavior unchanged.
 3. Implement the Runner WebSocket client and bind the typed methods to the
    existing handlers and journals.
 4. In one release candidate, switch every Server control caller to the
    WebSocket registry and delete `RunnerHub`, the Runner SignalR client,
-   recording SignalR test fakes, and unused SignalR package dependencies.
+   recording SignalR test fakes, and unused SignalR package dependencies. In
+   the same change, replace heartbeat registration with current-lease matching.
 5. Cut over with a coordinated stop, deploy, and start of Server and Runner.
    Start Server before Runner. Mixed old and new control clients are unsupported.
 
@@ -306,8 +331,11 @@ one only when an independent product requirement needs it.
 
 ## Status
 
-The migration is not implemented. Current Server code uses SignalR
-client-result calls for the nine request methods above and a SignalR send for
-the Workflow status notification. Existing HTTP dispatch, result delivery,
-operation journals, and Workflow status reconciliation are the preserved
-baseline.
+Server hosts the dormant native WebSocket endpoint and connection registry.
+Production control callers still use SignalR client-result calls for the nine
+request methods above and a SignalR send for the Workflow status notification;
+no production Runner opens the WebSocket yet. While the endpoint is dormant,
+the existing SignalR heartbeat repair behavior remains unchanged. It is removed
+atomically with the production caller cutover, not in this phase. Existing HTTP
+dispatch, result delivery, operation journals, and Workflow status
+reconciliation remain the preserved baseline.

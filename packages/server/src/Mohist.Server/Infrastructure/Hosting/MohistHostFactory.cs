@@ -139,6 +139,7 @@ public sealed class MohistHostFactory : IMohistHostFactory
         app.UseOtelPortIsolation();
         app.UseRequestDecompression();
         app.UseResponseCompression();
+        app.UseWebSockets();
         app.UseRouting();
         app.UseOtelSuppression();
         app.UseRuntimeRequestMetrics();

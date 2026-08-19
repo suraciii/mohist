@@ -75,6 +75,7 @@ public static class MohistApiRegistration
         app.MapAgentSessionDetachRoutes();
         app.MapAgentSessionRecoveryRoutes();
         app.MapRunnerRoutes();
+        app.MapRunnerControlRoute();
         app.MapRunnerStatusRoutes();
         app.MapRunnerIdentityRoutes();
         app.MapWorkflowArtifactUploadRoutes();

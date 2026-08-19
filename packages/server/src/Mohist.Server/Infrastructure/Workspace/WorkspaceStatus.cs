@@ -1,7 +1,10 @@
+using System.Text.Json.Serialization;
+
 namespace Mohist.Server.Infrastructure.Workspace;
 
 public class WorkspaceStatus
 {
+    [JsonRequired]
     public bool Exists { get; set; }
     public string? Reason { get; set; }
     public string? Branch { get; set; }
