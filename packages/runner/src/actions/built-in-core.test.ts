@@ -24,6 +24,31 @@ describe('core/script timeout enforcement', () => {
     )
   })
 
+  it('KeepsTheTemporaryScriptOutsideTheWorkspaceWhileExecutingFromTheWorkspace', async () => {
+    const workDir = '/tmp/test-workdir'
+    let captured: { args: string[]; cwd: string } | undefined
+
+    await withTestRunnerResources(
+      async () => {
+        const result = await scriptAction({ run: 'git status --porcelain' }, makeHost({ workDir }))
+
+        expect(result).toMatchObject({ output: { exitCode: 0 } })
+        expect(captured?.cwd).toBe(workDir)
+        expect(captured?.args).toHaveLength(1)
+        expect(captured?.args[0]).not.toMatch(new RegExp(`^${workDir}/`))
+        expect(captured?.args[0]).toContain('mohist-script-')
+      },
+      {
+        commandRunner: {
+          run: async (_command, args, cwd) => {
+            captured = { args: [...args], cwd }
+            return { exitCode: 0, stdout: '', stderr: '' }
+          },
+        },
+      },
+    )
+  })
+
   it('MapsAnOverBudgetCommandToTheTimeoutErrorCodeRetainingLaneDiagnostics', async () => {
     await withTestRunnerResources(
       async () => {

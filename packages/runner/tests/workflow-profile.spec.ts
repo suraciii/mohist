@@ -467,7 +467,7 @@ describe('clean-run lane shells', () => {
         expect(invocation.timeoutMs).toBe(lane.timeout)
 
         const scriptPath = invocation.args[0]
-        expect(scriptPath).toMatch(/_\w+\.sh$/)
+        expect(scriptPath).toMatch(/mohist-script-\w+\.sh$/)
         // The lane body is the whole script for one shell invocation; no
         // other lane's commands are mixed into this shell. scriptAction
         // deletes the file after the run, so the content is captured while

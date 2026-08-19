@@ -1,5 +1,6 @@
-import { join } from 'node:path'
 import { randomUUID } from 'node:crypto'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import type { ActionResult, JsonObject } from '../core/types.js'
 import type { ActionHost } from './host.js'
 import { arrayInput, numberInput, stringInput } from '../core/json.js'
@@ -34,7 +35,10 @@ export async function scriptAction(inputs: JsonObject, host: ActionHost): Promis
   const run = stringInput(inputs, 'run')
   if (!run?.trim()) return fail('invalid-input', "Script action requires 'run'")
   const shell = stringInput(inputs, 'shell') || (process.platform === 'win32' ? 'pwsh' : 'bash')
-  const file = join(host.workDir, `_${randomUUID().replace(/-/g, '')}${process.platform === 'win32' ? '.ps1' : '.sh'}`)
+  const file = join(
+    tmpdir(),
+    `mohist-script-${randomUUID().replace(/-/g, '')}${process.platform === 'win32' ? '.ps1' : '.sh'}`,
+  )
   await writeText(file, run)
   try {
     const timeoutMs = numberInput(inputs, 'timeout')
