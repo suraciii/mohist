@@ -120,10 +120,15 @@ Runner process                   physical process
 
 ### Transport
 
-All work, both Workflow and AgentJob, is pull-only: DispatchService computes
-it on poll, and reports go directly to the owner grain. The poll is also the
+All work, both Workflow and AgentJob, is pull-only: DispatchService computes it
+on poll, and reports go directly to the owner grain. The poll is also the
 presence heartbeat (`TouchPresence`). Info travels only through register,
 unregister, and heartbeat-repair; a poll never updates it.
+
+The target Server-to-Runner Workspace and Session control transport uses one
+outbound WebSocket connection. It does not carry work or replace HTTP poll,
+report, or reconciliation. The SignalR-to-WebSocket migration is authoritative
+in [`runner-transport.md`](runner-transport.md).
 
 ### Poll Computation
 
@@ -173,9 +178,12 @@ to the Runner connection and contains:
 - `runtime`: the canonical runtime id, for example `pi` or `opencode`;
 - `ready`: whether this runtime can accept new work now;
 - `generation`: a monotonically increasing runtime instance fence owned by
-  the Runner; and
-- `connectionGeneration`: the registration identity that produced the
-  observation.
+  the Runner.
+
+The poll boundary binds the witness to the current control connection. Runner
+sends its public connection ID with the poll; after matching the current lease,
+Server injects the corresponding process-local `connectionGeneration`. The
+witness itself does not carry or own that Server fence.
 
 The Server treats a missing, malformed, stale, or `ready=false` witness as
 unknown for new claims. It never treats a runtime catalog as a readiness
@@ -353,8 +361,8 @@ There is no `Interrupted` state.
 The Runner process has exactly one process-level critical loop, which owns poll
 cadence and bounded retry of unacknowledged reports. Transport failure does not
 end the loop. Unexpected loop exit terminates the process so the service
-supervisor can restart it. Auxiliary heartbeat or SignalR loops must never keep
-a Runner process alive when it is not polling.
+supervisor can restart it. Auxiliary heartbeat or control-connection loops must
+never keep a Runner process alive when it is not polling.
 
 The reported set, `inFlight` union `awaitingAck`, belongs to the process
 lifecycle and must survive poll failures and reconnection. Otherwise one

@@ -37,6 +37,24 @@ capabilities, and then waits for Server to assign work.
 
 Start Runner **after Server**. It cannot connect while Server is unavailable.
 
+## Connection and Recovery
+
+Runner may lose its Server connection without losing Server-owned work. During
+a disconnect:
+
+- Server-owned work remains available for redelivery.
+- Work results continue retrying after connectivity returns.
+- Session mutation recovery follows that operation's documented contract.
+- New work waits until Runner can report current presence and readiness.
+- A live Workspace inspection fails as unavailable instead of returning a guessed
+  filesystem result.
+- A mutating retry keeps its original business operation identity; reconnecting
+  does not create a replacement intent.
+
+Mohist does not infer success, failure, or a missing Runtime Session from a
+transport timeout. Retry only through the operation-specific recovery path with
+the original identity.
+
 ## Checking Runner State
 
 ```bash
@@ -198,6 +216,14 @@ protocol.
 
 For a long-running Runner managed as a service instead of foreground
 `dev:runner`, see [Self-hosting](self-host.md).
+
+## Implementation Gaps
+
+Some live Runner operations can still return unavailable when their connection
+drops after delivery. Original-outcome recovery is not yet uniform for
+Follow-up, Stop, Session commands, and Workspace removal. Workflow terminal
+status already reconciles after a lost notification. Until this gap closes, do
+not treat an unavailable response as proof that a local effect did not happen.
 
 ---
 
