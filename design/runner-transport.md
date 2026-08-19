@@ -228,7 +228,7 @@ supply them; the migration removes the Runner's legacy unjournaled fallback.
 Step 1 promotes anonymous SignalR payloads to these named DTOs and freezes exact
 JSON names, nullability, and enum spellings in shared fixtures. The carrier
 wrappers above are new; nested domain values and result semantics do not change.
-C# and Go contract tests decode the same checked-in request, success, and error
+C# and TypeScript contract tests decode the same checked-in request, success, and error
 fixtures for every method. No schema generator or generic map-based handler is
 added.
 
