@@ -146,6 +146,11 @@ export class TerminalTaskLogDeliveryStoreImpl implements TerminalTaskLogDelivery
           return cloneRecord(pending)
         }
         if (!sameSnapshot(existing, record)) {
+          // A recovery execution can reach the same work identity while the
+          // first terminal snapshot is still pending. The first durable
+          // snapshot is authoritative for this work; do not turn the second
+          // execution into a fatal result-reporting error.
+          if (existing.state === "pending") return cloneRecord(existing)
           throw new Error(`Terminal task-log payload changed for ${key}`)
         }
         return cloneRecord(existing)

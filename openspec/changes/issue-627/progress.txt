@@ -179,3 +179,16 @@
 - Moved persistence/seed helpers into `DispatchServiceReconciliationPersistenceSpecs.cs` and the stage-lock case into `AgentResultSettlementResourceSpecs.cs`, both partial-class companions with valid `*Specs.cs` names. `npm run check:filesizes`, `npm run format:check`, the affected Runner class (25/25), Agent settlement class (17/17), and architecture rules (28/28) pass.
 - The first post-fix `npm run verify` stopped before any lane because the canonical guard requires a clean index and worktree. The fix is now ready to verify from a clean commit; no verification-only Git changes were observed.
 - Clean committed verification passed from `/tmp/issue-627-verify-clean.log`: all 9 tracks completed with zero failures, cancellations, or timeouts. Totals were Server Spec 3842, Server Unit 2974, Server Architecture 69, Workflow Definition 178, CLI 1887, Web 4768, Runner 1820, Runner integration 11, and Slack 70; file-size and format checks were clean.
+
+## Bootstrap defect: duplicate pending terminal task-log snapshot
+
+- Live verification reproduced `Terminal task-log payload changed` for the same
+  `workflow:run:work` identity when a recovery execution captured a different
+  terminal batch while the first batch was still pending. The Runner then failed
+  before reporting the Agent result and the Workflow deadline blocked the task.
+- The durable outbox now keeps the first pending snapshot authoritative and
+  returns it for a later differing pending write. This preserves the existing
+  work identity and retry path without adding an execution-attempt key or a
+  second server idempotency protocol.
+- Added a focused store regression:
+  `KeepsTheFirstPendingSnapshotWhenARecoveryExecutionDiffers`.

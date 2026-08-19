@@ -95,6 +95,29 @@ Add or extend tests around the domain, Workflow grain, run-store projection, Run
 - Deliver matching late success and failure reports through the additive Runner report binding, then duplicate, incomplete, and mismatched bindings, and verify exactly one original-task outcome with stale, side-effect-free acknowledgements for the rest. Verify that the existing non-Agent report path is unchanged.
 - Verify blocked status, Issue/Inbox attention, event projections, and Runner status preserve the reason and deadline without presenting the attempt as failed or running.
 
+### 7. Keep one pending terminal task-log snapshot per work identity
+
+Bootstrap verification exposed a Runner failure mode: a recovery execution can
+reach the same `ownerKind:ownerId:workId` while the first terminal task-log
+snapshot is still pending, but with a different captured batch. Treating that
+second batch as a fatal local conflict prevents the Agent result from reaching
+the durable report path and turns a duplicate execution into
+`agent-result-unconfirmed`.
+
+The terminal task-log outbox therefore keeps the first durable pending snapshot
+as the authoritative snapshot for that work identity and returns it to the
+caller when a later pending write differs. The later execution still reports
+its result through the normal result/receipt path; terminal log delivery keeps
+retrying the already persisted snapshot. Failed records retain their existing
+conflict handling, including replacement only for the explicit
+`terminal_snapshot_conflict` next-execution case.
+
+An alternative would be to add an execution-attempt component to the terminal
+log identity and make the server accept multiple snapshots per work. That
+would expand the idempotency key, API behavior, cleanup, and tests without
+being required to preserve the authoritative task result. It is rejected in
+favor of the existing work identity boundary.
+
 ## Risks / Trade-offs
 
 - [Cleanup fails after the blocked save] -> The active lease is already removed durably; every external cleanup step is idempotent, retried on reminder replay/activation, and logged for repair.

@@ -58,11 +58,13 @@ describe("TerminalTaskLogDeliveryStore", () => {
     expect(JSON.parse(fileSystem.text!).deliveries).toEqual({})
   })
 
-  it("DoesNotReplaceAnExistingIdentityWithDifferentPayload", async () => {
+  it("KeepsTheFirstPendingSnapshotWhenARecoveryExecutionDiffers", async () => {
     const { store } = await loadedStore()
     await store.putPending(snapshot("original"))
 
-    await expect(store.putPending(snapshot("changed"))).rejects.toThrow(/payload changed/)
+    const duplicate = await store.putPending(snapshot("changed"))
+
+    expect(duplicate.batch.entries[0]?.text).toBe("original")
     expect((await store.listPending())[0]?.batch.entries[0]?.text).toBe("original")
   })
 
