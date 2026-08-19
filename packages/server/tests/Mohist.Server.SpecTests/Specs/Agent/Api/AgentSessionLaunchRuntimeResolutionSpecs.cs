@@ -10,10 +10,10 @@ using Xunit;
 
 namespace Mohist.Server.SpecTests.Specs.Agent.Api;
 
-[Collection("RunnerMutationIntegration")]
-public class AgentSessionLaunchRuntimeResolutionSpecs : AgentSessionLaunchRoutesTestSupport
+public class AgentSessionLaunchRuntimeResolutionSpecs
+    : AgentSessionLaunchRoutesTestSupport, IClassFixture<IsolatedMohistIntegrationFixture>
 {
-    public AgentSessionLaunchRuntimeResolutionSpecs(MohistIntegrationFixture fixture) : base(fixture)
+    public AgentSessionLaunchRuntimeResolutionSpecs(IsolatedMohistIntegrationFixture fixture) : base(fixture)
     {
     }
 
