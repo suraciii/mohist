@@ -321,16 +321,18 @@ export function AgentProfileEditor({ agent, open, onClose, onSaved, operationsHo
                 modelVariants={modelVariantsMap}
                 valueVariant={variant}
                 onChangeModelVariant={(m, v) => {
+                  const modelChanged = m !== model
                   setModel(m)
                   setVariant(v)
-                  setReasoningEffort(null)
+                  if (modelChanged) setReasoningEffort(null)
                 }}
                 modelReasoningEfforts={reasoningEffortsMap}
                 valueReasoningEffort={reasoningEffort}
                 onChangeModelReasoningEffort={(m, effort) => {
+                  const modelChanged = m !== model
                   setModel(m)
                   setReasoningEffort(effort)
-                  setVariant(null)
+                  if (modelChanged) setVariant(null)
                 }}
               />
             </div>

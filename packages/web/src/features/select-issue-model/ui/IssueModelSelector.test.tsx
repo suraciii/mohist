@@ -181,6 +181,87 @@ describe('IssueModelSelector default-model variant chips', () => {
     })
   })
 
+  it('preserves the default true variant when changing Pi reasoning effort', async () => {
+    mocks.useWorkflowProfiles.mockReturnValue({
+      data: [{ id: 'team/pi', displayName: 'Pi workflow', description: '', isDefault: false, agentRuntime: 'pi' }],
+    })
+    mocks.useEffectiveDefaultWorkflowProfile.mockReturnValue({ effectiveTemplateId: 'team/pi' })
+    mocks.useAvailableModelIds.mockReturnValue({
+      data: {
+        models: ['pi/anthropic/claude'],
+        modelVariants: { 'pi/anthropic/claude': ['balanced'] },
+        reasoningEfforts: { 'pi/anthropic/claude': ['low', 'high'] },
+      },
+      isLoading: false,
+      error: null,
+    })
+    mocks.getIssueWorkflowVariables.mockResolvedValue({
+      vars: {
+        agent: {
+          model: 'pi/anthropic/claude',
+          reasoningEffort: 'low',
+          variant: 'balanced',
+        },
+      },
+      stages: {},
+    })
+    renderSelector({ currentModel: 'pi/anthropic/claude' })
+
+    fireEvent.click(await waitFor(() => screen.getByTestId('issue-coder-model-trigger')))
+    fireEvent.click(await screen.findByTestId('issue-coder-model-variant-pi/anthropic/claude-high'))
+
+    await waitFor(() => {
+      expect(mocks.patchIssueWorkflowDefinitionVar).toHaveBeenCalledWith(
+        42,
+        'agent',
+        { model: 'pi/anthropic/claude', reasoningEffort: 'high', variant: 'balanced' },
+        'proj_test',
+      )
+    })
+  })
+
+  it('clears the default true variant when selecting Pi effort for another model', async () => {
+    mocks.useWorkflowProfiles.mockReturnValue({
+      data: [{ id: 'team/pi', displayName: 'Pi workflow', description: '', isDefault: false, agentRuntime: 'pi' }],
+    })
+    mocks.useEffectiveDefaultWorkflowProfile.mockReturnValue({ effectiveTemplateId: 'team/pi' })
+    mocks.useAvailableModelIds.mockReturnValue({
+      data: {
+        models: ['pi/anthropic/claude', 'pi/openai/gpt'],
+        modelVariants: { 'pi/anthropic/claude': ['balanced'] },
+        reasoningEfforts: {
+          'pi/anthropic/claude': ['low'],
+          'pi/openai/gpt': ['high'],
+        },
+      },
+      isLoading: false,
+      error: null,
+    })
+    mocks.getIssueWorkflowVariables.mockResolvedValue({
+      vars: {
+        agent: {
+          model: 'pi/anthropic/claude',
+          reasoningEffort: 'low',
+          variant: 'balanced',
+        },
+      },
+      stages: {},
+    })
+    renderSelector({ currentModel: 'pi/anthropic/claude' })
+
+    fireEvent.click(await waitFor(() => screen.getByTestId('issue-coder-model-trigger')))
+    fireEvent.click(await screen.findByTestId('issue-coder-model-variant-pi/openai/gpt-high'))
+
+    await waitFor(() => {
+      expect(mocks.patchIssueWorkflowDefinitionVar).toHaveBeenCalledWith(
+        42,
+        'agent',
+        { model: 'pi/openai/gpt', reasoningEffort: 'high', variant: null },
+        'proj_test',
+      )
+    })
+  })
+
   it('selects the default variant (no variant) when the model body is clicked', async () => {
     mocks.useAvailableModelIds.mockReturnValue({
       data: {
@@ -270,9 +351,7 @@ describe('IssueModelSelector default-model variant chips', () => {
 
     const clearOption = await waitFor(() => {
       const items = document.querySelectorAll('[cmdk-item]')
-      const found = Array.from(items).find(
-        (el) => el.textContent?.includes('Use default'),
-      )
+      const found = Array.from(items).find((el) => el.textContent?.includes('Use default'))
       if (!found) throw new Error('clear option not found')
       return found as HTMLElement
     })
@@ -424,18 +503,13 @@ describe('IssueModelSelector default-model popover accessibility and keyboard', 
     const options = await waitFor(() => screen.getAllByRole('option'))
     expect(options.length).toBeGreaterThanOrEqual(2)
 
-    const claudeOption = options.find(
-      (o) => o.getAttribute('data-model-id') === 'anthropic/claude',
-    )
+    const claudeOption = options.find((o) => o.getAttribute('data-model-id') === 'anthropic/claude')
     expect(claudeOption).toBeTruthy()
     expect(claudeOption!.getAttribute('aria-selected')).toBe('true')
   })
 
   it('renders Override, Recent, and All-models sections as labeled groups', async () => {
-    window.localStorage.setItem(
-      'mohist:recent-issue-models',
-      JSON.stringify(['openai/gpt-4']),
-    )
+    window.localStorage.setItem('mohist:recent-issue-models', JSON.stringify(['openai/gpt-4']))
     mocks.useAvailableModelIds.mockReturnValue({
       data: {
         models: ['anthropic/claude', 'openai/gpt-4'],
