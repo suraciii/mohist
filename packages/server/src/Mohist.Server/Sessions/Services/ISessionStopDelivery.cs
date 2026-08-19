@@ -1,4 +1,3 @@
-using Mohist.Server.Api;
 using Mohist.Server.Infrastructure.Hosting;
 using Mohist.Server.Sessions.Domain;
 
@@ -53,6 +52,8 @@ public static class SessionStopDeliveryArbitration
 public sealed record SessionStopDeliveryResponse(
     RunnerStopReply? Reply,
     bool DispatchStarted);
+
+public sealed record RunnerStopReply(string? State, bool? InterruptUnconfirmed = null);
 
 public sealed record SessionStopDeliveryResult(
     AgentSessionStopDisposition Disposition,

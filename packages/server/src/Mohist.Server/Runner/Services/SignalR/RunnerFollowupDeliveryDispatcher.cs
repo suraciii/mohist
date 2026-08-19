@@ -1,4 +1,5 @@
 using Microsoft.AspNetCore.SignalR;
+using Mohist.Server.Contracts;
 using Mohist.Server.Sessions.Services;
 
 namespace Mohist.Server.Runner.Services.SignalR;
@@ -30,51 +31,41 @@ public sealed class RunnerFollowupDeliveryDispatcher : IFollowupDeliveryDispatch
         if (string.IsNullOrWhiteSpace(connectionId))
             return new FollowupDeliveryResult(false);
 
-        object binding = new
-        {
-            runtime = request.Runtime,
-            runtimeSessionId = request.RuntimeSessionId,
-            runnerId = request.RunnerId,
-            workDir = request.WorkDir,
-        };
-        object target = string.Equals(request.SourceKind, "workflow", StringComparison.Ordinal)
-            ? new
-            {
-                kind = "workflow",
-                projectId = request.ProjectId,
-                workflowRunId = request.WorkflowRunId,
-                sessionName = request.SessionName,
-                sessionId = request.SessionId,
+        var binding = new RunnerSessionBinding(
+            request.Runtime,
+            request.RuntimeSessionId,
+            request.RunnerId,
+            request.WorkDir);
+        var target = string.Equals(request.SourceKind, "workflow", StringComparison.Ordinal)
+            ? new RunnerSessionTarget(
+                "workflow",
+                request.ProjectId,
                 binding,
-            }
-            : new
-            {
-                kind = "generic",
-                projectId = request.ProjectId,
-                sessionId = request.SessionId,
-                definition = request.Definition,
+                WorkflowRunId: request.WorkflowRunId,
+                SessionName: request.SessionName,
+                SessionId: request.SessionId)
+            : new RunnerSessionTarget(
+                "generic",
+                request.ProjectId,
                 binding,
-            };
-        var payload = new
-        {
+                SessionId: request.SessionId,
+                Definition: request.Definition);
+        var payload = new FollowupParams(
             target,
-            text = string.Join("\n", request.InputTexts),
-            operationId = request.OperationId,
-            inputId = request.InputId,
-            turnId = request.TurnId,
-            slackExecutionContext = request.SlackExecutionContext,
-            attachments = request.Attachments is { Count: > 0 }
+            string.Join("\n", request.InputTexts),
+            request.OperationId,
+            request.InputId,
+            request.TurnId!,
+            request.SlackExecutionContext,
+            request.Attachments is { Count: > 0 }
                 ? request.Attachments
-                    .Select(descriptor => new
-                    {
-                        id = descriptor.Id,
-                        name = descriptor.OriginalFileName,
-                        contentType = descriptor.ContentType,
-                        size = descriptor.Size,
-                    })
+                    .Select(descriptor => new FollowupAttachmentDescriptor(
+                        descriptor.Id,
+                        descriptor.OriginalFileName,
+                        descriptor.ContentType,
+                        descriptor.Size))
                     .ToArray()
-                : null,
-        };
+                : null);
 
         try
         {
@@ -106,5 +97,3 @@ public sealed class RunnerFollowupDeliveryDispatcher : IFollowupDeliveryDispatch
         }
     }
 }
-
-public sealed record RunnerFollowupDeliveryResult(bool Accepted, string? Error = null);

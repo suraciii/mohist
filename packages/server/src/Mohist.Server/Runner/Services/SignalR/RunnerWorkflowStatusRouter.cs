@@ -1,6 +1,7 @@
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.Extensions.Logging;
 using Mohist.Server.Infrastructure.Events;
+using Mohist.Server.Contracts;
 using Mohist.Server.Runner.Grains;
 using Mohist.Server.Workflow.Domain.Run;
 using Mohist.Server.Workflow.Grains;
@@ -118,14 +119,3 @@ public sealed class RunnerWorkflowStatusRouter : IRunnerWorkflowStatusRouter
         }
     }
 }
-
-/// <summary>
-/// Wire payload for the runner-side SignalR method
-/// <c>ReceiveWorkflowRunStatus</c>. The status string is the canonical
-/// <see cref="WorkflowRunStatus"/> name (<c>Completed</c> or <c>Stopped</c>)
-/// and is distinguishable from any non-terminal state
-/// (e.g. <c>Running</c>, <c>Paused</c>, <c>AwaitingApproval</c>) by the
-/// runner. The runner never receives <c>null</c> in this channel: the
-/// router only fires on terminal events.
-/// </summary>
-public sealed record WorkflowRunStatusNotification(string WorkflowRunId, string Status);
