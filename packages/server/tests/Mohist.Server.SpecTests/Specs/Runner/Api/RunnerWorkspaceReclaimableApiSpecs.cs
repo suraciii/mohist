@@ -15,7 +15,6 @@ namespace Mohist.Server.SpecTests.Specs.Runner.Api;
 /// cleanup guard: the runner asks the server whether a workspace it
 /// materialized may be reclaimed (archived, or no active bound session).
 /// </summary>
-[Collection("MohistIntegration")]
 public sealed class RunnerWorkspaceReclaimableApiSpecs
 {
     private readonly MohistIntegrationFixture _fixture;

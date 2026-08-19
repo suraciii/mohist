@@ -20,7 +20,6 @@ using Xunit;
 
 namespace Mohist.Server.SpecTests.Specs.Workflow.Api;
 
-[Collection("IntegrationWorkflow")]
 public partial class WorkflowRunControlApiSpecs
 {
     private static readonly JsonSerializerOptions ReadJsonOptions = new(JsonSerializerDefaults.Web);

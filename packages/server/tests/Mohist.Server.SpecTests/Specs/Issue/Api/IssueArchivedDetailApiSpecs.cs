@@ -14,7 +14,6 @@ namespace Mohist.Server.SpecTests.Specs.Issue.Api;
 /// and error-code assertions that must be driven through
 /// <c>HttpClient</c>.
 /// </summary>
-[Collection("IntegrationIssue")]
 public class IssueArchivedDetailApiSpecs
 {
     private readonly HttpClient _client;

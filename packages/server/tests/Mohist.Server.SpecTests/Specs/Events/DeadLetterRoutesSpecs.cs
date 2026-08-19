@@ -13,7 +13,6 @@ using Xunit;
 
 namespace Mohist.Server.SpecTests.Specs.Events;
 
-[Collection("IntegrationMisc")]
 public sealed class DeadLetterRoutesSpecs
 {
     private readonly MohistIntegrationFixture _fixture;

@@ -23,14 +23,14 @@ using Xunit;
 
 namespace Mohist.Server.SpecTests.Specs.Slack;
 
-[Collection("SlackReplyAnchorIngress")]
-public sealed class SlackReplyAnchorIngressSpecs : IAsyncLifetime
+public sealed class SlackReplyAnchorIngressSpecs
+    : IAsyncLifetime, IClassFixture<IsolatedMohistIntegrationFixture>
 {
     private readonly MohistIntegrationFixture _fixture;
     private readonly List<string> _runnerIds = [];
     private readonly Dictionary<string, string> _connectionLeases = new(StringComparer.Ordinal);
 
-    public SlackReplyAnchorIngressSpecs(MohistIntegrationFixture fixture) => _fixture = fixture;
+    public SlackReplyAnchorIngressSpecs(IsolatedMohistIntegrationFixture fixture) => _fixture = fixture;
 
     public ValueTask InitializeAsync() => ValueTask.CompletedTask;
 

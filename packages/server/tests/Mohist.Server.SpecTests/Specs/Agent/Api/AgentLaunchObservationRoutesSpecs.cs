@@ -23,10 +23,9 @@ namespace Mohist.Server.SpecTests.Specs.Agent.Api;
 ///   original Job/Turn
 /// - launch 201 surfaces all four stable references plus the observation URL
 /// </summary>
-[Collection("IntegrationExtended")]
-public class AgentLaunchObservationRoutesSpecs : AgentSessionLaunchRoutesTestSupport
+public class AgentLaunchObservationRoutesSpecs : AgentSessionLaunchRoutesTestSupport, IClassFixture<IsolatedMohistIntegrationFixture>
 {
-    public AgentLaunchObservationRoutesSpecs(MohistIntegrationFixture fixture) : base(fixture)
+    public AgentLaunchObservationRoutesSpecs(IsolatedMohistIntegrationFixture fixture) : base(fixture)
     {
     }
 

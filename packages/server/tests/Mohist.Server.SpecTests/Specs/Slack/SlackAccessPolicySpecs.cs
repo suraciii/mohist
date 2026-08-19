@@ -30,7 +30,6 @@ namespace Mohist.Server.SpecTests.Specs.Slack;
 /// the default <c>owner_only</c> policy so a future widening
 /// (allowlist, anyone) cannot silently regress the Owner path.
 /// </summary>
-[Collection("MohistIntegration")]
 public sealed partial class SlackAccessPolicySpecs
 {
     private readonly Dictionary<string, string> _connectionLeases = new(StringComparer.Ordinal);

@@ -42,7 +42,6 @@ public abstract class AgentSessionLaunchRoutesTestSupport
         catch
         {
             await CompleteClaimedAgentJobAsync(runnerId, claim.AgentJobId, claim.Dispatch.WorkId);
-            await DrainDispatchAsync(runnerId);
             throw;
         }
         return claim;
@@ -81,7 +80,7 @@ public abstract class AgentSessionLaunchRoutesTestSupport
         Assert.Equal(WorkDispatchOwnerKinds.AgentJob, claim.Dispatch.OwnerKind);
     }
 
-    protected async Task<PollSnapshot> PollDispatchForSessionAsync(
+    protected async Task<ClaimedDispatch> ClaimDispatchForSessionAsync(
         string agentJobId,
         string runnerId,
         string? expectedSessionId)
@@ -89,22 +88,18 @@ public abstract class AgentSessionLaunchRoutesTestSupport
         await _fixture.AgentJobDispatches.WaitForAssignmentPreparedAsync(
             agentJobId,
             TimeSpan.FromSeconds(5));
-        var assignment = await _fixture.Grains
-            .GetGrain<IAgentJobGrain>(agentJobId)
-            .GetRuntimeSnapshotAsync();
+        var job = _fixture.Grains.GetGrain<IAgentJobGrain>(agentJobId);
+        var assignment = await job.GetRuntimeSnapshotAsync();
         Assert.Equal(runnerId, assignment.RunnerId);
-
-        var dispatch = (await TestWait.ForAsync(
-            () => PollDispatchOnceAsync(runnerId, agentJobId),
-            candidate => candidate is not null,
-            TimeSpan.FromSeconds(5),
-            TimeSpan.FromMilliseconds(100),
-            $"a polled dispatch on runner '{runnerId}' for AgentJob '{agentJobId}'",
-            _fixture.ReleaseDispatchBackoffAsync))!;
-
-        Assert.Equal(agentJobId, dispatch.AgentJobId);
-        Assert.Equal(expectedSessionId, dispatch.AgentSessionId);
-        return dispatch;
+        var claim = Assert.IsType<ClaimResult>(await job.ClaimNextAsync(runnerId));
+        AssertPreparedAgentJobClaim(claim, agentJobId, runnerId, expectedSessionId);
+        return new ClaimedDispatch(
+            claim.Dispatch.WorkflowRunId,
+            claim.Dispatch.WorkId,
+            claim.AgentJobId,
+            claim.Dispatch.ProjectId,
+            claim.Dispatch.AgentSessionId,
+            claim.Dispatch.OwnerKind);
     }
 
     protected async Task<string> CreateRunnerHomeWorkspaceAsync(
@@ -160,57 +155,6 @@ public abstract class AgentSessionLaunchRoutesTestSupport
             await CompleteClaimedAgentJobAsync(runnerId!, agentJobId, snapshot.CurrentWorkId!);
         }
 
-        if (!string.IsNullOrWhiteSpace(runnerId))
-            await DrainDispatchAsync(runnerId!);
-    }
-
-    private async Task<PollSnapshot?> PollDispatchOnceAsync(
-        string runnerId,
-        string expectedAgentJobId)
-    {
-        using var poll = await _fixture.Client.PostAsync($"/api/runner/{runnerId}/poll", content: null);
-        var dispatches = await poll.ReadDispatchElementsAsync();
-        PollSnapshot? match = null;
-        var others = new List<JsonElement>();
-        foreach (var data in dispatches)
-        {
-            var polledSessionId = data.TryGetProperty("agentSessionId", out var sessionIdElement)
-                && sessionIdElement.ValueKind != JsonValueKind.Null
-                ? sessionIdElement.GetString()
-                : null;
-            var polledAgentJobId = data.TryGetProperty("agentJobId", out var agentJobIdElement)
-                && agentJobIdElement.ValueKind != JsonValueKind.Null
-                ? agentJobIdElement.GetString()
-                : null;
-            if (match is null && polledAgentJobId == expectedAgentJobId)
-            {
-                var workId = data.GetProperty("workId").GetString() ?? string.Empty;
-                var projectId = data.TryGetProperty("projectId", out var projectIdElement)
-                    && projectIdElement.ValueKind != JsonValueKind.Null
-                    ? projectIdElement.GetString()
-                    : null;
-                var ownerKind = data.TryGetProperty("ownerKind", out var ownerKindElement)
-                    && ownerKindElement.ValueKind != JsonValueKind.Null
-                    ? ownerKindElement.GetString()
-                    : null;
-                match = new PollSnapshot(
-                    WorkflowRunId: data.GetProperty("workflowRunId").GetString() ?? string.Empty,
-                    WorkId: workId,
-                    AgentJobId: polledAgentJobId,
-                    ProjectId: projectId,
-                    AgentSessionId: polledSessionId,
-                    OwnerKind: ownerKind);
-            }
-            else
-            {
-                others.Add(data);
-            }
-        }
-
-        foreach (var other in others)
-            await DrainDispatchElementAsync(runnerId, other);
-
-        return match;
     }
 
     protected async Task DrainDispatchAsync(string runnerId)
@@ -246,7 +190,7 @@ public abstract class AgentSessionLaunchRoutesTestSupport
         await CompleteClaimedAgentJobAsync(runnerId, agentJobId!, workId!);
     }
 
-    protected sealed record PollSnapshot(
+    protected sealed record ClaimedDispatch(
         string WorkflowRunId,
         string WorkId,
         string? AgentJobId,

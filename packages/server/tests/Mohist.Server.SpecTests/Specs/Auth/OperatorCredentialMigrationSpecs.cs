@@ -12,7 +12,6 @@ namespace Mohist.Server.SpecTests.Specs.Auth;
 /// like requests with no credential at all. A valid Bearer credential
 /// makes the legacy header irrelevant.
 /// </summary>
-[Collection("IntegrationMisc")]
 public sealed class OperatorCredentialMigrationSpecs(MohistIntegrationFixture fixture)
 {
     private const string LegacyHeaderName = "X-Mohist-Operator-Token";

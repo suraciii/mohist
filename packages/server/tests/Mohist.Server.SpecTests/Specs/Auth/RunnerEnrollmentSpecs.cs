@@ -15,7 +15,6 @@ namespace Mohist.Server.SpecTests.Specs.Auth;
 /// rejects that runner's requests immediately while others keep working;
 /// re-running the install flow restores a revoked runner.
 /// </summary>
-[Collection("IntegrationRunner")]
 public sealed class RunnerEnrollmentSpecs(MohistIntegrationFixture fixture)
 {
     private const string EnrollmentTokensPath = "/api/runners/enrollment-tokens";

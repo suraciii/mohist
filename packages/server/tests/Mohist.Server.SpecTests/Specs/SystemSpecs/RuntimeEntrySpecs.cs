@@ -22,12 +22,11 @@ using Xunit;
 
 namespace Mohist.Server.SpecTests.Specs.SystemSpecs;
 
-[Collection("PlatformIntegration")]
-public class RuntimeEntrySpecs
+public class RuntimeEntrySpecs : IClassFixture<IsolatedMohistIntegrationFixture>
 {
     private readonly MohistIntegrationFixture _fixture;
 
-    public RuntimeEntrySpecs(MohistIntegrationFixture fixture)
+    public RuntimeEntrySpecs(IsolatedMohistIntegrationFixture fixture)
     {
         _fixture = fixture;
     }

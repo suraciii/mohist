@@ -24,8 +24,8 @@ namespace Mohist.Server.SpecTests.Specs.DirectApi;
 /// Session input. These tests pin replay, conflict, durable rejection, and
 /// the write-scope pipeline for the follow-up route.
 /// </summary>
-[Collection("IntegrationMisc")]
-public sealed class DirectApiFollowupSpecs(MohistIntegrationFixture fixture)
+[Collection("PublicProjectionIntegration")]
+public sealed class DirectApiFollowupSpecs(PublicProjectionIntegrationFixture fixture)
 {
     [Fact]
     public async Task MissingOrForeignSession_ReturnsSessionNotFoundWithoutMapping()

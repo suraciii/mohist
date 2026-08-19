@@ -8,7 +8,6 @@ using Xunit;
 
 namespace Mohist.Server.SpecTests.Specs.Slack;
 
-[Collection("MohistIntegration")]
 public sealed class SlackLegacyRouteRetirementSpecs
 {
     private static readonly string[] RetiredRoutes =

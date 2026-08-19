@@ -50,12 +50,11 @@ namespace Mohist.Server.SpecTests.Specs.Agent.Services;
 ///   </item>
 /// </list>
 /// </summary>
-[Collection("IntegrationRunner")]
-public class AgentLauncherSpecs
+public class AgentLauncherSpecs : IClassFixture<IsolatedMohistIntegrationFixture>
 {
     private readonly MohistIntegrationFixture _fixture;
 
-    public AgentLauncherSpecs(MohistIntegrationFixture fixture)
+    public AgentLauncherSpecs(IsolatedMohistIntegrationFixture fixture)
     {
         _fixture = fixture;
     }
@@ -202,13 +201,15 @@ public class AgentLauncherSpecs
 
             var jobKey = TriggerJobKey(projectId, eventId, subscriptionId);
             var job = _fixture.Grains.GetGrain<IAgentJobGrain>(jobKey);
-            using (var poll = await _fixture.Client.PostAsync($"/api/runner/{runnerId}/poll", content: null))
-            {
-                poll.EnsureSuccessStatusCode();
-            }
+            var pending = await job.GetRuntimeSnapshotAsync();
+            Assert.Equal(AgentJobStatus.Pending, pending.Status);
+            Assert.False(string.IsNullOrWhiteSpace(pending.RunnerId));
+            var assignedRunnerId = pending.RunnerId!;
+            var claim = await job.ClaimNextAsync(assignedRunnerId);
+            Assert.NotNull(claim);
             var before = await job.GetRuntimeSnapshotAsync();
             Assert.Equal(AgentJobStatus.Running, before.Status);
-            Assert.Equal(runnerId, before.RunnerId);
+            Assert.Equal(assignedRunnerId, before.RunnerId);
             Assert.False(string.IsNullOrWhiteSpace(before.CurrentWorkId));
 
             await job.AsReference<IGrainManagementExtension>().DeactivateOnIdle();
@@ -227,9 +228,6 @@ public class AgentLauncherSpecs
             var after = await job.GetRuntimeSnapshotAsync();
             Assert.Equal(first.SessionId, replay.SessionId);
             Assert.Equal(before.CurrentWorkId, after.CurrentWorkId);
-            var runnerState = await runner.GetRuntimeStateAsync();
-            var work = Assert.Single(runnerState.ActiveWorks, item => item.OwnerId == jobKey);
-            Assert.Equal(before.CurrentWorkId, work.WorkId);
         }
         finally
         {

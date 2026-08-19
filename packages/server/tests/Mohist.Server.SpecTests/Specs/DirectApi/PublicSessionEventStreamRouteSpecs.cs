@@ -23,8 +23,8 @@ namespace Mohist.Server.SpecTests.Specs.DirectApi;
 /// reader. These specs exercise the durable journal page shape and the
 /// cursor lifecycle without using the live event bus or UI timeline.
 /// </summary>
-[Collection("IntegrationExtended")]
-public sealed class PublicSessionEventStreamRouteSpecs(MohistIntegrationFixture fixture)
+[Collection("PublicProjectionIntegration")]
+public sealed class PublicSessionEventStreamRouteSpecs(PublicProjectionIntegrationFixture fixture)
 {
     private static readonly string[] ExecutionKeys =
     [
@@ -441,20 +441,14 @@ public sealed class PublicSessionEventStreamRouteSpecs(MohistIntegrationFixture 
             await sessions.SaveAsync(sessionId, session);
         }
 
-        await TestWait.ForAsync(
-            probe: async () =>
-            {
-                await using var db = await fixture.Services
-                    .GetRequiredService<IDbContextFactory<MohistDbContext>>()
-                    .CreateDbContextAsync();
-                return await db.PublicStreamStates.AsNoTracking()
-                    .AnyAsync(row => row.SessionId == sessionId);
-            },
-            isDone: exists => exists,
-            timeout: TimeSpan.FromSeconds(30),
-            step: TimeSpan.FromMilliseconds(20),
-            description: "the hosted public projector to create the Session stream",
-            advance: () => fixture.Client.GetAsync("/api/health"));
+        await fixture.Services.GetRequiredService<PublicProjectionNudge>().NudgeAndWaitAsync();
+        await using (var db = await fixture.Services
+            .GetRequiredService<IDbContextFactory<MohistDbContext>>()
+            .CreateDbContextAsync())
+        {
+            Assert.True(await db.PublicStreamStates.AsNoTracking()
+                .AnyAsync(row => row.SessionId == sessionId));
+        }
 
         await using (var db = await fixture.Services
             .GetRequiredService<IDbContextFactory<MohistDbContext>>()

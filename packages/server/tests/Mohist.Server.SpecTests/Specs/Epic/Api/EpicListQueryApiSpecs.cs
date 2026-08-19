@@ -23,7 +23,6 @@ namespace Mohist.Server.SpecTests.Specs.Epic.Api;
 ///   result in error codes.</item>
 /// </list>
 /// </summary>
-[Collection("PlatformIntegration")]
 public class EpicListQueryApiSpecs
 {
     private readonly MohistIntegrationFixture _fixture;

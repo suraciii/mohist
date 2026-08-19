@@ -27,8 +27,8 @@ namespace Mohist.Server.SpecTests.Specs.DirectApi;
 /// turns an unconsumed source watermark into 503 projection_lag with a
 /// retry hint — never a stale snapshot and never the five-state unknown.
 /// </summary>
-[Collection("IntegrationMisc")]
-public sealed class PublicExecutionReadRouteSpecs(MohistIntegrationFixture fixture)
+[Collection("PublicProjectionIntegration")]
+public sealed class PublicExecutionReadRouteSpecs(PublicProjectionIntegrationFixture fixture)
 {
     private const string Prompt = "Investigate the failed deployment";
 
@@ -553,41 +553,18 @@ public sealed class PublicExecutionReadRouteSpecs(MohistIntegrationFixture fixtu
         return await ReadAsync(client, $"/api/v1/projects/{projectId}/agent-turns/{turnId}");
     }
 
-    /// <summary>
-    /// Polls a public read until it serves the current projection. A
-    /// 404 or 503 answer is part of convergence — the anchor appears
-    /// only once the projector consumes the seeded facts — so the
-    /// probe keeps waiting on both; any other failure is fatal. A caller
-    /// may also require a specific public state when the fixture writes
-    /// the canonical Job and Session in separate commits.
-    /// </summary>
     private async Task<JsonDocument> ReadAsync(
         HttpClient client,
         string path,
         Func<JsonElement, bool>? isReady = null)
     {
-        var body = await TestWait.ForAsync(
-            probe: async () =>
-            {
-                using var response = await client.GetAsync(path);
-                if (response.StatusCode is HttpStatusCode.ServiceUnavailable or HttpStatusCode.NotFound)
-                {
-                    return null;
-                }
-
-                Assert.True(
-                    response.IsSuccessStatusCode,
-                    $"{path} answered {response.StatusCode}: {await response.Content.ReadAsStringAsync()}");
-                var content = await response.Content.ReadAsStringAsync();
-                using var document = JsonDocument.Parse(content);
-                return isReady is null || isReady(document.RootElement) ? content : null;
-            },
-            isDone: content => content is not null,
-            timeout: TimeSpan.FromSeconds(30),
-            step: TimeSpan.FromMilliseconds(20),
-            description: $"the public read of {path} to become current",
-            advance: () => fixture.Client.GetAsync("/api/health"));
-        return JsonDocument.Parse(body!);
+        await NudgeProjectorAsync();
+        using var response = await client.GetAsync(path);
+        var content = await response.Content.ReadAsStringAsync();
+        Assert.True(response.IsSuccessStatusCode, $"{path} answered {response.StatusCode}: {content}");
+        var document = JsonDocument.Parse(content);
+        Assert.True(isReady is null || isReady(document.RootElement), content);
+        return document;
     }
     private async Task RewindJobCheckpointAsync(string jobKey)
     {
@@ -616,7 +593,7 @@ public sealed class PublicExecutionReadRouteSpecs(MohistIntegrationFixture fixtu
     private async Task NudgeProjectorAsync()
     {
         await using var scope = fixture.Services.CreateAsyncScope();
-        scope.ServiceProvider.GetRequiredService<IPublicProjectionNudge>().Nudge();
+        await scope.ServiceProvider.GetRequiredService<PublicProjectionNudge>().NudgeAndWaitAsync();
     }
 
     private static JsonElement Json(JsonDocument document) => document.RootElement;

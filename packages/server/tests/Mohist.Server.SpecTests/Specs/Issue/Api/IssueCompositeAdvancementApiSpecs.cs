@@ -35,7 +35,6 @@ namespace Mohist.Server.SpecTests.Specs.Issue.Api;
 /// and
 /// <c>openspec/changes/issue-419/specs/parent-status-aggregation/spec.md</c>.
 /// </summary>
-[Collection("IssueLifecycle")]
 public class IssueCompositeAdvancementApiSpecs
 {
     private readonly HttpClient _client;

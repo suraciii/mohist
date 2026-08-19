@@ -7,6 +7,8 @@ using Mohist.Server.SpecTests.Specs.Slack;
 using Mohist.Server.SpecTests.Specs.GitHub;
 using Xunit;
 
+[assembly: AssemblyFixture(typeof(Mohist.Server.SpecTests.Support.MohistIntegrationFixture))]
+
 namespace Mohist.Server.SpecTests.Support;
 
 /// <summary>
@@ -20,58 +22,26 @@ public class SlackLeaseRoutesCollection : ICollectionFixture<SlackAdapterLeaseRo
 [CollectionDefinition("SlackControlPlaneRoutes")]
 public class SlackControlPlaneRoutesCollection : ICollectionFixture<SlackControlPlaneRoutesFixture>;
 
-// Parallel integration collections. Each shares one MohistIntegrationFixture
-// (one in-memory silo + one TestServer web host), so the collections run
-// concurrently without opening host ports. Within a collection the
-// classes still run serially (xUnit semantics), so max parallelism equals the
-// number of these collections. Cluster-scoped state that looks global
-// (RunnerRegistryKeys.Global, IManagementGrain.ForceActivationCollection,
-// cross-class FakeTimeProvider.Advance) lives inside each collection's own
-// cluster/fixture, so it never crosses collection boundaries and does not
-// require DisableParallelization. See design/testing.md "Server Spec Parallelism".
+// Full-stack HTTP/Orleans specs receive the assembly fixture directly. Their
+// default per-class collections remain available for parallel scheduling.
 
-[CollectionDefinition("MohistIntegration")]
-public class MohistIntegrationCollection : ICollectionFixture<MohistIntegrationFixture>;
+[CollectionDefinition("PublicProjectionIntegration")]
+public class PublicProjectionIntegrationCollection
+    : ICollectionFixture<PublicProjectionIntegrationFixture>;
 
-[CollectionDefinition("SlackReplyAnchorIngress")]
-public class SlackReplyAnchorIngressCollection : ICollectionFixture<MohistIntegrationFixture>;
+[CollectionDefinition("RunnerMutationIntegration")]
+public class RunnerMutationIntegrationCollection : ICollectionFixture<MohistIntegrationFixture>;
 
-[CollectionDefinition("IntegrationExtended")]
-public class IntegrationExtendedCollection : ICollectionFixture<MohistIntegrationFixture>;
-
-[CollectionDefinition("PlatformIntegration")]
-public class PlatformIntegrationCollection : ICollectionFixture<MohistIntegrationFixture>;
-
-[CollectionDefinition("IntegrationIssue")]
-public class IntegrationIssueCollection : ICollectionFixture<MohistIntegrationFixture>;
-
-[CollectionDefinition("IssueLifecycle")]
-public class IssueLifecycleCollection : ICollectionFixture<MohistIntegrationFixture>;
-
-[CollectionDefinition("IssueProfile")]
-public class IssueProfileCollection : ICollectionFixture<MohistIntegrationFixture>;
-
-[CollectionDefinition("IntegrationApi")]
-public class IntegrationApiCollection : ICollectionFixture<MohistIntegrationFixture>;
-
-[CollectionDefinition("IntegrationSessions")]
-public class IntegrationSessionsCollection : ICollectionFixture<MohistIntegrationFixture>;
+[CollectionDefinition("RepositoryDataUpgrade")]
+public class RepositoryDataUpgradeCollection
+    : ICollectionFixture<Specs.Issue.Api.RepositoryDataUpgradeFixture>;
 
 [CollectionDefinition("AgentStatusHistoryBounded")]
 public class AgentStatusHistoryBoundedCollection
     : ICollectionFixture<Specs.Sessions.AgentStatusHistoryBoundedFixture>;
 
-[CollectionDefinition("IntegrationWorkflow")]
-public class IntegrationWorkflowCollection : ICollectionFixture<MohistIntegrationFixture>;
-
-[CollectionDefinition("IntegrationRunner")]
-public class IntegrationRunnerCollection : ICollectionFixture<MohistIntegrationFixture>;
-
 [CollectionDefinition("GitHubFeed")]
 public class GitHubFeedCollection : ICollectionFixture<GitHubFeedFixture>;
-
-[CollectionDefinition("IntegrationMisc")]
-public class IntegrationMiscCollection : ICollectionFixture<MohistIntegrationFixture>;
 
 // OTLP/query route specs share one OtlpRoutesWebApplicationFactory (web host
 // + in-memory silo). Tests reset the otel

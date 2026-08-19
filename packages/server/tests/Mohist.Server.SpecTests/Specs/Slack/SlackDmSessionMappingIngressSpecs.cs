@@ -29,13 +29,12 @@ namespace Mohist.Server.SpecTests.Specs.Slack;
 /// <c>SlackDmSessionMappingStoreTests</c> (provider-side round-trip) and the
 /// spec-level <c>SlackDmSessionMappingMigrationSpecs</c> (schema surface).
 /// </summary>
-[Collection("MohistIntegration")]
-public sealed class SlackDmSessionMappingIngressSpecs
+public sealed class SlackDmSessionMappingIngressSpecs : IClassFixture<IsolatedMohistIntegrationFixture>
 {
     private readonly MohistIntegrationFixture _fixture;
     private readonly Dictionary<string, string> _connectionLeases = new(StringComparer.Ordinal);
 
-    public SlackDmSessionMappingIngressSpecs(MohistIntegrationFixture fixture) => _fixture = fixture;
+    public SlackDmSessionMappingIngressSpecs(IsolatedMohistIntegrationFixture fixture) => _fixture = fixture;
 
     [Fact]
     public async Task Ingress_records_dm_session_mapping_for_the_first_dm()

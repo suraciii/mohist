@@ -38,7 +38,6 @@ namespace Mohist.Server.SpecTests.Specs.Issue.Grain;
 /// Spec: <c>openspec/changes/issue-419/specs/compound-advancement/spec.md</c>
 /// and <c>openspec/changes/issue-419/specs/parent-status-aggregation/spec.md</c>.
 /// </summary>
-[Collection("IssueLifecycle")]
 public class IssueCompositeAdvancementGrainSpecs
 {
     private readonly MohistIntegrationFixture _fixture;

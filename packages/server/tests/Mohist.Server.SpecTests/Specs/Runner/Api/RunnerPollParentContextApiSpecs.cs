@@ -17,12 +17,11 @@ using DomainIssue = Mohist.Server.Issue.Domain.Issue;
 
 namespace Mohist.Server.SpecTests.Specs.Runner.Api;
 
-[Collection("IntegrationRunner")]
-public sealed class RunnerPollParentContextApiSpecs
+public sealed class RunnerPollParentContextApiSpecs : IClassFixture<IsolatedMohistIntegrationFixture>
 {
     private readonly MohistIntegrationFixture _fixture;
 
-    public RunnerPollParentContextApiSpecs(MohistIntegrationFixture fixture) => _fixture = fixture;
+    public RunnerPollParentContextApiSpecs(IsolatedMohistIntegrationFixture fixture) => _fixture = fixture;
 
     [Fact]
     public async Task PollAddsOnlyCurrentParentTitleAndBodyToEligiblePlanDispatch()

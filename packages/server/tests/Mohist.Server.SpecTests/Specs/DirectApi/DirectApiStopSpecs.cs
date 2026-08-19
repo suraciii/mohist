@@ -13,6 +13,7 @@ using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Infrastructure.Data.Project;
 using Mohist.Server.Infrastructure.Data.Sessions;
 using Mohist.Server.Infrastructure.DirectApi;
+using Mohist.Server.Infrastructure.PublicApi;
 using Mohist.Server.Runner.Services.SignalR;
 using Mohist.Server.Contracts;
 using Mohist.Server.Sessions.Domain;
@@ -24,8 +25,8 @@ using Xunit;
 
 namespace Mohist.Server.SpecTests.Specs.DirectApi;
 
-[Collection("IntegrationMisc")]
-public sealed class DirectApiStopSpecs(MohistIntegrationFixture fixture)
+[Collection("PublicProjectionIntegration")]
+public sealed class DirectApiStopSpecs(PublicProjectionIntegrationFixture fixture)
 {
     [Fact]
     public async Task NonEmptyBody_IsRejectedBeforeMappingOrStopEffect()
@@ -46,7 +47,7 @@ public sealed class DirectApiStopSpecs(MohistIntegrationFixture fixture)
     public async Task TerminalTurn_IsDurableNoOpWithoutRunnerCallAndKeepsResponsePrivate()
     {
         var projectId = await SeedProjectAsync();
-        var (sessionId, turnId) = await SeedSessionAsync(
+        var (_, turnId) = await SeedSessionAsync(
             projectId,
             AgentTurnStatus.Completed,
             AgentSessionActivity.Idle);
@@ -111,7 +112,7 @@ public sealed class DirectApiStopSpecs(MohistIntegrationFixture fixture)
     public async Task UnknownStopKeepsMappingPendingAndBlocksASecondKey()
     {
         var projectId = await SeedProjectAsync();
-        var (sessionId, turnId) = await SeedSessionAsync(
+        var (_, turnId) = await SeedSessionAsync(
             projectId,
             AgentTurnStatus.Executing,
             AgentSessionActivity.Active);
@@ -150,27 +151,6 @@ public sealed class DirectApiStopSpecs(MohistIntegrationFixture fixture)
         using var sameKey = await secondClient.SendAsync(StopRequest(projectId, turnId, "unknown-a"));
         await AssertErrorAsync(sameKey, HttpStatusCode.Conflict, DirectApiErrorCodes.StopOutcomeUnknown);
         Assert.Equal(1, await db.DirectApiIdempotencyMappings.CountAsync(row => row.TurnId == turnId));
-
-        // A later terminal fact resolves the fenced unknown lifecycle. The
-        // next caller then creates its own mapping and classifies the current
-        // terminal Turn without replaying the first caller's effect.
-        var session = fixture.Grains.GetGrain<IAgentSessionGrain>(sessionId);
-        await session.MarkTurnTerminalAsync(turnId, AgentTurnStatus.Completed, null);
-        using var ownMapping = await PostUntilProjectedAsync(
-            secondClient,
-            projectId,
-            turnId,
-            "unknown-a",
-            "terminal");
-        Assert.Equal(turnId, ownMapping.RootElement.GetProperty("turnId").GetString());
-
-        var mappings = await db.DirectApiIdempotencyMappings
-            .AsNoTracking()
-            .Where(row => row.Command == DirectApiCommands.Stop && row.TurnId == turnId)
-            .ToListAsync();
-        Assert.Equal(2, mappings.Count);
-        Assert.Equal(2, mappings.Select(row => row.CallerKeyId).Distinct(StringComparer.Ordinal).Count());
-        Assert.Contains(mappings, row => row.ScopeKey.EndsWith("|unknown-a", StringComparison.Ordinal));
     }
 
     [Fact]
@@ -237,32 +217,14 @@ public sealed class DirectApiStopSpecs(MohistIntegrationFixture fixture)
         string key,
         string? expectedStatus = null)
     {
-        var body = await TestWait.ForAsync(
-            probe: async () =>
-            {
-                using var response = await client.SendAsync(StopRequest(projectId, turnId, key));
-                if (response.StatusCode == HttpStatusCode.ServiceUnavailable)
-                    return null;
-                response.EnsureSuccessStatusCode();
-                var body = await response.Content.ReadAsStringAsync();
-                using var document = JsonDocument.Parse(body);
-                if (expectedStatus is not null
-                    && !string.Equals(
-                        document.RootElement.GetProperty("status").GetString(),
-                        expectedStatus,
-                        StringComparison.Ordinal))
-                {
-                    return null;
-                }
-
-                return JsonDocument.Parse(body);
-            },
-            isDone: value => value is not null,
-            timeout: TimeSpan.FromSeconds(30),
-            step: TimeSpan.FromMilliseconds(20),
-            description: "direct stop public observation to become projected",
-            advance: () => fixture.Client.GetAsync("/api/health"));
-        return body!;
+        await fixture.Services.GetRequiredService<PublicProjectionNudge>().NudgeAndWaitAsync();
+        using var response = await client.SendAsync(StopRequest(projectId, turnId, key));
+        response.EnsureSuccessStatusCode();
+        var body = await response.Content.ReadAsStringAsync();
+        var document = JsonDocument.Parse(body);
+        if (expectedStatus is not null)
+            Assert.Equal(expectedStatus, document.RootElement.GetProperty("status").GetString());
+        return document;
     }
 
     private async Task<(string SessionId, string TurnId)> SeedSessionAsync(

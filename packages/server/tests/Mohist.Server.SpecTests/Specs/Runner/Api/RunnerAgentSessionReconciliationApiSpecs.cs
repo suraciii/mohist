@@ -10,7 +10,6 @@ using Xunit;
 
 namespace Mohist.Server.SpecTests.Specs.Runner.Api;
 
-[Collection("MohistIntegration")]
 public sealed class RunnerAgentSessionReconciliationApiSpecs
 {
     private readonly MohistIntegrationFixture _fixture;

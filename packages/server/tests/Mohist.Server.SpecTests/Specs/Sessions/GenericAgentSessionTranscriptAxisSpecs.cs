@@ -16,15 +16,15 @@ using Xunit;
 
 namespace Mohist.Server.SpecTests.Specs.Sessions;
 
-[Collection("IntegrationSessions")]
-public class GenericAgentSessionTranscriptAxisSpecs : GenericAgentSessionTranscriptAxisTestSupport
+public class GenericAgentSessionTranscriptAxisSpecs
+    : GenericAgentSessionTranscriptAxisTestSupport, IClassFixture<IsolatedMohistIntegrationFixture>
 {
-    public GenericAgentSessionTranscriptAxisSpecs(MohistIntegrationFixture fixture) : base(fixture)
+    public GenericAgentSessionTranscriptAxisSpecs(IsolatedMohistIntegrationFixture fixture) : base(fixture)
     {
     }
 
     [Fact]
-    public async Task GenericLaunch_PolledDispatch_CarriesMintedAgentSessionIdAndNoWorkflowRunId()
+    public async Task GenericLaunch_ClaimedDispatch_CarriesMintedAgentSessionIdAndNoWorkflowRunId()
     {
         var project = await CreateProjectAsync("transcript-axis-launch");
         var agent = await CreateAgentAsync(project.Id, "transcript-axis-agent");
@@ -42,7 +42,7 @@ public class GenericAgentSessionTranscriptAxisSpecs : GenericAgentSessionTranscr
         var sessionId = launchPayload.GetProperty("data").GetProperty("sessionId").GetString()!;
         var jobId = launchPayload.GetProperty("data").GetProperty("jobId").GetString()!;
 
-        var polledWork = await PollOnceAsync(jobId, _runnerId, sessionId);
+        var polledWork = await ClaimPreparedDispatchAsync(jobId, _runnerId, sessionId);
 
         Assert.False(string.IsNullOrWhiteSpace(polledWork.WorkId));
         Assert.Equal(string.Empty, polledWork.WorkflowRunId);
@@ -55,7 +55,7 @@ public class GenericAgentSessionTranscriptAxisSpecs : GenericAgentSessionTranscr
     }
 
     [Fact]
-    public async Task GenericLaunch_PolledDispatch_FakeAgentRunThroughRuntimeEventsEndpoint_PersistsNonEmptyTranscriptTurn()
+    public async Task GenericLaunch_ClaimedDispatch_FakeAgentRunThroughRuntimeEventsEndpoint_PersistsNonEmptyTranscriptTurn()
     {
         var project = await CreateProjectAsync("transcript-axis-transcript");
         var agent = await CreateAgentAsync(project.Id, "transcript-axis-events-agent");
@@ -75,7 +75,7 @@ public class GenericAgentSessionTranscriptAxisSpecs : GenericAgentSessionTranscr
             var sessionId = launchPayload.GetProperty("data").GetProperty("sessionId").GetString()!;
             var jobId = launchPayload.GetProperty("data").GetProperty("jobId").GetString()!;
 
-            var polledWork = await PollOnceAsync(jobId, _runnerId, sessionId);
+            var polledWork = await ClaimPreparedDispatchAsync(jobId, _runnerId, sessionId);
             var persistence = _fixture.Persistence.Checkpoint(sessionId);
 
             var fakeRun = await RunFakeAcpAgentThroughRuntimeEventsEndpointAsync(
@@ -212,7 +212,7 @@ public class GenericAgentSessionTranscriptAxisSpecs : GenericAgentSessionTranscr
             var sessionId = launchPayload.GetProperty("data").GetProperty("sessionId").GetString()!;
             var jobId = launchPayload.GetProperty("data").GetProperty("jobId").GetString()!;
 
-            var polledWork = await PollOnceAsync(jobId, _runnerId, sessionId);
+            var polledWork = await ClaimPreparedDispatchAsync(jobId, _runnerId, sessionId);
             var firstPersistence = _fixture.Persistence.Checkpoint(sessionId);
             await RunFakeAcpAgentThroughRuntimeEventsEndpointAsync(
                 project.Id,

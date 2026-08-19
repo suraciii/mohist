@@ -13,7 +13,6 @@ namespace Mohist.Server.SpecTests.Specs.Api;
 /// <c>AgentCostRollupQuerierSpecs</c> and exercised without an HTTP
 /// round-trip; see <see cref="Mohist.Server.SpecTests.Specs.AgentOps.AgentCostRollupQuerierSpecs"/>.
 /// </summary>
-[Collection("IntegrationApi")]
 public class AgentCostRollupApiSpecs
 {
     private readonly MohistIntegrationFixture _fixture;

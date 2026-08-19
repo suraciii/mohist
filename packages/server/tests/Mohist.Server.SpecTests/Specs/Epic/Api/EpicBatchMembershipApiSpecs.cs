@@ -24,7 +24,6 @@ namespace Mohist.Server.SpecTests.Specs.Epic.Api;
 /// <item>Single-issue link/unlink routes remain unchanged.</item>
 /// </list>
 /// </summary>
-[Collection("IntegrationWorkflow")]
 public partial class EpicBatchMembershipApiSpecs
 {
     private readonly MohistIntegrationFixture _fixture;

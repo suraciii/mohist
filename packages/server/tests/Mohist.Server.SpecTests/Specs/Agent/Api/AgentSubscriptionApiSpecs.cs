@@ -17,7 +17,6 @@ using Xunit;
 
 namespace Mohist.Server.SpecTests.Specs.Agent.Api;
 
-[Collection("MohistIntegration")]
 public sealed class AgentSubscriptionApiSpecs(MohistIntegrationFixture fixture)
 {
     private HttpClient Client => fixture.Client;

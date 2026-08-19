@@ -36,48 +36,6 @@ public abstract class AgentSessionTestSupport
         _client = fixture.Client;
     }
 
-    protected async Task<WorkDispatchDto> PollUntilAgentWorkAsync(int? expectedIssueNumber = null)
-    {
-        for (var attempt = 0; attempt < 100; attempt++)
-        {
-            using var response = await _client.PostAsync($"/api/runner/{_runnerId}/poll", null);
-            var work = await response.ReadFirstDispatchAsync<WorkDispatchDto>();
-            if (work is null)
-                continue;
-
-            if (work.WorkType == "task" && work.Uses == "mohist/openspec-tasks")
-            {
-                var workflow = _fixture.Grains.GetGrain<IWorkflowGrain>(work.WorkflowRunId);
-                await workflow.AddTasksAsync(new AddTasksBatchRequest([
-                    new AddTasksBatchItem("build-1", "Build task", "mohist/opencode")
-                ]));
-                await _client.PostOkAsync($"/api/runner/{_runnerId}/report", new
-                {
-                    workId = work.WorkId,
-                    taskRunId = work.TaskRunId,
-                    workflowRunId = work.WorkflowRunId,
-                    status = "completed",
-                    projectId = work.ProjectId
-                });
-                continue;
-            }
-
-            if (work.Uses == "mohist/opencode")
-            {
-                if (expectedIssueNumber is null || work.IssueNumber == expectedIssueNumber)
-                    return work;
-
-                await _client.PostOkAsync($"/api/runner/{_runnerId}/report", new { workId = work.WorkId, taskRunId = work.TaskRunId, workflowRunId = work.WorkflowRunId, status = "completed", projectId = work.ProjectId });
-                continue;
-            }
-
-            await _client.PostOkAsync($"/api/runner/{_runnerId}/report", new { workId = work.WorkId, taskRunId = work.TaskRunId, workflowRunId = work.WorkflowRunId, status = "completed", projectId = work.ProjectId });
-        }
-
-        Assert.Fail("No agent work dispatched");
-        return default!;
-    }
-
     protected async Task<(ProjectDto Project, IssueDto Issue, WorkDispatch Work, CreatedSession Session)> CreateStartedAgentSessionAsync(string name, bool start = true, string? title = null, string? sessionName = null)
     {
         var projectName = $"asg-{Guid.NewGuid():N}";
@@ -280,7 +238,6 @@ var issue = await _client.PostDataAsync<IssueDto>($"/api/projects/{project.Id}/i
         public string Id => Info.Id;
     }
 
-    protected sealed record WorkDispatchDto(string WorkflowRunId, string WorkId, string? TaskRunId, string? Uses, string? With, string WorkType, string? Stage, string? Title, string? ProjectId, string? IssueId, int? IssueNumber);
     protected sealed record AgentSessionSummaryDto(
         string Id,
         string SessionName,

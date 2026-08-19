@@ -16,12 +16,11 @@ using Xunit;
 
 namespace Mohist.Server.SpecTests.Specs.Agent.Services;
 
-[Collection("IntegrationRunner")]
-public sealed class AgentSubagentLaunchSpecs
+public sealed class AgentSubagentLaunchSpecs : IClassFixture<IsolatedMohistIntegrationFixture>
 {
     private readonly MohistIntegrationFixture _fixture;
 
-    public AgentSubagentLaunchSpecs(MohistIntegrationFixture fixture)
+    public AgentSubagentLaunchSpecs(IsolatedMohistIntegrationFixture fixture)
     {
         _fixture = fixture;
     }

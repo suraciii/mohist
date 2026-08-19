@@ -3,6 +3,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Infrastructure.Data.PublicApi;
 using Mohist.Server.Infrastructure.Data.Sessions;
+using Mohist.Server.Infrastructure.PublicApi;
 using Mohist.Server.Sessions.Domain;
 using Mohist.Server.SpecTests.Support;
 using Mohist.Server.TestSupport;
@@ -16,8 +17,8 @@ namespace Mohist.Server.SpecTests.Specs.DirectApi;
 /// nudge raised by a canonical write path is enough for the projection
 /// to catch up from the checkpoint — without any caller involvement.
 /// </summary>
-[Collection("IntegrationMisc")]
-public sealed class PublicExecutionProjectorHostingSpecs(MohistIntegrationFixture fixture)
+[Collection("PublicProjectionIntegration")]
+public sealed class PublicExecutionProjectorHostingSpecs(PublicProjectionIntegrationFixture fixture)
 {
     [Fact]
     public async Task NudgedHostedProjector_CatchesUpFromTheCheckpoint()
@@ -55,23 +56,12 @@ public sealed class PublicExecutionProjectorHostingSpecs(MohistIntegrationFixtur
             await store.SaveAsync(session.Id, session);
         }
 
-        // The session store save nudged the hosted projector through
-        // the registered channel; each probe attempt crosses a real
-        // asynchronous boundary (an HTTP round trip through the same
-        // host the projector runs in) while the drain settles.
-        var snapshot = await TestWait.ForAsync(
-            probe: async () =>
-            {
-                await using var scope = fixture.Services.CreateAsyncScope();
-                var db = scope.ServiceProvider.GetRequiredService<MohistDbContext>();
-                return await db.PublicExecutionSnapshots.AsNoTracking()
-                    .FirstOrDefaultAsync(row => row.AnchorType == "input" && row.AnchorId == inputId);
-            },
-            isDone: row => row is not null,
-            timeout: TimeSpan.FromSeconds(30),
-            step: TimeSpan.FromMilliseconds(20),
-            description: "the hosted public execution projector to catch up after the nudge",
-            advance: () => fixture.Client.GetAsync("/api/health"));
+        await fixture.Services.GetRequiredService<PublicProjectionNudge>().NudgeAndWaitAsync();
+
+        await using var projectionScope = fixture.Services.CreateAsyncScope();
+        var projectionDb = projectionScope.ServiceProvider.GetRequiredService<MohistDbContext>();
+        var snapshot = await projectionDb.PublicExecutionSnapshots.AsNoTracking()
+            .FirstOrDefaultAsync(row => row.AnchorType == "input" && row.AnchorId == inputId);
 
         Assert.NotNull(snapshot);
         Assert.Contains("\"status\":\"accepted\"", snapshot!.SnapshotJson, StringComparison.Ordinal);

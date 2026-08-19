@@ -130,8 +130,18 @@ downstream-call counts rather than elapsed time.
 An xUnit collection is the scheduling unit. Classes inside one collection run
 serially.
 
-- The complete Server Spec suite runs once in one apphost. CI and the canonical
-  local gate do not split classes across processes.
+- Full-stack specs share one assembly fixture and therefore one apphost. Each
+  test creates a unique project for business state and may run in its class's
+  default collection.
+- Product-global state such as clocks, runner discovery, instrumentation, or
+  hosted dispatchers is not project-isolated. A full-stack class that mutates
+  it owns a dedicated class or resource-suite apphost. A resource suite may
+  share its host only when its classes use unique identities and can run
+  serially against that resource. Isolated class hosts keep their default
+  collections and may run concurrently. Only truly process-static state uses
+  a non-parallel collection. Behavior matrices still move below the full-stack
+  boundary.
+- CI and the canonical local gate do not split classes across processes.
 - Collections express shared fixture lifetime or real isolation needs, never
   speed or cost.
 - A Spec that no longer needs a distinct clock, database, or cluster joins an

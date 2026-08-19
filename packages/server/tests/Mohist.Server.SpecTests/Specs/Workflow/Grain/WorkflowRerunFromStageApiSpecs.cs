@@ -21,8 +21,7 @@ using Xunit;
 
 namespace Mohist.Server.SpecTests.Specs.Workflow.Grain;
 
-[Collection("IntegrationWorkflow")]
-public class WorkflowRerunFromStageApiSpecs
+public class WorkflowRerunFromStageApiSpecs : IClassFixture<IsolatedMohistIntegrationFixture>
 {
     private static readonly JsonSerializerOptions ReadJsonOptions = new()
     {
@@ -36,7 +35,7 @@ public class WorkflowRerunFromStageApiSpecs
     private readonly IServiceProvider _services;
     private readonly string _connectionString;
 
-    public WorkflowRerunFromStageApiSpecs(MohistIntegrationFixture fixture)
+    public WorkflowRerunFromStageApiSpecs(IsolatedMohistIntegrationFixture fixture)
     {
         _fixture = fixture;
         _client = fixture.Client;

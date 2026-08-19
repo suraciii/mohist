@@ -19,10 +19,9 @@ using Xunit;
 
 namespace Mohist.Server.SpecTests.Specs.Agent.Api;
 
-[Collection("MohistIntegration")]
-public class AgentSessionLaunchRoutesSpecs : AgentSessionLaunchRoutesTestSupport
+public class AgentSessionLaunchRoutesSpecs : AgentSessionLaunchRoutesTestSupport, IClassFixture<IsolatedMohistIntegrationFixture>
 {
-    public AgentSessionLaunchRoutesSpecs(MohistIntegrationFixture fixture) : base(fixture)
+    public AgentSessionLaunchRoutesSpecs(IsolatedMohistIntegrationFixture fixture) : base(fixture)
     {
     }
 
@@ -220,6 +219,10 @@ public class AgentSessionLaunchRoutesSpecs : AgentSessionLaunchRoutesTestSupport
             Assert.NotNull(snapshot);
             Assert.Equal(runnerId, snapshot!.RunnerId);
             Assert.False(string.IsNullOrWhiteSpace(snapshot.CurrentWorkId));
+            Assert.Equal(AgentConfigSchema.OpenCodeRuntime, snapshot.ExecutionDefinition!.Runtime);
+            Assert.Equal(
+                AgentConfigSchema.OpenCodeRuntime,
+                (await _fixture.Grains.GetGrain<IAgentSessionGrain>(sessionId!).GetAsync())!.Runtime);
         }
         finally
         {

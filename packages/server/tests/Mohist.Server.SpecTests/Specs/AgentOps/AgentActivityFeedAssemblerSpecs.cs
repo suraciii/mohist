@@ -31,7 +31,6 @@ namespace Mohist.Server.SpecTests.Specs.AgentOps;
 /// passthrough, and reconciler-driven session filtering are caught without
 /// a full HTTP round-trip.
 /// </summary>
-[Collection("IntegrationSessions")]
 public class AgentActivityFeedAssemblerSpecs
 {
     private static readonly DateTime PinnedNow = new(2026, 6, 30, 12, 0, 0, DateTimeKind.Utc);
