@@ -21,18 +21,18 @@
   "suiteDeadlineMs": 300000,
   "killGraceMs": 5000,
   // The local canonical gate does not open every test process at once. The
-  // host cap leaves room for lightweight lanes, while Spec partitions run two
-  // at a time to avoid cross-process resource contention.
+  // four-execution-unit host cap matches the active Spec execution bound; resource caps
+  // reserve capacity for a Node lane while bounded .NET work is active.
   "canonical": {
     "maxConcurrentLanes": 4,
     "resourceLimits": {
       "host": 4,
       "dotnet": 4,
       "node": 2,
-      "server-spec": 2,
+      "server-spec": 4,
       "duration-measurement": 1
     },
-    "partitionExecutionCapacity": 2,
+    "partitionExecutionCapacity": 4,
     // CLI and the isolated Spec measurement precede the remaining fan-out.
     "durationMeasurementTracks": ["cli", "server-spec"],
     "durationIsolationTrack": "runner"
@@ -80,8 +80,9 @@
           ] }
       ]
     },
-    // Four partitions mirror the CI matrix. Two execute at a time so each
-    // remains under 240s and the two waves finish inside the 300s suite deadline.
+    // Four partitions mirror the CI matrix; each partition stays under the
+    // 240s per-lane deadline on the local host while the whole Spec suite
+    // finishes well inside the 300s suite deadline.
     { "id": "server-spec", "kind": "dotnet-apphost", "csproj": "packages/server/tests/Mohist.Server.SpecTests/Mohist.Server.SpecTests.csproj", "report": "reports/server-spec/partition-{partition}.trx", "reportFormat": "trx", "partitions": 4, "partitionMaxThreads": 1, "deadlineMs": 240000, "enforce": true, "rules": [
         { "id": "spec", "absoluteMs": 5000, "percentile": 95, "percentileMs": 500, "allowlist": [
           { "id": "Mohist.Server.SpecTests.Specs.Workspace.WebConversationWorkspaceSpecs.WebConversation_Followup_ReusesSameSessionAndWorkspace", "observedMs": 12723.6, "reason": "launch POST intermittently absorbs 2-12s full-suite parallel-load stalls (silo scheduler backlog; same stalls hit other spec tests at load peaks, e.g. migrations); p95 unaffected", "owner": "slack", "deadline": "2026-10-31" },
