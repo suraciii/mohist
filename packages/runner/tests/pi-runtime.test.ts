@@ -287,6 +287,7 @@ describe('PiRuntime', () => {
     await new Promise<void>((resolve) => setImmediate(resolve))
     expect(session.promptCalls).toEqual(['once'])
     clock.advance(100)
+    await new Promise<void>((resolve) => setImmediate(resolve))
     expect(session.abortCalls).toBe(1)
     session.complete('late')
     await expect(resultPromise).resolves.toMatchObject({ ok: false, error: { kind: 'deadline-exceeded' } })
@@ -545,7 +546,12 @@ describe('PiRuntime', () => {
     expect(session.abortCalls).toBe(0)
   })
 
-  it('keeps the prompt mutex held until an aborted workflow prompt settles', async () => {
+  it('releases the session mutex when the turn exits with the prompt still unsettled', async () => {
+    // A prompt that never settles used to hold the per-session mutex forever,
+    // queueing every later session operation behind a dead lock. The turn
+    // exiting must release it so follow-ups proceed (pi rejects concurrent
+    // prompts itself, which surfaces as a retryable turn failure instead of
+    // an infinite hang).
     const session = new FakeSession()
     const runtime = new PiRuntime({ agentDir: '/global', sdkFactory: factory(session) })
     await runtime.start()
@@ -562,9 +568,6 @@ describe('PiRuntime', () => {
       target: { runtime: 'pi', runtimeSessionId: session.sessionFile, workDir: '/workspace' },
       prompt: 'followup',
     })
-    await new Promise<void>((resolve) => setImmediate(resolve))
-    expect(session.promptCalls).toEqual(['workflow'])
-    session.complete('workflow stopped')
     await new Promise<void>((resolve) => setImmediate(resolve))
     expect(session.promptCalls).toEqual(['workflow', 'followup'])
     await followup

@@ -13,6 +13,7 @@ import type { ServerConnection } from '../server/connection.js'
 import { resolveOrRecoverBinding, type BindingRecoveryCoordinator, type RuntimeBinding } from './binding-recovery.js'
 import type { RuntimeTurnRegistry } from './runtime-turn-registry.js'
 import { workKey } from './work-result-journal.js'
+import { boundedWait } from './bounded-wait.js'
 import type { ResolvedSkill } from './skill-resolver.js'
 import { runnerLogger } from '../system/logger.js'
 import type { DeliveredAttachment } from './attachment-delivery.js'
@@ -433,13 +434,21 @@ interface AgentSessionEventSink {
   drain(): Promise<void>
 }
 
-function createAgentSessionEventSink(
+// Runtime-event delivery is best-effort telemetry: a stalled server response
+// must never hold the serialized delivery chain (and therefore the post-turn
+// drain) forever. Each request gets its own deadline and the drain gets an
+// overall bound; a hung work otherwise stays "running" with nothing logged.
+const AGENT_EVENT_DELIVERY_TIMEOUT_MS = 30_000
+const AGENT_EVENT_DRAIN_TIMEOUT_MS = 120_000
+
+export function createAgentSessionEventSink(
   connection: ServerConnection,
   work: DispatchWorkItem,
   signal: AbortSignal,
   agentSessionId: string | null,
 ): AgentSessionEventSink {
   let pending: Promise<void> = Promise.resolve()
+  const deliverySignal = () => AbortSignal.any([signal, AbortSignal.timeout(AGENT_EVENT_DELIVERY_TIMEOUT_MS)])
   const projectId = work.projectId
   if (!agentSessionId || !projectId) {
     const noop = async () => undefined
@@ -525,7 +534,7 @@ function createAgentSessionEventSink(
                 runtimeSessionId: event.runtimeSessionId,
                 runtimeEvents: [{ type: event.type, payload: event.payload }],
               },
-              signal,
+              deliverySignal(),
             )
             .then(() => undefined),
         )
@@ -551,7 +560,7 @@ function createAgentSessionEventSink(
                 runtimeSessionId: event.runtimeSessionId,
                 runtimeEvents: [{ type: event.type, payload: event.payload }],
               },
-              signal,
+              deliverySignal(),
             )
             .then(() => undefined),
         )
@@ -564,7 +573,14 @@ function createAgentSessionEventSink(
         })
     },
     async drain() {
-      await pending
+      const completed = await boundedWait(() => pending, AGENT_EVENT_DRAIN_TIMEOUT_MS)
+      if (!completed) {
+        log.warn('agent-session runtime event drain timed out; abandoning remaining deliveries', {
+          job: work.agentJobId,
+          session: agentSessionId,
+          timeoutMs: AGENT_EVENT_DRAIN_TIMEOUT_MS,
+        })
+      }
     },
   }
 }

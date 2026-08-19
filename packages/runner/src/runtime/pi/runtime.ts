@@ -1,5 +1,8 @@
 import { createCredentialMaskerFromEnvironment, CredentialMasker } from '../task-log.js'
 import { resolve } from 'node:path'
+import { startSettleGuard } from './settle-guard.js'
+import { finalText, lastMessageError, lastMessageFailed } from './session-state.js'
+import { SessionMutexes } from './session-locks.js'
 import { boundedTimeoutMs, boundedWait } from '../bounded-wait.js'
 import { diagnostic, piError, resetDiagnostic } from './errors.js'
 import { isProviderFailure, DEFAULT_PI_PROVIDER_ERROR_POLICY } from './policy.js'
@@ -62,7 +65,7 @@ export class PiRuntime {
   private readonly deps: PiRuntimeDeps
   private readonly runtimeShutdownTimeoutMs: number
   private readonly sessions = new Map<string, PiSdkSession>()
-  private readonly sessionMutexes = new Map<string, Promise<unknown>>()
+  private readonly sessionLocks = new SessionMutexes()
   private readonly state: {
     ready: boolean
     diagnostic: PiDiagnostic | null
@@ -74,25 +77,6 @@ export class PiRuntime {
   constructor(deps: PiRuntimeDeps) {
     this.deps = deps
     this.runtimeShutdownTimeoutMs = boundedTimeoutMs(deps.runtimeShutdownTimeoutMs, 30_000)
-  }
-
-  private withSessionLock<T>(path: string, operation: () => Promise<T>): Promise<T> {
-    const previous = this.sessionMutexes.get(path)
-    if (previous) {
-      const settled = previous.catch(() => undefined)
-      const current = settled.then(operation)
-      this.sessionMutexes.set(
-        path,
-        current.catch(() => undefined),
-      )
-      return current
-    }
-    const current = operation()
-    this.sessionMutexes.set(
-      path,
-      current.catch(() => undefined),
-    )
-    return current
   }
 
   async start(): Promise<PiResult<PiReadyState>> {
@@ -204,7 +188,12 @@ export class PiRuntime {
     const fixAndAbort = (result: PiResult<PiTurnResult>) => {
       if (fixed) return
       fixed = result
-      void abortAndDiagnose(session, diagnostics, this.mask.bind(this)).finally(resolveFixed)
+      // The outcome is already decided (deadline exceeded, interrupted, or
+      // provider failure). Resolve the race first so the turn returns even if
+      // the abort below never completes; abort is diagnostic-only and must
+      // never gate settlement on a dead/ended SDK session.
+      resolveFixed()
+      void abortAndDiagnose(session, diagnostics, this.mask.bind(this))
     }
     const unsubscribe = session.subscribe((event) => {
       const facts = projector.project(event)
@@ -252,10 +241,66 @@ export class PiRuntime {
       if (!fixed) fixAndAbort(this.finishFailure('interrupted', 'Pi turn was interrupted', diagnostics))
     }
     signal.addEventListener('abort', cancel, { once: true })
+    // pi's prompt() promise can fail to resolve even after the session has
+    // reached a terminal state (an SSE body that never ends, or a settlement
+    // step stuck after the final message). The session stays streaming while
+    // the agent loop is blocked, so detect the terminal assistant message
+    // itself rather than waiting on isStreaming or the stuck prompt. The
+    // terminal-state predicate is the same one reattach uses to adopt a
+    // completed turn, so settling here produces the identical outcome a
+    // healthy prompt() would have returned.
+    const initialMessageCount = session.messages.length
+    const settleFromTerminalState = (fileTerminal: string | null = null) => {
+      if (fixed) return
+      report(projector.reconcile(session.messages))
+      diagnostics.push(...projector.diagnostics().map((item) => diagnostic(item.code, this.mask(item.message), 'info')))
+      const failed = lastMessageFailed(session.messages) || fileTerminal === 'error'
+      fixed = failed
+        ? this.finishFailure('turn-failed', 'Pi turn failed', [
+            diagnostic('turn-failed', this.mask(lastMessageError(session.messages) ?? 'Pi reported an error')),
+          ])
+        : {
+            ok: true as const,
+            value: {
+              facts: {
+                finalAssistantText: finalText(session.messages),
+                runtimeSessionId: path,
+                workDir: request.target.workDir,
+              },
+              diagnostics,
+            },
+            diagnostics,
+          }
+      resolveFixed()
+      // The stuck prompt() still holds the per-session mutex; release it so
+      // later turns on this session do not queue behind a promise that never
+      // settles. The orphaned promise is already caught by the mutex chain.
+      this.sessionLocks.release(path)
+    }
+    const stopSettleGuard = startSettleGuard({
+      clock,
+      sessionFile: path,
+      messages: () => session.messages,
+      initialMessageCount,
+      isSettled: () => fixed !== null,
+      onSettle: settleFromTerminalState,
+    })
+    let promptSettled = false
     try {
-      const promptOperation = this.withSessionLock(path, () =>
-        session.prompt(request.prompt, { expandPromptTemplates: false }).then(() => 'completed' as const),
-      )
+      const promptOperation = this.sessionLocks
+        .run(path, () =>
+          session.prompt(request.prompt, { expandPromptTemplates: false }).then(() => 'completed' as const),
+        )
+        .then(
+          (value) => {
+            promptSettled = true
+            return value
+          },
+          (error) => {
+            promptSettled = true
+            throw error
+          },
+        )
       const promptOutcome = await Promise.race([promptOperation, fixedSignal.then(() => 'fixed' as const)])
       if (fixed) return fixed
       if (lastMessageFailed(session.messages))
@@ -283,7 +328,13 @@ export class PiRuntime {
       signal.removeEventListener('abort', cancel)
       if (deadline !== null) clock.clearTimeout(deadline)
       if (warning !== null) clock.clearTimeout(warning)
+      stopSettleGuard()
       unsubscribe()
+      // A prompt that never settles keeps holding the per-session mutex; every
+      // later session operation on this path would queue behind it forever.
+      // The orphaned lock entry is harmless: the next run replaces it on
+      // the next acquisition.
+      if (!promptSettled) this.sessionLocks.release(path)
     }
   }
 
@@ -456,7 +507,7 @@ export class PiRuntime {
         settled = true
         resolve(result)
       }
-      void this.withSessionLock(path, async () => {
+      void this.sessionLocks.run(path, async () => {
         const unsubscribe = session.value.subscribe((event) => report(projector.project(event)))
         try {
           await session.value.prompt(request.prompt, {
@@ -618,7 +669,7 @@ export class PiRuntime {
       request.target.workDir,
       this.deps.masker ?? createCredentialMaskerFromEnvironment(),
     )
-    return this.withSessionLock(path, async () => {
+    return this.sessionLocks.run(path, async () => {
       if (session.value.isStreaming) {
         return this.failure('conflict', 'Pi compact refused: the physical session is still streaming', [
           diagnostic(
@@ -788,7 +839,7 @@ export class PiRuntime {
       }
     }
     this.sessions.clear()
-    this.sessionMutexes.clear()
+    this.sessionLocks.clear()
     const services = this.state.services
     this.state.services = null
     this.state.ready = false
@@ -887,31 +938,6 @@ function splitModel(value: string): { provider: string; id: string } | null {
 function message(cause: unknown): string {
   return cause instanceof Error ? cause.message || 'Pi operation failed' : String(cause)
 }
-function finalText(messages: readonly { role?: string; content?: unknown }[]): string | null {
-  const assistant = [...messages].reverse().find((item) => item.role === 'assistant')
-  return contentText(assistant?.content)
-}
-function contentText(content: unknown): string | null {
-  if (typeof content === 'string') return content
-  if (!Array.isArray(content)) return null
-  const text = content
-    .map((part) =>
-      typeof part === 'string'
-        ? part
-        : part && typeof part === 'object' && 'text' in part && typeof part.text === 'string'
-          ? part.text
-          : '',
-    )
-    .join('')
-  return text || null
-}
-function lastMessageFailed(messages: readonly { role?: string; stopReason?: string }[]): boolean {
-  const item = [...messages].reverse().find((entry) => entry.role === 'assistant')
-  return item?.stopReason === 'error'
-}
-function lastMessageError(messages: readonly { role?: string; errorMessage?: string }[]): string | undefined {
-  return [...messages].reverse().find((entry) => entry.role === 'assistant')?.errorMessage
-}
 function isRetryFailure(event: unknown, policy: PiProviderErrorPolicy): boolean {
   if (!event || typeof event !== 'object' || (event as { type?: unknown }).type !== 'auto_retry_start') return false
   const value = event as { errorMessage?: unknown; attempt?: unknown }
@@ -963,9 +989,8 @@ async function abortAndDiagnose(
   mask: (text: string) => string,
 ): Promise<void> {
   try {
-    await session.abort()
-    await Promise.resolve()
-    if (session.isStreaming)
+    const completed = await boundedWait(() => session.abort(), CANCEL_CONFIRMATION_TIMEOUT_MS)
+    if (!completed || session.isStreaming)
       diagnostics.push(diagnostic('abort-unconfirmed', mask('Pi did not confirm that the turn stopped')))
   } catch (cause) {
     diagnostics.push(diagnostic('abort-unconfirmed', mask(message(cause))))
