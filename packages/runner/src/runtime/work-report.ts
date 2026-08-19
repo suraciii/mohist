@@ -76,7 +76,9 @@ export async function reportAndRequireDurableAck(
   const timeout = setTimeout(() => controller.abort(), REPORT_TIMEOUT_MS)
   timeout.unref?.()
   try {
-    const acknowledgement = await connection.report(work, result, controller.signal, binding)
+    const acknowledgement = binding
+      ? await connection.report(work, result, controller.signal, binding)
+      : await connection.report(work, result, controller.signal)
     if (acknowledgement.tracked !== true) {
       const reason = typeof acknowledgement.reason === 'string' ? `: ${acknowledgement.reason}` : ''
       throw new Error(`work report was not durably acknowledged${reason}`)
