@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
+import { withTestRunnerResources, currentTestResourceState } from './support/test-resources.js'
 import { scriptAction } from '../src/actions/built-in-core.js'
 import { makeHost } from './support/action-host-test.js'
-import { currentTestResourceState, withTestRunnerResources } from './support/test-resources.js'
 
 async function currentFileSystemRead(path: string): Promise<string> {
   return await currentTestResourceState().fileSystem.readText(path)
@@ -18,16 +18,16 @@ const profileFiles = {
  * bind these fixtures to the same contract the Server catalog recognizes.
  */
 const laneContract = [
-  { id: "verify-install", run: "npm ci", timeout: 900_000 },
+  { id: 'verify-install', run: 'npm ci', timeout: 900_000 },
   {
-    id: "verify-dotnet",
-    run: "export DOTNET_ROOT=/home/szf/.dotnet\ndotnet test Mohist.sln --nologo -m:1 -p:UseSharedCompilation=false",
+    id: 'verify-dotnet',
+    run: 'export DOTNET_ROOT=/home/szf/.dotnet\ndotnet test Mohist.sln --nologo -m:1 -p:UseSharedCompilation=false',
     timeout: 1_200_000,
   },
-  { id: "verify-web-typecheck", run: "npm run typecheck -w packages/web", timeout: 600_000 },
-  { id: "verify-web-tests", run: "npm run test:run -w packages/web", timeout: 900_000 },
-  { id: "verify-runner-typecheck", run: "npm run typecheck -w packages/runner", timeout: 600_000 },
-  { id: "verify-runner-tests", run: "npm run test:run -w packages/runner -- --no-file-parallelism", timeout: 900_000 },
+  { id: 'verify-web-typecheck', run: 'npm run typecheck -w packages/web', timeout: 600_000 },
+  { id: 'verify-web-tests', run: 'npm run test:run -w packages/web', timeout: 900_000 },
+  { id: 'verify-runner-typecheck', run: 'npm run typecheck -w packages/runner', timeout: 600_000 },
+  { id: 'verify-runner-tests', run: 'npm run test:run -w packages/runner -- --no-file-parallelism', timeout: 900_000 },
 ] as const
 
 const fixCiRecoveryLocal = `        recovery:
@@ -68,11 +68,11 @@ function laneTasks(recovery: string): string {
       (lane) => `      - id: ${lane.id}
         uses: core/script
         with:
-          run: ${lane.run.includes("\n") ? `|\n            ${lane.run.split("\n").join("\n            ")}` : lane.run}
+          run: ${lane.run.includes('\n') ? `|\n            ${lane.run.split('\n').join('\n            ')}` : lane.run}
           timeout: ${lane.timeout}
 ${recovery}`,
     )
-    .join("\n")
+    .join('\n')
 }
 
 const profileFixtures: Record<keyof typeof profileFiles, string> = {
@@ -291,22 +291,22 @@ function laneBlocks(buildBody: string): Map<string, string> {
 }
 
 function laneRunValue(block: string): string {
-  const lines = block.split("\n")
+  const lines = block.split('\n')
   const runIdx = lines.findIndex((line) => /^\s*run:\s*\|/.test(line))
   if (runIdx < 0) {
     const plain = block.match(/run:\s([^\n]+)/)
-    return plain ? plain[1].trim() : ""
+    return plain ? plain[1].trim() : ''
   }
-  const runIndent = (lines[runIdx].match(/^\s*/) ?? [""])[0].length
+  const runIndent = (lines[runIdx].match(/^\s*/) ?? [''])[0].length
   const content: string[] = []
   for (let i = runIdx + 1; i < lines.length; i++) {
     const line = lines[i]
-    if (line.trim() === "") continue
-    const indent = (line.match(/^\s*/) ?? [""])[0].length
+    if (line.trim() === '') continue
+    const indent = (line.match(/^\s*/) ?? [''])[0].length
     if (indent <= runIndent) break
     content.push(line.trim())
   }
-  return content.join("\n")
+  return content.join('\n')
 }
 
 function laneTimeout(block: string): number {
@@ -348,9 +348,9 @@ for (const [profileId, path] of Object.entries(profileFiles)) {
       }
     })
 
-    it("build stage defines the six verification lanes in order after orchestration tasks", async () => {
+    it('build stage defines the six verification lanes in order after orchestration tasks', async () => {
       const yaml = await readProfile(path)
-      const build = sliceStage(yaml, "build")
+      const build = sliceStage(yaml, 'build')
 
       const taskIdPositions = laneContract.map((lane) => ({
         ...lane,
@@ -362,17 +362,17 @@ for (const [profileId, path] of Object.entries(profileFiles)) {
       for (let i = 1; i < taskIdPositions.length; i++) {
         expect(taskIdPositions[i - 1].index).toBeLessThan(taskIdPositions[i].index)
       }
-      expect(build.indexOf("- id: workspace-prepare")).toBeLessThan(taskIdPositions[0].index)
-      expect(build.indexOf("- id: load-tasks")).toBeLessThan(taskIdPositions[0].index)
+      expect(build.indexOf('- id: workspace-prepare')).toBeLessThan(taskIdPositions[0].index)
+      expect(build.indexOf('- id: load-tasks')).toBeLessThan(taskIdPositions[0].index)
 
       // No aggregate verify task or aggregate CI variable remains.
       expect(build).not.toMatch(/(?:^|\n)\s*-\s+id:\s*verify\s*$/m)
-      expect(build).not.toContain("vars.ci.verify")
+      expect(build).not.toContain('vars.ci.verify')
     })
 
-    it("build stage lanes carry the exact command lines with the .NET runtime prelude", async () => {
+    it('build stage lanes carry the exact command lines with the .NET runtime prelude', async () => {
       const yaml = await readProfile(path)
-      const build = sliceStage(yaml, "build")
+      const build = sliceStage(yaml, 'build')
       const blocks = laneBlocks(build)
 
       expect(blocks.size).toBe(6)
@@ -382,20 +382,22 @@ for (const [profileId, path] of Object.entries(profileFiles)) {
         expect(laneRunValue(block!), `lane ${lane.id} run value`).toBe(lane.run)
       }
 
-      const dotnet = blocks.get("verify-dotnet")!
-      expect(dotnet).toContain("uses: core/script")
-      expect(dotnet.indexOf("export DOTNET_ROOT=/home/szf/.dotnet")).toBeGreaterThanOrEqual(0)
-      expect(dotnet.indexOf("export DOTNET_ROOT=/home/szf/.dotnet")).toBeLessThan(dotnet.indexOf("dotnet test Mohist.sln"))
+      const dotnet = blocks.get('verify-dotnet')!
+      expect(dotnet).toContain('uses: core/script')
+      expect(dotnet.indexOf('export DOTNET_ROOT=/home/szf/.dotnet')).toBeGreaterThanOrEqual(0)
+      expect(dotnet.indexOf('export DOTNET_ROOT=/home/szf/.dotnet')).toBeLessThan(
+        dotnet.indexOf('dotnet test Mohist.sln'),
+      )
 
       // The dotnet lane body is only the prelude plus the unchanged command.
       expect(laneRunValue(dotnet)).toBe(
-        "export DOTNET_ROOT=/home/szf/.dotnet\ndotnet test Mohist.sln --nologo -m:1 -p:UseSharedCompilation=false",
+        'export DOTNET_ROOT=/home/szf/.dotnet\ndotnet test Mohist.sln --nologo -m:1 -p:UseSharedCompilation=false',
       )
     })
 
-    it("every lane declares its own positive finite timeout and no lane reuses the aggregate 300000 budget", async () => {
+    it('every lane declares its own positive finite timeout and no lane reuses the aggregate 300000 budget', async () => {
       const yaml = await readProfile(path)
-      const build = sliceStage(yaml, "build")
+      const build = sliceStage(yaml, 'build')
       const blocks = laneBlocks(build)
 
       for (const lane of laneContract) {
@@ -408,40 +410,40 @@ for (const [profileId, path] of Object.entries(profileFiles)) {
       }
     })
 
-    it("no single timeout encloses all six lanes", async () => {
+    it('no single timeout encloses all six lanes', async () => {
       const yaml = await readProfile(path)
-      const build = sliceStage(yaml, "build")
+      const build = sliceStage(yaml, 'build')
       const blocks = laneBlocks(build)
 
       for (const lane of laneContract) {
         const block = blocks.get(lane.id)!
         // Each lane carries exactly one timeout and it belongs to the lane,
         // not to an enclosing wrapper around the whole sequence.
-        expect(countOccurrences(block, "timeout:")).toBe(1)
+        expect(countOccurrences(block, 'timeout:')).toBe(1)
       }
     })
 
-    it("every lane carries the same profile-specific fix-ci recovery contract", async () => {
+    it('every lane carries the same profile-specific fix-ci recovery contract', async () => {
       const yaml = await readProfile(path)
-      const build = sliceStage(yaml, "build")
+      const build = sliceStage(yaml, 'build')
       const blocks = laneBlocks(build)
 
-      const recovery = profileId === "mohist/local" ? fixCiRecoveryLocal : fixCiRecoveryGithubPr
+      const recovery = profileId === 'mohist/local' ? fixCiRecoveryLocal : fixCiRecoveryGithubPr
       for (const lane of laneContract) {
         const block = blocks.get(lane.id)!
-        expect(block, `lane ${lane.id} must keep the fix-ci recovery declaration`).toContain("budget: 2")
-        expect(block).toContain("retrySelf: true")
-        expect(block).toContain("id: recover:fix-ci")
-        expect(block).toContain("session: build")
-        expect(block).toContain("prompt: ${{ prompts.fix-ci }}")
-        expect(block).toContain("options: ${{ vars.agent }}")
-        if (profileId === "mohist/local") {
-          expect(block).toContain("uses: mohist/opencode")
-          expect(block).toContain("<promise>done</promise>")
-          expect(block).toContain("<promise>unfinished</promise>")
+        expect(block, `lane ${lane.id} must keep the fix-ci recovery declaration`).toContain('budget: 2')
+        expect(block).toContain('retrySelf: true')
+        expect(block).toContain('id: recover:fix-ci')
+        expect(block).toContain('session: build')
+        expect(block).toContain('prompt: ${{ prompts.fix-ci }}')
+        expect(block).toContain('options: ${{ vars.agent }}')
+        if (profileId === 'mohist/local') {
+          expect(block).toContain('uses: mohist/opencode')
+          expect(block).toContain('<promise>done</promise>')
+          expect(block).toContain('<promise>unfinished</promise>')
         } else {
-          expect(block).toContain("uses: ${{ profile.agentAction }}")
-          expect(block).not.toContain("<promise>")
+          expect(block).toContain('uses: ${{ profile.agentAction }}')
+          expect(block).not.toContain('<promise>')
         }
         // The recovery declaration must be exactly the profile's block, unchanged.
         expect(block).toContain(recovery)
@@ -450,8 +452,8 @@ for (const [profileId, path] of Object.entries(profileFiles)) {
   })
 }
 
-describe("clean-run lane shells", () => {
-  it.each(laneContract)("$id executes in its own fresh shell with its own finite budget", async (lane) => {
+describe('clean-run lane shells', () => {
+  it.each(laneContract)('$id executes in its own fresh shell with its own finite budget', async (lane) => {
     const invocations: Array<{ command: string; args: string[]; timeoutMs: number | undefined; script: string }> = []
     await withTestRunnerResources(
       async () => {
@@ -460,7 +462,7 @@ describe("clean-run lane shells", () => {
 
         expect(invocations).toHaveLength(1)
         const invocation = invocations[0]
-        expect(invocation.command).toBe(process.platform === "win32" ? "pwsh" : "bash")
+        expect(invocation.command).toBe(process.platform === 'win32' ? 'pwsh' : 'bash')
         expect(invocation.args).toHaveLength(1)
         expect(invocation.timeoutMs).toBe(lane.timeout)
 
@@ -479,17 +481,17 @@ describe("clean-run lane shells", () => {
               command,
               args: [...args],
               timeoutMs: (options as { timeoutMs?: number } | undefined)?.timeoutMs,
-              script: args[0] ? await currentFileSystemRead(args[0]) : "",
+              script: args[0] ? await currentFileSystemRead(args[0]) : '',
             })
-            return { exitCode: 0, stdout: "", stderr: "" }
+            return { exitCode: 0, stdout: '', stderr: '' }
           },
         },
       },
     )
   })
 
-  it("the .NET lane shell sees DOTNET_ROOT before dotnet invokes", async () => {
-    const dotnet = laneContract.find((lane) => lane.id === "verify-dotnet")!
+  it('the .NET lane shell sees DOTNET_ROOT before dotnet invokes', async () => {
+    const dotnet = laneContract.find((lane) => lane.id === 'verify-dotnet')!
     const scripts: string[] = []
     await withTestRunnerResources(
       async () => {
@@ -498,28 +500,28 @@ describe("clean-run lane shells", () => {
 
         expect(scripts).toHaveLength(1)
         const script = scripts[0]
-        const lines = script.split("\n")
-        expect(lines[0]).toBe("export DOTNET_ROOT=/home/szf/.dotnet")
-        expect(lines[1]).toBe("dotnet test Mohist.sln --nologo -m:1 -p:UseSharedCompilation=false")
+        const lines = script.split('\n')
+        expect(lines[0]).toBe('export DOTNET_ROOT=/home/szf/.dotnet')
+        expect(lines[1]).toBe('dotnet test Mohist.sln --nologo -m:1 -p:UseSharedCompilation=false')
         // The export is in the same script/shell, so the dotnet apphost can
         // resolve the runtime without relying on any earlier lane's shell.
-        expect(script.indexOf("export DOTNET_ROOT=/home/szf/.dotnet")).toBeLessThan(script.indexOf("dotnet test"))
+        expect(script.indexOf('export DOTNET_ROOT=/home/szf/.dotnet')).toBeLessThan(script.indexOf('dotnet test'))
       },
       {
         commandRunner: {
           run: async (_command, args) => {
-            scripts.push(args[0] ? await currentFileSystemRead(args[0]) : "")
-            return { exitCode: 0, stdout: "", stderr: "" }
+            scripts.push(args[0] ? await currentFileSystemRead(args[0]) : '')
+            return { exitCode: 0, stdout: '', stderr: '' }
           },
         },
       },
     )
   })
 
-  it("a representative clean run completes all six lanes for both built-in profiles", async () => {
+  it('a representative clean run completes all six lanes for both built-in profiles', async () => {
     for (const profileId of Object.keys(profileFiles) as Array<keyof typeof profileFiles>) {
       const yaml = await readProfile(profileFiles[profileId])
-      const build = sliceStage(yaml, "build")
+      const build = sliceStage(yaml, 'build')
       const blocks = laneBlocks(build)
       expect(blocks.size).toBe(6)
 
@@ -528,19 +530,16 @@ describe("clean-run lane shells", () => {
         const block = blocks.get(lane.id)!
         const run = laneRunValue(block)
         const timeout = laneTimeout(block)
-        const result = await withTestRunnerResources(
-          async () => await scriptAction({ run, timeout }, makeHost()),
-          {
-            commandRunner: {
-              run: async (_command, _args, _cwd, _signal, _env, options) => ({
-                exitCode: 0,
-                stdout: "",
-                stderr: "",
-                timeoutMs: (options as { timeoutMs?: number } | undefined)?.timeoutMs,
-              }),
-            },
+        const result = await withTestRunnerResources(async () => await scriptAction({ run, timeout }, makeHost()), {
+          commandRunner: {
+            run: async (_command, _args, _cwd, _signal, _env, options) => ({
+              exitCode: 0,
+              stdout: '',
+              stderr: '',
+              timeoutMs: (options as { timeoutMs?: number } | undefined)?.timeoutMs,
+            }),
           },
-        )
+        })
         expect(result.error?.code ?? result.output, `${profileId} lane ${lane.id}`).toBeTruthy()
         completed++
       }
@@ -549,10 +548,10 @@ describe("clean-run lane shells", () => {
   })
 })
 
-describe("mohist local workflow profile", () => {
-  it("IntegrateStage_UsesRebaseSquashThenPushWithoutPreparePublish", async () => {
-    const yaml = await readProfile(profileFiles["mohist/local"])
-    const integrate = yaml.slice(yaml.indexOf("  - stage: integrate"))
+describe('mohist local workflow profile', () => {
+  it('IntegrateStage_UsesRebaseSquashThenPushWithoutPreparePublish', async () => {
+    const yaml = await readProfile(profileFiles['mohist/local'])
+    const integrate = yaml.slice(yaml.indexOf('  - stage: integrate'))
 
     expect(integrate).toContain('id: integrate:archive-change')
     expect(integrate).toContain('id: integrate:rebase')

@@ -61,3 +61,10 @@ Implemented T-001 end to end on top of the plan-review fixes above.
 - Added coverage for recovery scheduling classification, helper exclusion, source-identity idempotence, preserved timeout diagnostics during a pending retry, stale old reports, ordered lane recovery, and one-time downstream completion.
 - Full SpecTests initially exposed the lane gate being applied to approved non-build stages; narrowed the gate to `stage.Id == build`, restoring the existing approval workflow contract. The focused approval API class then passed 41 tests.
 - Final full SpecTests run passed all 3,885 tests. Solution build passed with 0 warnings/errors; ArchTests passed 68 and Workflow Definition tests passed 178.
+
+# Progress: Verification recovery
+
+- Reproduced the recorded prerequisite failure: the earlier `npm run verify` could not start because `tsx` was unavailable. The current workspace has the declared dependency installed, so the gate proceeded past that point.
+- The first current canonical run failed at `npm run format:check` because the T-002/T-003 Runner changes were not Biome-formatted. `npm run format` changed only `packages/runner/src/actions/built-in-core.ts` and `packages/runner/tests/workflow-profile.spec.ts`; no verification-only artifacts became Git-visible.
+- Focused verification now passes: Runner typecheck, test typecheck, test-boundary validation, format check, and the action/profile/journal suites (3 files, 58 tests).
+- A canonical rerun before committing correctly stopped at its clean-worktree guard. The formatting correction is intended task work and must be committed before the full canonical gate can execute.

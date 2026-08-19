@@ -49,18 +49,14 @@ export async function scriptAction(inputs: JsonObject, host: ActionHost): Promis
       // as timed out rather than passed or failed. The command outcome
       // (exit code) and captured stdout/stderr diagnostic tails are retained
       // for the Server lane projection.
-      return fail(
-        'timeout',
-        scriptFailureMessage(run, result.exitCode, result.stdout, result.stderr),
-        { exitCode: result.exitCode },
-      )
+      return fail('timeout', scriptFailureMessage(run, result.exitCode, result.stdout, result.stderr), {
+        exitCode: result.exitCode,
+      })
     }
     if (result.exitCode !== 0) {
-      return fail(
-        'script-failed',
-        scriptFailureMessage(run, result.exitCode, result.stdout, result.stderr),
-        { exitCode: result.exitCode },
-      )
+      return fail('script-failed', scriptFailureMessage(run, result.exitCode, result.stdout, result.stderr), {
+        exitCode: result.exitCode,
+      })
     }
     const output: JsonObject = {
       kind: 'script',
