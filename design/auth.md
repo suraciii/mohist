@@ -140,7 +140,10 @@ Mohist accepts the first valid carrier in this order:
 
 Tokens are never accepted in a query string because URIs enter browser history,
 access logs, and proxy records. Web SignalR uses the same-origin cookie. Runner
-SignalR uses the authorization header.
+control connections use the authorization header. A Runner-bound credential
+must match the claimed Runner identity; `operator` continues to satisfy the
+`runner` Scope. The control transport migration changes the Runner carrier from
+SignalR to WebSocket without changing this authentication boundary.
 
 A presented credential resolves in this order:
 
