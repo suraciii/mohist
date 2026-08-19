@@ -5,6 +5,7 @@ using Mohist.Server.SpecTests.Specs.Workflow;
 using Mohist.Server.SpecTests.Specs.Workflow.Grain;
 using Mohist.Server.SpecTests.Specs.Slack;
 using Mohist.Server.SpecTests.Specs.GitHub;
+using Mohist.Server.SpecTests.Specs.Runner.Api;
 using Xunit;
 
 [assembly: AssemblyFixture(typeof(Mohist.Server.SpecTests.Support.MohistIntegrationFixture))]
@@ -33,10 +34,16 @@ public class PublicProjectionIntegrationCollection
 public class RunnerMutationIntegrationCollection : ICollectionFixture<MohistIntegrationFixture>;
 
 // Specs whose contract depends on process- or cluster-wide state share one
-// dedicated host. The collection is serial; ordinary project-scoped specs
-// continue to run in parallel on the assembly fixture.
-[CollectionDefinition("IsolatedIntegration")]
-public class IsolatedIntegrationCollection : ICollectionFixture<IsolatedMohistIntegrationFixture>;
+// dedicated host per resource domain. Each domain is serial while independent
+// domains and ordinary project-scoped specs continue to run in parallel.
+[CollectionDefinition("LaunchIntegration")]
+public class LaunchIntegrationCollection : ICollectionFixture<IsolatedMohistIntegrationFixture>;
+
+[CollectionDefinition("SessionControlIntegration")]
+public class SessionControlIntegrationCollection : ICollectionFixture<IsolatedMohistIntegrationFixture>;
+
+[CollectionDefinition("WorkflowRuntimeIntegration")]
+public class WorkflowRuntimeIntegrationCollection : ICollectionFixture<IsolatedMohistIntegrationFixture>;
 
 [CollectionDefinition("RepositoryDataUpgrade")]
 public class RepositoryDataUpgradeCollection
@@ -55,6 +62,9 @@ public class GitHubFeedCollection : ICollectionFixture<GitHubFeedFixture>;
 // instead of paying a per-test host start.
 [CollectionDefinition("IntegrationTelemetry")]
 public class IntegrationTelemetryCollection : ICollectionFixture<Specs.Telemetry.OtlpRoutesHostFixture>;
+
+[CollectionDefinition("RunnerConfig")]
+public class RunnerConfigCollection : ICollectionFixture<RunnerConfigFixture>;
 
 [CollectionDefinition("MohistDb")]
 public class MohistDbCollection : ICollectionFixture<MohistDbFixture>;
@@ -89,22 +99,18 @@ public class EventPublishingCollection : ICollectionFixture<EventPublishingInteg
 
 /// <summary>
 /// <para>
-/// Serializes the server-OTel-tracing specs. They each stand up a
-/// <see cref="WebApplication"/> with its own OTel
-/// <c>TracerProvider</c>, and every provider subscribes to the same
-/// process-global <c>Microsoft.AspNetCore</c> ActivitySource. When two
-/// OTel tests run in parallel, the inbound-HTTP activities of one host
-/// flow through the other host's recorder and pollute its assertions —
-/// a passing test "no spans under /otel/" can suddenly see spans from
-/// the other test's <c>/api/health</c> request. Running these tests in
-/// a single non-parallel collection guarantees each
-/// <see cref="OtelTestHost"/>'s recorder sees only its own requests.
-/// </para>
-/// <para>
-/// No shared fixture is needed (each test creates its own host), so
-/// <see cref="ICollectionFixture{TFixture}"/> is intentionally not
-/// applied.
+/// Serializes server-OTel-tracing specs. Every tracing provider subscribes to
+/// process-global activity sources, so parallel hosts would pollute each
+/// other's assertions.
 /// </para>
 /// </summary>
 [CollectionDefinition("OtelTracing", DisableParallelization = true)]
 public class OtelTracingCollection;
+
+/// <summary>
+/// Owns the single full Mohist/Orleans host used by OTel integration specs.
+/// Lightweight OTel test hosts stay in <c>OtelTracing</c> so this provider is
+/// never injected into tests that require their own isolated activity pipeline.
+/// </summary>
+[CollectionDefinition("OtelFullStackIntegration", DisableParallelization = true)]
+public class OtelFullStackIntegrationCollection : ICollectionFixture<OtelIntegrationFixture>;

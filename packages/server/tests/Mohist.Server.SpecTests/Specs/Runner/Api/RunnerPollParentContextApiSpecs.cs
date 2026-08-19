@@ -17,7 +17,7 @@ using DomainIssue = Mohist.Server.Issue.Domain.Issue;
 
 namespace Mohist.Server.SpecTests.Specs.Runner.Api;
 
-[Collection("IsolatedIntegration")]
+[Collection("LaunchIntegration")]
 public sealed class RunnerPollParentContextApiSpecs
 {
     private readonly MohistIntegrationFixture _fixture;

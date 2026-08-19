@@ -30,7 +30,7 @@ namespace Mohist.Server.SpecTests.Specs.Workflow.Grain;
 /// retries successfully whether the session is empty, healthy, or at
 /// 100% context usage.
 /// </summary>
-[Collection("IsolatedIntegration")]
+[Collection("WorkflowRuntimeIntegration")]
 public class WorkflowRetryIgnoresContextUsageSpecs
 {
     private readonly MohistIntegrationFixture _fixture;

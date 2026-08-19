@@ -78,7 +78,10 @@ jobs:
     needs: [changes]
     if: github.event_name != 'pull_request' || needs.changes.outputs.dotnet == 'true'
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    # Setup and compilation consumed about 95s on hosted runners. Keep the
+    # test process's independent 240s hard limit reachable instead of letting
+    # the outer job cancel it around 197s.
+    timeout-minutes: 6
     env:
       DOTNET_NOLOGO: true
       DOTNET_CLI_TELEMETRY: false

@@ -17,7 +17,7 @@ namespace Mohist.Server.SpecTests.Specs.DirectApi;
 /// nudge raised by a canonical write path is enough for the projection
 /// to catch up from the checkpoint — without any caller involvement.
 /// </summary>
-[Collection("IsolatedIntegration")]
+[Collection("WorkflowRuntimeIntegration")]
 public sealed class PublicExecutionProjectorHostingSpecs(IsolatedMohistIntegrationFixture fixture)
 {
     [Fact]

@@ -24,7 +24,8 @@ namespace Mohist.Server.SpecTests.Specs.Sessions;
 /// and <c>RequestWorkScopeTests</c>; this spec only owns the
 /// wire-level response parity.
 /// </summary>
-public sealed class AgentPathAmplificationOtelEnabledSpecs : IClassFixture<OtelIntegrationFixture>
+[Collection("OtelFullStackIntegration")]
+public sealed class AgentPathAmplificationOtelEnabledSpecs
 {
     private static readonly string[] AmplificationFields =
         ["candidates", "databaseCalls", "downstreamCalls", "processed", "transcriptRecords"];

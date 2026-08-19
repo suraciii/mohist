@@ -111,14 +111,8 @@ public sealed class DirectApiFollowupSpecs(PublicProjectionIntegrationFixture fi
         const string key = "followup-replay";
         const string text = "continue the investigation";
 
-        JsonDocument? first = null;
-        for (var attempt = 0; attempt < 4; attempt++)
-        {
-            first?.Dispose();
-            first = await PostObservationAsync(client, projectId, sessionId, key, text);
-        }
-
-        var firstInputId = first!.RootElement.GetProperty("inputId").GetString();
+        using var first = await PostObservationAsync(client, projectId, sessionId, key, text);
+        var firstInputId = first.RootElement.GetProperty("inputId").GetString();
         var firstTurnId = first.RootElement.GetProperty("turnId").GetString();
         Assert.Null(first.RootElement.GetProperty("jobId").GetString());
         Assert.Equal(projectId, first.RootElement.GetProperty("projectId").GetString());
@@ -131,8 +125,6 @@ public sealed class DirectApiFollowupSpecs(PublicProjectionIntegrationFixture fi
         Assert.Equal(
             DirectApiWriteValidation.FollowupTurnId(sessionId, key),
             firstTurnId);
-        first.Dispose();
-
         await using var db = await fixture.Services
             .GetRequiredService<IDbContextFactory<MohistDbContext>>()
             .CreateDbContextAsync();
@@ -179,7 +171,7 @@ public sealed class DirectApiFollowupSpecs(PublicProjectionIntegrationFixture fi
         // canonical write path's projector nudge; wake the projector so
         // the replayed observation converges instead of racing the hourly
         // fixture sweep (see PublicExecutionReadRouteSpecs).
-        await NudgeProjectorAsync();
+        await ProjectSessionAsync(sessionId);
 
         using var replayBody = await PostObservationAsync(client, projectId, sessionId, key, text);
         Assert.Equal(originalInputId, replayBody.RootElement.GetProperty("inputId").GetString());
@@ -384,7 +376,7 @@ public sealed class DirectApiFollowupSpecs(PublicProjectionIntegrationFixture fi
         string key,
         string text)
     {
-        await NudgeProjectorAsync();
+        await ProjectSessionAsync(sessionId);
         using (var submitted = await SendAsync(client, projectId, sessionId, key, text))
         {
             if (submitted.StatusCode == HttpStatusCode.OK)
@@ -399,7 +391,13 @@ public sealed class DirectApiFollowupSpecs(PublicProjectionIntegrationFixture fi
                 error.RootElement.GetProperty("error").GetProperty("code").GetString());
         }
 
-        await NudgeProjectorAsync();
+        await ProjectSessionAsync(sessionId);
+        // The replay is meaningful only after the exact projection is readable;
+        // do not let the disabled background projector define this boundary.
+        var observation = await fixture.Services
+            .GetRequiredService<PublicExecutionReadQuerier>()
+            .ReadInputAsync(projectId, DirectApiWriteValidation.FollowupInputId(sessionId, key));
+        Assert.Equal(PublicReadStatus.Found, observation.Status);
         using var response = await SendAsync(client, projectId, sessionId, key, text);
         Assert.True(
             response.StatusCode == HttpStatusCode.OK,
@@ -615,10 +613,8 @@ public sealed class DirectApiFollowupSpecs(PublicProjectionIntegrationFixture fi
         await db.SaveChangesAsync();
     }
 
-    private async Task NudgeProjectorAsync()
-    {
-        await fixture.DrainPublicProjectionAsync();
-    }
+    private Task ProjectSessionAsync(string sessionId) =>
+        fixture.ProjectSessionAsync(sessionId);
 
     private async Task<int> MappingCountAsync()
     {

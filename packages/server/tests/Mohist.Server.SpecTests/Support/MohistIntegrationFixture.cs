@@ -182,6 +182,10 @@ public sealed class PublicProjectionIntegrationFixture : MohistIntegrationFixtur
         {
         }
     }
+
+    public Task ProjectSessionAsync(string sessionId, CancellationToken ct = default) =>
+        Services.GetRequiredService<PublicApiProjectionEngine>()
+            .ProcessSessionAsync(sessionId, ct);
 }
 
 public sealed class OtelIntegrationFixture : MohistIntegrationFixture

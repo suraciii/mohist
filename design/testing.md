@@ -137,12 +137,17 @@ serially.
   hosted dispatchers is not project-isolated. A full-stack class that mutates
   it belongs to a resource suite with one dedicated apphost. Classes in that
   suite use unique identities and run serially against the resource. A separate
-  resource suite is justified only by an incompatible host configuration, not
-  by a class boundary. Only truly process-static state uses a non-parallel
-  collection. Behavior matrices still move below the full-stack boundary.
+  resource suite requires an incompatible host configuration or a disjoint
+  global resource domain with its own reset boundary; a class boundary is never
+  sufficient. Only truly process-static state uses a non-parallel collection.
+  Behavior matrices still move below the full-stack boundary.
+  Large resource suites are partitioned by global resource domain. Each domain
+  owns one dedicated host, while independent domains run in parallel.
 - Specs that deliberately rewind public-projection checkpoints use a dedicated
   apphost without the background projector and drive complete batches through
-  the projection engine. The hosted-loop contract stays in its own apphost.
+  the projection engine. Command specs project the affected Session directly;
+  only drain-contract specs scan the collection's complete backlog. The
+  hosted-loop contract stays in its own apphost.
 - CI and the canonical local gate do not split classes across processes.
 - Collections express shared fixture lifetime or real isolation needs, never
   speed or cost.

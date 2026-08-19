@@ -65,16 +65,28 @@ public sealed partial class PublicApiProjectionEngine
     /// snapshot, journal entry, sequence, or checkpoint becomes
     /// visible.
     /// </param>
-    public async Task<bool> ProcessPendingAsync(
+    public Task<bool> ProcessPendingAsync(
         CancellationToken ct = default,
         bool commit = true,
-        int targetLimit = DefaultBatchTargetLimit)
+        int targetLimit = DefaultBatchTargetLimit) =>
+        ProcessAsync(onlySession: null, targetLimit, commit, ct);
+
+    internal Task<bool> ProcessSessionAsync(
+        string sessionId,
+        CancellationToken ct = default) =>
+        ProcessAsync(sessionId, targetLimit: 1, commit: true, ct);
+
+    private async Task<bool> ProcessAsync(
+        string? onlySession,
+        int targetLimit,
+        bool commit,
+        CancellationToken ct)
     {
         await using var db = await _dbFactory.CreateDbContextAsync(ct);
         await using var transaction = await db.Database.BeginTransactionAsync(ct);
         try
         {
-            var projected = await ProjectBatchAsync(db, targetLimit, rebuildGeneration: null, onlySession: null, ct);
+            var projected = await ProjectBatchAsync(db, targetLimit, rebuildGeneration: null, onlySession, ct);
             if (projected == 0)
             {
                 await transaction.RollbackAsync(ct);
