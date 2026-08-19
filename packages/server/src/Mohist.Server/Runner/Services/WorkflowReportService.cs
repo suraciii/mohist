@@ -67,7 +67,7 @@ public sealed class WorkflowReportService : IScopedService
         var report = _translator.TranslateResult(item, result, workflowRunId);
         if (report is WorkflowItemTranslator.InboundReport.Unknown unknown && item.IsTask)
         {
-            // Unknown is an observation, never an inferred task failure. Agent
+            // T-005: Unknown is an observation, never an inferred task failure. Agent
             // observations use the same complete execution binding as terminal
             // reports; non-Agent work retains the existing tuple path.
             var unknownAck = isAgentTask
