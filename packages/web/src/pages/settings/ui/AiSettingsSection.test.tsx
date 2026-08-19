@@ -3,7 +3,13 @@ import { fireEvent, screen, waitFor } from '../../../../tests/test-utils'
 import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it } from 'vitest'
 import { useMswServer } from '../../../../tests/support/msw'
-import { aiSettingsSectionHandlers, arrangeLoaded, patchCaptures, renderSection, resetAiSettingsSectionTestState } from './AiSettingsSectionTestSupport'
+import {
+  aiSettingsSectionHandlers,
+  arrangeLoaded,
+  patchCaptures,
+  renderSection,
+  resetAiSettingsSectionTestState,
+} from './AiSettingsSectionTestSupport'
 
 useMswServer(...aiSettingsSectionHandlers)
 beforeEach(resetAiSettingsSectionTestState)
@@ -20,9 +26,7 @@ describe('AiSettingsSection', () => {
     expect(screen.queryByText('Runtime')).not.toBeInTheDocument()
     expect(screen.queryByText('Command')).not.toBeInTheDocument()
     expect(screen.queryByText('Models')).not.toBeInTheDocument()
-    expect(
-      screen.queryByText(/does not configure AI providers/i),
-    ).not.toBeInTheDocument()
+    expect(screen.queryByText(/does not configure AI providers/i)).not.toBeInTheDocument()
   })
 
   it('keeps the Default Coder Agent Model ModelSelect and shows the model-count hint', async () => {
@@ -169,9 +173,7 @@ describe('AiSettingsSection inline variant chips', () => {
         document.querySelector('[data-testid="settings-default-model-row-anthropic/claude-3-variant-low"]'),
       ).toBeInTheDocument()
     })
-    expect(
-      document.querySelector('[data-testid="settings-default-model-row-openai/gpt-4-variant-low"]'),
-    ).toBeNull()
+    expect(document.querySelector('[data-testid="settings-default-model-row-openai/gpt-4-variant-low"]')).toBeNull()
   })
 
   it('highlights the stored default variant as the active chip', async () => {
@@ -215,9 +217,7 @@ describe('AiSettingsSection inline variant chips', () => {
     const defaultModelButton = await screen.findByRole('button', { name: /Default Coder Agent Model/i })
     await user.click(defaultModelButton)
 
-    const highChip = await screen.findByTestId(
-      'settings-default-model-row-anthropic/claude-3-variant-high',
-    )
+    const highChip = await screen.findByTestId('settings-default-model-row-anthropic/claude-3-variant-high')
     await user.click(highChip)
 
     await waitFor(() => {
@@ -241,9 +241,7 @@ describe('AiSettingsSection inline variant chips', () => {
     const defaultModelButton = await screen.findByRole('button', { name: /Default Coder Agent Model/i })
     await user.click(defaultModelButton)
 
-    const highChip = await screen.findByTestId(
-      'settings-default-model-row-anthropic/claude-3-variant-high',
-    )
+    const highChip = await screen.findByTestId('settings-default-model-row-anthropic/claude-3-variant-high')
     await user.click(highChip)
 
     await waitFor(() => {
@@ -266,9 +264,7 @@ describe('AiSettingsSection inline variant chips', () => {
     const defaultModelButton = await screen.findByRole('button', { name: /Default Coder Agent Model/i })
     await user.click(defaultModelButton)
 
-    const highChip = await screen.findByTestId(
-      'settings-default-model-row-anthropic/claude-3-variant-high',
-    )
+    const highChip = await screen.findByTestId('settings-default-model-row-anthropic/claude-3-variant-high')
     await user.click(highChip)
 
     await waitFor(() => {
@@ -291,13 +287,9 @@ describe('AiSettingsSection inline variant chips', () => {
     fireEvent.click(defaultModelButton)
 
     await waitFor(() => {
-      expect(
-        document.querySelector('[data-model-id="openai/gpt-4"]'),
-      ).toBeInTheDocument()
+      expect(document.querySelector('[data-model-id="openai/gpt-4"]')).toBeInTheDocument()
     })
-    expect(
-      document.querySelector('[data-testid="settings-default-model-row-openai/gpt-4-variant-low"]'),
-    ).toBeNull()
+    expect(document.querySelector('[data-testid="settings-default-model-row-openai/gpt-4-variant-low"]')).toBeNull()
     expect(document.querySelectorAll('[data-variant-chip]').length).toBe(0)
   })
 
@@ -313,13 +305,9 @@ describe('AiSettingsSection inline variant chips', () => {
     fireEvent.click(document.getElementById('settings-stage-model-build')!)
 
     await waitFor(() => {
-      expect(
-        document.querySelector('[data-model-id="openai/gpt-4"]'),
-      ).toBeInTheDocument()
+      expect(document.querySelector('[data-model-id="openai/gpt-4"]')).toBeInTheDocument()
     })
-    expect(
-      document.querySelector('[data-testid="settings-stage-model-build-row-openai/gpt-4-variant-low"]'),
-    ).toBeNull()
+    expect(document.querySelector('[data-testid="settings-stage-model-build-row-openai/gpt-4-variant-low"]')).toBeNull()
     expect(screen.queryByTestId('settings-stage-model-build-variant-trigger')).not.toBeInTheDocument()
   })
 
@@ -354,9 +342,7 @@ describe('AiSettingsSection inline variant chips', () => {
     await user.click(overridesButton)
     await user.click(document.getElementById('settings-stage-model-build')!)
 
-    const highChip = await screen.findByTestId(
-      'settings-stage-model-build-row-anthropic/claude-3-variant-high',
-    )
+    const highChip = await screen.findByTestId('settings-stage-model-build-row-anthropic/claude-3-variant-high')
     await user.click(highChip)
 
     await waitFor(() => {
@@ -365,9 +351,7 @@ describe('AiSettingsSection inline variant chips', () => {
     const body = patchCaptures[0]
     const buildStage = (body.stages as Record<string, unknown>)?.build as Record<string, unknown>
     const agent = buildStage?.vars as Record<string, unknown>
-    // Per #410 T-002 design D5: project-layer writers no longer stamp
-    // `type: 'opencode'`; only {model, variant} flows to vars.agent.
-    expect(agent?.agent).toEqual({ model: 'anthropic/claude-3', variant: 'high' })
+    expect(agent?.agent).toEqual({ model: 'anthropic/claude-3', variant: 'high', reasoningEffort: null })
   })
 
   it('persists model and variant when a chip is clicked on an unset stage row', async () => {
@@ -382,9 +366,7 @@ describe('AiSettingsSection inline variant chips', () => {
     await user.click(overridesButton)
     await user.click(document.getElementById('settings-stage-model-build')!)
 
-    const highChip = await screen.findByTestId(
-      'settings-stage-model-build-row-anthropic/claude-3-variant-high',
-    )
+    const highChip = await screen.findByTestId('settings-stage-model-build-row-anthropic/claude-3-variant-high')
     await user.click(highChip)
 
     await waitFor(() => {
@@ -393,6 +375,54 @@ describe('AiSettingsSection inline variant chips', () => {
     const body = patchCaptures[0]
     const buildStage = (body.stages as Record<string, unknown>)?.build as Record<string, unknown>
     const agent = buildStage?.vars as Record<string, unknown>
-    expect(agent?.agent).toEqual({ model: 'anthropic/claude-3', variant: 'high' })
+    expect(agent?.agent).toEqual({ model: 'anthropic/claude-3', variant: 'high', reasoningEffort: null })
+  })
+})
+
+describe('AiSettingsSection reasoning effort', () => {
+  it('renders Pi reasoning efforts and writes the canonical default-model key', async () => {
+    arrangeLoaded({
+      profileRuntime: 'pi',
+      defaultModel: 'anthropic/claude-3',
+      defaultVariant: 'balanced',
+      modelVariants: { 'anthropic/claude-3': ['balanced'] },
+      reasoningEfforts: { 'anthropic/claude-3': ['low', 'medium', 'high'] },
+    })
+    const user = userEvent.setup()
+    renderSection()
+
+    await user.click(await screen.findByRole('button', { name: /Default Coder Agent Model/i }))
+    expect(
+      screen.queryByTestId('settings-default-model-row-anthropic/claude-3-variant-balanced'),
+    ).not.toBeInTheDocument()
+    await user.click(await screen.findByTestId('settings-default-model-row-anthropic/claude-3-variant-high'))
+
+    await waitFor(() => expect(patchCaptures).toHaveLength(1))
+    const agent = (patchCaptures[0].vars as Record<string, unknown>).agent
+    expect(agent).toEqual({ model: 'anthropic/claude-3', variant: 'balanced', reasoningEffort: 'high' })
+  })
+
+  it('writes a Pi stage effort independently from variant', async () => {
+    arrangeLoaded({
+      profileRuntime: 'pi',
+      stageModels: { build: 'anthropic/claude-3' },
+      stageModelVariants: { build: 'balanced' },
+      modelVariants: { 'anthropic/claude-3': ['balanced'] },
+      reasoningEfforts: { 'anthropic/claude-3': ['low', 'high'] },
+    })
+    const user = userEvent.setup()
+    renderSection()
+
+    await user.click(await screen.findByRole('button', { name: /Stage Model Overrides/i }))
+    await user.click(document.getElementById('settings-stage-model-build')!)
+    await user.click(await screen.findByTestId('settings-stage-model-build-row-anthropic/claude-3-variant-high'))
+
+    await waitFor(() => expect(patchCaptures).toHaveLength(1))
+    const build = (patchCaptures[0].stages as Record<string, unknown>).build as Record<string, unknown>
+    expect((build.vars as Record<string, unknown>).agent).toEqual({
+      model: 'anthropic/claude-3',
+      variant: 'balanced',
+      reasoningEffort: 'high',
+    })
   })
 })

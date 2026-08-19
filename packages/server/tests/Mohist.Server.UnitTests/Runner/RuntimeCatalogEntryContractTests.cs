@@ -17,6 +17,7 @@ public sealed class RuntimeCatalogEntryContractTests
         Assert.Null(entry.SupportsReasoningEffort);
         Assert.Null(entry.Complete);
         Assert.Null(entry.CapabilityRevision);
+        Assert.Null(entry.ReasoningEfforts);
         Assert.DoesNotContain("capabilityRevision", JSON.Serialize(entry), StringComparison.Ordinal);
     }
 
@@ -28,7 +29,8 @@ public sealed class RuntimeCatalogEntryContractTests
             new Dictionary<string, string[]> { ["openai/gpt-5"] = ["balanced"] },
             SupportsReasoningEffort: true,
             Complete: true,
-            CapabilityRevision: "revision-a");
+            CapabilityRevision: "revision-a",
+            ReasoningEfforts: new Dictionary<string, string[]> { ["openai/gpt-5"] = ["low", "high"] });
 
         var roundTripped = JSON.DeserializeOrThrow<RuntimeCatalogEntry>(JSON.Serialize(original));
 
@@ -37,5 +39,6 @@ public sealed class RuntimeCatalogEntryContractTests
         Assert.Equal(original.SupportsReasoningEffort, roundTripped.SupportsReasoningEffort);
         Assert.Equal(original.Complete, roundTripped.Complete);
         Assert.Equal(original.CapabilityRevision, roundTripped.CapabilityRevision);
+        Assert.Equal(original.ReasoningEfforts, roundTripped.ReasoningEfforts);
     }
 }

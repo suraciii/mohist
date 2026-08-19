@@ -51,7 +51,7 @@ export function setLogLevel(level: string) {
 export type OpencodeModelVariants = Record<string, string[]>
 
 export function getOpencodeModels(projectId?: string | null) {
-  return request<{ models: string[]; modelVariants?: OpencodeModelVariants }>(
+  return request<{ models: string[]; modelVariants?: OpencodeModelVariants; reasoningEfforts?: OpencodeModelVariants }>(
     projectApiPath(projectId, '/opencode/models'),
   )
 }
@@ -61,7 +61,7 @@ export function getModels(
   runtime: AgentRuntime | string = DEFAULT_AGENT_RUNTIME,
 ) {
   const query = `?runtime=${encodeURIComponent(runtime)}`
-  return request<{ models: string[]; modelVariants?: OpencodeModelVariants }>(
+  return request<{ models: string[]; modelVariants?: OpencodeModelVariants; reasoningEfforts?: OpencodeModelVariants }>(
     projectApiPath(projectId, `/opencode/models${query}`),
   )
 }
@@ -95,6 +95,7 @@ export function getOpencodeModel(projectId?: string | null) {
   return getProjectWorkflowVariables(projectId).then((variables) => ({
     model: getAgentModel(variables.vars),
     variant: getAgentVariant(variables.vars),
+    reasoningEffort: getAgentReasoningEffort(variables.vars),
   }))
 }
 
@@ -102,12 +103,15 @@ export function updateOpencodeModel(
   projectId: string | null | undefined,
   model: string | null,
   variant?: string | null,
+  reasoningEffort?: string | null,
 ) {
   const agent: Record<string, unknown> = { model }
   if (variant !== undefined) agent.variant = variant
+  if (reasoningEffort !== undefined) agent.reasoningEffort = reasoningEffort
   return patchProjectWorkflowVariables(projectId, { vars: { agent } }).then((variables) => ({
     model: getAgentModel(variables.vars),
     variant: getAgentVariant(variables.vars),
+    reasoningEffort: getAgentReasoningEffort(variables.vars),
   }))
 }
 
@@ -234,6 +238,7 @@ export function getStageModels(projectId?: string | null) {
   return getProjectWorkflowVariables(projectId).then((variables) => ({
     stageModels: getStageModelMap(variables),
     stageModelVariants: getStageModelVariantMap(variables),
+    stageReasoningEfforts: getStageReasoningEffortMap(variables),
   }))
 }
 
@@ -242,12 +247,15 @@ export function setStageModel(
   stage: string,
   model: string | null,
   variant?: string | null,
+  reasoningEffort?: string | null,
 ) {
   const agent: Record<string, unknown> = { model }
   if (variant !== undefined) agent.variant = variant
+  if (reasoningEffort !== undefined) agent.reasoningEffort = reasoningEffort
   return patchProjectWorkflowVariables(projectId, { stages: { [stage]: { vars: { agent } } } }).then((variables) => ({
     stageModels: getStageModelMap(variables),
     stageModelVariants: getStageModelVariantMap(variables),
+    stageReasoningEfforts: getStageReasoningEffortMap(variables),
   }))
 }
 
@@ -389,6 +397,13 @@ function getAgentVariant(vars: Record<string, unknown> | null | undefined) {
   return typeof variant === 'string' && variant.trim() ? variant : null
 }
 
+function getAgentReasoningEffort(vars: Record<string, unknown> | null | undefined) {
+  const agent = vars?.agent
+  if (!agent || typeof agent !== 'object') return null
+  const effort = (agent as Record<string, unknown>).reasoningEffort
+  return typeof effort === 'string' && effort.trim() ? effort : null
+}
+
 function getStageModelMap(variables: VariableBundle) {
   const entries = Object.entries(variables.stages ?? {})
     .map(([stage, stageVars]) => [stage, getAgentModel(stageVars?.vars)] as const)
@@ -400,6 +415,14 @@ function getStageModelMap(variables: VariableBundle) {
 function getStageModelVariantMap(variables: VariableBundle) {
   const entries = Object.entries(variables.stages ?? {})
     .map(([stage, stageVars]) => [stage, getAgentVariant(stageVars?.vars)] as const)
+    .filter((entry): entry is readonly [string, string] => typeof entry[1] === 'string')
+
+  return entries.length > 0 ? Object.fromEntries(entries) : null
+}
+
+function getStageReasoningEffortMap(variables: VariableBundle) {
+  const entries = Object.entries(variables.stages ?? {})
+    .map(([stage, stageVars]) => [stage, getAgentReasoningEffort(stageVars?.vars)] as const)
     .filter((entry): entry is readonly [string, string] => typeof entry[1] === 'string')
 
   return entries.length > 0 ? Object.fromEntries(entries) : null

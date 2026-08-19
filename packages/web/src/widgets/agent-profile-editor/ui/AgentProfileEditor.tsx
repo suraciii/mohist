@@ -13,7 +13,6 @@ import {
   AGENT_RUNTIME_OPENCODE,
   AGENT_RUNTIME_PI,
   useAvailableModelIds,
-  useModelVariants,
   type AgentRuntime,
 } from '../../../entities/settings'
 import { useProjectPath } from '../../../entities/project'
@@ -79,8 +78,8 @@ export function AgentProfileEditor({ agent, open, onClose, onSaved, operationsHo
   const isSaving = createAgent.isPending || updateAgent.isPending
 
   const { data: availableModels } = useAvailableModelIds(runtime)
-  const modelVariantsMap = useModelVariants(runtime)
-  const reasoningEffortsMap = runtime === AGENT_RUNTIME_PI ? modelVariantsMap : undefined
+  const modelVariantsMap = availableModels?.modelVariants ?? {}
+  const reasoningEffortsMap = runtime === AGENT_RUNTIME_PI ? availableModels?.reasoningEfforts : undefined
 
   const allModels: string[] = useMemo(() => availableModels?.models ?? [], [availableModels])
 
