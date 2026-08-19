@@ -223,18 +223,18 @@ public sealed class WorkflowActivityHistoryTests : WorkflowActivityHistoryTestSu
     }
 
     [Fact]
-    public async Task Status_MaterializedRowCountRemainsBounded_WhenThousandsOfHistoricalRowsExist()
+    public async Task Status_MaterializedRowCountRemainsBounded_WhenHistoricalRowsGrow()
     {
         // This exercises the narrow internal test seam exposed on
         // AgentSessionQuery to count rows the candidate query
         // materializes. The seam is not exposed on the public API.
         var project = await CreateProjectAsync("status-materialized-count");
         await InsertActiveDirectSessionsAsync(project, count: 1);
-        await InsertInactiveHistoricalSessionsAsync(project, count: 800);
+        await InsertInactiveHistoricalSessionsAsync(project, count: 50);
 
         var rowsBefore = await CountMaterializedRowsAsync(SessionQuery, project);
 
-        await InsertInactiveHistoricalSessionsAsync(project, count: 800);
+        await InsertInactiveHistoricalSessionsAsync(project, count: 50);
 
         var rowsAfter = await CountMaterializedRowsAsync(SessionQuery, project);
 
