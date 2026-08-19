@@ -1,0 +1,40 @@
+{
+  "project": "mohist-local",
+  "description": "Prevent exhausted provider quota failures from dispatching Workflow Agent recovery while preserving ordinary recovery behavior.",
+  "tasks": [
+    {
+      "id": "T-001",
+      "title": "Propagate the non-recoverable provider failure marker",
+      "spec": "specs/provider-failure-recovery-eligibility/spec.md#pi-provider-message-is-preserved",
+      "description": "Map existing OpenCode and Pi provider policy decisions to the internal provider-quota-exhausted Action error code and retain the original provider message.",
+      "acceptanceCriteria": [
+        "OpenCode provider-quota-exhausted diagnostics map to the internal error code without changing the runtime policy.",
+        "Pi provider quota and usage-limit failures retain the original provider message and emit the same internal marker.",
+        "Transient retry behavior and all non-provider runtime failures remain unchanged."
+      ],
+      "priority": 1,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Runner runtime-to-Action failure marker propagation and focused runtime tests.",
+      "dependsOn": [],
+      "passes": true
+    },
+    {
+      "id": "T-002",
+      "title": "Veto Agent recovery for exhausted provider failures",
+      "spec": "specs/provider-failure-recovery-eligibility/spec.md#exhausted-provider-quota-does-not-schedule-agent-recovery",
+      "description": "Make the shared recovery boundary return the original failed result for the provider-quota-exhausted marker while preserving ordinary recovery matching.",
+      "acceptanceCriteria": [
+        "No recovery handler task or retrySelf task is added for provider-quota-exhausted.",
+        "The original failed result and provider message are returned unchanged.",
+        "Ordinary script failure recovery remains covered and passes."
+      ],
+      "priority": 2,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Recovery eligibility guard and regression tests.",
+      "dependsOn": ["T-001"],
+      "passes": true
+    }
+  ]
+}

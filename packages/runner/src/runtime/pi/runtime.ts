@@ -1,11 +1,12 @@
 import { createCredentialMaskerFromEnvironment, CredentialMasker } from '../task-log.js'
+import { NON_RECOVERABLE_PROVIDER_ERROR_CODE } from '../../core/types.js'
 import { resolve } from 'node:path'
 import { startSettleGuard } from './settle-guard.js'
 import { finalText, lastMessageError, lastMessageFailed } from './session-state.js'
 import { SessionMutexes } from './session-locks.js'
 import { boundedTimeoutMs, boundedWait } from '../bounded-wait.js'
 import { diagnostic, piError, resetDiagnostic } from './errors.js'
-import { isProviderFailure, DEFAULT_PI_PROVIDER_ERROR_POLICY } from './policy.js'
+import { classifyRetryFailure, DEFAULT_PI_PROVIDER_ERROR_POLICY } from './policy.js'
 import { createPiProjector } from './projector.js'
 import { realPiSdkFactory, type PiSdkFactory, type PiSdkServices, type PiSdkSession } from './sdk.js'
 import type {
@@ -198,8 +199,12 @@ export class PiRuntime {
     const unsubscribe = session.subscribe((event) => {
       const facts = projector.project(event)
       report(facts)
-      if (isRetryFailure(event, this.policy()) && !fixed) {
-        fixAndAbort(this.finishFailure('turn-failed', 'Pi provider retries exhausted', diagnostics))
+      const retryFailure = classifyRetryFailure(event, this.policy())
+      if (retryFailure && !fixed) {
+        const failureDiagnostics = retryFailure.provider
+          ? [diagnostic(NON_RECOVERABLE_PROVIDER_ERROR_CODE, retryFailure.message)]
+          : []
+        fixAndAbort(this.finishFailure('turn-failed', retryFailure.message, failureDiagnostics))
       }
     })
     const model = request.options?.model
@@ -937,15 +942,6 @@ function splitModel(value: string): { provider: string; id: string } | null {
 }
 function message(cause: unknown): string {
   return cause instanceof Error ? cause.message || 'Pi operation failed' : String(cause)
-}
-function isRetryFailure(event: unknown, policy: PiProviderErrorPolicy): boolean {
-  if (!event || typeof event !== 'object' || (event as { type?: unknown }).type !== 'auto_retry_start') return false
-  const value = event as { errorMessage?: unknown; attempt?: unknown }
-  const text = typeof value.errorMessage === 'string' ? value.errorMessage : ''
-  return (
-    isProviderFailure(text, policy) ||
-    (typeof value.attempt === 'number' && value.attempt >= policy.consecutiveRetryThreshold)
-  )
 }
 function isPiStopEvent(event: unknown): boolean {
   return Boolean(event && typeof event === 'object' && (event as { type?: unknown }).type === 'agent_settled')

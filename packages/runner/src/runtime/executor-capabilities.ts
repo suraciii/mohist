@@ -1,5 +1,10 @@
 import { createHash } from 'node:crypto'
-import type { ActionResult, JsonObject, DispatchWorkItem } from '../core/types.js'
+import {
+  NON_RECOVERABLE_PROVIDER_ERROR_CODE,
+  type ActionResult,
+  type JsonObject,
+  type DispatchWorkItem,
+} from '../core/types.js'
 import { errorMessage } from '../core/errors.js'
 import { renderWithSkippedFields } from '../core/template.js'
 import type { ServerConnection } from '../server/connection.js'
@@ -506,11 +511,14 @@ function buildAgentTurnCapability(
       await reporter?.settle()
 
       if (!result.ok) {
-        const code = opencodeFailureCode(result.error.kind)
+        const diagnostics = result.diagnostics ?? result.error.diagnostics ?? []
+        const code = diagnostics.some((diagnostic) => diagnostic.code === NON_RECOVERABLE_PROVIDER_ERROR_CODE)
+          ? NON_RECOVERABLE_PROVIDER_ERROR_CODE
+          : opencodeFailureCode(result.error.kind)
         return runtimeActionFailure(
           code,
           result.error.message,
-          hasUnconfirmedCleanup(result.diagnostics ?? result.error.diagnostics ?? []) ? 'unknown' : undefined,
+          hasUnconfirmedCleanup(diagnostics) ? 'unknown' : undefined,
         )
       }
 
