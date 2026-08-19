@@ -1,7 +1,7 @@
 # WorkflowRun State Persistence
 
 This document defines the content boundary and read/write cost rules for
-persisted WorkflowRun state in `WorkflowRuns.State`. See
+persisted WorkflowRun state. See
 [`task-dispatch.md`](task-dispatch.md) for dispatch-snapshot semantics and
 storage lifecycle.
 
@@ -23,11 +23,10 @@ capacity.
 
 ## Definition
 
-State is the persisted authority for one WorkflowRun. It contains the minimal
-runtime facts required for current decisions: status, assignment, state-machine
-fields for each Stage and TaskRun, Workspace and Repository references, and
-task output. The WorkflowRun state owner loads this record when it becomes
-active and rewrites it after each state change.
+State is the persisted authority for one WorkflowRun. It contains only the
+runtime facts required for current scheduling, recovery, and presentation
+decisions. The WorkflowRun state owner loads this record when it becomes active
+and rewrites it after each state change.
 
 State is not:
 
@@ -67,10 +66,9 @@ State is not:
 
 ## Format Evolution and Migration
 
-A running Server recognizes one canonical State format. Do not add per-row
-`SchemaVersion` or `StateSchemaVersion` to `WorkflowRuns`. One writer and
-startup-time database migration do not require permanent format branching, and
-multiple formats must not coexist on the read path.
+A running Server recognizes one canonical State format. A per-record format
+discriminator would create permanent branching for a one-way startup upgrade,
+so multiple formats must not coexist on the read path.
 
 A State format change is a database upgrade completed before the new Server
 accepts requests:
@@ -96,16 +94,13 @@ accepts requests:
 - A data upgrader must be idempotent. A failed write rolls back with the
   transaction. The next startup reevaluates persisted data and retries without
   process-memory progress.
-- WorkflowRun State migration must be idempotent by persisted bytes. Do not
-  reserialize canonical State when it does not change. Increment shadow ETag
-  exactly once in the same save transaction only when State changes. A backing
-  key change alone does not advance State ETag. Repetition must not change
-  State, ETag, or migration counts.
+- WorkflowRun State migration must be idempotent by persisted bytes. It must not
+  rewrite a canonical record or advance its revision when the content does not
+  change.
 
-Before destructive production-State rewrite, create a consistent SQLite backup
-and verify that it opens. In WAL mode, do not copy only the main `.db` file.
-Use SQLite online backup or `VACUUM INTO` so committed WAL content is present.
-Restore from that backup instead of inventing a reverse transformation.
+Before a destructive production-State rewrite, create and verify a consistent
+database backup. Restore from that backup instead of inventing a reverse
+transformation.
 
 After migration, every read entry deserializes State directly with the current
 model. It neither probes historical fields nor calls a converter. A database

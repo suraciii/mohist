@@ -62,11 +62,3 @@ frozen tuple.
 The Runner owns runtime-native adapters. Pi maps canonical effort to its
 private `thinkingLevel` input. Other runtimes may provide a different adapter;
 none may receive a Pi-specific value through the generic `variant` field.
-
-## Implementation boundary
-
-This document defines the contract only. The executable slice must add the
-append-only wire fields, the canonical resolver, snapshot propagation, and
-adapter-focused tests in one change. Admission must consume the resolver on
-the same runner/capability snapshot; a catalog-only write path is not a valid
-implementation.

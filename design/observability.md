@@ -71,7 +71,7 @@ occupies exactly one line.
   `exception` key and remains on one line.
 - Omit a key that has no value.
 
-```
+```text literal
 time=2025-01-15T10:30:45.123Z level=INFO msg="work claimed" service=server component=dispatch work=w_abc run=r_123 issue=468
 time=2025-01-15T10:30:46.567Z level=ERROR msg="report failed" service=runner component=report work=w_abc attempt=3 exception="HttpRequestException: connection refused\n   at RunnerClient.Report(...)"
 ```
@@ -93,24 +93,10 @@ time=2025-01-15T10:30:46.567Z level=ERROR msg="report failed" service=runner com
   the log filename.
 - Domain IDs appear only in log keys and Trace attributes, never metric labels.
 
-### Files and Retention
-
-- The default log directory is `$HOME/.mohist/logs`. The Server can override it
-  with `Mohist:LogsPath`, and the Runner with `MOHIST_LOGS_PATH`.
-- Server writes `server.log`; Runner writes `runner.log`. Both use the same line
-  contract.
-- Files rotate by size. One file is limited to 32 MiB, and the current file plus
-  two historical generations are retained, such as `server.log`,
-  `server.log.1`, and `server.log.2`. Rotated files remain uncompressed so line
-  tools can read them directly.
-- Runner process diagnostics use the same line contract in `runner.log` and are
-  also passed through to the terminal for development observation. There is no
-  terminal-only diagnostics path.
-
 ### Read Path
 
-- `/api/logs/tail` parses logfmt one line at a time into `LogEntry`. The file
-  format is the single source of truth; there is no second on-disk format.
+- The log read path parses logfmt one line at a time. The line contract is the
+  single source of truth; there is no second persisted format.
 - A line that fails parsing is not dropped. It becomes the unmodified `message`,
   structured fields remain empty, and `raw` retains the source line.
 
@@ -171,18 +157,6 @@ Their cost can grow only with currently relevant data, not unrelated history.
 These paths expose candidate count, processed count, and downstream call count.
 When a small response causes many database or cross-process calls, metrics and
 Traces must show that amplification directly.
-
-## Verification
-
-- Automated tests lock self-observation filtering to prevent a feedback loop.
-- Receive tests prove that decompressed request and concurrency-admission limits
-  apply before full buffering and that internal writes are budgeted chunks.
-- Storage tests prove time and space limits and overload-drop behavior, with the
-  database, WAL, and SHM included in the budget.
-- High-frequency paths verify cost through operation counts rather than wall
-  time.
-- Tests use the same current data with different amounts of history. More
-  history cannot amplify queries or calls.
 
 ## Current Gaps
 

@@ -81,14 +81,14 @@ durable comment-added event
 
 ### Loop Prevention
 
-By convention, an Agent comment declares its name through `--author`; preset
+By convention, an Agent comment declares its name through `--display-name`; preset
 text includes this rule. A comment whose author matches an active Project Agent
 name is not scanned for mentions. An Agent comment therefore triggers neither
 another Agent nor itself. A mention chain can begin only with a person's
 comment.
 
-Author is a declaration, not authentication. A person who deliberately uses an
-Agent name also suppresses mention detection. This convention cost is
+Display name is a declaration, not authentication. A person who deliberately
+uses an Agent name also suppresses mention detection. This convention cost is
 acceptable for local single-user use.
 
 ### Resolution Failure

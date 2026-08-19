@@ -27,8 +27,8 @@ explicitly from the Workflow Profile:
 ```yaml
 vars:
   agent:
-    model: anthropic/claude-sonnet-4
-    variant: high
+    model: provider-a/model-a
+    variant: variant-a
 
 stages:
   - stage: plan
@@ -55,15 +55,15 @@ execution.
 
 ## Action Inputs
 
-| Field | Required | Default | Meaning |
-|---|---:|---|---|
-| `prompt` | Yes | - | Prompt sent to Pi for this execution |
-| `session` | No | - | Logical Session name within the WorkflowRun; the current Work ID is used when omitted |
-| `options` | No | - | Object that selects the Pi model for this execution |
-| `options.model` | No | - | Pi model in `provider/model` form |
-| `options.reasoningEffort` | No | - | Canonical effort mapped privately to a Pi thinking level |
-| `options.variant` | No | - | Pi true model variant; it no longer selects thinking level |
-| `timeout` | No | `3600000` | Execution deadline in milliseconds; reaching it interrupts the current execution |
+- `prompt` is required and contains the prompt for this execution.
+- `session` is optional. It names the logical Session within the WorkflowRun.
+  When omitted, the current Work ID is used.
+- `options` is optional. Its `model` field uses `provider/model` form, and its
+  optional `reasoningEffort` field selects a canonical effort that Pi maps to
+  its private thinking level. The optional `variant` field selects a true model
+  variant and does not control the thinking level.
+- `timeout` is optional and defaults to `3600000` milliseconds. Reaching the
+  deadline interrupts the current execution.
 
 Tools, Skills, system prompts, and automatic compaction remain Pi
 configuration. Mohist does not duplicate them as fields. Action Input does not
@@ -81,9 +81,8 @@ The physical Session for this Action is Pi's session file. Automatic recovery
 requires that file to be explicitly missing. A corrupt or unreadable file is
 not considered missing.
 
-Session usage records input, output, cache read, cache write, and thought tokens
-when Pi provides them. Cache write is not included in cache read and is not
-counted again when an event is redelivered.
+Session usage records the usage and cost facts that Pi provides. Redelivery
+does not count the same usage event again.
 
 ## Pi Session Operations
 
@@ -132,21 +131,3 @@ does not add a separate timeout policy for each tool.
 `mohist/pi` uses only the six shared business error codes in
 [Action Contracts](README.md#shared-semantics-for-agent-execution-actions). It
 has no Pi-specific business error codes.
-
-## Implementation Gaps
-
-Both Workflow and AgentJob paths are implemented. A Workflow can use
-`mohist/pi`, and a Mohist Agent configured for Pi can execute input. Both reuse
-AgentSession and show transcripts, tools, state, compaction, model, usage, and
-cost on the existing Session page. Pi Compact and Reset are available through
-the shared Session operations. Workflow model selectors use the Runtime
-projected from the active bound Run when present, otherwise from the effective
-Profile Agent Action. They do not fall back to an OpenCode catalog.
-
-Before a new Workflow input is submitted, Mohist automatically creates empty Pi
-context and replaces a binding that the owning Runner confirms is missing while
-the Session is safely idle. AgentJob launch and idle Follow-up do not yet use
-that recovery boundary. Ambiguous or unsafe absence still blocks instead of
-replaying input. The complete ownership lease, fencing, candidate reconciliation,
-and cleanup contract is not yet enforced at every boundary; see [Agents and
-AgentSessions](../agent-sessions.md#implementation-gaps).

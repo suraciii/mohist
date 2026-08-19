@@ -24,8 +24,8 @@ separate Variables:
 ```yaml
 vars:
   agent:
-    model: anthropic/claude-sonnet-4
-    variant: high
+    model: provider-a/model-a
+    variant: variant-a
 ```
 
 Then bind `session` and `options` explicitly from the Workflow Profile:
@@ -60,15 +60,15 @@ the OpenCode default for the first execution.
 
 ## Action Inputs
 
-| Field | Required | Default | Meaning |
-|---|---:|---|---|
-| `prompt` | Yes | - | Prompt sent to OpenCode for this execution |
-| `session` | No | - | Logical Session name within the WorkflowRun; the current Work ID is used when omitted |
-| `options` | No | - | Object that selects the OpenCode model for this execution |
-| `options.model` | No | - | OpenCode model in `provider/model` form |
-| `options.variant` | No | - | OpenCode true variant for the model |
-| `options.reasoningEffort` | No | - | Rejected as `unsupported_execution_configuration` when set |
-| `timeout` | No | `3600000` | Execution deadline in milliseconds; reaching it interrupts the current execution |
+- `prompt` is required and contains the prompt for this execution.
+- `session` is optional. It names the logical Session within the WorkflowRun.
+  When omitted, the current Work ID is used.
+- `options` is optional. Its `model` field uses `provider/model` form, and its
+  optional `variant` field selects a true variant supported by that model. An
+  explicit `reasoningEffort` is rejected as
+  `unsupported_execution_configuration`.
+- `timeout` is optional and defaults to `3600000` milliseconds. Reaching the
+  deadline interrupts the current execution.
 
 Tools, plugins, permissions, default execution behavior, and automatic
 compaction remain OpenCode configuration. Mohist does not duplicate them as
@@ -122,26 +122,7 @@ See [Action Contracts](README.md#shared-semantics-for-agent-execution-actions)
 for the six shared business error codes and platform errors.
 `mohist/opencode` also defines:
 
-| Error code | Meaning |
-|---|---|
-| `incompatible-runtime` | The OpenCode version or data is incompatible with Mohist |
-| `permission-required` | Permission is required to continue |
-| `interrupted` | A signal outside the Runner interrupted execution |
-
-## Implementation Gaps
-
-`mohist/opencode` is implemented for both Workflow and AgentJob origins.
-OpenCode drives execution directly, and the built-in Profiles use this Action.
-Configuration, Session, command results, and diagnostics for Workflow and Agent
-origins no longer contain historical ACP identity fields.
-
-Stable Session identity, origin resolution, Follow-up, Stop, and Reset are
-implemented. Reset creates empty OpenCode context and replaces the binding while
-the AgentSession remains the same. Native Compact is still unavailable.
-
-Before a new Workflow input is submitted, Mohist automatically replaces an
-OpenCode binding that the owning Runner confirms is missing while the Session
-is safely idle. AgentJob launch and idle Follow-up do not yet use that recovery
-boundary. Ambiguous or unsafe absence still blocks instead of replaying input.
-The remaining cross-boundary recovery limits are defined in [Agents and
-AgentSessions](../agent-sessions.md#implementation-gaps).
+- `incompatible-runtime` means the OpenCode version or data is incompatible
+  with Mohist.
+- `permission-required` means permission is required to continue.
+- `interrupted` means a signal outside the Runner interrupted execution.

@@ -152,13 +152,11 @@ Archival is the Workspace's only terminal operation:
 
 The Runner keeps its existing periodic retention and storage-budget
 maintenance. The reclamation guard changes from "WorkflowRun is terminal" to
-the Workspace view:
-
-| Workspace status | Directory handling |
-|---|---|
-| active with active bound Sessions | reclamation forbidden |
-| active without active bindings | may be reclaimed by disk policy; the entity remains and the next binding rematerializes it |
-| archived | delete under the reclamation grant |
+the Workspace view: reclamation is forbidden while the Workspace is active
+with active bound Sessions; an active Workspace without active bindings may be
+reclaimed by disk policy, and the entity remains so the next binding
+rematerializes it; an archived Workspace is deleted under the reclamation
+grant.
 
 Every deletion must still acquire the directory's Runtime removal fence; that
 invariant does not change.

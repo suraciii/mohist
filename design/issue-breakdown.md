@@ -10,11 +10,11 @@ domain design, rationale, and constraints.
 
 ## Decision History
 
-- The original #96 proposed automatic three-stage breakdown: Agent analysis,
+- An early proposal suggested automatic three-stage breakdown: Agent analysis,
   an `issue-breakdown.json` artifact, Approval, and bulk child-Issue creation.
-  It was rejected. #281 lists automatic breakdown and bulk generation as
-  Non-goals. That decision remains: decomposition is always an explicit choice
-  by the owner or an External Agent acting for the owner.
+  It was rejected, and automatic breakdown and bulk generation are Non-goals.
+  That decision remains: decomposition is always an explicit choice by the
+  owner or an External Agent acting for the owner.
 - The earlier conclusion that child Issues overlapped with Epic assumed one
   Repository per Project. On 2026-07-15, multi-Repository resources introduced
   a real need to execute one requirement across Repositories. The decomposition
@@ -87,14 +87,18 @@ domain design, rationale, and constraints.
 
 ## Lifecycle Constraints
 
-| Operation | Constraint |
-|---|---|
-| Attach through create or update `--parent` | Child must be unstarted Backlog; parent must be unstarted or In Progress; an Issue that already has children cannot become a child |
-| Detach with `--parent none` | Allowed at any time; recompute parent state immediately |
-| Start parent | Requires at least one child; an Issue without children uses ordinary Workflow start |
-| Close parent | Allowed only when all children are terminal; does not cascade |
-| Archive parent | Children archive with the parent; a child cannot archive independently |
-| Delete Repository | The default cannot be deleted; a Repository bound to a nonterminal Issue cannot be deleted |
+- Attach through create or update `--parent`: the child must be unstarted
+  Backlog; the parent must be unstarted or In Progress; an Issue that already
+  has children cannot become a child.
+- Detach with `--parent none`: allowed at any time; recompute parent state
+  immediately.
+- Start parent: requires at least one child; an Issue without children uses
+  ordinary Workflow start.
+- Close parent: allowed only when all children are terminal; does not cascade.
+- Archive parent: children archive with the parent; a child cannot archive
+  independently.
+- Delete Repository: the default cannot be deleted; a Repository bound to a
+  nonterminal Issue cannot be deleted.
 
 ## Open Questions
 

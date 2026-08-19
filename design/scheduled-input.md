@@ -77,22 +77,11 @@ a due `scheduled` record and start the same delivery path.
 
 ## Invocation contract
 
-The Server surface is:
-
-```text literal
-POST /api/projects/{projectRef}/agent-sessions/{sessionId}/schedules
-Idempotency-Key: {key}
-{ "text": "...", "dueAt": "2026-08-06T14:00:00Z" }
-
-GET  /api/projects/{projectRef}/agent-sessions/{sessionId}/schedules
-POST /api/projects/{projectRef}/agent-sessions/{sessionId}/schedules/{scheduleId}/cancel
-```
-
 The creation body accepts only `text` and `dueAt`:
 
 - `dueAt` must be an offset-bearing RFC 3339 timestamp (`Z` or `+/-hh:mm`) strictly later than the
   current Server time supplied by `TimeProvider`. Local time without an offset or a time that is not
-  in the future returns `schedule_due_in_past`; the caller should use an ordinary follow-up instead.
+  in the future is rejected; the caller should use an ordinary follow-up instead.
 - `text` follows follow-up validation and must contain visible text. Scheduled attachments are not
   supported.
 - Authorization is identical to follow-up: the caller must be allowed to operate the Project, and
@@ -103,10 +92,10 @@ The creation body accepts only `text` and `dueAt`:
 
 Creation is idempotent within `(ProjectId, SessionId, IdempotencyKey)`. The canonical fingerprint is
 normalized text with leading and trailing whitespace removed plus UTC `dueAt`. Same-key replay with
-the same fingerprint returns the original schedule and current state; a changed fingerprint returns
-HTTP 409. When the key is omitted, CLI prints a newly generated key before the request and API
-generates a new key. Such separate requests are separate schedule intents; a caller that needs
-response-loss replay must retain and reuse the key.
+the same fingerprint returns the original schedule and current state; a changed fingerprint is
+rejected as a conflict. When the key is omitted, CLI prints a newly generated key before the request
+and API generates a new key. Such separate requests are separate schedule intents; a caller that
+needs response-loss replay must retain and reuse the key.
 
 Cancellation is idempotent by target state and needs no separate key. It moves `scheduled` or
 `pending-delivery` to `cancelled`. A `delivered` or already `cancelled` schedule returns its current
@@ -162,15 +151,15 @@ because they use the stable delivery identity.
 
 Delivery then follows ordinary Session admission:
 
-| State at delivery | Result |
-|---|---|
-| `idle` | Accept an ordinary follow-up and start a new Turn. |
-| `active` | Accept it into the current or a later Turn in ordinary input order. |
-| `unknown` | Keep `pending-delivery`; retry after activity evidence recovers. |
-| Runtime Session is definitely absent and the Session is `idle` | Establish a binding through automatic recovery in [`agent-execution.md`](agent-execution.md), then deliver. |
-| Runner unavailable, timeout, permission failure, binding change, or Runtime presence is uncertain | Do not create a binding; keep `pending-delivery` and retry after recovery. |
-| Follow-up capacity or Agent concurrency limit | Keep `pending-delivery` and retry after recovery. |
-| Stop in progress | Keep `pending-delivery` and retry after that stop operation completes. |
+- `idle`: accept an ordinary follow-up and start a new Turn.
+- `active`: accept it into the current or a later Turn in ordinary input order.
+- `unknown`: keep `pending-delivery` and retry after activity evidence recovers.
+- Runtime Session definitely absent while the Session is `idle`: establish a binding through
+  automatic recovery in [`agent-execution.md`](agent-execution.md), then deliver.
+- Runner unavailable, timeout, permission failure, binding change, or uncertain Runtime presence:
+  do not create a binding; keep `pending-delivery` and retry after recovery.
+- Follow-up capacity or Agent concurrency limit: keep `pending-delivery` and retry after recovery.
+- Stop in progress: keep `pending-delivery` and retry after that stop operation completes.
 
 Transport failure is not evidence that a Runtime Session is absent. Automatic binding recovery is
 allowed only after determinate absence while the Session is idle; every ambiguous result fails
@@ -200,23 +189,6 @@ The session-tree side of these interactions is summarized in
   no `AgentJob`.
 - No schedule projection in `mo session view` or `mo session tree`, and no Web management surface.
   API and CLI use the schedule list command.
-
-## Verification
-
-Server specifications use an injected fake clock, fake Runner, and in-memory stores to prove:
-
-- creation validation, field allowlisting, UTC normalization, same-key replay, changed-payload
-  conflict, distinct no-key requests, idempotent cancellation, and not-found behavior;
-- no delivery before `DueAt`, and one Input/Turn mapping after duplicate wake-ups, response loss, or
-  activation recovery;
-- `pending-delivery` retention across unknown activity, Runner failure, binding change, capacity,
-  and stop-in-progress, followed by same-identity delivery when the blocker recovers;
-- automatic binding recovery only after determinate Runtime absence while idle;
-- recovery of due `scheduled` records after a lost one-shot wake-up, with work proportional only to
-  that Session's nonterminal schedules;
-- stop, detach, Reset, and Compact lifecycle boundaries, including delivery to a detached Session
-  and a post-stop Turn outside the frozen snapshot;
-- unchanged Runner protocol: scheduled delivery is indistinguishable from an ordinary follow-up.
 
 ## Status
 

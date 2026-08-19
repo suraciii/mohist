@@ -73,11 +73,10 @@ the most recent failure context.
 ## Delivery and Failure Isolation
 
 TaskLog uses a separate upload channel and never enters the WorkResult payload.
-
-| Phase | When |
-|---|---|
-| Terminal flush | Flush retained entries before the final work report so completed work has its available evidence. |
-| Incremental flush | Periodically publish batches for live viewing; live delivery is best effort and the store remains authoritative. |
+A terminal flush sends the retained entries before the final work report so
+completed work has its available evidence. Incremental flushes publish batches
+periodically for live viewing; live delivery is best effort and the store
+remains authoritative.
 
 Log delivery failure is diagnostic state and must not rewrite TaskRun or
 AgentJob success. Conversely, a successful WorkResult does not imply that every
@@ -95,8 +94,7 @@ a missing fact, not a state to estimate
 ([`conventions.md`](conventions.md#facts-claims-and-settlement)).
 
 Gap: the current store derives terminal ownership heuristically from run
-state, and acceptance tests lock that derivation. Replacing the derivation
-with the settlement record is tracked follow-up work.
+state, and acceptance tests lock that derivation.
 
 ## Read Contract
 
@@ -107,9 +105,8 @@ durable contract is ordered, bounded, redacted evidence with monotonic sequence.
 
 ## Relationship to existing
 
-| Concept | Answers | Domain |
-|---|---|---|
-| TaskLog | Why did execution reach this result? | Runner execution |
-| Transcript | What did the Agent say and do conversationally? | Session |
-| Artifact | Which files were produced? | Workflow |
-| WorkResult | Did the work succeed, and what structured result did it return? | TaskRun or AgentJob |
+TaskLog answers why execution reached this result; it belongs to Runner
+execution. Transcript answers what the Agent said and did conversationally; it
+belongs to the Session. Artifact answers which files were produced; it belongs
+to the Workflow. WorkResult answers whether the work succeeded and what
+structured result it returned; it belongs to the TaskRun or AgentJob.

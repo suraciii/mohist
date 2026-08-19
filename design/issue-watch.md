@@ -35,20 +35,15 @@ WatchEntry
 
 ### Command Surface
 
-```text literal
-mo issue watch add <issue> --agent <name>
-  no declaration  -> create watching
-  muted            -> change to watching
-  watching         -> idempotently report current state
-
-mo issue watch remove <issue> --agent <name>
-  watching         -> delete declaration
-  no declaration  -> create muted; withdraw Project-wide coverage here
-  muted            -> idempotently report current state
-
-mo issue watch list <issue>
-  list watching and muted for the Issue; mo issue view shows both groups
-```
+- `mo issue watch add <issue> --agent <name>` creates a watching declaration
+  when none exists, changes a muted declaration to watching, and idempotently
+  reports current state when the declaration is already watching.
+- `mo issue watch remove <issue> --agent <name>` deletes a watching
+  declaration, creates a muted declaration when none exists to withdraw
+  Project-wide coverage for this Issue, and idempotently reports current state
+  when the declaration is already muted.
+- `mo issue watch list <issue>` lists the watching and muted declarations for
+  the Issue; `mo issue view` shows both groups.
 
 `watch add` and `watch remove` require an existing active Agent and reject an
 archived Agent.
@@ -94,7 +89,6 @@ Implemented: WatchEntry persistence in Agent context; `mo issue watch
 add/remove/list`; Issue read-model projection; dispatch-side muted suppression
 and watching launch with a built-in prompt and a synthetic `watch:` rule ID.
 
-Implementation gap: The durable launch key remains
-`(projectId, eventId, ruleId)`, with a synthetic `watch:` rule ID. Event-Agent
-deduplication applies only within one dispatch. Issue #532 will normalize it to
-an AgentId key.
+The durable launch key still includes a synthetic `watch:` rule identity.
+Event-Agent deduplication therefore applies only within one dispatch instead of
+using one stable Agent identity across dispatches.

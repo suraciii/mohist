@@ -14,7 +14,7 @@ namespace Mohist.Server.SpecTests.Specs.Events.Subscriptions;
 /// <see cref="MentionDispatchHandler"/> with a single
 /// <c>com.mohist.issue.comment-added</c> CloudEvent, and inspects the captured
 /// <see cref="RecordingAgentLauncher.MentionLaunches"/> log. No real network /
-/// grain / Orleans is touched (design/testing.md hard constraint 1).
+/// grain / Orleans is touched (design/testing.md "No External Environment").
 ///
 /// <para>
 /// The handler under test is the workspace-optional manual launch path

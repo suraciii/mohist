@@ -2,7 +2,7 @@
 
 An Issue is the main unit of work in the Mohist execution layer. This document
 covers every operation from creation through closure. Users usually ask an
-external Agent to perform these operations through the Mohist Skill and `mo`.
+External Agent to perform these operations through the Mohist Skill and `mo`.
 You can also use the same CLI directly or work manually in the Web UI as a
 fallback surface. See [The Workflow](the-workflow.md) for the work and
 artifacts inside each Workflow Stage. See [Planning with Epics](epics.md) to organize
@@ -16,34 +16,14 @@ multiple Issues into a milestone.
 # Minimal form; a new Issue is a Draft by default.
 mo issue create "Add search feature"
 
-# Include a body
-mo issue create "Fix login bug" --body "Users can't login on Safari"
-
-# Use a file for a long body
-mo issue create "Refactor auth module" --body-file ./issue-body.md
-
-# Read from stdin
-cat ./my-issue.md | mo issue create "My issue" --body-file -
-
-# Set priority and labels
-mo issue create "Critical fix" --priority p0 --label kind=bug
-
-# Select a Workflow Profile
-mo issue create "Implement search" --workflow-profile mohist/local
-
-# Select a model
-mo issue create "Complex refactor" --model claude-sonnet-4
-
-# Select the target repository in a multi-repository Project.
-# Without --repo, Mohist uses the default repository.
-mo issue create "server: add subscription API" --repo server
-
-# Create a child of another Issue
-mo issue create "web: add subscription management" --parent 42 --repo web
-
 # Skip Draft only when the requirement is ready to execute.
 mo issue create "Document search API" --body-file ./issue-body.md --ready
 ```
+
+The command also accepts a body inline, from a file, or from stdin, and
+selects priority, labels, a Workflow Profile, a model, a target repository,
+and a parent Issue. See [CLI Reference](cli-reference.md#issue) for the
+complete option surface.
 
 Draft protects incomplete requirements from consuming execution capacity. Mark
 an Issue ready only after its body and dependencies are usable.
@@ -124,25 +104,10 @@ Add a search field above the list. Filter in real time by a partial title match.
 
 ## View an Issue
 
-In an external Agent, ask directly for an Issue's progress, blockers, and
-pending actions. To use the CLI directly:
-
-```bash
-# List all Issues in the current Project
-mo issue list
-
-# Filter by Stage
-mo issue list --stage plan
-
-# List archived Issues
-mo issue list --archived
-
-# List all Issues, including archived Issues
-mo issue list --all
-
-# View details
-mo issue view 42
-```
+In an External Agent, ask directly for an Issue's progress, blockers, and
+pending actions. To use the CLI directly, run `mo issue list` for the Issue
+list and `mo issue view 42` for one Issue's details. Filters such as Stage,
+priority, and archived state are in [CLI Reference](cli-reference.md#issue).
 
 For a complete visual view or manual takeover, select an Issue card in the Web
 UI. The details page shows:
@@ -163,21 +128,9 @@ mo issue edit 42 --ready
 mo issue start 42
 ```
 
-After the Issue starts:
-
-1. Mohist creates or reuses the named Workspace `issue-42`.
-2. The Workflow enters Plan and waits for Runner capacity when necessary.
-3. The Inline Agent starts when a Runner claims the work.
-
-The following conditions must be true:
-
-- The Issue is in `backlog`.
-- The Issue is marked ready rather than Draft.
-- Its prerequisites and Repository binding permit a start.
-
-Runner presence and free slots affect dispatch, not the Start decision. A
-started Workflow waits safely until eligible capacity is available. Use
-`mo runner status` to inspect that wait.
+An Issue can start only from `backlog`, when it is marked ready rather than
+Draft, and when its prerequisites and Repository binding permit a start.
+Starting creates or reuses the named Workspace `issue-42` and enters Plan.
 
 ## Respond to an Approval Point
 
@@ -270,27 +223,20 @@ mo issue close 42
 mo issue reopen 42
 ```
 
-| Operation | Use | Result |
-|---|---|---|
-| `pause` | Stop temporarily, interrupt a stuck Inline Agent, or preserve a recovery path | Ends the current turn and puts the Workflow in a paused state that supports `resume` |
-| `stop` | End this Workflow permanently | Stops the Workflow Run permanently. It is terminal and cannot resume |
-| `done` | Work was completed and delivered outside the Workflow | Moves the Issue to Done and preserves the Workflow history |
-| `close` | The Issue will not be done | Moves the Issue to the `cancelled` terminal state. It can be reopened |
-| `reopen` | Reverse an accidental closure or do the work later | Returns the Issue to `backlog` |
+Use `pause` to stop temporarily, interrupt a stuck Inline Agent, or preserve a
+recovery path; it ends the current turn and puts the Workflow in a paused
+state that supports `resume`. Use `stop` to end the Workflow Run permanently;
+it is terminal and cannot resume. Use `done` when the work was completed and
+delivered outside the Workflow; it moves the Issue to Done and preserves the
+Workflow history. Use `close` when the Issue will not be done; it moves the
+Issue to the `cancelled` terminal state and can be reopened. Use `reopen` to
+reverse an accidental closure or to do the work later; it returns the Issue to
+`backlog`.
 
 ## Recover from Failure
 
-Recovery is a core Mohist capability. See [Troubleshooting](troubleshooting.md)
-for details. The following table is a quick reference:
-
-| Situation | Command |
-|---|---|
-| The Issue is blocked. Retry the current Stage | `mo run retry --issue 42` |
-| The Issue is paused. Continue the current Workflow | `mo run resume --issue 42` |
-| The Workflow stopped, but the work was delivered another way | `mo issue done 42` |
-| Repeat the current Stage and discard its artifacts | `mo run rerun --issue 42` |
-| Repeat from a selected Stage and discard that Stage's later artifacts | `mo run rerun --issue 42 --from-stage build` |
-| The base branch moved. Rebase the Issue branch | `mo issue rebase 42` |
+Recovery is a core Mohist capability. See
+[Troubleshooting](troubleshooting.md) for the situation-to-recovery mapping.
 
 ## Archive an Issue
 
@@ -307,17 +253,16 @@ The Web UI has an Archive page.
 
 ## Edit an Issue
 
-You may freely edit an Issue before it starts:
+Before an Issue starts, you may freely edit its title, body, priority, and
+labels:
 
 ```bash
-mo issue edit 42 --title "New title"
-mo issue edit 42 --body-file ./new-body.md
-mo issue edit 42 --priority p1
-mo issue edit 42 --label kind=bug --label area=web
+mo issue edit 42 --title "New title" --priority p1
 ```
 
-Edit the body of an active Issue with care. The Inline Agent is already working
-from the previous body.
+See [CLI Reference](cli-reference.md#issue) for all edit options. Edit the body
+of an active Issue with care. The Inline Agent is already working from the
+previous body.
 
 ## Complete CLI Reference
 

@@ -76,11 +76,14 @@ declarations, or dispatch metadata. A Profile must explicitly pass required cont
 Capabilities beyond the default host must be declared in the manifest. The engine injects only
 declared capabilities:
 
-| Capability | Injection | Purpose |
-|---|---|---|
-| `agent-turn` | `host.agent.execute({ prompt, session?, options? })` | Execute one Agent input. The capability layer owns Session open/attach and the Runtime lifecycle; the Action only expresses intent |
-| `add-tasks` | allows a result to carry `addTasks` | Append later tasks. The engine reports them uniformly; the Action does not connect directly to Server |
-| `write-vars` | `host.writeVars(vars)` | Persist `vars.*` immediately during execution, unlike the post-completion `setVars` projection. Writes are not rolled back on failure and are visible to retries |
+- `agent-turn` injects `host.agent.execute({ prompt, session?, options? })`. It executes one Agent
+  input. The capability layer owns Session open/attach and the Runtime lifecycle; the Action only
+  expresses intent.
+- `add-tasks` allows a result to carry `addTasks`, appending later tasks. The engine reports them
+  uniformly; the Action does not connect directly to Server.
+- `write-vars` injects `host.writeVars(vars)`. It persists `vars.*` immediately during execution,
+  unlike the post-completion `setVars` projection. Writes are not rolled back on failure and are
+  visible to retries.
 
 Declaring `agent-turn` also means the Action produces a Runner-private execution fact: the
 final assistant text. The capability layer records it so the `_output` marker in `expect` can match
@@ -202,9 +205,9 @@ diagnostic sources are combined into one validation exception, use the same YAML
 and carry source labels. A successful save response explicitly contains
 `actionValidation: { performed, reason? }`, telling the caller whether Action-contract validation
 ran. If the catalog is unavailable, the response explains the skipped validation. Built-in Profile
-loading, runtime loading, and `mo run validate` only perform Definition validation and do not depend
-on the catalog. Legacy `with.agent`, `with.kind`, `with.type`, and `with.expect` receive no special
-treatment and are rejected as unknown input keys.
+loading, runtime loading, and `mo workflow validate --file` only perform Definition validation and
+do not depend on the catalog. Legacy `with.agent`, `with.kind`, `with.type`, and `with.expect`
+receive no special treatment and are rejected as unknown input keys.
 
 ### `setVars`
 
@@ -295,7 +298,7 @@ Input contract:
 
 ```ts
 type OpenCodeActionInput = {
-  prompt: string                    // Non-empty string rendered by Runner
+  prompt: PromptSpec                // String or structured prompt spec; Runner renders it to non-empty text
   session?: string                  // Logical Session name
   options?: {
     model?: string                  // provider/model; model itself may contain '/'
@@ -376,10 +379,6 @@ See [`builtin-workflows.md`](builtin-workflows.md) for the complete task graph.
 Implemented: manifests and `defineAction`; registry and catalog reporting, including tombstones,
 when Runner registers with Server; catalog validation during Profile save with an
 `actionValidation` response marker; declarative capability injection for `agent-turn`,
-`add-tasks`, and `write-vars`; structured output end to end; and `setVars` projection. Named
-special-case lists, `PROMISE_PROJECTED` and `REMOVED`, have been removed. Privileged access such as
-`openspec-tasks` has been reduced to declarative effects.
-
-Implemented in the Profile Agent Action binding change: capability projection in the Server catalog,
-capability validation for `agentAction`, and the required non-overridable `task.uses` contract for
-`mohist/openspec-tasks`.
+`add-tasks`, and `write-vars`; structured output end to end; `setVars` projection; capability
+projection in the Server catalog; capability validation for `agentAction`; and the required
+non-overridable `task.uses` contract for `mohist/openspec-tasks`.

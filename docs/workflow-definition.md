@@ -163,29 +163,35 @@ Workflow does not enter the next Stage.
 
 ## Template Expressions
 
-Fields under `with` and `expect` can use `${{ }}` expressions. The following
-table lists every available namespace. A root reference not listed here is
-invalid.
+Fields under `with` and `expect` can use `${{ }}` expressions. The available
+namespaces are listed below. A root reference not listed here is invalid.
 
 `${{ profile.agentAction }}` is the one compile-time Profile expression. It is
 valid only as a complete `uses` value and is not part of the runtime namespace
-table below.
+list below.
 
-| Expression | Meaning |
-|---|---|
-| `workflow.runId` | The current Run identifier |
-| `stage.name` | The current Stage name |
-| `work.*` | Current work information, such as `work.id`, `work.type`, `work.title`, and `work.attempt` |
-| `work.approvalFeedback.*` | Available only to approval feedback Tasks. Information that triggered this work, such as `id`, `stage`, `createdAt`, and `summary` |
-| `issue.*` | Issue information, such as `issue.projectId`, `issue.number`, `issue.title`, and `issue.body` |
-| `repository.*` | Target repository information, such as `repository.baseBranch` |
-| `workspace.*` | Workspace information, such as `workspace.branch` |
-| `vars.*` | Merged Variables. See [Variable References](workflow-profiles.md#variable-references) |
-| `tasks.<id>.outputs.*` | Output from a previous Task |
-| `prompts.<key>` | A Project Prompt whose body is read when the Task executes |
-| `failure.output` | Available only to recovery Tasks. Output from the Task that triggered recovery |
-| `failure.error.code` | Available only to recovery Tasks. The triggering error code |
-| `failure.error.message` | Available only to recovery Tasks. The triggering error message |
+- `workflow.runId`: the current Run identifier.
+- `stage.name`: the current Stage name.
+- `work.*`: current work information, such as `work.id`, `work.type`,
+  `work.title`, and `work.attempt`.
+- `work.approvalFeedback.*`: available only to approval feedback Tasks.
+  Information that triggered this work, such as `id`, `stage`, `createdAt`,
+  and `summary`.
+- `issue.*`: Issue information, such as `issue.projectId`, `issue.number`,
+  `issue.title`, and `issue.body`.
+- `repository.*`: target repository information, such as
+  `repository.baseBranch`.
+- `workspace.*`: Workspace information, such as `workspace.branch`.
+- `vars.*`: merged Variables. See
+  [Variable References](workflow-profiles.md#variable-references).
+- `tasks.<id>.outputs.*`: output from a previous Task.
+- `prompts.<key>`: a Project Prompt whose body is read when the Task executes.
+- `failure.output`: available only to recovery Tasks. Output from the Task
+  that triggered recovery.
+- `failure.error.code`: available only to recovery Tasks. The triggering
+  error code.
+- `failure.error.message`: available only to recovery Tasks. The triggering
+  error message.
 
 - Mohist expands templates before a Task starts. Input for a started Task stays
   fixed when Variables change later.
@@ -344,11 +350,6 @@ stages:
 
 ## Validation Boundary
 
-The Profile compiler owns `agentAction` and the restricted
-`${{ profile.agentAction }}` form. The authoritative Definition validator owns
-Definition structure, field types, and runtime template expressions.
-`mo workflow validate --file` runs both language layers locally. CI continuously
-validates the built-in Profiles and the complete example in this document. The
-selected Action contract still decides whether the concrete Action is available,
-whether it declares `agent-turn` when selected as `agentAction`, and which
-`with` keys are valid, required, and of the correct type.
+The ownership boundary between the Profile compiler and the Definition
+validator is defined in
+[Workflow Definition design](../design/workflow/definition.md).

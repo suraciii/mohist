@@ -12,11 +12,10 @@ invariants. See [`event-protocol.md`](event-protocol.md) for the envelope and
 match-expression syntax.
 
 This design replaces the earlier subscription plus priority-arbitration model,
-which used a separate AgentSubscription aggregate and Arbitrate operation. See
-Migration for the old model. The current Agent subscription surface is an
-Agent-scoped configuration view over the same RoutingRule table for API, CLI,
-and Web addressing. It does not reintroduce a separate persisted object,
-matcher, or arbitrator.
+which used a separate AgentSubscription aggregate and Arbitrate operation. The
+current Agent subscription surface is an Agent-scoped configuration view over
+the same RoutingRule table for API, CLI, and Web addressing. It does not
+reintroduce a separate persisted object, matcher, or arbitrator.
 
 ## Boundary
 
@@ -94,9 +93,9 @@ envelope and does not parse `data`.
 ## Idempotency and Visibility
 
 - Launcher key is `hash(projectId, eventId, agentId)`. One event launches one
-  Agent at most once, regardless of which rule or watch declaration matched it.
-  Duplicate delivery does not create another Job because it uses the
-  AgentLauncher idempotent-launch mechanism. The matching rule is trigger
+  Agent at most once, regardless of trigger path through routing rule, watch,
+  or mention. Duplicate delivery does not create another Job because it uses
+  the AgentLauncher idempotent-launch mechanism. The matching rule is trigger
   attribution only and does not enter the idempotency key.
 - A triggered AgentSession carries `mohist.io/trigger/event-id` and
   `mohist.io/trigger/rule-id`. Event, rule, and AgentJob are queryable in both
@@ -116,37 +115,12 @@ reuse the name after deletion.
 The routing table is the user consumer surface. `[Subscription]` handlers are
 the system consumer surface. Both consume the same envelope protocol through
 the same dispatcher. Agents have no special channel; a response uses normal
-commands such as `mo workflow approve` and `mo issue comment`.
+commands such as `mo run approve` and `mo issue comment create`.
 
 ## Command Surface
 
-```text literal
-mo routing rule create --name <n> --match <expr> --agent <agent> \
-    --response-prompt <p> [--continue] [--before <rule> | --after <rule>]
-mo routing rule list | view <n> | edit <n> | archive <n>
-mo routing rule move <n> --before <rule> | --after <rule>
-mo routing test [--limit <N>]    # Dry-run the full table over the latest N events
-mo event tail [--match <expr>]   # Filter the event stream with the same matcher
-mo agent subscription list <agent> [--project <project>]
-mo agent subscription create <agent> --name <n> --match <expr> \
-    --response-prompt <p> [--continue] [--idempotency-key <key>]
-mo agent subscription edit <agent> <subscription-id> [fields]
-mo agent subscription delete <agent> <subscription-id>
-```
-
 Names follow [`cli.md`](cli.md): the resource comes first, and Project scope
 uses the active Project or `--project`.
-
-## Migration
-
-Migration performs no automatic data conversion. The old model, a separate
-`AgentSubscription` plus `Arbitrate`, was deleted directly with no aggregate
-compatibility layer. The current `mo agent subscription` surface does not
-restore that model. It is an Agent-scoped RoutingRule view that shares facts
-with `/routing/rules` and the Agent detail page. Operators manually recreate
-old subscriptions as rules. The three Filter fields map mechanically to an
-expression such as `event.type == "..." && event.source == "..."`, and
-descending Priority maps to table order.
 
 ## Non-goals
 
@@ -169,9 +143,8 @@ Implemented: the Project-scoped ordered routing table with `Position` and
 `{{event.*}}` rendering; envelope-only self-response protection; the
 `mo routing rule` surface and `mo routing test` dry-run; `mo event tail --match`;
 and `mo agent subscription`, API, and Web views over the same RoutingRule
-facts. Migration `DropAgentSubscriptions` removed the old independent
-subscription model and arbitration surface.
+facts.
 
 Implementation gap: the durable launch-pipeline key is still
 `(projectId, eventId, ruleId)`, so event-and-Agent coalescing applies only
-within one dispatch. Issue #532 converges it on the Agent ID key.
+within one dispatch.

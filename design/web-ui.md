@@ -24,28 +24,21 @@ a global view or manual takeover.
 
 ## Ownership
 
-| Concern | Owner |
-|---|---|
-| Render state | Web UI |
-| User actions | Web UI -> API |
-| Authoritative state | Server |
-| Workflow decisions | Workflow context on Server |
-| Shell, Agent, and Git execution | Runner |
-| Real-time push | Server -> Web UI |
-| Agent definition and AgentJob result | Agent context through Agent API |
-| Agent Connection binding and policy | Agent context through API |
+Web UI owns render state and sends user actions to the API. The Server owns
+authoritative state; Workflow decisions belong to the Workflow context on the
+Server. The Runner owns Shell, Agent, and Git execution. Real-time push flows
+from the Server to the Web UI. The Agent context owns the Agent definition and
+the AgentJob result through the Agent API, and Agent Connection binding and
+policy through the API.
 
 Web UI never interprets Workflow rules. It renders Server state and submits
 user intent.
 
 ## Events
 
-Push is observation, not a driver. SignalR uses `/hubs/events`. After reconnect,
-the UI reconciles its queries.
-
-```text diagram
-Workflow decision -> Server commit and publish -> SignalR -> query refresh
-```
+Push is observation, not a driver: a Workflow decision commits on the Server,
+publishes over SignalR on `/hubs/events`, and refreshes the affected queries.
+After reconnect, the UI reconciles its queries.
 
 ## Routes
 
@@ -69,8 +62,8 @@ Connections without requiring inference from raw transcript events.
 Identity, lifecycle, configuration Readiness, execution availability, and
 Connection health are separate signals. UI does not turn an offline Runner into
 an Agent configuration error or combine Slack health and Agent Readiness in one
-badge. Missing configuration links to the Agent edit location. Unknown remains
-distinct from Ready and Needs setup.
+badge. Missing configuration links to the Agent edit location. `unknown`
+remains distinct from `ready` and `needs-setup`.
 
 Direct launch uses the same Agent API request as CLI and Slack, except for
 authenticated actor and source metadata. Agent fields are edited before launch.

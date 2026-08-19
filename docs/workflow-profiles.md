@@ -270,8 +270,8 @@ A fixed value used by only one Task can be written directly in its Action Input:
     session: plan
     prompt: ${{ prompts.proposal }}
     options:
-      model: anthropic/claude-sonnet-4
-      variant: high
+      model: model-a
+      variant: variant-a
 ```
 
 When the Project or Issue must control the value, use
@@ -325,5 +325,5 @@ their purpose and remains stable.
   [Workflow Recovery Design](../design/workflow/recovery.md).
 - Some built-in Tasks still use legacy Action Input. The target interfaces are
   defined by the Action documentation.
-- Profile Agent Action binding, Run-bound materialization, and the configurable
-  `mohist/github-pr` Profile are planned in the current implementation change.
+- Profile Agent Action binding, Run-bound materialization, and the
+  configurable `mohist/github-pr` Profile are implemented.

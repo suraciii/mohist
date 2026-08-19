@@ -1,11 +1,7 @@
----
-status: wip-not-implemented
----
-
 # Mobile PWA and Push Notifications
 
-> The original backlog issue #106 is closed. This document records open
-> questions about the product proposal.
+> This document records open questions about an unimplemented product
+> proposal.
 
 ## Background
 
@@ -14,7 +10,7 @@ leaves their desk, failing to notice that a plan is ready limits throughput.
 Mobile access and push notifications may be part of the self-hosted autonomous
 system's product promise.
 
-## Original Proposal (#106)
+## Original Proposal
 
 Use a PWA, with scenarios in this priority order:
 
@@ -33,7 +29,7 @@ simplified Issue page), and desktop-only settings.
 - Only part of KanbanBoard has a mobile adaptation (`md:hidden`). Other pages
   are not adapted.
 - There is no PWA infrastructure or Web Push.
-- `mo notify setup` exists (#352) for outbound Hermes chat-platform
+- `mo notification setup` exists for outbound Hermes chat-platform
   notifications. Those are chat notifications, not in-browser Web Push.
 
 ## Open Questions

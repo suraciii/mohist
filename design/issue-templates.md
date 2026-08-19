@@ -9,12 +9,9 @@ This document records rationale without copying that content.
 
 ## Metadata Contains Only Name and Description
 
-Each template front matter has two fields:
-
-| Field | Purpose |
-|---|---|
-| `name` | Display name, such as Feature |
-| `description` | One-sentence description and the sole basis for template selection |
+Each template front matter has two fields: `name`, the display name such as
+Feature, and `description`, a one-sentence description that is the sole basis
+for template selection.
 
 - There is no `suitableFor`, `defaults`, or explicit ID. The file name is the
   ID: `feature.md` becomes `feature`.
@@ -27,21 +24,16 @@ Each template front matter has two fields:
 ## Two-stage Loading with Agent-side Selection
 
 Templates serve Web users and the `mohist-create-issue` Skill through the same
-three-step interaction:
+three-step interaction. First, read the catalog: `GET /issue-templates` or
+`mo issue template list` returns metadata only. Second, select: a person reads
+the list, and an Agent reads the description, with no programmatic matching.
+Third, read the complete template: `GET /issue-templates/{id}` or
+`mo issue template view <id>` returns the body with inline instructions.
 
-| Step | Person in Web creation | Agent using `mohist-create-issue` |
-|---|---|---|
-| 1. Read catalog | `GET /issue-templates`, metadata only | `mo issue template list`, metadata only |
-| 2. Select | Person reads the list | Agent reads description; no programmatic matching |
-| 3. Read complete template | `GET /issue-templates/{id}` returns body | `mo issue template view <id>` returns body with inline instructions |
-
-Selection happens in the person or Agent from metadata. Load the body only
-after selection. Discovery never reads it, matching Skill discovery:
-
-| Phase | Trigger | Read | Output |
-|---|---|---|---|
-| Discovery | List and select | Front matter only | Name and description |
-| Detail | Get and compose body | Front matter plus complete raw body | Unmodified body string including HTML comments |
+Selection happens in the person or Agent from metadata. The body loads only
+after selection: discovery reads front matter only and outputs name and
+description, while detail reads front matter plus the complete raw body and
+outputs the unmodified body string, including HTML comments.
 
 ## Body Is Opaque Raw Text
 
@@ -59,11 +51,13 @@ Issue templates, which insert the complete body including `<!-- comments -->`.
 Every Mohist Issue produces code and integrates it through Plan, Build, Check,
 and Integrate. There is no decision-only lane. Three types are sufficient:
 
-| Type | Meaning | Criterion |
-|---|---|---|
-| **Feature** | New product behavior or an iteration on existing behavior | A user can observe a change in external behavior |
-| **Bug** | Repair of incorrect functional or nonfunctional behavior | A correct-state invariant was violated |
-| **Refactor** | Internal quality work such as restructuring, coverage, or optimization | External behavior remains unchanged; value is maintainability, reliability, or headroom |
+- **Feature**: new product behavior or an iteration on existing behavior. A
+  user can observe a change in external behavior.
+- **Bug**: repair of incorrect functional or nonfunctional behavior. A
+  correct-state invariant was violated.
+- **Refactor**: internal quality work such as restructuring, coverage, or
+  optimization. External behavior remains unchanged; the value is
+  maintainability, reliability, or headroom.
 
 The deciding question is: Does external behavior change? A change is Feature.
 No change while repairing an incorrect condition is Bug. No change while
@@ -86,24 +80,30 @@ as vague Bug symptoms or subjective Refactor completion.
 
 ## Industry Practice Mapping
 
-| Template | Practices used |
-|---|---|
-| Feature | Agile User Story and INVEST; Dual-Track Agile or Opportunity-Solution Tree; optional BDD or Gherkin acceptance |
-| Bug | ISTQB defect reporting with symptom, reproduction, expected versus actual, and severity; DORA and SPACE for measurable nonfunctional defects; a violated invariant from DDD |
-| Refactor | Fowler's behavior-preserving definition; characterization test or golden master; Definition of Done with preserved behavior and improved structure |
+- Feature uses Agile User Story and INVEST, Dual-Track Agile or
+  Opportunity-Solution Tree, and optional BDD or Gherkin acceptance.
+- Bug uses ISTQB defect reporting with symptom, reproduction, expected versus
+  actual, and severity; DORA and SPACE for measurable nonfunctional defects;
+  and a violated invariant from DDD.
+- Refactor uses Fowler's behavior-preserving definition, characterization test
+  or golden master, and a Definition of Done with preserved behavior and
+  improved structure.
 
 ## Shared Structure
 
 All templates use five sections. Only the middle semantics differ: Feature
 creates behavior, Bug corrects behavior, and Refactor preserves behavior.
 
-| Section | Feature | Bug | Refactor |
-|---|---|---|---|
-| 1. Why | **User Voice** | **Symptom and Evidence**, two states | **Motivation** |
-| 2. Shape | **Product Shape** | **Fix Shape** | **Change Scope** |
-| 3. Domain core | **Domain Model**, optional | **Domain Context**, required | **Behavior Contract**, required |
-| 4. Acceptance | **Acceptance Criteria** | **Acceptance Criteria** | **Done When** |
-| 5. Boundary | **Non-goals** | **Non-goals** | **Non-goals** to prevent scope growth |
+1. Why: **User Voice** for Feature; **Symptom and Evidence**, two states, for
+   Bug; **Motivation** for Refactor.
+2. Shape: **Product Shape** for Feature, **Fix Shape** for Bug, **Change
+   Scope** for Refactor.
+3. Domain core: **Domain Model**, optional, for Feature; **Domain Context**,
+   required, for Bug; **Behavior Contract**, required, for Refactor.
+4. Acceptance: **Acceptance Criteria** for Feature and Bug; **Done When** for
+   Refactor.
+5. Boundary: **Non-goals** for all three; for Refactor they prevent scope
+   growth.
 
 One structure reduces cognitive load for people and Agents. Template selection
 changes only the meaning of the middle sections.
@@ -114,6 +114,5 @@ changes only the meaning of the middle sections.
 ## Implementation Gaps
 
 - Custom template CRUD does not exist. `ProjectIssueTemplates` has a read side
-  but no write path. When CRUD is added, migrate storage from legacy
-  `{sections:[...]}` to `{body:"..."}` and remove the compatibility path.
+  but no write path.
 - The Web selector does not show `description`.

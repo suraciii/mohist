@@ -27,14 +27,6 @@ Prompt Resolver -- load body by key at dispatch --> Attempt Snapshot
 Attempt Snapshot -- Runner renders before Action --> Rendered Prompt
 ```
 
-```text literal
-resolvePrompt(projectId, key):
-  if Project configured key:
-    return Project Prompt body
-
-  return Builtin Prompt body for key
-```
-
 Prompts do not merge across scopes and do not produce an `EffectivePrompts` collection. A Prompt body is
 one complete string. A Project configuration replaces the entire builtin body for the same key.
 
@@ -84,7 +76,7 @@ A builtin `.prompt` is product content. It ships with the product and applies to
   contract. The agent can be interrupted at any time, so it commits as it works and keeps progress records
   current. A review Prompt does not contain this contract because its only artifact is the report. On a
   closeout warning, it immediately finishes the report with the current findings. The Runtime owns the
-  injection and text of deadline warnings. See the "Prompt deadlines and two-stage closeout" section in
+  injection and text of deadline warnings. See the "Prompt Deadline and Two-Phase Closeout" section in
   [`runtimes/opencode.md`](runtimes/opencode.md). The Prompt does not repeat the warning text.
 
 The same conventions apply to the SKILL.md that ships in the nupkg as CLI skill data.

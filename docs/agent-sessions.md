@@ -31,17 +31,32 @@ complete product boundary.
 
 ## Concept Layers
 
-| Concept | Definition | Identity and lifecycle |
-|---|---|---|
-| Inline Agent | A use of Agent capability configured and invoked directly by a Workflow | Not a resource and has no Agent ID; its configuration exists in task input |
-| Agent Definition Reference | A use in which a Workflow task references a Mohist Agent definition with `uses: mohist/agent` | Not a resource and has no Agent ID; its definition is fixed when task execution starts |
-| Mohist Agent | A predefined Agent resource reused by name within a Project | Has a stable Agent ID, name, Instructions, configuration, Skills, and state |
-| Agent Connection | Exposes one Mohist Agent in an external interaction location such as Slack | Has an independent connection lifecycle; references the Agent but neither owns nor copies its configuration |
-| AgentJob | One launch execution of a Mohist Agent | Independently records waiting, execution, completion or failure, and the first execution result |
-| SessionInput | One input accepted by an AgentSession | Has a stable Input ID; records content, attachments, source, order, and delivery state; one Turn can process multiple Inputs |
-| AgentTurn | Continuous Runtime processing of an ordered set of SessionInputs | Has a stable Turn ID and state; is owned by an AgentSession and is not new top-level work |
-| AgentSession | A continuing session recorded by Mohist | Has a stable Session ID; owns Inputs and Turns in order and retains context, usage, Activity, and the current Runtime Session |
-| Runtime Session | The physical session maintained by an execution backend such as OpenCode or Pi | Identified by the execution backend; can be replaced by the AgentSession when necessary |
+- **Inline Agent**: A use of Agent capability configured and invoked directly
+  by a Workflow. Not a resource and has no Agent ID; its configuration exists
+  in task input.
+- **Agent Definition Reference**: A use in which a Workflow task references a
+  Mohist Agent definition with `uses: mohist/agent`. Not a resource and has no
+  Agent ID; its definition is fixed when task execution starts.
+- **Mohist Agent**: A predefined Agent resource reused by name within a
+  Project. Has a stable Agent ID, name, Instructions, configuration, Skills,
+  and state.
+- **Agent Connection**: Exposes one Mohist Agent in an external interaction
+  location such as Slack. Has an independent connection lifecycle; references
+  the Agent but neither owns nor copies its configuration.
+- **AgentJob**: One launch execution of a Mohist Agent. Independently records
+  waiting, execution, completion or failure, and the first execution result.
+- **SessionInput**: One input accepted by an AgentSession. Has a stable Input
+  ID; records content, attachments, source, order, and delivery state; one
+  Turn can process multiple Inputs.
+- **AgentTurn**: Continuous Runtime processing of an ordered set of
+  SessionInputs. Has a stable Turn ID and state; is owned by an AgentSession
+  and is not new top-level work.
+- **AgentSession**: A continuing session recorded by Mohist. Has a stable
+  Session ID; owns Inputs and Turns in order and retains context, usage,
+  Activity, and the current Runtime Session.
+- **Runtime Session**: The physical session maintained by an execution backend
+  such as OpenCode or Pi. Identified by the execution backend; can be replaced
+  by the AgentSession when necessary.
 
 An Action is not in the Agent resource layer. `mohist/opencode` describes how
 one unit of work is delegated to OpenCode. It does not represent an Agent with
@@ -49,10 +64,13 @@ an identity.
 
 ## Two Invocation Paths
 
-| Path | Agent identity | Work owner | Execution | AgentSession Origin |
-|---|---|---|---|---|
-| Direct Workflow invocation | No; uses an Inline Agent or Agent Definition Reference | TaskRun | An execution-backend Action (`mohist/opencode`, `mohist/pi`) or `mohist/agent` | Workflow |
-| Mohist Agent launch | Yes; uses a stored Mohist Agent | AgentJob | The Mohist Agent's internal execution entry point | Agent launch |
+A direct Workflow invocation has no Agent identity: it uses an Inline Agent or
+an Agent Definition Reference, the TaskRun owns the work, execution goes
+through an execution-backend Action (`mohist/opencode`, `mohist/pi`) or
+`mohist/agent`, and the AgentSession has a Workflow Origin. A Mohist Agent
+launch uses a stored Mohist Agent: the AgentJob owns the work through the
+Agent's internal execution entry point, and the AgentSession has an Agent
+launch Origin.
 
 The paths can use the same execution-backend capability and AgentSession model,
 but they do not share Agent identity or work lifecycle. A Workflow invokes
@@ -99,21 +117,30 @@ A Mohist Agent is a first-class resource in a Project. It stores:
 
 ## Configure an Agent
 
-| Setting | User question | Effective rule |
-|---|---|---|
-| Name | How is the Agent identified in the Project and external locations? | Unique within the Project; renaming does not change the Agent ID |
-| Avatar | How is the Agent recognized quickly in the Web UI, Slack, and execution records? | Updates Mohist presentation immediately and synchronizes to connections that support updates |
-| Description | When should this Agent be selected? | Used only for discovery and selection; not included in execution Instructions |
-| Instructions | What role does the Agent have, how does it work, and when does it stop? | Fixed when each new AgentJob starts |
-| Runtime | Which execution backend runs the Agent? | Owned by the Agent; an ordinary client cannot override it for one request |
-<<<<<<< HEAD
-| Model / Variant | Which model and reasoning level does the Agent use? | Owned by the Agent; a missing Model or Variant falls back to the Project default execution configuration, then to the Runtime default |
-=======
-| Model / Reasoning Effort / Variant | Which model, canonical reasoning effort, and true model variant does the Agent use? | Owned by the Agent; each value is independent and uses the Runtime default when not configured |
->>>>>>> f33dd4c57 (T-008: add catalog-driven effort Web surfaces and docs)
-| Skills | Which capability descriptions load at startup? | Fixed with the AgentJob; an entry point cannot add or remove them for one request |
-| Max concurrent runs | How many executions can this Agent run at once, including launches and follow-ups? | Applies to subsequent scheduling immediately; lowering it does not stop running executions, and excess work queues |
-| State | Can the Agent accept new delegations? | An archived Agent rejects new delegations; existing Sessions remain readable and can continue |
+- **Name**: how the Agent is identified in the Project and external
+  locations. Unique within the Project; renaming does not change the Agent ID.
+- **Avatar**: how the Agent is recognized quickly in the Web UI, Slack, and
+  execution records. Updates Mohist presentation immediately and synchronizes
+  to connections that support updates.
+- **Description**: when this Agent should be selected. Used only for
+  discovery and selection; not included in execution Instructions.
+- **Instructions**: what role the Agent has, how it works, and when it stops.
+  Fixed when each new AgentJob starts.
+- **Runtime**: which execution backend runs the Agent. Owned by the Agent; an
+  ordinary client cannot override it for one request.
+- **Model / Reasoning Effort / Variant**: which model, canonical reasoning
+  effort, and true model variant the Agent uses. The Model and Variant fall
+  back to the Project default execution configuration when absent. Reasoning
+  Effort remains independent and, when absent, uses Runtime behavior.
+- **Skills**: which capability descriptions load at startup. Fixed with the
+  AgentJob; an entry point cannot add or remove them for one request.
+- **Max concurrent runs**: how many executions this Agent can run at once,
+  including launches and follow-ups. Applies to subsequent scheduling
+  immediately; lowering it does not stop running executions, and excess work
+  queues.
+- **State**: whether the Agent can accept new delegations. An archived Agent
+  rejects new delegations; existing Sessions remain readable and can
+  continue.
 
 Configure model providers and Runtime credentials in protected Runtime settings.
 Do not put them in Instructions or copy them to an Agent or Agent Connection.
@@ -142,19 +169,18 @@ lower-precedence source: an unsupported Runtime or a Model outside the
 `provider/model` form remains a configuration gap and blocks launch even
 when a Project default is configured.
 
-Configure the default through the Project settings surface
-(`PUT /api/projects/{projectRef}/default-execution-config` with
-`runtime`, `model`, and optional `variant`; the Project read reports
-`defaultExecutionConfig`, null when unset). Setting a new default replaces
-the previous one; an invalid default is rejected and leaves the previous
-default untouched. The default resolves at launch, so each AgentJob stores
+Configure the default through the Project settings surface; the route
+contract is in
+[External Agent API](agent-api.md#project-default-execution-configuration).
+Setting a new default replaces the previous one; an invalid default is
+rejected and leaves the previous default untouched. The default resolves at launch, so each AgentJob stores
 the configuration it launched with and later default changes never change
 an in-flight or completed execution.
 
 With a default configured, an Agent without a Model (or with a Variant but
-no Model) is no longer structurally Needs setup: Readiness reports Ready or
-Unknown, and a launch dispatches with the model the default resolved. Without
-a default, the gap remains Needs setup with its actionable repair. Removing
+no Model) is no longer structurally `needs-setup`: Readiness reports `ready` or
+`unknown`, and a launch dispatches with the model the default resolved. Without
+a default, the gap remains `needs-setup` with its actionable repair. Removing
 or changing the default re-introduces or re-resolves the gap accordingly,
 but a Readiness conclusion confirmed by a completed execution is not flipped
 by a default change alone.
@@ -191,21 +217,22 @@ An Agent's `active` or `archived` state answers only whether it accepts new
 delegations. Readiness answers whether Mohist can currently confirm that the
 Agent execution configuration is complete:
 
-| Readiness | Meaning | User action |
-|---|---|---|
-| Ready | Mohist confirmed that the current definition can execute | Test or launch the Agent |
-| Needs setup | Mohist confirmed a configuration gap | Launch is blocked; inspect each gap and its repair entry point |
-| Unknown | Mohist cannot currently confirm whether the definition can execute | Submit and wait for validation, but do not claim that the Agent is available |
+Readiness has three values. `ready` means Mohist confirmed that the current
+definition can execute; test or launch the Agent. `needs-setup` means Mohist
+confirmed a configuration gap; launch is blocked, so inspect each gap and its
+repair entry point. `unknown` means Mohist cannot currently confirm whether the
+definition can execute; submit and wait for validation, but do not claim that
+the Agent is available.
 
 A temporarily offline Runner or lack of capacity is Availability, not a reason
-to change a Ready Agent to Needs setup. Work can be accepted and queued. The
+to change a `ready` Agent to `needs-setup`. Work can be accepted and queued. The
 Web UI, CLI, and Agent Connections present the unified Mohist conclusion and do
 not maintain separate Runtime judgment rules.
 
 Structural gaps resolve Model and Variant by Agent definition, then Project
 default. When a configured Project default resolves a missing Model or a
 Variant set without a Model, those gaps do not appear and the conclusion
-follows the existing history rules (Ready or Unknown). Definition errors — an
+follows the existing history rules (`ready` or `unknown`). Definition errors — an
 unsupported Runtime or a Model outside the `provider/model` form — remain gaps
 regardless of any Project default.
 
@@ -216,18 +243,17 @@ and does not mean that the Runner is offline again.
 
 ### Configure and Test in the Web UI
 
-1. In **Agents**, create or open an Agent and enter its name, avatar,
-   description, and Instructions.
-2. Select a Runtime. Show only the Model, catalog-backed Reasoning Effort,
-   true Variant, and credential requirements that Runtime supports. Then select
-   Skills and a concurrency limit. The page must show Readiness and every gap.
-3. When Readiness is Ready, use **Start session** to submit a real task. You can
-   also submit when it is Unknown, but the page must state that the task will
-   wait for Runner validation. Open the AgentSession after successful creation.
-4. In the Session, inspect replies and execution facts. Use a follow-up to
-   verify a continuing conversation.
-5. After the Agent can complete its goal independently, configure event routing
-   or an Agent Connection.
+In **Agents**, create or open an Agent and enter its name, avatar,
+description, and Instructions. Select a Runtime; the page shows only the
+Model, catalog-backed Reasoning Effort, true Variant, and credential
+requirements that Runtime supports. Then select Skills and a concurrency
+limit. The page shows Readiness and every gap. When Readiness is `ready`, use
+**Start session** to submit a real task. You can also submit when it is
+`unknown`, but the page states that the task will wait for Runner validation.
+Open the AgentSession after successful creation, inspect replies and execution
+facts, and use a follow-up to verify a continuing conversation. After the
+Agent can complete its goal independently, configure event routing or an Agent
+Connection.
 
 ### Configure and Use in the CLI
 
@@ -240,35 +266,39 @@ mo agent launch explorer --prompt "Explore a product design for invoking a Mohis
 ```
 
 `agent view` shows Readiness, Availability, and configuration gaps. When the
-Agent Needs setup, repair each listed gap before launch. `agent launch` returns
+Agent is `needs-setup`, repair each listed gap before launch. `agent launch` returns
 the AgentJob ID, AgentSession ID, first Input ID, and Turn ID. Read the first
 launch result and composite observation from the returned observation URL. Use
 `mo session followup` to submit a new SessionInput in a continuing conversation,
 and use `mo session transcript` for the complete record. Continue observing
-`pending`, `queued`, and `executing` states. Read the result or transcript in a
-terminal state. For Unknown, read or retry with the original key. The CLI and
-Web UI invoke the same product capabilities.
+while the state is `accepted`, `queued`, or `running`; read the result or
+transcript at `terminal`; for `unknown`, read or retry with the original key.
+The CLI and Web UI invoke the same product capabilities.
 
 ## Launch Entry Points
 
 A task-first launch is available when the caller has a task but does not yet
-need to configure an Agent. `POST /api/projects/{projectRef}/agent-tasks`
-accepts exactly these JSON fields: `prompt`, `attachments`, `context`, `name`,
-`runtime`, `model`, and `variant`. `context` uses the same `issueNumber`,
-`epicNumber`, `repository`, `workspace`, `workspacePath`, and `targetId`
-references as a definition-first launch. The request must include an
-`Idempotency-Key` header. The Server derives missing definition fields,
-materializes the resolved execution configuration, creates the Agent, and then
-uses the canonical AgentJob and AgentSession launch pipeline.
+need to configure an Agent;
+[External Agent API](agent-api.md#task-first-launch) defines the route and its
+replay contract. The Server derives missing definition fields, materializes
+the resolved execution configuration, creates the Agent, and then uses the
+canonical AgentJob and AgentSession launch pipeline.
 
-| Entry point | New delegation | Mohist behavior |
-|---|---|---|
-| Web UI | Start with a task and optional context | Creates a derived Agent, AgentJob, AgentSession, first Input, and first Turn, then opens the session page |
-| CLI | `mo agent start --prompt <task>` | Creates the derived Agent and returns the same AgentJob, AgentSession, first Input, and first Turn identities |
-| Web UI / CLI | Select or name an existing Agent | Uses the unchanged definition-first launch path |
-| Agent Connection | The first task in a Slack direct message, an explicit New task, or a new root mention in a channel | Delivers the message to the connected Agent without changing Agent configuration |
-| Event routing | A matching event and response prompt | Creates an AgentJob and AgentSession for the event |
-| Issue comment mention | Comment content after `@<agent-name>` | Uses the comment as the task and associates its Issue context |
+- The Web UI starts with a task and optional context. It creates a derived
+  Agent, AgentJob, AgentSession, first Input, and first Turn, then opens the
+  session page.
+- The CLI starts the same way with `mo agent start --prompt <task>`. It
+  creates the derived Agent and returns the same AgentJob, AgentSession,
+  first Input, and first Turn identities.
+- Selecting or naming an existing Agent in the Web UI or CLI uses the
+  unchanged definition-first launch path.
+- An Agent Connection delivers the first task in a Slack direct message, an
+  explicit New task, or a new root mention in a channel to the connected
+  Agent without changing Agent configuration.
+- Event routing creates an AgentJob and AgentSession for a matching event and
+  response prompt.
+- An Issue comment mention uses the comment content after `@<agent-name>` as
+  the task and associates its Issue context.
 
 A mention uses the comment body as the input and automatically includes the
 Issue context. It is one-time work, suitable for a request such as "@my-agent,
@@ -276,15 +306,6 @@ supervise and advance this Issue." For continuous attention, the Agent adds the
 Issue to its watch list with `mo issue watch add`. Every launch entry point
 creates an AgentJob and fixes the Agent Instructions and configuration for that
 work. Later Agent edits do not change work that has started.
-
-Task-first replay uses the same key space as definition-first launches. A retry
-with the same key and caller-visible inputs returns the original Agent, Job,
-Session, Input, Turn, workspace, attachment result, and canonical URLs. A
-changed prompt, context, attachment list, name, runtime, model, or variant
-returns `409 launch_idempotency_conflict`; a still-converging launch returns
-`503 launch_setup_pending` and the same key. A recorded rejection is replayed
-as the same rejection. Callers must retry a pending launch with the original
-key, not generate a new task.
 
 A Mohist Agent's central role is proxy. It occupies a production-line position
 that the owner could occupy and acts through the same commands and Approval
@@ -384,13 +405,13 @@ caller-visible idempotency key. The user-visible contract is:
 
 The Server is the authority for these facts. Entry points cannot infer success
 from local logs, an HTTP response, a Runner event, or a provider response alone.
-They present the same result and next action:
-
-| Activity | Meaning | Safe behavior |
-|---|---|---|
-| Idle | No Turn or session operation is in progress | A follow-up can start a new Turn; Compact and Reset are available |
-| Active | A Turn is queued, executing, or waiting for a confirmed result | Keep Inputs in order; request Stop for queued or running work |
-| Unknown | Mohist cannot confirm input acceptance, a Runtime side effect, binding, or result | Block new work; query the original operation or reconcile it manually |
+They present the same result and next action for each Activity value. `idle`
+means no Turn or session operation is in progress: a follow-up can start a new
+Turn, and Compact and Reset are available. `active` means a Turn is queued,
+executing, or waiting for a confirmed result: keep Inputs in order and request
+Stop for queued or running work. `unknown` means Mohist cannot confirm input
+acceptance, a Runtime side effect, binding, or result: block new work and query
+the original operation or reconcile it manually.
 
 Stop is the single operation for ending work. For a queued Turn, it settles
 locally without contacting the Runtime and records the Turn as cancelled. For a
@@ -480,13 +501,19 @@ arguments and operation keys.
 
 ## AgentSession Operations
 
-| Operation | Why use it | Visible guarantee |
-|---|---|---|
-| Follow-up | Continue the same conversation | Creates one Input, joins a running Turn when supported or starts or queues a later Turn, and creates no AgentJob |
-| Compact | Reduce Runtime context without starting over | Preserves the AgentSession and current Runtime Session |
-| Reset | Continue from empty Runtime context | Preserves AgentSession identity and transcript and records the context boundary |
-| Stop | End queued or active work, one Turn or a session tree | Queued Turns end locally and are recorded cancelled; executing Turns are recorded cancelled only after Runtime confirmation; unconfirmed targets remain Unknown |
-| Force-reset (target) | Continue after an Unknown that cannot be reconciled | Preserves unresolved history and starts a new context only after explicit risk acknowledgement |
+- **Follow-up** continues the same conversation. It creates one Input, joins a
+  running Turn when supported or starts or queues a later Turn, and creates no
+  AgentJob.
+- **Compact** reduces Runtime context without starting over. It preserves the
+  AgentSession and current Runtime Session.
+- **Reset** continues from empty Runtime context. It preserves AgentSession
+  identity and transcript and records the context boundary.
+- **Stop** ends queued or active work for one Turn or a session tree. Queued
+  Turns end locally. Executing Turns are cancelled only after Runtime
+  confirmation; unconfirmed targets remain Unknown.
+- **Force-reset** is the target recovery for an Unknown that cannot reconcile.
+  It preserves unresolved history and starts new context only after explicit
+  risk acknowledgement.
 
 These operations change session execution, not work ownership. A follow-up does
 not turn a TaskRun into an AgentJob. Compact, Reset, and force-reset do not launch
@@ -517,10 +544,9 @@ run. Reconnect reconciliation can also replace a binding for non-idle work
 without the complete proof that an old effect is absent. Callers must therefore
 not treat those paths as permission to replay input.
 
-Recovery does not yet apply the complete ownership lease, effect fence,
-candidate reconciliation, and cleanup contract at every boundary. This limits
-cross-boundary convergence without making confirmed-missing recovery itself an
-unimplemented capability.
+Recovery does not yet prove the active owner and absence of an earlier effect
+at every boundary. This limits convergence across Runner handoff without making
+confirmed-missing recovery itself an unimplemented capability.
 
 Force-reset, Runtime rebind, and Runner handoff are target recovery boundaries,
 but they have no public CLI, Web, or API operation today. A user cannot yet use

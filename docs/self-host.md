@@ -19,19 +19,21 @@ listens only on `localhost:4318`, and default deployment does not publish port
 disable observation completely, set `Mohist:Otel:Enabled=false` and restart
 Server.
 
-| Mode | Use when | Behavior |
-|---|---|---|
-| **systemd** | A Linux host such as a NUC, NAS, VPS, or laptop | Native processes. `mo install` creates units, enables startup, and can install Runner too. |
-| **Docker** | Docker is available and isolation or easy migration is preferred | Server runs in a container with all state in a mounted volume. Runner connects from the host. |
+Use **systemd** mode on a Linux host such as a NUC, NAS, VPS, or laptop. It
+runs native processes: `mo install` creates units, enables startup, and can
+install Runner too. Use **Docker** mode when Docker is available and isolation
+or easy migration is preferred. Server runs in a container with all state in a
+mounted volume, and Runner connects from the host.
 
 Choose one mode. Remote access, backup, and upgrade sections cover both.
 
-| Scenario | Recommended mode | Guide |
-|---|---|---|
-| Local development or trial | Development scripts: `dev:server`, `dev:runner`, and `dev:web` | [Getting Started](getting-started.md) |
-| Daily laptop use | systemd as a local daemon | [Local daemon](#local-daemon) |
-| Always-on home server or NAS | systemd or Docker | [Always-on server](#always-on-server-or-nas) or [Docker](#docker-mode) |
-| Remote VPS | Either mode with a reverse proxy or VPN | [Remote Access](#remote-access) |
+- Local development or trial: use the development scripts `dev:server`,
+  `dev:runner`, and `dev:web`. See [Getting Started](getting-started.md).
+- Daily laptop use: systemd as a [Local daemon](#local-daemon).
+- Always-on home server or NAS: systemd or Docker. See
+  [Always-on server](#always-on-server-or-nas) or [Docker mode](#docker-mode).
+- Remote VPS: either mode with a reverse proxy or VPN. See
+  [Remote Access](#remote-access).
 
 ## systemd Mode
 
@@ -209,10 +211,8 @@ with `{ "status": "ok"`.
 
 ### Persistent Data
 
-The image sets `HOME=/data`. Server resolves all state under `$HOME/.mohist/`,
-including `mohist.db`, `otel.db`, `attachments/`, `artifacts/`, and
-`system-update.json`. A volume mounted at `/data` therefore contains all Server
-state.
+The image sets `HOME=/data`. Server resolves all state under `$HOME/.mohist/`.
+A volume mounted at `/data` therefore contains all Server state.
 
 ```bash
 docker volume inspect mohist-data
@@ -288,10 +288,9 @@ RUNTIME_SHUTDOWN_TIMEOUT_MS=30000
 ```
 
 `QUARANTINE_DRAIN_TIMEOUT_MS` bounds a quarantined OpenCode generation. Active
-turns still running when it expires receive a definite
-`generation-drain-timeout` failure, while completed journal results continue to
-report. `RUNTIME_SHUTDOWN_TIMEOUT_MS` is the shared deadline for OpenCode
-process/dispatcher teardown and Pi `services.close()`. After the deadline the
+turns still running when it expires fail explicitly, while completed journal
+results continue to report. `RUNTIME_SHUTDOWN_TIMEOUT_MS` is the shared
+deadline for OpenCode and Pi runtime teardown. After the deadline the
 Runner abandons the wait and proceeds with best-effort forced teardown. Keep
 the Runner service's own process limits configured separately; for example,
 use systemd `MemoryMax` on the Runner unit to protect the host from aggregate
@@ -339,7 +338,7 @@ mkcert -install
 mkcert mohist.local your-server-ip
 
 # Configure Server TLS with the generated certificate.
-# See `mo server --help` and Server configuration documentation.
+# See `mo server --help`.
 ```
 
 ### Tailscale or WireGuard VPN
@@ -428,9 +427,9 @@ restic -r /backup/mohist backup ~/.mohist <repo>/openspec
 
 ## Upgrade
 
-Back up the complete Server data root before an upgrade. Server applies EF Core
-schema migrations and required repository data upgrades at startup. A backup is
-the rollback boundary if migration or the new version fails.
+Back up the complete Server data root before an upgrade. Server applies schema
+migrations and required repository data upgrades at startup. A backup is the
+rollback boundary if migration or the new version fails.
 
 Older migrations are periodically squashed into a single baseline (see
 [`design/db-migrations.md`](../design/db-migrations.md)). A database last
@@ -447,7 +446,7 @@ npm ci
 npm run build
 
 # Required once when upgrading an installation whose `mo` binary predates
-# managed CLI launcher activation. This is the reachable bootstrap path.
+# the managed CLI launcher.
 bash scripts/install-mo.sh
 
 mo update
@@ -460,11 +459,6 @@ mo update
 
 `mo update` rebuilds and restarts installed Server, Runner, and Slack services
 and synchronizes the `mo` CLI.
-
-The bootstrap command above is only needed for the first deployment of the
-managed CLI launcher behavior. It publishes the current source checkout
-directly to the stable user path; a pre-change `mo` binary cannot perform this
-migration through a legacy `mo update cli` path.
 
 For Docker:
 

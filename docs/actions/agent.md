@@ -31,12 +31,14 @@ tasks.
 
 ## Action Inputs
 
-| Field | Required | Default | Meaning |
-|---|---:|---|---|
-| `name` | Yes | - | Static Mohist Agent name or ID. Template expressions are not supported. |
-| `prompt` | Yes | - | Task input for the Agent. Template expressions are supported. |
-| `session` | No | - | Logical Session name within the WorkflowRun. The current Work ID is used when omitted. |
-| `timeout` | No | Same as the backend Action | Deadline for this execution. |
+- `name` (required): static Mohist Agent name or ID. Template expressions are
+  not supported.
+- `prompt` (required): task input for the Agent. Template expressions are
+  supported.
+- `session` (optional): logical Session name within the WorkflowRun. The
+  current Work ID is used when omitted.
+- `timeout` (optional): deadline for this execution. Defaults to the backend
+  Action's deadline.
 
 The Agent configuration selects the execution backend, model, optional
 Reasoning Effort, true model variant, and Skills. Reasoning Effort is one of
@@ -71,9 +73,8 @@ name first and fall back to ID when no name matches.
 
 ## Failure Semantics
 
-| Error code | Meaning |
-|---|---|
-| `agent_not_found` | `name` does not exist at dispatch time, or the Agent is archived. |
+The Action defines one business error code: `agent_not_found` when `name` does
+not exist at dispatch time, or the Agent is archived.
 
 Execution errors such as backend unavailability and timeout are the same as for
 the selected backend Action. Recovery `when` matching applies in the same way.

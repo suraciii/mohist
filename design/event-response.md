@@ -22,10 +22,10 @@ and its Agent-launch-origin AgentSession. Three authorities own its facts:
 
 ### Guarantees
 
-1. **At most once:** One Agent starts at most once for one event. The launch
-   pipeline normalizes a durable idempotency key from
-   `(projectId, eventId, agentId)`, independent of trigger path through routing
-   rule, watch, or mention.
+1. **At most once:** One Agent starts at most once for one event, independent
+   of trigger path through routing rule, watch, or mention.
+   [`event-routing.md`](event-routing.md) owns the durable launch-idempotency
+   key.
 2. **Use current state, not the event snapshot:** An event says what occurred.
    Before acting, the Agent must use the command surface to confirm current
    state. For example, it confirms that a run still waits for an Approval.
@@ -53,13 +53,13 @@ and its Agent-launch-origin AgentSession. Three authorities own its facts:
 Every Agent decision must be distinguishable from a person's action so an owner
 can take over from history.
 
-- A comment declares the Agent name through `--author`, by convention in the
-  supervision preset.
+- A comment declares the Agent name through `--display-name`, by convention in
+  the supervision preset.
 - An Approval decision can declare `decidedBy`. Like comment author, it is a
   declaration rather than authentication. `mo run approve` and
-  `mo run reject` accept `--author`. Decision events and read models include the
-  field when present. An Agent should provide attribution; direct human action
-  can omit it.
+  `mo run reject` accept `--display-name`. Decision events and read models
+  include the field when present. An Agent should provide attribution; direct
+  human action can omit it.
 - Manual Approve and Send Back in the Web UI do not require an actor. An
   unsigned decision leaves `decidedBy` empty and does not synthesize `web`,
   `owner`, or another value.

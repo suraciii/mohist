@@ -9,14 +9,17 @@ transaction; it does not mean that caller and target share a transaction.
 
 ## Write Authorities
 
-| Business fact | Sole write authority | Use by other participants |
-|---|---|---|
-| Which Epic currently contains an Issue | Issue.`EpicNumber?` | Epic queries Issue; WorkflowRun stores minimal run context |
-| Epic lifecycle and advancement policy | Epic | Issue carries only `EpicNumber?` and does not copy Epic state |
-| Issue lifecycle and current WorkflowRun | Issue | Epic queries it; WorkflowRun results return through events |
-| Workflow execution state | WorkflowRun | Issue stores only the current `WorkflowRunId` |
-| Runner presence and capacity | Runner | Workflow scheduling consumes only its public facts |
-| Session lifecycle | Session | WorkflowRun and Agent store only associated identities |
+Each business fact has one sole write authority:
+
+- Which Epic currently contains an Issue: Issue.`EpicNumber?`. Epic queries Issue; WorkflowRun
+  stores minimal run context.
+- Epic lifecycle and advancement policy: Epic. Issue carries only `EpicNumber?` and does not copy
+  Epic state.
+- Issue lifecycle and current WorkflowRun: Issue. Epic queries it; WorkflowRun results return
+  through events.
+- Workflow execution state: WorkflowRun. Issue stores only the current `WorkflowRunId`.
+- Runner presence and capacity: Runner. Workflow scheduling consumes only its public facts.
+- Session lifecycle: Session. WorkflowRun and Agent store only associated identities.
 
 There is no independent membership aggregate, generic `OwnerRef`, or controller aggregate. Member
 lists, progress, and the next candidate Issue are queries over current Issue state, not a second set
@@ -181,14 +184,7 @@ back; a propagation that would close a synchronous cycle always takes the asynch
 
 ## Other Interactions
 
-```text diagram
-Issue -> Cancel -> WorkflowRun
-Session -> AbandonActiveWork -> WorkflowRun
-Session -> MarkUnknown -> AgentJob
-AgentJob --[job state fact]--> Session (settles the initial Turn asynchronously)
-Runner --[RunnerDisconnected]--> Session (fails affected sessions)
+Two more one-way interactions exist beyond the sections above:
 
-WorkflowRun: Pause, Resume, Approve, Reject, Retry, Rerun
-Issue: MarkDone, Archive, Unarchive, Reopen, Close
-Runner: Register, Unregister, HeartbeatRepair
-```
+- Issue -> Cancel -> WorkflowRun.
+- Runner --[RunnerDisconnected]--> Session, which fails the affected Sessions.

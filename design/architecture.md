@@ -27,46 +27,57 @@ User Project
 
 ## What goes where
 
-| Concern | Belongs in | Not in |
-|---|---|---|
-| third-party external Agent conversation | external Agent host | Mohist Web / Server |
-| external presentation and provider protocol translation | Web / CLI / `mohist-slack` | Agent / Session domains |
-| Mohist Agent transcript, SessionInput, AgentTurn and activity | Session context | `mohist-slack` / Web local state |
-| CLI command grammar and local interaction | CLI | Server |
-| official client Agent invocation contract | Server Agent API | `mohist-slack` / Runner |
-| fallback observe & act | Web UI + API | Runner |
-| state authority | Server | Runner |
-| decide workflow | Server | Runner |
-| register/presence/capacity | Server | Web / CLI |
-| workspace prep/clean | Runner | Server |
-| user-project shell/process/agent execution | Runner | Server |
-| git side effects | Runner | Server |
-| OpenSpec side effects | Runner | Server |
-| Mohist daemon self-management process execution (inspect, update, install, restart, and determine the status of Mohist and its managed services) | Server | Runner for user-project workspace, git, shell, and agent execution |
-| Mohist Agent identity, instructions, config, skills, and jobs | Agent context | Slack adapter / Web / CLI |
-| Agent Connection binding and access policy | Agent context | Agent definition / Slack thread state |
-| Slack credentials and service authentication | Server infrastructure | Agent / Session domains |
-| Slack protocol: receiving events, sending messages | `mohist-slack` | Server Agent / Session contexts |
-| Slack provider inbox, conversation mapping, and pending outbound delivery | Server infrastructure | `mohist-slack` local storage / Agent or Session aggregates |
-| Slack workspace Mohist App enrollment and managed Agent App lifecycle (external App create/install approval, manifest, Socket facts, operation fence, unknown outcome) | Server Slack integration supporting context (SlackWorkspaceEnrollment / ManagedSlackAgentApp aggregates) | `mohist-slack` / Agent or Session aggregates / pure integration records |
-| Slack Configuration access/refresh pair, Mohist App credentials, and managed Agent App runtime secrets (client/signing secret, app-level token, bot token) | Server Slack integration supporting context, addressed by owning aggregate (Enrollment or AgentApp) | Agent Connection / `mohist-slack` / plaintext in row, DTO, audit, or log |
-| `mohist-slack` process lifecycle | CLI managed service | Agent Connection aggregate / Runner |
-| third-party Agent exploration and delegation | external Agent + Skill | Mohist Runtime / Web UI |
-| Mohist Agent conversation from any client | Agent API + AgentSession | provider adapter local state |
-| skill install | CLI | Server |
-| product design | docs/ | design/ |
-| domain model | code | design/ |
-| architecture rules | design/architecture.md | OpenSpec |
-| builtin workflow content | *.workflow.yaml | design/ |
+- A third-party External Agent conversation belongs in the External Agent host, not in Mohist Web
+  or Server.
+- External presentation and provider protocol translation belong in Web, CLI, and `mohist-slack`,
+  not in Agent or Session domains.
+- Mohist Agent transcript, SessionInput, AgentTurn, and activity belong in the Session context, not
+  in `mohist-slack` or Web local state.
+- CLI command grammar and local interaction belong in the CLI, not in Server.
+- The official client Agent invocation contract belongs in the Server Agent API, not in
+  `mohist-slack` or Runner.
+- Fallback observe and act belongs in Web UI + API, not in Runner.
+- State authority belongs in Server, not in Runner.
+- Workflow decisions belong in Server, not in Runner.
+- Register/presence/capacity belong in Server, not in Web or CLI.
+- Workspace prep/clean belongs in Runner, not in Server.
+- User-project shell, process, and agent execution belong in Runner, not in Server.
+- Git side effects belong in Runner, not in Server.
+- OpenSpec side effects belong in Runner, not in Server.
+- Mohist daemon self-management process execution (inspect, update, install, restart, and determine
+  the status of Mohist and its managed services) belongs in Server; Runner is for user-project
+  workspace, git, shell, and agent execution.
+- Mohist Agent identity, instructions, config, skills, and jobs belong in the Agent context, not in
+  the Slack adapter, Web, or CLI.
+- Agent Connection binding and access policy belong in the Agent context, not in the Agent
+  definition or Slack thread state.
+- Slack credentials and service authentication belong in Server infrastructure, not in Agent or
+  Session domains.
+- The Slack protocol (receiving events, sending messages) belongs in `mohist-slack`, not in Server
+  Agent or Session contexts.
+- The Slack provider inbox, conversation mapping, and pending outbound delivery belong in Server
+  infrastructure, not in `mohist-slack` local storage or Agent or Session aggregates.
+- Slack workspace Mohist App enrollment and managed Agent App lifecycle (external App
+  create/install approval, manifest, Socket facts, operation fence, unknown outcome) belong in the
+  Server Slack integration supporting context (`SlackWorkspaceEnrollment` / `ManagedSlackAgentApp`
+  aggregates), not in `mohist-slack`, Agent or Session aggregates, or pure integration records.
+- The Slack Configuration access/refresh pair, Mohist App credentials, and managed Agent App
+  runtime secrets (client/signing secret, app-level token, bot token) belong in the Server Slack
+  integration supporting context, addressed by the owning aggregate (Enrollment or AgentApp); never
+  in Agent Connection, `mohist-slack`, or plaintext in a row, DTO, audit, or log.
+- The `mohist-slack` process lifecycle belongs to a CLI managed service, not to an Agent Connection
+  aggregate or Runner.
+- Third-party Agent exploration and delegation belong in the External Agent + Skill, not in Mohist
+  Runtime or Web UI.
+- A Mohist Agent conversation from any client belongs in Agent API + AgentSession, not in provider
+  adapter local state.
+- Skill install belongs in the CLI, not in Server.
+- Product design belongs in `docs/`, not in `design/`.
+- The domain model belongs in code, not in `design/`.
+- Architecture rules belong in `design/architecture.md`, not in OpenSpec.
+- Builtin workflow content belongs in `*.workflow.yaml`, not in `design/`.
 
 ## Facts and decisions
-
-```text diagram
-Task executes.
-Check verifies.
-Runner reports.
-WorkflowRun decides.
-```
 
 Runner produces facts. Never interprets them.
 Workflow interprets facts. Never produces them.
@@ -98,10 +109,8 @@ Every in-flight work has an owner. Stale reports get rejected, never merged.
 
 ## Events: two channels
 
-| Channel | SLA | Purpose |
-|---|---|---|
-| Domain reaction | durable at-least-once | advance cross-aggregate state |
-| UI push | best-effort | update screen |
+Domain reaction events use durable at-least-once delivery; their purpose is to advance
+cross-aggregate state. UI push events are best-effort; their purpose is to update the screen.
 
 The UI self-reconciles after a disconnect. Workflow progress must never depend on the UI.
 
@@ -155,83 +164,50 @@ and makes every step safe for redelivery.
 
 All of these constraints apply:
 
-- **Persist only uncertain command-delivery state.** The coordinator grain stores only the fence for the
-  command that is in progress, such as `Pending { commandId, kind, payload, expectedRevision }`. It clears
-  the fence as soon as the command has a definite `applied` or `rejected` result. It does not cache a
-  business result. When the participant's aggregate is the durable result, a retry after the fence was
-  cleared reads that aggregate by the command's stable target identity before it recomputes any
-  race-sensitive input. It returns the persisted result for matching request identity and rejects conflicting
-  identity. A lost response must not make the retry resolve newer configuration for an already applied
-  command.
-- **Write at most one participant aggregate per command.** One synchronous coordinator call chain enters
-  only one participant transaction. The coordinator must not write across aggregates or use a join table
-  or repository to bypass aggregate boundaries. If one business operation affects two aggregates, each
-  aggregate uses its own transaction and durable events carry the process forward. The coordinator only
-  provides serialization and idempotency.
-- **Remain downstream of participant interfaces.** The coordinator sends commands in one direction through
-  narrow participant interfaces. A participant must not call the coordinator back in the same synchronous
-  call stack or hold a coordinator reference. Participant aggregates such as `Issue` and `Project` do not
-  know that the coordinator exists. Event routing, handlers, and commands from other contexts continue to
+- **Persist only uncertain command-delivery state.** The coordinator stores only the fence for the
+  command that is in progress and clears the fence as soon as the command has a definite `applied`
+  or `rejected` result. It does not cache a business result. When the participant's aggregate is the
+  durable result, a retry after the fence was cleared reads that aggregate by the command's stable
+  target identity before it recomputes any race-sensitive input. It returns the persisted result for
+  matching request identity and rejects conflicting identity. A lost response must not make the
+  retry resolve newer configuration for an already applied command.
+- **Write at most one participant aggregate per command.** One synchronous coordinator call chain
+  enters only one participant transaction. The coordinator must not write across aggregates or use a
+  join table or repository to bypass aggregate boundaries. If one business operation affects two
+  aggregates, each aggregate uses its own transaction and durable events carry the process forward.
+  The coordinator only provides serialization and idempotency.
+- **Remain downstream of participant interfaces.** The coordinator sends commands in one direction
+  through narrow participant interfaces. A participant must not call the coordinator back in the
+  same synchronous call stack or hold a coordinator reference. Participant aggregates do not know
+  that the coordinator exists. Event routing, handlers, and commands from other contexts continue to
   use the participant's own interface directly.
-- **Do not store duplicate business facts.** Coordinator persistence contains no Issue, Project,
-  Repository, or WorkflowRun business state. Those facts remain authoritative only in their aggregates.
-  The coordinator may store technical fence fields such as `commandId`, command kind, a canonical command
-  parameter snapshot, and expected revision. Reuse of a pending `commandId` is a replay only when the
-  command kind and canonical parameter snapshot are identical; a different payload is rejected.
-- **Do not create a synchronous callback cycle.** The coordinator calls a participant, the participant
-  commits, a durable event is published, and a handler reenters the coordinator. Reentry must use durable
-  dispatch. The participant must not call the coordinator synchronously from inside the command.
+- **Do not store duplicate business facts.** Coordinator persistence contains no participant
+  business state. Those facts remain authoritative only in their aggregates. The coordinator may
+  store technical fence fields such as the command identity, the command kind, a canonical command
+  parameter snapshot, and the expected revision. Reuse of a pending command identity is a replay
+  only when the command kind and canonical parameter snapshot are identical; a different payload is
+  rejected.
+- **Do not create a synchronous callback cycle.** The coordinator calls a participant, the
+  participant commits, a durable event is published, and a handler reenters the coordinator. Reentry
+  must use durable dispatch. The participant must not call the coordinator synchronously from inside
+  the command.
 
-The following uses are in scope:
+Each coordinator serializes by Project key. Today one coordinator serializes the commands that
+establish or break a non-terminal Issue's Repository binding: Issue creation, target Repository
+reassignment, reopening a cancelled Issue, and Repository deletion. Another coordinator serializes
+Workflow Profile mutation, Project default and Agent Action override writes, Profile deletion, and
+WorkflowRun start binding, so a Run observes the complete configuration before or after a mutation,
+never an intermediate version. A duplicate Run start returns the identical persisted binding, while
+conflicting startup facts are rejected. A Profile deletion that races an Issue selection ends in a
+block or a retryable conflict; it never leaves a dangling reference. The coordinators do not call
+each other and do not share a transaction. They do not reimplement invariant validation; they
+sequence the existing validators and one participant commit under the fence. Coordinators do not
+handle eventually consistent progress across aggregates, UI pushes, or Session and Runtime binding.
 
-- `IssueRepositoryCoordinatorGrain` serializes Issue creation, Repository reassignment, reopening a
-  cancelled Issue, and Repository deletion within a Project. These commands establish or break a binding
-  for a non-terminal Issue. An Issue's explicit WorkflowProfile selection, including creation, edit, and
-  clearing with `--inherit-workflow-profile`, is an Issue aggregate field. Issue creation commits that field
-  in the same `IIssueBindingParticipant` transaction. Before it commits, the participant validates that the
-  Profile exists in the same way that it validates that the Repository exists.
-- `WorkflowProfileReferenceCoordinator` serializes Profile deletion, custom Profile source updates, writes
-  to a Project's default Profile, Project Agent Action override changes, and WorkflowRun start binding within
-  a Project. Profile updates and override changes share this order with Run binding so a Run observes the
-  complete configuration before or after a mutation, never an intermediate version. The start request
-  carries the WorkflowRun ID, Project/Issue identity, and the Issue's explicit Profile selection snapshot.
-  The coordinator settles any pending fence first, then asks the Run participant whether that WorkflowRun
-  already exists. A matching Project/Issue identity returns the Run's persisted startup binding without
-  resolving current Profile configuration; conflicting ownership is rejected. When the Run does not exist,
-  the coordinator resolves the effective Profile under its fence, materializes one `BoundWorkflowStart`,
-  persists that resolved command payload, and invokes `IWorkflowRunBindingParticipant`. The participant
-  creates the initial Run state with Project/Issue identity, Profile ID, concrete Agent Action, and ordered
-  Stage ID/approval facts in one transaction; no caller may create or save a partial Run before this command.
-  Reference commands
-  establish or break Profile references. Each persisted custom Profile reference has a nullable backing key
-  and a restrictive foreign key to `(ProjectId, ProfileId)`. Builtin references keep a null backing key
-  because they cannot be deleted. This foreign key is the primary mechanism that makes concurrent deletion correct.
-  `WorkflowProfileDeletionBlockerQuery` combines the Project default, **all** explicit Issue selections in
-  that Project, including terminal Issues, and active Run bindings. It is the source of actionable deletion
-  diagnostics and errors. `IssueRepositoryCoordinatorGrain` serializes Issue selection; selection does not
-  pass through the Profile coordinator. For a deletion and selection race across coordinators, the foreign
-  key either makes an already-committed reference block deletion or makes the Issue receive a retryable
-  `workflow-profile-not-found` conflict. It never leaves a dangling reference.
-
-Each coordinator serializes by Project key. They use narrow participant interfaces:
-`IIssueBindingParticipant`, `IProjectBindingParticipant`, `IProjectWorkflowProfileBindingParticipant`,
-`IWorkflowProfileMutationParticipant`, and `IWorkflowRunBindingParticipant`. The Workflow Profile Project
-participant owns default and Agent Action override writes; the Profile participant owns custom source writes;
-the Run participant owns the Profile ID, concrete Action, and initial Stage skeleton captured at start. A
-duplicate start returns the identical persisted binding, while conflicting startup facts are rejected. An
-`ArchTest` prevents production code from bypassing the coordinators. The coordinators **do not** call each
-other or share a transaction. Each synchronous coordinator call chain enters only one participant aggregate.
-Issue selection belongs to the Issue coordinator. Project default, Profile mutation, Agent Action override,
-and Run binding belong to the Profile coordinator.
-
-The coordinators do not reimplement invariant validation. The Profile coordinator sequences the existing
-Profile compiler, Action-contract validator, active-Run binding query, and one participant commit under its
-fence. Coordinators do not handle eventually consistent progress across aggregates, UI pushes, or Session and
-Runtime binding.
-
-`Completed` and `Stopped` WorkflowRuns are immutable terminal aggregates. Workflow control rejects retry,
-rerun, rerun-from-stage, and resume for them. Re-executing Issue work creates a new WorkflowRun and enters the
-same Profile start-binding coordinator; a terminal Run never regains an active Profile backing key.
+`Completed` and `Stopped` WorkflowRuns are immutable terminal aggregates. Workflow control rejects
+retry, rerun, rerun-from-stage, and resume for them. Re-executing Issue work creates a new
+WorkflowRun and enters the same start-binding coordination; a terminal Run never regains an active
+Profile reference.
 
 ## Persistence
 
@@ -254,7 +230,7 @@ There are two distinct paths:
    AgentTurn, durable transcript, activity, result, and evidence. Server infrastructure owns durable
    provider conversation mapping and delivery state; the external surface owns only presentation and
    transient protocol translation.
-2. A third-party external Agent keeps its own conversation in its host and uses Mohist Skills + `mo` to
+2. A third-party External Agent keeps its own conversation in its host and uses Mohist Skills + `mo` to
    issue domain commands. That external conversation does not become an AgentSession merely because it
    caused Mohist work. If it explicitly launches a Mohist Agent, the launched work follows path 1.
 

@@ -39,12 +39,10 @@ On the Epics page in the top navigation, select **New Epic**.
 
 ### Epic Properties
 
-| Property | Meaning |
-|---|---|
-| Title | A short title |
-| Description | A long description. Include the Goal, Background, Non-goals, and member Issues |
-| Priority | `p0` through `p4` |
-| Status | `idle`, `running`, `paused`, `done`, or `closed`, controlled by the lifecycle |
+An Epic has a short title and a long description that holds the Goal,
+Background, Non-goals, and member Issues. Its priority runs from `p0` through
+`p4`. Its status is `idle`, `running`, `paused`, `done`, or `closed`,
+controlled by the lifecycle.
 
 Both Epics and Issues use their Project-scoped number as their permanent
 identity. Commands, pages, and events use that same number. Users do not need
@@ -129,13 +127,14 @@ Done.
 An Epic has five lifecycle states. User operations and automatic advancement
 both drive this state.
 
-| State | Meaning | Entry Condition |
-|---|---|---|
-| `idle` | Created but not advancing automatically | The initial state |
-| `running` | Advancing linked Issues automatically | Start from `idle` |
-| `paused` | Future advancement is paused, but the current in-progress Issue continues | Pause from `running` |
-| `done` | Currently complete, with no open linked Issues | Mark Done while not `paused` or `closed` and all linked Issues are terminal; or automatic progress recalculation finds the same condition |
-| `closed` | Closed and will not continue | Close from `idle`, `running`, or `paused` |
+A new Epic is `idle`: created, but not advancing automatically. Start from
+`idle` enters `running`, where the Epic advances linked Issues automatically.
+Pause from `running` enters `paused`: future advancement is paused, but the
+current in-progress Issue continues. The Epic is `done` when it is currently
+complete, with no open linked Issues: mark it Done while it is not `paused` or
+`closed` and all linked Issues are terminal, or let automatic progress
+recalculation find the same condition. Close from `idle`, `running`, or
+`paused` enters `closed`: the Epic is closed and will not continue.
 
 - A new Epic starts in `idle` and does not advance automatically. You must
   explicitly Start it to enter `running`.
@@ -146,11 +145,12 @@ both drive this state.
 
 ### Start, Pause, and Resume
 
-| Operation | CLI | Web UI | Semantics |
-|---|---|---|---|
-| Start | `mo epic start <number>` | **Start Epic** | Change `idle` to `running` and try to start the first startable linked Issue |
-| Pause | `mo epic pause <number>` | **Pause** | Change `running` to `paused`; stop future advancement without interrupting the current in-progress Issue |
-| Resume | `mo epic resume <number>` | **Resume** | Change `paused` to `running`; evaluate readiness again and advance |
+Start (`mo epic start <number>`, or **Start Epic** in the Web UI) changes
+`idle` to `running` and tries to start the first startable linked Issue. Pause
+(`mo epic pause <number>`, or **Pause**) changes `running` to `paused` and
+stops future advancement without interrupting the current in-progress Issue.
+Resume (`mo epic resume <number>`, or **Resume**) changes `paused` to
+`running`, evaluates readiness again, and advances.
 
 Repeating an operation when the Epic is already in its target state is safe and
 has no side effects. For example, Start succeeds for an Epic that is already

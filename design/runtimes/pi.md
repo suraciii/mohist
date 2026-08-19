@@ -44,24 +44,9 @@ rules.
 
 ## Action Input and Output Contract
 
-```ts
-type PiActionInput = {
-  prompt: PromptSpec
-  session?: string
-  options?: {
-    model?: string
-    reasoningEffort?: string
-    variant?: string
-  }
-}
-
-type PiActionOutput = null | {
-  promise: string
-}
-```
-
-The input shape, expansion timing, and output projection are identical to
-`mohist/opencode`; see the Action input and output contract in
+The Action input and output contract is owned by
+[`../workflow/actions.md`](../workflow/actions.md). The input shape, expansion
+timing, and output projection are identical to `mohist/opencode`; see
 [`opencode.md`](opencode.md). There are only two differences:
 
 - `model` uses Pi's `provider/model` form and is likewise split only at the
@@ -74,10 +59,10 @@ The input shape, expansion timing, and output projection are identical to
   Pi remains the final authority for native model and variant validity.
 
 Keys in `options` other than `model`, `reasoningEffort`, and `variant` are
-ignored with a diagnostic and do not fail execution. This allows persisted `vars.agent` values containing
-a `runtime` key, used by the Mohist Agent path, or legacy keys to remain
-bindable to this Action. `options` does not carry `runtime`; the Workflow path
-selects its backend through `uses`.
+ignored with a diagnostic and do not fail execution. This allows persisted
+`vars.agent` values containing a `runtime` key, used by the Mohist Agent path,
+or legacy keys to remain bindable to this Action. `options` does not carry
+`runtime`; the Workflow path selects its backend through `uses`.
 
 ## Capability Boundary
 
@@ -309,12 +294,22 @@ unconfirmed result is `unavailable`, retains the original operation identity, an
 is never replayed automatically. Every command routes by the persisted complete
 binding, not by an in-memory Session object.
 
-| Command | Pi-specific contract |
-|---|---|
-| Follow-up | Active execution receives a native steer at an iteration boundary. Idle execution starts a Prompt whose preflight callback is the acceptance authority. Model and thinking level are applied first. Preflight rejection is definitive; active or unknown state never triggers binding replacement. |
-| Compact | Allowed only while idle. Uses native compaction with the current model, keeps the Session-file binding and AgentSession identity, and never falls back to a Mohist-generated summary. |
-| Reset | Allowed only while idle. Creates an empty Session in the same work directory, then replaces the complete expected binding. A definitely absent old file may skip selection inheritance; corruption, permission failure, and unclassified reads remain explicit failures. |
-| Stop | Requests interruption. Provider acceptance of the request does not prove execution stopped; events and `isStreaming` provide stop confirmation. |
+The Pi-specific command contracts are:
+
+- **Follow-up:** Active execution receives a native steer at an iteration
+  boundary. Idle execution starts a Prompt whose preflight callback is the
+  acceptance authority. Model and thinking level are applied first. Preflight
+  rejection is definitive; active or unknown state never triggers binding
+  replacement.
+- **Compact:** Allowed only while idle. Uses native compaction with the current
+  model, keeps the Session-file binding and AgentSession identity, and never
+  falls back to a Mohist-generated summary.
+- **Reset:** Allowed only while idle. Creates an empty Session in the same work
+  directory, then replaces the complete expected binding. A definitely absent
+  old file may skip selection inheritance; corruption, permission failure, and
+  unclassified reads remain explicit failures.
+- **Stop:** Requests interruption. Provider acceptance of the request does not
+  prove execution stopped; events and `isStreaming` provide stop confirmation.
 
 Compact and Reset preserve the AgentSession ID and transcript. Only Reset replaces
 the physical Session-file binding and begins empty provider context. A stale
@@ -361,16 +356,6 @@ and usage facts, including cache-read and cache-write tokens, without exposing
 Pi SDK types. This capability boundary replaces component-by-component Pi
 special cases in Server and Web.
 
-## Verification Boundary
-
-Default verification replaces SDK services, Sessions, provider events, storage,
-and time with deterministic fakes. It proves readiness gating, binding-before-effect,
-absolute-path restoration, missing versus corrupt or unknown classification,
-completion authority, no replay, active versus idle Follow-up, native Compact and
-Reset semantics, project-trust exclusion, provider retry policy, and two-phase
-closeout. A real smoke test is upgrade evidence for the locked SDK surface; it is
-not a substitute for these state and failure assertions.
-
 ## Upgrade Boundary
 
 Mohist locks `@earendil-works/pi-coding-agent` at 0.80.10 and requires the
@@ -385,6 +370,3 @@ restore, Prompt completion, active and idle Follow-up acceptance, interruption a
 stop confirmation, compaction, model/thinking selection, event payloads, and
 credential redaction. A method existing in generated types is not evidence that
 its completion or failure semantics still satisfy Mohist.
-
-Upgrade evidence follows the redacted artifact shape demonstrated by
-[`sdk-smoke-verification.json`](../../openspec/changes/archive/2026-07-18-issue-409/sdk-smoke-verification.json).

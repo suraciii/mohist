@@ -1,7 +1,7 @@
 # Authentication and Access
 
 Mohist is self-hosted for one person, but it is not used by one process. The Web
-UI, remote CLI, Runner, integrations, scripts, and external Agents all need to
+UI, remote CLI, Runner, integrations, scripts, and External Agents all need to
 act without sharing the administrator's long-lived secret. Mohist therefore
 keeps one human administrator and gives each machine caller a separate,
 revocable identity.
@@ -12,34 +12,42 @@ when that credential was issued.
 
 ## Choose the Right Access Method
 
-| Caller | Access method | Why |
-|---|---|---|
-| Local `mo` on the Server host | Administrator credential file, discovered automatically | Access to the host is already the local trust boundary. |
-| Remote `mo` | Device authorization with `mo auth login` | The administrator approves the machine without copying the root credential to it. |
-| Web UI | Administrator-level token exchanged for a browser session | The browser receives a revocable session instead of retaining the root token. |
-| Script or CI | Personal access token in `MOHIST_TOKEN` | Each automation can have its own lifetime and read or write capability. |
-| Direct external Agent caller | Personal access token with an explicit Project grant | A headless caller can reach only the private Projects selected for that token. |
-| Runner | Machine credential issued during registration | A Runner can claim and report work but cannot act as the administrator. |
-| Local service or inbound integration | Dedicated service or integration credential | A compromise remains inside that component's boundary. |
-| GitHub | Native GitHub signature | Mohist can trust the platform event without sharing a general Mohist token. |
+- **Local `mo` on the Server host:** Uses the administrator credential file,
+  discovered automatically. Access to the host is already the local trust
+  boundary.
+- **Remote `mo`:** Device authorization with `mo auth login`. The administrator
+  approves the machine without copying the root credential to it.
+- **Web UI:** An administrator-level token exchanged for a browser session. The
+  browser receives a revocable session instead of retaining the root token.
+- **Script or CI:** A personal access token (PAT) in `MOHIST_TOKEN`. Each
+  automation can have its own lifetime and read or write capability.
+- **Direct External Agent caller:** A PAT with an explicit Project grant. A
+  headless caller can reach only the private Projects selected for that token.
+- **Runner:** A machine credential issued during registration. A Runner can
+  claim and report work but cannot act as the administrator.
+- **Local service or inbound integration:** A dedicated service or integration
+  credential. A compromise remains inside that component's boundary.
+- **GitHub:** A native GitHub signature. Mohist can trust the platform event
+  without sharing a general Mohist token.
 
 Invalid credentials are rejected as unauthenticated. Valid credentials without
 the required capability are rejected as forbidden. Mohist does not reveal
 whether a private resource exists until the caller has access to its Project.
 
-## One Administrator, Several Machine Identities
+## One Administrator, Several Machine Principals
 
 Mohist has one administrator. It does not create a second Mohist login, role, or
 permission group for a collaborator. Instead, each machine receives a separate
-credential, and each Mohist Agent receives a stable identity for attribution.
+Credential as its own Principal, and each Mohist Agent receives a stable Agent
+Identity for attribution.
 
 This separation has three consequences:
 
 - A token can expire or be revoked without rotating every other credential.
 - Activity and Approval records identify the actual administrator, machine, or
   Agent that caused an effect.
-- Agent attribution does not make the Agent a login identity. External callers
-  authenticate with their own personal access token.
+- An Agent Identity attributes effects; it is not a caller Principal. External
+  callers authenticate with their own personal access token.
 
 Mohist shows an issued token in full only once and stores only its fingerprint.
 A database disclosure therefore does not reveal the token value.
@@ -53,7 +61,7 @@ Connection access policy; see [Slack](slack.md).
 
 The platform proves who the person is. Mohist validates the platform-backed
 identity and the configured access policy. That boundary is separate from the
-personal access token required by a direct external Agent caller.
+personal access token required by a direct External Agent caller.
 
 ## Local CLI Requires No Login
 
@@ -88,7 +96,7 @@ and makes every new login an explicit decision in an already trusted browser.
 Create a separate token for each headless caller:
 
 ```bash
-mo auth token create --name ci-bot --scope readonly --ttl 720h
+mo auth token create --name ci-bot --scope readonly --ttl 720
 ```
 
 The token is shown in full only once. Its default lifetime is 90 days and its
@@ -119,14 +127,14 @@ this private-Project boundary. The PAT must also carry a persisted Project grant
 Create a PAT with an explicit grant for one or more Projects:
 
 ~~~text literal
-mo auth token create --name release-agent --scope operator --ttl 720h --project proj_123
-mo auth token create --name observer --scope readonly --ttl 720h --project proj_123
+mo auth token create --name release-agent --scope operator --ttl 720 --project proj_123
+mo auth token create --name observer --scope readonly --ttl 720 --project proj_123
 ~~~
 
 An operator PAT may use the explicit `operator_all` grant instead:
 
 ~~~text literal
-mo auth token create --name owner-agent --scope operator --ttl 720h --all-projects
+mo auth token create --name owner-agent --scope operator --ttl 720 --all-projects
 ~~~
 
 Repeat `--project` to grant more than one Project. Use `--all-projects` only with
@@ -136,18 +144,11 @@ usable on existing control-plane routes but cannot use the direct API.
 
 Call `/api/v1` with the PAT as a Bearer token. A Web session cookie, Runner or
 service credential, and trusted Agent Connection identity cannot substitute for
-the PAT. Cookie-only and otherwise unusable direct requests return `401` with a
-`WWW-Authenticate: Bearer` challenge and do not reveal whether a token was
-missing, expired, or revoked.
+the PAT.
 
-For a usable PAT, Mohist resolves the persisted `ExternalAgentCaller`, checks
-its route Scope, and checks the selected Project grant before it looks up a
-Project, Agent, Job, Session, Input, or Turn, or reads an idempotency mapping.
-An out-of-grant Project returns `403 forbidden` even when that Project does not
-exist. Only after the grant passes can a missing or foreign resource return its
-resource-specific `404`. Failed authentication and authorization do not create
-or read request mappings, rejection records, execution records, outbox items,
-or public events.
+For a usable PAT, Mohist checks its route Scope and the selected Project grant
+before it looks up a Project, Agent, Job, Session, Input, or Turn, or reads an
+idempotency mapping.
 
 ## Web UI Uses a Revocable Session
 
@@ -175,12 +176,10 @@ external platform's own member and workspace policies.
 
 ## Capability Summary
 
-| Capability | Access |
-|---|---|
-| Operator | Reads, writes, and administration. |
-| Read-only | Product observation without modification. |
-| Runner | Work claim, heartbeat, result, artifact, and log reporting. |
-| Integration | One inbound integration within its Project boundary. |
+- **Operator:** Reads, writes, and administration.
+- **Read-only:** Product observation without modification.
+- **Runner:** Work claim, heartbeat, result, artifact, and log reporting.
+- **Integration:** One inbound integration within its Project boundary.
 
 Machine credentials have fixed capabilities and cannot expand themselves.
 Sensitive infrastructure remains operator-only even when an operation only
@@ -192,7 +191,7 @@ reads data.
 - A public developer platform or third-party application registration.
 - Single sign-on or enterprise identity federation.
 
-The explicit Project grant on an external Agent PAT is only a credential safety
+The explicit Project grant on an External Agent PAT is only a credential safety
 boundary. It does not introduce any of these broader identity models.
 
 The single-administrator model, local bootstrap, authenticated Web UI, remote

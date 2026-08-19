@@ -28,14 +28,18 @@ across Runtime loss.
 
 ## Ownership and Call Paths
 
-| Concept | Owner | Authoritative decisions |
-|---|---|---|
-| Mohist Agent | Agent context | identity, Instructions, execution configuration, Skills, archival |
-| TaskRun | Workflow context | Workflow task lifecycle, result, retry, recovery, advancement |
-| AgentJob | Agent context | lifecycle and result of one Agent work item |
-| AgentSession | Session context | Input order, Turns, Transcript, Activity, context, usage, current Binding |
-| Runtime Session | external Runtime | physical provider Session and execution facts |
-| Runtime adapter | Runner process | provider protocol, process resources, event reconciliation, error classification |
+- Mohist Agent is owned by the Agent context, which decides identity, Instructions, execution
+  configuration, Skills, and archival.
+- TaskRun is owned by the Workflow context, which decides Workflow task lifecycle, result, retry,
+  recovery, and advancement.
+- AgentJob is owned by the Agent context, which decides the lifecycle and result of one Agent work
+  item.
+- AgentSession is owned by the Session context, which decides Input order, Turns, Transcript,
+  Activity, context, usage, and current Binding.
+- Runtime Session is owned by the external Runtime, which decides the physical provider Session
+  and execution facts.
+- Runtime adapter is owned by the Runner process, which decides provider protocol, process
+  resources, event reconciliation, and error classification.
 
 There are two work-owner paths:
 
@@ -176,14 +180,18 @@ Durable identity is fixed at ingress before any external effect. Trusted callers
 canonical command identity directly; an external adapter durably maps its caller-held public key
 to that identity before invoking the command.
 
-| Intent | Ingress replay identity | Durable operation identity |
-|---|---|---|
-| Launch | caller `launchRequestId` | Server creates and durably maps one `launchOperationId` |
-| Follow-up with new Turn | caller `requestId` | the same request map identity |
-| Steer | caller `requestId` | the same `SessionOperationRead.operationId` |
-| Compact, Reset, recovery, rebind, handoff, force-reset | caller `operationId` | the same operation ID |
-| Direct API Turn stop | caller `Idempotency-Key` | adapter maps one private operation ID for the frozen Turn |
-| Cascade stop | root Session plus caller `Idempotency-Key` | Server derives the tree operation and stable per-target operation IDs |
+- Launch: the caller supplies `launchRequestId`; the Server creates and durably maps one
+  `launchOperationId`.
+- Follow-up with a new Turn: the caller supplies `requestId`, and the same request map identity is
+  the durable operation identity.
+- Steer: the caller supplies `requestId`, and the same `SessionOperationRead.operationId` is the
+  durable operation identity.
+- Compact, Reset, recovery, rebind, handoff, and force-reset: the caller supplies `operationId`,
+  which is the durable operation identity.
+- Direct API Turn stop: the caller supplies `Idempotency-Key`, and the adapter maps one private
+  operation ID for the frozen Turn.
+- Cascade stop: the caller supplies the root Session plus `Idempotency-Key`, and the Server
+  derives the tree operation and stable per-target operation IDs.
 
 The direct API mapping, authentication scope, and response contract are authoritative only in
 [`agent-api.md`](agent-api.md). The private operation ID is never serialized externally; replay or
@@ -208,11 +216,12 @@ operation projection and kind-specific rules are in
 
 AgentSession has only these Activity states:
 
-| Value | Meaning |
-|---|---|
-| `idle` | No current-generation Turn or operation is nonterminal or uncertain. This is the only safe idle state. |
-| `active` | A Turn is queued, running, or `outcome_pending`, or a known Session operation is progressing. |
-| `unknown` | Input acceptance, a Turn result, a Runtime effect, Binding, or an operation cannot be confirmed. |
+- `idle`: no current-generation Turn or operation is nonterminal or uncertain. This is the only
+  safe idle state.
+- `active`: a Turn is queued, running, or `outcome_pending`, or a known Session operation is
+  progressing.
+- `unknown`: Input acceptance, a Turn result, a Runtime effect, Binding, or an operation cannot be
+  confirmed.
 
 ```text diagram
 idle -- accepted Input ----------------------------> active
@@ -273,14 +282,15 @@ Activity from historical completion, failure, or stop facts.
 
 ## Follow-up and Stop
 
-Follow-up has two semantic paths:
+Follow-up has two semantic paths, `new-turn` and `steer`, chosen by current state:
 
-| Current state | Accepted relation | Result |
-|---|---|---|
-| idle, admission ready | `new-turn` | create one Input and one new Turn |
-| running, steer supported, no competing operation | `steer` | create one Input attached to the current Turn |
-| running, steer unsupported | `new-turn` | queue a later Turn in Session order if capacity permits |
-| `outcome_pending`, `unknown`, or context operation active | none | reject without guessing a target Turn |
+- When the Session is idle and admission is ready, `new-turn` creates one Input and one new Turn.
+- When the Session is running, steer is supported, and no operation competes, `steer` creates one
+  Input attached to the current Turn.
+- When the Session is running and steer is unsupported, `new-turn` queues a later Turn in Session
+  order if capacity permits.
+- When a Turn is `outcome_pending` or `unknown`, or a context operation is active, no relation is
+  accepted; the request is rejected without guessing a target Turn.
 
 The Session request map is unique by `(SessionId, requestId)`. Acceptance, a durable rejection
 tombstone, or an uncertain result is persisted under that identity. Same-key replay reads the
@@ -428,46 +438,41 @@ original operation active or block a later safe binding operation.
 
 ### Operation boundaries
 
-| Operation | Automatic replacement after confirmed missing | Reason |
-|---|---:|---|
-| Initial TaskRun or AgentJob Input not yet submitted | Yes | It can continue in a known empty context without replaying an effect |
-| Idle Follow-up | Yes | It starts a new execution through the same acceptance identity |
-| Follow-up during execution | No | Replacement would change the physical target of that Input |
-| Compact | No | A missing context cannot be compacted |
-| Stop target | No | A replacement is not the original execution target |
-| Ordinary Reset | No | Reset requires safe admission; unknown requires explicit force-reset |
+Automatic replacement after confirmed missing is allowed only for an initial TaskRun or AgentJob
+Input not yet submitted, because it can continue in a known empty context without replaying an
+effect, and for an idle Follow-up, because it starts a new execution through the same acceptance
+identity. It is rejected for a Follow-up during execution, because replacement would change the
+physical target of that Input; for Compact, because a missing context cannot be compacted; for a
+Stop target, because a replacement is not the original execution target; and for an ordinary
+Reset, because Reset requires safe admission and `unknown` requires explicit force-reset.
 
 Recovery never reconstructs Runtime context from Transcript. Transcript is an audit and
 presentation record, not a command source.
 
 ## Context Operations
 
-| Kind | Binding effect | Context effect | Key safety rule |
-|---|---|---|---|
-| `compact` | keep Binding | keep generation | unknown result stays on the same operation; do not compact a missing context |
-| `reset` | replace on same Runner/runtime | increment generation | requires idle, ready admission |
-| `recovery` | replace confirmed-missing Session on same Runner/runtime | increment generation | deterministic missing evidence only |
-| `rebind` | replace on same Runner; runtime may change | increment generation | explicit request; never inferred from reconnect |
-| `handoff` | replace on an explicit different Runner | increment generation | only this operation may change `runnerId` |
-| `force-reset` | replace after explicit risk acknowledgement | increment generation | preserves and supersedes old unknown facts |
-| per-target `stop` | keep Binding | keep generation | derived by cascade or direct API mapping; acts only on frozen Turn/Binding |
+- `compact` keeps the Binding and the generation. An unknown result stays on the same operation;
+  a missing context must not be compacted.
+- `reset` replaces the Binding on the same Runner/runtime and increments the generation. It
+  requires idle, ready admission.
+- `recovery` replaces a confirmed-missing Session on the same Runner/runtime and increments the
+  generation. It requires deterministic missing evidence only.
+- `rebind` replaces the Binding on the same Runner and may change the runtime; it increments the
+  generation. It is an explicit request and is never inferred from a reconnect.
+- `handoff` replaces the Binding on an explicit different Runner and increments the generation. It
+  is the only operation that may change `runnerId`.
+- `force-reset` replaces the Binding after explicit risk acknowledgement and increments the
+  generation. It preserves and supersedes old unknown facts.
+- per-target `stop` keeps the Binding and the generation. Its identity is derived by cascade or
+  direct API mapping, and it acts only on the frozen Turn/Binding.
 
 Each context operation has one stable canonical operation ID and request fingerprint before any
 effect. Internal callers supply that ID, cascade derives its per-target IDs, and the direct API
 durably maps its public key. Replay first returns the stored operation. A different intent cannot
 join or overwrite another active operation.
 
-Binding-changing operations follow one semantic order:
-
-1. Persist operation identity, fingerprint, expected revision/generation/Binding, owner lease,
-   target, stable candidate key, and deadline before any external effect.
-2. Create or query only that candidate identity under the complete fence.
-3. Record a validated complete candidate before attempting CAS.
-4. Atomically change expected Binding to candidate and persist the post-CAS fence and Context
-   boundary.
-5. Use only the post-CAS fence for later input, result, completion, or cleanup decisions.
-
-The detailed field set, null rules, comparison predicate, and CAS algorithm are defined once in
+The semantic order, detailed field set, null rules, comparison predicate, and CAS algorithm for
+Binding-changing operations are defined once in
 [`conventions.md`](conventions.md). This document does not restate their storage procedure.
 
 Compact follows the same before/after effect fence but performs no Binding CAS. Success records a
@@ -528,22 +533,6 @@ Session summaries, and unified Session summaries expose only the Issue, Epic, re
 named Workspace. CLI tables and Web types consume those same read models and therefore cannot
 reconstruct or display the materialization path.
 
-## Verification Boundaries
-
-Tests must prove the contracts at deterministic seams without real Runtime, network, process,
-filesystem Session, or wall clock:
-
-- duplicate launch and Follow-up identities converge without duplicate Job, Session, Input, Turn,
-  dispatch, or Runtime effect;
-- work lifecycle and Session Activity never overwrite each other;
-- `outcome_pending` and `unknown` never appear as idle or terminal success;
-- stale owner, revision, Binding, Turn, and candidate facts fail closed before and after effects;
-- response loss queries the same operation/candidate identity before any bounded retry;
-- Binding replacement atomically advances epoch/generation and keeps Transcript and Session ID;
-- cleanup cannot discard an adopted/current candidate;
-- cascade stop acts only on frozen targets and never follows later Turns or Bindings;
-- force-reset preserves old unknown facts and exposes the supersession mapping.
-
 ## Status
 
 Stable AgentSession identity, Input and Turn records, Activity and unknown handling, launch and
@@ -572,8 +561,6 @@ model yet.
   reply arbitration are implemented twice (request path and recovery path) with divergent
   unconfirmed-result behavior; recovery redelivery has no deadline. The one-way, single-owner,
   deadline-bounded rules are the target.
-- `IAgentJobGrain.ReconcileRunningAsync` is a public reconcile entry that was never wired: it is a
-  default no-op with no caller. Removing it is the target.
 
 Every Follow-up requires a non-empty caller `requestId`. Compact, Reset, recovery, handoff, rebind,
 and force-reset require a caller `operationId`; steer reuses its Follow-up `requestId`. Some current

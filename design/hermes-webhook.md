@@ -85,19 +85,21 @@ window, but does not replay notifications missed during the old one.
 
 ## Boundary Contract
 
-| Owner | Owns | Must not own |
-|---|---|---|
-| Mohist Server | Event selection, enabled notification types, Issue context, rendered `body`, suggested action, and Web Inbox history | Chat credentials, chat delivery state, or platform retry policy |
-| Hermes | Subscription authentication, destination selection, and chat-platform delivery | Issue or Workflow arbitration, message semantics, or a second copy of Mohist state |
-| Chat platform | Provider acceptance, rate limits, and reply-window rules | Mohist retry, completion, or Approval decisions |
+Mohist Server owns event selection, enabled notification types, Issue context,
+the rendered `body`, the suggested action, and Web Inbox history. It must not
+own chat credentials, chat delivery state, or platform retry policy. Hermes
+owns subscription authentication, destination selection, and chat-platform
+delivery. It must not own Issue or Workflow arbitration, message semantics, or
+a second copy of Mohist state. The chat platform owns provider acceptance, rate
+limits, and reply-window rules. It must not own Mohist retry, completion, or
+Approval decisions.
 
-The minimum Mohist configuration contract is:
-
-| Setting | Contract |
-|---|---|
-| `WebhookUrl` | Target Hermes subscription endpoint. Missing or empty disables Hermes delivery. |
-| `Secret` | Optional subscription-level secret used to sign the exact request body. It is never the Hermes platform-level secret. |
-| `EnabledTypes` | Allowlist of `notificationType` values. Events outside the list produce no request. |
+The minimum Mohist configuration contract has three settings. `WebhookUrl` is
+the target Hermes subscription endpoint; missing or empty disables Hermes
+delivery. `Secret` is the optional subscription-level secret used to sign the
+exact request body; it is never the Hermes platform-level secret.
+`EnabledTypes` is an allowlist of `notificationType` values; events outside the
+list produce no request.
 
 The Hermes subscription must accept the request contract below, deliver the
 rendered `body` without an Agent loop, and select an explicit destination when a
@@ -108,15 +110,16 @@ locations, service reloads, and end-to-end checks belong in
 ## Event Types
 
 `notificationType` is the compact subscription and template value.
-`eventType` preserves the triggering Mohist event for traceability.
+`eventType` preserves the triggering Mohist event for traceability. Five pairs
+exist:
 
-| `notificationType` | `eventType` | Enabled by default |
-|---|---|---:|
-| `approval_requested` | `com.mohist.workflow.stage.approval-requested` | Yes |
-| `workflow_failed` | `com.mohist.workflow.run.failed` | Yes |
-| `issue_completed` | `com.mohist.issue.completed` | Yes |
-| `issue_started` | `com.mohist.issue.work-started` | No |
-| `agent_response_failed` | `com.mohist.agent.job.failed` | Yes |
+- `approval_requested` for `com.mohist.workflow.stage.approval-requested`
+- `workflow_failed` for `com.mohist.workflow.run.failed`
+- `issue_completed` for `com.mohist.issue.completed`
+- `issue_started` for `com.mohist.issue.work-started`
+- `agent_response_failed` for `com.mohist.agent.job.failed`
+
+All are enabled by default except `issue_started`.
 
 ## HTTP Request
 
@@ -154,19 +157,24 @@ internal state.
 }
 ```
 
-| Field | Contract |
-|---|---|
-| `notificationType` | One value from the event table and the value repeated in `X-Mohist-Event`. |
-| `eventType` | Full Mohist type of the source event. |
-| `sourceEventId` | Stable source-event identity for correlation; it is not a new webhook-attempt ID. |
-| `occurredAt` | Source-event occurrence time in ISO 8601 form. |
-| `projectId`, `issueNumber`, `issueTitle` | Required Issue identity and current title used to render the notification. |
-| `epicNumber` | Present only when the Issue currently belongs to an Epic. |
-| `workflowRunId` | Present when the source event identifies a WorkflowRun. |
-| `stage` | Present for an Approval-point notification. |
-| `failureReason` | Present for Workflow or Agent response failure when a short reason is available; never contains a stack trace. |
-| `suggestedAction` | Actionable text that always includes the Issue number. |
-| `body` | Complete user-facing message rendered by Mohist in its configured language. This is the default and recommended Hermes template input. |
+The payload fields are:
+
+- `notificationType`: one value from the event list above, repeated in
+  `X-Mohist-Event`.
+- `eventType`: the full Mohist type of the source event.
+- `sourceEventId`: the stable source-event identity for correlation; it is not
+  a new webhook-attempt ID.
+- `occurredAt`: the source-event occurrence time in ISO 8601 form.
+- `projectId`, `issueNumber`, `issueTitle`: the required Issue identity and
+  current title used to render the notification.
+- `epicNumber`: present only when the Issue currently belongs to an Epic.
+- `workflowRunId`: present when the source event identifies a WorkflowRun.
+- `stage`: present for an Approval-point notification.
+- `failureReason`: present for Workflow or Agent response failure when a short
+  reason is available; it never contains a stack trace.
+- `suggestedAction`: actionable text that always includes the Issue number.
+- `body`: the complete user-facing message rendered by Mohist in its configured
+  language. This is the default and recommended Hermes template input.
 
 Nullable fields are omitted rather than sent as JSON `null`.
 

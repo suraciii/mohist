@@ -22,24 +22,9 @@ lists, CLI lists, and a small number of aggregate reads. `IssueReadModel` from
 
 `IssueListItem` is the shared Server, Web, and CLI list contract. It contains
 only current state, actionability, and compact relationship summaries used by
-lists and boards:
-
-- `number`, `title`, `status`, `health`, `projectId`, and `projectName`.
-- `labels`, `priority`, `risk`, `createdAt`, `updatedAt`, `archivedAt`, and
-  `completedAt`.
-- `approvalState`, `blockedReason`, `workflowRunId`, `workflowStage`,
-  `workflowStatus`, `workflowStageProgress`, and `workflowProfileId`.
-- `prerequisiteNumbers`, `prerequisites`, `isDraft`, `canStart`, `canBeParent`,
-  and `blocker`.
-- `repositoryName`, `repository`, `repositoryProblem`, `primaryEpic`,
-  `parentIssueRef`, `childIssuesSummary`, and the existing compact `children`
-  references.
-
-The list contract excludes `body`, `comments`, `attachments`, `feedback`,
-`agentConfig`, `model`, `modelVariant`, `stageModels`, `stageModelVariants`, and
-configuration merged from each Issue's Variable layers. `workflowProfileId`
-identifies the currently effective Profile; it is not an expanded Variable
-result.
+lists and boards. It excludes the body, comments, attachments, feedback, Agent
+configuration, and configuration merged from each Issue's Variable layers;
+detail reads own those facts.
 
 An `IssueListItem` is identified by `(projectId, number)`. Existing Project,
 status, label, priority, repository, parent, and archived or all filters for
@@ -134,20 +119,6 @@ Project ID is ignored. An event with an Issue number invalidates only detail,
 Workflow, and artifact keys for `(projectId, issueNumber)`, never a broad key
 unrelated to the Issue number.
 
-- Issue create, archive, cancel, reopen, start, complete, draft, label,
-  priority, prerequisite, Workflow Profile, repository, Epic, parent, and
-  composite-state changes invalidate the Project's active list. Create, parent,
-  and candidate-eligibility changes also invalidate `issue-candidates`. A
-  parent change precisely invalidates previous and current parent detail; other
-  events invalidate only the event Issue's detail and affected relationships.
-- Workflow Run, Stage, Approval, and Task events invalidate the event Issue's
-  detail and Workflow plus the Project's active list. An artifact event
-  invalidates only its artifact and Workflow resources.
-- AgentSession events invalidate only corresponding Session, Workflow, detail,
-  and existing Agent activity or status resources.
-- An Inbox hint invalidates only `inbox-list` and `inbox-count` for the current
-  Project.
-
 Invalidating an inactive list marks it stale without forcing a network request.
 Detail keys match the Issue number exactly. An event for Issue #474 therefore
 does not request Issue #473, and an unrelated event burst that does not change
@@ -168,10 +139,10 @@ Static-file cache boundaries are:
 - `/api/*` and `/otel/v1/*` do not enter the SPA fallback, and unknown paths
   return 404.
 
-Build checks enforce fingerprinted assets, no source maps, independent route
-chunks, and compressed size budgets. Static-serving checks protect cache headers,
-HTML fallback, and API 404 behavior. These are observable transfer contracts,
-not a required bundler implementation.
+Fingerprinted assets, no source maps, independent route chunks, and compressed
+size budgets are observable transfer contracts, as are cache headers, HTML
+fallback, and API 404 behavior. They do not require a specific bundler
+implementation.
 
 ## Examples
 
@@ -191,13 +162,6 @@ can mark only detail and Workflow keys for `474`, plus an active list explicitly
 required by that event. It cannot match the detail key for `473`. An event with
 the same Issue number in another Project touches no Issue key in the current
 Project.
-
-### Closed Dialog
-
-On the first shell render with `createIssueOpen = false`, the Network view has
-no `GET /issues` or `GET /parent-candidates`. Opening the dialog sends one
-`GET /parent-candidates`; every response object contains only `number` and
-`title`.
 
 ## Status
 

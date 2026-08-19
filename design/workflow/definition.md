@@ -63,6 +63,10 @@ and local `mo` validation run the same code.
 
 ### Parsing Is Validation
 
+Validation boundary: the Workflow Definition parser owns syntax and semantic validation — parsing
+is validation. The compiler lowers a validated definition to the semantic model; runtime tasks
+consume the compiled model and never revalidate.
+
 There is one Definition entry point: `Parse(yaml) -> Definition | Error[]`. Profile source first
 passes through the Profile parser and its restricted Agent Action materializer, then this entry
 point receives ordinary Definition YAML.
@@ -80,22 +84,29 @@ stages[1].tasks[0].recovery.handlers[0]: handler must declare tasks or retrySelf
 
 ### Validation Rules
 
-| Location | Rule |
-|---|---|
-| top level | Only `approval`, `stages`, and `recoveries` are allowed; `stages` must not be empty |
-| approval.feedback | Optional; when present, `tasks` must not be empty and every item follows the task rules |
-| stage | `stage` name must not be empty and must be unique within the Definition; `tasks` must not be empty |
-| stage | `lockBehavior` only accepts `sequential` and must appear with non-empty `resources`; `resources` cannot appear alone |
-| task | `id` must not be empty and must be unique within its task list; `uses` is required; `title` is optional |
-| expect | `files[].path` must not be empty; `markers[].oneOf` must not be empty; `failIf` must be a member of `oneOf` |
-| artifacts | `files[].path` must not be empty |
-| setVars | key must not be empty; value must be an output field path beginning with `output.` |
-| recovery | `budget` must be a non-negative integer; `handlers` must be non-empty and ordered |
-| handler | Optional `when` has the form `field=value`, with both sides non-empty; an omitted `when` denotes the only default handler and it must be last; at least one of `tasks` or `retrySelf` is required |
-| check | `id` must not be empty and must be unique within the stage; `uses` is required |
-| template | Every `${{ }}` must parse; the root namespace must appear in the product reference table; `failure.*` is allowed only in recovery handler tasks |
-| template | An ID referenced by `tasks.<id>` must be declared in the Definition |
-| with | Omitted or a JSON object; the Definition validator does not interpret internal keys and only recursively validates template expressions in values |
+- Top level: only `approval`, `stages`, and `recoveries` are allowed; `stages` must not be empty.
+- `approval.feedback` is optional; when present, `tasks` must not be empty and every item follows
+  the task rules.
+- A `stage` name must not be empty and must be unique within the Definition; `tasks` must not be
+  empty. `lockBehavior` only accepts `sequential` and must appear with non-empty `resources`;
+  `resources` cannot appear alone.
+- A task `id` must not be empty and must be unique within its task list; `uses` is required;
+  `title` is optional.
+- `expect`: `files[].path` must not be empty; `markers[].oneOf` must not be empty; `failIf` must be
+  a member of `oneOf`.
+- `artifacts`: `files[].path` must not be empty.
+- `setVars`: the key must not be empty; the value must be an output field path beginning with
+  `output.`.
+- `recovery`: `budget` must be a non-negative integer; `handlers` must be non-empty and ordered.
+- A handler's optional `when` has the form `field=value`, with both sides non-empty; an omitted
+  `when` denotes the only default handler and it must be last; at least one of `tasks` or
+  `retrySelf` is required.
+- A check `id` must not be empty and must be unique within the stage; `uses` is required.
+- Every `${{ }}` template must parse; the root namespace must appear in the product reference;
+  `failure.*` is allowed only in recovery handler tasks. An ID referenced by `tasks.<id>` must be
+  declared in the Definition.
+- `with` is omitted or a JSON object; the Definition validator does not interpret internal keys and
+  only recursively validates template expressions in values.
 
 Profile validation additionally requires `${{ profile.agentAction }}` to occupy an entire `uses`
 scalar, a matching non-empty `agentAction` default, and one bound inline Agent Action across Stage,
@@ -176,14 +187,13 @@ that the selected Action and its inputs are available in the current Project.
 
 ## Implementation Semantics Index
 
-| Construct | Authoritative implementation semantics |
-|---|---|
-| expansion timing and dispatch input for `with` / `expect` | [`task-dispatch.md`](task-dispatch.md) |
-| execution ownership for `expect` / `artifacts` / `setVars` / `error` | [`actions.md`](actions.md) |
-| recovery matching, `recoveryRemaining` budget flow, and manual retry reconstruction | [`recovery.md`](recovery.md) |
-| merge algorithm and write API for `vars.*` | [`variables.md`](variables.md) |
-| Profile resources, live Definition parsing, and APIs | [`profile.md`](profile.md) |
-| built-in Profile tradeoffs and invariants | [`builtin-workflows.md`](builtin-workflows.md) |
+- Expansion timing and dispatch input for `with` / `expect`: [`task-dispatch.md`](task-dispatch.md).
+- Execution ownership for `expect` / `artifacts` / `setVars` / `error`: [`actions.md`](actions.md).
+- Recovery matching, `recoveryRemaining` budget flow, and manual retry reconstruction:
+  [`recovery.md`](recovery.md).
+- Merge algorithm and write API for `vars.*`: [`variables.md`](variables.md).
+- Profile resources, live Definition parsing, and APIs: [`profile.md`](profile.md).
+- Built-in Profile tradeoffs and invariants: [`builtin-workflows.md`](builtin-workflows.md).
 
 ## Status
 

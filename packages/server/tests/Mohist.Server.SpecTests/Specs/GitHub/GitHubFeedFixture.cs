@@ -15,7 +15,7 @@ namespace Mohist.Server.SpecTests.Specs.GitHub;
 /// <summary>
 /// Recording fake for the minimal GitHub comment port. Deterministic seam:
 /// production <see cref="GitHubCommentPort"/> (real HTTP) is never
-/// resolvable in specs (design/testing.md hard constraint 1).
+/// resolvable in specs (design/testing.md "No External Environment").
 /// </summary>
 public sealed class RecordingGitHubCommentPort : IGitHubCommentPort
 {

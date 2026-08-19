@@ -1,10 +1,10 @@
 # Agentic Testing
 
-Container-isolated end-to-end tests for mohist.
+Container-isolated end-to-end tests for Mohist.
 
 ## Structure
 
-```
+```text literal
 test/agentic/
 ├── README.md
 ├── AGENTS.md
@@ -19,33 +19,44 @@ test/agentic/
 
 ## TESTPLAN.md Convention
 
-TESTPLAN.md 是 **agent 阅读并执行的测试计划**。
+`TESTPLAN.md` is the test plan that an Agent reads and executes.
 
-- 以自然语言描述每个 Phase 的步骤和预期结果
-- Agent 自行执行简单命令（`curl`、API calls、`which` 等）
-- 只在需要复杂确定性操作时，用 `@scripts/<name>.sh` 调用辅助脚本
+- Describe each phase's steps and expected results in natural language.
+- The Agent runs simple commands itself (`curl`, API calls, `which`, and so on).
+- Call a helper script with `@scripts/<name>.sh` only for complex operations
+  that must be deterministic.
 
 Example:
+
 ```markdown
 ## Phase 5: Data Persistence
 
-1. 记录当前 issue 数量
+1. Record the current Issue count.
 2. @scripts/restart-server.sh
-3. 验证数据完整
+3. Verify that the data is intact.
 ```
 
 ## scripts/ Convention
 
-每个脚本只做 **一件事**，命名自解释：
+Each script does exactly one thing, and its name states what it does:
 
 ```bash
-scripts/restart-server.sh   # 停止 Mohist.Server，重启，等待健康检查通过
+scripts/restart-server.sh   # Stops Mohist.Server, restarts it, and waits for the health check to pass.
 ```
 
-脚本应幂等、有明确退出码（0=成功，1=失败）、输出简明状态信息。
+Scripts are idempotent, exit with a clear code (0 = success, 1 = failure), and
+print concise status output.
+
+## Container Environment
+
+- User: `motest`
+- Workspace: `/app/workspace/`
+- Data: `/home/motest/.mohist/`
+- Mohist source: `/opt/mohist-src` (built)
+- Server: `localhost:3456`, started by the entrypoint
 
 ## Creating a New Test
 
-手动创建 `test/agentic/verify-<feature>/scripts`，写 `TESTPLAN.md` 和脚本。
-
-旧 CLI 时代的 `/test-create` 和 `/test-run` 命令已移除；新的 agentic 测试应直接面向 ASP.NET Core server、TypeScript runner 和 HTTP API。
+Create `test/agentic/verify-<feature>/` by hand: write `TESTPLAN.md` and any
+helper scripts under `scripts/`. Tests target the ASP.NET Core Server, the
+TypeScript Runner, and the HTTP API directly.

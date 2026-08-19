@@ -35,12 +35,15 @@ execution mechanism.
   rather than freezing values resolved by the triggering attempt into the retry.
 - A new attempt expands its declaration against its own context snapshot.
 
-| Layer | Responsibility |
-|---|---|
-| Workflow YAML | Declares `budget` and `handlers`, with optional `when`, `tasks`, and `retrySelf` |
-| Action | Returns output or an error and has no recovery awareness |
-| Runner executor | Matches explicit `when` first, then the default handler when an error exists; maps explicit `null` to the full `budget`, clamps a numeric value to the declared range, and builds `addTasks` from the original declaration |
-| Engine | Mechanically inserts `addTasks`, passes `recoveryRemaining` as opaque per-attempt state, and reconstructs a manual retry only from definitional fields |
+The responsibility split is:
+
+- Workflow YAML declares `budget` and `handlers`, with optional `when`, `tasks`, and `retrySelf`.
+- The Action returns output or an error and has no recovery awareness.
+- The Runner executor matches explicit `when` first, then the default handler when an error exists;
+  maps explicit `null` to the full `budget`, clamps a numeric value to the declared range, and
+  builds `addTasks` from the original declaration.
+- The engine mechanically inserts `addTasks`, passes `recoveryRemaining` as opaque per-attempt
+  state, and reconstructs a manual retry only from definitional fields.
 
 ## Remaining Budget (`recoveryRemaining`)
 
@@ -110,28 +113,19 @@ Session arbitrates and persists the binding, and Workflow interprets only the fi
 
 ## Runner Executor Flow
 
-```text literal
-result = action.execute()
-context = { output: parseJSON(result.output), error: result.error }
-if recoveryRemaining is absent:
-    return ordinary result
-remaining = recoveryRemaining is null
-    ? recovery.budget
-    : clamp(recoveryRemaining, 0, recovery.budget)
-handler = recovery.handlers.find(h => h.when && matchesWhen(h.when, context))
-    ?? (result.error ? recovery.handlers.find(h => h.when is absent) : null)
+The Runner executor applies these rules in order:
 
-if handler && remaining > 0:
-    handlerTasks = bindFailureReferences(handler.tasks, context)
-    selfRetry = copyOriginalDeclaration(work)
-    addTasks = handlerTasks with their own full recoveryRemaining
-        + (retrySelf ? selfRetry with recoveryRemaining = remaining - 1 : [])
-    return completed + addTasks
-
-if result.error is absent:
-    return completed
-return failed
-```
+1. Build the result context `{ output, error }` from the Action result.
+2. An absent `recoveryRemaining` returns the ordinary result.
+3. Otherwise compute the remaining budget: explicit `null` receives the full declared `budget`,
+   and a numeric value clamps to the declared range.
+4. Match the first explicit `when` handler against the context; when none matches and an error
+   exists, match the default handler without `when`.
+5. When a handler matches and budget remains, bind `${{ failure.* }}` references in its tasks,
+   copy the original declaration for `retrySelf`, and return completed with `addTasks`. Handler
+   tasks receive their own full `recoveryRemaining`; the retry copy receives the remaining budget
+   minus one.
+6. Without a matched handler, the result stands: completed when no error exists, failed otherwise.
 
 At most one default handler exists and it must be last, so it cannot shadow an explicit match. It
 matches after the executor has formed the final failed result, which lets the same recovery path
@@ -159,21 +153,9 @@ recovery task. A handler must not branch on the message.
 - `completed` without `addTasks`: normal completion.
 - `failed`: Workflow fails.
 
-## Engine Behavior
-
-```text diagram
-result.completed
-  -> mark task completed
-  -> addTasks non-empty? -> AddRuntimeTaskAttempts
-  -> Advance
-
-result.failed
-  -> mark task failed -> Stage failed -> Workflow failed
-```
-
 ## Status
 
-Implemented in issue #465: both `retrySelf` and manual retry reconstruct the original declaration.
+Implemented: both `retrySelf` and manual retry reconstruct the original declaration.
 `with` and `expect` retain Workflow expressions, a new attempt expands them against its own context
 snapshot, and `recoveryRemaining` is separate execution state that cannot enter reconstruction by
 construction.

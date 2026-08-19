@@ -16,49 +16,6 @@ for the complete expression and Variable rules.
 
 Creates or updates a GitHub Pull Request for the current branch.
 
-### Inputs
-
-| Field | Required | Default | Meaning |
-|---|---:|---|---|
-| `repositoryUrl` | Yes | - | Git repository URL that identifies the GitHub repository. The value is text. |
-| `source` | Yes | - | Source branch. The value is text. |
-| `target` | Yes | - | Target branch. The value is text. |
-| `draft` | No | `true` | Whether to open the Pull Request as a draft. The value is Boolean. |
-| `title` | No | - | Explicit Pull Request title. The value is text. |
-| `message` | No | - | Alias for `title`. The value is text. |
-| `titleFrom` | No | `issue.title` | Issue field used as the Pull Request title. The value is text. |
-| `body` | No | - | Explicit Pull Request body. The value is text. |
-| `bodyFrom` | No | `issue.body` | Issue field used as the Pull Request body. The value is text. |
-
-### Outputs
-
-| Field | Meaning |
-|---|---|
-| `kind` | Output type identifier. |
-| `status` | Pull Request status identifier. |
-| `source` | Source branch. |
-| `targetBranch` | Target branch. |
-| `branch` | Head branch name. |
-| `prNumber` | Pull Request number. |
-| `prUrl` | Pull Request URL. |
-| `operation` | Operation identifier: `created`, `updated`, or `reused`. |
-| `draft` | Whether the Pull Request is a draft. |
-| `output` | Aggregated `gh` output. |
-| `steps` | `gh` command results for each step. |
-
-### Business Error Codes
-
-| Error code | Meaning |
-|---|---|
-| `config-error` | GitHub configuration is missing or invalid. |
-| `protection-conflict` | Branch protection rejected the Pull Request. |
-| `base-moved` | The base branch moved and the Pull Request is stale. |
-| `pr-state-conflict` | An existing Pull Request is in a conflicting state. |
-| `retry-safe` | The Pull Request operation can be retried safely. |
-| `create-pr-failed` | Creating the Pull Request failed. |
-
-### Example
-
 ```yaml
 - id: open-draft-pr
   uses: mohist/create-github-pr
@@ -71,44 +28,49 @@ Creates or updates a GitHub Pull Request for the current branch.
     bodyFrom: issue.body
 ```
 
+Inputs:
+
+- `repositoryUrl` (required, text): Git repository URL that identifies the
+  GitHub repository.
+- `source` (required, text): source branch.
+- `target` (required, text): target branch.
+- `draft` (optional, Boolean, default `true`): whether to open the Pull
+  Request as a draft.
+- `title` (optional, text): explicit Pull Request title.
+- `message` (optional, text): alias for `title`.
+- `titleFrom` (optional, text, default `issue.title`): Issue field used as the
+  Pull Request title.
+- `body` (optional, text): explicit Pull Request body.
+- `bodyFrom` (optional, text, default `issue.body`): Issue field used as the
+  Pull Request body.
+
+Outputs:
+
+- `kind`: output type identifier.
+- `status`: Pull Request status identifier.
+- `source`: source branch.
+- `targetBranch`: target branch.
+- `branch`: head branch name.
+- `prNumber`: Pull Request number.
+- `prUrl`: Pull Request URL.
+- `operation`: operation identifier: `created`, `updated`, or `reused`.
+- `draft`: whether the Pull Request is a draft.
+- `output`: aggregated `gh` output.
+- `steps`: `gh` command results for each step.
+
+Business error codes:
+
+- `config-error`: GitHub configuration is missing or invalid.
+- `protection-conflict`: branch protection rejected the Pull Request.
+- `base-moved`: the base branch moved and the Pull Request is stale.
+- `pr-state-conflict`: an existing Pull Request is in a conflicting state.
+- `retry-safe`: the Pull Request operation can be retried safely.
+- `create-pr-failed`: creating the Pull Request failed.
+
 ## `mohist/mark-github-pr-ready`
 
 Marks the specified GitHub Pull Request ready for review. The operation is
 idempotent when the Pull Request is already ready.
-
-### Inputs
-
-| Field | Required | Default | Meaning |
-|---|---:|---|---|
-| `repositoryUrl` | Yes | - | Git repository URL that identifies the GitHub repository. The value is text. |
-| `prNumber` | Yes | - | Pull Request number. The value is numeric. |
-
-### Outputs
-
-| Field | Meaning |
-|---|---|
-| `kind` | Output type identifier. |
-| `status` | Status identifier. |
-| `prNumber` | Pull Request number. |
-| `prUrl` | Pull Request URL. |
-| `state` | Pull Request state after the operation. |
-| `previousState` | Pull Request state before the operation. |
-| `transitioned` | Whether the ready-state transition occurred. |
-| `output` | Aggregated `gh` output. |
-| `steps` | `gh` command results for each step. |
-
-### Business Error Codes
-
-| Error code | Meaning |
-|---|---|
-| `config-error` | GitHub configuration is missing or invalid. |
-| `protection-conflict` | Branch protection rejected the state transition. |
-| `base-moved` | The base branch moved and the Pull Request is stale. |
-| `pr-state-conflict` | An existing Pull Request is in a conflicting state. |
-| `retry-safe` | The operation can be retried safely. |
-| `mark-ready-failed` | Marking the Pull Request ready failed. |
-
-### Example
 
 ```yaml
 - id: mark-pr-ready
@@ -118,47 +80,36 @@ idempotent when the Pull Request is already ready.
     prNumber: ${{ vars.github.pr.number }}
 ```
 
+Inputs:
+
+- `repositoryUrl` (required, text): Git repository URL that identifies the
+  GitHub repository.
+- `prNumber` (required, numeric): Pull Request number.
+
+Outputs:
+
+- `kind`: output type identifier.
+- `status`: status identifier.
+- `prNumber`: Pull Request number.
+- `prUrl`: Pull Request URL.
+- `state`: Pull Request state after the operation.
+- `previousState`: Pull Request state before the operation.
+- `transitioned`: whether the ready-state transition occurred.
+- `output`: aggregated `gh` output.
+- `steps`: `gh` command results for each step.
+
+Business error codes:
+
+- `config-error`: GitHub configuration is missing or invalid.
+- `protection-conflict`: branch protection rejected the state transition.
+- `base-moved`: the base branch moved and the Pull Request is stale.
+- `pr-state-conflict`: an existing Pull Request is in a conflicting state.
+- `retry-safe`: the operation can be retried safely.
+- `mark-ready-failed`: marking the Pull Request ready failed.
+
 ## `mohist/merge-github-pr`
 
 Squash-merges the specified GitHub Pull Request.
-
-### Inputs
-
-| Field | Required | Default | Meaning |
-|---|---:|---|---|
-| `repositoryUrl` | Yes | - | Git repository URL that identifies the GitHub repository. The value is text. |
-| `method` | No | `squash` | Merge method. Only `squash` is supported. The value is text. |
-| `prNumber` | Yes | - | Pull Request number. The value is numeric. |
-| `subject` | No | - | Explicit squash-commit subject. The value is text. |
-| `subjectFrom` | No | `issue.title` | Issue field used as the squash-commit subject. The value is text. |
-
-### Outputs
-
-| Field | Meaning |
-|---|---|
-| `kind` | Output type identifier. |
-| `status` | Merge status identifier. |
-| `prNumber` | Pull Request number. |
-| `prUrl` | Pull Request URL. |
-| `mergeCommitSha` | SHA of the squash-merge commit. |
-| `method` | Merge method that was used. |
-| `output` | Aggregated `gh` output. |
-| `steps` | `gh` command results for each step. |
-
-### Business Error Codes
-
-| Error code | Meaning |
-|---|---|
-| `base-moved` | The base branch moved and the Pull Request is stale. |
-| `retry-safe` | The merge operation can be retried safely. |
-| `config-error` | GitHub configuration is missing or invalid. |
-| `protection-conflict` | Branch protection rejected the merge. |
-| `pr-state-conflict` | An existing Pull Request is in a conflicting state. |
-| `pr-checks-unavailable` | Pull Request check status is unavailable. |
-| `pr-checks-failed` | Required Pull Request checks did not pass. |
-| `merge-failed` | Merging the Pull Request failed. |
-
-### Example
 
 ```yaml
 - id: merge-pr
@@ -170,40 +121,42 @@ Squash-merges the specified GitHub Pull Request.
     subjectFrom: issue.title
 ```
 
+Inputs:
+
+- `repositoryUrl` (required, text): Git repository URL that identifies the
+  GitHub repository.
+- `method` (optional, text, default `squash`): merge method. Only `squash` is
+  supported.
+- `prNumber` (required, numeric): Pull Request number.
+- `subject` (optional, text): explicit squash-commit subject.
+- `subjectFrom` (optional, text, default `issue.title`): Issue field used as
+  the squash-commit subject.
+
+Outputs:
+
+- `kind`: output type identifier.
+- `status`: merge status identifier.
+- `prNumber`: Pull Request number.
+- `prUrl`: Pull Request URL.
+- `mergeCommitSha`: SHA of the squash-merge commit.
+- `method`: merge method that was used.
+- `output`: aggregated `gh` output.
+- `steps`: `gh` command results for each step.
+
+Business error codes:
+
+- `base-moved`: the base branch moved and the Pull Request is stale.
+- `retry-safe`: the merge operation can be retried safely.
+- `config-error`: GitHub configuration is missing or invalid.
+- `protection-conflict`: branch protection rejected the merge.
+- `pr-state-conflict`: an existing Pull Request is in a conflicting state.
+- `pr-checks-unavailable`: Pull Request check status is unavailable.
+- `pr-checks-failed`: required Pull Request checks did not pass.
+- `merge-failed`: merging the Pull Request failed.
+
 ## `mohist/github-pr-status`
 
 Verifies that the specified GitHub Pull Request is in the expected state.
-
-### Inputs
-
-| Field | Required | Default | Meaning |
-|---|---:|---|---|
-| `repositoryUrl` | Yes | - | Git repository URL that identifies the GitHub repository. The value is text. |
-| `prNumber` | Yes | - | Pull Request number. The value is numeric. |
-| `expect` | No | `open,ready` | Comma-separated expected states: `open`, `ready`, or `merged`. The value is text. |
-
-### Outputs
-
-| Field | Meaning |
-|---|---|
-| `kind` | Output type identifier. |
-| `status` | Status identifier. |
-| `prNumber` | Pull Request number. |
-| `prUrl` | Pull Request URL. |
-| `prState` | Pull Request state. |
-| `isDraft` | Whether the Pull Request is a draft. |
-| `expectations` | Expected-state markers. |
-| `missing` | Expected-state markers that were not satisfied. |
-| `output` | Aggregated `gh` output. |
-| `steps` | `gh` command results for each step. |
-
-### Business Error Codes
-
-| Error code | Meaning |
-|---|---|
-| `pr-status-failed` | Pull Request state validation failed. |
-
-### Example
 
 ```yaml
 - id: verify-pr-status
@@ -214,39 +167,34 @@ Verifies that the specified GitHub Pull Request is in the expected state.
     expect: open,ready
 ```
 
+Inputs:
+
+- `repositoryUrl` (required, text): Git repository URL that identifies the
+  GitHub repository.
+- `prNumber` (required, numeric): Pull Request number.
+- `expect` (optional, text, default `open,ready`): comma-separated expected
+  states: `open`, `ready`, or `merged`.
+
+Outputs:
+
+- `kind`: output type identifier.
+- `status`: status identifier.
+- `prNumber`: Pull Request number.
+- `prUrl`: Pull Request URL.
+- `prState`: Pull Request state.
+- `isDraft`: whether the Pull Request is a draft.
+- `expectations`: expected-state markers.
+- `missing`: expected-state markers that were not satisfied.
+- `output`: aggregated `gh` output.
+- `steps`: `gh` command results for each step.
+
+Business error codes:
+
+- `pr-status-failed`: Pull Request state validation failed.
+
 ## `mohist/github-pr-checks`
 
 Waits for every check on the specified GitHub Pull Request to pass.
-
-### Inputs
-
-| Field | Required | Default | Meaning |
-|---|---:|---|---|
-| `repositoryUrl` | Yes | - | Git repository URL that identifies the GitHub repository. The value is text. |
-| `prNumber` | Yes | - | Pull Request number. The value is numeric. |
-
-### Outputs
-
-| Field | Meaning |
-|---|---|
-| `kind` | Output type identifier. |
-| `status` | Check status identifier. |
-| `prNumber` | Pull Request number. |
-| `pollIntervalMs` | Polling interval in milliseconds. |
-| `message` | User-facing check result. |
-| `output` | Aggregated `gh` output. |
-| `steps` | `gh` command results for each step. |
-
-### Business Error Codes
-
-| Error code | Meaning |
-|---|---|
-| `config-error` | GitHub configuration is missing or invalid. |
-| `pr-checks-unavailable` | Pull Request check status is unavailable. |
-| `pr-checks-failed` | Required Pull Request checks did not pass. |
-| `aborted` | Polling was cancelled. |
-
-### Example
 
 ```yaml
 - id: wait-for-pr-checks
@@ -255,3 +203,26 @@ Waits for every check on the specified GitHub Pull Request to pass.
     repositoryUrl: ${{ repository.gitUrl }}
     prNumber: ${{ vars.github.pr.number }}
 ```
+
+Inputs:
+
+- `repositoryUrl` (required, text): Git repository URL that identifies the
+  GitHub repository.
+- `prNumber` (required, numeric): Pull Request number.
+
+Outputs:
+
+- `kind`: output type identifier.
+- `status`: check status identifier.
+- `prNumber`: Pull Request number.
+- `pollIntervalMs`: polling interval in milliseconds.
+- `message`: user-facing check result.
+- `output`: aggregated `gh` output.
+- `steps`: `gh` command results for each step.
+
+Business error codes:
+
+- `config-error`: GitHub configuration is missing or invalid.
+- `pr-checks-unavailable`: Pull Request check status is unavailable.
+- `pr-checks-failed`: required Pull Request checks did not pass.
+- `aborted`: polling was cancelled.

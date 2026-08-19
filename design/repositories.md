@@ -73,14 +73,9 @@ remote, the lock cannot split one physical repository into two locks.
 
 ### Dispatch
 
-Each task dispatch constructs its Runtime context in this order:
-
-```text diagram
-WorkflowRun.(ProjectId, IssueNumber)
-  -> Issue.RepositoryName
-  -> Project.Repository
-  -> repository.{name, gitUrl, baseBranch}
-```
+Each task dispatch uses the WorkflowRun's Project and Issue references to read
+the Issue's Repository name, then resolves that name through the Project
+Repository collection.
 
 The resolved value belongs only to that dispatch. It is not a Run Variable and
 is not written back to WorkflowRun. There is no fallback to the Project
@@ -126,11 +121,12 @@ reclamation rules remain authoritative in
 
 ## Failure Semantics
 
-| Failure | Result |
-|---|---|
-| change Git URL / base branch while an unfinished Issue uses the Repository | reject the Project update and identify the blocking Issue |
-| dispatch cannot resolve the Issue's Repository | fail the task; retry after repairing the Project |
-| materialized checkout remote cannot be confirmed as the resolved Repository | fail preparation; do not fetch, push, or rebase |
+- Changing the Git URL or base branch while an unfinished Issue uses the
+  Repository is rejected and identifies the blocking Issue.
+- When dispatch cannot resolve the Issue's Repository, the task fails and may
+  retry after the Project is repaired.
+- When preparation cannot confirm that the materialized checkout belongs to the
+  resolved Repository, it fails before fetch, push, or rebase.
 
 ## Status
 

@@ -3,7 +3,7 @@
 A Skill is a reusable description of Agent capability. Mohist supports two
 forms of use:
 
-- A third-party external Agent installs Mohist Skills. In Slack, an IDE, or
+- A third-party External Agent installs Mohist Skills. In Slack, an IDE, or
   another Agent host, it identifies the scenario and uses `mo` to inspect state,
   delegate work, or perform an operation. Its conversation remains in its own
   host.
@@ -11,14 +11,14 @@ forms of use:
   whether Web, CLI, an Agent Connection, or an event starts the Agent. An entry
   point cannot add or remove capability for one launch.
 
-An external Agent is not a Mohist Agent. The first interacts with the user
+An External Agent is not a Mohist Agent. The first interacts with the user
 outside Mohist. The second is a stable Project resource executed by Mohist. A
-Slack Bot is not an external Agent either; it is a client identity representing
+Slack Bot is not an External Agent either; it is a client identity representing
 one Mohist Agent through an Agent Connection. A Workflow invokes an Inline
 Agent directly. See [Core Concepts](concepts.md) for all terms.
 
 Interactive work such as requirement discovery and product exploration can be
-performed by an external Agent through a Skill, or by a Mohist Agent configured
+performed by an External Agent through a Skill, or by a Mohist Agent configured
 with `mohist-explore` through Web or Slack. Exploration must produce a ready
 Issue that can enter a Workflow.
 
@@ -30,7 +30,7 @@ parts and does not reopen settled decisions.
 
 Users already have continuous conversation and work context in Slack, an IDE,
 or another environment. Mohist does not duplicate those environments. It
-exposes a Mohist Agent through Agent Connections and lets an external Agent use
+exposes a Mohist Agent through Agent Connections and lets an External Agent use
 Skills to call the execution surface. Exploration especially needs to be:
 
 - **Real-time:** The user speaks while the Agent reasons.
@@ -42,7 +42,7 @@ The daily interaction can remain external while Mohist executes the Agent:
 ```text diagram
 User + Slack Bot ---- Agent Connection ---- Mohist Agent + configured Skills
                                                   |
-User + external Agent ---- Mohist Skill + mo -----+
+User + External Agent ---- Mohist Skill + mo -----+
                                                   |
                                                   v
                               Issue / Workflow / AgentJob execution and record
@@ -55,7 +55,7 @@ User + external Agent ---- Mohist Skill + mo -----+
 ### `mohist`
 
 This Skill operates Mohist and dispatches to scenario-specific Skills. It lets
-an external Agent:
+an External Agent:
 
 - Create, inspect, start, and approve Issues, and advance Epics.
 - Summarize Project progress, pending decisions, blocks, and anomalies.
@@ -63,7 +63,7 @@ an external Agent:
 - Invoke the `mo` CLI.
 - Load the following specialized Skills for a matching scenario.
 
-Use it for daily inspection and operation from an external Agent, such as
+Use it for daily inspection and operation from an External Agent, such as
 asking which Issues are advancing correctly or delegating a requirement to
 Mohist.
 
@@ -99,10 +99,10 @@ prerequisites, and advances the autopilot lifecycle.
 mo skill install
 ```
 
-The command synchronizes Skill content into the external Agent configuration
+The command synchronizes Skill content into the External Agent configuration
 directory. See `mo skill install --help` for its location.
 
-After installation, an external Agent can load Skills through its normal
+After installation, an External Agent can load Skills through its normal
 mechanism:
 
 - OpenCode selects a Skill from its description.
@@ -128,13 +128,13 @@ refreshes it.
 
 Assume the user wants search in a task list but has not decided the details.
 
-1. **Talk to an external Agent in the current work environment.**
+1. **Talk to an External Agent in the current work environment.**
 
    ```text literal
    I want search in the task list. Help me explore the product behavior.
    ```
 
-2. **The external Agent loads `mohist-explore`.**
+2. **The External Agent loads `mohist-explore`.**
 
    It asks only unresolved questions, such as:
 
@@ -169,25 +169,25 @@ Assume the user wants search in a task list but has not decided the details.
 
    The Agent passes the exploration result as the body to `mo issue create`.
 
-5. **Ask the external Agent to start and track the Issue.**
+5. **Ask the External Agent to start and track the Issue.**
 
    ```text literal
    Start this Issue and tell me when I need to act.
    ```
 
-   The external Agent runs `mo issue start`, and the Workflow takes over. The
+   The External Agent runs `mo issue start`, and the Workflow takes over. The
    user remains in the existing environment. Open the Web UI only for complete
    state, detailed evidence, or manual intervention.
 
 ## Example: Is the Project Advancing?
 
-Ask directly in an external Agent:
+Ask directly in an External Agent:
 
 ```text literal
 @mohist Which Issues are advancing, and does any need attention?
 ```
 
-The external Agent uses the Mohist Skill to read Project, Issue, Workflow, and
+The External Agent uses the Mohist Skill to read Project, Issue, Workflow, and
 Runner state. It separates normal progress, waiting decisions, blocks, and
 anomalies, then returns a conclusion and concrete next actions. The user does
 not need to open the Web UI or combine several state fields manually.
@@ -230,15 +230,15 @@ Users can write their own Skills, for example:
 - A team code-review checklist.
 - An exploration process for a specific Issue type.
 
-A Skill is an ordinary file in an external Agent's Skill directory. Use the
+A Skill is an ordinary file in an External Agent's Skill directory. Use the
 output of `mo skill view mohist-explore` as a structural example.
 
-Distributing a custom Skill currently requires manual copying into the external
-Agent directory. Unified management through `mo skill` remains on the roadmap.
+Distributing a custom Skill currently requires manual copying into the
+External Agent directory.
 
 ## Status
 
-`mo skill install` and `mo skill view` serve external Agents. Mohist snapshots
+`mo skill install` and `mo skill view` serve External Agents. Mohist snapshots
 an Agent's configured Skills with its execution definition, and Runner injects
 that same set for a direct launch, Workflow task, or follow-up. CLI, Web, and
 Slack entry points therefore do not change the Agent's capabilities. Custom

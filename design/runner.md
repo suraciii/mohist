@@ -30,12 +30,11 @@ count(Running work assigned to Runner) <= slots, checked at claim time
 
 ## Runner Aggregate and Presence
 
-Fields are grouped by update lifecycle, never by who reports them:
-
-| Lifecycle | Trigger | Change | Invalidated |
-|---|---|---|---|
-| persistent | control plane | a few individual fields | never |
-| snapshot-replace | register / successful poll / unregister | replace as a whole | next successful poll |
+Fields are grouped by update lifecycle, never by who reports them. Persistent
+fields change only through the control plane, a few individual fields at a
+time, and are never invalidated. Snapshot fields are replaced as a whole on
+register, successful poll, or unregister, and the next successful poll
+invalidates them.
 
 ```text literal
 Runner
@@ -55,14 +54,11 @@ A Runner holds no work records. The two work types remain authoritative in
 their owners' stores: Workflow work in the run row model and AgentJob work in
 the AgentJob dispatch projection. Both can be queried directly as
 `Pending/Running WHERE AssignedRunnerId=R`. The slot invariant
-(`count(running) <= slots`) is checked against the store during claim and is not
-maintained here:
-
-| Test | Result |
-|---|---|
-| Protects an invariant owned by Runner itself? | no |
-| Cannot be derived from other aggregates? | it can be derived by querying both owner stores |
-| Required by a behavior signature? | no behavior accepts a work record |
+(`count(running) <= slots`) is checked against the store during claim and is
+not maintained here. Work records fail the ownership test on the Runner: the
+slot invariant is not owned by the Runner itself, the running-work set can be
+derived by querying both owner stores, and no Runner behavior accepts a work
+record.
 
 ### Behaviors
 
@@ -124,17 +120,16 @@ Runner process                   physical process
 
 ### Transport
 
-| Content | Transport |
-|---|---|
-| all work, both Workflow and AgentJob | pull-only; DispatchService computes on poll; reports go directly to the owner grain |
-| presence | poll is the heartbeat (`TouchPresence`) |
-| info | register / unregister / heartbeat-repair; never updated by poll |
+All work, both Workflow and AgentJob, is pull-only: DispatchService computes
+it on poll, and reports go directly to the owner grain. The poll is also the
+presence heartbeat (`TouchPresence`). Info travels only through register,
+unregister, and heartbeat-repair; a poll never updates it.
 
 ### Poll Computation
 
 ```text diagram
 Runner process                  DispatchService                    store / grains
-    | POST poll {inFlight, awaitingAck}                                  |
+    | POST poll {inFlight, awaitingAck, readiness}                       |
     |---------------------------->|                                      |
     |                             | 0 BeginPoll: capture slots + gate     |
     |                             | 1 TouchPresence (poll = heartbeat)    |
@@ -167,6 +162,47 @@ report as its acknowledgement, and discards the result.
 Race avoidance: the process adds received dispatches to inFlight synchronously
 before the next poll. A newly delivered dispatch can never be mistaken for lost
 work.
+
+### Runtime Readiness Witness
+
+Presence alone cannot prove that the runtime a pending work item needs is
+ready before the Server claims the item. The Runner therefore sends a runtime
+readiness witness in every poll. A witness is an ephemeral observation bound
+to the Runner connection and contains:
+
+- `runtime`: the canonical runtime id, for example `pi` or `opencode`;
+- `ready`: whether this runtime can accept new work now;
+- `generation`: a monotonically increasing runtime instance fence owned by
+  the Runner; and
+- `connectionGeneration`: the registration identity that produced the
+  observation.
+
+The Server treats a missing, malformed, stale, or `ready=false` witness as
+unknown for new claims. It never treats a runtime catalog as a readiness
+witness. The witness is not durable work state and cannot settle, replay, or
+replace a work result.
+
+For each pending candidate, DispatchService resolves the candidate's runtime
+without mutating its owner, applies the witness predicate, and only then calls
+the owner claim operation. Workflow runtime resolution is a read-only
+projection of the pending `WorkItem`; it must not call `ClaimNextAsync`
+merely to discover `uses`. AgentJob runtime resolution uses its persisted
+dispatch snapshot. If either projection is unavailable, the candidate remains
+pending for a later poll.
+
+Redelivery is separate from admission. Work already reported as `inFlight` or
+`awaitingAck` remains owned by that Runner and may be delayed while its
+runtime recovers. The Runner continues to poll, report, and acknowledge that
+held work; it must not acquire new work and hide it in an unbounded deferred
+queue.
+
+A witness is a claim-time admission fence, not a guarantee that an external
+runtime cannot fail immediately after the poll. If readiness changes after a
+successful claim, the claimed work follows the existing in-flight and
+result-uncertain protocol. A later connection or runtime generation cannot
+reuse an older witness. The Server must not infer readiness from a successful
+HTTP poll, presence, heartbeat, model catalog, runtime session file, or
+reconnect; these facts have different owners and lifecycles.
 
 ### Claim
 
@@ -257,13 +293,21 @@ whether normally or after a timeout, or RunnerGrain closeout.
 
 ## Supervision and Runner-Lost Closeout
 
-| Condition | Owner | Handling |
-|---|---|---|
-| poll transport unavailable | Runner process | bounded attempt, then retry in the same loop |
-| loop exits unexpectedly | Runner process | terminate process; service supervisor restarts it |
-| work hangs or escapes control | Runner process | progress-aware timeout, kill, report FAILED |
-| Runner disappears | RunnerGrain | poll freshness expires, mark offline, query both owner types for `Running assigned=me`, and report `FAILED("runner-lost")` for each |
-| work times out | no Server-side timer | reported in-flight work is alive; only the process judges progress. Owner timers, including AgentJob execution and dispatch timeouts, are decided by owner reminders and are unrelated to dispatch |
+Each failure condition has exactly one owner:
+
+- Poll transport unavailable: the Runner process makes a bounded attempt,
+  then retries in the same loop.
+- Loop exits unexpectedly: the Runner process terminates, and the service
+  supervisor restarts it.
+- Work hangs or escapes control: the Runner process applies a progress-aware
+  timeout, kills the work, and reports FAILED.
+- Runner disappears: RunnerGrain lets poll freshness expire, marks the Runner
+  offline, queries both owner types for `Running assigned=me`, and reports
+  `FAILED("runner-lost")` for each.
+- No Server-side timer times out work. Reported in-flight work is alive; only
+  the process judges progress. Owner timers, including AgentJob execution and
+  dispatch timeouts, are decided by owner reminders and are unrelated to
+  dispatch.
 
 Register establishes initial presence and persists the last registration
 profile. HTTP heartbeat refreshes presence even when the Runner process cannot
@@ -280,21 +324,29 @@ There is no `Interrupted` state.
 
 ### Failure Handling
 
-| Failure | Handling |
-|---|---|
-| poll transport fails | retry in the same Runner process; retain the reported set |
-| dispatch response is lost | next poll computes `desired - reported` and redelivers |
-| process restarts | an empty report causes full redelivery |
-| ordinary dispatch construction failure after claim | remain Running; retry every poll |
-| persisted WorkItem references a retired Action | reject that work by `workerId + workId`; owner marks it FAILED |
-| Runner rendering or manifest validation fails | attempt fails as `invalid-input`; do not redeliver |
-| report transport fails | retry awaitingAck; it remains reported and is never redelivered |
-| duplicate or late report | owner idempotently returns Stale |
-| work hangs | process timeout produces FAILED |
-| Runner is lost | closeout reports `FAILED("runner-lost")`; owner enters Failed |
-| Runner returns after closeout | report receives Stale; work is no longer desired and drains naturally |
-| run or job is stopped while work executes | do not cancel; report receives Stale |
-| AgentJob has no available Runner for too long | owner ReadySince timeout produces `FAILED(RunnerUnavailable)` |
+- Poll transport fails: retry in the same Runner process and retain the
+  reported set.
+- Dispatch response is lost: the next poll computes `desired - reported` and
+  redelivers.
+- Process restarts: an empty report causes full redelivery.
+- Ordinary dispatch construction failure after claim: the work remains
+  Running and retries every poll.
+- A persisted WorkItem references a retired Action: reject that work by
+  `workerId + workId`; the owner marks it FAILED.
+- Runner rendering or manifest validation fails: the attempt fails as
+  `invalid-input`; do not redeliver.
+- Report transport fails: retry awaitingAck; the report remains reported and
+  is never redelivered.
+- Duplicate or late report: the owner idempotently returns Stale.
+- Work hangs: the process timeout produces FAILED.
+- Runner is lost: closeout reports `FAILED("runner-lost")` and the owner
+  enters Failed.
+- Runner returns after closeout: its report receives Stale; the work is no
+  longer desired and drains naturally.
+- A run or job is stopped while work executes: do not cancel; the report
+  receives Stale.
+- An AgentJob has no available Runner for too long: the owner ReadySince
+  timeout produces `FAILED(RunnerUnavailable)`.
 
 ## Process Contract
 
@@ -322,6 +374,12 @@ Work lost with a Runner is reported to its owner as
 `FAILED("runner-lost")`. The owner decides what follows. There is no
 `Interrupted` state.
 
+When a Runtime Session quarantines or a Runner shuts down, the Runner drains
+in-flight work before it releases ownership. Two env-var budgets bound the
+drain: `QUARANTINE_DRAIN_TIMEOUT_MS` (default 60s) and
+`RUNTIME_SHUTDOWN_TIMEOUT_MS` (default 30s). Results produced during drain
+are journaled so a restart can settle them exactly once.
+
 ## Local Workspace Lifecycle
 
 The Server owns the logical Workspace and its lifecycle. The Runner owns only
@@ -344,13 +402,12 @@ checkout.
 The Runner records each materialization in a reconstructible
 `NamedWorkspaceRegistry`, keyed by `(ProjectId, WorkspaceName)`. The registry is
 a local maintenance index, not a second Workspace store. Every entry has one
-phase:
-
-| Phase | Meaning |
-|---|---|
-| `active` | Runner has not received a current Server grant for reclamation |
-| `eligible` | Server reports the Workspace archived or active with no active bound Session; disk policy may delete the materialization |
-| `stuck` | deletion safety checks rejected deterministically; retain the directory and index entry and do not retry automatic deletion |
+phase. `active` means the Runner has not received a current Server grant for
+reclamation. `eligible` means the Server reports the Workspace archived or
+active with no active bound Session, so disk policy may delete the
+materialization. `stuck` means deletion safety checks rejected
+deterministically; the Runner retains the directory and index entry and does
+not retry automatic deletion.
 
 The Runner periodically asks the Server whether each `active` entry is
 reclaimable. Transport failure or an unknown answer keeps it `active`. An
@@ -394,14 +451,33 @@ Each file is written atomically with a temporary file plus rename and loaded at
 startup. Corruption semantics differ based on whether lost state can be
 reconstructed:
 
-| File | Content | Corruption semantics |
-|---|---|---|
-| `runtime-events.json` | Runtime event outbox: Session events pending delivery to Server; snapshot written for each new fact | unreadable: mark outbox unhealthy and reload at local retry cadence; never overwrite the unreadable file. If retention is exceeded, discard reconstructible streaming increments first |
-| `followup-operations.json` | Follow-up operation idempotency log: operationId -> claimed / submitted; written on each transition | wrong version or shape: log unavailable and reject new operations (fail closed); missing file means a fresh start |
-| `session-commands.json` | Session command idempotency log: operationId -> started / completed plus result; same write behavior | same: corruption fails closed; missing file means a fresh start |
-| `cancel-operations.json` | Stop operation idempotency log: operationId -> claimed / completed plus verdict; same write behavior | unreadable: quarantine the file aside and restart empty; stop verdicts re-settle by identity, so the next redelivery rebuilds the lost record |
-| `named-workspaces.json` | current named Workspace materialization index: Project, Workspace name, path, phase, and materialization times | unreadable or corrupt: start with an empty index and rebuild on later materialization; Server remains the logical authority |
-| `workspaces.json` | legacy per-WorkflowRun materialization index used only by the fallback execution path | same fail-open behavior; remove with the fallback rather than treating it as a second identity model |
+- `runtime-events.json`: the Runtime event outbox — Session events pending
+  delivery to the Server, with a snapshot written for each new fact. If the
+  file is unreadable, the Runner marks the outbox unhealthy and reloads at a
+  local retry cadence; it never overwrites the unreadable file. When
+  retention is exceeded, the Runner discards reconstructible streaming
+  increments first.
+- `followup-operations.json`: the Follow-up operation idempotency log,
+  operationId -> claimed / submitted, written on each transition. A wrong
+  version or shape makes the log unavailable and rejects new operations
+  (fail closed); a missing file means a fresh start.
+- `session-commands.json`: the Session command idempotency log, operationId
+  -> started / completed plus result, with the same write behavior.
+  Corruption fails closed; a missing file means a fresh start.
+- `cancel-operations.json`: the stop operation idempotency log, operationId
+  -> claimed / completed plus verdict, with the same write behavior. If the
+  file is unreadable, the Runner quarantines it aside and restarts empty;
+  stop verdicts re-settle by identity, so the next redelivery rebuilds the
+  lost record.
+- `named-workspaces.json`: the current named Workspace materialization
+  index — Project, Workspace name, path, phase, and materialization times.
+  If the file is unreadable or corrupt, the Runner starts with an empty
+  index and rebuilds on later materialization; the Server remains the
+  logical authority.
+- `workspaces.json`: the legacy per-WorkflowRun materialization index used
+  only by the fallback execution path. It has the same fail-open behavior;
+  remove it with the fallback rather than treating it as a second identity
+  model.
 
 Idempotency logs fail closed because losing them can repeat effects. The stop
 journal is the exception: its effect is checkable by identity, so corruption
@@ -446,8 +522,7 @@ confirmed stop, maps target-resolution failures and absent live targets to
 not-cancellable, returns redelivery verdicts without recording them, and
 leaves a corrupt journal permanently unavailable. Under the certainty
 vocabulary these are fabricate and estimate defects
-([`conventions.md`](conventions.md#facts-claims-and-settlement)), tracked for
-removal.
+([`conventions.md`](conventions.md#facts-claims-and-settlement)).
 
 The per-WorkflowRun Workspace manager and `workspaces.json` registry remain an
 implementation gap for dispatches that still lack a named Workspace. New code

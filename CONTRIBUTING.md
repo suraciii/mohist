@@ -22,7 +22,7 @@ Thanks for your interest in mohist!
 
 ## Pull requests
 
-- Title uses Conventional Commits; after squash it becomes the commit on main.
+- Title uses Conventional Commits; after squash it becomes the commit on master.
 - Body states what and why, not how — the template has the required sections.
 - Include tests for new behavior; update docs when the change is user-facing.
 - State breaking changes and migration steps explicitly.
@@ -36,6 +36,29 @@ Read the writing rules before editing documents:
 [`design/README.md`](design/README.md) for design docs. Before requesting a
 review, re-read the code behind any fact you state, and check that every
 example runs and every link resolves.
+
+## Focused C# Tests
+
+C# test projects use Microsoft Testing Platform with xUnit v3. VSTest
+`--filter` does not select focused tests in these projects. Run the compiled
+apphost directly with `-class` or `-method`.
+
+Build the selected project once, list the target, and then run it:
+
+```bash
+dotnet build packages/cli/tests/Mohist.Cli.Tests/Mohist.Cli.Tests.csproj --no-restore
+packages/cli/tests/Mohist.Cli.Tests/bin/Debug/net11.0/Mohist.Cli.Tests \
+  -list classes -noColor -noLogo \
+  -class Mohist.Cli.Tests.Skills.SkillsContentTests
+packages/cli/tests/Mohist.Cli.Tests/bin/Debug/net11.0/Mohist.Cli.Tests \
+  -noColor -noLogo \
+  -class Mohist.Cli.Tests.Skills.SkillsContentTests
+```
+
+Confirm the apphost supports the selector with `--help`. In a new worktree, run
+`npm ci` first. If the selected project has no `obj/project.assets.json`, run an
+explicit `dotnet restore` before the `--no-restore` build. Focused runs are
+development evidence; `npm run verify` remains the final local gate.
 
 ## License
 

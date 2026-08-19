@@ -17,7 +17,7 @@ namespace Mohist.Server.SpecTests.Specs.Events.Subscriptions;
 /// <see cref="RoutingDispatchHandler"/> with a single CloudEvent
 /// envelope, and inspects the captured
 /// <see cref="RecordingAgentLauncher"/> log. No real network / grain /
-/// Orleans is touched (design/testing.md hard constraint 1).
+/// Orleans is touched (design/testing.md "No External Environment").
 ///
 /// Spec: <c>openspec/changes/issue-489/specs/issue-watch-dispatch/spec.md</c>.
 /// </summary>

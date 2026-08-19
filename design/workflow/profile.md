@@ -33,13 +33,12 @@ WorkflowRun: Profile identity and Agent Action are fixed; Definition resolves as
 
 The minimal `WorkflowProfile` model is:
 
-| Field | Meaning |
-|---|---|
-| `id` | Stable Profile identifier within a Project |
-| `name` | User-facing name |
-| `description` | Short description of the applicable scenario |
-| `agentAction` | Optional default concrete Action for `${{ profile.agentAction }}` references |
-| `definition` | Rules for Stages, initial tasks, checks, Approval, recovery that creates later tasks, and related behavior |
+- `id`: stable Profile identifier within a Project.
+- `name`: user-facing name.
+- `description`: short description of the applicable scenario.
+- `agentAction`: optional default concrete Action for `${{ profile.agentAction }}` references.
+- `definition`: rules for Stages, initial tasks, checks, Approval, recovery that creates later
+  tasks, and related behavior.
 
 IDs under `mohist/*` are reserved for builtin Profiles that update with the Mohist version. These Profiles
 are visible and selectable in the same collection for every Project. They can be the default Profile, but
@@ -104,13 +103,8 @@ Profile input, and does not participate in execution. The effective concrete
 
 For a bound Profile, the Server derives the projection from the effective
 `agentAction`. For a Profile with only literal Action declarations, it derives
-the projection from the validated Definition. Both paths use this built-in
-mapping:
-
-| Inline Agent Action | Runtime |
-|---|---|
-| `mohist/opencode` | `opencode` |
-| `mohist/pi` | `pi` |
+the projection from the validated Definition. Both paths use the built-in
+mapping: `mohist/opencode` maps to `opencode`, and `mohist/pi` maps to `pi`.
 
 The literal scan includes Stage tasks and checks, Approval feedback tasks,
 recovery tasks, and the static `task.uses` default of `mohist/openspec-tasks`.
@@ -133,8 +127,8 @@ agentRuntime = exactly one discovered Runtime ? that Runtime : null
 
 The Project WorkflowProfile list and detail read models expose `agentRuntime`.
 The browser consumes that field and never parses Profile YAML or infers a
-Runtime from a model ID. A newly supported built-in Runtime adds one row to the
-mapping; it does not add a Profile field, Action input, or Runtime descriptor.
+Runtime from a model ID. A newly supported built-in Runtime adds one entry to
+the mapping; it does not add a Profile field, Action input, or Runtime descriptor.
 
 The model selector uses one Runtime for its complete surface:
 
@@ -222,50 +216,36 @@ validated `WorkflowDefinition` by Project, Profile ID, and the Run-bound Agent A
 not store the Definition body. The Provider does not read Variables or Prompts and does not select the
 Profile outside the start-binding command.
 
-The existing Project-scoped `WorkflowProfileReferenceCoordinator` serializes custom Profile updates,
+The Project-scoped `WorkflowProfileReferenceCoordinator` serializes custom Profile updates,
 Project Agent Action override changes, and WorkflowRun binding. An update validates the future effective
 Action, the distinct bound Actions, and the stored startup skeletons read from active Run state before it
-writes the Profile. A Run start has stable Project, Issue, Epic, explicit Profile, metadata, and workspace
-facts under one `workflowRunId`. The Issue transaction first commits an
-`IssueWorkStarted` start intent containing that fixed Run ID,
-Profile selection, and repository/workspace snapshot. Only after this durable intent commits may the
-WorkflowRun participant create executable state. Both the synchronous start path and durable event delivery
-drive the same idempotent `EnsureStarted` operation, so a process exit can leave pending intent but cannot
-leave an executable Run that no Issue owns.
-The coordinator settles any pending fence first, then asks the participant for an existing Run with that
-ID. A request whose stable startup facts match returns the persisted binding without reading the current
-Project default, Profile source, or Action override; any conflicting startup fact is rejected.
+writes the Profile. Start binding follows these invariants:
 
-When no Run exists, the coordinator reads one accepted Profile version and materializes one
-`BoundWorkflowStart` containing the start identity, Profile ID, concrete Agent Action, and ordered
-`StageStructure { stage, requiresApproval }` values. The coordinator persists that resolved command payload
-in its pending fence before delivery.
-`IWorkflowRunBindingParticipant` then creates the `Created` Run row with that complete binding and Stage
-skeleton in one transaction. It never patches a separately created Run. The Workflow grain does not resolve
-startup structure or save a partial Run before this command; after the participant commit it loads the
-persisted Run and continues the ordinary idempotent start transition.
-
-Redelivery uses the `BoundWorkflowStart` captured in the fence. The participant returns the same persisted
-binding when the Run already exists with identical startup facts and rejects a conflicting existing Run.
-A pending `commandId` is a replay only when its kind and complete canonical payload match. A crash before
-participant commit is replayed; a crash after commit is observed as already applied. If the coordinator
-cleared its fence and the response was then lost, the retry returns the binding stored in the Run instead of
-resolving newer configuration. The coordinator order is therefore the linearization point: a concurrent Run
-starts entirely before or after a Profile or override change, never between its resolution, validation, and
-initial persistence.
+- A Run start has stable Project, Issue, Epic, explicit Profile, metadata, and workspace facts under
+  one `workflowRunId`. The Issue transaction first commits an `IssueWorkStarted` start intent with
+  that fixed Run ID, Profile selection, and repository/workspace snapshot. Only after this durable
+  intent commits may the WorkflowRun participant create executable state. Both the synchronous start
+  path and durable event delivery drive the same idempotent `EnsureStarted` operation, so a process
+  exit can leave pending intent but cannot leave an executable Run that no Issue owns.
+- The coordinator settles any pending fence first, then asks the participant for an existing Run
+  with that ID. A request whose stable startup facts match returns the persisted binding without
+  reading the current Project default, Profile source, or Action override; any conflicting startup
+  fact is rejected.
+- When no Run exists, the coordinator persists the resolved start payload (start identity, Profile
+  ID, concrete Agent Action, and ordered Stage skeleton) in its pending fence before delivery. The
+  participant then creates the Run with that complete binding and Stage skeleton in one transaction.
+  It never patches a partially created Run.
+- Redelivery uses the payload captured in the fence. A crash before participant commit is replayed;
+  a crash after commit is observed as already applied. If the coordinator cleared its fence and the
+  response was then lost, the retry returns the binding stored in the Run instead of resolving newer
+  configuration.
+- The coordinator order is the linearization point: a concurrent Run starts entirely before or after
+  a Profile or override change, never between its resolution, validation, and initial persistence.
 
 ## API
 
-The Profile collection is a child resource of Project:
-
-```text literal
-GET    /api/projects/{projectRef}/workflow-profiles
-POST   /api/projects/{projectRef}/workflow-profiles
-GET    /api/projects/{projectRef}/workflow-profiles/{*profileId}
-PUT    /api/projects/{projectRef}/workflow-profiles/{*profileId}
-PATCH  /api/projects/{projectRef}/workflow-profiles/{*profileId}
-DELETE /api/projects/{projectRef}/workflow-profiles/{*profileId}
-```
+The Profile collection is a child resource of Project at
+`/api/projects/{projectRef}/workflow-profiles`.
 
 The Project's `defaultWorkflowProfileId` and the Issue's `workflowProfileId` reference this collection.
 They are modified through the Project and Issue resources, respectively. Profile deletion must protect a
@@ -322,9 +302,3 @@ Project, Issue, create-Issue, and stage model selectors. The projection is deriv
 `uses` declarations and the browser does not parse Workflow YAML. Runtime-specific model catalogs remain
 isolated; a missing catalog or a Profile with no single resolved Runtime does not fall back to another
 Runtime.
-
-Planned in the Profile Agent Action binding change: `agentAction` source defaults and Project overrides,
-the restricted `${{ profile.agentAction }}` compiler, Run-bound concrete Actions, capability-aware catalog
-validation, response-loss-safe startup replay, active-Run structure compatibility, active-Run read
-projection, Approval feedback binding, and `mohist/github-pr` adoption. These items must land
-together before this section becomes implemented behavior.

@@ -54,17 +54,17 @@ prints steps for two GitHub-side configurations:
      credentials.
    - **Fine-grained PAT, fallback:** Give it only Issues read and write access
      for write-back. It cannot modify code. Clone, push, and Pull Request
-     delivery continue to use the existing Runner login; see
+     delivery continue to use the Runner's existing Git credential; see
      [Runner Guide](runner.md). Records appear under the administrator or
      Runner account.
 
 Optional configuration:
 
-| Setting | Default | Meaning |
-|---|---|---|
-| Feed label | `mohist` | Applying it supplies the requirement |
-| Feed mode | Start immediately | Use `--feed-mode backlog` to create only a backlog Issue for a later manual start |
-| Approver list | Empty, disabled | Only Pull Request reviews from listed GitHub users decide an Approval |
+- **Feed label:** Defaults to `mohist`. Applying it supplies the requirement.
+- **Feed mode:** Starts work immediately by default. Use `--feed-mode backlog`
+  to create only a backlog Issue for a later manual start.
+- **Approver list:** Empty and disabled by default. Only Pull Request reviews
+  from listed GitHub users decide an Approval.
 
 One GitHub Repository can connect to only one Project. A Project can connect to
 several Repositories.
@@ -96,12 +96,10 @@ Issue.
 **State labels** use the mutually exclusive `mohist:` prefix, with at most one
 present at a time:
 
-| Label | Meaning |
-|---|---|
-| `mohist:in-progress` | The production system is running |
-| `mohist:awaiting-approval` | Work is waiting at an Approval point |
-| `mohist:blocked` | Work is blocked and needs intervention |
-| `mohist:done` | Work is complete; the GitHub Issue closes at the same time |
+- `mohist:in-progress` — the production system is running.
+- `mohist:awaiting-approval` — work is waiting at an Approval point.
+- `mohist:blocked` — work is blocked and needs intervention.
+- `mohist:done` — work is complete; the GitHub Issue closes at the same time.
 
 Mohist writes four types of low-volume comments: intake confirmation with the
 Mohist Issue link, arrival at an Approval point, completion with a delivery
@@ -116,13 +114,9 @@ the production state. Mohist records the failure for inspection.
 ## Pull Request Review as Approval
 
 When a Connection has an approver list, a Check Approval point accepts GitHub
-Pull Request reviews:
-
-| Review result | Production action |
-|---|---|
-| Approve | Approve |
-| Request changes | Reject, using the review body as the reason |
-| Comment | No Approval action |
+Pull Request reviews. An **Approve** review approves. A **Request changes**
+review rejects, using the review body as the reason. A **Comment** review has
+no Approval action.
 
 - Only a review by a listed GitHub user counts. An empty list disables the
   capability.
@@ -159,47 +153,6 @@ Issue lineage, so subscribing to every event under Issue #42 includes it.
 - **Runtime control on GitHub:** Exceptional operations such as pause, stop,
   and retry remain in Mohist interfaces such as CLI, Web, Slack, and suggested
   notification actions.
-
-## Status
-
-Repository Connection and inbound events are implemented. `mo github connect`
-creates a Connection and prints the GitHub configuration checklist. Signed
-events for label changes, Issue closure, Pull Request reviews, and completed
-check suites reach event routing in real time and can be subscribed to.
-
-Intake and withdrawal are implemented. A feed label creates and starts a
-Mohist Issue with title and body snapshot, `p0` through `p4` priority mapping,
-traceable origin, and optional backlog-only mode through
-`--feed-mode backlog`. Repeated intake creates only one Mohist Issue. Closing
-the GitHub Issue cancels its Mohist Issue unless that Issue is already terminal.
-When start is rejected because prerequisites are unmet or the Repository is
-unavailable, the Issue remains in the backlog and a minimal PAT-authored comment
-explains the result on GitHub.
-
-Pull Request review Approval is implemented. `mo github connect --approver`
-and `mo github update` configure the approver list. Approve and Request changes
-reviews from listed users approve or reject a Check Approval point, attributed
-to `github:<login>`, with the review body as a rejection reason. Comment reviews
-and unlisted users have no effect. Mohist decides from state at event arrival
-and does not revisit dismissed or stale reviews.
-
-Issue-level progress write-back is implemented. Work start, arrival at an
-Approval point, run failure, completion, and cancellation project to mutually
-exclusive state labels and comments. Completion and cancellation also close
-the GitHub Issue. Comments and labels are idempotent. Failure of one operation
-does not block another. Failures are persisted, and a 401 or 403 also marks the
-Connection as needing operations attention.
-
-The Web and CLI do not yet expose persisted write-back failures. GitHub App
-identity is also not implemented; write-back currently uses a PAT, without App
-installation or Repository-scoped short-lived token exchange. GitHub remains a
-delivery target through the `mohist/github-pr` Profile. Future Issues will
-deliver App identity and failure inspection.
-
-PR review Approval and completion-comment PR lookup still recognize the old
-`mo/issue-N` branch form. The current Issue Workspace branch is
-`mohist/ws-issue-N`, so do not rely on those two correlations until the GitHub
-reader uses the Workspace branch convention.
 
 ---
 

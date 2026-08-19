@@ -146,10 +146,11 @@ use `mo routing rule edit` to assign one rule to it. Observe two constraints:
   the Issue before acting, not only comments by that Agent. Otherwise neither
   side can see a loop between repeated rejection and repeated repair.
 
-## Implementation Status
+## Status
 
 `mo agent install supervisor`, Issue watch and mute, Agent-response-failed
 notifications, Approval actor records, routing tables, Agent launch, and
-Approval and failure events are implemented. To assemble specialized Agents
-manually, use `mo agent create` and `mo routing rule create`. See the supervision
-scenario in [Agent Event Routing](event-routing.md) for prompt guidance.
+Approval and failure events are implemented. Specialized Agents are assembled
+manually with `mo agent create` and `mo routing rule create`. See the
+supervision scenario in [Agent Event Routing](event-routing.md) for prompt
+guidance.

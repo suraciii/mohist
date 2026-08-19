@@ -217,19 +217,8 @@ next step.
 
 ### CLI
 
-`mo slack` covers all Connection operations:
-
-```text literal
-mo slack setup
-mo slack install-agent <agent> [--workspace-team <team-id>]
-mo slack status
-mo slack list <agent>
-mo slack view <connection-id>
-mo slack edit <connection-id> --access-policy allowlist --allow-member <slack-member-id>
-mo slack disable <connection-id>
-mo slack enable <connection-id>
-mo slack transfer-owner <connection-id>
-```
+`mo slack` covers all Connection operations. See
+[CLI Reference](cli-reference.md) for the command language.
 
 CLI and Web UI operate on the same Connection record. `install-agent` also
 resumes a record created from a Mohist App conversation. App creation, manifest
@@ -243,19 +232,28 @@ search and avatars.
 
 ## Agent Connection Configuration
 
-| Setting | Meaning |
-|---|---|
-| Agent | Fixed at creation; create another Connection for another Agent |
-| Slack workspace | Confirmed by Mohist App installation, never a user-entered name |
-| Bot identity | Initialized from Agent name and avatar, then managed in Slack and verified by Mohist |
-| Slack description | Initialized from Agent Description; never becomes Instructions or a hidden prompt |
-| Runtime mode | Local Socket Mode; each App has its own Bot token and App-level token |
-| Owner | Claimed Slack member; the only caller by default and always in the Allowlist |
-| Access policy | Who can invoke in channels; Owner only by default |
-| Allowed members | Workspace members who can invoke under Allowlist; DMs remain Owner-only |
-| Installation progress | Not installed / Action required / Pending approval / Installing / Ready / Degraded / Disabled |
-| Status | Setup required / Ready / Degraded / Disabled; Degraded carries one actionable reason |
-| Identity sync | Whether Bot name and avatar still match the Agent |
+A Connection carries these settings:
+
+- **Agent:** Fixed at creation; create another Connection for another Agent.
+- **Slack workspace:** Confirmed by Mohist App installation, never a
+  user-entered name.
+- **Bot identity:** Initialized from Agent name and avatar, then managed in
+  Slack and verified by Mohist.
+- **Slack description:** Initialized from Agent Description; never becomes
+  Instructions or a hidden prompt.
+- **Runtime mode:** Local Socket Mode; each App has its own Bot token and
+  App-level token.
+- **Owner:** A claimed Slack member; the only caller by default and always in
+  the Allowlist.
+- **Access policy:** Who can invoke in channels; Owner only by default.
+- **Allowed members:** Workspace members who can invoke under Allowlist; DMs
+  remain Owner-only.
+
+A Connection also reports three independent facts: **installation progress**
+(Not installed, Action required, Pending approval, Installing, Ready,
+Degraded, or Disabled), **status** (Setup required, Ready, Degraded, or
+Disabled, with Degraded carrying one actionable reason), and **identity sync**
+(whether Bot name and avatar still match the Agent).
 
 Instructions, Runtime, Model, Variant, Skills, and concurrency limit are Agent
 configuration, not Connection configuration. New work uses the new snapshot,
@@ -278,7 +276,9 @@ durable record or log.
 The configuration page lists every requested permission with its reason. Invite
 the Bot only to channels where it is needed. The first version has no
 per-permission toggles, which would create states where Slack offers a
-follow-up the App cannot perform.
+follow-up the App cannot perform. There is also no per-Connection selection of
+accepted channels: the Bot accepts invocations from every channel it has
+joined.
 
 Mohist reads the basic member directory — IDs, names, avatars — to select
 Owners and Allowlist members and to show senders. It never reads member email,
@@ -343,9 +343,8 @@ One thread can host several Agents, each with an independent Session:
 - A Bot's own message never becomes input — not for itself, not for another
   Bot. Separate Mohist Servers do not coordinate one multi-Bot message.
 
-As in Buzz, several Agents can act as independent collaborators in one
-discussion without triggering one another or making follow-up ownership
-ambiguous.
+Several Agents can act as independent collaborators in one discussion without
+triggering one another or making follow-up ownership ambiguous.
 
 ### Mention in an Existing Discussion
 
@@ -463,18 +462,21 @@ govern behavior in a shared space and change no capabilities:
 
 ## Permissions
 
-| Policy | Direct messages | Channel mentions and bound threads |
-|---|---|---|
-| Owner only | Owner only | Owner only (default) |
-| Allowlist | Owner only | Owner and listed workspace members |
-| Anyone | Owner only | A verified full workspace member in a channel where the Bot is present |
+Three access policies decide who can invoke the Bot:
+
+- **Owner only** (default): Only the Owner, in direct messages and in channels.
+- **Allowlist:** Direct messages remain Owner-only; channel mentions and bound
+  threads also accept listed workspace members.
+- **Anyone:** Direct messages remain Owner-only; channel mentions and bound
+  threads accept any verified full workspace member in a channel where the Bot
+  is present.
 
 **Anyone who can invoke the Bot can use every capability granted to the
 Agent**, including repository writes, tools, and credentials. Widening a policy
 is a permission grant, not a convenience switch. Do not use Anyone for an Agent
 with repository write access.
 
-This follows Buzz's DM hardening: DMs are Owner-only under every policy.
+DMs are Owner-only under every policy.
 Allowlist and Anyone re-verify on every invocation that the sender is still a
 full workspace member; deactivated, restricted, external, Bot, and unconfirmed
 identities are rejected. Anyone also verifies that the Bot is in the sender's
@@ -518,32 +520,37 @@ Three independent lifecycle actions, each explicitly confirmed:
   binding. An unknown delete result is reported as unknown and reconciled or
   arbitrated, never claimed as success. Mohist deletes only Apps it created.
 
-| Situation | Product behavior |
-|---|---|
-| Agent name or avatar edited | Bot identity marked out of sync; user updates Slack App settings and verifies again |
-| Agent description edited | Expected Slack description updated; Agent behavior unchanged |
-| Agent execution definition edited | New AgentJobs use the new snapshot; existing Sessions keep theirs |
-| Agent concurrency limit edited | Applies to later launches and follow-ups; running input is not stopped |
-| Agent archived | New root delegations rejected; existing Sessions remain readable and continuable |
-| Agent becomes Needs setup | New delegations get a safe summary in the channel; Owner and operators see the specific gap; existing Sessions continue on their snapshots |
-| Agent Readiness Unknown | Delegation accepted and waits for Runner validation; explicit failure if execution later proves impossible |
-| Connection Disabled | Input and replies stop immediately; messages received while disabled are acknowledged and discarded, never replayed |
-| Binding removed | Runtime records cleared; App management facts preserved; Slack App not uninstalled |
-| Slack App permanently deleted | Second confirmation, no active binding, audit; unknown results reconcile |
-| Agent App creation unknown | Enters Result unknown; no automatic second App; reconcile or arbitrate |
-| Authorization cancelled, expired, or pending approval | Same Agent App resumes after recovery |
-| Authorized identity mismatch | Nothing stored, nothing bound; one explicit next action |
-| Slack credential invalid | Degraded; new input stops; rerun `install-agent` and verify the same identities |
-| Agent already connected to the workspace | Points to the existing Connection; never overwrites |
-| Socket Mode temporarily unavailable | Connection and progress preserved; Slack retries within its window; beyond it the user resends |
-| Owner must change | Operator starts a new one-time claim; old Owner remains until success; a Slack sender cannot reset ownership |
-| Owner leaves or is deactivated | Degraded (Owner unavailable); channel Allowlist and Anyone continue; DMs and Owner management wait for operator transfer; never transfers to a same-named member |
-| Slack redelivers an event | Returns the existing Job, Session, Input, and Turn |
-| Input delivery to execution unconfirmed | Marked Unknown and reconciled as the same Input, never replayed as new |
-| Concurrency or Session queue limit reached | Shown as queued or rejected with retry-later; capacity is not execution failure |
-| Pending-result capacity reached | Progress coalesces; Degraded (Backpressured); final results, failures, and user actions preserved |
-| Owner or Session starter stops a queued Turn | Ended locally as cancelled; a first Turn's AgentJob ends with failure category `cancelled` |
-| Slack cannot send a reply | Work result unchanged; definite rejection retries; unknown result shows Delivery uncertain without blind duplication |
+Failure handling follows fixed boundaries:
+
+- **Agent edits never change running work.** New AgentJobs use the new
+  snapshot and existing Sessions keep theirs. A concurrency-limit change
+  applies to later launches and follow-ups and does not stop running input. A
+  description edit updates the expected Slack description without changing
+  Agent behavior.
+- **An archived Agent rejects new root delegations** while its existing
+  Sessions remain readable and continuable. An Agent that needs setup answers
+  new delegations with a safe summary in the channel; the Owner and operators
+  see the specific gap, and existing Sessions continue on their snapshots.
+  Unknown Readiness accepts the delegation and waits for Runner validation,
+  failing explicitly if execution later proves impossible.
+- **Installation and recovery never create duplicates.** A cancelled, expired,
+  or pending authorization resumes the same Agent App, and an unknown
+  App-creation result enters Result unknown until it is reconciled or
+  arbitrated. An Agent already connected to the workspace points to the
+  existing Connection. An invalid Slack credential makes the Connection
+  Degraded and stops new input until `install-agent` revalidates the same
+  identities. A temporary Socket Mode outage preserves the Connection and its
+  progress.
+- **Owner loss degrades, never transfers silently.** An Owner who leaves or is
+  deactivated makes the Connection Degraded (Owner unavailable). Channel
+  Allowlist and Anyone policies continue; DMs and Owner management wait for an
+  operator transfer. Ownership never moves to a same-named member.
+- **Delivery uncertainty settles to one record.** An unconfirmed input is
+  marked Unknown and reconciled as the same Input, never replayed as new.
+- **Capacity is not an execution failure.** A full concurrency or Session
+  queue shows work as queued or rejects it with retry-later.
+- **Stopping a queued Turn ends it locally as cancelled.** Stopping a first
+  Turn ends its AgentJob with failure category `cancelled`.
 
 ## Non-goals
 
@@ -567,38 +574,3 @@ Three independent lifecycle actions, each explicitly confirmed:
   installation, waits for required administrator approval, and provides the Bot
   token and App-level token that Slack shows only to them. Mohist automates
   creation, configuration, validation, and connection around those steps.
-
-## Status
-
-Delivered:
-
-- Data plane: channel root mentions, bound-thread follow-ups, multi-Bot
-  ownership selection, duplicate delivery protection, thread history import
-  with marked truncation, attachments, and the Owner only, Allowlist, and
-  Anyone policies. Anyone verifies that the Bot can see the channel; DMs are
-  Owner-only under every policy.
-- Reply contract: in-place status messages, the Agent-authored reply action,
-  collaboration rules and reply anchor on every input, steer-by-default
-  follow-ups, explicit Stop, and reconciled Delivery uncertain with a single
-  fallback answer.
-- Control plane: resumable `mo slack setup` and `mo slack install-agent`
-  guides, one-time Owner claim, transparent Configuration-token rotation, and
-  Owner transfer. Remove binding and permanent delete are independent,
-  explicitly confirmed CLI or Web actions.
-- End-to-end acceptance passed in an isolated real Slack workspace: setup,
-  install-agent, Owner claim, DM task execution, and reply delivery over real
-  Socket Mode.
-
-Current gaps:
-
-- Per-Connection selection of accepted channels is not delivered.
-- Coordination between Bots managed by different Mohist Servers is not
-  available.
-- The Mohist App conversation is migrating to the standard liveness and reply
-  contract. The current build still acknowledges management requests with a
-  text message and performs management through a model-output protocol instead
-  of the ordinary operations surface.
-
-Future phases: Slack's native Agent entry point and streaming replies,
-approval-gate notifications routed into Slack, message shortcuts, a public
-marketplace, multi-tenant hosting, and a complete diagnostics console.

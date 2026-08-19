@@ -42,9 +42,8 @@ and take over manually.
   definition to change the line. The system does not change.
 - **An Issue is work in progress**: All work enters the line as an Issue. It
   carries requirements, discussion, and history from Draft to Done. Readiness
-  stays outside execution so incomplete requirements do not consume capacity:
-  the default line is `Draft --mark ready--> Backlog --start--> Plan -> Build ->
-  Check -> Integrate -> Done`.
+  stays outside execution so incomplete requirements do not consume capacity.
+  [The Workflow](the-workflow.md) defines the default line.
 - **Agents are workers**: An Inline Agent executes a Workflow task directly. A
   predefined Mohist Agent can start from the Web UI, CLI, an Agent Connection,
   an event, or a comment mention. An AgentSession records the session
@@ -117,10 +116,10 @@ Each linked product spec defines one direction in full:
   Issues deliver across repositories. See [Planning with Epics](epics.md) and
   [Composite Issues and Sub-issues](sub-issues.md).
 - **Mobile supervision**: View production-line state and receive anomaly
-  notifications on a phone. See [Mobile PWA and Push](mobile-pwa.md) and
+  notifications on a phone. See
+  [Mobile PWA and Push](../design/decisions/mobile-pwa.md) and
   [Hermes Notifications](hermes-notifications.md).
 
 ---
 
-This document describes the future product, not the current implementation
-list. See the [README implementation status](../README.md#implementation-status).
+This document describes the future product, not a delivery-status list.
