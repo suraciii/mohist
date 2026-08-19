@@ -197,7 +197,7 @@ public partial class WorkflowRunControlApiSpecs
         [
             new StageDefinition("plan", [], [], RequiresApproval: true),
         ]);
-        await WorkflowApiTestSupport.SeedWorkflowTemplateAsync(_connectionString, projectId, definition);
+        await WorkflowApiTestSupport.SeedWorkflowProfileAsync(_connectionString, projectId, definition);
         var wrId = await _grains.GetGrain<IIssueGrain>(issueKey).StartWorkAsync();
         await DispatchEventsAsync();
         var run = await LoadRunAsync(wrId);

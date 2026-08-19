@@ -37,13 +37,20 @@ internal static class WorkflowApiTestSupport
             new StageDefinition("build", [new("compile", "Compile", "spec/task")], []),
         ]);
 
-        await SeedWorkflowTemplateAsync(connectionString, projectId, definition);
+        await SeedWorkflowDefinitionAsync(connectionString, projectId, definition, bindCurrentProfile: false);
     }
 
-    public static async Task SeedWorkflowTemplateAsync(
+    public static Task SeedWorkflowProfileAsync(
         string connectionString,
         string projectId,
-        WorkflowDefinition definition)
+        WorkflowDefinition definition) =>
+        SeedWorkflowDefinitionAsync(connectionString, projectId, definition, bindCurrentProfile: true);
+
+    private static async Task SeedWorkflowDefinitionAsync(
+        string connectionString,
+        string projectId,
+        WorkflowDefinition definition,
+        bool bindCurrentProfile)
     {
         var options = new DbContextOptionsBuilder<MohistDbContext>()
             .UseSqlite(connectionString)
@@ -74,34 +81,40 @@ internal static class WorkflowApiTestSupport
             {
                 ProjectId = projectId,
                 DefaultTemplateId = templateId,
-                DefaultWorkflowProfileId = templateId,
-                DefaultWorkflowProfileIdKey = templateId,
+                DefaultWorkflowProfileId = bindCurrentProfile ? templateId : null,
+                DefaultWorkflowProfileIdKey = bindCurrentProfile ? templateId : null,
             });
         }
         else
         {
             profile.DefaultTemplateId = templateId;
-            profile.DefaultWorkflowProfileId = templateId;
-            profile.DefaultWorkflowProfileIdKey = templateId;
+            if (bindCurrentProfile)
+            {
+                profile.DefaultWorkflowProfileId = templateId;
+                profile.DefaultWorkflowProfileIdKey = templateId;
+            }
             profile.UpdatedAt = TestTime.UtcNow;
         }
 
-        var workflowProfile = await db.WorkflowProfileRecords.FindAsync(projectId, templateId);
-        var definitionSource = WorkflowYamlSerializer.ToYaml(definition);
-        if (workflowProfile is null)
+        if (bindCurrentProfile)
         {
-            db.WorkflowProfileRecords.Add(new WorkflowProfileRecordRow
+            var workflowProfile = await db.WorkflowProfileRecords.FindAsync(projectId, templateId);
+            var definitionSource = WorkflowYamlSerializer.ToYaml(definition);
+            if (workflowProfile is null)
             {
-                ProjectId = projectId,
-                ProfileId = templateId,
-                Name = templateId,
-                DefinitionSource = definitionSource,
-            });
-        }
-        else
-        {
-            workflowProfile.DefinitionSource = definitionSource;
-            workflowProfile.UpdatedAt = TestTime.UtcNow;
+                db.WorkflowProfileRecords.Add(new WorkflowProfileRecordRow
+                {
+                    ProjectId = projectId,
+                    ProfileId = templateId,
+                    Name = templateId,
+                    DefinitionSource = definitionSource,
+                });
+            }
+            else
+            {
+                workflowProfile.DefinitionSource = definitionSource;
+                workflowProfile.UpdatedAt = TestTime.UtcNow;
+            }
         }
 
         await db.SaveChangesAsync();

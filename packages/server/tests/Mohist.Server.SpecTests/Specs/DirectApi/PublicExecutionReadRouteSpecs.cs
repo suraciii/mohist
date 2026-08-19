@@ -82,8 +82,9 @@ public sealed class PublicExecutionReadRouteSpecs(PublicProjectionIntegrationFix
             turnStatus: AgentTurnStatus.Completed,
             turnResult: new AgentTurnResult(Output: """{"text":"The deployment failure was a bad config."}"""));
 
+        await NudgeProjectorAsync();
         using var reader = await CreateReaderAsync(projectId);
-        using var job = await ReadAsync(
+        using var job = await ReadProjectedAsync(
             reader,
             $"/api/v1/projects/{projectId}/agent-jobs/{ids.JobId}",
             root => string.Equals(
@@ -101,12 +102,16 @@ public sealed class PublicExecutionReadRouteSpecs(PublicProjectionIntegrationFix
         Assert.True(Json(job).GetProperty("sequence").GetInt64() > 0);
         await AssertAllowlistAsync(job);
 
-        using var input = await ReadInputAsync(projectId, ids.InputId);
+        using var input = await ReadProjectedAsync(
+            reader,
+            $"/api/v1/projects/{projectId}/agent-inputs/{ids.InputId}");
         Assert.Equal(ids.InputId, Json(input).GetProperty("inputId").GetString());
         Assert.Equal(PublicExecutionFieldValues.InputAccepted, Json(input).GetProperty("inputStatus").GetString());
         await AssertAllowlistAsync(input);
 
-        using var turn = await ReadTurnAsync(projectId, ids.TurnId);
+        using var turn = await ReadProjectedAsync(
+            reader,
+            $"/api/v1/projects/{projectId}/agent-turns/{ids.TurnId}");
         Assert.Equal(ids.TurnId, Json(turn).GetProperty("turnId").GetString());
         Assert.Equal(PublicExecutionFieldValues.OutcomeCompleted, Json(turn).GetProperty("outcome").GetString());
         await AssertAllowlistAsync(turn);
@@ -508,6 +513,14 @@ public sealed class PublicExecutionReadRouteSpecs(PublicProjectionIntegrationFix
         Func<JsonElement, bool>? isReady = null)
     {
         await NudgeProjectorAsync();
+        return await ReadProjectedAsync(client, path, isReady);
+    }
+
+    private static async Task<JsonDocument> ReadProjectedAsync(
+        HttpClient client,
+        string path,
+        Func<JsonElement, bool>? isReady = null)
+    {
         using var response = await client.GetAsync(path);
         var content = await response.Content.ReadAsStringAsync();
         Assert.True(response.IsSuccessStatusCode, $"{path} answered {response.StatusCode}: {content}");
