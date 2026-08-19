@@ -599,6 +599,11 @@ public partial class WorkflowGrain : Grain, IWorkflowGrain, IWorkflowGrainContex
     public Task<string?> GetCurrentWorkIdAsync()
     {
         RejectIfRunReloadRequired();
+        // A blocked Agent settlement has already crossed the release boundary:
+        // the attempt stops being active work even though its task stays
+        // Running for late-result arbitration.
+        if (_run is null || _run.HasBlockedAgentResult())
+            return Task.FromResult<string?>(null);
         var stage = _run?.CurrentStage();
         if (stage is null) return Task.FromResult<string?>(null);
         return Task.FromResult(stage.RunningTask?.WorkId ?? stage.ChecksWorkId);

@@ -82,9 +82,33 @@ public sealed record AgentTaskResultUnconfirmed(
     string WorkId,
     string Reason,
     DateTimeOffset DeadlineAt);
-public sealed record TaskBlocked(string Stage, string TaskId, string Reason, DateTimeOffset DeadlineAt);
-public sealed record StageBlocked(string Stage, string TaskId, string Reason);
-public sealed record WorkflowRunBlocked(string Stage, string TaskId, string Reason, DateTimeOffset DeadlineAt);
+/// <summary>
+/// Blocked-attention events emitted exactly once by the durable release
+/// boundary. <see cref="Reason"/> is the stable consumer category
+/// (<c>agent-result-unconfirmed</c>); <see cref="ReasonCode"/> optionally
+/// carries the settlement's original persisted reason so event consumers can
+/// observe it without depending on another projection. It is additive: older
+/// persisted events deserialize with a null reason code.
+/// </summary>
+public sealed record TaskBlocked(
+    string Stage,
+    string TaskId,
+    string Reason,
+    DateTimeOffset DeadlineAt,
+    string? ReasonCode = null);
+
+public sealed record StageBlocked(
+    string Stage,
+    string TaskId,
+    string Reason,
+    string? ReasonCode = null);
+
+public sealed record WorkflowRunBlocked(
+    string Stage,
+    string TaskId,
+    string Reason,
+    DateTimeOffset DeadlineAt,
+    string? ReasonCode = null);
 
 public sealed record CheckPassed(string Stage, string CheckName, string? Message);
 public sealed record CheckFailed(string Stage, string CheckName, string? Message);

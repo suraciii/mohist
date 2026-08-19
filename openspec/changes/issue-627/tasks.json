@@ -1,0 +1,97 @@
+{
+  "project": "mohist-local",
+  "description": "Release unresolved Workflow Agent attempts at their durable deadline while preserving blocked attention, active-capacity liveness, and identity-fenced late-result arbitration.",
+  "tasks": [
+    {
+      "id": "T-001",
+      "title": "Implement durable deadline settlement and repairable Workflow cleanup",
+      "spec": "specs/workflow-agent-settlement-liveness/spec.md#the-unknown-result-deadline-is-a-durable-release-boundary",
+      "description": "Update the Workflow domain and grain reconciliation path so an expired Unknown Agent settlement atomically becomes Blocked and removes the active Workflow assignment while preserving WorkId, WorkerId, complete execution identity, stop facts, reason, and deadline. Commit the durable boundary before independently retryable cleanup of dispatch snapshots, stage or resource locks, and settlement reminders, and repair already-Blocked runs that still hold assignment state without creating replacement work.",
+      "acceptanceCriteria": [
+        "With fake time exactly at or after the persisted deadline, one reconciliation changes Unknown to Blocked, clears WorkflowRun.Assignment and the in-memory assigned-worker cache, preserves task and WorkflowRun Running lifecycle state, and leaves WorkId, WorkerId, RunnerId, AgentSessionId, AgentTurnId, runtime, runtime-session, stop-operation, observation, reason, and deadline unchanged.",
+        "The deadline transition emits the existing blocked events at most once and never emits success, failure, cancellation, implicit-stop, retry, replacement-work, or replacement-identity effects; repeated reminder delivery, grain reactivation, and reconciliation leave durable state and event history unchanged.",
+        "A blocked-and-released run is durably saved before snapshot deletion, reminder removal, or stage/resource lock cleanup is attempted, and each cleanup operation is independently idempotent and retried after injected failure without restoring ownership or changing the settlement outcome.",
+        "A pre-existing Blocked settlement with a stale assignment is repaired by clearing the assignment and then converges through the same cleanup path, while the original execution identity remains addressable.",
+        "A fake-time/failure-injection test drives two concurrent unknown attempts on the same capacity-limited Runner through the deadline and verifies both become Blocked, both assignments are cleared at their durable release boundaries, both original identity tuples remain unchanged, and cleanup failure does not retain either active lease.",
+        "Domain, Workflow grain, fake-time, grain activation/replay, and failure-injection tests verify the exact-deadline boundary, unchanged identity and disposition, cleanup convergence, and absence of replacement execution or renewed ownership."
+      ],
+      "priority": 1,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Updated WorkflowRun and WorkflowGrain settlement/reconciliation implementation with domain and Workflow grain regression tests.",
+      "dependsOn": [],
+      "passes": false,
+      "notes": "Keep the persisted settlement as the late-result identity record. Cleanup retries must never call claim, dispatch, assignment, or result-settlement paths."
+    },
+    {
+      "id": "T-002",
+      "title": "Exclude released attempts from active work and Runner capacity",
+      "spec": "specs/workflow-agent-settlement-liveness/spec.md#an-expired-attempt-shall-release-active-work-ownership-and-runner-capacity",
+      "description": "Make active-work discovery and Runner accounting depend on current active ownership rather than a running task alone. Update Workflow read projections, database queries, Runner slot/status views, and DispatchService polling so released or blocked attempts are absent from redelivery and active slots, including legacy blocked rows with stale assignment, while unresolved blocked attempts remain non-claimable.",
+      "acceptanceCriteria": [
+        "After T-001 releases an attempt, CurrentActiveWorkFor, GetCurrentWorkIdAsync, GetActiveWorkAsync, WorkflowRunWorkProjectionBuilder, and persisted active-work/active-worker columns return no active work for that attempt while the task and settlement identity remain readable.",
+        "Runner used-slot counts, active-work status, FindRunningAssignedToAsync, and equivalent capacity queries exclude released assignments and pre-existing rows indexed with blocked attention; the released slot can be claimed by a different eligible Workflow.",
+        "With two concurrent unknown attempts occupying a capacity-limited Runner, deadline reconciliation leaves both original work keys absent from activeWorks and used-slot accounting at the same durable release boundary, including when snapshot/reminder/stage cleanup is failure-injected; a different eligible work item can then claim the released capacity.",
+        "Polling the recorded Runner after release produces no recovery or redelivery dispatch, does not reserve a slot, and remains safe when a stale dispatch snapshot is still present or cleanup is mid-retry.",
+        "HasUnresolvedAgentResult and HasDispatchableWork continue to prevent the blocked attempt from being freshly claimed, retried, or replaced merely because its assignment was cleared; no new TaskRun or WorkId is allocated.",
+        "Workflow projection, WorkflowRunQuerier, Runner grain/status, DispatchService, capacity-full, stale-snapshot, and poll reconciliation tests verify active-work exclusion, slot availability, no redelivery, and preservation of blocked identity."
+      ],
+      "priority": 2,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Updated Workflow active-work projections, Runner queries/capacity/redelivery behavior, and corresponding Runner and storage specification tests.",
+      "dependsOn": [
+        "T-001"
+      ],
+      "passes": false,
+      "notes": "Use assignment removal as the active-ownership signal; do not introduce a second capacity flag. Preserve task/work/Runner facts for report routing."
+    },
+    {
+      "id": "T-003",
+      "title": "Preserve blocked attention across Workflow and consumer projections",
+      "spec": "specs/workflow-agent-settlement-liveness/spec.md#workflow-and-consumer-projections-shall-preserve-blocked-or-unknown-attention",
+      "description": "Align Workflow status views, task and stage projections, indexed WorkflowRun attention, Issue attention, Inbox handling, and event projection behavior with the released settlement. Expose the stable blocked category together with the persisted reason/detail and deadline, keep attention actionable and non-failure, and make replay or reactivation produce one consistent projection.",
+      "acceptanceCriteria": [
+        "Before the deadline, status and task views expose Unknown with its persisted reason, message, execution identity, and deadline; after release they expose Blocked with the same persisted facts and do not report the attempt as completed, failed, or an active Runner reservation.",
+        "Blocked Workflow, task, and stage status, WorkflowRun AttentionStatus, Issue attention, Inbox attention, and event consumers retain the stable blocked or agent-result-unconfirmed category while making the persisted reason/detail and deadline observable where the view supports them.",
+        "Replaying blocked events or rebuilding projections after reminder replay and grain activation is idempotent: blocked attention remains actionable, no duplicate blocked attention is created, and no failure or completion notification is emitted.",
+        "Status and consumer projections continue to distinguish an unresolved or blocked settlement from explicit operator cancellation and ordinary task failure, without inferring a result from physical Agent observations.",
+        "Workflow status mapper, run-store projection, Issue attention, Inbox projection, event replay, and API/spec tests verify reason/deadline preservation, stable blocked categorization, idempotence, and absence of failure presentation."
+      ],
+      "priority": 2,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Updated Workflow, Issue, Inbox, event, and read-model projection behavior with status and replay regression tests.",
+      "dependsOn": [
+        "T-001"
+      ],
+      "passes": false,
+      "notes": "Keep blocked event categories compatible with existing consumers while separating stable category from the settlement's original reason/detail."
+    },
+    {
+      "id": "T-004",
+      "title": "Fence and settle late authoritative Agent results",
+      "spec": "specs/workflow-agent-settlement-liveness/spec.md#a-late-authoritative-result-shall-settle-the-original-attempt-at-most-once",
+      "description": "Make the existing POST /api/runner/{runnerId}/report workflow ingress authoritative for Workflow Agent terminal results by adding nullable AgentSessionId, AgentTurnId, Runtime, and RuntimeSessionId fields to RunnerReportRequest. Extend the workflow Agent dispatch/session path and the Runner durable result journal so the report carries the complete binding for the executed turn. Route complete Agent reports to a dedicated full-fence Workflow grain operation; reconcile due deadlines first, apply a matching success or failure to the original task exactly once, clear the settlement without restoring assignment or capacity, and acknowledge duplicate, incomplete, stale, mismatched, or physical-only receipts as side-effect-free stale acknowledgements. Keep the existing non-Agent report path unchanged.",
+      "acceptanceCriteria": [
+        "RunnerReportRequest has nullable additive AgentSessionId, AgentTurnId, Runtime, and RuntimeSessionId fields. For a Workflow Agent task, the Runner persists the immutable binding with the local result journal and sends all four fields from the same executed turn; WorkflowRunId, TaskRunId, WorkId, and RunnerId complete the fence. A missing or incomplete Agent binding is acknowledged stale rather than accepted by a partial tuple.",
+        "The Workflow Agent dispatch/session path carries additive AgentSessionId, AgentTurnId, Runtime, and RuntimeSessionId fields, obtains the logical session/turn from the immutable Workflow execution binding, obtains runtime/session from the runtime attach/create acknowledgement, and calls BindAgentExecutionAsync before persisting a result as ready; it never reconstructs them from mutable current-session labels after a rebind. Non-Agent reports continue through ReceiveTaskReportAsync or ReceiveCheckReportAsync without requiring these fields.",
+        "A matching late success settles the original TaskRun through normal completion and a matching late failure settles it through normal failure, then clears the unresolved settlement without creating replacement work or restoring assignment, dispatch snapshots, stage/resource locks, or Runner slots.",
+        "Due-settlement reconciliation runs before late result arbitration, and a result that loses the full identity race cannot alter the blocked reason, deadline, disposition, or active ownership.",
+        "Duplicate results, incomplete bindings, mismatched WorkflowRun/TaskRun/Work/Runner identities, mismatched AgentSession/AgentTurn/runtime/runtime-session bindings, superseded receipts, and post-release physical observations all receive stale acknowledgements with no duplicate events, output/artifact mutation, workflow advancement, ownership reacquisition, or capacity change.",
+        "After two concurrent unknown attempts are released, matching late receipts for either original identity settle only that original task and never reoccupy either Runner slot; a receipt for the other attempt cannot be applied to the first attempt.",
+        "Workflow grain, Runner report/API, Runner result-journal, AgentSession binding, fake-time, matching success/failure, duplicate, incomplete, mismatch, concurrent-two-attempt, and non-Agent regression tests verify exactly-once original-attempt settlement and side-effect-free stale handling."
+      ],
+      "priority": 3,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Resolved late-result transport contract plus updated Agent execution binding/report handling and end-to-end arbitration tests.",
+      "dependsOn": [
+        "T-001",
+        "T-002"
+      ],
+      "passes": false,
+      "notes": "RunnerReportRequest is the authoritative additive ingress. Keep the four Agent binding fields nullable for wire compatibility, require all four only for Workflow Agent terminal reports, persist them with the Runner result journal, and return stale for incomplete or mismatched Agent receipts. Preserve the existing non-Agent report path."
+    }
+  ]
+}
