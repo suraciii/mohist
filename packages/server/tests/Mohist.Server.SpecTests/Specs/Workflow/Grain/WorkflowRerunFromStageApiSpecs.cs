@@ -143,6 +143,40 @@ public class WorkflowRerunFromStageApiSpecs : IClassFixture<IsolatedMohistIntegr
         Assert.Contains("Stop or cancel", payload.GetProperty("error").GetString());
     }
 
+    [Theory]
+    [InlineData("rerun", false)]
+    [InlineData("rerun-from-stage", true)]
+    public async Task CrossPath_RerunWithCorruptedState_RecoversByStartingNewWorkflow(string verb, bool fromStage)
+    {
+        var (issueProjectId, issueNumber, _, issueWrId) = await SeedInProgressIssueWithWorkflowRunAsync();
+        await CorruptWorkflowRunStateAsync(issueWrId);
+
+        var issueResponse = fromStage
+            ? await _client.PostAsJsonAsync($"/api/projects/{issueProjectId}/issues/{issueNumber}/{verb}", new { stage = "plan" })
+            : await _client.PostAsync($"/api/projects/{issueProjectId}/issues/{issueNumber}/{verb}", content: null);
+
+        Assert.Equal(HttpStatusCode.OK, issueResponse.StatusCode);
+        await DispatchEventsAsync();
+        var recoveredIssueWrId = await GetIssueWorkflowRunIdAsync(issueProjectId, issueNumber);
+        Assert.NotNull(recoveredIssueWrId);
+        Assert.NotEqual(issueWrId, recoveredIssueWrId);
+        Assert.NotNull(await LoadRunAsync(recoveredIssueWrId!));
+
+        var (runProjectId, runIssueNumber, _, runWrId) = await SeedInProgressIssueWithWorkflowRunAsync();
+        await CorruptWorkflowRunStateAsync(runWrId);
+
+        var runResponse = fromStage
+            ? await _client.PostAsJsonAsync($"/api/workflow-runs/{runWrId}/{verb}", new { stage = "plan" })
+            : await _client.PostAsync($"/api/workflow-runs/{runWrId}/{verb}", content: null);
+
+        Assert.Equal(HttpStatusCode.OK, runResponse.StatusCode);
+        await DispatchEventsAsync();
+        var recoveredRunWrId = await GetIssueWorkflowRunIdAsync(runProjectId, runIssueNumber);
+        Assert.NotNull(recoveredRunWrId);
+        Assert.NotEqual(runWrId, recoveredRunWrId);
+        Assert.NotNull(await LoadRunAsync(recoveredRunWrId!));
+    }
+
     [Fact]
     public async Task RerunFromStage_TimelineOmitsInvalidatedTaskHistory()
     {
@@ -301,6 +335,46 @@ public class WorkflowRerunFromStageApiSpecs : IClassFixture<IsolatedMohistIntegr
         using var scope = _services.CreateScope();
         var store = scope.ServiceProvider.GetRequiredService<IWorkflowRunStore>();
         return await store.LoadAsync(wrId) ?? throw new InvalidOperationException($"Workflow run '{wrId}' not found");
+    }
+
+    private async Task<string?> GetIssueWorkflowRunIdAsync(string projectId, int issueNumber)
+    {
+        using var scope = _services.CreateScope();
+        var issues = scope.ServiceProvider.GetRequiredService<Mohist.Server.Issue.Services.IssueQuerier>();
+        var info = await issues.GetInfoAsync(projectId, issueNumber);
+        return info?.WorkflowRunId;
+    }
+
+    private async Task CorruptWorkflowRunStateAsync(string workflowRunId)
+    {
+        await DeactivateWorkflowAsync(workflowRunId);
+
+        var options = new DbContextOptionsBuilder<MohistDbContext>()
+            .UseSqlite(_connectionString)
+            .Options;
+        await using var db = new MohistDbContext(options);
+        var row = await db.WorkflowRuns.FindAsync(workflowRunId)
+            ?? throw new InvalidOperationException($"Workflow run {workflowRunId} not found in store");
+        row.State = "{}";
+        await db.SaveChangesAsync();
+
+        await _grains.GetGrain<IManagementGrain>(0).ForceActivationCollection(TimeSpan.Zero);
+    }
+
+    private async Task DeactivateWorkflowAsync(string workflowRunId)
+    {
+        await _grains.GetGrain<IWorkflowGrain>(workflowRunId).Deactivate();
+        var management = _grains.GetGrain<IManagementGrain>(0);
+        await management.ForceActivationCollection(TimeSpan.Zero);
+        await TestWait.ForAsync(
+            async () => await management.GetDetailedGrainStatistics(),
+            activations => !activations.Any(stat =>
+                stat.GrainType.Contains(nameof(WorkflowGrain), StringComparison.Ordinal)
+                && stat.GrainId.ToString()!.Contains(workflowRunId, StringComparison.Ordinal)),
+            TimeSpan.FromSeconds(3),
+            TimeSpan.FromMilliseconds(50),
+            $"Workflow grain '{workflowRunId}' to deactivate",
+            () => management.ForceActivationCollection(TimeSpan.Zero));
     }
 
     private async Task SeedWorkflowTemplateAsync(string projectId)
