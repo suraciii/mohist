@@ -10,7 +10,7 @@ using static Mohist.Server.TestSupport.PathContractAssertions;
 
 namespace Mohist.Server.SpecTests.Specs.Api;
 
-[Collection("SerialIntegration")]
+[Collection("IntegrationExtended")]
 public class PathContractRegressionSpecs
 {
     private readonly MohistIntegrationFixture _fixture;

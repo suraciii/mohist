@@ -36,8 +36,8 @@ public class MohistIntegrationCollection : ICollectionFixture<MohistIntegrationF
 [CollectionDefinition("SlackReplyAnchorIngress")]
 public class SlackReplyAnchorIngressCollection : ICollectionFixture<MohistIntegrationFixture>;
 
-[CollectionDefinition("SerialIntegration", DisableParallelization = true)]
-public class SerialIntegrationCollection : ICollectionFixture<MohistIntegrationFixture>;
+[CollectionDefinition("IntegrationExtended")]
+public class IntegrationExtendedCollection : ICollectionFixture<MohistIntegrationFixture>;
 
 [CollectionDefinition("PlatformIntegration")]
 public class PlatformIntegrationCollection : ICollectionFixture<MohistIntegrationFixture>;

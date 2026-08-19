@@ -43,6 +43,8 @@ public class MohistIntegrationFixture : IAsyncLifetime
     private const string VirtualRunnerRoot = "/mohist-tests/runner";
     private const string VirtualSystemUpdateStatePath = "/mohist-tests/system-update.json";
     private const string VirtualLogsPath = "/mohist-tests/logs";
+    private static readonly object WorkspaceCodegenWarmupLock = new();
+    private static Task? _workspaceCodegenWarmup;
     private SqliteConnection _keeper = null!;
     private MohistWebApplicationFactory _factory = null!;
     private readonly bool _otelEnabled;
@@ -91,7 +93,15 @@ public class MohistIntegrationFixture : IAsyncLifetime
             Mohist.Server.Slack.Services.SlackAdapterOperatorAuthenticator.OperatorIdHeaderName,
             "spec-operator");
         await _factory.EnsureSchemaAsync();
-        await WarmUpWorkspaceCodegenAsync();
+        await EnsureWorkspaceCodegenWarmAsync();
+    }
+
+    private Task EnsureWorkspaceCodegenWarmAsync()
+    {
+        // Orleans serializer codegen is process-wide, so every integration
+        // collection can share the first fixture's completed warm-up.
+        lock (WorkspaceCodegenWarmupLock)
+            return _workspaceCodegenWarmup ??= WarmUpWorkspaceCodegenAsync();
     }
 
     /// <summary>
