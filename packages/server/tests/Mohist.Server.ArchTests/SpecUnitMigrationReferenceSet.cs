@@ -10,6 +10,8 @@ internal static class SpecUnitMigrationReferenceSet
     private static readonly object MetadataGate = new();
     private static readonly List<ModuleMetadata> Metadata = [];
     private static readonly List<AssemblyMetadata> Assemblies = [];
+    private static readonly Lazy<IReadOnlyList<MetadataReference>> CompilationReferences =
+        new(CreateCompilationReferencesCore);
     private static readonly HashSet<string> ExcludedAssemblies = new(StringComparer.Ordinal)
     {
         "Mohist.Server.ArchTests",
@@ -19,6 +21,9 @@ internal static class SpecUnitMigrationReferenceSet
     };
 
     internal static IReadOnlyList<MetadataReference> CreateCompilationReferences()
+        => CompilationReferences.Value;
+
+    private static IReadOnlyList<MetadataReference> CreateCompilationReferencesCore()
     {
         var references = LoadReferencedAssemblies()
             .Where(assembly => !assembly.IsDynamic)

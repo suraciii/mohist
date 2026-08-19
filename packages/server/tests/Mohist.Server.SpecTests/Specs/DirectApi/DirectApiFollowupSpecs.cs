@@ -443,32 +443,12 @@ public sealed class DirectApiFollowupSpecs(PublicProjectionIntegrationFixture fi
     }
 
     private async Task<string> CreatePatAsync(string projectId, string scope = "operator")
-    {
-        using var response = await fixture.Client.PostAsJsonAsync("/api/auth/tokens", new
-        {
-            name = $"direct-followup-{Guid.NewGuid():N}",
-            scope,
-            projectIds = new[] { projectId },
-            allProjects = false,
-        });
-        response.EnsureSuccessStatusCode();
-        using var body = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
-        return body.RootElement.GetProperty("data").GetProperty("token").GetString()!;
-    }
+        => await DirectApiCredentialTestSupport.CreatePatAsync(
+            fixture, "direct-followup", [projectId], scope);
 
     private async Task<string> CreatePatForProjectsAsync(params string[] projectIds)
-    {
-        using var response = await fixture.Client.PostAsJsonAsync("/api/auth/tokens", new
-        {
-            name = $"direct-followup-multi-project-{Guid.NewGuid():N}",
-            scope = "operator",
-            projectIds,
-            allProjects = false,
-        });
-        response.EnsureSuccessStatusCode();
-        using var body = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
-        return body.RootElement.GetProperty("data").GetProperty("token").GetString()!;
-    }
+        => await DirectApiCredentialTestSupport.CreatePatAsync(
+            fixture, "direct-followup-multi-project", projectIds);
 
     private async Task<string> SeedProjectAsync()
     {
