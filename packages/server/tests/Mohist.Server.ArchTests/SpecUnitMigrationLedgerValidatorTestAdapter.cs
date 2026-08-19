@@ -51,4 +51,11 @@ internal static partial class SpecUnitMigrationLedgerValidator
         ValidatePlannedUnitTarget(row, violations);
         return violations;
     }
+
+    internal static IReadOnlyList<string> ValidateRequiredRowFieldsForTests(SpecUnitMigrationLedgerRow row)
+    {
+        var violations = new List<string>();
+        ValidateRequiredRowFields(row, violations);
+        return violations;
+    }
 }

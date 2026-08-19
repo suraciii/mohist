@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import { readFileSync, writeFileSync, existsSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
@@ -119,6 +119,18 @@ async function run(mode: BodyMode): Promise<{ last: string | undefined; seen: st
   return { last: seen[seen.length - 1], seen, error: lastError }
 }
 
+async function runUntilIdleTimeout(mode: Exclude<BodyMode, 'normal'>) {
+  vi.useFakeTimers()
+  try {
+    const result = run(mode)
+    await vi.advanceTimersByTimeAsync(IDLE_TIMEOUT_MS + 1)
+    return await result
+  } finally {
+    vi.clearAllTimers()
+    vi.useRealTimers()
+  }
+}
+
 beforeAll(async () => {
   // The patched reader resolves its timeout from this env var at module
   // load; set it before importing so both freshly-patched and
@@ -150,13 +162,13 @@ describe('pi-ai SSE no-event idle timeout patch', () => {
   }, 15_000)
 
   it('settles a stalled stream (no data after payload) with an idle-timeout error', async () => {
-    const result = await run('stall')
+    const result = await runUntilIdleTimeout('stall')
     expect(result.last).toBe('error')
     expect(result.error).toContain('idle timeout')
   }, 15_000)
 
   it('settles a keep-alive stream (comment lines, no events) with an idle-timeout error', async () => {
-    const result = await run('keepalive')
+    const result = await runUntilIdleTimeout('keepalive')
     expect(result.last).toBe('error')
     expect(result.error).toContain('idle timeout')
   }, 15_000)
