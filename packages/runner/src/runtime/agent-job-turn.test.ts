@@ -20,7 +20,13 @@ describe('createAgentSessionEventSink drain bound', () => {
         agentJobId: 'job-1',
       } as unknown as DispatchWorkItem
       const sink = createAgentSessionEventSink(connection, work, new AbortController().signal, 'session-1')
-      sink.observePiEvent({ id: 'evt-1', type: 'tool_call.started', runtimeSessionId: 'rt', workDir: '/w', payload: {} })
+      sink.observePiEvent({
+        id: 'evt-1',
+        type: 'tool_call.started',
+        runtimeSessionId: 'rt',
+        workDir: '/w',
+        payload: {},
+      })
       await Promise.resolve()
       const drained = sink.drain()
       await vi.advanceTimersByTimeAsync(130_000)

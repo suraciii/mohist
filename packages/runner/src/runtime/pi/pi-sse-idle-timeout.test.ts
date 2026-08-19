@@ -1,9 +1,9 @@
-import { afterAll, beforeAll, describe, expect, it } from "vitest"
-import { readFileSync, writeFileSync, existsSync } from "node:fs"
-import { dirname, join } from "node:path"
-import { fileURLToPath, pathToFileURL } from "node:url"
+import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { readFileSync, writeFileSync, existsSync } from 'node:fs'
+import { dirname, join } from 'node:path'
+import { fileURLToPath, pathToFileURL } from 'node:url'
 // @ts-expect-error the patch script ships without type declarations
-import { applyIdleTimeoutPatch } from "../../../scripts/patch-pi-idle-timeout.mjs"
+import { applyIdleTimeoutPatch } from '../../../scripts/patch-pi-idle-timeout.mjs'
 
 function findUp(startDir: string, name: string): string {
   let dir = startDir
@@ -18,13 +18,10 @@ function findUp(startDir: string, name: string): string {
 
 const piCodingAgentRoot = findUp(
   dirname(fileURLToPath(import.meta.url)),
-  "node_modules/@earendil-works/pi-coding-agent",
+  'node_modules/@earendil-works/pi-coding-agent',
 )
-const SSE_TARGET = join(
-  piCodingAgentRoot,
-  "node_modules/@earendil-works/pi-ai/dist/api/anthropic-messages.js",
-)
-const ORIGINAL = readFileSync(SSE_TARGET, "utf8")
+const SSE_TARGET = join(piCodingAgentRoot, 'node_modules/@earendil-works/pi-ai/dist/api/anthropic-messages.js')
+const ORIGINAL = readFileSync(SSE_TARGET, 'utf8')
 
 const IDLE_TIMEOUT_MS = 3_000
 
@@ -33,63 +30,63 @@ type StreamEvent = {
   reason?: string
   error?: { errorMessage?: string }
 }
-type StreamFn = (
-  model: unknown,
-  context: unknown,
-  options: { client: unknown },
-) => AsyncIterable<StreamEvent>
+type StreamFn = (model: unknown, context: unknown, options: { client: unknown }) => AsyncIterable<StreamEvent>
 
 let stream: StreamFn
 
 const sse = (event: string, data: unknown) => `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`
 
 const payload = [
-  sse("message_start", {
-    type: "message_start",
+  sse('message_start', {
+    type: 'message_start',
     message: {
-      id: "msg_1",
-      type: "message",
-      role: "assistant",
-      model: "test",
+      id: 'msg_1',
+      type: 'message',
+      role: 'assistant',
+      model: 'test',
       content: [],
       stop_reason: null,
       stop_sequence: null,
       usage: { input_tokens: 5, output_tokens: 0 },
     },
   }),
-  sse("content_block_start", { type: "content_block_start", index: 0, content_block: { type: "text", text: "" } }),
-  sse("content_block_delta", { type: "content_block_delta", index: 0, delta: { type: "text_delta", text: "hi" } }),
-  sse("content_block_stop", { type: "content_block_stop", index: 0 }),
-  sse("message_delta", { type: "message_delta", delta: { stop_reason: "end_turn", stop_sequence: null }, usage: { output_tokens: 5 } }),
-  sse("message_stop", { type: "message_stop" }),
-].join("")
+  sse('content_block_start', { type: 'content_block_start', index: 0, content_block: { type: 'text', text: '' } }),
+  sse('content_block_delta', { type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text: 'hi' } }),
+  sse('content_block_stop', { type: 'content_block_stop', index: 0 }),
+  sse('message_delta', {
+    type: 'message_delta',
+    delta: { stop_reason: 'end_turn', stop_sequence: null },
+    usage: { output_tokens: 5 },
+  }),
+  sse('message_stop', { type: 'message_stop' }),
+].join('')
 
 const model = {
-  provider: "test",
-  id: "test-model",
-  api: { endpoint: "http://localhost", key: "k" },
+  provider: 'test',
+  id: 'test-model',
+  api: { endpoint: 'http://localhost', key: 'k' },
   maxTokens: 1000,
-  input: ["text"],
+  input: ['text'],
   cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0, tiers: [] },
 }
 const context = {
-  messages: [{ role: "user", content: [{ type: "text", text: "hi" }] }],
-  systemPrompt: "sys",
+  messages: [{ role: 'user', content: [{ type: 'text', text: 'hi' }] }],
+  systemPrompt: 'sys',
   tools: [],
 }
 
 const keepAliveTimers = new Set<ReturnType<typeof setInterval>>()
 
-type BodyMode = "normal" | "stall" | "keepalive"
+type BodyMode = 'normal' | 'stall' | 'keepalive'
 function makeBody(mode: BodyMode): ReadableStream {
   return new ReadableStream({
     start(controller) {
       controller.enqueue(new TextEncoder().encode(payload))
-      if (mode === "normal") {
+      if (mode === 'normal') {
         controller.close()
-      } else if (mode === "keepalive") {
+      } else if (mode === 'keepalive') {
         const timer = setInterval(() => {
-          controller.enqueue(new TextEncoder().encode(": keep-alive\n\n"))
+          controller.enqueue(new TextEncoder().encode(': keep-alive\n\n'))
         }, 20)
         keepAliveTimers.add(timer)
       }
@@ -112,10 +109,10 @@ async function run(mode: BodyMode): Promise<{ last: string | undefined; seen: st
   let lastError: string | undefined
   for await (const event of events) {
     seen.push(event.type)
-    if (event.type === "error") {
+    if (event.type === 'error') {
       lastError = event.error?.errorMessage
     }
-    if (event.type === "done" || event.type === "error") {
+    if (event.type === 'done' || event.type === 'error') {
       break
     }
   }
@@ -130,8 +127,8 @@ beforeAll(async () => {
   const result = applyIdleTimeoutPatch(SSE_TARGET, IDLE_TIMEOUT_MS)
   // The postbuild step may have already patched the tree; both states carry
   // the patched behavior under test.
-  if (!result.applied && result.reason !== "already-applied") {
-    throw new Error(`patch failed: ${result.reason ?? "unknown"}`)
+  if (!result.applied && result.reason !== 'already-applied') {
+    throw new Error(`patch failed: ${result.reason ?? 'unknown'}`)
   }
   const mod = (await import(`${pathToFileURL(SSE_TARGET).href}?idle=${Date.now()}`)) as { stream: StreamFn }
   stream = mod.stream
@@ -146,21 +143,21 @@ afterAll(() => {
   writeFileSync(SSE_TARGET, ORIGINAL)
 })
 
-describe("pi-ai SSE no-event idle timeout patch", () => {
-  it("lets a normal full stream complete with done", async () => {
-    const result = await run("normal")
-    expect(result.last).toBe("done")
+describe('pi-ai SSE no-event idle timeout patch', () => {
+  it('lets a normal full stream complete with done', async () => {
+    const result = await run('normal')
+    expect(result.last).toBe('done')
   }, 15_000)
 
-  it("settles a stalled stream (no data after payload) with an idle-timeout error", async () => {
-    const result = await run("stall")
-    expect(result.last).toBe("error")
-    expect(result.error).toContain("idle timeout")
+  it('settles a stalled stream (no data after payload) with an idle-timeout error', async () => {
+    const result = await run('stall')
+    expect(result.last).toBe('error')
+    expect(result.error).toContain('idle timeout')
   }, 15_000)
 
-  it("settles a keep-alive stream (comment lines, no events) with an idle-timeout error", async () => {
-    const result = await run("keepalive")
-    expect(result.last).toBe("error")
-    expect(result.error).toContain("idle timeout")
+  it('settles a keep-alive stream (comment lines, no events) with an idle-timeout error', async () => {
+    const result = await run('keepalive')
+    expect(result.last).toBe('error')
+    expect(result.error).toContain('idle timeout')
   }, 15_000)
 })

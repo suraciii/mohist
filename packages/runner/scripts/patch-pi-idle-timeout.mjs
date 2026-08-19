@@ -25,32 +25,32 @@
  * Apply after `npm install` (postinstall) so it ships inside the runner bundle.
  * Override the default timeout with PI_SSE_IDLE_TIMEOUT_MS.
  */
-import { readFileSync, writeFileSync, existsSync } from "node:fs";
-import { dirname, resolve } from "node:path";
-import { fileURLToPath, pathToFileURL } from "node:url";
+import { readFileSync, writeFileSync, existsSync } from 'node:fs'
+import { dirname, resolve } from 'node:path'
+import { fileURLToPath, pathToFileURL } from 'node:url'
 
-const IDLE_TIMEOUT_MS = Number(process.env.PI_SSE_IDLE_TIMEOUT_MS || 90_000);
+const IDLE_TIMEOUT_MS = Number(process.env.PI_SSE_IDLE_TIMEOUT_MS || 90_000)
 
-const here = fileURLToPath(new URL(".", import.meta.url));
+const here = fileURLToPath(new URL('.', import.meta.url))
 
 // Locate the pi-ai Anthropic SSE file by walking up from this script. The
 // workspace hoists pi-ai under the root node_modules while a packaged release
 // keeps it under its own node_modules; both resolve to the same relative
 // pattern from the repo/release root.
 function findPiAiTarget(startDir) {
-  let dir = startDir;
+  let dir = startDir
   for (;;) {
     const candidate = resolve(
       dir,
-      "node_modules/@earendil-works/pi-coding-agent/node_modules/@earendil-works/pi-ai/dist/api/anthropic-messages.js",
-    );
-    if (existsSync(candidate)) return candidate;
-    const parent = dirname(dir);
-    if (parent === dir) return null;
-    dir = parent;
+      'node_modules/@earendil-works/pi-coding-agent/node_modules/@earendil-works/pi-ai/dist/api/anthropic-messages.js',
+    )
+    if (existsSync(candidate)) return candidate
+    const parent = dirname(dir)
+    if (parent === dir) return null
+    dir = parent
   }
 }
-const DEFAULT_TARGET = findPiAiTarget(here);
+const DEFAULT_TARGET = findPiAiTarget(here)
 
 /**
  * Apply the no-event idle timeout to the given anthropic-messages.js file.
@@ -59,12 +59,12 @@ const DEFAULT_TARGET = findPiAiTarget(here);
  */
 export function applyIdleTimeoutPatch(targetPath, idleTimeoutMs = IDLE_TIMEOUT_MS) {
   if (!existsSync(targetPath)) {
-    return { applied: false, reason: "target-not-found" };
+    return { applied: false, reason: 'target-not-found' }
   }
-  let source = readFileSync(targetPath, "utf8");
+  let source = readFileSync(targetPath, 'utf8')
 
-  if (source.includes("lastEventAt")) {
-    return { applied: false, reason: "already-applied" };
+  if (source.includes('lastEventAt')) {
+    return { applied: false, reason: 'already-applied' }
   }
 
   const oldHead = `    let buffer = "";
@@ -76,7 +76,7 @@ export function applyIdleTimeoutPatch(targetPath, idleTimeoutMs = IDLE_TIMEOUT_M
             const { value, done } = await reader.read();
             if (done) {
                 break;
-            }`;
+            }`
 
   const newHead = `    let buffer = "";
     const IDLE_TIMEOUT_MS = Number(process.env.PI_SSE_IDLE_TIMEOUT_MS || ${idleTimeoutMs});
@@ -125,64 +125,64 @@ export function applyIdleTimeoutPatch(targetPath, idleTimeoutMs = IDLE_TIMEOUT_M
             const { value, done } = await readWithIdleTimeout();
             if (done) {
                 break;
-            }`;
+            }`
 
   if (!source.includes(oldHead)) {
-    return { applied: false, reason: "loop-pattern-not-found" };
+    return { applied: false, reason: 'loop-pattern-not-found' }
   }
-  source = source.replace(oldHead, newHead);
+  source = source.replace(oldHead, newHead)
 
   const oldYield = `                const event = decodeSseLine(consumed.line, state);
                 if (event) {
                     yield event;
-                }`;
+                }`
 
   const newYield = `                const event = decodeSseLine(consumed.line, state);
                 if (event) {
                     lastEventAt = Date.now();
                     clearIdleTimer();
                     yield event;
-                }`;
+                }`
 
   if (!source.includes(oldYield)) {
-    return { applied: false, reason: "yield-pattern-not-found" };
+    return { applied: false, reason: 'yield-pattern-not-found' }
   }
-  source = source.replace(oldYield, newYield);
+  source = source.replace(oldYield, newYield)
 
   const oldFinally = `    finally {
         reader.releaseLock();
-    }`;
+    }`
 
   const newFinally = `    finally {
         clearIdleTimer();
         currentReadReject = null;
         reader.releaseLock();
-    }`;
+    }`
 
   if (source.includes(oldFinally)) {
-    source = source.replace(oldFinally, newFinally);
+    source = source.replace(oldFinally, newFinally)
   }
 
-  writeFileSync(targetPath, source);
-  return { applied: true };
+  writeFileSync(targetPath, source)
+  return { applied: true }
 }
 
-const isMain = process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href;
+const isMain = process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href
 if (isMain) {
   if (DEFAULT_TARGET === null) {
     // The pi-ai dependency may not be installed in this tree (e.g. runner
     // built standalone). The patch is only required for deployment; do not
     // fail the build.
-    console.warn("[patch-pi-idle-timeout] pi-ai not found, skipping (build only, not deployment)");
-    process.exit(0);
+    console.warn('[patch-pi-idle-timeout] pi-ai not found, skipping (build only, not deployment)')
+    process.exit(0)
   }
-  const result = applyIdleTimeoutPatch(DEFAULT_TARGET, IDLE_TIMEOUT_MS);
+  const result = applyIdleTimeoutPatch(DEFAULT_TARGET, IDLE_TIMEOUT_MS)
   if (result.applied) {
-    console.log(`[patch-pi-idle-timeout] applied no-event idle timeout of ${IDLE_TIMEOUT_MS}ms`);
-  } else if (result.reason === "already-applied") {
-    console.log("[patch-pi-idle-timeout] already applied, skipping");
+    console.log(`[patch-pi-idle-timeout] applied no-event idle timeout of ${IDLE_TIMEOUT_MS}ms`)
+  } else if (result.reason === 'already-applied') {
+    console.log('[patch-pi-idle-timeout] already applied, skipping')
   } else {
-    console.error(`[patch-pi-idle-timeout] failed: ${result.reason}`);
-    process.exit(1);
+    console.error(`[patch-pi-idle-timeout] failed: ${result.reason}`)
+    process.exit(1)
   }
 }

@@ -140,7 +140,12 @@ describe('PiRuntime runTurn deadline', () => {
         },
         controller.signal,
       )
-      const pending = turn.then(() => false, () => false).catch(() => false)
+      const pending = turn
+        .then(
+          () => false,
+          () => false,
+        )
+        .catch(() => false)
       await vi.advanceTimersByTimeAsync(25)
       const settled = await Promise.race([pending, Promise.resolve(true)])
       // Give the microtask queue a chance to settle the turn after the timer.
