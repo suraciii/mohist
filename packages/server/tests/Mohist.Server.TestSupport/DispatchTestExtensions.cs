@@ -1,6 +1,7 @@
 using Microsoft.Extensions.DependencyInjection;
 using Mohist.Server.Runner.Grains;
 using Mohist.Server.Runner.Services;
+using Mohist.Server.Infrastructure.Data.Workflow;
 using Mohist.Server.Workflow.Domain.Run;
 using Mohist.Server.Workflow.Grains;
 using Orleans;
@@ -66,13 +67,46 @@ public static class DispatchTestExtensions
         WorkResult result)
     {
         var active = await grains.GetGrain<IWorkflowGrain>(workflowRunId).GetActiveWorkAsync(workId);
+        var taskRunId = active?.WorkType == WorkItemTypes.Task ? active.TaskRunId : null;
+        var run = taskRunId is null
+            ? null
+            : await ResolveScoped<WorkflowRunQuerier>(serviceProvider).LoadAsync(workflowRunId);
+        var task = taskRunId is null
+            ? null
+            : run?.FindTaskForRecoveryReceipt(taskRunId, workId);
+        var settlement = task?.AgentResultSettlement;
+        var runtime = task?.Uses switch
+        {
+            "mohist/opencode" => "opencode",
+            "mohist/pi" => "pi",
+            _ => null,
+        };
+        AgentExecutionBinding? binding = null;
+        if (taskRunId is not null && runtime is not null && settlement is not null)
+        {
+            binding = new AgentExecutionBinding(
+                taskRunId,
+                workId,
+                runnerId,
+                settlement.AgentSessionId ?? $"test-session:{workId}",
+                settlement.AgentTurnId ?? $"test-turn:{workId}",
+                settlement.Runtime ?? runtime,
+                settlement.RuntimeSessionId ?? $"test-runtime-session:{workId}");
+            await grains.GetGrain<IWorkflowGrain>(workflowRunId).BindAgentExecutionAsync(binding);
+        }
+
         var report = ResolveScoped<WorkflowReportService>(serviceProvider);
         await report.ReportAsync(
             runnerId,
             workflowRunId,
             workId,
-            active?.WorkType == WorkItemTypes.Task ? active.TaskRunId : null,
-            result);
+            taskRunId,
+            result,
+            CancellationToken.None,
+            binding?.AgentSessionId,
+            binding?.AgentTurnId,
+            binding?.Runtime,
+            binding?.RuntimeSessionId);
     }
 
     /// <summary>
