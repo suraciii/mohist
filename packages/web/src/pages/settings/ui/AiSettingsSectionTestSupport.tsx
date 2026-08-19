@@ -9,28 +9,37 @@ let opencodeRuntime: { mode: string; command: string; model: string | null; note
   model: 'openai/gpt-4',
   note: '',
 }
-let availableModels: { models: string[]; modelVariants: Record<string, string[]> } = {
+let availableModels: {
+  models: string[]
+  modelVariants: Record<string, string[]>
+  reasoningEfforts: Record<string, string[]>
+} = {
   models: ['openai/gpt-4', 'anthropic/claude-3', 'google/gemini-2'],
   modelVariants: {},
+  reasoningEfforts: {},
 }
 let workflowVariables: Record<string, unknown> = { vars: null, stages: null }
-let workflowProfiles: Array<Record<string, unknown>> = [{
+let workflowProfiles: Array<Record<string, unknown>> = [
+  {
+    projectId: 'proj_test',
+    profileId: 'mohist/local',
+    name: 'Default',
+    description: '',
+    sourceProvenance: 'BuiltIn',
+    isBuiltIn: true,
+    definitionSource: null,
+    agentRuntime: 'opencode',
+  },
+]
+let projectWorkflowProfile = {
   projectId: 'proj_test',
-  profileId: 'mohist/local',
-  name: 'Default',
-  description: '',
-  sourceProvenance: 'BuiltIn',
-  isBuiltIn: true,
-  definitionSource: null,
-  agentRuntime: 'opencode',
-}]
-let projectWorkflowProfile = { projectId: 'proj_test', defaultWorkflowProfileId: 'mohist/local', disabledWorkflowProfileIds: [] as string[] }
+  defaultWorkflowProfileId: 'mohist/local',
+  disabledWorkflowProfileIds: [] as string[],
+}
 export const patchCaptures: Array<Record<string, unknown>> = []
 
 export const aiSettingsSectionHandlers = [
-  http.get('/api/opencode/runtime', () =>
-    HttpResponse.json({ success: true, data: opencodeRuntime }),
-  ),
+  http.get('/api/opencode/runtime', () => HttpResponse.json({ success: true, data: opencodeRuntime })),
   http.get('/api/projects/:projectId/opencode/models', () =>
     HttpResponse.json({ success: true, data: availableModels }),
   ),
@@ -40,9 +49,7 @@ export const aiSettingsSectionHandlers = [
   http.get('/api/projects/:projectId/workflow-profile/default', () =>
     HttpResponse.json({ success: true, data: projectWorkflowProfile }),
   ),
-  http.get('/api/projects/:projectId/variables', () =>
-    HttpResponse.json({ success: true, data: workflowVariables }),
-  ),
+  http.get('/api/projects/:projectId/variables', () => HttpResponse.json({ success: true, data: workflowVariables })),
   http.patch('/api/projects/:projectId/variables', async ({ request }) => {
     const body = await request.json()
     patchCaptures.push(body as Record<string, unknown>)
@@ -57,24 +64,29 @@ export function renderSection() {
 interface ArrangeOptions {
   models?: string[]
   modelVariants?: Record<string, string[]>
+  reasoningEfforts?: Record<string, string[]>
   defaultModel?: string | null
   defaultVariant?: string | null
+  defaultReasoningEffort?: string | null
   stageModels?: Record<string, string> | null
   stageModelVariants?: Record<string, string> | null
+  stageReasoningEfforts?: Record<string, string> | null
   profileRuntime?: 'opencode' | 'pi' | null
 }
 
 export function arrangeLoaded(options: ArrangeOptions = {}) {
   const models = options.models ?? ['openai/gpt-4', 'anthropic/claude-3', 'google/gemini-2']
   const modelVariants = options.modelVariants ?? {}
+  const reasoningEfforts = options.reasoningEfforts ?? {}
 
-  availableModels = { models, modelVariants }
+  availableModels = { models, modelVariants, reasoningEfforts }
   opencodeRuntime = { mode: 'local', command: 'opencode', model: 'openai/gpt-4', note: '' }
 
   const vars: Record<string, unknown> = {}
   if (options.defaultModel) {
     const agent: Record<string, unknown> = { type: 'opencode', model: options.defaultModel }
     if (options.defaultVariant) agent.variant = options.defaultVariant
+    if (options.defaultReasoningEffort) agent.reasoningEffort = options.defaultReasoningEffort
     vars.agent = agent
   }
 
@@ -84,6 +96,8 @@ export function arrangeLoaded(options: ArrangeOptions = {}) {
       const agent: Record<string, unknown> = { type: 'opencode', model }
       const variant = options.stageModelVariants?.[stage]
       if (variant) agent.variant = variant
+      const reasoningEffort = options.stageReasoningEfforts?.[stage]
+      if (reasoningEffort) agent.reasoningEffort = reasoningEffort
       stages[stage] = { vars: { agent } }
     }
   }
@@ -92,34 +106,50 @@ export function arrangeLoaded(options: ArrangeOptions = {}) {
     vars: Object.keys(vars).length > 0 ? vars : null,
     stages: Object.keys(stages).length > 0 ? stages : null,
   }
-  workflowProfiles = [{
+  workflowProfiles = [
+    {
+      projectId: 'proj_test',
+      profileId: 'mohist/local',
+      name: 'Default',
+      description: '',
+      sourceProvenance: 'BuiltIn',
+      isBuiltIn: true,
+      definitionSource: null,
+      agentRuntime: options.profileRuntime === undefined ? 'opencode' : options.profileRuntime,
+    },
+  ]
+  projectWorkflowProfile = {
     projectId: 'proj_test',
-    profileId: 'mohist/local',
-    name: 'Default',
-    description: '',
-    sourceProvenance: 'BuiltIn',
-    isBuiltIn: true,
-    definitionSource: null,
-    agentRuntime: options.profileRuntime === undefined ? 'opencode' : options.profileRuntime,
-  }]
-  projectWorkflowProfile = { projectId: 'proj_test', defaultWorkflowProfileId: 'mohist/local', disabledWorkflowProfileIds: [] }
+    defaultWorkflowProfileId: 'mohist/local',
+    disabledWorkflowProfileIds: [],
+  }
 }
 
 export function resetAiSettingsSectionTestState() {
   vi.clearAllMocks()
   patchCaptures.length = 0
-  availableModels = { models: ['openai/gpt-4', 'anthropic/claude-3', 'google/gemini-2'], modelVariants: {} }
+  availableModels = {
+    models: ['openai/gpt-4', 'anthropic/claude-3', 'google/gemini-2'],
+    modelVariants: {},
+    reasoningEfforts: {},
+  }
   opencodeRuntime = { mode: 'local', command: 'opencode', model: 'openai/gpt-4', note: '' }
   workflowVariables = { vars: null, stages: null }
-  workflowProfiles = [{
+  workflowProfiles = [
+    {
+      projectId: 'proj_test',
+      profileId: 'mohist/local',
+      name: 'Default',
+      description: '',
+      sourceProvenance: 'BuiltIn',
+      isBuiltIn: true,
+      definitionSource: null,
+      agentRuntime: 'opencode',
+    },
+  ]
+  projectWorkflowProfile = {
     projectId: 'proj_test',
-    profileId: 'mohist/local',
-    name: 'Default',
-    description: '',
-    sourceProvenance: 'BuiltIn',
-    isBuiltIn: true,
-    definitionSource: null,
-    agentRuntime: 'opencode',
-  }]
-  projectWorkflowProfile = { projectId: 'proj_test', defaultWorkflowProfileId: 'mohist/local', disabledWorkflowProfileIds: [] }
+    defaultWorkflowProfileId: 'mohist/local',
+    disabledWorkflowProfileIds: [],
+  }
 }

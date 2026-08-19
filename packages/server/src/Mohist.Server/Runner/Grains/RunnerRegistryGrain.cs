@@ -69,15 +69,24 @@ public class RunnerRegistryGrain : Grain, IRunnerRegistryGrain
     }
 
     public Task<IReadOnlyDictionary<string, string[]>> ListCoderModelVariantsByRuntimeAsync(string runtime)
+        => ListModelValuesByRuntimeAsync(runtime, catalog => catalog.Variants);
+
+    public Task<IReadOnlyDictionary<string, string[]>> ListCoderReasoningEffortsByRuntimeAsync(string runtime)
+        => ListModelValuesByRuntimeAsync(runtime, catalog => catalog.ReasoningEfforts);
+
+    private Task<IReadOnlyDictionary<string, string[]>> ListModelValuesByRuntimeAsync(
+        string runtime,
+        Func<RuntimeCatalogEntry, Dictionary<string, string[]>?> selectValues)
     {
         var aggregated = new Dictionary<string, string[]>(StringComparer.OrdinalIgnoreCase);
         foreach (var runner in _runners.Values)
         {
-            var variants = CatalogFor(runner, runtime)?.Variants;
-            if (variants is null || variants.Count == 0)
+            var catalog = CatalogFor(runner, runtime);
+            var values = catalog is null ? null : selectValues(catalog);
+            if (values is null || values.Count == 0)
                 continue;
 
-            foreach (var entry in variants)
+            foreach (var entry in values)
             {
                 if (string.IsNullOrWhiteSpace(entry.Key))
                     continue;

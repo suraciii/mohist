@@ -978,8 +978,8 @@ public partial class RunnerGrain : Grain, IRunnerGrain, IRemindable
                 entry.Value.Models is null ? null : [.. entry.Value.Models],
                 CloneMap(entry.Value.Variants),
                 entry.Value.SupportsReasoningEffort,
-                entry.Value.Complete,
-                entry.Value.CapabilityRevision),
+                entry.Value.Complete, entry.Value.CapabilityRevision,
+                CloneMap(entry.Value.ReasoningEfforts)),
             StringComparer.OrdinalIgnoreCase);
     }
 

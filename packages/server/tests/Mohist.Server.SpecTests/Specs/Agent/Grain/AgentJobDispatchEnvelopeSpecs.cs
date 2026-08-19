@@ -49,7 +49,11 @@ public class AgentJobDispatchEnvelopeSpecs : AgentJobGrainTestSupport
                     },
                     SupportsReasoningEffort: true,
                     Complete: true,
-                    CapabilityRevision: "catalog-rev-envelope-1"),
+                    CapabilityRevision: "catalog-rev-envelope-1",
+                    ReasoningEfforts: new Dictionary<string, string[]>
+                    {
+                        ["openai/gpt-5.5"] = ["high"],
+                    }),
             }));
         await runner.ObserveRuntimeReadinessAsync(
             "connection-1",
