@@ -19,7 +19,7 @@ using Mohist.Server.Workflow.Services;
 using Xunit;
 
 namespace Mohist.Server.SpecTests.Specs.Issue.Api;
-[Collection("PlatformIntegration")]
+[Collection("RunnerMutationIntegration")]
 public class IssueCreationSpecs
 {
     private readonly IGrainFactory _grains;

@@ -7,7 +7,6 @@ using Xunit;
 
 namespace Mohist.Server.SpecTests.Specs.Agent.Api;
 
-[Collection("MohistIntegration")]
 public class AgentDefinitionApiSpecs
 {
     private readonly MohistIntegrationFixture _fixture;
@@ -388,65 +387,6 @@ public class AgentDefinitionApiSpecs
         Assert.Equal("active", patched.Status);
         Assert.Equal("still active", patched.Description);
         Assert.True(DateTimeOffset.Parse(patched.UpdatedAt) > before);
-    }
-
-    [Theory]
-    [InlineData("type")]
-    [InlineData("livenessQuietThresholdMs")]
-    [InlineData("probeTimeoutMs")]
-    [InlineData("sessionStartTimeoutMs")]
-    [InlineData("compaction")]
-    public async Task CreateAgent_WithForbiddenAgentConfigKey_Returns400(string forbiddenKey)
-    {
-        var project = await CreateProjectAsync("agent-create-forbidden");
-
-        var agentConfig = new Dictionary<string, object?>
-        {
-            [forbiddenKey] = "value",
-        };
-        using var response = await _client.PostAsJsonAsync(
-            $"/api/projects/{project.Id}/agents",
-            new
-            {
-                name = $"agent-{forbiddenKey}",
-                description = "agent description",
-                instructions = "instructions",
-                agentConfig,
-                skills = Array.Empty<string>(),
-                maxConcurrentRuns = 1,
-            });
-
-        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
-        var body = await response.Content.ReadFromJsonAsync<JsonElement>();
-        Assert.Equal("invalid_agent_config", body.GetProperty("code").GetString());
-        var error = body.GetProperty("error").GetString() ?? string.Empty;
-        Assert.Contains($"agentConfig.{forbiddenKey}", error);
-    }
-
-    [Theory]
-    [InlineData("type")]
-    [InlineData("livenessQuietThresholdMs")]
-    [InlineData("probeTimeoutMs")]
-    public async Task PatchAgent_WithForbiddenAgentConfigKey_Returns400(string forbiddenKey)
-    {
-        var project = await CreateProjectAsync("agent-patch-forbidden");
-        var created = await _client.PostDataAsync<AgentDto>(
-            $"/api/projects/{project.Id}/agents", NewAgent("patch-target"));
-
-        var agentConfig = new Dictionary<string, object?>
-        {
-            [forbiddenKey] = "value",
-        };
-        using var response = await _client.PatchAsJsonAsync(
-            $"/api/projects/{project.Id}/agents/{created.Id}",
-            new
-            {
-                agentConfig,
-            });
-
-        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
-        var body = await response.Content.ReadFromJsonAsync<JsonElement>();
-        Assert.Equal("invalid_agent_config", body.GetProperty("code").GetString());
     }
 
     private async Task<ProjectDto> CreateProjectAsync(string prefix) =>

@@ -21,7 +21,6 @@ namespace Mohist.Server.SpecTests.Specs.Auth;
 /// credentials stay bound to their RunnerId: any path, hub query or
 /// header self-declaring another runner is rejected at the auth layer.
 /// </summary>
-[Collection("IntegrationMisc")]
 public sealed class ScopeAuthorizationSpecs(MohistIntegrationFixture fixture)
 {
     [Fact]

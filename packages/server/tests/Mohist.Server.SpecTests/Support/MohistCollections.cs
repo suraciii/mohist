@@ -5,7 +5,10 @@ using Mohist.Server.SpecTests.Specs.Workflow;
 using Mohist.Server.SpecTests.Specs.Workflow.Grain;
 using Mohist.Server.SpecTests.Specs.Slack;
 using Mohist.Server.SpecTests.Specs.GitHub;
+using Mohist.Server.SpecTests.Specs.Runner.Api;
 using Xunit;
+
+[assembly: AssemblyFixture(typeof(Mohist.Server.SpecTests.Support.MohistIntegrationFixture))]
 
 namespace Mohist.Server.SpecTests.Support;
 
@@ -20,73 +23,38 @@ public class SlackLeaseRoutesCollection : ICollectionFixture<SlackAdapterLeaseRo
 [CollectionDefinition("SlackControlPlaneRoutes")]
 public class SlackControlPlaneRoutesCollection : ICollectionFixture<SlackControlPlaneRoutesFixture>;
 
-// Parallel integration collections. Each shares one MohistIntegrationFixture
-// (one in-memory silo + one TestServer web host), so the collections run
-// concurrently without opening host ports. Within a collection the
-// classes still run serially (xUnit semantics), so max parallelism equals the
-// number of these collections. Cluster-scoped state that looks global
-// (RunnerRegistryKeys.Global, IManagementGrain.ForceActivationCollection,
-// cross-class FakeTimeProvider.Advance) lives inside each collection's own
-// cluster/fixture, so it never crosses collection boundaries and does not
-// require DisableParallelization. See design/testing.md "Server Spec Parallelism".
+// Full-stack HTTP/Orleans specs receive the assembly fixture directly. Their
+// default per-class collections remain available for parallel scheduling.
 
-[CollectionDefinition("MohistIntegration")]
-public class MohistIntegrationCollection : ICollectionFixture<MohistIntegrationFixture>;
+[CollectionDefinition("PublicProjectionIntegration")]
+public class PublicProjectionIntegrationCollection
+    : ICollectionFixture<PublicProjectionIntegrationFixture>;
 
-[CollectionDefinition("SlackReplyAnchorIngress")]
-public class SlackReplyAnchorIngressCollection : ICollectionFixture<MohistIntegrationFixture>;
+[CollectionDefinition("RunnerMutationIntegration")]
+public class RunnerMutationIntegrationCollection : ICollectionFixture<MohistIntegrationFixture>;
 
-[CollectionDefinition("AgentLaunchObservationRoutes", DisableParallelization = true)]
-public class AgentLaunchObservationRoutesCollection : ICollectionFixture<MohistIntegrationFixture>;
+// Specs whose contract depends on process- or cluster-wide state share one
+// dedicated host per resource domain. Each domain is serial while independent
+// domains and ordinary project-scoped specs continue to run in parallel.
+[CollectionDefinition("LaunchIntegration")]
+public class LaunchIntegrationCollection : ICollectionFixture<IsolatedMohistIntegrationFixture>;
 
-[CollectionDefinition("DirectApiJobRead", DisableParallelization = true)]
-public class DirectApiJobReadCollection : ICollectionFixture<MohistIntegrationFixture>;
+[CollectionDefinition("SessionControlIntegration")]
+public class SessionControlIntegrationCollection : ICollectionFixture<IsolatedMohistIntegrationFixture>;
 
-[CollectionDefinition("PlatformIntegration")]
-public class PlatformIntegrationCollection : ICollectionFixture<MohistIntegrationFixture>;
+[CollectionDefinition("WorkflowRuntimeIntegration")]
+public class WorkflowRuntimeIntegrationCollection : ICollectionFixture<IsolatedMohistIntegrationFixture>;
 
-[CollectionDefinition("IntegrationIssue")]
-public class IntegrationIssueCollection : ICollectionFixture<MohistIntegrationFixture>;
-
-[CollectionDefinition("IssueLifecycle")]
-public class IssueLifecycleCollection : ICollectionFixture<MohistIntegrationFixture>;
-
-[CollectionDefinition("IssueProfile")]
-public class IssueProfileCollection : ICollectionFixture<MohistIntegrationFixture>;
-
-[CollectionDefinition("IntegrationApi")]
-public class IntegrationApiCollection : ICollectionFixture<MohistIntegrationFixture>;
-
-[CollectionDefinition("WorkspaceSpecs", DisableParallelization = true)]
-public class WorkspaceSpecsCollection : ICollectionFixture<MohistIntegrationFixture>;
-
-[CollectionDefinition("PathContractRegression", DisableParallelization = true)]
-public class PathContractRegressionCollection : ICollectionFixture<MohistIntegrationFixture>;
-
-[CollectionDefinition("IntegrationSessions")]
-public class IntegrationSessionsCollection : ICollectionFixture<MohistIntegrationFixture>;
+[CollectionDefinition("RepositoryDataUpgrade")]
+public class RepositoryDataUpgradeCollection
+    : ICollectionFixture<Specs.Issue.Api.RepositoryDataUpgradeFixture>;
 
 [CollectionDefinition("AgentStatusHistoryBounded")]
 public class AgentStatusHistoryBoundedCollection
     : ICollectionFixture<Specs.Sessions.AgentStatusHistoryBoundedFixture>;
 
-[CollectionDefinition("IntegrationWorkflow")]
-public class IntegrationWorkflowCollection : ICollectionFixture<MohistIntegrationFixture>;
-
-[CollectionDefinition("IntegrationRunner")]
-public class IntegrationRunnerCollection : ICollectionFixture<MohistIntegrationFixture>;
-
 [CollectionDefinition("GitHubFeed")]
 public class GitHubFeedCollection : ICollectionFixture<GitHubFeedFixture>;
-
-[CollectionDefinition("IntegrationMisc")]
-public class IntegrationMiscCollection : ICollectionFixture<MohistIntegrationFixture>;
-
-[CollectionDefinition("PublicSessionEventStream", DisableParallelization = true)]
-public class PublicSessionEventStreamCollection : ICollectionFixture<MohistIntegrationFixture>;
-
-[CollectionDefinition("RunnerEnrollment")]
-public class RunnerEnrollmentCollection : ICollectionFixture<MohistIntegrationFixture>;
 
 // OTLP/query route specs share one OtlpRoutesWebApplicationFactory (web host
 // + in-memory silo). Tests reset the otel
@@ -94,6 +62,9 @@ public class RunnerEnrollmentCollection : ICollectionFixture<MohistIntegrationFi
 // instead of paying a per-test host start.
 [CollectionDefinition("IntegrationTelemetry")]
 public class IntegrationTelemetryCollection : ICollectionFixture<Specs.Telemetry.OtlpRoutesHostFixture>;
+
+[CollectionDefinition("RunnerConfig")]
+public class RunnerConfigCollection : ICollectionFixture<RunnerConfigFixture>;
 
 [CollectionDefinition("MohistDb")]
 public class MohistDbCollection : ICollectionFixture<MohistDbFixture>;
@@ -128,22 +99,18 @@ public class EventPublishingCollection : ICollectionFixture<EventPublishingInteg
 
 /// <summary>
 /// <para>
-/// Serializes the server-OTel-tracing specs. They each stand up a
-/// <see cref="WebApplication"/> with its own OTel
-/// <c>TracerProvider</c>, and every provider subscribes to the same
-/// process-global <c>Microsoft.AspNetCore</c> ActivitySource. When two
-/// OTel tests run in parallel, the inbound-HTTP activities of one host
-/// flow through the other host's recorder and pollute its assertions —
-/// a passing test "no spans under /otel/" can suddenly see spans from
-/// the other test's <c>/api/health</c> request. Running these tests in
-/// a single non-parallel collection guarantees each
-/// <see cref="OtelTestHost"/>'s recorder sees only its own requests.
-/// </para>
-/// <para>
-/// No shared fixture is needed (each test creates its own host), so
-/// <see cref="ICollectionFixture{TFixture}"/> is intentionally not
-/// applied.
+/// Serializes server-OTel-tracing specs. Every tracing provider subscribes to
+/// process-global activity sources, so parallel hosts would pollute each
+/// other's assertions.
 /// </para>
 /// </summary>
 [CollectionDefinition("OtelTracing", DisableParallelization = true)]
 public class OtelTracingCollection;
+
+/// <summary>
+/// Owns the single full Mohist/Orleans host used by OTel integration specs.
+/// Lightweight OTel test hosts stay in <c>OtelTracing</c> so this provider is
+/// never injected into tests that require their own isolated activity pipeline.
+/// </summary>
+[CollectionDefinition("OtelFullStackIntegration", DisableParallelization = true)]
+public class OtelFullStackIntegrationCollection : ICollectionFixture<OtelIntegrationFixture>;

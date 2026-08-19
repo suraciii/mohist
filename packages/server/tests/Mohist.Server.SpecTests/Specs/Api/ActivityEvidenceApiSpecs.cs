@@ -25,7 +25,7 @@ namespace Mohist.Server.SpecTests.Specs.Api;
 /// <c>ActivityEvidenceAssemblerSpecs</c> and exercised without an HTTP
 /// round-trip; see <see cref="Mohist.Server.SpecTests.Specs.AgentOps.ActivityEvidenceAssemblerSpecs"/>.
 /// </summary>
-[Collection("IntegrationApi")]
+[Collection("RunnerMutationIntegration")]
 public class ActivityEvidenceApiSpecs : ProjectEventsApiTestSupport
 {
     public ActivityEvidenceApiSpecs(MohistIntegrationFixture fixture) : base(fixture)

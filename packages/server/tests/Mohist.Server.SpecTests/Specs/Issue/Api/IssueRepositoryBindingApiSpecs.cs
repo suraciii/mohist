@@ -16,7 +16,6 @@ namespace Mohist.Server.SpecTests.Specs.Issue.Api;
 /// binding specs; this file keeps the JSON-shape, status, and
 /// error-code assertions that must be driven through <c>HttpClient</c>.
 /// </summary>
-[Collection("IntegrationIssue")]
 public class IssueRepositoryBindingApiSpecs
 {
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);

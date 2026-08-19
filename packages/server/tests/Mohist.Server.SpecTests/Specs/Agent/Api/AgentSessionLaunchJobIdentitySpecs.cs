@@ -19,7 +19,7 @@ namespace Mohist.Server.SpecTests.Specs.Agent.Api;
 /// <see cref="AgentSessionLaunchValidationRoutesSpecs"/>; this file owns
 /// the identity + exactly-once invariants.
 /// </summary>
-[Collection("MohistIntegration")]
+[Collection("RunnerMutationIntegration")]
 public class AgentSessionLaunchJobIdentitySpecs : AgentSessionLaunchRoutesTestSupport
 {
     public AgentSessionLaunchJobIdentitySpecs(MohistIntegrationFixture fixture) : base(fixture)
@@ -72,10 +72,7 @@ public class AgentSessionLaunchJobIdentitySpecs : AgentSessionLaunchRoutesTestSu
         finally
         {
             if (claim is not null)
-            {
                 await CompleteClaimedAgentJobAsync(runnerId, claim.AgentJobId, claim.WorkId);
-                await DrainDispatchAsync(runnerId);
-            }
             await _fixture.Client.PostAsync($"/api/runner/{runnerId}/unregister", null);
         }
     }
@@ -121,10 +118,7 @@ public class AgentSessionLaunchJobIdentitySpecs : AgentSessionLaunchRoutesTestSu
         finally
         {
             if (claim is not null)
-            {
                 await CompleteClaimedAgentJobAsync(runnerId, claim.AgentJobId, claim.Dispatch.WorkId);
-                await DrainDispatchAsync(runnerId);
-            }
             await _fixture.Client.PostAsync($"/api/runner/{runnerId}/unregister", null);
         }
     }

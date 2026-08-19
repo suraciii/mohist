@@ -20,7 +20,7 @@ using Xunit;
 
 namespace Mohist.Server.SpecTests.Specs.Api;
 
-[Collection("IntegrationApi")]
+[Collection("RunnerMutationIntegration")]
 public partial class AgentSessionInputAttachmentAcceptanceSpecs
 {
     private readonly MohistIntegrationFixture _fixture;
@@ -158,9 +158,8 @@ public partial class AgentSessionInputAttachmentAcceptanceSpecs
             Assert.Equal(upload.Id, descriptor.Id);
             Assert.Equal("snapshot.txt", descriptor.OriginalFileName);
 
-            var snapshot = await PollDispatchForSessionAsync(runnerId, sessionId);
-            var polled = await PollDispatchEnvelopeAsync(runnerId, snapshot.WorkId!);
-            using var withDoc = JsonDocument.Parse(polled.GetProperty("with").GetString()!);
+            var claim = await ClaimPreparedDispatchForSessionAsync(jobId, runnerId, sessionId);
+            using var withDoc = JsonDocument.Parse(claim.Dispatch.With!);
             var attachments = withDoc.RootElement.GetProperty("attachments").EnumerateArray().ToArray();
             var dispatchAttachment = Assert.Single(attachments);
             Assert.Equal(upload.Id, dispatchAttachment.GetProperty("id").GetString());
@@ -168,7 +167,7 @@ public partial class AgentSessionInputAttachmentAcceptanceSpecs
             Assert.Equal("text/plain", dispatchAttachment.GetProperty("contentType").GetString());
             await _fixture.Grains.GetGrain<IAgentJobGrain>(jobId).ReportResultAsync(
                 runnerId,
-                snapshot.WorkId!,
+                claim.WorkId,
                 new WorkResult(Status: "completed", Message: "ok"));
         }
         finally
@@ -327,10 +326,10 @@ public partial class AgentSessionInputAttachmentAcceptanceSpecs
     {
         var jobId = launchData.GetProperty("jobId").GetString()!;
         var sessionId = launchData.GetProperty("sessionId").GetString()!;
-        var dispatch = await PollDispatchForSessionAsync(runnerId, sessionId);
+        var dispatch = await ClaimPreparedDispatchForSessionAsync(jobId, runnerId, sessionId);
         await _fixture.Grains.GetGrain<IAgentJobGrain>(jobId).ReportResultAsync(
             runnerId,
-            dispatch.WorkId!,
+            dispatch.WorkId,
             new WorkResult(Status: "completed", Message: "ok"));
     }
 }

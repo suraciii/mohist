@@ -28,7 +28,7 @@ using Xunit;
 namespace Mohist.Server.SpecTests.Specs.Slack;
 
 [CollectionDefinition("SlackTurnControlInteraction", DisableParallelization = true)]
-public class SlackTurnControlInteractionCollection : ICollectionFixture<MohistIntegrationFixture>;
+public class SlackTurnControlInteractionCollection;
 
 [Collection("SlackTurnControlInteraction")]
 public sealed class SlackTurnControlInteractionSpecs : IAsyncLifetime

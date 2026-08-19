@@ -18,11 +18,12 @@ using Xunit;
 
 namespace Mohist.Server.SpecTests.Specs.Issue.Api;
 
-[Collection("IssueProfile")]
+[Collection("RunnerMutationIntegration")]
 public class IssueWorkspaceRepositoryResolutionSpecs : IAsyncLifetime
 {
     private readonly MohistIntegrationFixture _fixture;
     private readonly HttpClient _client;
+    private readonly List<string> _runnerIds = [];
 
     public IssueWorkspaceRepositoryResolutionSpecs(MohistIntegrationFixture fixture)
     {
@@ -31,7 +32,11 @@ public class IssueWorkspaceRepositoryResolutionSpecs : IAsyncLifetime
     }
 
     public ValueTask InitializeAsync() => ValueTask.CompletedTask;
-    public ValueTask DisposeAsync() => ValueTask.CompletedTask;
+    public async ValueTask DisposeAsync()
+    {
+        foreach (var runnerId in _runnerIds)
+            await _client.PostAsync($"/api/runner/{runnerId}/unregister", null);
+    }
 
     [Fact]
     public async Task GivenProjectRepositoryConfigChanges_AfterIssueCreation_WhenUserOpensWorkspaceDiff_ThenBaseBranchComesFromRunSnapshot()
@@ -221,6 +226,7 @@ public class IssueWorkspaceRepositoryResolutionSpecs : IAsyncLifetime
             hostname = "test-host",
             projectId,
         });
+        _runnerIds.Add(runnerId);
 
         var issue = await _client.GetDataAsync<IssueDto>($"/api/projects/{projectId}/issues/{number}");
         var issueGrain = _fixture.Grains.GetGrain<IIssueGrain>(GrainKey.Issue(new IssueKey(projectId, issue.Number)));

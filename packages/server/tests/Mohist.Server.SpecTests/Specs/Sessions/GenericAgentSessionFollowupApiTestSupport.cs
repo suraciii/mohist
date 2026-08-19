@@ -72,32 +72,6 @@ public abstract class GenericAgentSessionFollowupApiTestSupport : IAsyncLifetime
             .Select(work => $"{work.WorkId}|{work.OwnerKind}|{work.OwnerId}|{work.WorkType}")
             .ToArray();
 
-    protected async Task<(ProjectRef Project, AgentRef Agent, string SessionId, AgentSessionInfo Info)> LaunchGenericSessionAsync(string name)
-    {
-        var project = await CreateProjectAsync(name);
-        var runnerId = _runnerId;
-        var agent = await CreateAgentAsync(project.Id, $"gen-followup-agent-{name}");
-
-        await _fixture.Client.PostOkAsync($"/api/runner/{runnerId}/register", new
-        {
-            capabilities = new[] { "spec/*" },
-            hostname = $"{runnerId}-host",
-            projectId = project.Id,
-            runtimeCatalogs = CapabilityCatalogTestHelpers.Create(),
-        });
-        await _fixture.Client.PatchOkAsync($"/api/runner/{runnerId}", new { slots = 2 });
-
-        using var response = await _fixture.Client.LaunchAgentSessionAsync(project.Id, agent.Id, new { prompt = $"hello from {name}" });
-
-        response.EnsureSuccessStatusCode();
-        var payload = await response.Content.ReadFromJsonAsync<JsonElement>();
-        var sessionId = payload.GetProperty("data").GetProperty("sessionId").GetString()!;
-
-        var grain = _fixture.Grains.GetGrain<IAgentSessionGrain>(sessionId);
-        var info = await grain.GetAsync() ?? throw new InvalidOperationException("session grain returned null");
-        return (project, agent, sessionId, info);
-    }
-
     protected async Task<(ProjectRef Project, string SessionId)> CreateUnboundGenericLaunchSessionAsync(string name)
     {
         var project = await CreateProjectAsync(name);
@@ -116,40 +90,6 @@ public abstract class GenericAgentSessionFollowupApiTestSupport : IAsyncLifetime
             Runtime: "opencode"));
 
         return (project, sessionId);
-    }
-
-    protected async Task<(ProjectRef Project, AgentRef Agent, string SessionId, AgentSessionInfo Info)> LaunchAndOpenGenericSessionAsync(string name)
-    {
-        var launched = await LaunchGenericSessionAsync(name);
-
-        var runnerId = _runnerId;
-        await _fixture.Client.PostOkAsync(
-            $"/api/runner/{runnerId}/agent-sessions/{launched.Project.Id}/{launched.SessionId}/open",
-            new
-            {
-                workId = $"work-{Guid.NewGuid():N}",
-                workType = "task",
-                stage = "Build",
-                title = $"session for {name}",
-                issueNumber = 1,
-            });
-
-        // Attach the physical session so AgentRuntimeSessionId is set;
-        // StatusName() requires this for the session to read as "active"
-        // once runtime events start flowing (same shape the workflow
-        // followup tests use).
-        await _fixture.Client.PostOkAsync(
-            $"/api/runner/{runnerId}/agent-sessions/{launched.Project.Id}/{launched.SessionId}/attach",
-            new
-            {
-                runtimeSessionId = launched.SessionId,
-                workDir = WorkDirFor(launched.Project.Id),
-                processPid = 1234,
-            });
-
-        var grain = _fixture.Grains.GetGrain<IAgentSessionGrain>(launched.SessionId);
-        var info = await grain.GetAsync() ?? throw new InvalidOperationException("session grain returned null");
-        return (launched.Project, launched.Agent, launched.SessionId, info);
     }
 
     protected async Task<(ProjectRef Project, string SessionId, string RuntimeSessionId)> CreateIdleGenericSessionAsync(string name)
@@ -179,6 +119,21 @@ public abstract class GenericAgentSessionFollowupApiTestSupport : IAsyncLifetime
             WorkDir: WorkDirFor(project.Id)));
 
         return (project, sessionId, runtimeSessionId);
+    }
+
+    protected async Task<(ProjectRef Project, string SessionId, string RuntimeSessionId)> CreateExecutingGenericSessionAsync(string name)
+    {
+        var created = await CreateIdleGenericSessionAsync(name);
+        var turnId = $"turn-{Guid.NewGuid():N}";
+        var grain = _fixture.Grains.GetGrain<IAgentSessionGrain>(created.SessionId);
+        await grain.RecordFollowupTurnAsync(new RecordFollowupTurnCommand(
+            InputId: $"input-{Guid.NewGuid():N}",
+            TurnId: turnId,
+            Prompt: $"active turn for {name}",
+            Source: "spec-setup"));
+        await grain.MarkTurnExecutingAsync(turnId);
+
+        return created;
     }
 
     /// <summary>
@@ -266,38 +221,12 @@ public abstract class GenericAgentSessionFollowupApiTestSupport : IAsyncLifetime
         var projectName = $"gen-followup-{Guid.NewGuid():N}";
         if (projectName.Length > 63) projectName = projectName[..63];
         var project = await _client.CreateProjectWithDefaultRepositoryAsync<ProjectDto>("/api/projects", projectName);
-        await _client.PostOkAsync($"/api/projects/{project.Id}/repositories", new
-        {
-            name = "main",
-            gitUrl = $"file://{Guid.NewGuid():N}",
-            baseBranch = "main",
-            setDefault = true,
-        });
         return new ProjectRef(project.Id);
-    }
-
-    protected async Task<AgentRef> CreateAgentAsync(string projectId, string agentName)
-    {
-        using var response = await _fixture.Client.PostAsJsonAsync(
-            $"/api/projects/{projectId}/agents",
-            new
-            {
-                name = agentName,
-                description = $"description for {agentName}",
-                instructions = $"instructions for {agentName}",
-                agentConfig = new { model = "openai/gpt-5.6" },
-                skills = new[] { "coding" },
-                maxConcurrentRuns = 1,
-            });
-        response.EnsureSuccessStatusCode();
-        var body = await response.Content.ReadFromJsonAsync<JsonElement>();
-        return new AgentRef(body.GetProperty("data").GetProperty("id").GetString()!, agentName);
     }
 
     protected static string WorkDirFor(string projectId) => $"/workspaces/{projectId}";
 
     protected sealed record ProjectRef(string Id);
-    protected sealed record AgentRef(string Id, string Name);
     protected sealed record IssueRef(int Number);
     protected sealed record ProjectDto(string Id, string Name);
     protected sealed record IssueDto(int Number, string Title);

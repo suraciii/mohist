@@ -11,6 +11,7 @@ using Mohist.Server.Api;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
+using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Time.Testing;
 using Mohist.Server.Agent.Grains;
@@ -43,9 +44,12 @@ public class MohistIntegrationFixture : IAsyncLifetime
     private const string VirtualRunnerRoot = "/mohist-tests/runner";
     private const string VirtualSystemUpdateStatePath = "/mohist-tests/system-update.json";
     private const string VirtualLogsPath = "/mohist-tests/logs";
+    private static readonly object WorkspaceCodegenWarmupLock = new();
+    private static Task? _workspaceCodegenWarmup;
     private SqliteConnection _keeper = null!;
     private MohistWebApplicationFactory _factory = null!;
     private readonly bool _otelEnabled;
+    private readonly bool _manualPublicProjection;
     public IGrainFactory Grains => _factory.Services.GetRequiredService<IGrainFactory>();
     public HttpClient Client { get; private set; } = null!;
     public IServiceProvider Services => _factory.Services;
@@ -65,9 +69,10 @@ public class MohistIntegrationFixture : IAsyncLifetime
     {
     }
 
-    protected MohistIntegrationFixture(bool otelEnabled)
+    protected MohistIntegrationFixture(bool otelEnabled, bool manualPublicProjection = false)
     {
         _otelEnabled = otelEnabled;
+        _manualPublicProjection = manualPublicProjection;
     }
 
     public async ValueTask InitializeAsync()
@@ -76,6 +81,7 @@ public class MohistIntegrationFixture : IAsyncLifetime
         ConnectionString = $"Data Source={dbName};Mode=Memory;Cache=Shared";
         _keeper = new SqliteConnection(ConnectionString);
         await _keeper.OpenAsync();
+        MigratedSqliteTemplate.CopyTo(_keeper);
 
         _factory = new MohistWebApplicationFactory(
             ConnectionString,
@@ -83,14 +89,23 @@ public class MohistIntegrationFixture : IAsyncLifetime
             VirtualSystemUpdateStatePath,
             VirtualLogsPath,
             TimeProvider,
-            otelEnabled: _otelEnabled);
+            otelEnabled: _otelEnabled,
+            manualPublicProjection: _manualPublicProjection);
         Client = _factory.CreateClient();
         Client.DefaultRequestHeaders.Add("Authorization", $"Bearer {OperatorToken}");
         Client.DefaultRequestHeaders.Add(
             Mohist.Server.Slack.Services.SlackAdapterOperatorAuthenticator.OperatorIdHeaderName,
             "spec-operator");
         await _factory.EnsureSchemaAsync();
-        await WarmUpWorkspaceCodegenAsync();
+        await EnsureWorkspaceCodegenWarmAsync();
+    }
+
+    private Task EnsureWorkspaceCodegenWarmAsync()
+    {
+        // Orleans serializer codegen is process-wide, so every integration
+        // collection can share the first fixture's completed warm-up.
+        lock (WorkspaceCodegenWarmupLock)
+            return _workspaceCodegenWarmup ??= WarmUpWorkspaceCodegenAsync();
     }
 
     /// <summary>
@@ -147,6 +162,32 @@ public class MohistIntegrationFixture : IAsyncLifetime
     }
 }
 
+/// <summary>
+/// Resource-suite host for specs whose behavior is defined over process or
+/// cluster state rather than a single project.
+/// </summary>
+public sealed class IsolatedMohistIntegrationFixture : MohistIntegrationFixture;
+
+public sealed class PublicProjectionIntegrationFixture : MohistIntegrationFixture
+{
+    public PublicProjectionIntegrationFixture()
+        : base(otelEnabled: false, manualPublicProjection: true)
+    {
+    }
+
+    public async Task DrainPublicProjectionAsync(CancellationToken ct = default)
+    {
+        var engine = Services.GetRequiredService<PublicApiProjectionEngine>();
+        while (await engine.ProcessPendingAsync(ct))
+        {
+        }
+    }
+
+    public Task ProjectSessionAsync(string sessionId, CancellationToken ct = default) =>
+        Services.GetRequiredService<PublicApiProjectionEngine>()
+            .ProcessSessionAsync(sessionId, ct);
+}
+
 public sealed class OtelIntegrationFixture : MohistIntegrationFixture
 {
     public OtelIntegrationFixture()
@@ -163,6 +204,7 @@ public class MohistWebApplicationFactory : WebApplicationFactory<Program>
     private readonly string _logsPath;
     private readonly FakeTimeProvider _timeProvider;
     private readonly bool _otelEnabled;
+    private readonly bool _manualPublicProjection;
     public AgentSessionPersistenceTestProbe Persistence { get; }
     // Keeper for the in-memory OtelDb override; disposed with the factory.
     private SqliteConnection? _otelKeeper;
@@ -175,14 +217,16 @@ public class MohistWebApplicationFactory : WebApplicationFactory<Program>
         string runnerRoot,
         string systemUpdateStatePath,
         FakeTimeProvider? timeProvider = null,
-        bool otelEnabled = false)
+        bool otelEnabled = false,
+        bool manualPublicProjection = false)
         : this(
             connectionString,
             runnerRoot,
             systemUpdateStatePath,
             "/mohist-tests/logs",
             timeProvider,
-            otelEnabled)
+            otelEnabled,
+            manualPublicProjection)
     {
     }
 
@@ -192,7 +236,8 @@ public class MohistWebApplicationFactory : WebApplicationFactory<Program>
         string systemUpdateStatePath,
         string logsPath,
         FakeTimeProvider? timeProvider = null,
-        bool otelEnabled = false)
+        bool otelEnabled = false,
+        bool manualPublicProjection = false)
     {
         _connectionString = connectionString;
         _runnerRoot = runnerRoot;
@@ -200,6 +245,7 @@ public class MohistWebApplicationFactory : WebApplicationFactory<Program>
         _logsPath = logsPath;
         _timeProvider = timeProvider ?? new FakeTimeProvider(new DateTimeOffset(2026, 6, 30, 0, 0, 0, TimeSpan.Zero));
         _otelEnabled = otelEnabled;
+        _manualPublicProjection = manualPublicProjection;
         Persistence = new AgentSessionPersistenceTestProbe(
             () => _timeProvider.Advance(TimeSpan.FromSeconds(1)));
     }
@@ -260,6 +306,19 @@ public class MohistWebApplicationFactory : WebApplicationFactory<Program>
 
         builder.ConfigureTestServices(services =>
         {
+            if (_manualPublicProjection)
+            {
+                for (var index = services.Count - 1; index >= 0; index--)
+                {
+                    var descriptor = services[index];
+                    if (descriptor.ServiceType == typeof(IHostedService)
+                        && descriptor.ImplementationType == typeof(PublicExecutionProjector))
+                    {
+                        services.RemoveAt(index);
+                    }
+                }
+            }
+
             services.RemoveAll<IFileCredentialStore>();
             services.AddSingleton<IFileCredentialStore>(new InMemoryFileCredentialStore());
             for (var index = services.Count - 1; index >= 0; index--)

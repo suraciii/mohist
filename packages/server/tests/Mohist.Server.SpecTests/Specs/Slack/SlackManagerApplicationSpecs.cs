@@ -18,7 +18,6 @@ using DomainAgent = Mohist.Server.Agent.Domain.Agent;
 
 namespace Mohist.Server.SpecTests.Specs.Slack;
 
-[Collection("MohistIntegration")]
 public sealed class SlackManagerApplicationSpecs
 {
     private readonly MohistIntegrationFixture _fixture;

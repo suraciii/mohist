@@ -68,6 +68,7 @@ public sealed class AgentAvailabilityListFixture : IAsyncLifetime
         var connectionString = $"Data Source={dbName};Mode=Memory;Cache=Shared";
         _keeper = new SqliteConnection(connectionString);
         await _keeper.OpenAsync();
+        MigratedSqliteTemplate.CopyTo(_keeper);
 
         _factory = new AvailabilityWebApplicationFactory(
             connectionString,

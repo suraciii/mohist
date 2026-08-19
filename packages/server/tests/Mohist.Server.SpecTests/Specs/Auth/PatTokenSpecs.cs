@@ -19,7 +19,6 @@ namespace Mohist.Server.SpecTests.Specs.Auth;
 /// every token must expire, names are unique among active credentials,
 /// revocation is immediate and list never echoes full values.
 /// </summary>
-[Collection("IntegrationMisc")]
 public sealed class PatTokenSpecs(MohistIntegrationFixture fixture)
 {
     private const string CreatePath = "/api/auth/tokens";

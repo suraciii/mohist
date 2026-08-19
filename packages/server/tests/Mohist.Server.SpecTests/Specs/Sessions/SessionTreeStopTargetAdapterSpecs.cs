@@ -12,12 +12,12 @@ using Xunit;
 
 namespace Mohist.Server.SpecTests.Specs.Sessions;
 
-[Collection("IntegrationSessions")]
+[Collection("SessionControlIntegration")]
 public sealed class SessionTreeStopTargetAdapterSpecs
 {
     private readonly MohistIntegrationFixture _fixture;
 
-    public SessionTreeStopTargetAdapterSpecs(MohistIntegrationFixture fixture)
+    public SessionTreeStopTargetAdapterSpecs(IsolatedMohistIntegrationFixture fixture)
     {
         _fixture = fixture;
     }

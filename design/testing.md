@@ -130,8 +130,29 @@ downstream-call counts rather than elapsed time.
 An xUnit collection is the scheduling unit. Classes inside one collection run
 serially.
 
+- Full-stack specs share one assembly fixture and therefore one apphost. Each
+  test creates a unique project for business state and may run in its class's
+  default collection.
+- Product-global state such as clocks, runner discovery, instrumentation, or
+  hosted dispatchers is not project-isolated. A full-stack class that mutates
+  it belongs to a resource suite with one dedicated apphost. Classes in that
+  suite use unique identities and run serially against the resource. A separate
+  resource suite requires an incompatible host configuration or a disjoint
+  global resource domain with its own reset boundary; a class boundary is never
+  sufficient. Only truly process-static state uses a non-parallel collection.
+  Behavior matrices still move below the full-stack boundary.
+  Large resource suites are partitioned by global resource domain. Each domain
+  owns one dedicated host, while independent domains run in parallel.
+- Specs that deliberately rewind public-projection checkpoints use a dedicated
+  apphost without the background projector and drive complete batches through
+  the projection engine. Command specs project the affected Session directly;
+  only drain-contract specs scan the collection's complete backlog. The
+  hosted-loop contract stays in its own apphost.
+- CI and the canonical local gate do not split classes across processes.
 - Collections express shared fixture lifetime or real isolation needs, never
   speed or cost.
+- A Spec that no longer needs a distinct clock, database, or cluster joins an
+  existing compatible collection; it does not retain a dedicated host.
 - Process-global instrumentation may disable parallelism. Cluster-scoped state
   is per fixture and is not a reason to serialize.
 - `WebApplicationFactory` and `InProcessTestCluster` use in-memory transport and

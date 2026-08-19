@@ -19,7 +19,7 @@ namespace Mohist.Server.SpecTests.Specs.Agent.Api;
 /// pinned at launch time by the launcher, so it is authoritative on
 /// every subsequent runner call.
 /// </summary>
-[Collection("MohistIntegration")]
+[Collection("RunnerMutationIntegration")]
 public class GenericAgentSessionRuntimeOpenAttachSpecs
 {
     private readonly MohistIntegrationFixture _fixture;
