@@ -6,9 +6,12 @@ API also makes response loss recoverable: the caller repeats the same keyed
 request or resumes a persisted Session event stream instead of creating new
 work.
 
-The API is available under `/api/v1`. It uses the existing AgentJob,
-AgentSession, SessionInput, and AgentTurn lifecycle. It does not expose Runner,
-Runtime, workspace, prompt, transcript, or provider details.
+The versioned direct API is available under `/api/v1`. Project default
+configuration and task-first launch use the control-plane `/api/projects`
+routes described below. Task-first launch and versioned direct commands use the
+existing AgentJob, AgentSession, SessionInput, and AgentTurn lifecycle. The
+versioned direct API does not expose Runner, Runtime, workspace, prompt,
+transcript, or provider details.
 
 ## Routes
 
@@ -57,21 +60,24 @@ for how the default resolves into a launch.
 `POST /api/projects/{projectRef}/agent-tasks` starts work for a caller that
 has a task but does not yet need to configure an Agent. The body accepts
 exactly these JSON fields: `prompt`, `attachments`, `context`, `name`,
-`runtime`, `model`, and `variant`. `context` uses the same `issueNumber`,
-`epicNumber`, `repository`, `workspace`, `workspacePath`, and `targetId`
-references as a definition-first launch. The request must include an
-`Idempotency-Key` header. The Server derives missing definition fields,
-materializes the resolved execution configuration, creates the Agent, and
-then uses the canonical AgentJob and AgentSession launch pipeline.
+`runtime`, `model`, `variant`, `allowedSubagentAgentIds`, and
+`maxConcurrentRuns`. A non-null collaborator list contains Agent IDs from the
+same Project. A non-null concurrency limit must be a positive integer. `context`
+uses the same `issueNumber`, `epicNumber`, `repository`, `workspace`,
+`workspacePath`, and `targetId` references as a definition-first launch. The
+request must include an `Idempotency-Key` header. The Server derives missing
+definition fields, materializes the resolved execution configuration, creates
+the Agent, and then uses the canonical AgentJob and AgentSession launch pipeline.
 
 Task-first replay uses the same key space as definition-first launches. A
 retry with the same key and caller-visible inputs returns the original Agent,
 Job, Session, Input, Turn, workspace, attachment result, and canonical URLs.
-A changed prompt, context, attachment list, name, runtime, model, or variant
-returns `409 launch_idempotency_conflict`. A still-converging launch returns
-`503 launch_setup_pending` and keeps the same key. A recorded rejection is
-replayed as the same rejection. Callers must retry a pending launch with the
-original key, not generate a new task.
+A changed prompt, context, attachment list, name, runtime, model, variant,
+collaborator list, or concurrency limit returns `409
+launch_idempotency_conflict`. A still-converging launch returns `503
+launch_setup_pending` and keeps the same key. A recorded rejection is replayed
+as the same rejection. Callers must retry a pending launch with the original
+key, not generate a new task.
 
 ## Authentication
 

@@ -392,8 +392,8 @@ Job completion as a closed conversation or a delivered user goal.
   have work but do not need a preconfigured Agent. It creates the Agent and
   launches its first AgentJob, AgentSession, SessionInput, and AgentTurn in one
   accepted request. Use `--prompt-file` instead of `--prompt`, and optionally
-  pass `--attach`, `--name`, `--runtime`, `--model`, `--reasoning-effort`,
-  `--variant`, `--issue`, `--epic`, `--repo`, and `--workspace`. A Project default execution
+  pass `--attach`, `--name`, `--runtime`, `--model`, `--variant`, `--issue`,
+  `--epic`, `--repo`, and `--workspace`. A Project default execution
   configuration supplies omitted execution hints; without one, pass the
   execution hints explicitly. `--runtime` accepts `opencode` or `pi`, and
   `--model` uses `provider/model`. The command sends the CLI launch origin and

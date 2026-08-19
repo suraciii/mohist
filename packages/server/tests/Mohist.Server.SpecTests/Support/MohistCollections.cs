@@ -28,7 +28,7 @@ public class SlackControlPlaneRoutesCollection : ICollectionFixture<SlackControl
 // (RunnerRegistryKeys.Global, IManagementGrain.ForceActivationCollection,
 // cross-class FakeTimeProvider.Advance) lives inside each collection's own
 // cluster/fixture, so it never crosses collection boundaries and does not
-// require DisableParallelization. See design/testing.md "Spec parallelism".
+// require DisableParallelization. See design/testing.md "Server Spec Parallelism".
 
 [CollectionDefinition("MohistIntegration")]
 public class MohistIntegrationCollection : ICollectionFixture<MohistIntegrationFixture>;

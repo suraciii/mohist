@@ -77,21 +77,6 @@ proxy, analyze failures, summarize progress, create follow-up Issues, and notify
 the owner. See [Agent Event Routing](docs/event-routing.md) and
 [Agent Supervision](docs/agent-supervision.md).
 
-## Implementation Status
-
-Available: the five-stage Workflow with approval points; Epics, composite
-Issues, and sub-issues; the `mo` CLI; the authenticated Web UI; direct Mohist
-Agent launch and sessions; the External Agent API with personal access token
-(PAT) authentication; Hermes notifications, event routing, Agent supervision,
-mentions, and Issue watch; Agent Skills execution and concurrency limits;
-OpenCode and Pi Runtimes, the GitHub PR Profile, and Slack Agent Connections;
-metrics, route diagnostics, and the application log contract.
-
-Integration in progress: Workflow Profile UI migration; automatic observability
-anomaly notifications.
-
-Not implemented or proposal: Mobile PWA and Web Push.
-
 ## Documentation
 
 Start with [Getting Started](docs/getting-started.md). See
