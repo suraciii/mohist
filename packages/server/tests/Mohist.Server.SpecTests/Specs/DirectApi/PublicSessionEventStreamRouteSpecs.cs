@@ -229,6 +229,8 @@ public sealed class PublicSessionEventStreamRouteSpecs(PublicProjectionIntegrati
         await AssertErrorAsync(response, HttpStatusCode.ServiceUnavailable, DirectApiErrorCodes.ProjectionLag);
         var body = await response.Content.ReadAsStringAsync();
         Assert.DoesNotContain("\"events\"", body, StringComparison.Ordinal);
+
+        await fixture.DrainPublicProjectionAsync();
     }
 
     private async Task<SeededStream> SeedStreamAsync(
@@ -238,6 +240,8 @@ public sealed class PublicSessionEventStreamRouteSpecs(PublicProjectionIntegrati
         var projectId = $"direct-events-{Guid.NewGuid():N}";
         var sessionId = $"session-events-{Guid.NewGuid():N}";
         var agentId = $"agent-events-{Guid.NewGuid():N}";
+        var inputId = $"input-events-{Guid.NewGuid():N}";
+        var turnId = $"turn-events-{Guid.NewGuid():N}";
         var now = fixture.TimeProvider.GetUtcNow().UtcDateTime;
         var observedAt = fixture.TimeProvider.GetUtcNow();
         var session = AgentSession.Create(
@@ -256,16 +260,16 @@ public sealed class PublicSessionEventStreamRouteSpecs(PublicProjectionIntegrati
         {
             Activity = AgentSessionActivity.Active,
             Inputs = [new AgentSessionInputRecord(
-                "input-events-1",
+                inputId,
                 1,
                 "event test input",
                 "direct-test",
                 AgentSessionInputAcceptance.Accepted,
                 now)],
             Turns = [new AgentTurnRecord(
-                "turn-events-1",
+                turnId,
                 1,
-                ["input-events-1"],
+                [inputId],
                 AgentTurnStatus.Executing,
                 null,
                 null,
@@ -329,7 +333,7 @@ public sealed class PublicSessionEventStreamRouteSpecs(PublicProjectionIntegrati
                         Admission = PublicExecutionFieldValues.AdmissionReady,
                         ReasonCode = PublicExecutionFieldValues.Reasons.ContextReset,
                     }, JSON.PublicApi)
-                    : ExecutionPayload(projectId, agentId, sessionId, observedAt, sequence),
+                    : ExecutionPayload(projectId, agentId, sessionId, inputId, turnId, observedAt, sequence),
                 SourceTransition = $"direct-test:{sequence}",
                 RecordedAt = observedAt,
             });
@@ -349,6 +353,8 @@ public sealed class PublicSessionEventStreamRouteSpecs(PublicProjectionIntegrati
         string projectId,
         string agentId,
         string sessionId,
+        string inputId,
+        string turnId,
         DateTimeOffset observedAt,
         long sequence) =>
         JsonSerializer.Serialize(new PublicExecutionRead
@@ -357,8 +363,8 @@ public sealed class PublicSessionEventStreamRouteSpecs(PublicProjectionIntegrati
             AgentId = agentId,
             JobId = null,
             SessionId = sessionId,
-            InputId = "input-events-1",
-            TurnId = "turn-events-1",
+            InputId = inputId,
+            TurnId = turnId,
             Status = PublicExecutionFieldValues.StatusRunning,
             JobStatus = null,
             SessionActivity = PublicExecutionFieldValues.SessionActive,
@@ -384,6 +390,8 @@ public sealed class PublicSessionEventStreamRouteSpecs(PublicProjectionIntegrati
         var projectId = $"direct-events-{Guid.NewGuid():N}";
         var sessionId = $"session-events-{Guid.NewGuid():N}";
         var agentId = $"agent-events-{Guid.NewGuid():N}";
+        var inputId = $"input-events-{Guid.NewGuid():N}";
+        var turnId = $"turn-events-{Guid.NewGuid():N}";
         var now = fixture.TimeProvider.GetUtcNow().UtcDateTime;
 
         await using (var scope = fixture.Services.CreateAsyncScope())
@@ -418,7 +426,7 @@ public sealed class PublicSessionEventStreamRouteSpecs(PublicProjectionIntegrati
                 Inputs =
                 [
                     new AgentSessionInputRecord(
-                        "input-events-1",
+                        inputId,
                         1,
                         "event test input",
                         "direct-test",
@@ -428,9 +436,9 @@ public sealed class PublicSessionEventStreamRouteSpecs(PublicProjectionIntegrati
                 Turns =
                 [
                     new AgentTurnRecord(
-                        "turn-events-1",
+                        turnId,
                         1,
-                        ["input-events-1"],
+                        [inputId],
                         AgentTurnStatus.Executing,
                         null,
                         null,
@@ -441,7 +449,7 @@ public sealed class PublicSessionEventStreamRouteSpecs(PublicProjectionIntegrati
             await sessions.SaveAsync(sessionId, session);
         }
 
-        await fixture.Services.GetRequiredService<PublicProjectionNudge>().NudgeAndWaitAsync();
+        await fixture.DrainPublicProjectionAsync();
         await using (var db = await fixture.Services
             .GetRequiredService<IDbContextFactory<MohistDbContext>>()
             .CreateDbContextAsync())
@@ -485,8 +493,8 @@ public sealed class PublicSessionEventStreamRouteSpecs(PublicProjectionIntegrati
                             AgentId = agentId,
                             JobId = null,
                             SessionId = sessionId,
-                            InputId = "input-events-1",
-                            TurnId = "turn-events-1",
+                            InputId = inputId,
+                            TurnId = turnId,
                             Status = PublicExecutionFieldValues.StatusRunning,
                             JobStatus = null,
                             SessionActivity = PublicExecutionFieldValues.SessionActive,

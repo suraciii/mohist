@@ -320,7 +320,7 @@ public sealed class DirectApiIdempotencySpecs(PublicProjectionIntegrationFixture
             return JsonDocument.Parse(await first.Content.ReadAsStringAsync());
 
         Assert.Equal(HttpStatusCode.ServiceUnavailable, first.StatusCode);
-        await fixture.Services.GetRequiredService<PublicProjectionNudge>().NudgeAndWaitAsync();
+        await fixture.DrainPublicProjectionAsync();
         using var replay = await client.SendAsync(Request(projectId, agentId, body, key));
         Assert.Equal(HttpStatusCode.OK, replay.StatusCode);
         return JsonDocument.Parse(await replay.Content.ReadAsStringAsync());

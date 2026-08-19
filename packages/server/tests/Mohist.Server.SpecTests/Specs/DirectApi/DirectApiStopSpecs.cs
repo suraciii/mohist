@@ -217,8 +217,21 @@ public sealed class DirectApiStopSpecs(PublicProjectionIntegrationFixture fixtur
         string key,
         string? expectedStatus = null)
     {
-        await fixture.Services.GetRequiredService<PublicProjectionNudge>().NudgeAndWaitAsync();
-        using var response = await client.SendAsync(StopRequest(projectId, turnId, key));
+        await fixture.DrainPublicProjectionAsync();
+        using var first = await client.SendAsync(StopRequest(projectId, turnId, key));
+        if (first.IsSuccessStatusCode)
+            return await ReadSuccessfulStopAsync(first, expectedStatus);
+
+        await AssertErrorAsync(first, HttpStatusCode.ServiceUnavailable, DirectApiErrorCodes.ProjectionLag);
+        await fixture.DrainPublicProjectionAsync();
+        using var replay = await client.SendAsync(StopRequest(projectId, turnId, key));
+        return await ReadSuccessfulStopAsync(replay, expectedStatus);
+    }
+
+    private static async Task<JsonDocument> ReadSuccessfulStopAsync(
+        HttpResponseMessage response,
+        string? expectedStatus)
+    {
         response.EnsureSuccessStatusCode();
         var body = await response.Content.ReadAsStringAsync();
         var document = JsonDocument.Parse(body);

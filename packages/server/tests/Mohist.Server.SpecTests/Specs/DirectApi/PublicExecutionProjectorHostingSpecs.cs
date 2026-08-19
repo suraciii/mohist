@@ -17,8 +17,8 @@ namespace Mohist.Server.SpecTests.Specs.DirectApi;
 /// nudge raised by a canonical write path is enough for the projection
 /// to catch up from the checkpoint — without any caller involvement.
 /// </summary>
-[Collection("PublicProjectionIntegration")]
-public sealed class PublicExecutionProjectorHostingSpecs(PublicProjectionIntegrationFixture fixture)
+public sealed class PublicExecutionProjectorHostingSpecs(IsolatedMohistIntegrationFixture fixture)
+    : IClassFixture<IsolatedMohistIntegrationFixture>
 {
     [Fact]
     public async Task NudgedHostedProjector_CatchesUpFromTheCheckpoint()

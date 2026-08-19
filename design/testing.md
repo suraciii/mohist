@@ -141,6 +141,9 @@ serially.
   collections and may run concurrently. Only truly process-static state uses
   a non-parallel collection. Behavior matrices still move below the full-stack
   boundary.
+- Specs that deliberately rewind public-projection checkpoints use a dedicated
+  apphost without the background projector and drive complete batches through
+  the projection engine. The hosted-loop contract stays in its own apphost.
 - CI and the canonical local gate do not split classes across processes.
 - Collections express shared fixture lifetime or real isolation needs, never
   speed or cost.

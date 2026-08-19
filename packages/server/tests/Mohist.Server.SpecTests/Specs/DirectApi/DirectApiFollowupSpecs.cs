@@ -601,8 +601,7 @@ public sealed class DirectApiFollowupSpecs(PublicProjectionIntegrationFixture fi
 
     private async Task NudgeProjectorAsync()
     {
-        await using var scope = fixture.Services.CreateAsyncScope();
-        await scope.ServiceProvider.GetRequiredService<PublicProjectionNudge>().NudgeAndWaitAsync();
+        await fixture.DrainPublicProjectionAsync();
     }
 
     private async Task<int> MappingCountAsync()
