@@ -10,12 +10,13 @@ using Xunit;
 
 namespace Mohist.Server.SpecTests.Specs.Api;
 
+[Collection("WorkspaceIntegration")]
 public class WorkspaceSpecs
 {
     private readonly HttpClient _client;
     private readonly MohistIntegrationFixture _fixture;
 
-    public WorkspaceSpecs(MohistIntegrationFixture fixture)
+    public WorkspaceSpecs(IsolatedMohistIntegrationFixture fixture)
     {
         _fixture = fixture;
         _client = fixture.Client;

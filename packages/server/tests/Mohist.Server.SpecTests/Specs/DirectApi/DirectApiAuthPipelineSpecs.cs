@@ -4,6 +4,7 @@ using System.Text;
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
+using Mohist.Server.Api.DirectApi;
 using Mohist.Server.Auth.Domain;
 using Mohist.Server.Infrastructure.Data.Auth;
 using Mohist.Server.Infrastructure.Data.Db;
@@ -291,7 +292,8 @@ public sealed class DirectApiAuthPipelineSpecs(MohistIntegrationFixture fixture)
         var grantlessOperator = await CreatePatAsync(scope: "operator");
         var readonlyWriter = await CreatePatAsync(scope: "readonly", projectIds: [projectId]);
 
-        var before = await SnapshotCanonicalStateAsync();
+        const string idempotencyKey = "direct-spec-zero-effects";
+        var before = await SnapshotCanonicalStateAsync(projectId, outOfGrantProject, idempotencyKey);
 
         var battery = new List<(HttpClient Client, HttpMethod Method, string Path)>
         {
@@ -315,7 +317,7 @@ public sealed class DirectApiAuthPipelineSpecs(MohistIntegrationFixture fixture)
                     ? new StringContent("""{"text":"Investigate."}""", Encoding.UTF8, "application/json")
                     : null,
             };
-            request.Headers.Add("Idempotency-Key", "direct-spec-zero-effects");
+            request.Headers.Add("Idempotency-Key", idempotencyKey);
             using var response = await client.SendAsync(request);
             client.Dispose();
 
@@ -324,7 +326,7 @@ public sealed class DirectApiAuthPipelineSpecs(MohistIntegrationFixture fixture)
                 $"{method} {path} answered {response.StatusCode}; the battery must be rejected.");
         }
 
-        var after = await SnapshotCanonicalStateAsync();
+        var after = await SnapshotCanonicalStateAsync(projectId, outOfGrantProject, idempotencyKey);
         Assert.Equal(before, after);
     }
 
@@ -350,23 +352,32 @@ public sealed class DirectApiAuthPipelineSpecs(MohistIntegrationFixture fixture)
             resourceId);
 
     /// <summary>
-    /// The durable state a launch, follow-up, or stop could possibly
-    /// touch. The idempotency and public projection tables land with
-    /// T-002/T-004; the pipeline-order guarantee this suite pins — no
-    /// endpoint delegate runs on 401/403 — is what keeps those writers
-    /// out of these paths as they arrive.
+    /// The scenario-owned durable state that a rejected launch or follow-up
+    /// could touch. Other Specs may legitimately mutate the shared host, so
+    /// global row counts cannot express this claim.
     /// </summary>
-    private async Task<(int Jobs, int JobEvents, int Sessions, int SessionEvents, int Credentials)>
-        SnapshotCanonicalStateAsync()
+    private async Task<(int Jobs, int Sessions, int IdempotencyMappings)> SnapshotCanonicalStateAsync(
+        string projectId,
+        string outOfGrantProject,
+        string idempotencyKey)
     {
         await using var scope = fixture.Services.CreateAsyncScope();
         var db = scope.ServiceProvider.GetRequiredService<MohistDbContext>();
+        var launchScope = DirectApiWriteValidation.LaunchScopeKey(projectId, "agent_1", idempotencyKey);
+        var outOfGrantLaunchScope = DirectApiWriteValidation.LaunchScopeKey(
+            outOfGrantProject,
+            "agent_1",
+            idempotencyKey);
+        var followupScope = DirectApiWriteValidation.FollowupScopeKey("session_1", idempotencyKey);
         return (
-            await db.AgentJobs.CountAsync(),
-            await db.AgentJobEvents.CountAsync(),
-            await db.AgentSessions.CountAsync(),
-            await db.AgentSessionEvents.CountAsync(),
-            await db.Credentials.CountAsync());
+            await db.AgentJobs.CountAsync(row =>
+                row.ProjectId == projectId || row.ProjectId == outOfGrantProject),
+            await db.AgentSessions.CountAsync(row =>
+                row.LabelProjectId == projectId || row.LabelProjectId == outOfGrantProject),
+            await db.DirectApiIdempotencyMappings.CountAsync(row =>
+                row.ScopeKey == launchScope
+                || row.ScopeKey == outOfGrantLaunchScope
+                || row.ScopeKey == followupScope));
     }
 
     private static async Task AssertDirectErrorAsync(

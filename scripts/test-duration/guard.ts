@@ -32,6 +32,7 @@ import {
   suiteDeadlinesAt,
   type SuiteDeadlines,
 } from './deadline.js'
+import { planIdentity, selectApplicationTracks, selectRepositoryTracks, validatePlan } from './plan.js'
 import {
   buildLedgerEnvironment,
   createExecutionRunId,
@@ -47,12 +48,11 @@ import { parseAssemblyName, resolveApphostPath, resolveDiscoveryCommand, resolve
 import { nativeProcessTreeOps, terminateProcessTree, type ProcessTreeOps } from './process-tree.js'
 import { scheduleLanes, type LaneSpec, type RunningLane } from './scheduler.js'
 import { resolveSpawnCommand } from './spawn-command.js'
-import { nativeCalendarSource, nativeTimeSource } from './time.js'
+import { nativeTimeSource } from './time.js'
 import type {
   CurrentExecutionIdentity,
   ExecutionLedgerExpectation,
   SuiteConfig,
-  TestCase,
   TrackConfig,
   TrackEvaluation,
   TrackRun,
@@ -264,7 +264,6 @@ const nativeTimeoutScheduler: TimeoutScheduler = {
 
 export interface GuardRuntime {
   readonly now: () => number
-  readonly calendarNow?: () => Date
   readonly timeoutScheduler?: TimeoutScheduler
   readonly processTreeOps?: ProcessTreeOps
   readonly abortSignal?: AbortSignal
@@ -272,19 +271,6 @@ export interface GuardRuntime {
 
 const nativeGuardRuntime: GuardRuntime = {
   now: nativeTimeSource.now,
-  calendarNow: nativeCalendarSource.now,
-}
-
-export function calendarNowFor(runtime: Pick<GuardRuntime, 'calendarNow'>): () => Date {
-  return runtime.calendarNow ?? nativeCalendarSource.now
-}
-
-export function evaluateTrackAtCalendarDate(
-  track: TrackConfig,
-  cases: readonly TestCase[],
-  runtime: Pick<GuardRuntime, 'calendarNow'>,
-): TrackEvaluation {
-  return evaluateTrack(track, cases, calendarNowFor(runtime)())
 }
 
 export function reportEvaluationFailureReason(
@@ -480,7 +466,12 @@ interface PlannedLane {
 }
 
 function laneResources(track: TrackConfig): string[] {
-  return ['host', track.kind === 'vitest' ? 'node' : 'dotnet', ...(track.id === 'server-spec' ? ['server-spec'] : [])]
+  return [
+    'host',
+    track.kind === 'vitest' ? 'node' : 'dotnet',
+    ...(track.resources ?? []),
+    ...(track.id === 'server-spec' ? ['server-spec'] : []),
+  ]
 }
 
 function withLaneConstraints(
@@ -884,7 +875,6 @@ export function evaluateTrackArtifacts(
   track: TrackConfig,
   artifacts: TrackArtifactReader,
   run?: TrackRun,
-  today: Date = new Date(),
   currentIdentity?: CurrentExecutionIdentity,
 ): TrackEvaluation {
   if (run?.cancelled) {
@@ -924,9 +914,9 @@ export function evaluateTrackArtifacts(
       if (evidence.errors.length > 0) {
         return failedEvaluation(track, `execution ledger contract failed: ${evidence.errors.join('; ')}`)
       }
-      return evaluateTrack(track, evidence.cases, today)
+      return evaluateTrack(track, evidence.cases)
     }
-    return evaluateTrack(track, trxCases, today)
+    return evaluateTrack(track, trxCases)
   } catch (error) {
     return failedEvaluation(track, `could not read report ${track.report}: ${(error as Error).message}`)
   }
@@ -936,7 +926,6 @@ function evaluateFromPlans(
   track: TrackConfig,
   plans: readonly PlannedLane[],
   runsByLane: ReadonlyMap<string, TrackRun>,
-  runtime: Pick<GuardRuntime, 'calendarNow'>,
   artifactRoot: string,
   currentIdentity?: CurrentExecutionIdentity,
 ): TrackEvaluation {
@@ -953,7 +942,6 @@ function evaluateFromPlans(
           readFileSync(path === track.report ? plan.reportPath! : resolve(artifactRoot, path), 'utf8'),
       },
       run,
-      calendarNowFor(runtime)(),
       currentIdentity,
     )
   }
@@ -977,7 +965,7 @@ function evaluateFromPlans(
       return failedEvaluation(track, `could not read report ${plan.reportPath}: ${(error as Error).message}`)
     }
   }
-  return evaluateTrackAtCalendarDate(track, cases, runtime)
+  return evaluateTrack(track, cases)
 }
 
 async function readSavedTrackIdentity(
@@ -1077,24 +1065,30 @@ function focusedFlow(csprojPath: string, className: string): number {
 interface Args {
   mode: 'run' | 'check' | 'focused'
   tracks: string[]
+  application?: string
+  repository: boolean
   all: boolean
   artifactRoot?: string
   runRoot?: string
   suiteDeadlineMs?: number
   suiteDeadlineAtMs?: number
   requireBuildStamp: boolean
+  requireEnforced: boolean
   focused?: { csproj: string; className: string }
 }
 
 export function parseArgs(argv: readonly string[]): Args {
   const tracks: string[] = []
   let mode: 'run' | 'check' | 'focused' = 'run'
+  let application: string | undefined
+  let repository = false
   let all = false
   let artifactRoot: string | undefined
   let runRoot: string | undefined
   let suiteDeadlineMs: number | undefined
   let suiteDeadlineAtMs: number | undefined
   let requireBuildStamp = false
+  let requireEnforced = false
   let focused: { csproj: string; className: string } | undefined
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i]
@@ -1102,6 +1096,9 @@ export function parseArgs(argv: readonly string[]): Args {
     else if (arg === '--all') all = true
     else if (arg === '--track') tracks.push(argv[++i])
     else if (arg.startsWith('--track=')) tracks.push(arg.slice('--track='.length))
+    else if (arg === '--application') application = argv[++i] ?? ''
+    else if (arg.startsWith('--application=')) application = arg.slice('--application='.length)
+    else if (arg === '--repository') repository = true
     else if (arg === '--artifact-root') artifactRoot = argv[++i]
     else if (arg.startsWith('--artifact-root=')) artifactRoot = arg.slice('--artifact-root='.length)
     else if (arg === '--run-root') runRoot = argv[++i]
@@ -1112,6 +1109,7 @@ export function parseArgs(argv: readonly string[]): Args {
     else if (arg.startsWith('--suite-deadline-at-ms='))
       suiteDeadlineAtMs = Number(arg.slice('--suite-deadline-at-ms='.length))
     else if (arg === '--require-build-stamp') requireBuildStamp = true
+    else if (arg === '--require-enforced') requireEnforced = true
     else if (arg === 'focused') {
       mode = 'focused'
       const csproj = argv[i + 1]
@@ -1126,7 +1124,20 @@ export function parseArgs(argv: readonly string[]): Args {
       }
     }
   }
-  return { mode, tracks, all, artifactRoot, runRoot, suiteDeadlineMs, suiteDeadlineAtMs, requireBuildStamp, focused }
+  return {
+    mode,
+    tracks,
+    application,
+    repository,
+    all,
+    artifactRoot,
+    runRoot,
+    suiteDeadlineMs,
+    suiteDeadlineAtMs,
+    requireBuildStamp,
+    requireEnforced,
+    focused,
+  }
 }
 
 function isMatchingCanonicalBuild(root: string): boolean {
@@ -1182,12 +1193,15 @@ export async function main(
   const {
     mode,
     tracks,
+    application,
+    repository,
     all,
     artifactRoot: artifactRootArg,
     runRoot: runRootArg,
     suiteDeadlineMs: requestedDeadlineMs,
     suiteDeadlineAtMs: requestedDeadlineAtMs,
     requireBuildStamp,
+    requireEnforced,
     focused,
   } = parseArgs(argv)
 
@@ -1201,7 +1215,7 @@ export async function main(
 
   const configText = readFileSync(resolve(repoRoot, 'test-duration.config.jsonc'), 'utf8')
   const config = parseSuiteConfig(configText)
-  const errors = validateConfig(config)
+  const errors = [...validateConfig(config), ...validatePlan(config)]
   if (errors.length > 0) {
     process.stderr.write(`invalid test-duration config:\n${errors.map((e) => `  - ${e}`).join('\n')}\n`)
     return 2
@@ -1239,9 +1253,32 @@ export async function main(
     process.stderr.write('--run-root and --artifact-root are mutually exclusive\n')
     return 2
   }
+  if (
+    application === '' ||
+    (application !== undefined && repository) ||
+    (application !== undefined && tracks.length > 0) ||
+    (repository && tracks.length > 0)
+  ) {
+    process.stderr.write('--application, --repository, and --track are mutually exclusive scopes\n')
+    return 2
+  }
 
   let selected: readonly TrackConfig[]
-  if (tracks.length > 0) {
+  if (application !== undefined) {
+    try {
+      selected = selectApplicationTracks(config, application).tracks
+    } catch (error) {
+      process.stderr.write(`${(error as Error).message}\n`)
+      return 2
+    }
+  } else if (repository) {
+    try {
+      selected = selectRepositoryTracks(config).tracks
+    } catch (error) {
+      process.stderr.write(`${(error as Error).message}\n`)
+      return 2
+    }
+  } else if (tracks.length > 0) {
     selected = config.tracks.filter((t) => tracks.includes(t.id))
   } else {
     // Default gate: enforced tracks only (fast, green). --all adds the
@@ -1339,6 +1376,7 @@ export async function main(
     mode === 'run' &&
     !writeJsonEvidence(artifactRoot, 'plan.json', {
       sourceRevision: canonicalRun?.sourceRevision,
+      planIdentity: planIdentity(config),
       suiteStart,
       hardDeadlineAt: deadlines.hardDeadlineAt,
       executionDeadlineAt: deadlines.executionDeadlineAt,
@@ -1465,13 +1503,7 @@ export async function main(
         continue
       }
       try {
-        const evaluation = evaluateFromPlans(
-          track,
-          plansByPolicy.get(track.id) ?? [],
-          runsByTrack,
-          runtime,
-          artifactRoot,
-        )
+        const evaluation = evaluateFromPlans(track, plansByPolicy.get(track.id) ?? [], runsByTrack, artifactRoot)
         const afterEvaluationFailure = reportEvaluationFailureReason(
           runtime.now(),
           deadlines,
@@ -1480,7 +1512,15 @@ export async function main(
         if (afterEvaluationFailure !== undefined) {
           evaluations.push(failedEvaluation(track, afterEvaluationFailure.replace('before', 'during')))
         } else {
-          evaluations.push(evaluation)
+          evaluations.push(
+            requireEnforced && !track.enforce
+              ? {
+                  ...evaluation,
+                  passed: false,
+                  reportError: evaluation.reportError ?? 'track is baseline-pending and is not enforced',
+                }
+              : evaluation,
+          )
         }
       } catch (error) {
         evaluations.push(
@@ -1506,6 +1546,7 @@ export async function main(
     const evidenceWritten = writeJsonEvidence(artifactRoot, 'summary.json', {
       schemaVersion: 1,
       sourceRevision: canonicalRun?.sourceRevision,
+      planIdentity: planIdentity(config),
       suiteStart,
       hardDeadlineAt: deadlines.hardDeadlineAt,
       executionDeadlineAt: deadlines.executionDeadlineAt,
@@ -1540,8 +1581,21 @@ export async function main(
         continue
       }
     }
+    const evaluation = evaluateFromPlans(
+      track,
+      plansByPolicy.get(track.id) ?? [],
+      new Map(),
+      artifactRoot,
+      currentIdentity,
+    )
     evaluations.push(
-      evaluateFromPlans(track, plansByPolicy.get(track.id) ?? [], new Map(), runtime, artifactRoot, currentIdentity),
+      requireEnforced && !track.enforce
+        ? {
+            ...evaluation,
+            passed: false,
+            reportError: evaluation.reportError ?? 'track is baseline-pending and is not enforced',
+          }
+        : evaluation,
     )
   }
   console.log('budget:')

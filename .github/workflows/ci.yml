@@ -12,95 +12,38 @@ on:
 permissions:
   contents: read
 
-# A superseded push to the same PR cancels the obsolete run instead of
-# finishing side by side with the fresh one.
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.event_name == 'pull_request' && github.ref || github.sha }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
-# The Spec suite runs once in one apphost. Collection parallelism is bounded
-# inside xUnit so every CI run exercises the same process and fixture graph.
+env:
+  DOTNET_NOLOGO: true
+  DOTNET_CLI_TELEMETRY: false
+  DOTNET_GENERATE_ASPNET_CERT: false
+
 jobs:
-  changes:
-    name: Detect Changed Paths
+  server:
+    name: Server
     runs-on: ubuntu-latest
-    timeout-minutes: 2
-    permissions:
-      contents: read
-    outputs:
-      dotnet: ${{ steps.filter.outputs.dotnet }}
-      node: ${{ steps.filter.outputs.node }}
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v6
-        with:
-          fetch-depth: 0
-
-      - name: Filter changed paths
-        id: filter
-        shell: bash
-        env:
-          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
-          PUSH_BEFORE_SHA: ${{ github.event.before }}
-        run: |
-          base_ref=""
-          if [[ "$GITHUB_EVENT_NAME" == "pull_request" ]]; then
-            base_ref="$PR_BASE_SHA"
-          elif [[ "$GITHUB_EVENT_NAME" == "push" ]]; then
-            base_ref="$PUSH_BEFORE_SHA"
-          fi
-
-          if [[ -z "$base_ref" || "$base_ref" =~ ^0+$ ]] || ! git rev-parse --verify "${base_ref}^{commit}" >/dev/null 2>&1; then
-            echo "No comparable base; running every track."
-            echo "dotnet=true" >> "$GITHUB_OUTPUT"
-            echo "node=true" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-
-          dotnet=false
-          node=false
-          while IFS= read -r file; do
-            case "$file" in
-              packages/server/*|packages/cli/*|Mohist.sln|Directory.Build.props|Directory.Packages.props|global.json|eng/*|.github/workflows/ci.yml)
-                dotnet=true ;;
-            esac
-            case "$file" in
-              packages/web/*|packages/runner/*|packages/mohist-slack/*|package.json|package-lock.json|tsconfig*.json|biome.json|scripts/*|docs/*|design/*|*.md|.github/workflows/ci.yml)
-                node=true ;;
-            esac
-          done <<< "$(git diff --name-only "$base_ref"...HEAD)"
-
-          echo "dotnet=$dotnet" >> "$GITHUB_OUTPUT"
-          echo "node=$node" >> "$GITHUB_OUTPUT"
-
-  dotnet-spec:
-    name: .NET spec tests
-    needs: [changes]
-    if: github.event_name != 'pull_request' || needs.changes.outputs.dotnet == 'true'
-    runs-on: ubuntu-latest
-    # Setup and compilation consumed about 95s on hosted runners. Keep the
-    # test process's independent 240s hard limit reachable instead of letting
-    # the outer job cancel it around 197s.
-    timeout-minutes: 6
+    timeout-minutes: 8
     env:
-      DOTNET_NOLOGO: true
-      DOTNET_CLI_TELEMETRY: false
-      DOTNET_GENERATE_ASPNET_CERT: false
-
+      TMPDIR: /tmp/mohist-scope
     steps:
       - name: Checkout
         uses: actions/checkout@v6
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22.19.0
+          cache: npm
+          cache-dependency-path: package-lock.json
 
       - name: Setup .NET
         uses: actions/setup-dotnet@v5
         with:
           global-json-file: global.json
 
-      # Project uses Central Package Management (Directory.Packages.props) with
-      # no packages.lock.json, so setup-dotnet's `cache: true` (which requires a
-      # lock file) cannot be used. Cache the restored NuGet global packages
-      # folder keyed on the props hash instead, to skip re-downloading ~120
-      # packages from nuget.org on every run.
       - name: Cache NuGet packages
         uses: actions/cache@v6
         with:
@@ -109,50 +52,90 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-nuget-
 
-      - name: Restore
-        run: timeout --signal=TERM --kill-after=30s 300s dotnet restore Mohist.sln
+      - name: Install dependencies
+        run: npm ci
 
-      - name: Build
-        run: timeout --signal=TERM --kill-after=30s 300s dotnet build packages/server/tests/Mohist.Server.SpecTests/Mohist.Server.SpecTests.csproj -p:SkipWebBuild=true --no-restore
+      - name: Restore .NET
+        run: dotnet restore Mohist.sln
 
-      - name: Test Spec suite
+      - name: Run Server scope
+        run: |
+          mkdir -p "$TMPDIR" artifacts/server
+          npm run test:app -- server
+
+      - name: Capture Server evidence
+        if: always()
         shell: bash
         run: |
-          mkdir -p artifacts/spec
-          set -o pipefail
-          timeout --signal=TERM -k 10s 240s \
-            packages/server/tests/Mohist.Server.SpecTests/bin/Debug/net11.0/Mohist.Server.SpecTests \
-            -noColor -noLogo -noAutoReporters \
-            -parallel collections -parallelAlgorithm conservative -maxThreads 2 \
-            -trx artifacts/spec/spec.trx \
-            2>&1 | tee artifacts/spec/spec.log
-          test -s artifacts/spec/spec.trx
-          grep -Eq 'Total:[[:space:]]*[1-9][0-9]*' artifacts/spec/spec.log
-        timeout-minutes: 5
+          scope_root="$(find "$TMPDIR" -mindepth 1 -maxdepth 1 -type d -name 'mohist-canonical-gate-*' -print -quit 2>/dev/null || true)"
+          if [[ -n "$scope_root" ]]; then cp -a "$scope_root"/. artifacts/server/; fi
 
-      - name: Upload Spec artifacts
+      - name: Upload Server evidence
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: dotnet-spec-${{ github.run_attempt }}
-          path: artifacts/spec
-          if-no-files-found: error
+          name: scope-server
+          path: artifacts
+          if-no-files-found: warn
           retention-days: 7
 
-  dotnet-core:
-    name: .NET build and test
-    needs: [changes]
-    if: github.event_name != 'pull_request' || needs.changes.outputs.dotnet == 'true'
+  web:
+    name: Web
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 8
     env:
-      DOTNET_NOLOGO: true
-      DOTNET_CLI_TELEMETRY: false
-      DOTNET_GENERATE_ASPNET_CERT: false
-
+      TMPDIR: /tmp/mohist-scope
     steps:
       - name: Checkout
         uses: actions/checkout@v6
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22.19.0
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run Web scope
+        run: |
+          mkdir -p "$TMPDIR" artifacts/web
+          npm run test:app -- web
+
+      - name: Capture Web evidence
+        if: always()
+        shell: bash
+        run: |
+          scope_root="$(find "$TMPDIR" -mindepth 1 -maxdepth 1 -type d -name 'mohist-canonical-gate-*' -print -quit 2>/dev/null || true)"
+          if [[ -n "$scope_root" ]]; then cp -a "$scope_root"/. artifacts/web/; fi
+
+      - name: Upload Web evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: scope-web
+          path: artifacts
+          if-no-files-found: warn
+          retention-days: 7
+
+  cli:
+    name: CLI
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    env:
+      TMPDIR: /tmp/mohist-scope
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22.19.0
+          cache: npm
+          cache-dependency-path: package-lock.json
 
       - name: Setup .NET
         uses: actions/setup-dotnet@v5
@@ -167,36 +150,121 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-nuget-
 
-      - name: Restore
-        run: timeout --signal=TERM --kill-after=30s 300s dotnet restore Mohist.sln
+      - name: Install dependencies
+        run: npm ci
 
-      - name: Build
-        run: timeout --signal=TERM --kill-after=30s 300s dotnet build Mohist.sln -p:SkipWebBuild=true --no-restore
+      - name: Restore .NET
+        run: dotnet restore Mohist.sln
 
-      - name: Test
+      - name: Run CLI scope
         run: |
-          timeout --signal=TERM --kill-after=30s 300s dotnet test packages/server/tests/Mohist.Workflow.Definition.Tests/Mohist.Workflow.Definition.Tests.csproj -p:SkipWebBuild=true --no-build
-          timeout --signal=TERM --kill-after=30s 300s dotnet test packages/cli/tests/Mohist.Cli.Tests/Mohist.Cli.Tests.csproj -p:SkipWebBuild=true --no-build
-          timeout --signal=TERM --kill-after=30s 300s dotnet test packages/server/tests/Mohist.Server.UnitTests/Mohist.Server.UnitTests.csproj -p:SkipWebBuild=true --no-build
-          timeout --signal=TERM --kill-after=30s 300s dotnet test packages/server/tests/Mohist.Server.ArchTests/Mohist.Server.ArchTests.csproj -p:SkipWebBuild=true --no-build
-        timeout-minutes: 5
+          mkdir -p "$TMPDIR" artifacts/cli
+          npm run test:app -- cli
 
-      - name: Upload failed test results
-        if: failure()
+      - name: Capture CLI evidence
+        if: always()
+        shell: bash
+        run: |
+          scope_root="$(find "$TMPDIR" -mindepth 1 -maxdepth 1 -type d -name 'mohist-canonical-gate-*' -print -quit 2>/dev/null || true)"
+          if [[ -n "$scope_root" ]]; then cp -a "$scope_root"/. artifacts/cli/; fi
+
+      - name: Upload CLI evidence
+        if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: dotnet-core-test-results-${{ github.run_attempt }}
-          path: "**/TestResults/*.log"
+          name: scope-cli
+          path: artifacts
           if-no-files-found: warn
           retention-days: 7
 
-  node:
-    name: Node build and test
-    needs: [changes]
-    if: github.event_name != 'pull_request' || needs.changes.outputs.node == 'true'
+  runner:
+    name: Runner
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 8
+    env:
+      TMPDIR: /tmp/mohist-scope
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
 
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22.19.0
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run Runner scope
+        run: |
+          mkdir -p "$TMPDIR" artifacts/runner
+          npm run test:app -- runner
+
+      - name: Capture Runner evidence
+        if: always()
+        shell: bash
+        run: |
+          scope_root="$(find "$TMPDIR" -mindepth 1 -maxdepth 1 -type d -name 'mohist-canonical-gate-*' -print -quit 2>/dev/null || true)"
+          if [[ -n "$scope_root" ]]; then cp -a "$scope_root"/. artifacts/runner/; fi
+
+      - name: Upload Runner evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: scope-runner
+          path: artifacts
+          if-no-files-found: warn
+          retention-days: 7
+
+  slack:
+    name: Slack
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    env:
+      TMPDIR: /tmp/mohist-scope
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22.19.0
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run Slack scope
+        run: |
+          mkdir -p "$TMPDIR" artifacts/slack
+          npm run test:app -- slack
+
+      - name: Capture Slack evidence
+        if: always()
+        shell: bash
+        run: |
+          scope_root="$(find "$TMPDIR" -mindepth 1 -maxdepth 1 -type d -name 'mohist-canonical-gate-*' -print -quit 2>/dev/null || true)"
+          if [[ -n "$scope_root" ]]; then cp -a "$scope_root"/. artifacts/slack/; fi
+
+      - name: Upload Slack evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: scope-slack
+          path: artifacts
+          if-no-files-found: warn
+          retention-days: 7
+
+  repository:
+    name: Repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    env:
+      TMPDIR: /tmp/mohist-scope
     steps:
       - name: Checkout
         uses: actions/checkout@v6
@@ -211,49 +279,55 @@ jobs:
           cache-dependency-path: package-lock.json
 
       - name: Install dependencies
-        run: timeout --signal=TERM --kill-after=30s 300s npm ci
+        run: npm ci
 
-      - name: Resolve file size ratchet base
+      - name: Run Repository scope
+        run: |
+          mkdir -p "$TMPDIR" artifacts/repository
+          node --import tsx scripts/test-duration/repository.ts
+
+      - name: Capture Repository evidence
+        if: always()
         shell: bash
-        env:
-          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
-          PUSH_BEFORE_SHA: ${{ github.event.before }}
         run: |
-          base_ref=""
-          if [[ "$GITHUB_EVENT_NAME" == "pull_request" ]]; then
-            base_ref="$PR_BASE_SHA"
-          elif [[ "$GITHUB_EVENT_NAME" == "push" ]]; then
-            base_ref="$PUSH_BEFORE_SHA"
-          fi
+          scope_root="$(find "$TMPDIR" -mindepth 1 -maxdepth 1 -type d -name 'mohist-canonical-gate-*' -print -quit 2>/dev/null || true)"
+          if [[ -n "$scope_root" ]]; then cp -a "$scope_root"/. artifacts/repository/; fi
 
-          if [[ -z "$base_ref" || "$base_ref" =~ ^0+$ ]]; then
-            base_ref="$(git rev-parse HEAD^ 2>/dev/null || git rev-parse HEAD)"
-          fi
+      - name: Upload Repository evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: scope-repository
+          path: artifacts
+          if-no-files-found: warn
+          retention-days: 7
 
-          git rev-parse --verify "${base_ref}^{commit}" >/dev/null
-          printf 'FILE_SIZE_BASE_REF=%s\n' "$base_ref" >> "$GITHUB_ENV"
+  gate:
+    name: Gate
+    if: always()
+    needs: [server, web, cli, runner, slack, repository]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
 
-      - name: Check format
-        run: timeout --signal=TERM --kill-after=30s 60s npm run format:check
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22.19.0
+          cache: npm
+          cache-dependency-path: package-lock.json
 
-      - name: Check file sizes
-        run: timeout --signal=TERM --kill-after=30s 60s npm run check:filesizes
+      - name: Install dependencies
+        run: npm ci
 
-      - name: Check Node architecture scripts
-        run: |
-          timeout --signal=TERM --kill-after=30s 180s npm run archtest
+      - name: Download scope evidence
+        uses: actions/download-artifact@v5
+        with:
+          pattern: scope-*
+          path: artifacts
+          merge-multiple: true
 
-      - name: Check active documentation
-        run: timeout --signal=TERM --kill-after=30s 180s npm run docs:check
-
-      - name: Build
-        run: timeout --signal=TERM --kill-after=30s 300s npm run build --workspaces --if-present
-
-      - name: Test runner
-        run: timeout --signal=TERM --kill-after=30s 180s npm run test:ci -w packages/runner
-
-      - name: Test runner integration
-        run: timeout --signal=TERM --kill-after=30s 180s npm run test:integration -w packages/runner
-
-      - name: Test web
-        run: timeout --signal=TERM --kill-after=30s 180s npm run test:ci -w packages/web
+      - name: Aggregate evidence
+        run: node --import tsx scripts/test-duration/gate.ts --evidence-root "$GITHUB_WORKSPACE/artifacts"

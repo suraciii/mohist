@@ -167,6 +167,7 @@ test('canonical gate retains an external diagnostic root for success, failure, a
           '--run-root',
           probe.root,
           '--require-build-stamp',
+          '--require-enforced',
           '--suite-deadline-at-ms',
           '301000',
         ])

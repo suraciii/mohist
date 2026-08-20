@@ -440,13 +440,21 @@ describe('RunnerHost wires the OpenCodeRuntime lifecycle', () => {
       connected.resolve()
     })
     const controller = new AbortController()
-    const host = hostWithFakeTerminalDelivery()
+    const host = new RunnerHost(
+      {
+        ...hostOptions(),
+        pollIntervalMs: QUIET_INTERVAL_MS,
+        heartbeatIntervalMs: POLL_INTERVAL_MS,
+      },
+      undefined,
+      { terminalTaskLogDelivery: new FakeTerminalTaskLogDeliveryStore() },
+    )
     const run = host.run(controller.signal)
     try {
       await connected.promise
       // Drive a heartbeat tick to confirm the registration body keeps
       // carrying the host-owned discovered snapshot.
-      await vi.advanceTimersByTimeAsync(QUIET_INTERVAL_MS + 10)
+      await vi.advanceTimersByTimeAsync(POLL_INTERVAL_MS + 1)
       const heartbeatBodies = heartbeat.mock.calls.map((call) => call[0] as Record<string, unknown>)
       expect(heartbeatBodies.length).toBeGreaterThan(0)
       for (const body of heartbeatBodies) {

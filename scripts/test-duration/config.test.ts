@@ -17,8 +17,7 @@ const SAMPLE = `{
       "deadlineMs": 60000,
       "enforce": true,
       "rules": [
-        { "id": "unit", "absoluteMs": 50, "percentile": 95, "percentileMs": 50,
-          "allowlist": [{ "id": "slow", "observedMs": 120, "reason": "governed", "owner": "team", "deadline": "2026-11-30" }] }
+        { "id": "unit", "percentile": 95, "percentileMs": 50 }
       ]
     }
   ]
@@ -34,7 +33,7 @@ test('stripJsonc removes line and block comments without touching strings', () =
 test('parseSuiteConfig parses commented JSONC', () => {
   const config = parseSuiteConfig(SAMPLE)
   assert.equal(config.suiteDeadlineMs, 300000)
-  assert.equal(config.tracks[0].rules[0].allowlist[0].id, 'slow')
+  assert.equal(config.tracks[0].rules[0].percentileMs, 50)
 })
 
 test('validateConfig accepts a well-formed enforce track with a default rule', () => {
@@ -214,48 +213,11 @@ test('validateConfig requires the last rule to be the default catch-all', () => 
           reportFormat: 'trx',
           deadlineMs: 100,
           enforce: true,
-          rules: [{ id: 'spec', namePattern: 'Specs\\.', absoluteMs: 500 }],
+          rules: [{ id: 'spec', namePattern: 'Specs\\.' }],
         },
       ],
     }),
   )
   const errors = validateConfig(config)
   assert.ok(errors.some((e) => e.includes('default catch-all')))
-})
-
-test('validateConfig rejects allowlist entries missing governance fields', () => {
-  const config = parseSuiteConfig(
-    JSON.stringify({
-      suiteDeadlineMs: 1000,
-      tracks: [
-        {
-          id: 't',
-          kind: 'report-only',
-          report: 'r',
-          reportFormat: 'trx',
-          deadlineMs: 100,
-          enforce: true,
-          rules: [
-            {
-              id: 'unit',
-              absoluteMs: 50,
-              allowlist: [
-                { id: 'both', pattern: 'x', observedMs: 80, reason: 'both', owner: 'o', deadline: '2026-11-30' },
-                { id: 'noreason', observedMs: 80, owner: 'o', deadline: '2026-11-30' },
-                { id: 'noowner', observedMs: 80, reason: 'r', deadline: '2026-11-30' },
-                { id: 'nodeadline', observedMs: 80, reason: 'r', owner: 'o' },
-                { id: 'baddate', observedMs: 80, reason: 'r', owner: 'o', deadline: 'not-a-date' },
-              ],
-            },
-          ],
-        },
-      ],
-    }),
-  )
-  const errors = validateConfig(config)
-  assert.ok(errors.some((e) => e.includes('both id and pattern')))
-  assert.ok(errors.some((e) => e.includes('"noreason" needs a reason')))
-  assert.ok(errors.some((e) => e.includes('"noowner" needs an owner')))
-  assert.ok(errors.some((e) => e.includes('"nodeadline" needs a valid ISO date deadline')))
-  assert.ok(errors.some((e) => e.includes('"baddate" needs a valid ISO date deadline')))
 })

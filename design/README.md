@@ -17,7 +17,7 @@ changing a document in `design/`.
 - [domain-analysis.md](domain-analysis.md) — Domain analysis and context mapping: subdomain split, bounded-context relations, dependency invariants.
 - [conventions.md](conventions.md) — Naming, layering, variable conventions, certainty vocabulary (facts, claims, settlement).
 - [cli.md](cli.md) — Command language for humans and agents: domain ownership, progressive help / Skill context, field-selection output, error and reliability contract.
-- [testing.md](testing.md) — Executable Product and Design Specs; ownership-based L0 and L1 placement; hermetic Resources, shift-left feedback, shared local and CI commands, duration budgets, and application-level gates. Gate run-directory, DAG, and lane internals live in [`../scripts/test-duration/README.md`](../scripts/test-duration/README.md).
+- [testing.md](testing.md) — Executable Product and Design Specs; ownership-based L0 and L1 placement; hermetic Resources, shift-left feedback, local validation commands, application-owned CI evidence, duration budgets, and the final Gate. Gate run-directory, DAG, and lane internals live in [`../scripts/test-duration/README.md`](../scripts/test-duration/README.md).
 - [observability.md](observability.md) — Observability signal split, resource budget, degradation rules, high-frequency path cost constraints.
 - [eventbus.md](eventbus.md) — Event bus: CloudEvent subscription contract + single dispatcher reliable at-least-once notification.
 - [event-protocol.md](event-protocol.md) — Event protocol: three-axis envelope model, business lineage stamping matrix, match expressions (CEL subset), conformance.

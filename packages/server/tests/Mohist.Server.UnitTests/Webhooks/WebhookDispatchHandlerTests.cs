@@ -227,7 +227,7 @@ public sealed class WebhookDispatchHandlerTests
             await connection.OpenAsync();
             var options = new DbContextOptionsBuilder<MohistDbContext>().UseSqlite(connection).Options;
             await using var context = new MohistDbContext(options);
-            await context.Database.MigrateAsync();
+            await context.Database.EnsureCreatedAsync();
             return new TestDatabase(connection, options);
         }
 

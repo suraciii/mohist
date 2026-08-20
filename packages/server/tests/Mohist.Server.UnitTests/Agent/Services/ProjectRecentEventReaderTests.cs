@@ -4,6 +4,7 @@ using Microsoft.EntityFrameworkCore;
 using Mohist.Server.Agent.Services;
 using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Infrastructure.Data.Events;
+using Mohist.Server.UnitTests.Support;
 using Xunit;
 
 namespace Mohist.Server.UnitTests.Agent.Services;
@@ -16,9 +17,9 @@ public sealed class ProjectRecentEventReaderTests
         await using var connection = new SqliteConnection("Data Source=:memory:");
         await connection.OpenAsync();
         var options = new DbContextOptionsBuilder<MohistDbContext>().UseSqlite(connection).Options;
+        SqliteSchemaTemplate.CopyModelSchemaTo(connection);
         await using (var db = new MohistDbContext(options))
         {
-            await db.Database.EnsureCreatedAsync();
             db.IssueEvents.AddRange(
                 Row(1, "p", "one", "2026-01-01T00:00:00Z"),
                 Row(2, "q", "other", "2026-01-01T00:02:00Z"),

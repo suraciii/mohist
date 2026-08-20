@@ -12,14 +12,15 @@ using Xunit;
 
 namespace Mohist.Server.SpecTests.Specs.Sessions;
 
+[Collection("AgentPathAmplificationIntegration")]
 public sealed class AgentPathAmplificationSpecs
 {
     private static readonly string[] AmplificationFields =
         ["candidates", "databaseCalls", "downstreamCalls", "processed", "transcriptRecords"];
-    private readonly MohistIntegrationFixture _fixture;
+    private readonly IsolatedMohistIntegrationFixture _fixture;
     private readonly HttpClient _client;
 
-    public AgentPathAmplificationSpecs(MohistIntegrationFixture fixture)
+    public AgentPathAmplificationSpecs(IsolatedMohistIntegrationFixture fixture)
     {
         _fixture = fixture;
         _client = fixture.Client;

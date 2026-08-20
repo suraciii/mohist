@@ -3,6 +3,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Time.Testing;
 using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Infrastructure.Slack;
+using Mohist.Server.UnitTests.Support;
 using Xunit;
 
 namespace Mohist.Server.UnitTests.Slack;
@@ -60,8 +61,7 @@ public sealed class SlackThreadLaunchReservationStoreTests
         var options = new DbContextOptionsBuilder<MohistDbContext>()
             .UseSqlite(keeper)
             .Options;
-        using (var db = new MohistDbContext(options))
-            db.Database.EnsureCreated();
+        SqliteSchemaTemplate.CopyModelSchemaTo(keeper);
 
         return new Harness(
             new SlackThreadLaunchReservationStore(new TestDbContextFactory(options), new FakeTimeProvider(FixedNow)),
