@@ -1,0 +1,44 @@
+## Codebase Patterns
+
+- Slack Socket events are reduced to an allowlisted `SlackEnvelope`; raw Slack event objects, tokens, URLs, and unrelated message fields must not cross the adapter boundary.
+- `apiAppId` identifies the receiving Socket App. Bot authors are represented separately as nullable nested `authorBot` metadata with `appId`, `botId`, `botUserId`, and `identityConflict`.
+- Adapter-generated envelopes always include `senderKind`; Server DTOs keep `SenderKind` nullable for compatibility with direct callers that predate the field. A missing sender is accepted at Manager HTTP ingress only for an explicit Bot classification.
+- `event.app_id` and `event.bot_id` take precedence when present; `bot_profile.app_id` and `bot_profile.id` are fallbacks. Disagreement preserves the event-side value but sets `identityConflict`, allowing later Server admission to fail closed.
+- Bot `event.user` is author Bot-user metadata, never `senderSlackUserId`; human sender identity is null for Bot and unknown events.
+- Manager transport projects `appId` from `apiAppId` and forwards `senderKind`, nullable `senderSlackUserId`, and `authorBot` independently. Connection transport forwards the complete envelope.
+- The adapter already acknowledges after a definite ingress result, renders only backpressure responses, and drains deliveries afterward. An `ignored` result therefore acknowledges once without a rejection mutation while preserving normal delivery draining.
+
+## T-001
+
+- Added `SlackBotAuthorMetadata` to the TypeScript envelope and Server Slack DTO contracts.
+- Added Manager and Agent-shaped normalization fixtures, optional Bot-user propagation, conflicting source-field coverage, App-less Bot coverage, raw-field leakage checks, transport forwarding coverage, and ignored-result acknowledgement/draining coverage.
+- Added a temporary Manager service null-sender guard that preserves the existing non-Bot path without inventing a human ID; T-002 must move managed-Bot admission ahead of this guard and all existing Manager authorization/inbox processing.
+
+## Verification
+
+- Baseline adapter event and transport suites passed before implementation: 13 tests.
+- Focused adapter event and transport suites passed after implementation: 18 tests.
+- Full `packages/mohist-slack` typecheck, build, and test suite passed: 7 files, 75 tests.
+- `Mohist.Server` builds with `SkipWebBuild=true`; Server Slack specification suite passes.
+- `git diff --check` passes.
+
+## T-002
+
+- Added `SlackManagedBotAdmissionService` as a scoped, read-only Server service. It queries the active workspace enrollment only for explicitly classified Bot events with usable, non-conflicting author App/Bot-user metadata, then matches the Manager identity or every enrollment Agent App with non-empty identity, `DeletedAt == null`, workspace match, and `AppLifecycle != deleted`. Binding state is intentionally ignored.
+- Manager ingress evaluates managed-Bot admission after message identity validation and before direct-message, receiving-App authorization, sender validation, inbox admission, claims, actor access, conversation processing, and outbox creation. Managed matches return an ignored result without persistence; `kind` is exposed additively alongside the existing `decision` field for adapter compatibility.
+- Focused Server specs cover Manager self and cross-target Agent authors, pending/in-progress/bound/connection-deleted/conflict/deleting transitions, repeated delivery, no inbox/outbox side effects, receiver-only/conflicting/workspace-mismatched/deleted/tombstoned/identity-less authors, source conflict, and third-party Bot compatibility.
+- Native xUnit runner verification passed: `SlackManagedBotAdmissionSpecs` 3 tests and existing Manager ingress/application/conversation suites 9 tests. Server production and SpecTests builds pass with `SkipWebBuild=true`; `git diff --check` passes.
+
+## T-003
+
+- Agent Connection ingress now validates stable message identity and workspace consistency, evaluates `SlackManagedBotAdmissionService`, and returns `ignored` before disabled auditing, sender access, channel/thread routing, DM/session handling, or Agent launch processing. Existing Bot/unknown handling remains unchanged when the author is not managed.
+- A disabled Connection is removed from the runtime lease target view immediately. For a managed Bot event already in flight, the route still performs the lease check first, then revalidates identity/workspace and admits only the exact workspace-scoped managed author for an ignored result; stale non-managed requests retain the existing lease conflict and no disabled audit row is created.
+- Connection specs cover managed Manager and Agent self/cross-target events across DM, channel mention, bound-thread shapes, redelivery, all T-002 Agent App binding/deletion transitions as cross-target authors, disabled suppression without audit, invalid identity/workspace ordering, and human/third-party compatibility. The new class passes 5 tests; existing channel/thread baseline passed 23 tests.
+- Broader native xUnit regression across the new Connection class plus managed admission, Manager ingress/application/conversation, channel/thread, DM mapping, access, and runtime lease specs passed 69 tests. SpecTests build and `git diff --check` pass.
+
+## Review remediation
+
+- M-001 fixed: Manager ingress treats an explicit `senderKind=unknown` as authoritative and rejects it before managed admission, inbox admission, authorization, or conversation processing. The compatibility fallback for omitted `senderKind` remains unchanged. Regression coverage verifies no Manager inbox or outbox rows are created.
+- M-002 fixed: supported Manager and Agent adapter fixtures now require a non-conflicting author App-ID, and explicit supported-shaped fixtures with both App-ID sources absent fail the fixture contract. The generic App-less Bot behavior remains covered separately.
+- Remediation verification: Server specifications passed 3,702 tests; the `mohist-slack` test suite passed 7 files and 76 tests; adapter test typechecking and `git diff --check` passed.
+- The full `npm run verify` canonical gate passed after moving Slack ingress DTO contracts out of the oversized route file; all 9 tracks completed with zero failing, cancelled, or timed-out tests.

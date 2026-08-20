@@ -178,9 +178,10 @@ public static class SlackManagerIngressRoutes
                 || string.IsNullOrWhiteSpace(body.WorkspaceTeamId)
                 || string.IsNullOrWhiteSpace(body.ConversationId)
                 || string.IsNullOrWhiteSpace(body.MessageTs)
-                || string.IsNullOrWhiteSpace(body.SenderSlackUserId))
+                || (string.IsNullOrWhiteSpace(body.SenderSlackUserId)
+                    && !string.Equals(body.SenderKind?.Trim(), "bot", StringComparison.OrdinalIgnoreCase)))
                 return ApiResults.BadRequest(
-                    "appId, workspaceTeamId, conversationId, messageTs, and senderSlackUserId are required.");
+                    "appId, workspaceTeamId, conversationId, messageTs, and a senderSlackUserId for non-Bot events are required.");
             if (HasClientIdentity(body.ExtensionData))
                 return ApiResults.BadRequest(
                     "Client identity fields are not supported by the Manager API.",
@@ -200,7 +201,9 @@ public static class SlackManagerIngressRoutes
                 body.SenderSlackUserId,
                 body.Text ?? string.Empty,
                 body.IsDirectMessage,
-                body.ThreadTs), ct);
+                body.ThreadTs,
+                body.SenderKind,
+                body.AuthorBot), ct);
             return ApiResults.Ok(result);
         });
 
@@ -269,7 +272,9 @@ public sealed class SlackManagerIngressBody
     public string WorkspaceTeamId { get; init; } = string.Empty;
     public string ConversationId { get; init; } = string.Empty;
     public string MessageTs { get; init; } = string.Empty;
-    public string SenderSlackUserId { get; init; } = string.Empty;
+    public string? SenderSlackUserId { get; init; }
+    public string? SenderKind { get; init; }
+    public SlackBotAuthorMetadata? AuthorBot { get; init; }
     public string? Text { get; init; }
     public bool IsDirectMessage { get; init; }
     public string? ThreadTs { get; init; }

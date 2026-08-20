@@ -31,6 +31,14 @@ public readonly record struct SlackMessageIdentity(
     }
 }
 
+public sealed class SlackBotAuthorMetadata
+{
+    public string? AppId { get; init; }
+    public string? BotId { get; init; }
+    public string? BotUserId { get; init; }
+    public bool IdentityConflict { get; init; }
+}
+
 public readonly record struct SlackProviderMessageIdentity(
     [property: JsonPropertyName("conversationId")] string ConversationId,
     [property: JsonPropertyName("messageTs")] string MessageTs)

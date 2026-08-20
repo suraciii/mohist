@@ -9,6 +9,7 @@ namespace Mohist.Server.Slack.Services;
 public sealed class SlackManagerIngressService : IScopedService
 {
     private readonly SlackWorkspaceEnrollmentStore _enrollments;
+    private readonly SlackManagedBotAdmissionService _managedBotAdmission;
     private readonly SlackProviderInboxStore _inbox;
     private readonly SlackOutboxStore _outbox;
     private readonly ManagerClaimService _claims;
@@ -17,6 +18,7 @@ public sealed class SlackManagerIngressService : IScopedService
 
     public SlackManagerIngressService(
         SlackWorkspaceEnrollmentStore enrollments,
+        SlackManagedBotAdmissionService managedBotAdmission,
         SlackProviderInboxStore inbox,
         SlackOutboxStore outbox,
         ManagerClaimService claims,
@@ -24,6 +26,7 @@ public sealed class SlackManagerIngressService : IScopedService
         ISlackManagerConversationProcessor conversation)
     {
         _enrollments = enrollments;
+        _managedBotAdmission = managedBotAdmission;
         _inbox = inbox;
         _outbox = outbox;
         _claims = claims;
@@ -40,20 +43,36 @@ public sealed class SlackManagerIngressService : IScopedService
         if (!string.IsNullOrEmpty(identityError))
             throw new ArgumentException(identityError, nameof(message));
 
-        var enrollment = await _enrollments.GetActiveByTeamAsync(message.Identity.WorkspaceTeamId, ct);
+        // An explicit unknown classification is authoritative. Do not let a
+        // sender id from an untrusted caller turn it into human work.
+        if (string.Equals(message.SenderKind?.Trim(), "unknown", StringComparison.OrdinalIgnoreCase))
+            return SlackManagerIngressResult.Rejected("manager_sender_required");
+
+        var admission = await _managedBotAdmission.EvaluateAsync(
+            message.Identity.WorkspaceTeamId,
+            message.SenderKind,
+            message.AuthorBot,
+            ct);
+        var enrollment = admission.ActiveEnrollment
+            ?? await _enrollments.GetActiveByTeamAsync(message.Identity.WorkspaceTeamId, ct);
         if (enrollment is null)
             return SlackManagerIngressResult.Rejected("manager_enrollment_not_found");
+        if (admission.IsManaged)
+            return SlackManagerIngressResult.Ignored();
         if (!message.IsDirectMessage)
             return SlackManagerIngressResult.Rejected("manager_direct_message_required");
         if (!string.Equals(enrollment.ManagerAppId, message.AppId, StringComparison.Ordinal))
             return SlackManagerIngressResult.Rejected("manager_app_not_authorized");
+        if (string.IsNullOrWhiteSpace(message.SenderSlackUserId))
+            return SlackManagerIngressResult.Rejected("manager_sender_required");
+        var senderSlackUserId = message.SenderSlackUserId!;
 
         var accepted = await _inbox.AcceptAsync(
             new SlackProviderInboxDraft(
                 SlackDeliveryOwnerIds.ManagerProjectId,
                 enrollment.Id,
                 message.Identity,
-                message.SenderSlackUserId,
+                senderSlackUserId,
                 message.ThreadTs),
             new SlackProviderInboxRouteDraft(SlackProviderInboxRouteKinds.Manager, SessionId: null),
             ct);
@@ -74,7 +93,7 @@ public sealed class SlackManagerIngressService : IScopedService
 
         var actor = await _access.AuthenticateAsync(
             message.Identity.WorkspaceTeamId,
-            message.SenderSlackUserId,
+            senderSlackUserId,
             ct);
         var claimCode = ReadClaimCode(message.Text);
         var claimAccepted = false;
@@ -82,14 +101,14 @@ public sealed class SlackManagerIngressService : IScopedService
         {
             var claim = await _claims.ConsumeAsync(
                 message.Identity.WorkspaceTeamId,
-                message.SenderSlackUserId,
+                senderSlackUserId,
                 claimCode,
                 ct);
             if (claim.Outcome == SlackManagerClaimOutcome.Accepted)
             {
                 actor = await _access.AuthenticateAsync(
                     message.Identity.WorkspaceTeamId,
-                    message.SenderSlackUserId,
+                    senderSlackUserId,
                     ct);
                 claimAccepted = true;
             }
@@ -180,10 +199,12 @@ public sealed class SlackManagerIngressService : IScopedService
 public sealed record SlackManagerIngressMessage(
     string AppId,
     SlackMessageIdentity Identity,
-    string SenderSlackUserId,
+    string? SenderSlackUserId,
     string Text,
     bool IsDirectMessage,
-    string? ThreadTs = null);
+    string? ThreadTs = null,
+    string? SenderKind = null,
+    SlackBotAuthorMetadata? AuthorBot = null);
 
 public sealed record SlackManagerConversationRequest(
     SlackManagerIngressMessage Message,
@@ -218,6 +239,13 @@ public sealed record SlackManagerIngressResult(
     string? Reason = null,
     bool DeliveryIntentCreated = false)
 {
+    // Keep the existing decision field for direct API callers while exposing
+    // the adapter's ingress-result discriminator on the wire.
+    public string Kind => Decision;
+
+    public static SlackManagerIngressResult Ignored() =>
+        new("ignored");
+
     public static SlackManagerIngressResult Accepted(string inboxId, bool deliveryIntentCreated) =>
         new("accepted", inboxId, null, deliveryIntentCreated);
 
