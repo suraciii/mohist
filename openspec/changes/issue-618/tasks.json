@@ -1,0 +1,89 @@
+{
+  "project": "mohist-local",
+  "description": "Refactor Slack Manager into a normal Slack Agent using a narrow, ephemeral-credentialed mo CLI surface and durable shared liveness.",
+  "tasks": [
+    {
+      "id": "T-001",
+      "title": "Move Manager conversations onto ordinary Slack Agent sessions",
+      "spec": "specs/manager-session-reply/spec.md#durable-manager-agent-sessions",
+      "description": "Update Manager ingress and conversation coordination to persist one durable Session mapping per Enrollment, workspace, and conversation, then use the ordinary initial-input and follow-up dispatch paths with replacement-session recovery and immutable Slack origin data. Use the shared Slack execution context and pinned collaboration Skill for Agent-owned replies, replace Manager-specific instructions with natural-language behavior, and remove or unregister the retired model-output parser, tool-result follow-up, synthesized acknowledgement, terminal text, and execution-fence call paths while preserving loop prevention.",
+      "acceptanceCriteria": [
+        "The first authorized Manager DM persists its inbox acceptance, origin, initiating actor, Session, and conversation-to-Session mapping before dispatch; later messages create exactly one ordinary follow-up input, and replayed workspace/conversation/message identities create no second Session, input, turn, or management dispatch.",
+        "When a mapped runtime Session is missing, the coordinator conditionally establishes a replacement Session for the same durable origin and accepts the current message exactly once without losing it or creating competing mappings.",
+        "Every initial and follow-up Manager execution receives the complete authoritative Slack anchor and pinned collaboration Skill, including workspace, conversation, thread root, triggering message, actor, Enrollment or Connection, Session, and dispatch identity; `mo slack message send` is the only source of user-visible Manager reply text.",
+        "Built-in Manager instructions contain no `mohistManagerTool` envelope or Manager tool-result protocol. Natural-language output, malformed JSON, and old-envelope-shaped output are never parsed or executed, never cause a `managerToolResult` follow-up, and never cause a Server acknowledgement, fallback, or terminal reply.",
+        "Events authored by the managed Manager bot and Agent-authored Manager replies are ignored by Manager ingress, so neither can create or continue Manager work; ordinary non-Manager Slack Agent behavior remains unchanged.",
+        "Focused Server ingress, Session mapping, execution-contract, terminal-delivery, built-in-catalog, and Runner integration tests cover initial/follow-up parity, replay, replacement Session recovery, anchor ownership, natural-language output, retired-protocol rejection, no-reply completion, and loop prevention, and pass without invoking the retired Manager parser or executor."
+      ],
+      "priority": 1,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Ordinary Manager Session ingress/follow-up wiring, shared Slack reply ownership, updated built-in instructions, retired protocol path removal or unregistration, and passing Server/Runner regression tests.",
+      "dependsOn": [],
+      "passes": false,
+      "notes": "Keep durable inbox, Session, origin, and outbox facts as the recovery source of truth. Do not put destination selection or a credential in the user prompt, Skill, Slack execution context, Session state, or AgentJob state."
+    },
+    {
+      "id": "T-002",
+      "title": "Enforce the Manager CLI capability surface",
+      "spec": "specs/manager-cli-capabilities/spec.md#explicit-manager-cli-capability-allowlist",
+      "description": "Add an explicit Manager mode and one logical capability catalog to the `mo` CLI and its Server admission boundary for supported status, list, view, diagnostics, Agent creation or mounting, access-policy changes, enable/disable, and applicable owner claim or transfer operations. Translate these commands through the existing application services and authorization paths, return authoritative service projections, and reject protected, destructive, unlisted, or arbitrary management access before any side effect while preserving existing operator CLI and Web behavior.",
+      "acceptanceCriteria": [
+        "Allowlisted Manager commands execute through the existing application services and return their actual current inspection or mutation result, including readiness, validation errors, authorization failures, and next actions without a Manager-specific synthetic acknowledgement or inferred success state.",
+        "The CLI rejects commands outside the logical catalog before making a management request, including secret submission, credential reads or rotation, credential addresses, `remove-binding`, permanent deletion, delivery recovery controls, arbitrary API access, and other destructive operations.",
+        "Server admission independently enforces the same Manager capability scope before target lookup or mutation, so bypassing the CLI with a direct HTTP/API request cannot broaden access or select an unbound fallback target.",
+        "Current actor, Enrollment, Project, workspace, Agent, and Slack Connection authorization remains authoritative for Manager calls; cross-workspace, missing, deleted, moved, or otherwise unauthorized targets are rejected without mutation, while existing non-Manager CLI and Web routes retain their current route, authorization, validation, and result behavior.",
+        "CLI unit tests and Server integration/spec tests cover every supported capability, current-state and non-ready results, authorization and missing-target failures, cross-workspace isolation, protected-value and destructive-command rejection, direct API bypass rejection, and regression behavior for existing CLI/Web callers."
+      ],
+      "priority": 1,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Manager-mode `mo` capability catalog and command dispatch, Server-side scope admission and existing-service adapters, plus passing CLI/Server authorization and result-contract tests.",
+      "dependsOn": [],
+      "passes": false,
+      "notes": "The catalog is a logical allowlist for the Manager execution boundary, not a model-output DSL. Keep owner claim or transfer only where the existing management contract supports it and apply existing protected-value redaction rules."
+    },
+    {
+      "id": "T-003",
+      "title": "Secure Manager executions with ephemeral capability leases",
+      "spec": "specs/manager-execution-credentials/spec.md#per-execution-manager-capability-credentials",
+      "description": "Issue a cryptographically random, short-lived, revocable Manager capability lease for every initial, follow-up, recovered, or replacement execution, storing only its hash and non-secret binding metadata. Carry the plaintext only in a dedicated ephemeral Server-to-Runner execution field, inject it at the Manager CLI process boundary with output redaction, and validate expiry, execution/origin binding, actor, Enrollment, requested capability, and current target authorization on every invocation before calling an existing service, failing closed on every invalid or unavailable authorization path.",
+      "acceptanceCriteria": [
+        "Initial, follow-up, recovered, and replacement executions receive distinct credentials bound to the immutable Slack origin, workspace, actor, Enrollment, Session, execution identity, and explicit validity window; completion, cancellation, replacement, and recovery invalidate the prior lease and never reuse its plaintext.",
+        "Only a hash and non-secret lease metadata are held by the short-lived runtime store; the plaintext is absent from prompts, instructions, collaboration Skill content, Slack execution context, Session inputs/state, AgentJob durable state, Slack inbox/outbox payloads, audit records, terminal events, logs, exceptions, and transcripts.",
+        "The Runner receives the credential through a dedicated ephemeral execution field, exposes it only to the Manager CLI child-process boundary, never includes it in generic model shell arguments or the base environment, and redacts token-like credential values before command output can reach the model, logs, outbox, or terminal records.",
+        "Every Manager CLI invocation rejects expired, unknown, malformed, replayed, incorrectly bound, revoked, or out-of-scope credentials and rechecks current actor, Enrollment, Project, Agent, workspace, and Connection authorization immediately before side effects; changed Enrollment state, removed actors, unauthorized targets, or unavailable validation fail closed with a non-secret actionable error and no broader-credential retry.",
+        "Runner capability/version gating prevents dispatch to a runtime that cannot consume the ephemeral field or enforce redaction, and recovery issues a new lease rather than replaying the interrupted credential or automatically retrying an uncertain state-changing operation.",
+        "Server, Runner, and CLI integration/unit tests cover distinct per-execution issuance, binding and expiry, revocation and current-state authorization changes, process-only injection, prompt/transcript/log/outbox redaction, direct invocation rejection, fail-closed store errors, mixed-version gating, and fresh credentials after recovery."
+      ],
+      "priority": 2,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Runtime-only Manager capability lease issuer/validator, ephemeral Server-to-Runner transport and CLI injection/redaction, current-state authorization enforcement, capability gating, and passing cross-package security tests.",
+      "dependsOn": ["T-001", "T-002"],
+      "passes": false,
+      "notes": "Use a shared short-lived lease store or shared validation mechanism across Server instances and fail closed when it cannot validate. Do not persist plaintext credentials or turn them into a general Slack delivery credential."
+    },
+    {
+      "id": "T-004",
+      "title": "Converge Manager receipt, progress, and terminal liveness",
+      "spec": "specs/manager-reaction-liveness/spec.md#durable-manager-receipt-liveness",
+      "description": "Drive accepted Manager messages through the existing durable Slack status projection and outbox using a stable logical execution identity and the same origin and ownership rules as ordinary Slack Agent Connections. Implement idempotent receipt, replaceable progress, and terminal convergence for completed, failed, cancelled, and unknown outcomes, including fast completion, recovery, adapter uncertainty, duplicate delivery, and reply-action promotion, while keeping terminal delivery free of Server-authored text.",
+      "acceptanceCriteria": [
+        "An accepted Manager message enqueues exactly one receipt projection using a stable dispatch identity derived from its immutable origin; replayed ingress and redriven inbox work reuse that identity and do not create another reaction or execution.",
+        "Queued or active execution removes receipt before showing applicable working progress, and repeated progress replaces or deduplicates one replaceable projection for the same logical execution without competing working messages or reactions.",
+        "Terminal convergence removes receipt and working state as needed and leaves exactly one success reaction for `completed` or one attention reaction for `failed`, `cancelled`, and `unknown`; fast completion still reaches a terminal reaction even when progress was never stored, and unknown remains distinguishable for recovery/operator handling.",
+        "Duplicate or replayed terminal events, process restart, Runner recovery, delivery uncertainty, and Slack adapter redelivery resume from durable inbox, Session, execution, and outbox facts and converge without a second terminal mutation or a message stuck in receipt/working state.",
+        "A Manager Agent reply sent with the authoritative Slack reply action uses the same thread anchor, outbox ownership, deduplication, and promotion rules as ordinary Agent Connections; terminal handling never extracts assistant text, creates fallback text, or starts a second liveness lifecycle when the Agent sends no reply.",
+        "Server Slack liveness/recovery specs and `mohist-slack` adapter integration tests cover receipt replay, progress replacement, fast completion, all terminal outcomes, reply promotion, duplicate terminal delivery, restart/recovery, uncertain delivery, and ordinary Connection regression behavior."
+      ],
+      "priority": 3,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Shared Manager reaction-liveness projection and terminal delivery/recovery behavior across Server outbox and `mohist-slack`, with passing Server/adapter integration tests.",
+      "dependsOn": ["T-001", "T-003"],
+      "passes": false,
+      "notes": "Derive liveness keys from the logical Manager execution, not transient retries or recovered runtimes. Preserve the existing Manager DM outbox owner where required while sharing projection and adapter semantics with ordinary Slack Agents."
+    }
+  ]
+}
