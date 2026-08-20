@@ -455,7 +455,12 @@ describe('RunnerHost', () => {
     const recoveryDispatch = {
       ...fencedWork,
       variables: { workspace: { path: '/virtual/mohist-runner-test-2' } },
-      agentRecovery: { runtime: 'pi', runtimeSessionId: '/virtual/mohist-runner-test/sessions/pi-1' },
+      agentRecovery: {
+        runtime: 'pi',
+        runtimeSessionId: '/virtual/mohist-runner-test/sessions/pi-1',
+        agentSessionId: 'agent-session-1',
+        agentTurnId: 'agent-turn-1',
+      },
     }
     const journal = new WorkResultJournal('/virtual/mohist-runner-test')
     await journal.load()
@@ -510,6 +515,12 @@ describe('RunnerHost', () => {
         expect.objectContaining({ workId: fencedWork.workId, taskRunId: fencedWork.taskRunId }),
         expect.objectContaining({ status: 'completed' }),
         expect.any(AbortSignal),
+        {
+          agentSessionId: 'agent-session-1',
+          agentTurnId: 'agent-turn-1',
+          runtime: 'pi',
+          runtimeSessionId: '/virtual/mohist-runner-test/sessions/pi-1',
+        },
       )
 
       // The startup unknown observation must not fire again after the
