@@ -2,7 +2,7 @@ using Mohist.Server.Agent.Domain;
 using Mohist.Server.Agent.Services;
 using Xunit;
 
-namespace Mohist.Server.SpecTests.Specs.Agent.Services;
+namespace Mohist.Server.UnitTests.Agent.Services;
 
 public sealed partial class AgentConnectionStoreSpecs
 {

@@ -9,7 +9,7 @@ using Mohist.Workflow.Definition;
 using Mohist.Server.Workflow.Services;
 using Xunit;
 
-namespace Mohist.Server.SpecTests.Specs.Workflow.Querier;
+namespace Mohist.Server.UnitTests.Workflow.Querier;
 
 public class WorkflowStructureSpecs : WorkflowDefinitionResolverTestFactory
 {

@@ -5,7 +5,7 @@ using Mohist.Server.Infrastructure.Data.Db;
 
 namespace Mohist.Server.UnitTests.Support;
 
-internal sealed class TestSqliteDatabase : IDisposable
+public sealed class TestSqliteDatabase : IDisposable
 {
     private TestSqliteDatabase(SqliteConnection keeper)
     {

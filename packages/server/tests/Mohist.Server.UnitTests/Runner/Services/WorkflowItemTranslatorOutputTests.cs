@@ -6,7 +6,7 @@ using Mohist.Workflow.Definition;
 using Mohist.Server.Workflow.Domain.Run;
 using Xunit;
 
-namespace Mohist.Server.SpecTests.Specs.Runner.Services;
+namespace Mohist.Server.UnitTests.Runner.Services;
 
 public partial class WorkflowItemTranslatorSpecs
 {

@@ -3,11 +3,11 @@ using Microsoft.Extensions.Time.Testing;
 using Mohist.Server.Infrastructure;
 using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Infrastructure.Data.Runner;
-using Mohist.Server.SpecTests.Support;
+using Mohist.Server.UnitTests.Support;
 using Mohist.Server.TestSupport;
 using Xunit;
 
-namespace Mohist.Server.SpecTests.Specs.Runner.Data;
+namespace Mohist.Server.UnitTests.Runner.Data;
 
 public partial class TaskLogStoreSpecs : IAsyncLifetime
 {
@@ -17,7 +17,7 @@ public partial class TaskLogStoreSpecs : IAsyncLifetime
 
     public TaskLogStoreSpecs()
     {
-        _database = TestSqliteDatabase.CreateMigrated();
+        _database = TestSqliteDatabase.CreateModelSchema();
         _store = new TaskLogStore(new TestDbContextFactory(_database.Options), _timeProvider);
     }
 

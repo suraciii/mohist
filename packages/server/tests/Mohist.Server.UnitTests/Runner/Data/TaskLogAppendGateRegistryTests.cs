@@ -1,7 +1,7 @@
 using Mohist.Server.Infrastructure.Data.Runner;
 using Xunit;
 
-namespace Mohist.Server.SpecTests.Specs.Runner.Data;
+namespace Mohist.Server.UnitTests.Runner.Data;
 
 public partial class TaskLogStoreSpecs
 {

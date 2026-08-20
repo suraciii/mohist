@@ -8,7 +8,7 @@ using Mohist.Server.Workflow.Services;
 using Mohist.Server.Workflow.Services.Artifacts;
 using Xunit;
 
-namespace Mohist.Server.SpecTests.Specs.Workflow.Querier;
+namespace Mohist.Server.UnitTests.Workflow.Querier;
 
 public sealed class WorkflowRunStatusCacheSpecs : WorkflowDefinitionResolverTestFactory
 {

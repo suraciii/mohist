@@ -4,7 +4,7 @@ using Mohist.Server.Infrastructure;
 using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Infrastructure.Data.Issue;
 using Mohist.Server.Infrastructure.Data.Workflow;
-using Mohist.Server.SpecTests.Support;
+using Mohist.Server.UnitTests.Support;
 using Mohist.Server.TestSupport;
 using Mohist.Server.Workflow.Domain;
 using Mohist.Workflow.Definition;
@@ -13,13 +13,13 @@ using Mohist.Server.Workflow.Services;
 using Mohist.Server.Workflow.Services.Prompts;
 using Xunit;
 
-namespace Mohist.Server.SpecTests.Specs.Workflow.Querier;
+namespace Mohist.Server.UnitTests.Workflow.Querier;
 
 public abstract class WorkflowDefinitionResolverTestFactory : IDisposable
 {
     protected WorkflowDefinitionResolverTestFactory()
     {
-        Database = TestSqliteDatabase.CreateMigrated();
+        Database = TestSqliteDatabase.CreateModelSchema();
         var dbContextFactory = new TestDbContextFactory(Database.Options);
         DefinitionResolver = new WorkflowDefinitionResolver(
             dbContextFactory,

@@ -12,11 +12,11 @@ using Mohist.Server.Workflow.Domain.Run;
 using Mohist.Server.Workflow.Services;
 using Mohist.Server.Workflow.Services.Artifacts;
 using Mohist.Server.Workflow.Services.Prompts;
-using Mohist.Server.SpecTests.Support;
+using Mohist.Server.UnitTests.Support;
 using Mohist.Server.TestSupport;
 using Xunit;
 
-namespace Mohist.Server.SpecTests.Specs.Runner.Services;
+namespace Mohist.Server.UnitTests.Runner.Services;
 
 /// <summary>
 /// Unit specs for <see cref="WorkflowItemTranslator"/> — the boundary service
@@ -36,7 +36,7 @@ public partial class WorkflowItemTranslatorSpecs : IAsyncLifetime
 
     public WorkflowItemTranslatorSpecs()
     {
-        _database = TestSqliteDatabase.CreateMigrated();
+        _database = TestSqliteDatabase.CreateModelSchema();
 
         var factory = new TestDbContextFactory(_database.Options);
         var runVariablesStore = new WorkflowRunVariablesStore(factory);

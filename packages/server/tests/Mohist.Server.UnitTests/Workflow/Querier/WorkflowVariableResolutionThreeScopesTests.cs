@@ -7,7 +7,7 @@ using Mohist.Server.Workflow.Domain;
 using Mohist.Server.Workflow.Services;
 using Xunit;
 
-namespace Mohist.Server.SpecTests.Specs.Workflow.Querier;
+namespace Mohist.Server.UnitTests.Workflow.Querier;
 
 public sealed class WorkflowVariableResolutionThreeScopesSpecs : WorkflowDefinitionResolverTestFactory
 {

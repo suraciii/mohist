@@ -7,7 +7,7 @@ using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Infrastructure.Data.Workflow;
 using Mohist.Server.Runner.Grains;
 using Mohist.Server.Runner.Services;
-using Mohist.Server.SpecTests.Support;
+using Mohist.Server.UnitTests.Support;
 using Mohist.Server.TestSupport;
 using Mohist.Server.Workflow.Domain;
 using Mohist.Workflow.Definition;
@@ -17,11 +17,11 @@ using Mohist.Server.Workflow.Services.Artifacts;
 using Mohist.Server.Workflow.Services.Prompts;
 using Xunit;
 
-namespace Mohist.Server.SpecTests.Specs.Runner.Services;
+namespace Mohist.Server.UnitTests.Runner.Services;
 
 public sealed class WorkflowItemTranslatorLivePromptSpecs : IAsyncLifetime
 {
-    private readonly TestSqliteDatabase _database = TestSqliteDatabase.CreateMigrated();
+    private readonly TestSqliteDatabase _database = TestSqliteDatabase.CreateModelSchema();
     private readonly WorkflowItemTranslator _translator;
 
     public WorkflowItemTranslatorLivePromptSpecs()

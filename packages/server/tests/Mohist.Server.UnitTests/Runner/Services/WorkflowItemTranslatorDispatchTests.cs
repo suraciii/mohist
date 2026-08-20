@@ -10,7 +10,7 @@ using Mohist.Server.TestSupport;
 using Xunit;
 
 
-namespace Mohist.Server.SpecTests.Specs.Runner.Services;
+namespace Mohist.Server.UnitTests.Runner.Services;
 
 public partial class WorkflowItemTranslatorSpecs
 {

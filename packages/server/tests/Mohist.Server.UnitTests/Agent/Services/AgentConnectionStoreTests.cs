@@ -9,11 +9,11 @@ using Mohist.Server.Infrastructure.Data.Agent;
 using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Infrastructure.Security.Secrets;
 using Mohist.Server.Infrastructure.Slack;
-using Mohist.Server.SpecTests.Support;
+using Mohist.Server.UnitTests.Support;
 using Mohist.Server.TestSupport;
 using Xunit;
 
-namespace Mohist.Server.SpecTests.Specs.Agent.Services;
+namespace Mohist.Server.UnitTests.Agent.Services;
 
 public sealed partial class AgentConnectionStoreSpecs : IAsyncLifetime
 {
@@ -30,7 +30,7 @@ public sealed partial class AgentConnectionStoreSpecs : IAsyncLifetime
 
     public ValueTask InitializeAsync()
     {
-        _database = TestSqliteDatabase.CreateMigrated();
+        _database = TestSqliteDatabase.CreateModelSchema();
         _factory = new TestDbContextFactory(_database.Options);
         var querier = new AgentQuerier(_factory);
         _secretStore = new FakeSecretStore();

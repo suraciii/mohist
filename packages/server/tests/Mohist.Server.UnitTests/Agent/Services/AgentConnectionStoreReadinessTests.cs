@@ -5,7 +5,7 @@ using Mohist.Server.Infrastructure;
 using Mohist.Server.Infrastructure.Data.Agent;
 using Xunit;
 
-namespace Mohist.Server.SpecTests.Specs.Agent.Services;
+namespace Mohist.Server.UnitTests.Agent.Services;
 
 public sealed partial class AgentConnectionStoreSpecs
 {
