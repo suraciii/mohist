@@ -33,9 +33,6 @@ public class PublicProjectionIntegrationCollection
 [CollectionDefinition("RunnerMutationIntegration")]
 public class RunnerMutationIntegrationCollection : ICollectionFixture<MohistIntegrationFixture>;
 
-[CollectionDefinition("IssueCompositeIntegration")]
-public class IssueCompositeIntegrationCollection : ICollectionFixture<IsolatedMohistIntegrationFixture>;
-
 [CollectionDefinition("AgentPathAmplificationIntegration")]
 public class AgentPathAmplificationIntegrationCollection : ICollectionFixture<IsolatedMohistIntegrationFixture>;
 
@@ -47,9 +44,6 @@ public class WorkspaceIntegrationCollection : ICollectionFixture<IsolatedMohistI
 
 [CollectionDefinition("WorkflowSessionTerminalIntegration")]
 public class WorkflowSessionTerminalIntegrationCollection : ICollectionFixture<IsolatedMohistIntegrationFixture>;
-
-[CollectionDefinition("SlackMultiAgentIntegration")]
-public class SlackMultiAgentIntegrationCollection : ICollectionFixture<IsolatedMohistIntegrationFixture>;
 
 // Specs whose contract depends on process- or cluster-wide state share one
 // dedicated host per resource domain. Each domain is serial while independent
