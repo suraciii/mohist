@@ -1,3 +1,5 @@
+import { createHash } from 'node:crypto'
+
 import type { CommandConfig, ResourceLaneConfig, SuiteConfig, TrackConfig } from './types.js'
 
 const ID_PATTERN = /^[a-z][a-z0-9-]*$/
@@ -6,6 +8,10 @@ export interface PlanSelection {
   readonly scope: 'application' | 'repository'
   readonly application?: string
   readonly tracks: readonly TrackConfig[]
+}
+
+export function planIdentity(config: SuiteConfig): string {
+  return createHash('sha256').update(JSON.stringify(config.plan)).digest('hex')
 }
 
 export function validatePlan(config: SuiteConfig): string[] {

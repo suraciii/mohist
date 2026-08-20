@@ -5,6 +5,7 @@ import { join } from 'node:path'
 import { test } from 'node:test'
 
 import { parseArgs, validateEvidence } from './gate.js'
+import { planIdentity } from './plan.js'
 import type { SuiteConfig } from './types.js'
 
 function config(): SuiteConfig {
@@ -41,15 +42,23 @@ function writeScope(root: string, scope: string, trackId: string): void {
   const scopeRoot = join(root, scope)
   mkdirSync(scopeRoot, { recursive: true })
   if (scope === 'repository') {
-    writeFileSync(join(scopeRoot, 'repository.json'), JSON.stringify({ scope }))
+    writeFileSync(
+      join(scopeRoot, 'repository.json'),
+      JSON.stringify({ scope, sourceRevision: 'revision-1', planIdentity: planIdentity(config()) }),
+    )
     writeFileSync(
       join(scopeRoot, 'checks.json'),
-      JSON.stringify([{ exitCode: 0, timedOut: false, cleanupComplete: true }]),
+      JSON.stringify([
+        { command: 'npm', args: ['run', 'archtest'], exitCode: 0, timedOut: false, cleanupComplete: true },
+      ]),
     )
     writeFileSync(join(scopeRoot, 'summary.json'), JSON.stringify({ passed: true }))
     return
   }
-  writeFileSync(join(scopeRoot, 'application.json'), JSON.stringify({ application: scope }))
+  writeFileSync(
+    join(scopeRoot, 'application.json'),
+    JSON.stringify({ application: scope, sourceRevision: 'revision-1', planIdentity: planIdentity(config()) }),
+  )
   writeFileSync(
     join(scopeRoot, 'summary.json'),
     JSON.stringify({

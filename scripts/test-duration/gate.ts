@@ -1,10 +1,11 @@
+import { execFileSync } from 'node:child_process'
 import { existsSync, readdirSync, readFileSync } from 'node:fs'
 import { dirname, isAbsolute, join, resolve } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 
 import { parseSuiteConfig, validateConfig } from './config.js'
-import { selectApplicationTracks, selectRepositoryTracks, validatePlan } from './plan.js'
-import type { SuiteConfig } from './types.js'
+import { planIdentity, selectApplicationTracks, selectRepositoryTracks, validatePlan } from './plan.js'
+import type { CommandConfig, SuiteConfig } from './types.js'
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..')
 
@@ -102,7 +103,12 @@ function validateTrackEvidence(scope: string, expectedTrackIds: readonly string[
   return errors
 }
 
-function validateRepositoryEvidence(scope: string, expectedTrackIds: readonly string[], root: string): string[] {
+function validateRepositoryEvidence(
+  scope: string,
+  expectedChecks: readonly CommandConfig[],
+  expectedTrackIds: readonly string[],
+  root: string,
+): string[] {
   const errors: string[] = []
   const summary = object(readJson(join(root, 'summary.json')))
   if (summary === undefined) {
@@ -110,16 +116,26 @@ function validateRepositoryEvidence(scope: string, expectedTrackIds: readonly st
     return errors
   }
   if (summary.passed !== true) errors.push(`${scope}: summary.passed is not true`)
-  const checks = Array.isArray(readJson(join(root, 'checks.json')))
-    ? (readJson(join(root, 'checks.json')) as readonly unknown[])
-    : Array.isArray(summary.checks)
-      ? summary.checks
-      : undefined
+  const checksJson = readJson(join(root, 'checks.json'))
+  const checks = Array.isArray(checksJson) ? checksJson : Array.isArray(summary.checks) ? summary.checks : undefined
   if (checks === undefined || checks.length === 0) {
     errors.push(`${scope}: repository checks are missing`)
   } else {
+    if (checks.length !== expectedChecks.length) {
+      errors.push(`${scope}: expected ${expectedChecks.length} repository checks, received ${checks.length}`)
+    }
     checks.forEach((value, index) => {
       const check = object(value)
+      const expected = expectedChecks[index]
+      if (
+        expected === undefined ||
+        check?.command !== expected.command ||
+        !Array.isArray(check.args) ||
+        check.args.length !== expected.args.length ||
+        check.args.some((arg, argIndex) => arg !== expected.args[argIndex])
+      ) {
+        errors.push(`${scope}: check ${index + 1} does not match the declared repository plan`)
+      }
       if (check?.exitCode !== 0 || check.timedOut === true || check.cleanupComplete !== true) {
         errors.push(`${scope}: check ${index + 1} did not pass cleanly`)
       }
@@ -129,12 +145,14 @@ function validateRepositoryEvidence(scope: string, expectedTrackIds: readonly st
   return errors
 }
 
-export function validateEvidence(config: SuiteConfig, evidenceRoot: string): string[] {
+export function validateEvidence(config: SuiteConfig, evidenceRoot: string, expectedSourceRevision?: string): string[] {
   const errors: string[] = []
   if (!isAbsolute(evidenceRoot)) return ['--evidence-root must be an absolute path']
   if (!existsSync(evidenceRoot)) return [`evidence root does not exist: ${evidenceRoot}`]
   const applications = config.plan!.applications
   const repositoryScope = config.plan!.repositoryScope
+  const expectedPlanIdentity = planIdentity(config)
+  const sourceRevisions = new Set<string>()
   const expectedScopes = [...applications, repositoryScope]
   const expectedSet = new Set(expectedScopes)
   for (const entry of readdirSync(evidenceRoot, { withFileTypes: true })) {
@@ -145,6 +163,13 @@ export function validateEvidence(config: SuiteConfig, evidenceRoot: string): str
     const metadata = object(readJson(join(root, 'application.json')))
     if (metadata?.application !== application)
       errors.push(`${application}: application metadata is missing or mismatched`)
+    if (metadata?.planIdentity !== expectedPlanIdentity)
+      errors.push(`${application}: plan identity is missing or mismatched`)
+    if (typeof metadata?.sourceRevision !== 'string' || metadata.sourceRevision.length === 0) {
+      errors.push(`${application}: source revision is missing or invalid`)
+    } else {
+      sourceRevisions.add(metadata.sourceRevision)
+    }
     const tracks = selectApplicationTracks(config, application).tracks.map((track) => track.id)
     errors.push(...validateTrackEvidence(application, tracks, root))
   }
@@ -152,8 +177,21 @@ export function validateEvidence(config: SuiteConfig, evidenceRoot: string): str
   const metadata = object(readJson(join(repositoryRoot, 'repository.json')))
   if (metadata?.scope !== repositoryScope)
     errors.push(`${repositoryScope}: repository metadata is missing or mismatched`)
+  if (metadata?.planIdentity !== expectedPlanIdentity)
+    errors.push(`${repositoryScope}: plan identity is missing or mismatched`)
+  if (typeof metadata?.sourceRevision !== 'string' || metadata.sourceRevision.length === 0) {
+    errors.push(`${repositoryScope}: source revision is missing or invalid`)
+  } else {
+    sourceRevisions.add(metadata.sourceRevision)
+  }
   const repositoryTracks = selectRepositoryTracks(config).tracks.map((track) => track.id)
-  errors.push(...validateRepositoryEvidence(repositoryScope, repositoryTracks, repositoryRoot))
+  errors.push(
+    ...validateRepositoryEvidence(repositoryScope, config.plan!.repositoryChecks, repositoryTracks, repositoryRoot),
+  )
+  if (sourceRevisions.size > 1) errors.push('evidence scopes have mismatched source revisions')
+  if (expectedSourceRevision !== undefined && !sourceRevisions.has(expectedSourceRevision)) {
+    errors.push(`evidence scopes do not match checked-out source revision: ${expectedSourceRevision}`)
+  }
   return errors
 }
 
@@ -189,7 +227,14 @@ export function main(argv: readonly string[] = process.argv.slice(2)): number {
     process.stderr.write('usage: gate --evidence-root <absolute-path>\n')
     return 2
   }
-  const errors = validateEvidence(config, resolve(args.evidenceRoot))
+  let sourceRevision: string
+  try {
+    sourceRevision = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: repoRoot, encoding: 'utf8' }).trim()
+  } catch (error) {
+    process.stderr.write(`could not read source revision: ${(error as Error).message}\n`)
+    return 1
+  }
+  const errors = validateEvidence(config, resolve(args.evidenceRoot), sourceRevision)
   if (errors.length > 0) {
     console.error(`Gate: FAIL (${errors.length} errors)`)
     for (const error of errors) console.error(`  - ${error}`)

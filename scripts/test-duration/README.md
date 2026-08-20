@@ -117,10 +117,10 @@ global serialization are not gate recovery mechanisms.
 The executor now validates the checked-in application plan, exposes the closed
 `test:app` scope, builds the selected application once, and passes the same run
 root to the existing track guard. The Repository executor runs the declared
-repository checks, and Gate validates the six scope evidence bundles without
-rerunning tests. Complete local `verify` aggregation and the migration of all
-CI setup details into the workflow remain implementation work. These are
-implementation gaps, not alternate supported modes.
+repository checks, Gate validates the six scope evidence bundles without
+rerunning tests, and local `verify` runs those same scopes under one absolute
+deadline before applying the Gate validation. The remaining migration work is
+the portfolio of individual Specs and the removal of obsolete public aliases.
 
 ## Platform Rules
 

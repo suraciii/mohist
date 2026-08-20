@@ -1,3 +1,4 @@
+import { execFileSync } from 'node:child_process'
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { dirname, resolve } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
@@ -6,7 +7,7 @@ import { createArtifactRoot, phaseSucceeded, runPhase, type PhaseResult } from '
 import { parseSuiteConfig, validateConfig } from './config.js'
 import { suiteDeadlines, type SuiteDeadlines } from './deadline.js'
 import { main as runGuard, type GuardRuntime } from './guard.js'
-import { applicationBuilds, formatApplicationHelp, validatePlan } from './plan.js'
+import { applicationBuilds, formatApplicationHelp, planIdentity, validatePlan } from './plan.js'
 import { nativeTimeSource } from './time.js'
 import type { CommandConfig, SuiteConfig } from './types.js'
 
@@ -50,6 +51,16 @@ export interface ApplicationRuntime {
   readonly report: (line: string) => void
 }
 
+export interface ApplicationExecutionContext {
+  readonly runId: string
+  readonly startedAt: number
+  readonly deadlines: SuiteDeadlines
+  readonly artifactRoot: string
+  readonly abortSignal: AbortSignal
+  readonly sourceRevision?: string
+  readonly planIdentity?: string
+}
+
 export function createTerminationSignal(): { readonly signal: AbortSignal; readonly dispose: () => void } {
   const controller = new AbortController()
   const abort = () => controller.abort()
@@ -66,6 +77,10 @@ export function createTerminationSignal(): { readonly signal: AbortSignal; reado
 
 function nativeSourceConfig(): SuiteConfig {
   return parseSuiteConfig(readFileSync(resolve(repoRoot, 'test-duration.config.jsonc'), 'utf8'))
+}
+
+function nativeSourceRevision(): string {
+  return execFileSync('git', ['rev-parse', 'HEAD'], { cwd: repoRoot, encoding: 'utf8' }).trim()
 }
 
 function validateSuite(config: SuiteConfig): string[] {
@@ -101,6 +116,71 @@ export async function runCommandSequence(
     if (!phaseSucceeded(result)) return { passed: false, results }
   }
   return { passed: true, results }
+}
+
+export async function runApplicationScope(
+  application: string,
+  config: SuiteConfig,
+  runtime: ApplicationRuntime,
+  context: ApplicationExecutionContext,
+): Promise<number> {
+  const commands = applicationBuilds(config, application)
+  const { artifactRoot, deadlines, abortSignal } = context
+  mkdirSync(artifactRoot, { recursive: true })
+  try {
+    runtime.report(`test:app ${application} diagnostics: ${artifactRoot}`)
+    writeEvidence(runtime, artifactRoot, 'run.json', {
+      runId: context.runId,
+      startedAt: context.startedAt,
+      suiteDeadlineMs: config.suiteDeadlineMs,
+      ...(context.sourceRevision ? { sourceRevision: context.sourceRevision } : {}),
+      ...(context.planIdentity ? { planIdentity: context.planIdentity } : {}),
+    })
+    writeEvidence(runtime, artifactRoot, 'application.json', {
+      application,
+      buildCommands: commands,
+      ...(context.sourceRevision ? { sourceRevision: context.sourceRevision } : {}),
+      ...(context.planIdentity ? { planIdentity: context.planIdentity } : {}),
+    })
+
+    const build = await runCommandSequence(commands, runtime, artifactRoot, deadlines, abortSignal)
+    if (!build.passed) {
+      writeEvidence(runtime, artifactRoot, 'summary.json', {
+        application,
+        passed: false,
+        phase: 'build',
+        build,
+      })
+      return 1
+    }
+    writeEvidence(runtime, artifactRoot, 'build-stamp.json', {
+      runId: context.runId,
+      builtAt: runtime.now(),
+      ...(context.sourceRevision ? { sourceRevision: context.sourceRevision } : {}),
+      ...(context.planIdentity ? { planIdentity: context.planIdentity } : {}),
+    })
+    if (abortSignal.aborted || runtime.now() >= deadlines.hardDeadlineAt) return 1
+
+    return await runtime.runGuard(
+      [
+        '--application',
+        application,
+        '--run-root',
+        artifactRoot,
+        '--require-build-stamp',
+        '--require-enforced',
+        '--suite-deadline-at-ms',
+        String(deadlines.hardDeadlineAt),
+      ],
+      { now: runtime.now, abortSignal },
+    )
+  } catch (error) {
+    writeEvidence(runtime, artifactRoot, 'fatal-error.json', {
+      message: error instanceof Error ? error.message : String(error),
+    })
+    process.stderr.write(`test:app failed: ${(error as Error).message}\n`)
+    return 1
+  }
 }
 
 export async function main(
@@ -156,51 +236,24 @@ export async function main(
   const suiteDeadline = config.suiteDeadlineMs
   const graceMs = config.killGraceMs ?? 5000
   const deadlines = suiteDeadlines(startedAt, suiteDeadline, graceMs)
+  let sourceRevision: string
+  try {
+    sourceRevision = nativeSourceRevision()
+  } catch (error) {
+    process.stderr.write(`could not read source revision: ${(error as Error).message}\n`)
+    return 1
+  }
   const termination = createTerminationSignal()
   try {
-    runtime.report(`test:app ${args.application} diagnostics: ${artifactRoot}`)
-    writeEvidence(runtime, artifactRoot, 'run.json', {
+    return await runApplicationScope(args.application, config, runtime, {
       runId,
       startedAt,
-      suiteDeadlineMs: suiteDeadline,
+      deadlines,
+      artifactRoot,
+      abortSignal: termination.signal,
+      sourceRevision,
+      planIdentity: planIdentity(config),
     })
-    writeEvidence(runtime, artifactRoot, 'application.json', {
-      application: args.application,
-      buildCommands: commands,
-    })
-
-    const build = await runCommandSequence(commands, runtime, artifactRoot, deadlines, termination.signal)
-    if (!build.passed) {
-      writeEvidence(runtime, artifactRoot, 'summary.json', {
-        application: args.application,
-        passed: false,
-        phase: 'build',
-        build,
-      })
-      return 1
-    }
-    writeEvidence(runtime, artifactRoot, 'build-stamp.json', { runId, builtAt: runtime.now() })
-    if (termination.signal.aborted || runtime.now() >= deadlines.hardDeadlineAt) return 1
-
-    return await runtime.runGuard(
-      [
-        '--application',
-        args.application,
-        '--run-root',
-        artifactRoot,
-        '--require-build-stamp',
-        '--require-enforced',
-        '--suite-deadline-at-ms',
-        String(deadlines.hardDeadlineAt),
-      ],
-      { now: runtime.now, abortSignal: termination.signal },
-    )
-  } catch (error) {
-    writeEvidence(runtime, artifactRoot, 'fatal-error.json', {
-      message: error instanceof Error ? error.message : String(error),
-    })
-    process.stderr.write(`test:app failed: ${(error as Error).message}\n`)
-    return 1
   } finally {
     termination.dispose()
   }
