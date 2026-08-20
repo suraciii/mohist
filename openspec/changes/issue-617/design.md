@@ -37,7 +37,32 @@ Stakeholders are Slack users and Agent authors, the Server and Runner maintainer
 
 ### 1. Use one embedded, versioned Server asset as the canonical Skill
 
-The Skill body will live in the Server's embedded asset set and be resolved through a small catalog with the fixed identity `mohist-slack-collaboration` / `1.0.0`. The catalog owns an explicit version-to-content table; version `1.0.0` is pinned to the canonical digest `de3272639a1d390f3dcf915e65b6c057bf0b9eb91c51545572eb1e484c8c1a22`. Resolution reads the exact embedded text, hashes its exact UTF-8 bytes with SHA-256, and fails closed if the computed digest differs from the pinned mapping. It returns the pinned identity, body, and lowercase hexadecimal digest together. A wording or byte change therefore fails asset resolution until a new published version and mapping are added; it cannot silently change an existing payload.
+The Skill body will live in the Server's embedded asset set and be resolved through a small catalog with the fixed identity `mohist-slack-collaboration` / `1.0.0`. The catalog owns an explicit version-to-content table; version `1.0.0` is pinned to the canonical digest `dedf18a796543ade06a9e0ece00c086577153e1e633f868c099b01cf910d641b`. Resolution reads the exact embedded text, hashes its exact UTF-8 bytes with SHA-256, and fails closed if the computed digest differs from the pinned mapping. It returns the pinned identity, body, and lowercase hexadecimal digest together. A wording or byte change therefore fails asset resolution until a new published version and mapping are added; it cannot silently change an existing payload.
+
+The final v1 asset is fixed by this plan before implementation. The following code block is the exact instruction body: its bytes use UTF-8 with LF line endings and one trailing LF; the code-fence delimiters are not part of the asset. The embedded file, the catalog fixture, and the parity fixture must use this exact body and digest.
+
+```text
+You are the speaker in this Slack conversation. Your reasoning and tool calls are invisible to Slack users; only what you actively send appears as a message.
+
+Send your reply with the Mohist-provided command, reading the destination from the system facts (the Slack reply anchor), never from memory:
+
+  mo slack message send --conversation <conversationId> --reply-to <threadRootMessageId> --text "<your reply>"
+
+- The reply body is rendered in Slack: markdown bold (`**bold**`), inline code (`` `code` ``), fenced code blocks, lists, and quotes display natively; unsupported markdown (tables, headings) degrades to readable plain text. Do not hand-format Slack syntax -- write markdown and let the pipeline render it.
+- To include an image, add `--image <public image url>` for a publicly reachable image, or `--file <local image path>` to upload a local screenshot (at most 10 MB). `--text` is optional when an image is attached.
+- Send when your turn produced a conclusion, result, or a needed next step. If you have nothing worth saying, send nothing -- silence is a legitimate, normal end of a turn, not a failure.
+- A direct human question overrides silence: always answer it, even when the answer is that you have nothing to add. A bare acknowledgement is not an answer.
+- When the work failed or needs a human, send the failure reason and the concrete next step yourself. Do not rely on a system template to speak for you.
+- Keep replies self-contained: the conclusion, the evidence summary, and the next step all belong in the Slack message. Do not require the user to open another tool to learn the outcome.
+- Do not post empty acknowledgements ("got it", "understood", "confirmed"). They disturb the channel and can trigger other bots. Silence is a normal completion, not a failure.
+- When you complete delegated work, @mention the delegator in the result message. Mention someone only when they need to act or notice the result; a narrative reference needs no mention.
+- Fine-grained progress belongs in the Web session timeline, not in Slack chatter.
+- Never guess a reply destination. Use the conversation and reply target from the system facts. Do not target a different channel or an older message from memory.
+- Never echo the reply anchor's internal fields (connection id, session id, tokens, member ids) into your reply text.
+- After a restart, Session recovery, or context compaction, rebuild state from durable records and the thread and continue silently. Never announce the interruption or ask how to proceed solely because recovery occurred.
+```
+
+The SHA-256 of those exact bytes is `dedf18a796543ade06a9e0ece00c086577153e1e633f868c099b01cf910d641b`. Any intentional wording or byte change requires a new Skill version and a new mapping; it cannot be published by changing only the digest.
 
 This keeps the behavioral contract independent of a Runner's local filesystem, user-installed Skills, or a particular Runtime. A user-installed Skill was considered but rejected because it is optional, mutable, and not Server-controlled. Hardcoding the rules in the Runner was also rejected because it would duplicate the product source of truth and make Server/Runner releases drift.
 
@@ -89,9 +114,9 @@ Adding a Server fallback was considered because it could improve visible respons
 
 ### 6. Test the contract at the owning boundaries
 
-Server unit tests will lock the asset identity, pinned v1 digest, six rule content, exact digest, and context version. A catalog test will substitute the embedded body under version `1.0.0` and assert resolution fails. Slack integration specs will cover DM initial launches, channel roots, thread follow-ups, durable DM roots, multi-input representative anchors, replay equivalence, source/context omission, and absence of secrets or Runner-selected destinations. Runner tests will cover source/context pair mismatches, malformed contexts, unsupported versions, empty required fields, changed instructions, lowercase hash validation, and non-Slack envelope preservation. Executor and follow-up tests will assert that invalid Slack source/context pairs do not invoke a Runtime or enqueue follow-up input.
+Server unit tests will lock the asset identity, the exact v1 fixture above, pinned digest `dedf18a796543ade06a9e0ece00c086577153e1e633f868c099b01cf910d641b`, six rule content, exact digest, and context version. A catalog test will substitute the embedded body under version `1.0.0` and assert resolution fails. Slack integration specs will cover DM initial launches, channel roots, thread follow-ups, durable DM roots, multi-input representative anchors, replay equivalence, source/context omission, and absence of secrets or Runner-selected destinations. Runner tests will cover source/context pair mismatches, malformed contexts, unsupported versions, empty required fields, changed instructions, lowercase hash validation, and non-Slack envelope preservation. Executor and follow-up tests will assert that invalid Slack source/context pairs do not invoke a Runtime or enqueue follow-up input.
 
-A parity test will dispatch one initial input and one follow-up for the same Session and assert the same Skill identity, version, exact body, and digest after the initial snapshot crosses the AgentJob boundary and the follow-up resolves the pinned catalog, with distinct correct anchors. A separate batched follow-up test will assert first-durable-input representative selection and bound-root preservation. The existing Slack reply action and outbox tests remain regression coverage rather than becoming part of this context contract.
+A parity test will dispatch one initial input and one follow-up for the same Session and assert the same Skill identity, version, exact v1 fixture body, and digest `dedf18a796543ade06a9e0ece00c086577153e1e633f868c099b01cf910d641b` after the initial snapshot crosses the AgentJob boundary and the follow-up resolves the pinned catalog, with distinct correct anchors. A separate batched follow-up test will assert first-durable-input representative selection and bound-root preservation. The existing Slack reply action and outbox tests remain regression coverage rather than becoming part of this context contract.
 
 ## Risks / Trade-offs
 

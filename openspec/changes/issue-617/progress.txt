@@ -6,11 +6,11 @@
 
 - MF-1 — Slack-origin context can degrade to ordinary work: FIXED IN PLAN. The revised artifacts require a persisted/transported `executionSource`, enforce the Slack/context and non-Slack/no-context pair at Server, Runner control, AgentJob, and follow-up boundaries, and test omitted/null context on both paths.
 - MF-2 — Batched follow-ups lack a complete anchor: FIXED IN PLAN. The revised artifacts persist the effective bound thread root, including the initial DM message, define the first durable input in a combined turn as the representative triggering message, and cover multi-input and DM follow-up dispatches.
-- MF-3 — Same-version Skill immutability/parity is not enforceable: FIXED IN PLAN. The revised artifacts pin the v1 asset digest, reject embedded-asset drift, and require initial/follow-up payload parity plus drift-rejection tests.
+- MF-3 — Same-version Skill immutability/parity is not enforceable: the lock, drift rejection, and parity mechanism remain fixed in the plan; the originally selected digest was for the pre-change asset and is being replaced with an exact post-change fixture.
 
 ## Verification
 
-- Asset digest verified from the exact embedded file: `de3272639a1d390f3dcf915e65b6c057bf0b9eb91c51545572eb1e484c8c1a22`.
+- Canonical post-change asset fixture is now defined exactly in `design.md` with LF line endings and one trailing LF; its SHA-256 is `dedf18a796543ade06a9e0ece00c086577153e1e633f868c099b01cf910d641b`. The implementation must make the embedded file and catalog fixture byte-for-byte equal to it before claiming the digest is verified.
 - No changes are made to `self-review.md`.
 - Incremental commits: `98949a924` locks the published Skill payload; `df5b56129` closes the source-discriminator and batched-anchor findings.
 - Mechanical checks pass: `tasks.json` parses, spec anchors resolve, requirements/scenarios are present, `git diff --check` is clean, and `self-review.md` is untouched. `npm run docs:check` could not run because `tsx` is not installed in the workspace (`exit 127`).
