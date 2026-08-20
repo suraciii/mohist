@@ -260,6 +260,8 @@ public partial class DispatchServiceReconciliationSpecs : Mohist.Server.SpecTest
         var binding = Assert.IsType<AgentRecoveryBinding>(redelivery.AgentRecovery);
         Assert.Equal("pi", binding.Runtime);
         Assert.Equal("/pi/sessions/spec-1", binding.RuntimeSessionId);
+        Assert.Equal("session-1", binding.AgentSessionId);
+        Assert.Equal("turn-1", binding.AgentTurnId);
         var run = await LoadRunAsync(_workflowId!);
         Assert.Equal(TaskRunStatus.Running, Assert.Single(run.CurrentStage().Tasks).Status);
     }

@@ -129,6 +129,8 @@ export interface AgentSessionStartup {
 export interface AgentRecoveryBinding {
   runtime: string
   runtimeSessionId: string
+  agentSessionId?: string | null
+  agentTurnId?: string | null
 }
 
 export type WorkDispatchResponse = {

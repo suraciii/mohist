@@ -417,17 +417,24 @@ public sealed class DispatchService : IScopedService
         if (settlement.State != AgentResultSettlementState.Unknown
             || !string.IsNullOrWhiteSpace(settlement.UpdateOperationId))
             return (null, null, ReserveSlot: false);
-        var binding = settlement.Runtime is not null && settlement.RuntimeSessionId is not null
-            ? new AgentRecoveryBinding(settlement.Runtime, settlement.RuntimeSessionId)
-            : null;
         var activeWork = run.CurrentActiveWorkFor(runnerId);
-        if (binding is null
-            || activeWork is not { IsTask: true }
+        if (activeWork is not { IsTask: true }
             || !string.Equals(activeWork.TaskRunId, settlementTask.Task.Id, StringComparison.Ordinal)
             || !string.Equals(settlement.RunnerId, runnerId, StringComparison.Ordinal))
         {
             return (null, null, ReserveSlot: false);
         }
+
+        var executionBinding = run.FindBoundAgentExecution(settlementTask.Task.Id, activeWork.WorkId, runnerId);
+        var binding = executionBinding is null
+            ? null
+            : new AgentRecoveryBinding(
+                executionBinding.Runtime,
+                executionBinding.RuntimeSessionId,
+                executionBinding.AgentSessionId,
+                executionBinding.AgentTurnId);
+        if (binding is null)
+            return (null, null, ReserveSlot: false);
 
         var workKey = WorkflowWorkKey(workflowRunId, activeWork.WorkId);
         if (reportedWorkKeys.Contains(workKey))

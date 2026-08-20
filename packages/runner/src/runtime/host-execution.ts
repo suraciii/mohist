@@ -1,4 +1,4 @@
-import { createTerminalRecoveryReceipt } from './recovery-receipt.js'
+import { createTerminalRecoveryReceipt, type RuntimeRecoveryBinding } from './recovery-receipt.js'
 import { executeWork } from './host-task-log.js'
 import { reportAndRequireDurableAck } from './work-report.js'
 import { isShutdownFailureResult, isSyntheticStopResult } from './host-update-shutdown.js'
@@ -17,6 +17,25 @@ import type { HostTaskLogDeps } from './host-task-log.js'
 import type { RunnerHostShutdown } from './host-shutdown-types.js'
 
 const log = runnerLogger.child('host')
+
+function recoveryReceiptBinding(work: DispatchWorkItem): RuntimeRecoveryBinding | null {
+  const recovery = work.agentRecovery
+  const runtime = recovery?.runtime.trim().toLowerCase()
+  if (
+    (runtime !== 'pi' && runtime !== 'opencode') ||
+    !recovery?.runtimeSessionId?.trim() ||
+    !recovery.agentSessionId?.trim() ||
+    !recovery.agentTurnId?.trim()
+  )
+    return null
+  return {
+    agentSessionId: recovery.agentSessionId,
+    agentTurnId: recovery.agentTurnId,
+    runtime,
+    runtimeSessionId: recovery.runtimeSessionId,
+    workDir: '',
+  }
+}
 
 /**
  * Read-only context surface the host exposes to the execution helpers. The
@@ -266,7 +285,7 @@ export async function executeAndTransition(
     return
   }
 
-  const binding = context.runtimeTurnRegistry.get(key)
+  const binding = context.runtimeTurnRegistry.get(key) ?? recoveryReceiptBinding(work)
   const receipt = binding
     ? createTerminalRecoveryReceipt(work, binding, context.options.runnerId, result, context.receiptId())
     : undefined

@@ -286,7 +286,9 @@ public record WorkDispatch(
 [GenerateSerializer]
 public sealed record AgentRecoveryBinding(
     [property: Id(0)] string Runtime,
-    [property: Id(1)] string RuntimeSessionId);
+    [property: Id(1)] string RuntimeSessionId,
+    [property: Id(2)] string? AgentSessionId = null,
+    [property: Id(3)] string? AgentTurnId = null);
 
 public static class WorkDispatchOwnerKinds
 {
