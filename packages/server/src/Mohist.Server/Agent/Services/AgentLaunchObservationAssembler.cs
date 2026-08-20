@@ -80,26 +80,10 @@ public sealed class AgentLaunchObservationAssembler
         }
 
         var status = await jobGrain.GetStatusAsync();
-        string? jobMessage = null;
-        string? jobOutput = null;
-        IReadOnlyList<string>? jobArtifactUploadIds = null;
-        string? jobFailureReason = null;
-        int? jobExitCode = null;
+        AgentJobTerminalResult? terminal = null;
         if (status is AgentJobStatus.Completed or AgentJobStatus.Failed or AgentJobStatus.Cancelled or AgentJobStatus.Interrupted)
         {
-            var terminal = await jobGrain.GetTerminalResultAsync();
-            jobMessage = terminal.Message;
-            jobOutput = terminal.Output;
-            jobArtifactUploadIds = terminal.ArtifactUploadIds;
-            jobFailureReason = terminal.FailureReason;
-            jobExitCode = terminal.ExitCode;
-        }
-        else if (status == AgentJobStatus.Unknown)
-        {
-            // Unknown is nonterminal and non-dispatchable. A future
-            // runner-loss deadline projects it as recovering while the
-            // recorded reason remains visible to the caller.
-            jobFailureReason = snapshot.FailureReason;
+            terminal = await jobGrain.GetTerminalResultAsync();
         }
 
         var sessionId = snapshot.AgentSessionId;
@@ -111,6 +95,53 @@ public sealed class AgentLaunchObservationAssembler
         var sessionGrain = _grains.GetGrain<IAgentSessionGrain>(sessionId);
         var initialLaunch = await sessionGrain.GetInitialLaunchAsync();
         var sessionInfo = await sessionGrain.GetAsync();
+
+        return Project(
+            projectId,
+            jobId,
+            status,
+            snapshot,
+            terminal,
+            initialLaunch,
+            sessionInfo);
+    }
+
+    internal static AgentLaunchObservationDto? Project(
+        string projectId,
+        string jobId,
+        AgentJobStatus status,
+        AgentJobRuntimeSnapshot snapshot,
+        AgentJobTerminalResult? terminal,
+        AgentInitialLaunchSnapshot? initialLaunch,
+        AgentSessionInfo? sessionInfo)
+    {
+        if (!string.Equals(snapshot.ProjectId, projectId, StringComparison.Ordinal))
+            return null;
+
+        var sessionId = snapshot.AgentSessionId;
+        if (string.IsNullOrWhiteSpace(sessionId))
+            return null;
+
+        string? jobMessage = null;
+        string? jobOutput = null;
+        IReadOnlyList<string>? jobArtifactUploadIds = null;
+        string? jobFailureReason = null;
+        int? jobExitCode = null;
+        if (status is AgentJobStatus.Completed or AgentJobStatus.Failed or AgentJobStatus.Cancelled or AgentJobStatus.Interrupted)
+        {
+            jobMessage = terminal?.Message;
+            jobOutput = terminal?.Output;
+            jobArtifactUploadIds = terminal?.ArtifactUploadIds;
+            jobFailureReason = terminal?.FailureReason;
+            jobExitCode = terminal?.ExitCode;
+        }
+        else if (status == AgentJobStatus.Unknown)
+        {
+            // Unknown is nonterminal and non-dispatchable. A future
+            // runner-loss deadline projects it as recovering while the
+            // recorded reason remains visible to the caller.
+            jobFailureReason = snapshot.FailureReason;
+        }
 
         var transcriptUrl =
             $"/api/projects/{Uri.EscapeDataString(projectId)}/agent-sessions/{Uri.EscapeDataString(sessionId)}/transcript";
