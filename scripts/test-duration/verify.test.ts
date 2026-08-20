@@ -35,6 +35,7 @@ test('verify parser permits only an external diagnostics parent', () => {
 test('verify runs every declared application and Repository scope under one deadline', async () => {
   const root = mkdtempSync(join(tmpdir(), 'mohist-verify-'))
   const phases: string[] = []
+  const events: string[] = []
   const writes = new Map<string, string>()
   const runtime: VerifyRuntime = {
     now: () => 1000,
@@ -47,9 +48,11 @@ test('verify runs every declared application and Repository scope under one dead
     },
     runPhase: async (name) => {
       phases.push(name)
+      events.push(name)
       return { exitCode: 0, timedOut: false, cleanupComplete: true }
     },
     runGuard: async (argv) => {
+      events.push(`guard:${argv[argv.indexOf('--application') + 1]}`)
       const scope = argv[argv.indexOf('--application') + 1]
       const runRoot = argv[argv.indexOf('--run-root') + 1]
       const trackId = scope === 'server' ? 'server-unit' : 'web-unit'
@@ -79,6 +82,10 @@ test('verify runs every declared application and Repository scope under one dead
 
   assert.equal(code, 0)
   assert.deepEqual(phases.sort(), ['build-1', 'build-1', 'check-1'])
+  assert.deepEqual(events.slice(0, 2), ['build-1', 'build-1'])
+  assert.ok(events.indexOf('check-1') > 1)
+  assert.ok(events.some((event) => event === 'guard:server'))
+  assert.ok(events.some((event) => event === 'guard:web'))
   assert.match(
     writes.get(join(root, 'summary.json')) ?? readFileSync(join(root, 'summary.json'), 'utf8'),
     /"passed": true/,

@@ -20,7 +20,8 @@ namespace Mohist.Server.SpecTests.Specs.Auth;
 /// replay, and logout revokes the chain. Verify/decision require a Web
 /// session; polling and code guessing are rate-limited per source.
 /// </summary>
-public sealed class DeviceFlowSpecs(MohistIntegrationFixture fixture)
+[Collection("DeviceFlowIntegration")]
+public sealed class DeviceFlowSpecs(IsolatedMohistIntegrationFixture fixture)
 {
     private const string SessionCookieName = "mohist_session";
     private const string DeviceCodeGrantType = "urn:ietf:params:oauth:grant-type:device_code";

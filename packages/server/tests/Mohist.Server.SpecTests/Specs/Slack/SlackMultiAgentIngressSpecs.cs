@@ -19,12 +19,13 @@ using Xunit;
 
 namespace Mohist.Server.SpecTests.Specs.Slack;
 
+[Collection("SlackMultiAgentIntegration")]
 public sealed partial class SlackMultiAgentIngressSpecs
 {
     private readonly MohistIntegrationFixture _fixture;
     private readonly Dictionary<string, string> _connectionLeases = new(StringComparer.Ordinal);
 
-    public SlackMultiAgentIngressSpecs(MohistIntegrationFixture fixture) => _fixture = fixture;
+    public SlackMultiAgentIngressSpecs(IsolatedMohistIntegrationFixture fixture) => _fixture = fixture;
 
     [Fact]
     public async Task Multi_bot_mention_starts_no_work_and_prompts_once()

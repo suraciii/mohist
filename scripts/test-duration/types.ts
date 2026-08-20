@@ -157,6 +157,7 @@ export interface TestPlanConfig {
   readonly resourceLanes: readonly ResourceLaneConfig[]
   readonly applicationBuilds: Readonly<Record<string, readonly CommandConfig[]>>
   readonly repositoryChecks: readonly CommandConfig[]
+  readonly fastChecks?: readonly CommandConfig[]
 }
 
 export interface SuiteConfig {

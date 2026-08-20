@@ -6,7 +6,8 @@ import { fileURLToPath, pathToFileURL } from 'node:url'
 import { createArtifactRoot, runPhase, type PhaseResult } from './canonical.js'
 import {
   createTerminationSignal,
-  runApplicationScope,
+  prepareApplicationScope,
+  runPreparedApplicationScope,
   type ApplicationRuntime,
   type ApplicationExecutionContext,
 } from './application.js'
@@ -127,18 +128,35 @@ export async function runVerify(
 ): Promise<number> {
   const runtimes = scopeRuntime(runtime)
   const identity = planIdentity(config)
+  const applicationContexts: readonly ApplicationExecutionContext[] = config.plan!.applications.map((application) => ({
+    runId: `${startedAt}-${runtime.pid()}-${application}`,
+    startedAt,
+    deadlines,
+    artifactRoot: resolve(artifactRoot, application),
+    abortSignal,
+    sourceRevision,
+    planIdentity: identity,
+  }))
+
+  // Server and CLI share project-reference outputs. Build every application
+  // before admitting any test process, then let the isolated test scopes fan
+  // out together. CI already gives each application its own runner; local
+  // verify must provide the equivalent output isolation on one host.
+  const builtApplications = new Map<string, boolean>()
+  for (const [index, application] of config.plan!.applications.entries()) {
+    const context = applicationContexts[index]
+    builtApplications.set(
+      application,
+      await prepareApplicationScope(application, config, runtimes.application, context),
+    )
+  }
+
   const scopeResults = await Promise.all([
-    ...config.plan!.applications.map((application) => {
-      const context: ApplicationExecutionContext = {
-        runId: `${startedAt}-${runtime.pid()}-${application}`,
-        startedAt,
-        deadlines,
-        artifactRoot: resolve(artifactRoot, application),
-        abortSignal,
-        sourceRevision,
-        planIdentity: identity,
-      }
-      return runApplicationScope(application, config, runtimes.application, context)
+    ...applicationContexts.map((context, index) => {
+      const application = config.plan!.applications[index]
+      return builtApplications.get(application)
+        ? runPreparedApplicationScope(application, runtimes.application, context)
+        : Promise.resolve(1)
     }),
     (() => {
       const context: RepositoryExecutionContext = {

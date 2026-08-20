@@ -481,7 +481,12 @@ interface PlannedLane {
 }
 
 function laneResources(track: TrackConfig): string[] {
-  return ['host', track.kind === 'vitest' ? 'node' : 'dotnet', ...(track.id === 'server-spec' ? ['server-spec'] : [])]
+  return [
+    'host',
+    track.kind === 'vitest' ? 'node' : 'dotnet',
+    ...(track.resources ?? []),
+    ...(track.id === 'server-spec' ? ['server-spec'] : []),
+  ]
 }
 
 function withLaneConstraints(

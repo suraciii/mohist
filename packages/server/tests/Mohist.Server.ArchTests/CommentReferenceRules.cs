@@ -22,20 +22,17 @@ public sealed class CommentReferenceRules
     private static readonly Regex CommentReferencePattern = new(
         "issue-\\d+|T-\\d{3}|design/[^*\\s]+\\.md|openspec/",
         RegexOptions.ExplicitCapture);
+    private static readonly Lazy<IReadOnlyDictionary<string, int>> CurrentCounts = new(
+        ReadCommentReferenceCounts,
+        LazyThreadSafetyMode.ExecutionAndPublication);
+
+    internal static void Warmup() => _ = CurrentCounts.Value;
 
     [Fact]
     public void ServerSourceComments_DoNotIntroduceNewIssueSpecDesignPathReferences_BeyondBaseline()
     {
-        var sources = ReadServerSources();
-        Assert.NotEmpty(sources);
-
         var baseline = ReadCommentReferenceBaseline();
-        var currentCounts = sources.ToDictionary(
-            source => source.Path,
-            source => CountOffenders(source.Content),
-            StringComparer.Ordinal);
-
-        var violations = Ratchet(baseline, currentCounts);
+        var violations = Ratchet(baseline, CurrentCounts.Value);
 
         Assert.True(
             violations.Count == 0,
@@ -216,19 +213,14 @@ public sealed class CommentReferenceRules
         || kind == SyntaxKind.SingleLineDocumentationCommentTrivia
         || kind == SyntaxKind.MultiLineDocumentationCommentTrivia;
 
-    private static IReadOnlyList<EmbeddedSource> ReadServerSources()
+    private static IReadOnlyDictionary<string, int> ReadCommentReferenceCounts()
     {
-        var assembly = typeof(CommentReferenceRules).Assembly;
-        return assembly.GetManifestResourceNames()
-            .Where(name => name.StartsWith(ServerSourcesPrefix, StringComparison.Ordinal))
-            .OrderBy(name => name, StringComparer.Ordinal)
-            .Select(name =>
-            {
-                using var stream = assembly.GetManifestResourceStream(name)!;
-                using var reader = new StreamReader(stream);
-                return new EmbeddedSource(name[ServerSourcesPrefix.Length..], reader.ReadToEnd());
-            })
-            .ToArray();
+        var sources = ArchitectureRulesSupport.EmbeddedSources(ServerSourcesPrefix);
+        if (sources.Count == 0) throw new InvalidOperationException("Server production sources are missing");
+        return sources.ToDictionary(
+            source => source.Path,
+            source => CountOffenders(source.Content),
+            StringComparer.Ordinal);
     }
 
     private static IReadOnlyDictionary<string, int> ReadCommentReferenceBaseline()
@@ -243,6 +235,4 @@ public sealed class CommentReferenceRules
         Assert.NotNull(baseline);
         return baseline;
     }
-
-    private sealed record EmbeddedSource(string Path, string Content);
 }

@@ -329,12 +329,14 @@ deadline.
 Each command owns all compilation required by its scope. `test:fast`,
 `test:app`, and `npm test` may reuse valid incremental outputs. `verify` owns one
 fresh build for each application scope. Every track in one application scope
-uses that application's exact build without a hidden rebuild. Application
-scopes may build concurrently only when their output paths and claimed
-Resources are isolated. `verify` requires a clean index and worktree and fails
-if the revision or source state changes during the run. A CI application job
-uses the same build rule for its application and must not consume an output
-from a different source revision.
+uses that application's exact build without a hidden rebuild. Local `verify`
+prepares those application builds before admitting any test process, because
+the Server and CLI projects share project-reference output paths on one host;
+the prepared test scopes then run concurrently. CI application jobs use
+separate runners, so their builds and tests may run concurrently. `verify`
+requires a clean index and worktree and fails if the revision or source state
+changes during the run. A CI application job uses the same build rule for its
+application and must not consume an output from a different source revision.
 
 Every command must print one uniform result summary containing:
 
@@ -521,25 +523,17 @@ for expensive Specs or shared Resources.
 
 ## Status
 
-The current Server projects and duration gate still use Unit and Spec as
-execution tracks. The Spec-to-Unit migration inventory still classifies tests
-by runtime dependencies. Root scripts expose overlapping `test`, `test:fast`,
-`test:canonical`, and `test:budget` paths. They select project and track names
-instead of the target behavior-track model. The canonical test plan does not
-declare application, Level, or Architecture scope metadata, and there is no
-`test:app` command.
+The canonical plan now declares each application, behavior Level, Architecture
+scope, Spec Kind, Resource lane, build, report, and duration rule. The root
+commands are plan-backed: `npm run test:fast` selects the fast inner loop,
+`npm run test:app -- <application>` selects one application, `npm test` runs the
+complete Spec portfolio, and `npm run verify` adds repository checks and Gate
+evidence. Obsolete aliases and raw track selection are removed from the public
+surface.
 
-The current CI workflow groups work by runtime and project instead of
-application ownership. It owns direct `dotnet test`, compiled apphost, and
-workspace Vitest invocations together with project lists, worker counts,
-per-step timeouts, and report checks. It has no independent application jobs,
-Repository evidence producer, or final Gate aggregation. The duration gate
-still has a slow-test allowlist mechanism and does not enforce separate fixture
-startup and runtime-start counts or the complete acceptance evidence.
-
-These are migration gaps. The target is application-and-Level behavior tracks
-plus structurally scoped Architecture tracks, with Product and Design as
-orthogonal declared Kinds and controlled Resources as independent scheduling
-and cost metadata. Existing file suffixes may remain, but they must stop acting
-as classifications. New Specs must follow the target model before the migration
-is complete.
+CI uses the same plan as six ownership jobs: Server, Web, CLI, Runner, Slack,
+and Repository, followed by Gate. Every configured Spec track is enforced
+without a slow-test allowlist, and each scope records source identity, reports,
+totals, duration, and process cleanup. New Specs only need to follow the model
+and declare their owning application, Kind, Level or Architecture scope, and
+Resources; the distribution between levels remains an outcome of ownership.

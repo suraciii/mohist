@@ -42,6 +42,7 @@ export function validatePlan(config: SuiteConfig): string[] {
   errors.push(...validateResourceLanes(plan.resourceLanes))
   errors.push(...validateApplicationBuilds(plan.applications, plan.applicationBuilds))
   errors.push(...validateCommandList(`plan.repositoryChecks`, plan.repositoryChecks))
+  if (plan.fastChecks !== undefined) errors.push(...validateCommandList(`plan.fastChecks`, plan.fastChecks))
 
   const behaviorByApplication = new Map<string, number>()
   const trackIds = new Set<string>()
@@ -101,6 +102,18 @@ export function selectRepositoryTracks(config: SuiteConfig): PlanSelection {
       (track) => track.trackType === 'architecture' && track.architectureScope === repositoryScope,
     ),
   }
+}
+
+export function selectFastTracks(config: SuiteConfig): readonly TrackConfig[] {
+  assertValidPlan(config)
+  return config.tracks.filter(
+    (track) => track.trackType === 'architecture' || (track.trackType === 'behavior' && track.level === 'L0'),
+  )
+}
+
+export function selectPortfolioTracks(config: SuiteConfig): readonly TrackConfig[] {
+  assertValidPlan(config)
+  return config.tracks
 }
 
 export function formatApplicationHelp(config: SuiteConfig): string {

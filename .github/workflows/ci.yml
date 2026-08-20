@@ -27,7 +27,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 8
     env:
-      TMPDIR: ${{ runner.temp }}/mohist-scope
+      TMPDIR: /tmp/mohist-scope
     steps:
       - name: Checkout
         uses: actions/checkout@v6
@@ -67,7 +67,7 @@ jobs:
         if: always()
         shell: bash
         run: |
-          scope_root="$(find "$TMPDIR" -mindepth 1 -maxdepth 1 -type d -print -quit 2>/dev/null || true)"
+          scope_root="$(find "$TMPDIR" -mindepth 1 -maxdepth 1 -type d -name 'mohist-canonical-gate-*' -print -quit 2>/dev/null || true)"
           if [[ -n "$scope_root" ]]; then cp -a "$scope_root"/. artifacts/server/; fi
 
       - name: Upload Server evidence
@@ -84,7 +84,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 8
     env:
-      TMPDIR: ${{ runner.temp }}/mohist-scope
+      TMPDIR: /tmp/mohist-scope
     steps:
       - name: Checkout
         uses: actions/checkout@v6
@@ -108,7 +108,7 @@ jobs:
         if: always()
         shell: bash
         run: |
-          scope_root="$(find "$TMPDIR" -mindepth 1 -maxdepth 1 -type d -print -quit 2>/dev/null || true)"
+          scope_root="$(find "$TMPDIR" -mindepth 1 -maxdepth 1 -type d -name 'mohist-canonical-gate-*' -print -quit 2>/dev/null || true)"
           if [[ -n "$scope_root" ]]; then cp -a "$scope_root"/. artifacts/web/; fi
 
       - name: Upload Web evidence
@@ -125,7 +125,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 8
     env:
-      TMPDIR: ${{ runner.temp }}/mohist-scope
+      TMPDIR: /tmp/mohist-scope
     steps:
       - name: Checkout
         uses: actions/checkout@v6
@@ -165,7 +165,7 @@ jobs:
         if: always()
         shell: bash
         run: |
-          scope_root="$(find "$TMPDIR" -mindepth 1 -maxdepth 1 -type d -print -quit 2>/dev/null || true)"
+          scope_root="$(find "$TMPDIR" -mindepth 1 -maxdepth 1 -type d -name 'mohist-canonical-gate-*' -print -quit 2>/dev/null || true)"
           if [[ -n "$scope_root" ]]; then cp -a "$scope_root"/. artifacts/cli/; fi
 
       - name: Upload CLI evidence
@@ -182,7 +182,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 8
     env:
-      TMPDIR: ${{ runner.temp }}/mohist-scope
+      TMPDIR: /tmp/mohist-scope
     steps:
       - name: Checkout
         uses: actions/checkout@v6
@@ -206,7 +206,7 @@ jobs:
         if: always()
         shell: bash
         run: |
-          scope_root="$(find "$TMPDIR" -mindepth 1 -maxdepth 1 -type d -print -quit 2>/dev/null || true)"
+          scope_root="$(find "$TMPDIR" -mindepth 1 -maxdepth 1 -type d -name 'mohist-canonical-gate-*' -print -quit 2>/dev/null || true)"
           if [[ -n "$scope_root" ]]; then cp -a "$scope_root"/. artifacts/runner/; fi
 
       - name: Upload Runner evidence
@@ -223,7 +223,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 8
     env:
-      TMPDIR: ${{ runner.temp }}/mohist-scope
+      TMPDIR: /tmp/mohist-scope
     steps:
       - name: Checkout
         uses: actions/checkout@v6
@@ -247,7 +247,7 @@ jobs:
         if: always()
         shell: bash
         run: |
-          scope_root="$(find "$TMPDIR" -mindepth 1 -maxdepth 1 -type d -print -quit 2>/dev/null || true)"
+          scope_root="$(find "$TMPDIR" -mindepth 1 -maxdepth 1 -type d -name 'mohist-canonical-gate-*' -print -quit 2>/dev/null || true)"
           if [[ -n "$scope_root" ]]; then cp -a "$scope_root"/. artifacts/slack/; fi
 
       - name: Upload Slack evidence
@@ -264,7 +264,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 8
     env:
-      TMPDIR: ${{ runner.temp }}/mohist-scope
+      TMPDIR: /tmp/mohist-scope
     steps:
       - name: Checkout
         uses: actions/checkout@v6
@@ -290,7 +290,7 @@ jobs:
         if: always()
         shell: bash
         run: |
-          scope_root="$(find "$TMPDIR" -mindepth 1 -maxdepth 1 -type d -print -quit 2>/dev/null || true)"
+          scope_root="$(find "$TMPDIR" -mindepth 1 -maxdepth 1 -type d -name 'mohist-canonical-gate-*' -print -quit 2>/dev/null || true)"
           if [[ -n "$scope_root" ]]; then cp -a "$scope_root"/. artifacts/repository/; fi
 
       - name: Upload Repository evidence

@@ -47,7 +47,11 @@ L1, application Architecture, and owned static-check lanes use that build. The
 Repository scope runs plan validation, cross-application and repository
 Architecture tracks, documentation, formatting, and repository-wide static
 checks. A scope may run independent lanes concurrently when the plan proves
-their output and Resource isolation.
+their output and Resource isolation. Local `verify` prepares all application
+builds first so shared Server/CLI project-reference outputs cannot be written
+while another scope is executing; the prepared application test scopes then
+fan out together. CI jobs have separate runners and do not need this local
+build barrier.
 
 Gate validates producer source and plan identity, scope completeness, unique
 track ownership, reports, budgets, cleanup, and the canonical first failure. It
@@ -114,14 +118,13 @@ global serialization are not gate recovery mechanisms.
 
 ## Migration Status
 
-The executor now validates the checked-in application plan, exposes the closed
-`test:app` scope, builds the selected application once, and passes the same run
-root to the existing track guard. The Repository executor runs the declared
-repository checks, Gate validates the six scope evidence bundles without
-rerunning tests, and local `verify` runs those same scopes under one absolute
-deadline before applying the Gate validation. The remaining migration work is
-the plan-backed `test:fast`/`npm test` commands, the portfolio of individual
-Specs, and the removal of obsolete public aliases.
+The executor validates the checked-in application plan and exposes the closed
+`test:fast`, `test:app`, and portfolio commands. Each application builds once
+and passes the same run root to the track guard. The Repository executor runs
+the declared repository checks, Gate validates the six scope evidence bundles
+without rerunning tests, and local `verify` runs those scopes under one
+absolute deadline before applying Gate validation. Obsolete public aliases are
+removed; new Specs are added by extending the canonical plan.
 
 ## Platform Rules
 
