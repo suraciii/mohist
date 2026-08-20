@@ -12,5 +12,5 @@
 
 - Canonical post-change asset fixture is now defined exactly in `design.md` with LF line endings and one trailing LF; its SHA-256 is `dedf18a796543ade06a9e0ece00c086577153e1e633f868c099b01cf910d641b`. The implementation must make the embedded file and catalog fixture byte-for-byte equal to it before claiming the digest is verified.
 - No changes are made to `self-review.md`.
-- Incremental commits: `98949a924` locks the published Skill payload; `df5b56129` closes the source-discriminator and batched-anchor findings.
-- Mechanical checks pass: `tasks.json` parses, spec anchors resolve, requirements/scenarios are present, `git diff --check` is clean, and `self-review.md` is untouched. `npm run docs:check` could not run because `tsx` is not installed in the workspace (`exit 127`).
+- Incremental commits: `98949a924` and `7712ca9ad` cover the canonical Skill lock repair; `df5b56129` covers the source-discriminator and batched-anchor repair; the bounded rollout repair is the current uncommitted change.
+- Mechanical checks pass so far: `tasks.json` parses, the canonical fixture re-hashes to its pinned digest, `git diff --check` is clean, and `self-review.md` is untouched. Final verification will also check spec anchors and mixed-version rollout coverage. `npm run docs:check` could not run because `tsx` is not installed in the workspace (`exit 127`).
