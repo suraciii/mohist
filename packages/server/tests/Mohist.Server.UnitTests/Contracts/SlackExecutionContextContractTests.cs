@@ -105,4 +105,18 @@ Send your reply with the Mohist-provided command, reading the destination from t
         Assert.Equal("connection_1", context.ReplyAnchor.ConnectionId);
         Assert.Equal("dispatch_1", context.ReplyAnchor.DispatchRef);
     }
+
+    [Fact]
+    public void Manager_context_carries_the_synthetic_project_and_owner()
+    {
+        var context = SlackExecutionContextFactory.Create(
+            "T_MANAGER", "D_MANAGER", "171.0", "171.1", "U_MANAGER",
+            "enrollment_1", "session_1", "slack:session_1:input_1",
+            "__mohist_slack_manager__", "manager");
+
+        Assert.Equal("__mohist_slack_manager__", context.ReplyAnchor.ProjectId);
+        Assert.Equal("manager", context.ReplyAnchor.OwnerKind);
+        Assert.Equal("enrollment_1", context.ReplyAnchor.ConnectionId);
+        Assert.Equal("U_MANAGER", context.ReplyAnchor.InitiatingMemberId);
+    }
 }

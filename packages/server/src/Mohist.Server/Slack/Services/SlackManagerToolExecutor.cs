@@ -4,12 +4,13 @@ using Mohist.Server.Agent.Grains;
 using Mohist.Server.Agent.Services;
 using Mohist.Server.Infrastructure;
 using Mohist.Server.Infrastructure.Data.Slack;
-using Mohist.Server.Infrastructure.Hosting;
 using Mohist.Server.Infrastructure.Orleans;
 
 namespace Mohist.Server.Slack.Services;
 
-public sealed class SlackManagerToolExecutor : IScopedService
+// Retired with the model-output protocol. Capability execution will use the
+// explicit CLI boundary; this compatibility type is intentionally not wired.
+public sealed class SlackManagerToolExecutor
 {
     private readonly SlackManagerToolAuthorization _authorization;
     private readonly SlackManagerApplicationService _manager;

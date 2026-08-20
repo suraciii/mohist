@@ -69,7 +69,11 @@ public sealed record SlackReplyAnchor(
     [property: Id(4)] string InitiatingMemberId,
     [property: Id(5)] string ConnectionId,
     [property: Id(6)] string SessionId,
-    [property: Id(7)] string DispatchRef);
+    [property: Id(7)] string DispatchRef,
+    // Manager executions use the synthetic project and owner explicitly so
+    // reply routing cannot silently fall back to a Connection.
+    [property: Id(8)] string? ProjectId = null,
+    [property: Id(9)] string? OwnerKind = null);
 
 [GenerateSerializer]
 public sealed record SlackCollaborationSkill(
@@ -97,7 +101,9 @@ public static class SlackExecutionContextFactory
         string initiatingMemberId,
         string connectionId,
         string sessionId,
-        string dispatchRef)
+        string dispatchRef,
+        string? projectId = null,
+        string? ownerKind = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(workspaceId);
         ArgumentException.ThrowIfNullOrWhiteSpace(conversationId);
@@ -118,7 +124,9 @@ public static class SlackExecutionContextFactory
                 initiatingMemberId,
                 connectionId,
                 sessionId,
-                dispatchRef),
+                dispatchRef,
+                projectId,
+                ownerKind),
             SlackCollaborationSkillCatalog.Resolve());
     }
 }

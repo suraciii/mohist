@@ -1,4 +1,3 @@
-using System.Text.Json;
 using Mohist.Server.Infrastructure.Data.Slack;
 using Mohist.Server.Infrastructure.Hosting;
 using Mohist.Server.Infrastructure.Slack;
@@ -11,7 +10,8 @@ public sealed class SlackManagerIngressService : IScopedService
     private readonly SlackWorkspaceEnrollmentStore _enrollments;
     private readonly SlackManagedBotAdmissionService _managedBotAdmission;
     private readonly SlackProviderInboxStore _inbox;
-    private readonly SlackOutboxStore _outbox;
+    private readonly SlackDmSessionMappingStore _dmSessions;
+    private readonly SlackStatusProjection _status;
     private readonly ManagerClaimService _claims;
     private readonly ManagerActorAccessDecider _access;
     private readonly ISlackManagerConversationProcessor _conversation;
@@ -20,7 +20,8 @@ public sealed class SlackManagerIngressService : IScopedService
         SlackWorkspaceEnrollmentStore enrollments,
         SlackManagedBotAdmissionService managedBotAdmission,
         SlackProviderInboxStore inbox,
-        SlackOutboxStore outbox,
+        SlackDmSessionMappingStore dmSessions,
+        SlackStatusProjection status,
         ManagerClaimService claims,
         ManagerActorAccessDecider access,
         ISlackManagerConversationProcessor conversation)
@@ -28,7 +29,8 @@ public sealed class SlackManagerIngressService : IScopedService
         _enrollments = enrollments;
         _managedBotAdmission = managedBotAdmission;
         _inbox = inbox;
-        _outbox = outbox;
+        _dmSessions = dmSessions;
+        _status = status;
         _claims = claims;
         _access = access;
         _conversation = conversation;
@@ -67,6 +69,15 @@ public sealed class SlackManagerIngressService : IScopedService
             return SlackManagerIngressResult.Rejected("manager_sender_required");
         var senderSlackUserId = message.SenderSlackUserId!;
 
+        var currentSessionId = await _dmSessions.GetCurrentSessionIdAsync(
+            SlackDeliveryOwnerIds.ManagerProjectId,
+            enrollment.Id,
+            message.Identity.WorkspaceTeamId,
+            message.Identity.ConversationId,
+            ct);
+        var routeKind = string.IsNullOrWhiteSpace(currentSessionId)
+            ? SlackProviderInboxRouteKinds.Launch
+            : SlackProviderInboxRouteKinds.Followup;
         var accepted = await _inbox.AcceptAsync(
             new SlackProviderInboxDraft(
                 SlackDeliveryOwnerIds.ManagerProjectId,
@@ -74,7 +85,7 @@ public sealed class SlackManagerIngressService : IScopedService
                 message.Identity,
                 senderSlackUserId,
                 message.ThreadTs),
-            new SlackProviderInboxRouteDraft(SlackProviderInboxRouteKinds.Manager, SessionId: null),
+            new SlackProviderInboxRouteDraft(routeKind, currentSessionId),
             ct);
         if (accepted.AlreadyExisted)
         {
@@ -141,40 +152,42 @@ public sealed class SlackManagerIngressService : IScopedService
         if (accepted.AlreadyExisted && !string.IsNullOrWhiteSpace(route.SessionId))
         {
             await _inbox.MarkDispatchedAsync(SlackDeliveryOwnerIds.ManagerProjectId, accepted.Id, ct);
-            return SlackManagerIngressResult.Accepted(accepted.Id, false);
+            return SlackManagerIngressResult.Duplicate(accepted.Id);
         }
 
         var response = await _conversation.ProcessAsync(
             new SlackManagerConversationRequest(message, actor.Actor, route.SessionId), ct);
-        if (!string.IsNullOrWhiteSpace(response.SessionId) && string.IsNullOrWhiteSpace(route.SessionId))
-            await _inbox.SetRouteSessionIdAsync(
-                SlackDeliveryOwnerIds.ManagerProjectId,
-                accepted.Id,
-                response.SessionId!,
-                ct);
-        if (!string.IsNullOrWhiteSpace(response.Text))
+        if (response.Accepted && !string.IsNullOrWhiteSpace(response.SessionId))
         {
-            var dispatchRef = response.DispatchRef ?? $"manager:{message.Identity.AsKey()}:response";
-            var payload = JsonSerializer.Serialize(new SlackDeliveryPayload(
-                SlackDeliveryOperations.PostMessage,
-                response.Text,
-                ClientMessageId: dispatchRef));
-            await _outbox.EnqueueRequiredAsync(
-                new SlackOutboxDraft(
+            if (string.IsNullOrWhiteSpace(route.SessionId))
+            {
+                await _inbox.SetRouteSessionIdAsync(
                     SlackDeliveryOwnerIds.ManagerProjectId,
-                    enrollment.Id,
-                    message.Identity.WorkspaceTeamId,
-                    message.Identity.ConversationId,
-                    SlackOutboxKinds.TerminalResult,
-                    dispatchRef,
-                    payload,
-                    message.ThreadTs,
-                    SlackDeliveryOwnerKinds.Manager),
-                ct);
+                    accepted.Id,
+                    response.SessionId!,
+                    ct);
+            }
+            else if (!string.Equals(route.SessionId, response.SessionId, StringComparison.Ordinal))
+            {
+                await _inbox.ReplaceRouteSessionIdAsync(
+                    SlackDeliveryOwnerIds.ManagerProjectId,
+                    accepted.Id,
+                    route.SessionId,
+                    response.SessionId!,
+                    ct);
+            }
         }
 
+        // Receipt and working state are durable projections, not replies. The
+        // Agent reply action remains the only source of Manager message text.
+        await _status.EnqueueReceivedAsync(
+            SlackDeliveryOwnerIds.ManagerProjectId,
+            enrollment.Id,
+            message.Identity,
+            message.ThreadTs,
+            ct);
         await _inbox.MarkDispatchedAsync(SlackDeliveryOwnerIds.ManagerProjectId, accepted.Id, ct);
-        return SlackManagerIngressResult.Accepted(accepted.Id, response.Text is not null);
+        return SlackManagerIngressResult.Accepted(accepted.Id, false, response.SessionId, response.InputId, response.TurnId);
     }
 
     private static string? ReadClaimCode(string text)
@@ -212,9 +225,15 @@ public sealed record SlackManagerConversationRequest(
     string? CurrentSessionId = null);
 
 public sealed record SlackManagerConversationResult(
-    string? Text = null,
+    string? SessionId = null,
     string? DispatchRef = null,
-    string? SessionId = null);
+    string? InputId = null,
+    string? TurnId = null,
+    bool Accepted = true)
+{
+    public static SlackManagerConversationResult NotAccepted(string? sessionId) =>
+        new(sessionId, Accepted: false);
+}
 
 public interface ISlackManagerConversationProcessor
 {
@@ -237,7 +256,10 @@ public sealed record SlackManagerIngressResult(
     string Decision,
     string? InboxId = null,
     string? Reason = null,
-    bool DeliveryIntentCreated = false)
+    bool DeliveryIntentCreated = false,
+    string? SessionId = null,
+    string? InputId = null,
+    string? TurnId = null)
 {
     // Keep the existing decision field for direct API callers while exposing
     // the adapter's ingress-result discriminator on the wire.
@@ -246,8 +268,18 @@ public sealed record SlackManagerIngressResult(
     public static SlackManagerIngressResult Ignored() =>
         new("ignored");
 
-    public static SlackManagerIngressResult Accepted(string inboxId, bool deliveryIntentCreated) =>
-        new("accepted", inboxId, null, deliveryIntentCreated);
+    public static SlackManagerIngressResult Accepted(
+        string inboxId,
+        bool deliveryIntentCreated,
+        string? sessionId = null,
+        string? inputId = null,
+        string? turnId = null) =>
+        new("accepted", inboxId, null, deliveryIntentCreated)
+        {
+            SessionId = sessionId,
+            InputId = inputId,
+            TurnId = turnId,
+        };
 
     public static SlackManagerIngressResult Duplicate(string inboxId) =>
         new("duplicate", inboxId);
