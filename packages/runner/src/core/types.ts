@@ -404,6 +404,12 @@ export interface RunnerOptions {
   // to drive ticks deterministically.
   cleanupLoopIntervalMs?: number
 
+  /**
+   * Reject source-less execution only after the bounded legacy drain gate.
+   * Explicit source/context pairs are always validated.
+   */
+  strictExecutionSourceValidation?: boolean
+
   /** Idle grace before an unowned shared Agent runtime is terminated. */
   runtimeIdleGraceMs?: number
 

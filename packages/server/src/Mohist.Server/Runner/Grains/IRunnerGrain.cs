@@ -162,7 +162,8 @@ public sealed record CapabilityClaimExpectation(
     [property: Id(6)] string? Variant,
     [property: Id(7)] string? CapabilityRevision,
     [property: Id(8)] long? RuntimeGeneration,
-    [property: Id(9)] string? ConnectionGeneration);
+    [property: Id(9)] string? ConnectionGeneration,
+    [property: Id(10)] string[]? RequiredCapabilities = null);
 
 [GenerateSerializer]
 public record RunnerInfo(

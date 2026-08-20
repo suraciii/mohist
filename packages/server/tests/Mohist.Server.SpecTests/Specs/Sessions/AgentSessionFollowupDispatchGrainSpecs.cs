@@ -1,3 +1,4 @@
+using Mohist.Server.Contracts;
 using Mohist.Server.Sessions.Domain;
 using Mohist.Server.Sessions.Grains;
 using Mohist.Server.Sessions.Services;
@@ -53,6 +54,50 @@ public sealed partial class AgentSessionFollowupGrainSpecs
         Assert.Equal(AgentTurnStatus.Queued, Assert.Single(state!.Status.Turns!).Status);
         Assert.True(Assert.Single(state.Status.PendingFollowups!).Dispatching);
         Assert.Equal(accepted.OperationId, dispatch!.OperationId);
+    }
+
+    [Fact]
+    public async Task BeginNextFollowupDispatch_UsesDurableDmRootAndFirstRepresentativeForBatchedSlackInputs()
+    {
+        var (grain, _) = await CreateAttachedSessionAsync("runtime-slack-batched-root");
+        var initialProvenance = new AgentSessionInputProvenance(
+            ProviderKind: "slack",
+            WorkspaceId: "T123",
+            ConversationId: "D123",
+            ThreadId: null,
+            MemberId: "U123",
+            MessageId: "initial-message",
+            ConnectionId: "connection-1",
+            BoundThreadRootMessageId: "initial-message");
+        await grain.EnsureInitialLaunchAsync(new EnsureInitialLaunchCommand(
+            InputId: "initial-input",
+            TurnId: "initial-turn",
+            Prompt: "initial prompt",
+            Source: "agent-connection",
+            JobId: "initial-job",
+            Provenance: initialProvenance));
+        await grain.MarkInitialTurnTerminalAsync("initial-job", AgentTurnStatus.Completed, null);
+
+        var first = await grain.AcceptFollowupAsync(new AcceptFollowupCommand(
+            Text: "first queued input",
+            Source: "agent-session-followup",
+            IdempotencyKey: "slack-batched-first",
+            Provenance: initialProvenance with { MessageId = "first-message" }));
+        await grain.AcceptFollowupAsync(new AcceptFollowupCommand(
+            Text: "second queued input",
+            Source: "agent-session-followup",
+            IdempotencyKey: "slack-batched-second",
+            Provenance: initialProvenance with { MessageId = "second-message" }));
+
+        var dispatch = await grain.BeginNextFollowupDispatchAsync();
+
+        Assert.NotNull(dispatch);
+        Assert.Equal(AgentExecutionSources.Slack, dispatch!.ExecutionSource);
+        Assert.Equal(first.InputId, dispatch.InputId);
+        Assert.Equal(["first queued input", "second queued input"], dispatch.InputTexts);
+        Assert.NotNull(dispatch.Provenance);
+        Assert.Equal("initial-message", dispatch.Provenance!.BoundThreadRootMessageId);
+        Assert.Equal("first-message", dispatch.Provenance.MessageId);
     }
 
     [Fact]

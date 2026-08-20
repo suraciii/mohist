@@ -1,5 +1,6 @@
 using Mohist.Server.Infrastructure.Hosting;
 using Mohist.Server.Contracts;
+using Mohist.Server.Runner.Grains;
 using Mohist.Server.Sessions.Domain;
 using Mohist.Server.Sessions.Grains;
 using Mohist.Server.Sessions.Services;
@@ -30,6 +31,17 @@ public sealed class AgentSessionFollowupDispatcher : IScopedService
             || string.IsNullOrWhiteSpace(target.RuntimeSessionId))
             return;
 
+        // Every newly emitted follow-up carries the v1 source marker. Hold
+        // it when the selected Runner has not advertised the matching wire
+        // contract; legacy source-less work remains the Runner's compatibility
+        // concern and is never relabeled here.
+        var runnerInfo = await _grains.GetGrain<IRunnerGrain>(target.RunnerId).GetInfoAsync();
+        if (runnerInfo is null
+            || !runnerInfo.Capabilities.Any(capability =>
+                string.Equals(capability, AgentExecutionSources.Version1Capability, StringComparison.Ordinal)
+                || string.Equals(capability, "spec/*", StringComparison.Ordinal)))
+            return;
+
         var grain = _grains.GetGrain<IAgentSessionGrain>(sessionId);
         var dispatch = await grain.BeginNextFollowupDispatchAsync();
         if (dispatch is null)
@@ -54,12 +66,18 @@ public sealed class AgentSessionFollowupDispatcher : IScopedService
                 Attachments: dispatch.Attachments,
                 InputId: dispatch.InputId,
                 SlackExecutionContext: SlackExecutionContextFor(dispatch, target.SessionId),
-                TurnId: dispatch.TurnId), ct);
+                TurnId: dispatch.TurnId,
+                ExecutionSource: dispatch.ExecutionSource), ct);
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
             await grain.ReleaseFollowupDispatchAsync(dispatch.OperationId);
             throw;
+        }
+        catch
+        {
+            await grain.ReleaseFollowupDispatchAsync(dispatch.OperationId);
+            return;
         }
         if (!result.Accepted)
             await grain.ReleaseFollowupDispatchAsync(dispatch.OperationId);
@@ -69,19 +87,25 @@ public sealed class AgentSessionFollowupDispatcher : IScopedService
         AgentSessionFollowupDispatch dispatch,
         string sessionId)
     {
-        var provenance = dispatch.Provenance;
-        return dispatch.InputId is null
-            || provenance is null
-            || !string.Equals(provenance.ProviderKind, "slack", StringComparison.Ordinal)
-            ? null
-            : SlackExecutionContextFactory.Create(
-                provenance.WorkspaceId,
-                provenance.ConversationId,
-                provenance.ThreadId,
-                provenance.MessageId,
-                provenance.MemberId,
-                provenance.ConnectionId ?? string.Empty,
-                sessionId,
-                dispatch.OperationId);
+        if (string.Equals(dispatch.ExecutionSource, AgentExecutionSources.NonSlack, StringComparison.Ordinal))
+            return null;
+        if (!string.Equals(dispatch.ExecutionSource, AgentExecutionSources.Slack, StringComparison.Ordinal))
+            throw new InvalidOperationException($"Unknown follow-up execution source '{dispatch.ExecutionSource}'.");
+
+        var provenance = dispatch.Provenance
+            ?? throw new InvalidOperationException("Slack follow-up dispatch has no representative provenance.");
+        if (!string.Equals(provenance.ProviderKind, "slack", StringComparison.Ordinal)
+            || string.IsNullOrWhiteSpace(provenance.BoundThreadRootMessageId))
+            throw new InvalidOperationException("Slack follow-up dispatch has incomplete durable provenance.");
+
+        return SlackExecutionContextFactory.Create(
+            provenance.WorkspaceId,
+            provenance.ConversationId,
+            provenance.BoundThreadRootMessageId,
+            provenance.MessageId,
+            provenance.MemberId,
+            provenance.ConnectionId ?? string.Empty,
+            sessionId,
+            dispatch.OperationId);
     }
 }

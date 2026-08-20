@@ -49,7 +49,7 @@ import type { FollowupOperationJournalStore } from '../runtime/followup-operatio
 import type { ServerConnection } from './connection.js'
 import { SkillResolver } from '../runtime/skill-resolver.js'
 import { buildExecutionEnvelope } from '../runtime/execution-envelope.js'
-import { inlineSlackCollaborationSkill, readSlackExecutionContext } from '../runtime/slack-execution-context.js'
+import { inlineSlackCollaborationSkill, readExecutionSourceContext } from '../runtime/slack-execution-context.js'
 import { runnerLogger } from '../system/logger.js'
 import {
   attachmentManifestEnvelope,
@@ -71,6 +71,7 @@ export interface FollowupHandlerDeps {
   randomId?: () => string
   bindingRecoveryCoordinator?: BindingRecoveryCoordinator | null
   skillResolver?: SkillResolver
+  strictExecutionSourceValidation?: boolean
 }
 
 export interface FollowupDeliveryResult {
@@ -108,6 +109,12 @@ async function handleFollowup(
   deps: FollowupHandlerDeps,
 ): Promise<FollowupDeliveryResult> {
   if (!payload) return unavailable()
+  const sourceContext = readExecutionSourceContext(payload, {
+    strict: deps.strictExecutionSourceValidation === true,
+  })
+  if (sourceContext.kind === 'invalid') return unavailable()
+  if (sourceContext.kind === 'legacy') log.warn('accepted source-less follow-up through the bounded legacy path')
+  const slackContext = sourceContext.slackExecutionContext
   const text = typeof payload.text === 'string' ? payload.text : ''
   const descriptors = parseAttachmentDescriptors(payload.attachments)
   if (text.trim().length === 0 && descriptors.length === 0) return unavailable()
@@ -206,17 +213,14 @@ async function handleFollowup(
   }
 
   const definition = sessionTarget.kind === 'generic' ? target.definition : undefined
-  const slackContext = readSlackExecutionContext(payload)
-  if (slackContext.kind === 'invalid') return unavailable()
   const resolvedSkills = await (deps.skillResolver ?? new SkillResolver()).resolve(
     definition?.skills,
     selectedTarget.workDir,
   )
   if (!resolvedSkills.ok) return unavailable()
-  const skills =
-    slackContext.kind === 'resolved'
-      ? [...resolvedSkills.skills, inlineSlackCollaborationSkill(slackContext.value)]
-      : resolvedSkills.skills
+  const skills = slackContext
+    ? [...resolvedSkills.skills, inlineSlackCollaborationSkill(slackContext)]
+    : resolvedSkills.skills
 
   if (operationId && operationKey && deps.followupOperationJournal) {
     try {
@@ -242,12 +246,7 @@ async function handleFollowup(
   )
   const deliveredAttachments = attachmentDelivery.attachments
   const composedPrompt = attachmentManifestEnvelope(
-    buildExecutionEnvelope(
-      text,
-      definition?.instructions,
-      skills,
-      slackContext.kind === 'resolved' ? slackContext.value : null,
-    ),
+    buildExecutionEnvelope(text, definition?.instructions, skills, slackContext),
     deliveredAttachments,
   )
   const fileParts = deliveredAttachments.flatMap((entry) =>

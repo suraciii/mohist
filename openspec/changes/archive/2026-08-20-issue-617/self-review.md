@@ -1,0 +1,30 @@
+# Self Review
+
+## Verdict
+PASS
+
+This is a re-review. I reread the current issue with `mo issue view 617 --project proj_f6c141d63b6243bfbb481737b2243b87` before reviewing `proposal.md`, `design.md`, `tasks.json`, and both specification files. I found no must-fix problem relative to the issue goals or acceptance criteria; the plan is ready to build.
+
+## Prior Finding Dispositions
+
+- **MF-1, Slack-origin context could degrade to ordinary work:** fixed properly. The revised plan makes `executionSource` durable and enforces the source/context pair at Server construction, Runner control dispatch, AgentJob execution, and follow-up execution. It explicitly rejects omitted or null Slack context and never relabels it as non-Slack (`design.md:76, 101-105`; `specs/slack-skill-injection/spec.md:1-2, 49-72`; `tasks.json:T-002`, criteria 1, 4, and 5).
+- **MF-2, batched follow-ups lacked a complete anchor:** fixed properly. The plan persists the effective bound root, including a DM's initial message, selects the first durable `InputId` as the representative trigger for a batched turn, preserves all input text, and rejects missing provenance (`design.md:78-82`; `specs/slack-skill-injection/spec.md:25-37`; `tasks.json:T-002`, criteria 1-3).
+- **MF-3, same-version Skill immutability and initial/follow-up parity were not enforceable:** fixed properly. The catalog now has a version-to-content lock, rejects embedded-byte drift, and requires both paths to use the locked payload (`design.md:40-65, 82`; `specs/slack-collaboration-skill/spec.md:1-15`; `specs/slack-skill-injection/spec.md:39-47`).
+- **Prior finding 1, the pinned digest described the incomplete Skill:** fixed properly. The plan records the complete v1 instruction fixture before implementation and uses digest `dedf18a796543ade06a9e0ece00c086577153e1e633f868c099b01cf910d641b` consistently. Extracting the exact LF-delimited body from `design.md` and hashing its UTF-8 bytes independently produced that digest (`design.md:42-65`; `tasks.json:T-001`, criteria 3-4).
+- **Prior finding 2, strict source validation could precede Server emission:** fixed properly. The migration now upgrades Runners into bounded dual-read mode, capability-routes explicit v1 dispatches, enables Server emission, drains or reconciles source-less work, and only then enables strict rejection. It also specifies mixed-version tests and rollback ordering (`design.md:127, 131-145`; `specs/slack-skill-injection/spec.md:49-69`; `tasks.json:T-002`, criterion 9).
+- The previous review's non-blocking observations remain observations: the Runner's canonical digest pin is not stated as a concrete expected value in its validator requirement, automated document-to-asset parity is not required, and the persistence-scope wording could be clearer. None makes the plan wrong or incomplete against this issue's acceptance criteria, so none changes the verdict.
+
+## Dimension Verdicts
+
+- **Issue goals and acceptance criteria:** checked, no issue. The plan covers the shared versioned Skill for Slack initial and follow-up execution, excludes it and the anchor from explicit non-Slack execution, states the direct-question exception and empty-acknowledgement prohibition, specifies silent recovery, and rejects invalid or anchorless contexts before enqueue or Runtime invocation. The plan also preserves the issue's non-goals around question classification, Server-authored replies, Slack delivery, and Web/CLI/Workflow behavior.
+- **Coverage:** checked, no issue. The canonical Skill fixture covers the six documented collaboration rules, including direct questions, silence, delegation callbacks, self-contained results, anchor use, and silent recovery. The context specification covers DM roots, channel roots, thread follow-ups, batched representatives, initial/follow-up parity, source mismatches, malformed contexts, and non-Slack preservation.
+- **Correctness:** checked, no issue. The failure cases are addressed at the owning boundaries: catalog drift and body/hash mismatch fail closed; missing Slack context cannot become ordinary work; a DM follow-up uses its persisted initial root; a batched turn uses its first durable input; and the rollout compatibility path is bounded and does not reinterpret an omitted source as `non-slack`.
+- **Consistency with the current codebase and conventions:** checked, no issue. The plan follows the existing embedded Server asset, Orleans append-only contract, AgentJob dispatch, follow-up control method, Runner context parser, managed Skill resolution, and execution-envelope seams. It keeps the existing Agent-owned Slack send action and delivery/outbox boundaries unchanged.
+- **Task breakdown, ordering, and verifiability:** checked, no issue. T-001 establishes the immutable Skill contract before T-002 wires it through Server and Runner. The tasks name the relevant Server and Runner contract tests, boundary rejection tests, initial/follow-up parity tests, non-Slack regression tests, and mixed-version rollout tests. The migration and rollback sequences make the compatibility ordering testable.
+
+## Observations
+
+- `design.md:101` says the Runner rejects a "non-canonical digest," while `specs/slack-skill-injection/spec.md:71-78` requires only that the digest match the supplied instruction bytes. The Server catalog is pinned and the design states that transport authentication is the source-authenticity boundary, so this is not a must-fix for issue 617. The implementation should nevertheless make clear whether Runner v1 compares against the pinned digest or only checks internal body/hash consistency.
+- The issue describes the change as not altering persistence. The plan adds append-only source and bound-root provenance to durable AgentJob/Session state while explicitly avoiding a relational migration and preserving Session queue/turn semantics (`proposal.md:20-23`; `design.md:31-33, 131-139`). That scope interpretation should be made explicit during implementation, but it does not violate an acceptance criterion as currently written.
+
+<promise>PASS</promise>

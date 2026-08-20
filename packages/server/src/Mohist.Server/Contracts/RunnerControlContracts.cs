@@ -80,6 +80,7 @@ public sealed record FollowupParams(
     [property: JsonPropertyName("operationId")] string OperationId,
     [property: JsonPropertyName("inputId")] string? InputId,
     [property: JsonPropertyName("turnId")] string TurnId,
+    [property: JsonPropertyName("executionSource")] string? ExecutionSource,
     [property: JsonPropertyName("slackExecutionContext")] AgentSlackExecutionContext? SlackExecutionContext,
     [property: JsonPropertyName("attachments")] IReadOnlyList<FollowupAttachmentDescriptor>? Attachments);
 

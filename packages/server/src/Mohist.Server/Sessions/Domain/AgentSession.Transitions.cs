@@ -460,7 +460,8 @@ public static partial class AgentSessionExtensions
                     JobId: jobId,
                     Attachments: normalizedAttachments,
                     Provenance: provenance,
-                    StartupContext: startupContext));
+                    StartupContext: startupContext,
+                    ExecutionSource: ExecutionSourceFor(provenance)));
             }
 
             var turns = (session.Status.Turns ?? []).ToList();
@@ -593,7 +594,8 @@ public static partial class AgentSessionExtensions
                 RecordedAt: now,
                 JobId: null,
                 Attachments: normalizedAttachments,
-                Provenance: provenance));
+                Provenance: provenance,
+                ExecutionSource: ExecutionSourceFor(provenance)));
             turns.Add(new AgentTurnRecord(
                 Id: turnId,
                 Sequence: turns.Count + 1,
@@ -1144,11 +1146,13 @@ public static partial class AgentSessionExtensions
                     TurnStatus: existingTurn.Status);
             }
 
+            var executionSource = ExecutionSourceFor(provenance);
             var candidateTurn = ChooseFollowupTurnForAssignment(
                 turns,
                 leases,
                 inputs,
-                hasAttachments);
+                hasAttachments,
+                executionSource);
 
             var newInput = new AgentSessionInputRecord(
                 Id: inputId,
@@ -1160,7 +1164,8 @@ public static partial class AgentSessionExtensions
                 JobId: null,
                 IdempotencyKey: idempotencyKey,
                 Attachments: normalizedAttachments,
-                Provenance: provenance);
+                Provenance: provenance,
+                ExecutionSource: executionSource);
 
             AgentTurnRecord updatedTurn;
             var createdNewTurn = false;
@@ -1236,40 +1241,6 @@ public static partial class AgentSessionExtensions
                 InputAcceptance: newInput.Acceptance,
                 TurnStatus: updatedTurn.Status,
                 Attachments: normalizedAttachments);
-        }
-
-        /// <summary>
-        /// Resolve the follow-up turn an incoming input should be
-        /// assigned to. Returns the existing queued turn whose delivery
-        /// payload has not been claimed (joins the new input in submission
-        /// order), or <c>null</c> to signal that the caller must create a
-        /// new queued turn. A dispatching or executing turn does NOT match.
-        /// </summary>
-        private static AgentTurnRecord? ChooseFollowupTurnForAssignment(
-            IReadOnlyList<AgentTurnRecord> turns,
-            IReadOnlyList<AgentSessionFollowupLease> leases,
-            IReadOnlyList<AgentSessionInputRecord> inputs,
-            bool incomingHasAttachments)
-        {
-            if (incomingHasAttachments)
-                return null;
-
-            for (var i = turns.Count - 1; i >= 0; i--)
-            {
-                var candidate = turns[i];
-                if (!string.IsNullOrEmpty(candidate.JobId))
-                    continue;
-                if (candidate.Status != AgentTurnStatus.Queued)
-                    continue;
-                if (leases.Any(lease => string.Equals(lease.TurnId, candidate.Id, StringComparison.Ordinal)
-                    && lease.PayloadSealed))
-                    continue;
-                if (candidate.InputIds.Any(inputId => inputs.Any(input => input.Id == inputId
-                    && input.Attachments is { Count: > 0 })))
-                    continue;
-                return candidate;
-            }
-            return null;
         }
 
         /// <summary>

@@ -77,6 +77,7 @@ export interface FollowupParams {
   operationId: string
   inputId?: string | null
   turnId: string
+  executionSource?: unknown
   slackExecutionContext?: SlackExecutionContext | null
   attachments?: readonly FollowupAttachmentDescriptor[] | null
 }

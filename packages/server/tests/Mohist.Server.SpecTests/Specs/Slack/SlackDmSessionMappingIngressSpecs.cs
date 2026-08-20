@@ -134,12 +134,13 @@ public sealed class SlackDmSessionMappingIngressSpecs
             var mapping = scope.ServiceProvider.GetRequiredService<SlackDmSessionMappingStore>();
             var now = _fixture.TimeProvider.GetUtcNow();
             var sessionState = """
-                {"id":"__SESSION__","metadata":{"labels":{"mohist.io/project-id":"__PROJECT__","mohist.io/source-kind":"agent-connection","mohist.io/connection-id":"__CONNECTION__","mohist.io/slack-user-id":"U_OWNER","mohist.io/slack-conversation-id":"D-DM-FOLLOWUP","mohist.io/agent-id":"agent-1","mohist.io/agent-name":"Mohist Agent"}},"runtime":{"runnerId":"r1","workDir":null,"runtime":"opencode"},"settings":{"model":"gpt-4o"},"status":{"agentRuntimeSessionId":"runtime-followup","activity":"active","createdAt":"__NOW__","lastDataAt":"__NOW__"}}
+                {"id":"__SESSION__","metadata":{"labels":{"mohist.io/project-id":"__PROJECT__","mohist.io/source-kind":"agent-connection","mohist.io/connection-id":"__CONNECTION__","mohist.io/slack-user-id":"U_OWNER","mohist.io/slack-conversation-id":"D-DM-FOLLOWUP","mohist.io/agent-id":"agent-1","mohist.io/agent-name":"Mohist Agent"}},"runtime":{"runnerId":"r1","workDir":null,"runtime":"opencode"},"settings":{"model":"gpt-4o"},"status":{"agentRuntimeSessionId":"runtime-followup","activity":"active","createdAt":"__NOW__","lastDataAt":"__NOW__","inputs":[{"id":"initial-input","sequence":1,"text":"initial","source":"agent-connection","acceptance":"accepted","recordedAt":"__NOW__","jobId":"__JOB__","provenance":{"providerKind":"slack","workspaceId":"T123","conversationId":"D-DM-FOLLOWUP","threadId":null,"memberId":"U_OWNER","messageId":"initial-message","connectionId":"__CONNECTION__","boundThreadRootMessageId":"initial-message"}}],"turns":[{"id":"initial-turn","sequence":1,"inputIds":["initial-input"],"status":"completed","jobId":"__JOB__","recordedAt":"__NOW__","updatedAt":"__NOW__"}]}}
                 """;
             sessionState = sessionState
                 .Replace("__SESSION__", sessionId)
                 .Replace("__PROJECT__", connection.ProjectId)
                 .Replace("__CONNECTION__", connection.Id)
+                .Replace("__JOB__", jobKey)
                 .Replace("__NOW__", now.UtcDateTime.ToString("O"));
             db.AgentSessions.Add(new AgentSessionRow
             {
@@ -258,7 +259,7 @@ public sealed class SlackDmSessionMappingIngressSpecs
             .Where(row => row.Id == sessionId)
             .Select(row => row.State)
             .SingleAsync();
-        Assert.Equal(1, JsonDocument.Parse(state).RootElement.GetProperty("status").GetProperty("turns").GetArrayLength());
+        Assert.Equal(2, JsonDocument.Parse(state).RootElement.GetProperty("status").GetProperty("turns").GetArrayLength());
         var afterReplayProjection = await verifyScope.ServiceProvider.GetRequiredService<MohistDbContext>().SlackOutboxRows
             .Where(row => row.ConnectionId == connection.Id && row.ConversationId == "D-DM-FOLLOWUP")
             .OrderBy(row => row.Id)

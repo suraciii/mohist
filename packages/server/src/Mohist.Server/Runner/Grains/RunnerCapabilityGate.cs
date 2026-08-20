@@ -26,6 +26,13 @@ internal static class RunnerCapabilityGate
         if (string.IsNullOrWhiteSpace(expectation.Runtime))
             return false;
 
+        if (expectation.RequiredCapabilities is { Length: > 0 }
+            && expectation.RequiredCapabilities.Any(required =>
+                !info.Capabilities.Any(capability =>
+                    string.Equals(capability, required, StringComparison.Ordinal)
+                    || string.Equals(capability, "spec/*", StringComparison.Ordinal))))
+            return false;
+
         var catalog = RuntimeCatalogFor(info, expectation.Runtime);
         var requiresCapabilityRevision = !string.IsNullOrWhiteSpace(expectation.ReasoningEffort);
         if (requiresCapabilityRevision

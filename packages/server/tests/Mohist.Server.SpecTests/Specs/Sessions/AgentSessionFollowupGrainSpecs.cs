@@ -1,3 +1,4 @@
+using Mohist.Server.Contracts;
 using Mohist.Server.Sessions.Domain;
 using Mohist.Server.Sessions.Grains;
 using Mohist.Server.Sessions.Services;
@@ -118,6 +119,59 @@ public sealed partial class AgentSessionFollowupGrainSpecs : IClassFixture<Agent
         Assert.Equal(first.InputId, turn.InputIds[0]);
         Assert.Equal(second.InputId, turn.InputIds[1]);
         Assert.Equal(AgentTurnStatus.Queued, turn.Status);
+    }
+
+    [Fact]
+    public async Task AcceptFollowup_QueuedTurn_DoesNotJoinDifferentExecutionSource()
+    {
+        var (grain, sessionId) = await CreateAttachedSessionAsync("runtime-source-separated-queued");
+        var initialProvenance = new AgentSessionInputProvenance(
+            ProviderKind: "slack",
+            WorkspaceId: "T123",
+            ConversationId: "C123",
+            ThreadId: null,
+            MemberId: "U123",
+            MessageId: "initial-message",
+            ConnectionId: "connection-1",
+            BoundThreadRootMessageId: "initial-message");
+        await grain.EnsureInitialLaunchAsync(new EnsureInitialLaunchCommand(
+            InputId: "initial-input",
+            TurnId: "initial-turn",
+            Prompt: "initial prompt",
+            Source: "agent-connection",
+            JobId: "initial-job",
+            Provenance: initialProvenance));
+        await grain.MarkInitialTurnTerminalAsync("initial-job", AgentTurnStatus.Completed, null);
+
+        var slack = await grain.AcceptFollowupAsync(new AcceptFollowupCommand(
+            Text: "Slack follow-up waiting for dispatch",
+            Source: "agent-session-followup",
+            IdempotencyKey: "source-separated-slack",
+            Provenance: initialProvenance with { MessageId = "slack-followup" }));
+        var nonSlack = await grain.AcceptFollowupAsync(new AcceptFollowupCommand(
+            Text: "Web follow-up",
+            Source: "agent-session-followup",
+            IdempotencyKey: "source-separated-non-slack"));
+
+        Assert.NotEqual(slack.TurnId, nonSlack.TurnId);
+        var state = await _fixture.StateStore.LoadAsync(sessionId);
+        Assert.NotNull(state);
+        Assert.Equal([slack.InputId], state!.Status.Turns![1].InputIds);
+        Assert.Equal([nonSlack.InputId], state.Status.Turns[2].InputIds);
+
+        var slackDispatch = await grain.BeginNextFollowupDispatchAsync();
+        Assert.NotNull(slackDispatch);
+        Assert.Equal(slack.InputId, slackDispatch!.InputId);
+        Assert.Equal(AgentExecutionSources.Slack, slackDispatch.ExecutionSource);
+
+        await grain.MarkFollowupTurnExecutingAsync(slack.OperationId);
+        await grain.MarkFollowupTurnTerminalAsync(slack.OperationId, AgentTurnStatus.Completed, null);
+
+        var nonSlackDispatch = await grain.BeginNextFollowupDispatchAsync();
+        Assert.NotNull(nonSlackDispatch);
+        Assert.Equal(nonSlack.InputId, nonSlackDispatch!.InputId);
+        Assert.Equal(AgentExecutionSources.NonSlack, nonSlackDispatch.ExecutionSource);
+        Assert.Null(nonSlackDispatch.Provenance);
     }
 
     [Fact]

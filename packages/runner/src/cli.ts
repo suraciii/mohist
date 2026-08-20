@@ -44,6 +44,7 @@ try {
     runtimeIdleGraceMs: positiveNumberEnv('RUNTIME_IDLE_GRACE_MS') ?? 5 * 60_000,
     quarantineDrainTimeoutMs: positiveNumberEnv('QUARANTINE_DRAIN_TIMEOUT_MS') ?? 60_000,
     runtimeShutdownTimeoutMs: positiveNumberEnv('RUNTIME_SHUTDOWN_TIMEOUT_MS') ?? 30_000,
+    strictExecutionSourceValidation: booleanEnv('STRICT_EXECUTION_SOURCE_VALIDATION') ?? false,
     credential: credential ?? undefined,
   }).run(controller.signal)
 } finally {
@@ -64,4 +65,11 @@ function numberEnv(name: string) {
 function positiveNumberEnv(name: string) {
   const parsed = numberEnv(name)
   return parsed !== undefined && parsed > 0 ? Math.floor(parsed) : undefined
+}
+
+function booleanEnv(name: string): boolean | undefined {
+  const value = env(name)?.toLowerCase()
+  if (value === 'true' || value === '1') return true
+  if (value === 'false' || value === '0') return false
+  return undefined
 }

@@ -1,5 +1,6 @@
 using System.Text.Json;
 using Mohist.Server.Agent.Grains;
+using Mohist.Server.Contracts;
 using Mohist.Server.Infrastructure;
 using Mohist.Server.Infrastructure.Data.AgentJobs;
 using Mohist.Server.Infrastructure.Data.Workflow;
@@ -315,7 +316,26 @@ public sealed class DispatchService : IScopedService
             definition.Variant,
             catalog.CapabilityRevision,
             witness?.Generation,
-            info.ConnectionGeneration);
+            info.ConnectionGeneration,
+            HasExplicitExecutionSource(dispatch)
+                ? [AgentExecutionSources.Version1Capability]
+                : null);
+    }
+
+    private static bool HasExplicitExecutionSource(WorkDispatch dispatch)
+    {
+        if (string.IsNullOrWhiteSpace(dispatch.With))
+            return false;
+        try
+        {
+            using var document = JsonDocument.Parse(dispatch.With);
+            return document.RootElement.ValueKind == JsonValueKind.Object
+                && document.RootElement.TryGetProperty("executionSource", out _);
+        }
+        catch (JsonException)
+        {
+            return false;
+        }
     }
 
     private static RuntimeCatalogEntry? FindRuntimeCatalog(RunnerInfo info, string runtime)

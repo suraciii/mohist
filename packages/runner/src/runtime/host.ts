@@ -286,6 +286,7 @@ export class RunnerHost {
             followupOperationJournal: this.followupOperationJournal,
             bindingRecoveryCoordinator: this.bindingRecoveryCoordinator,
             skillResolver: this.skillResolver,
+            strictExecutionSourceValidation: options.strictExecutionSourceValidation === true,
           },
           cancel: {
             followupTargetResolver: (target) => this.resolveFollowupTarget(target),
@@ -310,6 +311,7 @@ export class RunnerHost {
         sessionCommandJournal: this.sessionCommandJournal,
         followupOperationJournal: this.followupOperationJournal,
         cancelOperationJournal: this.cancelOperationJournal,
+        strictExecutionSourceValidation: options.strictExecutionSourceValidation === true,
       },
       this.buildInfo,
     )
@@ -572,7 +574,7 @@ export class RunnerHost {
         process.cwd(),
         this.skillResolver,
         this.namedWorkspaceManager,
-        undefined,
+        { strictExecutionSourceValidation: this.options.strictExecutionSourceValidation === true },
         this.runtimeTurnRegistry,
       ),
       this.agentSessionRuntimeEventOutbox,
