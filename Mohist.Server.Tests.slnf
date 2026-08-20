@@ -4,6 +4,7 @@
     "projects": [
       "packages/server/tests/Mohist.Server.ArchTests/Mohist.Server.ArchTests.csproj",
       "packages/server/tests/Mohist.Server.SpecTests/Mohist.Server.SpecTests.csproj",
+      "packages/server/tests/Mohist.Server.OrleansTests/Mohist.Server.OrleansTests.csproj",
       "packages/server/tests/Mohist.Server.UnitTests/Mohist.Server.UnitTests.csproj",
       "packages/server/tests/Mohist.Workflow.Definition.Tests/Mohist.Workflow.Definition.Tests.csproj"
     ]

@@ -1,0 +1,39 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <IsPackable>false</IsPackable>
+    <RootNamespace>Mohist.Server.OrleansTests</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Orleans.TestingHost" />
+    <PackageReference Include="xunit.v3" />
+    <PackageReference Include="Microsoft.Extensions.TimeProvider.Testing" />
+    <PackageReference Include="EnvironmentAbstractions" />
+    <PackageReference Include="EnvironmentAbstractions.TestHelpers" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\Mohist.Server\Mohist.Server.csproj" />
+    <ProjectReference Include="..\..\..\cli\Mohist.Cli\Mohist.Cli.csproj" />
+    <ProjectReference Include="..\Mohist.Server.TestSupport\Mohist.Server.TestSupport.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Compile Include="..\Mohist.Server.SpecTests\Specs\Workflow\WorkflowGrainFixture.cs"
+             Link="Support\WorkflowGrainFixture.cs" />
+    <Compile Include="..\Mohist.Server.SpecTests\Specs\Workflow\WorkflowGrainSpecs.cs"
+             Link="Support\WorkflowGrainSpecs.cs" />
+    <Compile Include="..\Mohist.Server.SpecTests\Support\GrainTestConfig.cs"
+             Link="Support\GrainTestConfig.cs" />
+    <Compile Include="..\Mohist.Server.SpecTests\Support\LogicalTestClusterPortAllocator.cs"
+             Link="Support\LogicalTestClusterPortAllocator.cs" />
+    <Compile Include="..\Mohist.Server.SpecTests\Support\MigratedSqliteTemplate.cs"
+             Link="Support\MigratedSqliteTemplate.cs" />
+    <Compile Include="..\Mohist.Server.SpecTests\Support\ProfileWorkflowTestSupport.cs"
+             Link="Support\ProfileWorkflowTestSupport.cs" />
+    <Compile Include="..\Mohist.Server.SpecTests\Support\TestSqliteDatabase.cs"
+             Link="Support\TestSqliteDatabase.cs" />
+  </ItemGroup>
+
+</Project>
