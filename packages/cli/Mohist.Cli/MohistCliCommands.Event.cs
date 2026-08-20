@@ -32,57 +32,74 @@ internal static class EventCommands
     {
         var descriptor = new ResourceDescriptor(
             ResourceCardinality.Stream,
-            ["type", "source", "id", "time", "specversion", "subject", "extensions", "data"]);
+            ["type", "source", "id", "time", "specversion", "subject", "datacontenttype", "data",
+                "projectid", "issue", "epic", "workflowrunid", "agentid", "sessionid", "runnerid",
+                "workspace", "workspaceoriginkind", "stage", "parent", "githubrepo", "githubissue"]);
         var cmd = new Command(
             "tail",
             "Subscribe to realtime Event envelopes from subscription establishment; emit one NDJSON object per line. With --match, only matching events are emitted.");
         var projectOpt = MohistCliCommands.ProjectRefOption();
         var matchOpt = new Option<string?>("--match") { Description = "Match expression (CEL subset) forwarded to the server; the server is the single compile authority" };
+        var eventOpt = new Option<string[]?>("--event")
+        {
+            Description = "Domain event type to subscribe to (repeatable)",
+            AllowMultipleArgumentsPerToken = true,
+        };
         var jsonOpt = MohistCliCommands.JsonSelectionOption(descriptor);
         cmd.Options.Add(projectOpt);
         cmd.Options.Add(matchOpt);
+        cmd.Options.Add(eventOpt);
         cmd.Options.Add(jsonOpt);
         cmd.SetAction(async ctx =>
         {
             var project = ctx.GetValue(projectOpt);
             var match = ctx.GetValue(matchOpt);
+            var eventValues = ctx.GetValue(eventOpt);
             var json = ctx.GetValue(jsonOpt);
             var selection = JsonSelection.Parse(descriptor, ctx.GetResult(jsonOpt) is not null, json);
             if (selection.Kind == JsonSelectionKind.Discovery || selection.Kind == JsonSelectionKind.Invalid)
                 return api.WriteJsonSelectionResult(descriptor, selection);
 
+            string[]? eventTypes = null;
+            if (eventValues is { Length: > 0 })
+            {
+                if (eventValues.Any(string.IsNullOrWhiteSpace))
+                    return CommandHelpHook.RenderUsageFailure(ctx, api.Error, "--event values must not be empty.");
+                eventTypes = eventValues
+                    .Select(value => value.Trim())
+                    .Distinct(StringComparer.Ordinal)
+                    .ToArray();
+            }
+
             var (resolved, resolveExit) = await api.ResolveProject(project).ConfigureAwait(false);
             if (resolveExit != 0)
                 return resolveExit;
 
-            var path = $"/api/projects/{Uri.EscapeDataString(resolved)}/events/tail";
-            if (!string.IsNullOrWhiteSpace(match))
-                path += $"?match={Uri.EscapeDataString(match!)}";
-
-            return await RunTailAsync(api, path, selection, descriptor).ConfigureAwait(false);
+            return await RunTailAsync(api, resolved, match, eventTypes, selection).ConfigureAwait(false);
         });
         return cmd;
     }
 
-    internal static async Task<int> RunTailAsync(MohistCliApi api, string path, JsonSelection? selection = null, ResourceDescriptor? descriptor = null)
+    internal static async Task<int> RunTailAsync(
+        MohistCliApi api,
+        string projectRef,
+        string? match,
+        string[]? eventTypes,
+        JsonSelection? selection = null)
     {
-        if (selection is { Kind: JsonSelectionKind.Selected } && descriptor is not null)
-        {
-            var token = TailCancellationOverride != default
-                ? TailCancellationOverride
-                : api.Invocation.CancellationToken;
-            return await NdjsonStream.ReadSelectedAsync(api.Http, path, api.Output, api.Error, selection, token)
-                .ConfigureAwait(false);
-        }
         if (TailCancellationOverride != default)
-            return await NdjsonStream.ReadAsync(api.Http, path, api.Output, api.Error, TailCancellationOverride)
+            return await api.EventStream!.RunAsync(projectRef, match, eventTypes, selection, TailCancellationOverride)
+                .ConfigureAwait(false);
+
+        if (api.Invocation.CancellationToken != default)
+            return await api.EventStream!.RunAsync(projectRef, match, eventTypes, selection, api.Invocation.CancellationToken)
                 .ConfigureAwait(false);
 
         using var cts = new CancellationTokenSource();
         Console.CancelKeyPress += OnCancel;
         try
         {
-            return await NdjsonStream.ReadAsync(api.Http, path, api.Output, api.Error, cts.Token)
+            return await api.EventStream!.RunAsync(projectRef, match, eventTypes, selection, cts.Token)
                 .ConfigureAwait(false);
         }
         finally

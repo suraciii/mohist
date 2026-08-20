@@ -214,7 +214,6 @@ interface CoderSessionFixture {
 async function mockCoderSessionApi(page: Page, fixture: CoderSessionFixture = {}) {
   const session = fixture.session ?? makeCompactViewportSession()
 
-  await page.route('**/hubs/events**', route => route.fulfill({ status: 204, body: '' }))
   await page.route('**/api/**', async (route) => {
     const url = new URL(route.request().url())
     const path = url.pathname.replace(/^\/api/, '')
@@ -224,7 +223,9 @@ async function mockCoderSessionApi(page: Page, fixture: CoderSessionFixture = {}
       return route.fulfill({ json: apiResponse([project]) })
     }
     if (method === 'GET' && path === `/projects/${project.id}/agent/status`) {
-      return route.fulfill({ json: apiResponse({ running: false, runnerAvailable: true, activeAgents: [], capacity: { active: 0, max: 8 } }) })
+      return route.fulfill({
+        json: apiResponse({ running: false, runnerAvailable: true, activeAgents: [], capacity: { active: 0, max: 8 } }),
+      })
     }
     if (method === 'GET' && path === `/projects/${project.id}/issues`) {
       return route.fulfill({ json: apiResponse([makeIssue()]) })
@@ -253,22 +254,42 @@ async function mockCoderSessionApi(page: Page, fixture: CoderSessionFixture = {}
     if (method === 'GET' && path === `/workflow-runs/${workflowRunId}/sessions`) {
       return route.fulfill({ json: apiResponse([session]) })
     }
-    if (fixture.genericSession && method === 'GET' && path === `/projects/${project.id}/agent-sessions/${genericSessionId}`) {
+    if (
+      fixture.genericSession &&
+      method === 'GET' &&
+      path === `/projects/${project.id}/agent-sessions/${genericSessionId}`
+    ) {
       return route.fulfill({ json: apiResponse(fixture.genericSession) })
     }
-    if (fixture.genericSession && method === 'GET' && path === `/projects/${project.id}/agent-sessions/${genericSessionId}/transcript`) {
+    if (
+      fixture.genericSession &&
+      method === 'GET' &&
+      path === `/projects/${project.id}/agent-sessions/${genericSessionId}/transcript`
+    ) {
       return route.fulfill({ json: apiResponse(makeCompactViewportTranscript()) })
     }
     if (fixture.genericSession && method === 'GET' && path === `/projects/${project.id}/sessions/${genericSessionId}`) {
       return route.fulfill({ json: apiResponse(makeUnifiedGenericSummary(fixture.genericSession)) })
     }
-    if (fixture.genericSession && method === 'GET' && path === `/projects/${project.id}/sessions/${genericSessionId}/transcript`) {
+    if (
+      fixture.genericSession &&
+      method === 'GET' &&
+      path === `/projects/${project.id}/sessions/${genericSessionId}/transcript`
+    ) {
       return route.fulfill({ json: apiResponse(makeCompactViewportTranscript()) })
     }
-    if (fixture.compactError && method === 'POST' && path === `/projects/${project.id}/agent-sessions/${session.id}/compact`) {
+    if (
+      fixture.compactError &&
+      method === 'POST' &&
+      path === `/projects/${project.id}/agent-sessions/${session.id}/compact`
+    ) {
       return route.fulfill({ status: 409, json: { success: false, error: fixture.compactError } })
     }
-    if (fixture.genericSession && method === 'POST' && path === `/projects/${project.id}/agent-sessions/${genericSessionId}/stop`) {
+    if (
+      fixture.genericSession &&
+      method === 'POST' &&
+      path === `/projects/${project.id}/agent-sessions/${genericSessionId}/stop`
+    ) {
       return route.fulfill({ json: apiResponse({ state: 'cancelled' }) })
     }
 
@@ -294,7 +315,11 @@ const compactViewports = [
   { width: 320, height: 568 },
 ] as const
 
-async function openIssueSession(page: Page, viewport: { width: number; height: number }, fixture?: CoderSessionFixture) {
+async function openIssueSession(
+  page: Page,
+  viewport: { width: number; height: number },
+  fixture?: CoderSessionFixture,
+) {
   await page.setViewportSize(viewport)
   await mockCoderSessionApi(page, fixture)
   await page.goto(`/${project.name}/sessions/session-${sessionName}`)
@@ -351,9 +376,17 @@ async function expectTranscriptScrollsIndependently(page: Page) {
     page.evaluate(() => window.scrollY),
   ])
   expect(headerAfter.y, 'outer header scrolls with transcript content').toBeLessThan(headerBefore.y)
-  expect(headerAfter.y + headerAfter.height, 'outer header leaves the transcript viewport').toBeLessThanOrEqual(transcriptBox.y + 1)
-  expect(Math.abs(stickyBefore.y - transcriptBox.y), 'sticky identity takes over at the transcript top').toBeLessThanOrEqual(1)
-  expect(Math.abs(composerAfter.y - composerBefore.y), 'composer remains fixed while transcript scrolls').toBeLessThanOrEqual(1)
+  expect(headerAfter.y + headerAfter.height, 'outer header leaves the transcript viewport').toBeLessThanOrEqual(
+    transcriptBox.y + 1,
+  )
+  expect(
+    Math.abs(stickyBefore.y - transcriptBox.y),
+    'sticky identity takes over at the transcript top',
+  ).toBeLessThanOrEqual(1)
+  expect(
+    Math.abs(composerAfter.y - composerBefore.y),
+    'composer remains fixed while transcript scrolls',
+  ).toBeLessThanOrEqual(1)
   expect(documentScrollAfter, 'document does not scroll with the transcript').toBe(documentScrollBefore)
 
   await transcript.evaluate((node) => {
@@ -363,7 +396,10 @@ async function expectTranscriptScrollsIndependently(page: Page) {
   await expect.poll(() => transcript.evaluate((node) => node.scrollTop)).toBeGreaterThan(metrics.clientHeight)
 
   const stickyAfter = await boxOf(page, stickyTitle)
-  expect(Math.abs(stickyAfter.y - stickyBefore.y), 'sticky identity remains pinned during further transcript scrolling').toBeLessThanOrEqual(1)
+  expect(
+    Math.abs(stickyAfter.y - stickyBefore.y),
+    'sticky identity remains pinned during further transcript scrolling',
+  ).toBeLessThanOrEqual(1)
 }
 
 async function expectNoDocumentHorizontalOverflow(page: Page) {
@@ -376,18 +412,24 @@ async function expectNoDocumentHorizontalOverflow(page: Page) {
 
 test.describe('Coder Session compact viewport pixel verification', () => {
   for (const viewport of compactViewports) {
-    test(`preserves a readable transcript and pins identity after the header scrolls out at ${viewport.width}x${viewport.height}`, async ({ page }) => {
+    test(`preserves a readable transcript and pins identity after the header scrolls out at ${viewport.width}x${viewport.height}`, async ({
+      page,
+    }) => {
       await openIssueSession(page, viewport)
       await expectTranscriptScrollsIndependently(page)
     })
 
-    test(`keeps Compact and Reset recovery controls above the mobile navigation at ${viewport.width}x${viewport.height}`, async ({ page }) => {
+    test(`keeps Compact and Reset recovery controls above the mobile navigation at ${viewport.width}x${viewport.height}`, async ({
+      page,
+    }) => {
       await openIssueSession(page, viewport)
       await expectReachableAboveMobileNav(page, page.getByTestId('session-recovery-compact'), 'Compact')
       await expectReachableAboveMobileNav(page, page.getByTestId('session-recovery-reset'), 'Reset')
     })
 
-    test(`renders the active follow-up form above the mobile navigation at ${viewport.width}x${viewport.height}`, async ({ page }) => {
+    test(`renders the active follow-up form above the mobile navigation at ${viewport.width}x${viewport.height}`, async ({
+      page,
+    }) => {
       const runningSession: WorkflowRunSession = {
         ...makeCompactViewportSession(),
         status: 'active',
@@ -406,15 +448,19 @@ test.describe('Coder Session compact viewport pixel verification', () => {
       await expectReachableAboveMobileNav(page, send, 'follow-up send button')
     })
 
-    test(`keeps transcript content clear of the mobile navigation at ${viewport.width}x${viewport.height}`, async ({ page }) => {
+    test(`keeps transcript content clear of the mobile navigation at ${viewport.width}x${viewport.height}`, async ({
+      page,
+    }) => {
       await openIssueSession(page, viewport)
       await expectReachableAboveMobileNav(page, page.getByTestId('session-transcript-scroll-container'), 'transcript')
     })
 
-    test(`keeps the generic session stop control reachable at ${viewport.width}x${viewport.height}`, async ({ page }) => {
+    test(`keeps the generic session stop control reachable at ${viewport.width}x${viewport.height}`, async ({
+      page,
+    }) => {
       await page.setViewportSize(viewport)
       await mockCoderSessionApi(page, { genericSession: makeGenericRunningSession() })
-       await page.goto(`/${project.name}/sessions/${genericSessionId}`)
+      await page.goto(`/${project.name}/sessions/${genericSessionId}`)
 
       const stop = page.getByTestId('session-stop-trigger')
       await expectReachableAboveMobileNav(page, stop, 'stop session')
@@ -424,7 +470,8 @@ test.describe('Coder Session compact viewport pixel verification', () => {
   }
 
   test('keeps a long recovery error readable without horizontal overflow at 320x568', async ({ page }) => {
-    const recoveryError = 'The recovery request was rejected because a stale execution lease still owns this session and the current runner must release it before compaction can continue.'
+    const recoveryError =
+      'The recovery request was rejected because a stale execution lease still owns this session and the current runner must release it before compaction can continue.'
     await openIssueSession(page, { width: 320, height: 568 }, { compactError: recoveryError })
 
     const compact = page.getByTestId('session-recovery-compact')

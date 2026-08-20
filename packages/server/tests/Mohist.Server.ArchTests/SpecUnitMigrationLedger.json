@@ -178,6 +178,8 @@
     {
       "id": "rename-events-event-bridge",
       "kind": "historical",
+      "retired": true,
+      "retirementReason": "SignalR EventBridge coverage was replaced by the native event WebSocket protocol suite.",
       "source": "git:602efa6abd6fca3efcd43b66b47ba10a80d9faba^ legacy source Mohist.Server.SpecTests/Specs/Events/EventBridgeSpecs.cs Mohist.Server.SpecTests.Specs.Events.EventBridgeSpecs",
       "legacy": {
         "path": "Mohist.Server.SpecTests/Specs/Events/EventBridgeSpecs.cs",
@@ -287,6 +289,8 @@
     {
       "id": "rename-events-project-isolation",
       "kind": "historical",
+      "retired": true,
+      "retirementReason": "Legacy SignalR project-affinity coverage was replaced by strict event WebSocket project isolation coverage.",
       "source": "git:602efa6abd6fca3efcd43b66b47ba10a80d9faba^ legacy source Mohist.Server.SpecTests/Specs/Events/ProjectIsolationIntegrationSpecs.cs Mohist.Server.SpecTests.Specs.Events.ProjectIsolationIntegrationSpecs",
       "legacy": {
         "path": "Mohist.Server.SpecTests/Specs/Events/ProjectIsolationIntegrationSpecs.cs",
@@ -343,6 +347,8 @@
     {
       "id": "rename-events-signalr-delta",
       "kind": "historical",
+      "retired": true,
+      "retirementReason": "SignalR task-log publisher coverage was replaced by the event WebSocket task-log notification suite.",
       "source": "git:602efa6abd6fca3efcd43b66b47ba10a80d9faba^ legacy source Mohist.Server.SpecTests/Specs/Events/SignalRTaskLogDeltaPublisherSpecs.cs Mohist.Server.SpecTests.Specs.Events.SignalRTaskLogDeltaPublisherSpecs",
       "legacy": {
         "path": "Mohist.Server.SpecTests/Specs/Events/SignalRTaskLogDeltaPublisherSpecs.cs",
@@ -401,6 +407,8 @@
     {
       "id": "rename-events-transcript-publisher",
       "kind": "historical",
+      "retired": true,
+      "retirementReason": "SignalR transcript publisher coverage was replaced by the event WebSocket transcript notification suite.",
       "source": "git:602efa6abd6fca3efcd43b66b47ba10a80d9faba^ legacy source Mohist.Server.SpecTests/Specs/Events/TranscriptEventPublisherSpecs.cs Mohist.Server.SpecTests.Specs.Events.TranscriptEventPublisherSpecs",
       "legacy": {
         "path": "Mohist.Server.SpecTests/Specs/Events/TranscriptEventPublisherSpecs.cs",
@@ -1282,6 +1290,8 @@
     {
       "id": "rename-system-event-bridge",
       "kind": "historical",
+      "retired": true,
+      "retirementReason": "SignalR EventBridge system coverage was replaced by the native event WebSocket endpoint and connection suites.",
       "source": "git:602efa6abd6fca3efcd43b66b47ba10a80d9faba^ legacy source Mohist.Server.SpecTests/Specs/SystemSpecs/EventBridgeSpecs.cs Mohist.Server.SpecTests.Specs.SystemSpecs.EventBridgeSpecs",
       "legacy": {
         "path": "Mohist.Server.SpecTests/Specs/SystemSpecs/EventBridgeSpecs.cs",
@@ -2501,21 +2511,21 @@
         "fqn": "Mohist.Server.SpecTests.Specs.Events.MohistHubSpecs"
       },
       "target": {
-        "path": "Mohist.Server.UnitTests/Events/MohistHubTests.cs",
-        "fqn": "Mohist.Server.UnitTests.Events.MohistHubTests"
+        "path": "Mohist.Server.UnitTests/Events/EventWebSocketConnectionTests.cs",
+        "fqn": "Mohist.Server.UnitTests.Events.EventWebSocketConnectionTests"
       },
       "status": "MOVE",
-      "owner": "Mohist.Server.UnitTests.Events.MohistHubTests",
+      "owner": "Mohist.Server.UnitTests.Events.EventWebSocketConnectionTests",
       "moveContract": {
-        "owner": "Mohist.Server.UnitTests.Events.MohistHubTests",
+        "owner": "Mohist.Server.UnitTests.Events.EventWebSocketConnectionTests",
         "helpers": [
           {
             "role": "events"
           }
         ],
         "target": {
-          "path": "Mohist.Server.UnitTests/Events/MohistHubTests.cs",
-          "fqn": "Mohist.Server.UnitTests.Events.MohistHubTests"
+          "path": "Mohist.Server.UnitTests/Events/EventWebSocketConnectionTests.cs",
+          "fqn": "Mohist.Server.UnitTests.Events.EventWebSocketConnectionTests"
         },
         "split": {
           "maxTargetLines": 299,
@@ -2557,13 +2567,13 @@
         "factMethods": 9,
         "theoryMethods": 0,
         "inlineDataRows": 0,
-        "mtpCases": 9
+        "mtpCases": 40
       },
       "moved": {
         "sourcePath": "Mohist.Server.SpecTests/Specs/Events/MohistHubSpecs.cs",
         "sourceFqn": "Mohist.Server.SpecTests.Specs.Events.MohistHubSpecs",
-        "targetPath": "Mohist.Server.UnitTests/Events/MohistHubTests.cs",
-        "targetFqn": "Mohist.Server.UnitTests.Events.MohistHubTests"
+        "targetPath": "Mohist.Server.UnitTests/Events/EventWebSocketConnectionTests.cs",
+        "targetFqn": "Mohist.Server.UnitTests.Events.EventWebSocketConnectionTests"
       }
     },
     {
@@ -2579,21 +2589,21 @@
         "fqn": "Mohist.Server.SpecTests.Specs.Events.MohistHubProjectAffinitySpecs"
       },
       "target": {
-        "path": "Mohist.Server.UnitTests/Events/MohistHubProjectAffinityTests.cs",
-        "fqn": "Mohist.Server.UnitTests.Events.MohistHubProjectAffinityTests"
+        "path": "Mohist.Server.UnitTests/Events/EventWebSocketConnectionTests.cs",
+        "fqn": "Mohist.Server.UnitTests.Events.EventWebSocketConnectionTests"
       },
       "status": "MOVE",
-      "owner": "Mohist.Server.UnitTests.Events.MohistHubProjectAffinityTests",
+      "owner": "Mohist.Server.UnitTests.Events.EventWebSocketConnectionTests",
       "moveContract": {
-        "owner": "Mohist.Server.UnitTests.Events.MohistHubProjectAffinityTests",
+        "owner": "Mohist.Server.UnitTests.Events.EventWebSocketConnectionTests",
         "helpers": [
           {
             "role": "events"
           }
         ],
         "target": {
-          "path": "Mohist.Server.UnitTests/Events/MohistHubProjectAffinityTests.cs",
-          "fqn": "Mohist.Server.UnitTests.Events.MohistHubProjectAffinityTests"
+          "path": "Mohist.Server.UnitTests/Events/EventWebSocketConnectionTests.cs",
+          "fqn": "Mohist.Server.UnitTests.Events.EventWebSocketConnectionTests"
         },
         "split": {
           "maxTargetLines": 299,
@@ -2636,13 +2646,13 @@
         "factMethods": 7,
         "theoryMethods": 0,
         "inlineDataRows": 0,
-        "mtpCases": 7
+        "mtpCases": 40
       },
       "moved": {
         "sourcePath": "Mohist.Server.SpecTests/Specs/Events/MohistHubProjectAffinitySpecs.cs",
         "sourceFqn": "Mohist.Server.SpecTests.Specs.Events.MohistHubProjectAffinitySpecs",
-        "targetPath": "Mohist.Server.UnitTests/Events/MohistHubProjectAffinityTests.cs",
-        "targetFqn": "Mohist.Server.UnitTests.Events.MohistHubProjectAffinityTests"
+        "targetPath": "Mohist.Server.UnitTests/Events/EventWebSocketConnectionTests.cs",
+        "targetFqn": "Mohist.Server.UnitTests.Events.EventWebSocketConnectionTests"
       }
     },
     {

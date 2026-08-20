@@ -32,18 +32,6 @@ namespace Mohist.Server.SpecTests.Specs.SystemSpecs.Otel;
 public class OtelSourceSubscriptionSpecs
 {
     [Fact]
-    public void ConfigureTracing_SubscribesSignalRServerSource()
-    {
-        // The SignalR Server source is a literal AddSource call in
-        // the production pipeline. The .NET 10 source name is the
-        // canonical, documented constant — pinning it here makes a
-        // future typo in the registration immediately visible.
-        Assert.Equal(
-            "Microsoft.AspNetCore.SignalR.Server",
-            MohistOpenTelemetryRegistration.SignalRServerActivitySourceName);
-    }
-
-    [Fact]
     public async Task ConfigureTracing_RegistersEntityFrameworkCoreInstrumentation()
     {
         // Stand up the test host and issue an EF query through the

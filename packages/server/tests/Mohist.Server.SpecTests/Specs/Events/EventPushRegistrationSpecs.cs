@@ -1,5 +1,5 @@
 using Microsoft.Extensions.DependencyInjection;
-using Mohist.Server.Events.Hub;
+using Mohist.Server.Events.WebSocket;
 using Mohist.Server.Infrastructure.Events;
 using Mohist.Server.Runner.Subscriptions;
 using Mohist.Server.SpecTests.Support;
@@ -15,10 +15,12 @@ public sealed class EventPushRegistrationSpecs
     public EventPushRegistrationSpecs(MohistIntegrationFixture fixture) => _fixture = fixture;
 
     [Fact]
-    public void EventBridge_IsAbsentFromDurableSubscriptions()
+    public void EventSocketDomainBridge_IsPushOnly()
     {
         var durable = _fixture.Services.GetRequiredService<IEnumerable<Subscription>>();
-        Assert.DoesNotContain(durable, subscription => subscription.Handler is EventBridge);
+        var push = _fixture.Services.GetRequiredService<IEnumerable<EventPushSubscription>>();
+        Assert.DoesNotContain(durable, subscription => subscription.Handler is EventSocketDomainBridge);
+        Assert.Contains(push, subscription => subscription.Handler is EventSocketDomainBridge);
     }
 
     [Fact]

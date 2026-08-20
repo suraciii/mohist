@@ -52,7 +52,6 @@ function apiResponse(data: unknown) {
 }
 
 async function mockSettingsApi(page: Page, repositories = project.repositories) {
-  await page.route('**/hubs/events**', route => route.fulfill({ status: 204, body: '' }))
   await page.route('**/api/**', async (route) => {
     const url = new URL(route.request().url())
     const path = url.pathname.replace(/^\/api/, '')
@@ -82,20 +81,28 @@ async function mockSettingsApi(page: Page, repositories = project.repositories) 
       return route.fulfill({ json: apiResponse(config) })
     }
     if (method === 'GET' && path === `/projects/${project.id}/workflow-profile/default`) {
-      return route.fulfill({ json: apiResponse({ projectId: project.id, defaultWorkflowProfileId: 'mohist/local', disabledWorkflowProfileIds: [] }) })
+      return route.fulfill({
+        json: apiResponse({
+          projectId: project.id,
+          defaultWorkflowProfileId: 'mohist/local',
+          disabledWorkflowProfileIds: [],
+        }),
+      })
     }
     if (method === 'GET' && path === `/projects/${project.id}/workflow-profiles`) {
       return route.fulfill({
-        json: apiResponse([{
-          projectId: project.id,
-          profileId: workflowTemplate.id,
-          name: workflowTemplate.name,
-          description: workflowTemplate.description,
-          sourceProvenance: 'BuiltIn',
-          isBuiltIn: true,
-          definitionSource: workflowTemplate.yaml,
-          agentRuntime: 'opencode',
-        }]),
+        json: apiResponse([
+          {
+            projectId: project.id,
+            profileId: workflowTemplate.id,
+            name: workflowTemplate.name,
+            description: workflowTemplate.description,
+            sourceProvenance: 'BuiltIn',
+            isBuiltIn: true,
+            definitionSource: workflowTemplate.yaml,
+            agentRuntime: 'opencode',
+          },
+        ]),
       })
     }
     if (method === 'GET' && path === `/projects/${project.id}/workflow-profiles/mohist/local`) {
@@ -148,8 +155,10 @@ async function mockSettingsApi(page: Page, repositories = project.repositories) 
   })
 }
 
-
-async function gotoSettingsTab(page: Page, tab: 'ai' | 'agent' | 'repositories' | 'workflows' | 'templates' | 'system' | 'preferences') {
+async function gotoSettingsTab(
+  page: Page,
+  tab: 'ai' | 'agent' | 'repositories' | 'workflows' | 'templates' | 'system' | 'preferences',
+) {
   await page.goto(`/${project.name}/settings/${tab}`)
   await expect(page.getByRole('heading', { name: 'Settings', level: 1 })).toBeAttached()
   await expect(page).toHaveURL(new RegExp(`/settings/${tab}$`))

@@ -57,30 +57,44 @@ function makeIssue() {
 }
 
 async function mockApi(page: Page) {
-  await page.route('**/hubs/events**', route => route.fulfill({ status: 204, body: '' }))
   await page.route('**/api/**', async (route) => {
     const url = new URL(route.request().url())
     const path = url.pathname.replace(/^\/api/, '')
     const method = route.request().method()
 
     if (method === 'GET' && path === '/projects') return route.fulfill({ json: response([project]) })
-    if (method === 'GET' && path === `/projects/${project.id}/issues/${issueNumber}`) return route.fulfill({ json: response(makeIssue()) })
+    if (method === 'GET' && path === `/projects/${project.id}/issues/${issueNumber}`)
+      return route.fulfill({ json: response(makeIssue()) })
     if (method === 'GET' && path === `/projects/${project.id}/issues`) return route.fulfill({ json: response([]) })
     if (method === 'GET' && path === `/projects/${project.id}/agent/status`) {
-      return route.fulfill({ json: response({ running: false, runnerAvailable: true, activeAgents: [], capacity: { active: 0, max: 4 } }) })
+      return route.fulfill({
+        json: response({ running: false, runnerAvailable: true, activeAgents: [], capacity: { active: 0, max: 4 } }),
+      })
     }
-    if (method === 'GET' && path.endsWith('/diff')) return route.fulfill({ json: response({ available: false, message: 'No workspace' }) })
-    if (method === 'GET' && path.endsWith('/commits')) return route.fulfill({ json: response({ available: false, message: 'No workspace' }) })
+    if (method === 'GET' && path.endsWith('/diff'))
+      return route.fulfill({ json: response({ available: false, message: 'No workspace' }) })
+    if (method === 'GET' && path.endsWith('/commits'))
+      return route.fulfill({ json: response({ available: false, message: 'No workspace' }) })
     if (method === 'GET' && path.endsWith('/workspace-status')) return route.fulfill({ json: response(null) })
     if (method === 'GET' && path === `/projects/${project.id}/workflow-profile/default`) {
-      return route.fulfill({ json: response({ projectId: project.id, defaultWorkflowProfileId: 'mohist/local', disabledWorkflowProfileIds: [] }) })
+      return route.fulfill({
+        json: response({
+          projectId: project.id,
+          defaultWorkflowProfileId: 'mohist/local',
+          disabledWorkflowProfileIds: [],
+        }),
+      })
     }
     if (method === 'GET' && path === `/projects/${project.id}/workflow-profiles`) {
       return route.fulfill({ json: response([]) })
     }
-    if (method === 'GET' && path.endsWith('/opencode/models')) return route.fulfill({ json: response({ models: [], modelVariants: {} }) })
+    if (method === 'GET' && path.endsWith('/opencode/models'))
+      return route.fulfill({ json: response({ models: [], modelVariants: {} }) })
 
-    return route.fulfill({ status: 404, json: { success: false, error: `Unhandled browser fixture: ${method} ${path}` } })
+    return route.fulfill({
+      status: 404,
+      json: { success: false, error: `Unhandled browser fixture: ${method} ${path}` },
+    })
   })
 }
 
@@ -111,7 +125,8 @@ test('phone comments keep author, timestamp, and body readable without overflow'
   expect(metadataBox!.x + metadataBox!.width).toBeLessThanOrEqual(390)
   expect(metadataBox!.y + metadataBox!.height).toBeLessThanOrEqual(bodyBox!.y)
 
-  const overflow = await page.evaluate(() =>
-    document.documentElement.scrollWidth - document.documentElement.clientWidth)
+  const overflow = await page.evaluate(
+    () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
+  )
   expect(overflow).toBeLessThanOrEqual(0)
 })

@@ -5,14 +5,9 @@ import { QueryClient, QueryClientProvider, useQuery } from '@tanstack/react-quer
 import { ProjectProvider } from '../../../entities/project'
 import { issueWorkflowTaskLogQueryOptions } from '../../../entities/issue'
 import type { TaskLogPage } from '../../../entities/issue/model/task-log'
+import { TaskLogPanel as DefaultTaskLogPanel, type TaskLogDataHook, type TaskLogPanelProps } from './TaskLogPanel'
 import {
-  TaskLogPanel as DefaultTaskLogPanel,
-  type TaskLogDataHook,
-  type TaskLogPanelProps,
-} from './TaskLogPanel'
-import {
-  fakeConnections,
-  flushAndGetLastConnection,
+  emitTaskLog,
   installDownloadSpy,
   makeEnvelope,
   makeLine,
@@ -21,7 +16,6 @@ import {
   newQueryClient,
   projects,
   readBlobText,
-  recordedInvokes,
   renderWithTaskLogProviders,
   type TaskLogTestState,
 } from './_taskLogPanelTestUtils'
@@ -31,14 +25,7 @@ let _taskLogState: 'ready' | 'loading' | 'error' = 'ready'
 
 const taskLogHook: TaskLogDataHook = ({ issueNumber, taskId, projectId, workflowRunId }) =>
   useQuery({
-    ...issueWorkflowTaskLogQueryOptions(
-      projectId,
-      issueNumber,
-      taskId,
-      { limit: 5000 },
-      true,
-      workflowRunId,
-    ),
+    ...issueWorkflowTaskLogQueryOptions(projectId, issueNumber, taskId, { limit: 5000 }, true, workflowRunId),
     queryFn: async () => {
       if (_taskLogState === 'loading') return new Promise<TaskLogPage>(() => {})
       if (_taskLogState === 'error') throw new Error('boom')
@@ -65,8 +52,6 @@ function createTaskLogTestState(initialPage: TaskLogPage | undefined): TaskLogTe
 describe('TaskLogPanel log viewing', () => {
   beforeEach(() => {
     vi.clearAllMocks()
-    fakeConnections.length = 0
-    recordedInvokes.length = 0
     _taskLogPageRef.current = undefined
     _taskLogState = 'ready'
     mockConnectionBuilder()
@@ -78,12 +63,14 @@ describe('TaskLogPanel log viewing', () => {
   })
 
   it('renders one chip per distinct source in lexicographic order with no absent-source chips', async () => {
-    const testState = createTaskLogTestState(makePage([
-      makeLine({ seq: 1, source: 'cleanup', text: 'rm -rf tmp' }),
-      makeLine({ seq: 2, source: 'workspace-prep', text: 'cloning' }),
-      makeLine({ seq: 3, source: 'action:rebase', text: 'rebasing' }),
-      makeLine({ seq: 4, source: 'branch-check', text: 'on master' }),
-    ]))
+    const testState = createTaskLogTestState(
+      makePage([
+        makeLine({ seq: 1, source: 'cleanup', text: 'rm -rf tmp' }),
+        makeLine({ seq: 2, source: 'workspace-prep', text: 'cloning' }),
+        makeLine({ seq: 3, source: 'action:rebase', text: 'rebasing' }),
+        makeLine({ seq: 4, source: 'branch-check', text: 'on master' }),
+      ]),
+    )
 
     renderWithTaskLogProviders(
       <TaskLogPanel issueNumber={161} taskId="build-task-1" workflowRunId="wr-1" taskStatus="failed" />,
@@ -93,20 +80,17 @@ describe('TaskLogPanel log viewing', () => {
     await screen.findByTestId('task-log-panel')
     const chipsContainer = await screen.findByTestId('task-log-source-chips')
     const chipLabels = Array.from(chipsContainer.querySelectorAll('button')).map((b) => b.textContent?.trim())
-    expect(chipLabels).toEqual([
-      'action:rebase',
-      'branch-check',
-      'cleanup',
-      'workspace-prep',
-    ])
+    expect(chipLabels).toEqual(['action:rebase', 'branch-check', 'cleanup', 'workspace-prep'])
   })
 
   it('narrows visible lines in real time as the user types a keyword (case-insensitive)', async () => {
-    const testState = createTaskLogTestState(makePage([
-      makeLine({ seq: 1, source: 'workspace-prep', text: 'Cloning repo' }),
-      makeLine({ seq: 2, source: 'action:rebase', text: 'CONFLICT (content)' }),
-      makeLine({ seq: 3, source: 'action:rebase', text: 'Patch failed' }),
-    ]))
+    const testState = createTaskLogTestState(
+      makePage([
+        makeLine({ seq: 1, source: 'workspace-prep', text: 'Cloning repo' }),
+        makeLine({ seq: 2, source: 'action:rebase', text: 'CONFLICT (content)' }),
+        makeLine({ seq: 3, source: 'action:rebase', text: 'Patch failed' }),
+      ]),
+    )
 
     const user = userEvent.setup()
     renderWithTaskLogProviders(
@@ -130,10 +114,12 @@ describe('TaskLogPanel log viewing', () => {
   })
 
   it('searches source as well as text (case-insensitive)', async () => {
-    const testState = createTaskLogTestState(makePage([
-      makeLine({ seq: 1, source: 'action:rebase', text: 'starting' }),
-      makeLine({ seq: 2, source: 'branch-check', text: 'on master' }),
-    ]))
+    const testState = createTaskLogTestState(
+      makePage([
+        makeLine({ seq: 1, source: 'action:rebase', text: 'starting' }),
+        makeLine({ seq: 2, source: 'branch-check', text: 'on master' }),
+      ]),
+    )
 
     const user = userEvent.setup()
     renderWithTaskLogProviders(
@@ -153,11 +139,13 @@ describe('TaskLogPanel log viewing', () => {
   })
 
   it('toggling a source chip hides only its lines while keeping other sources visible (opt-out semantics)', async () => {
-    const testState = createTaskLogTestState(makePage([
-      makeLine({ seq: 1, source: 'action:rebase', text: 'rebasing' }),
-      makeLine({ seq: 2, source: 'branch-check', text: 'on master' }),
-      makeLine({ seq: 3, source: 'cleanup', text: 'rm tmp' }),
-    ]))
+    const testState = createTaskLogTestState(
+      makePage([
+        makeLine({ seq: 1, source: 'action:rebase', text: 'rebasing' }),
+        makeLine({ seq: 2, source: 'branch-check', text: 'on master' }),
+        makeLine({ seq: 3, source: 'cleanup', text: 'rm tmp' }),
+      ]),
+    )
 
     const user = userEvent.setup()
     renderWithTaskLogProviders(
@@ -178,9 +166,9 @@ describe('TaskLogPanel log viewing', () => {
   })
 
   it('newly-arrived source from a live delta remains visible by default (opt-out set)', async () => {
-    const testState = createTaskLogTestState(makePage([
-      makeLine({ seq: 1, source: 'workspace-prep', text: 'cloning' }),
-    ]))
+    const testState = createTaskLogTestState(
+      makePage([makeLine({ seq: 1, source: 'workspace-prep', text: 'cloning' })]),
+    )
 
     renderWithTaskLogProviders(
       <TaskLogPanel issueNumber={161} taskId="build-task-1" workflowRunId="wr-1" taskStatus="running" />,
@@ -191,16 +179,12 @@ describe('TaskLogPanel log viewing', () => {
     const chipBar = await screen.findByTestId('task-log-source-chips')
     expect(chipBar.querySelectorAll('button')).toHaveLength(1)
 
-    const conn = await flushAndGetLastConnection()
-    const handler = conn.handlers.get('OnTaskLogDelta')
-    expect(handler).toBeDefined()
-
-    await act(async () => {
-      handler!(makeEnvelope([
+    await emitTaskLog(
+      makeEnvelope([
         { seq: 2, source: 'cleanup', text: 'rm tmp' },
         { seq: 3, source: 'branch-check', text: 'on master' },
-      ]))
-    })
+      ]),
+    )
 
     await waitFor(() => {
       expect(screen.getByText('rm tmp')).toBeInTheDocument()
@@ -210,11 +194,13 @@ describe('TaskLogPanel log viewing', () => {
   })
 
   it('composes search AND source filter so a line must pass both', async () => {
-    const testState = createTaskLogTestState(makePage([
-      makeLine({ seq: 1, source: 'action:rebase', text: 'CONFLICT (content)' }),
-      makeLine({ seq: 2, source: 'action:rebase', text: 'rebasing' }),
-      makeLine({ seq: 3, source: 'cleanup', text: 'CONFLICT during cleanup' }),
-    ]))
+    const testState = createTaskLogTestState(
+      makePage([
+        makeLine({ seq: 1, source: 'action:rebase', text: 'CONFLICT (content)' }),
+        makeLine({ seq: 2, source: 'action:rebase', text: 'rebasing' }),
+        makeLine({ seq: 3, source: 'cleanup', text: 'CONFLICT during cleanup' }),
+      ]),
+    )
 
     const user = userEvent.setup()
     renderWithTaskLogProviders(
@@ -235,11 +221,13 @@ describe('TaskLogPanel log viewing', () => {
   })
 
   it('exports the currently filtered view as a .txt Blob with the convention filename (filter applied)', async () => {
-    const testState = createTaskLogTestState(makePage([
-      makeLine({ seq: 1, source: 'workspace-prep', text: 'cloning' }),
-      makeLine({ seq: 2, source: 'action:rebase', text: 'rebasing-1' }),
-      makeLine({ seq: 3, source: 'action:rebase', text: 'rebasing-2' }),
-    ]))
+    const testState = createTaskLogTestState(
+      makePage([
+        makeLine({ seq: 1, source: 'workspace-prep', text: 'cloning' }),
+        makeLine({ seq: 2, source: 'action:rebase', text: 'rebasing-1' }),
+        makeLine({ seq: 3, source: 'action:rebase', text: 'rebasing-2' }),
+      ]),
+    )
 
     const user = userEvent.setup()
     renderWithTaskLogProviders(
@@ -274,9 +262,7 @@ describe('TaskLogPanel log viewing', () => {
   })
 
   it('preserves colon-containing task ids in the download filename', async () => {
-    const testState = createTaskLogTestState(makePage([
-      makeLine({ seq: 1, source: 'workspace-prep', text: 'line-1' }),
-    ]))
+    const testState = createTaskLogTestState(makePage([makeLine({ seq: 1, source: 'workspace-prep', text: 'line-1' })]))
 
     const user = userEvent.setup()
     renderWithTaskLogProviders(
@@ -297,11 +283,13 @@ describe('TaskLogPanel log viewing', () => {
   })
 
   it('exports the full loaded log when no filter is active', async () => {
-    const testState = createTaskLogTestState(makePage([
-      makeLine({ seq: 1, source: 'workspace-prep', text: 'line-1' }),
-      makeLine({ seq: 2, source: 'action:rebase', text: 'line-2' }),
-      makeLine({ seq: 3, source: 'cleanup', text: 'line-3' }),
-    ]))
+    const testState = createTaskLogTestState(
+      makePage([
+        makeLine({ seq: 1, source: 'workspace-prep', text: 'line-1' }),
+        makeLine({ seq: 2, source: 'action:rebase', text: 'line-2' }),
+        makeLine({ seq: 3, source: 'cleanup', text: 'line-3' }),
+      ]),
+    )
 
     const user = userEvent.setup()
     renderWithTaskLogProviders(
@@ -325,9 +313,9 @@ describe('TaskLogPanel log viewing', () => {
   })
 
   it('disables the download button when the filtered set is empty', async () => {
-    const testState = createTaskLogTestState(makePage([
-      makeLine({ seq: 1, source: 'workspace-prep', text: 'cloning' }),
-    ]))
+    const testState = createTaskLogTestState(
+      makePage([makeLine({ seq: 1, source: 'workspace-prep', text: 'cloning' })]),
+    )
 
     const user = userEvent.setup()
     renderWithTaskLogProviders(
@@ -344,10 +332,12 @@ describe('TaskLogPanel log viewing', () => {
   })
 
   it('opens with the default state: empty search input, every source chip enabled, every loaded line visible', async () => {
-    const testState = createTaskLogTestState(makePage([
-      makeLine({ seq: 1, source: 'workspace-prep', text: 'line-1' }),
-      makeLine({ seq: 2, source: 'action:rebase', text: 'line-2' }),
-    ]))
+    const testState = createTaskLogTestState(
+      makePage([
+        makeLine({ seq: 1, source: 'workspace-prep', text: 'line-1' }),
+        makeLine({ seq: 2, source: 'action:rebase', text: 'line-2' }),
+      ]),
+    )
 
     renderWithTaskLogProviders(
       <TaskLogPanel issueNumber={161} taskId="build-task-1" workflowRunId="wr-1" taskStatus="failed" />,
@@ -371,9 +361,9 @@ describe('TaskLogPanel log viewing', () => {
   })
 
   it('renders the no-search-match boundary when search yields zero results', async () => {
-    const testState = createTaskLogTestState(makePage([
-      makeLine({ seq: 1, source: 'workspace-prep', text: 'cloning' }),
-    ]))
+    const testState = createTaskLogTestState(
+      makePage([makeLine({ seq: 1, source: 'workspace-prep', text: 'cloning' })]),
+    )
 
     const user = userEvent.setup()
     renderWithTaskLogProviders(
@@ -390,10 +380,12 @@ describe('TaskLogPanel log viewing', () => {
   })
 
   it('renders the no-source-filter boundary when all sources are disabled and search is empty', async () => {
-    const testState = createTaskLogTestState(makePage([
-      makeLine({ seq: 1, source: 'workspace-prep', text: 'cloning' }),
-      makeLine({ seq: 2, source: 'cleanup', text: 'rm tmp' }),
-    ]))
+    const testState = createTaskLogTestState(
+      makePage([
+        makeLine({ seq: 1, source: 'workspace-prep', text: 'cloning' }),
+        makeLine({ seq: 2, source: 'cleanup', text: 'rm tmp' }),
+      ]),
+    )
 
     const user = userEvent.setup()
     renderWithTaskLogProviders(
@@ -411,9 +403,9 @@ describe('TaskLogPanel log viewing', () => {
   })
 
   it('prefers the no-search-match boundary when search and source filters both yield zero rows', async () => {
-    const testState = createTaskLogTestState(makePage([
-      makeLine({ seq: 1, source: 'workspace-prep', text: 'cloning' }),
-    ]))
+    const testState = createTaskLogTestState(
+      makePage([makeLine({ seq: 1, source: 'workspace-prep', text: 'cloning' })]),
+    )
 
     const user = userEvent.setup()
     renderWithTaskLogProviders(
@@ -458,9 +450,7 @@ describe('TaskLogPanel log viewing', () => {
   })
 
   it('does not force-scroll on a new line while the user is paused away from the bottom', async () => {
-    const testState = createTaskLogTestState(makePage([
-      makeLine({ seq: 1, source: 'workspace-prep', text: 'line-1' }),
-    ]))
+    const testState = createTaskLogTestState(makePage([makeLine({ seq: 1, source: 'workspace-prep', text: 'line-1' })]))
 
     renderWithTaskLogProviders(
       <TaskLogPanel issueNumber={161} taskId="build-task-1" workflowRunId="wr-1" taskStatus="running" />,
@@ -478,13 +468,7 @@ describe('TaskLogPanel log viewing', () => {
       fireEvent.scroll(scrollNode)
     })
 
-    const conn = await flushAndGetLastConnection()
-    const handler = conn.handlers.get('OnTaskLogDelta')
-    expect(handler).toBeDefined()
-
-    await act(async () => {
-      handler!(makeEnvelope([{ seq: 2, source: 'workspace-prep', text: 'line-2' }]))
-    })
+    await emitTaskLog(makeEnvelope([{ seq: 2, source: 'workspace-prep', text: 'line-2' }]))
 
     await waitFor(() => {
       expect(screen.getByText('line-2')).toBeInTheDocument()
@@ -494,10 +478,12 @@ describe('TaskLogPanel log viewing', () => {
   })
 
   it('does not force-scroll when a filter change hides lines while the user is paused away from the bottom', async () => {
-    const testState = createTaskLogTestState(makePage([
-      makeLine({ seq: 1, source: 'workspace-prep', text: 'needle line' }),
-      makeLine({ seq: 2, source: 'cleanup', text: 'other line' }),
-    ]))
+    const testState = createTaskLogTestState(
+      makePage([
+        makeLine({ seq: 1, source: 'workspace-prep', text: 'needle line' }),
+        makeLine({ seq: 2, source: 'cleanup', text: 'other line' }),
+      ]),
+    )
 
     const user = userEvent.setup()
     renderWithTaskLogProviders(
@@ -526,10 +512,12 @@ describe('TaskLogPanel log viewing', () => {
   })
 
   it('resumes auto-follow near the bottom and follows the next visible-line change', async () => {
-    const testState = createTaskLogTestState(makePage([
-      makeLine({ seq: 1, source: 'workspace-prep', text: 'alpha line' }),
-      makeLine({ seq: 2, source: 'cleanup', text: 'beta line' }),
-    ]))
+    const testState = createTaskLogTestState(
+      makePage([
+        makeLine({ seq: 1, source: 'workspace-prep', text: 'alpha line' }),
+        makeLine({ seq: 2, source: 'cleanup', text: 'beta line' }),
+      ]),
+    )
 
     const user = userEvent.setup()
     renderWithTaskLogProviders(
@@ -566,9 +554,7 @@ describe('TaskLogPanel log viewing', () => {
   })
 
   it('appends live lines in sequence when no filter is active', async () => {
-    const testState = createTaskLogTestState(makePage([
-      makeLine({ seq: 1, source: 'workspace-prep', text: 'line-1' }),
-    ]))
+    const testState = createTaskLogTestState(makePage([makeLine({ seq: 1, source: 'workspace-prep', text: 'line-1' })]))
 
     renderWithTaskLogProviders(
       <TaskLogPanel issueNumber={161} taskId="build-task-1" workflowRunId="wr-1" taskStatus="running" />,
@@ -578,16 +564,12 @@ describe('TaskLogPanel log viewing', () => {
     await screen.findByTestId('task-log-panel')
     await screen.findByText('line-1')
 
-    const conn = await flushAndGetLastConnection()
-    const handler = conn.handlers.get('OnTaskLogDelta')
-    expect(handler).toBeDefined()
-
-    await act(async () => {
-      handler!(makeEnvelope([
+    await emitTaskLog(
+      makeEnvelope([
         { seq: 2, source: 'workspace-prep', text: 'line-2' },
         { seq: 3, source: 'workspace-prep', text: 'line-3' },
-      ]))
-    })
+      ]),
+    )
 
     await waitFor(() => {
       expect(screen.getByText('line-3')).toBeInTheDocument()

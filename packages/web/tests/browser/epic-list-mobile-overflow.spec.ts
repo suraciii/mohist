@@ -8,9 +8,12 @@ const project = {
   updatedAt: '2026-06-01T00:00:00Z',
 }
 
-const LONG_RUNNING_TITLE = 'CurrentIssueWithAnUnbrokenLongTokenThatMustWrapInsideTheEpicListCardWithoutPushingTheMobileViewportWide'
-const LONG_NEXT_TITLE = 'QueuedNextIssueWithAnUnbrokenLongTokenThatMustWrapInsideTheReadyCardWithoutHidingTheIssueNumber'
-const LONG_REASON = 'WaitingBecauseExternalPrerequisiteWithAnUnbrokenLongTokenMustWrapInsideTheCardInsteadOfCreatingHorizontalOverflow'
+const LONG_RUNNING_TITLE =
+  'CurrentIssueWithAnUnbrokenLongTokenThatMustWrapInsideTheEpicListCardWithoutPushingTheMobileViewportWide'
+const LONG_NEXT_TITLE =
+  'QueuedNextIssueWithAnUnbrokenLongTokenThatMustWrapInsideTheReadyCardWithoutHidingTheIssueNumber'
+const LONG_REASON =
+  'WaitingBecauseExternalPrerequisiteWithAnUnbrokenLongTokenMustWrapInsideTheCardInsteadOfCreatingHorizontalOverflow'
 
 function apiResponse(data: unknown) {
   return { success: true, data }
@@ -95,7 +98,6 @@ const epics = [
 ]
 
 async function mockEpicListApi(page: Page) {
-  await page.route('**/hubs/events**', route => route.fulfill({ status: 204, body: '' }))
   await page.route('**/api/**', async (route) => {
     const url = new URL(route.request().url())
     const path = url.pathname.replace(/^\/api/, '')
@@ -145,7 +147,11 @@ async function expectBoxInsideViewport(page: Page, locator: ReturnType<Page['get
 async function expectResponsiveControlsInsideViewport(page: Page) {
   await expectBoxInsideViewport(page, page.getByTestId('epic-list-toolbar'), 'Epic list toolbar')
   await expectBoxInsideViewport(page, page.getByTestId('epic-card-in-progress'), 'Running issue label')
-  await expectBoxInsideViewport(page, page.getByTestId('epic-card-next').filter({ hasText: '#67890' }), 'Next issue label')
+  await expectBoxInsideViewport(
+    page,
+    page.getByTestId('epic-card-next').filter({ hasText: '#67890' }),
+    'Next issue label',
+  )
   await expectBoxInsideViewport(page, page.getByTestId('epic-card-start'), 'Start next issue action')
 }
 

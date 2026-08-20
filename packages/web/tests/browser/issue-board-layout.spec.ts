@@ -55,14 +55,32 @@ function makeIssue(number: number, overrides: Record<string, unknown> = {}) {
 
 const issues = [
   makeIssue(101, { status: 'backlog', title: 'Backlog board item', repositoryName: 'web' }),
-  makeIssue(102, { status: 'in_progress', workflowStage: 'build', title: 'In progress board item', repositoryName: 'web' }),
-  makeIssue(103, { status: 'done', workflowStage: 'done', workflowStatus: 'completed', health: 'done', title: 'Done board item', repositoryName: 'server' }),
-  makeIssue(104, { status: 'cancelled', workflowStage: null, workflowStatus: null, health: 'cancelled', title: 'Cancelled board item', repositoryName: 'server' }),
+  makeIssue(102, {
+    status: 'in_progress',
+    workflowStage: 'build',
+    title: 'In progress board item',
+    repositoryName: 'web',
+  }),
+  makeIssue(103, {
+    status: 'done',
+    workflowStage: 'done',
+    workflowStatus: 'completed',
+    health: 'done',
+    title: 'Done board item',
+    repositoryName: 'server',
+  }),
+  makeIssue(104, {
+    status: 'cancelled',
+    workflowStage: null,
+    workflowStatus: null,
+    health: 'cancelled',
+    title: 'Cancelled board item',
+    repositoryName: 'server',
+  }),
   makeIssue(105, { status: 'backlog', health: 'interrupted', title: 'Mobile rerun board item', repositoryName: 'web' }),
 ]
 
 async function mockIssueBoardApi(page: Page) {
-  await page.route('**/hubs/events**', route => route.fulfill({ status: 204, body: '' }))
   await page.route('**/api/**', async (route) => {
     const url = new URL(route.request().url())
     const path = url.pathname.replace(/^\/api/, '')
@@ -78,10 +96,14 @@ async function mockIssueBoardApi(page: Page) {
       return route.fulfill({ json: apiResponse(['kind']) })
     }
     if (method === 'GET' && path === `/projects/${project.id}/agent/status`) {
-      return route.fulfill({ json: apiResponse({ running: false, runnerAvailable: true, activeAgents: [], capacity: { active: 0, max: 8 } }) })
+      return route.fulfill({
+        json: apiResponse({ running: false, runnerAvailable: true, activeAgents: [], capacity: { active: 0, max: 8 } }),
+      })
     }
     if (method === 'GET' && path === `/projects/${project.id}/runners`) {
-      return route.fulfill({ json: apiResponse({ runners: [{ id: 'runner-layout', status: 'idle', slots: 1, active: 0 }] }) })
+      return route.fulfill({
+        json: apiResponse({ runners: [{ id: 'runner-layout', status: 'idle', slots: 1, active: 0 }] }),
+      })
     }
     if (method === 'GET' && path === `/projects/${project.id}/inbox`) {
       return route.fulfill({ json: apiResponse([]) })
@@ -100,7 +122,10 @@ async function box(locator: Locator) {
   return value
 }
 
-function boxesOverlap(a: { x: number; y: number; width: number; height: number }, b: { x: number; y: number; width: number; height: number }) {
+function boxesOverlap(
+  a: { x: number; y: number; width: number; height: number },
+  b: { x: number; y: number; width: number; height: number },
+) {
   return a.x < b.x + b.width && a.x + a.width > b.x && a.y < b.y + b.height && a.y + a.height > b.y
 }
 
@@ -197,7 +222,9 @@ test.describe('Issue board browser layout', () => {
     expect(actionBox.x + actionBox.width).toBeLessThanOrEqual(cardBox.x + cardBox.width)
   })
 
-  test('renders the repository filter alongside the existing desktop filter bar without overlap at desktop viewports', async ({ page }) => {
+  test('renders the repository filter alongside the existing desktop filter bar without overlap at desktop viewports', async ({
+    page,
+  }) => {
     await page.setViewportSize({ width: 1280, height: 900 })
     await mockIssueBoardApi(page)
     await page.goto(`/${project.name}/issues`)
@@ -231,7 +258,9 @@ test.describe('Issue board browser layout', () => {
     expect(sortBox.x + sortBox.width).toBeLessThanOrEqual(filterBarBox.x + filterBarBox.width)
   })
 
-  test('renders the repository filter inside the mobile filter panel without overlap at mobile viewports', async ({ page }) => {
+  test('renders the repository filter inside the mobile filter panel without overlap at mobile viewports', async ({
+    page,
+  }) => {
     await page.setViewportSize({ width: 390, height: 820 })
     await mockIssueBoardApi(page)
     await page.goto(`/${project.name}/issues`)

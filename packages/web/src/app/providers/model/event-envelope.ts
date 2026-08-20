@@ -22,47 +22,32 @@ export function routeTranscriptEventName(name: string): string {
   }
 }
 
-/**
- * Wire shape from the SignalR bus. The server now sends the full CloudEvents
- * 1.0.2 envelope; the Web reads {@link payload} for the original event body
- * and merges {@link extensions} routing metadata (projectid, issue, epic,
- * workflowrunid, stage, agentid, sessionid, runnerid). The user-visible
- * issue number rides under the `issue` key. Falls back to the
- * legacy raw-payload shape (where the event body sits in a top-level
- * `payload` field) for any unmigrated producers.
- *
- * Note on field casing: the server-side `CloudEventEnvelope` record uses
- * PascalCase property names (SpecVersion, DataContentType, ...) when
- * serialised by System.Text.Json, so the wire JSON has `specVersion`,
- * not the CloudEvents-spec lowercase `specversion`. The structural
- * check here matches what the server actually emits.
- */
 function isNonEmptyString(value: unknown): value is string {
   return typeof value === 'string' && value.trim().length > 0
 }
 
 function mergeRoutingLineage(
   payload: Record<string, unknown>,
-  extensions: Record<string, unknown> | null,
+  envelope: Record<string, unknown>,
 ): Record<string, unknown> {
   let normalized = payload
-  const extensionProjectId = extensions?.projectid
+  const extensionProjectId = envelope.projectid
   if (isNonEmptyString(extensionProjectId) && payload.projectId !== extensionProjectId) {
     normalized = { ...normalized, projectId: extensionProjectId }
   }
 
-  const extensionIssue = extensions?.issue
+  const extensionIssue = envelope.issue
   if (isNonEmptyString(extensionIssue)) {
     const issueNumber = Number(extensionIssue)
     if (Number.isSafeInteger(issueNumber) && issueNumber > 0 && normalized.issueNumber !== issueNumber) {
       normalized = { ...normalized, issueNumber }
     }
   }
-  const extensionSessionId = extensions?.sessionid
+  const extensionSessionId = envelope.sessionid
   if (isNonEmptyString(extensionSessionId) && normalized.sessionId !== extensionSessionId) {
     normalized = { ...normalized, sessionId: extensionSessionId }
   }
-  const extensionAgentId = extensions?.agentid
+  const extensionAgentId = envelope.agentid
   if (isNonEmptyString(extensionAgentId) && normalized.agentId !== extensionAgentId) {
     normalized = { ...normalized, agentId: extensionAgentId }
   }
@@ -74,27 +59,15 @@ export function unwrapEnvelope(rawData: unknown): Record<string, unknown> {
     return {}
   }
   const candidate = rawData as Record<string, unknown>
-  // CloudEvents envelope marker: id + source + type + specVersion all
-  // present as strings. duck-typing on 'payload' alone would mis-parse
-  // any future event whose data payload happens to contain a nested
-  // 'payload' field.
   if (
-    typeof candidate.specVersion === 'string'
-    && typeof candidate.id === 'string'
-    && typeof candidate.source === 'string'
-    && typeof candidate.type === 'string'
+    candidate.specversion === '1.0' &&
+    typeof candidate.id === 'string' &&
+    typeof candidate.source === 'string' &&
+    typeof candidate.type === 'string'
   ) {
-    const payload = candidate.payload ?? candidate.data
+    const payload = candidate.data
     if (payload && typeof payload === 'object') {
-      return mergeRoutingLineage(payload as Record<string, unknown>, asRecord(candidate.extensions))
-    }
-    return {}
-  }
-  // Legacy raw-payload shape (unmigrated producers).
-  if (typeof candidate.type === 'string' && 'payload' in candidate) {
-    const payload = candidate.payload
-    if (payload && typeof payload === 'object') {
-      return payload as Record<string, unknown>
+      return mergeRoutingLineage(payload as Record<string, unknown>, candidate)
     }
     return {}
   }
@@ -106,9 +79,7 @@ export function readEnvelopeField(candidate: Record<string, unknown>, camelCase:
 }
 
 export function asRecord(value: unknown): Record<string, unknown> | null {
-  return value && typeof value === 'object' && !Array.isArray(value)
-    ? value as Record<string, unknown>
-    : null
+  return value && typeof value === 'object' && !Array.isArray(value) ? (value as Record<string, unknown>) : null
 }
 
 export function normalizeToolState(value: unknown, eventName: string): string | undefined {
@@ -138,18 +109,22 @@ export function normalizeTranscriptDetail(
   eventName: string,
   innerPayload?: Record<string, unknown>,
 ): Record<string, unknown> {
-  const runtimeSessionId = readEnvelopeField(candidate, 'runtimeSessionId', 'RuntimeSessionId')
-    ?? readEnvelopeField(candidate, 'agentSessionId', 'AgentSessionId')
-    ?? (innerPayload && readEnvelopeField(innerPayload, 'runtimeSessionId', 'RuntimeSessionId'))
-  const runtime = readEnvelopeField(candidate, 'runtime', 'Runtime')
-    ?? (innerPayload && readEnvelopeField(innerPayload, 'runtime', 'Runtime'))
-  const sessionId = readEnvelopeField(candidate, 'sessionId', 'SessionId')
-    ?? (innerPayload && readEnvelopeField(innerPayload, 'sessionId', 'SessionId'))
+  const runtimeSessionId =
+    readEnvelopeField(candidate, 'runtimeSessionId', 'RuntimeSessionId') ??
+    readEnvelopeField(candidate, 'agentSessionId', 'AgentSessionId') ??
+    (innerPayload && readEnvelopeField(innerPayload, 'runtimeSessionId', 'RuntimeSessionId'))
+  const runtime =
+    readEnvelopeField(candidate, 'runtime', 'Runtime') ??
+    (innerPayload && readEnvelopeField(innerPayload, 'runtime', 'Runtime'))
+  const sessionId =
+    readEnvelopeField(candidate, 'sessionId', 'SessionId') ??
+    (innerPayload && readEnvelopeField(innerPayload, 'sessionId', 'SessionId'))
   const workId = readEnvelopeField(candidate, 'workId', 'WorkId')
   const sequence = readEnvelopeField(candidate, 'sequence', 'Sequence')
   const createdAt = readEnvelopeField(candidate, 'createdAt', 'CreatedAt')
-  const eventId = readEnvelopeField(candidate, 'eventId', 'EventId')
-    ?? (candidate.source !== undefined ? readEnvelopeField(candidate, 'id', 'Id') : undefined)
+  const eventId =
+    readEnvelopeField(candidate, 'eventId', 'EventId') ??
+    (candidate.source !== undefined ? readEnvelopeField(candidate, 'id', 'Id') : undefined)
   const normalized: Record<string, unknown> = {
     ...candidate,
     ...(innerPayload ?? {}),
@@ -203,21 +178,26 @@ export function normalizeTranscriptDetail(
   return normalized
 }
 
-export function unwrapTranscriptEnvelope(rawData: unknown): { eventName: string; payload: unknown; detail: unknown } | null {
+export function unwrapTranscriptEnvelope(
+  rawData: unknown,
+): { eventName: string; payload: unknown; detail: unknown } | null {
   if (!rawData || typeof rawData !== 'object') {
     return null
   }
   const candidate = rawData as Record<string, unknown>
-  const eventName = readEnvelopeField(candidate, 'type', 'Type')
-    ?? readEnvelopeField(candidate, 'eventType', 'EventType')
-    ?? readEnvelopeField(candidate, 'name', 'Name')
+  const eventName =
+    readEnvelopeField(candidate, 'type', 'Type') ??
+    readEnvelopeField(candidate, 'eventType', 'EventType') ??
+    readEnvelopeField(candidate, 'name', 'Name')
   if (typeof eventName !== 'string') {
     return null
   }
-  const innerPayload = readEnvelopeField(candidate, 'payload', 'Payload') ?? readEnvelopeField(candidate, 'data', 'Data')
-  const hasRuntimeRowMetadata = readEnvelopeField(candidate, 'sessionId', 'SessionId') !== undefined
-    || readEnvelopeField(candidate, 'sequence', 'Sequence') !== undefined
-    || readEnvelopeField(candidate, 'createdAt', 'CreatedAt') !== undefined
+  const innerPayload =
+    readEnvelopeField(candidate, 'payload', 'Payload') ?? readEnvelopeField(candidate, 'data', 'Data')
+  const hasRuntimeRowMetadata =
+    readEnvelopeField(candidate, 'sessionId', 'SessionId') !== undefined ||
+    readEnvelopeField(candidate, 'sequence', 'Sequence') !== undefined ||
+    readEnvelopeField(candidate, 'createdAt', 'CreatedAt') !== undefined
   if (hasRuntimeRowMetadata && innerPayload && typeof innerPayload === 'object') {
     const payload = innerPayload as Record<string, unknown>
     return {

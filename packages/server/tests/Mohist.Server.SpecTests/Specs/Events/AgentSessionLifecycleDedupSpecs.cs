@@ -266,6 +266,9 @@ public class AgentSessionLifecycleDedupSpecs
             first => Assert.Equal("message.delta", first.Type),
             second => Assert.Equal("tool_call.started", second.Type),
             third => Assert.Equal("tool_call.updated", third.Type));
+        Assert.All(
+            _fixture.RecordingTranscriptPublisher.ProjectIds,
+            projectId => Assert.Equal(session.ProjectId, projectId));
     }
 
     [Fact]

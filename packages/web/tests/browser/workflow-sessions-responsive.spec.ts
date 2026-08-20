@@ -162,7 +162,6 @@ function makeUnifiedSummary(session: ReturnType<typeof makeTranscriptSession>) {
 }
 
 async function mockWorkflowSessionsApi(page: Page, sessions = [makeSession()]) {
-  await page.route('**/hubs/events**', route => route.fulfill({ status: 204, body: '' }))
   await page.route('**/api/**', async (route) => {
     const url = new URL(route.request().url())
     const path = url.pathname.replace(/^\/api/, '')
@@ -172,7 +171,9 @@ async function mockWorkflowSessionsApi(page: Page, sessions = [makeSession()]) {
       return route.fulfill({ json: apiResponse([project]) })
     }
     if (method === 'GET' && path === `/projects/${project.id}/agent/status`) {
-      return route.fulfill({ json: apiResponse({ running: false, runnerAvailable: true, activeAgents: [], capacity: { active: 0, max: 8 } }) })
+      return route.fulfill({
+        json: apiResponse({ running: false, runnerAvailable: true, activeAgents: [], capacity: { active: 0, max: 8 } }),
+      })
     }
     if (method === 'GET' && path === `/projects/${project.id}/issues/${issueNumber}`) {
       return route.fulfill({ json: apiResponse(makeIssue()) })
@@ -273,7 +274,7 @@ test.describe('Workflow session transcript mobile overflow', () => {
       const transcriptRow = page.getByTestId('workflow-session-row').filter({ hasText: transcriptSessionName })
       await expect(transcriptRow).toBeVisible()
       await transcriptRow.click()
-       await expect(page).toHaveURL(new RegExp('/sessions/session-responsive-code$'))
+      await expect(page).toHaveURL(new RegExp('/sessions/session-responsive-code$'))
 
       const codeBlock = page.locator('.transcript-md pre')
       const horizontalScrollOwner = codeBlock.locator(

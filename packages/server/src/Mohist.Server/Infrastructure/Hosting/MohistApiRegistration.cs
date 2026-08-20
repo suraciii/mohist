@@ -2,7 +2,6 @@ using Mohist.Server.Api;
 using Mohist.Server.Api.DirectApi;
 using Mohist.Server.Auth.Domain;
 using Mohist.Server.Auth.Identity;
-using Mohist.Server.Events.Hub;
 using Mohist.Server.Runner.Services;
 
 namespace Mohist.Server.Infrastructure.Hosting;
@@ -21,7 +20,7 @@ public static class MohistApiRegistration
         app.MapProjectRoutes();
         app.MapProjectEventsRoutes();
         app.MapActivityRoutes();
-        app.MapProjectEventTailRoutes();
+        app.MapProjectEventSocketRoutes();
         app.MapAttachmentRoutes();
         app.MapIssueRoutes();
         app.MapWorkflowEventRoutes();
@@ -80,7 +79,6 @@ public static class MohistApiRegistration
         app.MapRunnerIdentityRoutes();
         app.MapWorkflowArtifactUploadRoutes();
         app.MapTaskLogRoutes();
-        app.MapHub<MohistHub>("/hubs/events").RequireScopes(Scope.Operator, Scope.Readonly);
         app.MapOtlpRoutes();
         app.MapOtelQueryRoutes();
         return app;

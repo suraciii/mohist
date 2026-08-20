@@ -191,7 +191,7 @@ public sealed class AgentSessionFollowupConcurrencyFixture : IAsyncLifetime
 
         public void Clear() => Published.Clear();
 
-        public Task PublishAsync(TranscriptEnvelope envelope, CancellationToken ct = default)
+        public Task PublishAsync(string projectId, TranscriptEnvelope envelope, CancellationToken ct = default)
         {
             Published.Add(envelope);
             return Task.CompletedTask;

@@ -123,7 +123,6 @@ function makeInterruptionTimeline() {
 }
 
 async function mockApi(page: Page, timeline = makeTimeline()) {
-  await page.route('**/hubs/events**', (route) => route.fulfill({ status: 204, body: '' }))
   await page.route('**/api/**', async (route) => {
     const url = new URL(route.request().url())
     const path = url.pathname.replace(/^\/api/, '')

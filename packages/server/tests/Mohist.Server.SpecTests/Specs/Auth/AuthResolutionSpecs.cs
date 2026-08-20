@@ -59,10 +59,10 @@ public sealed class AuthResolutionSpecs(MohistIntegrationFixture fixture)
     }
 
     [Fact]
-    public async Task MissingCredential_OnSignalRHubs_Answers401()
+    public async Task MissingCredential_OnEventSocket_Answers401()
     {
         using var client = fixture.CreateClient();
-        using var negotiate = await client.GetAsync("/hubs/events/negotiate?negotiateVersion=1");
+        using var negotiate = await client.GetAsync("/api/projects/project-1/events/socket");
 
         Assert.Equal(HttpStatusCode.Unauthorized, negotiate.StatusCode);
         Assert.Equal(
@@ -229,20 +229,6 @@ public sealed class AuthResolutionSpecs(MohistIntegrationFixture fixture)
             "sha256=" + Convert.ToHexString(HMACSHA256.HashData(Encoding.UTF8.GetBytes(secret), bytes)).ToLowerInvariant());
         using var accepted = await client.SendAsync(goodSignature);
         Assert.Equal(HttpStatusCode.OK, accepted.StatusCode);
-    }
-
-    [Fact]
-    public async Task HubNegotiate_WithAValidCredential_IsServed()
-    {
-        using var client = fixture.CreateClient();
-        client.DefaultRequestHeaders.Authorization =
-            new AuthenticationHeaderValue("Bearer", MohistIntegrationFixture.AdminToken);
-
-        using var response = await client.PostAsync(
-            "/hubs/events/negotiate?negotiateVersion=1",
-            new StringContent(string.Empty));
-
-        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
     }
 
     private async Task InsertCredentialRowAsync(

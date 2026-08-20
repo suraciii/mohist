@@ -222,7 +222,7 @@ isolation.
   checkout, build output, or assembly content roots.
 - Composition uses in-memory stores, catalogs, file providers, and named
   shared-memory SQLite. It must not resolve a physical filesystem adapter.
-- Web SignalR uses recording Server hub contexts or the configured Web fake.
+- Web event WebSocket uses recording Server sockets or the configured Web fake.
   Runner control WebSocket uses fake sockets or the typed recording transport.
 - Built-in prompts, templates, Workflow Definitions, Skills, and assets enter a
   Spec as embedded catalogs or explicit in-memory values.
@@ -269,7 +269,7 @@ or a previous test.
 Web Specs run with `isolate: false`. Mutable module state and control ports must
 provide a reset seam that `afterEach` invokes. Web HTTP uses MSW. An unhandled
 request fails its owning Spec even when product code catches the request error.
-Web SignalR and notification boundaries use configured fakes. Web Specs must
+Web event WebSocket and notification boundaries use configured fakes. Web Specs must
 not add local `vi.mock` calls. Unexpected `console.error` or `console.warn`
 output fails unless the Spec captures and asserts it. The normal Web suite and
 shuffled execution must both pass. A shuffle failure is a state leak.

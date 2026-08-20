@@ -17,6 +17,7 @@ public sealed class FakeFileSystem : IFileSystem
     public IReadOnlyDictionary<string, string> Files => _files;
     public bool TreatFilesAsSymbolicLinks { get; set; }
     public bool TreatFilesAsWorldReadable { get; set; }
+    public bool ThrowOnWriteUserOnly { get; set; }
 
     public bool IsSymbolicLink(string path) => TreatFilesAsSymbolicLinks;
     public bool IsUserOnlyFile(string path) => !TreatFilesAsWorldReadable;
@@ -120,6 +121,13 @@ public sealed class FakeFileSystem : IFileSystem
     {
         WriteAllText(path, contents);
         return Task.CompletedTask;
+    }
+
+    public void WriteAllTextUserOnly(string path, string contents)
+    {
+        if (ThrowOnWriteUserOnly)
+            throw new IOException("Configured user-only write failure.");
+        WriteAllText(path, contents);
     }
 
     public IEnumerable<string> EnumerateFiles(string path, string searchPattern, SearchOption searchOption)

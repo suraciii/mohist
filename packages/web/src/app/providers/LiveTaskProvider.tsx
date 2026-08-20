@@ -9,7 +9,7 @@ import {
 import { dispatchAgentEvent } from '../../entities/agent'
 import type { AgentDetailEventMap } from '../../entities/agent'
 import { useProject } from '../../entities/project'
-import { useEventsConnection } from '../../shared/api/events-hub'
+import { LiveEventsContext, useEventsConnection, type EventsConnection } from '../../shared/api/live-events'
 import { parseInboxItemPersistedHint } from '../../entities/inbox'
 import {
   isAgentDetailEvent,
@@ -21,9 +21,20 @@ import { buildTimelineLiveEvent } from './model/timeline-live-event'
 import { routeEvent } from './handle-event'
 import { getCurrentIssueNumber, useViewedIssueRef } from './use-viewed-issue'
 
-export const __testing__ = { unwrapEnvelope, unwrapTranscriptEnvelope, routeTranscriptEventName, buildTimelineLiveEvent, parseInboxItemPersistedHint, getCurrentIssueNumber }
+export const __testing__ = {
+  unwrapEnvelope,
+  unwrapTranscriptEnvelope,
+  routeTranscriptEventName,
+  buildTimelineLiveEvent,
+  parseInboxItemPersistedHint,
+  getCurrentIssueNumber,
+}
 
-export type EventsConnectionHook = typeof useEventsConnection
+export type EventsConnectionHook = (
+  projectId: string | null,
+  onEvent: (eventName: string, data: unknown) => void,
+  onTranscriptEvent?: (envelope: unknown) => void,
+) => EventsConnection | { reconnectVersion: number; api?: EventsConnection['api'] }
 export type ViewedIssueHook = typeof useViewedIssueRef
 export type PathnameReader = () => string
 
@@ -73,23 +84,21 @@ function useLiveEvents(
       if (!transcript) return
       const routedName = routeTranscriptEventName(transcript.eventName)
       if (isAgentDetailEvent(routedName)) {
-        dispatchAgentEvent(
-          routedName,
-          transcript.detail as AgentDetailEventMap[typeof routedName],
-        )
+        dispatchAgentEvent(routedName, transcript.detail as AgentDetailEventMap[typeof routedName])
       }
       handleEvent(routedName, transcript.payload, { dispatchAgentDetail: false })
     },
     [handleEvent],
   )
 
-  const { reconnectVersion } = eventsConnectionHook(projectId, handleEvent, handleTranscriptEvent)
+  const events = eventsConnectionHook(projectId, handleEvent, handleTranscriptEvent)
 
   return {
     activeTaskId,
     activeTaskElapsedMs,
     rebaseConflict,
-    eventsReconnectVersion: reconnectVersion,
+    eventsReconnectVersion: events.reconnectVersion,
+    liveEventsApi: events.api,
   }
 }
 
@@ -107,15 +116,10 @@ export function LiveTaskProvider({
   pathnameReader = readPathname,
 }: LiveTaskProviderProps) {
   const { projectId } = useProject()
-  const state = useLiveEvents(
-    projectId,
-    eventsConnectionHook,
-    viewedIssueHook,
-    pathnameReader,
-  )
+  const state = useLiveEvents(projectId, eventsConnectionHook, viewedIssueHook, pathnameReader)
   return (
-    <LiveTaskContext.Provider value={state}>
-      {children}
-    </LiveTaskContext.Provider>
+    <LiveEventsContext.Provider value={state.liveEventsApi}>
+      <LiveTaskContext.Provider value={state}>{children}</LiveTaskContext.Provider>
+    </LiveEventsContext.Provider>
   )
 }

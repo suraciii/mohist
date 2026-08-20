@@ -3,13 +3,7 @@ import { cleanup, configure } from '@testing-library/react'
 import { afterEach, beforeEach, vi } from 'vitest'
 import { restoreScopedProperties } from './support/scoped-property'
 import { resetSonnerFake } from './support/sonner-fake'
-import { resetSignalrFake } from './support/signalr-fake'
-import {
-  ensureMswServerListening,
-  resetUnhandledRequests,
-  server,
-  takeUnhandledRequestError,
-} from './support/msw'
+import { ensureMswServerListening, resetUnhandledRequests, server, takeUnhandledRequestError } from './support/msw'
 
 ensureMswServerListening()
 configure({ asyncUtilTimeout: 10_000 })
@@ -17,6 +11,18 @@ configure({ asyncUtilTimeout: 10_000 })
 beforeEach(() => {
   resetUnhandledRequests()
   ensureMswServerListening()
+  if (typeof window !== 'undefined') {
+    class TestWebSocket {
+      readyState = 0
+      onopen: ((event: Event) => void) | null = null
+      onmessage: ((event: MessageEvent) => void) | null = null
+      onclose: ((event: CloseEvent) => void) | null = null
+      onerror: ((event: Event) => void) | null = null
+      send() {}
+      close() {}
+    }
+    vi.stubGlobal('WebSocket', TestWebSocket)
+  }
 })
 
 let _reducedMotionOverride: boolean | undefined
@@ -63,17 +69,15 @@ beforeEach(() => {
 })
 
 const _matchMediaMock = ((query: string) => ({
-    matches: _reducedMotionOverride === true
-      ? query === '(prefers-reduced-motion: reduce)'
-      : false,
-    media: query,
-    onchange: null,
-    addListener: vi.fn(),
-    removeListener: vi.fn(),
-    addEventListener: vi.fn(),
-    removeEventListener: vi.fn(),
-    dispatchEvent: vi.fn(),
-  })) as typeof window.matchMedia
+  matches: _reducedMotionOverride === true ? query === '(prefers-reduced-motion: reduce)' : false,
+  media: query,
+  onchange: null,
+  addListener: vi.fn(),
+  removeListener: vi.fn(),
+  addEventListener: vi.fn(),
+  removeEventListener: vi.fn(),
+  dispatchEvent: vi.fn(),
+})) as typeof window.matchMedia
 
 function restoreAnimationFrameFallback() {
   if (typeof window === 'undefined') return
@@ -108,7 +112,6 @@ afterEach(() => {
   server.resetHandlers()
   _reducedMotionOverride = undefined
   resetSonnerFake()
-  resetSignalrFake()
   vi.useRealTimers()
   vi.unstubAllGlobals()
   restoreAnimationFrameFallback()
@@ -120,10 +123,13 @@ afterEach(() => {
     window.matchMedia = _matchMediaMock
     try {
       Object.defineProperty(window, 'innerWidth', { configurable: true, writable: true, value: 1280 })
-    } catch (_) { /* ignore non-configurable */ }
+    } catch (_) {
+      /* ignore non-configurable */
+    }
   }
-  const errors = [takeUnhandledRequestError(), takeUnexpectedConsoleError()]
-    .filter((error): error is Error => error !== null)
+  const errors = [takeUnhandledRequestError(), takeUnexpectedConsoleError()].filter(
+    (error): error is Error => error !== null,
+  )
   if (errors.length === 1) throw errors[0]
   if (errors.length > 1) throw new AggregateError(errors, 'Test emitted unexpected boundary errors')
 })
@@ -161,7 +167,11 @@ if (typeof window !== 'undefined' && !window.ResizeObserver) {
   })
 }
 
-if (typeof window !== 'undefined' && typeof window.Element !== 'undefined' && !window.Element.prototype.scrollIntoView) {
+if (
+  typeof window !== 'undefined' &&
+  typeof window.Element !== 'undefined' &&
+  !window.Element.prototype.scrollIntoView
+) {
   window.Element.prototype.scrollIntoView = function scrollIntoView() {}
 }
 

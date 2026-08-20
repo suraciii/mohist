@@ -4,8 +4,6 @@ import { render } from '../../../../tests/test-utils'
 import type { StageTaskState } from '../../../entities/issue'
 import { TaskItem } from './TaskItem'
 import type { TaskLogDataHook, WorkflowRunSessionsHook } from './TaskLogPanel'
-import { flushAndGetLastConnection } from './_taskLogPanelTestUtils'
-import { deferNextFakeConnectionStart, recordedInvokes } from '../../../../tests/support/signalr-fake'
 
 const taskLogHook: TaskLogDataHook = ({ enabled }) => ({
   data:
@@ -80,21 +78,11 @@ describe('TaskItem', () => {
     expect(row.querySelector('button')).toBeNull()
   })
 
-  it('keeps a running task inspectable and subscribes its canonical log panel', async () => {
-    // The TaskLogPanel mounts on expand and opens a SignalR connection whose
-    // `start()` resolves asynchronously; only after the connection resolves
-    // does the subscription effect invoke SubscribeTaskLogAsync. Deferring the
-    // connection start and flushing it inside act() (the same helper the
-    // TaskLogPanel tests use) keeps this deterministic on slow CI runners
-    // instead of polling a module global under a short waitFor timer.
-    deferNextFakeConnectionStart()
+  it('keeps a running task inspectable and shows its canonical log panel', async () => {
     renderTask(makeTask({ status: 'running', startedAt: '2026-01-01T00:00:00.000Z' }))
 
     fireEvent.click(screen.getByRole('button', { name: 'Canonical workflow task title' }))
 
-    const conn = await flushAndGetLastConnection()
-    await conn.waitForInvoke('SubscribeTaskLogAsync')
-    expect(recordedInvokes.some((invoke) => invoke.method === 'SubscribeTaskLogAsync')).toBe(true)
     expect(screen.getByTestId('task-log-panel')).toBeVisible()
   })
 

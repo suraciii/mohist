@@ -6,22 +6,19 @@ export function readIssueNumber(parsed: Record<string, unknown>): number | null 
 }
 
 function asRecord(value: unknown): Record<string, unknown> | null {
-  return value && typeof value === 'object' && !Array.isArray(value)
-    ? value as Record<string, unknown>
-    : null
+  return value && typeof value === 'object' && !Array.isArray(value) ? (value as Record<string, unknown>) : null
 }
 
 function readEnvelopePayload(rawData: unknown, parsed: Record<string, unknown>): Record<string, unknown> {
   const envelope = asRecord(rawData)
-  if (!envelope || typeof envelope.specVersion !== 'string') return parsed
+  if (!envelope || envelope.specversion !== '1.0') return parsed
 
-  return asRecord(envelope.payload) ?? asRecord(envelope.data) ?? parsed
+  return asRecord(envelope.data) ?? parsed
 }
 
 function readEnvelopeIssueNumber(rawData: unknown): number | null {
   const envelope = asRecord(rawData)
-  const extensions = envelope && asRecord(envelope.extensions)
-  const issue = extensions?.issue
+  const issue = envelope?.issue
   if (typeof issue !== 'string' || issue.trim() === '') return null
 
   const issueNumber = Number(issue)

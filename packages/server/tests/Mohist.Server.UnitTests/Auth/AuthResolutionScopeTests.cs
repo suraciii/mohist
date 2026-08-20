@@ -86,7 +86,7 @@ public sealed class AuthResolutionScopeTests
     public async Task ReadonlyCredential_OnReadonlyDeclaredRouteGet_Passes()
     {
         var (middleware, context) = NewReadonlyContext(
-            path: "/hubs/events/negotiate",
+            path: "/api/projects/project-1/events/socket",
             endpoint: new RouteScopeRequirement(RouteScopeRequirementExtensions.OperatorOrReadonly));
 
         var invoked = false;
@@ -116,26 +116,6 @@ public sealed class AuthResolutionScopeTests
 
         Assert.False(invoked);
         AssertForbidden(context);
-    }
-
-    [Fact]
-    public async Task ReadonlyCredential_OnReadonlyDeclaredHubNegotiate_Passes()
-    {
-        // SignalR clients negotiate over POST; the handshake belongs to
-        // the observation connection, so readonly is not blocked by it.
-        var (middleware, context) = NewReadonlyContext(
-            path: "/hubs/events/negotiate",
-            method: HttpMethods.Post,
-            endpoint: new RouteScopeRequirement(RouteScopeRequirementExtensions.OperatorOrReadonly));
-
-        var invoked = false;
-        await middleware.InvokeAsync(context, _ =>
-        {
-            invoked = true;
-            return Task.CompletedTask;
-        });
-
-        Assert.True(invoked);
     }
 
     [Fact]

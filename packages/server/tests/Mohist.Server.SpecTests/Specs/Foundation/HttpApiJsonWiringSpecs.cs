@@ -1,8 +1,5 @@
-using System.Text;
 using System.Text.Json;
 using Microsoft.AspNetCore.Http.Json;
-using Microsoft.AspNetCore.SignalR;
-using Microsoft.AspNetCore.SignalR.Protocol;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
 using Mohist.Server.Infrastructure;
@@ -21,8 +18,6 @@ public class HttpApiJsonWiringSpecs
     {
         _fixture = fixture;
     }
-
-    private const string NonAsciiText = "修复中文乱码 — Issue #1";
 
     [Fact]
     public void HttpJsonOptions_MatchesUnifiedFacadeBehavior()
@@ -54,35 +49,5 @@ public class HttpApiJsonWiringSpecs
         Assert.Contains("\"message\":\"中文\"", json);
     }
 
-    [Fact]
-    public void SignalRJsonHubProtocolOptions_PayloadSerializerOptionsIsUnifiedFacade()
-    {
-        var protocolOptions = _fixture.Services
-            .GetRequiredService<IOptions<JsonHubProtocolOptions>>().Value;
-
-        Assert.Same(JSON.Options, protocolOptions.PayloadSerializerOptions);
-        Assert.Same(JSON.Options.Encoder, protocolOptions.PayloadSerializerOptions.Encoder);
-    }
-
-    [Fact]
-    public void JsonHubProtocol_WithUnifiedFacade_WritesNonAsciiPayloadVerbatim()
-    {
-        var protocolOptions = _fixture.Services
-            .GetRequiredService<IOptions<JsonHubProtocolOptions>>();
-        var protocol = new JsonHubProtocol(protocolOptions);
-
-        var message = new InvocationMessage(
-            target: "OnEvent",
-            arguments: new object?[] { "issue.created", NonAsciiText },
-            invocationId: "inv-1");
-
-        var bytes = protocol.GetMessageBytes(message);
-        var text = Encoding.UTF8.GetString(bytes.Span);
-
-        Assert.Contains(NonAsciiText, text);
-        Assert.DoesNotContain("\\u4fee", text);
-        Assert.DoesNotContain("\\u4e2d", text);
-        Assert.DoesNotContain("\\u6587", text);
-    }
 
 }

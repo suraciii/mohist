@@ -11,7 +11,7 @@ Runners, integrations, and External Agents receive credentials that can be
 revoked independently.
 
 This design covers authentication, authorization, and attribution for
-Mohist-owned APIs and SignalR hubs. GitHub verifies its own ingress as described
+Mohist-owned APIs and WebSocket endpoints. GitHub verifies its own ingress as described
 in [github-integration.md](github-integration.md). Slack member policy remains
 inside the Agent Connection boundary in [slack.md](slack.md). The direct
 External Agent boundary builds on this model and is defined in
@@ -139,8 +139,8 @@ Mohist accepts the first valid carrier in this order:
 2. The `mohist_session` cookie for same-origin Web access.
 
 Tokens are never accepted in a query string because URIs enter browser history,
-access logs, and proxy records. Web SignalR uses the same-origin cookie. Runner
-control connections use the authorization header. A Runner-bound credential
+access logs, and proxy records. The Web event socket uses the same-origin cookie.
+Runner control connections use the authorization header. A Runner-bound credential
 must match the claimed Runner identity; `operator` continues to satisfy the
 `runner` Scope. The control transport migration changes the Runner carrier from
 SignalR to WebSocket without changing this authentication boundary.
@@ -283,7 +283,7 @@ authorization approval; and session creation.
 
 ## Status
 
-Principal and Credential bootstrap, unified API and SignalR authentication, Web
+Principal and Credential bootstrap, unified API and WebSocket authentication, Web
 login, CLI device authorization and refresh-family protection, personal access
 tokens, persisted direct API Project grants, Runner enrollment,
 Project-constrained integration credentials, Scope enforcement, actor

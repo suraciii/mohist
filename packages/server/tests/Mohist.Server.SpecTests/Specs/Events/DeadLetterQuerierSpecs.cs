@@ -1,6 +1,5 @@
 using System.Text.Json;
 using Microsoft.Extensions.DependencyInjection;
-using Mohist.Server.Events.Hub;
 using Mohist.Server.Infrastructure.Data.Events;
 using Mohist.Server.Infrastructure.Events;
 using Mohist.Server.SpecTests.Support;

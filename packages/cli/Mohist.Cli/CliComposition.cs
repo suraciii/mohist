@@ -19,7 +19,10 @@ internal sealed record CliCompositionOptions(
     CancellationToken CancellationToken = default,
     ICliTerminal? Terminal = null,
     TimeProvider? TimeProvider = null,
-    Func<TimeSpan, CancellationToken, Task>? PollWait = null);
+    Func<TimeSpan, CancellationToken, Task>? PollWait = null,
+    CliCredentialSession? CredentialSession = null,
+    IEventSocketFactory? EventSocketFactory = null,
+    Func<double>? EventReconnectJitter = null);
 
 internal sealed class CliComposition
 {
@@ -72,6 +75,9 @@ internal sealed class CliComposition
             cliEnvironment: cliEnvironment,
             timeProvider: timeProvider,
             pollWait: pollWait,
+            credentialSession: options.CredentialSession,
+            eventSocketFactory: options.EventSocketFactory,
+            eventReconnectJitter: options.EventReconnectJitter,
             cancellationToken: options.CancellationToken);
 
         var services = new ServiceCollection();

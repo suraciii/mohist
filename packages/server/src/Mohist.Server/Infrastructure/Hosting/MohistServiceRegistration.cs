@@ -8,8 +8,9 @@ using Microsoft.Extensions.DependencyInjection.Extensions;
 using Mohist.Server.Api;
 using Mohist.Server.Events.Grains;
 using Mohist.Server.Events.Hosting;
-using Mohist.Server.Events.Hub;
+using Mohist.Server.Events.WebSocket;
 using Mohist.Server.Infrastructure.Events;
+using Mohist.Server.Infrastructure.Events.Matching;
 using Mohist.Server.Agent.Grains;
 using Mohist.Server.Agent.Services;
 using Mohist.Server.Auth.Domain;
@@ -194,7 +195,7 @@ public static class MohistServiceRegistration
         services.AddSingleton<WebhookPayloadRenderer>();
         services.AddHttpClient<IWebhookHttpClient, WebhookHttpClient>()
             .ConfigureHttpClient(client => client.Timeout = TimeSpan.FromSeconds(15));
-         services.AddScoped<SlackAttachmentInputBinder>();
+        services.AddScoped<SlackAttachmentInputBinder>();
 
         services.AddScoped<ISlackAppManagementPort, SlackAppManagementPortAdapter>();
         services.AddScoped<ISlackAppManagementFactPort, SlackAppManagementPortAdapter>();
@@ -229,10 +230,11 @@ public static class MohistServiceRegistration
         services.AddCloudEventBus();
         services.AddCloudEventHandlersFromAssembly(typeof(MohistServiceRegistration).Assembly);
         services.AddCloudEventPushHandlersFromAssembly(typeof(MohistServiceRegistration).Assembly);
-        services.AddSingleton<IEventTailSource>(sp => sp.GetRequiredService<Mohist.Server.Events.Hub.EventTailSource>());
-        services.AddSingleton<IUserNotificationDispatcher, UserNotificationDispatcher>();
-        services.AddSingleton<ITranscriptEventPublisher, SignalRTranscriptEventPublisher>();
-        services.AddSingleton<ITaskLogDeltaPublisher, SignalRTaskLogDeltaPublisher>();
+        services.AddSingleton<IEventMatchFailureSink, EventSocketMatchFailureSink>();
+        services.AddSingleton<EventWebSocketRegistry>();
+        services.AddHostedService(sp => sp.GetRequiredService<EventWebSocketRegistry>());
+        services.AddSingleton<ITranscriptEventPublisher, WebSocketTranscriptEventPublisher>();
+        services.AddSingleton<ITaskLogDeltaPublisher, WebSocketTaskLogDeltaPublisher>();
         services.AddHostedService<AttachmentCleanupService>();
         services.AddHostedService<DispatcherActivationService>();
         services.AddHostedService<EventPushWorker>();
@@ -369,12 +371,6 @@ public static class MohistServiceRegistration
         services.AddScoped<RunnerDefinitionStore>();
         services.AddScoped<TaskLogService>();
         services.AddScoped<TaskLogStore>();
-        services.AddSignalR()
-            .AddJsonProtocol(options =>
-            {
-                options.PayloadSerializerOptions = JSON.Options;
-            });
-
         return services;
     }
 

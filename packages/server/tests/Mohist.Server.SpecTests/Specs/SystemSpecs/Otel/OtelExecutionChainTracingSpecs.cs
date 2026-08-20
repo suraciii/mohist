@@ -18,7 +18,7 @@ namespace Mohist.Server.SpecTests.Specs.SystemSpecs.Otel;
 /// <summary>
 /// End-to-end "single unbroken trace" tests for the production
 /// OpenTelemetry pipeline. These exercise the full Mohist server
-/// (Orleans silo + ASP.NET Core + EF Core + HttpClient + SignalR)
+/// (Orleans silo + ASP.NET Core + EF Core + HttpClient)
 /// through <see cref="OtelIntegrationFixture"/> and assert that
 /// activities emitted from all five automatic instrumentation
 /// sources share one trace id, with correct parent-child links
@@ -62,7 +62,7 @@ public class OtelExecutionChainTracingSpecs
     }
 
     [Fact]
-    public async Task RepresentativeRequest_YieldsSingleTraceAcrossAllFiveSources()
+    public async Task RepresentativeRequest_YieldsSingleTraceAcrossRegisteredSources()
     {
         await using var host = new OtelTestHost(new OtelTestHostOptions
         {
@@ -71,10 +71,6 @@ public class OtelExecutionChainTracingSpecs
             {
                 app.MapGet("/api/otel-chain", async () =>
                 {
-                    using var signalr = MohistOpenTelemetryRegistrationTestSources.SignalR.StartActivity("TestHub/Echo", ActivityKind.Server);
-                    signalr?.SetTag("rpc.system", "signalr");
-                    signalr?.SetTag("rpc.method", "Echo");
-
                     using var orleans = MohistOpenTelemetryRegistrationTestSources.Orleans.StartActivity("ITestGrain/Ping", ActivityKind.Internal);
                     using (var ef = MohistOpenTelemetryRegistrationTestSources.EfCore.StartActivity("SELECT Probe", ActivityKind.Client))
                     {
@@ -98,23 +94,19 @@ public class OtelExecutionChainTracingSpecs
 
         await host.Recorder.WaitForAsync(s =>
             s.Any(IsInboundHttpSpan)
-            && s.Any(IsSignalRActivity)
             && s.Any(IsOrleansActivity)
             && s.Any(IsEfCoreActivity)
             && s.Any(IsOutboundHttpSpan));
 
         var inbound = Assert.Single(host.Recorder.EndedActivities, IsInboundHttpSpan);
-        var signalr = Assert.Single(host.Recorder.EndedActivities, IsTestSignalRActivity);
         var orleans = Assert.Single(host.Recorder.EndedActivities, IsTestOrleansActivity);
         var ef = Assert.Single(host.Recorder.EndedActivities, IsTestEfCoreActivity);
         var outbound = Assert.Single(host.Recorder.EndedActivities, IsOutboundHttpSpan);
 
-        Assert.Equal(inbound.TraceId, signalr.TraceId);
-        Assert.Equal(signalr.TraceId, orleans.TraceId);
+        Assert.Equal(inbound.TraceId, orleans.TraceId);
         Assert.Equal(orleans.TraceId, ef.TraceId);
         Assert.Equal(orleans.TraceId, outbound.TraceId);
-        Assert.Equal(inbound.SpanId, signalr.ParentSpanId);
-        Assert.Equal(signalr.SpanId, orleans.ParentSpanId);
+        Assert.Equal(inbound.SpanId, orleans.ParentSpanId);
         Assert.Equal(orleans.SpanId, ef.ParentSpanId);
         Assert.Equal(orleans.SpanId, outbound.ParentSpanId);
     }
@@ -328,12 +320,6 @@ public class OtelExecutionChainTracingSpecs
         return route.TrimEnd('/') == "/api/projects/{projectRef}/issues";
     }
 
-    private static bool IsSignalRActivity(Activity activity) =>
-        activity.Source?.Name == MohistOpenTelemetryRegistration.SignalRServerActivitySourceName;
-
-    private static bool IsTestSignalRActivity(Activity activity) =>
-        IsSignalRActivity(activity) && activity.DisplayName == "TestHub/Echo";
-
     private static bool IsOrleansActivity(Activity activity) =>
         activity.Source?.Name is "Microsoft.Orleans.Runtime"
             or "Microsoft.Orleans.Application"
@@ -394,7 +380,6 @@ public class OtelExecutionChainTracingSpecs
         {
             ShouldListenTo = source =>
                 source.Name == "Microsoft.AspNetCore"
-                || source.Name == MohistOpenTelemetryRegistration.SignalRServerActivitySourceName
                 || MohistOpenTelemetryRegistration.OrleansActivitySourceNames.Contains(source.Name)
                 || source.Name == "OpenTelemetry.Instrumentation.EntityFrameworkCore"
                 || source.Name == "System.Net.Http"
@@ -513,7 +498,6 @@ public class OtelExecutionChainTracingSpecs
 
     private static class MohistOpenTelemetryRegistrationTestSources
     {
-        public static readonly ActivitySource SignalR = new(MohistOpenTelemetryRegistration.SignalRServerActivitySourceName);
         public static readonly ActivitySource Orleans = new(MohistOpenTelemetryRegistration.OrleansActivitySourceNames[0]);
         public static readonly ActivitySource EfCore = new("OpenTelemetry.Instrumentation.EntityFrameworkCore");
         public static readonly ActivitySource HttpClient = new("System.Net.Http");

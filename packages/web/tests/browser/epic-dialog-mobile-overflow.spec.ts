@@ -24,7 +24,7 @@ const epic = {
     totalIssueCount: 1,
     blockedIssues: [],
     activeIssues: [],
-      nextIssue: { number: 201, title: 'Ready issue' },
+    nextIssue: { number: 201, title: 'Ready issue' },
     nextIssueReason: null,
     readyToMarkDone: false,
   },
@@ -36,7 +36,6 @@ function apiResponse(data: unknown) {
 }
 
 async function mockEpicDialogApi(page: Page) {
-  await page.route('**/hubs/events**', route => route.fulfill({ status: 204, body: '' }))
   await page.route('**/api/**', async (route) => {
     const url = new URL(route.request().url())
     const path = url.pathname.replace(/^\/api/, '')

@@ -14,7 +14,7 @@ namespace Mohist.Server.Infrastructure.Events;
 /// counterpart to <see cref="TranscriptEnvelope"/>, not a domain event.
 /// The <see cref="IEventPublisher"/> bus never sees a
 /// <see cref="TaskLogDeltaEnvelope"/>, and
-/// <see cref="Mohist.Server.Events.Hub.EventBridge"/> never forwards
+/// the domain event push bridge never forwards
 /// one. It is <i>work-scoped</i> (the runner uploads by
 /// <c>workId</c>); the server stamps <see cref="TaskId"/> at publish
 /// time so the Web, which natively holds <c>taskId</c>, can match
