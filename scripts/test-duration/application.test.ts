@@ -51,7 +51,7 @@ test('test:app builds once and hands the same run root to the application guard'
     writeFile: (path: string, content: string) => writes.set(path, content),
     runPhase: async (name: string) => {
       phases.push(name)
-      return { exitCode: 0, timedOut: false, cleanupComplete: true }
+      return { exitCode: 0, timedOut: false, elapsedMs: 123, cleanupComplete: true }
     },
     runGuard: async (argv: readonly string[]) => {
       guardArgs = argv
@@ -73,6 +73,12 @@ test('test:app builds once and hands the same run root to the application guard'
     '301000',
   ])
   assert.match(writes.get(join(artifactRoot, 'build-stamp.json')) ?? '', /"runId": "1000-7"/)
+  const buildEvidence = JSON.parse(writes.get(join(artifactRoot, 'build.json')) ?? '{}') as {
+    readonly passed?: boolean
+    readonly results?: readonly { readonly elapsedMs?: number }[]
+  }
+  assert.equal(buildEvidence.passed, true)
+  assert.equal(buildEvidence.results?.[0]?.elapsedMs, 123)
   assert.deepEqual(reports, [])
 })
 

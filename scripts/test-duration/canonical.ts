@@ -17,6 +17,7 @@ const killGraceMs = 5_000
 export interface PhaseResult {
   readonly exitCode: number | null
   readonly timedOut: boolean
+  readonly elapsedMs?: number
   readonly cancelled?: boolean
   readonly cleanupComplete?: boolean
 }
@@ -123,9 +124,12 @@ export async function runPhase(
   abortSignal: AbortSignal,
   timeoutScheduler?: TimeoutScheduler,
 ): Promise<PhaseResult> {
-  if (abortSignal.aborted) return { exitCode: null, timedOut: false, cancelled: true, cleanupComplete: true }
+  const phaseStartedAt = now()
+  if (abortSignal.aborted) {
+    return { exitCode: null, timedOut: false, elapsedMs: 0, cancelled: true, cleanupComplete: true }
+  }
   if (now() >= deadlines.executionDeadlineAt) {
-    return { exitCode: null, timedOut: true, cleanupComplete: true }
+    return { exitCode: null, timedOut: true, elapsedMs: 0, cleanupComplete: true }
   }
 
   const resolvedCommand = resolveSpawnCommand(command, args)
@@ -178,6 +182,7 @@ export async function runPhase(
   const result = {
     exitCode: outcome.kind === 'exit' && !executionExpired ? outcome.exitCode : null,
     timedOut: outcome.kind === 'deadline' || executionExpired,
+    elapsedMs: now() - phaseStartedAt,
     cancelled: outcome.kind === 'abort',
     cleanupComplete,
   }
