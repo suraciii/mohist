@@ -1,30 +1,27 @@
 # Review
 
-## Must-Fix Findings
+Review round: 3 (re-review)
 
-### M-001: Manager ingress can admit an explicitly unknown event as human work
+## Verdict
 
-`packages/server/src/Mohist.Server/Api/SlackManagerIngressRoutes.cs:181-184` only permits a missing `senderSlackUserId` exception for `senderKind=bot`; it does not reject an explicit `senderKind=unknown` when a sender ID is present. More importantly, `packages/server/src/Mohist.Server/Slack/Services/SlackManagerIngressService.cs:58-69` never checks an explicit non-Bot sender kind before calling `SlackProviderInboxStore.AcceptAsync`. A request such as `senderKind: "unknown", senderSlackUserId: "U_UNKNOWN", isDirectMessage: true` therefore proceeds through Manager authorization and can create durable work-input state as if it were human input.
+**PASS** - no must-fix problems remain; the change is ready to merge.
 
-This violates the `Preserve existing non-managed Slack ingress behavior` criterion: unknown sender events must retain unknown-sender validation/ignore behavior and must not bypass required identity rules. Treat the explicit sender kind as authoritative at Manager ingress (while retaining the compatibility fallback only when the field is omitted), and add a regression asserting that an unknown event cannot create an inbox row or reach conversation processing.
+## Prior Findings
 
-### M-002: The required supported-fixture App-ID contract test is absent
-
-`packages/mohist-slack/src/adapter-events.test.ts:404-414` tests a generic App-less Bot and explicitly accepts `authorBot.appId === null`. It does not construct a Manager- or Agent-shaped supported Mohist fixture with both App-ID sources missing and fail the contract test. Consequently, a regression that removes `event.app_id` and `bot_profile.app_id` from a supported fixture can pass the current suite, even though T-001 and the normalization acceptance criterion require that case to be a release-blocking contract failure.
-
-Add explicit supported Manager and Agent fixture contract checks that require a matchable `authorAppId` from one of the two allowed sources. Keep the generic third-party App-less Bot test separate so preserving unrelated Bot behavior remains covered.
+- **M-001, explicit unknown Manager sender: fixed properly.** `SlackManagerIngressService.cs:46-49` rejects an explicit `senderKind=unknown` before managed admission, inbox insertion, authorization, or conversation processing. The regression in `SlackManagedBotAdmissionSpecs.cs` verifies that an unknown event carrying a sender ID creates neither inbox nor outbox state. The compatibility fallback for an omitted sender kind remains available for legacy human callers.
+- **M-002, supported fixture App-ID contract: fixed properly.** `adapter-events.test.ts:286-379` verifies both supported Manager and Agent-shaped fixtures, requires a non-conflicting author App-ID, and explicitly fails both fixture contracts when `event.app_id` and `bot_profile.app_id` are absent. The separate App-less third-party Bot test remains, so this remediation does not weaken unrelated Bot coverage.
 
 ## Dimension Checks
 
-- **Issue acceptance criteria:** FAIL. Managed-Bot attribution, early suppression, side-effect avoidance, identity propagation, and normal human/third-party paths are implemented, but M-001 violates the unknown-sender preservation criterion and M-002 leaves an explicit required contract test uncovered.
-- **Coverage:** FAIL. The added Server and adapter tests cover the primary managed, lifecycle, conflict, redelivery, no-side-effect, and acknowledgement paths, but do not cover the two cases above.
-- **Correctness:** FAIL because M-001 permits an explicit unknown classification to enter Manager durable admission.
-- **Consistency with surrounding code:** checked, no issue. The shared admission service, additive DTO fields, workspace-scoped identity matching, and early Connection branch follow the existing service and ingress conventions.
-- **Tests and verification:** checked. `npm --prefix packages/mohist-slack run test` passed 7 files and 75 tests; adapter test typecheck passed; the Server build passed; the Server spec run passed all 3,701 tests; and `git diff --check` passed. These results do not cover the missing cases above.
+- **Issue acceptance criteria:** checked, no issue. Managed Manager and Agent Bot authors are matched within the active workspace, cross-target authors are suppressed, and managed events return `ignored` before human-sender validation, authorization, routing, inbox admission, or work processing.
+- **Coverage:** checked, no issue. The adapter tests cover sender classification, both supported author App-ID sources, optional Bot-user identity, source conflicts, receiver/author separation, raw-field filtering, missing supported identity contracts, transport forwarding, and ignored-result acknowledgement. Server specs cover Manager and Connection self/cross-target events, transition states, disabled Connections, invalid identity ordering, redelivery, no-side-effect behavior, unknown senders, humans, and third-party Bots.
+- **Correctness:** checked, no issue. `SlackManagedBotAdmissionService` requires an exact workspace-scoped match to a non-deleted, identity-bearing Manager or Agent App and never uses the receiving App as author evidence. Both ingress routes perform stable identity, workspace, and lease checks before managed admission, while managed admission precedes ingress-specific work. The adapter acknowledges an ignored result once, does not render a user-facing response, and still drains normal deliveries.
+- **Consistency with the surrounding codebase:** checked, no issue. The new metadata is allowlisted and additive, the Manager result preserves the existing `decision` field while exposing the adapter-compatible `kind`, and the new admission service follows the existing scoped-service and store conventions. The DTO extraction refactor builds cleanly.
+- **Tests and verification:** checked, no issue. `npm --prefix packages/mohist-slack run test:ci` passed typechecking and 7 files / 76 tests. `dotnet build packages/server/src/Mohist.Server/Mohist.Server.csproj -p:SkipWebBuild=true --no-restore` passed with 0 warnings and 0 errors. The Server spec command passed all 3,702 tests; its requested filter was ignored by Microsoft Testing Platform, so the complete assembly ran. `git diff --check` passed.
 
 ## Observations
 
-- `packages/mohist-slack/src/adapter-events.ts:30` prefers `event.api_app_id` over the outer `api_app_id`. Normal Slack Socket Mode payloads use the outer value, and the current tests cover that shape, but a conflicting duplicate would not preserve the outer receiving identity as unambiguously as the design describes. This is not counted as a must-fix for the current issue because the duplicate is outside the exercised Slack payload shape.
-- The focused `dotnet test` filter was ignored by the repository's Microsoft Testing Platform runner, so the command executed the complete Server specification assembly rather than only the two new classes. The broader result was successful.
+- `packages/mohist-slack/src/adapter-events.ts:30` prefers a nested event `api_app_id` over the outer Socket payload value. Normal Slack Socket Mode payloads use the outer value and the exercised fixtures cover that shape, so this is not a must-fix for Issue 616. A future malformed-payload hardening change could fail closed or define precedence for conflicting receiving-App fields.
+- Unrecognized explicit `senderKind` strings are not rejected at the Server boundary: Connection `NormalizeSenderKind` maps them to `Human` (`SlackConnectionRoutes.cs:1008-1015`), while Manager specifically rejects only the literal `unknown` value (`SlackManagerIngressService.cs:46-49`). Adapter-generated envelopes use the closed `human`/`bot`/`unknown` union, and the omitted-field fallback is intentional for legacy callers, so this does not block the valid Issue 616 contract. Failing closed for a non-null unrecognized value would be a useful protocol-hardening improvement.
 
-<promise>FAIL</promise>
+<promise>PASS</promise>
