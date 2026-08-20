@@ -120,7 +120,8 @@ root to the existing track guard. The Repository executor runs the declared
 repository checks, Gate validates the six scope evidence bundles without
 rerunning tests, and local `verify` runs those same scopes under one absolute
 deadline before applying the Gate validation. The remaining migration work is
-the portfolio of individual Specs and the removal of obsolete public aliases.
+the plan-backed `test:fast`/`npm test` commands, the portfolio of individual
+Specs, and the removal of obsolete public aliases.
 
 ## Platform Rules
 
