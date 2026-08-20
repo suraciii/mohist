@@ -29,6 +29,8 @@ internal sealed class FakeEventSocket : IEventSocket
     private FakeMessage? _current;
     private int _offset;
     private bool _exhausted;
+    private WebSocketCloseStatus? _peerCloseStatus;
+    private string? _peerCloseDescription;
 
     public FakeEventSocket(FakeEventSocketFactory factory)
     {
@@ -42,6 +44,7 @@ internal sealed class FakeEventSocket : IEventSocket
     public bool CloseNeverCompletes { get; init; }
     public List<string> SentMessages { get; } = [];
     public List<WebSocketCloseStatus> CloseStatuses { get; } = [];
+    public List<string> CloseDescriptions { get; } = [];
     public int AbortCount { get; private set; }
     public int DisposeCount { get; private set; }
 
@@ -63,8 +66,12 @@ internal sealed class FakeEventSocket : IEventSocket
     public FakeEventSocket AddBinary(string content, bool endOfMessage = true) =>
         AddFragment(content, endOfMessage, WebSocketMessageType.Binary);
 
-    public FakeEventSocket AddClose()
+    public FakeEventSocket AddClose(
+        WebSocketCloseStatus status = WebSocketCloseStatus.NormalClosure,
+        string description = "")
     {
+        _peerCloseStatus = status;
+        _peerCloseDescription = description;
         _messages.Enqueue(null);
         return this;
     }
@@ -82,7 +89,7 @@ internal sealed class FakeEventSocket : IEventSocket
     }
 
     public async ValueTask<EventSocketReceiveResult> ReceiveAsync(
-        Memory<byte> buffer,
+        ArraySegment<byte> buffer,
         CancellationToken cancellationToken)
     {
         if (_current is null && _messages.Count > 0)
@@ -90,7 +97,12 @@ internal sealed class FakeEventSocket : IEventSocket
             _current = _messages.Dequeue();
             _offset = 0;
             if (_current is null)
-                return new EventSocketReceiveResult(0, true, WebSocketMessageType.Close);
+                return new EventSocketReceiveResult(
+                    0,
+                    true,
+                    WebSocketMessageType.Close,
+                    _peerCloseStatus,
+                    _peerCloseDescription);
         }
 
         if (_current is null)
@@ -108,8 +120,8 @@ internal sealed class FakeEventSocket : IEventSocket
             cancellationToken.ThrowIfCancellationRequested();
         }
 
-        var count = Math.Min(buffer.Length, _current!.Payload.Length - _offset);
-        _current.Payload.AsMemory(_offset, count).CopyTo(buffer);
+        var count = Math.Min(buffer.Count, _current!.Payload.Length - _offset);
+        _current.Payload.AsMemory(_offset, count).CopyTo(buffer.AsMemory());
         _offset += count;
         var frameComplete = _offset == _current.Payload.Length;
         var end = frameComplete && _current.EndOfMessage;
@@ -125,6 +137,7 @@ internal sealed class FakeEventSocket : IEventSocket
         CancellationToken cancellationToken)
     {
         CloseStatuses.Add(status);
+        CloseDescriptions.Add(description);
         OnClose?.Invoke();
         return CloseNeverCompletes
             ? new ValueTask(new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously).Task)

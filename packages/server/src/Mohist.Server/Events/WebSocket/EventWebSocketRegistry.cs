@@ -14,11 +14,14 @@ namespace Mohist.Server.Events.WebSocket;
 public sealed class EventWebSocketRegistry : ISingletonService, IHostedService
 {
     private const int MaxMessageBytes = 4 * 1024 * 1024;
+    private static readonly TimeSpan CloseTimeout = TimeSpan.FromSeconds(5);
     private readonly ConcurrentDictionary<string, EventProjectConnections> _projects = new(StringComparer.Ordinal);
+    private readonly object _lifecycle = new();
     private readonly WebhookPayloadRenderer _renderer;
     private readonly TimeProvider _time;
     private readonly ILoggerFactory _logs;
     private readonly IEventMatchFailureSink _matchFailures;
+    private bool _stopping;
 
     public EventWebSocketRegistry(
         WebhookPayloadRenderer renderer,
@@ -34,23 +37,37 @@ public sealed class EventWebSocketRegistry : ISingletonService, IHostedService
 
     internal async Task RunAsync(string projectId, System.Net.WebSockets.WebSocket socket, CancellationToken ct)
     {
-        var project = _projects.GetOrAdd(projectId, static _ => new());
+        EventProjectConnections? project = null;
         EventWebSocketConnection? connection = null;
-        connection = new EventWebSocketConnection(
-            projectId,
-            socket,
-            _time,
-            subscription => project.Update(connection!, subscription),
-            _logs.CreateLogger<EventWebSocketConnection>(),
-            _matchFailures);
-        project.Add(connection);
+        lock (_lifecycle)
+        {
+            if (!_stopping)
+            {
+                project = _projects.GetOrAdd(projectId, static _ => new());
+                connection = new EventWebSocketConnection(
+                    projectId,
+                    socket,
+                    _time,
+                    subscription => project.Update(connection!, subscription),
+                    _logs.CreateLogger<EventWebSocketConnection>(),
+                    _matchFailures);
+                project.Add(connection);
+            }
+        }
+
+        if (connection is null)
+        {
+            await CloseRejectedSocketAsync(socket);
+            return;
+        }
+
         try
         {
             await connection.RunAsync(ct);
         }
         finally
         {
-            project.Remove(connection);
+            project!.Remove(connection);
             // Buckets are retained so a reconnect can never be added to a bucket
             // that a concurrent last disconnect then removes from the registry.
             await connection.FenceAsync(WebSocketCloseStatus.NormalClosure, "Disconnected");
@@ -100,9 +117,32 @@ public sealed class EventWebSocketRegistry : ISingletonService, IHostedService
 
     public Task StopAsync(CancellationToken cancellationToken)
     {
-        var connections = _projects.Values.SelectMany(static project => project.SnapshotAll()).ToArray();
+        EventWebSocketConnection[] connections;
+        lock (_lifecycle)
+        {
+            _stopping = true;
+            connections = _projects.Values.SelectMany(static project => project.SnapshotAll()).ToArray();
+        }
         return Task.WhenAll(connections.Select(connection =>
             connection.FenceAsync(WebSocketCloseStatus.EndpointUnavailable, "Server stopping")));
+    }
+
+    private async Task CloseRejectedSocketAsync(System.Net.WebSockets.WebSocket socket)
+    {
+        try
+        {
+            using var timeout = new CancellationTokenSource(CloseTimeout, _time);
+            if (socket.State is WebSocketState.Open or WebSocketState.CloseReceived)
+                await socket.CloseOutputAsync(WebSocketCloseStatus.EndpointUnavailable, "Server stopping", timeout.Token);
+        }
+        catch (OperationCanceledException)
+        {
+            socket.Abort();
+        }
+        catch (Exception ex) when (ex is WebSocketException or IOException or ObjectDisposedException)
+        {
+            socket.Abort();
+        }
     }
 
     internal static bool IsWithinMessageLimit(byte[] payload) => payload.Length <= MaxMessageBytes;
@@ -551,6 +591,10 @@ internal sealed class EventWebSocketConnection
                 }
                 finally { _sendGate.Release(); }
             }
+        }
+        catch (Exception ex) when (ex is WebSocketException or IOException or ObjectDisposedException)
+        {
+            _log.LogDebug(ex, "Project {ProjectId} event socket send failed", _projectId);
         }
         finally { _sendCompleted.TrySetResult(); }
     }

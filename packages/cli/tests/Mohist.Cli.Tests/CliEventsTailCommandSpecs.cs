@@ -102,8 +102,9 @@ public sealed class CliEventTailCommandSpecs : IDisposable
     public async Task Tail_SubscriptionError_PrintsMatchDiagnosticAndStops()
     {
         var factory = new FakeEventSocketFactory();
-        factory.Add(new FakeEventSocket(factory).AddJson(
-            """{"jsonrpc":"2.0","id":"req_1","error":{"code":-32602,"message":"Unbalanced '('","data":{"line":1,"column":20,"offset":19,"source":"(event.type"}}}"""));
+        var socket = new FakeEventSocket(factory).AddJson(
+            """{"jsonrpc":"2.0","id":"req_1","error":{"code":-32602,"message":"Unbalanced '('","data":{"line":1,"column":20,"offset":19,"source":"(event.type"}}}""");
+        factory.Add(socket);
 
         var result = await RunAsync(factory, CancellationToken.None,
             ["event", "tail", "--match", "(event.type == \"x\""]);
@@ -112,6 +113,8 @@ public sealed class CliEventTailCommandSpecs : IDisposable
         Assert.Contains("Unbalanced '('", result.Error.ToString(), StringComparison.Ordinal);
         Assert.Contains("line 1, column 20", result.Error.ToString(), StringComparison.Ordinal);
         Assert.Empty(result.Output.ToString());
+        Assert.Equal(WebSocketCloseStatus.NormalClosure, Assert.Single(socket.CloseStatuses));
+        Assert.Equal("Subscription rejected.", Assert.Single(socket.CloseDescriptions));
     }
 
     [Fact]
@@ -120,7 +123,9 @@ public sealed class CliEventTailCommandSpecs : IDisposable
         using var cts = new CancellationTokenSource();
         var waits = new List<TimeSpan>();
         var factory = new FakeEventSocketFactory();
-        var first = new FakeEventSocket(factory).AddJson(Ack).AddClose();
+        var first = new FakeEventSocket(factory).AddJson(Ack).AddClose(
+            WebSocketCloseStatus.EndpointUnavailable,
+            "Server restart.");
         var second = new FakeEventSocket(factory) { OnExhausted = cts.Cancel }.AddJson(Ack).AddJson(DomainEvent);
         factory.Add(first);
         factory.Add(second);
@@ -134,6 +139,8 @@ public sealed class CliEventTailCommandSpecs : IDisposable
         Assert.Equal(2, factory.Endpoints.Count);
         Assert.Single(first.SentMessages);
         Assert.Single(second.SentMessages);
+        Assert.Equal(WebSocketCloseStatus.EndpointUnavailable, Assert.Single(first.CloseStatuses));
+        Assert.Equal("Server restart.", Assert.Single(first.CloseDescriptions));
         Assert.Single(waits);
         Assert.InRange(waits[0], TimeSpan.FromMilliseconds(800), TimeSpan.FromMilliseconds(1200));
         Assert.Single(result.Output.ToString().Split('\n', StringSplitOptions.RemoveEmptyEntries));
@@ -396,6 +403,62 @@ public sealed class CliEventTailCommandSpecs : IDisposable
         Assert.Equal(1, socket.DisposeCount);
     }
 
+    [Fact]
+    public async Task Tail_PeerClose_WhenCloseResponseNeverCompletes_AbortsAndReconnectsAfterInjectedDeadline()
+    {
+        using var cts = new CancellationTokenSource();
+        var closeStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var time = new FakeTimeProvider();
+        var factory = new FakeEventSocketFactory();
+        var socket = new FakeEventSocket(factory)
+        {
+            OnClose = closeStarted.SetResult,
+            CloseNeverCompletes = true,
+        }.AddJson(Ack).AddClose(WebSocketCloseStatus.EndpointUnavailable, "Maintenance.");
+        factory.Add(socket);
+
+        var run = RunAsync(
+            factory,
+            cts.Token,
+            wait: (_, _) => { cts.Cancel(); return Task.CompletedTask; },
+            timeProvider: time);
+        await closeStarted.Task;
+        Assert.False(run.IsCompleted);
+        time.Advance(TimeSpan.FromSeconds(2));
+        var result = await run;
+
+        Assert.Equal(130, result.ExitCode);
+        Assert.Equal(WebSocketCloseStatus.EndpointUnavailable, Assert.Single(socket.CloseStatuses));
+        Assert.Equal("Maintenance.", Assert.Single(socket.CloseDescriptions));
+        Assert.Equal(1, socket.AbortCount);
+        Assert.Equal(1, socket.DisposeCount);
+    }
+
+    [Fact]
+    public async Task Tail_SubscriptionRejection_WhenCloseNeverCompletes_ReturnsAfterInjectedDeadline()
+    {
+        var closeStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var time = new FakeTimeProvider();
+        var factory = new FakeEventSocketFactory();
+        var socket = new FakeEventSocket(factory)
+        {
+            OnClose = closeStarted.SetResult,
+            CloseNeverCompletes = true,
+        }.AddJson("""{"jsonrpc":"2.0","id":"req_1","error":{"code":-32602,"message":"Rejected"}}""");
+        factory.Add(socket);
+
+        var run = RunAsync(factory, CancellationToken.None, timeProvider: time);
+        await closeStarted.Task;
+        Assert.False(run.IsCompleted);
+        time.Advance(TimeSpan.FromSeconds(2));
+        var result = await run;
+
+        Assert.Equal(1, result.ExitCode);
+        Assert.Equal(WebSocketCloseStatus.NormalClosure, Assert.Single(socket.CloseStatuses));
+        Assert.Equal("Subscription rejected.", Assert.Single(socket.CloseDescriptions));
+        Assert.Equal(1, socket.AbortCount);
+    }
+
     public static TheoryData<string> MalformedSubscriptionResponses => new()
     {
         "not-json",
@@ -407,6 +470,14 @@ public sealed class CliEventTailCommandSpecs : IDisposable
         "{\"jsonrpc\":\"2.0\",\"id\":\"req_1\"}",
         "{\"jsonrpc\":\"2.0\",\"id\":\"req_1\",\"result\":{},\"error\":{}}",
         "{\"jsonrpc\":\"2.0\",\"id\":\"req_1\",\"result\":[]}",
+        "{\"jsonrpc\":\"2.0\",\"id\":\"req_1\",\"result\":{},\"method\":\"event.domain\"}",
+        "{\"jsonrpc\":\"2.0\",\"id\":\"req_1\",\"result\":{},\"params\":{}}",
+        "{\"jsonrpc\":\"2.0\",\"id\":\"req_1\",\"result\":{},\"extra\":true}",
+        "{\"jsonrpc\":\"2.0\",\"jsonrpc\":\"2.0\",\"id\":\"req_1\",\"result\":{}}",
+        "{\"jsonrpc\":\"2.0\",\"id\":\"req_1\",\"error\":{}}",
+        "{\"jsonrpc\":\"2.0\",\"id\":\"req_1\",\"error\":{\"code\":-32602,\"message\":1}}",
+        "{\"jsonrpc\":\"2.0\",\"id\":\"req_1\",\"error\":{\"code\":-32602.5,\"message\":\"Rejected\"}}",
+        "{\"jsonrpc\":\"2.0\",\"id\":\"req_1\",\"error\":{\"code\":-32602,\"message\":\"Rejected\",\"other\":true}}",
     };
 
     [Theory]
@@ -430,6 +501,12 @@ public sealed class CliEventTailCommandSpecs : IDisposable
     [InlineData("event-not-object", "{\"jsonrpc\":\"2.0\",\"method\":\"event.domain\",\"params\":{\"event\":[]}}")]
     [InlineData("params-not-object", "{\"jsonrpc\":\"2.0\",\"method\":\"event.domain\",\"params\":[]}")]
     [InlineData("method-not-string", "{\"jsonrpc\":\"2.0\",\"method\":1,\"params\":{}}")]
+    [InlineData("missing-params", "{\"jsonrpc\":\"2.0\",\"method\":\"event.domain\"}")]
+    [InlineData("response-id", "{\"jsonrpc\":\"2.0\",\"method\":\"event.domain\",\"params\":{},\"id\":\"x\"}")]
+    [InlineData("response-result", "{\"jsonrpc\":\"2.0\",\"method\":\"event.domain\",\"params\":{},\"result\":{}}")]
+    [InlineData("response-error", "{\"jsonrpc\":\"2.0\",\"method\":\"event.domain\",\"params\":{},\"error\":{}}")]
+    [InlineData("extra-envelope-member", "{\"jsonrpc\":\"2.0\",\"method\":\"unknown\",\"params\":{},\"extra\":true}")]
+    [InlineData("extra-domain-param", "{\"jsonrpc\":\"2.0\",\"method\":\"event.domain\",\"params\":{\"event\":{},\"other\":true}}")]
     public async Task Tail_MalformedNotification_FencesAttemptWithoutOutput(string caseName, string notification)
     {
         _ = caseName;
@@ -443,6 +520,70 @@ public sealed class CliEventTailCommandSpecs : IDisposable
         Assert.Equal(130, result.ExitCode);
         Assert.Equal(WebSocketCloseStatus.ProtocolError, Assert.Single(socket.CloseStatuses));
         Assert.Empty(result.Output.ToString());
+    }
+
+    public static TheoryData<string> MalformedCloudEvents => new()
+    {
+        "{}",
+        "{\"specversion\":\"0.3\",\"id\":\"e1\",\"source\":\"test\",\"type\":\"one\"}",
+        "{\"specversion\":\"1.0\",\"id\":\"\",\"source\":\"test\",\"type\":\"one\"}",
+        "{\"specversion\":\"1.0\",\"id\":\"e1\",\"source\":1,\"type\":\"one\"}",
+        "{\"specversion\":\"1.0\",\"id\":\"e1\",\"source\":\"test\"}",
+        "{\"specversion\":\"1.0\",\"id\":\"e1\",\"source\":\"test\",\"type\":\"one\",\"type\":\"two\"}",
+    };
+
+    [Theory]
+    [MemberData(nameof(MalformedCloudEvents))]
+    public async Task Tail_MalformedCloudEvent_FencesAttemptWithoutOutput(string cloudEvent)
+    {
+        using var cts = new CancellationTokenSource();
+        var factory = new FakeEventSocketFactory();
+        var notification = """{"jsonrpc":"2.0","method":"event.domain","params":{"event":"""
+            + cloudEvent
+            + "}}";
+        var socket = new FakeEventSocket(factory).AddJson(Ack).AddJson(notification);
+        factory.Add(socket);
+
+        var result = await RunAsync(factory, cts.Token, wait: (_, _) => { cts.Cancel(); return Task.CompletedTask; });
+
+        Assert.Equal(130, result.ExitCode);
+        Assert.Equal(WebSocketCloseStatus.ProtocolError, Assert.Single(socket.CloseStatuses));
+        Assert.Empty(result.Output.ToString());
+    }
+
+    [Fact]
+    public async Task Tail_PrettyPrintedFragmentedCloudEvent_EmitsOneCompactNdjsonLine()
+    {
+        using var cts = new CancellationTokenSource();
+        var factory = new FakeEventSocketFactory();
+        const string first = """
+            {
+              "jsonrpc": "2.0",
+              "method": "event.domain",
+              "params": {
+                "event": {
+                  "specversion": "1.0",
+            """;
+        const string second = """
+                  "id": "e1",
+                  "source": "test",
+                  "type": "one",
+                  "data": { "value": 1 }
+                }
+              }
+            }
+            """;
+        var socket = new FakeEventSocket(factory) { OnExhausted = cts.Cancel }
+            .AddJson(Ack)
+            .AddFragment(first, false)
+            .AddFragment(second, true);
+        factory.Add(socket);
+
+        var result = await RunAsync(factory, cts.Token);
+
+        Assert.Equal(130, result.ExitCode);
+        var lines = result.Output.ToString().Split('\n', StringSplitOptions.RemoveEmptyEntries);
+        Assert.Equal("{\"specversion\":\"1.0\",\"id\":\"e1\",\"source\":\"test\",\"type\":\"one\",\"data\":{\"value\":1}}", Assert.Single(lines).TrimEnd('\r'));
     }
 
     [Fact]

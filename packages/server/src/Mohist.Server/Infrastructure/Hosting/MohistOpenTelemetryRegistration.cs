@@ -2,6 +2,7 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
+using Mohist.Server.Events.WebSocket;
 using Mohist.Server.Infrastructure.Config;
 using Mohist.Server.Infrastructure.Events;
 using OpenTelemetry;
@@ -85,7 +86,8 @@ public static class MohistOpenTelemetryRegistration
         {
             metrics
                 .ConfigureResource(resource => resource.AddService(ServiceName))
-                .AddMeter(EventDispatcherService.MeterName);
+                .AddMeter(EventDispatcherService.MeterName)
+                .AddMeter(EventSocketMatchFailureSink.MeterName);
             if (options.ExportEnabled)
             {
                 metrics.AddOtlpExporter("metrics", configure: null);

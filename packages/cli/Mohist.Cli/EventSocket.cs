@@ -12,7 +12,7 @@ internal interface IEventSocket : IDisposable
 {
     Task ConnectAsync(Uri uri, CancellationToken cancellationToken);
     ValueTask SendAsync(ReadOnlyMemory<byte> message, CancellationToken cancellationToken);
-    ValueTask<EventSocketReceiveResult> ReceiveAsync(Memory<byte> buffer, CancellationToken cancellationToken);
+    ValueTask<EventSocketReceiveResult> ReceiveAsync(ArraySegment<byte> buffer, CancellationToken cancellationToken);
     ValueTask CloseAsync(WebSocketCloseStatus status, string description, CancellationToken cancellationToken);
     void Abort();
 }
@@ -21,7 +21,8 @@ internal readonly record struct EventSocketReceiveResult(
     int Count,
     bool EndOfMessage,
     WebSocketMessageType MessageType,
-    WebSocketCloseStatus? CloseStatus = null);
+    WebSocketCloseStatus? CloseStatus = null,
+    string? CloseStatusDescription = null);
 
 internal sealed class EventSocketUnauthorizedException : Exception;
 
@@ -57,14 +58,16 @@ internal sealed class ClientEventSocket : IEventSocket
         _socket.SendAsync(message, WebSocketMessageType.Text, WebSocketMessageFlags.EndOfMessage, cancellationToken);
 
     public async ValueTask<EventSocketReceiveResult> ReceiveAsync(
-        Memory<byte> buffer,
+        ArraySegment<byte> buffer,
         CancellationToken cancellationToken)
     {
         var result = await _socket.ReceiveAsync(buffer, cancellationToken).ConfigureAwait(false);
         return new EventSocketReceiveResult(
             result.Count,
             result.EndOfMessage,
-            result.MessageType);
+            result.MessageType,
+            result.CloseStatus,
+            result.CloseStatusDescription);
     }
 
     public async ValueTask CloseAsync(

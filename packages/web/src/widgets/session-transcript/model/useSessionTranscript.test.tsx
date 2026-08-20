@@ -3,7 +3,6 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { describe, expect, it, vi } from 'vitest'
 import { dispatchAgentEvent } from '../../../entities/agent'
 import type { SessionTurn } from '../../../entities/coder-session'
-import { LiveEventsContext, type LiveEventsApi } from '../../../shared/api/live-events'
 import { useSessionTranscript } from './useSessionTranscript'
 
 function Wrapper({ events, isRunning = true }: { events: SessionTurn[]; isRunning?: boolean }) {
@@ -160,63 +159,6 @@ function renderHistoricalSessionTranscript(events: SessionTurn[], isRunning = tr
 }
 
 describe('useSessionTranscript', () => {
-  it('explicitly replaces a running live tail with the authoritative reconciliation result before resolving', async () => {
-    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
-    const transcriptQueryKey = ['unified-session', 'project-1', 'session-84', 'transcript'] as const
-    let reconcile: (() => Promise<unknown>) | undefined
-    const api: LiveEventsApi = {
-      registerTaskLogScope: () => ({ admitted: false }),
-      registerTranscriptReconciliation: (_sessionId, _runtimeSessionId, callback) => {
-        reconcile = callback
-        return { dispose: () => {} }
-      },
-    }
-    function ReconciliationHarness({ events }: { events: SessionTurn[] }) {
-      const result = useSessionTranscript({
-        issueNumber: 84,
-        projectId: 'project-1',
-        sessionId: 'session-84',
-        runtimeSessionId: 'runtime-84',
-        runtime: 'opencode',
-        initialTurns: events,
-        sessionQueryKeys: [transcriptQueryKey],
-        isRunning: true,
-      })
-      return (
-        <div data-testid="reconciled-transcript">
-          {result.turns
-            .flatMap((turn) => turn.assistant)
-            .map((part) => ('text' in part ? part.text : ''))
-            .join('')}
-        </div>
-      )
-    }
-    render(
-      <QueryClientProvider client={queryClient}>
-        <LiveEventsContext.Provider value={api}>
-          <ReconciliationHarness events={[persistedEvent('persisted')]} />
-        </LiveEventsContext.Provider>
-      </QueryClientProvider>,
-    )
-    act(() => {
-      dispatchAgentEvent('message.delta', {
-        sessionId: 'session-84',
-        runtimeSessionId: 'runtime-84',
-        runtime: 'opencode',
-        text: ' live',
-      })
-    })
-    expect(screen.getByTestId('reconciled-transcript')).toHaveTextContent('persisted live')
-    queryClient.setQueryData(transcriptQueryKey, { turns: [persistedEvent('authoritative')] })
-
-    await act(async () => {
-      await reconcile?.()
-    })
-
-    expect(screen.getByTestId('reconciled-transcript')).toHaveTextContent('authoritative')
-    expect(screen.getByTestId('reconciled-transcript')).not.toHaveTextContent('live')
-  })
-
   it('does not let running persisted refetch overwrite live transcript tail', () => {
     const initial = [persistedEvent('persisted')]
     const { rerenderWith } = renderSessionTranscript(initial)

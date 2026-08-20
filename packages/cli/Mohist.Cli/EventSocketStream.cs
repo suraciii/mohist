@@ -164,7 +164,13 @@ internal sealed class EventSocketStream
 
         var acknowledged = await AwaitSubscriptionAsync(socket, cancellationToken).ConfigureAwait(false);
         if (acknowledged == SubscriptionOutcome.Rejected)
+        {
+            await CloseAndFenceAsync(
+                socket,
+                WebSocketCloseStatus.NormalClosure,
+                "Subscription rejected.").ConfigureAwait(false);
             return ConnectionOutcome.Fatal;
+        }
         if (acknowledged == SubscriptionOutcome.Disconnected)
             return ConnectionOutcome.Disconnected;
 
@@ -188,7 +194,7 @@ internal sealed class EventSocketStream
                 return SubscriptionOutcome.Disconnected;
             using var document = ParseProtocolMessage(message);
             var root = document.RootElement;
-            RequireJsonRpcObject(root);
+            RequireSubscriptionResponse(root);
             if (!root.TryGetProperty("id", out var id)
                 || id.ValueKind != JsonValueKind.String
                 || id.GetString() != "req_1")
@@ -204,13 +210,9 @@ internal sealed class EventSocketStream
                     throw ProtocolError("Subscription result must be an object.");
                 return SubscriptionOutcome.Accepted;
             }
-            if (error.ValueKind != JsonValueKind.Object)
-                throw ProtocolError("Subscription error must be an object.");
+            RequireSubscriptionError(error);
 
-            var text = error.TryGetProperty("message", out var messageElement)
-                && messageElement.ValueKind == JsonValueKind.String
-                ? messageElement.GetString() ?? "Subscription rejected."
-                : "Subscription rejected.";
+            var text = error.GetProperty("message").GetString()!;
             if (error.TryGetProperty("data", out var data)
                 && data.ValueKind == JsonValueKind.Object
                 && data.TryGetProperty("line", out var line)
@@ -230,18 +232,18 @@ internal sealed class EventSocketStream
     {
         using var document = ParseProtocolMessage(message);
         var root = document.RootElement;
-        RequireJsonRpcObject(root);
-        if (!root.TryGetProperty("method", out var method) || method.ValueKind != JsonValueKind.String)
-            throw ProtocolError("Notification method must be a string.");
+        RequireNotification(root);
+        var method = root.GetProperty("method");
         if (method.GetString() != "event.domain")
             return;
-        if (!root.TryGetProperty("params", out var parameters)
-            || parameters.ValueKind != JsonValueKind.Object
-            || !parameters.TryGetProperty("event", out var eventElement)
-            || eventElement.ValueKind != JsonValueKind.Object)
+        var parameters = root.GetProperty("params");
+        RequireExactProperties(parameters, "event.domain params", ["event"]);
+        var eventElement = parameters.GetProperty("event");
+        if (eventElement.ValueKind != JsonValueKind.Object)
             throw ProtocolError("event.domain params.event must be an object.");
+        RequireCloudEvent(eventElement);
 
-        var line = eventElement.GetRawText();
+        var line = JsonSerializer.Serialize(eventElement, MohistCliApi.JsonCompactOutputOptions);
         if (selection is { Kind: JsonSelectionKind.Selected })
         {
             var projected = selection.Project(JsonNode.Parse(line), ResourceCardinality.Stream);
@@ -251,22 +253,28 @@ internal sealed class EventSocketStream
         await _output.FlushAsync(cancellationToken).ConfigureAwait(false);
     }
 
-    private static async Task<byte[]?> ReceiveMessageAsync(
+    private async Task<byte[]?> ReceiveMessageAsync(
         IEventSocket socket,
         CancellationToken cancellationToken)
     {
         var writer = new ArrayBufferWriter<byte>();
+        var buffer = new byte[16 * 1024];
         while (true)
         {
-            var memory = writer.GetMemory(16 * 1024);
-            var result = await socket.ReceiveAsync(memory, cancellationToken).ConfigureAwait(false);
+            var result = await socket.ReceiveAsync(buffer, cancellationToken).ConfigureAwait(false);
             if (result.MessageType == WebSocketMessageType.Close)
+            {
+                await CloseAndFenceAsync(
+                    socket,
+                    result.CloseStatus ?? WebSocketCloseStatus.NormalClosure,
+                    result.CloseStatusDescription ?? string.Empty).ConfigureAwait(false);
                 return null;
+            }
             if (result.MessageType != WebSocketMessageType.Text)
                 throw new EventSocketProtocolException(
                     WebSocketCloseStatus.InvalidMessageType,
                     "Binary WebSocket messages are not supported.");
-            writer.Advance(result.Count);
+            writer.Write(buffer.AsSpan(0, result.Count));
             if (writer.WrittenCount > MaximumMessageBytes)
                 throw new EventSocketProtocolException(
                     WebSocketCloseStatus.MessageTooBig,
@@ -322,13 +330,94 @@ internal sealed class EventSocketStream
         }
     }
 
-    private static void RequireJsonRpcObject(JsonElement root)
+    private static void RequireSubscriptionResponse(JsonElement root)
     {
-        if (root.ValueKind != JsonValueKind.Object
-            || !root.TryGetProperty("jsonrpc", out var jsonRpc)
-            || jsonRpc.ValueKind != JsonValueKind.String
-            || jsonRpc.GetString() != "2.0")
-            throw ProtocolError("WebSocket message must be a JSON-RPC 2.0 object.");
+        if (root.ValueKind != JsonValueKind.Object)
+            throw ProtocolError("Subscription response must be an object.");
+
+        var names = root.EnumerateObject().Select(property => property.Name).ToArray();
+        var hasResult = names.Contains("result", StringComparer.Ordinal);
+        var hasError = names.Contains("error", StringComparer.Ordinal);
+        if (hasResult == hasError)
+            throw ProtocolError("Subscription response must contain exactly one of result or error.");
+
+        RequireExactProperties(
+            root,
+            "Subscription response",
+            hasResult ? ["jsonrpc", "id", "result"] : ["jsonrpc", "id", "error"]);
+        RequireJsonRpcVersion(root);
+    }
+
+    private static void RequireSubscriptionError(JsonElement error)
+    {
+        if (error.ValueKind != JsonValueKind.Object)
+            throw ProtocolError("Subscription error must be an object.");
+
+        var properties = error.EnumerateObject().ToArray();
+        var expectedCount = properties.Any(property => property.NameEquals("data")) ? 3 : 2;
+        RequireExactProperties(
+            error,
+            "Subscription error",
+            expectedCount == 3 ? ["code", "message", "data"] : ["code", "message"]);
+        if (!error.GetProperty("code").TryGetInt64(out _))
+            throw ProtocolError("Subscription error code must be an integer.");
+        if (error.GetProperty("message").ValueKind != JsonValueKind.String)
+            throw ProtocolError("Subscription error message must be a string.");
+    }
+
+    private static void RequireNotification(JsonElement root)
+    {
+        if (root.ValueKind != JsonValueKind.Object)
+            throw ProtocolError("Notification must be an object.");
+        RequireExactProperties(root, "Notification", ["jsonrpc", "method", "params"]);
+        RequireJsonRpcVersion(root);
+        if (root.GetProperty("method").ValueKind != JsonValueKind.String)
+            throw ProtocolError("Notification method must be a string.");
+        if (root.GetProperty("params").ValueKind != JsonValueKind.Object)
+            throw ProtocolError("Notification params must be an object.");
+    }
+
+    private static void RequireCloudEvent(JsonElement cloudEvent)
+    {
+        RequireNonEmptyString(cloudEvent, "specversion");
+        if (cloudEvent.GetProperty("specversion").GetString() != "1.0")
+            throw ProtocolError("CloudEvent specversion must be \"1.0\".");
+        RequireNonEmptyString(cloudEvent, "id");
+        RequireNonEmptyString(cloudEvent, "source");
+        RequireNonEmptyString(cloudEvent, "type");
+    }
+
+    private static void RequireNonEmptyString(JsonElement value, string propertyName)
+    {
+        var matching = value.EnumerateObject()
+            .Where(property => property.NameEquals(propertyName))
+            .ToArray();
+        if (matching.Length != 1
+            || matching[0].Value.ValueKind != JsonValueKind.String
+            || string.IsNullOrWhiteSpace(matching[0].Value.GetString()))
+            throw ProtocolError($"CloudEvent {propertyName} must be a non-empty string.");
+    }
+
+    private static void RequireJsonRpcVersion(JsonElement root)
+    {
+        if (root.GetProperty("jsonrpc").ValueKind != JsonValueKind.String
+            || root.GetProperty("jsonrpc").GetString() != "2.0")
+            throw ProtocolError("WebSocket message must use JSON-RPC 2.0.");
+    }
+
+    private static void RequireExactProperties(
+        JsonElement value,
+        string subject,
+        string[] expectedProperties)
+    {
+        if (value.ValueKind != JsonValueKind.Object)
+            throw ProtocolError($"{subject} must be an object.");
+
+        var actualProperties = value.EnumerateObject().Select(property => property.Name).ToArray();
+        if (actualProperties.Length != expectedProperties.Length
+            || expectedProperties.Any(expected => actualProperties.Count(actual => actual == expected) != 1)
+            || actualProperties.Any(actual => !expectedProperties.Contains(actual, StringComparer.Ordinal)))
+            throw ProtocolError($"{subject} has invalid members.");
     }
 
     private static EventSocketProtocolException ProtocolError(string message, Exception? inner = null) =>

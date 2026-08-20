@@ -423,6 +423,18 @@ Protocol limits are constants, not deployment configuration:
   subscription limit is Invalid Params and leaves the old subscription active.
 - Each connection has one 256-message bounded outgoing queue shared by responses
   and notifications. Socket writes and close output are serialized.
+- During authoritative HTTP reconciliation, Web buffers at most 256 transcript
+  notifications per session identity and 256 task-log deltas per task scope.
+  Overflow clears those transient buffers and closes the socket with private
+  code `4000`; the normal reconnect and reconciliation path restores an
+  authoritative base instead of allowing unbounded browser memory growth.
+  A failed authoritative reconciliation likewise clears its buffers and closes
+  with private code `4001`, so delivery cannot remain attached to an unknown
+  base or a permanently buffering generation. Any Project invalidation,
+  transcript read, or task-log read failure fences delivery for that socket
+  generation immediately, aborts every in-progress stream reconciliation, and
+  includes the interval before its close callback. Consumers bind the abort
+  signal to authoritative query cancellation and check it before local commits.
 - Publication never waits for a client. If a response or notification cannot be
   enqueued immediately, Server fences that connection and closes it with `1013`
   instead of silently retaining a connected client with an unknown gap.
@@ -471,6 +483,11 @@ merge or deduplicate raw and persisted shapes by `id` or `sequence`. Task-log
 entries reconcile by `seq`. Reconciliation runs even if no later notification
 arrives. A `1013` close is treated exactly like any other gap and follows the
 same reconnect-and-reconcile path.
+
+Each reconciliation pass uses fixed transcript and task-log registration
+snapshots captured before buffering begins. A replacement registration created
+while that pass is in progress is not refetched by the old pass, so its direct
+notifications cannot be overwritten by stale HTTP completion.
 
 ### Lifecycle and Ownership
 
@@ -606,6 +623,10 @@ system handler can receive an event that no user expression can subscribe to.
   validated.
   The third-error tests assert an owed response is enqueued before close `1008`,
   while a failed enqueue closes `1013` without promising that response.
+  Shutdown tests synchronize admission with `StopAsync` and prove both existing
+  and late sockets are fenced; send-failure tests prove expected transport
+  exceptions do not escape the upgraded request. Runtime match-failure tests
+  assert both structured logging and the telemetry counter.
   Publisher tests prove transcript notifications carry explicit
   Project scope, are emitted before persistence, and expose only transient raw
   `id` and `sequence`. Client tests cover the single Web owner, its fixed
@@ -617,9 +638,16 @@ system handler can receive an event that no user expression can subscribe to.
   unconditional post-ack reconciliation. Transcript tests hold the authoritative
   HTTP read open, receive current-generation raw notifications, replace the
   persisted base, and assert that buffered notifications are reapplied afterward
-  without cross-shape sequence deduplication. CLI tests cover flag mapping, the
-  standard event object, credential resolution and one-refresh `401` recovery,
-  bounded output fencing, and removal of both legacy live endpoints after cutover.
+  without cross-shape sequence deduplication. They also replace a runtime
+  identity during reconciliation, isolate a throwing task-log consumer, and
+  prove transcript and task-log buffer overflow remains bounded and reconnects.
+  A rejected authoritative read must clear buffering, close `4001`, and deliver
+  normally again only after the replacement connection reconciles.
+  CLI tests cover flag mapping, strict response and notification shapes, the
+  standard event object, compact one-object-per-line NDJSON rendering, bounded
+  peer-close acknowledgement, credential resolution and one-refresh `401`
+  recovery, bounded output fencing, and removal of both legacy live endpoints
+  after cutover.
 
 ## Status
 

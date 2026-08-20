@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
+import type { HubConnection } from '@microsoft/signalr'
 import { DiamondIcon } from 'lucide-react'
 import { useProject } from '../../../entities/project'
 import {
@@ -10,7 +11,12 @@ import {
 } from '../../../entities/issue'
 import { useWorkflowRunSessions } from '../../../entities/coder-session'
 import type { WorkflowRunSession } from '../../../entities/coder-session'
-import { useLiveEvents, type TaskLogDeltaEnvelopeWire } from '../../../shared/api/live-events'
+import {
+  useEventsConnection,
+  subscribeTaskLog,
+  unsubscribeTaskLog,
+  type TaskLogDeltaEnvelopeWire,
+} from '../../../shared/api/events-hub'
 import type { StageTaskStatus } from '../../../entities/issue'
 import {
   deriveMilestones,
@@ -56,6 +62,7 @@ export interface TaskLogPanelProps {
 }
 
 const TASK_LOG_RETAINED_LIMIT = 5000
+const TASK_LOG_QUERY_KEY_NAMESPACE = 'workflow-task-log'
 
 const TERMINAL_TASK_STATUSES: ReadonlySet<StageTaskStatus> = new Set<StageTaskStatus>([
   'completed',
@@ -137,7 +144,6 @@ export function TaskLogPanel({
 }: TaskLogPanelProps) {
   const { projectId } = useProject()
   const queryClient = useQueryClient()
-  const liveEvents = useLiveEvents()
   const { data, isLoading, isError } = taskLogHook({
     issueNumber,
     taskId,
@@ -145,13 +151,16 @@ export function TaskLogPanel({
     workflowRunId: workflowRunId ?? null,
   })
   const scrollRef = useRef<HTMLDivElement | null>(null)
+  const subscribedRef = useRef(false)
+  const subscribedConnectionRef = useRef<HubConnection | null>(null)
+  const subscribedReconnectVersionRef = useRef<number | null>(null)
   const terminalNow = isTerminalStatus(taskStatus)
 
   const [searchQuery, setSearchQuery] = useState('')
   const [disabledSources, setDisabledSources] = useState<Set<string>>(new Set())
   const [userPausedAutoFollow, setUserPausedAutoFollow] = useState(false)
 
-  const onTaskLogDelta = (envelope: TaskLogDeltaEnvelopeWire) => {
+  const onTaskLogDelta = (envelope: unknown) => {
     if (!isTaskLogEnvelope(envelope)) return
     const taskScope = envelope.taskId
     if (taskScope == null) return
@@ -159,7 +168,6 @@ export function TaskLogPanel({
     if (envelope.ownerKind !== 'workflow') return
     if (envelope.ownerId !== workflowRunId) return
     if (!projectId) return
-    if (envelope.projectId !== projectId) return
     const queryKey = issueWorkflowTaskLogQueryOptions(
       projectId,
       issueNumber,
@@ -170,6 +178,10 @@ export function TaskLogPanel({
     ).queryKey
     queryClient.setQueryData<TaskLogPage | undefined>(queryKey, (current) => mergeTaskLogDelta(current, envelope))
   }
+
+  const { connection, reconnectVersion } = useEventsConnection(projectId, () => {}, undefined, onTaskLogDelta, {
+    applyDefaultSubscriptions: false,
+  })
 
   const lines = data?.lines ?? []
   const truncated = data?.truncated ?? false
@@ -281,37 +293,69 @@ export function TaskLogPanel({
     if (!projectId || !workflowRunId) return
 
     if (terminalNow) {
-      const queryKey = issueWorkflowTaskLogQueryOptions(
-        projectId,
-        issueNumber,
-        taskId,
-        { limit: TASK_LOG_RETAINED_LIMIT },
-        true,
-        workflowRunId,
-      ).queryKey
+      if (subscribedRef.current) {
+        subscribedRef.current = false
+        const conn = subscribedConnectionRef.current
+        subscribedConnectionRef.current = null
+        subscribedReconnectVersionRef.current = null
+        if (conn) {
+          void unsubscribeTaskLog(conn, { workflowRunId, taskId })
+        }
+      }
       queryClient.invalidateQueries({
-        queryKey,
-        exact: true,
+        queryKey: [issueNumber, taskId, projectId, workflowRunId, TASK_LOG_QUERY_KEY_NAMESPACE],
       })
       return
     }
 
-    if (!taskStatus || !LIVE_LOG_TASK_STATUSES.has(taskStatus)) return
-    const queryKey = issueWorkflowTaskLogQueryOptions(
-      projectId,
-      issueNumber,
-      taskId,
-      { limit: TASK_LOG_RETAINED_LIMIT },
-      true,
-      workflowRunId,
-    ).queryKey
-    const refetch = () => queryClient.refetchQueries({ queryKey, exact: true })
-    const registration = liveEvents.registerTaskLogScope({ workflowRunId, taskId }, onTaskLogDelta, refetch)
-    if (registration.admitted) return registration.dispose
+    if (!taskStatus || !LIVE_LOG_TASK_STATUSES.has(taskStatus)) {
+      if (subscribedRef.current) {
+        subscribedRef.current = false
+        const conn = subscribedConnectionRef.current
+        subscribedConnectionRef.current = null
+        subscribedReconnectVersionRef.current = null
+        if (conn) {
+          void unsubscribeTaskLog(conn, { workflowRunId, taskId })
+        }
+      }
+      return
+    }
 
-    const interval = setInterval(() => void refetch(), 2000)
-    return () => clearInterval(interval)
-  }, [liveEvents, terminalNow, taskStatus, projectId, workflowRunId, issueNumber, taskId, queryClient])
+    if (!connection) return
+    if (
+      subscribedRef.current &&
+      subscribedConnectionRef.current === connection &&
+      subscribedReconnectVersionRef.current === reconnectVersion
+    )
+      return
+    subscribedRef.current = true
+    subscribedConnectionRef.current = connection
+    subscribedReconnectVersionRef.current = reconnectVersion
+    void subscribeTaskLog(connection, { workflowRunId, taskId })
+  }, [
+    connection,
+    reconnectVersion,
+    terminalNow,
+    taskStatus,
+    projectId,
+    workflowRunId,
+    issueNumber,
+    taskId,
+    queryClient,
+  ])
+
+  useEffect(() => {
+    return () => {
+      const wasSubscribed = subscribedRef.current
+      const conn = subscribedConnectionRef.current
+      subscribedRef.current = false
+      subscribedConnectionRef.current = null
+      subscribedReconnectVersionRef.current = null
+      if (wasSubscribed && conn && workflowRunId) {
+        void unsubscribeTaskLog(conn, { workflowRunId, taskId })
+      }
+    }
+  }, [workflowRunId, taskId])
 
   const renderScrollBody = () => {
     if (isLoading || (isSessionSummaryLoading && lines.length === 0 && milestones.length === 0)) {

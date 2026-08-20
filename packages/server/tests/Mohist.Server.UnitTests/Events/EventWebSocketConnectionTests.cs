@@ -368,6 +368,27 @@ public sealed class EventWebSocketConnectionTests
     }
 
     [Fact]
+    public async Task SendFailureCompletesRunAndRemovesRegistryConnection()
+    {
+        var registry = new EventWebSocketRegistry(
+            new WebhookPayloadRenderer(),
+            new FakeTimeProvider(),
+            NullLoggerFactory.Instance,
+            NullEventMatchFailureSink.Instance);
+        using var socket = new FakeWebSocket();
+        socket.FailNextSend(new IOException("connection reset"));
+
+        var run = registry.RunAsync("project-a", socket, TestContext.Current.CancellationToken);
+        socket.ReceiveText(SubscriptionJson("set"));
+
+        await run;
+        Assert.Equal(WebSocketCloseStatus.NormalClosure,
+            (await socket.Closed.WaitAsync(TestContext.Current.CancellationToken)).Status);
+        await registry.PublishTranscriptAsync("project-a", Transcript("message.delta"));
+        Assert.Equal(0, socket.SentCount);
+    }
+
+    [Fact]
     public async Task OversizedNotificationClosesWith1009()
     {
         await using var fixture = new ConnectionFixture();
@@ -500,6 +521,61 @@ public sealed class EventWebSocketConnectionTests
         await registry.PublishTranscriptAsync("project-a", Transcript("message.delta"));
         Assert.Equal(1, socket.SentCount);
         await run;
+    }
+
+    [Fact]
+    public async Task AdmissionConcurrentWithStopIsRejectedOutsideRegistry()
+    {
+        var registry = new EventWebSocketRegistry(
+            new WebhookPayloadRenderer(),
+            new FakeTimeProvider(),
+            NullLoggerFactory.Instance,
+            NullEventMatchFailureSink.Instance);
+        using var active = new FakeWebSocket();
+        var activeRun = registry.RunAsync("project-a", active, TestContext.Current.CancellationToken);
+        active.ReceiveText(SubscriptionJson("active"));
+        await active.NextSentAsync(TestContext.Current.CancellationToken);
+        active.PauseCloses();
+
+        var stop = registry.StopAsync(TestContext.Current.CancellationToken);
+        await active.CloseStarted.WaitAsync(TestContext.Current.CancellationToken);
+
+        using var concurrent = new FakeWebSocket();
+        var concurrentRun = registry.RunAsync("project-a", concurrent, TestContext.Current.CancellationToken);
+        Assert.Equal(WebSocketCloseStatus.EndpointUnavailable,
+            (await concurrent.Closed.WaitAsync(TestContext.Current.CancellationToken)).Status);
+        await concurrentRun;
+        Assert.False(stop.IsCompleted);
+
+        concurrent.ReceiveText(SubscriptionJson("concurrent"));
+        await registry.PublishTranscriptAsync("project-a", Transcript("message.delta"));
+        Assert.Equal(0, concurrent.SentCount);
+
+        active.ReleaseCloses();
+        await stop;
+        await activeRun;
+    }
+
+    [Fact]
+    public async Task AdmissionAfterStopUsesBoundedCloseThenAborts()
+    {
+        var time = new FakeTimeProvider();
+        var registry = new EventWebSocketRegistry(
+            new WebhookPayloadRenderer(),
+            time,
+            NullLoggerFactory.Instance,
+            NullEventMatchFailureSink.Instance);
+        await registry.StopAsync(TestContext.Current.CancellationToken);
+        using var socket = new FakeWebSocket();
+        socket.PauseCloses();
+
+        var run = registry.RunAsync("project-a", socket, TestContext.Current.CancellationToken);
+        await socket.CloseStarted.WaitAsync(TestContext.Current.CancellationToken);
+        time.Advance(TimeSpan.FromSeconds(5));
+
+        await run;
+        Assert.Equal(WebSocketState.Aborted, socket.State);
+        Assert.Equal(0, socket.SentCount);
     }
 
     [Theory]
@@ -656,14 +732,19 @@ public sealed class EventWebSocketConnectionTests
         private readonly TaskCompletionSource<CloseFrame> _closed = new(TaskCreationOptions.RunContinuationsAsynchronously);
         private TaskCompletionSource _sendStarted = new(TaskCreationOptions.RunContinuationsAsynchronously);
         private TaskCompletionSource _sendRelease = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        private TaskCompletionSource _closeStarted = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        private TaskCompletionSource _closeRelease = new(TaskCreationOptions.RunContinuationsAsynchronously);
         private WebSocketState _state = WebSocketState.Open;
         private WebSocketCloseStatus? _closeStatus;
         private string? _closeStatusDescription;
         private int _sentCount;
         private int _blockSends;
+        private int _blockCloses;
+        private Exception? _sendFailure;
 
         public Task<CloseFrame> Closed => _closed.Task;
         public Task SendStarted => _sendStarted.Task;
+        public Task CloseStarted => _closeStarted.Task;
         public int SentCount => Volatile.Read(ref _sentCount);
         public override WebSocketCloseStatus? CloseStatus => _closeStatus;
         public override string? CloseStatusDescription => _closeStatusDescription;
@@ -691,17 +772,33 @@ public sealed class EventWebSocketConnectionTests
             Volatile.Write(ref _blockSends, 0);
             _sendRelease.TrySetResult();
         }
+        public void PauseCloses()
+        {
+            _closeStarted = new(TaskCreationOptions.RunContinuationsAsynchronously);
+            _closeRelease = new(TaskCreationOptions.RunContinuationsAsynchronously);
+            Volatile.Write(ref _blockCloses, 1);
+        }
+        public void ReleaseCloses()
+        {
+            Volatile.Write(ref _blockCloses, 0);
+            _closeRelease.TrySetResult();
+        }
+        public void FailNextSend(Exception exception) => Interlocked.Exchange(ref _sendFailure, exception);
 
         public override void Abort() => _state = WebSocketState.Aborted;
         public override Task CloseAsync(WebSocketCloseStatus closeStatus, string? statusDescription, CancellationToken cancellationToken) =>
             CloseOutputAsync(closeStatus, statusDescription, cancellationToken);
-        public override Task CloseOutputAsync(WebSocketCloseStatus closeStatus, string? statusDescription, CancellationToken cancellationToken)
+        public override async Task CloseOutputAsync(WebSocketCloseStatus closeStatus, string? statusDescription, CancellationToken cancellationToken)
         {
+            if (Volatile.Read(ref _blockCloses) != 0)
+            {
+                _closeStarted.TrySetResult();
+                await _closeRelease.Task.WaitAsync(cancellationToken);
+            }
             _closeStatus = closeStatus;
             _closeStatusDescription = statusDescription;
             _state = WebSocketState.Closed;
             _closed.TrySetResult(new(closeStatus, statusDescription));
-            return Task.CompletedTask;
         }
 
         public override async Task<WebSocketReceiveResult> ReceiveAsync(ArraySegment<byte> buffer, CancellationToken cancellationToken)
@@ -724,6 +821,8 @@ public sealed class EventWebSocketConnectionTests
                 _sendStarted.TrySetResult();
                 await _sendRelease.Task.WaitAsync(cancellationToken);
             }
+            var failure = Interlocked.Exchange(ref _sendFailure, null);
+            if (failure is not null) throw failure;
             Interlocked.Increment(ref _sentCount);
             _sent.Writer.TryWrite(buffer.ToArray());
         }

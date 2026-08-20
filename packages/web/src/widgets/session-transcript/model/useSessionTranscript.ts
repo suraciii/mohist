@@ -1,11 +1,9 @@
 import { useEffect, useMemo, useRef, useState, useCallback } from 'react'
-import { flushSync } from 'react-dom'
 import { useQueryClient } from '@tanstack/react-query'
 import { onAgentEvent } from '../../../entities/agent'
 import type { AgentDetailEventMap, AgentTranscriptDetail } from '../../../entities/agent'
 import type { SessionTurn } from '../../../entities/coder-session'
 import { issueWorkflowKeys } from '../../../entities/issue'
-import { useLiveEvents } from '../../../shared/api/live-events'
 import {
   appendInputTurn,
   appendReasoningToTurn,
@@ -99,7 +97,6 @@ export function useSessionTranscript({
   terminalInvalidationKey,
 }: UseSessionTranscriptOptions): UseSessionTranscriptResult {
   const queryClient = useQueryClient()
-  const liveEvents = useLiveEvents()
   const initialState = useMemo<SessionTurn[]>(() => {
     return initialTurns ?? []
   }, [])
@@ -196,49 +193,6 @@ export function useSessionTranscript({
     setIsFinalizing(true)
     invalidateSessionQueries()
   }, [invalidateSessionQueries])
-
-  useEffect(() => {
-    if (!sessionId || !runtimeSessionId) return
-    let cancelled = false
-    const queryKeys = sessionQueryKeys ?? []
-    const transcriptQueryKey = queryKeys.find((queryKey) => queryKey.includes('transcript'))
-    const registration = liveEvents.registerTranscriptReconciliation(sessionId, runtimeSessionId, async () => {
-      for (const queryKey of queryKeys) {
-        if (cancelled) return
-        await queryClient.refetchQueries({ queryKey, exact: true })
-      }
-      if (cancelled) return
-      const response = transcriptQueryKey
-        ? queryClient.getQueryData<{ turns?: SessionTurn[] }>(transcriptQueryKey)
-        : undefined
-      const authoritativeTurns = response?.turns ?? []
-      flushSync(() => {
-        hasLiveTailRef.current = false
-        liveToolCallMapRef.current.clear()
-        pendingCorrelationRef.current.clear()
-        liveDetailOrdinalRef.current = 0
-        liveSourceIdsRef.current.clear()
-        setLiveDetails([])
-        setTurns(authoritativeTurns)
-        setIsFinalizing(false)
-        setIsThinking(false)
-        clearStreaming()
-        setTranscriptVersion((version) => version + 1)
-      })
-    })
-    return () => {
-      cancelled = true
-      registration.dispose()
-    }
-  }, [
-    liveEvents,
-    runtimeSessionId,
-    sessionId,
-    queryClient,
-    sessionQueryKeys?.[0],
-    sessionQueryKeys?.[1],
-    clearStreaming,
-  ])
 
   useEffect(() => {
     if (hasLiveTailRef.current && isRunning) {

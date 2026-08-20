@@ -265,8 +265,8 @@ public sealed class CliResourceOutputSpecs
         var sockets = new FakeEventSocketFactory();
         sockets.Add(new FakeEventSocket(sockets) { OnExhausted = cts.Cancel }
             .AddJson("""{"jsonrpc":"2.0","id":"req_1","result":{}}""")
-            .AddJson("""{"jsonrpc":"2.0","method":"event.domain","params":{"event":{"type":"one","id":"e1","source":"test"}}}""")
-            .AddJson("""{"jsonrpc":"2.0","method":"event.domain","params":{"event":{"type":"two","id":"e2","source":"test"}}}"""));
+            .AddJson("""{"jsonrpc":"2.0","method":"event.domain","params":{"event":{"specversion":"1.0","type":"one","id":"e1","source":"test"}}}""")
+            .AddJson("""{"jsonrpc":"2.0","method":"event.domain","params":{"event":{"specversion":"1.0","type":"two","id":"e2","source":"test"}}}"""));
 
         var exit = await MohistCliCommands.RunAsync(
             http,
