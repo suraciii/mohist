@@ -191,7 +191,8 @@ serially.
   Web.
 - HTTP uses `WebApplicationFactory` with `TestServer`, stubbed `fetch`, MSW, or a
   recording handler according to package.
-- SignalR uses recording Server contexts or the configured Web and Runner fake.
+- Web SignalR uses recording Server hub contexts or the configured Web fake.
+- Runner control WebSocket uses fake sockets or the typed recording transport.
 - Processes use fake Runtime or command executors.
 - Server data uses in-memory SQLite and migrated templates.
 - Files and static data use in-memory providers or package test-data catalogs.
