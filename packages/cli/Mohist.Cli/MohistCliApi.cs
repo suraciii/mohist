@@ -285,10 +285,10 @@ internal sealed partial class MohistCliApi
         return response is null ? 1 : await PrintResponseAsync(response);
     }
 
-    public async Task<PostResult> PostAndReadAsync(string path, object body)
+    public async Task<PostResult> PostAndReadAsync(string path, object body, bool printOutput = true)
     {
         using var response = await SendAsync(HttpMethod.Post, path, body, printServerUnavailable: false);
-        return await ReadPostResultAsync(response!);
+        return await ReadPostResultAsync(response!, printOutput);
     }
 
     public async Task<int> PrintPutAsync(string path, object body)
@@ -1518,7 +1518,7 @@ internal sealed partial class MohistCliApi
 
     public sealed record PostResult(int ExitCode, JsonNode? Data, string? Error, string? Code);
 
-    private async Task<PostResult> ReadPostResultAsync(HttpResponseMessage response)
+    private async Task<PostResult> ReadPostResultAsync(HttpResponseMessage response, bool printOutput)
     {
         await using var stream = await response.Content.ReadAsStreamAsync();
         JsonNode? node = stream.Length == 0 ? null : await JsonNode.ParseAsync(stream);
@@ -1526,7 +1526,8 @@ internal sealed partial class MohistCliApi
         if (node is null)
         {
             var statusOk = response.IsSuccessStatusCode;
-            _out.WriteLine(response.StatusCode.ToString());
+            if (printOutput)
+                _out.WriteLine(response.StatusCode.ToString());
             return new PostResult(statusOk ? 0 : 1, null, statusOk ? null : response.ReasonPhrase, null);
         }
 
@@ -1538,7 +1539,8 @@ internal sealed partial class MohistCliApi
         }
 
         var data = envelope.Data;
-        _out.WriteLine(data is null ? "OK" : data.ToJsonString(JsonOptions));
+        if (printOutput)
+            _out.WriteLine(data is null ? "OK" : data.ToJsonString(JsonOptions));
         return new PostResult(0, data, null, null);
     }
 

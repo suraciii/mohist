@@ -1,4 +1,5 @@
 using System.Net.Http.Headers;
+using Mohist.Workflow.Definition;
 
 namespace Mohist.Cli;
 
@@ -21,13 +22,16 @@ internal sealed class CliCredentialHandler : HttpMessageHandler
 {
     private readonly CliCredentialSession _credentials;
     private readonly HttpClient _transport;
+    private readonly bool _managerMode;
 
     public CliCredentialHandler(
         CliCredentialSession credentials,
-        HttpClient transport)
+        HttpClient transport,
+        bool managerMode = false)
     {
         _credentials = credentials;
         _transport = transport;
+        _managerMode = managerMode;
     }
 
     protected override async Task<HttpResponseMessage> SendAsync(
@@ -38,6 +42,8 @@ internal sealed class CliCredentialHandler : HttpMessageHandler
         // receives a clone; the credential is attached to it when
         // resolvable and allowed for the destination.
         var forwarded = await CloneAsync(request, cancellationToken).ConfigureAwait(false);
+        if (_managerMode)
+            forwarded.Headers.TryAddWithoutValidation(ManagerCapabilityCatalog.ManagerModeHeader, "1");
         var credential = await _credentials.TryResolveAllowedAsync(forwarded.RequestUri).ConfigureAwait(false);
         if (credential is not null
             && request.Headers.Authorization is null)

@@ -144,6 +144,7 @@ public sealed class MohistHostFactory : IMohistHostFactory
         app.UseOtelSuppression();
         app.UseRuntimeRequestMetrics();
         app.UseMohistAuth();
+        app.UseManagerCapabilityAdmission();
         app.UseExternalAgentApi();
         app.MapMohistApi();
         app.MapMohistWeb();
