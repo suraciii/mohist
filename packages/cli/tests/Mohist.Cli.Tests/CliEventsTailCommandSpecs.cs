@@ -459,31 +459,32 @@ public sealed class CliEventTailCommandSpecs : IDisposable
         Assert.Equal(1, socket.AbortCount);
     }
 
-    public static TheoryData<string> MalformedSubscriptionResponses => new()
+    public static TheoryData<string, string> MalformedSubscriptionResponses => new()
     {
-        "not-json",
-        "[]",
-        "{}",
-        "{\"jsonrpc\":\"1.0\",\"id\":\"req_1\",\"result\":{}}",
-        "{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{}}",
-        "{\"jsonrpc\":\"2.0\",\"id\":\"other\",\"result\":{}}",
-        "{\"jsonrpc\":\"2.0\",\"id\":\"req_1\"}",
-        "{\"jsonrpc\":\"2.0\",\"id\":\"req_1\",\"result\":{},\"error\":{}}",
-        "{\"jsonrpc\":\"2.0\",\"id\":\"req_1\",\"result\":[]}",
-        "{\"jsonrpc\":\"2.0\",\"id\":\"req_1\",\"result\":{},\"method\":\"event.domain\"}",
-        "{\"jsonrpc\":\"2.0\",\"id\":\"req_1\",\"result\":{},\"params\":{}}",
-        "{\"jsonrpc\":\"2.0\",\"id\":\"req_1\",\"result\":{},\"extra\":true}",
-        "{\"jsonrpc\":\"2.0\",\"jsonrpc\":\"2.0\",\"id\":\"req_1\",\"result\":{}}",
-        "{\"jsonrpc\":\"2.0\",\"id\":\"req_1\",\"error\":{}}",
-        "{\"jsonrpc\":\"2.0\",\"id\":\"req_1\",\"error\":{\"code\":-32602,\"message\":1}}",
-        "{\"jsonrpc\":\"2.0\",\"id\":\"req_1\",\"error\":{\"code\":-32602.5,\"message\":\"Rejected\"}}",
-        "{\"jsonrpc\":\"2.0\",\"id\":\"req_1\",\"error\":{\"code\":-32602,\"message\":\"Rejected\",\"other\":true}}",
+        { "not-json", "not-json" },
+        { "array", "[]" },
+        { "empty-object", "{}" },
+        { "wrong-version", "{\"jsonrpc\":\"1.0\",\"id\":\"req_1\",\"result\":{}}" },
+        { "numeric-id", "{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{}}" },
+        { "wrong-id", "{\"jsonrpc\":\"2.0\",\"id\":\"other\",\"result\":{}}" },
+        { "missing-outcome", "{\"jsonrpc\":\"2.0\",\"id\":\"req_1\"}" },
+        { "result-and-error", "{\"jsonrpc\":\"2.0\",\"id\":\"req_1\",\"result\":{},\"error\":{}}" },
+        { "array-result", "{\"jsonrpc\":\"2.0\",\"id\":\"req_1\",\"result\":[]}" },
+        { "response-method", "{\"jsonrpc\":\"2.0\",\"id\":\"req_1\",\"result\":{},\"method\":\"event.domain\"}" },
+        { "response-params", "{\"jsonrpc\":\"2.0\",\"id\":\"req_1\",\"result\":{},\"params\":{}}" },
+        { "extra-response-member", "{\"jsonrpc\":\"2.0\",\"id\":\"req_1\",\"result\":{},\"extra\":true}" },
+        { "duplicate-version", "{\"jsonrpc\":\"2.0\",\"jsonrpc\":\"2.0\",\"id\":\"req_1\",\"result\":{}}" },
+        { "empty-error", "{\"jsonrpc\":\"2.0\",\"id\":\"req_1\",\"error\":{}}" },
+        { "non-string-message", "{\"jsonrpc\":\"2.0\",\"id\":\"req_1\",\"error\":{\"code\":-32602,\"message\":1}}" },
+        { "non-integer-code", "{\"jsonrpc\":\"2.0\",\"id\":\"req_1\",\"error\":{\"code\":-32602.5,\"message\":\"Rejected\"}}" },
+        { "extra-error-member", "{\"jsonrpc\":\"2.0\",\"id\":\"req_1\",\"error\":{\"code\":-32602,\"message\":\"Rejected\",\"other\":true}}" },
     };
 
     [Theory]
     [MemberData(nameof(MalformedSubscriptionResponses))]
-    public async Task Tail_MalformedSubscriptionResponse_FencesAttemptWithoutOutput(string response)
+    public async Task Tail_MalformedSubscriptionResponse_FencesAttemptWithoutOutput(string caseName, string response)
     {
+        _ = caseName;
         using var cts = new CancellationTokenSource();
         var factory = new FakeEventSocketFactory();
         var socket = new FakeEventSocket(factory).AddJson(response);
@@ -522,20 +523,21 @@ public sealed class CliEventTailCommandSpecs : IDisposable
         Assert.Empty(result.Output.ToString());
     }
 
-    public static TheoryData<string> MalformedCloudEvents => new()
+    public static TheoryData<string, string> MalformedCloudEvents => new()
     {
-        "{}",
-        "{\"specversion\":\"0.3\",\"id\":\"e1\",\"source\":\"test\",\"type\":\"one\"}",
-        "{\"specversion\":\"1.0\",\"id\":\"\",\"source\":\"test\",\"type\":\"one\"}",
-        "{\"specversion\":\"1.0\",\"id\":\"e1\",\"source\":1,\"type\":\"one\"}",
-        "{\"specversion\":\"1.0\",\"id\":\"e1\",\"source\":\"test\"}",
-        "{\"specversion\":\"1.0\",\"id\":\"e1\",\"source\":\"test\",\"type\":\"one\",\"type\":\"two\"}",
+        { "empty", "{}" },
+        { "wrong-specversion", "{\"specversion\":\"0.3\",\"id\":\"e1\",\"source\":\"test\",\"type\":\"one\"}" },
+        { "empty-id", "{\"specversion\":\"1.0\",\"id\":\"\",\"source\":\"test\",\"type\":\"one\"}" },
+        { "non-string-source", "{\"specversion\":\"1.0\",\"id\":\"e1\",\"source\":1,\"type\":\"one\"}" },
+        { "missing-type", "{\"specversion\":\"1.0\",\"id\":\"e1\",\"source\":\"test\"}" },
+        { "duplicate-type", "{\"specversion\":\"1.0\",\"id\":\"e1\",\"source\":\"test\",\"type\":\"one\",\"type\":\"two\"}" },
     };
 
     [Theory]
     [MemberData(nameof(MalformedCloudEvents))]
-    public async Task Tail_MalformedCloudEvent_FencesAttemptWithoutOutput(string cloudEvent)
+    public async Task Tail_MalformedCloudEvent_FencesAttemptWithoutOutput(string caseName, string cloudEvent)
     {
+        _ = caseName;
         using var cts = new CancellationTokenSource();
         var factory = new FakeEventSocketFactory();
         var notification = """{"jsonrpc":"2.0","method":"event.domain","params":{"event":"""
