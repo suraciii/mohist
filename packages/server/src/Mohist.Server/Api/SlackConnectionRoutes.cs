@@ -1549,28 +1549,23 @@ public static partial class SlackConnectionRoutes
 
         if (mentionedWorkspaceBots.Count >= 2)
         {
-            var mentionedConnectionIds = mentionedWorkspaceBots
-                .Select(bot => bot.ConnectionId)
-                .Distinct(StringComparer.Ordinal)
-                .ToArray();
-            var ownerClaimantConnectionId = mentionedWorkspaceBots
-                .Where(bot => string.Equals(bot.OwnerSlackUserId, req.SenderSlackUserId, StringComparison.Ordinal))
-                .Select(bot => bot.ConnectionId)
-                .FirstOrDefault();
-            var currentConnectionIsMentioned = mentionedConnectionIds.Contains(connection.Id, StringComparer.Ordinal);
-            var senderAuthorizedForCurrentConnection = decision.Allowed;
-            if (!currentConnectionIsMentioned
-                || (ownerClaimantConnectionId is not null
-                    && !senderAuthorizedForCurrentConnection
-                    && !string.Equals(ownerClaimantConnectionId, connection.Id, StringComparison.Ordinal)))
-                return ApiResults.Ok(new { kind = "ignored" });
-            if (!senderAuthorizedForCurrentConnection)
-                return await HandleAmbiguousNonOwnerAsync(req, mentionedConnectionIds, ct);
-            return await HandleAmbiguousPromptAsync(
-                req,
-                mentionedWorkspaceBots.Select(b => b.BotUserId).ToArray(),
-                mentionedConnectionIds,
-                ct);
+            var routing = SlackMultiAgentRoutingPolicy.Decide(
+                connection.Id,
+                req.SenderSlackUserId,
+                decision.Allowed,
+                mentionedWorkspaceBots
+                    .Select(bot => new SlackMultiAgentRoutingCandidate(
+                        bot.ConnectionId, bot.BotUserId, bot.OwnerSlackUserId))
+                    .ToArray())!;
+            return routing.Disposition switch
+            {
+                SlackMultiAgentRoutingDisposition.Ignore => ApiResults.Ok(new { kind = "ignored" }),
+                SlackMultiAgentRoutingDisposition.RejectNonOwner =>
+                    await HandleAmbiguousNonOwnerAsync(req, routing.ConnectionIds, ct),
+                SlackMultiAgentRoutingDisposition.Prompt => await HandleAmbiguousPromptAsync(
+                    req, routing.BotLabels, routing.ConnectionIds, ct),
+                _ => throw new InvalidOperationException("Unknown multi-agent routing disposition."),
+            };
         }
 
         if (mentionedWorkspaceBots.Count == 1)
