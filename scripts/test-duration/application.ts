@@ -124,10 +124,10 @@ export async function runApplicationScope(
   runtime: ApplicationRuntime,
   context: ApplicationExecutionContext,
 ): Promise<number> {
-  const commands = applicationBuilds(config, application)
   const { artifactRoot, deadlines, abortSignal } = context
-  mkdirSync(artifactRoot, { recursive: true })
   try {
+    const commands = applicationBuilds(config, application)
+    mkdirSync(artifactRoot, { recursive: true })
     runtime.report(`test:app ${application} diagnostics: ${artifactRoot}`)
     writeEvidence(runtime, artifactRoot, 'run.json', {
       runId: context.runId,

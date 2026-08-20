@@ -62,10 +62,10 @@ export async function runRepositoryScope(
   runtime: RepositoryRuntime,
   context: RepositoryExecutionContext,
 ): Promise<number> {
-  const checks = config.plan!.repositoryChecks
   const { artifactRoot, deadlines, abortSignal } = context
-  mkdirSync(artifactRoot, { recursive: true })
   try {
+    const checks = config.plan!.repositoryChecks
+    mkdirSync(artifactRoot, { recursive: true })
     runtime.report(`repository scope diagnostics: ${artifactRoot}`)
     writeEvidence(runtime, artifactRoot, 'run.json', {
       runId: context.runId,
