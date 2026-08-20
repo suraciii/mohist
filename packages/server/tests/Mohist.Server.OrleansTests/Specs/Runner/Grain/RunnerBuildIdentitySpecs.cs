@@ -2,19 +2,20 @@ using Mohist.Server.Runner.Grains;
 using Xunit;
 using Mohist.Server.TestSupport;
 using Mohist.Server.SpecTests.Specs.Workflow;
+using Mohist.Server.OrleansTests.Support;
 
 namespace Mohist.Server.OrleansTests.Specs.Runner.Grain;
 
 [Collection("RunnerGrain")]
 public class RunnerBuildIdentitySpecs : WorkflowGrainSpecs
 {
-    public RunnerBuildIdentitySpecs(WorkflowGrainFixture fixture) : base(fixture) { }
+    public RunnerBuildIdentitySpecs(OrleansL0WorkflowGrainFixture fixture) : base(fixture) { }
 
     private async Task<(string RunnerId, IRunnerGrain Runner)> FreshRunnerAsync()
     {
         // Reuse the activation warmed by the fixture, but clear its
         // registration state before each claim so the Specs stay isolated.
-        var runnerId = WorkflowGrainFixture.WarmupRunnerId;
+        var runnerId = OrleansL0WorkflowGrainFixture.WarmupRunnerId;
         var runner = Grains.GetGrain<IRunnerGrain>(runnerId);
         await runner.UnregisterAsync();
         return (runnerId, runner);
