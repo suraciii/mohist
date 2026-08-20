@@ -4,6 +4,7 @@ using Microsoft.Extensions.Time.Testing;
 using Mohist.Server.GitHub.Domain;
 using Mohist.Server.GitHub.Infrastructure;
 using Mohist.Server.Infrastructure.Data.Db;
+using Mohist.Server.UnitTests.Support;
 using Xunit;
 
 namespace Mohist.Server.UnitTests.GitHub;
@@ -33,10 +34,7 @@ public sealed class GitHubIssueLinkStoreTests
         var options = new DbContextOptionsBuilder<MohistDbContext>()
             .UseSqlite(connection)
             .Options;
-        using (var db = new MohistDbContext(options))
-        {
-            db.Database.EnsureCreated();
-        }
+        SqliteSchemaTemplate.CopyModelSchemaTo(connection);
         return new TestDatabase(connection, options);
     }
 

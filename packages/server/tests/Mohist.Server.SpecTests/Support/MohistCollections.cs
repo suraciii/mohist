@@ -33,6 +33,18 @@ public class PublicProjectionIntegrationCollection
 [CollectionDefinition("RunnerMutationIntegration")]
 public class RunnerMutationIntegrationCollection : ICollectionFixture<MohistIntegrationFixture>;
 
+[CollectionDefinition("AgentPathAmplificationIntegration")]
+public class AgentPathAmplificationIntegrationCollection : ICollectionFixture<IsolatedMohistIntegrationFixture>;
+
+[CollectionDefinition("DeviceFlowIntegration")]
+public class DeviceFlowIntegrationCollection : ICollectionFixture<IsolatedMohistIntegrationFixture>;
+
+[CollectionDefinition("WorkspaceIntegration")]
+public class WorkspaceIntegrationCollection : ICollectionFixture<IsolatedMohistIntegrationFixture>;
+
+[CollectionDefinition("WorkflowSessionTerminalIntegration")]
+public class WorkflowSessionTerminalIntegrationCollection : ICollectionFixture<IsolatedMohistIntegrationFixture>;
+
 // Specs whose contract depends on process- or cluster-wide state share one
 // dedicated host per resource domain. Each domain is serial while independent
 // domains and ordinary project-scoped specs continue to run in parallel.

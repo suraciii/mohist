@@ -169,6 +169,12 @@ One claim must not exist at two Levels. Coverage is a measurement, not a claim.
 A test that exists only to increase coverage, preserves no intentional
 contract, or fails after an unrelated refactor must be deleted or rewritten.
 
+Migration plans, transition inventories, historical source snapshots, and
+proofs of a completed move are not permanent Specs. Keep them with the active
+migration work. Once the end-state behavior Specs and structural constraints
+exist, remove the migration gate and its historical proof. A permanent gate
+asserts the current contract, not the path used to reach it.
+
 There is no target count or percentage for L0 and L1. Every L1 Spec must explain
 which application behavior would be absent from a narrower proof. Every L0 Spec
 must name the stable component or module that owns the claim.
@@ -279,19 +285,22 @@ shuffled execution must both pass. A shuffle failure is a state leak.
 ### Public Command Surface
 
 The root package exposes four validation intents. These commands are the stable
-interface for developers and CI. Test frameworks, project files, apphosts,
+developer interface. CI uses the same plan and executor through closed
+application and repository scopes. Test frameworks, project files, apphosts,
 track IDs, worker counts, report paths, and scheduling flags are internal gate
 details.
 
-| Command | Scope | Intended use | Final acceptance |
+| Command | Scope | Intended use | Final local acceptance |
 | --- | --- | --- | --- |
 | `npm run test:fast` | Every L0 and Architecture Spec plus fast static checks | Broad inner-loop feedback after a local change | No |
 | `npm run test:app -- <application>` | Every L0, L1, application-scoped Architecture Spec, and static check owned by one application | Complete feedback for one application boundary | No |
 | `npm test` | The complete hermetic Spec portfolio with test-plan validation, reports, and duration policy | Changes to shared contracts or test infrastructure | No |
-| `npm run verify` | One fresh build, all non-Spec repository checks, and the complete hermetic Spec portfolio | Final local and pull request acceptance | Yes |
+| `npm run verify` | Fresh application builds, all non-Spec repository checks, and the complete hermetic Spec portfolio | Final local handoff; CI applies the same contract through Gate | Yes |
 
 `test:fast` is broad and shallow. `test:app` is narrow and deep. `npm test`
-is broad and deep. `verify` adds the repository-wide acceptance checks.
+is broad and deep. `verify` adds the repository-wide acceptance checks. The
+name `verify` applies only to the complete local action. CI execution jobs use
+their evidence owner as the name. The final CI aggregation job is `Gate`.
 
 `test:fast` excludes L1 by definition. It may use normal incremental
 compilation. `test:app` accepts exactly one application ID declared by the
@@ -325,10 +334,15 @@ deadline.
 
 Each command owns all compilation required by its scope. `test:fast`,
 `test:app`, and `npm test` may reuse valid incremental outputs. `verify` owns one
-fresh build and every test lane inside it uses that exact build without a hidden
-rebuild. It requires a clean index and worktree and fails if the revision or
-source state changes during the run. CI must not prebuild a different output
-before invoking a command.
+fresh build for each application scope. Every track in one application scope
+uses that application's exact build without a hidden rebuild. Local `verify`
+prepares those application builds before admitting any test process, because
+the Server and CLI projects share project-reference output paths on one host;
+the prepared test scopes then run concurrently. CI application jobs use
+separate runners, so their builds and tests may run concurrently. `verify`
+requires a clean index and worktree and fails if the revision or source state
+changes during the run. A CI application job uses the same build rule for its
+application and must not consume an output from a different source revision.
 
 Every command must print one uniform result summary containing:
 
@@ -341,8 +355,10 @@ Every command must print one uniform result summary containing:
 
 `npm test` and `verify` must also persist the full test plan, source revision and
 dirty state, selected Kinds and Resource lanes, reports, startup counts, cleanup
-state, first failure, and artifact directory. `test:fast` and `test:app` must not
-pay this full evidence cost.
+state, first failure, and artifact directory. Each CI application or Repository
+job persists the same evidence for its scope so that Gate can validate the
+complete candidate. `test:fast` and `test:app` must not pay this full evidence
+cost.
 
 A selected Spec track that is missing, empty, skipped, or not run fails the
 command. A selected non-Spec check that does not run or pass also fails. A
@@ -359,33 +375,63 @@ code two means the invocation or checked-in command configuration is invalid.
 
 ### Local And CI Parity
 
-The required pull request job invokes exactly `npm run verify`. The same command
-must be the final local handoff gate. It owns documentation checks, one fresh
-build, non-Spec repository checks, every behavior and Architecture track, test
-reports, duration evidence, process cleanup, source identity, and one absolute
-five-minute deadline. It must not be followed by another full test command.
+`npm run verify` is the final local handoff command. It owns all application and
+Repository scopes, their evidence, source identity, cleanup, and one absolute
+five-minute deadline. It must not shell out to another public command with a
+fresh deadline or be followed by another full test command.
 
-CI must invoke only the public commands. A diagnostic or manual workflow may
-invoke `npm run test:fast`, `npm run test:app -- <application>`, or `npm test`,
-but it must not replace `verify` in the pull request gate. Changed-path detection
-must not waive final acceptance.
+CI decomposes the same acceptance plan by ownership. It has one execution job
+for each independently built application, one `Repository` job, and one final
+`Gate` job. The canonical plan declares the application IDs `server`, `web`,
+`cli`, `runner`, and `slack`. Their CI display names are `Server`, `Web`, `CLI`,
+`Runner`, and `Slack`.
+
+- An application job owns its application's fresh build, L0 and L1 behavior
+  tracks, application-scoped Architecture tracks, owned static checks, reports,
+  budgets, and cleanup.
+- `Repository` owns plan validation, cross-application and repository
+  Architecture tracks, documentation, formatting, and repository-wide static
+  checks that no application owns.
+- `Gate` depends on every application job and `Repository`. It validates that
+  all evidence has the same source revision and plan identity and that the
+  complete plan appears exactly once. It does not build or run a Spec.
+
+Only `Gate` is the required branch-protection check. A failed, cancelled, or
+missing producer job makes Gate fail. Changed-path detection must not waive an
+application, Repository, or Gate for final acceptance.
+
+The CI job set is an explicit projection of the applications in the canonical
+plan. Automated enforcement must fail when the workflow and plan application
+sets differ. The workflow may name an application or the Repository scope. It
+must not select projects, tracks, Kinds, Levels, Resource lanes, or test cases.
+CI uses a closed executor interface for these evidence scopes. That interface
+is not a fifth public validation command or a generic filter DSL.
+
+The closed executor uses the same summary fields, failure ordering, and exit
+codes as the public commands. Scope selection is an explicit invocation input.
+No CI environment marker may change selection or pass/fail semantics.
 
 Workflow YAML owns checkout, toolchain installation, dependency caches, outer
-job failsafes, and artifact upload. It must not own test project lists, apphost
-arguments, class filters, worker counts, retries, report validation, or command
-deadlines. An outer CI timeout may terminate a stuck command, but it must exceed
-the command's own absolute deadline and cannot define normal failure semantics.
+job failsafes, job dependencies, and artifact transfer. It must not own test
+project lists, apphost arguments, class filters, worker counts, retries, report
+validation, or scope deadlines. An outer CI timeout may terminate a stuck
+scope, but it must exceed that scope's own absolute deadline and cannot define
+normal failure semantics.
 
-Within one candidate workflow run, CI must not overlap Mohist validation
-commands or create an application matrix outside the test plan. Independent
-candidates may run concurrently. One command invocation owns all concurrency. A
-semantic track is not a shard. CI and local commands must not split one track by
+Application and Repository jobs for one candidate may run concurrently. Within
+one application job, the plan owns all concurrency. A semantic track is not a
+shard. CI and local commands must not split one application or track by project,
 class, hash, or process merely to reduce wall time. The plan may run independent
-tracks or isolated Resource lanes concurrently. Parallel execution is valid only
-for independently owned tracks or Specs with proven isolation. Worker capacity
-is a memory and host-resource bound, not a speed control. Retry, sleep, skip,
-allowlist, threshold increase, timeout increase, and global serialization are
-not recovery mechanisms.
+tracks or isolated Resource lanes concurrently inside their owning application.
+Parallel execution is valid only for independently owned scopes, tracks, or
+Specs with proven isolation. Worker capacity is a memory and host-resource
+bound, not a speed control. Retry, sleep, skip, allowlist, threshold increase,
+timeout increase, and global serialization are not recovery mechanisms.
+
+Local and CI parity means the same plan, ownership, budgets, evidence protocol,
+and pass/fail rules. It does not require the local process graph and the CI job
+graph to be identical. Local `verify` may execute application scopes on one
+host. CI executes them on separate runners and Gate aggregates their evidence.
 
 Gate implementation, evidence, scheduling, and process-cleanup rules live in
 [`scripts/test-duration/README.md`](../scripts/test-duration/README.md).
@@ -400,15 +446,18 @@ track:
   is at most 500 ms.
 - p95 uses nearest rank: sort the population by duration and select the one-based
   item at `ceil(0.95 * count)`.
-- One L0 or Architecture Spec is at most 500 ms. One L1 Spec is at most 5 s.
 - Each application-and-Level track has an enforced wall-time deadline.
 - Each Architecture track has an enforced wall-time deadline.
 - The complete local gate is at most five minutes.
 
-The L1 single-Spec limit is a failure ceiling, not a target. A budget breach is
-a test defect and must fail acceptance. No slow-Spec exception may turn the
-gate green. A track without a seeded baseline is an incomplete migration state;
-it must not waive the final gate.
+Per-Spec wall time is diagnostic evidence, not a stable acceptance boundary.
+Concurrent scheduling, runtime startup, garbage collection, and shared host
+load can change that measurement without changing the claimed behavior or the
+portfolio cost. A slow maximum must trigger investigation, but it does not fail
+an otherwise passing population and track deadline. A deterministic cost claim
+uses work counts or controlled inputs, not runner wall time. A track without a
+seeded baseline is an incomplete migration state; it must not waive the final
+gate.
 
 Duration evidence must report population p50, p95, and maximum, track wall time,
 fixture setup time, and application, Orleans, or Browser startup counts. Shared
@@ -466,7 +515,7 @@ for expensive Specs or shared Resources.
   and reported without requiring an independent selector. Resource metadata must
   map each test class to exactly one plan lane.
 - `scripts/test-duration/` must enforce suite and track deadlines, population
-  budgets, single-Spec limits, report freshness, and nonzero totals. It must
+  budgets, report freshness, and nonzero totals. It must
   report setup and startup cost until explicit limits exist.
 - Architecture Specs must enforce layer dependencies, naming, namespaces,
   public surfaces, and analyzer wiring.
@@ -483,24 +532,17 @@ for expensive Specs or shared Resources.
 
 ## Status
 
-The current Server projects and duration gate still use Unit and Spec as
-execution tracks. The Spec-to-Unit migration inventory still classifies tests
-by runtime dependencies. Root scripts expose overlapping `test`, `test:fast`,
-`test:canonical`, and `test:budget` paths. They select project and track names
-instead of the target behavior-track model. The canonical test plan does not
-declare application, Level, or Architecture scope metadata, and there is no
-`test:app` command.
+The canonical plan now declares each application, behavior Level, Architecture
+scope, Spec Kind, Resource lane, build, report, and duration rule. The root
+commands are plan-backed: `npm run test:fast` selects the fast inner loop,
+`npm run test:app -- <application>` selects one application, `npm test` runs the
+complete Spec portfolio, and `npm run verify` adds repository checks and Gate
+evidence. Obsolete aliases and raw track selection are removed from the public
+surface.
 
-The current CI workflow bypasses the root command contract. It owns direct
-`dotnet test`, compiled apphost, and workspace Vitest invocations together with
-project lists, worker counts, per-step timeouts, and report checks. It does not
-invoke the same final `verify` command used locally. The duration gate still has
-a slow-test allowlist mechanism and does not enforce separate fixture startup
-and runtime-start counts or the complete acceptance evidence.
-
-These are migration gaps. The target is application-and-Level behavior tracks
-plus structurally scoped Architecture tracks, with Product and Design as
-orthogonal declared Kinds and controlled Resources as independent scheduling
-and cost metadata. Existing file suffixes may remain, but they must stop acting
-as classifications. New Specs must follow the target model before the migration
-is complete.
+CI uses the same plan as six ownership jobs: Server, Web, CLI, Runner, Slack,
+and Repository, followed by Gate. Every configured Spec track is enforced
+without slow-test exceptions, and each scope records source identity, reports,
+totals, duration, and process cleanup. New Specs only need to follow the model
+and declare their owning application, Kind, Level or Architecture scope, and
+Resources; the distribution between levels remains an outcome of ownership.

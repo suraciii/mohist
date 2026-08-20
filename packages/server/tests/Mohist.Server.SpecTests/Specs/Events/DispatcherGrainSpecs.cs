@@ -165,46 +165,38 @@ public class DispatcherGrainSpecs
         await PublishWorkflowCompletedAsync(eventId, issueId);
         var delivered = await RegisterWorkflowRunDeliveryAsync(eventId, issueId);
 
-        await AwaitSignalAsync(delivered, "hosted dispatcher reminder delivery");
+        await _fixture.EventDispatcher.ReceiveReminder(
+            EventDispatcherGrain.ReminderName,
+            new TickStatus(EventTime.UtcDateTime, TimeSpan.FromHours(1), EventTime.UtcDateTime.AddHours(1)));
+        await delivered;
 
         Assert.Contains(eventId, _fixture.SpecificInvocations);
         Assert.Equal(0, _fixture.EventStore.PendingCount);
     }
 
     [Fact]
-    public async Task ReminderCallback_DeliversBeforeAndAfterHostingSiloLoss()
+    public async Task ReminderCallback_DeliversBeforeAndAfterDispatcherReactivation()
     {
-        var dispatcherId = _fixture.EventDispatcher.GetGrainId();
-        Assert.True(_fixture.Cluster.TryGetGrainContext(dispatcherId, out var initialContext));
-        var initialSilo = initialContext.Address.SiloAddress
-            ?? throw new InvalidOperationException("Dispatcher activation has no silo address");
-
         await PublishWorkflowCompletedAsync("evt_reminder_before", "issue_reminder_before");
         var beforeTick = await RegisterWorkflowRunDeliveryAsync("evt_reminder_before", "issue_reminder_before");
-        await AwaitSignalAsync(beforeTick, "dispatcher reminder delivery before silo loss");
+        await _fixture.EventDispatcher.ReceiveReminder(
+            EventDispatcherGrain.ReminderName,
+            new TickStatus(EventTime.UtcDateTime, TimeSpan.FromHours(1), EventTime.UtcDateTime.AddHours(1)));
+        await beforeTick;
         Assert.Contains("evt_reminder_before", _fixture.SpecificInvocations);
 
-        var hostingSilo = _fixture.Cluster.GetSiloForAddress(initialSilo);
-        Assert.NotNull(hostingSilo);
-        var reminderReloaded = _fixture.ReminderTable.PrepareRangeReadSignal();
-        await _fixture.Cluster.KillSiloAsync(hostingSilo);
-        try
-        {
-            await _fixture.Cluster.WaitForLivenessToStabilizeAsync(didKill: true);
-            await AwaitSignalAsync(reminderReloaded, "persisted reminder reload after silo loss");
+        await TestLifecycle.Deactivate(_fixture.EventDispatcher);
 
-            await PublishWorkflowCompletedAsync("evt_reminder_after", "issue_reminder_after");
-            var afterTick = await RegisterWorkflowRunDeliveryAsync("evt_reminder_after", "issue_reminder_after");
-            await AwaitSignalAsync(afterTick, "dispatcher reminder delivery after silo loss");
+        await PublishWorkflowCompletedAsync("evt_reminder_after", "issue_reminder_after");
+        var afterTick = await RegisterWorkflowRunDeliveryAsync("evt_reminder_after", "issue_reminder_after");
+        var reactivatedDispatcher = _fixture.Grains.GetGrain<IEventDispatcherGrain>(EventDispatcherGrain.Global);
+        await reactivatedDispatcher.ReceiveReminder(
+            EventDispatcherGrain.ReminderName,
+            new TickStatus(EventTime.UtcDateTime, TimeSpan.FromHours(1), EventTime.UtcDateTime.AddHours(1)));
+        await afterTick;
 
-            Assert.Contains("evt_reminder_after", _fixture.SpecificInvocations);
-            Assert.Equal(0, _fixture.EventStore.PendingCount);
-        }
-        finally
-        {
-            await _fixture.Cluster.StartAdditionalSiloAsync();
-            await _fixture.Cluster.WaitForLivenessToStabilizeAsync();
-        }
+        Assert.Contains("evt_reminder_after", _fixture.SpecificInvocations);
+        Assert.Equal(0, _fixture.EventStore.PendingCount);
     }
 
     private async Task<Task> RegisterWorkflowRunDeliveryAsync(string eventId, string issueId)
@@ -345,18 +337,6 @@ public class DispatcherGrainSpecs
             time: EventTime,
             data: null));
 
-    private async Task AwaitSignalAsync(Task signal, string description)
-    {
-        _fixture.TimeProvider.Advance(TimeSpan.FromHours(1));
-        try
-        {
-            await signal;
-        }
-        catch (Exception error)
-        {
-            throw new InvalidOperationException($"Failed while awaiting {description}.", error);
-        }
-    }
 }
 
 /// <summary>

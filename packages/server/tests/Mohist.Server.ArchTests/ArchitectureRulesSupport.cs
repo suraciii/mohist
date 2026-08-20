@@ -38,5 +38,9 @@ internal static class ArchitectureRulesSupport
 internal static class ArchitectureRulesWarmup
 {
     [ModuleInitializer]
-    internal static void Initialize() => _ = ArchitectureRulesSupport.Architecture;
+    internal static void Initialize()
+    {
+        _ = ArchitectureRulesSupport.Architecture;
+        CommentReferenceRules.Warmup();
+    }
 }

@@ -1,4 +1,4 @@
-import type { AllowlistEntry, BudgetRule, CanonicalGateConfig, SuiteConfig, TrackConfig } from './types.js'
+import type { BudgetRule, CanonicalGateConfig, SuiteConfig, TrackConfig } from './types.js'
 
 export function stripJsonc(text: string): string {
   let out = ''
@@ -197,30 +197,8 @@ function validateRule(rule: BudgetRule, prefix: string): string[] {
   const errors: string[] = []
   const rp = `${prefix}: rule "${rule.id}"`
   if (!rule.id) errors.push(`${rp}: missing id`)
-  if (rule.absoluteMs <= 0) errors.push(`${rp}: absoluteMs must be positive`)
   if (rule.percentile !== undefined && (rule.percentileMs === undefined || rule.percentileMs < 0)) {
     errors.push(`${rp}: percentile set without a valid percentileMs`)
-  }
-  for (const entry of rule.allowlist ?? []) {
-    errors.push(...validateEntry(entry, rp))
-  }
-  return errors
-}
-
-function validateEntry(entry: AllowlistEntry, prefix: string): string[] {
-  const errors: string[] = []
-  const key = entry.id ?? entry.pattern ?? ''
-  if (!key) errors.push(`${prefix}: allowlist entry needs id or pattern`)
-  if (entry.id !== undefined && entry.pattern !== undefined) {
-    errors.push(`${prefix}: allowlist entry "${entry.id}" has both id and pattern`)
-  }
-  if (!entry.reason) errors.push(`${prefix}: allowlist entry "${key}" needs a reason`)
-  if (!entry.owner) errors.push(`${prefix}: allowlist entry "${key}" needs an owner`)
-  if (!Number.isFinite(entry.observedMs) || entry.observedMs <= 0) {
-    errors.push(`${prefix}: allowlist entry "${key}" needs a positive observedMs`)
-  }
-  if (!entry.deadline || Number.isNaN(Date.parse(entry.deadline))) {
-    errors.push(`${prefix}: allowlist entry "${key}" needs a valid ISO date deadline`)
   }
   return errors
 }

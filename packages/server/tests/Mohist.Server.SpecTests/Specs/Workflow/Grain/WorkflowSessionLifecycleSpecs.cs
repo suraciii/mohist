@@ -15,13 +15,14 @@ using Xunit;
 
 namespace Mohist.Server.SpecTests.Specs.Workflow.Grain;
 
+[Collection("SessionControlIntegration")]
 public sealed class WorkflowSessionLifecycleSpecs
 {
     private readonly HttpClient _client;
     private readonly MohistIntegrationFixture _fixture;
     private readonly string _runnerId = $"workflow-session-lifecycle-{Guid.NewGuid():N}";
 
-    public WorkflowSessionLifecycleSpecs(MohistIntegrationFixture fixture)
+    public WorkflowSessionLifecycleSpecs(IsolatedMohistIntegrationFixture fixture)
     {
         _fixture = fixture;
         _client = fixture.Client;

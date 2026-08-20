@@ -8,6 +8,7 @@ import type { FakeRuntimeHandles } from './support/opencode-runtime-factory.js'
 import { capturedLogs } from './support/logger-test.js'
 import type { DefaultRunnerTestResources } from './support/test-resources.js'
 import { withDefaultRunnerTestResources } from './support/test-resources.js'
+import { RunnerHost } from '../src/runtime/host.js'
 
 // Idle-system cleanup scenario: when `poll` is continuously
 // returning 204 (no work dispatched), the runner's cleanup-loop tick
@@ -150,12 +151,6 @@ vi.mock('../src/runtime/cleanup-loop.js', () => {
   }
 })
 
-async function importHost() {
-  // Dynamic import so the `vi.mock` calls above are wired before the
-  // module graph resolves.
-  return (await import('../src/runtime/host.js')).RunnerHost
-}
-
 function deferred() {
   let resolve!: () => void
   const promise = new Promise<void>((resolvePromise) => {
@@ -284,7 +279,6 @@ describe('RunnerHost idle-system cleanup', () => {
       workspaceUsageBytes: 200_000,
     }
 
-    const RunnerHost = await importHost()
     const controller = new AbortController()
     const host = new RunnerHost(defaultOptions())
     const run = host.run(controller.signal)
@@ -327,7 +321,6 @@ describe('RunnerHost idle-system cleanup', () => {
       workspaceUsageBytes: null,
     }
 
-    const RunnerHost = await importHost()
     const controller = new AbortController()
     const host = new RunnerHost(defaultOptions())
     const run = host.run(controller.signal)
@@ -374,7 +367,6 @@ describe('RunnerHost idle-system cleanup', () => {
       workspaceUsageBytes: 100_000,
     }
 
-    const RunnerHost = await importHost()
     const controller = new AbortController()
     const host = new RunnerHost(defaultOptions())
     const run = host.run(controller.signal)
@@ -409,7 +401,6 @@ describe('RunnerHost idle-system cleanup', () => {
     const cleanupEvents = observeCleanupTicks()
     testState().stubFetchConfigBehavior = async () => ({ retentionDays: 7 })
     const order: string[] = []
-    const RunnerHost = await importHost()
     const controller = new AbortController()
     const host = new RunnerHost(defaultOptions())
     const run = host.run(controller.signal)
@@ -451,7 +442,6 @@ describe('RunnerHost idle-system cleanup', () => {
     const hostEvents = configureHost()
     const cleanupEvents = observeCleanupTicks()
     testState().stubFetchConfigBehavior = async () => ({ retentionDays: 7 })
-    const RunnerHost = await importHost()
     const controller = new AbortController()
     const host = new RunnerHost(defaultOptions())
     const run = host.run(controller.signal)
@@ -509,7 +499,6 @@ describe('RunnerHost idle-system cleanup', () => {
     const hostEvents = configureHost()
     const cleanupEvents = observeCleanupTicks()
     const failure = new Error('runtime reclaim failed')
-    const RunnerHost = await importHost()
     const controller = new AbortController()
     const host = new RunnerHost(defaultOptions())
     const run = host.run(controller.signal)
@@ -541,7 +530,6 @@ describe('RunnerHost idle-system cleanup', () => {
     testState().stubFetchConfigBehavior = async () => ({ retentionDays: 7 })
     const reclaimStarted = deferred()
     const reclaimGate = deferred()
-    const RunnerHost = await importHost()
     const controller = new AbortController()
     const host = new RunnerHost(defaultOptions())
     const run = host.run(controller.signal)
@@ -574,7 +562,6 @@ describe('RunnerHost idle-system cleanup', () => {
     const cleanupEvents = observeCleanupTicks()
     testState().stubFetchConfigBehavior = async () => ({ retentionDays: 7 })
 
-    const RunnerHost = await importHost()
     const controller = new AbortController()
     const host = new RunnerHost(defaultOptions())
     const run = host.run(controller.signal)
@@ -605,7 +592,6 @@ describe('RunnerHost idle-system cleanup', () => {
     await testState().resources.fileSystem.writeText(join(legacyWorkspaces, 'stale-worktree'), 'retired')
     await testState().resources.fileSystem.writeText(join(legacyWorkspaces, 'manifest.json'), '{}')
 
-    const RunnerHost = await importHost()
     const controller = new AbortController()
     const host = new RunnerHost(defaultOptions())
     const run = host.run(controller.signal)
@@ -628,7 +614,6 @@ describe('RunnerHost idle-system cleanup', () => {
   })
 
   it('HostIntervals_ClampSubSecondCleanupAndConvergenceConfigurationToOneSecond', async () => {
-    const RunnerHost = await importHost()
     const host = new RunnerHost({
       ...defaultOptions(),
       cleanupLoopIntervalMs: 1,
