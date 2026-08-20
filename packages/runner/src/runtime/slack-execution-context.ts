@@ -5,8 +5,7 @@ export const SLACK_EXECUTION_SOURCE = 'slack' as const
 export const NON_SLACK_EXECUTION_SOURCE = 'non-slack' as const
 export const PUBLISHED_SLACK_SKILL_NAME = 'mohist-slack-collaboration' as const
 export const PUBLISHED_SLACK_SKILL_VERSION = '1.0.0' as const
-export const PUBLISHED_SLACK_SKILL_HASH =
-  'dedf18a796543ade06a9e0ece00c086577153e1e633f868c099b01cf910d641b' as const
+export const PUBLISHED_SLACK_SKILL_HASH = 'dedf18a796543ade06a9e0ece00c086577153e1e633f868c099b01cf910d641b' as const
 
 export type ExecutionSource = typeof SLACK_EXECUTION_SOURCE | typeof NON_SLACK_EXECUTION_SOURCE
 
@@ -37,7 +36,11 @@ export type SlackExecutionContextRead =
 
 export type ExecutionSourceContextRead =
   | { readonly kind: 'legacy'; readonly slackExecutionContext: SlackExecutionContext | null }
-  | { readonly kind: 'resolved'; readonly source: ExecutionSource; readonly slackExecutionContext: SlackExecutionContext | null }
+  | {
+      readonly kind: 'resolved'
+      readonly source: ExecutionSource
+      readonly slackExecutionContext: SlackExecutionContext | null
+    }
   | { readonly kind: 'invalid'; readonly message: string }
 
 export interface ExecutionSourceContextValidationOptions {
@@ -53,8 +56,7 @@ export function readExecutionSourceContext(
   payload: { readonly executionSource?: unknown; readonly slackExecutionContext?: unknown } | null,
   options: ExecutionSourceContextValidationOptions = {},
 ): ExecutionSourceContextRead {
-  const sourcePresent = payload !== null
-    && Object.prototype.hasOwnProperty.call(payload, 'executionSource')
+  const sourcePresent = payload !== null && Object.prototype.hasOwnProperty.call(payload, 'executionSource')
   const source = payload?.executionSource
 
   // Before source v1, Slack payloads were source-less and their context
@@ -70,14 +72,16 @@ export function readExecutionSourceContext(
     }
   }
 
-  if (source === undefined || source === null)
-    return invalid('executionSource is required')
+  if (source === undefined || source === null) return invalid('executionSource is required')
   if (source !== SLACK_EXECUTION_SOURCE && source !== NON_SLACK_EXECUTION_SOURCE)
     return invalid('executionSource must be slack or non-slack')
 
   const context = readSlackExecutionContext(payload)
   if (source === NON_SLACK_EXECUTION_SOURCE) {
-    if (context.kind === 'resolved' || (payload?.slackExecutionContext !== undefined && payload.slackExecutionContext !== null))
+    if (
+      context.kind === 'resolved' ||
+      (payload?.slackExecutionContext !== undefined && payload.slackExecutionContext !== null)
+    )
       return invalid('non-slack execution cannot carry a Slack execution context')
     if (context.kind === 'invalid') return context
     return { kind: 'resolved', source, slackExecutionContext: null }
@@ -126,15 +130,19 @@ function readSlackExecutionContextShape(
   if (anchorFields.some((field) => !nonEmptyString(replyAnchor[field])))
     return invalid('slackExecutionContext.replyAnchor is incomplete')
 
-  if (!nonEmptyString(collaborationSkill.name)
-    || !nonEmptyString(collaborationSkill.version)
-    || !nonEmptyString(collaborationSkill.instructions)
-    || !nonEmptyString(collaborationSkill.contentHash))
+  if (
+    !nonEmptyString(collaborationSkill.name) ||
+    !nonEmptyString(collaborationSkill.version) ||
+    !nonEmptyString(collaborationSkill.instructions) ||
+    !nonEmptyString(collaborationSkill.contentHash)
+  )
     return invalid('slackExecutionContext.collaborationSkill is incomplete')
 
-  if (requirePublishedSkill
-    && (collaborationSkill.name !== PUBLISHED_SLACK_SKILL_NAME
-      || collaborationSkill.version !== PUBLISHED_SLACK_SKILL_VERSION))
+  if (
+    requirePublishedSkill &&
+    (collaborationSkill.name !== PUBLISHED_SLACK_SKILL_NAME ||
+      collaborationSkill.version !== PUBLISHED_SLACK_SKILL_VERSION)
+  )
     return invalid('slackExecutionContext uses an unpublished collaboration Skill identity')
 
   const instructions = collaborationSkill.instructions

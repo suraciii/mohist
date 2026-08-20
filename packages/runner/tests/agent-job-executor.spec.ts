@@ -179,9 +179,12 @@ describe('AgentJobExecutor drives OpenCodeRuntime directly', () => {
     const connection = makeFakeConnection()
     const executor = new AgentJobExecutor(connection.connection, makeAccessors(runtime.runtime))
 
-    const result = await executor.execute(buildAgentJobWork({
-      with: { prompt: 'should not run', executionSource: 'slack', slackExecutionContext: null },
-    }), new AbortController().signal)
+    const result = await executor.execute(
+      buildAgentJobWork({
+        with: { prompt: 'should not run', executionSource: 'slack', slackExecutionContext: null },
+      }),
+      new AbortController().signal,
+    )
 
     expect(result).toMatchObject({ status: 'failed', error: { code: 'invalid-input' } })
     expect(runtime.runTurnCalls).toHaveLength(0)

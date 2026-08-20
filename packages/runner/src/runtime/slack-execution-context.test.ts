@@ -12,7 +12,10 @@ import {
 } from './slack-execution-context.js'
 
 const instructions = readFileSync(
-  new URL('../../../server/src/Mohist.Server/Agent/Services/Assets/mohist-slack-collaboration.skill.md', import.meta.url),
+  new URL(
+    '../../../server/src/Mohist.Server/Agent/Services/Assets/mohist-slack-collaboration.skill.md',
+    import.meta.url,
+  ),
   'utf8',
 )
 const preChangeInstructions = readFileSync(
@@ -54,10 +57,13 @@ function validContext(overrides: ContextOverrides = {}): SlackExecutionContext {
 
 describe('Slack execution source/context validation', () => {
   it('accepts the published Slack context and exposes no mutable destination choice', () => {
-    const result = readExecutionSourceContext({
-      executionSource: SLACK_EXECUTION_SOURCE,
-      slackExecutionContext: validContext(),
-    }, { strict: true })
+    const result = readExecutionSourceContext(
+      {
+        executionSource: SLACK_EXECUTION_SOURCE,
+        slackExecutionContext: validContext(),
+      },
+      { strict: true },
+    )
 
     expect(result).toMatchObject({ kind: 'resolved', source: SLACK_EXECUTION_SOURCE })
     if (result.kind !== 'resolved') throw new Error('expected a valid Slack context')
@@ -69,19 +75,53 @@ describe('Slack execution source/context validation', () => {
     ['unknown source', { executionSource: 'web', slackExecutionContext: null }],
     ['Slack source without context', { executionSource: SLACK_EXECUTION_SOURCE }],
     ['Slack source with null context', { executionSource: SLACK_EXECUTION_SOURCE, slackExecutionContext: null }],
-    ['non-Slack source with context', { executionSource: NON_SLACK_EXECUTION_SOURCE, slackExecutionContext: validContext() }],
+    [
+      'non-Slack source with context',
+      { executionSource: NON_SLACK_EXECUTION_SOURCE, slackExecutionContext: validContext() },
+    ],
     ['non-object context', { executionSource: SLACK_EXECUTION_SOURCE, slackExecutionContext: [] }],
-    ['unsupported version', { executionSource: SLACK_EXECUTION_SOURCE, slackExecutionContext: validContext({ version: 2 }) }],
-    ['empty anchor', { executionSource: SLACK_EXECUTION_SOURCE, slackExecutionContext: validContext({ replyAnchor: { conversationId: '' } }) }],
-    ['wrong Skill identity', { executionSource: SLACK_EXECUTION_SOURCE, slackExecutionContext: validContext({ collaborationSkill: { name: 'other-skill' } }) }],
-    ['uppercase digest', { executionSource: SLACK_EXECUTION_SOURCE, slackExecutionContext: validContext({ collaborationSkill: { contentHash: PUBLISHED_SLACK_SKILL_HASH.toUpperCase() } }) }],
-    ['modified Skill body', { executionSource: SLACK_EXECUTION_SOURCE, slackExecutionContext: validContext({ collaborationSkill: { instructions: `${instructions}changed` } }) }],
+    [
+      'unsupported version',
+      { executionSource: SLACK_EXECUTION_SOURCE, slackExecutionContext: validContext({ version: 2 }) },
+    ],
+    [
+      'empty anchor',
+      {
+        executionSource: SLACK_EXECUTION_SOURCE,
+        slackExecutionContext: validContext({ replyAnchor: { conversationId: '' } }),
+      },
+    ],
+    [
+      'wrong Skill identity',
+      {
+        executionSource: SLACK_EXECUTION_SOURCE,
+        slackExecutionContext: validContext({ collaborationSkill: { name: 'other-skill' } }),
+      },
+    ],
+    [
+      'uppercase digest',
+      {
+        executionSource: SLACK_EXECUTION_SOURCE,
+        slackExecutionContext: validContext({
+          collaborationSkill: { contentHash: PUBLISHED_SLACK_SKILL_HASH.toUpperCase() },
+        }),
+      },
+    ],
+    [
+      'modified Skill body',
+      {
+        executionSource: SLACK_EXECUTION_SOURCE,
+        slackExecutionContext: validContext({ collaborationSkill: { instructions: `${instructions}changed` } }),
+      },
+    ],
   ])('rejects %s', (_name, payload) => {
     expect(readExecutionSourceContext(payload, { strict: true }).kind).toBe('invalid')
   })
 
   it('rejects an explicit null source even while compatibility mode is enabled', () => {
-    expect(readExecutionSourceContext({ executionSource: null, slackExecutionContext: validContext() }).kind).toBe('invalid')
+    expect(readExecutionSourceContext({ executionSource: null, slackExecutionContext: validContext() }).kind).toBe(
+      'invalid',
+    )
   })
 
   it('accepts the actual pre-change source-less Slack snapshot through compatibility mode', () => {
@@ -101,12 +141,14 @@ describe('Slack execution source/context validation', () => {
       kind: 'legacy',
       slackExecutionContext: { collaborationSkill: { instructions: preChangeInstructions, contentHash } },
     })
-    expect(readExecutionSourceContext({
-      executionSource: SLACK_EXECUTION_SOURCE,
-      slackExecutionContext: validContext({
-        collaborationSkill: { instructions: preChangeInstructions, contentHash },
-      }),
-    }).kind).toBe('invalid')
+    expect(
+      readExecutionSourceContext({
+        executionSource: SLACK_EXECUTION_SOURCE,
+        slackExecutionContext: validContext({
+          collaborationSkill: { instructions: preChangeInstructions, contentHash },
+        }),
+      }).kind,
+    ).toBe('invalid')
   })
 
   it('accepts omitted source only through the bounded compatibility path without relabeling it', () => {

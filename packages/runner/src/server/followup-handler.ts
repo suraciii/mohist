@@ -113,8 +113,7 @@ async function handleFollowup(
     strict: deps.strictExecutionSourceValidation === true,
   })
   if (sourceContext.kind === 'invalid') return unavailable()
-  if (sourceContext.kind === 'legacy')
-    log.warn('accepted source-less follow-up through the bounded legacy path')
+  if (sourceContext.kind === 'legacy') log.warn('accepted source-less follow-up through the bounded legacy path')
   const slackContext = sourceContext.slackExecutionContext
   const text = typeof payload.text === 'string' ? payload.text : ''
   const descriptors = parseAttachmentDescriptors(payload.attachments)
@@ -247,12 +246,7 @@ async function handleFollowup(
   )
   const deliveredAttachments = attachmentDelivery.attachments
   const composedPrompt = attachmentManifestEnvelope(
-    buildExecutionEnvelope(
-      text,
-      definition?.instructions,
-      skills,
-      slackContext,
-    ),
+    buildExecutionEnvelope(text, definition?.instructions, skills, slackContext),
     deliveredAttachments,
   )
   const fileParts = deliveredAttachments.flatMap((entry) =>

@@ -1034,22 +1034,6 @@ public sealed partial class AgentJobGrain : Grain, IAgentJobGrain
             SpawnOrigin: command.SpawnOrigin,
             WorkspaceRepositories: command.WorkspaceRepositories);
 
-    private static AgentSlackExecutionContext? SlackExecutionContextFor(PrepareManualLaunchCommand command)
-    {
-        var origin = command.ConnectionOrigin;
-        return origin is null
-            ? null
-            : SlackExecutionContextFactory.Create(
-                origin.WorkspaceTeamId,
-                origin.ConversationId,
-                origin.ThreadTs ?? origin.MessageTs,
-                origin.MessageTs,
-                origin.SlackUserId,
-                origin.ConnectionId,
-                command.SessionId,
-                $"slack:{command.SessionId}:{command.InputId}");
-    }
-
     private static bool PlansEquivalent(PrepareManualLaunchCommand left, PrepareManualLaunchCommand right) =>
         string.Equals(left.Prompt, right.Prompt, StringComparison.Ordinal)
         && string.Equals(left.Model, right.Model, StringComparison.Ordinal)
