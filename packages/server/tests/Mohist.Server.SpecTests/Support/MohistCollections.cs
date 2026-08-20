@@ -49,10 +49,6 @@ public class WorkflowRuntimeIntegrationCollection : ICollectionFixture<IsolatedM
 public class RepositoryDataUpgradeCollection
     : ICollectionFixture<Specs.Issue.Api.RepositoryDataUpgradeFixture>;
 
-[CollectionDefinition("AgentStatusHistoryBounded")]
-public class AgentStatusHistoryBoundedCollection
-    : ICollectionFixture<Specs.Sessions.AgentStatusHistoryBoundedFixture>;
-
 [CollectionDefinition("GitHubFeed")]
 public class GitHubFeedCollection : ICollectionFixture<GitHubFeedFixture>;
 

@@ -120,6 +120,12 @@ per endpoint. State and calculation permutations belong to the domain or module
 below. One behavior change should not require the same scenario matrix in two
 layers.
 
+A lower-owner test does not start a full application host solely to replace one
+collaborator. When a consumer needs only a narrow read or decision capability,
+that capability is an explicit port: production forwards it to the concrete
+service, while Unit tests supply a fake and in-memory state. The HTTP Spec keeps
+only the route and wire behavior that the lower layer cannot prove.
+
 Polling, heartbeat, status, dashboard, and cleanup paths must cost only what
 their current relevant data requires. Cost tests hold current work constant and
 vary unrelated history. They assert database command, deserialization, or
