@@ -8,6 +8,7 @@ import type {
   TerminalTaskLogDeliveryStore,
 } from './terminal-task-log-delivery.js'
 import { runnerLogger } from '../system/logger.js'
+import type { ManagerExecutionBoundary } from './manager-execution-boundary.js'
 
 const log = runnerLogger.child('host')
 
@@ -172,6 +173,7 @@ export async function executeWork(
   inFlightDeliveries: Set<string>,
   work: DispatchWorkItem,
   signal: AbortSignal,
+  managerExecution: ManagerExecutionBoundary | null = null,
 ): Promise<WorkItemResult> {
   // Owner-id mirrors `artifact-side-effects.ts:107`: agent-job
   // dispatches upload under `work.agentJobId`, workflow dispatches
@@ -258,7 +260,7 @@ export async function executeWork(
   const flushTrigger = startIncrementalFlushForCollector(collector)
   let terminalPersistenceAttempted = false
   try {
-    const execution = await workExecutor.executeWithLog(work, signal, collector)
+    const execution = await workExecutor.executeWithLog(work, signal, collector, managerExecution)
     // Detach the listener before stopping the timer so a stale
     // tick can never re-fire against a collector that the executor
     // has handed back to us for terminal flushing.

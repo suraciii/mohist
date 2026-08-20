@@ -8,6 +8,7 @@ import { boundedTimeoutMs, boundedWait } from '../bounded-wait.js'
 import { diagnostic, piError, resetDiagnostic } from './errors.js'
 import { classifyRetryFailure, DEFAULT_PI_PROVIDER_ERROR_POLICY } from './policy.js'
 import { createPiProjector } from './projector.js'
+import type { ManagerExecutionBoundary } from '../manager-execution-boundary.js'
 import { realPiSdkFactory, type PiSdkFactory, type PiSdkServices, type PiSdkSession } from './sdk.js'
 import type {
   PiCancelFacts,
@@ -129,7 +130,9 @@ export class PiRuntime {
   async createSession(request: PiSessionCreateRequest): Promise<PiResult<PiSessionResult>> {
     if (!this.state.ready || !this.state.services) return this.unavailable()
     try {
-      const session = await this.state.services.createSession(request.target.workDir)
+      const session = await this.state.services.createSession(request.target.workDir, {
+        managerExecution: request.managerExecution ?? null,
+      })
       const path = normalizedPath(session.sessionFile)
       if (!path) return this.failure('incompatible-runtime', 'Pi did not return an absolute session-file path')
       this.sessions.set(path, session)
@@ -156,7 +159,9 @@ export class PiRuntime {
     if (!path) return this.failure('incompatible-runtime', 'Pi runtimeSessionId must be an absolute session-file path')
     let session: PiSdkSession
     try {
-      session = this.sessions.get(path) ?? (await this.state.services.openSession(path, request.target.workDir))
+      session = this.sessions.get(path) ?? (await this.state.services.openSession(path, request.target.workDir, {
+        managerExecution: request.managerExecution ?? null,
+      }))
       this.sessions.set(path, session)
     } catch (cause) {
       return this.failure('missing-session', 'The bound Pi Session is missing or corrupt', [
@@ -178,7 +183,7 @@ export class PiRuntime {
     const projector = createPiProjector(
       path,
       request.target.workDir,
-      this.deps.masker ?? createCredentialMaskerFromEnvironment(),
+      request.managerExecution?.masker ?? this.deps.masker ?? createCredentialMaskerFromEnvironment(),
     )
     const report = (events: readonly PiRuntimeEvent[]) => events.forEach((event) => observer?.onEvent?.(event))
     let fixed: PiResult<PiTurnResult> | null = null

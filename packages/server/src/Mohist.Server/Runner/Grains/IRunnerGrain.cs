@@ -309,7 +309,8 @@ public sealed record RunnerPollRequest(
     [property: Id(2)] List<RuntimeReadinessWitness>? RuntimeReadiness = null,
     [property: Id(3)] string? ConnectionId = null,
     [property: Id(4)] string? ConnectionGeneration = null,
-    [property: Id(5)] bool? AdmissionReady = null)
+    [property: Id(5)] bool? AdmissionReady = null,
+    [property: Id(6)] string? DeploymentEpoch = null)
 {
     public RunnerPollRequest() : this([], []) { }
 }

@@ -6,6 +6,8 @@ using Mohist.Server.Api.DirectApi;
 using Mohist.Server.Auth.Domain;
 using Mohist.Server.Infrastructure.Hosting;
 using Mohist.Server.Project.Services;
+using Mohist.Server.Slack.Services;
+using Mohist.Workflow.Definition;
 
 namespace Mohist.Server.Auth.Identity;
 
@@ -46,15 +48,21 @@ public sealed class AuthResolutionMiddleware : IMiddleware, IScopedService
     private readonly FileCredentialLoader _fileCredentials;
     private readonly ICredentialStore _credentials;
     private readonly ProjectRefResolver _projects;
+    private readonly ManagerExecutionCapabilityIssuer? _managerCredentials;
+    private readonly ManagerActorAccessDecider? _managerActors;
 
     public AuthResolutionMiddleware(
         FileCredentialLoader fileCredentials,
         ICredentialStore credentials,
-        ProjectRefResolver projects)
+        ProjectRefResolver projects,
+        ManagerExecutionCapabilityIssuer? managerCredentials = null,
+        ManagerActorAccessDecider? managerActors = null)
     {
         _fileCredentials = fileCredentials;
         _credentials = credentials;
         _projects = projects;
+        _managerCredentials = managerCredentials;
+        _managerActors = managerActors;
     }
 
     public async Task InvokeAsync(HttpContext context, RequestDelegate next)
@@ -77,6 +85,53 @@ public sealed class AuthResolutionMiddleware : IMiddleware, IScopedService
         {
             await RejectAsync(context, directApi);
             return;
+        }
+
+        if (!directApi
+            && IsManagerRequest(context)
+            && _managerCredentials is not null
+            && TryResolveManagerCapability(context) is { } managerCapability)
+        {
+            var kind = IsManagerReplyRoute(context.Request.Path)
+                ? ManagerExecutionLeaseKind.Reply
+                : ManagerExecutionLeaseKind.Management;
+            var validation = _managerCredentials.ValidatePresented(
+                presented.Token,
+                kind,
+                managerCapability,
+                DateTimeOffset.UtcNow);
+            if (validation.Allowed && validation.Lease is { } lease)
+            {
+                if (_managerActors is not null)
+                {
+                    var actor = await _managerActors.AuthenticateAsync(
+                        lease.Origin.WorkspaceId,
+                        lease.Origin.ActorId,
+                        context.RequestAborted);
+                    if (!actor.Allowed
+                        || actor.Actor is null
+                        || !string.Equals(actor.Actor.EnrollmentId, lease.Origin.EnrollmentId, StringComparison.Ordinal))
+                    {
+                        await RejectManagerAuthorizationAsync(context);
+                        return;
+                    }
+                }
+
+                context.Items[ManagerExecutionCredentialContext.HttpContextItemKey] =
+                    new ManagerExecutionCredentialContext(lease, kind);
+                var managerPrincipal = new MohistPrincipal(
+                    lease.Origin.ActorId,
+                    PrincipalKind.Agent,
+                    lease.Origin.ActorId,
+                    []);
+                context.Items[MohistPrincipal.HttpContextItemKey] = managerPrincipal;
+                context.Items[CredentialCarrierResolution.HttpContextItemKey] = presented.Carrier;
+                context.User = new ClaimsPrincipal(new ClaimsIdentity(
+                    [new Claim(ClaimTypes.Name, managerPrincipal.Id)],
+                    "mohist-manager"));
+                await next(context);
+                return;
+            }
         }
 
         var principal = _fileCredentials.TryResolve(presented.Token)
@@ -156,6 +211,14 @@ public sealed class AuthResolutionMiddleware : IMiddleware, IScopedService
 
         var header = context.Request.Headers["x-mohist-runner-id"].ToString();
         return string.IsNullOrWhiteSpace(header) ? null : header;
+    }
+
+    private static async Task RejectManagerAuthorizationAsync(HttpContext context)
+    {
+        context.Response.StatusCode = StatusCodes.Status403Forbidden;
+        context.Response.ContentType = "application/json";
+        await context.Response.WriteAsync(
+            "{\"success\":false,\"error\":\"Manager authorization is no longer active; inspect current status and start a fresh turn.\",\"code\":\"manager_actor_not_authorized\"}");
     }
 
     private static async Task RejectForbiddenAsync(
@@ -263,6 +326,22 @@ public sealed class AuthResolutionMiddleware : IMiddleware, IScopedService
             credential.Scopes,
             RunnerId: credential.Kind == CredentialKind.Runner ? credential.Name : null,
             ProjectId: credential.ProjectId);
+
+    private static string? TryResolveManagerCapability(HttpContext context)
+    {
+        if (IsManagerReplyRoute(context.Request.Path)) return "manager.reply";
+        return ManagerCapabilityCatalog.ResolveHttp(
+            context.Request.Method,
+            context.Request.Path.Value ?? string.Empty);
+    }
+
+    private static bool IsManagerReplyRoute(PathString path) =>
+        path.StartsWithSegments("/api/slack-manager/reply", StringComparison.Ordinal);
+
+    private static bool IsManagerRequest(HttpContext context) =>
+        context.Request.Headers.TryGetValue(ManagerCapabilityCatalog.ManagerModeHeader, out var values)
+        && values.Count == 1
+        && ManagerCapabilityCatalog.IsManagerModeValue(values[0]);
 
     private static bool IsAuthSurface(PathString path) =>
         path.StartsWithSegments("/api", StringComparison.Ordinal)

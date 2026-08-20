@@ -220,6 +220,18 @@ public static class MohistServiceRegistration
         services.AddScoped<ISlackLeaseSecretResolver>(sp => sp.GetRequiredService<SlackLeaseSecretResolver>());
         services.AddScoped<ISlackAdapterOperatorAuthenticator>(sp => sp.GetRequiredService<SlackAdapterOperatorAuthenticator>());
 
+        // Manager execution credentials are runtime-only. The epoch and
+        // hashed lease store are process singletons; no durable provider is
+        // registered for either value.
+        services.AddSingleton<ManagerExecutionLeaseStore>();
+        services.AddSingleton<IManagerExecutionLeaseStore>(sp =>
+            sp.GetRequiredService<ManagerExecutionLeaseStore>());
+        services.AddSingleton<ManagerDeploymentEpoch>();
+        services.AddSingleton<IManagerDeploymentEpoch>(sp =>
+            sp.GetRequiredService<ManagerDeploymentEpoch>());
+        services.AddHostedService(sp => sp.GetRequiredService<ManagerDeploymentEpoch>());
+        services.AddSingleton<ManagerExecutionCapabilityIssuer>();
+
         services.AddHttpClient<IGitHubCommentPort, GitHubCommentPort>(client =>
         {
             client.BaseAddress = new Uri("https://api.github.com");

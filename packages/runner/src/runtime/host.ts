@@ -56,7 +56,7 @@ import {
 } from './recovery-receipt.js'
 import { RuntimeTurnRegistry } from './runtime-turn-registry.js'
 import { loadBuildInfo } from './build-info.js'
-import type { DispatchWorkItem } from '../core/types.js'
+import type { DispatchWorkItem, PolledDispatch } from '../core/types.js'
 import type { WorkItemResult } from '../core/types.js'
 import { currentRunnerResources } from '../system/filesystem.js'
 import { WorkflowSessionTurnCoordinator } from './workflow-session-turn-coordinator.js'
@@ -68,6 +68,7 @@ import { resolveWorkspaceQuery } from './workspace-query.js'
 import { createSessionCommandRouter } from '../server/command-runtime.js'
 import { reconcileStartedDispatch, type HostRecoveryContext } from './host-recovery.js'
 import { type AwaitingAckEntry, type InFlightEntry, type ShutdownWorkState } from './host-state.js'
+import { ManagerExecutionBoundary } from './manager-execution-boundary.js'
 import {
   executeAndTransition,
   markResultPersistencePending,
@@ -106,6 +107,10 @@ export interface RunnerHostDependencies {
  * `workKey` convention.
  */
 const workKey = journalWorkKey
+
+function isManagerExecutionWork(work: Pick<DispatchWorkItem, 'projectId'>): boolean {
+  return work.projectId === '__mohist_slack_manager__'
+}
 
 /**
  * Resolves the runner's build git hash from the on-disk build manifest.
@@ -184,6 +189,8 @@ export class RunnerHost {
   // The keys of both Maps together form the process's full poll report.
   private readonly inFlight = new Map<string, InFlightEntry>()
   private readonly awaitingAck = new Map<string, { work: DispatchWorkItem; entry: AwaitingAckEntry }>()
+  private readonly managerExecutions = new Map<string, ManagerExecutionBoundary>()
+  private observedManagerDeploymentEpoch: string | null = null
   private readonly terminalTaskLogDeliveryInFlight = new Set<string>()
 
   constructor(
@@ -369,6 +376,13 @@ export class RunnerHost {
       awaitingAck: this.awaitingAck,
       hostShutdown: this.hostShutdown,
       currentCatalogRevision: (runtime) => this.currentCatalogRevision(runtime),
+      managerExecutionFor: (key) => this.managerExecutions.get(key) ?? null,
+      releaseManagerExecution: async (key) => {
+        const boundary = this.managerExecutions.get(key)
+        if (!boundary) return
+        this.managerExecutions.delete(key)
+        await boundary.dispose()
+      },
     }
   }
 
@@ -634,6 +648,7 @@ export class RunnerHost {
   }
 
   private async shutdownSharedConnection() {
+    await this.invalidateManagerExecutions()
     this.workExecutor = null
     if (this.openCodeRuntime !== null) {
       try {
@@ -680,7 +695,7 @@ export class RunnerHost {
         if (piStart?.ok && this.piRuntime.ready()) this.piRuntimeGeneration += 1
       }
 
-      let works: DispatchWorkItem[]
+      let works: PolledDispatch[]
       try {
         works = await this.pollOnce(signal)
       } catch (error) {
@@ -695,13 +710,14 @@ export class RunnerHost {
       // becomes reportable until this retry restores its durable receipt.
       await retryPendingWorkResultPersistence(this.executionContext)
 
-      await this.prepareOpenCodeWork(works, signal)
+      await this.prepareOpenCodeWork(works.map((item) => item.work), signal)
 
       // A single poll may return multiple dispatches (repair + new claims).
       // Execute each concurrently, skipping re-deliveries the process
       // already holds.
       const startupRecoveryKeys = new Set<string>()
-      for (const work of works) {
+      for (const polled of works) {
+        const work = polled.work
         if (signal.aborted) break
         const key = workKey(work)
         // Re-delivery is the normal recovery path under at-least-once:
@@ -773,6 +789,26 @@ export class RunnerHost {
           log.info('recovery dispatch admitted for reconciliation', { work: work.workId })
         }
 
+        const isManagerExecution = work.projectId === '__mohist_slack_manager__'
+        if (isManagerExecution) {
+          if (!polled.managerExecutionGrant) {
+            log.error('Manager dispatch arrived without its one-shot execution grant', { work: work.workId })
+            continue
+          }
+          try {
+            this.managerExecutions.set(
+              key,
+              await ManagerExecutionBoundary.create(polled.managerExecutionGrant, this.options.runnerRoot),
+            )
+          } catch (error) {
+            log.error('Manager execution boundary could not be established; refusing work', {
+              work: work.workId,
+              exception: error,
+            })
+            continue
+          }
+        }
+
         const controller = new AbortController()
         const entry: InFlightEntry = {
           done: Promise.resolve(),
@@ -813,15 +849,21 @@ export class RunnerHost {
     const runtime = this.openCodeRuntime
     if (!runtime) return
     const owners = [
-      ...[...this.inFlight.values()].filter((entry) => usesOpenCode(entry.work)).map((entry) => workKey(entry.work)),
-      ...[...this.awaitingAck.values()].filter((entry) => usesOpenCode(entry.work)).map((entry) => workKey(entry.work)),
+      ...[...this.inFlight.values()]
+        .filter((entry) => usesOpenCode(entry.work) && !isManagerExecutionWork(entry.work))
+        .map((entry) => workKey(entry.work)),
+      ...[...this.awaitingAck.values()]
+        .filter((entry) => usesOpenCode(entry.work) && !isManagerExecutionWork(entry.work))
+        .map((entry) => workKey(entry.work)),
     ]
     runtime.setWorkOwners(owners)
   }
 
   private async prepareOpenCodeWork(works: readonly DispatchWorkItem[], signal: AbortSignal): Promise<void> {
     const runtime = this.openCodeRuntime
-    const owners = works.filter((work) => usesOpenCode(work) && !isAgentRecoveryDispatch(work)).map(workKey)
+    const owners = works
+      .filter((work) => usesOpenCode(work) && !isManagerExecutionWork(work) && !isAgentRecoveryDispatch(work))
+      .map(workKey)
     if (!runtime || owners.length === 0) return
     runtime.setWorkOwners([...this.openCodeOwners(), ...owners])
     if (!runtime.ready()) {
@@ -832,18 +874,47 @@ export class RunnerHost {
 
   private openCodeOwners(): string[] {
     return [
-      ...[...this.inFlight.values()].filter((entry) => usesOpenCode(entry.work)).map((entry) => workKey(entry.work)),
-      ...[...this.awaitingAck.values()].filter((entry) => usesOpenCode(entry.work)).map((entry) => workKey(entry.work)),
+      ...[...this.inFlight.values()]
+        .filter((entry) => usesOpenCode(entry.work) && !isManagerExecutionWork(entry.work))
+        .map((entry) => workKey(entry.work)),
+      ...[...this.awaitingAck.values()]
+        .filter((entry) => usesOpenCode(entry.work) && !isManagerExecutionWork(entry.work))
+        .map((entry) => workKey(entry.work)),
     ]
   }
 
-  private async pollOnce(signal: AbortSignal): Promise<DispatchWorkItem[]> {
+  private async pollOnce(signal: AbortSignal): Promise<PolledDispatch[]> {
     const bounded = boundedSignal(signal, POLL_TIMEOUT_MS)
     try {
-      return await this.connection.poll(bounded.signal, this.pollReport())
+      const workItems = await this.connection.poll(bounded.signal, this.pollReport())
+      const takeLast = (
+        this.connection as ServerConnection & {
+          takeLastPolledDispatches?: (items: readonly DispatchWorkItem[]) => PolledDispatch[]
+        }
+      ).takeLastPolledDispatches
+      const works = takeLast ? takeLast.call(this.connection, workItems) : workItems.map((work) => ({ work }))
+      const epoch = this.connection.deploymentEpoch
+      if (
+        epoch &&
+        this.observedManagerDeploymentEpoch &&
+        epoch !== this.observedManagerDeploymentEpoch
+      ) {
+        await this.invalidateManagerExecutions()
+      }
+      if (epoch) this.observedManagerDeploymentEpoch = epoch
+      return works
     } finally {
       bounded.dispose()
     }
+  }
+
+  private async invalidateManagerExecutions(): Promise<void> {
+    for (const entry of this.inFlight.values()) {
+      if (entry.work.projectId === '__mohist_slack_manager__') entry.controller.abort()
+    }
+    const boundaries = [...this.managerExecutions.values()]
+    this.managerExecutions.clear()
+    await Promise.allSettled(boundaries.map((boundary) => boundary.dispose()))
   }
 
   /**
@@ -858,6 +929,7 @@ export class RunnerHost {
     runtimeReadiness: RuntimeReadinessWitness[]
     connectionId: string | null
     admissionReady: boolean
+    deploymentEpoch: string | null
   } {
     const durableStarted = this.workResultJournal.ready()
       ? this.workResultJournal.started().map((entry) => workKey(entry.work))
@@ -876,6 +948,7 @@ export class RunnerHost {
         this.terminalTaskLogDelivery.ready() &&
         this.agentSessionRuntimeEventOutbox.ready() &&
         this.workResultJournal.ready(),
+      deploymentEpoch: this.connection.deploymentEpoch,
     }
   }
 

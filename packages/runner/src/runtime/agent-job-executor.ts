@@ -25,6 +25,7 @@ import {
 } from './workspace-entity.js'
 import { executeOpenCodeTurn, executePiTurn, failureResult, type AgentJobTurnDeps } from './agent-job-turn.js'
 import { runnerLogger } from '../system/logger.js'
+import type { ManagerExecutionBoundary } from './manager-execution-boundary.js'
 
 const executionSourceLog = runnerLogger.child('execution-source')
 
@@ -83,7 +84,11 @@ export class AgentJobExecutor {
     private readonly runtimeTurnRegistry: RuntimeTurnRegistry | null = null,
   ) {}
 
-  async execute(work: DispatchWorkItem, signal: AbortSignal): Promise<WorkItemResult> {
+  async execute(
+    work: DispatchWorkItem,
+    signal: AbortSignal,
+    managerExecution: ManagerExecutionBoundary | null = null,
+  ): Promise<WorkItemResult> {
     if (work.ownerKind !== 'agent-job') {
       return failureResult(
         'invalid-dispatch',
@@ -186,7 +191,7 @@ export class AgentJobExecutor {
 
     if (runtimeName === 'pi') {
       return executePiTurn(
-        this.turnDeps(),
+        this.turnDeps(managerExecution),
         work,
         signal,
         payload,
@@ -198,10 +203,23 @@ export class AgentJobExecutor {
         workDir,
         binding,
         skills,
+        managerExecution,
       )
     }
+    let turnDeps = this.turnDeps(managerExecution)
+    if (managerExecution) {
+      const isolated = await managerExecution.openCodeRuntime(workDir, signal)
+      if (!isolated) {
+        return failureResult(
+          'runtime-unavailable',
+          'Manager OpenCode execution could not establish an isolated server process',
+          'opencode',
+        )
+      }
+      turnDeps = { ...turnDeps, runtimes: { ...turnDeps.runtimes, openCode: isolated } }
+    }
     return executeOpenCodeTurn(
-      this.turnDeps(),
+      turnDeps,
       work,
       signal,
       payload,
@@ -214,16 +232,18 @@ export class AgentJobExecutor {
       binding,
       skills,
       attachmentDelivery,
+      managerExecution,
     )
   }
 
-  private turnDeps(): AgentJobTurnDeps {
+  private turnDeps(managerExecution: ManagerExecutionBoundary | null = null): AgentJobTurnDeps {
     return {
       connection: this.connection,
       runtimes: this.runtimes,
       bindingRecoveryCoordinator: this.bindingRecoveryCoordinator,
       options: this.options,
       runtimeTurnRegistry: this.runtimeTurnRegistry,
+      managerExecution,
     }
   }
 
