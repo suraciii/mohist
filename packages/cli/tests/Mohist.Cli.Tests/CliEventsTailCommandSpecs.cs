@@ -427,11 +427,12 @@ public sealed class CliEventTailCommandSpecs : IDisposable
     }
 
     [Theory]
-    [InlineData("{\"jsonrpc\":\"2.0\",\"method\":\"event.domain\",\"params\":{\"event\":[]}}")]
-    [InlineData("{\"jsonrpc\":\"2.0\",\"method\":\"event.domain\",\"params\":[]}")]
-    [InlineData("{\"jsonrpc\":\"2.0\",\"method\":1,\"params\":{}}")]
-    public async Task Tail_MalformedNotification_FencesAttemptWithoutOutput(string notification)
+    [InlineData("event-not-object", "{\"jsonrpc\":\"2.0\",\"method\":\"event.domain\",\"params\":{\"event\":[]}}")]
+    [InlineData("params-not-object", "{\"jsonrpc\":\"2.0\",\"method\":\"event.domain\",\"params\":[]}")]
+    [InlineData("method-not-string", "{\"jsonrpc\":\"2.0\",\"method\":1,\"params\":{}}")]
+    public async Task Tail_MalformedNotification_FencesAttemptWithoutOutput(string caseName, string notification)
     {
+        _ = caseName;
         using var cts = new CancellationTokenSource();
         var factory = new FakeEventSocketFactory();
         var socket = new FakeEventSocket(factory).AddJson(Ack).AddJson(notification);
