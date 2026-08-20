@@ -32,7 +32,7 @@ import {
   suiteDeadlinesAt,
   type SuiteDeadlines,
 } from './deadline.js'
-import { selectApplicationTracks, selectRepositoryTracks, validatePlan } from './plan.js'
+import { planIdentity, selectApplicationTracks, selectRepositoryTracks, validatePlan } from './plan.js'
 import {
   buildLedgerEnvironment,
   createExecutionRunId,
@@ -1389,6 +1389,7 @@ export async function main(
     mode === 'run' &&
     !writeJsonEvidence(artifactRoot, 'plan.json', {
       sourceRevision: canonicalRun?.sourceRevision,
+      planIdentity: planIdentity(config),
       suiteStart,
       hardDeadlineAt: deadlines.hardDeadlineAt,
       executionDeadlineAt: deadlines.executionDeadlineAt,
@@ -1564,6 +1565,7 @@ export async function main(
     const evidenceWritten = writeJsonEvidence(artifactRoot, 'summary.json', {
       schemaVersion: 1,
       sourceRevision: canonicalRun?.sourceRevision,
+      planIdentity: planIdentity(config),
       suiteStart,
       hardDeadlineAt: deadlines.hardDeadlineAt,
       executionDeadlineAt: deadlines.executionDeadlineAt,
