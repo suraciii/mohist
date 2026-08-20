@@ -274,7 +274,7 @@ public sealed class MohistDbFixture : IAsyncLifetime
         public NoopRunnerStatusService()
             : base(
                 grainFactory: new NullDispatchGrainFactory(),
-                connectionTracker: new Mohist.Server.Runner.Services.SignalR.RunnerConnectionTracker(),
+                connectionTracker: new Mohist.Server.Runner.Services.RunnerConnectionTracker(),
                 timeProvider: new Microsoft.Extensions.Time.Testing.FakeTimeProvider(Mohist.Server.TestSupport.TestTime.UtcNow))
         {
         }

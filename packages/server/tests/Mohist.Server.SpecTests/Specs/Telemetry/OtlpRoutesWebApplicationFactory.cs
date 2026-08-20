@@ -18,7 +18,7 @@ using Mohist.Server.Infrastructure.Events;
 using Mohist.Server.Infrastructure.Hosting;
 using Mohist.Server.Infrastructure.Workspace;
 using Mohist.Server.Otel;
-using Mohist.Server.Runner.Services.SignalR;
+using Mohist.Server.Runner.Services;
 using Mohist.Server.SystemInfo;
 using Mohist.Server.SpecTests.Support;
 using Mohist.Server.TestSupport;

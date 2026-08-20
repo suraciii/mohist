@@ -25,7 +25,7 @@ using Mohist.Server.Infrastructure.Slack.Ports;
 using Mohist.Server.Infrastructure.Workspace;
 using Mohist.Server.Logging;
 using Mohist.Server.Otel;
-using Mohist.Server.Runner.Services.SignalR;
+using Mohist.Server.Runner.Services;
 using Mohist.Server.Sessions.Services;
 using Mohist.Server.SystemInfo;
 using Mohist.Server.Workflow.Storage;
@@ -263,7 +263,7 @@ public class MohistWebApplicationFactory : WebApplicationFactory<Program>
         // WebApplicationFactory must never fall through to the production
         // Kestrel listener. This is a logical TestServer URL; no socket is
         // opened and requests stay inside the in-process handler.
-        builder.UseTestServer();
+        builder.UseTestServer(options => options.PreserveExecutionContext = true);
         builder.UseSetting(WebHostDefaults.ServerUrlsKey, "http://localhost");
         builder.UseEnvironment(MohistHostEnvironment.Testing);
         builder.UseSetting("Mohist:Testing:InMemoryOrleansTransport", "true");
@@ -379,9 +379,9 @@ public class MohistWebApplicationFactory : WebApplicationFactory<Program>
             services.AddSingleton<IAgentLaunchParticipantProbe>(provider => provider.GetRequiredService<AgentLaunchParticipantProbe>());
             services.RemoveAll<IAgentSessionPersistenceObserver>();
             services.AddSingleton<IAgentSessionPersistenceObserver>(Persistence);
-            services.RemoveAll<IHubContext<RunnerHub>>();
-            services.AddSingleton<RecordingRunnerHubContext>();
-            services.AddSingleton<IHubContext<RunnerHub>>(provider => provider.GetRequiredService<RecordingRunnerHubContext>());
+            services.RemoveAll<IRunnerControlTransport>();
+            services.AddSingleton<RecordingRunnerControlTransport>();
+            services.AddSingleton<IRunnerControlTransport>(provider => provider.GetRequiredService<RecordingRunnerControlTransport>());
             services.RemoveAll<ConfigService>();
             services.RemoveAll<IConfigDocumentStore>();
             services.AddSingleton<InMemoryConfigDocumentStore>();

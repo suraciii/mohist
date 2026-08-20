@@ -1,6 +1,6 @@
 using Mohist.Server.Infrastructure.Hosting;
 using Mohist.Server.Runner.Grains;
-using Mohist.Server.Runner.Services.SignalR;
+using Mohist.Server.Runner.Services;
 
 namespace Mohist.Server.Runner.Services;
 

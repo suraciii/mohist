@@ -154,8 +154,7 @@ public sealed class AuthResolutionMiddleware : IMiddleware, IScopedService
 
     /// <summary>
     /// The runner id a runner-scoped request self-declares, in priority
-    /// order: the <c>/api/runner/{{runnerId}}/**</c> path segment, the
-    /// <c>/hubs/runner</c> query parameter, and the
+    /// order: the <c>/api/runner/{{runnerId}}/**</c> path segment and the
     /// <c>x-mohist-runner-id</c> header (task-log uploads). The auth
     /// layer never trusts any of these — they must all match the
     /// credential's binding.
@@ -171,15 +170,6 @@ public sealed class AuthResolutionMiddleware : IMiddleware, IScopedService
                 && string.Equals(segments[1], "runner", StringComparison.Ordinal))
             {
                 return segments[2];
-            }
-
-            if (segments.Length >= 2
-                && string.Equals(segments[0], "hubs", StringComparison.Ordinal)
-                && string.Equals(segments[1], "runner", StringComparison.Ordinal))
-            {
-                var query = context.Request.Query["runnerId"].ToString();
-                if (!string.IsNullOrWhiteSpace(query))
-                    return query;
             }
         }
 

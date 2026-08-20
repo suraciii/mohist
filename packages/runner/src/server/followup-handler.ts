@@ -7,7 +7,7 @@
 //     resolver, resolver returning null, resolver throwing (logged)
 //   - resolves the runtime accessor at invocation time (host-owned
 //     late binding), so a runtime built or replaced after
-//     SignalR client construction is visible to later commands
+//     control WebSocket client construction is visible to later commands
 //   - admits a follow-up command only when (a) the binding resolves and
 //     (b) the captured runtime is ready and (c) the outbox is healthy;
 //     otherwise returns `{ accepted: false, error: "unavailable" }`
@@ -26,7 +26,6 @@
 //     does NOT re-invoke the prompt — the durable record is now under
 //     the outbox's retry/recovery policy
 
-import * as signalR from '@microsoft/signalr'
 import { errorMessage } from '../core/errors.js'
 import {
   resolveSessionTarget,
@@ -77,11 +76,6 @@ export interface FollowupHandlerDeps {
 export interface FollowupDeliveryResult {
   accepted: boolean
   error?: 'missing' | 'unavailable'
-}
-
-export function registerFollowupHandler(conn: signalR.HubConnection, deps: FollowupHandlerDeps): void {
-  const handler = createFollowupHandler(deps)
-  conn.on('ReceiveFollowup', handler)
 }
 
 export function createFollowupHandler(

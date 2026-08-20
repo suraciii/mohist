@@ -8,7 +8,7 @@ using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Infrastructure.Orleans;
 using Mohist.Server.Issue.Grains;
 using Mohist.Server.Runner.Grains;
-using Mohist.Server.Runner.Services.SignalR;
+using Mohist.Server.Runner.Services;
 using Mohist.Server.Sessions.Domain;
 using Mohist.Server.Sessions.Grains;
 using Mohist.Server.SpecTests.Support;
@@ -48,7 +48,7 @@ public class AgentSessionRecoveryConflictApiSpecs : AgentSessionRecoveryApiTestS
         using var doc = JsonDocument.Parse(body);
         Assert.Equal("session_active", doc.RootElement.GetProperty("code").GetString());
         Assert.Equal(currentSession.Id, doc.RootElement.GetProperty("details").GetProperty("sessionId").GetString());
-        Assert.Empty(RunnerHub.Invocations);
+        Assert.Empty(RunnerControl.Invocations);
     }
 
     [Fact]

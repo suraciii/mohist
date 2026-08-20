@@ -1,6 +1,6 @@
 import { isAbsolute, relative, resolve } from 'node:path'
 
-// Wire shape for workspace-scoped SignalR queries. `workspacePath` is the
+// Wire shape for workspace-scoped control WebSocket queries. `workspacePath` is the
 // on-disk worktree the runner materialized; `branch` is the head ref the
 // dispatch put into the worktree (e.g. `mohist/run-${workflowRunId}`);
 // `baseBranch` is the upstream branch the server-side review APIs diff

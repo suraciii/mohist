@@ -555,7 +555,7 @@ export class OpenCodeRuntime {
 
   /**
    * Run a Follow-up prompt to completion on an existing Runtime Session.
-   * The SignalR handler still acknowledges the command immediately;
+   * The control WebSocket handler still acknowledges the command immediately;
    * this runtime owns completion and event projection.
    */
   async followup(

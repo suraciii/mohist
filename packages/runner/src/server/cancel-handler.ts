@@ -1,8 +1,8 @@
 // The cancel handler does NOT consult outbox health — it is the one
-// SignalR operation that must remain available while the durable
+// control WebSocket operation that must remain available while the durable
 // snapshot is being recovered. It captures the runtime via the host-owned
 // invocation-time accessor at command time (a runtime initialized or
-// replaced after SignalR client construction is therefore visible) and
+// replaced after control WebSocket client construction is therefore visible) and
 // resolves the binding through the binding-only `followupTargetResolver`.
 //
 // The cancel reply carries `interruptUnconfirmed` whenever the bound
@@ -23,7 +23,6 @@
 // the cancel reply still flows to the caller, because cancel must remain
 // available while the durable snapshot is being recovered.
 
-import * as signalR from '@microsoft/signalr'
 import {
   sessionTargetFromWireTarget,
   type CancelAgentSessionPayload,
@@ -52,10 +51,6 @@ export interface CancelHandlerDeps {
   piRuntime?: CommandRuntimeAccessors['pi']
   agentSessionRuntimeEventOutbox?: AgentSessionRuntimeEventOutbox | null
   cancelOperationJournal?: CancelOperationJournalStore | null
-}
-
-export function registerCancelHandler(conn: signalR.HubConnection, deps: CancelHandlerDeps): void {
-  conn.on('CancelAgentSession', createCancelHandler(deps))
 }
 
 export function createCancelHandler(

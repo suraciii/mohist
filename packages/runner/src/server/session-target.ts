@@ -82,7 +82,7 @@ export type FollowupTargetResolver = (
 
 /**
  * Discriminated session target carried in the unified
- * `ReceiveFollowup` SignalR payload. The runner
+ * `ReceiveFollowup` control WebSocket payload. The runner
  * branches on `kind` to pick the right runtime-events endpoint
  * (`workflow:` / `generic:`) and the right server-side
  * runtime endpoint.
@@ -106,7 +106,7 @@ export interface ReceiveFollowupSessionTarget {
 }
 
 /**
- * Unified payload delivered by the server-side `ReceiveFollowup` SignalR
+ * Unified payload delivered by the server-side `ReceiveFollowup` control WebSocket
  * method. The `text` field is always present. It may be empty when accepted
  * attachment descriptors are present; the server rejects an empty input
  * only when there are no accepted attachments to deliver.
@@ -151,7 +151,7 @@ export interface ReceiveFollowupPayload {
   slackExecutionContext?: unknown
 }
 
-// Payload delivered by the server-side `ReceiveWorkflowRunStatus` SignalR
+// Payload delivered by the server-side `ReceiveWorkflowRunStatus` control WebSocket
 // method when a workflow run reaches a terminal state. The status string
 // is the canonical WorkflowRunStatus enum name (`Completed`, `Stopped`,
 // `Failed` for terminal; non-terminal statuses are not delivered by the
@@ -162,7 +162,7 @@ export interface ReceiveWorkflowRunStatusPayload {
 }
 
 /**
- * Payload delivered by the server-side `CancelAgentSession` SignalR
+ * Payload delivered by the server-side `CancelAgentSession` control WebSocket
  * invocation. Distinct from
  * `ReceiveFollowup` because cancel needs a reply path (the runner
  * returns `{ state: "stopped" | "unknown" | "stop-requested" | <terminal-state> }`)
@@ -198,7 +198,7 @@ export interface CancelAgentSessionReply {
 }
 
 // Derives a discriminated `SessionTarget` from the
-// unified `ReceiveFollowup` SignalR payload. Returns `null` when the
+// unified `ReceiveFollowup` control WebSocket payload. Returns `null` when the
 // payload carries no usable target — the caller drops the message
 // silently, matching the existing "unknown session" contract.
 export function resolveSessionTarget(payload: ReceiveFollowupPayload): SessionTarget | null {

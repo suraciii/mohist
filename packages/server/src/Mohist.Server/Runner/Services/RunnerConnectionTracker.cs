@@ -3,7 +3,7 @@ using Mohist.Server.Infrastructure.Hosting;
 using Mohist.Server.Runner.Grains;
 using Mohist.Server.Sessions.Services;
 
-namespace Mohist.Server.Runner.Services.SignalR;
+namespace Mohist.Server.Runner.Services;
 
 public class RunnerConnectionTracker : ISingletonService, IAgentSessionConnectionRegistry
 {
@@ -68,6 +68,11 @@ public class RunnerConnectionTracker : ISingletonService, IAgentSessionConnectio
             ? connection.Generation
             : null;
     }
+
+    public bool Matches(string runnerId, string? connectionId) =>
+        connectionId is not null
+        && _connections.TryGetValue(runnerId, out var connection)
+        && string.Equals(connection.ConnectionId, connectionId, StringComparison.Ordinal);
 
     public RunnerPollRequest ApplyPollAdmission(string runnerId, RunnerPollRequest req)
     {

@@ -1,4 +1,3 @@
-import type * as signalR from '@microsoft/signalr'
 import type { SessionCommandJournalStore } from '../runtime/session-command-journal.js'
 
 export type SessionCommand = 'compact' | 'reset'
@@ -39,10 +38,6 @@ export interface SessionCommandHandlerDeps {
   handler?: SessionCommandHandler | null
   journal?: SessionCommandJournalStore | null
   reconcileStarted?: SessionCommandReconciler | null
-}
-
-export function registerSessionCommandHandler(conn: signalR.HubConnection, deps: SessionCommandHandlerDeps): void {
-  conn.on('SessionCommand', createSessionCommandHandler(deps))
 }
 
 export function createSessionCommandHandler(

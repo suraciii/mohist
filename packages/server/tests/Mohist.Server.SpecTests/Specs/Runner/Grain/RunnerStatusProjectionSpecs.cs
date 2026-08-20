@@ -5,7 +5,6 @@ using System.Threading.Tasks;
 using Mohist.Server.Infrastructure.Orleans;
 using Mohist.Server.Runner.Grains;
 using Mohist.Server.Runner.Services;
-using Mohist.Server.Runner.Services.SignalR;
 using Mohist.Server.Workflow.Domain.Run;
 using Mohist.Server.Workflow.Grains;
 using Xunit;

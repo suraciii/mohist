@@ -1,7 +1,6 @@
-using Microsoft.AspNetCore.SignalR;
 using Microsoft.Extensions.DependencyInjection;
 using Mohist.Server.Api;
-using Mohist.Server.Runner.Services.SignalR;
+using Mohist.Server.Runner.Services;
 using Mohist.Server.Contracts;
 using Mohist.Server.Sessions.Domain;
 using Mohist.Server.Sessions.Grains;
@@ -28,7 +27,7 @@ public sealed class SessionTreeStopTargetAdapterSpecs
         var projectId = $"adapter-matrix-{Guid.NewGuid():N}";
         await using var scope = _fixture.Services.CreateAsyncScope();
         var adapter = scope.ServiceProvider.GetRequiredService<ISessionTreeStopTargetAdapter>();
-        var hub = scope.ServiceProvider.GetRequiredService<IHubContext<RunnerHub>>() as RecordingRunnerHubContext
+        var hub = scope.ServiceProvider.GetRequiredService<IRunnerControlTransport>() as RecordingRunnerControlTransport
             ?? throw new InvalidOperationException("Recording runner hub context is not configured.");
 
         var queued = await OpenSessionAsync(projectId, "adapter-queued");
@@ -48,12 +47,12 @@ public sealed class SessionTreeStopTargetAdapterSpecs
         await executing.MarkTurnExecutingAsync(executingTurn);
         var runnerId = "adapter-runner";
         _fixture.Services.GetRequiredService<RunnerConnectionTracker>().Register(runnerId, "adapter-executing-connection");
-        hub.SetInvocationResponse("CancelAgentSession", new RunnerStopReply("stopped"));
+        hub.SetInvocationResponse("session.stop", new RunnerStopReply("stopped"));
         var executingInvocationCount = hub.Invocations.Count;
         var executingResult = await adapter.StopAsync(projectId, Target(
             "adapter-executing", executingTurn, AgentTurnStatus.Executing, "adapter-executing-op", runnerId));
         Assert.Equal(SessionTreeStopTargetOutcome.Cancelled, executingResult.Outcome);
-        Assert.Contains(hub.Invocations.Skip(executingInvocationCount), item => item.Method == "CancelAgentSession");
+        Assert.Contains(hub.Invocations.Skip(executingInvocationCount), item => item.Method == "session.stop");
 
         var idleResult = await adapter.StopAsync(projectId, Target(
             "adapter-idle", null, null, "adapter-idle-op"));
@@ -83,13 +82,13 @@ public sealed class SessionTreeStopTargetAdapterSpecs
         var projectId = $"adapter-not-cancellable-{Guid.NewGuid():N}";
         await using var scope = _fixture.Services.CreateAsyncScope();
         var adapter = scope.ServiceProvider.GetRequiredService<ISessionTreeStopTargetAdapter>();
-        var hub = scope.ServiceProvider.GetRequiredService<IHubContext<RunnerHub>>() as RecordingRunnerHubContext
+        var hub = scope.ServiceProvider.GetRequiredService<IRunnerControlTransport>() as RecordingRunnerControlTransport
             ?? throw new InvalidOperationException("Recording runner hub context is not configured.");
         var runnerId = "adapter-runner";
         _fixture.Services.GetRequiredService<RunnerConnectionTracker>().Register(
             runnerId,
             "adapter-not-cancellable-connection");
-        hub.SetInvocationResponse("CancelAgentSession", new RunnerStopReply("not-cancellable"));
+        hub.SetInvocationResponse("session.stop", new RunnerStopReply("not-cancellable"));
 
         var sessionId = $"adapter-not-cancellable-{Guid.NewGuid():N}";
         var session = await OpenSessionAsync(projectId, sessionId);

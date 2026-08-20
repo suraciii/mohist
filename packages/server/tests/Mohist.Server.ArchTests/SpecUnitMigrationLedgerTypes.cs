@@ -42,6 +42,8 @@ internal sealed class SpecUnitMigrationLedgerRow
     public SpecUnitMigrationMovedRecord? Moved { get; set; }
     public SpecUnitMigrationRowHistory? History { get; set; }
     public string? ValidationHead { get; set; }
+    public bool Retired { get; set; }
+    public string? RetirementReason { get; set; }
 }
 
 internal sealed class SpecUnitMigrationMovedRecord

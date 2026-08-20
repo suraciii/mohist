@@ -70,6 +70,61 @@ public sealed class RunnerControlWebSocketConnectionTests
     }
 
     [Fact]
+    public async Task RequestTimeoutStartsBeforeBlockedEnqueueCallbackReturns()
+    {
+        var time = new FakeTimeProvider();
+        await using var fixture = new ConnectionFixture(time);
+        var callbackEntered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var callbackRelease = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var callbackCalls = 0;
+        var response = Task.Run(async () => await fixture.Connection.SendRequestAsync<TestParams, TestResult>(
+            "test",
+            new TestParams("input"),
+            allowsNull: false,
+            () =>
+            {
+                Interlocked.Increment(ref callbackCalls);
+                callbackEntered.TrySetResult();
+                callbackRelease.Task.GetAwaiter().GetResult();
+            },
+            TestContext.Current.CancellationToken));
+        await callbackEntered.Task.WaitAsync(TestContext.Current.CancellationToken);
+
+        time.Advance(TimeSpan.FromSeconds(15));
+        callbackRelease.TrySetResult();
+
+        await Assert.ThrowsAsync<RunnerControlUnavailableException>(() => response);
+        Assert.Equal(1, callbackCalls);
+    }
+
+    [Fact]
+    public async Task ThrowingEnqueueCallbackDoesNotInvalidateTypedResponse()
+    {
+        await using var fixture = new ConnectionFixture();
+        var callbackCalls = 0;
+        var response = fixture.Connection.SendRequestAsync<TestParams, TestResult>(
+            "test",
+            new TestParams("input"),
+            allowsNull: false,
+            () =>
+            {
+                Interlocked.Increment(ref callbackCalls);
+                throw new InvalidOperationException("observer failed");
+            },
+            TestContext.Current.CancellationToken);
+        var id = RequestId(await fixture.Socket.NextSentAsync(TestContext.Current.CancellationToken));
+        fixture.Socket.ReceiveText(JsonSerializer.Serialize(new
+        {
+            jsonrpc = "2.0",
+            id,
+            result = new { value = "output" },
+        }, JSON.Options));
+
+        Assert.Equal(new TestResult("output"), await response);
+        Assert.Equal(1, callbackCalls);
+    }
+
+    [Fact]
     public async Task DisconnectCompletesPendingRequestUnavailable()
     {
         await using var fixture = new ConnectionFixture();

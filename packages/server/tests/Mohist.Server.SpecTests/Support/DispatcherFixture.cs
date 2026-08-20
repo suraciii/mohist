@@ -20,7 +20,6 @@ using Mohist.Server.Issue.Domain.Events;
 using Mohist.Server.Issue.Services.WorkflowProfiles;
 using Mohist.Server.Runner.Grains;
 using Mohist.Server.Runner.Services;
-using Mohist.Server.Runner.Services.SignalR;
 using Mohist.Server.Sessions.Services;
 using Mohist.Server.SpecTests.Specs.Issue.Profile;
 using Mohist.Server.SpecTests.Support;

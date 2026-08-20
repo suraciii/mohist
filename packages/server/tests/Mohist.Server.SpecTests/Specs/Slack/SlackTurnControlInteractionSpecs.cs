@@ -14,7 +14,7 @@ using Mohist.Server.Infrastructure.Data.Slack;
 using Mohist.Server.Infrastructure.Security.Secrets;
 using Mohist.Server.Infrastructure.Slack;
 using Mohist.Server.Runner.Grains;
-using Mohist.Server.Runner.Services.SignalR;
+using Mohist.Server.Runner.Services;
 using Mohist.Server.Contracts;
 using Mohist.Server.Sessions.Domain;
 using Mohist.Server.Sessions.Grains;
@@ -62,7 +62,7 @@ public sealed class SlackTurnControlInteractionSpecs : IAsyncLifetime
                 "D-steer",
                 seeded.SessionId);
         }
-        var hub = _fixture.Services.GetRequiredService<RecordingRunnerHubContext>();
+        var hub = _fixture.Services.GetRequiredService<RecordingRunnerControlTransport>();
         hub.Clear();
 
         using var response = await _fixture.Client.PostAsJsonAsync(IngressPath(connection, "/ingress"), new
@@ -82,7 +82,7 @@ public sealed class SlackTurnControlInteractionSpecs : IAsyncLifetime
 
         Assert.True(result.GetProperty("followup").GetBoolean());
         Assert.Equal("accepted", result.GetProperty("kind").GetString());
-        Assert.DoesNotContain(hub.Invocations, invocation => invocation.Method == "CancelAgentSession");
+        Assert.DoesNotContain(hub.Invocations, invocation => invocation.Method == "session.stop");
         var session = _fixture.Grains.GetGrain<IAgentSessionGrain>(seeded.SessionId);
         Assert.Equal(AgentTurnControlClassification.Executing,
             (await session.ResolveTurnControlAsync(seeded.TurnId))?.Classification);
@@ -99,9 +99,9 @@ public sealed class SlackTurnControlInteractionSpecs : IAsyncLifetime
         var ownerAction = await CreateStopActionAsync(ownerConnection, ownerSession, "U_OWNER", "C-owner");
         Assert.Contains(SlackTurnControlService.StopActionId, ownerAction.Blocks.ToString(), StringComparison.Ordinal);
         Assert.DoesNotContain("xoxb", ownerAction.ActionValue, StringComparison.Ordinal);
-        var hub = _fixture.Services.GetRequiredService<RecordingRunnerHubContext>();
+        var hub = _fixture.Services.GetRequiredService<RecordingRunnerControlTransport>();
         hub.Clear();
-        hub.SetInvocationResponse("CancelAgentSession", new RunnerStopReply("stopped"));
+        hub.SetInvocationResponse("session.stop", new RunnerStopReply("stopped"));
 
         var ownerResult = await PostInteractionAsync(ownerConnection, ownerAction, "U_OWNER", "C-owner");
 
@@ -113,7 +113,7 @@ public sealed class SlackTurnControlInteractionSpecs : IAsyncLifetime
         var initiatorSession = await SeedExecutingSessionAsync(initiatorConnection, "U_INITIATOR", "C-initiator");
         var initiatorAction = await CreateStopActionAsync(initiatorConnection, initiatorSession, "U_INITIATOR", "C-initiator");
         hub.Clear();
-        hub.SetInvocationResponse("CancelAgentSession", new RunnerStopReply("stopped"));
+        hub.SetInvocationResponse("session.stop", new RunnerStopReply("stopped"));
 
         var initiatorResult = await PostInteractionAsync(initiatorConnection, initiatorAction, "U_INITIATOR", "C-initiator");
 
@@ -127,7 +127,7 @@ public sealed class SlackTurnControlInteractionSpecs : IAsyncLifetime
         var connection = await CreateConnectionAsync();
         var seeded = await SeedExecutingSessionAsync(connection, "U_INITIATOR", "C-auth");
         var action = await CreateStopActionAsync(connection, seeded, "U_INITIATOR", "C-auth");
-        var hub = _fixture.Services.GetRequiredService<RecordingRunnerHubContext>();
+        var hub = _fixture.Services.GetRequiredService<RecordingRunnerControlTransport>();
         hub.Clear();
 
         var result = await PostInteractionAsync(connection, action, "U_OTHER", "C-auth");
@@ -160,9 +160,9 @@ public sealed class SlackTurnControlInteractionSpecs : IAsyncLifetime
             $"{started.RunnerId}-connection");
         await _fixture.Grains.GetGrain<IAgentSessionGrain>(started.SessionId)
             .MarkTurnExecutingAsync(started.TurnId);
-        var hub = _fixture.Services.GetRequiredService<RecordingRunnerHubContext>();
+        var hub = _fixture.Services.GetRequiredService<RecordingRunnerControlTransport>();
         hub.Clear();
-        hub.SetInvocationResponse("CancelAgentSession", new RunnerStopReply("stopped"));
+        hub.SetInvocationResponse("session.stop", new RunnerStopReply("stopped"));
 
         var stopped = await PostInteractionAsync(connection, startedAction, "U_OWNER", "C-queued-stop");
 
@@ -176,7 +176,7 @@ public sealed class SlackTurnControlInteractionSpecs : IAsyncLifetime
         var connection = await CreateConnectionAsync();
         var seeded = await SeedExecutingSessionAsync(connection, "U_OWNER", "C-stale");
         var action = await CreateStopActionAsync(connection, seeded, "U_OWNER", "C-stale");
-        var hub = _fixture.Services.GetRequiredService<RecordingRunnerHubContext>();
+        var hub = _fixture.Services.GetRequiredService<RecordingRunnerControlTransport>();
         hub.Clear();
 
         var tampered = await PostInteractionAsync(
@@ -198,7 +198,7 @@ public sealed class SlackTurnControlInteractionSpecs : IAsyncLifetime
         Assert.Empty(hub.Invocations);
 
         var fresh = await CreateStopActionAsync(connection, seeded, "U_OWNER", "C-stale");
-        hub.SetInvocationResponse("CancelAgentSession", new RunnerStopReply("stopped"));
+        hub.SetInvocationResponse("session.stop", new RunnerStopReply("stopped"));
         var first = await PostInteractionAsync(connection, fresh, "U_OWNER", "C-stale");
         Assert.Equal("stopped", first.GetProperty("state").GetString());
         hub.Clear();

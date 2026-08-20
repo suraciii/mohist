@@ -2,7 +2,6 @@ using System.Text.Json;
 using Mohist.Server.Infrastructure;
 using Mohist.Server.Runner.Grains;
 using Mohist.Server.Runner.Services;
-using Mohist.Server.Runner.Services.SignalR;
 
 namespace Mohist.Server.Api;
 
@@ -38,10 +37,10 @@ public static partial class RunnerRoutes
                 ArtifactDigest: NormalizeIdentity(req.ArtifactDigest),
                 ReleaseId: NormalizeIdentity(req.ReleaseId),
                 Generation: req.Generation > 0 ? req.Generation : null);
-            await runner.HeartbeatRepairAsync(info);
-
-            if (!string.IsNullOrWhiteSpace(req.ConnectionId))
-                connections.Register(runnerId, req.ConnectionId);
+            if (connections.Matches(runnerId, req.ConnectionId))
+                await runner.HeartbeatRepairAsync(info);
+            else
+                await runner.HeartbeatAsync();
         }
         else
         {

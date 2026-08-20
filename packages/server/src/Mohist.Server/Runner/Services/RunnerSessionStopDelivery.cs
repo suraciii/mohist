@@ -1,22 +1,18 @@
-using Microsoft.AspNetCore.SignalR;
 using Mohist.Server.Infrastructure.Hosting;
 using Mohist.Server.Contracts;
 using Mohist.Server.Sessions.Services;
 
-namespace Mohist.Server.Runner.Services.SignalR;
+namespace Mohist.Server.Runner.Services;
 
 public sealed class RunnerSessionStopDelivery(
-    IHubContext<RunnerHub> runnerHub,
-    RunnerConnectionTracker connections,
+    IRunnerControlTransport control,
     ILogger<RunnerSessionStopDelivery> log) : ISessionStopDelivery, IScopedService
 {
     public async Task<SessionStopDeliveryResponse> DispatchAsync(
         SessionStopDeliveryRequest request,
         CancellationToken cancellationToken = default)
     {
-        var connectionId = connections.GetConnectionId(request.RunnerId);
-        if (string.IsNullOrWhiteSpace(connectionId)
-            || string.IsNullOrWhiteSpace(request.Runtime)
+        if (string.IsNullOrWhiteSpace(request.Runtime)
             || string.IsNullOrWhiteSpace(request.RuntimeSessionId)
             || string.IsNullOrWhiteSpace(request.WorkDir))
             return new(null, DispatchStarted: false);
@@ -39,14 +35,17 @@ public sealed class RunnerSessionStopDelivery(
                 binding,
                 SessionId: request.SessionId);
 
+        var dispatchStarted = false;
         try
         {
             return new(
-                await runnerHub.Clients.Client(connectionId).InvokeAsync<RunnerStopReply?>(
-                "CancelAgentSession",
+                await control.SendRequestAsync<SessionStopParams, RunnerStopReply>(
+                request.RunnerId,
+                "session.stop",
                 new SessionStopParams(target, request.SessionId, request.TurnId, request.OperationId),
+                () => dispatchStarted = true,
                 cancellationToken),
-                DispatchStarted: true);
+                DispatchStarted: dispatchStarted);
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
@@ -60,7 +59,7 @@ public sealed class RunnerSessionStopDelivery(
                 request.RunnerId,
                 request.SessionId,
                 request.TurnId);
-            return new(null, DispatchStarted: true);
+            return new(null, DispatchStarted: dispatchStarted);
         }
     }
 }

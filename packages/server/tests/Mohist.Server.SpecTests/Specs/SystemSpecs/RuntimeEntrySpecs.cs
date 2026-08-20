@@ -173,7 +173,7 @@ public class RuntimeEntrySpecs
     }
 
     [Fact]
-    public async Task AgentStatus_WhenRunnerUnregistered_HeartbeatRestoresPresence()
+    public async Task AgentStatus_WhenRunnerUnregistered_HeartbeatDoesNotRestoreRegistryMetadata()
     {
         var projectName = $"runtime-presence-repair-{Guid.NewGuid():N}";
         var project = await _fixture.Client.CreateProjectWithDefaultRepositoryAsync<ProjectDto>("/api/projects", projectName);
@@ -197,13 +197,13 @@ public class RuntimeEntrySpecs
 
             await _fixture.Client.PostOkAsync($"/api/runner/{runnerId}/heartbeat", new { capabilities = Array.Empty<string>(), hostname = "test-host", projectId = project.Id });
             var runnersAfterHeartbeat = await registry.ListRunnersAsync();
-            Assert.Contains(runnersAfterHeartbeat, r => r.RunnerId == runnerId);
+            Assert.Empty(runnersAfterHeartbeat);
 
             using var poll = await _fixture.Client.PostAsync($"/api/runner/{runnerId}/poll", content: null);
             Assert.True(poll.IsSuccessStatusCode);
 
             var runnersAfterPoll = await registry.ListRunnersAsync();
-            Assert.Contains(runnersAfterPoll, r => r.RunnerId == runnerId);
+            Assert.Empty(runnersAfterPoll);
         }
         finally
         {

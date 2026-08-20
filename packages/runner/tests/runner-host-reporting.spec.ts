@@ -26,8 +26,8 @@ type ReportingMocks = Record<
   | 'fetchConfig'
   | 'getWorkflowAgentSession'
   | 'getAgentSession'
-  | 'startSignalR'
-  | 'stopSignalR'
+  | 'startControl'
+  | 'stopControl'
   | 'getConnectionId'
   | 'probeLiveness'
   | 'blockingAction'
@@ -79,8 +79,8 @@ const uploadTaskLog = scopedMock('uploadTaskLog')
 const fetchConfig = scopedMock('fetchConfig')
 const getWorkflowAgentSession = scopedMock('getWorkflowAgentSession')
 const getAgentSession = scopedMock('getAgentSession')
-const startSignalR = scopedMock('startSignalR')
-const stopSignalR = scopedMock('stopSignalR')
+const startControl = scopedMock('startControl')
+const stopControl = scopedMock('stopControl')
 const getConnectionId = scopedMock('getConnectionId')
 const probeLiveness = scopedMock('probeLiveness')
 const blockingAction = scopedMock('blockingAction')
@@ -101,8 +101,8 @@ function createReportingMocks(): ReportingMocks {
     fetchConfig: vi.fn(async () => null),
     getWorkflowAgentSession: vi.fn(async () => null),
     getAgentSession: vi.fn(async () => null),
-    startSignalR: vi.fn(async () => undefined),
-    stopSignalR: vi.fn(async () => undefined),
+    startControl: vi.fn(async () => undefined),
+    stopControl: vi.fn(async () => undefined),
     getConnectionId: vi.fn(() => 'conn-1'),
     probeLiveness: vi.fn(async () => true),
     blockingAction: vi.fn(async ({ signal }: { signal: AbortSignal }) => {
@@ -137,10 +137,10 @@ vi.mock('../src/server/connection.js', () => ({
   },
 }))
 
-vi.mock('../src/server/runner-signalr.js', () => ({
-  RunnerSignalRClient: class {
-    start = startSignalR
-    stop = stopSignalR
+vi.mock('../src/server/runner-control-websocket.js', () => ({
+  RunnerControlWebSocketClient: class {
+    start = startControl
+    stop = stopControl
     getConnectionId = getConnectionId
     probeLiveness = probeLiveness
     forceReconnect = forceReconnect
@@ -282,8 +282,8 @@ describe('RunnerHost', () => {
       return { tracked: true, reason: 'accepted' }
     })
     poll.mockResolvedValue([])
-    startSignalR.mockResolvedValue(undefined)
-    stopSignalR.mockResolvedValue(undefined)
+    startControl.mockResolvedValue(undefined)
+    stopControl.mockResolvedValue(undefined)
     connect.mockResolvedValue(undefined)
     heartbeat.mockResolvedValue(undefined)
     disconnect.mockResolvedValue(undefined)
@@ -514,8 +514,8 @@ describe('RunnerHost', () => {
       await reportRelease.promise
       return {}
     })
-    startSignalR.mockResolvedValue(undefined)
-    stopSignalR.mockResolvedValue(undefined)
+    startControl.mockResolvedValue(undefined)
+    stopControl.mockResolvedValue(undefined)
     const controller = new AbortController()
     const held = {
       workflowRunId: 'wr-held',
@@ -571,8 +571,8 @@ describe('RunnerHost', () => {
       await reportRelease.promise
       return {}
     })
-    startSignalR.mockResolvedValue(undefined)
-    stopSignalR.mockResolvedValue(undefined)
+    startControl.mockResolvedValue(undefined)
+    stopControl.mockResolvedValue(undefined)
     const controller = new AbortController()
     const same = {
       workflowRunId: 'wr-dup',
@@ -642,8 +642,8 @@ describe('RunnerHost', () => {
       thirdReport.resolve()
       return { tracked: true }
     })
-    startSignalR.mockResolvedValue(undefined)
-    stopSignalR.mockResolvedValue(undefined)
+    startControl.mockResolvedValue(undefined)
+    stopControl.mockResolvedValue(undefined)
     const controller = new AbortController()
     const work = {
       workflowRunId: 'wr-retry',
@@ -719,8 +719,8 @@ describe('RunnerHost', () => {
       replayedReport.resolve()
       return { tracked: true, reason: 'accepted' }
     })
-    startSignalR.mockResolvedValue(undefined)
-    stopSignalR.mockResolvedValue(undefined)
+    startControl.mockResolvedValue(undefined)
+    stopControl.mockResolvedValue(undefined)
     const controller = new AbortController()
     const work = {
       workflowRunId: 'wr-unknown-replay',

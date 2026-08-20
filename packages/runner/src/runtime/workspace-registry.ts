@@ -1,6 +1,6 @@
-import { dirname, join, resolve } from "node:path"
-import { exists, readText } from "../system/process.js"
-import { currentRunnerFileSystem } from "../system/filesystem.js"
+import { dirname, join, resolve } from 'node:path'
+import { exists, readText } from '../system/process.js'
+import { currentRunnerFileSystem } from '../system/filesystem.js'
 
 // Runner-local registry of workspaces this runner has materialized. The
 // registry is runtime state, NOT domain truth — workflow run lifecycle
@@ -22,7 +22,7 @@ import { currentRunnerFileSystem } from "../system/filesystem.js"
 // rename. The atomic rename keeps the on-disk file valid even if the
 // runner is killed mid-write.
 
-export type WorkspaceRegistryPhase = "active" | "eligible" | "stuck"
+export type WorkspaceRegistryPhase = 'active' | 'eligible' | 'stuck'
 
 // Stable binding identity. The workspace path is a derived local handle,
 // never the authority used to recover a workflow after a runner restart.
@@ -71,7 +71,7 @@ export interface WorkspaceRegistryOptions {
   now?: () => Date
 }
 
-export const DEFAULT_WORKSPACE_REGISTRY_FILE = ".mohist/runner-state/workspaces.json"
+export const DEFAULT_WORKSPACE_REGISTRY_FILE = '.mohist/runner-state/workspaces.json'
 
 export class WorkspaceRegistry {
   private readonly runnerRoot: string
@@ -139,11 +139,11 @@ export class WorkspaceRegistry {
   // the registry is keyed by workflowRunId.
   async register(input: RegisterInput): Promise<WorkspaceRegistryEntry> {
     this.ensureLoaded()
-    if (!input.workflowRunId) throw new Error("workspace registry register requires workflowRunId")
-    if (!input.workspacePath) throw new Error("workspace registry register requires workspacePath")
+    if (!input.workflowRunId) throw new Error('workspace registry register requires workflowRunId')
+    if (!input.workspacePath) throw new Error('workspace registry register requires workspacePath')
     const workspacePath = resolve(input.workspacePath)
     if (isEphemeralManagedWorkspacePath(workspacePath)) {
-      throw new Error("workspace registry cannot persist a process-scoped /proc/fd workspace path")
+      throw new Error('workspace registry cannot persist a process-scoped /proc/fd workspace path')
     }
     const owner = this.pathIndex.get(workspacePath)
     if (owner && owner !== input.workflowRunId) {
@@ -159,11 +159,15 @@ export class WorkspaceRegistry {
       workspacePath,
       ...(binding ? { binding: { ...binding, runnerRoot: resolve(binding.runnerRoot) } } : {}),
       runBranch: input.runBranch ?? null,
-      phase: "active",
+      phase: 'active',
       materializedAt,
       terminalAt: existing?.terminalAt ?? null,
     }
-    if (existing && this.pathIndex.get(existing.workspacePath) === input.workflowRunId && existing.workspacePath !== workspacePath) {
+    if (
+      existing &&
+      this.pathIndex.get(existing.workspacePath) === input.workflowRunId &&
+      existing.workspacePath !== workspacePath
+    ) {
       this.pathIndex.delete(existing.workspacePath)
     }
     this.entries.set(input.workflowRunId, entry)
@@ -198,8 +202,8 @@ export class WorkspaceRegistry {
     this.ensureLoaded()
     const existing = this.entries.get(workflowRunId)
     if (!existing) return null
-    if (existing.phase !== "active") return { ...existing }
-    existing.phase = "eligible"
+    if (existing.phase !== 'active') return { ...existing }
+    existing.phase = 'eligible'
     existing.terminalAt = this.now().toISOString()
     await this.persist()
     return { ...existing }
@@ -218,8 +222,8 @@ export class WorkspaceRegistry {
     this.ensureLoaded()
     const existing = this.entries.get(workflowRunId)
     if (!existing) return null
-    if (existing.phase !== "eligible") return { ...existing }
-    existing.phase = "stuck"
+    if (existing.phase !== 'eligible') return { ...existing }
+    existing.phase = 'stuck'
     await this.persist()
     return { ...existing }
   }
@@ -245,7 +249,7 @@ export class WorkspaceRegistry {
 
   // Eagerly load the registry from disk. Idempotent. Called by
   // RunnerHost at startup so the in-memory cache is hot before the
-  // first dispatch or SignalR RPC.
+  // first dispatch or control WebSocket RPC.
   async load(): Promise<void> {
     await this.loadFromDisk()
   }
@@ -261,19 +265,18 @@ export class WorkspaceRegistry {
 
   private validateBinding(workflowRunId: string, workspacePath: string, binding: WorkspaceBindingIdentity): void {
     if (!this.bindingBelongsToRunner(binding)) {
-      throw new Error(`workspace registry binding does not belong to runner ${this.runnerId ?? "unknown"}`)
+      throw new Error(`workspace registry binding does not belong to runner ${this.runnerId ?? 'unknown'}`)
     }
     if (binding.workflowRunId !== workflowRunId) {
-      throw new Error("workspace registry binding workflowRunId does not match the entry")
+      throw new Error('workspace registry binding workflowRunId does not match the entry')
     }
     if (workspacePath !== workflowWorkspacePath(binding.runnerRoot, workflowRunId)) {
-      throw new Error("workspace registry binding must use the canonical workflow workspace path")
+      throw new Error('workspace registry binding must use the canonical workflow workspace path')
     }
   }
 
   private bindingBelongsToRunner(binding: WorkspaceBindingIdentity): boolean {
-    return resolve(binding.runnerRoot) === this.runnerRoot
-      && (!this.runnerId || binding.runnerId === this.runnerId)
+    return resolve(binding.runnerRoot) === this.runnerRoot && (!this.runnerId || binding.runnerId === this.runnerId)
   }
 
   private async loadFromDisk(): Promise<void> {
@@ -304,7 +307,13 @@ export class WorkspaceRegistry {
       return
     }
     const file = parsed as Partial<WorkspaceRegistryFile> | null
-    if (!file || typeof file !== "object" || (file.version !== 2 && file.version !== 3) || !file.entries || typeof file.entries !== "object") {
+    if (
+      !file ||
+      typeof file !== 'object' ||
+      (file.version !== 2 && file.version !== 3) ||
+      !file.entries ||
+      typeof file.entries !== 'object'
+    ) {
       this.loaded = true
       return
     }
@@ -312,12 +321,12 @@ export class WorkspaceRegistry {
     const nextPathIndex = new Map<string, string>()
     let discardedStaleBinding = false
     for (const [key, value] of Object.entries(file.entries)) {
-      if (!value || typeof value !== "object") continue
+      if (!value || typeof value !== 'object') continue
       const entry = value as Partial<WorkspaceRegistryEntry>
-      if (typeof entry.workflowRunId !== "string" || entry.workflowRunId.length === 0) continue
-      if (typeof entry.workspacePath !== "string" || entry.workspacePath.length === 0) continue
-      if (entry.phase !== "active" && entry.phase !== "eligible" && entry.phase !== "stuck") continue
-      if (typeof entry.materializedAt !== "string") continue
+      if (typeof entry.workflowRunId !== 'string' || entry.workflowRunId.length === 0) continue
+      if (typeof entry.workspacePath !== 'string' || entry.workspacePath.length === 0) continue
+      if (entry.phase !== 'active' && entry.phase !== 'eligible' && entry.phase !== 'stuck') continue
+      if (typeof entry.materializedAt !== 'string') continue
       const workspacePath = resolve(entry.workspacePath)
       if (isEphemeralManagedWorkspacePath(workspacePath)) {
         discardedStaleBinding = true
@@ -343,14 +352,14 @@ export class WorkspaceRegistry {
         return
       }
       const loadedEntry = {
-        issueNumber: typeof entry.issueNumber === "number" ? entry.issueNumber : 0,
+        issueNumber: typeof entry.issueNumber === 'number' ? entry.issueNumber : 0,
         workflowRunId: entry.workflowRunId,
         workspacePath,
         ...(binding ? { binding } : {}),
-        runBranch: typeof entry.runBranch === "string" ? entry.runBranch : null,
+        runBranch: typeof entry.runBranch === 'string' ? entry.runBranch : null,
         phase: entry.phase,
         materializedAt: entry.materializedAt,
-        terminalAt: typeof entry.terminalAt === "string" ? entry.terminalAt : null,
+        terminalAt: typeof entry.terminalAt === 'string' ? entry.terminalAt : null,
       }
       nextEntries.set(key, loadedEntry)
       nextPathIndex.set(workspacePath, key)
@@ -385,22 +394,22 @@ export function defaultWorkspaceRegistryFilePath(runnerRoot: string): string {
 }
 
 export function isEphemeralManagedWorkspacePath(workspacePath: string): boolean {
-  const normalized = resolve(workspacePath).replaceAll("\\", "/")
+  const normalized = resolve(workspacePath).replaceAll('\\', '/')
   return /^\/proc\/(?:\d+|self)\/fd\/\d+(?:\/|$)/.test(normalized)
 }
 
 export function workflowWorkspacePath(runnerRoot: string, workflowRunId: string): string {
-  return resolve(join(runnerRoot, "workspaces", workflowRunId))
+  return resolve(join(runnerRoot, 'workspaces', workflowRunId))
 }
 
 function parseWorkspaceBinding(value: unknown): WorkspaceBindingIdentity | null {
-  if (!value || typeof value !== "object") return null
+  if (!value || typeof value !== 'object') return null
   const candidate = value as Partial<WorkspaceBindingIdentity>
-  if (typeof candidate.runnerId !== "string" || candidate.runnerId.trim().length === 0) return null
-  if (typeof candidate.runnerRoot !== "string" || candidate.runnerRoot.trim().length === 0) return null
-  if (typeof candidate.workflowRunId !== "string" || candidate.workflowRunId.trim().length === 0) return null
-  if (typeof candidate.gitUrl !== "string" || candidate.gitUrl.trim().length === 0) return null
-  if (typeof candidate.baseBranch !== "string" || candidate.baseBranch.trim().length === 0) return null
+  if (typeof candidate.runnerId !== 'string' || candidate.runnerId.trim().length === 0) return null
+  if (typeof candidate.runnerRoot !== 'string' || candidate.runnerRoot.trim().length === 0) return null
+  if (typeof candidate.workflowRunId !== 'string' || candidate.workflowRunId.trim().length === 0) return null
+  if (typeof candidate.gitUrl !== 'string' || candidate.gitUrl.trim().length === 0) return null
+  if (typeof candidate.baseBranch !== 'string' || candidate.baseBranch.trim().length === 0) return null
   return {
     runnerId: candidate.runnerId.trim(),
     runnerRoot: resolve(candidate.runnerRoot),
@@ -453,7 +462,7 @@ export interface NamedWorkspaceRegistryOptions {
   now?: () => Date
 }
 
-export const DEFAULT_NAMED_WORKSPACE_REGISTRY_FILE = ".mohist/runner-state/named-workspaces.json"
+export const DEFAULT_NAMED_WORKSPACE_REGISTRY_FILE = '.mohist/runner-state/named-workspaces.json'
 
 export function namedWorkspaceRegistryKey(projectId: string, workspaceName: string): string {
   return `ws:${projectId}:${workspaceName}`
@@ -503,9 +512,9 @@ export class NamedWorkspaceRegistry {
 
   async register(input: NamedWorkspaceRegisterInput): Promise<NamedWorkspaceRegistryEntry> {
     this.ensureLoaded()
-    if (!input.projectId) throw new Error("named workspace registry register requires projectId")
-    if (!input.workspaceName) throw new Error("named workspace registry register requires workspaceName")
-    if (!input.workspacePath) throw new Error("named workspace registry register requires workspacePath")
+    if (!input.projectId) throw new Error('named workspace registry register requires projectId')
+    if (!input.workspaceName) throw new Error('named workspace registry register requires workspaceName')
+    if (!input.workspacePath) throw new Error('named workspace registry register requires workspacePath')
     const key = namedWorkspaceRegistryKey(input.projectId, input.workspaceName)
     const workspacePath = resolve(input.workspacePath)
     const owner = this.pathIndex.get(workspacePath)
@@ -518,7 +527,7 @@ export class NamedWorkspaceRegistry {
       projectId: input.projectId,
       workspaceName: input.workspaceName,
       workspacePath,
-      phase: "active",
+      phase: 'active',
       materializedAt,
       terminalAt: existing?.terminalAt ?? null,
     }
@@ -541,8 +550,8 @@ export class NamedWorkspaceRegistry {
     const key = namedWorkspaceRegistryKey(projectId, workspaceName)
     const existing = this.entries.get(key)
     if (!existing) return null
-    if (existing.phase !== "active") return { ...existing }
-    existing.phase = "eligible"
+    if (existing.phase !== 'active') return { ...existing }
+    existing.phase = 'eligible'
     existing.terminalAt = this.now().toISOString()
     await this.persist()
     return { ...existing }
@@ -552,8 +561,8 @@ export class NamedWorkspaceRegistry {
     this.ensureLoaded()
     const existing = this.entries.get(key)
     if (!existing) return null
-    if (existing.phase !== "eligible") return { ...existing }
-    existing.phase = "stuck"
+    if (existing.phase !== 'eligible') return { ...existing }
+    existing.phase = 'stuck'
     await this.persist()
     return { ...existing }
   }
@@ -604,20 +613,20 @@ export class NamedWorkspaceRegistry {
       return
     }
     const file = parsed as Partial<NamedWorkspaceRegistryFile> | null
-    if (!file || typeof file !== "object" || file.version !== 1 || !file.entries || typeof file.entries !== "object") {
+    if (!file || typeof file !== 'object' || file.version !== 1 || !file.entries || typeof file.entries !== 'object') {
       this.loaded = true
       return
     }
     const nextEntries = new Map<string, NamedWorkspaceRegistryEntry>()
     const nextPathIndex = new Map<string, string>()
     for (const [key, value] of Object.entries(file.entries)) {
-      if (!value || typeof value !== "object") continue
+      if (!value || typeof value !== 'object') continue
       const entry = value as Partial<NamedWorkspaceRegistryEntry>
-      if (typeof entry.projectId !== "string" || entry.projectId.length === 0) continue
-      if (typeof entry.workspaceName !== "string" || entry.workspaceName.length === 0) continue
-      if (typeof entry.workspacePath !== "string" || entry.workspacePath.length === 0) continue
-      if (entry.phase !== "active" && entry.phase !== "eligible" && entry.phase !== "stuck") continue
-      if (typeof entry.materializedAt !== "string") continue
+      if (typeof entry.projectId !== 'string' || entry.projectId.length === 0) continue
+      if (typeof entry.workspaceName !== 'string' || entry.workspaceName.length === 0) continue
+      if (typeof entry.workspacePath !== 'string' || entry.workspacePath.length === 0) continue
+      if (entry.phase !== 'active' && entry.phase !== 'eligible' && entry.phase !== 'stuck') continue
+      if (typeof entry.materializedAt !== 'string') continue
       const workspacePath = resolve(entry.workspacePath)
       if (nextPathIndex.has(workspacePath)) {
         this.entries = new Map()
@@ -631,7 +640,7 @@ export class NamedWorkspaceRegistry {
         workspacePath,
         phase: entry.phase,
         materializedAt: entry.materializedAt,
-        terminalAt: typeof entry.terminalAt === "string" ? entry.terminalAt : null,
+        terminalAt: typeof entry.terminalAt === 'string' ? entry.terminalAt : null,
       })
       nextPathIndex.set(workspacePath, key)
     }
