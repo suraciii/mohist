@@ -1,5 +1,5 @@
 ### Requirement: Durable Manager receipt liveness
-Each accepted Manager Slack message SHALL project receipt liveness onto the originating Slack message through the durable Slack outbox. The receipt projection SHALL use a stable dispatch identity derived from the immutable Manager origin, so duplicate or replayed ingress events are idempotent.
+Each accepted Manager Slack message SHALL project receipt liveness onto the originating Slack message through the durable Slack outbox. Manager receipt, progress, reply, and terminal rows SHALL use `SlackDeliveryOwnerIds.ManagerProjectId`, `SlackDeliveryOwnerKinds.Manager`, and the Enrollment id as owner id. The receipt projection SHALL use a stable dispatch identity derived from the immutable Manager origin, so duplicate or replayed ingress events are idempotent.
 
 #### Scenario: Manager message is accepted
 - **WHEN** an authorized Manager direct message is accepted into the durable inbox
@@ -55,11 +55,15 @@ Manager liveness SHALL be driven from durable inbox, Session, execution, and out
 - **THEN** durable recovery resumes the pending projection, preserves dispatch deduplication, and eventually closes the logical execution with the required terminal reaction
 
 ### Requirement: Reply and liveness share ownership and origin
-Manager Agent reply actions and Manager liveness projections SHALL use the same durable Slack origin and outbox ownership rules as ordinary Agent Connections. The system SHALL allow a reply action to promote or complete the progress message, but it MUST NOT create a second logical terminal liveness lifecycle.
+Manager Agent reply actions and Manager liveness projections SHALL use the same durable Slack origin and outbox idempotency rules as ordinary Agent Connections while using the explicit Manager project and Manager owner. The system SHALL authenticate replies through the separate Manager reply route, allow a valid reply action to promote or complete only the matching Manager progress message, and MUST NOT create a second logical terminal liveness lifecycle.
 
 #### Scenario: Manager Agent sends its terminal reply
 - **WHEN** the Manager Agent sends a reply using the authoritative Slack reply action before terminal liveness finalization
-- **THEN** the reply is anchored to the originating conversation and thread, the progress projection is promoted or deduplicated, and terminal reaction finalization still produces exactly one terminal reaction
+- **THEN** the separate reply route validates workspace, conversation, thread, triggering message, actor, Enrollment, Session, and dispatch against the immutable origin, writes the Manager-owned outbox row, promotes or deduplicates the matching progress projection, and terminal reaction finalization still produces exactly one terminal reaction
+
+#### Scenario: Manager reply is sent twice
+- **WHEN** the same execution repeats a reply request after a timeout or client retry
+- **THEN** the Manager outbox uses the execution idempotency key to retain one progress/terminal row and does not append a duplicate message or create a second liveness lifecycle
 
 #### Scenario: Manager Agent sends no terminal reply
 - **WHEN** the Manager Agent completes without sending a reply action
