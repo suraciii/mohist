@@ -591,7 +591,8 @@ public sealed partial class AgentJobGrain : Grain, IAgentJobGrain
                 ReasoningEffort: plan?.ReasoningEffort,
                 IssueNumber: plan?.IssueNumber,
                 EpicNumber: plan?.EpicNumber,
-                WorkflowRunId: plan?.WorkflowRunId);
+                WorkflowRunId: plan?.WorkflowRunId,
+                ExecutionSource: AgentExecutionSources.NonSlack);
         }
         else if (string.IsNullOrWhiteSpace(State.Input.AgentId))
         {
@@ -760,7 +761,8 @@ public sealed partial class AgentJobGrain : Grain, IAgentJobGrain
                 IssueNumber: plan.IssueNumber,
                 EpicNumber: plan.EpicNumber,
                 WorkflowRunId: plan.WorkflowRunId,
-                Skills: plan.Skills);
+                Skills: plan.Skills,
+                ExecutionSource: AgentExecutionSources.NonSlack);
             await PersistAsync();
 
             var reason = plan.PreflightReason ?? AgentJobFailureReasons.WorkspaceUnavailable;
@@ -795,7 +797,8 @@ public sealed partial class AgentJobGrain : Grain, IAgentJobGrain
                 IssueNumber: plan.IssueNumber,
                 EpicNumber: plan.EpicNumber,
                 WorkflowRunId: plan.WorkflowRunId,
-                Skills: plan.Skills);
+                Skills: plan.Skills,
+                ExecutionSource: AgentExecutionSources.NonSlack);
             State.AgentConfigJson = plan.AgentConfigJson;
             State.Input = input with { AgentConfig = null };
             State.SubmittedAt = _timeProvider.GetUtcNow();
@@ -1117,6 +1120,7 @@ public sealed partial class AgentJobGrain : Grain, IAgentJobGrain
         && string.Equals(left.AgentSessionId, right.AgentSessionId, StringComparison.Ordinal)
         && string.Equals(left.Variant, right.Variant, StringComparison.Ordinal)
         && string.Equals(left.ReasoningEffort, right.ReasoningEffort, StringComparison.Ordinal)
+        && string.Equals(left.ExecutionSource, right.ExecutionSource, StringComparison.Ordinal)
         && JsonEquals(left.AgentConfig, right.AgentConfig)
         && AttachmentDescriptorsEquivalent(left.Attachments, right.Attachments)
         && Equals(left.StartupContext, right.StartupContext)
@@ -1139,6 +1143,7 @@ public sealed partial class AgentJobGrain : Grain, IAgentJobGrain
         if (!string.Equals(left.AgentSessionId, right.AgentSessionId, StringComparison.Ordinal)) fields.Add(nameof(AgentJobInput.AgentSessionId));
         if (!string.Equals(left.Variant, right.Variant, StringComparison.Ordinal)) fields.Add(nameof(AgentJobInput.Variant));
         if (!string.Equals(left.ReasoningEffort, right.ReasoningEffort, StringComparison.Ordinal)) fields.Add(nameof(AgentJobInput.ReasoningEffort));
+        if (!string.Equals(left.ExecutionSource, right.ExecutionSource, StringComparison.Ordinal)) fields.Add(nameof(AgentJobInput.ExecutionSource));
         if (!JsonEquals(left.AgentConfig, right.AgentConfig)) fields.Add(nameof(AgentJobInput.AgentConfig));
         if (!AttachmentDescriptorsEquivalent(left.Attachments, right.Attachments)) fields.Add(nameof(AgentJobInput.Attachments));
         if (!Equals(left.AllowedSubagents, right.AllowedSubagents)) fields.Add(nameof(AgentJobInput.AllowedSubagents));

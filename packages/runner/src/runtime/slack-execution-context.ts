@@ -53,11 +53,16 @@ export function readExecutionSourceContext(
   payload: { readonly executionSource?: unknown; readonly slackExecutionContext?: unknown } | null,
   options: ExecutionSourceContextValidationOptions = {},
 ): ExecutionSourceContextRead {
+  const sourcePresent = payload !== null
+    && Object.prototype.hasOwnProperty.call(payload, 'executionSource')
   const source = payload?.executionSource
-  const context = readSlackExecutionContext(payload)
 
-  if (source === undefined || source === null) {
+  // Before source v1, Slack payloads were source-less and their context
+  // accepted any self-consistent Skill snapshot. Preserve that exact wire
+  // contract only when the discriminator is genuinely absent.
+  if (!sourcePresent) {
     if (options.strict) return invalid('executionSource is required')
+    const context = readLegacySlackExecutionContext(payload)
     if (context.kind === 'invalid') return context
     return {
       kind: 'legacy',
@@ -65,9 +70,12 @@ export function readExecutionSourceContext(
     }
   }
 
+  if (source === undefined || source === null)
+    return invalid('executionSource is required')
   if (source !== SLACK_EXECUTION_SOURCE && source !== NON_SLACK_EXECUTION_SOURCE)
     return invalid('executionSource must be slack or non-slack')
 
+  const context = readSlackExecutionContext(payload)
   if (source === NON_SLACK_EXECUTION_SOURCE) {
     if (context.kind === 'resolved' || (payload?.slackExecutionContext !== undefined && payload.slackExecutionContext !== null))
       return invalid('non-slack execution cannot carry a Slack execution context')
@@ -82,6 +90,19 @@ export function readExecutionSourceContext(
 
 export function readSlackExecutionContext(
   payload: { readonly slackExecutionContext?: unknown } | null,
+): SlackExecutionContextRead {
+  return readSlackExecutionContextShape(payload, true)
+}
+
+function readLegacySlackExecutionContext(
+  payload: { readonly slackExecutionContext?: unknown } | null,
+): SlackExecutionContextRead {
+  return readSlackExecutionContextShape(payload, false)
+}
+
+function readSlackExecutionContextShape(
+  payload: { readonly slackExecutionContext?: unknown } | null,
+  requirePublishedSkill: boolean,
 ): SlackExecutionContextRead {
   const raw = payload?.slackExecutionContext
   if (raw === undefined || raw === null) return { kind: 'absent' }
@@ -111,17 +132,20 @@ export function readSlackExecutionContext(
     || !nonEmptyString(collaborationSkill.contentHash))
     return invalid('slackExecutionContext.collaborationSkill is incomplete')
 
-  if (collaborationSkill.name !== PUBLISHED_SLACK_SKILL_NAME
-    || collaborationSkill.version !== PUBLISHED_SLACK_SKILL_VERSION)
+  if (requirePublishedSkill
+    && (collaborationSkill.name !== PUBLISHED_SLACK_SKILL_NAME
+      || collaborationSkill.version !== PUBLISHED_SLACK_SKILL_VERSION))
     return invalid('slackExecutionContext uses an unpublished collaboration Skill identity')
 
   const instructions = collaborationSkill.instructions
   const contentHash = collaborationSkill.contentHash
-  if (!/^[a-f0-9]{64}$/.test(contentHash))
+  if (requirePublishedSkill && !/^[a-f0-9]{64}$/.test(contentHash))
     return invalid('slackExecutionContext collaboration skill contentHash must be lowercase hexadecimal')
 
   const expectedHash = createHash('sha256').update(instructions, 'utf8').digest('hex')
-  if (contentHash !== expectedHash || contentHash !== PUBLISHED_SLACK_SKILL_HASH)
+  if (contentHash !== expectedHash)
+    return invalid('slackExecutionContext collaboration skill hash does not match its content')
+  if (requirePublishedSkill && contentHash !== PUBLISHED_SLACK_SKILL_HASH)
     return invalid('slackExecutionContext collaboration skill hash does not match the published Skill')
 
   return {

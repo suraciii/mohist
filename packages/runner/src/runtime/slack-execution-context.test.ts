@@ -15,6 +15,10 @@ const instructions = readFileSync(
   new URL('../../../server/src/Mohist.Server/Agent/Services/Assets/mohist-slack-collaboration.skill.md', import.meta.url),
   'utf8',
 )
+const preChangeInstructions = readFileSync(
+  new URL('./fixtures/pre-change-mohist-slack-collaboration.skill.md', import.meta.url),
+  'utf8',
+)
 
 type ContextOverrides = {
   readonly version?: number
@@ -74,6 +78,35 @@ describe('Slack execution source/context validation', () => {
     ['modified Skill body', { executionSource: SLACK_EXECUTION_SOURCE, slackExecutionContext: validContext({ collaborationSkill: { instructions: `${instructions}changed` } }) }],
   ])('rejects %s', (_name, payload) => {
     expect(readExecutionSourceContext(payload, { strict: true }).kind).toBe('invalid')
+  })
+
+  it('rejects an explicit null source even while compatibility mode is enabled', () => {
+    expect(readExecutionSourceContext({ executionSource: null, slackExecutionContext: validContext() }).kind).toBe('invalid')
+  })
+
+  it('accepts the actual pre-change source-less Slack snapshot through compatibility mode', () => {
+    const contentHash = createHash('sha256').update(preChangeInstructions, 'utf8').digest('hex')
+    expect(contentHash).toBe('de3272639a1d390f3dcf915e65b6c057bf0b9eb91c51545572eb1e484c8c1a22')
+
+    const legacy = readExecutionSourceContext({
+      slackExecutionContext: validContext({
+        collaborationSkill: {
+          instructions: preChangeInstructions,
+          contentHash,
+        },
+      }),
+    })
+
+    expect(legacy).toMatchObject({
+      kind: 'legacy',
+      slackExecutionContext: { collaborationSkill: { instructions: preChangeInstructions, contentHash } },
+    })
+    expect(readExecutionSourceContext({
+      executionSource: SLACK_EXECUTION_SOURCE,
+      slackExecutionContext: validContext({
+        collaborationSkill: { instructions: preChangeInstructions, contentHash },
+      }),
+    }).kind).toBe('invalid')
   })
 
   it('accepts omitted source only through the bounded compatibility path without relabeling it', () => {

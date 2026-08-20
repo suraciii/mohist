@@ -13,11 +13,11 @@ public sealed partial class AgentJobGrain
     private async Task<WorkDispatch> BuildDispatchAsync(string workId)
     {
         var input = InputWithAgentConfig()!;
-        // A pre-discriminator Slack job can be reconciled only from its
-        // durable Server-created context. It remains a legacy Slack
-        // dispatch; it is never relabeled as ordinary non-Slack work.
-        var executionSource = input.SlackExecutionContext is not null
-            && string.Equals(input.ExecutionSource, AgentExecutionSources.NonSlack, StringComparison.Ordinal)
+        // Null is the durable marker for an input written before the
+        // discriminator existed. Only trusted persisted Slack context may
+        // reconcile that legacy state to Slack; an explicit non-Slack value
+        // must never be rewritten around a context mismatch.
+        var executionSource = input.ExecutionSource is null && input.SlackExecutionContext is not null
             ? AgentExecutionSources.Slack
             : input.ExecutionSource;
         var payload = new Dictionary<string, JsonElement?>(StringComparer.Ordinal);
@@ -40,8 +40,9 @@ public sealed partial class AgentJobGrain
         {
             ["prompt"] = JSON.SerializeToElement(
                 AgentStartupContextComposer.ComposePrompt(input.Prompt, input.StartupContext)),
-            ["executionSource"] = JSON.SerializeToElement(executionSource),
         };
+        if (executionSource is not null)
+            with["executionSource"] = JSON.SerializeToElement(executionSource);
         if (!string.IsNullOrWhiteSpace(input.AgentInstructions))
             with["instructions"] = JSON.SerializeToElement(input.AgentInstructions);
         if (!string.IsNullOrWhiteSpace(input.Model))
@@ -71,13 +72,22 @@ public sealed partial class AgentJobGrain
                 throw new InvalidOperationException("Slack AgentJob input requires a complete execution context.");
             with["slackExecutionContext"] = JSON.SerializeToElement(input.SlackExecutionContext);
         }
-        else if (!string.Equals(executionSource, AgentExecutionSources.NonSlack, StringComparison.Ordinal))
+        else if (executionSource is null)
+        {
+            // Preserve the old source-less envelope for legacy non-Slack
+            // inputs. A legacy input with trusted Slack context was
+            // reconciled to Slack above and cannot reach this branch.
+            if (input.SlackExecutionContext is not null)
+                throw new InvalidOperationException("Legacy AgentJob Slack context could not be reconciled.");
+        }
+        else if (string.Equals(executionSource, AgentExecutionSources.NonSlack, StringComparison.Ordinal))
+        {
+            if (input.SlackExecutionContext is not null)
+                throw new InvalidOperationException("Non-Slack AgentJob input cannot carry a Slack execution context.");
+        }
+        else
         {
             throw new InvalidOperationException($"Unknown AgentJob execution source '{executionSource}'.");
-        }
-        else if (input.SlackExecutionContext is not null)
-        {
-            throw new InvalidOperationException("Non-Slack AgentJob input cannot carry a Slack execution context.");
         }
 
         return new WorkDispatch(
