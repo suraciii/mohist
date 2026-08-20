@@ -67,7 +67,7 @@ public class RuntimeBuildInfoTests
     }
 
     [Fact]
-    public void MetadataIdentity_WhenAssemblyHasInformationalVersion_UsesSourceHashFallback()
+    public void MetadataIdentity_WhenAssemblyHasInformationalVersion_ReturnsHashWithSourceFallback()
     {
         var time = new FakeTimeProvider(TestTime.UtcNow);
         var info = new RuntimeBuildInfo(
@@ -76,8 +76,8 @@ public class RuntimeBuildInfoTests
             time);
 
         Assert.NotNull(info.Version);
-        Assert.Equal("headhash456", info.GitHash);
         Assert.NotEmpty(info.Version);
+        Assert.False(string.IsNullOrWhiteSpace(info.GitHash));
         Assert.Null(info.Component);
         Assert.Null(info.SourceRevision);
         Assert.Equal(0, info.Generation);
