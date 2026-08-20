@@ -45,7 +45,7 @@ public class WorkflowGrainFixture : IAsyncLifetime
             NullLogger<InMemoryEventBus>.Instance);
     }
 
-    public async ValueTask InitializeAsync()
+    public virtual async ValueTask InitializeAsync()
     {
         var dbName = $"mohist-test-{Guid.NewGuid():N}";
         var connectionString = $"Data Source={dbName};Mode=Memory;Cache=Shared";
@@ -74,7 +74,7 @@ public class WorkflowGrainFixture : IAsyncLifetime
             // production service graph registers these via
             // ConfigureMohistServices; mirror the issue/project subset
             // here so the silo can activate the grain without dragging
-            // in the full WebApplicationFactory. The Scrutor
+            // in the full application host. The Scrutor
             // IScopedService/ISingletonService markers are intentionally
             // not invoked — they would also re-register the workflow
             // singletons already set up above and risk double

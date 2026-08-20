@@ -713,6 +713,30 @@ public class ArchitectureRules
             "Violations: " + string.Join(", ", violations));
     }
 
+    [Fact]
+    public void ServerOrleansL0Tests_MustNotStartApplicationHosts()
+    {
+        var forbiddenMarkers = new[]
+        {
+            "WebApplicationFactory",
+            "Microsoft.AspNetCore.Mvc.Testing",
+            "TestServer",
+            "MohistIntegrationFixture",
+            "IsolatedMohistIntegrationFixture",
+        };
+
+        var violations = EmbeddedSources("TestSources/Mohist.Server.OrleansTests/")
+            .Where(source => forbiddenMarkers.Any(source.Content.Contains))
+            .Select(source => source.Path)
+            .OrderBy(path => path)
+            .ToList();
+
+        Assert.True(
+            violations.Count == 0,
+            "Server Orleans L0 tests must not start application hosts or HTTP fixtures. " +
+            "Violations: " + string.Join(", ", violations));
+    }
+
     private static IReadOnlyList<EmbeddedSource> EmbeddedSources(string prefix)
         => ArchitectureRulesSupport.EmbeddedSources(prefix);
 

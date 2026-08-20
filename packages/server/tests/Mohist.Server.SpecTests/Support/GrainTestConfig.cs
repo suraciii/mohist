@@ -81,8 +81,8 @@ public static class GrainTestConfig
     /// table, plus the trigger that simulates the column's auto-update
     /// on INSERT/UPDATE. The migration that produces the durable form
     /// is owned by T-004 (<c>20260702060000_WorkflowRunStatus</c>); this
-    /// helper exists so any test fixture (MohistIntegrationFixture,
-    /// BacklogFixture, MohistDbFixture, …) that pre-creates the schema
+    /// helper exists so any test fixture (HTTP integration, BacklogFixture,
+    /// MohistDbFixture, …) that pre-creates the schema
     /// without going through <c>Migrate()</c> (e.g. via
     /// <c>EnsureCreatedAsync</c>) still gets a working column / index.
     /// Idempotent — re-runnable across test classes sharing an in-memory
