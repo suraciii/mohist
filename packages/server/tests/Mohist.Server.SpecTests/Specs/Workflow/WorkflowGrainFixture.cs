@@ -7,6 +7,7 @@ using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Time.Testing;
 using Mohist.Server.Infrastructure.Events;
 using Mohist.Server.Runner.Services;
+using Mohist.Server.Runner.Grains;
 using Mohist.Server.SpecTests.Support;
 using Mohist.Server.TestSupport;
 using Mohist.Server.Workflow.Services;
@@ -21,6 +22,8 @@ namespace Mohist.Server.SpecTests.Specs.Workflow;
 
 public class WorkflowGrainFixture : IAsyncLifetime
 {
+    public const string WarmupRunnerId = "orleans-l0-fixture-warmup";
+
     public InProcessTestCluster Cluster { get; private set; } = null!;
     public IGrainFactory Grains => Cluster.Client;
     public RecordingEventStore EventStore => _sharedEventStore;
@@ -74,7 +77,7 @@ public class WorkflowGrainFixture : IAsyncLifetime
             // production service graph registers these via
             // ConfigureMohistServices; mirror the issue/project subset
             // here so the silo can activate the grain without dragging
-            // in the full WebApplicationFactory. The Scrutor
+            // in the full application host. The Scrutor
             // IScopedService/ISingletonService markers are intentionally
             // not invoked — they would also re-register the workflow
             // singletons already set up above and risk double
@@ -161,6 +164,22 @@ public class WorkflowGrainFixture : IAsyncLifetime
         });
         Cluster = builder.Build();
         await Cluster.DeployAsync();
+        await WarmUpRunnerGrainAsync();
+    }
+
+    private async Task WarmUpRunnerGrainAsync()
+    {
+        // Pay Orleans serializer and first runner activation during fixture
+        // setup so the first business Spec measures its own claim rather than
+        // process-wide runtime initialization.
+        var runner = Grains.GetGrain<IRunnerGrain>(WarmupRunnerId);
+        await runner.RegisterAsync(new RunnerInfo(
+            WarmupRunnerId,
+            ["spec/*"],
+            "test-host",
+            null));
+        _ = await runner.GetInfoAsync();
+        await runner.UnregisterAsync();
     }
 
     public ValueTask DisposeAsync()

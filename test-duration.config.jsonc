@@ -61,6 +61,7 @@
     "resourceLanes": [
       { "id": "default", "resources": [], "capacity": 4 },
       { "id": "server-l1", "resources": ["orleans", "sqlite", "server-runtime"], "capacity": 1 },
+      { "id": "server-orleans-l0", "resources": ["orleans", "sqlite", "server-runtime", "duration-measurement"], "capacity": 1 },
       { "id": "server-l0-measurement", "resources": ["duration-measurement", "server-runtime"], "capacity": 1 },
       { "id": "architecture-measurement", "resources": ["duration-measurement"], "capacity": 1 }
     ]
@@ -90,6 +91,10 @@
     },
     { "id": "server-unit", "kind": "dotnet-apphost", "trackType": "behavior", "application": "server", "specKind": "Design", "level": "L0", "resources": ["duration-measurement", "server-runtime"], "csproj": "packages/server/tests/Mohist.Server.UnitTests/Mohist.Server.UnitTests.csproj", "apphostArgs": ["-parallel", "none"], "report": "reports/server-unit.trx", "reportFormat": "trx", "deadlineMs": 90000, "enforce": true, "rules": [
         { "id": "unit", "percentile": 95, "percentileMs": 50 }
+      ]
+    },
+    { "id": "server-orleans-l0", "kind": "dotnet-apphost", "trackType": "behavior", "application": "server", "specKind": "Product", "level": "L0", "resources": ["orleans", "sqlite", "server-runtime", "duration-measurement"], "csproj": "packages/server/tests/Mohist.Server.OrleansTests/Mohist.Server.OrleansTests.csproj", "apphostArgs": ["-parallel", "none"], "report": "reports/server-orleans-l0.trx", "reportFormat": "trx", "deadlineMs": 90000, "enforce": true, "rules": [
+        { "id": "spec", "percentile": 95, "percentileMs": 50 }
       ]
     },
     { "id": "server-arch", "kind": "dotnet-apphost", "trackType": "architecture", "application": "server", "specKind": "Design", "architectureScope": "server", "resources": ["duration-measurement"], "csproj": "packages/server/tests/Mohist.Server.ArchTests/Mohist.Server.ArchTests.csproj", "report": "reports/server-arch.trx", "reportFormat": "trx", "deadlineMs": 60000, "enforce": true, "rules": [

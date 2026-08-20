@@ -89,6 +89,12 @@ database, logical endpoint scope, and report path. Fixtures use Orleans
 in-memory transport and never probe or bind host ports. Node TypeScript checks
 run through `node --import tsx` without a shared IPC server.
 
+The Server Orleans L0 lane is the single controlled in-process Orleans boundary
+for grain activation and dispatch Specs. It is selected by `test:fast` through
+the `server-orleans-l0` track; no domain-specific project or CI selector is
+created. Fixture warm-up is setup evidence, while the track still reports its
+wall time and the complete Spec population.
+
 Duration-measurement tracks claim an exclusive measurement Resource on their
 host and run in deterministic order. Throughput lanes begin after the
 measurement barrier. CI selects only a complete application or Repository

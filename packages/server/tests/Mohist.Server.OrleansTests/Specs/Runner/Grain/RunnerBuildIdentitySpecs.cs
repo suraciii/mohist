@@ -3,19 +3,28 @@ using Xunit;
 using Mohist.Server.TestSupport;
 using Mohist.Server.SpecTests.Specs.Workflow;
 
-namespace Mohist.Server.SpecTests.Specs.Runner.Grain;
+namespace Mohist.Server.OrleansTests.Specs.Runner.Grain;
 
 [Collection("RunnerGrain")]
 public class RunnerBuildIdentitySpecs : WorkflowGrainSpecs
 {
     public RunnerBuildIdentitySpecs(WorkflowGrainFixture fixture) : base(fixture) { }
 
+    private async Task<(string RunnerId, IRunnerGrain Runner)> FreshRunnerAsync()
+    {
+        // Reuse the activation warmed by the fixture, but clear its
+        // registration state before each claim so the Specs stay isolated.
+        var runnerId = WorkflowGrainFixture.WarmupRunnerId;
+        var runner = Grains.GetGrain<IRunnerGrain>(runnerId);
+        await runner.UnregisterAsync();
+        return (runnerId, runner);
+    }
+
     [Fact]
     public async Task Register_StoresBuildGitHashOnRunnerInfo()
     {
-        var runnerId = $"runner-build-{Guid.NewGuid():N}";
+        var (runnerId, runner) = await FreshRunnerAsync();
         var hash = "abcdef1234567890abcdef1234567890abcdef12";
-        var runner = Grains.GetGrain<IRunnerGrain>(runnerId);
         await runner.RegisterAsync(new RunnerInfo(
             runnerId,
             ["spec/*"],
@@ -31,8 +40,7 @@ public class RunnerBuildIdentitySpecs : WorkflowGrainSpecs
     [Fact]
     public async Task Register_DefaultsBuildGitHashToNullWhenOmitted()
     {
-        var runnerId = $"runner-nohash-{Guid.NewGuid():N}";
-        var runner = Grains.GetGrain<IRunnerGrain>(runnerId);
+        var (runnerId, runner) = await FreshRunnerAsync();
         await runner.RegisterAsync(new RunnerInfo(runnerId, ["spec/*"], "test-host", null));
 
         var info = await runner.GetInfoAsync();
@@ -43,8 +51,7 @@ public class RunnerBuildIdentitySpecs : WorkflowGrainSpecs
     [Fact]
     public async Task UpdateBuildGitHashAsync_StoresHashOnRegisteredRunner()
     {
-        var runnerId = $"runner-update-{Guid.NewGuid():N}";
-        var runner = Grains.GetGrain<IRunnerGrain>(runnerId);
+        var (runnerId, runner) = await FreshRunnerAsync();
         await runner.RegisterAsync(new RunnerInfo(runnerId, ["spec/*"], "test-host", null));
 
         var hash = "0123456789abcdef0123456789abcdef01234567";
@@ -58,8 +65,7 @@ public class RunnerBuildIdentitySpecs : WorkflowGrainSpecs
     [Fact]
     public async Task UpdateBuildGitHashAsync_BuffersHashUntilRegister()
     {
-        var runnerId = $"runner-buffer-{Guid.NewGuid():N}";
-        var runner = Grains.GetGrain<IRunnerGrain>(runnerId);
+        var (runnerId, runner) = await FreshRunnerAsync();
 
         var hash = "feedfacefeedfacefeedfacefeedfacefeedface";
         await runner.UpdateBuildGitHashAsync(hash);
@@ -75,8 +81,7 @@ public class RunnerBuildIdentitySpecs : WorkflowGrainSpecs
     [Fact]
     public async Task UpdateBuildGitHashAsync_NormalisesBlankHashToNull()
     {
-        var runnerId = $"runner-blank-{Guid.NewGuid():N}";
-        var runner = Grains.GetGrain<IRunnerGrain>(runnerId);
+        var (runnerId, runner) = await FreshRunnerAsync();
         await runner.RegisterAsync(new RunnerInfo(runnerId, ["spec/*"], "test-host", null, BuildGitHash: "stale-hash"));
 
         await runner.UpdateBuildGitHashAsync("   ");
@@ -89,8 +94,7 @@ public class RunnerBuildIdentitySpecs : WorkflowGrainSpecs
     [Fact]
     public async Task UpdateBuildGitHashAsync_ClearsStaleHashWhenControlHandshakeOmitsIdentity()
     {
-        var runnerId = $"runner-clear-{Guid.NewGuid():N}";
-        var runner = Grains.GetGrain<IRunnerGrain>(runnerId);
+        var (runnerId, runner) = await FreshRunnerAsync();
         await runner.RegisterAsync(new RunnerInfo(runnerId, ["spec/*"], "test-host", null, BuildGitHash: "old-hash"));
 
         await runner.UpdateBuildGitHashAsync(null);
@@ -103,10 +107,9 @@ public class RunnerBuildIdentitySpecs : WorkflowGrainSpecs
     [Fact]
     public async Task ListRunners_ExposesBuildGitHashThroughRegistry()
     {
+        var (runnerId, runner) = await FreshRunnerAsync();
         var projectId = $"build-hash-project-{Guid.NewGuid():N}";
-        var runnerId = $"runner-registry-{Guid.NewGuid():N}";
         var hash = "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef";
-        var runner = Grains.GetGrain<IRunnerGrain>(runnerId);
         await runner.RegisterAsync(new RunnerInfo(runnerId, ["spec/*"], "test-host", projectId, BuildGitHash: hash));
 
         var registry = Grains.GetGrain<IRunnerRegistryGrain>(RunnerRegistryKeys.Global);
@@ -119,8 +122,7 @@ public class RunnerBuildIdentitySpecs : WorkflowGrainSpecs
     [Fact]
     public async Task HeartbeatRepair_UpdatesBuildGitHashFromRequest()
     {
-        var runnerId = $"runner-heartbeat-{Guid.NewGuid():N}";
-        var runner = Grains.GetGrain<IRunnerGrain>(runnerId);
+        var (runnerId, runner) = await FreshRunnerAsync();
         await runner.RegisterAsync(new RunnerInfo(runnerId, ["spec/*"], "test-host", null, BuildGitHash: "old-hash"));
 
         var newHash = "newhashnewhashnewhashnewhashnewhashnewhas";

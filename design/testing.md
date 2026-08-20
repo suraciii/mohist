@@ -471,6 +471,26 @@ L0 Spec files should remain below 300 lines. L1 Spec files should remain below
 800 lines. Browser-backed Specs run in a separate Resource lane. These are
 review guidelines. The source-file ratchet is the automated size gate.
 
+## Server L0 Resource Ownership
+
+Server L0 has two ownership boundaries. Component and module Specs that do not
+need Orleans belong to `Mohist.Server.UnitTests`. Specs whose claim includes
+activation, serialization, reminder, reentrancy, or real grain dispatch belong
+to the single `Mohist.Server.OrleansTests` project and its `server-orleans-l0`
+track. This is one Resource lane, not a project or CI job per domain.
+
+The Orleans L0 fixture uses only the controlled in-process transport, fake time,
+and in-memory SQLite. It owns setup, reset, and disposal, and performs runtime
+serializer and first-grain warm-up during setup so per-Spec duration measures the
+claim rather than process-wide initialization. The warm-up input is deterministic
+and its state is removed before the first Spec. It must not start
+`WebApplicationFactory` or `TestServer`, bind a port, access a real filesystem,
+or use a wall clock, polling, retry, or ambient shared state.
+
+State transitions, decisions, projections, and persistence mappings remain in
+the owning component's L0 Specs even when the production component is used by a
+grain. Only the grain boundary itself is kept in the Orleans L0 lane.
+
 ## Server L1 Resource Ownership
 
 This section applies only when a claim requires the complete Server application
