@@ -66,7 +66,6 @@ export async function runRepositoryScope(
   try {
     const checks = config.plan!.repositoryChecks
     mkdirSync(artifactRoot, { recursive: true })
-    runtime.report(`repository scope diagnostics: ${artifactRoot}`)
     writeEvidence(runtime, artifactRoot, 'run.json', {
       runId: context.runId,
       startedAt: context.startedAt,
@@ -186,7 +185,7 @@ export async function main(
   }
   const termination = createTerminationSignal()
   try {
-    return await runRepositoryScope(config, runtime, {
+    const code = await runRepositoryScope(config, runtime, {
       runId,
       startedAt,
       deadlines,
@@ -195,6 +194,8 @@ export async function main(
       sourceRevision,
       planIdentity: planIdentity(config),
     })
+    if (code !== 0) runtime.report(`repository scope diagnostics: ${artifactRoot}`)
+    return code
   } finally {
     termination.dispose()
   }

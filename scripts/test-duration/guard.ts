@@ -1,7 +1,6 @@
 import { execFileSync, spawn } from 'node:child_process'
 import { createHash, randomUUID } from 'node:crypto'
 import {
-  createWriteStream,
   existsSync,
   lstatSync,
   mkdirSync,
@@ -12,7 +11,6 @@ import {
   writeFileSync,
 } from 'node:fs'
 import { dirname, resolve, basename, isAbsolute, join, relative, sep } from 'node:path'
-import { finished } from 'node:stream/promises'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 
 import { evaluateTrack } from './budget.js'
@@ -24,7 +22,7 @@ import {
   type CanonicalRunMetadata,
 } from './artifacts.js'
 import { parseSuiteConfig, validateConfig } from './config.js'
-import { formatEvaluation, formatSummary, formatTrackRun, summarize } from './diagnostics.js'
+import { formatGuardOutput, summarize } from './diagnostics.js'
 import {
   externalAbortCleanupDeadlineAt,
   runWithDeadline,
@@ -242,11 +240,6 @@ interface SpawnedChild {
   readonly pid: number
 }
 
-interface RawEvidence {
-  readonly stdoutPath: string
-  readonly stderrPath: string
-}
-
 export interface TimeoutHandle {
   readonly promise: Promise<void>
   readonly cancel: () => void
@@ -299,44 +292,31 @@ function spawnChild(
   command: string,
   args: readonly string[],
   env: NodeJS.ProcessEnv,
-  evidence: RawEvidence,
+  output: 'inherit' | 'capture' = 'inherit',
 ): SpawnedChild {
   const resolvedCommand = resolveSpawnCommand(command, args)
   const detached = process.platform !== 'win32'
-  mkdirSync(dirname(evidence.stdoutPath), { recursive: true })
-  const stdout = createWriteStream(evidence.stdoutPath)
-  const stderr = createWriteStream(evidence.stderrPath)
   const child = spawn(resolvedCommand.command, resolvedCommand.args as string[], {
     cwd: repoRoot,
     env,
-    stdio: ['ignore', 'pipe', 'pipe'],
+    stdio: output === 'capture' ? ['ignore', 'pipe', 'inherit'] : ['ignore', 'inherit', 'inherit'],
     detached,
   })
   let stdoutText = ''
-  child.stdout?.on('data', (chunk: Buffer) => {
-    stdoutText += chunk.toString()
-    stdout.write(chunk)
-    process.stdout.write(chunk)
-  })
-  child.stderr?.on('data', (chunk: Buffer) => {
-    stderr.write(chunk)
-    process.stderr.write(chunk)
-  })
+  child.stdout?.on('data', (chunk: Buffer) => (stdoutText += chunk.toString()))
   const done = new Promise<{ exitCode: number | null; stdout: string }>((resolvePromise) => {
     let settled = false
-    const settle = async (code: number | null) => {
+    const settle = (code: number | null) => {
       if (settled) return
       settled = true
-      stdout.end()
-      stderr.end()
-      await Promise.allSettled([finished(stdout), finished(stderr)])
       resolvePromise({ exitCode: code, stdout: stdoutText })
     }
-    child.once('error', () => {
-      void settle(1)
+    child.once('error', (error) => {
+      process.stderr.write(`could not start ${resolvedCommand.command}: ${error.message}\n`)
+      settle(1)
     })
     child.once('close', (code) => {
-      void settle(code)
+      settle(code)
     })
   })
   return { done, pid: child.pid ?? -1 }
@@ -427,6 +407,10 @@ export function laneSandbox(
       HOME: homeDir,
       USERPROFILE: homeDir,
       MOHIST_TEST_LANE: laneId,
+      Logging__LogLevel__Default: inherited.Logging__LogLevel__Default ?? 'Warning',
+      DOTNET_NOLOGO: inherited.DOTNET_NOLOGO ?? 'true',
+      DOTNET_CLI_TELEMETRY_OPTOUT: inherited.DOTNET_CLI_TELEMETRY_OPTOUT ?? 'true',
+      DOTNET_GENERATE_ASPNET_CERTIFICATE: inherited.DOTNET_GENERATE_ASPNET_CERTIFICATE ?? 'false',
       ...(isolateServerRuntime
         ? {
             // Only concurrent Spec lanes need isolated server-owned paths.
@@ -560,14 +544,7 @@ export function planTracks(
   return applyDurationMeasurementPhase(planned, durationMeasurementTracks, durationIsolationTrack)
 }
 
-function evidenceFor(artifactRoot: string, laneId: string): RawEvidence {
-  return {
-    stdoutPath: resolve(artifactRoot, 'logs', `${laneId}.stdout.log`),
-    stderrPath: resolve(artifactRoot, 'logs', `${laneId}.stderr.log`),
-  }
-}
-
-function failedRun(plan: PlannedLane, command: string, reportError: string, evidence?: RawEvidence): TrackRun {
+function failedRun(plan: PlannedLane, command: string, reportError: string): TrackRun {
   return {
     trackId: plan.lane.id,
     policyTrackId: plan.policyTrack?.id,
@@ -580,17 +557,10 @@ function failedRun(plan: PlannedLane, command: string, reportError: string, evid
     reportReady: false,
     cleanupComplete: true,
     reportError,
-    stdoutPath: evidence?.stdoutPath,
-    stderrPath: evidence?.stderrPath,
   }
 }
 
-function cancelledRun(
-  plan: PlannedLane,
-  suiteExpired: boolean,
-  artifactRoot: string,
-  failureLaneId?: string,
-): TrackRun {
+function cancelledRun(plan: PlannedLane, suiteExpired: boolean, failureLaneId?: string): TrackRun {
   const cancellationReason = suiteExpired
     ? 'after the suite deadline expired'
     : failureLaneId
@@ -613,7 +583,6 @@ function cancelledRun(
     reportError: plan.reportPath
       ? `report ${plan.reportPath} was not produced ${cancellationReason}`
       : `coverage verification did not run ${cancellationReason}`,
-    ...evidenceFor(artifactRoot, plan.lane.id),
   }
 }
 
@@ -639,7 +608,6 @@ function startLane(
   runtime: GuardRuntime,
   cancellationDeadlineAt: () => number,
 ): RunningLane<TrackRun> {
-  const evidence = evidenceFor(artifactRoot, plan.lane.id)
   const trackDeadline = createTimeout(plan.deadlineMs, runtime.timeoutScheduler)
   const laneStartedAt = runtime.now()
   let cleanupComplete = true
@@ -677,7 +645,7 @@ function startLane(
     command: string,
     args: readonly string[],
     environment: NodeJS.ProcessEnv,
-    stageEvidence: RawEvidence,
+    output: 'inherit' | 'capture' = 'inherit',
   ) => {
     if (cancellationRequested) {
       return {
@@ -688,7 +656,7 @@ function startLane(
         stdout: '',
       }
     }
-    const child = spawnChild(command, args, environment, stageEvidence)
+    const child = spawnChild(command, args, environment, output)
     currentChild = child
     const stageResult = await runProcessWithDeadline({
       child,
@@ -762,12 +730,11 @@ function startLane(
             readAssemblySha256: sha256File,
             readSourceSha256: sha256Sources,
             readDiscovery: async () => {
-              const discoveryEvidence = evidenceFor(artifactRoot, `${plan.lane.id}.discovery`)
               const discovery = await runStage(
                 ledgerPlan.discovery.apphost,
                 ledgerPlan.discovery.args,
                 sandbox.environment,
-                discoveryEvidence,
+                'capture',
               )
               if (discovery.status !== 'passed') {
                 const reason =
@@ -795,7 +762,7 @@ function startLane(
         throw new Error(`lane "${plan.lane.id}" has no execution track`)
       }
 
-      const outcome = await runStage(command, args, { ...sandbox.environment, ...executionEnvironment }, evidence)
+      const outcome = await runStage(command, args, { ...sandbox.environment, ...executionEnvironment })
       let reportReady = false
       try {
         reportReady = plan.reportPath ? reportFileReady(plan.reportPath) : outcome.status === 'passed'
@@ -835,12 +802,10 @@ function startLane(
         executionLedgerReady,
         executionLedgerError: executionLedgerReady === false ? reportError : undefined,
         executionLedgerExpectation: ledgerExpectation,
-        stdoutPath: evidence.stdoutPath,
-        stderrPath: evidence.stderrPath,
       }
     } catch (error) {
       return {
-        ...failedRun(plan, command, `could not prepare or execute lane: ${(error as Error).message}`, evidence),
+        ...failedRun(plan, command, `could not prepare or execute lane: ${(error as Error).message}`),
         elapsedMs: runtime.now() - laneStartedAt,
         cleanupComplete,
         executionLedgerReady: ledgerPath ? false : undefined,
@@ -989,8 +954,7 @@ async function readSavedTrackIdentity(
       readAssemblySha256: sha256File,
       readSourceSha256: sha256Sources,
       readDiscovery: async () => {
-        const evidence = evidenceFor(artifactRoot, `${track.id}.check-discovery`)
-        const child = spawnChild(plan.discovery.apphost, plan.discovery.args, process.env, evidence)
+        const child = spawnChild(plan.discovery.apphost, plan.discovery.args, process.env, 'capture')
         const remaining = Math.max(0, deadlines.executionDeadlineAt - runtime.now())
         const timer = createTimeout(Math.min(track.deadlineMs, remaining), runtime.timeoutScheduler)
         try {
@@ -1347,7 +1311,6 @@ export async function main(
         resolve(artifactRoot, 'run.json'),
         JSON.stringify({ runId, startedAt: suiteStart, suiteDeadlineMs }, null, 2) + '\n',
       )
-      console.log(`test-duration diagnostics: ${artifactRoot}`)
     } catch (error) {
       process.stderr.write(`${(error as Error).message}\n`)
       return 2
@@ -1458,13 +1421,8 @@ export async function main(
         const result =
           scheduledLane.result ??
           (scheduledLane.state === 'failed'
-            ? failedRun(
-                plan,
-                'scheduler',
-                'lane execution rejected before producing a report',
-                evidenceFor(artifactRoot, plan.lane.id),
-              )
-            : cancelledRun(plan, suiteExpired, artifactRoot, scheduled.failureLaneId))
+            ? failedRun(plan, 'scheduler', 'lane execution rejected before producing a report')
+            : cancelledRun(plan, suiteExpired, scheduled.failureLaneId))
         const run =
           scheduledLane.state === 'cancelled' && !result.cancelled
             ? {
@@ -1480,17 +1438,12 @@ export async function main(
               }
             : result
         runs.push(run)
-        if (run.timeoutReason === 'track') console.error(`  ${run.trackId}: exceeded ${run.deadlineMs}ms deadline`)
       }
     } finally {
       executionTimer?.cancel()
     }
     const suiteElapsed = runtime.now() - suiteStart
     let suiteDeadlineBreached = suiteExpired || runtime.now() >= deadlines.hardDeadlineAt
-    if (suiteDeadlineBreached) {
-      console.error(`suite deadline breached after ${suiteElapsed}ms`)
-    }
-
     const runsByTrack = new Map(runs.map((run) => [run.trackId, run]))
     for (const track of selected) {
       const beforeEvaluationFailure = reportEvaluationFailureReason(
@@ -1531,14 +1484,7 @@ export async function main(
 
     if (runtime.now() >= deadlines.hardDeadlineAt) suiteDeadlineBreached = true
 
-    console.log('runs:')
-    for (const run of runs) console.log(formatTrackRun(run))
-    console.log('budget:')
-    for (const evaluation of evaluations) {
-      for (const line of formatEvaluation(evaluation)) console.log(line)
-    }
     const summary = summarize(runs, evaluations, suiteDeadlineBreached, suiteElapsed)
-    console.log(formatSummary(summary, suiteDeadlineMs))
     const runFailed = suiteDeadlineBreached || runs.some((run) => !run.cancelled && !isLaneSuccessful(run))
     const budgetFailed = evaluations.some((e) => !e.passed)
     const firstFailedRun = runs.find((run) => !isLaneSuccessful(run))
@@ -1565,8 +1511,17 @@ export async function main(
       runs,
       evaluations,
     })
+    const passed = evidenceWritten && !runFailed && !budgetFailed
+    const output = formatGuardOutput({
+      passed,
+      summary,
+      suiteDeadlineMs,
+      failedRuns: runs.filter((run) => !run.cancelled && !isLaneSuccessful(run)),
+      failedEvaluations: evaluations.filter((evaluation) => !evaluation.passed),
+    })
+    if (output) process.stderr.write(`${output}\n`)
     externalAbort?.removeEventListener('abort', abortFromCanonical)
-    return !evidenceWritten || runFailed || budgetFailed ? 1 : 0
+    return passed ? 0 : 1
   }
 
   for (const track of selected) {
@@ -1598,16 +1553,19 @@ export async function main(
         : evaluation,
     )
   }
-  console.log('budget:')
-  for (const evaluation of evaluations) {
-    for (const line of formatEvaluation(evaluation)) console.log(line)
-  }
   const summary = summarize(runs, evaluations)
-  console.log(formatSummary(summary, suiteDeadlineMs))
-
   const runFailed = runs.some((run) => !run.cancelled && !isLaneSuccessful(run))
   const budgetFailed = evaluations.some((e) => !e.passed)
-  return runFailed || budgetFailed ? 1 : 0
+  const passed = !runFailed && !budgetFailed
+  const output = formatGuardOutput({
+    passed,
+    summary,
+    suiteDeadlineMs,
+    failedRuns: runs.filter((run) => !run.cancelled && !isLaneSuccessful(run)),
+    failedEvaluations: evaluations.filter((evaluation) => !evaluation.passed),
+  })
+  if (output) process.stderr.write(`${output}\n`)
+  return passed ? 0 : 1
 }
 
 const isMain = process.argv[1] !== undefined && import.meta.url === pathToFileURL(resolve(process.argv[1])).href

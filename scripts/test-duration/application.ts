@@ -71,7 +71,6 @@ export async function prepareApplicationScope(
   try {
     const commands = applicationBuilds(config, application)
     mkdirSync(artifactRoot, { recursive: true })
-    runtime.report(`test:app ${application} diagnostics: ${artifactRoot}`)
     writeEvidence(runtime, artifactRoot, 'run.json', {
       runId: context.runId,
       startedAt: context.startedAt,
@@ -263,7 +262,7 @@ export async function main(
   }
   const termination = createTerminationSignal()
   try {
-    return await runApplicationScope(args.application, config, runtime, {
+    const code = await runApplicationScope(args.application, config, runtime, {
       runId,
       startedAt,
       deadlines,
@@ -272,6 +271,8 @@ export async function main(
       sourceRevision,
       planIdentity: planIdentity(config),
     })
+    if (code !== 0) runtime.report(`test:app ${args.application} diagnostics: ${artifactRoot}`)
+    return code
   } finally {
     termination.dispose()
   }

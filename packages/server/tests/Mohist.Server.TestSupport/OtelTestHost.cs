@@ -6,6 +6,7 @@ using Microsoft.AspNetCore.TestHost;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Logging;
 using Mohist.Server.Infrastructure.Config;
 using Mohist.Server.Infrastructure.Hosting;
 using OpenTelemetry;
@@ -63,6 +64,8 @@ public sealed class OtelTestHost : IAsyncDisposable
         _otlpExporterHandler = new RecordingHttpMessageHandler(options.FailExporterRequests);
 
         var builder = WebApplication.CreateBuilder();
+        builder.Logging.SetMinimumLevel(
+            builder.Configuration.GetValue("Logging:LogLevel:Default", LogLevel.Warning));
         builder.WebHost.UseTestServer();
         builder.Configuration.AddInMemoryCollection(options.AsConfiguration());
 

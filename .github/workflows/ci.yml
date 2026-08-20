@@ -17,9 +17,9 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
-  DOTNET_NOLOGO: true
-  DOTNET_CLI_TELEMETRY: false
-  DOTNET_GENERATE_ASPNET_CERT: false
+  DOTNET_NOLOGO: "true"
+  DOTNET_CLI_TELEMETRY_OPTOUT: "true"
+  DOTNET_GENERATE_ASPNET_CERTIFICATE: "false"
 
 jobs:
   server:

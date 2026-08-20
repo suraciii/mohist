@@ -212,6 +212,4 @@ export interface TrackRun {
   readonly executionLedgerReady?: boolean
   readonly executionLedgerError?: string
   readonly executionLedgerExpectation?: ExecutionLedgerExpectation
-  readonly stdoutPath?: string
-  readonly stderrPath?: string
 }

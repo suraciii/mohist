@@ -26,7 +26,7 @@ public sealed class ExecutionLedgerReporter : IRunnerReporter
     public string? RunnerSwitch => "mohist-ledger";
 
     public ValueTask<IRunnerReporterMessageHandler> CreateMessageHandler(IRunnerLogger logger, IMessageSink? diagnosticMessageSink) =>
-        new(new ExecutionLedgerReporterMessageHandler());
+        new(new ExecutionLedgerReporterMessageHandler(logger));
 }
 
 internal static class ExecutionLedgerEnvironment
@@ -94,21 +94,31 @@ public sealed class ExecutionLedgerReporterMessageHandler : IRunnerReporterMessa
 {
     private readonly ExecutionLedgerCapture capture;
     private readonly IExecutionLedgerArtifactStore artifacts;
+    private readonly IRunnerReporterMessageHandler? output;
     private readonly object metadataGate = new();
     private MessageMetadataCache metadata = new();
     private int cachedMetadataCount;
     private string? error;
 
-    public ExecutionLedgerReporterMessageHandler() : this(
+    public ExecutionLedgerReporterMessageHandler(IRunnerLogger logger) : this(
         SystemExecutionLedgerRuntime.Instance,
-        PhysicalExecutionLedgerArtifactStore.Instance)
+        PhysicalExecutionLedgerArtifactStore.Instance,
+        new DefaultRunnerReporterMessageHandler(logger))
     { }
 
     internal ExecutionLedgerReporterMessageHandler(
         IExecutionLedgerRuntime runtime,
         IExecutionLedgerArtifactStore artifacts)
+        : this(runtime, artifacts, null)
+    { }
+
+    private ExecutionLedgerReporterMessageHandler(
+        IExecutionLedgerRuntime runtime,
+        IExecutionLedgerArtifactStore artifacts,
+        IRunnerReporterMessageHandler? output)
     {
         this.artifacts = artifacts;
+        this.output = output;
         capture = ExecutionLedgerCapture.FromEnvironment(runtime, artifacts);
     }
 
@@ -119,6 +129,7 @@ public sealed class ExecutionLedgerReporterMessageHandler : IRunnerReporterMessa
 
     public bool OnMessage(IMessageSinkMessage message)
     {
+        var shouldContinue = output?.OnMessage(message) ?? true;
         try
         {
             CacheMetadata(message);
@@ -165,10 +176,10 @@ public sealed class ExecutionLedgerReporterMessageHandler : IRunnerReporterMessa
             }
         }
 
-        return true;
+        return shouldContinue;
     }
 
-    public ValueTask DisposeAsync()
+    public async ValueTask DisposeAsync()
     {
         try
         {
@@ -186,9 +197,9 @@ public sealed class ExecutionLedgerReporterMessageHandler : IRunnerReporterMessa
                 metadata = new MessageMetadataCache();
                 cachedMetadataCount = 0;
             }
+            if (output is not null)
+                await output.DisposeAsync();
         }
-
-        return ValueTask.CompletedTask;
     }
 
     private (string? ClassName, string? CollectionName) GetMetadata(IMessageSinkMessage message)

@@ -228,8 +228,7 @@ export async function main(
   const deadlines = suiteDeadlines(startedAt, config.suiteDeadlineMs, config.killGraceMs ?? 5000)
   const termination = createTerminationSignal()
   try {
-    runtime.report(`test command diagnostics: ${artifactRoot}`)
-    return await runCommand(
+    const code = await runCommand(
       config,
       args.mode,
       runtime,
@@ -239,11 +238,14 @@ export async function main(
       termination.signal,
       sourceRevision,
     )
+    if (code !== 0) runtime.report(`test command diagnostics: ${artifactRoot}`)
+    return code
   } catch (error) {
     writeEvidence(runtime, artifactRoot, 'fatal-error.json', {
       message: error instanceof Error ? error.message : String(error),
     })
     process.stderr.write(`test command failed: ${(error as Error).message}\n`)
+    runtime.report(`test command diagnostics: ${artifactRoot}`)
     return 1
   } finally {
     termination.dispose()

@@ -42,6 +42,7 @@ test('test:app builds once and hands the same run root to the application guard'
   const artifactRoot = mkdtempSync(join(tmpdir(), 'mohist-test-app-'))
   const writes = new Map<string, string>()
   const phases: string[] = []
+  const reports: string[] = []
   let guardArgs: readonly string[] | undefined
   const runtime = {
     now: () => 1000,
@@ -56,7 +57,7 @@ test('test:app builds once and hands the same run root to the application guard'
       guardArgs = argv
       return 0
     },
-    report: () => {},
+    report: (line: string) => reports.push(line),
   } satisfies ApplicationRuntime
 
   assert.equal(await main(['web'], runtime), 0)
@@ -72,6 +73,26 @@ test('test:app builds once and hands the same run root to the application guard'
     '301000',
   ])
   assert.match(writes.get(join(artifactRoot, 'build-stamp.json')) ?? '', /"runId": "1000-7"/)
+  assert.deepEqual(reports, [])
+})
+
+test('test:app reports its diagnostics path only when execution fails', async () => {
+  const artifactRoot = mkdtempSync(join(tmpdir(), 'mohist-test-app-failure-'))
+  const reports: string[] = []
+  const runtime = {
+    now: () => 1000,
+    pid: () => 7,
+    createArtifactRoot: () => artifactRoot,
+    writeFile: () => {},
+    runPhase: async () => ({ exitCode: 1, timedOut: false, cleanupComplete: true }),
+    runGuard: async () => {
+      throw new Error('failed build must not run tracks')
+    },
+    report: (line: string) => reports.push(line),
+  } satisfies ApplicationRuntime
+
+  assert.equal(await main(['web'], runtime), 1)
+  assert.deepEqual(reports, [`test:app web diagnostics: ${artifactRoot}`])
 })
 
 test('test:app rejects an unknown application before creating diagnostics', async () => {

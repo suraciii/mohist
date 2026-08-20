@@ -1,7 +1,6 @@
 import { execFileSync, spawn } from 'node:child_process'
-import { createWriteStream, mkdirSync, writeFileSync } from 'node:fs'
+import { mkdirSync, writeFileSync } from 'node:fs'
 import { dirname, resolve } from 'node:path'
-import { finished } from 'node:stream/promises'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 
 import { createArtifactRoot as createUniqueArtifactRoot, type ArtifactDirectoryOps } from './artifacts.js'
@@ -85,28 +84,6 @@ function createTimeout(
   }
 }
 
-async function settleOutputBefore(
-  output: Promise<unknown>,
-  hardDeadlineAt: number,
-  now: () => number,
-  timeoutScheduler?: TimeoutScheduler,
-): Promise<boolean> {
-  if (now() >= hardDeadlineAt) return false
-  const timeout = createTimeout(hardDeadlineAt, now, timeoutScheduler)
-  try {
-    const settled = await Promise.race([
-      output.then(
-        () => true,
-        () => true,
-      ),
-      timeout.promise.then(() => false),
-    ])
-    return settled && now() < hardDeadlineAt
-  } finally {
-    timeout.cancel()
-  }
-}
-
 function waitForAbort(signal: AbortSignal): { readonly promise: Promise<void>; readonly dispose: () => void } {
   if (signal.aborted) return { promise: Promise.resolve(), dispose: () => {} }
   let listener: (() => void) | undefined
@@ -140,7 +117,7 @@ export async function runPhase(
   name: string,
   command: string,
   args: readonly string[],
-  artifactRoot: string,
+  _artifactRoot: string,
   deadlines: SuiteDeadlines,
   now: () => number,
   abortSignal: AbortSignal,
@@ -151,45 +128,25 @@ export async function runPhase(
     return { exitCode: null, timedOut: true, cleanupComplete: true }
   }
 
-  const stdoutPath = resolve(artifactRoot, 'logs', `${name}.stdout.log`)
-  const stderrPath = resolve(artifactRoot, 'logs', `${name}.stderr.log`)
-  mkdirSync(dirname(stdoutPath), { recursive: true })
-  const stdout = createWriteStream(stdoutPath)
-  const stderr = createWriteStream(stderrPath)
   const resolvedCommand = resolveSpawnCommand(command, args)
   const child = spawn(resolvedCommand.command, resolvedCommand.args as string[], {
     cwd: repoRoot,
     detached: process.platform !== 'win32',
-    stdio: ['ignore', 'pipe', 'pipe'],
+    stdio: ['ignore', 'inherit', 'inherit'],
   })
-  child.stdout?.on('data', (chunk: Buffer) => {
-    stdout.write(chunk)
-    process.stdout.write(chunk)
-  })
-  child.stderr?.on('data', (chunk: Buffer) => {
-    stderr.write(chunk)
-    process.stderr.write(chunk)
-  })
-
-  let ended = false
-  const endOutput = () => {
-    if (ended) return
-    ended = true
-    stdout.end()
-    stderr.end()
-  }
   const exited = new Promise<number | null>((resolveExit) => {
     let settled = false
     const settle = (code: number | null) => {
       if (settled) return
       settled = true
-      endOutput()
       resolveExit(code)
     }
-    child.once('error', () => settle(1))
+    child.once('error', (error) => {
+      process.stderr.write(`could not start ${name}: ${error.message}\n`)
+      settle(1)
+    })
     child.once('close', (code) => settle(code))
   })
-  const outputFinished = Promise.allSettled([finished(stdout), finished(stderr)])
   const executionDeadline = createTimeout(deadlines.executionDeadlineAt, now, timeoutScheduler)
   const aborted = waitForAbort(abortSignal)
   let outcome:
@@ -217,15 +174,24 @@ export async function runPhase(
     killGraceMs,
     { ...nativeProcessTreeOps, now },
   )
-  endOutput()
-  const outputComplete = await settleOutputBefore(outputFinished, cleanupDeadlineAt, now, timeoutScheduler)
   const executionExpired = now() >= deadlines.executionDeadlineAt
-  return {
+  const result = {
     exitCode: outcome.kind === 'exit' && !executionExpired ? outcome.exitCode : null,
     timedOut: outcome.kind === 'deadline' || executionExpired,
     cancelled: outcome.kind === 'abort',
-    cleanupComplete: cleanupComplete && outputComplete,
+    cleanupComplete,
   }
+  if (!phaseSucceeded(result)) {
+    const reason = result.cancelled
+      ? 'cancelled'
+      : result.timedOut
+        ? 'timed out'
+        : result.cleanupComplete === false
+          ? 'process cleanup incomplete'
+          : `exit ${result.exitCode}`
+    process.stderr.write(`FAIL ${name}: ${reason}\n`)
+  }
+  return result
 }
 
 function nativeSourceIdentity(): SourceIdentity {
@@ -352,7 +318,10 @@ export async function main(
     const startedAt = runtime.now()
     const runId = `${startedAt}-${runtime.pid()}`
     artifactRoot = runtime.createArtifactRoot(runId, artifactParent)
-    runtime.report(`canonical-gate diagnostics: ${artifactRoot}`)
+    const fail = () => {
+      runtime.report(`canonical-gate diagnostics: ${artifactRoot}`)
+      return 1
+    }
     const deadlines = suiteDeadlines(startedAt, suiteDeadlineMs, killGraceMs)
     const source = runtime.sourceIdentity()
     assertMatchingCleanSource(source, source)
@@ -372,8 +341,8 @@ export async function main(
       abortSignal,
       runtime.timeoutScheduler,
     )
-    if (docs.timedOut || docs.cancelled || docs.cleanupComplete === false || docs.exitCode !== 0) return 1
-    if (abortSignal.aborted || runtime.now() >= deadlines.executionDeadlineAt) return 1
+    if (docs.timedOut || docs.cancelled || docs.cleanupComplete === false || docs.exitCode !== 0) return fail()
+    if (abortSignal.aborted || runtime.now() >= deadlines.executionDeadlineAt) return fail()
 
     const { build, boundary } = await runBuildAndBoundaries(
       runtime,
@@ -384,8 +353,8 @@ export async function main(
       abortSignal,
       runtime.timeoutScheduler,
     )
-    if (!phaseSucceeded(build) || !phaseSucceeded(boundary)) return 1
-    if (abortSignal.aborted || runtime.now() >= deadlines.executionDeadlineAt) return 1
+    if (!phaseSucceeded(build) || !phaseSucceeded(boundary)) return fail()
+    if (abortSignal.aborted || runtime.now() >= deadlines.executionDeadlineAt) return fail()
     assertMatchingCleanSource(source, runtime.sourceIdentity())
 
     runtime.writeFile(
@@ -406,7 +375,8 @@ export async function main(
       { now: runtime.now, abortSignal, timeoutScheduler: runtime.timeoutScheduler },
     )
     assertMatchingCleanSource(source, runtime.sourceIdentity())
-    return durationCode === 0 && !abortSignal.aborted && runtime.now() < deadlines.hardDeadlineAt ? 0 : 1
+    if (durationCode !== 0 || abortSignal.aborted || runtime.now() >= deadlines.hardDeadlineAt) return fail()
+    return 0
   } catch (error) {
     if (artifactRoot !== undefined) {
       try {
@@ -419,6 +389,7 @@ export async function main(
       }
     }
     runtime.report(`canonical-gate fatal error: ${error instanceof Error ? error.message : String(error)}`)
+    if (artifactRoot !== undefined) runtime.report(`canonical-gate diagnostics: ${artifactRoot}`)
     return 1
   } finally {
     termination?.dispose()
