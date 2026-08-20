@@ -105,6 +105,39 @@ describe('TerminalTaskLogDeliveryStore', () => {
     expect((await store.listPending())[0]?.batch.entries[0]?.text).toBe('next execution')
   })
 
+  it('ReopensANotFoundDeliveryForTheNextExecution', async () => {
+    const { store, fileSystem } = await loadedStore()
+    await store.putPending(snapshot('first execution'))
+    await store.markFailed(workflowIdentity, {
+      kind: 'not-found',
+      status: 404,
+      code: 'not_found',
+      message: 'Active runner work item not found',
+    })
+
+    const recovery = await store.putPending(snapshot('recovery execution'))
+
+    expect(recovery.state).toBe('pending')
+    expect(recovery.batch.entries[0]?.text).toBe('recovery execution')
+    expect(await store.listPending()).toEqual([recovery])
+    expect(JSON.parse(fileSystem.text!).deliveries['workflow:workflow-1:work-1'].state).toBe('pending')
+  })
+
+  it('KeepsNonRecoverableFailuresFailClosed', async () => {
+    const { store } = await loadedStore()
+    await store.putPending(snapshot('first execution'))
+    await store.markFailed(workflowIdentity, {
+      kind: 'local',
+      status: 422,
+      code: 'invalid_task_log',
+      message: 'invalid terminal log',
+    })
+
+    await expect(store.putPending(snapshot('recovery execution'))).rejects.toThrow(
+      'Terminal task-log payload changed for workflow:workflow-1:work-1',
+    )
+  })
+
   it('SerializesConcurrentMutationsWithoutDroppingEitherWork', async () => {
     const { store } = await loadedStore()
     await Promise.all([
