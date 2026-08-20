@@ -41,10 +41,10 @@
     "repositoryScope": "repository",
     "applicationBuilds": {
       "server": [
-        { "command": "dotnet", "args": ["build", "packages/server/tests/Mohist.Server.SpecTests/Mohist.Server.SpecTests.csproj"] },
-        { "command": "dotnet", "args": ["build", "packages/server/tests/Mohist.Server.UnitTests/Mohist.Server.UnitTests.csproj"] },
-        { "command": "dotnet", "args": ["build", "packages/server/tests/Mohist.Server.ArchTests/Mohist.Server.ArchTests.csproj"] },
-        { "command": "dotnet", "args": ["build", "packages/server/tests/Mohist.Workflow.Definition.Tests/Mohist.Workflow.Definition.Tests.csproj"] }
+        { "command": "dotnet", "args": ["build", "packages/server/tests/Mohist.Server.SpecTests/Mohist.Server.SpecTests.csproj", "-p:SkipWebBuild=true"] },
+        { "command": "dotnet", "args": ["build", "packages/server/tests/Mohist.Server.UnitTests/Mohist.Server.UnitTests.csproj", "-p:SkipWebBuild=true"] },
+        { "command": "dotnet", "args": ["build", "packages/server/tests/Mohist.Server.ArchTests/Mohist.Server.ArchTests.csproj", "-p:SkipWebBuild=true"] },
+        { "command": "dotnet", "args": ["build", "packages/server/tests/Mohist.Workflow.Definition.Tests/Mohist.Workflow.Definition.Tests.csproj", "-p:SkipWebBuild=true"] }
       ],
       "web": [
         { "command": "npm", "args": ["run", "build", "-w", "packages/web"] }
