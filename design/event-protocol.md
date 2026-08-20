@@ -166,7 +166,7 @@ is a mainstream community dependency.
 
 The live endpoint is:
 
-```text
+```text literal
 GET /api/projects/{projectRef}/events/socket
 ```
 
