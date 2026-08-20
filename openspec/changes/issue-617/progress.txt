@@ -12,5 +12,5 @@
 
 - Asset digest verified from the exact embedded file: `de3272639a1d390f3dcf915e65b6c057bf0b9eb91c51545572eb1e484c8c1a22`.
 - No changes are made to `self-review.md`.
-- Incremental commits: `98949a924` locks the published Skill payload; the source/anchor repair is the next commit after mechanical validation.
+- Incremental commits: `98949a924` locks the published Skill payload; `df5b56129` closes the source-discriminator and batched-anchor findings.
 - Mechanical checks pass: `tasks.json` parses, spec anchors resolve, requirements/scenarios are present, `git diff --check` is clean, and `self-review.md` is untouched. `npm run docs:check` could not run because `tsx` is not installed in the workspace (`exit 127`).
