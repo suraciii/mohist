@@ -32,8 +32,7 @@ export function formatTrackRun(run: TrackRun): string {
   const cleanup = `  [process-tree ${run.cleanupComplete ? 'terminal' : 'NOT TERMINAL'}]`
   const ledger = run.executionLedgerReady === false ? '  [execution ledger missing/stale]' : ''
   const reportPath = run.reportPath ? `  report=${run.reportPath}` : ''
-  const evidence = run.stdoutPath && run.stderrPath ? `  logs=${run.stdoutPath},${run.stderrPath}` : ''
-  return `  ${run.trackId}: ${ms(run.elapsedMs)} / ${ms(run.deadlineMs)} deadline  [${flag}]${report}${ledger}${cleanup}${reportPath}  ${run.command}${evidence}`
+  return `  ${run.trackId}: ${ms(run.elapsedMs)} / ${ms(run.deadlineMs)} deadline  [${flag}]${report}${ledger}${cleanup}${reportPath}  ${run.command}`
 }
 
 export function formatEvaluation(eval_: TrackEvaluation): string[] {
@@ -121,4 +120,30 @@ export function formatSummary(summary: GuardSummary, suiteDeadlineMs: number): s
     `  percentile budget breaches: ${summary.percentileBreaches}`,
     `  suite deadline: ${suite}`,
   ].join('\n')
+}
+
+export interface GuardOutputInput {
+  readonly passed: boolean
+  readonly summary: GuardSummary
+  readonly suiteDeadlineMs: number
+  readonly failedRuns: readonly TrackRun[]
+  readonly failedEvaluations: readonly TrackEvaluation[]
+}
+
+export function formatGuardOutput(input: GuardOutputInput): string {
+  const tracks = `${input.summary.totalTracks} track${input.summary.totalTracks === 1 ? '' : 's'}`
+  if (input.passed) return ''
+
+  const lines = [
+    `FAIL ${input.summary.failedTracks} of ${tracks} failed, ${input.summary.cancelledTracks} cancelled, ${input.summary.timeoutTracks} timed out`,
+  ]
+  if (input.summary.percentileBreaches > 0) {
+    lines.push(`  percentile budget breaches: ${input.summary.percentileBreaches}`)
+  }
+  if (input.summary.suiteDeadlineBreached) {
+    lines.push(`  suite deadline: ${ms(input.suiteDeadlineMs)} breached`)
+  }
+  for (const run of input.failedRuns) lines.push(formatTrackRun(run))
+  for (const evaluation of input.failedEvaluations) lines.push(...formatEvaluation(evaluation))
+  return lines.join('\n')
 }

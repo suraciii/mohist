@@ -152,15 +152,6 @@ public class OtelExecutionChainTracingSpecs
 
         var activities = recorder.EndedActivities;
 
-        // Diagnostic dump: list every captured activity's source,
-        // displayName, traceId, and parentSpanId so a future failure
-        // shows the actual trace topology rather than just a
-        // mismatch on one span.
-        foreach (var a in activities)
-        {
-            Console.WriteLine($"ACTIVITY source={a.Source?.Name} displayName={a.DisplayName} traceId={a.TraceId} spanId={a.SpanId} parentSpanId={a.ParentSpanId}");
-        }
-
         var trace = FindIssueCreationTrace(activities);
         Assert.NotNull(trace);
 

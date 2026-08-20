@@ -1,5 +1,4 @@
 using Microsoft.Extensions.Configuration;
-using Microsoft.Extensions.Logging;
 using Mohist.Server.Events.Grains;
 using Mohist.Server.Otel;
 using Orleans.Configuration;
@@ -35,11 +34,6 @@ public static class MohistSiloRegistration
         {
             options.Invariant = "System.Data.SQLite";
             options.ConnectionString = MohistServiceRegistration.ResolveSqliteConnectionString(configuration);
-        });
-
-        silo.ConfigureLogging(logging =>
-        {
-            logging.AddConsole();
         });
 
         // The dispatcher grain registers a ~1s reminder, well

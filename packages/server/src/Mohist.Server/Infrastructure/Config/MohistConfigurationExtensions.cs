@@ -67,8 +67,8 @@ public static class MohistConfigurationExtensions
                 ctx.Ignore = true;
                 Console.Error.WriteLine(
                     $"[mohist-config] Failed to load/reload config file '{ctx.Provider}'; falling back to defaults/last-known-good. Error: {ctx.Exception.Message}");
-                // Build-time hook has no logger in scope, so Console.Error is
-                // the durable surface; this mirrors the OtelPortBindingLog precedent.
+                // This build-time hook has no logger in scope, so Console.Error
+                // is the only durable failure surface.
             };
         });
 

@@ -35,7 +35,6 @@ public sealed class OtelBindFailureClassifier : IOtelBindFailureClassifier
         if (!OtelBindFailureDetector.IsOtlpPortBindFailure(io, listener.Port, listener.BindHost))
             return new CollectorBindFailureDecision(null);
 
-        OtelPortBindingLog.WriteBindFailure(listener.Port, listener.BindHost, io);
         _logger?.LogWarning(
             io,
             "Mohist host fallback triggered after OTLP bind failure on {Host}:{Port}; alternate host will be started.",
