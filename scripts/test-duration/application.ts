@@ -86,6 +86,13 @@ export async function prepareApplicationScope(
     })
 
     const build = await runCommandSequence(commands, runtime, artifactRoot, deadlines, abortSignal)
+    writeEvidence(runtime, artifactRoot, 'build.json', {
+      schemaVersion: 1,
+      application,
+      commands,
+      passed: build.passed,
+      results: build.results,
+    })
     if (!build.passed) {
       writeEvidence(runtime, artifactRoot, 'summary.json', {
         application,

@@ -203,7 +203,9 @@ export interface TrackRun {
   readonly timedOut: boolean
   readonly timeoutReason?: 'track' | 'suite'
   readonly exitCode: number | null
+  readonly queueWaitMs?: number
   readonly elapsedMs: number
+  readonly executionElapsedMs?: number
   readonly deadlineMs: number
   readonly command: string
   readonly reportReady: boolean

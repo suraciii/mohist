@@ -606,10 +606,12 @@ function startLane(
   deadlines: SuiteDeadlines,
   artifactRoot: string,
   runtime: GuardRuntime,
+  schedulerStartedAt: number,
   cancellationDeadlineAt: () => number,
 ): RunningLane<TrackRun> {
   const trackDeadline = createTimeout(plan.deadlineMs, runtime.timeoutScheduler)
   const laneStartedAt = runtime.now()
+  const queueWaitMs = Math.max(0, laneStartedAt - schedulerStartedAt)
   let cleanupComplete = true
   let currentChild: SpawnedChild | undefined
   let cancellationRequested = false
@@ -793,7 +795,9 @@ function startLane(
         timedOut: outcome.status === 'timeout',
         timeoutReason: outcome.timeoutReason,
         exitCode: outcome.exitCode,
+        queueWaitMs,
         elapsedMs: runtime.now() - laneStartedAt,
+        executionElapsedMs: outcome.elapsedMs,
         deadlineMs: plan.deadlineMs,
         command: `${command} ${args.join(' ')}`,
         reportReady,
@@ -1400,6 +1404,7 @@ export async function main(
           config.canonical?.resourceLimits.host ?? config.canonical?.maxConcurrentLanes ?? 1,
         ),
       }
+      const schedulerStartedAt = runtime.now()
       const scheduled = await scheduleLanes(
         planned.map((plan) => plan.lane),
         (lane) =>
@@ -1410,6 +1415,7 @@ export async function main(
             deadlines,
             artifactRoot,
             runtime,
+            schedulerStartedAt,
             () => externalCleanupDeadline ?? cleanupDeadlineAt(runtime.now(), deadlines.hardDeadlineAt, graceMs),
           ),
         isLaneSuccessful,
