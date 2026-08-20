@@ -2567,7 +2567,7 @@
         "factMethods": 9,
         "theoryMethods": 0,
         "inlineDataRows": 0,
-        "mtpCases": 35
+        "mtpCases": 37
       },
       "moved": {
         "sourcePath": "Mohist.Server.SpecTests/Specs/Events/MohistHubSpecs.cs",
@@ -2646,7 +2646,7 @@
         "factMethods": 7,
         "theoryMethods": 0,
         "inlineDataRows": 0,
-        "mtpCases": 35
+        "mtpCases": 37
       },
       "moved": {
         "sourcePath": "Mohist.Server.SpecTests/Specs/Events/MohistHubProjectAffinitySpecs.cs",
