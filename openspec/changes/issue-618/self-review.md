@@ -1,49 +1,47 @@
-# Self-Review: Issue 618 Plan Artifacts (Round 2)
+# Self-Review: Issue 618
 
-This is a re-review. I re-read the canonical issue body and acceptance criteria first with:
+Review mode: re-review. I re-read the live issue with `mo issue view 618 --project proj_f6c141d63b6243bfbb481737b2243b87 --json body` before checking the revised artifacts. The issue has eight acceptance criteria; this review verifies the previous findings and checks regressions introduced by their dispositions.
 
-```bash
-mo issue view 618 --project proj_f6c141d63b6243bfbb481737b2243b87
-```
+**Verdict: FAIL**
 
-I then verified the disposition of the prior review against `proposal.md`, `design.md`, `tasks.json`, and all four files under `specs/`.
+## Must-Fix Findings
 
-## Verdict
+### 1. Restart and credential-expiry reissuance is not a defined lifecycle
 
-**PASS** — no must-fix problems remain; the plan is ready to build.
+**Violates:** Issue Acceptance Criterion 5: after a Server restart, Session recovery, or credential expiry, the system must reauthorize from the immutable Slack origin and issue a new credential without reusing the old value.
 
-## Previous finding disposition
+The revised design defines issuance for new, recovered, and replacement executions and says that lease-store shutdown revokes active leases (`design.md:90-96`). It does not define the required behavior for a Server restart that is not a graceful lease-store shutdown, nor does it bind lease validity to a Server incarnation. The deployment topology and lease-store sharing remain open (`design.md:149-150`). With a shared runtime store, an old hash can remain valid across a restart unless a restart epoch or equivalent invalidation boundary is specified; with an in-memory store, the Runner can still hold the old grant and broker unless the durable recovery transition is explicitly triggered.
 
-### MF-1 — fixed properly
+The expiry path is also incomplete. The only specified behavior for an expired credential is rejection (`manager-execution-credentials/spec.md`, `Credential is expired` scenario). The design leaves open whether an active execution is renewed only by starting a new turn (`design.md:149`), while fresh issuance is otherwise described only for a new follow-up or recovered execution (`design.md:90`). A Manager turn that reaches expiry therefore has no defined path from the rejected invocation back to origin-based reauthorization and a new execution credential.
 
-The prior review found a conflict between the exact nine-operation management allowlist and the required `mo slack message send` reply action. The updated artifacts resolve that conflict consistently:
+Before build, the plan must define one authoritative restart boundary for all Server topologies, invalidate old Runner grants and brokers across graceful and ungraceful restart, and specify what durable recovery/new-turn transition handles an expired active execution. It must state that a state-changing operation with an uncertain result is never automatically replayed, and add tests for restart, crash recovery, expiry during a turn, and fresh values after each path. T-003's current acceptance text (`tasks.json:52-57`) does not establish those behaviors.
 
-- `specs/manager-command-capability/spec.md:2-18` defines `ManagerManagementCapability` as exactly the nine operations, gives the exact request envelope and argument mapping, and explicitly rejects `mo slack message send` on that bridge.
-- `design.md:78-90` defines separate `ManagerManagementBridge` and `ManagerSlackReplyBridge` routes. It also defines the reply bridge's trusted anchor mapping, Manager outbox owner, route-scoped audiences, and per-input idempotency behavior.
-- `specs/manager-execution-credential/spec.md:32-74` makes the management and reply audiences disjoint and requires validation before either application or outbox service is called.
-- `tasks.json` T-003 and T-005 contain corresponding implementation and denial tests, including reply denial on the management route, anchor validation, Manager-owned routing, duplicate payload conflicts, and recovery redelivery.
+### 2. The claimed per-execution CLI boundary is not connected to the current OpenCode execution boundary
 
-This fixes the specific issue against acceptance criteria 1 and 7 without reintroducing a reply exception into the management allowlist. The proposal and lifecycle spec still remove the old model-output parser, synthetic follow-up, and Server-authored reply paths, so the fix did not regress acceptance criterion 2 or the no-compatibility-path non-goal.
+**Violates:** Issue Acceptance Criterion 4: credentials must be execution-scoped and absent from prompts, transcripts, logs, Session state, and durable records while remaining available to the Manager capability execution.
 
-## Re-review checks
+The design specifies a private broker, a per-execution `mo` launcher, and a private `PATH`, then asserts that Pi and OpenCode use the same boundary (`design.md:92-96`; `tasks.json:54-57`). That assertion does not match the current Runner/OpenCode contract. The Runner's process helper applies an `env` override only when the Runner itself spawns the child (`packages/runner/src/system/process.ts:94-128`). OpenCode is instead started through the SDK's `createOpencodeServer` without a per-turn environment or command-boundary parameter (`packages/runner/src/runtime/opencode/server-process.ts:4-11,57-66`), and `OpenCodeRuntime` retains a shared server/client while turns send prompts through that client (`packages/runner/src/runtime/opencode/runtime.ts:111-157`; `packages/runner/src/runtime/opencode/turn.ts:172-203`). A launcher placed in a per-execution Runner environment is consequently not shown to the OpenCode server's model-shell child. Making it global would allow cross-execution access to a credential and violate the same criterion.
 
-- **Prior must-fix findings:** checked; MF-1 is fixed in the contract, design, task breakdown, and tests.
-- **Regression from the fix:** checked, no must-fix regression. The reply route is separate, has its own audience and authorization, and does not broaden management access.
-- **Coverage:** checked, no must-fix issue. The artifacts address all eight acceptance criteria: Agent-authored CLI-backed replies and received reaction; removal of envelope/synthetic/server-authored text; managed-Bot loop prevention; ephemeral credential boundaries; recovery reissuance; current authorization; strict exclusions; and one terminal reaction for every outcome.
-- **Correctness:** checked, no must-fix issue. The selected boundaries make management effects originate only from the allowlisted capability, replies originate only from the separately authorized reply action, and liveness remains an independent reaction projection.
-- **Current codebase consistency:** checked, no must-fix issue. The plan explicitly reuses the existing Session/Runner Slack context, application services, Slack outbox, Manager owner kind, managed-Bot admission, and liveness projection, while naming the current Manager parser, generic reply lookup, and Server terminal-delivery branch for removal or replacement.
-- **Task breakdown, ordering, and verifiability:** checked, no must-fix issue. T-001 establishes the transient credential boundary; T-002 independently protects ingress; T-003 builds the management bridge; T-004 switches the Session lifecycle and removes the old protocol; T-005 completes reply delivery and liveness. Dependencies are acyclic, and each task has focused acceptance and regression tests.
+Capability/version gating alone is not sufficient: the built-in Manager currently selects OpenCode (`packages/server/src/Mohist.Server/Agent/Services/BuiltInAgentCatalog.cs:12-21`), so rejecting the runtime that cannot preserve the boundary would leave the required Manager flow unavailable. The plan must choose and specify a concrete OpenCode-compatible boundary, such as an isolated per-execution OpenCode process with its own broker environment or an explicit Runner-mediated CLI boundary that preserves the `mo` surface. It must define concurrency, cleanup, failure-closed behavior, and redaction at that boundary, and the integration tests must exercise the actual Pi and OpenCode command paths rather than only testing a Runner launcher in isolation.
+
+## Previous Findings
+
+- **Previous credential transport finding: fixed properly for the previously identified gap.** The revised plan now names a non-durable `managerExecutionGrant`, keeps plaintext values outside `WorkDispatch` and durable records, specifies a private broker/launcher, and describes cleanup and redaction (`design.md:90-98`). The restart/expiry lifecycle finding above is a remaining contract gap, not a reassertion that the carrier is unspecified.
+- **Previous Manager reply-route finding: fixed properly.** The revised plan now specifies a dedicated reply route, separate reply lease, full-origin validation, synthetic Manager owner derivation, exact progress promotion/deduplication, and route/liveness tests (`design.md:64-66`; `tasks.json:71-78`).
+
+## Dimension Checks
+
+- Issue goals and acceptance criteria: checked against the live issue; the eight criteria are represented in the proposal, specs, and task acceptance text, but Criteria 4 and 5 remain unsatisfied by the two boundary gaps above.
+- Coverage: checked; the revised artifacts cover natural-language replies, protocol removal, loop prevention, allowlisting, current authorization, credentials, recovery, and liveness. The restart/expiry and OpenCode execution details are not complete enough to make the corresponding coverage implementable.
+- Correctness: checked; the Manager-owned reply path and ordinary-session direction are coherent, but the credential behavior cannot guarantee the issue's restart/expiry or OpenCode secrecy requirements as written.
+- Consistency with the current codebase: checked; the reply/outbox design now addresses the existing Manager ownership split. The proposed per-execution PATH/broker is not yet reconciled with the shared SDK-managed OpenCode server boundary cited above.
+- Task breakdown, ordering, and verifiability: checked; T-003 and its security tests name the required cases, but they cannot pass until the restart/expiry state transition and OpenCode injection boundary are selected. T-001 and T-002 are parallel despite T-001 removing or unregistering the old Manager executor while T-002 may move reusable operation behavior out of it; this is an ordering watchpoint, not an additional must-fix finding because the design also permits reuse of the existing application services.
 
 ## Observations
 
-These do not affect the PASS verdict because the plan states the required invariants and assigns verification; they are implementation cautions rather than problems that make the plan wrong or incomplete relative to Issue 618.
+- The allowlist is still expressed as logical categories rather than one canonical list of operation ids, argument schemas, and route mappings (`design.md:70-82`; `tasks.json:30-36`). The owner claim/transfer choice also remains open (`design.md:151`). Tests should make the catalog authoritative and prevent CLI and Server drift.
+- Exact credential TTL, clock-skew handling, and shared lease-store implementation remain open (`design.md:149-150`). The lifecycle semantics are a must-fix because of Criterion 5; the numeric policy and topology choice are observations once that lifecycle is explicitly defined.
+- Adapter support for idempotent reaction add/remove remains an open question (`design.md:152`). The implementation should either prove the supported adapter contract or gate Manager liveness before enabling it; this is not a separate must-fix finding here because the task already requires adapter integration coverage.
+- The proposal calls the change a non-general-purpose Manager HTTP API while the design adds a dedicated Manager reply endpoint (`proposal.md:40`; `design.md:64`). Clarify that this is an internal, narrowly scoped reply capability route rather than a public management API.
 
-1. The exact Runner-to-CLI transport, multi-Server placement/routing of the non-durable grant store, and grant TTL remain implementation choices in `design.md:145-147`. The plan does provide the non-negotiable security invariant and leakage tests. The chosen mechanism must preserve that invariant rather than turn the credential into a generic shell environment variable or durable token row.
-
-2. Manager liveness is specified as reaction-only, but the existing common projection carries fallback text such as `Received...` and `Working...` in `SlackStatusProjection`. T-005 should explicitly verify the Manager path does not emit those fallback messages, including reaction-delivery failure and retry cases; this is already covered by the plan's no-Server-authored-text contract and is not a missing acceptance criterion.
-
-3. Terminal delivery must resolve the triggering Manager input from durable Session/input provenance when a follow-up terminal envelope has no `messageTs`. The design calls for this resolution and T-005 requires absent-progress, restart, recovery, and redelivery coverage. The implementation should not fall back to the initial DM root or a synthetic terminal identity when finalizing reactions.
-
-4. The command spec describes `list` as workspace Manager status and `view` as a single Agent/Connection inspection. The implementation should make the `list Agents` scenario explicit in the structured result and test it against the same facts exposed by the protected `mo` path, including project/workspace scope. This is a clarity and verification concern, not a demonstrated failure of the issue goals.
-
-<promise>PASS</promise>
+<promise>FAIL</promise>
