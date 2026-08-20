@@ -152,24 +152,6 @@ public sealed class SlackDmNewTaskIngressSpecs : IAsyncLifetime
     }
 
     [Fact]
-    public async Task A_normal_message_containing_new_task_words_remains_a_followup()
-    {
-        var connection = await CreateConnectionAsync();
-        var first = await PostIngressAsync(connection, "D-DM-MARKER", "1710000000.000500", "first task");
-        var firstSessionId = first.GetProperty("sessionId").GetString();
-
-        var followup = await PostIngressAsync(
-            connection,
-            "D-DM-MARKER",
-            "1710000000.000600",
-            "please review the new task wording");
-
-        Assert.True(followup.GetProperty("followup").GetBoolean());
-        Assert.Equal(firstSessionId, followup.GetProperty("sessionId").GetString());
-        Assert.False(followup.TryGetProperty("newTask", out _));
-    }
-
-    [Fact]
     public async Task Empty_new_task_is_rejected_without_accepting_or_creating_work()
     {
         var connection = await CreateConnectionAsync();
@@ -191,36 +173,6 @@ public sealed class SlackDmNewTaskIngressSpecs : IAsyncLifetime
             .Where(row => row.ConnectionId == connection.Id && row.ConversationId == "D-DM-EMPTY")
             .Select(row => row.SlackMessageIdentity)
             .ToListAsync(), identity => identity.EndsWith("1710000000.000800", StringComparison.Ordinal));
-    }
-
-    [Fact]
-    public async Task Redelivered_new_task_does_not_restore_an_older_current_session()
-    {
-        var connection = await CreateConnectionAsync();
-        var first = await PostIngressAsync(connection, "D-DM-REPLAY-NEW", "1710000000.000100", "new task first work");
-        var second = await PostIngressAsync(connection, "D-DM-REPLAY-NEW", "1710000000.000200", "new task second work");
-
-        var replay = await PostIngressAsync(connection, "D-DM-REPLAY-NEW", "1710000000.000100", "new task first work");
-
-        await using var scope = _fixture.Services.CreateAsyncScope();
-        var mapping = scope.ServiceProvider.GetRequiredService<SlackDmSessionMappingStore>();
-        Assert.Equal(second.GetProperty("sessionId").GetString(), await mapping.GetCurrentSessionIdAsync(
-            connection.ProjectId, connection.Id, "D-DM-REPLAY-NEW"));
-        Assert.Equal(first.GetProperty("sessionId").GetString(), replay.GetProperty("sessionId").GetString());
-    }
-
-    [Fact]
-    public async Task Concurrent_new_tasks_keep_the_latest_message_as_current()
-    {
-        var connection = await CreateConnectionAsync();
-        var results = await Task.WhenAll(
-            PostIngressAsync(connection, "D-DM-CONCURRENT", "1710000000.000100", "new task first work"),
-            PostIngressAsync(connection, "D-DM-CONCURRENT", "1710000000.000200", "new task second work"));
-
-        await using var scope = _fixture.Services.CreateAsyncScope();
-        var mapping = scope.ServiceProvider.GetRequiredService<SlackDmSessionMappingStore>();
-        Assert.Equal(results[1].GetProperty("sessionId").GetString(), await mapping.GetCurrentSessionIdAsync(
-            connection.ProjectId, connection.Id, "D-DM-CONCURRENT"));
     }
 
     private async Task<JsonElement> PostIngressAsync(

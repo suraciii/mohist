@@ -13,7 +13,12 @@ using WorkspaceIdentity = Mohist.Server.Workflow.Domain.Run.WorkspaceIdentity;
 
 namespace Mohist.Server.Workflow.Services;
 
-public class WorkflowQuerier : IScopedService
+public interface IWorkflowStatusReader
+{
+    Task<WorkflowStatusView?> GetStatusAsync(string workflowRunId);
+}
+
+public class WorkflowQuerier : IScopedService, IWorkflowStatusReader
 {
     private readonly IDbContextFactory<MohistDbContext> _db;
     private readonly WorkflowDefinitionResolver _definitionResolver;

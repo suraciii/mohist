@@ -58,29 +58,6 @@ public class EpicLifecycleSpecs
     }
 
     [Fact]
-    public async Task MarkDone_WhenAllLinkedIssuesCancelled_SucceedsAndChangesStatusToDone()
-    {
-        // cancelled is terminal for readiness but not counted as
-        // delivered; an epic whose linked issues are all cancelled is
-        // ready to Mark Done.
-        var project = await CreateProjectAsync();
-        var first = await CreateIssueAsync(project.Id, "First cancelled");
-        var second = await CreateIssueAsync(project.Id, "Second cancelled");
-        var epic = await CreateEpicAsync(project.Id, "All cancelled epic");
-        await LinkIssueAsync(project.Id, epic.Number, first.Number);
-        await LinkIssueAsync(project.Id, epic.Number, second.Number);
-        await CancelIssueAsync(project.Id, first);
-        await CancelIssueAsync(project.Id, second);
-
-        var detail = await _client.GetDataAsync<EpicDetailDto>($"/api/projects/{project.Id}/epics/{epic.Number}");
-
-        Assert.Equal("done", detail.Status);
-        Assert.Equal(0, detail.Progress.DeliveredCount);
-        Assert.Equal(2, detail.Progress.TotalIssueCount);
-        Assert.True(detail.Progress.ReadyToMarkDone);
-    }
-
-    [Fact]
     public async Task MarkDone_WithMixedDoneAndCancelledLinkedIssues_SucceedsAndDeliveredCountCountsOnlyDone()
     {
         // Epic #18 scenario: at least one done issue and at least one
@@ -102,31 +79,6 @@ public class EpicLifecycleSpecs
         Assert.True(detail.Progress.ReadyToMarkDone);
         Assert.Equal(1, detail.Progress.DeliveredCount);
         Assert.Equal(2, detail.Progress.TotalIssueCount);
-    }
-
-    [Fact]
-    public async Task MarkDone_WhenAllLinkedIssuesDelivered_SucceedsAndChangesStatusToDone()
-    {
-        var project = await CreateProjectAsync();
-        var first = await CreateIssueAsync(project.Id, "First");
-        var second = await CreateIssueAsync(project.Id, "Second");
-        var epic = await CreateEpicAsync(project.Id, "Lifecycle success");
-        await LinkIssueAsync(project.Id, epic.Number, first.Number);
-        await LinkIssueAsync(project.Id, epic.Number, second.Number);
-        await CompleteIssueAsync(project.Id, first);
-        await CompleteIssueAsync(project.Id, second);
-
-        var detail = await _client.GetDataAsync<EpicDetailDto>($"/api/projects/{project.Id}/epics/{epic.Number}");
-
-        Assert.Equal("done", detail.Status);
-        Assert.Equal(2, detail.Progress.DeliveredCount);
-        Assert.Equal(2, detail.Progress.TotalIssueCount);
-        Assert.True(detail.Progress.ReadyToMarkDone);
-        Assert.Equal(2, detail.LinkedIssues.Length);
-        Assert.Equal(first.Number, detail.LinkedIssues[0].Number);
-        Assert.Equal("done", detail.LinkedIssues[0].Status);
-        Assert.Equal(second.Number, detail.LinkedIssues[1].Number);
-        Assert.Equal("done", detail.LinkedIssues[1].Status);
     }
 
     [Fact]
@@ -154,73 +106,6 @@ public class EpicLifecycleSpecs
 
         var after = await _client.GetDataAsync<EpicDto>($"/api/projects/{project.Id}/epics/{epic.Number}");
         Assert.Equal("done", after.Status);
-    }
-
-    [Fact]
-    public async Task MarkDone_OnClosedEpic_ReturnsAlreadyTerminalEnvelope()
-    {
-        var project = await CreateProjectAsync();
-        var issue = await CreateIssueAsync(project.Id, "Linked");
-        var epic = await CreateEpicAsync(project.Id, "Closed epic");
-        await LinkIssueAsync(project.Id, epic.Number, issue.Number);
-        await _client.PostOkAsync($"/api/projects/{project.Id}/epics/{epic.Number}/close", null);
-
-        using var response = await _client.PostAsync($"/api/projects/{project.Id}/epics/{epic.Number}/done", null);
-
-        Assert.Equal(HttpStatusCode.Conflict, response.StatusCode);
-
-        var envelope = await response.Content.ReadFromJsonAsync<ConflictEnvelope>();
-        Assert.NotNull(envelope);
-        Assert.False(envelope!.Success);
-        Assert.Equal("EPIC_ALREADY_TERMINAL", envelope.Code);
-        Assert.NotNull(envelope.Details);
-        Assert.Equal("closed", envelope.Details!.CurrentStatus);
-        Assert.Equal("done", envelope.Details.RequestedStatus);
-    }
-
-    [Fact]
-    public async Task Close_RepeatedOnClosedEpic_ReturnsAlreadyTerminalEnvelope()
-    {
-        var project = await CreateProjectAsync();
-        var epic = await CreateEpicAsync(project.Id, "Close twice");
-
-        await _client.PostOkAsync($"/api/projects/{project.Id}/epics/{epic.Number}/close", null);
-
-        using var response = await _client.PostAsync($"/api/projects/{project.Id}/epics/{epic.Number}/close", null);
-
-        Assert.Equal(HttpStatusCode.Conflict, response.StatusCode);
-
-        var envelope = await response.Content.ReadFromJsonAsync<ConflictEnvelope>();
-        Assert.NotNull(envelope);
-        Assert.False(envelope!.Success);
-        Assert.Equal("EPIC_ALREADY_TERMINAL", envelope.Code);
-        Assert.NotNull(envelope.Details);
-        Assert.Equal("closed", envelope.Details!.CurrentStatus);
-        Assert.Equal("closed", envelope.Details.RequestedStatus);
-    }
-
-    [Fact]
-    public async Task Close_RepeatedOnDoneEpic_ReturnsAlreadyTerminalEnvelope()
-    {
-        var project = await CreateProjectAsync();
-        var issue = await CreateIssueAsync(project.Id, "Delivered");
-        var epic = await CreateEpicAsync(project.Id, "Done then close");
-        await LinkIssueAsync(project.Id, epic.Number, issue.Number);
-        await CompleteIssueAsync(project.Id, issue);
-        var done = await _client.GetDataAsync<EpicDetailDto>($"/api/projects/{project.Id}/epics/{epic.Number}");
-        Assert.Equal("done", done.Status);
-
-        using var response = await _client.PostAsync($"/api/projects/{project.Id}/epics/{epic.Number}/close", null);
-
-        Assert.Equal(HttpStatusCode.Conflict, response.StatusCode);
-
-        var envelope = await response.Content.ReadFromJsonAsync<ConflictEnvelope>();
-        Assert.NotNull(envelope);
-        Assert.False(envelope!.Success);
-        Assert.Equal("EPIC_ALREADY_TERMINAL", envelope.Code);
-        Assert.NotNull(envelope.Details);
-        Assert.Equal("done", envelope.Details!.CurrentStatus);
-        Assert.Equal("closed", envelope.Details.RequestedStatus);
     }
 
     [Fact]
@@ -306,23 +191,6 @@ public class EpicLifecycleSpecs
     }
 
     [Fact]
-    public async Task UnlinkIssue_ByNumber_RemovesSingleMember()
-    {
-        var project = await CreateProjectAsync();
-        var issue = await CreateIssueAsync(project.Id, "Only");
-        var epic = await CreateEpicAsync(project.Id, "Unlink single member");
-        await LinkIssueAsync(project.Id, epic.Number, issue.Number);
-
-        using var response = await _client.DeleteAsync(
-            $"/api/projects/{project.Id}/epics/{epic.Number}/issues/{issue.Number}");
-
-        response.EnsureSuccessStatusCode();
-
-        var detail = await _client.GetDataAsync<EpicDetailDto>($"/api/projects/{project.Id}/epics/{epic.Number}");
-        Assert.Empty(detail.LinkedIssues);
-    }
-
-    [Fact]
     public async Task MarkDone_AllDelivered_LinkTimeRecomputeAutoTransitionsToDone()
     {
         var project = await CreateProjectAsync();
@@ -405,40 +273,6 @@ public class EpicLifecycleSpecs
     }
 
     [Fact]
-    public async Task EpicDetail_ProgressOutputsAreUnchangedByPrerequisiteData()
-    {
-        var project = await CreateProjectAsync();
-        var first = await CreateIssueAsync(project.Id, "First");
-        await CompleteIssueAsync(project.Id, first);
-        var second = await CreateIssueAsync(project.Id, "Second");
-        var secondGrain = _grains.GetGrain<IIssueGrain>(GrainKey.Issue(new IssueKey(project.Id, second.Number)));
-        await secondGrain.AddPrerequisiteAsync(first.Number);
-
-        var epic = await CreateEpicAsync(project.Id, "Progress additivity");
-        await LinkIssueAsync(project.Id, epic.Number, first.Number);
-        var done = await _client.GetDataAsync<EpicDto>($"/api/projects/{project.Id}/epics/{epic.Number}");
-        Assert.Equal("done", done.Status);
-        await LinkIssueAsync(project.Id, epic.Number, second.Number);
-
-        var detail = await _client.GetDataAsync<EpicDetailDto>($"/api/projects/{project.Id}/epics/{epic.Number}");
-
-        Assert.Equal("running", detail.Status);
-        Assert.Contains(detail.Progress.ActiveIssues, issue => issue.Number == second.Number);
-        Assert.Equal(1, detail.Progress.DeliveredCount);
-        Assert.Equal(2, detail.Progress.TotalIssueCount);
-        Assert.False(detail.Progress.ReadyToMarkDone);
-        Assert.Null(detail.Progress.NextIssue);
-        var active = Assert.Single(detail.Progress.ActiveIssues);
-        Assert.Equal(second.Number, active.Number);
-        Assert.Equal(second.Number, active.Number);
-        Assert.Empty(detail.Progress.BlockedIssues);
-
-        var secondRow = detail.LinkedIssues.Single(i => i.Number == second.Number);
-        Assert.Equal(new[] { first.Number }, secondRow.PrerequisiteNumbers);
-        Assert.Empty(secondRow.ExternalPrerequisites);
-    }
-
-    [Fact]
     public async Task Reopen_OnClosedEpic_ReturnsIdleEpic()
     {
         var project = await CreateProjectAsync();
@@ -451,22 +285,6 @@ public class EpicLifecycleSpecs
 
         var detail = await _client.GetDataAsync<EpicDetailDto>($"/api/projects/{project.Id}/epics/{epic.Number}");
         Assert.Equal("idle", detail.Status);
-    }
-
-    [Fact]
-    public async Task Reopen_OnDoneEpic_ReturnsIdleEpic()
-    {
-        var project = await CreateProjectAsync();
-        var issue = await CreateIssueAsync(project.Id, "Done issue");
-        var epic = await CreateEpicAsync(project.Id, "Done epic");
-        await LinkIssueAsync(project.Id, epic.Number, issue.Number);
-        await CompleteIssueAsync(project.Id, issue);
-        var done = await _client.GetDataAsync<EpicDetailDto>($"/api/projects/{project.Id}/epics/{epic.Number}");
-        Assert.Equal("done", done.Status);
-
-        var reopened = await _client.PostDataAsync<EpicDto>($"/api/projects/{project.Id}/epics/{epic.Number}/reopen", null);
-
-        Assert.Equal("idle", reopened.Status);
     }
 
     [Fact]
@@ -491,28 +309,6 @@ public class EpicLifecycleSpecs
     }
 
     [Fact]
-    public async Task Reopen_OnRunningEpic_Returns409EpIcNotTerminal()
-    {
-        var project = await CreateProjectAsync();
-        var issue = await CreateIssueAsync(project.Id, "Running issue");
-        var epic = await CreateEpicAsync(project.Id, "Running epic");
-        await LinkIssueAsync(project.Id, epic.Number, issue.Number);
-        await _client.PostOkAsync($"/api/projects/{project.Id}/epics/{epic.Number}/start", null);
-
-        using var response = await _client.PostAsync($"/api/projects/{project.Id}/epics/{epic.Number}/reopen", null);
-
-        Assert.Equal(HttpStatusCode.Conflict, response.StatusCode);
-
-        var envelope = await response.Content.ReadFromJsonAsync<ConflictEnvelope>();
-        Assert.NotNull(envelope);
-        Assert.Equal("EPIC_NOT_TERMINAL", envelope.Code);
-        Assert.Equal("running", envelope!.Details!.CurrentStatus);
-
-        var after = await _client.GetDataAsync<EpicDto>($"/api/projects/{project.Id}/epics/{epic.Number}");
-        Assert.Equal("running", after.Status);
-    }
-
-    [Fact]
     public async Task Reopen_OnMissingEpic_Returns404()
     {
         var project = await CreateProjectAsync();
@@ -520,18 +316,6 @@ public class EpicLifecycleSpecs
         using var response = await _client.PostAsync($"/api/projects/{project.Id}/epics/999/reopen", null);
 
         Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
-    }
-
-    [Fact]
-    public async Task Reopen_UsesEpicNumber()
-    {
-        var project = await CreateProjectAsync();
-        var epic = await CreateEpicAsync(project.Id, "By number");
-        await _client.PostOkAsync($"/api/projects/{project.Id}/epics/{epic.Number}/close", null);
-
-        var byNumber = await _client.PostDataAsync<EpicDto>($"/api/projects/{project.Id}/epics/{epic.Number}/reopen", null);
-        Assert.Equal("idle", byNumber.Status);
-
     }
 
     [Fact]

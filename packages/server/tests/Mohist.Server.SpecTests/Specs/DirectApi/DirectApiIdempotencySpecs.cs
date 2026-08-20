@@ -410,18 +410,8 @@ public sealed class DirectApiIdempotencySpecs(PublicProjectionIntegrationFixture
     }
 
     private async Task<string> CreatePatAsync(string projectId)
-    {
-        using var response = await fixture.Client.PostAsJsonAsync("/api/auth/tokens", new
-        {
-            name = $"direct-idempotency-{Guid.NewGuid():N}",
-            scope = "operator",
-            projectIds = new[] { projectId },
-            allProjects = false,
-        });
-        response.EnsureSuccessStatusCode();
-        using var body = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
-        return body.RootElement.GetProperty("data").GetProperty("token").GetString()!;
-    }
+        => await DirectApiCredentialTestSupport.CreatePatAsync(
+            fixture, "direct-idempotency", [projectId]);
 
     private async Task<CanonicalCounts> CountsAsync()
     {

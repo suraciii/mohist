@@ -1,0 +1,222 @@
+# Issue 627 progress
+
+## Codebase Patterns
+
+- Domain settlement logic lives in `packages/server/src/Mohist.Server/Workflow/Domain/Run/WorkflowRun.Work.cs`
+  (`extension(WorkflowRun run)` blocks). Grain-side reconciliation lives in
+  `packages/server/src/Mohist.Server/Workflow/Grains/WorkflowGrain.AgentResultSettlement.cs`.
+- `WorkflowRun.Assignment` is the *active-work lease*; `TaskRun.WorkId`/`WorkerId`
+  plus `AgentResultSettlement` are the *identity record*. Release clears only the lease.
+- `CommitAsync(events)` = mark dirty + `SaveRunAsync(events)` (durable boundary).
+  `CommitAsync([])` is the idiom for a state-only save.
+- Deterministic grain tests with fake time + failure injection: use the harness in
+  `packages/server/tests/Mohist.Server.SpecTests/Specs/Workflow/Grain/WorkflowGrainStateSaveFailureSpecs.cs`
+  (`CreateReminderGrain`, `ReminderCalls`, static `FakeTimeProvider TimeProvider`,
+  directly-constructed `WorkflowGrain` + manual `OnActivateAsync`). Partial-class
+  files split by scenario (e.g. `WorkflowGrainSettlementCleanupRecoverySpecs.cs`).
+  Orleans-cluster level settlement specs live in `Specs/Workflow/Grain/AgentResultSettlementSpecs.cs`.
+- Running the spec suite: `dotnet build ... -p:SkipWebBuild=true` then run the
+  xUnit v3 in-process runner directly:
+  `packages/server/tests/Mohist.Server.SpecTests/bin/Debug/net11.0/Mohist.Server.SpecTests -class "<FQN>"`.
+  (`dotnet test --filter` is ignored under Microsoft.Testing.Platform; `-- --filter-class`
+  works via `dotnet test` but gives no failure detail.)
+  Building `Mohist.Server` without `-p:SkipWebBuild=true` fails in this sandbox (no npm web build).
+
+## T-001 (durable deadline release + repairable cleanup)
+
+- `WorkflowRun.BlockUnresolvedAgentResult(now)` now also sets `run.Assignment = null`
+  in the same aggregate mutation as the `Unknown -> Blocked` transition, so the
+  blocked-and-released state is one durable save. Task/run stay `Running`; every
+  settlement field and the task's `WorkId`/`WorkerId` are untouched.
+- Added `WorkflowRun.ReleaseBlockedAgentResultOwnership()`: repairs an already-`Blocked`
+  run that still holds a lease (legacy rows / interrupted release). Returns true only
+  when the run changed; emits no events.
+- Grain: `BlockUnresolvedAgentResultIfDueAsync` commits the boundary, clears
+  `_cachedAssignedWorkerId`, then calls `ReleaseBlockedAgentResultSettlementAsync`,
+  which (a) repairs+persists a stale assignment, (b) deletes the dispatch snapshot,
+  (c) releases stage/resource locks, and (d) removes the settlement reminder **only
+  when (b) and (c) succeeded**, so a replay/activation retries the rest. Each step is
+  wrapped in `TryReleaseBlockedResourceAsync` (log + continue) so a cleanup failure
+  never undoes the durable boundary.
+- Snapshot deletion for a still-`Unknown` settlement now happens only when the
+  deadline is *not* yet due; the due path deletes it after the release commit
+  (cleanup strictly after the durable boundary).
+- `ReleaseUnresolvedAgentResultSettlementStageLocksAsync(stage)` became
+  `ReleaseAgentResultSettlementStageLocksAsync(stage, reason)`; the deadline path uses
+  reason `blocked-unresolved-agent-result`, explicit stop keeps
+  `stopped-unresolved-agent-result`. The failure-injection harness override was renamed.
+- Gotcha: `ReminderCalls.FailNextSnapshotDelete` does not throw (base snapshot delete is
+  already best-effort/internally caught), so only the stage-lock and reminder boundaries
+  are useful for exercising the "cleanup step failed" branch.
+- Contract changes to existing tests (old behavior was the bug):
+  - `AgentResultSettlementSpecs.UnknownAndBlockedSettlement_HoldsSequentialStageLockUntilExplicitStop`
+    -> `UnknownSettlement_HoldsSequentialStageLockUntilTheDeadlineReleasesIt` (lock is now
+    released at the deadline, not at explicit stop).
+  - `DispatchServiceReconciliationSpecs.Redelivery_BlockedUnresolvedAgentWork_*`: a blocked,
+    released attempt gets **no** recovery dispatch anymore, but a late authoritative report
+    still settles the original task. Remaining Runner capacity/active-work exclusion is T-002.
+- Two-concurrent-attempt coverage at this layer uses two runs sharing one worker id
+  (grain-level; Runner slot accounting assertions belong to T-002). Note run-scoped work
+  ids repeat across runs (`agent.1`), so identity must be compared per run route.
+- Verified: full `Mohist.Server.UnitTests` (2768) and full `Mohist.Server.SpecTests` (3878) green.
+
+## T-002 (exclude released attempts from active work and Runner capacity)
+
+- Active-work is now defined by active ownership, not a running task:
+  - `WorkflowRunQuerier.CountRunningAssignedToAsync` / `FindRunningAssignedToAsync`
+    filter on the materialized active-work projection (`ActiveWorkId != null`,
+    `ActiveWorkerId == workerId`) AND `AttentionStatus != "blocked"`. The
+    attention filter protects capacity for pre-existing blocked rows whose
+    stale assignment/active columns the grain repair has not cleared yet
+    (rollout window). No `State` deserialization.
+  - `WorkflowRunWorkProjectionBuilder` keys off `HasBlockedAgentResult()` (was
+    `HasUnresolvedAgentResult()`): Unknown keeps its lease until the deadline;
+    Blocked drops ActiveWorkId/ActiveWorkerId in the persisted row.
+  - `WorkflowGrain.GetCurrentWorkIdAsync` and `WorkflowReadModel.GetActiveWork`
+    return null for a blocked run (task stays Running for late-result arbitration,
+    but it is not active work; artifact upload bound to active work is rejected).
+  - `DispatchService`: reported work keys reserve a slot only when they are still
+    in the desired active set (`AddMissingRedeliveriesAsync` result), and
+    `RenderUnresolvedAgentRecoveryAsync` returns (null, null, ReserveSlot:false)
+    for any settlement that is not Unknown. Polling a released/blocked run yields
+    no redelivery/recovery dispatch and no slot reservation even with a stale
+    dispatch snapshot present.
+- Test-helper gotcha: raw `WorkflowRunRow` inserts that bypass the store must fill
+  the ActiveWorkId/ActiveWorkerId/AttentionStatus columns (use
+  `WorkflowRunWorkProjectionBuilder.Build`) or the new queries return 0/empty and
+  tests fail for the wrong reason. Corrupt `stateOverride` rows must stay
+  unprojected (their tests assert the DB layer never deserializes).
+- New tests:
+  - Specs/Workflow/Storage/WorkflowRunStoreProjectionSpecs:
+    `SaveAsync_KeepsUnknownActiveLeaseAndClearsBlockedProjectionForCapacity`
+    (Unknown holds lease + rows; after Blocked release the row drops
+    ActiveWorkId/ActiveWorkerId, sets blocked attention, and the querier excludes
+    it; late-result clearing drops attention).
+  - Specs/Runner/Grain/DispatchServiceReconciliationSpecs:
+    `DeadlineRelease_TwoConcurrentUnknownAttempts_FreeBothSlotsForAnotherWorkflow`
+    (two attempts on a 2-slot runner, deadline releases both at the same boundary,
+    activeWorks + used-slot empty, a fresh workflow claims the capacity, both
+    original identities preserved) and
+    `PollAfterBlockedRelease_SafeWithStaleSnapshot_AndReleasesCapacity` (legacy
+    blocked row with stale assignment + active columns + indexed blocked attention
+    + leftover snapshot: excluded from query/status/poll and another workflow
+    claims the slot).
+  - Specs/Workflow/Grain/WorkflowGrainSettlementDeadlineReleaseSpecs:
+    `DeadlineRelease_RemovesAttemptFromActiveWorkViewsAndKeepsIdentityReadable`
+    (grain-level: GetCurrentWorkIdAsync/GetActiveWorkAsync/GetAssignedWorkerIdAsync
+    null after release, ClaimNextAsync null, single task, full identity preserved)
+    and extended `TwoConcurrentUnknownAttempts_ReleaseBothLeasesAtTheirOwnBoundaries`
+    with DB-layer active-work assertions under injected cleanup failure.
+- Full suites green: SpecTests 3881, UnitTests 2768, ArchTests 68.
+
+## T-003 (preserve blocked attention across Workflow and consumer projections)
+
+- Status/task/stage wire status for a blocked settlement stays "blocked" (derived from
+  the settlement at projection time), never failed/completed, and the run's
+  `AssignedTo` goes null at release (no active Runner reservation). Before the
+  deadline the Unknown settlement view exposes `Reason == ReasonCode == persisted
+  reason code`, message, execution identity, and deadline.
+- AgentResultSettlementView and AgentResultAttentionView gained an additive,
+  trailing `ReasonCode` param; the mapper sets it from `settlement.ReasonCode`.
+  For Unknown/awaiting states `Reason` stays the persisted reason code; for Blocked,
+  `Reason` is the stable `agent-result-unconfirmed` category while `ReasonCode`
+  keeps the persisted original reason. Views keep the run "running" pre-deadline
+  (Attention null) and "blocked" post-deadline.
+- Issue attention: `WorkflowAttention.AgentResultUnconfirmed` now carries the
+  persisted `ReasonCode` and `RecoveryDeadlineAt` (reusing the field already used
+  by recoverable interruptions). `MohistDefaultWorkflowProjection` passes the
+  AgentResultAttention values when status == "blocked". Stable reason stays
+  `AgentResultUnconfirmed` — never `WorkflowFailed`/`Blocked`.
+- Blocked events (`TaskBlocked`/`StageBlocked`/`WorkflowRunBlocked`) gained an
+  additive trailing `string? ReasonCode = null`. `BlockUnresolvedAgentResult`
+  emits the stable `agent-result-unconfirmed` category in `Reason` and the
+  settlement's original reason code in `ReasonCode`. Legacy persisted events
+  deserialize with null ReasonCode (verified by a legacy-JSON round-trip test).
+  Events still carry `deadlineAt`; the message stays on the settlement record as
+  the source of truth.
+- Inbox: `WorkflowRunBlocked` was already mapped to
+  `NotificationKinds.AgentResultUnconfirmed` (non-failure) and `InboxStore` dedupes
+  by source+event id, so replay is idempotent by construction. No reason/deadline
+  fields exist on the inbox item view ("where the view supports them" — stable
+  category only). Hermes notifications do NOT subscribe to run.blocked, so blocked
+  replay never emits an external failure/completion notification.
+- Run-store projection: AttentionStatus "blocked", ActiveWorkId/ActiveWorkerId null
+  for a released blocked row; `WorkflowRunQuerier.FindBlockedAsync` is the indexed
+  blocked-attention reader. Round-tripping + re-saving the same blocked run rebuilds
+  the identical row (no duplicate blocked state).
+- Web API contract: the detail endpoint (`GET /api/workflow-runs/{id}`) composes
+  `WorkflowStatusView` directly so the new fields flow over the wire. The web TS
+  model `WorkflowAgentResultSettlement` gained `reasonCode?: string | null` for
+  contract parity (additive, client ignores unknown fields).
+- Gotcha: `AgentResultSettlementView.RecoveryActions` is nullable; `Assert.DoesNotContain`
+  on it needs `!` (warnings-as-errors in UnitTests). New SpecTests that call
+  `WorkflowStatusMapper.BuildStatusView` need `using Mohist.Server.Workflow.Services;`.
+- Verified: full UnitTests 2772, SpecTests 3885, ArchTests 68 green.
+
+## T-004 disposition after rebasing onto master
+
+- Rebased onto `2ae7aaace`, which includes the bounded runtime result settlement
+  work merged after this issue branch was created. The existing
+  `RuntimeRecoveryReceipt` contract now owns authoritative late terminal-result
+  ingress: it persists the immutable task/work/runner and Agent/runtime binding,
+  carries a result fingerprint, fences mismatches, and replays exactly once.
+- The branch's earlier `ReceiveAgentTaskReport` endpoint and parallel journal
+  `binding` field were dropped during rebase. Keeping them would create a second
+  terminal-result protocol beside `RuntimeRecoveryReceipt`, contrary to the
+  issue requirement to use the existing identity fence.
+- Existing receipt failure-injection and replay specs cover late terminal
+  arbitration. T-001 through T-003 retain the issue-specific deadline release,
+  active-work/capacity release, blocked projection, and original identity needed
+  by that receipt path.
+- Post-rebase verification in this worktree: `npm run test:fast` passed (Unit
+  2974, Arch 69, Workflow Definition 178, CLI 1887, Web 4768, Runner 1820, all
+  typechecks); full Server SpecTests passed 3842/3842 in 2m45s. No verification
+  timeout was increased.
+
+## Verification repair
+
+- The saved failing canonical runs identified two real file-size ratchet violations: `DispatchServiceReconciliationSpecs.cs` (1147 lines) and `AgentResultSettlementSpecs.cs` (1047 lines). An earlier attempted split also failed the architecture rule because `DispatchServiceReconciliationSpecs.Persistence.cs` does not have a `Specs` or `Collection` filename suffix.
+- Moved persistence/seed helpers into `DispatchServiceReconciliationPersistenceSpecs.cs` and the stage-lock case into `AgentResultSettlementResourceSpecs.cs`, both partial-class companions with valid `*Specs.cs` names. `npm run check:filesizes`, `npm run format:check`, the affected Runner class (25/25), Agent settlement class (17/17), and architecture rules (28/28) pass.
+- The first post-fix `npm run verify` stopped before any lane because the canonical guard requires a clean index and worktree. The fix is now ready to verify from a clean commit; no verification-only Git changes were observed.
+- Clean committed verification passed from `/tmp/issue-627-verify-clean.log`: all 9 tracks completed with zero failures, cancellations, or timeouts. Totals were Server Spec 3842, Server Unit 2974, Server Architecture 69, Workflow Definition 178, CLI 1887, Web 4768, Runner 1820, Runner integration 11, and Slack 70; file-size and format checks were clean.
+
+## Bootstrap defect: duplicate pending terminal task-log snapshot
+
+- Live verification reproduced `Terminal task-log payload changed` for the same
+  `workflow:run:work` identity when a recovery execution captured a different
+  terminal batch while the first batch was still pending. The Runner then failed
+  before reporting the Agent result and the Workflow deadline blocked the task.
+- The durable outbox now keeps the first pending snapshot authoritative and
+  returns it for a later differing pending write. This preserves the existing
+  work identity and retry path without adding an execution-attempt key or a
+  second server idempotency protocol.
+- Added a focused store regression:
+  `KeepsTheFirstPendingSnapshotWhenARecoveryExecutionDiffers`.
+
+## Review must-fix repair
+
+- Extended the existing Runner `/report` envelope with nullable
+  `AgentSessionId`, `AgentTurnId`, `Runtime`, and `RuntimeSessionId` fields.
+  Workflow Agent results without all four fields are acknowledged `stale`;
+  complete fields are validated against the persisted binding before task
+  mutation. Non-Agent reports retain their existing path.
+- Terminal workflow Agent receipts now use the full-bound `/report` path with
+  the four identity fields; update-interrupted receipts retain the dedicated
+  recovery-receipt path. Added Runner transport coverage for the wire body.
+- `ReceiveRecoveryReceiptAsync` now reconciles a due settlement before receipt
+  lookup, so a late receipt cannot skip the durable Unknown-to-Blocked
+  boundary. Added a fake-time regression proving blocked events precede the
+  accepted late result.
+- Settlement snapshot deletion no longer swallows exceptions. A blocked
+  cleanup failure keeps the reminder retryable; added a real throwing failure
+  injection and replay coverage without duplicate blocked events.
+- Targeted verification: Server Agent settlement/state-save/recovery suites
+  54/54, Runner identity/outbox/recovery tests 44/44, Runner typecheck, Server
+  SpecTests build, file-size ratchet, and diff checks passed.
+- The shared direct-report test helper now reads an existing Agent binding from
+  the owning Workflow grain and only seeds a synthetic binding when the task is
+  unbound. This removes a duplicate full WorkflowRun database load from every
+  Agent report fixture while preserving existing-bound identities.
+- Commit b0c867f35 was deployed to the local server and Runner; `/api/health`
+  and the Runner heartbeat both report that build hash, with zero active work
+  and all eight slots available after deployment.

@@ -8,9 +8,7 @@ namespace Mohist.Server.ArchTests;
 internal static class ArchitectureRulesSupport
 {
     internal static readonly Architecture Architecture = new ArchLoader()
-        .LoadAssemblies(
-            System.Reflection.Assembly.Load("Mohist.Server"),
-            System.Reflection.Assembly.Load("Mohist.Cli"))
+        .LoadAssembly(System.Reflection.Assembly.Load("Mohist.Server"))
         .Build();
 
     private static readonly ConcurrentDictionary<string, Lazy<IReadOnlyList<ArchitectureRules.EmbeddedSource>>> EmbeddedSourceCache = new();

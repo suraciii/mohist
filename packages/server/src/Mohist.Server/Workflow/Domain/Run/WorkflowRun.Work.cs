@@ -519,6 +519,17 @@ public static partial class WorkflowRunExtensions
                 settlementTimeout);
         }
 
+        /// <summary>
+        /// The exactly-once durable release boundary for an unresolved Agent
+        /// execution. At or after the persisted deadline the settlement becomes
+        /// blocked and the run's active-work lease (<see cref="WorkflowRun.Assignment"/>)
+        /// is dropped in the same aggregate mutation, so the expired attempt
+        /// stops holding Runner capacity. The attempt's identity facts
+        /// (task <c>WorkId</c>/<c>WorkerId</c> and every settlement field) are
+        /// deliberately preserved: they remain the late-result identity record.
+        /// The task and run lifecycle stay unresolved; nothing here infers
+        /// success, failure, cancellation, or replacement work.
+        /// </summary>
         public IReadOnlyList<WorkflowEvent> BlockUnresolvedAgentResult(DateTimeOffset now)
         {
             var unresolved = run.FindUnresolvedAgentResultSettlementTask();
@@ -532,13 +543,37 @@ public static partial class WorkflowRunExtensions
             }
 
             settlement.State = AgentResultSettlementState.Blocked;
+            run.Assignment = null;
+            // The stable consumer category stays on the events for existing
+            // Issue/Inbox/event consumers; the settlement's original reason
+            // code rides along additively so projections can expose it.
             const string reason = "agent-result-unconfirmed";
             return
             [
-                new TaskBlocked(unresolved.Stage, unresolved.Task.Id, reason, deadline),
-                new StageBlocked(unresolved.Stage, unresolved.Task.Id, reason),
-                new WorkflowRunBlocked(unresolved.Stage, unresolved.Task.Id, reason, deadline)
+                new TaskBlocked(unresolved.Stage, unresolved.Task.Id, reason, deadline, settlement.ReasonCode),
+                new StageBlocked(unresolved.Stage, unresolved.Task.Id, reason, settlement.ReasonCode),
+                new WorkflowRunBlocked(unresolved.Stage, unresolved.Task.Id, reason, deadline, settlement.ReasonCode)
             ];
+        }
+
+        /// <summary>
+        /// Repairs a blocked settlement that still holds the active-work lease,
+        /// e.g. a run blocked before the release boundary existed or a run whose
+        /// release save raced a reload. Returns true when the run changed and
+        /// must be persisted before further cleanup. No event is emitted: the
+        /// blocked transition already happened exactly once.
+        /// </summary>
+        public bool ReleaseBlockedAgentResultOwnership()
+        {
+            var blocked = run.FindUnresolvedAgentResultSettlementTask();
+            if (blocked?.Task.AgentResultSettlement?.State != AgentResultSettlementState.Blocked
+                || run.Assignment is null)
+            {
+                return false;
+            }
+
+            run.Assignment = null;
+            return true;
         }
 
         public WorkflowPendingWork? CurrentPendingWork()

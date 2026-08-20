@@ -29,7 +29,11 @@ public sealed class WorkflowReportService : IScopedService
         string workId,
         string? taskRunId,
         WorkResult result,
-        CancellationToken ct = default)
+        CancellationToken ct = default,
+        string? agentSessionId = null,
+        string? agentTurnId = null,
+        string? runtime = null,
+        string? runtimeSessionId = null)
     {
         var run = await _workflowRuns.LoadAsync(workflowRunId, ct);
         if (run is null)
@@ -39,28 +43,45 @@ public sealed class WorkflowReportService : IScopedService
         if (item is null)
             return (ReportAck.Stale.ToString().ToLowerInvariant(), null);
 
+        var isAgentTask = item.IsTask && IsAgentTask(item.Uses);
+        var agentBinding = isAgentTask
+            ? TryCreateAgentBinding(
+                taskRunId,
+                workId,
+                runnerId,
+                agentSessionId,
+                agentTurnId,
+                runtime,
+                runtimeSessionId)
+            : null;
+        if (isAgentTask && agentBinding is null)
+        {
+            // Workflow Agent results are never accepted from the reusable
+            // task/work/Runner tuple. The runtime identity must come from the
+            // same executed turn, otherwise an incomplete or stale receipt is
+            // acknowledged without side effects.
+            return (ReportAck.Stale.ToString().ToLowerInvariant(), null);
+        }
+
         var workflow = _grains.GetGrain<IWorkflowGrain>(workflowRunId);
         var report = _translator.TranslateResult(item, result, workflowRunId);
         if (report is WorkflowItemTranslator.InboundReport.Unknown unknown && item.IsTask)
         {
-            // Issue-628 T-005: a non-authoritative <c>unknown</c> result
-            // is an observation only. When the workflow grain's Agent
-            // settlement rejects the observation as <c>Stale</c> — which
-            // includes a matching attempt that has already been durably
-            // <c>Blocked</c> — the report adapter must acknowledge stale
-            // and MUST NOT forward the translator's <c>TaskReportStatus.Failed</c>
-            // fallback to <c>ReceiveTaskReportAsync</c>. Doing so would
-            // re-author a <c>TaskFailed</c> event for an attempt that
-            // the durable settlement has already classified as
-            // <c>Blocked</c>, mutating the blocked state and
-            // re-introducing the run into Runner activeWorks, capacity,
-            // and missing-redelivery reconciliation.
-            var unknownAck = await workflow.ObserveAgentResultUnknownAsync(
-                runnerId,
-                taskRunId ?? string.Empty,
-                workId,
-                unknown.ReasonCode,
-                unknown.Message);
+            // T-005: Unknown is an observation, never an inferred task failure. Agent
+            // observations use the same complete execution binding as terminal
+            // reports; non-Agent work retains the existing tuple path.
+            var unknownAck = isAgentTask
+                ? await workflow.ObserveAgentExecutionAsync(new AgentExecutionObservation(
+                    agentBinding!,
+                    AgentExecutionObservationKind.Unknown,
+                    unknown.ReasonCode,
+                    unknown.Message))
+                : await workflow.ObserveAgentResultUnknownAsync(
+                    runnerId,
+                    taskRunId ?? string.Empty,
+                    workId,
+                    unknown.ReasonCode,
+                    unknown.Message);
             if (unknownAck == ReportAck.Stale)
                 return (ReportAck.Stale.ToString().ToLowerInvariant(), await workflow.GetRunStatusAsync());
 
@@ -73,11 +94,42 @@ public sealed class WorkflowReportService : IScopedService
                 await workflow.ReceiveTaskReportAsync(
                     runnerId,
                     workId,
-                    task.Value with { TaskRunId = taskRunId }),
+                    task.Value with { TaskRunId = taskRunId },
+                    agentBinding),
             WorkflowItemTranslator.InboundReport.Checks checks when item.IsChecks =>
                 await workflow.ReceiveCheckReportAsync(runnerId, workId, checks.Value),
             _ => ReportAck.Stale,
         };
         return (ack.ToString().ToLowerInvariant(), await workflow.GetRunStatusAsync());
     }
+
+    private static bool IsAgentTask(string? uses) =>
+        string.Equals(uses, "mohist/agent", StringComparison.Ordinal)
+        || string.Equals(uses, "mohist/opencode", StringComparison.Ordinal)
+        || string.Equals(uses, "mohist/pi", StringComparison.Ordinal);
+
+    private static AgentExecutionBinding? TryCreateAgentBinding(
+        string? taskRunId,
+        string workId,
+        string runnerId,
+        string? agentSessionId,
+        string? agentTurnId,
+        string? runtime,
+        string? runtimeSessionId) =>
+        string.IsNullOrWhiteSpace(taskRunId)
+        || string.IsNullOrWhiteSpace(workId)
+        || string.IsNullOrWhiteSpace(runnerId)
+        || string.IsNullOrWhiteSpace(agentSessionId)
+        || string.IsNullOrWhiteSpace(agentTurnId)
+        || string.IsNullOrWhiteSpace(runtime)
+        || string.IsNullOrWhiteSpace(runtimeSessionId)
+            ? null
+            : new AgentExecutionBinding(
+                taskRunId,
+                workId,
+                runnerId,
+                agentSessionId,
+                agentTurnId,
+                runtime,
+                runtimeSessionId);
 }

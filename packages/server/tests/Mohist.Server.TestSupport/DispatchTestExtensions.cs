@@ -65,14 +65,40 @@ public static class DispatchTestExtensions
         string workId,
         WorkResult result)
     {
-        var active = await grains.GetGrain<IWorkflowGrain>(workflowRunId).GetActiveWorkAsync(workId);
+        var workflow = grains.GetGrain<IWorkflowGrain>(workflowRunId);
+        var active = await workflow.GetActiveWorkAsync(workId);
+        var taskRunId = active?.WorkType == WorkItemTypes.Task ? active.TaskRunId : null;
+        AgentExecutionBinding? binding = null;
+        if (taskRunId is not null)
+        {
+            binding = await workflow.GetBoundAgentExecutionAsync(taskRunId, workId, runnerId);
+            if (binding is null)
+            {
+                var candidate = new AgentExecutionBinding(
+                    taskRunId,
+                    workId,
+                    runnerId,
+                    $"test-session:{workId}",
+                    $"test-turn:{workId}",
+                    "opencode",
+                    $"test-runtime-session:{workId}");
+                if (await workflow.BindAgentExecutionAsync(candidate) == ReportAck.Accepted)
+                    binding = candidate;
+            }
+        }
+
         var report = ResolveScoped<WorkflowReportService>(serviceProvider);
         await report.ReportAsync(
             runnerId,
             workflowRunId,
             workId,
-            active?.WorkType == WorkItemTypes.Task ? active.TaskRunId : null,
-            result);
+            taskRunId,
+            result,
+            CancellationToken.None,
+            binding?.AgentSessionId,
+            binding?.AgentTurnId,
+            binding?.Runtime,
+            binding?.RuntimeSessionId);
     }
 
     /// <summary>

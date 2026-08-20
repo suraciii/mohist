@@ -64,13 +64,8 @@ public sealed partial class WorkflowGrainStateSaveFailureSpecs
             Assert.Null(await snapshots.LoadJsonAsync(workflowRunId, binding.WorkId));
     }
 
-    private static async Task StopWithExpectedCleanupFailureAsync(WorkflowGrain grain, string boundary)
-    {
-        if (boundary == "snapshot")
-            await grain.StopAsync("operator stop");
-        else
-            await Assert.ThrowsAsync<InvalidOperationException>(() => grain.StopAsync("operator stop"));
-    }
+    private static Task StopWithExpectedCleanupFailureAsync(WorkflowGrain grain, string boundary) =>
+        Assert.ThrowsAsync<InvalidOperationException>(() => grain.StopAsync("operator stop"));
 
     private static void FailNextCleanupBoundary(ReminderCalls calls, string boundary)
     {

@@ -75,7 +75,7 @@ public class WorkflowRetryIgnoresContextUsageSpecs
                     contextWindowUsed,
                     contextWindowSize);
             }
-            await ReportTaskFailedAsync(runnerId, workflowRunId, work, $"failed at {label}");
+            await ReportTaskFailedAsync(runnerId, workflowRunId, work, $"failed at {label}", binding);
 
             var response = await _client.PostAsync($"/api/projects/{projectId}/issues/{issueNumber}/retry", null);
 
@@ -112,7 +112,7 @@ public class WorkflowRetryIgnoresContextUsageSpecs
             await ReportTaskFailedAsync(runnerId, workflowRunId, work, "no session attached");
 
             var response = await _client.PostAsync($"/api/projects/{projectId}/issues/{issueNumber}/retry", null);
-            Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+            Assert.Equal(HttpStatusCode.Conflict, response.StatusCode);
         }
         finally
         {
@@ -304,7 +304,8 @@ public class WorkflowRetryIgnoresContextUsageSpecs
         string runnerId,
         string workflowRunId,
         WorkDispatchInfo work,
-        string reason)
+        string reason,
+        WorkflowRuntimeBinding? binding = null)
     {
         await _client.PostOkAsync($"/api/runner/{runnerId}/report", new
         {
@@ -313,6 +314,10 @@ public class WorkflowRetryIgnoresContextUsageSpecs
             taskRunId = work.TaskRunId,
             status = "failed",
             message = reason,
+            agentSessionId = binding?.AgentSessionId,
+            agentTurnId = binding?.AgentTurnId,
+            runtime = binding is null ? null : "opencode",
+            runtimeSessionId = binding is null ? null : RuntimeSessionId,
         });
     }
 

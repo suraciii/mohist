@@ -199,7 +199,16 @@ public static partial class RunnerRoutes
             // report service (the runner grain no longer relays workflow
             // reports). Accepted and Stale are both acks.
             var (ack, workflowStatus) = await workflowReport.ReportAsync(
-                runnerId, req.WorkflowRunId ?? string.Empty, req.WorkId, req.TaskRunId, result, ct);
+                runnerId,
+                req.WorkflowRunId ?? string.Empty,
+                req.WorkId,
+                req.TaskRunId,
+                result,
+                ct,
+                req.AgentSessionId,
+                req.AgentTurnId,
+                req.Runtime,
+                req.RuntimeSessionId);
             var tracked = ack != "missing-workflow";
             return Results.Ok(new RunnerReportResponse(
                 req.WorkflowRunId ?? string.Empty, workflowStatus, tracked, ack, ownerKind, req.WorkflowRunId ?? string.Empty));
@@ -1001,20 +1010,6 @@ public record RunnerHeartbeatRequest(
     string? ArtifactDigest = null,
     string? ReleaseId = null,
     long? Generation = null);
-public record RunnerReportRequest(
-    string WorkId,
-    string Status,
-    string? WorkflowRunId = null,
-    string? TaskRunId = null,
-    string? ProjectId = null,
-    string? Message = null,
-    System.Text.Json.JsonElement? Output = null,
-    int? ExitCode = null,
-    string[]? ArtifactUploadIds = null,
-    string? OwnerKind = null,
-    string? AgentJobId = null,
-    List<RuntimeTaskInput>? AddTasks = null,
-    ExecutionError? Error = null);
 public record RunnerReportResponse(
     string WorkflowRunId,
     string? WorkflowStatus,

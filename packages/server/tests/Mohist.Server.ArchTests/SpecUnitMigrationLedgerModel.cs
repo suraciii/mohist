@@ -52,6 +52,13 @@ internal static partial class SpecUnitMigrationLedgerValidator
         return violations;
     }
 
+    internal static IReadOnlyList<string> ValidateSourceTreeMetadataForTests(SpecUnitMigrationLedger ledger)
+    {
+        var violations = new List<string>();
+        ValidateSourceTreeMetadata(ledger, violations);
+        return violations;
+    }
+
     private static void ValidateMovedRow(SpecUnitMigrationLedgerRow row, SpecUnitMigrationInventory inventory,
         ICollection<string> violations)
     {
@@ -206,9 +213,7 @@ internal static partial class SpecUnitMigrationLedgerValidator
     {
         if (ledger.SchemaVersion != 1) violations.Add($"ledger schemaVersion must be 1, got {ledger.SchemaVersion}");
         if (ledger.ValidationHead != ValidationHead) violations.Add($"ledger validationHead must be {ValidationHead}, got {ledger.ValidationHead}");
-        if (ledger.ValidationSourceFileCount != ValidationSourceTreeFileCount
-            || ledger.ValidationSourceTreeDigest != ValidationSourceTreeDigest)
-            violations.Add("ledger validation source tree metadata does not match the audited baseline");
+        ValidateSourceTreeMetadata(ledger, violations);
         if (ledger.ValidationBaselineDigest != ExpectedValidationBaselineDigest)
             violations.Add($"ledger validation baseline digest must be {ExpectedValidationBaselineDigest}, got {ledger.ValidationBaselineDigest}");
         if (string.IsNullOrWhiteSpace(ledger.ValidationHeadMeaning) || !ledger.ValidationHeadMeaning.Contains("not the final validation commit", StringComparison.OrdinalIgnoreCase))
@@ -244,6 +249,15 @@ internal static partial class SpecUnitMigrationLedgerValidator
             if (row is null || string.IsNullOrWhiteSpace(row.Id) || !ids.Add(row.Id ?? "")) violations.Add($"ledger row id is missing or duplicated: {row?.Id}");
             if (row is not null) ValidateRequiredRowFields(row, violations);
         }
+    }
+
+    private static void ValidateSourceTreeMetadata(
+        SpecUnitMigrationLedger ledger,
+        ICollection<string> violations)
+    {
+        if (ledger.ValidationSourceFileCount != ValidationSourceTreeFileCount
+            || ledger.ValidationSourceTreeDigest != ValidationSourceTreeDigest)
+            violations.Add("ledger validation source tree metadata does not match the audited baseline");
     }
 
     private static void ValidateRequiredNamedRows(IReadOnlyList<SpecUnitMigrationLedgerRow> rows, ICollection<string> violations)

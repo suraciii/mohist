@@ -1,19 +1,19 @@
-import { dirname, join, resolve } from "node:path"
-import { currentRunnerFileSystem } from "../system/filesystem.js"
-import type { TaskLogBatch, TaskLogEntry } from "./task-log.js"
+import { dirname, join, resolve } from 'node:path'
+import { currentRunnerFileSystem } from '../system/filesystem.js'
+import type { TaskLogBatch, TaskLogEntry } from './task-log.js'
 
-export const DEFAULT_TERMINAL_TASK_LOG_DELIVERY_FILE = ".mohist/runner-state/terminal-task-log-deliveries.json"
+export const DEFAULT_TERMINAL_TASK_LOG_DELIVERY_FILE = '.mohist/runner-state/terminal-task-log-deliveries.json'
 
-export type TerminalTaskLogDeliveryState = "pending" | "failed"
+export type TerminalTaskLogDeliveryState = 'pending' | 'failed'
 
 export interface TerminalTaskLogDeliveryIdentity {
-  ownerKind: "workflow" | "agent-job"
+  ownerKind: 'workflow' | 'agent-job'
   ownerId: string
   workId: string
 }
 
 export interface TerminalTaskLogDeliveryFailure {
-  kind: "conflict" | "not-found" | "local"
+  kind: 'conflict' | 'not-found' | 'local'
   status?: number
   code?: string
   message: string
@@ -35,7 +35,7 @@ export interface TerminalTaskLogDeliveryStore {
   load(): Promise<void>
   ready(): boolean
   listPending(): Promise<TerminalTaskLogDeliveryRecord[]>
-  putPending(record: Omit<TerminalTaskLogDeliveryRecord, "state" | "failure">): Promise<TerminalTaskLogDeliveryRecord>
+  putPending(record: Omit<TerminalTaskLogDeliveryRecord, 'state' | 'failure'>): Promise<TerminalTaskLogDeliveryRecord>
   acknowledge(identity: TerminalTaskLogDeliveryIdentity): Promise<void>
   markFailed(identity: TerminalTaskLogDeliveryIdentity, failure: TerminalTaskLogDeliveryFailure): Promise<void>
 }
@@ -114,12 +114,12 @@ export class TerminalTaskLogDeliveryStoreImpl implements TerminalTaskLogDelivery
 
   async listPending(): Promise<TerminalTaskLogDeliveryRecord[]> {
     this.ensureAvailable()
-    return [...this.deliveries.values()]
-      .filter((record) => record.state === "pending")
-      .map(cloneRecord)
+    return [...this.deliveries.values()].filter((record) => record.state === 'pending').map(cloneRecord)
   }
 
-  async putPending(record: Omit<TerminalTaskLogDeliveryRecord, "state" | "failure">): Promise<TerminalTaskLogDeliveryRecord> {
+  async putPending(
+    record: Omit<TerminalTaskLogDeliveryRecord, 'state' | 'failure'>,
+  ): Promise<TerminalTaskLogDeliveryRecord> {
     return await this.mutate(async () => {
       const key = deliveryKey(record.identity)
       const existing = this.deliveries.get(key)
@@ -128,13 +128,15 @@ export class TerminalTaskLogDeliveryStoreImpl implements TerminalTaskLogDelivery
         // but it must not make a later execution fail before it can report.
         // Replace that failed local delivery with the new snapshot so the
         // executor can make one fresh delivery attempt.
-        if (existing.state === "failed"
-          && existing.failure?.kind === "conflict"
-          && existing.failure.code === "terminal_snapshot_conflict") {
+        if (
+          existing.state === 'failed' &&
+          existing.failure?.kind === 'conflict' &&
+          existing.failure.code === 'terminal_snapshot_conflict'
+        ) {
           const pending: TerminalTaskLogDeliveryRecord = {
             identity: { ...record.identity },
             batch: cloneBatch(record.batch),
-            state: "pending",
+            state: 'pending',
           }
           this.deliveries.set(key, pending)
           try {
@@ -146,6 +148,11 @@ export class TerminalTaskLogDeliveryStoreImpl implements TerminalTaskLogDelivery
           return cloneRecord(pending)
         }
         if (!sameSnapshot(existing, record)) {
+          // A recovery execution can reach the same work identity while the
+          // first terminal snapshot is still pending. The first durable
+          // snapshot is authoritative for this work; do not turn the second
+          // execution into a fatal result-reporting error.
+          if (existing.state === 'pending') return cloneRecord(existing)
           throw new Error(`Terminal task-log payload changed for ${key}`)
         }
         return cloneRecord(existing)
@@ -154,7 +161,7 @@ export class TerminalTaskLogDeliveryStoreImpl implements TerminalTaskLogDelivery
       const pending: TerminalTaskLogDeliveryRecord = {
         identity: { ...record.identity },
         batch: cloneBatch(record.batch),
-        state: "pending",
+        state: 'pending',
       }
       this.deliveries.set(key, pending)
       try {
@@ -171,7 +178,7 @@ export class TerminalTaskLogDeliveryStoreImpl implements TerminalTaskLogDelivery
     await this.mutate(async () => {
       const key = deliveryKey(identity)
       const existing = this.deliveries.get(key)
-      if (!existing || existing.state !== "pending") return
+      if (!existing || existing.state !== 'pending') return
       this.deliveries.delete(key)
       try {
         await this.persist()
@@ -186,13 +193,13 @@ export class TerminalTaskLogDeliveryStoreImpl implements TerminalTaskLogDelivery
     await this.mutate(async () => {
       const key = deliveryKey(identity)
       const existing = this.deliveries.get(key)
-      if (!existing || existing.state !== "pending") return
-      existing.state = "failed"
+      if (!existing || existing.state !== 'pending') return
+      existing.state = 'failed'
       existing.failure = { ...failure }
       try {
         await this.persist()
       } catch (error) {
-        existing.state = "pending"
+        existing.state = 'pending'
         delete existing.failure
         throw error
       }
@@ -202,21 +209,22 @@ export class TerminalTaskLogDeliveryStoreImpl implements TerminalTaskLogDelivery
   private async mutate<T>(operation: () => Promise<T>): Promise<T> {
     this.ensureAvailable()
     const run = this.writeChain.then(operation, operation)
-    this.writeChain = run.then(() => undefined, () => undefined)
+    this.writeChain = run.then(
+      () => undefined,
+      () => undefined,
+    )
     return await run
   }
 
   private ensureAvailable(): void {
-    if (!this.loaded) throw new Error("Terminal task-log delivery store has not been loaded")
-    if (this.unavailable) throw new Error("Terminal task-log delivery store is unavailable")
+    if (!this.loaded) throw new Error('Terminal task-log delivery store has not been loaded')
+    if (this.unavailable) throw new Error('Terminal task-log delivery store is unavailable')
   }
 
   private async persist(): Promise<void> {
     const file: DeliveryFile = {
       version: 1,
-      deliveries: Object.fromEntries(
-        [...this.deliveries].map(([key, record]) => [key, toPersistedRecord(record)]),
-      ),
+      deliveries: Object.fromEntries([...this.deliveries].map(([key, record]) => [key, toPersistedRecord(record)])),
     }
     await this.fileSystem.writeAtomicText(this.filePath, JSON.stringify(file, null, 2))
   }
@@ -227,7 +235,7 @@ export class NodeTerminalTaskLogDeliveryFileSystem implements TerminalTaskLogDel
     try {
       return await currentRunnerFileSystem().readText(path)
     } catch (error) {
-      if ((error as NodeJS.ErrnoException).code === "ENOENT") return null
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null
       throw error
     }
   }
@@ -260,10 +268,10 @@ function parseRecord(value: unknown): TerminalTaskLogDeliveryRecord | null {
   const identity = parseIdentity(value.identity)
   const batch = parseBatch(value.batch)
   const state = value.state
-  if (!identity || !batch || (state !== "pending" && state !== "failed")) return null
+  if (!identity || !batch || (state !== 'pending' && state !== 'failed')) return null
   const failure = value.failure === undefined ? undefined : parseFailure(value.failure)
-  if (state === "failed" && !failure) return null
-  if (state === "pending" && value.failure !== undefined) return null
+  if (state === 'failed' && !failure) return null
+  if (state === 'pending' && value.failure !== undefined) return null
   return { identity, batch, state, ...(failure ? { failure } : {}) }
 }
 
@@ -272,22 +280,34 @@ function parseIdentity(value: unknown): TerminalTaskLogDeliveryIdentity | null {
   const ownerKind = value.ownerKind
   const ownerId = value.ownerId
   const workId = value.workId
-  if ((ownerKind !== "workflow" && ownerKind !== "agent-job")
-    || typeof ownerId !== "string" || ownerId.length === 0
-    || typeof workId !== "string" || workId.length === 0) return null
+  if (
+    (ownerKind !== 'workflow' && ownerKind !== 'agent-job') ||
+    typeof ownerId !== 'string' ||
+    ownerId.length === 0 ||
+    typeof workId !== 'string' ||
+    workId.length === 0
+  )
+    return null
   return { ownerKind, ownerId, workId }
 }
 
 function parseBatch(value: unknown): TaskLogBatch | null {
-  if (!isRecord(value) || typeof value.truncated !== "boolean" || !Array.isArray(value.entries)) return null
+  if (!isRecord(value) || typeof value.truncated !== 'boolean' || !Array.isArray(value.entries)) return null
   const entries: TaskLogEntry[] = []
   let previous = 0
   for (const item of value.entries) {
-    if (!isRecord(item)
-      || typeof item.seq !== "number" || !Number.isSafeInteger(item.seq) || item.seq <= previous
-      || typeof item.timestamp !== "string" || Number.isNaN(Date.parse(item.timestamp))
-      || typeof item.source !== "string" || item.source.length === 0
-      || typeof item.text !== "string") return null
+    if (
+      !isRecord(item) ||
+      typeof item.seq !== 'number' ||
+      !Number.isSafeInteger(item.seq) ||
+      item.seq <= previous ||
+      typeof item.timestamp !== 'string' ||
+      Number.isNaN(Date.parse(item.timestamp)) ||
+      typeof item.source !== 'string' ||
+      item.source.length === 0 ||
+      typeof item.text !== 'string'
+    )
+      return null
     entries.push({ seq: item.seq, timestamp: new Date(item.timestamp), source: item.source, text: item.text })
     previous = item.seq
   }
@@ -295,11 +315,16 @@ function parseBatch(value: unknown): TaskLogBatch | null {
 }
 
 function parseFailure(value: unknown): TerminalTaskLogDeliveryFailure | null {
-  if (!isRecord(value)
-    || (value.kind !== "conflict" && value.kind !== "not-found" && value.kind !== "local")
-    || typeof value.message !== "string" || value.message.length === 0) return null
-  if (value.status !== undefined && (typeof value.status !== "number" || !Number.isSafeInteger(value.status))) return null
-  if (value.code !== undefined && typeof value.code !== "string") return null
+  if (
+    !isRecord(value) ||
+    (value.kind !== 'conflict' && value.kind !== 'not-found' && value.kind !== 'local') ||
+    typeof value.message !== 'string' ||
+    value.message.length === 0
+  )
+    return null
+  if (value.status !== undefined && (typeof value.status !== 'number' || !Number.isSafeInteger(value.status)))
+    return null
+  if (value.code !== undefined && typeof value.code !== 'string') return null
   return {
     kind: value.kind,
     ...(value.status === undefined ? {} : { status: value.status }),
@@ -325,18 +350,25 @@ function toPersistedRecord(record: TerminalTaskLogDeliveryRecord): PersistedDeli
   }
 }
 
-function sameSnapshot(left: Pick<TerminalTaskLogDeliveryRecord, "identity" | "batch">, right: Pick<TerminalTaskLogDeliveryRecord, "identity" | "batch">): boolean {
-  return deliveryKey(left.identity) === deliveryKey(right.identity)
-    && left.batch.truncated === right.batch.truncated
-    && left.batch.entries.length === right.batch.entries.length
-    && left.batch.entries.every((entry, index) => {
+function sameSnapshot(
+  left: Pick<TerminalTaskLogDeliveryRecord, 'identity' | 'batch'>,
+  right: Pick<TerminalTaskLogDeliveryRecord, 'identity' | 'batch'>,
+): boolean {
+  return (
+    deliveryKey(left.identity) === deliveryKey(right.identity) &&
+    left.batch.truncated === right.batch.truncated &&
+    left.batch.entries.length === right.batch.entries.length &&
+    left.batch.entries.every((entry, index) => {
       const other = right.batch.entries[index]
-      return other !== undefined
-        && entry.seq === other.seq
-        && entry.timestamp.getTime() === other.timestamp.getTime()
-        && entry.source === other.source
-        && entry.text === other.text
+      return (
+        other !== undefined &&
+        entry.seq === other.seq &&
+        entry.timestamp.getTime() === other.timestamp.getTime() &&
+        entry.source === other.source &&
+        entry.text === other.text
+      )
     })
+  )
 }
 
 function cloneBatch(batch: TaskLogBatch): TaskLogBatch {
@@ -356,5 +388,5 @@ function cloneRecord(record: TerminalTaskLogDeliveryRecord): TerminalTaskLogDeli
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
-  return value !== null && typeof value === "object" && !Array.isArray(value)
+  return value !== null && typeof value === 'object' && !Array.isArray(value)
 }

@@ -135,13 +135,13 @@ public sealed class SpecUnitMigrationLedgerRules
         var placeholder = SpecUnitMigrationLedger.Read(LedgerResourceName);
         placeholder.ValidationSourceFileCount = -1;
         placeholder.ValidationSourceTreeDigest = "__RECOMPUTE_VALIDATION_SOURCE_TREE_DIGEST__";
-        Assert.Contains(SpecUnitMigrationLedgerValidator.Validate(placeholder, ProductionInventory.Value), violation =>
+        Assert.Contains(SpecUnitMigrationLedgerValidator.ValidateSourceTreeMetadataForTests(placeholder), violation =>
             violation.Contains("ledger validation source tree metadata", StringComparison.Ordinal));
 
         var tampered = SpecUnitMigrationLedger.Read(LedgerResourceName);
         tampered.ValidationSourceFileCount++;
         tampered.ValidationSourceTreeDigest = new string('0', SpecUnitMigrationLedgerValidator.ValidationSourceTreeDigest.Length);
-        Assert.Contains(SpecUnitMigrationLedgerValidator.Validate(tampered, ProductionInventory.Value), violation =>
+        Assert.Contains(SpecUnitMigrationLedgerValidator.ValidateSourceTreeMetadataForTests(tampered), violation =>
             violation.Contains("ledger validation source tree metadata", StringComparison.Ordinal));
     }
 

@@ -196,6 +196,8 @@ public class RunnerWorkflowStatusRouterSpecs
             => Task.FromResult(Mohist.Server.Workflow.Grains.ReportAck.Stale);
         public Task<Mohist.Server.Workflow.Grains.ReportAck> BindAgentExecutionAsync(AgentExecutionBinding binding)
             => Task.FromResult(Mohist.Server.Workflow.Grains.ReportAck.Stale);
+        public Task<AgentExecutionBinding?> GetBoundAgentExecutionAsync(string taskRunId, string workId, string runnerId)
+            => Task.FromResult<AgentExecutionBinding?>(null);
         public Task<bool> CanStartAgentCleanupAsync(AgentExecutionBinding binding) => Task.FromResult(false);
         public Task<Mohist.Server.Workflow.Grains.ReportAck> ObserveAgentExecutionAsync(AgentExecutionObservation observation)
             => Task.FromResult(Mohist.Server.Workflow.Grains.ReportAck.Stale);
@@ -205,7 +207,11 @@ public class RunnerWorkflowStatusRouterSpecs
             => Task.FromResult(Mohist.Server.Workflow.Grains.ReportAck.Stale);
         public Task<Mohist.Server.Workflow.Grains.ReportAck> RejectActiveWorkDispatchAsync(string workerId, string workId, ExecutionError error)
             => Task.FromResult(Mohist.Server.Workflow.Grains.ReportAck.Stale);
-        public Task<Mohist.Server.Workflow.Grains.ReportAck> ReceiveTaskReportAsync(string workerId, string workId, TaskReport report)
+        public Task<Mohist.Server.Workflow.Grains.ReportAck> ReceiveTaskReportAsync(
+            string workerId,
+            string workId,
+            TaskReport report,
+            AgentExecutionBinding? agentBinding = null)
             => Task.FromResult(Mohist.Server.Workflow.Grains.ReportAck.Stale);
         public Task<Mohist.Server.Workflow.Grains.ReportAck> ReceiveCheckReportAsync(string workerId, string workId, CheckReport report)
             => Task.FromResult(Mohist.Server.Workflow.Grains.ReportAck.Stale);
