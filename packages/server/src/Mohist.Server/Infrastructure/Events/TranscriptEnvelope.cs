@@ -12,7 +12,7 @@ namespace Mohist.Server.Infrastructure.Events;
 /// This is a <i>non-domain</i> envelope: it is runtime event data, not a
 /// fact that changes lifecycle state. The <see cref="IEventPublisher"/>
 /// bus never sees a <see cref="TranscriptEnvelope"/>, and
-/// <see cref="Mohist.Server.Events.Hub.EventBridge"/> never forwards one.
+/// the domain event push bridge never forwards one.
 /// It is also session-scoped: workflow/project/work context belongs to
 /// session metadata and workflow references, not to runtime event envelopes.
 /// </para>

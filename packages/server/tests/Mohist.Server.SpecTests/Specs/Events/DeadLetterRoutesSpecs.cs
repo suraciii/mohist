@@ -4,7 +4,7 @@ using System.Text.Json;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Mohist.Server.Api;
-using Mohist.Server.Events.Hub;
+using Mohist.Server.Events.WebSocket;
 using Mohist.Server.Infrastructure.Data.Events;
 using Mohist.Server.Infrastructure.Events;
 using Mohist.Server.SpecTests.Support;
@@ -50,10 +50,10 @@ public sealed class DeadLetterRoutesSpecs
     }
 
     [Fact]
-    public async Task Redeliver_RejectsEventBridgeBecauseItIsNotDurable()
+    public async Task Redeliver_RejectsEventSocketBridgeBecauseItIsNotDurable()
     {
         var store = _fixture.Services.GetRequiredService<IDeadLetterStore>();
-        var row = BuildRow(typeof(EventBridge).FullName!);
+        var row = BuildRow(typeof(EventSocketDomainBridge).FullName!);
         await store.WriteAsync(row);
 
         using var response = await _fixture.Client.PostAsJsonAsync(
@@ -95,7 +95,7 @@ public sealed class DeadLetterRoutesSpecs
     public async Task Redeliver_RejectsUnauthenticatedCallerAndHasNoSideEffect()
     {
         var store = _fixture.Services.GetRequiredService<IDeadLetterStore>();
-        var row = BuildRow(typeof(EventBridge).FullName!);
+        var row = BuildRow(typeof(EventSocketDomainBridge).FullName!);
         await store.WriteAsync(row);
 
         try

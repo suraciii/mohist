@@ -83,6 +83,47 @@ public sealed class CliCredentialRefreshSpecs
     }
 
     [Fact]
+    public async Task IssueList_WhenRefreshedSessionCannotBePersisted_RetriesWithFreshAccessToken()
+    {
+        var projectsCalls = 0;
+        var (handler, http, output, error, fs, executor) = CliTestFactory.Create((request, _) =>
+        {
+            if (IsProjectsPath(request))
+            {
+                projectsCalls++;
+                return Task.FromResult(projectsCalls == 1
+                    ? RecordingHttpHandler.JsonError(
+                        "Authentication required.", "unauthorized", HttpStatusCode.Unauthorized)
+                    : RecordingHttpHandler.Json(new { success = true, data = Array.Empty<object>() }));
+            }
+            return Task.FromResult(RecordingHttpHandler.Json(new
+            {
+                success = true,
+                data = new
+                {
+                    accessToken = NewAccess,
+                    refreshToken = NewRefresh,
+                    accessExpiresAt = "2026-01-01T02:00:00+00:00",
+                    refreshExpiresAt = "2026-02-01T00:00:00+00:00",
+                },
+            }));
+        });
+        fs.AddFile(CredentialsPath, $$"""
+            {"servers":[{"server":"{{Server}}","accessToken":"{{OldAccess}}","refreshToken":"moh_refresh_oldoldoldoldoldoldoldoldoldoldoldold","accessExpiresAt":"2025-01-01T00:00:00+00:00","refreshExpiresAt":"2026-01-31T00:00:00+00:00"}]}
+            """);
+        fs.ThrowOnWriteUserOnly = true;
+
+        var exitCode = await RunIssueListAsync(http, output, error, fs, executor);
+
+        Assert.Equal(0, exitCode);
+        var projectCalls = handler.Requests.Where(request => IsProjectsPath(request)).ToList();
+        Assert.Equal(2, projectCalls.Count);
+        Assert.Equal($"Bearer {OldAccess}", Assert.Single(projectCalls[0].Headers["Authorization"]));
+        Assert.Equal($"Bearer {NewAccess}", Assert.Single(projectCalls[1].Headers["Authorization"]));
+        Assert.Contains(OldAccess, fs.ReadAllText(CredentialsPath), StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task IssueList_WhenTheRefreshFails_PrintsTheReloginHint()
     {
         var (handler, http, output, error, fs, executor) = CliTestFactory.Create((request, _) =>

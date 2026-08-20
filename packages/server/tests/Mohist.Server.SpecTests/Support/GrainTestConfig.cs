@@ -335,7 +335,7 @@ public static class GrainTestConfig
 
     private sealed class NoopTranscriptEventPublisher : ITranscriptEventPublisher
     {
-        public Task PublishAsync(TranscriptEnvelope envelope, CancellationToken ct = default) => Task.CompletedTask;
+        public Task PublishAsync(string projectId, TranscriptEnvelope envelope, CancellationToken ct = default) => Task.CompletedTask;
     }
 
     private sealed class NoopSlackConnectionHealthBackpressurer : ISlackConnectionHealthBackpressurer

@@ -86,9 +86,7 @@ public sealed class OtelTestHost : IAsyncDisposable
             // channel only.
             builder.Services.AddOpenTelemetry().WithTracing(tracing =>
             {
-                tracing
-                    .AddSource("Microsoft.AspNetCore")
-                    .AddSource(MohistOpenTelemetryRegistration.SignalRServerActivitySourceName);
+                tracing.AddSource("Microsoft.AspNetCore");
                 foreach (var sourceName in MohistOpenTelemetryRegistration.OrleansActivitySourceNames)
                 {
                     tracing.AddSource(sourceName);
@@ -131,9 +129,9 @@ public sealed class OtelTestHost : IAsyncDisposable
     public HttpClient CreateClient() => _server.CreateClient();
 
     /// <summary>
-    /// Exposes the <see cref="TestServer"/> so SignalR (and other
-    /// long-lived client) tests can plug the in-process handler into
-    /// their connection builder without spinning up a real socket.
+    /// Exposes the <see cref="TestServer"/> so long-lived client tests can
+    /// plug the in-process handler into their connection builder without
+    /// spinning up a real socket.
     /// </summary>
     public TestServer TestServer => _server;
 
@@ -157,18 +155,17 @@ public sealed class OtelTestHostOptions
     /// <summary>
     /// Optional hook to register additional services BEFORE
     /// <see cref="WebApplication.Build"/> runs. Used by tests that
-    /// need extra middleware services (e.g. SignalR via
-    /// <c>AddSignalR</c>) that must be wired before any endpoint is
-    /// mapped.
+    /// need extra middleware services that must be wired before any
+    /// endpoint is mapped.
     /// </summary>
     public Action<IServiceCollection>? ConfigureServices { get; init; }
 
     /// <summary>
-    /// Optional hook to map additional routes / SignalR hubs / etc.
+    /// Optional hook to map additional routes
     /// after the default <c>/api/health</c> and <c>/otel/v1/traces</c>
     /// routes have been mapped. Used by integration tests that need
-    /// to exercise a SignalR hub method or an EF / outbound-HttpClient
-    /// chain through the hosted pipeline.
+    /// to exercise an EF / outbound-HttpClient chain through the hosted
+    /// pipeline.
     /// </summary>
     public Action<WebApplication>? ConfigureApp { get; init; }
 

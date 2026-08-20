@@ -22,8 +22,6 @@ public static class MohistOpenTelemetryRegistration
 
     public static readonly PathString OtelIngestPathPrefix = "/otel";
 
-    public const string SignalRServerActivitySourceName = "Microsoft.AspNetCore.SignalR.Server";
-
     public static readonly string[] OrleansActivitySourceNames = new[]
     {
         "Microsoft.Orleans.Application",
@@ -64,7 +62,6 @@ public static class MohistOpenTelemetryRegistration
             tracing
                 .ConfigureResource(resource => resource.AddService(ServiceName))
                 .AddAspNetCoreInstrumentation(o => o.Filter = ExcludeOtelIngestPath)
-                .AddSource(SignalRServerActivitySourceName)
                 .AddSource(OrleansActivitySourceNames[0])
                 .AddSource(OrleansActivitySourceNames[1])
                 .AddSource(OrleansActivitySourceNames[2])

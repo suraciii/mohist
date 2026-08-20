@@ -4,10 +4,7 @@ import react from '@vitejs/plugin-react'
 import tailwindcss from '@tailwindcss/vite'
 
 export default defineConfig({
-  plugins: [
-    react(),
-    tailwindcss(),
-  ],
+  plugins: [react(), tailwindcss()],
   resolve: {
     alias: {
       '@': path.resolve(__dirname, './src'),
@@ -19,11 +16,7 @@ export default defineConfig({
     proxy: {
       '/api': {
         target: 'http://127.0.0.1:3456',
-        changeOrigin: true,
-      },
-      '/hubs': {
-        target: 'http://127.0.0.1:3456',
-        changeOrigin: true,
+        changeOrigin: false,
         ws: true,
       },
     },
@@ -52,7 +45,6 @@ export default defineConfig({
     // 新增替身需在 openspec/changes/web-test-boundary-mocks 方案内登记。
     alias: {
       sonner: path.resolve(__dirname, './tests/support/sonner-fake.ts'),
-      '@microsoft/signalr': path.resolve(__dirname, './tests/support/signalr-fake.ts'),
     },
     exclude: [
       '**/node_modules/**',
@@ -82,12 +74,7 @@ export default defineConfig({
           isolate: false,
           environment: 'jsdom',
           testTimeout: 30_000,
-          include: [
-            'src/**/*.test.tsx',
-            'src/**/*.dom.test.ts',
-            'src/**/*.spec.tsx',
-            'tests/**/*.spec.tsx',
-          ],
+          include: ['src/**/*.test.tsx', 'src/**/*.dom.test.ts', 'src/**/*.spec.tsx', 'tests/**/*.spec.tsx'],
         },
       },
     ],

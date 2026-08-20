@@ -1,5 +1,8 @@
 using System.Net;
+using System.Net.WebSockets;
 using System.Text.Json.Nodes;
+using EnvironmentAbstractions.TestHelpers;
+using Microsoft.Extensions.Time.Testing;
 using Mohist.Cli.Tests.Support;
 using Xunit;
 
@@ -7,247 +10,567 @@ namespace Mohist.Cli.Tests;
 
 public sealed class CliEventTailCommandSpecs : IDisposable
 {
-    public CliEventTailCommandSpecs()
-    {
-        EventCommands.TailCancellationOverride = default;
-    }
+    private const string Ack = """{"jsonrpc":"2.0","id":"req_1","result":{}}""";
+    private const string DomainEvent = """{"jsonrpc":"2.0","method":"event.domain","params":{"event":{"specversion":"1.0","id":"e1","source":"/mohist/projects/proj_abc/issues/42","type":"com.mohist.issue.completed","datacontenttype":"application/json","data":{},"projectid":"proj_abc","issue":"42"}}}""";
 
-    public void Dispose()
+    public CliEventTailCommandSpecs() => EventCommands.TailCancellationOverride = default;
+
+    public void Dispose() => EventCommands.TailCancellationOverride = default;
+
+    [Fact]
+    public async Task Tail_SendsDomainSubscriptionAndEmitsStandardEventObject()
     {
-        EventCommands.TailCancellationOverride = default;
+        using var cts = new CancellationTokenSource();
+        var factory = new FakeEventSocketFactory();
+        var socket = new FakeEventSocket(factory) { OnExhausted = cts.Cancel }
+            .AddJson(Ack)
+            .AddJson("""{"jsonrpc":"2.0","method":"event.transcript","params":{"event":{}}}""")
+            .AddJson(DomainEvent);
+        factory.Add(socket);
+
+        var result = await RunAsync(factory, cts.Token);
+
+        Assert.Equal(130, result.ExitCode);
+        Assert.Equal("ws://localhost:3456/api/projects/proj_abc/events/socket", Assert.Single(factory.Endpoints).ToString());
+        var subscription = JsonNode.Parse(Assert.Single(socket.SentMessages))!;
+        Assert.Equal("subscription.set", subscription["method"]!.GetValue<string>());
+        Assert.Null(subscription["params"]!["domain"]!["types"]);
+        Assert.Null(subscription["params"]!["domain"]!["match"]);
+        Assert.Null(subscription["params"]!["transcript"]);
+        Assert.Empty(subscription["params"]!["taskLogs"]!.AsArray());
+        var emitted = JsonNode.Parse(result.Output.ToString())!;
+        Assert.Equal("1.0", emitted["specversion"]!.GetValue<string>());
+        Assert.Equal("proj_abc", emitted["projectid"]!.GetValue<string>());
+        Assert.Null(emitted["extensions"]);
+        Assert.Empty(result.Error.ToString());
     }
 
     [Fact]
-    public async Task Tail_NoMatch_StreamsProjectEnvelopesOnePerLine()
+    public async Task Tail_WithMatch_SendsMatchAndSelectedFieldsProjectTheEvent()
     {
-        var (handler, http, output, error, fs, executor) = CliTestFactory.Create();
-        handler.SetResponder((req, _) =>
-        {
-            if (req.RequestUri is null || !req.RequestUri.AbsolutePath.EndsWith("/events/tail", StringComparison.Ordinal))
-                return Task.FromResult(RecordingHttpHandler.Json(new { success = true }));
-            return Task.FromResult(RecordingHttpHandler.Ndjson(new[]
+        using var cts = new CancellationTokenSource();
+        var factory = new FakeEventSocketFactory();
+        var socket = new FakeEventSocket(factory) { OnExhausted = cts.Cancel }
+            .AddJson(Ack)
+            .AddJson(DomainEvent);
+        factory.Add(socket);
+
+        var result = await RunAsync(
+            factory,
+            cts.Token,
+            ["event", "tail", "--match", "event.issue == \"42\"", "--json", "id,type,issue"]);
+
+        Assert.Equal(130, result.ExitCode);
+        var subscription = JsonNode.Parse(Assert.Single(socket.SentMessages))!;
+        Assert.Equal("event.issue == \"42\"", subscription["params"]!["domain"]!["match"]!.GetValue<string>());
+        var emitted = JsonNode.Parse(result.Output.ToString())!.AsObject();
+        Assert.Equal(["id", "type", "issue"], emitted.Select(property => property.Key).ToArray());
+    }
+
+    [Fact]
+    public async Task Tail_WithRepeatedEvents_SendsTrimmedDistinctDomainTypes()
+    {
+        using var cts = new CancellationTokenSource();
+        var factory = new FakeEventSocketFactory();
+        var socket = new FakeEventSocket(factory) { OnExhausted = cts.Cancel }.AddJson(Ack);
+        factory.Add(socket);
+
+        var result = await RunAsync(
+            factory,
+            cts.Token,
+            ["event", "tail", "--event", " com.mohist.issue.completed ", "--event", "com.mohist.issue.completed", "--event", "com.mohist.epic.closed"]);
+
+        Assert.Equal(130, result.ExitCode);
+        var types = JsonNode.Parse(Assert.Single(socket.SentMessages))!["params"]!["domain"]!["types"]!.AsArray();
+        Assert.Equal(["com.mohist.issue.completed", "com.mohist.epic.closed"], types.Select(value => value!.GetValue<string>()).ToArray());
+    }
+
+    [Fact]
+    public async Task Tail_EmptyEvent_FailsBeforeProjectResolutionOrSocketCreation()
+    {
+        var factory = new FakeEventSocketFactory();
+
+        var result = await RunAsync(factory, CancellationToken.None, ["event", "tail", "--event", " "]);
+
+        Assert.Equal(2, result.ExitCode);
+        Assert.Empty(factory.Endpoints);
+        Assert.Empty(result.Handler.Requests);
+        Assert.Contains("--event values must not be empty", result.Error.ToString(), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task Tail_SubscriptionError_PrintsMatchDiagnosticAndStops()
+    {
+        var factory = new FakeEventSocketFactory();
+        factory.Add(new FakeEventSocket(factory).AddJson(
+            """{"jsonrpc":"2.0","id":"req_1","error":{"code":-32602,"message":"Unbalanced '('","data":{"line":1,"column":20,"offset":19,"source":"(event.type"}}}"""));
+
+        var result = await RunAsync(factory, CancellationToken.None,
+            ["event", "tail", "--match", "(event.type == \"x\""]);
+
+        Assert.Equal(1, result.ExitCode);
+        Assert.Contains("Unbalanced '('", result.Error.ToString(), StringComparison.Ordinal);
+        Assert.Contains("line 1, column 20", result.Error.ToString(), StringComparison.Ordinal);
+        Assert.Empty(result.Output.ToString());
+    }
+
+    [Fact]
+    public async Task Tail_ReconnectsAfterCloseAndResubscribesAfterInjectedWait()
+    {
+        using var cts = new CancellationTokenSource();
+        var waits = new List<TimeSpan>();
+        var factory = new FakeEventSocketFactory();
+        var first = new FakeEventSocket(factory).AddJson(Ack).AddClose();
+        var second = new FakeEventSocket(factory) { OnExhausted = cts.Cancel }.AddJson(Ack).AddJson(DomainEvent);
+        factory.Add(first);
+        factory.Add(second);
+
+        var result = await RunAsync(
+            factory,
+            cts.Token,
+            wait: (delay, _) => { waits.Add(delay); return Task.CompletedTask; });
+
+        Assert.Equal(130, result.ExitCode);
+        Assert.Equal(2, factory.Endpoints.Count);
+        Assert.Single(first.SentMessages);
+        Assert.Single(second.SentMessages);
+        Assert.Single(waits);
+        Assert.InRange(waits[0], TimeSpan.FromMilliseconds(800), TimeSpan.FromMilliseconds(1200));
+        Assert.Single(result.Output.ToString().Split('\n', StringSplitOptions.RemoveEmptyEntries));
+    }
+
+    [Fact]
+    public async Task Tail_ReconnectsWhenAnEstablishedSocketReceiveFails()
+    {
+        using var cts = new CancellationTokenSource();
+        var factory = new FakeEventSocketFactory();
+        factory.Add(new FakeEventSocket(factory) { ReceiveException = new WebSocketException() }.AddJson(Ack));
+        factory.Add(new FakeEventSocket(factory) { OnExhausted = cts.Cancel }.AddJson(Ack).AddJson(DomainEvent));
+
+        var result = await RunAsync(
+            factory,
+            cts.Token,
+            wait: (_, _) => Task.CompletedTask);
+
+        Assert.Equal(130, result.ExitCode);
+        Assert.Equal(2, factory.Endpoints.Count);
+        Assert.Single(result.Output.ToString().Split('\n', StringSplitOptions.RemoveEmptyEntries));
+    }
+
+    [Fact]
+    public async Task Tail_ReresolvesCredentialBeforeReconnect()
+    {
+        const string firstToken = "first-token-0123456789abcdef0123456789";
+        const string secondToken = "second-token-0123456789abcdef0123456789";
+        using var cts = new CancellationTokenSource();
+        var environment = new MockEnvironmentVariableProvider(addExistingEnvironmentVariables: false);
+        environment[CliCredentialProvider.TokenEnvironmentVariable] = firstToken;
+        var factory = new FakeEventSocketFactory();
+        factory.Add(new FakeEventSocket(factory).AddJson(Ack).AddClose());
+        factory.Add(new FakeEventSocket(factory) { OnExhausted = cts.Cancel }.AddJson(Ack));
+
+        var result = await RunAsync(
+            factory,
+            cts.Token,
+            environment: environment,
+            wait: (_, _) =>
             {
-                "{\"type\":\"com.mohist.issue.completed\",\"source\":\"mohist.test\",\"id\":\"e1\",\"time\":\"2026-07-17T00:00:00Z\",\"specversion\":\"1.0\",\"subject\":\"42\",\"extensions\":{\"projectid\":\"proj_abc\"}}",
-                "{\"type\":\"com.mohist.workflow.advanced\",\"source\":\"mohist.test\",\"id\":\"e2\",\"time\":\"2026-07-17T00:00:01Z\",\"specversion\":\"1.0\",\"extensions\":{\"projectid\":\"proj_abc\"}}",
-            }));
-        });
+                environment[CliCredentialProvider.TokenEnvironmentVariable] = secondToken;
+                return Task.CompletedTask;
+            });
 
-        var exitCode = await MohistCliCommands.RunAsync(
-            http, ["event", "tail"], output, error, fs, executor);
-
-        Assert.Equal(0, exitCode);
-        var request = Assert.Single(handler.Requests);
-        Assert.Equal(HttpMethod.Get, request.Method);
-        Assert.Equal("/api/projects/proj_abc/events/tail", request.RequestUri?.PathAndQuery);
-        var stdout = output.ToString();
-        var lines = stdout.Split('\n', StringSplitOptions.RemoveEmptyEntries);
-        Assert.Equal(2, lines.Length);
-        var first = JsonNode.Parse(lines[0]) as JsonObject;
-        Assert.NotNull(first);
-        Assert.Equal("com.mohist.issue.completed", first!["type"]!.GetValue<string>());
-        Assert.Equal("e1", first["id"]!.GetValue<string>());
-        var second = JsonNode.Parse(lines[1]) as JsonObject;
-        Assert.Equal("com.mohist.workflow.advanced", second!["type"]!.GetValue<string>());
-        Assert.DoesNotContain("[", stdout, StringComparison.Ordinal);
-        Assert.Empty(error.ToString());
+        Assert.Equal(130, result.ExitCode);
+        Assert.Equal([firstToken, secondToken], factory.BearerTokens);
     }
 
     [Fact]
-    public async Task Tail_WithMatch_ForwardsMatchExpressionAndStreamsFilter()
+    public async Task Tail_StoredSession401_RefreshesPersistsReresolvesAndRetriesOnce()
     {
-        var (handler, http, output, error, fs, executor) = CliTestFactory.Create();
-        var receivedMatch = string.Empty;
-        handler.SetResponder((req, _) =>
-        {
-            if (req.RequestUri is null || !req.RequestUri.AbsolutePath.EndsWith("/events/tail", StringComparison.Ordinal))
-                return Task.FromResult(RecordingHttpHandler.Json(new { success = true }));
-            receivedMatch = req.RequestUri.Query;
-            return Task.FromResult(RecordingHttpHandler.Ndjson(new[]
+        const string oldAccess = "moh_session_oldoldoldoldoldoldoldoldoldoldoldold";
+        const string newAccess = "moh_session_newnonewnonewnonewnonewnonewnonewn";
+        const string newRefresh = "moh_refresh_newnonewnonewnonewnonewnonewnonewn";
+        using var cts = new CancellationTokenSource();
+        var factory = new FakeEventSocketFactory();
+        factory.Add(new FakeEventSocket(factory) { ConnectException = new EventSocketUnauthorizedException() });
+        factory.Add(new FakeEventSocket(factory) { OnExhausted = cts.Cancel }.AddJson(Ack));
+        var result = await RunAsync(
+            factory,
+            cts.Token,
+            configureFileSystem: fs => fs.AddFile(
+                "/mohist-tests/user/.mohist/credentials.json",
+                $$"""{"servers":[{"server":"http://localhost:3456","accessToken":"{{oldAccess}}","refreshToken":"moh_refresh_oldoldoldoldoldoldoldoldoldoldoldold","accessExpiresAt":"2025-01-01T00:00:00Z","refreshExpiresAt":"2027-01-01T00:00:00Z"}]}"""),
+            responder: (request, _) => Task.FromResult(request.RequestUri!.AbsolutePath == "/api/auth/token"
+                ? RecordingHttpHandler.Json(new { success = true, data = new { accessToken = newAccess, refreshToken = newRefresh, accessExpiresAt = "2027-01-01T00:00:00Z", refreshExpiresAt = "2027-02-01T00:00:00Z" } })
+                : RecordingHttpHandler.Json(new { success = true })));
+
+        Assert.Equal(130, result.ExitCode);
+        Assert.Equal([oldAccess, newAccess], factory.BearerTokens);
+        var stored = JsonNode.Parse(result.FileSystem.ReadAllText("/mohist-tests/user/.mohist/credentials.json"))!;
+        Assert.Equal(newRefresh, stored["servers"]![0]!["refreshToken"]!.GetValue<string>());
+        Assert.Single(result.Handler.Requests, request => request.RequestUri!.AbsolutePath == "/api/auth/token");
+    }
+
+    [Fact]
+    public async Task Tail_StoredSession401_WhenPersistenceFails_RetriesWithFreshAccessToken()
+    {
+        const string oldAccess = "moh_session_oldoldoldoldoldoldoldoldoldoldoldold";
+        const string newAccess = "moh_session_newnonewnonewnonewnonewnonewnonewn";
+        using var cts = new CancellationTokenSource();
+        var factory = new FakeEventSocketFactory();
+        factory.Add(new FakeEventSocket(factory) { ConnectException = new EventSocketUnauthorizedException() });
+        factory.Add(new FakeEventSocket(factory) { OnExhausted = cts.Cancel }.AddJson(Ack));
+
+        var result = await RunAsync(
+            factory,
+            cts.Token,
+            configureFileSystem: fs =>
             {
-                "{\"type\":\"com.mohist.issue.completed\",\"source\":\"mohist.test\",\"id\":\"e1\",\"time\":\"2026-07-17T00:00:00Z\",\"specversion\":\"1.0\",\"extensions\":{\"issue\":\"42\"}}",
-            }));
-        });
+                fs.AddFile(
+                    "/mohist-tests/user/.mohist/credentials.json",
+                    $$"""{"servers":[{"server":"http://localhost:3456","accessToken":"{{oldAccess}}","refreshToken":"moh_refresh_oldoldoldoldoldoldoldoldoldoldoldold","accessExpiresAt":"2025-01-01T00:00:00Z","refreshExpiresAt":"2027-01-01T00:00:00Z"}]}""");
+                fs.ThrowOnWriteUserOnly = true;
+            },
+            responder: (_, _) => Task.FromResult(RecordingHttpHandler.Json(new
+            {
+                success = true,
+                data = new
+                {
+                    accessToken = newAccess,
+                    refreshToken = "moh_refresh_newnonewnonewnonewnonewnonewnonewn",
+                    accessExpiresAt = "2027-01-01T00:00:00Z",
+                    refreshExpiresAt = "2027-02-01T00:00:00Z",
+                },
+            })));
 
+        Assert.Equal(130, result.ExitCode);
+        Assert.Equal([oldAccess, newAccess], factory.BearerTokens);
+        Assert.Contains(oldAccess, result.FileSystem.ReadAllText("/mohist-tests/user/.mohist/credentials.json"), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task Tail_Second401AfterStoredSessionRefreshEntersReconnectBackoff()
+    {
+        const string oldAccess = "moh_session_oldoldoldoldoldoldoldoldoldoldoldold";
+        const string newAccess = "moh_session_newnonewnonewnonewnonewnonewnonewn";
+        using var cts = new CancellationTokenSource();
+        var factory = new FakeEventSocketFactory();
+        factory.Add(new FakeEventSocket(factory) { ConnectException = new EventSocketUnauthorizedException() });
+        factory.Add(new FakeEventSocket(factory) { ConnectException = new EventSocketUnauthorizedException() });
+
+        var result = await RunAsync(
+            factory,
+            cts.Token,
+            wait: (_, _) => { cts.Cancel(); return Task.CompletedTask; },
+            configureFileSystem: fs => fs.AddFile(
+                "/mohist-tests/user/.mohist/credentials.json",
+                $$"""{"servers":[{"server":"http://localhost:3456","accessToken":"{{oldAccess}}","refreshToken":"moh_refresh_oldoldoldoldoldoldoldoldoldoldoldold","accessExpiresAt":"2025-01-01T00:00:00Z","refreshExpiresAt":"2027-01-01T00:00:00Z"}]}"""),
+            responder: (request, _) => Task.FromResult(RecordingHttpHandler.Json(new
+            {
+                success = true,
+                data = new
+                {
+                    accessToken = newAccess,
+                    refreshToken = "moh_refresh_newnonewnonewnonewnonewnonewnonewn",
+                    accessExpiresAt = "2027-01-01T00:00:00Z",
+                    refreshExpiresAt = "2027-02-01T00:00:00Z",
+                },
+            })));
+
+        Assert.Equal(130, result.ExitCode);
+        Assert.Equal([oldAccess, newAccess], factory.BearerTokens);
+        Assert.Single(result.Handler.Requests);
+    }
+
+    [Fact]
+    public async Task Tail_EnvironmentToken401_DoesNotRefreshAndUsesBoundedReconnectWait()
+    {
+        using var cts = new CancellationTokenSource();
+        var waits = new List<TimeSpan>();
+        var factory = new FakeEventSocketFactory();
+        factory.Add(new FakeEventSocket(factory) { ConnectException = new EventSocketUnauthorizedException() });
+        var environment = new MockEnvironmentVariableProvider(addExistingEnvironmentVariables: false);
+        environment[CliCredentialProvider.TokenEnvironmentVariable] = "env-token-0123456789abcdef0123456789";
+
+        var result = await RunAsync(
+            factory,
+            cts.Token,
+            environment: environment,
+            wait: (delay, _) => { waits.Add(delay); cts.Cancel(); return Task.CompletedTask; });
+
+        Assert.Equal(130, result.ExitCode);
+        Assert.Single(factory.BearerTokens);
+        Assert.Empty(result.Handler.Requests);
+        Assert.InRange(Assert.Single(waits), TimeSpan.FromMilliseconds(800), TimeSpan.FromMilliseconds(1200));
+    }
+
+    [Fact]
+    public async Task Tail_MachineLocalCredentialIsNotSentToRemoteSocket()
+    {
+        using var cts = new CancellationTokenSource();
+        var factory = new FakeEventSocketFactory();
+        factory.Add(new FakeEventSocket(factory) { OnExhausted = cts.Cancel }.AddJson(Ack));
+        var environment = new MockEnvironmentVariableProvider(addExistingEnvironmentVariables: false);
+        environment[CliCredentialProvider.AdminTokenEnvironmentVariable] = "admin-token-0123456789abcdef0123456789";
+
+        var result = await RunAsync(factory, cts.Token, environment: environment, baseAddress: "https://mohist.example");
+
+        Assert.Equal(130, result.ExitCode);
+        Assert.Null(Assert.Single(factory.BearerTokens));
+        Assert.Equal("wss", Assert.Single(factory.Endpoints).Scheme);
+    }
+
+    [Fact]
+    public async Task Tail_OversizedMessageClosesWith1009BeforeReconnect()
+    {
+        using var cts = new CancellationTokenSource();
+        var factory = new FakeEventSocketFactory();
+        var socket = new FakeEventSocket(factory)
+            .AddJson(Ack)
+            .AddJson(new string('x', (4 * 1024 * 1024) + 1));
+        factory.Add(socket);
+
+        var result = await RunAsync(
+            factory,
+            cts.Token,
+            wait: (_, _) => { cts.Cancel(); return Task.CompletedTask; });
+
+        Assert.Equal(130, result.ExitCode);
+        Assert.Equal(WebSocketCloseStatus.MessageTooBig, Assert.Single(socket.CloseStatuses));
+        Assert.Empty(result.Output.ToString());
+    }
+
+    [Fact]
+    public async Task Tail_Cancellation_WhenPeerNeverCompletesClose_AbortsAfterInjectedDeadlineAndReturns130()
+    {
+        using var cts = new CancellationTokenSource();
+        var closeStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var time = new FakeTimeProvider();
+        var factory = new FakeEventSocketFactory();
+        var socket = new FakeEventSocket(factory)
+        {
+            OnExhausted = cts.Cancel,
+            OnClose = closeStarted.SetResult,
+            CloseNeverCompletes = true,
+        }.AddJson(Ack);
+        factory.Add(socket);
+
+        var run = RunAsync(factory, cts.Token, timeProvider: time);
+        await closeStarted.Task;
+        Assert.False(run.IsCompleted);
+        time.Advance(TimeSpan.FromSeconds(2));
+        var result = await run;
+
+        Assert.Equal(130, result.ExitCode);
+        Assert.Equal(WebSocketCloseStatus.NormalClosure, Assert.Single(socket.CloseStatuses));
+        Assert.Equal(1, socket.AbortCount);
+        Assert.Equal(1, socket.DisposeCount);
+    }
+
+    [Fact]
+    public async Task Tail_Oversize_WhenPeerNeverCompletesClose_AbortsAndReconnectsAfterInjectedDeadline()
+    {
+        using var cts = new CancellationTokenSource();
+        var closeStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var time = new FakeTimeProvider();
+        var factory = new FakeEventSocketFactory();
+        var socket = new FakeEventSocket(factory)
+        {
+            OnClose = closeStarted.SetResult,
+            CloseNeverCompletes = true,
+        }.AddJson(Ack).AddJson(new string('x', (4 * 1024 * 1024) + 1));
+        factory.Add(socket);
+
+        var run = RunAsync(
+            factory,
+            cts.Token,
+            wait: (_, _) => { cts.Cancel(); return Task.CompletedTask; },
+            timeProvider: time);
+        await closeStarted.Task;
+        Assert.False(run.IsCompleted);
+        time.Advance(TimeSpan.FromSeconds(2));
+        var result = await run;
+
+        Assert.Equal(130, result.ExitCode);
+        Assert.Equal(WebSocketCloseStatus.MessageTooBig, Assert.Single(socket.CloseStatuses));
+        Assert.Equal(1, socket.AbortCount);
+        Assert.Equal(1, socket.DisposeCount);
+    }
+
+    public static TheoryData<string> MalformedSubscriptionResponses => new()
+    {
+        "not-json",
+        "[]",
+        "{}",
+        "{\"jsonrpc\":\"1.0\",\"id\":\"req_1\",\"result\":{}}",
+        "{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{}}",
+        "{\"jsonrpc\":\"2.0\",\"id\":\"other\",\"result\":{}}",
+        "{\"jsonrpc\":\"2.0\",\"id\":\"req_1\"}",
+        "{\"jsonrpc\":\"2.0\",\"id\":\"req_1\",\"result\":{},\"error\":{}}",
+        "{\"jsonrpc\":\"2.0\",\"id\":\"req_1\",\"result\":[]}",
+    };
+
+    [Theory]
+    [MemberData(nameof(MalformedSubscriptionResponses))]
+    public async Task Tail_MalformedSubscriptionResponse_FencesAttemptWithoutOutput(string response)
+    {
+        using var cts = new CancellationTokenSource();
+        var factory = new FakeEventSocketFactory();
+        var socket = new FakeEventSocket(factory).AddJson(response);
+        factory.Add(socket);
+
+        var result = await RunAsync(factory, cts.Token, wait: (_, _) => { cts.Cancel(); return Task.CompletedTask; });
+
+        Assert.Equal(130, result.ExitCode);
+        Assert.Equal(WebSocketCloseStatus.ProtocolError, Assert.Single(socket.CloseStatuses));
+        Assert.Equal(1, socket.AbortCount);
+        Assert.Empty(result.Output.ToString());
+    }
+
+    [Theory]
+    [InlineData("{\"jsonrpc\":\"2.0\",\"method\":\"event.domain\",\"params\":{\"event\":[]}}")]
+    [InlineData("{\"jsonrpc\":\"2.0\",\"method\":\"event.domain\",\"params\":[]}")]
+    [InlineData("{\"jsonrpc\":\"2.0\",\"method\":1,\"params\":{}}")]
+    public async Task Tail_MalformedNotification_FencesAttemptWithoutOutput(string notification)
+    {
+        using var cts = new CancellationTokenSource();
+        var factory = new FakeEventSocketFactory();
+        var socket = new FakeEventSocket(factory).AddJson(Ack).AddJson(notification);
+        factory.Add(socket);
+
+        var result = await RunAsync(factory, cts.Token, wait: (_, _) => { cts.Cancel(); return Task.CompletedTask; });
+
+        Assert.Equal(130, result.ExitCode);
+        Assert.Equal(WebSocketCloseStatus.ProtocolError, Assert.Single(socket.CloseStatuses));
+        Assert.Empty(result.Output.ToString());
+    }
+
+    [Fact]
+    public async Task Tail_BinaryMessage_FencesAttemptWithInvalidMessageType()
+    {
+        using var cts = new CancellationTokenSource();
+        var factory = new FakeEventSocketFactory();
+        var socket = new FakeEventSocket(factory).AddJson(Ack).AddBinary("binary");
+        factory.Add(socket);
+
+        var result = await RunAsync(factory, cts.Token, wait: (_, _) => { cts.Cancel(); return Task.CompletedTask; });
+
+        Assert.Equal(130, result.ExitCode);
+        Assert.Equal(WebSocketCloseStatus.InvalidMessageType, Assert.Single(socket.CloseStatuses));
+        Assert.Empty(result.Output.ToString());
+    }
+
+    [Fact]
+    public async Task Tail_FragmentedMessage_EnforcesAggregateSizeLimit()
+    {
+        using var cts = new CancellationTokenSource();
+        var factory = new FakeEventSocketFactory();
+        var socket = new FakeEventSocket(factory)
+            .AddJson(Ack)
+            .AddFragment(new string('x', 2 * 1024 * 1024), false)
+            .AddFragment(new string('x', (2 * 1024 * 1024) + 1), true);
+        factory.Add(socket);
+
+        var result = await RunAsync(factory, cts.Token, wait: (_, _) => { cts.Cancel(); return Task.CompletedTask; });
+
+        Assert.Equal(130, result.ExitCode);
+        Assert.Equal(WebSocketCloseStatus.MessageTooBig, Assert.Single(socket.CloseStatuses));
+        Assert.Empty(result.Output.ToString());
+    }
+
+    [Fact]
+    public async Task Tail_NoActiveProject_FailsWithoutSocketOrHttp()
+    {
+        var factory = new FakeEventSocketFactory();
+        var result = await RunAsync(factory, CancellationToken.None, activeProjectId: null);
+
+        Assert.NotEqual(0, result.ExitCode);
+        Assert.Empty(factory.Endpoints);
+        Assert.Empty(result.Handler.Requests);
+        Assert.Contains(MohistCliCommands.NoActiveProjectMessage, result.Error.ToString(), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task Tail_PluralNoun_DoesNotResolveWithoutSocket()
+    {
+        var factory = new FakeEventSocketFactory();
+        var result = await RunAsync(factory, CancellationToken.None, ["events", "tail"]);
+
+        Assert.NotEqual(0, result.ExitCode);
+        Assert.Empty(factory.Endpoints);
+    }
+
+    [Fact]
+    public async Task Tail_Help_DescribesPostSubscriptionNdjson()
+    {
+        var factory = new FakeEventSocketFactory();
+        var result = await RunAsync(factory, CancellationToken.None, ["event", "tail", "--help"]);
+
+        Assert.Equal(0, result.ExitCode);
+        Assert.Contains("subscription establishment", result.Output.ToString(), StringComparison.Ordinal);
+        Assert.Contains("NDJSON", result.Output.ToString(), StringComparison.Ordinal);
+        Assert.Contains("--event", result.Output.ToString(), StringComparison.Ordinal);
+        Assert.Contains("repeatable", result.Output.ToString(), StringComparison.Ordinal);
+        Assert.Empty(factory.Endpoints);
+    }
+
+    [Fact]
+    public async Task Tail_JsonDiscovery_IncludesAllCanonicalLineageExtensions()
+    {
+        var factory = new FakeEventSocketFactory();
+
+        var result = await RunAsync(factory, CancellationToken.None, ["event", "tail", "--json"]);
+
+        Assert.Equal(0, result.ExitCode);
+        var fields = JsonNode.Parse(result.Output.ToString())!.AsArray().Select(value => value!.GetValue<string>()).ToArray();
+        Assert.Contains("parent", fields);
+        Assert.Contains("githubrepo", fields);
+        Assert.Contains("githubissue", fields);
+        Assert.Empty(factory.Endpoints);
+    }
+
+    private static async Task<TailResult> RunAsync(
+        FakeEventSocketFactory factory,
+        CancellationToken cancellationToken,
+        string[]? args = null,
+        Func<TimeSpan, CancellationToken, Task>? wait = null,
+        IEnvironmentVariableProvider? environment = null,
+        string? activeProjectId = "proj_abc",
+        string baseAddress = CliTestFactory.BaseAddress,
+        Action<FakeFileSystem>? configureFileSystem = null,
+        Func<HttpRequestMessage, CancellationToken, Task<HttpResponseMessage>>? responder = null,
+        TimeProvider? timeProvider = null)
+    {
+        var (handler, http, output, error, fs, executor) = CliTestFactory.Create(responder, activeProjectId);
+        http.BaseAddress = new Uri(baseAddress);
+        configureFileSystem?.Invoke(fs);
         var exitCode = await MohistCliCommands.RunAsync(
             http,
-            ["event", "tail", "--match", "event.type == \"com.mohist.issue.completed\" && event.issue in [\"42\", \"43\"]"],
+            args ?? ["event", "tail"],
             output,
             error,
             fs,
-            executor);
-
-        Assert.Equal(0, exitCode);
-        Assert.Equal("?match=event.type%20%3D%3D%20%22com.mohist.issue.completed%22%20%26%26%20event.issue%20in%20%5B%2242%22%2C%20%2243%22%5D",
-            receivedMatch);
-        var lines = output.ToString().Split('\n', StringSplitOptions.RemoveEmptyEntries);
-        var single = Assert.Single(lines);
-        Assert.Contains("\"type\":\"com.mohist.issue.completed\"", single, StringComparison.Ordinal);
-        Assert.Empty(error.ToString());
+            executor,
+            environment,
+            cancellationToken: cancellationToken,
+            timeProvider: timeProvider,
+            pollWait: wait ?? WaitForCancellationAsync,
+            eventSocketFactory: factory,
+            eventReconnectJitter: () => 0.5);
+        return new TailResult(exitCode, handler, output, error, fs);
     }
 
-    [Fact]
-    public async Task Tail_InvalidMatch_PrintsLocationToStderrAndExitsNonZeroBeforeStreaming()
+    private static async Task WaitForCancellationAsync(TimeSpan _, CancellationToken cancellationToken)
     {
-        var (handler, http, output, error, fs, executor) = CliTestFactory.Create();
-        handler.SetResponder((req, _) =>
-        {
-            if (req.RequestUri is null || !req.RequestUri.AbsolutePath.EndsWith("/events/tail", StringComparison.Ordinal))
-                return Task.FromResult(RecordingHttpHandler.Json(new { success = true }));
-            return Task.FromResult(RecordingHttpHandler.MatchCompileError(
-                message: "Unbalanced '('",
-                offset: 19,
-                line: 1,
-                column: 20,
-                source: "(event.type == \"x\""));
-        });
-
-        var exitCode = await MohistCliCommands.RunAsync(
-            http,
-            ["event", "tail", "--match", "(event.type == \"x\""],
-            output,
-            error,
-            fs,
-            executor);
-
-        Assert.NotEqual(0, exitCode);
-        var stderr = error.ToString();
-        Assert.Contains("Unbalanced '('", stderr, StringComparison.Ordinal);
-        Assert.Contains("line 1", stderr, StringComparison.Ordinal);
-        Assert.Contains("column 20", stderr, StringComparison.Ordinal);
-        Assert.Empty(output.ToString());
-        Assert.Single(handler.Requests);
+        var cancelled = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        using var registration = cancellationToken.Register(cancelled.SetResult);
+        await cancelled.Task;
+        cancellationToken.ThrowIfCancellationRequested();
     }
 
-    [Fact]
-    public async Task Tail_NoActiveProject_FailsLocallyWithoutContactingServer()
-    {
-        var (handler, http, output, error, fs, executor) = CliTestFactory.Create(activeProjectId: null);
-        var called = false;
-        handler.SetResponder((_, _) =>
-        {
-            called = true;
-            return Task.FromResult(RecordingHttpHandler.Json(new { success = true }));
-        });
-
-        var exitCode = await MohistCliCommands.RunAsync(
-            http, ["event", "tail"], output, error, fs, executor);
-
-        Assert.NotEqual(0, exitCode);
-        Assert.False(called);
-        Assert.Empty(handler.Requests);
-        Assert.Contains(MohistCliCommands.NoActiveProjectMessage, error.ToString(), StringComparison.Ordinal);
-    }
-
-    [Fact]
-    public async Task Tail_NoActiveProject_WithMatch_FailsLocallyWithoutContactingServer()
-    {
-        var (handler, http, output, error, fs, executor) = CliTestFactory.Create(activeProjectId: null);
-        var called = false;
-        handler.SetResponder((_, _) =>
-        {
-            called = true;
-            return Task.FromResult(RecordingHttpHandler.Json(new { success = true }));
-        });
-
-        var exitCode = await MohistCliCommands.RunAsync(
-            http, ["event", "tail", "--match", "event.type == \"x\""], output, error, fs, executor);
-
-        Assert.NotEqual(0, exitCode);
-        Assert.False(called);
-        Assert.Empty(handler.Requests);
-    }
-
-    [Fact]
-    public async Task Tail_ProjectFlagOverridesActiveProject()
-    {
-        var (handler, http, output, error, fs, executor) = CliTestFactory.Create();
-        handler.SetResponder((req, _) =>
-        {
-            if (req.RequestUri is null || !req.RequestUri.AbsolutePath.EndsWith("/events/tail", StringComparison.Ordinal))
-                return Task.FromResult(RecordingHttpHandler.Json(new { success = true }));
-            return Task.FromResult(RecordingHttpHandler.Ndjson(Array.Empty<string>()));
-        });
-
-        var exitCode = await MohistCliCommands.RunAsync(
-            http,
-            ["event", "tail", "--project", "proj_other"],
-            output,
-            error,
-            fs,
-            executor);
-
-        Assert.Equal(0, exitCode);
-        var request = Assert.Single(handler.Requests);
-        Assert.Equal("/api/projects/proj_other/events/tail", request.RequestUri?.PathAndQuery);
-    }
-
-    [Fact]
-    public async Task Tail_CancellationStopsStreamingAndReleasesRequest()
-    {
-        var (handler, http, output, error, fs, executor) = CliTestFactory.Create();
-        var observedToken = default(CancellationToken);
-        var block = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        var releaseSignal = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        var cts = new CancellationTokenSource();
-        EventCommands.TailCancellationOverride = cts.Token;
-        handler.SetResponder((req, token) =>
-        {
-            observedToken = token;
-            block.TrySetResult();
-            return WaitForCancelAsync(token, releaseSignal);
-        });
-
-        var runTask = MohistCliCommands.RunAsync(
-            http, ["event", "tail"], output, error, fs, executor);
-
-        await block.Task;
-        cts.Cancel();
-        await releaseSignal.Task;
-        var exitCode = await runTask;
-
-        Assert.Equal(130, exitCode);
-        Assert.True(observedToken.IsCancellationRequested);
-        Assert.Empty(output.ToString());
-        cts.Dispose();
-    }
-
-    private static async Task<HttpResponseMessage> WaitForCancelAsync(
-        CancellationToken token,
-        TaskCompletionSource release)
-    {
-        var tcs = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        using var registration = token.Register(() => tcs.TrySetResult());
-        await tcs.Task;
-        release.TrySetResult();
-        throw new OperationCanceledException(token);
-    }
-
-    [Fact]
-    public async Task Tail_PluralNoun_DoesNotResolveWithoutHttp()
-    {
-        var (handler, http, output, error, fs, executor) = CliTestFactory.Create();
-
-        var exitCode = await MohistCliCommands.RunAsync(
-            http, ["events", "tail"], output, error, fs, executor);
-
-        Assert.NotEqual(0, exitCode);
-        Assert.Empty(handler.Requests);
-    }
-
-    [Fact]
-    public async Task Tail_Help_DescribesPostSubscriptionNdjsonWithoutSharedFlags()
-    {
-        var (handler, http, output, error, fs, executor) = CliTestFactory.Create();
-
-        var exitCode = await MohistCliCommands.RunAsync(
-            http, ["event", "tail", "--help"], output, error, fs, executor);
-
-        Assert.Equal(0, exitCode);
-        var help = output.ToString();
-        Assert.Contains("subscription establishment", help, StringComparison.Ordinal);
-        Assert.Contains("NDJSON", help, StringComparison.Ordinal);
-        Assert.DoesNotContain("--mode", help, StringComparison.Ordinal);
-        Assert.DoesNotContain("--source", help, StringComparison.Ordinal);
-        Assert.Empty(handler.Requests);
-    }
+    private sealed record TailResult(
+        int ExitCode,
+        RecordingHttpHandler Handler,
+        StringWriter Output,
+        StringWriter Error,
+        FakeFileSystem FileSystem);
 }

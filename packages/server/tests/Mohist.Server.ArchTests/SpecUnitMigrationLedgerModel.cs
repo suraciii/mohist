@@ -269,10 +269,11 @@ internal static partial class SpecUnitMigrationLedgerValidator
             "Mohist.Server.UnitTests/Workflow/Grain/FailIfMarkerSemanticTests.cs",
             "Mohist.Server.UnitTests.Workflow.Grain.FailIfMarkerSemanticTests", violations);
         ValidateMovedNamedRow(rows.SingleOrDefault(row => row.Id == "current-mohist-hub"),
-            "Mohist.Server.UnitTests/Events/MohistHubTests.cs", "Mohist.Server.UnitTests.Events.MohistHubTests", violations);
+            "Mohist.Server.UnitTests/Events/EventWebSocketConnectionTests.cs",
+            "Mohist.Server.UnitTests.Events.EventWebSocketConnectionTests", violations);
         ValidateMovedNamedRow(rows.SingleOrDefault(row => row.Id == "current-mohist-hub-project-affinity"),
-            "Mohist.Server.UnitTests/Events/MohistHubProjectAffinityTests.cs",
-            "Mohist.Server.UnitTests.Events.MohistHubProjectAffinityTests", violations);
+            "Mohist.Server.UnitTests/Events/EventWebSocketConnectionTests.cs",
+            "Mohist.Server.UnitTests.Events.EventWebSocketConnectionTests", violations);
         ValidateMovedNamedRow(rows.SingleOrDefault(row => row.Id == "current-recording-background-task-launcher"),
             "Mohist.Server.UnitTests/Events/RecordingBackgroundTaskLauncherTests.cs",
             "Mohist.Server.UnitTests.Events.RecordingBackgroundTaskLauncherTests", violations);

@@ -65,7 +65,7 @@ public sealed class DispatcherSpecificHandler : ICloudEventHandler
 
 public sealed class TestNoopTranscriptEventPublisher : ITranscriptEventPublisher
 {
-    public Task PublishAsync(TranscriptEnvelope envelope, CancellationToken ct = default) => Task.CompletedTask;
+    public Task PublishAsync(string projectId, TranscriptEnvelope envelope, CancellationToken ct = default) => Task.CompletedTask;
 }
 
 [Subscription(Type = "test.poison")]

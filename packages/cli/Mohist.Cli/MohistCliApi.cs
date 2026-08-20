@@ -44,6 +44,7 @@ internal sealed partial class MohistCliApi
     internal Func<string> GetUserHome => _getUserHome;
     internal TimeProvider TimeProvider => _timeProvider;
     internal Func<TimeSpan, CancellationToken, Task> PollWait => _pollWait;
+    internal EventSocketStream? EventStream { get; }
     internal string CurrentProjectStatePath => ProjectReferenceResolver.StatePath(_fileSystem.CurrentDirectory);
 
     public MohistCliApi(
@@ -59,6 +60,9 @@ internal sealed partial class MohistCliApi
         ICliEnvironment? cliEnvironment = null,
         TimeProvider? timeProvider = null,
         Func<TimeSpan, CancellationToken, Task>? pollWait = null,
+        CliCredentialSession? credentialSession = null,
+        IEventSocketFactory? eventSocketFactory = null,
+        Func<double>? eventReconnectJitter = null,
         CancellationToken cancellationToken = default)
     {
         _http = http;
@@ -76,6 +80,18 @@ internal sealed partial class MohistCliApi
         // Polling waits (mo auth login) are released by the HTTP responder
         // sequence in tests; production sleeps the RFC 8628 interval.
         _pollWait = pollWait ?? ((delay, ct) => Task.Delay(delay, _timeProvider, ct));
+        if (credentialSession is not null)
+        {
+            EventStream = new EventSocketStream(
+                http,
+                credentialSession,
+                eventSocketFactory ?? new ClientEventSocketFactory(),
+                output,
+                error,
+                _pollWait,
+                eventReconnectJitter ?? Random.Shared.NextDouble,
+                _timeProvider);
+        }
         Invocation = new CliInvocation(
             output,
             error,

@@ -1,9 +1,11 @@
 import { useEffect, useMemo, useRef, useState, useCallback } from 'react'
+import { flushSync } from 'react-dom'
 import { useQueryClient } from '@tanstack/react-query'
 import { onAgentEvent } from '../../../entities/agent'
 import type { AgentDetailEventMap, AgentTranscriptDetail } from '../../../entities/agent'
 import type { SessionTurn } from '../../../entities/coder-session'
 import { issueWorkflowKeys } from '../../../entities/issue'
+import { useLiveEvents } from '../../../shared/api/live-events'
 import {
   appendInputTurn,
   appendReasoningToTurn,
@@ -22,10 +24,7 @@ import {
   updateToolInTurn,
   type LiveToolCall,
 } from './transcript-state'
-import {
-  stringifyPayload,
-  getCorrelationKey,
-} from './transcript-tool-utils'
+import { stringifyPayload, getCorrelationKey } from './transcript-tool-utils'
 
 interface UseSessionTranscriptOptions {
   issueNumber: number
@@ -100,6 +99,7 @@ export function useSessionTranscript({
   terminalInvalidationKey,
 }: UseSessionTranscriptOptions): UseSessionTranscriptResult {
   const queryClient = useQueryClient()
+  const liveEvents = useLiveEvents()
   const initialState = useMemo<SessionTurn[]>(() => {
     return initialTurns ?? []
   }, [])
@@ -118,7 +118,9 @@ export function useSessionTranscript({
   isNearBottomRef.current = isNearBottom
 
   const liveToolCallMapRef = useRef<Map<string, LiveToolCall>>(new Map())
-  const pendingCorrelationRef = useRef<Map<string, { normalizedName: string; target?: string; turnIndex: number }>>(new Map())
+  const pendingCorrelationRef = useRef<Map<string, { normalizedName: string; target?: string; turnIndex: number }>>(
+    new Map(),
+  )
   const mountedRef = useRef(true)
   const streamingTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const isStreamingRef = useRef(false)
@@ -143,30 +145,36 @@ export function useSessionTranscript({
     setIsStreaming(false)
   }, [])
 
-  const bumpTranscriptVersion = useCallback((engageActivity = true) => {
-    setTranscriptVersion((version) => version + 1)
-    if (streamingTimerRef.current !== null) {
-      clearTimeout(streamingTimerRef.current)
-    }
-    if (!engageActivity) {
-      isStreamingRef.current = false
-      setIsStreaming(false)
-      return
-    }
-    isStreamingRef.current = true
-    setIsStreaming(true)
-    streamingTimerRef.current = setTimeout(() => {
-      clearStreaming()
-      streamingTimerRef.current = null
-    }, 2000)
-  }, [clearStreaming])
+  const bumpTranscriptVersion = useCallback(
+    (engageActivity = true) => {
+      setTranscriptVersion((version) => version + 1)
+      if (streamingTimerRef.current !== null) {
+        clearTimeout(streamingTimerRef.current)
+      }
+      if (!engageActivity) {
+        isStreamingRef.current = false
+        setIsStreaming(false)
+        return
+      }
+      isStreamingRef.current = true
+      setIsStreaming(true)
+      streamingTimerRef.current = setTimeout(() => {
+        clearStreaming()
+        streamingTimerRef.current = null
+      }, 2000)
+    },
+    [clearStreaming],
+  )
 
-  const markNewContent = useCallback((engageActivity = true) => {
-    bumpTranscriptVersion(engageActivity)
-    if (!isNearBottomRef.current) {
-      setNewContentAvailable(true)
-    }
-  }, [bumpTranscriptVersion])
+  const markNewContent = useCallback(
+    (engageActivity = true) => {
+      bumpTranscriptVersion(engageActivity)
+      if (!isNearBottomRef.current) {
+        setNewContentAvailable(true)
+      }
+    },
+    [bumpTranscriptVersion],
+  )
 
   const markNewContentRef = useRef(markNewContent)
   markNewContentRef.current = markNewContent
@@ -179,7 +187,8 @@ export function useSessionTranscript({
     for (const queryKey of sessionQueryKeys ?? []) {
       queryClient.invalidateQueries({ queryKey })
     }
-    const invKey = terminalInvalidationKey ?? issueWorkflowKeys.session(projectId, issueNumber, 'coder-sessions', sessionId)
+    const invKey =
+      terminalInvalidationKey ?? issueWorkflowKeys.session(projectId, issueNumber, 'coder-sessions', sessionId)
     queryClient.invalidateQueries({ queryKey: invKey })
   }, [queryClient, issueNumber, projectId, sessionId, sessionQueryKeys, terminalInvalidationKey])
 
@@ -187,6 +196,49 @@ export function useSessionTranscript({
     setIsFinalizing(true)
     invalidateSessionQueries()
   }, [invalidateSessionQueries])
+
+  useEffect(() => {
+    if (!sessionId || !runtimeSessionId) return
+    let cancelled = false
+    const queryKeys = sessionQueryKeys ?? []
+    const transcriptQueryKey = queryKeys.find((queryKey) => queryKey.includes('transcript'))
+    const registration = liveEvents.registerTranscriptReconciliation(sessionId, runtimeSessionId, async () => {
+      for (const queryKey of queryKeys) {
+        if (cancelled) return
+        await queryClient.refetchQueries({ queryKey, exact: true })
+      }
+      if (cancelled) return
+      const response = transcriptQueryKey
+        ? queryClient.getQueryData<{ turns?: SessionTurn[] }>(transcriptQueryKey)
+        : undefined
+      const authoritativeTurns = response?.turns ?? []
+      flushSync(() => {
+        hasLiveTailRef.current = false
+        liveToolCallMapRef.current.clear()
+        pendingCorrelationRef.current.clear()
+        liveDetailOrdinalRef.current = 0
+        liveSourceIdsRef.current.clear()
+        setLiveDetails([])
+        setTurns(authoritativeTurns)
+        setIsFinalizing(false)
+        setIsThinking(false)
+        clearStreaming()
+        setTranscriptVersion((version) => version + 1)
+      })
+    })
+    return () => {
+      cancelled = true
+      registration.dispose()
+    }
+  }, [
+    liveEvents,
+    runtimeSessionId,
+    sessionId,
+    queryClient,
+    sessionQueryKeys?.[0],
+    sessionQueryKeys?.[1],
+    clearStreaming,
+  ])
 
   useEffect(() => {
     if (hasLiveTailRef.current && isRunning) {
@@ -212,8 +264,8 @@ export function useSessionTranscript({
       setIsThinking(false)
       return
     }
-    const hasVisibleContent = turns.some(t =>
-      t.assistant.some(p => p.type === 'text' || p.type === 'reasoning' || p.type === 'tool')
+    const hasVisibleContent = turns.some((t) =>
+      t.assistant.some((p) => p.type === 'text' || p.type === 'reasoning' || p.type === 'tool'),
     )
     if (!hasVisibleContent) {
       setIsThinking(true)
@@ -233,11 +285,12 @@ export function useSessionTranscript({
     }
     const captureLiveDetail = (eventName: string, detail: Record<string, unknown>) => {
       const explicitSourceId = detail.sourceId ?? detail.eventId
-      const sourceId = typeof explicitSourceId === 'string' && explicitSourceId.trim().length > 0
-        ? explicitSourceId
-        : typeof detail.sequence === 'number'
-          ? `live:${eventName}:${detail.sequence}`
-          : `live:${eventName}:${++liveDetailOrdinalRef.current}`
+      const sourceId =
+        typeof explicitSourceId === 'string' && explicitSourceId.trim().length > 0
+          ? explicitSourceId
+          : typeof detail.sequence === 'number'
+            ? `live:${eventName}:${detail.sequence}`
+            : `live:${eventName}:${++liveDetailOrdinalRef.current}`
       if (liveSourceIdsRef.current.has(sourceId)) return
       liveSourceIdsRef.current.add(sourceId)
       setLiveDetails((previous) => [
@@ -266,7 +319,9 @@ export function useSessionTranscript({
       const correlationKey = getCorrelationKey(detail.toolName, detail.title, target)
       const metadata = detail.metadata ?? detail.rawOutputMetadata
       const detailsMetadata = asRecord(metadata)
-      const liveDetails = detail.details ?? buildLiveToolDetails(normalizedName, detail.rawInput, detail.rawOutput, detailsMetadata ?? undefined)
+      const liveDetails =
+        detail.details ??
+        buildLiveToolDetails(normalizedName, detail.rawInput, detail.rawOutput, detailsMetadata ?? undefined)
       const { displayTitle, displaySubtitle } = getDisplayFields(detail)
 
       if (detail.state === 'started') {
@@ -296,23 +351,28 @@ export function useSessionTranscript({
         setTurns((prev) => {
           const next = ensureLiveTurn(prev, now)
           const lastTurn = next[next.length - 1]
-          next[next.length - 1] = updateToolInTurn(lastTurn, toolCallId, {
-            toolName: detail.toolName,
-            normalizedName,
-            displayTitle,
-            displaySubtitle,
-            category: detail.category,
-            status: 'started',
-            title: detail.title,
-            target,
-            input: stringifyPayload(detail.rawInput),
-            output: stringifyPayload(detail.rawOutput),
-            rawInput: detail.rawInput,
-            rawOutput: detail.rawOutput,
-            metadata: detailsMetadata ?? undefined,
-            details: liveDetails,
-            startedAt: now,
-          }, correlationKey)
+          next[next.length - 1] = updateToolInTurn(
+            lastTurn,
+            toolCallId,
+            {
+              toolName: detail.toolName,
+              normalizedName,
+              displayTitle,
+              displaySubtitle,
+              category: detail.category,
+              status: 'started',
+              title: detail.title,
+              target,
+              input: stringifyPayload(detail.rawInput),
+              output: stringifyPayload(detail.rawOutput),
+              rawInput: detail.rawInput,
+              rawOutput: detail.rawOutput,
+              metadata: detailsMetadata ?? undefined,
+              details: liveDetails,
+              startedAt: now,
+            },
+            correlationKey,
+          )
           return next
         })
         setIsThinking(false)
@@ -324,22 +384,27 @@ export function useSessionTranscript({
         setTurns((prev) => {
           const next = ensureLiveTurn(prev, now)
           const lastTurn = next[next.length - 1]
-          next[next.length - 1] = updateToolInTurn(lastTurn, toolCallId, {
-            status: detail.state as LiveToolCall['status'],
-            toolName: detail.toolName,
-            normalizedName,
-            displayTitle,
-            displaySubtitle,
-            category: detail.category,
-            title: detail.title,
-            target,
-            input: stringifyPayload(detail.rawInput),
-            output: stringifyPayload(detail.rawOutput),
-            rawInput: detail.rawInput,
-            rawOutput: detail.rawOutput,
-            metadata: detailsMetadata ?? undefined,
-            details: liveDetails,
-          }, correlationKey)
+          next[next.length - 1] = updateToolInTurn(
+            lastTurn,
+            toolCallId,
+            {
+              status: detail.state as LiveToolCall['status'],
+              toolName: detail.toolName,
+              normalizedName,
+              displayTitle,
+              displaySubtitle,
+              category: detail.category,
+              title: detail.title,
+              target,
+              input: stringifyPayload(detail.rawInput),
+              output: stringifyPayload(detail.rawOutput),
+              rawInput: detail.rawInput,
+              rawOutput: detail.rawOutput,
+              metadata: detailsMetadata ?? undefined,
+              details: liveDetails,
+            },
+            correlationKey,
+          )
           return next
         })
         setIsThinking(false)
@@ -361,35 +426,46 @@ export function useSessionTranscript({
         existing.metadata = detailsMetadata ?? existing.metadata
         existing.details = liveDetails ?? existing.details
         existing.completedAt = now
-        existing.error = detail.state === 'failed'
-          ? (typeof detail.rawOutput === 'string' ? detail.rawOutput : JSON.stringify(detail.rawOutput ?? 'Tool failed'))
-          : existing.error
+        existing.error =
+          detail.state === 'failed'
+            ? typeof detail.rawOutput === 'string'
+              ? detail.rawOutput
+              : JSON.stringify(detail.rawOutput ?? 'Tool failed')
+            : existing.error
       }
 
       setTurns((prev) => {
         const next = ensureLiveTurn(prev, now)
         const lastTurn = next[next.length - 1]
-        const error = detail.state === 'failed'
-          ? (typeof detail.rawOutput === 'string' ? detail.rawOutput : JSON.stringify(detail.rawOutput ?? 'Tool failed'))
-          : undefined
-        next[next.length - 1] = updateToolInTurn(lastTurn, toolCallId, {
-          status: mapStatusToDisplay(detail.state) as LiveToolCall['status'],
-          toolName: detail.toolName,
-          normalizedName,
-          displayTitle,
-          displaySubtitle,
-          category: detail.category,
-          title: detail.title,
-          target,
-          input: stringifyPayload(detail.rawInput),
-          output: stringifyPayload(detail.rawOutput),
-          rawInput: detail.rawInput,
-          rawOutput: detail.rawOutput,
-          metadata: detailsMetadata ?? undefined,
-          details: liveDetails,
-          completedAt: now,
-          error,
-        }, correlationKey)
+        const error =
+          detail.state === 'failed'
+            ? typeof detail.rawOutput === 'string'
+              ? detail.rawOutput
+              : JSON.stringify(detail.rawOutput ?? 'Tool failed')
+            : undefined
+        next[next.length - 1] = updateToolInTurn(
+          lastTurn,
+          toolCallId,
+          {
+            status: mapStatusToDisplay(detail.state) as LiveToolCall['status'],
+            toolName: detail.toolName,
+            normalizedName,
+            displayTitle,
+            displaySubtitle,
+            category: detail.category,
+            title: detail.title,
+            target,
+            input: stringifyPayload(detail.rawInput),
+            output: stringifyPayload(detail.rawOutput),
+            rawInput: detail.rawInput,
+            rawOutput: detail.rawOutput,
+            metadata: detailsMetadata ?? undefined,
+            details: liveDetails,
+            completedAt: now,
+            error,
+          },
+          correlationKey,
+        )
         return next
       })
       liveToolCallMapRef.current.delete(toolCallId)
@@ -403,11 +479,13 @@ export function useSessionTranscript({
         if (!acceptLiveDetail('session.input', detail)) return
 
         hasLiveTailRef.current = true
-        setTurns((prev) => appendInputTurn(prev, {
-          text: detail.text,
-          kind: detail.kind,
-          sentAt: detail.sentAt,
-        }))
+        setTurns((prev) =>
+          appendInputTurn(prev, {
+            text: detail.text,
+            kind: detail.kind,
+            sentAt: detail.sentAt,
+          }),
+        )
         const isFollowup = detail.kind === 'followup'
         if (!isFollowup) {
           setIsThinking(true)
@@ -470,24 +548,21 @@ export function useSessionTranscript({
       }),
     )
 
-    unsubs.push(
-      onAgentEvent('tool_call.started', (detail) => handleToolDetail(detail, 'tool_call.started')),
-    )
+    unsubs.push(onAgentEvent('tool_call.started', (detail) => handleToolDetail(detail, 'tool_call.started')))
 
-    unsubs.push(
-      onAgentEvent('tool_call.updated', (detail) => handleToolDetail(detail, 'tool_call.updated')),
-    )
+    unsubs.push(onAgentEvent('tool_call.updated', (detail) => handleToolDetail(detail, 'tool_call.updated')))
 
-    unsubs.push(
-      onAgentEvent('tool_call.completed', (detail) => handleToolDetail(detail, 'tool_call.completed')),
-    )
+    unsubs.push(onAgentEvent('tool_call.completed', (detail) => handleToolDetail(detail, 'tool_call.completed')))
 
     unsubs.push(
       onAgentEvent('coder_tool_call', (detail) => {
-        handleToolDetail({
-          ...detail,
-          state: (detail.state ?? detail.status ?? 'started') as AgentDetailEventMap['tool_call.started']['state'],
-        }, 'coder_tool_call')
+        handleToolDetail(
+          {
+            ...detail,
+            state: (detail.state ?? detail.status ?? 'started') as AgentDetailEventMap['tool_call.started']['state'],
+          },
+          'coder_tool_call',
+        )
       }),
     )
 
@@ -523,11 +598,7 @@ export function useSessionTranscript({
         setTurns((prev) => {
           const next = ensureLiveTurn(prev, now)
           const lastTurn = next[next.length - 1]
-          const newPart = createErrorPart(
-            errorMessages[detail.status] ?? detail.status,
-            'recovery',
-            now,
-          )
+          const newPart = createErrorPart(errorMessages[detail.status] ?? detail.status, 'recovery', now)
           next[next.length - 1] = {
             ...lastTurn,
             assistant: [...lastTurn.assistant, newPart],
@@ -548,11 +619,12 @@ export function useSessionTranscript({
 
         hasLiveTailRef.current = true
         const timestamp = detail.probeSentAt ?? detail.lastDataAt ?? new Date().toISOString()
-        const message = detail.status === 'probing'
-          ? `Liveness probe sent. Waiting until ${detail.probeDeadlineAt ?? 'deadline unknown'}. Last activity: ${detail.lastActivityType ?? 'unknown'}.`
-          : detail.status === 'running'
-            ? `Liveness recovered after ${detail.lastActivityType ?? 'session'} activity.`
-            : `Liveness failed: ${detail.failureReason ?? 'unknown'}. Last activity: ${detail.lastActivityType ?? 'unknown'}.`
+        const message =
+          detail.status === 'probing'
+            ? `Liveness probe sent. Waiting until ${detail.probeDeadlineAt ?? 'deadline unknown'}. Last activity: ${detail.lastActivityType ?? 'unknown'}.`
+            : detail.status === 'running'
+              ? `Liveness recovered after ${detail.lastActivityType ?? 'session'} activity.`
+              : `Liveness failed: ${detail.failureReason ?? 'unknown'}. Last activity: ${detail.lastActivityType ?? 'unknown'}.`
 
         setTurns((prev) => {
           const next = ensureLiveTurn(prev, timestamp)
@@ -578,9 +650,8 @@ export function useSessionTranscript({
 
         hasLiveTailRef.current = true
         const now = new Date().toISOString()
-        const progress = detail.attempt != null && detail.maxAttempts != null
-          ? ` (${detail.attempt}/${detail.maxAttempts})`
-          : ''
+        const progress =
+          detail.attempt != null && detail.maxAttempts != null ? ` (${detail.attempt}/${detail.maxAttempts})` : ''
         const message = `Provider retry${detail.phase ? `: ${detail.phase}` : ''}${progress}${detail.message ? ` - ${detail.message}` : ''}`
         setTurns((prev) => {
           const next = ensureLiveTurn(prev, now)
@@ -596,14 +667,30 @@ export function useSessionTranscript({
     )
 
     unsubs.push(
-      onAgentEvent('compaction', (detail) => { acceptLiveDetail('compaction', detail) }),
-      onAgentEvent('compaction_event', (detail) => { acceptLiveDetail('compaction_event', detail) }),
-      onAgentEvent('context_health_update', (detail) => { acceptLiveDetail('context_health_update', detail) }),
-      onAgentEvent('usage.updated', (detail) => { acceptLiveDetail('usage.updated', detail) }),
-      onAgentEvent('model.resolved', (detail) => { acceptLiveDetail('model.resolved', detail) }),
-      onAgentEvent('com.mohist.agent-session.context-compacted', (detail) => { acceptLiveDetail('com.mohist.agent-session.context-compacted', detail) }),
-      onAgentEvent('com.mohist.agent-session.context-exhausted', (detail) => { acceptLiveDetail('com.mohist.agent-session.context-exhausted', detail) }),
-      onAgentEvent('com.mohist.agent-session.context-health-updated', (detail) => { acceptLiveDetail('com.mohist.agent-session.context-health-updated', detail) }),
+      onAgentEvent('compaction', (detail) => {
+        acceptLiveDetail('compaction', detail)
+      }),
+      onAgentEvent('compaction_event', (detail) => {
+        acceptLiveDetail('compaction_event', detail)
+      }),
+      onAgentEvent('context_health_update', (detail) => {
+        acceptLiveDetail('context_health_update', detail)
+      }),
+      onAgentEvent('usage.updated', (detail) => {
+        acceptLiveDetail('usage.updated', detail)
+      }),
+      onAgentEvent('model.resolved', (detail) => {
+        acceptLiveDetail('model.resolved', detail)
+      }),
+      onAgentEvent('com.mohist.agent-session.context-compacted', (detail) => {
+        acceptLiveDetail('com.mohist.agent-session.context-compacted', detail)
+      }),
+      onAgentEvent('com.mohist.agent-session.context-exhausted', (detail) => {
+        acceptLiveDetail('com.mohist.agent-session.context-exhausted', detail)
+      }),
+      onAgentEvent('com.mohist.agent-session.context-health-updated', (detail) => {
+        acceptLiveDetail('com.mohist.agent-session.context-health-updated', detail)
+      }),
     )
 
     return () => {

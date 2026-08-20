@@ -403,7 +403,7 @@ registry for all nine request methods and the Workflow status notification.
 RunnerHost opens the matching native client after HTTP registration and binds
 the transport-neutral handler catalog. Runner-specific SignalR endpoints,
 clients, handlers, test fakes, and dependencies are removed; `/hubs/events`
-remains SignalR for operator event delivery. Existing HTTP registration,
+has since been replaced by the project-scoped native event WebSocket. Existing HTTP registration,
 heartbeat, work poll and report, Runtime events, operation journals, and
 Workflow status reconciliation remain unchanged. Mixed old and new Runner
 control clients are unsupported.

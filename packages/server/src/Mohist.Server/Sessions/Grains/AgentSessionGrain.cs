@@ -2448,6 +2448,15 @@ public sealed partial class AgentSessionGrain : Grain, IAgentSessionGrain, IRemi
     {
         if (entries.Count == 0) return;
 
+        var projectId = session.Metadata?.Label(AgentSessionQueryMetadataKeys.ProjectId);
+        if (string.IsNullOrWhiteSpace(projectId))
+        {
+            _log.LogError(
+                "AgentSessionGrain cannot publish transcript events for {SessionId}: Project metadata is missing",
+                session.Id);
+            return;
+        }
+
         foreach (var row in entries)
         {
             if (!TranscriptAccumulator.EventTypes.Contains(row.Type))
@@ -2478,7 +2487,7 @@ public sealed partial class AgentSessionGrain : Grain, IAgentSessionGrain, IRemi
 
             try
             {
-                await _transcriptPublisher.PublishAsync(envelope, CancellationToken.None);
+                await _transcriptPublisher.PublishAsync(projectId, envelope, CancellationToken.None);
             }
             catch (Exception ex)
             {

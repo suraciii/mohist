@@ -52,7 +52,7 @@ public sealed class TaskLogService : IScopedService
     /// <summary>
     /// Persists a runner upload (incremental or terminal) and, on
     /// successful persistence, best-effort fans out the delta to
-    /// subscribed SignalR connections via
+    /// subscribed event WebSocket connections via
     /// <see cref="ITaskLogDeltaPublisher"/>. Persistence is the
     /// authoritative step; fan-out failure (publisher throws, no
     /// subscribers, per-send error) is logged and swallowed so it
@@ -191,9 +191,7 @@ public sealed class TaskLogService : IScopedService
     /// work item isn't owned by a workflow run (e.g. an agent-job
     /// owner kind with no task mapping) or the work projection has no
     /// mapping; the publisher treats a null
-    /// <c>taskId</c> as "no scope can match, no fan-out" (its
-    /// <see cref="ConnectionSubscriptionRegistry.ShouldNotifyTaskLog"/>
-    /// gate short-circuits to false).
+    /// <c>taskId</c> as "no scope can match, no fan-out".
     ///
     /// </summary>
     private async Task<TaskLogPublishScope?> ResolvePublishScopeAsync(

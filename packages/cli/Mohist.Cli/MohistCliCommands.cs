@@ -173,7 +173,7 @@ internal static class MohistCliCommands
 
     internal static string Escape(string value) => Uri.EscapeDataString(value);
 
-    internal static async Task<int> RunAsync(HttpClient http, string[] args, TextWriter output, TextWriter error, IFileSystem fileSystem, ICommandExecutor commandExecutor, IEnvironmentVariableProvider? environment = null, TextReader? standardInput = null, IServiceInstaller? installer = null, SourceCodeUpdater? updater = null, Func<string>? getUserHome = null, CancellationToken cancellationToken = default, ICliTerminal? terminalOverride = null, TimeProvider? timeProvider = null, Func<TimeSpan, CancellationToken, Task>? pollWait = null, Func<string?>? getLocalHostname = null)
+    internal static async Task<int> RunAsync(HttpClient http, string[] args, TextWriter output, TextWriter error, IFileSystem fileSystem, ICommandExecutor commandExecutor, IEnvironmentVariableProvider? environment = null, TextReader? standardInput = null, IServiceInstaller? installer = null, SourceCodeUpdater? updater = null, Func<string>? getUserHome = null, CancellationToken cancellationToken = default, ICliTerminal? terminalOverride = null, TimeProvider? timeProvider = null, Func<TimeSpan, CancellationToken, Task>? pollWait = null, Func<string?>? getLocalHostname = null, IEventSocketFactory? eventSocketFactory = null, Func<double>? eventReconnectJitter = null)
     {
         OutputOptionState.Explicit = false;
         if (IsDirectSlackCredentialArgument(args))
@@ -194,7 +194,9 @@ internal static class MohistCliCommands
         // is resolvable (CliCredentialHandler), regardless of which command
         // originates it. The caller-supplied client remains the transport.
         var credentials = new CliCredentialProvider(fileSystem, environment, effectiveUserHome);
-        http = new HttpClient(new CliCredentialHandler(credentials, http, fileSystem, effectiveUserHome, error))
+        var credentialSession = new CliCredentialSession(
+            credentials, http, fileSystem, effectiveUserHome, error);
+        http = new HttpClient(new CliCredentialHandler(credentialSession, http))
         {
             BaseAddress = http.BaseAddress,
             Timeout = http.Timeout,
@@ -214,7 +216,10 @@ internal static class MohistCliCommands
             CancellationToken: cancellationToken,
             Terminal: terminalOverride,
             TimeProvider: timeProvider,
-            PollWait: pollWait));
+            PollWait: pollWait,
+            CredentialSession: credentialSession,
+            EventSocketFactory: eventSocketFactory,
+            EventReconnectJitter: eventReconnectJitter));
         var root = composition.Root;
         var config = new InvocationConfiguration { Output = output, Error = error };
         var parseConfig = new ParserConfiguration { ResponseFileTokenReplacer = null };

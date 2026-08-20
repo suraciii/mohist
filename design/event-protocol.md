@@ -1,5 +1,5 @@
 ---
-status: draft
+status: converged
 ---
 
 # Event Protocol
@@ -274,8 +274,10 @@ replaces the connection's prior state:
   An empty array disables task-log notifications. Task-log interest does not
   also require a synthetic `task-log.delta` type subscription.
 
-Duplicate type values and task scopes are normalized as sets. Empty or
-whitespace identifiers, unknown domain types, and unknown transcript types are
+Duplicate type values and task scopes are normalized as sets. Domain type values
+are trimmed and may be any non-empty exact string within the subscription limits;
+an unknown domain type is forward-compatible and simply matches no currently
+emitted event. Empty or whitespace domain types and unknown transcript types are
 Invalid Params. A task scope need not be looked up while setting a subscription;
 strict Project metadata on publication is the authorization boundary and an
 unknown scope simply receives nothing.
@@ -474,7 +476,7 @@ same reconnect-and-reconcile path.
 
 One live-event owner under `AuthGate` always owns exactly one physical connection
 for the active Project while mounted. Its wire subscription always contains the
-existing canonical Web `EVENT_TYPES` set in `domain.types`, with
+canonical Web `DOMAIN_EVENT_TYPES` set in `domain.types`, with
 `domain.match: null`, and `TRANSCRIPT_EVENT_TYPES` in `transcript.types`.
 Components cannot register domain types or match expressions, and transcript
 reconciliation registrations do not alter the transcript wire types.
@@ -598,12 +600,17 @@ system handler can receive an event that no user expression can subscribe to.
   idless JSON-RPC notification semantics. They also cover duplicate in-flight
   IDs, malformed envelopes, unknown methods, invalid params, atomic replacement,
   and response-before-new-notification ordering under concurrent publication.
+  Domain subscription tests prove arbitrary non-empty exact type strings are
+  trimmed and accepted without catalog coupling, while empty or whitespace types
+  are invalid and leave the prior state active. Transcript types remain catalog
+  validated.
   The third-error tests assert an owed response is enqueued before close `1008`,
   while a failed enqueue closes `1013` without promising that response.
   Publisher tests prove transcript notifications carry explicit
   Project scope, are emitted before persistence, and expose only transient raw
-  `id` and `sequence`. Client tests cover the single Web owner, its fixed domain
-  and transcript type sets, admission of at most 128 unique task-log scopes,
+  `id` and `sequence`. Client tests cover the single Web owner, its fixed
+  reverse-DNS-only domain set and fixed transcript type set, admission of at most
+  128 unique task-log scopes,
   explicit no-handle failure and unchanged aggregate for the 129th, HTTP polling
   fallback for its caller, duplicate-scope reference counting without another
   slot, idempotent dispose handles, serialized/coalesced complete snapshots, and
@@ -624,12 +631,11 @@ path; the CEL-subset evaluator and user routing evaluation; promotion of the
 `workspace` and `workspaceoriginkind`. Dual Issue and Epic identities and the
 old `issueid`, `epicid`, `issueno`, and `epicno` attributes are removed.
 
-Draft and not implemented: the project-scoped native WebSocket live protocol and
-removal of the SignalR and NDJSON live transports. The draft now fixes raw
+Implemented: the project-scoped native WebSocket live protocol and removal of
+the SignalR and NDJSON live transports. The protocol fixes raw
 transcript delivery before persistence, generation-local transcript
 reconciliation, one fixed Web owner, canonical same-origin cookie upgrades, and
 one CloudEvents 1.0 Published Language shared unchanged with outbound webhooks. Web
 intentionally adapts from the legacy SignalR camelCase envelope, and
 `mo event tail` emits the standard object as NDJSON without the old nested
-`extensions` shape. Independent review must pass before this section can return
-to converged status.
+`extensions` shape.
