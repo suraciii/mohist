@@ -27,9 +27,10 @@ failure. It contains:
 - `run.json` and `build-stamp.json` provenance;
 - `plan.json` with the plan identity, selected owner, tracks, dependencies, and
   Resource claims;
+- `build.json` with build phase results and elapsed time;
 - raw lane logs and reports; and
-- `summary.json` with every lane result, parsed totals, cleanup state, deadline
-  state, and the first failure.
+- `summary.json` with every lane result, parsed totals, queue wait, test-process
+  time, cleanup state, deadline state, and the first failure.
 
 Failure to write the plan or final summary fails the scope. Gate fails when a
 required scope directory or final summary is missing.
