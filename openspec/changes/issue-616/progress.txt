@@ -35,3 +35,9 @@
 - A disabled Connection is removed from the runtime lease target view immediately. For a managed Bot event already in flight, the route still performs the lease check first, then revalidates identity/workspace and admits only the exact workspace-scoped managed author for an ignored result; stale non-managed requests retain the existing lease conflict and no disabled audit row is created.
 - Connection specs cover managed Manager and Agent self/cross-target events across DM, channel mention, bound-thread shapes, redelivery, all T-002 Agent App binding/deletion transitions as cross-target authors, disabled suppression without audit, invalid identity/workspace ordering, and human/third-party compatibility. The new class passes 5 tests; existing channel/thread baseline passed 23 tests.
 - Broader native xUnit regression across the new Connection class plus managed admission, Manager ingress/application/conversation, channel/thread, DM mapping, access, and runtime lease specs passed 69 tests. SpecTests build and `git diff --check` pass.
+
+## Review remediation
+
+- M-001 fixed: Manager ingress treats an explicit `senderKind=unknown` as authoritative and rejects it before managed admission, inbox admission, authorization, or conversation processing. The compatibility fallback for omitted `senderKind` remains unchanged. Regression coverage verifies no Manager inbox or outbox rows are created.
+- M-002 fixed: supported Manager and Agent adapter fixtures now require a non-conflicting author App-ID, and explicit supported-shaped fixtures with both App-ID sources absent fail the fixture contract. The generic App-less Bot behavior remains covered separately.
+- Remediation verification: Server specifications passed 3,702 tests; the `mohist-slack` test suite passed 7 files and 76 tests; adapter test typechecking and `git diff --check` passed.

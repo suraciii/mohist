@@ -334,10 +334,47 @@ describe('mohist-slack adapter', () => {
         identityConflict: false,
       },
     })
+    expect(requireSupportedMohistAuthorAppId(manager, 'Manager')).toBe('A_MANAGER_AUTHOR')
+    expect(requireSupportedMohistAuthorAppId(agent, 'Agent')).toBe('A_AGENT_AUTHOR')
     expect(manager.apiAppId).not.toBe(manager.authorBot?.appId)
     expect(agent.apiAppId).not.toBe(agent.authorBot?.appId)
     expect(JSON.stringify(manager)).not.toContain('bot_profile')
     expect(JSON.stringify(manager)).not.toContain('Mohist Manager')
+  })
+
+  it('fails supported Mohist fixture contracts when both App-ID sources are absent', () => {
+    const manager = normalizeSocketEvent({
+      team_id: 'T_MANAGER',
+      api_app_id: 'A_MANAGER_RECEIVER',
+      event: {
+        type: 'message',
+        subtype: 'bot_message',
+        channel: 'D_MANAGER',
+        ts: '200.003',
+        bot_profile: { id: 'B_MANAGER_AUTHOR' },
+        text: 'manager response',
+      },
+    })
+    const agent = normalizeSocketEvent({
+      team_id: 'T_AGENT',
+      api_app_id: 'A_MANAGER_RECEIVER',
+      event: {
+        type: 'message',
+        subtype: 'bot_message',
+        channel: 'D_AGENT',
+        ts: '200.004',
+        bot_id: 'B_AGENT_AUTHOR',
+        bot_profile: { id: 'B_AGENT_AUTHOR' },
+        text: 'agent response',
+      },
+    })
+
+    expect(() => requireSupportedMohistAuthorAppId(manager, 'Manager')).toThrow(
+      'Manager fixture is missing a matchable author App-ID',
+    )
+    expect(() => requireSupportedMohistAuthorAppId(agent, 'Agent')).toThrow(
+      'Agent fixture is missing a matchable author App-ID',
+    )
   })
 
   it('marks conflicting Bot author fields instead of selecting an unsafe identity', () => {
@@ -490,3 +527,13 @@ describe('mohist-slack adapter', () => {
     controller.abort()
   })
 })
+
+function requireSupportedMohistAuthorAppId(
+  envelope: ReturnType<typeof normalizeSocketEvent>,
+  fixtureName: string,
+): string {
+  const appId = envelope.authorBot?.appId
+  if (envelope.senderKind !== 'bot' || !appId || envelope.authorBot?.identityConflict)
+    throw new Error(`${fixtureName} fixture is missing a matchable author App-ID`)
+  return appId
+}
