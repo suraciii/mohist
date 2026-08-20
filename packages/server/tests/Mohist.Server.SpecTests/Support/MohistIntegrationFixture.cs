@@ -255,7 +255,7 @@ public class MohistWebApplicationFactory : WebApplicationFactory<Program>
         // WebApplicationFactory must never fall through to the production
         // Kestrel listener. This is a logical TestServer URL; no socket is
         // opened and requests stay inside the in-process handler.
-        builder.UseTestServer();
+        builder.UseTestServer(options => options.PreserveExecutionContext = true);
         builder.UseSetting(WebHostDefaults.ServerUrlsKey, "http://localhost");
         builder.UseEnvironment(MohistHostEnvironment.Testing);
         builder.UseSetting("Mohist:Testing:InMemoryOrleansTransport", "true");

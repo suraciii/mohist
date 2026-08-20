@@ -7,21 +7,22 @@ namespace Mohist.Server.SpecTests.Support;
 
 public sealed class RecordingRunnerControlTransport : IRunnerControlTransport
 {
-    private readonly object _gate = new();
+    private readonly AsyncLocal<RecordingRunnerControlGlobalState?> _globalState = new();
     private readonly ConcurrentDictionary<string, RecordingRunnerControlOwnerState> _owners = new(StringComparer.Ordinal);
-    private readonly Dictionary<string, object?> _responses = new(StringComparer.Ordinal);
-    private readonly Dictionary<string, Func<IReadOnlyList<object?>, object?>> _responseFactories = new(StringComparer.Ordinal);
-    private readonly List<RecordedRunnerControlMessage> _sentMessages = [];
-    private readonly List<RecordedRunnerControlRequest> _requests = [];
+
+    public RecordingRunnerControlTransport() => _globalState.Value = new RecordingRunnerControlGlobalState(false);
+
+    private RecordingRunnerControlGlobalState GlobalState =>
+        _globalState.Value ??= new RecordingRunnerControlGlobalState(false);
 
     public IReadOnlyList<RecordedRunnerControlMessage> SentMessages
     {
-        get { lock (_gate) return _sentMessages.ToArray(); }
+        get { lock (GlobalState.Gate) return GlobalState.SentMessages.ToArray(); }
     }
 
     public IReadOnlyList<RecordedRunnerControlRequest> Invocations
     {
-        get { lock (_gate) return _requests.ToArray(); }
+        get { lock (GlobalState.Gate) return GlobalState.Requests.ToArray(); }
     }
 
     public int OwnerCount => _owners.Count;
@@ -29,20 +30,10 @@ public sealed class RecordingRunnerControlTransport : IRunnerControlTransport
     public bool IsConnected(string runnerId)
     {
         if (_owners.ContainsKey(runnerId)) return true;
-        if (!_owners.IsEmpty) return false;
-        lock (_gate) return _responses.Count > 0 || _responseFactories.Count > 0;
+        lock (GlobalState.Gate) return GlobalState.Responses.Count > 0 || GlobalState.ResponseFactories.Count > 0;
     }
 
-    public void Clear()
-    {
-        lock (_gate)
-        {
-            _sentMessages.Clear();
-            _requests.Clear();
-            _responses.Clear();
-            _responseFactories.Clear();
-        }
-    }
+    public void Clear() => _globalState.Value = new RecordingRunnerControlGlobalState(true);
 
     public RecordingRunnerControlOwner CreateOwner(string ownerId)
     {
@@ -53,22 +44,10 @@ public sealed class RecordingRunnerControlTransport : IRunnerControlTransport
     }
 
     public void SetInvocationResponse(string method, object? response)
-    {
-        lock (_gate)
-        {
-            _responseFactories.Remove(method);
-            _responses[method] = response;
-        }
-    }
+        => GlobalState.SetResponse(method, response);
 
     public void SetInvocationResponseFactory(string method, Func<IReadOnlyList<object?>, object?> responseFactory)
-    {
-        lock (_gate)
-        {
-            _responses.Remove(method);
-            _responseFactories[method] = responseFactory;
-        }
-    }
+        => GlobalState.SetResponseFactory(method, responseFactory);
 
     public async Task<TResult> SendRequestAsync<TParams, TResult>(
         string runnerId,
@@ -79,17 +58,17 @@ public sealed class RecordingRunnerControlTransport : IRunnerControlTransport
     {
         ct.ThrowIfCancellationRequested();
         var owner = FindOwner(runnerId);
-        if (owner is null && !_owners.IsEmpty)
+        if (owner is null && !_owners.IsEmpty && !GlobalState.IsActive)
             throw new RunnerControlUnavailableException($"Runner '{runnerId}' has no recording control owner");
         var arguments = new object?[] { parameters };
         var message = new RecordedRunnerControlMessage(runnerId, method, arguments);
         var request = new RecordedRunnerControlRequest(runnerId, method, arguments);
         if (owner is null)
         {
-            lock (_gate)
+            lock (GlobalState.Gate)
             {
-                _sentMessages.Add(message);
-                _requests.Add(request);
+                GlobalState.SentMessages.Add(message);
+                GlobalState.Requests.Add(request);
             }
         }
         else
@@ -119,11 +98,11 @@ public sealed class RecordingRunnerControlTransport : IRunnerControlTransport
         ct.ThrowIfCancellationRequested();
         var message = new RecordedRunnerControlMessage(runnerId, method, [parameters]);
         var owner = FindOwner(runnerId);
-        if (owner is null && !_owners.IsEmpty)
+        if (owner is null && !_owners.IsEmpty && !GlobalState.IsActive)
             throw new RunnerControlUnavailableException($"Runner '{runnerId}' has no recording control owner");
         if (owner is null)
         {
-            lock (_gate) _sentMessages.Add(message);
+            lock (GlobalState.Gate) GlobalState.SentMessages.Add(message);
         }
         else
         {
@@ -147,13 +126,13 @@ public sealed class RecordingRunnerControlTransport : IRunnerControlTransport
             lock (owner.Gate)
             {
                 if (owner.ResponseFactories.TryGetValue(method, out var factory)) return factory(arguments);
-                if (owner.Responses.TryGetValue(method, out var response)) return response;
+                return owner.Responses.GetValueOrDefault(method);
             }
         }
-        lock (_gate)
+        lock (GlobalState.Gate)
         {
-            if (_responseFactories.TryGetValue(method, out var factory)) return factory(arguments);
-            return _responses.GetValueOrDefault(method);
+            if (GlobalState.ResponseFactories.TryGetValue(method, out var factory)) return factory(arguments);
+            return GlobalState.Responses.GetValueOrDefault(method);
         }
     }
 
@@ -167,6 +146,41 @@ public sealed class RecordingRunnerControlTransport : IRunnerControlTransport
     internal void ReleaseOwner(RecordingRunnerControlOwnerState owner)
     {
         _owners.TryRemove(new KeyValuePair<string, RecordingRunnerControlOwnerState>(owner.OwnerId, owner));
+    }
+}
+
+internal sealed class RecordingRunnerControlGlobalState(bool isActive)
+{
+    private bool _isActive = isActive;
+
+    public bool IsActive
+    {
+        get { lock (Gate) return _isActive; }
+    }
+    public object Gate { get; } = new();
+    public List<RecordedRunnerControlMessage> SentMessages { get; } = [];
+    public List<RecordedRunnerControlRequest> Requests { get; } = [];
+    public Dictionary<string, object?> Responses { get; } = new(StringComparer.Ordinal);
+    public Dictionary<string, Func<IReadOnlyList<object?>, object?>> ResponseFactories { get; } = new(StringComparer.Ordinal);
+
+    public void SetResponse(string method, object? response)
+    {
+        lock (Gate)
+        {
+            _isActive = true;
+            ResponseFactories.Remove(method);
+            Responses[method] = response;
+        }
+    }
+
+    public void SetResponseFactory(string method, Func<IReadOnlyList<object?>, object?> factory)
+    {
+        lock (Gate)
+        {
+            _isActive = true;
+            Responses.Remove(method);
+            ResponseFactories[method] = factory;
+        }
     }
 }
 

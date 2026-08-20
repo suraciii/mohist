@@ -162,7 +162,7 @@ public sealed class DirectApiStopSpecs(PublicProjectionIntegrationFixture fixtur
             AgentSessionActivity.Active);
         var token = await CreatePatAsync(projectId);
         using var client = DirectClient(token);
-        var transport = GetRunnerControlTransport();
+        using var transport = GetRunnerControlTransport().CreateOwner("runner-direct-stop");
         transport.Clear();
         transport.SetInvocationResponse("session.stop", null);
 

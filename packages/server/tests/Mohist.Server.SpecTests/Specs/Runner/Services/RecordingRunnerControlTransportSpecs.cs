@@ -33,4 +33,44 @@ public sealed class RecordingRunnerControlTransportSpecs
         Assert.Equal("response", await transport.SendRequestAsync<object, string>("runner-1", "test", new()));
         Assert.Single(transport.Invocations);
     }
+
+    [Fact]
+    public async Task GlobalModeIsIsolatedBetweenConcurrentExecutionContexts()
+    {
+        var transport = new RecordingRunnerControlTransport();
+        using var owner = transport.CreateOwner("exact-runner");
+        var firstConfigured = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var secondConfigured = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        var first = Task.Run(async () =>
+        {
+            transport.Clear();
+            transport.SetInvocationResponse("shared.method", "first-response");
+            firstConfigured.SetResult();
+            await secondConfigured.Task;
+
+            Assert.True(transport.IsConnected("first-runner"));
+            var response = await transport.SendRequestAsync<object, string>("first-runner", "shared.method", new());
+            return (response, transport.Invocations);
+        });
+        var second = Task.Run(async () =>
+        {
+            transport.Clear();
+            transport.SetInvocationResponse("shared.method", "second-response");
+            secondConfigured.SetResult();
+            await firstConfigured.Task;
+
+            Assert.True(transport.IsConnected("second-runner"));
+            var response = await transport.SendRequestAsync<object, string>("second-runner", "shared.method", new());
+            return (response, transport.Invocations);
+        });
+
+        var results = await Task.WhenAll(first, second);
+
+        Assert.Equal("first-response", results[0].response);
+        Assert.Equal("first-runner", Assert.Single(results[0].Invocations).ConnectionId);
+        Assert.Equal("second-response", results[1].response);
+        Assert.Equal("second-runner", Assert.Single(results[1].Invocations).ConnectionId);
+        Assert.Empty(owner.Invocations);
+    }
 }
