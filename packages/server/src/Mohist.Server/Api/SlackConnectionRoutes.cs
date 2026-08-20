@@ -2374,6 +2374,7 @@ public sealed class SlackIngressBody
     public IReadOnlyList<string> MentionedUserIds { get; init; } = Array.Empty<string>();
     public string? SenderSlackUserId { get; init; }
     public string? SenderKind { get; init; }
+    public SlackBotAuthorMetadata? AuthorBot { get; init; }
     public string? Text { get; init; }
     public IReadOnlyList<SlackIngressFile> Files { get; init; } = Array.Empty<SlackIngressFile>();
     public string LeaseId { get; init; } = string.Empty;

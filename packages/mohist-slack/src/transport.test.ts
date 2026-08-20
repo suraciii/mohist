@@ -13,7 +13,29 @@ const envelope: SlackEnvelope = {
   mentionedUserIds: [],
   senderSlackUserId: "U",
   senderKind: "human",
+  authorBot: null,
   text: "task",
+  files: [],
+}
+
+const botEnvelope: SlackEnvelope = {
+  eventType: "message",
+  apiAppId: "A_MANAGER_RECEIVER",
+  isDirectMessage: true,
+  teamId: "T",
+  conversationId: "D-BOT",
+  messageTs: "3",
+  threadTs: null,
+  mentionedUserIds: [],
+  senderSlackUserId: null,
+  senderKind: "bot",
+  authorBot: {
+    appId: "A_AGENT_AUTHOR",
+    botId: "B_AGENT_AUTHOR",
+    botUserId: "U_AGENT_AUTHOR",
+    identityConflict: false,
+  },
+  text: "bot task",
   files: [],
 }
 
@@ -101,7 +123,7 @@ describe("HttpAdapterTransport", () => {
     })
     await expect(transport.reportHello(ref, "lease", "A1", signal)).resolves.toBe("verified")
     await expect(transport.ingress(ref, envelope, "lease", "a", signal)).resolves.toEqual({ kind: "accepted" })
-    await expect(transport.ingress(manager, envelope, "lease", "a", signal)).resolves.toEqual({ kind: "accepted" })
+    await expect(transport.ingress(manager, botEnvelope, "lease", "a", signal)).resolves.toEqual({ kind: "accepted" })
     await expect(transport.interaction(ref, interaction, "lease", "a", signal)).resolves.toEqual({ state: "stop_requested" })
     await expect(transport.claimDelivery(ref, "lease", "a", signal)).resolves.toEqual({
       id: "delivery-1",
@@ -170,12 +192,19 @@ describe("HttpAdapterTransport", () => {
     })
     expect(JSON.parse(calls[6]!.body)).toEqual({ ...envelope, leaseId: "lease", adapterId: "a" })
     expect(JSON.parse(calls[7]!.body)).toEqual({
-      appId: "A1",
+      appId: "A_MANAGER_RECEIVER",
       workspaceTeamId: "T_MANAGER",
-      conversationId: "D",
-      messageTs: "1",
-      senderSlackUserId: "U",
-      text: "task",
+      conversationId: "D-BOT",
+      messageTs: "3",
+      senderSlackUserId: null,
+      senderKind: "bot",
+      authorBot: {
+        appId: "A_AGENT_AUTHOR",
+        botId: "B_AGENT_AUTHOR",
+        botUserId: "U_AGENT_AUTHOR",
+        identityConflict: false,
+      },
+      text: "bot task",
       isDirectMessage: true,
       threadTs: null,
       leaseId: "lease",

@@ -52,6 +52,13 @@ export interface SlackFileRef {
   readonly size: number
 }
 
+export interface SlackBotAuthorMetadata {
+  readonly appId: string | null
+  readonly botId: string | null
+  readonly botUserId: string | null
+  readonly identityConflict: boolean
+}
+
 export interface SlackEnvelope {
   readonly eventType: string
   readonly apiAppId: string
@@ -63,6 +70,7 @@ export interface SlackEnvelope {
   readonly mentionedUserIds: readonly string[]
   readonly senderSlackUserId: string | null
   readonly senderKind: SlackSenderKind
+  readonly authorBot: SlackBotAuthorMetadata | null
   readonly text: string | null
   readonly files: readonly SlackFileRef[]
 }

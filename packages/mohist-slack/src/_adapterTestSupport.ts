@@ -25,6 +25,7 @@ export class FakeSocket implements SocketClient {
   starts = 0
   disconnected = false
   acknowledged = false
+  acknowledgementCount = 0
   disconnectError?: Error
   disconnectGate?: Promise<void>
   disconnectStarted?: () => void
@@ -49,6 +50,7 @@ export class FakeSocket implements SocketClient {
       body,
       ack: () => {
         this.acknowledged = true
+        this.acknowledgementCount += 1
       },
     })
     return this.acknowledged

@@ -33,7 +33,7 @@ export function normalizeSocketEvent(body: unknown): SlackEnvelope {
   const messageTs = stringValue(event.ts) ?? stringValue(event.event_ts)
   if (!apiAppId || !teamId || !conversationId || !messageTs)
     throw new Error('Slack event is missing its stable identity')
-  const senderSlackUserId = stringValue(event.user)
+  const senderKind = normalizeSenderKind(event)
   return {
     eventType: stringValue(event.type) ?? 'message',
     apiAppId,
@@ -43,8 +43,9 @@ export function normalizeSocketEvent(body: unknown): SlackEnvelope {
     messageTs,
     threadTs: stringValue(event.thread_ts),
     mentionedUserIds: parseMentionedUserIds(typeof event.text === 'string' ? event.text : null),
-    senderSlackUserId,
-    senderKind: normalizeSenderKind(event),
+    senderSlackUserId: senderKind === 'human' ? stringValue(event.user) : null,
+    senderKind,
+    authorBot: senderKind === 'bot' ? normalizeBotAuthor(event) : null,
     text: typeof event.text === 'string' ? event.text : null,
     files: parseFiles(event.files),
   }
@@ -122,8 +123,28 @@ function parseFiles(value: unknown): readonly SlackFileRef[] {
 }
 
 function normalizeSenderKind(event: Record<string, unknown>): SlackSenderKind {
-  if (stringValue(event.bot_id) || stringValue(event.subtype) === 'bot_message') return 'bot'
+  if (
+    stringValue(event.bot_id) ||
+    stringValue(event.subtype) === 'bot_message' ||
+    isRecord(event.bot_profile)
+  ) return 'bot'
   return stringValue(event.user) ? 'human' : 'unknown'
+}
+
+function normalizeBotAuthor(event: Record<string, unknown>): SlackEnvelope['authorBot'] {
+  const botProfile = isRecord(event.bot_profile) ? event.bot_profile : null
+  const eventAppId = stringValue(event.app_id)
+  const profileAppId = stringValue(botProfile?.app_id)
+  const eventBotId = stringValue(event.bot_id)
+  const profileBotId = stringValue(botProfile?.id)
+  const appId = eventAppId ?? profileAppId
+  const botId = eventBotId ?? profileBotId
+  const identityConflict =
+    (eventAppId !== null && profileAppId !== null && eventAppId !== profileAppId) ||
+    (eventBotId !== null && profileBotId !== null && eventBotId !== profileBotId)
+  const botUserId = stringValue(event.user)
+  if (appId === null && botId === null && botUserId === null && !identityConflict) return null
+  return { appId, botId, botUserId, identityConflict }
 }
 
 function parseMentionedUserIds(text: string | null): readonly string[] {

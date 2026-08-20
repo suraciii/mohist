@@ -1,0 +1,23 @@
+## Codebase Patterns
+
+- Slack Socket events are reduced to an allowlisted `SlackEnvelope`; raw Slack event objects, tokens, URLs, and unrelated message fields must not cross the adapter boundary.
+- `apiAppId` identifies the receiving Socket App. Bot authors are represented separately as nullable nested `authorBot` metadata with `appId`, `botId`, `botUserId`, and `identityConflict`.
+- Adapter-generated envelopes always include `senderKind`; Server DTOs keep `SenderKind` nullable for compatibility with direct callers that predate the field. A missing sender is accepted at Manager HTTP ingress only for an explicit Bot classification.
+- `event.app_id` and `event.bot_id` take precedence when present; `bot_profile.app_id` and `bot_profile.id` are fallbacks. Disagreement preserves the event-side value but sets `identityConflict`, allowing later Server admission to fail closed.
+- Bot `event.user` is author Bot-user metadata, never `senderSlackUserId`; human sender identity is null for Bot and unknown events.
+- Manager transport projects `appId` from `apiAppId` and forwards `senderKind`, nullable `senderSlackUserId`, and `authorBot` independently. Connection transport forwards the complete envelope.
+- The adapter already acknowledges after a definite ingress result, renders only backpressure responses, and drains deliveries afterward. An `ignored` result therefore acknowledges once without a rejection mutation while preserving normal delivery draining.
+
+## T-001
+
+- Added `SlackBotAuthorMetadata` to the TypeScript envelope and Server Slack DTO contracts.
+- Added Manager and Agent-shaped normalization fixtures, optional Bot-user propagation, conflicting source-field coverage, App-less Bot coverage, raw-field leakage checks, transport forwarding coverage, and ignored-result acknowledgement/draining coverage.
+- Added a temporary Manager service null-sender guard that preserves the existing non-Bot path without inventing a human ID; T-002 must move managed-Bot admission ahead of this guard and all existing Manager authorization/inbox processing.
+
+## Verification
+
+- Baseline adapter event and transport suites passed before implementation: 13 tests.
+- Focused adapter event and transport suites passed after implementation: 18 tests.
+- Full `packages/mohist-slack` typecheck, build, and test suite passed: 7 files, 75 tests.
+- `Mohist.Server` builds with `SkipWebBuild=true`; Server Slack specification suite passes.
+- `git diff --check` passes.

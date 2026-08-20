@@ -47,13 +47,16 @@ public sealed class SlackManagerIngressService : IScopedService
             return SlackManagerIngressResult.Rejected("manager_direct_message_required");
         if (!string.Equals(enrollment.ManagerAppId, message.AppId, StringComparison.Ordinal))
             return SlackManagerIngressResult.Rejected("manager_app_not_authorized");
+        if (string.IsNullOrWhiteSpace(message.SenderSlackUserId))
+            return SlackManagerIngressResult.Rejected("manager_sender_required");
+        var senderSlackUserId = message.SenderSlackUserId;
 
         var accepted = await _inbox.AcceptAsync(
             new SlackProviderInboxDraft(
                 SlackDeliveryOwnerIds.ManagerProjectId,
                 enrollment.Id,
                 message.Identity,
-                message.SenderSlackUserId,
+                senderSlackUserId,
                 message.ThreadTs),
             new SlackProviderInboxRouteDraft(SlackProviderInboxRouteKinds.Manager, SessionId: null),
             ct);
@@ -74,7 +77,7 @@ public sealed class SlackManagerIngressService : IScopedService
 
         var actor = await _access.AuthenticateAsync(
             message.Identity.WorkspaceTeamId,
-            message.SenderSlackUserId,
+            senderSlackUserId,
             ct);
         var claimCode = ReadClaimCode(message.Text);
         var claimAccepted = false;
@@ -82,14 +85,14 @@ public sealed class SlackManagerIngressService : IScopedService
         {
             var claim = await _claims.ConsumeAsync(
                 message.Identity.WorkspaceTeamId,
-                message.SenderSlackUserId,
+                senderSlackUserId,
                 claimCode,
                 ct);
             if (claim.Outcome == SlackManagerClaimOutcome.Accepted)
             {
                 actor = await _access.AuthenticateAsync(
                     message.Identity.WorkspaceTeamId,
-                    message.SenderSlackUserId,
+                    senderSlackUserId,
                     ct);
                 claimAccepted = true;
             }
@@ -180,10 +183,12 @@ public sealed class SlackManagerIngressService : IScopedService
 public sealed record SlackManagerIngressMessage(
     string AppId,
     SlackMessageIdentity Identity,
-    string SenderSlackUserId,
+    string? SenderSlackUserId,
     string Text,
     bool IsDirectMessage,
-    string? ThreadTs = null);
+    string? ThreadTs = null,
+    string? SenderKind = null,
+    SlackBotAuthorMetadata? AuthorBot = null);
 
 public sealed record SlackManagerConversationRequest(
     SlackManagerIngressMessage Message,

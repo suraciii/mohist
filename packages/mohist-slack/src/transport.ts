@@ -239,6 +239,8 @@ function managerIngressBody(ref: SlackManagerRef, envelope: SlackEnvelope): Reco
     conversationId: envelope.conversationId,
     messageTs: envelope.messageTs,
     senderSlackUserId: envelope.senderSlackUserId,
+    senderKind: envelope.senderKind,
+    authorBot: envelope.authorBot,
     text: envelope.text,
     isDirectMessage: envelope.isDirectMessage,
     threadTs: envelope.threadTs,

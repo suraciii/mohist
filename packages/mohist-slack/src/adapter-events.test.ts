@@ -185,6 +185,7 @@ describe('mohist-slack adapter', () => {
       mentionedUserIds: [],
       senderSlackUserId: 'U1',
       senderKind: 'human',
+      authorBot: null,
       text: 'do work',
       files: [],
     })
@@ -264,6 +265,7 @@ describe('mohist-slack adapter', () => {
       messageTs: '123.457',
       senderSlackUserId: null,
       senderKind: 'bot',
+      authorBot: { appId: null, botId: 'B1', botUserId: null, identityConflict: false },
     })
 
     expect(
@@ -279,6 +281,176 @@ describe('mohist-slack adapter', () => {
       senderSlackUserId: null,
       senderKind: 'unknown',
     })
+  })
+
+  it('normalizes supported Manager and Agent Bot author fixtures without using the receiver identity', () => {
+    const manager = normalizeSocketEvent({
+      team_id: 'T_MANAGER',
+      api_app_id: 'A_MANAGER_RECEIVER',
+      event: {
+        type: 'message',
+        subtype: 'bot_message',
+        channel: 'D_MANAGER',
+        ts: '200.001',
+        bot_profile: { app_id: 'A_MANAGER_AUTHOR', id: 'B_MANAGER_AUTHOR', name: 'Mohist Manager' },
+        text: 'manager response',
+      },
+    })
+    const agent = normalizeSocketEvent({
+      team_id: 'T_AGENT',
+      api_app_id: 'A_MANAGER_RECEIVER',
+      event: {
+        type: 'message',
+        subtype: 'bot_message',
+        channel: 'D_AGENT',
+        ts: '200.002',
+        app_id: 'A_AGENT_AUTHOR',
+        bot_id: 'B_AGENT_AUTHOR',
+        bot_profile: { id: 'B_AGENT_AUTHOR' },
+        user: 'U_AGENT_AUTHOR',
+        text: 'agent response',
+      },
+    })
+
+    expect(manager).toMatchObject({
+      apiAppId: 'A_MANAGER_RECEIVER',
+      senderKind: 'bot',
+      senderSlackUserId: null,
+      authorBot: {
+        appId: 'A_MANAGER_AUTHOR',
+        botId: 'B_MANAGER_AUTHOR',
+        botUserId: null,
+        identityConflict: false,
+      },
+    })
+    expect(agent).toMatchObject({
+      apiAppId: 'A_MANAGER_RECEIVER',
+      senderKind: 'bot',
+      senderSlackUserId: null,
+      authorBot: {
+        appId: 'A_AGENT_AUTHOR',
+        botId: 'B_AGENT_AUTHOR',
+        botUserId: 'U_AGENT_AUTHOR',
+        identityConflict: false,
+      },
+    })
+    expect(manager.apiAppId).not.toBe(manager.authorBot?.appId)
+    expect(agent.apiAppId).not.toBe(agent.authorBot?.appId)
+    expect(JSON.stringify(manager)).not.toContain('bot_profile')
+    expect(JSON.stringify(manager)).not.toContain('Mohist Manager')
+  })
+
+  it('marks conflicting Bot author fields instead of selecting an unsafe identity', () => {
+    const envelope = normalizeSocketEvent({
+      team_id: 'T1',
+      api_app_id: 'A_RECEIVER',
+      event: {
+        type: 'message',
+        subtype: 'bot_message',
+        channel: 'C1',
+        ts: '201.001',
+        app_id: 'A_EVENT_AUTHOR',
+        bot_id: 'B_EVENT_AUTHOR',
+        bot_profile: { app_id: 'A_PROFILE_AUTHOR', id: 'B_PROFILE_AUTHOR' },
+        user: 'U_AUTHOR',
+        text: 'conflicting response',
+      },
+    })
+
+    expect(envelope).toMatchObject({
+      apiAppId: 'A_RECEIVER',
+      senderKind: 'bot',
+      senderSlackUserId: null,
+      authorBot: {
+        appId: 'A_EVENT_AUTHOR',
+        botId: 'B_EVENT_AUTHOR',
+        botUserId: 'U_AUTHOR',
+        identityConflict: true,
+      },
+    })
+  })
+
+  it('does not invent a Bot App identity or leak raw Slack fields', () => {
+    const envelope = normalizeSocketEvent({
+      team_id: 'T1',
+      api_app_id: 'A_RECEIVER',
+      token: 'xoxb-secret',
+      event: {
+        type: 'message',
+        subtype: 'bot_message',
+        channel: 'C1',
+        ts: '201.002',
+        bot_id: 'B_AUTHOR',
+        bot_profile: { id: 'B_AUTHOR', app_name: 'hidden app name' },
+        text: 'bot response',
+        client_msg_id: 'raw-message-id',
+      },
+    })
+
+    expect(envelope.senderKind).toBe('bot')
+    expect(envelope.senderSlackUserId).toBeNull()
+    expect(envelope.authorBot).toEqual({
+      appId: null,
+      botId: 'B_AUTHOR',
+      botUserId: null,
+      identityConflict: false,
+    })
+    expect(JSON.stringify(envelope)).not.toContain('xoxb-secret')
+    expect(JSON.stringify(envelope)).not.toContain('bot_profile')
+    expect(JSON.stringify(envelope)).not.toContain('raw-message-id')
+    expect(JSON.stringify(envelope)).not.toContain('hidden app name')
+  })
+
+  it('keeps an App-less Bot distinct from a supported fixture contract', () => {
+    const envelope = normalizeSocketEvent({
+      team_id: 'T1',
+      api_app_id: 'A_RECEIVER',
+      event: { channel: 'C1', ts: '201.003', subtype: 'bot_message', bot_id: 'B_AUTHOR', text: 'bot response' },
+    })
+
+    expect(envelope.senderKind).toBe('bot')
+    expect(envelope.authorBot).toMatchObject({ appId: null, botId: 'B_AUTHOR' })
+    expect(envelope.authorBot?.appId).not.toBe(envelope.apiAppId)
+  })
+
+  it('acknowledges an ignored result once without rejecting or stopping normal delivery draining', async () => {
+    const transport = new FakeTransport()
+    transport.connections = [{ projectId: 'p', connectionId: 'c' }]
+    transport.deliveries.length = 0
+    transport.nextIngressResults = [{ kind: 'ignored' }]
+    const web = new FakeWeb()
+    const socket = new FakeSocket()
+    const adapter = new SlackAdapter({
+      adapterId: 'a',
+      transport,
+      socketFactory: () => socket,
+      webFactory: () => web,
+      heartbeatIntervalMs: 60_000,
+      deliveryPollIntervalMs: 60_000,
+    })
+    const controller = new AbortController()
+    await adapter.start(controller.signal)
+    transport.deliveries.push({
+      id: 'existing-delivery',
+      conversationId: 'C1',
+      threadTs: null,
+      payloadJson: JSON.stringify({ text: 'existing response' }),
+    })
+
+    await expect(
+      socket.emit({
+        team_id: 'T1',
+        api_app_id: 'A1',
+        event: { channel: 'C1', ts: '202.001', subtype: 'bot_message', bot_id: 'B1', text: 'ignored response' },
+      }),
+    ).resolves.toBe(true)
+
+    expect(socket.acknowledgementCount).toBe(1)
+    expect(web.posted).toEqual([{ channel: 'C1', text: 'existing response' }])
+    expect(web.updated).toEqual([])
+    expect(web.uploaded).toEqual([])
+    expect(transport.acks).toEqual([{ ref: { projectId: 'p', connectionId: 'c' }, id: 'existing-delivery', outcome: 'delivered' }])
+    await adapter.stop()
   })
 
   it('acknowledges bot and unknown events without requiring a user id', async () => {
