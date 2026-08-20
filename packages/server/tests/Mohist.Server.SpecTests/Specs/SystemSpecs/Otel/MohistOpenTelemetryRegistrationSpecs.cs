@@ -122,7 +122,7 @@ public class MohistOpenTelemetryRegistrationSpecs
 
         using var response = await host.CreateClient().GetAsync("/api/health");
         Assert.Equal(System.Net.HttpStatusCode.OK, response.StatusCode);
-        using var source = new ActivitySource(MohistOpenTelemetryRegistration.SignalRServerActivitySourceName);
+        using var source = new ActivitySource(MohistOpenTelemetryRegistration.OrleansActivitySourceNames[0]);
         using (var activity = source.StartActivity("export-probe", ActivityKind.Internal))
         {
             Assert.NotNull(activity);

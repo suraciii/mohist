@@ -588,7 +588,7 @@ public class IssueGrain : Grain, IIssueGrain, Coordinator.IIssueBindingTarget
         // The runner manages the per-run head ref (`mohist/run-${workflowRunId}`)
         // inside the workspace; the integrate merge uses this branch as the
         // source. Persisting it on WorkspaceIdentity keeps review APIs,
-        // SignalR handlers, and the integrate task aligned on a stable ref.
+        // runner handlers, and the integrate task aligned on a stable ref.
         var runBranch = WorkflowRunBranch.For(workflowRunId);
         return new WorkspaceIdentity(
             Path: workspacePath,

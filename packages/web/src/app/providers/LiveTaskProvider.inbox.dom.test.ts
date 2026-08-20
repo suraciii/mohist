@@ -32,22 +32,16 @@ describe('LiveTaskProvider inbox hint (invalidation only)', () => {
       createElement(
         QueryClientProvider,
         { client: queryClient },
-        createElement(
-          ProjectProvider,
-          {
-            initialProjectId,
-            initialProjects: [TEST_PROJECT],
-            children: createElement(
-              LiveTaskProvider,
-              {
-                children: createElement('div', null, 'child'),
-                eventsConnectionHook,
-                viewedIssueHook,
-                pathnameReader,
-              },
-            ),
-          },
-        ),
+        createElement(ProjectProvider, {
+          initialProjectId,
+          initialProjects: [TEST_PROJECT],
+          children: createElement(LiveTaskProvider, {
+            children: createElement('div', null, 'child'),
+            eventsConnectionHook,
+            viewedIssueHook,
+            pathnameReader,
+          }),
+        }),
       ),
     )
     return eventsConnectionCalls[0][1]
@@ -151,7 +145,7 @@ describe('LiveTaskProvider inbox hint (invalidation only)', () => {
     const fetchSpy = vi.spyOn(queryClient, 'fetchQuery')
     const handleEvent = mountWith(queryClient)
 
-    // Simulate a reconnect: the connection re-emits SetSubscriptionsAsync
+    // Simulate a reconnect acknowledgement from the live event socket.
     // and the user re-focuses; the provider's `handleEvent` is only invoked
     // when an actual event arrives. With no event arriving, no fetch is
     // kicked off by the provider — recovery happens through TanStack
@@ -180,22 +174,16 @@ describe('LiveTaskProvider high-attention inbox notice', () => {
       createElement(
         QueryClientProvider,
         { client: queryClient },
-        createElement(
-          ProjectProvider,
-          {
-            initialProjectId,
-            initialProjects: [TEST_PROJECT],
-            children: createElement(
-              LiveTaskProvider,
-              {
-                children: createElement('div', null, 'child'),
-                eventsConnectionHook,
-                viewedIssueHook,
-                pathnameReader,
-              },
-            ),
-          },
-        ),
+        createElement(ProjectProvider, {
+          initialProjectId,
+          initialProjects: [TEST_PROJECT],
+          children: createElement(LiveTaskProvider, {
+            children: createElement('div', null, 'child'),
+            eventsConnectionHook,
+            viewedIssueHook,
+            pathnameReader,
+          }),
+        }),
       ),
     )
     return eventsConnectionCalls[0][1]

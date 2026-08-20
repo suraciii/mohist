@@ -111,11 +111,17 @@ public sealed class EventPublishingIntegrationFixture : IAsyncLifetime
     public sealed class RecordingTranscriptEventPublisher : ITranscriptEventPublisher
     {
         public List<TranscriptEnvelope> Published { get; } = [];
+        public List<string> ProjectIds { get; } = [];
 
-        public void Clear() => Published.Clear();
-
-        public Task PublishAsync(TranscriptEnvelope envelope, CancellationToken ct = default)
+        public void Clear()
         {
+            Published.Clear();
+            ProjectIds.Clear();
+        }
+
+        public Task PublishAsync(string projectId, TranscriptEnvelope envelope, CancellationToken ct = default)
+        {
+            ProjectIds.Add(projectId);
             Published.Add(envelope);
             return Task.CompletedTask;
         }

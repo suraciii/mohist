@@ -11,15 +11,26 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { ProjectProvider } from '../../../entities/project'
 import type { TaskLogLine, TaskLogPage } from '../../../entities/issue'
 import type { WorkflowRunSession } from '../../../entities/coder-session/model/types'
-import {
-  fakeConnections,
-  recordedInvokes,
-  makeFakeConnection,
-  waitForFakeConnection,
-  type FakeConnection,
-} from '../../../../tests/support/signalr-fake'
+import { LiveEventsContext, type LiveEventsApi, type TaskLogDeltaEnvelopeWire } from '../../../shared/api/live-events'
 
-export type { FakeConnection }
+type TaskLogListener = (delta: TaskLogDeltaEnvelopeWire) => void
+export const taskLogListeners = new Map<string, TaskLogListener>()
+export const registeredTaskLogScopes: Array<{ workflowRunId: string; taskId: string }> = []
+
+export const fakeLiveEvents: LiveEventsApi = {
+  registerTaskLogScope(scope, onDelta) {
+    const key = `${scope.workflowRunId}:${scope.taskId}`
+    registeredTaskLogScopes.push(scope)
+    taskLogListeners.set(key, onDelta)
+    return {
+      admitted: true,
+      dispose: () => taskLogListeners.delete(key),
+    }
+  },
+  registerTranscriptReconciliation() {
+    return { dispose: () => {} }
+  },
+}
 
 export function makeLine(overrides: Partial<TaskLogLine>): TaskLogLine {
   return {
@@ -35,10 +46,14 @@ export function makePage(lines: TaskLogLine[], truncated = false): TaskLogPage {
   return { lines: lines.slice().sort((a, b) => a.seq - b.seq), nextCursor: null, truncated }
 }
 
-export function makeEnvelope(entries: { seq: number; timestamp?: string; source?: string; text?: string }[], options: { ownerKind?: string; ownerId?: string; workId?: string; taskId?: string | null; truncated?: boolean } = {}): import('../../../shared/api/events-hub').TaskLogDeltaEnvelopeWire {
+export function makeEnvelope(
+  entries: { seq: number; timestamp?: string; source?: string; text?: string }[],
+  options: { ownerKind?: string; ownerId?: string; workId?: string; taskId?: string; truncated?: boolean } = {},
+): TaskLogDeltaEnvelopeWire {
   return {
     ownerKind: options.ownerKind ?? 'workflow',
     ownerId: options.ownerId ?? 'wr-1',
+    projectId: 'proj-1',
     workId: options.workId ?? 'work-1',
     taskId: options.taskId ?? 'build-task-1',
     entries: entries.map((e) => ({
@@ -75,12 +90,9 @@ export function sessionFixture(overrides: Partial<WorkflowRunSession>): Workflow
   }
 }
 
-
-export { fakeConnections, recordedInvokes, makeFakeConnection }
-
 export function mockConnectionBuilder() {
-  // 全局 signalr alias 已让 HubConnectionBuilder 返回构建 FakeConnection 的链；
-  // 保留此函数为空操作以维持调用方签名不变。
+  taskLogListeners.clear()
+  registeredTaskLogScopes.length = 0
 }
 
 export const projects = [
@@ -108,19 +120,16 @@ export function renderWithTaskLogProviders(ui: ReactNode, testState: TaskLogTest
   return render(
     <QueryClientProvider client={testState.queryClient}>
       <ProjectProvider initialProjects={projects} initialProjectId="proj-1">
-        {ui}
+        <LiveEventsContext.Provider value={fakeLiveEvents}>{ui}</LiveEventsContext.Provider>
       </ProjectProvider>
     </QueryClientProvider>,
   )
 }
 
-export async function flushAndGetLastConnection(): Promise<FakeConnection> {
-  const connection = await waitForFakeConnection()
+export async function emitTaskLog(delta: TaskLogDeltaEnvelopeWire): Promise<void> {
   await act(async () => {
-    connection.completeStart()
-    await connection.waitForStart()
+    taskLogListeners.get(`${delta.ownerId}:${delta.taskId}`)?.(delta)
   })
-  return connection
 }
 
 export interface DownloadCapture {

@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest'
 import { AGENT_DETAIL_EVENTS } from '../../entities/agent'
 import type { EventName } from '../../entities/issue'
 import {
+  DOMAIN_EVENT_TYPES,
   EVENT_TYPES,
   LEGACY_AGENT_DETAIL_EVENT_TYPES,
   TRANSCRIPT_EVENT_TYPES,
@@ -12,6 +13,13 @@ import {
 describe('canonical event types', () => {
   it('EVENT_TYPES is a non-empty list', () => {
     expect(EVENT_TYPES.length).toBeGreaterThan(0)
+  })
+
+  it('DOMAIN_EVENT_TYPES contains only reverse-DNS domain values', () => {
+    const nonDomainTypes = new Set<string>([...TRANSCRIPT_EVENT_TYPES, ...LEGACY_AGENT_DETAIL_EVENT_TYPES])
+    expect(DOMAIN_EVENT_TYPES).toEqual(Object.values(REVERSE_DNS_EVENT_TYPES))
+    expect(DOMAIN_EVENT_TYPES.every((type) => type.startsWith('com.mohist.'))).toBe(true)
+    expect(DOMAIN_EVENT_TYPES.filter((type) => nonDomainTypes.has(type))).toEqual([])
   })
 
   it('includes every legacy snake_case name from AGENT_DETAIL_EVENTS', () => {

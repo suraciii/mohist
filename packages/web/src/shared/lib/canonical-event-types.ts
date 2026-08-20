@@ -50,6 +50,8 @@ export const REVERSE_DNS_EVENT_TYPES = {
 
 export type ReverseDnsEventType = (typeof REVERSE_DNS_EVENT_TYPES)[keyof typeof REVERSE_DNS_EVENT_TYPES]
 
+export const DOMAIN_EVENT_TYPES = Object.values(REVERSE_DNS_EVENT_TYPES)
+
 export const REVERSE_DNS_AGENT_SESSION_EVENT_TYPES = [
   REVERSE_DNS_EVENT_TYPES.AgentSessionRuntimeBound,
   REVERSE_DNS_EVENT_TYPES.AgentSessionUsageRecorded,
@@ -100,7 +102,7 @@ export const LEGACY_AGENT_DETAIL_EVENT_TYPES = [
 export const EVENT_TYPES = [
   ...LEGACY_AGENT_DETAIL_EVENT_TYPES,
   ...TRANSCRIPT_EVENT_TYPES,
-  ...Object.values(REVERSE_DNS_EVENT_TYPES),
+  ...DOMAIN_EVENT_TYPES,
 ] as const
 
 export const AGENT_DETAIL_ROUTED_EVENT_TYPES = [

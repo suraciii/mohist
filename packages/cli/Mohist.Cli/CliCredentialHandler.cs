@@ -1,7 +1,4 @@
 using System.Net.Http.Headers;
-using System.Net.Http.Json;
-using System.Text.Json;
-using System.Text.Json.Nodes;
 
 namespace Mohist.Cli;
 
@@ -22,22 +19,15 @@ namespace Mohist.Cli;
 /// </summary>
 internal sealed class CliCredentialHandler : HttpMessageHandler
 {
-    private readonly CliCredentialProvider _credentials;
+    private readonly CliCredentialSession _credentials;
     private readonly HttpClient _transport;
-    private readonly CliCredentialFile _credentialFile;
-    private readonly TextWriter? _error;
 
     public CliCredentialHandler(
-        CliCredentialProvider credentials,
-        HttpClient transport,
-        IFileSystem fileSystem,
-        Func<string> getUserHome,
-        TextWriter? error = null)
+        CliCredentialSession credentials,
+        HttpClient transport)
     {
         _credentials = credentials;
         _transport = transport;
-        _credentialFile = new CliCredentialFile(fileSystem, CliCredentialFile.PathFor(getUserHome));
-        _error = error;
     }
 
     protected override async Task<HttpResponseMessage> SendAsync(
@@ -48,11 +38,9 @@ internal sealed class CliCredentialHandler : HttpMessageHandler
         // receives a clone; the credential is attached to it when
         // resolvable and allowed for the destination.
         var forwarded = await CloneAsync(request, cancellationToken).ConfigureAwait(false);
-        var credential = await ResolveCredentialAsync(forwarded.RequestUri).ConfigureAwait(false);
+        var credential = await _credentials.TryResolveAllowedAsync(forwarded.RequestUri).ConfigureAwait(false);
         if (credential is not null
-            && forwarded.RequestUri is { } destination
-            && request.Headers.Authorization is null
-            && (!credential.MachineLocal || IsLoopback(destination)))
+            && request.Headers.Authorization is null)
         {
             forwarded.Headers.Authorization =
                 new AuthenticationHeaderValue("Bearer", credential.Token);
@@ -63,7 +51,7 @@ internal sealed class CliCredentialHandler : HttpMessageHandler
             && credential is { Source: CliCredentialSource.CredentialFile, Stored: not null }
             && forwarded.RequestUri is { } destination2)
         {
-            var refreshed = await TryRefreshAsync(credential.Stored, destination2, cancellationToken)
+            var refreshed = await _credentials.TryRefreshAsync(credential, destination2, cancellationToken)
                 .ConfigureAwait(false);
             if (refreshed is not null)
             {
@@ -73,87 +61,10 @@ internal sealed class CliCredentialHandler : HttpMessageHandler
                 return await _transport.SendAsync(retry, cancellationToken).ConfigureAwait(false);
             }
 
-            _error?.WriteLine("Session expired. Run 'mo auth login' to sign in again.");
+            _credentials.WriteExpiredSessionMessage();
         }
 
         return response;
-    }
-
-    /// <summary>
-    /// Rolls the stored session forward via the refresh endpoint (which
-    /// carries its own credential and is exempt from auth resolution).
-    /// The new pair is persisted before the original request is retried;
-    /// a persistence failure still returns the fresh access token so the
-    /// command can succeed — the next command then re-logs in.
-    /// </summary>
-    private async Task<StoredCliCredential?> TryRefreshAsync(
-        StoredCliCredential stored,
-        Uri destination,
-        CancellationToken cancellationToken)
-    {
-        try
-        {
-            using var request = new HttpRequestMessage(
-                HttpMethod.Post,
-                new Uri(destination, "/api/auth/token"))
-            {
-                Content = JsonContent.Create(new Dictionary<string, string>
-                {
-                    ["grant_type"] = "refresh_token",
-                    ["refresh_token"] = stored.RefreshToken,
-                }),
-            };
-            using var response = await _transport.SendAsync(request, cancellationToken).ConfigureAwait(false);
-            if (!response.IsSuccessStatusCode)
-                return null;
-
-            var node = await JsonNode.ParseAsync(
-                await response.Content.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false),
-                cancellationToken: cancellationToken).ConfigureAwait(false);
-            var data = node?["data"];
-            if (data is null)
-                return null;
-
-            var accessToken = data["accessToken"]?.GetValue<string>();
-            var refreshToken = data["refreshToken"]?.GetValue<string>();
-            if (string.IsNullOrEmpty(accessToken) || string.IsNullOrEmpty(refreshToken))
-                return null;
-
-            var updated = stored with
-            {
-                AccessToken = accessToken,
-                RefreshToken = refreshToken,
-                AccessExpiresAt = data["accessExpiresAt"]?.GetValue<DateTimeOffset>() ?? default,
-                RefreshExpiresAt = data["refreshExpiresAt"]?.GetValue<DateTimeOffset>() ?? default,
-            };
-            try
-            {
-                await _credentialFile.SaveAsync(updated).ConfigureAwait(false);
-            }
-            catch (IOException)
-            {
-                // Best-effort persistence; the request still retries with
-                // the fresh access token.
-            }
-
-            return updated;
-        }
-        catch (Exception ex) when (ex is HttpRequestException or JsonException)
-        {
-            return null;
-        }
-    }
-
-    private async Task<CliCredential?> ResolveCredentialAsync(Uri? destination)
-    {
-        try
-        {
-            return await _credentials.TryResolveAsync(destination).ConfigureAwait(false);
-        }
-        catch (InvalidOperationException)
-        {
-            return null;
-        }
     }
 
     private static async Task<HttpRequestMessage> CloneAsync(
@@ -176,9 +87,4 @@ internal sealed class CliCredentialHandler : HttpMessageHandler
 
         return clone;
     }
-
-    private static bool IsLoopback(Uri destination) =>
-        string.Equals(destination.Host, "localhost", StringComparison.OrdinalIgnoreCase)
-        || (System.Net.IPAddress.TryParse(destination.Host, out var address)
-            && System.Net.IPAddress.IsLoopback(address));
 }

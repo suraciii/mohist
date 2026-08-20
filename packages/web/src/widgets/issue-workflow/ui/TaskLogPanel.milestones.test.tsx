@@ -12,14 +12,12 @@ import {
   type WorkflowRunSessionsHook,
 } from './TaskLogPanel'
 import {
-  fakeConnections,
   installDownloadSpy,
   makeLine,
   makePage,
   mockConnectionBuilder,
   newQueryClient,
   readBlobText,
-  recordedInvokes,
   renderWithTaskLogProviders,
   sessionFixture,
   type TaskLogTestState,
@@ -32,14 +30,7 @@ let _workflowRunSessionsLoading = false
 
 const taskLogHook: TaskLogDataHook = ({ issueNumber, taskId, projectId, workflowRunId }) =>
   useQuery({
-    ...issueWorkflowTaskLogQueryOptions(
-      projectId,
-      issueNumber,
-      taskId,
-      { limit: 5000 },
-      true,
-      workflowRunId,
-    ),
+    ...issueWorkflowTaskLogQueryOptions(projectId, issueNumber, taskId, { limit: 5000 }, true, workflowRunId),
     queryFn: async () => _taskLogPageRef.current ?? makePage([]),
   })
 
@@ -51,16 +42,8 @@ const workflowSessionsHook: WorkflowRunSessionsHook = (workflowRunId) => {
   }
 }
 
-function TaskLogPanel(
-  props: Omit<TaskLogPanelProps, 'taskLogHook' | 'workflowSessionsHook'>,
-) {
-  return (
-    <DefaultTaskLogPanel
-      {...props}
-      taskLogHook={taskLogHook}
-      workflowSessionsHook={workflowSessionsHook}
-    />
-  )
+function TaskLogPanel(props: Omit<TaskLogPanelProps, 'taskLogHook' | 'workflowSessionsHook'>) {
+  return <DefaultTaskLogPanel {...props} taskLogHook={taskLogHook} workflowSessionsHook={workflowSessionsHook} />
 }
 
 function createTaskLogTestState(initialPage: TaskLogPage | undefined): TaskLogTestState {
@@ -78,8 +61,6 @@ function createTaskLogTestState(initialPage: TaskLogPage | undefined): TaskLogTe
 describe('TaskLogPanel agent-task milestone rows', () => {
   beforeEach(() => {
     vi.clearAllMocks()
-    fakeConnections.length = 0
-    recordedInvokes.length = 0
     _taskLogPageRef.current = undefined
     _workflowRunSessionsRef.current = []
     _workflowRunSessionCalls.length = 0
@@ -105,10 +86,12 @@ describe('TaskLogPanel agent-task milestone rows', () => {
         eventSummary: { resolvedModel: 'minimax/MiniMax-M3' },
       }),
     ]
-    const testState = createTaskLogTestState(makePage([
-      makeLine({ seq: 1, timestamp: '2026-07-03T08:00:01.000Z', source: 'workspace-prep', text: 'ops-08:00:01' }),
-      makeLine({ seq: 2, timestamp: '2026-07-03T08:05:00.000Z', source: 'cleanup', text: 'ops-08:05:00' }),
-    ]))
+    const testState = createTaskLogTestState(
+      makePage([
+        makeLine({ seq: 1, timestamp: '2026-07-03T08:00:01.000Z', source: 'workspace-prep', text: 'ops-08:00:01' }),
+        makeLine({ seq: 2, timestamp: '2026-07-03T08:05:00.000Z', source: 'cleanup', text: 'ops-08:05:00' }),
+      ]),
+    )
 
     renderWithTaskLogProviders(
       <TaskLogPanel
@@ -127,7 +110,9 @@ describe('TaskLogPanel agent-task milestone rows', () => {
     expect(await screen.findByTestId('task-log-milestone-model-bound')).toBeInTheDocument()
     expect(await screen.findByTestId('task-log-milestone-session-ended')).toBeInTheDocument()
 
-    const items = Array.from(document.querySelectorAll('[data-testid="task-log-lines"] > li')).map((li) => li.textContent ?? '')
+    const items = Array.from(document.querySelectorAll('[data-testid="task-log-lines"] > li')).map(
+      (li) => li.textContent ?? '',
+    )
     expect(items).toHaveLength(4)
     const indices = {
       ops1: items.findIndex((t) => t.includes('ops-08:00:01')),
@@ -258,12 +243,10 @@ describe('TaskLogPanel agent-task milestone rows', () => {
   })
 
   it('renders NO milestone rows for a pure ops task even when sessionName is present', async () => {
-    _workflowRunSessionsRef.current = [
-      sessionFixture({ id: 'session-1', sessionName: 'rebase-1' }),
-    ]
-    const testState = createTaskLogTestState(makePage([
-      makeLine({ seq: 1, source: 'action:rebase', text: 'rebasing' }),
-    ]))
+    _workflowRunSessionsRef.current = [sessionFixture({ id: 'session-1', sessionName: 'rebase-1' })]
+    const testState = createTaskLogTestState(
+      makePage([makeLine({ seq: 1, source: 'action:rebase', text: 'rebasing' })]),
+    )
 
     renderWithTaskLogProviders(
       <TaskLogPanel
@@ -284,12 +267,8 @@ describe('TaskLogPanel agent-task milestone rows', () => {
   })
 
   it('renders NO milestone rows when origin.uses is the agent action but sessionName is empty', async () => {
-    _workflowRunSessionsRef.current = [
-      sessionFixture({ id: 'session-1', sessionName: '' }),
-    ]
-    const testState = createTaskLogTestState(makePage([
-      makeLine({ seq: 1, source: 'workspace-prep', text: 'prep' }),
-    ]))
+    _workflowRunSessionsRef.current = [sessionFixture({ id: 'session-1', sessionName: '' })]
+    const testState = createTaskLogTestState(makePage([makeLine({ seq: 1, source: 'workspace-prep', text: 'prep' })]))
 
     renderWithTaskLogProviders(
       <TaskLogPanel
@@ -310,12 +289,10 @@ describe('TaskLogPanel agent-task milestone rows', () => {
   })
 
   it('renders milestone rows when origin.uses and sessionName are present even if classification is missing', async () => {
-    _workflowRunSessionsRef.current = [
-      sessionFixture({ id: 'session-1', sessionName: 'plan-issue-339' }),
-    ]
-    const testState = createTaskLogTestState(makePage([
-      makeLine({ seq: 1, source: 'workspace-prep', text: 'prep-without-classification' }),
-    ]))
+    _workflowRunSessionsRef.current = [sessionFixture({ id: 'session-1', sessionName: 'plan-issue-339' })]
+    const testState = createTaskLogTestState(
+      makePage([makeLine({ seq: 1, source: 'workspace-prep', text: 'prep-without-classification' })]),
+    )
 
     renderWithTaskLogProviders(
       <TaskLogPanel
@@ -336,9 +313,9 @@ describe('TaskLogPanel agent-task milestone rows', () => {
 
   it('renders NO milestone rows when the workflow-run sessions data is empty (graceful degradation)', async () => {
     _workflowRunSessionsRef.current = []
-    const testState = createTaskLogTestState(makePage([
-      makeLine({ seq: 1, source: 'workspace-prep', text: 'ops-line' }),
-    ]))
+    const testState = createTaskLogTestState(
+      makePage([makeLine({ seq: 1, source: 'workspace-prep', text: 'ops-line' })]),
+    )
 
     renderWithTaskLogProviders(
       <TaskLogPanel
@@ -369,10 +346,17 @@ describe('TaskLogPanel agent-task milestone rows', () => {
         eventSummary: { resolvedModel: 'minimax/MiniMax-M3' },
       }),
     ]
-    const testState = createTaskLogTestState(makePage([
-      makeLine({ seq: 1, timestamp: '2026-07-03T08:05:00.000Z', source: 'workspace-prep', text: 'seq-one-late-clock' }),
-      makeLine({ seq: 2, timestamp: '2026-07-03T08:00:00.000Z', source: 'cleanup', text: 'seq-two-early-clock' }),
-    ]))
+    const testState = createTaskLogTestState(
+      makePage([
+        makeLine({
+          seq: 1,
+          timestamp: '2026-07-03T08:05:00.000Z',
+          source: 'workspace-prep',
+          text: 'seq-one-late-clock',
+        }),
+        makeLine({ seq: 2, timestamp: '2026-07-03T08:00:00.000Z', source: 'cleanup', text: 'seq-two-early-clock' }),
+      ]),
+    )
 
     const user = userEvent.setup()
     renderWithTaskLogProviders(
@@ -389,7 +373,9 @@ describe('TaskLogPanel agent-task milestone rows', () => {
     )
 
     await screen.findByText('seq-two-early-clock')
-    const items = Array.from(document.querySelectorAll('[data-testid="task-log-lines"] > li')).map((li) => li.textContent ?? '')
+    const items = Array.from(document.querySelectorAll('[data-testid="task-log-lines"] > li')).map(
+      (li) => li.textContent ?? '',
+    )
     expect(items.findIndex((t) => t.includes('seq-two-early-clock'))).toBeLessThan(
       items.findIndex((t) => t.includes('Model bound')),
     )
@@ -424,9 +410,9 @@ describe('TaskLogPanel agent-task milestone rows', () => {
         eventSummary: { resolvedModel: 'minimax/MiniMax-M3' },
       }),
     ]
-    const testState = createTaskLogTestState(makePage([
-      makeLine({ seq: 1, timestamp: '2026-07-03T08:05:00.000Z', source: 'cleanup', text: 'final cleanup' }),
-    ]))
+    const testState = createTaskLogTestState(
+      makePage([makeLine({ seq: 1, timestamp: '2026-07-03T08:05:00.000Z', source: 'cleanup', text: 'final cleanup' })]),
+    )
 
     const user = userEvent.setup()
     renderWithTaskLogProviders(
@@ -472,9 +458,11 @@ describe('TaskLogPanel agent-task milestone rows', () => {
         eventSummary: { resolvedModel: 'minimax/MiniMax-M3' },
       }),
     ]
-    const testState = createTaskLogTestState(makePage([
-      makeLine({ seq: 1, timestamp: '2026-07-03T08:05:00.000Z', source: 'workspace-prep', text: 'prep-line' }),
-    ]))
+    const testState = createTaskLogTestState(
+      makePage([
+        makeLine({ seq: 1, timestamp: '2026-07-03T08:05:00.000Z', source: 'workspace-prep', text: 'prep-line' }),
+      ]),
+    )
 
     const user = userEvent.setup()
     renderWithTaskLogProviders(
@@ -512,9 +500,9 @@ describe('TaskLogPanel agent-task milestone rows', () => {
         eventSummary: { resolvedModel: 'minimax/MiniMax-M3' },
       }),
     ]
-    const testState = createTaskLogTestState(makePage([
-      makeLine({ seq: 1, source: 'action:rebase', text: 'rebasing' }),
-    ]))
+    const testState = createTaskLogTestState(
+      makePage([makeLine({ seq: 1, source: 'action:rebase', text: 'rebasing' })]),
+    )
 
     renderWithTaskLogProviders(
       <TaskLogPanel
@@ -545,10 +533,12 @@ describe('TaskLogPanel agent-task milestone rows', () => {
         eventSummary: { resolvedModel: 'minimax/MiniMax-M3' },
       }),
     ]
-    const testState = createTaskLogTestState(makePage([
-      makeLine({ seq: 1, timestamp: '2026-07-03T08:00:00.000Z', source: 'workspace-prep', text: 'before' }),
-      makeLine({ seq: 2, timestamp: '2026-07-03T08:02:00.000Z', source: 'cleanup', text: 'after' }),
-    ]))
+    const testState = createTaskLogTestState(
+      makePage([
+        makeLine({ seq: 1, timestamp: '2026-07-03T08:00:00.000Z', source: 'workspace-prep', text: 'before' }),
+        makeLine({ seq: 2, timestamp: '2026-07-03T08:02:00.000Z', source: 'cleanup', text: 'after' }),
+      ]),
+    )
 
     const user = userEvent.setup()
     renderWithTaskLogProviders(
@@ -593,9 +583,9 @@ describe('TaskLogPanel agent-task milestone rows', () => {
         eventSummary: { resolvedModel: 'minimax/MiniMax-M3' },
       }),
     ]
-    const testState = createTaskLogTestState(makePage([
-      makeLine({ seq: 1, timestamp: '2026-07-03T08:02:00.000Z', source: 'cleanup', text: 'unrelated' }),
-    ]))
+    const testState = createTaskLogTestState(
+      makePage([makeLine({ seq: 1, timestamp: '2026-07-03T08:02:00.000Z', source: 'cleanup', text: 'unrelated' })]),
+    )
 
     const user = userEvent.setup()
     renderWithTaskLogProviders(
@@ -664,7 +654,11 @@ describe('TaskLogPanel agent-task milestone rows', () => {
       expect(marker).toHaveAttribute('aria-label', 'Session event')
     }
 
-    expect(screen.getAllByText((_, el) => el?.textContent?.startsWith('Model bound') ?? false).length).toBeGreaterThan(0)
-    expect(screen.getAllByText((_, el) => el?.textContent?.startsWith('Session idle') ?? false).length).toBeGreaterThan(0)
+    expect(screen.getAllByText((_, el) => el?.textContent?.startsWith('Model bound') ?? false).length).toBeGreaterThan(
+      0,
+    )
+    expect(screen.getAllByText((_, el) => el?.textContent?.startsWith('Session idle') ?? false).length).toBeGreaterThan(
+      0,
+    )
   })
 })

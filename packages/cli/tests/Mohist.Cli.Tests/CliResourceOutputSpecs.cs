@@ -261,14 +261,24 @@ public sealed class CliResourceOutputSpecs
     public async Task EventTail_SelectedFieldsRemainNdjson()
     {
         var (handler, http, output, error, fs, executor) = CliTestFactory.Create();
-        handler.SetResponder((_, _) => Task.FromResult(RecordingHttpHandler.Ndjson([
-            "{\"type\":\"one\",\"id\":\"e1\",\"source\":\"test\"}",
-            "{\"type\":\"two\",\"id\":\"e2\",\"source\":\"test\"}"]))) ;
+        using var cts = new CancellationTokenSource();
+        var sockets = new FakeEventSocketFactory();
+        sockets.Add(new FakeEventSocket(sockets) { OnExhausted = cts.Cancel }
+            .AddJson("""{"jsonrpc":"2.0","id":"req_1","result":{}}""")
+            .AddJson("""{"jsonrpc":"2.0","method":"event.domain","params":{"event":{"specversion":"1.0","type":"one","id":"e1","source":"test"}}}""")
+            .AddJson("""{"jsonrpc":"2.0","method":"event.domain","params":{"event":{"specversion":"1.0","type":"two","id":"e2","source":"test"}}}"""));
 
         var exit = await MohistCliCommands.RunAsync(
-            http, ["event", "tail", "--json", "id,type"], output, error, fs, executor);
+            http,
+            ["event", "tail", "--json", "id,type"],
+            output,
+            error,
+            fs,
+            executor,
+            cancellationToken: cts.Token,
+            eventSocketFactory: sockets);
 
-        Assert.Equal(0, exit);
+        Assert.Equal(130, exit);
         var lines = output.ToString().Split('\n', StringSplitOptions.RemoveEmptyEntries);
         Assert.Equal(2, lines.Length);
         Assert.Equal(["id", "type"], JsonNode.Parse(lines[0])!.AsObject().Select(p => p.Key).ToArray());

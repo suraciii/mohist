@@ -5,7 +5,11 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { ProjectProvider } from '../../entities/project'
 import { REVERSE_DNS_EVENT_TYPES } from '../../shared/lib/canonical-event-types'
 import { LiveTaskProvider, __testing__, type EventsConnectionHook } from './LiveTaskProvider'
-import { dispatchTimelineEvent, onTimelineEvent, type TimelineLiveEvent } from '../../entities/issue/model/timeline-events'
+import {
+  dispatchTimelineEvent,
+  onTimelineEvent,
+  type TimelineLiveEvent,
+} from '../../entities/issue/model/timeline-events'
 import { TEST_PROJECT } from './_liveTaskProviderTestUtils'
 import { issueDetailKeys, issueListKeys, issueWorkflowKeys } from '../../entities/issue/api/query-keys'
 import { approvalWaitQueryKey } from '../../entities/issue/api/approval-wait'
@@ -121,24 +125,20 @@ describe('LiveTaskProvider timeline forwarding', () => {
       id: 'evt-abc-123',
       type: 'com.mohist.workflow.run.started',
       source: '/mohist/test',
-      specVersion: '1.0',
+      specversion: '1.0',
       time: '2026-06-18T00:00:00.000Z',
-      payload: { issueNumber: 42, },
-      extensions: { issue: '99' },
+      data: { issueNumber: 42 },
+      issue: '99',
     }
     const parsed = __testing__.unwrapEnvelope(envelope)
 
-    const event = __testing__.buildTimelineLiveEvent(
-      'com.mohist.workflow.run.started',
-      envelope,
-      parsed,
-    )
+    const event = __testing__.buildTimelineLiveEvent('com.mohist.workflow.run.started', envelope, parsed)
 
     expect(event.issueNumber).toBe(99)
     expect(event.type).toBe('com.mohist.workflow.run.started')
     expect(event.time).toBe('2026-06-18T00:00:00.000Z')
     expect(event.eventId).toBe('evt-abc-123')
-    expect(event.payload).toEqual({ issueNumber: 42, })
+    expect(event.payload).toEqual({ issueNumber: 42 })
   })
 
   it('takes CloudEvents issue lineage without changing the timeline payload', () => {
@@ -146,18 +146,14 @@ describe('LiveTaskProvider timeline forwarding', () => {
       id: 'evt-issue-lineage',
       type: 'com.mohist.workflow.run.started',
       source: '/mohist/test',
-      specVersion: '1.0',
+      specversion: '1.0',
       time: '2026-06-18T00:00:00.000Z',
-      payload: { stage: 'build' },
-      extensions: { issue: '42' },
+      data: { stage: 'build' },
+      issue: '42',
     }
     const parsed = __testing__.unwrapEnvelope(envelope)
 
-    const event = __testing__.buildTimelineLiveEvent(
-      'com.mohist.workflow.run.started',
-      envelope,
-      parsed,
-    )
+    const event = __testing__.buildTimelineLiveEvent('com.mohist.workflow.run.started', envelope, parsed)
 
     expect(event.issueNumber).toBe(42)
     expect(event.payload).toEqual({ stage: 'build' })
@@ -168,16 +164,12 @@ describe('LiveTaskProvider timeline forwarding', () => {
       id: 'evt-abc-123',
       type: 'com.mohist.workflow.run.started',
       source: '/mohist/test',
-      specVersion: '1.0',
+      specversion: '1.0',
       time: '2026-06-18T00:00:00.000Z',
-      payload: { issueNumber: 42, },
+      data: { issueNumber: 42 },
     }
 
-    const event = __testing__.buildTimelineLiveEvent(
-      'com.mohist.workflow.run.started',
-      envelope,
-      { issueNumber: 42, },
-    )
+    const event = __testing__.buildTimelineLiveEvent('com.mohist.workflow.run.started', envelope, { issueNumber: 42 })
 
     expect(event.issueNumber).toBe(42)
     expect(event.eventId).toBe('evt-abc-123')
@@ -195,11 +187,7 @@ describe('LiveTaskProvider timeline forwarding', () => {
   })
 
   it('returns null issueNumber and null time when both envelope and payload omit them', () => {
-    const event = __testing__.buildTimelineLiveEvent(
-      'unknown_event',
-      { payload: {} },
-      {},
-    )
+    const event = __testing__.buildTimelineLiveEvent('unknown_event', { payload: {} }, {})
 
     expect(event.issueNumber).toBeNull()
     expect(event.time).toBeNull()
@@ -213,8 +201,8 @@ describe('LiveTaskProvider timeline forwarding', () => {
 
     const event = __testing__.buildTimelineLiveEvent(
       'rebase_conflict',
-      { id: 'rc-1', payload: { issueNumber: 99, } },
-      { issueNumber: 99, },
+      { id: 'rc-1', payload: { issueNumber: 99 } },
+      { issueNumber: 99 },
     )
     dispatchTimelineEvent(event)
 
@@ -234,15 +222,15 @@ describe('LiveTaskProvider timeline forwarding', () => {
       id: 'evt-1',
       type: 'merge_completed',
       source: '/mohist/test',
-      specVersion: '1.0',
+      specversion: '1.0',
       time: '2026-06-18T00:00:00.000Z',
-      payload: { issueNumber: 42,},
+      data: { issueNumber: 42 },
     }
 
     const event = __testing__.buildTimelineLiveEvent(
       'merge_completed',
       envelope,
-      envelope.payload as Record<string, unknown>,
+      envelope.data as Record<string, unknown>,
     )
     dispatchTimelineEvent(event)
 
@@ -259,20 +247,14 @@ describe('LiveTaskProvider timeline forwarding', () => {
       createElement(
         QueryClientProvider,
         { client: queryClient },
-        createElement(
-          ProjectProvider,
-          {
-            initialProjectId: TEST_PROJECT.id,
-            initialProjects: [TEST_PROJECT],
-            children: createElement(
-              LiveTaskProvider,
-              {
-                children: createElement('div', null, 'child'),
-                eventsConnectionHook,
-              },
-            ),
-          },
-        ),
+        createElement(ProjectProvider, {
+          initialProjectId: TEST_PROJECT.id,
+          initialProjects: [TEST_PROJECT],
+          children: createElement(LiveTaskProvider, {
+            children: createElement('div', null, 'child'),
+            eventsConnectionHook,
+          }),
+        }),
       ),
     )
 

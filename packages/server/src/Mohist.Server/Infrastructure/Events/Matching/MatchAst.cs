@@ -81,19 +81,5 @@ internal sealed record StringFunctionMatchNode(AttributeMatchNode Attribute, Str
 
 internal sealed record RegexMatchNode(AttributeMatchNode Attribute, Regex Pattern) : IBooleanMatchNode
 {
-    public bool Evaluate(EventMatchInput input)
-    {
-        try
-        {
-            return Pattern.IsMatch(Attribute.Evaluate(input));
-        }
-        catch (RegexMatchTimeoutException)
-        {
-            return false;
-        }
-        catch (Exception)
-        {
-            return false;
-        }
-    }
+    public bool Evaluate(EventMatchInput input) => Pattern.IsMatch(Attribute.Evaluate(input));
 }

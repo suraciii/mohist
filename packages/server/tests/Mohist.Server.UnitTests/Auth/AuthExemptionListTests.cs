@@ -27,8 +27,8 @@ public sealed class AuthExemptionListTests
     [InlineData("GET", "/api/github-connections/github_abc123/ingress", false)]
     [InlineData("GET", "/api/projects", false)]
     [InlineData("POST", "/api/projects", false)]
-    [InlineData("GET", "/hubs/events/negotiate", false)]
-    [InlineData("GET", "/hubs/runner/negotiate", false)]
+    [InlineData("GET", "/api/projects/project-1/events/socket", false)]
+    [InlineData("GET", "/api/runner/runner-1/control", false)]
     [InlineData("GET", "/otel/api/status", false)]
     public void IsExempt_MatchesTheClosedList(string method, string path, bool expected)
     {

@@ -68,15 +68,15 @@ public sealed class ScopeAuthorizationSpecs(MohistIntegrationFixture fixture)
     }
 
     [Fact]
-    public async Task ReadonlyPat_OnEventHubObservationSurface_Passes()
+    public async Task ReadonlyPat_OnEventSocketObservationSurface_PassesAuthorization()
     {
         var token = await CreatePatAsync("scope-readonly-events", "readonly");
 
         using var client = fixture.CreateClient();
         client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", token);
 
-        using var negotiate = await client.PostAsync("/hubs/events/negotiate?negotiateVersion=1", new StringContent(string.Empty));
-        Assert.Equal(HttpStatusCode.OK, negotiate.StatusCode);
+        using var response = await client.GetAsync("/api/projects/missing/events/socket");
+        Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
     }
 
     [Fact]

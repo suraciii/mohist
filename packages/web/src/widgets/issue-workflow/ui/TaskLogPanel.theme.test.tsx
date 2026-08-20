@@ -4,13 +4,8 @@ import { QueryClient, QueryClientProvider, useQuery } from '@tanstack/react-quer
 import { ProjectProvider } from '../../../entities/project'
 import { issueWorkflowTaskLogQueryOptions } from '../../../entities/issue'
 import type { TaskLogPage } from '../../../entities/issue/model/task-log'
+import { TaskLogPanel as DefaultTaskLogPanel, type TaskLogDataHook, type TaskLogPanelProps } from './TaskLogPanel'
 import {
-  TaskLogPanel as DefaultTaskLogPanel,
-  type TaskLogDataHook,
-  type TaskLogPanelProps,
-} from './TaskLogPanel'
-import {
-  fakeConnections,
   makeLine,
   makePage,
   mockConnectionBuilder,
@@ -25,14 +20,7 @@ let _taskLogState: 'ready' | 'loading' | 'error' = 'ready'
 
 const taskLogHook: TaskLogDataHook = ({ issueNumber, taskId, projectId, workflowRunId }) =>
   useQuery({
-    ...issueWorkflowTaskLogQueryOptions(
-      projectId,
-      issueNumber,
-      taskId,
-      { limit: 5000 },
-      true,
-      workflowRunId,
-    ),
+    ...issueWorkflowTaskLogQueryOptions(projectId, issueNumber, taskId, { limit: 5000 }, true, workflowRunId),
     queryFn: async () => {
       if (_taskLogState === 'loading') return new Promise<TaskLogPage>(() => {})
       if (_taskLogState === 'error') throw new Error('boom')
@@ -59,7 +47,6 @@ function createTaskLogTestState(initialPage: TaskLogPage | undefined): TaskLogTe
 describe('TaskLogPanel theme tokens', () => {
   beforeEach(() => {
     vi.clearAllMocks()
-    fakeConnections.length = 0
     _taskLogPageRef.current = undefined
     _taskLogState = 'ready'
     mockConnectionBuilder()
@@ -71,10 +58,15 @@ describe('TaskLogPanel theme tokens', () => {
   })
 
   it('tokenizes the panel chrome (outer surface, header label, search control, download button, source chips) to semantic theme tokens', async () => {
-    const testState = createTaskLogTestState(makePage([
-      makeLine({ seq: 1, source: 'cleanup', text: 'rm -rf tmp' }),
-      makeLine({ seq: 2, source: 'workspace-prep', text: 'cloning' }),
-    ], true))
+    const testState = createTaskLogTestState(
+      makePage(
+        [
+          makeLine({ seq: 1, source: 'cleanup', text: 'rm -rf tmp' }),
+          makeLine({ seq: 2, source: 'workspace-prep', text: 'cloning' }),
+        ],
+        true,
+      ),
+    )
 
     renderWithTaskLogProviders(
       <TaskLogPanel issueNumber={161} taskId="build-task-1" workflowRunId="wr-1" taskStatus="failed" />,
@@ -86,7 +78,13 @@ describe('TaskLogPanel theme tokens', () => {
     expect(panel).not.toHaveClass('bg-white', 'border-slate-200')
 
     const searchInput = await screen.findByTestId('task-log-search-input')
-    expect(searchInput).toHaveClass('border-input', 'bg-background', 'text-foreground', 'focus:border-info', 'focus:ring-info')
+    expect(searchInput).toHaveClass(
+      'border-input',
+      'bg-background',
+      'text-foreground',
+      'focus:border-info',
+      'focus:ring-info',
+    )
     expect(searchInput).not.toHaveClass('bg-white', 'text-slate-900', 'focus:border-sky-500')
 
     const downloadButton = await screen.findByTestId('task-log-download-button')
@@ -107,9 +105,9 @@ describe('TaskLogPanel theme tokens', () => {
   })
 
   it('preserves the deliberate dark log-console surface (bg-slate-900 text-slate-100 and the foreground line colors)', async () => {
-    const testState = createTaskLogTestState(makePage([
-      makeLine({ seq: 1, source: 'workspace-prep', text: 'cloning repo' }),
-    ]))
+    const testState = createTaskLogTestState(
+      makePage([makeLine({ seq: 1, source: 'workspace-prep', text: 'cloning repo' })]),
+    )
 
     renderWithTaskLogProviders(
       <TaskLogPanel issueNumber={161} taskId="build-task-1" workflowRunId="wr-1" taskStatus="failed" />,
@@ -130,9 +128,7 @@ describe('TaskLogPanel theme tokens', () => {
   })
 
   it('uses muted tokens for the disabled source chip variant', async () => {
-    const testState = createTaskLogTestState(makePage([
-      makeLine({ seq: 1, source: 'cleanup', text: 'rm -rf tmp' }),
-    ]))
+    const testState = createTaskLogTestState(makePage([makeLine({ seq: 1, source: 'cleanup', text: 'rm -rf tmp' })]))
 
     renderWithTaskLogProviders(
       <TaskLogPanel issueNumber={161} taskId="build-task-1" workflowRunId="wr-1" taskStatus="failed" />,

@@ -37,7 +37,7 @@ user intent.
 ## Events
 
 Push is observation, not a driver: a Workflow decision commits on the Server,
-publishes over SignalR on `/hubs/events`, and refreshes the affected queries.
+publishes over the project event WebSocket, and refreshes the affected queries.
 After reconnect, the UI reconciles its queries.
 
 ## Routes

@@ -3,15 +3,10 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { describe, expect, it, vi } from 'vitest'
 import { dispatchAgentEvent } from '../../../entities/agent'
 import type { SessionTurn } from '../../../entities/coder-session'
+import { LiveEventsContext, type LiveEventsApi } from '../../../shared/api/live-events'
 import { useSessionTranscript } from './useSessionTranscript'
 
-function Wrapper({
-  events,
-  isRunning = true,
-}: {
-  events: SessionTurn[]
-  isRunning?: boolean
-}) {
+function Wrapper({ events, isRunning = true }: { events: SessionTurn[]; isRunning?: boolean }) {
   const result = useSessionTranscript({
     issueNumber: 84,
     sessionId: 'session-84',
@@ -24,15 +19,12 @@ function Wrapper({
   const text = result.turns
     .flatMap((turn) => turn.assistant)
     .filter((part) => part.type === 'text' || part.type === 'reasoning')
-    .map((part) => part.type === 'text' || part.type === 'reasoning' ? part.text : '')
+    .map((part) => (part.type === 'text' || part.type === 'reasoning' ? part.text : ''))
     .join('')
   const latestTurn = result.turns.at(-1)
   const error = latestTurn?.assistant.find((part) => part.type === 'error')
-  const outcome = error?.type === 'error' && error.kind === 'failed'
-    ? 'failed'
-    : latestTurn?.completedAt
-      ? 'completed'
-      : 'in-flight'
+  const outcome =
+    error?.type === 'error' && error.kind === 'failed' ? 'failed' : latestTurn?.completedAt ? 'completed' : 'in-flight'
   return (
     <div>
       <div data-testid="transcript">{text}</div>
@@ -114,13 +106,7 @@ function followupTurn(): SessionTurn {
   }
 }
 
-function WrapperWithoutBinding({
-  events,
-  isRunning = true,
-}: {
-  events: SessionTurn[]
-  isRunning?: boolean
-}) {
+function WrapperWithoutBinding({ events, isRunning = true }: { events: SessionTurn[]; isRunning?: boolean }) {
   const result = useSessionTranscript({
     issueNumber: 84,
     sessionId: 'session-84',
@@ -132,18 +118,12 @@ function WrapperWithoutBinding({
   const text = result.turns
     .flatMap((turn) => turn.assistant)
     .filter((part) => part.type === 'text' || part.type === 'reasoning')
-    .map((part) => part.type === 'text' || part.type === 'reasoning' ? part.text : '')
+    .map((part) => (part.type === 'text' || part.type === 'reasoning' ? part.text : ''))
     .join('')
   return <div data-testid="transcript">{text}</div>
 }
 
-function WrapperHistorical({
-  events,
-  isRunning = true,
-}: {
-  events: SessionTurn[]
-  isRunning?: boolean
-}) {
+function WrapperHistorical({ events, isRunning = true }: { events: SessionTurn[]; isRunning?: boolean }) {
   const result = useSessionTranscript({
     issueNumber: 84,
     sessionId: 'session-84',
@@ -156,7 +136,7 @@ function WrapperHistorical({
   const text = result.turns
     .flatMap((turn) => turn.assistant)
     .filter((part) => part.type === 'text' || part.type === 'reasoning')
-    .map((part) => part.type === 'text' || part.type === 'reasoning' ? part.text : '')
+    .map((part) => (part.type === 'text' || part.type === 'reasoning' ? part.text : ''))
     .join('')
   return <div data-testid="transcript">{text}</div>
 }
@@ -180,6 +160,89 @@ function renderHistoricalSessionTranscript(events: SessionTurn[], isRunning = tr
 }
 
 describe('useSessionTranscript', () => {
+  it('explicitly replaces a running live tail with the authoritative reconciliation result before resolving', async () => {
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    const transcriptQueryKey = ['unified-session', 'project-1', 'session-84', 'transcript'] as const
+    let reconcile: ((signal: AbortSignal) => Promise<unknown>) | undefined
+    const api: LiveEventsApi = {
+      registerTaskLogScope: () => ({ admitted: false }),
+      registerTranscriptReconciliation: (_sessionId, _runtimeSessionId, callback) => {
+        reconcile = callback
+        return { dispose: () => {} }
+      },
+    }
+    function ReconciliationHarness({ events }: { events: SessionTurn[] }) {
+      const result = useSessionTranscript({
+        issueNumber: 84,
+        projectId: 'project-1',
+        sessionId: 'session-84',
+        runtimeSessionId: 'runtime-84',
+        runtime: 'opencode',
+        initialTurns: events,
+        sessionQueryKeys: [transcriptQueryKey],
+        isRunning: true,
+      })
+      return (
+        <div data-testid="reconciled-transcript">
+          {result.turns
+            .flatMap((turn) => turn.assistant)
+            .map((part) => ('text' in part ? part.text : ''))
+            .join('')}
+        </div>
+      )
+    }
+    render(
+      <QueryClientProvider client={queryClient}>
+        <LiveEventsContext.Provider value={api}>
+          <ReconciliationHarness events={[persistedEvent('persisted')]} />
+        </LiveEventsContext.Provider>
+      </QueryClientProvider>,
+    )
+    act(() => {
+      dispatchAgentEvent('message.delta', {
+        sessionId: 'session-84',
+        runtimeSessionId: 'runtime-84',
+        runtime: 'opencode',
+        text: ' live',
+      })
+    })
+    expect(screen.getByTestId('reconciled-transcript')).toHaveTextContent('persisted live')
+    queryClient.setQueryData(transcriptQueryKey, { turns: [persistedEvent('authoritative')] })
+    vi.spyOn(queryClient, 'refetchQueries').mockResolvedValue(undefined)
+
+    await act(async () => {
+      await reconcile?.(new AbortController().signal)
+    })
+
+    expect(screen.getByTestId('reconciled-transcript')).toHaveTextContent('authoritative')
+    expect(screen.getByTestId('reconciled-transcript')).not.toHaveTextContent('live')
+
+    act(() => {
+      dispatchAgentEvent('message.delta', {
+        sessionId: 'session-84',
+        runtimeSessionId: 'runtime-84',
+        runtime: 'opencode',
+        text: ' current',
+      })
+    })
+    let resolveRefetch!: () => void
+    const pendingRefetch = new Promise<void>((resolve) => {
+      resolveRefetch = resolve
+    })
+    vi.mocked(queryClient.refetchQueries).mockImplementation(() => pendingRefetch)
+    queryClient.setQueryData(transcriptQueryKey, { turns: [persistedEvent('stale')] })
+    const abortController = new AbortController()
+    const staleReconciliation = reconcile?.(abortController.signal)
+    abortController.abort()
+    resolveRefetch()
+    await act(async () => {
+      await staleReconciliation
+    })
+
+    expect(screen.getByTestId('reconciled-transcript')).toHaveTextContent('authoritative current')
+    expect(screen.getByTestId('reconciled-transcript')).not.toHaveTextContent('stale')
+  })
+
   it('does not let running persisted refetch overwrite live transcript tail', () => {
     const initial = [persistedEvent('persisted')]
     const { rerenderWith } = renderSessionTranscript(initial)
@@ -495,5 +558,4 @@ describe('useSessionTranscript', () => {
     expect(screen.getByTestId('transcript')).toHaveTextContent('Response')
     expect(screen.getByTestId('streaming-state')).toHaveTextContent('streaming')
   })
-
 })

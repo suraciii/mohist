@@ -100,7 +100,7 @@ public sealed class AuthResolutionMiddleware : IMiddleware, IScopedService
         }
 
         var required = ResolveRequiredScopes(context);
-        if (!ScopeSatisfaction.Satisfies(required, principal.Scopes, EffectiveMethod(context)))
+        if (!ScopeSatisfaction.Satisfies(required, principal.Scopes, context.Request.Method))
         {
             await RejectForbiddenAsync(context, principal, required);
             return;
@@ -115,25 +115,6 @@ public sealed class AuthResolutionMiddleware : IMiddleware, IScopedService
         }
 
         await next(context);
-    }
-
-    /// <summary>
-    /// The method the readonly rule sees. SignalR clients negotiate over
-    /// POST on this stack; the handshake belongs to the observation
-    /// connection itself (the GET upgrade that follows), so a readonly
-    /// credential on a readonly-declared hub surface is not rejected by
-    /// the negotiate verb. No other surface is affected: runner scope is
-    /// method-agnostic and operator satisfies everything.
-    /// </summary>
-    private static string EffectiveMethod(HttpContext context)
-    {
-        if (HttpMethods.IsPost(context.Request.Method)
-            && context.Request.Path.Value?.EndsWith("/negotiate", StringComparison.Ordinal) == true)
-        {
-            return HttpMethods.Get;
-        }
-
-        return context.Request.Method;
     }
 
     /// <summary>

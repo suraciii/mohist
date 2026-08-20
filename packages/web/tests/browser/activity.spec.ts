@@ -42,7 +42,7 @@ const events = [
     specVersion: '1.0',
     subject: 'session-42',
     dataContentType: 'application/json',
-    data: { issueNumber: 42, },
+    data: { issueNumber: 42 },
     extensions: { issue: '42' },
     runnerId: null,
     issueNumber: 42,
@@ -67,21 +67,45 @@ const events = [
 ]
 
 async function mockActivityApi(page: Page) {
-  await page.route('**/hubs/events**', (route) => route.fulfill({ status: 204, body: '' }))
   await page.route('**/api/**', async (route) => {
     const url = new URL(route.request().url())
     const path = url.pathname.replace(/^\/api/, '')
 
     if (route.request().method() === 'GET' && path === '/projects') return route.fulfill({ json: response([project]) })
     if (route.request().method() === 'GET' && path === `/projects/${project.id}/agent/status`) {
-      return route.fulfill({ json: response({ running: false, runnerAvailable: true, activeAgents: [], capacity: { active: 0, max: 8 } }) })
+      return route.fulfill({
+        json: response({ running: false, runnerAvailable: true, activeAgents: [], capacity: { active: 0, max: 8 } }),
+      })
     }
-    if (route.request().method() === 'GET' && path === `/projects/${project.id}/events`) return route.fulfill({ json: response(events) })
+    if (route.request().method() === 'GET' && path === `/projects/${project.id}/events`)
+      return route.fulfill({ json: response(events) })
     if (route.request().method() === 'GET' && path === `/projects/${project.id}/agent/activity`) {
-      return route.fulfill({ json: response({ summary: { active: 0, waiting: 0, completed: 0, failed: 0, slots: { active: 0, max: 8 } }, sessions: [], waiting: [] }) })
+      return route.fulfill({
+        json: response({
+          summary: { active: 0, waiting: 0, completed: 0, failed: 0, slots: { active: 0, max: 8 } },
+          sessions: [],
+          waiting: [],
+        }),
+      })
     }
     if (route.request().method() === 'GET' && path === `/projects/${project.id}/runners`) {
-      return route.fulfill({ json: response({ runners: [{ id: 'runner-42', kind: 'external', hostname: 'runner', scope: { type: 'global' }, status: 'idle', capabilities: [], coderModels: [], coderModelCount: 0, activeWorks: [] }] }) })
+      return route.fulfill({
+        json: response({
+          runners: [
+            {
+              id: 'runner-42',
+              kind: 'external',
+              hostname: 'runner',
+              scope: { type: 'global' },
+              status: 'idle',
+              capabilities: [],
+              coderModels: [],
+              coderModelCount: 0,
+              activeWorks: [],
+            },
+          ],
+        }),
+      })
     }
     return route.fulfill({ status: 404, json: { success: false, error: `Unhandled route: ${path}` } })
   })
@@ -103,9 +127,18 @@ test('Activity renders evidence zones and project-scoped navigation at desktop w
   await expect(page.getByTestId('activity-attention-zone')).toBeVisible()
   await expect(page.getByTestId('activity-routine-zone')).toBeVisible()
   await expect(page.getByTestId('activity-event-entry')).toHaveCount(3)
-  await expect(page.getByTestId('activity-event-primary-link').first()).toHaveAttribute('href', `/${project.name}/issues/42?from=activity`)
-  await expect(page.getByTestId('activity-event-session-link')).toHaveAttribute('href', `/${project.name}/sessions/session-42?from=activity`)
-  await expect(page.getByTestId('activity-event-runner-link')).toHaveAttribute('href', `/${project.name}/runners/runner-42?from=activity`)
+  await expect(page.getByTestId('activity-event-primary-link').first()).toHaveAttribute(
+    'href',
+    `/${project.name}/issues/42?from=activity`,
+  )
+  await expect(page.getByTestId('activity-event-session-link')).toHaveAttribute(
+    'href',
+    `/${project.name}/sessions/session-42?from=activity`,
+  )
+  await expect(page.getByTestId('activity-event-runner-link')).toHaveAttribute(
+    'href',
+    `/${project.name}/runners/runner-42?from=activity`,
+  )
 
   await page.getByTestId('activity-event-primary-link').first().click()
   await expect(page).toHaveURL(`/${project.name}/issues/42?from=activity`)
@@ -129,7 +162,9 @@ test('Activity filters wrap without horizontal overflow on a narrow viewport', a
   await expect(page.getByTestId('activity-attention-zone')).toBeVisible()
   await expect(page.getByTestId('activity-routine-zone')).toBeVisible()
 
-  const filterLines = await filterBar.locator('button').evaluateAll((buttons) => new Set(buttons.map((button) => Math.round(button.getBoundingClientRect().top))).size)
+  const filterLines = await filterBar
+    .locator('button')
+    .evaluateAll((buttons) => new Set(buttons.map((button) => Math.round(button.getBoundingClientRect().top))).size)
   expect(filterLines).toBeGreaterThan(1)
   await expectNoHorizontalOverflow(page)
 })

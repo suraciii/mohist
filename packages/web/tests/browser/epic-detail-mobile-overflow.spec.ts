@@ -8,12 +8,18 @@ const project = {
   updatedAt: '2026-06-01T00:00:00Z',
 }
 
-const LONG_TITLE = 'EpicDetailPageMobileHeaderTitleWithAnUnbrokenEnglishTokenThatMustWrapInsideTheReadableColumnAtThreeHundredTwentyPixels'
-const LONG_DESCRIPTION = 'EpicDetailPageMobileHeaderDescriptionWithAnUnbrokenEnglishTokenThatMustWrapInsideTheDescriptionColumnAtThreeHundredTwentyPixels'
-const LONG_LINKED_ISSUE_TITLE = 'LinkedIssueRowMobileOverflowTitleWithAnUnbrokenTokenThatMustWrapInsideTheTaskLineAtThreeHundredTwentyPixels'
+const LONG_TITLE =
+  'EpicDetailPageMobileHeaderTitleWithAnUnbrokenEnglishTokenThatMustWrapInsideTheReadableColumnAtThreeHundredTwentyPixels'
+const LONG_DESCRIPTION =
+  'EpicDetailPageMobileHeaderDescriptionWithAnUnbrokenEnglishTokenThatMustWrapInsideTheDescriptionColumnAtThreeHundredTwentyPixels'
+const LONG_LINKED_ISSUE_TITLE =
+  'LinkedIssueRowMobileOverflowTitleWithAnUnbrokenTokenThatMustWrapInsideTheTaskLineAtThreeHundredTwentyPixels'
 const FULL_DESCRIPTION = [
   LONG_DESCRIPTION,
-  ...Array.from({ length: 24 }, (_, index) => `Background paragraph ${index + 1} that should stay below the summary area.`),
+  ...Array.from(
+    { length: 24 },
+    (_, index) => `Background paragraph ${index + 1} that should stay below the summary area.`,
+  ),
 ].join('\n\n')
 
 type EpicStatus = 'idle' | 'running' | 'done' | 'closed'
@@ -82,7 +88,6 @@ function makeEpic(status: EpicStatus, overrides: Record<string, unknown> = {}) {
 }
 
 async function mockEpicApi(page: Page) {
-  await page.route('**/hubs/events**', route => route.fulfill({ status: 204, body: '' }))
   await page.route('**/api/**', async (route) => {
     const url = new URL(route.request().url())
     const apiIndex = url.pathname.indexOf('/api/')
@@ -105,34 +110,43 @@ async function mockEpicApi(page: Page) {
     if (method === 'GET' && path.startsWith(epicPath)) {
       const rawNumber = decodeURIComponent(path.slice(epicPath.length))
       if (rawNumber.includes('/')) {
-        return route.fulfill({ status: 404, json: { success: false, error: `Unhandled test route: ${method} ${path}` } })
+        return route.fulfill({
+          status: 404,
+          json: { success: false, error: `Unhandled test route: ${method} ${path}` },
+        })
       }
       const epicNumber = Number(rawNumber)
       if (epicNumber === LINKED_ROWS_EPIC_NUMBER) {
         return route.fulfill({
-          json: apiResponse(makeEpic('idle', {
-            number: LINKED_ROWS_EPIC_NUMBER,
-            linkedIssues: [
-              makeIssue(1, {
-                title: LONG_LINKED_ISSUE_TITLE,
-                status: 'in_progress',
-                stage: 'build',
-                canStart: false,
-              }),
-              makeIssue(2, {
-                title: `${LONG_LINKED_ISSUE_TITLE}Dependent`,
-                canStart: false,
-                startBlocker: { kind: 'waiting-for', issue: { number: 1, title: LONG_LINKED_ISSUE_TITLE } },
-                prerequisiteNumbers: [1],
-              }),
-            ],
-          })),
+          json: apiResponse(
+            makeEpic('idle', {
+              number: LINKED_ROWS_EPIC_NUMBER,
+              linkedIssues: [
+                makeIssue(1, {
+                  title: LONG_LINKED_ISSUE_TITLE,
+                  status: 'in_progress',
+                  stage: 'build',
+                  canStart: false,
+                }),
+                makeIssue(2, {
+                  title: `${LONG_LINKED_ISSUE_TITLE}Dependent`,
+                  canStart: false,
+                  startBlocker: { kind: 'waiting-for', issue: { number: 1, title: LONG_LINKED_ISSUE_TITLE } },
+                  prerequisiteNumbers: [1],
+                }),
+              ],
+            }),
+          ),
         })
       }
-      const status = (Object.entries(EPIC_NUMBER_BY_STATUS) as Array<[EpicStatus, number]>)
-        .find(([, number]) => number === epicNumber)?.[0]
+      const status = (Object.entries(EPIC_NUMBER_BY_STATUS) as Array<[EpicStatus, number]>).find(
+        ([, number]) => number === epicNumber,
+      )?.[0]
       if (!status) {
-        return route.fulfill({ status: 404, json: { success: false, error: `Unhandled test route: ${method} ${path}` } })
+        return route.fulfill({
+          status: 404,
+          json: { success: false, error: `Unhandled test route: ${method} ${path}` },
+        })
       }
       return route.fulfill({ json: apiResponse(makeEpic(status)) })
     }
@@ -207,7 +221,9 @@ async function expectSummaryVisibleBeforeOverview(page: Page, viewportHeight: nu
 test.describe('Epic detail mobile overflow', () => {
   for (const width of [320, 390, 430]) {
     for (const status of ['running', 'idle', 'done', 'closed'] as const) {
-      test(`does not overflow at ${width}px for a ${status} epic with unbroken title and description`, async ({ page }) => {
+      test(`does not overflow at ${width}px for a ${status} epic with unbroken title and description`, async ({
+        page,
+      }) => {
         await page.setViewportSize({ width, height: 900 })
         await mockEpicApi(page)
 

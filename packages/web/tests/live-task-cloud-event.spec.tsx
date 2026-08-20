@@ -10,10 +10,14 @@ import { RuntimeToastHost } from '../src/shared/ui/toast'
 import { ProjectProvider } from '../src/entities/project'
 import { useLiveTask } from '../src/entities/issue'
 import { onAgentEvent } from '../src/entities/agent'
-import { REVERSE_DNS_EVENT_TYPES } from '../src/shared/lib/canonical-event-types'
-import { SUBSCRIPTION_EVENT_TYPES } from '../src/shared/api/events-hub'
+import { EVENT_TYPES, REVERSE_DNS_EVENT_TYPES } from '../src/shared/lib/canonical-event-types'
 import { useMswServer } from './support/msw'
-import { issueCandidateKeys, issueDetailKeys, issueListKeys, issueWorkflowKeys } from '../src/entities/issue/api/query-keys'
+import {
+  issueCandidateKeys,
+  issueDetailKeys,
+  issueListKeys,
+  issueWorkflowKeys,
+} from '../src/entities/issue/api/query-keys'
 
 useMswServer(
   http.get('*/api/projects/:projectId/agent/status', () =>
@@ -31,48 +35,34 @@ useMswServer(
 
 const eventsConnectionHook = vi.fn<EventsConnectionHook>(() => ({
   status: 'connected',
-  connection: null,
   reconnectVersion: 0,
 }))
 
 const { unwrapEnvelope, unwrapTranscriptEnvelope, routeTranscriptEventName } = __testing__
 
 describe('unwrapEnvelope', () => {
-  it('returns the data when given a CloudEvents 1.0.2 envelope', () => {
+  it('returns data from a structured CloudEvents object', () => {
     const data = { issueNumber: 42, projectId: 'mohist' }
     const envelope = {
       type: 'stage_changed',
       data,
       id: 'evt-1',
       source: '/mohist/test',
-      specVersion: '1.0',
+      specversion: '1.0',
     }
     expect(unwrapEnvelope(envelope)).toBe(data)
   })
 
-  it('returns the payload when given the server CloudEventEnvelope shape', () => {
-    const payload = { issueNumber: 42, projectId: 'mohist' }
-    const envelope = {
-      type: 'com.mohist.workflow.stage.started',
-      payload,
-      id: 'evt-1',
-      source: '/mohist/test',
-      specVersion: '1.0',
-      dataContentType: 'application/json',
-      extensions: { projectid: 'mohist' },
-    }
-    expect(unwrapEnvelope(envelope)).toBe(payload)
-  })
-
-  it('uses canonical routing extensions without mutating the display payload', () => {
+  it('uses top-level CloudEvents extensions without mutating data', () => {
     const payload = { projectId: 'payload-project', issueNumber: 42, healthStatus: 'yellow' }
     const envelope = {
       type: REVERSE_DNS_EVENT_TYPES.AgentSessionContextHealthUpdated,
-      payload,
+      data: payload,
       id: 'evt-routing-context',
       source: '/mohist/agent-session/session-1',
-      specVersion: '1.0',
-      extensions: { projectid: 'canonical-project', issue: '99' },
+      specversion: '1.0',
+      projectid: 'canonical-project',
+      issue: '99',
     }
 
     expect(unwrapEnvelope(envelope)).toEqual({
@@ -83,7 +73,7 @@ describe('unwrapEnvelope', () => {
     expect(payload).toEqual({ projectId: 'payload-project', issueNumber: 42, healthStatus: 'yellow' })
   })
 
-  it('returns the raw object when given a back-compat raw payload', () => {
+  it('returns a non-envelope object unchanged', () => {
     const raw = { issueNumber: 42, projectId: 'mohist' }
     expect(unwrapEnvelope(raw)).toBe(raw)
   })
@@ -94,25 +84,33 @@ describe('unwrapEnvelope', () => {
   })
 
   it('returns empty record when envelope data is non-object', () => {
-    expect(unwrapEnvelope({
-      type: 'x', data: 'string', id: 'a', source: 'b', specVersion: '1.0',
-    })).toEqual({})
-    expect(unwrapEnvelope({
-      type: 'x', data: 42, id: 'a', source: 'b', specVersion: '1.0',
-    })).toEqual({})
-    expect(unwrapEnvelope({
-      type: 'x', data: null, id: 'a', source: 'b', specVersion: '1.0',
-    })).toEqual({})
-  })
-
-  it('extracts the nested payload for legacy back-compat shape', () => {
-    // The old code path: any object with a 'payload' field returned the
-    // payload. We still support that for unmigrated producers. The
-    // structural check above covers the new CloudEvents path; the
-    // legacy path here is documented as a back-compat fallback.
-    const legacy = { type: 'tool_call', payload: { foo: 'bar' } }
-    const result = unwrapEnvelope(legacy)
-    expect(result).toEqual({ foo: 'bar' })
+    expect(
+      unwrapEnvelope({
+        type: 'x',
+        data: 'string',
+        id: 'a',
+        source: 'b',
+        specversion: '1.0',
+      }),
+    ).toEqual({})
+    expect(
+      unwrapEnvelope({
+        type: 'x',
+        data: 42,
+        id: 'a',
+        source: 'b',
+        specversion: '1.0',
+      }),
+    ).toEqual({})
+    expect(
+      unwrapEnvelope({
+        type: 'x',
+        data: null,
+        id: 'a',
+        source: 'b',
+        specversion: '1.0',
+      }),
+    ).toEqual({})
   })
 
   it('returns the envelope as-is when only the CloudEvents marker is partial', () => {
@@ -126,7 +124,7 @@ describe('unwrapEnvelope', () => {
 
   it('returns the envelope as-is when missing type', () => {
     // Malformed: missing 'type' is the common bug class
-    const noType = { id: 'a', source: 'b', specVersion: '1.0', data: { foo: 'bar' } }
+    const noType = { id: 'a', source: 'b', specversion: '1.0', data: { foo: 'bar' } }
     expect(unwrapEnvelope(noType)).toBe(noType)
   })
 
@@ -138,7 +136,7 @@ describe('unwrapEnvelope', () => {
 
   it('returns the envelope as-is when missing type', () => {
     // Malformed: missing 'type' is the common bug class
-    const noType = { id: 'a', source: 'b', specVersion: '1.0', data: { foo: 'bar' } }
+    const noType = { id: 'a', source: 'b', specversion: '1.0', data: { foo: 'bar' } }
     expect(unwrapEnvelope(noType)).toBe(noType)
   })
 })
@@ -233,7 +231,9 @@ describe('LiveTaskProvider transcript routing', () => {
   ] as const)('forwards %s transcript events to %s subscribers', async (eventName, partialPayload) => {
     const queryClient = new QueryClient()
     const received: unknown[] = []
-    const off = onAgentEvent(routeTranscriptEventName(eventName) as Parameters<typeof onAgentEvent>[0], (detail) => received.push(detail))
+    const off = onAgentEvent(routeTranscriptEventName(eventName) as Parameters<typeof onAgentEvent>[0], (detail) =>
+      received.push(detail),
+    )
 
     rtlRender(
       <QueryClientProvider client={queryClient}>
@@ -286,7 +286,9 @@ describe('LiveTaskProvider transcript routing', () => {
   ] as const)('routes %s transcript events to coder_tool_call subscribers', async (eventName, partialPayload) => {
     const queryClient = new QueryClient()
     const received: unknown[] = []
-    const off = onAgentEvent(routeTranscriptEventName(eventName) as Parameters<typeof onAgentEvent>[0], (detail) => received.push(detail))
+    const off = onAgentEvent(routeTranscriptEventName(eventName) as Parameters<typeof onAgentEvent>[0], (detail) =>
+      received.push(detail),
+    )
 
     rtlRender(
       <QueryClientProvider client={queryClient}>
@@ -355,9 +357,9 @@ describe('LiveTaskProvider transcript routing', () => {
     onEvent('com.mohist.workflow.stage.approval-requested', {
       id: 'evt-1',
       source: '/mohist/test',
-      specVersion: '1.0',
+      specversion: '1.0',
       type: 'com.mohist.workflow.stage.approval-requested',
-      payload: { projectId: 'project-1', issueNumber: 82, stage: 'review' },
+      data: { projectId: 'project-1', issueNumber: 82, stage: 'review' },
     })
 
     await waitFor(() => {
@@ -375,7 +377,9 @@ describe('LiveTaskProvider transcript routing', () => {
   it('forwards canonical AgentSession context from a CloudEvent envelope', async () => {
     const queryClient = new QueryClient()
     const received: unknown[] = []
-    const off = onAgentEvent(REVERSE_DNS_EVENT_TYPES.AgentSessionContextHealthUpdated, (detail) => received.push(detail))
+    const off = onAgentEvent(REVERSE_DNS_EVENT_TYPES.AgentSessionContextHealthUpdated, (detail) =>
+      received.push(detail),
+    )
 
     rtlRender(
       <QueryClientProvider client={queryClient}>
@@ -393,19 +397,22 @@ describe('LiveTaskProvider transcript routing', () => {
     onEvent(REVERSE_DNS_EVENT_TYPES.AgentSessionContextHealthUpdated, {
       id: 'evt-health-1',
       source: '/mohist/agent-session/session-1',
-      specVersion: '1.0',
+      specversion: '1.0',
       type: REVERSE_DNS_EVENT_TYPES.AgentSessionContextHealthUpdated,
-      payload: { healthStatus: 'yellow', contextUsagePercent: 65 },
-      extensions: { projectid: 'project-1', issue: '82' },
+      data: { healthStatus: 'yellow', contextUsagePercent: 65 },
+      projectid: 'project-1',
+      issue: '82',
     })
 
     await waitFor(() => {
-      expect(received).toEqual([{
-        projectId: 'project-1',
-        issueNumber: 82,
-        healthStatus: 'yellow',
-        contextUsagePercent: 65,
-      }])
+      expect(received).toEqual([
+        {
+          projectId: 'project-1',
+          issueNumber: 82,
+          healthStatus: 'yellow',
+          contextUsagePercent: 65,
+        },
+      ])
     })
     off()
   })
@@ -413,7 +420,7 @@ describe('LiveTaskProvider transcript routing', () => {
   it('subscribes to affiliation changes and invalidates Issue and Epic caches', async () => {
     const queryClient = new QueryClient()
     const invalidateSpy = vi.spyOn(queryClient, 'invalidateQueries')
-    expect(SUBSCRIPTION_EVENT_TYPES).toContain(REVERSE_DNS_EVENT_TYPES.IssueEpicChanged)
+    expect(EVENT_TYPES).toContain(REVERSE_DNS_EVENT_TYPES.IssueEpicChanged)
 
     rtlRender(
       <QueryClientProvider client={queryClient}>
@@ -431,10 +438,11 @@ describe('LiveTaskProvider transcript routing', () => {
     onEvent(REVERSE_DNS_EVENT_TYPES.IssueEpicChanged, {
       id: 'evt-epic-change-1',
       source: '/mohist/projects/project-1/issues/82',
-      specVersion: '1.0',
+      specversion: '1.0',
       type: REVERSE_DNS_EVENT_TYPES.IssueEpicChanged,
-      payload: {},
-      extensions: { projectid: 'project-1', issue: '82' },
+      data: {},
+      projectid: 'project-1',
+      issue: '82',
     })
 
     await waitFor(() => {
@@ -469,9 +477,9 @@ describe('LiveTaskProvider transcript routing', () => {
     onEvent('com.mohist.issue.completed', {
       id: 'evt-merge-1',
       source: '/mohist/test',
-      specVersion: '1.0',
+      specversion: '1.0',
       type: 'com.mohist.issue.completed',
-      payload: { projectId: 'project-1', issueNumber: 82, operation: 'merge' },
+      data: { projectId: 'project-1', issueNumber: 82, operation: 'merge' },
     })
 
     await waitFor(() => {
@@ -509,9 +517,9 @@ describe('LiveTaskProvider transcript routing', () => {
     onEvent('com.mohist.workflow.run.failed', {
       id: 'evt-merge-failed-1',
       source: '/mohist/test',
-      specVersion: '1.0',
+      specversion: '1.0',
       type: 'com.mohist.workflow.run.failed',
-      payload: { projectId: 'project-1', issueNumber: 82, operation: 'merge', error: 'boom' },
+      data: { projectId: 'project-1', issueNumber: 82, operation: 'merge', error: 'boom' },
     })
 
     await waitFor(() => {
@@ -542,13 +550,13 @@ describe('LiveTaskProvider transcript routing', () => {
     onEvent('com.mohist.issue.completed', {
       id: 'evt-rebase-1',
       source: '/mohist/test',
-      specVersion: '1.0',
+      specversion: '1.0',
       type: 'com.mohist.issue.completed',
-      payload: { projectId: 'project-1', issueNumber: 82, operation: 'rebase', rebased: true },
+      data: { projectId: 'project-1', issueNumber: 82, operation: 'rebase', rebased: true },
     })
 
     await waitFor(() => {
-       expect(seen).toContainEqual({ type: 'rebase_completed', issueNumber: 82, rebased: true })
+      expect(seen).toContainEqual({ type: 'rebase_completed', issueNumber: 82, rebased: true })
     })
     off()
   })
@@ -575,9 +583,9 @@ describe('LiveTaskProvider transcript routing', () => {
       onEvent('com.mohist.workflow.stage.failed', {
         id: 'evt-rebase-conflict-1',
         source: '/mohist/test',
-        specVersion: '1.0',
+        specversion: '1.0',
         type: 'com.mohist.workflow.stage.failed',
-        payload: {
+        data: {
           projectId: 'project-1',
           issueNumber: 82,
           operation: 'rebase',
@@ -609,7 +617,7 @@ describe('rebase events reach onRebaseEvent listeners', () => {
       data: { projectId: 'p1', issueNumber: 42 },
       id: 'evt-rb-1',
       source: '/mohist/test',
-      specVersion: '1.0',
+      specversion: '1.0',
     }
     const payload = unwrapEnvelope(envelope) as { issueNumber: number }
     dispatchRebaseEvent({ type: 'rebase_started', issueNumber: payload.issueNumber })

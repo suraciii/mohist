@@ -126,7 +126,6 @@ async function mockIssueDetailApi(
   sessionsOverride?: typeof sessions,
   approvalEvidence?: ApprovalEvidenceFixture,
 ) {
-  await page.route('**/hubs/events**', (route) => route.fulfill({ status: 204, body: '' }))
   await page.route('**/api/**', async (route) => {
     const url = new URL(route.request().url())
     const path = url.pathname.replace(/^\/api/, '')
@@ -149,7 +148,9 @@ async function mockIssueDetailApi(
       return route.fulfill({ json: response(issue) })
     }
     if (method === 'GET' && path === `/projects/${project.id}/issues/${issue.number}/diff`) {
-      return route.fulfill({ json: response(approvalEvidence?.diff ?? { available: false, reason: 'not_started', message: 'no workspace' }) })
+      return route.fulfill({
+        json: response(approvalEvidence?.diff ?? { available: false, reason: 'not_started', message: 'no workspace' }),
+      })
     }
     if (method === 'GET' && path === `/projects/${project.id}/issues/${issue.number}/commits`) {
       return route.fulfill({ json: response({ available: false, reason: 'not_started', message: 'no workspace' }) })
@@ -239,7 +240,8 @@ async function mockIssueDetailApi(
         }),
       })
     }
-    if (method === 'GET' && path === `/projects/${project.id}/workflow-profiles`) return route.fulfill({ json: response([]) })
+    if (method === 'GET' && path === `/projects/${project.id}/workflow-profiles`)
+      return route.fulfill({ json: response([]) })
     if (method === 'GET' && path.startsWith('/workflow-runs/') && path.endsWith('/sessions')) {
       return route.fulfill({ json: response(sessionsOverride ?? sessions) })
     }
@@ -267,7 +269,9 @@ function boxesOverlap(
 }
 
 test.describe('Issue decision surface browser layout', () => {
-  test('running issue renders Stop exactly once and inside the runtime decision surface (desktop)', async ({ page }) => {
+  test('running issue renders Stop exactly once and inside the runtime decision surface (desktop)', async ({
+    page,
+  }) => {
     await page.setViewportSize({ width: 1280, height: 900 })
     const issue = makeIssue({
       number: 401,
@@ -296,7 +300,9 @@ test.describe('Issue decision surface browser layout', () => {
     await expect(page.getByTestId('reference-rail').locator('[data-testid="decision-action-stop"]')).toHaveCount(0)
   })
 
-  test('running issue with no executable action shows a product-language rationale rather than an unexplained all-disabled surface (desktop)', async ({ page }) => {
+  test('running issue with no executable action shows a product-language rationale rather than an unexplained all-disabled surface (desktop)', async ({
+    page,
+  }) => {
     await page.setViewportSize({ width: 1280, height: 900 })
     const issue = makeIssue({
       number: 402,
@@ -323,7 +329,9 @@ test.describe('Issue decision surface browser layout', () => {
     expect(rationale ?? '').toMatch(/[A-Za-z]/)
   })
 
-  test('disabled Stop carries an accessible reason and uses unmistakable disabled styling (desktop)', async ({ page }) => {
+  test('disabled Stop carries an accessible reason and uses unmistakable disabled styling (desktop)', async ({
+    page,
+  }) => {
     await page.setViewportSize({ width: 1280, height: 900 })
     const issue = makeIssue({
       number: 403,
@@ -364,7 +372,9 @@ test.describe('Issue decision surface browser layout', () => {
     }
   })
 
-  test('composite parent issue surfaces close and Ask Agent inside the decision surface (desktop)', async ({ page }) => {
+  test('composite parent issue surfaces close and Ask Agent inside the decision surface (desktop)', async ({
+    page,
+  }) => {
     await page.setViewportSize({ width: 1280, height: 900 })
     const issue = makeIssue({
       number: 404,
@@ -399,7 +409,9 @@ test.describe('Issue decision surface browser layout', () => {
     await expect(surface.getByTestId('decision-action-approve')).toHaveCount(0)
   })
 
-  test('desktop session action opens the concrete session route and no transcript action appears without sessions', async ({ page }) => {
+  test('desktop session action opens the concrete session route and no transcript action appears without sessions', async ({
+    page,
+  }) => {
     await page.setViewportSize({ width: 1280, height: 900 })
     const issue = makeIssue({
       number: 405,
@@ -423,7 +435,7 @@ test.describe('Issue decision surface browser layout', () => {
     await expect(transcript).toBeVisible()
     await expect(transcript).not.toHaveAttribute('aria-disabled', 'true')
     const transcriptHref = await transcript.getAttribute('href')
-     expect(transcriptHref).toContain('/sessions/session-coder-2')
+    expect(transcriptHref).toContain('/sessions/session-coder-2')
 
     const stopBox = await box(surface.getByTestId('decision-action-stop'))
     const transcriptBox = await box(transcript)
@@ -532,21 +544,29 @@ test.describe('Issue decision surface browser layout', () => {
     await mockIssueDetailApi(page, issue, [])
     let approveRequests = 0
     page.on('request', (request) => {
-      if (request.method() === 'POST' && request.url().endsWith(`/projects/${project.id}/issues/${issue.number}/approve`)) approveRequests += 1
+      if (
+        request.method() === 'POST' &&
+        request.url().endsWith(`/projects/${project.id}/issues/${issue.number}/approve`)
+      )
+        approveRequests += 1
     })
     await page.goto(`/${project.name}/issues/${issue.number}`)
 
     await expect(page.getByTestId('decision-action-approve')).toBeEnabled()
     await page.getByTestId('decision-rationale').click()
     await expect(page.getByTestId('decision-action-approve-shortcut')).toHaveText('a')
-    const approveRequest = page.waitForRequest((request) => request.method() === 'POST'
-      && request.url().endsWith(`/projects/${project.id}/issues/${issue.number}/approve`))
+    const approveRequest = page.waitForRequest(
+      (request) =>
+        request.method() === 'POST' && request.url().endsWith(`/projects/${project.id}/issues/${issue.number}/approve`),
+    )
     await page.keyboard.press('a')
     await expect.poll(() => approveRequests).toBe(1)
     expect(JSON.parse((await approveRequest).postData() ?? '{}')).toEqual({})
   })
 
-  test('phone plan approval renders recorded artifacts without overflow and submits send-back once', async ({ page }) => {
+  test('phone plan approval renders recorded artifacts without overflow and submits send-back once', async ({
+    page,
+  }) => {
     await page.setViewportSize({ width: 390, height: 820 })
     const issue = makeIssue({
       number: 412,
@@ -594,8 +614,11 @@ test.describe('Issue decision surface browser layout', () => {
     await expect(feedback).toBeFocused()
     await page.getByRole('radio', { name: 'Scope' }).click()
     await feedback.fill('Keep the plan focused.')
-    const feedbackRequest = page.waitForRequest((request) => request.method() === 'POST'
-      && request.url().endsWith(`/projects/${project.id}/issues/${issue.number}/feedback`))
+    const feedbackRequest = page.waitForRequest(
+      (request) =>
+        request.method() === 'POST' &&
+        request.url().endsWith(`/projects/${project.id}/issues/${issue.number}/feedback`),
+    )
     await page.getByTestId('send-back-feedback-submit').click()
     expect(JSON.parse((await feedbackRequest).postData() ?? '{}')).toEqual({
       stage: 'plan',
@@ -674,10 +697,12 @@ test.describe('Issue decision surface browser layout', () => {
     await page.goto(`/${project.name}/issues/${issue.number}`)
     await page.getByRole('button', { name: 'More actions' }).click()
     await page.getByTestId('approval-more-action-view-transcript').click()
-     await expect(page).toHaveURL(new RegExp('/sessions/session-coder-2$'))
+    await expect(page).toHaveURL(new RegExp('/sessions/session-coder-2$'))
   })
 
-  test('phone width keeps the launcher enabled even when the primary action itself is currently disabled', async ({ page }) => {
+  test('phone width keeps the launcher enabled even when the primary action itself is currently disabled', async ({
+    page,
+  }) => {
     await page.setViewportSize({ width: 390, height: 820 })
     const issue = makeIssue({
       number: 407,
@@ -746,7 +771,9 @@ test.describe('Issue decision surface browser layout', () => {
     await expect(sheet).toHaveCount(0)
   })
 
-  test('phone sheet preserves safe-area clearance and renders disabled destructive actions without live destructive styling', async ({ page }) => {
+  test('phone sheet preserves safe-area clearance and renders disabled destructive actions without live destructive styling', async ({
+    page,
+  }) => {
     await page.setViewportSize({ width: 390, height: 820 })
     const issue = makeIssue({
       number: 409,

@@ -2,6 +2,7 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
+using Mohist.Server.Events.WebSocket;
 using Mohist.Server.Infrastructure.Config;
 using Mohist.Server.Infrastructure.Events;
 using OpenTelemetry;
@@ -21,8 +22,6 @@ public static class MohistOpenTelemetryRegistration
     public const string ServiceName = "Mohist.Server";
 
     public static readonly PathString OtelIngestPathPrefix = "/otel";
-
-    public const string SignalRServerActivitySourceName = "Microsoft.AspNetCore.SignalR.Server";
 
     public static readonly string[] OrleansActivitySourceNames = new[]
     {
@@ -64,7 +63,6 @@ public static class MohistOpenTelemetryRegistration
             tracing
                 .ConfigureResource(resource => resource.AddService(ServiceName))
                 .AddAspNetCoreInstrumentation(o => o.Filter = ExcludeOtelIngestPath)
-                .AddSource(SignalRServerActivitySourceName)
                 .AddSource(OrleansActivitySourceNames[0])
                 .AddSource(OrleansActivitySourceNames[1])
                 .AddSource(OrleansActivitySourceNames[2])
@@ -88,7 +86,8 @@ public static class MohistOpenTelemetryRegistration
         {
             metrics
                 .ConfigureResource(resource => resource.AddService(ServiceName))
-                .AddMeter(EventDispatcherService.MeterName);
+                .AddMeter(EventDispatcherService.MeterName)
+                .AddMeter(EventSocketMatchFailureSink.MeterName);
             if (options.ExportEnabled)
             {
                 metrics.AddOtlpExporter("metrics", configure: null);

@@ -2441,54 +2441,6 @@ public sealed partial class AgentSessionGrain : Grain, IAgentSessionGrain, IRemi
         return new ContextHealthDecision(envelope, domainEvents, newStatus, percent);
     }
 
-    private async Task FanOutRealtimeAsync(
-        AgentSession session,
-        IReadOnlyList<RuntimeEventEnvelope> entries,
-        IReadOnlyList<AgentSessionEvent> domainEvents)
-    {
-        if (entries.Count == 0) return;
-
-        foreach (var row in entries)
-        {
-            if (!TranscriptAccumulator.EventTypes.Contains(row.Type))
-                continue;
-
-            JsonElement payload;
-            try
-            {
-                payload = JSON.DeserializeElement(row.PayloadJson);
-            }
-            catch (Exception ex)
-            {
-                _log.LogWarning(ex,
-                    "AgentSessionGrain failed to deserialise transcript payload for {Type} on {SessionId}",
-                    row.Type, session.Id);
-                continue;
-            }
-
-            var envelope = new TranscriptEnvelope(
-                Id: row.Id.ToString(),
-                SessionId: row.SessionId,
-                RuntimeSessionId: row.AgentSessionId,
-                Runtime: session.Runtime.Runtime,
-                Sequence: row.Sequence,
-                Type: row.Type,
-                Payload: payload,
-                CreatedAt: row.CreatedAt.ToString("o"));
-
-            try
-            {
-                await _transcriptPublisher.PublishAsync(envelope, CancellationToken.None);
-            }
-            catch (Exception ex)
-            {
-                _log.LogWarning(ex,
-                    "AgentSessionGrain transcript publish failed for {Type} on {SessionId}",
-                    row.Type, session.Id);
-            }
-        }
-    }
-
     private void EnsurePersistenceTimer()
     {
         _persistTimer ??= this.RegisterGrainTimer(

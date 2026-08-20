@@ -19,15 +19,15 @@ function makeIssue(number: number, approval: boolean) {
   return {
     number,
     title: approval ? 'Approval fragment destination' : 'Ordinary fragment destinations',
-    body: '# Description\n\n' + 'Detailed issue context keeps the comments destination below the workflow content. '.repeat(25),
+    body:
+      '# Description\n\n' +
+      'Detailed issue context keeps the comments destination below the workflow content. '.repeat(25),
     status: approval ? 'in_progress' : 'backlog',
     workflowStage: approval ? 'check' : null,
     workflowStatus: approval ? 'paused' : null,
     workflowRunId: approval ? 'wr-fragment-approval' : null,
     health: approval ? 'paused' : 'active',
-    approvalState: approval
-      ? { status: 'awaiting', stage: 'check', requestedAt: '2026-07-21T01:00:00Z' }
-      : null,
+    approvalState: approval ? { status: 'awaiting', stage: 'check', requestedAt: '2026-07-21T01:00:00Z' } : null,
     recovery: approval
       ? {
           currentWorkItem: null,
@@ -43,13 +43,15 @@ function makeIssue(number: number, approval: boolean) {
     risk: null,
     prerequisites: [],
     attachments: [],
-    comments: [{
-      id: `comment-${number}`,
-      author: 'Fragment reviewer',
-      body: 'The comments destination is visible.',
-      createdAt: '2026-07-21T02:00:00Z',
-      attachments: [],
-    }],
+    comments: [
+      {
+        id: `comment-${number}`,
+        author: 'Fragment reviewer',
+        body: 'The comments destination is visible.',
+        createdAt: '2026-07-21T02:00:00Z',
+        attachments: [],
+      },
+    ],
     children: [],
     isDraft: false,
     canStart: true,
@@ -65,7 +67,6 @@ async function mockApi(page: Page) {
     [approvalIssueNumber, makeIssue(approvalIssueNumber, true)],
   ])
 
-  await page.route('**/hubs/events**', route => route.fulfill({ status: 204, body: '' }))
   await page.route('**/api/**', async (route) => {
     const url = new URL(route.request().url())
     const path = url.pathname.replace(/^\/api/, '')
@@ -80,21 +81,24 @@ async function mockApi(page: Page) {
       return route.fulfill({ json: response(issue) })
     }
     if (method === 'GET' && path === `/projects/${project.id}/agent/status`) {
-      return route.fulfill({ json: response({ running: false, runnerAvailable: true, activeAgents: [], capacity: { active: 0, max: 4 } }) })
+      return route.fulfill({
+        json: response({ running: false, runnerAvailable: true, activeAgents: [], capacity: { active: 0, max: 4 } }),
+      })
     }
     if (method === 'GET' && issue && path.endsWith('/workflow/status')) {
       return route.fulfill({
         json: response({
-          workflow: issueNumber === approvalIssueNumber
-            ? {
-                workflowRunId: 'wr-fragment-approval',
-                status: 'paused',
-                currentStage: 'check',
-                pendingWork: null,
-                stages: [],
-                availableActions: ['approve', 'reject'],
-              }
-            : null,
+          workflow:
+            issueNumber === approvalIssueNumber
+              ? {
+                  workflowRunId: 'wr-fragment-approval',
+                  status: 'paused',
+                  currentStage: 'check',
+                  pendingWork: null,
+                  stages: [],
+                  availableActions: ['approve', 'reject'],
+                }
+              : null,
         }),
       })
     }
@@ -103,10 +107,14 @@ async function mockApi(page: Page) {
     }
     if (method === 'GET' && issue && path.endsWith('/events')) return route.fulfill({ json: response([]) })
     if (method === 'GET' && issue && path.endsWith('/diff')) {
-      return route.fulfill({ json: response({ available: false, reason: 'not_started', message: 'No comparison is available.' }) })
+      return route.fulfill({
+        json: response({ available: false, reason: 'not_started', message: 'No comparison is available.' }),
+      })
     }
     if (method === 'GET' && issue && path.endsWith('/commits')) {
-      return route.fulfill({ json: response({ available: false, reason: 'not_started', message: 'No comparison is available.' }) })
+      return route.fulfill({
+        json: response({ available: false, reason: 'not_started', message: 'No comparison is available.' }),
+      })
     }
     if (method === 'GET' && issue && path.endsWith('/workspace-status')) {
       return route.fulfill({ json: response({ exists: false, reason: 'not_started' }) })
@@ -115,24 +123,44 @@ async function mockApi(page: Page) {
       return route.fulfill({ json: response({ vars: {}, stages: {} }) })
     }
     if (method === 'GET' && issue && path.endsWith('/workflow-profile')) {
-      return route.fulfill({ json: response({ issueNumber, projectId: project.id, hasCustomTemplate: false, yaml: null, workflowRunId: null, profileId: '' }) })
+      return route.fulfill({
+        json: response({
+          issueNumber,
+          projectId: project.id,
+          hasCustomTemplate: false,
+          yaml: null,
+          workflowRunId: null,
+          profileId: '',
+        }),
+      })
     }
     if (method === 'GET' && path === `/projects/${project.id}/variables`) {
       return route.fulfill({ json: response({ vars: {}, stages: {} }) })
     }
     if (method === 'GET' && path === `/projects/${project.id}/workflow-profile/default`) {
-      return route.fulfill({ json: response({ projectId: project.id, defaultWorkflowProfileId: 'mohist/local', disabledWorkflowProfileIds: [] }) })
+      return route.fulfill({
+        json: response({
+          projectId: project.id,
+          defaultWorkflowProfileId: 'mohist/local',
+          disabledWorkflowProfileIds: [],
+        }),
+      })
     }
     if (method === 'GET' && path.endsWith('/opencode/models')) {
       return route.fulfill({ json: response({ models: [], modelVariants: {} }) })
     }
-    if (method === 'GET' && path === `/projects/${project.id}/workflow-profiles`) return route.fulfill({ json: response([]) })
-    if (method === 'GET' && path === '/workflow-runs/wr-fragment-approval/sessions') return route.fulfill({ json: response([]) })
+    if (method === 'GET' && path === `/projects/${project.id}/workflow-profiles`)
+      return route.fulfill({ json: response([]) })
+    if (method === 'GET' && path === '/workflow-runs/wr-fragment-approval/sessions')
+      return route.fulfill({ json: response([]) })
     if (method === 'GET' && path === '/workflow-runs/wr-fragment-approval/yaml') {
       return route.fulfill({ json: response({ workflowRunId: 'wr-fragment-approval', yaml: '' }) })
     }
 
-    return route.fulfill({ status: 404, json: { success: false, error: `Unhandled fragment fixture: ${method} ${path}` } })
+    return route.fulfill({
+      status: 404,
+      json: { success: false, error: `Unhandled fragment fixture: ${method} ${path}` },
+    })
   })
 }
 
@@ -163,7 +191,10 @@ async function expectSectionVisible(page: Page, target: Locator) {
 
   const centerIsTarget = await target.evaluate((element) => {
     const box = element.getBoundingClientRect()
-    const hit = document.elementFromPoint(box.left + Math.min(box.width / 2, 20), box.top + Math.min(box.height / 2, 20))
+    const hit = document.elementFromPoint(
+      box.left + Math.min(box.width / 2, 20),
+      box.top + Math.min(box.height / 2, 20),
+    )
     return hit === element || (hit !== null && element.contains(hit))
   })
   expect(centerIsTarget).toBe(true)
