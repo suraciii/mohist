@@ -114,10 +114,12 @@ global serialization are not gate recovery mechanisms.
 
 ## Migration Status
 
-The current executor still uses one local runtime-oriented graph and raw track
-selection. The current CI workflow still owns project and framework commands.
-It does not yet produce application and Repository scope evidence or run Gate.
-These are implementation gaps, not alternate supported modes.
+The executor now validates the checked-in application plan, exposes the closed
+`test:app` scope, builds the selected application once, and passes the same run
+root to the existing track guard. Repository scope evidence, complete local
+`verify` aggregation, and CI producer/Gate wiring remain implementation work.
+The current CI workflow still owns project and framework commands. These are
+implementation gaps, not alternate supported modes.
 
 ## Platform Rules
 

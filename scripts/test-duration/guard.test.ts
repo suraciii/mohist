@@ -593,6 +593,16 @@ test('parseArgs accepts an internal run root and the canonical absolute deadline
   assert.equal(args.requireBuildStamp, true)
 })
 
+test('parseArgs accepts a closed application or repository scope', () => {
+  const application = parseArgs(['--application', 'server'])
+  assert.equal(application.application, 'server')
+  assert.equal(application.repository, false)
+
+  const repository = parseArgs(['--repository'])
+  assert.equal(repository.repository, true)
+  assert.equal(repository.application, undefined)
+})
+
 test('guard derives cancellation cleanup from the injected time value and never extends the hard deadline', () => {
   const hardDeadlineAt = 30_000
   assert.equal(cleanupDeadlineAt(10_000, hardDeadlineAt, 5_000), 20_000)

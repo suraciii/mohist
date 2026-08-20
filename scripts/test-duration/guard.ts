@@ -32,6 +32,7 @@ import {
   suiteDeadlinesAt,
   type SuiteDeadlines,
 } from './deadline.js'
+import { selectApplicationTracks, selectRepositoryTracks, validatePlan } from './plan.js'
 import {
   buildLedgerEnvironment,
   createExecutionRunId,
@@ -1077,6 +1078,8 @@ function focusedFlow(csprojPath: string, className: string): number {
 interface Args {
   mode: 'run' | 'check' | 'focused'
   tracks: string[]
+  application?: string
+  repository: boolean
   all: boolean
   artifactRoot?: string
   runRoot?: string
@@ -1089,6 +1092,8 @@ interface Args {
 export function parseArgs(argv: readonly string[]): Args {
   const tracks: string[] = []
   let mode: 'run' | 'check' | 'focused' = 'run'
+  let application: string | undefined
+  let repository = false
   let all = false
   let artifactRoot: string | undefined
   let runRoot: string | undefined
@@ -1102,6 +1107,9 @@ export function parseArgs(argv: readonly string[]): Args {
     else if (arg === '--all') all = true
     else if (arg === '--track') tracks.push(argv[++i])
     else if (arg.startsWith('--track=')) tracks.push(arg.slice('--track='.length))
+    else if (arg === '--application') application = argv[++i] ?? ''
+    else if (arg.startsWith('--application=')) application = arg.slice('--application='.length)
+    else if (arg === '--repository') repository = true
     else if (arg === '--artifact-root') artifactRoot = argv[++i]
     else if (arg.startsWith('--artifact-root=')) artifactRoot = arg.slice('--artifact-root='.length)
     else if (arg === '--run-root') runRoot = argv[++i]
@@ -1126,7 +1134,19 @@ export function parseArgs(argv: readonly string[]): Args {
       }
     }
   }
-  return { mode, tracks, all, artifactRoot, runRoot, suiteDeadlineMs, suiteDeadlineAtMs, requireBuildStamp, focused }
+  return {
+    mode,
+    tracks,
+    application,
+    repository,
+    all,
+    artifactRoot,
+    runRoot,
+    suiteDeadlineMs,
+    suiteDeadlineAtMs,
+    requireBuildStamp,
+    focused,
+  }
 }
 
 function isMatchingCanonicalBuild(root: string): boolean {
@@ -1182,6 +1202,8 @@ export async function main(
   const {
     mode,
     tracks,
+    application,
+    repository,
     all,
     artifactRoot: artifactRootArg,
     runRoot: runRootArg,
@@ -1201,7 +1223,7 @@ export async function main(
 
   const configText = readFileSync(resolve(repoRoot, 'test-duration.config.jsonc'), 'utf8')
   const config = parseSuiteConfig(configText)
-  const errors = validateConfig(config)
+  const errors = [...validateConfig(config), ...validatePlan(config)]
   if (errors.length > 0) {
     process.stderr.write(`invalid test-duration config:\n${errors.map((e) => `  - ${e}`).join('\n')}\n`)
     return 2
@@ -1239,9 +1261,32 @@ export async function main(
     process.stderr.write('--run-root and --artifact-root are mutually exclusive\n')
     return 2
   }
+  if (
+    application === '' ||
+    (application !== undefined && repository) ||
+    (application !== undefined && tracks.length > 0) ||
+    (repository && tracks.length > 0)
+  ) {
+    process.stderr.write('--application, --repository, and --track are mutually exclusive scopes\n')
+    return 2
+  }
 
   let selected: readonly TrackConfig[]
-  if (tracks.length > 0) {
+  if (application !== undefined) {
+    try {
+      selected = selectApplicationTracks(config, application).tracks
+    } catch (error) {
+      process.stderr.write(`${(error as Error).message}\n`)
+      return 2
+    }
+  } else if (repository) {
+    try {
+      selected = selectRepositoryTracks(config).tracks
+    } catch (error) {
+      process.stderr.write(`${(error as Error).message}\n`)
+      return 2
+    }
+  } else if (tracks.length > 0) {
     selected = config.tracks.filter((t) => tracks.includes(t.id))
   } else {
     // Default gate: enforced tracks only (fast, green). --all adds the

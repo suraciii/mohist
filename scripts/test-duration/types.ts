@@ -105,11 +105,24 @@ export interface BudgetRule {
 
 export type TrackKind = 'vitest' | 'dotnet-apphost' | 'dotnet-vstest' | 'report-only'
 
+export type SpecKind = 'Product' | 'Design'
+
+export type SpecLevel = 'L0' | 'L1'
+
+export type SpecTrackType = 'behavior' | 'architecture'
+
 export type ReportFormat = 'trx' | 'vitest'
 
 export interface TrackConfig {
   readonly id: string
   readonly kind: TrackKind
+  /** Semantic ownership metadata. Required by the canonical plan. */
+  readonly application?: string
+  readonly specKind?: SpecKind
+  readonly trackType?: SpecTrackType
+  readonly level?: SpecLevel
+  readonly architectureScope?: string
+  readonly resources?: readonly string[]
   readonly csproj?: string
   readonly apphost?: string
   readonly apphostArgs?: readonly string[]
@@ -127,10 +140,29 @@ export interface TrackConfig {
   readonly rules?: readonly BudgetRule[]
 }
 
+export interface ResourceLaneConfig {
+  readonly id: string
+  readonly resources: readonly string[]
+  readonly capacity: number
+}
+
+export interface CommandConfig {
+  readonly command: string
+  readonly args: readonly string[]
+}
+
+export interface TestPlanConfig {
+  readonly applications: readonly string[]
+  readonly repositoryScope: string
+  readonly resourceLanes: readonly ResourceLaneConfig[]
+  readonly applicationBuilds: Readonly<Record<string, readonly CommandConfig[]>>
+}
+
 export interface SuiteConfig {
   readonly suiteDeadlineMs: number
   readonly killGraceMs?: number
   readonly canonical?: CanonicalGateConfig
+  readonly plan?: TestPlanConfig
   readonly tracks: readonly TrackConfig[]
 }
 

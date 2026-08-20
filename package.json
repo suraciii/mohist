@@ -27,6 +27,7 @@
     "test:archscripts": "tsx --test scripts/*.test.ts scripts/test-duration/*.test.ts",
     "test:budget": "tsx scripts/test-duration/guard.ts",
     "test:budget:all": "tsx scripts/test-duration/guard.ts --all",
+    "test:app": "tsx scripts/test-duration/application.ts",
     "docs:check": "tsx scripts/check-docs.ts",
     "test:canonical": "tsx scripts/test-duration/canonical.ts",
     "check:filesizes": "tsx scripts/check-file-sizes.ts",

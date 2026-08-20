@@ -136,7 +136,7 @@ function createNativeTerminationSignal(): TerminationLease {
   }
 }
 
-async function runPhase(
+export async function runPhase(
   name: string,
   command: string,
   args: readonly string[],
@@ -250,7 +250,7 @@ function assertMatchingCleanSource(expected: SourceIdentity, actual: SourceIdent
   }
 }
 
-function phaseSucceeded(result: PhaseResult): boolean {
+export function phaseSucceeded(result: PhaseResult): boolean {
   return result.exitCode === 0 && !result.timedOut && !result.cancelled && result.cleanupComplete !== false
 }
 
