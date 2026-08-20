@@ -1,5 +1,5 @@
 ### Requirement: Per-execution Manager capability credentials
-The system SHALL issue two new short-lived Manager execution credentials for every Manager execution: one management credential and one reply-delivery credential. A new execution includes an initial turn, every new follow-up turn, and every recovered or replacement execution. Each credential SHALL be bound to the immutable Slack origin, current actor, Enrollment, Session, and an explicit validity window. The management credential SHALL authorize only the Manager CLI capability surface, and the reply credential SHALL authorize only the anchored Manager reply route.
+The system SHALL issue two new short-lived Manager execution credentials for every Manager execution: one management credential and one reply-delivery credential. A new execution includes an initial turn, every new follow-up turn, and every recovered, replacement, or expiry-recovery execution. Each credential SHALL be bound to the immutable Slack origin, current actor, Enrollment, Session, execution identity, deployment epoch, and an explicit validity window. The management credential SHALL authorize only the Manager CLI capability surface, and the reply credential SHALL authorize only the anchored Manager reply route.
 
 #### Scenario: Initial Manager turn receives a credential
 - **WHEN** an authorized Manager message starts an Agent execution
@@ -13,6 +13,33 @@ The system SHALL issue two new short-lived Manager execution credentials for eve
 - **WHEN** a Manager execution is recovered or replaced after a runtime, Runner, or process interruption
 - **THEN** the recovered execution receives newly issued management and reply credentials and cannot reuse either interrupted credential
 
+#### Scenario: Server restart invalidates a live execution
+- **WHEN** a Server process restarts gracefully or after a crash while a Manager execution has a live grant
+- **THEN** the new Server deployment epoch rejects both old credentials, connected or subsequently polling Runners destroy the old grant, broker, and launcher, and durable recovery starts at most one replacement execution from the immutable Slack origin with fresh credentials
+
+### Requirement: Restart and expiry recovery
+The system SHALL use one authoritative Server restart boundary for every deployment topology. Every Server process start advances the shared Manager deployment epoch before accepting Manager polls; a graceful shutdown revokes active leases, and an ungraceful restart invalidates them through the new epoch. Lease-store loss, epoch disagreement, or inability to notify or reconcile a Runner SHALL fail closed. Credential expiry SHALL close the current execution and trigger one durable recovery/new-turn transition that reauthorizes from the immutable Slack origin and receives new credentials; it SHALL never renew a live lease in place.
+
+#### Scenario: Graceful Server shutdown closes Manager work
+- **WHEN** the Server begins a graceful restart with Manager executions in flight
+- **THEN** it stops accepting new Manager claims, revokes both leases for each active execution, closes or instructs the Runner to close each broker boundary, and records each execution for recovery without reusing its grant
+
+#### Scenario: Crash recovery closes Manager work
+- **WHEN** the Server becomes unavailable without graceful shutdown and starts with a new deployment epoch
+- **THEN** every old lease is rejected even if its hash remains in the shared store, the next Runner heartbeat or poll discards the old grant and closes its broker/process boundary, and durable recovery can issue only a fresh replacement grant
+
+#### Scenario: Credential expires during an active turn
+- **WHEN** either Manager credential reaches its expiry while the Agent turn is active
+- **THEN** the current execution is closed, both leases and the broker are revoked, further invocations are rejected before side effects, and exactly one expiry-recovery/new-turn transition is recorded against the same immutable origin and current Session
+
+#### Scenario: Expiry recovery reauthorizes without replay
+- **WHEN** the expiry-recovery/new-turn transition is dispatched
+- **THEN** current actor, Enrollment, Session, and target authorization are evaluated again before issuing distinct credentials, the Agent receives only a non-secret recovery fact, and the prior prompt or any state-changing operation with an uncertain result is never automatically replayed
+
+#### Scenario: State-changing result is uncertain at restart or expiry
+- **WHEN** a state-changing Manager invocation may have reached the Server but its result is unknown because of restart, expiry, process loss, or transport failure
+- **THEN** durable recovery marks the operation outcome unknown, issues no automatic retry, and requires authoritative inspection or a new explicit Agent/user decision before another mutation
+
 ### Requirement: Runtime-only credential handling
 The plaintext Manager execution credentials SHALL be carried only in a one-shot, non-durable Server-to-Runner poll-response grant and injected only into the process boundary required by the Manager CLI. It MUST NOT be placed in Agent instructions, prompts, system facts, collaboration Skill content, transcripts, Session inputs or state, AgentJob durable state, Slack inbox or outbox payloads, audit records, logs, error messages, or any other durable or model-visible surface.
 
@@ -22,7 +49,7 @@ The plaintext Manager execution credentials SHALL be carried only in a one-shot,
 
 #### Scenario: Manager CLI runs inside the execution
 - **WHEN** the Agent invokes an allowlisted management command or `mo slack message send`
-- **THEN** the corresponding management or reply credential is available only through the per-execution private broker and Manager `mo` child-process boundary, while the Agent model, generic shell, Pi/OpenCode base environment, and command transcript receive no plaintext credential value
+- **THEN** the corresponding management or reply credential is available only through the per-execution private broker and Manager `mo` child-process boundary, while the Agent model, generic shell, Pi/OpenCode base environment, and command transcript receive no plaintext credential value; Pi uses the scoped Runner command path and OpenCode uses an isolated per-execution server/client process rather than the shared OpenCode runtime
 
 #### Scenario: Manager reply uses a separate authentication path
 - **WHEN** the Agent invokes `mo slack message send` for the bound Manager origin
@@ -44,8 +71,8 @@ Every Manager CLI invocation SHALL validate the presented credential, its expiry
 - **THEN** the invocation is authorized and the existing application service performs the operation
 
 #### Scenario: Credential is expired
-- **WHEN** a Manager CLI invocation presents a credential at or after its expiry
-- **THEN** the invocation is rejected before the management service mutates any resource
+- **WHEN** a Manager CLI invocation presents a credential at or after its expiry, including during an active turn
+- **THEN** the invocation is rejected before the management service mutates any resource, and the execution transitions to the durable expiry-recovery path rather than renewing the credential in place
 
 #### Scenario: Enrollment state changes
 - **WHEN** the Enrollment becomes disabled, removed, not ready, or otherwise loses Manager capability after credential issuance but before a CLI invocation
@@ -71,8 +98,8 @@ A credential validation or authorization failure SHALL fail closed, expose only 
 - **THEN** the operation is not attempted, the resource remains unchanged, and the Agent receives an authorization result rather than a success result
 
 ### Requirement: Manager execution grant cleanup
-The system SHALL destroy the per-execution broker and launcher after completion or cancellation and SHALL revoke both lease hashes on completion, cancellation, replacement, recovery, or expiry. A Runner or lease-store failure MUST fail closed.
+The system SHALL destroy the per-execution broker, launcher, and isolated OpenCode process tree after completion, cancellation, expiry, epoch change, or replacement, and SHALL revoke both lease hashes on completion, cancellation, replacement, recovery, expiry, or Server restart. A Runner, process-boundary, epoch, or lease-store failure MUST fail closed.
 
 #### Scenario: Execution ends
-- **WHEN** a Manager execution completes, is cancelled, or is replaced
-- **THEN** its broker and launcher are removed, both credentials are unusable, and no plaintext or broker handle is retained in Runner state
+- **WHEN** a Manager execution completes, is cancelled, expires, is replaced, or is invalidated by a Server restart
+- **THEN** its broker, launcher, and isolated runtime process are removed, both credentials are unusable, and no plaintext or broker handle is retained in Runner state
