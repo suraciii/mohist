@@ -3,18 +3,18 @@ using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Infrastructure.Data.Workflow;
 using Mohist.Server.Infrastructure.Data.Events;
 using Mohist.Server.Infrastructure.Events;
-using Mohist.Server.SpecTests.Support;
+using Mohist.Server.UnitTests.Support;
 using Mohist.Server.TestSupport;
 using Xunit;
 
-namespace Mohist.Server.SpecTests.Specs.Workflow.Storage;
+namespace Mohist.Server.UnitTests.Workflow.Storage;
 
 public sealed class WorkflowRunLegacyBindingSpecs
 {
     [Fact]
     public async Task LoadAsync_LegacyWorkflowProfileAnnotationRestoresRunBinding()
     {
-        using var database = TestSqliteDatabase.CreateMigrated();
+        using var database = TestSqliteDatabase.CreateModelSchema();
         var factory = new TestDbContextFactory(database.Options);
         var store = new WorkflowRunStore(
             factory,

@@ -49,6 +49,7 @@ public sealed class PatTokenSpecs(MohistIntegrationFixture fixture)
     [Fact]
     public async Task Create_WithoutTtl_DefaultsTo90Days()
     {
+        var requestStartedAt = fixture.TimeProvider.GetUtcNow();
         using var response = await fixture.Client.PostAsJsonAsync(CreatePath, new
         {
             name = "default-ttl",
@@ -58,8 +59,9 @@ public sealed class PatTokenSpecs(MohistIntegrationFixture fixture)
         Assert.Equal(HttpStatusCode.Created, response.StatusCode);
         var data = JsonDocument.Parse(await response.Content.ReadAsStringAsync())
             .RootElement.GetProperty("data");
-        Assert.Equal(
-            fixture.TimeProvider.GetUtcNow().AddDays(90),
+        AssertExpiryWithinRequestWindow(
+            requestStartedAt,
+            TimeSpan.FromDays(90),
             data.GetProperty("expiresAt").GetDateTimeOffset());
         Assert.Equal("operator", data.GetProperty("scope").GetString());
     }
@@ -137,6 +139,7 @@ public sealed class PatTokenSpecs(MohistIntegrationFixture fixture)
     [Fact]
     public async Task Create_WithExplicitTtl_ExpiresExactlyThatFarOut()
     {
+        var requestStartedAt = fixture.TimeProvider.GetUtcNow();
         using var response = await fixture.Client.PostAsJsonAsync(CreatePath, new
         {
             name = "explicit-ttl",
@@ -147,9 +150,22 @@ public sealed class PatTokenSpecs(MohistIntegrationFixture fixture)
         Assert.Equal(HttpStatusCode.Created, response.StatusCode);
         var data = JsonDocument.Parse(await response.Content.ReadAsStringAsync())
             .RootElement.GetProperty("data");
-        Assert.Equal(
-            fixture.TimeProvider.GetUtcNow().AddHours(720),
+        AssertExpiryWithinRequestWindow(
+            requestStartedAt,
+            TimeSpan.FromHours(720),
             data.GetProperty("expiresAt").GetDateTimeOffset());
+    }
+
+    private void AssertExpiryWithinRequestWindow(
+        DateTimeOffset requestStartedAt,
+        TimeSpan ttl,
+        DateTimeOffset expiresAt)
+    {
+        var requestFinishedAt = fixture.TimeProvider.GetUtcNow();
+        Assert.InRange(
+            expiresAt,
+            requestStartedAt.Add(ttl),
+            requestFinishedAt.Add(ttl));
     }
 
     [Theory]
