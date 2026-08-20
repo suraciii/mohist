@@ -2,19 +2,19 @@ using Microsoft.EntityFrameworkCore;
 using Mohist.Server.Infrastructure;
 using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Infrastructure.Data.Workflow;
-using Mohist.Server.SpecTests.Support;
+using Mohist.Server.UnitTests.Support;
 using Mohist.Server.TestSupport;
 using Mohist.Server.Workflow.Domain.Run;
 using Xunit;
 
-namespace Mohist.Server.SpecTests.Specs.Workflow.Storage;
+namespace Mohist.Server.UnitTests.Workflow.Storage;
 
 public sealed class WorkflowRunWorkProjectionDataUpgraderSpecs
 {
     [Fact]
     public async Task UpgradeAsync_BackfillsTerminalAndActiveRunsAndIsIdempotent()
     {
-        using var database = TestSqliteDatabase.CreateMigrated();
+        using var database = TestSqliteDatabase.CreateModelSchema();
         var terminal = TerminalRun("wr_projection_terminal");
         var active = ActiveRun("wr_projection_active");
         await InsertAsync(database,
@@ -67,7 +67,7 @@ public sealed class WorkflowRunWorkProjectionDataUpgraderSpecs
     [Fact]
     public async Task UpgradeAsync_PreflightFailureWritesNoProjection()
     {
-        using var database = TestSqliteDatabase.CreateMigrated();
+        using var database = TestSqliteDatabase.CreateModelSchema();
         var good = TerminalRun("wr_projection_good");
         const string badId = "wr_projection_bad";
         await InsertAsync(database,
