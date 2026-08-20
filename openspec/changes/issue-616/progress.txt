@@ -21,3 +21,10 @@
 - Full `packages/mohist-slack` typecheck, build, and test suite passed: 7 files, 75 tests.
 - `Mohist.Server` builds with `SkipWebBuild=true`; Server Slack specification suite passes.
 - `git diff --check` passes.
+
+## T-002
+
+- Added `SlackManagedBotAdmissionService` as a scoped, read-only Server service. It queries the active workspace enrollment only for explicitly classified Bot events with usable, non-conflicting author App/Bot-user metadata, then matches the Manager identity or every enrollment Agent App with non-empty identity, `DeletedAt == null`, workspace match, and `AppLifecycle != deleted`. Binding state is intentionally ignored.
+- Manager ingress evaluates managed-Bot admission after message identity validation and before direct-message, receiving-App authorization, sender validation, inbox admission, claims, actor access, conversation processing, and outbox creation. Managed matches return an ignored result without persistence; `kind` is exposed additively alongside the existing `decision` field for adapter compatibility.
+- Focused Server specs cover Manager self and cross-target Agent authors, pending/in-progress/bound/connection-deleted/conflict/deleting transitions, repeated delivery, no inbox/outbox side effects, receiver-only/conflicting/workspace-mismatched/deleted/tombstoned/identity-less authors, source conflict, and third-party Bot compatibility.
+- Native xUnit runner verification passed: `SlackManagedBotAdmissionSpecs` 3 tests and existing Manager ingress/application/conversation suites 9 tests. Server production and SpecTests builds pass with `SkipWebBuild=true`; `git diff --check` passes.
