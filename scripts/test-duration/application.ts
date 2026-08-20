@@ -188,6 +188,7 @@ export async function main(
         '--run-root',
         artifactRoot,
         '--require-build-stamp',
+        '--require-enforced',
         '--suite-deadline-at-ms',
         String(deadlines.hardDeadlineAt),
       ],

@@ -586,11 +586,13 @@ test('parseArgs accepts an internal run root and the canonical absolute deadline
     '/tmp/mohist-canonical-gate/run-1',
     '--suite-deadline-at-ms=301000',
     '--require-build-stamp',
+    '--require-enforced',
   ])
   assert.equal(args.all, true)
   assert.equal(args.runRoot, '/tmp/mohist-canonical-gate/run-1')
   assert.equal(args.suiteDeadlineAtMs, 301000)
   assert.equal(args.requireBuildStamp, true)
+  assert.equal(args.requireEnforced, true)
 })
 
 test('parseArgs accepts a closed application or repository scope', () => {

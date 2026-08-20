@@ -1086,6 +1086,7 @@ interface Args {
   suiteDeadlineMs?: number
   suiteDeadlineAtMs?: number
   requireBuildStamp: boolean
+  requireEnforced: boolean
   focused?: { csproj: string; className: string }
 }
 
@@ -1100,6 +1101,7 @@ export function parseArgs(argv: readonly string[]): Args {
   let suiteDeadlineMs: number | undefined
   let suiteDeadlineAtMs: number | undefined
   let requireBuildStamp = false
+  let requireEnforced = false
   let focused: { csproj: string; className: string } | undefined
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i]
@@ -1120,6 +1122,7 @@ export function parseArgs(argv: readonly string[]): Args {
     else if (arg.startsWith('--suite-deadline-at-ms='))
       suiteDeadlineAtMs = Number(arg.slice('--suite-deadline-at-ms='.length))
     else if (arg === '--require-build-stamp') requireBuildStamp = true
+    else if (arg === '--require-enforced') requireEnforced = true
     else if (arg === 'focused') {
       mode = 'focused'
       const csproj = argv[i + 1]
@@ -1145,6 +1148,7 @@ export function parseArgs(argv: readonly string[]): Args {
     suiteDeadlineMs,
     suiteDeadlineAtMs,
     requireBuildStamp,
+    requireEnforced,
     focused,
   }
 }
@@ -1210,6 +1214,7 @@ export async function main(
     suiteDeadlineMs: requestedDeadlineMs,
     suiteDeadlineAtMs: requestedDeadlineAtMs,
     requireBuildStamp,
+    requireEnforced,
     focused,
   } = parseArgs(argv)
 
@@ -1525,7 +1530,15 @@ export async function main(
         if (afterEvaluationFailure !== undefined) {
           evaluations.push(failedEvaluation(track, afterEvaluationFailure.replace('before', 'during')))
         } else {
-          evaluations.push(evaluation)
+          evaluations.push(
+            requireEnforced && !track.enforce
+              ? {
+                  ...evaluation,
+                  passed: false,
+                  reportError: evaluation.reportError ?? 'track is baseline-pending and is not enforced',
+                }
+              : evaluation,
+          )
         }
       } catch (error) {
         evaluations.push(
@@ -1585,8 +1598,22 @@ export async function main(
         continue
       }
     }
+    const evaluation = evaluateFromPlans(
+      track,
+      plansByPolicy.get(track.id) ?? [],
+      new Map(),
+      runtime,
+      artifactRoot,
+      currentIdentity,
+    )
     evaluations.push(
-      evaluateFromPlans(track, plansByPolicy.get(track.id) ?? [], new Map(), runtime, artifactRoot, currentIdentity),
+      requireEnforced && !track.enforce
+        ? {
+            ...evaluation,
+            passed: false,
+            reportError: evaluation.reportError ?? 'track is baseline-pending and is not enforced',
+          }
+        : evaluation,
     )
   }
   console.log('budget:')

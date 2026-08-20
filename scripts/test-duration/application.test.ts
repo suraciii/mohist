@@ -67,6 +67,7 @@ test('test:app builds once and hands the same run root to the application guard'
     '--run-root',
     artifactRoot,
     '--require-build-stamp',
+    '--require-enforced',
     '--suite-deadline-at-ms',
     '301000',
   ])
