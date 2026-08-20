@@ -28,11 +28,12 @@ namespace Mohist.Server.SpecTests.Specs.Issue.Grain;
 ///   fan-out from its persisted child snapshot.</item>
 /// </list>
 /// </summary>
+[Collection("IssueCompositeIntegration")]
 public class IssueCompositeAdvancementGrainSpecs
 {
-    private readonly MohistIntegrationFixture _fixture;
+    private readonly IsolatedMohistIntegrationFixture _fixture;
 
-    public IssueCompositeAdvancementGrainSpecs(MohistIntegrationFixture fixture)
+    public IssueCompositeAdvancementGrainSpecs(IsolatedMohistIntegrationFixture fixture)
     {
         _fixture = fixture;
     }

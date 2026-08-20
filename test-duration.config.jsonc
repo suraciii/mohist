@@ -96,11 +96,12 @@
         { "id": "unit", "absoluteMs": 500, "percentile": 95, "percentileMs": 50, "allowlist": [] }
       ]
     },
-    { "id": "server-spec", "kind": "dotnet-apphost", "trackType": "behavior", "application": "server", "specKind": "Product", "level": "L1", "resources": ["orleans", "sqlite", "server-runtime"], "csproj": "packages/server/tests/Mohist.Server.SpecTests/Mohist.Server.SpecTests.csproj", "apphostArgs": ["-parallel", "collections", "-parallelAlgorithm", "conservative", "-maxThreads", "2"], "report": "reports/server-spec.trx", "reportFormat": "trx", "deadlineMs": 240000, "enforce": true, "rules": [
+    { "id": "server-spec", "kind": "dotnet-apphost", "trackType": "behavior", "application": "server", "specKind": "Product", "level": "L1", "resources": ["orleans", "sqlite", "server-runtime"], "csproj": "packages/server/tests/Mohist.Server.SpecTests/Mohist.Server.SpecTests.csproj", "apphostArgs": ["-parallel", "collections", "-parallelAlgorithm", "conservative", "-maxThreads", "3"], "report": "reports/server-spec.trx", "reportFormat": "trx", "deadlineMs": 240000, "enforce": true, "rules": [
         { "id": "spec", "absoluteMs": 5000, "percentile": 95, "percentileMs": 500, "allowlist": [] }
       ]
     },
-    { "id": "server-arch", "kind": "dotnet-apphost", "trackType": "architecture", "application": "server", "specKind": "Design", "architectureScope": "server", "resources": [], "csproj": "packages/server/tests/Mohist.Server.ArchTests/Mohist.Server.ArchTests.csproj", "report": "reports/server-arch.trx", "reportFormat": "trx", "deadlineMs": 60000, "enforce": true, "rules": [
+    // Architecture source scans and Orleans specs compete during cold startup; keep this Resource lane isolated without serializing other applications.
+    { "id": "server-arch", "kind": "dotnet-apphost", "trackType": "architecture", "application": "server", "specKind": "Design", "architectureScope": "server", "resources": ["server-runtime"], "csproj": "packages/server/tests/Mohist.Server.ArchTests/Mohist.Server.ArchTests.csproj", "report": "reports/server-arch.trx", "reportFormat": "trx", "deadlineMs": 60000, "enforce": true, "rules": [
         { "id": "arch", "absoluteMs": 500 }
       ]
     },

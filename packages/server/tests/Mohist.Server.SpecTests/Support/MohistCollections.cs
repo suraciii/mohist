@@ -33,6 +33,9 @@ public class PublicProjectionIntegrationCollection
 [CollectionDefinition("RunnerMutationIntegration")]
 public class RunnerMutationIntegrationCollection : ICollectionFixture<MohistIntegrationFixture>;
 
+[CollectionDefinition("IssueCompositeIntegration")]
+public class IssueCompositeIntegrationCollection : ICollectionFixture<IsolatedMohistIntegrationFixture>;
+
 [CollectionDefinition("DeviceFlowIntegration")]
 public class DeviceFlowIntegrationCollection : ICollectionFixture<IsolatedMohistIntegrationFixture>;
 

@@ -12,6 +12,9 @@ namespace Mohist.Server.UnitTests.Slack;
 
 public sealed class SlackOutboundPortTests
 {
+    private static readonly Lazy<IReadOnlyList<Type>> BoundaryTypes = new(LoadSlackBoundaryTypes);
+    private static readonly Lazy<IReadOnlyList<MethodBase>> BoundaryMethods = new(LoadSlackBoundaryMethods);
+
     [Fact]
     public void Server_removes_the_legacy_wide_Slack_api_client()
     {
@@ -25,7 +28,7 @@ public sealed class SlackOutboundPortTests
     }
 
     [Fact]
-    public void Server_Slack_boundary_does_not_directly_use_protocol_clients_or_register_Slack_http_clients()
+    public void Server_Slack_boundary_does_not_expose_protocol_types()
     {
         var surfaceLeaks = SlackBoundaryTypes()
             .Where(type => !IsProductionTransport(type))
@@ -36,7 +39,11 @@ public sealed class SlackOutboundPortTests
             .Distinct(StringComparer.Ordinal)
             .ToArray();
         Assert.Empty(surfaceLeaks);
+    }
 
+    [Fact]
+    public void Server_Slack_boundary_does_not_call_protocol_clients_or_register_Slack_http_clients()
+    {
         var protocolCalls = SlackBoundaryMethods()
             .Where(method => !IsProductionTransport(method.DeclaringType!))
             .SelectMany(ReferencedMethods)
@@ -164,16 +171,22 @@ public sealed class SlackOutboundPortTests
         type == typeof(SlackApiTransport)
         || type.DeclaringType == typeof(SlackApiTransport);
 
-    private static IEnumerable<Type> SlackBoundaryTypes() => typeof(ISlackAppManagementPort).Assembly
+    private static IReadOnlyList<Type> SlackBoundaryTypes() => BoundaryTypes.Value;
+
+    private static IReadOnlyList<MethodBase> SlackBoundaryMethods() => BoundaryMethods.Value;
+
+    private static IReadOnlyList<Type> LoadSlackBoundaryTypes() => typeof(ISlackAppManagementPort).Assembly
         .GetTypes()
         .Where(type => type == typeof(MohistServiceRegistration)
             || type.Namespace?.StartsWith("Mohist.Server.Slack", StringComparison.Ordinal) == true
-            || type.Namespace?.StartsWith("Mohist.Server.Infrastructure.Slack", StringComparison.Ordinal) == true);
+            || type.Namespace?.StartsWith("Mohist.Server.Infrastructure.Slack", StringComparison.Ordinal) == true)
+        .ToArray();
 
-    private static IEnumerable<MethodBase> SlackBoundaryMethods() => SlackBoundaryTypes()
+    private static IReadOnlyList<MethodBase> LoadSlackBoundaryMethods() => SlackBoundaryTypes()
         .SelectMany(type => type.GetConstructors(BindingFlags.Instance | BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic)
             .Cast<MethodBase>()
-            .Concat(type.GetMethods(BindingFlags.Instance | BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.DeclaredOnly)));
+            .Concat(type.GetMethods(BindingFlags.Instance | BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.DeclaredOnly)))
+        .ToArray();
 
     private static IEnumerable<Type> ReferencedSurfaceTypes(Type type)
     {
