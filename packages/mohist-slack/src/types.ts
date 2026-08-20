@@ -234,11 +234,7 @@ export interface SlackWebClient {
   reactions?: {
     add(input: { channel: string; name: string; timestamp: string }): Promise<{ ok?: boolean; error?: string }>
     remove(input: { channel: string; name: string; timestamp: string }): Promise<{ ok?: boolean; error?: string }>
-    get?(input: {
-      channel: string
-      timestamp: string
-      full?: boolean
-    }): Promise<{
+    get?(input: { channel: string; timestamp: string; full?: boolean }): Promise<{
       ok?: boolean
       error?: string
       message?: { reactions?: readonly { name?: string; users?: readonly string[] }[] }
