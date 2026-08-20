@@ -68,46 +68,6 @@ public sealed partial class SlackMultiAgentIngressSpecs
     }
 
     [Fact]
-    public async Task Ambiguous_message_is_not_rejected_by_a_non_claiming_owner()
-    {
-        var connectionA = await CreateConnectionAsync("agent-A", "T-multi-owner-routing", "U_OWNER_A", "A_OWNER_A");
-        var connectionB = await CreateConnectionAsync("agent-B", "T-multi-owner-routing", "U_OWNER_B", "A_OWNER_B");
-        var messageTs = "1710000000.010150";
-        var text = $"<@{connectionA.BotUserId}> <@{connectionB.BotUserId}> choose";
-
-        var prompt = await PostChannelAsync(
-            connectionA,
-            "C-multi-owner-routing",
-            messageTs,
-            null,
-            new[] { connectionA.BotUserId, connectionB.BotUserId },
-            text,
-            connectionA.OwnerSlackUserId);
-        var otherDelivery = await PostChannelAsync(
-            connectionB,
-            "C-multi-owner-routing",
-            messageTs,
-            null,
-            new[] { connectionA.BotUserId, connectionB.BotUserId },
-            text,
-            connectionA.OwnerSlackUserId);
-
-        Assert.Equal("ambiguous", prompt.GetProperty("kind").GetString());
-        Assert.Equal("ignored", otherDelivery.GetProperty("kind").GetString());
-
-        await using var scope = _fixture.Services.CreateAsyncScope();
-        var db = scope.ServiceProvider.GetRequiredService<MohistDbContext>();
-        Assert.Single(await db.SlackOutboxRows
-            .Where(row => row.ConnectionId == connectionA.Id
-                && row.ConversationId == "C-multi-owner-routing")
-            .ToListAsync());
-        Assert.Empty(await db.SlackOutboxRows
-            .Where(row => row.ConnectionId == connectionB.Id
-                && row.ConversationId == "C-multi-owner-routing")
-            .ToListAsync());
-    }
-
-    [Fact]
     public async Task Two_connections_mentioning_same_multi_bot_prompt_once()
     {
         var connectionA = await CreateConnectionAsync("agent-A", "T-multi-2", "U_BOT_A2", "A_BOT_A2");

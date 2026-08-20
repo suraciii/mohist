@@ -37,6 +37,9 @@
     <EmbeddedResource Include="..\Mohist.Server.SpecTests\Specs\**\*.cs">
       <LogicalName>TestSources/Mohist.Server.SpecTests/Specs/%(RecursiveDir)%(Filename)%(Extension)</LogicalName>
     </EmbeddedResource>
+    <EmbeddedResource Include="..\Mohist.Server.UnitTests\**\*.cs">
+      <LogicalName>TestSources/Mohist.Server.UnitTests/%(RecursiveDir)%(Filename)%(Extension)</LogicalName>
+    </EmbeddedResource>
     <EmbeddedResource Include="comment-reference-baseline.json">
       <LogicalName>CommentReferenceBaseline.json</LogicalName>
     </EmbeddedResource>

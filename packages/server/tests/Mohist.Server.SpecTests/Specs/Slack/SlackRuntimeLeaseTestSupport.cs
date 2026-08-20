@@ -7,6 +7,7 @@ using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Infrastructure.Data.Slack;
 using Mohist.Server.Infrastructure.Security.Secrets;
 using Mohist.Server.Slack.Domain;
+using Mohist.Server.Slack.Services;
 using Mohist.Server.SpecTests.Support;
 using Mohist.Server.TestSupport;
 
@@ -14,8 +15,10 @@ namespace Mohist.Server.SpecTests.Specs.Slack;
 
 /// <summary>
 /// Shared helper for specs that exercise the adapter-facing routes now gated
-/// on a runtime Socket lease. Acquires a real production runtime lease over
-/// HTTP (never a test bypass) for a fully provisioned, verified target.
+/// on a runtime Socket lease. Acquires a real production runtime lease from
+/// the service boundary (never a test bypass) for a fully provisioned,
+/// verified target. The route contract is covered by its own Specs; setup
+/// for ingress Specs does not need to pay HTTP serialization and middleware.
 /// </summary>
 public static class SlackRuntimeLeaseTestSupport
 {
@@ -76,19 +79,14 @@ public static class SlackRuntimeLeaseTestSupport
     public static async Task<string> AcquireConnectionLeaseAsync(
         MohistIntegrationFixture fixture, string projectId, string connectionId)
     {
-        using var response = await fixture.Client.PostAsJsonAsync("/api/slack-adapter/leases/acquire", new
-        {
-            kind = Mohist.Server.Slack.Domain.SlackLeaseKind.Runtime,
-            target = new
-            {
-                kind = Mohist.Server.Slack.Domain.SlackLeaseTargetKind.Connection,
-                projectId,
-                connectionId,
-            },
-            adapterId = AdapterId,
-        });
-        response.EnsureSuccessStatusCode();
-        return await ReadLeaseIdAsync(response);
+        await using var scope = fixture.Services.CreateAsyncScope();
+        var service = scope.ServiceProvider.GetRequiredService<SlackAdapterLeaseService>();
+        var result = await service.AcquireRuntimeLeaseAsync(
+            "spec-operator",
+            new SlackLeaseTargetRef.Connection(projectId, connectionId),
+            AdapterId);
+        return result?.LeaseId
+            ?? throw new InvalidOperationException($"Connection '{connectionId}' could not acquire a runtime lease.");
     }
 
     public static async Task<string> AcquireManagerLeaseAsync(

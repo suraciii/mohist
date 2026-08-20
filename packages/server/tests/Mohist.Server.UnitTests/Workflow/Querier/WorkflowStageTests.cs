@@ -1,0 +1,247 @@
+using System.Text.Json;
+using Microsoft.EntityFrameworkCore;
+using Mohist.Server.Infrastructure;
+using Mohist.Server.Infrastructure.Data.Db;
+using Mohist.Server.Infrastructure.Data.Workflow;
+using Mohist.Server.TestSupport;
+using Mohist.Server.Workflow.Domain;
+using Mohist.Server.Workflow.Domain.Run;
+using Mohist.Workflow.Definition;
+using Mohist.Server.Workflow.Services;
+using Xunit;
+
+namespace Mohist.Server.UnitTests.Workflow.Querier;
+
+public class WorkflowStageSpecs : WorkflowDefinitionResolverTestFactory
+{
+    [Fact]
+    public async Task LoadStageSpecsAsync_ReturnsTasksAndChecksForStage_FromProjectTemplate()
+    {
+        var runId = "wr_stage_specs_proj";
+        var templateJson = SerializeDefinitionWithStages("specs-template",
+            ("plan", new[]
+            {
+                new TaskDefinition("draft", "Draft", "spec/task"),
+            }, new[]
+            {
+                new CheckDefinition("plan-ok", "Plan OK", "spec/check"),
+            }, requiresApproval: false),
+            ("build", new[]
+            {
+                new TaskDefinition("compile", "Compile", "spec/task"),
+                new TaskDefinition("test", "Test", "spec/task"),
+            }, new[]
+            {
+                new CheckDefinition("build-ok", "Build OK", "spec/check"),
+            }, requiresApproval: false));
+
+        await SeedProjectTemplateAsync("specs_proj", runId, "specs-template", templateJson);
+
+        var build = await DefinitionResolver.LoadStageSpecsAsync(runId, "build");
+
+        Assert.Equal("build", build.Stage);
+        Assert.Equal(new[] { "compile", "test" }, build.Tasks.Select(t => t.Id).ToArray());
+        Assert.Equal(new[] { "build-ok" }, build.Checks.Select(c => c.Id).ToArray());
+        Assert.Equal("sequential", build.LockBehavior);
+        Assert.Equal(new[] { "ci-pool" }, build.Resources);
+    }
+
+    [Fact]
+    public async Task LoadStageSpecsAsync_HonorsIssueCustomTemplate_PerStage()
+    {
+        // Issue-level template can replace the project default. The narrow API
+        // re-runs the cascade on every call so the choice is honored
+        // even when stage-init runs after StartAsync has already loaded
+        // a different (e.g. project default) structure.
+        var runId = "wr_stage_specs_issue";
+        var projectJson = SerializeDefinitionWithStages("project-tmpl",
+            ("build", new[]
+            {
+                new TaskDefinition("compile", "Compile", "spec/task"),
+            }, Array.Empty<CheckDefinition>(), requiresApproval: false));
+        var issueJson = SerializeDefinitionWithStages("issue-custom",
+            ("build", new[]
+            {
+                new TaskDefinition("replacement-task", "Replacement", "spec/task"),
+            }, Array.Empty<CheckDefinition>(), requiresApproval: false));
+
+        await SeedIssueOverProjectTemplateAsync(
+            "iss_proj", 1, runId,
+            issueTemplateJson: issueJson,
+            projectDefaultTemplateId: "project-tmpl",
+            projectTemplateJson: projectJson);
+
+        var build = await DefinitionResolver.LoadStageSpecsAsync(runId, "build");
+
+        Assert.Equal(new[] { "replacement-task" }, build.Tasks.Select(t => t.Id).ToArray());
+    }
+
+    [Fact]
+    public async Task LoadStageSpecsAsync_RerunsCascadeBetweenCalls_HotReloadsProfileEdits()
+    {
+        // The hot-reload promise: profile edits between two calls MUST be
+        // visible to the second caller (since this API re-runs the cascade).
+        var runId = "wr_stage_specs_hot_reload";
+        var templateJson = SerializeDefinitionWithStages("hot-template",
+            ("build", new[]
+            {
+                new TaskDefinition("original-task", "Original", "spec/task"),
+            }, Array.Empty<CheckDefinition>(), requiresApproval: false));
+
+        await SeedProjectTemplateAsync("hot_proj", runId, "hot-template", templateJson);
+
+        var before = await DefinitionResolver.LoadStageSpecsAsync(runId, "build");
+        Assert.Equal(new[] { "original-task" }, before.Tasks.Select(t => t.Id).ToArray());
+
+        // Mutate the project template to a new task — next call must see it.
+        var updatedJson = SerializeDefinitionWithStages("hot-template",
+            ("build", new[]
+            {
+                new TaskDefinition("replacement-task", "Replacement", "spec/task"),
+                new TaskDefinition("follow-up-task", "Follow Up", "spec/task"),
+            }, Array.Empty<CheckDefinition>(), requiresApproval: false));
+        await UpdateProjectTemplateAsync("hot_proj", "hot-template", updatedJson);
+
+        var after = await DefinitionResolver.LoadStageSpecsAsync(runId, "build");
+        Assert.Equal(new[] { "replacement-task", "follow-up-task" }, after.Tasks.Select(t => t.Id).ToArray());
+    }
+
+    [Fact]
+    public async Task LoadStageSpecsAsync_ThrowsWhenStageMissing()
+    {
+        var runId = "wr_stage_specs_missing";
+        var templateJson = SerializeDefinitionWithStages("missing-template",
+            ("build", new[]
+            {
+                new TaskDefinition("compile", "Compile", "spec/task"),
+            }, Array.Empty<CheckDefinition>(), requiresApproval: false));
+
+        await SeedProjectTemplateAsync("missing_proj", runId, "missing-template", templateJson);
+
+        var ex = await Assert.ThrowsAsync<WorkflowDefinitionResolutionException>(
+            () => DefinitionResolver.LoadStageSpecsAsync(runId, "no-such-stage"));
+
+        Assert.Equal(
+            WorkflowDefinitionResolutionException.ResolutionReason.NoStageDefinition,
+            ex.Reason);
+        Assert.Contains("no-such-stage", ex.Message);
+    }
+
+    [Fact]
+    public async Task LoadStageSpecsAsync_SnapshotBackedRunDoesNotHotReloadMissingStage()
+    {
+        var runId = "wr_snapshot_stage_boundary";
+        var currentProfile = SerializeDefinitionWithStages(
+            "mohist/local",
+            ("plan", new[] { new TaskDefinition("edited-plan", "Edited plan", "spec/task") }, Array.Empty<CheckDefinition>(), false),
+            ("build", new[] { new TaskDefinition("verify", "Verify", "core/script") }, Array.Empty<CheckDefinition>(), false));
+        await SeedProjectTemplateAsync("snapshot_stage_boundary", runId, "mohist/local", currentProfile);
+
+        var boundDefinition = new WorkflowDefinition(new[]
+        {
+            new StageDefinition(
+                "build",
+                new[] { new TaskDefinition("verify", "Verify", "core/script") },
+                Array.Empty<CheckDefinition>()),
+        });
+        var run = new WorkflowRun
+        {
+            Id = runId,
+            Metadata = new WorkflowRunMetadata(
+                "Snapshot stage boundary",
+                DateTimeOffset.UnixEpoch,
+                ProjectId: "snapshot_stage_boundary",
+                IssueNumber: 1),
+            Status = WorkflowRunStatus.Failed,
+            WorkflowProfileId = "mohist/local",
+            CurrentStageId = "build",
+            Stages = new List<StageRun>(),
+            BoundWorkflowDefinitionJson = WorkflowYamlSerializer.ToJson(boundDefinition),
+        };
+        await ReplaceRunStateJsonAsync(runId, JSON.Serialize(run));
+
+        var ex = await Assert.ThrowsAsync<WorkflowDefinitionResolutionException>(
+            () => DefinitionResolver.LoadStageSpecsAsync(runId, "plan"));
+
+        Assert.Equal(
+            WorkflowDefinitionResolutionException.ResolutionReason.NoStageDefinition,
+            ex.Reason);
+        Assert.Contains("bound workflow snapshot", ex.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task LoadStageSpecsAsync_WhenAllProfilesDisabled_ThrowsActionableErrorInsteadOfFallingBackToLocal()
+    {
+        var runId = "wr_all_disabled_stage_specs";
+        await SeedWithoutRunAsync(projectId: "proj-all-disabled-stage-specs", issueNumber: 1,
+            issueTemplateJson: null,
+            issueSourceTemplateId: null,
+            projectDefaultTemplateId: null,
+            disabledWorkflowProfileIds: ["mohist/local", "mohist/github-pr"]);
+
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(
+            () => DefinitionResolver.LoadStageSpecsAsync(runId, "plan", "proj-all-disabled-stage-specs", 1));
+
+        Assert.Contains("Enable a workflow first", ex.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task LoadStageSpecsAsync_ExistingRunKeepsOriginalProfileAfterItIsDisabled()
+    {
+        var runId = "wr_existing_disabled_stage_specs";
+        await SeedAsync(projectId: "proj-existing-disabled-stage-specs", issueNumber: 1, runId: runId,
+            issueTemplateJson: null,
+            issueSourceTemplateId: null,
+            projectDefaultTemplateId: null,
+            issueWorkflowProfileId: "mohist/local",
+            disabledWorkflowProfileIds: ["mohist/local", "mohist/github-pr"]);
+
+        var integrate = await DefinitionResolver.LoadStageSpecsAsync(runId, "integrate");
+
+        Assert.Contains(integrate.Tasks, t => t.Id == "integrate:rebase");
+        Assert.DoesNotContain(integrate.Tasks, t => t.Id == "merge-pr");
+    }
+
+    [Fact]
+    public async Task LoadStageSpecsAsync_ReloadedLegacyRunKeepsBindingAfterSelectionsChange()
+    {
+        var runId = "wr_legacy_profile_live_resolution";
+        await SeedAsync(
+            projectId: "proj-legacy-profile-live-resolution",
+            issueNumber: 1,
+            runId: runId,
+            issueTemplateJson: null,
+            projectDefaultTemplateId: null,
+            issueWorkflowProfileId: "mohist/local");
+
+        await ReplaceRunStateJsonAsync(runId, """
+            {
+              "id":"wr_legacy_profile_live_resolution",
+              "metadata":{"createdAt":"1970-01-01T00:00:00+00:00","annotations":{"projectId":"proj-legacy-profile-live-resolution","issueNumber":"1","workflowProfileId":"mohist/local"}},
+              "status":"Failed",
+              "stages":[]
+            }
+            """);
+
+        await using (var upgradeDb = new MohistDbContext(Database.Options))
+        {
+            await WorkflowRunStateDataUpgrader.UpgradeAsync(
+                upgradeDb,
+                backup: static (_, _) => Task.FromResult("test-backup"));
+        }
+
+        await using (var db = new MohistDbContext(Database.Options))
+        {
+            var issue = await db.Issues.SingleAsync(x => x.WorkflowRunId == runId);
+            issue.State = issue.State.Replace("mohist/local", "mohist/github-pr", StringComparison.Ordinal);
+            await db.SaveChangesAsync();
+        }
+
+        var integrate = await CreateDefinitionResolver().LoadStageSpecsAsync(
+            runId, "integrate", "proj-legacy-profile-live-resolution", 1);
+
+        Assert.Contains(integrate.Tasks, t => t.Id == "integrate:rebase");
+        Assert.DoesNotContain(integrate.Tasks, t => t.Id == "merge-pr");
+    }
+
+}

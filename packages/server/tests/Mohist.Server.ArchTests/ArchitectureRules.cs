@@ -688,6 +688,31 @@ public class ArchitectureRules
             string.Join(", ", violations));
     }
 
+    [Fact]
+    public void ServerL0Tests_MustNotStartApplicationHosts()
+    {
+        var forbiddenMarkers = new[]
+        {
+            "WebApplicationFactory",
+            "Microsoft.AspNetCore.Mvc.Testing",
+            "TestServer",
+            "MohistIntegrationFixture",
+            "IsolatedMohistIntegrationFixture",
+            "InProcessTestCluster",
+        };
+
+        var violations = EmbeddedSources("TestSources/Mohist.Server.UnitTests/")
+            .Where(source => forbiddenMarkers.Any(source.Content.Contains))
+            .Select(source => source.Path)
+            .OrderBy(path => path)
+            .ToList();
+
+        Assert.True(
+            violations.Count == 0,
+            "Server L0 tests must not start application hosts or integration fixtures. " +
+            "Violations: " + string.Join(", ", violations));
+    }
+
     private static IReadOnlyList<EmbeddedSource> EmbeddedSources(string prefix)
         => ArchitectureRulesSupport.EmbeddedSources(prefix);
 
