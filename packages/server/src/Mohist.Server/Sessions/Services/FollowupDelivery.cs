@@ -37,6 +37,7 @@ public sealed record FollowupDeliveryRequest(
     IReadOnlyList<AgentSessionInputAttachmentDescriptor>? Attachments = null,
     string? InputId = null,
     AgentSlackExecutionContext? SlackExecutionContext = null,
-    string? TurnId = null);
+    string? TurnId = null,
+    string ExecutionSource = AgentExecutionSources.NonSlack);
 
 public sealed record FollowupDeliveryResult(bool Accepted);

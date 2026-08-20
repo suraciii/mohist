@@ -9,7 +9,7 @@ import type { BindingRecoveryCoordinator } from './binding-recovery.js'
 import type { RuntimeTurnRegistry } from './runtime-turn-registry.js'
 import { SkillResolver } from './skill-resolver.js'
 import { buildExecutionEnvelope } from './execution-envelope.js'
-import { inlineSlackCollaborationSkill, readSlackExecutionContext } from './slack-execution-context.js'
+import { inlineSlackCollaborationSkill, readExecutionSourceContext } from './slack-execution-context.js'
 import {
   attachmentManifestEnvelope,
   buildAttachmentContext,
@@ -24,12 +24,17 @@ import {
   WorkspaceHomeClaimedError,
 } from './workspace-entity.js'
 import { executeOpenCodeTurn, executePiTurn, failureResult, type AgentJobTurnDeps } from './agent-job-turn.js'
+import { runnerLogger } from '../system/logger.js'
+
+const executionSourceLog = runnerLogger.child('execution-source')
 
 export { projectTurnToWorkItemResult } from './agent-job-turn.js'
 
 export type ModelRetryWaiter = (delayMs: number, signal: AbortSignal) => Promise<boolean>
 
 export interface AgentJobExecutorOptions {
+  /** Source-less dispatches are accepted only during the bounded rollout window. */
+  readonly strictExecutionSourceValidation?: boolean
   readonly modelRetryInitialDelayMs?: number
   readonly modelRetryMaxDelayMs?: number
   readonly waitForModelRetry?: ModelRetryWaiter
@@ -87,6 +92,13 @@ export class AgentJobExecutor {
     }
 
     const payload = work.with ?? null
+    const sourceContext = readExecutionSourceContext(payload, {
+      strict: this.options.strictExecutionSourceValidation === true,
+    })
+    if (sourceContext.kind === 'invalid') return failureResult('invalid-input', sourceContext.message)
+    if (sourceContext.kind === 'legacy')
+      executionSourceLog.warn('accepted source-less AgentJob dispatch through the bounded legacy path')
+    const slackContext = sourceContext.slackExecutionContext
     const prompt = readPrompt(payload)
     const attachmentDescriptors = readAttachmentDescriptors(payload)
     if (!prompt && attachmentDescriptors.length === 0) {
@@ -98,8 +110,6 @@ export class AgentJobExecutor {
 
     const instructions = readOptionalString(payload, 'instructions')
     const skillNames = readSkillNames(payload)
-    const slackContext = readSlackExecutionContext(payload)
-    if (slackContext.kind === 'invalid') return failureResult('invalid-input', slackContext.message)
 
     const runtimeName = readRuntime(payload)
     const modelInput = readOptionalString(payload, 'model')
@@ -138,10 +148,9 @@ export class AgentJobExecutor {
 
     const resolvedSkills = await this.skillResolver.resolve(skillNames, workDir)
     if (!resolvedSkills.ok) return failureResult(resolvedSkills.code, resolvedSkills.message)
-    const skills =
-      slackContext.kind === 'resolved'
-        ? [...resolvedSkills.skills, inlineSlackCollaborationSkill(slackContext.value)]
-        : resolvedSkills.skills
+    const skills = slackContext
+      ? [...resolvedSkills.skills, inlineSlackCollaborationSkill(slackContext)]
+      : resolvedSkills.skills
 
     let attachmentDelivery: readonly DeliveredAttachment[]
     try {
@@ -158,7 +167,7 @@ export class AgentJobExecutor {
         prompt ?? '',
         instructions,
         skills,
-        slackContext.kind === 'resolved' ? slackContext.value : null,
+        slackContext,
         work.agentSessionStartup,
         workspaceBinding.kind === 'named' ? buildWorkspaceAnchor(workspaceBinding.workDir) : null,
       ),

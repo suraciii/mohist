@@ -17,6 +17,30 @@ function it(name: string, body: (fileSystem: MemoryFileSystem) => Promise<void>)
 }
 
 describe('follow-up attachment delivery', () => {
+  it('rejects an explicit Slack follow-up without context before resolver or enqueue', async () => {
+    const resolver = vi.fn()
+    const enqueue = vi.fn()
+    const receive = createFollowupHandler({
+      followupTargetResolver: resolver,
+      agentSessionRuntimeEventOutbox: { ready: () => true, enqueueBeforeExecution: enqueue } as never,
+      openCodeRuntime: (() => ({ ready: () => true })) as never,
+      strictExecutionSourceValidation: true,
+    })
+
+    const result = await receive({
+      executionSource: 'slack',
+      slackExecutionContext: null,
+      text: 'continue',
+      operationId: 'operation-1',
+      turnId: 'turn-1',
+      target: { kind: 'generic', projectId: 'project-1', sessionId: 'session-1' },
+    } as never)
+
+    expect(result).toEqual({ accepted: false, error: 'unavailable' })
+    expect(resolver).not.toHaveBeenCalled()
+    expect(enqueue).not.toHaveBeenCalled()
+  })
+
   it('executes an attachment-only turn through the owning input scope', async (fileSystem) => {
     const workDir = '/virtual/mohist-followup-attachment'
     const runtimeFollowup = vi.fn(async (request: { prompt: string; fileParts?: readonly unknown[] }) => ({

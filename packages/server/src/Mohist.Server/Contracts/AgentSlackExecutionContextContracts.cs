@@ -4,12 +4,26 @@ using Orleans;
 
 namespace Mohist.Server.Contracts;
 
+public static class AgentExecutionSources
+{
+    public const string Slack = "slack";
+    public const string NonSlack = "non-slack";
+    public const string Version1Capability = "execution-source-v1";
+}
+
 public static class SlackCollaborationSkillCatalog
 {
     public const string Name = "mohist-slack-collaboration";
     public const string Version = "1.0.0";
+    public const string ContentHash = "dedf18a796543ade06a9e0ece00c086577153e1e633f868c099b01cf910d641b";
 
     private const string AssetSuffix = ".Agent.Services.Assets.mohist-slack-collaboration.skill.md";
+    private static readonly UTF8Encoding Utf8 = new(encoderShouldEmitUTF8Identifier: false, throwOnInvalidBytes: true);
+    private static readonly IReadOnlyDictionary<string, string> PinnedContentHashes =
+        new Dictionary<string, string>(StringComparer.Ordinal)
+        {
+            [Version] = ContentHash,
+        };
 
     public static SlackCollaborationSkill Resolve()
     {
@@ -21,9 +35,27 @@ public static class SlackCollaborationSkillCatalog
 
         using var stream = assembly.GetManifestResourceStream(resourceName)
             ?? throw new InvalidOperationException($"Embedded Slack collaboration asset '{resourceName}' could not be opened.");
-        using var reader = new StreamReader(stream);
-        var instructions = reader.ReadToEnd();
-        var hash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(instructions))).ToLowerInvariant();
+        using var buffer = new MemoryStream();
+        stream.CopyTo(buffer);
+        return ResolveEmbeddedBytes(buffer.ToArray());
+    }
+
+    internal static SlackCollaborationSkill ResolveAssetForTesting(string instructions) =>
+        ResolveEmbeddedBytes(Utf8.GetBytes(instructions));
+
+    private static SlackCollaborationSkill ResolveEmbeddedBytes(byte[] bytes)
+    {
+        if (!PinnedContentHashes.TryGetValue(Version, out var expectedHash))
+            throw new InvalidOperationException($"No pinned Slack collaboration Skill digest exists for version '{Version}'.");
+
+        var instructions = Utf8.GetString(bytes);
+        var hash = Convert.ToHexString(SHA256.HashData(bytes)).ToLowerInvariant();
+        if (!StringComparer.Ordinal.Equals(hash, expectedHash))
+        {
+            throw new InvalidOperationException(
+                $"Embedded Slack collaboration Skill version '{Version}' drifted from its pinned content digest.");
+        }
+
         return new SlackCollaborationSkill(Name, Version, instructions, hash);
     }
 }
@@ -60,22 +92,33 @@ public static class SlackExecutionContextFactory
     public static AgentSlackExecutionContext Create(
         string workspaceId,
         string conversationId,
-        string? threadRootMessageId,
+        string threadRootMessageId,
         string triggeringMessageId,
         string initiatingMemberId,
         string connectionId,
         string sessionId,
-        string dispatchRef) =>
-        new(
+        string dispatchRef)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(workspaceId);
+        ArgumentException.ThrowIfNullOrWhiteSpace(conversationId);
+        ArgumentException.ThrowIfNullOrWhiteSpace(threadRootMessageId);
+        ArgumentException.ThrowIfNullOrWhiteSpace(triggeringMessageId);
+        ArgumentException.ThrowIfNullOrWhiteSpace(initiatingMemberId);
+        ArgumentException.ThrowIfNullOrWhiteSpace(connectionId);
+        ArgumentException.ThrowIfNullOrWhiteSpace(sessionId);
+        ArgumentException.ThrowIfNullOrWhiteSpace(dispatchRef);
+
+        return new(
             AgentSlackExecutionContext.CurrentVersion,
             new SlackReplyAnchor(
                 workspaceId,
                 conversationId,
-                string.IsNullOrWhiteSpace(threadRootMessageId) ? triggeringMessageId : threadRootMessageId,
+                threadRootMessageId,
                 triggeringMessageId,
                 initiatingMemberId,
                 connectionId,
                 sessionId,
                 dispatchRef),
             SlackCollaborationSkillCatalog.Resolve());
+    }
 }
