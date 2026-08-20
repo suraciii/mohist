@@ -17,6 +17,13 @@ The Manager Agent SHALL access management behavior only through an explicit allo
 - **WHEN** the Manager Agent attempts a command outside the allowlist, including arbitrary Server API access
 - **THEN** the command is rejected before any management side effect occurs and the rejection is returned as an actionable authorization or availability result
 
+### Requirement: Manager reply is a separate capability
+The anchored `mo slack message send` action SHALL be available through a separate Manager reply route and reply credential. It SHALL NOT be part of the management allowlist, SHALL NOT accept the management credential, and SHALL be restricted to the immutable Manager execution origin and Manager-owned outbox.
+
+#### Scenario: Manager reply action is invoked
+- **WHEN** the Manager Agent sends a reply using the current execution's anchored destination
+- **THEN** the CLI uses the separate reply route, which derives the synthetic Manager project and Enrollment owner from the reply credential and promotes or deduplicates the matching Manager progress row
+
 ### Requirement: Authoritative CLI results
 Manager decisions and user-facing claims about Agent, Connection, workspace, ownership, readiness, and next actions SHALL be based on the result of the allowlisted CLI capability. The Server MUST NOT maintain a second Manager-specific tool-result protocol or provide a conflicting management result to the Agent.
 
