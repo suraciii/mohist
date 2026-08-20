@@ -30,6 +30,7 @@
       "node": 2,
       "server-spec": 1,
       "server-cold-start": 1,
+      "server-unit-cold-start": 1,
       "server-runtime": 1,
       "duration-measurement": 1
     },
@@ -68,6 +69,7 @@
       { "id": "default", "resources": [], "capacity": 4 },
       { "id": "server-l1", "resources": ["orleans", "sqlite", "server-runtime"], "capacity": 1 },
       { "id": "server-cold-start", "resources": ["server-cold-start"], "capacity": 1 },
+      { "id": "server-unit-cold-start", "resources": ["server-runtime", "server-cold-start"], "capacity": 1 },
       { "id": "server-l1-cold-start", "resources": ["orleans", "sqlite", "server-runtime", "server-cold-start"], "capacity": 1 },
       { "id": "server-runtime", "resources": ["server-runtime"], "capacity": 1 }
     ]
@@ -95,17 +97,17 @@
         { "id": "spec", "absoluteMs": 5000, "percentile": 95, "percentileMs": 500, "allowlist": [] }
       ]
     },
-    { "id": "server-unit", "kind": "dotnet-apphost", "trackType": "behavior", "application": "server", "specKind": "Design", "level": "L0", "resources": ["server-runtime"], "csproj": "packages/server/tests/Mohist.Server.UnitTests/Mohist.Server.UnitTests.csproj", "apphostArgs": ["-parallel", "none"], "report": "reports/server-unit.trx", "reportFormat": "trx", "deadlineMs": 90000, "enforce": true, "rules": [
+    { "id": "server-unit", "kind": "dotnet-apphost", "trackType": "behavior", "application": "server", "specKind": "Design", "level": "L0", "resources": ["server-runtime", "server-cold-start"], "csproj": "packages/server/tests/Mohist.Server.UnitTests/Mohist.Server.UnitTests.csproj", "apphostArgs": ["-parallel", "none"], "report": "reports/server-unit.trx", "reportFormat": "trx", "deadlineMs": 90000, "enforce": true, "rules": [
         { "id": "unit", "absoluteMs": 500, "percentile": 95, "percentileMs": 50, "allowlist": [] }
+      ]
+    },
+    // Server apphosts share a cold-start path; keep source scans away from behavior startup.
+    { "id": "server-arch", "kind": "dotnet-apphost", "trackType": "architecture", "application": "server", "specKind": "Design", "architectureScope": "server", "resources": ["server-cold-start"], "csproj": "packages/server/tests/Mohist.Server.ArchTests/Mohist.Server.ArchTests.csproj", "report": "reports/server-arch.trx", "reportFormat": "trx", "deadlineMs": 60000, "enforce": true, "rules": [
+        { "id": "arch", "absoluteMs": 500 }
       ]
     },
     { "id": "server-spec", "kind": "dotnet-apphost", "trackType": "behavior", "application": "server", "specKind": "Product", "level": "L1", "resources": ["orleans", "sqlite", "server-runtime", "server-cold-start"], "csproj": "packages/server/tests/Mohist.Server.SpecTests/Mohist.Server.SpecTests.csproj", "apphostArgs": ["-parallel", "collections", "-parallelAlgorithm", "conservative", "-maxThreads", "3"], "report": "reports/server-spec.trx", "reportFormat": "trx", "deadlineMs": 240000, "enforce": true, "rules": [
         { "id": "spec", "absoluteMs": 5000, "percentile": 95, "percentileMs": 500, "allowlist": [] }
-      ]
-    },
-    // Architecture source scans and product specs compete during cold startup; share only that host budget so unit coverage can overlap.
-    { "id": "server-arch", "kind": "dotnet-apphost", "trackType": "architecture", "application": "server", "specKind": "Design", "architectureScope": "server", "resources": ["server-cold-start"], "csproj": "packages/server/tests/Mohist.Server.ArchTests/Mohist.Server.ArchTests.csproj", "report": "reports/server-arch.trx", "reportFormat": "trx", "deadlineMs": 60000, "enforce": true, "rules": [
-        { "id": "arch", "absoluteMs": 500 }
       ]
     },
     { "id": "runner-integration", "kind": "vitest", "trackType": "behavior", "application": "runner", "specKind": "Product", "level": "L1", "resources": [], "run": ["npm","run","test:duration:integration","-w","packages/runner","--","--reporter=json","--outputFile={report}"], "report": "reports/runner-integration.json", "reportFormat": "vitest", "deadlineMs": 90000, "enforce": true, "rules": [

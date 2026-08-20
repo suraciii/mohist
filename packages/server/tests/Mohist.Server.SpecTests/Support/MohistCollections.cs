@@ -36,6 +36,9 @@ public class RunnerMutationIntegrationCollection : ICollectionFixture<MohistInte
 [CollectionDefinition("IssueCompositeIntegration")]
 public class IssueCompositeIntegrationCollection : ICollectionFixture<IsolatedMohistIntegrationFixture>;
 
+[CollectionDefinition("AgentPathAmplificationIntegration")]
+public class AgentPathAmplificationIntegrationCollection : ICollectionFixture<IsolatedMohistIntegrationFixture>;
+
 [CollectionDefinition("DeviceFlowIntegration")]
 public class DeviceFlowIntegrationCollection : ICollectionFixture<IsolatedMohistIntegrationFixture>;
 
