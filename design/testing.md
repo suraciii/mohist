@@ -169,6 +169,12 @@ One claim must not exist at two Levels. Coverage is a measurement, not a claim.
 A test that exists only to increase coverage, preserves no intentional
 contract, or fails after an unrelated refactor must be deleted or rewritten.
 
+Migration plans, transition inventories, historical source snapshots, and
+proofs of a completed move are not permanent Specs. Keep them with the active
+migration work. Once the end-state behavior Specs and structural constraints
+exist, remove the migration gate and its historical proof. A permanent gate
+asserts the current contract, not the path used to reach it.
+
 There is no target count or percentage for L0 and L1. Every L1 Spec must explain
 which application behavior would be absent from a narrower proof. Every L0 Spec
 must name the stable component or module that owns the claim.
