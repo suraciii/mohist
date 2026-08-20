@@ -9,6 +9,7 @@ import type {
   RuntimeReadinessWitness,
   WorkDispatchResponse,
   WorkItemResult,
+  PolledDispatch,
 } from '../core/types.js'
 import type { BuildInfo } from '../runtime/build-info.js'
 import { parseObject } from '../core/json.js'
@@ -30,6 +31,8 @@ export class ServerConnection {
   private readonly buildInfo: BuildInfo | null
   private readonly credential: string | null
   readonly runnerId: string
+  private managerDeploymentEpoch: string | null = null
+  private lastPolledDispatches: PolledDispatch[] = []
 
   constructor(
     private readonly options: RunnerOptions,
@@ -55,7 +58,8 @@ export class ServerConnection {
   }
 
   async heartbeat(state: RunnerRegistration, signal: AbortSignal) {
-    await this.post('heartbeat', { hostname: hostname(), ...state, ...this.identityPayload() }, signal)
+    const response = await this.post('heartbeat', { hostname: hostname(), ...state, ...this.identityPayload() }, signal)
+    this.observeDeploymentEpoch(response.headers.get('x-mohist-manager-deployment-epoch'))
   }
 
   private identityPayload(): Record<string, unknown> {
@@ -76,6 +80,11 @@ export class ServerConnection {
     await this.post('unregister', undefined, signal)
   }
 
+  /** Current epoch observed from the latest Manager poll/heartbeat response. */
+  get deploymentEpoch(): string | null {
+    return this.managerDeploymentEpoch
+  }
+
   /**
    * Polls the server for dispatches. The body carries the process's full level
    * state (`inFlight` + `awaitingAck` work keys) so the server can reconcile
@@ -92,18 +101,52 @@ export class ServerConnection {
       runtimeReadiness?: RuntimeReadinessWitness[]
       connectionId?: string | null
       admissionReady?: boolean
+      deploymentEpoch?: string | null
     } = { inFlight: [], awaitingAck: [], admissionReady: false },
   ): Promise<DispatchWorkItem[]> {
+    const polled = await this.pollWithGrants(signal, report)
+    this.lastPolledDispatches = polled
+    return polled.map((item) => item.work)
+  }
+
+  /**
+   * Returns the grant-bearing view produced by the immediately preceding
+   * `poll` call. This keeps the established poll seam usable by host fakes
+   * while the grant remains outside DispatchWorkItem.
+   */
+  takeLastPolledDispatches(work: readonly DispatchWorkItem[]): PolledDispatch[] {
+    if (this.lastPolledDispatches.length === 0)
+      return work.map((item) => ({ work: item }))
+    const byKey = new Map(this.lastPolledDispatches.map((item) => [dispatchKey(item.work), item]))
+    this.lastPolledDispatches = []
+    return work.map((item) => byKey.get(dispatchKey(item)) ?? { work: item })
+  }
+
+  async pollWithGrants(
+    signal: AbortSignal,
+    report: {
+      inFlight: string[]
+      awaitingAck: string[]
+      runtimeReadiness?: RuntimeReadinessWitness[]
+      connectionId?: string | null
+      admissionReady?: boolean
+      deploymentEpoch?: string | null
+    } = { inFlight: [], awaitingAck: [], admissionReady: false },
+  ): Promise<PolledDispatch[]> {
     const response = await this.fetchWithAuth(this.url('poll'), {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify(report),
       signal,
     })
+    this.observeDeploymentEpoch(response.headers.get('x-mohist-manager-deployment-epoch'))
     if (response.status === 204) return []
     if (!response.ok) throw new Error(`poll failed: ${response.status} ${await response.text()}`)
     const payload = (await response.json()) as { dispatches?: WorkDispatchResponse[] }
-    return (payload.dispatches ?? []).map(parseDispatchWorkItem)
+    return (payload.dispatches ?? []).map((dispatch) => ({
+      work: parseDispatchWorkItem(dispatch),
+      ...(dispatch.managerExecutionGrant ? { managerExecutionGrant: dispatch.managerExecutionGrant } : {}),
+    }))
   }
 
   async fetchPendingUpdateOperation(signal: AbortSignal): Promise<PendingUpdateOperation | null> {
@@ -782,7 +825,11 @@ export class ServerConnection {
     return `${this.options.serverUrl.replace(/\/$/, '')}/api/projects/${encodeURIComponent(projectId)}/agent-sessions/${encodeURIComponent(agentSessionId)}/inputs/${encodeURIComponent(inputId)}/attachments/${encodeURIComponent(attachmentId)}/content`
   }
 
-  private async post(path: string, body: unknown, signal: AbortSignal) {
+  private observeDeploymentEpoch(value: string | null): void {
+    if (value && value.length > 0) this.managerDeploymentEpoch = value
+  }
+
+  private async post(path: string, body: unknown, signal: AbortSignal): Promise<Response> {
     const response = await this.fetchWithAuth(this.url(path), {
       method: 'POST',
       headers: body === undefined ? undefined : { 'content-type': 'application/json' },
@@ -790,6 +837,7 @@ export class ServerConnection {
       signal,
     })
     if (!response.ok) throw new Error(`${path} failed: ${response.status} ${await response.text()}`)
+    return response
   }
 
   private url(path: string) {
@@ -845,6 +893,12 @@ export interface WorkflowAgentSessionCleanupTurnAcceptance {
 }
 
 export type AgentSession = WorkflowAgentSession
+
+function dispatchKey(work: DispatchWorkItem): string {
+  const ownerKind = work.ownerKind ?? 'workflow'
+  const ownerId = ownerKind === 'agent-job' ? work.agentJobId ?? '' : work.workflowRunId
+  return `${ownerKind}:${ownerId}:${work.workId}`
+}
 
 function parseDispatchWorkItem(dispatch: WorkDispatchResponse): DispatchWorkItem {
   const work: DispatchWorkItem = {

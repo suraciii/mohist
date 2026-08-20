@@ -133,6 +133,19 @@ export interface AgentRecoveryBinding {
   agentTurnId?: string | null
 }
 
+export interface ManagerExecutionGrantResponse {
+  managementCredential: string
+  replyCredential: string
+  executionId: string
+  expiresAt: string
+  deploymentEpoch: string
+}
+
+export interface PolledDispatch {
+  readonly work: DispatchWorkItem
+  readonly managerExecutionGrant?: ManagerExecutionGrantResponse
+}
+
 export type WorkDispatchResponse = {
   workflowRunId: string
   workId: string
@@ -201,6 +214,9 @@ export type WorkDispatchResponse = {
    * semantics (issue-557 T-006).
    */
   capabilityRevision?: string | null
+  /** One-shot plaintext grant. It is consumed into the Runner wrapper and
+   * is never copied onto DispatchWorkItem or a journal record. */
+  managerExecutionGrant?: ManagerExecutionGrantResponse | null
 }
 
 /**

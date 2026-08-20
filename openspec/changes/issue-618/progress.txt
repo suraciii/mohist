@@ -36,3 +36,18 @@
 - Complete Server unit suite passes: `dotnet test packages/server/tests/Mohist.Server.UnitTests/Mohist.Server.UnitTests.csproj --no-restore --no-build` (3,115 tests).
 - Complete Server spec suite including direct Manager admission coverage passes: `dotnet test packages/server/tests/Mohist.Server.SpecTests/Mohist.Server.SpecTests.csproj --no-restore --filter FullyQualifiedName~SlackManagerCapabilityAdmissionSpecs` (3,706 tests; the current test platform executes the full assembly).
 - Server build passes: `dotnet build packages/server/src/Mohist.Server/Mohist.Server.csproj --no-restore -p:SkipWebBuild=true`.
+
+## T-003 Decisions
+- Manager credentials are issued only while assembling the Server poll response from a Manager Slack anchor. The durable `WorkDispatch`, AgentJob ledger, Session state, Slack context, and Runner journal never gain a credential field.
+- `ManagerExecutionLeaseStore` retains only SHA-256 hashes plus immutable origin, actor/Enrollment, execution, epoch, scope, issue, expiry, and active metadata. `ManagerDeploymentEpoch` invalidates the store on graceful shutdown and rejects older values after a restart; store or epoch unavailability fails closed.
+- The Runner consumes the response-only grant into a per-work in-memory wrapper. Its private broker exposes the matching management or reply value only to the scoped `mo` launcher; generic commands inherit a broker locator and private PATH but no bearer. Pi uses the pinned SDK Bash operations hook, and Manager OpenCode turns create a separate server/client process with the same non-secret boundary environment.
+- Manager CLI transport selects `MOHIST_MANAGER_MANAGEMENT_TOKEN` or `MOHIST_MANAGER_REPLY_TOKEN` by request path and never falls back to an operator credential. Runner capability registration/gating requires grant, epoch, broker, Pi, isolated OpenCode, and redaction support.
+- Epoch changes abort Manager turns and dispose brokers/runtimes; acknowledged AgentJob reports revoke both lease records for the work identity. Final Runner outputs, runtime events, task logs, exceptions, and terminal messages are passed through the Manager redactor.
+
+## T-003 Verification
+- Server, Runner, and CLI projects build.
+- Runner broker/transport tests pass: `npm run test:run -w packages/runner -- src/runtime/manager-execution-boundary.test.ts src/server/connection.test.ts`.
+- Full Runner suite passes: 156 files / 1,683 tests, including host lifecycle, recovery, reporting, runtime, cleanup, and new broker tests.
+- Full Server unit suite passes: 3,120 tests; full Server spec suite passes: 3,706 tests; CLI suite passes: 1,950 tests.
+- A compatibility seam was preserved: `RunnerHost` continues to call `ServerConnection.poll`; the connection stores its grant-bearing view separately so existing test fakes and ordinary dispatch journals never receive grant fields.
+- Lease-backed HTTP requests reauthenticate the current Slack actor and active/ready Enrollment through `ManagerActorAccessDecider` before reaching an endpoint; invalid current state fails closed with a non-secret response.

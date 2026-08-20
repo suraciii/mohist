@@ -44,7 +44,7 @@ internal sealed class CliCredentialHandler : HttpMessageHandler
         var forwarded = await CloneAsync(request, cancellationToken).ConfigureAwait(false);
         if (_managerMode)
             forwarded.Headers.TryAddWithoutValidation(ManagerCapabilityCatalog.ManagerModeHeader, "1");
-        var credential = await _credentials.TryResolveAllowedAsync(forwarded.RequestUri).ConfigureAwait(false);
+        var credential = await _credentials.TryResolveAllowedAsync(forwarded.RequestUri, _managerMode).ConfigureAwait(false);
         if (credential is not null
             && request.Headers.Authorization is null)
         {

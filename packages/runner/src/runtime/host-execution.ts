@@ -14,6 +14,7 @@ import type { RecoveredStartedWork } from './recovered-started-work.js'
 import type { RuntimeTurnRegistry } from './runtime-turn-registry.js'
 import type { TerminalTaskLogDeliveryStore } from './terminal-task-log-delivery.js'
 import type { HostTaskLogDeps } from './host-task-log.js'
+import type { ManagerExecutionBoundary } from './manager-execution-boundary.js'
 import type { RunnerHostShutdown } from './host-shutdown-types.js'
 
 const log = runnerLogger.child('host')
@@ -65,6 +66,8 @@ export interface HostExecutionContext {
    * semantics. Returns null when the runtime has no authoritative catalog.
    */
   readonly currentCatalogRevision: (runtime: string) => string | null
+  readonly managerExecutionFor: (key: string) => ManagerExecutionBoundary | null
+  readonly releaseManagerExecution: (key: string) => Promise<void>
 }
 
 /**
@@ -226,6 +229,20 @@ export async function executeAndTransition(
   key: string,
   entry: InFlightEntry,
 ): Promise<void> {
+  try {
+    await executeAndTransitionCore(context, work, signal, key, entry)
+  } finally {
+    await context.releaseManagerExecution(key)
+  }
+}
+
+async function executeAndTransitionCore(
+  context: HostExecutionContext,
+  work: DispatchWorkItem,
+  signal: AbortSignal,
+  key: string,
+  entry: InFlightEntry,
+): Promise<void> {
   let result: WorkItemResult
   try {
     const runtime = workRuntime(work)
@@ -246,6 +263,7 @@ export async function executeAndTransition(
           context.terminalTaskLogDeliveryInFlight,
           work,
           signal,
+          context.managerExecutionFor(key),
         )
       }
     } else {
@@ -255,12 +273,15 @@ export async function executeAndTransition(
         context.terminalTaskLogDeliveryInFlight,
         work,
         signal,
+        context.managerExecutionFor(key),
       )
     }
   } catch (error) {
     if (signal.aborted) return
-    log.error('work failed before report', { work: work.workId, exception: error })
-    result = { status: 'failed', message: String(error) }
+    const boundary = context.managerExecutionFor(key)
+    const message = boundary ? boundary.mask(String(error)) : String(error)
+    log.error('work failed before report', { work: work.workId, exception: message })
+    result = { status: 'failed', message }
   }
 
   if (entry.terminalPersisted) {

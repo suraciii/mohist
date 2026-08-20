@@ -15,6 +15,7 @@ using Mohist.Server.Sessions.Services;
 using Mohist.Server.Workspace.Services;
 using Mohist.Server.Workflow.Domain.Run;
 using Mohist.Server.Workflow.Grains;
+using Mohist.Server.Slack.Services;
 
 namespace Mohist.Server.Api;
 
@@ -83,8 +84,11 @@ public static partial class RunnerRoutes
             IGrainFactory grains,
             Mohist.Server.Runner.Services.DispatchService dispatch,
             IssueQuerier issues, RunnerConnectionTracker connections,
+            ManagerExecutionCapabilityIssuer managerCredentials,
+            IManagerDeploymentEpoch managerEpoch,
             CancellationToken ct) =>
         {
+            request.HttpContext.Response.Headers["X-Mohist-Manager-Deployment-Epoch"] = managerEpoch.Current;
             RunnerPollRequest req = new([], []);
             if (request.ContentLength is > 0)
             {
@@ -103,7 +107,7 @@ public static partial class RunnerRoutes
             if (response.Dispatches.Count == 0) return Results.NoContent();
 
             var dispatches = await Task.WhenAll(response.Dispatches.Select(work =>
-                ToWorkDispatchResponseAsync(work, issues.GetParentIssueContextAsync)));
+                ToWorkDispatchResponseAsync(work, issues.GetParentIssueContextAsync, managerCredentials)));
             return Results.Ok(new RunnerPollResponseDto(dispatches.ToList()));
         });
 
@@ -149,6 +153,7 @@ public static partial class RunnerRoutes
             HttpRequest request,
             IGrainFactory grains,
             Mohist.Server.Runner.Services.WorkflowReportService workflowReport,
+            ManagerExecutionCapabilityIssuer managerCredentials,
             CancellationToken ct) =>
         {
             RunnerReportRequest? req;
@@ -190,6 +195,8 @@ public static partial class RunnerRoutes
                 var report = await grains.GetGrain<IAgentJobGrain>(req.AgentJobId ?? string.Empty)
                     .ReportResultAsync(runnerId, req.WorkId, result);
                 var acknowledged = report.Accepted || string.Equals(report.Reason, "stale", StringComparison.Ordinal);
+                if (acknowledged)
+                    managerCredentials.RevokeWork(req.AgentJobId ?? string.Empty, req.WorkId);
                 return Results.Ok(new RunnerReportResponse(
                     req.AgentJobId ?? string.Empty, null, acknowledged,
                     report.Reason, ownerKind, req.AgentJobId));
@@ -774,7 +781,8 @@ public static partial class RunnerRoutes
 
     internal static async Task<WorkDispatchResponse> ToWorkDispatchResponseAsync(
         WorkDispatch work,
-        Func<string, int, Task<ParentIssueContext?>> resolveParentIssueContext)
+        Func<string, int, Task<ParentIssueContext?>> resolveParentIssueContext,
+        ManagerExecutionCapabilityIssuer? managerCredentials = null)
     {
         ParentIssueContextResponse? parentIssueContext = null;
         var projectId = work.Issue?.ProjectId ?? work.ProjectId;
@@ -814,7 +822,8 @@ public static partial class RunnerRoutes
             AgentSessionStartup: work.AgentSessionStartup,
             TaskRunId: work.TaskRunId,
             RecoveryGeneration: work.RecoveryGeneration,
-            AgentRecovery: work.AgentRecovery);
+            AgentRecovery: work.AgentRecovery,
+            ManagerExecutionGrant: managerCredentials?.IssueFor(work));
     }
 
     private static RunnerGenericAgentSessionResponse ToRunnerGenericAgentSession(AgentSessionInfo session) =>

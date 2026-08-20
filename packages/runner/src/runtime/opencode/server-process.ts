@@ -16,6 +16,7 @@
  */
 
 import { createOpencodeClient, createOpencodeServer } from '@opencode-ai/sdk/v2'
+import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process'
 import type { OpencodeClient } from '@opencode-ai/sdk/v2'
 import { Agent } from 'undici'
 import type { Dispatcher } from 'undici'
@@ -42,6 +43,8 @@ export interface OpencodeServerHandle {
 
 export interface OpencodeServerFactoryOptions {
   readonly shutdownTimeoutMs?: number
+  /** Non-secret process boundary values for an isolated Manager server. */
+  readonly environment?: NodeJS.ProcessEnv
 }
 
 export type OpencodeServerFactory = (
@@ -76,6 +79,84 @@ export const createSpawnedOpencodeServer: OpencodeServerFactory = async (directo
     close: terminateTree,
     terminateTree,
   }
+}
+
+/**
+ * Process adapter for Manager executions. The pinned SDK does not expose an
+ * environment option, so Manager work uses an owned `opencode serve` child
+ * and a client bound to that child. The environment contains only the scoped
+ * broker locator and launcher path, never either lease value.
+ */
+export const createIsolatedOpencodeServer: OpencodeServerFactory = async (directory, signal, options) => {
+  const child = spawn('opencode', ['serve', '--hostname=127.0.0.1', '--port=0'], {
+    cwd: directory,
+    env: { ...process.env, ...(options?.environment ?? {}) },
+    stdio: ['ignore', 'pipe', 'pipe'],
+    detached: process.platform !== 'win32',
+  }) as unknown as ChildProcessWithoutNullStreams
+  const output: string[] = []
+  const timeoutMs = boundedTimeoutMs(options?.shutdownTimeoutMs, 5_000)
+  const url = await new Promise<string>((resolve, reject) => {
+    let settled = false
+    const timer = setTimeout(() => finish(new Error(`Timed out waiting for isolated OpenCode server after ${timeoutMs}ms`)), timeoutMs)
+    timer.unref?.()
+    const onData = (chunk: Buffer) => {
+      output.push(chunk.toString())
+      const text = output.join('')
+      const match = text.match(/opencode server listening\s+on\s+(https?:\/\/[^\s]+)/)
+      if (match) finish(null, match[1])
+    }
+    const finish = (error: Error | null, value?: string) => {
+      if (settled) return
+      settled = true
+      clearTimeout(timer)
+      if (error) {
+        killChildTree(child)
+        reject(new Error(`${error.message}${output.length > 0 ? `\nServer output: ${output.join('')}` : ''}`))
+      } else {
+        resolve(value!)
+      }
+    }
+    child.stdout.on('data', onData)
+    child.stderr.on('data', onData)
+    child.once('error', (error) => finish(error))
+    child.once('exit', (code) => finish(new Error(`Isolated OpenCode server exited with code ${code ?? 'unknown'}`)))
+    signal.addEventListener('abort', () => finish(signal.reason instanceof Error ? signal.reason : new Error('OpenCode server start aborted')), { once: true })
+  })
+  const dispatcher = new Agent({ headersTimeout: 0, bodyTimeout: 0 })
+  const client = createOpencodeClient({
+    baseUrl: url,
+    directory,
+    fetch: createOpenCodeFetch(dispatcher),
+  })
+  const processControl: OpencodeProcessControl = {
+    pid: child.pid,
+    kill: (sig) => child.kill(sig),
+  }
+  const close = async () => {
+    try { child.kill('SIGTERM') } catch { /* already exited */ }
+    await dispatcher.close().catch(() => undefined)
+  }
+  return {
+    url,
+    directory,
+    client,
+    process: processControl,
+    pid: child.pid,
+    close,
+    terminateTree: async () => {
+      await boundedWait(() => close(), timeoutMs)
+      killChildTree(child)
+      dispatcher.destroy()
+    },
+  }
+}
+
+function killChildTree(child: { pid?: number; kill(signal?: NodeJS.Signals): boolean }): void {
+  if (child.pid && process.platform !== 'win32') {
+    try { process.kill(-child.pid, 'SIGKILL'); return } catch { /* fall through */ }
+  }
+  try { child.kill('SIGKILL') } catch { /* already exited */ }
 }
 
 export async function terminateOpencodeTree(

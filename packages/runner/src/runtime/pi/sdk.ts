@@ -1,5 +1,6 @@
 import {
   createAgentSession,
+  createBashTool,
   DefaultResourceLoader,
   ModelRuntime,
   SessionManager,
@@ -7,6 +8,7 @@ import {
 } from "@earendil-works/pi-coding-agent"
 import { resolve } from "node:path"
 import type { PiDiagnostic } from "./types.js"
+import type { ManagerExecutionBoundary } from '../manager-execution-boundary.js'
 
 export interface PiSdkMessage {
   readonly role?: string
@@ -70,10 +72,14 @@ export interface PiSdkFactoryOptions {
   readonly agentDir: string
 }
 
+export interface PiSessionExecutionOptions {
+  readonly managerExecution?: ManagerExecutionBoundary | null
+}
+
 export interface PiSdkServices {
   catalog(): Promise<readonly { readonly provider: string; readonly id: string; readonly thinkingLevels?: readonly string[] }[]>
-  createSession(cwd: string): Promise<PiSdkSession>
-  openSession(path: string, cwd: string): Promise<PiSdkSession>
+  createSession(cwd: string, options?: PiSessionExecutionOptions): Promise<PiSdkSession>
+  openSession(path: string, cwd: string, options?: PiSessionExecutionOptions): Promise<PiSdkSession>
   validateSessionFile?(path: string, expectedSessionId?: string): Promise<void>
   model(provider: string, id: string): unknown
   close(): Promise<void>
@@ -122,14 +128,30 @@ export const realPiSdkFactory: PiSdkFactory = {
         if (!model) throw new Error(`Pi model ${provider}/${id} is unavailable`)
         return model
       },
-      async createSession(sessionCwd) {
+      async createSession(sessionCwd, options) {
         const manager = SessionManager.create(sessionCwd)
-        const session = (await createAgentSession({ cwd: sessionCwd, agentDir, modelRuntime, settingsManager, resourceLoader, sessionManager: manager })).session
+        const session = (await createAgentSession({
+          cwd: sessionCwd,
+          agentDir,
+          modelRuntime,
+          settingsManager,
+          resourceLoader,
+          sessionManager: manager,
+          ...managerToolOptions(sessionCwd, options),
+        })).session
         return wrapAgentSession(session)
       },
-      async openSession(path, sessionCwd) {
+      async openSession(path, sessionCwd, options) {
         const manager = SessionManager.open(path, undefined, sessionCwd)
-        const session = (await createAgentSession({ cwd: sessionCwd, agentDir, modelRuntime, settingsManager, resourceLoader, sessionManager: manager })).session
+        const session = (await createAgentSession({
+          cwd: sessionCwd,
+          agentDir,
+          modelRuntime,
+          settingsManager,
+          resourceLoader,
+          sessionManager: manager,
+          ...managerToolOptions(sessionCwd, options),
+        })).session
         return wrapAgentSession(session)
       },
       async validateSessionFile(path, expectedSessionId) {
@@ -246,6 +268,15 @@ function isRecord(value: unknown): value is Record<string, unknown> {
  * rather than a value-spread so the AgentSession getters stay live
  * (a value-spread would snapshot them at wrap time).
  */
+function managerToolOptions(cwd: string, options?: PiSessionExecutionOptions): Record<string, unknown> {
+  const boundary = options?.managerExecution
+  if (!boundary) return {}
+  return {
+    tools: ['read', 'bash', 'edit', 'write'],
+    customTools: [createBashTool(cwd, { operations: boundary.bashOperations() })],
+  }
+}
+
 function wrapAgentSession(session: unknown): PiSdkSession {
   const agent = session as PiSdkSession & { readonly model?: unknown; readonly thinkingLevel?: string }
   return {

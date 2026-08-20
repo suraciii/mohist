@@ -17,6 +17,8 @@ internal sealed class CliCredentialProvider
     public const string TokenEnvironmentVariable = "MOHIST_TOKEN";
     public const string AdminTokenEnvironmentVariable = "MOHIST_ADMIN_TOKEN";
     public const string AdminTokenPathEnvironmentVariable = "MOHIST_ADMIN_TOKEN_PATH";
+    public const string ManagerManagementTokenEnvironmentVariable = "MOHIST_MANAGER_MANAGEMENT_TOKEN";
+    public const string ManagerReplyTokenEnvironmentVariable = "MOHIST_MANAGER_REPLY_TOKEN";
     internal const string DefaultTokenDirectoryName = ".mohist";
     internal const string DefaultTokenFileName = "admin-token";
 
@@ -37,6 +39,19 @@ internal sealed class CliCredentialProvider
             ?? (fileSystem is RealFileSystem
                 ? Environment.GetFolderPath(Environment.SpecialFolder.UserProfile)
                 : "/mohist-tests/user"));
+    }
+
+    public Task<CliCredential?> TryResolveManagerAsync(bool reply)
+    {
+        var name = reply ? ManagerReplyTokenEnvironmentVariable : ManagerManagementTokenEnvironmentVariable;
+        var value = _environment.GetEnvironmentVariable(name);
+        if (string.IsNullOrWhiteSpace(value)) return Task.FromResult<CliCredential?>(null);
+        var token = value.Trim();
+        RequireMinimumLength(token);
+        return Task.FromResult<CliCredential?>(new CliCredential(
+            token,
+            MachineLocal: false,
+            Source: CliCredentialSource.EnvironmentToken));
     }
 
     public async Task<CliCredential?> TryResolveAsync(Uri? destination)
