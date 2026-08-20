@@ -26,9 +26,9 @@ type LifecycleMocks = Record<
   | 'fetchConfig'
   | 'workflowAgentSessionRuntimeEvents'
   | 'agentSessionRuntimeEvents'
-  | 'startSignalR'
-  | 'stopSignalR'
-  | 'disconnectSignalR'
+  | 'startControl'
+  | 'stopControl'
+  | 'disconnectControl'
   | 'getConnectionId'
   | 'probeLiveness'
   | 'blockingAction'
@@ -79,9 +79,9 @@ const uploadTaskLog = scopedMock('uploadTaskLog')
 const fetchConfig = scopedMock('fetchConfig')
 const workflowAgentSessionRuntimeEvents = scopedMock('workflowAgentSessionRuntimeEvents')
 const agentSessionRuntimeEvents = scopedMock('agentSessionRuntimeEvents')
-const startSignalR = scopedMock('startSignalR')
-const stopSignalR = scopedMock('stopSignalR')
-const disconnectSignalR = scopedMock('disconnectSignalR')
+const startControl = scopedMock('startControl')
+const stopControl = scopedMock('stopControl')
+const disconnectControl = scopedMock('disconnectControl')
 const getConnectionId = scopedMock('getConnectionId')
 const probeLiveness = scopedMock('probeLiveness')
 const blockingAction = scopedMock('blockingAction')
@@ -101,11 +101,11 @@ vi.mock('../src/server/connection.js', () => ({
   },
 }))
 
-vi.mock('../src/server/runner-signalr.js', () => ({
-  RunnerSignalRClient: class {
-    start = startSignalR
-    stop = stopSignalR
-    disconnect = disconnectSignalR
+vi.mock('../src/server/runner-control-websocket.js', () => ({
+  RunnerControlWebSocketClient: class {
+    start = startControl
+    stop = stopControl
+    disconnect = disconnectControl
     getConnectionId = getConnectionId
     probeLiveness = probeLiveness
     forceReconnect = forceReconnect
@@ -155,9 +155,9 @@ function createLifecycleMocks(): LifecycleMocks {
     fetchConfig: vi.fn(async () => null),
     workflowAgentSessionRuntimeEvents: vi.fn(async () => undefined),
     agentSessionRuntimeEvents: vi.fn(async () => undefined),
-    startSignalR: vi.fn(async () => undefined),
-    stopSignalR: vi.fn(async () => undefined),
-    disconnectSignalR: vi.fn(async () => undefined),
+    startControl: vi.fn(async () => undefined),
+    stopControl: vi.fn(async () => undefined),
+    disconnectControl: vi.fn(async () => undefined),
     getConnectionId: vi.fn(() => 'conn-1'),
     probeLiveness: vi.fn(async () => true),
     blockingAction: vi.fn(async ({ signal }: { signal: AbortSignal }) => {
@@ -201,7 +201,7 @@ function it(name: string, body: (state: LifecycleTestState) => Promise<void> | v
 describe('RunnerHost', () => {
   it("treats 'opencode' (any casing) as the configured runtime", () => {
     // Issue-410 T-004 retired the SessionCommand handler. The runner
-    // host no longer wires a sessionCommandHandler on the SignalR
+    // host no longer wires a sessionCommandHandler on the control
     // client; the only runtime the runner drives end-to-end is
     // OpenCode, regardless of casing in the wire field.
     expect(getOpenCodeRuntimeFactory()).toBe(currentLifecycleTestState().resources.openCodeRuntimeFactory)
@@ -218,8 +218,8 @@ describe('RunnerHost', () => {
     heartbeat.mockResolvedValue(undefined)
     disconnect.mockResolvedValue(undefined)
     poll.mockResolvedValue([])
-    startSignalR.mockResolvedValue(undefined)
-    stopSignalR.mockResolvedValue(undefined)
+    startControl.mockResolvedValue(undefined)
+    stopControl.mockResolvedValue(undefined)
     const controller = new AbortController()
     const host = new RunnerHost({
       serverUrl: 'https://runner.test',
@@ -292,8 +292,8 @@ describe('RunnerHost', () => {
         heartbeat.mockResolvedValue(undefined)
         disconnect.mockResolvedValue(undefined)
         poll.mockResolvedValue([])
-        startSignalR.mockResolvedValue(undefined)
-        stopSignalR.mockResolvedValue(undefined)
+        startControl.mockResolvedValue(undefined)
+        stopControl.mockResolvedValue(undefined)
         const controller = new AbortController()
         const host = new RunnerHost({
           serverUrl: 'https://runner.test',
@@ -338,8 +338,8 @@ describe('RunnerHost', () => {
     heartbeat.mockResolvedValue(undefined)
     disconnect.mockResolvedValue(undefined)
     report.mockResolvedValue(undefined)
-    startSignalR.mockResolvedValue(undefined)
-    stopSignalR.mockResolvedValue(undefined)
+    startControl.mockResolvedValue(undefined)
+    stopControl.mockResolvedValue(undefined)
     const controller = new AbortController()
     const work = (id: string) => ({
       workflowRunId: '',
@@ -397,8 +397,8 @@ describe('RunnerHost', () => {
     connect.mockResolvedValue(undefined)
     heartbeat.mockResolvedValue(undefined)
     disconnect.mockResolvedValue(undefined)
-    startSignalR.mockResolvedValue(undefined)
-    stopSignalR.mockResolvedValue(undefined)
+    startControl.mockResolvedValue(undefined)
+    stopControl.mockResolvedValue(undefined)
     const controller = new AbortController()
     poll
       .mockImplementationOnce(async () => {
@@ -432,7 +432,8 @@ describe('RunnerHost', () => {
       await expect(run).resolves.toBeUndefined()
 
       expect(connect).toHaveBeenCalledTimes(1)
-      expect(startSignalR).toHaveBeenCalledTimes(1)
+      expect(startControl).toHaveBeenCalledTimes(1)
+      expect(startControl).toHaveBeenCalledWith(controller.signal)
       expect(capturedLogs()).toEqual(
         expect.arrayContaining([
           expect.objectContaining({
@@ -459,8 +460,8 @@ describe('RunnerHost', () => {
     connect.mockResolvedValue(undefined)
     heartbeat.mockResolvedValue(undefined)
     disconnect.mockResolvedValue(undefined)
-    startSignalR.mockResolvedValue(undefined)
-    stopSignalR.mockResolvedValue(undefined)
+    startControl.mockResolvedValue(undefined)
+    stopControl.mockResolvedValue(undefined)
     const controller = new AbortController()
     poll
       .mockImplementationOnce(
@@ -526,8 +527,8 @@ describe('RunnerHost', () => {
     heartbeat.mockResolvedValue(undefined)
     disconnect.mockResolvedValue(undefined)
     poll.mockResolvedValue([])
-    startSignalR.mockResolvedValue(undefined)
-    stopSignalR.mockResolvedValue(undefined)
+    startControl.mockResolvedValue(undefined)
+    stopControl.mockResolvedValue(undefined)
     const controller = new AbortController()
     const host = new RunnerHost({
       serverUrl: 'https://runner.test',
@@ -545,17 +546,17 @@ describe('RunnerHost', () => {
       await expect(run).resolves.toBeUndefined()
 
       expect(disconnect).toHaveBeenCalledWith(expect.any(AbortSignal))
-      expect(stopSignalR).toHaveBeenCalled()
+      expect(stopControl).toHaveBeenCalled()
     } finally {
       controller.abort()
       await run.catch(() => undefined)
     }
   })
 
-  it('RunnerConnection_WhenSignalRFails_DoesNotPollAndRetriesCleanly', async () => {
-    const firstSignalRStarted = deferred<void>()
-    const secondSignalRStarted = deferred<void>()
-    const secondSignalRRelease = deferred<void>()
+  it('RunnerConnection_WhenControlFails_DoesNotPollAndRetriesCleanly', async () => {
+    const firstControlStarted = deferred<void>()
+    const secondControlStarted = deferred<void>()
+    const secondControlRelease = deferred<void>()
     const disconnectedAfterFailure = deferred<void>()
     const retryWaitStarted = deferred<number>()
     const retryWaitRelease = deferred<void>()
@@ -572,17 +573,17 @@ describe('RunnerHost', () => {
       firstPollStarted.resolve()
       return []
     })
-    const signalRUnavailable = new Error('signalr unavailable')
-    startSignalR
+    const controlUnavailable = new Error('control unavailable')
+    startControl
       .mockImplementationOnce(async () => {
-        firstSignalRStarted.resolve()
-        throw signalRUnavailable
+        firstControlStarted.resolve()
+        throw controlUnavailable
       })
       .mockImplementationOnce(async () => {
-        secondSignalRStarted.resolve()
-        await secondSignalRRelease.promise
+        secondControlStarted.resolve()
+        await secondControlRelease.promise
       })
-    stopSignalR.mockResolvedValue(undefined)
+    stopControl.mockResolvedValue(undefined)
     const waitForConnectionRetry = vi.fn(async (delayMs: number, signal: AbortSignal) => {
       retryWaitStarted.resolve(delayMs)
       await retryWaitRelease.promise
@@ -604,18 +605,18 @@ describe('RunnerHost', () => {
 
     const run = host.run(controller.signal)
     try {
-      await firstSignalRStarted.promise
+      await firstControlStarted.promise
       await disconnectedAfterFailure.promise
       await expect(retryWaitStarted.promise).resolves.toBe(POLL_INTERVAL_MS)
       expect(waitForConnectionRetry).toHaveBeenCalledWith(POLL_INTERVAL_MS, controller.signal)
       retryWaitRelease.resolve()
-      await secondSignalRStarted.promise
+      await secondControlStarted.promise
       expect(poll).not.toHaveBeenCalled()
       expect(disconnect).toHaveBeenCalledWith(expect.any(AbortSignal))
-      expect(disconnectSignalR).toHaveBeenCalledTimes(1)
-      expect(stopSignalR).not.toHaveBeenCalled()
+      expect(disconnectControl).toHaveBeenCalledTimes(1)
+      expect(stopControl).not.toHaveBeenCalled()
 
-      secondSignalRRelease.resolve()
+      secondControlRelease.resolve()
       await firstPollStarted.promise
       controller.abort()
       await expect(run).resolves.toBeUndefined()
@@ -625,78 +626,16 @@ describe('RunnerHost', () => {
           expect.objectContaining({
             level: 'ERROR',
             message: 'runner connection failed; retrying',
-            fields: expect.objectContaining({ exception: signalRUnavailable }),
+            fields: expect.objectContaining({ exception: controlUnavailable }),
           }),
         ]),
       )
     } finally {
       retryWaitRelease.resolve()
-      secondSignalRRelease.resolve()
+      secondControlRelease.resolve()
       controller.abort()
       await run.catch(() => undefined)
     }
-  })
-
-  it('GenericFollowupResolver_ProjectsBindingIntoRuntimeTarget', async () => {
-    const host = new RunnerHost({
-      serverUrl: 'https://runner.test',
-      runnerId: 'runner-test',
-      runnerRoot: '/virtual/mohist-runner-test',
-      pollIntervalMs: 1,
-      heartbeatIntervalMs: 60_000,
-      dispatchLivenessProbeIntervalMs: 60_000,
-    }) as unknown as { openCodeRuntime: { ready(): boolean } | null }
-    host.openCodeRuntime = { ready: () => true }
-
-    const resolved = currentLifecycleTestState().followupTargetResolver?.({
-      kind: 'generic',
-      projectId: 'project-from-payload',
-      sessionId: 'gen-1',
-      binding: {
-        runtime: 'opencode',
-        runtimeSessionId: 'runtime-1',
-        runnerId: 'runner-test',
-        workDir: '/virtual/work',
-      },
-    })
-
-    expect(resolved).toEqual({
-      runtimeSessionId: 'runtime-1',
-      workDir: '/virtual/work',
-      projectId: 'project-from-payload',
-    })
-  })
-
-  it('GenericFollowupResolver_StartupBeforeRuntimeReady_ResolvesBindingOnly', () => {
-    new RunnerHost({
-      serverUrl: 'https://runner.test',
-      runnerId: 'runner-test',
-      runnerRoot: '/virtual/mohist-runner-test',
-      pollIntervalMs: 1,
-      heartbeatIntervalMs: 60_000,
-      dispatchLivenessProbeIntervalMs: 60_000,
-    })
-
-    const resolved = currentLifecycleTestState().followupTargetResolver?.({
-      kind: 'generic',
-      projectId: 'project-1',
-      sessionId: 'gen-1',
-      binding: {
-        runtime: 'opencode',
-        runtimeSessionId: 'runtime-1',
-        runnerId: 'runner-test',
-        workDir: '/virtual/work',
-      },
-    })
-
-    // Issue-461 D1: the resolver is binding-only. The caller (follow-up handler
-    // or worker claim) gates admission on runtime readiness; the resolver
-    // never inspects runtime or outbox state.
-    expect(resolved).toEqual({
-      runtimeSessionId: 'runtime-1',
-      workDir: '/virtual/work',
-      projectId: 'project-1',
-    })
   })
 
   it('ClaimReadiness_RequiresHealthyRuntimeEventOutbox', () => {
@@ -719,127 +658,5 @@ describe('RunnerHost', () => {
 
     host.agentSessionRuntimeEventOutbox = { ready: () => true }
     expect(host.isOpenCodeReadyForClaim()).toBe(true)
-  })
-
-  it('GenericFollowupResolver_NonOpencodeBinding_IsMissingTarget', () => {
-    new RunnerHost({
-      serverUrl: 'https://runner.test',
-      runnerId: 'runner-test',
-      runnerRoot: '/virtual/mohist-runner-test',
-      pollIntervalMs: 1,
-      heartbeatIntervalMs: 60_000,
-      dispatchLivenessProbeIntervalMs: 60_000,
-    }) as unknown as { openCodeRuntime: { ready(): boolean } | null }
-    // legacy ACP-bound session: the runner must report missing
-    // (per issue-410 D6 — Reset hint), not forward to the runtime
-    const resolved = currentLifecycleTestState().followupTargetResolver?.({
-      kind: 'generic',
-      projectId: 'project-1',
-      sessionId: 'gen-1',
-      binding: {
-        runtime: 'acp',
-        runtimeSessionId: 'runtime-1',
-        runnerId: 'runner-test',
-        workDir: '/virtual/work',
-      },
-    } as SessionTarget)
-
-    expect(resolved).toBeNull()
-  })
-
-  it('GenericFollowupResolver_MismatchedRunnerId_IsMissingTarget', () => {
-    new RunnerHost({
-      serverUrl: 'https://runner.test',
-      runnerId: 'runner-test',
-      runnerRoot: '/virtual/mohist-runner-test',
-      pollIntervalMs: 1,
-      heartbeatIntervalMs: 60_000,
-      dispatchLivenessProbeIntervalMs: 60_000,
-    })
-
-    const resolved = currentLifecycleTestState().followupTargetResolver?.({
-      kind: 'generic',
-      projectId: 'project-1',
-      sessionId: 'gen-1',
-      binding: {
-        runtime: 'opencode',
-        runtimeSessionId: 'runtime-1',
-        runnerId: 'different-runner',
-        workDir: '/virtual/work',
-      },
-    })
-
-    expect(resolved).toBeNull()
-  })
-
-  it('GenericFollowupResolver_MissingWorkDir_IsMissingTarget', () => {
-    new RunnerHost({
-      serverUrl: 'https://runner.test',
-      runnerId: 'runner-test',
-      runnerRoot: '/virtual/mohist-runner-test',
-      pollIntervalMs: 1,
-      heartbeatIntervalMs: 60_000,
-      dispatchLivenessProbeIntervalMs: 60_000,
-    })
-
-    const resolved = currentLifecycleTestState().followupTargetResolver?.({
-      kind: 'generic',
-      projectId: 'project-1',
-      sessionId: 'gen-1',
-      binding: {
-        runtime: 'opencode',
-        runtimeSessionId: 'runtime-1',
-        runnerId: 'runner-test',
-        workDir: null,
-      },
-    })
-
-    expect(resolved).toBeNull()
-  })
-
-  it('GenericFollowupResolver_NoBinding_IsMissingTarget', () => {
-    new RunnerHost({
-      serverUrl: 'https://runner.test',
-      runnerId: 'runner-test',
-      runnerRoot: '/virtual/mohist-runner-test',
-      pollIntervalMs: 1,
-      heartbeatIntervalMs: 60_000,
-      dispatchLivenessProbeIntervalMs: 60_000,
-    })
-
-    const resolved = currentLifecycleTestState().followupTargetResolver?.({
-      kind: 'generic',
-      projectId: 'project-1',
-      sessionId: 'gen-1',
-    })
-
-    expect(resolved).toBeNull()
-  })
-
-  it('GenericFollowupResolver_RejectsMismatchedConfiguredRunnerProject', async () => {
-    const host = new RunnerHost({
-      serverUrl: 'https://runner.test',
-      runnerId: 'runner-test',
-      projectId: 'runner-project',
-      runnerRoot: '/virtual/mohist-runner-test',
-      pollIntervalMs: 1,
-      heartbeatIntervalMs: 60_000,
-      dispatchLivenessProbeIntervalMs: 60_000,
-    }) as unknown as { openCodeRuntime: { ready(): boolean } | null }
-    host.openCodeRuntime = { ready: () => true }
-
-    const resolved = currentLifecycleTestState().followupTargetResolver?.({
-      kind: 'generic',
-      projectId: 'other-project',
-      sessionId: 'gen-1',
-      binding: {
-        runtime: 'opencode',
-        runtimeSessionId: 'runtime-1',
-        runnerId: 'runner-test',
-        workDir: '/virtual/work',
-      },
-    })
-
-    expect(resolved).toBeNull()
   })
 })

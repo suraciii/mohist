@@ -1,13 +1,13 @@
-import { AsyncLocalStorage } from "node:async_hooks"
-import { join } from "node:path"
-import { describe, expect, it as vitestIt, vi } from "vitest"
-import type { CleanupLoopResult } from "../src/runtime/cleanup-loop.js"
-import type { CleanupPolicy } from "../src/core/types.js"
-import { installReadyOpenCodeRuntimeFactory } from "./support/opencode-runtime-factory.js"
-import type { FakeRuntimeHandles } from "./support/opencode-runtime-factory.js"
-import { capturedLogs } from "./support/logger-test.js"
-import type { DefaultRunnerTestResources } from "./support/test-resources.js"
-import { withDefaultRunnerTestResources } from "./support/test-resources.js"
+import { AsyncLocalStorage } from 'node:async_hooks'
+import { join } from 'node:path'
+import { describe, expect, it as vitestIt, vi } from 'vitest'
+import type { CleanupLoopResult } from '../src/runtime/cleanup-loop.js'
+import type { CleanupPolicy } from '../src/core/types.js'
+import { installReadyOpenCodeRuntimeFactory } from './support/opencode-runtime-factory.js'
+import type { FakeRuntimeHandles } from './support/opencode-runtime-factory.js'
+import { capturedLogs } from './support/logger-test.js'
+import type { DefaultRunnerTestResources } from './support/test-resources.js'
+import { withDefaultRunnerTestResources } from './support/test-resources.js'
 
 // Idle-system cleanup scenario: when `poll` is continuously
 // returning 204 (no work dispatched), the runner's cleanup-loop tick
@@ -49,14 +49,17 @@ const cleanupTestStorage = new AsyncLocalStorage<CleanupTestState>()
 
 function currentCleanupTestState(): CleanupTestState {
   const state = cleanupTestStorage.getStore()
-  if (!state) throw new Error("cleanup test resource context is not active")
+  if (!state) throw new Error('cleanup test resource context is not active')
   return state
 }
 
-function createCleanupTestState(resources: DefaultRunnerTestResources, runtimeHandles: FakeRuntimeHandles): CleanupTestState {
+function createCleanupTestState(
+  resources: DefaultRunnerTestResources,
+  runtimeHandles: FakeRuntimeHandles,
+): CleanupTestState {
   return {
     resources,
-    root: "/virtual/runner-host-idle-cleanup",
+    root: '/virtual/runner-host-idle-cleanup',
     runtimeHandles,
     hostEvents: null,
     cleanupCalls: [],
@@ -84,7 +87,7 @@ function testState(): CleanupTestState {
   return currentCleanupTestState()
 }
 
-vi.mock("../src/server/connection.js", () => ({
+vi.mock('../src/server/connection.js', () => ({
   ServerConnection: class {
     async connect() {
       currentCleanupTestState().hostEvents?.connected.resolve()
@@ -113,20 +116,28 @@ vi.mock("../src/server/connection.js", () => ({
   },
 }))
 
-vi.mock("../src/server/runner-signalr.js", () => ({
-  RunnerSignalRClient: class {
+vi.mock('../src/server/runner-control-websocket.js', () => ({
+  RunnerControlWebSocketClient: class {
     async start() {}
     async stop() {}
-    getConnectionId() { return "conn-1" }
-    async probeLiveness() { return true }
+    getConnectionId() {
+      return 'conn-1'
+    }
+    async probeLiveness() {
+      return true
+    }
     async forceReconnect() {}
   },
 }))
 
-vi.mock("../src/runtime/cleanup-loop.js", () => {
+vi.mock('../src/runtime/cleanup-loop.js', () => {
   return {
     CleanupLoop: class {
-      async runOnce(policy: CleanupPolicy | null | undefined, _signal: AbortSignal, blockedPaths: ReadonlySet<string>): Promise<CleanupLoopResult> {
+      async runOnce(
+        policy: CleanupPolicy | null | undefined,
+        _signal: AbortSignal,
+        blockedPaths: ReadonlySet<string>,
+      ): Promise<CleanupLoopResult> {
         const state = currentCleanupTestState()
         state.blockedPaths = blockedPaths
         const call = { policy: policy ?? null, tickIndex: state.cleanupCalls.length + 1 }
@@ -142,7 +153,7 @@ vi.mock("../src/runtime/cleanup-loop.js", () => {
 async function importHost() {
   // Dynamic import so the `vi.mock` calls above are wired before the
   // module graph resolves.
-  return (await import("../src/runtime/host.js")).RunnerHost
+  return (await import('../src/runtime/host.js')).RunnerHost
 }
 
 function deferred() {
@@ -228,7 +239,7 @@ async function advanceCleanupTick(events: CleanupEvents): Promise<CleanupCall> {
   return await cleanup
 }
 
-describe("RunnerHost idle-system cleanup", () => {
+describe('RunnerHost idle-system cleanup', () => {
   function it(name: string, body: () => Promise<void>): void {
     vitestIt(name, async () => {
       await withDefaultRunnerTestResources(async (resources) => {
@@ -247,9 +258,9 @@ describe("RunnerHost idle-system cleanup", () => {
 
   function defaultOptions() {
     return {
-      serverUrl: "https://runner.test",
-      runnerId: "runner-idle-cleanup",
-      projectId: "project-1",
+      serverUrl: 'https://runner.test',
+      runnerId: 'runner-idle-cleanup',
+      projectId: 'project-1',
       runnerRoot: testRoot(),
       pollIntervalMs: 60_000,
       heartbeatIntervalMs: 60_000,
@@ -260,8 +271,8 @@ describe("RunnerHost idle-system cleanup", () => {
     }
   }
 
-  it("FetchesConfigOnEachCleanupTick_AndRunsEviction_WhenPollStays204", async () => {
-    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "setInterval", "clearInterval"] })
+  it('FetchesConfigOnEachCleanupTick_AndRunsEviction_WhenPollStays204', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval'] })
     const hostEvents = configureHost()
     const cleanupEvents = observeCleanupTicks()
     testState().stubFetchConfigBehavior = async () => ({ retentionDays: 7 })
@@ -298,8 +309,8 @@ describe("RunnerHost idle-system cleanup", () => {
     await expect(run).resolves.toBeUndefined()
   })
 
-  it("FetchesConfigButEvictsNothing_WhenPolicyIsFullyUnconfigured", async () => {
-    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "setInterval", "clearInterval"] })
+  it('FetchesConfigButEvictsNothing_WhenPolicyIsFullyUnconfigured', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval'] })
     const hostEvents = configureHost()
     const cleanupEvents = observeCleanupTicks()
     // /config returns a policy with all-null fields — "null means do not evict".
@@ -342,11 +353,11 @@ describe("RunnerHost idle-system cleanup", () => {
     await expect(run).resolves.toBeUndefined()
   })
 
-  it("SkipsCleanupTick_WhenFetchConfigThrows_BestEffortNextTickRetries", async () => {
-    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "setInterval", "clearInterval"] })
+  it('SkipsCleanupTick_WhenFetchConfigThrows_BestEffortNextTickRetries', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval'] })
     const hostEvents = configureHost()
     const cleanupEvents = observeCleanupTicks()
-    const failure = new Error("fetchConfig failed: 404")
+    const failure = new Error('fetchConfig failed: 404')
 
     testState().stubFetchConfigBehavior = async () => {
       testState().fetchAttempts += 1
@@ -377,17 +388,23 @@ describe("RunnerHost idle-system cleanup", () => {
       expect(testState().fetchConfigCalls).toHaveLength(2)
       expect(testState().cleanupCalls).toEqual([successfulCall])
       expect(successfulCall.policy).toEqual({ retentionDays: 7 })
-      expect(capturedLogs()).toEqual(expect.arrayContaining([
-        expect.objectContaining({ level: "ERROR", message: "workspace cleanup loop failed", fields: { exception: failure } }),
-      ]))
+      expect(capturedLogs()).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            level: 'ERROR',
+            message: 'workspace cleanup loop failed',
+            fields: { exception: failure },
+          }),
+        ]),
+      )
 
       controller.abort()
       await expect(run).resolves.toBeUndefined()
     }
   })
 
-  it("ReclaimsBeforeConfig_AndPassesOnlyTheBlockedSnapshotToCleanup", async () => {
-    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "setInterval", "clearInterval"] })
+  it('ReclaimsBeforeConfig_AndPassesOnlyTheBlockedSnapshotToCleanup', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval'] })
     const hostEvents = configureHost()
     const cleanupEvents = observeCleanupTicks()
     testState().stubFetchConfigBehavior = async () => ({ retentionDays: 7 })
@@ -398,39 +415,39 @@ describe("RunnerHost idle-system cleanup", () => {
     const run = host.run(controller.signal)
     await waitForHostStartup(hostEvents)
     const runtime = await testState().runtimeHandles.runtimeCreated
-    vi.spyOn(runtime, "reclaimWhere").mockImplementation(async () => {
-      order.push("reclaim")
+    vi.spyOn(runtime, 'reclaimWhere').mockImplementation(async () => {
+      order.push('reclaim')
       return {
         tracked: 1,
         candidates: 1,
         disposed: 0,
         busy: 1,
         failed: 0,
-        blockedDirectories: ["/blocked"],
+        blockedDirectories: ['/blocked'],
         diagnostics: [],
       }
     })
     const previousFetch = testState().onFetchConfig
     testState().onFetchConfig = () => {
-      order.push("fetch")
+      order.push('fetch')
       previousFetch?.()
     }
     const previousCleanup = testState().onCleanupCall
     testState().onCleanupCall = (call) => {
-      order.push("cleanup")
+      order.push('cleanup')
       previousCleanup?.(call)
     }
 
     await advanceCleanupTick(cleanupEvents)
 
-    expect(order).toEqual(["reclaim", "fetch", "cleanup"])
-    expect(testState().blockedPaths).toEqual(new Set(["/blocked"]))
+    expect(order).toEqual(['reclaim', 'fetch', 'cleanup'])
+    expect(testState().blockedPaths).toEqual(new Set(['/blocked']))
     controller.abort()
     await expect(run).resolves.toBeUndefined()
   })
 
-  it("LogsOneBoundedReclaimSummaryOnlyWhenCandidatesExist", async () => {
-    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "setInterval", "clearInterval"] })
+  it('LogsOneBoundedReclaimSummaryOnlyWhenCandidatesExist', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval'] })
     const hostEvents = configureHost()
     const cleanupEvents = observeCleanupTicks()
     testState().stubFetchConfigBehavior = async () => ({ retentionDays: 7 })
@@ -440,30 +457,45 @@ describe("RunnerHost idle-system cleanup", () => {
     const run = host.run(controller.signal)
     await waitForHostStartup(hostEvents)
     const runtime = await testState().runtimeHandles.runtimeCreated
-    const reclaim = vi.spyOn(runtime, "reclaimWhere")
-      .mockResolvedValueOnce({ tracked: 2, candidates: 0, disposed: 0, busy: 0, failed: 0, blockedDirectories: [], diagnostics: [] })
+    const reclaim = vi
+      .spyOn(runtime, 'reclaimWhere')
+      .mockResolvedValueOnce({
+        tracked: 2,
+        candidates: 0,
+        disposed: 0,
+        busy: 0,
+        failed: 0,
+        blockedDirectories: [],
+        diagnostics: [],
+      })
       .mockResolvedValueOnce({
         tracked: 6,
         candidates: 2,
         disposed: 1,
         busy: 1,
         failed: 0,
-        blockedDirectories: ["/busy"],
+        blockedDirectories: ['/busy'],
         diagnostics: [
-          { severity: "warning", code: "zeta", message: "hidden" },
-          { severity: "info", code: "alpha", message: "hidden" },
-          { severity: "warning", code: "alpha", message: "hidden" },
-          { severity: "warning", code: "delta", message: "hidden" },
-          { severity: "warning", code: "beta", message: "hidden" },
-          { severity: "warning", code: "omega", message: "hidden" },
+          { severity: 'warning', code: 'zeta', message: 'hidden' },
+          { severity: 'info', code: 'alpha', message: 'hidden' },
+          { severity: 'warning', code: 'alpha', message: 'hidden' },
+          { severity: 'warning', code: 'delta', message: 'hidden' },
+          { severity: 'warning', code: 'beta', message: 'hidden' },
+          { severity: 'warning', code: 'omega', message: 'hidden' },
         ],
       })
     try {
       await advanceCleanupTick(cleanupEvents)
-      expect(capturedLogs().filter((record) => record.message === "workspace reclaim completed")).toHaveLength(0)
+      expect(capturedLogs().filter((record) => record.message === 'workspace reclaim completed')).toHaveLength(0)
       await advanceCleanupTick(cleanupEvents)
-      expect(capturedLogs().filter((record) => record.message === "workspace reclaim completed")).toEqual([
-        expect.objectContaining({ level: "INFO", fields: { reason: "workspace reclaim: tracked=6 candidates=2 disposed=1 busy=1 failed=0 diagnostics=alpha:2,beta:1,delta:1,omega:1 omitted=1" } }),
+      expect(capturedLogs().filter((record) => record.message === 'workspace reclaim completed')).toEqual([
+        expect.objectContaining({
+          level: 'INFO',
+          fields: {
+            reason:
+              'workspace reclaim: tracked=6 candidates=2 disposed=1 busy=1 failed=0 diagnostics=alpha:2,beta:1,delta:1,omega:1 omitted=1',
+          },
+        }),
       ])
       expect(reclaim).toHaveBeenCalledTimes(2)
     } finally {
@@ -472,32 +504,38 @@ describe("RunnerHost idle-system cleanup", () => {
     }
   })
 
-  it("SkipsDiskCleanup_WhenRuntimeReclamationThrows", async () => {
-    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "setInterval", "clearInterval"] })
+  it('SkipsDiskCleanup_WhenRuntimeReclamationThrows', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval'] })
     const hostEvents = configureHost()
     const cleanupEvents = observeCleanupTicks()
-    const failure = new Error("runtime reclaim failed")
+    const failure = new Error('runtime reclaim failed')
     const RunnerHost = await importHost()
     const controller = new AbortController()
     const host = new RunnerHost(defaultOptions())
     const run = host.run(controller.signal)
     await waitForHostStartup(hostEvents)
     const runtime = await testState().runtimeHandles.runtimeCreated
-    vi.spyOn(runtime, "reclaimWhere").mockRejectedValue(failure)
+    vi.spyOn(runtime, 'reclaimWhere').mockRejectedValue(failure)
 
     await vi.advanceTimersByTimeAsync(CLEANUP_INTERVAL_FLOOR_MS)
 
     expect(testState().fetchConfigCalls).toHaveLength(0)
     expect(testState().cleanupCalls).toHaveLength(0)
-    expect(capturedLogs()).toEqual(expect.arrayContaining([
-      expect.objectContaining({ level: "ERROR", message: "workspace cleanup runtime reclamation failed", fields: { exception: failure } }),
-    ]))
+    expect(capturedLogs()).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          level: 'ERROR',
+          message: 'workspace cleanup runtime reclamation failed',
+          fields: { exception: failure },
+        }),
+      ]),
+    )
     controller.abort()
     await expect(run).resolves.toBeUndefined()
   })
 
-  it("SingleFlightsOverlappingTimerInvocations", async () => {
-    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "setInterval", "clearInterval"] })
+  it('SingleFlightsOverlappingTimerInvocations', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval'] })
     const hostEvents = configureHost()
     const cleanupEvents = observeCleanupTicks()
     testState().stubFetchConfigBehavior = async () => ({ retentionDays: 7 })
@@ -509,7 +547,7 @@ describe("RunnerHost idle-system cleanup", () => {
     const run = host.run(controller.signal)
     await waitForHostStartup(hostEvents)
     const runtime = await testState().runtimeHandles.runtimeCreated
-    const reclaim = vi.spyOn(runtime, "reclaimWhere").mockImplementation(async () => {
+    const reclaim = vi.spyOn(runtime, 'reclaimWhere').mockImplementation(async () => {
       reclaimStarted.resolve()
       await reclaimGate.promise
       return { tracked: 0, candidates: 0, disposed: 0, busy: 0, failed: 0, blockedDirectories: [], diagnostics: [] }
@@ -530,8 +568,8 @@ describe("RunnerHost idle-system cleanup", () => {
     await expect(run).resolves.toBeUndefined()
   })
 
-  it("IssuesIndependentFetchPerTick_NoCachingAcrossTicks", async () => {
-    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "setInterval", "clearInterval"] })
+  it('IssuesIndependentFetchPerTick_NoCachingAcrossTicks', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval'] })
     const hostEvents = configureHost()
     const cleanupEvents = observeCleanupTicks()
     testState().stubFetchConfigBehavior = async () => ({ retentionDays: 7 })
@@ -554,18 +592,18 @@ describe("RunnerHost idle-system cleanup", () => {
     await expect(run).resolves.toBeUndefined()
   })
 
-  it("SweepsRetiredAgentWorkspacesDirectoryOnCleanupTick_AndIsIdempotentAcrossTicks", async () => {
-    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "setInterval", "clearInterval"] })
+  it('SweepsRetiredAgentWorkspacesDirectoryOnCleanupTick_AndIsIdempotentAcrossTicks', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval'] })
     const hostEvents = configureHost()
     const cleanupEvents = observeCleanupTicks()
     testState().stubFetchConfigBehavior = async () => ({ retentionDays: 7 })
 
     // The retired managed-worktree tree is pre-existing data under
     // the runner root — the cleanup tick must sweep it whole.
-    const legacyWorkspaces = join(testRoot(), "agent-workspaces")
+    const legacyWorkspaces = join(testRoot(), 'agent-workspaces')
     await testState().resources.fileSystem.ensureDir(legacyWorkspaces)
-    await testState().resources.fileSystem.writeText(join(legacyWorkspaces, "stale-worktree"), "retired")
-    await testState().resources.fileSystem.writeText(join(legacyWorkspaces, "manifest.json"), "{}")
+    await testState().resources.fileSystem.writeText(join(legacyWorkspaces, 'stale-worktree'), 'retired')
+    await testState().resources.fileSystem.writeText(join(legacyWorkspaces, 'manifest.json'), '{}')
 
     const RunnerHost = await importHost()
     const controller = new AbortController()
@@ -576,20 +614,20 @@ describe("RunnerHost idle-system cleanup", () => {
     await advanceCleanupTick(cleanupEvents)
 
     // First tick: the whole directory is gone as disk-policy cleanup.
-    await expect(testState().resources.fileSystem.stat(legacyWorkspaces)).rejects.toMatchObject({ code: "ENOENT" })
-    expect(capturedLogs().filter((record) => record.message === "removed retired agent-workspaces directory")).toEqual([
-      expect.objectContaining({ level: "INFO", fields: { path: legacyWorkspaces } }),
+    await expect(testState().resources.fileSystem.stat(legacyWorkspaces)).rejects.toMatchObject({ code: 'ENOENT' })
+    expect(capturedLogs().filter((record) => record.message === 'removed retired agent-workspaces directory')).toEqual([
+      expect.objectContaining({ level: 'INFO', fields: { path: legacyWorkspaces } }),
     ])
 
     // Second tick: nothing left to sweep — no error, directory stays gone.
     await advanceCleanupTick(cleanupEvents)
-    await expect(testState().resources.fileSystem.stat(legacyWorkspaces)).rejects.toMatchObject({ code: "ENOENT" })
+    await expect(testState().resources.fileSystem.stat(legacyWorkspaces)).rejects.toMatchObject({ code: 'ENOENT' })
 
     controller.abort()
     await expect(run).resolves.toBeUndefined()
   })
 
-  it("HostIntervals_ClampSubSecondCleanupAndConvergenceConfigurationToOneSecond", async () => {
+  it('HostIntervals_ClampSubSecondCleanupAndConvergenceConfigurationToOneSecond', async () => {
     const RunnerHost = await importHost()
     const host = new RunnerHost({
       ...defaultOptions(),

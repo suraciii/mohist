@@ -118,6 +118,18 @@ public sealed class SpecUnitMigrationLedgerRules
     }
 
     [Fact]
+    public void SpecUnitMigrationLedger_NegativeProof_RejectsRetiringAnExistingHistoricalTarget()
+    {
+        var row = SpecUnitMigrationLedger.Read(LedgerResourceName).Rows!
+            .Single(candidate => candidate.Id == "rename-runner-terminal-status");
+        row.Retired = true;
+        row.RetirementReason = "synthetic retirement";
+
+        Assert.Contains(SpecUnitMigrationLedgerValidator.ValidateHistoricalRowForTests(row, ProductionInventory.Value),
+            violation => violation.Contains("retired historical target is still a compiled discoverable type", StringComparison.Ordinal));
+    }
+
+    [Fact]
     public void SpecUnitMigrationLedger_NegativeProof_RejectsPlaceholderAndTamperedSourceTreeMetadata()
     {
         var placeholder = SpecUnitMigrationLedger.Read(LedgerResourceName);

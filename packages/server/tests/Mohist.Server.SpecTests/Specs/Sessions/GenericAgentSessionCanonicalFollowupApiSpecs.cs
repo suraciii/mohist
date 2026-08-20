@@ -3,7 +3,6 @@ using System.Net.Http.Json;
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
-using Microsoft.AspNetCore.SignalR;
 using Mohist.Server.Api;
 using Mohist.Server.Events.Grains;
 using Mohist.Server.Infrastructure.Data.Db;
@@ -11,7 +10,7 @@ using Mohist.Server.Infrastructure.Orleans;
 using Mohist.Server.Issue.Domain;
 using Mohist.Server.Issue.Grains;
 using Mohist.Server.Runner.Grains;
-using Mohist.Server.Runner.Services.SignalR;
+using Mohist.Server.Runner.Services;
 using Mohist.Server.Sessions.Domain;
 using Mohist.Server.Sessions.Grains;
 using Mohist.Server.Sessions.Services;
@@ -36,7 +35,7 @@ public class GenericAgentSessionCanonicalFollowupApiSpecs : GenericAgentSessionF
         var (project, issue, workflowRunId, sessionName, sessionId) = await CreateWorkflowSessionAsync("gen-issue-scoped-shape");
 
         var tracker = _fixture.Services.GetRequiredService<RunnerConnectionTracker>();
-        var runnerHub = _fixture.Services.GetRequiredService<IHubContext<RunnerHub>>() as RecordingRunnerHubContext
+        var runnerHub = _fixture.Services.GetRequiredService<IRunnerControlTransport>() as RecordingRunnerControlTransport
             ?? throw new InvalidOperationException("Recording runner hub context was not registered.");
         runnerHub.Clear();
         tracker.Register(_runnerId, "conn-issue-scoped-shape");
@@ -55,7 +54,7 @@ public class GenericAgentSessionCanonicalFollowupApiSpecs : GenericAgentSessionF
             Assert.False(string.IsNullOrEmpty(responseData.GetProperty("turnId").GetString()));
 
             var sent = Assert.Single(runnerHub.SentMessages);
-            Assert.Equal("ReceiveFollowup", sent.Method);
+            Assert.Equal("session.followup", sent.Method);
 
             var payload = JsonSerializer.SerializeToElement(sent.Arguments.Single());
             Assert.Equal("ship it", payload.GetProperty("text").GetString());
@@ -82,7 +81,7 @@ public class GenericAgentSessionCanonicalFollowupApiSpecs : GenericAgentSessionF
     {
         var (project, issue, _, sessionName, sessionId) = await CreateWorkflowSessionAsync("issue-followup-observation");
         var tracker = _fixture.Services.GetRequiredService<RunnerConnectionTracker>();
-        var runnerHub = _fixture.Services.GetRequiredService<IHubContext<RunnerHub>>() as RecordingRunnerHubContext
+        var runnerHub = _fixture.Services.GetRequiredService<IRunnerControlTransport>() as RecordingRunnerControlTransport
             ?? throw new InvalidOperationException("Recording runner hub context was not registered.");
         runnerHub.Clear();
         tracker.Register(_runnerId, "conn-issue-followup-observation");

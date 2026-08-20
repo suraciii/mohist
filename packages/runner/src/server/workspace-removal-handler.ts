@@ -1,10 +1,10 @@
 // The server-invoked
-// `RemoveWorkspace` SignalR method is registered through the
+// `RemoveWorkspace` control WebSocket method is registered through the
 // free-function `registerWorkspaceRemovalHandler(conn, deps)` so
 // the cluster's dependency surface is explicit and the handler can be
 // exercised independently from the connection lifecycle.
 //
-// Behaviour preserves the SignalR reply contract while enforcing the
+// Behaviour preserves the control WebSocket reply contract while enforcing the
 // registry-safety invariant:
 //   - runner-root containment check (rejects `workspace_cleanup_refused`)
 //   - paths outside runnerRoot never mutate the registry
@@ -22,7 +22,6 @@
 
 import { existsSync as defaultExistsSync } from 'node:fs'
 import { resolve } from 'node:path'
-import * as signalR from '@microsoft/signalr'
 import { deleteDirectory } from '../system/process.js'
 import { hasCompleteWorkspaceIdentity, isUnderRunnerRoot, type WorkspaceQuery } from '../runtime/workspace-query.js'
 import type { WorkspaceRemovalFence } from '../runtime/workspace-removal-fence.js'
@@ -49,14 +48,17 @@ export function createWorkspaceRemovalHandler(
       on(_method: string, registered: (query: WorkspaceQuery) => Promise<unknown>) {
         handler = registered
       },
-    } as signalR.HubConnection,
+    },
     deps,
   )
   return (query) => handler!(query)
 }
 
-export function registerWorkspaceRemovalHandler(conn: signalR.HubConnection, deps: WorkspaceRemovalHandlerDeps): void {
-  const pathExists = deps.pathExists ?? currentRunnerResources()?.signalRExistsChecker ?? defaultExistsSync
+function registerWorkspaceRemovalHandler(
+  conn: { on(method: string, handler: (query: WorkspaceQuery) => Promise<unknown>): void },
+  deps: WorkspaceRemovalHandlerDeps,
+): void {
+  const pathExists = deps.pathExists ?? currentRunnerResources()?.controlExistsChecker ?? defaultExistsSync
 
   conn.on('RemoveWorkspace', async (query: WorkspaceQuery) => {
     if (!query?.workspacePath) {

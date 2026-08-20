@@ -247,7 +247,7 @@ export interface RunnerResourceContext {
   readonly transport?: { fetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response> }
   readonly gitRunner?: RunnerGitRunner
   readonly deliveryGitRunner?: RunnerGitRunner
-  readonly signalRGitRunner?: (
+  readonly controlGitRunner?: (
     command: string,
     args: string[],
     cwd: string,
@@ -261,7 +261,7 @@ export interface RunnerResourceContext {
     status?: 'timeout'
     timeoutMs?: number
   }>
-  readonly signalRExistsChecker?: (path: string) => boolean
+  readonly controlExistsChecker?: (path: string) => boolean
   readonly processSpawner?: RunnerProcessSpawner
   readonly processKiller?: RunnerProcessKiller
   readonly openSpecGitRunner?: RunnerGitRunner

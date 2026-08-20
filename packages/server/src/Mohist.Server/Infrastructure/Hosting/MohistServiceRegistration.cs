@@ -35,8 +35,8 @@ using Mohist.Server.Infrastructure.PublicApi;
 using Mohist.Server.Workflow.Services;
 using Mohist.Server.Infrastructure.Workspace;
 using Mohist.Server.Runner.Grains;
-using Mohist.Server.Runner.Services.SignalR;
 using Mohist.Server.Runner.Services;
+using Mohist.Server.Runner.Services.WebSocket;
 using Mohist.Server.SystemInfo;
 using Mohist.Server.Workflow.Services.Prompts;
 using Mohist.Server.Workflow.Storage;
@@ -130,7 +130,9 @@ public static class MohistServiceRegistration
         services.AddScoped<ISlackManagerConversationProcessor>(sp =>
             sp.GetRequiredService<SlackManagerConversationService>());
         services.AddSingleton<Mohist.Server.Sessions.Services.IAgentSessionConnectionRegistry>(sp =>
-            sp.GetRequiredService<Mohist.Server.Runner.Services.SignalR.RunnerConnectionTracker>());
+            sp.GetRequiredService<Mohist.Server.Runner.Services.RunnerConnectionTracker>());
+        services.AddSingleton<IRunnerControlTransport>(sp =>
+            sp.GetRequiredService<RunnerControlWebSocketRegistry>());
 
         // IAgentConnectionProviderCleanup implementations are also
         // registered as Self by the conventional services scan; Microsoft DI's

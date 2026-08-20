@@ -1,10 +1,9 @@
 using System.Net;
 using System.Text.Json;
-using Microsoft.AspNetCore.SignalR;
 using Microsoft.Extensions.DependencyInjection;
 using Mohist.Server.Agent.Grains;
 using Mohist.Server.Api;
-using Mohist.Server.Runner.Services.SignalR;
+using Mohist.Server.Runner.Services;
 using Mohist.Server.Contracts;
 using Mohist.Server.Sessions.Domain;
 using Mohist.Server.Sessions.Grains;
@@ -27,7 +26,7 @@ public class GenericAgentSessionCancelApiSpecs : GenericAgentSessionCancelApiTes
     {
         var (project, sessionId, turnId) = await CreateQueuedSessionForCancelAsync();
         var before = await ReadSessionEvidenceAsync(sessionId);
-        var hub = _fixture.Services.GetRequiredService<IHubContext<RunnerHub>>() as RecordingRunnerHubContext
+        var hub = _fixture.Services.GetRequiredService<IRunnerControlTransport>() as RecordingRunnerControlTransport
             ?? throw new InvalidOperationException("Recording runner hub context was not registered.");
         hub.Clear();
 
@@ -51,7 +50,7 @@ public class GenericAgentSessionCancelApiSpecs : GenericAgentSessionCancelApiTes
     {
         var (project, sessionId, turnId) = await CreateQueuedSessionForCancelAsync();
         using var first = await PostCancelAsync(project.Id, sessionId, turnId);
-        var hub = _fixture.Services.GetRequiredService<IHubContext<RunnerHub>>() as RecordingRunnerHubContext
+        var hub = _fixture.Services.GetRequiredService<IRunnerControlTransport>() as RecordingRunnerControlTransport
             ?? throw new InvalidOperationException("Recording runner hub context was not registered.");
         hub.Clear();
 
@@ -68,7 +67,7 @@ public class GenericAgentSessionCancelApiSpecs : GenericAgentSessionCancelApiTes
     public async Task Stop_ExecutingWithoutReplyLeavesStopPending()
     {
         var (project, sessionId, turnId) = await CreateExecutingSessionForCancelAsync();
-        var hub = _fixture.Services.GetRequiredService<IHubContext<RunnerHub>>() as RecordingRunnerHubContext
+        var hub = _fixture.Services.GetRequiredService<IRunnerControlTransport>() as RecordingRunnerControlTransport
             ?? throw new InvalidOperationException("Recording runner hub context was not registered.");
         hub.Clear();
 
@@ -85,10 +84,10 @@ public class GenericAgentSessionCancelApiSpecs : GenericAgentSessionCancelApiTes
     {
         var (project, sessionId) = await CreateCanonicalSessionForCancelAsync("agent-launch");
         var turnId = Assert.Single(await _fixture.Grains.GetGrain<IAgentSessionGrain>(sessionId).ListTurnsAsync()).Id;
-        var hub = _fixture.Services.GetRequiredService<IHubContext<RunnerHub>>() as RecordingRunnerHubContext
+        var hub = _fixture.Services.GetRequiredService<IRunnerControlTransport>() as RecordingRunnerControlTransport
             ?? throw new InvalidOperationException("Recording runner hub context was not registered.");
         hub.Clear();
-        hub.SetInvocationResponse("CancelAgentSession", new RunnerStopReply("stopped"));
+        hub.SetInvocationResponse("session.stop", new RunnerStopReply("stopped"));
 
         using var response = await PostStopAsync(project.Id, sessionId, turnId);
 
@@ -96,7 +95,7 @@ public class GenericAgentSessionCancelApiSpecs : GenericAgentSessionCancelApiTes
         var data = await ReadDataAsync(response);
         Assert.Equal("stopped", data.GetProperty("state").GetString());
         var invocation = Assert.Single(hub.Invocations);
-        Assert.Equal("CancelAgentSession", invocation.Method);
+        Assert.Equal("session.stop", invocation.Method);
         var payload = JsonSerializer.SerializeToElement(invocation.Arguments.Single());
         Assert.Equal(turnId, payload.GetProperty("turnId").GetString());
     }
@@ -105,10 +104,10 @@ public class GenericAgentSessionCancelApiSpecs : GenericAgentSessionCancelApiTes
     public async Task Stop_ConfirmedLaunchLeavesTerminalVerdictToAgentJob()
     {
         var (project, sessionId, turnId, jobId) = await CreateExecutingLaunchSessionForStopAsync();
-        var hub = _fixture.Services.GetRequiredService<IHubContext<RunnerHub>>() as RecordingRunnerHubContext
+        var hub = _fixture.Services.GetRequiredService<IRunnerControlTransport>() as RecordingRunnerControlTransport
             ?? throw new InvalidOperationException("Recording runner hub context was not registered.");
         hub.Clear();
-        hub.SetInvocationResponse("CancelAgentSession", new RunnerStopReply("stopped"));
+        hub.SetInvocationResponse("session.stop", new RunnerStopReply("stopped"));
 
         using var response = await PostStopAsync(project.Id, sessionId, turnId);
 
@@ -145,7 +144,7 @@ public class GenericAgentSessionCancelApiSpecs : GenericAgentSessionCancelApiTes
     public async Task Stop_QueuedTurnRecordsCancelledWithoutContactingRunner()
     {
         var (project, sessionId, turnId) = await CreateQueuedSessionForCancelAsync();
-        var hub = _fixture.Services.GetRequiredService<IHubContext<RunnerHub>>() as RecordingRunnerHubContext
+        var hub = _fixture.Services.GetRequiredService<IRunnerControlTransport>() as RecordingRunnerControlTransport
             ?? throw new InvalidOperationException("Recording runner hub context was not registered.");
         hub.Clear();
 
@@ -161,10 +160,10 @@ public class GenericAgentSessionCancelApiSpecs : GenericAgentSessionCancelApiTes
     public async Task Stop_UnconfirmedReplySurfacesUnknownAndInterruptFlag()
     {
         var (project, sessionId, turnId, jobId) = await CreateExecutingLaunchSessionForStopAsync();
-        var hub = _fixture.Services.GetRequiredService<IHubContext<RunnerHub>>() as RecordingRunnerHubContext
+        var hub = _fixture.Services.GetRequiredService<IRunnerControlTransport>() as RecordingRunnerControlTransport
             ?? throw new InvalidOperationException("Recording runner hub context was not registered.");
         hub.Clear();
-        hub.SetInvocationResponse("CancelAgentSession", new RunnerStopReply("unknown", true));
+        hub.SetInvocationResponse("session.stop", new RunnerStopReply("unknown", true));
 
         using var response = await PostStopAsync(project.Id, sessionId, turnId);
 
@@ -189,10 +188,10 @@ public class GenericAgentSessionCancelApiSpecs : GenericAgentSessionCancelApiTes
     public async Task Stop_UnconfirmedReplyMarksFollowupTurnAndSessionUnknownWithoutRunnerActivity()
     {
         var (project, sessionId, turnId) = await CreateExecutingSessionForCancelAsync();
-        var hub = _fixture.Services.GetRequiredService<IHubContext<RunnerHub>>() as RecordingRunnerHubContext
+        var hub = _fixture.Services.GetRequiredService<IRunnerControlTransport>() as RecordingRunnerControlTransport
             ?? throw new InvalidOperationException("Recording runner hub context was not registered.");
         hub.Clear();
-        hub.SetInvocationResponse("CancelAgentSession", new RunnerStopReply("unknown", true));
+        hub.SetInvocationResponse("session.stop", new RunnerStopReply("unknown", true));
 
         using var response = await PostStopAsync(project.Id, sessionId, turnId);
 
@@ -213,10 +212,10 @@ public class GenericAgentSessionCancelApiSpecs : GenericAgentSessionCancelApiTes
         AgentTurnStatus expectedTurnStatus)
     {
         var (project, sessionId, turnId) = await CreateExecutingSessionForCancelAsync();
-        var hub = _fixture.Services.GetRequiredService<IHubContext<RunnerHub>>() as RecordingRunnerHubContext
+        var hub = _fixture.Services.GetRequiredService<IRunnerControlTransport>() as RecordingRunnerControlTransport
             ?? throw new InvalidOperationException("Recording runner hub context was not registered.");
         hub.Clear();
-        hub.SetInvocationResponse("CancelAgentSession", new RunnerStopReply("unknown", true));
+        hub.SetInvocationResponse("session.stop", new RunnerStopReply("unknown", true));
 
         using var response = await PostStopAsync(project.Id, sessionId, turnId);
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
@@ -240,7 +239,7 @@ public class GenericAgentSessionCancelApiSpecs : GenericAgentSessionCancelApiTes
     {
         var (project, sessionId, turnId) = await CreateQueuedSessionForCancelAsync();
         using var cancel = await PostCancelAsync(project.Id, sessionId, turnId);
-        var hub = _fixture.Services.GetRequiredService<IHubContext<RunnerHub>>() as RecordingRunnerHubContext
+        var hub = _fixture.Services.GetRequiredService<IRunnerControlTransport>() as RecordingRunnerControlTransport
             ?? throw new InvalidOperationException("Recording runner hub context was not registered.");
         hub.Clear();
 
@@ -258,10 +257,10 @@ public class GenericAgentSessionCancelApiSpecs : GenericAgentSessionCancelApiTes
     {
         var (project, sessionId, turnId) = await CreateExecutingSessionForCancelAsync();
         var session = _fixture.Grains.GetGrain<IAgentSessionGrain>(sessionId);
-        var hub = _fixture.Services.GetRequiredService<IHubContext<RunnerHub>>() as RecordingRunnerHubContext
+        var hub = _fixture.Services.GetRequiredService<IRunnerControlTransport>() as RecordingRunnerControlTransport
             ?? throw new InvalidOperationException("Recording runner hub context was not registered.");
         hub.Clear();
-        hub.SetInvocationResponseFactory("CancelAgentSession", _ => CompleteTargetBeforeStopReplyAsync(session, turnId));
+        hub.SetInvocationResponseFactory("session.stop", _ => CompleteTargetBeforeStopReplyAsync(session, turnId));
 
         using var response = await PostStopAsync(project.Id, sessionId, turnId);
 
@@ -278,10 +277,10 @@ public class GenericAgentSessionCancelApiSpecs : GenericAgentSessionCancelApiTes
     {
         var (project, sessionId, turnId) = await CreateExecutingSessionForCancelAsync();
         var session = _fixture.Grains.GetGrain<IAgentSessionGrain>(sessionId);
-        var hub = _fixture.Services.GetRequiredService<IHubContext<RunnerHub>>() as RecordingRunnerHubContext
+        var hub = _fixture.Services.GetRequiredService<IRunnerControlTransport>() as RecordingRunnerControlTransport
             ?? throw new InvalidOperationException("Recording runner hub context was not registered.");
         hub.Clear();
-        hub.SetInvocationResponseFactory("CancelAgentSession", _ => CompleteTargetWithoutStopReplyAsync(session, turnId));
+        hub.SetInvocationResponseFactory("session.stop", _ => CompleteTargetWithoutStopReplyAsync(session, turnId));
 
         using var response = await PostStopAsync(project.Id, sessionId, turnId);
 
@@ -294,10 +293,10 @@ public class GenericAgentSessionCancelApiSpecs : GenericAgentSessionCancelApiTes
     {
         var (project, sessionId, turnId) = await CreateExecutingSessionForCancelAsync();
         var session = _fixture.Grains.GetGrain<IAgentSessionGrain>(sessionId);
-        var hub = _fixture.Services.GetRequiredService<IHubContext<RunnerHub>>() as RecordingRunnerHubContext
+        var hub = _fixture.Services.GetRequiredService<IRunnerControlTransport>() as RecordingRunnerControlTransport
             ?? throw new InvalidOperationException("Recording runner hub context was not registered.");
         hub.Clear();
-        hub.SetInvocationResponseFactory("CancelAgentSession", _ => CompleteTargetWithoutStopReplyAsync(session, turnId));
+        hub.SetInvocationResponseFactory("session.stop", _ => CompleteTargetWithoutStopReplyAsync(session, turnId));
 
         using var response = await PostStopAsync(project.Id, sessionId, turnId);
 
@@ -322,15 +321,15 @@ public class GenericAgentSessionCancelApiSpecs : GenericAgentSessionCancelApiTes
     {
         var (project, sessionId, turnId) = await CreateExecutingSessionForCancelAsync();
         var session = _fixture.Grains.GetGrain<IAgentSessionGrain>(sessionId);
-        var hub = _fixture.Services.GetRequiredService<IHubContext<RunnerHub>>() as RecordingRunnerHubContext
+        var hub = _fixture.Services.GetRequiredService<IRunnerControlTransport>() as RecordingRunnerControlTransport
             ?? throw new InvalidOperationException("Recording runner hub context was not registered.");
         hub.Clear();
-        hub.SetInvocationResponseFactory("CancelAgentSession", _ => CompleteTargetWithoutStopReplyAsync(session, turnId));
+        hub.SetInvocationResponseFactory("session.stop", _ => CompleteTargetWithoutStopReplyAsync(session, turnId));
 
         using var first = await PostStopAsync(project.Id, sessionId, turnId);
         Assert.Equal(HttpStatusCode.ServiceUnavailable, first.StatusCode);
 
-        hub.SetInvocationResponse("CancelAgentSession", new RunnerStopReply("not-cancellable"));
+        hub.SetInvocationResponse("session.stop", new RunnerStopReply("not-cancellable"));
         using var retry = await PostStopAsync(project.Id, sessionId, turnId);
 
         Assert.Equal(HttpStatusCode.OK, retry.StatusCode);
@@ -349,7 +348,7 @@ public class GenericAgentSessionCancelApiSpecs : GenericAgentSessionCancelApiTes
     public async Task Stop_LaterTurnDoesNotChangeTerminalLaunchJobWhenNoReply()
     {
         var (project, sessionId, turnId, jobId) = await CreateTerminalLaunchWithExecutingFollowupAsync();
-        var hub = _fixture.Services.GetRequiredService<IHubContext<RunnerHub>>() as RecordingRunnerHubContext
+        var hub = _fixture.Services.GetRequiredService<IRunnerControlTransport>() as RecordingRunnerControlTransport
             ?? throw new InvalidOperationException("Recording runner hub context was not registered.");
         hub.Clear();
 
@@ -364,10 +363,10 @@ public class GenericAgentSessionCancelApiSpecs : GenericAgentSessionCancelApiTes
     public async Task Stop_LaterTurnDoesNotChangeTerminalLaunchJob()
     {
         var (project, sessionId, turnId, jobId) = await CreateTerminalLaunchWithExecutingFollowupAsync();
-        var hub = _fixture.Services.GetRequiredService<IHubContext<RunnerHub>>() as RecordingRunnerHubContext
+        var hub = _fixture.Services.GetRequiredService<IRunnerControlTransport>() as RecordingRunnerControlTransport
             ?? throw new InvalidOperationException("Recording runner hub context was not registered.");
         hub.Clear();
-        hub.SetInvocationResponse("CancelAgentSession", new RunnerStopReply("stopped"));
+        hub.SetInvocationResponse("session.stop", new RunnerStopReply("stopped"));
 
         using var response = await PostStopAsync(project.Id, sessionId, turnId);
 

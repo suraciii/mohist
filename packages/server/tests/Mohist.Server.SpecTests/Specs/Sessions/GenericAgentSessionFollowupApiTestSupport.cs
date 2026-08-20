@@ -3,7 +3,6 @@ using System.Net.Http.Json;
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
-using Microsoft.AspNetCore.SignalR;
 using Mohist.Server.Api;
 using Mohist.Server.Events.Grains;
 using Mohist.Server.Infrastructure.Data.Db;
@@ -11,7 +10,7 @@ using Mohist.Server.Infrastructure.Orleans;
 using Mohist.Server.Issue.Domain;
 using Mohist.Server.Issue.Grains;
 using Mohist.Server.Runner.Grains;
-using Mohist.Server.Runner.Services.SignalR;
+using Mohist.Server.Runner.Services;
 using Mohist.Server.Sessions.Domain;
 using Mohist.Server.Sessions.Grains;
 using Mohist.Server.Sessions.Services;
@@ -30,7 +29,7 @@ public abstract class GenericAgentSessionFollowupApiTestSupport : IAsyncLifetime
     {
         _fixture = fixture;
         _client = fixture.Client;
-        fixture.Services.GetRequiredService<RecordingRunnerHubContext>().Clear();
+        fixture.Services.GetRequiredService<RecordingRunnerControlTransport>().Clear();
     }
 
     public ValueTask InitializeAsync() => ValueTask.CompletedTask;

@@ -36,7 +36,13 @@ import type {
 } from '../runtime/pi/index.js'
 import { parseModelIdentifier } from '../runtime/opencode/index.js'
 import type { RuntimeSessionBinding } from './session-target.js'
-import type { SessionCommand, SessionCommandError, SessionCommandResult } from './session-command-handler.js'
+import type { AgentSessionRuntimeEventOutbox, RuntimeEventRecord } from './runtime-event-outbox.js'
+import type {
+  SessionCommand,
+  SessionCommandError,
+  SessionCommandRequest,
+  SessionCommandResult,
+} from './session-command-handler.js'
 
 /**
  * Late-binding accessor shape. The host supplies either the runtime
@@ -198,6 +204,54 @@ export async function callSessionCommand(
     return dispatchPiCompact(handle.runtime, request, observer)
   }
   return dispatchPiReset(handle.runtime, request)
+}
+
+export function createSessionCommandRouter(
+  accessors: CommandRuntimeAccessors,
+  outbox: AgentSessionRuntimeEventOutbox,
+): (request: SessionCommandRequest) => Promise<SessionCommandResult> {
+  return async (request) => {
+    const handle = resolveCommandRuntime({ runtime: request.runtime }, accessors)
+    if (!handle || !(await ensureCommandRuntimeReady(handle))) return { ok: false, error: 'unavailable' }
+    if (!request.workDir || (request.command === 'compact' && !request.runtimeSessionId)) {
+      return { ok: false, error: 'unavailable' }
+    }
+    const observer: PiTurnObserver | null =
+      outbox.ready() && request.projectId && request.runtimeSessionId
+        ? {
+            onEvent: async (event) => {
+              const record: RuntimeEventRecord = {
+                id: `session-command-event:${request.operationId}:${event.id}`,
+                producerFamily: 'generic-followup',
+                target: { kind: 'generic', projectId: request.projectId!, sessionId: request.sessionId },
+                runtimeSessionId: request.runtimeSessionId!,
+                work: null,
+                event: {
+                  type: event.type,
+                  payload: {
+                    ...event.payload,
+                    source: 'session-command',
+                    command: request.command,
+                    operationId: request.operationId,
+                    runtimeSessionId: request.runtimeSessionId,
+                  },
+                },
+                acknowledgementPolicy: 'successful-response',
+              }
+              await outbox.enqueueProducedFact(record)
+            },
+          }
+        : null
+    if (handle.kind === 'pi' && request.command === 'compact' && !observer) {
+      return { ok: false, error: 'unavailable' }
+    }
+    return await callSessionCommand(
+      handle,
+      request.command,
+      { runtimeSessionId: request.runtimeSessionId ?? '', workDir: request.workDir },
+      observer,
+    )
+  }
 }
 
 async function callOpenCodeFollowup(

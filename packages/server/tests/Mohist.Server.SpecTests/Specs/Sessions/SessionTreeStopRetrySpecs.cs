@@ -8,7 +8,7 @@ using Mohist.Server.Sessions.Grains;
 using Mohist.Server.Sessions.Services;
 using Mohist.Server.SpecTests.Support;
 using Mohist.Server.TestSupport;
-using Mohist.Server.Runner.Services.SignalR;
+using Mohist.Server.Runner.Services;
 using Xunit;
 
 namespace Mohist.Server.SpecTests.Specs.Sessions;
@@ -25,7 +25,7 @@ public sealed class SessionTreeStopRetrySpecs
     [Fact]
     public async Task UnknownRetryKeepsFence_AndCompletedOperationDoesNotStopALaterTurn()
     {
-        var hub = _fixture.Services.GetRequiredService<RecordingRunnerHubContext>();
+        var hub = _fixture.Services.GetRequiredService<RecordingRunnerControlTransport>();
         var invocationCountAtStart = hub.Invocations.Count;
         var projectId = await CreateProjectAsync("stop-retry");
         var unknownSessionId = $"stop-unknown-{Guid.NewGuid():N}";
@@ -57,7 +57,7 @@ public sealed class SessionTreeStopRetrySpecs
 
         Assert.DoesNotContain(
             hub.Invocations.Skip(invocationCountAtStart),
-            item => item.Method == "CancelAgentSession");
+            item => item.Method == "session.stop");
     }
 
     [Fact]

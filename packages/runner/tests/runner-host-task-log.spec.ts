@@ -27,8 +27,8 @@ type TaskLogMocks = Record<
   | 'report'
   | 'uploadTaskLog'
   | 'fetchConfig'
-  | 'startSignalR'
-  | 'stopSignalR'
+  | 'startControl'
+  | 'stopControl'
   | 'getConnectionId'
   | 'probeLiveness'
   | 'blockingAction'
@@ -72,8 +72,8 @@ const poll = scopedMock('poll')
 const report = scopedMock('report')
 const uploadTaskLog = scopedMock('uploadTaskLog')
 const fetchConfig = scopedMock('fetchConfig')
-const startSignalR = scopedMock('startSignalR')
-const stopSignalR = scopedMock('stopSignalR')
+const startControl = scopedMock('startControl')
+const stopControl = scopedMock('stopControl')
 const getConnectionId = scopedMock('getConnectionId')
 const probeLiveness = scopedMock('probeLiveness')
 const blockingAction = scopedMock('blockingAction')
@@ -88,8 +88,8 @@ function createTaskLogMocks(): TaskLogMocks {
     report: vi.fn(async () => ({})),
     uploadTaskLog: vi.fn(async () => ({ status: 'changed', accepted: 0, truncated: false })),
     fetchConfig: vi.fn(async () => null),
-    startSignalR: vi.fn(async () => undefined),
-    stopSignalR: vi.fn(async () => undefined),
+    startControl: vi.fn(async () => undefined),
+    stopControl: vi.fn(async () => undefined),
     getConnectionId: vi.fn(() => 'conn-1'),
     probeLiveness: vi.fn(async () => true),
     blockingAction: vi.fn(
@@ -115,10 +115,10 @@ vi.mock('../src/server/connection.js', () => ({
   },
 }))
 
-vi.mock('../src/server/runner-signalr.js', () => ({
-  RunnerSignalRClient: class {
-    start = startSignalR
-    stop = stopSignalR
+vi.mock('../src/server/runner-control-websocket.js', () => ({
+  RunnerControlWebSocketClient: class {
+    start = startControl
+    stop = stopControl
     getConnectionId = getConnectionId
     probeLiveness = probeLiveness
     forceReconnect = forceReconnect
@@ -209,8 +209,8 @@ describe('RunnerHost flushes task logs before reporting work', () => {
       reportStarted.resolve()
       return {}
     })
-    startSignalR.mockResolvedValue(undefined)
-    stopSignalR.mockResolvedValue(undefined)
+    startControl.mockResolvedValue(undefined)
+    stopControl.mockResolvedValue(undefined)
     poll
       .mockResolvedValueOnce([workWith({ workId: 'work-live', agentJobId: 'aj-live' })])
       .mockImplementation(async () => [])
@@ -271,8 +271,8 @@ describe('RunnerHost flushes task logs before reporting work', () => {
       reportsStarted.get(work.workId)?.resolve()
       return {}
     })
-    startSignalR.mockResolvedValue(undefined)
-    stopSignalR.mockResolvedValue(undefined)
+    startControl.mockResolvedValue(undefined)
+    stopControl.mockResolvedValue(undefined)
     // Dispatch both works in a single poll so they start concurrently.
     // Using one batch removes the dependency on a second poll cycle and
     // the race between timer advancement and action microtasks.
@@ -349,8 +349,8 @@ describe('RunnerHost flushes task logs before reporting work', () => {
       reportStarted.resolve()
       return {}
     })
-    startSignalR.mockResolvedValue(undefined)
-    stopSignalR.mockResolvedValue(undefined)
+    startControl.mockResolvedValue(undefined)
+    stopControl.mockResolvedValue(undefined)
     poll.mockResolvedValueOnce([workWith()]).mockImplementation(async () => [])
 
     const controller = new AbortController()
@@ -395,8 +395,8 @@ describe('RunnerHost flushes task logs before reporting work', () => {
       reportStarted.resolve()
       return {}
     })
-    startSignalR.mockResolvedValue(undefined)
-    stopSignalR.mockResolvedValue(undefined)
+    startControl.mockResolvedValue(undefined)
+    stopControl.mockResolvedValue(undefined)
     poll
       .mockResolvedValueOnce([workWith({ workflowRunId: 'wf-fail', workId: 'work-fail', agentJobId: 'aj-fail' })])
       .mockImplementation(async () => [])
@@ -443,8 +443,8 @@ describe('RunnerHost flushes task logs before reporting work', () => {
       reportStarted.resolve()
       return {}
     })
-    startSignalR.mockResolvedValue(undefined)
-    stopSignalR.mockResolvedValue(undefined)
+    startControl.mockResolvedValue(undefined)
+    stopControl.mockResolvedValue(undefined)
     poll
       .mockResolvedValueOnce([
         workWith({ workflowRunId: 'wf-pending', workId: 'work-pending', agentJobId: 'aj-pending' }),
@@ -482,8 +482,8 @@ describe('RunnerHost flushes task logs before reporting work', () => {
       reportStarted.resolve()
       return {}
     })
-    startSignalR.mockResolvedValue(undefined)
-    stopSignalR.mockResolvedValue(undefined)
+    startControl.mockResolvedValue(undefined)
+    stopControl.mockResolvedValue(undefined)
     blockingAction.mockImplementationOnce(
       async ({ log }: { signal: AbortSignal; log?: { write: (source: string, text: string) => void } }) => {
         log?.write('action:rebase', 'final line')
@@ -544,8 +544,8 @@ describe('RunnerHost flushes task logs before reporting work', () => {
       reportStarted.resolve()
       return {}
     })
-    startSignalR.mockResolvedValue(undefined)
-    stopSignalR.mockResolvedValue(undefined)
+    startControl.mockResolvedValue(undefined)
+    stopControl.mockResolvedValue(undefined)
     poll
       .mockResolvedValueOnce([workWith({ workflowRunId: 'wf-durable', workId: 'work-durable' })])
       .mockImplementation(async () => [])
@@ -600,8 +600,8 @@ describe('RunnerHost flushes task logs before reporting work', () => {
     connect.mockResolvedValue(undefined)
     heartbeat.mockResolvedValue(undefined)
     disconnect.mockResolvedValue(undefined)
-    startSignalR.mockResolvedValue(undefined)
-    stopSignalR.mockResolvedValue(undefined)
+    startControl.mockResolvedValue(undefined)
+    stopControl.mockResolvedValue(undefined)
     poll.mockResolvedValue([])
 
     const controller = new AbortController()

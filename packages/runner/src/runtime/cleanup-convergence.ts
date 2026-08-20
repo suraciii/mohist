@@ -1,15 +1,15 @@
-import type { ServerConnection } from "../server/connection.js"
-import type { WorkspaceRegistry } from "./workspace-registry.js"
-import { isTerminalWorkflowStatus } from "./workflow-terminal-status.js"
-import { runnerLogger } from "../system/logger.js"
+import type { ServerConnection } from '../server/connection.js'
+import type { WorkspaceRegistry } from './workspace-registry.js'
+import { isTerminalWorkflowStatus } from './workflow-terminal-status.js'
+import { runnerLogger } from '../system/logger.js'
 
-const log = runnerLogger.child("cleanup")
+const log = runnerLogger.child('cleanup')
 
 // Convergence backstop for missed workflow terminal events.
 //
 // Push is a latency optimization only — correctness must not depend on it.
 // When the runner misses a `ReceiveWorkflowRunStatus` push (because it was
-// offline, the SignalR transport dropped the message, or the workflow grain
+// offline, the control WebSocket transport dropped the message, or the workflow grain
 // fired before the runner was assigned), the runner must still converge to
 // the correct eligibility state. This module implements that backstop:
 //
@@ -24,7 +24,7 @@ const log = runnerLogger.child("cleanup")
 //
 // The runner MUST NOT enumerate or query workflow runs that have no
 // active registry entry on this runner — i.e. no full-history scan. The
-// caller (RunnerHost) triggers the backstop at startup, on SignalR
+// caller (RunnerHost) triggers the backstop at startup, on control WebSocket
 // reconnect, and on a periodic timer.
 
 export interface ConvergenceResult {
@@ -48,7 +48,7 @@ export class ConvergenceBackstop {
   //   - transitioned: how many active entries moved to eligible this pass
   //   - dropped: how many active entries the server had no record of
   async runOnce(signal: AbortSignal): Promise<ConvergenceResult> {
-    const activeEntries = this.registry.list().filter((entry) => entry.phase === "active")
+    const activeEntries = this.registry.list().filter((entry) => entry.phase === 'active')
     if (activeEntries.length === 0) {
       return { queried: 0, transitioned: 0, dropped: 0 }
     }
@@ -59,7 +59,7 @@ export class ConvergenceBackstop {
     } catch (error) {
       // Convergence is best-effort. The next tick (or reconnect) will
       // retry. Push may still be working in parallel.
-      log.error("workspace cleanup convergence query failed", { exception: error })
+      log.error('workspace cleanup convergence query failed', { exception: error })
       return { queried: workflowRunIds.length, transitioned: 0, dropped: 0 }
     }
 
@@ -80,7 +80,7 @@ export class ConvergenceBackstop {
       }
       if (!isTerminalWorkflowStatus(reported)) continue
       const updated = await this.registry.markEligible(entry.workflowRunId)
-      if (updated && updated.phase === "eligible" && updated.terminalAt) {
+      if (updated && updated.phase === 'eligible' && updated.terminalAt) {
         transitioned++
       }
     }

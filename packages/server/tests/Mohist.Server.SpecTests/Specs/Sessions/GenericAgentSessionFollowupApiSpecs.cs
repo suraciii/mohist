@@ -3,7 +3,6 @@ using System.Net.Http.Json;
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
-using Microsoft.AspNetCore.SignalR;
 using Mohist.Server.Agent.Services;
 using Mohist.Server.Api;
 using Mohist.Server.Events.Grains;
@@ -12,7 +11,7 @@ using Mohist.Server.Infrastructure.Orleans;
 using Mohist.Server.Issue.Domain;
 using Mohist.Server.Issue.Grains;
 using Mohist.Server.Runner.Grains;
-using Mohist.Server.Runner.Services.SignalR;
+using Mohist.Server.Runner.Services;
 using Mohist.Server.Contracts;
 using Mohist.Server.Sessions.Domain;
 using Mohist.Server.Sessions.Grains;
@@ -37,7 +36,7 @@ public class GenericAgentSessionFollowupApiSpecs : GenericAgentSessionFollowupAp
         var runner = _fixture.Grains.GetGrain<IRunnerGrain>(runnerId);
         var activeWorksBefore = await GetActiveWorkSnapshotAsync(runner);
         var tracker = _fixture.Services.GetRequiredService<RunnerConnectionTracker>();
-        var runnerHub = _fixture.Services.GetRequiredService<IHubContext<RunnerHub>>() as RecordingRunnerHubContext
+        var runnerHub = _fixture.Services.GetRequiredService<IRunnerControlTransport>() as RecordingRunnerControlTransport
             ?? throw new InvalidOperationException("Recording runner hub context was not registered.");
         runnerHub.Clear();
         tracker.Register(runnerId, "conn-gen-followup-1");
@@ -77,10 +76,10 @@ public class GenericAgentSessionFollowupApiSpecs : GenericAgentSessionFollowupAp
     {
         var (project, sessionId, _) = await CreateIdleGenericSessionAsync("gen-followup-restarted");
         var tracker = _fixture.Services.GetRequiredService<RunnerConnectionTracker>();
-        var runnerHub = _fixture.Services.GetRequiredService<IHubContext<RunnerHub>>() as RecordingRunnerHubContext
+        var runnerHub = _fixture.Services.GetRequiredService<IRunnerControlTransport>() as RecordingRunnerControlTransport
             ?? throw new InvalidOperationException("Recording runner hub context was not registered.");
         runnerHub.Clear();
-        runnerHub.SetInvocationResponse("ReceiveFollowup", new RunnerFollowupDeliveryResult(false, "missing"));
+        runnerHub.SetInvocationResponse("session.followup", new RunnerFollowupDeliveryResult(false, "missing"));
         tracker.Register(_runnerId, "conn-gen-followup-restarted");
         try
         {

@@ -1,7 +1,8 @@
 import { randomUUID } from 'node:crypto'
 import type { RunnerOptions, RunnerRegistration, RuntimeReadinessWitness } from '../core/types.js'
 import { ServerConnection } from '../server/connection.js'
-import { RunnerSignalRClient } from '../server/runner-signalr.js'
+import { RunnerControlWebSocketClient } from '../server/runner-control-websocket.js'
+import { createRunnerControlHandlers } from '../server/runner-control-handlers.js'
 import { reportAndRequireDurableAck } from './work-report.js'
 import { buildRegistrationState } from './registration-state.js'
 import { ActionRegistry, createDefaultRegistry } from '../actions/registry.js'
@@ -63,6 +64,8 @@ import { SkillResolver } from './skill-resolver.js'
 import { runnerLogger } from '../system/logger.js'
 import { type FollowupTarget, type FollowupTargetResolution, type SessionTarget } from '../server/session-target.js'
 import { isAgentRecoveryDispatch, usesOpenCode } from './host-helpers.js'
+import { resolveWorkspaceQuery } from './workspace-query.js'
+import { createSessionCommandRouter } from '../server/command-runtime.js'
 import { reconcileStartedDispatch, type HostRecoveryContext } from './host-recovery.js'
 import { type AwaitingAckEntry, type InFlightEntry, type ShutdownWorkState } from './host-state.js'
 import {
@@ -115,7 +118,7 @@ export function getRunnerBuildGitHash(): string | null {
 
 export class RunnerHost {
   private readonly connection: ServerConnection
-  private readonly signalR: RunnerSignalRClient
+  private readonly control: RunnerControlWebSocketClient
   private readonly workspace: WorkspaceManager
   private readonly workspaceRegistry: WorkspaceRegistry
   private readonly namedWorkspaceRegistry: NamedWorkspaceRegistry
@@ -148,8 +151,7 @@ export class RunnerHost {
   private lastProviderPolicyDiagnosticLogged: string | null = null
   /**
    * Per-runner journal for SessionCommand dedup/recovery.
-   * Shared with `RunnerSignalRClient`
-   * so its `registerSessionCommandHandler` reuses the in-flight
+   * Shared with the control transport so its Session command handler reuses the in-flight
    * dedup + on-disk recovery the host owns.
    */
   private readonly sessionCommandJournal: SessionCommandJournal
@@ -197,10 +199,10 @@ export class RunnerHost {
     this.connection = new ServerConnection(options, this.buildGitHash, build)
     // Runner-local registry of workspaces this host has materialized.
     // Loaded eagerly at startup so the in-memory cache is hot before the
-    // first dispatch or SignalR RPC: active
+    // first dispatch or control RPC: active
     // entries remain active until a terminal transition is observed.
     // The registry is shared with WorkspaceManager (for materialize /
-    // verify registration hooks) and RunnerSignalRClient (for the
+    // verify registration hooks) and control handlers (for the
     // RemoveWorkspace entry-removal hook).
     this.workspaceRegistry = new WorkspaceRegistry(options.runnerRoot, { runnerId: options.runnerId })
     this.namedWorkspaceRegistry = new NamedWorkspaceRegistry(options.runnerRoot)
@@ -259,7 +261,7 @@ export class RunnerHost {
           ? await connection.fetchPendingUpdateOperation(signal)
           : null
       })
-    this.signalR = new RunnerSignalRClient(
+    this.control = new RunnerControlWebSocketClient(
       options.serverUrl,
       options.runnerId,
       options.runnerRoot,
@@ -267,24 +269,54 @@ export class RunnerHost {
       {
         onReconnected: () => this.onDispatchReconnected(),
         credential: options.credential ?? null,
-        followupTargetResolver: (target) => this.resolveFollowupTarget(target),
+        handlers: createRunnerControlHandlers({
+          workspaceGit: { resolveQuery: resolveWorkspaceQuery, runnerRoot: options.runnerRoot },
+          workspaceRemoval: {
+            runnerRoot: options.runnerRoot,
+            registry: this.workspaceRegistry,
+            removalFence: () => this.openCodeRuntime,
+          },
+          followup: {
+            followupTargetResolver: (target) => this.resolveFollowupTarget(target),
+            agentSessionRuntimeEventOutbox: this.agentSessionRuntimeEventOutbox,
+            openCodeRuntime: () => this.openCodeRuntime,
+            piRuntime: () => this.piRuntime,
+            connection: this.connection,
+            runnerId: options.runnerId,
+            followupOperationJournal: this.followupOperationJournal,
+            bindingRecoveryCoordinator: this.bindingRecoveryCoordinator,
+            skillResolver: this.skillResolver,
+          },
+          cancel: {
+            followupTargetResolver: (target) => this.resolveFollowupTarget(target),
+            openCodeRuntime: () => this.openCodeRuntime,
+            piRuntime: () => this.piRuntime,
+            agentSessionRuntimeEventOutbox: this.agentSessionRuntimeEventOutbox,
+            cancelOperationJournal: this.cancelOperationJournal,
+          },
+          sessionCommand: {
+            handler: createSessionCommandRouter(
+              { openCode: () => this.openCodeRuntime, pi: () => this.piRuntime },
+              this.agentSessionRuntimeEventOutbox,
+            ),
+            journal: this.sessionCommandJournal,
+          },
+          onWorkflowStatusChanged: async () => {
+            const signal = this.activeSignal
+            if (signal && !signal.aborted) await this.cleanup.runConvergenceOnce(signal)
+          },
+        }),
         agentSessionRuntimeEventOutbox: this.agentSessionRuntimeEventOutbox,
-        registry: this.workspaceRegistry,
-        openCodeRuntime: () => this.openCodeRuntime,
-        piRuntime: () => this.piRuntime,
-        serverConnection: this.connection,
         sessionCommandJournal: this.sessionCommandJournal,
         followupOperationJournal: this.followupOperationJournal,
         cancelOperationJournal: this.cancelOperationJournal,
-        bindingRecoveryCoordinator: this.bindingRecoveryCoordinator,
-        skillResolver: this.skillResolver,
       },
       this.buildInfo,
     )
     this.cleanup = createHostCleanup({
       runnerRoot: options.runnerRoot,
       connection: this.connection,
-      signalR: this.signalR,
+      control: this.control,
       workspaceRegistry: this.workspaceRegistry,
       namedWorkspaceRegistry: this.namedWorkspaceRegistry,
       namedWorkspaceReclaimProbe: this.namedWorkspaceReclaimProbe,
@@ -378,7 +410,7 @@ export class RunnerHost {
     this.activeSignal = signal
     try {
       // Load the runner-local workspace registry before any dispatch /
-      // SignalR RPC can fire. A missing file is treated as an empty
+      // control WebSocket RPC can fire. A missing file is treated as an empty
       // registry; corrupt JSON is similarly tolerated (see
       // WorkspaceRegistry.loadFromDisk). The load is best-effort — a
       // failed read does not block startup.
@@ -404,7 +436,7 @@ export class RunnerHost {
       }
       await this.loadWorkResultJournal()
       // Load the AgentSession runtime-event outbox BEFORE accepting
-      // SignalR commands or claiming work. An unreadable snapshot is
+      // control WebSocket commands or claiming work. An unreadable snapshot is
       // never replaced with empty state — the outbox loads itself once
       // a successful read happens and stays unhealthy otherwise.
       await this.loadAgentSessionRuntimeEventOutbox(signal)
@@ -417,7 +449,7 @@ export class RunnerHost {
       }
       // Startup convergence: pick up any terminal events the runner
       // missed while it was offline (e.g. completed while the previous
-      // process was down). Runs immediately after SignalR is up so the
+      // process was down). Runs immediately after control WebSocket is up so the
       // push channel is available in parallel.
       await this.cleanup.runConvergenceOnce(signal)
       await this.cleanup.runBindingConvergenceOnce(signal)
@@ -457,7 +489,7 @@ export class RunnerHost {
     const signal = this.activeSignal
     if (signal)
       void retryPendingTerminalTaskLogs(this.taskLogDepsForExecution(), this.terminalTaskLogDeliveryInFlight, signal)
-    // Convergence on every reconnect: the SignalR transport just
+    // Convergence on every reconnect: the control WebSocket transport just
     // recovered, which is the cheapest moment to ask the server for the
     // truth about every active registry entry. Push may also have queued
     // events during the disconnect window; this catch-all reconciles
@@ -836,7 +868,7 @@ export class RunnerHost {
       inFlight: [...new Set([...this.inFlight.keys(), ...durableStarted])],
       awaitingAck: [...this.awaitingAck.keys()],
       runtimeReadiness: this.runtimeReadiness(),
-      connectionId: this.signalR.getConnectionId(),
+      connectionId: this.control.getConnectionId(),
       admissionReady:
         this.providerPolicyDiagnostic === null &&
         this.terminalTaskLogDelivery.ready() &&
@@ -895,7 +927,7 @@ export class RunnerHost {
     const timeout = setTimeout(() => cleanup.abort(), 5_000)
     timeout.unref?.()
     try {
-      await Promise.allSettled([this.connection.disconnect(cleanup.signal), this.signalR.stop()])
+      await Promise.allSettled([this.connection.disconnect(cleanup.signal), this.control.stop()])
     } finally {
       clearTimeout(timeout)
     }
@@ -903,7 +935,7 @@ export class RunnerHost {
 
   private registrationState(): RunnerRegistration {
     return buildRegistrationState(this.options, this.piRuntime, this.actions.catalog(), () =>
-      this.signalR.getConnectionId(),
+      this.control.getConnectionId(),
     )
   }
 
@@ -925,7 +957,7 @@ export class RunnerHost {
           },
           signal,
         )
-        await this.signalR.start()
+        await this.control.start(signal)
         return
       } catch (error) {
         log.error('runner connection failed; retrying', {
@@ -943,7 +975,7 @@ export class RunnerHost {
     const timeout = setTimeout(() => cleanup.abort(), 5_000)
     timeout.unref?.()
     try {
-      await Promise.allSettled([this.connection.disconnect(cleanup.signal), this.signalR.disconnect()])
+      await Promise.allSettled([this.connection.disconnect(cleanup.signal), this.control.disconnect()])
     } finally {
       clearTimeout(timeout)
     }

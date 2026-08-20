@@ -1,5 +1,7 @@
 using Mohist.Server.SpecTests.Support;
 using Mohist.Server.TestSupport;
+using Mohist.Server.Runner.Services;
+using Microsoft.Extensions.DependencyInjection;
 using Xunit;
 
 namespace Mohist.Server.SpecTests.Specs.Runner.Api;
@@ -15,7 +17,7 @@ public class RunnerIdentityConnectionSpecs
     }
 
     [Fact]
-    public async Task RunnerIdentity_WhenHeartbeatReportsConnectionId_ShowsConnected()
+    public async Task RunnerIdentity_WhenHeartbeatMatchesControlLease_ShowsConnected()
     {
         var runnerId = $"identity-connection-{Guid.NewGuid():N}";
         var hostname = $"identity-host-{Guid.NewGuid():N}";
@@ -28,6 +30,8 @@ public class RunnerIdentityConnectionSpecs
 
         try
         {
+            var tracker = _fixture.Services.GetRequiredService<RunnerConnectionTracker>();
+            tracker.Register(runnerId, "connection-1");
             await _fixture.Client.PostOkAsync($"/api/runner/{runnerId}/heartbeat", new
             {
                 capabilities = new[] { "spec/*" },
@@ -51,6 +55,7 @@ public class RunnerIdentityConnectionSpecs
         }
         finally
         {
+            _fixture.Services.GetRequiredService<RunnerConnectionTracker>().Unregister(runnerId, "connection-1");
             await _fixture.Client.PostAsync($"/api/runner/{runnerId}/unregister", null);
         }
     }

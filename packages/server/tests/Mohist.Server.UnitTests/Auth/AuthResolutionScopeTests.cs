@@ -12,7 +12,7 @@ namespace Mohist.Server.UnitTests.Auth;
 /// route declarations (or the method-based default for business routes)
 /// gate every authenticated request, insufficient scope answers 403 with
 /// the principal, and runner credentials stay bound to their RunnerId —
-/// any path, hub query or header self-declaring another runner is
+/// any path or header self-declaring another runner is
 /// rejected before the route runs.
 /// </summary>
 public sealed class AuthResolutionScopeTests
@@ -139,27 +139,6 @@ public sealed class AuthResolutionScopeTests
     }
 
     [Fact]
-    public async Task ReadonlyCredential_OnRunnerHubNegotiate_Answers403()
-    {
-        // The negotiate verb does not open the runner hub to readonly:
-        // the runner scope is required regardless of method.
-        var (middleware, context) = NewReadonlyContext(
-            path: "/hubs/runner/negotiate",
-            method: HttpMethods.Post,
-            endpoint: new RouteScopeRequirement(RouteScopeRequirementExtensions.Runner));
-
-        var invoked = false;
-        await middleware.InvokeAsync(context, _ =>
-        {
-            invoked = true;
-            return Task.CompletedTask;
-        });
-
-        Assert.False(invoked);
-        AssertForbidden(context);
-    }
-
-    [Fact]
     public async Task OperatorCredential_OnReadonlyDeclaredRoute_Passes()
     {
         var middleware = NewMiddleware();
@@ -227,39 +206,6 @@ public sealed class AuthResolutionScopeTests
         var body = JsonDocument.Parse(ReadBody(context));
         Assert.Equal("runner-a", body.RootElement.GetProperty("details").GetProperty("boundRunnerId").GetString());
         Assert.Equal("runner-b", body.RootElement.GetProperty("details").GetProperty("claimedRunnerId").GetString());
-    }
-
-    [Fact]
-    public async Task RunnerCredential_OnItsOwnHubQuery_Passes()
-    {
-        var (middleware, context) = NewRunnerContext(path: "/hubs/runner/negotiate");
-        context.Request.QueryString = new QueryString("?negotiateVersion=1&runnerId=runner-a");
-
-        var invoked = false;
-        await middleware.InvokeAsync(context, _ =>
-        {
-            invoked = true;
-            return Task.CompletedTask;
-        });
-
-        Assert.True(invoked);
-    }
-
-    [Fact]
-    public async Task RunnerCredential_OnAnotherRunnersHubQuery_Answers403()
-    {
-        var (middleware, context) = NewRunnerContext(path: "/hubs/runner/negotiate");
-        context.Request.QueryString = new QueryString("?negotiateVersion=1&runnerId=runner-b");
-
-        var invoked = false;
-        await middleware.InvokeAsync(context, _ =>
-        {
-            invoked = true;
-            return Task.CompletedTask;
-        });
-
-        Assert.False(invoked);
-        AssertForbidden(context);
     }
 
     [Fact]
