@@ -180,6 +180,20 @@ public sealed partial class ManagedRuntimeTransactionSpecs
             command.FileName == "cp" && command.Args[^1].EndsWith("/runner/dist", StringComparison.Ordinal));
         Assert.Equal(["-RL", distCopy.Args[1], distCopy.Args[2]], distCopy.Args);
         Assert.EndsWith("/packages/runner/dist/.", distCopy.Args[1], StringComparison.Ordinal);
+        var dependencyCopies = fixture.Commands.ExecutedCommands
+            .Where(command =>
+                command.FileName == "cp"
+                && command.Args.Length == 3
+                && (command.Args[1].EndsWith("/node_modules", StringComparison.Ordinal)
+                    || command.Args[1].EndsWith("/node_modules/.", StringComparison.Ordinal)))
+            .ToArray();
+        Assert.Equal(2, dependencyCopies.Length);
+        Assert.Contains(dependencyCopies, command =>
+            command.Args[1].EndsWith("/node_modules", StringComparison.Ordinal)
+            && !command.Args[1].EndsWith("/packages/runner/node_modules", StringComparison.Ordinal));
+        Assert.Contains(dependencyCopies, command => command.Args[1].EndsWith("/packages/runner/node_modules/.", StringComparison.Ordinal));
+        var dependencyTarget = dependencyCopies[0].Args[2];
+        Assert.All(dependencyCopies, command => Assert.Equal(dependencyTarget, command.Args[2]));
         Assert.Equal(
             Path.Combine(session.ReleaseRoot, "runner", ManagedRuntimeLayout.RunnerEntrypoint).Replace('\\', '/'),
             runner.Entrypoint);
@@ -992,7 +1006,8 @@ public sealed partial class ManagedRuntimeTransactionSpecs
                     {
                         files.AddFile(target, "{}");
                     }
-                    else if (source.EndsWith("/node_modules", StringComparison.Ordinal))
+                    else if (source.EndsWith("/node_modules", StringComparison.Ordinal)
+                        || source.EndsWith("/node_modules/.", StringComparison.Ordinal))
                     {
                         files.AddDirectory(target);
                         files.AddFile(Path.Combine(target, "typescript", "bin", "tsc"), "tsc");

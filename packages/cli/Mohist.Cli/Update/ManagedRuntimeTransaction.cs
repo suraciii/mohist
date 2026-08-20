@@ -510,6 +510,7 @@ internal sealed class ManagedRuntimeTransaction
             ($"{Path.Combine(runnerSource, "dist").Replace('\\', '/')}/.", distRoot),
             (Path.Combine(runnerSource, "package.json").Replace('\\', '/'), Path.Combine(runnerRoot, "package.json").Replace('\\', '/')),
             (Path.Combine(context.BuildWorkspaceRoot, "node_modules").Replace('\\', '/'), Path.Combine(runnerRoot, "node_modules").Replace('\\', '/')),
+            ($"{Path.Combine(runnerSource, "node_modules").Replace('\\', '/')}/.", Path.Combine(runnerRoot, "node_modules").Replace('\\', '/')),
         };
         foreach (var (source, target) in copies)
         {
