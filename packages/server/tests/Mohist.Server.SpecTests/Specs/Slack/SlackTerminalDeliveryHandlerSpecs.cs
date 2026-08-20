@@ -208,7 +208,7 @@ public sealed class SlackTerminalDeliveryHandlerSpecs
     }
 
     [Fact]
-    public async Task HandleAsync_Neutralizes_control_syntax_in_a_completed_reply()
+    public async Task HandleAsync_Manager_output_is_not_parsed_or_written_as_reply()
     {
         await using var database = TestSqliteDatabase.CreateMigrated();
         var time = new FakeTimeProvider(new DateTimeOffset(2026, 7, 29, 12, 0, 0, TimeSpan.Zero));
@@ -273,16 +273,12 @@ public sealed class SlackTerminalDeliveryHandlerSpecs
         await handler.HandleAsync(evt, CancellationToken.None);
 
         await using var scope = provider.CreateAsyncScope();
-        var row = Assert.Single((await scope.ServiceProvider
+        var rows = (await scope.ServiceProvider
             .GetRequiredService<SlackOutboxStore>()
-            .ListManagerAsync(enrollmentId)).Entries);
-        var payload = SlackDeliveryPayload.Parse(row.PayloadJson);
-        Assert.Equal(SlackDeliveryOwnerKinds.Manager, row.OwnerKind);
-        Assert.Equal(
-            "The reply contains &lt;!channel&gt;, &lt;@U123&gt;, and &lt;https://example.test|a link&gt;.",
-            payload.Text);
-        Assert.DoesNotContain("<!channel>", payload.Text, StringComparison.Ordinal);
-        Assert.DoesNotContain("<@U123>", payload.Text, StringComparison.Ordinal);
+            .ListManagerAsync(enrollmentId)).Entries;
+        Assert.DoesNotContain(rows, row => row.Kind is SlackOutboxKinds.TerminalResult or SlackOutboxKinds.ExplicitFailure);
+        Assert.DoesNotContain(rows, row => row.PayloadJson.Contains("<!channel>", StringComparison.Ordinal));
+        Assert.DoesNotContain(rows, row => row.PayloadJson.Contains("<@U123>", StringComparison.Ordinal));
     }
 
     [Fact]
@@ -313,45 +309,6 @@ public sealed class SlackTerminalDeliveryHandlerSpecs
         Assert.Equal("C1", envelope.Data.Value.GetProperty("conversationId").GetString());
         Assert.Equal("1710000000.000000", envelope.Data.Value.GetProperty("threadTs").GetString());
         Assert.Equal("Manager response with ***", envelope.Data.Value.GetProperty("assistantText").GetString());
-    }
-
-    [Fact]
-    public void Render_AlwaysKeepsCompletedAndFailedRepliesTiedToTheirOriginatingWork()
-    {
-        var priorWork = new SlackTerminalDelivery(
-            "job-prior",
-            "migrate the database schema",
-            "conn-1",
-            "team-1",
-            "D1",
-            "failed",
-            "migration failed",
-            "migration-error",
-            "runtime-failed",
-            0,
-            1);
-        var currentWork = new SlackTerminalDelivery(
-            "job-current",
-            "update the dashboard",
-            "conn-1",
-            "team-1",
-            "D1",
-            "completed",
-            "dashboard updated",
-            null,
-            null,
-            0,
-            0);
-
-        var priorReply = SlackTerminalDeliveryHandler.Render(priorWork);
-        var currentReply = SlackTerminalDeliveryHandler.Render(currentWork);
-
-        Assert.StartsWith("Task: migrate the database schema\n", priorReply, StringComparison.Ordinal);
-        Assert.Contains("The task failed.", priorReply);
-        Assert.StartsWith("Task: update the dashboard\n", currentReply, StringComparison.Ordinal);
-        Assert.Contains("The task completed.", currentReply);
-        Assert.DoesNotContain("update the dashboard", priorReply);
-        Assert.DoesNotContain("migrate the database schema", currentReply);
     }
 
     private sealed class NoopHealthBackpressurer : ISlackConnectionHealthBackpressurer

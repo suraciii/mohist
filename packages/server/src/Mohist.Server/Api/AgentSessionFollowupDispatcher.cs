@@ -1,5 +1,6 @@
 using Mohist.Server.Infrastructure.Hosting;
 using Mohist.Server.Contracts;
+using Mohist.Server.Infrastructure.Slack;
 using Mohist.Server.Runner.Grains;
 using Mohist.Server.Sessions.Domain;
 using Mohist.Server.Sessions.Grains;
@@ -65,7 +66,7 @@ public sealed class AgentSessionFollowupDispatcher : IScopedService
                 InputTexts: dispatch.InputTexts,
                 Attachments: dispatch.Attachments,
                 InputId: dispatch.InputId,
-                SlackExecutionContext: SlackExecutionContextFor(dispatch, target.SessionId),
+                SlackExecutionContext: SlackExecutionContextFor(projectId, dispatch, target.SessionId),
                 TurnId: dispatch.TurnId,
                 ExecutionSource: dispatch.ExecutionSource), ct);
         }
@@ -84,6 +85,7 @@ public sealed class AgentSessionFollowupDispatcher : IScopedService
     }
 
     private static AgentSlackExecutionContext? SlackExecutionContextFor(
+        string projectId,
         AgentSessionFollowupDispatch dispatch,
         string sessionId)
     {
@@ -106,6 +108,12 @@ public sealed class AgentSessionFollowupDispatcher : IScopedService
             provenance.MemberId,
             provenance.ConnectionId ?? string.Empty,
             sessionId,
-            dispatch.OperationId);
+            dispatch.OperationId,
+            projectId: string.Equals(projectId, SlackDeliveryOwnerIds.ManagerProjectId, StringComparison.Ordinal)
+                ? SlackDeliveryOwnerIds.ManagerProjectId
+                : null,
+            ownerKind: string.Equals(projectId, SlackDeliveryOwnerIds.ManagerProjectId, StringComparison.Ordinal)
+                ? SlackDeliveryOwnerKinds.Manager
+                : null);
     }
 }

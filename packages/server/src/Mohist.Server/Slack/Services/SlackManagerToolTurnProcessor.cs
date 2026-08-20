@@ -2,13 +2,14 @@ using System.Text.Json;
 using Mohist.Server.Api;
 using Mohist.Server.Agent.Services;
 using Mohist.Server.Infrastructure.Data.Slack;
-using Mohist.Server.Infrastructure.Hosting;
 using Mohist.Server.Infrastructure.Slack;
 using Mohist.Server.Sessions.Grains;
 
 namespace Mohist.Server.Slack.Services;
 
-public sealed class SlackManagerToolTurnProcessor : IScopedService
+// Retired with the model-output protocol. Kept as source history for the
+// migration window, but deliberately not registered as an application service.
+public sealed class SlackManagerToolTurnProcessor
 {
     private readonly ManagerActorAccessDecider _access;
     private readonly SlackManagerToolExecutor _tools;

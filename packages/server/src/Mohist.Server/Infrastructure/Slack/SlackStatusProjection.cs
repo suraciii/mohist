@@ -31,10 +31,15 @@ public sealed class SlackStatusProjection : IScopedService
                 SlackDeliveryOperations.ReactionAdd,
                 TargetMessageIdentity: new SlackProviderMessageIdentity(source.ConversationId, source.MessageTs),
                 Reaction: ReceivedReaction,
-                FallbackText: "Received. I am checking the task and will post the result here.",
-                FallbackDispatchRef: DispatchRef(source, "status"),
+                FallbackText: string.Equals(projectId, SlackDeliveryOwnerIds.ManagerProjectId, StringComparison.Ordinal)
+                    ? null
+                    : "Received. I am checking the task and will post the result here.",
+                FallbackDispatchRef: string.Equals(projectId, SlackDeliveryOwnerIds.ManagerProjectId, StringComparison.Ordinal)
+                    ? null
+                    : DispatchRef(source, "status"),
                 StatusDispatchRef: DispatchRef(source, "status"))),
-            threadTs ?? source.MessageTs), ct);
+            threadTs ?? source.MessageTs,
+            OwnerKindFor(projectId)), ct);
 
     public async Task<SlackOutboxEnqueueResult> EnqueueWorkingAsync(
         string projectId,
@@ -59,7 +64,8 @@ public sealed class SlackStatusProjection : IScopedService
                 FallbackDispatchRef: DispatchRef(source, "status"),
                 StatusDispatchRef: DispatchRef(source, "status"),
                 Blocks: blocks)),
-            threadTs ?? source.MessageTs), ct);
+            threadTs ?? source.MessageTs,
+            OwnerKindFor(projectId)), ct);
 
         await EnqueueReactionAsync(
             projectId,
@@ -134,7 +140,8 @@ public sealed class SlackStatusProjection : IScopedService
             kind,
             terminalDispatchRef ?? DispatchRef(source, "terminal"),
             JsonSerializer.Serialize(payload),
-            threadTs);
+            threadTs,
+            OwnerKindFor(projectId));
         var promoted = await _outbox.PromotePendingProgressAsync(draft, dispatchRef, ct);
         var result = promoted ?? await _outbox.EnqueueRequiredAsync(draft, ct);
         if (hadProgress)
@@ -204,14 +211,24 @@ public sealed class SlackStatusProjection : IScopedService
                 break;
             }
         }
-        if (!hadWorking)
-            return;
-
+        // Fast completion can race the working projection. Terminal
+        // convergence must still close receipt state and add one terminal
+        // reaction even when no progress row was stored.
+        if (hadWorking)
+        {
+            await EnqueueReactionAsync(
+                projectId, connectionId, projectionSource, threadTs,
+                "terminal-remove-working",
+                SlackDeliveryOperations.ReactionRemove,
+                WorkingReaction,
+                null,
+                ct);
+        }
         await EnqueueReactionAsync(
             projectId, connectionId, projectionSource, threadTs,
-            "terminal-remove-working",
+            "terminal-remove-received",
             SlackDeliveryOperations.ReactionRemove,
-            WorkingReaction,
+            ReceivedReaction,
             null,
             ct);
         await EnqueueReactionAsync(
@@ -286,6 +303,11 @@ public sealed class SlackStatusProjection : IScopedService
         return source.Validate().Length == 0;
     }
 
+    private static string OwnerKindFor(string projectId) =>
+        string.Equals(projectId, SlackDeliveryOwnerIds.ManagerProjectId, StringComparison.Ordinal)
+            ? SlackDeliveryOwnerKinds.Manager
+            : SlackDeliveryOwnerKinds.Connection;
+
     private Task<SlackOutboxEnqueueResult> EnqueueReactionAsync(
         string projectId,
         string connectionId,
@@ -310,5 +332,6 @@ public sealed class SlackStatusProjection : IScopedService
                 FallbackText: fallbackText,
                 FallbackDispatchRef: DispatchRef(source, "status"),
                 StatusDispatchRef: DispatchRef(source, "status"))),
-            threadTs ?? source.MessageTs), ct);
+            threadTs ?? source.MessageTs,
+            OwnerKindFor(projectId)), ct);
 }

@@ -220,6 +220,38 @@ public sealed class SlackProviderInboxStore : IScopedService, IAgentConnectionPr
     }
 
     /// <summary>
+    /// Replaces a stale Session route during Manager runtime recovery. The
+    /// expected value is part of the conditional update so a concurrent
+    /// replay cannot overwrite a newer replacement route.
+    /// </summary>
+    public async Task<string> ReplaceRouteSessionIdAsync(
+        string projectId,
+        string id,
+        string expectedSessionId,
+        string replacementSessionId,
+        CancellationToken ct = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(projectId);
+        ArgumentException.ThrowIfNullOrWhiteSpace(id);
+        ArgumentException.ThrowIfNullOrWhiteSpace(expectedSessionId);
+        ArgumentException.ThrowIfNullOrWhiteSpace(replacementSessionId);
+
+        await using var db = await _dbFactory.CreateDbContextAsync(ct);
+        await db.SlackProviderInboxRows
+            .Where(row => row.ProjectId == projectId
+                && row.Id == id
+                && row.RouteSessionId == expectedSessionId)
+            .ExecuteUpdateAsync(setters => setters.SetProperty(row => row.RouteSessionId, replacementSessionId), ct);
+        var persisted = await db.SlackProviderInboxRows.AsNoTracking()
+            .Where(row => row.ProjectId == projectId && row.Id == id)
+            .Select(row => row.RouteSessionId)
+            .SingleOrDefaultAsync(ct);
+        if (!string.Equals(persisted, replacementSessionId, StringComparison.Ordinal))
+            throw new InvalidOperationException($"Slack inbox entry {id} resolved to a different session.");
+        return persisted!;
+    }
+
+    /// <summary>
     /// Marks an accepted inbox entry dispatched. Called after the
     /// launcher has been invoked for that identity; freeing the slot is
     /// what keeps the per-connection capacity bounded against

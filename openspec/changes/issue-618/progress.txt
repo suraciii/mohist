@@ -1,0 +1,25 @@
+## Codebase Patterns
+- Ordinary Slack DM ingress persists an inbox route, launches through `IAgentLauncher.LaunchConnectionAsync`, sets the route Session and `SlackDmSessionMappingStore`, then uses `AcceptFollowupAsync` plus `AgentSessionFollowupDispatcher` for later messages.
+- `AgentSlackExecutionContext` is built from durable Session input provenance and the Runner injects the pinned collaboration Skill for every Slack execution. Manager uses the synthetic `__mohist_slack_manager__` project and Enrollment id as the Slack owner/connection identity.
+- Inbox identity is `(ConnectionId, SlackMessageIdentity)` and Manager uses Enrollment id as `ConnectionId`; the mapping stores workspace and actor facts and is read with a workspace-bound lookup for Manager ingress.
+- Slack terminal delivery must finalize liveness only. Assistant output is not a reply source; Manager terminal envelopes now omit the extracted `assistantText` value entirely.
+
+## T-001 Decisions
+- Manager prompts are passed unchanged as ordinary natural-language Agent input. Manager-specific JSON/protocol instructions and synthesized acknowledgement/fallback text are removed.
+- Manager initial context dispatch refs follow the ordinary `slack:{sessionId}:{inputId}` convention; follow-up refs use the durable Session follow-up `OperationId`.
+- Manager reply-anchor extensions are append-only `projectId` and `ownerKind` fields. Existing ordinary Connection anchors remain compatible; Manager anchors explicitly carry synthetic project and `manager` owner values.
+- The retired `SlackManagerToolTurnProcessor`, `SlackManagerToolExecutor`, and execution-fence store are retained only as unregistered compatibility source; no runtime ingress or terminal path resolves them.
+- `SlackStatusProjection.FinalizeLivenessAsync` now closes receipt state and adds terminal reaction even if no progress row was persisted, preserving silence as a valid Agent outcome.
+
+## Verification Notes
+- `progress.txt` was absent at task start.
+- Existing Manager tests that asserted the retired JSON protocol were replaced with natural-language, replay, replacement, and no-terminal-text coverage.
+- A replacement inbox route must be updated conditionally from the mapped runtime Session to the deterministic replacement Session; unconditional `SetRouteSessionIdAsync` correctly rejects stale routes but was too strict for this recovery transition.
+- Manager status projections explicitly select `OwnerKind.Manager`; Manager reaction payloads have no Server-authored fallback text, preserving Agent-only reply ownership.
+
+## Verification
+- `dotnet build packages/server/src/Mohist.Server/Mohist.Server.csproj --no-restore -p:SkipWebBuild=true` passes.
+- Focused Server specs pass: Manager conversation/replacement, terminal delivery, ordinary Slack reply-anchor, DM mapping, and managed-bot admission classes (20 tests).
+- Focused Server unit classes pass: built-in catalog and Slack execution context contracts.
+- `npm run build -w packages/runner` and `npm run build -w packages/web` pass.
+- `npm run test:run -w packages/runner -- src/runtime/slack-execution-context.test.ts` passes (15 tests).
