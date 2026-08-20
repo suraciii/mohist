@@ -2,41 +2,36 @@
 
 ## Must-fix findings
 
-### MF-1 - Compatibility mode rejects pre-change Slack payloads
+### MF-1 - Mixed-source follow-up batching can permanently block a Session
 
-**Criterion violated:** T-002 acceptance criterion 9 in `tasks.json`, and the legacy rollout scenario in `specs/slack-skill-injection/spec.md` (the upgraded Runner must accept pre-existing source-less work through the bounded legacy path while strict validation is disabled, preserving its prior behavior).
+**Criterion violated:** T-002 acceptance criterion 7 (non-Slack follow-ups must retain their existing non-Slack execution behavior and envelope), plus the issue non-goal that Web, CLI, and Workflow execution must remain unchanged. The source discriminator boundary also requires one valid source/context pair per dispatch.
 
-**Where:** `packages/runner/src/runtime/slack-execution-context.ts:57-67,83-125`, reached from `packages/runner/src/runtime/agent-job-executor.ts:95-102` and `packages/runner/src/server/followup-handler.ts:112-119`.
+**Where:** `packages/server/src/Mohist.Server/Sessions/Domain/AgentSession.Transitions.cs:1257-1277`, `packages/server/src/Mohist.Server/Sessions/Grains/AgentSessionGrain.cs:1053-1056`, and `packages/server/src/Mohist.Server/Api/AgentSessionFollowupDispatcher.cs:46-48`.
 
-**Problem:** `readExecutionSourceContext` identifies an omitted source as `legacy`, but it calls the current `readSlackExecutionContext` before making that decision. That parser requires the current published v1 identity and hash (`PUBLISHED_SLACK_SKILL_HASH`). A source-less dispatch produced by the pre-change Server can contain the previous `1.0.0` Skill snapshot: the old embedded asset hashes to `de3272639a1d390f3dcf915e65b6c057bf0b9eb91c51545572eb1e484c8c1a22`, while the new Runner accepts only `dedf18a796543ade06a9e0ece00c086577153e1e633f868c099b01cf910d641b`. The payload is therefore classified as invalid before the legacy path can run. This affects both an in-flight/queued AgentJob and an old follow-up during a rolling deployment.
+**Problem:** `ChooseFollowupTurnForAssignment` joins an incoming follow-up to any unclaimed queued turn without checking its execution source. A valid scenario is a Slack Session whose queued Slack follow-up is waiting because its Runner is unavailable, followed by a Web or CLI follow-up for the same Session. Both inputs are then placed in one turn. `BeginNextFollowupDispatchAsync` selects the first input's source and throws when the other input has a different source. The call occurs before the dispatcher's `try` block, so the exception is not converted into a release or an unavailable result; the queued turn remains undispatched and repeats the same failure on retry.
 
-**Required disposition:** Separate legacy compatibility parsing from v1 validation. With strict validation disabled, a genuinely pre-existing source-less payload must retain the prior source-less behavior (including a valid old Skill snapshot), while explicit v1 `slack`/`non-slack` payloads must continue to use the current published validator. Add a mixed-version regression test using the pre-change source-less Slack context, not only a source-less payload containing the new fixture.
+This means the non-Slack follow-up is neither delivered with its unchanged non-Slack envelope nor given a separate turn, and the Slack work is also stuck. Make queued-turn assignment source-aware, or otherwise reject/separate mixed-source inputs before they can poison one turn. Add a regression test that queues a Slack follow-up, accepts a non-Slack follow-up while dispatch is held, and verifies that the two source boundaries do not produce a permanently failing mixed turn.
 
-### MF-2 - Server silently relabels a non-Slack/context mismatch as Slack
+## Prior finding dispositions
 
-**Criterion violated:** Issue acceptance criterion 1 (non-Slack execution must receive neither the Slack Skill nor the reply anchor), plus T-002 acceptance criterion 4 and the source/context contract in `specs/slack-skill-injection/spec.md` (a `non-slack` source carrying Slack context is invalid).
-
-**Where:** `packages/server/src/Mohist.Server/Agent/Grains/AgentJobGrain.Dispatch.cs:19-22`.
-
-**Problem:** When an `AgentJobInput` has `ExecutionSource == non-slack` and a non-null `SlackExecutionContext`, `BuildDispatchAsync` changes the effective source to `slack` and sends both the context and Slack Skill. The Runner never sees the mismatch, so its validator cannot reject it. For example, a valid Server-created context accidentally paired with an explicit non-Slack source executes as Slack work instead of failing closed. The comment says this is legacy reconciliation, but `AgentJobInput.ExecutionSource` defaults to `non-slack`, so the current representation cannot distinguish an old persisted input whose source field was absent from a new malformed input that explicitly says `non-slack`.
-
-**Required disposition:** Preserve an explicit source/context mismatch as a failure. Distinguish an absent legacy source from an explicit `non-slack` value (or otherwise carry an unambiguous legacy marker), and only reconcile the absent legacy case from trusted durable Slack context. Add a Server dispatch test proving that explicit `non-slack` plus Slack context is rejected and that the legacy absent-source case does not get relabeled as ordinary non-Slack work.
-
-## Verdict
-
-**FAIL** - the two must-fix findings above leave the compatibility contract and fail-closed source/context boundary incomplete.
+- **Prior MF-1, source-less compatibility rejected the pre-change Skill snapshot:** fixed properly. `readExecutionSourceContext` now distinguishes a genuinely absent discriminator from an explicit null (`packages/runner/src/runtime/slack-execution-context.ts:56-74`), routes source-less compatibility through a separate self-consistency parser, and keeps explicit `slack` on the published identity/hash validator. The actual pre-change fixture regression test passes.
+- **Prior MF-2, explicit `non-slack` plus Slack context was relabeled as Slack:** fixed properly. `AgentJobInput.ExecutionSource` is nullable for legacy persisted inputs, `BuildDispatchAsync` reconciles only absent legacy source state, and explicit `non-slack` with context throws (`packages/server/src/Mohist.Server/Agent/Grains/AgentJobGrain.Dispatch.cs:16-22,69-90`). The Server dispatch specs for explicit mismatch and absent-source legacy reconciliation pass.
 
 ## Dimension verdicts
 
-- **Issue acceptance criteria:** FAIL. Fresh v1 Slack initial and follow-up dispatches carry the same locked Skill and anchor, explicit malformed v1 contexts are rejected, and current non-Slack envelopes omit Slack injection. MF-2 is a direct failure of the non-Slack exclusion when the source/context pair is malformed; MF-1 prevents pre-change Slack work from continuing during the rollout required by the plan.
-- **Coverage:** FAIL. The current tests cover the canonical asset, current v1 context mutations, DM/channel/thread anchors, batched representative selection, current initial/follow-up parity, explicit Slack-without-context rejection, and current non-Slack envelope preservation. They do not cover the pre-change source-less Slack payload required by the mixed-version criterion or the Server-side explicit non-Slack/context mismatch.
-- **Correctness:** FAIL for MF-1 and MF-2. The normal current-version path is internally consistent, but the two adversarial boundary cases above do not fail or route as specified.
-- **Consistency with surrounding codebase:** checked, no additional issue. The implementation uses the existing AgentJob, Session, Runner control, managed Skill, and execution-envelope seams; the problems are contract-boundary behaviors described above rather than unrelated style or architecture concerns.
-- **Tests and verification:** FAIL for coverage completeness. Verification run during this review: Runner production and test typechecks passed; 60 focused Runner tests passed; `Mohist.Server.UnitTests` passed 3,081/3,081; `SlackReplyAnchorIngressSpecs` passed 3/3; `AgentSessionFollowupGrainSpecs` passed 38/38. The focused suites pass, but they do not exercise either must-fix case. A generic filtered full SpecTests command was not usable because this repository's Microsoft Testing Platform ignores the VSTest filter; the affected classes were run directly with the xUnit v3 runner.
+- **Issue acceptance criteria:** FAIL due MF-1. The canonical Skill, direct-question and silent-recovery rules, initial/follow-up Slack injection, non-Slack single-source envelope, and fail-closed invalid-context paths are otherwise checked with no additional issue.
+- **Coverage:** FAIL. The changed tests cover the canonical asset and digest lock, Slack DM/channel/thread anchors, initial/follow-up Skill parity, batched same-source representative selection, source/context validation, legacy mixed-version parsing, invalid AgentJob/follow-up rejection, and non-Slack preservation. They do not cover a queued Slack turn receiving a non-Slack follow-up before dispatch.
+- **Correctness:** FAIL due MF-1. The two findings from the previous review are fixed, but the new source-consistency check exposes an unhandled mixed-source batching path that violates the non-Slack preservation criterion.
+- **Consistency with surrounding codebase and conventions:** checked, no additional issue. The implementation follows the existing AgentJob, Session, Runner capability, managed Skill, and follow-up dispatch boundaries; the finding is a missing source boundary in the existing batching decision.
+- **Tests and verification:** FAIL for completeness. `npm run test:ci --prefix packages/runner` passed 155 files and 1,680 tests. `dotnet test packages/server/tests/Mohist.Server.UnitTests/Mohist.Server.UnitTests.csproj --no-restore` passed 3,081 tests. The 14 directly affected Server specs passed, including the source mismatch, legacy reconciliation, anchor, parity, and batching cases. The full Server SpecTests run passed 3,699 of 3,700; its single failure is the unchanged `Specs/Auth/PatTokenSpecs.cs` fixed-expiry test and is unrelated to this change.
 
 ## Observations
 
-- `readExecutionSourceContext` treats an explicit `executionSource: null` the same as an omitted source when strict validation is disabled (`packages/runner/src/runtime/slack-execution-context.ts:59`). New Server producers emit a concrete value and strict mode rejects it, so this is not a separate must-fix, but the compatibility implementation should distinguish omitted legacy fields from malformed explicit values.
-- The Server and Runner use the same published Skill hash as an independently maintained constant/fixture. The catalog lock and current parity tests protect the present bytes; an automated cross-project fixture check would reduce future drift risk.
+- The full Server SpecTests failure is an existing clock-sensitive `PatTokenSpecs.Create_WithExplicitTtl_ExpiresExactlyThatFarOut` assertion (`packages/server/tests/Mohist.Server.SpecTests/Specs/Auth/PatTokenSpecs.cs:138-150`); the Auth test path is unchanged by this issue. It does not affect the issue verdict.
+- Server and Runner independently pin the same published Skill digest. Current contract tests protect the value on both sides, but a future cross-project fixture check would reduce drift risk.
+
+## Verdict
+
+**FAIL** - MF-1 leaves a supported mixed-source follow-up workflow incomplete and can leave accepted inputs permanently queued.
 
 <promise>FAIL</promise>
