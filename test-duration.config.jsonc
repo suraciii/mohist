@@ -29,6 +29,7 @@
       "dotnet": 4,
       "node": 2,
       "server-spec": 1,
+      "server-cold-start": 1,
       "server-runtime": 1,
       "duration-measurement": 1
     },
@@ -66,6 +67,8 @@
     "resourceLanes": [
       { "id": "default", "resources": [], "capacity": 4 },
       { "id": "server-l1", "resources": ["orleans", "sqlite", "server-runtime"], "capacity": 1 },
+      { "id": "server-cold-start", "resources": ["server-cold-start"], "capacity": 1 },
+      { "id": "server-l1-cold-start", "resources": ["orleans", "sqlite", "server-runtime", "server-cold-start"], "capacity": 1 },
       { "id": "server-runtime", "resources": ["server-runtime"], "capacity": 1 }
     ]
   },
@@ -96,12 +99,12 @@
         { "id": "unit", "absoluteMs": 500, "percentile": 95, "percentileMs": 50, "allowlist": [] }
       ]
     },
-    { "id": "server-spec", "kind": "dotnet-apphost", "trackType": "behavior", "application": "server", "specKind": "Product", "level": "L1", "resources": ["orleans", "sqlite", "server-runtime"], "csproj": "packages/server/tests/Mohist.Server.SpecTests/Mohist.Server.SpecTests.csproj", "apphostArgs": ["-parallel", "collections", "-parallelAlgorithm", "conservative", "-maxThreads", "3"], "report": "reports/server-spec.trx", "reportFormat": "trx", "deadlineMs": 240000, "enforce": true, "rules": [
+    { "id": "server-spec", "kind": "dotnet-apphost", "trackType": "behavior", "application": "server", "specKind": "Product", "level": "L1", "resources": ["orleans", "sqlite", "server-runtime", "server-cold-start"], "csproj": "packages/server/tests/Mohist.Server.SpecTests/Mohist.Server.SpecTests.csproj", "apphostArgs": ["-parallel", "collections", "-parallelAlgorithm", "conservative", "-maxThreads", "3"], "report": "reports/server-spec.trx", "reportFormat": "trx", "deadlineMs": 240000, "enforce": true, "rules": [
         { "id": "spec", "absoluteMs": 5000, "percentile": 95, "percentileMs": 500, "allowlist": [] }
       ]
     },
-    // Architecture source scans and Orleans specs compete during cold startup; keep this Resource lane isolated without serializing other applications.
-    { "id": "server-arch", "kind": "dotnet-apphost", "trackType": "architecture", "application": "server", "specKind": "Design", "architectureScope": "server", "resources": ["server-runtime"], "csproj": "packages/server/tests/Mohist.Server.ArchTests/Mohist.Server.ArchTests.csproj", "report": "reports/server-arch.trx", "reportFormat": "trx", "deadlineMs": 60000, "enforce": true, "rules": [
+    // Architecture source scans and product specs compete during cold startup; share only that host budget so unit coverage can overlap.
+    { "id": "server-arch", "kind": "dotnet-apphost", "trackType": "architecture", "application": "server", "specKind": "Design", "architectureScope": "server", "resources": ["server-cold-start"], "csproj": "packages/server/tests/Mohist.Server.ArchTests/Mohist.Server.ArchTests.csproj", "report": "reports/server-arch.trx", "reportFormat": "trx", "deadlineMs": 60000, "enforce": true, "rules": [
         { "id": "arch", "absoluteMs": 500 }
       ]
     },
