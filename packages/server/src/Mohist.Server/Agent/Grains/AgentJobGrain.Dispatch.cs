@@ -1,5 +1,6 @@
 using System.Text.Json;
 using Mohist.Server.Agent.Services;
+using Mohist.Server.Contracts;
 using Mohist.Server.Infrastructure;
 using Mohist.Server.Infrastructure.Serialization;
 using Mohist.Server.Runner.Domain;
@@ -12,6 +13,13 @@ public sealed partial class AgentJobGrain
     private async Task<WorkDispatch> BuildDispatchAsync(string workId)
     {
         var input = InputWithAgentConfig()!;
+        // A pre-discriminator Slack job can be reconciled only from its
+        // durable Server-created context. It remains a legacy Slack
+        // dispatch; it is never relabeled as ordinary non-Slack work.
+        var executionSource = input.SlackExecutionContext is not null
+            && string.Equals(input.ExecutionSource, AgentExecutionSources.NonSlack, StringComparison.Ordinal)
+            ? AgentExecutionSources.Slack
+            : input.ExecutionSource;
         var payload = new Dictionary<string, JsonElement?>(StringComparer.Ordinal);
         if (!string.IsNullOrWhiteSpace(input.WorkspaceName))
             payload["workspace"] = JSON.SerializeToElement(new
@@ -32,6 +40,7 @@ public sealed partial class AgentJobGrain
         {
             ["prompt"] = JSON.SerializeToElement(
                 AgentStartupContextComposer.ComposePrompt(input.Prompt, input.StartupContext)),
+            ["executionSource"] = JSON.SerializeToElement(executionSource),
         };
         if (!string.IsNullOrWhiteSpace(input.AgentInstructions))
             with["instructions"] = JSON.SerializeToElement(input.AgentInstructions);
@@ -56,8 +65,20 @@ public sealed partial class AgentJobGrain
                     size = descriptor.Size,
                 })
                 .ToArray());
-        if (input.SlackExecutionContext is not null)
+        if (string.Equals(executionSource, AgentExecutionSources.Slack, StringComparison.Ordinal))
+        {
+            if (input.SlackExecutionContext is null)
+                throw new InvalidOperationException("Slack AgentJob input requires a complete execution context.");
             with["slackExecutionContext"] = JSON.SerializeToElement(input.SlackExecutionContext);
+        }
+        else if (!string.Equals(executionSource, AgentExecutionSources.NonSlack, StringComparison.Ordinal))
+        {
+            throw new InvalidOperationException($"Unknown AgentJob execution source '{executionSource}'.");
+        }
+        else if (input.SlackExecutionContext is not null)
+        {
+            throw new InvalidOperationException("Non-Slack AgentJob input cannot carry a Slack execution context.");
+        }
 
         return new WorkDispatch(
             WorkflowRunId: string.Empty,

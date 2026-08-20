@@ -29,6 +29,7 @@ export interface RunnerControlWebSocketClientOptions {
   sessionCommandJournal?: SessionCommandJournalStore | null
   followupOperationJournal?: FollowupOperationJournalStore | null
   cancelOperationJournal?: CancelOperationJournalStore | null
+  strictExecutionSourceValidation?: boolean
 }
 
 interface Connection {
@@ -219,6 +220,8 @@ export class RunnerControlWebSocketClient {
         enqueue: (value, complete) => this.enqueue(connection, value, complete),
         protocolError: () => this.protocolError(connection),
         isCurrent: () => this.current === connection && !connection.fenced,
+      }, {
+        strictExecutionSourceValidation: this.options.strictExecutionSourceValidation === true,
       }),
     })
     const socket = connection.socket

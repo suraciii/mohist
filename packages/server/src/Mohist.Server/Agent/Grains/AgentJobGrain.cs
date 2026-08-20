@@ -1021,6 +1021,9 @@ public sealed partial class AgentJobGrain : Grain, IAgentJobGrain
             InitialTurnId: command.TurnId,
             Attachments: command.Attachments,
             StartupContext: command.StartupContext,
+            ExecutionSource: command.ConnectionOrigin is null
+                ? AgentExecutionSources.NonSlack
+                : AgentExecutionSources.Slack,
             SlackExecutionContext: SlackExecutionContextFor(command),
             AllowedSubagents: command.AllowedSubagents,
             PinnedRunnerId: command.PinnedRunnerId,
@@ -1036,7 +1039,7 @@ public sealed partial class AgentJobGrain : Grain, IAgentJobGrain
             : SlackExecutionContextFactory.Create(
                 origin.WorkspaceTeamId,
                 origin.ConversationId,
-                origin.ThreadTs,
+                origin.ThreadTs ?? origin.MessageTs,
                 origin.MessageTs,
                 origin.SlackUserId,
                 origin.ConnectionId,
@@ -1061,6 +1064,7 @@ public sealed partial class AgentJobGrain : Grain, IAgentJobGrain
         && left.IssueNumber == right.IssueNumber
         && left.EpicNumber == right.EpicNumber
         && string.Equals(left.WorkflowRunId ?? string.Empty, right.WorkflowRunId ?? string.Empty, StringComparison.Ordinal)
+        && Equals(left.ConnectionOrigin, right.ConnectionOrigin)
         && JsonEquals(left.AgentConfig, right.AgentConfig)
         && AttachmentDescriptorsEquivalent(left.Attachments, right.Attachments);
 

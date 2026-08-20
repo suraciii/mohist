@@ -712,7 +712,13 @@ public sealed record AgentJobInput(
     [property: Id(20)] string? PinnedRunnerId = null,
     [property: Id(21)] AgentSessionStartup? AgentSessionStartup = null,
     [property: Id(22)] AgentJobSpawnOrigin? SpawnOrigin = null,
-    [property: Id(25)] string? ReasoningEffort = null);
+    [property: Id(25)] string? ReasoningEffort = null,
+    /// <summary>
+    /// Durable transport discriminator. It is explicit on every new
+    /// dispatch; the default keeps older persisted inputs readable during
+    /// the bounded source rollout.
+    /// </summary>
+    [property: Id(26)] string ExecutionSource = AgentExecutionSources.NonSlack);
 
 [GenerateSerializer]
 public sealed record AgentJobTerminalResult(

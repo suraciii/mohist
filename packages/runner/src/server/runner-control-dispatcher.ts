@@ -5,7 +5,7 @@ import type {
   ReceiveWorkflowRunStatusPayload,
 } from './session-target.js'
 import type { SessionCommandRequest } from './session-command-handler.js'
-import { readSlackExecutionContext } from '../runtime/slack-execution-context.js'
+import { readExecutionSourceContext } from '../runtime/slack-execution-context.js'
 
 export const JSON_RPC_PARSE_ERROR = -32700
 export const JSON_RPC_INVALID_REQUEST = -32600
@@ -34,12 +34,17 @@ export interface RunnerControlDispatcherOutput {
 
 type ObjectValue = Record<string, unknown>
 
+export interface RunnerControlDispatcherOptions {
+  readonly strictExecutionSourceValidation?: boolean
+}
+
 export class RunnerControlDispatcher {
   private readonly live = new Set<string>()
 
   constructor(
     private readonly handlers: RunnerControlHandlers,
     private readonly output: RunnerControlDispatcherOutput,
+    private readonly options: RunnerControlDispatcherOptions = {},
   ) {}
 
   receive(text: string): void {
@@ -138,7 +143,9 @@ export class RunnerControlDispatcher {
           ? () => this.handlers.workspaceFileContent(params.query, params.path as string)
           : 'invalid'
       case 'session.followup':
-        return isFollowup(params) ? () => this.handlers.sessionFollowup(normalizeFollowup(params)) : 'invalid'
+        return isFollowup(params, this.options.strictExecutionSourceValidation === true)
+          ? () => this.handlers.sessionFollowup(normalizeFollowup(params))
+          : 'invalid'
       case 'session.stop':
         return isStop(params) ? () => this.handlers.sessionStop(normalizeStop(params)) : 'invalid'
       case 'session.command':
@@ -234,7 +241,10 @@ function isAttachment(value: unknown): boolean {
   )
 }
 
-function isFollowup(value: ObjectValue): value is ObjectValue & ReceiveFollowupPayload {
+function isFollowup(
+  value: ObjectValue,
+  strictExecutionSourceValidation: boolean,
+): value is ObjectValue & ReceiveFollowupPayload {
   const attachmentsValid =
     value.attachments === undefined ||
     value.attachments === null ||
@@ -247,7 +257,7 @@ function isFollowup(value: ObjectValue): value is ObjectValue & ReceiveFollowupP
     (value.inputId === undefined || value.inputId === null || nonempty(value.inputId)) &&
     nonempty(value.turnId) &&
     attachmentsValid &&
-    readSlackExecutionContext({ slackExecutionContext: value.slackExecutionContext }).kind !== 'invalid'
+    readExecutionSourceContext(value, { strict: strictExecutionSourceValidation }).kind !== 'invalid'
   )
 }
 

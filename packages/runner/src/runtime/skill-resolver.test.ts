@@ -2,8 +2,7 @@ import { join } from "node:path"
 import { describe, expect, it as vitestIt } from "vitest"
 import { buildExecutionEnvelope } from "./execution-envelope.js"
 import { SkillResolver } from "./skill-resolver.js"
-import { inlineSlackCollaborationSkill, readSlackExecutionContext } from "./slack-execution-context.js"
-import { createHash } from "node:crypto"
+import { inlineSlackCollaborationSkill } from "./slack-execution-context.js"
 import { MemoryFileSystem } from "../../tests/support/memory-filesystem.js"
 import { withTestRunnerResources } from "../../tests/support/test-resources.js"
 
@@ -84,19 +83,15 @@ describe("SkillResolver", () => {
         name: "mohist-slack-collaboration",
         version: "1.0.0",
         instructions,
-        contentHash: createHash("sha256").update(instructions, "utf8").digest("hex"),
+        contentHash: "test-hash",
       },
-    }
-
-    const resolved = readSlackExecutionContext({ slackExecutionContext: context })
-    expect(resolved.kind).toBe("resolved")
-    if (resolved.kind !== "resolved") throw new Error("Slack context did not resolve")
+    } as const
 
     const envelope = buildExecutionEnvelope(
       "goal",
       null,
-      [inlineSlackCollaborationSkill(resolved.value)],
-      resolved.value,
+      [inlineSlackCollaborationSkill(context)],
+      context,
     )
     expect(envelope).toContain("[mohist-system-facts]")
     expect(envelope).toContain('"dispatchRef":"dispatch_1"')

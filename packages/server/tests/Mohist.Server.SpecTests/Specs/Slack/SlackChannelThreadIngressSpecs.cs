@@ -76,7 +76,8 @@ public sealed partial class SlackChannelThreadIngressSpecs
             ThreadId: "1710000000.000100",
             MemberId: "U_OWNER",
             MessageId: "1710000000.000100",
-            ConnectionId: connection.Id), input!.Input!.Provenance);
+            ConnectionId: connection.Id,
+            BoundThreadRootMessageId: "1710000000.000100"), input!.Input!.Provenance);
         var inboxRow = await db.SlackProviderInboxRows.SingleAsync(row =>
             row.ConnectionId == connection.Id
             && row.ConversationId == "C-channel-A"

@@ -569,7 +569,8 @@ public sealed partial class AgentLaunchCoordinatorGrain : Grain, IAgentLaunchCoo
                     ThreadId: provenanceOrigin.ThreadTs,
                     MemberId: provenanceOrigin.SlackUserId,
                     MessageId: provenanceOrigin.MessageTs,
-                    ConnectionId: provenanceOrigin.ConnectionId)
+                    ConnectionId: provenanceOrigin.ConnectionId,
+                    BoundThreadRootMessageId: provenanceOrigin.ThreadTs ?? provenanceOrigin.MessageTs)
                 : null,
             StartupContext: plan.StartupContext,
             Definition: new AgentExecutionDefinition(

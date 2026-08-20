@@ -97,10 +97,10 @@ Send your reply with the Mohist-provided command, reading the destination from t
     public void Slack_context_uses_the_thread_root_and_never_allows_a_runner_selected_target()
     {
         var context = SlackExecutionContextFactory.Create(
-            "T1", "C1", null, "101.0", "U1", "connection_1", "session_1", "dispatch_1");
+            "T1", "C1", "100.0", "101.0", "U1", "connection_1", "session_1", "dispatch_1");
 
         Assert.Equal(AgentSlackExecutionContext.CurrentVersion, context.Version);
-        Assert.Equal("101.0", context.ReplyAnchor.ThreadRootMessageId);
+        Assert.Equal("100.0", context.ReplyAnchor.ThreadRootMessageId);
         Assert.Equal("101.0", context.ReplyAnchor.TriggeringMessageId);
         Assert.Equal("connection_1", context.ReplyAnchor.ConnectionId);
         Assert.Equal("dispatch_1", context.ReplyAnchor.DispatchRef);

@@ -979,7 +979,8 @@ public static partial class SlackConnectionRoutes
             ThreadId: threadTs,
             MemberId: body.SenderSlackUserId!,
             MessageId: body.MessageTs,
-            ConnectionId: connectionId);
+            ConnectionId: connectionId,
+            BoundThreadRootMessageId: threadTs);
 
     /// <summary>
     /// Sender kind surfaced by the adapter on the normalized envelope.

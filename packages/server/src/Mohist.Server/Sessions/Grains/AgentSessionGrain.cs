@@ -1040,6 +1040,23 @@ public sealed partial class AgentSessionGrain : Grain, IAgentSessionGrain, IRemi
         if (index < 0 || leases[index].Dispatching) return null;
 
         var lease = leases[index];
+        var inputs = (session.Status.Inputs ?? []).ToDictionary(input => input.Id, StringComparer.Ordinal);
+        if (turn.InputIds.Count == 0)
+            throw new InvalidOperationException($"AgentSession {SessionId} follow-up turn '{turn.Id}' has no inputs.");
+
+        var turnInputs = turn.InputIds.Select(id => inputs.TryGetValue(id, out var input)
+                ? input
+                : throw new InvalidOperationException(
+                    $"AgentSession {SessionId} follow-up turn '{turn.Id}' references missing input '{id}'."))
+            .ToArray();
+        var representative = turnInputs[0];
+        var executionSource = EffectiveExecutionSource(representative);
+        if (turnInputs.Any(input => EffectiveExecutionSource(input) != executionSource))
+            throw new InvalidOperationException($"AgentSession {SessionId} follow-up turn '{turn.Id}' mixes execution sources.");
+        var provenance = ResolveFollowupProvenance(session, turnInputs, executionSource);
+        var texts = turnInputs.Select(input => input.Text).ToArray();
+        var attachments = CollectAttachmentsForDispatch(inputs, turn.InputIds);
+
         if (!await AcquireFollowupDispatchPermitAsync(session, lease))
             return null;
 
@@ -1051,9 +1068,6 @@ public sealed partial class AgentSessionGrain : Grain, IAgentSessionGrain, IRemi
         lease = GetPendingFollowups(session).FirstOrDefault(candidate =>
             string.Equals(candidate.OperationId, lease.OperationId, StringComparison.Ordinal)) ?? lease;
 
-        var inputs = (session.Status.Inputs ?? []).ToDictionary(input => input.Id, StringComparer.Ordinal);
-        var texts = turn.InputIds.Select(id => inputs[id].Text).ToArray();
-        var attachments = CollectAttachmentsForDispatch(inputs, turn.InputIds);
         leases[index] = lease with
         {
             Dispatching = true,
@@ -1090,18 +1104,56 @@ public sealed partial class AgentSessionGrain : Grain, IAgentSessionGrain, IRemi
             SetPendingFollowups(session, leases);
             await CommitAsync(session, []);
         }
-        var inputId = turn.InputIds.Count == 1 ? turn.InputIds[0] : null;
-        var provenance = inputId is not null && inputs.TryGetValue(inputId, out var input)
-            ? input.Provenance
-            : null;
         return new AgentSessionFollowupDispatch(
             turn.Id,
             leases[index].OperationId,
             texts,
             attachments,
-            inputId,
+            representative.Id,
             provenance,
-            leases[index].ConcurrencyDispatchId ?? $"followup:{session.Id}:{leases[index].OperationId}");
+            leases[index].ConcurrencyDispatchId ?? $"followup:{session.Id}:{leases[index].OperationId}",
+            executionSource);
+    }
+
+    private static string EffectiveExecutionSource(AgentSessionInputRecord input)
+    {
+        if (input.Provenance is { } provenance
+            && string.Equals(provenance.ProviderKind, "slack", StringComparison.Ordinal))
+            return AgentExecutionSources.Slack;
+        if (string.Equals(input.ExecutionSource, AgentExecutionSources.NonSlack, StringComparison.Ordinal))
+            return AgentExecutionSources.NonSlack;
+        if (string.Equals(input.ExecutionSource, AgentExecutionSources.Slack, StringComparison.Ordinal))
+            throw new InvalidOperationException($"Slack execution input '{input.Id}' is missing Slack provenance.");
+        throw new InvalidOperationException($"Input '{input.Id}' has unknown execution source '{input.ExecutionSource}'.");
+    }
+
+    private static AgentSessionInputProvenance? ResolveFollowupProvenance(
+        AgentSession session,
+        IReadOnlyList<AgentSessionInputRecord> turnInputs,
+        string executionSource)
+    {
+        if (!string.Equals(executionSource, AgentExecutionSources.Slack, StringComparison.Ordinal))
+            return turnInputs[0].Provenance;
+
+        var initial = (session.Status.Inputs ?? [])
+            .Where(input => EffectiveExecutionSource(input) == AgentExecutionSources.Slack)
+            .OrderBy(input => input.Sequence)
+            .FirstOrDefault(input => !string.IsNullOrWhiteSpace(input.JobId));
+        var initialProvenance = initial?.Provenance;
+        var root = initialProvenance?.BoundThreadRootMessageId;
+        if (string.IsNullOrWhiteSpace(root))
+            throw new InvalidOperationException($"AgentSession {session.Id} Slack follow-up has no durable bound thread root.");
+
+        var representative = turnInputs[0].Provenance
+            ?? throw new InvalidOperationException($"AgentSession {session.Id} Slack follow-up representative has no provenance.");
+        if (string.IsNullOrWhiteSpace(representative.WorkspaceId)
+            || string.IsNullOrWhiteSpace(representative.ConversationId)
+            || string.IsNullOrWhiteSpace(representative.MessageId)
+            || string.IsNullOrWhiteSpace(representative.MemberId)
+            || string.IsNullOrWhiteSpace(representative.ConnectionId))
+            throw new InvalidOperationException($"AgentSession {session.Id} Slack follow-up representative provenance is incomplete.");
+
+        return representative with { BoundThreadRootMessageId = root };
     }
 
     private async Task<bool> AcquireFollowupDispatchPermitAsync(

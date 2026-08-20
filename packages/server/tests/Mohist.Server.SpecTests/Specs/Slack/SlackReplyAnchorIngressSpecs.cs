@@ -59,6 +59,7 @@ public sealed class SlackReplyAnchorIngressSpecs : IAsyncLifetime
         var jobKey = initial.Turn!.JobId!;
         var dispatch = await PollInitialDispatchAsync(runnerId, jobKey);
 
+        Assert.Equal("slack", InitialExecutionSource(dispatch));
         AssertReplyAnchor(
             InitialReplyAnchor(dispatch),
             connection,
@@ -98,6 +99,7 @@ public sealed class SlackReplyAnchorIngressSpecs : IAsyncLifetime
         var jobKey = initial.Turn!.JobId!;
         var dispatch = await PollInitialDispatchAsync(runnerId, jobKey);
 
+        Assert.Equal("slack", InitialExecutionSource(dispatch));
         AssertReplyAnchor(
             InitialReplyAnchor(dispatch),
             connection,
@@ -142,6 +144,7 @@ public sealed class SlackReplyAnchorIngressSpecs : IAsyncLifetime
         var rootInitial = await _fixture.Grains.GetGrain<IAgentSessionGrain>(sessionId).GetInitialLaunchAsync()
             ?? throw new InvalidOperationException("Thread root ingress did not create the initial Session input.");
         var rootDispatch = await PollInitialDispatchAsync(runnerId, rootInitial.Turn!.JobId!);
+        Assert.Equal("slack", InitialExecutionSource(rootDispatch));
         await BindRuntimeSessionAsync(connection, runnerId, sessionId, rootDispatch);
         await _fixture.Grains.GetGrain<IAgentSessionGrain>(sessionId).MarkTurnTerminalAsync(
             root.GetProperty("turnId").GetString()!, AgentTurnStatus.Completed, null);
@@ -169,6 +172,8 @@ public sealed class SlackReplyAnchorIngressSpecs : IAsyncLifetime
             var payload = JsonSerializer.SerializeToElement(delivery.Arguments.Single(), JSON.Options);
             var operationId = payload.GetProperty("operationId").GetString()!;
 
+            Assert.Equal("slack", payload.GetProperty("executionSource").GetString());
+            AssertSkillParity(InitialReplyAnchor(rootDispatch), payload.GetProperty("slackExecutionContext"));
             AssertReplyAnchor(
                 payload.GetProperty("slackExecutionContext"),
                 connection,
@@ -308,6 +313,22 @@ public sealed class SlackReplyAnchorIngressSpecs : IAsyncLifetime
     {
         using var with = JsonDocument.Parse(dispatch.GetProperty("with").GetString()!);
         return with.RootElement.GetProperty("slackExecutionContext").Clone();
+    }
+
+    private static string? InitialExecutionSource(JsonElement dispatch)
+    {
+        using var with = JsonDocument.Parse(dispatch.GetProperty("with").GetString()!);
+        return with.RootElement.GetProperty("executionSource").GetString();
+    }
+
+    private static void AssertSkillParity(JsonElement initial, JsonElement followup)
+    {
+        var initialSkill = initial.GetProperty("collaborationSkill");
+        var followupSkill = followup.GetProperty("collaborationSkill");
+        Assert.Equal(initialSkill.GetProperty("name").GetString(), followupSkill.GetProperty("name").GetString());
+        Assert.Equal(initialSkill.GetProperty("version").GetString(), followupSkill.GetProperty("version").GetString());
+        Assert.Equal(initialSkill.GetProperty("instructions").GetString(), followupSkill.GetProperty("instructions").GetString());
+        Assert.Equal(initialSkill.GetProperty("contentHash").GetString(), followupSkill.GetProperty("contentHash").GetString());
     }
 
     private static void AssertReplyAnchor(

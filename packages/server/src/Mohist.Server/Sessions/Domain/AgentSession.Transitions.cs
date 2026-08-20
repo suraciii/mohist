@@ -460,7 +460,8 @@ public static partial class AgentSessionExtensions
                     JobId: jobId,
                     Attachments: normalizedAttachments,
                     Provenance: provenance,
-                    StartupContext: startupContext));
+                    StartupContext: startupContext,
+                    ExecutionSource: ExecutionSourceFor(provenance)));
             }
 
             var turns = (session.Status.Turns ?? []).ToList();
@@ -593,7 +594,8 @@ public static partial class AgentSessionExtensions
                 RecordedAt: now,
                 JobId: null,
                 Attachments: normalizedAttachments,
-                Provenance: provenance));
+                Provenance: provenance,
+                ExecutionSource: ExecutionSourceFor(provenance)));
             turns.Add(new AgentTurnRecord(
                 Id: turnId,
                 Sequence: turns.Count + 1,
@@ -1160,7 +1162,8 @@ public static partial class AgentSessionExtensions
                 JobId: null,
                 IdempotencyKey: idempotencyKey,
                 Attachments: normalizedAttachments,
-                Provenance: provenance);
+                Provenance: provenance,
+                ExecutionSource: ExecutionSourceFor(provenance));
 
             AgentTurnRecord updatedTurn;
             var createdNewTurn = false;
@@ -1237,6 +1240,12 @@ public static partial class AgentSessionExtensions
                 TurnStatus: updatedTurn.Status,
                 Attachments: normalizedAttachments);
         }
+
+        private static string ExecutionSourceFor(AgentSessionInputProvenance? provenance) =>
+            provenance is not null
+                && string.Equals(provenance.ProviderKind, "slack", StringComparison.Ordinal)
+                ? AgentExecutionSources.Slack
+                : AgentExecutionSources.NonSlack;
 
         /// <summary>
         /// Resolve the follow-up turn an incoming input should be

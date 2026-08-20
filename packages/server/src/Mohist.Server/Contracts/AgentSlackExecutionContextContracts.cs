@@ -4,6 +4,13 @@ using Orleans;
 
 namespace Mohist.Server.Contracts;
 
+public static class AgentExecutionSources
+{
+    public const string Slack = "slack";
+    public const string NonSlack = "non-slack";
+    public const string Version1Capability = "execution-source-v1";
+}
+
 public static class SlackCollaborationSkillCatalog
 {
     public const string Name = "mohist-slack-collaboration";
@@ -85,22 +92,33 @@ public static class SlackExecutionContextFactory
     public static AgentSlackExecutionContext Create(
         string workspaceId,
         string conversationId,
-        string? threadRootMessageId,
+        string threadRootMessageId,
         string triggeringMessageId,
         string initiatingMemberId,
         string connectionId,
         string sessionId,
-        string dispatchRef) =>
-        new(
+        string dispatchRef)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(workspaceId);
+        ArgumentException.ThrowIfNullOrWhiteSpace(conversationId);
+        ArgumentException.ThrowIfNullOrWhiteSpace(threadRootMessageId);
+        ArgumentException.ThrowIfNullOrWhiteSpace(triggeringMessageId);
+        ArgumentException.ThrowIfNullOrWhiteSpace(initiatingMemberId);
+        ArgumentException.ThrowIfNullOrWhiteSpace(connectionId);
+        ArgumentException.ThrowIfNullOrWhiteSpace(sessionId);
+        ArgumentException.ThrowIfNullOrWhiteSpace(dispatchRef);
+
+        return new(
             AgentSlackExecutionContext.CurrentVersion,
             new SlackReplyAnchor(
                 workspaceId,
                 conversationId,
-                string.IsNullOrWhiteSpace(threadRootMessageId) ? triggeringMessageId : threadRootMessageId,
+                threadRootMessageId,
                 triggeringMessageId,
                 initiatingMemberId,
                 connectionId,
                 sessionId,
                 dispatchRef),
             SlackCollaborationSkillCatalog.Resolve());
+    }
 }
