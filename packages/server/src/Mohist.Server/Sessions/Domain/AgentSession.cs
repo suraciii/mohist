@@ -527,7 +527,8 @@ public sealed record AgentSessionFollowupDispatch(
     /// </summary>
     [property: Id(4)] string? InputId = null,
     [property: Id(5)] AgentSessionInputProvenance? Provenance = null,
-    [property: Id(6)] string? DispatchId = null);
+    [property: Id(6)] string? DispatchId = null,
+    [property: Id(7)] string ExecutionSource = AgentExecutionSources.NonSlack);
 
 /// <summary>
 /// Lookup result of <see cref="AgentSessionExtensions.FindFollowupInputByIdempotencyKey"/>.
@@ -580,7 +581,8 @@ public sealed record AgentSessionInputProvenance(
     [property: Id(3)] string? ThreadId,
     [property: Id(4)] string MemberId,
     [property: Id(5)] string MessageId,
-    [property: Id(6)] string? ConnectionId = null);
+    [property: Id(6)] string? ConnectionId = null,
+    [property: Id(7)] string? BoundThreadRootMessageId = null);
 
 [GenerateSerializer]
 public sealed record AgentSessionInputRecord(
@@ -606,7 +608,8 @@ public sealed record AgentSessionInputRecord(
     /// no startup context was supplied. Append-only Orleans field
     /// id (next free after <see cref="Provenance"/>).
     /// </summary>
-    [property: Id(10)] AgentStartupContext? StartupContext = null);
+    [property: Id(10)] AgentStartupContext? StartupContext = null,
+    [property: Id(11)] string ExecutionSource = AgentExecutionSources.NonSlack);
 
 public enum AgentSessionInputAcceptance
 {

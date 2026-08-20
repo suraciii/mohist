@@ -4,6 +4,7 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Options;
 using Mohist.Server.Agent.Grains;
 using Mohist.Server.Agent.Services;
+using Mohist.Server.Contracts;
 using Mohist.Server.Infrastructure;
 
 namespace Mohist.Server.Api;
@@ -116,7 +117,8 @@ public static class AgentJobController
             WorkspaceName: body.Workspace?.Name,
             WorkspacePath: body.Workspace?.Path,
             ProjectId: body.Workspace?.ProjectId,
-            AgentId: body.AgentId!.Trim());
+            AgentId: body.AgentId!.Trim(),
+            ExecutionSource: AgentExecutionSources.NonSlack);
 
         var waiter = grain.WaitForTerminalAsync();
         try

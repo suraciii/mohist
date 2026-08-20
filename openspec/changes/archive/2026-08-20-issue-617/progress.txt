@@ -1,0 +1,40 @@
+# issue-617 plan repair progress
+
+`self-review.md` is intentionally untouched; the next self-review regenerates it.
+
+## Must-fix dispositions in progress
+
+- MF-1 — Slack-origin context can degrade to ordinary work: FIXED IN PLAN. The revised artifacts require a persisted/transported `executionSource`, enforce the Slack/context and non-Slack/no-context pair at Server, Runner control, AgentJob, and follow-up boundaries, and test omitted/null context on both paths.
+- MF-2 — Batched follow-ups lack a complete anchor: FIXED IN PLAN. The revised artifacts persist the effective bound thread root, including the initial DM message, define the first durable input in a combined turn as the representative triggering message, and cover multi-input and DM follow-up dispatches.
+- MF-3 — Same-version Skill immutability/parity is not enforceable: FIXED IN PLAN. The lock, drift rejection, and parity mechanism now use the exact post-change v1 fixture and digest.
+- Review finding 1 — The pinned digest described the incomplete pre-change Skill: FIXED IN PLAN. `design.md` defines the complete v1 instruction bytes first, records their exact UTF-8/LF digest, and `tasks.json` plus both parity contracts use the same value.
+- Review finding 2 — Strict source validation was deployed before Server emission: FIXED IN PLAN. `design.md`, the injection spec, and T-002 define a bounded dual-read gate, capability routing, legacy drain/reconciliation, strict activation prerequisites, mixed-version tests, and rollback order.
+
+## Verification
+
+- Canonical post-change asset fixture is now defined exactly in `design.md` with LF line endings and one trailing LF; its SHA-256 is `dedf18a796543ade06a9e0ece00c086577153e1e633f868c099b01cf910d641b`. The implementation must make the embedded file and catalog fixture byte-for-byte equal to it before claiming the digest is verified.
+- No changes are made to `self-review.md`.
+- Incremental commits: `98949a924` and `7712ca9ad` cover the canonical Skill lock repair; `df5b56129` covers the source-discriminator and batched-anchor repair; `f26be6fd0` covers the bounded rollout repair.
+- Mechanical checks pass: `tasks.json` parses, the canonical fixture re-hashes to its pinned digest, `git diff --check` is clean, spec anchors and mixed-version rollout scenarios are present, and `self-review.md` is untouched. `npm run docs:check` could not run because `tsx` is not installed in the workspace (`exit 127`).
+
+## T-001 implementation
+
+- Replaced the short pre-issue Slack asset with the exact LF-delimited v1 fixture from `design.md`; independent extraction and the embedded file both hash to `dedf18a796543ade06a9e0ece00c086577153e1e633f868c099b01cf910d641b`.
+- Updated `SlackCollaborationSkillCatalog` to read raw embedded bytes, use strict UTF-8, and reject the `1.0.0` asset unless its computed lowercase SHA-256 matches the pinned version map. The only non-embedded resolver is an internal test seam used to prove same-version drift fails.
+- Expanded the Server contract tests to assert exact fixture equality, stable identity, lowercase digest, trailing-LF/no-CR encoding, all six collaboration rules, silent instruction-only authorship boundaries, and changed-body rejection. The existing thread-root contract remains covered.
+- Verification: focused contract class passed 5/5; full `Mohist.Server.UnitTests` passed 3,081/3,081. `dotnet test` only built in this workspace's generated xUnit v3 setup, so executable tests were run with `dotnet run ... -- -noColor -noLogo`.
+
+## T-002 implementation
+
+- Added explicit `AgentExecutionSources` (`slack` / `non-slack`) to durable AgentJob inputs and follow-up dispatch state. Initial AgentJob dispatches now always include `executionSource`; Slack inputs persist the complete context, while non-Slack inputs reject accidental Slack context.
+- Persisted `BoundThreadRootMessageId` on Slack input provenance. Initial roots use `threadTs ?? messageTs`; follow-ups resolve the root from the durable initial input, use the first durable `turn.InputIds` entry as the representative for batched turns, preserve all input text, and use the follow-up operation as `dispatchRef`.
+- Follow-up construction now fails closed on missing source/root/provenance and releases the local dispatch before Runner delivery. Existing legacy records with trusted Slack context/provenance are reconciled as Slack and never relabeled as non-Slack.
+- Replaced the Runner's optional Slack-context reader with one source/context validator. It enforces explicit source pairs in strict mode, bounded source-less compatibility without relabeling, the published Skill identity/version/hash, lowercase digest casing, exact UTF-8 digest integrity, complete anchors, and fail-closed Slack null/omitted contexts at control, AgentJob, and follow-up boundaries.
+- Added Runner capability registration/gating for explicit source-version-1 dispatches and an environment-controlled strict gate (`STRICT_EXECUTION_SOURCE_VALIDATION`). Initial and follow-up Server routing both hold explicit v1 work from Runners without the capability. Valid Slack envelopes append the managed Skill and expose only Slack source/version/anchor facts; non-Slack envelopes remain unchanged.
+- Verification: Server unit suite passed 3,081/3,081; focused Server Slack reply-anchor class passed 3/3; focused batched follow-up dispatch passed 1/1; focused Runner suite passed 47/47; Runner production and test typechecks passed. Full SpecTests were not run because the repository test platform ignores the MSBuild filter; direct xUnit method/class runs were used for the affected cases.
+
+## Review must-fix implementation
+
+- MF-1 — FIXED. The Runner now selects a separate legacy parser only when `executionSource` is genuinely absent. It accepts the exact pre-change source-less Slack Skill snapshot (`de3272639a1d390f3dcf915e65b6c057bf0b9eb91c51545572eb1e484c8c1a22`) while compatibility mode is enabled, while explicit `slack` remains on the published v1 validator. Added the mixed-version fixture/regression test and explicit-null rejection coverage.
+- MF-2 — FIXED. `AgentJobInput.ExecutionSource` is nullable so absent legacy state is distinct from explicit `non-slack`; new Server producers write the explicit non-Slack marker. `BuildDispatchAsync` reconciles only absent source plus trusted Slack context, preserves source-less legacy non-Slack envelopes, and rejects explicit non-Slack plus Slack context. Added Server dispatch specs for both cases.
+- Verification: `npm run test:ci --prefix packages/runner` passed 155 files/1,680 tests; Server UnitTests passed 3,081/3,081; affected Server dispatch specs passed 11/11; Runner and Server test projects built with zero errors.

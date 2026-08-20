@@ -43,6 +43,7 @@ public sealed class RunnerFollowupDeliveryDispatcher : IFollowupDeliveryDispatch
             request.OperationId,
             request.InputId,
             request.TurnId!,
+            request.ExecutionSource,
             request.SlackExecutionContext,
             request.Attachments is { Count: > 0 }
                 ? request.Attachments

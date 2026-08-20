@@ -3,6 +3,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
 using Microsoft.EntityFrameworkCore;
 using Mohist.Server.Agent.Grains;
+using Mohist.Server.Contracts;
 using Mohist.Server.Sessions.Domain;
 using Mohist.Server.Sessions.Grains;
 using Mohist.Server.Runner.Grains;
@@ -19,6 +20,65 @@ public class AgentJobDispatchEnvelopeSpecs : AgentJobGrainTestSupport
 {
     public AgentJobDispatchEnvelopeSpecs(AgentJobGrainFixture fixture) : base(fixture)
     {
+    }
+
+    [Fact]
+    public async Task SubmitAsync_RejectsExplicitNonSlackSourceWithSlackContext()
+    {
+        var (runnerId, projectId) = await RegisterAgentJobRunnerAsync($"agent-job-source-mismatch-{Guid.NewGuid():N}");
+        var job = JobGrain($"agent-job-source-mismatch-{Guid.NewGuid():N}");
+        var context = SlackExecutionContextFactory.Create(
+            "workspace-1",
+            "conversation-1",
+            "thread-1",
+            "message-1",
+            "member-1",
+            "connection-1",
+            "session-1",
+            "dispatch-1");
+
+        var error = await Assert.ThrowsAsync<InvalidOperationException>(() => job.SubmitAsync(new AgentJobInput(
+            Prompt: "must fail closed",
+            ProjectId: projectId,
+            AgentId: "agent-source-mismatch",
+            ExecutionSource: AgentExecutionSources.NonSlack,
+            SlackExecutionContext: context)));
+
+        Assert.Contains("cannot carry a Slack execution context", error.Message, StringComparison.Ordinal);
+        Assert.Null(await job.GetCurrentWorkIdAsync());
+    }
+
+    [Fact]
+    public async Task SubmitAsync_ReconcilesAbsentSourceFromTrustedSlackContext()
+    {
+        var (runnerId, projectId) = await RegisterAgentJobRunnerAsync($"agent-job-legacy-slack-{Guid.NewGuid():N}");
+        var job = JobGrain($"agent-job-legacy-slack-{Guid.NewGuid():N}");
+        var context = SlackExecutionContextFactory.Create(
+            "workspace-legacy",
+            "conversation-legacy",
+            "thread-legacy",
+            "message-legacy",
+            "member-legacy",
+            "connection-legacy",
+            "session-legacy",
+            "dispatch-legacy");
+
+        await job.SubmitAsync(new AgentJobInput(
+            Prompt: "legacy Slack work",
+            ProjectId: projectId,
+            AgentId: "agent-legacy-slack",
+            ExecutionSource: null,
+            SlackExecutionContext: context));
+        await _fixture.DispatchObserver.WaitForAssignmentPreparedAsync();
+        var dispatch = await Grains.GetGrain<IRunnerGrain>(runnerId).PollAsync(_fixture.Cluster.GetSiloServiceProvider(null));
+        Assert.NotNull(dispatch);
+        await _fixture.DispatchObserver.WaitForRunnerAcceptedAsync();
+        Assert.Equal(AgentJobStatus.Running, await job.GetStatusAsync());
+
+        Assert.NotNull(dispatch!.With);
+        var with = JsonSerializer.Deserialize<JsonElement>(dispatch.With!);
+        Assert.Equal(AgentExecutionSources.Slack, with.GetProperty("executionSource").GetString());
+        Assert.True(with.TryGetProperty("slackExecutionContext", out _));
     }
 
     [Fact]

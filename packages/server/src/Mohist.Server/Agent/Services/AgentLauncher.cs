@@ -140,7 +140,8 @@ public sealed class AgentLauncher : IAgentLauncher, IScopedService
             IssueNumber: context.IssueNumber,
             EpicNumber: context.EpicNumber,
             AllowedSubagents: definition.AllowedSubagents,
-            AgentSessionStartup: startup);
+            AgentSessionStartup: startup,
+            ExecutionSource: AgentExecutionSources.NonSlack);
         if (triggerLabels is null)
             await jobGrain.SubmitAsync(jobInput);
         else
@@ -718,7 +719,8 @@ public sealed class AgentLauncher : IAgentLauncher, IScopedService
             IssueNumber: context.IssueNumber,
             EpicNumber: context.EpicNumber,
             AllowedSubagents: definition.AllowedSubagents,
-            AgentSessionStartup: startup);
+            AgentSessionStartup: startup,
+            ExecutionSource: AgentExecutionSources.NonSlack);
         await jobGrain.EnsureSubmittedAsync(jobInput);
 
         return new AgentLaunchResult(

@@ -134,6 +134,8 @@ export interface ReceiveFollowupPayload {
    * callers.
    */
   turnId?: string
+  /** Explicit source discriminator; omitted only for bounded legacy payloads. */
+  executionSource?: unknown
   /**
    * Issue-513 T-003: accepted attachment descriptors for this
    * follow-up turn. The Runner uses these to materialize the

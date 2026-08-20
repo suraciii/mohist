@@ -23,7 +23,7 @@ export function buildRegistrationState(
         .digest('hex')
     : null
   return {
-    capabilities: [],
+    capabilities: ['execution-source-v1'],
     actionCatalog: actionsCatalog,
     projectId: options.projectId,
     connectionId: getConnectionId(),
