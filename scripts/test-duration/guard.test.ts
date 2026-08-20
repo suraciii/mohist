@@ -17,7 +17,7 @@ import {
   reportEvaluationFailureReason,
   writeExecutionProvenance,
 } from './guard.js'
-import { formatEvaluation, formatSummary, formatTrackRun, summarize } from './diagnostics.js'
+import { formatEvaluation, formatGuardOutput, formatSummary, formatTrackRun, summarize } from './diagnostics.js'
 import { manifestFromDiscovery, serializeExecutionProvenance } from './execution-ledger.js'
 import type {
   CurrentExecutionIdentity,
@@ -434,6 +434,10 @@ test('lane sandbox gives every lane distinct temporary resources and isolates se
   assert.equal(web.environment.HOME, web.homeDir)
   assert.equal(web.environment.USERPROFILE, web.homeDir)
   assert.equal(web.environment.MOHIST_TEST_LANE, 'web')
+  assert.equal(web.environment.Logging__LogLevel__Default, 'Warning')
+  assert.equal(web.environment.DOTNET_NOLOGO, 'true')
+  assert.equal(web.environment.DOTNET_CLI_TELEMETRY_OPTOUT, 'true')
+  assert.equal(web.environment.DOTNET_GENERATE_ASPNET_CERTIFICATE, 'false')
   assert.equal(web.environment.MOHIST_DB_PATH, undefined)
   assert.equal(web.environment.MOHIST__Otel__Port, undefined)
   assert.equal(serverSpec.environment.MOHIST_DB_PATH, serverSpec.databasePath)
@@ -451,6 +455,9 @@ test('lane sandbox gives every lane distinct temporary resources and isolates se
   assert.match(serverSpec.databasePath, /^\/evidence\/tmp\/server-spec\/mohist\/mohist\.db$/)
   assert.match(serverSpec.otelDatabasePath, /^\/evidence\/tmp\/server-spec\/mohist\/otel\.db$/)
   assert.match(web.homeDir, /^\/evidence\/tmp\/web\/home$/)
+
+  const verbose = laneSandbox('/evidence', 'server-spec', { Logging__LogLevel__Default: 'Debug' })
+  assert.equal(verbose.environment.Logging__LogLevel__Default, 'Debug')
 })
 
 test('a completed lane without its report fails fast while cancelled lanes remain distinct in the summary', () => {
@@ -546,6 +553,64 @@ test('suite deadline breach remains visible in summary and report errors fail th
   assert.match(output, /1 failing, 0 cancelled, 1 timed out/)
   assert.match(output, /suite deadline: 1\.00s BREACHED after 1\.25s/)
   assert.match(output, /REPORT ERROR: report reports\/slow\.trx was not refreshed/)
+})
+
+test('successful guard adds no output beyond the test framework reporter', () => {
+  const evaluation: TrackEvaluation = {
+    trackId: 'unit',
+    enforce: true,
+    total: 3,
+    outcomes: { total: 3, passed: 3, failed: 0, errors: 0, skipped: 0, notRun: 0, other: 0 },
+    failedTests: [],
+    rules: [],
+    passed: true,
+  }
+  const summary = summarize([], [evaluation], false, 1250)
+
+  const output = formatGuardOutput({
+    passed: true,
+    summary,
+    suiteDeadlineMs: 300_000,
+    failedRuns: [],
+    failedEvaluations: [],
+  })
+
+  assert.equal(output, '')
+})
+
+test('failed guard output reports failed work without captured process logs', () => {
+  const run: TrackRun = {
+    trackId: 'unit',
+    timedOut: false,
+    exitCode: 1,
+    elapsedMs: 20,
+    deadlineMs: 1000,
+    command: 'unit-tests',
+    reportReady: true,
+    cleanupComplete: true,
+  }
+  const evaluation: TrackEvaluation = {
+    trackId: 'unit',
+    enforce: true,
+    total: 1,
+    outcomes: { total: 1, passed: 0, failed: 1, errors: 0, skipped: 0, notRun: 0, other: 0 },
+    failedTests: ['Ns.Unit.fails'],
+    rules: [],
+    passed: false,
+  }
+  const summary = summarize([run], [evaluation], false, 20)
+  const output = formatGuardOutput({
+    passed: false,
+    summary,
+    suiteDeadlineMs: 300_000,
+    failedRuns: [run],
+    failedEvaluations: [evaluation],
+  })
+
+  assert.match(output, /^FAIL 1 of 1 track failed/)
+  assert.match(output, /FAILED TEST: Ns\.Unit\.fails/)
+  assert.doesNotMatch(output, /stdout|stderr|\.log/)
+  assert.doesNotMatch(output, /runs:|budget:/)
 })
 
 test('parseArgs accepts an internal run root and the canonical absolute deadline', () => {

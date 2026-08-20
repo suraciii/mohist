@@ -155,7 +155,7 @@ test('canonical gate retains an external diagnostic root for success, failure, a
 
       assert.equal(code, scenario.expectedCode)
       assert.ok(!probe.root.startsWith(`${resolve(process.cwd())}${sep}`))
-      assert.deepEqual(probe.reports, [`canonical-gate diagnostics: ${probe.root}`])
+      assert.deepEqual(probe.reports, scenario.expectedCode === 0 ? [] : [`canonical-gate diagnostics: ${probe.root}`])
       assert.equal(probe.phases.length, scenario.expectedPhaseCount)
       assert.ok(probe.phases.every((phase) => phase.artifactRoot === probe.root))
       assert.ok(probe.writes.every((path) => path.startsWith(`${probe.root}${sep}`)))
@@ -302,7 +302,8 @@ test('canonical fails before phases when build inputs are dirty or untracked', a
   assert.deepEqual(probe.phases, [])
   assert.deepEqual(probe.durationArgs, [])
   assert.ok(probe.writes.some((path) => path.endsWith('fatal-error.json')))
-  assert.match(probe.reports.at(-1) ?? '', /requires a clean index and worktree/)
+  assert.match(probe.reports[0] ?? '', /requires a clean index and worktree/)
+  assert.equal(probe.reports.at(-1), `canonical-gate diagnostics: ${probe.root}`)
 })
 
 test('canonical revalidates the same clean revision through build, boundaries, and duration', async () => {

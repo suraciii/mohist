@@ -258,19 +258,29 @@ export async function main(
   const deadlines = suiteDeadlines(startedAt, config.suiteDeadlineMs, graceMs)
   const termination = createTerminationSignal()
   try {
-    runtime.report(`verify diagnostics: ${artifactRoot}`)
     writeEvidence(runtime, artifactRoot, 'run.json', {
       runId,
       startedAt,
       suiteDeadlineMs: config.suiteDeadlineMs,
       sourceRevision: source.revision,
     })
-    return await runVerify(config, runtime, artifactRoot, startedAt, deadlines, termination.signal, source.revision)
+    const code = await runVerify(
+      config,
+      runtime,
+      artifactRoot,
+      startedAt,
+      deadlines,
+      termination.signal,
+      source.revision,
+    )
+    if (code !== 0) runtime.report(`verify diagnostics: ${artifactRoot}`)
+    return code
   } catch (error) {
     writeEvidence(runtime, artifactRoot, 'fatal-error.json', {
       message: error instanceof Error ? error.message : String(error),
     })
     process.stderr.write(`verify failed: ${(error as Error).message}\n`)
+    runtime.report(`verify diagnostics: ${artifactRoot}`)
     return 1
   } finally {
     termination.dispose()
