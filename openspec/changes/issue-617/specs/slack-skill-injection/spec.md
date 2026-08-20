@@ -1,5 +1,5 @@
 ### Requirement: Slack origin requires a complete versioned execution context
-Every Slack-origin initial launch and Slack-origin follow-up SHALL carry a Server-created execution context containing the current context version, the versioned `mohist-slack-collaboration` Skill name and instructions with its content digest, and a complete reply anchor. The reply anchor SHALL identify the workspace, conversation, thread root, triggering message, initiating member, Connection, Session, and dispatch operation. A Slack-origin execution with a missing or incomplete context SHALL be treated as invalid rather than as a non-Slack execution.
+Every Slack-origin initial launch and Slack-origin follow-up SHALL carry a Server-created execution context containing the current context version, the versioned `mohist-slack-collaboration` Skill name and instructions with its content digest, and a complete reply anchor. Every initial and follow-up dispatch SHALL also carry an explicit `executionSource` discriminator (`slack` or `non-slack`); `slack` SHALL require the context and `non-slack` SHALL require its absence. The reply anchor SHALL identify the workspace, conversation, durable bound thread root, triggering message, initiating member, Connection, Session, and dispatch operation. A Slack-origin execution with a missing or incomplete context SHALL be treated as invalid rather than as a non-Slack execution.
 
 #### Scenario: A direct-message initial launch carries its Slack context
 - **WHEN** a valid Slack direct message starts a new Agent Session
@@ -15,11 +15,26 @@ Every Slack-origin initial launch and Slack-origin follow-up SHALL carry a Serve
 - **AND** it SHALL preserve the Server-resolved workspace, conversation, Connection, member, Session, and dispatch identities
 
 #### Scenario: A Slack follow-up carries a new Server-provided reply anchor
-- **WHEN** a valid Slack follow-up is dispatched for an existing Session
-- **THEN** the follow-up request SHALL carry the same published collaboration Skill name, version, instructions, and digest as a Slack initial launch
+- **WHEN** a valid single-input Slack follow-up is dispatched for an existing Session
+- **THEN** the follow-up request SHALL declare `executionSource: slack`
+- **AND** it SHALL carry the same published collaboration Skill name, version, instructions, and digest as a Slack initial launch
 - **AND** it SHALL carry a complete reply anchor for the follow-up
-- **AND** the anchor SHALL preserve the bound thread root while identifying the follow-up message as the triggering message
+- **AND** the anchor SHALL preserve the durable bound thread root while identifying the follow-up message as the triggering message
 - **AND** the anchor SHALL identify the current Session and follow-up dispatch operation
+
+#### Scenario: A DM follow-up preserves its initial bound root
+- **WHEN** a follow-up is dispatched for a Slack DM whose incoming provenance has no thread timestamp
+- **THEN** the anchor SHALL use the initial DM message's durable id as `threadRootMessageId`
+- **AND** it SHALL use the follow-up message id as `triggeringMessageId`
+- **AND** it SHALL reject the dispatch if that persisted bound root is unavailable rather than substituting the follow-up message as the root
+
+#### Scenario: A batched Slack follow-up has a deterministic representative anchor
+- **WHEN** multiple queued Slack inputs are assigned to one existing follow-up turn
+- **THEN** the combined dispatch SHALL retain all input texts
+- **AND** the anchor SHALL preserve the Session's durable bound thread root
+- **AND** `triggeringMessageId` SHALL be the message id from the first `InputId` in the persisted `turn.InputIds` order
+- **AND** `dispatchRef` SHALL identify the combined follow-up operation
+- **AND** the Server SHALL reject the dispatch when that representative input or its Slack provenance is unavailable rather than guessing a destination
 
 ### Requirement: Initial launches and follow-ups receive the same validated Skill and anchor
 The Server SHALL deliver the validated Slack Skill and Server-provided reply anchor to both Slack-origin initial execution and Slack-origin follow-up execution. The Runner SHALL preserve the Skill instructions as managed execution-definition input and SHALL expose the anchor as Slack system facts for the same execution. The Runner SHALL NOT replace the Server-provided destination with a Runtime-selected or Agent-invented destination.
@@ -31,13 +46,24 @@ The Server SHALL deliver the validated Slack Skill and Server-provided reply anc
 - **AND** the initial and follow-up prompts SHALL retain their own input text while the Slack control data remains system-provided
 
 ### Requirement: Runner validates Slack context integrity before Runtime invocation
-The Runner SHALL validate a Slack execution context before invoking an Agent Runtime. Validation SHALL reject an unsupported context version, a non-object or malformed context, any missing or empty required reply-anchor field, any missing or empty Skill name, version, instructions, or content digest, and any content digest that does not match the exact supplied instructions. A rejected context SHALL fail closed before the follow-up input is enqueued or the Runtime is invoked.
+The Runner SHALL validate the `executionSource` and Slack execution context before invoking an Agent Runtime. A `slack` source SHALL require a present context; a `non-slack` source SHALL require no context. Validation SHALL reject an omitted or unknown source, a Slack source with an omitted or null context, a non-Slack source carrying context, an unsupported context version, a non-object or malformed context, any missing or empty required reply-anchor field, any missing or empty Skill name, version, instructions, or content digest, and any content digest that does not match the exact supplied instructions. A rejected context SHALL fail closed before the follow-up input is enqueued or the Runtime is invoked.
 
 #### Scenario: A modified Skill body is rejected
 - **WHEN** a Slack execution context contains a collaboration Skill whose instructions have been changed without updating the digest
 - **THEN** the Runner SHALL reject the execution context
 - **AND** it SHALL not invoke the Runtime
 - **AND** it SHALL not enqueue the Slack follow-up input for execution
+
+#### Scenario: An initial Slack source without context is rejected
+- **WHEN** an initial AgentJob dispatch declares `executionSource: slack` but its context is omitted or null
+- **THEN** the Runner SHALL reject the dispatch before Runtime selection or invocation
+- **AND** it SHALL not treat the AgentJob as ordinary non-Slack work
+
+#### Scenario: A follow-up Slack source without context is rejected
+- **WHEN** a follow-up dispatch declares `executionSource: slack` but its context is omitted or null
+- **THEN** the Runner control dispatcher and follow-up handler SHALL reject it before local input enqueue
+- **AND** it SHALL not invoke the Runtime
+- **AND** it SHALL not treat the follow-up as ordinary non-Slack work
 
 #### Scenario: An anchorless or incomplete context is rejected
 - **WHEN** a Slack-origin execution context omits the reply anchor or omits any required anchor identifier
@@ -55,7 +81,8 @@ An execution that does not originate from Slack SHALL continue without a Slack e
 
 #### Scenario: A normal Agent launch has no Slack control data
 - **WHEN** an Agent is launched from the Web UI, CLI, Workflow, or another non-Slack source
-- **THEN** the execution envelope SHALL contain no Slack collaboration Skill
+- **THEN** the dispatch SHALL declare `executionSource: non-slack` and carry no Slack context
+- **AND** the execution envelope SHALL contain no Slack collaboration Skill
 - **AND** it SHALL contain no Slack reply anchor or Slack system-facts block
 - **AND** the Agent SHALL retain its existing prompt, instructions, and configured Skills
 

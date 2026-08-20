@@ -4,11 +4,13 @@
 
 ## Must-fix dispositions in progress
 
-- MF-1 — Slack-origin context can degrade to ordinary work: OPEN. Add an explicit persisted/transported execution-source discriminator and source/context pair validation at Server, Runner control, AgentJob, and follow-up boundaries. Test omitted/null context on both paths and preserve explicit non-Slack behavior.
-- MF-2 — Batched follow-ups lack a complete anchor: OPEN. Persist the effective bound thread root, including the initial DM message, and define the first durable input in a combined turn as the deterministic representative triggering message. Cover multi-input and DM follow-up dispatches.
-- MF-3 — Same-version Skill immutability/parity is not enforceable: IN PROGRESS. Pin the v1 asset digest and reject embedded-asset drift; add initial/follow-up payload parity and drift-rejection tests.
+- MF-1 — Slack-origin context can degrade to ordinary work: FIXED IN PLAN. The revised artifacts require a persisted/transported `executionSource`, enforce the Slack/context and non-Slack/no-context pair at Server, Runner control, AgentJob, and follow-up boundaries, and test omitted/null context on both paths.
+- MF-2 — Batched follow-ups lack a complete anchor: FIXED IN PLAN. The revised artifacts persist the effective bound thread root, including the initial DM message, define the first durable input in a combined turn as the representative triggering message, and cover multi-input and DM follow-up dispatches.
+- MF-3 — Same-version Skill immutability/parity is not enforceable: FIXED IN PLAN. The revised artifacts pin the v1 asset digest, reject embedded-asset drift, and require initial/follow-up payload parity plus drift-rejection tests.
 
 ## Verification
 
 - Asset digest verified from the exact embedded file: `de3272639a1d390f3dcf915e65b6c057bf0b9eb91c51545572eb1e484c8c1a22`.
 - No changes are made to `self-review.md`.
+- Incremental commits: `98949a924` locks the published Skill payload; the source/anchor repair is the next commit after mechanical validation.
+- Mechanical checks pass: `tasks.json` parses, spec anchors resolve, requirements/scenarios are present, `git diff --check` is clean, and `self-review.md` is untouched. `npm run docs:check` could not run because `tsx` is not installed in the workspace (`exit 127`).
