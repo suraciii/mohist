@@ -490,28 +490,7 @@ public class IssueGrain : Grain, IIssueGrain, Coordinator.IIssueBindingTarget
 
     private async Task TryStartChildrenAsync(IReadOnlyList<IssueChildCompositeInfo> children)
     {
-        if (children.Count == 0) return;
-
-        var startableChildren = new List<IssueChildCompositeInfo>();
-        var allDoneNumbers = new HashSet<int>();
-        foreach (var child in children)
-        {
-            if (child.Status == Domain.IssueStatus.Done) allDoneNumbers.Add(child.Number);
-        }
-        foreach (var child in children)
-        {
-            if (IsStartableForComposite(child, allDoneNumbers))
-            {
-                startableChildren.Add(child);
-            }
-            else
-            {
-                _log.LogDebug(
-                    "Parent {ParentKey} child {ChildNumber} not startable (status={Status} draft={IsDraft} prereqs=[{Prereqs}])",
-                    GrainKey, child.Number, child.Status, child.IsDraft,
-                    string.Join(",", child.PrerequisiteNumbers));
-            }
-        }
+        var startableChildren = IssueCompositeStartPolicy.SelectStartable(children);
 
         if (startableChildren.Count == 0) return;
 
@@ -521,21 +500,6 @@ public class IssueGrain : Grain, IIssueGrain, Coordinator.IIssueBindingTarget
             tasks.Add(StartChildIssueAsync(child));
         }
         await Task.WhenAll(tasks);
-    }
-
-    private bool IsStartableForComposite(
-        IssueChildCompositeInfo child,
-        IReadOnlySet<int> allDoneNumbers)
-    {
-        if (child.IsDraft) return false;
-        if (child.WorkflowRunId is not null) return false;
-        if (child.Status != Domain.IssueStatus.Backlog) return false;
-        if (string.IsNullOrWhiteSpace(child.RepositoryRef)) return false;
-        foreach (var prereq in child.PrerequisiteNumbers)
-        {
-            if (!allDoneNumbers.Contains(prereq)) return false;
-        }
-        return true;
     }
 
     private async Task StartChildIssueAsync(IssueChildCompositeInfo child)

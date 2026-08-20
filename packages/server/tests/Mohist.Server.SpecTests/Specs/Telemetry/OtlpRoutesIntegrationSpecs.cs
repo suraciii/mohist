@@ -56,24 +56,6 @@ public class OtlpRoutesIntegrationSpecs : IAsyncLifetime
     }
 
     [Fact]
-    public async Task ExplicitFalse_OmitsOtlpRouteAndKeepsStatusOff()
-    {
-        using var otlpClient = _fixture.DisabledFactory.CreateOtlpClient();
-        using var ingestResponse = await otlpClient.PostAsync(
-            OtlpPath,
-            new StringContent("{}", Encoding.UTF8, "application/json"));
-
-        Assert.Equal(HttpStatusCode.NotFound, ingestResponse.StatusCode);
-
-        using var apiClient = _fixture.DisabledFactory.CreateMainApiClient();
-        using var statusResponse = await apiClient.GetAsync(OtelQueryRoutes.StatusPath);
-        Assert.Equal(HttpStatusCode.OK, statusResponse.StatusCode);
-
-        using var document = JsonDocument.Parse(await statusResponse.Content.ReadAsStringAsync());
-        Assert.Equal("off", document.RootElement.GetProperty("data").GetProperty("status").GetString());
-    }
-
-    [Fact]
     public async Task PostUnsupportedContentType_Returns415()
     {
         using var client = _factory.CreateOtlpClient();

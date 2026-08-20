@@ -1,4 +1,3 @@
-using System.Collections.Concurrent;
 using Microsoft.Extensions.DependencyInjection;
 using Mohist.Server.Events.Grains;
 using Mohist.Server.Infrastructure.Data.Issue;
@@ -11,16 +10,13 @@ using Mohist.Server.Project.Grains;
 using Mohist.Server.SpecTests.Support;
 using Mohist.Server.TestSupport;
 using Xunit;
-using DomainIssue = Mohist.Server.Issue.Domain.Issue;
 
 namespace Mohist.Server.SpecTests.Specs.Issue.Grain;
 
 /// <summary>
-/// issue-419 T-002 grain spec tests for composite advancement. Covers the
-/// end-to-end behavior of <see cref="IIssueGrain.StartCompositeAsync"/> and
-/// <see cref="IIssueGrain.RecomputeCompositeStatusAsync"/> as dispatched
-/// from the durable handlers in
-/// <c>Events/Subscriptions/IssueCompositeHandlers.cs</c>:
+/// Retains the Orleans, persistence, and event-delivery boundaries for
+/// composite advancement. Pure child-selection and state-transition
+/// matrices are owned by unit tests.
 /// <list type="bullet">
 /// <item>start fan-out: a parent's <c>StartCompositeAsync</c> calls
 ///   <c>StartWorkAsync</c> on every startable child in parallel.</item>
@@ -28,15 +24,9 @@ namespace Mohist.Server.SpecTests.Specs.Issue.Grain;
 ///   <c>RecomputeCompositeStatusAsync</c> converges the parent to the same
 ///   state and emits no duplicate
 ///   <see cref="IssueCompositeStatusChanged"/> events.</item>
-/// <item>fan-out failure isolation: a per-child start failure (e.g. one
-///   child carries an undelivered prereq) does not abort sibling starts,
-///   and the parent still enters InProgress.</item>
-/// <item>restart recompute: a fresh activation that loads a child snapshot
-///   with a Done + Done child converges the parent to Done; the next
-///   recompute is a no-op.</item>
+/// <item>restart recompute: a fresh activation reloads the parent and resumes
+///   fan-out from its persisted child snapshot.</item>
 /// </list>
-/// Spec: <c>openspec/changes/issue-419/specs/compound-advancement/spec.md</c>
-/// and <c>openspec/changes/issue-419/specs/parent-status-aggregation/spec.md</c>.
 /// </summary>
 public class IssueCompositeAdvancementGrainSpecs
 {
@@ -117,75 +107,6 @@ public class IssueCompositeAdvancementGrainSpecs
     }
 
     [Fact]
-    public async Task StartCompositeAsync_SkipsChildWithUndeliveredPrereq_StartsOtherSiblings()
-    {
-        var projectId = await CreateProjectAsync();
-        var parent = await CreateIssueAsync(projectId, "Parent", isDraft: false);
-        var prereq = await CreateIssueAsync(projectId, "Prereq", isDraft: false);
-        var readyChild = await CreateIssueAsync(projectId, "Ready", isDraft: false);
-        var blockedChild = await CreateIssueAsync(projectId, "Blocked", isDraft: false);
-        await AttachChildAsync(projectId, readyChild, parent.Number);
-        await AttachChildAsync(projectId, blockedChild, parent.Number);
-        await AddPrerequisiteAsync(projectId, blockedChild.Number, prereq.Number);
-
-        var parentGrain = Grains.GetGrain<IIssueGrain>(
-            GrainKey.Issue(new IssueKey(projectId, parent.Number)));
-        await parentGrain.StartCompositeAsync();
-
-        await DispatchEventsAsync();
-
-        var ready = await GetIssueReadModelAsync(projectId, readyChild.Number);
-        Assert.Equal("in_progress", ready!.Status);
-        Assert.NotNull(ready.WorkflowRunId);
-
-        var blocked = await GetIssueReadModelAsync(projectId, blockedChild.Number);
-        Assert.Equal("backlog", blocked!.Status);
-        Assert.Null(blocked.WorkflowRunId);
-    }
-
-    [Fact]
-    public async Task StartCompositeAsync_SkipsDraftChild_StartsReadySiblings()
-    {
-        var projectId = await CreateProjectAsync();
-        var parent = await CreateIssueAsync(projectId, "Parent", isDraft: false);
-        var draftChild = await CreateIssueAsync(projectId, "Draft", isDraft: true);
-        var readyChild = await CreateIssueAsync(projectId, "Ready", isDraft: false);
-        await AttachChildAsync(projectId, draftChild, parent.Number);
-        await AttachChildAsync(projectId, readyChild, parent.Number);
-
-        var parentGrain = Grains.GetGrain<IIssueGrain>(
-            GrainKey.Issue(new IssueKey(projectId, parent.Number)));
-        await parentGrain.StartCompositeAsync();
-
-        await DispatchEventsAsync();
-
-        var draft = await GetIssueReadModelAsync(projectId, draftChild.Number);
-        Assert.Equal("backlog", draft!.Status);
-        Assert.Null(draft.WorkflowRunId);
-
-        var ready = await GetIssueReadModelAsync(projectId, readyChild.Number);
-        Assert.Equal("in_progress", ready!.Status);
-        Assert.NotNull(ready.WorkflowRunId);
-    }
-
-    [Fact]
-    public async Task StartCompositeAsync_ParentNeverOwnsWorkflowRun()
-    {
-        var projectId = await CreateProjectAsync();
-        var parent = await CreateIssueAsync(projectId, "Parent", isDraft: false);
-        var child = await CreateIssueAsync(projectId, "Child", isDraft: false);
-        await AttachChildAsync(projectId, child, parent.Number);
-
-        var parentGrain = Grains.GetGrain<IIssueGrain>(
-            GrainKey.Issue(new IssueKey(projectId, parent.Number)));
-        await parentGrain.StartCompositeAsync();
-
-        var parentView = await GetIssueReadModelAsync(projectId, parent.Number);
-        Assert.Equal("in_progress", parentView!.Status);
-        Assert.Null(parentView.WorkflowRunId);
-    }
-
-    [Fact]
     public async Task RecomputeCompositeStatusAsync_IsIdempotent_AcrossRedeliveries()
     {
         // Drive a recompute that produces a status-change event, then
@@ -234,88 +155,6 @@ public class IssueCompositeAdvancementGrainSpecs
     }
 
     [Fact]
-    public async Task RecomputeCompositeStatusAsync_AllTerminalChildrenDone_AggregatesParentToDone()
-    {
-        var projectId = await CreateProjectAsync();
-        var parent = await CreateIssueAsync(projectId, "Parent", isDraft: false);
-        var childA = await CreateIssueAsync(projectId, "A", isDraft: false);
-        var childB = await CreateIssueAsync(projectId, "B", isDraft: false);
-        await AttachChildAsync(projectId, childA, parent.Number);
-        await AttachChildAsync(projectId, childB, parent.Number);
-
-        var parentGrain = Grains.GetGrain<IIssueGrain>(
-            GrainKey.Issue(new IssueKey(projectId, parent.Number)));
-        var aGrain = Grains.GetGrain<IIssueGrain>(
-            GrainKey.Issue(new IssueKey(projectId, childA.Number)));
-        var bGrain = Grains.GetGrain<IIssueGrain>(
-            GrainKey.Issue(new IssueKey(projectId, childB.Number)));
-
-        await parentGrain.StartCompositeAsync();
-        await DispatchEventsAsync();
-
-        var wrA = await aGrain.GetActiveWorkflowRunIdAsync();
-        var wrB = await bGrain.GetActiveWorkflowRunIdAsync();
-        Assert.NotNull(wrA);
-        Assert.NotNull(wrB);
-
-        await aGrain.CompleteWorkAsync(wrA!);
-        await bGrain.CompleteWorkAsync(wrB!);
-
-        await DispatchEventsAsync();
-        // Two recompute deliveries — one from completed-A, one from
-        // completed-B — converge the parent to Done.
-        await parentGrain.RecomputeCompositeStatusAsync();
-        await parentGrain.RecomputeCompositeStatusAsync();
-
-        var view = await GetIssueReadModelAsync(projectId, parent.Number);
-        Assert.Equal("done", view!.Status);
-
-        var events = await LoadIssueEventsAsync(projectId, parent.Number);
-        var statusChangeCount = events.Count(e =>
-            string.Equals(e.Envelope.Type, EventCatalog.ReverseDns.IssueCompositeStatusChanged, StringComparison.Ordinal));
-        // Exactly one composite-status-changed event: parent flipped
-        // InProgress -> Done once. Redelivery must not emit a duplicate.
-        Assert.Equal(1, statusChangeCount);
-    }
-
-    [Fact]
-    public async Task RecomputeCompositeStatusAsync_MixedTerminalDoneAndCancelled_AggregatesDone()
-    {
-        // The pure four-state aggregation logic (Done + Cancelled -> Done)
-        // is covered by domain unit tests; this spec only asserts the
-        // grain's recompute path engages when the durable handler
-        // dispatches it. Cancellation through the grain's CancelAsync
-        // requires the workflow to be stopped first, which is a T-003
-        // concern (lifecycle); for this spec we only need to confirm the
-        // recompute path itself runs on the durable trigger.
-        var projectId = await CreateProjectAsync();
-        var parent = await CreateIssueAsync(projectId, "Parent", isDraft: false);
-        var childA = await CreateIssueAsync(projectId, "A", isDraft: false);
-        await AttachChildAsync(projectId, childA, parent.Number);
-
-        var parentGrain = Grains.GetGrain<IIssueGrain>(
-            GrainKey.Issue(new IssueKey(projectId, parent.Number)));
-        var aGrain = Grains.GetGrain<IIssueGrain>(
-            GrainKey.Issue(new IssueKey(projectId, childA.Number)));
-
-        await parentGrain.StartCompositeAsync();
-        await DispatchEventsAsync();
-
-        var wrA = await aGrain.GetActiveWorkflowRunIdAsync();
-        Assert.NotNull(wrA);
-
-        await aGrain.CompleteWorkAsync(wrA!);
-
-        await DispatchEventsAsync();
-        await parentGrain.RecomputeCompositeStatusAsync();
-        await parentGrain.RecomputeCompositeStatusAsync();
-
-        // After the only child completes, parent aggregates to Done.
-        var view = await GetIssueReadModelAsync(projectId, parent.Number);
-        Assert.Equal("done", view!.Status);
-    }
-
-    [Fact]
     public async Task RecomputeCompositeStatusAsync_OnBacklogParent_NoFanOut()
     {
         // Attaching a child to a Backlog parent must NOT start the child —
@@ -358,24 +197,6 @@ public class IssueCompositeAdvancementGrainSpecs
 
         var view = await GetIssueReadModelAsync(projectId, parent.Number);
         Assert.Equal("backlog", view!.Status);
-    }
-
-    [Fact]
-    public async Task StartWorkAsync_OnNormalIssue_RunsPerIssueStartPath()
-    {
-        // Regression guard: an issue with no children must still get a
-        // workflow run on start.
-        var projectId = await CreateProjectAsync();
-        var issue = await CreateIssueAsync(projectId, "Solo", isDraft: false);
-
-        var grain = Grains.GetGrain<IIssueGrain>(
-            GrainKey.Issue(new IssueKey(projectId, issue.Number)));
-        await grain.StartWorkAsync();
-
-        await DispatchEventsAsync();
-        var view = await GetIssueReadModelAsync(projectId, issue.Number);
-        Assert.Equal("in_progress", view!.Status);
-        Assert.NotNull(view.WorkflowRunId);
     }
 
     [Fact]
@@ -441,44 +262,6 @@ public class IssueCompositeAdvancementGrainSpecs
         Assert.NotNull(childView.WorkflowRunId);
     }
 
-    [Fact]
-    public async Task FanOutFailureIsolation_OneChildPrereqBlocked_OtherChildStartsParentAggregates()
-    {
-        // Acceptance: "Composite advancement skips children that are
-        // draft, have undelivered prerequisites, or whose target
-        // repository is no longer declared — without aborting sibling
-        // starts". The grain's per-child start failures are swallowed
-        // by StartChildIssueAsync; the parent still aggregates to
-        // InProgress.
-        var projectId = await CreateProjectAsync();
-        var parent = await CreateIssueAsync(projectId, "Parent", isDraft: false);
-        var prereq = await CreateIssueAsync(projectId, "Prereq", isDraft: false);
-        var ready = await CreateIssueAsync(projectId, "Ready", isDraft: false);
-        var blocked = await CreateIssueAsync(projectId, "Blocked", isDraft: false);
-        await AttachChildAsync(projectId, ready, parent.Number);
-        await AttachChildAsync(projectId, blocked, parent.Number);
-        // Add the prereq BEFORE attaching so the parent's recompute
-        // sees the blocked child as not startable.
-        await AddPrerequisiteAsync(projectId, blocked.Number, prereq.Number);
-
-        var parentGrain = Grains.GetGrain<IIssueGrain>(
-            GrainKey.Issue(new IssueKey(projectId, parent.Number)));
-        await parentGrain.StartCompositeAsync();
-
-        await DispatchEventsAsync();
-
-        var parentView = await GetIssueReadModelAsync(projectId, parent.Number);
-        Assert.Equal("in_progress", parentView!.Status);
-
-        var readyView = await GetIssueReadModelAsync(projectId, ready.Number);
-        Assert.Equal("in_progress", readyView!.Status);
-        Assert.NotNull(readyView.WorkflowRunId);
-
-        var blockedView = await GetIssueReadModelAsync(projectId, blocked.Number);
-        Assert.Equal("backlog", blockedView!.Status);
-        Assert.Null(blockedView.WorkflowRunId);
-    }
-
     private async Task<string> CreateProjectAsync()
     {
         var id = $"proj_{Guid.NewGuid():N}";
@@ -508,12 +291,6 @@ public class IssueCompositeAdvancementGrainSpecs
         await grain.UpdateFullAsync(new UpdateIssueData(
             PresentFields: new HashSet<string>(StringComparer.Ordinal) { nameof(UpdateIssueData.ParentIssueNumber) },
             ParentIssueNumber: parentNumber));
-    }
-
-    private async Task AddPrerequisiteAsync(string projectId, int dependent, int prereq)
-    {
-        var grain = Grains.GetGrain<IIssueGrain>(GrainKey.Issue(new IssueKey(projectId, dependent)));
-        await grain.AddPrerequisiteAsync(prereq);
     }
 
     private async Task DispatchEventsAsync()

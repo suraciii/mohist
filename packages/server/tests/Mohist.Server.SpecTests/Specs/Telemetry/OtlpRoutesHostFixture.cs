@@ -21,11 +21,9 @@ public sealed class OtlpRoutesHostFixture : IAsyncLifetime
     // These are logical TestServer listener identities, not OS ports.
     // TestServer and the in-memory exporter never bind them.
     public const int OtlpPort = 0;
-    public const int DisabledOtlpPort = 1;
 
     private SqliteConnection _keeper = null!;
     public OtlpRoutesWebApplicationFactory Factory { get; private set; } = null!;
-    public OtlpRoutesWebApplicationFactory DisabledFactory { get; private set; } = null!;
 
     public async ValueTask InitializeAsync()
     {
@@ -41,18 +39,9 @@ public sealed class OtlpRoutesHostFixture : IAsyncLifetime
             OtlpPort);
         await Factory.EnsureSchemaAsync();
 
-        DisabledFactory = new OtlpRoutesWebApplicationFactory(
-            connectionString,
-            "/mohist-tests/otel/runner",
-            "/mohist-tests/otel/system-update.json",
-            DisabledOtlpPort,
-            otelEnabled: false);
-        await DisabledFactory.EnsureSchemaAsync();
-
         // Force the server to materialize so middleware and routes are
         // registered (MohistWebApplicationFactory is lazy by default).
         _ = Factory.Services;
-        _ = DisabledFactory.Services;
     }
 
     /// <summary>
@@ -81,7 +70,6 @@ public sealed class OtlpRoutesHostFixture : IAsyncLifetime
     public async ValueTask DisposeAsync()
     {
         Factory?.Dispose();
-        DisabledFactory?.Dispose();
         await _keeper.DisposeAsync();
     }
 }

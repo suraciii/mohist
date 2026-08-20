@@ -88,6 +88,8 @@ public static class MohistServiceRegistration
         services.AddScoped<IDeviceAuthorizationStore>(sp => sp.GetRequiredService<DeviceAuthorizationStore>());
         services.AddSingleton<IWorkflowRunDeserializer>(sp =>
             sp.GetRequiredService<WorkflowRunDeserializer>());
+        services.AddScoped<IWorkflowStatusReader>(sp =>
+            sp.GetRequiredService<WorkflowQuerier>());
         services.TryAddSingleton<IBackgroundTaskLauncher, BackgroundTaskLauncher>();
         services.TryAddSingleton<IRunnerUpdateOperationWriteFailureInjector>(
             NoopRunnerUpdateOperationWriteFailureInjector.Instance);

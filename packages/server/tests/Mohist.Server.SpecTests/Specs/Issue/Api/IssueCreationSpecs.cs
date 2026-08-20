@@ -287,23 +287,29 @@ public class IssueCreationSpecs
         var runnerId = $"runner-{Guid.NewGuid():N}";
         var runner = _grains.GetGrain<IRunnerGrain>(runnerId);
         await runner.RegisterAsync(new RunnerInfo(runnerId, ["spec/*"], "test-host", project.Id));
+        try
+        {
+            await PollAnyWorkAsync(runner, runnerId);
 
-        await PollAnyWorkAsync(runner, runnerId);
+            var wfGrain = _grains.GetGrain<IWorkflowGrain>(workflowRunId);
+            await wfGrain.StopAsync("user-cancel");
 
-        var wfGrain = _grains.GetGrain<IWorkflowGrain>(workflowRunId);
-        await wfGrain.StopAsync("user-cancel");
+            await issue.CancelAsync();
 
-        await issue.CancelAsync();
+            var info = await GetIssueInfoAsync(project.Id, created.Number);
+            Assert.NotNull(info);
+            Assert.Equal("cancelled", info!.Status);
+            Assert.Equal("cancelled", info.Health);
 
-        var info = await GetIssueInfoAsync(project.Id, created.Number);
-        Assert.NotNull(info);
-        Assert.Equal("cancelled", info!.Status);
-        Assert.Equal("cancelled", info.Health);
+            Assert.Null(await runner.PollAsync(_services));
 
-        Assert.Null(await runner.PollAsync(_services));
-
-        var events = await GetWorkflowEventsAsync(workflowRunId);
-        Assert.Single(events, e => e.Envelope.Type == "com.mohist.workflow.run.stopped");
+            var events = await GetWorkflowEventsAsync(workflowRunId);
+            Assert.Single(events, e => e.Envelope.Type == "com.mohist.workflow.run.stopped");
+        }
+        finally
+        {
+            await runner.UnregisterAsync();
+        }
     }
 
     [Fact]

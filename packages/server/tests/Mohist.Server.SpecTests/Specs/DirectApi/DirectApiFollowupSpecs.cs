@@ -162,19 +162,38 @@ public sealed class DirectApiFollowupSpecs(PublicProjectionIntegrationFixture fi
         const string key = "followup-replay-after-invalidation";
         const string text = "continue after target invalidation";
 
-        using var first = await PostObservationAsync(client, projectId, sessionId, key, text);
-        var originalInputId = first.RootElement.GetProperty("inputId").GetString();
-        Assert.False(string.IsNullOrWhiteSpace(originalInputId));
+        var inputId = DirectApiWriteValidation.FollowupInputId(sessionId, key);
+        var turnId = DirectApiWriteValidation.FollowupTurnId(sessionId, key);
+        var snapshotJson = JsonSerializer.Serialize(new { inputId, turnId });
+        await using (var scope = fixture.Services.CreateAsyncScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<MohistDbContext>();
+            db.DirectApiIdempotencyMappings.Add(new DirectApiIdempotencyMappingRow
+            {
+                Command = DirectApiCommands.Followup,
+                ScopeKey = DirectApiWriteValidation.FollowupScopeKey(sessionId, key),
+                CallerKeyId = "completed-replay-caller",
+                Fingerprint = DirectApiWriteValidation.FollowupFingerprint(sessionId, text),
+                State = DirectApiMappingStates.Completed,
+                Outcome = JSON.Serialize(new DirectApiFollowupOutcome(
+                    projectId,
+                    sessionId,
+                    "agent-canonical",
+                    inputId,
+                    turnId,
+                    SnapshotJson: snapshotJson)),
+                CreatedAt = fixture.TimeProvider.GetUtcNow(),
+                CompletedAt = fixture.TimeProvider.GetUtcNow(),
+            });
+            await db.SaveChangesAsync();
+        }
 
         await InvalidateSessionTargetAsync(sessionId);
-        // The invalidation is a direct durable write that bypasses the
-        // canonical write path's projector nudge; wake the projector so
-        // the replayed observation converges instead of racing the hourly
-        // fixture sweep (see PublicExecutionReadRouteSpecs).
-        await ProjectSessionAsync(sessionId);
 
-        using var replayBody = await PostObservationAsync(client, projectId, sessionId, key, text);
-        Assert.Equal(originalInputId, replayBody.RootElement.GetProperty("inputId").GetString());
+        using var replay = await SendAsync(client, projectId, sessionId, key, text);
+        Assert.Equal(HttpStatusCode.OK, replay.StatusCode);
+        using var replayBody = JsonDocument.Parse(await replay.Content.ReadAsStringAsync());
+        Assert.Equal(inputId, replayBody.RootElement.GetProperty("inputId").GetString());
     }
 
     [Fact]
@@ -398,6 +417,21 @@ public sealed class DirectApiFollowupSpecs(PublicProjectionIntegrationFixture fi
             .GetRequiredService<PublicExecutionReadQuerier>()
             .ReadInputAsync(projectId, DirectApiWriteValidation.FollowupInputId(sessionId, key));
         Assert.Equal(PublicReadStatus.Found, observation.Status);
+
+        var idempotency = fixture.Services.GetRequiredService<DirectApiIdempotencyService>();
+        var scopeKey = DirectApiWriteValidation.FollowupScopeKey(sessionId, key);
+        var mapping = await idempotency.FindAsync(DirectApiCommands.Followup, scopeKey);
+        Assert.NotNull(mapping);
+        var outcome = DirectApiIdempotencyService.ReadOutcome<DirectApiFollowupOutcome>(mapping);
+        var frozen = await idempotency.FreezeCompletedOutcomeAsync(
+            DirectApiCommands.Followup,
+            scopeKey,
+            mapping.Outcome!,
+            JSON.Serialize(outcome with { SnapshotJson = observation.SnapshotJson }));
+        Assert.NotNull(DirectApiIdempotencyService
+            .ReadOutcome<DirectApiFollowupOutcome>(frozen)
+            .SnapshotJson);
+
         using var response = await SendAsync(client, projectId, sessionId, key, text);
         Assert.True(
             response.StatusCode == HttpStatusCode.OK,
@@ -443,32 +477,12 @@ public sealed class DirectApiFollowupSpecs(PublicProjectionIntegrationFixture fi
     }
 
     private async Task<string> CreatePatAsync(string projectId, string scope = "operator")
-    {
-        using var response = await fixture.Client.PostAsJsonAsync("/api/auth/tokens", new
-        {
-            name = $"direct-followup-{Guid.NewGuid():N}",
-            scope,
-            projectIds = new[] { projectId },
-            allProjects = false,
-        });
-        response.EnsureSuccessStatusCode();
-        using var body = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
-        return body.RootElement.GetProperty("data").GetProperty("token").GetString()!;
-    }
+        => await DirectApiCredentialTestSupport.CreatePatAsync(
+            fixture, "direct-followup", [projectId], scope);
 
     private async Task<string> CreatePatForProjectsAsync(params string[] projectIds)
-    {
-        using var response = await fixture.Client.PostAsJsonAsync("/api/auth/tokens", new
-        {
-            name = $"direct-followup-multi-project-{Guid.NewGuid():N}",
-            scope = "operator",
-            projectIds,
-            allProjects = false,
-        });
-        response.EnsureSuccessStatusCode();
-        using var body = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
-        return body.RootElement.GetProperty("data").GetProperty("token").GetString()!;
-    }
+        => await DirectApiCredentialTestSupport.CreatePatAsync(
+            fixture, "direct-followup-multi-project", projectIds);
 
     private async Task<string> SeedProjectAsync()
     {

@@ -192,6 +192,21 @@ public class SlackDmSessionMappingStoreTests
             harness.ProjectId, harness.ConnectionId, "D-order"));
     }
 
+    [Fact]
+    public async Task SetCurrentSessionIdAsync_ConcurrentMessagesKeepTheLatestMessage()
+    {
+        await using var harness = CreateHarness();
+
+        await Task.WhenAll(
+            harness.Store.SetCurrentSessionIdAsync(
+                harness.ProjectId, harness.ConnectionId, "T123", "U_OWNER", "D-order", "session-old", "1710000000.000100"),
+            harness.Store.SetCurrentSessionIdAsync(
+                harness.ProjectId, harness.ConnectionId, "T123", "U_OWNER", "D-order", "session-new", "1710000000.000200"));
+
+        Assert.Equal("session-new", await harness.Store.GetCurrentSessionIdAsync(
+            harness.ProjectId, harness.ConnectionId, "D-order"));
+    }
+
     private static Harness CreateHarness()
     {
         var keeper = new SqliteConnection($"Data Source=dm-store-{Guid.NewGuid():N};Mode=Memory;Cache=Shared");

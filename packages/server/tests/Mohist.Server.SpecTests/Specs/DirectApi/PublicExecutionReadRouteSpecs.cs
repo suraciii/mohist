@@ -340,17 +340,8 @@ public sealed class PublicExecutionReadRouteSpecs(PublicProjectionIntegrationFix
 
     private async Task<HttpClient> CreateReaderAsync(string projectId)
     {
-        using var response = await fixture.Client.PostAsJsonAsync("/api/auth/tokens", new
-        {
-            name = $"direct-read-{Guid.NewGuid():N}",
-            scope = "readonly",
-            projectIds = new[] { projectId },
-        });
-        response.EnsureSuccessStatusCode();
-        var token = JsonDocument.Parse(await response.Content.ReadAsStringAsync())
-            .RootElement.GetProperty("data")
-            .GetProperty("token")
-            .GetString()!;
+        var token = await DirectApiCredentialTestSupport.CreatePatAsync(
+            fixture, "direct-read", [projectId], "readonly");
 
         var client = fixture.CreateClient();
         client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", token);

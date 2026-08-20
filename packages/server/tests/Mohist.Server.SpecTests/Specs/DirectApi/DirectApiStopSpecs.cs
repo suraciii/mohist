@@ -339,18 +339,8 @@ public sealed class DirectApiStopSpecs(PublicProjectionIntegrationFixture fixtur
     }
 
     private async Task<string> CreatePatAsync(string projectId)
-    {
-        using var response = await fixture.Client.PostAsJsonAsync("/api/auth/tokens", new
-        {
-            name = $"direct-stop-{Guid.NewGuid():N}",
-            scope = "operator",
-            projectIds = new[] { projectId },
-            allProjects = false,
-        });
-        response.EnsureSuccessStatusCode();
-        using var body = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
-        return body.RootElement.GetProperty("data").GetProperty("token").GetString()!;
-    }
+        => await DirectApiCredentialTestSupport.CreatePatAsync(
+            fixture, "direct-stop", [projectId]);
 
     private async Task<int> MappingCountAsync()
     {

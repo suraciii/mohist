@@ -56,6 +56,44 @@ public sealed class DirectApiIdempotencyServiceTests
         Assert.Equal(2, await db.DirectApiIdempotencyMappings.CountAsync());
     }
 
+    [Fact]
+    public async Task FreezeCompletedOutcome_ReplacesOnlyTheExpectedVersion()
+    {
+        using var database = TestSqliteDatabase.CreateModelSchema();
+        var factory = new TestDbContextFactory(database.Options);
+        var service = new DirectApiIdempotencyService(
+            factory,
+            new FakeTimeProvider(new DateTimeOffset(2026, 8, 19, 0, 0, 0, TimeSpan.Zero)));
+        const string scopeKey = "session-1|key-1";
+
+        await service.GetOrCreateAsync(
+            DirectApiCommands.Followup,
+            scopeKey,
+            "caller-a",
+            "fingerprint",
+            turnId: null,
+            "pending");
+        await service.CompleteAsync(
+            DirectApiCommands.Followup,
+            scopeKey,
+            DirectApiMappingStates.Completed,
+            "completed");
+
+        var frozen = await service.FreezeCompletedOutcomeAsync(
+            DirectApiCommands.Followup,
+            scopeKey,
+            "completed",
+            "frozen");
+        var staleWriter = await service.FreezeCompletedOutcomeAsync(
+            DirectApiCommands.Followup,
+            scopeKey,
+            "completed",
+            "stale");
+
+        Assert.Equal("frozen", frozen.Outcome);
+        Assert.Equal("frozen", staleWriter.Outcome);
+    }
+
     private sealed class TestDbContextFactory(DbContextOptions<MohistDbContext> options)
         : IDbContextFactory<MohistDbContext>
     {

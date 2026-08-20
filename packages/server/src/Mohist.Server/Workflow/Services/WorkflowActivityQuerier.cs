@@ -11,16 +11,16 @@ namespace Mohist.Server.Workflow.Services;
 public class WorkflowActivityQuerier : IScopedService
 {
     private readonly IDbContextFactory<MohistDbContext> _dbFactory;
-    private readonly WorkflowQuerier _workflowQuerier;
+    private readonly IWorkflowStatusReader _workflowStatuses;
     private readonly AgentSessionQuery _sessionQuery;
 
     public WorkflowActivityQuerier(
         IDbContextFactory<MohistDbContext> dbFactory,
-        WorkflowQuerier workflowQuerier,
+        IWorkflowStatusReader workflowStatuses,
         AgentSessionQuery sessionQuery)
     {
         _dbFactory = dbFactory;
-        _workflowQuerier = workflowQuerier;
+        _workflowStatuses = workflowStatuses;
         _sessionQuery = sessionQuery;
     }
 
@@ -150,7 +150,7 @@ public class WorkflowActivityQuerier : IScopedService
         var statuses = new Dictionary<string, WorkflowStatusView>(StringComparer.Ordinal);
         foreach (var workflowRunId in runningWorkflowIds)
         {
-            var status = await _workflowQuerier.GetStatusAsync(workflowRunId);
+            var status = await _workflowStatuses.GetStatusAsync(workflowRunId);
             if (status is not null)
                 statuses[workflowRunId] = status;
         }

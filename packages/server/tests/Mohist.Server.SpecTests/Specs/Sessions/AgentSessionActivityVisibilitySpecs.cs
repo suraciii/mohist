@@ -30,7 +30,7 @@ public class AgentSessionActivityVisibilitySpecs
     /// <c>agentId</c>/<c>agentName</c>; workflow cards must not leak them.
     /// Card projection and attribution semantics are owned by
     /// <see cref="AgentActivityFeedAssemblerSpecs"/>; activeAgents selection
-    /// by <see cref="AgentStatusHistoryBoundedSelectionSpecs"/>.
+    /// by the lower-owner WorkflowActivity history tests.
     /// </summary>
     [Fact]
     public async Task ActivityCards_MixedGenericAndWorkflowSessions_ExposeContractualJsonShape()
@@ -64,7 +64,7 @@ public class AgentSessionActivityVisibilitySpecs
     /// Single wire case for the <c>activeAgents</c> array on
     /// <c>GET /api/projects/{projectRef}/agent/status</c>: a generic
     /// agent-launch session's entry shape. Candidate selection and stale
-    /// exclusion are owned by <see cref="AgentStatusHistoryBoundedSelectionSpecs"/>.
+    /// exclusion are owned by the lower-owner WorkflowActivity history tests.
     /// </summary>
     [Fact]
     public async Task ActiveAgents_GenericSession_ExposesContractualEntryShape()

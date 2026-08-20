@@ -43,7 +43,7 @@ public sealed class WebConversationWorkspaceSpecs
     public async Task WebConversation_NewConversation_GetsNewWorkspace()
     {
         var projectId = await CreateProjectAsync();
-        var agentId = await CreateAgentAsync(projectId);
+        var agentId = await CreateAgentAsync(projectId, maxConcurrentRuns: 2);
 
         var first = await LaunchWebSessionAsync(projectId, agentId, "conversation one");
         var second = await LaunchWebSessionAsync(projectId, agentId, "conversation two");
@@ -89,7 +89,7 @@ public sealed class WebConversationWorkspaceSpecs
             ?? throw new InvalidOperationException("CreateProject returned no id");
     }
 
-    private async Task<string> CreateAgentAsync(string projectId)
+    private async Task<string> CreateAgentAsync(string projectId, int maxConcurrentRuns = 1)
     {
         using var response = await _fixture.Client.PostAsJsonAsync(
             $"/api/projects/{projectId}/agents",
@@ -100,7 +100,7 @@ public sealed class WebConversationWorkspaceSpecs
                 instructions = "Work inside the conversation workspace.",
                 agentConfig = new { model = "openai/gpt-5.6" },
                 skills = new[] { "coding" },
-                maxConcurrentRuns = 1,
+                maxConcurrentRuns,
             });
         response.EnsureSuccessStatusCode();
         var body = await response.Content.ReadFromJsonAsync<JsonElement>();

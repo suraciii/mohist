@@ -11,6 +11,7 @@ namespace Mohist.Server.ArchTests;
 public class ArchitectureRules
 {
     private static readonly ArchUnitNET.Domain.Architecture _architecture = ArchitectureRulesSupport.Architecture;
+    private static readonly Type[] ServerTypes = typeof(MohistDbContext).Assembly.GetTypes();
 
     private static readonly IObjectProvider<IType> OrleansGeneratedTypes = Types()
         .That().ResideInNamespaceMatching("OrleansCodeGen")
@@ -136,21 +137,26 @@ public class ArchitectureRules
     [Fact]
     public void DbContexts_AreInInfrastructureData()
     {
-        Classes().That().ResideInNamespaceMatching("Mohist.Server")
-            .And().AreAssignableTo(typeof(Microsoft.EntityFrameworkCore.DbContext))
-            .Should().ResideInNamespaceMatching("Mohist.Server.Infrastructure.Data(\\..*)?")
-            .Because("database contexts are infrastructure data concerns")
-            .Check(_architecture);
+        const string expectedNamespace = "Mohist.Server.Infrastructure.Data";
+        var dbContexts = ServerTypes
+            .Where(typeof(Microsoft.EntityFrameworkCore.DbContext).IsAssignableFrom)
+            .ToArray();
+
+        Assert.All(dbContexts, type => Assert.True(
+            type.Namespace == expectedNamespace
+                || type.Namespace?.StartsWith(expectedNamespace + ".", StringComparison.Ordinal) == true,
+            $"Database context '{type.FullName}' must reside in {expectedNamespace} or a child namespace."));
     }
 
     [Fact]
     public void Migrations_AreInInfrastructureData()
     {
-        Classes().That().ResideInNamespaceMatching("Mohist.Server")
-            .And().AreAssignableTo(typeof(Microsoft.EntityFrameworkCore.Migrations.Migration))
-            .Should().ResideInNamespaceMatching("Mohist.Server.Infrastructure.Data.Migrations")
-            .Because("EF migrations should live with database schema artifacts under Infrastructure.Data")
-            .Check(_architecture);
+        const string expectedNamespace = "Mohist.Server.Infrastructure.Data.Migrations";
+        var migrations = ServerTypes
+            .Where(typeof(Microsoft.EntityFrameworkCore.Migrations.Migration).IsAssignableFrom)
+            .ToArray();
+
+        Assert.All(migrations, type => Assert.Equal(expectedNamespace, type.Namespace));
     }
 
     [Fact]
