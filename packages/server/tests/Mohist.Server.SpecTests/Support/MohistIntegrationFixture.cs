@@ -53,7 +53,7 @@ public class MohistIntegrationFixture : IAsyncLifetime
     public IGrainFactory Grains => _factory.Services.GetRequiredService<IGrainFactory>();
     public HttpClient Client { get; private set; } = null!;
     public IServiceProvider Services => _factory.Services;
-    public HttpClient CreateClient() => CreateRecordingClient();
+    public HttpClient CreateClient() => _factory.CreateClient();
     public WebSocketClient CreateWebSocketClient() => _factory.Server.CreateWebSocketClient();
     public FakeRunnerWorkspaceClient RunnerWorkspace => _factory.Services.GetRequiredService<FakeRunnerWorkspaceClient>();
     public AgentJobDispatchProbe AgentJobDispatches => _factory.Services.GetRequiredService<AgentJobDispatchProbe>();
@@ -91,19 +91,13 @@ public class MohistIntegrationFixture : IAsyncLifetime
             TimeProvider,
             otelEnabled: _otelEnabled,
             manualPublicProjection: _manualPublicProjection);
-        Client = CreateRecordingClient();
+        Client = _factory.CreateClient();
         Client.DefaultRequestHeaders.Add("Authorization", $"Bearer {OperatorToken}");
         Client.DefaultRequestHeaders.Add(
             Mohist.Server.Slack.Services.SlackAdapterOperatorAuthenticator.OperatorIdHeaderName,
             "spec-operator");
         await _factory.EnsureSchemaAsync();
         await EnsureWorkspaceCodegenWarmAsync();
-    }
-
-    private HttpClient CreateRecordingClient()
-    {
-        var transport = _factory.Services.GetRequiredService<RecordingRunnerControlTransport>();
-        return _factory.CreateDefaultClient(new RecordingRunnerControlScopeHandler(transport));
     }
 
     private Task EnsureWorkspaceCodegenWarmAsync()
@@ -269,7 +263,7 @@ public class MohistWebApplicationFactory : WebApplicationFactory<Program>
         // WebApplicationFactory must never fall through to the production
         // Kestrel listener. This is a logical TestServer URL; no socket is
         // opened and requests stay inside the in-process handler.
-        builder.UseTestServer();
+        builder.UseTestServer(options => options.PreserveExecutionContext = true);
         builder.UseSetting(WebHostDefaults.ServerUrlsKey, "http://localhost");
         builder.UseEnvironment(MohistHostEnvironment.Testing);
         builder.UseSetting("Mohist:Testing:InMemoryOrleansTransport", "true");
