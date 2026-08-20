@@ -6,7 +6,7 @@ The Server is the authority for Slack workspace, conversation, thread, member, C
 
 The main constraints are:
 
-- The Skill payload is immutable for a published version and its digest is the SHA-256 of the exact UTF-8 instruction bytes.
+- The Skill payload is immutable for a published version: the catalog pins a version-to-content digest mapping and rejects embedded bytes that drift from it; the published digest is the SHA-256 of the exact UTF-8 instruction bytes.
 - Every Slack initial launch and follow-up must carry a complete context; it must never degrade into a non-Slack execution when context is missing or malformed.
 - Non-Slack execution must retain its existing prompt, configured Skills, and envelope behavior.
 - Reply authorship remains with the Agent's existing `mo slack message send` action. Runtime output, progress, and missing sends are not converted into Slack messages by this change.
@@ -18,7 +18,7 @@ Stakeholders are Slack users and Agent authors, the Server and Runner maintainer
 **Goals:**
 
 - Publish `mohist-slack-collaboration` version `1.0.0` as one embedded Server asset containing all six collaboration rules.
-- Publish the Skill name, version, instructions, and lowercase SHA-256 digest as one immutable payload.
+- Publish the Skill name, version, instructions, and lowercase SHA-256 digest as one immutable payload, with a production-enforced version-to-content lock.
 - Define a versioned Slack execution context containing the Skill and a complete reply anchor with workspace, conversation, thread root, triggering message, initiating member, Connection, Session, and dispatch identities.
 - Construct equivalent contexts for Slack direct-message launches, channel-root launches, and follow-ups. A follow-up keeps the bound thread root and uses its own triggering message and dispatch operation.
 - Validate context shape, required values, version, and digest before Runtime invocation. Invalid follow-ups must also be rejected before local input enqueue.
@@ -37,7 +37,7 @@ Stakeholders are Slack users and Agent authors, the Server and Runner maintainer
 
 ### 1. Use one embedded, versioned Server asset as the canonical Skill
 
-The Skill body will live in the Server's embedded asset set and be resolved through a small catalog with the fixed identity `mohist-slack-collaboration` / `1.0.0`. The catalog reads the exact embedded text, hashes its UTF-8 bytes with SHA-256, and returns the identity, body, and lowercase hexadecimal digest together. A wording or byte change requires a new published version rather than silently changing an existing payload.
+The Skill body will live in the Server's embedded asset set and be resolved through a small catalog with the fixed identity `mohist-slack-collaboration` / `1.0.0`. The catalog owns an explicit version-to-content table; version `1.0.0` is pinned to the canonical digest `de3272639a1d390f3dcf915e65b6c057bf0b9eb91c51545572eb1e484c8c1a22`. Resolution reads the exact embedded text, hashes its exact UTF-8 bytes with SHA-256, and fails closed if the computed digest differs from the pinned mapping. It returns the pinned identity, body, and lowercase hexadecimal digest together. A wording or byte change therefore fails asset resolution until a new published version and mapping are added; it cannot silently change an existing payload.
 
 This keeps the behavioral contract independent of a Runner's local filesystem, user-installed Skills, or a particular Runtime. A user-installed Skill was considered but rejected because it is optional, mutable, and not Server-controlled. Hardcoding the rules in the Runner was also rejected because it would duplicate the product source of truth and make Server/Runner releases drift.
 
@@ -90,7 +90,7 @@ A parity test will dispatch one initial input and one follow-up for the same Ses
 ## Risks / Trade-offs
 
 - [Risk] Prompt instructions cannot deterministically force a model to answer a direct question, remain silent, or recover correctly. -> Mitigation: keep the six rules explicit and versioned as a visible Skill, preserve the existing send-action boundary, and avoid claiming delivery or behavioral guarantees that the system cannot enforce.
-- [Risk] A changed embedded asset or newline/encoding transformation can invalidate the published digest. -> Mitigation: hash the exact embedded UTF-8 text at resolution time, require lowercase hexadecimal output, and test the digest against the asset bytes; change the Skill version for intentional content changes.
+- [Risk] A changed embedded asset or newline/encoding transformation can invalidate the published digest. -> Mitigation: hash the exact embedded UTF-8 text at resolution time, compare it with the pinned version-to-content mapping, require lowercase hexadecimal output, and test that substituted bytes are rejected; change the Skill version and mapping for intentional content changes.
 - [Risk] Missing or stale Slack provenance can produce an incomplete follow-up anchor. -> Mitigation: derive follow-ups only from durable provenance, reject incomplete contexts before enqueue or Runtime invocation, and cover missing-field and replay cases in Server specs.
 - [Risk] Adding Slack control data to the common envelope can regress Web, CLI, or Workflow prompts. -> Mitigation: make Slack context optional, append the managed Skill only when resolved, preserve the existing no-Slack envelope path, and assert byte-level behavior for ordinary dispatches.
 - [Risk] A fail-closed Runner rejection makes a Slack turn unavailable when the Server and Runner contracts are out of sync. -> Mitigation: deploy Runner support before Server injection, keep context version explicit, return actionable invalid/unavailable results, and monitor rejection diagnostics without logging anchor payloads or secrets.

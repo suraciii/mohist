@@ -1,0 +1,14 @@
+# issue-617 plan repair progress
+
+`self-review.md` is intentionally untouched; the next self-review regenerates it.
+
+## Must-fix dispositions in progress
+
+- MF-1 — Slack-origin context can degrade to ordinary work: OPEN. Add an explicit persisted/transported execution-source discriminator and source/context pair validation at Server, Runner control, AgentJob, and follow-up boundaries. Test omitted/null context on both paths and preserve explicit non-Slack behavior.
+- MF-2 — Batched follow-ups lack a complete anchor: OPEN. Persist the effective bound thread root, including the initial DM message, and define the first durable input in a combined turn as the deterministic representative triggering message. Cover multi-input and DM follow-up dispatches.
+- MF-3 — Same-version Skill immutability/parity is not enforceable: IN PROGRESS. Pin the v1 asset digest and reject embedded-asset drift; add initial/follow-up payload parity and drift-rejection tests.
+
+## Verification
+
+- Asset digest verified from the exact embedded file: `de3272639a1d390f3dcf915e65b6c057bf0b9eb91c51545572eb1e484c8c1a22`.
+- No changes are made to `self-review.md`.

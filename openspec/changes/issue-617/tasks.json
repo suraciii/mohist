@@ -6,13 +6,13 @@
       "id": "T-001",
       "title": "Publish the canonical versioned Slack collaboration Skill",
       "spec": "specs/slack-collaboration-skill/spec.md#server-publishes-one-versioned-canonical-slack-collaboration-skill",
-      "description": "Add the embedded Server Skill asset and catalog for `mohist-slack-collaboration` version `1.0.0`. Make the catalog return the exact instruction body with its lowercase SHA-256 digest, and lock the six collaboration rules and the instruction-only reply-authorship boundary with asset contract tests.",
+      "description": "Add the embedded Server Skill asset and catalog for `mohist-slack-collaboration` version `1.0.0`. Pin its version-to-content digest mapping so the catalog rejects embedded-byte drift, return the exact instruction body with its lowercase SHA-256 digest, and lock the six collaboration rules and the instruction-only reply-authorship boundary with asset contract tests.",
       "acceptanceCriteria": [
         "Resolving the managed Skill returns the stable name `mohist-slack-collaboration`, version `1.0.0`, non-empty instructions, and a lowercase hexadecimal SHA-256 digest of the exact UTF-8 instruction bytes.",
         "The published instructions explicitly cover all six Slack rules: useful content through the supplied send action, direct-question answers overriding silence, no empty acknowledgements, useful delegated callbacks and conditional mentions, self-contained conclusion/evidence/next-step replies with progress kept out of Slack, Server-provided reply-anchor use without destination guessing or internal-ID echoing, and silent recovery after restart, Session recovery, or compaction.",
         "Asset contract tests verify the canonical rule content, stable identity, exact digest calculation, and that Runtime output, progress, or a missing Agent send action never becomes a Server-authored Slack reply; no question classifier or fallback response generator is introduced.",
-        "The Skill is resolved from the Server's embedded managed asset rather than a user filesystem or configurable Agent Skill, and changing published instruction bytes requires an explicit version change instead of silently changing version `1.0.0`.",
-        "The Server asset and contract/unit test suite pass with no plaintext credentials, delivery-target selection, or changes to the existing Slack reply action ownership."
+        "The Skill is resolved from the Server's embedded managed asset rather than a user filesystem or configurable Agent Skill; the catalog pins version `1.0.0` to digest `de3272639a1d390f3dcf915e65b6c057bf0b9eb91c51545572eb1e484c8c1a22`, rejects substituted or changed bytes under that version, and requires an explicit version/mapping change for new instructions.",
+        "Asset contract tests substitute the embedded body under the existing version and prove catalog resolution fails, while the Server asset and contract/unit test suite pass with no plaintext credentials, delivery-target selection, or changes to the existing Slack reply action ownership."
       ],
       "priority": 1,
       "mode": "AFK",

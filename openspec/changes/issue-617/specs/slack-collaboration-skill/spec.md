@@ -1,5 +1,5 @@
 ### Requirement: Server publishes one versioned canonical Slack collaboration Skill
-The Server SHALL publish the embedded Slack collaboration Skill with the stable name `mohist-slack-collaboration`, version `1.0.0`, its complete instruction body, and a content digest. The content digest SHALL be the lowercase hexadecimal SHA-256 digest of the exact UTF-8 bytes of the published instruction body. The name, version, instructions, and digest SHALL describe one immutable Skill payload for a given published version.
+The Server SHALL publish the embedded Slack collaboration Skill with the stable name `mohist-slack-collaboration`, version `1.0.0`, its complete instruction body, and a content digest. The content digest SHALL be the lowercase hexadecimal SHA-256 digest of the exact UTF-8 bytes of the published instruction body. The Server SHALL pin the version-to-content mapping and SHALL reject embedded bytes that do not match the pinned digest instead of publishing a changed body under version `1.0.0`. The name, version, instructions, and digest SHALL describe one immutable Skill payload for a given published version.
 
 #### Scenario: Resolving the managed Skill returns its identity and integrity data
 - **WHEN** the Server resolves the managed Slack collaboration Skill
@@ -7,6 +7,12 @@ The Server SHALL publish the embedded Slack collaboration Skill with the stable 
 - **AND** it SHALL return version `1.0.0`
 - **AND** it SHALL return non-empty instructions containing the canonical Slack collaboration rules
 - **AND** its content digest SHALL equal the lowercase SHA-256 digest of those exact instructions encoded as UTF-8
+
+#### Scenario: Same-version asset drift is rejected
+- **WHEN** the embedded instruction bytes for published version `1.0.0` differ from the pinned version-to-content mapping
+- **THEN** the Server Skill catalog SHALL reject resolution
+- **AND** it SHALL NOT publish the changed bytes as version `1.0.0`
+- **AND** an intentional wording change SHALL require a new published version and digest mapping
 
 ### Requirement: The Skill defines the six Slack collaboration rules
 The published Skill SHALL instruct the Agent on all six Slack collaboration rules: the Agent is the speaker and sends useful content only through Mohist's supplied send action; empty acknowledgements are prohibited while a direct human question always receives an answer, including an answer that says there is nothing to add; delegated work calls back to the delegator when the result requires notice or action; a reply is self-contained and proportionate with its conclusion, evidence summary, and next step; the Agent uses the supplied reply anchor and never guesses a destination; and execution resumes silently after restart, Session recovery, or context compaction by rebuilding state from durable records and the thread.
