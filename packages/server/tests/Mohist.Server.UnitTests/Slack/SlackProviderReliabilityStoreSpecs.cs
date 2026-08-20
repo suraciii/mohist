@@ -3,11 +3,11 @@ using Microsoft.Extensions.Time.Testing;
 using Mohist.Server.Agent.Domain;
 using Mohist.Server.Infrastructure.Data.Agent;
 using Mohist.Server.Infrastructure.Slack;
-using Mohist.Server.SpecTests.Support;
+using Mohist.Server.UnitTests.Support;
 using Mohist.Server.TestSupport;
 using Xunit;
 
-namespace Mohist.Server.SpecTests.Specs.Slack;
+namespace Mohist.Server.UnitTests.Slack;
 
 public sealed class SlackProviderReliabilityStoreSpecs
 {
@@ -16,7 +16,7 @@ public sealed class SlackProviderReliabilityStoreSpecs
     [Fact]
     public async Task Inbox_DuplicateIdentityReturnsExistingRowEvenWhenAtCapacity()
     {
-        await using var database = TestSqliteDatabase.CreateMigrated();
+        using var database = TestSqliteDatabase.CreateModelSchema();
         var health = new RecordingHealthBackpressurer();
         var store = new SlackProviderInboxStore(
             new TestDbContextFactory(database.Options),
@@ -38,7 +38,7 @@ public sealed class SlackProviderReliabilityStoreSpecs
     [Fact]
     public async Task Inbox_AcceptPersistsTheRouteBeforeTheMessageCanBeRedelivered()
     {
-        await using var database = TestSqliteDatabase.CreateMigrated();
+        using var database = TestSqliteDatabase.CreateModelSchema();
         var health = new RecordingHealthBackpressurer();
         var firstStore = new SlackProviderInboxStore(
             new TestDbContextFactory(database.Options),
@@ -62,7 +62,7 @@ public sealed class SlackProviderReliabilityStoreSpecs
     [Fact]
     public async Task Inbox_OverflowRefusesWithoutEvictingAndBackpressuresConnection()
     {
-        await using var database = TestSqliteDatabase.CreateMigrated();
+        using var database = TestSqliteDatabase.CreateModelSchema();
         var health = new RecordingHealthBackpressurer();
         var store = new SlackProviderInboxStore(
             new TestDbContextFactory(database.Options),
@@ -80,7 +80,7 @@ public sealed class SlackProviderReliabilityStoreSpecs
     [Fact]
     public async Task Outbox_MergesPendingProgressButKeepsTerminalRowsSeparate()
     {
-        await using var database = TestSqliteDatabase.CreateMigrated();
+        using var database = TestSqliteDatabase.CreateModelSchema();
         var health = new RecordingHealthBackpressurer();
         var store = NewOutbox(database, health, capacity: 3);
 
@@ -99,7 +99,7 @@ public sealed class SlackProviderReliabilityStoreSpecs
     [Fact]
     public async Task Outbox_OverflowBackpressuresAndDoesNotDropAcceptedRows()
     {
-        await using var database = TestSqliteDatabase.CreateMigrated();
+        using var database = TestSqliteDatabase.CreateModelSchema();
         var health = new RecordingHealthBackpressurer();
         var store = NewOutbox(database, health, capacity: 1);
 
@@ -114,7 +114,7 @@ public sealed class SlackProviderReliabilityStoreSpecs
     [Fact]
     public async Task Outbox_RequiredAcknowledgementIsIdempotentAcrossStoreRecreation()
     {
-        await using var database = TestSqliteDatabase.CreateMigrated();
+        using var database = TestSqliteDatabase.CreateModelSchema();
         var health = new RecordingHealthBackpressurer();
         await SeedEnabledConnectionAsync(database);
         var firstStore = NewOutbox(database, health, capacity: 1);
@@ -131,7 +131,7 @@ public sealed class SlackProviderReliabilityStoreSpecs
     [Fact]
     public async Task Outbox_RequiredAcknowledgementPersistsWhenCapacityIsAlreadyFull()
     {
-        await using var database = TestSqliteDatabase.CreateMigrated();
+        using var database = TestSqliteDatabase.CreateModelSchema();
         var health = new RecordingHealthBackpressurer();
         await SeedEnabledConnectionAsync(database);
         var store = NewOutbox(database, health, capacity: 1);
@@ -146,7 +146,7 @@ public sealed class SlackProviderReliabilityStoreSpecs
     [Fact]
     public async Task Outbox_ClaimDoesNotClaimBeforeRetryTimeAndUncertaintyIsTerminal()
     {
-        await using var database = TestSqliteDatabase.CreateMigrated();
+        using var database = TestSqliteDatabase.CreateModelSchema();
         var time = new FakeTimeProvider(Start);
         var store = NewOutbox(database, new RecordingHealthBackpressurer(), capacity: 3, time);
         var queued = await store.EnqueueAsync(OutboxDraft(SlackOutboxKinds.TerminalResult, "done"));
@@ -165,7 +165,7 @@ public sealed class SlackProviderReliabilityStoreSpecs
     [Fact]
     public async Task Outbox_ack_rejects_a_stale_adapter_lease()
     {
-        await using var database = TestSqliteDatabase.CreateMigrated();
+        using var database = TestSqliteDatabase.CreateModelSchema();
         await SeedEnabledConnectionAsync(database);
         var store = NewOutbox(database, new RecordingHealthBackpressurer(), capacity: 3);
         var queued = await store.EnqueueAsync(OutboxDraft(SlackOutboxKinds.TerminalResult, "done"));
