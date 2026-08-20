@@ -1012,7 +1012,7 @@ public sealed partial class ManagedRuntimeTransactionSpecs
                     {
                         files.AddDirectory(target);
                         files.AddFile(Path.Combine(target, "typescript", "bin", "tsc"), "tsc");
-                        if (source.EndsWith("/packages/runner/node_modules/.", StringComparison.Ordinal))
+                        if (source.Contains("/packages/runner/node_modules", StringComparison.Ordinal))
                             files.AddFile(Path.Combine(target, "ws", "index.js"), "workspace-local ws");
                     }
                     return;
