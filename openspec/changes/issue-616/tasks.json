@@ -6,13 +6,13 @@
       "id": "T-001",
       "title": "Propagate Slack sender and Bot author metadata through the adapter contract",
       "spec": "specs/slack-bot-message-admission/spec.md#requirement-normalize-slack-sender-kind-and-author-identity",
-      "description": "Extend the normalized Slack envelope and both HTTP ingress payloads so every text event carries an explicit sender kind, nullable human sender, and optional Bot author identity independently from the receiving Socket App identity. Normalize Bot markers and supported author fields without copying raw Slack payload data, and keep the existing adapter result handling so a definite ignored result is acknowledged once without a WebClient mutation.",
+      "description": "Extend the normalized Slack envelope and both HTTP ingress payloads so every text event carries an explicit sender kind, nullable human sender, and nullable allowlisted Bot author metadata independently from the receiving Socket App identity. Normalize `event.app_id` with `bot_profile.app_id` fallback, `bot_id` with `bot_profile.id` fallback, and optional Bot `user`, mark conflicting duplicate fields instead of guessing, and keep the existing adapter result handling so a definite ignored result is acknowledged once without a WebClient mutation.",
       "acceptanceCriteria": [
         "Adapter normalization classifies text events as exactly human, bot, or unknown; Bot events without a Slack user remain valid with a null human sender, and events without either identity are unknown.",
-        "When Slack provides Bot author metadata, the envelope preserves the author App and available Bot/user identifiers separately from apiAppId; apiAppId remains the receiving App identity and is never projected as the author.",
+        "When Slack provides Bot author metadata, the envelope preserves authorAppId, authorBotId, optional authorBotUserId, and any identityConflict marker separately from apiAppId; apiAppId remains the receiving App identity and is never projected as the author. event.app_id wins over bot_profile.app_id only when the latter is absent, and disagreement is fail-closed.",
         "Agent Connection and Manager request payloads forward senderKind, nullable senderSlackUserId, and the optional author Bot metadata without loss; Manager payloads preserve the receiving App ID separately and do not synthesize a human user for Bot events.",
         "An adapter ingress result of kind ignored causes exactly one Socket acknowledgement, no user-facing Slack message, reaction, or status mutation, and normal delivery draining remains intact.",
-        "Vitest coverage in the adapter event and transport suites verifies human, managed-shaped Bot, unknown, author-versus-receiver, null-sender, payload-forwarding, and ignored-result acknowledgement cases, including that raw Slack secrets and message payload fields are not leaked into the normalized envelope."
+        "Vitest coverage in the adapter event and transport suites verifies human, Manager and Agent Bot fixtures using both supported App-ID sources, optional Bot-user propagation, conflicting author fields, managed-shaped Bot, unknown, author-versus-receiver, null-sender, payload-forwarding, and ignored-result acknowledgement cases, including that raw Slack secrets and message payload fields are not leaked into the normalized envelope; a supported Mohist fixture missing both App-ID fields fails the contract tests."
       ],
       "priority": 1,
       "mode": "AFK",
@@ -26,14 +26,14 @@
       "id": "T-002",
       "title": "Implement managed-Bot attribution and Manager ingress suppression",
       "spec": "specs/slack-bot-message-admission/spec.md#requirement-attribute-managed-bots-from-registered-mohist-identities",
-      "description": "Add a read-only Slack admission service that matches preserved Bot author identities against the active workspace enrollment and current live, non-deleted managed Agent App registrations, never against the receiving App identity. Integrate it into Manager ingress after structural identity and lease checks but before direct-message validation, actor and claim processing, inbox admission, conversation handling, or outbox creation; managed matches return a definite ignored result.",
+      "description": "Add a read-only Slack admission service that matches preserved Bot author identities against the active workspace enrollment and every current non-deleted, identity-bearing managed Agent App registration, never against the receiving App identity. Agent App BindingState is intentionally ignored for attribution, and AppLifecycle=deleted or DeletedAt/non-identity records are excluded; this covers binding and deletion-transition races within the issue's all-Agent-App scope. Integrate it into Manager ingress after structural identity and lease checks but before direct-message validation, actor and claim processing, inbox admission, conversation handling, or outbox creation; managed matches return a definite ignored result.",
       "acceptanceCriteria": [
-        "The admission service classifies the enrolled Manager Bot and every current created/bound, non-deleted managed Agent App Bot in the same workspace as managed, including an Agent Bot received by Manager; absent, inconsistent, deleted, unbound, or workspace-mismatched author identities do not match.",
+        "The admission service classifies the enrolled Manager Bot and every current non-deleted Agent App with matching workspace/enrollment, non-empty AppId and BotUserId, and AppLifecycle other than deleted as managed, including Agent Apps in pending, in_progress, bound, connection_deleted, conflict, and deleting transitions; only absent, conflicting, deleted/tombstoned, identity-less, or workspace-mismatched author identities do not match.",
         "Manager ingress accepts a classified Bot event with no senderSlackUserId far enough to evaluate attribution, returns kind ignored for a managed author, and does not use the receiving Manager App ID as an author fallback.",
         "For a managed Bot event, Manager claim consumption, actor authentication and authorization, provider inbox insertion, conversation processing, SessionInput/AgentJob/session creation, follow-up handling, and outbox enqueueing are not invoked or persisted; repeated delivery remains ignored without creating an ignored-event record.",
         "Manager admission preserves the existing direct-message, authorization, unknown-sender, human, and unrelated third-party Bot behavior when the author is not a registered Mohist identity.",
         "Operational diagnostics for ignored events, if emitted, contain only stable non-content identifiers and the decision; the incoming message text is absent from work-input persistence and logging.",
-        "Server integration or specification tests cover Manager self-message, cross-target managed Agent Bot, missing human sender, absent/unmatched author, repeated delivery, no durable side effects, and the existing human/third-party compatibility paths."
+        "Server integration or specification tests cover Manager self-message, cross-target managed Agent Bot, missing human sender, absent/unmatched author, App-ID/Bot-user-ID disagreement, Agent App pending/in-progress/bound/connection-deleted/deleting acceptance, deleted/tombstoned rejection, repeated delivery, no durable side effects, and the existing human/third-party compatibility paths."
       ],
       "priority": 2,
       "mode": "AFK",
@@ -41,20 +41,20 @@
       "output": "Workspace-scoped managed-Bot admission service and a working Manager ingress path that acknowledges via an ignored result without durable work side effects, with focused Server regression coverage.",
       "dependsOn": ["T-001"],
       "passes": false,
-      "notes": "Use existing SlackWorkspaceEnrollmentStore and ManagedSlackAgentAppStore data; resolve current registration per request and do not add persistence."
+      "notes": "Use existing SlackWorkspaceEnrollmentStore and ManagedSlackAgentAppStore data; resolve the active enrollment and current identity-bearing registrations per request, match both identifiers only to the same record when both are supplied, ignore BindingState for attribution, and do not add persistence."
     },
     {
       "id": "T-003",
       "title": "Apply managed-Bot suppression across Agent Connection ingress",
       "spec": "specs/slack-bot-message-admission/spec.md#requirement-evaluate-managed-bot-admission-before-human-and-ingress-specific-processing",
-      "description": "Wire the shared admission service into Agent Connection ingress after lease, workspace, and stable message identity checks, before disabled auditing, sender access, channel or thread routing, DM/session handling, or Agent launch processing. Return ignored for Mohist-managed self and cross-target Bot messages while retaining the existing paths for humans, unknown senders, and unrelated third-party Bots.",
+      "description": "Wire the shared admission service into Agent Connection ingress after lease, workspace, and stable message identity checks, before disabled auditing, sender access, channel or thread routing, DM/session handling, or Agent launch processing. Return ignored for every exact workspace-scoped Mohist-managed Manager or Agent author, including Agent App binding and deletion-transition identities accepted by T-002, while retaining the existing paths for humans, unknown senders, and unrelated third-party Bots.",
       "acceptanceCriteria": [
         "A managed Manager Bot or managed Agent App Bot received by its own Connection, another managed Connection, or a Connection in a channel/DM/bound-thread flow returns kind ignored before any sender validation or routing work.",
         "A managed Bot delivered to a disabled Connection is ignored before disabled-event auditing and creates no disabled provider inbox row.",
         "Managed Bot events create no Connection provider inbox entry, SessionInput, AgentJob, Agent Session, follow-up, routing action, or Slack outbox response, including on redelivery; message text is not recorded as work input.",
         "Stable target and message identity validation, runtime lease checks, and workspace consistency checks still run before managed-Bot admission, while managed admission precedes all ingress-specific authorization and processing.",
         "Human DM, channel mention, and bound-thread follow-up behavior remains unchanged, and unmatched third-party Bot and unknown sender events retain the existing Connection-specific handling.",
-        "Server specification coverage exercises managed self and cross-target Bots across DM, channel mention, bound-thread, disabled, and repeated-delivery cases, verifies the no-side-effects contract, and includes human and third-party compatibility regressions."
+        "Server specification coverage exercises managed self and cross-target Bots across DM, channel mention, bound-thread, disabled, repeated-delivery, and Agent App lifecycle/binding-transition cases, verifies the no-side-effects contract, and includes human and third-party compatibility regressions."
       ],
       "priority": 3,
       "mode": "AFK",

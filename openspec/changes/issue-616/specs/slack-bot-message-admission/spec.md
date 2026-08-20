@@ -1,5 +1,5 @@
 ### Requirement: Normalize Slack sender kind and author identity
-Every Slack text event SHALL be normalized as exactly one sender kind: `human`, `bot`, or `unknown`. An event with Slack Bot markers such as `bot_id` or `subtype=bot_message` SHALL be classified as `bot`; an event with a stable Slack `user` identity and no Bot marker SHALL be classified as `human`; an event with neither a usable human identity nor a Bot marker SHALL be classified as `unknown`. For a Bot event, the adapter SHALL preserve any Slack-provided author Bot identity metadata, including the author Bot App identity when present, separately from the identity of the App receiving the Socket event.
+Every Slack text event SHALL be normalized as exactly one sender kind: `human`, `bot`, or `unknown`. An event with Slack Bot markers such as `bot_id` or `subtype=bot_message` SHALL be classified as `bot`; an event with a stable Slack `user` identity and no Bot marker SHALL be classified as `human`; an event with neither a usable human identity nor a Bot marker SHALL be classified as `unknown`. For a Bot event, the adapter SHALL preserve allowlisted author metadata separately from the receiving Socket App identity: `authorAppId` SHALL use `event.app_id` when present and otherwise `event.bot_profile.app_id`; `authorBotId` SHALL use `event.bot_id` when present and otherwise `event.bot_profile.id`; and a Bot event's optional `event.user` SHALL be carried as `authorBotUserId`, never as the human sender. If both sources for either identity are present but disagree, the metadata SHALL be marked conflicting and SHALL not match a managed identity. The outer `api_app_id` SHALL remain the receiving App identity and SHALL never be used as the author.
 
 #### Scenario: Human event is normalized with its sender identity
 - **WHEN** a Slack text event contains a stable `user` identity and no Bot marker
@@ -17,6 +17,14 @@ Every Slack text event SHALL be normalized as exactly one sender kind: `human`, 
 - **WHEN** a Slack text event contains neither a human sender identity nor a Bot marker
 - **THEN** the normalized event has sender kind `unknown` and does not invent an author identity
 
+#### Scenario: Supported Mohist Bot payload fixtures produce matchable author metadata
+- **WHEN** the adapter normalizes the Manager fixture with `bot_profile.app_id` and the Agent fixture with `event.app_id`, each carrying the persisted App identity of its supported Mohist Slack App
+- **THEN** both envelopes expose the matching `authorAppId` independently of their receiving `api_app_id`, and a fixture variant with `event.user` exposes the matching `authorBotUserId`; a supported Mohist fixture missing both App-ID fields fails the contract tests
+
+#### Scenario: Conflicting Slack author fields fail closed
+- **WHEN** `event.app_id` and `bot_profile.app_id`, or `event.bot_id` and `bot_profile.id`, disagree
+- **THEN** the normalized author metadata is marked conflicting and Server admission does not attribute the event to Mohist
+
 ### Requirement: Preserve sender metadata through both ingress transports
 The Slack adapter SHALL forward sender kind, human sender identity, and optional Bot author identity without loss for both Agent Connection ingress and Mohist App Manager ingress. Manager ingress requests SHALL permit the human sender identity to be absent when the normalized event is a Bot event. The transport SHALL keep the receiving Socket App identity and the author Bot identity as separate values.
 
@@ -33,7 +41,7 @@ The Slack adapter SHALL forward sender kind, human sender identity, and optional
 - **THEN** the transport sends a missing or null human sender identity and the Server can evaluate Bot admission without a fabricated user ID
 
 ### Requirement: Attribute managed Bots from registered Mohist identities
-The Server SHALL identify a Bot event as a managed Bot only when its preserved author identity matches a registered Mohist-managed Manager App Bot or Agent App Bot in the same Slack workspace. The match SHALL include the Mohist Manager App's own Bot and every managed Agent App Bot, including an Agent App other than the ingress target. A Bot event with no author identity or with an author identity that is not registered for the workspace SHALL not be treated as a managed Bot. The receiving Socket App identity alone SHALL never establish managed authorship.
+The Server SHALL identify a Bot event as a managed Bot only when its preserved author identity matches an eligible Mohist-managed Manager App Bot or Agent App Bot in the same Slack workspace. The active enrollment's non-empty `ManagerAppId` and `ManagerBotUserId` are the Manager identity. An Agent App is eligible when its enrollment and workspace match, `DeletedAt` is null, `AppLifecycle` is not `deleted`, and its `AppId` and `BotUserId` are non-empty; `BindingState` does not remove eligibility, so `pending`, `in_progress`, `bound`, `connection_deleted`, and `conflict` identities remain suppressible during transitions. This includes every other managed Agent App, not only the ingress target. Deleted/tombstoned or identity-less records, inactive workspaces, and workspace-mismatched records are not managed. If both author App and Bot-user identities are present, they SHALL match the same eligible registration; source conflicts or identifiers that point to different registrations SHALL return not managed. A Bot event with no usable author identity or with an author identity that is not registered for the workspace SHALL not be treated as a managed Bot. The receiving Socket App identity alone SHALL never establish managed authorship.
 
 #### Scenario: Mohist Manager App self-message is managed
 - **WHEN** the Manager ingress receives a Bot event whose author identity matches the enrolled Mohist Manager App Bot
@@ -43,8 +51,16 @@ The Server SHALL identify a Bot event as a managed Bot only when its preserved a
 - **WHEN** an Agent Connection or the Mohist Manager ingress receives a Bot event whose author identity matches any other managed Agent App Bot in that workspace
 - **THEN** the Server classifies the event as a managed Bot and does not require the author to be the receiving target's Bot
 
+#### Scenario: Agent App transition identities remain managed
+- **WHEN** a non-deleted Agent App with matching AppId and BotUserId is in `created`/`pending`, `created`/`in_progress`, `created`/`bound`, `created`/`connection_deleted`, or `deleting`/`in_progress`
+- **THEN** its Bot event is classified as managed regardless of the binding transition state
+
+#### Scenario: Deleted Agent App identity is not managed
+- **WHEN** an Agent App has `DeletedAt` set, `AppLifecycle=deleted`, or no persisted AppId or BotUserId
+- **THEN** its Bot event is not classified as managed
+
 #### Scenario: Third-party Bot is not attributed to Mohist
-- **WHEN** a Bot event's author identity does not match the enrolled Manager App or any managed Agent App in the workspace
+- **WHEN** a Bot event's author identity does not match the enrolled Manager App or any eligible managed Agent App in the workspace
 - **THEN** the Server does not classify the event as a managed Bot and applies the existing target-specific handling for an unrelated third-party Bot
 
 #### Scenario: Receiving App identity is insufficient for attribution
