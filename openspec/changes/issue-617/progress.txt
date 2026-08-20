@@ -16,3 +16,10 @@
 - No changes are made to `self-review.md`.
 - Incremental commits: `98949a924` and `7712ca9ad` cover the canonical Skill lock repair; `df5b56129` covers the source-discriminator and batched-anchor repair; `f26be6fd0` covers the bounded rollout repair.
 - Mechanical checks pass: `tasks.json` parses, the canonical fixture re-hashes to its pinned digest, `git diff --check` is clean, spec anchors and mixed-version rollout scenarios are present, and `self-review.md` is untouched. `npm run docs:check` could not run because `tsx` is not installed in the workspace (`exit 127`).
+
+## T-001 implementation
+
+- Replaced the short pre-issue Slack asset with the exact LF-delimited v1 fixture from `design.md`; independent extraction and the embedded file both hash to `dedf18a796543ade06a9e0ece00c086577153e1e633f868c099b01cf910d641b`.
+- Updated `SlackCollaborationSkillCatalog` to read raw embedded bytes, use strict UTF-8, and reject the `1.0.0` asset unless its computed lowercase SHA-256 matches the pinned version map. The only non-embedded resolver is an internal test seam used to prove same-version drift fails.
+- Expanded the Server contract tests to assert exact fixture equality, stable identity, lowercase digest, trailing-LF/no-CR encoding, all six collaboration rules, silent instruction-only authorship boundaries, and changed-body rejection. The existing thread-root contract remains covered.
+- Verification: focused contract class passed 5/5; full `Mohist.Server.UnitTests` passed 3,081/3,081. `dotnet test` only built in this workspace's generated xUnit v3 setup, so executable tests were run with `dotnet run ... -- -noColor -noLogo`.
