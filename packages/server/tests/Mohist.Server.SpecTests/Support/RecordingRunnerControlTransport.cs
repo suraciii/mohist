@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using Microsoft.AspNetCore.Http;
 using Mohist.Server.Contracts;
 using Mohist.Server.Runner.Services;
 using Mohist.Server.Runner.Services.WebSocket;
@@ -7,13 +8,31 @@ namespace Mohist.Server.SpecTests.Support;
 
 public sealed class RecordingRunnerControlTransport : IRunnerControlTransport
 {
+    internal const string ScopeHeaderName = "X-Mohist-Runner-Control-Recording-Scope";
+
     private readonly AsyncLocal<RecordingRunnerControlGlobalState?> _globalState = new();
+    private readonly ConcurrentDictionary<Guid, RecordingRunnerControlGlobalState> _globalStates = new();
     private readonly ConcurrentDictionary<string, RecordingRunnerControlOwnerState> _owners = new(StringComparer.Ordinal);
+    private readonly IHttpContextAccessor? _httpContextAccessor;
 
-    public RecordingRunnerControlTransport() => _globalState.Value = new RecordingRunnerControlGlobalState(false);
+    public RecordingRunnerControlTransport(IHttpContextAccessor? httpContextAccessor = null)
+    {
+        _httpContextAccessor = httpContextAccessor;
+        SetGlobalState(false);
+    }
 
-    private RecordingRunnerControlGlobalState GlobalState =>
-        _globalState.Value ??= new RecordingRunnerControlGlobalState(false);
+    private RecordingRunnerControlGlobalState GlobalState
+    {
+        get
+        {
+            var scopeId = _httpContextAccessor?.HttpContext?.Request.Headers[ScopeHeaderName].FirstOrDefault();
+            if (Guid.TryParse(scopeId, out var id) && _globalStates.TryGetValue(id, out var requestState))
+                return requestState;
+            return _globalState.Value ?? SetGlobalState(false);
+        }
+    }
+
+    internal Guid CurrentScopeId => (_globalState.Value ?? SetGlobalState(false)).ScopeId;
 
     public IReadOnlyList<RecordedRunnerControlMessage> SentMessages
     {
@@ -33,7 +52,15 @@ public sealed class RecordingRunnerControlTransport : IRunnerControlTransport
         lock (GlobalState.Gate) return GlobalState.Responses.Count > 0 || GlobalState.ResponseFactories.Count > 0;
     }
 
-    public void Clear() => _globalState.Value = new RecordingRunnerControlGlobalState(true);
+    public void Clear() => SetGlobalState(true);
+
+    private RecordingRunnerControlGlobalState SetGlobalState(bool isActive)
+    {
+        var state = new RecordingRunnerControlGlobalState(Guid.NewGuid(), isActive);
+        _globalStates[state.ScopeId] = state;
+        _globalState.Value = state;
+        return state;
+    }
 
     public RecordingRunnerControlOwner CreateOwner(string ownerId)
     {
@@ -149,10 +176,23 @@ public sealed class RecordingRunnerControlTransport : IRunnerControlTransport
     }
 }
 
-internal sealed class RecordingRunnerControlGlobalState(bool isActive)
+internal sealed class RecordingRunnerControlScopeHandler(RecordingRunnerControlTransport transport) : DelegatingHandler
+{
+    protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken ct)
+    {
+        request.Headers.Remove(RecordingRunnerControlTransport.ScopeHeaderName);
+        request.Headers.TryAddWithoutValidation(
+            RecordingRunnerControlTransport.ScopeHeaderName,
+            transport.CurrentScopeId.ToString());
+        return base.SendAsync(request, ct);
+    }
+}
+
+internal sealed class RecordingRunnerControlGlobalState(Guid scopeId, bool isActive)
 {
     private bool _isActive = isActive;
 
+    public Guid ScopeId { get; } = scopeId;
     public bool IsActive
     {
         get { lock (Gate) return _isActive; }
