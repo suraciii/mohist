@@ -465,6 +465,7 @@ public static partial class SlackConnectionRoutes
             SlackThreadHistoryReader threadHistory,
             IOptions<SlackProviderOptions> slackProviderOptions,
             SlackAdapterLeaseService leases,
+            SlackManagedBotAdmissionService managedBotAdmission,
             ISlackAdapterOperatorAuthenticator auth,
             CancellationToken ct) =>
         {
@@ -472,13 +473,39 @@ public static partial class SlackConnectionRoutes
             if (operatorId is null)
                 return ApiResults.Fail("Slack adapter authentication is required.", 403, "operator_credential_required");
             var projectId = http.GetResolvedProject().Id;
-            if (!await leases.ValidateRuntimeLeaseAsync(
-                    operatorId,
-                    new SlackLeaseTargetRef.Connection(projectId, connectionId),
-                    body?.LeaseId ?? string.Empty,
-                    body?.AdapterId ?? string.Empty,
-                    ct))
+            var leaseValid = await leases.ValidateRuntimeLeaseAsync(
+                operatorId,
+                new SlackLeaseTargetRef.Connection(projectId, connectionId),
+                body?.LeaseId ?? string.Empty,
+                body?.AdapterId ?? string.Empty,
+                ct);
+            if (!leaseValid)
             {
+                // Disabling a Connection removes it from the lease target
+                // view immediately. A Bot event already in flight can still
+                // be safely acknowledged when its author is managed, but
+                // every other stale-lease request keeps the existing failure.
+                var disabledConnection = await connections.GetAsync(projectId, connectionId, ct);
+                if (disabledConnection?.DesiredState == DesiredStateKind.Disabled
+                    && body is not null)
+                {
+                    var disabledIdentity = new SlackMessageIdentity(
+                        body.TeamId, body.ConversationId, body.MessageTs);
+                    var disabledIdentityError = disabledIdentity.Validate();
+                    if (disabledIdentityError.Length != 0)
+                        return ApiResults.BadRequest(disabledIdentityError, "invalid_slack_identity");
+                    if (!string.Equals(body.TeamId, disabledConnection.WorkspaceTeamId, StringComparison.Ordinal))
+                        return ApiResults.BadRequest("The Slack workspace does not match this Connection.", "workspace_mismatch");
+
+                    var disabledAdmission = await managedBotAdmission.EvaluateAsync(
+                        disabledIdentity.WorkspaceTeamId,
+                        body.SenderKind,
+                        body.AuthorBot,
+                        ct);
+                    if (disabledAdmission.IsManaged)
+                        return ApiResults.Ok(new { kind = "ignored" });
+                }
+
                 return LeaseStaleOrExpired();
             }
             var connection = await connections.GetAsync(projectId, connectionId, ct);
@@ -486,19 +513,28 @@ public static partial class SlackConnectionRoutes
                 return ApiResults.NotFound("Slack Connection was not found.");
             if (body is null)
                 return ApiResults.Ok(new { kind = "ignored" });
+
+            var identity = new SlackMessageIdentity(body.TeamId, body.ConversationId, body.MessageTs);
+            var identityError = identity.Validate();
+            if (identityError.Length != 0)
+                return ApiResults.BadRequest(identityError, "invalid_slack_identity");
+            if (!string.Equals(body.TeamId, connection.WorkspaceTeamId, StringComparison.Ordinal))
+                return ApiResults.BadRequest("The Slack workspace does not match this Connection.", "workspace_mismatch");
+
+            var managedAdmission = await managedBotAdmission.EvaluateAsync(
+                identity.WorkspaceTeamId,
+                body.SenderKind,
+                body.AuthorBot,
+                ct);
+            if (managedAdmission.IsManaged)
+                return ApiResults.Ok(new { kind = "ignored" });
+
             if (connection.DesiredState == DesiredStateKind.Disabled)
             {
-                var disabledIdentity = new SlackMessageIdentity(body.TeamId, body.ConversationId, body.MessageTs);
-                var disabledIdentityError = disabledIdentity.Validate();
-                if (disabledIdentityError.Length != 0)
-                    return ApiResults.BadRequest(disabledIdentityError, "invalid_slack_identity");
-                if (!string.Equals(body.TeamId, connection.WorkspaceTeamId, StringComparison.Ordinal))
-                    return ApiResults.BadRequest("The Slack workspace does not match this Connection.", "workspace_mismatch");
-
                 try
                 {
                     var discarded = await inbox.AcceptAsync(
-                        new SlackProviderInboxDraft(projectId, connection.Id, disabledIdentity,
+                        new SlackProviderInboxDraft(projectId, connection.Id, identity,
                             body.SenderSlackUserId ?? "unknown", body.ThreadTs),
                         new SlackProviderInboxRouteDraft(SlackProviderInboxRouteKinds.DisabledDiscarded), ct);
                     await inbox.MarkDispatchedAsync(projectId, discarded.Id, ct);
@@ -510,13 +546,6 @@ public static partial class SlackConnectionRoutes
                 }
                 return ApiResults.Ok(new { kind = SlackProviderInboxRouteKinds.DisabledDiscarded, reason = "This Connection is disabled.", audited = true });
             }
-            if (!string.Equals(body.TeamId, connection.WorkspaceTeamId, StringComparison.Ordinal))
-                return ApiResults.BadRequest("The Slack workspace does not match this Connection.", "workspace_mismatch");
-
-            var identity = new SlackMessageIdentity(body.TeamId, body.ConversationId, body.MessageTs);
-            var identityError = identity.Validate();
-            if (identityError.Length != 0)
-                return ApiResults.BadRequest(identityError, "invalid_slack_identity");
 
             var senderKind = NormalizeSenderKind(body.SenderKind);
             if (senderKind is SlackSenderKind.Bot or SlackSenderKind.Unknown)
