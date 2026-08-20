@@ -503,6 +503,18 @@ describe('RunnerHost', () => {
       heartbeatIntervalMs: QUIET_INTERVAL_MS,
       dispatchLivenessProbeIntervalMs: QUIET_INTERVAL_MS,
     })
+    const runtimeTurnRegistry = (
+      host as unknown as {
+        runtimeTurnRegistry: { register: (key: string, binding: unknown) => void }
+      }
+    ).runtimeTurnRegistry
+    runtimeTurnRegistry.register('workflow:wr-recovery-rearm:work-recovery-rearm', {
+      agentSessionId: 'stale-session',
+      agentTurnId: null,
+      runtime: 'pi',
+      runtimeSessionId: 'stale-runtime-session',
+      workDir: '/virtual/stale-workspace',
+    })
     const run = host.run(controller.signal)
 
     try {

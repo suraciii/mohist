@@ -285,7 +285,9 @@ export async function executeAndTransition(
     return
   }
 
-  const binding = context.runtimeTurnRegistry.get(key) ?? recoveryReceiptBinding(work)
+  const binding = work.agentRecovery
+    ? (recoveryReceiptBinding(work) ?? context.runtimeTurnRegistry.get(key))
+    : (context.runtimeTurnRegistry.get(key) ?? recoveryReceiptBinding(work))
   const receipt = binding
     ? createTerminalRecoveryReceipt(work, binding, context.options.runnerId, result, context.receiptId())
     : undefined
