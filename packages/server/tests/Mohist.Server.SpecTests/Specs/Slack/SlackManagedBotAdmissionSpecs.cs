@@ -104,6 +104,35 @@ public sealed class SlackManagedBotAdmissionSpecs
     }
 
     [Fact]
+    public async Task Manager_explicit_unknown_sender_is_rejected_before_durable_admission()
+    {
+        var team = $"T_UNKNOWN_MANAGER_{Guid.NewGuid():N}";
+        const string managerAppId = "A_UNKNOWN_MANAGER";
+        const string managerBotUserId = "U_UNKNOWN_MANAGER";
+        var (enrollmentId, leaseId) = await SetupManagerAsync(team, managerAppId, managerBotUserId);
+
+        using var response = await PostManagerBotAsync(
+            team,
+            managerAppId,
+            leaseId,
+            authorAppId: null,
+            authorBotUserId: null,
+            messageTs: "1710000000.000010",
+            isDirectMessage: true,
+            senderSlackUserId: "U_UNKNOWN_SENDER",
+            senderKind: "unknown");
+        response.EnsureSuccessStatusCode();
+        using var document = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        var data = document.RootElement.GetProperty("data");
+        Assert.Equal("rejected", data.GetProperty("kind").GetString());
+        Assert.Equal("manager_sender_required", data.GetProperty("reason").GetString());
+
+        var rows = await CountManagerRowsAsync(enrollmentId);
+        Assert.Equal(0, rows.Inbox);
+        Assert.Equal(0, rows.Outbox);
+    }
+
+    [Fact]
     public async Task Manager_managed_admission_fails_closed_for_receiver_only_conflicts_and_deleted_identities()
     {
         var team = $"T_MANAGED_BOT_REJECT_{Guid.NewGuid():N}";
@@ -207,14 +236,15 @@ public sealed class SlackManagedBotAdmissionSpecs
         string messageTs,
         bool isDirectMessage = false,
         string? senderSlackUserId = null,
-        bool identityConflict = false) =>
+        bool identityConflict = false,
+        string senderKind = "bot") =>
         await _fixture.Client.PostAsJsonAsync("/api/slack-manager/ingress", new
         {
             appId = managerAppId,
             workspaceTeamId = team,
             conversationId = "D_MANAGED_BOT",
             messageTs,
-            senderKind = "bot",
+            senderKind,
             senderSlackUserId,
             authorBot = authorAppId is null && authorBotUserId is null
                 ? null

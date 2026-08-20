@@ -43,6 +43,11 @@ public sealed class SlackManagerIngressService : IScopedService
         if (!string.IsNullOrEmpty(identityError))
             throw new ArgumentException(identityError, nameof(message));
 
+        // An explicit unknown classification is authoritative. Do not let a
+        // sender id from an untrusted caller turn it into human work.
+        if (string.Equals(message.SenderKind?.Trim(), "unknown", StringComparison.OrdinalIgnoreCase))
+            return SlackManagerIngressResult.Rejected("manager_sender_required");
+
         var admission = await _managedBotAdmission.EvaluateAsync(
             message.Identity.WorkspaceTeamId,
             message.SenderKind,
