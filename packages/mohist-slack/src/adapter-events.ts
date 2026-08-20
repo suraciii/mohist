@@ -123,11 +123,8 @@ function parseFiles(value: unknown): readonly SlackFileRef[] {
 }
 
 function normalizeSenderKind(event: Record<string, unknown>): SlackSenderKind {
-  if (
-    stringValue(event.bot_id) ||
-    stringValue(event.subtype) === 'bot_message' ||
-    isRecord(event.bot_profile)
-  ) return 'bot'
+  if (stringValue(event.bot_id) || stringValue(event.subtype) === 'bot_message' || isRecord(event.bot_profile))
+    return 'bot'
   return stringValue(event.user) ? 'human' : 'unknown'
 }
 

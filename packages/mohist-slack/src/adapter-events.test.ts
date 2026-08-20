@@ -486,7 +486,9 @@ describe('mohist-slack adapter', () => {
     expect(web.posted).toEqual([{ channel: 'C1', text: 'existing response' }])
     expect(web.updated).toEqual([])
     expect(web.uploaded).toEqual([])
-    expect(transport.acks).toEqual([{ ref: { projectId: 'p', connectionId: 'c' }, id: 'existing-delivery', outcome: 'delivered' }])
+    expect(transport.acks).toEqual([
+      { ref: { projectId: 'p', connectionId: 'c' }, id: 'existing-delivery', outcome: 'delivered' },
+    ])
     await adapter.stop()
   })
 
