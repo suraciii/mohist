@@ -96,7 +96,7 @@
         { "id": "arch" }
       ]
     },
-    { "id": "server-spec", "kind": "dotnet-apphost", "trackType": "behavior", "application": "server", "specKind": "Product", "level": "L1", "resources": ["orleans", "sqlite", "server-runtime"], "csproj": "packages/server/tests/Mohist.Server.SpecTests/Mohist.Server.SpecTests.csproj", "apphostArgs": ["-parallel", "collections", "-parallelAlgorithm", "conservative", "-maxThreads", "4"], "report": "reports/server-spec.trx", "reportFormat": "trx", "deadlineMs": 240000, "enforce": true, "rules": [
+    { "id": "server-spec", "kind": "dotnet-apphost", "trackType": "behavior", "application": "server", "specKind": "Product", "level": "L1", "resources": ["orleans", "sqlite", "server-runtime"], "csproj": "packages/server/tests/Mohist.Server.SpecTests/Mohist.Server.SpecTests.csproj", "apphostArgs": ["-parallel", "collections", "-parallelAlgorithm", "conservative", "-maxThreads", "2"], "report": "reports/server-spec.trx", "reportFormat": "trx", "deadlineMs": 240000, "enforce": true, "rules": [
         { "id": "spec", "percentile": 95, "percentileMs": 500 }
       ]
     },
