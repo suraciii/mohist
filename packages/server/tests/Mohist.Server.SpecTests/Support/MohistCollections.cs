@@ -51,6 +51,9 @@ public class WorkflowSessionTerminalIntegrationCollection : ICollectionFixture<I
 [CollectionDefinition("LaunchIntegration")]
 public class LaunchIntegrationCollection : ICollectionFixture<IsolatedMohistIntegrationFixture>;
 
+[CollectionDefinition("RunnerRecoveryIntegration")]
+public class RunnerRecoveryIntegrationCollection : ICollectionFixture<IsolatedMohistIntegrationFixture>;
+
 [CollectionDefinition("SessionControlIntegration")]
 public class SessionControlIntegrationCollection : ICollectionFixture<IsolatedMohistIntegrationFixture>;
 
