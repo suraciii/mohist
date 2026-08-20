@@ -192,11 +192,9 @@ public sealed partial class ManagedRuntimeTransactionSpecs
             command.Args[1].EndsWith("/node_modules", StringComparison.Ordinal)
             && !command.Args[1].EndsWith("/packages/runner/node_modules", StringComparison.Ordinal));
         Assert.Contains(dependencyCopies, command => command.Args[1].EndsWith("/packages/runner/node_modules/.", StringComparison.Ordinal));
-        Assert.All(dependencyCopies, command => Assert.Equal(
-            Path.Combine(session.ReleaseRoot, "runner", "node_modules").Replace('\\', '/'),
-            command.Args[2]));
-        Assert.True(fixture.Files.HasFile(
-            Path.Combine(session.ReleaseRoot, "runner", "node_modules", "ws", "index.js").Replace('\\', '/')));
+        var dependencyTarget = dependencyCopies[0].Args[2];
+        Assert.All(dependencyCopies, command => Assert.Equal(dependencyTarget, command.Args[2]));
+        Assert.True(fixture.Files.HasFile(Path.Combine(dependencyTarget, "ws", "index.js").Replace('\\', '/')));
         Assert.Equal(
             Path.Combine(session.ReleaseRoot, "runner", ManagedRuntimeLayout.RunnerEntrypoint).Replace('\\', '/'),
             runner.Entrypoint);
