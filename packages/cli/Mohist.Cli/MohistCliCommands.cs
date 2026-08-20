@@ -176,12 +176,24 @@ internal static class MohistCliCommands
     internal static async Task<int> RunAsync(HttpClient http, string[] args, TextWriter output, TextWriter error, IFileSystem fileSystem, ICommandExecutor commandExecutor, IEnvironmentVariableProvider? environment = null, TextReader? standardInput = null, IServiceInstaller? installer = null, SourceCodeUpdater? updater = null, Func<string>? getUserHome = null, CancellationToken cancellationToken = default, ICliTerminal? terminalOverride = null, TimeProvider? timeProvider = null, Func<TimeSpan, CancellationToken, Task>? pollWait = null, Func<string?>? getLocalHostname = null, IEventSocketFactory? eventSocketFactory = null, Func<double>? eventReconnectJitter = null)
     {
         OutputOptionState.Explicit = false;
-        if (IsDirectSlackCredentialArgument(args))
+        environment ??= SystemEnvironmentVariableProvider.Instance;
+        var managerMode = ManagerCliMode.IsEnabled(args, environment);
+        using var managerModeScope = ManagerCliMode.Push(managerMode);
+        var effectiveArgs = ManagerCliMode.RemoveModeFlags(args);
+        if (managerMode
+            && effectiveArgs.Length > 0
+            && !ManagerCliMode.IsHelpRequest(effectiveArgs))
+        {
+            var managerExit = await ManagerCliMode.RejectIfUnlistedAsync(effectiveArgs, error).ConfigureAwait(false);
+            if (managerExit != 0)
+                return managerExit;
+        }
+
+        if (IsDirectSlackCredentialArgument(effectiveArgs))
         {
             await error.WriteLineAsync("Slack credentials must be supplied through hidden input or --credentials-file; command-line token arguments are refused.").ConfigureAwait(false);
             return CliExitCode.For(CliExitOutcome.UsageFailure);
         }
-        environment ??= SystemEnvironmentVariableProvider.Instance;
         // The machine-local home is resolved the same way for the provider,
         // the handler and the api so all three agree on where the
         // credentials file lives.
@@ -196,7 +208,7 @@ internal static class MohistCliCommands
         var credentials = new CliCredentialProvider(fileSystem, environment, effectiveUserHome);
         var credentialSession = new CliCredentialSession(
             credentials, http, fileSystem, effectiveUserHome, error);
-        http = new HttpClient(new CliCredentialHandler(credentialSession, http))
+        http = new HttpClient(new CliCredentialHandler(credentialSession, http, managerMode))
         {
             BaseAddress = http.BaseAddress,
             Timeout = http.Timeout,
@@ -223,16 +235,16 @@ internal static class MohistCliCommands
         var root = composition.Root;
         var config = new InvocationConfiguration { Output = output, Error = error };
         var parseConfig = new ParserConfiguration { ResponseFileTokenReplacer = null };
-        var parseResult = CommandLineParser.Parse(root, args, parseConfig);
-        var helpRequested = args.Any(arg => IsHelpToken(arg));
+        var parseResult = CommandLineParser.Parse(root, effectiveArgs, parseConfig);
+        var helpRequested = effectiveArgs.Any(arg => IsHelpToken(arg));
         if (parseResult.Errors.Count > 0 && !helpRequested)
         {
             foreach (var parseError in parseResult.Errors)
                 await error.WriteLineAsync(parseError.Message).ConfigureAwait(false);
-            if (args.Any(arg => string.Equals(arg, "--output", StringComparison.Ordinal)))
+            if (effectiveArgs.Any(arg => string.Equals(arg, "--output", StringComparison.Ordinal)))
                 await error.WriteLineAsync("Use --json for structured output.").ConfigureAwait(false);
-            if (args.Any(arg => string.Equals(arg, "true", StringComparison.Ordinal))
-                && args.Any(arg => string.Equals(arg, "--json", StringComparison.Ordinal)))
+            if (effectiveArgs.Any(arg => string.Equals(arg, "true", StringComparison.Ordinal))
+                && effectiveArgs.Any(arg => string.Equals(arg, "--json", StringComparison.Ordinal)))
                 await error.WriteLineAsync("A required value for the variable was not provided.").ConfigureAwait(false);
             return CommandHelpHook.RenderNearestUsage(parseResult, error);
         }

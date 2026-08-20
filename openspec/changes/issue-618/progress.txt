@@ -23,3 +23,16 @@
 - Focused Server unit classes pass: built-in catalog and Slack execution context contracts.
 - `npm run build -w packages/runner` and `npm run build -w packages/web` pass.
 - `npm run test:run -w packages/runner -- src/runtime/slack-execution-context.test.ts` passes (15 tests).
+
+## T-002 Decisions
+- `ManagerCapabilityCatalog` lives in the shared `Mohist.Workflow.Definition` assembly so the CLI preflight and Server admission resolve the same logical capabilities and HTTP route shapes. The catalog contains only workspace status, Agent/Connection inspection, Agent create-or-mount, access policy, enable/disable, diagnostics, and owner claim/transfer.
+- Manager mode is process-scoped through `MOHIST_MANAGER_MODE=1` (the Runner launcher can provide this later) or the explicit `--manager` flag. The CLI strips the flag before parser dispatch, rejects unlisted commands before HTTP, and adds only a non-secret `X-Mohist-Manager-Mode` marker to requests.
+- `ManagerCapabilityAdmissionMiddleware` runs after authentication and before endpoint filters, so a Manager-marked request to setup, credential, recovery, binding-removal, permanent-delete, arbitrary API, or any other unlisted route is rejected before Project or resource lookup. Unmarked operator/Web requests retain their existing route behavior.
+- Existing `mo slack view` is the diagnostic projection, so its catalog capability is `connection.diagnostics`; `slack diagnostics` is an explicit alias. `slack create` mounts an existing Agent through `SlackManagerApplicationService` or creates the Agent through the existing Agent route before mounting it.
+- Owner claim and transfer responses are authoritative but one-time values are protected: Manager mode suppresses `code`, `claimCode`, `value`, and `token` from CLI output while preserving non-secret expiry/bot projection. Ordinary operator output is unchanged.
+
+## T-002 Verification
+- Complete CLI suite passes: `dotnet test packages/cli/tests/Mohist.Cli.Tests/Mohist.Cli.Tests.csproj --no-restore -p:UseSharedCompilation=false` (1,950 tests).
+- Complete Server unit suite passes: `dotnet test packages/server/tests/Mohist.Server.UnitTests/Mohist.Server.UnitTests.csproj --no-restore --no-build` (3,115 tests).
+- Complete Server spec suite including direct Manager admission coverage passes: `dotnet test packages/server/tests/Mohist.Server.SpecTests/Mohist.Server.SpecTests.csproj --no-restore --filter FullyQualifiedName~SlackManagerCapabilityAdmissionSpecs` (3,706 tests; the current test platform executes the full assembly).
+- Server build passes: `dotnet build packages/server/src/Mohist.Server/Mohist.Server.csproj --no-restore -p:SkipWebBuild=true`.

@@ -16,7 +16,7 @@ public sealed class CliSlackCommandSpecs
 
         Assert.Equal(0, exit);
         var text = output.ToString();
-        foreach (var command in new[] { "setup", "status", "install-agent", "list", "view", "claim-owner", "edit", "transfer-owner", "enable", "disable", "remove-binding", "permanent-delete", "deliveries", "resend-delivery", "clear-gap", "reconcile-create", "reconcile-delete", "message" })
+        foreach (var command in new[] { "setup", "status", "create", "install-agent", "list", "view", "diagnostics", "claim-owner", "edit", "transfer-owner", "enable", "disable", "remove-binding", "permanent-delete", "deliveries", "resend-delivery", "clear-gap", "reconcile-create", "reconcile-delete", "message" })
             Assert.Contains(command, text, StringComparison.Ordinal);
         Assert.DoesNotContain("agent connection", text, StringComparison.OrdinalIgnoreCase);
         Assert.Empty(handler.Requests);

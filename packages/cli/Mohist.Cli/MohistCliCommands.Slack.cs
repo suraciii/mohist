@@ -27,9 +27,11 @@ internal static class SlackCommands
         var group = new Command("slack", "Manage Slack integrations");
         group.Subcommands.Add(BuildSetup(api));
         group.Subcommands.Add(BuildStatus(api));
+        group.Subcommands.Add(BuildCreate(api));
         group.Subcommands.Add(BuildInstallAgent(api));
         group.Subcommands.Add(BuildList(api));
         group.Subcommands.Add(BuildView(api));
+        group.Subcommands.Add(BuildDiagnostics(api));
         group.Subcommands.Add(BuildClaimOwner(api));
         group.Subcommands.Add(BuildEdit(api));
         group.Subcommands.Add(BuildTransferOwner(api));
@@ -589,6 +591,115 @@ internal static class SlackCommands
         return command;
     }
 
+    private static Command BuildCreate(MohistCliApi api)
+    {
+        var command = new Command("create", "Create or mount an Agent for the enrolled Slack workspace");
+        var agent = new Argument<string>("agent")
+        {
+            Description = "Existing Agent name or id, or the name of a new Agent.",
+        };
+        var workspaceTeam = new Option<string?>("--workspace-team")
+        {
+            Description = "Slack workspace team id.",
+        };
+        var responsibility = new Option<string?>("--responsibility")
+        {
+            Description = "Daily responsibility used when creating a new Agent.",
+        };
+        var accessPolicy = new Option<string?>("--access-policy")
+        {
+            Description = "Connection access policy: owner_only, allowlist, or anyone.",
+        };
+        var project = MohistCliCommands.ProjectRefOption();
+        command.Arguments.Add(agent);
+        command.Options.Add(workspaceTeam);
+        command.Options.Add(responsibility);
+        command.Options.Add(accessPolicy);
+        command.Options.Add(project);
+        command.SetAction(async ctx =>
+        {
+            if (!ManagerCliMode.Active)
+            {
+                await api.Error.WriteLineAsync("slack create is available only in Manager mode.").ConfigureAwait(false);
+                return CliExitCode.For(CliExitOutcome.UsageFailure);
+            }
+
+            var (projectId, projectExit) = await ProjectAsync(api, ctx.GetValue(project)).ConfigureAwait(false);
+            if (projectExit != 0 || projectId is null) return projectExit;
+            var team = await ResolveWorkspaceTeamAsync(api, ctx, workspaceTeam, "slack create").ConfigureAwait(false);
+            if (team is null) return CliExitCode.For(CliExitOutcome.UsageFailure);
+
+            var agentReference = ctx.GetValue(agent)!;
+            var agentId = await ResolveAgentIdAsync(api, projectId, agentReference).ConfigureAwait(false);
+            if (agentId is null)
+            {
+                var dailyResponsibility = ctx.GetValue(responsibility);
+                if (string.IsNullOrWhiteSpace(dailyResponsibility))
+                {
+                    await api.Error.WriteLineAsync(
+                        $"Agent '{agentReference}' was not found; --responsibility is required to create it.").ConfigureAwait(false);
+                    return CliExitCode.For(CliExitOutcome.UsageFailure);
+                }
+
+                var createAgent = await api.ResponseReader.ReadAsync(
+                    HttpMethod.Post,
+                    $"/api/projects/{Uri.EscapeDataString(projectId)}/agents/",
+                    new
+                    {
+                        name = agentReference,
+                        description = $"Helps with {dailyResponsibility.Trim()}.",
+                        purpose = dailyResponsibility.Trim(),
+                        instructions = $"You are responsible for {dailyResponsibility.Trim()}.",
+                    },
+                    mutating: true,
+                    cancellationToken: api.Invocation.CancellationToken).ConfigureAwait(false);
+                if (createAgent.Failure is not null)
+                    return await new CliResultWriter(api.Invocation).WriteFailureAsync(createAgent.Failure).ConfigureAwait(false);
+                agentId = createAgent.Data?["id"]?.GetValue<string>();
+                if (string.IsNullOrWhiteSpace(agentId))
+                {
+                    await api.Error.WriteLineAsync("The Agent creation result did not include an id.").ConfigureAwait(false);
+                    return CliExitCode.For(CliExitOutcome.OperationFailure);
+                }
+            }
+
+            var mounted = await api.ResponseReader.ReadAsync(
+                HttpMethod.Post,
+                ManagerPath(projectId, "/apps"),
+                new
+                {
+                    agentId,
+                    workspaceTeamId = team,
+                    accessPolicy = ctx.GetValue(accessPolicy),
+                },
+                mutating: true,
+                cancellationToken: api.Invocation.CancellationToken).ConfigureAwait(false);
+            if (mounted.Failure is not null)
+                return await new CliResultWriter(api.Invocation).WriteFailureAsync(mounted.Failure).ConfigureAwait(false);
+            return await new CliResultWriter(api.Invocation).WriteSuccessAsync(mounted.Data).ConfigureAwait(false);
+        });
+        return command;
+    }
+
+    private static Command BuildDiagnostics(MohistCliApi api)
+    {
+        var command = new Command("diagnostics", "Show authoritative Slack Connection diagnostics");
+        var id = new Argument<string>("connection-id");
+        var project = MohistCliCommands.ProjectRefOption();
+        command.Arguments.Add(id);
+        command.Options.Add(project);
+        command.SetAction(async ctx =>
+        {
+            var (projectId, exit) = await ProjectAsync(api, ctx.GetValue(project)).ConfigureAwait(false);
+            if (exit != 0 || projectId is null) return exit;
+            var result = await api.GetDataOrPrintErrorAsync(
+                Path(projectId, $"/{Uri.EscapeDataString(ctx.GetValue(id)!)}/diagnostic")).ConfigureAwait(false);
+            if (result.ExitCode != 0) return result.ExitCode;
+            return RenderDiagnostic(api.Output, result.Data);
+        });
+        return command;
+    }
+
     private static JsonSelection ResolveSelection(
         ParseResult context,
         Option<string?> output,
@@ -699,10 +810,15 @@ internal static class SlackCommands
         {
             var (projectId, exit) = await ProjectAsync(api, ctx.GetValue(project));
             if (exit != 0 || projectId is null) return exit;
-            var result = await api.PostAndReadAsync(Path(projectId, $"/{Uri.EscapeDataString(ctx.GetValue(id)!)}/claim-owner"), new { });
-            if (result.ExitCode == 0)
-                await PrintClaimCodeHintAsync(api, result);
-            return result.ExitCode;
+            var result = await api.PostAndReadAsync(
+                Path(projectId, $"/{Uri.EscapeDataString(ctx.GetValue(id)!)}/claim-owner"),
+                new { },
+                printOutput: !ManagerCliMode.Active);
+            if (result.ExitCode != 0) return result.ExitCode;
+            if (ManagerCliMode.Active)
+                return await api.WriteJsonDataAsync(RedactOwnerClaimData(result.Data)).ConfigureAwait(false);
+            await PrintClaimCodeHintAsync(api, result).ConfigureAwait(false);
+            return 0;
         });
         return command;
     }
@@ -714,6 +830,17 @@ internal static class SlackCommands
             ? "Send the code to the Agent bot DM to claim ownership."
             : $"Send the code to the Agent bot DM ({botName}) to claim ownership.";
         await api.Error.WriteLineAsync(hint).ConfigureAwait(false);
+    }
+
+    private static JsonNode? RedactOwnerClaimData(JsonNode? data)
+    {
+        if (data is not JsonObject objectData) return data;
+        var redacted = objectData.DeepClone().AsObject();
+        redacted.Remove("code");
+        redacted.Remove("claimCode");
+        redacted.Remove("value");
+        redacted.Remove("token");
+        return redacted;
     }
 
     private static Command BuildTransferOwner(MohistCliApi api)
@@ -729,10 +856,13 @@ internal static class SlackCommands
             if (exit != 0 || projectId is null) return exit;
             var result = await api.PostAndReadAsync(
                 Path(projectId, $"/{Uri.EscapeDataString(ctx.GetValue(id)!)}/transfer-owner"),
-                new { });
-            if (result.ExitCode == 0)
-                await PrintClaimCodeHintAsync(api, result);
-            return result.ExitCode;
+                new { },
+                printOutput: !ManagerCliMode.Active);
+            if (result.ExitCode != 0) return result.ExitCode;
+            if (ManagerCliMode.Active)
+                return await api.WriteJsonDataAsync(RedactOwnerClaimData(result.Data)).ConfigureAwait(false);
+            await PrintClaimCodeHintAsync(api, result).ConfigureAwait(false);
+            return 0;
         });
         return command;
     }
