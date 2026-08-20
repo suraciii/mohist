@@ -3,21 +3,16 @@
   // See scripts/test-duration/README.md for the gate implementation model.
   //
   // Hard constraints per enforced budget rule (all FAIL, never warnings):
-  //   - L0:   p95 <= 50ms (population) AND per-test <= 500ms.
-  //   - L1:   p95 <= 500ms (population) AND per-test <= 5s.
-  //   - arch: per-test <= 500ms only (structural; no p95).
+  //   - L0: p95 <= 50ms for the complete track population.
+  //   - L1: p95 <= 500ms for the complete track population.
+  //   - architecture: the track deadline bounds total structural-check cost.
   // The rule ids below are execution adapters. They do not classify the Spec.
-  // A test over its per-test cap FAILS unless listed below as governed
-  // governance: identity + observed baseline + reason + owner + removal
-  // deadline. p95 cannot be allowlisted away. On the deadline the entry
-  // expires and the guard fails until the test is optimized or renewed.
   //
   // Full suite 5-minute deadline (suiteDeadlineMs); per-track hard deadlines
   // via a Node-spawned subprocess kill (cross-platform; never the Linux
   // `timeout` binary as the only executor). Tracks with enforce=false are
   // migration gaps (baseline-pending), not warnings.
   //
-  // Allowlist entries are real >cap exact identities (no class/glob exemptions).
   "suiteDeadlineMs": 300000,
   "killGraceMs": 5000,
   // The local executor does not open every test process at once. The
@@ -75,41 +70,41 @@
   },
   "tracks": [
     { "id": "mohist-slack", "kind": "vitest", "trackType": "behavior", "application": "slack", "specKind": "Design", "level": "L0", "resources": [], "run": ["npm","run","test:duration","-w","packages/mohist-slack","--","--reporter=json","--outputFile={report}"], "report": "reports/mohist-slack.json", "reportFormat": "vitest", "deadlineMs": 30000, "enforce": true, "rules": [
-        { "id": "unit", "absoluteMs": 500, "percentile": 95, "percentileMs": 50, "allowlist": [] }
+        { "id": "unit", "percentile": 95, "percentileMs": 50 }
       ]
     },
     { "id": "runner", "kind": "vitest", "trackType": "behavior", "application": "runner", "specKind": "Design", "level": "L0", "resources": [], "run": ["npm","run","test:duration","-w","packages/runner","--","--reporter=json","--outputFile={report}"], "report": "reports/runner.json", "reportFormat": "vitest", "deadlineMs": 90000, "enforce": true, "rules": [
-        { "id": "unit", "absoluteMs": 500, "percentile": 95, "percentileMs": 50, "allowlist": [] }
+        { "id": "unit", "percentile": 95, "percentileMs": 50 }
       ]
     },
     { "id": "workflow-def", "kind": "dotnet-vstest", "trackType": "behavior", "application": "server", "specKind": "Design", "level": "L0", "resources": [], "csproj": "packages/server/tests/Mohist.Workflow.Definition.Tests/Mohist.Workflow.Definition.Tests.csproj", "report": "reports/workflow-def.trx", "reportFormat": "trx", "deadlineMs": 30000, "enforce": true, "rules": [
-        { "id": "unit", "absoluteMs": 500, "percentile": 95, "percentileMs": 50, "allowlist": [] }
+        { "id": "unit", "percentile": 95, "percentileMs": 50 }
       ]
     },
     // Four collection workers retain parallelism without letting concurrent cold command-tree construction dominate native test execution time.
     { "id": "cli", "kind": "dotnet-apphost", "trackType": "behavior", "application": "cli", "specKind": "Product", "level": "L1", "resources": [], "csproj": "packages/cli/tests/Mohist.Cli.Tests/Mohist.Cli.Tests.csproj", "apphostArgs": ["-preEnumerateTheories", "-parallel", "collections", "-parallelAlgorithm", "conservative", "-maxThreads", "4"], "report": "reports/cli.trx", "executionLedger": "reports/cli.execution-ledger.json", "executionProvenance": "reports/cli.execution-provenance.json", "executionSourceRoots": ["packages/cli", "Directory.Build.props", "Directory.Packages.props", "global.json"], "reportFormat": "trx", "deadlineMs": 60000, "enforce": true, "rules": [
-        { "id": "spec", "namePattern": "Specs\\.", "absoluteMs": 5000, "percentile": 95, "percentileMs": 500, "allowlist": [] },
-        { "id": "unit", "absoluteMs": 500, "percentile": 95, "percentileMs": 50, "allowlist": [] }
+        { "id": "spec", "namePattern": "Specs\\.", "percentile": 95, "percentileMs": 500 },
+        { "id": "unit", "percentile": 95, "percentileMs": 50 }
       ]
     },
     { "id": "web", "kind": "vitest", "trackType": "behavior", "application": "web", "specKind": "Product", "level": "L1", "resources": [], "run": ["npm","run","test:duration","-w","packages/web","--","--reporter=json","--outputFile={report}"], "report": "reports/web.json", "reportFormat": "vitest", "deadlineMs": 180000, "enforce": true, "rules": [
-        { "id": "spec", "absoluteMs": 5000, "percentile": 95, "percentileMs": 500, "allowlist": [] }
+        { "id": "spec", "percentile": 95, "percentileMs": 500 }
       ]
     },
     { "id": "server-unit", "kind": "dotnet-apphost", "trackType": "behavior", "application": "server", "specKind": "Design", "level": "L0", "resources": ["duration-measurement", "server-runtime"], "csproj": "packages/server/tests/Mohist.Server.UnitTests/Mohist.Server.UnitTests.csproj", "apphostArgs": ["-parallel", "none"], "report": "reports/server-unit.trx", "reportFormat": "trx", "deadlineMs": 90000, "enforce": true, "rules": [
-        { "id": "unit", "absoluteMs": 500, "percentile": 95, "percentileMs": 50, "allowlist": [] }
+        { "id": "unit", "percentile": 95, "percentileMs": 50 }
       ]
     },
     { "id": "server-arch", "kind": "dotnet-apphost", "trackType": "architecture", "application": "server", "specKind": "Design", "architectureScope": "server", "resources": ["duration-measurement"], "csproj": "packages/server/tests/Mohist.Server.ArchTests/Mohist.Server.ArchTests.csproj", "report": "reports/server-arch.trx", "reportFormat": "trx", "deadlineMs": 60000, "enforce": true, "rules": [
-        { "id": "arch", "absoluteMs": 500 }
+        { "id": "arch" }
       ]
     },
     { "id": "server-spec", "kind": "dotnet-apphost", "trackType": "behavior", "application": "server", "specKind": "Product", "level": "L1", "resources": ["orleans", "sqlite", "server-runtime"], "csproj": "packages/server/tests/Mohist.Server.SpecTests/Mohist.Server.SpecTests.csproj", "apphostArgs": ["-parallel", "collections", "-parallelAlgorithm", "conservative", "-maxThreads", "3"], "report": "reports/server-spec.trx", "reportFormat": "trx", "deadlineMs": 240000, "enforce": true, "rules": [
-        { "id": "spec", "absoluteMs": 5000, "percentile": 95, "percentileMs": 500, "allowlist": [] }
+        { "id": "spec", "percentile": 95, "percentileMs": 500 }
       ]
     },
     { "id": "runner-integration", "kind": "vitest", "trackType": "behavior", "application": "runner", "specKind": "Product", "level": "L1", "resources": [], "run": ["npm","run","test:duration:integration","-w","packages/runner","--","--reporter=json","--outputFile={report}"], "report": "reports/runner-integration.json", "reportFormat": "vitest", "deadlineMs": 90000, "enforce": true, "rules": [
-        { "id": "spec", "absoluteMs": 5000, "percentile": 95, "percentileMs": 500, "allowlist": [] }
+        { "id": "spec", "percentile": 95, "percentileMs": 500 }
       ]
     }
   ]

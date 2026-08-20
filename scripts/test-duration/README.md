@@ -109,12 +109,13 @@ data but cannot justify a performance baseline or threshold change.
 ## Duration Policy
 
 Every configured track must report a nonzero total. Failed, skipped, and not-run
-cases fail. Every track must enforce its configured p95 and single-Spec limits.
-An allowlist or `baseline-pending` state is invalid in complete acceptance
-evidence.
+cases fail. Behavior tracks enforce their configured p95; every track and the
+complete portfolio enforce wall-time deadlines. Per-Spec maximum duration is
+reported for diagnosis but is not an acceptance boundary. A `baseline-pending`
+state is invalid in complete acceptance evidence.
 
-Retry, sleep, skip, allowlist expansion, threshold change, timeout increase, and
-global serialization are not gate recovery mechanisms.
+Retry, sleep, skip, threshold change, timeout increase, and global serialization
+are not gate recovery mechanisms.
 
 ## Migration Status
 

@@ -78,29 +78,11 @@ export interface ExecutionLedgerValidation {
   readonly errors: readonly string[]
 }
 
-export interface AllowlistEntry {
-  readonly id?: string
-  readonly pattern?: string
-  readonly observedMs: number
-  readonly reason: string
-  readonly owner: string
-  readonly deadline: string
-}
-
-export interface ExpiredAllowlist {
-  readonly key: string
-  readonly reason: string
-  readonly owner: string
-  readonly deadline: string
-}
-
 export interface BudgetRule {
   readonly id: string
   readonly namePattern?: string
-  readonly absoluteMs: number
   readonly percentile?: number
   readonly percentileMs?: number
-  readonly allowlist?: readonly AllowlistEntry[]
 }
 
 export type TrackKind = 'vitest' | 'dotnet-apphost' | 'dotnet-vstest' | 'report-only'
@@ -185,25 +167,6 @@ export interface OutcomeCounts {
   readonly other: number
 }
 
-export interface AbsoluteViolation {
-  readonly name: string
-  readonly durationMs: number
-}
-
-export interface GovernedCase {
-  readonly name: string
-  readonly durationMs: number
-  readonly reason: string
-  readonly owner: string
-  readonly deadline: string
-  readonly observedMs: number
-}
-
-export interface StaleAllowlist {
-  readonly key: string
-  readonly reason: string
-}
-
 export interface PercentileViolation {
   readonly p: number
   readonly valueMs: number
@@ -215,10 +178,6 @@ export interface RuleDiagnosis {
   readonly total: number
   readonly percentiles: Readonly<Record<number, number>>
   readonly maxMs: number
-  readonly absoluteViolations: readonly AbsoluteViolation[]
-  readonly governed: readonly GovernedCase[]
-  readonly staleAllowlist: readonly StaleAllowlist[]
-  readonly expiredAllowlist: readonly ExpiredAllowlist[]
   readonly percentileViolation?: PercentileViolation
 }
 

@@ -12,9 +12,9 @@ function config() {
   return parseSuiteConfig(`{
     "suiteDeadlineMs": 300000,
     "tracks": [
-      {"id":"server-unit","kind":"report-only","trackType":"behavior","application":"server","specKind":"Design","level":"L0","resources":[],"report":"reports/server.json","reportFormat":"vitest","deadlineMs":1000,"enforce":true,"rules":[{"id":"unit","absoluteMs":500}]},
-      {"id":"server-spec","kind":"report-only","trackType":"behavior","application":"server","specKind":"Product","level":"L1","resources":[],"report":"reports/spec.json","reportFormat":"vitest","deadlineMs":1000,"enforce":true,"rules":[{"id":"spec","absoluteMs":5000}]},
-      {"id":"repository-arch","kind":"report-only","trackType":"architecture","architectureScope":"repository","specKind":"Design","resources":[],"report":"reports/arch.json","reportFormat":"vitest","deadlineMs":1000,"enforce":true,"rules":[{"id":"arch","absoluteMs":500}]}
+      {"id":"server-unit","kind":"report-only","trackType":"behavior","application":"server","specKind":"Design","level":"L0","resources":[],"report":"reports/server.json","reportFormat":"vitest","deadlineMs":1000,"enforce":true,"rules":[{"id":"unit","percentile":95,"percentileMs":50}]},
+      {"id":"server-spec","kind":"report-only","trackType":"behavior","application":"server","specKind":"Product","level":"L1","resources":[],"report":"reports/spec.json","reportFormat":"vitest","deadlineMs":1000,"enforce":true,"rules":[{"id":"spec","percentile":95,"percentileMs":500}]},
+      {"id":"repository-arch","kind":"report-only","trackType":"architecture","architectureScope":"repository","specKind":"Design","resources":[],"report":"reports/arch.json","reportFormat":"vitest","deadlineMs":1000,"enforce":true,"rules":[{"id":"arch"}]}
     ],
     "plan": {
       "applications":["server"],

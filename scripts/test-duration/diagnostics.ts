@@ -54,22 +54,6 @@ export function formatEvaluation(eval_: TrackEvaluation): string[] {
         `      >> percentile p${rule.percentileViolation.p} ${ms(rule.percentileViolation.valueMs)} exceeds budget ${ms(rule.percentileViolation.budgetMs)}`,
       )
     }
-    for (const v of rule.absoluteViolations) {
-      lines.push(`      >> OVER BUDGET ${ms(v.durationMs)}: ${v.name}`)
-    }
-    for (const g of rule.governed) {
-      lines.push(
-        `      governed ${ms(g.durationMs)} (baseline ${ms(g.observedMs)}, by ${g.deadline}, ${g.owner}): ${g.name}  [${g.reason}]`,
-      )
-    }
-    for (const s of rule.staleAllowlist) {
-      lines.push(`      >> STALE allowlist "${s.key}" matched no test  [${s.reason}]`)
-    }
-    for (const e of rule.expiredAllowlist) {
-      lines.push(
-        `      >> EXPIRED allowlist "${e.key}" past removal deadline ${e.deadline} (${e.owner})  [${e.reason}]`,
-      )
-    }
   }
   for (const failed of eval_.failedTests) {
     lines.push(`      >> FAILED TEST: ${failed}`)
@@ -82,8 +66,7 @@ export interface GuardSummary {
   readonly failedTracks: number
   readonly cancelledTracks: number
   readonly timeoutTracks: number
-  readonly governed: number
-  readonly overBudget: number
+  readonly percentileBreaches: number
   readonly suiteDeadlineBreached: boolean
   readonly suiteElapsedMs?: number
 }
@@ -113,9 +96,8 @@ export function summarize(
       .filter((r) => !r.cancelled && (r.timedOut || r.exitCode !== 0 || !r.reportReady || !r.cleanupComplete))
       .map((r) => r.policyTrackId ?? r.trackId),
   ])
-  const governed = evaluations.reduce((sum, e) => sum + e.rules.reduce((s, r) => s + r.governed.length, 0), 0)
-  const overBudget = evaluations.reduce(
-    (sum, e) => sum + e.rules.reduce((s, r) => s + r.absoluteViolations.length, 0),
+  const percentileBreaches = evaluations.reduce(
+    (sum, e) => sum + e.rules.filter((rule) => rule.percentileViolation !== undefined).length,
     0,
   )
   return {
@@ -123,8 +105,7 @@ export function summarize(
     failedTracks: failedTrackIds.size + (suiteDeadlineBreached && failedTrackIds.size === 0 ? 1 : 0),
     cancelledTracks: cancelledTrackIds.size,
     timeoutTracks,
-    governed,
-    overBudget,
+    percentileBreaches,
     suiteDeadlineBreached,
     suiteElapsedMs,
   }
@@ -137,7 +118,7 @@ export function formatSummary(summary: GuardSummary, suiteDeadlineMs: number): s
       : ms(suiteDeadlineMs)
   return [
     `test-duration: ${summary.totalTracks} tracks, ${summary.failedTracks} failing, ${summary.cancelledTracks} cancelled, ${summary.timeoutTracks} timed out`,
-    `  governed (allowlisted) slow tests: ${summary.governed}  | over-budget (not allowlisted): ${summary.overBudget}`,
+    `  percentile budget breaches: ${summary.percentileBreaches}`,
     `  suite deadline: ${suite}`,
   ].join('\n')
 }

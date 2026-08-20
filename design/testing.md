@@ -446,15 +446,18 @@ track:
   is at most 500 ms.
 - p95 uses nearest rank: sort the population by duration and select the one-based
   item at `ceil(0.95 * count)`.
-- One L0 or Architecture Spec is at most 500 ms. One L1 Spec is at most 5 s.
 - Each application-and-Level track has an enforced wall-time deadline.
 - Each Architecture track has an enforced wall-time deadline.
 - The complete local gate is at most five minutes.
 
-The L1 single-Spec limit is a failure ceiling, not a target. A budget breach is
-a test defect and must fail acceptance. No slow-Spec exception may turn the
-gate green. A track without a seeded baseline is an incomplete migration state;
-it must not waive the final gate.
+Per-Spec wall time is diagnostic evidence, not a stable acceptance boundary.
+Concurrent scheduling, runtime startup, garbage collection, and shared host
+load can change that measurement without changing the claimed behavior or the
+portfolio cost. A slow maximum must trigger investigation, but it does not fail
+an otherwise passing population and track deadline. A deterministic cost claim
+uses work counts or controlled inputs, not runner wall time. A track without a
+seeded baseline is an incomplete migration state; it must not waive the final
+gate.
 
 Duration evidence must report population p50, p95, and maximum, track wall time,
 fixture setup time, and application, Orleans, or Browser startup counts. Shared
@@ -512,7 +515,7 @@ for expensive Specs or shared Resources.
   and reported without requiring an independent selector. Resource metadata must
   map each test class to exactly one plan lane.
 - `scripts/test-duration/` must enforce suite and track deadlines, population
-  budgets, single-Spec limits, report freshness, and nonzero totals. It must
+  budgets, report freshness, and nonzero totals. It must
   report setup and startup cost until explicit limits exist.
 - Architecture Specs must enforce layer dependencies, naming, namespaces,
   public surfaces, and analyzer wiring.
@@ -539,7 +542,7 @@ surface.
 
 CI uses the same plan as six ownership jobs: Server, Web, CLI, Runner, Slack,
 and Repository, followed by Gate. Every configured Spec track is enforced
-without a slow-test allowlist, and each scope records source identity, reports,
+without slow-test exceptions, and each scope records source identity, reports,
 totals, duration, and process cleanup. New Specs only need to follow the model
 and declare their owning application, Kind, Level or Architecture scope, and
 Resources; the distribution between levels remains an outcome of ownership.

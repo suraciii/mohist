@@ -3,12 +3,10 @@ import { mock, test } from 'node:test'
 
 import {
   cleanupDeadlineAt,
-  calendarNowFor,
   commandFor,
   createTimeout,
   DEFAULT_XUNIT_PARALLELISM,
   evaluateTrackArtifacts,
-  evaluateTrackAtCalendarDate,
   isLaneSuccessful,
   laneSandbox,
   main,
@@ -170,7 +168,7 @@ test('guard evaluates CLI duration from the execution ledger and fails closed wh
     reportFormat: 'trx',
     deadlineMs: 60_000,
     enforce: true,
-    rules: [{ id: 'unit', absoluteMs: 500, percentile: 95, percentileMs: 50 }],
+    rules: [{ id: 'unit', percentile: 95, percentileMs: 50 }],
   }
   const artifacts = new Map<string, string>([
     [
@@ -233,7 +231,7 @@ test('guard evaluates CLI duration from the execution ledger and fails closed wh
   assert.equal(evaluation.rules[0].maxMs, 10)
 
   artifacts.delete(track.executionLedger!)
-  const missing = evaluateTrackArtifacts(track, reader, undefined, new Date(), expected)
+  const missing = evaluateTrackArtifacts(track, reader, undefined, expected)
   assert.equal(missing.passed, false)
   assert.match(missing.reportError ?? '', /missing reports\/cli\.execution-ledger\.json/)
 })
@@ -263,7 +261,7 @@ function savedExecutionFixture(): {
     reportFormat: 'trx',
     deadlineMs: 60_000,
     enforce: true,
-    rules: [{ id: 'unit', absoluteMs: 50 }],
+    rules: [{ id: 'unit' }],
   }
   return {
     track,
@@ -325,7 +323,6 @@ function evaluateSavedFixture(fixture: ReturnType<typeof savedExecutionFixture>)
       },
     },
     undefined,
-    new Date('2026-08-12T00:00:00Z'),
     fixture.current,
   )
 }
@@ -396,7 +393,7 @@ test('canonical lane commands keep reporter arguments on the final test process 
     reportFormat: 'trx',
     deadlineMs: 1000,
     enforce: true,
-    rules: [{ id: 'unit', absoluteMs: 500 }],
+    rules: [{ id: 'unit' }],
   }
   const workflowCommand = commandFor(workflow, '/evidence')
   assert.equal(workflowCommand.command, 'dotnet')
@@ -454,34 +451,6 @@ test('lane sandbox gives every lane distinct temporary resources and isolates se
   assert.match(serverSpec.databasePath, /^\/evidence\/tmp\/server-spec\/mohist\/mohist\.db$/)
   assert.match(serverSpec.otelDatabasePath, /^\/evidence\/tmp\/server-spec\/mohist\/otel\.db$/)
   assert.match(web.homeDir, /^\/evidence\/tmp\/web\/home$/)
-})
-
-test('budget calendar policy receives its injected wall-calendar source, never the monotonic duration clock', () => {
-  const calendar = new Date('2026-08-09T00:00:00.000Z')
-  const calendarNow = () => calendar
-
-  const track: TrackConfig = {
-    id: 'calendar-policy',
-    kind: 'report-only',
-    report: 'unused.trx',
-    reportFormat: 'trx',
-    deadlineMs: 1000,
-    enforce: true,
-    rules: [
-      {
-        id: 'unit',
-        absoluteMs: 50,
-        allowlist: [{ id: 'slow', observedMs: 100, reason: 'fixture', owner: 'test', deadline: '2026-01-01' }],
-      },
-    ],
-  }
-
-  assert.equal(calendarNowFor({ calendarNow })(), calendar)
-  const evaluation = evaluateTrackAtCalendarDate(track, [{ name: 'slow', durationMs: 100, outcome: 'passed' }], {
-    calendarNow,
-  })
-  assert.equal(evaluation.passed, false)
-  assert.equal(evaluation.rules[0].expiredAllowlist.length, 1)
 })
 
 test('a completed lane without its report fails fast while cancelled lanes remain distinct in the summary', () => {

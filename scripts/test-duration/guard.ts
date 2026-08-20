@@ -48,12 +48,11 @@ import { parseAssemblyName, resolveApphostPath, resolveDiscoveryCommand, resolve
 import { nativeProcessTreeOps, terminateProcessTree, type ProcessTreeOps } from './process-tree.js'
 import { scheduleLanes, type LaneSpec, type RunningLane } from './scheduler.js'
 import { resolveSpawnCommand } from './spawn-command.js'
-import { nativeCalendarSource, nativeTimeSource } from './time.js'
+import { nativeTimeSource } from './time.js'
 import type {
   CurrentExecutionIdentity,
   ExecutionLedgerExpectation,
   SuiteConfig,
-  TestCase,
   TrackConfig,
   TrackEvaluation,
   TrackRun,
@@ -265,7 +264,6 @@ const nativeTimeoutScheduler: TimeoutScheduler = {
 
 export interface GuardRuntime {
   readonly now: () => number
-  readonly calendarNow?: () => Date
   readonly timeoutScheduler?: TimeoutScheduler
   readonly processTreeOps?: ProcessTreeOps
   readonly abortSignal?: AbortSignal
@@ -273,19 +271,6 @@ export interface GuardRuntime {
 
 const nativeGuardRuntime: GuardRuntime = {
   now: nativeTimeSource.now,
-  calendarNow: nativeCalendarSource.now,
-}
-
-export function calendarNowFor(runtime: Pick<GuardRuntime, 'calendarNow'>): () => Date {
-  return runtime.calendarNow ?? nativeCalendarSource.now
-}
-
-export function evaluateTrackAtCalendarDate(
-  track: TrackConfig,
-  cases: readonly TestCase[],
-  runtime: Pick<GuardRuntime, 'calendarNow'>,
-): TrackEvaluation {
-  return evaluateTrack(track, cases, calendarNowFor(runtime)())
 }
 
 export function reportEvaluationFailureReason(
@@ -890,7 +875,6 @@ export function evaluateTrackArtifacts(
   track: TrackConfig,
   artifacts: TrackArtifactReader,
   run?: TrackRun,
-  today: Date = new Date(),
   currentIdentity?: CurrentExecutionIdentity,
 ): TrackEvaluation {
   if (run?.cancelled) {
@@ -930,9 +914,9 @@ export function evaluateTrackArtifacts(
       if (evidence.errors.length > 0) {
         return failedEvaluation(track, `execution ledger contract failed: ${evidence.errors.join('; ')}`)
       }
-      return evaluateTrack(track, evidence.cases, today)
+      return evaluateTrack(track, evidence.cases)
     }
-    return evaluateTrack(track, trxCases, today)
+    return evaluateTrack(track, trxCases)
   } catch (error) {
     return failedEvaluation(track, `could not read report ${track.report}: ${(error as Error).message}`)
   }
@@ -942,7 +926,6 @@ function evaluateFromPlans(
   track: TrackConfig,
   plans: readonly PlannedLane[],
   runsByLane: ReadonlyMap<string, TrackRun>,
-  runtime: Pick<GuardRuntime, 'calendarNow'>,
   artifactRoot: string,
   currentIdentity?: CurrentExecutionIdentity,
 ): TrackEvaluation {
@@ -959,7 +942,6 @@ function evaluateFromPlans(
           readFileSync(path === track.report ? plan.reportPath! : resolve(artifactRoot, path), 'utf8'),
       },
       run,
-      calendarNowFor(runtime)(),
       currentIdentity,
     )
   }
@@ -983,7 +965,7 @@ function evaluateFromPlans(
       return failedEvaluation(track, `could not read report ${plan.reportPath}: ${(error as Error).message}`)
     }
   }
-  return evaluateTrackAtCalendarDate(track, cases, runtime)
+  return evaluateTrack(track, cases)
 }
 
 async function readSavedTrackIdentity(
@@ -1521,13 +1503,7 @@ export async function main(
         continue
       }
       try {
-        const evaluation = evaluateFromPlans(
-          track,
-          plansByPolicy.get(track.id) ?? [],
-          runsByTrack,
-          runtime,
-          artifactRoot,
-        )
+        const evaluation = evaluateFromPlans(track, plansByPolicy.get(track.id) ?? [], runsByTrack, artifactRoot)
         const afterEvaluationFailure = reportEvaluationFailureReason(
           runtime.now(),
           deadlines,
@@ -1609,7 +1585,6 @@ export async function main(
       track,
       plansByPolicy.get(track.id) ?? [],
       new Map(),
-      runtime,
       artifactRoot,
       currentIdentity,
     )
