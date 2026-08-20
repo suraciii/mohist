@@ -126,12 +126,13 @@ export class TerminalTaskLogDeliveryStoreImpl implements TerminalTaskLogDelivery
       if (existing) {
         // A server-side terminal conflict is final for the previous snapshot,
         // but it must not make a later execution fail before it can report.
-        // Replace that failed local delivery with the new snapshot so the
-        // executor can make one fresh delivery attempt.
+        // A not-found response has a different meaning: the previous upload
+        // was never accepted, so a recovery execution needs a fresh delivery
+        // record for the same work identity.
         if (
           existing.state === 'failed' &&
-          existing.failure?.kind === 'conflict' &&
-          existing.failure.code === 'terminal_snapshot_conflict'
+          ((existing.failure?.kind === 'conflict' && existing.failure.code === 'terminal_snapshot_conflict') ||
+            existing.failure?.kind === 'not-found')
         ) {
           const pending: TerminalTaskLogDeliveryRecord = {
             identity: { ...record.identity },
