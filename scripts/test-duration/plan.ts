@@ -35,6 +35,7 @@ export function validatePlan(config: SuiteConfig): string[] {
 
   errors.push(...validateResourceLanes(plan.resourceLanes))
   errors.push(...validateApplicationBuilds(plan.applications, plan.applicationBuilds))
+  errors.push(...validateCommandList(`plan.repositoryChecks`, plan.repositoryChecks))
 
   const behaviorByApplication = new Map<string, number>()
   const trackIds = new Set<string>()
@@ -206,23 +207,29 @@ function validateApplicationBuilds(
   }
   for (const application of applications ?? []) {
     const commands = builds[application]
-    if (!Array.isArray(commands) || commands.length === 0) {
-      errors.push(`plan.applicationBuilds.${application} must be a non-empty command list`)
-      continue
-    }
-    commands.forEach((command, index) => {
-      if (command === null || typeof command !== 'object' || Array.isArray(command)) {
-        errors.push(`plan.applicationBuilds.${application}[${index}] must be a command object`)
-        return
-      }
-      if (typeof command.command !== 'string' || command.command.length === 0) {
-        errors.push(`plan.applicationBuilds.${application}[${index}].command must be non-empty`)
-      }
-      if (!Array.isArray(command.args) || command.args.some((arg) => typeof arg !== 'string')) {
-        errors.push(`plan.applicationBuilds.${application}[${index}].args must be an array of strings`)
-      }
-    })
+    errors.push(...validateCommandList(`plan.applicationBuilds.${application}`, commands))
   }
+  return errors
+}
+
+function validateCommandList(prefix: string, commands: readonly CommandConfig[] | undefined): string[] {
+  const errors: string[] = []
+  if (!Array.isArray(commands) || commands.length === 0) {
+    errors.push(`${prefix} must be a non-empty command list`)
+    return errors
+  }
+  commands.forEach((command, index) => {
+    if (command === null || typeof command !== 'object' || Array.isArray(command)) {
+      errors.push(`${prefix}[${index}] must be a command object`)
+      return
+    }
+    if (typeof command.command !== 'string' || command.command.length === 0) {
+      errors.push(`${prefix}[${index}].command must be non-empty`)
+    }
+    if (!Array.isArray(command.args) || command.args.some((arg) => typeof arg !== 'string')) {
+      errors.push(`${prefix}[${index}].args must be an array of strings`)
+    }
+  })
   return errors
 }
 

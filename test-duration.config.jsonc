@@ -55,6 +55,10 @@
         { "command": "npm", "args": ["run", "build", "-w", "packages/mohist-slack"] }
       ]
     },
+    "repositoryChecks": [
+      { "command": "npm", "args": ["run", "docs:check"] },
+      { "command": "npm", "args": ["run", "archtest"] }
+    ],
     "resourceLanes": [
       { "id": "default", "resources": [], "capacity": 4 },
       { "id": "server-l1", "resources": ["orleans", "sqlite"], "capacity": 1 }

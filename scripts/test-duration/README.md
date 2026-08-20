@@ -116,9 +116,10 @@ global serialization are not gate recovery mechanisms.
 
 The executor now validates the checked-in application plan, exposes the closed
 `test:app` scope, builds the selected application once, and passes the same run
-root to the existing track guard. Repository scope evidence, complete local
-`verify` aggregation, and CI producer/Gate wiring remain implementation work.
-The current CI workflow still owns project and framework commands. These are
+root to the existing track guard. The Repository executor runs the declared
+repository checks, and Gate validates the six scope evidence bundles without
+rerunning tests. Complete local `verify` aggregation and the migration of all
+CI setup details into the workflow remain implementation work. These are
 implementation gaps, not alternate supported modes.
 
 ## Platform Rules

@@ -156,6 +156,7 @@ export interface TestPlanConfig {
   readonly repositoryScope: string
   readonly resourceLanes: readonly ResourceLaneConfig[]
   readonly applicationBuilds: Readonly<Record<string, readonly CommandConfig[]>>
+  readonly repositoryChecks: readonly CommandConfig[]
 }
 
 export interface SuiteConfig {

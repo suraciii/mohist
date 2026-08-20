@@ -33,6 +33,7 @@ function planConfig(
       applications: ['server'],
       repositoryScope: 'repository',
       applicationBuilds: { server: [{ command: 'dotnet', args: ['build'] }] },
+      repositoryChecks: [{ command: 'npm', args: ['run', 'archtest'] }],
       resourceLanes: [{ id: 'default', resources: [], capacity: 1 }],
     },
     tracks,

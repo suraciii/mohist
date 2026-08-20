@@ -50,7 +50,7 @@ export interface ApplicationRuntime {
   readonly report: (line: string) => void
 }
 
-function createTerminationSignal(): { readonly signal: AbortSignal; readonly dispose: () => void } {
+export function createTerminationSignal(): { readonly signal: AbortSignal; readonly dispose: () => void } {
   const controller = new AbortController()
   const abort = () => controller.abort()
   process.once('SIGTERM', abort)
@@ -77,18 +77,19 @@ function writeEvidence(runtime: ApplicationRuntime, root: string, name: string, 
   runtime.writeFile(resolve(root, name), `${JSON.stringify(value, null, 2)}\n`)
 }
 
-async function executeBuild(
+export async function runCommandSequence(
   commands: readonly CommandConfig[],
-  runtime: ApplicationRuntime,
+  runtime: Pick<ApplicationRuntime, 'now' | 'runPhase'>,
   artifactRoot: string,
   deadlines: SuiteDeadlines,
   abortSignal: AbortSignal,
+  namePrefix = 'build',
 ): Promise<{ readonly passed: boolean; readonly results: readonly PhaseResult[] }> {
   const results: PhaseResult[] = []
   for (const [index, command] of commands.entries()) {
     if (abortSignal.aborted) return { passed: false, results }
     const result = await runtime.runPhase(
-      `build-${index + 1}`,
+      `${namePrefix}-${index + 1}`,
       command.command,
       command.args,
       artifactRoot,
@@ -168,7 +169,7 @@ export async function main(
       buildCommands: commands,
     })
 
-    const build = await executeBuild(commands, runtime, artifactRoot, deadlines, termination.signal)
+    const build = await runCommandSequence(commands, runtime, artifactRoot, deadlines, termination.signal)
     if (!build.passed) {
       writeEvidence(runtime, artifactRoot, 'summary.json', {
         application: args.application,
