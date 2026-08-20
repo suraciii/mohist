@@ -78,7 +78,7 @@
         { "id": "unit", "absoluteMs": 500, "percentile": 95, "percentileMs": 50, "allowlist": [] }
       ]
     },
-    { "id": "workflow-def", "kind": "dotnet-vstest", "trackType": "behavior", "application": "server", "specKind": "Design", "level": "L0", "resources": ["server-runtime"], "csproj": "packages/server/tests/Mohist.Workflow.Definition.Tests/Mohist.Workflow.Definition.Tests.csproj", "report": "reports/workflow-def.trx", "reportFormat": "trx", "deadlineMs": 30000, "enforce": true, "rules": [
+    { "id": "workflow-def", "kind": "dotnet-vstest", "trackType": "behavior", "application": "server", "specKind": "Design", "level": "L0", "resources": [], "csproj": "packages/server/tests/Mohist.Workflow.Definition.Tests/Mohist.Workflow.Definition.Tests.csproj", "report": "reports/workflow-def.trx", "reportFormat": "trx", "deadlineMs": 30000, "enforce": true, "rules": [
         { "id": "unit", "absoluteMs": 500, "percentile": 95, "percentileMs": 50, "allowlist": [] }
       ]
     },
@@ -96,7 +96,7 @@
         { "id": "unit", "absoluteMs": 500, "percentile": 95, "percentileMs": 50, "allowlist": [] }
       ]
     },
-    { "id": "server-arch", "kind": "dotnet-apphost", "trackType": "architecture", "application": "server", "specKind": "Design", "architectureScope": "server", "resources": ["server-runtime"], "csproj": "packages/server/tests/Mohist.Server.ArchTests/Mohist.Server.ArchTests.csproj", "report": "reports/server-arch.trx", "reportFormat": "trx", "deadlineMs": 60000, "enforce": true, "rules": [
+    { "id": "server-arch", "kind": "dotnet-apphost", "trackType": "architecture", "application": "server", "specKind": "Design", "architectureScope": "server", "resources": [], "csproj": "packages/server/tests/Mohist.Server.ArchTests/Mohist.Server.ArchTests.csproj", "report": "reports/server-arch.trx", "reportFormat": "trx", "deadlineMs": 60000, "enforce": true, "rules": [
         { "id": "arch", "absoluteMs": 500 }
       ]
     },
