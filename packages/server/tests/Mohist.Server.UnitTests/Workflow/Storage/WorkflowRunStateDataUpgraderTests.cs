@@ -4,18 +4,18 @@ using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Infrastructure.Data.Workflow;
-using Mohist.Server.SpecTests.Support;
+using Mohist.Server.UnitTests.Support;
 using Mohist.Server.TestSupport;
 using Xunit;
 
-namespace Mohist.Server.SpecTests.Specs.Workflow.Storage;
+namespace Mohist.Server.UnitTests.Workflow.Storage;
 
 public sealed class WorkflowRunStateDataUpgraderSpecs
 {
     [Fact]
     public async Task UpgradeAsync_MigratesLegacyClaimAssignmentRunnerRecoveryAndProfileBinding()
     {
-        using var database = TestSqliteDatabase.CreateMigrated();
+        using var database = TestSqliteDatabase.CreateModelSchema();
         const string runId = "wr_legacy_shape";
         var legacy = LegacyState(runId);
         await InsertAsync(database, new WorkflowRunRow
@@ -62,7 +62,7 @@ public sealed class WorkflowRunStateDataUpgraderSpecs
     [Fact]
     public async Task UpgradeAsync_PreflightFailureNamesRunAndWritesNothing()
     {
-        using var database = TestSqliteDatabase.CreateMigrated();
+        using var database = TestSqliteDatabase.CreateModelSchema();
         const string canonicalId = "wr_canonical";
         const string ambiguousId = "wr_ambiguous";
         var canonical = CanonicalState(canonicalId);
@@ -87,7 +87,7 @@ public sealed class WorkflowRunStateDataUpgraderSpecs
     [Fact]
     public async Task UpgradeAsync_BackupFailurePreventsAllStateAndETagWrites()
     {
-        using var database = TestSqliteDatabase.CreateMigrated();
+        using var database = TestSqliteDatabase.CreateModelSchema();
         const string firstId = "wr_backup_failure_a";
         const string secondId = "wr_backup_failure_b";
         var first = LegacyState(firstId);
@@ -113,7 +113,7 @@ public sealed class WorkflowRunStateDataUpgraderSpecs
     [Fact]
     public async Task UpgradeAsync_RollsBackAllStateAndETagWritesWhenOneRowFails()
     {
-        using var database = TestSqliteDatabase.CreateMigrated();
+        using var database = TestSqliteDatabase.CreateModelSchema();
         var first = LegacyState("wr_atomic_a");
         var second = LegacyState("wr_atomic_b");
         await InsertAsync(database,
@@ -147,7 +147,7 @@ public sealed class WorkflowRunStateDataUpgraderSpecs
     [Fact]
     public async Task UpgradeAsync_LeavesCanonicalRowsUntouchedAndIsIdempotent()
     {
-        using var database = TestSqliteDatabase.CreateMigrated();
+        using var database = TestSqliteDatabase.CreateModelSchema();
         const string canonicalId = "wr_noop";
         const string legacyId = "wr_once";
         var canonical = CanonicalState(canonicalId);
@@ -178,7 +178,7 @@ public sealed class WorkflowRunStateDataUpgraderSpecs
     [Fact]
     public async Task UpgradeAsync_UsesBatchesForMoreThanFiveHundredCandidates()
     {
-        using var database = TestSqliteDatabase.CreateMigrated();
+        using var database = TestSqliteDatabase.CreateModelSchema();
         var rows = Enumerable.Range(0, 1001)
             .Select(index => new WorkflowRunRow
             {

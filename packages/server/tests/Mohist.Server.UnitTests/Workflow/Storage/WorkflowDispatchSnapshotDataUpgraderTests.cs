@@ -4,11 +4,11 @@ using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Infrastructure.Data.Workflow;
-using Mohist.Server.SpecTests.Support;
+using Mohist.Server.UnitTests.Support;
 using Mohist.Server.TestSupport;
 using Xunit;
 
-namespace Mohist.Server.SpecTests.Specs.Workflow.Storage;
+namespace Mohist.Server.UnitTests.Workflow.Storage;
 
 public sealed class WorkflowDispatchSnapshotDataUpgraderSpecs
 {
@@ -17,7 +17,7 @@ public sealed class WorkflowDispatchSnapshotDataUpgraderSpecs
     [Fact]
     public async Task ExternalizeAsync_ExternalizesRunningSnapshotsAndStripsAllDispatchSnapshot()
     {
-        using var database = TestSqliteDatabase.CreateMigrated();
+        using var database = TestSqliteDatabase.CreateModelSchema();
         const string runId = "wr_externalize";
         await InsertAsync(database, new WorkflowRunRow
         {
@@ -51,7 +51,7 @@ public sealed class WorkflowDispatchSnapshotDataUpgraderSpecs
     [Fact]
     public async Task ExternalizeAsync_InFlightSnapshotSurvivesUpgradeVerbatim()
     {
-        using var database = TestSqliteDatabase.CreateMigrated();
+        using var database = TestSqliteDatabase.CreateModelSchema();
         const string runId = "wr_inflight";
         await InsertAsync(database, new WorkflowRunRow
         {
@@ -73,7 +73,7 @@ public sealed class WorkflowDispatchSnapshotDataUpgraderSpecs
     [Fact]
     public async Task ExternalizeAsync_IsIdempotentOnSecondRun()
     {
-        using var database = TestSqliteDatabase.CreateMigrated();
+        using var database = TestSqliteDatabase.CreateModelSchema();
         const string runId = "wr_idempotent";
         await InsertAsync(database, new WorkflowRunRow
         {
@@ -104,7 +104,7 @@ public sealed class WorkflowDispatchSnapshotDataUpgraderSpecs
     [Fact]
     public async Task ExternalizeAsync_LeavesRowsWithoutSnapshotsUntouched()
     {
-        using var database = TestSqliteDatabase.CreateMigrated();
+        using var database = TestSqliteDatabase.CreateModelSchema();
         const string slimId = "wr_already_slim";
         const string legacyId = "wr_still_embedded";
         var slim = $$"""{"id":"{{slimId}}","metadata":{"createdAt":"1970-01-01T00:00:00+00:00"},"status":"Running","stages":[]}""".Trim();
@@ -126,7 +126,7 @@ public sealed class WorkflowDispatchSnapshotDataUpgraderSpecs
     [Fact]
     public async Task ExternalizeAsync_PreflightFailureNamesRunAndWritesNothing()
     {
-        using var database = TestSqliteDatabase.CreateMigrated();
+        using var database = TestSqliteDatabase.CreateModelSchema();
         const string goodId = "wr_preflight_good";
         const string badId = "wr_preflight_bad";
         var good = LegacyEmbeddedState(goodId);
@@ -152,7 +152,7 @@ public sealed class WorkflowDispatchSnapshotDataUpgraderSpecs
     [Fact]
     public async Task ExternalizeAsync_PreflightValidatesRowsWithoutSnapshots()
     {
-        using var database = TestSqliteDatabase.CreateMigrated();
+        using var database = TestSqliteDatabase.CreateModelSchema();
         const string goodId = "wr_unchanged_good";
         const string badId = "wr_unchanged_bad";
         var good = LegacyEmbeddedState(goodId);
@@ -176,7 +176,7 @@ public sealed class WorkflowDispatchSnapshotDataUpgraderSpecs
     [Fact]
     public async Task ExternalizeAsync_DoesNotOverwritePreExistingSnapshot()
     {
-        using var database = TestSqliteDatabase.CreateMigrated();
+        using var database = TestSqliteDatabase.CreateModelSchema();
         const string runId = "wr_existing_snapshot";
         const string existing = "{\"workId\":\"t1.1\",\"items\":[{\"prompt\":\"existing\"}]}";
         await InsertAsync(database, new WorkflowRunRow
@@ -204,7 +204,7 @@ public sealed class WorkflowDispatchSnapshotDataUpgraderSpecs
     [Fact]
     public async Task ExternalizeAsync_BackupFailurePreventsAllWrites()
     {
-        using var database = TestSqliteDatabase.CreateMigrated();
+        using var database = TestSqliteDatabase.CreateModelSchema();
         const string runId = "wr_backup_fail";
         var legacy = LegacyEmbeddedState(runId);
         await InsertAsync(database, new WorkflowRunRow { WorkflowRunId = runId, State = legacy });
@@ -225,7 +225,7 @@ public sealed class WorkflowDispatchSnapshotDataUpgraderSpecs
     [Fact]
     public async Task SweepOrphansAsync_DeletesNonRunningSnapshotsAndKeepsActive()
     {
-        using var database = TestSqliteDatabase.CreateMigrated();
+        using var database = TestSqliteDatabase.CreateModelSchema();
         const string runId = "wr_orphan_sweep";
         await InsertAsync(database, new WorkflowRunRow
         {
@@ -249,7 +249,7 @@ public sealed class WorkflowDispatchSnapshotDataUpgraderSpecs
     [Fact]
     public async Task SweepOrphansAsync_PreflightFailureDeletesNothing()
     {
-        using var database = TestSqliteDatabase.CreateMigrated();
+        using var database = TestSqliteDatabase.CreateModelSchema();
         const string runId = "wr_invalid_sweep";
         await InsertAsync(database, new WorkflowRunRow
         {
@@ -272,7 +272,7 @@ public sealed class WorkflowDispatchSnapshotDataUpgraderSpecs
     [Fact]
     public async Task SweepOrphansAsync_IsNoOpWithNoSnapshots()
     {
-        using var database = TestSqliteDatabase.CreateMigrated();
+        using var database = TestSqliteDatabase.CreateModelSchema();
         await InsertAsync(database, new WorkflowRunRow
         {
             WorkflowRunId = "wr_empty_sweep",
