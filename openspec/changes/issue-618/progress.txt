@@ -142,7 +142,7 @@ Verification:
 - Verification: Server build passes; `AgentJobManagerRunnerLossRecoverySpecs` passes 1/1; `AgentSessionRuntimeEventSpecs` passes 11/11; `AgentSessionRecoveryGrainSpecs` passes 24/24. Shared SQLite/epoch-sensitive specs were run serially.
 
 ## Review Round 9 Repair
-- Finding 1: the deterministic Manager Session mapping is now persisted before `LaunchConnectionAsync` can submit the AgentJob and is repeated after launch for idempotent convergence.
+- Finding 1: the deterministic Manager Session mapping is now persisted before `LaunchConnectionAsync` can submit the AgentJob and is repeated after launch for idempotent convergence. A concurrent Manager follow-up can queue behind the still-unrouted initial inbox launch, while completed ingress continues to use the existing missing-runtime replacement path.
 - Finding 2: a duplicate follow-up whose operation journal is already `submitted` now revokes the newly issued Manager execution grant after disposing its unused boundary.
 - Finding 3: Manager CLI stdout and stderr are accumulated before masking, so credentials split across stream chunks are redacted before the response reaches the launcher or model.
-- Coverage: focused Runner follow-up and Manager boundary tests pass 5/5; Runner typecheck and Server build pass.
+- Coverage: the dispatch-boundary regression proves the mapping exists before submit and concurrent input creates one follow-up in the original Session; the Server Spec assembly passes 3,183/3,183. Focused Runner follow-up and Manager boundary tests pass 5/5; Runner typecheck and Server build pass.

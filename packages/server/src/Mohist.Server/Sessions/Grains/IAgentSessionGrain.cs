@@ -374,7 +374,14 @@ public sealed record AcceptFollowupCommand(
     /// free after <see cref="PreMintedTurnId"/>).
     /// </summary>
     [property: Id(6)] IReadOnlyList<AgentInputAttachmentAcceptance>? AttachmentResults = null,
-    [property: Id(7)] AgentSessionInputProvenance? Provenance = null);
+    [property: Id(7)] AgentSessionInputProvenance? Provenance = null,
+    /// <summary>
+    /// Allows a Manager message to queue behind a still-pending initial
+    /// launch before the Runner has attached its physical runtime session.
+    /// This does not permit dispatch to overtake the initial turn.
+    /// Append-only Orleans field id.
+    /// </summary>
+    [property: Id(8)] bool AllowPendingInitialLaunch = false);
 
 [GenerateSerializer]
 public sealed record AgentSessionRuntimeEventInput(

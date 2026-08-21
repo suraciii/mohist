@@ -588,7 +588,8 @@ public sealed partial class AgentSessionGrain : Grain, IAgentSessionGrain, IRemi
         }
 
         var session = await GetRequiredAsync();
-        EnsureRuntimeSessionPresent(session);
+        if (!command.AllowPendingInitialLaunch || !HasInitialLaunch(session))
+            EnsureRuntimeSessionPresent(session);
         if (session.Status.PendingReset is { } recovery)
         {
             if (recovery.Outcome is null)
@@ -1430,6 +1431,10 @@ public sealed partial class AgentSessionGrain : Grain, IAgentSessionGrain, IRemi
         if (!session.IsRuntimeSessionMissing(IsRuntimeRegistered)) return;
         throw new RuntimeSessionMissingException(session.Id, session.Status.AgentRuntimeSessionId, session.Runtime.Runtime);
     }
+
+    private static bool HasInitialLaunch(AgentSession session) =>
+        (session.Status.Turns ?? [])
+            .Any(turn => !string.IsNullOrWhiteSpace(turn.JobId));
 
     private static bool IsRuntimeRegistered(string runtime) =>
         string.Equals(runtime, OpenCodeRuntime, StringComparison.OrdinalIgnoreCase)

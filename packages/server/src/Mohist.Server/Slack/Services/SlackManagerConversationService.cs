@@ -24,6 +24,7 @@ public sealed class SlackManagerConversationService : IScopedService, ISlackMana
     private readonly AgentSessionFollowupDispatcher _followups;
     private readonly IGrainFactory _grains;
     private readonly SlackDmSessionMappingStore _dmSessions;
+    private readonly SlackProviderInboxStore _inbox;
 
     public SlackManagerConversationService(
         BuiltInAgentResolver agents,
@@ -31,7 +32,8 @@ public sealed class SlackManagerConversationService : IScopedService, ISlackMana
         AgentSessionQuerier sessions,
         AgentSessionFollowupDispatcher followups,
         IGrainFactory grains,
-        SlackDmSessionMappingStore dmSessions)
+        SlackDmSessionMappingStore dmSessions,
+        SlackProviderInboxStore inbox)
     {
         _agents = agents;
         _launcher = launcher;
@@ -39,6 +41,7 @@ public sealed class SlackManagerConversationService : IScopedService, ISlackMana
         _followups = followups;
         _grains = grains;
         _dmSessions = dmSessions;
+        _inbox = inbox;
     }
 
     public async Task<SlackManagerConversationResult> ProcessAsync(
@@ -67,6 +70,9 @@ public sealed class SlackManagerConversationService : IScopedService, ISlackMana
             agent.ProjectId,
             sessionId,
             ct);
+        var allowPendingInitialLaunch =
+            string.Equals(sessionId, ManagerSessionId(request), StringComparison.Ordinal)
+            && await IsPendingInitialLaunchAsync(request, sessionId, ct);
         if (target is null)
             return await LaunchSessionAsync(
                 request,
@@ -83,7 +89,8 @@ public sealed class SlackManagerConversationService : IScopedService, ISlackMana
                 Text: prompt,
                 Source: "agent-session-followup",
                 IdempotencyKey: idempotencyKey,
-                Provenance: Provenance(request)));
+                Provenance: Provenance(request),
+                AllowPendingInitialLaunch: allowPendingInitialLaunch));
             await _followups.DispatchNextAsync(agent.ProjectId, sessionId, ct);
             return new SlackManagerConversationResult(
                 SessionId: sessionId,
@@ -162,6 +169,26 @@ public sealed class SlackManagerConversationService : IScopedService, ISlackMana
             InputId: launch.InputId,
             TurnId: launch.TurnId,
             Accepted: true);
+    }
+
+    private async Task<bool> IsPendingInitialLaunchAsync(
+        SlackManagerConversationRequest request,
+        string sessionId,
+        CancellationToken ct)
+    {
+        var initial = await _grains.GetGrain<IAgentSessionGrain>(sessionId).GetInitialLaunchAsync();
+        var initialMessageTs = initial?.Input?.Provenance?.MessageId;
+        if (string.IsNullOrWhiteSpace(initialMessageTs))
+            return false;
+
+        var routedSessionId = await _inbox.FindMessageRouteSessionIdAsync(
+            SlackDeliveryOwnerIds.ManagerProjectId,
+            request.Actor.EnrollmentId,
+            request.Message.Identity.WorkspaceTeamId,
+            request.Message.Identity.ConversationId,
+            initialMessageTs,
+            ct);
+        return string.IsNullOrWhiteSpace(routedSessionId);
     }
 
     private static string ManagerSessionId(SlackManagerConversationRequest request) =>

@@ -38,6 +38,10 @@ public sealed class AgentLaunchParticipantProbe : IAgentLaunchParticipantProbe
         new();
     private readonly ConcurrentDictionary<LaunchParticipantGate, string> _rejections =
         new();
+    private readonly ConcurrentDictionary<LaunchParticipantGate, TaskCompletionSource> _blocked =
+        new();
+    private readonly ConcurrentDictionary<LaunchParticipantGate, TaskCompletionSource> _entered =
+        new();
 
     public void FailNext(LaunchParticipantGate gate, int times = 1)
     {
@@ -54,6 +58,24 @@ public sealed class AgentLaunchParticipantProbe : IAgentLaunchParticipantProbe
 
     public void StopFailing(LaunchParticipantGate gate) =>
         _remaining.TryRemove(gate, out _);
+
+    public void BlockNext(LaunchParticipantGate gate)
+    {
+        _entered[gate] = NewSignal();
+        _blocked[gate] = NewSignal();
+    }
+
+    public Task WaitUntilBlockedAsync(LaunchParticipantGate gate) =>
+        _entered.TryGetValue(gate, out var entered)
+            ? entered.Task
+            : throw new InvalidOperationException($"No block is armed for {gate}.");
+
+    public void ReleaseBlocked(LaunchParticipantGate gate)
+    {
+        if (_blocked.TryRemove(gate, out var blocked))
+            blocked.TrySetResult();
+        _entered.TryRemove(gate, out _);
+    }
 
     public void RejectNext(LaunchParticipantGate gate, string reason)
     {
@@ -96,10 +118,15 @@ public sealed class AgentLaunchParticipantProbe : IAgentLaunchParticipantProbe
     public Task OnArchiveDefinitionAsync(string agentId, string commandId) =>
         RecordAndMaybeThrow(LaunchParticipantGate.ArchiveDefinition, agentId, commandId);
 
-    private Task RecordAndMaybeThrow(LaunchParticipantGate gate, string participantId, string commandId)
+    private async Task RecordAndMaybeThrow(LaunchParticipantGate gate, string participantId, string commandId)
     {
         _participantIds.GetOrAdd(gate, _ => new()).Enqueue(participantId);
         _commandIds.GetOrAdd(gate, _ => new()).Enqueue(commandId);
+        if (_blocked.TryGetValue(gate, out var blocked))
+        {
+            _entered.GetOrAdd(gate, _ => NewSignal()).TrySetResult();
+            await blocked.Task;
+        }
         while (_remaining.TryGetValue(gate, out var current) && current > 0)
         {
             if (_remaining.TryUpdate(gate, current - 1, current))
@@ -110,6 +137,8 @@ public sealed class AgentLaunchParticipantProbe : IAgentLaunchParticipantProbe
         }
         if (_rejections.TryRemove(gate, out var reason))
             throw new AgentSpawnPostPlanRejectedException(reason);
-        return Task.CompletedTask;
     }
+
+    private static TaskCompletionSource NewSignal() =>
+        new(TaskCreationOptions.RunContinuationsAsynchronously);
 }

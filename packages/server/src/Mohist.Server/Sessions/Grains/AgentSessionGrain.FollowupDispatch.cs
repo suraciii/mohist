@@ -13,6 +13,8 @@ public sealed partial class AgentSessionGrain
         var session = await GetRequiredAsync();
         var turns = session.Status.Turns ?? [];
         if (turns.Any(turn => turn.Status == AgentTurnStatus.Executing)) return null;
+        if (turns.Any(turn => !string.IsNullOrWhiteSpace(turn.JobId) && turn.Status == AgentTurnStatus.Queued))
+            return null;
         var leases = GetPendingFollowups(session).ToList();
         var turn = turns.FirstOrDefault(turn => string.IsNullOrEmpty(turn.JobId) && turn.Status == AgentTurnStatus.Queued);
         if (turn is null) return null;

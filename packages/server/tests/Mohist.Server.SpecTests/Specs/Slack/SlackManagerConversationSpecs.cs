@@ -90,6 +90,60 @@ public sealed class SlackManagerConversationSpecs
     }
 
     [Fact]
+    public async Task Initial_mapping_is_published_before_submit_and_concurrent_message_is_one_followup()
+    {
+        var suffix = Guid.NewGuid().ToString("N");
+        var team = $"T_MANAGER_MAPPING_FENCE_{suffix}";
+        var appId = $"A_MANAGER_MAPPING_FENCE_{suffix}";
+        var owner = $"U_MANAGER_MAPPING_FENCE_{suffix}";
+        var enrollmentId = await SetupAndClaimAsync(team, appId, owner);
+        var firstTs = "1710001000.000010";
+        var sessionId = $"manager-session-{AgentLaunchCoordinatorCodec.StableToken(string.Join('\n',
+            enrollmentId,
+            team,
+            "D_MANAGER_CONVERSATION_NEW"))}";
+
+        _fixture.LaunchFaults.BlockNext(LaunchParticipantGate.SubmitJob);
+        try
+        {
+            var firstTask = SendManagerMessageAsync(
+                appId, team, owner, firstTs, "Inspect the current Manager state.");
+            await _fixture.LaunchFaults.WaitUntilBlockedAsync(LaunchParticipantGate.SubmitJob);
+
+            await using (var scope = _fixture.Services.CreateAsyncScope())
+            {
+                var mapping = await scope.ServiceProvider.GetRequiredService<SlackDmSessionMappingStore>()
+                    .GetCurrentSessionIdAsync(
+                        BuiltInAgentCatalog.MohistSlackProjectId,
+                        enrollmentId,
+                        team,
+                        "D_MANAGER_CONVERSATION_NEW");
+                Assert.Equal(sessionId, mapping);
+            }
+
+            var laterTask = SendManagerMessageAsync(
+                appId, team, owner, "1710001000.000011", "Also summarize the result.");
+            _fixture.LaunchFaults.ReleaseBlocked(LaunchParticipantGate.SubmitJob);
+
+            var first = await firstTask;
+            var later = await laterTask;
+            Assert.Equal("accepted", first.GetProperty("decision").GetString());
+            Assert.Equal("accepted", later.GetProperty("decision").GetString());
+            Assert.Equal(sessionId, later.GetProperty("sessionId").GetString());
+
+            var session = _fixture.Grains.GetGrain<IAgentSessionGrain>(sessionId);
+            Assert.Equal(2, (await session.ListTurnsAsync()).Count);
+            await using var finalScope = _fixture.Services.CreateAsyncScope();
+            var database = finalScope.ServiceProvider.GetRequiredService<MohistDbContext>();
+            Assert.Single(await database.AgentJobs.Where(row => row.AgentSessionId == sessionId).ToListAsync());
+        }
+        finally
+        {
+            _fixture.LaunchFaults.ReleaseBlocked(LaunchParticipantGate.SubmitJob);
+        }
+    }
+
+    [Fact]
     public async Task Missing_runtime_replaces_the_mapping_and_accepts_the_current_message_once()
     {
         var suffix = Guid.NewGuid().ToString("N");
