@@ -65,10 +65,13 @@ import { SkillResolver } from './skill-resolver.js'
 import { runnerLogger } from '../system/logger.js'
 import {
   buildRunnerPollReport,
+  createManagerExecutionBoundary,
+  gateManagerCapabilities,
+  isManagerExecutionWork,
+  supportsManagerExecution,
   createHostTaskLogDeps,
   currentCatalogRevision,
   isAgentRecoveryDispatch,
-  isManagerExecutionWork,
   isOpenCodeReadyForClaim as isOpenCodeReadyForClaimForRuntime,
   resolveFollowupTarget,
   runtimeReadinessWitnesses,
@@ -702,39 +705,12 @@ export class RunnerHost {
         // better.
         if (this.inFlight.has(key) || this.awaitingAck.has(key)) continue
 
-        const isManagerExecution = work.projectId === '__mohist_slack_manager__'
+        const isManagerExecution = isManagerExecutionWork(work)
         let managerBoundary: ManagerExecutionBoundary | null = null
         if (isManagerExecution) {
-          const managerCapabilities = [
-            'manager-execution-grant-v1',
-            'manager-deployment-epoch-v1',
-            'manager-private-broker-v1',
-            'manager-pi-scoped-executor-v1',
-            'manager-opencode-isolated-v1',
-            'manager-redaction-v1',
-          ]
-          if (
-            process.platform === 'win32' ||
-            !managerCapabilities.every((capability) => this.registrationState().capabilities.includes(capability)) ||
-            !polled.managerExecutionGrant
-          ) {
-            log.error('Manager dispatch is not supported by this runner; leaving work recoverable', {
-              work: work.workId,
-            })
-            continue
-          }
-          try {
-            managerBoundary = await ManagerExecutionBoundary.create(
-              polled.managerExecutionGrant,
-              this.options.runnerRoot,
-            )
-          } catch (error) {
-            log.error('Manager execution boundary could not be established; leaving work recoverable', {
-              work: work.workId,
-              exception: error,
-            })
-            continue
-          }
+          if (!supportsManagerExecution(this.registrationState()) || !polled.managerExecutionGrant) continue
+          managerBoundary = await createManagerExecutionBoundary(polled.managerExecutionGrant, this.options.runnerRoot)
+          if (!managerBoundary) continue
         }
 
         const startupObserved = this.recoveredStartedWork.has(key)
@@ -956,23 +932,12 @@ export class RunnerHost {
   }
 
   private registrationState(): RunnerRegistration {
-    const state = buildRegistrationState(this.options, this.piRuntime, this.actions.catalog(), () =>
-      this.control.getConnectionId(),
+    return gateManagerCapabilities(
+      buildRegistrationState(this.options, this.piRuntime, this.actions.catalog(), () =>
+        this.control.getConnectionId(),
+      ),
+      this.openCodeRuntime?.ready() === true,
     )
-    if (this.openCodeRuntime?.ready()) return state
-
-    const managerCapabilities = new Set([
-      'manager-execution-grant-v1',
-      'manager-deployment-epoch-v1',
-      'manager-private-broker-v1',
-      'manager-pi-scoped-executor-v1',
-      'manager-opencode-isolated-v1',
-      'manager-redaction-v1',
-    ])
-    return {
-      ...state,
-      capabilities: state.capabilities.filter((capability) => !managerCapabilities.has(capability)),
-    }
   }
 
   private async connectRunner(signal: AbortSignal) {

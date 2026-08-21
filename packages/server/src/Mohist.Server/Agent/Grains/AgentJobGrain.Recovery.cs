@@ -11,6 +11,9 @@ public sealed partial class AgentJobGrain
     private const string ManagerExpiryRecoveryPrompt =
         "The previous Manager execution expired before its outcome was confirmed. Inspect the current resource state before taking any action; do not repeat the interrupted operation automatically.";
 
+    private static bool IsManagerCredentialExpired(WorkResult result) =>
+        string.Equals(result.ErrorCode, "manager-credential-expired", StringComparison.Ordinal);
+
     private async Task<AgentJobReportResult> ReportManagerCredentialExpiredAsync(WorkResult result)
     {
         if (!IsManagerInput())
@@ -25,13 +28,8 @@ public sealed partial class AgentJobGrain
 
     private async Task EnsureManagerExpiryRecoveryAsync()
     {
-        if (State.ManagerExpiryRecovery is { } existing)
-        {
-            _followupDispatchScheduler?.Schedule(
-                State.Input?.ProjectId ?? string.Empty,
-                State.Input?.AgentSessionId ?? string.Empty);
+        if (State.ManagerExpiryRecovery is not null)
             return;
-        }
 
         var input = State.Input;
         var anchor = input?.SlackExecutionContext?.ReplyAnchor;
@@ -64,7 +62,7 @@ public sealed partial class AgentJobGrain
             turnId,
             _timeProvider.GetUtcNow());
         await PersistAsync();
-        _followupDispatchScheduler?.Schedule(input.ProjectId ?? string.Empty, input.AgentSessionId);
+        await session.MarkInitialTurnTerminalAsync(Key, AgentTurnStatus.Unknown, null);
     }
 
     private bool IsManagerInput() =>
