@@ -36,7 +36,7 @@ export function createServerRuntimeEventDelivery(options: RuntimeEventDeliveryOp
     ) {
       throw new Error('workflow cleanup delivery requires its complete immutable execution identity')
     }
-    const accepted = await connection.workflowAgentSessionCleanupTurn(
+    return await connection.workflowAgentSessionCleanupTurn(
       target.projectId,
       target.workflowRunId,
       target.sessionName,
@@ -51,14 +51,6 @@ export function createServerRuntimeEventDelivery(options: RuntimeEventDeliveryOp
       },
       signal,
     )
-    return [
-      {
-        type: 'session.cleanup',
-        inputDeliveryId: accepted.inputDeliveryId,
-        agentTurnId: accepted.agentTurnId,
-        agentSessionId: accepted.agentSessionId,
-      },
-    ]
   }
   return {
     async send(record: RuntimeEventRecord, signal: AbortSignal): Promise<AgentSessionRuntimeEventReceipt[]> {
@@ -120,6 +112,7 @@ export function createServerRuntimeEventDelivery(options: RuntimeEventDeliveryOp
         return accepted.map<AgentSessionRuntimeEventReceipt[]>((a) => [
           {
             type: a.type ?? '',
+            cleanupOperationId: a.cleanupOperationId,
             inputDeliveryId: a.inputDeliveryId,
             agentTurnId: a.agentTurnId,
             agentSessionId: a.agentSessionId,

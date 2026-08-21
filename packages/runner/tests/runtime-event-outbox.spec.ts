@@ -8,6 +8,7 @@
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import {
+  AlreadyConsumedRuntimeEventError,
   isDeterministicBindingRefusal,
   nextTemporaryFilePath,
   RUNTIME_EVENT_OUTBOX_FILE,
@@ -304,6 +305,60 @@ describe("AgentSessionRuntimeEventOutbox — acknowledgement policies", () => {
 
     await outbox.kick()
     expect(outbox.snapshot()).toHaveLength(0)
+  })
+
+  it("confirms a matching input as already consumed only after two consecutive empty responses", async () => {
+    const { outbox } = makeOutbox({ deliver: { async send() { return [] } } })
+    await outbox.load()
+    const waiter = outbox.awaitInputReceipt
+    if (!waiter) throw new Error('outbox must support Workflow input receipts')
+    await outbox.enqueueBeforeExecution(inputRecord({ id: 'already-consumed-input' }))
+
+    const pending = waiter.call(outbox, 'already-consumed-input')
+    await outbox.kick()
+    expect(outbox.snapshot()).toHaveLength(1)
+    expect(outbox.snapshot()[0]?.id).toBe('already-consumed-input')
+
+    await outbox.kick()
+    await expect(pending).rejects.toMatchObject({
+      name: 'AlreadyConsumedRuntimeEventError',
+      classification: 'already-consumed',
+      recordId: 'already-consumed-input',
+    })
+    expect(outbox.snapshot()).toHaveLength(0)
+    const persisted = JSON.parse((outbox as unknown as { fileSystem: { body(path: string): string | null } }).fileSystem.body(RUNTIME_EVENT_OUTBOX_FILE) ?? '{}') as { entries: unknown[] }
+    expect(persisted.entries).toEqual([])
+  })
+
+  it("keeps the empty confirmation and waiter pending when terminal settlement persistence fails", async () => {
+    const fileSystem = new RecordingFileSystem()
+    const { outbox } = makeOutbox({ fileSystem, deliver: { async send() { return [] } } })
+    await outbox.load()
+    await outbox.enqueueBeforeExecution(inputRecord({ id: 'persist-failure-empty' }))
+    await outbox.kick()
+
+    let waiterSettled = false
+    const waiter = outbox.awaitInputReceipt?.('persist-failure-empty')
+    if (!waiter) throw new Error('outbox must support Workflow input receipts')
+    waiter.then(() => { waiterSettled = true }, () => { waiterSettled = true })
+    fileSystem.failNextWrite = () => new Error('disk full')
+    await outbox.kick()
+    await flushMicrotasks()
+
+    expect(waiterSettled).toBe(false)
+    expect(outbox.snapshot().map((record) => record.id)).toEqual(['persist-failure-empty'])
+    expect(JSON.parse(fileSystem.body(RUNTIME_EVENT_OUTBOX_FILE) ?? '{}')).toMatchObject({ entries: [{ id: 'persist-failure-empty' }] })
+  })
+
+  it("does not confirm an empty response when a positive interruption breaks consecutiveness", async () => {
+    const responses: AgentSessionRuntimeEventReceipt[][] = [[], [{ type: 'message.delta' }], []]
+    const { outbox } = makeOutbox({ deliver: { async send() { return responses.shift() ?? [] } } })
+    await outbox.load()
+    await outbox.enqueueBeforeExecution(inputRecord({ id: 'interrupted-empty' }))
+    await outbox.kick()
+    await outbox.kick()
+    await outbox.kick()
+    expect(outbox.snapshot()).toHaveLength(1)
   })
 
   it("matching-receipt retains the head on timeout, transport failure, non-2xx, malformed, empty, or receipt without the submitted type", async () => {

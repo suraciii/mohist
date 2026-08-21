@@ -1,8 +1,49 @@
 import { describe, expect, it } from 'vitest'
-import type { RuntimeEventRecord } from '../src/server/runtime-event-outbox.js'
+import { AlreadyConsumedRuntimeEventError, type RuntimeEventRecord } from '../src/server/runtime-event-outbox.js'
 import { flushMicrotasks, makeOutbox, workflowFact } from './support/runtime-event-outbox-fixture.js'
 
 describe('AgentSessionRuntimeEventOutbox - workflow cleanup FIFO', () => {
+  it('settles a cleanup record as already consumed after two consecutive empty receipts', async () => {
+    const cleanupOperationId = 'workflow-cleanup:wf-1:task-1.1:work-1:1'
+    const { outbox } = makeOutbox({ deliver: { async send() { return [] } } })
+    await outbox.load()
+    const record: RuntimeEventRecord = {
+      id: cleanupOperationId,
+      producerFamily: 'workflow-cleanup',
+      target: { kind: 'workflow', projectId: 'proj-1', workflowRunId: 'wf-1', sessionName: 'build' },
+      runtime: 'pi',
+      runtimeSessionId: 'runtime-1',
+      work: {
+        workId: 'work-1', taskRunId: 'task-1.1', runnerId: 'runner-1', agentSessionId: 'agent-session-1',
+        inputDeliveryId: `workflow-cleanup-input:${cleanupOperationId}`, agentTurnId: null,
+        workType: 'task', stage: 'build',
+      },
+      event: {
+        type: 'session.cleanup',
+        payload: {
+          text: 'clean the worktree', cleanupOperationId,
+          inputDeliveryId: `workflow-cleanup-input:${cleanupOperationId}`,
+          turnId: `workflow-cleanup-turn:${cleanupOperationId}`,
+        },
+      },
+      acknowledgementPolicy: 'matching-receipt',
+    }
+    await outbox.enqueueBeforeExecution(record)
+    const waiter = outbox.awaitInputReceipt?.(cleanupOperationId)
+    if (!waiter) throw new Error('outbox must support cleanup receipts')
+
+    await outbox.kick()
+    expect(outbox.snapshot()).toHaveLength(1)
+    await outbox.kick()
+
+    await expect(waiter).rejects.toBeInstanceOf(AlreadyConsumedRuntimeEventError)
+    await expect(outbox.awaitInputReceipt?.(cleanupOperationId)).rejects.toMatchObject({
+      classification: 'already-consumed',
+      recordId: cleanupOperationId,
+    })
+    expect(outbox.snapshot()).toEqual([])
+  })
+
   it('keeps cleanup admission and the next input behind the original terminal receipt', async () => {
     const batches: string[][] = []
     let startTerminal!: () => void
@@ -36,6 +77,7 @@ describe('AgentSessionRuntimeEventOutbox - workflow cleanup FIFO', () => {
               [
                 {
                   type: 'session.cleanup',
+                  cleanupOperationId,
                   inputDeliveryId: 'workflow-cleanup-input:workflow-cleanup:wf-1:task-1.1:work-1:1',
                   agentTurnId: 'workflow-cleanup-turn:workflow-cleanup:wf-1:task-1.1:work-1:1',
                   agentSessionId: 'agent-session-1',

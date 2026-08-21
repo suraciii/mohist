@@ -109,6 +109,49 @@ describe("ServerConnection.resetWorkflowAgentSession", () => {
   })
 })
 
+describe("ServerConnection.workflowAgentSessionCleanupTurn", () => {
+  const body = {
+    cleanupOperationId: 'cleanup-1',
+    prompt: 'clean the worktree',
+    taskRunId: 'task-1.1',
+    workId: 'work-1',
+    agentSessionId: 'agent-session-1',
+    runtime: 'pi',
+    runtimeSessionId: 'runtime-1',
+  }
+
+  it("preserves a new cleanup receipt array", async () => {
+    fetchMock.mockResolvedValueOnce(mockResponse({
+      status: 200,
+      body: JSON.stringify([{
+        type: 'session.cleanup',
+        cleanupOperationId: 'cleanup-1',
+        inputDeliveryId: 'cleanup-input-1',
+        agentTurnId: 'cleanup-turn-1',
+        agentSessionId: 'agent-session-1',
+      }]),
+    }))
+    const connection = new ServerConnection(options())
+
+    await expect(connection.workflowAgentSessionCleanupTurn('project-1', 'wf-1', 'build', body, new AbortController().signal))
+      .resolves.toEqual([{
+        type: 'session.cleanup',
+        cleanupOperationId: 'cleanup-1',
+        inputDeliveryId: 'cleanup-input-1',
+        agentTurnId: 'cleanup-turn-1',
+        agentSessionId: 'agent-session-1',
+      }])
+  })
+
+  it("preserves an idempotent empty cleanup receipt array", async () => {
+    fetchMock.mockResolvedValueOnce(mockResponse({ status: 200, body: '[]' }))
+    const connection = new ServerConnection(options())
+
+    await expect(connection.workflowAgentSessionCleanupTurn('project-1', 'wf-1', 'build', body, new AbortController().signal))
+      .resolves.toEqual([])
+  })
+})
+
 describe("ServerConnection.agentSessionRuntimeEvents (generic)", () => {
   it("AgentSessionRuntimeEvents_PostsToGenericRuntimeEventsUrl", async () => {
     fetchMock.mockResolvedValueOnce(mockResponse({ status: 200, body: "[]" }))

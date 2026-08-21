@@ -7,7 +7,7 @@ import type { RuntimeEventSubscription, RuntimeGlobalEvent } from "../src/runtim
 import type { OpencodeClient } from "@opencode-ai/sdk/v2"
 import type { ActionTestContext as ActionContext } from "./support/action-test-context.js"
 import { WorkflowAgentSessionReporter } from "../src/actions/workflow-agent-session-reporter.js"
-import type { AgentSessionRuntimeEventOutbox, RuntimeEventRecord } from "../src/server/runtime-event-outbox.js"
+import { AlreadyConsumedRuntimeEventError, type AgentSessionRuntimeEventOutbox, type RuntimeEventRecord } from "../src/server/runtime-event-outbox.js"
 import { makeRecordingOutbox, type OutboxHandles } from "./support/outbox-test-helpers.js"
 import { callAction } from "./support/call-action.js"
 
@@ -498,7 +498,12 @@ describe("opencodeAction — Workflow AgentSession transcript reporting", () => 
 })
 
 describe("WorkflowAgentSessionReporter — outbox-driven failure semantics", () => {
-  function buildReporter(failEnqueueBeforeExecution = false, failEnqueueProducedFact = false) {
+  function buildReporter(
+    failEnqueueBeforeExecution = false,
+    failEnqueueProducedFact = false,
+    receiptError: Error | null = null,
+    cleanupAttempt?: number,
+  ) {
     const records: RuntimeEventRecord[] = []
     const beforeExecutionCalls: RuntimeEventRecord[] = []
     const producedFactCalls: RuntimeEventRecord[] = []
@@ -514,6 +519,7 @@ describe("WorkflowAgentSessionReporter — outbox-driven failure semantics", () 
         records.push(record as RuntimeEventRecord)
       },
       async awaitInputReceipt(recordId) {
+        if (receiptError) throw receiptError
         return { type: "session.input", inputDeliveryId: recordId, agentTurnId: `turn-${recordId}`, agentSessionId: "agent-session-1" }
       },
       async enqueueProducedFact(record) {
@@ -549,6 +555,7 @@ describe("WorkflowAgentSessionReporter — outbox-driven failure semantics", () 
         let counter = 0
         return () => `id_${++counter}`
       })(),
+      cleanupAttempt,
     })
     return { reporter, outbox, records, beforeExecutionCalls, producedFactCalls, producedFactSingleCalls, producedFactBatchCalls }
   }
@@ -577,6 +584,32 @@ describe("WorkflowAgentSessionReporter — outbox-driven failure semantics", () 
     } finally {
       errorSpy.mockRestore()
     }
+  })
+
+  it("fails closed on an already-consumed input without inventing an Agent turn", async () => {
+    const { reporter } = buildReporter(false, false, new AlreadyConsumedRuntimeEventError('input-1'))
+    await expect(reporter.awaitInput('p', 'ses_1')).rejects.toMatchObject({
+      classification: 'already-consumed',
+      recordId: 'input-1',
+    })
+    expect(reporter.getAgentTurnId()).toBeNull()
+    expect(reporter.inputWasRejected()).toBe(true)
+    expect(reporter.inputWasAccepted()).toBe(false)
+  })
+
+  it("fails closed on an already-consumed cleanup without enqueuing follow-up input", async () => {
+    const { reporter, records } = buildReporter(
+      false,
+      false,
+      new AlreadyConsumedRuntimeEventError('workflow-cleanup:wf-1:task-1.1:work-1:1'),
+      1,
+    )
+    await expect(reporter.awaitInput('clean', 'ses_1')).rejects.toMatchObject({ classification: 'already-consumed' })
+    expect(reporter.getAgentTurnId()).toBeNull()
+    expect(reporter.inputWasRejected()).toBe(true)
+    expect(records).toHaveLength(1)
+    reporter.registerEvent({ type: 'message.delta', runtimeSessionId: 'ses_1', workDir: '/w', payload: { text: 'ignored' } })
+    expect(records).toHaveLength(1)
   })
 
   it("continues after a later produced-fact rejection when input was accepted", async () => {

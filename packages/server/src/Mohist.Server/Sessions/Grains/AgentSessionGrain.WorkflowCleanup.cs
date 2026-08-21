@@ -34,7 +34,8 @@ public sealed partial class AgentSessionGrain
                 command.CleanupOperationId,
                 inputId,
                 turnId,
-                SessionId);
+                SessionId,
+                AlreadyRecorded: true);
         }
         if (_sessionWorkPort is null
             || !await _sessionWorkPort.CanStartAgentCleanupAsync(originalBinding))
@@ -65,7 +66,8 @@ public sealed partial class AgentSessionGrain
             command.CleanupOperationId,
             inputId,
             turnId,
-            SessionId);
+            SessionId,
+            AlreadyRecorded: false);
     }
 
     private static void ValidateWorkflowCleanupTarget(

@@ -6,10 +6,11 @@
 // Two acknowledgement policies share the same ordered state:
 //   - `matching-receipt` (Workflow input/activity/close and follow-up
 //     input): the head is removed only when the response carries the
-//     submitted event type. A timeout, transport failure, non-2xx,
-//     malformed/empty response, or a receipt without that type retains
-//     the head for retry. Stale binding (a 2xx with `[]`) is also a
-//     "no-match" outcome.
+//     submitted event type. For session.input and Workflow session.cleanup,
+//     two consecutive valid 2xx empty arrays instead confirm an already
+//     consumed record. A timeout, transport failure, non-2xx, malformed
+//     response, or a receipt without that type retains the head for retry and
+//     interrupts an empty confirmation sequence.
 //   - `successful-response` (operation-correlated follow-up terminals):
 //     any 2xx with a valid receipt array — even `[]` — settles the head.
 //     A consumed operation lease means replay legitimately returns `[]`,
@@ -62,6 +63,18 @@ import {
 
 export { nextTemporaryFilePath } from './runtime-event-outbox-ports.js'
 export { runtimeEventDeliveryKey, workflowExecutionIdentity } from './runtime-event-outbox-identity.js'
+
+export class AlreadyConsumedRuntimeEventError extends Error {
+  readonly classification = 'already-consumed' as const
+  readonly recordId: string
+
+  constructor(recordId: string) {
+    super(`runtime-event record ${recordId} was already consumed`)
+    this.name = 'AlreadyConsumedRuntimeEventError'
+    this.recordId = recordId
+  }
+}
+
 export type {
   AgentSessionRuntimeEventOutbox,
   AgentSessionRuntimeEventOutboxOptions,
@@ -160,6 +173,8 @@ class AgentSessionRuntimeEventOutboxImpl implements AgentSessionRuntimeEventOutb
   private readonly timer: RuntimeEventOutboxTimer
   private readonly records = new Map<string, InternalRecord>()
   private readonly deterministicBindingRefusalCounts = new Map<string, number>()
+  private readonly emptyReceiptConfirmationCounts = new Map<string, number>()
+  private readonly inputReceiptTerminalErrors = new Map<string, Error>()
   private readonly inputReceiptWaiters = new Map<
     string,
     {
@@ -272,6 +287,10 @@ class AgentSessionRuntimeEventOutboxImpl implements AgentSessionRuntimeEventOutb
       sequence,
       enqueuedAt: this.now().toISOString(),
     }
+    this.receivedInputReceipts.delete(internal.id)
+    this.timedOutInputReceiptErrors.delete(internal.id)
+    this.inputReceiptTerminalErrors.delete(internal.id)
+    this.emptyReceiptConfirmationCounts.delete(internal.id)
     this.records.set(internal.id, internal)
     await this.enqueueSnapshotWrite((error) => {
       this.records.delete(internal.id)
@@ -291,6 +310,8 @@ class AgentSessionRuntimeEventOutboxImpl implements AgentSessionRuntimeEventOutb
     }
     const timedOut = this.timedOutInputReceiptErrors.get(recordId)
     if (timedOut) throw timedOut
+    const terminal = this.inputReceiptTerminalErrors.get(recordId)
+    if (terminal) throw terminal
     if (!this.records.has(recordId))
       throw new Error(`workflow input ${recordId} is no longer pending and has no matching receipt`)
     if (this.inputReceiptWaiters.has(recordId))
@@ -492,9 +513,11 @@ class AgentSessionRuntimeEventOutboxImpl implements AgentSessionRuntimeEventOutb
     signal.removeEventListener('abort', abortFromStop)
 
     if (outcome.kind === 'timed-out') {
-      // A timeout is retryable and interrupts any deterministic refusal run.
+      // A timeout is retryable and interrupts any deterministic refusal or
+      // already-consumed confirmation run.
       const bindingKey = bindingReconcileDeliveryKey(batch)
       if (bindingKey !== null) this.deterministicBindingRefusalCounts.delete(bindingKey)
+      this.resetEmptyReceiptConfirmations(batch)
       // Abort is advisory: the original request may still commit and reply later.
       this.rejectTimedOutInputReceipts(batch, timeoutError)
       this.settleTimedOutDelivery(lease, completion)
@@ -540,6 +563,7 @@ class AgentSessionRuntimeEventOutboxImpl implements AgentSessionRuntimeEventOutb
     try {
       const bindingKey = bindingReconcileDeliveryKey(lease.batch)
       if (outcome.kind === 'failure') {
+        this.resetEmptyReceiptConfirmations(lease.batch)
         if (bindingKey !== null && isDeterministicBindingRefusal(outcome.error)) {
           const refusalCount = (this.deterministicBindingRefusalCounts.get(bindingKey) ?? 0) + 1
           this.deterministicBindingRefusalCounts.set(bindingKey, refusalCount)
@@ -597,14 +621,34 @@ class AgentSessionRuntimeEventOutboxImpl implements AgentSessionRuntimeEventOutb
     batch: readonly InternalRecord[],
     perRecord: AgentSessionRuntimeEventReceipt[][],
   ): Promise<boolean> {
-    // Settle each record against its own policy and the receipts returned
-    // for its position in the batch. Only records whose head pointer is
-    // unchanged (not rolled back / replaced mid-flight) are removed.
+    // Stage every removal first. Waiters are resolved only after the new
+    // snapshot is durable; a failed write must leave both the record and its
+    // confirmation sequence retryable.
     const removed: InternalRecord[] = []
-    let anyAcknowledged = false
+    const positiveReceipts: Array<{ record: InternalRecord; receipt: AgentSessionRuntimeEventReceipt }> = []
+    const alreadyConsumed: InternalRecord[] = []
+    const confirmationCountsBeforeSettlement = new Map<string, number>()
+
     for (let i = 0; i < batch.length; i += 1) {
       const record = batch[i]
       const receipts = perRecord[i] ?? []
+      if (receipts.length === 0 && isConfirmedConsumedRecord(record)) {
+        const previousConfirmationCount = this.emptyReceiptConfirmationCounts.get(record.id) ?? 0
+        const confirmationCount = previousConfirmationCount + 1
+        this.emptyReceiptConfirmationCounts.set(record.id, confirmationCount)
+        if (confirmationCount < 2) continue
+        confirmationCountsBeforeSettlement.set(record.id, previousConfirmationCount)
+        this.emptyReceiptConfirmationCounts.delete(record.id)
+        if (this.records.get(record.id) !== record) continue
+        this.records.delete(record.id)
+        removed.push(record)
+        alreadyConsumed.push(record)
+        continue
+      }
+
+      // Any non-empty response, including a non-matching positive response,
+      // interrupts an empty-confirmation sequence.
+      this.emptyReceiptConfirmationCounts.delete(record.id)
       const receipt = matchingReceipt(record.acknowledgementPolicy, record, receipts)
       if (!receipt) {
         this.rejectInputReceipt(
@@ -616,16 +660,18 @@ class AgentSessionRuntimeEventOutboxImpl implements AgentSessionRuntimeEventOutb
       if (this.records.get(record.id) !== record) continue
       this.records.delete(record.id)
       removed.push(record)
-      if (requiresInputReceipt(record)) this.resolveInputReceipt(record.id, receipt)
-      anyAcknowledged = true
+      if (requiresInputReceipt(record)) positiveReceipts.push({ record, receipt })
     }
-    if (!anyAcknowledged) {
-      return false
-    }
-    if (removed.length === 0) return true
+
+    if (removed.length === 0) return false
     try {
       await this.enqueueSnapshotWrite((error) => {
         for (const record of removed) this.records.set(record.id, record)
+        for (const record of removed) {
+          const previousCount = confirmationCountsBeforeSettlement.get(record.id)
+          if (previousCount === undefined) this.emptyReceiptConfirmationCounts.delete(record.id)
+          else this.emptyReceiptConfirmationCounts.set(record.id, previousCount)
+        }
         this.healthy = false
         this.lastLoadError = error instanceof Error ? error : new Error(errorMessage(error))
         this.scheduleLocalRetry()
@@ -633,7 +679,18 @@ class AgentSessionRuntimeEventOutboxImpl implements AgentSessionRuntimeEventOutb
     } catch {
       return false
     }
+
+    for (const { record, receipt } of positiveReceipts) this.resolveInputReceipt(record.id, receipt)
+    for (const record of alreadyConsumed) {
+      const error = new AlreadyConsumedRuntimeEventError(record.id)
+      this.inputReceiptTerminalErrors.set(record.id, error)
+      this.rejectInputReceipt(record.id, error)
+    }
     return true
+  }
+
+  private resetEmptyReceiptConfirmations(records: readonly InternalRecord[]): void {
+    for (const record of records) this.emptyReceiptConfirmationCounts.delete(record.id)
   }
 
   private rejectTimedOutInputReceipts(batch: readonly InternalRecord[], error: Error): void {
@@ -848,10 +905,13 @@ function matchingReceipt(
       : null
   }
   if (record.producerFamily === 'workflow-cleanup' && record.event.type === 'session.cleanup') {
+    const cleanupOperationId = record.event.payload.cleanupOperationId
     const inputDeliveryId = record.event.payload.inputDeliveryId
     const agentTurnId = record.event.payload.turnId
-    return typeof inputDeliveryId === 'string' &&
+    return typeof cleanupOperationId === 'string' &&
+      typeof inputDeliveryId === 'string' &&
       typeof agentTurnId === 'string' &&
+      matching.cleanupOperationId === cleanupOperationId &&
       matching.inputDeliveryId === inputDeliveryId &&
       matching.agentSessionId === record.work?.agentSessionId &&
       matching.agentTurnId === agentTurnId
@@ -866,6 +926,10 @@ function requiresInputReceipt(record: RuntimeEventRecord): boolean {
     record.event.type === 'session.input' ||
     (record.producerFamily === 'workflow-cleanup' && record.event.type === 'session.cleanup')
   )
+}
+
+function isConfirmedConsumedRecord(record: RuntimeEventRecord): boolean {
+  return record.acknowledgementPolicy === 'matching-receipt' && requiresInputReceipt(record)
 }
 
 function sortBySequence(a: InternalRecord, b: InternalRecord): number {

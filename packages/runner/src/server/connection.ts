@@ -32,7 +32,6 @@ import type {
   AgentSessionRuntimeEventAcceptance,
   AgentSessionRuntimeEventReceipt,
   WorkflowAgentSession,
-  WorkflowAgentSessionCleanupTurnAcceptance,
 } from './connection-session-models.js'
 
 export type {
@@ -42,7 +41,6 @@ export type {
   AgentSessionRuntimeEventAcceptance,
   AgentSessionRuntimeEventReceipt,
   WorkflowAgentSession,
-  WorkflowAgentSessionCleanupTurnAcceptance,
 } from './connection-session-models.js'
 
 export interface RuntimeEventDeliveryErrorMetadata {
@@ -520,7 +518,7 @@ export class ServerConnection {
     sessionName: string,
     body: unknown,
     signal: AbortSignal,
-  ): Promise<WorkflowAgentSessionCleanupTurnAcceptance> {
+  ): Promise<AgentSessionRuntimeEventReceipt[]> {
     const response = await this.fetchWithAuth(
       this.url(
         `sessions/${encodeURIComponent(projectId)}/${encodeURIComponent(workflowRunId)}/${encodeURIComponent(sessionName)}/cleanup-turn`,
@@ -539,28 +537,35 @@ export class ServerConnection {
     } catch {
       throw new Error('workflow cleanup turn returned malformed JSON')
     }
-    if (
-      !isObjectRecord(payload) ||
-      typeof payload.cleanupOperationId !== 'string' ||
-      payload.cleanupOperationId.length === 0 ||
-      typeof payload.inputDeliveryId !== 'string' ||
-      payload.inputDeliveryId.length === 0 ||
-      typeof payload.agentTurnId !== 'string' ||
-      payload.agentTurnId.length === 0 ||
-      typeof payload.agentSessionId !== 'string' ||
-      payload.agentSessionId.length === 0
-    ) {
-      throw new Error('workflow cleanup turn returned a malformed acceptance response')
-    }
-    const requestedOperationId = isObjectRecord(body) ? body.cleanupOperationId : null
-    if (typeof requestedOperationId === 'string' && requestedOperationId !== payload.cleanupOperationId)
-      throw new Error('workflow cleanup turn returned a mismatched operation identity')
-    return {
-      cleanupOperationId: payload.cleanupOperationId,
-      inputDeliveryId: payload.inputDeliveryId,
-      agentTurnId: payload.agentTurnId,
-      agentSessionId: payload.agentSessionId,
-    }
+    if (!Array.isArray(payload)) throw new Error('workflow cleanup turn returned a malformed receipt array')
+    return payload.map((value) => {
+      if (
+        !isObjectRecord(value) ||
+        typeof value.type !== 'string' ||
+        value.type.length === 0 ||
+        typeof value.cleanupOperationId !== 'string' ||
+        value.cleanupOperationId.length === 0 ||
+        typeof value.inputDeliveryId !== 'string' ||
+        value.inputDeliveryId.length === 0 ||
+        typeof value.agentTurnId !== 'string' ||
+        value.agentTurnId.length === 0 ||
+        typeof value.agentSessionId !== 'string' ||
+        value.agentSessionId.length === 0
+      ) {
+        throw new Error('workflow cleanup turn returned a malformed receipt')
+      }
+      if (value.type !== 'session.cleanup') throw new Error('workflow cleanup turn returned an unexpected receipt type')
+      const requestedOperationId = isObjectRecord(body) ? body.cleanupOperationId : null
+      if (typeof requestedOperationId !== 'string' || requestedOperationId !== value.cleanupOperationId)
+        throw new Error('workflow cleanup turn returned a mismatched operation identity')
+      return {
+        type: value.type,
+        cleanupOperationId: value.cleanupOperationId,
+        inputDeliveryId: value.inputDeliveryId,
+        agentTurnId: value.agentTurnId,
+        agentSessionId: value.agentSessionId,
+      }
+    })
   }
 
   async workflowAgentSessionRuntimeEvents(
@@ -652,7 +657,7 @@ export class ServerConnection {
       },
     )
     if (!response.ok) throw await this.runtimeEventDeliveryError('agent session reconcile runtime events', response)
-    return response.json() as Promise<AgentSessionRuntimeEventReceipt[]>
+    return await parseRuntimeEventReceiptArray(response, 'agent session reconcile runtime events')
   }
 
   async getAgentSession(projectId: string, sessionId: string, signal: AbortSignal): Promise<AgentSession | null> {
@@ -805,7 +810,7 @@ export class ServerConnection {
         `agent-sessions/${encodeURIComponent(projectId)}/${encodeURIComponent(sessionId)}/runtime-events`,
         response,
       )
-    return response.json() as Promise<AgentSessionRuntimeEventReceipt[]>
+    return await parseRuntimeEventReceiptArray(response, 'agent session runtime events')
   }
 
   /**
@@ -906,6 +911,19 @@ function dispatchKey(work: DispatchWorkItem): string {
   return `${ownerKind}:${ownerId}:${work.workId}`
 }
 
+async function parseRuntimeEventReceiptArray(
+  response: Response,
+  operation: string,
+): Promise<AgentSessionRuntimeEventReceipt[]> {
+  let payload: unknown
+  try {
+    payload = await response.json()
+  } catch {
+    throw new Error(`${operation} returned malformed JSON`)
+  }
+  if (!Array.isArray(payload)) throw new Error(`${operation} returned a malformed receipt array`)
+  return payload as AgentSessionRuntimeEventReceipt[]
+}
 function parseDispatchWorkItem(dispatch: WorkDispatchResponse): DispatchWorkItem {
   const work: DispatchWorkItem = {
     workflowRunId: dispatch.workflowRunId,
