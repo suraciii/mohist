@@ -20,6 +20,8 @@ export interface SlackExecutionContext {
     readonly connectionId: string
     readonly sessionId: string
     readonly dispatchRef: string
+    readonly projectId?: string | null
+    readonly ownerKind?: string | null
   }
   readonly collaborationSkill: {
     readonly name: string
@@ -169,6 +171,8 @@ function readSlackExecutionContextShape(
         connectionId: replyAnchor.connectionId as string,
         sessionId: replyAnchor.sessionId as string,
         dispatchRef: replyAnchor.dispatchRef as string,
+        projectId: nonEmptyString(replyAnchor.projectId) ? (replyAnchor.projectId as string) : null,
+        ownerKind: nonEmptyString(replyAnchor.ownerKind) ? (replyAnchor.ownerKind as string) : null,
       },
       collaborationSkill: {
         name: collaborationSkill.name as string,

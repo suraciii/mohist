@@ -15,6 +15,7 @@ using Mohist.Server.Runner.Grains;
 using Mohist.Server.Sessions.Domain;
 using Mohist.Server.Sessions.Grains;
 using Mohist.Server.Sessions.Services;
+using Mohist.Server.Slack.Services;
 using Mohist.Server.Workspace.Grains;
 using Orleans.Runtime;
 
@@ -63,10 +64,10 @@ public sealed partial class AgentJobGrain : Grain, IAgentJobGrain
     private readonly IBackgroundTaskLauncher _backgroundTasks;
     private readonly IGrainFactory _grains;
     private readonly IAgentJobDispatchObserver _dispatchObserver;
+    private readonly ManagerExecutionCapabilityIssuer _managerCredentials;
     private readonly TaskCompletionSource<AgentJobTerminalResult> _terminalCompletion =
         new(TaskCreationOptions.RunContinuationsAsynchronously);
     private IDisposable? _jobTimeoutTimer;
-
     private AgentJobState? _state;
     private AgentJobLedgerRecord? _ledger;
     private bool _hydrated;
@@ -79,7 +80,8 @@ public sealed partial class AgentJobGrain : Grain, IAgentJobGrain
         IEventStore eventStore,
         IBackgroundTaskLauncher backgroundTasks,
         IGrainFactory grains,
-        IAgentJobDispatchObserver dispatchObserver)
+        IAgentJobDispatchObserver dispatchObserver,
+        ManagerExecutionCapabilityIssuer managerCredentials)
     {
         _log = log;
         _options = options.Value;
@@ -89,6 +91,7 @@ public sealed partial class AgentJobGrain : Grain, IAgentJobGrain
         _backgroundTasks = backgroundTasks;
         _grains = grains;
         _dispatchObserver = dispatchObserver;
+        _managerCredentials = managerCredentials;
         _runnerLossRecoveryTimeout = ValidateRunnerLossRecoveryTimeout(_options.RunnerLossRecoveryTimeout);
     }
 
@@ -494,6 +497,7 @@ public sealed partial class AgentJobGrain : Grain, IAgentJobGrain
                 Key, runnerId, workId, State.RunnerId, State.WorkId);
             return new AgentJobReportResult(false, "runner-or-work-mismatch");
         }
+        if (IsManagerCredentialExpired(result)) return await ReportManagerCredentialExpiredAsync(result);
         if (string.Equals(result.Status, "unknown", StringComparison.OrdinalIgnoreCase)) return await ReportUnknownResultAsync(result);
         var isSuccess = string.Equals(result.Status, "completed", StringComparison.OrdinalIgnoreCase)
             || string.Equals(result.Status, "pass", StringComparison.OrdinalIgnoreCase)
@@ -997,7 +1001,8 @@ public sealed partial class AgentJobGrain : Grain, IAgentJobGrain
             PinnedRunnerId: command.PinnedRunnerId,
             AgentSessionStartup: command.AgentSessionStartup,
             SpawnOrigin: command.SpawnOrigin,
-            WorkspaceRepositories: command.WorkspaceRepositories);
+            WorkspaceRepositories: command.WorkspaceRepositories,
+            OriginMarker: command.OriginMarker);
 
     private static bool PlansEquivalent(PrepareManualLaunchCommand left, PrepareManualLaunchCommand right) =>
         string.Equals(left.Prompt, right.Prompt, StringComparison.Ordinal)
@@ -1017,6 +1022,7 @@ public sealed partial class AgentJobGrain : Grain, IAgentJobGrain
         && left.EpicNumber == right.EpicNumber
         && string.Equals(left.WorkflowRunId ?? string.Empty, right.WorkflowRunId ?? string.Empty, StringComparison.Ordinal)
         && Equals(left.ConnectionOrigin, right.ConnectionOrigin)
+        && string.Equals(left.OriginMarker, right.OriginMarker, StringComparison.Ordinal)
         && JsonEquals(left.AgentConfig, right.AgentConfig)
         && AttachmentDescriptorsEquivalent(left.Attachments, right.Attachments);
 
@@ -1070,6 +1076,7 @@ public sealed partial class AgentJobGrain : Grain, IAgentJobGrain
         && string.Equals(left.Variant, right.Variant, StringComparison.Ordinal)
         && string.Equals(left.ReasoningEffort, right.ReasoningEffort, StringComparison.Ordinal)
         && string.Equals(left.ExecutionSource, right.ExecutionSource, StringComparison.Ordinal)
+        && string.Equals(left.OriginMarker, right.OriginMarker, StringComparison.Ordinal)
         && JsonEquals(left.AgentConfig, right.AgentConfig)
         && AttachmentDescriptorsEquivalent(left.Attachments, right.Attachments)
         && Equals(left.StartupContext, right.StartupContext)
@@ -1093,6 +1100,7 @@ public sealed partial class AgentJobGrain : Grain, IAgentJobGrain
         if (!string.Equals(left.Variant, right.Variant, StringComparison.Ordinal)) fields.Add(nameof(AgentJobInput.Variant));
         if (!string.Equals(left.ReasoningEffort, right.ReasoningEffort, StringComparison.Ordinal)) fields.Add(nameof(AgentJobInput.ReasoningEffort));
         if (!string.Equals(left.ExecutionSource, right.ExecutionSource, StringComparison.Ordinal)) fields.Add(nameof(AgentJobInput.ExecutionSource));
+        if (!string.Equals(left.OriginMarker, right.OriginMarker, StringComparison.Ordinal)) fields.Add(nameof(AgentJobInput.OriginMarker));
         if (!JsonEquals(left.AgentConfig, right.AgentConfig)) fields.Add(nameof(AgentJobInput.AgentConfig));
         if (!AttachmentDescriptorsEquivalent(left.Attachments, right.Attachments)) fields.Add(nameof(AgentJobInput.Attachments));
         if (!Equals(left.AllowedSubagents, right.AllowedSubagents)) fields.Add(nameof(AgentJobInput.AllowedSubagents));
@@ -1175,25 +1183,6 @@ public sealed partial class AgentJobGrain : Grain, IAgentJobGrain
             _ => OnJobTimeoutAsync(),
             dueTime,
             TimeSpan.FromMilliseconds(-1));
-    }
-
-    private async Task OnJobTimeoutAsync()
-    {
-        if (IsTerminal || State.RunnerId is null)
-            return;
-
-        var runnerLost = await IsRunnerAwayAsync();
-        var reason = runnerLost
-            ? AgentJobFailureReasons.RunnerLost
-            : $"{AgentJobFailureReasons.ReportTimeout}: report timeout after {_options.JobTimeout}";
-        DateTimeOffset? recoveryDeadlineAt = runnerLost
-            ? _timeProvider.GetUtcNow() + _runnerLossRecoveryTimeout
-            : null;
-
-        _log.LogWarning(
-            "AgentJob {Id} report timeout after {Timeout}; transitioning to unknown with reason {Reason}",
-            Key, _options.JobTimeout, reason);
-        await EnterUnknownStateAsync(reason, recoveryDeadlineAt);
     }
 
     private async Task EvaluatePendingAsync()

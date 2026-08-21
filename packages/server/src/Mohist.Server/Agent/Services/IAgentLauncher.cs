@@ -251,4 +251,9 @@ public sealed record ConnectionLaunchOrigin(
     [property: Orleans.Id(2)] string SlackUserId,
     [property: Orleans.Id(3)] string ConversationId,
     [property: Orleans.Id(4)] string MessageTs,
-    [property: Orleans.Id(5)] string? ThreadTs = null);
+    /// <summary>
+    /// Optional non-secret control-plane origin marker. Ordinary Slack
+    /// Connections omit it; Manager DMs set <see cref="AgentOriginMarkers.SlackManager"/>.
+    /// </summary>
+    [property: Orleans.Id(5)] string? ThreadTs = null,
+    [property: Orleans.Id(6)] string? OriginMarker = null);

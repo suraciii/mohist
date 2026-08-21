@@ -216,7 +216,11 @@ public sealed record PrepareManualLaunchCommand(
     [property: Id(21)] AgentJobSpawnOrigin? SpawnOrigin = null,
     [property: Id(22)] string? WorkspacePath = null,
     [property: Id(23)] IReadOnlyList<WorkspaceRepositorySnapshot>? WorkspaceRepositories = null,
-    [property: Id(24)] string? ReasoningEffort = null);
+    [property: Id(24)] string? ReasoningEffort = null,
+    /// <summary>
+    /// Non-secret control-plane origin marker copied from the launch origin.
+    /// </summary>
+    [property: Id(25)] string? OriginMarker = null);
 
 [GenerateSerializer]
 public sealed record AgentJobSpawnOrigin(
@@ -719,7 +723,12 @@ public sealed record AgentJobInput(
     /// persisted before the discriminator existed, so dispatch can
     /// distinguish that legacy state from an explicit non-Slack value.
     /// </summary>
-    [property: Id(26)] string? ExecutionSource = null);
+    [property: Id(26)] string? ExecutionSource = null,
+    /// <summary>
+    /// Non-secret control-plane origin marker. It is carried beside the
+    /// execution source and Slack context, never in the prompt or Skill.
+    /// </summary>
+    [property: Id(27)] string? OriginMarker = null);
 
 [GenerateSerializer]
 public sealed record AgentJobTerminalResult(

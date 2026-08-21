@@ -24,11 +24,15 @@ internal sealed class CliCredentialSession
         _error = error;
     }
 
-    public async Task<CliCredential?> TryResolveAllowedAsync(Uri? destination)
+    public string? TryResolveManagerBroker() => _provider.TryResolveManagerBroker();
+
+    public async Task<CliCredential?> TryResolveAllowedAsync(Uri? destination, bool managerMode = false)
     {
         try
         {
-            var credential = await _provider.TryResolveAsync(destination).ConfigureAwait(false);
+            var credential = managerMode
+                ? await _provider.TryResolveManagerAsync(IsManagerReplyRoute(destination)).ConfigureAwait(false)
+                : await _provider.TryResolveAsync(destination).ConfigureAwait(false);
             return credential is { MachineLocal: true } && (destination is null || !IsLoopback(destination))
                 ? null
                 : credential;
@@ -95,6 +99,9 @@ internal sealed class CliCredentialSession
 
     public void WriteExpiredSessionMessage() =>
         _error?.WriteLine("Session expired. Run 'mo auth login' to sign in again.");
+
+    private static bool IsManagerReplyRoute(Uri? destination) =>
+        destination?.AbsolutePath.EndsWith("/api/slack-manager/reply", StringComparison.Ordinal) == true;
 
     private static bool IsLoopback(Uri destination) =>
         string.Equals(destination.Host, "localhost", StringComparison.OrdinalIgnoreCase)

@@ -1,6 +1,7 @@
 using System.Text.Json.Serialization;
 using Mohist.Server.Contracts;
 using Mohist.Server.Infrastructure;
+using Mohist.Server.Sessions.Services;
 
 namespace Mohist.Server.Sessions.Domain;
 
@@ -299,7 +300,8 @@ public sealed record AgentSessionMetadata(
     public const string WorkspaceNameKey = "mohist.io/workspace-name";
 
     private static bool IsSourceLabel(string key) =>
-        key is ProjectIdKey or SourceKindKey or WorkflowRunIdKey or SessionNameKey or AgentIdKey;
+        key is ProjectIdKey or SourceKindKey or WorkflowRunIdKey or SessionNameKey or AgentIdKey
+            or AgentSessionQueryMetadataKeys.OriginMarker;
 
     private static IReadOnlyDictionary<string, string> With(IReadOnlyDictionary<string, string>? source, string key, string value)
     {
@@ -528,7 +530,8 @@ public sealed record AgentSessionFollowupDispatch(
     [property: Id(4)] string? InputId = null,
     [property: Id(5)] AgentSessionInputProvenance? Provenance = null,
     [property: Id(6)] string? DispatchId = null,
-    [property: Id(7)] string ExecutionSource = AgentExecutionSources.NonSlack);
+    [property: Id(7)] string ExecutionSource = AgentExecutionSources.NonSlack,
+    [property: Id(8)] string? OriginMarker = null);
 
 /// <summary>
 /// Lookup result of <see cref="AgentSessionExtensions.FindFollowupInputByIdempotencyKey"/>.
@@ -582,7 +585,8 @@ public sealed record AgentSessionInputProvenance(
     [property: Id(4)] string MemberId,
     [property: Id(5)] string MessageId,
     [property: Id(6)] string? ConnectionId = null,
-    [property: Id(7)] string? BoundThreadRootMessageId = null);
+    [property: Id(7)] string? BoundThreadRootMessageId = null,
+    [property: Id(8)] string? OriginMarker = null);
 
 [GenerateSerializer]
 public sealed record AgentSessionInputRecord(
@@ -609,7 +613,8 @@ public sealed record AgentSessionInputRecord(
     /// id (next free after <see cref="Provenance"/>).
     /// </summary>
     [property: Id(10)] AgentStartupContext? StartupContext = null,
-    [property: Id(11)] string ExecutionSource = AgentExecutionSources.NonSlack);
+    [property: Id(11)] string ExecutionSource = AgentExecutionSources.NonSlack,
+    [property: Id(12)] string? OriginMarker = null);
 
 public enum AgentSessionInputAcceptance
 {

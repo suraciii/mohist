@@ -17,6 +17,7 @@ import { boundedWait } from './bounded-wait.js'
 import type { ResolvedSkill } from './skill-resolver.js'
 import { runnerLogger } from '../system/logger.js'
 import type { DeliveredAttachment } from './attachment-delivery.js'
+import type { ManagerExecutionBoundary } from './manager-execution-boundary.js'
 import type {
   AgentJobExecutorOptions,
   AgentJobRuntimeAccessors,
@@ -36,6 +37,7 @@ export interface AgentJobTurnDeps {
   readonly bindingRecoveryCoordinator: BindingRecoveryCoordinator | null
   readonly options: AgentJobExecutorOptions
   readonly runtimeTurnRegistry?: RuntimeTurnRegistry | null
+  readonly managerExecution?: ManagerExecutionBoundary | null
 }
 
 export async function executeOpenCodeTurn(
@@ -52,6 +54,7 @@ export async function executeOpenCodeTurn(
   binding: BindingResolution,
   skills: readonly ResolvedSkill[],
   attachments: readonly DeliveredAttachment[],
+  managerExecution: ManagerExecutionBoundary | null = deps.managerExecution ?? null,
 ): Promise<WorkItemResult> {
   const runtime = resolveAccessor(deps.runtimes.openCode)
   if (!runtime) {
@@ -161,7 +164,11 @@ export async function executeOpenCodeTurn(
           }
         },
         onEvent: (event) => {
-          eventSink.observeEvent(event)
+          eventSink.observeEvent(
+            managerExecution
+              ? { ...event, payload: managerExecution.redact(event.payload) as Record<string, unknown> }
+              : event,
+          )
         },
       }
     : undefined
@@ -190,10 +197,22 @@ export async function executeOpenCodeTurn(
       ),
     )
   } catch (error) {
-    return failureResult('turn-failed', `AgentJob turn threw: ${errorMessage(error)}`)
+    const message = errorMessage(error)
+    return failureResult(
+      managerExecution?.hasExpired() ? 'manager-credential-expired' : 'turn-failed',
+      managerExecution?.hasExpired()
+        ? 'Manager credentials expired before this execution completed; inspect current state before retrying.'
+        : `AgentJob turn threw: ${managerExecution ? managerExecution.mask(message) : message}`,
+    )
   }
   await eventSink.drain()
-  return projectTurnToWorkItemResult(result, 'opencode', modelInput, variant)
+  if (managerExecution?.hasExpired())
+    return failureResult(
+      'manager-credential-expired',
+      'Manager credentials expired before this execution completed; inspect current state before retrying.',
+      'opencode',
+    )
+  return redactManagerResult(projectTurnToWorkItemResult(result, 'opencode', modelInput, variant), managerExecution)
 }
 
 export async function executePiTurn(
@@ -209,6 +228,7 @@ export async function executePiTurn(
   workDir: string,
   binding: BindingResolution,
   skills: readonly ResolvedSkill[],
+  managerExecution: ManagerExecutionBoundary | null = deps.managerExecution ?? null,
 ): Promise<WorkItemResult> {
   if (variant) {
     return failureResult(
@@ -277,7 +297,10 @@ export async function executePiTurn(
     runtimeSessionId = recovery.binding.runtimeSessionId
   }
   if (!runtimeSessionId) {
-    const created = await runtime.createSession({ target: { runtime: 'pi', runtimeSessionId: null, workDir } })
+    const created = await runtime.createSession({
+      target: { runtime: 'pi', runtimeSessionId: null, workDir },
+      managerExecution,
+    })
     if (!created.ok) {
       const code = mapPiErrorKind(created.error.kind)
       return failureResult(code, created.error.message, 'pi', created.error.diagnostics)
@@ -299,11 +322,16 @@ export async function executePiTurn(
       ...(skills.length > 0 ? { skills } : {}),
       unknownKeys: collectUnknownKeys(payload),
     },
+    managerExecution,
   }
   const observer: PiTurnObserver | undefined = binding.agentSessionId
     ? {
         onEvent: (event) => {
-          eventSink.observePiEvent(event)
+          eventSink.observePiEvent(
+            managerExecution
+              ? { ...event, payload: managerExecution.redact(event.payload) as Record<string, unknown> }
+              : event,
+          )
         },
       }
     : undefined
@@ -322,10 +350,27 @@ export async function executePiTurn(
       runtime.runTurn(request, signal, observer),
     )
   } catch (error) {
-    return failureResult('turn-failed', `AgentJob turn threw: ${errorMessage(error)}`)
+    const message = errorMessage(error)
+    return failureResult(
+      managerExecution?.hasExpired() ? 'manager-credential-expired' : 'turn-failed',
+      managerExecution?.hasExpired()
+        ? 'Manager credentials expired before this execution completed; inspect current state before retrying.'
+        : `AgentJob turn threw: ${managerExecution ? managerExecution.mask(message) : message}`,
+    )
   }
   await eventSink.drain()
-  return projectPiTurnToWorkItemResult(result, 'pi', modelInput, variant)
+  if (managerExecution?.hasExpired())
+    return failureResult(
+      'manager-credential-expired',
+      'Manager credentials expired before this execution completed; inspect current state before retrying.',
+      'pi',
+    )
+  return redactManagerResult(projectPiTurnToWorkItemResult(result, 'pi', modelInput, variant), managerExecution)
+}
+
+function redactManagerResult(result: WorkItemResult, boundary: ManagerExecutionBoundary | null): WorkItemResult {
+  if (!boundary) return result
+  return boundary.redact(result) as WorkItemResult
 }
 
 async function runWithModelRetry<T extends ModelTurnResult>(

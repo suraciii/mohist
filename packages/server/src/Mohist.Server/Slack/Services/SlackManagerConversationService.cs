@@ -1,7 +1,7 @@
 using Mohist.Server.Api;
+using Mohist.Server.Contracts;
 using Mohist.Server.Agent.Grains;
 using Mohist.Server.Agent.Services;
-using Mohist.Server.Contracts;
 using Mohist.Server.Infrastructure;
 using Mohist.Server.Infrastructure.Hosting;
 using Mohist.Server.Infrastructure.Orleans;
@@ -12,6 +12,11 @@ using Mohist.Server.Sessions.Services;
 
 namespace Mohist.Server.Slack.Services;
 
+/// <summary>
+/// Coordinates Manager messages through the ordinary Agent Session launch and
+/// follow-up contracts. This service owns durable Session routing only; reply
+/// text is produced by the Agent reply action.
+/// </summary>
 public sealed class SlackManagerConversationService : IScopedService, ISlackManagerConversationProcessor
 {
     private readonly BuiltInAgentResolver _agents;
@@ -20,6 +25,7 @@ public sealed class SlackManagerConversationService : IScopedService, ISlackMana
     private readonly AgentSessionFollowupDispatcher _followups;
     private readonly IGrainFactory _grains;
     private readonly SlackDmSessionMappingStore _dmSessions;
+    private readonly SlackProviderInboxStore _inbox;
 
     public SlackManagerConversationService(
         BuiltInAgentResolver agents,
@@ -27,7 +33,8 @@ public sealed class SlackManagerConversationService : IScopedService, ISlackMana
         AgentSessionQuerier sessions,
         AgentSessionFollowupDispatcher followups,
         IGrainFactory grains,
-        SlackDmSessionMappingStore dmSessions)
+        SlackDmSessionMappingStore dmSessions,
+        SlackProviderInboxStore inbox)
     {
         _agents = agents;
         _launcher = launcher;
@@ -35,6 +42,7 @@ public sealed class SlackManagerConversationService : IScopedService, ISlackMana
         _followups = followups;
         _grains = grains;
         _dmSessions = dmSessions;
+        _inbox = inbox;
     }
 
     public async Task<SlackManagerConversationResult> ProcessAsync(
@@ -42,47 +50,64 @@ public sealed class SlackManagerConversationService : IScopedService, ISlackMana
         CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(request);
-        return await ContinueAgentAsync(request, request.Message.Text, ct);
-    }
+        var prompt = request.Message.Text.Trim();
+        if (string.IsNullOrWhiteSpace(prompt))
+            return SlackManagerConversationResult.NotAccepted(request.CurrentSessionId);
 
-    private async Task<SlackManagerConversationResult> ContinueAgentAsync(
-        SlackManagerConversationRequest request,
-        string prompt,
-        CancellationToken ct)
-    {
         var agent = await _agents.ResolveAsync(BuiltInAgentCatalog.MohistSlackName, ct)
             ?? throw new InvalidOperationException("The built-in mohist-slack Agent is not registered.");
         var sessionId = request.CurrentSessionId
             ?? await _dmSessions.GetCurrentSessionIdAsync(
-                agent.ProjectId,
+                BuiltInAgentCatalog.MohistSlackProjectId,
                 request.Actor.EnrollmentId,
+                request.Message.Identity.WorkspaceTeamId,
                 request.Message.Identity.ConversationId,
-                ct)
-            ?? ManagerSessionId(request);
+                ct);
+
+        if (string.IsNullOrWhiteSpace(sessionId))
+            return await LaunchSessionAsync(request, agent, prompt, ManagerSessionId(request), ct);
+
         var target = await _sessions.ResolveCanonicalFollowupTargetAsync(
             agent.ProjectId,
             sessionId,
             ct);
+        if (target is not null && !await ValidateSlackContinuityAsync(request, sessionId, ct))
+            return SlackManagerConversationResult.NotAccepted(sessionId);
+        var allowPendingInitialLaunch =
+            string.Equals(sessionId, ManagerSessionId(request), StringComparison.Ordinal)
+            && await IsPendingInitialLaunchAsync(request, sessionId, ct);
         if (target is null)
-            return await LaunchSessionAsync(request, agent, prompt, sessionId, ct);
+            return await LaunchSessionAsync(
+                request,
+                agent,
+                prompt,
+                ReplacementManagerSessionId(request),
+                ct);
 
-        var idempotencyKey = $"manager:{request.Message.Identity.AsKey()}";
         var grain = _grains.GetGrain<IAgentSessionGrain>(sessionId);
+        var idempotencyKey = $"slack:{request.Message.Identity.AsKey()}";
         try
         {
             var accepted = await grain.AcceptFollowupAsync(new AcceptFollowupCommand(
-                Text: ManagerPrompt(prompt),
-                Source: "slack-manager",
+                Text: prompt,
+                Source: "agent-session-followup",
                 IdempotencyKey: idempotencyKey,
-                Provenance: Provenance(request)));
+                Provenance: Provenance(request),
+                AllowPendingInitialLaunch: allowPendingInitialLaunch));
             await _followups.DispatchNextAsync(agent.ProjectId, sessionId, ct);
             return new SlackManagerConversationResult(
-                Text: accepted.AlreadyAccepted ? "Manager request is already queued." : "Manager request accepted.",
-                DispatchRef: $"manager:{sessionId}:{accepted.InputId}",
-                SessionId: sessionId);
+                SessionId: sessionId,
+                DispatchRef: accepted.OperationId,
+                InputId: accepted.InputId,
+                TurnId: accepted.TurnId,
+                Accepted: true);
         }
         catch (RuntimeSessionMissingException)
         {
+            // The current message is the replacement Session's initial input.
+            // Its message-derived Session id and the launch coordinator's
+            // message-derived idempotency key make a retry converge to one
+            // Session, input, and dispatch.
             return await LaunchSessionAsync(
                 request,
                 agent,
@@ -92,7 +117,9 @@ public sealed class SlackManagerConversationService : IScopedService, ISlackMana
         }
         catch (SessionActivityUnknownException)
         {
-            return Reply(request, "The Manager session state is uncertain. Please retry after it reconciles.");
+            // Durable Session state remains authoritative. Do not manufacture
+            // a Slack acknowledgement while the activity is unknown.
+            return SlackManagerConversationResult.NotAccepted(sessionId);
         }
     }
 
@@ -103,19 +130,33 @@ public sealed class SlackManagerConversationService : IScopedService, ISlackMana
         string sessionId,
         CancellationToken ct)
     {
+        // Publish the deterministic Session before the coordinator can submit
+        // the AgentJob. Reply validation and concurrent Manager ingress both
+        // need this durable launch fence while dispatch is in flight.
+        await _dmSessions.SetCurrentSessionIdAsync(
+            agent.ProjectId,
+            request.Actor.EnrollmentId,
+            request.Message.Identity.WorkspaceTeamId,
+            request.Actor.SlackUserId,
+            request.Message.Identity.ConversationId,
+            sessionId,
+            request.Message.Identity.MessageTs,
+            ct);
+
         var launch = await _launcher.LaunchConnectionAsync(
             agent,
-            ManagerPrompt(prompt),
+            prompt,
             new ConnectionLaunchOrigin(
                 request.Actor.EnrollmentId,
                 request.Actor.WorkspaceTeamId,
                 request.Actor.SlackUserId,
                 request.Message.Identity.ConversationId,
                 request.Message.Identity.MessageTs,
-                request.Message.ThreadTs),
-            startupContext: StartupContext(request.Actor),
+                request.Message.ThreadTs,
+                AgentOriginMarkers.SlackManager),
             preMintedSessionId: sessionId,
             ct: ct);
+
         await _dmSessions.SetCurrentSessionIdAsync(
             agent.ProjectId,
             request.Actor.EnrollmentId,
@@ -125,16 +166,55 @@ public sealed class SlackManagerConversationService : IScopedService, ISlackMana
             launch.SessionId,
             request.Message.Identity.MessageTs,
             ct);
+
         return new SlackManagerConversationResult(
-            Text: "Manager request accepted.",
-            DispatchRef: $"manager:{launch.SessionId}:{request.Message.Identity.MessageTs}",
-            SessionId: launch.SessionId);
+            SessionId: launch.SessionId,
+            DispatchRef: $"slack:{launch.SessionId}:{launch.InputId}",
+            InputId: launch.InputId,
+            TurnId: launch.TurnId,
+            Accepted: true);
     }
 
-    private static SlackManagerConversationResult Reply(
+    private async Task<bool> IsPendingInitialLaunchAsync(
         SlackManagerConversationRequest request,
-        string text) =>
-        new(text, $"manager:{request.Message.Identity.AsKey()}:reply");
+        string sessionId,
+        CancellationToken ct)
+    {
+        var initial = await _grains.GetGrain<IAgentSessionGrain>(sessionId).GetInitialLaunchAsync();
+        var initialMessageTs = initial?.Input?.Provenance?.MessageId;
+        if (string.IsNullOrWhiteSpace(initialMessageTs))
+            return false;
+
+        var routedSessionId = await _inbox.FindMessageRouteSessionIdAsync(
+            SlackDeliveryOwnerIds.ManagerProjectId,
+            request.Actor.EnrollmentId,
+            request.Message.Identity.WorkspaceTeamId,
+            request.Message.Identity.ConversationId,
+            initialMessageTs,
+            ct);
+        return string.IsNullOrWhiteSpace(routedSessionId);
+    }
+
+    private async Task<bool> ValidateSlackContinuityAsync(
+        SlackManagerConversationRequest request,
+        string sessionId,
+        CancellationToken ct)
+    {
+        var initial = await _grains.GetGrain<IAgentSessionGrain>(sessionId).GetInitialLaunchAsync();
+        var provenance = initial?.Input?.Provenance;
+        if (provenance is null
+            || !string.Equals(provenance.ProviderKind, "slack", StringComparison.Ordinal)
+            || !string.Equals(provenance.WorkspaceId, request.Message.Identity.WorkspaceTeamId, StringComparison.Ordinal)
+            || !string.Equals(provenance.ConversationId, request.Message.Identity.ConversationId, StringComparison.Ordinal)
+            || !string.Equals(provenance.MemberId, request.Actor.SlackUserId, StringComparison.Ordinal)
+            || !string.Equals(provenance.ConnectionId, request.Actor.EnrollmentId, StringComparison.Ordinal)
+            || string.IsNullOrWhiteSpace(provenance.BoundThreadRootMessageId)
+            || (request.Message.ThreadTs is not null
+                && !string.Equals(request.Message.ThreadTs, provenance.BoundThreadRootMessageId, StringComparison.Ordinal)))
+            return false;
+
+        return string.Equals(provenance.OriginMarker, AgentOriginMarkers.SlackManager, StringComparison.Ordinal);
+    }
 
     private static string ManagerSessionId(SlackManagerConversationRequest request) =>
         $"manager-session-{AgentLaunchCoordinatorCodec.StableToken(string.Join('\n',
@@ -149,10 +229,6 @@ public sealed class SlackManagerConversationService : IScopedService, ISlackMana
             request.Message.Identity.ConversationId,
             request.Message.Identity.MessageTs))}";
 
-    private static AgentStartupContext StartupContext(ManagerActorContext actor) => new(
-        $"Authenticated Manager actor for workspace {actor.WorkspaceTeamId}: {actor.SlackUserId}.",
-        new AgentStartupContextProvenance("slack-manager", false, null));
-
     private static AgentSessionInputProvenance Provenance(SlackManagerConversationRequest request) => new(
         ProviderKind: "slack",
         WorkspaceId: request.Message.Identity.WorkspaceTeamId,
@@ -160,9 +236,7 @@ public sealed class SlackManagerConversationService : IScopedService, ISlackMana
         ThreadId: request.Message.ThreadTs,
         MemberId: request.Actor.SlackUserId,
         MessageId: request.Message.Identity.MessageTs,
-        ConnectionId: request.Actor.EnrollmentId);
-
-    private static string ManagerPrompt(string prompt) =>
-        $"Manager request from the authenticated Slack actor. Treat this as a natural-language request. "
-        + $"Use the server-authorized manager tool protocol only when you need authoritative data or a state change.\n\n{prompt.Trim()}";
+        ConnectionId: request.Actor.EnrollmentId,
+        BoundThreadRootMessageId: request.Message.ThreadTs ?? request.Message.Identity.MessageTs,
+        OriginMarker: AgentOriginMarkers.SlackManager);
 }

@@ -1,0 +1,109 @@
+{
+  "project": "mohist-local",
+  "description": "Refactor Slack Manager DMs onto ordinary Agent Sessions and shared Slack boundaries, replacing model-output management protocol behavior with an ephemeral allowlisted command capability, Agent-authored replies, and reaction-based liveness.",
+  "tasks": [
+    {
+      "id": "T-001",
+      "title": "Ephemeral Manager execution credential and capability transport",
+      "spec": "specs/manager-execution-credential/spec.md#issue-one-short-lived-credential-for-each-manager-execution",
+      "description": "Implement the Server-owned Manager capability issuer and typed transient dispatch plumbing so every initial, follow-up, and recovered Manager execution receives fresh route-scoped grants bound to its immutable Slack origin, actor, enrollment, Session, dispatch attempt, expiry, and explicit audience. When both routes are available, issue distinct `manager-management` and `manager-slack-reply` grants from the same attempt lease, deliver each only to its matching bridge, keep both out of prompts, Slack context, generic `with` payloads, durable state, results, and ordinary logs, redact diagnostics, and discard them at expiry or terminal completion.",
+      "acceptanceCriteria": [
+        "Initial, follow-up, and recovered Manager executions each receive distinct unexpired route-scoped credentials with claims for workspace, conversation origin, enrollment, authenticated actor, Session, dispatch attempt, issued-at, expiry, and exact audience; when both routes are available the management and reply credentials are different values, and a recovered attempt resolves durable origin again and never reuses either earlier credential.",
+        "Credential validation rejects malformed, expired, replayed, cross-origin, cross-actor, cross-enrollment, cross-Session, cross-dispatch, and wrong-audience credentials before any Manager application or outbox service is called; a management grant cannot invoke the reply action and a reply grant cannot invoke management or arbitrary routes.",
+        "Serialized AgentJob, Session, follow-up, Runner dispatch, Slack context, prompt, Instructions, Skill, system facts, command result, terminal facts, and persisted execution records contain no credential value or secret-bearing environment payload.",
+        "The Runner and command bridge keep the credential in execution-scoped memory, do not place it in process arguments or general shell environment inheritance, expose only the Manager capability, and clear it after command return, expiry, or terminal completion.",
+        "Restart, expiry, terminal completion, and recovery tests prove that the old credential cannot be renewed or reused and that only non-secret origin and dispatch references survive for recovery.",
+        "Credential leakage tests inspect serialized dispatches, prompts, command results, exceptions, terminal diagnostics, and logs; known credential values are absent or redacted, and the relevant Server and Runner test suites pass."
+      ],
+      "priority": 1,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Server Manager capability issuer/validators, transient Runner bridge transport for both route audiences, execution cleanup and redaction behavior, with passing credential-boundary and recovery tests.",
+      "dependsOn": [],
+      "passes": false,
+      "notes": "Satisfies the delivery, validation, and non-disclosure requirements in `manager-execution-credential`. Choose an existing protected process-scoped transport where available; the invariant is that the credential never enters generic Runtime input, prompt composition, persistence, arguments, or unrestricted shell execution."
+    },
+    {
+      "id": "T-002",
+      "title": "Suppress managed Bot messages before Manager work admission",
+      "spec": "specs/manager-slack-reply-liveness/spec.md#managed-manager-and-agent-bot-messages-cannot-become-manager-work",
+      "description": "Integrate the existing workspace-scoped managed-Bot admission service at the first Manager ingress boundary after stable message identity, workspace consistency, and lease checks, before actor authorization, claim handling, inbox admission, Session routing, liveness, or outbox work. Managed Manager Bot and eligible managed Agent App Bot authors return a definite ignored result while absent, conflicting, unregistered, or unrelated Bot identities retain the existing non-managed path.",
+      "acceptanceCriteria": [
+        "A matching enrolled Manager Bot or eligible managed Agent App Bot is ignored even when no human Slack sender is present, and the receiving App identity is never used as author evidence.",
+        "Managed Bot ingress invokes neither actor authentication nor claim consumption and creates no Inbox row, SessionInput, AgentJob, Agent Session, follow-up, reply, reaction, progress record, or terminal delivery; message text is not persisted or logged as work input.",
+        "Repeated delivery of the same managed-Bot message is acknowledged and ignored without additional side effects, including after adapter rebinding or when the event contains no human sender.",
+        "Stable identity, workspace, and lease validation still precede managed attribution, while human messages, unknown senders, conflicting identities, and unrelated third-party Bots retain the current Manager ingress behavior.",
+        "Server specification tests cover Manager self-messages, managed Agent Bot messages, null human sender, receiving-App-versus-author identity, repeated delivery, and all compatibility paths, and the adapter acknowledgment regression tests pass."
+      ],
+      "priority": 2,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Manager ingress with pre-admission managed-Bot suppression and no-side-effect ignored results, plus passing ingress and redelivery regression tests.",
+      "dependsOn": [],
+      "passes": false,
+      "notes": "This consumes the managed-Bot identity contract already established by the preceding Slack admission work; do not broaden suppression to every Bot or infer authorship from the receiving App."
+    },
+    {
+      "id": "T-003",
+      "title": "Allowlisted Manager command capability with authoritative results",
+      "spec": "specs/manager-command-capability/spec.md#manager-exposes-only-the-approved-management-operations",
+      "description": "Build the `ManagerManagementBridge` over the credential transport, exposing exactly `list`, `view`, `create`, `claim-owner`, `edit`, `enable`, `disable`, `transfer-owner`, and `diagnostics` with the exact request/argument mapping in the Manager command capability spec. Keep `mo slack message send` on the separate reply bridge and reject it here. Refactor operation-specific CLI/Web behavior into shared application services and structured result mapping where needed, reauthorize the current actor, enrollment, workspace, and target on every call, and keep protected secrets, irreversible operations, database access, arbitrary API routes, and new Slack command grammar outside the management capability.",
+      "acceptanceCriteria": [
+        "The management bridge accepts each of the nine approved logical operations with the exact `operation`/`args` mapping in the spec, rejects extra properties and client authority overrides, rejects `mo slack message send` on this route, and rejects unknown names, arbitrary endpoint or HTTP selection, database requests, shell commands, and unrestricted management actions without mutation.",
+        "Every approved operation delegates to the same authoritative application service used by its protected CLI or Web path and returns confirmed state, next action, idempotent result, validation error, conflict, not-found, or unavailable outcome without optimistic success claims.",
+        "Each call performs current actor and enrollment authorization plus target workspace, existence, ownership, and scope checks after credential validation; revocation, disabled or removed enrollment, changed ownership, stale actor, and cross-workspace targets fail before service invocation.",
+        "Secret submission, credential reads or rotation, permanent deletion, binding removal, direct database access, arbitrary management API access, and Slack-native command syntax are rejected while existing protected CLI/Web credential and authorization paths remain unchanged.",
+        "Command capability tests cover the exact request mapping for status and inspection, create/edit/enable/disable, both owner workflows, diagnostics, invalid and idempotent requests, authorization changes, foreign targets, reply-action denial on the management route, every protected-operation and arbitrary-route denial, and authoritative failure mapping; Server, CLI, and bridge tests pass."
+      ],
+      "priority": 3,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Allowlisted Manager `mo` command bridge, shared authoritative result services/mapping, per-call reauthorization, protected-operation denials, and passing command capability tests.",
+      "dependsOn": ["T-001"],
+      "passes": false,
+      "notes": "Satisfies the remaining command, authorization, and exclusion requirements in `manager-command-capability`. Keep target lookup and mutation in application services; the bridge must not call EF, grains, Slack credentials, or private HTTP handlers directly."
+    },
+    {
+      "id": "T-004",
+      "title": "Route Manager DMs through ordinary Slack Sessions and remove the model-output protocol",
+      "spec": "specs/manager-session-lifecycle/spec.md#manager-dms-use-the-ordinary-agent-session-lifecycle",
+      "description": "Replace the Manager-specific conversation path with the ordinary `mohist-slack` launch, follow-up, Session, and recovery boundaries, preserving one durable Session per Manager DM and carrying a non-secret Manager-origin marker plus a complete Server-created Slack context and collaboration Skill. Remove assistant-text parsing, `mohistManagerTool` execution, synthesized follow-up or tool-result inputs, and Manager-specific response extraction, and update the built-in Manager instructions/assets to describe the command and reply actions instead of a JSON envelope.",
+      "acceptanceCriteria": [
+        "The first authorized non-claim Manager DM creates exactly one ordinary AgentSession, SessionInput, AgentTurn, and AgentJob with Slack provenance, Manager enrollment and actor facts, the bound DM root, a complete reply anchor, the published collaboration Skill identity/version/instructions/digest, and a non-secret Manager-origin marker.",
+        "A later message in the same durable Manager DM mapping creates one ordinary follow-up input for the existing Session, preserves the initial root while identifying the new triggering message, and never creates a parallel Manager Session; claim and owner-authentication messages remain ingress-consumed.",
+        "Duplicate delivery, restart, adapter rebinding, and AgentJob recovery converge on existing durable work, preserve workspace/enrollment/actor/conversation/root facts, and issue a fresh dispatch identity and execution credential rather than duplicating input or reusing stale execution material.",
+        "A missing or conflicting Manager Slack context or reply anchor is rejected before Runtime invocation or local follow-up enqueue and is never relabeled as non-Slack work.",
+        "No Server path parses assistant text for `mohistManagerTool` or another management envelope, executes a mutation from prose, synthesizes a `Task: Follow-up` or tool-result input, or promotes Runtime output to a reply; legacy JSON-shaped output is inert ordinary Runtime data.",
+        "Session, ingress, recovery, and Runner contract tests cover initial launch, follow-up root continuity, duplicate admission, claims, restart/rebinding recovery, context validation, legacy-envelope inertness, and absence of synthetic inputs; the updated Manager asset tests pass."
+      ],
+      "priority": 4,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Ordinary Slack-backed Manager Session launch/follow-up/recovery path, current Manager instructions and Skill guidance, removed model-output protocol behavior, and passing lifecycle/protocol regression tests.",
+      "dependsOn": ["T-001", "T-002", "T-003"],
+      "passes": false,
+      "notes": "This owns the Manager ingress/conversation/session switchover and the deletion of `SlackManagerToolInvocation`/`SlackManagerToolTurnProcessor` behavior. Durable DM mappings remain lookup indexes; Session provenance and bound root are the recovery authority."
+    },
+    {
+      "id": "T-005",
+      "title": "Agent-authored Manager replies and reaction-based liveness convergence",
+      "spec": "specs/manager-slack-reply-liveness/spec.md#manager-replies-are-authored-only-through-the-slack-reply-action",
+      "description": "Implement the separate `ManagerSlackReplyBridge` behind the existing `mo slack message send` action as the only Manager conversational delivery path. Bind sends to the current `manager-slack-reply` grant, Server-provided anchor, Session, and dispatch; inject the Manager owner and input-scoped dispatch key; and reuse an identical Manager-owned outbox intent while rejecting a conflicting duplicate. Complete the shared Manager liveness projection so Received and Working are reactions, terminal handling removes Working and converges to exactly one Completed or Attention reaction for every outcome, and the terminal delivery path never synthesizes conversational text from Runtime output, command results, or missing replies.",
+      "acceptanceCriteria": [
+        "The reply bridge accepts only `mo slack message send`, validates the current reply grant and actor/enrollment/Session/dispatch, rejects missing or mismatched conversation/thread/Project/Connection assertions, and delivers a useful response only to the injected Server-provided anchor using `ProjectId = __mohist_slack_manager__`, `OwnerKind = manager`, and `ConnectionId = enrollment id`.",
+        "Accepted Manager input projects canonical Received and queued/executing work projects canonical Working as reactions without Server-authored acceptance or progress messages; the reply action remains the only final text source.",
+        "Completed turns remove Working when present and leave exactly one Completed terminal reaction; failed, cancelled, unknown, and recovered terminal outcomes remove Working when present and leave exactly one Attention reaction.",
+        "Terminal finalization is idempotent when progress state is absent and across duplicate terminal events, restart, adapter rebinding, and recovery; no accepted input remains with Working open or only Received after confirmed terminal delivery.",
+        "Assistant prose, legacy JSON, command results, terminal facts, and missing Agent replies never create a Slack message. Silent successful and silent failed or unknown turns remain valid outcomes with reactions only.",
+        "Reply, outbox, projection, and terminal-delivery tests cover exact reply-route allowlisting, grant and anchor authorization, Manager owner routing, per-input idempotency across duplicate sends and recovery, conflicting duplicate payloads, all terminal states, absent progress, recovery and redelivery, silence, and no Server-authored text; the full relevant Server/Runner/adapter test suites and repository verification gate pass."
+      ],
+      "priority": 5,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Agent-only Manager reply delivery, idempotent Slack liveness projection and terminal handling, removal of Server-authored Manager messages, and passing end-to-end liveness/reply verification.",
+      "dependsOn": ["T-004"],
+      "passes": false,
+      "notes": "This owns the Manager branch removal in `SlackTerminalDeliveryHandler` and the idempotent terminal finalizer. Liveness reactions and conversational authorship are separate contracts; do not turn command results or terminal state into acknowledgements."
+    }
+  ]
+}

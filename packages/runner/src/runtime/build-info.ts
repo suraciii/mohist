@@ -1,7 +1,7 @@
-import { existsSync, readFileSync } from "node:fs"
-import { fileURLToPath } from "node:url"
-import { dirname, resolve } from "node:path"
-import { currentRunnerResources } from "../system/filesystem.js"
+import { existsSync, readFileSync } from 'node:fs'
+import { fileURLToPath } from 'node:url'
+import { dirname, resolve } from 'node:path'
+import { currentRunnerResources } from '../system/filesystem.js'
 
 export interface BuildInfo {
   gitHash: string | null
@@ -36,33 +36,40 @@ export interface BuildInfoFileSystem {
 
 const nodeBuildInfoFileSystem: BuildInfoFileSystem = {
   exists: existsSync,
-  readText: (path) => readFileSync(path, "utf8"),
+  readText: (path) => readFileSync(path, 'utf8'),
 }
 
 function candidatesForManifest() {
   const here = dirname(fileURLToPath(import.meta.url))
-  return [
-    resolve(here, "build-info.json"),
-    resolve(here, "..", "build-info.json"),
-  ]
+  return [resolve(here, 'build-info.json'), resolve(here, '..', 'build-info.json')]
 }
 
-export function loadBuildInfo(fileSystem: BuildInfoFileSystem = currentRunnerResources()?.buildInfoFileSystem ?? nodeBuildInfoFileSystem): BuildInfo {
+export function loadBuildInfo(
+  fileSystem: BuildInfoFileSystem = currentRunnerResources()?.buildInfoFileSystem ?? nodeBuildInfoFileSystem,
+): BuildInfo {
   for (const path of candidatesForManifest()) {
     if (!fileSystem.exists(path)) continue
     try {
       const raw = fileSystem.readText(path)
       const parsed = JSON.parse(raw) as {
-        gitHash?: unknown; builtAt?: unknown; component?: unknown; version?: unknown
-        sourceRevision?: unknown; treeHash?: unknown; artifactDigest?: unknown
-        releaseId?: unknown; generation?: unknown; runnerId?: unknown
+        gitHash?: unknown
+        builtAt?: unknown
+        component?: unknown
+        version?: unknown
+        sourceRevision?: unknown
+        treeHash?: unknown
+        artifactDigest?: unknown
+        releaseId?: unknown
+        generation?: unknown
+        runnerId?: unknown
       }
-      const gitHash = typeof parsed.gitHash === "string" && parsed.gitHash.length > 0 ? parsed.gitHash : null
-      const builtAt = typeof parsed.builtAt === "number" && Number.isFinite(parsed.builtAt) ? parsed.builtAt : null
-      const text = (value: unknown) => typeof value === "string" && value.length > 0 ? value : null
-      const generation = typeof parsed.generation === "number" && Number.isInteger(parsed.generation) && parsed.generation > 0
-        ? parsed.generation
-        : null
+      const gitHash = typeof parsed.gitHash === 'string' && parsed.gitHash.length > 0 ? parsed.gitHash : null
+      const builtAt = typeof parsed.builtAt === 'number' && Number.isFinite(parsed.builtAt) ? parsed.builtAt : null
+      const text = (value: unknown) => (typeof value === 'string' && value.length > 0 ? value : null)
+      const generation =
+        typeof parsed.generation === 'number' && Number.isInteger(parsed.generation) && parsed.generation > 0
+          ? parsed.generation
+          : null
       return {
         gitHash,
         builtAt,
@@ -80,6 +87,10 @@ export function loadBuildInfo(fileSystem: BuildInfoFileSystem = currentRunnerRes
     }
   }
   return { ...EMPTY_BUILD_INFO }
+}
+
+export function getRunnerBuildGitHash(): string | null {
+  return loadBuildInfo().gitHash
 }
 
 export function manifestCandidatesForTesting() {

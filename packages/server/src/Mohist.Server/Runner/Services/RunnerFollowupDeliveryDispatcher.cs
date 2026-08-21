@@ -53,7 +53,9 @@ public sealed class RunnerFollowupDeliveryDispatcher : IFollowupDeliveryDispatch
                         descriptor.ContentType,
                         descriptor.Size))
                     .ToArray()
-                : null);
+                : null,
+            request.ManagerExecutionGrant,
+            request.OriginMarker);
 
         try
         {

@@ -111,6 +111,8 @@ export interface ReceiveFollowupSessionTarget {
  * attachment descriptors are present; the server rejects an empty input
  * only when there are no accepted attachments to deliver.
  */
+import type { ManagerExecutionGrantResponse } from '../core/types.js'
+
 export interface ReceiveFollowupPayload {
   target?: ReceiveFollowupSessionTarget
   text: string
@@ -151,6 +153,8 @@ export interface ReceiveFollowupPayload {
     readonly size: number
   }>
   slackExecutionContext?: unknown
+  managerExecutionGrant?: ManagerExecutionGrantResponse | null
+  originMarker?: string | null
 }
 
 // Payload delivered by the server-side `ReceiveWorkflowRunStatus` control WebSocket

@@ -1,11 +1,12 @@
 using Microsoft.EntityFrameworkCore;
 using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Infrastructure.Data.Slack;
-using Mohist.Server.Infrastructure.Hosting;
 
 namespace Mohist.Server.Infrastructure.Slack;
 
-public sealed class SlackManagerToolExecutionFenceStore : IScopedService
+// Retired with the Manager model-output protocol. The durable table is
+// retained for migration compatibility but no runtime path uses this store.
+public sealed class SlackManagerToolExecutionFenceStore
 {
     private readonly IDbContextFactory<MohistDbContext> _dbFactory;
     private readonly TimeProvider _timeProvider;

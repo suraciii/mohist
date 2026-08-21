@@ -48,6 +48,8 @@ import { resolveOrRecoverBinding, type BindingRecoveryCoordinator } from '../run
 import type { FollowupOperationJournalStore } from '../runtime/followup-operation-journal.js'
 import type { ServerConnection } from './connection.js'
 import { SkillResolver } from '../runtime/skill-resolver.js'
+import { ManagerExecutionBoundary } from '../runtime/manager-execution-boundary.js'
+import { ManagerExecutionRegistry } from '../runtime/manager-execution-registry.js'
 import { buildExecutionEnvelope } from '../runtime/execution-envelope.js'
 import { inlineSlackCollaborationSkill, readExecutionSourceContext } from '../runtime/slack-execution-context.js'
 import { runnerLogger } from '../system/logger.js'
@@ -67,6 +69,10 @@ export interface FollowupHandlerDeps {
   piRuntime?: CommandRuntimeAccessors['pi']
   connection?: ServerConnection | null
   runnerId?: string | null
+  runnerRoot?: string
+  managerExecutionRegistry?: ManagerExecutionRegistry | null
+  onManagerExecutionFinished?: (executionId: string) => Promise<void> | void
+  createManagerExecutionBoundary?: typeof ManagerExecutionBoundary.create
   followupOperationJournal?: FollowupOperationJournalStore | null
   randomId?: () => string
   bindingRecoveryCoordinator?: BindingRecoveryCoordinator | null
@@ -127,6 +133,9 @@ async function handleFollowup(
   if (!sessionTarget) return unavailable()
   if (!sessionTargetId(sessionTarget) || !payload.turnId) return unavailable()
 
+  const managerContext = isManagerSlackContext(slackContext)
+  if (managerContext !== Boolean(payload.managerExecutionGrant)) return unavailable()
+
   const operationId = payload.operationId
   const operationKey = operationId ? sessionTargetKey(sessionTarget) : null
 
@@ -143,12 +152,41 @@ async function handleFollowup(
   const binding = sessionTarget.binding
   if (!binding) return { accepted: false, error: 'missing' }
 
-  const handle = resolveCommandRuntime(binding, {
+  let managerExecution: ManagerExecutionBoundary | null = null
+  let handle = resolveCommandRuntime(binding, {
     openCode: deps.openCodeRuntime,
     pi: deps.piRuntime,
   })
-  if (!handle) return unavailable()
-  if (!(await ensureCommandRuntimeReady(handle))) return unavailable()
+  if (managerContext) {
+    if (!deps.runnerRoot) return unavailable()
+    try {
+      managerExecution = await (deps.createManagerExecutionBoundary ?? ManagerExecutionBoundary.create)(
+        payload.managerExecutionGrant!,
+        deps.runnerRoot,
+        { workDir: target.workDir },
+      )
+      if (binding.runtime.toLowerCase() === 'opencode') {
+        const isolated = await managerExecution.openCodeRuntime(target.workDir, new AbortController().signal)
+        if (!isolated) {
+          await managerExecution.dispose()
+          return unavailable()
+        }
+        handle = { kind: 'opencode', runtime: isolated }
+      }
+    } catch (error) {
+      await managerExecution?.dispose().catch(() => undefined)
+      log.error('Manager follow-up boundary could not be established', { exception: error })
+      return unavailable()
+    }
+  }
+  if (!handle) {
+    await managerExecution?.dispose().catch(() => undefined)
+    return unavailable()
+  }
+  if (!(await ensureCommandRuntimeReady(handle))) {
+    await managerExecution?.dispose().catch(() => undefined)
+    return unavailable()
+  }
 
   let selectedTarget = target
   const connection = deps.connection ?? null
@@ -208,7 +246,10 @@ async function handleFollowup(
       recoveryKey: expected.runtimeSessionId!,
       coordinator: deps.bindingRecoveryCoordinator ?? undefined,
     })
-    if (!recovery.ok) return unavailable()
+    if (!recovery.ok) {
+      await managerExecution?.dispose().catch(() => undefined)
+      return unavailable()
+    }
     selectedTarget = { ...target, runtimeSessionId: recovery.binding.runtimeSessionId! }
   }
 
@@ -217,7 +258,10 @@ async function handleFollowup(
     definition?.skills,
     selectedTarget.workDir,
   )
-  if (!resolvedSkills.ok) return unavailable()
+  if (!resolvedSkills.ok) {
+    await managerExecution?.dispose().catch(() => undefined)
+    return unavailable()
+  }
   const skills = slackContext
     ? [...resolvedSkills.skills, inlineSlackCollaborationSkill(slackContext)]
     : resolvedSkills.skills
@@ -225,10 +269,18 @@ async function handleFollowup(
   if (operationId && operationKey && deps.followupOperationJournal) {
     try {
       const claim = await deps.followupOperationJournal.claim(operationKey, operationId)
-      if (claim === 'submitted') return { accepted: true }
-      if (claim === 'claimed') return unavailable()
+      if (claim === 'submitted') {
+        await managerExecution?.dispose().catch(() => undefined)
+        await revokeFinishedManagerExecution(payload.managerExecutionGrant?.executionId, deps)
+        return { accepted: true }
+      }
+      if (claim === 'claimed') {
+        await managerExecution?.dispose().catch(() => undefined)
+        return unavailable()
+      }
     } catch (error) {
       log.error('followup operation journal claim failed', { exception: error, session: sessionTarget.kind })
+      await managerExecution?.dispose().catch(() => undefined)
       return unavailable()
     }
   }
@@ -267,6 +319,7 @@ async function handleFollowup(
       await deps.followupOperationJournal.release(operationKey, operationId).catch(() => undefined)
     }
     log.error('followup durable input enqueue failed', { exception: error, session: sessionTarget.kind })
+    await managerExecution?.dispose().catch(() => undefined)
     return unavailable()
   }
 
@@ -288,13 +341,26 @@ async function handleFollowup(
           },
         }
       : {}),
+    ...(managerExecution ? { managerExecution } : {}),
   }
+  if (managerExecution && deps.managerExecutionRegistry) {
+    deps.managerExecutionRegistry.register({
+      executionId: payload.managerExecutionGrant!.executionId,
+      boundary: managerExecution,
+      handle,
+      sessionId: sessionTargetId(sessionTarget),
+      runtimeSessionId: selectedTarget.runtimeSessionId,
+      workDir: selectedTarget.workDir,
+    })
+  }
+
   const observerState = buildFollowupObserver(
     outbox,
     sessionTarget,
     selectedTarget,
     payload.operationId,
     payload.turnId,
+    managerExecution,
   )
   try {
     const completion = callFollowup(handle, followupRequest, observerState.observer).then(
@@ -310,6 +376,8 @@ async function handleFollowup(
             payload.turnId,
             isUncertainFollowupFailure(readErrorKind(result)) ? 'unknown' : 'idle',
             message,
+            undefined,
+            managerExecution,
           )
           if (readErrorKind(result) === 'unavailable-runtime') {
             log.error('followup runtime unavailable', { reason: message, session: selectedTarget.runtimeSessionId })
@@ -325,6 +393,8 @@ async function handleFollowup(
             payload.turnId,
             'unknown',
             observerError,
+            undefined,
+            managerExecution,
           )
           return
         }
@@ -337,6 +407,7 @@ async function handleFollowup(
           'idle',
           undefined,
           readFollowupOutput(result),
+          managerExecution,
         )
       },
       (error) => {
@@ -349,6 +420,8 @@ async function handleFollowup(
           payload.turnId,
           'unknown',
           error,
+          undefined,
+          managerExecution,
         )
       },
     )
@@ -363,13 +436,45 @@ async function handleFollowup(
         return unavailable()
       }
     }
-    void completion
+    void completion.finally(async () => {
+      if (managerExecution) {
+        if (deps.managerExecutionRegistry) await deps.managerExecutionRegistry.dispose(managerExecution)
+        else await managerExecution.dispose().catch(() => undefined)
+        await deps.onManagerExecutionFinished?.(payload.managerExecutionGrant?.executionId ?? '')
+      }
+    })
   } catch (error) {
     log.error('followup runtime.followup threw', { exception: error, session: selectedTarget.runtimeSessionId })
-    recordFollowupActivity(outbox, sessionTarget, selectedTarget, payload.operationId, payload.turnId, 'unknown', error)
+    recordFollowupActivity(
+      outbox,
+      sessionTarget,
+      selectedTarget,
+      payload.operationId,
+      payload.turnId,
+      'unknown',
+      error,
+      undefined,
+      managerExecution,
+    )
+    if (managerExecution) {
+      if (deps.managerExecutionRegistry) await deps.managerExecutionRegistry.dispose(managerExecution)
+      else await managerExecution.dispose().catch(() => undefined)
+      await deps.onManagerExecutionFinished?.(payload.managerExecutionGrant?.executionId ?? '')
+    }
     return unavailable()
   }
   return { accepted: true }
+}
+
+async function revokeFinishedManagerExecution(
+  executionId: string | undefined,
+  deps: FollowupHandlerDeps,
+): Promise<void> {
+  try {
+    await deps.onManagerExecutionFinished?.(executionId ?? '')
+  } catch (error) {
+    log.error('failed to revoke Manager execution after duplicate delivery', { exception: error })
+  }
 }
 
 function sessionTargetKey(target: SessionTarget): string {
@@ -386,12 +491,21 @@ function isUncertainFollowupFailure(kind: string): boolean {
   return kind === 'unavailable-runtime' || kind === 'deadline-exceeded'
 }
 
+function isManagerSlackContext(value: unknown): boolean {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false
+  const anchor = (value as { readonly replyAnchor?: unknown }).replyAnchor
+  if (!anchor || typeof anchor !== 'object' || Array.isArray(anchor)) return false
+  const candidate = anchor as { readonly projectId?: unknown; readonly ownerKind?: unknown }
+  return candidate.projectId === '__mohist_slack_manager__' && candidate.ownerKind === 'manager'
+}
+
 function buildFollowupObserver(
   outbox: AgentSessionRuntimeEventOutbox,
   sessionTarget: SessionTarget,
   target: FollowupTarget,
   operationId: string | undefined,
   turnId: string | undefined,
+  managerExecution: ManagerExecutionBoundary | null = null,
 ): {
   observer: PiTurnObserver | RuntimeTurnObserver | null
   flush: () => Promise<unknown>
@@ -404,6 +518,14 @@ function buildFollowupObserver(
   const observer: PiTurnObserver | RuntimeTurnObserver = {
     onEvent: (event: PiRuntimeEvent | RuntimeTurnEvent) => {
       const ordinal = 'id' in event ? 0 : ++openCodeEventOrdinal
+      const eventPayload = {
+        ...event.payload,
+        turnId,
+        source: 'followup',
+        operationId,
+        runtimeSessionId: target.runtimeSessionId,
+        completedAt,
+      }
       const record: RuntimeEventRecord = {
         id: `followup-event:${operationId}:${followupEventId(event, ordinal)}`,
         producerFamily: 'session-followup',
@@ -413,14 +535,7 @@ function buildFollowupObserver(
         work: null,
         event: {
           type: event.type,
-          payload: {
-            ...event.payload,
-            turnId,
-            source: 'followup',
-            operationId,
-            runtimeSessionId: target.runtimeSessionId,
-            completedAt,
-          },
+          payload: managerExecution ? (managerExecution.redact(eventPayload) as Record<string, unknown>) : eventPayload,
         },
         acknowledgementPolicy: 'successful-response',
       }
@@ -517,11 +632,14 @@ function recordFollowupActivity(
   activity: 'idle' | 'unknown',
   error?: unknown,
   output?: string | null,
+  managerExecution: ManagerExecutionBoundary | null = null,
 ): void {
   if (!operationId) return
+  const managerCredentialExpired = managerExecution?.hasExpired() === true
+  const terminalActivity = managerCredentialExpired ? 'unknown' : activity
   const completedAt = new Date().toISOString()
   const record: RuntimeEventRecord = {
-    id: `followup-activity:${operationId}:${activity}:${completedAt}`,
+    id: `followup-activity:${operationId}:${terminalActivity}:${completedAt}`,
     producerFamily: 'session-followup',
     target: sessionTargetToRuntimeTarget(sessionTarget),
     runtimeSessionId: target.runtimeSessionId,
@@ -530,10 +648,24 @@ function recordFollowupActivity(
     event: {
       type: 'session.activity',
       payload: {
-        activity,
-        status: activity === 'idle' ? 'completed' : 'failed',
-        ...(error ? { failureReason: error instanceof Error ? error.message : errorMessage(error) } : {}),
-        ...(output ? { message: output, output } : {}),
+        activity: terminalActivity,
+        status: managerCredentialExpired ? 'unknown' : terminalActivity === 'idle' ? 'completed' : 'failed',
+        ...(managerCredentialExpired ? { reason: 'manager-credential-expired', failureCategory: 'unknown' } : {}),
+        ...(error
+          ? {
+              failureReason: managerExecution
+                ? managerExecution.mask(error instanceof Error ? error.message : errorMessage(error))
+                : error instanceof Error
+                  ? error.message
+                  : errorMessage(error),
+            }
+          : {}),
+        ...(output
+          ? {
+              message: managerExecution ? managerExecution.mask(output) : output,
+              output: managerExecution ? managerExecution.mask(output) : output,
+            }
+          : {}),
         source: 'followup',
         operationId,
         ...(turnId ? { turnId } : {}),

@@ -31,10 +31,15 @@ public sealed class SlackStatusProjection : IScopedService
                 SlackDeliveryOperations.ReactionAdd,
                 TargetMessageIdentity: new SlackProviderMessageIdentity(source.ConversationId, source.MessageTs),
                 Reaction: ReceivedReaction,
-                FallbackText: "Received. I am checking the task and will post the result here.",
-                FallbackDispatchRef: DispatchRef(source, "status"),
+                FallbackText: string.Equals(projectId, SlackDeliveryOwnerIds.ManagerProjectId, StringComparison.Ordinal)
+                    ? null
+                    : "Received. I am checking the task and will post the result here.",
+                FallbackDispatchRef: string.Equals(projectId, SlackDeliveryOwnerIds.ManagerProjectId, StringComparison.Ordinal)
+                    ? null
+                    : DispatchRef(source, "status"),
                 StatusDispatchRef: DispatchRef(source, "status"))),
-            threadTs ?? source.MessageTs), ct);
+            threadTs ?? source.MessageTs,
+            OwnerKindFor(projectId)), ct);
 
     public async Task<SlackOutboxEnqueueResult> EnqueueWorkingAsync(
         string projectId,
@@ -45,6 +50,37 @@ public sealed class SlackStatusProjection : IScopedService
         JsonElement? blocks = null,
         CancellationToken ct = default)
     {
+        // Queue the receipt removal first. The adapter claims rows in their
+        // durable insertion order, so a working message cannot become
+        // visible before the receipt transition has been requested.
+        await EnqueueReactionAsync(
+            projectId,
+            connectionId,
+            source,
+            threadTs,
+            "working-remove-received",
+            SlackDeliveryOperations.ReactionRemove,
+            ReceivedReaction,
+            null,
+            ct);
+
+        // Manager liveness is deliberately reaction-only. The Agent's reply
+        // action is the sole conversational delivery path; do not create a
+        // Server-authored progress message for Manager turns.
+        if (string.Equals(projectId, SlackDeliveryOwnerIds.ManagerProjectId, StringComparison.Ordinal))
+        {
+            return await EnqueueReactionAsync(
+                projectId,
+                connectionId,
+                source,
+                threadTs,
+                "working-add",
+                SlackDeliveryOperations.ReactionAdd,
+                WorkingReaction,
+                null,
+                ct);
+        }
+
         var result = await _outbox.UpsertReplaceableProgressAsync(new SlackOutboxDraft(
             projectId,
             connectionId,
@@ -59,18 +95,9 @@ public sealed class SlackStatusProjection : IScopedService
                 FallbackDispatchRef: DispatchRef(source, "status"),
                 StatusDispatchRef: DispatchRef(source, "status"),
                 Blocks: blocks)),
-            threadTs ?? source.MessageTs), ct);
+            threadTs ?? source.MessageTs,
+            OwnerKindFor(projectId)), ct);
 
-        await EnqueueReactionAsync(
-            projectId,
-            connectionId,
-            source,
-            threadTs,
-            "working-remove-received",
-            SlackDeliveryOperations.ReactionRemove,
-            ReceivedReaction,
-            null,
-            ct);
         await EnqueueReactionAsync(
             projectId,
             connectionId,
@@ -97,7 +124,11 @@ public sealed class SlackStatusProjection : IScopedService
         CancellationToken ct = default)
     {
         var dispatchRef = progressDispatchRef ?? DispatchRef(source, "progress");
-        var entries = await _outbox.ListAsync(projectId, connectionId, ct);
+        var entries = await _outbox.ListAsync(
+            projectId,
+            connectionId,
+            ct,
+            OwnerKindFor(projectId));
         var progress = entries.Entries.FirstOrDefault(entry =>
             entry.Kind == SlackOutboxKinds.ReplaceableProgress && entry.DispatchRef == dispatchRef);
         var projectionSource = source;
@@ -134,7 +165,8 @@ public sealed class SlackStatusProjection : IScopedService
             kind,
             terminalDispatchRef ?? DispatchRef(source, "terminal"),
             JsonSerializer.Serialize(payload),
-            threadTs);
+            threadTs,
+            OwnerKindFor(projectId));
         var promoted = await _outbox.PromotePendingProgressAsync(draft, dispatchRef, ct);
         var result = promoted ?? await _outbox.EnqueueRequiredAsync(draft, ct);
         if (hadProgress)
@@ -158,7 +190,8 @@ public sealed class SlackStatusProjection : IScopedService
                 SlackDeliveryOperations.ReactionAdd,
                 ReactionFor(status),
                 null,
-                ct);
+                ct,
+                terminalStatus: status);
         }
         return result;
     }
@@ -183,35 +216,53 @@ public sealed class SlackStatusProjection : IScopedService
         CancellationToken ct = default)
     {
         var dispatchRef = progressDispatchRef ?? DispatchRef(source, "progress");
-        var entries = await _outbox.ListAsync(projectId, connectionId, ct);
+        var entries = await _outbox.ListAsync(
+            projectId,
+            connectionId,
+            ct,
+            OwnerKindFor(projectId));
         var projectionSource = source;
         var hadWorking = false;
         foreach (var entry in entries.Entries)
         {
-            if (entry.DispatchRef != dispatchRef)
+            var payload = TryReadPayload(entry.PayloadJson);
+            var isWorkingReaction = entry.Kind == SlackOutboxKinds.ReactionMutation
+                && entry.DispatchRef == DispatchRef(source, "working-add")
+                && payload?.Operation == SlackDeliveryOperations.ReactionAdd
+                && payload.Reaction == WorkingReaction;
+            var isProgressRow = entry.DispatchRef == dispatchRef
+                && (entry.Kind == SlackOutboxKinds.ReplaceableProgress
+                    || entry.Kind == SlackOutboxKinds.TerminalResult
+                    || entry.Kind == SlackOutboxKinds.ExplicitFailure);
+            if (!isWorkingReaction && !isProgressRow)
                 continue;
-            if (entry.Kind == SlackOutboxKinds.ReplaceableProgress
-                || entry.Kind == SlackOutboxKinds.TerminalResult
-                || entry.Kind == SlackOutboxKinds.ExplicitFailure)
-            {
-                hadWorking = true;
-                var payload = TryReadPayload(entry.PayloadJson);
-                if (payload?.StatusDispatchRef is { } statusDispatchRef
-                    && TryReadSource(statusDispatchRef, out var parsedSource))
-                {
-                    projectionSource = parsedSource;
-                }
-                break;
-            }
-        }
-        if (!hadWorking)
-            return;
 
+            hadWorking = true;
+            if (payload?.StatusDispatchRef is { } statusDispatchRef
+                && TryReadSource(statusDispatchRef, out var parsedSource))
+            {
+                projectionSource = parsedSource;
+            }
+            break;
+        }
+        // Fast completion can race the working projection. Terminal
+        // convergence must still close receipt state and add one terminal
+        // reaction even when no progress row was stored.
+        if (hadWorking)
+        {
+            await EnqueueReactionAsync(
+                projectId, connectionId, projectionSource, threadTs,
+                "terminal-remove-working",
+                SlackDeliveryOperations.ReactionRemove,
+                WorkingReaction,
+                null,
+                ct);
+        }
         await EnqueueReactionAsync(
             projectId, connectionId, projectionSource, threadTs,
-            "terminal-remove-working",
+            "terminal-remove-received",
             SlackDeliveryOperations.ReactionRemove,
-            WorkingReaction,
+            ReceivedReaction,
             null,
             ct);
         await EnqueueReactionAsync(
@@ -220,7 +271,8 @@ public sealed class SlackStatusProjection : IScopedService
             SlackDeliveryOperations.ReactionAdd,
             ReactionFor(status),
             null,
-            ct);
+            ct,
+            terminalStatus: status);
     }
 
     public static string DispatchRef(SlackMessageIdentity source, string phase) =>
@@ -286,6 +338,11 @@ public sealed class SlackStatusProjection : IScopedService
         return source.Validate().Length == 0;
     }
 
+    private static string OwnerKindFor(string projectId) =>
+        string.Equals(projectId, SlackDeliveryOwnerIds.ManagerProjectId, StringComparison.Ordinal)
+            ? SlackDeliveryOwnerKinds.Manager
+            : SlackDeliveryOwnerKinds.Connection;
+
     private Task<SlackOutboxEnqueueResult> EnqueueReactionAsync(
         string projectId,
         string connectionId,
@@ -295,7 +352,8 @@ public sealed class SlackStatusProjection : IScopedService
         string operation,
         string reaction,
         string? fallbackText,
-        CancellationToken ct) =>
+        CancellationToken ct,
+        string? terminalStatus = null) =>
         _outbox.EnqueueRequiredAsync(new SlackOutboxDraft(
             projectId,
             connectionId,
@@ -309,6 +367,8 @@ public sealed class SlackStatusProjection : IScopedService
                 Reaction: reaction,
                 FallbackText: fallbackText,
                 FallbackDispatchRef: DispatchRef(source, "status"),
-                StatusDispatchRef: DispatchRef(source, "status"))),
-            threadTs ?? source.MessageTs), ct);
+                StatusDispatchRef: DispatchRef(source, "status"),
+                TerminalStatus: terminalStatus)),
+            threadTs ?? source.MessageTs,
+            OwnerKindFor(projectId)), ct);
 }

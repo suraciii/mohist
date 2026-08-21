@@ -155,16 +155,41 @@ public sealed class SlackProviderInboxStore : IScopedService, IAgentConnectionPr
     }
 
     /// <summary>
+    /// Looks up the Session route for one exact Slack message identity.
+    /// Manager ingress uses the result to distinguish its pre-dispatch
+    /// mapping fence from the completed initial launch route.
+    /// </summary>
+    public async Task<string?> FindMessageRouteSessionIdAsync(
+        string projectId,
+        string connectionId,
+        string workspaceTeamId,
+        string conversationId,
+        string messageTs,
+        CancellationToken ct = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(projectId);
+        ArgumentException.ThrowIfNullOrWhiteSpace(connectionId);
+        ArgumentException.ThrowIfNullOrWhiteSpace(workspaceTeamId);
+        ArgumentException.ThrowIfNullOrWhiteSpace(conversationId);
+        ArgumentException.ThrowIfNullOrWhiteSpace(messageTs);
+
+        await using var db = await _dbFactory.CreateDbContextAsync(ct);
+        return await db.SlackProviderInboxRows.AsNoTracking()
+            .Where(row => row.ProjectId == projectId
+                && row.ConnectionId == connectionId
+                && row.WorkspaceTeamId == workspaceTeamId
+                && row.ConversationId == conversationId
+                && row.SlackMessageIdentity == $"{workspaceTeamId}/{conversationId}/{messageTs}"
+                && row.RouteSessionId != null)
+            .Select(row => row.RouteSessionId)
+            .FirstOrDefaultAsync(ct);
+    }
+
+    /// <summary>
     /// Looks up the session id persisted on the inbox row whose message
     /// ts matches the channel-thread root, for one Connection. Used by
     /// the channel ingress to recover a missing thread binding after a
-    /// crash between <c>LaunchConnectionAsync</c> and
-    /// <c>BindAsync</c>: the inbox route was stamped with the session
-    /// id BEFORE the reply was posted (per D2), so this read is a
-    /// durable fallback even when the binding row never made it to
-    /// disk. Returns null when no such root inbox row exists for this
-    /// Connection — a clean first launch in a brand-new thread has
-    /// nothing to reconcile.
+    /// crash between <c>LaunchConnectionAsync</c> and <c>BindAsync</c>.
     /// </summary>
     public async Task<string?> FindRootRouteSessionIdAsync(
         string projectId,
@@ -217,6 +242,38 @@ public sealed class SlackProviderInboxStore : IScopedService, IAgentConnectionPr
             throw new InvalidOperationException($"Slack inbox entry {id} resolved to a different session.");
 
         return persisted;
+    }
+
+    /// <summary>
+    /// Replaces a stale Session route during Manager runtime recovery. The
+    /// expected value is part of the conditional update so a concurrent
+    /// replay cannot overwrite a newer replacement route.
+    /// </summary>
+    public async Task<string> ReplaceRouteSessionIdAsync(
+        string projectId,
+        string id,
+        string expectedSessionId,
+        string replacementSessionId,
+        CancellationToken ct = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(projectId);
+        ArgumentException.ThrowIfNullOrWhiteSpace(id);
+        ArgumentException.ThrowIfNullOrWhiteSpace(expectedSessionId);
+        ArgumentException.ThrowIfNullOrWhiteSpace(replacementSessionId);
+
+        await using var db = await _dbFactory.CreateDbContextAsync(ct);
+        await db.SlackProviderInboxRows
+            .Where(row => row.ProjectId == projectId
+                && row.Id == id
+                && row.RouteSessionId == expectedSessionId)
+            .ExecuteUpdateAsync(setters => setters.SetProperty(row => row.RouteSessionId, replacementSessionId), ct);
+        var persisted = await db.SlackProviderInboxRows.AsNoTracking()
+            .Where(row => row.ProjectId == projectId && row.Id == id)
+            .Select(row => row.RouteSessionId)
+            .SingleOrDefaultAsync(ct);
+        if (!string.Equals(persisted, replacementSessionId, StringComparison.Ordinal))
+            throw new InvalidOperationException($"Slack inbox entry {id} resolved to a different session.");
+        return persisted!;
     }
 
     /// <summary>

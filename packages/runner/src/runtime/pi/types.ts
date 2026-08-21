@@ -43,6 +43,8 @@ export interface PiReadyState {
   readonly catalog: PiCatalog | null
 }
 
+import type { ManagerExecutionBoundary } from '../manager-execution-boundary.js'
+
 export interface PiSessionTarget {
   readonly runtime: 'pi'
   readonly runtimeSessionId: string | null
@@ -55,6 +57,7 @@ export interface PiSessionResolveRequest {
 
 export interface PiSessionCreateRequest {
   readonly target: PiSessionTarget
+  readonly managerExecution?: ManagerExecutionBoundary | null
 }
 
 export interface PiSessionResult {
@@ -79,6 +82,7 @@ export interface PiTurnRequest {
   readonly prompt: string
   readonly options?: PiTurnOptions | null
   readonly durationMs?: number | null
+  readonly managerExecution?: ManagerExecutionBoundary | null
 }
 
 export interface PiRuntimeEvent {
@@ -143,6 +147,7 @@ export interface PiProviderErrorPolicy {
 export interface PiFollowupRequest {
   readonly target: PiSessionTarget
   readonly prompt: string
+  readonly managerExecution?: ManagerExecutionBoundary | null
   readonly options?: PiTurnOptions | null
 }
 

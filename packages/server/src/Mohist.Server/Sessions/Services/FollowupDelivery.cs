@@ -1,6 +1,7 @@
 using Mohist.Server.Contracts;
 using Mohist.Server.Sessions.Domain;
 using Mohist.Server.Infrastructure;
+using Mohist.Server.Slack.Services;
 
 namespace Mohist.Server.Sessions.Services;
 
@@ -38,6 +39,8 @@ public sealed record FollowupDeliveryRequest(
     string? InputId = null,
     AgentSlackExecutionContext? SlackExecutionContext = null,
     string? TurnId = null,
-    string ExecutionSource = AgentExecutionSources.NonSlack);
+    string ExecutionSource = AgentExecutionSources.NonSlack,
+    ManagerExecutionGrant? ManagerExecutionGrant = null,
+    string? OriginMarker = null);
 
 public sealed record FollowupDeliveryResult(bool Accepted);

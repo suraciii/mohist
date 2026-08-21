@@ -59,6 +59,12 @@ export interface CommandLineOptions {
   onLine?: (line: string) => void
   onClose?: (exitCode: number) => void
   timeoutMs?: number
+  /**
+   * Replace the Runner's environment with the provided one instead of
+   * layering `process.env` underneath. Used by the Manager execution
+   * boundary so removed credential values cannot re-enter a child.
+   */
+  isolatedEnvironment?: boolean
 }
 
 const ABORT_FORCE_KILL_GRACE_MS = 5_000
@@ -121,7 +127,11 @@ export async function runCommand(
     const processSpawner = scopedSpawner ?? realProcessSpawner
     const child = processSpawner(command, args, {
       cwd,
-      env: { ...process.env, ...env },
+      // An isolated environment replaces the Runner's environment instead
+      // of layering over it: the Manager boundary removes ordinary CLI
+      // credentials and redirects HOME, and re-layering process.env would
+      // reintroduce everything it removed.
+      env: options?.isolatedEnvironment ? env : { ...process.env, ...env },
       signal: effectiveSignal,
       shell: false,
       detached: true,

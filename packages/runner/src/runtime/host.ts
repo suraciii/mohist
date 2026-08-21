@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto'
-import type { RunnerOptions, RunnerRegistration, RuntimeReadinessWitness } from '../core/types.js'
+import type { RunnerOptions, RunnerRegistration } from '../core/types.js'
 import { ServerConnection } from '../server/connection.js'
 import { RunnerControlWebSocketClient } from '../server/runner-control-websocket.js'
 import { createRunnerControlHandlers } from '../server/runner-control-handlers.js'
@@ -25,7 +25,7 @@ import { WorkExecutor } from './executor.js'
 import { AgentJobExecutor } from './agent-job-executor.js'
 import { TaskLogCollector } from './task-log.js'
 import { createHostCleanup } from './host-cleanup.js'
-import { executeWork, retryPendingTerminalTaskLogs, type HostTaskLogDeps } from './host-task-log.js'
+import { executeWork, retryPendingTerminalTaskLogs } from './host-task-log.js'
 import {
   AWAITING_ACK_RETRY_INTERVAL_MS,
   POLL_TIMEOUT_MS,
@@ -56,18 +56,40 @@ import {
 } from './recovery-receipt.js'
 import { RuntimeTurnRegistry } from './runtime-turn-registry.js'
 import { loadBuildInfo } from './build-info.js'
-import type { DispatchWorkItem } from '../core/types.js'
+export { getRunnerBuildGitHash } from './build-info.js'
+import type { DispatchWorkItem, PolledDispatch } from '../core/types.js'
 import type { WorkItemResult } from '../core/types.js'
 import { currentRunnerResources } from '../system/filesystem.js'
 import { WorkflowSessionTurnCoordinator } from './workflow-session-turn-coordinator.js'
 import { SkillResolver } from './skill-resolver.js'
 import { runnerLogger } from '../system/logger.js'
-import { type FollowupTarget, type FollowupTargetResolution, type SessionTarget } from '../server/session-target.js'
-import { isAgentRecoveryDispatch, usesOpenCode } from './host-helpers.js'
+import {
+  buildRunnerPollReport,
+  createManagerExecutionBoundary,
+  gateManagerCapabilities,
+  isManagerExecutionWork,
+  supportsManagerExecution,
+  createHostTaskLogDeps,
+  currentCatalogRevision,
+  isAgentRecoveryDispatch,
+  isOpenCodeReadyForClaim as isOpenCodeReadyForClaimForRuntime,
+  resolveFollowupTarget,
+  runtimeReadinessWitnesses,
+  openCodeOwners as openCodeOwnersForRuntime,
+  syncOpenCodeWorkOwners as syncOpenCodeWorkOwnersForRuntime,
+  usesOpenCode,
+} from './host-helpers.js'
 import { resolveWorkspaceQuery } from './workspace-query.js'
 import { createSessionCommandRouter } from '../server/command-runtime.js'
 import { reconcileStartedDispatch, type HostRecoveryContext } from './host-recovery.js'
 import { type AwaitingAckEntry, type InFlightEntry, type ShutdownWorkState } from './host-state.js'
+import { ManagerExecutionBoundary } from './manager-execution-boundary.js'
+import { ManagerExecutionRegistry } from './manager-execution-registry.js'
+import {
+  invalidateManagerExecutions,
+  observeManagerDeploymentEpoch,
+  revokeManagerExecution,
+} from './manager-execution-lifecycle.js'
 import {
   executeAndTransition,
   markResultPersistencePending,
@@ -106,15 +128,6 @@ export interface RunnerHostDependencies {
  * `workKey` convention.
  */
 const workKey = journalWorkKey
-
-/**
- * Resolves the runner's build git hash from the on-disk build manifest.
- * Returns `null` when the manifest is missing or unreadable (treated as
- * unknown-identity, non-fatal).
- */
-export function getRunnerBuildGitHash(): string | null {
-  return loadBuildInfo().gitHash
-}
 
 export class RunnerHost {
   private readonly connection: ServerConnection
@@ -184,6 +197,9 @@ export class RunnerHost {
   // The keys of both Maps together form the process's full poll report.
   private readonly inFlight = new Map<string, InFlightEntry>()
   private readonly awaitingAck = new Map<string, { work: DispatchWorkItem; entry: AwaitingAckEntry }>()
+  private readonly managerExecutions = new Map<string, ManagerExecutionBoundary>()
+  private readonly managerExecutionRegistry = new ManagerExecutionRegistry()
+  private observedManagerDeploymentEpoch: string | null = null
   private readonly terminalTaskLogDeliveryInFlight = new Set<string>()
 
   constructor(
@@ -277,22 +293,27 @@ export class RunnerHost {
             removalFence: () => this.openCodeRuntime,
           },
           followup: {
-            followupTargetResolver: (target) => this.resolveFollowupTarget(target),
+            followupTargetResolver: (target) => resolveFollowupTarget(this.options, target),
             agentSessionRuntimeEventOutbox: this.agentSessionRuntimeEventOutbox,
             openCodeRuntime: () => this.openCodeRuntime,
             piRuntime: () => this.piRuntime,
             connection: this.connection,
             runnerId: options.runnerId,
+            runnerRoot: options.runnerRoot,
+            managerExecutionRegistry: this.managerExecutionRegistry,
+            onManagerExecutionFinished: (executionId) => this.revokeManagerExecution(executionId),
             followupOperationJournal: this.followupOperationJournal,
             bindingRecoveryCoordinator: this.bindingRecoveryCoordinator,
             skillResolver: this.skillResolver,
             strictExecutionSourceValidation: options.strictExecutionSourceValidation === true,
           },
           cancel: {
-            followupTargetResolver: (target) => this.resolveFollowupTarget(target),
+            followupTargetResolver: (target) => resolveFollowupTarget(this.options, target),
             openCodeRuntime: () => this.openCodeRuntime,
             piRuntime: () => this.piRuntime,
             agentSessionRuntimeEventOutbox: this.agentSessionRuntimeEventOutbox,
+            managerExecutionRegistry: this.managerExecutionRegistry,
+            onManagerExecutionFinished: (executionId) => this.revokeManagerExecution(executionId),
             cancelOperationJournal: this.cancelOperationJournal,
           },
           sessionCommand: {
@@ -347,17 +368,12 @@ export class RunnerHost {
     })
   }
 
-  /**
-   * Lightweight projection of the host's process-lifetime state for the
-   * helpers under {@link ./host-execution.ts}. The host passes this object
-   * by reference; the helpers see only the surface they were designed for.
-   */
   private get executionContext(): HostExecutionContext {
     return {
       options: this.options,
       connection: this.connection,
       receiptId: this.receiptId,
-      taskLogDeps: () => this.taskLogDepsForExecution(),
+      taskLogDeps: () => createHostTaskLogDeps(this.connection, this.terminalTaskLogDelivery, this.options),
       workExecutorRef: () => this.workExecutor,
       workResultJournal: this.workResultJournal,
       runtimeTurnRegistry: this.runtimeTurnRegistry,
@@ -368,44 +384,15 @@ export class RunnerHost {
       inFlight: this.inFlight,
       awaitingAck: this.awaitingAck,
       hostShutdown: this.hostShutdown,
-      currentCatalogRevision: (runtime) => this.currentCatalogRevision(runtime),
+      currentCatalogRevision: (runtime) => currentCatalogRevision(this.registrationState().runtimeCatalogs, runtime),
+      managerExecutionFor: (key) => this.managerExecutions.get(key) ?? null,
+      releaseManagerExecution: async (key) => {
+        const boundary = this.managerExecutions.get(key)
+        if (!boundary) return
+        this.managerExecutions.delete(key)
+        await this.managerExecutionRegistry.dispose(boundary)
+      },
     }
-  }
-
-  private currentCatalogRevision(runtime: string): string | null {
-    const normalized = runtime.trim().toLowerCase()
-    const catalogs = this.registrationState().runtimeCatalogs
-    if (!catalogs) return null
-    for (const [key, entry] of Object.entries(catalogs)) {
-      if (key.trim().toLowerCase() === normalized) return entry.capabilityRevision ?? null
-    }
-    return null
-  }
-
-  private taskLogDepsForExecution(): HostTaskLogDeps {
-    return {
-      connection: this.connection,
-      terminalTaskLogDelivery: this.terminalTaskLogDelivery,
-      options: this.options,
-    }
-  }
-
-  private resolveFollowupTarget(target: SessionTarget): FollowupTargetResolution {
-    if (this.options.projectId && this.options.projectId !== target.projectId) return null
-    const binding = target.binding ?? null
-    if (!binding) return null
-    const runtime = binding.runtime.toLowerCase()
-    if (runtime !== 'opencode' && runtime !== 'pi') return null
-    if (binding.runnerId !== this.options.runnerId) return null
-    if (!binding.runtimeSessionId) return null
-    if (!binding.workDir) return null
-    const resolved: FollowupTarget = {
-      runtimeSessionId: binding.runtimeSessionId,
-      workDir: binding.workDir,
-      projectId: target.projectId,
-      ...(target.kind === 'generic' && target.definition ? { definition: target.definition } : {}),
-    }
-    return resolved
   }
 
   async run(signal: AbortSignal) {
@@ -455,13 +442,7 @@ export class RunnerHost {
       // push channel is available in parallel.
       await this.cleanup.runConvergenceOnce(signal)
       await this.cleanup.runBindingConvergenceOnce(signal)
-      const heartbeat = setInterval(
-        () =>
-          void this.connection
-            .heartbeat(this.registrationState(), signal)
-            .catch((error) => log.error('runner heartbeat failed', { exception: error })),
-        this.options.heartbeatIntervalMs,
-      )
+      const heartbeat = setInterval(() => void this.heartbeatOnce(signal), this.options.heartbeatIntervalMs)
       const selfCheck = setInterval(
         () => void this.cleanup.runSelfCheck(signal),
         this.options.dispatchLivenessProbeIntervalMs,
@@ -490,16 +471,24 @@ export class RunnerHost {
     void this.sendImmediateHeartbeat()
     const signal = this.activeSignal
     if (signal)
-      void retryPendingTerminalTaskLogs(this.taskLogDepsForExecution(), this.terminalTaskLogDeliveryInFlight, signal)
-    // Convergence on every reconnect: the control WebSocket transport just
-    // recovered, which is the cheapest moment to ask the server for the
-    // truth about every active registry entry. Push may also have queued
-    // events during the disconnect window; this catch-all reconciles
-    // whatever push did not cover.
+      void retryPendingTerminalTaskLogs(
+        createHostTaskLogDeps(this.connection, this.terminalTaskLogDelivery, this.options),
+        this.terminalTaskLogDeliveryInFlight,
+        signal,
+      )
     if (signal) {
       void this.cleanup.runConvergenceOnce(signal)
       void this.cleanup.runBindingConvergenceOnce(signal)
       void this.cleanup.runCleanupOnce(signal)
+    }
+  }
+
+  private async heartbeatOnce(signal: AbortSignal): Promise<void> {
+    try {
+      await this.connection.heartbeat(this.registrationState(), signal)
+      await this.observeManagerDeploymentEpoch()
+    } catch (error) {
+      log.error('runner heartbeat failed', { exception: error })
     }
   }
 
@@ -508,6 +497,7 @@ export class RunnerHost {
     if (!signal || signal.aborted) return
     try {
       await this.connection.heartbeat(this.registrationState(), signal)
+      await this.observeManagerDeploymentEpoch()
     } catch (error) {
       log.error('immediate runner heartbeat failed', { exception: error })
     }
@@ -634,6 +624,7 @@ export class RunnerHost {
   }
 
   private async shutdownSharedConnection() {
+    await this.invalidateManagerExecutions()
     this.workExecutor = null
     if (this.openCodeRuntime !== null) {
       try {
@@ -654,12 +645,12 @@ export class RunnerHost {
   }
 
   private async runWorkerPool(signal: AbortSignal) {
-    // The reported set (inFlight ∪ awaitingAck) is process-lifetime state
-    // declared on the host instance, so it survives poll exceptions. Polling
-    // and report retries share this one process-critical reconciliation loop;
-    // no sibling lifetime task can prevent a failed poll from being retried.
     while (!signal.aborted) {
-      void retryPendingTerminalTaskLogs(this.taskLogDepsForExecution(), this.terminalTaskLogDeliveryInFlight, signal)
+      void retryPendingTerminalTaskLogs(
+        createHostTaskLogDeps(this.connection, this.terminalTaskLogDelivery, this.options),
+        this.terminalTaskLogDeliveryInFlight,
+        signal,
+      )
       await retryDueReports(this.executionContext)
 
       // Runtime readiness is sent as a claim-time witness. Polling must stay
@@ -680,7 +671,7 @@ export class RunnerHost {
         if (piStart?.ok && this.piRuntime.ready()) this.piRuntimeGeneration += 1
       }
 
-      let works: DispatchWorkItem[]
+      let works: PolledDispatch[]
       try {
         works = await this.pollOnce(signal)
       } catch (error) {
@@ -695,13 +686,17 @@ export class RunnerHost {
       // becomes reportable until this retry restores its durable receipt.
       await retryPendingWorkResultPersistence(this.executionContext)
 
-      await this.prepareOpenCodeWork(works, signal)
+      await this.prepareOpenCodeWork(
+        works.map((item) => item.work),
+        signal,
+      )
 
       // A single poll may return multiple dispatches (repair + new claims).
       // Execute each concurrently, skipping re-deliveries the process
       // already holds.
       const startupRecoveryKeys = new Set<string>()
-      for (const work of works) {
+      for (const polled of works) {
+        const work = polled.work
         if (signal.aborted) break
         const key = workKey(work)
         // Re-delivery is the normal recovery path under at-least-once:
@@ -711,6 +706,20 @@ export class RunnerHost {
         // better.
         if (this.inFlight.has(key) || this.awaitingAck.has(key)) continue
 
+        const isManagerExecution = isManagerExecutionWork(work)
+        let managerBoundary: ManagerExecutionBoundary | null = null
+        if (isManagerExecution) {
+          if (!supportsManagerExecution(this.registrationState()) || !polled.managerExecutionGrant) continue
+          managerBoundary = await createManagerExecutionBoundary(
+            polled.managerExecutionGrant,
+            this.options.runnerRoot,
+            {
+              workDir: this.options.runnerRoot,
+            },
+          )
+          if (!managerBoundary) continue
+        }
+
         const startupObserved = this.recoveredStartedWork.has(key)
         const recovery = isAgentRecoveryDispatch(work)
         let admission: Awaited<ReturnType<WorkResultJournal['begin']>>
@@ -719,6 +728,7 @@ export class RunnerHost {
             ? await this.workResultJournal.beginRecovery(work)
             : await this.workResultJournal.begin(work)
         } catch (error) {
+          await managerBoundary?.dispose().catch(() => undefined)
           log.error('work result journal could not fence dispatch; skipping work', {
             work: work.workId,
             exception: error,
@@ -734,6 +744,7 @@ export class RunnerHost {
           const entry: InFlightEntry = { done: Promise.resolve(), work, awaitingResultPersistence: false, controller }
           entry.done = reconcileStartedDispatch(this.recoveryContext(), work, controller.signal, key)
           this.inFlight.set(key, entry)
+          await managerBoundary?.dispose().catch(() => undefined)
           this.syncOpenCodeWorkOwners()
           continue
         }
@@ -745,10 +756,12 @@ export class RunnerHost {
           const entry: InFlightEntry = { done: Promise.resolve(), work, awaitingResultPersistence: false, controller }
           entry.done = reconcileStartedDispatch(this.recoveryContext(), work, controller.signal, key)
           this.inFlight.set(key, entry)
+          await managerBoundary?.dispose().catch(() => undefined)
           this.syncOpenCodeWorkOwners()
           continue
         }
         if (admission !== 'new' && (!recovery || admission === 'completed')) {
+          await managerBoundary?.dispose().catch(() => undefined)
           log.warn('work dispatch has a durable unfinished result; retaining fence', {
             work: work.workId,
             state: admission,
@@ -764,6 +777,7 @@ export class RunnerHost {
             // No turn-adoption API: the execution context is provably
             // gone, so surface unknown without executing anything.
             this.recoveredStartedWork.enqueue(work)
+            await managerBoundary?.dispose().catch(() => undefined)
             log.warn('recovery dispatch runtime has no turn adoption; reporting unknown', {
               work: work.workId,
               runtime: work.agentRecovery!.runtime,
@@ -771,6 +785,17 @@ export class RunnerHost {
             continue
           }
           log.info('recovery dispatch admitted for reconciliation', { work: work.workId })
+        }
+
+        if (isManagerExecution && managerBoundary) {
+          this.managerExecutions.set(key, managerBoundary)
+          this.managerExecutionRegistry.register({
+            executionId: polled.managerExecutionGrant!.executionId,
+            boundary: managerBoundary,
+            sessionId: '',
+            runtimeSessionId: '',
+            workDir: this.options.runnerRoot,
+          })
         }
 
         const controller = new AbortController()
@@ -802,101 +827,86 @@ export class RunnerHost {
       )
     }
 
-    // Shutdown is deliberately bounded. The handoff identifies an update
-    // operation before runtime stop is attempted; a missing or unavailable
-    // handoff leaves the started fences untouched.
     await this.hostShutdown.shutdownInFlight()
     await withTimeout(Promise.allSettled([...this.inFlight.values()].map((e) => e.done)), this.shutdownStopBudgetMs)
   }
 
   private syncOpenCodeWorkOwners(): void {
-    const runtime = this.openCodeRuntime
-    if (!runtime) return
-    const owners = [
-      ...[...this.inFlight.values()].filter((entry) => usesOpenCode(entry.work)).map((entry) => workKey(entry.work)),
-      ...[...this.awaitingAck.values()].filter((entry) => usesOpenCode(entry.work)).map((entry) => workKey(entry.work)),
-    ]
-    runtime.setWorkOwners(owners)
+    syncOpenCodeWorkOwnersForRuntime(this.openCodeRuntime, this.inFlight.values(), this.awaitingAck.values())
   }
 
   private async prepareOpenCodeWork(works: readonly DispatchWorkItem[], signal: AbortSignal): Promise<void> {
     const runtime = this.openCodeRuntime
-    const owners = works.filter((work) => usesOpenCode(work) && !isAgentRecoveryDispatch(work)).map(workKey)
+    const owners = works
+      .filter((work) => usesOpenCode(work) && !isManagerExecutionWork(work) && !isAgentRecoveryDispatch(work))
+      .map(workKey)
     if (!runtime || owners.length === 0) return
-    runtime.setWorkOwners([...this.openCodeOwners(), ...owners])
+    runtime.setWorkOwners([...openCodeOwnersForRuntime(this.inFlight.values(), this.awaitingAck.values()), ...owners])
     if (!runtime.ready()) {
       const started = await runtime.start(signal)
       if (!started.ok) log.error('opencode runtime could not be recreated for work', { reason: started.error.message })
     }
   }
 
-  private openCodeOwners(): string[] {
-    return [
-      ...[...this.inFlight.values()].filter((entry) => usesOpenCode(entry.work)).map((entry) => workKey(entry.work)),
-      ...[...this.awaitingAck.values()].filter((entry) => usesOpenCode(entry.work)).map((entry) => workKey(entry.work)),
-    ]
-  }
-
-  private async pollOnce(signal: AbortSignal): Promise<DispatchWorkItem[]> {
+  private async pollOnce(signal: AbortSignal): Promise<PolledDispatch[]> {
     const bounded = boundedSignal(signal, POLL_TIMEOUT_MS)
     try {
-      return await this.connection.poll(bounded.signal, this.pollReport())
+      const workItems = await this.connection.poll(bounded.signal, this.pollReport())
+      const takeLast = (
+        this.connection as ServerConnection & {
+          takeLastPolledDispatches?: (items: readonly DispatchWorkItem[]) => PolledDispatch[]
+        }
+      ).takeLastPolledDispatches
+      const works = takeLast ? takeLast.call(this.connection, workItems) : workItems.map((work) => ({ work }))
+      await this.observeManagerDeploymentEpoch()
+      return works
     } finally {
       bounded.dispose()
     }
   }
 
-  /**
-   * The process's full level state, sent in every poll body so the server
-   * can reconcile (Batch 2). In Batch 1 the server ignores the body; the
-   * value of sending it now is that the reported set is correct the moment
-   * the server starts consuming it, with no second runner-side change.
-   */
-  private pollReport(): {
-    inFlight: string[]
-    awaitingAck: string[]
-    runtimeReadiness: RuntimeReadinessWitness[]
-    connectionId: string | null
-    admissionReady: boolean
-  } {
-    const durableStarted = this.workResultJournal.ready()
-      ? this.workResultJournal.started().map((entry) => workKey(entry.work))
-      : []
-    return {
-      // A started journal entry survives a Runner restart without an
-      // execution promise. Report it as held so Server reconciliation does
-      // not keep redelivering an identity that the journal will refuse to
-      // execute.
-      inFlight: [...new Set([...this.inFlight.keys(), ...durableStarted])],
-      awaitingAck: [...this.awaitingAck.keys()],
-      runtimeReadiness: this.runtimeReadiness(),
+  private async observeManagerDeploymentEpoch(): Promise<void> {
+    this.observedManagerDeploymentEpoch = await observeManagerDeploymentEpoch(
+      this.observedManagerDeploymentEpoch,
+      this.connection.deploymentEpoch,
+      () => this.invalidateManagerExecutions(),
+    )
+  }
+
+  private async revokeManagerExecution(executionId: string): Promise<void> {
+    try {
+      await revokeManagerExecution(this.connection, executionId, new AbortController().signal)
+    } catch (error) {
+      log.warn('Manager execution revocation could not be delivered', { executionId, exception: error })
+    }
+  }
+
+  private async invalidateManagerExecutions(): Promise<void> {
+    const boundaries = [...this.managerExecutions.values()]
+    this.managerExecutions.clear()
+    await invalidateManagerExecutions(this.inFlight.values(), boundaries, this.managerExecutionRegistry)
+  }
+
+  private pollReport(): ReturnType<typeof buildRunnerPollReport> {
+    return buildRunnerPollReport({
+      durableStarted: this.workResultJournal.ready()
+        ? this.workResultJournal.started().map((entry) => workKey(entry.work))
+        : [],
+      inFlight: this.inFlight.keys(),
+      awaitingAck: this.awaitingAck.keys(),
+      runtimeReadiness: runtimeReadinessWitnesses(this.openCodeRuntime, this.piRuntime, this.piRuntimeGeneration),
       connectionId: this.control.getConnectionId(),
       admissionReady:
         this.providerPolicyDiagnostic === null &&
         this.terminalTaskLogDelivery.ready() &&
         this.agentSessionRuntimeEventOutbox.ready() &&
         this.workResultJournal.ready(),
-    }
-  }
-
-  private runtimeReadiness(): RuntimeReadinessWitness[] {
-    return [
-      {
-        runtime: 'opencode',
-        ready: this.openCodeRuntime?.ready() === true,
-        generation: this.openCodeRuntime?.ownership().generation ?? null,
-      },
-      {
-        runtime: 'pi',
-        ready: this.piRuntime?.ready() === true,
-        generation: this.piRuntime?.ready() === true ? this.piRuntimeGeneration : null,
-      },
-    ]
+      deploymentEpoch: this.connection.deploymentEpoch,
+    })
   }
 
   private isOpenCodeReadyForClaim(): boolean {
-    const runtime = this.openCodeRuntime
-    return runtime !== null && runtime.ready() && this.agentSessionRuntimeEventOutbox.ready()
+    return isOpenCodeReadyForClaimForRuntime(this.openCodeRuntime, this.agentSessionRuntimeEventOutbox)
   }
 
   private recoveryContext(): HostRecoveryContext {
@@ -936,8 +946,11 @@ export class RunnerHost {
   }
 
   private registrationState(): RunnerRegistration {
-    return buildRegistrationState(this.options, this.piRuntime, this.actions.catalog(), () =>
-      this.control.getConnectionId(),
+    return gateManagerCapabilities(
+      buildRegistrationState(this.options, this.piRuntime, this.actions.catalog(), () =>
+        this.control.getConnectionId(),
+      ),
+      this.openCodeRuntime?.ready() === true,
     )
   }
 

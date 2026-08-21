@@ -1,8 +1,11 @@
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.EntityFrameworkCore;
 using Mohist.Server.Agent.Grains;
 using Mohist.Server.Infrastructure;
+using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Infrastructure.Events;
 using Mohist.Server.Runner.Grains;
+using Mohist.Server.Slack.Services;
 
 namespace Mohist.Server.TestSupport;
 
@@ -18,6 +21,19 @@ public static class TestServices
         services.AddSingleton<RunnerUpdateOperationWriteFailureProbe>();
         services.AddSingleton<IRunnerUpdateOperationWriteFailureInjector>(sp =>
             sp.GetRequiredService<RunnerUpdateOperationWriteFailureProbe>());
+        // AgentJobGrain revokes Manager execution leases in its recovery
+        // transitions, so every test silo that can activate the grain needs
+        // the same runtime-only singletons the production host registers.
+        // The DbContextFactory is supplied by each silo configuration.
+        services.AddSingleton<ManagerExecutionLeaseStore>(sp =>
+            new ManagerExecutionLeaseStore(sp.GetRequiredService<IDbContextFactory<MohistDbContext>>()));
+        services.AddSingleton<IManagerExecutionLeaseStore>(sp =>
+            sp.GetRequiredService<ManagerExecutionLeaseStore>());
+        services.AddSingleton<ManagerDeploymentEpoch>(sp =>
+            new ManagerDeploymentEpoch(sp.GetRequiredService<IManagerExecutionLeaseStore>()));
+        services.AddSingleton<IManagerDeploymentEpoch>(sp =>
+            sp.GetRequiredService<ManagerDeploymentEpoch>());
+        services.AddSingleton<ManagerExecutionCapabilityIssuer>();
         return services;
     }
 }

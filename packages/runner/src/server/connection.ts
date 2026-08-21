@@ -9,6 +9,7 @@ import type {
   RuntimeReadinessWitness,
   WorkDispatchResponse,
   WorkItemResult,
+  PolledDispatch,
 } from '../core/types.js'
 import type { BuildInfo } from '../runtime/build-info.js'
 import { parseObject } from '../core/json.js'
@@ -24,12 +25,33 @@ import { reportWork } from './connection-report.js'
 import { WorkspaceHomeClaimedError } from '../runtime/workspace-entity.js'
 import { currentRunnerTransport } from '../system/filesystem.js'
 import { extractErrorMessage } from './connection-errors.js'
+import type {
+  AgentInputAttachmentContent,
+  AgentSession,
+  AgentSessionReconcileBinding,
+  AgentSessionRuntimeEventAcceptance,
+  AgentSessionRuntimeEventReceipt,
+  WorkflowAgentSession,
+  WorkflowAgentSessionCleanupTurnAcceptance,
+} from './connection-session-models.js'
+
+export type {
+  AgentInputAttachmentContent,
+  AgentSession,
+  AgentSessionReconcileBinding,
+  AgentSessionRuntimeEventAcceptance,
+  AgentSessionRuntimeEventReceipt,
+  WorkflowAgentSession,
+  WorkflowAgentSessionCleanupTurnAcceptance,
+} from './connection-session-models.js'
 
 export class ServerConnection {
   private readonly buildGitHash: string | null
   private readonly buildInfo: BuildInfo | null
   private readonly credential: string | null
   readonly runnerId: string
+  private managerDeploymentEpoch: string | null = null
+  private lastPolledDispatches: PolledDispatch[] = []
 
   constructor(
     private readonly options: RunnerOptions,
@@ -55,7 +77,8 @@ export class ServerConnection {
   }
 
   async heartbeat(state: RunnerRegistration, signal: AbortSignal) {
-    await this.post('heartbeat', { hostname: hostname(), ...state, ...this.identityPayload() }, signal)
+    const response = await this.post('heartbeat', { hostname: hostname(), ...state, ...this.identityPayload() }, signal)
+    this.observeDeploymentEpoch(response.headers.get('x-mohist-manager-deployment-epoch'))
   }
 
   private identityPayload(): Record<string, unknown> {
@@ -76,14 +99,12 @@ export class ServerConnection {
     await this.post('unregister', undefined, signal)
   }
 
-  /**
-   * Polls the server for dispatches. The body carries the process's full level
-   * state (`inFlight` + `awaitingAck` work keys) so the server can reconcile
-   * (`desired − reported`): repair lost dispatches and serve new claims against
-   * spare capacity. The response is `{ dispatches: [...] }` carrying zero or
-   * more work items; an empty list (HTTP 204 or empty array) means nothing to
-   * do this round. Multi-dispatch replaces the old one-dispatch-per-poll limit.
-   */
+  /** Current epoch observed from the latest Manager poll/heartbeat response. */
+  get deploymentEpoch(): string | null {
+    return this.managerDeploymentEpoch
+  }
+
+  /** Polls for work and retains the response-only grant view out of work items. */
   async poll(
     signal: AbortSignal,
     report: {
@@ -92,18 +113,52 @@ export class ServerConnection {
       runtimeReadiness?: RuntimeReadinessWitness[]
       connectionId?: string | null
       admissionReady?: boolean
+      deploymentEpoch?: string | null
     } = { inFlight: [], awaitingAck: [], admissionReady: false },
   ): Promise<DispatchWorkItem[]> {
+    const polled = await this.pollWithGrants(signal, report)
+    this.lastPolledDispatches = polled
+    return polled.map((item) => item.work)
+  }
+
+  /**
+   * Returns the grant-bearing view produced by the immediately preceding
+   * `poll` call. This keeps the established poll seam usable by host fakes
+   * while the grant remains outside DispatchWorkItem.
+   */
+  takeLastPolledDispatches(work: readonly DispatchWorkItem[]): PolledDispatch[] {
+    if (this.lastPolledDispatches.length === 0) return work.map((item) => ({ work: item }))
+    const byKey = new Map(this.lastPolledDispatches.map((item) => [dispatchKey(item.work), item]))
+    this.lastPolledDispatches = []
+    return work.map((item) => byKey.get(dispatchKey(item)) ?? { work: item })
+  }
+
+  async pollWithGrants(
+    signal: AbortSignal,
+    report: {
+      inFlight: string[]
+      awaitingAck: string[]
+      runtimeReadiness?: RuntimeReadinessWitness[]
+      connectionId?: string | null
+      admissionReady?: boolean
+      deploymentEpoch?: string | null
+    } = { inFlight: [], awaitingAck: [], admissionReady: false },
+  ): Promise<PolledDispatch[]> {
     const response = await this.fetchWithAuth(this.url('poll'), {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify(report),
       signal,
     })
+    this.observeDeploymentEpoch(response.headers.get('x-mohist-manager-deployment-epoch'))
     if (response.status === 204) return []
     if (!response.ok) throw new Error(`poll failed: ${response.status} ${await response.text()}`)
     const payload = (await response.json()) as { dispatches?: WorkDispatchResponse[] }
-    return (payload.dispatches ?? []).map(parseDispatchWorkItem)
+    return (payload.dispatches ?? []).map((dispatch) => ({
+      work: parseDispatchWorkItem(dispatch),
+      ...(dispatch.managerExecutionGrant ? { managerExecutionGrant: dispatch.managerExecutionGrant } : {}),
+      ...(dispatch.originMarker != null ? { originMarker: dispatch.originMarker } : {}),
+    }))
   }
 
   async fetchPendingUpdateOperation(signal: AbortSignal): Promise<PendingUpdateOperation | null> {
@@ -782,7 +837,20 @@ export class ServerConnection {
     return `${this.options.serverUrl.replace(/\/$/, '')}/api/projects/${encodeURIComponent(projectId)}/agent-sessions/${encodeURIComponent(agentSessionId)}/inputs/${encodeURIComponent(inputId)}/attachments/${encodeURIComponent(attachmentId)}/content`
   }
 
-  private async post(path: string, body: unknown, signal: AbortSignal) {
+  private observeDeploymentEpoch(value: string | null): void {
+    if (value && value.length > 0) this.managerDeploymentEpoch = value
+  }
+
+  async revokeManagerExecution(executionId: string, signal: AbortSignal): Promise<void> {
+    if (!executionId) return
+    const response = await this.fetchWithAuth(
+      this.url(`manager-executions/${encodeURIComponent(executionId)}/revoke`),
+      { method: 'POST', signal },
+    )
+    if (!response.ok) throw new Error(`Manager execution revocation failed: ${response.status}`)
+  }
+
+  private async post(path: string, body: unknown, signal: AbortSignal): Promise<Response> {
     const response = await this.fetchWithAuth(this.url(path), {
       method: 'POST',
       headers: body === undefined ? undefined : { 'content-type': 'application/json' },
@@ -790,6 +858,7 @@ export class ServerConnection {
       signal,
     })
     if (!response.ok) throw new Error(`${path} failed: ${response.status} ${await response.text()}`)
+    return response
   }
 
   private url(path: string) {
@@ -797,54 +866,11 @@ export class ServerConnection {
   }
 }
 
-export interface AgentSessionReconcileBinding {
-  readonly sessionId: string
-  readonly runtime: 'opencode' | 'pi'
-  readonly runtimeSessionId: string
-  readonly workDir: string
+function dispatchKey(work: DispatchWorkItem): string {
+  const ownerKind = work.ownerKind ?? 'workflow'
+  const ownerId = ownerKind === 'agent-job' ? (work.agentJobId ?? '') : work.workflowRunId
+  return `${ownerKind}:${ownerId}:${work.workId}`
 }
-
-export interface WorkflowAgentSession {
-  sessionId: string
-  runtimeSessionId?: string | null
-  runtime?: string | null
-  status?: string | null
-  workDir?: string | null
-  model?: string | null
-  resolvedModel?: string | null
-  needsFreshRuntimeSession?: boolean
-}
-
-export interface AgentSessionRuntimeEventReceipt {
-  type: string
-  inputDeliveryId?: string
-  agentTurnId?: string
-  agentSessionId?: string
-}
-
-export interface AgentInputAttachmentContent {
-  readonly bytes: Uint8Array
-  readonly contentType: string | null
-  readonly contentDisposition: string | null
-}
-
-export interface AgentSessionRuntimeEventAcceptance {
-  id?: string
-  type?: string
-  sequence?: number
-  inputDeliveryId?: string
-  agentTurnId?: string
-  agentSessionId?: string
-}
-
-export interface WorkflowAgentSessionCleanupTurnAcceptance {
-  cleanupOperationId: string
-  inputDeliveryId: string
-  agentTurnId: string
-  agentSessionId: string
-}
-
-export type AgentSession = WorkflowAgentSession
 
 function parseDispatchWorkItem(dispatch: WorkDispatchResponse): DispatchWorkItem {
   const work: DispatchWorkItem = {

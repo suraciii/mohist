@@ -42,6 +42,7 @@ public sealed record SlackDeliveryPayload(
     [property: JsonPropertyName("fallbackText")] string? FallbackText = null,
     [property: JsonPropertyName("fallbackDispatchRef")] string? FallbackDispatchRef = null,
     [property: JsonPropertyName("statusDispatchRef")] string? StatusDispatchRef = null,
+    [property: JsonPropertyName("terminalStatus")] string? TerminalStatus = null,
     [property: JsonPropertyName("blocks")] JsonElement? Blocks = null,
     [property: JsonPropertyName("fileName")] string? FileName = null,
     [property: JsonPropertyName("fileContentBase64")] string? FileContentBase64 = null,
@@ -91,17 +92,50 @@ public sealed record SlackOutboxList(IReadOnlyList<SlackOutboxEntry> Entries);
 /// Outcome of an Agent-authored reply action
 /// (<c>mo slack message send</c>). The reply lands in the same outbox as
 /// liveness projections; when a replaceable progress message exists it is
-/// promoted in place (one input = one final answer), repeated sends merge
-/// their text, and the stable dispatch reference protects against
-/// duplication. <see cref="Accepted"/> is false only when no live
-/// Connection owns the conversation.
+/// promoted in place (one input = one final answer). Repeated identical sends
+/// reuse that intent, while a different payload is rejected as an idempotency
+/// conflict. <see cref="Accepted"/> is false only when no live Connection owns
+/// the conversation.
 /// </summary>
 public sealed record SlackAgentReplyResult(
     bool Accepted,
     string? ConnectionId = null,
     string? DeliveryId = null,
     string? DispatchRef = null,
-    bool MergedIntoExisting = false);
+    bool MergedIntoExisting = false,
+    bool ConflictingDuplicate = false,
+    string? Code = null,
+    string? Message = null);
+
+/// <summary>
+/// The non-secret origin facts required to promote a Manager reply. The
+/// route constructs this only after validating the lease and the durable
+/// inbox/session mapping, so the outbox never resolves a Manager reply by
+/// conversation alone.
+/// </summary>
+public sealed record SlackManagerReplyAnchor(
+    SlackMessageIdentity Source,
+    string ThreadRootMessageId,
+    string ActorId,
+    string EnrollmentId,
+    string SessionId,
+    string DispatchRef)
+{
+    /// <summary>
+    /// The delivery identity is scoped to the accepted Session input, not to
+    /// the current execution attempt. A retry or recovered attempt therefore
+    /// reuses the same final answer intent, while the next Slack message gets
+    /// a different key.
+    /// </summary>
+    public string InputDispatchRef => $"manager-reply:{SessionId}:{Source.MessageTs}";
+
+    /// <summary>
+    /// Kept separate from <see cref="InputDispatchRef"/> because liveness
+    /// reactions use the source-message status namespace.
+    /// </summary>
+    public string ProgressDispatchRef => SlackStatusProjection.DispatchRef(Source, "progress");
+    public string StatusDispatchRef => SlackStatusProjection.DispatchRef(Source, "status");
+}
 
 public static class SlackDeliveryOwnerKinds
 {

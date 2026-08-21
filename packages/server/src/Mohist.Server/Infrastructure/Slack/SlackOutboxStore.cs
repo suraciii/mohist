@@ -31,7 +31,7 @@ namespace Mohist.Server.Infrastructure.Slack;
 /// the dispatcher's sweep plus the adapter's claim both move rows out
 /// of Pending, so merges are safe.
 /// </remarks>
-public sealed class SlackOutboxStore : IScopedService, IAgentConnectionProviderCleanup
+public sealed partial class SlackOutboxStore : IScopedService, IAgentConnectionProviderCleanup
 {
     private readonly IDbContextFactory<MohistDbContext> _dbFactory;
     private readonly ISlackConnectionHealthBackpressurer _healthBackpressurer;
@@ -693,15 +693,6 @@ public sealed class SlackOutboxStore : IScopedService, IAgentConnectionProviderC
 
         return null;
     }
-
-    private static string ReplyDispatchRef(string connectionId, string conversationId, string? threadTs) =>
-        $"slack-reply:{connectionId}:{conversationId}:{threadTs ?? "dm"}:terminal";
-
-    private static string ReplyImageDispatchRef(string connectionId, string conversationId, string? threadTs) =>
-        $"slack-reply:{connectionId}:{conversationId}:{threadTs ?? "dm"}:image";
-
-    private static string ReplyFileDispatchRef(string connectionId, string conversationId, string? threadTs) =>
-        $"slack-reply:{connectionId}:{conversationId}:{threadTs ?? "dm"}:file";
 
     private static bool IsDispatchRefConflict(DbUpdateException ex)
     {
