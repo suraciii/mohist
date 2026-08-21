@@ -366,13 +366,17 @@ public sealed class SlackManagedBotAdmissionSpecs
         var outbox = await db.SlackOutboxRows.CountAsync(row =>
             row.OwnerKind == SlackDeliveryOwnerKinds.Manager
             && row.ConnectionId == enrollmentId);
+        var sessionIds = await db.AgentSessions
+            .Where(row =>
+                row.LabelProjectId == BuiltInAgentCatalog.MohistSlackProjectId
+                && row.LabelConnectionId == enrollmentId)
+            .Select(row => row.Id)
+            .ToArrayAsync();
         var agentJobs = await db.AgentJobs.CountAsync(row =>
             row.ProjectId == BuiltInAgentCatalog.MohistSlackProjectId
-            && row.AgentSessionId != null);
-        var sessions = await db.AgentSessions.CountAsync(row =>
-            row.LabelProjectId == BuiltInAgentCatalog.MohistSlackProjectId
-            && row.LabelConnectionId == enrollmentId);
-        return (inbox, outbox, agentJobs, sessions);
+            && row.AgentSessionId != null
+            && sessionIds.Contains(row.AgentSessionId));
+        return (inbox, outbox, agentJobs, sessionIds.Length);
     }
 
     private static async Task AssertIgnoredAsync(HttpResponseMessage response)

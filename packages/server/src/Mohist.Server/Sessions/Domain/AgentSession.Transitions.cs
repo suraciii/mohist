@@ -1426,13 +1426,6 @@ public static partial class AgentSessionExtensions
             return [];
         }
 
-        /// <summary>
-        /// Returns a defensive copy of the supplied attachment
-        /// descriptors, preserving order and dropping null / blank-id
-        /// entries. The list is stored on the durable input record so
-        /// callers may not mutate the original collection after the
-        /// transition completes.
-        /// </summary>
         private static IReadOnlyList<AgentSessionInputAttachmentDescriptor>? NormalizeAttachmentDescriptors(
             IReadOnlyList<AgentSessionInputAttachmentDescriptor>? descriptors)
         {
@@ -1446,14 +1439,6 @@ public static partial class AgentSessionExtensions
             return copy.Count == 0 ? null : copy;
         }
 
-        /// <summary>
-        /// Idempotency check for the attachment child record on
-        /// <see cref="AgentSessionInputRecord"/>. Two descriptor lists
-        /// are equivalent when they carry the same ordered ids and
-        /// matching name / content-type / size tuples — accepted-at is
-        /// intentionally excluded because the wall-clock stamp is not
-        /// a property of the immutable launch identity.
-        /// </summary>
         private static bool AttachmentDescriptorsEquivalent(
             IReadOnlyList<AgentSessionInputAttachmentDescriptor>? left,
             IReadOnlyList<AgentSessionInputAttachmentDescriptor>? right)
