@@ -43,7 +43,7 @@ public sealed partial class SlackOutboxStore
         var projectId = SlackDeliveryOwnerIds.ManagerProjectId;
         var ownerKind = SlackDeliveryOwnerKinds.Manager;
         var progressDispatchRef = anchor.ProgressDispatchRef;
-        var terminalDispatchRef = SlackStatusProjection.DispatchRef(anchor.Source, "terminal");
+        var inputDispatchRef = anchor.InputDispatchRef;
 
         var originAccepted = await db.SlackWorkspaceEnrollments.AnyAsync(enrollment =>
                 enrollment.Id == anchor.EnrollmentId
@@ -77,13 +77,36 @@ public sealed partial class SlackOutboxStore
                 && row.OwnerKind == ownerKind
                 && row.ConnectionId == anchor.EnrollmentId
                 && row.ConversationId == anchor.Source.ConversationId
-                && (row.DispatchRef == progressDispatchRef || row.DispatchRef == terminalDispatchRef)
+                && row.DispatchRef == inputDispatchRef
                 && (row.Kind == SlackOutboxKinds.TerminalResult
                     || row.Kind == SlackOutboxKinds.ExplicitFailure))
             .OrderBy(row => row.Id)
             .FirstOrDefaultAsync(ct);
         if (existingTerminal is not null)
         {
+            var existingPayload = SlackDeliveryPayload.Parse(existingTerminal.PayloadJson);
+            var requestedPayload = BuildManagerReplyPayload(
+                redactedText,
+                inputDispatchRef,
+                existingPayload.ProviderMessageIdentity,
+                anchor.StatusDispatchRef,
+                imageUrl,
+                fileName,
+                fileContentBase64);
+            if (!SameReplyContent(existingPayload, requestedPayload))
+            {
+                await transaction.CommitAsync(ct);
+                return new SlackAgentReplyResult(
+                    Accepted: false,
+                    ConnectionId: anchor.EnrollmentId,
+                    DeliveryId: existingTerminal.Id,
+                    DispatchRef: existingTerminal.DispatchRef,
+                    MergedIntoExisting: true,
+                    ConflictingDuplicate: true,
+                    Code: "manager_reply_idempotency_conflict",
+                    Message: "A different reply was already submitted for this Manager input.");
+            }
+
             await transaction.CommitAsync(ct);
             return new SlackAgentReplyResult(
                 Accepted: true,
@@ -116,7 +139,7 @@ public sealed partial class SlackOutboxStore
         var previousPayload = progress is null ? null : SlackDeliveryPayload.Parse(progress.PayloadJson);
         var payload = BuildManagerReplyPayload(
             redactedText,
-            progressDispatchRef,
+            inputDispatchRef,
             previousPayload?.ProviderMessageIdentity,
             anchor.StatusDispatchRef,
             imageUrl,
@@ -125,6 +148,7 @@ public sealed partial class SlackOutboxStore
         if (progress is not null)
         {
             progress.Kind = SlackOutboxKinds.TerminalResult;
+            progress.DispatchRef = inputDispatchRef;
             progress.PayloadJson = JsonSerializer.Serialize(payload);
             progress.ThreadTs = anchor.ThreadRootMessageId;
             progress.UpdatedAt = _timeProvider.GetUtcNow();
@@ -150,7 +174,7 @@ public sealed partial class SlackOutboxStore
             ThreadTs = anchor.ThreadRootMessageId,
             Kind = SlackOutboxKinds.TerminalResult,
             State = SlackOutboxStates.Pending,
-            DispatchRef = progressDispatchRef,
+            DispatchRef = inputDispatchRef,
             PayloadJson = JsonSerializer.Serialize(payload),
             AttemptCount = 0,
             NextAttemptAt = now,
@@ -170,7 +194,7 @@ public sealed partial class SlackOutboxStore
                 .Where(candidate => candidate.ProjectId == projectId
                     && candidate.OwnerKind == ownerKind
                     && candidate.ConnectionId == anchor.EnrollmentId
-                    && candidate.DispatchRef == progressDispatchRef
+                    && candidate.DispatchRef == inputDispatchRef
                     && candidate.Kind == SlackOutboxKinds.TerminalResult)
                 .Select(candidate => new { candidate.Id, candidate.DispatchRef })
                 .FirstOrDefaultAsync(ct);
@@ -179,7 +203,7 @@ public sealed partial class SlackOutboxStore
                 Accepted: true,
                 ConnectionId: anchor.EnrollmentId,
                 DeliveryId: duplicate?.Id,
-                DispatchRef: duplicate?.DispatchRef ?? progressDispatchRef,
+                DispatchRef: duplicate?.DispatchRef ?? inputDispatchRef,
                 MergedIntoExisting: true);
         }
 
@@ -224,6 +248,13 @@ public sealed partial class SlackOutboxStore
 
         return BuildReplyPayload(text, dispatchRef, providerIdentity, statusDispatchRef);
     }
+
+    private static bool SameReplyContent(SlackDeliveryPayload existing, SlackDeliveryPayload requested) =>
+        string.Equals(existing.Operation, requested.Operation, StringComparison.Ordinal)
+        && string.Equals(existing.Text, requested.Text, StringComparison.Ordinal)
+        && string.Equals(existing.FileName, requested.FileName, StringComparison.Ordinal)
+        && string.Equals(existing.FileContentBase64, requested.FileContentBase64, StringComparison.Ordinal)
+        && string.Equals(existing.Blocks?.GetRawText(), requested.Blocks?.GetRawText(), StringComparison.Ordinal);
 
     private static string ReplyDispatchRef(string connectionId, string conversationId, string? threadTs) =>
         $"slack-reply:{connectionId}:{conversationId}:{threadTs ?? "dm"}:terminal";

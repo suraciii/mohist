@@ -165,90 +165,57 @@ public static class SlackManagerIngressRoutes
         manager.MapPost("/reply", async (
             HttpContext context,
             SlackReplyBody body,
-            SlackOutboxStore outbox,
+            ManagerSlackReplyBridge bridge,
             CancellationToken ct) =>
         {
             if (context.Items[ManagerExecutionCredentialContext.HttpContextItemKey]
-                is not ManagerExecutionCredentialContext credential
-                || credential.Kind != ManagerExecutionLeaseKind.Reply)
+                is not ManagerExecutionCredentialContext credential)
                 return ApiResults.Fail(
                     "Manager replies require a Manager reply credential.",
                     StatusCodes.Status403Forbidden,
                     "manager_reply_credential_required");
 
-            if (body is null || string.IsNullOrWhiteSpace(body.ConversationId))
-                return ApiResults.BadRequest("conversationId is required.");
-
-            var origin = credential.Lease.Origin;
-            var conversationId = body.ConversationId.Trim();
-            var threadTs = string.IsNullOrWhiteSpace(body.ThreadTs)
-                ? origin.ThreadRootMessageId
-                : body.ThreadTs.Trim();
-            if (!string.Equals(conversationId, origin.ConversationId, StringComparison.Ordinal)
-                || !string.Equals(threadTs, origin.ThreadRootMessageId, StringComparison.Ordinal)
-                || !MatchesOptional(body.WorkspaceTeamId, origin.WorkspaceId)
-                || !MatchesOptional(body.ThreadRootMessageId, origin.ThreadRootMessageId)
-                || !MatchesOptional(body.TriggeringMessageId, origin.TriggeringMessageId)
-                || !MatchesOptional(body.ActorId, origin.ActorId)
-                || !MatchesOptional(body.EnrollmentId, origin.EnrollmentId)
-                || !MatchesOptional(body.SessionId, origin.SessionId)
-                || !MatchesOptional(body.DispatchRef, origin.DispatchRef))
-            {
-                return ApiResults.Conflict(
-                    "The Manager reply does not match its immutable Slack origin.",
-                    "manager_reply_origin_mismatch");
-            }
-
-            var hasAttachment = !string.IsNullOrWhiteSpace(body.ImageUrl)
-                || !string.IsNullOrWhiteSpace(body.FileContentBase64);
-            if (string.IsNullOrWhiteSpace(body.Text) && !hasAttachment)
-                return ApiResults.BadRequest("text, imageUrl, or a file is required.");
-            if (!string.IsNullOrWhiteSpace(body.FileContentBase64)
-                && string.IsNullOrWhiteSpace(body.FileName))
-                return ApiResults.BadRequest("fileName is required when a file is attached.");
-            if (!string.IsNullOrWhiteSpace(body.FileContentBase64))
-            {
-                try
-                {
-                    _ = Convert.FromBase64String(body.FileContentBase64);
-                }
-                catch (FormatException)
-                {
-                    return ApiResults.BadRequest("fileContentBase64 is not valid base64.");
-                }
-            }
-
-            var text = SlackMarkdownRenderer.ToMrkdwn(SlackFinalReplyRenderer.RedactReplyText(body.Text));
-            if (string.IsNullOrWhiteSpace(text) && !hasAttachment)
-                return ApiResults.BadRequest("text must not be empty.");
-
-            var result = await outbox.EnqueueManagerAgentReplyAsync(
-                new SlackManagerReplyAnchor(
-                    new SlackMessageIdentity(origin.WorkspaceId, origin.ConversationId, origin.TriggeringMessageId),
-                    origin.ThreadRootMessageId,
-                    origin.ActorId,
-                    origin.EnrollmentId,
-                    origin.SessionId,
-                    origin.DispatchRef),
-                text,
-                imageUrl: string.IsNullOrWhiteSpace(body.ImageUrl) ? null : body.ImageUrl.Trim(),
-                fileName: string.IsNullOrWhiteSpace(body.FileName) ? null : body.FileName.Trim(),
-                fileContentBase64: string.IsNullOrWhiteSpace(body.FileContentBase64) ? null : body.FileContentBase64,
+            var result = await bridge.ExecuteAsync(
+                new SlackManagerReplyRequest(
+                    body?.ConversationId,
+                    body?.ThreadTs,
+                    body?.Text,
+                    body?.ImageUrl,
+                    body?.FileName,
+                    body?.FileContentBase64,
+                    body?.WorkspaceTeamId,
+                    body?.ProjectId,
+                    body?.OwnerKind,
+                    body?.ConnectionId,
+                    body?.ThreadRootMessageId,
+                    body?.TriggeringMessageId,
+                    body?.ActorId,
+                    body?.EnrollmentId,
+                    body?.SessionId,
+                    body?.DispatchRef),
+                credential,
                 ct);
-            if (!result.Accepted)
-                return ApiResults.Conflict(
-                    "The Manager reply could not be attached to its current liveness projection.",
-                    "manager_reply_liveness_conflict");
-            return ApiResults.Ok(new
+            if (result.Accepted)
             {
-                accepted = true,
-                connectionId = result.ConnectionId,
-                deliveryId = result.DeliveryId,
-                dispatchRef = result.DispatchRef,
-                merged = result.MergedIntoExisting,
-                ownerKind = SlackDeliveryOwnerKinds.Manager,
-                projectId = SlackDeliveryOwnerIds.ManagerProjectId,
-            });
+                var delivery = result.Delivery!;
+                return ApiResults.Ok(new
+                {
+                    accepted = true,
+                    connectionId = delivery.ConnectionId,
+                    deliveryId = delivery.DeliveryId,
+                    dispatchRef = delivery.DispatchRef,
+                    merged = delivery.MergedIntoExisting,
+                    ownerKind = SlackDeliveryOwnerKinds.Manager,
+                    projectId = SlackDeliveryOwnerIds.ManagerProjectId,
+                });
+            }
+
+            return result.StatusCode switch
+            {
+                StatusCodes.Status400BadRequest => ApiResults.BadRequest(result.Message, result.Code),
+                StatusCodes.Status409Conflict => ApiResults.Conflict(result.Message, result.Code),
+                _ => ApiResults.Fail(result.Message, result.StatusCode, result.Code),
+            };
         });
 
         manager.MapPost("/ingress", async (

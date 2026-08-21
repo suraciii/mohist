@@ -64,6 +64,23 @@ public sealed class SlackStatusProjection : IScopedService
             null,
             ct);
 
+        // Manager liveness is deliberately reaction-only. The Agent's reply
+        // action is the sole conversational delivery path; do not create a
+        // Server-authored progress message for Manager turns.
+        if (string.Equals(projectId, SlackDeliveryOwnerIds.ManagerProjectId, StringComparison.Ordinal))
+        {
+            return await EnqueueReactionAsync(
+                projectId,
+                connectionId,
+                source,
+                threadTs,
+                "working-add",
+                SlackDeliveryOperations.ReactionAdd,
+                WorkingReaction,
+                null,
+                ct);
+        }
+
         var result = await _outbox.UpsertReplaceableProgressAsync(new SlackOutboxDraft(
             projectId,
             connectionId,
@@ -208,21 +225,25 @@ public sealed class SlackStatusProjection : IScopedService
         var hadWorking = false;
         foreach (var entry in entries.Entries)
         {
-            if (entry.DispatchRef != dispatchRef)
+            var payload = TryReadPayload(entry.PayloadJson);
+            var isWorkingReaction = entry.Kind == SlackOutboxKinds.ReactionMutation
+                && entry.DispatchRef == DispatchRef(source, "working-add")
+                && payload?.Operation == SlackDeliveryOperations.ReactionAdd
+                && payload.Reaction == WorkingReaction;
+            var isProgressRow = entry.DispatchRef == dispatchRef
+                && (entry.Kind == SlackOutboxKinds.ReplaceableProgress
+                    || entry.Kind == SlackOutboxKinds.TerminalResult
+                    || entry.Kind == SlackOutboxKinds.ExplicitFailure);
+            if (!isWorkingReaction && !isProgressRow)
                 continue;
-            if (entry.Kind == SlackOutboxKinds.ReplaceableProgress
-                || entry.Kind == SlackOutboxKinds.TerminalResult
-                || entry.Kind == SlackOutboxKinds.ExplicitFailure)
+
+            hadWorking = true;
+            if (payload?.StatusDispatchRef is { } statusDispatchRef
+                && TryReadSource(statusDispatchRef, out var parsedSource))
             {
-                hadWorking = true;
-                var payload = TryReadPayload(entry.PayloadJson);
-                if (payload?.StatusDispatchRef is { } statusDispatchRef
-                    && TryReadSource(statusDispatchRef, out var parsedSource))
-                {
-                    projectionSource = parsedSource;
-                }
-                break;
+                projectionSource = parsedSource;
             }
+            break;
         }
         // Fast completion can race the working projection. Terminal
         // convergence must still close receipt state and add one terminal

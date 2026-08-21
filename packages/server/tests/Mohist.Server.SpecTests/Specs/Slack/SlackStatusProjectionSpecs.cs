@@ -166,7 +166,65 @@ public sealed class SlackStatusProjectionSpecs
     }
 
     [Fact]
-    public async Task Manager_reply_promotes_only_matching_progress_and_duplicate_send_is_idempotent()
+    public async Task Manager_working_is_reaction_only_and_every_terminal_outcome_converges()
+    {
+        await using var database = TestSqliteDatabase.CreateMigrated();
+        var time = new FakeTimeProvider(new DateTimeOffset(2026, 8, 3, 12, 0, 0, TimeSpan.Zero));
+        const string enrollmentId = "manager-liveness-all-outcomes";
+        await SeedManagerAsync(database, time, enrollmentId);
+        var store = CreateStore(database, time);
+        var projection = new SlackStatusProjection(store);
+
+        foreach (var (status, suffix) in new[]
+        {
+            ("completed", "001"),
+            ("failed", "002"),
+            ("cancelled", "003"),
+            ("unknown", "004"),
+        })
+        {
+            var source = new SlackMessageIdentity("T_MANAGER", "D_MANAGER", $"1710000000.{suffix}");
+            await projection.EnqueueReceivedAsync(
+                SlackDeliveryOwnerIds.ManagerProjectId, enrollmentId, source, null);
+            await projection.EnqueueWorkingAsync(
+                SlackDeliveryOwnerIds.ManagerProjectId, enrollmentId, source, null);
+            await projection.FinalizeLivenessAsync(
+                SlackDeliveryOwnerIds.ManagerProjectId, enrollmentId, source, null, status);
+            await projection.FinalizeLivenessAsync(
+                SlackDeliveryOwnerIds.ManagerProjectId, enrollmentId, source, null, status);
+        }
+
+        var rows = (await store.ListManagerAsync(enrollmentId)).Entries;
+        foreach (var (status, suffix) in new[]
+        {
+            ("completed", "001"),
+            ("failed", "002"),
+            ("cancelled", "003"),
+            ("unknown", "004"),
+        })
+        {
+            var source = new SlackMessageIdentity("T_MANAGER", "D_MANAGER", $"1710000000.{suffix}");
+            var terminal = Assert.Single(
+                rows,
+                row => row.DispatchRef == SlackStatusProjection.DispatchRef(source, "terminal-add"));
+            Assert.Equal(
+                status == "completed" ? "white_check_mark" : "warning",
+                SlackDeliveryPayload.Parse(terminal.PayloadJson).Reaction);
+            Assert.DoesNotContain(
+                rows,
+                row => row.DispatchRef == SlackStatusProjection.DispatchRef(source, "progress")
+                    && row.Kind == SlackOutboxKinds.ReplaceableProgress);
+            Assert.DoesNotContain(
+                rows.Where(row => row.ConnectionId == enrollmentId && row.DispatchRef?.Contains(source.MessageTs, StringComparison.Ordinal) == true),
+                row => SlackDeliveryPayload.Parse(row.PayloadJson).Operation == SlackDeliveryOperations.PostMessage);
+            Assert.Single(
+                rows,
+                row => row.DispatchRef == SlackStatusProjection.DispatchRef(source, "terminal-remove-working"));
+        }
+    }
+
+    [Fact]
+    public async Task Manager_reply_promotes_only_matching_progress_and_conflicting_duplicate_is_rejected()
     {
         await using var database = TestSqliteDatabase.CreateMigrated();
         var time = new FakeTimeProvider(new DateTimeOffset(2026, 8, 3, 12, 0, 0, TimeSpan.Zero));
@@ -191,9 +249,14 @@ public sealed class SlackStatusProjectionSpecs
             "slack:manager-session:input-1");
         var first = await store.EnqueueManagerAgentReplyAsync(anchor, "first answer");
         var duplicate = await store.EnqueueManagerAgentReplyAsync(anchor, "duplicate answer");
+        var identical = await store.EnqueueManagerAgentReplyAsync(anchor, "first answer");
         Assert.True(first.Accepted);
-        Assert.True(duplicate.MergedIntoExisting);
+        Assert.False(duplicate.Accepted);
+        Assert.True(duplicate.ConflictingDuplicate);
+        Assert.True(identical.Accepted);
+        Assert.True(identical.MergedIntoExisting);
         Assert.Equal(first.DeliveryId, duplicate.DeliveryId);
+        Assert.Equal(first.DeliveryId, identical.DeliveryId);
 
         await projection.FinalizeLivenessAsync(
             SlackDeliveryOwnerIds.ManagerProjectId,

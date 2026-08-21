@@ -137,7 +137,15 @@ public sealed class SlackManagerReplyRouteSpecs
             text = "a duplicate answer must not append",
         });
         using var duplicateResponse = await _fixture.Client.SendAsync(duplicate);
-        duplicateResponse.EnsureSuccessStatusCode();
+        Assert.Equal(HttpStatusCode.Conflict, duplicateResponse.StatusCode);
+        using var identical = BuildRequest(grant.ReplyCredential, new
+        {
+            conversationId = conversation,
+            threadTs = triggeringMessage,
+            text = "the authoritative answer",
+        });
+        using var identicalResponse = await _fixture.Client.SendAsync(identical);
+        identicalResponse.EnsureSuccessStatusCode();
 
         await using var verify = _fixture.Services.CreateAsyncScope();
         var outbox = verify.ServiceProvider.GetRequiredService<SlackOutboxStore>();
