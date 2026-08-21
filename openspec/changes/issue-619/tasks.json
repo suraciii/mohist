@@ -26,14 +26,15 @@
       "id": "T-002",
       "title": "Gate new Slack DM work with a durable safe admission nudge",
       "spec": "specs/slack-agent-admission-nudge/spec.md#new-slack-work-shall-be-gated-by-agent-readiness-and-connection-availability",
-      "description": "Introduce the shared Server admission decision and durable-nudge construction needed by DM ingress, then integrate it after DM routing/session classification and before provider-inbox acceptance or launch preparation. Block not-ready Agents and unavailable enabled Connections with a generic safe UserAction outbox delivery using a stable Connection-plus-Slack-event identity, while returning explicit server ownership or the known adapter-owned no-intent backpressure fallback.",
+      "description": "Introduce the shared Server admission decision and durable-nudge construction needed by DM ingress, then integrate it after prompt normalization and DM routing classification but before provider-inbox acceptance or launch preparation. The explicit leading `new task` marker is new work even when the DM has a current Session mapping; only an ordinary established-session DM is a follow-up. Block not-ready Agents and unavailable enabled Connections with a generic safe UserAction outbox delivery using a stable Connection-plus-Slack-event identity, while returning explicit server ownership or the known adapter-owned no-intent backpressure fallback.",
       "acceptanceCriteria": [
-        "A DM without a current Session is gated before SlackProviderInboxStore.AcceptAsync, attachment preparation, workspace provisioning, Session, SessionInput, Turn, AgentJob, or pending execution work is created when Agent readiness is needs_setup/non-executable or an enabled Connection is unavailable.",
+        "An ordinary DM without a current Session is gated before SlackProviderInboxStore.AcceptAsync, attachment preparation, workspace provisioning, Session, SessionInput, Turn, AgentJob, or pending execution work is created when Agent readiness is not-configured/not-executable or an enabled Connection is unavailable.",
+        "A DM with the explicit leading `new task` marker is classified as new work before the current-session mapping is consulted and is subject to the same gate; when blocked it creates no follow-up input or new execution state.",
         "A blocked DM creates at most one UserAction outbox row addressed to the originating conversation and thread context, with a deterministic bounded dispatch reference and matching clientMessageId; redelivery and concurrent attempts resolve to the existing row and return responseOwner server.",
         "Known no-intent capacity/backpressure handling returns responseOwner adapter with the safe generic retry message and still creates no execution state; unexpected persistence failures are not falsely reported as a successful direct response.",
-        "Caller-facing setup and availability text is fixed, actionable, and contains no credentials, configuration values, exception text, internal health details, or repair commands; the existing authorized diagnostic endpoint still exposes concrete facts for operators.",
-        "DM follow-ups with an established Session bypass the new-work gate, Disabled Connections retain audited discard without a nudge, and executable or unknown-readiness Agents retain normal admission behavior.",
-        "Server spec and integration tests cover setup blocks, Connection availability blocks, safe-message forbidden-content assertions, outbox context/identity, response ownership, zero execution side effects, follow-ups, Disabled, executable, and unknown cases."
+        "Caller-facing setup and availability text is fixed, actionable, and contains no credentials, configuration values, exception text, internal health details, or repair commands; the existing authorized diagnostic endpoint injects AgentReadinessService and exposes an authorized AgentExecutability projection with the canonical state, concrete gaps, gap next actions, Connection facts, and Connection next action for operators.",
+        "Ordinary DM follow-ups with an established Session bypass the new-work gate, Disabled Connections retain audited discard without a nudge, and executable or unknown-readiness Agents retain normal admission behavior.",
+        "Server spec and integration tests cover setup blocks, history-based non-executable blocks, Connection availability blocks, safe-message forbidden-content assertions, diagnostic gap projection, outbox context/identity, response ownership, zero execution side effects, ordinary follow-ups, explicit new-task DMs, Disabled, executable, and unknown cases."
       ],
       "priority": 2,
       "mode": "AFK",
@@ -41,7 +42,7 @@
       "output": "A reusable Server admission/nudge policy integrated into the DM ingress path, with durable outbox records and passing DM admission specs.",
       "dependsOn": ["T-001"],
       "passes": false,
-      "notes": "Reuse AgentReadinessService/AgentReadinessDeriver and the existing Connection diagnostic vocabulary. Do not duplicate health-string interpretation in the route or alter readiness criteria."
+      "notes": "Reuse AgentReadinessService for the canonical admission and diagnostic executability result, retain AgentReadinessDeriver only for existing compatibility facts, and reuse the existing Connection diagnostic vocabulary. Do not duplicate health-string interpretation in the route or alter readiness criteria."
     },
     {
       "id": "T-003",
@@ -74,7 +75,8 @@
         "When Slack accepted a message but the provider response was lost, reconciliation finds the existing provider message by provider identity or stable clientMessageId and marks the original row delivered without posting a second message.",
         "When reconciliation confirms absence, retry reuses the original durable intent and stable delivery identity; it does not create a new outbox row or adapter-owned direct fallback.",
         "Ingress redelivery, adapter reconnect, outbox sweeps, and delivery reconciliation all continue to report Server ownership once a durable nudge exists, while the legacy adapter-owned fallback remains direct only when no durable intent was committed.",
-        "Server integration tests and real Node adapter tests share representative JSON fixtures for server-owned, adapter-owned, and none outcomes and verify the no-duplication boundary for DM, channel-root, and unbound-thread events.",
+        "Server integration tests and real Node adapter tests share representative JSON fixtures for server-owned, adapter-owned, and none outcomes, but a separate cross-component end-to-end harness invokes the actual Server ingress HTTP route, feeds its response to the actual Node adapter event handler, and uses instrumented Slack post/ack and outbox-drain seams.",
+        "That cross-component harness covers a Server-owned durable DM/channel-root/unbound-thread nudge with zero direct post and one normal outbox delivery, plus an adapter-owned no-intent backpressure result with exactly one direct post and no durable nudge; it verifies the no-duplication boundary through both components rather than only comparing fixtures.",
         "Delivery uncertainty, reconciliation, concurrency, and redelivery tests pass without requiring a schema migration or changing Disabled Connection claim/discard semantics."
       ],
       "priority": 4,

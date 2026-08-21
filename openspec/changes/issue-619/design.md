@@ -8,7 +8,7 @@ The existing persistence model already supplies the two identities needed for an
 - `SlackProviderInboxRows` deduplicate accepted provider events, while `SlackOutboxRows` persist outbound delivery intents and reconcile uncertain Slack mutations.
 - `SlackOutboxRows` already have a unique `(OwnerKind, ConnectionId, DispatchRef, Kind)` constraint and `EnqueueRequiredAsync` conflict handling.
 
-The change must preserve the existing routing boundaries. Established DM and channel-thread sessions remain follow-ups, Disabled Connections retain audited-discard behavior, executable Agents continue through the normal launch path, and `unknown` readiness remains accepted for Runner verification. Agent readiness rules themselves are not changing. `ConnectionDiagnostic` remains the authorized source for concrete setup, health, and next-action details; those details must not be copied into ordinary caller-facing Slack text.
+The change must preserve the existing routing boundaries. Ordinary established DM and channel-thread sessions remain follow-ups, while the explicit DM `new task` marker retains its existing new-task launch meaning. Disabled Connections retain audited-discard behavior, executable Agents continue through the normal launch path, and `unknown` readiness remains accepted for Runner verification. Agent readiness rules themselves are not changing. `ConnectionDiagnostic` remains the authorized source for concrete setup, health, and next-action details; its diagnostic route must consume the same canonical execution result used by admission, including execution-history-based non-executable states and concrete gaps. Those details must not be copied into ordinary caller-facing Slack text.
 
 The main stakeholders are Slack callers, Connection owners/operators, the Server ingress and outbox, and the Node/Go adapter transports. The implementation must also tolerate an adapter acknowledgment arriving after a durable outbox write, an ingress response being lost, concurrent requests for one event, and delivery uncertainty after Slack has accepted a message.
 
@@ -16,8 +16,8 @@ The main stakeholders are Slack callers, Connection owners/operators, the Server
 
 **Goals:**
 
-- Classify an inbound event as established-session follow-up or new work before creating provider inbox or execution state.
-- Gate only new work: a DM without a current Session, a channel root mention, or the first mention in an unbound thread.
+- Classify an inbound event as established-session follow-up or new work before creating provider inbox or execution state; the explicit leading `new task` DM marker is new work even when a current DM Session mapping exists.
+- Gate only new work: an ordinary DM without a current Session, an explicit leading `new task` DM even when a current Session exists, a channel root mention, or the first mention in an unbound thread.
 - Block gated work before creating a `SlackProviderInboxRow`, Session, SessionInput, Turn, AgentJob, attachment execution state, or pending execution work.
 - Persist one safe setup/unavailability nudge for a blocked event using a stable identity derived from the Connection and `SlackMessageIdentity`.
 - Make ingress response ownership explicit so the adapter can distinguish Server-owned durable delivery from the legacy adapter-owned direct backpressure fallback.
@@ -41,13 +41,14 @@ The main stakeholders are Slack callers, Connection owners/operators, the Server
 Add a small Server-side admission service/policy used by both DM and channel ingress. The route will first perform the existing identity, managed-bot, access, mention, and binding checks. It will then classify the event:
 
 1. Disabled and managed/ignored events follow their existing paths.
-2. A DM with a current mapping, or a reply in an established channel thread, is a follow-up and bypasses the new-work readiness gate.
-3. A DM without a current mapping, a channel root mention, or an unbound-thread first mention is new work and is evaluated by the gate.
-4. Only an admitted new-work event proceeds to `SlackProviderInboxStore.AcceptAsync`, attachment binding, workspace provisioning, and `LaunchConnectionAsync`.
+2. After prompt normalization, the explicit leading `new task` marker is classified as new work before DM mapping or the backpressure short-circuit is consulted. It therefore remains a new-work launch even when the DM has a current Session mapping. The known no-intent backpressure fallback may still own the response for this new-work path, but it must not bypass classification.
+3. An ordinary DM with a current mapping, or a reply in an established channel thread, is a follow-up and bypasses the new-work readiness gate; its existing follow-up capacity/lifecycle behavior remains authoritative.
+4. An ordinary DM without a current mapping, a channel root mention, or an unbound-thread first mention is new work and is evaluated by the gate.
+5. Only an admitted new-work event proceeds to `SlackProviderInboxStore.AcceptAsync`, attachment binding, workspace provisioning, and `LaunchConnectionAsync`.
 
 This ordering fixes the current DM problem where connection backpressure/readiness can be checked before determining that a message is a follow-up. It also moves the gate ahead of channel thread-history import, so a blocked launch does not perform unnecessary launch preparation or external history work.
 
-For Agent state, the service will continue to use `AgentReadinessService`/`AgentReadinessDeriver`: `needs_setup` and non-executable states block, `ready` admits, and `unknown` admits. For Connection state, the service will reuse the existing diagnostic/admission vocabulary rather than duplicating health-string interpretation in each route. Disabled is handled separately; backpressure remains the legacy direct-fallback case; other non-ready enabled states such as incomplete setup, credential failure, or service unavailability become durable-nudge blocks. Owner access and identity-drift policy remain their existing routing decisions, not new execution-readiness rules.
+For Agent state, admission will use the canonical `AgentReadinessService` result: `not-configured` and `not-executable` block, `executable` admits, and `unknown` admits. The authorized diagnostic route will call that same service and pass the lossless `AgentExecutabilityResult` into its response projection, alongside the existing structural readiness facts where needed for compatibility; it will not derive operator diagnostics from `AgentReadinessDeriver` alone. The diagnostic result will expose the canonical state, each concrete `AgentExecutabilityGap`, and each gap's `NextAction`. For Connection state, the service will reuse the existing diagnostic/admission vocabulary rather than duplicating health-string interpretation in each route. Disabled is handled separately; backpressure remains the legacy direct-fallback case; other non-ready enabled states such as incomplete setup, credential failure, or service unavailability become durable-nudge blocks. Owner access and identity-drift policy remain their existing routing decisions, not new execution-readiness rules.
 
 **Alternative considered:** add another readiness check inside `IAgentLauncher` or Runner dispatch. That would be too late: it could already create Session and AgentJob state and cannot produce a Slack response with the required no-execution side effects. Patching each existing `if (IsBackpressured(...))` and readiness branch separately was also rejected because it would preserve change amplification and make DM/channel behavior diverge again.
 
@@ -85,13 +86,15 @@ The existing direct backpressure response will explicitly return `responseOwner:
 
 ### 4. Use safe public summaries and preserve diagnostics separately
 
-The admission service will return an internal block category and a public summary. The public summaries will be fixed, independent of the concrete failure:
+The admission service will return an internal block category and a public summary. It will also use the canonical `AgentExecutabilityResult` returned by `AgentReadinessService`, rather than the structural `AgentReadinessDeriver` projection alone. The authorized diagnostic route will inject `AgentReadinessService`, call `GetAsync(projectId, agent, ct)`, and pass the lossless result into `ConnectionDiagnostic` through an explicit diagnostic-input field. `ConnectionDiagnosticResult` will add an authorized `AgentExecutability` projection containing the canonical state, concrete gaps, gap next actions, and their existing authorized fix-entry-point details; the existing Connection facts and Connection `PrimaryState`/`NextAction` remain unchanged. A lossy `ready`/`needs_setup`/`unknown` string cannot be the only readiness field. This makes a history-based `not-executable` admission block visible to Owners and authorized operators while keeping the caller summary safe.
+
+The public summaries will be fixed, independent of the concrete failure:
 
 - Agent/setup block: indicate that the Agent is not ready to accept new work and ask the caller to contact the Connection owner or finish setup through the normal owner workflow.
 - Connection availability block: indicate temporary unavailability and suggest retrying shortly or contacting the Connection owner.
 - Adapter-owned backpressure fallback: retain a generic retry/backpressure message without queue counts or internal health details.
 
-No configuration property, credential, token, exception text, shell command, or repair instruction will be interpolated into the Slack payload. Operators continue to use `GET /api/projects/{projectRef}/slack-connections/{connectionId}/diagnostic` and existing authorized surfaces to see the concrete readiness state, Connection health reason, and next action. Internal logs/telemetry may record the block category, but must use the existing secret-redaction conventions.
+No configuration property, credential, token, exception text, shell command, or repair instruction will be interpolated into the Slack payload. Operators continue to use `GET /api/projects/{projectRef}/slack-connections/{connectionId}/diagnostic` and existing authorized surfaces to see the canonical executability state, concrete execution gaps, Connection health reason, and next action. The endpoint must derive readiness through the canonical execution service on every diagnostic request and serialize its `AgentExecutability` projection; it must not continue to rely only on `AgentReadinessDeriver`. Internal logs/telemetry may record the block category, but must use the existing secret-redaction conventions.
 
 **Alternative considered:** send the current `AgentConnectionDispatchDecision.Reason` to Slack. This would leak implementation and repair details and would make caller text vary with internal readiness implementation. The current diagnostic endpoint is already the correct information boundary.
 
@@ -117,11 +120,12 @@ This avoids hiding a persistence outage as a successful direct response while st
 
 Coverage will be added at three levels:
 
-- Server spec tests for unconfigured/non-executable Agents, unavailable Connections, existing DM follow-ups, channel roots, and unbound threads. Assertions will verify the response owner, exactly one outbox row when durable, correct conversation/thread anchor, and zero provider inbox/session/input/turn/job rows for blocked new work.
+- Server spec tests for unconfigured/non-executable Agents, unavailable Connections, existing DM follow-ups, explicit `new task` DMs, channel roots, and unbound threads. Assertions will verify the response owner, exactly one outbox row when durable, correct conversation/thread anchor, and zero provider inbox/session/input/turn/job rows for blocked new work.
+- The authorized diagnostic endpoint will be exercised with both structural setup gaps and execution-history-based `not-executable` results. Tests will verify that the response exposes the canonical executability state, concrete gap, gap next action, Connection state, and Connection next action, while the caller-facing nudge remains free of those details.
 - Concurrency and redelivery tests using the same `(ConnectionId, workspace, conversation, messageTs)` will assert one dispatch reference and one outbox row, with all successful responses reporting Server ownership.
 - Adapter tests will feed both ownership results through the real event handler: Server-owned results must not post directly and must acknowledge once; adapter-owned results must post once and acknowledge only after success; unknown or malformed results must not acknowledge. Delivery tests will cover uncertain reconciliation by stable `client_msg_id`.
 
-The Server integration fixture and adapter contract fixture should share representative JSON payloads so the breaking internal contract is tested from both sides. Existing manager and non-admission ingress results should default to `none` or `server` according to whether they create an outbox response and must not acquire new direct-send behavior.
+The Server integration fixture and adapter contract fixture should share representative JSON payloads so the breaking internal contract is tested from both sides; those fixture tests are wire-level coverage only. A separate cross-component harness will invoke the actual Server ingress HTTP route with a blocked event, feed that response to the actual Node adapter event handler, and use instrumented Slack post/ack and outbox-drain seams to assert the durable-outbox/direct-send no-duplication boundary end to end. Existing manager and non-admission ingress results should default to `none` or `server` according to whether they create an outbox response and must not acquire new direct-send behavior.
 
 ## Risks / Trade-offs
 
@@ -131,7 +135,7 @@ The Server integration fixture and adapter contract fixture should share represe
 - **[Slack accepts a nudge but the adapter loses the provider response]** -> Use the stable `client_msg_id` and existing uncertain-delivery reconciliation before retrying the same row.
 - **[The direct adapter fallback is itself uncertain]** -> Keep it limited to the legacy no-intent backpressure path and preserve the existing acknowledgment-after-post rule. The durable nudge path, which is the required deduplicated path, never falls back to a second direct post after ownership is Server-side.
 - **[A readiness or health reason is accidentally exposed through a new response path]** -> Centralize public-summary mapping in the admission service, add forbidden-content assertions for credentials/errors/commands, and keep diagnostic facts in the authorized diagnostic endpoint only.
-- **[DM or channel follow-up is accidentally classified as new work]** -> Resolve DM session mappings and channel thread bindings before applying the gate, and add regression tests where readiness changes after a Session is established.
+- **[DM or channel follow-up is accidentally classified as new work]** -> Resolve ordinary DM session mappings and channel thread bindings before applying the gate, but classify the explicit leading `new task` marker as new work first; add regression tests for both an ordinary established-session follow-up and a marked new task after readiness changes.
 - **[Stable dispatch references exceed the existing column limit or collide across contexts]** -> Canonicalize all identity components with explicit separators and use a fixed-length cryptographic digest with a namespaced prefix; test same message across different Connections and conversations.
 
 ## Migration Plan

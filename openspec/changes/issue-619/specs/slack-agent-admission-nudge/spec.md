@@ -1,10 +1,17 @@
 ### Requirement: New Slack work SHALL be gated by Agent readiness and Connection availability
-For a Slack DM with no established Session, a channel root mention, or the first mention of an Agent in an unbound thread, Server SHALL evaluate the canonical Agent readiness/executability state and the Connection's current admission availability before admitting new work. When the Agent is not ready or a non-Disabled Connection is unavailable, Server SHALL block the new work before creating execution state.
+For an ordinary Slack DM with no established Session, an explicit leading `new task` DM even when a current Session exists, a channel root mention, or the first mention of an Agent in an unbound thread, Server SHALL classify the event before any backpressure short-circuit and SHALL evaluate the canonical Agent readiness/executability state and the Connection's current admission availability before admitting new work. When the Agent is not ready or a non-Disabled Connection is unavailable, Server SHALL block the new work before creating execution state.
 
 #### Scenario: An unconfigured Agent blocks a new DM
 - **WHEN** a caller sends a task in a DM that has no established Session and the bound Agent is not ready
 - **THEN** Server SHALL refuse new-work admission
 - **AND** Server SHALL create no Session, SessionInput, Turn, AgentJob, or pending execution inbox work
+
+#### Scenario: An explicit new-task DM is gated even with an established Session
+- **WHEN** a caller sends a DM beginning with the explicit `new task` marker and the DM has a current Session mapping
+- **THEN** Server SHALL classify the message as new work rather than as a follow-up
+- **AND** Server SHALL apply the new-work readiness and Connection-availability gate
+- **AND** a blocked message SHALL create no new execution state or follow-up input
+- **AND** a known no-intent capacity fallback, if selected, SHALL still report adapter ownership without bypassing the new-work classification
 
 #### Scenario: An unavailable Connection blocks a channel root mention
 - **WHEN** an authorized caller mentions the Bot in a channel root message and the non-Disabled Connection cannot accept new work
@@ -48,7 +55,7 @@ The nudge shown to an ordinary Slack caller SHALL state that the Agent cannot ac
 - **AND** the message SHALL not expose internal health diagnostics or credentials
 
 ### Requirement: Authorized diagnostics SHALL retain the concrete readiness and availability facts
-Owners and authorized operators SHALL be able to use the existing authorized diagnostic surfaces to inspect the concrete Agent readiness gap, Connection state, health or availability reason, and current next action for a blocked event. The diagnostic surfaces SHALL not be replaced by the safe caller summary.
+Owners and authorized operators SHALL be able to use the existing authorized diagnostic surfaces to inspect the concrete Agent readiness/executability state, every applicable execution gap and its next action, Connection state, health or availability reason, and current Connection next action for a blocked event. The diagnostic route SHALL inject and call `AgentReadinessService` and expose an authorized `AgentExecutability` projection from that result, rather than only the structural `ready`/`needs_setup`/`unknown` projection. The diagnostic surfaces SHALL not be replaced by the safe caller summary.
 
 #### Scenario: An operator can diagnose an Agent readiness block
 - **WHEN** an authorized operator inspects a Connection whose new work was blocked by Agent readiness
@@ -61,10 +68,10 @@ Owners and authorized operators SHALL be able to use the existing authorized dia
 - **AND** the caller-facing nudge SHALL remain generic
 
 ### Requirement: Established follow-ups SHALL preserve Session semantics
-A message routed to an established DM Session or an established channel-thread Session SHALL remain a follow-up to that Session. The new-work readiness gate SHALL NOT create a new Session or setup nudge merely because the current Agent readiness projection is not ready. Existing follow-up capacity and lifecycle behavior SHALL remain authoritative for those messages.
+An ordinary message routed to an established DM Session or an established channel-thread Session SHALL remain a follow-up to that Session. The explicit leading `new task` DM marker is an exception: it SHALL retain its existing new-work launch meaning even when a current DM Session exists. The new-work readiness gate SHALL NOT create a new Session or setup nudge for an ordinary follow-up merely because the current Agent readiness projection is not ready. Existing follow-up capacity and lifecycle behavior SHALL remain authoritative for ordinary follow-up messages.
 
 #### Scenario: A DM follow-up continues its established Session
-- **WHEN** a DM already has a current Session and the caller sends another ordinary message
+- **WHEN** a DM already has a current Session and the caller sends another ordinary message without the explicit `new task` marker
 - **THEN** Server SHALL route the message through the existing follow-up path
 - **AND** Server SHALL not treat it as a new-work setup nudge solely because the Agent is currently not ready
 

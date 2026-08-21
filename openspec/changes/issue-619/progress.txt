@@ -1,0 +1,35 @@
+# issue-619 plan-fix progress
+
+Working through `self-review.md` must-fix findings. `self-review.md` itself is
+not edited; the next self-review regenerates it.
+
+## Findings in scope
+
+- MF-1: connect the canonical execution-readiness result to the authorized
+  Connection diagnostic projection, including concrete gaps and next action.
+- MF-2: classify the explicit DM `new task` marker as new work even when the DM
+  already has a current Session mapping.
+- MF-3: require a real Server-ingress-plus-Node-adapter end-to-end test, not
+  only tests that happen to share JSON fixtures.
+
+## Status
+
+- Plan edits: complete for all three findings.
+- Verification: `tasks.json` parses, all task spec anchors resolve, and `git diff --check` passes.
+- Commit: pending.
+
+## Disposition notes
+
+- MF-1 is fixed in `design.md`, the admission spec, T-002, and the proposal:
+  the authorized diagnostic route now explicitly calls `AgentReadinessService`
+  and exposes a lossless `AgentExecutability` projection with concrete gaps and
+  next actions, while caller text stays generic.
+- MF-2 is fixed in `design.md`, the admission spec, T-002, and the proposal:
+  the leading `new task` marker is classified as new work before DM mapping and
+  backpressure short-circuiting; ordinary established-session messages remain
+  follow-ups.
+- MF-3 is fixed in the ownership spec, `design.md`, T-004, and the proposal:
+  a dedicated cross-component harness must invoke the real Server ingress HTTP
+  route, feed its response to the real Node adapter event handler, and assert
+  durable-outbox versus direct-send behavior with instrumented post/ack and
+  outbox-drain seams. Shared fixtures are explicitly only wire-level coverage.

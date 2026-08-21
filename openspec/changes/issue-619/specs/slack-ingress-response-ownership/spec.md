@@ -88,3 +88,18 @@ The adapter SHALL acknowledge a Slack message event only after it receives a def
 - **WHEN** the adapter receives a valid Server-owned durable-nudge result
 - **THEN** the adapter SHALL acknowledge the event without waiting for a second direct rejection post
 - **AND** the adapter SHALL rely on durable outbox delivery for the user-visible message
+
+### Requirement: Combined Server ingress and adapter coverage SHALL exercise ownership end to end
+The integration test harness SHALL send representative Slack events through the real Server ingress path and the real Node adapter event handler together. Shared JSON fixtures or isolated unit tests SHALL not be treated as a substitute for this boundary test.
+
+#### Scenario: Durable Server ownership crosses the ingress and adapter boundary once
+- **WHEN** the harness sends a blocked DM, channel-root, or unbound-thread event through Server ingress and the real adapter handler
+- **THEN** Server SHALL commit one durable nudge and return `responseOwner: server`
+- **AND** the adapter SHALL acknowledge without a direct rejection post
+- **AND** the normal outbox delivery path SHALL produce one user-visible message with no duplicate direct post
+
+#### Scenario: Adapter-owned fallback crosses the ingress and adapter boundary once
+- **WHEN** the harness sends a capacity/backpressure event for which Server creates no durable intent through Server ingress and the real adapter handler
+- **THEN** Server SHALL return `responseOwner: adapter`
+- **AND** the adapter SHALL make exactly one direct post in the originating context and acknowledge only after it succeeds
+- **AND** no durable nudge row or competing Server-owned delivery SHALL be created
