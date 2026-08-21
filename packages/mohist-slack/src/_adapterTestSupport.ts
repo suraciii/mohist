@@ -86,12 +86,18 @@ export class FakeTransport implements AdapterTransport {
   readonly leases: SlackAdapterTarget[] = []
   readonly envelopes: SlackEnvelope[] = []
   readonly interactions: SlackInteractionEnvelope[] = []
-  readonly acks: Array<{ ref: SlackAdapterTarget; id: string; outcome: string }> = []
+  readonly acks: Array<{
+    ref: SlackAdapterTarget
+    id: string
+    outcome: string
+    providerMessageIdentity?: { conversationId: string; messageTs: string }
+  }> = []
   readonly hellos: Array<{ ref: SlackAdapterTarget; leaseId: string; appId: string }> = []
   readonly deliveries: Delivery[] = [
     { id: 'delivery-1', conversationId: 'D1', threadTs: null, payloadJson: JSON.stringify({ text: 'accepted' }) },
   ]
   readonly uncertainDeliveries: Delivery[] = []
+  retryDelivery?: Delivery
   connections: SlackAdapterTarget[] = []
   nextLeases: Array<AdapterLease | null> = []
   nextRenewals: Array<LeaseRenewal | null> = []
@@ -166,6 +172,10 @@ export class FakeTransport implements AdapterTransport {
       outcome: ack.outcome,
       ...(ack.providerMessageIdentity ? { providerMessageIdentity: ack.providerMessageIdentity } : {}),
     })
+    if (ack.outcome === 'retry' && this.retryDelivery) {
+      this.deliveries.unshift(this.retryDelivery)
+      this.retryDelivery = undefined
+    }
   }
 }
 
@@ -192,6 +202,10 @@ export class FakeWeb implements SlackWebClient {
     []
   readonly uploaded: Array<Record<string, unknown>> = []
   nextResponses: Array<{ ok?: boolean; error?: string }> = []
+  historyMessages: Array<{ ts?: string; client_msg_id?: string; text?: string }> = []
+  historyAvailable = false
+  throwAfterPost = false
+  nextMessageTs = '200.001'
   nextUploadResponses: Array<{
     ok?: boolean
     error?: string
@@ -216,6 +230,10 @@ export class FakeWeb implements SlackWebClient {
       blocks?: readonly Record<string, unknown>[]
     }) => {
       this.posted.push(input)
+      if (this.throwAfterPost) {
+        this.historyMessages.push({ ts: this.nextMessageTs, client_msg_id: input.client_msg_id, text: input.text })
+        throw new Error('Slack response was lost after the provider accepted the post')
+      }
       const next = this.nextResponses.shift()
       return next ?? { ok: true }
     },
@@ -228,6 +246,11 @@ export class FakeWeb implements SlackWebClient {
       this.updated.push(input)
       return { ok: true, ts: input.ts }
     },
+  }
+  get conversations() {
+    return this.historyAvailable
+      ? { history: async () => ({ ok: true, messages: this.historyMessages }) }
+      : undefined
   }
   readonly filesUploadV2 = async (
     input:

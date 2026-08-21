@@ -45,8 +45,8 @@ not edited; the next self-review regenerates it.
 
 - Added explicit `responseOwner` values (`none`, `server`, `adapter`) to the Node
   ingress model and Go `IngressResult` contract.
-- Transport decoding is strict for present ownership values and malformed
-  result fields. The only legacy omission fallback is `kind: backpressured` ->
+- Transport decoding is strict for present ownership values and malformed result
+  fields. The only legacy omission fallback is `kind: backpressured` ->
   adapter ownership; omitted ownership on other kinds becomes `none` and never
   authorizes a direct post.
 - The Node handler branches only on ownership, preserves `thread_ts`, and
@@ -73,3 +73,22 @@ not edited; the next self-review regenerates it.
   backpressure ownership, stable outbox identity, safe-message assertions, and
   diagnostic executability projection. Focused unit and DM spec suites pass;
   Channel integration remains for T-003.
+
+## T-004 implementation notes
+
+- Added `SlackOutboxStore.FindByDispatchRefAsync` and made `SlackAdmissionService`
+  recover an existing admission nudge before readiness/backpressure evaluation;
+  redelivery therefore retains Server ownership and the original durable row.
+- Admission nudge payloads retain their original internal response kind while
+  `clientMessageId` remains the stable dispatch reference.
+- Added server reliability coverage for the exact row/dispatch/client identity
+  across claim, `delivery_uncertain`, uncertain claim, retry, and delivered.
+  Added Node delivery tests for lost provider acknowledgments (reconcile by
+  `client_msg_id` with no second post) and absence-confirmed retry of the same
+  delivery. Added a real Node HTTP-transport/adapter boundary harness for
+  Server-owned and adapter-owned outcomes, plus shared representative ownership
+  JSON fixtures consumed by Node, Server unit tests, and Server spec tests.
+- Focused Server unit tests pass (3717), focused Server specs pass (3010), and
+  Node adapter tests pass (85). The Go toolchain is not installed, so Go tests
+  remain unavailable. No schema migration was added; Disabled claim/discard
+  semantics remain unchanged.

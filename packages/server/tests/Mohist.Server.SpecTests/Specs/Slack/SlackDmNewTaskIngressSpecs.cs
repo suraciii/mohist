@@ -205,6 +205,49 @@ public sealed class SlackDmNewTaskIngressSpecs : IAsyncLifetime
     }
 
     [Fact]
+    public async Task Redelivery_after_uncertain_delivery_keeps_the_original_server_owned_nudge()
+    {
+        var connection = await CreateConnectionAsync();
+        await SetAgentConfigAsync(connection, null);
+
+        var first = await PostIngressAsync(
+            connection,
+            "D-DM-UNCERTAIN",
+            "1710000000.001050",
+            "please do this");
+        Assert.Equal("server", first.GetProperty("responseOwner").GetString());
+
+        await using (var scope = _fixture.Services.CreateAsyncScope())
+        {
+            var outbox = scope.ServiceProvider.GetRequiredService<SlackOutboxStore>();
+            var row = Assert.Single(await GetAdmissionNudgesAsync(connection, "D-DM-UNCERTAIN"));
+            var claimed = await outbox.ClaimAsync(connection.ProjectId, connection.Id, SlackRuntimeLeaseTestSupport.AdapterId);
+            Assert.Equal(row.Id, claimed?.Id);
+            await outbox.MarkDeliveryUncertainAsync(
+                connection.ProjectId,
+                row.Id,
+                "provider response lost",
+                SlackRuntimeLeaseTestSupport.AdapterId);
+        }
+
+        var replay = await PostIngressAsync(
+            connection,
+            "D-DM-UNCERTAIN",
+            "1710000000.001050",
+            "please do this");
+        Assert.Equal("server", replay.GetProperty("responseOwner").GetString());
+        Assert.Equal("agent_not_configured", replay.GetProperty("kind").GetString());
+
+        var rows = await GetAdmissionNudgesAsync(connection, "D-DM-UNCERTAIN");
+        var original = Assert.Single(rows);
+        Assert.Equal(SlackOutboxStates.DeliveryUncertain, original.State);
+        Assert.Equal(SlackAdmissionService.DispatchRef(
+            connection,
+            new SlackMessageIdentity("T123", "D-DM-UNCERTAIN", "1710000000.001050")), original.DispatchRef);
+        Assert.Equal(original.DispatchRef, SlackDeliveryPayload.Parse(original.PayloadJson).ClientMessageId);
+    }
+
+    [Fact]
     public async Task Explicit_new_task_is_gated_before_the_existing_dm_session_mapping()
     {
         var connection = await CreateConnectionAsync();

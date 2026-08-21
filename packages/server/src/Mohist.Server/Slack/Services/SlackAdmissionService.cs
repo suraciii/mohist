@@ -54,6 +54,33 @@ public sealed class SlackAdmissionService : IScopedService
         _setupVerifier = setupVerifier;
     }
 
+    public async Task<SlackAdmissionDecision?> FindExistingNudgeAsync(
+        string projectId,
+        AgentConnection connection,
+        SlackMessageIdentity identity,
+        CancellationToken ct = default)
+    {
+        var existing = await _outbox.FindByDispatchRefAsync(
+            projectId,
+            connection.Id,
+            SlackOutboxKinds.UserAction,
+            DispatchRef(connection, identity),
+            ct);
+        if (existing is null)
+            return null;
+
+        // Once the durable row exists, it is the response owner even if
+        // readiness or Connection health changed before redelivery. Do
+        // not turn a lost ingress response into a second launch or a
+        // direct adapter post.
+        var existingPayload = SlackDeliveryPayload.Parse(existing.PayloadJson);
+        return new SlackAdmissionDecision(
+            Admitted: false,
+            Kind: existingPayload.ResponseKind ?? "admission_nudge",
+            Reason: existingPayload.Text ?? existingPayload.FallbackText,
+            ResponseOwner: SlackIngressResponseOwners.Server);
+    }
+
     public async Task<SlackAdmissionDecision> AdmitNewWorkAsync(
         string projectId,
         AgentConnection connection,
@@ -62,6 +89,10 @@ public sealed class SlackAdmissionService : IScopedService
         string? threadTs,
         CancellationToken ct = default)
     {
+        var existing = await FindExistingNudgeAsync(projectId, connection, identity, ct);
+        if (existing is not null)
+            return existing;
+
         var executability = await _readiness.GetAsync(projectId, agent, ct);
 
         // Backpressure is the one deliberately non-durable response path.
@@ -142,7 +173,8 @@ public sealed class SlackAdmissionService : IScopedService
                 JsonSerializer.Serialize(new SlackDeliveryPayload(
                     SlackDeliveryOperations.PostMessage,
                     text,
-                    ClientMessageId: dispatchRef)),
+                    ClientMessageId: dispatchRef,
+                    ResponseKind: kind)),
                 threadTs), ct);
         }
         catch (SlackOutboxCapacityExceededException)

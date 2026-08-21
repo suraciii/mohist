@@ -534,6 +534,23 @@ public static partial class SlackConnectionRoutes
             if (managedAdmission.IsManaged)
                 return ApiResults.Ok(new { kind = "ignored" });
 
+            var existingNudge = await outbox.FindByDispatchRefAsync(
+                projectId,
+                connection.Id,
+                SlackOutboxKinds.UserAction,
+                SlackAdmissionService.DispatchRef(connection, identity),
+                ct);
+            if (existingNudge is not null)
+            {
+                var payload = SlackDeliveryPayload.Parse(existingNudge.PayloadJson);
+                return ApiResults.Ok(new
+                {
+                    kind = payload.ResponseKind ?? "admission_nudge",
+                    reason = payload.Text ?? payload.FallbackText,
+                    responseOwner = SlackIngressResponseOwners.Server,
+                });
+            }
+
             if (connection.DesiredState == DesiredStateKind.Disabled)
             {
                 try
@@ -1263,17 +1280,25 @@ public static partial class SlackConnectionRoutes
             return ApiResults.Ok(new { kind = "rejected", reason });
         }
 
-        var agent = await req.Agents.GetByIdAsync(projectId, connection.AgentId);
-        if (agent is null)
-            return ApiResults.Fail("The Agent bound to this Connection no longer exists.", 409, "agent_not_found");
-
+        var admissionService = req.Services.GetRequiredService<SlackAdmissionService>();
         var currentSessionId = isNewTask
             ? null
             : await req.DmMapping.GetCurrentSessionIdAsync(projectId, connection.Id, body.ConversationId, ct);
         var isNewWork = isNewTask || string.IsNullOrWhiteSpace(currentSessionId);
         if (isNewWork)
         {
-            var admission = await req.Services.GetRequiredService<SlackAdmissionService>()
+            var existingNudge = await admissionService.FindExistingNudgeAsync(projectId, connection, req.Identity, ct);
+            if (existingNudge is not null)
+                return AdmissionResponse(existingNudge);
+        }
+
+        var agent = await req.Agents.GetByIdAsync(projectId, connection.AgentId);
+        if (agent is null)
+            return ApiResults.Fail("The Agent bound to this Connection no longer exists.", 409, "agent_not_found");
+
+        if (isNewWork)
+        {
+            var admission = await admissionService
                 .AdmitNewWorkAsync(projectId, connection, agent, req.Identity, body.ThreadTs, ct);
             if (!admission.Admitted)
                 return ApiResults.Ok(new
