@@ -16,19 +16,22 @@ public sealed class AgentSessionFollowupDispatcher : IScopedService
     private readonly IFollowupDeliveryDispatcher _delivery;
     private readonly ManagerExecutionCapabilityIssuer _managerCredentials;
     private readonly ManagerActorAccessDecider _managerActors;
+    private readonly TimeProvider _timeProvider;
 
     public AgentSessionFollowupDispatcher(
         AgentSessionQuerier sessions,
         IGrainFactory grains,
         IFollowupDeliveryDispatcher delivery,
         ManagerExecutionCapabilityIssuer managerCredentials,
-        ManagerActorAccessDecider managerActors)
+        ManagerActorAccessDecider managerActors,
+        TimeProvider timeProvider)
     {
         _sessions = sessions;
         _grains = grains;
         _delivery = delivery;
         _managerCredentials = managerCredentials;
         _managerActors = managerActors;
+        _timeProvider = timeProvider;
     }
 
     public async Task DispatchNextAsync(string projectId, string sessionId, CancellationToken ct)
@@ -142,7 +145,7 @@ public sealed class AgentSessionFollowupDispatcher : IScopedService
         var grant = _managerCredentials.Issue(new ManagerExecutionIssueRequest(
             ExecutionId: $"manager:{target.SessionId}:{dispatch.OperationId}",
             Origin: origin,
-            Now: DateTimeOffset.UtcNow,
+            Now: _timeProvider.GetUtcNow(),
             Lifetime: ManagerExecutionCapabilityIssuer.DefaultLifetime));
         return new ManagerGrantResult(true, grant);
     }
