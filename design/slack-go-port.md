@@ -60,8 +60,8 @@ Unchanged. Restated here as the port's test oracle.
 
 Every response body is a JSON object `{success, code?, data?}`. A response is
 successful only when `success === true`; `data` may be `null`. The code
-`lease_stale_or_expired` maps to a dedicated stale-lease error that drops the
-runtime; it is never retried inline.
+`lease_stale_or_expired` surfaces as an error the adapter can identify by its
+code; the adapter drops the runtime on it and never retries inline.
 
 Requests carry `Authorization: Bearer <operator token>` and
 `x-mohist-operator-id`. The base URL must be loopback (`localhost`, `[::1]`,
@@ -184,26 +184,32 @@ Socket reconnects back off exponentially from 1 s, doubling to a 30 s cap.
 SIGINT and SIGTERM abort the process context, stop all runtimes, and flush
 logs.
 
-Logs are logfmt on stderr: fixed prefix fields `time` (RFC 3339), `level`
-(INFO or ERROR), `msg`, `service=slack`, `component`, then sorted call-site
-fields with reserved keys dropped and logfmt quoting applied. The Go port
-implements this as a custom `log/slog` handler so line format stays stable
-for existing log consumers.
+Logging uses the standard `log/slog` facade on stderr. Handler selection at
+startup: an interactive terminal gets `lmittmann/tint` colored output; any
+captured stream (journald, scheduled-task log files, containers) gets
+`slog.TextHandler`; `MOHIST_LOG_FORMAT=json` forces `slog.JSONHandler` for
+log collectors. Call sites never reference a logging library, so the handler
+can be swapped for the OpenTelemetry slog bridge without touching them.
+Component names travel as a `component` attribute; error fields carrying
+Slack tokens have `xapp`, `xoxb`, `xoxp`, and `xoxe` shapes redacted before
+emission.
 
 ## Go Mapping
 
-Module layout — flat on purpose at this size:
+Module layout — flat on purpose at this size. Library code lives in the
+module root package `mohistslack`; the binary arrives as `cmd/mohist-slack`
+when the process entry lands:
 
 ```
 text literal
 packages/go/mohist-slack/
   go.mod          module github.com/suraciii/mohist/packages/go/mohist-slack
-  main.go         env config, signal handling, assembly
   serverapi.go    envelope client, nine routes, loopback guard
   adapter.go      runtime map, generation fencing, drain loops
   delivery.go     payload operations, fallback, reconciliation
   events.go       message and interaction normalization
-  logging.go      logfmt slog handler, redaction
+  logging.go      slog assembly, tint/text/json handlers, redaction
+  cmd/mohist-slack/main.go   env config, signal handling, assembly (Batch 4)
 ```
 
 Library choices: `slack-go/slack` (socketmode and api packages) for Slack
@@ -238,7 +244,11 @@ Concurrency mapping:
    proceed. Fan-out must not use an errgroup, whose cancellation would poison
    siblings.
 5. Redaction. The token-shape redaction regex ports verbatim into the log
-   handler path.
+   path.
+6. Log format. The Node implementation hand-rolls a logfmt line format; the
+   port uses the standard slog facade with a tinted terminal handler, plain
+   text for captured output, and JSON on request. Line formats intentionally
+   diverge.
 
 ## Compatibility Commitments
 
@@ -247,7 +257,8 @@ Concurrency mapping:
   completes the Socket hello automatically after credentials are staged.
 - Service names unchanged; installers swap only the ExecStart / launcher
   command from `node …/dist/cli.js` to the Go binary.
-- Log line format preserved; log consumers keep working.
+- Log output stays on stderr as key=value or JSON lines; the exact line
+  format intentionally diverges from the Node implementation.
 
 ## Test Plan
 
@@ -258,7 +269,7 @@ Concurrency mapping:
 | adapter-delivery.test.ts | delivery_test.go | every operation's success, degradation, and reconciliation branches |
 | adapter-events.test.ts | events_test.go | required-identity failures, string-wrapped interactive payloads |
 | cli.test.ts | main_test.go | env resolution, token precedence, backoff sequence |
-| logger.test.ts | logging_test.go | logfmt golden lines, redaction |
+| logger.test.ts | logging_test.go | handler selection, per-format golden lines, redaction |
 
 Time discipline follows the repository rules: injected clocks and tickers,
 no wall-clock polling assertions. Before cutover, one end-to-end pass runs
@@ -270,7 +281,7 @@ reaction paths.
 | Batch | Content | Exit criterion |
 | --- | --- | --- |
 | 0 | this specification | merged |
-| 1 | serverapi layer | contract tests green against fixtures |
+| 1 | serverapi layer | contract tests green against fixtures; Go CI job (gofmt, vet, test) wired |
 | 2 | adapter core | fake-injected state-machine tests green |
 | 3 | Slack integration incl. proxy ping verification | fake-socket behavior pinned; open item resolved |
 | 4 | process entry | real-Slack end-to-end pass |
