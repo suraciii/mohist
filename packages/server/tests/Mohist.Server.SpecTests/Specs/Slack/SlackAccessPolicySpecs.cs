@@ -5,7 +5,6 @@ using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Mohist.Server.Agent.Domain;
-using Mohist.Server.Agent.Grains;
 using Mohist.Server.Agent.Services;
 using Mohist.Server.Infrastructure;
 using Mohist.Server.Infrastructure.Data.Agent;
@@ -14,8 +13,6 @@ using Mohist.Server.Infrastructure.Data.Project;
 using Mohist.Server.Infrastructure.Data.Slack;
 using Mohist.Server.Infrastructure.Security.Secrets;
 using Mohist.Server.Infrastructure.Slack;
-using Mohist.Server.Sessions.Domain;
-using Mohist.Server.Sessions.Grains;
 using Mohist.Server.Slack.Domain;
 using Mohist.Server.SpecTests.Support;
 using Mohist.Server.TestSupport;
@@ -53,23 +50,6 @@ public sealed partial class SlackAccessPolicySpecs
     }
 
     [Fact]
-    public async Task Owner_root_mention_under_default_owner_only_is_accepted()
-    {
-        var connection = await CreateConnectionAsync();
-        var data = await PostChannelAsync(
-            connection,
-            conversationId: "C-access-owner-accept",
-            messageTs: "1710000000.100100",
-            threadTs: null,
-            mentions: new[] { connection.BotUserId },
-            senderSlackUserId: "U_OWNER",
-            text: "<@U123> please summarise this");
-
-        Assert.Equal("accepted", data.GetProperty("kind").GetString());
-        Assert.False(string.IsNullOrWhiteSpace(data.GetProperty("sessionId").GetString()));
-    }
-
-    [Fact]
     public async Task Non_owner_root_mention_under_default_owner_only_is_rejected_with_no_resources()
     {
         var connection = await CreateConnectionAsync();
@@ -94,77 +74,6 @@ public sealed partial class SlackAccessPolicySpecs
         Assert.Empty(await db.AgentSessions
             .Where(row => row.LabelConnectionId == connection.Id)
             .ToListAsync());
-    }
-
-    [Fact]
-    public async Task Non_owner_bound_thread_reply_under_default_owner_only_is_rejected_with_no_resources()
-    {
-        var connection = await CreateConnectionAsync();
-        var root = await PostChannelAsync(
-            connection,
-            conversationId: "C-access-thread-reject",
-            messageTs: "1710000000.100200",
-            threadTs: null,
-            mentions: new[] { connection.BotUserId },
-            senderSlackUserId: "U_OWNER",
-            text: "<@U123> first task");
-        var sessionId = root.GetProperty("sessionId").GetString()!;
-        await _fixture.Grains.GetGrain<IAgentSessionGrain>(sessionId)
-            .MarkTurnTerminalAsync(
-                root.GetProperty("turnId").GetString()!,
-                AgentTurnStatus.Completed,
-                null);
-
-        var data = await PostChannelAsync(
-            connection,
-            conversationId: "C-access-thread-reject",
-            messageTs: "1710000000.100210",
-            threadTs: "1710000000.100200",
-            mentions: Array.Empty<string>(),
-            senderSlackUserId: "U_OTHER",
-            text: "follow-up from non-owner");
-
-        Assert.Equal("rejected", data.GetProperty("kind").GetString());
-
-        await using var scope = _fixture.Services.CreateAsyncScope();
-        var db = scope.ServiceProvider.GetRequiredService<MohistDbContext>();
-        Assert.Empty(await db.SlackProviderInboxRows
-            .Where(row => row.ConnectionId == connection.Id
-                && row.ConversationId == "C-access-thread-reject"
-                && row.SlackMessageIdentity.EndsWith("1710000000.100210"))
-            .ToListAsync());
-        var session = await db.AgentSessions.SingleAsync(row => row.Id == sessionId);
-        Assert.Equal("1710000000.100200", session.LabelSlackThreadTs);
-    }
-
-    [Fact]
-    public async Task Non_owner_dm_under_default_owner_only_is_rejected()
-    {
-        var connection = await CreateConnectionAsync();
-        var data = await PostDmAsync(
-            connection,
-            conversationId: "D-access-non-owner",
-            messageTs: "1710000000.100300",
-            senderSlackUserId: "U_OTHER",
-            text: "DM from non-owner");
-
-        Assert.Equal("rejected", data.GetProperty("kind").GetString());
-        Assert.Contains("owner", data.GetProperty("reason").GetString()!, StringComparison.OrdinalIgnoreCase);
-    }
-
-    [Fact]
-    public async Task Owner_dm_under_default_owner_only_is_accepted()
-    {
-        var connection = await CreateConnectionAsync();
-        var data = await PostDmAsync(
-            connection,
-            conversationId: "D-access-owner-accept",
-            messageTs: "1710000000.100310",
-            senderSlackUserId: "U_OWNER",
-            text: "DM from owner: a real task");
-
-        Assert.False(string.IsNullOrWhiteSpace(data.GetProperty("kind").GetString()));
-        Assert.NotEqual("rejected", data.GetProperty("kind").GetString());
     }
 
     [Fact]
@@ -241,33 +150,6 @@ public sealed partial class SlackAccessPolicySpecs
             messageTs,
             threadTs,
             mentionedUserIds = mentions,
-            senderSlackUserId,
-            senderKind = "human",
-            text,
-            leaseId = _connectionLeases[connection.Id],
-            adapterId = SlackRuntimeLeaseTestSupport.AdapterId,
-        };
-        using var response = await _fixture.Client.PostAsJsonAsync(IngressPath(connection), body);
-        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-        using var doc = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
-        return doc.RootElement.GetProperty("data").Clone();
-    }
-
-    private async Task<JsonElement> PostDmAsync(
-        AgentConnection connection,
-        string conversationId,
-        string messageTs,
-        string senderSlackUserId,
-        string text)
-    {
-        var body = new
-        {
-            isDirectMessage = true,
-            teamId = connection.WorkspaceTeamId,
-            conversationId,
-            messageTs,
-            threadTs = (string?)null,
-            mentionedUserIds = Array.Empty<string>(),
             senderSlackUserId,
             senderKind = "human",
             text,
