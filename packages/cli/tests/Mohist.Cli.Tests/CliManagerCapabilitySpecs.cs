@@ -1,3 +1,4 @@
+using System.Text.Json;
 using System.Text.Json.Nodes;
 using EnvironmentAbstractions.TestHelpers;
 using Mohist.Cli.Tests.Support;
@@ -53,6 +54,39 @@ public sealed class CliManagerCapabilitySpecs
         Assert.Equal("1", Assert.Single(request.Headers[ManagerCapabilityCatalog.ManagerModeHeader]));
         Assert.Equal("D_1", JsonNode.Parse(request.Body!)!["conversationId"]!.GetValue<string>());
         Assert.Equal("1710000000.000001", JsonNode.Parse(request.Body!)!["threadTs"]!.GetValue<string>());
+    }
+
+    [Fact]
+    public async Task Manager_mode_management_bridge_posts_the_exact_operation_envelope()
+    {
+        var (handler, http, output, error, fs, executor) = CliTestFactory.Create((request, _) =>
+            Task.FromResult(RecordingHttpHandler.Json(new
+            {
+                success = true,
+                data = new
+                {
+                    succeeded = true,
+                    outcome = "confirmed_state",
+                    code = "connection_disabled",
+                    state = new { desiredState = "disabled" },
+                },
+            })));
+
+        var requestJson = "{\"operation\":\"disable\",\"args\":{\"projectId\":\"proj_abc\",\"connectionId\":\"connection_1\"}}";
+        var exit = await MohistCliCommands.RunAsync(
+            http,
+            ["--manager", "slack", "management", requestJson],
+            output, error, fs, executor, OperatorEnv());
+
+        Assert.Equal(0, exit);
+        var request = Assert.Single(handler.Requests);
+        Assert.Equal(HttpMethod.Post, request.Method);
+        Assert.Equal("/api/slack-manager/management", request.RequestUri?.PathAndQuery);
+        Assert.Equal("1", Assert.Single(request.Headers[ManagerCapabilityCatalog.ManagerModeHeader]));
+        Assert.Equal(
+            requestJson,
+            JsonNode.Parse(request.Body!)!.ToJsonString(new JsonSerializerOptions { WriteIndented = false }));
+        Assert.Contains("connection_disabled", output.ToString(), StringComparison.Ordinal);
     }
 
     [Fact]
