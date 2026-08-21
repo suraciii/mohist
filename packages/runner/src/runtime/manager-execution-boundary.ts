@@ -338,6 +338,7 @@ socket.end(JSON.stringify({ kind, args }))
   }
 
   private async listen(server: Server, path: string): Promise<void> {
+    await rm(path, { force: true }).catch(() => undefined)
     await new Promise<void>((resolve, reject) => {
       server.once('error', reject)
       server.listen(path, () => {

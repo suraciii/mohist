@@ -104,14 +104,7 @@ export class ServerConnection {
     return this.managerDeploymentEpoch
   }
 
-  /**
-   * Polls the server for dispatches. The body carries the process's full level
-   * state (`inFlight` + `awaitingAck` work keys) so the server can reconcile
-   * (`desired − reported`): repair lost dispatches and serve new claims against
-   * spare capacity. The response is `{ dispatches: [...] }` carrying zero or
-   * more work items; an empty list (HTTP 204 or empty array) means nothing to
-   * do this round. Multi-dispatch replaces the old one-dispatch-per-poll limit.
-   */
+  /** Polls for work and retains the response-only grant view out of work items. */
   async poll(
     signal: AbortSignal,
     report: {

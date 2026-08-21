@@ -86,6 +86,11 @@ import { type AwaitingAckEntry, type InFlightEntry, type ShutdownWorkState } fro
 import { ManagerExecutionBoundary } from './manager-execution-boundary.js'
 import { ManagerExecutionRegistry } from './manager-execution-registry.js'
 import {
+  invalidateManagerExecutions,
+  observeManagerDeploymentEpoch,
+  revokeManagerExecution,
+} from './manager-execution-lifecycle.js'
+import {
   executeAndTransition,
   markResultPersistencePending,
   nextReconciliationInterval,
@@ -363,11 +368,6 @@ export class RunnerHost {
     })
   }
 
-  /**
-   * Lightweight projection of the host's process-lifetime state for the
-   * helpers under {@link ./host-execution.ts}. The host passes this object
-   * by reference; the helpers see only the surface they were designed for.
-   */
   private get executionContext(): HostExecutionContext {
     return {
       options: this.options,
@@ -476,11 +476,6 @@ export class RunnerHost {
         this.terminalTaskLogDeliveryInFlight,
         signal,
       )
-    // Convergence on every reconnect: the control WebSocket transport just
-    // recovered, which is the cheapest moment to ask the server for the
-    // truth about every active registry entry. Push may also have queued
-    // events during the disconnect window; this catch-all reconciles
-    // whatever push did not cover.
     if (signal) {
       void this.cleanup.runConvergenceOnce(signal)
       void this.cleanup.runBindingConvergenceOnce(signal)
@@ -650,10 +645,6 @@ export class RunnerHost {
   }
 
   private async runWorkerPool(signal: AbortSignal) {
-    // The reported set (inFlight ∪ awaitingAck) is process-lifetime state
-    // declared on the host instance, so it survives poll exceptions. Polling
-    // and report retries share this one process-critical reconciliation loop;
-    // no sibling lifetime task can prevent a failed poll from being retried.
     while (!signal.aborted) {
       void retryPendingTerminalTaskLogs(
         createHostTaskLogDeps(this.connection, this.terminalTaskLogDelivery, this.options),
@@ -836,9 +827,6 @@ export class RunnerHost {
       )
     }
 
-    // Shutdown is deliberately bounded. The handoff identifies an update
-    // operation before runtime stop is attempted; a missing or unavailable
-    // handoff leaves the started fences untouched.
     await this.hostShutdown.shutdownInFlight()
     await withTimeout(Promise.allSettled([...this.inFlight.values()].map((e) => e.done)), this.shutdownStopBudgetMs)
   }
@@ -878,40 +866,27 @@ export class RunnerHost {
   }
 
   private async observeManagerDeploymentEpoch(): Promise<void> {
-    const epoch = this.connection.deploymentEpoch
-    if (!epoch) return
-    if (this.observedManagerDeploymentEpoch && epoch !== this.observedManagerDeploymentEpoch)
-      await this.invalidateManagerExecutions()
-    this.observedManagerDeploymentEpoch = epoch
+    this.observedManagerDeploymentEpoch = await observeManagerDeploymentEpoch(
+      this.observedManagerDeploymentEpoch,
+      this.connection.deploymentEpoch,
+      () => this.invalidateManagerExecutions(),
+    )
   }
 
   private async revokeManagerExecution(executionId: string): Promise<void> {
-    if (!executionId) return
     try {
-      await this.connection.revokeManagerExecution(executionId, new AbortController().signal)
+      await revokeManagerExecution(this.connection, executionId, new AbortController().signal)
     } catch (error) {
       log.warn('Manager execution revocation could not be delivered', { executionId, exception: error })
     }
   }
 
   private async invalidateManagerExecutions(): Promise<void> {
-    for (const entry of this.inFlight.values()) {
-      if (entry.work.projectId !== '__mohist_slack_manager__') continue
-      entry.managerInvalidated = true
-      entry.controller.abort(new Error('manager deployment epoch changed'))
-    }
     const boundaries = [...this.managerExecutions.values()]
     this.managerExecutions.clear()
-    await this.managerExecutionRegistry.disposeAll()
-    await Promise.allSettled(boundaries.map((boundary) => boundary.dispose()))
+    await invalidateManagerExecutions(this.inFlight.values(), boundaries, this.managerExecutionRegistry)
   }
 
-  /**
-   * The process's full level state, sent in every poll body so the server
-   * can reconcile (Batch 2). In Batch 1 the server ignores the body; the
-   * value of sending it now is that the reported set is correct the moment
-   * the server starts consuming it, with no second runner-side change.
-   */
   private pollReport(): ReturnType<typeof buildRunnerPollReport> {
     return buildRunnerPollReport({
       durableStarted: this.workResultJournal.ready()
