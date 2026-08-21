@@ -260,10 +260,15 @@ public sealed class RunnerPollRecoveryStateApiSpecs
                 workflowRunId,
                 new RecoveryDefinition(1, []),
                 uses: "mohist/opencode");
-            await runner.RegisterAsync(new RunnerInfo(runnerId, ["spec/*"], "test-host", projectId));
+            await runner.RegisterAsync(new RunnerInfo(runnerId, ["mohist/opencode"], "test-host", projectId));
             var fresh = await PollAsync(runnerId);
-            var taskRunId = fresh.GetProperty("taskRunId").GetString()!;
-            var workId = fresh.GetProperty("workId").GetString()!;
+            Assert.Equal(workflowRunId, fresh.GetProperty("workflowRunId").GetString());
+            Assert.True(fresh.TryGetProperty("taskRunId", out var taskRun));
+            Assert.True(fresh.TryGetProperty("workId", out var work));
+            var taskRunId = taskRun.GetString()!;
+            var workId = work.GetString()!;
+            Assert.False(string.IsNullOrWhiteSpace(taskRunId));
+            Assert.False(string.IsNullOrWhiteSpace(workId));
             var binding = new AgentExecutionBinding(
                 taskRunId,
                 workId,
