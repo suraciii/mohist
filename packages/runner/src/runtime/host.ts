@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto'
-import type { RunnerOptions, RunnerRegistration, RuntimeReadinessWitness } from '../core/types.js'
+import type { RunnerOptions, RunnerRegistration } from '../core/types.js'
 import { ServerConnection } from '../server/connection.js'
 import { RunnerControlWebSocketClient } from '../server/runner-control-websocket.js'
 import { createRunnerControlHandlers } from '../server/runner-control-handlers.js'
@@ -25,7 +25,7 @@ import { WorkExecutor } from './executor.js'
 import { AgentJobExecutor } from './agent-job-executor.js'
 import { TaskLogCollector } from './task-log.js'
 import { createHostCleanup } from './host-cleanup.js'
-import { executeWork, retryPendingTerminalTaskLogs, type HostTaskLogDeps } from './host-task-log.js'
+import { executeWork, retryPendingTerminalTaskLogs } from './host-task-log.js'
 import {
   AWAITING_ACK_RETRY_INTERVAL_MS,
   POLL_TIMEOUT_MS,
@@ -56,14 +56,26 @@ import {
 } from './recovery-receipt.js'
 import { RuntimeTurnRegistry } from './runtime-turn-registry.js'
 import { loadBuildInfo } from './build-info.js'
+export { getRunnerBuildGitHash } from './build-info.js'
 import type { DispatchWorkItem, PolledDispatch } from '../core/types.js'
 import type { WorkItemResult } from '../core/types.js'
 import { currentRunnerResources } from '../system/filesystem.js'
 import { WorkflowSessionTurnCoordinator } from './workflow-session-turn-coordinator.js'
 import { SkillResolver } from './skill-resolver.js'
 import { runnerLogger } from '../system/logger.js'
-import { type FollowupTarget, type FollowupTargetResolution, type SessionTarget } from '../server/session-target.js'
-import { isAgentRecoveryDispatch, usesOpenCode } from './host-helpers.js'
+import {
+  buildRunnerPollReport,
+  createHostTaskLogDeps,
+  currentCatalogRevision,
+  isAgentRecoveryDispatch,
+  isManagerExecutionWork,
+  isOpenCodeReadyForClaim as isOpenCodeReadyForClaimForRuntime,
+  resolveFollowupTarget,
+  runtimeReadinessWitnesses,
+  openCodeOwners as openCodeOwnersForRuntime,
+  syncOpenCodeWorkOwners as syncOpenCodeWorkOwnersForRuntime,
+  usesOpenCode,
+} from './host-helpers.js'
 import { resolveWorkspaceQuery } from './workspace-query.js'
 import { createSessionCommandRouter } from '../server/command-runtime.js'
 import { reconcileStartedDispatch, type HostRecoveryContext } from './host-recovery.js'
@@ -107,19 +119,6 @@ export interface RunnerHostDependencies {
  * `workKey` convention.
  */
 const workKey = journalWorkKey
-
-function isManagerExecutionWork(work: Pick<DispatchWorkItem, 'projectId'>): boolean {
-  return work.projectId === '__mohist_slack_manager__'
-}
-
-/**
- * Resolves the runner's build git hash from the on-disk build manifest.
- * Returns `null` when the manifest is missing or unreadable (treated as
- * unknown-identity, non-fatal).
- */
-export function getRunnerBuildGitHash(): string | null {
-  return loadBuildInfo().gitHash
-}
 
 export class RunnerHost {
   private readonly connection: ServerConnection
@@ -284,7 +283,7 @@ export class RunnerHost {
             removalFence: () => this.openCodeRuntime,
           },
           followup: {
-            followupTargetResolver: (target) => this.resolveFollowupTarget(target),
+            followupTargetResolver: (target) => resolveFollowupTarget(this.options, target),
             agentSessionRuntimeEventOutbox: this.agentSessionRuntimeEventOutbox,
             openCodeRuntime: () => this.openCodeRuntime,
             piRuntime: () => this.piRuntime,
@@ -296,7 +295,7 @@ export class RunnerHost {
             strictExecutionSourceValidation: options.strictExecutionSourceValidation === true,
           },
           cancel: {
-            followupTargetResolver: (target) => this.resolveFollowupTarget(target),
+            followupTargetResolver: (target) => resolveFollowupTarget(this.options, target),
             openCodeRuntime: () => this.openCodeRuntime,
             piRuntime: () => this.piRuntime,
             agentSessionRuntimeEventOutbox: this.agentSessionRuntimeEventOutbox,
@@ -364,7 +363,7 @@ export class RunnerHost {
       options: this.options,
       connection: this.connection,
       receiptId: this.receiptId,
-      taskLogDeps: () => this.taskLogDepsForExecution(),
+      taskLogDeps: () => createHostTaskLogDeps(this.connection, this.terminalTaskLogDelivery, this.options),
       workExecutorRef: () => this.workExecutor,
       workResultJournal: this.workResultJournal,
       runtimeTurnRegistry: this.runtimeTurnRegistry,
@@ -375,7 +374,7 @@ export class RunnerHost {
       inFlight: this.inFlight,
       awaitingAck: this.awaitingAck,
       hostShutdown: this.hostShutdown,
-      currentCatalogRevision: (runtime) => this.currentCatalogRevision(runtime),
+      currentCatalogRevision: (runtime) => currentCatalogRevision(this.registrationState().runtimeCatalogs, runtime),
       managerExecutionFor: (key) => this.managerExecutions.get(key) ?? null,
       releaseManagerExecution: async (key) => {
         const boundary = this.managerExecutions.get(key)
@@ -384,42 +383,6 @@ export class RunnerHost {
         await boundary.dispose()
       },
     }
-  }
-
-  private currentCatalogRevision(runtime: string): string | null {
-    const normalized = runtime.trim().toLowerCase()
-    const catalogs = this.registrationState().runtimeCatalogs
-    if (!catalogs) return null
-    for (const [key, entry] of Object.entries(catalogs)) {
-      if (key.trim().toLowerCase() === normalized) return entry.capabilityRevision ?? null
-    }
-    return null
-  }
-
-  private taskLogDepsForExecution(): HostTaskLogDeps {
-    return {
-      connection: this.connection,
-      terminalTaskLogDelivery: this.terminalTaskLogDelivery,
-      options: this.options,
-    }
-  }
-
-  private resolveFollowupTarget(target: SessionTarget): FollowupTargetResolution {
-    if (this.options.projectId && this.options.projectId !== target.projectId) return null
-    const binding = target.binding ?? null
-    if (!binding) return null
-    const runtime = binding.runtime.toLowerCase()
-    if (runtime !== 'opencode' && runtime !== 'pi') return null
-    if (binding.runnerId !== this.options.runnerId) return null
-    if (!binding.runtimeSessionId) return null
-    if (!binding.workDir) return null
-    const resolved: FollowupTarget = {
-      runtimeSessionId: binding.runtimeSessionId,
-      workDir: binding.workDir,
-      projectId: target.projectId,
-      ...(target.kind === 'generic' && target.definition ? { definition: target.definition } : {}),
-    }
-    return resolved
   }
 
   async run(signal: AbortSignal) {
@@ -504,7 +467,11 @@ export class RunnerHost {
     void this.sendImmediateHeartbeat()
     const signal = this.activeSignal
     if (signal)
-      void retryPendingTerminalTaskLogs(this.taskLogDepsForExecution(), this.terminalTaskLogDeliveryInFlight, signal)
+      void retryPendingTerminalTaskLogs(
+        createHostTaskLogDeps(this.connection, this.terminalTaskLogDelivery, this.options),
+        this.terminalTaskLogDeliveryInFlight,
+        signal,
+      )
     // Convergence on every reconnect: the control WebSocket transport just
     // recovered, which is the cheapest moment to ask the server for the
     // truth about every active registry entry. Push may also have queued
@@ -674,7 +641,11 @@ export class RunnerHost {
     // and report retries share this one process-critical reconciliation loop;
     // no sibling lifetime task can prevent a failed poll from being retried.
     while (!signal.aborted) {
-      void retryPendingTerminalTaskLogs(this.taskLogDepsForExecution(), this.terminalTaskLogDeliveryInFlight, signal)
+      void retryPendingTerminalTaskLogs(
+        createHostTaskLogDeps(this.connection, this.terminalTaskLogDelivery, this.options),
+        this.terminalTaskLogDeliveryInFlight,
+        signal,
+      )
       await retryDueReports(this.executionContext)
 
       // Runtime readiness is sent as a claim-time witness. Polling must stay
@@ -710,7 +681,10 @@ export class RunnerHost {
       // becomes reportable until this retry restores its durable receipt.
       await retryPendingWorkResultPersistence(this.executionContext)
 
-      await this.prepareOpenCodeWork(works.map((item) => item.work), signal)
+      await this.prepareOpenCodeWork(
+        works.map((item) => item.work),
+        signal,
+      )
 
       // A single poll may return multiple dispatches (repair + new claims).
       // Execute each concurrently, skipping re-deliveries the process
@@ -846,17 +820,7 @@ export class RunnerHost {
   }
 
   private syncOpenCodeWorkOwners(): void {
-    const runtime = this.openCodeRuntime
-    if (!runtime) return
-    const owners = [
-      ...[...this.inFlight.values()]
-        .filter((entry) => usesOpenCode(entry.work) && !isManagerExecutionWork(entry.work))
-        .map((entry) => workKey(entry.work)),
-      ...[...this.awaitingAck.values()]
-        .filter((entry) => usesOpenCode(entry.work) && !isManagerExecutionWork(entry.work))
-        .map((entry) => workKey(entry.work)),
-    ]
-    runtime.setWorkOwners(owners)
+    syncOpenCodeWorkOwnersForRuntime(this.openCodeRuntime, this.inFlight.values(), this.awaitingAck.values())
   }
 
   private async prepareOpenCodeWork(works: readonly DispatchWorkItem[], signal: AbortSignal): Promise<void> {
@@ -865,22 +829,11 @@ export class RunnerHost {
       .filter((work) => usesOpenCode(work) && !isManagerExecutionWork(work) && !isAgentRecoveryDispatch(work))
       .map(workKey)
     if (!runtime || owners.length === 0) return
-    runtime.setWorkOwners([...this.openCodeOwners(), ...owners])
+    runtime.setWorkOwners([...openCodeOwnersForRuntime(this.inFlight.values(), this.awaitingAck.values()), ...owners])
     if (!runtime.ready()) {
       const started = await runtime.start(signal)
       if (!started.ok) log.error('opencode runtime could not be recreated for work', { reason: started.error.message })
     }
-  }
-
-  private openCodeOwners(): string[] {
-    return [
-      ...[...this.inFlight.values()]
-        .filter((entry) => usesOpenCode(entry.work) && !isManagerExecutionWork(entry.work))
-        .map((entry) => workKey(entry.work)),
-      ...[...this.awaitingAck.values()]
-        .filter((entry) => usesOpenCode(entry.work) && !isManagerExecutionWork(entry.work))
-        .map((entry) => workKey(entry.work)),
-    ]
   }
 
   private async pollOnce(signal: AbortSignal): Promise<PolledDispatch[]> {
@@ -894,11 +847,7 @@ export class RunnerHost {
       ).takeLastPolledDispatches
       const works = takeLast ? takeLast.call(this.connection, workItems) : workItems.map((work) => ({ work }))
       const epoch = this.connection.deploymentEpoch
-      if (
-        epoch &&
-        this.observedManagerDeploymentEpoch &&
-        epoch !== this.observedManagerDeploymentEpoch
-      ) {
+      if (epoch && this.observedManagerDeploymentEpoch && epoch !== this.observedManagerDeploymentEpoch) {
         await this.invalidateManagerExecutions()
       }
       if (epoch) this.observedManagerDeploymentEpoch = epoch
@@ -923,25 +872,14 @@ export class RunnerHost {
    * value of sending it now is that the reported set is correct the moment
    * the server starts consuming it, with no second runner-side change.
    */
-  private pollReport(): {
-    inFlight: string[]
-    awaitingAck: string[]
-    runtimeReadiness: RuntimeReadinessWitness[]
-    connectionId: string | null
-    admissionReady: boolean
-    deploymentEpoch: string | null
-  } {
-    const durableStarted = this.workResultJournal.ready()
-      ? this.workResultJournal.started().map((entry) => workKey(entry.work))
-      : []
-    return {
-      // A started journal entry survives a Runner restart without an
-      // execution promise. Report it as held so Server reconciliation does
-      // not keep redelivering an identity that the journal will refuse to
-      // execute.
-      inFlight: [...new Set([...this.inFlight.keys(), ...durableStarted])],
-      awaitingAck: [...this.awaitingAck.keys()],
-      runtimeReadiness: this.runtimeReadiness(),
+  private pollReport(): ReturnType<typeof buildRunnerPollReport> {
+    return buildRunnerPollReport({
+      durableStarted: this.workResultJournal.ready()
+        ? this.workResultJournal.started().map((entry) => workKey(entry.work))
+        : [],
+      inFlight: this.inFlight.keys(),
+      awaitingAck: this.awaitingAck.keys(),
+      runtimeReadiness: runtimeReadinessWitnesses(this.openCodeRuntime, this.piRuntime, this.piRuntimeGeneration),
       connectionId: this.control.getConnectionId(),
       admissionReady:
         this.providerPolicyDiagnostic === null &&
@@ -949,27 +887,11 @@ export class RunnerHost {
         this.agentSessionRuntimeEventOutbox.ready() &&
         this.workResultJournal.ready(),
       deploymentEpoch: this.connection.deploymentEpoch,
-    }
-  }
-
-  private runtimeReadiness(): RuntimeReadinessWitness[] {
-    return [
-      {
-        runtime: 'opencode',
-        ready: this.openCodeRuntime?.ready() === true,
-        generation: this.openCodeRuntime?.ownership().generation ?? null,
-      },
-      {
-        runtime: 'pi',
-        ready: this.piRuntime?.ready() === true,
-        generation: this.piRuntime?.ready() === true ? this.piRuntimeGeneration : null,
-      },
-    ]
+    })
   }
 
   private isOpenCodeReadyForClaim(): boolean {
-    const runtime = this.openCodeRuntime
-    return runtime !== null && runtime.ready() && this.agentSessionRuntimeEventOutbox.ready()
+    return isOpenCodeReadyForClaimForRuntime(this.openCodeRuntime, this.agentSessionRuntimeEventOutbox)
   }
 
   private recoveryContext(): HostRecoveryContext {

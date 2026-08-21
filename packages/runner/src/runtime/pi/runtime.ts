@@ -8,6 +8,7 @@ import { boundedTimeoutMs, boundedWait } from '../bounded-wait.js'
 import { diagnostic, piError, resetDiagnostic } from './errors.js'
 import { classifyRetryFailure, DEFAULT_PI_PROVIDER_ERROR_POLICY } from './policy.js'
 import { createPiProjector } from './projector.js'
+import { CANCEL_CONFIRMATION_TIMEOUT_MS, defaultClock, type PiClock } from './runtime-clock.js'
 import type { ManagerExecutionBoundary } from '../manager-execution-boundary.js'
 import { realPiSdkFactory, type PiSdkFactory, type PiSdkServices, type PiSdkSession } from './sdk.js'
 import type {
@@ -41,12 +42,6 @@ import type {
   PiTurnResult,
 } from './types.js'
 
-export interface PiClock {
-  readonly now: () => number
-  readonly setTimeout: (callback: () => void, delayMs: number) => unknown
-  readonly clearTimeout: (handle: unknown) => void
-}
-
 export interface PiRuntimeDeps {
   readonly agentDir: string
   readonly sdkFactory?: PiSdkFactory
@@ -55,13 +50,6 @@ export interface PiRuntimeDeps {
   readonly masker?: CredentialMasker
   readonly runtimeShutdownTimeoutMs?: number
 }
-
-const defaultClock: PiClock = {
-  now: () => Date.now(),
-  setTimeout: (callback, delay) => setTimeout(callback, delay),
-  clearTimeout: (handle) => clearTimeout(handle as ReturnType<typeof setTimeout>),
-}
-const CANCEL_CONFIRMATION_TIMEOUT_MS = 5_000
 
 export class PiRuntime {
   private readonly deps: PiRuntimeDeps
@@ -159,9 +147,11 @@ export class PiRuntime {
     if (!path) return this.failure('incompatible-runtime', 'Pi runtimeSessionId must be an absolute session-file path')
     let session: PiSdkSession
     try {
-      session = this.sessions.get(path) ?? (await this.state.services.openSession(path, request.target.workDir, {
-        managerExecution: request.managerExecution ?? null,
-      }))
+      session =
+        this.sessions.get(path) ??
+        (await this.state.services.openSession(path, request.target.workDir, {
+          managerExecution: request.managerExecution ?? null,
+        }))
       this.sessions.set(path, session)
     } catch (cause) {
       return this.failure('missing-session', 'The bound Pi Session is missing or corrupt', [

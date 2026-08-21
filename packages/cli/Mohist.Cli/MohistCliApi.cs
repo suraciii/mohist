@@ -34,14 +34,6 @@ internal sealed partial class MohistCliApi
     private readonly Func<TimeSpan, CancellationToken, Task> _pollWait;
     internal CliInvocation Invocation { get; }
 
-    internal IFileSystem FileSystem => _fileSystem;
-    internal ICommandExecutor CommandExecutor => _commandExecutor;
-    internal TextReader StandardInput => _standardInput;
-    internal CliResponseReader ResponseReader => _responseReader;
-    internal Func<string> GetUserHome => _getUserHome;
-    internal TimeProvider TimeProvider => _timeProvider;
-    internal string CurrentProjectStatePath => ProjectReferenceResolver.StatePath(_fileSystem.CurrentDirectory);
-
     public MohistCliApi(
         HttpClient http,
         TextWriter output,

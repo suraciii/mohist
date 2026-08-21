@@ -297,6 +297,33 @@ public sealed class SlackStatusProjectionSpecs
             CreatedAt = time.GetUtcNow(),
             UpdatedAt = time.GetUtcNow(),
         });
+        db.SlackProviderInboxRows.Add(new SlackProviderInboxRow
+        {
+            Id = "slkinb_manager_liveness_reply",
+            ProjectId = SlackDeliveryOwnerIds.ManagerProjectId,
+            ConnectionId = enrollmentId,
+            SlackMessageIdentity = "T_MANAGER/D_MANAGER/1710000000.000002",
+            WorkspaceTeamId = "T_MANAGER",
+            ConversationId = "D_MANAGER",
+            SlackUserId = "U_MANAGER",
+            RouteKind = SlackProviderInboxRouteKinds.Launch,
+            RouteSessionId = "manager-session",
+            AcceptedAt = time.GetUtcNow(),
+            DispatchedAt = time.GetUtcNow(),
+            CreatedAt = time.GetUtcNow(),
+        });
+        db.SlackDmSessionMappings.Add(new SlackDmSessionMappingRow
+        {
+            Id = "slkdmmp_manager_liveness_reply",
+            ProjectId = SlackDeliveryOwnerIds.ManagerProjectId,
+            ConnectionId = enrollmentId,
+            WorkspaceTeamId = "T_MANAGER",
+            SlackUserId = "U_MANAGER",
+            DmConversationId = "D_MANAGER",
+            CurrentSessionId = "manager-session",
+            CurrentMessageTs = "1710000000.000002",
+            UpdatedAt = time.GetUtcNow(),
+        });
         await db.SaveChangesAsync();
     }
 

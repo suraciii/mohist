@@ -93,7 +93,10 @@ export class WorkExecutor {
     managerExecution: ManagerExecutionBoundary | null = null,
   ): Promise<WorkExecution> {
     const ownedCollector = collector ?? new TaskLogCollector({ now: this.now })
-    const logger = new TaskLogger({ collector: ownedCollector, masker: managerExecution?.masker ?? createCredentialMaskerFromEnvironment() })
+    const logger = new TaskLogger({
+      collector: ownedCollector,
+      masker: managerExecution?.masker ?? createCredentialMaskerFromEnvironment(),
+    })
     let resolvedWorkspace: ResolvedWorkspace
     if (work.ownerKind !== 'agent-job') {
       const precheck = await this.prepareWorkspace(work, signal, logger)

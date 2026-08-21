@@ -98,7 +98,10 @@ export const createIsolatedOpencodeServer: OpencodeServerFactory = async (direct
   const timeoutMs = boundedTimeoutMs(options?.shutdownTimeoutMs, 5_000)
   const url = await new Promise<string>((resolve, reject) => {
     let settled = false
-    const timer = setTimeout(() => finish(new Error(`Timed out waiting for isolated OpenCode server after ${timeoutMs}ms`)), timeoutMs)
+    const timer = setTimeout(
+      () => finish(new Error(`Timed out waiting for isolated OpenCode server after ${timeoutMs}ms`)),
+      timeoutMs,
+    )
     timer.unref?.()
     const onData = (chunk: Buffer) => {
       output.push(chunk.toString())
@@ -121,7 +124,11 @@ export const createIsolatedOpencodeServer: OpencodeServerFactory = async (direct
     child.stderr.on('data', onData)
     child.once('error', (error) => finish(error))
     child.once('exit', (code) => finish(new Error(`Isolated OpenCode server exited with code ${code ?? 'unknown'}`)))
-    signal.addEventListener('abort', () => finish(signal.reason instanceof Error ? signal.reason : new Error('OpenCode server start aborted')), { once: true })
+    signal.addEventListener(
+      'abort',
+      () => finish(signal.reason instanceof Error ? signal.reason : new Error('OpenCode server start aborted')),
+      { once: true },
+    )
   })
   const dispatcher = new Agent({ headersTimeout: 0, bodyTimeout: 0 })
   const client = createOpencodeClient({
@@ -134,7 +141,11 @@ export const createIsolatedOpencodeServer: OpencodeServerFactory = async (direct
     kill: (sig) => child.kill(sig),
   }
   const close = async () => {
-    try { child.kill('SIGTERM') } catch { /* already exited */ }
+    try {
+      child.kill('SIGTERM')
+    } catch {
+      /* already exited */
+    }
     await dispatcher.close().catch(() => undefined)
   }
   return {
@@ -154,9 +165,18 @@ export const createIsolatedOpencodeServer: OpencodeServerFactory = async (direct
 
 function killChildTree(child: { pid?: number; kill(signal?: NodeJS.Signals): boolean }): void {
   if (child.pid && process.platform !== 'win32') {
-    try { process.kill(-child.pid, 'SIGKILL'); return } catch { /* fall through */ }
+    try {
+      process.kill(-child.pid, 'SIGKILL')
+      return
+    } catch {
+      /* fall through */
+    }
   }
-  try { child.kill('SIGKILL') } catch { /* already exited */ }
+  try {
+    child.kill('SIGKILL')
+  } catch {
+    /* already exited */
+  }
 }
 
 export async function terminateOpencodeTree(

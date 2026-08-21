@@ -189,6 +189,7 @@ public interface IManagerExecutionLeaseStore
     bool Available { get; }
     void Put(ManagerExecutionLeaseMetadata lease);
     ManagerExecutionLeaseMetadata? Find(string credentialHash);
+    ManagerExecutionLeaseMetadata? FindIncludingRevoked(string credentialHash);
     int RevokeExecution(string executionId);
     int RevokeExecutionPrefix(string executionPrefix);
     int RevokeAll();
@@ -221,9 +222,15 @@ public sealed class ManagerExecutionLeaseStore : IManagerExecutionLeaseStore, ID
 
     public ManagerExecutionLeaseMetadata? Find(string credentialHash)
     {
+        var lease = FindIncludingRevoked(credentialHash);
+        return lease is { Active: true } ? lease : null;
+    }
+
+    public ManagerExecutionLeaseMetadata? FindIncludingRevoked(string credentialHash)
+    {
         if (!Available || string.IsNullOrWhiteSpace(credentialHash))
             return null;
-        return _leases.TryGetValue(credentialHash, out var lease) && lease.Active ? lease : null;
+        return _leases.TryGetValue(credentialHash, out var lease) ? lease : null;
     }
 
     public int RevokeExecution(string executionId)
@@ -381,7 +388,7 @@ public sealed class ManagerExecutionCapabilityIssuer
             return ManagerExecutionValidationResult.Denied(
                 "manager_credential_invalid",
                 "The Manager execution credential is invalid or unavailable; request a fresh turn.");
-        var lease = _store.Find(Hash(credential));
+        var lease = _store.FindIncludingRevoked(Hash(credential));
         if (lease is null || lease.Kind != kind)
             return ManagerExecutionValidationResult.Denied(
                 "manager_credential_invalid",
@@ -390,6 +397,10 @@ public sealed class ManagerExecutionCapabilityIssuer
             return ManagerExecutionValidationResult.Denied(
                 "manager_epoch_changed",
                 "The Manager Server restarted; request a fresh turn before retrying.");
+        if (!lease.Active)
+            return ManagerExecutionValidationResult.Denied(
+                "manager_credential_invalid",
+                "The Manager execution credential is unknown, revoked, or already consumed; request a fresh turn.");
         if (now >= lease.ExpiresAt)
             return ManagerExecutionValidationResult.Denied(
                 "manager_credential_expired",
@@ -422,7 +433,7 @@ public sealed class ManagerExecutionCapabilityIssuer
                 "manager_capability_invalid",
                 "The requested Manager capability is invalid; choose an allowlisted operation.");
         var hash = Hash(credential);
-        var lease = _store.Find(hash);
+        var lease = _store.FindIncludingRevoked(hash);
         if (lease is null)
             return ManagerExecutionValidationResult.Denied(
                 "manager_credential_invalid",
@@ -441,6 +452,10 @@ public sealed class ManagerExecutionCapabilityIssuer
             return ManagerExecutionValidationResult.Denied(
                 "manager_epoch_changed",
                 "The Manager Server restarted; request a fresh turn before retrying.");
+        if (!lease.Active)
+            return ManagerExecutionValidationResult.Denied(
+                "manager_credential_invalid",
+                "The Manager execution credential is unknown, revoked, or already consumed; request a fresh turn.");
         if (!string.Equals(lease.ExecutionId, executionId, StringComparison.Ordinal)
             || !Equals(lease.Origin, origin))
             return ManagerExecutionValidationResult.Denied(
