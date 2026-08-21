@@ -123,13 +123,13 @@ public sealed class SlackManagerConversationSpecs
 
             var laterTask = SendManagerMessageAsync(
                 appId, team, owner, "1710001000.000011", "Also summarize the result.");
-            _fixture.LaunchFaults.ReleaseBlocked(LaunchParticipantGate.SubmitJob);
-
-            var first = await firstTask;
             var later = await laterTask;
-            Assert.Equal("accepted", first.GetProperty("decision").GetString());
             Assert.Equal("accepted", later.GetProperty("decision").GetString());
             Assert.Equal(sessionId, later.GetProperty("sessionId").GetString());
+
+            _fixture.LaunchFaults.ReleaseBlocked(LaunchParticipantGate.SubmitJob);
+            var first = await firstTask;
+            Assert.Equal("accepted", first.GetProperty("decision").GetString());
 
             var session = _fixture.Grains.GetGrain<IAgentSessionGrain>(sessionId);
             Assert.Equal(2, (await session.ListTurnsAsync()).Count);
