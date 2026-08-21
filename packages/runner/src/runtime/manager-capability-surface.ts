@@ -88,6 +88,18 @@ export function managerRequestKind(capability: string | null): ManagerRequestKin
   return null
 }
 
+// Mirrors `ManagerCliMode.IsHelpRequest` plus the bare-invocation and
+// mode-flag handling that precede the CLI's allowlist rejection, so the
+// broker admits exactly the invocations Manager-mode `mo` itself accepts.
+export function isManagerUsageRequest(args: readonly string[]): boolean {
+  if (args.length === 0) return true
+  const effective = args.filter((arg) => arg !== '--manager' && arg !== '--manager=true')
+  if (effective.length === 0) return true
+  return effective.some(
+    (arg) => arg === '--help' || arg === '-h' || arg === '-?' || arg === '/?' || arg.startsWith('--help='),
+  )
+}
+
 function hasOption(args: readonly string[], option: string): boolean {
   for (const arg of args) {
     if (arg === option || arg.startsWith(`${option}=`)) return true
