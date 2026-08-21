@@ -3,14 +3,14 @@ using Mohist.Server.Infrastructure.PublicApi;
 using Mohist.Server.Sessions.Domain;
 using Xunit;
 
-namespace Mohist.Server.SpecTests.Specs.DirectApi;
+namespace Mohist.Server.UnitTests.DirectApi;
 
 /// <summary>
 /// Verifies the shared projection read service distinguishes an owned
 /// canonical anchor from a missing resource while its snapshot is still
 /// waiting for the projector.
 /// </summary>
-public sealed class PublicExecutionReadQuerierSpecs
+public sealed class PublicExecutionReadQuerierTests
 {
     [Fact]
     public async Task OwnedCanonicalInputAndTurnWithoutSnapshots_ReturnProjectionLagThenRecover()

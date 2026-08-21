@@ -12,10 +12,10 @@ using Mohist.Server.Infrastructure.Data.PublicApi;
 using Mohist.Server.Infrastructure.PublicApi;
 using Mohist.Server.Infrastructure.Data.Sessions;
 using Mohist.Server.Sessions.Domain;
-using Mohist.Server.SpecTests.Support;
 using Mohist.Server.TestSupport;
+using Mohist.Server.UnitTests.Support;
 
-namespace Mohist.Server.SpecTests.Specs.DirectApi;
+namespace Mohist.Server.UnitTests.DirectApi;
 
 /// <summary>
 /// Seeding and read helpers for the public execution projection specs.
@@ -30,7 +30,7 @@ public sealed class PublicProjectionTestSupport : IAsyncDisposable
 
     public PublicProjectionTestSupport()
     {
-        Database = TestSqliteDatabase.CreateMigrated();
+        Database = TestSqliteDatabase.CreateModelSchema();
         DbFactory = new TestDbContextFactory(Database.Options);
         Time = new FakeTimeProvider(new DateTimeOffset(2026, 8, 9, 10, 15, 0, TimeSpan.Zero));
         EventStore = new EventStore(DbFactory, NullLogger<EventStore>.Instance);
@@ -257,5 +257,9 @@ public sealed class PublicProjectionTestSupport : IAsyncDisposable
         return await selector(db).CountAsync();
     }
 
-    public ValueTask DisposeAsync() => Database.DisposeAsync();
+    public ValueTask DisposeAsync()
+    {
+        Database.Dispose();
+        return ValueTask.CompletedTask;
+    }
 }
