@@ -1,4 +1,4 @@
-import { createHash } from 'node:crypto'
+import { createHash, randomUUID } from 'node:crypto'
 import { existsSync } from 'node:fs'
 import { spawn, type ChildProcess } from 'node:child_process'
 import { chmod, mkdir, rm, writeFile } from 'node:fs/promises'
@@ -116,13 +116,18 @@ export class ManagerExecutionBoundary {
       throw new Error('Manager execution grant is expired or malformed')
     }
     const suffix = createHash('sha256')
-      .update(`${grant.executionId}\n${grant.deploymentEpoch}\n${Math.random()}`)
+      .update(`${grant.executionId}\n${grant.deploymentEpoch}\n${randomUUID()}`)
       .digest('hex')
       .slice(0, 32)
     const directory = join(runnerRoot, 'manager-executions', suffix)
     await mkdir(directory, { recursive: true, mode: 0o700 })
-    const socketPath = join(directory, 'broker.sock')
-    const credentialBrokerPath = join(directory, 'credential-broker.sock')
+    // Linux limits Unix-socket pathnames to roughly 108 bytes. The Runner
+    // root may be a long diagnostic path, so keep only these non-secret
+    // endpoints under a short system path while private files stay rooted in
+    // the Runner directory.
+    const socketRoot = process.platform === 'linux' ? '/tmp' : directory
+    const socketPath = join(socketRoot, `mohist-manager-${suffix}.sock`)
+    const credentialBrokerPath = join(socketRoot, `mohist-manager-${suffix}-cred.sock`)
     const baseEnvironment: NodeJS.ProcessEnv = {
       ...process.env,
       MOHIST_MANAGER_MODE: '1',
@@ -143,9 +148,14 @@ export class ManagerExecutionBoundary {
       options.requestLimits ?? DEFAULT_MANAGER_REQUEST_LIMITS,
       options.terminationTimeoutMs ?? DEFAULT_TERMINATION_TIMEOUT_MS,
     )
-    await boundary.writeLauncher()
-    await boundary.startBroker()
-    return boundary
+    try {
+      await boundary.writeLauncher()
+      await boundary.startBroker()
+      return boundary
+    } catch (error) {
+      await boundary.dispose().catch(() => undefined)
+      throw error
+    }
   }
 
   /** The locator is non-secret; bearer values never enter this environment. */
@@ -157,6 +167,7 @@ export class ManagerExecutionBoundary {
       PATH: `${this.directory}${process.platform === 'win32' ? ';' : ':'}${currentPath}`,
       MOHIST_MANAGER_MODE: '1',
       MOHIST_MANAGER_BROKER: this.socketPath,
+      MOHIST_MANAGER_LAUNCHER: this.launcherPath,
       MOHIST_MANAGER_CREDENTIAL_BROKER: this.credentialBrokerPath,
       MOHIST_MANAGER_EXECUTION_ID: this.grant.executionId,
     }
@@ -261,6 +272,8 @@ export class ManagerExecutionBoundary {
       broker?.close(closed)
       credentialBroker?.close(closed)
     }).catch(() => undefined)
+    await rm(this.socketPath, { force: true }).catch(() => undefined)
+    await rm(this.credentialBrokerPath, { force: true }).catch(() => undefined)
     await rm(this.directory, { recursive: true, force: true }).catch(() => undefined)
   }
 
