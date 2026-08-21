@@ -98,6 +98,31 @@ public sealed partial class AgentJobGrain
 
     private readonly TimeSpan _runnerLossRecoveryTimeout;
 
+    private async Task OnJobTimeoutAsync()
+    {
+        if (IsTerminal || State.RunnerId is null)
+            return;
+
+        var runnerLost = await IsRunnerAwayAsync();
+        var reason = runnerLost
+            ? AgentJobFailureReasons.RunnerLost
+            : $"{AgentJobFailureReasons.ReportTimeout}: report timeout after {_options.JobTimeout}";
+        DateTimeOffset? recoveryDeadlineAt = runnerLost
+            ? _timeProvider.GetUtcNow() + _runnerLossRecoveryTimeout
+            : null;
+
+        _log.LogWarning(
+            "AgentJob {Id} report timeout after {Timeout}; transitioning to unknown with reason {Reason}",
+            Key, _options.JobTimeout, reason);
+        await EnterUnknownStateAsync(reason, recoveryDeadlineAt);
+        if (IsManagerInput())
+        {
+            if (State.PendingInitialTurnTerminalDelivery is { } pending)
+                await DeliverInitialTurnTerminalAsync(pending);
+            await EnsureManagerRecoveryAsync(reason);
+        }
+    }
+
     private bool IsRecovering => State.Status == AgentJobStatus.Unknown
         && State.RecoveryDeadlineAt is { } deadline
         && deadline > _timeProvider.GetUtcNow();
