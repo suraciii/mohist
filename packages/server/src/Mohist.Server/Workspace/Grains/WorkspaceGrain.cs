@@ -204,7 +204,7 @@ public sealed class WorkspaceGrain : Grain, IWorkspaceGrain
 
         await EnsureNoActiveSessionsAsync(state);
 
-        state.RepositoryNames.Add(repoName.Trim());
+        state.AddRepository(repoName);
         await _store.SaveAsync(state);
         return state;
     }
@@ -220,7 +220,7 @@ public sealed class WorkspaceGrain : Grain, IWorkspaceGrain
 
         await EnsureNoActiveSessionsAsync(state);
 
-        state.RepositoryNames.RemoveAll(r => string.Equals(r, repoName.Trim(), StringComparison.OrdinalIgnoreCase));
+        state.RemoveRepository(repoName);
         await _store.SaveAsync(state);
         return state;
     }
@@ -231,15 +231,8 @@ public sealed class WorkspaceGrain : Grain, IWorkspaceGrain
     public async Task ArchiveByOriginAsync(WorkspaceOrigin origin, DateTimeOffset now)
     {
         var state = _state;
-        if (state is null || state.Status == WorkspaceStatus.Archived) return;
+        if (state is null || !state.ArchiveByOrigin(origin, now)) return;
 
-        if (!Equals(state.Origin, origin))
-            throw new WorkspaceDomainException(
-                "workspace_origin_mismatch",
-                $"Workspace '{state.Name}' does not belong to origin '{WorkspaceRowJson.OriginKind(origin)}'.");
-
-        state.Status = WorkspaceStatus.Archived;
-        state.ArchivedAt = now;
         await _store.SaveAsync(state);
         _log.LogInformation("Workspace {ProjectId}/{Name} archived ({OriginKind})", state.ProjectId, state.Name, WorkspaceRowJson.OriginKind(origin));
         await EmitArchivedAsync(state);
@@ -250,61 +243,35 @@ public sealed class WorkspaceGrain : Grain, IWorkspaceGrain
         var state = _state;
         if (state is null) return null;
 
-        if (state.Origin is WorkspaceOrigin.Issue)
-            throw new WorkspaceDomainException(
-                "workspace_close_not_allowed_for_issue",
-                "Issue-backed workspaces are archived by the issue lifecycle, not by manual close.",
-                hint: "Finish or close the issue instead ('mo issue done <number>' / 'mo issue close <number>').");
-
-        if (state.Status == WorkspaceStatus.Archived)
-            throw new WorkspaceDomainException(
-                "workspace_already_archived",
-                $"Workspace '{state.Name}' is already archived.");
-
+        state.EnsureCloseAllowed();
         await EnsureNoActiveSessionsAsync(state);
 
-        state.Status = WorkspaceStatus.Archived;
-        state.ArchivedAt = now;
+        state.Close(now);
         await _store.SaveAsync(state);
         await EmitArchivedAsync(state);
         return state;
     }
 
     public Task<WorkspaceHome?> GetHomeAsync() =>
-        Task.FromResult(WorkspacePolicy.ActiveHome(_state));
+        Task.FromResult(_state?.ActiveHome());
 
     public async Task<WorkspaceHome?> EnsureMaterializedOnAsync(string runnerId, string path, DateTimeOffset now)
     {
         var state = _state;
         if (state is null) return null;
 
-        if (state.Status != WorkspaceStatus.Active)
-            throw new WorkspaceDomainException("workspace_archived", $"Workspace '{state.Name}' is archived and cannot be materialized.");
+        var previous = state.Home;
+        var home = state.EnsureMaterializedOn(runnerId, path);
+        if (Equals(previous, home)) return home;
 
-        if (state.Home is not null && !string.Equals(state.Home.RunnerId, runnerId, StringComparison.Ordinal))
-            throw new WorkspaceDomainException(
-                "workspace_home_claimed",
-                $"Workspace '{state.Name}' is already materialized on runner '{state.Home.RunnerId}'.",
-                hint: "The dispatching runner must yield its local directory; the job retries against the home runner.");
-
-        if (state.Home is not null
-            && string.Equals(state.Home.RunnerId, runnerId, StringComparison.Ordinal)
-            && string.Equals(state.Home.Path, path, StringComparison.Ordinal))
-        {
-            return state.Home;
-        }
-
-        state.Home = new WorkspaceHome(runnerId, path);
         await _store.SaveAsync(state);
-        return state.Home;
+        return home;
     }
 
     public async Task ClearHomeIfAsync(string runnerId)
     {
         var state = _state;
-        if (state is null || state.Home is null) return;
-        if (!string.Equals(state.Home.RunnerId, runnerId, StringComparison.Ordinal)) return;
-        state.Home = null;
+        if (state is null || !state.ClearHomeIf(runnerId)) return;
         await _store.SaveAsync(state);
     }
 
@@ -312,8 +279,7 @@ public sealed class WorkspaceGrain : Grain, IWorkspaceGrain
     {
         var state = _state;
         if (state is null) return null;
-        if (state.Status != WorkspaceStatus.Active)
-            throw new WorkspaceDomainException("workspace_archived", $"Workspace '{state.Name}' is archived.");
+        state.EnsureActive();
         return state;
     }
 

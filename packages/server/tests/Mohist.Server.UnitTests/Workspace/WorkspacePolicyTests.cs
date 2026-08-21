@@ -109,36 +109,6 @@ public class WorkspacePolicyTests
     }
 
     [Fact]
-    public void ActiveHome_ActiveWorkspace_ReturnsItsHome()
-    {
-        var home = new WorkspaceHome("runner-a", "/workspace/pay");
-        var state = new WorkspaceState
-        {
-            ProjectId = "proj-1",
-            Name = "pay",
-            Origin = Manual,
-            Status = WorkspaceStatus.Active,
-            Home = home,
-        };
-
-        Assert.Same(home, WorkspacePolicy.ActiveHome(state));
-    }
-
-    [Fact]
-    public void ActiveHome_ArchivedOrMissingWorkspace_ReturnsNull()
-    {
-        Assert.Null(WorkspacePolicy.ActiveHome(new WorkspaceState
-        {
-            ProjectId = "proj-1",
-            Name = "pay",
-            Origin = Manual,
-            Status = WorkspaceStatus.Archived,
-            Home = new WorkspaceHome("runner-a", "/workspace/pay"),
-        }));
-        Assert.Null(WorkspacePolicy.ActiveHome(null));
-    }
-
-    [Fact]
     public void IsManual_ManualOrigin_True()
     {
         Assert.True(WorkspacePolicy.IsManual(new WorkspaceOrigin.Manual()));

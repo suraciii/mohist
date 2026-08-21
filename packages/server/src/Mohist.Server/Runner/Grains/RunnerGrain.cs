@@ -7,6 +7,7 @@ using Mohist.Server.Infrastructure.Data.Runner;
 using Mohist.Server.Infrastructure.Data.Workflow;
 using Mohist.Server.Infrastructure.Events;
 using Mohist.Server.Infrastructure;
+using Mohist.Server.Runner.Domain;
 using Mohist.Server.Workflow.Domain;
 using Mohist.Server.Workflow.Domain.Run;
 using Mohist.Server.Workflow.Grains;
@@ -610,7 +611,7 @@ public partial class RunnerGrain : Grain, IRunnerGrain, IRemindable
         await _lifecycleGate.WaitAsync();
         try
         {
-            var normalized = string.IsNullOrWhiteSpace(buildGitHash) ? null : buildGitHash.Trim();
+            var normalized = RunnerBuildIdentityPolicy.Normalize(buildGitHash);
             if (_info is null)
             {
                 _pendingBuildGitHash = normalized;
@@ -718,7 +719,10 @@ public partial class RunnerGrain : Grain, IRunnerGrain, IRemindable
     {
         return info with
         {
-            BuildGitHash = info.BuildGitHash ?? _pendingRuntimeIdentity?.BuildGitHash ?? _pendingBuildGitHash,
+            BuildGitHash = RunnerBuildIdentityPolicy.ResolveForRegister(
+                info.BuildGitHash,
+                _pendingRuntimeIdentity?.BuildGitHash,
+                _pendingBuildGitHash),
             Component = info.Component ?? _pendingRuntimeIdentity?.Component,
             Version = info.Version ?? _pendingRuntimeIdentity?.Version,
             SourceRevision = info.SourceRevision ?? _pendingRuntimeIdentity?.SourceRevision,
@@ -736,7 +740,10 @@ public partial class RunnerGrain : Grain, IRunnerGrain, IRemindable
     {
         return info with
         {
-            BuildGitHash = info.BuildGitHash ?? _pendingBuildGitHash ?? _info?.BuildGitHash,
+            BuildGitHash = RunnerBuildIdentityPolicy.ResolveForHeartbeat(
+                info.BuildGitHash,
+                _pendingBuildGitHash,
+                _info?.BuildGitHash),
             Component = info.Component ?? _info?.Component,
             Version = info.Version ?? _info?.Version,
             SourceRevision = info.SourceRevision ?? _info?.SourceRevision,

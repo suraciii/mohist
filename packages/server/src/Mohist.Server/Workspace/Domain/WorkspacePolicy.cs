@@ -82,8 +82,5 @@ public static class WorkspacePolicy
                 $"Workspace '{workspaceName}' has {activeSessionCount} active bound session(s).")
             : null;
 
-    public static WorkspaceHome? ActiveHome(WorkspaceState? state) =>
-        state?.Status == WorkspaceStatus.Active ? state.Home : null;
-
     public static bool IsManual(WorkspaceOrigin origin) => origin is WorkspaceOrigin.Manual;
 }
