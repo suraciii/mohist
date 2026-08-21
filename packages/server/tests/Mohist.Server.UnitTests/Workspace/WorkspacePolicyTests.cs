@@ -93,6 +93,52 @@ public class WorkspacePolicyTests
     }
 
     [Fact]
+    public void ValidateActiveSessions_ActiveSession_ReportsConflict()
+    {
+        var error = WorkspacePolicy.ValidateActiveSessions("pay", 2);
+
+        Assert.NotNull(error);
+        Assert.Equal("workspace_has_active_sessions", error!.Code);
+        Assert.Contains("2 active bound session", error.Message);
+    }
+
+    [Fact]
+    public void ValidateActiveSessions_NoActiveSessions_ReturnsNoError()
+    {
+        Assert.Null(WorkspacePolicy.ValidateActiveSessions("pay", 0));
+    }
+
+    [Fact]
+    public void ActiveHome_ActiveWorkspace_ReturnsItsHome()
+    {
+        var home = new WorkspaceHome("runner-a", "/workspace/pay");
+        var state = new WorkspaceState
+        {
+            ProjectId = "proj-1",
+            Name = "pay",
+            Origin = Manual,
+            Status = WorkspaceStatus.Active,
+            Home = home,
+        };
+
+        Assert.Same(home, WorkspacePolicy.ActiveHome(state));
+    }
+
+    [Fact]
+    public void ActiveHome_ArchivedOrMissingWorkspace_ReturnsNull()
+    {
+        Assert.Null(WorkspacePolicy.ActiveHome(new WorkspaceState
+        {
+            ProjectId = "proj-1",
+            Name = "pay",
+            Origin = Manual,
+            Status = WorkspaceStatus.Archived,
+            Home = new WorkspaceHome("runner-a", "/workspace/pay"),
+        }));
+        Assert.Null(WorkspacePolicy.ActiveHome(null));
+    }
+
+    [Fact]
     public void IsManual_ManualOrigin_True()
     {
         Assert.True(WorkspacePolicy.IsManual(new WorkspaceOrigin.Manual()));

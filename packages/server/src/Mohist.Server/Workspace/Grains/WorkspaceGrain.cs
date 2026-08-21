@@ -271,7 +271,7 @@ public sealed class WorkspaceGrain : Grain, IWorkspaceGrain
     }
 
     public Task<WorkspaceHome?> GetHomeAsync() =>
-        Task.FromResult(_state?.Status == WorkspaceStatus.Active ? _state.Home : null);
+        Task.FromResult(WorkspacePolicy.ActiveHome(_state));
 
     public async Task<WorkspaceHome?> EnsureMaterializedOnAsync(string runnerId, string path, DateTimeOffset now)
     {
@@ -320,10 +320,11 @@ public sealed class WorkspaceGrain : Grain, IWorkspaceGrain
     private async Task EnsureNoActiveSessionsAsync(WorkspaceState state)
     {
         var active = await _querier.CountActiveBoundSessionsAsync(state.ProjectId, state.Name);
-        if (active > 0)
+        var error = WorkspacePolicy.ValidateActiveSessions(state.Name, active);
+        if (error is not null)
             throw new WorkspaceDomainException(
-                "workspace_has_active_sessions",
-                $"Workspace '{state.Name}' has {active} active bound session(s).",
+                error.Code,
+                error.Message,
                 hint: "Stop or wait for the bound sessions to finish, then retry. List them with 'mo session list --workspace <name>'.");
     }
 

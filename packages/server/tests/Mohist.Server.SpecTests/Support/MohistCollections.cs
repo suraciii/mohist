@@ -99,9 +99,6 @@ public class AgentJobGrainCollection : ICollectionFixture<AgentJobGrainFixture>;
 [CollectionDefinition("AgentSpawnCoordinator", DisableParallelization = true)]
 public class AgentSpawnCoordinatorCollection : ICollectionFixture<AgentJobGrainFixture>;
 
-[CollectionDefinition("Backlog")]
-public class BacklogCollection : ICollectionFixture<BacklogFixture>;
-
 [CollectionDefinition("EventPublishing")]
 public class EventPublishingCollection : ICollectionFixture<EventPublishingIntegrationFixture>;
 

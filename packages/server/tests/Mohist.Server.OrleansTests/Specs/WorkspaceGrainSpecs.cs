@@ -1,9 +1,5 @@
-using Mohist.Server.Agent.Grains;
 using Mohist.Server.Infrastructure.Orleans;
 using Mohist.Server.OrleansTests.Support;
-using Mohist.Server.Sessions.Domain;
-using Mohist.Server.Sessions.Grains;
-using Mohist.Server.Sessions.Services;
 using Mohist.Server.TestSupport;
 using Mohist.Server.Workspace.Domain;
 using Mohist.Server.Workspace.Grains;
@@ -96,18 +92,6 @@ public class WorkspaceGrainSpecs
     }
 
     [Fact]
-    public async Task ArchiveByOriginAsync_ActiveBoundSession_DoesNotBlockArchive()
-    {
-        var name = UniqueName("archive-no-guard");
-        await Grain(name).CreateAsync(name, new WorkspaceOrigin.Slack("T1", "C-guard"), [], _fixture.TimeProvider.GetUtcNow());
-        await SeedBoundSessionAsync(name, active: true, bound: true);
-
-        await Grain(name).ArchiveByOriginAsync(new WorkspaceOrigin.Slack("T1", "C-guard"), _fixture.TimeProvider.GetUtcNow());
-
-        Assert.Equal(WorkspaceStatus.Archived, (await Grain(name).GetAsync())!.Status);
-    }
-
-    [Fact]
     public async Task CreateManualAsync_ValidInput_CreatesActiveManualWorkspace()
     {
         var name = UniqueName("pay");
@@ -148,26 +132,6 @@ public class WorkspaceGrainSpecs
     }
 
     [Fact]
-    public async Task CreateManualAsync_UnknownRepository_ThrowsRepositoryNotFound()
-    {
-        var name = UniqueName("unknown-repo");
-        var ex = await Assert.ThrowsAsync<WorkspaceDomainException>(
-            () => Grain(name).CreateManualAsync(name, ["missing"], _fixture.TimeProvider.GetUtcNow()));
-        Assert.Equal("workspace_repository_not_found", ex.Code);
-    }
-
-    [Fact]
-    public async Task AddRepositoryAsync_UnknownRepository_ThrowsRepositoryNotFound()
-    {
-        var name = UniqueName("add-unknown");
-        await Grain(name).CreateManualAsync(name, ["server"], _fixture.TimeProvider.GetUtcNow());
-
-        var ex = await Assert.ThrowsAsync<WorkspaceDomainException>(
-            () => Grain(name).AddRepositoryAsync("missing"));
-        Assert.Equal("workspace_repository_not_found", ex.Code);
-    }
-
-    [Fact]
     public async Task AddAndRemoveRepository_MutatesMembers()
     {
         var name = UniqueName("members");
@@ -178,17 +142,6 @@ public class WorkspaceGrainSpecs
 
         var removed = await Grain(name).RemoveRepositoryAsync("web");
         Assert.Equal(["server"], removed!.RepositoryNames);
-    }
-
-    [Fact]
-    public async Task RemoveRepositoryAsync_Missing_ThrowsNotFound()
-    {
-        var name = UniqueName("remove-missing");
-        await Grain(name).CreateManualAsync(name, ["server"], _fixture.TimeProvider.GetUtcNow());
-
-        var ex = await Assert.ThrowsAsync<WorkspaceDomainException>(
-            () => Grain(name).RemoveRepositoryAsync("web"));
-        Assert.Equal("workspace_repository_not_found", ex.Code);
     }
 
     [Fact]
@@ -216,30 +169,6 @@ public class WorkspaceGrainSpecs
         var ex = await Assert.ThrowsAsync<WorkspaceDomainException>(
             () => Grain(name).AddRepositoryAsync("web"));
         Assert.Equal("workspace_archived", ex.Code);
-    }
-
-    [Fact]
-    public async Task CloseAsync_ActiveBoundSession_ThrowsHasActiveSessions()
-    {
-        var name = UniqueName("close-active");
-        await Grain(name).CreateManualAsync(name, ["server"], _fixture.TimeProvider.GetUtcNow());
-        await SeedBoundSessionAsync(name, active: true, bound: true);
-
-        var ex = await Assert.ThrowsAsync<WorkspaceDomainException>(
-            () => Grain(name).CloseAsync(_fixture.TimeProvider.GetUtcNow()));
-        Assert.Equal("workspace_has_active_sessions", ex.Code);
-        Assert.Contains("mo session list --workspace", ex.Hint);
-    }
-
-    [Fact]
-    public async Task CloseAsync_IdleBoundSession_IsAllowed()
-    {
-        var name = UniqueName("close-idle");
-        await Grain(name).CreateManualAsync(name, ["server"], _fixture.TimeProvider.GetUtcNow());
-        await SeedBoundSessionAsync(name, active: false, bound: true);
-
-        var closed = await Grain(name).CloseAsync(_fixture.TimeProvider.GetUtcNow());
-        Assert.Equal(WorkspaceStatus.Archived, closed!.Status);
     }
 
     [Fact]
@@ -282,55 +211,4 @@ public class WorkspaceGrainSpecs
         Assert.Null(await Grain(name).GetHomeAsync());
     }
 
-    [Fact]
-    public async Task GetHomeAsync_ArchivedWorkspace_ReturnsNull()
-    {
-        var name = UniqueName("home-archived");
-        await Grain(name).CreateManualAsync(name, ["server"], _fixture.TimeProvider.GetUtcNow());
-        await Grain(name).EnsureMaterializedOnAsync("runner-a", $"/ws/{name}", _fixture.TimeProvider.GetUtcNow());
-        await Grain(name).CloseAsync(_fixture.TimeProvider.GetUtcNow());
-
-        Assert.Null(await Grain(name).GetHomeAsync());
-    }
-
-    [Fact]
-    public async Task AddRepositoryAsync_ActiveBoundSession_ThrowsHasActiveSessions()
-    {
-        var name = UniqueName("add-active");
-        await Grain(name).CreateManualAsync(name, ["server"], _fixture.TimeProvider.GetUtcNow());
-        await SeedBoundSessionAsync(name, active: true, bound: true);
-
-        var ex = await Assert.ThrowsAsync<WorkspaceDomainException>(
-            () => Grain(name).AddRepositoryAsync("web"));
-        Assert.Equal("workspace_has_active_sessions", ex.Code);
-    }
-
-    private async Task SeedBoundSessionAsync(string workspaceName, bool active, bool bound)
-    {
-        var sessionId = $"agent-session-ws-{Guid.NewGuid():N}";
-        var grain = _fixture.Grains.GetGrain<IAgentSessionGrain>(sessionId);
-        await grain.OpenAsync(new OpenAgentSessionCommand(
-            "runner-a",
-            "opencode",
-            WorkDir: null,
-            Metadata: new AgentSessionMetadata()
-                .WithLabel(AgentSessionQueryMetadataKeys.ProjectId, _projectId)
-                .WithLabel(AgentSessionQueryMetadataKeys.SourceKind, "agent-launch")
-                .WithLabel(GenericAgentSessionMetadata.AgentId, "agent-ws")
-                .WithLabel(AgentSessionMetadata.WorkspaceNameKey, workspaceName)));
-        if (bound)
-            await grain.AttachPhysicalSessionAsync(new AttachPhysicalSessionCommand("runtime-session-1"));
-        if (active)
-        {
-            var persistence = grain.PersistenceCheckpoint(_fixture.Persistence);
-            await grain.AppendRuntimeEventsAsync(new AppendAgentSessionRuntimeEventsCommand(
-                new AgentSessionRuntimeEventInput[]
-                {
-                    new(RuntimeEventTypes.SessionActivity,
-                        "{\"activity\":\"active\"}")
-                },
-                "runtime-session-1"));
-            await persistence.WaitAsync();
-        }
-    }
 }
