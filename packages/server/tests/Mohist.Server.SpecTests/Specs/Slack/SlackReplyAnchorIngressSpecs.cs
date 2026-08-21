@@ -406,7 +406,6 @@ public sealed class SlackReplyAnchorIngressSpecs : IAsyncLifetime
             CreatedAt = now,
             UpdatedAt = now,
         });
-        await db.SaveChangesAsync();
 
         var agentAppId = $"agent_app_{Guid.NewGuid():N}";
         var enrollmentId = await SlackRuntimeLeaseTestSupport.EnsureEnrollmentAsync(_fixture, "T123");

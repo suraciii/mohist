@@ -488,7 +488,6 @@ public sealed partial class SlackChannelThreadIngressSpecs
             CreatedAt = now,
             UpdatedAt = now,
         });
-        await db.SaveChangesAsync();
 
         var agentAppId = $"agent_app_{Guid.NewGuid():N}";
         db.ManagedSlackAgentApps.Add(new ManagedSlackAgentAppRow
