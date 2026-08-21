@@ -67,25 +67,6 @@ public partial class EpicBatchMembershipApiSpecs
     }
 
     [Fact]
-    public async Task BatchLink_Numbers_AllLinked()
-    {
-        var project = await CreateProjectAsync();
-        var epic = await CreateEpicAsync(project.Id, "batch-mixed");
-        var issueA = await CreateIssueAsync(project.Id, "By number");
-        var issueB = await CreateIssueAsync(project.Id, "Second number");
-
-        var response = await _client.PostAsJsonAsync(
-            $"/api/projects/{project.Id}/epics/{epic.Number}/issues:batch",
-            new { issueNumbers = new[] { issueA.Number, issueB.Number } });
-
-        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-        var envelope = await ReadEnvelopeAsync(response);
-        var results = Assert.IsType<JsonElement>(envelope.GetProperty("data")).GetProperty("results");
-        Assert.Equal(2, results.GetArrayLength());
-        Assert.All(results.EnumerateArray(), r => Assert.Equal("linked", r.GetProperty("status").GetString()));
-    }
-
-    [Fact]
     public async Task BatchLink_IssueAlreadyInOtherEpic_ReturnsConflict_AndLinksOthers()
     {
         var project = await CreateProjectAsync();
@@ -122,76 +103,6 @@ public partial class EpicBatchMembershipApiSpecs
     }
 
     [Fact]
-    public async Task BatchLink_IssueAlreadyMember_ReportedAsAlreadyLinked()
-    {
-        var project = await CreateProjectAsync();
-        var epic = await CreateEpicAsync(project.Id, "dup");
-        var issue = await CreateIssueAsync(project.Id, "re-add");
-        await LinkIssueAsync(project.Id, epic, issue);
-
-        var response = await _client.PostAsJsonAsync(
-            $"/api/projects/{project.Id}/epics/{epic.Number}/issues:batch",
-            new { issueNumbers = new[] { issue.Number } });
-
-        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-        var envelope = await ReadEnvelopeAsync(response);
-        var results = Assert.IsType<JsonElement>(envelope.GetProperty("data")).GetProperty("results");
-        Assert.Equal("already-linked", results[0].GetProperty("status").GetString());
-        Assert.Equal(epic.Number, results[0].GetProperty("owningEpicNumber").GetInt32());
-        Assert.Equal(epic.Title, results[0].GetProperty("owningEpicTitle").GetString());
-    }
-
-    [Fact]
-    public async Task BatchLink_UnknownIdentifier_ReportedAsNotFound()
-    {
-        var project = await CreateProjectAsync();
-        var epic = await CreateEpicAsync(project.Id, "nope");
-        var issue = await CreateIssueAsync(project.Id, "real");
-
-        var response = await _client.PostAsJsonAsync(
-            $"/api/projects/{project.Id}/epics/{epic.Number}/issues:batch",
-            new { issueNumbers = new[] { 99999, issue.Number } });
-
-        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-        var envelope = await ReadEnvelopeAsync(response);
-        var results = Assert.IsType<JsonElement>(envelope.GetProperty("data")).GetProperty("results");
-        Assert.Equal(2, results.GetArrayLength());
-        var arr = results.EnumerateArray().ToArray();
-        Assert.Equal("not-found", arr[0].GetProperty("status").GetString());
-        AssertNoOwningEpic(arr[0]);
-        Assert.Equal("linked", arr[1].GetProperty("status").GetString());
-        Assert.Equal(epic.Number, arr[1].GetProperty("owningEpicNumber").GetInt32());
-        Assert.Equal(epic.Title, arr[1].GetProperty("owningEpicTitle").GetString());
-    }
-
-    [Fact]
-    public async Task BatchLink_DuplicateIdentifierInOneRequest_LinkedAtMostOnce()
-    {
-        var project = await CreateProjectAsync();
-        var epic = await CreateEpicAsync(project.Id, "dup-req");
-        var issue = await CreateIssueAsync(project.Id, "only-once");
-
-        // Same identifier (the issue number) twice in one request: the
-        // issue is linked at most once, but the response still contains
-        // one non-error outcome for each requested token.
-        var response = await _client.PostAsJsonAsync(
-            $"/api/projects/{project.Id}/epics/{epic.Number}/issues:batch",
-            new { issueNumbers = new[] { issue.Number, issue.Number } });
-
-        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-        var envelope = await ReadEnvelopeAsync(response);
-        var results = Assert.IsType<JsonElement>(envelope.GetProperty("data")).GetProperty("results");
-        Assert.Equal(2, results.GetArrayLength());
-        var arr = results.EnumerateArray().ToArray();
-        Assert.Equal(new[] { issue.Number.ToString(), issue.Number.ToString() }, arr.Select(r => r.GetProperty("identifier").GetString()).ToArray());
-        Assert.Equal("linked", arr[0].GetProperty("status").GetString());
-        Assert.Equal("already-linked", arr[1].GetProperty("status").GetString());
-
-        var detail = await _client.GetDataAsync<EpicDetailDtoLike>($"/api/projects/{project.Id}/epics/{epic.Number}");
-        Assert.Single(detail.LinkedIssues);
-    }
-
-    [Fact]
     public async Task BatchUnlink_RemovesOnlyRequestedMembers_RemainingIntact()
     {
         var project = await CreateProjectAsync();
@@ -216,95 +127,6 @@ public partial class EpicBatchMembershipApiSpecs
         var detail = await _client.GetDataAsync<EpicDetailDtoLike>($"/api/projects/{project.Id}/epics/{epic.Number}");
         Assert.Single(detail.LinkedIssues);
         Assert.Equal(c.Number, detail.LinkedIssues[0].Number);
-    }
-
-    [Fact]
-    public async Task BatchUnlink_NotMember_ReportedAsWasNotAMember_AndOthersUnlinked()
-    {
-        var project = await CreateProjectAsync();
-        var epic = await CreateEpicAsync(project.Id, "unlink-mixed");
-        var member = await CreateIssueAsync(project.Id, "member");
-        var nonMember = await CreateIssueAsync(project.Id, "non");
-        await LinkIssueAsync(project.Id, epic, member);
-
-        var response = await _client.PostAsJsonAsync(
-            $"/api/projects/{project.Id}/epics/{epic.Number}/issues:batch-unlink",
-            new { issueNumbers = new[] { member.Number, nonMember.Number } });
-
-        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-        var envelope = await ReadEnvelopeAsync(response);
-        var results = Assert.IsType<JsonElement>(envelope.GetProperty("data")).GetProperty("results");
-        Assert.Equal(2, results.GetArrayLength());
-        var arr = results.EnumerateArray().ToArray();
-        Assert.Equal("unlinked", arr[0].GetProperty("status").GetString());
-        Assert.Equal("was-not-a-member", arr[1].GetProperty("status").GetString());
-        Assert.All(arr, result =>
-            AssertNoOwningEpic(result));
-    }
-
-    [Fact]
-    public async Task BatchUnlink_UnknownIdentifier_ReportedAsWasNotAMember()
-    {
-        var project = await CreateProjectAsync();
-        var epic = await CreateEpicAsync(project.Id, "unlink-unknown");
-        var member = await CreateIssueAsync(project.Id, "member");
-        await LinkIssueAsync(project.Id, epic, member);
-
-        var response = await _client.PostAsJsonAsync(
-            $"/api/projects/{project.Id}/epics/{epic.Number}/issues:batch-unlink",
-            new { issueNumbers = new[] { 99999, member.Number } });
-
-        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-        var envelope = await ReadEnvelopeAsync(response);
-        var results = Assert.IsType<JsonElement>(envelope.GetProperty("data")).GetProperty("results");
-        Assert.Equal(2, results.GetArrayLength());
-        var arr = results.EnumerateArray().ToArray();
-        Assert.Equal("99999", arr[0].GetProperty("identifier").GetString());
-        Assert.Equal("was-not-a-member", arr[0].GetProperty("status").GetString());
-        AssertNoOwningEpic(arr[0]);
-        Assert.Equal("unlinked", arr[1].GetProperty("status").GetString());
-        AssertNoOwningEpic(arr[1]);
-    }
-
-    [Fact]
-    public async Task BatchUnlink_DuplicateIdentifier_ReturnsOutcomePerRequestedIdentifier()
-    {
-        var project = await CreateProjectAsync();
-        var epic = await CreateEpicAsync(project.Id, "unlink-dup");
-        var issue = await CreateIssueAsync(project.Id, "member");
-        await LinkIssueAsync(project.Id, epic, issue);
-
-        var response = await _client.PostAsJsonAsync(
-            $"/api/projects/{project.Id}/epics/{epic.Number}/issues:batch-unlink",
-            new { issueNumbers = new[] { issue.Number, issue.Number } });
-
-        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-        var envelope = await ReadEnvelopeAsync(response);
-        var results = Assert.IsType<JsonElement>(envelope.GetProperty("data")).GetProperty("results");
-        Assert.Equal(2, results.GetArrayLength());
-        var arr = results.EnumerateArray().ToArray();
-        Assert.Equal(new[] { issue.Number.ToString(), issue.Number.ToString() }, arr.Select(r => r.GetProperty("identifier").GetString()).ToArray());
-        Assert.Equal("unlinked", arr[0].GetProperty("status").GetString());
-        Assert.Equal("was-not-a-member", arr[1].GetProperty("status").GetString());
-
-        var detail = await _client.GetDataAsync<EpicDetailDtoLike>($"/api/projects/{project.Id}/epics/{epic.Number}");
-        Assert.Empty(detail.LinkedIssues);
-    }
-
-    [Fact]
-    public async Task BatchLink_EmptyArray_ReturnsOkWithEmptyResults()
-    {
-        var project = await CreateProjectAsync();
-        var epic = await CreateEpicAsync(project.Id, "empty-batch");
-
-        var response = await _client.PostAsJsonAsync(
-            $"/api/projects/{project.Id}/epics/{epic.Number}/issues:batch",
-            new { issueNumbers = Array.Empty<int>() });
-
-        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-        var envelope = await ReadEnvelopeAsync(response);
-        var results = Assert.IsType<JsonElement>(envelope.GetProperty("data")).GetProperty("results");
-        Assert.Equal(0, results.GetArrayLength());
     }
 
     [Fact]

@@ -205,7 +205,7 @@ public sealed partial class AgentJobGrain
         if (IsTerminal)
         {
             if (payloadType == RuntimeRecoveryReceiptPayloadTypes.TerminalResult
-                && MatchesRecoveryReceiptBinding(receipt)
+                && AgentJobRecoveryPolicy.MatchesBinding(State, receipt)
                 && receipt.RecoveryGeneration == State.RecoveryGeneration
                 && string.Equals(
                     payload.Fingerprint,
@@ -222,7 +222,7 @@ public sealed partial class AgentJobGrain
                 "job-terminal");
         }
 
-        if (!MatchesRecoveryReceiptBinding(receipt)
+        if (!AgentJobRecoveryPolicy.MatchesBinding(State, receipt)
             || receipt.RecoveryGeneration != State.RecoveryGeneration)
         {
             return new RuntimeRecoveryReceiptAcknowledgement(
@@ -293,7 +293,7 @@ public sealed partial class AgentJobGrain
                 "update-fence-missing");
         }
 
-        var canContinue = CanContinueAfterUpdateInterruption();
+        var canContinue = AgentJobRecoveryPolicy.CanContinue(State);
         var reason = canContinue ? "replacement-created" : "cannot-continue";
         if (canContinue)
             await AllocateRecoveryAttemptAsync(receipt.WorkId);
@@ -401,9 +401,7 @@ public sealed partial class AgentJobGrain
     }
 
     private bool UpdateInterruptionDeadlineExceeded() =>
-        State.Status == AgentJobStatus.RecoverablyInterrupted
-        && State.UpdateInterruptionDeadlineAt is { } deadline
-        && deadline <= _timeProvider.GetUtcNow();
+        AgentJobRecoveryPolicy.IsUpdateInterruptionDeadlineExceeded(State, _timeProvider.GetUtcNow());
 
     public async Task<bool> MarkUpdateStopFailureAsync(
         string runnerId,
@@ -412,21 +410,15 @@ public sealed partial class AgentJobGrain
         string failure)
     {
         await HydrateAsync();
-        if (string.IsNullOrWhiteSpace(failure)
-            || State.Status != AgentJobStatus.RecoverablyInterrupted
-            || !string.Equals(State.RunnerId, runnerId, StringComparison.Ordinal)
-            || !string.Equals(State.WorkId, workId, StringComparison.Ordinal)
-            || !string.Equals(State.UpdateOperationId, updateOperationId, StringComparison.Ordinal)
-            || State.Interruption is null)
-        {
+        var transition = AgentJobRecoveryPolicy.RecordStopFailure(
+            State,
+            runnerId,
+            workId,
+            updateOperationId,
+            failure,
+            _timeProvider.GetUtcNow());
+        if (transition is null)
             return false;
-        }
-
-        var transition = State.Interruption with { StopFailure = failure, RecordedAt = _timeProvider.GetUtcNow() };
-        State.Interruption = transition;
-        State.InterruptionHistory = AgentWorkInterruptionProjection.Apply(
-            State.InterruptionHistory,
-            transition).ToList();
         QueueSessionInterruptionDelivery(State.Input?.AgentSessionId, transition);
         await PersistAsync();
         await DeliverPendingSessionInterruptionAsync();
