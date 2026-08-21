@@ -283,19 +283,6 @@ internal sealed partial class MohistCliApi
         return await ReadPostResultAsync(response!, printOutput);
     }
 
-    internal async Task<JsonNode?> PostManagerManagementAsync(JsonObject request)
-    {
-        var response = await ResponseReader.ReadAsync(
-            HttpMethod.Post,
-            "/api/slack-manager/management",
-            request,
-            mutating: true,
-            cancellationToken: Invocation.CancellationToken).ConfigureAwait(false);
-        if (!response.IsSuccess)
-            throw new ApiResponseException(response.StatusCode, response.Failure!.Message, response.Failure.Code, response.Failure.Details);
-        return response.Data;
-    }
-
     public async Task<int> PrintPutAsync(string path, object body)
     {
         using var response = await SendAsync(HttpMethod.Put, path, body);
