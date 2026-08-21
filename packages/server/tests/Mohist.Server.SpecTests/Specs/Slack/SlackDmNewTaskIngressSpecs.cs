@@ -6,6 +6,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Mohist.Server.Agent.Domain;
 using Mohist.Server.Agent.Grains;
+using Mohist.Server.Agent.Services;
 using Mohist.Server.Infrastructure;
 using Mohist.Server.Infrastructure.Data.Agent;
 using Mohist.Server.Infrastructure.Data.Db;
@@ -152,6 +153,196 @@ public sealed class SlackDmNewTaskIngressSpecs : IAsyncLifetime
     }
 
     [Fact]
+    public async Task Unconfigured_new_dm_gets_one_safe_durable_nudge_without_execution_side_effects()
+    {
+        var connection = await CreateConnectionAsync();
+        await SetAgentConfigAsync(connection, null);
+
+        var first = await PostIngressAsync(
+            connection,
+            "D-DM-SETUP",
+            "1710000000.001000",
+            "please do this");
+        var replay = await PostIngressAsync(
+            connection,
+            "D-DM-SETUP",
+            "1710000000.001000",
+            "please do this");
+
+        Assert.Equal("agent_not_configured", first.GetProperty("kind").GetString());
+        Assert.Equal("server", first.GetProperty("responseOwner").GetString());
+        Assert.Equal("server", replay.GetProperty("responseOwner").GetString());
+        Assert.Equal(SlackAdmissionMessages.AgentNotReady, first.GetProperty("reason").GetString());
+
+        await using var scope = _fixture.Services.CreateAsyncScope();
+        var db = scope.ServiceProvider.GetRequiredService<MohistDbContext>();
+        var nudges = (await db.SlackOutboxRows
+            .Where(row => row.ConnectionId == connection.Id
+                && row.ConversationId == "D-DM-SETUP"
+                && row.DispatchRef != null)
+            .ToListAsync())
+            .Where(row => row.DispatchRef!.StartsWith("slack-admission-nudge:", StringComparison.Ordinal))
+            .ToList();
+        var nudge = Assert.Single(nudges);
+        Assert.Equal("D-DM-SETUP", nudge.ConversationId);
+        Assert.Null(nudge.ThreadTs);
+        var payload = SlackDeliveryPayload.Parse(nudge.PayloadJson);
+        Assert.Equal(SlackAdmissionMessages.AgentNotReady, payload.Text);
+        Assert.Equal(nudge.DispatchRef, payload.ClientMessageId);
+        Assert.True(nudge.DispatchRef!.Length <= 256);
+        Assert.Empty(await db.SlackProviderInboxRows
+            .Where(row => row.ConnectionId == connection.Id
+                && row.ConversationId == "D-DM-SETUP")
+            .ToListAsync());
+        Assert.Empty(await db.AgentSessions
+            .Where(row => row.LabelConnectionId == connection.Id)
+            .ToListAsync());
+        Assert.Empty(await db.AgentJobs
+            .Where(row => row.ProjectId == connection.ProjectId)
+            .ToListAsync());
+        Assert.DoesNotContain("xoxb-", nudge.PayloadJson, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("exception", nudge.PayloadJson, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task Explicit_new_task_is_gated_before_the_existing_dm_session_mapping()
+    {
+        var connection = await CreateConnectionAsync();
+        var initial = await PostIngressAsync(connection, "D-DM-MARKER", "1710000000.001100", "initial task");
+        var currentSessionId = initial.GetProperty("sessionId").GetString();
+        await SetAgentConfigAsync(connection, null);
+
+        var blocked = await PostIngressAsync(
+            connection,
+            "D-DM-MARKER",
+            "1710000000.001200",
+            "new task independent work");
+
+        Assert.Equal("agent_not_configured", blocked.GetProperty("kind").GetString());
+        Assert.Equal("server", blocked.GetProperty("responseOwner").GetString());
+        Assert.DoesNotContain(blocked.EnumerateObject(), property => property.Name is "sessionId" or "inputId" or "turnId");
+
+        await using var scope = _fixture.Services.CreateAsyncScope();
+        var db = scope.ServiceProvider.GetRequiredService<MohistDbContext>();
+        Assert.Equal(currentSessionId, await db.SlackDmSessionMappings
+            .Where(row => row.ConnectionId == connection.Id && row.DmConversationId == "D-DM-MARKER")
+            .Select(row => row.CurrentSessionId)
+            .SingleAsync());
+        Assert.DoesNotContain(await db.SlackProviderInboxRows
+            .Where(row => row.ConnectionId == connection.Id && row.ConversationId == "D-DM-MARKER")
+            .Select(row => row.SlackMessageIdentity)
+            .ToListAsync(), identity => identity.EndsWith("1710000000.001200", StringComparison.Ordinal));
+        var markerNudges = (await db.SlackOutboxRows
+            .Where(row => row.ConnectionId == connection.Id
+                && row.DispatchRef != null
+                && row.ConversationId == "D-DM-MARKER")
+            .ToListAsync())
+            .Where(row => row.DispatchRef!.StartsWith("slack-admission-nudge:", StringComparison.Ordinal))
+            .ToList();
+        Assert.Single(markerNudges);
+    }
+
+    [Fact]
+    public async Task Established_ordinary_dm_followup_bypasses_the_new_work_gate()
+    {
+        var connection = await CreateConnectionAsync();
+        var initial = await PostIngressAsync(connection, "D-DM-FOLLOWUP-READY", "1710000000.001300", "initial task");
+        var sessionId = initial.GetProperty("sessionId").GetString();
+        await SetAgentConfigAsync(connection, null);
+
+        var followup = await PostIngressAsync(
+            connection,
+            "D-DM-FOLLOWUP-READY",
+            "1710000000.001400",
+            "ordinary follow-up");
+
+        Assert.True(followup.GetProperty("followup").GetBoolean());
+        Assert.Equal(sessionId, followup.GetProperty("sessionId").GetString());
+        Assert.DoesNotContain(await GetAdmissionNudgesAsync(connection, "D-DM-FOLLOWUP-READY"),
+            row => row.DispatchRef!.Contains("1710000000.001400", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task Unavailable_enabled_connection_gets_a_thread_anchored_nudge()
+    {
+        var connection = await CreateConnectionAsync();
+        await using (var scope = _fixture.Services.CreateAsyncScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<MohistDbContext>();
+            await db.AgentConnections
+                .Where(row => row.ProjectId == connection.ProjectId && row.Id == connection.Id)
+                .ExecuteUpdateAsync(setters => setters
+                    .SetProperty(row => row.ConnectionHealth, ConnectionHealthKind.Unhealthy)
+                    .SetProperty(row => row.HealthReason, "Slack service is offline."));
+        }
+
+        var result = await PostIngressAsync(
+            connection,
+            "D-DM-UNAVAILABLE",
+            "1710000000.001450",
+            "please retry this",
+            "1710000000.001400");
+
+        Assert.Equal("connection_unavailable", result.GetProperty("kind").GetString());
+        Assert.Equal("server", result.GetProperty("responseOwner").GetString());
+        Assert.Equal(SlackAdmissionMessages.ConnectionUnavailable, result.GetProperty("reason").GetString());
+
+        var nudges = await GetAdmissionNudgesAsync(connection, "D-DM-UNAVAILABLE");
+        var nudge = Assert.Single(nudges);
+        Assert.Equal("1710000000.001400", nudge.ThreadTs);
+        var payload = SlackDeliveryPayload.Parse(nudge.PayloadJson);
+        Assert.Equal(nudge.DispatchRef, payload.ClientMessageId);
+        Assert.Equal(SlackAdmissionMessages.ConnectionUnavailable, payload.Text);
+    }
+
+    [Fact]
+    public async Task Backpressured_new_dm_uses_adapter_owned_fallback_without_a_nudge()
+    {
+        var connection = await CreateConnectionAsync();
+        await using (var scope = _fixture.Services.CreateAsyncScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<MohistDbContext>();
+            await db.AgentConnections
+                .Where(row => row.ProjectId == connection.ProjectId && row.Id == connection.Id)
+                .ExecuteUpdateAsync(setters => setters
+                    .SetProperty(row => row.ConnectionHealth, ConnectionHealthKind.Degraded)
+                    .SetProperty(row => row.HealthReason, SlackProviderBackpressureReasons.OutboxOverflow));
+        }
+
+        var result = await PostIngressAsync(connection, "D-DM-BUSY", "1710000000.001500", "please retry");
+
+        Assert.Equal("backpressured", result.GetProperty("kind").GetString());
+        Assert.Equal("adapter", result.GetProperty("responseOwner").GetString());
+        Assert.Equal(SlackAdmissionMessages.Backpressured, result.GetProperty("reason").GetString());
+        Assert.Empty(await GetAdmissionNudgesAsync(connection, "D-DM-BUSY"));
+
+        await using var verify = _fixture.Services.CreateAsyncScope();
+        var dbVerify = verify.ServiceProvider.GetRequiredService<MohistDbContext>();
+        Assert.Empty(await dbVerify.SlackProviderInboxRows
+            .Where(row => row.ConnectionId == connection.Id && row.ConversationId == "D-DM-BUSY")
+            .ToListAsync());
+    }
+
+    [Fact]
+    public async Task Diagnostic_exposes_canonical_executability_gaps_for_operators()
+    {
+        var connection = await CreateConnectionAsync();
+        await SetAgentConfigAsync(connection, null);
+
+        using var response = await _fixture.Client.GetAsync(Path(connection, "/diagnostic"));
+        response.EnsureSuccessStatusCode();
+        using var document = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        var data = document.RootElement.GetProperty("data");
+        var executability = data.GetProperty("facts").GetProperty("agentExecutability");
+        Assert.Equal(AgentExecutabilityStates.NotConfigured, executability.GetProperty("state").GetString());
+        var gap = Assert.Single(executability.GetProperty("gaps").EnumerateArray());
+        Assert.Equal("model-missing", gap.GetProperty("code").GetString());
+        Assert.Equal("Set a model in Agent settings.", gap.GetProperty("nextAction").GetString());
+        Assert.Equal(ConnectionDiagnosticState.AgentNeedsSetup, data.GetProperty("primaryState").GetString());
+        Assert.Equal("Review the Agent execution settings.", data.GetProperty("nextAction").GetString());
+    }
+
+    [Fact]
     public async Task Empty_new_task_is_rejected_without_accepting_or_creating_work()
     {
         var connection = await CreateConnectionAsync();
@@ -264,6 +455,39 @@ public sealed class SlackDmNewTaskIngressSpecs : IAsyncLifetime
             .Select(row => row.PayloadJson)
             .SingleAsync();
         Assert.Equal(SlackDeliveryOperations.ReactionAdd, SlackDeliveryPayload.Parse(payload).Operation);
+    }
+
+    private async Task SetAgentConfigAsync(AgentConnection connection, object? config)
+    {
+        await using var scope = _fixture.Services.CreateAsyncScope();
+        var db = scope.ServiceProvider.GetRequiredService<MohistDbContext>();
+        var row = await db.Agents.SingleAsync(agent => agent.ProjectId == connection.ProjectId);
+        var agent = new Mohist.Server.Agent.Domain.Agent
+        {
+            Id = row.Id,
+            ProjectId = connection.ProjectId,
+            Name = "Mohist Agent",
+            Status = AgentStatus.Active,
+            Instructions = "Handle Slack requests.",
+            AgentConfig = config is null ? null : JsonSerializer.SerializeToElement(config),
+        };
+        row.State = JsonSerializer.Serialize(agent, JSON.Options);
+        await db.SaveChangesAsync();
+    }
+
+    private async Task<List<SlackOutboxRow>> GetAdmissionNudgesAsync(
+        AgentConnection connection,
+        string conversationId)
+    {
+        await using var scope = _fixture.Services.CreateAsyncScope();
+        var db = scope.ServiceProvider.GetRequiredService<MohistDbContext>();
+        return (await db.SlackOutboxRows
+            .Where(row => row.ConnectionId == connection.Id
+                && row.ConversationId == conversationId
+                && row.DispatchRef != null)
+            .ToListAsync())
+            .Where(row => row.DispatchRef!.StartsWith("slack-admission-nudge:", StringComparison.Ordinal))
+            .ToList();
     }
 
     private async Task<AgentConnection> CreateConnectionAsync()

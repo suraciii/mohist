@@ -50,3 +50,19 @@ not edited; the next self-review regenerates it.
   Go verification remains unavailable because the Go toolchain is not installed.
   Tests cover wire decoding, legacy compatibility, ownership boundaries,
   malformed outcomes, failed direct posts, and acknowledgment counts.
+
+## T-002 implementation notes
+
+- Added `SlackAdmissionService` with canonical `AgentReadinessService` evaluation,
+  fixed safe caller summaries, stable SHA-256 admission-nudge dispatch references,
+  `clientMessageId` reuse, and explicit `none`/`server`/`adapter` ownership.
+- DM classification now strips/recognizes the leading `new task` marker before
+  consulting the current DM mapping; ordinary mapped DMs bypass the new-work gate.
+- The authorized Connection diagnostic route now injects `AgentReadinessService`
+  and exposes the lossless `AgentExecutabilityResult` projection (including gaps
+  and next actions) while retaining the compatibility readiness fact.
+- Server build passes after restore. Added DM integration coverage for setup blocks,
+  explicit new-task mapping bypass, ordinary follow-ups, unavailable Connections,
+  backpressure ownership, stable outbox identity, safe-message assertions, and
+  diagnostic executability projection. Focused unit and DM spec suites pass;
+  Channel integration remains for T-003.
