@@ -42,6 +42,49 @@ describe('follow-up attachment delivery', () => {
     expect(enqueue).not.toHaveBeenCalled()
   })
 
+  it('revokes a fresh Manager grant when a submitted follow-up is redelivered after terminal completion', async () => {
+    const boundary = {
+      hasExpired: () => false,
+      mask: (value: string) => value,
+      redact: (value: unknown) => value,
+      dispose: vi.fn(async () => undefined),
+    }
+    const runtime = {
+      ready: () => true,
+      followup: vi.fn(),
+    }
+    const outbox = {
+      ready: () => true,
+      enqueueBeforeExecution: vi.fn(),
+      enqueueProducedFact: vi.fn(),
+    }
+    const journal = {
+      claim: vi.fn(async () => 'submitted' as const),
+      load: vi.fn(),
+      markSubmitted: vi.fn(),
+      release: vi.fn(),
+    }
+    const revoke = vi.fn(async () => undefined)
+    const receive = createFollowupHandler({
+      followupTargetResolver: () => ({
+        runtimeSessionId: 'runtime-1',
+        workDir: '/work',
+        projectId: '__mohist_slack_manager__',
+      }),
+      agentSessionRuntimeEventOutbox: outbox as never,
+      piRuntime: runtime as never,
+      runnerRoot: '/tmp/runner',
+      createManagerExecutionBoundary: vi.fn(async () => boundary as never) as never,
+      followupOperationJournal: journal,
+      onManagerExecutionFinished: revoke,
+    })
+
+    expect(await receive(managerFollowupPayload())).toEqual({ accepted: true })
+    expect(boundary.dispose).toHaveBeenCalledOnce()
+    expect(revoke).toHaveBeenCalledWith('manager:session-1:operation-1')
+    expect(runtime.followup).not.toHaveBeenCalled()
+  })
+
   it('marks a successful Manager result as expiry recovery when the grant expired during execution', async () => {
     const records: any[] = []
     const runtime = {
@@ -63,7 +106,11 @@ describe('follow-up attachment delivery', () => {
       enqueueProducedFact: vi.fn(async (record: unknown) => records.push(record)),
     }
     const receive = createFollowupHandler({
-      followupTargetResolver: () => ({ runtimeSessionId: 'runtime-1', workDir: '/work', projectId: '__mohist_slack_manager__' }),
+      followupTargetResolver: () => ({
+        runtimeSessionId: 'runtime-1',
+        workDir: '/work',
+        projectId: '__mohist_slack_manager__',
+      }),
       agentSessionRuntimeEventOutbox: outbox as never,
       piRuntime: runtime as never,
       runnerRoot: '/tmp/runner',
@@ -104,7 +151,11 @@ describe('follow-up attachment delivery', () => {
       enqueueProducedFact: vi.fn(async (record: unknown) => records.push(record)),
     }
     const receive = createFollowupHandler({
-      followupTargetResolver: () => ({ runtimeSessionId: 'runtime-1', workDir: '/work', projectId: '__mohist_slack_manager__' }),
+      followupTargetResolver: () => ({
+        runtimeSessionId: 'runtime-1',
+        workDir: '/work',
+        projectId: '__mohist_slack_manager__',
+      }),
       agentSessionRuntimeEventOutbox: outbox as never,
       piRuntime: runtime as never,
       runnerRoot: '/tmp/runner',

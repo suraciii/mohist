@@ -271,6 +271,7 @@ async function handleFollowup(
       const claim = await deps.followupOperationJournal.claim(operationKey, operationId)
       if (claim === 'submitted') {
         await managerExecution?.dispose().catch(() => undefined)
+        await revokeFinishedManagerExecution(payload.managerExecutionGrant?.executionId, deps)
         return { accepted: true }
       }
       if (claim === 'claimed') {
@@ -465,6 +466,17 @@ async function handleFollowup(
   return { accepted: true }
 }
 
+async function revokeFinishedManagerExecution(
+  executionId: string | undefined,
+  deps: FollowupHandlerDeps,
+): Promise<void> {
+  try {
+    await deps.onManagerExecutionFinished?.(executionId ?? '')
+  } catch (error) {
+    log.error('failed to revoke Manager execution after duplicate delivery', { exception: error })
+  }
+}
+
 function sessionTargetKey(target: SessionTarget): string {
   return `session:${sessionTargetId(target)}`
 }
@@ -637,11 +649,7 @@ function recordFollowupActivity(
       type: 'session.activity',
       payload: {
         activity: terminalActivity,
-        status: managerCredentialExpired
-          ? 'unknown'
-          : terminalActivity === 'idle'
-            ? 'completed'
-            : 'failed',
+        status: managerCredentialExpired ? 'unknown' : terminalActivity === 'idle' ? 'completed' : 'failed',
         ...(managerCredentialExpired ? { reason: 'manager-credential-expired', failureCategory: 'unknown' } : {}),
         ...(error
           ? {
