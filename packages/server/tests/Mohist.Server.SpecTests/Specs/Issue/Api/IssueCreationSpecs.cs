@@ -19,6 +19,15 @@ using Mohist.Server.Workflow.Services;
 using Xunit;
 
 namespace Mohist.Server.SpecTests.Specs.Issue.Api;
+
+/// <summary>
+/// Application-level issue creation claims (#676): HTTP binding and error
+/// envelopes for the create/prerequisite endpoints, and behaviors that span
+/// the issue grain and the workflow/runner runtime (start dispatch, cancel,
+/// completion-gated readiness). The grain-internal create/update matrix —
+/// numbering, identity, prerequisite validation, risk, hydration — is owned
+/// by Mohist.Server.UnitTests IssueGrainCreationSpecs.
+/// </summary>
 [Collection("RunnerMutationIntegration")]
 public class IssueCreationSpecs
 {
@@ -84,72 +93,6 @@ public class IssueCreationSpecs
     }
 
     [Fact]
-    public async Task CreateIssue_ReturnsInfoWithNumber()
-    {
-        var project = await SetupProjectAsync();
-
-        var issue = await CreateIssueAsync(project.Id, "Test issue", "body");
-
-        Assert.Equal(1, issue.Number);
-        Assert.Equal("Test issue", issue.Title);
-        Assert.Equal("body", issue.Body);
-        Assert.Equal("backlog", issue.Status);
-        Assert.Equal("active", issue.Health);
-        Assert.Equal(project.Id, issue.ProjectId);
-        Assert.Equal("mohist/local", issue.WorkflowProfileId);
-    }
-
-    [Fact]
-    public async Task CreateIssue_RejectsIdentityOutsideGrainKey()
-    {
-        var projectA = await SetupProjectAsync();
-        var projectB = await SetupProjectAsync();
-        var grain = IssueGrain(projectB.Id, 1);
-
-        await Assert.ThrowsAsync<InvalidOperationException>(() =>
-            grain.CreateAsync(projectA.Id, 1, "cross-project issue", null, null, null));
-
-        Assert.Null(await GetIssueInfoAsync(projectA.Id, 1));
-        Assert.Null(await GetIssueInfoAsync(projectB.Id, 1));
-    }
-
-    // Regression guard for the bug that left IssueEvents permanently empty:
-    // SaveIssueAsync snapshotted PendingEvents by reference, then
-    // ClearPendingEvents() drained the same list, so the publish path
-    // no-op'd on an empty collection and no issue lifecycle CloudEvent ever
-    // reached EventStore. WorkflowRunEvents and EpicEvents worked because
-    // their drain paths snapshot via ToList(). This spec is the only place
-    // that asserts the issue→IssueEvents append actually happens end-to-end
-    // through the real grain + EventStore.
-    [Fact]
-    public async Task CreateIssue_PersistsCreatedEventToIssueEvents()
-    {
-        var project = await SetupProjectAsync();
-        var issue = await CreateIssueAsync(project.Id, "Event persistence probe");
-
-        using var scope = _services.CreateScope();
-        var events = scope.ServiceProvider.GetRequiredService<IEventStore>();
-        var stored = await events.ListIssueEventsAsync(project.Id, issue.Number);
-
-        // issue-361 T-004: events now append inside the state transaction
-        // exactly once per IssueEvent recorded by the aggregate, so the
-        // single IssuedCreated event lands as a single row.
-        var created = Assert.Single(stored);
-        Assert.Equal("com.mohist.issue.created", created.Envelope.Type);
-        Assert.Equal($"/mohist/projects/{project.Id}/issues/{issue.Number}", created.Envelope.Source.ToString());
-    }
-
-    [Fact]
-    public async Task CreateIssue_DefaultWorkflowProfile_ComesFromDefaultProfile()
-    {
-        var project = await SetupProjectAsync();
-
-        var issue = await CreateIssueAsync(project.Id, "Default profile");
-
-        Assert.Equal("mohist/local", issue.WorkflowProfileId);
-    }
-
-    [Fact]
     public async Task StartWorkflow_WithProjectContext_DispatchesProjectVariables()
     {
         // The runner is a global resource. Prior tests in this collection
@@ -191,67 +134,6 @@ public class IssueCreationSpecs
         Assert.Equal("main", repository.GetProperty("baseBranch").GetString());
 
         await runner.UnregisterAsync();
-    }
-
-    [Fact]
-    public async Task CreateIssue_SequentialNumbers()
-    {
-        var project = await SetupProjectAsync();
-
-        var first = await CreateIssueAsync(project.Id, "First");
-        var second = await CreateIssueAsync(project.Id, "Second");
-
-        Assert.Equal(1, first.Number);
-        Assert.Equal(2, second.Number);
-    }
-
-    [Fact]
-    public async Task CreateIssue_WithLabelsAndPriority()
-    {
-        var project = await SetupProjectAsync();
-
-        var issue = await CreateIssueAsync(
-            project.Id,
-            "Labeled",
-            labels: new Dictionary<string, string>(StringComparer.Ordinal)
-            {
-                ["stream"] = "frontend",
-                ["priority"] = "p0",
-            },
-            priority: "p0");
-
-        Assert.Equal("frontend", issue.Labels["stream"]);
-        Assert.Equal("p0", issue.Labels["priority"]);
-        Assert.Equal("p0", issue.Priority);
-    }
-
-    [Fact]
-    public async Task Querier_ReturnsIssueInfo()
-    {
-        var project = await SetupProjectAsync();
-        var created = await CreateIssueAsync(project.Id, "Info test", "desc");
-
-        var info = await GetIssueInfoAsync(project.Id, created.Number);
-
-        Assert.NotNull(info);
-        Assert.Equal(created.Number, info.Number);
-        Assert.Equal("Info test", info.Title);
-        Assert.Equal("desc", info.Body);
-    }
-
-    [Fact]
-    public async Task Update_ChangesTitleAndBody()
-    {
-        var project = await SetupProjectAsync();
-        var created = await CreateIssueAsync(project.Id, "Original", "old body");
-
-        var grain = IssueGrain(project.Id, created.Number);
-        await grain.UpdateAsync("Updated", "new body");
-        var info = await GetIssueInfoAsync(project.Id, created.Number);
-
-        Assert.NotNull(info);
-        Assert.Equal("Updated", info.Title);
-        Assert.Equal("new body", info.Body);
     }
 
     [Fact]
@@ -313,17 +195,6 @@ public class IssueCreationSpecs
     }
 
     [Fact]
-    public async Task Hydrate_Duplicate_Throws()
-    {
-        var project = await SetupProjectAsync();
-        var created = await CreateIssueAsync(project.Id, "Dup");
-
-        var grain = IssueGrain(project.Id, created.Number);
-        await Assert.ThrowsAsync<InvalidOperationException>(() =>
-            grain.CreateAsync(project.Id, 999, "dup", null, null, null, null));
-    }
-
-    [Fact]
     public async Task IssueWorkflowStatus_ProjectsDefaultChangeDirOutsideWorkflowStatus()
     {
         var project = await SetupProjectAsync();
@@ -336,39 +207,6 @@ public class IssueCreationSpecs
 
         Assert.NotNull(status);
         Assert.Equal($"openspec/changes/issue-{created.Number}", status.ChangeDir);
-    }
-
-    [Fact]
-    public async Task DifferentProjects_IndependentNumbering()
-    {
-        var project1 = await SetupProjectAsync();
-        var project2 = await SetupProjectAsync();
-
-        var issue1 = await CreateIssueAsync(project1.Id, "P1-Issue");
-        var issue2 = await CreateIssueAsync(project2.Id, "P2-Issue");
-
-        Assert.Equal(1, issue1.Number);
-        Assert.Equal(1, issue2.Number);
-    }
-
-    [Fact]
-    public async Task AddPrerequisite_StartReadinessAndStartGateComeFromIssueGrain()
-    {
-        var project = await SetupProjectAsync();
-        var prereq = await CreateIssueAsync(project.Id, "Prereq");
-        var dependent = await CreateIssueAsync(project.Id, "Dependent");
-        var grain = IssueGrain(project.Id, dependent.Number);
-
-        await grain.AddPrerequisiteAsync(prereq.Number);
-        var info = await GetIssueInfoAsync(project.Id, dependent.Number);
-        var readiness = await grain.GetStartReadinessAsync();
-
-        Assert.NotNull(info);
-        Assert.Contains(prereq.Number, info.PrerequisiteNumbers);
-        Assert.False(readiness.CanStart);
-        var waiting = Assert.IsType<IssueStartBlockerDto.WaitingForBlocker>(readiness.Blocker);
-        Assert.Equal(prereq.Number, waiting.Issue.Number);
-        await Assert.ThrowsAsync<IssueStartBlockedException>(() => grain.StartWorkAsync());
     }
 
     [Fact]
@@ -391,51 +229,31 @@ public class IssueCreationSpecs
     }
 
     [Fact]
-    public async Task CreateIssue_WithRisk_PersistsAndReturnsIt()
+    public async Task CreateIssue_WithCompletedPrerequisite_MarksReadinessOpen()
     {
         var project = await SetupProjectAsync();
+        var prereq = await CreateIssueAsync(project.Id, "Will complete");
+        var prereqGrain = IssueGrain(project.Id, prereq.Number);
 
-        var issue = await CreateIssueAsync(project.Id, "Risked", risk: "high");
+        // Drive the prerequisite to a completed workflow so the
+        // read-model exposes it as Completed and the blocker is null.
+        var wrId = await prereqGrain.StartWorkAsync(new WorkflowProjectContext(
+            project.Id,
+            project.Name,
+            RepositoryBaseBranch: project.DefaultRepository?.BaseBranch ?? "main"));
+        await prereqGrain.CompleteWorkAsync(wrId);
 
-        Assert.Equal("high", issue.Risk);
-    }
+        var dependent = await CreateIssueAsync(
+            project.Id,
+            "Dependent of completed prereq",
+            prerequisiteNumbers: [prereq.Number]);
 
-    [Fact]
-    public async Task CreateIssue_WithoutRisk_ReturnsNull()
-    {
-        var project = await SetupProjectAsync();
-
-        var issue = await CreateIssueAsync(project.Id, "NoRisk");
-
-        Assert.Null(issue.Risk);
-    }
-
-    [Fact]
-    public async Task ReadModel_IncludesRisk_AfterCreate()
-    {
-        var project = await SetupProjectAsync();
-
-        var number = await _grains.GetGrain<IIssueCounterGrain>(project.Id).NextAsync();
-        var grain = IssueGrain(project.Id, number);
-        await grain.CreateAsync(project.Id, number, "Medium risk", body: null, labels: null, priority: null, repositoryRef: null, risk: "medium");
-
-        using var scope = _services.CreateScope();
-        var issuesQuery = scope.ServiceProvider.GetRequiredService<IssueQuerier>();
-        var readModel = await issuesQuery.GetAsync(project.Id, number, project);
-
+        var readModel = await GetIssueReadModelAsync(project.Id, dependent.Number);
         Assert.NotNull(readModel);
-        Assert.Equal("medium", readModel!.Risk);
-    }
-
-    [Fact]
-    public async Task CreateIssue_WithInvalidRisk_Throws()
-    {
-        var project = await SetupProjectAsync();
-        var number = await _grains.GetGrain<IIssueCounterGrain>(project.Id).NextAsync();
-        var grain = IssueGrain(project.Id, number);
-
-        await Assert.ThrowsAsync<ArgumentException>(() =>
-            grain.CreateAsync(project.Id, number, "Bad", null, null, null, null, "unknown"));
+        Assert.True(readModel!.CanStart);
+        Assert.Null(readModel.Blocker);
+        var prereqSummary = readModel.Prereq.Single();
+        Assert.True(prereqSummary.Completed);
     }
 
     [Fact]
@@ -541,177 +359,6 @@ public class IssueCreationSpecs
 
         var unchanged = await _client.GetDataAsync<CreateIssueApiDto>($"/api/projects/{project.Id}/issues/{second.Number}");
         Assert.Empty(unchanged.PrerequisiteNumbers);
-    }
-
-    [Fact]
-    public async Task CreateIssue_WithPrerequisiteNumbers_RecordsBothAndExposesReadModels()
-    {
-        var project = await SetupProjectAsync();
-        var prereqA = await CreateIssueAsync(project.Id, "Prereq A");
-        var prereqB = await CreateIssueAsync(project.Id, "Prereq B");
-
-        var dependent = await CreateIssueAsync(
-            project.Id,
-            "Dependent",
-            prerequisiteNumbers: [prereqA.Number, prereqB.Number]);
-
-        Assert.Equal(new[] { prereqA.Number, prereqB.Number }, dependent.PrerequisiteNumbers);
-
-        var readModel = await GetIssueReadModelAsync(project.Id, dependent.Number);
-        Assert.NotNull(readModel);
-        Assert.Equal(new[] { prereqA.Number, prereqB.Number }, readModel!.PrerequisiteNumbers);
-        Assert.Equal(2, readModel.Prereq.Length);
-        var summaryNumbers = readModel.Prereq.Select(p => p.Number).OrderBy(n => n).ToArray();
-        Assert.Equal(new[] { prereqA.Number, prereqB.Number }, summaryNumbers);
-        Assert.All(readModel.Prereq, p => Assert.False(p.Completed));
-        Assert.False(readModel.CanStart);
-        var waiting = Assert.IsType<IssueStartBlockerDto.WaitingForBlocker>(readModel.Blocker);
-        Assert.Equal(prereqA.Number, waiting.Issue.Number);
-    }
-
-    [Fact]
-    public async Task CreateIssue_WithPrerequisiteNumbers_CollapsesDuplicatesIdempotently()
-    {
-        var project = await SetupProjectAsync();
-        var prereq = await CreateIssueAsync(project.Id, "Only one prereq");
-
-        var dependent = await CreateIssueAsync(
-            project.Id,
-            "Dependent",
-            prerequisiteNumbers: [prereq.Number, prereq.Number, prereq.Number]);
-
-        Assert.Equal(new[] { prereq.Number }, dependent.PrerequisiteNumbers);
-        var readModel = await GetIssueReadModelAsync(project.Id, dependent.Number);
-        Assert.NotNull(readModel);
-        Assert.Single(readModel!.Prereq);
-    }
-
-    [Fact]
-    public async Task CreateIssue_WithoutPrerequisiteNumbers_LeavesEmptySet()
-    {
-        var project = await SetupProjectAsync();
-
-        var plain = await CreateIssueAsync(project.Id, "Plain");
-
-        Assert.Empty(plain.PrerequisiteNumbers);
-        var readModel = await GetIssueReadModelAsync(project.Id, plain.Number);
-        Assert.NotNull(readModel);
-        Assert.Empty(readModel!.Prereq);
-        Assert.True(readModel.CanStart || readModel.Blocker is not null);
-    }
-
-    [Fact]
-    public async Task CreateIssue_WithEmptyPrerequisiteNumbers_BehavesAsAbsent()
-    {
-        var project = await SetupProjectAsync();
-
-        var plain = await CreateIssueAsync(project.Id, "Plain empty", prerequisiteNumbers: []);
-
-        Assert.Empty(plain.PrerequisiteNumbers);
-    }
-
-    [Fact]
-    public async Task CreateIssue_WithNonexistentPrerequisite_ThrowsAndLeavesNoIssue()
-    {
-        var project = await SetupProjectAsync();
-
-        var attemptNumber = await _grains.GetGrain<IIssueCounterGrain>(project.Id).NextAsync();
-        var grain = IssueGrain(project.Id, attemptNumber);
-
-        await Assert.ThrowsAsync<PrerequisiteValidationException>(() =>
-            grain.CreateAsync(
-                project.Id,
-                attemptNumber,
-                "Will fail",
-                body: null,
-                labels: null,
-                priority: null,
-                repositoryRef: null,
-                risk: null,
-                isDraft: false,
-                attachmentIds: null,
-                workflowProfileId: null,
-                prerequisiteNumbers: new[] { 999_999 }));
-
-        var readModel = await GetIssueReadModelAsync(project.Id, attemptNumber);
-        Assert.Null(readModel);
-    }
-
-    [Fact]
-    public async Task CreateIssue_WithCrossProjectPrerequisite_ThrowsAsNotFound()
-    {
-        var projectA = await SetupProjectAsync();
-        var projectB = await SetupProjectAsync();
-        var issueInA = await CreateIssueAsync(projectA.Id, "A issue");
-
-        await Assert.ThrowsAsync<PrerequisiteValidationException>(() =>
-            CreateIssueAsync(projectB.Id, "B dependent", prerequisiteNumbers: [issueInA.Number]));
-
-        var readModel = await GetIssueReadModelAsync(projectB.Id, 1);
-        Assert.Null(readModel);
-    }
-
-    [Fact]
-    public async Task CreateIssue_WithSelfReferencingPrerequisite_ThrowsAndLeavesNoIssue()
-    {
-        var project = await SetupProjectAsync();
-
-        await CreateIssueAsync(project.Id, "First");
-
-        // AddPrerequisiteAsync path cannot self-reference (it would have to
-        // know its own number in advance). For create, we simulate the
-        // would-be self-reference by constructing the request directly via
-        // the counter+bypass path: increment the counter to reserve the
-        // next number, then attempt CreateAsync on a fresh grain with
-        // prerequisiteNumbers pointing at it.
-        var reserved = await _grains.GetGrain<IIssueCounterGrain>(project.Id).NextAsync();
-        var freshGrain = IssueGrain(project.Id, reserved);
-
-        await Assert.ThrowsAsync<PrerequisiteValidationException>(() =>
-            freshGrain.CreateAsync(
-                project.Id,
-                reserved,
-                "Self ref",
-                body: null,
-                labels: null,
-                priority: null,
-                repositoryRef: null,
-                risk: null,
-                isDraft: false,
-                attachmentIds: null,
-                workflowProfileId: null,
-                prerequisiteNumbers: new[] { reserved }));
-
-        var readModel = await GetIssueReadModelAsync(project.Id, reserved);
-        Assert.Null(readModel);
-    }
-
-    [Fact]
-    public async Task CreateIssue_WithCompletedPrerequisite_MarksReadinessOpen()
-    {
-        var project = await SetupProjectAsync();
-        var prereq = await CreateIssueAsync(project.Id, "Will complete");
-        var prereqGrain = IssueGrain(project.Id, prereq.Number);
-
-        // Drive the prerequisite to a completed workflow so the
-        // read-model exposes it as Completed and the blocker is null.
-        var wrId = await prereqGrain.StartWorkAsync(new WorkflowProjectContext(
-            project.Id,
-            project.Name,
-            RepositoryBaseBranch: project.DefaultRepository?.BaseBranch ?? "main"));
-        await prereqGrain.CompleteWorkAsync(wrId);
-
-        var dependent = await CreateIssueAsync(
-            project.Id,
-            "Dependent of completed prereq",
-            prerequisiteNumbers: [prereq.Number]);
-
-        var readModel = await GetIssueReadModelAsync(project.Id, dependent.Number);
-        Assert.NotNull(readModel);
-        Assert.True(readModel!.CanStart);
-        Assert.Null(readModel.Blocker);
-        var prereqSummary = readModel.Prereq.Single();
-        Assert.True(prereqSummary.Completed);
     }
 
     [Fact]
