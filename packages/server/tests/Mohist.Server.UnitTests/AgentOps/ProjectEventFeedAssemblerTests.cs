@@ -5,11 +5,10 @@ using Mohist.Server.AgentOps.Services;
 using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Infrastructure.Data.Workflow;
 using Mohist.Server.Infrastructure.Events;
-using Mohist.Server.SpecTests.Support;
 using Mohist.Server.TestSupport;
 using Xunit;
 
-namespace Mohist.Server.SpecTests.Specs.AgentOps;
+namespace Mohist.Server.UnitTests.AgentOps;
 
 /// <summary>
 /// Calculation specs for <see cref="ProjectEventFeedAssembler"/>, the service
@@ -23,12 +22,12 @@ namespace Mohist.Server.SpecTests.Specs.AgentOps;
 /// <c>ProjectEventsApiSpecs</c>.
 /// </summary>
 [Collection("MohistDb")]
-public class ProjectEventFeedAssemblerSpecs
+public class ProjectEventFeedAssemblerTests
 {
     private readonly MohistDbFixture _fixture;
     private readonly ProjectEventSeedSupport _seeds;
 
-    public ProjectEventFeedAssemblerSpecs(MohistDbFixture fixture)
+    public ProjectEventFeedAssemblerTests(MohistDbFixture fixture)
     {
         _fixture = fixture;
         _seeds = new ProjectEventSeedSupport(fixture.Services);
