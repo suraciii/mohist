@@ -5,6 +5,8 @@ import type {
   RuntimeReadinessWitness,
   WorkItemResult,
 } from '../core/types.js'
+import type { ManagerExecutionGrantResponse } from '../core/types.js'
+import { ManagerExecutionBoundary } from './manager-execution-boundary.js'
 import type { RuntimeResult, RuntimeTurnResult, OpenCodeRuntime } from './opencode/index.js'
 import type { PiResult, PiRuntime, PiTurnResult } from './pi/index.js'
 import type { RecoverableRuntime, RuntimeTurnRecoveryResult } from './binding-recovery.js'
@@ -18,8 +20,45 @@ import { workKey } from './work-result-journal.js'
 
 export type RuntimeKind = 'opencode' | 'pi'
 
+export const MANAGER_RUNTIME_CAPABILITIES = [
+  'manager-execution-grant-v1',
+  'manager-deployment-epoch-v1',
+  'manager-private-broker-v1',
+  'manager-pi-scoped-executor-v1',
+  'manager-opencode-isolated-v1',
+  'manager-redaction-v1',
+] as const
+
 export function isManagerExecutionWork(work: Pick<DispatchWorkItem, 'projectId'>): boolean {
   return work.projectId === '__mohist_slack_manager__'
+}
+
+export function supportsManagerExecution(registration: RunnerRegistration): boolean {
+  return (
+    process.platform !== 'win32' &&
+    MANAGER_RUNTIME_CAPABILITIES.every((capability) => registration.capabilities.includes(capability))
+  )
+}
+
+export async function createManagerExecutionBoundary(
+  grant: ManagerExecutionGrantResponse,
+  runnerRoot: string,
+): Promise<ManagerExecutionBoundary | null> {
+  try {
+    return await ManagerExecutionBoundary.create(grant, runnerRoot)
+  } catch {
+    return null
+  }
+}
+
+export function gateManagerCapabilities(state: RunnerRegistration, openCodeReady: boolean): RunnerRegistration {
+  if (openCodeReady) return state
+  return {
+    ...state,
+    capabilities: state.capabilities.filter(
+      (capability) => !MANAGER_RUNTIME_CAPABILITIES.includes(capability as never),
+    ),
+  }
 }
 
 export function usesOpenCode(work: DispatchWorkItem): boolean {
