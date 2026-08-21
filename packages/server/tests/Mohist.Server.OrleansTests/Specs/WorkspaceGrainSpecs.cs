@@ -1,49 +1,26 @@
-using System.Net.Http.Json;
-using System.Text.Json;
 using Mohist.Server.Agent.Grains;
 using Mohist.Server.Infrastructure.Orleans;
+using Mohist.Server.OrleansTests.Support;
 using Mohist.Server.Sessions.Domain;
 using Mohist.Server.Sessions.Grains;
 using Mohist.Server.Sessions.Services;
-using Mohist.Server.SpecTests.Support;
 using Mohist.Server.TestSupport;
 using Mohist.Server.Workspace.Domain;
 using Mohist.Server.Workspace.Grains;
 using Xunit;
 
-namespace Mohist.Server.SpecTests.Specs.Workspace;
+namespace Mohist.Server.OrleansTests.Specs;
 
+[Collection("WorkflowGrain")]
 public class WorkspaceGrainSpecs
 {
-    private readonly MohistIntegrationFixture _fixture;
+    private readonly OrleansL0WorkflowGrainFixture _fixture;
     private readonly string _projectId;
 
-    public WorkspaceGrainSpecs(MohistIntegrationFixture fixture)
+    public WorkspaceGrainSpecs(OrleansL0WorkflowGrainFixture fixture)
     {
         _fixture = fixture;
-        _projectId = CreateProjectWithReposAsync().GetAwaiter().GetResult();
-    }
-
-    private async Task<string> CreateProjectWithReposAsync()
-    {
-        var raw = $"wgs-{Guid.NewGuid():N}".ToLowerInvariant();
-        var name = raw.Length > 63 ? raw[..63] : raw;
-        using var create = await _fixture.Client.PostAsJsonAsync("/api/projects", new
-        {
-            name,
-            repository = new { name = "server", gitUrl = $"file://{Guid.NewGuid():N}", baseBranch = "main" },
-        });
-        create.EnsureSuccessStatusCode();
-        var body = await create.Content.ReadFromJsonAsync<JsonElement>();
-        var projectId = body.GetProperty("data").GetProperty("id").GetString()
-            ?? throw new InvalidOperationException("CreateProject returned no id");
-
-        using var addWeb = await _fixture.Client.PostAsJsonAsync(
-            $"/api/projects/{projectId}/repositories",
-            new { name = "web", gitUrl = $"file://{Guid.NewGuid():N}", baseBranch = "main" });
-        addWeb.EnsureSuccessStatusCode();
-
-        return projectId;
+        _projectId = fixture.SeedWorkspaceProject();
     }
 
     private IWorkspaceGrain Grain(string name) =>

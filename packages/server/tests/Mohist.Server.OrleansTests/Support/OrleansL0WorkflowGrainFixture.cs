@@ -1,9 +1,13 @@
 using System.Text.Json;
+using Mohist.Server.Infrastructure.Data.Project;
+using Mohist.Server.Infrastructure.Orleans;
 using Mohist.Server.Runner.Grains;
 using Mohist.Server.SpecTests.Specs.Workflow;
+using Mohist.Server.SpecTests.Support;
 using Mohist.Server.TestSupport;
 using Mohist.Server.Workflow.Domain.Run;
 using Mohist.Server.Workflow.Grains;
+using Mohist.Server.Workspace.Grains;
 using Mohist.Workflow.Definition;
 
 namespace Mohist.Server.OrleansTests.Support;
@@ -36,6 +40,14 @@ public sealed class OrleansL0WorkflowGrainFixture : WorkflowGrainFixture
         _ = await runner.GetInfoAsync();
         await runner.UnregisterAsync();
 
+        var workspaceProjectId = SeedWorkspaceProject();
+        var workspace = Grains.GetGrain<IWorkspaceGrain>(
+            GrainKey.Workspace(workspaceProjectId, "workspace-warmup"));
+        await workspace.CreateManualAsync(
+            "workspace-warmup",
+            ["server"],
+            TimeProvider.GetUtcNow());
+
         // Template seeding, first activation, and generated copier JIT are
         // fixture costs. Warm the same report/claim path once, then prepare the
         // starting claim measured by the business Spec.
@@ -57,6 +69,27 @@ public sealed class OrleansL0WorkflowGrainFixture : WorkflowGrainFixture
             RecoveryWorkflowId,
             RecoveryRunnerId,
             RecoveryProjectId);
+    }
+
+    public string SeedWorkspaceProject()
+    {
+        var projectId = $"wgs-{Guid.NewGuid():N}";
+        using var db = GrainTestConfig.CreateDbContext(ConnectionString);
+        db.Projects.Add(new ProjectRow
+        {
+            Id = projectId,
+            Name = projectId,
+            RepositoriesJson = """
+                [
+                  {"name":"server","gitUrl":"https://git.test/server.git","baseBranch":"main","isDefault":true},
+                  {"name":"web","gitUrl":"https://git.test/web.git","baseBranch":"main","isDefault":false}
+                ]
+                """,
+            CreatedAt = TimeProvider.GetUtcNow(),
+            UpdatedAt = TimeProvider.GetUtcNow(),
+        });
+        db.SaveChanges();
+        return projectId;
     }
 
     public static RuntimeTaskInput RecoveryFollowUp() => new(
