@@ -8,8 +8,8 @@ namespace Mohist.Server.Agent.Grains;
 
 public sealed partial class AgentJobGrain
 {
-    private const string ManagerExpiryRecoveryPrompt =
-        "The previous Manager execution expired before its outcome was confirmed. Inspect the current resource state before taking any action; do not repeat the interrupted operation automatically.";
+    private const string ManagerRecoveryPrompt =
+        "The previous Manager execution ended before its outcome was confirmed. Inspect the current resource state before taking any action; do not repeat the interrupted operation automatically.";
 
     private static bool IsManagerCredentialExpired(WorkResult result) =>
         string.Equals(result.ErrorCode, "manager-credential-expired", StringComparison.Ordinal);
@@ -22,13 +22,13 @@ public sealed partial class AgentJobGrain
         await EnterUnknownStateAsync("manager-credential-expired");
         if (State.PendingInitialTurnTerminalDelivery is { } pending)
             await DeliverInitialTurnTerminalAsync(pending);
-        await EnsureManagerExpiryRecoveryAsync();
+        await EnsureManagerRecoveryAsync("manager-credential-expired");
         return new AgentJobReportResult(true, "manager_credential_expired");
     }
 
-    private async Task EnsureManagerExpiryRecoveryAsync()
+    private async Task EnsureManagerRecoveryAsync(string reason)
     {
-        if (State.ManagerExpiryRecovery is not null)
+        if (State.ManagerExpiryRecovery is not null || State.ManagerRecovery is not null)
             return;
 
         var input = State.Input;
@@ -39,14 +39,14 @@ public sealed partial class AgentJobGrain
             || string.IsNullOrWhiteSpace(input.AgentSessionId))
             return;
 
-        var inputId = $"manager-expiry-recovery-input:{Key}";
-        var turnId = $"manager-expiry-recovery-turn:{Key}";
+        var inputId = $"manager-recovery-input:{Key}";
+        var turnId = $"manager-recovery-turn:{Key}";
         var session = GrainFactory.GetGrain<IAgentSessionGrain>(input.AgentSessionId);
         await session.RecordFollowupTurnAsync(new RecordFollowupTurnCommand(
             inputId,
             turnId,
-            ManagerExpiryRecoveryPrompt,
-            "manager-credential-expiry-recovery",
+            ManagerRecoveryPrompt,
+            $"manager-recovery:{reason}",
             Provenance: new AgentSessionInputProvenance(
                 "slack",
                 anchor.WorkspaceId,
@@ -57,10 +57,18 @@ public sealed partial class AgentJobGrain
                 anchor.ConnectionId,
                 anchor.ThreadRootMessageId)));
 
-        State.ManagerExpiryRecovery = new ManagerExpiryRecoveryTransition(
+        State.ManagerRecovery = new ManagerRecoveryTransition(
             inputId,
             turnId,
+            reason,
             _timeProvider.GetUtcNow());
+        if (string.Equals(reason, "manager-credential-expired", StringComparison.Ordinal))
+        {
+            State.ManagerExpiryRecovery = new ManagerExpiryRecoveryTransition(
+                inputId,
+                turnId,
+                _timeProvider.GetUtcNow());
+        }
         await PersistAsync();
         await session.MarkInitialTurnTerminalAsync(Key, AgentTurnStatus.Unknown, null);
     }
@@ -79,6 +87,12 @@ public sealed partial class AgentJobGrain
             ? AgentJobFailureReasons.RunnerUnavailable
             : result.Message;
         await EnterUnknownStateAsync(reason);
+        if (IsManagerInput())
+        {
+            if (State.PendingInitialTurnTerminalDelivery is { } pending)
+                await DeliverInitialTurnTerminalAsync(pending);
+            await EnsureManagerRecoveryAsync("manager-execution-unknown");
+        }
         return new AgentJobReportResult(true, "unknown");
     }
 

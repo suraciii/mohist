@@ -860,7 +860,9 @@ export class RunnerHost {
 
   private async invalidateManagerExecutions(): Promise<void> {
     for (const entry of this.inFlight.values()) {
-      if (entry.work.projectId === '__mohist_slack_manager__') entry.controller.abort()
+      if (entry.work.projectId !== '__mohist_slack_manager__') continue
+      entry.managerInvalidated = true
+      entry.controller.abort(new Error('manager deployment epoch changed'))
     }
     const boundaries = [...this.managerExecutions.values()]
     this.managerExecutions.clear()

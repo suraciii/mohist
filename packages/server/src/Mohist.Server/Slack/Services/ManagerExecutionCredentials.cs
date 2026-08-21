@@ -154,7 +154,10 @@ public sealed class ManagerDeploymentEpoch : IManagerDeploymentEpoch, IHostedSer
         get
         {
             lock (_gate)
+            {
+                RefreshSharedEpoch();
                 return _current ?? string.Empty;
+            }
         }
     }
 
@@ -163,7 +166,10 @@ public sealed class ManagerDeploymentEpoch : IManagerDeploymentEpoch, IHostedSer
         get
         {
             lock (_gate)
+            {
+                RefreshSharedEpoch();
                 return _available && !string.IsNullOrWhiteSpace(_current);
+            }
         }
     }
 
@@ -213,6 +219,31 @@ public sealed class ManagerDeploymentEpoch : IManagerDeploymentEpoch, IHostedSer
     {
         Invalidate();
         return Task.CompletedTask;
+    }
+
+    private void RefreshSharedEpoch()
+    {
+        if (_store?.IsShared != true || !_available)
+            return;
+
+        try
+        {
+            var current = _store.ReadDeploymentEpoch();
+            if (string.IsNullOrWhiteSpace(current))
+            {
+                _current = null;
+                _available = false;
+                return;
+            }
+
+            _current = current;
+            _available = _store.Available;
+        }
+        catch
+        {
+            _current = null;
+            _available = false;
+        }
     }
 
     private static string NewEpoch() => $"mepoch_{Convert.ToHexString(RandomNumberGenerator.GetBytes(24)).ToLowerInvariant()}";
@@ -544,7 +575,8 @@ public sealed class ManagerExecutionCapabilityIssuer
         if (string.IsNullOrWhiteSpace(request.ExecutionId))
             throw new ArgumentException("Execution identity is required.", nameof(request));
         ValidateOrigin(request.Origin);
-        if (!_epoch.Available || string.IsNullOrWhiteSpace(_epoch.Current) || !_store.Available)
+        var deploymentEpoch = _epoch.Current;
+        if (!_epoch.Available || string.IsNullOrWhiteSpace(deploymentEpoch) || !_store.Available)
             throw new InvalidOperationException("Manager execution authorization is unavailable.");
 
         // A redelivery or replacement with the same execution identity
@@ -561,14 +593,16 @@ public sealed class ManagerExecutionCapabilityIssuer
             request,
             issuedAt,
             expiresAt,
-            capabilities);
+            capabilities,
+            deploymentEpoch);
         var replyLease = NewMetadata(
             ManagerExecutionLeaseKind.Reply,
             reply,
             request,
             issuedAt,
             expiresAt,
-            new HashSet<string>(StringComparer.Ordinal) { "manager.reply" });
+            new HashSet<string>(StringComparer.Ordinal) { "manager.reply" },
+            deploymentEpoch);
 
         try
         {
@@ -581,7 +615,13 @@ public sealed class ManagerExecutionCapabilityIssuer
             throw;
         }
 
-        return new ManagerExecutionGrant(management, reply, request.ExecutionId, expiresAt, _epoch.Current);
+        if (!string.Equals(_epoch.Current, deploymentEpoch, StringComparison.Ordinal))
+        {
+            _store.RevokeExecution(request.ExecutionId);
+            throw new InvalidOperationException("Manager deployment epoch changed while issuing the execution grant.");
+        }
+
+        return new ManagerExecutionGrant(management, reply, request.ExecutionId, expiresAt, deploymentEpoch);
     }
 
     public ManagerExecutionGrant? IssueFor(
@@ -604,7 +644,8 @@ public sealed class ManagerExecutionCapabilityIssuer
         string capability,
         DateTimeOffset now)
     {
-        if (!_epoch.Available || !_store.Available)
+        var deploymentEpoch = _epoch.Current;
+        if (!_epoch.Available || !_store.Available || string.IsNullOrWhiteSpace(deploymentEpoch))
             return ManagerExecutionValidationResult.Denied(
                 "manager_authorization_unavailable",
                 "Manager authorization is unavailable; inspect the current Manager status and retry explicitly.");
@@ -617,7 +658,7 @@ public sealed class ManagerExecutionCapabilityIssuer
             return ManagerExecutionValidationResult.Denied(
                 "manager_credential_invalid",
                 "The Manager execution credential is unknown, revoked, or already consumed; request a fresh turn.");
-        if (!string.Equals(lease.DeploymentEpoch, _epoch.Current, StringComparison.Ordinal))
+        if (!string.Equals(lease.DeploymentEpoch, deploymentEpoch, StringComparison.Ordinal))
             return ManagerExecutionValidationResult.Denied(
                 "manager_epoch_changed",
                 "The Manager Server restarted; request a fresh turn before retrying.");
@@ -644,7 +685,8 @@ public sealed class ManagerExecutionCapabilityIssuer
         ManagerExecutionOrigin origin,
         DateTimeOffset now)
     {
-        if (!_epoch.Available || !_store.Available)
+        var deploymentEpoch = _epoch.Current;
+        if (!_epoch.Available || !_store.Available || string.IsNullOrWhiteSpace(deploymentEpoch))
             return ManagerExecutionValidationResult.Denied(
                 "manager_authorization_unavailable",
                 "Manager authorization is unavailable; inspect the current Manager status and retry explicitly.");
@@ -672,7 +714,7 @@ public sealed class ManagerExecutionCapabilityIssuer
             return ManagerExecutionValidationResult.Denied(
                 "manager_credential_scope_mismatch",
                 "This credential is not valid for the requested Manager route.");
-        if (!string.Equals(lease.DeploymentEpoch, _epoch.Current, StringComparison.Ordinal))
+        if (!string.Equals(lease.DeploymentEpoch, deploymentEpoch, StringComparison.Ordinal))
             return ManagerExecutionValidationResult.Denied(
                 "manager_epoch_changed",
                 "The Manager Server restarted; request a fresh turn before retrying.");
@@ -707,14 +749,15 @@ public sealed class ManagerExecutionCapabilityIssuer
         ManagerExecutionIssueRequest request,
         DateTimeOffset issuedAt,
         DateTimeOffset expiresAt,
-        IReadOnlySet<string> capabilities) =>
+        IReadOnlySet<string> capabilities,
+        string deploymentEpoch) =>
         new(
             $"mlease_{Convert.ToHexString(RandomNumberGenerator.GetBytes(16)).ToLowerInvariant()}",
             Hash(credential),
             kind,
             request.ExecutionId,
             request.Origin,
-            _epoch.Current,
+            deploymentEpoch,
             issuedAt,
             expiresAt,
             new HashSet<string>(capabilities, StringComparer.Ordinal));

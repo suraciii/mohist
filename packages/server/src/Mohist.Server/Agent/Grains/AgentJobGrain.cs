@@ -1194,6 +1194,12 @@ public sealed partial class AgentJobGrain : Grain, IAgentJobGrain
             "AgentJob {Id} report timeout after {Timeout}; transitioning to unknown with reason {Reason}",
             Key, _options.JobTimeout, reason);
         await EnterUnknownStateAsync(reason, recoveryDeadlineAt);
+        if (IsManagerInput())
+        {
+            if (State.PendingInitialTurnTerminalDelivery is { } pending)
+                await DeliverInitialTurnTerminalAsync(pending);
+            await EnsureManagerRecoveryAsync(reason);
+        }
     }
 
     private async Task EvaluatePendingAsync()
