@@ -1,5 +1,21 @@
 ### Requirement: Manager exposes only the approved management operations
-The Manager execution capability SHALL expose exactly the approved logical operations `list`, `view`, `create`, `claim-owner`, `edit`, `enable`, `disable`, `transfer-owner`, and `diagnostics`. `list` SHALL provide workspace Manager status, `view` SHALL inspect Agent or Connection state, `create` SHALL create or mount the requested Agent using the existing Manager creation semantics, `edit` SHALL apply only supported routine Connection settings, `enable` and `disable` SHALL change routine Connection lifecycle state, owner operations SHALL issue the existing one-time owner workflows, and `diagnostics` SHALL report authoritative status and next actions. No operation outside this allowlist SHALL be callable through the Manager capability.
+The `ManagerManagementCapability` SHALL expose exactly the approved logical operations `list`, `view`, `create`, `claim-owner`, `edit`, `enable`, `disable`, `transfer-owner`, and `diagnostics`. The `mo slack message send` reply action is a separate `ManagerSlackReplyCapability`; it is not an operation in this allowlist and MUST NOT be accepted by this management bridge. `list` SHALL provide workspace Manager status, `view` SHALL inspect Agent or Connection state, `create` SHALL create or mount the requested Agent using the existing Manager creation semantics, `edit` SHALL apply only supported routine Connection settings, `enable` and `disable` SHALL change routine Connection lifecycle state, owner operations SHALL issue the existing one-time owner workflows, and `diagnostics` SHALL report authoritative status and next actions. No operation outside this allowlist SHALL be callable through the Manager management capability.
+
+The authoritative management request is an object with exactly `operation` and `args` properties. The grant supplies Workspace, enrollment, actor, and Session/dispatch claims; those values are not accepted as `args`. All target operations require a `projectId` and use these exact argument mappings:
+
+| Operation | Exact `args` |
+| --- | --- |
+| `list` | `{}` |
+| `diagnostics` | `{}` |
+| `view` | `{ projectId, targetKind: "agent" | "connection", targetId }` |
+| `create` | `{ projectId, agentId }` XOR `{ projectId, agentName, responsibility? }`, with optional `accessPolicy: "owner_only" | "allowlist" | "anyone"`; `responsibility` is required when `agentName` does not resolve to an existing Agent and otherwise omitted |
+| `edit` | `{ projectId, connectionId, accessPolicy: "owner_only" | "allowlist" | "anyone" }` |
+| `enable` | `{ projectId, connectionId }` |
+| `disable` | `{ projectId, connectionId }` |
+| `claim-owner` | `{ projectId, connectionId }` |
+| `transfer-owner` | `{ projectId, connectionId }` |
+
+The bridge rejects extra properties, a client-supplied Workspace or enrollment override, and any request that selects an endpoint, HTTP method, database operation, shell command, or protected credential route. For `create`, owner identity is the authenticated grant actor and workspace is the authenticated grant Workspace; neither is caller-selectable.
 
 #### Scenario: Status and inspection use the approved command surface
 - **WHEN** the Manager Agent requests current workspace status or an Agent/Connection inspection
@@ -12,6 +28,10 @@ The Manager execution capability SHALL expose exactly the approved logical opera
 #### Scenario: Owner operations use the existing claim workflow
 - **WHEN** the Manager Agent requests `claim-owner` or `transfer-owner` for a valid target
 - **THEN** the capability invokes the existing one-time owner workflow and returns only the resulting user instruction and expiry information required to continue that workflow, without exposing protected runtime credentials
+
+#### Scenario: The reply action is outside the management bridge
+- **WHEN** the Manager Agent invokes `mo slack message send` or supplies a reply-action request to the management bridge
+- **THEN** the management bridge rejects it as outside the management capability, and the request can succeed only through the separately authorized `ManagerSlackReplyCapability`
 
 #### Scenario: An unknown operation is rejected
 - **WHEN** the Manager Agent requests an operation name not in the allowlist

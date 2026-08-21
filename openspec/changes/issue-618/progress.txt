@@ -2,10 +2,11 @@ Issue 618 plan-artifact self-review follow-up
 
 Status: MF-1 identified as the only must-fix finding in self-review Round 1.
 
-Disposition in progress:
-- MF-1: fix in plan artifacts by separating the nine-operation Manager management capability from the `mo slack message send` reply capability. The fix will define each management request shape, the reply request and trusted Server anchor fields, grant validation for both routes, Manager-owned outbox routing, per-input dispatch idempotency, and focused denial/authorization tests.
+Disposition:
+- MF-1: fixed in the plan artifacts by separating the nine-operation Manager management capability from the `mo slack message send` reply capability. The fix defines each management request shape, the reply request and trusted Server anchor fields, route-scoped grant validation, Manager-owned outbox routing, per-input dispatch idempotency, and focused denial/authorization tests. A turn may receive distinct management and reply credentials from the same attempt lease, so the two capabilities remain disjoint without preventing a command followed by a reply.
 - Review observations: no action required by the request; retain as implementation cautions without changing self-review.md.
 
 Constraints:
 - Do not edit self-review.md.
-- Verify all changed plan artifacts and commit the completed plan update.
+- `git diff --check` and `jq empty openspec/changes/issue-618/tasks.json` pass; `self-review.md` remains untouched.
+- Commit the completed plan update.

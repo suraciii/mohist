@@ -1,17 +1,25 @@
 ### Requirement: Manager replies are authored only through the Slack reply action
-The Manager Agent SHALL author conversational content through the existing Slack reply action `mo slack message send`, using the Server-provided reply anchor for the Manager conversation and thread. Server SHALL never derive a Slack reply from Runtime output, assistant text, command results, terminal facts, or a missing reply. For each accepted Manager input, the Slack delivery boundary SHALL permit at most one final text reply for that input, with duplicate sends and redelivery converging on the existing delivery intent.
+The Manager Agent SHALL author conversational content through the separate `ManagerSlackReplyCapability` behind the existing Slack reply action `mo slack message send`, using the Server-provided reply anchor for the Manager conversation and thread. This action SHALL NOT be accepted by the nine-operation `ManagerManagementCapability`. The reply bridge SHALL validate the current `manager-slack-reply` grant, treat command-supplied conversation/thread/project/connection/session/dispatch values as untrusted assertions, and enqueue only with the injected anchor. Manager replies SHALL use `ProjectId = __mohist_slack_manager__`, `OwnerKind = manager`, and `ConnectionId = enrollment id`; their stable input dispatch key SHALL be derived from Session plus triggering message. Server SHALL never derive a Slack reply from Runtime output, assistant text, command results, terminal facts, or a missing reply. For each accepted Manager input, the Slack delivery boundary SHALL permit at most one final text reply for that input, with duplicate sends and redelivery converging on the existing delivery intent and a conflicting second payload rejected.
 
 #### Scenario: An Agent-authored Manager reply uses the supplied anchor
 - **WHEN** the Manager Agent has a useful response for an accepted input
-- **THEN** it sends that response through the existing Slack reply action to the Server-provided Manager conversation and thread anchor, and the Server persists it as the Manager's reply delivery intent
+- **THEN** it sends that response through the existing Slack reply action to the Server-provided Manager conversation and thread anchor, the `ManagerSlackReplyCapability` validates the current grant and dispatch, and the Server persists it as a Manager-owned reply delivery intent keyed to the current Session and triggering message
+
+#### Scenario: Every other Manager command remains denied
+- **WHEN** Manager execution attempts `mo slack status`, an unlisted `mo` command, an arbitrary endpoint/HTTP/database route, or a reply action through the management bridge
+- **THEN** the request is rejected before mutation or outbox enqueue; only the nine management operations or the separately authorized reply action can succeed
 
 #### Scenario: Assistant text is not a Manager reply
 - **WHEN** a Manager turn completes with `assistantText` or other Runtime output but no reply action
 - **THEN** Server creates no Slack reply from that output and does not copy it into a Manager outbox message
 
+#### Scenario: A reply cannot select another destination
+- **WHEN** the Manager Agent supplies a different conversation, thread, Project, Connection, Session, or dispatch value to `mo slack message send`
+- **THEN** the reply bridge rejects the action before enqueue and creates no delivery for the supplied foreign destination
+
 #### Scenario: Duplicate reply sends converge
 - **WHEN** the same Manager input is redelivered or the Agent repeats its reply action for the same dispatch
-- **THEN** the Server reuses or merges the existing final delivery intent and does not append a second final answer for that input
+- **THEN** the Server reuses the existing Manager-owned final delivery intent when the payload is identical, rejects a different payload with an idempotency conflict, and does not append a second final answer for that input
 
 ### Requirement: Manager liveness uses reactions and closes one terminal outcome
 For every accepted Manager input, Server SHALL project acceptance with the canonical Received reaction and progress with the canonical Working reaction when work is executing or queued. On a successful, failed, cancelled, unknown, or recovered terminal outcome, Server SHALL remove the Working state when present and converge to exactly one terminal reaction for that input. A successful terminal outcome SHALL use the completed reaction; failed, cancelled, or unknown outcomes SHALL use the attention reaction; a recovered execution SHALL close the current turn using the terminal state confirmed for that recovered execution. Liveness projection SHALL be idempotent across duplicate events, restart, and adapter rebinding.
