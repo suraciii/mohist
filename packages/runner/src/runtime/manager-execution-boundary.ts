@@ -11,6 +11,7 @@ import type { OpenCodeRuntime } from './opencode/runtime.js'
 import { createIsolatedOpencodeServer } from './opencode/server-process.js'
 import {
   DEFAULT_MANAGER_REQUEST_LIMITS,
+  isManagerUsageRequest,
   managerRequestKind,
   resolveManagerRequestCapability,
   type ManagerRequestLimits,
@@ -359,16 +360,18 @@ socket.end(JSON.stringify({ kind, args }))
   }): { kind: 'management' | 'reply'; args: string[] } | null {
     const kind = request.kind === 'management' || request.kind === 'reply' ? request.kind : null
     if (kind === null) return null
-    if (!Array.isArray(request.args) || request.args.length === 0) return null
-    if (request.args.length > 128) return null
+    if (!Array.isArray(request.args) || request.args.length > 128) return null
     if (request.args.some((arg) => typeof arg !== 'string' || arg.length === 0)) return null
     if (this.disposed || this.expired()) return null
     if (this.runningChildren > 0) return null
     if (this.usedRequests[kind] >= this.requestLimits[kind]) return null
-    const capability = resolveManagerRequestCapability(request.args as string[])
-    if (managerRequestKind(capability) !== kind) return null
+    const args = request.args as string[]
+    const capability = resolveManagerRequestCapability(args)
+    const admittedKind =
+      capability !== null ? managerRequestKind(capability) : isManagerUsageRequest(args) ? 'management' : null
+    if (admittedKind !== kind) return null
     this.usedRequests[kind] += 1
-    return { kind, args: request.args as string[] }
+    return { kind, args }
   }
 
   private async executeCli(socket: Socket, kind: 'management' | 'reply', args: string[]): Promise<void> {

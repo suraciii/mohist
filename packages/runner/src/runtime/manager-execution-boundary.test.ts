@@ -5,7 +5,11 @@ import { join } from 'node:path'
 import { createConnection } from 'node:net'
 import { describe, expect, it } from 'vitest'
 import { ManagerExecutionBoundary, type ManagerExecutionGrant } from './manager-execution-boundary.js'
-import { managerRequestKind, resolveManagerRequestCapability } from './manager-capability-surface.js'
+import {
+  isManagerUsageRequest,
+  managerRequestKind,
+  resolveManagerRequestCapability,
+} from './manager-capability-surface.js'
 
 const grant: ManagerExecutionGrant = {
   managementCredential: 'management-secret-012345678901234567890123456789',
@@ -131,24 +135,39 @@ describe('ManagerExecutionBoundary', () => {
       expect(stub.invocations()).toHaveLength(1)
 
       // Commands outside the Manager capability vocabulary never spawn.
-      for (const args of [['run', 'view'], ['issue', 'create', 'x'], [], ['slack', 'edit', '--bot-name=n']]) {
-        const refused = await requestBroker(broker, 'management', args as string[])
+      for (const args of [
+        ['run', 'view'],
+        ['issue', 'create', 'x'],
+        ['slack', 'edit', '--bot-name=n'],
+      ]) {
+        const refused = await requestBroker(broker, 'management', args)
         expect(refused?.exitCode).toBeUndefined()
       }
       expect(stub.invocations()).toHaveLength(1)
+
+      // Usage and help requests mirror the CLI manager-mode admission and
+      // run read-only under the management kind.
+      for (const args of [[], ['--help'], ['-h'], ['--manager']]) {
+        const usage = await requestBroker(broker, 'management', args)
+        expect(usage?.exitCode).toBe(0)
+      }
+      expect(stub.invocations()).toHaveLength(5)
+      const usageReplyKind = await requestBroker(broker, 'reply', ['--help'])
+      expect(usageReplyKind?.exitCode).toBeUndefined()
+      expect(stub.invocations()).toHaveLength(5)
 
       // A forged reply target cannot escape the reply lease: only the
       // message send shape is admitted under the reply kind.
       const forged = await requestBroker(broker, 'reply', ['slack', 'message', 'drop'])
       expect(forged?.exitCode).toBeUndefined()
-      expect(stub.invocations()).toHaveLength(1)
+      expect(stub.invocations()).toHaveLength(5)
 
       const validReply = await requestBroker(broker, 'reply', ['slack', 'message', 'send', 'hello'])
       expect(validReply?.exitCode).toBe(0)
       const replyInvocations = stub.invocations()
-      expect(replyInvocations).toHaveLength(2)
-      expect(replyInvocations[1].replyToken).toBe(true)
-      expect(replyInvocations[1].managementToken).toBe(false)
+      expect(replyInvocations).toHaveLength(6)
+      expect(replyInvocations[5].replyToken).toBe(true)
+      expect(replyInvocations[5].managementToken).toBe(false)
       expect(JSON.stringify(validReply)).not.toContain(grant.replyCredential)
     } finally {
       await boundary.dispose()
@@ -240,6 +259,20 @@ describe('manager capability surface mirror', () => {
     expect(managerRequestKind('workspace.status')).toBe('management')
     expect(managerRequestKind('unknown.thing')).toBeNull()
     expect(managerRequestKind(null)).toBeNull()
+  })
+
+  it('admits usage and help requests exactly like Manager-mode mo', () => {
+    expect(isManagerUsageRequest([])).toBe(true)
+    expect(isManagerUsageRequest(['--manager'])).toBe(true)
+    expect(isManagerUsageRequest(['--manager=true'])).toBe(true)
+    expect(isManagerUsageRequest(['--help'])).toBe(true)
+    expect(isManagerUsageRequest(['-h'])).toBe(true)
+    expect(isManagerUsageRequest(['-?'])).toBe(true)
+    expect(isManagerUsageRequest(['/?'])).toBe(true)
+    expect(isManagerUsageRequest(['--help=expanded'])).toBe(true)
+    expect(isManagerUsageRequest(['--manager', '--help'])).toBe(true)
+    expect(isManagerUsageRequest(['slack', 'status'])).toBe(false)
+    expect(isManagerUsageRequest(['run', 'view', '--help'])).toBe(true)
   })
 })
 
