@@ -16,7 +16,7 @@ not edited; the next self-review regenerates it.
 
 - Plan edits: complete for all three findings.
 - Verification: `tasks.json` parses, all task spec anchors resolve, and `git diff --check` passes.
-- Commit: pending.
+- Commit: `fcfeffc25` (`fix issue-619 plan review findings`).
 
 ## Disposition notes
 
