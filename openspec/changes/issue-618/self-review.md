@@ -1,40 +1,49 @@
-# Self-Review: Issue 618 Plan Artifacts (Round 1)
+# Self-Review: Issue 618 Plan Artifacts (Round 2)
 
-This is the first review of the plan. I read the canonical issue body and acceptance criteria before reviewing `proposal.md`, `design.md`, `tasks.json`, and all four capability specs. I also checked the current Server, CLI, Runner-contract, Slack outbox, liveness, Manager ingress, and Manager test surfaces.
+This is a re-review. I re-read the canonical issue body and acceptance criteria first with:
 
-## Must-Fix Findings
+```bash
+mo issue view 618 --project proj_f6c141d63b6243bfbb481737b2243b87
+```
 
-### MF-1. The Manager command bridge has no non-overlapping boundary for the required reply action
+I then verified the disposition of the prior review against `proposal.md`, `design.md`, `tasks.json`, and all four files under `specs/`.
 
-**Evidence:**
+## Verdict
 
-- `specs/manager-command-capability/spec.md:2` and `tasks.json` T-003 require the Manager capability to expose exactly nine logical operations and reject every operation outside that allowlist.
-- `design.md:80-81` says the Manager execution bridge constrains requests to that allowlist and rejects unknown command names, arbitrary endpoints, and other unrestricted access.
-- `design.md:100-106`, `specs/manager-slack-reply-liveness/spec.md:2-6`, and T-005 simultaneously require the Agent to publish the final conversational response through `mo slack message send`.
-- The artifacts never state whether `mo slack message send` is outside the management capability, nor do they define a separate reply capability, its authorization boundary, or how its Manager grant/Session/dispatch metadata reaches the reply endpoint. The current CLI registers `message send` as a normal `mo slack` command (`packages/cli/Mohist.Cli/MohistCliCommands.Slack.cs:1001-1098`), so an implementation that applies the T-003 bridge filter to all `mo` invocations will reject the required reply. An implementation that exempts it inside the same bridge violates the stated exact allowlist.
+**PASS** — no must-fix problems remain; the plan is ready to build.
 
-This violates issue acceptance criterion 1, which requires the final natural-language result to be published by the Agent through the reply action, and criterion 7, which requires the capability allowlist to exclude unrestricted operations. It also leaves the core security and authorship contract ambiguous: there is no authoritative answer to which capability authorizes the reply, which request fields are trusted from the injected anchor, or which Manager outbox owner and per-input dispatch identity are used.
+## Previous finding disposition
 
-The plan must explicitly separate the management allowlist from the reply-action capability, or define a precise exception with equivalent non-management authorization. It must specify the exact request/argument mapping for the nine management operations, the reply transport and grant validation, Manager-owned outbox routing, and per-input idempotency. Add tests proving that `mo slack message send` succeeds only for the current Manager anchor while every other `mo` command and arbitrary route remains denied.
+### MF-1 — fixed properly
 
-## Dimension Verdicts
+The prior review found a conflict between the exact nine-operation management allowlist and the required `mo slack message send` reply action. The updated artifacts resolve that conflict consistently:
 
-- **Issue goals and acceptance criteria:** checked first, with one must-fix conflict recorded above.
-- **Coverage:** issue found. The plan covers the visible behaviors, but the required Agent reply and strict capability exclusion do not have a complete, non-conflicting contract.
-- **Correctness:** issue found. The two literal interpretations of the bridge produce opposite acceptance-criteria failures.
-- **Current codebase consistency:** issue found for the same boundary. The existing CLI has a general `message send` command and the existing reply API is separate from the Manager outbox owner, but the plan does not define how that separation is preserved under the new bridge.
-- **Task breakdown, ordering, and verifiability:** checked. The dependency graph is acyclic and the five tasks cover all four specs, but T-003 and T-005 need the boundary and contract additions above before implementation is verifiable.
+- `specs/manager-command-capability/spec.md:2-18` defines `ManagerManagementCapability` as exactly the nine operations, gives the exact request envelope and argument mapping, and explicitly rejects `mo slack message send` on that bridge.
+- `design.md:78-90` defines separate `ManagerManagementBridge` and `ManagerSlackReplyBridge` routes. It also defines the reply bridge's trusted anchor mapping, Manager outbox owner, route-scoped audiences, and per-input idempotency behavior.
+- `specs/manager-execution-credential/spec.md:32-74` makes the management and reply audiences disjoint and requires validation before either application or outbox service is called.
+- `tasks.json` T-003 and T-005 contain corresponding implementation and denial tests, including reply denial on the management route, anchor validation, Manager-owned routing, duplicate payload conflicts, and recovery redelivery.
+
+This fixes the specific issue against acceptance criteria 1 and 7 without reintroducing a reply exception into the management allowlist. The proposal and lifecycle spec still remove the old model-output parser, synthetic follow-up, and Server-authored reply paths, so the fix did not regress acceptance criterion 2 or the no-compatibility-path non-goal.
+
+## Re-review checks
+
+- **Prior must-fix findings:** checked; MF-1 is fixed in the contract, design, task breakdown, and tests.
+- **Regression from the fix:** checked, no must-fix regression. The reply route is separate, has its own audience and authorization, and does not broaden management access.
+- **Coverage:** checked, no must-fix issue. The artifacts address all eight acceptance criteria: Agent-authored CLI-backed replies and received reaction; removal of envelope/synthetic/server-authored text; managed-Bot loop prevention; ephemeral credential boundaries; recovery reissuance; current authorization; strict exclusions; and one terminal reaction for every outcome.
+- **Correctness:** checked, no must-fix issue. The selected boundaries make management effects originate only from the allowlisted capability, replies originate only from the separately authorized reply action, and liveness remains an independent reaction projection.
+- **Current codebase consistency:** checked, no must-fix issue. The plan explicitly reuses the existing Session/Runner Slack context, application services, Slack outbox, Manager owner kind, managed-Bot admission, and liveness projection, while naming the current Manager parser, generic reply lookup, and Server terminal-delivery branch for removal or replacement.
+- **Task breakdown, ordering, and verifiability:** checked, no must-fix issue. T-001 establishes the transient credential boundary; T-002 independently protects ingress; T-003 builds the management bridge; T-004 switches the Session lifecycle and removes the old protocol; T-005 completes reply delivery and liveness. Dependencies are acyclic, and each task has focused acceptance and regression tests.
 
 ## Observations
 
-1. The current `SlackManagerConversationService` still catches `RuntimeSessionMissingException` and launches `ReplacementManagerSessionId` (`packages/server/src/Mohist.Server/Slack/Services/SlackManagerConversationService.cs:84-91,145-151`). That would create a second Session in one DM. The plan's T-004 acceptance criteria and `design.md:127` correctly prohibit parallel Sessions, so implementation must remove this fallback or reconcile the canonical Session instead of following the current path.
+These do not affect the PASS verdict because the plan states the required invariants and assigns verification; they are implementation cautions rather than problems that make the plan wrong or incomplete relative to Issue 618.
 
-2. The current reply store hardcodes `OwnerKind = connection` for a newly created reply and deduplicates primarily by connection/conversation/thread (`packages/server/src/Mohist.Server/Infrastructure/Slack/SlackOutboxStore.cs:299-412,658-704`). T-005's per-input promise requires a Manager enrollment owner and a dispatch/input-scoped identity, especially for multiple sequential turns in one DM. The design states the behavioral outcome but does not name this required store-key change.
+1. The exact Runner-to-CLI transport, multi-Server placement/routing of the non-durable grant store, and grant TTL remain implementation choices in `design.md:145-147`. The plan does provide the non-negotiable security invariant and leakage tests. The chosen mechanism must preserve that invariant rather than turn the credential into a generic shell environment variable or durable token row.
 
-3. Follow-up terminal events currently carry `messageTs = null` and only the Session's thread label (`packages/server/src/Mohist.Server/Sessions/Grains/AgentSessionGrain.cs:3881-3933`). With Manager progress represented only by reactions, terminal finalization cannot rely on a replaceable progress row to recover the current triggering message. The design says the terminal handler resolves Manager Session/source facts (`design.md:127 and Decision 6`), so T-005 should test that lookup explicitly, including absent progress, restart, and redelivery; otherwise the projector can target the initial root or the handler's synthetic `terminal:<job>` identity.
+2. Manager liveness is specified as reaction-only, but the existing common projection carries fallback text such as `Received...` and `Working...` in `SlackStatusProjection`. T-005 should explicitly verify the Manager path does not emit those fallback messages, including reaction-delivery failure and retry cases; this is already covered by the plan's no-Server-authored-text contract and is not a missing acceptance criterion.
 
-4. The exact Runner-to-CLI transport remains an open question (`design.md:149-153`). The stated invariant and leakage tests are useful and keep this from being a separate must-fix, but the selected transport must be fixed before implementation because ordinary CLI bearer authentication and general shell execution are different trust boundaries.
+3. Terminal delivery must resolve the triggering Manager input from durable Session/input provenance when a follow-up terminal envelope has no `messageTs`. The design calls for this resolution and T-005 requires absent-progress, restart, recovery, and redelivery coverage. The implementation should not fall back to the initial DM root or a synthetic terminal identity when finalizing reactions.
 
-5. The current `SlackStatusProjection` still creates a `Working...` progress message and reaction fallbacks (`packages/server/src/Mohist.Server/Infrastructure/Slack/SlackStatusProjection.cs:17-68`). T-005 explicitly requires Manager reaction-only acceptance/progress, so its tests must prove that Manager requests do not leave these ordinary text fallback rows even when liveness is retried.
+4. The command spec describes `list` as workspace Manager status and `view` as a single Agent/Connection inspection. The implementation should make the `list Agents` scenario explicit in the structured result and test it against the same facts exposed by the protected `mo` path, including project/workspace scope. This is a clarity and verification concern, not a demonstrated failure of the issue goals.
 
-<promise>FAIL</promise>
+<promise>PASS</promise>
