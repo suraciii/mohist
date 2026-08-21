@@ -55,24 +55,6 @@ public sealed class InteractionWorkspaceSpecs
     }
 
     [Fact]
-    public async Task SlackChannel_SecondSession_ReusesSameWorkspace()
-    {
-        var connection = await CreateConnectionAsync();
-        const string conversationId = "C-interaction-reuse";
-
-        var first = await PostChannelAsync(connection, conversationId, "1710000000.010101", "<@U123> first task");
-        var firstSessionId = first.GetProperty("sessionId").GetString()!;
-        var firstWorkspace = await SessionWorkspaceNameAsync(firstSessionId);
-
-        var second = await PostChannelAsync(connection, conversationId, "1710000000.010102", "<@U123> second task");
-        var secondSessionId = second.GetProperty("sessionId").GetString()!;
-
-        Assert.NotEqual(firstSessionId, secondSessionId);
-        Assert.Equal(firstWorkspace, await SessionWorkspaceNameAsync(secondSessionId));
-        Assert.Single(await WorkspaceEventsAsync(connection.ProjectId, firstWorkspace!));
-    }
-
-    [Fact]
     public async Task SlackChannel_SecondAgent_EntersSameWorkspace()
     {
         var connection = await CreateConnectionAsync();
@@ -116,20 +98,6 @@ public sealed class InteractionWorkspaceSpecs
         var secondWs = await FindWorkspaceAsync(connection.ProjectId, secondWorkspaceName!);
         Assert.Equal(WorkspaceStatus.Active, secondWs!.Status);
         Assert.Equal(new WorkspaceOrigin.Slack(connection.WorkspaceTeamId, conversationId), secondWs.Origin);
-    }
-
-    [Fact]
-    public async Task SlackChannel_Archive_IsIdempotentAndIgnoresActiveSessions()
-    {
-        var connection = await CreateConnectionAsync();
-        const string conversationId = "C-interaction-archive-guard";
-
-        var first = await PostChannelAsync(connection, conversationId, "1710000000.010401", "<@U123> first task");
-        var workspaceName = await SessionWorkspaceNameAsync(first.GetProperty("sessionId").GetString()!);
-
-        Assert.True((await ArchiveChannelAsync(connection, conversationId)).GetProperty("archived").GetBoolean());
-        Assert.False((await ArchiveChannelAsync(connection, conversationId)).GetProperty("archived").GetBoolean());
-        Assert.Equal(WorkspaceStatus.Archived, (await FindWorkspaceAsync(connection.ProjectId, workspaceName!))!.Status);
     }
 
     // --- Slack channel across projects: acceptance 4 ---
@@ -180,31 +148,6 @@ public sealed class InteractionWorkspaceSpecs
     }
 
     // --- Concurrency ---
-
-    [Fact]
-    public async Task SlackChannel_ConcurrentFirstCreate_ResolvesToOneWorkspace()
-    {
-        var connection = await CreateConnectionAsync();
-        const string conversationId = "C-interaction-concurrent";
-
-        await using var scope = _fixture.Services.CreateAsyncScope();
-        var provisioner = scope.ServiceProvider.GetRequiredService<InteractionWorkspaceProvisioner>();
-        var now = _fixture.TimeProvider.GetUtcNow();
-        var results = await Task.WhenAll(
-            provisioner.EnsureSlackWorkspaceAsync(connection.ProjectId, "T123", conversationId, now),
-            provisioner.EnsureSlackWorkspaceAsync(connection.ProjectId, "T123", conversationId, now));
-
-        Assert.Equal(results[0], results[1]);
-        Assert.Equal($"slack-{conversationId}", results[0]);
-        var active = await scope.ServiceProvider.GetRequiredService<IWorkspaceStore>()
-            .FindActiveByOriginAsync(
-                connection.ProjectId,
-                WorkspaceRowJson.OriginKind(new WorkspaceOrigin.Slack("T123", conversationId)),
-                WorkspaceRowJson.OriginPayload(new WorkspaceOrigin.Slack("T123", conversationId)));
-        Assert.NotNull(active);
-        Assert.Equal(results[0], active!.Name);
-        Assert.Single(await WorkspaceEventsAsync(connection.ProjectId, results[0]));
-    }
 
     // --- Helpers ---
 

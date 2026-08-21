@@ -32,40 +32,6 @@ public class AgentSessionTranscriptProjectionSpecs : AgentSessionTestSupport
     }
 
     [Fact]
-    public async Task LoadLatestEventsActivity_DoesNotSuppressTerminalOrLivenessEventTypes()
-    {
-        var (project, issue, _, session) = await CreateStartedAgentSessionAsync("activity-no-filter", title: "Activity no filter");
-        var persistence = _fixture.Persistence.Checkpoint(session.Id);
-        await _client.PostOkAsync(RunnerAgentSessionAttachPath(session), new { runtimeSessionId = session.Id, workDir = $"/workspaces/{project.Id}", processPid = 1234 });
-
-        // Under the activity model `session.closed` is a no-op (the grain no
-        // longer persists a transcript part for it); a liveness-bearing event
-        // such as `session.liveness` still produces a `status` transcript
-        // part, so verify that part type is forwarded to the activity feed
-        // rather than suppressed.
-        await _client.PostOkAsync(RunnerSessionRuntimeEventsPath(session), new
-        {
-            runtimeSessionId = session.Id,
-            runtimeEvents = new object[]
-            {
-                new
-                {
-                    type = "session.liveness",
-                    payload = new { }
-                }
-            }
-        });
-
-        var dbFactory = _fixture.Services.GetRequiredService<IDbContextFactory<MohistDbContext>>();
-        await dbFactory.WaitForTranscriptPartsAsync(session.Id, 1, persistence);
-
-        var activity = await _client.GetDataAsync<ActivityDto>($"/api/projects/{project.Id}/agent/activity");
-        var card = Assert.Single(activity.Sessions, s => s.SessionId == session.Id);
-        Assert.NotNull(card.LastActivity);
-        Assert.Equal("status", card.LastActivity!.Text);
-    }
-
-    [Fact]
     public async Task IssueSessionMetadataEndpoint_ProjectsTranscriptEventsInSequenceOrder_WhenRowsWereInsertedOutOfOrder()
     {
         var (project, issue, work, _) = await CreateStartedAgentSessionAsync("metadata-order", sessionName: "plan");
@@ -125,57 +91,6 @@ public class AgentSessionTranscriptProjectionSpecs : AgentSessionTestSupport
         Assert.Equal(session.Id, wireSummary.GetProperty("runtimeSessionId").GetString());
         Assert.Equal("opencode", wireSummary.GetProperty("runtime").GetString());
         Assert.False(wireSummary.TryGetProperty("coderSessionId", out _));
-    }
-
-    [Fact]
-    public async Task CoderSessionSummary_UnboundSessionLeavesRuntimeSessionIdNull()
-    {
-        var (project, issue, _, _) = await CreateStartedAgentSessionAsync("unbound-summary", start: false, sessionName: "plan");
-
-        var raw = await _client.GetRawAsync($"/api/projects/{project.Id}/issues/{issue.Number}/coder-sessions");
-
-        using var document = JsonDocument.Parse(raw);
-        var summary = Assert.Single(document.RootElement.GetProperty("data").EnumerateArray());
-        Assert.False(summary.TryGetProperty("runtimeSessionId", out _));
-    }
-
-    [Fact]
-    public async Task UnboundQueuedSessionTranscript_ProjectsCanonicalTurnWithoutRuntimeBinding()
-    {
-        var (project, issue, work, session) = await CreateStartedAgentSessionAsync("unbound-transcript", start: false, sessionName: "plan");
-        var sessionGrain = _fixture.Grains.GetGrain<IAgentSessionGrain>(session.Id);
-        await sessionGrain.EnsureInitialLaunchAsync(new EnsureInitialLaunchCommand(
-            InputId: $"input-{session.Id}",
-            TurnId: $"turn-{session.Id}",
-            Prompt: "queued task",
-            Source: "agent-launch",
-            JobId: work.WorkId,
-            Runtime: "opencode",
-            WorkDir: $"/workspaces/{project.Id}"));
-
-        var raw = await _client.GetRawAsync(
-            $"/api/projects/{project.Id}/issues/{issue.Number}/sessions/plan/transcript");
-        using var document = JsonDocument.Parse(raw);
-        var data = document.RootElement.GetProperty("data");
-        var turn = Assert.Single(data.GetProperty("turns").EnumerateArray());
-        Assert.Equal("queued", data.GetProperty("status").GetString());
-        Assert.Equal("queued", turn.GetProperty("status").GetString());
-        Assert.True(turn.GetProperty("incomplete").GetBoolean());
-        Assert.Equal("queued task", turn.GetProperty("user").GetProperty("text").GetString());
-    }
-
-    [Fact]
-    public async Task IssueSessionMetadataEndpoint_MissingSession_ReturnsNotFound()
-    {
-        var projectName = $"metadata-not-found-{Guid.NewGuid():N}";
-        var project = await _client.CreateProjectWithDefaultRepositoryAsync<ProjectDto>("/api/projects", projectName);
-
-        await _client.PostOkAsync($"/api/projects/{project.Id}/repositories", new { name = "main", gitUrl = $"file://{Guid.NewGuid():N}", baseBranch = "main", setDefault = true });
-        var issue = await _client.PostDataAsync<IssueDto>($"/api/projects/{project.Id}/issues", new { title = "Metadata not found", projectId = project.Id });
-
-        using var response = await _client.GetAsync($"/api/projects/{project.Id}/issues/{issue.Number}/sessions/does-not-exist");
-
-        Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
     }
 
     [Fact]

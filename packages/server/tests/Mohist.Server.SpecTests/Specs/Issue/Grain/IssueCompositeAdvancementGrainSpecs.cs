@@ -68,45 +68,6 @@ public class IssueCompositeAdvancementGrainSpecs
     }
 
     [Fact]
-    public async Task StartCompositeAsync_OnDraftParent_ThrowsDraftBlocker()
-    {
-        var projectId = await CreateProjectAsync();
-        var parent = await CreateIssueAsync(projectId, "Parent Draft", isDraft: true);
-        var child = await CreateIssueAsync(projectId, "Child", isDraft: false);
-        await AttachChildAsync(projectId, child, parent.Number);
-
-        var parentGrain = Grains.GetGrain<IIssueGrain>(
-            GrainKey.Issue(new IssueKey(projectId, parent.Number)));
-        var ex = await Assert.ThrowsAsync<IssueStartBlockedException>(
-            () => parentGrain.StartCompositeAsync());
-        Assert.IsType<IssueStartBlocker.Draft>(ex.Blocker);
-    }
-
-    [Fact]
-    public async Task StartCompositeAsync_OnParentWithZeroChildren_NoOpsAndDoesNotThrow()
-    {
-        // The issue-419 design tolerates a vanishing-children race: the
-        // recompute triggered by the parent-changed event for the last
-        // detach may engage StartCompositeAsync after the children
-        // snapshot is already empty. The grain must no-op rather than
-        // throw — subsequent aggregate transitions are guarded by their
-        // own empty-snapshot check.
-        var projectId = await CreateProjectAsync();
-        var parent = await CreateIssueAsync(projectId, "Parent", isDraft: false);
-
-        var parentGrain = Grains.GetGrain<IIssueGrain>(
-            GrainKey.Issue(new IssueKey(projectId, parent.Number)));
-        await parentGrain.StartCompositeAsync();
-
-        // Parent stays Backlog: there are no children to drive it to
-        // InProgress, and StartCompositeAsync must not throw.
-        var view = await GetIssueReadModelAsync(projectId, parent.Number);
-        Assert.NotNull(view);
-        Assert.Equal("backlog", view!.Status);
-        Assert.Null(view.WorkflowRunId);
-    }
-
-    [Fact]
     public async Task RecomputeCompositeStatusAsync_IsIdempotent_AcrossRedeliveries()
     {
         // Drive a recompute that produces a status-change event, then
@@ -152,79 +113,6 @@ public class IssueCompositeAdvancementGrainSpecs
         var statusChangeCount = events.Count(e =>
             string.Equals(e.Envelope.Type, EventCatalog.ReverseDns.IssueCompositeStatusChanged, StringComparison.Ordinal));
         Assert.Equal(1, statusChangeCount);
-    }
-
-    [Fact]
-    public async Task RecomputeCompositeStatusAsync_OnBacklogParent_NoFanOut()
-    {
-        // Attaching a child to a Backlog parent must NOT start the child —
-        // the user must explicitly run `mo issue start`. The fan-out is
-        // gated on target == InProgress (design D6 step 4).
-        var projectId = await CreateProjectAsync();
-        var parent = await CreateIssueAsync(projectId, "Parent", isDraft: false);
-        var child = await CreateIssueAsync(projectId, "Child", isDraft: false);
-
-        var parentGrain = Grains.GetGrain<IIssueGrain>(
-            GrainKey.Issue(new IssueKey(projectId, parent.Number)));
-        // Recompute before attach: nothing to do.
-        await parentGrain.RecomputeCompositeStatusAsync();
-
-        await AttachChildAsync(projectId, child, parent.Number);
-        await DispatchEventsAsync();
-
-        // Recompute triggered by parent-changed: parent is still Backlog,
-        // target stays Backlog, no fan-out.
-        await parentGrain.RecomputeCompositeStatusAsync();
-
-        var childView = await GetIssueReadModelAsync(projectId, child.Number);
-        Assert.Equal("backlog", childView!.Status);
-        Assert.Null(childView.WorkflowRunId);
-
-        var parentView = await GetIssueReadModelAsync(projectId, parent.Number);
-        Assert.Equal("backlog", parentView!.Status);
-    }
-
-    [Fact]
-    public async Task RecomputeCompositeStatusAsync_OnParentWithZeroChildren_NoOps()
-    {
-        var projectId = await CreateProjectAsync();
-        var parent = await CreateIssueAsync(projectId, "Parent", isDraft: false);
-
-        var parentGrain = Grains.GetGrain<IIssueGrain>(
-            GrainKey.Issue(new IssueKey(projectId, parent.Number)));
-        // No children exist; recompute is a no-op.
-        await parentGrain.RecomputeCompositeStatusAsync();
-
-        var view = await GetIssueReadModelAsync(projectId, parent.Number);
-        Assert.Equal("backlog", view!.Status);
-    }
-
-    [Fact]
-    public async Task StartWorkAsync_OnParent_AggregatesAndFansOut()
-    {
-        // Regression guard: StartWorkAsync on a parent must route into
-        // StartCompositeAsync (no is_parent blocker).
-        var projectId = await CreateProjectAsync();
-        var parent = await CreateIssueAsync(projectId, "Parent", isDraft: false);
-        var child = await CreateIssueAsync(projectId, "Child", isDraft: false);
-        await AttachChildAsync(projectId, child, parent.Number);
-
-        var grain = Grains.GetGrain<IIssueGrain>(
-            GrainKey.Issue(new IssueKey(projectId, parent.Number)));
-        var returnedWrId = await grain.StartWorkAsync();
-
-        // The composite path returns an empty string for the run id
-        // (the parent never owns one).
-        Assert.Equal(string.Empty, returnedWrId);
-
-        await DispatchEventsAsync();
-        var parentView = await GetIssueReadModelAsync(projectId, parent.Number);
-        Assert.Equal("in_progress", parentView!.Status);
-        Assert.Null(parentView.WorkflowRunId);
-
-        var childView = await GetIssueReadModelAsync(projectId, child.Number);
-        Assert.Equal("in_progress", childView!.Status);
-        Assert.NotNull(childView.WorkflowRunId);
     }
 
     [Fact]

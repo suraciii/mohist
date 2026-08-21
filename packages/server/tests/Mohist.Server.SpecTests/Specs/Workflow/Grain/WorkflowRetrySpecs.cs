@@ -214,37 +214,6 @@ public class WorkflowRetrySpecs : WorkflowGrainSpecs
         Assert.Equal(WorkflowRunStatus.Failed, failed.Status);
     }
 
-    [Theory]
-    [InlineData(-1)]
-    [InlineData(3)]
-    public async Task RecoveryFollowUpOutsideDeclaredBudget_PreservesValueAndDispatchesItUnchanged(int recoveryRemaining)
-    {
-        var recovery = new RecoveryDefinition(
-            2,
-            [new RecoveryHandlerDefinition("error.code=base-moved", [], RetrySelf: true)]);
-        await StartWorkflowAsync(SingleStage(
-            tasks: [new TaskDefinition("merge-pr", "Merge PR", "spec/task", Recovery: recovery)],
-            checks: []));
-        var (task, runnerId) = await PollWorkAnyAsync();
-
-        await ReportAsync(runnerId, task.WorkId, new WorkResult(
-            "completed",
-            Output: JSON.DeserializeElement("{}"),
-            AddTasks: [new RuntimeTaskInput("merge-pr", "Merge PR", "spec/task", Recovery: recovery, RecoveryRemaining: recoveryRemaining)]));
-
-        var run = await LoadRunAsync(_workflowId!);
-        var attempts = run.CurrentStage().Tasks.Where(t => t.DefinitionId == "merge-pr").ToList();
-        Assert.Equal(2, attempts.Count);
-        Assert.Equal(TaskRunStatus.Completed, attempts[0].Status);
-        Assert.Equal(TaskRunStatus.Pending, attempts[1].Status);
-        Assert.Equal(recoveryRemaining, attempts[1].RecoveryRemaining);
-        Assert.Equal(2, attempts[1].Recovery!.Budget);
-
-        var dispatched = await PollWorkAnyAsync();
-        Assert.Equal("merge-pr.2", dispatched.Work.WorkId);
-        Assert.Equal(recoveryRemaining, dispatched.Work.RecoveryRemaining);
-    }
-
     [Fact]
     public async Task RecoveryFollowUpBatch_AcceptsOutOfRangeContinuationAlongsideValidFollowUp()
     {

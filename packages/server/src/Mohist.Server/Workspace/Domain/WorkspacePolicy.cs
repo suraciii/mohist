@@ -75,5 +75,12 @@ public static class WorkspacePolicy
         return null;
     }
 
+    public static ValidationError? ValidateActiveSessions(string workspaceName, int activeSessionCount) =>
+        activeSessionCount > 0
+            ? new(
+                "workspace_has_active_sessions",
+                $"Workspace '{workspaceName}' has {activeSessionCount} active bound session(s).")
+            : null;
+
     public static bool IsManual(WorkspaceOrigin origin) => origin is WorkspaceOrigin.Manual;
 }

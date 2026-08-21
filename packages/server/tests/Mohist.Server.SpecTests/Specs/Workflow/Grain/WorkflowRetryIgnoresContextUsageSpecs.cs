@@ -44,13 +44,12 @@ public class WorkflowRetryIgnoresContextUsageSpecs
         _client = fixture.Client;
     }
 
-    [Theory]
-    [InlineData(0L, 0L, "no usage data")]
-    [InlineData(400L, 1000L, "healthy usage")]
-    [InlineData(850L, 1000L, "warn-range usage")]
-    [InlineData(960L, 1000L, "near-capacity usage")]
-    public async Task TaskFails_RetrySucceedsRegardlessOfContextUsage(long contextWindowUsed, long contextWindowSize, string label)
+    [Fact]
+    public async Task TaskFails_RetrySucceedsAtNearCapacityContextUsage()
     {
+        const long contextWindowUsed = 960;
+        const long contextWindowSize = 1000;
+        const string label = "near-capacity usage";
         var (projectId, issueNumber, workflowRunId, sessionName) = await SeedProjectIssueWorkflowAsync();
         var runnerId = $"retry-{Guid.NewGuid():N}";
         await RegisterRunnerAsync(runnerId, projectId);

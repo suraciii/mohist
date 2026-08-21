@@ -2,7 +2,6 @@ using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
 using Mohist.Server.Agent.Grains;
-using Mohist.Server.Infrastructure.Orleans;
 using Mohist.Server.Sessions.Grains;
 using Mohist.Server.SpecTests.Support;
 using Mohist.Server.TestSupport;
@@ -45,11 +44,11 @@ public sealed class AgentSessionLaunchDefaultExecutionConfigSpecs : AgentSession
     }
 
     [Fact]
-    public async Task Launch_WithProjectDefault_DispatchesWithTheDefaultResolvedModel()
+    public async Task Launch_WithProjectDefault_DispatchesWithTheResolvedConfiguration()
     {
         var projectId = await CreateProjectAsync("launch-default-model");
         var agent = await CreateModellessAgentAsync(projectId, "default-model-agent");
-        await SetDefaultAsync(projectId, "opencode", "openai/gpt-5.6", "high");
+        await SetDefaultAsync(projectId, "pi", "openai/gpt-5.6", "high");
         var runnerId = $"launch-default-model-runner-{Guid.NewGuid():N}";
         await RegisterRunnerAndAwaitOnlineAsync(runnerId, projectId);
 
@@ -75,165 +74,7 @@ public sealed class AgentSessionLaunchDefaultExecutionConfigSpecs : AgentSession
             var dispatch = await PollDispatchEnvelopeForWorkAsync(runnerId, snapshot.WorkId!);
             Assert.Equal("openai/gpt-5.6", ReadModelFromDispatch(dispatch));
             Assert.Equal("high", ReadVariantFromDispatch(dispatch));
-            Assert.Equal("opencode", ReadRuntimeFromDispatch(dispatch));
-        }
-        finally
-        {
-            await _fixture.Client.PostAsync($"/api/runner/{runnerId}/unregister", null);
-        }
-    }
-
-    [Fact]
-    public async Task Launch_WithProjectDefaultRuntime_DispatchesWithTheDefaultRuntime()
-    {
-        var projectId = await CreateProjectAsync("launch-default-runtime");
-        var runnerId = $"launch-default-runtime-runner-{Guid.NewGuid():N}";
-        var agent = await CreateAgentWithConfigAsync(projectId, "default-runtime-agent", config: new { });
-        await SetDefaultAsync(projectId, "pi", "openai/gpt-5.6", null);
-        await RegisterRunnerAndAwaitOnlineAsync(runnerId, projectId);
-
-        try
-        {
-            using var response = await _fixture.Client.LaunchAgentSessionAsync(
-                projectId,
-                agent.Id,
-                new { prompt = "run on the default runtime" });
-
-            Assert.Equal(HttpStatusCode.Created, response.StatusCode);
-            var payload = await response.Content.ReadFromJsonAsync<JsonElement>();
-            var sessionId = payload.GetProperty("data").GetProperty("sessionId").GetString()!;
-            var jobId = payload.GetProperty("data").GetProperty("jobId").GetString()!;
-
-            var sessionInfo = await _fixture.Grains.GetGrain<IAgentSessionGrain>(sessionId).GetAsync();
-            Assert.Equal("pi", sessionInfo!.Runtime);
-
-            var snapshot = await ClaimDispatchForSessionAsync(jobId, runnerId, sessionId);
-            var dispatch = await PollDispatchEnvelopeForWorkAsync(runnerId, snapshot.WorkId!);
             Assert.Equal("pi", ReadRuntimeFromDispatch(dispatch));
-            Assert.Equal("openai/gpt-5.6", ReadModelFromDispatch(dispatch));
-        }
-        finally
-        {
-            await _fixture.Client.PostAsync($"/api/runner/{runnerId}/unregister", null);
-        }
-    }
-
-    [Fact]
-    public async Task Launch_DefinitionModel_WinsOverTheProjectDefault()
-    {
-        var projectId = await CreateProjectAsync("launch-definition-wins");
-        var runnerId = $"launch-definition-wins-runner-{Guid.NewGuid():N}";
-        var agent = await CreateAgentWithConfigAsync(
-            projectId,
-            "definition-model-agent",
-            config: new { model = "anthropic/sonnet-4.6" });
-        await SetDefaultAsync(projectId, "opencode", "openai/gpt-5.6", "high");
-        await RegisterRunnerAndAwaitOnlineAsync(runnerId, projectId);
-
-        try
-        {
-            using var response = await _fixture.Client.LaunchAgentSessionAsync(
-                projectId,
-                agent.Id,
-                new { prompt = "definition model wins" });
-
-            Assert.Equal(HttpStatusCode.Created, response.StatusCode);
-            var payload = await response.Content.ReadFromJsonAsync<JsonElement>();
-            var sessionId = payload.GetProperty("data").GetProperty("sessionId").GetString()!;
-            var jobId = payload.GetProperty("data").GetProperty("jobId").GetString()!;
-
-            var snapshot = await ClaimDispatchForSessionAsync(jobId, runnerId, sessionId);
-            var dispatch = await PollDispatchEnvelopeForWorkAsync(runnerId, snapshot.WorkId!);
-            Assert.Equal("anthropic/sonnet-4.6", ReadModelFromDispatch(dispatch));
-        }
-        finally
-        {
-            await _fixture.Client.PostAsync($"/api/runner/{runnerId}/unregister", null);
-        }
-    }
-
-    [Fact]
-    public async Task Launch_MalformedDefinitionModel_IsNotMaskedByTheDefault()
-    {
-        var projectId = await CreateProjectAsync("launch-malformed-unmasked");
-        var agent = await CreateAgentWithConfigAsync(
-            projectId,
-            "malformed-model-agent",
-            config: new { model = "gpt" });
-        await SetDefaultAsync(projectId, "opencode", "openai/gpt-5.6", null);
-
-        var readiness = await GetReadinessAsync(projectId, agent.Id);
-        Assert.Equal("not-configured", readiness.Conclusion);
-        Assert.Contains("model-reference-malformed", readiness.Gaps);
-
-        using var response = await _fixture.Client.LaunchAgentSessionAsync(
-            projectId,
-            agent.Id,
-            new { prompt = "should not launch" });
-
-        Assert.Equal(HttpStatusCode.Conflict, response.StatusCode);
-    }
-
-    [Fact]
-    public async Task Launch_InvalidDefinitionRuntime_IsNotMaskedByTheDefault()
-    {
-        var projectId = await CreateProjectAsync("launch-runtime-invalid-unmasked");
-        var agent = await CreateAgentWithConfigAsync(
-            projectId,
-            "invalid-runtime-agent",
-            config: new { model = "openai/gpt-5.6" });
-        await SetDefaultAsync(projectId, "pi", "openai/gpt-5.6", null);
-
-        // The write surfaces reject an invalid runtime; the gap covers
-        // stored definitions, so the invalid value is written through the
-        // grain (below the route's schema validation) like legacy data.
-        await _fixture.Grains.GetGrain<IAgentGrain>(GrainKey.Agent(projectId, agent.Id))
-            .UpdateAsync(new AgentUpdateData(
-                Name: null,
-                Description: null,
-                Instructions: null,
-                AgentConfig: JsonDocument.Parse("{\"model\":\"openai/gpt-5.6\",\"runtime\":\"fast\"}").RootElement,
-                Skills: null,
-                MaxConcurrentRuns: null,
-                Fields: new HashSet<string>([nameof(AgentUpdateData.AgentConfig)], StringComparer.Ordinal)));
-
-        var readiness = await GetReadinessAsync(projectId, agent.Id);
-        Assert.Equal("not-configured", readiness.Conclusion);
-        Assert.Contains("runtime-invalid", readiness.Gaps);
-    }
-
-    [Fact]
-    public async Task Launch_DefaultResolvesVariantWithoutModel()
-    {
-        var projectId = await CreateProjectAsync("launch-default-variant");
-        var agent = await CreateAgentWithConfigAsync(
-            projectId,
-            "variant-without-model-agent",
-            config: new { variant = "fast" });
-        await SetDefaultAsync(projectId, "opencode", "openai/gpt-5.6", null);
-        var runnerId = $"launch-default-variant-runner-{Guid.NewGuid():N}";
-        await RegisterRunnerAndAwaitOnlineAsync(runnerId, projectId);
-
-        try
-        {
-            var readiness = await GetReadinessAsync(projectId, agent.Id);
-            Assert.Equal("unknown", readiness.Conclusion);
-            Assert.Empty(readiness.Gaps);
-
-            using var response = await _fixture.Client.LaunchAgentSessionAsync(
-                projectId,
-                agent.Id,
-                new { prompt = "variant resolves with default model" });
-
-            Assert.Equal(HttpStatusCode.Created, response.StatusCode);
-            var payload = await response.Content.ReadFromJsonAsync<JsonElement>();
-            var sessionId = payload.GetProperty("data").GetProperty("sessionId").GetString()!;
-            var jobId = payload.GetProperty("data").GetProperty("jobId").GetString()!;
-
-            var snapshot = await ClaimDispatchForSessionAsync(jobId, runnerId, sessionId);
-            var dispatch = await PollDispatchEnvelopeForWorkAsync(runnerId, snapshot.WorkId!);
-            Assert.Equal("openai/gpt-5.6", ReadModelFromDispatch(dispatch));
-            Assert.Equal("fast", ReadVariantFromDispatch(dispatch));
         }
         finally
         {

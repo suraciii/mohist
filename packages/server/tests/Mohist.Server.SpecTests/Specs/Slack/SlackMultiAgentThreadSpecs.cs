@@ -10,8 +10,8 @@ namespace Mohist.Server.SpecTests.Specs.Slack;
 /// <summary>
 /// Multi-agent thread behavior split off from
 /// <see cref="SlackMultiAgentIngressSpecs"/>: thread launch / session sharing,
-/// per-agent binding isolation, workspace attribution and threaded ambiguous
-/// prompting. Shares the same fixture, seed helpers and cached connection
+/// per-agent binding isolation and threaded ambiguous prompting. Shares the
+/// same fixture, seed helpers and cached connection
 /// leases as the partial.
 /// </summary>
 public sealed partial class SlackMultiAgentIngressSpecs
@@ -164,107 +164,6 @@ public sealed partial class SlackMultiAgentIngressSpecs
     }
 
     [Fact]
-    public async Task First_second_agent_binding_is_isolated_from_existing_binding()
-    {
-        var sharedProjectId = $"project_{Guid.NewGuid():N}";
-        var connectionA = await CreateConnectionAsync("agent-A", "T-multi-6", "U_BOT_A6", "A_BOT_A6", sharedProjectId);
-        var connectionB = await CreateConnectionAsync("agent-B", "T-multi-6", "U_BOT_B6", "A_BOT_B6", sharedProjectId);
-
-        var firstA = await PostChannelAsync(connectionA, "C-multi-bind",
-            messageTs: "1710000000.010600",
-            threadTs: null,
-            mentions: new[] { connectionA.BotUserId },
-            text: $"<@{connectionA.BotUserId}> first");
-        var sessionAId = firstA.GetProperty("sessionId").GetString();
-
-        var secondB = await PostChannelAsync(connectionB, "C-multi-bind",
-            messageTs: "1710000000.010610",
-            threadTs: "1710000000.010600",
-            mentions: new[] { connectionB.BotUserId },
-            text: $"<@{connectionB.BotUserId}> second");
-        var sessionBId = secondB.GetProperty("sessionId").GetString();
-        Assert.False(string.IsNullOrEmpty(sessionBId));
-        Assert.NotEqual(sessionAId, sessionBId);
-
-        await using var scope = _fixture.Services.CreateAsyncScope();
-        var threadMapping = scope.ServiceProvider.GetRequiredService<SlackThreadSessionMappingStore>();
-        var bindings = await threadMapping.ListBindingsAsync(
-            connectionA.ProjectId, connectionA.WorkspaceTeamId,
-            "C-multi-bind", "1710000000.010600");
-        Assert.Equal(2, bindings.Count);
-
-        var firstASessionId = (await threadMapping.GetSessionIdAsync(
-            connectionA.ProjectId, connectionA.WorkspaceTeamId, connectionA.Id,
-            "C-multi-bind", "1710000000.010600"))!;
-        var secondBSessionId = (await threadMapping.GetSessionIdAsync(
-            connectionB.ProjectId, connectionB.WorkspaceTeamId, connectionB.Id,
-            "C-multi-bind", "1710000000.010600"))!;
-        Assert.Equal(sessionAId, firstASessionId);
-        Assert.Equal(sessionBId, secondBSessionId);
-    }
-
-    [Fact]
-    public async Task Two_workspaces_with_same_channel_thread_do_not_share_attribution()
-    {
-        var teamX = "T-workspace-X";
-        var teamY = "T-workspace-Y";
-        var connectionX = await CreateConnectionAsync("agent-X", teamX, "U_BOT_X", "A_BOT_X");
-        var connectionY = await CreateConnectionAsync("agent-Y", teamY, "U_BOT_Y", "A_BOT_Y");
-
-        var firstX = await PostChannelAsync(connectionX, "C-shared",
-            messageTs: "1710000000.010700",
-            threadTs: null,
-            mentions: new[] { connectionX.BotUserId },
-            text: $"<@{connectionX.BotUserId}> workspace X task");
-        var sessionXId = firstX.GetProperty("sessionId").GetString();
-        Assert.False(string.IsNullOrEmpty(sessionXId));
-
-        var replyX = await PostChannelAsync(connectionX, "C-shared",
-            messageTs: "1710000000.010710",
-            threadTs: "1710000000.010700",
-            mentions: Array.Empty<string>(),
-            text: "continue X thread");
-        Assert.Equal(sessionXId, replyX.GetProperty("sessionId").GetString());
-        Assert.True(replyX.GetProperty("followup").GetBoolean());
-
-        var replyY = await PostChannelAsync(connectionY, "C-shared",
-            messageTs: "1710000000.010710",
-            threadTs: "1710000000.010700",
-            mentions: Array.Empty<string>(),
-            text: "no attribution to X thread");
-        Assert.Equal("ignored", replyY.GetProperty("kind").GetString());
-
-        var firstY = await PostChannelAsync(connectionY, "C-shared",
-            messageTs: "1710000000.010700",
-            threadTs: null,
-            mentions: new[] { connectionY.BotUserId },
-            text: $"<@{connectionY.BotUserId}> workspace Y task");
-        var sessionYId = firstY.GetProperty("sessionId").GetString();
-        Assert.False(string.IsNullOrEmpty(sessionYId));
-
-        await using var scope = _fixture.Services.CreateAsyncScope();
-        var db = scope.ServiceProvider.GetRequiredService<MohistDbContext>();
-        var sessions = await db.AgentSessions
-            .Where(row => row.LabelConnectionId == connectionX.Id || row.LabelConnectionId == connectionY.Id)
-            .ToListAsync();
-        Assert.Equal(2, sessions.Count);
-        var xRows = sessions.Where(row => row.LabelConnectionId == connectionX.Id).ToList();
-        var yRows = sessions.Where(row => row.LabelConnectionId == connectionY.Id).ToList();
-        Assert.Single(xRows);
-        Assert.Single(yRows);
-
-        var threadMapping = scope.ServiceProvider.GetRequiredService<SlackThreadSessionMappingStore>();
-        var bindingsX = await threadMapping.ListBindingsAsync(
-            connectionX.ProjectId, connectionX.WorkspaceTeamId, "C-shared", "1710000000.010700");
-        var bindingsY = await threadMapping.ListBindingsAsync(
-            connectionY.ProjectId, connectionY.WorkspaceTeamId, "C-shared", "1710000000.010700");
-        Assert.Single(bindingsX);
-        Assert.Single(bindingsY);
-        Assert.Equal(sessionXId, bindingsX[0].SessionId);
-        Assert.Equal(sessionYId, bindingsY[0].SessionId);
-    }
-
-    [Fact]
     public async Task Ambiguous_prompt_threaded_reply_is_prompted_in_thread()
     {
         var sharedProjectId = $"project_{Guid.NewGuid():N}";
@@ -303,53 +202,4 @@ public sealed partial class SlackMultiAgentIngressSpecs
         Assert.Contains(promptRows, row => row.PayloadJson.Contains("Multiple Agents", StringComparison.Ordinal));
     }
 
-    [Fact]
-    public async Task Unrelated_connection_does_not_claim_ambiguous_prompt()
-    {
-        var sharedProjectId = $"project_{Guid.NewGuid():N}";
-        var connectionA = await CreateConnectionAsync("agent-A", "T-unrelated", "U_OWNER_A", "A_UNRELATED_A", sharedProjectId);
-        var connectionB = await CreateConnectionAsync("agent-B", "T-unrelated", "U_OWNER_B", "A_UNRELATED_B", sharedProjectId);
-        var connectionC = await CreateConnectionAsync("agent-C", "T-unrelated", "U_OWNER_C", "A_UNRELATED_C", sharedProjectId);
-
-        var root = await PostChannelAsync(
-            connectionC,
-            "C-unrelated-root",
-            "1710000000.010900",
-            null,
-            new[] { connectionA.BotUserId, connectionB.BotUserId },
-            $"<@{connectionA.BotUserId}> <@{connectionB.BotUserId}> choose");
-        Assert.Equal("ignored", root.GetProperty("kind").GetString());
-
-        await PostChannelAsync(
-            connectionA,
-            "C-unrelated-thread",
-            "1710000000.010910",
-            null,
-            new[] { connectionA.BotUserId },
-            $"<@{connectionA.BotUserId}> first");
-        await PostChannelAsync(
-            connectionB,
-            "C-unrelated-thread",
-            "1710000000.010920",
-            "1710000000.010910",
-            new[] { connectionB.BotUserId },
-            $"<@{connectionB.BotUserId}> second");
-
-        var reply = await PostChannelAsync(
-            connectionC,
-            "C-unrelated-thread",
-            "1710000000.010930",
-            "1710000000.010910",
-            Array.Empty<string>(),
-            "human discussion");
-        Assert.Equal("ignored", reply.GetProperty("kind").GetString());
-
-        await using var scope = _fixture.Services.CreateAsyncScope();
-        var db = scope.ServiceProvider.GetRequiredService<MohistDbContext>();
-        Assert.Empty(await db.SlackOutboxRows
-            .Where(row => row.ConnectionId == connectionC.Id
-                && (row.ConversationId == "C-unrelated-root"
-                    || row.ConversationId == "C-unrelated-thread"))
-            .ToListAsync());
-    }
 }

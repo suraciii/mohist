@@ -93,6 +93,22 @@ public class WorkspacePolicyTests
     }
 
     [Fact]
+    public void ValidateActiveSessions_ActiveSession_ReportsConflict()
+    {
+        var error = WorkspacePolicy.ValidateActiveSessions("pay", 2);
+
+        Assert.NotNull(error);
+        Assert.Equal("workspace_has_active_sessions", error!.Code);
+        Assert.Contains("2 active bound session", error.Message);
+    }
+
+    [Fact]
+    public void ValidateActiveSessions_NoActiveSessions_ReturnsNoError()
+    {
+        Assert.Null(WorkspacePolicy.ValidateActiveSessions("pay", 0));
+    }
+
+    [Fact]
     public void IsManual_ManualOrigin_True()
     {
         Assert.True(WorkspacePolicy.IsManual(new WorkspaceOrigin.Manual()));

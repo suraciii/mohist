@@ -281,14 +281,13 @@ public static class EpicRoutes
             return ApiResults.Ok(new BatchMembershipResponse(Array.Empty<BatchMembershipOutcome>()));
 
         var issues = await issuesQuery.ListReadModelsAsync(pid, all: true);
-        var (resolvedItems, perIdentifier) = ResolveBatchItems(issues, req.IssueNumbers);
-        var requestedIdentifiers = req.IssueNumbers.Select(n => n.ToString()).ToArray();
+        var request = EpicBatchMembershipPolicy.Resolve(issues, req.IssueNumbers);
 
         var grain = GetEpicGrain(grains, pid, number);
         IReadOnlyList<BatchMembershipOutcome> grainOutcomes;
         try
         {
-            grainOutcomes = await grain.LinkIssuesAsync(resolvedItems, pid);
+            grainOutcomes = await grain.LinkIssuesAsync(request.ResolvedItems, pid);
         }
         catch (EpicClosedCannotLinkException ex)
         {
@@ -303,7 +302,7 @@ public static class EpicRoutes
             return ApiResults.NotFound(ex.Message);
         }
 
-        var outcomes = MergeBatchOutcomes(requestedIdentifiers, perIdentifier, grainOutcomes, isUnlink: false);
+        var outcomes = EpicBatchMembershipPolicy.Merge(request, grainOutcomes, isUnlink: false);
         return ApiResults.Ok(new BatchMembershipResponse(outcomes));
     }
 
@@ -324,100 +323,21 @@ public static class EpicRoutes
             return ApiResults.Ok(new BatchMembershipResponse(Array.Empty<BatchMembershipOutcome>()));
 
         var issues = await issuesQuery.ListReadModelsAsync(pid, all: true);
-        var (resolvedItems, perIdentifier) = ResolveBatchItems(issues, req.IssueNumbers);
-        var requestedIdentifiers = req.IssueNumbers.Select(n => n.ToString()).ToArray();
+        var request = EpicBatchMembershipPolicy.Resolve(issues, req.IssueNumbers);
 
         var grain = GetEpicGrain(grains, pid, number);
         IReadOnlyList<BatchMembershipOutcome> grainOutcomes;
         try
         {
-            grainOutcomes = await grain.UnlinkIssuesAsync(resolvedItems, pid);
+            grainOutcomes = await grain.UnlinkIssuesAsync(request.ResolvedItems, pid);
         }
         catch (InvalidOperationException ex) when (ex.Message.Contains("not found"))
         {
             return ApiResults.NotFound(ex.Message);
         }
 
-        var outcomes = MergeBatchOutcomes(requestedIdentifiers, perIdentifier, grainOutcomes, isUnlink: true);
+        var outcomes = EpicBatchMembershipPolicy.Merge(request, grainOutcomes, isUnlink: true);
         return ApiResults.Ok(new BatchMembershipResponse(outcomes));
-    }
-
-    private static (List<BatchMembershipRequestItem> Resolved, Dictionary<string, BatchMembershipRequestItem> ByIdentifier)
-        ResolveBatchItems(IReadOnlyList<IssueReadModel> issues, IReadOnlyList<int> requestedNumbers)
-    {
-        var byNumber = issues.ToDictionary(i => i.Number);
-        var resolved = new List<BatchMembershipRequestItem>(requestedNumbers.Count);
-        var byIdentifier = new Dictionary<string, BatchMembershipRequestItem>(StringComparer.Ordinal);
-        var seenNumbers = new HashSet<int>();
-        foreach (var issueNumber in requestedNumbers)
-        {
-            var identifier = issueNumber.ToString();
-            var item = byNumber.ContainsKey(issueNumber)
-                ? new BatchMembershipRequestItem(identifier, issueNumber)
-                : new BatchMembershipRequestItem(identifier, 0);
-            byIdentifier[identifier] = item;
-            if (item.IssueNumber > 0 && seenNumbers.Add(item.IssueNumber))
-                resolved.Add(item);
-        }
-        return (resolved, byIdentifier);
-    }
-
-    private static IReadOnlyList<BatchMembershipOutcome> MergeBatchOutcomes(
-        IReadOnlyList<string> requestedIdentifiers,
-        IReadOnlyDictionary<string, BatchMembershipRequestItem> resolvedItems,
-        IReadOnlyList<BatchMembershipOutcome> grainOutcomes,
-        bool isUnlink)
-    {
-        var byIssueNumber = grainOutcomes
-            .Where(o => o.IssueNumber.HasValue)
-            .GroupBy(o => o.IssueNumber!.Value)
-            .ToDictionary(g => g.Key, g => g.First());
-
-        var seenIssueNumbers = new HashSet<int>();
-        var results = new List<BatchMembershipOutcome>(requestedIdentifiers.Count);
-        foreach (var identifier in requestedIdentifiers)
-        {
-            if (string.IsNullOrWhiteSpace(identifier)) continue;
-            // Unresolved identifier: link reports not-found; unlink is
-            // idempotent and reports was-not-a-member per the unlink contract.
-            if (!resolvedItems.TryGetValue(identifier, out var item) || item.IssueNumber <= 0)
-            {
-                results.Add(isUnlink
-                    ? new BatchMembershipOutcome(identifier, "was-not-a-member")
-                    : BatchMembershipOutcome.NotFound(identifier));
-                continue;
-            }
-
-            if (byIssueNumber.TryGetValue(item.IssueNumber, out var outcome))
-            {
-                results.Add(seenIssueNumbers.Add(item.IssueNumber)
-                    ? outcome with { Identifier = identifier }
-                    : DuplicateOutcome(identifier, item, outcome, isUnlink));
-            }
-            else
-            {
-                // Resolved issue that the grain dropped (only possible if
-                // the grain returned no entry for it — defensive fallback).
-                results.Add(isUnlink
-                    ? BatchMembershipOutcome.WasNotAMember(identifier, item.IssueNumber)
-                    : BatchMembershipOutcome.NotFound(identifier));
-            }
-        }
-
-        return results;
-    }
-
-    private static BatchMembershipOutcome DuplicateOutcome(
-        string identifier,
-        BatchMembershipRequestItem item,
-        BatchMembershipOutcome firstOutcome,
-        bool isUnlink)
-    {
-        if (isUnlink)
-            return BatchMembershipOutcome.WasNotAMember(identifier, item.IssueNumber);
-        return firstOutcome.Status == "conflict"
-            ? firstOutcome with { Identifier = identifier }
-            : firstOutcome with { Identifier = identifier, Status = "already-linked" };
     }
 
     private static async Task<BatchMembershipRequest?> ReadBatchRequestAsync(HttpContext context)
