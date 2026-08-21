@@ -1,5 +1,6 @@
 using Mohist.Server.Runner.Grains;
 using Mohist.Server.Slack.Services;
+using System.Security.Cryptography;
 using Xunit;
 
 namespace Mohist.Server.UnitTests.Slack;
@@ -75,6 +76,32 @@ public sealed class ManagerExecutionCredentialsTests
     }
 
     [Fact]
+    public async Task Separate_server_epochs_read_the_shared_current_epoch_on_every_operation()
+    {
+        var store = new SharedEpochStore();
+        var firstServerEpoch = new ManagerDeploymentEpoch(store);
+        await firstServerEpoch.StartAsync(default);
+        var firstIssuer = new ManagerExecutionCapabilityIssuer(store, firstServerEpoch);
+        var now = DateTimeOffset.Parse("2026-08-20T12:00:00Z");
+        var oldGrant = firstIssuer.Issue(new("execution-old", Origin, now, TimeSpan.FromMinutes(5)));
+
+        var secondServerEpoch = new ManagerDeploymentEpoch(store);
+        await secondServerEpoch.StartAsync(default);
+
+        Assert.Equal(secondServerEpoch.Current, firstServerEpoch.Current);
+        Assert.Equal(
+            "manager_epoch_changed",
+            firstIssuer.Validate(oldGrant.ManagementCredential, ManagerExecutionLeaseKind.Management,
+                "workspace.status", oldGrant.ExecutionId, Origin, now).Code);
+
+        var freshOrigin = Origin with { DispatchRef = "slack:session-1:fresh" };
+        var freshGrant = firstIssuer.Issue(new("execution-fresh", freshOrigin, now, TimeSpan.FromMinutes(5)));
+        Assert.Equal(secondServerEpoch.Current, freshGrant.DeploymentEpoch);
+        Assert.True(firstIssuer.Validate(freshGrant.ManagementCredential, ManagerExecutionLeaseKind.Management,
+            "workspace.status", freshGrant.ExecutionId, freshOrigin, now).Allowed);
+    }
+
+    [Fact]
     public void Graceful_invalidation_revokes_both_leases_and_store_failure_denies()
     {
         var store = new ManagerExecutionLeaseStore();
@@ -103,5 +130,65 @@ public sealed class ManagerExecutionCredentialsTests
 
         Assert.False(ManagerExecutionRuntimeCapabilities.Supports(old));
         Assert.True(ManagerExecutionRuntimeCapabilities.Supports(current));
+    }
+}
+
+file sealed class SharedEpochStore : IManagerExecutionLeaseStore
+{
+    private readonly Dictionary<string, ManagerExecutionLeaseMetadata> _leases = new(StringComparer.Ordinal);
+    private string? _epoch;
+
+    public bool Available => true;
+    public bool IsShared => true;
+    public int Count => _leases.Count;
+
+    public string? ReadDeploymentEpoch() => _epoch ??= "mepoch_initial";
+
+    public string? AdvanceDeploymentEpoch()
+    {
+        _epoch = $"mepoch_{Convert.ToHexString(RandomNumberGenerator.GetBytes(8)).ToLowerInvariant()}";
+        RevokeAll();
+        return _epoch;
+    }
+
+    public void Put(ManagerExecutionLeaseMetadata lease) => _leases[lease.CredentialHash] = lease;
+
+    public ManagerExecutionLeaseMetadata? Find(string credentialHash) =>
+        FindIncludingRevoked(credentialHash) is { Active: true } lease ? lease : null;
+
+    public ManagerExecutionLeaseMetadata? FindIncludingRevoked(string credentialHash) =>
+        _leases.TryGetValue(credentialHash, out var lease) ? lease : null;
+
+    public int RevokeExecution(string executionId) => Revoke(lease => lease.ExecutionId == executionId);
+
+    public int RevokeExecutionPrefix(string executionPrefix) =>
+        Revoke(lease => lease.ExecutionId.StartsWith(executionPrefix, StringComparison.Ordinal));
+
+    public int RevokeAll() => Revoke(_ => true);
+
+    public int RemoveExpired(DateTimeOffset now) => Remove(lease => lease.ExpiresAt <= now);
+
+    private int Revoke(Func<ManagerExecutionLeaseMetadata, bool> predicate)
+    {
+        var count = 0;
+        foreach (var (hash, lease) in _leases.ToArray())
+        {
+            if (lease.Active && predicate(lease))
+            {
+                _leases[hash] = lease with { Active = false };
+                count++;
+            }
+        }
+        return count;
+    }
+
+    private int Remove(Func<ManagerExecutionLeaseMetadata, bool> predicate)
+    {
+        var count = 0;
+        foreach (var (hash, lease) in _leases.ToArray())
+        {
+            if (predicate(lease) && _leases.Remove(hash)) count++;
+        }
+        return count;
     }
 }
