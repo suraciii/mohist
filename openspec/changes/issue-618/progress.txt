@@ -100,3 +100,11 @@ Verification:
 - `packages/runner` vitest: manager-execution-boundary 6/6 (refused shapes, admitted catalog commands with frozen cwd + masked output, kind mismatch, request budgets, bounded disposal kill, capability mirror vocabulary).
 - `npm run typecheck` (runner), `npm run format:check`, `npm run check:filesizes` clean.
 - Full Server Spec suite: 3,711/3,711 (includes the two new `AgentJobManagerRunnerLossRecoverySpecs` cases: exactly-one recovery turn + suppressed redelivery on Manager jobs, and no recovery turn on ordinary jobs). One pre-existing unrelated flake (`WorkflowSessionSpecs.GivenRunnerReportsAcpSessionEvents_...` transcript race) passed in the clean rerun.
+
+## Review Round 4 Repair
+- Finding 1 (generic-shell Manager broker bypass): fixed by authenticating the accepted Unix socket's kernel-reported peer on Linux. The broker maps the peer socket through `ss` and `/proc`, requires the connected process command line to resolve to the exact generated `mo` launcher, and fails closed when peer inspection is unavailable; capability, lease, cwd, budget, and output-redaction gates remain in force. Direct valid management and reply socket requests are covered and spawn no child.
+
+Verification:
+- `npm run test:run -w packages/runner -- src/runtime/manager-execution-boundary.test.ts`: 7/7.
+- `npm run typecheck -w packages/runner`, `npm run build -w packages/runner`, full Runner Vitest: 156 files / 1,688 tests.
+- `npm run format:check` and `npm run check:filesizes` clean.
