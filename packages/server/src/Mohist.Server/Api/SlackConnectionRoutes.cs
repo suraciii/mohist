@@ -547,7 +547,7 @@ public static partial class SlackConnectionRoutes
                 return ApiResults.Ok(new { kind = SlackProviderInboxRouteKinds.DisabledDiscarded, reason = "This Connection is disabled.", audited = true });
             }
 
-            var senderKind = NormalizeSenderKind(body.SenderKind);
+            var senderKind = SlackChannelIngressPolicy.NormalizeSenderKind(body.SenderKind);
             if (senderKind is SlackSenderKind.Bot or SlackSenderKind.Unknown)
                 return ApiResults.Ok(new { kind = "ignored" });
             if (string.IsNullOrWhiteSpace(body.SenderSlackUserId))
@@ -966,41 +966,6 @@ public static partial class SlackConnectionRoutes
             string.Equals(match.Groups["id"].Value, botUserId, StringComparison.OrdinalIgnoreCase)
                 ? string.Empty
                 : match.Value).Trim();
-    }
-
-    /// <summary>
-    /// Sender kind surfaced by the adapter on the normalized envelope.
-    /// The adapter sets <see cref="Bot"/> for Slack Bot subtype /
-    /// <c>bot_id</c> events, <see cref="Unknown"/> when a stable user
-    /// id is absent, and <see cref="Human"/> otherwise. A missing
-    /// <c>SenderKind</c> field with a stable user id falls back to
-    /// <see cref="Human"/> so existing DM callers keep working; the
-    /// adapter populates the explicit value on every new envelope.
-    /// </summary>
-    internal enum SlackSenderKind
-    {
-        Human,
-        Bot,
-        Unknown,
-    }
-
-    /// <summary>
-    /// Normalizes the envelope's <c>SenderKind</c> field. Returns
-    /// <see cref="SlackSenderKind.Unknown"/> for a missing user id
-    /// (matches the adapter's "stable identity absent" decision), and
-    /// <see cref="SlackSenderKind.Human"/> when <c>SenderKind</c> is
-    /// absent but a stable user id is present so legacy DM callers
-    /// are not regressed.
-    /// </summary>
-    private static SlackSenderKind NormalizeSenderKind(string? rawKind)
-    {
-        var normalized = rawKind?.Trim().ToLowerInvariant();
-        return normalized switch
-        {
-            "bot" => SlackSenderKind.Bot,
-            "unknown" => SlackSenderKind.Unknown,
-            _ => SlackSenderKind.Human,
-        };
     }
 
     /// <summary>
@@ -1533,6 +1498,22 @@ public static partial class SlackConnectionRoutes
         var decision = await req.AccessDecider.EvaluateAsync(
             connection, req.SenderSlackUserId, body.TeamId, body.ConversationId,
             isDirectMessage: false, req.LeaseContext, ct);
+
+        var ingressDecision = SlackChannelIngressPolicy.Decide(
+            connection.Id,
+            ownBotUserId,
+            decision.Allowed,
+            decision.Reason,
+            isRootMessage: string.IsNullOrWhiteSpace(body.ThreadTs),
+            hasThread: !string.IsNullOrWhiteSpace(body.ThreadTs),
+            hasPrompt: !string.IsNullOrWhiteSpace(RemoveBotMention(body.Text ?? string.Empty, ownBotUserId)),
+            hasFiles: body.Files.Count != 0,
+            mentionedWorkspaceBots,
+            threadBindings);
+        if (ingressDecision.Disposition == SlackChannelIngressDisposition.Ignore)
+            return ApiResults.Ok(new { kind = "ignored" });
+        if (ingressDecision.Disposition == SlackChannelIngressDisposition.Reject)
+            return await RejectAsync(req, ingressDecision.Reason!, ct);
 
         if (mentionedWorkspaceBots.Count >= 2)
         {
