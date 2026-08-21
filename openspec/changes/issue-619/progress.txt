@@ -33,3 +33,20 @@ not edited; the next self-review regenerates it.
   route, feed its response to the real Node adapter event handler, and assert
   durable-outbox versus direct-send behavior with instrumented post/ack and
   outbox-drain seams. Shared fixtures are explicitly only wire-level coverage.
+
+## T-001 implementation notes
+
+- Added explicit `responseOwner` values (`none`, `server`, `adapter`) to the Node
+  ingress model and Go `IngressResult` contract.
+- Transport decoding is strict for present ownership values and malformed
+  result fields. The only legacy omission fallback is `kind: backpressured` ->
+  adapter ownership; omitted ownership on other kinds becomes `none` and never
+  authorizes a direct post.
+- The Node handler branches only on ownership, preserves `thread_ts`, and
+  acknowledges adapter-owned responses only after a successful Slack post.
+- Initial verification found `tsc` and `go` unavailable. After installing the
+  existing npm dependencies, Node package typecheck and `npm run test:ci -w
+  packages/mohist-slack` pass (7 files, 80 tests); `git diff --check` passes.
+  Go verification remains unavailable because the Go toolchain is not installed.
+  Tests cover wire decoding, legacy compatibility, ownership boundaries,
+  malformed outcomes, failed direct posts, and acknowledgment counts.

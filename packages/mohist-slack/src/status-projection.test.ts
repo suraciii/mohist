@@ -18,7 +18,7 @@ class Transport implements AdapterTransport {
   async acquireLease(): Promise<AdapterLease | null> { return { kind: "runtime", leaseId: "lease", generation: 1, expiresAt: "2026-01-01T00:05:00Z", appToken: "app", botToken: "bot" } }
   async renewLease(): Promise<LeaseRenewal | null> { return { leaseId: "lease", kind: "runtime", generation: 1, expiresAt: "2026-01-01T00:05:00Z" } }
   async reportHello(): Promise<SlackHelloOutcome> { return "verified" }
-  async ingress(_ref: SlackConnectionRef, _envelope: SlackEnvelope) { return { kind: "accepted" as const } }
+  async ingress(_ref: SlackConnectionRef, _envelope: SlackEnvelope) { return { kind: "accepted", responseOwner: "none" as const } }
   async interaction(_ref: SlackConnectionRef, _envelope: SlackInteractionEnvelope) { return { state: "stop_requested" } }
   async claimDelivery() { return this.deliveries.shift() ?? null }
   async claimUncertainDelivery() { return this.uncertain.shift() ?? null }

@@ -137,7 +137,7 @@ export class FakeTransport implements AdapterTransport {
     await this.ingressGate
     if (this.ingressError) throw this.ingressError
     const queued = this.nextIngressResults.shift()
-    return queued ?? { kind: 'accepted' }
+    return queued ?? { kind: 'accepted', responseOwner: 'none' }
   }
 
   async interaction(_ref: SlackAdapterTarget, envelope: SlackInteractionEnvelope) {

@@ -115,9 +115,9 @@ describe('HttpAdapterTransport', () => {
               : url.endsWith('/leases/renew')
                 ? { leaseId: 'lease', kind: 'runtime', generation: 2, expiresAt: '2026-01-01T00:10:00Z' }
                 : url.endsWith('/slack-manager/ingress')
-                  ? { kind: 'accepted' }
+                  ? { kind: 'accepted', responseOwner: 'none' }
                   : url.endsWith('/ingress')
-                    ? { kind: 'accepted' }
+                    ? { kind: 'accepted', responseOwner: 'none' }
                     : url.endsWith('/interactions')
                       ? { state: 'stop_requested' }
                       : url.endsWith('/claim-uncertain')
@@ -173,8 +173,14 @@ describe('HttpAdapterTransport', () => {
       expiresAt: '2026-01-01T00:10:00Z',
     })
     await expect(transport.reportHello(ref, 'lease', 'A1', signal)).resolves.toBe('verified')
-    await expect(transport.ingress(ref, envelope, 'lease', 'a', signal)).resolves.toEqual({ kind: 'accepted' })
-    await expect(transport.ingress(manager, botEnvelope, 'lease', 'a', signal)).resolves.toEqual({ kind: 'accepted' })
+    await expect(transport.ingress(ref, envelope, 'lease', 'a', signal)).resolves.toEqual({
+      kind: 'accepted',
+      responseOwner: 'none',
+    })
+    await expect(transport.ingress(manager, botEnvelope, 'lease', 'a', signal)).resolves.toEqual({
+      kind: 'accepted',
+      responseOwner: 'none',
+    })
     await expect(transport.interaction(ref, interaction, 'lease', 'a', signal)).resolves.toEqual({
       state: 'stop_requested',
     })
@@ -342,6 +348,75 @@ describe('HttpAdapterTransport', () => {
 
     responses.push({ status: 409, body: { success: false, error: 'lease is stale', code: 'lease_stale_or_expired' } })
     await expect(transport.ingress(ref, envelope, 'lease', 'a', signal)).rejects.toBeInstanceOf(LeaseStaleError)
+  })
+
+  it('decodes every response owner and keeps legacy ownership compatibility explicit', async () => {
+    const responses = [
+      { kind: 'accepted', responseOwner: 'none' },
+      { kind: 'rejected', responseOwner: 'server', reason: 'durable nudge' },
+      { kind: 'backpressured', responseOwner: 'adapter', reason: 'retry shortly' },
+      { kind: 'backpressured', reason: 'legacy retry' },
+      { kind: 'rejected', reason: 'legacy rejection' },
+    ]
+    const transport = new HttpAdapterTransport({
+      serverUrl: 'http://localhost',
+      operatorToken: 'operator',
+      operatorId: 'operator-id',
+      fetch: async () => new Response(JSON.stringify({ success: true, data: responses.shift() }), { status: 200 }),
+    })
+    const signal = new AbortController().signal
+    const ref = { projectId: 'p', connectionId: 'c' }
+
+    await expect(transport.ingress(ref, envelope, 'lease', 'a', signal)).resolves.toEqual({
+      kind: 'accepted',
+      responseOwner: 'none',
+    })
+    await expect(transport.ingress(ref, envelope, 'lease', 'a', signal)).resolves.toEqual({
+      kind: 'rejected',
+      responseOwner: 'server',
+      reason: 'durable nudge',
+    })
+    await expect(transport.ingress(ref, envelope, 'lease', 'a', signal)).resolves.toEqual({
+      kind: 'backpressured',
+      responseOwner: 'adapter',
+      reason: 'retry shortly',
+    })
+    await expect(transport.ingress(ref, envelope, 'lease', 'a', signal)).resolves.toEqual({
+      kind: 'backpressured',
+      responseOwner: 'adapter',
+      reason: 'legacy retry',
+    })
+    await expect(transport.ingress(ref, envelope, 'lease', 'a', signal)).resolves.toEqual({
+      kind: 'rejected',
+      responseOwner: 'none',
+      reason: 'legacy rejection',
+    })
+  })
+
+  it('rejects malformed ingress results and invalid response owners', async () => {
+    const responses: unknown[] = [
+      { kind: 'rejected', responseOwner: 'unknown' },
+      { kind: 'rejected', responseOwner: null },
+      { responseOwner: 'server' },
+      { kind: 'rejected', reason: 42 },
+      { kind: 'rejected', reason: null },
+      { kind: 'backpressured' },
+    ]
+    const transport = new HttpAdapterTransport({
+      serverUrl: 'http://localhost',
+      operatorToken: 'operator',
+      operatorId: 'operator-id',
+      fetch: async () => new Response(JSON.stringify({ success: true, data: responses.shift() }), { status: 200 }),
+    })
+    const signal = new AbortController().signal
+    const ref = { projectId: 'p', connectionId: 'c' }
+
+    await expect(transport.ingress(ref, envelope, 'lease', 'a', signal)).rejects.toThrow('invalid ingress response owner')
+    await expect(transport.ingress(ref, envelope, 'lease', 'a', signal)).rejects.toThrow('invalid ingress response owner')
+    await expect(transport.ingress(ref, envelope, 'lease', 'a', signal)).rejects.toThrow('invalid ingress result')
+    await expect(transport.ingress(ref, envelope, 'lease', 'a', signal)).rejects.toThrow('invalid ingress result')
+    await expect(transport.ingress(ref, envelope, 'lease', 'a', signal)).rejects.toThrow('invalid ingress result')
+    await expect(transport.ingress(ref, envelope, 'lease', 'a', signal)).rejects.toThrow('invalid ingress result')
   })
 
   it('rejects malformed discovery targets and lease responses without leaking payloads', async () => {
