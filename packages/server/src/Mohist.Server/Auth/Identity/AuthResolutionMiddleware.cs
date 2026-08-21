@@ -329,7 +329,10 @@ public sealed class AuthResolutionMiddleware : IMiddleware, IScopedService
 
     private static string? TryResolveManagerCapability(HttpContext context)
     {
-        if (IsManagerReplyRoute(context.Request.Path)) return "manager.reply";
+        if (IsManagerReplyRoute(context.Request.Path)) return ManagerCapabilityCatalog.ManagerReply;
+        if (context.Request.Path.StartsWithSegments(
+                "/api/slack-manager/management", StringComparison.Ordinal))
+            return ManagerCapabilityCatalog.ManagerManagementRoute;
         return ManagerCapabilityCatalog.ResolveHttp(
             context.Request.Method,
             context.Request.Path.Value ?? string.Empty);

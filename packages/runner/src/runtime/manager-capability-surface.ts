@@ -6,6 +6,7 @@
 // the C# catalog.
 
 export const MANAGER_REPLY_CAPABILITY = 'manager.reply'
+export const MANAGER_MANAGEMENT_CAPABILITY = 'manager.management'
 
 const MANAGEMENT_CAPABILITIES = new Set([
   'workspace.status',
@@ -38,6 +39,7 @@ export function resolveManagerRequestCapability(args: readonly string[]): string
   if (args.length === 0) return null
   if (args[0] === 'slack') {
     const verb = args[1]
+    if (verb === 'management') return MANAGER_MANAGEMENT_CAPABILITY
     if (verb === 'message') return args[2] === 'send' ? MANAGER_REPLY_CAPABILITY : null
     switch (verb) {
       case 'status':
@@ -84,6 +86,7 @@ export function resolveManagerRequestCapability(args: readonly string[]): string
 
 export function managerRequestKind(capability: string | null): ManagerRequestKind | null {
   if (capability === MANAGER_REPLY_CAPABILITY) return 'reply'
+  if (capability === MANAGER_MANAGEMENT_CAPABILITY) return 'management'
   if (capability !== null && MANAGEMENT_CAPABILITIES.has(capability)) return 'management'
   return null
 }

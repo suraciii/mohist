@@ -45,6 +45,7 @@ internal static partial class SlackCommands
         group.Subcommands.Add(BuildReconcileCreate(api));
         group.Subcommands.Add(BuildReconcileDelete(api));
         group.Subcommands.Add(BuildMessage(api));
+        group.Subcommands.Add(BuildManagement(api));
         return group;
     }
 
@@ -890,6 +891,45 @@ internal static partial class SlackCommands
                 return candidate;
         }
         return null;
+    }
+
+    private static Command BuildManagement(MohistCliApi api)
+    {
+        var command = new Command("management", "Invoke the Manager management capability") { Hidden = true };
+        var request = new Argument<string>("request") { Description = "JSON object with exactly operation and args" };
+        command.Arguments.Add(request);
+        command.SetAction(async ctx =>
+        {
+            if (!ManagerCliMode.Active)
+            {
+                await api.Error.WriteLineAsync("slack management is available only in Manager mode.").ConfigureAwait(false);
+                return CliExitCode.For(CliExitOutcome.UsageFailure);
+            }
+
+            JsonNode? node;
+            try
+            {
+                node = JsonNode.Parse(ctx.GetValue(request)!);
+            }
+            catch (JsonException)
+            {
+                return await new CliResultWriter(api.Invocation).WriteFailureAsync(
+                    new CliFailure("manager_request_invalid", "The management request must be valid JSON.", null));
+            }
+
+            if (node is not JsonObject objectNode
+                || objectNode.Count != 2
+                || !objectNode.ContainsKey("operation")
+                || !objectNode.ContainsKey("args"))
+            {
+                return await new CliResultWriter(api.Invocation).WriteFailureAsync(
+                    new CliFailure("manager_request_invalid", "The management request must contain exactly operation and args.", null));
+            }
+
+            return await new CliResultWriter(api.Invocation).WriteSuccessAsync(
+                await api.PostManagerManagementAsync(objectNode).ConfigureAwait(false));
+        });
+        return command;
     }
 
     private static Command BuildMessage(MohistCliApi api)

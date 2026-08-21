@@ -166,3 +166,10 @@ Verification:
 - Extended the Manager managed-Bot specification to assert that no Manager Inbox, outbox, AgentJob, or Agent Session rows are created, and that the same null-sender Bot redelivery remains ignored after acquiring a replacement adapter lease.
 - Existing workspace-scoped `SlackManagedBotAdmissionService` remains the sole attribution rule: it matches only enrolled Manager or eligible non-deleted managed Agent author identities and never the receiving App identity. Unmatched, conflicting, unknown, and third-party Bot events retain the existing rejection path.
 - Verification: Server build passes; focused Manager managed-Bot specs, Manager adapter/ingress/runtime-lease specs, and `mohist-slack` adapter event/transport tests pass; `git diff --check` is clean.
+
+## T-003
+- Added the typed `ManagerManagementBridge` and `/api/slack-manager/management` route. Requests are exact `{operation,args}` envelopes; parsing, operation allowlisting, argument-property rejection, current actor/enrollment reauthorization, project/target scope checks, and structured authoritative outcomes happen before application-service delegation.
+- Extended `SlackManagerApplicationService` with shared create-or-mount, inspection, routine lifecycle, access-policy, and owner-workflow methods. Owner workflow results intentionally expose expiry/next action but not one-time claim values.
+- Added the hidden `mo slack management <json>` transport form and a runner catalog entry for the fixed management route. The existing `mo slack message send` route remains separate and is rejected by the management bridge.
+- Protected and arbitrary operations remain outside the fixed route and broker vocabulary. Manager grants accept the management route only for a management audience and still require the per-operation catalog capability.
+- Added `SlackManagerManagementBridgeSpecs` covering all nine operations, exact envelope rejection, protected/reply denials, and authoritative state changes. The named bridge class passes 7/7 serially; the full Spec assembly had one unrelated managed-bot parallelism race (3049/3050) and the managed-bot class passes in isolation.

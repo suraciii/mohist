@@ -39,9 +39,12 @@ public sealed class ManagerCapabilityAdmissionMiddleware : IMiddleware, IScopedS
         var capability = context.Request.Path.StartsWithSegments(
                 "/api/slack-manager/reply", StringComparison.Ordinal)
             ? ManagerCapabilityCatalog.ManagerReply
-            : ManagerCapabilityCatalog.ResolveHttp(
-                context.Request.Method,
-                context.Request.Path.Value ?? string.Empty);
+            : context.Request.Path.StartsWithSegments(
+                "/api/slack-manager/management", StringComparison.Ordinal)
+                ? ManagerCapabilityCatalog.ManagerManagementRoute
+                : ManagerCapabilityCatalog.ResolveHttp(
+                    context.Request.Method,
+                    context.Request.Path.Value ?? string.Empty);
         if (!ManagerCapabilityCatalog.IsManagerCapability(capability))
         {
             await RejectAsync(context, "This operation is unavailable to Manager executions.",

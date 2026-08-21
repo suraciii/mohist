@@ -26,6 +26,10 @@ public static class ManagerCapabilityCatalog
     // operation. It is still part of the Manager CLI language so the CLI
     // can select the dedicated reply route before making a request.
     public const string ManagerReply = "manager.reply";
+    // The logical management bridge is a fixed transport route. The bridge
+    // still validates the operation-specific capability from the request;
+    // this value only lets auth admit the route before its JSON body is read.
+    public const string ManagerManagementRoute = "manager.management";
 
     public static IReadOnlySet<string> ManagementCapabilities { get; } = new HashSet<string>(StringComparer.Ordinal)
     {
@@ -47,7 +51,9 @@ public static class ManagerCapabilityCatalog
         capability is not null && ManagementCapabilities.Contains(capability);
 
     public static bool IsManagerCapability(string? capability) =>
-        IsManagement(capability) || string.Equals(capability, ManagerReply, StringComparison.Ordinal);
+        IsManagement(capability)
+        || string.Equals(capability, ManagerReply, StringComparison.Ordinal)
+        || string.Equals(capability, ManagerManagementRoute, StringComparison.Ordinal);
 
     public static bool IsManagerModeValue(string? value) =>
         string.Equals(value, "1", StringComparison.Ordinal)
@@ -68,6 +74,8 @@ public static class ManagerCapabilityCatalog
         if (Equals(args, 0, "slack"))
         {
             var verb = ValueAt(args, 1);
+            if (verb == "management")
+                return ManagerManagementRoute;
             if (verb == "message" && ValueAt(args, 2) == "send")
                 return ManagerReply;
             return verb switch
@@ -125,6 +133,12 @@ public static class ManagerCapabilityCatalog
             && Equals(segments, 2, "reply")
             && string.Equals(method, "POST", StringComparison.OrdinalIgnoreCase))
             return ManagerReply;
+        if (segments.Length == 3
+            && Equals(segments, 0, "api")
+            && Equals(segments, 1, "slack-manager")
+            && Equals(segments, 2, "management")
+            && string.Equals(method, "POST", StringComparison.OrdinalIgnoreCase))
+            return ManagerManagementRoute;
 
         if (segments.Length < 4
             || !Equals(segments, 0, "api")

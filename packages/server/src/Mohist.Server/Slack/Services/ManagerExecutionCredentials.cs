@@ -673,7 +673,11 @@ public sealed class ManagerExecutionCapabilityIssuer
             return ManagerExecutionValidationResult.Denied(
                 "manager_credential_expired",
                 "The Manager execution expired; inspect the current state and start a fresh turn.");
-        if (!lease.Capabilities.Contains(capability, StringComparer.Ordinal))
+        var routeAllowed = string.Equals(capability, ManagerCapabilityCatalog.ManagerManagementRoute, StringComparison.Ordinal)
+            ? kind == ManagerExecutionLeaseKind.Management
+                && lease.Capabilities.Any(ManagerCapabilityCatalog.IsManagement)
+            : lease.Capabilities.Contains(capability, StringComparer.Ordinal);
+        if (!routeAllowed)
             return ManagerExecutionValidationResult.Denied(
                 "manager_capability_not_available",
                 "This Manager operation is outside the execution capability allowlist.");
