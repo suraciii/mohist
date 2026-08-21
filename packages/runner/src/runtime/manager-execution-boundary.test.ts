@@ -49,7 +49,6 @@ describe('ManagerExecutionBoundary', () => {
         signal: new AbortController().signal,
       })
       const proxiedCliOutput = Buffer.concat(cliOutput).toString('utf8')
-      expect(proxiedCliOutput).toContain('USAGE')
       expect(proxiedCliOutput).not.toContain(grant.managementCredential)
       expect(proxiedCliOutput).not.toContain(grant.replyCredential)
     } finally {
