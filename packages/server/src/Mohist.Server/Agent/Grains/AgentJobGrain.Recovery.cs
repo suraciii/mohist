@@ -129,8 +129,19 @@ public sealed partial class AgentJobGrain
 
     public Task MarkUnknownAsync(string reason) => EnterUnknownStateAsync(reason);
 
-    public Task MarkUnknownAsync(string reason, DateTimeOffset recoveryDeadlineAt) =>
-        EnterUnknownStateAsync(reason, recoveryDeadlineAt);
+    public async Task MarkUnknownAsync(string reason, DateTimeOffset recoveryDeadlineAt)
+    {
+        await EnterUnknownStateAsync(reason, recoveryDeadlineAt);
+        // Server-side Runner loss is the one unknown transition that no
+        // Runner report will follow up on, so the Manager recovery turn must
+        // be created here rather than waiting for a report that cannot come.
+        if (IsManagerInput())
+        {
+            if (State.PendingInitialTurnTerminalDelivery is { } pending)
+                await DeliverInitialTurnTerminalAsync(pending);
+            await EnsureManagerRecoveryAsync(reason);
+        }
+    }
 
     internal async Task EnterUnknownStateAsync(
         string reason,

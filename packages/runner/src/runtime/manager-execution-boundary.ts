@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto'
 import { existsSync } from 'node:fs'
-import { spawn } from 'node:child_process'
+import { spawn, type ChildProcess } from 'node:child_process'
 import { chmod, mkdir, rm, writeFile } from 'node:fs/promises'
 import { createServer, type Server, type Socket } from 'node:net'
 import { join } from 'node:path'
@@ -9,6 +9,12 @@ import { CredentialMasker } from './task-log.js'
 import { createDefaultOpenCodeRuntime } from './opencode/factory.js'
 import type { OpenCodeRuntime } from './opencode/runtime.js'
 import { createIsolatedOpencodeServer } from './opencode/server-process.js'
+import {
+  DEFAULT_MANAGER_REQUEST_LIMITS,
+  managerRequestKind,
+  resolveManagerRequestCapability,
+  type ManagerRequestLimits,
+} from './manager-capability-surface.js'
 
 export interface ManagerExecutionGrant {
   readonly managementCredential: string
@@ -25,6 +31,27 @@ export interface ManagerBashOptions {
   readonly env?: NodeJS.ProcessEnv
 }
 
+export interface ManagerExecutionBoundaryOptions {
+  /** Frozen working directory for credential-bearing CLI children. */
+  readonly workDir?: string
+  /** Overrides the resolved `mo` executable; tests inject a stub here. */
+  readonly moExecutable?: string
+  readonly requestLimits?: ManagerRequestLimits
+  /** Bounded grace before SIGKILL during disposal. */
+  readonly terminationTimeoutMs?: number
+}
+
+const DEFAULT_TERMINATION_TIMEOUT_MS = 5_000
+
+// Same-user processes cannot authenticate themselves over a local socket:
+// Node exposes no SO_PEERCRED, and every file or environment value the
+// launcher could hold is equally readable by the model's own shell. The
+// enforceable boundary is therefore confinement, not caller identity:
+// bearer values exist only inside the spawned CLI child, every request is
+// restricted to the Manager capability vocabulary, the working directory is
+// frozen to the execution workspace, and each kind has a bounded request
+// budget. The Server independently enforces the lease origin, route
+// allowlist, and anchor validation for whatever those children send.
 /**
  * One in-memory Manager process boundary. The grant is deliberately not part
  * of DispatchWorkItem and this class is never passed to a journal or report.
@@ -36,9 +63,16 @@ export class ManagerExecutionBoundary {
   private readonly directory: string
   private readonly grant: ManagerExecutionGrant
   private readonly realMoPath: string
+  private readonly frozenCwd: string
+  private readonly requestLimits: ManagerRequestLimits
+  private readonly terminationTimeoutMs: number
+  private readonly children = new Set<ChildProcess>()
+  private readonly sockets = new Set<Socket>()
+  private readonly usedRequests: Record<'management' | 'reply', number> = { management: 0, reply: 0 }
   private broker: Server | null = null
   private isolatedOpenCodeRuntime: OpenCodeRuntime | null = null
   private disposed = false
+  private runningChildren = 0
   private authorizationInvalidated = false
 
   private constructor(
@@ -47,17 +81,27 @@ export class ManagerExecutionBoundary {
     socketPath: string,
     baseEnvironment: NodeJS.ProcessEnv,
     realMoPath: string,
+    frozenCwd: string,
+    requestLimits: ManagerRequestLimits,
+    terminationTimeoutMs: number,
   ) {
     this.grant = grant
     this.directory = directory
     this.socketPath = socketPath
     this.baseEnvironment = baseEnvironment
     this.realMoPath = realMoPath
+    this.frozenCwd = frozenCwd
+    this.requestLimits = requestLimits
+    this.terminationTimeoutMs = terminationTimeoutMs
     this.masker.registerSecret(grant.managementCredential)
     this.masker.registerSecret(grant.replyCredential)
   }
 
-  static async create(grant: ManagerExecutionGrant, runnerRoot: string): Promise<ManagerExecutionBoundary> {
+  static async create(
+    grant: ManagerExecutionGrant,
+    runnerRoot: string,
+    options: ManagerExecutionBoundaryOptions = {},
+  ): Promise<ManagerExecutionBoundary> {
     if (!grant.managementCredential || !grant.replyCredential || !grant.executionId) {
       throw new Error('Manager execution grant is incomplete')
     }
@@ -75,9 +119,18 @@ export class ManagerExecutionBoundary {
       ...process.env,
       MOHIST_MANAGER_MODE: '1',
     }
-    const realMoPath = findRealMoPath(directory, baseEnvironment.PATH ?? '')
+    const realMoPath = options.moExecutable ?? findRealMoPath(directory, baseEnvironment.PATH ?? '')
     if (!realMoPath) throw new Error('The real mo executable could not be resolved')
-    const boundary = new ManagerExecutionBoundary(grant, directory, socketPath, baseEnvironment, realMoPath)
+    const boundary = new ManagerExecutionBoundary(
+      grant,
+      directory,
+      socketPath,
+      baseEnvironment,
+      realMoPath,
+      options.workDir ?? process.cwd(),
+      options.requestLimits ?? DEFAULT_MANAGER_REQUEST_LIMITS,
+      options.terminationTimeoutMs ?? DEFAULT_TERMINATION_TIMEOUT_MS,
+    )
     await boundary.writeLauncher()
     await boundary.startBroker()
     return boundary
@@ -173,16 +226,52 @@ export class ManagerExecutionBoundary {
     const runtime = this.isolatedOpenCodeRuntime
     this.isolatedOpenCodeRuntime = null
     await runtime?.shutdown().catch(() => undefined)
+    await this.terminateChildren()
     await new Promise<void>((resolve) => {
       const broker = this.broker
       this.broker = null
-      if (!broker || !broker.listening) {
+      if (!broker) {
         resolve()
         return
       }
+      // Destroy remaining sockets first so `close` cannot block on a
+      // half-open connection whose response will never be written.
+      for (const socket of this.sockets) socket.destroy()
+      this.sockets.clear()
       broker.close(() => resolve())
     }).catch(() => undefined)
     await rm(this.directory, { recursive: true, force: true }).catch(() => undefined)
+  }
+
+  private async terminateChildren(): Promise<void> {
+    for (const child of this.children) {
+      if (child.exitCode === null) child.kill('SIGTERM')
+    }
+    if (this.children.size === 0) return
+    await this.awaitChildExit(this.terminationTimeoutMs)
+    // `killed` only records that some signal was sent; a child that traps or
+    // ignores SIGTERM still needs the unconditional escalation.
+    for (const child of this.children) {
+      if (child.exitCode === null) child.kill('SIGKILL')
+    }
+    await this.awaitChildExit(this.terminationTimeoutMs)
+    this.children.clear()
+  }
+
+  private awaitChildExit(timeoutMs: number): Promise<void> {
+    if ([...this.children].every((child) => child.exitCode !== null)) return Promise.resolve()
+    return new Promise<void>((resolve) => {
+      const settle = () => {
+        clearTimeout(timer)
+        resolve()
+      }
+      const timer = setTimeout(settle, timeoutMs)
+      timer.unref?.()
+      const check = () => {
+        if ([...this.children].every((child) => child.exitCode !== null)) settle()
+      }
+      for (const child of this.children) child.once('close', check)
+    })
   }
 
   private async writeLauncher(): Promise<void> {
@@ -205,7 +294,7 @@ socket.on('end', () => {
   if (typeof response.stderr === 'string') process.stderr.write(response.stderr)
   process.exit(response.exitCode)
 })
-socket.end(JSON.stringify({ kind, args, cwd: process.cwd() }))
+socket.end(JSON.stringify({ kind, args }))
 `
     await writeFile(launcher, source, { encoding: 'utf8', mode: 0o700 })
     if (process.platform !== 'win32') await chmod(launcher, 0o700)
@@ -215,7 +304,10 @@ socket.end(JSON.stringify({ kind, args, cwd: process.cwd() }))
     if (process.platform === 'win32') {
       throw new Error('Manager execution broker requires the named-pipe adapter on Windows')
     }
-    const broker = createServer((socket) => this.handleConnection(socket))
+    // allowHalfOpen keeps the server socket writable after the client's
+    // request end, because the response is produced asynchronously once the
+    // CLI child exits; every handling path still ends or destroys the socket.
+    const broker = createServer({ allowHalfOpen: true }, (socket) => this.handleConnection(socket))
     await new Promise<void>((resolve, reject) => {
       broker.once('error', reject)
       broker.listen(this.socketPath, () => {
@@ -226,13 +318,9 @@ socket.end(JSON.stringify({ kind, args, cwd: process.cwd() }))
     this.broker = broker
   }
 
-  /**
-   * The broker is an argument-only command proxy. It never returns either
-   * bearer value, so a same-user process that connects directly can request
-   * only the normal CLI surface and cannot turn the launcher into a token
-   * oracle.
-   */
   private handleConnection(socket: Socket): void {
+    this.sockets.add(socket)
+    socket.on('close', () => this.sockets.delete(socket))
     let body = ''
     socket.setEncoding('utf8')
     socket.on('data', (chunk) => {
@@ -248,26 +336,42 @@ socket.end(JSON.stringify({ kind, args, cwd: process.cwd() }))
         socket.end('{}')
         return
       }
-      if (
-        (request.kind !== 'management' && request.kind !== 'reply') ||
-        !Array.isArray(request.args) ||
-        request.args.some((arg) => typeof arg !== 'string') ||
-        request.args.length > 128 ||
-        this.expired()
-      ) {
+      const verdict = this.admitRequest(request)
+      if (verdict === null) {
         socket.end('{}')
         return
       }
-      void this.executeCli(
-        socket,
-        request.kind,
-        request.args as string[],
-        typeof request.cwd === 'string' && request.cwd.length > 0 ? request.cwd : process.cwd(),
-      )
+      void this.executeCli(socket, verdict.kind, verdict.args)
     })
   }
 
-  private async executeCli(socket: Socket, kind: 'management' | 'reply', args: string[], cwd: string): Promise<void> {
+  /**
+   * Confinement gate for every broker request, launcher or not. A request is
+   * admitted only when its arguments resolve to a Manager capability, the
+   * declared kind matches that capability, the execution is live, no other
+   * credential-bearing child is running, and the kind still has request
+   * budget. The caller-supplied working directory is never used.
+   */
+  private admitRequest(request: {
+    kind?: unknown
+    args?: unknown
+    cwd?: unknown
+  }): { kind: 'management' | 'reply'; args: string[] } | null {
+    const kind = request.kind === 'management' || request.kind === 'reply' ? request.kind : null
+    if (kind === null) return null
+    if (!Array.isArray(request.args) || request.args.length === 0) return null
+    if (request.args.length > 128) return null
+    if (request.args.some((arg) => typeof arg !== 'string' || arg.length === 0)) return null
+    if (this.disposed || this.expired()) return null
+    if (this.runningChildren > 0) return null
+    if (this.usedRequests[kind] >= this.requestLimits[kind]) return null
+    const capability = resolveManagerRequestCapability(request.args as string[])
+    if (managerRequestKind(capability) !== kind) return null
+    this.usedRequests[kind] += 1
+    return { kind, args: request.args as string[] }
+  }
+
+  private async executeCli(socket: Socket, kind: 'management' | 'reply', args: string[]): Promise<void> {
     const childEnvironment = { ...this.baseEnvironment }
     delete childEnvironment.MOHIST_MANAGER_BROKER
     delete childEnvironment.MOHIST_MANAGER_EXECUTION_ID
@@ -277,10 +381,12 @@ socket.end(JSON.stringify({ kind, args, cwd: process.cwd() }))
     else childEnvironment.MOHIST_MANAGER_REPLY_TOKEN = this.grant.replyCredential
 
     const child = spawn(this.realMoPath, args, {
-      cwd,
+      cwd: this.frozenCwd,
       env: childEnvironment,
       stdio: ['ignore', 'pipe', 'pipe'],
     })
+    this.children.add(child)
+    this.runningChildren += 1
     let stdout = ''
     let stderr = ''
     child.stdout.on('data', (chunk: Buffer) => {
@@ -289,8 +395,18 @@ socket.end(JSON.stringify({ kind, args, cwd: process.cwd() }))
     child.stderr.on('data', (chunk: Buffer) => {
       stderr += this.mask(chunk.toString('utf8'))
     })
-    child.on('error', () => socket.end('{}'))
+    child.on('error', () => {
+      this.children.delete(child)
+      this.runningChildren -= 1
+      socket.end('{}')
+    })
     child.on('close', (exitCode) => {
+      this.children.delete(child)
+      this.runningChildren -= 1
+      if (this.disposed) {
+        socket.destroy()
+        return
+      }
       if (socket.destroyed) return
       socket.end(
         JSON.stringify({

@@ -6,7 +6,7 @@ import type {
   WorkItemResult,
 } from '../core/types.js'
 import type { ManagerExecutionGrantResponse } from '../core/types.js'
-import { ManagerExecutionBoundary } from './manager-execution-boundary.js'
+import { ManagerExecutionBoundary, type ManagerExecutionBoundaryOptions } from './manager-execution-boundary.js'
 import type { RuntimeResult, RuntimeTurnResult, OpenCodeRuntime } from './opencode/index.js'
 import type { PiResult, PiRuntime, PiTurnResult } from './pi/index.js'
 import type { RecoverableRuntime, RuntimeTurnRecoveryResult } from './binding-recovery.js'
@@ -43,9 +43,10 @@ export function supportsManagerExecution(registration: RunnerRegistration): bool
 export async function createManagerExecutionBoundary(
   grant: ManagerExecutionGrantResponse,
   runnerRoot: string,
+  options?: ManagerExecutionBoundaryOptions,
 ): Promise<ManagerExecutionBoundary | null> {
   try {
-    return await ManagerExecutionBoundary.create(grant, runnerRoot)
+    return await ManagerExecutionBoundary.create(grant, runnerRoot, options)
   } catch {
     return null
   }
