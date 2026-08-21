@@ -101,12 +101,12 @@ public sealed class SlackDmSessionMappingStore : IScopedService, IAgentConnectio
 
     /// <summary>
     /// Records <paramref name="sessionId"/> as the current AgentSession
-    /// for the DM conversation. Called by the ingress after a successful
-    /// launch. Upserts on the unique
+    /// for the DM conversation. The Manager launch path writes its
+    /// deterministic Session id before dispatch as a durable launch fence,
+    /// then repeats this write after the coordinator returns so retries
+    /// converge on the canonical result. Upserts on the unique
     /// <c>(ConnectionId, DmConversationId)</c> index so an idempotent
-    /// replay (e.g. an inbox-dedup redelivery that re-runs the launch
-    /// path before the first upsert committed) collapses to the same
-    /// row.
+    /// replay collapses to the same row.
     /// </summary>
     public async Task SetCurrentSessionIdAsync(
         string projectId,

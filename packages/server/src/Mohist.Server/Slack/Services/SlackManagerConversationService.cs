@@ -120,6 +120,19 @@ public sealed class SlackManagerConversationService : IScopedService, ISlackMana
         string sessionId,
         CancellationToken ct)
     {
+        // Publish the deterministic Session before the coordinator can submit
+        // the AgentJob. Reply validation and concurrent Manager ingress both
+        // need this durable launch fence while dispatch is in flight.
+        await _dmSessions.SetCurrentSessionIdAsync(
+            agent.ProjectId,
+            request.Actor.EnrollmentId,
+            request.Message.Identity.WorkspaceTeamId,
+            request.Actor.SlackUserId,
+            request.Message.Identity.ConversationId,
+            sessionId,
+            request.Message.Identity.MessageTs,
+            ct);
+
         var launch = await _launcher.LaunchConnectionAsync(
             agent,
             prompt,

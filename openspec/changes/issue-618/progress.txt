@@ -140,3 +140,9 @@ Verification:
 - Finding 1 (initial Manager recovery rejected from unknown Session): fixed by routing AgentJob initial recovery through the Manager-only `RecordManagerRecoveryTurnAsync` transition. It explicitly permits the replacement inspection turn after the initial turn is marked `Unknown`, preserves the deterministic recovery lease and idempotent state guard, and continues to use the immutable Slack provenance.
 - Coverage: the Runner-loss regression now records a real initial Manager input/turn and verifies the initial turn becomes `Unknown` before exactly one recovery turn is created; the runtime-event coverage verifies the recovery turn's fresh management/reply grant at the Runner follow-up delivery boundary.
 - Verification: Server build passes; `AgentJobManagerRunnerLossRecoverySpecs` passes 1/1; `AgentSessionRuntimeEventSpecs` passes 11/11; `AgentSessionRecoveryGrainSpecs` passes 24/24. Shared SQLite/epoch-sensitive specs were run serially.
+
+## Review Round 9 Repair
+- Finding 1: the deterministic Manager Session mapping is now persisted before `LaunchConnectionAsync` can submit the AgentJob and is repeated after launch for idempotent convergence.
+- Finding 2: a duplicate follow-up whose operation journal is already `submitted` now revokes the newly issued Manager execution grant after disposing its unused boundary.
+- Finding 3: Manager CLI stdout and stderr are accumulated before masking, so credentials split across stream chunks are redacted before the response reaches the launcher or model.
+- Coverage: focused Runner follow-up and Manager boundary tests pass 5/5; Runner typecheck and Server build pass.
