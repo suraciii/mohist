@@ -535,10 +535,10 @@ socket.end(JSON.stringify({ kind, args }))
     let stdout = ''
     let stderr = ''
     child.stdout.on('data', (chunk: Buffer) => {
-      stdout += this.mask(chunk.toString('utf8'))
+      stdout += chunk.toString('utf8')
     })
     child.stderr.on('data', (chunk: Buffer) => {
-      stderr += this.mask(chunk.toString('utf8'))
+      stderr += chunk.toString('utf8')
     })
     const clearChild = () => {
       this.children.delete(child)
@@ -562,8 +562,8 @@ socket.end(JSON.stringify({ kind, args }))
       socket.end(
         JSON.stringify({
           exitCode: typeof exitCode === 'number' ? exitCode : 1,
-          stdout,
-          stderr,
+          stdout: this.mask(stdout),
+          stderr: this.mask(stderr),
         }),
       )
     })

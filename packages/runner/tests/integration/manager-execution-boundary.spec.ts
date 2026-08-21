@@ -318,6 +318,28 @@ describe.sequential('ManagerExecutionBoundary', () => {
     expect(readdirSync(join(root, 'manager-executions'))).toHaveLength(0)
   })
 
+  it('redacts credentials split across stdout and stderr chunks', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'mohist-manager-boundary-'))
+    const stub = await writeChunkedCredentialStubMo(root)
+    const boundary = await ManagerExecutionBoundary.create(grant, root, {
+      moExecutable: stub.executable,
+      workDir: stub.frozenWorkDir,
+    })
+    try {
+      const result = await requestLauncher(
+        boundary.environment().MOHIST_MANAGER_BROKER!,
+        ['slack', 'status'],
+        boundary.environment().MOHIST_MANAGER_LAUNCHER!,
+      )
+      expect(result.stdout).toBe('***')
+      expect(result.stderr).toBe('***')
+      expect(JSON.stringify(result)).not.toContain(grant.managementCredential)
+      expect(JSON.stringify(result)).not.toContain(grant.replyCredential)
+    } finally {
+      await boundary.dispose()
+    }
+  })
+
   it('redacts both credentials before output capture', async () => {
     const root = await mkdtemp(join(tmpdir(), 'mohist-manager-boundary-'))
     const boundary = await ManagerExecutionBoundary.create(grant, root, {
@@ -331,6 +353,31 @@ describe.sequential('ManagerExecutionBoundary', () => {
     }
   })
 })
+
+async function writeChunkedCredentialStubMo(root: string): Promise<{ executable: string; frozenWorkDir: string }> {
+  const directory = join(root, 'chunked-stub-bin')
+  const executable = join(directory, 'mo')
+  const frozenWorkDir = join(root, 'chunked-frozen-workdir')
+  await mkdir(directory, { recursive: true })
+  await mkdir(frozenWorkDir, { recursive: true })
+  const script = `#!/usr/bin/env node
+const management = ${JSON.stringify(grant.managementCredential)}
+const reply = ${JSON.stringify(grant.replyCredential)}
+const split = (value) => [value.slice(0, Math.ceil(value.length / 2)), value.slice(Math.ceil(value.length / 2))]
+const [managementFirst, managementSecond] = split(management)
+const [replyFirst, replySecond] = split(reply)
+process.stdout.write(managementFirst)
+process.stderr.write(replyFirst)
+setTimeout(() => {
+  process.stdout.write(managementSecond)
+  process.stderr.write(replySecond)
+  setTimeout(() => process.exit(0), 10)
+}, 10)
+`
+  await writeFile(executable, script, { encoding: 'utf8', mode: 0o700 })
+  await chmod(executable, 0o700)
+  return { executable, frozenWorkDir }
+}
 
 describe('manager capability surface mirror', () => {
   it('resolves the same vocabulary as the CLI manager-mode admission', () => {
