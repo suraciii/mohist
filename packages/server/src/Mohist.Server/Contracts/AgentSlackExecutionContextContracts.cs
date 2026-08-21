@@ -11,6 +11,20 @@ public static class AgentExecutionSources
     public const string Version1Capability = "execution-source-v1";
 }
 
+/// <summary>
+/// Non-secret control-plane markers for execution origins. The marker is
+/// separate from the Slack context: it selects server-side capability and
+/// recovery rules, but is never added to the Agent prompt, Instructions,
+/// Skill, or Slack facts.
+/// </summary>
+public static class AgentOriginMarkers
+{
+    public const string SlackManager = "slack-manager";
+
+    public static bool IsManager(string? marker) =>
+        string.Equals(marker, SlackManager, StringComparison.Ordinal);
+}
+
 public static class SlackCollaborationSkillCatalog
 {
     public const string Name = "mohist-slack-collaboration";
@@ -69,7 +83,11 @@ public sealed record SlackReplyAnchor(
     [property: Id(4)] string InitiatingMemberId,
     [property: Id(5)] string ConnectionId,
     [property: Id(6)] string SessionId,
-    [property: Id(7)] string DispatchRef);
+    [property: Id(7)] string DispatchRef,
+    // Manager executions use the synthetic project and owner explicitly so
+    // reply routing cannot silently fall back to a Connection.
+    [property: Id(8)] string? ProjectId = null,
+    [property: Id(9)] string? OwnerKind = null);
 
 [GenerateSerializer]
 public sealed record SlackCollaborationSkill(
@@ -97,7 +115,9 @@ public static class SlackExecutionContextFactory
         string initiatingMemberId,
         string connectionId,
         string sessionId,
-        string dispatchRef)
+        string dispatchRef,
+        string? projectId = null,
+        string? ownerKind = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(workspaceId);
         ArgumentException.ThrowIfNullOrWhiteSpace(conversationId);
@@ -118,7 +138,9 @@ public static class SlackExecutionContextFactory
                 initiatingMemberId,
                 connectionId,
                 sessionId,
-                dispatchRef),
+                dispatchRef,
+                projectId,
+                ownerKind),
             SlackCollaborationSkillCatalog.Resolve());
     }
 }

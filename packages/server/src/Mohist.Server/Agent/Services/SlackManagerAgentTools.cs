@@ -1,3 +1,5 @@
+using Mohist.Workflow.Definition;
+
 namespace Mohist.Server.Agent.Services;
 
 public static class SlackManagerAgentTools
@@ -26,7 +28,21 @@ public static class SlackManagerAgentTools
     };
 
     public static bool IsAllowed(string? tool) =>
-        tool is not null && Allowed.Contains(tool.Trim());
+        ManagerCapabilityCatalog.IsManagement(CapabilityForTool(tool));
+
+    public static string? CapabilityForTool(string? tool) => tool?.Trim() switch
+    {
+        List => ManagerCapabilityCatalog.ConnectionList,
+        Diagnostics => ManagerCapabilityCatalog.ConnectionDiagnostics,
+        View => ManagerCapabilityCatalog.ConnectionView,
+        Create => ManagerCapabilityCatalog.AgentCreateOrMount,
+        Edit => ManagerCapabilityCatalog.ConnectionAccessPolicy,
+        Enable => ManagerCapabilityCatalog.ConnectionEnable,
+        Disable => ManagerCapabilityCatalog.ConnectionDisable,
+        ClaimOwner => ManagerCapabilityCatalog.OwnerClaim,
+        TransferOwner => ManagerCapabilityCatalog.OwnerTransfer,
+        _ => null,
+    };
 
     public static bool IsForbidden(string? tool) => tool is
         "remove-binding" or "delete" or "permanent-delete" or "configure" or "rotate-credentials";

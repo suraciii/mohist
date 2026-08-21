@@ -41,6 +41,7 @@ import {
 } from './command-runtime.js'
 import type { AgentSessionRuntimeEventOutbox, RuntimeEventRecord } from './runtime-event-outbox.js'
 import type { CancelOperationJournalStore } from '../runtime/cancel-operation-journal.js'
+import type { ManagerExecutionRegistry, ManagerExecutionEntry } from '../runtime/manager-execution-registry.js'
 import { runnerLogger } from '../system/logger.js'
 
 const log = runnerLogger.child('session')
@@ -50,6 +51,8 @@ export interface CancelHandlerDeps {
   openCodeRuntime?: CommandRuntimeAccessors['openCode']
   piRuntime?: CommandRuntimeAccessors['pi']
   agentSessionRuntimeEventOutbox?: AgentSessionRuntimeEventOutbox | null
+  managerExecutionRegistry?: ManagerExecutionRegistry | null
+  onManagerExecutionFinished?: (executionId: string) => Promise<void> | void
   cancelOperationJournal?: CancelOperationJournalStore | null
 }
 
@@ -122,10 +125,18 @@ async function reconcileStartedStop(
   const binding = sessionTarget?.binding
   if (!binding || !binding.workDir) return 'indeterminate'
 
-  const handle = resolveCommandRuntime(binding, {
-    openCode: deps.openCodeRuntime,
-    pi: deps.piRuntime,
-  })
+  const managerExecution =
+    deps.managerExecutionRegistry?.findForCancel(
+      sessionTarget.kind === 'workflow' ? (sessionTarget.agentSessionId ?? '') : sessionTarget.sessionId,
+      binding.runtime,
+      binding.runtimeSessionId,
+    ) ?? null
+  const handle =
+    managerExecution?.handle ??
+    resolveCommandRuntime(binding, {
+      openCode: deps.openCodeRuntime,
+      pi: deps.piRuntime,
+    })
   if (!handle || !handle.runtime.ready()) return 'indeterminate'
 
   try {
@@ -171,10 +182,18 @@ async function handleCancel(
 
   const resolver = deps.followupTargetResolver ?? null
   if (!resolver) return { state: 'unavailable' }
-  const handle = resolveCommandRuntime(binding, {
-    openCode: deps.openCodeRuntime,
-    pi: deps.piRuntime,
-  })
+  const managerExecution =
+    deps.managerExecutionRegistry?.findForCancel(
+      sessionTarget.kind === 'workflow' ? (sessionTarget.agentSessionId ?? '') : sessionTarget.sessionId,
+      binding.runtime,
+      binding.runtimeSessionId,
+    ) ?? null
+  const handle =
+    managerExecution?.handle ??
+    resolveCommandRuntime(binding, {
+      openCode: deps.openCodeRuntime,
+      pi: deps.piRuntime,
+    })
   if (!handle) return { state: 'unavailable' }
   if (!(await ensureCommandRuntimeReady(handle))) {
     return { state: 'unavailable' }
@@ -189,7 +208,10 @@ async function handleCancel(
   }
 
   if (!resolved) {
-    return settleWithoutLiveTarget(payload, deps)
+    const settled = await settleWithoutLiveTarget(payload, deps)
+    if (managerExecution && settled.state !== 'not-cancellable' && settled.state !== 'unavailable')
+      await finishManagerExecution(managerExecution, deps)
+    return settled
   }
 
   try {
@@ -207,7 +229,10 @@ async function handleCancel(
         return { state: 'unavailable' }
       }
       if (kind === 'missing-session') {
-        return settleWithoutLiveTarget(payload, deps)
+        const settled = await settleWithoutLiveTarget(payload, deps)
+        if (managerExecution && settled.state !== 'not-cancellable' && settled.state !== 'unavailable')
+          await finishManagerExecution(managerExecution, deps)
+        return settled
       }
       log.error('cancel runtime.cancel rejected', {
         reason: readErrorMessage(result),
@@ -233,11 +258,15 @@ async function handleCancel(
       log.error('failed to persist cancel activity', { session: binding.runtimeSessionId, exception: outboxError })
       return { state: 'stop-requested' }
     }
-    return handle.kind === 'pi' && facts.stopConfirmed === false
-      ? { state: 'unknown', interruptUnconfirmed: true }
-      : confirmed
-        ? { state: 'stopped' }
-        : { state: 'stop-requested' }
+    const reply =
+      handle.kind === 'pi' && facts.stopConfirmed === false
+        ? ({ state: 'unknown', interruptUnconfirmed: true } as const)
+        : confirmed
+          ? ({ state: 'stopped' } as const)
+          : ({ state: 'stop-requested' } as const)
+    if (managerExecution && (confirmed || (handle.kind === 'pi' && facts.stopConfirmed === false)))
+      await finishManagerExecution(managerExecution, deps)
+    return reply
   } catch (error) {
     log.error('cancel runtime.cancel threw', { exception: error, session: binding.runtimeSessionId })
     return { state: 'stop-requested' }
@@ -289,6 +318,16 @@ async function recordCancelActivity(
     acknowledgementPolicy: 'successful-response',
   }
   await outbox.enqueueProducedFact(record)
+}
+
+async function finishManagerExecution(entry: ManagerExecutionEntry, deps: CancelHandlerDeps): Promise<void> {
+  if (deps.managerExecutionRegistry) await deps.managerExecutionRegistry.dispose(entry.boundary)
+  else await entry.boundary.dispose().catch(() => undefined)
+  try {
+    await deps.onManagerExecutionFinished?.(entry.executionId)
+  } catch (error) {
+    log.error('failed to revoke Manager execution after cancellation', { exception: error, session: entry.sessionId })
+  }
 }
 
 function operationKey(payload: CancelAgentSessionPayload | null | undefined): string | null {

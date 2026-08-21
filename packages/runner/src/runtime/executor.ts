@@ -39,6 +39,7 @@ import type { BindingRecoveryCoordinator } from './binding-recovery.js'
 import type { RuntimeTurnRegistry } from './runtime-turn-registry.js'
 import { SkillResolver } from './skill-resolver.js'
 import { renderWithDeferred, buildActionHost, type ExecutorCapabilityDeps } from './executor-capabilities.js'
+import type { ManagerExecutionBoundary } from './manager-execution-boundary.js'
 
 const COMPLETED_STATUSES = new Set(['completed', 'success', 'succeeded', 'pass', 'passed'])
 const CHECK_STATUS_BY_ACTION_STATUS = new Map([
@@ -77,17 +78,25 @@ export class WorkExecutor {
     this.agentSessionRuntimeEventOutbox = outbox
   }
 
-  async execute(work: DispatchWorkItem, signal: AbortSignal): Promise<WorkItemResult> {
-    return this.executeWithLog(work, signal, null).then((exec) => exec.result)
+  async execute(
+    work: DispatchWorkItem,
+    signal: AbortSignal,
+    managerExecution: ManagerExecutionBoundary | null = null,
+  ): Promise<WorkItemResult> {
+    return this.executeWithLog(work, signal, null, managerExecution).then((exec) => exec.result)
   }
 
   async executeWithLog(
     work: DispatchWorkItem,
     signal: AbortSignal,
     collector: TaskLogCollector | null,
+    managerExecution: ManagerExecutionBoundary | null = null,
   ): Promise<WorkExecution> {
     const ownedCollector = collector ?? new TaskLogCollector({ now: this.now })
-    const logger = new TaskLogger({ collector: ownedCollector, masker: createCredentialMaskerFromEnvironment() })
+    const logger = new TaskLogger({
+      collector: ownedCollector,
+      masker: managerExecution?.masker ?? createCredentialMaskerFromEnvironment(),
+    })
     let resolvedWorkspace: ResolvedWorkspace
     if (work.ownerKind !== 'agent-job') {
       const precheck = await this.prepareWorkspace(work, signal, logger)
@@ -101,7 +110,7 @@ export class WorkExecutor {
       const result = await this.executeChecks(work, resolvedWorkspace, signal, logger)
       return { result, collector: ownedCollector }
     }
-    const result = await this.executeOne(work, resolvedWorkspace, signal, logger)
+    const result = await this.executeOne(work, resolvedWorkspace, signal, logger, managerExecution)
     return { result, collector: ownedCollector }
   }
 
@@ -138,15 +147,17 @@ export class WorkExecutor {
     resolvedWorkspace: ResolvedWorkspace,
     signal: AbortSignal,
     log: TaskLogger,
+    managerExecution: ManagerExecutionBoundary | null = null,
   ): Promise<WorkItemResult> {
     if (work.ownerKind === 'agent-job') {
       if (!this.agentJobExecutor) {
         return failure(work, 'AgentJob dispatch received without an AgentJobExecutor wired on the WorkExecutor')
       }
       try {
-        return await this.agentJobExecutor.execute(work, signal)
+        return await this.agentJobExecutor.execute(work, signal, managerExecution)
       } catch (error) {
-        return failure(work, errorMessage(error))
+        const message = errorMessage(error)
+        return failure(work, managerExecution ? managerExecution.mask(message) : message)
       }
     }
 

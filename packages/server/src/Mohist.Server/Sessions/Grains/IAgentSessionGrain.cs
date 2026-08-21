@@ -56,6 +56,15 @@ public interface IAgentSessionGrain : IGrainWithStringKey
         AgentTurnResult? result);
 
     Task RecordFollowupTurnAsync(RecordFollowupTurnCommand command);
+
+    /// <summary>
+    /// Records the inspection-only Manager recovery turn after the original
+    /// Manager turn became unknown. Unlike an ordinary follow-up, this
+    /// transition is explicitly allowed from Session activity Unknown and
+    /// carries the durable recovery lease needed by the normal dispatcher.
+    /// </summary>
+    Task RecordManagerRecoveryTurnAsync(RecordFollowupTurnCommand command);
+    Task EnsureManagerCredentialExpiryRecoveryAsync();
     Task AbandonFollowupTurnAsync(string inputId, string turnId);
 
     Task MarkTurnExecutingAsync(string turnId);
@@ -133,6 +142,7 @@ public interface IAgentSessionGrain : IGrainWithStringKey
     Task<AgentInitialLaunchSnapshot?> GetInitialLaunchAsync();
 
     Task<IReadOnlyList<AgentTurnRecord>> ListTurnsAsync();
+    Task<IReadOnlyList<AgentSessionInputRecord>> ListInputsAsync();
 
     /// <summary>
     /// Create a scheduled input (or replay an existing schedule for the
@@ -365,7 +375,14 @@ public sealed record AcceptFollowupCommand(
     /// free after <see cref="PreMintedTurnId"/>).
     /// </summary>
     [property: Id(6)] IReadOnlyList<AgentInputAttachmentAcceptance>? AttachmentResults = null,
-    [property: Id(7)] AgentSessionInputProvenance? Provenance = null);
+    [property: Id(7)] AgentSessionInputProvenance? Provenance = null,
+    /// <summary>
+    /// Allows a Manager message to queue behind a still-pending initial
+    /// launch before the Runner has attached its physical runtime session.
+    /// This does not permit dispatch to overtake the initial turn.
+    /// Append-only Orleans field id.
+    /// </summary>
+    [property: Id(8)] bool AllowPendingInitialLaunch = false);
 
 [GenerateSerializer]
 public sealed record AgentSessionRuntimeEventInput(

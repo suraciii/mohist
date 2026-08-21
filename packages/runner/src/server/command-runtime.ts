@@ -7,6 +7,7 @@
 // the selector + the two parallel call surfaces the handlers use
 // without leaking the deep-module boundary types into each other.
 
+import type { ManagerExecutionBoundary } from '../runtime/manager-execution-boundary.js'
 import type {
   OpenCodeRuntime,
   RuntimeFilePart,
@@ -109,6 +110,7 @@ export interface FollowupCallTarget {
 export interface FollowupCallRequest {
   readonly target: FollowupCallTarget
   readonly prompt: string
+  readonly managerExecution?: ManagerExecutionBoundary | null
   readonly fileParts?: readonly RuntimeFilePart[] | null
   readonly options?: {
     readonly model?: string | null
@@ -295,6 +297,7 @@ async function callPiFollowup(
           },
         }
       : {}),
+    managerExecution: request.managerExecution ?? null,
   }
   return await runtime.followup(piRequest, observer ?? undefined)
 }

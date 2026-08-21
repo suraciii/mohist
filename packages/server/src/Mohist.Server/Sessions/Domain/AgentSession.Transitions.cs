@@ -461,7 +461,8 @@ public static partial class AgentSessionExtensions
                     Attachments: normalizedAttachments,
                     Provenance: provenance,
                     StartupContext: startupContext,
-                    ExecutionSource: ExecutionSourceFor(provenance)));
+                    ExecutionSource: ExecutionSourceFor(provenance),
+                    OriginMarker: provenance?.OriginMarker));
             }
 
             var turns = (session.Status.Turns ?? []).ToList();
@@ -509,7 +510,42 @@ public static partial class AgentSessionExtensions
             string source,
             DateTime now,
             IReadOnlyList<AgentSessionInputAttachmentDescriptor>? attachments = null,
-            AgentSessionInputProvenance? provenance = null)
+            AgentSessionInputProvenance? provenance = null) =>
+            session.RecordFollowupTurnCore(
+                inputId,
+                turnId,
+                prompt,
+                source,
+                now,
+                attachments: attachments,
+                provenance: provenance);
+
+        public IReadOnlyList<AgentSessionEvent> RecordManagerRecoveryTurn(
+            string inputId,
+            string turnId,
+            string prompt,
+            string source,
+            DateTime now,
+            AgentSessionInputProvenance provenance) =>
+            session.RecordFollowupTurnCore(
+                inputId,
+                turnId,
+                prompt,
+                source,
+                now,
+                attachments: null,
+                provenance: provenance,
+                allowUnknownRecovery: true);
+
+        private IReadOnlyList<AgentSessionEvent> RecordFollowupTurnCore(
+            string inputId,
+            string turnId,
+            string prompt,
+            string source,
+            DateTime now,
+            IReadOnlyList<AgentSessionInputAttachmentDescriptor>? attachments,
+            AgentSessionInputProvenance? provenance,
+            bool allowUnknownRecovery = false)
         {
             if (string.IsNullOrWhiteSpace(inputId))
                 throw new ArgumentException("Input id is required.", nameof(inputId));
@@ -575,11 +611,13 @@ public static partial class AgentSessionExtensions
                     $"AgentSession {session.Id} already links input '{inputId}' to another turn.");
             }
 
-            if (session.Status.Activity != AgentSessionActivity.Idle
-                || turns.Any(candidate => string.IsNullOrWhiteSpace(candidate.JobId)
-                    && (candidate.Status is AgentTurnStatus.Queued
-                        or AgentTurnStatus.Executing
-                        or AgentTurnStatus.Unknown)))
+            var activityAllowsRecovery = allowUnknownRecovery
+                && session.Status.Activity == AgentSessionActivity.Unknown;
+            var hasActiveTurn = turns.Any(candidate => string.IsNullOrWhiteSpace(candidate.JobId)
+                && (candidate.Status is AgentTurnStatus.Queued or AgentTurnStatus.Executing
+                    || candidate.Status == AgentTurnStatus.Unknown && !activityAllowsRecovery));
+            if ((session.Status.Activity != AgentSessionActivity.Idle && !activityAllowsRecovery)
+                || hasActiveTurn)
             {
                 throw new InvalidOperationException(
                     $"AgentSession {session.Id} cannot start another turn while work is active.");
@@ -595,7 +633,8 @@ public static partial class AgentSessionExtensions
                 JobId: null,
                 Attachments: normalizedAttachments,
                 Provenance: provenance,
-                ExecutionSource: ExecutionSourceFor(provenance)));
+                ExecutionSource: ExecutionSourceFor(provenance),
+                OriginMarker: provenance?.OriginMarker));
             turns.Add(new AgentTurnRecord(
                 Id: turnId,
                 Sequence: turns.Count + 1,
@@ -605,10 +644,29 @@ public static partial class AgentSessionExtensions
                 RecordedAt: now,
                 UpdatedAt: now));
 
+            // System-initiated turns (Manager expiry/loss recovery) must be
+            // dispatchable by the ordinary follow-up dispatcher, which only
+            // claims queued turns carrying a matching lease; without one the
+            // recovery turn is recorded but never executed and never receives
+            // fresh credentials.
+            var leases = (session.Status.PendingFollowups ?? []).ToList();
+            if (!leases.Any(candidate => string.Equals(candidate.TurnId, turnId, StringComparison.Ordinal)))
+            {
+                leases.Add(new AgentSessionFollowupLease(
+                    OperationId: $"system-turn:{turnId}",
+                    RuntimeSessionId: session.Status.AgentRuntimeSessionId ?? string.Empty,
+                    Accepted: true,
+                    AcceptedAt: now,
+                    StartedAt: now,
+                    InputId: inputId,
+                    TurnId: turnId));
+            }
+
             session.Status = session.Status with
             {
                 Inputs = inputs,
                 Turns = turns,
+                PendingFollowups = leases,
                 Activity = AgentSessionActivity.Active,
                 LastDataAt = now,
                 CurrentTurnEndedAt = null,
@@ -1368,70 +1426,6 @@ public static partial class AgentSessionExtensions
             return [];
         }
 
-        /// <summary>
-        /// Appends a thinned <see cref="ContextUsageHistoryEntry"/> to
-        /// <paramref name="history"/>. Behaviour:
-        /// <list type="bullet">
-        ///   <item><description>returns <paramref name="history"/> unchanged
-        ///   when <paramref name="contextWindowUsed"/> or
-        ///   <paramref name="contextWindowSize"/> cannot produce a finite
-        ///   0..100 % (mirrors <see cref="AgentSessionJsonHelper.ContextUsagePercent"/>);</description></item>
-        ///   <item><description>coalesces with the last entry when it falls
-        ///   inside the same <see cref="ContextUsageHistoryBucket"/> time
-        ///   window (last-wins) so back-to-back usage updates don't drown
-        ///   the long-run trend;</description></item>
-        ///   <item><description>truncates to the most recent
-        ///   <see cref="ContextUsageHistoryCap"/> samples so the history
-        ///   cannot grow unbounded regardless of session length (bounded
-        ///   payload).</description></item>
-        /// </list>
-        /// </summary>
-        private static IReadOnlyList<ContextUsageHistoryEntry>? AppendUsageHistorySample(
-            IReadOnlyList<ContextUsageHistoryEntry>? history,
-            long? contextWindowUsed,
-            long? contextWindowSize,
-            DateTime now)
-        {
-            if (history is null) return null;
-
-            var percent = AgentSessionJsonHelper.ContextUsagePercent(contextWindowUsed, contextWindowSize);
-            if (percent is null) return history;
-
-            var entries = new List<ContextUsageHistoryEntry>(history.Count + 1);
-            entries.AddRange(history);
-
-            var lastBucket = GetHistoryBucket(entries.Count > 0 ? entries[^1].At : (DateTime?)null);
-            var nowBucket = GetHistoryBucket(now);
-
-            if (entries.Count > 0 && lastBucket == nowBucket)
-            {
-                entries[^1] = new ContextUsageHistoryEntry(now, percent.Value);
-            }
-            else
-            {
-                entries.Add(new ContextUsageHistoryEntry(now, percent.Value));
-            }
-
-            if (entries.Count > ContextUsageHistoryCap)
-            {
-                entries.RemoveRange(0, entries.Count - ContextUsageHistoryCap);
-            }
-
-            return entries;
-        }
-
-        private static long GetHistoryBucket(DateTime? at) =>
-            at is null
-                ? long.MinValue
-                : at.Value.Ticks / ContextUsageHistoryBucket.Ticks;
-
-        /// <summary>
-        /// Returns a defensive copy of the supplied attachment
-        /// descriptors, preserving order and dropping null / blank-id
-        /// entries. The list is stored on the durable input record so
-        /// callers may not mutate the original collection after the
-        /// transition completes.
-        /// </summary>
         private static IReadOnlyList<AgentSessionInputAttachmentDescriptor>? NormalizeAttachmentDescriptors(
             IReadOnlyList<AgentSessionInputAttachmentDescriptor>? descriptors)
         {
@@ -1445,14 +1439,6 @@ public static partial class AgentSessionExtensions
             return copy.Count == 0 ? null : copy;
         }
 
-        /// <summary>
-        /// Idempotency check for the attachment child record on
-        /// <see cref="AgentSessionInputRecord"/>. Two descriptor lists
-        /// are equivalent when they carry the same ordered ids and
-        /// matching name / content-type / size tuples — accepted-at is
-        /// intentionally excluded because the wall-clock stamp is not
-        /// a property of the immutable launch identity.
-        /// </summary>
         private static bool AttachmentDescriptorsEquivalent(
             IReadOnlyList<AgentSessionInputAttachmentDescriptor>? left,
             IReadOnlyList<AgentSessionInputAttachmentDescriptor>? right)

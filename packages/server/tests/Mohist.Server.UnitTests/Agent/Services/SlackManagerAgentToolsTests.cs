@@ -18,16 +18,14 @@ public sealed class SlackManagerAgentToolsTests
             {
                 Assert.True(SlackManagerAgentTools.IsForbidden(tool));
                 Assert.False(SlackManagerAgentTools.IsAllowed(tool));
-                Assert.False(SlackManagerToolAuthorization.EvaluateTool(tool).Allowed);
+                Assert.False(SlackManagerAgentTools.IsAllowed(tool));
             });
     }
 
     [Fact]
     public void Unknown_tools_do_not_get_a_manager_authorization_decision()
     {
-        var decision = SlackManagerToolAuthorization.EvaluateTool("run-sql");
-
-        Assert.False(decision.Allowed);
-        Assert.Equal("manager_tool_not_authorized", decision.Reason);
+        Assert.False(SlackManagerAgentTools.IsAllowed("run-sql"));
+        Assert.Null(SlackManagerAgentTools.CapabilityForTool("run-sql"));
     }
 }

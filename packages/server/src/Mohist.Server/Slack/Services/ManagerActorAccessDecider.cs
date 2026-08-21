@@ -71,9 +71,13 @@ public sealed class ManagerActorAccessDecider : IScopedService
         if (string.IsNullOrWhiteSpace(target.ProjectId))
             return ManagerAccessDecision.Deny("manager_resource_not_found");
 
+        var projectAuthorized = await ProjectBelongsToWorkspaceAsync(actor, target.ProjectId, ct);
+        if (!projectAuthorized)
+            return ManagerAccessDecision.Deny("manager_resource_not_found");
+
         var exists = target.Kind switch
         {
-            ManagerResourceKinds.Project => await ProjectExistsAsync(target.ProjectId),
+            ManagerResourceKinds.Project => true,
             ManagerResourceKinds.Agent => await AgentExistsAsync(target.ProjectId, target.ResourceId, ct),
             ManagerResourceKinds.Connection => await ConnectionExistsAsync(actor, target, ct),
             _ => false,
@@ -83,8 +87,30 @@ public sealed class ManagerActorAccessDecider : IScopedService
             : ManagerAccessDecision.Deny("manager_resource_not_found");
     }
 
-    private async Task<bool> ProjectExistsAsync(string projectId) =>
-        await _projects.GetByIdAsync(projectId) is not null;
+    private async Task<bool> ProjectBelongsToWorkspaceAsync(
+        ManagerActorContext actor,
+        string projectId,
+        CancellationToken ct)
+    {
+        if (await _projects.GetByIdAsync(projectId) is null)
+            return false;
+
+        var connections = await _connections.ListAsync(projectId, ct: ct);
+        var activeSlackConnections = connections
+            .Where(connection => connection.ProviderKind == ConnectionProviderKind.Slack
+                && connection.DeletedAt is null)
+            .ToArray();
+        if (activeSlackConnections.Any(connection =>
+                string.Equals(connection.WorkspaceTeamId, actor.WorkspaceTeamId, StringComparison.Ordinal)))
+            return true;
+
+        // A project without a Slack binding is the valid first target for a
+        // Manager create-or-mount call. Once a project has a live Slack
+        // binding, however, its workspace is authoritative and a Manager
+        // from another enrollment must not cross that boundary.
+        return activeSlackConnections.Length == 0
+            && await _enrollments.GetActiveByTeamAsync(actor.WorkspaceTeamId, ct) is not null;
+    }
 
     private async Task<bool> AgentExistsAsync(string projectId, string? agentId, CancellationToken ct) =>
         !string.IsNullOrWhiteSpace(agentId)

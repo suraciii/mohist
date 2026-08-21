@@ -4,6 +4,7 @@ using Mohist.Server.Auth.Domain;
 using Mohist.Server.Auth.Identity;
 using Mohist.Server.Infrastructure;
 using Mohist.Server.Infrastructure.Config;
+using Mohist.Server.Infrastructure.Slack;
 using Mohist.Server.Infrastructure.Orleans;
 using Mohist.Server.Issue.Services;
 using Mohist.Server.Agent.Grains;
@@ -15,6 +16,7 @@ using Mohist.Server.Sessions.Services;
 using Mohist.Server.Workspace.Services;
 using Mohist.Server.Workflow.Domain.Run;
 using Mohist.Server.Workflow.Grains;
+using Mohist.Server.Slack.Services;
 
 namespace Mohist.Server.Api;
 
@@ -55,6 +57,7 @@ public static partial class RunnerRoutes
         });
 
         group.MapPost("/heartbeat", HandleHeartbeatAsync);
+        MapRunnerManagerExecutionRoutes(app);
         MapUpdateInterruptRoutes(group);
         MapRunnerUpdateRecoveryRoutes(group);
         group.MapPatch("", async (string runnerId, RunnerSlotsPatchRequest req, IGrainFactory grains) =>
@@ -83,8 +86,13 @@ public static partial class RunnerRoutes
             IGrainFactory grains,
             Mohist.Server.Runner.Services.DispatchService dispatch,
             IssueQuerier issues, RunnerConnectionTracker connections,
+            ManagerExecutionCapabilityIssuer managerCredentials,
+            IManagerDeploymentEpoch managerEpoch,
             CancellationToken ct) =>
         {
+            if (!managerEpoch.Available)
+                return Results.StatusCode(StatusCodes.Status503ServiceUnavailable);
+            request.HttpContext.Response.Headers["X-Mohist-Manager-Deployment-Epoch"] = managerEpoch.Current;
             RunnerPollRequest req = new([], []);
             if (request.ContentLength is > 0)
             {
@@ -103,7 +111,7 @@ public static partial class RunnerRoutes
             if (response.Dispatches.Count == 0) return Results.NoContent();
 
             var dispatches = await Task.WhenAll(response.Dispatches.Select(work =>
-                ToWorkDispatchResponseAsync(work, issues.GetParentIssueContextAsync)));
+                ToWorkDispatchResponseAsync(work, issues.GetParentIssueContextAsync, managerCredentials)));
             return Results.Ok(new RunnerPollResponseDto(dispatches.ToList()));
         });
 
@@ -149,6 +157,7 @@ public static partial class RunnerRoutes
             HttpRequest request,
             IGrainFactory grains,
             Mohist.Server.Runner.Services.WorkflowReportService workflowReport,
+            ManagerExecutionCapabilityIssuer managerCredentials,
             CancellationToken ct) =>
         {
             RunnerReportRequest? req;
@@ -190,6 +199,8 @@ public static partial class RunnerRoutes
                 var report = await grains.GetGrain<IAgentJobGrain>(req.AgentJobId ?? string.Empty)
                     .ReportResultAsync(runnerId, req.WorkId, result);
                 var acknowledged = report.Accepted || string.Equals(report.Reason, "stale", StringComparison.Ordinal);
+                if (acknowledged)
+                    managerCredentials.RevokeWork(req.AgentJobId ?? string.Empty, req.WorkId);
                 return Results.Ok(new RunnerReportResponse(
                     req.AgentJobId ?? string.Empty, null, acknowledged,
                     report.Reason, ownerKind, req.AgentJobId));
@@ -537,7 +548,10 @@ public static partial class RunnerRoutes
         group.MapPost("/agent-sessions/{sessionId}/runtime-events", async (
             string runnerId, string sessionId,
             AgentSessionRuntimeEventsRequest req,
-            AgentSessionResolver sessions) =>
+            AgentSessionResolver sessions,
+            AgentSessionQuery sessionQuery,
+            ManagerExecutionCapabilityIssuer managerCredentials,
+            CancellationToken ct) =>
         {
             var grain = sessions.GetGrain(sessionId);
             var existing = await grain.GetAsync();
@@ -573,6 +587,8 @@ public static partial class RunnerRoutes
                 runtimeEvents,
                 req.RuntimeSessionId,
                 SessionTurnId: req.AgentTurnId));
+            if (await IsManagerAgentSessionAsync(sessionQuery, sessionId, ct))
+                RevokeCompletedManagerFollowupLeases(sessionId, req.RuntimeEvents, managerCredentials);
             return Results.Ok(events);
         });
 
@@ -694,6 +710,7 @@ public static partial class RunnerRoutes
             AgentSessionRuntimeEventsRequest req, AgentSessionResolver sessions,
             AgentSessionQuery sessionQuery,
             AgentSessionFollowupDispatcher followups,
+            ManagerExecutionCapabilityIssuer managerCredentials,
             CancellationToken ct) =>
         {
             var grain = sessions.GetGrain(sessionId);
@@ -708,6 +725,12 @@ public static partial class RunnerRoutes
                 e.Type,
                 e.Payload.ValueKind == System.Text.Json.JsonValueKind.Undefined ? "{}" : e.Payload.GetRawText())).ToArray();
             var events = await grain.AppendRuntimeEventsAsync(new AppendAgentSessionRuntimeEventsCommand(runtimeEvents, req.RuntimeSessionId));
+            if (string.Equals(projectId, SlackDeliveryOwnerIds.ManagerProjectId, StringComparison.Ordinal))
+            {
+                RevokeCompletedManagerFollowupLeases(sessionId, req.RuntimeEvents, managerCredentials);
+                if (ContainsManagerCredentialExpiry(req.RuntimeEvents))
+                    await grain.EnsureManagerCredentialExpiryRecoveryAsync();
+            }
             await followups.DispatchNextAsync(projectId, sessionId, ct);
             return Results.Ok(events);
         });
@@ -770,51 +793,6 @@ public static partial class RunnerRoutes
         });
 
         return app;
-    }
-
-    internal static async Task<WorkDispatchResponse> ToWorkDispatchResponseAsync(
-        WorkDispatch work,
-        Func<string, int, Task<ParentIssueContext?>> resolveParentIssueContext)
-    {
-        ParentIssueContextResponse? parentIssueContext = null;
-        var projectId = work.Issue?.ProjectId ?? work.ProjectId;
-        var issueNumber = work.Issue?.IssueNumber;
-        if (string.Equals(work.OwnerKind, WorkDispatchOwnerKinds.Workflow, StringComparison.Ordinal)
-            && string.Equals(work.WorkType, WorkItemTypes.Task, StringComparison.Ordinal)
-            && !string.IsNullOrWhiteSpace(projectId)
-            && issueNumber is > 0)
-        {
-            var resolved = await resolveParentIssueContext(projectId, issueNumber.Value);
-            if (resolved is not null)
-                parentIssueContext = new ParentIssueContextResponse(resolved.Title, resolved.Body);
-        }
-
-        return new WorkDispatchResponse(
-            work.WorkflowRunId,
-            work.WorkId,
-            work.Uses,
-            work.With,
-            work.Variables,
-            work.WorkType,
-            work.Stage,
-            work.Title,
-            projectId,
-            issueNumber,
-            work.EpicNumber,
-            work.Artifacts,
-            work.SetVars,
-            work.OwnerKind,
-            work.AgentJobId,
-            AgentSessionId: work.AgentSessionId,
-            Recovery: work.Recovery,
-            RecoveryRemaining: work.RecoveryRemaining,
-            Expect: work.Expect,
-            ParentIssueContext: parentIssueContext,
-            AgentDefinition: work.AgentDefinition,
-            AgentSessionStartup: work.AgentSessionStartup,
-            TaskRunId: work.TaskRunId,
-            RecoveryGeneration: work.RecoveryGeneration,
-            AgentRecovery: work.AgentRecovery);
     }
 
     private static RunnerGenericAgentSessionResponse ToRunnerGenericAgentSession(AgentSessionInfo session) =>

@@ -1,4 +1,5 @@
 using System.Text.Json;
+using Mohist.Server.Infrastructure.Slack;
 using Mohist.Server.Sessions.Domain;
 using Mohist.Server.Sessions.Grains;
 using Mohist.Server.Sessions.Services;
@@ -394,6 +395,69 @@ public sealed class AgentSessionRecoveryGrainSpecs : IClassFixture<AgentSessionG
         Assert.Equal(saveCountBefore, _fixture.StateStore.SaveCount);
         Assert.Equal(eventCountBefore, _fixture.StateStore.Events.Count);
         Assert.Equal("runtime-active", (await _fixture.StateStore.LoadAsync(sessionId))!.Status.AgentRuntimeSessionId);
+    }
+
+    [Fact]
+    public async Task ManagerCredentialExpiry_CreatesOneRecoveryTurnFromInitialSlackProvenance()
+    {
+        var sessionId = $"manager-expiry-{Guid.NewGuid():N}";
+        var initialProvenance = new AgentSessionInputProvenance(
+            "slack",
+            "workspace-1",
+            "conversation-1",
+            "thread-1",
+            "member-1",
+            "message-1",
+            "connection-1",
+            "thread-1");
+        var grain = _fixture.Grains.GetGrain<IAgentSessionGrain>(sessionId);
+        await grain.OpenAsync(new OpenAgentSessionCommand(
+            "runner-1",
+            "opencode",
+            WorkDir: "/work",
+            Metadata: new AgentSessionMetadata(new Dictionary<string, string>(StringComparer.Ordinal)
+            {
+                [AgentSessionQueryMetadataKeys.ProjectId] = SlackDeliveryOwnerIds.ManagerProjectId,
+                [AgentSessionQueryMetadataKeys.SourceKind] = "agent-launch",
+                [GenericAgentSessionMetadata.AgentId] = "manager-agent",
+            })));
+        await grain.EnsureInitialLaunchAsync(new EnsureInitialLaunchCommand(
+            "initial-input",
+            "initial-turn",
+            "manager request",
+            "agent-launch",
+            "manager-job",
+            Provenance: initialProvenance));
+        await grain.AttachPhysicalSessionAsync(new AttachPhysicalSessionCommand("runtime-1"));
+        await grain.MarkInitialTurnTerminalAsync("manager-job", AgentTurnStatus.Completed, null);
+
+        var followup = await grain.AcceptFollowupAsync(new AcceptFollowupCommand(
+            "continue",
+            "agent-session-followup",
+            "manager-followup-1",
+            Provenance: initialProvenance));
+        await grain.AppendRuntimeEventsAsync(new AppendAgentSessionRuntimeEventsCommand(
+            new[] { new AgentSessionRuntimeEventInput(
+                RuntimeEventTypes.SessionActivity,
+                $$"""{"activity":"unknown","status":"unknown","reason":"manager-credential-expired","failureCategory":"unknown","operationId":"{{followup.OperationId}}","turnId":"{{followup.TurnId}}"}""" ) },
+            "runtime-1",
+            SessionTurnId: followup.TurnId));
+
+        await grain.EnsureManagerCredentialExpiryRecoveryAsync();
+        await grain.EnsureManagerCredentialExpiryRecoveryAsync();
+
+        var state = Assert.IsType<AgentSession>(await _fixture.StateStore.LoadAsync(sessionId));
+        var recoveryInput = Assert.Single(
+            state.Status.Inputs!,
+            input => input.Id == $"manager-recovery-input:{sessionId}");
+        var recoveryTurn = Assert.Single(
+            state.Status.Turns!,
+            turn => turn.Id == $"manager-recovery-turn:{sessionId}");
+        Assert.Equal(AgentTurnStatus.Queued, recoveryTurn.Status);
+        Assert.Equal(initialProvenance, recoveryInput.Provenance);
+        Assert.Equal("manager-recovery:manager-credential-expired", recoveryInput.Source);
+        Assert.Single(state.Status.Inputs!, input => input.Id == recoveryInput.Id);
+        Assert.Single(state.Status.Turns!, turn => turn.Id == recoveryTurn.Id);
     }
 
     [Fact]

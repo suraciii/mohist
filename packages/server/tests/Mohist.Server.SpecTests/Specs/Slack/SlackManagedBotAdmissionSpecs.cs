@@ -3,6 +3,7 @@ using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Mohist.Server.Agent.Domain;
+using Mohist.Server.Agent.Services;
 using Mohist.Server.Infrastructure.Data.Agent;
 using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Infrastructure.Data.Slack;
@@ -56,14 +57,19 @@ public sealed class SlackManagedBotAdmissionSpecs
         }
 
         // Redelivery is re-evaluated and ignored without a durable duplicate
-        // or an ignored-event record.
+        // or an ignored-event record. Acquire a new runtime lease first to
+        // model adapter rebinding; managed admission must not depend on the
+        // original adapter lease or a human sender.
+        var reboundLeaseId = await SlackRuntimeLeaseTestSupport.AcquireManagerLeaseAsync(
+            _fixture, enrollmentId, team, "adapter-managed-bot-rebound");
         using (var redelivery = await PostManagerBotAsync(
                    team,
                    managerAppId,
-                   leaseId,
+                   reboundLeaseId,
                    transitionIdentities[0].AppId,
                    transitionIdentities[0].BotUserId,
-                   transitionIdentities[0].MessageTs))
+                   transitionIdentities[0].MessageTs,
+                   adapterId: "adapter-managed-bot-rebound"))
         {
             redelivery.EnsureSuccessStatusCode();
             await AssertIgnoredAsync(redelivery);
@@ -73,6 +79,8 @@ public sealed class SlackManagedBotAdmissionSpecs
         Assert.Equal(before, after);
         Assert.Equal(0, after.Inbox);
         Assert.Equal(0, after.Outbox);
+        Assert.Equal(0, after.AgentJobs);
+        Assert.Equal(0, after.Sessions);
     }
 
     [Fact]
@@ -237,7 +245,8 @@ public sealed class SlackManagedBotAdmissionSpecs
         bool isDirectMessage = false,
         string? senderSlackUserId = null,
         bool identityConflict = false,
-        string senderKind = "bot") =>
+        string senderKind = "bot",
+        string? adapterId = null) =>
         await _fixture.Client.PostAsJsonAsync("/api/slack-manager/ingress", new
         {
             appId = managerAppId,
@@ -258,7 +267,7 @@ public sealed class SlackManagedBotAdmissionSpecs
             text = "managed bot text must not become work input",
             isDirectMessage,
             leaseId,
-            adapterId = SlackRuntimeLeaseTestSupport.AdapterId,
+            adapterId = adapterId ?? SlackRuntimeLeaseTestSupport.AdapterId,
         });
 
     private async Task<IReadOnlyList<BotIdentity>> SeedAgentTransitionIdentitiesAsync(
@@ -347,7 +356,7 @@ public sealed class SlackManagedBotAdmissionSpecs
         await db.SaveChangesAsync();
     }
 
-    private async Task<(int Inbox, int Outbox)> CountManagerRowsAsync(string enrollmentId)
+    private async Task<(int Inbox, int Outbox, int AgentJobs, int Sessions)> CountManagerRowsAsync(string enrollmentId)
     {
         await using var scope = _fixture.Services.CreateAsyncScope();
         var db = scope.ServiceProvider.GetRequiredService<MohistDbContext>();
@@ -357,7 +366,17 @@ public sealed class SlackManagedBotAdmissionSpecs
         var outbox = await db.SlackOutboxRows.CountAsync(row =>
             row.OwnerKind == SlackDeliveryOwnerKinds.Manager
             && row.ConnectionId == enrollmentId);
-        return (inbox, outbox);
+        var sessionIds = await db.AgentSessions
+            .Where(row =>
+                row.LabelProjectId == BuiltInAgentCatalog.MohistSlackProjectId
+                && row.LabelConnectionId == enrollmentId)
+            .Select(row => row.Id)
+            .ToArrayAsync();
+        var agentJobs = await db.AgentJobs.CountAsync(row =>
+            row.ProjectId == BuiltInAgentCatalog.MohistSlackProjectId
+            && row.AgentSessionId != null
+            && sessionIds.Contains(row.AgentSessionId));
+        return (inbox, outbox, agentJobs, sessionIds.Length);
     }
 
     private static async Task AssertIgnoredAsync(HttpResponseMessage response)

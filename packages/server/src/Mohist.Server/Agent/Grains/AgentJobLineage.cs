@@ -3,6 +3,7 @@ using System.Text.RegularExpressions;
 using Mohist.Server.Infrastructure;
 using Mohist.Server.Infrastructure.Data.Events;
 using Mohist.Server.Infrastructure.Events;
+using Mohist.Server.Infrastructure.Slack;
 
 namespace Mohist.Server.Agent.Grains;
 
@@ -148,7 +149,14 @@ public static class AgentJobLineage
             failureCategory = SafeSummaryFact(payload.FailureCategory),
             artifactCount = payload.ArtifactCount,
             exitCode = payload.ExitCode,
-            assistantText = ExtractAssistantText(payload.Output),
+            // Manager turns are ordinary natural-language Agent turns. Their
+            // output is never parsed into a Server protocol or reply payload.
+            // Assistant output remains Runtime data. Manager deliveries do
+            // not carry an extracted text field because the reply action is
+            // the only conversational delivery boundary.
+            assistantText = IsManagerProject(extensions)
+                ? null
+                : ExtractAssistantText(payload.Output),
         }, JSON.Options);
         return new CloudEvent(
             id: payload.EventId,
@@ -183,6 +191,10 @@ public static class AgentJobLineage
             data: data,
             subject: jobKey);
     }
+
+    private static bool IsManagerProject(IReadOnlyDictionary<string, string> extensions) =>
+        extensions.TryGetValue(EventCatalog.Lineage.ProjectId, out var projectId)
+        && string.Equals(projectId, SlackDeliveryOwnerIds.ManagerProjectId, StringComparison.Ordinal);
 
     public static string? ExtractAssistantText(string? output)
     {

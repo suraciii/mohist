@@ -22,8 +22,21 @@ export function buildRegistrationState(
         .update(JSON.stringify({ models: piModels, reasoningEfforts: piReasoningEfforts }))
         .digest('hex')
     : null
+  const managerCapabilitiesAvailable = process.platform === 'linux' && piCatalog !== null
   return {
-    capabilities: ['execution-source-v1'],
+    capabilities: [
+      'execution-source-v1',
+      ...(managerCapabilitiesAvailable
+        ? [
+            'manager-execution-grant-v1',
+            'manager-deployment-epoch-v1',
+            'manager-private-broker-v1',
+            'manager-pi-scoped-executor-v1',
+            'manager-opencode-isolated-v1',
+            'manager-redaction-v1',
+          ]
+        : []),
+    ],
     actionCatalog: actionsCatalog,
     projectId: options.projectId,
     connectionId: getConnectionId(),

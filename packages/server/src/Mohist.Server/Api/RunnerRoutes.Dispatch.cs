@@ -1,6 +1,7 @@
 using Mohist.Server.Infrastructure;
 using System.Text.Json.Serialization;
 using Mohist.Server.Runner.Grains;
+using Mohist.Server.Slack.Services;
 
 namespace Mohist.Server.Api;
 
@@ -36,4 +37,6 @@ public record WorkDispatchResponse(
     AgentSessionStartup? AgentSessionStartup = null,
     string? TaskRunId = null,
     int RecoveryGeneration = 0,
-    AgentRecoveryBinding? AgentRecovery = null);
+    AgentRecoveryBinding? AgentRecovery = null,
+    ManagerExecutionGrant? ManagerExecutionGrant = null,
+    string? OriginMarker = null);

@@ -8,6 +8,8 @@ import { boundedTimeoutMs, boundedWait } from '../bounded-wait.js'
 import { diagnostic, piError, resetDiagnostic } from './errors.js'
 import { classifyRetryFailure, DEFAULT_PI_PROVIDER_ERROR_POLICY } from './policy.js'
 import { createPiProjector } from './projector.js'
+import { CANCEL_CONFIRMATION_TIMEOUT_MS, defaultClock, type PiClock } from './runtime-clock.js'
+import type { ManagerExecutionBoundary } from '../manager-execution-boundary.js'
 import { realPiSdkFactory, type PiSdkFactory, type PiSdkServices, type PiSdkSession } from './sdk.js'
 import type {
   PiCancelFacts,
@@ -40,12 +42,6 @@ import type {
   PiTurnResult,
 } from './types.js'
 
-export interface PiClock {
-  readonly now: () => number
-  readonly setTimeout: (callback: () => void, delayMs: number) => unknown
-  readonly clearTimeout: (handle: unknown) => void
-}
-
 export interface PiRuntimeDeps {
   readonly agentDir: string
   readonly sdkFactory?: PiSdkFactory
@@ -54,13 +50,6 @@ export interface PiRuntimeDeps {
   readonly masker?: CredentialMasker
   readonly runtimeShutdownTimeoutMs?: number
 }
-
-const defaultClock: PiClock = {
-  now: () => Date.now(),
-  setTimeout: (callback, delay) => setTimeout(callback, delay),
-  clearTimeout: (handle) => clearTimeout(handle as ReturnType<typeof setTimeout>),
-}
-const CANCEL_CONFIRMATION_TIMEOUT_MS = 5_000
 
 export class PiRuntime {
   private readonly deps: PiRuntimeDeps
@@ -129,7 +118,9 @@ export class PiRuntime {
   async createSession(request: PiSessionCreateRequest): Promise<PiResult<PiSessionResult>> {
     if (!this.state.ready || !this.state.services) return this.unavailable()
     try {
-      const session = await this.state.services.createSession(request.target.workDir)
+      const session = await this.state.services.createSession(request.target.workDir, {
+        managerExecution: request.managerExecution ?? null,
+      })
       const path = normalizedPath(session.sessionFile)
       if (!path) return this.failure('incompatible-runtime', 'Pi did not return an absolute session-file path')
       this.sessions.set(path, session)
@@ -156,7 +147,11 @@ export class PiRuntime {
     if (!path) return this.failure('incompatible-runtime', 'Pi runtimeSessionId must be an absolute session-file path')
     let session: PiSdkSession
     try {
-      session = this.sessions.get(path) ?? (await this.state.services.openSession(path, request.target.workDir))
+      session =
+        this.sessions.get(path) ??
+        (await this.state.services.openSession(path, request.target.workDir, {
+          managerExecution: request.managerExecution ?? null,
+        }))
       this.sessions.set(path, session)
     } catch (cause) {
       return this.failure('missing-session', 'The bound Pi Session is missing or corrupt', [
@@ -178,7 +173,7 @@ export class PiRuntime {
     const projector = createPiProjector(
       path,
       request.target.workDir,
-      this.deps.masker ?? createCredentialMaskerFromEnvironment(),
+      request.managerExecution?.masker ?? this.deps.masker ?? createCredentialMaskerFromEnvironment(),
     )
     const report = (events: readonly PiRuntimeEvent[]) => events.forEach((event) => observer?.onEvent?.(event))
     let fixed: PiResult<PiTurnResult> | null = null
@@ -481,7 +476,7 @@ export class PiRuntime {
       return this.failure('missing-session', 'Pi follow-up requires a bound Session', [resetDiagnostic()])
     const path = normalizedPath(runtimeSessionId)
     if (!path) return this.failure('incompatible-runtime', 'Pi runtimeSessionId must be an absolute session-file path')
-    const session = await this.resolveFollowupSession(path, request.target.workDir)
+    const session = await this.resolveFollowupSession(path, request.target.workDir, request.managerExecution ?? null)
     if (!session.ok) return session.failure
     const configured = await this.applyFollowupOptions(session.value, request.options)
     if (configured) return configured
@@ -808,18 +803,21 @@ export class PiRuntime {
   private async resolveFollowupSession(
     path: string,
     workDir: string,
+    managerExecution: ManagerExecutionBoundary | null = null,
   ): Promise<{ ok: true; value: PiSdkSession } | { ok: false; failure: PiResult<never> }> {
     if (!this.state.services) return { ok: false, failure: this.unavailable() }
     let session: PiSdkSession
     try {
-      const cached = this.sessions.get(path)
+      const cached = managerExecution ? null : this.sessions.get(path)
       if (cached) {
         if (this.state.services.validateSessionFile) {
           await this.state.services.validateSessionFile(path, cached.sessionId)
         }
         return { ok: true, value: cached }
       }
-      const opened = await this.state.services.openSession(path, workDir)
+      const opened = await this.state.services.openSession(path, workDir, {
+        managerExecution,
+      })
       session = opened
       this.sessions.set(path, session)
       return { ok: true, value: session }

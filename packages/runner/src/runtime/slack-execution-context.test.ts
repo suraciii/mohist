@@ -71,6 +71,23 @@ describe('Slack execution source/context validation', () => {
     expect(result.slackExecutionContext?.collaborationSkill.contentHash).toBe(PUBLISHED_SLACK_SKILL_HASH)
   })
 
+  it('preserves explicit Manager project and owner anchor fields', () => {
+    const result = readExecutionSourceContext(
+      {
+        executionSource: SLACK_EXECUTION_SOURCE,
+        slackExecutionContext: validContext({
+          replyAnchor: { projectId: '__mohist_slack_manager__', ownerKind: 'manager' },
+        }),
+      },
+      { strict: true },
+    )
+
+    expect(result.kind).toBe('resolved')
+    if (result.kind !== 'resolved') throw new Error('expected a valid Slack context')
+    expect(result.slackExecutionContext?.replyAnchor.projectId).toBe('__mohist_slack_manager__')
+    expect(result.slackExecutionContext?.replyAnchor.ownerKind).toBe('manager')
+  })
+
   it.each([
     ['unknown source', { executionSource: 'web', slackExecutionContext: null }],
     ['Slack source without context', { executionSource: SLACK_EXECUTION_SOURCE }],

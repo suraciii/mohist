@@ -2,6 +2,7 @@ using System.Text.Json;
 using Mohist.Server.Infrastructure;
 using Mohist.Server.Runner.Grains;
 using Mohist.Server.Runner.Services;
+using Mohist.Server.Slack.Services;
 
 namespace Mohist.Server.Api;
 
@@ -11,7 +12,8 @@ public static partial class RunnerRoutes
         string runnerId,
         HttpRequest request,
         IGrainFactory grains,
-        RunnerConnectionTracker connections)
+        RunnerConnectionTracker connections,
+        IManagerDeploymentEpoch? managerEpoch = null)
     {
         var runner = grains.GetGrain<IRunnerGrain>(runnerId);
         var req = request.ContentLength.GetValueOrDefault() > 0
@@ -47,6 +49,12 @@ public static partial class RunnerRoutes
             await runner.HeartbeatAsync();
         }
 
+        if (managerEpoch is not null)
+        {
+            if (!managerEpoch.Available)
+                return Results.StatusCode(StatusCodes.Status503ServiceUnavailable);
+            request.HttpContext.Response.Headers["X-Mohist-Manager-Deployment-Epoch"] = managerEpoch.Current;
+        }
         return Results.Ok();
     }
 }

@@ -8,6 +8,7 @@ using Mohist.Server.Infrastructure.Hosting;
 using Mohist.Server.Runner.Grains;
 using Mohist.Server.Workflow.Domain.Run;
 using Mohist.Server.Workflow.Grains;
+using Mohist.Server.Slack.Services;
 using Orleans;
 
 namespace Mohist.Server.Runner.Services;
@@ -21,6 +22,7 @@ public sealed class DispatchService : IScopedService
     private readonly WorkflowItemTranslator _translator;
     private readonly ILogger<DispatchService> _log;
     private readonly IDispatchPollObserver _pollObserver;
+    private readonly IManagerDeploymentEpoch? _managerEpoch;
 
     public DispatchService(
         IGrainFactory grains,
@@ -29,7 +31,8 @@ public sealed class DispatchService : IScopedService
         IDispatchSnapshotStore dispatchSnapshots,
         WorkflowItemTranslator translator,
         ILogger<DispatchService> log,
-        IDispatchPollObserver? pollObserver = null)
+        IDispatchPollObserver? pollObserver = null,
+        IManagerDeploymentEpoch? managerEpoch = null)
     {
         _grains = grains;
         _workflowRuns = workflowRuns;
@@ -38,6 +41,7 @@ public sealed class DispatchService : IScopedService
         _translator = translator;
         _log = log;
         _pollObserver = pollObserver ?? NoopDispatchPollObserver.Instance;
+        _managerEpoch = managerEpoch;
     }
 
     public async Task<RunnerPollResponse> PollAsync(
@@ -73,6 +77,10 @@ public sealed class DispatchService : IScopedService
         var info = await runner.GetInfoAsync();
         if (info is null)
             return new RunnerPollResponse([]);
+        if (_managerEpoch is { Available: true } epoch
+            && !string.IsNullOrWhiteSpace(req.DeploymentEpoch)
+            && !string.Equals(req.DeploymentEpoch, epoch.Current, StringComparison.Ordinal))
+            return new RunnerPollResponse([]);
 
         await _pollObserver.AfterRunnerInfoAsync(runnerId).WaitAsync(ct);
         ct.ThrowIfCancellationRequested();
@@ -86,6 +94,7 @@ public sealed class DispatchService : IScopedService
         ct.ThrowIfCancellationRequested();
         var desiredActiveKeys = await AddMissingRedeliveriesAsync(
             runnerId,
+            info,
             reportedWorkKeys,
             dispatches,
             ct);
@@ -143,6 +152,7 @@ public sealed class DispatchService : IScopedService
 
     private async Task<HashSet<string>> AddMissingRedeliveriesAsync(
         string runnerId,
+        RunnerInfo info,
         IReadOnlySet<string> reportedWorkKeys,
         List<WorkDispatch> dispatches,
         CancellationToken ct)
@@ -173,13 +183,22 @@ public sealed class DispatchService : IScopedService
         foreach (var record in agentWork)
         {
             ct.ThrowIfCancellationRequested();
+            var dispatch = DeserializeAgentDispatch(record);
+            var isManagerExecution = dispatch is not null && ManagerExecutionBinding.TryRead(dispatch, out _);
+            // An unknown Manager turn may have reached the Server before the
+            // Runner disappeared. Its natural-language prompt is not a safe
+            // recovery command, so the durable Manager recovery transition
+            // owns inspection and the original dispatch is never replayed.
+            if (isManagerExecution && IsUnknownAgentJob(record.StateJson))
+                continue;
+
             var workKey = AgentJobWorkKey(record.JobKey, record.WorkId);
             activeWorkKeys.Add(workKey);
             if (reportedWorkKeys.Contains(workKey))
                 continue;
 
-            var dispatch = DeserializeAgentDispatch(record);
-            if (dispatch is not null)
+            if (dispatch is not null
+                && (!isManagerExecution || ManagerExecutionRuntimeCapabilities.Supports(info)))
                 dispatches.Add(dispatch);
         }
 
@@ -240,13 +259,18 @@ public sealed class DispatchService : IScopedService
             if (candidate.OwnerKind == WorkDispatchOwnerKinds.AgentJob)
             {
                 var record = await _agentJobs.LoadLedgerAsync(candidate.OwnerId, ct);
-                var requiredRuntimes = record is null
-                    ? null
-                    : RuntimeRequirementsFromDispatch(DeserializeAgentDispatch(record));
+                var pendingDispatch = record is null ? null : DeserializeAgentDispatch(record);
+                var isManagerExecution = pendingDispatch is not null
+                    && ManagerExecutionBinding.TryRead(pendingDispatch, out _);
+                if (isManagerExecution && !ManagerExecutionRuntimeCapabilities.Supports(info))
+                    continue;
+                var requiredRuntimes = isManagerExecution
+                    ? []
+                    : record is null
+                        ? null
+                        : RuntimeRequirementsFromDispatch(pendingDispatch);
                 if (!readiness.Allows(requiredRuntimes))
                     continue;
-
-                var pendingDispatch = record is null ? null : DeserializeAgentDispatch(record);
                 var expectation = pendingDispatch is null
                     ? null
                     : BuildAgentJobCapabilityExpectation(info, readiness, pendingDispatch);
@@ -561,6 +585,21 @@ public sealed class DispatchService : IScopedService
         catch
         {
             return null;
+        }
+    }
+
+    private static bool IsUnknownAgentJob(string stateJson)
+    {
+        try
+        {
+            using var document = JsonDocument.Parse(stateJson);
+            return document.RootElement.TryGetProperty("status", out var status)
+                && status.ValueKind == JsonValueKind.String
+                && string.Equals(status.GetString(), "unknown", StringComparison.OrdinalIgnoreCase);
+        }
+        catch (JsonException)
+        {
+            return false;
         }
     }
 

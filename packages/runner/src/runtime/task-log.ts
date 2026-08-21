@@ -1,4 +1,5 @@
-import { currentRunnerResources } from "../system/filesystem.js"
+import { createHash } from 'node:crypto'
+import { currentRunnerResources } from '../system/filesystem.js'
 
 /**
  * Single sink for ops command output. The runner exposes ONE capture
@@ -72,40 +73,49 @@ export interface TaskLogBatch {
  * startup; defaults cover the common case.
  */
 export class CredentialMasker {
-  private readonly additional: string[] = []
+  private readonly additional: Array<{ readonly length: number; readonly digest: string }> = []
 
   /**
-   * Add a literal secret to the runtime-known list. Substrings match
-   * case-sensitively; the secret itself is never written to logs.
+   * Store only a digest and length for a runtime secret. This keeps the
+   * redaction index useful after the execution bearer is cleared without
+   * retaining another plaintext copy of the bearer.
    */
   registerSecret(secret: string) {
-    if (typeof secret !== "string" || secret.length < 6) return
-    if (!this.additional.includes(secret)) this.additional.push(secret)
+    if (typeof secret !== 'string' || secret.length < 6) return
+    const digest = secretDigest(secret)
+    if (!this.additional.some((entry) => entry.length === secret.length && entry.digest === digest))
+      this.additional.push({ length: secret.length, digest })
+  }
+
+  clearSecrets(): void {
+    this.additional.splice(0, this.additional.length)
   }
 
   mask(text: string): string {
-    if (typeof text !== "string" || text.length === 0) return text
+    if (typeof text !== 'string' || text.length === 0) return text
     let result = maskKnownPatterns(text)
     for (const secret of this.additional) {
-      // Replace each literal secret occurrence with the redaction
-      // placeholder. We avoid the `String.replace` form with a string
-      // needle because the secret may include characters that have
-      // special meaning in the replacement string (`$`, `&`); a
-      // callback sidesteps the issue and matches the line-oriented
-      // emit model the rest of the file uses.
       let cursor = 0
-      while (cursor <= result.length) {
-        const found = result.indexOf(secret, cursor)
-        if (found < 0) break
-        result = result.slice(0, found) + REDACTED + result.slice(found + secret.length)
-        cursor = found + REDACTED.length
+      while (cursor + secret.length <= result.length) {
+        const candidate = result.slice(cursor, cursor + secret.length)
+        if (secretDigest(candidate) !== secret.digest) {
+          cursor += 1
+          continue
+        }
+        result = result.slice(0, cursor) + REDACTED + result.slice(cursor + secret.length)
+        cursor += REDACTED.length
       }
     }
     return result
   }
 }
 
-const REDACTED = "***"
+const REDACTED = '***'
+
+function secretDigest(value: string): string {
+  return createHash('sha256').update(value, 'utf8').digest('hex')
+}
+
 const SECRET_ENV_NAME = /(?:TOKEN|PASSWORD|SECRET|API_KEY|ACCESS_KEY|AUTH)$/i
 
 export function createCredentialMaskerFromEnvironment(
@@ -114,7 +124,7 @@ export function createCredentialMaskerFromEnvironment(
   const masker = new CredentialMasker()
   for (const [name, value] of Object.entries(env)) {
     if (!SECRET_ENV_NAME.test(name)) continue
-    if (typeof value === "string") masker.registerSecret(value)
+    if (typeof value === 'string') masker.registerSecret(value)
   }
   return masker
 }

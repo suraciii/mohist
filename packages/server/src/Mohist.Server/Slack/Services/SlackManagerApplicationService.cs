@@ -10,7 +10,7 @@ using Microsoft.EntityFrameworkCore;
 
 namespace Mohist.Server.Slack.Services;
 
-public sealed class SlackManagerApplicationService : IScopedService
+public sealed partial class SlackManagerApplicationService : IScopedService
 {
     private const string ProductCapabilityVersion = "p0-agent-app";
     private const int ManifestVersion = 2;
@@ -26,6 +26,11 @@ public sealed class SlackManagerApplicationService : IScopedService
     private readonly ManagerClaimService _claims;
     private readonly IDbContextFactory<MohistDbContext> _dbFactory;
     private readonly ISecretStore _secrets;
+    private readonly SlackConnectionAccessManager _accessPolicies;
+    private readonly SlackOwnerClaimService _ownerClaims;
+    private readonly SlackOutboxStore _outbox;
+    private readonly IGrainFactory _grains;
+    private readonly ManagerAgentDefaultProfileResolver _defaults;
 
     public SlackManagerApplicationService(
         AgentQuerier agents,
@@ -36,7 +41,12 @@ public sealed class SlackManagerApplicationService : IScopedService
         ManagedSlackAgentAppApplicationService childOperations,
         ManagerClaimService claims,
         IDbContextFactory<MohistDbContext> dbFactory,
-        ISecretStore secrets)
+        ISecretStore secrets,
+        SlackConnectionAccessManager accessPolicies,
+        SlackOwnerClaimService ownerClaims,
+        SlackOutboxStore outbox,
+        IGrainFactory grains,
+        ManagerAgentDefaultProfileResolver defaults)
     {
         _agents = agents;
         _connections = connections;
@@ -47,6 +57,11 @@ public sealed class SlackManagerApplicationService : IScopedService
         _claims = claims;
         _dbFactory = dbFactory;
         _secrets = secrets;
+        _accessPolicies = accessPolicies;
+        _ownerClaims = ownerClaims;
+        _outbox = outbox;
+        _grains = grains;
+        _defaults = defaults;
     }
 
     public async Task<SlackManagerSetupResult> SetupAsync(

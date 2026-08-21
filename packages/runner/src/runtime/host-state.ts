@@ -30,6 +30,8 @@ export interface InFlightEntry {
   awaitingResultPersistence: boolean
   readonly controller: AbortController
   shutdown?: ShutdownWorkState
+  /** The Server deployment epoch invalidated this Manager execution. */
+  managerInvalidated?: boolean
   terminalPersisted?: boolean
 }
 

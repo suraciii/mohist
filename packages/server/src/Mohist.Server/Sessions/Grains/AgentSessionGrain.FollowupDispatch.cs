@@ -13,6 +13,8 @@ public sealed partial class AgentSessionGrain
         var session = await GetRequiredAsync();
         var turns = session.Status.Turns ?? [];
         if (turns.Any(turn => turn.Status == AgentTurnStatus.Executing)) return null;
+        if (turns.Any(turn => !string.IsNullOrWhiteSpace(turn.JobId) && turn.Status == AgentTurnStatus.Queued))
+            return null;
         var leases = GetPendingFollowups(session).ToList();
         var turn = turns.FirstOrDefault(turn => string.IsNullOrEmpty(turn.JobId) && turn.Status == AgentTurnStatus.Queued);
         if (turn is null) return null;
@@ -92,7 +94,8 @@ public sealed partial class AgentSessionGrain
             representative.Id,
             provenance,
             leases[index].ConcurrencyDispatchId ?? $"followup:{session.Id}:{leases[index].OperationId}",
-            executionSource);
+            executionSource,
+            session.Metadata?.Label(AgentSessionQueryMetadataKeys.OriginMarker));
     }
 
     private static string EffectiveExecutionSource(AgentSessionInputRecord input)

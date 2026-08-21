@@ -4,6 +4,7 @@ using Microsoft.EntityFrameworkCore;
 using Mohist.Server.Infrastructure;
 using Mohist.Server.Infrastructure.Events;
 using Mohist.Server.Infrastructure.Orleans;
+using Mohist.Server.Infrastructure.Slack;
 using Mohist.Server.Sessions.Domain;
 using Mohist.Server.Infrastructure.Data.Sessions;
 using Mohist.Server.Infrastructure.Data.Db;
@@ -587,7 +588,8 @@ public sealed partial class AgentSessionGrain : Grain, IAgentSessionGrain, IRemi
         }
 
         var session = await GetRequiredAsync();
-        EnsureRuntimeSessionPresent(session);
+        if (!command.AllowPendingInitialLaunch || !HasInitialLaunch(session))
+            EnsureRuntimeSessionPresent(session);
         if (session.Status.PendingReset is { } recovery)
         {
             if (recovery.Outcome is null)
@@ -1423,16 +1425,6 @@ public sealed partial class AgentSessionGrain : Grain, IAgentSessionGrain, IRemi
         SessionCommandKind.Reset => "reset",
         _ => throw new ArgumentOutOfRangeException(nameof(command), command, "Unsupported session command"),
     };
-
-    private static void EnsureRuntimeSessionPresent(AgentSession session)
-    {
-        if (!session.IsRuntimeSessionMissing(IsRuntimeRegistered)) return;
-        throw new RuntimeSessionMissingException(session.Id, session.Status.AgentRuntimeSessionId, session.Runtime.Runtime);
-    }
-
-    private static bool IsRuntimeRegistered(string runtime) =>
-        string.Equals(runtime, OpenCodeRuntime, StringComparison.OrdinalIgnoreCase)
-        || string.Equals(runtime, PiRuntime, StringComparison.OrdinalIgnoreCase);
 
     private static void EnsureBindingChangeAllowed(AgentSession session, long? expectedEpoch)
     {
@@ -3834,6 +3826,12 @@ public sealed partial class AgentSessionGrain : Grain, IAgentSessionGrain, IRemi
             : Array.Empty<AgentTurnRecord>();
     }
 
+    public async Task<IReadOnlyList<AgentSessionInputRecord>> ListInputsAsync()
+    {
+        var session = await GetRequiredAsync();
+        return session.Status.Inputs?.ToArray() ?? Array.Empty<AgentSessionInputRecord>();
+    }
+
     private static AgentTurnRecord CopyTurnForBoundary(AgentTurnRecord turn) =>
         turn with { InputIds = turn.InputIds.ToArray() };
 
@@ -3878,71 +3876,4 @@ public sealed partial class AgentSessionGrain : Grain, IAgentSessionGrain, IRemi
     private static bool IsTerminalTurn(AgentTurnStatus status) =>
         status is not AgentTurnStatus.Queued and not AgentTurnStatus.Executing;
 
-    private async Task TryEmitFollowupDeliveryAsync(AgentSession session, AgentTurnRecord turn)
-    {
-        var metadata = session.Metadata;
-        if (metadata is null) return;
-
-        var connectionId = metadata.Label(AgentSessionQueryMetadataKeys.ConnectionId);
-        var workspaceTeamId = metadata.Label(AgentSessionQueryMetadataKeys.SlackWorkspaceTeamId);
-        var conversationId = metadata.Label(AgentSessionQueryMetadataKeys.SlackConversationId);
-        if (string.IsNullOrWhiteSpace(connectionId)
-            || string.IsNullOrWhiteSpace(workspaceTeamId)
-            || string.IsNullOrWhiteSpace(conversationId))
-            return;
-
-        var threadTs = metadata.Label(AgentSessionQueryMetadataKeys.SlackThreadTs);
-        var title = metadata.Label(AgentSessionQueryMetadataKeys.Title);
-        var projectId = metadata.Label(AgentSessionQueryMetadataKeys.ProjectId);
-        var status = turn.Status switch
-        {
-            AgentTurnStatus.Cancelled => "failed",
-            _ => turn.Status.ToString().ToLowerInvariant(),
-        };
-
-        var delivery = new
-        {
-            jobKey = $"agent-session-followup:{session.Id}:{turn.Id}",
-            workLabel = !string.IsNullOrWhiteSpace(title) ? title : "Follow-up",
-            connectionId,
-            workspaceTeamId,
-            slackUserId = (string?)metadata.Label(AgentSessionQueryMetadataKeys.SlackUserId),
-            conversationId,
-            threadTs,
-            messageTs = (string?)null,
-            status,
-            message = turn.Result?.Message,
-            failureReason = (string?)null,
-            failureCategory = (string?)null,
-            artifactCount = 0,
-            exitCode = (int?)null,
-            assistantText = AgentJobLineage.ExtractAssistantText(turn.Result?.Output),
-        };
-        var data = JsonSerializer.SerializeToElement(delivery, CloudEvent.JsonOptions);
-        var extensions = new Dictionary<string, string>(StringComparer.Ordinal);
-        if (!string.IsNullOrWhiteSpace(projectId))
-            extensions[EventCatalog.Lineage.ProjectId] = projectId;
-
-        var envelope = new CloudEvent(
-            id: $"followup-delivery:{session.Id}:{turn.Id}",
-            source: new Uri($"/mohist/agent-session/{session.Id}", UriKind.Relative),
-            type: EventCatalog.ReverseDns.AgentSessionFollowupDelivery,
-            time: _timeProvider.GetUtcNow(),
-            data: data,
-            subject: session.Id,
-            extensions: extensions);
-
-        try
-        {
-            await _eventStore.AppendAsync(envelope, CancellationToken.None);
-            EventDispatcherPoke.PokeAfterCommit(GrainFactory, _log, nameof(AgentSessionGrain), _backgroundTasks);
-        }
-        catch (Exception ex)
-        {
-            _log.LogWarning(ex,
-                "AgentSession {SessionId} follow-up delivery event could not be emitted for turn {TurnId}",
-                session.Id,
-                turn.Id);
-        }
-    }
 }

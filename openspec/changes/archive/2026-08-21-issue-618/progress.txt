@@ -1,0 +1,197 @@
+Issue 618 plan-artifact self-review follow-up
+
+Status: MF-1 identified as the only must-fix finding in self-review Round 1.
+
+Disposition:
+- MF-1: fixed in the plan artifacts by separating the nine-operation Manager management capability from the `mo slack message send` reply capability. The fix defines each management request shape, the reply request and trusted Server anchor fields, route-scoped grant validation, Manager-owned outbox routing, per-input dispatch idempotency, and focused denial/authorization tests. A turn may receive distinct management and reply credentials from the same attempt lease, so the two capabilities remain disjoint without preventing a command followed by a reply.
+- Review observations: no action required by the request; retain as implementation cautions without changing self-review.md.
+
+Constraints:
+- Do not edit self-review.md.
+- `git diff --check` and `jq empty openspec/changes/issue-618/tasks.json` pass; `self-review.md` remains untouched.
+- Completed plan update committed as `1c75a6271`.
+
+## Codebase Patterns
+- Ordinary Slack DM ingress persists an inbox route, launches through `IAgentLauncher.LaunchConnectionAsync`, sets the route Session and `SlackDmSessionMappingStore`, then uses `AcceptFollowupAsync` plus `AgentSessionFollowupDispatcher` for later messages.
+- `AgentSlackExecutionContext` is built from durable Session input provenance and the Runner injects the pinned collaboration Skill for every Slack execution. Manager uses the synthetic `__mohist_slack_manager__` project and Enrollment id as the Slack owner/connection identity.
+- Inbox identity is `(ConnectionId, SlackMessageIdentity)` and Manager uses Enrollment id as `ConnectionId`; the mapping stores workspace and actor facts and is read with a workspace-bound lookup for Manager ingress.
+- Slack terminal delivery must finalize liveness only. Assistant output is not a reply source; Manager terminal envelopes now omit the extracted `assistantText` value entirely.
+
+## T-001 Decisions
+- Manager prompts are passed unchanged as ordinary natural-language Agent input. Manager-specific JSON/protocol instructions and synthesized acknowledgement/fallback text are removed.
+- Manager initial context dispatch refs follow the ordinary `slack:{sessionId}:{inputId}` convention; follow-up refs use the durable Session follow-up `OperationId`.
+- Manager reply-anchor extensions are append-only `projectId` and `ownerKind` fields. Existing ordinary Connection anchors remain compatible; Manager anchors explicitly carry synthetic project and `manager` owner values.
+- The retired `SlackManagerToolTurnProcessor`, `SlackManagerToolExecutor`, and execution-fence store are retained only as unregistered compatibility source; no runtime ingress or terminal path resolves them.
+- `SlackStatusProjection.FinalizeLivenessAsync` now closes receipt state and adds terminal reaction even if no progress row was persisted, preserving silence as a valid Agent outcome.
+
+## Verification Notes
+- `progress.txt` was absent at task start.
+- Existing Manager tests that asserted the retired JSON protocol were replaced with natural-language, replay, replacement, and no-terminal-text coverage.
+
+## Current T-004 implementation notes
+- Added the non-secret `slack-manager` origin marker as a separate control-plane fact. It is persisted on Manager launch/session/job/follow-up dispatch boundaries and remains outside Runtime `with`, prompts, Skills, and Slack facts.
+- Manager initial origin now carries the marker through `ConnectionLaunchOrigin`, durable provenance, the AgentJob dispatch, and Runner poll/follow-up contracts; follow-up dispatch reconstructs the marker from the durable Session source label.
+- Removed the model-output protocol source files (`SlackManagerToolInvocation`, `SlackManagerToolTurnProcessor`, `SlackManagerToolExecutor`, and the old tool authorization wrapper). The management bridge remains the only management route, and terminal/session delivery does not extract Manager assistant text.
+- Manager continuation validates the existing Session's durable Slack workspace, conversation, actor, Enrollment, root, and Manager marker before follow-up; missing/conflicting continuity fails closed rather than falling through to non-Slack work.
+- Build/typecheck verification after these changes: Server build passes and Runner typecheck passes. Focused Manager lifecycle/terminal specs pass (3,050 total SpecTests run, including the Manager classes), and the relevant Server unit tests pass (3,724 total UnitTests run).
+- A replacement inbox route must be updated conditionally from the mapped runtime Session to the deterministic replacement Session; unconditional `SetRouteSessionIdAsync` correctly rejects stale routes but was too strict for this recovery transition.
+- Manager status projections explicitly select `OwnerKind.Manager`; Manager reaction payloads have no Server-authored fallback text, preserving Agent-only reply ownership.
+
+## Verification
+- `dotnet build packages/server/src/Mohist.Server/Mohist.Server.csproj --no-restore -p:SkipWebBuild=true` passes.
+- Focused Server specs pass: Manager conversation/replacement, terminal delivery, ordinary Slack reply-anchor, DM mapping, and managed-bot admission classes (20 tests).
+- Focused Server unit classes pass: built-in catalog and Slack execution context contracts.
+- `npm run build -w packages/runner` and `npm run build -w packages/web` pass.
+- `npm run test:run -w packages/runner -- src/runtime/slack-execution-context.test.ts` passes (15 tests).
+
+## T-002 Decisions
+- `ManagerCapabilityCatalog` lives in the shared `Mohist.Workflow.Definition` assembly so the CLI preflight and Server admission resolve the same logical capabilities and HTTP route shapes. The catalog contains only workspace status, Agent/Connection inspection, Agent create-or-mount, access policy, enable/disable, diagnostics, and owner claim/transfer.
+- Manager mode is process-scoped through `MOHIST_MANAGER_MODE=1` (the Runner launcher can provide this later) or the explicit `--manager` flag. The CLI strips the flag before parser dispatch, rejects unlisted commands before HTTP, and adds only a non-secret `X-Mohist-Manager-Mode` marker to requests.
+- `ManagerCapabilityAdmissionMiddleware` runs after authentication and before endpoint filters, so a Manager-marked request to setup, credential, recovery, binding-removal, permanent-delete, arbitrary API, or any other unlisted route is rejected before Project or resource lookup. Unmarked operator/Web requests retain their existing route behavior.
+- Existing `mo slack view` is the diagnostic projection, so its catalog capability is `connection.diagnostics`; `slack diagnostics` is an explicit alias. `slack create` mounts an existing Agent through `SlackManagerApplicationService` or creates the Agent through the existing Agent route before mounting it.
+- Owner claim and transfer responses are authoritative but one-time values are protected: Manager mode suppresses `code`, `claimCode`, `value`, and `token` from CLI output while preserving non-secret expiry/bot projection. Ordinary operator output is unchanged.
+
+## T-002 Verification
+- Complete CLI suite passes: `dotnet test packages/cli/tests/Mohist.Cli.Tests/Mohist.Cli.Tests.csproj --no-restore -p:UseSharedCompilation=false` (1,950 tests).
+- Complete Server unit suite passes: `dotnet test packages/server/tests/Mohist.Server.UnitTests/Mohist.Server.UnitTests.csproj --no-restore --no-build` (3,115 tests).
+- Complete Server spec suite including direct Manager admission coverage passes: `dotnet test packages/server/tests/Mohist.Server.SpecTests/Mohist.Server.SpecTests.csproj --no-restore --filter FullyQualifiedName~SlackManagerCapabilityAdmissionSpecs` (3,706 tests; the current test platform executes the full assembly).
+- Server build passes: `dotnet build packages/server/src/Mohist.Server/Mohist.Server.csproj --no-restore -p:SkipWebBuild=true`.
+
+## T-003 Decisions
+- Manager credentials are issued only while assembling the Server poll response from a Manager Slack anchor. The durable `WorkDispatch`, AgentJob ledger, Session state, Slack context, and Runner journal never gain a credential field.
+- `ManagerExecutionLeaseStore` retains only SHA-256 hashes plus immutable origin, actor/Enrollment, execution, epoch, scope, issue, expiry, and active metadata. `ManagerDeploymentEpoch` invalidates the store on graceful shutdown and rejects older values after a restart; store or epoch unavailability fails closed.
+- The Runner consumes the response-only grant into a per-work in-memory wrapper. Its private broker exposes the matching management or reply value only to the scoped `mo` launcher; generic commands inherit a broker locator and private PATH but no bearer. Pi uses the pinned SDK Bash operations hook, and Manager OpenCode turns create a separate server/client process with the same non-secret boundary environment.
+- Manager CLI transport selects `MOHIST_MANAGER_MANAGEMENT_TOKEN` or `MOHIST_MANAGER_REPLY_TOKEN` by request path and never falls back to an operator credential. Runner capability registration/gating requires grant, epoch, broker, Pi, isolated OpenCode, and redaction support.
+- Epoch changes abort Manager turns and dispose brokers/runtimes; acknowledged AgentJob reports revoke both lease records for the work identity. Final Runner outputs, runtime events, task logs, exceptions, and terminal messages are passed through the Manager redactor.
+
+## T-003 Verification
+- Server, Runner, and CLI projects build.
+- Runner broker/transport tests pass: `npm run test:run -w packages/runner -- src/runtime/manager-execution-boundary.test.ts src/server/connection.test.ts`.
+- Full Runner suite passes: 156 files / 1,683 tests, including host lifecycle, recovery, reporting, runtime, cleanup, and new broker tests.
+- Full Server unit suite passes: 3,120 tests; full Server spec suite passes: 3,706 tests; CLI suite passes: 1,950 tests.
+- A compatibility seam was preserved: `RunnerHost` continues to call `ServerConnection.poll`; the connection stores its grant-bearing view separately so existing test fakes and ordinary dispatch journals never receive grant fields.
+- Lease-backed HTTP requests reauthenticate the current Slack actor and active/ready Enrollment through `ManagerActorAccessDecider` before reaching an endpoint; invalid current state fails closed with a non-secret response.
+
+## T-004 Decisions
+- Manager CLI reply sends are a separate `manager.reply` capability. Manager mode routes `mo slack message send` to `/api/slack-manager/reply`; the existing project-scoped Connection reply route remains unchanged for ordinary callers.
+- Manager reply validation is lease-bound and durable: the route compares the requested conversation/thread and optional full-anchor fields with the immutable lease origin, then requires the matching active Enrollment, accepted Manager inbox origin, and Enrollment/workspace/actor/Session DM mapping before any outbox write.
+- `SlackManagerReplyAnchor` carries the validated origin into `SlackOutboxStore.EnqueueManagerAgentReplyAsync`. The outbox uses the synthetic Manager project, `OwnerKind.Manager`, Enrollment id, and the stable origin-derived progress dispatch ref. A pending progress row is promoted in place; repeated sends return the same terminal row without appending text. A missing progress row receives a Manager-owned terminal row so fast replies still share terminal convergence.
+- Manager ingress persists receipt before Session dispatch and queues working state before invoking the launcher/follow-up path. The working projection queues receipt removal first, so fast completion and adapter redelivery cannot leave a receipt as the final visible state or show working before the receipt transition.
+- Terminal reaction mutations are idempotent by stable phase dispatch refs. Terminal payloads carry non-user-visible `terminalStatus` metadata so `unknown` remains distinguishable for operator/recovery handling; terminal delivery still never reads assistant text or authors fallback text.
+
+## T-004 Verification
+- Full Server spec suite passes: `dotnet test packages/server/tests/Mohist.Server.SpecTests/Mohist.Server.SpecTests.csproj --no-restore` (3,709 tests), including Manager route anchor validation, reply promotion/deduplication, fast completion, terminal outcomes, restart/recovery, and ordinary Slack regressions.
+- Full Server unit suite passes: `dotnet test packages/server/tests/Mohist.Server.UnitTests/Mohist.Server.UnitTests.csproj --no-restore --no-build` (3,120 tests).
+- Full CLI suite passes: `dotnet test packages/cli/tests/Mohist.Cli.Tests/Mohist.Cli.Tests.csproj --no-restore -p:UseSharedCompilation=false` (1,950 tests), including dedicated Manager reply route selection.
+- `mohist-slack` adapter suite passes: `npm run test:run -w packages/mohist-slack` (7 files, 76 tests).
+- Server build passes: `dotnet build packages/server/src/Mohist.Server/Mohist.Server.csproj --no-restore -p:SkipWebBuild=true`.
+
+## Verify Repair
+- The failed `npm run verify` output was recovered from the workflow result: one Server architecture test and one Server unit test failed; all 3,709 Server specs and 1,950 CLI tests passed.
+- The architecture failure was a real T-004 regression: `SlackManagerIngressRoutes` directly injected `MohistDbContext` and read inbox, Session mapping, and enrollment rows. Those origin checks now live in the transactional `SlackOutboxStore` reply enqueue path, preserving validation-before-write while respecting the API/data boundary.
+- The credential failure was a real restart-epoch reporting defect: `ManagerDeploymentEpoch.Advance()` revoked leases before validation, so an old grant was reported as `manager_credential_invalid` instead of `manager_epoch_changed`. Validation now distinguishes retained revoked metadata from unknown credentials and reports the deployment epoch transition correctly.
+
+## Final Verification
+- Focused repairs pass: Server architecture 51/51, Server unit 3,120/3,120, Manager reply integration, Runner typecheck, Runner Manager boundary and Slack context tests (17/17), and the Runner host readiness test (1/1).
+- The first post-repair full Server spec run also exposed one unrelated Runner recovery-spec race; the exact named test passed 1/1 in isolation and was not changed.
+- The clean `npm run verify` gate passes all tracks: Workflow Definition 178, CLI 1,950, Server Unit 3,120, Server Architecture 51, Server Spec 3,709, Web, Runner, and `mohist-slack`, plus docs, format, file-size, script, and boundary checks.
+- File-size ratchet failures were resolved with behavior-preserving partial/module splits for issue-618 growth; no baseline or assertion was weakened. Verification created no Git-visible changes, and the final worktree is clean.
+
+## Review Repair
+- Fixed Manager lease-bound workspace/project/Agent/Connection admission, Manager-owned liveness lookup, rejected-coordinator terminal convergence, and follow-up terminal origin identity.
+- Added fresh dual Manager grants to follow-up control delivery with actor/Enrollment reauthorization, scoped Runner Pi/OpenCode execution, redaction, and cleanup.
+- Replaced the forgeable PID/path credential broker with an argument-only command proxy. The per-execution broker spawns the real `mo` child with the scoped bearer, masks its output, and never returns a bearer to the launcher or a generic same-user process.
+- Shared deployment epochs are refreshed from the authoritative lease store on each issue/validation operation; cross-instance epoch freshness is covered by a unit test.
+- Epoch invalidation marks in-flight Manager work unknown, durably reports the transition, and creates one inspection-only recovery turn. Unknown Manager Runner-loss recovery skips the original prompt dispatch, so uncertain CLI mutations are never replayed.
+- Credential expiry is classified durably and creates one deterministic, non-replaying Session recovery follow-up.
+- Production lease hashes/metadata and deployment epoch use a shared SQLite runtime store; parameterless in-memory construction remains for unit tests.
+
+## Review Repair Verification
+- `npm run verify` passes all tracks: Workflow Definition 178, CLI 1,950, Server Unit 3,121, Server Architecture 51, Server Spec 3,709, Runner 1,683, Web, `mohist-slack`, docs, formatting, file-size, script, and boundary checks.
+
+## Review Round 3 Repair (manual, review budget exhausted)
+Round-3 FAIL terminated the run's automated review budget, so the three findings were fixed directly on the run branch and the check stage is rerun from these commits.
+
+- Finding 1 (unauthenticated Manager command proxy): the broker no longer accepts arbitrary `mo` arguments. Every request must resolve through the new `manager-capability-surface` mirror of `ManagerCapabilityCatalog` (same vocabulary as CLI manager-mode admission, including the bare-invocation and `--help` bypasses the CLI itself applies before its allowlist), the declared `kind` must match the resolved capability family, the child runs only in the boundary-frozen working directory (caller cwd ignored, launcher no longer sends it), one credential-bearing child may run at a time, and each kind has a bounded request budget (reply 5 / management 64, configurable). The file documents why same-user caller authentication is unachievable (no SO_PEERCRED in Node; every launcher-held value is equally readable by the model shell) and why the enforceable boundary is credential non-exposure plus capability confinement, with the Server still enforcing lease origin, route allowlist, and anchor validation. Fixing this exposed a real pre-existing bug: `net.Server` defaults to `allowHalfOpen=false`, so the admitted proxy path never delivered a response at all (the previous tests only exercised the refused shape); the broker now runs with `allowHalfOpen=true`.
+- Finding 2 (disposal left token-bearing children alive): spawned CLI children are tracked; disposal SIGTERMs them, waits a bounded configurable grace, escalates unconditionally to SIGKILL (`killed` merely records that a signal was sent), awaits exit, destroys broker sockets, closes the broker, and only then removes the boundary directory. Another real bug surfaced: the SIGKILL escalation previously never fired because `!child.killed` gated it.
+- Finding 3 (Runner-loss left Manager recovery without a fresh turn): `AgentJobGrain.MarkUnknownAsync(reason, recoveryDeadlineAt)` — the path `RunnerGrain.CloseoutLostAsync` drives — now delivers the pending initial terminal and creates the single Manager recovery turn for Manager inputs, mirroring the report/timeout paths; `EnsureManagerRecoveryAsync`'s existing guard keeps repeated transitions idempotent.
+
+Verification:
+- `packages/runner` vitest: manager-execution-boundary 6/6 (refused shapes, admitted catalog commands with frozen cwd + masked output, kind mismatch, request budgets, bounded disposal kill, capability mirror vocabulary).
+- `npm run typecheck` (runner), `npm run format:check`, `npm run check:filesizes` clean.
+- Full Server Spec suite: 3,711/3,711 (includes the two new `AgentJobManagerRunnerLossRecoverySpecs` cases: exactly-one recovery turn + suppressed redelivery on Manager jobs, and no recovery turn on ordinary jobs). One pre-existing unrelated flake (`WorkflowSessionSpecs.GivenRunnerReportsAcpSessionEvents_...` transcript race) passed in the clean rerun.
+
+## Review Round 4 Repair
+- Finding 1 (generic-shell Manager broker bypass): fixed by authenticating the accepted Unix socket's kernel-reported peer on Linux. The broker maps the peer socket through `ss` and `/proc`, requires the connected process command line to resolve to the exact generated `mo` launcher, and fails closed when peer inspection is unavailable; capability, lease, cwd, budget, and output-redaction gates remain in force. Direct valid management and reply socket requests are covered and spawn no child.
+
+Verification:
+- `npm run test:run -w packages/runner -- src/runtime/manager-execution-boundary.test.ts`: 7/7.
+- `npm run typecheck -w packages/runner`, `npm run build -w packages/runner`, full Runner Vitest: 156 files / 1,688 tests.
+- `npm run format:check` and `npm run check:filesizes` clean.
+
+## Review Round 5 Repair
+- Finding 1 (same-user environment side channel): fixed by removing both bearer variables from all Runner and Manager child environments. Manager-mode CLI HTTP requests use a Runner-owned Unix-socket credential proxy; the exact spawned `mo` child is authenticated by PID and executable path, and the Runner injects the bearer only into the outbound request. Coverage inspects the live child `/proc/*/environ` and verifies proxy authorization without exposing the bearer to the child.
+- Finding 2 (follow-up leases survive completion): fixed by revoking the execution identity when follow-up dispatch is rejected, when Runner completion/cancellation closes the local boundary, and when Server accepts a terminal Manager follow-up event. Revocation is idempotent and invalidates both management and reply lease hashes.
+- Finding 3 (follow-up boundaries miss epoch invalidation): fixed with a shared process-local Manager execution registry. Initial jobs and control-channel follow-ups are registered together; poll and heartbeat epoch changes abort Manager work and dispose every registered broker/runtime boundary.
+- Finding 4 (cancellation uses shared OpenCode runtime): fixed by retaining each follow-up's runtime handle in the registry. Cancellation resolves the isolated Manager OpenCode handle, records the honest terminal outcome, disposes the boundary, and requests Server-side lease revocation. A focused test covers the shared-runtime non-use.
+
+Verification:
+- `npm run verify` passes: Runner integration 19/19, Runner full lane, Web, `mohist-slack`, Workflow Definition 178, CLI 1,950, Server Unit 3,662, Server Architecture 53, Server Spec 3,179, docs, formatting, file-size, script, FSD, and test-boundary checks.
+- Incremental commits: `2ac2c9313`, `b9422468d`, `be04dbe6a`, and `4f6db35f2`.
+
+## Review Round 7 Repair (manual, recovery budget exhausted)
+- Finding 1 (expiry recovery persisted but never dispatched): `RecordFollowupTurnCore` now appends a standard `AgentSessionFollowupLease` (`system-turn:{turnId}` operation id, deterministic and idempotent) whenever it creates a new queued turn, so system-initiated recovery turns enter the same durable dispatch contract as ordinary follow-ups. `BeginNextFollowupDispatchAsync` claims the recovery turn, the dispatcher emits a Runner request, and `IssueManagerGrantAsync` can mint the fresh management/reply credentials for the recovery agent.
+- Verification: full Server Spec suite 3,181/3,3181 includes the extended `ManagerCredentialExpiryRoute_CreatesOneQueuedRecoveryTurn` case asserting `BeginNextFollowupDispatchAsync` returns the recovery turn/input; all pre-existing follow-up dispatch and recovery specs unchanged and green.
+
+## Review Round 8 Repair
+- Finding 1 (initial Manager recovery rejected from unknown Session): fixed by routing AgentJob initial recovery through the Manager-only `RecordManagerRecoveryTurnAsync` transition. It explicitly permits the replacement inspection turn after the initial turn is marked `Unknown`, preserves the deterministic recovery lease and idempotent state guard, and continues to use the immutable Slack provenance.
+- Coverage: the Runner-loss regression now records a real initial Manager input/turn and verifies the initial turn becomes `Unknown` before exactly one recovery turn is created; the runtime-event coverage verifies the recovery turn's fresh management/reply grant at the Runner follow-up delivery boundary.
+- Verification: Server build passes; `AgentJobManagerRunnerLossRecoverySpecs` passes 1/1; `AgentSessionRuntimeEventSpecs` passes 11/11; `AgentSessionRecoveryGrainSpecs` passes 24/24. Shared SQLite/epoch-sensitive specs were run serially.
+
+## Review Round 9 Repair
+- Finding 1: the deterministic Manager Session mapping is now persisted before `LaunchConnectionAsync` can submit the AgentJob and is repeated after launch for idempotent convergence. A concurrent Manager follow-up can queue behind the still-unrouted initial inbox launch, while completed ingress continues to use the existing missing-runtime replacement path.
+- Finding 2: a duplicate follow-up whose operation journal is already `submitted` now revokes the newly issued Manager execution grant after disposing its unused boundary.
+- Finding 3: Manager CLI stdout and stderr are accumulated before masking, so credentials split across stream chunks are redacted before the response reaches the launcher or model.
+- Coverage: the dispatch-boundary regression proves the mapping exists before submit and concurrent input creates one follow-up in the original Session; the Server Spec assembly passes 3,183/3,183. Focused Runner follow-up and Manager boundary tests pass 5/5; Runner typecheck and Server build pass.
+
+## Review Round 10 Repair (manual takeover; review session hung post-compaction, run stopped)
+- Finding 1 (replay during initial launch creates a second input): Manager ingress now treats any already-existing inbox identity as the existing acceptance — a still-pending row stays owned by the in-flight launch (no dispatch marking), a completed row keeps the idempotent mark. `Replay_during_initial_launch_never_creates_a_second_input` blocks the launch at SubmitJob, replays the same message, and asserts one turn/job/session input.
+- Finding 2 (ordinary credential bypass): the Manager runtime environment strips `MOHIST_TOKEN`, `MOHIST_ADMIN_TOKEN`, and `MOHIST_ADMIN_TOKEN_PATH`, and redirects `HOME` into the boundary (with `.gitconfig` carried over) so every `~/.mohist/*` credential-file fallback resolves inside the empty boundary home. Two real exec-layer bugs surfaced and were fixed: `runCommand` layered `process.env` under the sanitized environment (re-introducing everything the boundary removed) and the isolated OpenCode server did the same — both now honor environment replacement for the Manager boundary. The file header documents the same-user residual (absolute-path reads of operator files / direct loopback HTTP need an OS-level sandbox, i.e. a dedicated execution UID) which an in-process boundary cannot claim. Coverage: fake operator HOME with `admin-token` + token envs proves the runtime env, generic bash, and file fallback see no credential.
+- Finding 3 (Runner-loss leaves interrupted leases active): `AgentJobGrain` now injects `ManagerExecutionCapabilityIssuer` and `EnsureManagerRecoveryAsync` revokes every lease for the interrupted work (`manager:{job}:{work}:` prefix, idempotent) before creating the recovery turn, covering the report, timeout, and Runner-loss paths. The runner-loss spec now issues a live lease first and asserts validation flips Allowed→Denied across `UnregisterAsync`. The manager singletons moved into `TestServices.AddRequiredInfrastructure` because the Dispatcher test silo also activates AgentJobGrain.
+- Verification: Server Spec 3,184/3,184, Server Unit 3,662/3,662, Architecture 53/53, Runner unit 1,685/1,685 + integration 21/21, runner typecheck, format, file-size ratchets all clean.
+
+## T-001 Final Boundary Hardening
+- Runner expiry is now an active lifecycle boundary: an injected clock can invalidate the execution, revoke the in-memory grant immediately, dispose the broker/process tree, and reject further launcher or credential-proxy requests. Disposal clears the redaction index after output drain and clears the copied grant object, so terminal callbacks do not retain bearer values.
+- `CredentialMasker` stores only SHA-256 digests and lengths for registered runtime secrets rather than another plaintext copy. Generic Manager shell overrides are merged through the sanitized environment and protected operator/Manager credential variables are removed again before execution.
+- Runner poll and heartbeat fail closed with 503 when the authoritative Manager deployment epoch is unavailable; `ManagerExecutionCapabilityIssuer.IssueFor` uses the injected `TimeProvider` instead of wall-clock access.
+- Added an expiry cleanup integration regression. Focused verification after these changes: Runner integration Manager boundary 11/11, Runner boundary/connection unit 21/21, Runner typecheck, format check, Server build, Manager credential unit filter, and Manager capability-admission spec filter all passed.
+- Generic Manager Bash overrides cannot replace the fixed HOME, PATH, broker, launcher, execution id, or Manager-mode values; the boundary reapplies its sanitized process environment after removing override attempts.
+
+## T-002
+
+- Manager ingress now validates the stable `SlackMessageIdentity` in the HTTP route before the Manager runtime lease gate; managed-Bot classification therefore remains downstream of identity and lease validation and upstream of all human authorization, claims, inbox, Session, and liveness work.
+- Extended the Manager managed-Bot specification to assert that no Manager Inbox, outbox, AgentJob, or Agent Session rows are created, and that the same null-sender Bot redelivery remains ignored after acquiring a replacement adapter lease.
+- Existing workspace-scoped `SlackManagedBotAdmissionService` remains the sole attribution rule: it matches only enrolled Manager or eligible non-deleted managed Agent author identities and never the receiving App identity. Unmatched, conflicting, unknown, and third-party Bot events retain the existing rejection path.
+- Verification: Server build passes; focused Manager managed-Bot specs, Manager adapter/ingress/runtime-lease specs, and `mohist-slack` adapter event/transport tests pass; `git diff --check` is clean.
+
+## T-003
+- Added the typed `ManagerManagementBridge` and `/api/slack-manager/management` route. Requests are exact `{operation,args}` envelopes; parsing, operation allowlisting, argument-property rejection, current actor/enrollment reauthorization, project/target scope checks, and structured authoritative outcomes happen before application-service delegation.
+- Extended `SlackManagerApplicationService` with shared create-or-mount, inspection, routine lifecycle, access-policy, and owner-workflow methods. Owner workflow results intentionally expose expiry/next action but not one-time claim values.
+- Added the hidden `mo slack management <json>` transport form and a runner catalog entry for the fixed management route. The existing `mo slack message send` route remains separate and is rejected by the management bridge.
+- Protected and arbitrary operations remain outside the fixed route and broker vocabulary. Manager grants accept the management route only for a management audience and still require the per-operation catalog capability.
+- Added `SlackManagerManagementBridgeSpecs` covering all nine operations, exact envelope rejection, protected/reply denials, and authoritative state changes. The named bridge class passes 7/7 serially; the full Spec assembly had one unrelated managed-bot parallelism race (3049/3050) and the managed-bot class passes in isolation.
+
+## T-005
+
+- Added `ManagerSlackReplyBridge` as the dedicated reply capability boundary. It reauthenticates the lease actor, requires the reply audience, validates the complete Server-provided Manager anchor and rejects destination/Session/dispatch assertions that do not match it before calling the outbox.
+- Manager reply delivery now derives `manager-reply:{SessionId}:{TriggeringMessageId}` and stores Manager-owned terminal intents under the synthetic Manager project and enrollment connection. Identical retries reuse the existing intent; conflicting payloads return `manager_reply_idempotency_conflict` without changing the stored answer.
+- Manager Working projection is reaction-only; it no longer creates a Server-authored `Working...` message. Terminal liveness detects reaction-only progress, removes Working and Received, and idempotently adds exactly one Completed or Attention reaction even when no progress row exists.
+- Terminal delivery continues to finalize only reactions. Manager Runtime output, assistant text, command results, terminal facts, and missing replies remain inert conversationally.
+- Verification: Server build passes; focused Manager reply/liveness assertions pass in the relevant Spec assembly. The initial full Spec assembly exposed a concurrent managed-Bot row-count defect in its test helper; the helper now scopes AgentJob counts to the test's Manager Session set.
+
+## Verify Repair (current worktree)
+
+- Initial inspection found the worktree clean and all existing commits were intended issue-618 implementation/progress work; no verification-only Git changes were present.
+- Recovered verification output showed two Server Spec failures in the aggregate run: the Manager recovery-grant test passed when its class was isolated, while the managed-Bot test's `AgentJobs` count was global to all Manager sessions and could include unrelated concurrent tests. The latter was a real test defect, not a product failure.
+- The clean gate also failed the file-size ratchet because issue-618 growth crossed the existing limits in `AgentLaunchCoordinatorGrain.cs`, `AgentSession.Transitions.cs`, and `AgentSessionGrain.cs`. The behavior-preserving repair moved the coordinator envelope and Manager recovery methods into partial files and removed only redundant comments; it did not alter assertions or relax the ratchet.
+- Focused checks after repair pass: Server test-solution build, `AgentSessionRuntimeEventSpecs` (11/11), `SlackManagedBotAdmissionSpecs` (4/4), `npm run check:filesizes`, `npm run format:check`, and `git diff --check`.

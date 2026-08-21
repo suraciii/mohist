@@ -2337,7 +2337,7 @@ public sealed class SlackCredentialsBody
     public string BotToken { get; init; } = string.Empty;
 }
 
-public sealed class SlackReplyBody
+public sealed partial class SlackReplyBody
 {
     public string ConversationId { get; init; } = string.Empty;
     public string? ThreadTs { get; init; }

@@ -162,6 +162,62 @@ public static class SlackManagerIngressRoutes
                 : ApiResults.Ok(progress);
         });
 
+        manager.MapPost("/reply", async (
+            HttpContext context,
+            SlackReplyBody body,
+            ManagerSlackReplyBridge bridge,
+            CancellationToken ct) =>
+        {
+            if (context.Items[ManagerExecutionCredentialContext.HttpContextItemKey]
+                is not ManagerExecutionCredentialContext credential)
+                return ApiResults.Fail(
+                    "Manager replies require a Manager reply credential.",
+                    StatusCodes.Status403Forbidden,
+                    "manager_reply_credential_required");
+
+            var result = await bridge.ExecuteAsync(
+                new SlackManagerReplyRequest(
+                    body?.ConversationId,
+                    body?.ThreadTs,
+                    body?.Text,
+                    body?.ImageUrl,
+                    body?.FileName,
+                    body?.FileContentBase64,
+                    body?.WorkspaceTeamId,
+                    body?.ProjectId,
+                    body?.OwnerKind,
+                    body?.ConnectionId,
+                    body?.ThreadRootMessageId,
+                    body?.TriggeringMessageId,
+                    body?.ActorId,
+                    body?.EnrollmentId,
+                    body?.SessionId,
+                    body?.DispatchRef),
+                credential,
+                ct);
+            if (result.Accepted)
+            {
+                var delivery = result.Delivery!;
+                return ApiResults.Ok(new
+                {
+                    accepted = true,
+                    connectionId = delivery.ConnectionId,
+                    deliveryId = delivery.DeliveryId,
+                    dispatchRef = delivery.DispatchRef,
+                    merged = delivery.MergedIntoExisting,
+                    ownerKind = SlackDeliveryOwnerKinds.Manager,
+                    projectId = SlackDeliveryOwnerIds.ManagerProjectId,
+                });
+            }
+
+            return result.StatusCode switch
+            {
+                StatusCodes.Status400BadRequest => ApiResults.BadRequest(result.Message, result.Code),
+                StatusCodes.Status409Conflict => ApiResults.Conflict(result.Message, result.Code),
+                _ => ApiResults.Fail(result.Message, result.StatusCode, result.Code),
+            };
+        });
+
         manager.MapPost("/ingress", async (
             HttpContext context,
             SlackManagerIngressBody body,
@@ -187,6 +243,14 @@ public static class SlackManagerIngressRoutes
                     "Client identity fields are not supported by the Manager API.",
                     "client_identity_not_supported");
 
+            var identity = new SlackMessageIdentity(
+                body.WorkspaceTeamId,
+                body.ConversationId,
+                body.MessageTs);
+            var identityError = identity.Validate();
+            if (identityError.Length != 0)
+                return ApiResults.BadRequest(identityError, "invalid_slack_identity");
+
             if (!await leases.ValidateManagerRuntimeLeaseByTeamAsync(
                     operatorId, body.WorkspaceTeamId, body.LeaseId, body.AdapterId, ct))
             {
@@ -197,7 +261,7 @@ public static class SlackManagerIngressRoutes
 
             var result = await ingress.AcceptAsync(new SlackManagerIngressMessage(
                 body.AppId,
-                new SlackMessageIdentity(body.WorkspaceTeamId, body.ConversationId, body.MessageTs),
+                identity,
                 body.SenderSlackUserId,
                 body.Text ?? string.Empty,
                 body.IsDirectMessage,
@@ -219,6 +283,10 @@ public static class SlackManagerIngressRoutes
                 403, "loopback_required");
         return null;
     }
+
+    private static bool MatchesOptional(string? supplied, string expected) =>
+        string.IsNullOrWhiteSpace(supplied)
+            || string.Equals(supplied.Trim(), expected, StringComparison.Ordinal);
 
     private static bool HasClientIdentity(IReadOnlyDictionary<string, JsonElement>? extensionData) =>
         extensionData?.Keys.Any(key =>
