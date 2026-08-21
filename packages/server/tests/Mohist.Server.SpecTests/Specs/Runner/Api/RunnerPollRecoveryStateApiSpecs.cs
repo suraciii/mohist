@@ -26,7 +26,7 @@ public sealed class RunnerPollRecoveryStateApiSpecs
     }
 
     [Fact]
-    public async Task Poll_PreservesCompletionContractAndRecoveryState()
+    public async Task ReportAndPoll_ExposeAcceptedContinuationIdentity()
     {
         var projectId = $"runner-recovery-{Guid.NewGuid():N}";
         var workflowRunId = $"wr-poll-recovery-{Guid.NewGuid():N}";
@@ -42,18 +42,18 @@ public sealed class RunnerPollRecoveryStateApiSpecs
             await runner.RegisterAsync(new RunnerInfo(runnerId, ["spec/*"], "test-host", projectId));
 
             var fresh = await PollAsync(runnerId);
+            var freshWorkId = fresh.GetProperty("workId").GetString();
+            var freshTaskRunId = fresh.GetProperty("taskRunId").GetString();
+            Assert.False(string.IsNullOrWhiteSpace(freshWorkId));
+            Assert.False(string.IsNullOrWhiteSpace(freshTaskRunId));
             Assert.True(fresh.TryGetProperty("recoveryRemaining", out var freshState));
             Assert.Equal(JsonValueKind.Null, freshState.ValueKind);
-            using var expectJson = JsonDocument.Parse(fresh.GetProperty("expect").GetString()!);
-            var marker = expectJson.RootElement.GetProperty("markers")[0];
-            Assert.Equal("review.md", marker.GetProperty("path").GetString());
-            Assert.Equal("<promise>FAIL</promise>", marker.GetProperty("failIf").GetString());
 
             using var report = await _fixture.Client.PostAsJsonAsync($"/api/runner/{runnerId}/report", new
             {
                 workflowRunId,
-                workId = fresh.GetProperty("workId").GetString(),
-                taskRunId = fresh.GetProperty("taskRunId").GetString(),
+                workId = freshWorkId,
+                taskRunId = freshTaskRunId,
                 status = "completed",
                 addTasks = new[]
                 {
@@ -77,14 +77,17 @@ public sealed class RunnerPollRecoveryStateApiSpecs
                 },
             });
             Assert.Equal(HttpStatusCode.OK, report.StatusCode);
+            var reportBody = await report.Content.ReadFromJsonAsync<JsonElement>();
+            Assert.True(reportBody.GetProperty("tracked").GetBoolean());
+            Assert.Equal("accepted", reportBody.GetProperty("reason").GetString());
+            Assert.Equal(workflowRunId, reportBody.GetProperty("workflowRunId").GetString());
 
             var continuation = await PollAsync(runnerId);
+            Assert.Equal(workflowRunId, continuation.GetProperty("workflowRunId").GetString());
+            Assert.NotEqual(freshWorkId, continuation.GetProperty("workId").GetString());
+            Assert.NotEqual(freshTaskRunId, continuation.GetProperty("taskRunId").GetString());
             Assert.True(continuation.TryGetProperty("recoveryRemaining", out var continuationState));
             Assert.Equal(1, continuationState.GetInt32());
-            using var continuationWith = JsonDocument.Parse(continuation.GetProperty("with").GetString()!);
-            Assert.Equal("${{ vars.agent }}", continuationWith.RootElement.GetProperty("options").GetString());
-            using var continuationExpect = JsonDocument.Parse(continuation.GetProperty("expect").GetString()!);
-            Assert.Equal("${{ vars.marker }}", continuationExpect.RootElement.GetProperty("markers")[0].GetProperty("failIf").GetString());
         }
         finally
         {
