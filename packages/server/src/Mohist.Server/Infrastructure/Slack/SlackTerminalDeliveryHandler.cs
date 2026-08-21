@@ -77,6 +77,8 @@ public sealed record SlackTerminalDelivery(
     string? ThreadTs = null,
     string? MessageTs = null,
     string? SlackUserId = null,
+    // Retained only as an additive wire field for ordinary Slack history;
+    // Manager terminal delivery never populates or consumes it.
     string? AssistantText = null)
 {
     public void Validate()

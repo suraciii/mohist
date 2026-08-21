@@ -2,6 +2,7 @@ using System.Text.Json;
 using Mohist.Server.Agent.Grains;
 using Mohist.Server.Contracts;
 using Mohist.Server.Infrastructure.Events;
+using Mohist.Server.Infrastructure.Slack;
 using Mohist.Server.Sessions.Domain;
 using Mohist.Server.Sessions.Services;
 
@@ -55,7 +56,9 @@ public sealed partial class AgentSessionGrain
             failureCategory = (string?)null,
             artifactCount = 0,
             exitCode = (int?)null,
-            assistantText = AgentJobLineage.ExtractAssistantText(turn.Result?.Output),
+            assistantText = string.Equals(projectId, SlackDeliveryOwnerIds.ManagerProjectId, StringComparison.Ordinal)
+                ? null
+                : AgentJobLineage.ExtractAssistantText(turn.Result?.Output),
         };
         var data = JsonSerializer.SerializeToElement(delivery, CloudEvent.JsonOptions);
         var extensions = new Dictionary<string, string>(StringComparer.Ordinal);

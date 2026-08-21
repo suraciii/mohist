@@ -81,6 +81,7 @@ export interface FollowupParams {
   slackExecutionContext?: SlackExecutionContext | null
   attachments?: readonly FollowupAttachmentDescriptor[] | null
   managerExecutionGrant?: ManagerExecutionGrantResponse | null
+  originMarker?: string | null
 }
 
 export interface SessionStopParams {

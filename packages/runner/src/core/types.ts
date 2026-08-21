@@ -144,6 +144,7 @@ export interface ManagerExecutionGrantResponse {
 export interface PolledDispatch {
   readonly work: DispatchWorkItem
   readonly managerExecutionGrant?: ManagerExecutionGrantResponse
+  readonly originMarker?: string | null
 }
 
 export type WorkDispatchResponse = {
@@ -217,6 +218,8 @@ export type WorkDispatchResponse = {
   /** One-shot plaintext grant. It is consumed into the Runner wrapper and
    * is never copied onto DispatchWorkItem or a journal record. */
   managerExecutionGrant?: ManagerExecutionGrantResponse | null
+  /** Non-secret control-plane origin marker, kept outside Runtime input. */
+  originMarker?: string | null
 }
 
 /**

@@ -275,7 +275,12 @@ public record WorkDispatch(
     /// work: the runner must reconcile against the bound execution instead
     /// of submitting a new prompt. Null on fresh dispatches.
     /// </summary>
-    [property: Id(29)] AgentRecoveryBinding? AgentRecovery = null)
+    [property: Id(29)] AgentRecoveryBinding? AgentRecovery = null,
+    /// <summary>
+    /// Non-secret control-plane origin marker. It is intentionally separate
+    /// from the Runtime <c>with</c> payload.
+    /// </summary>
+    [property: Id(30)] string? OriginMarker = null)
 {
     public WorkDispatch() : this(string.Empty, string.Empty) { }
 }

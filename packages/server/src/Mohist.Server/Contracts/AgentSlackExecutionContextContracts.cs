@@ -11,6 +11,20 @@ public static class AgentExecutionSources
     public const string Version1Capability = "execution-source-v1";
 }
 
+/// <summary>
+/// Non-secret control-plane markers for execution origins. The marker is
+/// separate from the Slack context: it selects server-side capability and
+/// recovery rules, but is never added to the Agent prompt, Instructions,
+/// Skill, or Slack facts.
+/// </summary>
+public static class AgentOriginMarkers
+{
+    public const string SlackManager = "slack-manager";
+
+    public static bool IsManager(string? marker) =>
+        string.Equals(marker, SlackManager, StringComparison.Ordinal);
+}
+
 public static class SlackCollaborationSkillCatalog
 {
     public const string Name = "mohist-slack-collaboration";

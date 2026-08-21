@@ -1001,7 +1001,8 @@ public sealed partial class AgentJobGrain : Grain, IAgentJobGrain
             PinnedRunnerId: command.PinnedRunnerId,
             AgentSessionStartup: command.AgentSessionStartup,
             SpawnOrigin: command.SpawnOrigin,
-            WorkspaceRepositories: command.WorkspaceRepositories);
+            WorkspaceRepositories: command.WorkspaceRepositories,
+            OriginMarker: command.OriginMarker);
 
     private static bool PlansEquivalent(PrepareManualLaunchCommand left, PrepareManualLaunchCommand right) =>
         string.Equals(left.Prompt, right.Prompt, StringComparison.Ordinal)
@@ -1021,6 +1022,7 @@ public sealed partial class AgentJobGrain : Grain, IAgentJobGrain
         && left.EpicNumber == right.EpicNumber
         && string.Equals(left.WorkflowRunId ?? string.Empty, right.WorkflowRunId ?? string.Empty, StringComparison.Ordinal)
         && Equals(left.ConnectionOrigin, right.ConnectionOrigin)
+        && string.Equals(left.OriginMarker, right.OriginMarker, StringComparison.Ordinal)
         && JsonEquals(left.AgentConfig, right.AgentConfig)
         && AttachmentDescriptorsEquivalent(left.Attachments, right.Attachments);
 
@@ -1074,6 +1076,7 @@ public sealed partial class AgentJobGrain : Grain, IAgentJobGrain
         && string.Equals(left.Variant, right.Variant, StringComparison.Ordinal)
         && string.Equals(left.ReasoningEffort, right.ReasoningEffort, StringComparison.Ordinal)
         && string.Equals(left.ExecutionSource, right.ExecutionSource, StringComparison.Ordinal)
+        && string.Equals(left.OriginMarker, right.OriginMarker, StringComparison.Ordinal)
         && JsonEquals(left.AgentConfig, right.AgentConfig)
         && AttachmentDescriptorsEquivalent(left.Attachments, right.Attachments)
         && Equals(left.StartupContext, right.StartupContext)
@@ -1097,6 +1100,7 @@ public sealed partial class AgentJobGrain : Grain, IAgentJobGrain
         if (!string.Equals(left.Variant, right.Variant, StringComparison.Ordinal)) fields.Add(nameof(AgentJobInput.Variant));
         if (!string.Equals(left.ReasoningEffort, right.ReasoningEffort, StringComparison.Ordinal)) fields.Add(nameof(AgentJobInput.ReasoningEffort));
         if (!string.Equals(left.ExecutionSource, right.ExecutionSource, StringComparison.Ordinal)) fields.Add(nameof(AgentJobInput.ExecutionSource));
+        if (!string.Equals(left.OriginMarker, right.OriginMarker, StringComparison.Ordinal)) fields.Add(nameof(AgentJobInput.OriginMarker));
         if (!JsonEquals(left.AgentConfig, right.AgentConfig)) fields.Add(nameof(AgentJobInput.AgentConfig));
         if (!AttachmentDescriptorsEquivalent(left.Attachments, right.Attachments)) fields.Add(nameof(AgentJobInput.Attachments));
         if (!Equals(left.AllowedSubagents, right.AllowedSubagents)) fields.Add(nameof(AgentJobInput.AllowedSubagents));

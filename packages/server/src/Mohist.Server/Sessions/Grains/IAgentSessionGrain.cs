@@ -142,6 +142,7 @@ public interface IAgentSessionGrain : IGrainWithStringKey
     Task<AgentInitialLaunchSnapshot?> GetInitialLaunchAsync();
 
     Task<IReadOnlyList<AgentTurnRecord>> ListTurnsAsync();
+    Task<IReadOnlyList<AgentSessionInputRecord>> ListInputsAsync();
 
     /// <summary>
     /// Create a scheduled input (or replay an existing schedule for the

@@ -3901,6 +3901,12 @@ public sealed partial class AgentSessionGrain : Grain, IAgentSessionGrain, IRemi
             : Array.Empty<AgentTurnRecord>();
     }
 
+    public async Task<IReadOnlyList<AgentSessionInputRecord>> ListInputsAsync()
+    {
+        var session = await GetRequiredAsync();
+        return session.Status.Inputs?.ToArray() ?? Array.Empty<AgentSessionInputRecord>();
+    }
+
     private static AgentTurnRecord CopyTurnForBoundary(AgentTurnRecord turn) =>
         turn with { InputIds = turn.InputIds.ToArray() };
 

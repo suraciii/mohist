@@ -1,4 +1,5 @@
 using Mohist.Server.Api;
+using Mohist.Server.Contracts;
 using Mohist.Server.Agent.Grains;
 using Mohist.Server.Agent.Services;
 using Mohist.Server.Infrastructure;
@@ -70,6 +71,8 @@ public sealed class SlackManagerConversationService : IScopedService, ISlackMana
             agent.ProjectId,
             sessionId,
             ct);
+        if (target is not null && !await ValidateSlackContinuityAsync(request, sessionId, ct))
+            return SlackManagerConversationResult.NotAccepted(sessionId);
         var allowPendingInitialLaunch =
             string.Equals(sessionId, ManagerSessionId(request), StringComparison.Ordinal)
             && await IsPendingInitialLaunchAsync(request, sessionId, ct);
@@ -149,7 +152,8 @@ public sealed class SlackManagerConversationService : IScopedService, ISlackMana
                 request.Actor.SlackUserId,
                 request.Message.Identity.ConversationId,
                 request.Message.Identity.MessageTs,
-                request.Message.ThreadTs),
+                request.Message.ThreadTs,
+                AgentOriginMarkers.SlackManager),
             preMintedSessionId: sessionId,
             ct: ct);
 
@@ -191,6 +195,27 @@ public sealed class SlackManagerConversationService : IScopedService, ISlackMana
         return string.IsNullOrWhiteSpace(routedSessionId);
     }
 
+    private async Task<bool> ValidateSlackContinuityAsync(
+        SlackManagerConversationRequest request,
+        string sessionId,
+        CancellationToken ct)
+    {
+        var initial = await _grains.GetGrain<IAgentSessionGrain>(sessionId).GetInitialLaunchAsync();
+        var provenance = initial?.Input?.Provenance;
+        if (provenance is null
+            || !string.Equals(provenance.ProviderKind, "slack", StringComparison.Ordinal)
+            || !string.Equals(provenance.WorkspaceId, request.Message.Identity.WorkspaceTeamId, StringComparison.Ordinal)
+            || !string.Equals(provenance.ConversationId, request.Message.Identity.ConversationId, StringComparison.Ordinal)
+            || !string.Equals(provenance.MemberId, request.Actor.SlackUserId, StringComparison.Ordinal)
+            || !string.Equals(provenance.ConnectionId, request.Actor.EnrollmentId, StringComparison.Ordinal)
+            || string.IsNullOrWhiteSpace(provenance.BoundThreadRootMessageId)
+            || (request.Message.ThreadTs is not null
+                && !string.Equals(request.Message.ThreadTs, provenance.BoundThreadRootMessageId, StringComparison.Ordinal)))
+            return false;
+
+        return string.Equals(provenance.OriginMarker, AgentOriginMarkers.SlackManager, StringComparison.Ordinal);
+    }
+
     private static string ManagerSessionId(SlackManagerConversationRequest request) =>
         $"manager-session-{AgentLaunchCoordinatorCodec.StableToken(string.Join('\n',
             request.Actor.EnrollmentId,
@@ -212,5 +237,6 @@ public sealed class SlackManagerConversationService : IScopedService, ISlackMana
         MemberId: request.Actor.SlackUserId,
         MessageId: request.Message.Identity.MessageTs,
         ConnectionId: request.Actor.EnrollmentId,
-        BoundThreadRootMessageId: request.Message.ThreadTs ?? request.Message.Identity.MessageTs);
+        BoundThreadRootMessageId: request.Message.ThreadTs ?? request.Message.Identity.MessageTs,
+        OriginMarker: AgentOriginMarkers.SlackManager);
 }

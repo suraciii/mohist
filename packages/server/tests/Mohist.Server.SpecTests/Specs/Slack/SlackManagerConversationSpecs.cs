@@ -4,6 +4,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Mohist.Server.Agent.Grains;
 using Mohist.Server.Agent.Services;
+using Mohist.Server.Contracts;
 using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Infrastructure.Data.Project;
 using Mohist.Server.Infrastructure.Data.Slack;
@@ -49,6 +50,8 @@ public sealed class SlackManagerConversationSpecs
         Assert.Equal(firstText, launch!.Input!.Text);
         Assert.DoesNotContain("mohistManagerTool", launch.Input.Text, StringComparison.Ordinal);
         Assert.DoesNotContain("Manager request accepted", launch.Input.Text, StringComparison.Ordinal);
+        Assert.Equal(AgentOriginMarkers.SlackManager, launch.Input.Provenance?.OriginMarker);
+        Assert.Equal(AgentOriginMarkers.SlackManager, (await session.ListInputsAsync()).Single().OriginMarker);
 
         await session.AttachPhysicalSessionAsync(new AttachPhysicalSessionCommand(
             "runtime-manager-conversation-new",
@@ -84,8 +87,6 @@ public sealed class SlackManagerConversationSpecs
                 "D_MANAGER_CONVERSATION_NEW");
         Assert.Equal(sessionId, mapping);
         Assert.Empty(await database.Agents.Where(row => row.ProjectId == projectId).ToListAsync());
-        Assert.Null(scope.ServiceProvider.GetService<SlackManagerToolTurnProcessor>());
-        Assert.Null(scope.ServiceProvider.GetService<SlackManagerToolExecutor>());
         Assert.Null(scope.ServiceProvider.GetService<SlackManagerToolExecutionFenceStore>());
     }
 

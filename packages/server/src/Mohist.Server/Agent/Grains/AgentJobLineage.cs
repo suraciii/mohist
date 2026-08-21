@@ -151,6 +151,9 @@ public static class AgentJobLineage
             exitCode = payload.ExitCode,
             // Manager turns are ordinary natural-language Agent turns. Their
             // output is never parsed into a Server protocol or reply payload.
+            // Assistant output remains Runtime data. Manager deliveries do
+            // not carry an extracted text field because the reply action is
+            // the only conversational delivery boundary.
             assistantText = IsManagerProject(extensions)
                 ? null
                 : ExtractAssistantText(payload.Output),

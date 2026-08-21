@@ -157,6 +157,7 @@ export class ServerConnection {
     return (payload.dispatches ?? []).map((dispatch) => ({
       work: parseDispatchWorkItem(dispatch),
       ...(dispatch.managerExecutionGrant ? { managerExecutionGrant: dispatch.managerExecutionGrant } : {}),
+      ...(dispatch.originMarker != null ? { originMarker: dispatch.originMarker } : {}),
     }))
   }
 

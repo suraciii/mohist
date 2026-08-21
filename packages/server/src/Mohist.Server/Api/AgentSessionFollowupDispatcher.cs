@@ -86,7 +86,10 @@ public sealed class AgentSessionFollowupDispatcher : IScopedService
                 SlackExecutionContext: SlackExecutionContextFor(projectId, dispatch, target.SessionId),
                 TurnId: dispatch.TurnId,
                 ExecutionSource: dispatch.ExecutionSource,
-                ManagerExecutionGrant: managerGrant?.Grant), ct);
+                ManagerExecutionGrant: managerGrant?.Grant,
+                OriginMarker: AgentOriginMarkers.IsManager(target.ProjectId)
+                    ? AgentOriginMarkers.SlackManager
+                    : null), ct);
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {

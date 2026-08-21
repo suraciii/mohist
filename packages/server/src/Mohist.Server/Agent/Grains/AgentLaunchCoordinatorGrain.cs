@@ -354,7 +354,8 @@ public sealed partial class AgentLaunchCoordinatorGrain : Grain, IAgentLaunchCoo
             PinnedRunnerId: plan.PinnedRunnerId,
             AgentSessionStartup: plan.AgentSessionStartup,
             SpawnOrigin: SpawnOriginFor(plan),
-            WorkspaceRepositories: plan.WorkspaceRepositories));
+            WorkspaceRepositories: plan.WorkspaceRepositories,
+            OriginMarker: plan.ConnectionOrigin?.OriginMarker));
         await _participantProbe.OnPrepareJobAsync(plan.JobKey, commandId);
 
         _state.State.Plan = plan with
@@ -548,6 +549,8 @@ public sealed partial class AgentLaunchCoordinatorGrain : Grain, IAgentLaunchCoo
             labels[AgentSessionQueryMetadataKeys.SlackConversationId] = origin.ConversationId;
             if (!string.IsNullOrWhiteSpace(origin.ThreadTs))
                 labels[AgentSessionQueryMetadataKeys.SlackThreadTs] = origin.ThreadTs;
+            if (!string.IsNullOrWhiteSpace(origin.OriginMarker))
+                labels[AgentSessionQueryMetadataKeys.OriginMarker] = origin.OriginMarker;
         }
 
         var metadata = new AgentSessionMetadata(labels, null);
@@ -570,7 +573,8 @@ public sealed partial class AgentLaunchCoordinatorGrain : Grain, IAgentLaunchCoo
                     MemberId: provenanceOrigin.SlackUserId,
                     MessageId: provenanceOrigin.MessageTs,
                     ConnectionId: provenanceOrigin.ConnectionId,
-                    BoundThreadRootMessageId: provenanceOrigin.ThreadTs ?? provenanceOrigin.MessageTs)
+                    BoundThreadRootMessageId: provenanceOrigin.ThreadTs ?? provenanceOrigin.MessageTs,
+                    OriginMarker: provenanceOrigin.OriginMarker)
                 : null,
             StartupContext: plan.StartupContext,
             Definition: new AgentExecutionDefinition(

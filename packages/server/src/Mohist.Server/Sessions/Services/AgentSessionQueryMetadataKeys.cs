@@ -19,6 +19,7 @@ public static class AgentSessionQueryMetadataKeys
     public const string SlackUserId = "mohist.io/slack-user-id";
     public const string SlackConversationId = "mohist.io/slack-conversation-id";
     public const string SlackThreadTs = "mohist.io/slack-thread-ts";
+    public const string OriginMarker = "mohist.io/origin-marker";
 
     public const string WorkspaceName = AgentSessionMetadata.WorkspaceNameKey;
 }

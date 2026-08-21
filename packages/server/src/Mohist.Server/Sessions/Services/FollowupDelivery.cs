@@ -40,6 +40,7 @@ public sealed record FollowupDeliveryRequest(
     AgentSlackExecutionContext? SlackExecutionContext = null,
     string? TurnId = null,
     string ExecutionSource = AgentExecutionSources.NonSlack,
-    ManagerExecutionGrant? ManagerExecutionGrant = null);
+    ManagerExecutionGrant? ManagerExecutionGrant = null,
+    string? OriginMarker = null);
 
 public sealed record FollowupDeliveryResult(bool Accepted);

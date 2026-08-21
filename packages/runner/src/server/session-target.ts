@@ -154,6 +154,7 @@ export interface ReceiveFollowupPayload {
   }>
   slackExecutionContext?: unknown
   managerExecutionGrant?: ManagerExecutionGrantResponse | null
+  originMarker?: string | null
 }
 
 // Payload delivered by the server-side `ReceiveWorkflowRunStatus` control WebSocket

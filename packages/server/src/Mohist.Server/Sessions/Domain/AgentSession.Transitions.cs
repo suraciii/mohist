@@ -461,7 +461,8 @@ public static partial class AgentSessionExtensions
                     Attachments: normalizedAttachments,
                     Provenance: provenance,
                     StartupContext: startupContext,
-                    ExecutionSource: ExecutionSourceFor(provenance)));
+                    ExecutionSource: ExecutionSourceFor(provenance),
+                    OriginMarker: provenance?.OriginMarker));
             }
 
             var turns = (session.Status.Turns ?? []).ToList();
@@ -632,7 +633,8 @@ public static partial class AgentSessionExtensions
                 JobId: null,
                 Attachments: normalizedAttachments,
                 Provenance: provenance,
-                ExecutionSource: ExecutionSourceFor(provenance)));
+                ExecutionSource: ExecutionSourceFor(provenance),
+                OriginMarker: provenance?.OriginMarker));
             turns.Add(new AgentTurnRecord(
                 Id: turnId,
                 Sequence: turns.Count + 1,

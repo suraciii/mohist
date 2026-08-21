@@ -94,7 +94,8 @@ public sealed partial class AgentSessionGrain
             representative.Id,
             provenance,
             leases[index].ConcurrencyDispatchId ?? $"followup:{session.Id}:{leases[index].OperationId}",
-            executionSource);
+            executionSource,
+            session.Metadata?.Label(AgentSessionQueryMetadataKeys.OriginMarker));
     }
 
     private static string EffectiveExecutionSource(AgentSessionInputRecord input)

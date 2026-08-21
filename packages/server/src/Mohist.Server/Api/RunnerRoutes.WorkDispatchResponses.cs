@@ -52,6 +52,7 @@ public static partial class RunnerRoutes
             TaskRunId: work.TaskRunId,
             RecoveryGeneration: work.RecoveryGeneration,
             AgentRecovery: work.AgentRecovery,
-            ManagerExecutionGrant: managerCredentials?.IssueFor(work));
+            ManagerExecutionGrant: managerCredentials?.IssueFor(work),
+            OriginMarker: work.OriginMarker);
     }
 }

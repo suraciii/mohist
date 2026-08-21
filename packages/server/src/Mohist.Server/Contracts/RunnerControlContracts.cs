@@ -84,7 +84,8 @@ public sealed record FollowupParams(
     [property: JsonPropertyName("executionSource")] string? ExecutionSource,
     [property: JsonPropertyName("slackExecutionContext")] AgentSlackExecutionContext? SlackExecutionContext,
     [property: JsonPropertyName("attachments")] IReadOnlyList<FollowupAttachmentDescriptor>? Attachments,
-    [property: JsonPropertyName("managerExecutionGrant")] ManagerExecutionGrant? ManagerExecutionGrant = null);
+    [property: JsonPropertyName("managerExecutionGrant")] ManagerExecutionGrant? ManagerExecutionGrant = null,
+    [property: JsonPropertyName("originMarker")] string? OriginMarker = null);
 
 public sealed record SessionStopParams(
     [property: JsonPropertyName("target")] RunnerSessionTarget Target,

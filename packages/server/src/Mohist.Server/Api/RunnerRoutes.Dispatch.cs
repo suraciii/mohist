@@ -38,4 +38,5 @@ public record WorkDispatchResponse(
     string? TaskRunId = null,
     int RecoveryGeneration = 0,
     AgentRecoveryBinding? AgentRecovery = null,
-    ManagerExecutionGrant? ManagerExecutionGrant = null);
+    ManagerExecutionGrant? ManagerExecutionGrant = null,
+    string? OriginMarker = null);

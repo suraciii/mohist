@@ -27,6 +27,13 @@ Constraints:
 ## Verification Notes
 - `progress.txt` was absent at task start.
 - Existing Manager tests that asserted the retired JSON protocol were replaced with natural-language, replay, replacement, and no-terminal-text coverage.
+
+## Current T-004 implementation notes
+- Added the non-secret `slack-manager` origin marker as a separate control-plane fact. It is persisted on Manager launch/session/job/follow-up dispatch boundaries and remains outside Runtime `with`, prompts, Skills, and Slack facts.
+- Manager initial origin now carries the marker through `ConnectionLaunchOrigin`, durable provenance, the AgentJob dispatch, and Runner poll/follow-up contracts; follow-up dispatch reconstructs the marker from the durable Session source label.
+- Removed the model-output protocol source files (`SlackManagerToolInvocation`, `SlackManagerToolTurnProcessor`, `SlackManagerToolExecutor`, and the old tool authorization wrapper). The management bridge remains the only management route, and terminal/session delivery does not extract Manager assistant text.
+- Manager continuation validates the existing Session's durable Slack workspace, conversation, actor, Enrollment, root, and Manager marker before follow-up; missing/conflicting continuity fails closed rather than falling through to non-Slack work.
+- Build/typecheck verification after these changes: Server build passes and Runner typecheck passes. Focused Manager lifecycle/terminal specs pass (3,050 total SpecTests run, including the Manager classes), and the relevant Server unit tests pass (3,724 total UnitTests run).
 - A replacement inbox route must be updated conditionally from the mapped runtime Session to the deterministic replacement Session; unconditional `SetRouteSessionIdAsync` correctly rejects stale routes but was too strict for this recovery transition.
 - Manager status projections explicitly select `OwnerKind.Manager`; Manager reaction payloads have no Server-authored fallback text, preserving Agent-only reply ownership.
 
