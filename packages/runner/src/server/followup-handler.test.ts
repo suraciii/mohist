@@ -89,10 +89,11 @@ describe('follow-up attachment delivery', () => {
     const records: any[] = []
     const runtime = {
       ready: () => true,
-      followup: vi.fn(async () => {
-        await new Promise((resolve) => setTimeout(resolve, 5))
-        return { ok: true as const, value: { facts: {} }, diagnostics: [] }
-      }),
+      followup: vi.fn(async () => ({
+        ok: true as const,
+        value: { facts: {} },
+        diagnostics: [],
+      })),
     }
     const boundary = {
       hasExpired: () => true,
@@ -118,7 +119,7 @@ describe('follow-up attachment delivery', () => {
     })
 
     expect(await receive(managerFollowupPayload())).toEqual({ accepted: true })
-    await new Promise((resolve) => setTimeout(resolve, 20))
+    await flushMicrotasks()
 
     const terminal = records.find((record) => record.event?.type === 'session.activity')
     expect(terminal.event.payload).toMatchObject({
@@ -163,7 +164,7 @@ describe('follow-up attachment delivery', () => {
     })
 
     expect(await receive(managerFollowupPayload())).toEqual({ accepted: true })
-    await new Promise((resolve) => setTimeout(resolve, 20))
+    await flushMicrotasks()
 
     const terminal = records.find((record) => record.event?.type === 'session.activity')
     expect(terminal.event.payload).toMatchObject({
@@ -264,6 +265,12 @@ describe('follow-up attachment delivery', () => {
     expect(JSON.stringify(records)).not.toContain('rawPlatformEvent')
   })
 })
+
+async function flushMicrotasks(): Promise<void> {
+  await Promise.resolve()
+  await Promise.resolve()
+  await Promise.resolve()
+}
 
 function managerFollowupPayload() {
   const instructions = 'Manager collaboration instructions'

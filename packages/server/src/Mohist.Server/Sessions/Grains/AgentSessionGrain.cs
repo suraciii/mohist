@@ -1426,20 +1426,6 @@ public sealed partial class AgentSessionGrain : Grain, IAgentSessionGrain, IRemi
         _ => throw new ArgumentOutOfRangeException(nameof(command), command, "Unsupported session command"),
     };
 
-    private static void EnsureRuntimeSessionPresent(AgentSession session)
-    {
-        if (!session.IsRuntimeSessionMissing(IsRuntimeRegistered)) return;
-        throw new RuntimeSessionMissingException(session.Id, session.Status.AgentRuntimeSessionId, session.Runtime.Runtime);
-    }
-
-    private static bool HasInitialLaunch(AgentSession session) =>
-        (session.Status.Turns ?? [])
-            .Any(turn => !string.IsNullOrWhiteSpace(turn.JobId));
-
-    private static bool IsRuntimeRegistered(string runtime) =>
-        string.Equals(runtime, OpenCodeRuntime, StringComparison.OrdinalIgnoreCase)
-        || string.Equals(runtime, PiRuntime, StringComparison.OrdinalIgnoreCase);
-
     private static void EnsureBindingChangeAllowed(AgentSession session, long? expectedEpoch)
     {
         if (expectedEpoch is not null && expectedEpoch.Value != session.BindingEpoch)
