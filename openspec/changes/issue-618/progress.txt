@@ -159,3 +159,10 @@ Verification:
 - Runner poll and heartbeat fail closed with 503 when the authoritative Manager deployment epoch is unavailable; `ManagerExecutionCapabilityIssuer.IssueFor` uses the injected `TimeProvider` instead of wall-clock access.
 - Added an expiry cleanup integration regression. Focused verification after these changes: Runner integration Manager boundary 11/11, Runner boundary/connection unit 21/21, Runner typecheck, format check, Server build, Manager credential unit filter, and Manager capability-admission spec filter all passed.
 - Generic Manager Bash overrides cannot replace the fixed HOME, PATH, broker, launcher, execution id, or Manager-mode values; the boundary reapplies its sanitized process environment after removing override attempts.
+
+## T-002
+
+- Manager ingress now validates the stable `SlackMessageIdentity` in the HTTP route before the Manager runtime lease gate; managed-Bot classification therefore remains downstream of identity and lease validation and upstream of all human authorization, claims, inbox, Session, and liveness work.
+- Extended the Manager managed-Bot specification to assert that no Manager Inbox, outbox, AgentJob, or Agent Session rows are created, and that the same null-sender Bot redelivery remains ignored after acquiring a replacement adapter lease.
+- Existing workspace-scoped `SlackManagedBotAdmissionService` remains the sole attribution rule: it matches only enrolled Manager or eligible non-deleted managed Agent author identities and never the receiving App identity. Unmatched, conflicting, unknown, and third-party Bot events retain the existing rejection path.
+- Verification: Server build passes; focused Manager managed-Bot specs, Manager adapter/ingress/runtime-lease specs, and `mohist-slack` adapter event/transport tests pass; `git diff --check` is clean.

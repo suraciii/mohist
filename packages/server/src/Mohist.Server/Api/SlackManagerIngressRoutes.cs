@@ -276,6 +276,14 @@ public static class SlackManagerIngressRoutes
                     "Client identity fields are not supported by the Manager API.",
                     "client_identity_not_supported");
 
+            var identity = new SlackMessageIdentity(
+                body.WorkspaceTeamId,
+                body.ConversationId,
+                body.MessageTs);
+            var identityError = identity.Validate();
+            if (identityError.Length != 0)
+                return ApiResults.BadRequest(identityError, "invalid_slack_identity");
+
             if (!await leases.ValidateManagerRuntimeLeaseByTeamAsync(
                     operatorId, body.WorkspaceTeamId, body.LeaseId, body.AdapterId, ct))
             {
@@ -286,7 +294,7 @@ public static class SlackManagerIngressRoutes
 
             var result = await ingress.AcceptAsync(new SlackManagerIngressMessage(
                 body.AppId,
-                new SlackMessageIdentity(body.WorkspaceTeamId, body.ConversationId, body.MessageTs),
+                identity,
                 body.SenderSlackUserId,
                 body.Text ?? string.Empty,
                 body.IsDirectMessage,
