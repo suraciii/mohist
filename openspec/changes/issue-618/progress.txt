@@ -93,6 +93,11 @@ Constraints:
 ## Review Repair
 - Fixed Manager lease-bound workspace/project/Agent/Connection admission, Manager-owned liveness lookup, rejected-coordinator terminal convergence, and follow-up terminal origin identity.
 - Added fresh dual Manager grants to follow-up control delivery with actor/Enrollment reauthorization, scoped Runner Pi/OpenCode execution, redaction, and cleanup.
-- Broker requests now require the generated launcher process identity; Manager capabilities are withheld on unsupported platforms or incomplete Pi readiness, before Runner work journaling.
+- Replaced the forgeable PID/path credential broker with an argument-only command proxy. The per-execution broker spawns the real `mo` child with the scoped bearer, masks its output, and never returns a bearer to the launcher or a generic same-user process.
+- Shared deployment epochs are refreshed from the authoritative lease store on each issue/validation operation; cross-instance epoch freshness is covered by a unit test.
+- Epoch invalidation marks in-flight Manager work unknown, durably reports the transition, and creates one inspection-only recovery turn. Unknown Manager Runner-loss recovery skips the original prompt dispatch, so uncertain CLI mutations are never replayed.
 - Credential expiry is classified durably and creates one deterministic, non-replaying Session recovery follow-up.
-- Production lease hashes/metadata and deployment epoch now use a shared SQLite runtime store; parameterless in-memory construction remains for unit tests.
+- Production lease hashes/metadata and deployment epoch use a shared SQLite runtime store; parameterless in-memory construction remains for unit tests.
+
+## Review Repair Verification
+- `npm run verify` passes all tracks: Workflow Definition 178, CLI 1,950, Server Unit 3,121, Server Architecture 51, Server Spec 3,709, Runner 1,683, Web, `mohist-slack`, docs, formatting, file-size, script, and boundary checks.
