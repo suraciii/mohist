@@ -149,40 +149,31 @@ describe('ManagerExecutionBoundary', () => {
       expect(mismatch?.exitCode).toBeUndefined()
       expect(stub.invocations()).toHaveLength(1)
 
-      // Commands outside the Manager capability vocabulary never spawn.
-      for (const args of [
-        ['run', 'view'],
-        ['issue', 'create', 'x'],
-        ['slack', 'edit', '--bot-name=n'],
-      ]) {
-        const refused = await requestLauncher(broker, args)
-        expect(refused.exitCode).toBe(126)
-      }
+      // A forged reply target cannot escape the reply lease. The
+      // capability-surface test covers the remaining invalid command shapes
+      // without starting another process for each one.
+      const refused = await requestLauncher(broker, ['slack', 'message', 'drop'])
+      expect(refused.exitCode).toBe(126)
       expect(stub.invocations()).toHaveLength(1)
 
       // Usage and help requests mirror the CLI manager-mode admission and
-      // run read-only under the management kind.
-      for (const args of [[], ['--help'], ['-h'], ['--manager']]) {
-        const usage = await requestLauncher(broker, args)
-        expect(usage?.exitCode).toBe(0)
-      }
-      expect(stub.invocations()).toHaveLength(5)
+      // run read-only under the management kind. The unit mirror test covers
+      // the accepted flag variants; this verifies the broker path once.
+      const usage = await requestLauncher(broker, ['--help'])
+      expect(usage?.exitCode).toBe(0)
+      const usageInvocations = stub.invocations()
+      expect(usageInvocations).toHaveLength(2)
+      expect(usageInvocations[1].managementToken).toBe(true)
       const usageReplyKind = await requestBroker(broker, 'reply', ['--help'])
       expect(usageReplyKind?.exitCode).toBeUndefined()
-      expect(stub.invocations()).toHaveLength(5)
-
-      // A forged reply target cannot escape the reply lease: only the
-      // message send shape is admitted under the reply kind.
-      const forged = await requestLauncher(broker, ['slack', 'message', 'drop'])
-      expect(forged.exitCode).toBe(126)
-      expect(stub.invocations()).toHaveLength(5)
+      expect(stub.invocations()).toHaveLength(2)
 
       const validReply = await requestLauncher(broker, ['slack', 'message', 'send', 'hello'])
       expect(validReply?.exitCode).toBe(0)
       const replyInvocations = stub.invocations()
-      expect(replyInvocations).toHaveLength(6)
-      expect(replyInvocations[5].replyToken).toBe(true)
-      expect(replyInvocations[5].managementToken).toBe(false)
+      expect(replyInvocations).toHaveLength(3)
+      expect(replyInvocations[2].replyToken).toBe(true)
+      expect(replyInvocations[2].managementToken).toBe(false)
       expect(JSON.stringify(validReply)).not.toContain(grant.replyCredential)
     } finally {
       await boundary.dispose()
