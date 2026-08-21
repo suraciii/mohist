@@ -60,8 +60,8 @@ Unchanged. Restated here as the port's test oracle.
 
 Every response body is a JSON object `{success, code?, data?}`. A response is
 successful only when `success === true`; `data` may be `null`. The code
-`lease_stale_or_expired` maps to a dedicated stale-lease error that drops the
-runtime; it is never retried inline.
+`lease_stale_or_expired` surfaces as an error the adapter can identify by its
+code; the adapter drops the runtime on it and never retries inline.
 
 Requests carry `Authorization: Bearer <operator token>` and
 `x-mohist-operator-id`. The base URL must be loopback (`localhost`, `[::1]`,
@@ -192,18 +192,20 @@ for existing log consumers.
 
 ## Go Mapping
 
-Module layout — flat on purpose at this size:
+Module layout — flat on purpose at this size. Library code lives in the
+module root package `mohistslack`; the binary arrives as `cmd/mohist-slack`
+when the process entry lands:
 
 ```
 text literal
 packages/go/mohist-slack/
   go.mod          module github.com/suraciii/mohist/packages/go/mohist-slack
-  main.go         env config, signal handling, assembly
   serverapi.go    envelope client, nine routes, loopback guard
   adapter.go      runtime map, generation fencing, drain loops
   delivery.go     payload operations, fallback, reconciliation
   events.go       message and interaction normalization
   logging.go      logfmt slog handler, redaction
+  cmd/mohist-slack/main.go   env config, signal handling, assembly (Batch 4)
 ```
 
 Library choices: `slack-go/slack` (socketmode and api packages) for Slack
@@ -270,7 +272,7 @@ reaction paths.
 | Batch | Content | Exit criterion |
 | --- | --- | --- |
 | 0 | this specification | merged |
-| 1 | serverapi layer | contract tests green against fixtures |
+| 1 | serverapi layer | contract tests green against fixtures; Go CI job (gofmt, vet, test) wired |
 | 2 | adapter core | fake-injected state-machine tests green |
 | 3 | Slack integration incl. proxy ping verification | fake-socket behavior pinned; open item resolved |
 | 4 | process entry | real-Slack end-to-end pass |

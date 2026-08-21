@@ -259,6 +259,28 @@ jobs:
           if-no-files-found: warn
           retention-days: 7
 
+  go:
+    name: Go
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup Go
+        uses: actions/setup-go@v6
+        with:
+          go-version: stable
+
+      - name: Check formatting
+        run: test -z "$(gofmt -l packages/go/mohist-slack)"
+
+      - name: Vet and test
+        working-directory: packages/go/mohist-slack
+        run: |
+          go vet ./...
+          go test ./...
+
   repository:
     name: Repository
     runs-on: ubuntu-latest
