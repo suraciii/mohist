@@ -47,10 +47,10 @@ const DEFAULT_TERMINATION_TIMEOUT_MS = 5_000
 
 // The broker uses Linux kernel peer information to admit only the generated
 // launcher process. Capability confinement remains a second gate: bearer
-// values exist only inside spawned CLI children, requests resolve through the
-// Manager vocabulary, the working directory is frozen, and each kind has a
-// bounded request budget. The Server independently enforces lease origin,
-// route allowlist, and anchor validation for whatever those children send.
+// values remain in the Runner-side proxy, requests resolve through the Manager
+// vocabulary, the working directory is frozen, and each kind has a bounded
+// request budget. The Server independently enforces lease origin, route
+// allowlist, and anchor validation for whatever those children send.
 /**
  * One in-memory Manager process boundary. The grant is deliberately not part
  * of DispatchWorkItem and this class is never passed to a journal or report.
@@ -127,6 +127,9 @@ export class ManagerExecutionBoundary {
       ...process.env,
       MOHIST_MANAGER_MODE: '1',
     }
+    delete baseEnvironment.MOHIST_MANAGER_MANAGEMENT_TOKEN
+    delete baseEnvironment.MOHIST_MANAGER_REPLY_TOKEN
+    delete baseEnvironment.MOHIST_MANAGER_CREDENTIAL_BROKER
     const realMoPath = options.moExecutable ?? findRealMoPath(directory, baseEnvironment.PATH ?? '')
     if (!realMoPath) throw new Error('The real mo executable could not be resolved')
     const boundary = new ManagerExecutionBoundary(

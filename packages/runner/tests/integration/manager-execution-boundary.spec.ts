@@ -4,6 +4,7 @@ import { existsSync, readFileSync, readdirSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { createConnection } from 'node:net'
+import { createServer as createHttpServer, type Server as HttpServer } from 'node:http'
 import { describe, expect, it } from 'vitest'
 import { ManagerExecutionBoundary, type ManagerExecutionGrant } from '../../src/runtime/manager-execution-boundary.js'
 import {
@@ -36,7 +37,7 @@ interface StubMo {
   invocations(): StubInvocation[]
 }
 
-async function writeStubMo(root: string, holdSignal: boolean): Promise<StubMo> {
+async function writeStubMo(root: string, holdSignal: boolean, proxyUrl: string | null = null): Promise<StubMo> {
   const directory = join(root, 'stub-bin')
   const executable = join(directory, 'mo')
   const marker = join(root, 'stub-invocations.jsonl')
@@ -51,8 +52,23 @@ const record = {
   pid: process.pid,
 }
 fs.appendFileSync(${JSON.stringify(marker)}, JSON.stringify(record) + '\\n')
-process.stdout.write('out ' + (process.env.MOHIST_MANAGER_MANAGEMENT_TOKEN ?? process.env.MOHIST_MANAGER_REPLY_TOKEN ?? 'none') + '\\n')
-${holdSignal ? "process.on('SIGTERM', () => {})\nsetTimeout(() => process.exit(0), 60_000)\n" : 'process.exit(0)\n'}
+${
+  proxyUrl
+    ? `const net = require('node:net')
+const proxy = net.createConnection(process.env.MOHIST_MANAGER_CREDENTIAL_BROKER)
+let proxyBody = ''
+proxy.on('data', (chunk) => { proxyBody += chunk.toString() })
+proxy.on('error', () => process.exit(1))
+proxy.on('end', () => {
+  const response = JSON.parse(proxyBody)
+  process.stdout.write('proxy ' + response.status + '\\n')
+  process.exit(response.status === 200 ? 0 : 1)
+})
+proxy.end(JSON.stringify({ method: 'GET', url: ${JSON.stringify(proxyUrl)}, headers: {} }))
+`
+    : "process.stdout.write('out ' + (process.env.MOHIST_MANAGER_MANAGEMENT_TOKEN ?? process.env.MOHIST_MANAGER_REPLY_TOKEN ?? 'none') + '\\n')"
+}
+${holdSignal ? "process.on('SIGTERM', () => {})\nsetTimeout(() => process.exit(0), 60_000)\n" : proxyUrl ? '' : 'process.exit(0)\n'}
 `
   await mkdir(directory, { recursive: true })
   await writeFile(executable, script, { encoding: 'utf8', mode: 0o700 })
@@ -120,6 +136,37 @@ describe('ManagerExecutionBoundary', () => {
       expect(genericEnvironment).not.toContain(grant.replyCredential)
     } finally {
       await boundary.dispose()
+    }
+  })
+
+  it('injects the bearer only inside the Runner-side request proxy', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'mohist-manager-boundary-'))
+    let targetServer: HttpServer | null = null
+    const authorization = new Promise<string | undefined>((resolve) => {
+      targetServer = createHttpServer((request, response) => {
+        resolve(request.headers.authorization)
+        response.writeHead(200, { 'content-type': 'text/plain' })
+        response.end('ok')
+      })
+    })
+    await new Promise<void>((resolve) => targetServer!.listen(0, '127.0.0.1', resolve))
+    const address = targetServer!.address()
+    if (!address || typeof address === 'string') throw new Error('credential proxy test server did not bind')
+    const stub = await writeStubMo(root, false, `http://127.0.0.1:${address.port}/status`)
+    const boundary = await ManagerExecutionBoundary.create(grant, root, {
+      moExecutable: stub.executable,
+      workDir: stub.frozenWorkDir,
+    })
+    try {
+      const result = await requestLauncher(boundary.environment().MOHIST_MANAGER_BROKER!, ['slack', 'status'])
+      expect(result.exitCode).toBe(0)
+      expect(result.stdout).toContain('proxy 200')
+      expect(await authorization).toBe(`Bearer ${grant.managementCredential}`)
+      expect(stub.invocations()[0].managementToken).toBe(false)
+      expect(stub.invocations()[0].credentialBroker).toBe(true)
+    } finally {
+      await boundary.dispose()
+      await new Promise<void>((resolve) => targetServer!.close(() => resolve()))
     }
   })
 

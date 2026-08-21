@@ -125,10 +125,18 @@ async function reconcileStartedStop(
   const binding = sessionTarget?.binding
   if (!binding || !binding.workDir) return 'indeterminate'
 
-  const handle = resolveCommandRuntime(binding, {
-    openCode: deps.openCodeRuntime,
-    pi: deps.piRuntime,
-  })
+  const managerExecution =
+    deps.managerExecutionRegistry?.findForCancel(
+      sessionTarget.kind === 'workflow' ? (sessionTarget.agentSessionId ?? '') : sessionTarget.sessionId,
+      binding.runtime,
+      binding.runtimeSessionId,
+    ) ?? null
+  const handle =
+    managerExecution?.handle ??
+    resolveCommandRuntime(binding, {
+      openCode: deps.openCodeRuntime,
+      pi: deps.piRuntime,
+    })
   if (!handle || !handle.runtime.ready()) return 'indeterminate'
 
   try {

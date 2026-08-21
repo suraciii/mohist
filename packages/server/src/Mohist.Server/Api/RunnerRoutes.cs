@@ -554,7 +554,10 @@ public static partial class RunnerRoutes
         group.MapPost("/agent-sessions/{sessionId}/runtime-events", async (
             string runnerId, string sessionId,
             AgentSessionRuntimeEventsRequest req,
-            AgentSessionResolver sessions) =>
+            AgentSessionResolver sessions,
+            AgentSessionQuery sessionQuery,
+            ManagerExecutionCapabilityIssuer managerCredentials,
+            CancellationToken ct) =>
         {
             var grain = sessions.GetGrain(sessionId);
             var existing = await grain.GetAsync();
@@ -590,6 +593,8 @@ public static partial class RunnerRoutes
                 runtimeEvents,
                 req.RuntimeSessionId,
                 SessionTurnId: req.AgentTurnId));
+            if (await IsManagerAgentSessionAsync(sessionQuery, sessionId, ct))
+                RevokeCompletedManagerFollowupLeases(sessionId, req.RuntimeEvents, managerCredentials);
             return Results.Ok(events);
         });
 
@@ -727,21 +732,7 @@ public static partial class RunnerRoutes
                 e.Payload.ValueKind == System.Text.Json.JsonValueKind.Undefined ? "{}" : e.Payload.GetRawText())).ToArray();
             var events = await grain.AppendRuntimeEventsAsync(new AppendAgentSessionRuntimeEventsCommand(runtimeEvents, req.RuntimeSessionId));
             if (string.Equals(projectId, SlackDeliveryOwnerIds.ManagerProjectId, StringComparison.Ordinal))
-            {
-                foreach (var runtimeEvent in req.RuntimeEvents.Where(eventItem =>
-                             string.Equals(eventItem.Type, RuntimeEventTypes.SessionActivity, StringComparison.Ordinal)))
-                {
-                    if (runtimeEvent.Payload.ValueKind != JsonValueKind.Object
-                        || !runtimeEvent.Payload.TryGetProperty("activity", out var activity)
-                        || activity.ValueKind != JsonValueKind.String
-                        || activity.GetString() is not ("idle" or "unknown")
-                        || !runtimeEvent.Payload.TryGetProperty("operationId", out var operation)
-                        || operation.ValueKind != JsonValueKind.String
-                        || string.IsNullOrWhiteSpace(operation.GetString()))
-                        continue;
-                    managerCredentials.RevokeExecution($"manager:{sessionId}:{operation.GetString()}");
-                }
-            }
+                RevokeCompletedManagerFollowupLeases(sessionId, req.RuntimeEvents, managerCredentials);
             await followups.DispatchNextAsync(projectId, sessionId, ct);
             return Results.Ok(events);
         });
@@ -804,6 +795,36 @@ public static partial class RunnerRoutes
         });
 
         return app;
+    }
+
+    private static async Task<bool> IsManagerAgentSessionAsync(
+        AgentSessionQuery sessionQuery,
+        string sessionId,
+        CancellationToken ct)
+    {
+        var records = await sessionQuery.ListByIdsAsync([sessionId], ct);
+        return records.Any(record =>
+            string.Equals(record.Label(AgentSessionQueryMetadataKeys.ProjectId), SlackDeliveryOwnerIds.ManagerProjectId, StringComparison.Ordinal));
+    }
+
+    private static void RevokeCompletedManagerFollowupLeases(
+        string sessionId,
+        IReadOnlyList<AgentSessionRuntimeEventRequest> runtimeEvents,
+        ManagerExecutionCapabilityIssuer managerCredentials)
+    {
+        foreach (var runtimeEvent in runtimeEvents.Where(eventItem =>
+                     string.Equals(eventItem.Type, RuntimeEventTypes.SessionActivity, StringComparison.Ordinal)))
+        {
+            if (runtimeEvent.Payload.ValueKind != JsonValueKind.Object
+                || !runtimeEvent.Payload.TryGetProperty("activity", out var activity)
+                || activity.ValueKind != JsonValueKind.String
+                || activity.GetString() is not ("idle" or "unknown")
+                || !runtimeEvent.Payload.TryGetProperty("operationId", out var operation)
+                || operation.ValueKind != JsonValueKind.String
+                || string.IsNullOrWhiteSpace(operation.GetString()))
+                continue;
+            managerCredentials.RevokeExecution($"manager:{sessionId}:{operation.GetString()}");
+        }
     }
 
     private static RunnerGenericAgentSessionResponse ToRunnerGenericAgentSession(AgentSessionInfo session) =>

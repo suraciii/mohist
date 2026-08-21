@@ -442,13 +442,7 @@ export class RunnerHost {
       // push channel is available in parallel.
       await this.cleanup.runConvergenceOnce(signal)
       await this.cleanup.runBindingConvergenceOnce(signal)
-      const heartbeat = setInterval(
-        () =>
-          void this.connection
-            .heartbeat(this.registrationState(), signal)
-            .catch((error) => log.error('runner heartbeat failed', { exception: error })),
-        this.options.heartbeatIntervalMs,
-      )
+      const heartbeat = setInterval(() => void this.heartbeatOnce(signal), this.options.heartbeatIntervalMs)
       const selfCheck = setInterval(
         () => void this.cleanup.runSelfCheck(signal),
         this.options.dispatchLivenessProbeIntervalMs,
@@ -494,11 +488,21 @@ export class RunnerHost {
     }
   }
 
+  private async heartbeatOnce(signal: AbortSignal): Promise<void> {
+    try {
+      await this.connection.heartbeat(this.registrationState(), signal)
+      await this.observeManagerDeploymentEpoch()
+    } catch (error) {
+      log.error('runner heartbeat failed', { exception: error })
+    }
+  }
+
   private async sendImmediateHeartbeat() {
     const signal = this.activeSignal
     if (!signal || signal.aborted) return
     try {
       await this.connection.heartbeat(this.registrationState(), signal)
+      await this.observeManagerDeploymentEpoch()
     } catch (error) {
       log.error('immediate runner heartbeat failed', { exception: error })
     }
@@ -866,15 +870,19 @@ export class RunnerHost {
         }
       ).takeLastPolledDispatches
       const works = takeLast ? takeLast.call(this.connection, workItems) : workItems.map((work) => ({ work }))
-      const epoch = this.connection.deploymentEpoch
-      if (epoch && this.observedManagerDeploymentEpoch && epoch !== this.observedManagerDeploymentEpoch) {
-        await this.invalidateManagerExecutions()
-      }
-      if (epoch) this.observedManagerDeploymentEpoch = epoch
+      await this.observeManagerDeploymentEpoch()
       return works
     } finally {
       bounded.dispose()
     }
+  }
+
+  private async observeManagerDeploymentEpoch(): Promise<void> {
+    const epoch = this.connection.deploymentEpoch
+    if (!epoch) return
+    if (this.observedManagerDeploymentEpoch && epoch !== this.observedManagerDeploymentEpoch)
+      await this.invalidateManagerExecutions()
+    this.observedManagerDeploymentEpoch = epoch
   }
 
   private async revokeManagerExecution(executionId: string): Promise<void> {
