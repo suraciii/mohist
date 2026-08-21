@@ -42,6 +42,16 @@ describe('ManagerExecutionBoundary', () => {
       const genericEnvironment = Buffer.concat(output).toString('utf8')
       expect(genericEnvironment).not.toContain(grant.managementCredential)
       expect(genericEnvironment).not.toContain(grant.replyCredential)
+
+      const cliOutput: Buffer[] = []
+      await boundary.bashOperations().exec('mo --help', root, {
+        onData: (chunk) => cliOutput.push(chunk),
+        signal: new AbortController().signal,
+      })
+      const proxiedCliOutput = Buffer.concat(cliOutput).toString('utf8')
+      expect(proxiedCliOutput).toContain('USAGE')
+      expect(proxiedCliOutput).not.toContain(grant.managementCredential)
+      expect(proxiedCliOutput).not.toContain(grant.replyCredential)
     } finally {
       await boundary.dispose()
     }
