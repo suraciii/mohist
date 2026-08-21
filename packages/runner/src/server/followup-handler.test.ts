@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto'
 import { join } from 'node:path'
 import { describe, expect, it as vitestIt, vi } from 'vitest'
 import { createFollowupHandler } from './followup-handler.js'
@@ -39,6 +40,88 @@ describe('follow-up attachment delivery', () => {
     expect(result).toEqual({ accepted: false, error: 'unavailable' })
     expect(resolver).not.toHaveBeenCalled()
     expect(enqueue).not.toHaveBeenCalled()
+  })
+
+  it('marks a successful Manager result as expiry recovery when the grant expired during execution', async () => {
+    const records: any[] = []
+    const runtime = {
+      ready: () => true,
+      followup: vi.fn(async () => {
+        await new Promise((resolve) => setTimeout(resolve, 5))
+        return { ok: true as const, value: { facts: {} }, diagnostics: [] }
+      }),
+    }
+    const boundary = {
+      hasExpired: () => true,
+      mask: (value: string) => value,
+      redact: (value: unknown) => value,
+      dispose: vi.fn(async () => undefined),
+    }
+    const outbox = {
+      ready: () => true,
+      enqueueBeforeExecution: vi.fn(async (record: unknown) => records.push(record)),
+      enqueueProducedFact: vi.fn(async (record: unknown) => records.push(record)),
+    }
+    const receive = createFollowupHandler({
+      followupTargetResolver: () => ({ runtimeSessionId: 'runtime-1', workDir: '/work', projectId: '__mohist_slack_manager__' }),
+      agentSessionRuntimeEventOutbox: outbox as never,
+      piRuntime: runtime as never,
+      runnerRoot: '/tmp/runner',
+      createManagerExecutionBoundary: vi.fn(async () => boundary as never) as never,
+    })
+
+    expect(await receive(managerFollowupPayload())).toEqual({ accepted: true })
+    await new Promise((resolve) => setTimeout(resolve, 20))
+
+    const terminal = records.find((record) => record.event?.type === 'session.activity')
+    expect(terminal.event.payload).toMatchObject({
+      activity: 'unknown',
+      status: 'unknown',
+      failureCategory: 'unknown',
+      reason: 'manager-credential-expired',
+    })
+  })
+
+  it('marks a CLI expiry error as expiry recovery instead of ordinary failure', async () => {
+    const records: any[] = []
+    const runtime = {
+      ready: () => true,
+      followup: vi.fn(async () => ({
+        ok: false as const,
+        error: { kind: 'command-failed', message: 'manager_credential_expired' },
+        diagnostics: [],
+      })),
+    }
+    const boundary = {
+      hasExpired: () => true,
+      mask: (value: string) => value,
+      redact: (value: unknown) => value,
+      dispose: vi.fn(async () => undefined),
+    }
+    const outbox = {
+      ready: () => true,
+      enqueueBeforeExecution: vi.fn(async (record: unknown) => records.push(record)),
+      enqueueProducedFact: vi.fn(async (record: unknown) => records.push(record)),
+    }
+    const receive = createFollowupHandler({
+      followupTargetResolver: () => ({ runtimeSessionId: 'runtime-1', workDir: '/work', projectId: '__mohist_slack_manager__' }),
+      agentSessionRuntimeEventOutbox: outbox as never,
+      piRuntime: runtime as never,
+      runnerRoot: '/tmp/runner',
+      createManagerExecutionBoundary: vi.fn(async () => boundary as never) as never,
+    })
+
+    expect(await receive(managerFollowupPayload())).toEqual({ accepted: true })
+    await new Promise((resolve) => setTimeout(resolve, 20))
+
+    const terminal = records.find((record) => record.event?.type === 'session.activity')
+    expect(terminal.event.payload).toMatchObject({
+      activity: 'unknown',
+      status: 'unknown',
+      failureCategory: 'unknown',
+      reason: 'manager-credential-expired',
+      failureReason: 'manager_credential_expired',
+    })
   })
 
   it('executes an attachment-only turn through the owning input scope', async (fileSystem) => {
@@ -130,3 +213,51 @@ describe('follow-up attachment delivery', () => {
     expect(JSON.stringify(records)).not.toContain('rawPlatformEvent')
   })
 })
+
+function managerFollowupPayload() {
+  const instructions = 'Manager collaboration instructions'
+  return {
+    target: {
+      kind: 'generic',
+      projectId: '__mohist_slack_manager__',
+      sessionId: 'session-1',
+      binding: {
+        runtime: 'pi',
+        runtimeSessionId: 'runtime-1',
+        runnerId: 'runner-1',
+        workDir: '/work',
+      },
+    },
+    text: 'continue',
+    operationId: 'operation-1',
+    turnId: 'turn-1',
+    slackExecutionContext: {
+      version: 1,
+      replyAnchor: {
+        workspaceId: 'workspace-1',
+        conversationId: 'conversation-1',
+        threadRootMessageId: 'thread-1',
+        triggeringMessageId: 'message-1',
+        initiatingMemberId: 'member-1',
+        connectionId: 'connection-1',
+        sessionId: 'session-1',
+        dispatchRef: 'dispatch-1',
+        projectId: '__mohist_slack_manager__',
+        ownerKind: 'manager',
+      },
+      collaborationSkill: {
+        name: 'test-skill',
+        version: '1',
+        instructions,
+        contentHash: createHash('sha256').update(instructions, 'utf8').digest('hex'),
+      },
+    },
+    managerExecutionGrant: {
+      managementCredential: 'management-secret',
+      replyCredential: 'reply-secret',
+      executionId: 'manager:session-1:operation-1',
+      expiresAt: new Date(Date.now() + 60_000).toISOString(),
+      deploymentEpoch: 'epoch-1',
+    },
+  } as const
+}

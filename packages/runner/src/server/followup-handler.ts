@@ -72,6 +72,7 @@ export interface FollowupHandlerDeps {
   runnerRoot?: string
   managerExecutionRegistry?: ManagerExecutionRegistry | null
   onManagerExecutionFinished?: (executionId: string) => Promise<void> | void
+  createManagerExecutionBoundary?: typeof ManagerExecutionBoundary.create
   followupOperationJournal?: FollowupOperationJournalStore | null
   randomId?: () => string
   bindingRecoveryCoordinator?: BindingRecoveryCoordinator | null
@@ -159,9 +160,11 @@ async function handleFollowup(
   if (managerContext) {
     if (!deps.runnerRoot) return unavailable()
     try {
-      managerExecution = await ManagerExecutionBoundary.create(payload.managerExecutionGrant!, deps.runnerRoot, {
-        workDir: target.workDir,
-      })
+      managerExecution = await (deps.createManagerExecutionBoundary ?? ManagerExecutionBoundary.create)(
+        payload.managerExecutionGrant!,
+        deps.runnerRoot,
+        { workDir: target.workDir },
+      )
       if (binding.runtime.toLowerCase() === 'opencode') {
         const isolated = await managerExecution.openCodeRuntime(target.workDir, new AbortController().signal)
         if (!isolated) {
@@ -620,9 +623,11 @@ function recordFollowupActivity(
   managerExecution: ManagerExecutionBoundary | null = null,
 ): void {
   if (!operationId) return
+  const managerCredentialExpired = managerExecution?.hasExpired() === true
+  const terminalActivity = managerCredentialExpired ? 'unknown' : activity
   const completedAt = new Date().toISOString()
   const record: RuntimeEventRecord = {
-    id: `followup-activity:${operationId}:${activity}:${completedAt}`,
+    id: `followup-activity:${operationId}:${terminalActivity}:${completedAt}`,
     producerFamily: 'session-followup',
     target: sessionTargetToRuntimeTarget(sessionTarget),
     runtimeSessionId: target.runtimeSessionId,
@@ -631,8 +636,13 @@ function recordFollowupActivity(
     event: {
       type: 'session.activity',
       payload: {
-        activity,
-        status: activity === 'idle' ? 'completed' : 'failed',
+        activity: terminalActivity,
+        status: managerCredentialExpired
+          ? 'unknown'
+          : terminalActivity === 'idle'
+            ? 'completed'
+            : 'failed',
+        ...(managerCredentialExpired ? { reason: 'manager-credential-expired', failureCategory: 'unknown' } : {}),
         ...(error
           ? {
               failureReason: managerExecution
