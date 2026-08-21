@@ -248,11 +248,13 @@ socket.end(JSON.stringify({ kind, args, cwd: process.cwd() }))
         socket.end('{}')
         return
       }
-      if ((request.kind !== 'management' && request.kind !== 'reply')
-        || !Array.isArray(request.args)
-        || request.args.some((arg) => typeof arg !== 'string')
-        || request.args.length > 128
-        || this.expired()) {
+      if (
+        (request.kind !== 'management' && request.kind !== 'reply') ||
+        !Array.isArray(request.args) ||
+        request.args.some((arg) => typeof arg !== 'string') ||
+        request.args.length > 128 ||
+        this.expired()
+      ) {
         socket.end('{}')
         return
       }
@@ -265,12 +267,7 @@ socket.end(JSON.stringify({ kind, args, cwd: process.cwd() }))
     })
   }
 
-  private async executeCli(
-    socket: Socket,
-    kind: 'management' | 'reply',
-    args: string[],
-    cwd: string,
-  ): Promise<void> {
+  private async executeCli(socket: Socket, kind: 'management' | 'reply', args: string[], cwd: string): Promise<void> {
     const childEnvironment = { ...this.baseEnvironment }
     delete childEnvironment.MOHIST_MANAGER_BROKER
     delete childEnvironment.MOHIST_MANAGER_EXECUTION_ID
@@ -295,11 +292,13 @@ socket.end(JSON.stringify({ kind, args, cwd: process.cwd() }))
     child.on('error', () => socket.end('{}'))
     child.on('close', (exitCode) => {
       if (socket.destroyed) return
-      socket.end(JSON.stringify({
-        exitCode: typeof exitCode === 'number' ? exitCode : 1,
-        stdout,
-        stderr,
-      }))
+      socket.end(
+        JSON.stringify({
+          exitCode: typeof exitCode === 'number' ? exitCode : 1,
+          stdout,
+          stderr,
+        }),
+      )
     })
   }
 }
@@ -307,11 +306,13 @@ socket.end(JSON.stringify({ kind, args, cwd: process.cwd() }))
 function findRealMoPath(managerDirectory: string, pathValue: string): string | null {
   const separator = process.platform === 'win32' ? ';' : ':'
   const executable = process.platform === 'win32' ? 'mo.exe' : 'mo'
-  return pathValue
-    .split(separator)
-    .filter((item) => item && join(item) !== managerDirectory)
-    .map((item) => join(item, executable))
-    .find((candidate) => existsSync(candidate)) ?? null
+  return (
+    pathValue
+      .split(separator)
+      .filter((item) => item && join(item) !== managerDirectory)
+      .map((item) => join(item, executable))
+      .find((candidate) => existsSync(candidate)) ?? null
+  )
 }
 
 export interface ManagerRuntimeProcessEnvironment {
