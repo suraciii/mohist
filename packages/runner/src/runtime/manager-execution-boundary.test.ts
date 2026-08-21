@@ -1,7 +1,8 @@
+import { spawn } from 'node:child_process'
 import { chmod, mkdir, mkdtemp, writeFile } from 'node:fs/promises'
 import { existsSync, readFileSync, readdirSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 import { createConnection } from 'node:net'
 import { describe, expect, it } from 'vitest'
 import { ManagerExecutionBoundary, type ManagerExecutionGrant } from './manager-execution-boundary.js'
@@ -89,6 +90,20 @@ describe('ManagerExecutionBoundary', () => {
       const managementResponse = await requestBroker(environment.MOHIST_MANAGER_BROKER!, 'management')
       expect(managementResponse?.credential).toBeUndefined()
       expect(managementResponse?.exitCode).toBeUndefined()
+
+      // A generic process cannot proxy an otherwise valid management request.
+      const directManagement = await requestBroker(environment.MOHIST_MANAGER_BROKER!, 'management', [
+        'slack',
+        'status',
+      ])
+      const directReply = await requestBroker(environment.MOHIST_MANAGER_BROKER!, 'reply', [
+        'slack',
+        'message',
+        'send',
+        'attacker text',
+      ])
+      expect(directManagement?.exitCode).toBeUndefined()
+      expect(directReply?.exitCode).toBeUndefined()
       expect(stub.invocations()).toHaveLength(0)
 
       const output: Buffer[] = []
@@ -117,7 +132,7 @@ describe('ManagerExecutionBoundary', () => {
 
       // A management read from the catalog runs the child with only the
       // management bearer, in the frozen working directory.
-      const status = await requestBroker(broker, 'management', ['slack', 'status'], '/attacker/chosen/cwd')
+      const status = await requestLauncher(broker, ['slack', 'status'])
       expect(status?.exitCode).toBe(0)
       const invocations = stub.invocations()
       expect(invocations).toHaveLength(1)
@@ -140,15 +155,15 @@ describe('ManagerExecutionBoundary', () => {
         ['issue', 'create', 'x'],
         ['slack', 'edit', '--bot-name=n'],
       ]) {
-        const refused = await requestBroker(broker, 'management', args)
-        expect(refused?.exitCode).toBeUndefined()
+        const refused = await requestLauncher(broker, args)
+        expect(refused.exitCode).toBe(126)
       }
       expect(stub.invocations()).toHaveLength(1)
 
       // Usage and help requests mirror the CLI manager-mode admission and
       // run read-only under the management kind.
       for (const args of [[], ['--help'], ['-h'], ['--manager']]) {
-        const usage = await requestBroker(broker, 'management', args)
+        const usage = await requestLauncher(broker, args)
         expect(usage?.exitCode).toBe(0)
       }
       expect(stub.invocations()).toHaveLength(5)
@@ -158,11 +173,11 @@ describe('ManagerExecutionBoundary', () => {
 
       // A forged reply target cannot escape the reply lease: only the
       // message send shape is admitted under the reply kind.
-      const forged = await requestBroker(broker, 'reply', ['slack', 'message', 'drop'])
-      expect(forged?.exitCode).toBeUndefined()
+      const forged = await requestLauncher(broker, ['slack', 'message', 'drop'])
+      expect(forged.exitCode).toBe(126)
       expect(stub.invocations()).toHaveLength(5)
 
-      const validReply = await requestBroker(broker, 'reply', ['slack', 'message', 'send', 'hello'])
+      const validReply = await requestLauncher(broker, ['slack', 'message', 'send', 'hello'])
       expect(validReply?.exitCode).toBe(0)
       const replyInvocations = stub.invocations()
       expect(replyInvocations).toHaveLength(6)
@@ -184,15 +199,15 @@ describe('ManagerExecutionBoundary', () => {
     })
     try {
       const broker = boundary.environment().MOHIST_MANAGER_BROKER!
-      expect((await requestBroker(broker, 'management', ['slack', 'status']))?.exitCode).toBe(0)
-      expect((await requestBroker(broker, 'management', ['agent', 'list']))?.exitCode).toBe(0)
-      const exhausted = await requestBroker(broker, 'management', ['slack', 'status'])
-      expect(exhausted?.exitCode).toBeUndefined()
+      expect((await requestLauncher(broker, ['slack', 'status'])).exitCode).toBe(0)
+      expect((await requestLauncher(broker, ['agent', 'list'])).exitCode).toBe(0)
+      const exhausted = await requestLauncher(broker, ['slack', 'status'])
+      expect(exhausted.exitCode).toBe(126)
       expect(stub.invocations()).toHaveLength(2)
 
-      expect((await requestBroker(broker, 'reply', ['slack', 'message', 'send', 'hi']))?.exitCode).toBe(0)
-      const replyExhausted = await requestBroker(broker, 'reply', ['slack', 'message', 'send', 'again'])
-      expect(replyExhausted?.exitCode).toBeUndefined()
+      expect((await requestLauncher(broker, ['slack', 'message', 'send', 'hi'])).exitCode).toBe(0)
+      const replyExhausted = await requestLauncher(broker, ['slack', 'message', 'send', 'again'])
+      expect(replyExhausted.exitCode).toBe(126)
       expect(stub.invocations()).toHaveLength(3)
     } finally {
       await boundary.dispose()
@@ -209,7 +224,7 @@ describe('ManagerExecutionBoundary', () => {
       terminationTimeoutMs: 150,
     })
     const broker = boundary.environment().MOHIST_MANAGER_BROKER!
-    const pending = requestBroker(broker, 'management', ['slack', 'status']).catch(() => null)
+    const pending = requestLauncher(broker, ['slack', 'status']).catch(() => null)
     await new Promise((resolve) => setTimeout(resolve, 120))
     expect(stub.invocations()).toHaveLength(1)
     const startedAt = Date.now()
@@ -275,6 +290,30 @@ describe('manager capability surface mirror', () => {
     expect(isManagerUsageRequest(['run', 'view', '--help'])).toBe(true)
   })
 })
+
+function requestLauncher(
+  brokerPath: string,
+  args: string[],
+): Promise<{ exitCode: number; stdout: string; stderr: string }> {
+  return new Promise((resolve, reject) => {
+    const child = spawn(join(dirname(brokerPath), 'mo'), args, {
+      env: { ...process.env, MOHIST_MANAGER_BROKER: brokerPath },
+      stdio: ['ignore', 'pipe', 'pipe'],
+    })
+    let stdout = ''
+    let stderr = ''
+    child.stdout.on('data', (chunk: Buffer) => {
+      stdout += chunk.toString('utf8')
+    })
+    child.stderr.on('data', (chunk: Buffer) => {
+      stderr += chunk.toString('utf8')
+    })
+    child.once('error', reject)
+    child.once('close', (exitCode) =>
+      resolve({ exitCode: typeof exitCode === 'number' ? exitCode : 126, stdout, stderr }),
+    )
+  })
+}
 
 function requestBroker(
   path: string,

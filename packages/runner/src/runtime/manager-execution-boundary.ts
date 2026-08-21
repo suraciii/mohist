@@ -16,6 +16,7 @@ import {
   resolveManagerRequestCapability,
   type ManagerRequestLimits,
 } from './manager-capability-surface.js'
+import { isManagerLauncherConnection } from './manager-launcher-auth.js'
 
 export interface ManagerExecutionGrant {
   readonly managementCredential: string
@@ -44,15 +45,12 @@ export interface ManagerExecutionBoundaryOptions {
 
 const DEFAULT_TERMINATION_TIMEOUT_MS = 5_000
 
-// Same-user processes cannot authenticate themselves over a local socket:
-// Node exposes no SO_PEERCRED, and every file or environment value the
-// launcher could hold is equally readable by the model's own shell. The
-// enforceable boundary is therefore confinement, not caller identity:
-// bearer values exist only inside the spawned CLI child, every request is
-// restricted to the Manager capability vocabulary, the working directory is
-// frozen to the execution workspace, and each kind has a bounded request
-// budget. The Server independently enforces the lease origin, route
-// allowlist, and anchor validation for whatever those children send.
+// The broker uses Linux kernel peer information to admit only the generated
+// launcher process. Capability confinement remains a second gate: bearer
+// values exist only inside spawned CLI children, requests resolve through the
+// Manager vocabulary, the working directory is frozen, and each kind has a
+// bounded request budget. The Server independently enforces lease origin,
+// route allowlist, and anchor validation for whatever those children send.
 /**
  * One in-memory Manager process boundary. The grant is deliberately not part
  * of DispatchWorkItem and this class is never passed to a journal or report.
@@ -61,6 +59,7 @@ export class ManagerExecutionBoundary {
   readonly masker = new CredentialMasker()
   private readonly baseEnvironment: NodeJS.ProcessEnv
   private readonly socketPath: string
+  private readonly launcherPath: string
   private readonly directory: string
   private readonly grant: ManagerExecutionGrant
   private readonly realMoPath: string
@@ -89,6 +88,7 @@ export class ManagerExecutionBoundary {
     this.grant = grant
     this.directory = directory
     this.socketPath = socketPath
+    this.launcherPath = join(directory, 'mo')
     this.baseEnvironment = baseEnvironment
     this.realMoPath = realMoPath
     this.frozenCwd = frozenCwd
@@ -276,7 +276,7 @@ export class ManagerExecutionBoundary {
   }
 
   private async writeLauncher(): Promise<void> {
-    const launcher = join(this.directory, 'mo')
+    const launcher = this.launcherPath
     const source = `#!/usr/bin/env node
 const net = require('node:net')
 const broker = process.env.MOHIST_MANAGER_BROKER
@@ -302,8 +302,8 @@ socket.end(JSON.stringify({ kind, args }))
   }
 
   private async startBroker(): Promise<void> {
-    if (process.platform === 'win32') {
-      throw new Error('Manager execution broker requires the named-pipe adapter on Windows')
+    if (process.platform !== 'linux') {
+      throw new Error('Manager execution broker requires Linux Unix-socket peer authentication')
     }
     // allowHalfOpen keeps the server socket writable after the client's
     // request end, because the response is produced asynchronously once the
@@ -330,20 +330,29 @@ socket.end(JSON.stringify({ kind, args }))
     })
     socket.on('error', () => socket.destroy())
     socket.on('end', () => {
-      let request: { kind?: unknown; args?: unknown; cwd?: unknown }
-      try {
-        request = JSON.parse(body) as { kind?: unknown; args?: unknown; cwd?: unknown }
-      } catch {
-        socket.end('{}')
-        return
-      }
-      const verdict = this.admitRequest(request)
-      if (verdict === null) {
-        socket.end('{}')
-        return
-      }
-      void this.executeCli(socket, verdict.kind, verdict.args)
+      void this.handleRequest(socket, body)
     })
+  }
+
+  private async handleRequest(socket: Socket, body: string): Promise<void> {
+    if (!(await isManagerLauncherConnection(socket, this.launcherPath))) {
+      socket.end('{}')
+      return
+    }
+
+    let request: { kind?: unknown; args?: unknown; cwd?: unknown }
+    try {
+      request = JSON.parse(body) as { kind?: unknown; args?: unknown; cwd?: unknown }
+    } catch {
+      socket.end('{}')
+      return
+    }
+    const verdict = this.admitRequest(request)
+    if (verdict === null) {
+      socket.end('{}')
+      return
+    }
+    await this.executeCli(socket, verdict.kind, verdict.args)
   }
 
   /**
