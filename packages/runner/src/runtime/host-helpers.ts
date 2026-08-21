@@ -35,7 +35,7 @@ export function isManagerExecutionWork(work: Pick<DispatchWorkItem, 'projectId'>
 
 export function supportsManagerExecution(registration: RunnerRegistration): boolean {
   return (
-    process.platform !== 'win32' &&
+    process.platform === 'linux' &&
     MANAGER_RUNTIME_CAPABILITIES.every((capability) => registration.capabilities.includes(capability))
   )
 }
