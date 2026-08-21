@@ -9,9 +9,9 @@ using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Infrastructure.Hosting;
 using Xunit;
 
-namespace Mohist.Server.SpecTests.Specs.SystemSpecs;
+namespace Mohist.Server.UnitTests.SystemSpecs;
 
-public class SquashedMigrationHistorySpecs
+public class SquashedMigrationHistoryTests
 {
     [Fact]
     public async Task Initialize_WhenDatabasePredatesSquashFloor_FailsFast()

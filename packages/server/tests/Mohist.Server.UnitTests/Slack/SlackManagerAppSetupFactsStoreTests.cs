@@ -1,13 +1,13 @@
 using Microsoft.Extensions.Time.Testing;
 using Mohist.Server.Infrastructure.Data.Slack;
 using Mohist.Server.Slack.Domain;
-using Mohist.Server.SpecTests.Support;
+using Mohist.Server.UnitTests.Support;
 using Mohist.Server.TestSupport;
 using Xunit;
 
-namespace Mohist.Server.SpecTests.Specs.Slack;
+namespace Mohist.Server.UnitTests.Slack;
 
-public sealed class SlackManagerAppSetupFactsStoreSpecs
+public sealed class SlackManagerAppSetupFactsStoreTests
 {
     private static readonly DateTimeOffset FixedNow = new(2026, 8, 6, 0, 0, 0, TimeSpan.Zero);
     private readonly FakeTimeProvider _time = new(FixedNow);
@@ -15,7 +15,7 @@ public sealed class SlackManagerAppSetupFactsStoreSpecs
     [Fact]
     public async Task BeginManagerAppCreate_accepts_matching_fence_and_persists_the_operation()
     {
-        await using var database = TestSqliteDatabase.CreateMigrated();
+        using var database = TestSqliteDatabase.CreateModelSchema();
         var factory = new TestDbContextFactory(database.Options);
         await SeedEnrollmentAsync(factory);
         var store = new SlackWorkspaceEnrollmentStore(factory, _time);
@@ -38,7 +38,7 @@ public sealed class SlackManagerAppSetupFactsStoreSpecs
     [Fact]
     public async Task BeginManagerAppCreate_rejects_a_stale_fence_and_returns_the_current_state()
     {
-        await using var database = TestSqliteDatabase.CreateMigrated();
+        using var database = TestSqliteDatabase.CreateModelSchema();
         var factory = new TestDbContextFactory(database.Options);
         await SeedEnrollmentAsync(factory);
         var reader = new SlackWorkspaceEnrollmentStore(factory, _time);
@@ -61,7 +61,7 @@ public sealed class SlackManagerAppSetupFactsStoreSpecs
     [Fact]
     public async Task ApplyManagerAppCreateResult_records_created_and_survives_store_reload()
     {
-        await using var database = TestSqliteDatabase.CreateMigrated();
+        using var database = TestSqliteDatabase.CreateModelSchema();
         var factory = new TestDbContextFactory(database.Options);
         await SeedEnrollmentAsync(factory);
         var store = new SlackWorkspaceEnrollmentStore(factory, _time);
@@ -86,7 +86,7 @@ public sealed class SlackManagerAppSetupFactsStoreSpecs
     [Fact]
     public async Task ApplyManagerAppCreateResult_rejects_a_stale_result_from_a_previous_operation()
     {
-        await using var database = TestSqliteDatabase.CreateMigrated();
+        using var database = TestSqliteDatabase.CreateModelSchema();
         var factory = new TestDbContextFactory(database.Options);
         await SeedEnrollmentAsync(factory);
         var store = new SlackWorkspaceEnrollmentStore(factory, _time);
@@ -123,7 +123,7 @@ public sealed class SlackManagerAppSetupFactsStoreSpecs
     [Fact]
     public async Task Unknown_create_retries_with_a_fresh_operation_and_reaches_created()
     {
-        await using var database = TestSqliteDatabase.CreateMigrated();
+        using var database = TestSqliteDatabase.CreateModelSchema();
         var factory = new TestDbContextFactory(database.Options);
         await SeedEnrollmentAsync(factory);
         var store = new SlackWorkspaceEnrollmentStore(factory, _time);
@@ -154,7 +154,7 @@ public sealed class SlackManagerAppSetupFactsStoreSpecs
     [Fact]
     public async Task Socket_validation_reaches_verified_through_candidate_and_awaiting_socket()
     {
-        await using var database = TestSqliteDatabase.CreateMigrated();
+        using var database = TestSqliteDatabase.CreateModelSchema();
         var factory = new TestDbContextFactory(database.Options);
         await SeedEnrollmentAsync(factory);
         var store = new SlackWorkspaceEnrollmentStore(factory, _time);
@@ -175,7 +175,7 @@ public sealed class SlackManagerAppSetupFactsStoreSpecs
     [Fact]
     public async Task Failed_validation_restages_as_candidate_and_can_fail_again()
     {
-        await using var database = TestSqliteDatabase.CreateMigrated();
+        using var database = TestSqliteDatabase.CreateModelSchema();
         var factory = new TestDbContextFactory(database.Options);
         await SeedEnrollmentAsync(factory);
         var store = new SlackWorkspaceEnrollmentStore(factory, _time);
@@ -195,7 +195,7 @@ public sealed class SlackManagerAppSetupFactsStoreSpecs
     [Fact]
     public async Task ApplySocketValidation_rejects_states_that_skip_a_step()
     {
-        await using var database = TestSqliteDatabase.CreateMigrated();
+        using var database = TestSqliteDatabase.CreateModelSchema();
         var factory = new TestDbContextFactory(database.Options);
         await SeedEnrollmentAsync(factory);
         var store = new SlackWorkspaceEnrollmentStore(factory, _time);
@@ -207,7 +207,7 @@ public sealed class SlackManagerAppSetupFactsStoreSpecs
     [Fact]
     public async Task Begin_and_apply_return_not_found_for_an_unknown_enrollment()
     {
-        await using var database = TestSqliteDatabase.CreateMigrated();
+        using var database = TestSqliteDatabase.CreateModelSchema();
         var factory = new TestDbContextFactory(database.Options);
         var store = new SlackWorkspaceEnrollmentStore(factory, _time);
 
@@ -227,7 +227,7 @@ public sealed class SlackManagerAppSetupFactsStoreSpecs
     [Fact]
     public async Task Fresh_enrollment_starts_not_created_with_a_zero_fence_and_no_runtime_credentials()
     {
-        await using var database = TestSqliteDatabase.CreateMigrated();
+        using var database = TestSqliteDatabase.CreateModelSchema();
         var factory = new TestDbContextFactory(database.Options);
         var store = new SlackWorkspaceEnrollmentStore(factory, _time);
         var enrollment = new SlackWorkspaceEnrollment

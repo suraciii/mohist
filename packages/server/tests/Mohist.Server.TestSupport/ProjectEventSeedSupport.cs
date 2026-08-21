@@ -11,7 +11,7 @@ using Mohist.Server.Workflow.Domain.Run;
 using Xunit;
 using DomainIssue = Mohist.Server.Issue.Domain.Issue;
 
-namespace Mohist.Server.SpecTests.Support;
+namespace Mohist.Server.TestSupport;
 
 /// <summary>
 /// Fixture-agnostic seeding for the project event feed: writes the same
@@ -20,7 +20,7 @@ namespace Mohist.Server.SpecTests.Support;
 /// <c>ProjectEventFeedAssembler</c> reads, against any
 /// <see cref="IServiceProvider"/> that carries the production service graph.
 /// Shared by the HTTP-layer <c>ProjectEventsApiTestSupport</c> and the
-/// assembler-level <c>ProjectEventFeedAssemblerSpecs</c> so the two layers
+/// assembler-level <c>ProjectEventFeedAssemblerTests</c> so the two layers
 /// cannot drift on how events are seeded.
 /// </summary>
 internal sealed class ProjectEventSeedSupport

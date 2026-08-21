@@ -20,7 +20,7 @@ namespace Mohist.Server.SpecTests.Specs.Api;
 /// issue/workflow/agent-session events. The assembler's calculation matrix
 /// (limit/cap/sort/tie-break/isolation/envelope-priority/activity-safe
 /// projection/attention filters) lives in
-/// <c>ProjectEventFeedAssemblerSpecs</c>.
+/// <c>ProjectEventFeedAssemblerTests</c>.
 /// </summary>
 public class ProjectEventsApiSpecs : ProjectEventsApiTestSupport
 {

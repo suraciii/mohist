@@ -47,7 +47,7 @@ public sealed class AuthSessionSpecs(MohistIntegrationFixture fixture)
         Assert.Equal(CredentialKind.Session.ToString(), row.Kind);
         Assert.Equal(MohistPrincipal.AdminPrincipalId, row.PrincipalId);
         Assert.Equal("""["operator"]""", row.ScopesJson);
-        Assert.Equal(fixture.TimeProvider.GetUtcNow() + AuthSessionRoutes.SessionLifetime, row.ExpiresAt);
+        Assert.Equal(row.CreatedAt + AuthSessionRoutes.SessionLifetime, row.ExpiresAt);
         Assert.Null(row.RevokedAt);
 
         using var business = await SendWithSessionCookieAsync(client, HttpMethod.Get, "/api/projects", sessionToken);

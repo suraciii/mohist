@@ -3,13 +3,13 @@ using Mohist.Server.Infrastructure.Data.Slack;
 using Mohist.Server.Infrastructure.Slack;
 using Mohist.Server.Slack.Domain;
 using Mohist.Server.Slack.Services;
-using Mohist.Server.SpecTests.Support;
+using Mohist.Server.UnitTests.Support;
 using Mohist.Server.TestSupport;
 using Xunit;
 
-namespace Mohist.Server.SpecTests.Specs.Slack;
+namespace Mohist.Server.UnitTests.Slack;
 
-public sealed class SlackAdapterLeaseStoreSpecs
+public sealed class SlackAdapterLeaseStoreTests
 {
     private static readonly DateTimeOffset T0 = new(2026, 8, 5, 14, 0, 0, TimeSpan.Zero);
     private const string Target = "manager:enr_1";
@@ -17,7 +17,7 @@ public sealed class SlackAdapterLeaseStoreSpecs
     [Fact]
     public async Task Issue_bumps_generation_and_supersedes_the_prior_lease()
     {
-        await using var database = TestSqliteDatabase.CreateMigrated();
+        using var database = TestSqliteDatabase.CreateModelSchema();
         var store = new SlackAdapterLeaseStore(new TestDbContextFactory(database.Options));
 
         var first = await store.IssueAsync(Target, SlackLeaseKind.Runtime, "adapter-A", T0 + RuntimeTtl, T0, credentialFingerprint: null);
@@ -31,7 +31,7 @@ public sealed class SlackAdapterLeaseStoreSpecs
     [Fact]
     public async Task Renew_extends_the_active_lease_and_survives_a_store_reload()
     {
-        await using var database = TestSqliteDatabase.CreateMigrated();
+        using var database = TestSqliteDatabase.CreateModelSchema();
         var factory = new TestDbContextFactory(database.Options);
         var store = new SlackAdapterLeaseStore(factory);
 
@@ -50,7 +50,7 @@ public sealed class SlackAdapterLeaseStoreSpecs
     [Fact]
     public async Task Renew_rejects_a_superseded_wrong_adapter_or_expired_lease()
     {
-        await using var database = TestSqliteDatabase.CreateMigrated();
+        using var database = TestSqliteDatabase.CreateModelSchema();
         var store = new SlackAdapterLeaseStore(new TestDbContextFactory(database.Options));
 
         var first = await store.IssueAsync(Target, SlackLeaseKind.Runtime, "adapter-A", T0 + RuntimeTtl, T0, credentialFingerprint: null);
@@ -66,7 +66,7 @@ public sealed class SlackAdapterLeaseStoreSpecs
     [Fact]
     public async Task ConfirmHello_fences_the_validation_lease_and_bumps_generation()
     {
-        await using var database = TestSqliteDatabase.CreateMigrated();
+        using var database = TestSqliteDatabase.CreateModelSchema();
         var store = new SlackAdapterLeaseStore(new TestDbContextFactory(database.Options));
 
         var validation = await store.IssueAsync(Target, SlackLeaseKind.Validation, "adapter-A", T0 + ValidationTtl, T0, credentialFingerprint: null);
@@ -81,7 +81,7 @@ public sealed class SlackAdapterLeaseStoreSpecs
     [Fact]
     public async Task ConfirmHello_rejects_a_runtime_lease_and_an_unknown_lease()
     {
-        await using var database = TestSqliteDatabase.CreateMigrated();
+        using var database = TestSqliteDatabase.CreateModelSchema();
         var store = new SlackAdapterLeaseStore(new TestDbContextFactory(database.Options));
 
         var runtime = await store.IssueAsync(Target, SlackLeaseKind.Runtime, "adapter-A", T0 + RuntimeTtl, T0, credentialFingerprint: null);
@@ -92,7 +92,7 @@ public sealed class SlackAdapterLeaseStoreSpecs
     [Fact]
     public async Task Issue_pins_and_confirm_clears_the_credential_fingerprint()
     {
-        await using var database = TestSqliteDatabase.CreateMigrated();
+        using var database = TestSqliteDatabase.CreateModelSchema();
         var factory = new TestDbContextFactory(database.Options);
         var store = new SlackAdapterLeaseStore(factory);
 
@@ -115,7 +115,7 @@ public sealed class SlackAdapterLeaseStoreSpecs
     [Fact]
     public async Task GetActive_returns_null_when_no_lease_has_ever_been_issued()
     {
-        await using var database = TestSqliteDatabase.CreateMigrated();
+        using var database = TestSqliteDatabase.CreateModelSchema();
         var store = new SlackAdapterLeaseStore(new TestDbContextFactory(database.Options));
 
         Assert.Null(await store.GetActiveAsync(Target));
@@ -125,7 +125,7 @@ public sealed class SlackAdapterLeaseStoreSpecs
     [Fact]
     public async Task Active_lease_columns_are_coherent_after_every_transition()
     {
-        await using var database = TestSqliteDatabase.CreateMigrated();
+        using var database = TestSqliteDatabase.CreateModelSchema();
         var factory = new TestDbContextFactory(database.Options);
         var store = new SlackAdapterLeaseStore(factory);
 

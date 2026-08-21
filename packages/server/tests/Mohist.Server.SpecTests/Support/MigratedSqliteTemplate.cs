@@ -21,7 +21,7 @@ namespace Mohist.Server.SpecTests.Support;
 /// <c>__EFMigrationsHistory</c> for the migration-based templates, which
 /// makes a subsequent <c>Migrate()</c> on the clone purely incremental.
 /// Specs whose subject is the chain itself running from an empty database
-/// (<c>DatabaseInitializationSpecs</c>) must keep calling <c>Migrate()</c>
+/// must keep calling <c>Migrate()</c>
 /// and must not clone a template.
 /// </summary>
 public static class MigratedSqliteTemplate

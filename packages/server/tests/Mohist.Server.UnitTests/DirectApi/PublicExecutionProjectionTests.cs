@@ -10,11 +10,10 @@ using Mohist.Server.Infrastructure.Data.PublicApi;
 using Mohist.Server.Infrastructure.PublicApi;
 using Mohist.Server.Infrastructure.Data.Sessions;
 using Mohist.Server.Sessions.Domain;
-using Mohist.Server.SpecTests.Support;
 using Mohist.Server.TestSupport;
 using Xunit;
 
-namespace Mohist.Server.SpecTests.Specs.DirectApi;
+namespace Mohist.Server.UnitTests.DirectApi;
 
 /// <summary>
 /// The public execution projection engine: prepared-launch anchoring,
@@ -24,7 +23,7 @@ namespace Mohist.Server.SpecTests.Specs.DirectApi;
 /// all driven from durable canonical facts seeded through the real
 /// stores.
 /// </summary>
-public sealed class PublicExecutionProjectionSpecs : IAsyncDisposable
+public sealed class PublicExecutionProjectionTests : IAsyncDisposable
 {
     private static readonly DateTime T0 = new(2026, 8, 9, 10, 15, 0, DateTimeKind.Utc);
     private readonly PublicProjectionTestSupport _harness = new();

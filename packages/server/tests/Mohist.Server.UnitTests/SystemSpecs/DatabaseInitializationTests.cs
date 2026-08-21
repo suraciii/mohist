@@ -7,9 +7,9 @@ using Mohist.Server.Infrastructure.Hosting;
 using Xunit;
 using Mohist.Server.TestSupport;
 
-namespace Mohist.Server.SpecTests.Specs.SystemSpecs;
+namespace Mohist.Server.UnitTests.SystemSpecs;
 
-public class DatabaseInitializationSpecs
+public class DatabaseInitializationTests
 {
     [Fact]
     public async Task Migrate_WhenEmptyDatabase_CreatesAllTables()
