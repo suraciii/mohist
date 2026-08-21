@@ -121,3 +121,13 @@ Verification:
 - `npm run test:run -w packages/runner -- src/runtime/manager-execution-boundary.test.ts`: 7/7.
 - `npm run typecheck -w packages/runner`, `npm run build -w packages/runner`, full Runner Vitest: 156 files / 1,688 tests.
 - `npm run format:check` and `npm run check:filesizes` clean.
+
+## Review Round 5 Repair
+- Finding 1 (same-user environment side channel): fixed by removing both bearer variables from all Runner and Manager child environments. Manager-mode CLI HTTP requests use a Runner-owned Unix-socket credential proxy; the exact spawned `mo` child is authenticated by PID and executable path, and the Runner injects the bearer only into the outbound request. Coverage inspects the live child `/proc/*/environ` and verifies proxy authorization without exposing the bearer to the child.
+- Finding 2 (follow-up leases survive completion): fixed by revoking the execution identity when follow-up dispatch is rejected, when Runner completion/cancellation closes the local boundary, and when Server accepts a terminal Manager follow-up event. Revocation is idempotent and invalidates both management and reply lease hashes.
+- Finding 3 (follow-up boundaries miss epoch invalidation): fixed with a shared process-local Manager execution registry. Initial jobs and control-channel follow-ups are registered together; poll and heartbeat epoch changes abort Manager work and dispose every registered broker/runtime boundary.
+- Finding 4 (cancellation uses shared OpenCode runtime): fixed by retaining each follow-up's runtime handle in the registry. Cancellation resolves the isolated Manager OpenCode handle, records the honest terminal outcome, disposes the boundary, and requests Server-side lease revocation. A focused test covers the shared-runtime non-use.
+
+Verification:
+- `npm run verify` passes: Runner integration 19/19, Runner full lane, Web, `mohist-slack`, Workflow Definition 178, CLI 1,950, Server Unit 3,662, Server Architecture 53, Server Spec 3,179, docs, formatting, file-size, script, FSD, and test-boundary checks.
+- Incremental commits: `2ac2c9313`, `b9422468d`, `be04dbe6a`, and `4f6db35f2`.
