@@ -341,8 +341,9 @@ public class DispatcherGrainSpecs
 
 /// <summary>
 /// xUnit collection definition for the dispatcher silo fixture.
-/// Serialized because the silo activates the dispatcher grain on
-/// first use and the capture lists are shared state.
+/// Tests in this collection are serialized with each other because they share
+/// capture state. The fixture owns isolated logical silos and an in-memory
+/// database, so unrelated collections may still run in parallel.
 /// </summary>
-[CollectionDefinition("Dispatcher", DisableParallelization = true)]
+[CollectionDefinition("Dispatcher")]
 public class DispatcherCollection : ICollectionFixture<DispatcherFixture>;
