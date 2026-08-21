@@ -4,6 +4,7 @@ using Microsoft.EntityFrameworkCore;
 using Mohist.Server.Infrastructure;
 using Mohist.Server.Infrastructure.Events;
 using Mohist.Server.Infrastructure.Orleans;
+using Mohist.Server.Infrastructure.Slack;
 using Mohist.Server.Sessions.Domain;
 using Mohist.Server.Infrastructure.Data.Sessions;
 using Mohist.Server.Infrastructure.Data.Db;
@@ -3488,6 +3489,48 @@ public sealed partial class AgentSessionGrain : Grain, IAgentSessionGrain, IRemi
             now: Now(),
             attachments: command.Attachments,
             provenance: command.Provenance);
+        if (events.Count == 0)
+        {
+            await _stateStore.SaveAsync(SessionId, session);
+            _session = session;
+            _stateDirty = true;
+            EnsurePersistenceTimer();
+            return;
+        }
+        await CommitAsync(session, events);
+    }
+
+    public async Task EnsureManagerCredentialExpiryRecoveryAsync()
+    {
+        var session = await GetRequiredAsync();
+        if (!string.Equals(
+                session.Metadata?.Label(AgentSessionQueryMetadataKeys.ProjectId),
+                SlackDeliveryOwnerIds.ManagerProjectId,
+                StringComparison.Ordinal))
+            return;
+
+        var provenance = (session.Status.Inputs ?? [])
+            .Where(input => !string.IsNullOrWhiteSpace(input.JobId))
+            .OrderBy(input => input.Sequence)
+            .Select(input => input.Provenance)
+            .FirstOrDefault(candidate => candidate is not null);
+        if (provenance is null
+            || !string.Equals(provenance.ProviderKind, "slack", StringComparison.Ordinal)
+            || string.IsNullOrWhiteSpace(provenance.WorkspaceId)
+            || string.IsNullOrWhiteSpace(provenance.ConversationId)
+            || string.IsNullOrWhiteSpace(provenance.BoundThreadRootMessageId)
+            || string.IsNullOrWhiteSpace(provenance.MemberId)
+            || string.IsNullOrWhiteSpace(provenance.MessageId)
+            || string.IsNullOrWhiteSpace(provenance.ConnectionId))
+            return;
+
+        var events = session.RecordManagerRecoveryTurn(
+            inputId: $"manager-recovery-input:{SessionId}",
+            turnId: $"manager-recovery-turn:{SessionId}",
+            prompt: "The previous Manager execution ended before its outcome was confirmed. Inspect the current resource state before taking any action; do not repeat the interrupted operation automatically.",
+            source: "manager-recovery:manager-credential-expired",
+            now: Now(),
+            provenance);
         if (events.Count == 0)
         {
             await _stateStore.SaveAsync(SessionId, session);

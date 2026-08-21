@@ -9,6 +9,7 @@ using Mohist.Server.Infrastructure.Data.Issue;
 using Mohist.Server.Infrastructure.Data.Sessions;
 using Mohist.Server.Infrastructure.Data.Workflow;
 using Mohist.Server.Infrastructure.Events;
+using Mohist.Server.Infrastructure.Slack;
 using Mohist.Server.Issue.Grains;
 using Mohist.Server.Runner.Grains;
 using Mohist.Server.Sessions.Domain;
@@ -28,6 +29,79 @@ public class AgentSessionRuntimeEventSpecs : AgentSessionTestSupport
 {
     public AgentSessionRuntimeEventSpecs(MohistIntegrationFixture fixture) : base(fixture)
     {
+    }
+
+    [Fact]
+    public async Task ManagerCredentialExpiryRoute_CreatesOneQueuedRecoveryTurn()
+    {
+        var sessionId = $"manager-route-expiry-{Guid.NewGuid():N}";
+        var provenance = new AgentSessionInputProvenance(
+            "slack",
+            "workspace-route",
+            "conversation-route",
+            "thread-route",
+            "member-route",
+            "message-route",
+            "connection-route",
+            "thread-route");
+        var grain = _fixture.Grains.GetGrain<IAgentSessionGrain>(sessionId);
+        await grain.OpenAsync(new OpenAgentSessionCommand(
+            _runnerId,
+            "opencode",
+            WorkDir: "/work",
+            Metadata: new AgentSessionMetadata(new Dictionary<string, string>(StringComparer.Ordinal)
+            {
+                [AgentSessionQueryMetadataKeys.ProjectId] = SlackDeliveryOwnerIds.ManagerProjectId,
+                [AgentSessionQueryMetadataKeys.SourceKind] = "agent-launch",
+                [GenericAgentSessionMetadata.AgentId] = "manager-agent",
+            })));
+        await grain.EnsureInitialLaunchAsync(new EnsureInitialLaunchCommand(
+            "manager-route-input",
+            "manager-route-turn",
+            "manager request",
+            "agent-launch",
+            "manager-route-job",
+            Provenance: provenance));
+        await grain.AttachPhysicalSessionAsync(new AttachPhysicalSessionCommand("runtime-route"));
+        await grain.MarkInitialTurnTerminalAsync("manager-route-job", AgentTurnStatus.Completed, null);
+        var followup = await grain.AcceptFollowupAsync(new AcceptFollowupCommand(
+            "continue",
+            "agent-session-followup",
+            "manager-route-followup",
+            Provenance: provenance));
+
+        await _client.PostOkAsync(
+            $"/api/runner/{_runnerId}/agent-sessions/{Uri.EscapeDataString(SlackDeliveryOwnerIds.ManagerProjectId)}/{sessionId}/runtime-events",
+            new
+            {
+                runtimeSessionId = "runtime-route",
+                agentSessionId = sessionId,
+                agentTurnId = followup.TurnId,
+                runtimeEvents = new[]
+                {
+                    new
+                    {
+                        type = "session.activity",
+                        payload = new
+                        {
+                            activity = "unknown",
+                            status = "unknown",
+                            reason = "manager-credential-expired",
+                            failureCategory = "unknown",
+                            operationId = followup.OperationId,
+                            turnId = followup.TurnId,
+                        },
+                    },
+                },
+            });
+
+        var turns = await grain.ListTurnsAsync();
+        var recoveryTurn = Assert.Single(
+            turns,
+            turn => turn.Id == $"manager-recovery-turn:{sessionId}");
+        Assert.Equal(AgentTurnStatus.Queued, recoveryTurn.Status);
+        Assert.Equal(AgentTurnStatus.Unknown, Assert.Single(turns, turn => turn.Id == followup.TurnId).Status);
+        Assert.Single(turns, turn => turn.Id == $"manager-recovery-turn:{sessionId}");
     }
 
     [Fact]

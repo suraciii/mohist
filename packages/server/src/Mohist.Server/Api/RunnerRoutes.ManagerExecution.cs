@@ -34,6 +34,15 @@ public static partial class RunnerRoutes
             string.Equals(record.Label(AgentSessionQueryMetadataKeys.ProjectId), SlackDeliveryOwnerIds.ManagerProjectId, StringComparison.Ordinal));
     }
 
+    internal static bool ContainsManagerCredentialExpiry(
+        IReadOnlyList<AgentSessionRuntimeEventRequest> runtimeEvents) =>
+        runtimeEvents.Any(runtimeEvent =>
+            string.Equals(runtimeEvent.Type, RuntimeEventTypes.SessionActivity, StringComparison.Ordinal)
+            && runtimeEvent.Payload.ValueKind == JsonValueKind.Object
+            && runtimeEvent.Payload.TryGetProperty("reason", out var reason)
+            && reason.ValueKind == JsonValueKind.String
+            && string.Equals(reason.GetString(), "manager-credential-expired", StringComparison.Ordinal));
+
     private static void RevokeCompletedManagerFollowupLeases(
         string sessionId,
         IReadOnlyList<AgentSessionRuntimeEventRequest> runtimeEvents,

@@ -56,6 +56,7 @@ public interface IAgentSessionGrain : IGrainWithStringKey
         AgentTurnResult? result);
 
     Task RecordFollowupTurnAsync(RecordFollowupTurnCommand command);
+    Task EnsureManagerCredentialExpiryRecoveryAsync();
     Task AbandonFollowupTurnAsync(string inputId, string turnId);
 
     Task MarkTurnExecutingAsync(string turnId);

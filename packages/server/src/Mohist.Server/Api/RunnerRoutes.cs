@@ -724,7 +724,11 @@ public static partial class RunnerRoutes
                 e.Payload.ValueKind == System.Text.Json.JsonValueKind.Undefined ? "{}" : e.Payload.GetRawText())).ToArray();
             var events = await grain.AppendRuntimeEventsAsync(new AppendAgentSessionRuntimeEventsCommand(runtimeEvents, req.RuntimeSessionId));
             if (string.Equals(projectId, SlackDeliveryOwnerIds.ManagerProjectId, StringComparison.Ordinal))
+            {
                 RevokeCompletedManagerFollowupLeases(sessionId, req.RuntimeEvents, managerCredentials);
+                if (ContainsManagerCredentialExpiry(req.RuntimeEvents))
+                    await grain.EnsureManagerCredentialExpiryRecoveryAsync();
+            }
             await followups.DispatchNextAsync(projectId, sessionId, ct);
             return Results.Ok(events);
         });

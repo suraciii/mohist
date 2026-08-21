@@ -509,7 +509,42 @@ public static partial class AgentSessionExtensions
             string source,
             DateTime now,
             IReadOnlyList<AgentSessionInputAttachmentDescriptor>? attachments = null,
-            AgentSessionInputProvenance? provenance = null)
+            AgentSessionInputProvenance? provenance = null) =>
+            session.RecordFollowupTurnCore(
+                inputId,
+                turnId,
+                prompt,
+                source,
+                now,
+                attachments: attachments,
+                provenance: provenance);
+
+        public IReadOnlyList<AgentSessionEvent> RecordManagerRecoveryTurn(
+            string inputId,
+            string turnId,
+            string prompt,
+            string source,
+            DateTime now,
+            AgentSessionInputProvenance provenance) =>
+            session.RecordFollowupTurnCore(
+                inputId,
+                turnId,
+                prompt,
+                source,
+                now,
+                attachments: null,
+                provenance: provenance,
+                allowUnknownRecovery: true);
+
+        private IReadOnlyList<AgentSessionEvent> RecordFollowupTurnCore(
+            string inputId,
+            string turnId,
+            string prompt,
+            string source,
+            DateTime now,
+            IReadOnlyList<AgentSessionInputAttachmentDescriptor>? attachments,
+            AgentSessionInputProvenance? provenance,
+            bool allowUnknownRecovery = false)
         {
             if (string.IsNullOrWhiteSpace(inputId))
                 throw new ArgumentException("Input id is required.", nameof(inputId));
@@ -575,11 +610,13 @@ public static partial class AgentSessionExtensions
                     $"AgentSession {session.Id} already links input '{inputId}' to another turn.");
             }
 
-            if (session.Status.Activity != AgentSessionActivity.Idle
-                || turns.Any(candidate => string.IsNullOrWhiteSpace(candidate.JobId)
-                    && (candidate.Status is AgentTurnStatus.Queued
-                        or AgentTurnStatus.Executing
-                        or AgentTurnStatus.Unknown)))
+            var activityAllowsRecovery = allowUnknownRecovery
+                && session.Status.Activity == AgentSessionActivity.Unknown;
+            var hasActiveTurn = turns.Any(candidate => string.IsNullOrWhiteSpace(candidate.JobId)
+                && (candidate.Status is AgentTurnStatus.Queued or AgentTurnStatus.Executing
+                    || candidate.Status == AgentTurnStatus.Unknown && !activityAllowsRecovery));
+            if ((session.Status.Activity != AgentSessionActivity.Idle && !activityAllowsRecovery)
+                || hasActiveTurn)
             {
                 throw new InvalidOperationException(
                     $"AgentSession {session.Id} cannot start another turn while work is active.");
