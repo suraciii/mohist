@@ -244,8 +244,7 @@ socket.end(JSON.stringify({ kind, launcherPid: process.pid }))
         socket.end('{}')
         return
       }
-      if ((request.kind !== 'management' && request.kind !== 'reply')
-        || !this.isLauncherProcess(request.launcherPid)) {
+      if ((request.kind !== 'management' && request.kind !== 'reply') || !this.isLauncherProcess(request.launcherPid)) {
         socket.end('{}')
         return
       }
