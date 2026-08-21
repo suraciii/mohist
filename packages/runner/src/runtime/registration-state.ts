@@ -22,7 +22,7 @@ export function buildRegistrationState(
         .update(JSON.stringify({ models: piModels, reasoningEfforts: piReasoningEfforts }))
         .digest('hex')
     : null
-  const managerCapabilitiesAvailable = process.platform !== 'win32' && piCatalog !== null
+  const managerCapabilitiesAvailable = process.platform === 'linux' && piCatalog !== null
   return {
     capabilities: [
       'execution-source-v1',
