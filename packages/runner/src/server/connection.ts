@@ -45,6 +45,28 @@ export type {
   WorkflowAgentSessionCleanupTurnAcceptance,
 } from './connection-session-models.js'
 
+export interface RuntimeEventDeliveryErrorMetadata {
+  readonly status: number
+  readonly code: string | null
+}
+
+/**
+ * HTTP failure returned by a runtime-event endpoint. The Server's structured
+ * ApiResponse.Code is kept separate from the human-readable message so
+ * delivery policy does not need to inspect exception text.
+ */
+export class RuntimeEventDeliveryError extends Error implements RuntimeEventDeliveryErrorMetadata {
+  readonly status: number
+  readonly code: string | null
+
+  constructor(operation: string, status: number, code: string | null, responseBody: string) {
+    super(`${operation} failed: ${status}${responseBody ? ` ${responseBody}` : ''}`)
+    this.name = 'RuntimeEventDeliveryError'
+    this.status = status
+    this.code = code
+  }
+}
+
 export class ServerConnection {
   private readonly buildGitHash: string | null
   private readonly buildInfo: BuildInfo | null
@@ -510,7 +532,7 @@ export class ServerConnection {
         signal,
       },
     )
-    if (!response.ok) throw new Error(`workflow cleanup turn failed: ${response.status} ${await response.text()}`)
+    if (!response.ok) throw await this.runtimeEventDeliveryError('workflow cleanup turn', response)
     let payload: unknown
     try {
       payload = await response.json()
@@ -554,7 +576,7 @@ export class ServerConnection {
       ),
       { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body), signal },
     )
-    if (!response.ok) throw new Error(`session runtime events failed: ${response.status} ${await response.text()}`)
+    if (!response.ok) throw await this.runtimeEventDeliveryError('session runtime events', response)
     let payload: unknown
     try {
       payload = await response.json()
@@ -629,8 +651,7 @@ export class ServerConnection {
         signal,
       },
     )
-    if (!response.ok)
-      throw new Error(`agent session reconcile runtime events failed: ${response.status} ${await response.text()}`)
+    if (!response.ok) throw await this.runtimeEventDeliveryError('agent session reconcile runtime events', response)
     return response.json() as Promise<AgentSessionRuntimeEventReceipt[]>
   }
 
@@ -780,8 +801,9 @@ export class ServerConnection {
       },
     )
     if (!response.ok)
-      throw new Error(
-        `agent-sessions/${encodeURIComponent(projectId)}/${encodeURIComponent(sessionId)}/runtime-events failed: ${response.status} ${await response.text()}`,
+      throw await this.runtimeEventDeliveryError(
+        `agent-sessions/${encodeURIComponent(projectId)}/${encodeURIComponent(sessionId)}/runtime-events`,
+        response,
       )
     return response.json() as Promise<AgentSessionRuntimeEventReceipt[]>
   }
@@ -859,6 +881,18 @@ export class ServerConnection {
     })
     if (!response.ok) throw new Error(`${path} failed: ${response.status} ${await response.text()}`)
     return response
+  }
+
+  private async runtimeEventDeliveryError(operation: string, response: Response): Promise<RuntimeEventDeliveryError> {
+    const body = await response.text()
+    let code: string | null = null
+    try {
+      const payload = JSON.parse(body) as unknown
+      if (isObjectRecord(payload) && typeof payload.code === 'string') code = payload.code
+    } catch {
+      // The status remains useful when the Server did not return JSON.
+    }
+    return new RuntimeEventDeliveryError(operation, response.status, code, body)
   }
 
   private url(path: string) {

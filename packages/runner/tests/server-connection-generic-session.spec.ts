@@ -1,5 +1,5 @@
 import { describe, expect, it as vitestIt } from "vitest"
-import { ServerConnection } from "../src/server/connection.js"
+import { RuntimeEventDeliveryError, ServerConnection } from "../src/server/connection.js"
 import { transportFetch, withFakeTransport } from "./support/fake-transport.js"
 
 const fetchMock = transportFetch
@@ -145,6 +145,26 @@ describe("ServerConnection.agentSessionRuntimeEvents (generic)", () => {
     )
 
     expect(receipts).toEqual([{ type: "session.input" }, { type: "message.delta" }])
+  })
+})
+
+describe("ServerConnection runtime-event failure metadata", () => {
+  it("preserves HTTP status and the Server ApiResponse code without parsing the message", async () => {
+    fetchMock.mockResolvedValueOnce(mockResponse({
+      status: 409,
+      body: JSON.stringify({ success: false, error: "binding changed", code: "agent_session_changed" }),
+    }))
+    const connection = new ServerConnection(options())
+
+    await expect(connection.reconcileAgentSessionRuntimeEvents(
+      "session-abc",
+      { runtimeSessionId: "runtime-1", runtimeEvents: [] },
+      new AbortController().signal,
+    )).rejects.toMatchObject({
+      name: "RuntimeEventDeliveryError",
+      status: 409,
+      code: "agent_session_changed",
+    } satisfies Partial<RuntimeEventDeliveryError>)
   })
 })
 
