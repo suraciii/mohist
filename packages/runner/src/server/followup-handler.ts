@@ -496,9 +496,7 @@ function buildFollowupObserver(
         work: null,
         event: {
           type: event.type,
-          payload: managerExecution
-            ? managerExecution.redact(eventPayload) as Record<string, unknown>
-            : eventPayload,
+          payload: managerExecution ? (managerExecution.redact(eventPayload) as Record<string, unknown>) : eventPayload,
         },
         acknowledgementPolicy: 'successful-response',
       }

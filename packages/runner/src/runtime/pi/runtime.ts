@@ -476,11 +476,7 @@ export class PiRuntime {
       return this.failure('missing-session', 'Pi follow-up requires a bound Session', [resetDiagnostic()])
     const path = normalizedPath(runtimeSessionId)
     if (!path) return this.failure('incompatible-runtime', 'Pi runtimeSessionId must be an absolute session-file path')
-    const session = await this.resolveFollowupSession(
-      path,
-      request.target.workDir,
-      request.managerExecution ?? null,
-    )
+    const session = await this.resolveFollowupSession(path, request.target.workDir, request.managerExecution ?? null)
     if (!session.ok) return session.failure
     const configured = await this.applyFollowupOptions(session.value, request.options)
     if (configured) return configured
