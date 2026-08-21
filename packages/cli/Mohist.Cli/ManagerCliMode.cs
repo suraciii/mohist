@@ -43,7 +43,7 @@ internal static class ManagerCliMode
         TextWriter error)
     {
         var capability = ManagerCapabilityCatalog.ResolveCli(args);
-        if (ManagerCapabilityCatalog.IsManagement(capability))
+        if (ManagerCapabilityCatalog.IsManagerCapability(capability))
             return 0;
 
         await error.WriteLineAsync(

@@ -16,7 +16,6 @@ public sealed class CliManagerCapabilitySpecs
     [InlineData("slack", "permanent-delete", "connection_1", "--yes")]
     [InlineData("slack", "deliveries", "connection_1")]
     [InlineData("slack", "resend-delivery", "connection_1", "delivery_1", "--yes")]
-    [InlineData("slack", "message", "send", "--conversation", "D_1", "--text", "secret")]
     [InlineData("agent", "archive", "agent_1")]
     [InlineData("otel", "query", "SELECT 1")]
     public async Task Manager_mode_rejects_unlisted_commands_before_http(params string[] command)
@@ -30,6 +29,30 @@ public sealed class CliManagerCapabilitySpecs
         Assert.NotEqual(0, exit);
         Assert.Empty(handler.Requests);
         Assert.Contains("unavailable in Manager mode", error.ToString(), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task Manager_mode_sends_reply_through_the_dedicated_route()
+    {
+        var (handler, http, output, error, fs, executor) = CliTestFactory.Create((request, _) =>
+            Task.FromResult(RecordingHttpHandler.Json(new
+            {
+                success = true,
+                data = new { accepted = true, ownerKind = "manager" },
+            })));
+
+        var exit = await MohistCliCommands.RunAsync(
+            http,
+            ["--manager", "slack", "message", "send", "--conversation", "D_1", "--reply-to", "1710000000.000001", "--text", "answer"],
+            output, error, fs, executor, OperatorEnv());
+
+        Assert.Equal(0, exit);
+        var request = Assert.Single(handler.Requests);
+        Assert.Equal(HttpMethod.Post, request.Method);
+        Assert.Equal("/api/slack-manager/reply", request.RequestUri?.PathAndQuery);
+        Assert.Equal("1", Assert.Single(request.Headers[ManagerCapabilityCatalog.ManagerModeHeader]));
+        Assert.Equal("D_1", JsonNode.Parse(request.Body!)!["conversationId"]!.GetValue<string>());
+        Assert.Equal("1710000000.000001", JsonNode.Parse(request.Body!)!["threadTs"]!.GetValue<string>());
     }
 
     [Fact]

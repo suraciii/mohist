@@ -1171,8 +1171,13 @@ internal static class SlackCommands
         command.Options.Add(project);
         command.SetAction(async ctx =>
         {
-            var (projectId, exit) = await ProjectAsync(api, ctx.GetValue(project));
-            if (exit != 0 || projectId is null) return exit;
+            string? projectId = null;
+            if (!ManagerCliMode.Active)
+            {
+                var resolved = await ProjectAsync(api, ctx.GetValue(project));
+                if (resolved.Exit != 0 || resolved.ProjectId is null) return resolved.Exit;
+                projectId = resolved.ProjectId;
+            }
 
             var body = ctx.GetValue(text);
             if (string.Equals(body, "-", StringComparison.Ordinal))
@@ -1224,8 +1229,11 @@ internal static class SlackCommands
                 fileContentBase64 = Convert.ToBase64String(buffer.ToArray());
             }
 
+            var replyPath = ManagerCliMode.Active
+                ? "/api/slack-manager/reply"
+                : Path(projectId!, "/reply");
             return await api.PrintPostWithOutputAsync(
-                Path(projectId, "/reply"),
+                replyPath,
                 new
                 {
                     conversationId = ctx.GetValue(conversation),

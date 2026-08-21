@@ -51,3 +51,17 @@
 - Full Server unit suite passes: 3,120 tests; full Server spec suite passes: 3,706 tests; CLI suite passes: 1,950 tests.
 - A compatibility seam was preserved: `RunnerHost` continues to call `ServerConnection.poll`; the connection stores its grant-bearing view separately so existing test fakes and ordinary dispatch journals never receive grant fields.
 - Lease-backed HTTP requests reauthenticate the current Slack actor and active/ready Enrollment through `ManagerActorAccessDecider` before reaching an endpoint; invalid current state fails closed with a non-secret response.
+
+## T-004 Decisions
+- Manager CLI reply sends are a separate `manager.reply` capability. Manager mode routes `mo slack message send` to `/api/slack-manager/reply`; the existing project-scoped Connection reply route remains unchanged for ordinary callers.
+- Manager reply validation is lease-bound and durable: the route compares the requested conversation/thread and optional full-anchor fields with the immutable lease origin, then requires the matching active Enrollment, accepted Manager inbox origin, and Enrollment/workspace/actor/Session DM mapping before any outbox write.
+- `SlackManagerReplyAnchor` carries the validated origin into `SlackOutboxStore.EnqueueManagerAgentReplyAsync`. The outbox uses the synthetic Manager project, `OwnerKind.Manager`, Enrollment id, and the stable origin-derived progress dispatch ref. A pending progress row is promoted in place; repeated sends return the same terminal row without appending text. A missing progress row receives a Manager-owned terminal row so fast replies still share terminal convergence.
+- Manager ingress persists receipt before Session dispatch and queues working state before invoking the launcher/follow-up path. The working projection queues receipt removal first, so fast completion and adapter redelivery cannot leave a receipt as the final visible state or show working before the receipt transition.
+- Terminal reaction mutations are idempotent by stable phase dispatch refs. Terminal payloads carry non-user-visible `terminalStatus` metadata so `unknown` remains distinguishable for operator/recovery handling; terminal delivery still never reads assistant text or authors fallback text.
+
+## T-004 Verification
+- Full Server spec suite passes: `dotnet test packages/server/tests/Mohist.Server.SpecTests/Mohist.Server.SpecTests.csproj --no-restore` (3,709 tests), including Manager route anchor validation, reply promotion/deduplication, fast completion, terminal outcomes, restart/recovery, and ordinary Slack regressions.
+- Full Server unit suite passes: `dotnet test packages/server/tests/Mohist.Server.UnitTests/Mohist.Server.UnitTests.csproj --no-restore --no-build` (3,120 tests).
+- Full CLI suite passes: `dotnet test packages/cli/tests/Mohist.Cli.Tests/Mohist.Cli.Tests.csproj --no-restore -p:UseSharedCompilation=false` (1,950 tests), including dedicated Manager reply route selection.
+- `mohist-slack` adapter suite passes: `npm run test:run -w packages/mohist-slack` (7 files, 76 tests).
+- Server build passes: `dotnet build packages/server/src/Mohist.Server/Mohist.Server.csproj --no-restore -p:SkipWebBuild=true`.
