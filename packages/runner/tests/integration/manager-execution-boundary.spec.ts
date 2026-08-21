@@ -411,6 +411,26 @@ describe.sequential('ManagerExecutionBoundary', () => {
       await boundary.dispose()
     }
   })
+
+  it('closes the boundary when the injected clock reaches expiry', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'mohist-manager-boundary-'))
+    let now = Date.now()
+    const stub = await writeStubMo(root, false)
+    const boundary = await ManagerExecutionBoundary.create(
+      { ...grant, expiresAt: new Date(now + 1_000).toISOString() },
+      root,
+      { moExecutable: stub.executable, now: () => now },
+    )
+    now += 1_001
+    try {
+      expect(boundary.hasExpired()).toBe(true)
+      await new Promise<void>((resolve) => setImmediate(resolve))
+      expect(() => boundary.environment()).toThrow('Manager execution boundary is closed')
+      expect(stub.invocations()).toHaveLength(0)
+    } finally {
+      await boundary.dispose()
+    }
+  })
 })
 
 async function writeChunkedCredentialStubMo(root: string): Promise<{ executable: string; frozenWorkDir: string }> {

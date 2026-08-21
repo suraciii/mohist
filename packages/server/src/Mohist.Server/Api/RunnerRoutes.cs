@@ -90,6 +90,8 @@ public static partial class RunnerRoutes
             IManagerDeploymentEpoch managerEpoch,
             CancellationToken ct) =>
         {
+            if (!managerEpoch.Available)
+                return Results.StatusCode(StatusCodes.Status503ServiceUnavailable);
             request.HttpContext.Response.Headers["X-Mohist-Manager-Deployment-Epoch"] = managerEpoch.Current;
             RunnerPollRequest req = new([], []);
             if (request.ContentLength is > 0)

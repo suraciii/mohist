@@ -41,6 +41,8 @@ export interface ManagerExecutionBoundaryOptions {
   readonly requestLimits?: ManagerRequestLimits
   /** Bounded grace before SIGKILL during disposal. */
   readonly terminationTimeoutMs?: number
+  /** Injectable clock for expiry tests and deterministic lifecycle checks. */
+  readonly now?: () => number
 }
 
 const DEFAULT_TERMINATION_TIMEOUT_MS = 5_000
@@ -73,6 +75,7 @@ export class ManagerExecutionBoundary {
   private readonly frozenCwd: string
   private readonly requestLimits: ManagerRequestLimits
   private readonly terminationTimeoutMs: number
+  private readonly now: () => number
   private readonly children = new Set<ChildProcess>()
   private readonly sockets = new Set<Socket>()
   private readonly usedRequests: Record<'management' | 'reply', number> = { management: 0, reply: 0 }
@@ -84,6 +87,7 @@ export class ManagerExecutionBoundary {
   private activeCredentialChildPid: number | null = null
   private activeCredentialKind: 'management' | 'reply' | null = null
   private authorizationInvalidated = false
+  private expiryTimer: NodeJS.Timeout | null = null
 
   private constructor(
     grant: ManagerExecutionGrant,
@@ -95,8 +99,9 @@ export class ManagerExecutionBoundary {
     frozenCwd: string,
     requestLimits: ManagerRequestLimits,
     terminationTimeoutMs: number,
+    now: () => number,
   ) {
-    this.grant = grant
+    this.grant = { ...grant }
     this.directory = directory
     this.socketPath = socketPath
     this.credentialBrokerPath = credentialBrokerPath
@@ -106,6 +111,7 @@ export class ManagerExecutionBoundary {
     this.frozenCwd = frozenCwd
     this.requestLimits = requestLimits
     this.terminationTimeoutMs = terminationTimeoutMs
+    this.now = now
     this.masker.registerSecret(grant.managementCredential)
     this.masker.registerSecret(grant.replyCredential)
   }
@@ -118,7 +124,8 @@ export class ManagerExecutionBoundary {
     if (!grant.managementCredential || !grant.replyCredential || !grant.executionId) {
       throw new Error('Manager execution grant is incomplete')
     }
-    if (!Number.isFinite(Date.parse(grant.expiresAt)) || Date.now() >= Date.parse(grant.expiresAt)) {
+    const now = options.now ?? Date.now
+    if (!Number.isFinite(Date.parse(grant.expiresAt)) || now() >= Date.parse(grant.expiresAt)) {
       throw new Error('Manager execution grant is expired or malformed')
     }
     const suffix = createHash('sha256')
@@ -169,7 +176,9 @@ export class ManagerExecutionBoundary {
       options.workDir ?? process.cwd(),
       options.requestLimits ?? DEFAULT_MANAGER_REQUEST_LIMITS,
       options.terminationTimeoutMs ?? DEFAULT_TERMINATION_TIMEOUT_MS,
+      options.now ?? Date.now,
     )
+    boundary.scheduleExpiry()
     try {
       await boundary.writeLauncher()
       await boundary.startBroker()
@@ -209,7 +218,7 @@ export class ManagerExecutionBoundary {
           ['-lc', command],
           cwd,
           options.signal ?? new AbortController().signal,
-          { ...this.environment(), ...(options.env ?? {}) },
+          this.shellEnvironment(options.env),
           {
             timeoutMs: options.timeout,
             isolatedEnvironment: true,
@@ -251,7 +260,11 @@ export class ManagerExecutionBoundary {
   }
 
   private expired(): boolean {
-    return Date.now() >= Date.parse(this.grant.expiresAt)
+    if (this.disposed || this.authorizationInvalidated) return true
+    if (this.now() < Date.parse(this.grant.expiresAt)) return false
+    this.authorizationInvalidated = true
+    void this.dispose()
+    return true
   }
 
   mask(value: string): string {
@@ -270,10 +283,20 @@ export class ManagerExecutionBoundary {
   async dispose(): Promise<void> {
     if (this.disposed) return
     this.disposed = true
+    if (this.expiryTimer) clearTimeout(this.expiryTimer)
+    this.expiryTimer = null
+    // Revoke the bearer immediately. The masker remains alive until child
+    // output has drained so an in-flight diagnostic can still be redacted.
+    this.clearGrant()
     const runtime = this.isolatedOpenCodeRuntime
     this.isolatedOpenCodeRuntime = null
     await runtime?.shutdown().catch(() => undefined)
     await this.terminateChildren()
+    // Do not retain bearer values in an otherwise-disposed boundary. The
+    // masker itself is also cleared because it is part of the execution
+    // object reachable from task-log and runtime observers until their final
+    // callbacks settle.
+    this.masker.clearSecrets()
     await new Promise<void>((resolve) => {
       const broker = this.broker
       const credentialBroker = this.credentialBroker
@@ -298,6 +321,34 @@ export class ManagerExecutionBoundary {
     await rm(this.socketPath, { force: true }).catch(() => undefined)
     await rm(this.credentialBrokerPath, { force: true }).catch(() => undefined)
     await rm(this.directory, { recursive: true, force: true }).catch(() => undefined)
+  }
+
+  private scheduleExpiry(): void {
+    const delay = Math.max(0, Date.parse(this.grant.expiresAt) - this.now())
+    this.expiryTimer = setTimeout(() => {
+      void this.dispose()
+    }, delay)
+    this.expiryTimer.unref?.()
+  }
+
+  private shellEnvironment(overrides?: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+    const environment = { ...this.environment(), ...(overrides ?? {}) }
+    for (const name of [
+      'MOHIST_TOKEN',
+      'MOHIST_ADMIN_TOKEN',
+      'MOHIST_ADMIN_TOKEN_PATH',
+      'MOHIST_MANAGER_MANAGEMENT_TOKEN',
+      'MOHIST_MANAGER_REPLY_TOKEN',
+    ]) {
+      delete environment[name]
+    }
+    return environment
+  }
+
+  private clearGrant(): void {
+    const grant = this.grant as { managementCredential: string; replyCredential: string }
+    grant.managementCredential = ''
+    grant.replyCredential = ''
   }
 
   private async terminateChildren(): Promise<void> {
@@ -466,7 +517,7 @@ socket.end(JSON.stringify({ kind, args }))
   private async handleCredentialRequest(socket: Socket, body: string): Promise<void> {
     const child = [...this.children].find((candidate) => candidate.pid === this.activeCredentialChildPid)
     if (
-      this.disposed ||
+      this.expired() ||
       this.activeCredentialChildPid === null ||
       !child ||
       !(await isManagerProcessConnection(socket, this.realMoPath, this.activeCredentialChildPid))
@@ -538,6 +589,10 @@ socket.end(JSON.stringify({ kind, args }))
   }
 
   private async executeCli(socket: Socket, kind: 'management' | 'reply', args: string[]): Promise<void> {
+    if (this.expired()) {
+      socket.end('{}')
+      return
+    }
     const childEnvironment = { ...this.baseEnvironment }
     delete childEnvironment.MOHIST_MANAGER_BROKER
     delete childEnvironment.MOHIST_MANAGER_EXECUTION_ID

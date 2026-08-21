@@ -50,7 +50,11 @@ public static partial class RunnerRoutes
         }
 
         if (managerEpoch is not null)
+        {
+            if (!managerEpoch.Available)
+                return Results.StatusCode(StatusCodes.Status503ServiceUnavailable);
             request.HttpContext.Response.Headers["X-Mohist-Manager-Deployment-Epoch"] = managerEpoch.Current;
+        }
         return Results.Ok();
     }
 }

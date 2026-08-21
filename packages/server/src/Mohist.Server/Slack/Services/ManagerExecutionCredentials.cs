@@ -560,13 +560,16 @@ public sealed class ManagerExecutionCapabilityIssuer
 
     private readonly IManagerExecutionLeaseStore _store;
     private readonly IManagerDeploymentEpoch _epoch;
+    private readonly TimeProvider _timeProvider;
 
     public ManagerExecutionCapabilityIssuer(
         IManagerExecutionLeaseStore store,
-        IManagerDeploymentEpoch epoch)
+        IManagerDeploymentEpoch epoch,
+        TimeProvider? timeProvider = null)
     {
         _store = store;
         _epoch = epoch;
+        _timeProvider = timeProvider ?? TimeProvider.System;
     }
 
     public ManagerExecutionGrant Issue(ManagerExecutionIssueRequest request)
@@ -634,7 +637,7 @@ public sealed class ManagerExecutionCapabilityIssuer
         return Issue(new ManagerExecutionIssueRequest(
             binding.ExecutionId,
             binding.Origin,
-            now ?? DateTimeOffset.UtcNow,
+            now ?? _timeProvider.GetUtcNow(),
             lifetime ?? DefaultLifetime));
     }
 
