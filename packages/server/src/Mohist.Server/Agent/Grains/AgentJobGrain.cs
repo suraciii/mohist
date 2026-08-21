@@ -1212,31 +1212,6 @@ public sealed partial class AgentJobGrain : Grain, IAgentJobGrain
             TimeSpan.FromMilliseconds(-1));
     }
 
-    private async Task OnJobTimeoutAsync()
-    {
-        if (IsTerminal || State.RunnerId is null)
-            return;
-
-        var runnerLost = await IsRunnerAwayAsync();
-        var reason = runnerLost
-            ? AgentJobFailureReasons.RunnerLost
-            : $"{AgentJobFailureReasons.ReportTimeout}: report timeout after {_options.JobTimeout}";
-        DateTimeOffset? recoveryDeadlineAt = runnerLost
-            ? _timeProvider.GetUtcNow() + _runnerLossRecoveryTimeout
-            : null;
-
-        _log.LogWarning(
-            "AgentJob {Id} report timeout after {Timeout}; transitioning to unknown with reason {Reason}",
-            Key, _options.JobTimeout, reason);
-        await EnterUnknownStateAsync(reason, recoveryDeadlineAt);
-        if (IsManagerInput())
-        {
-            if (State.PendingInitialTurnTerminalDelivery is { } pending)
-                await DeliverInitialTurnTerminalAsync(pending);
-            await EnsureManagerRecoveryAsync(reason);
-        }
-    }
-
     private async Task EvaluatePendingAsync()
     {
         if (string.IsNullOrWhiteSpace(State.RunnerId)
