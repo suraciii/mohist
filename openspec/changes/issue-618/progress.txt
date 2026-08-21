@@ -9,4 +9,4 @@ Disposition:
 Constraints:
 - Do not edit self-review.md.
 - `git diff --check` and `jq empty openspec/changes/issue-618/tasks.json` pass; `self-review.md` remains untouched.
-- Commit the completed plan update.
+- Completed plan update committed as `1c75a6271`.
