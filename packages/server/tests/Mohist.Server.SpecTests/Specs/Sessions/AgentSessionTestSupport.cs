@@ -152,59 +152,6 @@ var issue = await _client.PostDataAsync<IssueDto>($"/api/projects/{project.Id}/i
             .ToArrayAsync();
     }
 
-    protected static async Task SeedOutOfOrderTranscriptPartsAsync(IDbContextFactory<MohistDbContext> dbFactory, string sessionId)
-    {
-        var baseTime = new DateTime(2026, 6, 15, 10, 0, 0, DateTimeKind.Utc);
-        await using var db = await dbFactory.CreateDbContextAsync();
-        var turn = new AgentSessionTranscriptTurnRow
-        {
-            SessionId = sessionId,
-            Sequence = 1,
-            StartedAt = baseTime,
-            UpdatedAt = baseTime.AddMinutes(5),
-        };
-        db.AgentSessionTranscriptTurns.Add(turn);
-        await db.SaveChangesAsync();
-
-        db.AgentSessionTranscriptParts.AddRange(
-            new AgentSessionTranscriptPartRow
-            {
-                TurnId = turn.Id,
-                Sequence = 20,
-                Type = TranscriptPartTypes.Model,
-                CorrelationKey = "metadata-model-latest-by-sequence",
-                PayloadJson = JsonSerializer.Serialize(new { resolvedModel = "sequence-last-model" }),
-                LastSeenAt = baseTime.AddMinutes(20),
-            },
-            new AgentSessionTranscriptPartRow
-            {
-                TurnId = turn.Id,
-                Sequence = 10,
-                Type = TranscriptPartTypes.Model,
-                CorrelationKey = "metadata-model-inserted-last",
-                PayloadJson = JsonSerializer.Serialize(new { resolvedModel = "inserted-last-model" }),
-                LastSeenAt = baseTime.AddMinutes(10),
-            },
-            new AgentSessionTranscriptPartRow
-            {
-                TurnId = turn.Id,
-                Sequence = 30,
-                Type = TranscriptPartTypes.SessionActivity,
-                CorrelationKey = "metadata-closed-latest-by-sequence",
-                PayloadJson = JsonSerializer.Serialize(new { status = "failed", failureCategory = "sequence-last-failure" }),
-                LastSeenAt = baseTime.AddMinutes(30),
-            },
-            new AgentSessionTranscriptPartRow
-            {
-                TurnId = turn.Id,
-                Sequence = 15,
-                Type = TranscriptPartTypes.SessionActivity,
-                CorrelationKey = "metadata-closed-inserted-last",
-                PayloadJson = JsonSerializer.Serialize(new { status = "failed", failureCategory = "inserted-last-failure" }),
-                LastSeenAt = baseTime.AddMinutes(15),
-            });
-        await db.SaveChangesAsync();
-    }
 
     protected static AgentSessionMetadata WorkflowSessionMetadata(
         string projectId,
