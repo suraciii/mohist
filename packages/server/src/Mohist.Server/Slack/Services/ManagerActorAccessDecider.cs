@@ -71,9 +71,13 @@ public sealed class ManagerActorAccessDecider : IScopedService
         if (string.IsNullOrWhiteSpace(target.ProjectId))
             return ManagerAccessDecision.Deny("manager_resource_not_found");
 
+        var projectAuthorized = await ProjectBelongsToWorkspaceAsync(actor, target.ProjectId, ct);
+        if (!projectAuthorized)
+            return ManagerAccessDecision.Deny("manager_resource_not_found");
+
         var exists = target.Kind switch
         {
-            ManagerResourceKinds.Project => await ProjectExistsAsync(target.ProjectId),
+            ManagerResourceKinds.Project => true,
             ManagerResourceKinds.Agent => await AgentExistsAsync(target.ProjectId, target.ResourceId, ct),
             ManagerResourceKinds.Connection => await ConnectionExistsAsync(actor, target, ct),
             _ => false,
@@ -83,8 +87,20 @@ public sealed class ManagerActorAccessDecider : IScopedService
             : ManagerAccessDecision.Deny("manager_resource_not_found");
     }
 
-    private async Task<bool> ProjectExistsAsync(string projectId) =>
-        await _projects.GetByIdAsync(projectId) is not null;
+    private async Task<bool> ProjectBelongsToWorkspaceAsync(
+        ManagerActorContext actor,
+        string projectId,
+        CancellationToken ct)
+    {
+        if (await _projects.GetByIdAsync(projectId) is null)
+            return false;
+
+        var connections = await _connections.ListAsync(projectId, ct: ct);
+        return connections.Any(connection =>
+            connection.ProviderKind == ConnectionProviderKind.Slack
+            && string.Equals(connection.WorkspaceTeamId, actor.WorkspaceTeamId, StringComparison.Ordinal)
+            && connection.DeletedAt is null);
+    }
 
     private async Task<bool> AgentExistsAsync(string projectId, string? agentId, CancellationToken ct) =>
         !string.IsNullOrWhiteSpace(agentId)

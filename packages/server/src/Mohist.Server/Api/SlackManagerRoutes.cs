@@ -27,11 +27,44 @@ public static class SlackManagerRoutes
             HttpContext context,
             SlackManagerCreateBody body,
             SlackManagerApplicationService service,
+            ManagerActorAccessDecider access,
             CancellationToken ct) =>
         {
             if (body is null || string.IsNullOrWhiteSpace(body.AgentId)
                 || string.IsNullOrWhiteSpace(body.WorkspaceTeamId))
                 return ApiResults.BadRequest("agentId and workspaceTeamId are required.");
+
+            if (context.Items[ManagerExecutionCredentialContext.HttpContextItemKey]
+                is ManagerExecutionCredentialContext credential)
+            {
+                if (!string.Equals(body.WorkspaceTeamId.Trim(), credential.Lease.Origin.WorkspaceId, StringComparison.Ordinal))
+                    return ApiResults.Fail(
+                        "The requested workspace is outside this Manager execution.",
+                        StatusCodes.Status403Forbidden,
+                        "manager_workspace_not_authorized");
+
+                var actor = await access.AuthenticateAsync(
+                    credential.Lease.Origin.WorkspaceId,
+                    credential.Lease.Origin.ActorId,
+                    ct);
+                if (!actor.Allowed || actor.Actor is null)
+                    return ApiResults.Fail(
+                        "Manager authorization is no longer active; start a fresh turn.",
+                        StatusCodes.Status403Forbidden,
+                        "manager_actor_not_authorized");
+                var target = await access.AuthorizeAsync(
+                    actor.Actor,
+                    new ManagerResourceTarget(
+                        ManagerResourceKinds.Agent,
+                        context.GetResolvedProject().Id,
+                        body.AgentId.Trim()),
+                    ct);
+                if (!target.Allowed)
+                    return ApiResults.Fail(
+                        "The requested Agent is outside this Manager execution.",
+                        StatusCodes.Status403Forbidden,
+                        target.Reason ?? "manager_resource_not_found");
+            }
 
             var identityError = RejectClientIdentity(context, body.ExtensionData);
             if (identityError is not null) return identityError;

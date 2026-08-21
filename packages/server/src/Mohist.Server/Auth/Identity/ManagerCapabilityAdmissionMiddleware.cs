@@ -2,6 +2,8 @@ using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
 using Mohist.Server.Api;
 using Mohist.Server.Infrastructure.Hosting;
+using Mohist.Server.Project.Services;
+using Mohist.Server.Slack.Services;
 using Mohist.Workflow.Definition;
 
 namespace Mohist.Server.Auth.Identity;
@@ -15,6 +17,17 @@ namespace Mohist.Server.Auth.Identity;
 /// </summary>
 public sealed class ManagerCapabilityAdmissionMiddleware : IMiddleware, IScopedService
 {
+    private readonly ManagerActorAccessDecider _access;
+    private readonly ProjectRefResolver _projects;
+
+    public ManagerCapabilityAdmissionMiddleware(
+        ManagerActorAccessDecider access,
+        ProjectRefResolver projects)
+    {
+        _access = access;
+        _projects = projects;
+    }
+
     public async Task InvokeAsync(HttpContext context, RequestDelegate next)
     {
         if (!IsManagerRequest(context))
@@ -31,15 +44,94 @@ public sealed class ManagerCapabilityAdmissionMiddleware : IMiddleware, IScopedS
                 context.Request.Path.Value ?? string.Empty);
         if (!ManagerCapabilityCatalog.IsManagerCapability(capability))
         {
-            await ApiResults.Fail(
-                "This operation is unavailable to Manager executions.",
-                StatusCodes.Status403Forbidden,
-                "manager_capability_not_available").ExecuteAsync(context).ConfigureAwait(false);
+            await RejectAsync(context, "This operation is unavailable to Manager executions.",
+                "manager_capability_not_available").ConfigureAwait(false);
             return;
+        }
+
+        // Authentication normally rejects a Manager-marked request before
+        // this point. Test hosts and other auth adapters may deliberately
+        // leave the request unauthenticated; preserve the route's normal
+        // lookup semantics in that case.
+        if (context.Items[ManagerExecutionCredentialContext.HttpContextItemKey]
+            is not ManagerExecutionCredentialContext credential)
+        {
+            await next(context).ConfigureAwait(false);
+            return;
+        }
+
+        var authentication = await _access.AuthenticateAsync(
+            credential.Lease.Origin.WorkspaceId,
+            credential.Lease.Origin.ActorId,
+            context.RequestAborted).ConfigureAwait(false);
+        if (!authentication.Allowed || authentication.Actor is null)
+        {
+            await RejectAsync(context,
+                "Manager authorization is no longer active; inspect current status and start a fresh turn.",
+                "manager_actor_not_authorized").ConfigureAwait(false);
+            return;
+        }
+
+        if (string.Equals(capability, ManagerCapabilityCatalog.WorkspaceStatus, StringComparison.Ordinal))
+        {
+            var workspace = context.Request.Query["workspaceTeamId"].ToString();
+            if (!string.IsNullOrWhiteSpace(workspace)
+                && !string.Equals(workspace.Trim(), credential.Lease.Origin.WorkspaceId, StringComparison.Ordinal))
+            {
+                await RejectAsync(context,
+                    "The requested workspace is outside this Manager execution.",
+                    "manager_workspace_not_authorized").ConfigureAwait(false);
+                return;
+            }
+        }
+
+        if (context.Request.RouteValues.TryGetValue("projectRef", out var rawProjectRef)
+            && rawProjectRef is string projectRef
+            && !string.IsNullOrWhiteSpace(projectRef))
+        {
+            var project = await _projects.ResolveAsync(projectRef).ConfigureAwait(false);
+            if (project is null)
+            {
+                await ApiResults.NotFound("Project not found").ExecuteAsync(context).ConfigureAwait(false);
+                return;
+            }
+
+            var decision = await _access.AuthorizeAsync(
+                authentication.Actor,
+                new ManagerResourceTarget(ManagerResourceKinds.Project, project.Id),
+                context.RequestAborted).ConfigureAwait(false);
+            if (!decision.Allowed)
+            {
+                await RejectAsync(context,
+                    "The requested Project is outside this Manager execution.",
+                    decision.Reason ?? "manager_resource_not_found").ConfigureAwait(false);
+                return;
+            }
+
+            if (context.Request.RouteValues.TryGetValue("connectionId", out var rawConnectionId)
+                && rawConnectionId is string connectionId
+                && !string.IsNullOrWhiteSpace(connectionId))
+            {
+                decision = await _access.AuthorizeAsync(
+                    authentication.Actor,
+                    new ManagerResourceTarget(ManagerResourceKinds.Connection, project.Id, connectionId),
+                    context.RequestAborted).ConfigureAwait(false);
+                if (!decision.Allowed)
+                {
+                    await RejectAsync(context,
+                        "The requested Slack Connection is outside this Manager execution.",
+                        decision.Reason ?? "manager_resource_not_found").ConfigureAwait(false);
+                    return;
+                }
+            }
         }
 
         await next(context).ConfigureAwait(false);
     }
+
+    private static Task RejectAsync(HttpContext context, string message, string code) =>
+        ApiResults.Fail(message, StatusCodes.Status403Forbidden, code)
+            .ExecuteAsync(context);
 
     private static bool IsManagerRequest(HttpContext context) =>
         context.Request.Headers.TryGetValue(ManagerCapabilityCatalog.ManagerModeHeader, out var values)

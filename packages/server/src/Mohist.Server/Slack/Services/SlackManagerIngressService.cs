@@ -182,7 +182,25 @@ public sealed class SlackManagerIngressService : IScopedService
 
         var response = await _conversation.ProcessAsync(
             new SlackManagerConversationRequest(message, actor.Actor, route.SessionId), ct);
-        if (response.Accepted && !string.IsNullOrWhiteSpace(response.SessionId))
+        if (!response.Accepted)
+        {
+            // The coordinator's rejection is a real terminal outcome. The
+            // receipt was already persisted, so converge it before marking
+            // the inbox dispatched; otherwise the message would remain live
+            // forever without an Agent turn or terminal event.
+            await _status.FinalizeLivenessAsync(
+                SlackDeliveryOwnerIds.ManagerProjectId,
+                enrollment.Id,
+                message.Identity,
+                message.ThreadTs,
+                "unknown",
+                SlackStatusProjection.DispatchRef(message.Identity, "progress"),
+                ct);
+            await _inbox.MarkDispatchedAsync(SlackDeliveryOwnerIds.ManagerProjectId, accepted.Id, ct);
+            return SlackManagerIngressResult.Rejected("manager_session_not_accepted", accepted.Id);
+        }
+
+        if (!string.IsNullOrWhiteSpace(response.SessionId))
         {
             if (string.IsNullOrWhiteSpace(route.SessionId))
             {

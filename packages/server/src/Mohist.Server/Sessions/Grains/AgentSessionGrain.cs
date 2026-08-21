@@ -3883,15 +3883,23 @@ public sealed partial class AgentSessionGrain : Grain, IAgentSessionGrain, IRemi
         var metadata = session.Metadata;
         if (metadata is null) return;
 
-        var connectionId = metadata.Label(AgentSessionQueryMetadataKeys.ConnectionId);
-        var workspaceTeamId = metadata.Label(AgentSessionQueryMetadataKeys.SlackWorkspaceTeamId);
-        var conversationId = metadata.Label(AgentSessionQueryMetadataKeys.SlackConversationId);
+        var input = (session.Status.Inputs ?? [])
+            .FirstOrDefault(candidate => turn.InputIds.Contains(candidate.Id, StringComparer.Ordinal));
+        var provenance = input?.Provenance;
+        var connectionId = provenance?.ConnectionId ?? metadata.Label(AgentSessionQueryMetadataKeys.ConnectionId);
+        var workspaceTeamId = provenance?.WorkspaceId ?? metadata.Label(AgentSessionQueryMetadataKeys.SlackWorkspaceTeamId);
+        var conversationId = provenance?.ConversationId ?? metadata.Label(AgentSessionQueryMetadataKeys.SlackConversationId);
         if (string.IsNullOrWhiteSpace(connectionId)
             || string.IsNullOrWhiteSpace(workspaceTeamId)
             || string.IsNullOrWhiteSpace(conversationId))
             return;
 
-        var threadTs = metadata.Label(AgentSessionQueryMetadataKeys.SlackThreadTs);
+        // Follow-up terminal delivery must target the message that created
+        // this turn. Session metadata identifies the conversation, while the
+        // input provenance carries the immutable message identity.
+        var threadTs = provenance?.BoundThreadRootMessageId
+            ?? metadata.Label(AgentSessionQueryMetadataKeys.SlackThreadTs);
+        var messageTs = provenance?.MessageId;
         var title = metadata.Label(AgentSessionQueryMetadataKeys.Title);
         var projectId = metadata.Label(AgentSessionQueryMetadataKeys.ProjectId);
         var status = turn.Status switch
@@ -3906,10 +3914,10 @@ public sealed partial class AgentSessionGrain : Grain, IAgentSessionGrain, IRemi
             workLabel = !string.IsNullOrWhiteSpace(title) ? title : "Follow-up",
             connectionId,
             workspaceTeamId,
-            slackUserId = (string?)metadata.Label(AgentSessionQueryMetadataKeys.SlackUserId),
+            slackUserId = provenance?.MemberId ?? (string?)metadata.Label(AgentSessionQueryMetadataKeys.SlackUserId),
             conversationId,
             threadTs,
-            messageTs = (string?)null,
+            messageTs,
             status,
             message = turn.Result?.Message,
             failureReason = (string?)null,

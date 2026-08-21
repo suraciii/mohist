@@ -107,7 +107,11 @@ public sealed class SlackStatusProjection : IScopedService
         CancellationToken ct = default)
     {
         var dispatchRef = progressDispatchRef ?? DispatchRef(source, "progress");
-        var entries = await _outbox.ListAsync(projectId, connectionId, ct);
+        var entries = await _outbox.ListAsync(
+            projectId,
+            connectionId,
+            ct,
+            OwnerKindFor(projectId));
         var progress = entries.Entries.FirstOrDefault(entry =>
             entry.Kind == SlackOutboxKinds.ReplaceableProgress && entry.DispatchRef == dispatchRef);
         var projectionSource = source;
@@ -195,7 +199,11 @@ public sealed class SlackStatusProjection : IScopedService
         CancellationToken ct = default)
     {
         var dispatchRef = progressDispatchRef ?? DispatchRef(source, "progress");
-        var entries = await _outbox.ListAsync(projectId, connectionId, ct);
+        var entries = await _outbox.ListAsync(
+            projectId,
+            connectionId,
+            ct,
+            OwnerKindFor(projectId));
         var projectionSource = source;
         var hadWorking = false;
         foreach (var entry in entries.Entries)
