@@ -183,15 +183,22 @@ public sealed class DispatchService : IScopedService
         foreach (var record in agentWork)
         {
             ct.ThrowIfCancellationRequested();
+            var dispatch = DeserializeAgentDispatch(record);
+            var isManagerExecution = dispatch is not null && ManagerExecutionBinding.TryRead(dispatch, out _);
+            // An unknown Manager turn may have reached the Server before the
+            // Runner disappeared. Its natural-language prompt is not a safe
+            // recovery command, so the durable Manager recovery transition
+            // owns inspection and the original dispatch is never replayed.
+            if (isManagerExecution && IsUnknownAgentJob(record.StateJson))
+                continue;
+
             var workKey = AgentJobWorkKey(record.JobKey, record.WorkId);
             activeWorkKeys.Add(workKey);
             if (reportedWorkKeys.Contains(workKey))
                 continue;
 
-            var dispatch = DeserializeAgentDispatch(record);
             if (dispatch is not null
-                && (!ManagerExecutionBinding.TryRead(dispatch, out _)
-                    || ManagerExecutionRuntimeCapabilities.Supports(info)))
+                && (!isManagerExecution || ManagerExecutionRuntimeCapabilities.Supports(info)))
                 dispatches.Add(dispatch);
         }
 
@@ -578,6 +585,21 @@ public sealed class DispatchService : IScopedService
         catch
         {
             return null;
+        }
+    }
+
+    private static bool IsUnknownAgentJob(string stateJson)
+    {
+        try
+        {
+            using var document = JsonDocument.Parse(stateJson);
+            return document.RootElement.TryGetProperty("status", out var status)
+                && status.ValueKind == JsonValueKind.String
+                && string.Equals(status.GetString(), "unknown", StringComparison.OrdinalIgnoreCase);
+        }
+        catch (JsonException)
+        {
+            return false;
         }
     }
 

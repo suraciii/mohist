@@ -103,6 +103,16 @@ function staleCapabilityResult(work: DispatchWorkItem): WorkItemResult {
   }
 }
 
+function managerEpochChangedResult(): WorkItemResult {
+  const message = 'manager_epoch_changed: the Server deployment epoch changed before this execution was confirmed'
+  return {
+    status: 'unknown',
+    message,
+    error: { code: 'manager_epoch_changed', message },
+    exitCode: 1,
+  }
+}
+
 export function markResultPersistencePending(context: HostExecutionContext, key: string): void {
   const held = context.inFlight.get(key)
   if (held) held.awaitingResultPersistence = true
@@ -277,12 +287,18 @@ async function executeAndTransitionCore(
       )
     }
   } catch (error) {
-    if (signal.aborted) return
-    const boundary = context.managerExecutionFor(key)
-    const message = boundary ? boundary.mask(String(error)) : String(error)
-    log.error('work failed before report', { work: work.workId, exception: message })
-    result = { status: 'failed', message }
+    if (signal.aborted && !entry.managerInvalidated) return
+    if (entry.managerInvalidated) {
+      result = managerEpochChangedResult()
+    } else {
+      const boundary = context.managerExecutionFor(key)
+      const message = boundary ? boundary.mask(String(error)) : String(error)
+      log.error('work failed before report', { work: work.workId, exception: message })
+      result = { status: 'failed', message }
+    }
   }
+
+  if (entry.managerInvalidated) result = managerEpochChangedResult()
 
   if (entry.terminalPersisted) {
     context.runtimeTurnRegistry.remove(key)
