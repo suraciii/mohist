@@ -156,7 +156,9 @@ async function handleFollowup(
   if (managerContext) {
     if (!deps.runnerRoot) return unavailable()
     try {
-      managerExecution = await ManagerExecutionBoundary.create(payload.managerExecutionGrant!, deps.runnerRoot)
+      managerExecution = await ManagerExecutionBoundary.create(payload.managerExecutionGrant!, deps.runnerRoot, {
+        workDir: target.workDir,
+      })
       if (binding.runtime.toLowerCase() === 'opencode') {
         const isolated = await managerExecution.openCodeRuntime(target.workDir, new AbortController().signal)
         if (!isolated) {

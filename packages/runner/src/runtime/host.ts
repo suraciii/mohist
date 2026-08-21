@@ -709,7 +709,13 @@ export class RunnerHost {
         let managerBoundary: ManagerExecutionBoundary | null = null
         if (isManagerExecution) {
           if (!supportsManagerExecution(this.registrationState()) || !polled.managerExecutionGrant) continue
-          managerBoundary = await createManagerExecutionBoundary(polled.managerExecutionGrant, this.options.runnerRoot)
+          managerBoundary = await createManagerExecutionBoundary(
+            polled.managerExecutionGrant,
+            this.options.runnerRoot,
+            {
+              workDir: this.options.runnerRoot,
+            },
+          )
           if (!managerBoundary) continue
         }
 
