@@ -5,12 +5,12 @@ import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { createConnection } from 'node:net'
 import { describe, expect, it } from 'vitest'
-import { ManagerExecutionBoundary, type ManagerExecutionGrant } from './manager-execution-boundary.js'
+import { ManagerExecutionBoundary, type ManagerExecutionGrant } from '../../src/runtime/manager-execution-boundary.js'
 import {
   isManagerUsageRequest,
   managerRequestKind,
   resolveManagerRequestCapability,
-} from './manager-capability-surface.js'
+} from '../../src/runtime/manager-capability-surface.js'
 
 const grant: ManagerExecutionGrant = {
   managementCredential: 'management-secret-012345678901234567890123456789',
