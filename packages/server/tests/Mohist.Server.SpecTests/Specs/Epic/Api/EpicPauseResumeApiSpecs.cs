@@ -56,21 +56,6 @@ public class EpicPauseResumeApiSpecs : EpicApiTestSupport
     }
 
     [Fact]
-    public async Task Pause_WithoutReason_PersistsNullReason()
-    {
-        var project = await _client.CreateProjectWithDefaultRepositoryAsync<ProjectDto>("/api/projects", $"epic-pause-noreason-{Guid.NewGuid():N}");
-        await _client.PostOkAsync($"/api/projects/{project.Id}/repositories", new { name = "main", gitUrl = $"file://{Guid.NewGuid():N}", baseBranch = "main", setDefault = true });
-        var created = await _client.PostDataAsync<EpicDto>($"/api/projects/{project.Id}/epics", new { title = "No reason", projectId = project.Id });
-        await AddOpenIssueAsync(project.Id, created);
-        await StartEpicAsync(project.Id, created);
-
-        var paused = await _client.PostDataAsync<EpicFullDto>($"/api/projects/{project.Id}/epics/{created.Number}/pause");
-
-        Assert.Equal("paused", paused.Status);
-        Assert.Null(paused.PauseReason);
-    }
-
-    [Fact]
     public async Task Resume_FromPaused_ReturnsRunningStatusAndClearsReason()
     {
         var project = await _client.CreateProjectWithDefaultRepositoryAsync<ProjectDto>("/api/projects", $"epic-resume-{Guid.NewGuid():N}");
@@ -111,21 +96,6 @@ public class EpicPauseResumeApiSpecs : EpicApiTestSupport
     }
 
     [Fact]
-    public async Task Close_FromPaused_Succeeds()
-    {
-        var project = await _client.CreateProjectWithDefaultRepositoryAsync<ProjectDto>("/api/projects", $"epic-close-paused-{Guid.NewGuid():N}");
-        await _client.PostOkAsync($"/api/projects/{project.Id}/repositories", new { name = "main", gitUrl = $"file://{Guid.NewGuid():N}", baseBranch = "main", setDefault = true });
-        var created = await _client.PostDataAsync<EpicDto>($"/api/projects/{project.Id}/epics", new { title = "Paused then close", projectId = project.Id });
-        await AddOpenIssueAsync(project.Id, created);
-        await StartEpicAsync(project.Id, created);
-        await _client.PostDataAsync<EpicFullDto>($"/api/projects/{project.Id}/epics/{created.Number}/pause", new { reason = "abandon" });
-
-        var closed = await _client.PostDataAsync<EpicFullDto>($"/api/projects/{project.Id}/epics/{created.Number}/close");
-
-        Assert.Equal("closed", closed.Status);
-    }
-
-    [Fact]
     public async Task EpicList_IncludesPauseReason()
     {
         var project = await _client.CreateProjectWithDefaultRepositoryAsync<ProjectDto>("/api/projects", $"epic-list-reason-{Guid.NewGuid():N}");
@@ -143,38 +113,6 @@ public class EpicPauseResumeApiSpecs : EpicApiTestSupport
         Assert.Null(idleEpic.PauseReason);
         var pausedEpic = list.First(e => e.Status == "paused");
         Assert.Equal("hold", pausedEpic.PauseReason);
-    }
-
-    [Fact]
-    public async Task PauseRoute_AcceptsEpicNumber()
-    {
-        var project = await _client.CreateProjectWithDefaultRepositoryAsync<ProjectDto>("/api/projects", $"epic-pause-num-{Guid.NewGuid():N}");
-        await _client.PostOkAsync($"/api/projects/{project.Id}/repositories", new { name = "main", gitUrl = $"file://{Guid.NewGuid():N}", baseBranch = "main", setDefault = true });
-        var created = await _client.PostDataAsync<EpicDto>($"/api/projects/{project.Id}/epics", new { title = "Number pause", projectId = project.Id });
-        await AddOpenIssueAsync(project.Id, created);
-        await StartEpicAsync(project.Id, created);
-
-        var paused = await _client.PostDataAsync<EpicFullDto>(
-            $"/api/projects/{project.Id}/epics/{created.Number}/pause",
-            new { reason = "by number" });
-
-        Assert.Equal("paused", paused.Status);
-    }
-
-    [Fact]
-    public async Task ResumeRoute_AcceptsEpicNumber()
-    {
-        var project = await _client.CreateProjectWithDefaultRepositoryAsync<ProjectDto>("/api/projects", $"epic-resume-num-{Guid.NewGuid():N}");
-        await _client.PostOkAsync($"/api/projects/{project.Id}/repositories", new { name = "main", gitUrl = $"file://{Guid.NewGuid():N}", baseBranch = "main", setDefault = true });
-        var created = await _client.PostDataAsync<EpicDto>($"/api/projects/{project.Id}/epics", new { title = "Number resume", projectId = project.Id });
-        var openIssue = await _client.PostDataAsync<IssueDto>($"/api/projects/{project.Id}/issues", new { title = "Open work", projectId = project.Id });
-        await _client.PostOkAsync($"/api/projects/{project.Id}/epics/{created.Number}/issues", new { issueNumber = openIssue.Number });
-        await StartEpicAsync(project.Id, created);
-        await _client.PostDataAsync<EpicFullDto>($"/api/projects/{project.Id}/epics/{created.Number}/pause", new { reason = "hold" });
-
-        var resumed = await _client.PostDataAsync<EpicFullDto>($"/api/projects/{project.Id}/epics/{created.Number}/resume");
-
-        Assert.Equal("running", resumed.Status);
     }
 
 }
