@@ -1,7 +1,7 @@
 import { createHash, randomUUID } from 'node:crypto'
 import { existsSync } from 'node:fs'
 import { spawn, type ChildProcess } from 'node:child_process'
-import { chmod, mkdir, rm, writeFile } from 'node:fs/promises'
+import { chmod, copyFile, mkdir, rm, writeFile } from 'node:fs/promises'
 import { createServer, type Server, type Socket } from 'node:net'
 import { join } from 'node:path'
 import { runCommand } from '../system/process.js'
@@ -49,8 +49,14 @@ const DEFAULT_TERMINATION_TIMEOUT_MS = 5_000
 // launcher process. Capability confinement remains a second gate: bearer
 // values remain in the Runner-side proxy, requests resolve through the Manager
 // vocabulary, the working directory is frozen, and each kind has a bounded
-// request budget. The Server independently enforces lease origin, route
-// allowlist, and anchor validation for whatever those children send.
+// request budget. Ordinary credential environment values and credential-file
+// fallbacks are removed from the runtime boundary. The Server independently
+// enforces lease origin, route allowlist, and anchor validation for whatever
+// those children send. A same-user process reading an arbitrary absolute path
+// (for example the operator's admin-token outside the redirected HOME) or
+// attaching to the loopback API with such a value remains outside what an
+// in-process boundary can prevent; that residual requires OS-level sandboxing
+// (a dedicated execution UID) and is deliberately not claimed here.
 /**
  * One in-memory Manager process boundary. The grant is deliberately not part
  * of DispatchWorkItem and this class is never passed to a journal or report.
@@ -135,6 +141,22 @@ export class ManagerExecutionBoundary {
     delete baseEnvironment.MOHIST_MANAGER_MANAGEMENT_TOKEN
     delete baseEnvironment.MOHIST_MANAGER_REPLY_TOKEN
     delete baseEnvironment.MOHIST_MANAGER_CREDENTIAL_BROKER
+    // Ordinary CLI credentials must never survive into the Manager runtime:
+    // with them, a generic shell could bypass the capability catalog by
+    // driving the real CLI or API directly. HOME is redirected into the
+    // boundary so every `~/.mohist/*` credential-file fallback resolves
+    // inside this empty directory instead (git identity is carried over so
+    // workspace commits keep working).
+    delete baseEnvironment.MOHIST_TOKEN
+    delete baseEnvironment.MOHIST_ADMIN_TOKEN
+    delete baseEnvironment.MOHIST_ADMIN_TOKEN_PATH
+    const homeDirectory = join(directory, 'home')
+    await mkdir(homeDirectory, { recursive: true, mode: 0o700 })
+    const gitconfig = join(process.env.HOME ?? '', '.gitconfig')
+    if (process.env.HOME && existsSync(gitconfig)) {
+      await copyFile(gitconfig, join(homeDirectory, '.gitconfig')).catch(() => undefined)
+    }
+    baseEnvironment.HOME = homeDirectory
     const realMoPath = options.moExecutable ?? findRealMoPath(directory, baseEnvironment.PATH ?? '')
     if (!realMoPath) throw new Error('The real mo executable could not be resolved')
     const boundary = new ManagerExecutionBoundary(
@@ -190,6 +212,7 @@ export class ManagerExecutionBoundary {
           { ...this.environment(), ...(options.env ?? {}) },
           {
             timeoutMs: options.timeout,
+            isolatedEnvironment: true,
             onLine: (line) => {
               if (line.includes('manager_credential_expired') || line.includes('manager_epoch_changed'))
                 this.authorizationInvalidated = true

@@ -39,6 +39,13 @@ public sealed partial class AgentJobGrain
             || string.IsNullOrWhiteSpace(input.AgentSessionId))
             return;
 
+        // The interrupted execution's leases must die with the transition,
+        // before the recovery turn can mint fresh credentials: a retained
+        // bearer from the lost turn stays unusable during recovery. The
+        // prefix revoke is idempotent and covers every attempt of this work.
+        if (!string.IsNullOrWhiteSpace(State.WorkId))
+            _managerCredentials.RevokeWork(Key, State.WorkId);
+
         var inputId = $"manager-recovery-input:{Key}";
         var turnId = $"manager-recovery-turn:{Key}";
         var session = GrainFactory.GetGrain<IAgentSessionGrain>(input.AgentSessionId);

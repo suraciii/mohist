@@ -7,6 +7,7 @@ using Mohist.Server.Runner.Services;
 using Mohist.Server.Sessions.Domain;
 using Mohist.Server.Sessions.Grains;
 using Mohist.Server.Sessions.Services;
+using Mohist.Server.Slack.Services;
 using Mohist.Server.TestSupport;
 using Xunit;
 
@@ -50,7 +51,52 @@ public sealed class AgentJobManagerRunnerLossRecoverySpecs : AgentJobGrainTestSu
             SlackExecutionContext: context));
         await WaitForStatusAsync(job, AgentJobStatus.Running, TimeSpan.FromSeconds(5));
 
+        // A live lease for the interrupted work must die with the
+        // server-side Runner-loss transition, before the recovery turn is
+        // dispatched.
+        var workId = (await job.GetRuntimeSnapshotAsync()).CurrentWorkId!;
+        ManagerExecutionCapabilityIssuer issuer;
+        using (var issuerScope = _fixture.Cluster.GetSiloServiceProvider(null)
+            .GetRequiredService<IServiceScopeFactory>()
+            .CreateScope())
+        {
+            issuer = issuerScope.ServiceProvider.GetRequiredService<ManagerExecutionCapabilityIssuer>();
+        }
+        var executionId = $"manager:{jobKey}:{workId}:0";
+        var origin = new ManagerExecutionOrigin(
+            "workspace-1",
+            "conversation-1",
+            "thread-1",
+            "message-1",
+            "member-1",
+            "enrollment-1",
+            sessionId,
+            $"dispatch-{jobKey}");
+        var grant = issuer.Issue(new ManagerExecutionIssueRequest(
+            executionId,
+            origin,
+            new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero),
+            TimeSpan.FromMinutes(10),
+            new HashSet<string>(StringComparer.Ordinal) { "workspace.status" }));
+        var validateBefore = issuer.Validate(
+            grant.ManagementCredential,
+            ManagerExecutionLeaseKind.Management,
+            "workspace.status",
+            executionId,
+            origin,
+            new DateTimeOffset(2026, 1, 1, 0, 2, 0, TimeSpan.Zero));
+        Assert.True(validateBefore.Allowed);
+
         await Grains.GetGrain<IRunnerGrain>(runnerId).UnregisterAsync();
+
+        var validateAfter = issuer.Validate(
+            grant.ManagementCredential,
+            ManagerExecutionLeaseKind.Management,
+            "workspace.status",
+            executionId,
+            origin,
+            new DateTimeOffset(2026, 1, 1, 0, 2, 0, TimeSpan.Zero));
+        Assert.False(validateAfter.Allowed);
 
         var snapshot = await job.GetRuntimeSnapshotAsync();
         Assert.Equal(AgentJobStatus.Unknown, snapshot.Status);

@@ -15,6 +15,7 @@ using Mohist.Server.Runner.Grains;
 using Mohist.Server.Sessions.Domain;
 using Mohist.Server.Sessions.Grains;
 using Mohist.Server.Sessions.Services;
+using Mohist.Server.Slack.Services;
 using Mohist.Server.Workspace.Grains;
 using Orleans.Runtime;
 
@@ -63,6 +64,7 @@ public sealed partial class AgentJobGrain : Grain, IAgentJobGrain
     private readonly IBackgroundTaskLauncher _backgroundTasks;
     private readonly IGrainFactory _grains;
     private readonly IAgentJobDispatchObserver _dispatchObserver;
+    private readonly ManagerExecutionCapabilityIssuer _managerCredentials;
     private readonly TaskCompletionSource<AgentJobTerminalResult> _terminalCompletion =
         new(TaskCreationOptions.RunContinuationsAsynchronously);
     private IDisposable? _jobTimeoutTimer;
@@ -78,7 +80,8 @@ public sealed partial class AgentJobGrain : Grain, IAgentJobGrain
         IEventStore eventStore,
         IBackgroundTaskLauncher backgroundTasks,
         IGrainFactory grains,
-        IAgentJobDispatchObserver dispatchObserver)
+        IAgentJobDispatchObserver dispatchObserver,
+        ManagerExecutionCapabilityIssuer managerCredentials)
     {
         _log = log;
         _options = options.Value;
@@ -88,6 +91,7 @@ public sealed partial class AgentJobGrain : Grain, IAgentJobGrain
         _backgroundTasks = backgroundTasks;
         _grains = grains;
         _dispatchObserver = dispatchObserver;
+        _managerCredentials = managerCredentials;
         _runnerLossRecoveryTimeout = ValidateRunnerLossRecoveryTimeout(_options.RunnerLossRecoveryTimeout);
     }
 

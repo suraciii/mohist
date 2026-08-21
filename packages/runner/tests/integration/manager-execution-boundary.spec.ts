@@ -139,6 +139,65 @@ describe.sequential('ManagerExecutionBoundary', () => {
     }
   })
 
+  it('removes ordinary CLI credentials and credential-file fallbacks from the runtime', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'mohist-manager-boundary-'))
+    const stub = await writeStubMo(root, false)
+    const originalHome = process.env.HOME
+    const fakeHome = join(root, 'operator-home')
+    await mkdir(join(fakeHome, '.mohist'), { recursive: true })
+    await writeFile(join(fakeHome, '.mohist', 'admin-token'), `${'a'.repeat(48)}\n`, 'utf8')
+    await writeFile(
+      join(fakeHome, '.gitconfig'),
+      '[user]\n\tname = Operator\n\temail = operator@example.test\n',
+      'utf8',
+    )
+    process.env.HOME = fakeHome
+    process.env.MOHIST_ADMIN_TOKEN = `b${'b'.repeat(47)}`
+    process.env.MOHIST_TOKEN = `c${'c'.repeat(47)}`
+    let boundary: ManagerExecutionBoundary | null = null
+    try {
+      boundary = await ManagerExecutionBoundary.create(grant, root, {
+        moExecutable: stub.executable,
+        workDir: stub.frozenWorkDir,
+        requestLimits: { reply: 5, management: 64 },
+      })
+      const environment = boundary.environment()
+      expect(environment.MOHIST_ADMIN_TOKEN).toBeUndefined()
+      expect(environment.MOHIST_TOKEN).toBeUndefined()
+      expect(environment.MOHIST_ADMIN_TOKEN_PATH).toBeUndefined()
+      expect(environment.HOME).toContain('manager-executions')
+      expect(environment.HOME).not.toBe(fakeHome)
+
+      // The operator's credential file must not resolve from the redirected
+      // HOME, while the carried-over git identity keeps workspace commits
+      // working.
+      const output: Buffer[] = []
+      await boundary
+        .bashOperations()
+        .exec(
+          'cat "$HOME/.mohist/admin-token"; test ! -f "$HOME/.mohist/admin-token"; test -f "$HOME/.gitconfig"',
+          root,
+          { onData: (chunk) => output.push(chunk), signal: new AbortController().signal },
+        )
+      expect(Buffer.concat(output).toString('utf8')).not.toContain('aaaa')
+
+      const genericEnv: Buffer[] = []
+      await boundary.bashOperations().exec('env', root, {
+        onData: (chunk) => genericEnv.push(chunk),
+        signal: new AbortController().signal,
+      })
+      const seen = Buffer.concat(genericEnv).toString('utf8')
+      expect(seen).not.toContain(process.env.MOHIST_ADMIN_TOKEN!)
+      expect(seen).not.toContain(process.env.MOHIST_TOKEN!)
+      expect(seen).not.toContain('admin-token')
+    } finally {
+      boundary?.dispose().catch(() => undefined)
+      process.env.HOME = originalHome
+      delete process.env.MOHIST_ADMIN_TOKEN
+      delete process.env.MOHIST_TOKEN
+    }
+  })
+
   it('injects the bearer only inside the Runner-side request proxy', async () => {
     const root = await mkdtemp(join(tmpdir(), 'mohist-manager-boundary-'))
     let targetServer: HttpServer | null = null

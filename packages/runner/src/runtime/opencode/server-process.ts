@@ -90,7 +90,10 @@ export const createSpawnedOpencodeServer: OpencodeServerFactory = async (directo
 export const createIsolatedOpencodeServer: OpencodeServerFactory = async (directory, signal, options) => {
   const child = spawn('opencode', ['serve', '--hostname=127.0.0.1', '--port=0'], {
     cwd: directory,
-    env: { ...process.env, ...(options?.environment ?? {}) },
+    // An explicit environment replaces the Runner's environment: this
+    // factory serves the Manager execution boundary, whose sanitized
+    // environment must not be re-layered with process.env credentials.
+    env: options?.environment ?? { ...process.env },
     stdio: ['ignore', 'pipe', 'pipe'],
     detached: process.platform !== 'win32',
   }) as unknown as ChildProcessWithoutNullStreams

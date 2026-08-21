@@ -144,6 +144,51 @@ public sealed class SlackManagerConversationSpecs
     }
 
     [Fact]
+    public async Task Replay_during_initial_launch_never_creates_a_second_input()
+    {
+        var suffix = Guid.NewGuid().ToString("N");
+        var team = $"T_MANAGER_REPLAY_RACE_{suffix}";
+        var appId = $"A_MANAGER_REPLAY_RACE_{suffix}";
+        var owner = $"U_MANAGER_REPLAY_RACE_{suffix}";
+        var enrollmentId = await SetupAndClaimAsync(team, appId, owner);
+        var firstTs = "1710002000.000010";
+        var sessionId = $"manager-session-{AgentLaunchCoordinatorCodec.StableToken(string.Join('\n',
+            enrollmentId,
+            team,
+            "D_MANAGER_CONVERSATION_NEW"))}";
+
+        _fixture.LaunchFaults.BlockNext(LaunchParticipantGate.SubmitJob);
+        try
+        {
+            var firstTask = SendManagerMessageAsync(
+                appId, team, owner, firstTs, "Inspect the current Manager state.");
+            await _fixture.LaunchFaults.WaitUntilBlockedAsync(LaunchParticipantGate.SubmitJob);
+
+            // Slack replays the SAME message while the initial launch is
+            // still between inbox acceptance and route stamping: the replay
+            // must be the existing acceptance, never a second input, turn,
+            // or management execution.
+            var replay = await SendManagerMessageAsync(
+                appId, team, owner, firstTs, "Inspect the current Manager state.");
+            Assert.Equal("duplicate", replay.GetProperty("decision").GetString());
+
+            _fixture.LaunchFaults.ReleaseBlocked(LaunchParticipantGate.SubmitJob);
+            var first = await firstTask;
+            Assert.Equal("accepted", first.GetProperty("decision").GetString());
+
+            var session = _fixture.Grains.GetGrain<IAgentSessionGrain>(sessionId);
+            Assert.Single(await session.ListTurnsAsync());
+            await using var scope = _fixture.Services.CreateAsyncScope();
+            var database = scope.ServiceProvider.GetRequiredService<MohistDbContext>();
+            Assert.Single(await database.AgentJobs.Where(row => row.AgentSessionId == sessionId).ToListAsync());
+        }
+        finally
+        {
+            _fixture.LaunchFaults.ReleaseBlocked(LaunchParticipantGate.SubmitJob);
+        }
+    }
+
+    [Fact]
     public async Task Missing_runtime_replaces_the_mapping_and_accepts_the_current_message_once()
     {
         var suffix = Guid.NewGuid().ToString("N");

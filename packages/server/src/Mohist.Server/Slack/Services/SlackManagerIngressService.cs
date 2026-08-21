@@ -174,9 +174,20 @@ public sealed class SlackManagerIngressService : IScopedService
                 ct: ct);
         }
 
-        if (accepted.AlreadyExisted && !string.IsNullOrWhiteSpace(route.SessionId))
+        if (accepted.AlreadyExisted)
         {
-            await _inbox.MarkDispatchedAsync(SlackDeliveryOwnerIds.ManagerProjectId, accepted.Id, ct);
+            // A replayed message identity is the existing acceptance even
+            // while the initial launch has not stamped its route fence:
+            // re-processing here would queue a second input and turn under a
+            // different idempotency key. A still-pending row is owned by the
+            // in-flight launch, which performs its own dispatch marking; a
+            // completed row keeps the idempotent mark.
+            var existingRow = (await _inbox.ListAsync(
+                SlackDeliveryOwnerIds.ManagerProjectId,
+                enrollment.Id,
+                ct)).Entries.FirstOrDefault(entry => entry.Id == accepted.Id);
+            if (existingRow is null || !existingRow.IsPending)
+                await _inbox.MarkDispatchedAsync(SlackDeliveryOwnerIds.ManagerProjectId, accepted.Id, ct);
             return SlackManagerIngressResult.Duplicate(accepted.Id);
         }
 
