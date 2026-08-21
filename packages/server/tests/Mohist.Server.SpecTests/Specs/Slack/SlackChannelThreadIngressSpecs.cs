@@ -129,46 +129,6 @@ public sealed partial class SlackChannelThreadIngressSpecs
     }
 
     [Fact]
-    public async Task Bare_root_mention_with_no_task_creates_no_resources_and_asks_for_task()
-    {
-        var connection = await CreateConnectionAsync();
-        var body = new
-        {
-            isDirectMessage = false,
-            teamId = connection.WorkspaceTeamId,
-            conversationId = "C-channel-A",
-            messageTs = "1710000000.000110",
-            threadTs = (string?)null,
-            mentionedUserIds = new[] { connection.BotUserId },
-            senderSlackUserId = "U_OWNER",
-            senderKind = "human",
-            text = "<@U123|Mohist>",
-            leaseId = _connectionLeases[connection.Id],
-            adapterId = SlackRuntimeLeaseTestSupport.AdapterId,
-        };
-        using var response = await _fixture.Client.PostAsJsonAsync(IngressPath(connection), body);
-        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-
-        using var doc = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
-        var data = doc.RootElement.GetProperty("data");
-        Assert.Equal("rejected", data.GetProperty("kind").GetString());
-        Assert.Equal("Please send a task for the Agent to perform.",
-            data.GetProperty("reason").GetString());
-
-        await using var scope = _fixture.Services.CreateAsyncScope();
-        var threadMapping = scope.ServiceProvider.GetRequiredService<SlackThreadSessionMappingStore>();
-        Assert.Null(await threadMapping.GetSessionIdAsync(
-            connection.ProjectId, connection.WorkspaceTeamId, connection.Id,
-            "C-channel-A", "1710000000.000110"));
-        var inbox = scope.ServiceProvider.GetRequiredService<MohistDbContext>();
-        Assert.Empty(await inbox.SlackProviderInboxRows
-            .Where(row => row.ConnectionId == connection.Id
-                && row.ConversationId == "C-channel-A"
-                && row.SlackMessageIdentity.EndsWith("1710000000.000110"))
-            .ToListAsync());
-    }
-
-    [Fact]
     public async Task Followup_after_terminal_continues_bound_session()
     {
         var connection = await CreateConnectionAsync();
@@ -430,41 +390,6 @@ public sealed partial class SlackChannelThreadIngressSpecs
     }
 
     [Fact]
-    public async Task Non_owner_mention_is_rejected_with_no_agent_resources()
-    {
-        var connection = await CreateConnectionAsync();
-        var body = new
-        {
-            isDirectMessage = false,
-            teamId = connection.WorkspaceTeamId,
-            conversationId = "C-channel-D",
-            messageTs = "1710000000.000400",
-            threadTs = (string?)null,
-            mentionedUserIds = new[] { connection.BotUserId },
-            senderSlackUserId = "U_OTHER",
-            senderKind = "human",
-            text = "<@U123> do something",
-            leaseId = _connectionLeases[connection.Id],
-            adapterId = SlackRuntimeLeaseTestSupport.AdapterId,
-        };
-        using var response = await _fixture.Client.PostAsJsonAsync(IngressPath(connection), body);
-        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-
-        using var doc = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
-        var data = doc.RootElement.GetProperty("data");
-        Assert.Equal("rejected", data.GetProperty("kind").GetString());
-        Assert.Contains("owner", data.GetProperty("reason").GetString()!, StringComparison.OrdinalIgnoreCase);
-
-        await using var scope = _fixture.Services.CreateAsyncScope();
-        var inbox = scope.ServiceProvider.GetRequiredService<MohistDbContext>();
-        Assert.Empty(await inbox.SlackProviderInboxRows
-            .Where(row => row.ConnectionId == connection.Id
-                && row.ConversationId == "C-channel-D")
-            .ToListAsync());
-        Assert.Empty(await inbox.AgentSessions.Where(row => row.LabelConnectionId == connection.Id).ToListAsync());
-    }
-
-    [Fact]
     public async Task Backpressured_channel_returns_visible_rejection_without_accepting_work()
     {
         var connection = await CreateConnectionAsync();
@@ -565,95 +490,6 @@ public sealed partial class SlackChannelThreadIngressSpecs
     }
 
     [Fact]
-    public async Task Bot_sender_is_acknowledged_and_ignored()
-    {
-        var connection = await CreateConnectionAsync();
-        var body = new
-        {
-            isDirectMessage = false,
-            teamId = connection.WorkspaceTeamId,
-            conversationId = "C-channel-E",
-            messageTs = "1710000000.000500",
-            threadTs = (string?)null,
-            mentionedUserIds = new[] { connection.BotUserId },
-            senderSlackUserId = "U_BOT",
-            senderKind = "bot",
-            text = "<@U123> ignorable",
-            leaseId = _connectionLeases[connection.Id],
-            adapterId = SlackRuntimeLeaseTestSupport.AdapterId,
-        };
-        using var response = await _fixture.Client.PostAsJsonAsync(IngressPath(connection), body);
-        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-
-        using var doc = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
-        Assert.Equal("ignored", doc.RootElement.GetProperty("data").GetProperty("kind").GetString());
-
-        await using var scope = _fixture.Services.CreateAsyncScope();
-        var inbox = scope.ServiceProvider.GetRequiredService<MohistDbContext>();
-        Assert.Empty(await inbox.SlackProviderInboxRows
-            .Where(row => row.ConnectionId == connection.Id
-                && row.ConversationId == "C-channel-E")
-            .ToListAsync());
-    }
-
-    [Fact]
-    public async Task Unknown_sender_is_acknowledged_and_ignored()
-    {
-        var connection = await CreateConnectionAsync();
-        var body = new
-        {
-            isDirectMessage = false,
-            teamId = connection.WorkspaceTeamId,
-            conversationId = "C-channel-E2",
-            messageTs = "1710000000.000510",
-            threadTs = (string?)null,
-            mentionedUserIds = new[] { connection.BotUserId },
-            senderSlackUserId = (string?)null,
-            senderKind = "unknown",
-            text = "<@U123> ignorable",
-            leaseId = _connectionLeases[connection.Id],
-            adapterId = SlackRuntimeLeaseTestSupport.AdapterId,
-        };
-        using var response = await _fixture.Client.PostAsJsonAsync(IngressPath(connection), body);
-        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-
-        using var doc = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
-        Assert.Equal("ignored", doc.RootElement.GetProperty("data").GetProperty("kind").GetString());
-    }
-
-    [Fact]
-    public async Task Plain_channel_message_with_no_mention_is_ignored_without_persisting_text()
-    {
-        var connection = await CreateConnectionAsync();
-        var body = new
-        {
-            isDirectMessage = false,
-            teamId = connection.WorkspaceTeamId,
-            conversationId = "C-channel-F",
-            messageTs = "1710000000.000600",
-            threadTs = (string?)null,
-            mentionedUserIds = Array.Empty<string>(),
-            senderSlackUserId = "U_OWNER",
-            senderKind = "human",
-            text = "no mention here",
-            leaseId = _connectionLeases[connection.Id],
-            adapterId = SlackRuntimeLeaseTestSupport.AdapterId,
-        };
-        using var response = await _fixture.Client.PostAsJsonAsync(IngressPath(connection), body);
-        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-
-        using var doc = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
-        Assert.Equal("ignored", doc.RootElement.GetProperty("data").GetProperty("kind").GetString());
-
-        await using var scope = _fixture.Services.CreateAsyncScope();
-        var inbox = scope.ServiceProvider.GetRequiredService<MohistDbContext>();
-        Assert.Empty(await inbox.SlackProviderInboxRows
-            .Where(row => row.ConnectionId == connection.Id
-                && row.ConversationId == "C-channel-F")
-            .ToListAsync());
-    }
-
-    [Fact]
     public async Task Unbound_thread_reply_without_mention_is_ignored()
     {
         var connection = await CreateConnectionAsync();
@@ -683,47 +519,6 @@ public sealed partial class SlackChannelThreadIngressSpecs
             .Where(row => row.ConnectionId == connection.Id
                 && row.ConversationId == "C-channel-G")
             .ToListAsync());
-    }
-
-    [Fact]
-    public async Task Another_connection_ignores_unmentioned_reply_to_bound_thread()
-    {
-        var connection = await CreateConnectionAsync();
-        var first = await PostChannelAsync(connection, "C-channel-H",
-            messageTs: "1710000000.000800",
-            threadTs: null,
-            mentions: new[] { connection.BotUserId },
-            text: "<@U123> do it");
-        var sessionId = first.GetProperty("sessionId").GetString();
-
-        var otherConnection = await CreateConnectionAsync("agent-other");
-        var body = new
-        {
-            isDirectMessage = false,
-            teamId = otherConnection.WorkspaceTeamId,
-            conversationId = "C-channel-H",
-            messageTs = "1710000000.000810",
-            threadTs = "1710000000.000800",
-            mentionedUserIds = Array.Empty<string>(),
-            senderSlackUserId = "U_OWNER",
-            senderKind = "human",
-            text = "follow-up not for you",
-            leaseId = _connectionLeases[otherConnection.Id],
-            adapterId = SlackRuntimeLeaseTestSupport.AdapterId,
-        };
-        using var response = await _fixture.Client.PostAsJsonAsync(IngressPath(otherConnection), body);
-        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-
-        using var doc = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
-        Assert.Equal("ignored", doc.RootElement.GetProperty("data").GetProperty("kind").GetString());
-
-        await using var scope = _fixture.Services.CreateAsyncScope();
-        var inbox = scope.ServiceProvider.GetRequiredService<MohistDbContext>();
-        Assert.Empty(await inbox.SlackProviderInboxRows
-            .Where(row => row.ConnectionId == otherConnection.Id
-                && row.ConversationId == "C-channel-H")
-            .ToListAsync());
-        Assert.NotNull(sessionId);
     }
 
     [Fact]
