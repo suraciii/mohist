@@ -476,7 +476,11 @@ export class PiRuntime {
       return this.failure('missing-session', 'Pi follow-up requires a bound Session', [resetDiagnostic()])
     const path = normalizedPath(runtimeSessionId)
     if (!path) return this.failure('incompatible-runtime', 'Pi runtimeSessionId must be an absolute session-file path')
-    const session = await this.resolveFollowupSession(path, request.target.workDir)
+    const session = await this.resolveFollowupSession(
+      path,
+      request.target.workDir,
+      request.managerExecution ?? null,
+    )
     if (!session.ok) return session.failure
     const configured = await this.applyFollowupOptions(session.value, request.options)
     if (configured) return configured
@@ -803,18 +807,21 @@ export class PiRuntime {
   private async resolveFollowupSession(
     path: string,
     workDir: string,
+    managerExecution: ManagerExecutionBoundary | null = null,
   ): Promise<{ ok: true; value: PiSdkSession } | { ok: false; failure: PiResult<never> }> {
     if (!this.state.services) return { ok: false, failure: this.unavailable() }
     let session: PiSdkSession
     try {
-      const cached = this.sessions.get(path)
+      const cached = managerExecution ? null : this.sessions.get(path)
       if (cached) {
         if (this.state.services.validateSessionFile) {
           await this.state.services.validateSessionFile(path, cached.sessionId)
         }
         return { ok: true, value: cached }
       }
-      const opened = await this.state.services.openSession(path, workDir)
+      const opened = await this.state.services.openSession(path, workDir, {
+        managerExecution,
+      })
       session = opened
       this.sessions.set(path, session)
       return { ok: true, value: session }

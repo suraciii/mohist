@@ -1,10 +1,15 @@
 using System.Collections.Concurrent;
+using System.Data.Common;
+using System.Globalization;
 using System.Security.Cryptography;
 using System.Text;
+using System.Text.Json;
 using System.Text.Json.Serialization;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Hosting;
 using Mohist.Server.Contracts;
 using Mohist.Server.Infrastructure;
+using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Infrastructure.Slack;
 using Mohist.Server.Runner.Grains;
 using Mohist.Workflow.Definition;
@@ -124,10 +129,25 @@ public sealed class ManagerDeploymentEpoch : IManagerDeploymentEpoch, IHostedSer
 {
     private readonly object _gate = new();
     private readonly IManagerExecutionLeaseStore? _store;
-    private string? _current = NewEpoch();
-    private bool _available = true;
+    private string? _current;
+    private bool _available;
 
-    public ManagerDeploymentEpoch(IManagerExecutionLeaseStore? store = null) => _store = store;
+    public ManagerDeploymentEpoch(IManagerExecutionLeaseStore? store = null)
+    {
+        _store = store;
+        try
+        {
+            _current = store?.IsShared == true
+                ? store.ReadDeploymentEpoch()
+                : NewEpoch();
+            _available = !string.IsNullOrWhiteSpace(_current) && (store is null || store.Available);
+        }
+        catch
+        {
+            _current = null;
+            _available = false;
+        }
+    }
 
     public string Current
     {
@@ -151,10 +171,24 @@ public sealed class ManagerDeploymentEpoch : IManagerDeploymentEpoch, IHostedSer
     {
         lock (_gate)
         {
-            _store?.RevokeAll();
-            _current = NewEpoch();
-            _available = true;
-            return _current;
+            try
+            {
+                _current = _store?.IsShared == true
+                    ? _store.AdvanceDeploymentEpoch()
+                    : NewEpoch();
+                if (string.IsNullOrWhiteSpace(_current))
+                    throw new InvalidOperationException("Manager deployment epoch is unavailable.");
+                _available = _store is null || _store.Available;
+                if (!_available)
+                    throw new InvalidOperationException("Manager lease store is unavailable.");
+                return _current;
+            }
+            catch
+            {
+                _current = null;
+                _available = false;
+                throw;
+            }
         }
     }
 
@@ -187,6 +221,9 @@ public sealed class ManagerDeploymentEpoch : IManagerDeploymentEpoch, IHostedSer
 public interface IManagerExecutionLeaseStore
 {
     bool Available { get; }
+    bool IsShared { get; }
+    string? ReadDeploymentEpoch();
+    string? AdvanceDeploymentEpoch();
     void Put(ManagerExecutionLeaseMetadata lease);
     ManagerExecutionLeaseMetadata? Find(string credentialHash);
     ManagerExecutionLeaseMetadata? FindIncludingRevoked(string credentialHash);
@@ -198,26 +235,97 @@ public interface IManagerExecutionLeaseStore
 }
 
 /// <summary>
-/// Short-lived runtime store. The dictionary value contains only a hash and
-/// non-secret binding metadata. It is intentionally not an EF store and has
-/// no serialization or recovery path.
+/// Stores only lease hashes and non-secret binding metadata. Production uses
+/// the configured SQLite database so every Server instance sees the same
+/// leases and deployment epoch; the parameterless constructor remains an
+/// in-memory test seam.
 /// </summary>
 public sealed class ManagerExecutionLeaseStore : IManagerExecutionLeaseStore, IDisposable
 {
+    private const string EpochRowId = "manager";
     private readonly ConcurrentDictionary<string, ManagerExecutionLeaseMetadata> _leases = new(StringComparer.Ordinal);
+    private readonly IDbContextFactory<MohistDbContext>? _dbFactory;
+    private readonly object _databaseGate = new();
     private int _available = 1;
+    private bool _schemaReady;
+
+    public ManagerExecutionLeaseStore(IDbContextFactory<MohistDbContext>? dbFactory = null) => _dbFactory = dbFactory;
 
     public bool Available => Volatile.Read(ref _available) == 1;
-    public int Count => _leases.Count;
+    public bool IsShared => _dbFactory is not null;
+    public int Count => IsShared ? WithDatabase(connection => ScalarInt(connection, "SELECT COUNT(*) FROM ManagerExecutionLeases;")) : _leases.Count;
+
+    public string? ReadDeploymentEpoch()
+    {
+        if (!IsShared) return null;
+        return WithDatabase(connection =>
+        {
+            using var command = connection.CreateCommand();
+            command.CommandText = "SELECT Epoch FROM ManagerDeploymentEpochs WHERE Id = @id;";
+            Add(command, "@id", EpochRowId);
+            var value = command.ExecuteScalar() as string;
+            if (!string.IsNullOrWhiteSpace(value)) return value;
+            var epoch = NewEpoch();
+            using var insert = connection.CreateCommand();
+            insert.CommandText = "INSERT OR IGNORE INTO ManagerDeploymentEpochs (Id, Epoch) VALUES (@id, @epoch);";
+            Add(insert, "@id", EpochRowId);
+            Add(insert, "@epoch", epoch);
+            insert.ExecuteNonQuery();
+            using var read = connection.CreateCommand();
+            read.CommandText = "SELECT Epoch FROM ManagerDeploymentEpochs WHERE Id = @id;";
+            Add(read, "@id", EpochRowId);
+            return read.ExecuteScalar() as string;
+        });
+    }
+
+    public string? AdvanceDeploymentEpoch()
+    {
+        if (!IsShared) return null;
+        return WithDatabase(connection =>
+        {
+            using var transaction = connection.BeginTransaction();
+            var epoch = NewEpoch();
+            using (var insert = connection.CreateCommand())
+            {
+                insert.Transaction = transaction;
+                insert.CommandText = "INSERT OR IGNORE INTO ManagerDeploymentEpochs (Id, Epoch) VALUES (@id, @epoch);";
+                Add(insert, "@id", EpochRowId);
+                Add(insert, "@epoch", epoch);
+                insert.ExecuteNonQuery();
+            }
+            using (var update = connection.CreateCommand())
+            {
+                update.Transaction = transaction;
+                update.CommandText = "UPDATE ManagerDeploymentEpochs SET Epoch = @epoch WHERE Id = @id; UPDATE ManagerExecutionLeases SET Active = 0 WHERE Active = 1;";
+                Add(update, "@id", EpochRowId);
+                Add(update, "@epoch", epoch);
+                update.ExecuteNonQuery();
+            }
+            transaction.Commit();
+            return epoch;
+        });
+    }
 
     public void Put(ManagerExecutionLeaseMetadata lease)
     {
-        if (!Available)
-            throw new InvalidOperationException("Manager lease store is unavailable.");
         ArgumentNullException.ThrowIfNull(lease);
         if (string.IsNullOrWhiteSpace(lease.CredentialHash))
             throw new ArgumentException("A lease hash is required.", nameof(lease));
-        _leases[lease.CredentialHash] = lease;
+        if (!IsShared)
+        {
+            EnsureAvailable();
+            _leases[lease.CredentialHash] = lease;
+            return;
+        }
+
+        WithDatabase(connection =>
+        {
+            using var command = connection.CreateCommand();
+            command.CommandText = "INSERT OR REPLACE INTO ManagerExecutionLeases (CredentialHash, LeaseId, Kind, ExecutionId, WorkspaceId, ConversationId, ThreadRootMessageId, TriggeringMessageId, ActorId, EnrollmentId, SessionId, DispatchRef, DeploymentEpoch, IssuedAt, ExpiresAt, CapabilitiesJson, Active) VALUES (@hash, @lease, @kind, @execution, @workspace, @conversation, @thread, @trigger, @actor, @enrollment, @session, @dispatch, @epoch, @issued, @expires, @capabilities, @active);";
+            AddLeaseParameters(command, lease);
+            command.ExecuteNonQuery();
+            return 0;
+        });
     }
 
     public ManagerExecutionLeaseMetadata? Find(string credentialHash)
@@ -228,67 +336,60 @@ public sealed class ManagerExecutionLeaseStore : IManagerExecutionLeaseStore, ID
 
     public ManagerExecutionLeaseMetadata? FindIncludingRevoked(string credentialHash)
     {
-        if (!Available || string.IsNullOrWhiteSpace(credentialHash))
+        if (string.IsNullOrWhiteSpace(credentialHash) || !Available)
             return null;
-        return _leases.TryGetValue(credentialHash, out var lease) ? lease : null;
+        if (!IsShared)
+            return _leases.TryGetValue(credentialHash, out var lease) ? lease : null;
+        return WithDatabase(connection =>
+        {
+            using var command = connection.CreateCommand();
+            command.CommandText = "SELECT LeaseId, CredentialHash, Kind, ExecutionId, WorkspaceId, ConversationId, ThreadRootMessageId, TriggeringMessageId, ActorId, EnrollmentId, SessionId, DispatchRef, DeploymentEpoch, IssuedAt, ExpiresAt, CapabilitiesJson, Active FROM ManagerExecutionLeases WHERE CredentialHash = @hash;";
+            Add(command, "@hash", credentialHash);
+            using var reader = command.ExecuteReader();
+            return reader.Read() ? ReadLease(reader) : null;
+        });
     }
 
-    public int RevokeExecution(string executionId)
-    {
-        if (!Available || string.IsNullOrWhiteSpace(executionId))
-            return 0;
-        var revoked = 0;
-        foreach (var pair in _leases)
-        {
-            if (!string.Equals(pair.Value.ExecutionId, executionId, StringComparison.Ordinal))
-                continue;
-            if (_leases.TryUpdate(pair.Key, pair.Value with { Active = false }, pair.Value))
-                revoked++;
-        }
-        return revoked;
-    }
+    public int RevokeExecution(string executionId) =>
+        RevokeWhere("ExecutionId = @value", executionId);
 
-    public int RevokeExecutionPrefix(string executionPrefix)
-    {
-        if (!Available || string.IsNullOrWhiteSpace(executionPrefix))
-            return 0;
-        var revoked = 0;
-        foreach (var pair in _leases)
-        {
-            if (!pair.Value.ExecutionId.StartsWith(executionPrefix, StringComparison.Ordinal))
-                continue;
-            if (_leases.TryUpdate(pair.Key, pair.Value with { Active = false }, pair.Value))
-                revoked++;
-        }
-        return revoked;
-    }
+    public int RevokeExecutionPrefix(string executionPrefix) =>
+        RevokeWhere("ExecutionId LIKE @value || '%'", executionPrefix);
 
     public int RevokeAll()
     {
-        if (!Available)
-            return 0;
-        var revoked = 0;
-        foreach (var pair in _leases)
+        if (!Available) return 0;
+        if (!IsShared)
         {
-            if (_leases.TryUpdate(pair.Key, pair.Value with { Active = false }, pair.Value))
-                revoked++;
+            var count = 0;
+            foreach (var pair in _leases)
+            {
+                if (_leases.TryUpdate(pair.Key, pair.Value with { Active = false }, pair.Value)) count++;
+            }
+            return count;
         }
-        return revoked;
+        return WithDatabase(connection => Execute(connection, "UPDATE ManagerExecutionLeases SET Active = 0 WHERE Active = 1;"));
     }
 
     public int RemoveExpired(DateTimeOffset now)
     {
-        if (!Available)
-            return 0;
-        var removed = 0;
-        foreach (var pair in _leases)
+        if (!Available) return 0;
+        if (!IsShared)
         {
-            if (pair.Value.ExpiresAt > now)
-                continue;
-            if (_leases.TryRemove(pair.Key, out _))
-                removed++;
+            var removed = 0;
+            foreach (var pair in _leases)
+            {
+                if (pair.Value.ExpiresAt <= now && _leases.TryRemove(pair.Key, out _)) removed++;
+            }
+            return removed;
         }
-        return removed;
+        return WithDatabase(connection =>
+        {
+            using var command = connection.CreateCommand();
+            command.CommandText = "DELETE FROM ManagerExecutionLeases WHERE ExpiresAt <= @expires;";
+            Add(command, "@expires", now.ToString("O", CultureInfo.InvariantCulture));
+            return command.ExecuteNonQuery();
+        });
     }
 
     public void Dispose()
@@ -296,6 +397,129 @@ public sealed class ManagerExecutionLeaseStore : IManagerExecutionLeaseStore, ID
         Interlocked.Exchange(ref _available, 0);
         _leases.Clear();
     }
+
+    private int RevokeWhere(string predicate, string value)
+    {
+        if (!Available || string.IsNullOrWhiteSpace(value)) return 0;
+        if (!IsShared)
+        {
+            var revoked = 0;
+            foreach (var pair in _leases)
+            {
+                var matches = predicate.StartsWith("ExecutionId LIKE", StringComparison.Ordinal)
+                    ? pair.Value.ExecutionId.StartsWith(value, StringComparison.Ordinal)
+                    : string.Equals(pair.Value.ExecutionId, value, StringComparison.Ordinal);
+                if (matches && _leases.TryUpdate(pair.Key, pair.Value with { Active = false }, pair.Value)) revoked++;
+            }
+            return revoked;
+        }
+        return WithDatabase(connection =>
+        {
+            using var command = connection.CreateCommand();
+            command.CommandText = $"UPDATE ManagerExecutionLeases SET Active = 0 WHERE Active = 1 AND {predicate};";
+            Add(command, "@value", value);
+            return command.ExecuteNonQuery();
+        });
+    }
+
+    private T WithDatabase<T>(Func<DbConnection, T> operation)
+    {
+        if (!Available) throw new InvalidOperationException("Manager lease store is unavailable.");
+        try
+        {
+            lock (_databaseGate)
+            {
+                using var db = _dbFactory!.CreateDbContext();
+                using var connection = db.Database.GetDbConnection();
+                connection.Open();
+                EnsureSchema(connection);
+                return operation(connection);
+            }
+        }
+        catch
+        {
+            Interlocked.Exchange(ref _available, 0);
+            throw;
+        }
+    }
+
+    private void EnsureSchema(DbConnection connection)
+    {
+        if (_schemaReady) return;
+        using var command = connection.CreateCommand();
+        command.CommandText = "CREATE TABLE IF NOT EXISTS ManagerDeploymentEpochs (Id TEXT NOT NULL PRIMARY KEY, Epoch TEXT NOT NULL); CREATE TABLE IF NOT EXISTS ManagerExecutionLeases (CredentialHash TEXT NOT NULL PRIMARY KEY, LeaseId TEXT NOT NULL, Kind TEXT NOT NULL, ExecutionId TEXT NOT NULL, WorkspaceId TEXT NOT NULL, ConversationId TEXT NOT NULL, ThreadRootMessageId TEXT NOT NULL, TriggeringMessageId TEXT NOT NULL, ActorId TEXT NOT NULL, EnrollmentId TEXT NOT NULL, SessionId TEXT NOT NULL, DispatchRef TEXT NOT NULL, DeploymentEpoch TEXT NOT NULL, IssuedAt TEXT NOT NULL, ExpiresAt TEXT NOT NULL, CapabilitiesJson TEXT NOT NULL, Active INTEGER NOT NULL); CREATE INDEX IF NOT EXISTS IX_ManagerExecutionLeases_ExecutionId ON ManagerExecutionLeases (ExecutionId);";
+        command.ExecuteNonQuery();
+        _schemaReady = true;
+    }
+
+    private static void AddLeaseParameters(DbCommand command, ManagerExecutionLeaseMetadata lease)
+    {
+        Add(command, "@hash", lease.CredentialHash);
+        Add(command, "@lease", lease.LeaseId);
+        Add(command, "@kind", lease.Kind.ToString());
+        Add(command, "@execution", lease.ExecutionId);
+        Add(command, "@workspace", lease.Origin.WorkspaceId);
+        Add(command, "@conversation", lease.Origin.ConversationId);
+        Add(command, "@thread", lease.Origin.ThreadRootMessageId);
+        Add(command, "@trigger", lease.Origin.TriggeringMessageId);
+        Add(command, "@actor", lease.Origin.ActorId);
+        Add(command, "@enrollment", lease.Origin.EnrollmentId);
+        Add(command, "@session", lease.Origin.SessionId);
+        Add(command, "@dispatch", lease.Origin.DispatchRef);
+        Add(command, "@epoch", lease.DeploymentEpoch);
+        Add(command, "@issued", lease.IssuedAt.ToString("O", CultureInfo.InvariantCulture));
+        Add(command, "@expires", lease.ExpiresAt.ToString("O", CultureInfo.InvariantCulture));
+        Add(command, "@capabilities", JsonSerializer.Serialize(lease.Capabilities));
+        Add(command, "@active", lease.Active ? 1 : 0);
+    }
+
+    private static ManagerExecutionLeaseMetadata ReadLease(DbDataReader reader)
+    {
+        var kind = Enum.Parse<ManagerExecutionLeaseKind>(reader.GetString(2), ignoreCase: true);
+        var capabilities = JsonSerializer.Deserialize<HashSet<string>>(reader.GetString(15)) ?? new(StringComparer.Ordinal);
+        return new(
+            reader.GetString(0),
+            reader.GetString(1),
+            kind,
+            reader.GetString(3),
+            new ManagerExecutionOrigin(
+                reader.GetString(4), reader.GetString(5), reader.GetString(6), reader.GetString(7),
+                reader.GetString(8), reader.GetString(9), reader.GetString(10), reader.GetString(11)),
+            reader.GetString(12),
+            DateTimeOffset.Parse(reader.GetString(13), CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind),
+            DateTimeOffset.Parse(reader.GetString(14), CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind),
+            capabilities,
+            reader.GetInt32(16) != 0);
+    }
+
+    private static int Execute(DbConnection connection, string sql)
+    {
+        using var command = connection.CreateCommand();
+        command.CommandText = sql;
+        return command.ExecuteNonQuery();
+    }
+
+    private static int ScalarInt(DbConnection connection, string sql)
+    {
+        using var command = connection.CreateCommand();
+        command.CommandText = sql;
+        return Convert.ToInt32(command.ExecuteScalar(), CultureInfo.InvariantCulture);
+    }
+
+    private static void Add(DbCommand command, string name, object value)
+    {
+        var parameter = command.CreateParameter();
+        parameter.ParameterName = name;
+        parameter.Value = value;
+        command.Parameters.Add(parameter);
+    }
+
+    private void EnsureAvailable()
+    {
+        if (!Available) throw new InvalidOperationException("Manager lease store is unavailable.");
+    }
+
+    private static string NewEpoch() => $"mepoch_{Convert.ToHexString(RandomNumberGenerator.GetBytes(24)).ToLowerInvariant()}";
 }
 
 public sealed class ManagerExecutionCapabilityIssuer

@@ -76,3 +76,10 @@
 - The first post-repair full Server spec run also exposed one unrelated Runner recovery-spec race; the exact named test passed 1/1 in isolation and was not changed.
 - The clean `npm run verify` gate passes all tracks: Workflow Definition 178, CLI 1,950, Server Unit 3,120, Server Architecture 51, Server Spec 3,709, Web, Runner, and `mohist-slack`, plus docs, format, file-size, script, and boundary checks.
 - File-size ratchet failures were resolved with behavior-preserving partial/module splits for issue-618 growth; no baseline or assertion was weakened. Verification created no Git-visible changes, and the final worktree is clean.
+
+## Review Repair
+- Fixed Manager lease-bound workspace/project/Agent/Connection admission, Manager-owned liveness lookup, rejected-coordinator terminal convergence, and follow-up terminal origin identity.
+- Added fresh dual Manager grants to follow-up control delivery with actor/Enrollment reauthorization, scoped Runner Pi/OpenCode execution, redaction, and cleanup.
+- Broker requests now require the generated launcher process identity; Manager capabilities are withheld on unsupported platforms or incomplete Pi readiness, before Runner work journaling.
+- Credential expiry is classified durably and creates one deterministic, non-replaying Session recovery follow-up.
+- Production lease hashes/metadata and deployment epoch now use a shared SQLite runtime store; parameterless in-memory construction remains for unit tests.

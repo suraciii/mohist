@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto'
+import { readFileSync } from 'node:fs'
 import { chmod, mkdir, rm, writeFile } from 'node:fs/promises'
 import { createServer, type Server, type Socket } from 'node:net'
 import { join } from 'node:path'
@@ -133,6 +134,10 @@ export class ManagerExecutionBoundary {
     return runtime
   }
 
+  hasExpired(): boolean {
+    return this.expired()
+  }
+
   private expired(): boolean {
     return Date.now() >= Date.parse(this.grant.expiresAt)
   }
@@ -198,7 +203,7 @@ socket.on('end', () => {
   child.on('exit', (code) => process.exit(code === null ? 1 : code))
   child.on('error', () => process.exit(126))
 })
-socket.end(JSON.stringify({ kind }))
+socket.end(JSON.stringify({ kind, launcherPid: process.pid }))
 `
     await writeFile(launcher, source, { encoding: 'utf8', mode: 0o700 })
     if (process.platform !== 'win32') await chmod(launcher, 0o700)
@@ -227,14 +232,15 @@ socket.end(JSON.stringify({ kind }))
       if (body.length > 256) socket.destroy()
     })
     socket.on('end', () => {
-      let kind: unknown
+      let request: { kind?: unknown; launcherPid?: unknown }
       try {
-        kind = JSON.parse(body).kind
+        request = JSON.parse(body) as { kind?: unknown; launcherPid?: unknown }
       } catch {
         socket.end('{}')
         return
       }
-      if (kind !== 'management' && kind !== 'reply') {
+      if ((request.kind !== 'management' && request.kind !== 'reply')
+        || !this.isLauncherProcess(request.launcherPid)) {
         socket.end('{}')
         return
       }
@@ -242,9 +248,22 @@ socket.end(JSON.stringify({ kind }))
         socket.end('{}')
         return
       }
-      const credential = kind === 'reply' ? this.grant.replyCredential : this.grant.managementCredential
+      const credential = request.kind === 'reply' ? this.grant.replyCredential : this.grant.managementCredential
       socket.end(JSON.stringify({ credential }))
     })
+  }
+
+  private isLauncherProcess(value: unknown): value is number {
+    if (process.platform === 'win32' || typeof value !== 'number' || !Number.isSafeInteger(value) || value <= 0)
+      return false
+    try {
+      const commandLine = readFileSync(`/proc/${value}/cmdline`, 'utf8')
+        .split('\0')
+        .filter((part) => part.length > 0)
+      return commandLine.includes(join(this.directory, 'mo'))
+    } catch {
+      return false
+    }
   }
 }
 

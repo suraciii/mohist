@@ -147,6 +147,7 @@ export interface PiProviderErrorPolicy {
 export interface PiFollowupRequest {
   readonly target: PiSessionTarget
   readonly prompt: string
+  readonly managerExecution?: ManagerExecutionBoundary | null
   readonly options?: PiTurnOptions | null
 }
 

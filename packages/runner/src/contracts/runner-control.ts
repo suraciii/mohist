@@ -1,4 +1,4 @@
-import type { AgentExecutionDefinition } from '../core/types.js'
+import type { AgentExecutionDefinition, ManagerExecutionGrantResponse } from '../core/types.js'
 import type { SlackExecutionContext } from '../runtime/slack-execution-context.js'
 import type { WorkspaceQuery } from '../runtime/workspace-query.js'
 import type { SessionCommandRequest, SessionCommandResult } from '../server/session-command-handler.js'
@@ -80,6 +80,7 @@ export interface FollowupParams {
   executionSource?: unknown
   slackExecutionContext?: SlackExecutionContext | null
   attachments?: readonly FollowupAttachmentDescriptor[] | null
+  managerExecutionGrant?: ManagerExecutionGrantResponse | null
 }
 
 export interface SessionStopParams {

@@ -289,6 +289,7 @@ export class RunnerHost {
             piRuntime: () => this.piRuntime,
             connection: this.connection,
             runnerId: options.runnerId,
+            runnerRoot: options.runnerRoot,
             followupOperationJournal: this.followupOperationJournal,
             bindingRecoveryCoordinator: this.bindingRecoveryCoordinator,
             skillResolver: this.skillResolver,
@@ -701,6 +702,41 @@ export class RunnerHost {
         // better.
         if (this.inFlight.has(key) || this.awaitingAck.has(key)) continue
 
+        const isManagerExecution = work.projectId === '__mohist_slack_manager__'
+        let managerBoundary: ManagerExecutionBoundary | null = null
+        if (isManagerExecution) {
+          const managerCapabilities = [
+            'manager-execution-grant-v1',
+            'manager-deployment-epoch-v1',
+            'manager-private-broker-v1',
+            'manager-pi-scoped-executor-v1',
+            'manager-opencode-isolated-v1',
+            'manager-redaction-v1',
+          ]
+          if (
+            process.platform === 'win32' ||
+            !managerCapabilities.every((capability) => this.registrationState().capabilities.includes(capability)) ||
+            !polled.managerExecutionGrant
+          ) {
+            log.error('Manager dispatch is not supported by this runner; leaving work recoverable', {
+              work: work.workId,
+            })
+            continue
+          }
+          try {
+            managerBoundary = await ManagerExecutionBoundary.create(
+              polled.managerExecutionGrant,
+              this.options.runnerRoot,
+            )
+          } catch (error) {
+            log.error('Manager execution boundary could not be established; leaving work recoverable', {
+              work: work.workId,
+              exception: error,
+            })
+            continue
+          }
+        }
+
         const startupObserved = this.recoveredStartedWork.has(key)
         const recovery = isAgentRecoveryDispatch(work)
         let admission: Awaited<ReturnType<WorkResultJournal['begin']>>
@@ -709,6 +745,7 @@ export class RunnerHost {
             ? await this.workResultJournal.beginRecovery(work)
             : await this.workResultJournal.begin(work)
         } catch (error) {
+          await managerBoundary?.dispose().catch(() => undefined)
           log.error('work result journal could not fence dispatch; skipping work', {
             work: work.workId,
             exception: error,
@@ -724,6 +761,7 @@ export class RunnerHost {
           const entry: InFlightEntry = { done: Promise.resolve(), work, awaitingResultPersistence: false, controller }
           entry.done = reconcileStartedDispatch(this.recoveryContext(), work, controller.signal, key)
           this.inFlight.set(key, entry)
+          await managerBoundary?.dispose().catch(() => undefined)
           this.syncOpenCodeWorkOwners()
           continue
         }
@@ -735,10 +773,12 @@ export class RunnerHost {
           const entry: InFlightEntry = { done: Promise.resolve(), work, awaitingResultPersistence: false, controller }
           entry.done = reconcileStartedDispatch(this.recoveryContext(), work, controller.signal, key)
           this.inFlight.set(key, entry)
+          await managerBoundary?.dispose().catch(() => undefined)
           this.syncOpenCodeWorkOwners()
           continue
         }
         if (admission !== 'new' && (!recovery || admission === 'completed')) {
+          await managerBoundary?.dispose().catch(() => undefined)
           log.warn('work dispatch has a durable unfinished result; retaining fence', {
             work: work.workId,
             state: admission,
@@ -754,6 +794,7 @@ export class RunnerHost {
             // No turn-adoption API: the execution context is provably
             // gone, so surface unknown without executing anything.
             this.recoveredStartedWork.enqueue(work)
+            await managerBoundary?.dispose().catch(() => undefined)
             log.warn('recovery dispatch runtime has no turn adoption; reporting unknown', {
               work: work.workId,
               runtime: work.agentRecovery!.runtime,
@@ -763,24 +804,8 @@ export class RunnerHost {
           log.info('recovery dispatch admitted for reconciliation', { work: work.workId })
         }
 
-        const isManagerExecution = work.projectId === '__mohist_slack_manager__'
-        if (isManagerExecution) {
-          if (!polled.managerExecutionGrant) {
-            log.error('Manager dispatch arrived without its one-shot execution grant', { work: work.workId })
-            continue
-          }
-          try {
-            this.managerExecutions.set(
-              key,
-              await ManagerExecutionBoundary.create(polled.managerExecutionGrant, this.options.runnerRoot),
-            )
-          } catch (error) {
-            log.error('Manager execution boundary could not be established; refusing work', {
-              work: work.workId,
-              exception: error,
-            })
-            continue
-          }
+        if (isManagerExecution && managerBoundary) {
+          this.managerExecutions.set(key, managerBoundary)
         }
 
         const controller = new AbortController()

@@ -1,12 +1,77 @@
 using Mohist.Server.Contracts;
 using Mohist.Server.Runner.Grains;
 using Mohist.Server.Sessions.Domain;
+using Mohist.Server.Infrastructure.Slack;
 using Mohist.Server.Sessions.Grains;
 
 namespace Mohist.Server.Agent.Grains;
 
 public sealed partial class AgentJobGrain
 {
+    private const string ManagerExpiryRecoveryPrompt =
+        "The previous Manager execution expired before its outcome was confirmed. Inspect the current resource state before taking any action; do not repeat the interrupted operation automatically.";
+
+    private async Task<AgentJobReportResult> ReportManagerCredentialExpiredAsync(WorkResult result)
+    {
+        if (!IsManagerInput())
+            return new AgentJobReportResult(false, "invalid-manager-expiry-report");
+
+        await EnterUnknownStateAsync("manager-credential-expired");
+        if (State.PendingInitialTurnTerminalDelivery is { } pending)
+            await DeliverInitialTurnTerminalAsync(pending);
+        await EnsureManagerExpiryRecoveryAsync();
+        return new AgentJobReportResult(true, "manager_credential_expired");
+    }
+
+    private async Task EnsureManagerExpiryRecoveryAsync()
+    {
+        if (State.ManagerExpiryRecovery is { } existing)
+        {
+            _followupDispatchScheduler?.Schedule(
+                State.Input?.ProjectId ?? string.Empty,
+                State.Input?.AgentSessionId ?? string.Empty);
+            return;
+        }
+
+        var input = State.Input;
+        var anchor = input?.SlackExecutionContext?.ReplyAnchor;
+        if (input is null
+            || anchor is null
+            || !string.Equals(anchor.ProjectId, SlackDeliveryOwnerIds.ManagerProjectId, StringComparison.Ordinal)
+            || string.IsNullOrWhiteSpace(input.AgentSessionId))
+            return;
+
+        var inputId = $"manager-expiry-recovery-input:{Key}";
+        var turnId = $"manager-expiry-recovery-turn:{Key}";
+        var session = GrainFactory.GetGrain<IAgentSessionGrain>(input.AgentSessionId);
+        await session.RecordFollowupTurnAsync(new RecordFollowupTurnCommand(
+            inputId,
+            turnId,
+            ManagerExpiryRecoveryPrompt,
+            "manager-credential-expiry-recovery",
+            Provenance: new AgentSessionInputProvenance(
+                "slack",
+                anchor.WorkspaceId,
+                anchor.ConversationId,
+                anchor.ThreadRootMessageId,
+                anchor.InitiatingMemberId,
+                anchor.TriggeringMessageId,
+                anchor.ConnectionId,
+                anchor.ThreadRootMessageId)));
+
+        State.ManagerExpiryRecovery = new ManagerExpiryRecoveryTransition(
+            inputId,
+            turnId,
+            _timeProvider.GetUtcNow());
+        await PersistAsync();
+        _followupDispatchScheduler?.Schedule(input.ProjectId ?? string.Empty, input.AgentSessionId);
+    }
+
+    private bool IsManagerInput() =>
+        State.Input?.SlackExecutionContext?.ReplyAnchor is { } anchor
+        && string.Equals(anchor.ProjectId, SlackDeliveryOwnerIds.ManagerProjectId, StringComparison.Ordinal)
+        && string.Equals(anchor.OwnerKind, SlackDeliveryOwnerKinds.Manager, StringComparison.Ordinal);
+
     private async Task<AgentJobReportResult> ReportUnknownResultAsync(WorkResult result)
     {
         // A restarted Runner proves only that this physical dispatch was

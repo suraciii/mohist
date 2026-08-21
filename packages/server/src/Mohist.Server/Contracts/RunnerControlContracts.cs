@@ -3,6 +3,7 @@ using System.Text.Json.Serialization;
 using Mohist.Server.Infrastructure;
 using Mohist.Server.Infrastructure.Workspace;
 using Mohist.Server.Sessions.Services;
+using Mohist.Server.Slack.Services;
 
 namespace Mohist.Server.Contracts;
 
@@ -82,7 +83,8 @@ public sealed record FollowupParams(
     [property: JsonPropertyName("turnId")] string TurnId,
     [property: JsonPropertyName("executionSource")] string? ExecutionSource,
     [property: JsonPropertyName("slackExecutionContext")] AgentSlackExecutionContext? SlackExecutionContext,
-    [property: JsonPropertyName("attachments")] IReadOnlyList<FollowupAttachmentDescriptor>? Attachments);
+    [property: JsonPropertyName("attachments")] IReadOnlyList<FollowupAttachmentDescriptor>? Attachments,
+    [property: JsonPropertyName("managerExecutionGrant")] ManagerExecutionGrant? ManagerExecutionGrant = null);
 
 public sealed record SessionStopParams(
     [property: JsonPropertyName("target")] RunnerSessionTarget Target,
