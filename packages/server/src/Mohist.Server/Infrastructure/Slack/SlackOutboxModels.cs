@@ -42,6 +42,7 @@ public sealed record SlackDeliveryPayload(
     [property: JsonPropertyName("fallbackText")] string? FallbackText = null,
     [property: JsonPropertyName("fallbackDispatchRef")] string? FallbackDispatchRef = null,
     [property: JsonPropertyName("statusDispatchRef")] string? StatusDispatchRef = null,
+    [property: JsonPropertyName("terminalStatus")] string? TerminalStatus = null,
     [property: JsonPropertyName("blocks")] JsonElement? Blocks = null,
     [property: JsonPropertyName("fileName")] string? FileName = null,
     [property: JsonPropertyName("fileContentBase64")] string? FileContentBase64 = null,
@@ -102,6 +103,24 @@ public sealed record SlackAgentReplyResult(
     string? DeliveryId = null,
     string? DispatchRef = null,
     bool MergedIntoExisting = false);
+
+/// <summary>
+/// The non-secret origin facts required to promote a Manager reply. The
+/// route constructs this only after validating the lease and the durable
+/// inbox/session mapping, so the outbox never resolves a Manager reply by
+/// conversation alone.
+/// </summary>
+public sealed record SlackManagerReplyAnchor(
+    SlackMessageIdentity Source,
+    string ThreadRootMessageId,
+    string ActorId,
+    string EnrollmentId,
+    string SessionId,
+    string DispatchRef)
+{
+    public string ProgressDispatchRef => SlackStatusProjection.DispatchRef(Source, "progress");
+    public string StatusDispatchRef => SlackStatusProjection.DispatchRef(Source, "status");
+}
 
 public static class SlackDeliveryOwnerKinds
 {

@@ -22,6 +22,10 @@ public static class ManagerCapabilityCatalog
     public const string ConnectionDisable = "connection.disable";
     public const string OwnerClaim = "owner.claim";
     public const string OwnerTransfer = "owner.transfer";
+    // Reply delivery is a separate capability lease, not a management
+    // operation. It is still part of the Manager CLI language so the CLI
+    // can select the dedicated reply route before making a request.
+    public const string ManagerReply = "manager.reply";
 
     public static IReadOnlySet<string> ManagementCapabilities { get; } = new HashSet<string>(StringComparer.Ordinal)
     {
@@ -42,6 +46,9 @@ public static class ManagerCapabilityCatalog
     public static bool IsManagement(string? capability) =>
         capability is not null && ManagementCapabilities.Contains(capability);
 
+    public static bool IsManagerCapability(string? capability) =>
+        IsManagement(capability) || string.Equals(capability, ManagerReply, StringComparison.Ordinal);
+
     public static bool IsManagerModeValue(string? value) =>
         string.Equals(value, "1", StringComparison.Ordinal)
         || string.Equals(value, "true", StringComparison.OrdinalIgnoreCase)
@@ -61,6 +68,8 @@ public static class ManagerCapabilityCatalog
         if (Equals(args, 0, "slack"))
         {
             var verb = ValueAt(args, 1);
+            if (verb == "message" && ValueAt(args, 2) == "send")
+                return ManagerReply;
             return verb switch
             {
                 "status" => WorkspaceStatus,
@@ -110,6 +119,12 @@ public static class ManagerCapabilityCatalog
             && Equals(segments, 2, "status")
             && string.Equals(method, "GET", StringComparison.OrdinalIgnoreCase))
             return WorkspaceStatus;
+        if (segments.Length == 3
+            && Equals(segments, 0, "api")
+            && Equals(segments, 1, "slack-manager")
+            && Equals(segments, 2, "reply")
+            && string.Equals(method, "POST", StringComparison.OrdinalIgnoreCase))
+            return ManagerReply;
 
         if (segments.Length < 4
             || !Equals(segments, 0, "api")

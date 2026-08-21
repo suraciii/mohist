@@ -50,6 +50,20 @@ public sealed class SlackStatusProjection : IScopedService
         JsonElement? blocks = null,
         CancellationToken ct = default)
     {
+        // Queue the receipt removal first. The adapter claims rows in their
+        // durable insertion order, so a working message cannot become
+        // visible before the receipt transition has been requested.
+        await EnqueueReactionAsync(
+            projectId,
+            connectionId,
+            source,
+            threadTs,
+            "working-remove-received",
+            SlackDeliveryOperations.ReactionRemove,
+            ReceivedReaction,
+            null,
+            ct);
+
         var result = await _outbox.UpsertReplaceableProgressAsync(new SlackOutboxDraft(
             projectId,
             connectionId,
@@ -67,16 +81,6 @@ public sealed class SlackStatusProjection : IScopedService
             threadTs ?? source.MessageTs,
             OwnerKindFor(projectId)), ct);
 
-        await EnqueueReactionAsync(
-            projectId,
-            connectionId,
-            source,
-            threadTs,
-            "working-remove-received",
-            SlackDeliveryOperations.ReactionRemove,
-            ReceivedReaction,
-            null,
-            ct);
         await EnqueueReactionAsync(
             projectId,
             connectionId,
@@ -165,7 +169,8 @@ public sealed class SlackStatusProjection : IScopedService
                 SlackDeliveryOperations.ReactionAdd,
                 ReactionFor(status),
                 null,
-                ct);
+                ct,
+                terminalStatus: status);
         }
         return result;
     }
@@ -237,7 +242,8 @@ public sealed class SlackStatusProjection : IScopedService
             SlackDeliveryOperations.ReactionAdd,
             ReactionFor(status),
             null,
-            ct);
+            ct,
+            terminalStatus: status);
     }
 
     public static string DispatchRef(SlackMessageIdentity source, string phase) =>
@@ -317,7 +323,8 @@ public sealed class SlackStatusProjection : IScopedService
         string operation,
         string reaction,
         string? fallbackText,
-        CancellationToken ct) =>
+        CancellationToken ct,
+        string? terminalStatus = null) =>
         _outbox.EnqueueRequiredAsync(new SlackOutboxDraft(
             projectId,
             connectionId,
@@ -331,7 +338,8 @@ public sealed class SlackStatusProjection : IScopedService
                 Reaction: reaction,
                 FallbackText: fallbackText,
                 FallbackDispatchRef: DispatchRef(source, "status"),
-                StatusDispatchRef: DispatchRef(source, "status"))),
+                StatusDispatchRef: DispatchRef(source, "status"),
+                TerminalStatus: terminalStatus)),
             threadTs ?? source.MessageTs,
             OwnerKindFor(projectId)), ct);
 }

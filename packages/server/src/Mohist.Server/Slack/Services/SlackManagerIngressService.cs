@@ -87,7 +87,13 @@ public sealed class SlackManagerIngressService : IScopedService
                 message.ThreadTs),
             new SlackProviderInboxRouteDraft(routeKind, currentSessionId),
             ct);
-        if (accepted.AlreadyExisted)
+        var route = await _inbox.GetRouteAsync(
+            SlackDeliveryOwnerIds.ManagerProjectId,
+            accepted.Id,
+            ct);
+
+        var claimCode = ReadClaimCode(message.Text);
+        if (accepted.AlreadyExisted && claimCode is not null)
         {
             var existing = (await _inbox.ListAsync(
                 SlackDeliveryOwnerIds.ManagerProjectId,
@@ -97,16 +103,10 @@ public sealed class SlackManagerIngressService : IScopedService
                 return SlackManagerIngressResult.Duplicate(accepted.Id);
         }
 
-        var route = await _inbox.GetRouteAsync(
-            SlackDeliveryOwnerIds.ManagerProjectId,
-            accepted.Id,
-            ct);
-
         var actor = await _access.AuthenticateAsync(
             message.Identity.WorkspaceTeamId,
             senderSlackUserId,
             ct);
-        var claimCode = ReadClaimCode(message.Text);
         var claimAccepted = false;
         if (!actor.Allowed && claimCode is not null)
         {
@@ -149,6 +149,31 @@ public sealed class SlackManagerIngressService : IScopedService
             return SlackManagerIngressResult.Accepted(accepted.Id, false);
         }
 
+        // Persist the receipt before dispatching the Session. This ordering
+        // closes the fast-completion race: a terminal event cannot finish
+        // liveness and then have replayed ingress recreate a receipt after it.
+        await _status.EnqueueReceivedAsync(
+            SlackDeliveryOwnerIds.ManagerProjectId,
+            enrollment.Id,
+            message.Identity,
+            message.ThreadTs,
+            ct);
+
+        // Queue working liveness before handing the message to the Session.
+        // This makes terminal delivery converge even when the Agent finishes
+        // during the launch call and before the ingress request returns.
+        if ((!accepted.AlreadyExisted || string.IsNullOrWhiteSpace(route.SessionId))
+            && !string.IsNullOrWhiteSpace(message.Text))
+        {
+            await _status.EnqueueWorkingAsync(
+                SlackDeliveryOwnerIds.ManagerProjectId,
+                enrollment.Id,
+                message.Identity,
+                message.ThreadTs,
+                SlackStatusProjection.DispatchRef(message.Identity, "progress"),
+                ct: ct);
+        }
+
         if (accepted.AlreadyExisted && !string.IsNullOrWhiteSpace(route.SessionId))
         {
             await _inbox.MarkDispatchedAsync(SlackDeliveryOwnerIds.ManagerProjectId, accepted.Id, ct);
@@ -180,12 +205,6 @@ public sealed class SlackManagerIngressService : IScopedService
 
         // Receipt and working state are durable projections, not replies. The
         // Agent reply action remains the only source of Manager message text.
-        await _status.EnqueueReceivedAsync(
-            SlackDeliveryOwnerIds.ManagerProjectId,
-            enrollment.Id,
-            message.Identity,
-            message.ThreadTs,
-            ct);
         await _inbox.MarkDispatchedAsync(SlackDeliveryOwnerIds.ManagerProjectId, accepted.Id, ct);
         return SlackManagerIngressResult.Accepted(accepted.Id, false, response.SessionId, response.InputId, response.TurnId);
     }

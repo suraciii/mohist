@@ -1,6 +1,9 @@
 using System.Net;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using Microsoft.EntityFrameworkCore;
+using Mohist.Server.Infrastructure.Data.Db;
+using Mohist.Server.Infrastructure.Data.Slack;
 using Mohist.Server.Infrastructure.Slack;
 using Mohist.Server.Slack.Domain;
 using Mohist.Server.Slack.Services;
@@ -162,6 +165,133 @@ public static class SlackManagerIngressRoutes
                 : ApiResults.Ok(progress);
         });
 
+        manager.MapPost("/reply", async (
+            HttpContext context,
+            SlackReplyBody body,
+            IDbContextFactory<MohistDbContext> dbFactory,
+            SlackOutboxStore outbox,
+            CancellationToken ct) =>
+        {
+            if (context.Items[ManagerExecutionCredentialContext.HttpContextItemKey]
+                is not ManagerExecutionCredentialContext credential
+                || credential.Kind != ManagerExecutionLeaseKind.Reply)
+                return ApiResults.Fail(
+                    "Manager replies require a Manager reply credential.",
+                    StatusCodes.Status403Forbidden,
+                    "manager_reply_credential_required");
+
+            if (body is null || string.IsNullOrWhiteSpace(body.ConversationId))
+                return ApiResults.BadRequest("conversationId is required.");
+
+            var origin = credential.Lease.Origin;
+            var conversationId = body.ConversationId.Trim();
+            var threadTs = string.IsNullOrWhiteSpace(body.ThreadTs)
+                ? origin.ThreadRootMessageId
+                : body.ThreadTs.Trim();
+            if (!string.Equals(conversationId, origin.ConversationId, StringComparison.Ordinal)
+                || !string.Equals(threadTs, origin.ThreadRootMessageId, StringComparison.Ordinal)
+                || !MatchesOptional(body.WorkspaceTeamId, origin.WorkspaceId)
+                || !MatchesOptional(body.ThreadRootMessageId, origin.ThreadRootMessageId)
+                || !MatchesOptional(body.TriggeringMessageId, origin.TriggeringMessageId)
+                || !MatchesOptional(body.ActorId, origin.ActorId)
+                || !MatchesOptional(body.EnrollmentId, origin.EnrollmentId)
+                || !MatchesOptional(body.SessionId, origin.SessionId)
+                || !MatchesOptional(body.DispatchRef, origin.DispatchRef))
+            {
+                return ApiResults.Conflict(
+                    "The Manager reply does not match its immutable Slack origin.",
+                    "manager_reply_origin_mismatch");
+            }
+
+            var hasAttachment = !string.IsNullOrWhiteSpace(body.ImageUrl)
+                || !string.IsNullOrWhiteSpace(body.FileContentBase64);
+            if (string.IsNullOrWhiteSpace(body.Text) && !hasAttachment)
+                return ApiResults.BadRequest("text, imageUrl, or a file is required.");
+            if (!string.IsNullOrWhiteSpace(body.FileContentBase64)
+                && string.IsNullOrWhiteSpace(body.FileName))
+                return ApiResults.BadRequest("fileName is required when a file is attached.");
+            if (!string.IsNullOrWhiteSpace(body.FileContentBase64))
+            {
+                try
+                {
+                    _ = Convert.FromBase64String(body.FileContentBase64);
+                }
+                catch (FormatException)
+                {
+                    return ApiResults.BadRequest("fileContentBase64 is not valid base64.");
+                }
+            }
+
+            await using var db = await dbFactory.CreateDbContextAsync(ct);
+            var inbox = await db.SlackProviderInboxRows.AsNoTracking().SingleOrDefaultAsync(row =>
+                row.ProjectId == SlackDeliveryOwnerIds.ManagerProjectId
+                && row.ConnectionId == origin.EnrollmentId
+                && row.SlackMessageIdentity == origin.WorkspaceId + "/" + origin.ConversationId + "/" + origin.TriggeringMessageId,
+                ct);
+            var mapping = await db.SlackDmSessionMappings.AsNoTracking().SingleOrDefaultAsync(row =>
+                row.ProjectId == SlackDeliveryOwnerIds.ManagerProjectId
+                && row.ConnectionId == origin.EnrollmentId
+                && row.WorkspaceTeamId == origin.WorkspaceId
+                && row.SlackUserId == origin.ActorId
+                && row.DmConversationId == origin.ConversationId
+                && row.CurrentSessionId == origin.SessionId,
+                ct);
+            var enrollment = await db.SlackWorkspaceEnrollments.AsNoTracking().SingleOrDefaultAsync(row =>
+                row.Id == origin.EnrollmentId
+                && row.WorkspaceTeamId == origin.WorkspaceId
+                && row.Lifecycle == SlackEnrollmentLifecycle.Active
+                && row.DeletedAt == null,
+                ct);
+            if (inbox is null
+                || !string.Equals(inbox.WorkspaceTeamId, origin.WorkspaceId, StringComparison.Ordinal)
+                || !string.Equals(inbox.ConversationId, origin.ConversationId, StringComparison.Ordinal)
+                || !string.Equals(
+                    inbox.ThreadTs ?? origin.TriggeringMessageId,
+                    origin.ThreadRootMessageId,
+                    StringComparison.Ordinal)
+                || !string.Equals(inbox.SlackUserId, origin.ActorId, StringComparison.Ordinal)
+                || !string.Equals(inbox.RouteSessionId, origin.SessionId, StringComparison.Ordinal)
+                || mapping is null
+                || enrollment is null)
+            {
+                return ApiResults.Conflict(
+                    "The Manager reply origin is no longer an accepted active Session.",
+                    "manager_reply_origin_mismatch");
+            }
+
+            var text = SlackMarkdownRenderer.ToMrkdwn(SlackFinalReplyRenderer.RedactReplyText(body.Text));
+            if (string.IsNullOrWhiteSpace(text) && !hasAttachment)
+                return ApiResults.BadRequest("text must not be empty.");
+
+            var result = await outbox.EnqueueManagerAgentReplyAsync(
+                new SlackManagerReplyAnchor(
+                    new SlackMessageIdentity(origin.WorkspaceId, origin.ConversationId, origin.TriggeringMessageId),
+                    origin.ThreadRootMessageId,
+                    origin.ActorId,
+                    origin.EnrollmentId,
+                    origin.SessionId,
+                    origin.DispatchRef),
+                text,
+                imageUrl: string.IsNullOrWhiteSpace(body.ImageUrl) ? null : body.ImageUrl.Trim(),
+                fileName: string.IsNullOrWhiteSpace(body.FileName) ? null : body.FileName.Trim(),
+                fileContentBase64: string.IsNullOrWhiteSpace(body.FileContentBase64) ? null : body.FileContentBase64,
+                ct);
+            if (!result.Accepted)
+                return ApiResults.Conflict(
+                    "The Manager reply could not be attached to its current liveness projection.",
+                    "manager_reply_liveness_conflict");
+            return ApiResults.Ok(new
+            {
+                accepted = true,
+                connectionId = result.ConnectionId,
+                deliveryId = result.DeliveryId,
+                dispatchRef = result.DispatchRef,
+                merged = result.MergedIntoExisting,
+                ownerKind = SlackDeliveryOwnerKinds.Manager,
+                projectId = SlackDeliveryOwnerIds.ManagerProjectId,
+            });
+        });
+
         manager.MapPost("/ingress", async (
             HttpContext context,
             SlackManagerIngressBody body,
@@ -219,6 +349,10 @@ public static class SlackManagerIngressRoutes
                 403, "loopback_required");
         return null;
     }
+
+    private static bool MatchesOptional(string? supplied, string expected) =>
+        string.IsNullOrWhiteSpace(supplied)
+            || string.Equals(supplied.Trim(), expected, StringComparison.Ordinal);
 
     private static bool HasClientIdentity(IReadOnlyDictionary<string, JsonElement>? extensionData) =>
         extensionData?.Keys.Any(key =>
