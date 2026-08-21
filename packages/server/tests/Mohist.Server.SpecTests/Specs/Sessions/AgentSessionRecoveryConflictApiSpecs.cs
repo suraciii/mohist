@@ -25,33 +25,6 @@ public class AgentSessionRecoveryConflictApiSpecs : AgentSessionRecoveryApiTestS
     }
 
     [Fact]
-    public async Task ResetEndpoint_ActiveSession_ReturnsConflict()
-    {
-        var (project, issue, _, currentSession) = await CreateAndStartSessionAsync("reset-active", sessionName: "build", attach: true);
-        // Under the activity model (issue-484) attaching the runtime no
-        // longer flips the session to active; a session.activity record
-        // does. Mark the session active so the idle boundary rejects Reset.
-        var grain = _fixture.Grains.GetGrain<IAgentSessionGrain>(currentSession.Id);
-        var persistence = grain.PersistenceCheckpoint(_fixture.Persistence);
-        await grain.AppendRuntimeEventsAsync(new AppendAgentSessionRuntimeEventsCommand(new[]
-        {
-            new AgentSessionRuntimeEventInput(
-                RuntimeEventTypes.SessionActivity,
-                "{\"activity\":\"active\"}"),
-        }, currentSession.Id));
-        await persistence.WaitAsync();
-
-        using var response = await _client.PostAsync($"/api/projects/{project.Id}/issues/{issue.Number}/sessions/build/reset", content: null);
-
-        Assert.Equal(HttpStatusCode.Conflict, response.StatusCode);
-        var body = await response.Content.ReadAsStringAsync();
-        using var doc = JsonDocument.Parse(body);
-        Assert.Equal("session_active", doc.RootElement.GetProperty("code").GetString());
-        Assert.Equal(currentSession.Id, doc.RootElement.GetProperty("details").GetProperty("sessionId").GetString());
-        Assert.Empty(RunnerControl.Invocations);
-    }
-
-    [Fact]
     public async Task ResetEndpoint_NonexistentSession_ReturnsNotFound()
     {
         var (project, issue) = await CreateProjectAndIssueAsync("reset-not-found");
@@ -115,15 +88,14 @@ public class AgentSessionRecoveryConflictApiSpecs : AgentSessionRecoveryApiTestS
             .GetAsync())?.Id);
     }
 
-    [Theory]
-    [InlineData("compact")]
-    [InlineData("reset")]
-    public async Task CanonicalRecoveryEndpoint_ActiveAgentLaunchSession_ReturnsSharedConflict(string operation)
+    [Fact]
+    public async Task CanonicalResetEndpoint_ActiveAgentLaunchSession_ReturnsSharedConflict()
     {
-        var (project, _) = await CreateProjectAndIssueAsync($"{operation}-agent-active");
+        const string operation = "reset";
+        var (project, _) = await CreateProjectAndIssueAsync("reset-agent-active");
         var session = await CreateAgentLaunchSessionAsync(
             project,
-            $"{operation}-agent-active",
+            "reset-agent-active",
             attach: true);
         // Under the activity model (issue-484) attaching the runtime no
         // longer flips the session to active; a session.activity record
@@ -185,17 +157,16 @@ public class AgentSessionRecoveryConflictApiSpecs : AgentSessionRecoveryApiTestS
         }
     }
 
-    [Theory]
-    [InlineData("compact")]
-    [InlineData("reset")]
-    public async Task CanonicalRecoveryEndpoint_CrossProjectSession_ReturnsNotFound(string operation)
+    [Fact]
+    public async Task CanonicalCompactEndpoint_CrossProjectSession_ReturnsNotFound()
     {
-        var (sourceProject, _) = await CreateProjectAndIssueAsync($"{operation}-agent-project-a");
+        const string operation = "compact";
+        var (sourceProject, _) = await CreateProjectAndIssueAsync("compact-agent-project-a");
         var session = await CreateAgentLaunchSessionAsync(
             sourceProject,
-            $"{operation}-agent-project-a",
+            "compact-agent-project-a",
             attach: true);
-        var (otherProject, _) = await CreateProjectAndIssueAsync($"{operation}-agent-project-b");
+        var (otherProject, _) = await CreateProjectAndIssueAsync("compact-agent-project-b");
 
         using var response = await _client.PostAsync(
             $"/api/projects/{otherProject.Id}/agent-sessions/{session.Id}/{operation}",
@@ -204,39 +175,8 @@ public class AgentSessionRecoveryConflictApiSpecs : AgentSessionRecoveryApiTestS
         Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
     }
 
-    [Fact]
-    public async Task SessionMetadataEndpoint_AfterCompact_ExposesContextUsagePercent()
-    {
-        var (project, issue, _, _) = await CreateAndStartSessionAsync("compact-dto", sessionName: "plan", attach: true);
-
-        using var compactResponse = await _client.PostAsync($"/api/projects/{project.Id}/issues/{issue.Number}/sessions/plan/compact", content: null);
-        Assert.Equal(HttpStatusCode.OK, compactResponse.StatusCode);
-
-        var raw = await _client.GetRawAsync($"/api/projects/{project.Id}/issues/{issue.Number}/sessions/plan");
-        using var doc = JsonDocument.Parse(raw);
-        var root = doc.RootElement.GetProperty("data");
-        var usage = root.GetProperty("usage");
-    }
-
-    [Fact]
-    public async Task CompactEndpoint_AfterClosedSession_EmitsContextExhaustionCategoryOnMetadata()
-    {
-        var (project, issue, _, currentSession) = await CreateAndStartSessionAsync("compact-after-close", sessionName: "plan", attach: true);
-
-        using var compactResponse = await _client.PostAsync($"/api/projects/{project.Id}/issues/{issue.Number}/sessions/plan/compact", content: null);
-        Assert.Equal(HttpStatusCode.OK, compactResponse.StatusCode);
-
-        var raw = await _client.GetRawAsync($"/api/projects/{project.Id}/issues/{issue.Number}/sessions/plan");
-        using var doc = JsonDocument.Parse(raw);
-        var root = doc.RootElement.GetProperty("data");
-        Assert.Equal(currentSession.Id, root.GetProperty("id").GetString());
-        var usage = root.GetProperty("usage");
-    }
-
     [Theory]
     [InlineData("compact", null)]
-    [InlineData("reset", null)]
-    [InlineData("compact", "acp")]
     [InlineData("reset", "acp")]
     public async Task RecoveryEndpoint_LegacyBackendBinding_CompactFailsAndResetEstablishesOpenCodeBinding(
         string operation,

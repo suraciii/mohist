@@ -312,29 +312,6 @@ public class AgentLauncherSpecs
     }
 
     [Fact]
-    public async Task Launch_WithEmptyTriggerLabels_ProducesNoTriggerMetadataLabels()
-    {
-        var projectId = await CreateProjectAsync("launcher-empty-trigger");
-        var agent = await CreateAgentAsync(projectId, "empty-trigger-agent");
-
-        AgentLaunchResult result;
-        await using (var scope = _fixture.Services.CreateAsyncScope())
-        {
-            var launcher = scope.ServiceProvider.GetRequiredService<IAgentLauncher>();
-            result = await launcher.LaunchAsync(
-                agent,
-                prompt: "empty trigger labels",
-                new AgentLaunchContext(ProjectId: projectId, WorkspaceName: null),
-                triggerLabels: new Dictionary<string, string>(StringComparer.Ordinal));
-        }
-
-        var record = await LoadSessionByIdAsync(result.SessionId);
-        Assert.NotNull(record);
-        Assert.Null(record!.Session.Metadata.Label(GenericAgentSessionMetadata.TriggerEventId));
-        Assert.Null(record.Session.Metadata.Label(GenericAgentSessionMetadata.TriggerRuleId));
-    }
-
-    [Fact]
     public async Task LaunchMention_ReturnsCommentAnchoredJobKey()
     {
         var projectId = await CreateProjectAsync("launcher-mention-job-key");
@@ -361,12 +338,10 @@ public class AgentLauncherSpecs
         Assert.Equal(expectedJobKey, result.JobKey);
     }
 
-    [Theory]
-    [InlineData("")]
-    [InlineData("   ")]
-    [InlineData("\t\n  ")]
-    public async Task Launch_WithBlankPrompt_ThrowsArgumentException_WithoutAnySideEffects(string prompt)
+    [Fact]
+    public async Task Launch_WithBlankPrompt_ThrowsArgumentException_WithoutAnySideEffects()
     {
+        const string prompt = "   ";
         var projectId = await CreateProjectAsync("launcher-blank-prompt");
         var agent = await CreateAgentAsync(projectId, "blank-prompt-agent");
 

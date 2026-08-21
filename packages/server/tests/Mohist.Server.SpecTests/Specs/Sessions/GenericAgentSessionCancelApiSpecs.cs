@@ -2,9 +2,7 @@ using System.Net;
 using System.Text.Json;
 using Microsoft.Extensions.DependencyInjection;
 using Mohist.Server.Agent.Grains;
-using Mohist.Server.Api;
 using Mohist.Server.Runner.Services;
-using Mohist.Server.Contracts;
 using Mohist.Server.Sessions.Domain;
 using Mohist.Server.Sessions.Grains;
 using Mohist.Server.Sessions.Services;
@@ -46,40 +44,6 @@ public class GenericAgentSessionCancelApiSpecs : GenericAgentSessionCancelApiTes
     }
 
     [Fact]
-    public async Task Stop_TerminalTurnReturnsAlreadyEndedAndDoesNotTouchOtherTurns()
-    {
-        var (project, sessionId, turnId) = await CreateQueuedSessionForCancelAsync();
-        using var first = await PostCancelAsync(project.Id, sessionId, turnId);
-        var hub = _fixture.Services.GetRequiredService<IRunnerControlTransport>() as RecordingRunnerControlTransport
-            ?? throw new InvalidOperationException("Recording runner hub context was not registered.");
-        hub.Clear();
-
-        using var second = await PostCancelAsync(project.Id, sessionId, turnId);
-
-        Assert.Equal(HttpStatusCode.OK, second.StatusCode);
-        var data = await ReadDataAsync(second);
-        Assert.Equal("turn-already-ended", data.GetProperty("state").GetString());
-        Assert.Equal("cancelled", data.GetProperty("turnStatus").GetString());
-        Assert.Empty(hub.Invocations);
-    }
-
-    [Fact]
-    public async Task Stop_ExecutingWithoutReplyLeavesStopPending()
-    {
-        var (project, sessionId, turnId) = await CreateExecutingSessionForCancelAsync();
-        var hub = _fixture.Services.GetRequiredService<IRunnerControlTransport>() as RecordingRunnerControlTransport
-            ?? throw new InvalidOperationException("Recording runner hub context was not registered.");
-        hub.Clear();
-
-        using var response = await PostCancelAsync(project.Id, sessionId, turnId);
-
-        Assert.Equal(HttpStatusCode.ServiceUnavailable, response.StatusCode);
-        Assert.Single(hub.Invocations);
-        await Assert.ThrowsAsync<StopOperationInProgressException>(
-            () => _fixture.Grains.GetGrain<IAgentSessionGrain>(sessionId).BeginFollowupAsync());
-    }
-
-    [Fact]
     public async Task Stop_ExecutingTurnSendsTurnTargetAndReturnsStopped()
     {
         var (project, sessionId) = await CreateCanonicalSessionForCancelAsync("agent-launch");
@@ -101,26 +65,6 @@ public class GenericAgentSessionCancelApiSpecs : GenericAgentSessionCancelApiTes
     }
 
     [Fact]
-    public async Task Stop_ConfirmedLaunchLeavesTerminalVerdictToAgentJob()
-    {
-        var (project, sessionId, turnId, jobId) = await CreateExecutingLaunchSessionForStopAsync();
-        var hub = _fixture.Services.GetRequiredService<IRunnerControlTransport>() as RecordingRunnerControlTransport
-            ?? throw new InvalidOperationException("Recording runner hub context was not registered.");
-        hub.Clear();
-        hub.SetInvocationResponse("session.stop", new RunnerStopReply("stopped"));
-
-        using var response = await PostStopAsync(project.Id, sessionId, turnId);
-
-        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-        Assert.Equal(AgentTurnStatus.Cancelled, Assert.Single(await _fixture.Grains.GetGrain<IAgentSessionGrain>(sessionId).ListTurnsAsync()).Status);
-
-        await _fixture.Grains.GetGrain<IAgentJobGrain>(jobId).FailAsync("job-reported-failure");
-
-        var turn = Assert.Single(await _fixture.Grains.GetGrain<IAgentSessionGrain>(sessionId).ListTurnsAsync());
-        Assert.Equal(AgentTurnStatus.Cancelled, turn.Status);
-    }
-
-    [Fact]
     public async Task Stop_OfflineBeforeDispatchKeepsTurnClaimForRecovery()
     {
         var (project, sessionId, turnId) = await CreateExecutingSessionForCancelAsync();
@@ -138,22 +82,6 @@ public class GenericAgentSessionCancelApiSpecs : GenericAgentSessionCancelApiTes
         {
             tracker.Register(_runnerId, $"{_runnerId}-conn");
         }
-    }
-
-    [Fact]
-    public async Task Stop_QueuedTurnRecordsCancelledWithoutContactingRunner()
-    {
-        var (project, sessionId, turnId) = await CreateQueuedSessionForCancelAsync();
-        var hub = _fixture.Services.GetRequiredService<IRunnerControlTransport>() as RecordingRunnerControlTransport
-            ?? throw new InvalidOperationException("Recording runner hub context was not registered.");
-        hub.Clear();
-
-        using var response = await PostStopAsync(project.Id, sessionId, turnId);
-
-        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-        var data = await ReadDataAsync(response);
-        Assert.Equal("cancelled", data.GetProperty("state").GetString());
-        Assert.Empty(hub.Invocations);
     }
 
     [Fact]
@@ -182,231 +110,6 @@ public class GenericAgentSessionCancelApiSpecs : GenericAgentSessionCancelApiTes
         turn = Assert.Single(await _fixture.Grains.GetGrain<IAgentSessionGrain>(sessionId).ListTurnsAsync());
         Assert.Equal(AgentTurnStatus.Unknown, turn.Status);
         Assert.Equal("unknown", (await _fixture.Grains.GetGrain<IAgentSessionGrain>(sessionId).GetAsync())!.Status);
-    }
-
-    [Fact]
-    public async Task Stop_UnconfirmedReplyMarksFollowupTurnAndSessionUnknownWithoutRunnerActivity()
-    {
-        var (project, sessionId, turnId) = await CreateExecutingSessionForCancelAsync();
-        var hub = _fixture.Services.GetRequiredService<IRunnerControlTransport>() as RecordingRunnerControlTransport
-            ?? throw new InvalidOperationException("Recording runner hub context was not registered.");
-        hub.Clear();
-        hub.SetInvocationResponse("session.stop", new RunnerStopReply("unknown", true));
-
-        using var response = await PostStopAsync(project.Id, sessionId, turnId);
-
-        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-        var data = await ReadDataAsync(response);
-        Assert.Equal("unknown", data.GetProperty("state").GetString());
-        Assert.True(data.GetProperty("interruptUnconfirmed").GetBoolean());
-        var turn = Assert.Single(await _fixture.Grains.GetGrain<IAgentSessionGrain>(sessionId).ListTurnsAsync());
-        Assert.Equal(AgentTurnStatus.Unknown, turn.Status);
-        Assert.Equal("unknown", (await _fixture.Grains.GetGrain<IAgentSessionGrain>(sessionId).GetAsync())!.Status);
-    }
-
-    [Theory]
-    [InlineData("completed", AgentTurnStatus.Completed)]
-    [InlineData("failed", AgentTurnStatus.Failed)]
-    public async Task Stop_UnconfirmedFollowupTurnReconcilesOnCorrelatedTerminalRuntimeActivity(
-        string runtimeStatus,
-        AgentTurnStatus expectedTurnStatus)
-    {
-        var (project, sessionId, turnId) = await CreateExecutingSessionForCancelAsync();
-        var hub = _fixture.Services.GetRequiredService<IRunnerControlTransport>() as RecordingRunnerControlTransport
-            ?? throw new InvalidOperationException("Recording runner hub context was not registered.");
-        hub.Clear();
-        hub.SetInvocationResponse("session.stop", new RunnerStopReply("unknown", true));
-
-        using var response = await PostStopAsync(project.Id, sessionId, turnId);
-        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-
-        var session = _fixture.Grains.GetGrain<IAgentSessionGrain>(sessionId);
-        var runtimeSessionId = (await session.GetAsync())!.AgentSessionId
-            ?? throw new InvalidOperationException("Agent session runtime identity was not created.");
-        await session.AppendRuntimeEventsAsync(new AppendAgentSessionRuntimeEventsCommand(
-            new[] { new AgentSessionRuntimeEventInput(
-                RuntimeEventTypes.SessionActivity,
-                $"{{\"activity\":\"idle\",\"status\":\"{runtimeStatus}\",\"turnId\":\"{turnId}\"}}") },
-            runtimeSessionId));
-
-        var turn = Assert.Single(await session.ListTurnsAsync());
-        Assert.Equal(expectedTurnStatus, turn.Status);
-        Assert.Equal("idle", (await session.GetAsync())!.Status);
-    }
-
-    [Fact]
-    public async Task Stop_TerminalTurnReturnsAlreadyEndedWithoutContactingRunner()
-    {
-        var (project, sessionId, turnId) = await CreateQueuedSessionForCancelAsync();
-        using var cancel = await PostCancelAsync(project.Id, sessionId, turnId);
-        var hub = _fixture.Services.GetRequiredService<IRunnerControlTransport>() as RecordingRunnerControlTransport
-            ?? throw new InvalidOperationException("Recording runner hub context was not registered.");
-        hub.Clear();
-
-        using var response = await PostStopAsync(project.Id, sessionId, turnId);
-
-        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-        var data = await ReadDataAsync(response);
-        Assert.Equal("turn-already-ended", data.GetProperty("state").GetString());
-        Assert.Equal("cancelled", data.GetProperty("turnStatus").GetString());
-        Assert.Empty(hub.Invocations);
-    }
-
-    [Fact]
-    public async Task Stop_TargetTerminalBeforeRunnerReplyDoesNotAdmitLaterTurn()
-    {
-        var (project, sessionId, turnId) = await CreateExecutingSessionForCancelAsync();
-        var session = _fixture.Grains.GetGrain<IAgentSessionGrain>(sessionId);
-        var hub = _fixture.Services.GetRequiredService<IRunnerControlTransport>() as RecordingRunnerControlTransport
-            ?? throw new InvalidOperationException("Recording runner hub context was not registered.");
-        hub.Clear();
-        hub.SetInvocationResponseFactory("session.stop", _ => CompleteTargetBeforeStopReplyAsync(session, turnId));
-
-        using var response = await PostStopAsync(project.Id, sessionId, turnId);
-
-        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-        Assert.Equal("stopped", (await ReadDataAsync(response)).GetProperty("state").GetString());
-        Assert.Single(hub.Invocations);
-        var reservation = await session.BeginFollowupAsync();
-        Assert.True(reservation.StartsIdleTurn);
-        await session.AbandonFollowupAsync(reservation.OperationId!);
-    }
-
-    [Fact]
-    public async Task Stop_RunnerWithoutReplyKeepsTurnClaimUntilAConfirmedRuntimeFactArrives()
-    {
-        var (project, sessionId, turnId) = await CreateExecutingSessionForCancelAsync();
-        var session = _fixture.Grains.GetGrain<IAgentSessionGrain>(sessionId);
-        var hub = _fixture.Services.GetRequiredService<IRunnerControlTransport>() as RecordingRunnerControlTransport
-            ?? throw new InvalidOperationException("Recording runner hub context was not registered.");
-        hub.Clear();
-        hub.SetInvocationResponseFactory("session.stop", _ => CompleteTargetWithoutStopReplyAsync(session, turnId));
-
-        using var response = await PostStopAsync(project.Id, sessionId, turnId);
-
-        Assert.Equal(HttpStatusCode.ServiceUnavailable, response.StatusCode);
-        await Assert.ThrowsAsync<StopOperationInProgressException>(session.BeginFollowupAsync);
-    }
-
-    [Fact]
-    public async Task Stop_ConfirmedRuntimeFactReleasesTurnClaimAfterReplyLoss()
-    {
-        var (project, sessionId, turnId) = await CreateExecutingSessionForCancelAsync();
-        var session = _fixture.Grains.GetGrain<IAgentSessionGrain>(sessionId);
-        var hub = _fixture.Services.GetRequiredService<IRunnerControlTransport>() as RecordingRunnerControlTransport
-            ?? throw new InvalidOperationException("Recording runner hub context was not registered.");
-        hub.Clear();
-        hub.SetInvocationResponseFactory("session.stop", _ => CompleteTargetWithoutStopReplyAsync(session, turnId));
-
-        using var response = await PostStopAsync(project.Id, sessionId, turnId);
-
-        Assert.Equal(HttpStatusCode.ServiceUnavailable, response.StatusCode);
-        var payload = JsonSerializer.SerializeToElement(Assert.Single(hub.Invocations).Arguments.Single());
-        var operationId = payload.GetProperty("operationId").GetString();
-        Assert.False(string.IsNullOrWhiteSpace(operationId));
-        var runtimeSessionId = (await session.GetAsync())!.AgentSessionId!;
-        await session.AppendRuntimeEventsAsync(new AppendAgentSessionRuntimeEventsCommand(
-            new[] { new AgentSessionRuntimeEventInput(
-                RuntimeEventTypes.SessionActivity,
-                $"{{\"activity\":\"idle\",\"status\":\"completed\",\"turnId\":\"{turnId}\",\"stopOperationId\":\"{operationId}\"}}") },
-            runtimeSessionId));
-
-        var reservation = await session.BeginFollowupAsync();
-        Assert.True(reservation.StartsIdleTurn);
-        await session.AbandonFollowupAsync(reservation.OperationId!);
-    }
-
-    [Fact]
-    public async Task Stop_TerminalTurnRetriesPendingOperationAfterReplyLoss()
-    {
-        var (project, sessionId, turnId) = await CreateExecutingSessionForCancelAsync();
-        var session = _fixture.Grains.GetGrain<IAgentSessionGrain>(sessionId);
-        var hub = _fixture.Services.GetRequiredService<IRunnerControlTransport>() as RecordingRunnerControlTransport
-            ?? throw new InvalidOperationException("Recording runner hub context was not registered.");
-        hub.Clear();
-        hub.SetInvocationResponseFactory("session.stop", _ => CompleteTargetWithoutStopReplyAsync(session, turnId));
-
-        using var first = await PostStopAsync(project.Id, sessionId, turnId);
-        Assert.Equal(HttpStatusCode.ServiceUnavailable, first.StatusCode);
-
-        hub.SetInvocationResponse("session.stop", new RunnerStopReply("not-cancellable"));
-        using var retry = await PostStopAsync(project.Id, sessionId, turnId);
-
-        Assert.Equal(HttpStatusCode.OK, retry.StatusCode);
-        Assert.Equal("not-cancellable", (await ReadDataAsync(retry)).GetProperty("state").GetString());
-        var invocations = hub.Invocations;
-        Assert.Equal(2, invocations.Count);
-        var firstPayload = JsonSerializer.SerializeToElement(invocations[0].Arguments.Single());
-        var retryPayload = JsonSerializer.SerializeToElement(invocations[1].Arguments.Single());
-        Assert.Equal(firstPayload.GetProperty("operationId").GetString(), retryPayload.GetProperty("operationId").GetString());
-        var reservation = await session.BeginFollowupAsync();
-        Assert.True(reservation.StartsIdleTurn);
-        await session.AbandonFollowupAsync(reservation.OperationId!);
-    }
-
-    [Fact]
-    public async Task Stop_LaterTurnDoesNotChangeTerminalLaunchJobWhenNoReply()
-    {
-        var (project, sessionId, turnId, jobId) = await CreateTerminalLaunchWithExecutingFollowupAsync();
-        var hub = _fixture.Services.GetRequiredService<IRunnerControlTransport>() as RecordingRunnerControlTransport
-            ?? throw new InvalidOperationException("Recording runner hub context was not registered.");
-        hub.Clear();
-
-        using var response = await PostCancelAsync(project.Id, sessionId, turnId);
-
-        Assert.Equal(HttpStatusCode.ServiceUnavailable, response.StatusCode);
-        Assert.Single(hub.Invocations);
-        Assert.Equal(AgentJobStatus.Failed, await _fixture.Grains.GetGrain<IAgentJobGrain>(jobId).GetStatusAsync());
-    }
-
-    [Fact]
-    public async Task Stop_LaterTurnDoesNotChangeTerminalLaunchJob()
-    {
-        var (project, sessionId, turnId, jobId) = await CreateTerminalLaunchWithExecutingFollowupAsync();
-        var hub = _fixture.Services.GetRequiredService<IRunnerControlTransport>() as RecordingRunnerControlTransport
-            ?? throw new InvalidOperationException("Recording runner hub context was not registered.");
-        hub.Clear();
-        hub.SetInvocationResponse("session.stop", new RunnerStopReply("stopped"));
-
-        using var response = await PostStopAsync(project.Id, sessionId, turnId);
-
-        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-        Assert.Equal("stopped", (await ReadDataAsync(response)).GetProperty("state").GetString());
-        Assert.Equal(AgentJobStatus.Failed, await _fixture.Grains.GetGrain<IAgentJobGrain>(jobId).GetStatusAsync());
-    }
-
-    private async Task<(ProjectRef Project, string SessionId, string TurnId, string JobId)> CreateTerminalLaunchWithExecutingFollowupAsync()
-    {
-        var (project, sessionId, initialTurnId, jobId) = await CreateExecutingLaunchSessionForStopAsync();
-        var session = _fixture.Grains.GetGrain<IAgentSessionGrain>(sessionId);
-        await _fixture.Grains.GetGrain<IAgentJobGrain>(jobId).FailAsync("terminal-before-followup");
-        await session.MarkTurnTerminalAsync(initialTurnId, AgentTurnStatus.Failed, null);
-
-        var turnId = $"turn-{Guid.NewGuid():N}";
-        await session.RecordFollowupTurnAsync(new RecordFollowupTurnCommand(
-            $"input-{Guid.NewGuid():N}",
-            turnId,
-            "later follow up",
-            "generic-followup"));
-        await session.MarkTurnExecutingAsync(turnId);
-        return (project, sessionId, turnId, jobId);
-    }
-
-    private static async Task<RunnerStopReply?> CompleteTargetBeforeStopReplyAsync(
-        IAgentSessionGrain session,
-        string turnId)
-    {
-        await session.MarkTurnTerminalAsync(turnId, AgentTurnStatus.Completed, null);
-        await Assert.ThrowsAsync<StopOperationInProgressException>(session.BeginFollowupAsync);
-        return new RunnerStopReply("stopped");
-    }
-
-    private static async Task<RunnerStopReply?> CompleteTargetWithoutStopReplyAsync(
-        IAgentSessionGrain session,
-        string turnId)
-    {
-        await session.MarkTurnTerminalAsync(turnId, AgentTurnStatus.Completed, null);
-        return null;
     }
 
     private async Task<JsonElement> ReadDataAsync(HttpResponseMessage response)

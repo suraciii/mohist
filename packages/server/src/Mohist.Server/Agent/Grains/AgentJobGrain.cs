@@ -265,25 +265,6 @@ public sealed partial class AgentJobGrain : Grain, IAgentJobGrain
             Interruption: State.Interruption,
             InterruptionHistory: State.InterruptionHistory));
 
-    private bool MatchesRecoveryReceiptBinding(RuntimeRecoveryReceipt receipt)
-    {
-        var input = State.Input;
-        var expectedRuntime = input?.Runtime ?? AgentConfigSchema.OpenCodeRuntime;
-        return string.Equals(receipt.RunnerId, State.RunnerId, StringComparison.Ordinal)
-            && string.Equals(receipt.WorkId, State.WorkId, StringComparison.Ordinal)
-            && string.Equals(receipt.AgentSessionId, input?.AgentSessionId, StringComparison.Ordinal)
-            && string.Equals(receipt.AgentTurnId, input?.InitialTurnId, StringComparison.Ordinal)
-            && string.Equals(receipt.Runtime, expectedRuntime, StringComparison.Ordinal)
-            && string.Equals(receipt.RuntimeSessionId, State.RuntimeSessionId, StringComparison.Ordinal);
-    }
-
-    private bool CanContinueAfterUpdateInterruption() =>
-        State.LaunchVisibility == AgentLaunchVisibility.Visible
-        && State.Input is { } input
-        && !string.IsNullOrWhiteSpace(input.AgentId)
-        && (!string.IsNullOrWhiteSpace(input.Prompt)
-            || input.Attachments is { Count: > 0 });
-
     private async Task AllocateRecoveryAttemptAsync(string interruptedWorkId)
     {
         State.RecoveryAttempts ??= [];
@@ -408,28 +389,12 @@ public sealed partial class AgentJobGrain : Grain, IAgentJobGrain
             return;
 
         RecordInterruptedAttempt(State.InterruptedWorkId, _timeProvider.GetUtcNow());
-        State.Status = AgentJobStatus.Interrupted;
-        State.RecoveryTerminalReason = reason;
-        State.UpdateInterruptionDeadlineAt = null;
-        State.FailureReason = null;
-        State.RunningSince = null;
-        State.TerminalAt = _timeProvider.GetUtcNow();
-        State.TerminalResult = new AgentJobTerminalResult(
-            AgentJobStatus.Interrupted,
-            reason,
-            null,
-            null,
-            null,
-            null);
-        State.ConcurrencyGateStatus = AgentConcurrencyPermitStatus.Terminal;
-        State.ConcurrencyReleasePending = State.ConcurrencyPermitId is not null
-            || State.ConcurrencyPermitHeld
-            || State.ConcurrencyWaiterId is not null;
+        var terminalResult = AgentJobRecoveryPolicy.EnterTerminal(State, reason, _timeProvider.GetUtcNow());
         DisposeJobTimeoutTimer();
         await EnsureRecoveryReminderAsync();
         await PersistAsync();
         await TryReleaseConcurrencyPermitAsync();
-        _terminalCompletion.TrySetResult(State.TerminalResult);
+        _terminalCompletion.TrySetResult(terminalResult);
     }
 
     private async Task SettleUpdateOperationWorkAsync(RuntimeRecoveryReceipt receipt)

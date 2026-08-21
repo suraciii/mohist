@@ -74,6 +74,22 @@ public sealed class AgentStartupContextFingerprintTests
             AgentLaunchCoordinatorCodec.Fingerprint(explicitNull));
     }
 
+    [Fact]
+    public void Agent_reference_and_prompt_changes_are_visible_to_replay_fingerprint()
+    {
+        var baseline = new AgentLaunchCoordinatorRequest(
+            "accepted prompt", "agent-id", null, null, null, null, null, null);
+        var differentAgentReference = baseline with { AgentRef = "agent-name" };
+        var whitespacePrompt = baseline with { Prompt = "   " };
+
+        Assert.NotEqual(
+            AgentLaunchCoordinatorCodec.Fingerprint(baseline),
+            AgentLaunchCoordinatorCodec.Fingerprint(differentAgentReference));
+        Assert.NotEqual(
+            AgentLaunchCoordinatorCodec.Fingerprint(baseline),
+            AgentLaunchCoordinatorCodec.Fingerprint(whitespacePrompt));
+    }
+
     private static AgentStartupContext BuildContext(
         string body,
         bool truncated,

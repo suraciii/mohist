@@ -119,6 +119,27 @@ public sealed class AgentSessionRecoveryDomainTests
             TestTime.UtcDateTime));
     }
 
+    [Theory]
+    [InlineData(null, "runtime-1", true)]
+    [InlineData("acp", "runtime-1", true)]
+    [InlineData("opencode", null, true)]
+    [InlineData("opencode", "runtime-1", false)]
+    [InlineData("pi", "runtime-1", false)]
+    public void IsRuntimeSessionMissing_RequiresARegisteredRuntimeAndPhysicalBinding(
+        string? runtime,
+        string? runtimeSessionId,
+        bool expected)
+    {
+        var session = CreateSession();
+        session.Runtime = session.Runtime with { Runtime = runtime };
+        session.Status = session.Status with { AgentRuntimeSessionId = runtimeSessionId };
+
+        var missing = session.IsRuntimeSessionMissing(
+            candidate => candidate is "opencode" or "pi");
+
+        Assert.Equal(expected, missing);
+    }
+
     private static AgentSession CreateSession() => AgentSession.Create(
         "session-1",
         "runner-1",
