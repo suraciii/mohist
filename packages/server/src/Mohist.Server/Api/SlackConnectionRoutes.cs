@@ -1491,6 +1491,41 @@ public static partial class SlackConnectionRoutes
     /// treated as Bot mentions.
     /// </para>
     /// </summary>
+    private sealed record ChannelNewWorkAdmission(
+        AgentInfo? Agent,
+        SlackAdmissionDecision? Decision);
+
+    private static async Task<ChannelNewWorkAdmission> AdmitChannelNewWorkAsync(
+        HandleChannelIngressRequest req,
+        string threadAnchor,
+        CancellationToken ct)
+    {
+        var agent = await req.Agents.GetByIdAsync(req.ProjectId, req.Connection.AgentId);
+        if (agent is null)
+            return new(null, null);
+
+        var decision = await req.Services.GetRequiredService<SlackAdmissionService>()
+            .AdmitNewWorkAsync(
+                req.ProjectId,
+                req.Connection,
+                agent,
+                req.Identity,
+                threadAnchor,
+                ct);
+        return new(agent, decision);
+    }
+
+    private static IResult AgentNotFoundResponse() =>
+        ApiResults.Fail("The Agent bound to this Connection no longer exists.", 409, "agent_not_found");
+
+    private static IResult AdmissionResponse(SlackAdmissionDecision decision) =>
+        ApiResults.Ok(new
+        {
+            kind = decision.Kind,
+            reason = decision.Reason,
+            responseOwner = decision.ResponseOwner,
+        });
+
     private static async Task<IResult> HandleChannelIngressAsync(HandleChannelIngressRequest req, CancellationToken ct)
     {
         var body = req.Body;
@@ -1581,7 +1616,12 @@ public static partial class SlackConnectionRoutes
                     await EnqueueReplyAsync(req.Outbox, projectId, connection, body.ConversationId, reason, null, ct, body.ThreadTs);
                     return ApiResults.Ok(new { kind = "rejected", reason });
                 }
-                return await LaunchChannelRootAsync(req, prompt, rootTs, null, ct);
+                var channelAdmissionRoot = await AdmitChannelNewWorkAsync(req, rootTs, ct);
+                if (channelAdmissionRoot.Agent is null)
+                    return AgentNotFoundResponse();
+                if (!channelAdmissionRoot.Decision!.Admitted)
+                    return AdmissionResponse(channelAdmissionRoot.Decision);
+                return await LaunchChannelRootAsync(req, channelAdmissionRoot.Agent, prompt, rootTs, null, ct);
             }
 
             if (otherBotsInThread)
@@ -1592,7 +1632,12 @@ public static partial class SlackConnectionRoutes
                     await EnqueueReplyAsync(req.Outbox, projectId, connection, body.ConversationId, reason, null, ct, body.ThreadTs);
                     return ApiResults.Ok(new { kind = "rejected", reason });
                 }
-                return await LaunchChannelRootAsync(req, prompt, rootTs, null, ct);
+                var channelAdmissionOtherThread = await AdmitChannelNewWorkAsync(req, rootTs, ct);
+                if (channelAdmissionOtherThread.Agent is null)
+                    return AgentNotFoundResponse();
+                if (!channelAdmissionOtherThread.Decision!.Admitted)
+                    return AdmissionResponse(channelAdmissionOtherThread.Decision);
+                return await LaunchChannelRootAsync(req, channelAdmissionOtherThread.Agent, prompt, rootTs, null, ct);
             }
 
             var reconciled = await ReconcileSessionIdAsync(
@@ -1607,6 +1652,12 @@ public static partial class SlackConnectionRoutes
                 return ApiResults.Ok(new { kind = "rejected", reason });
             }
 
+            var channelAdmissionUnbound = await AdmitChannelNewWorkAsync(req, rootTs, ct);
+            if (channelAdmissionUnbound.Agent is null)
+                return AgentNotFoundResponse();
+            if (!channelAdmissionUnbound.Decision!.Admitted)
+                return AdmissionResponse(channelAdmissionUnbound.Decision);
+
             var historyOutcome = await ReadThreadHistoryIfAnyAsync(req, rootTs, ct);
 
             if (historyOutcome.Outcome == SlackThreadHistoryReadOutcome.Refused)
@@ -1619,7 +1670,7 @@ public static partial class SlackConnectionRoutes
             var startupContext = historyOutcome.Outcome == SlackThreadHistoryReadOutcome.Imported
                 ? BuildStartupContext(req, historyOutcome.Messages)
                 : null;
-            return await LaunchChannelRootAsync(req, prompt, rootTs, startupContext, ct);
+            return await LaunchChannelRootAsync(req, channelAdmissionUnbound.Agent, prompt, rootTs, startupContext, ct);
         }
 
         if (threadBindings.Count >= 2)
@@ -1879,6 +1930,7 @@ public static partial class SlackConnectionRoutes
 
     private static async Task<IResult> LaunchChannelRootAsync(
         HandleChannelIngressRequest req,
+        AgentInfo agent,
         string prompt,
         string rootTs,
         AgentStartupContext? startupContext,
@@ -1896,18 +1948,6 @@ public static partial class SlackConnectionRoutes
                 reason = SlackAdmissionMessages.Backpressured,
                 responseOwner = SlackIngressResponseOwners.Adapter,
             });
-
-        var agent = await req.Agents.GetByIdAsync(projectId, connection.AgentId);
-        if (agent is null)
-            return ApiResults.Fail("The Agent bound to this Connection no longer exists.", 409, "agent_not_found");
-
-        var dispatchDecision = await ResolveInboundDispatchDecisionAsync(req.Services, projectId, agent, ct);
-        if (!dispatchDecision.Accepted)
-        {
-            await EnqueueReplyAsync(req.Outbox, projectId, connection, body.ConversationId,
-                dispatchDecision.Reason!, null, ct, body.ThreadTs);
-            return ApiResults.Ok(new { kind = dispatchDecision.Kind, reason = dispatchDecision.Reason });
-        }
 
         var reservation = await req.ThreadLaunchReservations.ReserveAsync(
             projectId,

@@ -12,11 +12,18 @@ not edited; the next self-review regenerates it.
 - MF-3: require a real Server-ingress-plus-Node-adapter end-to-end test, not
   only tests that happen to share JSON fixtures.
 
+## T-003 implementation notes
+
+- Channel ingress now applies the shared `SlackAdmissionService` after mention, access, routing, binding, and empty-prompt classification but before thread history import, provider inbox acceptance, reservation, attachment preparation, workspace provisioning, or launch.
+- Root mentions use the root message timestamp as the durable nudge reply anchor; first mentions in unbound threads use the incoming thread timestamp. Existing bound-thread replies stay on the follow-up path, and legacy capacity/backpressure remains adapter-owned.
+- Added channel integration coverage for blocked roots, blocked unbound-thread first mentions, anchors, redelivery/concurrency, no execution side effects, unavailable Connections, and bound follow-ups.
+
 ## Status
 
 - Plan edits: complete for all three findings.
-- Verification: `tasks.json` parses, all task spec anchors resolve, and `git diff --check` passes.
-- Commit: `fcfeffc25` (`fix issue-619 plan review findings`).
+- T-003 implementation and channel coverage are complete.
+- Verification: Server build passes; focused Slack channel/DM integration coverage passes (3008 tests under the repository's test runner); `git diff --check` passes.
+- Commits: `fcfeffc25` (`fix issue-619 plan review findings`), plus the current T-003 implementation commit.
 
 ## Disposition notes
 
