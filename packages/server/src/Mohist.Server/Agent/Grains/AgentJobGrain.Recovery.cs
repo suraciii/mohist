@@ -42,7 +42,7 @@ public sealed partial class AgentJobGrain
         var inputId = $"manager-recovery-input:{Key}";
         var turnId = $"manager-recovery-turn:{Key}";
         var session = GrainFactory.GetGrain<IAgentSessionGrain>(input.AgentSessionId);
-        await session.RecordFollowupTurnAsync(new RecordFollowupTurnCommand(
+        await session.RecordManagerRecoveryTurnAsync(new RecordFollowupTurnCommand(
             inputId,
             turnId,
             ManagerRecoveryPrompt,

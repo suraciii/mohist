@@ -3500,6 +3500,49 @@ public sealed partial class AgentSessionGrain : Grain, IAgentSessionGrain, IRemi
         await CommitAsync(session, events);
     }
 
+    public async Task RecordManagerRecoveryTurnAsync(RecordFollowupTurnCommand command)
+    {
+        ArgumentNullException.ThrowIfNull(command);
+        var session = await GetRequiredAsync();
+        await RecordManagerRecoveryTurnAsync(session, command);
+    }
+
+    private async Task RecordManagerRecoveryTurnAsync(
+        AgentSession session,
+        RecordFollowupTurnCommand command)
+    {
+        if (!string.Equals(
+                session.Metadata?.Label(AgentSessionQueryMetadataKeys.ProjectId),
+                SlackDeliveryOwnerIds.ManagerProjectId,
+                StringComparison.Ordinal)
+            || command.Provenance is null
+            || !string.Equals(command.Provenance.ProviderKind, "slack", StringComparison.Ordinal)
+            || string.IsNullOrWhiteSpace(command.Provenance.WorkspaceId)
+            || string.IsNullOrWhiteSpace(command.Provenance.ConversationId)
+            || string.IsNullOrWhiteSpace(command.Provenance.BoundThreadRootMessageId)
+            || string.IsNullOrWhiteSpace(command.Provenance.MemberId)
+            || string.IsNullOrWhiteSpace(command.Provenance.MessageId)
+            || string.IsNullOrWhiteSpace(command.Provenance.ConnectionId))
+            return;
+
+        var events = session.RecordManagerRecoveryTurn(
+            inputId: command.InputId,
+            turnId: command.TurnId,
+            prompt: command.Prompt,
+            source: command.Source,
+            now: Now(),
+            provenance: command.Provenance);
+        if (events.Count == 0)
+        {
+            await _stateStore.SaveAsync(SessionId, session);
+            _session = session;
+            _stateDirty = true;
+            EnsurePersistenceTimer();
+            return;
+        }
+        await CommitAsync(session, events);
+    }
+
     public async Task EnsureManagerCredentialExpiryRecoveryAsync()
     {
         var session = await GetRequiredAsync();
@@ -3524,22 +3567,12 @@ public sealed partial class AgentSessionGrain : Grain, IAgentSessionGrain, IRemi
             || string.IsNullOrWhiteSpace(provenance.ConnectionId))
             return;
 
-        var events = session.RecordManagerRecoveryTurn(
-            inputId: $"manager-recovery-input:{SessionId}",
-            turnId: $"manager-recovery-turn:{SessionId}",
-            prompt: "The previous Manager execution ended before its outcome was confirmed. Inspect the current resource state before taking any action; do not repeat the interrupted operation automatically.",
-            source: "manager-recovery:manager-credential-expired",
-            now: Now(),
-            provenance);
-        if (events.Count == 0)
-        {
-            await _stateStore.SaveAsync(SessionId, session);
-            _session = session;
-            _stateDirty = true;
-            EnsurePersistenceTimer();
-            return;
-        }
-        await CommitAsync(session, events);
+        await RecordManagerRecoveryTurnAsync(session, new RecordFollowupTurnCommand(
+            InputId: $"manager-recovery-input:{SessionId}",
+            TurnId: $"manager-recovery-turn:{SessionId}",
+            Prompt: "The previous Manager execution ended before its outcome was confirmed. Inspect the current resource state before taking any action; do not repeat the interrupted operation automatically.",
+            Source: "manager-recovery:manager-credential-expired",
+            Provenance: provenance));
     }
 
     public async Task AbandonFollowupTurnAsync(string inputId, string turnId)

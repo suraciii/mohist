@@ -4,17 +4,23 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
+using Mohist.Server.Contracts;
 using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Infrastructure.Data.Issue;
 using Mohist.Server.Infrastructure.Data.Sessions;
+using Mohist.Server.Infrastructure.Data.Slack;
 using Mohist.Server.Infrastructure.Data.Workflow;
 using Mohist.Server.Infrastructure.Events;
 using Mohist.Server.Infrastructure.Slack;
+using Mohist.Server.Api;
 using Mohist.Server.Issue.Grains;
 using Mohist.Server.Runner.Grains;
+using Mohist.Server.Runner.Services;
 using Mohist.Server.Sessions.Domain;
 using Mohist.Server.Sessions.Grains;
 using Mohist.Server.SpecTests.Support;
+using Mohist.Server.Slack.Domain;
+using Mohist.Server.Slack.Services;
 using Mohist.Server.TestSupport;
 using Mohist.Server.Sessions.Services;
 using Mohist.Server.Workflow.Domain.Run;
@@ -110,6 +116,146 @@ public class AgentSessionRuntimeEventSpecs : AgentSessionTestSupport
         Assert.NotNull(dispatch);
         Assert.Equal($"manager-recovery-turn:{sessionId}", dispatch!.TurnId);
         Assert.Equal($"manager-recovery-input:{sessionId}", dispatch.InputId);
+    }
+
+    [Fact]
+    public async Task UnknownInitialManagerTurn_RecoveryDispatchesFreshGrant()
+    {
+        var suffix = Guid.NewGuid().ToString("N");
+        var sessionId = $"manager-initial-recovery-{suffix}";
+        var runnerId = $"manager-initial-recovery-runner-{suffix}";
+        var workspaceId = $"workspace-initial-recovery-{suffix}";
+        var enrollmentId = $"enrollment-initial-recovery-{suffix}";
+        var memberId = $"member-initial-recovery-{suffix}";
+        var initialProvenance = new AgentSessionInputProvenance(
+            "slack",
+            workspaceId,
+            $"conversation-{suffix}",
+            $"thread-{suffix}",
+            memberId,
+            $"message-{suffix}",
+            enrollmentId,
+            $"thread-{suffix}");
+
+        await using (var scope = _fixture.Services.CreateAsyncScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<MohistDbContext>();
+            var now = _fixture.TimeProvider.GetUtcNow();
+            db.SlackWorkspaceEnrollments.Add(new SlackWorkspaceEnrollmentRow
+            {
+                Id = enrollmentId,
+                WorkspaceTeamId = workspaceId,
+                Lifecycle = SlackEnrollmentLifecycle.Active,
+                ManagerCapability = SlackManagerCapability.Available,
+                ManagerReadiness = SlackManagerReadiness.Ready,
+                ManagerActorId = $"manager-actor-{suffix}",
+                ClaimedSlackUserId = memberId,
+                PlanCode = "unknown",
+                AuditJson = "[]",
+                CreatedAt = now,
+                UpdatedAt = now,
+            });
+            await db.SaveChangesAsync();
+        }
+
+        await _fixture.Grains.GetGrain<IRunnerGrain>(runnerId).RegisterAsync(new RunnerInfo(
+            runnerId,
+            ["spec/*"],
+            "manager-recovery-runner",
+            SlackDeliveryOwnerIds.ManagerProjectId,
+            RuntimeCatalogs: CapabilityCatalogTestHelpers.Create()));
+
+        var grain = _fixture.Grains.GetGrain<IAgentSessionGrain>(sessionId);
+        var persistence = grain.PersistenceCheckpoint(_fixture.Persistence);
+        await grain.OpenAsync(new OpenAgentSessionCommand(
+            runnerId,
+            "opencode",
+            WorkDir: "/work",
+            Metadata: new AgentSessionMetadata(new Dictionary<string, string>(StringComparer.Ordinal)
+            {
+                [AgentSessionQueryMetadataKeys.ProjectId] = SlackDeliveryOwnerIds.ManagerProjectId,
+                [AgentSessionQueryMetadataKeys.SourceKind] = "agent-launch",
+                [GenericAgentSessionMetadata.AgentId] = $"manager-agent-{suffix}",
+            })));
+        await grain.EnsureInitialLaunchAsync(new EnsureInitialLaunchCommand(
+            "manager-initial-input",
+            "manager-initial-turn",
+            "manager request",
+            "agent-launch",
+            "manager-initial-job",
+            Provenance: initialProvenance));
+        await grain.AttachPhysicalSessionAsync(new AttachPhysicalSessionCommand("runtime-initial-recovery"));
+        await grain.MarkInitialTurnTerminalAsync("manager-initial-job", AgentTurnStatus.Unknown, null);
+        await grain.EnsureManagerCredentialExpiryRecoveryAsync();
+        await persistence.WaitAsync();
+
+        var transport = _fixture.Services.GetRequiredService<RecordingRunnerControlTransport>();
+        transport.Clear();
+        await using (var scope = _fixture.Services.CreateAsyncScope())
+        {
+            var dispatch = await grain.BeginNextFollowupDispatchAsync();
+            Assert.NotNull(dispatch);
+            var issuer = scope.ServiceProvider.GetRequiredService<ManagerExecutionCapabilityIssuer>();
+            var grant = issuer.Issue(new ManagerExecutionIssueRequest(
+                $"manager:{sessionId}:{dispatch!.OperationId}",
+                new ManagerExecutionOrigin(
+                    workspaceId,
+                    $"conversation-{suffix}",
+                    $"thread-{suffix}",
+                    $"message-{suffix}",
+                    memberId,
+                    enrollmentId,
+                    sessionId,
+                    dispatch.OperationId),
+                _fixture.TimeProvider.GetUtcNow(),
+                ManagerExecutionCapabilityIssuer.DefaultLifetime));
+            var delivery = scope.ServiceProvider.GetRequiredService<IFollowupDeliveryDispatcher>();
+            var result = await delivery.DispatchAsync(new FollowupDeliveryRequest(
+                ProjectId: SlackDeliveryOwnerIds.ManagerProjectId,
+                SessionId: sessionId,
+                SourceKind: "agent-launch",
+                WorkflowRunId: null,
+                SessionName: null,
+                RunnerId: runnerId,
+                Runtime: "opencode",
+                RuntimeSessionId: "runtime-initial-recovery",
+                WorkDir: "/work",
+                Definition: null,
+                OperationId: dispatch.OperationId,
+                InputTexts: dispatch.InputTexts,
+                Attachments: dispatch.Attachments,
+                InputId: dispatch.InputId,
+                SlackExecutionContext: SlackExecutionContextFactory.Create(
+                    workspaceId,
+                    $"conversation-{suffix}",
+                    $"thread-{suffix}",
+                    $"message-{suffix}",
+                    memberId,
+                    enrollmentId,
+                    sessionId,
+                    dispatch.OperationId,
+                    projectId: SlackDeliveryOwnerIds.ManagerProjectId,
+                    ownerKind: SlackDeliveryOwnerKinds.Manager),
+                TurnId: dispatch.TurnId,
+                ExecutionSource: dispatch.ExecutionSource,
+                ManagerExecutionGrant: grant));
+            Assert.True(result.Accepted);
+
+            var invocation = Assert.Single(
+                transport.Invocations,
+                request => string.Equals(request.Method, "session.followup", StringComparison.Ordinal));
+            var parameters = Assert.IsType<FollowupParams>(Assert.Single(invocation.Arguments));
+            Assert.Equal("manager-recovery-turn:" + sessionId, parameters.TurnId);
+            Assert.Equal(grant, parameters.ManagerExecutionGrant);
+            Assert.False(string.IsNullOrWhiteSpace(grant.ManagementCredential));
+            Assert.False(string.IsNullOrWhiteSpace(grant.ReplyCredential));
+            var validation = issuer.ValidatePresented(
+                grant.ManagementCredential,
+                ManagerExecutionLeaseKind.Management,
+                "workspace.status",
+                _fixture.TimeProvider.GetUtcNow());
+            Assert.True(validation.Allowed, validation.Message);
+        }
     }
 
     [Fact]

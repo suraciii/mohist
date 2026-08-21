@@ -56,6 +56,14 @@ public interface IAgentSessionGrain : IGrainWithStringKey
         AgentTurnResult? result);
 
     Task RecordFollowupTurnAsync(RecordFollowupTurnCommand command);
+
+    /// <summary>
+    /// Records the inspection-only Manager recovery turn after the original
+    /// Manager turn became unknown. Unlike an ordinary follow-up, this
+    /// transition is explicitly allowed from Session activity Unknown and
+    /// carries the durable recovery lease needed by the normal dispatcher.
+    /// </summary>
+    Task RecordManagerRecoveryTurnAsync(RecordFollowupTurnCommand command);
     Task EnsureManagerCredentialExpiryRecoveryAsync();
     Task AbandonFollowupTurnAsync(string inputId, string turnId);
 

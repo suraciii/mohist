@@ -33,14 +33,19 @@ public sealed class AgentJobManagerRunnerLossRecoverySpecs : AgentJobGrainTestSu
         var jobKey = $"agent-job-manager-loss-{Guid.NewGuid():N}";
         var job = JobGrain(jobKey);
         var sessionId = $"manager-loss-session-{Guid.NewGuid():N}";
-        await OpenSessionAsync(sessionId, projectId);
+        await OpenSessionAsync(sessionId, jobKey);
 
         var context = ManagerContext(sessionId, jobKey);
+        var initialInputId = $"manager-initial-input:{jobKey}";
+        var initialTurnId = $"manager-initial-turn:{jobKey}";
         await job.SubmitAsync(new AgentJobInput(
             Prompt: "manager request",
             ProjectId: projectId,
             AgentId: "agent-test",
             AgentSessionId: sessionId,
+            PinnedRunnerId: runnerId,
+            InitialInputId: initialInputId,
+            InitialTurnId: initialTurnId,
             ExecutionSource: AgentExecutionSources.Slack,
             SlackExecutionContext: context));
         await WaitForStatusAsync(job, AgentJobStatus.Running, TimeSpan.FromSeconds(5));
@@ -53,9 +58,10 @@ public sealed class AgentJobManagerRunnerLossRecoverySpecs : AgentJobGrainTestSu
         Assert.Equal(AgentJobFailureReasons.RunnerLost, snapshot.FailureReason);
 
         var recoveryTurnId = $"manager-recovery-turn:{jobKey}";
-        var recoveryTurn = Assert.Single(
-            (await SessionTurnsAsync(sessionId)),
-            turn => turn.Id == recoveryTurnId);
+        var turns = await SessionTurnsAsync(sessionId);
+        var initialTurn = Assert.Single(turns, turn => turn.Id == initialTurnId);
+        Assert.Equal(AgentTurnStatus.Unknown, initialTurn.Status);
+        var recoveryTurn = Assert.Single(turns, turn => turn.Id == recoveryTurnId);
         Assert.Null(recoveryTurn.WorkflowExecution);
 
         // Repeated server-side loss transitions stay idempotent: the
@@ -93,7 +99,7 @@ public sealed class AgentJobManagerRunnerLossRecoverySpecs : AgentJobGrainTestSu
     private async Task<IReadOnlyList<AgentTurnRecord>> SessionTurnsAsync(string sessionId) =>
         await Grains.GetGrain<IAgentSessionGrain>(sessionId).ListTurnsAsync();
 
-    private async Task OpenSessionAsync(string sessionId, string projectId)
+    private async Task OpenSessionAsync(string sessionId, string jobKey)
     {
         var session = Grains.GetGrain<IAgentSessionGrain>(sessionId);
         await session.OpenAsync(new OpenAgentSessionCommand(
@@ -102,9 +108,24 @@ public sealed class AgentJobManagerRunnerLossRecoverySpecs : AgentJobGrainTestSu
             WorkDir: "/tmp/agent-job-fixture",
             Metadata: new AgentSessionMetadata(new Dictionary<string, string>(StringComparer.Ordinal)
             {
-                [AgentSessionQueryMetadataKeys.ProjectId] = projectId,
+                [AgentSessionQueryMetadataKeys.ProjectId] = SlackDeliveryOwnerIds.ManagerProjectId,
                 [AgentSessionQueryMetadataKeys.SourceKind] = "agent-launch",
                 [GenericAgentSessionMetadata.AgentId] = "agent-test",
             })));
+        await session.EnsureInitialLaunchAsync(new EnsureInitialLaunchCommand(
+            InputId: $"manager-initial-input:{jobKey}",
+            TurnId: $"manager-initial-turn:{jobKey}",
+            Prompt: "manager request",
+            Source: "agent-launch",
+            JobId: jobKey,
+            Provenance: new AgentSessionInputProvenance(
+                "slack",
+                "workspace-1",
+                "conversation-1",
+                "thread-1",
+                "member-1",
+                "message-1",
+                "connection-1",
+                "thread-1")));
     }
 }
