@@ -84,6 +84,7 @@ import { createSessionCommandRouter } from '../server/command-runtime.js'
 import { reconcileStartedDispatch, type HostRecoveryContext } from './host-recovery.js'
 import { type AwaitingAckEntry, type InFlightEntry, type ShutdownWorkState } from './host-state.js'
 import { ManagerExecutionBoundary } from './manager-execution-boundary.js'
+import { ManagerExecutionRegistry } from './manager-execution-registry.js'
 import {
   executeAndTransition,
   markResultPersistencePending,
@@ -192,6 +193,7 @@ export class RunnerHost {
   private readonly inFlight = new Map<string, InFlightEntry>()
   private readonly awaitingAck = new Map<string, { work: DispatchWorkItem; entry: AwaitingAckEntry }>()
   private readonly managerExecutions = new Map<string, ManagerExecutionBoundary>()
+  private readonly managerExecutionRegistry = new ManagerExecutionRegistry()
   private observedManagerDeploymentEpoch: string | null = null
   private readonly terminalTaskLogDeliveryInFlight = new Set<string>()
 
@@ -293,6 +295,8 @@ export class RunnerHost {
             connection: this.connection,
             runnerId: options.runnerId,
             runnerRoot: options.runnerRoot,
+            managerExecutionRegistry: this.managerExecutionRegistry,
+            onManagerExecutionFinished: (executionId) => this.revokeManagerExecution(executionId),
             followupOperationJournal: this.followupOperationJournal,
             bindingRecoveryCoordinator: this.bindingRecoveryCoordinator,
             skillResolver: this.skillResolver,
@@ -303,6 +307,8 @@ export class RunnerHost {
             openCodeRuntime: () => this.openCodeRuntime,
             piRuntime: () => this.piRuntime,
             agentSessionRuntimeEventOutbox: this.agentSessionRuntimeEventOutbox,
+            managerExecutionRegistry: this.managerExecutionRegistry,
+            onManagerExecutionFinished: (executionId) => this.revokeManagerExecution(executionId),
             cancelOperationJournal: this.cancelOperationJournal,
           },
           sessionCommand: {
@@ -384,7 +390,7 @@ export class RunnerHost {
         const boundary = this.managerExecutions.get(key)
         if (!boundary) return
         this.managerExecutions.delete(key)
-        await boundary.dispose()
+        await this.managerExecutionRegistry.dispose(boundary)
       },
     }
   }
@@ -788,6 +794,13 @@ export class RunnerHost {
 
         if (isManagerExecution && managerBoundary) {
           this.managerExecutions.set(key, managerBoundary)
+          this.managerExecutionRegistry.register({
+            executionId: polled.managerExecutionGrant!.executionId,
+            boundary: managerBoundary,
+            sessionId: '',
+            runtimeSessionId: '',
+            workDir: this.options.runnerRoot,
+          })
         }
 
         const controller = new AbortController()
@@ -864,6 +877,15 @@ export class RunnerHost {
     }
   }
 
+  private async revokeManagerExecution(executionId: string): Promise<void> {
+    if (!executionId) return
+    try {
+      await this.connection.revokeManagerExecution(executionId, new AbortController().signal)
+    } catch (error) {
+      log.warn('Manager execution revocation could not be delivered', { executionId, exception: error })
+    }
+  }
+
   private async invalidateManagerExecutions(): Promise<void> {
     for (const entry of this.inFlight.values()) {
       if (entry.work.projectId !== '__mohist_slack_manager__') continue
@@ -872,6 +894,7 @@ export class RunnerHost {
     }
     const boundaries = [...this.managerExecutions.values()]
     this.managerExecutions.clear()
+    await this.managerExecutionRegistry.disposeAll()
     await Promise.allSettled(boundaries.map((boundary) => boundary.dispose()))
   }
 

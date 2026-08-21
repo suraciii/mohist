@@ -41,6 +41,11 @@ internal sealed class CliCredentialProvider
                 : "/mohist-tests/user"));
     }
 
+    public string? TryResolveManagerBroker() =>
+        string.IsNullOrWhiteSpace(_environment.GetEnvironmentVariable("MOHIST_MANAGER_CREDENTIAL_BROKER"))
+            ? null
+            : _environment.GetEnvironmentVariable("MOHIST_MANAGER_CREDENTIAL_BROKER")!.Trim();
+
     public Task<CliCredential?> TryResolveManagerAsync(bool reply)
     {
         var name = reply ? ManagerReplyTokenEnvironmentVariable : ManagerManagementTokenEnvironmentVariable;

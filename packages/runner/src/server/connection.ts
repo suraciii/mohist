@@ -847,6 +847,15 @@ export class ServerConnection {
     if (value && value.length > 0) this.managerDeploymentEpoch = value
   }
 
+  async revokeManagerExecution(executionId: string, signal: AbortSignal): Promise<void> {
+    if (!executionId) return
+    const response = await this.fetchWithAuth(
+      this.url(`manager-executions/${encodeURIComponent(executionId)}/revoke`),
+      { method: 'POST', signal },
+    )
+    if (!response.ok) throw new Error(`Manager execution revocation failed: ${response.status}`)
+  }
+
   private async post(path: string, body: unknown, signal: AbortSignal): Promise<Response> {
     const response = await this.fetchWithAuth(this.url(path), {
       method: 'POST',

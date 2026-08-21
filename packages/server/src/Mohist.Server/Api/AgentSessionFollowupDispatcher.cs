@@ -91,15 +91,20 @@ public sealed class AgentSessionFollowupDispatcher : IScopedService
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
             await grain.ReleaseFollowupDispatchAsync(dispatch.OperationId);
+            RevokeManagerGrant(managerGrant);
             throw;
         }
         catch
         {
             await grain.ReleaseFollowupDispatchAsync(dispatch.OperationId);
+            RevokeManagerGrant(managerGrant);
             return;
         }
         if (!result.Accepted)
+        {
             await grain.ReleaseFollowupDispatchAsync(dispatch.OperationId);
+            RevokeManagerGrant(managerGrant);
+        }
     }
 
     private async Task<ManagerGrantResult?> IssueManagerGrantAsync(
@@ -148,6 +153,12 @@ public sealed class AgentSessionFollowupDispatcher : IScopedService
             Now: _timeProvider.GetUtcNow(),
             Lifetime: ManagerExecutionCapabilityIssuer.DefaultLifetime));
         return new ManagerGrantResult(true, grant);
+    }
+
+    private void RevokeManagerGrant(ManagerGrantResult? managerGrant)
+    {
+        if (managerGrant?.Grant is { } grant)
+            _managerCredentials.RevokeExecution(grant.ExecutionId);
     }
 
     private sealed record ManagerGrantResult(bool Authorized, ManagerExecutionGrant? Grant);

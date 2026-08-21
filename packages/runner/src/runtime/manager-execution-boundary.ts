@@ -16,7 +16,7 @@ import {
   resolveManagerRequestCapability,
   type ManagerRequestLimits,
 } from './manager-capability-surface.js'
-import { isManagerLauncherConnection } from './manager-launcher-auth.js'
+import { isManagerLauncherConnection, isManagerProcessConnection } from './manager-launcher-auth.js'
 
 export interface ManagerExecutionGrant {
   readonly managementCredential: string
@@ -59,6 +59,7 @@ export class ManagerExecutionBoundary {
   readonly masker = new CredentialMasker()
   private readonly baseEnvironment: NodeJS.ProcessEnv
   private readonly socketPath: string
+  private readonly credentialBrokerPath: string
   private readonly launcherPath: string
   private readonly directory: string
   private readonly grant: ManagerExecutionGrant
@@ -70,15 +71,19 @@ export class ManagerExecutionBoundary {
   private readonly sockets = new Set<Socket>()
   private readonly usedRequests: Record<'management' | 'reply', number> = { management: 0, reply: 0 }
   private broker: Server | null = null
+  private credentialBroker: Server | null = null
   private isolatedOpenCodeRuntime: OpenCodeRuntime | null = null
   private disposed = false
   private runningChildren = 0
+  private activeCredentialChildPid: number | null = null
+  private activeCredentialKind: 'management' | 'reply' | null = null
   private authorizationInvalidated = false
 
   private constructor(
     grant: ManagerExecutionGrant,
     directory: string,
     socketPath: string,
+    credentialBrokerPath: string,
     baseEnvironment: NodeJS.ProcessEnv,
     realMoPath: string,
     frozenCwd: string,
@@ -88,6 +93,7 @@ export class ManagerExecutionBoundary {
     this.grant = grant
     this.directory = directory
     this.socketPath = socketPath
+    this.credentialBrokerPath = credentialBrokerPath
     this.launcherPath = join(directory, 'mo')
     this.baseEnvironment = baseEnvironment
     this.realMoPath = realMoPath
@@ -116,6 +122,7 @@ export class ManagerExecutionBoundary {
     const directory = join(runnerRoot, 'manager-executions', suffix)
     await mkdir(directory, { recursive: true, mode: 0o700 })
     const socketPath = join(directory, 'broker.sock')
+    const credentialBrokerPath = join(directory, 'credential-broker.sock')
     const baseEnvironment: NodeJS.ProcessEnv = {
       ...process.env,
       MOHIST_MANAGER_MODE: '1',
@@ -126,6 +133,7 @@ export class ManagerExecutionBoundary {
       grant,
       directory,
       socketPath,
+      credentialBrokerPath,
       baseEnvironment,
       realMoPath,
       options.workDir ?? process.cwd(),
@@ -146,6 +154,7 @@ export class ManagerExecutionBoundary {
       PATH: `${this.directory}${process.platform === 'win32' ? ';' : ':'}${currentPath}`,
       MOHIST_MANAGER_MODE: '1',
       MOHIST_MANAGER_BROKER: this.socketPath,
+      MOHIST_MANAGER_CREDENTIAL_BROKER: this.credentialBrokerPath,
       MOHIST_MANAGER_EXECUTION_ID: this.grant.executionId,
     }
   }
@@ -230,16 +239,24 @@ export class ManagerExecutionBoundary {
     await this.terminateChildren()
     await new Promise<void>((resolve) => {
       const broker = this.broker
+      const credentialBroker = this.credentialBroker
       this.broker = null
-      if (!broker) {
-        resolve()
-        return
-      }
+      this.credentialBroker = null
       // Destroy remaining sockets first so `close` cannot block on a
       // half-open connection whose response will never be written.
       for (const socket of this.sockets) socket.destroy()
       this.sockets.clear()
-      broker.close(() => resolve())
+      let remaining = (broker ? 1 : 0) + (credentialBroker ? 1 : 0)
+      if (remaining === 0) {
+        resolve()
+        return
+      }
+      const closed = () => {
+        remaining -= 1
+        if (remaining === 0) resolve()
+      }
+      broker?.close(closed)
+      credentialBroker?.close(closed)
     }).catch(() => undefined)
     await rm(this.directory, { recursive: true, force: true }).catch(() => undefined)
   }
@@ -309,14 +326,22 @@ socket.end(JSON.stringify({ kind, args }))
     // request end, because the response is produced asynchronously once the
     // CLI child exits; every handling path still ends or destroys the socket.
     const broker = createServer({ allowHalfOpen: true }, (socket) => this.handleConnection(socket))
+    await this.listen(broker, this.socketPath)
+    this.broker = broker
+
+    const credentialBroker = createServer({ allowHalfOpen: true }, (socket) => this.handleCredentialConnection(socket))
+    await this.listen(credentialBroker, this.credentialBrokerPath)
+    this.credentialBroker = credentialBroker
+  }
+
+  private async listen(server: Server, path: string): Promise<void> {
     await new Promise<void>((resolve, reject) => {
-      broker.once('error', reject)
-      broker.listen(this.socketPath, () => {
-        broker.removeListener('error', reject)
+      server.once('error', reject)
+      server.listen(path, () => {
+        server.removeListener('error', reject)
         resolve()
       })
     })
-    this.broker = broker
   }
 
   private handleConnection(socket: Socket): void {
@@ -383,14 +408,103 @@ socket.end(JSON.stringify({ kind, args }))
     return { kind, args }
   }
 
+  private handleCredentialConnection(socket: Socket): void {
+    this.sockets.add(socket)
+    socket.on('close', () => this.sockets.delete(socket))
+    let body = ''
+    socket.setEncoding('utf8')
+    socket.on('data', (chunk) => {
+      body += chunk
+      if (body.length > 16 * 1024 * 1024) socket.destroy()
+    })
+    socket.on('error', () => socket.destroy())
+    socket.on('end', () => {
+      void this.handleCredentialRequest(socket, body)
+    })
+  }
+
+  private async handleCredentialRequest(socket: Socket, body: string): Promise<void> {
+    const child = [...this.children].find((candidate) => candidate.pid === this.activeCredentialChildPid)
+    if (
+      this.disposed ||
+      this.activeCredentialChildPid === null ||
+      !child ||
+      !(await isManagerProcessConnection(socket, this.realMoPath, this.activeCredentialChildPid))
+    ) {
+      socket.end('{}')
+      return
+    }
+
+    let request: ManagerCredentialRequest
+    try {
+      request = JSON.parse(body) as ManagerCredentialRequest
+    } catch {
+      socket.end('{}')
+      return
+    }
+    let requestUrl: URL
+    try {
+      requestUrl = new URL(String(request.url))
+    } catch {
+      socket.end('{}')
+      return
+    }
+    if (
+      typeof request.url !== 'string' ||
+      !/^https?:$/i.test(requestUrl.protocol) ||
+      typeof request.method !== 'string' ||
+      (request.headers && (typeof request.headers !== 'object' || Array.isArray(request.headers)))
+    ) {
+      socket.end('{}')
+      return
+    }
+    const kind = this.activeCredentialKind
+    if (!kind) {
+      socket.end('{}')
+      return
+    }
+
+    try {
+      const headers = new Headers()
+      for (const [name, value] of Object.entries(request.headers ?? {})) {
+        if (typeof value !== 'string' || name.toLowerCase() === 'authorization') continue
+        headers.set(name, value)
+      }
+      headers.set(
+        'authorization',
+        `Bearer ${kind === 'management' ? this.grant.managementCredential : this.grant.replyCredential}`,
+      )
+      const method = request.method.toUpperCase()
+      const response = await fetch(requestUrl, {
+        method,
+        headers,
+        body:
+          request.bodyBase64 && method !== 'GET' && method !== 'HEAD'
+            ? Buffer.from(request.bodyBase64, 'base64')
+            : undefined,
+        redirect: 'error',
+      })
+      const responseBody = Buffer.from(await response.arrayBuffer())
+      socket.end(
+        JSON.stringify({
+          status: response.status,
+          headers: Object.fromEntries(response.headers.entries()),
+          bodyBase64: responseBody.toString('base64'),
+        } satisfies ManagerCredentialResponse),
+      )
+    } catch {
+      socket.end(JSON.stringify({ status: 502, headers: {}, bodyBase64: '' } satisfies ManagerCredentialResponse))
+    }
+  }
+
   private async executeCli(socket: Socket, kind: 'management' | 'reply', args: string[]): Promise<void> {
     const childEnvironment = { ...this.baseEnvironment }
     delete childEnvironment.MOHIST_MANAGER_BROKER
     delete childEnvironment.MOHIST_MANAGER_EXECUTION_ID
     delete childEnvironment.MOHIST_MANAGER_MANAGEMENT_TOKEN
     delete childEnvironment.MOHIST_MANAGER_REPLY_TOKEN
-    if (kind === 'management') childEnvironment.MOHIST_MANAGER_MANAGEMENT_TOKEN = this.grant.managementCredential
-    else childEnvironment.MOHIST_MANAGER_REPLY_TOKEN = this.grant.replyCredential
+    delete childEnvironment.MOHIST_MANAGER_CREDENTIAL_BROKER
+    childEnvironment.MOHIST_MANAGER_CREDENTIAL_BROKER = this.credentialBrokerPath
 
     const child = spawn(this.realMoPath, args, {
       cwd: this.frozenCwd,
@@ -398,6 +512,8 @@ socket.end(JSON.stringify({ kind, args }))
       stdio: ['ignore', 'pipe', 'pipe'],
     })
     this.children.add(child)
+    this.activeCredentialChildPid = child.pid ?? null
+    this.activeCredentialKind = kind
     this.runningChildren += 1
     let stdout = ''
     let stderr = ''
@@ -407,14 +523,20 @@ socket.end(JSON.stringify({ kind, args }))
     child.stderr.on('data', (chunk: Buffer) => {
       stderr += this.mask(chunk.toString('utf8'))
     })
-    child.on('error', () => {
+    const clearChild = () => {
       this.children.delete(child)
+      if (this.activeCredentialChildPid === child.pid) {
+        this.activeCredentialChildPid = null
+        this.activeCredentialKind = null
+      }
       this.runningChildren -= 1
+    }
+    child.on('error', () => {
+      clearChild()
       socket.end('{}')
     })
     child.on('close', (exitCode) => {
-      this.children.delete(child)
-      this.runningChildren -= 1
+      clearChild()
       if (this.disposed) {
         socket.destroy()
         return
@@ -429,6 +551,19 @@ socket.end(JSON.stringify({ kind, args }))
       )
     })
   }
+}
+
+type ManagerCredentialRequest = {
+  method?: unknown
+  url?: unknown
+  headers?: Record<string, unknown>
+  bodyBase64?: string
+}
+
+type ManagerCredentialResponse = {
+  status: number
+  headers: Record<string, string>
+  bodyBase64: string
 }
 
 function findRealMoPath(managerDirectory: string, pathValue: string): string | null {

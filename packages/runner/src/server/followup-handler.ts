@@ -49,6 +49,7 @@ import type { FollowupOperationJournalStore } from '../runtime/followup-operatio
 import type { ServerConnection } from './connection.js'
 import { SkillResolver } from '../runtime/skill-resolver.js'
 import { ManagerExecutionBoundary } from '../runtime/manager-execution-boundary.js'
+import { ManagerExecutionRegistry } from '../runtime/manager-execution-registry.js'
 import { buildExecutionEnvelope } from '../runtime/execution-envelope.js'
 import { inlineSlackCollaborationSkill, readExecutionSourceContext } from '../runtime/slack-execution-context.js'
 import { runnerLogger } from '../system/logger.js'
@@ -69,6 +70,8 @@ export interface FollowupHandlerDeps {
   connection?: ServerConnection | null
   runnerId?: string | null
   runnerRoot?: string
+  managerExecutionRegistry?: ManagerExecutionRegistry | null
+  onManagerExecutionFinished?: (executionId: string) => Promise<void> | void
   followupOperationJournal?: FollowupOperationJournalStore | null
   randomId?: () => string
   bindingRecoveryCoordinator?: BindingRecoveryCoordinator | null
@@ -336,6 +339,17 @@ async function handleFollowup(
       : {}),
     ...(managerExecution ? { managerExecution } : {}),
   }
+  if (managerExecution && deps.managerExecutionRegistry) {
+    deps.managerExecutionRegistry.register({
+      executionId: payload.managerExecutionGrant!.executionId,
+      boundary: managerExecution,
+      handle,
+      sessionId: sessionTargetId(sessionTarget),
+      runtimeSessionId: selectedTarget.runtimeSessionId,
+      workDir: selectedTarget.workDir,
+    })
+  }
+
   const observerState = buildFollowupObserver(
     outbox,
     sessionTarget,
@@ -419,7 +433,11 @@ async function handleFollowup(
       }
     }
     void completion.finally(async () => {
-      await managerExecution?.dispose().catch(() => undefined)
+      if (managerExecution) {
+        if (deps.managerExecutionRegistry) await deps.managerExecutionRegistry.dispose(managerExecution)
+        else await managerExecution.dispose().catch(() => undefined)
+        await deps.onManagerExecutionFinished?.(payload.managerExecutionGrant?.executionId ?? '')
+      }
     })
   } catch (error) {
     log.error('followup runtime.followup threw', { exception: error, session: selectedTarget.runtimeSessionId })
@@ -434,7 +452,11 @@ async function handleFollowup(
       undefined,
       managerExecution,
     )
-    await managerExecution?.dispose().catch(() => undefined)
+    if (managerExecution) {
+      if (deps.managerExecutionRegistry) await deps.managerExecutionRegistry.dispose(managerExecution)
+      else await managerExecution.dispose().catch(() => undefined)
+      await deps.onManagerExecutionFinished?.(payload.managerExecutionGrant?.executionId ?? '')
+    }
     return unavailable()
   }
   return { accepted: true }

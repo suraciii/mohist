@@ -25,6 +25,8 @@ interface StubInvocation {
   cwd: string
   managementToken: boolean
   replyToken: boolean
+  credentialBroker: boolean
+  pid: number
 }
 
 interface StubMo {
@@ -45,6 +47,8 @@ const record = {
   cwd: process.cwd(),
   managementToken: process.env.MOHIST_MANAGER_MANAGEMENT_TOKEN === ${JSON.stringify(grant.managementCredential)},
   replyToken: process.env.MOHIST_MANAGER_REPLY_TOKEN === ${JSON.stringify(grant.replyCredential)},
+  credentialBroker: typeof process.env.MOHIST_MANAGER_CREDENTIAL_BROKER === 'string',
+  pid: process.pid,
 }
 fs.appendFileSync(${JSON.stringify(marker)}, JSON.stringify(record) + '\\n')
 process.stdout.write('out ' + (process.env.MOHIST_MANAGER_MANAGEMENT_TOKEN ?? process.env.MOHIST_MANAGER_REPLY_TOKEN ?? 'none') + '\\n')
@@ -131,17 +135,18 @@ describe('ManagerExecutionBoundary', () => {
       const broker = boundary.environment().MOHIST_MANAGER_BROKER!
 
       // A management read from the catalog runs the child with only the
-      // management bearer, in the frozen working directory.
+      // non-secret credential proxy locator, in the frozen working directory.
       const status = await requestLauncher(broker, ['slack', 'status'])
       expect(status?.exitCode).toBe(0)
       const invocations = stub.invocations()
       expect(invocations).toHaveLength(1)
       expect(invocations[0].args).toEqual(['slack', 'status'])
       expect(invocations[0].cwd).toBe(stub.frozenWorkDir)
-      expect(invocations[0].managementToken).toBe(true)
+      expect(invocations[0].managementToken).toBe(false)
       expect(invocations[0].replyToken).toBe(false)
-      // The stub echoes the bearer to stdout; the broker must mask it.
-      expect(status?.stdout).toContain('***')
+      expect(invocations[0].credentialBroker).toBe(true)
+      // The child has no bearer to echo or expose.
+      expect(status?.stdout).toContain('none')
       expect(JSON.stringify(status)).not.toContain(grant.managementCredential)
 
       // The reply command is only valid under the reply kind.
@@ -163,7 +168,8 @@ describe('ManagerExecutionBoundary', () => {
       expect(usage?.exitCode).toBe(0)
       const usageInvocations = stub.invocations()
       expect(usageInvocations).toHaveLength(2)
-      expect(usageInvocations[1].managementToken).toBe(true)
+      expect(usageInvocations[1].managementToken).toBe(false)
+      expect(usageInvocations[1].credentialBroker).toBe(true)
       const usageReplyKind = await requestBroker(broker, 'reply', ['--help'])
       expect(usageReplyKind?.exitCode).toBeUndefined()
       expect(stub.invocations()).toHaveLength(2)
@@ -172,8 +178,9 @@ describe('ManagerExecutionBoundary', () => {
       expect(validReply?.exitCode).toBe(0)
       const replyInvocations = stub.invocations()
       expect(replyInvocations).toHaveLength(3)
-      expect(replyInvocations[2].replyToken).toBe(true)
+      expect(replyInvocations[2].replyToken).toBe(false)
       expect(replyInvocations[2].managementToken).toBe(false)
+      expect(replyInvocations[2].credentialBroker).toBe(true)
       expect(JSON.stringify(validReply)).not.toContain(grant.replyCredential)
     } finally {
       await boundary.dispose()
@@ -218,6 +225,10 @@ describe('ManagerExecutionBoundary', () => {
     const pending = requestLauncher(broker, ['slack', 'status']).catch(() => null)
     await new Promise((resolve) => setTimeout(resolve, 120))
     expect(stub.invocations()).toHaveLength(1)
+    const childPid = stub.invocations()[0].pid
+    const inspectedEnvironment = readFileSync(`/proc/${childPid}/environ`, 'utf8')
+    expect(inspectedEnvironment).not.toContain(grant.managementCredential)
+    expect(inspectedEnvironment).not.toContain(grant.replyCredential)
     const startedAt = Date.now()
     await boundary.dispose()
     expect(Date.now() - startedAt).toBeLessThan(10_000)

@@ -4,6 +4,7 @@ using Mohist.Server.Auth.Domain;
 using Mohist.Server.Auth.Identity;
 using Mohist.Server.Infrastructure;
 using Mohist.Server.Infrastructure.Config;
+using Mohist.Server.Infrastructure.Slack;
 using Mohist.Server.Infrastructure.Orleans;
 using Mohist.Server.Issue.Services;
 using Mohist.Server.Agent.Grains;
@@ -56,6 +57,15 @@ public static partial class RunnerRoutes
         });
 
         group.MapPost("/heartbeat", HandleHeartbeatAsync);
+        group.MapPost("/manager-executions/{executionId}/revoke", (
+            string executionId,
+            ManagerExecutionCapabilityIssuer managerCredentials) =>
+        {
+            if (string.IsNullOrWhiteSpace(executionId))
+                return ApiResults.BadRequest("executionId is required", "manager_execution_id_required");
+            managerCredentials.RevokeExecution(executionId);
+            return Results.Ok();
+        });
         MapUpdateInterruptRoutes(group);
         MapRunnerUpdateRecoveryRoutes(group);
         group.MapPatch("", async (string runnerId, RunnerSlotsPatchRequest req, IGrainFactory grains) =>
@@ -701,6 +711,7 @@ public static partial class RunnerRoutes
             AgentSessionRuntimeEventsRequest req, AgentSessionResolver sessions,
             AgentSessionQuery sessionQuery,
             AgentSessionFollowupDispatcher followups,
+            ManagerExecutionCapabilityIssuer managerCredentials,
             CancellationToken ct) =>
         {
             var grain = sessions.GetGrain(sessionId);
@@ -715,6 +726,22 @@ public static partial class RunnerRoutes
                 e.Type,
                 e.Payload.ValueKind == System.Text.Json.JsonValueKind.Undefined ? "{}" : e.Payload.GetRawText())).ToArray();
             var events = await grain.AppendRuntimeEventsAsync(new AppendAgentSessionRuntimeEventsCommand(runtimeEvents, req.RuntimeSessionId));
+            if (string.Equals(projectId, SlackDeliveryOwnerIds.ManagerProjectId, StringComparison.Ordinal))
+            {
+                foreach (var runtimeEvent in req.RuntimeEvents.Where(eventItem =>
+                             string.Equals(eventItem.Type, RuntimeEventTypes.SessionActivity, StringComparison.Ordinal)))
+                {
+                    if (runtimeEvent.Payload.ValueKind != JsonValueKind.Object
+                        || !runtimeEvent.Payload.TryGetProperty("activity", out var activity)
+                        || activity.ValueKind != JsonValueKind.String
+                        || activity.GetString() is not ("idle" or "unknown")
+                        || !runtimeEvent.Payload.TryGetProperty("operationId", out var operation)
+                        || operation.ValueKind != JsonValueKind.String
+                        || string.IsNullOrWhiteSpace(operation.GetString()))
+                        continue;
+                    managerCredentials.RevokeExecution($"manager:{sessionId}:{operation.GetString()}");
+                }
+            }
             await followups.DispatchNextAsync(projectId, sessionId, ct);
             return Results.Ok(events);
         });

@@ -1,4 +1,6 @@
 using System.Net.Http.Headers;
+using System.Net.Sockets;
+using System.Text.Json;
 using Mohist.Workflow.Definition;
 
 namespace Mohist.Cli;
@@ -23,6 +25,7 @@ internal sealed class CliCredentialHandler : HttpMessageHandler
     private readonly CliCredentialSession _credentials;
     private readonly HttpClient _transport;
     private readonly bool _managerMode;
+    private static readonly JsonSerializerOptions ManagerProxyJsonOptions = new(JsonSerializerDefaults.Web);
 
     public CliCredentialHandler(
         CliCredentialSession credentials,
@@ -38,6 +41,12 @@ internal sealed class CliCredentialHandler : HttpMessageHandler
         HttpRequestMessage request,
         CancellationToken cancellationToken)
     {
+        // Manager executions use a Runner-owned credential proxy. The CLI
+        // process never receives a bearer, so a same-user process cannot
+        // recover it from /proc or a child environment.
+        if (_managerMode && _credentials.TryResolveManagerBroker() is { } brokerPath)
+            return await SendThroughManagerBrokerAsync(request, brokerPath, cancellationToken).ConfigureAwait(false);
+
         // A request can only be sent once, so the transport always
         // receives a clone; the credential is attached to it when
         // resolvable and allowed for the destination.
@@ -72,6 +81,76 @@ internal sealed class CliCredentialHandler : HttpMessageHandler
 
         return response;
     }
+
+    private static async Task<HttpResponseMessage> SendThroughManagerBrokerAsync(
+        HttpRequestMessage request,
+        string brokerPath,
+        CancellationToken cancellationToken)
+    {
+        if (request.RequestUri is not { IsAbsoluteUri: true } destination)
+            throw new HttpRequestException("Manager credential proxy requires an absolute request URI.");
+        if (request.Headers.Authorization is not null)
+            throw new HttpRequestException("Manager requests must not provide an Authorization header.");
+
+        var headers = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+        {
+            [ManagerCapabilityCatalog.ManagerModeHeader] = "1",
+        };
+        foreach (var (name, values) in request.Headers)
+            if (!name.Equals("authorization", StringComparison.OrdinalIgnoreCase))
+                headers[name] = string.Join(", ", values);
+        var body = request.Content is null
+            ? null
+            : await request.Content.ReadAsByteArrayAsync(cancellationToken).ConfigureAwait(false);
+        if (request.Content is not null)
+            foreach (var (name, values) in request.Content.Headers)
+                headers[name] = string.Join(", ", values);
+
+        var payload = JsonSerializer.SerializeToUtf8Bytes(new ManagerProxyRequest(
+            request.Method.Method,
+            destination.ToString(),
+            headers,
+            body is null ? null : Convert.ToBase64String(body)), ManagerProxyJsonOptions);
+        using var socket = new Socket(AddressFamily.Unix, SocketType.Stream, ProtocolType.Unspecified);
+        await socket.ConnectAsync(new UnixDomainSocketEndPoint(brokerPath), cancellationToken).ConfigureAwait(false);
+        await socket.SendAsync(payload, SocketFlags.None, cancellationToken).ConfigureAwait(false);
+        socket.Shutdown(SocketShutdown.Send);
+
+        using var responseBuffer = new MemoryStream();
+        var chunk = new byte[16 * 1024];
+        while (true)
+        {
+            var received = await socket.ReceiveAsync(chunk, SocketFlags.None, cancellationToken).ConfigureAwait(false);
+            if (received == 0) break;
+            responseBuffer.Write(chunk, 0, received);
+            if (responseBuffer.Length > 16 * 1024 * 1024)
+                throw new HttpRequestException("Manager credential proxy response exceeded its limit.");
+        }
+        var response = JsonSerializer.Deserialize<ManagerProxyResponse>(responseBuffer.ToArray(), ManagerProxyJsonOptions)
+            ?? throw new HttpRequestException("Manager credential proxy returned an invalid response.");
+        var result = new HttpResponseMessage((System.Net.HttpStatusCode)response.Status)
+        {
+            RequestMessage = request,
+            Content = new ByteArrayContent(response.BodyBase64 is null ? [] : Convert.FromBase64String(response.BodyBase64)),
+        };
+        foreach (var (name, value) in response.Headers ?? [])
+        {
+            if (!result.Headers.TryAddWithoutValidation(name, value))
+                result.Content.Headers.TryAddWithoutValidation(name, value);
+        }
+        return result;
+    }
+
+    private sealed record ManagerProxyRequest(
+        string Method,
+        string Url,
+        Dictionary<string, string> Headers,
+        string? BodyBase64);
+
+    private sealed record ManagerProxyResponse(
+        int Status,
+        Dictionary<string, string>? Headers,
+        string? BodyBase64);
 
     private static async Task<HttpRequestMessage> CloneAsync(
         HttpRequestMessage request,

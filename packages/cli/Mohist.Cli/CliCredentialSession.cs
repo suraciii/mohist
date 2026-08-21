@@ -24,6 +24,8 @@ internal sealed class CliCredentialSession
         _error = error;
     }
 
+    public string? TryResolveManagerBroker() => _provider.TryResolveManagerBroker();
+
     public async Task<CliCredential?> TryResolveAllowedAsync(Uri? destination, bool managerMode = false)
     {
         try

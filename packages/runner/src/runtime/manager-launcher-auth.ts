@@ -19,6 +19,20 @@ interface SocketHandle {
  * socket handle, procfs view, or socket-inspection utility is unavailable.
  */
 export async function isManagerLauncherConnection(socket: Socket, launcherPath: string): Promise<boolean> {
+  return await isManagerProcessConnection(socket, launcherPath)
+}
+
+/**
+ * Authenticates a broker peer by its live process identity. The optional PID
+ * binds the connection to the exact child created for one Manager request;
+ * this prevents another same-user process from reusing the non-secret socket
+ * locator to obtain a credential-bearing proxy.
+ */
+export async function isManagerProcessConnection(
+  socket: Socket,
+  executablePath: string,
+  expectedPid?: number,
+): Promise<boolean> {
   if (process.platform !== 'linux') return false
   const fd = (socket as Socket & SocketHandle)._handle?.fd
   if (typeof fd !== 'number' || !Number.isInteger(fd) || fd < 0) return false
@@ -26,13 +40,16 @@ export async function isManagerLauncherConnection(socket: Socket, launcherPath: 
   const acceptedInode = await readSocketInode(`/proc/${process.pid}/fd/${fd}`)
   if (!acceptedInode) return false
   const peer = await findPeerProcess(acceptedInode)
-  if (!peer) return false
+  if (!peer || (expectedPid !== undefined && peer.pid !== expectedPid)) return false
   const peerSocket = await readSocketInode(`/proc/${peer.pid}/fd/${peer.fd}`)
   if (peerSocket !== peer.inode) return false
 
   const commandLine = await readProcessCommandLine(peer.pid)
-  if (commandLine.length < 2) return false
-  return await samePath(commandLine[1], launcherPath)
+  if (commandLine.length === 0) return false
+  for (const argument of commandLine) {
+    if (await samePath(argument, executablePath)) return true
+  }
+  return false
 }
 
 async function findPeerProcess(acceptedInode: string): Promise<{ pid: number; fd: number; inode: string } | null> {
