@@ -332,8 +332,15 @@ export class ManagerExecutionBoundary {
   }
 
   private shellEnvironment(overrides?: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
-    const environment = { ...this.environment(), ...(overrides ?? {}) }
+    const environment = { ...this.baseEnvironment, ...(overrides ?? {}) }
     for (const name of [
+      'HOME',
+      'PATH',
+      'MOHIST_MANAGER_MODE',
+      'MOHIST_MANAGER_BROKER',
+      'MOHIST_MANAGER_LAUNCHER',
+      'MOHIST_MANAGER_CREDENTIAL_BROKER',
+      'MOHIST_MANAGER_EXECUTION_ID',
       'MOHIST_TOKEN',
       'MOHIST_ADMIN_TOKEN',
       'MOHIST_ADMIN_TOKEN_PATH',
@@ -342,7 +349,10 @@ export class ManagerExecutionBoundary {
     ]) {
       delete environment[name]
     }
-    return environment
+    // Reapply the fixed boundary values after caller environment overrides;
+    // generic shell options cannot redirect HOME, PATH, or the broker to an
+    // unrestricted CLI transport.
+    return { ...environment, ...this.environment() }
   }
 
   private clearGrant(): void {
