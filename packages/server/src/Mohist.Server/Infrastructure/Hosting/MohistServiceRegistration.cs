@@ -223,7 +223,8 @@ public static class MohistServiceRegistration
         // Manager execution credentials are runtime-only. The epoch and
         // hashed lease store are process singletons; no durable provider is
         // registered for either value.
-        services.AddSingleton<ManagerExecutionLeaseStore>();
+        services.AddSingleton<ManagerExecutionLeaseStore>(sp =>
+            new ManagerExecutionLeaseStore(sp.GetRequiredService<IDbContextFactory<MohistDbContext>>()));
         services.AddSingleton<IManagerExecutionLeaseStore>(sp =>
             sp.GetRequiredService<ManagerExecutionLeaseStore>());
         services.AddSingleton<ManagerDeploymentEpoch>();

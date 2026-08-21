@@ -72,17 +72,14 @@ public sealed class ManagerCapabilityAdmissionMiddleware : IMiddleware, IScopedS
             return;
         }
 
-        if (string.Equals(capability, ManagerCapabilityCatalog.WorkspaceStatus, StringComparison.Ordinal))
+        var requestedWorkspace = context.Request.Query["workspaceTeamId"].ToString();
+        if (!string.IsNullOrWhiteSpace(requestedWorkspace)
+            && !string.Equals(requestedWorkspace.Trim(), credential.Lease.Origin.WorkspaceId, StringComparison.Ordinal))
         {
-            var workspace = context.Request.Query["workspaceTeamId"].ToString();
-            if (!string.IsNullOrWhiteSpace(workspace)
-                && !string.Equals(workspace.Trim(), credential.Lease.Origin.WorkspaceId, StringComparison.Ordinal))
-            {
-                await RejectAsync(context,
-                    "The requested workspace is outside this Manager execution.",
-                    "manager_workspace_not_authorized").ConfigureAwait(false);
-                return;
-            }
+            await RejectAsync(context,
+                "The requested workspace is outside this Manager execution.",
+                "manager_workspace_not_authorized").ConfigureAwait(false);
+            return;
         }
 
         if (context.Request.RouteValues.TryGetValue("projectRef", out var rawProjectRef)

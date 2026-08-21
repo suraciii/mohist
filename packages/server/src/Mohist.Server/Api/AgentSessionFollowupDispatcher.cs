@@ -2,6 +2,7 @@ using Mohist.Server.Infrastructure.Hosting;
 using Mohist.Server.Contracts;
 using Mohist.Server.Infrastructure.Slack;
 using Mohist.Server.Runner.Grains;
+using Mohist.Server.Slack.Services;
 using Mohist.Server.Sessions.Domain;
 using Mohist.Server.Sessions.Grains;
 using Mohist.Server.Sessions.Services;
@@ -13,15 +14,21 @@ public sealed class AgentSessionFollowupDispatcher : IScopedService
     private readonly AgentSessionQuerier _sessions;
     private readonly IGrainFactory _grains;
     private readonly IFollowupDeliveryDispatcher _delivery;
+    private readonly ManagerExecutionCapabilityIssuer _managerCredentials;
+    private readonly ManagerActorAccessDecider _managerActors;
 
     public AgentSessionFollowupDispatcher(
         AgentSessionQuerier sessions,
         IGrainFactory grains,
-        IFollowupDeliveryDispatcher delivery)
+        IFollowupDeliveryDispatcher delivery,
+        ManagerExecutionCapabilityIssuer managerCredentials,
+        ManagerActorAccessDecider managerActors)
     {
         _sessions = sessions;
         _grains = grains;
         _delivery = delivery;
+        _managerCredentials = managerCredentials;
+        _managerActors = managerActors;
     }
 
     public async Task DispatchNextAsync(string projectId, string sessionId, CancellationToken ct)
@@ -48,6 +55,13 @@ public sealed class AgentSessionFollowupDispatcher : IScopedService
         if (dispatch is null)
             return;
 
+        var managerGrant = await IssueManagerGrantAsync(target, dispatch, ct);
+        if (managerGrant is ManagerGrantResult { Authorized: false })
+        {
+            await grain.ReleaseFollowupDispatchAsync(dispatch.OperationId);
+            return;
+        }
+
         FollowupDeliveryResult result;
         try
         {
@@ -68,7 +82,8 @@ public sealed class AgentSessionFollowupDispatcher : IScopedService
                 InputId: dispatch.InputId,
                 SlackExecutionContext: SlackExecutionContextFor(projectId, dispatch, target.SessionId),
                 TurnId: dispatch.TurnId,
-                ExecutionSource: dispatch.ExecutionSource), ct);
+                ExecutionSource: dispatch.ExecutionSource,
+                ManagerExecutionGrant: managerGrant?.Grant), ct);
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
@@ -83,6 +98,56 @@ public sealed class AgentSessionFollowupDispatcher : IScopedService
         if (!result.Accepted)
             await grain.ReleaseFollowupDispatchAsync(dispatch.OperationId);
     }
+
+    private async Task<ManagerGrantResult?> IssueManagerGrantAsync(
+        CanonicalFollowupTarget target,
+        AgentSessionFollowupDispatch dispatch,
+        CancellationToken ct)
+    {
+        if (!string.Equals(target.ProjectId, SlackDeliveryOwnerIds.ManagerProjectId, StringComparison.Ordinal))
+            return null;
+
+        var provenance = dispatch.Provenance;
+        var context = provenance is null
+            ? null
+            : SlackExecutionContextFor(target.ProjectId!, dispatch, target.SessionId);
+        var anchor = context?.ReplyAnchor;
+        if (anchor is null
+            || !string.Equals(anchor.ProjectId, SlackDeliveryOwnerIds.ManagerProjectId, StringComparison.Ordinal)
+            || !string.Equals(anchor.OwnerKind, SlackDeliveryOwnerKinds.Manager, StringComparison.Ordinal))
+            return new ManagerGrantResult(false, null);
+
+        var authentication = await _managerActors.AuthenticateAsync(
+            anchor.WorkspaceId,
+            anchor.InitiatingMemberId,
+            ct);
+        if (!authentication.Allowed
+            || authentication.Actor is null
+            || !string.Equals(authentication.Actor.EnrollmentId, anchor.ConnectionId, StringComparison.Ordinal))
+            return new ManagerGrantResult(false, null);
+
+        var authorization = await _managerActors.AuthorizeAsync(authentication.Actor, ct: ct);
+        if (!authorization.Allowed)
+            return new ManagerGrantResult(false, null);
+
+        var origin = new ManagerExecutionOrigin(
+            anchor.WorkspaceId,
+            anchor.ConversationId,
+            anchor.ThreadRootMessageId,
+            anchor.TriggeringMessageId,
+            anchor.InitiatingMemberId,
+            anchor.ConnectionId,
+            anchor.SessionId,
+            anchor.DispatchRef);
+        var grant = _managerCredentials.Issue(new ManagerExecutionIssueRequest(
+            ExecutionId: $"manager:{target.SessionId}:{dispatch.OperationId}",
+            Origin: origin,
+            Now: DateTimeOffset.UtcNow,
+            Lifetime: ManagerExecutionCapabilityIssuer.DefaultLifetime));
+        return new ManagerGrantResult(true, grant);
+    }
+
+    private sealed record ManagerGrantResult(bool Authorized, ManagerExecutionGrant? Grant);
 
     private static AgentSlackExecutionContext? SlackExecutionContextFor(
         string projectId,

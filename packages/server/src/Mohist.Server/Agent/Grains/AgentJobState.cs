@@ -90,6 +90,11 @@ public sealed class AgentJobState
     /// idempotent transition. This closes the owner-commit/Session-write gap.
     /// </summary>
     [Id(45)] public List<PendingAgentSessionInterruption> PendingSessionInterruptionDeliveries { get; set; } = [];
+    /// <summary>
+    /// Durable at-most-once marker for the non-replaying follow-up created
+    /// after a Manager execution credential expires.
+    /// </summary>
+    [Id(46)] public ManagerExpiryRecoveryTransition? ManagerExpiryRecovery { get; set; }
 }
 
 
@@ -97,6 +102,12 @@ public sealed class AgentJobState
 public sealed record PendingAgentSessionInterruption(
     [property: Id(0)] string SessionId,
     [property: Id(1)] AgentWorkInterruptionTransition Transition);
+
+[GenerateSerializer]
+public sealed record ManagerExpiryRecoveryTransition(
+    [property: Id(0)] string InputId,
+    [property: Id(1)] string TurnId,
+    [property: Id(2)] DateTimeOffset RecordedAt);
 
 
 [GenerateSerializer]

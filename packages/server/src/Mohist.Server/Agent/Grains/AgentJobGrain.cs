@@ -63,6 +63,7 @@ public sealed partial class AgentJobGrain : Grain, IAgentJobGrain
     private readonly IBackgroundTaskLauncher _backgroundTasks;
     private readonly IGrainFactory _grains;
     private readonly IAgentJobDispatchObserver _dispatchObserver;
+    private readonly IFollowupDispatchScheduler? _followupDispatchScheduler;
     private readonly TaskCompletionSource<AgentJobTerminalResult> _terminalCompletion =
         new(TaskCreationOptions.RunContinuationsAsynchronously);
     private IDisposable? _jobTimeoutTimer;
@@ -79,7 +80,8 @@ public sealed partial class AgentJobGrain : Grain, IAgentJobGrain
         IEventStore eventStore,
         IBackgroundTaskLauncher backgroundTasks,
         IGrainFactory grains,
-        IAgentJobDispatchObserver dispatchObserver)
+        IAgentJobDispatchObserver dispatchObserver,
+        IFollowupDispatchScheduler? followupDispatchScheduler = null)
     {
         _log = log;
         _options = options.Value;
@@ -89,6 +91,7 @@ public sealed partial class AgentJobGrain : Grain, IAgentJobGrain
         _backgroundTasks = backgroundTasks;
         _grains = grains;
         _dispatchObserver = dispatchObserver;
+        _followupDispatchScheduler = followupDispatchScheduler;
         _runnerLossRecoveryTimeout = ValidateRunnerLossRecoveryTimeout(_options.RunnerLossRecoveryTimeout);
     }
 
@@ -494,6 +497,8 @@ public sealed partial class AgentJobGrain : Grain, IAgentJobGrain
                 Key, runnerId, workId, State.RunnerId, State.WorkId);
             return new AgentJobReportResult(false, "runner-or-work-mismatch");
         }
+        if (string.Equals(result.ErrorCode, "manager-credential-expired", StringComparison.Ordinal))
+            return await ReportManagerCredentialExpiredAsync(result);
         if (string.Equals(result.Status, "unknown", StringComparison.OrdinalIgnoreCase)) return await ReportUnknownResultAsync(result);
         var isSuccess = string.Equals(result.Status, "completed", StringComparison.OrdinalIgnoreCase)
             || string.Equals(result.Status, "pass", StringComparison.OrdinalIgnoreCase)

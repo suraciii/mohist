@@ -199,11 +199,19 @@ export async function executeOpenCodeTurn(
   } catch (error) {
     const message = errorMessage(error)
     return failureResult(
-      'turn-failed',
-      `AgentJob turn threw: ${managerExecution ? managerExecution.mask(message) : message}`,
+      managerExecution?.hasExpired() ? 'manager-credential-expired' : 'turn-failed',
+      managerExecution?.hasExpired()
+        ? 'Manager credentials expired before this execution completed; inspect current state before retrying.'
+        : `AgentJob turn threw: ${managerExecution ? managerExecution.mask(message) : message}`,
     )
   }
   await eventSink.drain()
+  if (managerExecution?.hasExpired())
+    return failureResult(
+      'manager-credential-expired',
+      'Manager credentials expired before this execution completed; inspect current state before retrying.',
+      'opencode',
+    )
   return redactManagerResult(projectTurnToWorkItemResult(result, 'opencode', modelInput, variant), managerExecution)
 }
 
@@ -344,11 +352,19 @@ export async function executePiTurn(
   } catch (error) {
     const message = errorMessage(error)
     return failureResult(
-      'turn-failed',
-      `AgentJob turn threw: ${managerExecution ? managerExecution.mask(message) : message}`,
+      managerExecution?.hasExpired() ? 'manager-credential-expired' : 'turn-failed',
+      managerExecution?.hasExpired()
+        ? 'Manager credentials expired before this execution completed; inspect current state before retrying.'
+        : `AgentJob turn threw: ${managerExecution ? managerExecution.mask(message) : message}`,
     )
   }
   await eventSink.drain()
+  if (managerExecution?.hasExpired())
+    return failureResult(
+      'manager-credential-expired',
+      'Manager credentials expired before this execution completed; inspect current state before retrying.',
+      'pi',
+    )
   return redactManagerResult(projectPiTurnToWorkItemResult(result, 'pi', modelInput, variant), managerExecution)
 }
 
