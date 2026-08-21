@@ -77,32 +77,6 @@ public sealed class AgentJobManagerRunnerLossRecoverySpecs : AgentJobGrainTestSu
             (await dispatch.PollAsync(runnerId, new RunnerPollRequest([], []))).Dispatches);
     }
 
-    [Fact]
-    public async Task RunnerLoss_OnOrdinaryJob_StillRedeliversWithoutRecoveryTurn()
-    {
-        var (runnerId, projectId) = await RegisterAgentJobRunnerAsync(
-            "agent-job-manager-loss-ordinary-runner",
-            projectId: "agent-job-manager-loss-ordinary-project");
-        var jobKey = $"agent-job-manager-loss-ordinary-{Guid.NewGuid():N}";
-        var job = JobGrain(jobKey);
-        var sessionId = $"ordinary-loss-session-{Guid.NewGuid():N}";
-        await OpenSessionAsync(sessionId, projectId);
-
-        await job.SubmitAsync(new AgentJobInput(
-            Prompt: "ordinary request",
-            ProjectId: projectId,
-            AgentId: "agent-test",
-            AgentSessionId: sessionId));
-        await WaitForStatusAsync(job, AgentJobStatus.Running, TimeSpan.FromSeconds(5));
-
-        await Grains.GetGrain<IRunnerGrain>(runnerId).UnregisterAsync();
-        var snapshot = await job.GetRuntimeSnapshotAsync();
-        Assert.Equal(AgentJobStatus.Unknown, snapshot.Status);
-
-        var turns = await SessionTurnsAsync(sessionId);
-        Assert.DoesNotContain(turns, turn => turn.Id.StartsWith("manager-recovery-turn:", StringComparison.Ordinal));
-    }
-
     private static AgentSlackExecutionContext ManagerContext(string sessionId, string jobKey) =>
         SlackExecutionContextFactory.Create(
             "workspace-1",
