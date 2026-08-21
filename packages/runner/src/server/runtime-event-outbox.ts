@@ -186,6 +186,10 @@ class AgentSessionRuntimeEventOutboxImpl implements AgentSessionRuntimeEventOutb
   // A deadline fails the current action while its original request remains fenced.
   private readonly timedOutInputReceiptErrors = new Map<string, Error>()
   private readonly activeDeliveryGroups = new Map<string, DeliveryLease>()
+  // Tracks the current in-memory retention interval. This is deliberately not
+  // persisted: recovery starts a fresh observation interval for the loaded
+  // version-1 snapshot.
+  private retentionOverCap = false
   private loaded = false
   private healthy = false
   private kicked: Promise<void> | null = null
@@ -228,6 +232,7 @@ class AgentSessionRuntimeEventOutboxImpl implements AgentSessionRuntimeEventOutb
 
   async load(): Promise<void> {
     this.records.clear()
+    this.retentionOverCap = false
     this.healthy = false
     this.loaded = true
     this.loadAttempts += 1
@@ -292,8 +297,10 @@ class AgentSessionRuntimeEventOutboxImpl implements AgentSessionRuntimeEventOutb
     this.inputReceiptTerminalErrors.delete(internal.id)
     this.emptyReceiptConfirmationCounts.delete(internal.id)
     this.records.set(internal.id, internal)
+    this.updateRetentionCapState()
     await this.enqueueSnapshotWrite((error) => {
       this.records.delete(internal.id)
+      this.updateRetentionCapState()
       this.healthy = false
       this.lastLoadError = error instanceof Error ? error : new Error(errorMessage(error))
       this.scheduleLocalRetry()
@@ -356,22 +363,31 @@ class AgentSessionRuntimeEventOutboxImpl implements AgentSessionRuntimeEventOutb
   // Dropped deltas are reconstructible from later deltas and the final
   // assistant message on the server side.
   private enforceRetentionCap(): void {
-    if (this.records.size <= this.maxRetentionEntries) return
-    let overflow = this.records.size - this.maxRetentionEntries
-    const candidates = [...this.records.values()]
-      .filter((record) => STREAMING_DELTA_TYPES.has(record.event.type))
-      .sort(sortBySequence)
-    for (const record of candidates) {
-      if (overflow <= 0) break
-      this.records.delete(record.id)
-      overflow -= 1
-    }
     if (this.records.size > this.maxRetentionEntries) {
-      log.warn('runtime-event outbox retention cap exceeded', {
-        reason: `limit=${this.maxRetentionEntries} remaining=${this.records.size}`,
-        session: 'outbox',
-      })
+      let overflow = this.records.size - this.maxRetentionEntries
+      const candidates = [...this.records.values()]
+        .filter((record) => STREAMING_DELTA_TYPES.has(record.event.type))
+        .sort(sortBySequence)
+      for (const record of candidates) {
+        if (overflow <= 0) break
+        this.records.delete(record.id)
+        overflow -= 1
+      }
     }
+    this.updateRetentionCapState()
+  }
+
+  private updateRetentionCapState(): void {
+    if (this.records.size <= this.maxRetentionEntries) {
+      this.retentionOverCap = false
+      return
+    }
+    if (this.retentionOverCap) return
+    this.retentionOverCap = true
+    log.warn('runtime-event outbox retention cap exceeded', {
+      reason: `limit=${this.maxRetentionEntries} remaining=${this.records.size}`,
+      session: 'outbox',
+    })
   }
 
   async kick(): Promise<void> {
@@ -595,6 +611,7 @@ class AgentSessionRuntimeEventOutboxImpl implements AgentSessionRuntimeEventOutb
     try {
       await this.enqueueSnapshotWrite((writeError) => {
         for (const record of removed) this.records.set(record.id, record)
+        this.updateRetentionCapState()
         this.healthy = false
         this.lastLoadError = writeError instanceof Error ? writeError : new Error(errorMessage(writeError))
         this.scheduleLocalRetry()
@@ -606,6 +623,7 @@ class AgentSessionRuntimeEventOutboxImpl implements AgentSessionRuntimeEventOutb
       this.deterministicBindingRefusalCounts.delete(deliveryKey)
       return false
     }
+    this.updateRetentionCapState()
     log.error('runtime-event binding refusal reached terminal settlement', {
       deliveryKey,
       status: error.status,
@@ -672,6 +690,7 @@ class AgentSessionRuntimeEventOutboxImpl implements AgentSessionRuntimeEventOutb
           if (previousCount === undefined) this.emptyReceiptConfirmationCounts.delete(record.id)
           else this.emptyReceiptConfirmationCounts.set(record.id, previousCount)
         }
+        this.updateRetentionCapState()
         this.healthy = false
         this.lastLoadError = error instanceof Error ? error : new Error(errorMessage(error))
         this.scheduleLocalRetry()
@@ -680,6 +699,7 @@ class AgentSessionRuntimeEventOutboxImpl implements AgentSessionRuntimeEventOutb
       return false
     }
 
+    this.updateRetentionCapState()
     for (const { record, receipt } of positiveReceipts) this.resolveInputReceipt(record.id, receipt)
     for (const record of alreadyConsumed) {
       const error = new AlreadyConsumedRuntimeEventError(record.id)

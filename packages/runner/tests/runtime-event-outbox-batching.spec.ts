@@ -9,6 +9,8 @@ import {
   makeOutbox,
   RecordingFileSystem,
 } from "./support/runtime-event-outbox-fixture.js"
+import { capturedLogs } from "./support/logger-test.js"
+import { withTestRunnerResources } from "./support/test-resources.js"
 
 beforeEach(() => {
   vi.useFakeTimers()
@@ -148,6 +150,91 @@ describe("AgentSessionRuntimeEventOutbox — batched streaming deltas", () => {
     } finally {
       warnSpy.mockRestore()
     }
+  })
+
+  it("warns once while a non-delta queue remains over the retention cap", async () => {
+    await withTestRunnerResources(async () => {
+      const { outbox } = makeOutbox({
+        maxRetentionEntries: 1,
+        deliver: { async send() { throw new Error("historical delivery unavailable") } },
+      })
+      await outbox.load()
+      await outbox.enqueueProducedFactBatch([
+        followupTerminal({ id: "over-cap-1" }),
+        followupTerminal({ id: "over-cap-2" }),
+      ])
+      await outbox.kick()
+      await outbox.enqueueProducedFact(followupTerminal({ id: "over-cap-3" }))
+      await outbox.kick()
+
+      expect(capturedLogs().filter((entry) => entry.message === "runtime-event outbox retention cap exceeded")).toHaveLength(1)
+      expect(outbox.snapshot().map((record) => record.id)).toEqual(["over-cap-1", "over-cap-2", "over-cap-3"])
+      await outbox.stop()
+    })
+  })
+
+  it("emits a new warning only after an over-cap queue drains and crosses again", async () => {
+    await withTestRunnerResources(async () => {
+      let available = false
+      const { outbox } = makeOutbox({
+        maxRetentionEntries: 1,
+        deliver: {
+          async send() {
+            if (!available) throw new Error("historical delivery unavailable")
+            return []
+          },
+        },
+      })
+      await outbox.load()
+      await outbox.enqueueProducedFactBatch([
+        followupTerminal({ id: "first-crossing-1" }),
+        followupTerminal({ id: "first-crossing-2" }),
+      ])
+      await outbox.kick()
+      expect(capturedLogs().filter((entry) => entry.message === "runtime-event outbox retention cap exceeded")).toHaveLength(1)
+
+      available = true
+      await outbox.kick()
+      expect(outbox.snapshot()).toEqual([])
+
+      available = false
+      await outbox.enqueueProducedFactBatch([
+        followupTerminal({ id: "second-crossing-1" }),
+        followupTerminal({ id: "second-crossing-2" }),
+      ])
+      await outbox.kick()
+      expect(capturedLogs().filter((entry) => entry.message === "runtime-event outbox retention cap exceeded")).toHaveLength(2)
+      await outbox.stop()
+    })
+  })
+
+  it("initializes recovered over-cap state without warning floods and keeps the version-one snapshot", async () => {
+    await withTestRunnerResources(async () => {
+      const fileSystem = new RecordingFileSystem()
+      const first = followupTerminal({ id: "recovered-1" })
+      const second = followupTerminal({ id: "recovered-2" })
+      fileSystem.textStore.set(RUNTIME_EVENT_OUTBOX_FILE, JSON.stringify({
+        version: 1,
+        entries: [
+          { ...first, sequence: 1, enqueuedAt: "2026-07-21T00:00:00.000Z" },
+          { ...second, sequence: 2, enqueuedAt: "2026-07-21T00:00:00.000Z" },
+        ],
+      }))
+      const { outbox } = makeOutbox({
+        fileSystem,
+        maxRetentionEntries: 1,
+        deliver: { async send() { throw new Error("historical delivery unavailable") } },
+      })
+      await outbox.load()
+      await outbox.enqueueProducedFact(followupTerminal({ id: "recovered-3" }))
+      await outbox.kick()
+
+      expect(capturedLogs().filter((entry) => entry.message === "runtime-event outbox retention cap exceeded")).toHaveLength(1)
+      const persisted = JSON.parse(fileSystem.body(RUNTIME_EVENT_OUTBOX_FILE) ?? "{}") as { version: number; entries: unknown[] }
+      expect(persisted.version).toBe(1)
+      expect(persisted.entries).toHaveLength(3)
+      await outbox.stop()
+    })
   })
 
   it("never drops non-delta facts even when retention cap is exceeded", async () => {
