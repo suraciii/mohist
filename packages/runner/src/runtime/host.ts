@@ -956,9 +956,23 @@ export class RunnerHost {
   }
 
   private registrationState(): RunnerRegistration {
-    return buildRegistrationState(this.options, this.piRuntime, this.actions.catalog(), () =>
+    const state = buildRegistrationState(this.options, this.piRuntime, this.actions.catalog(), () =>
       this.control.getConnectionId(),
     )
+    if (this.openCodeRuntime?.ready()) return state
+
+    const managerCapabilities = new Set([
+      'manager-execution-grant-v1',
+      'manager-deployment-epoch-v1',
+      'manager-private-broker-v1',
+      'manager-pi-scoped-executor-v1',
+      'manager-opencode-isolated-v1',
+      'manager-redaction-v1',
+    ])
+    return {
+      ...state,
+      capabilities: state.capabilities.filter((capability) => !managerCapabilities.has(capability)),
+    }
   }
 
   private async connectRunner(signal: AbortSignal) {
