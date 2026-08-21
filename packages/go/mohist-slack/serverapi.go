@@ -214,6 +214,10 @@ func (e *APIError) Error() string {
 	return fmt.Sprintf("slack adapter request failed: %d (%s)", e.Status, e.Code)
 }
 
+// StaleLease reports whether the failure carries the
+// lease_stale_or_expired code; the adapter drops the runtime on it.
+func (e *APIError) StaleLease() bool { return e != nil && e.Code == "lease_stale_or_expired" }
+
 const operatorIDHeader = "x-mohist-operator-id"
 
 // ServerAPI speaks the adapter-side HTTP contract of the Mohist Server.
