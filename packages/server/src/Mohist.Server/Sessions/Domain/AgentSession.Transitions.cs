@@ -642,10 +642,29 @@ public static partial class AgentSessionExtensions
                 RecordedAt: now,
                 UpdatedAt: now));
 
+            // System-initiated turns (Manager expiry/loss recovery) must be
+            // dispatchable by the ordinary follow-up dispatcher, which only
+            // claims queued turns carrying a matching lease; without one the
+            // recovery turn is recorded but never executed and never receives
+            // fresh credentials.
+            var leases = (session.Status.PendingFollowups ?? []).ToList();
+            if (!leases.Any(candidate => string.Equals(candidate.TurnId, turnId, StringComparison.Ordinal)))
+            {
+                leases.Add(new AgentSessionFollowupLease(
+                    OperationId: $"system-turn:{turnId}",
+                    RuntimeSessionId: session.Status.AgentRuntimeSessionId ?? string.Empty,
+                    Accepted: true,
+                    AcceptedAt: now,
+                    StartedAt: now,
+                    InputId: inputId,
+                    TurnId: turnId));
+            }
+
             session.Status = session.Status with
             {
                 Inputs = inputs,
                 Turns = turns,
+                PendingFollowups = leases,
                 Activity = AgentSessionActivity.Active,
                 LastDataAt = now,
                 CurrentTurnEndedAt = null,

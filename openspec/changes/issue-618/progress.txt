@@ -131,3 +131,7 @@ Verification:
 Verification:
 - `npm run verify` passes: Runner integration 19/19, Runner full lane, Web, `mohist-slack`, Workflow Definition 178, CLI 1,950, Server Unit 3,662, Server Architecture 53, Server Spec 3,179, docs, formatting, file-size, script, FSD, and test-boundary checks.
 - Incremental commits: `2ac2c9313`, `b9422468d`, `be04dbe6a`, and `4f6db35f2`.
+
+## Review Round 7 Repair (manual, recovery budget exhausted)
+- Finding 1 (expiry recovery persisted but never dispatched): `RecordFollowupTurnCore` now appends a standard `AgentSessionFollowupLease` (`system-turn:{turnId}` operation id, deterministic and idempotent) whenever it creates a new queued turn, so system-initiated recovery turns enter the same durable dispatch contract as ordinary follow-ups. `BeginNextFollowupDispatchAsync` claims the recovery turn, the dispatcher emits a Runner request, and `IssueManagerGrantAsync` can mint the fresh management/reply credentials for the recovery agent.
+- Verification: full Server Spec suite 3,181/3,3181 includes the extended `ManagerCredentialExpiryRoute_CreatesOneQueuedRecoveryTurn` case asserting `BeginNextFollowupDispatchAsync` returns the recovery turn/input; all pre-existing follow-up dispatch and recovery specs unchanged and green.

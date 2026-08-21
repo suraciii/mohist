@@ -102,6 +102,14 @@ public class AgentSessionRuntimeEventSpecs : AgentSessionTestSupport
         Assert.Equal(AgentTurnStatus.Queued, recoveryTurn.Status);
         Assert.Equal(AgentTurnStatus.Unknown, Assert.Single(turns, turn => turn.Id == followup.TurnId).Status);
         Assert.Single(turns, turn => turn.Id == $"manager-recovery-turn:{sessionId}");
+
+        // The recovery turn must enter the ordinary dispatch contract: the
+        // dispatcher claims it and would hand the recovery agent a fresh
+        // Manager grant instead of leaving the turn recorded but unexecuted.
+        var dispatch = await grain.BeginNextFollowupDispatchAsync();
+        Assert.NotNull(dispatch);
+        Assert.Equal($"manager-recovery-turn:{sessionId}", dispatch!.TurnId);
+        Assert.Equal($"manager-recovery-input:{sessionId}", dispatch.InputId);
     }
 
     [Fact]
