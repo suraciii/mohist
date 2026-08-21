@@ -37,6 +37,7 @@ export class ManagerExecutionBoundary {
   private broker: Server | null = null
   private isolatedOpenCodeRuntime: OpenCodeRuntime | null = null
   private disposed = false
+  private authorizationInvalidated = false
 
   private constructor(
     grant: ManagerExecutionGrant,
@@ -105,7 +106,11 @@ export class ManagerExecutionBoundary {
           { ...this.environment(), ...(options.env ?? {}) },
           {
             timeoutMs: options.timeout,
-            onLine: (line) => options.onData(Buffer.from(`${this.mask(line)}\n`, 'utf8')),
+            onLine: (line) => {
+              if (line.includes('manager_credential_expired') || line.includes('manager_epoch_changed'))
+                this.authorizationInvalidated = true
+              options.onData(Buffer.from(`${this.mask(line)}\n`, 'utf8'))
+            },
           },
         )
         return { exitCode: result.exitCode }
@@ -135,7 +140,7 @@ export class ManagerExecutionBoundary {
   }
 
   hasExpired(): boolean {
-    return this.expired()
+    return this.authorizationInvalidated || this.expired()
   }
 
   private expired(): boolean {
