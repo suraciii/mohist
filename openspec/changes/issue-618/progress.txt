@@ -78,3 +78,14 @@ Constraints:
 - Full CLI suite passes: `dotnet test packages/cli/tests/Mohist.Cli.Tests/Mohist.Cli.Tests.csproj --no-restore -p:UseSharedCompilation=false` (1,950 tests), including dedicated Manager reply route selection.
 - `mohist-slack` adapter suite passes: `npm run test:run -w packages/mohist-slack` (7 files, 76 tests).
 - Server build passes: `dotnet build packages/server/src/Mohist.Server/Mohist.Server.csproj --no-restore -p:SkipWebBuild=true`.
+
+## Verify Repair
+- The failed `npm run verify` output was recovered from the workflow result: one Server architecture test and one Server unit test failed; all 3,709 Server specs and 1,950 CLI tests passed.
+- The architecture failure was a real T-004 regression: `SlackManagerIngressRoutes` directly injected `MohistDbContext` and read inbox, Session mapping, and enrollment rows. Those origin checks now live in the transactional `SlackOutboxStore` reply enqueue path, preserving validation-before-write while respecting the API/data boundary.
+- The credential failure was a real restart-epoch reporting defect: `ManagerDeploymentEpoch.Advance()` revoked leases before validation, so an old grant was reported as `manager_credential_invalid` instead of `manager_epoch_changed`. Validation now distinguishes retained revoked metadata from unknown credentials and reports the deployment epoch transition correctly.
+
+## Final Verification
+- Focused repairs pass: Server architecture 51/51, Server unit 3,120/3,120, Manager reply integration, Runner typecheck, Runner Manager boundary and Slack context tests (17/17), and the Runner host readiness test (1/1).
+- The first post-repair full Server spec run also exposed one unrelated Runner recovery-spec race; the exact named test passed 1/1 in isolation and was not changed.
+- The clean `npm run verify` gate passes all tracks: Workflow Definition 178, CLI 1,950, Server Unit 3,120, Server Architecture 51, Server Spec 3,709, Web, Runner, and `mohist-slack`, plus docs, format, file-size, script, and boundary checks.
+- File-size ratchet failures were resolved with behavior-preserving partial/module splits for issue-618 growth; no baseline or assertion was weakened. Verification created no Git-visible changes, and the final worktree is clean.

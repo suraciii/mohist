@@ -1,9 +1,6 @@
 using System.Net;
 using System.Text.Json;
 using System.Text.Json.Serialization;
-using Microsoft.EntityFrameworkCore;
-using Mohist.Server.Infrastructure.Data.Db;
-using Mohist.Server.Infrastructure.Data.Slack;
 using Mohist.Server.Infrastructure.Slack;
 using Mohist.Server.Slack.Domain;
 using Mohist.Server.Slack.Services;
@@ -168,7 +165,6 @@ public static class SlackManagerIngressRoutes
         manager.MapPost("/reply", async (
             HttpContext context,
             SlackReplyBody body,
-            IDbContextFactory<MohistDbContext> dbFactory,
             SlackOutboxStore outbox,
             CancellationToken ct) =>
         {
@@ -220,43 +216,6 @@ public static class SlackManagerIngressRoutes
                 {
                     return ApiResults.BadRequest("fileContentBase64 is not valid base64.");
                 }
-            }
-
-            await using var db = await dbFactory.CreateDbContextAsync(ct);
-            var inbox = await db.SlackProviderInboxRows.AsNoTracking().SingleOrDefaultAsync(row =>
-                row.ProjectId == SlackDeliveryOwnerIds.ManagerProjectId
-                && row.ConnectionId == origin.EnrollmentId
-                && row.SlackMessageIdentity == origin.WorkspaceId + "/" + origin.ConversationId + "/" + origin.TriggeringMessageId,
-                ct);
-            var mapping = await db.SlackDmSessionMappings.AsNoTracking().SingleOrDefaultAsync(row =>
-                row.ProjectId == SlackDeliveryOwnerIds.ManagerProjectId
-                && row.ConnectionId == origin.EnrollmentId
-                && row.WorkspaceTeamId == origin.WorkspaceId
-                && row.SlackUserId == origin.ActorId
-                && row.DmConversationId == origin.ConversationId
-                && row.CurrentSessionId == origin.SessionId,
-                ct);
-            var enrollment = await db.SlackWorkspaceEnrollments.AsNoTracking().SingleOrDefaultAsync(row =>
-                row.Id == origin.EnrollmentId
-                && row.WorkspaceTeamId == origin.WorkspaceId
-                && row.Lifecycle == SlackEnrollmentLifecycle.Active
-                && row.DeletedAt == null,
-                ct);
-            if (inbox is null
-                || !string.Equals(inbox.WorkspaceTeamId, origin.WorkspaceId, StringComparison.Ordinal)
-                || !string.Equals(inbox.ConversationId, origin.ConversationId, StringComparison.Ordinal)
-                || !string.Equals(
-                    inbox.ThreadTs ?? origin.TriggeringMessageId,
-                    origin.ThreadRootMessageId,
-                    StringComparison.Ordinal)
-                || !string.Equals(inbox.SlackUserId, origin.ActorId, StringComparison.Ordinal)
-                || !string.Equals(inbox.RouteSessionId, origin.SessionId, StringComparison.Ordinal)
-                || mapping is null
-                || enrollment is null)
-            {
-                return ApiResults.Conflict(
-                    "The Manager reply origin is no longer an accepted active Session.",
-                    "manager_reply_origin_mismatch");
             }
 
             var text = SlackMarkdownRenderer.ToMrkdwn(SlackFinalReplyRenderer.RedactReplyText(body.Text));

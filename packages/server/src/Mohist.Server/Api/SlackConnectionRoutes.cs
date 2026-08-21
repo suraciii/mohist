@@ -2337,7 +2337,7 @@ public sealed class SlackCredentialsBody
     public string BotToken { get; init; } = string.Empty;
 }
 
-public sealed class SlackReplyBody
+public sealed partial class SlackReplyBody
 {
     public string ConversationId { get; init; } = string.Empty;
     public string? ThreadTs { get; init; }
@@ -2345,17 +2345,6 @@ public sealed class SlackReplyBody
     public string? ImageUrl { get; init; }
     public string? FileName { get; init; }
     public string? FileContentBase64 { get; init; }
-
-    // Optional only because ordinary Connection callers do not carry the
-    // Manager anchor. The dedicated Manager route validates every supplied
-    // field against its lease-bound immutable origin.
-    public string? WorkspaceTeamId { get; init; }
-    public string? ThreadRootMessageId { get; init; }
-    public string? TriggeringMessageId { get; init; }
-    public string? ActorId { get; init; }
-    public string? EnrollmentId { get; init; }
-    public string? SessionId { get; init; }
-    public string? DispatchRef { get; init; }
 }
 
 public sealed class SlackChannelArchiveBody

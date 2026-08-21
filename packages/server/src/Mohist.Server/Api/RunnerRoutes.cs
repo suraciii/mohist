@@ -779,53 +779,6 @@ public static partial class RunnerRoutes
         return app;
     }
 
-    internal static async Task<WorkDispatchResponse> ToWorkDispatchResponseAsync(
-        WorkDispatch work,
-        Func<string, int, Task<ParentIssueContext?>> resolveParentIssueContext,
-        ManagerExecutionCapabilityIssuer? managerCredentials = null)
-    {
-        ParentIssueContextResponse? parentIssueContext = null;
-        var projectId = work.Issue?.ProjectId ?? work.ProjectId;
-        var issueNumber = work.Issue?.IssueNumber;
-        if (string.Equals(work.OwnerKind, WorkDispatchOwnerKinds.Workflow, StringComparison.Ordinal)
-            && string.Equals(work.WorkType, WorkItemTypes.Task, StringComparison.Ordinal)
-            && !string.IsNullOrWhiteSpace(projectId)
-            && issueNumber is > 0)
-        {
-            var resolved = await resolveParentIssueContext(projectId, issueNumber.Value);
-            if (resolved is not null)
-                parentIssueContext = new ParentIssueContextResponse(resolved.Title, resolved.Body);
-        }
-
-        return new WorkDispatchResponse(
-            work.WorkflowRunId,
-            work.WorkId,
-            work.Uses,
-            work.With,
-            work.Variables,
-            work.WorkType,
-            work.Stage,
-            work.Title,
-            projectId,
-            issueNumber,
-            work.EpicNumber,
-            work.Artifacts,
-            work.SetVars,
-            work.OwnerKind,
-            work.AgentJobId,
-            AgentSessionId: work.AgentSessionId,
-            Recovery: work.Recovery,
-            RecoveryRemaining: work.RecoveryRemaining,
-            Expect: work.Expect,
-            ParentIssueContext: parentIssueContext,
-            AgentDefinition: work.AgentDefinition,
-            AgentSessionStartup: work.AgentSessionStartup,
-            TaskRunId: work.TaskRunId,
-            RecoveryGeneration: work.RecoveryGeneration,
-            AgentRecovery: work.AgentRecovery,
-            ManagerExecutionGrant: managerCredentials?.IssueFor(work));
-    }
-
     private static RunnerGenericAgentSessionResponse ToRunnerGenericAgentSession(AgentSessionInfo session) =>
         new(
             session.AgentSessionId,

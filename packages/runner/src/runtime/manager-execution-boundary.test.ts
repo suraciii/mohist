@@ -58,7 +58,9 @@ function requestBroker(path: string, kind: 'management' | 'reply'): Promise<stri
     const socket = createConnection(path)
     let body = ''
     socket.setEncoding('utf8')
-    socket.on('data', (chunk) => { body += chunk })
+    socket.on('data', (chunk) => {
+      body += chunk
+    })
     socket.on('error', reject)
     socket.on('end', () => {
       try {

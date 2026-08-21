@@ -25,6 +25,25 @@ import { reportWork } from './connection-report.js'
 import { WorkspaceHomeClaimedError } from '../runtime/workspace-entity.js'
 import { currentRunnerTransport } from '../system/filesystem.js'
 import { extractErrorMessage } from './connection-errors.js'
+import type {
+  AgentInputAttachmentContent,
+  AgentSession,
+  AgentSessionReconcileBinding,
+  AgentSessionRuntimeEventAcceptance,
+  AgentSessionRuntimeEventReceipt,
+  WorkflowAgentSession,
+  WorkflowAgentSessionCleanupTurnAcceptance,
+} from './connection-session-models.js'
+
+export type {
+  AgentInputAttachmentContent,
+  AgentSession,
+  AgentSessionReconcileBinding,
+  AgentSessionRuntimeEventAcceptance,
+  AgentSessionRuntimeEventReceipt,
+  WorkflowAgentSession,
+  WorkflowAgentSessionCleanupTurnAcceptance,
+} from './connection-session-models.js'
 
 export class ServerConnection {
   private readonly buildGitHash: string | null
@@ -115,8 +134,7 @@ export class ServerConnection {
    * while the grant remains outside DispatchWorkItem.
    */
   takeLastPolledDispatches(work: readonly DispatchWorkItem[]): PolledDispatch[] {
-    if (this.lastPolledDispatches.length === 0)
-      return work.map((item) => ({ work: item }))
+    if (this.lastPolledDispatches.length === 0) return work.map((item) => ({ work: item }))
     const byKey = new Map(this.lastPolledDispatches.map((item) => [dispatchKey(item.work), item]))
     this.lastPolledDispatches = []
     return work.map((item) => byKey.get(dispatchKey(item)) ?? { work: item })
@@ -845,58 +863,9 @@ export class ServerConnection {
   }
 }
 
-export interface AgentSessionReconcileBinding {
-  readonly sessionId: string
-  readonly runtime: 'opencode' | 'pi'
-  readonly runtimeSessionId: string
-  readonly workDir: string
-}
-
-export interface WorkflowAgentSession {
-  sessionId: string
-  runtimeSessionId?: string | null
-  runtime?: string | null
-  status?: string | null
-  workDir?: string | null
-  model?: string | null
-  resolvedModel?: string | null
-  needsFreshRuntimeSession?: boolean
-}
-
-export interface AgentSessionRuntimeEventReceipt {
-  type: string
-  inputDeliveryId?: string
-  agentTurnId?: string
-  agentSessionId?: string
-}
-
-export interface AgentInputAttachmentContent {
-  readonly bytes: Uint8Array
-  readonly contentType: string | null
-  readonly contentDisposition: string | null
-}
-
-export interface AgentSessionRuntimeEventAcceptance {
-  id?: string
-  type?: string
-  sequence?: number
-  inputDeliveryId?: string
-  agentTurnId?: string
-  agentSessionId?: string
-}
-
-export interface WorkflowAgentSessionCleanupTurnAcceptance {
-  cleanupOperationId: string
-  inputDeliveryId: string
-  agentTurnId: string
-  agentSessionId: string
-}
-
-export type AgentSession = WorkflowAgentSession
-
 function dispatchKey(work: DispatchWorkItem): string {
   const ownerKind = work.ownerKind ?? 'workflow'
-  const ownerId = ownerKind === 'agent-job' ? work.agentJobId ?? '' : work.workflowRunId
+  const ownerId = ownerKind === 'agent-job' ? (work.agentJobId ?? '') : work.workflowRunId
   return `${ownerKind}:${ownerId}:${work.workId}`
 }
 

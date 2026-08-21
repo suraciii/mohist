@@ -204,10 +204,7 @@ export async function executeOpenCodeTurn(
     )
   }
   await eventSink.drain()
-  return redactManagerResult(
-    projectTurnToWorkItemResult(result, 'opencode', modelInput, variant),
-    managerExecution,
-  )
+  return redactManagerResult(projectTurnToWorkItemResult(result, 'opencode', modelInput, variant), managerExecution)
 }
 
 export async function executePiTurn(
@@ -352,16 +349,10 @@ export async function executePiTurn(
     )
   }
   await eventSink.drain()
-  return redactManagerResult(
-    projectPiTurnToWorkItemResult(result, 'pi', modelInput, variant),
-    managerExecution,
-  )
+  return redactManagerResult(projectPiTurnToWorkItemResult(result, 'pi', modelInput, variant), managerExecution)
 }
 
-function redactManagerResult(
-  result: WorkItemResult,
-  boundary: ManagerExecutionBoundary | null,
-): WorkItemResult {
+function redactManagerResult(result: WorkItemResult, boundary: ManagerExecutionBoundary | null): WorkItemResult {
   if (!boundary) return result
   return boundary.redact(result) as WorkItemResult
 }
