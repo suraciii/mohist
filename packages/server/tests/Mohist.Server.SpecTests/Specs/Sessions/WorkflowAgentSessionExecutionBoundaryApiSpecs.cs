@@ -54,6 +54,117 @@ public sealed class WorkflowAgentSessionExecutionBoundaryApiSpecs : AgentSession
     }
 
     [Fact]
+    public async Task SessionRuntimeEvents_CurrentBindingActivityWithoutTurn_IsAcceptedWithoutWorkflowAttribution()
+    {
+        var (_, _, _, session) = await CreateStartedAgentSessionAsync("session-activity-only");
+        var grain = _fixture.Grains.GetGrain<IAgentSessionGrain>(session.Id);
+        var persistence = _fixture.Persistence.Checkpoint(session.Id);
+
+        using var activeResponse = await _client.PostAsJsonAsync(RunnerSessionRuntimeEventsPath(session), new
+        {
+            runtimeSessionId = session.Id,
+            runtimeEvents = new[]
+            {
+                new { type = RuntimeEventTypes.SessionActivity, payload = new { activity = "active" } }
+            }
+        });
+
+        Assert.Equal(HttpStatusCode.OK, activeResponse.StatusCode);
+        using var activeBody = JsonDocument.Parse(await activeResponse.Content.ReadAsStringAsync());
+        Assert.Single(activeBody.RootElement.EnumerateArray());
+        await persistence.WaitAsync();
+
+        var active = await grain.GetAsync();
+        Assert.NotNull(active);
+        Assert.Equal("active", active!.Status);
+        Assert.Empty(await grain.ListTurnsAsync());
+
+        var idlePersistence = _fixture.Persistence.Checkpoint(session.Id);
+        using var idleResponse = await _client.PostAsJsonAsync(RunnerSessionRuntimeEventsPath(session), new
+        {
+            runtimeSessionId = session.Id,
+            runtimeEvents = new[]
+            {
+                new { type = RuntimeEventTypes.SessionActivity, payload = new { activity = "idle" } }
+            }
+        });
+
+        Assert.Equal(HttpStatusCode.OK, idleResponse.StatusCode);
+        using var idleBody = JsonDocument.Parse(await idleResponse.Content.ReadAsStringAsync());
+        Assert.Single(idleBody.RootElement.EnumerateArray());
+        await idlePersistence.WaitAsync();
+
+        var idle = await grain.GetAsync();
+        Assert.NotNull(idle);
+        Assert.Equal("idle", idle!.Status);
+        Assert.Empty(await grain.ListTurnsAsync());
+    }
+
+    [Fact]
+    public async Task SessionRuntimeEvents_UnattributedNonActivityAndMixedBatch_FailClosedBeforeAppend()
+    {
+        var (_, _, _, session) = await CreateStartedAgentSessionAsync("session-activity-boundary");
+        var grain = _fixture.Grains.GetGrain<IAgentSessionGrain>(session.Id);
+        var before = await grain.GetAsync();
+
+        using var nonActivity = await _client.PostAsJsonAsync(RunnerSessionRuntimeEventsPath(session), new
+        {
+            runtimeSessionId = session.Id,
+            runtimeEvents = new[]
+            {
+                new { type = RuntimeEventTypes.MessageDelta, payload = new { text = "unattributed" } }
+            }
+        });
+        Assert.Equal(HttpStatusCode.Conflict, nonActivity.StatusCode);
+
+        using var mixed = await _client.PostAsJsonAsync(RunnerSessionRuntimeEventsPath(session), new
+        {
+            runtimeSessionId = session.Id,
+            runtimeEvents = new object[]
+            {
+                new { type = RuntimeEventTypes.SessionActivity, payload = new { activity = "active" } },
+                new { type = RuntimeEventTypes.MessageDelta, payload = new { text = "mixed" } }
+            }
+        });
+        Assert.Equal(HttpStatusCode.Conflict, mixed.StatusCode);
+
+        Assert.Equal(before, await grain.GetAsync());
+        Assert.Empty(await grain.ListTurnsAsync());
+    }
+
+    [Fact]
+    public async Task SessionRuntimeEvents_StaleOrMissingBinding_DoesNotMutateSession()
+    {
+        var (_, _, _, session) = await CreateStartedAgentSessionAsync("session-activity-stale");
+        var grain = _fixture.Grains.GetGrain<IAgentSessionGrain>(session.Id);
+        var before = await grain.GetAsync();
+
+        using var stale = await _client.PostAsJsonAsync(RunnerSessionRuntimeEventsPath(session), new
+        {
+            runtimeSessionId = "stale-runtime-session",
+            runtimeEvents = new[]
+            {
+                new { type = RuntimeEventTypes.SessionActivity, payload = new { activity = "active" } }
+            }
+        });
+        Assert.Equal(HttpStatusCode.OK, stale.StatusCode);
+        using var staleBody = JsonDocument.Parse(await stale.Content.ReadAsStringAsync());
+        Assert.Empty(staleBody.RootElement.EnumerateArray());
+
+        using var missing = await _client.PostAsJsonAsync(RunnerSessionRuntimeEventsPath(session), new
+        {
+            runtimeEvents = new[]
+            {
+                new { type = RuntimeEventTypes.SessionActivity, payload = new { activity = "active" } }
+            }
+        });
+        Assert.Equal(HttpStatusCode.BadRequest, missing.StatusCode);
+
+        Assert.Equal(before, await grain.GetAsync());
+        Assert.Empty(await grain.ListTurnsAsync());
+    }
+
+    [Fact]
     public async Task WorkflowRuntimeEvents_WithoutExecutionIdentity_FailClosed()
     {
         var (_, _, _, session) = await CreateStartedAgentSessionAsync("workflow-runtime-no-identity");

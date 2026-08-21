@@ -1685,12 +1685,24 @@ public sealed partial class AgentSessionGrain : Grain, IAgentSessionGrain, IRemi
         var session = await GetRequiredAsync();
         if (command.WorkflowExecution is not null && command.SessionTurnId is not null)
             throw new InvalidOperationException("Runtime events cannot carry both Workflow execution and Session turn identity.");
-        if (command.SessionTurnId is not null)
-            ValidateSessionRuntimeEventTurnIds(session, command.RuntimeEvents, command.SessionTurnId);
+
+        var isUnattributed = command.WorkflowExecution is null && command.SessionTurnId is null;
+        var isWorkflowIntroduced = string.Equals(
+            session.Metadata.Label(AgentSessionQueryMetadataKeys.SourceKind),
+            "workflow",
+            StringComparison.Ordinal);
+        var isPureActivityBatch = command.RuntimeEvents.Count > 0
+            && command.RuntimeEvents.All(runtimeEvent =>
+                string.Equals(runtimeEvent.Type, RuntimeEventTypes.SessionActivity, StringComparison.Ordinal));
         var hasWorkflowTurnForRuntime = (session.Status.Turns ?? []).Any(turn =>
             turn.WorkflowExecution is { } binding
             && string.Equals(binding.RuntimeSessionId, command.RuntimeSessionId, StringComparison.Ordinal));
-        if (hasWorkflowTurnForRuntime && command.SessionTurnId is null)
+        if (isWorkflowIntroduced && isUnattributed && !isPureActivityBatch)
+            throw new InvalidOperationException("Workflow runtime events require the acknowledged Agent turn binding.");
+
+        if (command.SessionTurnId is not null)
+            ValidateSessionRuntimeEventTurnIds(session, command.RuntimeEvents, command.SessionTurnId);
+        if (hasWorkflowTurnForRuntime && command.SessionTurnId is null && !isPureActivityBatch)
         {
             if (command.WorkflowExecution is null)
                 throw new InvalidOperationException("Workflow runtime events require the acknowledged Agent turn binding.");
@@ -1703,7 +1715,11 @@ public sealed partial class AgentSessionGrain : Grain, IAgentSessionGrain, IRemi
         if (command.WorkflowExecution is { } workflowBinding)
             ValidateWorkflowRuntimeEventTurnIds(command.RuntimeEvents, workflowBinding);
 
-        var events = await AppendEventsAsync(command.RuntimeEvents, command.RuntimeSessionId, requireCurrentRuntimeBinding: true);
+        var events = await AppendEventsAsync(
+            command.RuntimeEvents,
+            command.RuntimeSessionId,
+            requireCurrentRuntimeBinding: true,
+            sessionLevelActivityOnly: isWorkflowIntroduced && isUnattributed && isPureActivityBatch);
         if (command.WorkflowExecution is { } binding)
         {
             var observations = BuildWorkflowRuntimeObservations(command.RuntimeEvents);
@@ -2005,7 +2021,8 @@ public sealed partial class AgentSessionGrain : Grain, IAgentSessionGrain, IRemi
     private async Task<IReadOnlyList<AgentSessionRuntimeEventInfo>> AppendEventsAsync(
         IReadOnlyList<AgentSessionRuntimeEventInput> runtimeEvents,
         string? runtimeSessionId,
-        bool requireCurrentRuntimeBinding)
+        bool requireCurrentRuntimeBinding,
+        bool sessionLevelActivityOnly = false)
     {
         if (runtimeEvents.Count == 0) return [];
 
@@ -2085,49 +2102,53 @@ public sealed partial class AgentSessionGrain : Grain, IAgentSessionGrain, IRemi
             string? WaiterId)>();
         foreach (var e in runtimeEvents)
         {
-            var domainEvents = ApplyRuntimeEventToDomain(session, e, now);
+            var domainEvents = ApplyRuntimeEventToDomain(session, e, now, sessionLevelActivityOnly);
             events.AddRange(domainEvents);
-            SettleStopClaimFromRuntimeEvent(session, e);
 
-            if (e.Type == RuntimeEventTypes.SessionInput)
+            if (!sessionLevelActivityOnly)
             {
-                var inputPayload = SafeDeserialize(e.PayloadJson);
-                var operationId = AgentSessionJsonHelper.GetStringProp(inputPayload, "operationId");
-                if (!string.IsNullOrWhiteSpace(operationId))
-                    events.AddRange(session.MarkFollowupTurnExecuting(operationId, now));
-            }
+                SettleStopClaimFromRuntimeEvent(session, e);
 
-            if (e.Type == RuntimeEventTypes.SessionActivity)
-            {
-                var activityPayload = SafeDeserialize(e.PayloadJson);
-                var activity = ParseActivity(activityPayload);
-                var operationId = AgentSessionJsonHelper.GetStringProp(activityPayload, "operationId");
-                if (!string.IsNullOrWhiteSpace(operationId)
-                    && (activity == AgentSessionActivity.Idle || activity == AgentSessionActivity.Unknown))
+                if (e.Type == RuntimeEventTypes.SessionInput)
                 {
-                    var pending = GetPendingFollowups(session);
-                    var clearing = pending.FirstOrDefault(lease =>
-                        string.Equals(lease.OperationId, operationId, StringComparison.Ordinal));
-                    if (clearing?.ConcurrencyToken is not null && clearing.ConcurrencyAgentId is not null)
-                        pendingConcurrencyReleases.Add((
-                            clearing.ConcurrencyToken,
-                            clearing.ConcurrencyAgentId,
-                            clearing.ConcurrencyPermitId,
-                            clearing.ConcurrencyGeneration,
-                            clearing.ConcurrencyWaiterId));
+                    var inputPayload = SafeDeserialize(e.PayloadJson);
+                    var operationId = AgentSessionJsonHelper.GetStringProp(inputPayload, "operationId");
+                    if (!string.IsNullOrWhiteSpace(operationId))
+                        events.AddRange(session.MarkFollowupTurnExecuting(operationId, now));
+                }
 
-                    if (!string.IsNullOrWhiteSpace(clearing?.TurnId))
+                if (e.Type == RuntimeEventTypes.SessionActivity)
+                {
+                    var activityPayload = SafeDeserialize(e.PayloadJson);
+                    var activity = ParseActivity(activityPayload);
+                    var operationId = AgentSessionJsonHelper.GetStringProp(activityPayload, "operationId");
+                    if (!string.IsNullOrWhiteSpace(operationId)
+                        && (activity == AgentSessionActivity.Idle || activity == AgentSessionActivity.Unknown))
                     {
-                        events.AddRange(session.MarkFollowupTurnTerminal(
-                            operationId,
-                            ResolveFollowupTurnTerminalStatus(activityPayload),
-                            ResolveFollowupTurnResult(activityPayload),
-                            now));
-                    }
-                    else
-                    {
-                        SetPendingFollowups(session, pending.Where(lease =>
-                            !string.Equals(lease.OperationId, operationId, StringComparison.Ordinal)).ToArray());
+                        var pending = GetPendingFollowups(session);
+                        var clearing = pending.FirstOrDefault(lease =>
+                            string.Equals(lease.OperationId, operationId, StringComparison.Ordinal));
+                        if (clearing?.ConcurrencyToken is not null && clearing.ConcurrencyAgentId is not null)
+                            pendingConcurrencyReleases.Add((
+                                clearing.ConcurrencyToken,
+                                clearing.ConcurrencyAgentId,
+                                clearing.ConcurrencyPermitId,
+                                clearing.ConcurrencyGeneration,
+                                clearing.ConcurrencyWaiterId));
+
+                        if (!string.IsNullOrWhiteSpace(clearing?.TurnId))
+                        {
+                            events.AddRange(session.MarkFollowupTurnTerminal(
+                                operationId,
+                                ResolveFollowupTurnTerminalStatus(activityPayload),
+                                ResolveFollowupTurnResult(activityPayload),
+                                now));
+                        }
+                        else
+                        {
+                            SetPendingFollowups(session, pending.Where(lease =>
+                                !string.Equals(lease.OperationId, operationId, StringComparison.Ordinal)).ToArray());
+                        }
                     }
                 }
             }
@@ -2599,10 +2620,14 @@ public sealed partial class AgentSessionGrain : Grain, IAgentSessionGrain, IRemi
     private static IReadOnlyList<AgentSessionEvent> ApplyRuntimeEventToDomain(
         AgentSession session,
         AgentSessionRuntimeEventInput runtimeEvent,
-        DateTime now)
+        DateTime now,
+        bool sessionLevelActivityOnly = false)
     {
         var payload = JSON.DeserializeElement(runtimeEvent.PayloadJson);
         var operationId = AgentSessionJsonHelper.GetStringProp(payload, "operationId");
+        if (sessionLevelActivityOnly && runtimeEvent.Type == RuntimeEventTypes.SessionActivity)
+            return session.SetActivity(ParseActivity(payload), now);
+
         return runtimeEvent.Type switch
         {
             RuntimeEventTypes.SessionInput when HasPendingFollowupOperation(session, operationId) => session.SetActivity(
