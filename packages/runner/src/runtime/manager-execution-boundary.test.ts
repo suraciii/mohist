@@ -23,11 +23,16 @@ describe('ManagerExecutionBoundary', () => {
       expect(environment.MOHIST_MANAGER_REPLY_TOKEN).toBeUndefined()
       expect(environment.MOHIST_MANAGER_BROKER).toContain('broker.sock')
 
-      // A generic process that discovers the socket cannot authenticate as
-      // the generated launcher and receives no bearer.
-      expect(await requestBroker(environment.MOHIST_MANAGER_BROKER!, 'management')).toBeNull()
+      // A generic process that discovers the socket cannot turn it into a
+      // credential oracle. The broker accepts only command arguments and
+      // never returns a bearer value, even without launcher metadata.
+      const managementResponse = await requestBroker(environment.MOHIST_MANAGER_BROKER!, 'management')
+      expect(managementResponse?.credential).toBeUndefined()
+      expect(managementResponse?.exitCode).toBeUndefined()
 
-      expect(await requestBroker(environment.MOHIST_MANAGER_BROKER!, 'reply')).toBeNull()
+      const replyResponse = await requestBroker(environment.MOHIST_MANAGER_BROKER!, 'reply')
+      expect(replyResponse?.credential).toBeUndefined()
+      expect(replyResponse?.exitCode).toBeUndefined()
 
       const output: Buffer[] = []
       await boundary.bashOperations().exec('env', root, {
@@ -54,7 +59,10 @@ describe('ManagerExecutionBoundary', () => {
   })
 })
 
-function requestBroker(path: string, kind: 'management' | 'reply'): Promise<string | null> {
+function requestBroker(
+  path: string,
+  kind: 'management' | 'reply',
+): Promise<{ credential?: string; exitCode?: number; stdout?: string; stderr?: string } | null> {
   return new Promise((resolve, reject) => {
     const socket = createConnection(path)
     let body = ''
@@ -65,14 +73,16 @@ function requestBroker(path: string, kind: 'management' | 'reply'): Promise<stri
     socket.on('error', reject)
     socket.on('end', () => {
       try {
-        const parsed = JSON.parse(body) as { credential?: string }
-        resolve(parsed.credential ?? null)
+        const parsed = JSON.parse(body) as { credential?: string; exitCode?: number; stdout?: string; stderr?: string }
+        resolve(parsed)
       } catch (error) {
         reject(error)
       }
     })
     socket.on('connect', () => {
-      socket.end(JSON.stringify({ kind }))
+      // Deliberately omit the argument list: this is the old forged
+      // credential request shape, which must receive no bearer.
+      socket.end(JSON.stringify({ kind, launcherPid: process.pid }))
     })
   })
 }

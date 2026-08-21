@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto'
-import { readFileSync } from 'node:fs'
+import { existsSync } from 'node:fs'
+import { spawn } from 'node:child_process'
 import { chmod, mkdir, rm, writeFile } from 'node:fs/promises'
 import { createServer, type Server, type Socket } from 'node:net'
 import { join } from 'node:path'
@@ -34,6 +35,7 @@ export class ManagerExecutionBoundary {
   private readonly socketPath: string
   private readonly directory: string
   private readonly grant: ManagerExecutionGrant
+  private readonly realMoPath: string
   private broker: Server | null = null
   private isolatedOpenCodeRuntime: OpenCodeRuntime | null = null
   private disposed = false
@@ -44,11 +46,13 @@ export class ManagerExecutionBoundary {
     directory: string,
     socketPath: string,
     baseEnvironment: NodeJS.ProcessEnv,
+    realMoPath: string,
   ) {
     this.grant = grant
     this.directory = directory
     this.socketPath = socketPath
     this.baseEnvironment = baseEnvironment
+    this.realMoPath = realMoPath
     this.masker.registerSecret(grant.managementCredential)
     this.masker.registerSecret(grant.replyCredential)
   }
@@ -67,16 +71,19 @@ export class ManagerExecutionBoundary {
     const directory = join(runnerRoot, 'manager-executions', suffix)
     await mkdir(directory, { recursive: true, mode: 0o700 })
     const socketPath = join(directory, 'broker.sock')
-    const boundary = new ManagerExecutionBoundary(grant, directory, socketPath, {
+    const baseEnvironment: NodeJS.ProcessEnv = {
       ...process.env,
       MOHIST_MANAGER_MODE: '1',
-    })
+    }
+    const realMoPath = findRealMoPath(directory, baseEnvironment.PATH ?? '')
+    if (!realMoPath) throw new Error('The real mo executable could not be resolved')
+    const boundary = new ManagerExecutionBoundary(grant, directory, socketPath, baseEnvironment, realMoPath)
     await boundary.writeLauncher()
     await boundary.startBroker()
     return boundary
   }
 
-  /** No bearer is present in this environment. */
+  /** The locator is non-secret; bearer values never enter this environment. */
   environment(): NodeJS.ProcessEnv {
     if (this.disposed) throw new Error('Manager execution boundary is closed')
     const currentPath = this.baseEnvironment.PATH ?? ''
@@ -91,8 +98,8 @@ export class ManagerExecutionBoundary {
 
   /**
    * Pi's real Bash tool calls this operation. Generic commands inherit only
-   * the non-secret broker locator; the launcher is the sole code path that
-   * receives a bearer from the broker.
+   * the non-secret broker locator; the broker keeps bearer values inside the
+   * child process that performs the CLI request.
    */
   bashOperations() {
     return {
@@ -182,15 +189,10 @@ export class ManagerExecutionBoundary {
     const launcher = join(this.directory, 'mo')
     const source = `#!/usr/bin/env node
 const net = require('node:net')
-const { spawn } = require('node:child_process')
-const path = require('node:path')
 const broker = process.env.MOHIST_MANAGER_BROKER
 if (!broker) process.exit(126)
 const args = process.argv.slice(2)
 const kind = args[0] === 'slack' && args[1] === 'message' && args[2] === 'send' ? 'reply' : 'management'
-const pathParts = (process.env.PATH || '').split(path.delimiter).filter((item) => item && path.resolve(item) !== path.dirname(process.argv[1]))
-const realPath = pathParts.map((item) => path.join(item, process.platform === 'win32' ? 'mo.exe' : 'mo')).find((item) => require('node:fs').existsSync(item))
-if (!realPath) process.exit(127)
 const socket = net.createConnection(broker)
 let body = ''
 socket.on('data', (chunk) => { body += chunk.toString() })
@@ -198,17 +200,12 @@ socket.on('error', () => process.exit(126))
 socket.on('end', () => {
   let response
   try { response = JSON.parse(body) } catch { process.exit(126); return }
-  if (!response || typeof response.credential !== 'string') { process.exit(126); return }
-  const env = { ...process.env }
-  delete env.MOHIST_MANAGER_BROKER
-  delete env.MOHIST_MANAGER_EXECUTION_ID
-  if (kind === 'reply') env.MOHIST_MANAGER_REPLY_TOKEN = response.credential
-  else env.MOHIST_MANAGER_MANAGEMENT_TOKEN = response.credential
-  const child = spawn(realPath, args, { cwd: process.cwd(), env, stdio: 'inherit' })
-  child.on('exit', (code) => process.exit(code === null ? 1 : code))
-  child.on('error', () => process.exit(126))
+  if (!response || typeof response.exitCode !== 'number') { process.exit(126); return }
+  if (typeof response.stdout === 'string') process.stdout.write(response.stdout)
+  if (typeof response.stderr === 'string') process.stderr.write(response.stderr)
+  process.exit(response.exitCode)
 })
-socket.end(JSON.stringify({ kind, launcherPid: process.pid }))
+socket.end(JSON.stringify({ kind, args, cwd: process.cwd() }))
 `
     await writeFile(launcher, source, { encoding: 'utf8', mode: 0o700 })
     if (process.platform !== 'win32') await chmod(launcher, 0o700)
@@ -229,46 +226,92 @@ socket.end(JSON.stringify({ kind, launcherPid: process.pid }))
     this.broker = broker
   }
 
+  /**
+   * The broker is an argument-only command proxy. It never returns either
+   * bearer value, so a same-user process that connects directly can request
+   * only the normal CLI surface and cannot turn the launcher into a token
+   * oracle.
+   */
   private handleConnection(socket: Socket): void {
     let body = ''
     socket.setEncoding('utf8')
     socket.on('data', (chunk) => {
       body += chunk
-      if (body.length > 256) socket.destroy()
+      if (body.length > 64 * 1024) socket.destroy()
     })
+    socket.on('error', () => socket.destroy())
     socket.on('end', () => {
-      let request: { kind?: unknown; launcherPid?: unknown }
+      let request: { kind?: unknown; args?: unknown; cwd?: unknown }
       try {
-        request = JSON.parse(body) as { kind?: unknown; launcherPid?: unknown }
+        request = JSON.parse(body) as { kind?: unknown; args?: unknown; cwd?: unknown }
       } catch {
         socket.end('{}')
         return
       }
-      if ((request.kind !== 'management' && request.kind !== 'reply') || !this.isLauncherProcess(request.launcherPid)) {
+      if ((request.kind !== 'management' && request.kind !== 'reply')
+        || !Array.isArray(request.args)
+        || request.args.some((arg) => typeof arg !== 'string')
+        || request.args.length > 128
+        || this.expired()) {
         socket.end('{}')
         return
       }
-      if (this.expired()) {
-        socket.end('{}')
-        return
-      }
-      const credential = request.kind === 'reply' ? this.grant.replyCredential : this.grant.managementCredential
-      socket.end(JSON.stringify({ credential }))
+      void this.executeCli(
+        socket,
+        request.kind,
+        request.args as string[],
+        typeof request.cwd === 'string' && request.cwd.length > 0 ? request.cwd : process.cwd(),
+      )
     })
   }
 
-  private isLauncherProcess(value: unknown): value is number {
-    if (process.platform === 'win32' || typeof value !== 'number' || !Number.isSafeInteger(value) || value <= 0)
-      return false
-    try {
-      const commandLine = readFileSync(`/proc/${value}/cmdline`, 'utf8')
-        .split('\0')
-        .filter((part) => part.length > 0)
-      return commandLine.includes(join(this.directory, 'mo'))
-    } catch {
-      return false
-    }
+  private async executeCli(
+    socket: Socket,
+    kind: 'management' | 'reply',
+    args: string[],
+    cwd: string,
+  ): Promise<void> {
+    const childEnvironment = { ...this.baseEnvironment }
+    delete childEnvironment.MOHIST_MANAGER_BROKER
+    delete childEnvironment.MOHIST_MANAGER_EXECUTION_ID
+    delete childEnvironment.MOHIST_MANAGER_MANAGEMENT_TOKEN
+    delete childEnvironment.MOHIST_MANAGER_REPLY_TOKEN
+    if (kind === 'management') childEnvironment.MOHIST_MANAGER_MANAGEMENT_TOKEN = this.grant.managementCredential
+    else childEnvironment.MOHIST_MANAGER_REPLY_TOKEN = this.grant.replyCredential
+
+    const child = spawn(this.realMoPath, args, {
+      cwd,
+      env: childEnvironment,
+      stdio: ['ignore', 'pipe', 'pipe'],
+    })
+    let stdout = ''
+    let stderr = ''
+    child.stdout.on('data', (chunk: Buffer) => {
+      stdout += this.mask(chunk.toString('utf8'))
+    })
+    child.stderr.on('data', (chunk: Buffer) => {
+      stderr += this.mask(chunk.toString('utf8'))
+    })
+    child.on('error', () => socket.end('{}'))
+    child.on('close', (exitCode) => {
+      if (socket.destroyed) return
+      socket.end(JSON.stringify({
+        exitCode: typeof exitCode === 'number' ? exitCode : 1,
+        stdout,
+        stderr,
+      }))
+    })
   }
+}
+
+function findRealMoPath(managerDirectory: string, pathValue: string): string | null {
+  const separator = process.platform === 'win32' ? ';' : ':'
+  const executable = process.platform === 'win32' ? 'mo.exe' : 'mo'
+  return pathValue
+    .split(separator)
+    .filter((item) => item && join(item) !== managerDirectory)
+    .map((item) => join(item, executable))
+    .find((candidate) => existsSync(candidate)) ?? null
 }
 
 export interface ManagerRuntimeProcessEnvironment {
