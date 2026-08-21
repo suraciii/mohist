@@ -10,7 +10,7 @@
       "acceptanceCriteria": [
         "A current-binding activity-only request without Agent turn identity returns the normal successful acceptance shape, persists the activity/transcript state, and creates no Workflow execution observation or task transition.",
         "Both active and idle session.activity observations are accepted at session scope without inventing an Agent turn or Workflow attribution.",
-        "An unattributed message.delta request and an unattributed mixed activity plus non-activity batch are rejected or ignored according to the existing boundary contract, append no events, and create no Workflow observation.",
+        "For a session whose persisted SourceKind is workflow, an unattributed message.delta request and an unattributed mixed activity plus non-activity batch are rejected or ignored according to the existing boundary contract, append no events, and create no Workflow observation, regardless of whether a Workflow turn exists for the reported runtime.",
         "A stale, missing, or mismatched runtimeSessionId does not mutate the AgentSession, change activity state, append transcript data, or create a Workflow observation.",
         "Workflow-attributed requests still require the complete acknowledged input-delivery, AgentSession, Agent turn, TaskRun, Work, runner/runtime, and current runtime-session binding, and valid turn events still use the acknowledged execution binding.",
         "Server integration/spec tests cover accepted active and idle activity, stale binding no-op behavior, mixed and non-activity rejection, absent or partial Workflow identity, mismatched AgentSession identity, and absence of Workflow observations; the focused test suite passes."
@@ -21,15 +21,16 @@
       "output": "Updated packages/server runtime-event route and AgentSession grain behavior with regression coverage in the session runtime-event specification tests.",
       "dependsOn": [],
       "passes": false,
-      "notes": "Keep the relaxation authoritative in AgentSessionGrain.AppendRuntimeEventsAsync behind the existing session route. Do not infer Workflow attribution from session.activity or relax the Workflow-labeled route."
+      "notes": "Keep the relaxation authoritative in AgentSessionGrain.AppendRuntimeEventsAsync behind the existing session route. Classify Workflow-introduced sessions from persisted SourceKind == workflow before applying the pure-batch gate; do not use the presence of a matching Workflow turn as the classification. Do not infer Workflow attribution from session.activity or relax the Workflow-labeled route."
     },
     {
       "id": "T-002",
       "title": "Bound terminal settlement for deterministic binding refusals",
       "spec": "specs/runtime-event-outbox-convergence/spec.md#deterministic-binding-reconcile-refusals-reach-bounded-terminal-settlement",
-      "description": "Preserve HTTP status and structured Server error-code metadata for runtime-event delivery failures, then classify only known deterministic 4xx runtime-event refusals as terminal candidates. Track consecutive refusals per binding-reconcile runtimeEventDeliveryKey, and after the fixed threshold remove all pending records for that key in one durable snapshot settlement while retaining and retrying transient, malformed, timeout, transport, 408/429, and 5xx failures.",
+      "description": "Preserve HTTP status and structured Server error-code metadata for runtime-event delivery failures, then classify only the explicit allowlist of known deterministic 4xx runtime-event refusals as terminal candidates: the observed HTTP 409 code conflict, plus named runtime binding/session validation codes. Do not classify unknown 4xx, authentication/authorization, 404, 408, or 429 responses as terminal. Track consecutive refusals per binding-reconcile runtimeEventDeliveryKey, and after exactly three refusals remove all pending records for that key in one durable snapshot settlement while retaining and retrying transient, malformed, timeout, transport, and 5xx failures.",
       "acceptanceCriteria": [
         "A runtime-event HTTP failure exposes its status and available Server error code through typed metadata without requiring callers to parse exception strings; successful delivery behavior remains unchanged.",
+        "The terminal predicate is an explicit (status, code) allowlist: (409, conflict), (409, agent_session_changed), (409, workflow_agent_session_changed), (409, workflow_runtime_binding_rejected), (409, workflow_cleanup_binding_rejected), and the named 400 validation/runtime-identity codes; unknown 4xx codes, 401/403, 404, 408, and 429 remain retryable.",
         "Three consecutive deterministic 4xx refusals for one binding-reconcile delivery key remove every currently pending record for that key, persist the removal before reporting success, schedule no later retry for those records, and emit exactly one actionable terminal-settlement error.",
         "Refusal counters are independent per runtimeEventDeliveryKey and reset after a successful response, a retryable failure, or another non-deterministic outcome; settling one key does not remove or count records for another key.",
         "Timeouts, transport failures, malformed responses, 5xx responses, and known transient client statuses such as 408 and 429 retain durable records and use the existing retry timing without terminal settlement.",
@@ -42,16 +43,17 @@
       "output": "Structured runtime-event delivery errors and bounded binding-reconcile settlement in packages/runner, with durable outbox and fake-timer regression tests.",
       "dependsOn": [],
       "passes": false,
-      "notes": "Use the design threshold of three refusals and an allowlist of stable non-retryable runtime-event boundary refusals. Never retarget a refused record to a new runtime session or add a dead-letter snapshot format."
+      "notes": "Use exactly three refusals and the design's explicit (status, code) allowlist, including the observed session runtime-events (409, conflict) response. Never classify by status alone, parse exception strings, retarget a refused record to a new runtime session, or add a dead-letter snapshot format."
     },
     {
       "id": "T-003",
       "title": "Settle confirmed-consumed matching records fail-closed",
       "spec": "specs/runtime-event-outbox-convergence/spec.md#confirmed-consumed-matching-records-settle-without-fabricating-identity",
-      "description": "Extend matching-receipt settlement for session.input and Workflow cleanup session.cleanup so two consecutive valid 2xx responses with empty receipt arrays confirm that the record was already consumed. Persist the removal before resolving the waiter with a typed already-consumed terminal outcome, preserve all positive receipt identity checks, reset interrupted confirmation sequences, and update Workflow reporter callers to stop fail-closed without inventing an Agent turn or receipt.",
+      "description": "Extend matching-receipt settlement for session.input and Workflow cleanup session.cleanup so two consecutive valid 2xx responses with empty receipt arrays confirm that the record was already consumed. Change the Workflow cleanup-turn Server route, connection method, and delivery adapter to use the same receipt-array protocol: a new cleanup operation returns one validated session.cleanup receipt, while an idempotent replay returns a valid 2xx empty array. Persist the removal before resolving the waiter with a typed already-consumed terminal outcome, preserve all positive receipt identity checks, reset interrupted confirmation sequences, and update Workflow reporter callers to stop fail-closed without inventing an Agent turn or receipt.",
       "acceptanceCriteria": [
-        "The first valid empty 2xx response retains the matching-receipt record durably and leaves its waiter pending; a second consecutive valid empty response removes and persists the record as already consumed.",
-        "A waiting Workflow input or cleanup caller receives an explicit typed already-consumed outcome containing the record identity/classification rather than a fabricated receipt, Agent turn, or positive identity, and the caller does not set agentTurnId from that outcome or emit attributed follow-up events.",
+        "The first valid empty 2xx response retains the matching-receipt record durably and leaves its waiter pending; a second consecutive valid empty response removes and persists the record as already consumed for both session.input and session.cleanup.",
+        "The cleanup-turn route returns a JSON receipt array: one session.cleanup receipt for a newly recorded cleanup operation and [] for an idempotent replay of an already persisted operation after complete request-identity checks; the Runner connection and delivery adapter preserve [] instead of synthesizing a receipt.",
+        "A waiting Workflow input or cleanup caller receives an explicit typed already-consumed outcome containing the record identity/classification rather than a fabricated receipt, Agent turn, or positive identity, and the caller does not set agentTurnId from that outcome, enqueue the cleanup follow-on session.input, or emit attributed follow-up events.",
         "Positive non-empty receipts settle only when the existing event-type, input-delivery-id, expected AgentSession-id, and non-empty Agent-turn-id checks pass for session.input, with the corresponding exact cleanup identity checks preserved for session.cleanup.",
         "A non-matching positive response, malformed response, non-2xx response, timeout, transport failure, or any other interruption resets the empty-confirmation sequence and leaves the record durable and retryable.",
         "If snapshot persistence fails while applying already-consumed settlement, the record and confirmation state remain retryable and no waiter receives a terminal outcome.",
@@ -65,7 +67,7 @@
         "T-002"
       ],
       "passes": false,
-      "notes": "Build on the structured delivery/settlement error plumbing from T-002, but keep successful receipt APIs backward-compatible for positive receipts. The terminal outcome must remain fail-closed and must not synthesize identity."
+      "notes": "Build on the structured delivery/settlement error plumbing from T-002. Keep positive receipt APIs compatible, but make cleanup-turn's successful wire result an array so [] is observable. The terminal outcome must remain fail-closed and must not synthesize identity."
     },
     {
       "id": "T-004",

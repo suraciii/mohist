@@ -39,17 +39,22 @@ No new external dependency or snapshot-format migration is required.
 
 1. **Keep the activity relaxation in the grain, behind the existing session route.**
 
-   `AgentSessionGrain.AppendRuntimeEventsAsync` will recognize the narrow case where there is no `SessionTurnId` or `WorkflowExecution` and every submitted event is `session.activity`. It will allow that case to proceed to `AppendEventsAsync`, which already enforces the current `runtimeSessionId` fence. The existing rejection remains for any non-activity or mixed batch when a Workflow turn exists for that runtime.
+   `AgentSessionGrain.AppendRuntimeEventsAsync` will classify the persisted session before deciding whether an unattributed request may proceed. A session is Workflow-introduced only when `session.Metadata.Label(AgentSessionQueryMetadataKeys.SourceKind)` equals `"workflow"`; this is the authoritative classification and does not depend on whether the current runtime already has a persisted Workflow turn. For a Workflow-introduced session, a request with neither `SessionTurnId` nor `WorkflowExecution` is eligible for the relaxation only when it is a non-empty pure batch whose every event is `session.activity`. Any unattributed non-activity event, including a mixed activity/non-activity batch, is rejected before `AppendEventsAsync` and therefore cannot partially append.
 
-   Because the command has no `WorkflowExecution`, the existing `BuildWorkflowRuntimeObservations` branch is not entered. The event updates session/transcript state only. The session-scoped route continues to require `runtimeSessionId`; stale or missing bindings therefore remain ignored/rejected without mutation. The Workflow-labeled route remains unchanged and still requires the complete acknowledged execution binding, including Agent turn, TaskRun, Work, runtime, and current runtime session identities.
+   A pure activity request then proceeds to `AppendEventsAsync`, which enforces the current `runtimeSessionId` fence. This permits reconnect activity when the current runtime has no persisted turn and also preserves the same stale/missing-binding no-op or rejection behavior. The existing `hasWorkflowTurnForRuntime` check remains an attribution check for non-activity requests; it is not the boundary for deciding whether a Workflow-introduced session may submit an unattributed batch. Because the accepted command has no `WorkflowExecution`, `BuildWorkflowRuntimeObservations` is not entered and the event updates session/transcript state only.
+
+   The session-scoped route continues to require `runtimeSessionId` and delegates the source-kind and pure-batch rule to the grain. The Workflow-labeled route remains unchanged and still requires the complete acknowledged execution binding, including Agent turn, TaskRun, Work, runtime, and current runtime session identities.
 
    *Alternative considered:* special-casing this only in `RunnerRoutes.cs`. That would duplicate domain rules and could allow another caller to bypass the grain-level attribution fence. Keeping the rule in the grain makes the append and observation behavior atomic and authoritative.
 
 2. **Represent HTTP refusal metadata explicitly rather than parsing error strings.**
 
-   Runtime-event connection methods will preserve response status and, where available, the Server error code in a typed HTTP error (or an equivalent structured error property). The outbox will classify deterministic 4xx responses from this metadata. It will not infer status by matching strings such as `"409"` in an exception message.
+   Runtime-event connection methods will preserve response status and the top-level Server `ApiResponse.Code` (when present) in a typed HTTP error. The outbox will classify only the following structured combinations for `binding-reconcile` records:
 
-   The deterministic-refusal predicate will treat the runtime-event boundary's stable 4xx conflicts and validation failures as terminal candidates; known transient client statuses such as 408 and 429 remain retryable. 5xx, timeout, abort, malformed response, and transport errors are always retryable for this change.
+   - HTTP 409 with code `conflict` (the current session runtime-events middleware response), `agent_session_changed`, `workflow_agent_session_changed`, `workflow_runtime_binding_rejected`, or `workflow_cleanup_binding_rejected`.
+   - HTTP 400 with code `validation`, `runtime_session_id_required`, `session_runtime_identity_required`, `session_runtime_task_identity_invalid`, or `workflow_runtime_binding_required`.
+
+   The 409 `conflict` combination is deliberately included because it is the observed refusal shape from the session runtime-events route. No other 4xx code is terminal: unknown 400/409 codes, 401/403 authentication/authorization failures, and 404s remain durable and retryable. HTTP 408 and 429 are explicitly retryable, as are all 5xx responses, timeouts, aborts, malformed responses, and transport failures. The predicate is an allowlist over `(status, code)`, not a status-only rule and never parses exception text.
 
    *Alternative considered:* change `RuntimeEventDelivery` to return a status-bearing result for every response. That would make successful delivery more complex and require changes to all delivery implementations. Structured errors preserve the current successful-return contract while exposing metadata only on failures.
 
@@ -67,9 +72,11 @@ No new external dependency or snapshot-format migration is required.
 
    For `session.input` and Workflow cleanup `session.cleanup`, the outbox will keep a per-record empty-confirmation count. The first valid empty receipt array leaves the record durable and does not release the waiter. A second consecutive valid empty response removes and persists the record as already consumed.
 
-   Any positive response, non-matching receipt, malformed response, non-2xx response, timeout, or transport failure resets the empty-confirmation count. Positive receipts still pass the existing event-type, input-delivery, AgentSession, and non-empty Agent turn checks before settlement.
+   Cleanup must use the same receipt-array protocol as the ordinary runtime-events routes. `RunnerRoutes.WorkflowCleanup` will return a 2xx JSON receipt array: a newly persisted cleanup operation returns one `session.cleanup` receipt with the expected operation-derived input-delivery id, AgentSession id, and non-empty Agent turn id; an idempotent replay of an already persisted cleanup operation returns `[]` after rechecking the complete request identity. The grain result will expose whether the operation was newly recorded or already present so the route does not fabricate a positive receipt on replay. `ServerConnection.workflowAgentSessionCleanupTurn` and `runtime-event-delivery.ts` will pass through either the one-element array or the empty array unchanged. Conflict/validation responses retain their existing structured status and code behavior.
 
-   The waiter API will retain its successful receipt shape and report already-consumed settlement through a typed terminal error/outcome carrying the record id and `already-consumed` classification. It will not provide a fabricated receipt, Agent turn, or identity. Workflow reporter callers will handle this outcome explicitly and stop the attributed turn path rather than setting `agentTurnId` from incomplete data. Retryable outcomes leave a waiter pending (subject to the existing delivery timeout behavior), so one empty response cannot prematurely fail the action.
+   Any positive response, non-matching receipt, malformed response, non-2xx response, timeout, or transport failure resets the empty-confirmation count. Positive receipts still pass the existing event-type, input-delivery, AgentSession, and non-empty Agent turn checks before settlement; the exact cleanup identity checks apply to `session.cleanup` as well.
+
+   The waiter API will retain its successful receipt shape and report already-consumed settlement through a typed terminal error/outcome carrying the record id and `already-consumed` classification. It will not provide a fabricated receipt, Agent turn, or identity. Workflow reporter callers will handle this outcome explicitly and stop the attributed turn path rather than setting `agentTurnId` from incomplete data; cleanup callers must also avoid enqueueing the follow-on runtime `session.input` after this outcome. Retryable outcomes leave a waiter pending (subject to the existing delivery timeout behavior), so one empty response cannot prematurely fail the action.
 
    Settlement processing will stage record removals and their outcomes, persist the new snapshot, then resolve/reject waiters. If persistence fails, records and confirmation state remain retryable and no terminal outcome is exposed.
 
@@ -112,6 +119,5 @@ Rollback is code-compatible because no snapshot version changes. Stop the affect
 
 ## Open Questions
 
-- Confirm the exact refusal threshold and the final allowlist/metadata contract for deterministic 4xx responses, especially for authentication and rate-limit statuses.
 - Confirm the desired higher-level Workflow behavior when an active waiter receives the typed `already-consumed` outcome: fail the current turn, trigger a fresh input/reconciliation, or use another existing recovery path. The outbox itself will remain fail-closed and will not invent an Agent turn.
 - Decide whether terminal-settlement counts should receive a metric in addition to the required actionable log. This is observability-only and does not block the implementation.

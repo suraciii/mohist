@@ -16,16 +16,16 @@ The session-scoped runtime-events endpoint SHALL accept a request without AgentS
 
 ### Requirement: The relaxed path is limited to pure activity batches
 
-For a Workflow-introduced AgentSession, a request without Agent turn identity SHALL NOT use the session-level relaxation when the batch contains a non-`session.activity` event or mixes activity with any other event. Such a request SHALL be rejected or ignored using the existing runtime-event boundary contract, SHALL NOT append the disallowed events, and SHALL NOT produce a Workflow observation from them.
+A session is Workflow-introduced when its persisted `mohist.io/source-kind` metadata label (`AgentSessionQueryMetadataKeys.SourceKind`) is exactly `workflow`. This persisted source classification is authoritative even when the current runtime has no persisted Workflow turn. For a Workflow-introduced AgentSession, a request without Agent turn identity SHALL use the session-level relaxation only when the batch is non-empty and every event is `session.activity`. When an unattributed batch contains a non-`session.activity` event or mixes activity with any other event, the request SHALL be rejected before append using the existing runtime-event boundary contract, SHALL NOT partially append any event, and SHALL NOT produce a Workflow observation from them.
 
-#### Scenario: An unattributed non-activity event is submitted on a Workflow session
-- **WHEN** the session-scoped route receives `message.delta` without Agent turn identity for a current runtime binding on a Workflow-introduced session
+#### Scenario: An unattributed non-activity event is submitted on a Workflow session without a matching persisted turn
+- **WHEN** the session-scoped route receives `message.delta` without Agent turn identity for a current runtime binding on a Workflow-introduced session whose current runtime has no persisted Workflow turn
 - **THEN** the Server SHALL reject or ignore the request according to the existing stale/unattributed runtime-event contract
 - **AND** it SHALL NOT append the `message.delta`
 - **AND** it SHALL NOT create a Workflow execution observation
 
 #### Scenario: A mixed activity batch is submitted without turn identity
-- **WHEN** the session-scoped route receives `session.activity` together with a non-activity event and no Agent turn identity
+- **WHEN** the session-scoped route receives `session.activity` together with a non-activity event and no Agent turn identity on a Workflow-introduced session
 - **THEN** the Server SHALL reject or ignore the batch as unattributed Workflow runtime data
 - **AND** it SHALL NOT partially append the activity event
 - **AND** it SHALL NOT append or attribute the non-activity event

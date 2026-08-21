@@ -1,6 +1,6 @@
 ### Requirement: Deterministic binding-reconcile refusals reach bounded terminal settlement
 
-The durable runtime-event outbox SHALL track consecutive deterministic 4xx refusals independently for each `binding-reconcile` delivery key. After a finite bounded number of refusals for the same key, the outbox MUST remove the pending records for that key from the durable queue, persist the removal, stop retrying those records, and emit one actionable error for that terminal settlement. A successful response SHALL retain the existing successful settlement behavior. A timeout, transport failure, transient 5xx response, or other retryable failure SHALL retain the records and SHALL NOT trigger terminal settlement.
+The durable runtime-event outbox SHALL track consecutive deterministic 4xx refusals independently for each `binding-reconcile` delivery key. A refusal is deterministic only for this explicit `(HTTP status, Server error code)` allowlist: `(409, conflict)`, `(409, agent_session_changed)`, `(409, workflow_agent_session_changed)`, `(409, workflow_runtime_binding_rejected)`, `(409, workflow_cleanup_binding_rejected)`, `(400, validation)`, `(400, runtime_session_id_required)`, `(400, session_runtime_identity_required)`, `(400, session_runtime_task_identity_invalid)`, and `(400, workflow_runtime_binding_required)`. The observed `(409, conflict)` response is included because the session runtime-events route currently emits that structured code. Unknown 4xx codes, 401/403, 404, 408, and 429 are retryable, as are 5xx, malformed, timeout, abort, and transport outcomes. After exactly three consecutive allowlisted refusals for the same key, the outbox MUST remove the pending records for that key from the durable queue, persist the removal, stop retrying those records, and emit one actionable error for that terminal settlement. A successful response SHALL retain the existing successful settlement behavior.
 
 #### Scenario: Repeated deterministic refusal dead-letters one binding key
 - **WHEN** a `binding-reconcile` delivery key receives deterministic 4xx responses on each retry until its bounded refusal threshold is reached
@@ -23,8 +23,16 @@ The durable runtime-event outbox SHALL track consecutive deterministic 4xx refus
 
 A `matching-receipt` `session.input` or Workflow cleanup `session.cleanup` record SHALL settle as already consumed after two consecutive valid 2xx responses whose receipt arrays are empty. The first valid empty response SHALL retain the record for confirmation. The already-consumed settlement SHALL remove and durably persist removal of the record, SHALL not synthesize an Agent turn or positive receipt identity, and SHALL release any waiter from waiting indefinitely with an explicit terminal already-consumed outcome. Positive receipts SHALL continue to satisfy the existing event-type and identity checks before settlement.
 
+The Workflow cleanup-turn endpoint SHALL use this receipt-array protocol. A newly recorded cleanup operation SHALL return a one-element array containing the validated `session.cleanup` receipt. An idempotent replay of an already persisted cleanup operation SHALL return HTTP 2xx with `[]` after rechecking the complete cleanup request identity; the Runner connection and delivery adapter SHALL preserve that empty array rather than synthesize a receipt.
+
 #### Scenario: A lost Workflow input acknowledgement is confirmed consumed
 - **WHEN** a pending `session.input` record receives a valid 2xx response with an empty receipt array twice consecutively
+- **THEN** the outbox SHALL remove the record from the pending snapshot as already consumed
+- **AND** the second empty response SHALL not be treated as a matching Agent turn receipt
+- **AND** a waiter for that record SHALL receive a terminal already-consumed outcome rather than remain blocked
+
+#### Scenario: A lost Workflow cleanup acknowledgement is confirmed consumed
+- **WHEN** a pending `session.cleanup` record receives a valid 2xx response with an empty receipt array twice consecutively
 - **THEN** the outbox SHALL remove the record from the pending snapshot as already consumed
 - **AND** the second empty response SHALL not be treated as a matching Agent turn receipt
 - **AND** a waiter for that record SHALL receive a terminal already-consumed outcome rather than remain blocked

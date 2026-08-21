@@ -1,0 +1,7 @@
+## Plan self-review dispositions
+
+- MF-1 addressed in `design.md` and `tasks.json`: the plan now requires persisted `SourceKind == workflow` classification before the pure-activity gate. Unattributed non-activity and mixed batches are rejected before append even when no matching Workflow turn exists for the runtime; pure current-binding activity remains allowed.
+- MF-2 addressed in `design.md`, `tasks.json`, and the convergence spec: cleanup delivery now has an explicit receipt-array contract. New cleanup operations return one validated `session.cleanup` receipt; idempotent cleanup replays return 2xx `[]` after identity checks. The Server route, connection method, and delivery adapter are assigned to preserve that empty array so the two-empty settlement rule is reachable for cleanup records. The cleanup caller must not enqueue follow-on input after an already-consumed outcome.
+- MF-3 addressed in `design.md` and `tasks.json`: threshold is fixed at exactly three deterministic refusals. The terminal classifier is an explicit `(status, code)` allowlist including the observed `(409, conflict)` response and named runtime/session binding validation codes; unknown 4xx, auth/authorization, 404, 408, and 429 remain retryable. The open question was removed.
+
+Validation: `git diff --check` passed. `tasks.json` should be parsed with Node or another JSON parser when available; the first Python validation command could not run because `python` is not installed. `self-review.md` was not edited.
