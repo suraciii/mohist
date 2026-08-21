@@ -6,18 +6,18 @@ using Mohist.Server.Agent.Domain;
 using Mohist.Server.Infrastructure.Data.Agent;
 using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Infrastructure.Slack;
-using Mohist.Server.SpecTests.Support;
+using Mohist.Server.UnitTests.Support;
 using Mohist.Server.TestSupport;
 using Xunit;
 
-namespace Mohist.Server.SpecTests.Specs.Slack;
+namespace Mohist.Server.UnitTests.Slack;
 
-public sealed class SlackStatusProjectionSpecs
+public sealed class SlackStatusProjectionTests
 {
     [Fact]
     public async Task Accepted_status_projection_is_deduplicated_and_pending_progress_is_promoted_to_terminal()
     {
-        await using var database = TestSqliteDatabase.CreateMigrated();
+        using var database = TestSqliteDatabase.CreateModelSchema();
         var time = new FakeTimeProvider(new DateTimeOffset(2026, 8, 3, 12, 0, 0, TimeSpan.Zero));
         await SeedConnectionAsync(database, time);
         var store = CreateStore(database, time);
@@ -44,7 +44,7 @@ public sealed class SlackStatusProjectionSpecs
     [Fact]
     public async Task Progress_upsert_preserves_the_confirmed_provider_identity()
     {
-        await using var database = TestSqliteDatabase.CreateMigrated();
+        using var database = TestSqliteDatabase.CreateModelSchema();
         var time = new FakeTimeProvider(new DateTimeOffset(2026, 8, 3, 12, 0, 0, TimeSpan.Zero));
         await SeedConnectionAsync(database, time);
         var store = CreateStore(database, time);
@@ -66,7 +66,7 @@ public sealed class SlackStatusProjectionSpecs
     [Fact]
     public async Task Reenable_pruning_keeps_current_progress_but_drops_stale_reaction_mutations()
     {
-        await using var database = TestSqliteDatabase.CreateMigrated();
+        using var database = TestSqliteDatabase.CreateModelSchema();
         var time = new FakeTimeProvider(new DateTimeOffset(2026, 8, 3, 12, 0, 0, TimeSpan.Zero));
         await SeedConnectionAsync(database, time);
         var store = CreateStore(database, time);
@@ -84,7 +84,7 @@ public sealed class SlackStatusProjectionSpecs
     [Fact]
     public async Task Terminal_projection_uses_the_confirmed_progress_provider_identity_for_chat_update()
     {
-        await using var database = TestSqliteDatabase.CreateMigrated();
+        using var database = TestSqliteDatabase.CreateModelSchema();
         var time = new FakeTimeProvider(new DateTimeOffset(2026, 8, 3, 12, 0, 0, TimeSpan.Zero));
         await SeedConnectionAsync(database, time);
         var store = CreateStore(database, time);
@@ -110,7 +110,7 @@ public sealed class SlackStatusProjectionSpecs
     [Fact]
     public async Task Quick_terminal_does_not_update_the_original_message_from_a_reaction_ack()
     {
-        await using var database = TestSqliteDatabase.CreateMigrated();
+        using var database = TestSqliteDatabase.CreateModelSchema();
         var time = new FakeTimeProvider(new DateTimeOffset(2026, 8, 3, 12, 0, 0, TimeSpan.Zero));
         await SeedConnectionAsync(database, time);
         var store = CreateStore(database, time);
@@ -136,7 +136,7 @@ public sealed class SlackStatusProjectionSpecs
     [Fact]
     public async Task Accepted_terminal_delivery_is_retained_while_disabled_and_claimed_after_reenable()
     {
-        await using var database = TestSqliteDatabase.CreateMigrated();
+        using var database = TestSqliteDatabase.CreateModelSchema();
         var time = new FakeTimeProvider(new DateTimeOffset(2026, 8, 3, 12, 0, 0, TimeSpan.Zero));
         await SeedConnectionAsync(database, time, DesiredStateKind.Disabled);
         var store = CreateStore(database, time);
@@ -164,7 +164,7 @@ public sealed class SlackStatusProjectionSpecs
     [Fact]
     public async Task Deleted_connection_suppresses_new_status_delivery()
     {
-        await using var database = TestSqliteDatabase.CreateMigrated();
+        using var database = TestSqliteDatabase.CreateModelSchema();
         var time = new FakeTimeProvider(new DateTimeOffset(2026, 8, 3, 12, 0, 0, TimeSpan.Zero));
         await SeedConnectionAsync(database, time);
         await using (var db = database.CreateContext())

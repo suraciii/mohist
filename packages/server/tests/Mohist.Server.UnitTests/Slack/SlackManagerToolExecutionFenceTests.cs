@@ -2,18 +2,18 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Time.Testing;
 using Mohist.Server.Infrastructure.Data.Slack;
 using Mohist.Server.Infrastructure.Slack;
-using Mohist.Server.SpecTests.Support;
+using Mohist.Server.UnitTests.Support;
 using Mohist.Server.TestSupport;
 using Xunit;
 
-namespace Mohist.Server.SpecTests.Specs.Slack;
+namespace Mohist.Server.UnitTests.Slack;
 
-public sealed class SlackManagerToolExecutionFenceSpecs
+public sealed class SlackManagerToolExecutionFenceTests
 {
     [Fact]
     public async Task JobKey_is_acquired_once_and_survives_store_reload()
     {
-        await using var database = TestSqliteDatabase.CreateMigrated();
+        using var database = TestSqliteDatabase.CreateModelSchema();
         var time = new FakeTimeProvider(new DateTimeOffset(2026, 8, 4, 0, 0, 0, TimeSpan.Zero));
         var factory = new TestDbContextFactory(database.Options);
         var first = new SlackManagerToolExecutionFenceStore(factory, time);
