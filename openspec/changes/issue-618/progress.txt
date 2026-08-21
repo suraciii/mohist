@@ -180,3 +180,11 @@ Verification:
 - Added the hidden `mo slack management <json>` transport form and a runner catalog entry for the fixed management route. The existing `mo slack message send` route remains separate and is rejected by the management bridge.
 - Protected and arbitrary operations remain outside the fixed route and broker vocabulary. Manager grants accept the management route only for a management audience and still require the per-operation catalog capability.
 - Added `SlackManagerManagementBridgeSpecs` covering all nine operations, exact envelope rejection, protected/reply denials, and authoritative state changes. The named bridge class passes 7/7 serially; the full Spec assembly had one unrelated managed-bot parallelism race (3049/3050) and the managed-bot class passes in isolation.
+
+## T-005
+
+- Added `ManagerSlackReplyBridge` as the dedicated reply capability boundary. It reauthenticates the lease actor, requires the reply audience, validates the complete Server-provided Manager anchor and rejects destination/Session/dispatch assertions that do not match it before calling the outbox.
+- Manager reply delivery now derives `manager-reply:{SessionId}:{TriggeringMessageId}` and stores Manager-owned terminal intents under the synthetic Manager project and enrollment connection. Identical retries reuse the existing intent; conflicting payloads return `manager_reply_idempotency_conflict` without changing the stored answer.
+- Manager Working projection is reaction-only; it no longer creates a Server-authored `Working...` message. Terminal liveness detects reaction-only progress, removes Working and Received, and idempotently adds exactly one Completed or Attention reaction even when no progress row exists.
+- Terminal delivery continues to finalize only reactions. Manager Runtime output, assistant text, command results, terminal facts, and missing replies remain inert conversationally.
+- Verification: Server build passes; focused Manager reply/liveness assertions pass in the relevant Spec assembly. The full Spec assembly still reports the pre-existing parallel managed-Bot row-count race when all classes run concurrently (the isolated managed-Bot behavior remains unchanged).
