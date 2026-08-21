@@ -21,8 +21,10 @@ namespace Mohist.Server.SpecTests.Specs.Workflow.Grain;
 // depending on the 200 ms grain persist timer, and the latest accepted
 // session.closed drives the Workflow session read model toward its
 // terminal state. One final deterministic flush surfaces both turns
-// through Workflow-labelled session reads.
-[Collection("WorkflowSessionTerminalIntegration")]
+// through Workflow-labelled session reads. Shares the SessionControl
+// host: the fence is probe-driven and the collection runs its member
+// classes serially, so the back-to-back turns see no concurrent load.
+[Collection("SessionControlIntegration")]
 public class WorkflowSessionTerminalConvergenceSpecs
 {
     private readonly HttpClient _client;
