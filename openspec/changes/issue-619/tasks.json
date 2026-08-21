@@ -1,0 +1,89 @@
+{
+  "project": "mohist-local",
+  "description": "Guide Slack callers when new work cannot be admitted, with safe durable nudges, explicit response ownership, and deduplicated delivery.",
+  "tasks": [
+    {
+      "id": "T-001",
+      "title": "Make Slack ingress response ownership explicit across adapters",
+      "spec": "specs/slack-ingress-response-ownership/spec.md#server-ingress-outcomes-shall-identify-response-ownership",
+      "description": "Add the responseOwner contract with none, server, and adapter outcomes to the Node and Go Slack transports, while retaining tolerant decoding for older Server responses. Update the Node adapter event handler so it directly posts only adapter-owned fallbacks, preserves the original thread anchor, acknowledges server-owned results without a second post, and leaves unknown or malformed outcomes unacknowledged.",
+      "acceptanceCriteria": [
+        "Node and Go ingress result models carry responseOwner and accept the values none, server, and adapter.",
+        "The compatibility behavior is explicit and covered: an omitted owner on a legacy backpressured result remains adapter-owned, while other omitted-owner results do not trigger a new direct post.",
+        "A valid server-owned result produces no direct Slack rejection post and is acknowledged once; a valid adapter-owned result posts exactly one supplied safe message in the originating conversation and thread and acknowledges only after the post succeeds.",
+        "An ingress transport failure, malformed result, or invalid ownership value does not acknowledge the Slack event before ownership is known.",
+        "Node adapter tests and Go ServerAPI contract tests verify both ownership decoding and the acknowledgment/direct-send boundary, and the relevant package test suites pass."
+      ],
+      "priority": 1,
+      "mode": "AFK",
+      "type": "MIGRATE",
+      "output": "Updated packages/mohist-slack and packages/go/mohist-slack ingress contract and adapter behavior with passing wire and event-handler tests.",
+      "dependsOn": [],
+      "passes": false,
+      "notes": "Keep kind and reason for routing and observability; ownership must not be inferred from kind. Preserve the legacy direct backpressure fallback only when no durable response intent exists."
+    },
+    {
+      "id": "T-002",
+      "title": "Gate new Slack DM work with a durable safe admission nudge",
+      "spec": "specs/slack-agent-admission-nudge/spec.md#new-slack-work-shall-be-gated-by-agent-readiness-and-connection-availability",
+      "description": "Introduce the shared Server admission decision and durable-nudge construction needed by DM ingress, then integrate it after DM routing/session classification and before provider-inbox acceptance or launch preparation. Block not-ready Agents and unavailable enabled Connections with a generic safe UserAction outbox delivery using a stable Connection-plus-Slack-event identity, while returning explicit server ownership or the known adapter-owned no-intent backpressure fallback.",
+      "acceptanceCriteria": [
+        "A DM without a current Session is gated before SlackProviderInboxStore.AcceptAsync, attachment preparation, workspace provisioning, Session, SessionInput, Turn, AgentJob, or pending execution work is created when Agent readiness is needs_setup/non-executable or an enabled Connection is unavailable.",
+        "A blocked DM creates at most one UserAction outbox row addressed to the originating conversation and thread context, with a deterministic bounded dispatch reference and matching clientMessageId; redelivery and concurrent attempts resolve to the existing row and return responseOwner server.",
+        "Known no-intent capacity/backpressure handling returns responseOwner adapter with the safe generic retry message and still creates no execution state; unexpected persistence failures are not falsely reported as a successful direct response.",
+        "Caller-facing setup and availability text is fixed, actionable, and contains no credentials, configuration values, exception text, internal health details, or repair commands; the existing authorized diagnostic endpoint still exposes concrete facts for operators.",
+        "DM follow-ups with an established Session bypass the new-work gate, Disabled Connections retain audited discard without a nudge, and executable or unknown-readiness Agents retain normal admission behavior.",
+        "Server spec and integration tests cover setup blocks, Connection availability blocks, safe-message forbidden-content assertions, outbox context/identity, response ownership, zero execution side effects, follow-ups, Disabled, executable, and unknown cases."
+      ],
+      "priority": 2,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "A reusable Server admission/nudge policy integrated into the DM ingress path, with durable outbox records and passing DM admission specs.",
+      "dependsOn": ["T-001"],
+      "passes": false,
+      "notes": "Reuse AgentReadinessService/AgentReadinessDeriver and the existing Connection diagnostic vocabulary. Do not duplicate health-string interpretation in the route or alter readiness criteria."
+    },
+    {
+      "id": "T-003",
+      "title": "Apply the admission nudge to channel roots and unbound threads",
+      "spec": "specs/slack-agent-admission-nudge/spec.md#new-slack-work-shall-be-gated-by-agent-readiness-and-connection-availability",
+      "description": "Use the shared admission policy from the DM slice in channel ingress after mention, access, binding, and managed-bot routing decisions. Gate channel root mentions and first mentions in unbound threads before thread-history import, inbox acceptance, launch reservation, attachment preparation, or Agent launch, while preserving established bound-thread follow-ups and existing ignored, Disabled, executable, and unknown-readiness behavior.",
+      "acceptanceCriteria": [
+        "An authorized channel root mention or first mention in an unbound thread is blocked before history import and all provider-inbox, Session, SessionInput, Turn, AgentJob, attachment-execution, reservation, and pending-execution side effects when readiness or enabled Connection availability prevents new work.",
+        "A durable blocked-channel nudge targets the same conversation and uses the root timestamp or incoming thread timestamp as the appropriate reply anchor; its stable identity includes Connection, workspace, conversation, and message identity.",
+        "Concurrent requests and ordered Slack redeliveries for one root or unbound-thread event create one durable intent at most, converge on responseOwner server, and never instruct the adapter to send a competing direct fallback.",
+        "Replies in an already bound channel thread remain follow-ups to the existing Session even if current readiness is not ready, and Disabled Connections retain audited discard without setup guidance.",
+        "Executable Agents continue through the normal channel launch path and unknown readiness remains admitted for Runner verification.",
+        "Server channel integration/spec tests cover root mentions, unbound-thread first mentions, thread anchors, concurrency/redelivery, no-execution side effects, bound follow-ups, Disabled, executable, unknown, and the adapter-owned capacity fallback."
+      ],
+      "priority": 3,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Channel root and unbound-thread ingress paths using the shared admission/nudge policy, with passing channel admission and idempotency specs.",
+      "dependsOn": ["T-002"],
+      "passes": false,
+      "notes": "Keep routing classification ahead of the gate. A channel message that is ignored, ambiguous, unauthorized, or an established follow-up must not acquire a setup nudge merely because the Agent is not ready."
+    },
+    {
+      "id": "T-004",
+      "title": "Preserve durable nudge ownership through uncertain delivery and reconciliation",
+      "spec": "specs/slack-ingress-response-ownership/spec.md#uncertain-delivery-shall-reconcile-the-original-nudge-intent",
+      "description": "Complete the durable-delivery path for admission nudges by ensuring the existing Slack outbox claim, uncertainty, reconciliation, and retry flow retains one original row and one stable provider identity. Connect Server-owned ingress results, adapter delivery handling, and shared contract fixtures so delayed acknowledgments, lost provider responses, reconnects, and retries cannot become direct adapter posts or new nudge intents.",
+      "acceptanceCriteria": [
+        "A Server-owned nudge keeps the same outbox row, dispatch reference, clientMessageId, and response ownership across pending, claimed, delivery_uncertain, reconciliation, retry, and delivered states.",
+        "When Slack accepted a message but the provider response was lost, reconciliation finds the existing provider message by provider identity or stable clientMessageId and marks the original row delivered without posting a second message.",
+        "When reconciliation confirms absence, retry reuses the original durable intent and stable delivery identity; it does not create a new outbox row or adapter-owned direct fallback.",
+        "Ingress redelivery, adapter reconnect, outbox sweeps, and delivery reconciliation all continue to report Server ownership once a durable nudge exists, while the legacy adapter-owned fallback remains direct only when no durable intent was committed.",
+        "Server integration tests and real Node adapter tests share representative JSON fixtures for server-owned, adapter-owned, and none outcomes and verify the no-duplication boundary for DM, channel-root, and unbound-thread events.",
+        "Delivery uncertainty, reconciliation, concurrency, and redelivery tests pass without requiring a schema migration or changing Disabled Connection claim/discard semantics."
+      ],
+      "priority": 4,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "End-to-end durable nudge delivery/reconciliation behavior and shared Server-adapter ownership fixtures with passing reliability tests.",
+      "dependsOn": ["T-001", "T-002", "T-003"],
+      "passes": false,
+      "notes": "Reuse SlackOutboxRows, UserAction, EnqueueRequiredAsync, and the existing uncertain-delivery state machine. Do not add a second nudge table or delete pending nudges during rollback."
+    }
+  ]
+}
