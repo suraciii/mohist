@@ -286,7 +286,7 @@ jobs:
   gate:
     name: Gate
     if: always()
-    needs: [server, web, cli, runner, slack, repository]
+    needs: [server, web, cli, runner, go, repository]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
