@@ -53,6 +53,17 @@ describe("createServerRuntimeEventDelivery — sendBatch", () => {
     expect(result[0]).toEqual([{ type: "reasoning.delta" }])
   })
 
+  it("passes an empty Workflow input response through the real delivery adapter", async () => {
+    const connection = {
+      async workflowAgentSessionRuntimeEvents() {
+        return []
+      },
+    } as unknown as ServerConnection
+    const delivery = createServerRuntimeEventDelivery({ connection })
+
+    await expect(delivery.send(workflowRecord("input-1", "session.input"), new AbortController().signal)).resolves.toEqual([])
+  })
+
   it("send (single) still works unchanged", async () => {
     const sendSpy = vi.fn(async () => [{ type: "reasoning.delta" }])
     const connection = {

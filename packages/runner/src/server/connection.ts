@@ -573,7 +573,7 @@ export class ServerConnection {
     }
     if (!Array.isArray(payload)) throw new Error('session runtime events returned a malformed acceptance response')
     const submitted = isObjectRecord(body) && Array.isArray(body.runtimeEvents) ? body.runtimeEvents.length : 0
-    if (submitted > 0 && payload.length !== submitted)
+    if (submitted > 0 && payload.length > 0 && payload.length !== submitted)
       throw new Error(`session runtime events acceptance mismatch: submitted ${submitted}, accepted ${payload.length}`)
     return payload as AgentSessionRuntimeEventAcceptance[]
   }

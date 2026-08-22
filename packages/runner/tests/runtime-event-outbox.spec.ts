@@ -15,7 +15,8 @@ import {
   runtimeEventDeliveryKey,
   type RuntimeEventRecord,
 } from '../src/server/runtime-event-outbox.js'
-import { RuntimeEventDeliveryError, type AgentSessionRuntimeEventReceipt } from '../src/server/connection.js'
+import { RuntimeEventDeliveryError, type AgentSessionRuntimeEventReceipt, type ServerConnection } from '../src/server/connection.js'
+import { createServerRuntimeEventDelivery } from '../src/server/runtime-event-delivery.js'
 import { withTestRunnerResources } from './support/test-resources.js'
 import { capturedLogs } from './support/logger-test.js'
 import {
@@ -344,6 +345,31 @@ describe('AgentSessionRuntimeEventOutbox — acknowledgement policies', () => {
     expect(outbox.snapshot()).toHaveLength(1)
 
     await outbox.kick()
+    expect(outbox.snapshot()).toHaveLength(0)
+  })
+
+  it('confirms an input as already consumed through the real delivery adapter after two empty responses', async () => {
+    const connection = {
+      async workflowAgentSessionRuntimeEvents() {
+        return []
+      },
+    } as unknown as ServerConnection
+    const { outbox } = makeOutbox({ deliver: createServerRuntimeEventDelivery({ connection }) })
+    await outbox.load()
+    const waiter = outbox.awaitInputReceipt
+    if (!waiter) throw new Error('outbox must support Workflow input receipts')
+    await outbox.enqueueBeforeExecution(inputRecord({ id: 'adapter-empty-input' }))
+
+    const pending = waiter.call(outbox, 'adapter-empty-input')
+    await outbox.kick()
+    expect(outbox.snapshot().map((record) => record.id)).toEqual(['adapter-empty-input'])
+
+    await outbox.kick()
+    await expect(pending).rejects.toMatchObject({
+      name: 'AlreadyConsumedRuntimeEventError',
+      classification: 'already-consumed',
+      recordId: 'adapter-empty-input',
+    })
     expect(outbox.snapshot()).toHaveLength(0)
   })
 
