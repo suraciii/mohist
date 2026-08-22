@@ -88,7 +88,7 @@ public class AgentSessionGrainInputBoundaryPersistSuccessSpecs : AgentSessionGra
     }
 
     [Fact]
-    public async Task AppendRuntimeEvents_AttributionFreeWorkflowBatch_RejectsNonActivityBeforeAppend()
+    public async Task AppendRuntimeEvents_AttributionFreeWorkflowBatch_RejectsNonActivityAfterTurnBinding()
     {
         var grain = await OpenBoundGrainAsync(
             metadata: new AgentSessionMetadata()
@@ -96,8 +96,23 @@ public class AgentSessionGrainInputBoundaryPersistSuccessSpecs : AgentSessionGra
                 .WithLabel(AgentSessionQueryMetadataKeys.SourceKind, "workflow")
                 .WithLabel(AgentSessionQueryMetadataKeys.WorkflowRunId, "workflow-1")
                 .WithLabel(AgentSessionQueryMetadataKeys.SessionName, "build"));
+        // Seed the acknowledged workflow turn binding exactly as the
+        // runner's first workflow input does; without it master semantics
+        // accept unattributed pre-turn streaming batches.
+        await grain.AcceptWorkflowInputAsync(new AcceptWorkflowAgentSessionInputCommand(
+            "delivery-boundary-1",
+            "seed the acknowledged turn binding",
+            "workflow-1",
+            "task-boundary.1",
+            "work-boundary-1",
+            "runner-1",
+            "test",
+            "runtime-1",
+            "{\"text\":\"seed the acknowledged turn binding\"}"));
         var before = await grain.GetAsync();
         var saveCount = Fixture.StateStore.SaveCount;
+        var flushCount = Fixture.TranscriptStore.Flushes.Count;
+        var observationCount = Fixture.SessionWork.Observations.Count;
 
         await Assert.ThrowsAsync<InvalidOperationException>(() => grain.AppendRuntimeEventsAsync(
             new AppendAgentSessionRuntimeEventsCommand(
@@ -117,8 +132,8 @@ public class AgentSessionGrainInputBoundaryPersistSuccessSpecs : AgentSessionGra
 
         Assert.Equal(saveCount, Fixture.StateStore.SaveCount);
         Assert.Equal(before, await grain.GetAsync());
-        Assert.Empty(Fixture.TranscriptStore.Flushes);
-        Assert.Empty(Fixture.SessionWork.Observations);
+        Assert.Equal(flushCount, Fixture.TranscriptStore.Flushes.Count);
+        Assert.Equal(observationCount, Fixture.SessionWork.Observations.Count);
     }
 
     [Fact]

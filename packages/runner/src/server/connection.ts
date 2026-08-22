@@ -22,9 +22,14 @@ import type {
 } from '../runtime/recovery-receipt.js'
 import * as recoveryRequests from './connection.update-recovery.js'
 import { reportWork } from './connection-report.js'
-import { WorkspaceHomeClaimedError } from '../runtime/workspace-entity.js'
+import { extractErrorMessage, RuntimeEventDeliveryError } from './connection-errors.js'
+export { RuntimeEventDeliveryError } from './connection-errors.js'
+import {
+  getWorkspaceReclaimability as getWorkspaceReclaimabilityViaTransport,
+  reportWorkspaceMaterialized as reportWorkspaceMaterializedViaTransport,
+  type WorkspaceReportTransport,
+} from './connection-workspaces.js'
 import { currentRunnerTransport } from '../system/filesystem.js'
-import { extractErrorMessage } from './connection-errors.js'
 import type {
   AgentInputAttachmentContent,
   AgentSession,
@@ -42,28 +47,6 @@ export type {
   AgentSessionRuntimeEventReceipt,
   WorkflowAgentSession,
 } from './connection-session-models.js'
-
-export interface RuntimeEventDeliveryErrorMetadata {
-  readonly status: number
-  readonly code: string | null
-}
-
-/**
- * HTTP failure returned by a runtime-event endpoint. The Server's structured
- * ApiResponse.Code is kept separate from the human-readable message so
- * delivery policy does not need to inspect exception text.
- */
-export class RuntimeEventDeliveryError extends Error implements RuntimeEventDeliveryErrorMetadata {
-  readonly status: number
-  readonly code: string | null
-
-  constructor(operation: string, status: number, code: string | null, responseBody: string) {
-    super(`${operation} failed: ${status}${responseBody ? ` ${responseBody}` : ''}`)
-    this.name = 'RuntimeEventDeliveryError'
-    this.status = status
-    this.code = code
-  }
-}
 
 export class ServerConnection {
   private readonly buildGitHash: string | null
@@ -684,30 +667,7 @@ export class ServerConnection {
     path: string,
     signal: AbortSignal,
   ): Promise<WorkspaceMaterializedReport> {
-    const response = await this.fetchWithAuth(
-      this.url(`workspaces/${encodeURIComponent(projectId)}/${encodeURIComponent(workspaceName)}/materialized`),
-      { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ path }), signal },
-    )
-    if (!response.ok) {
-      const text = await response.text()
-      let code: string | null = null
-      try {
-        const payload = JSON.parse(text) as unknown
-        if (payload && typeof payload === 'object') {
-          const candidate = (payload as { code?: unknown }).code
-          if (typeof candidate === 'string') code = candidate
-        }
-      } catch {
-        // non-JSON error body; the status still explains the failure
-      }
-      if (code === 'workspace_home_claimed') {
-        throw new WorkspaceHomeClaimedError(
-          `workspace materialization rejected: workspace is already materialized on another runner (${response.status})`,
-        )
-      }
-      throw new Error(`workspace materialization failed: ${response.status} ${text}`)
-    }
-    return response.json() as Promise<WorkspaceMaterializedReport>
+    return await reportWorkspaceMaterializedViaTransport(this.transport(), projectId, workspaceName, path, signal)
   }
 
   /**
@@ -722,18 +682,13 @@ export class ServerConnection {
     workspaceName: string,
     signal: AbortSignal,
   ): Promise<WorkspaceReclaimability> {
-    const response = await this.fetchWithAuth(
-      this.url(`workspaces/${encodeURIComponent(projectId)}/${encodeURIComponent(workspaceName)}/reclaimable`),
-      { method: 'GET', signal },
+    return await getWorkspaceReclaimabilityViaTransport(
+      this.transport(),
+      (payload) => parseWorkspaceReclaimability(readObject(payload, ['data'])),
+      projectId,
+      workspaceName,
+      signal,
     )
-    if (!response.ok) throw new Error(`workspace reclaimability failed: ${response.status} ${await response.text()}`)
-    let payload: unknown
-    try {
-      payload = await response.json()
-    } catch {
-      throw new Error('workspace reclaimability returned malformed JSON')
-    }
-    return parseWorkspaceReclaimability(readObject(payload, ['data']))
   }
 
   async openAgentSession(
@@ -898,6 +853,10 @@ export class ServerConnection {
       // The status remains useful when the Server did not return JSON.
     }
     return new RuntimeEventDeliveryError(operation, response.status, code, body)
+  }
+
+  private transport(): WorkspaceReportTransport {
+    return { fetchWithAuth: (input, init) => this.fetchWithAuth(input, init), url: (path) => this.url(path) }
   }
 
   private url(path: string) {

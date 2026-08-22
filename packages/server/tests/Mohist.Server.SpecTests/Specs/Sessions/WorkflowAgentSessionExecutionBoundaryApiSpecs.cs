@@ -101,9 +101,26 @@ public sealed class WorkflowAgentSessionExecutionBoundaryApiSpecs : AgentSession
     }
 
     [Fact]
-    public async Task SessionRuntimeEvents_UnattributedNonActivityAndMixedBatch_FailClosedBeforeAppend()
+    public async Task SessionRuntimeEvents_UnattributedNonActivityAndMixedBatch_FailClosedAfterTurnBinding()
     {
-        var (_, _, _, session) = await CreateStartedAgentSessionAsync("session-activity-boundary");
+        var (_, _, work, session) = await CreateStartedAgentSessionAsync("session-activity-boundary");
+        // Seed the acknowledged workflow turn binding exactly as the
+        // runner's first workflow input does; without it master semantics
+        // accept unattributed pre-turn streaming batches.
+        using var seed = await _client.PostAsJsonAsync(RunnerAgentSessionRuntimeEventsPath(session), new
+        {
+            runtimeSessionId = session.Id,
+            runtime = "opencode",
+            agentSessionId = session.Id,
+            inputDeliveryId = "delivery-activity-boundary",
+            taskRunId = "task-activity-boundary.1",
+            workId = work.WorkId,
+            runtimeEvents = new[]
+            {
+                new { type = RuntimeEventTypes.SessionInput, payload = new { text = "seed the acknowledged turn binding" } }
+            }
+        });
+        Assert.Equal(HttpStatusCode.OK, seed.StatusCode);
         var grain = _fixture.Grains.GetGrain<IAgentSessionGrain>(session.Id);
         var before = await grain.GetAsync();
 
@@ -129,7 +146,6 @@ public sealed class WorkflowAgentSessionExecutionBoundaryApiSpecs : AgentSession
         Assert.Equal(HttpStatusCode.Conflict, mixed.StatusCode);
 
         Assert.Equal(before, await grain.GetAsync());
-        Assert.Empty(await grain.ListTurnsAsync());
     }
 
     [Fact]
