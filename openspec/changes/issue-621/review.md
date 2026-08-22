@@ -1,57 +1,36 @@
 # Review: issue 621
 
-First review of the current change. The canonical issue was re-read before reviewing the diff. Its current scope is one bounded advisory for initial Slack AgentJob turns only; Slack follow-ups are explicitly out of scope.
-
 ## Verdict
 
-**FAIL** — two must-fix problems make the change wrong relative to the current acceptance criteria.
+**PASS** — no must-fix problem remains; the change is ready to merge.
 
-## Must-fix findings
+## Re-review: previous findings
 
-### MF-001 — The guard can issue two advisories, but the issue permits at most one
+### MF-001 — advisory budget exceeded the issue limit: fixed
 
-**Violated criteria:**
+The previous review found that the default coordinator budget was two, violating the issue's requirement that the initial Slack turn receive at most one advisory. The current implementation sets `DEFAULT_REPLY_GUARD_REMINDER_BUDGET` to `1` in `packages/runner/src/runtime/reply-guard.ts:10`. The coordinator claims the reminder slot before invoking the advisory and closes after that single opportunity (`reply-guard.ts:218-247`). The focused tests now assert one advisory and a closed state (`packages/runner/tests/reply-guard.spec.ts:140-160` and `packages/runner/tests/agent-job-reply-guard.spec.ts:219-249`).
 
-- “advisory 最多一次、最长 30 秒、可由原 Turn cancellation 中断，不形成循环”
-- Non-goal: “不发送第二次 advisory”
+This disposition holds: the initial Pi and OpenCode integrations use the default budget and issue at most one advisory.
 
-**Evidence:**
+### MF-002 — follow-up behavior was changed despite being out of scope: fixed
 
-- `packages/runner/src/runtime/reply-guard.ts:10` sets `DEFAULT_REPLY_GUARD_REMINDER_BUDGET` to `2`.
-- `packages/runner/src/runtime/reply-guard.ts:218-247` loops until the budget is exhausted and starts a second advisory after a silent first advisory.
-- `packages/runner/src/runtime/agent-job-turn.ts:354-398` uses that coordinator for both initial Pi and OpenCode AgentJob turns, so every eligible unpublished initial turn can receive two reminders.
-- `packages/runner/tests/agent-job-reply-guard.spec.ts:250-271` explicitly asserts two initial advisories, confirming this is implemented behavior rather than dead configuration.
+The previous review found that the T-003 follow-up terminal-boundary and follow-up guard work violated the issue's explicit non-goal covering Slack follow-ups, Pi `steer`, and Pi idle follow-up completion. That work has been removed. The current `packages/runner/src/server/followup-handler.ts` has no reply-guard evaluation and records follow-up activity through the existing path; the follow-up-specific reply-guard test file and completion helper are gone. The no-signal follow-up paths in `packages/runner/src/runtime/pi/runtime.ts` and `packages/runner/src/runtime/opencode/runtime.ts` retain their pre-change admission/completion behavior. The remaining optional signal plumbing is used only by the initial-turn advisory path in `packages/runner/src/runtime/agent-job-turn.ts:354-393`; ordinary follow-up callers do not pass a signal.
 
-This is a direct product-contract violation, not merely an extra test or implementation detail. A silent first advisory must close the guard; a second advisory must never be started. The coordinator, integrations, and tests need to be changed so one initial Slack turn has a maximum of one advisory while preserving the original outcome on all advisory exits.
+The `packages/runner/src/runtime/pi/session-state.ts` extraction is behavior-neutral: it only moves the existing pure message-state helpers out of `pi/runtime.ts`.
 
-### MF-002 — The change modifies Slack follow-up behavior that the current issue requires to remain unchanged
+## Re-review checks
 
-**Violated criterion:**
-
-- “非 Slack、无效 Slack context 和所有 follow-up turn 保持现有行为”
-- Non-goal: “不覆盖 Slack follow-up、Pi steer 或 idle follow-up completion”
-
-**Evidence:**
-
-- `packages/runner/src/server/followup-handler.ts:306-385` now waits for a runtime-specific completion, evaluates `ReplyGuardCoordinator`, and only then records terminal activity.
-- `packages/runner/src/server/followup-handler.ts:406-443` adds a reply guard to follow-up turns.
-- `packages/runner/src/server/command-runtime.ts:129-137` adds `awaitFollowupCompletion`.
-- `packages/runner/src/runtime/pi/runtime.ts:426-471`, `packages/runner/src/runtime/pi/followup.ts`, and `packages/runner/src/runtime/pi/types.ts` change Pi follow-up admission/completion semantics and expose completion handles.
-- `packages/runner/tests/runner-signalr-followup-reply-guard.spec.ts` asserts the new follow-up advisories and terminal gating.
-
-These changes affect exactly the follow-up, Pi idle, and Pi streaming paths that the current issue excludes. They also change non-Slack Pi follow-up orchestration because the completion handle is part of the shared runtime path. Leaving them in means follow-ups no longer retain existing behavior, regardless of whether the initial-turn guard is otherwise correct. Remove the follow-up guard, terminal-boundary refactor, and associated production/test changes from this issue’s deliverable; follow-up work requires separate scope and evidence.
-
-## First-review dimension sweep
-
-- **Acceptance criteria — FAIL.** The initial-turn integration is present, but MF-001 violates the one-advisory limit and MF-002 violates the explicit follow-up/non-goal boundary.
-- **Coverage — FAIL.** The tests cover the broader stale plan shape, but they assert two reminders and new follow-up behavior instead of verifying the current one-reminder, initial-only contract.
-- **Correctness — FAIL.** The local attempt observation and original-result preservation are directionally correct, but the observable behavior is incorrect for the current budget and follow-up scope.
-- **Consistency with the current issue and surrounding change boundary — FAIL.** The implementation is internally consistent with the older OpenSpec artifacts, but those artifacts conflict with the canonical issue after its scope reset.
-- **Tests and verification — FAIL against the acceptance criteria.** Runner source/test typechecks, test-boundary validation, the focused issue-621 suites (49/49), and the full Runner suite (158 files, 1,709 tests) pass. However, passing tests do not rescue the contract failures: the issue-621 tests encode the two-reminder/follow-up behavior that must be removed or revised.
+- **Acceptance criteria:** checked. The guard is integrated only at the initial AgentJob terminal boundary for both Pi and OpenCode (`packages/runner/src/runtime/agent-job-turn.ts:137-199` and `251-342`). It reuses the existing session, work directory, Slack context, reply anchor, and collaboration skill; it returns the original `WorkItemResult` unchanged after advisory processing.
+- **Reply-attempt correctness:** checked. `ReplyActionObservationTracker` observes normalized `tool_call.started` facts synchronously, recognizes the projected Pi and OpenCode shell-command shapes, and leaves the attempt marked when a later completion is rejected or fails (`packages/runner/src/runtime/reply-guard.ts:33-80`). Final text, unrelated tools, terminal facts, liveness, Server state, and delivery state are not used as evidence.
+- **Eligibility and scope:** checked. Missing or malformed Slack context bypasses the coordinator, while the existing executor validation remains unchanged. No follow-up handler or Server-side unpublished-reply detection is involved.
+- **Bounded/error behavior:** checked. The single advisory is bounded by the fixed `30_000` ms timeout, combines the original cancellation signal, aborts the internal runtime call on timeout/interruption/action attempt, and contains advisory failure. Late advisory completion cannot replace the original result.
+- **Outcome and closeout preservation:** checked. The guard is evaluated only after the original runtime result and event-sink drain have been captured, and `evaluate()` returns that captured result unchanged. No liveness or terminal-reporting code was changed by the final implementation.
+- **Tests:** checked and verified. Runner source typecheck, test typecheck, test-boundary validation, the focused reply-guard/AgentJob suites (22/22), and the full Runner CI suite (157 files, 1,705 tests) pass.
 
 ## Observations
 
-- The artifacts under `openspec/changes/issue-621/` describe the superseded broader design: two reminders and follow-up terminal handling. The current issue comments and acceptance criteria reset the scope to one initial-turn advisory. This explains the implementation mismatch, but those workflow artifacts are not product deliverables and do not change the verdict.
-- `packages/server/tests/Mohist.Server.SpecTests/Specs/SystemSpecs/Otel/MohistOpenTelemetryRegistrationSpecs.cs` is an unrelated test-hermeticity change. It may be useful independently, but it is not part of the current issue’s initial Slack reply guard and should be reviewed or landed separately.
+- `ReplyGuardCoordinator` still accepts an explicit `reminderBudget` greater than one (`packages/runner/src/runtime/reply-guard.ts:118-126, 394-398`), although no production caller supplies it and the default/product path is exactly one. Clamping or removing that option would make the invariant harder to accidentally violate in a future caller; this is not a current acceptance failure.
+- `packages/server/tests/Mohist.Server.SpecTests/Specs/SystemSpecs/Otel/MohistOpenTelemetryRegistrationSpecs.cs` contains an unrelated test-hermeticity adjustment. It does not affect issue 621 behavior, but it would be cleaner to review or land it separately.
+- The recorded canonical verification encountered load-sensitive Server Spec/duration-gate failures, while the issue-specific Runner checks and the complete Runner CI suite pass. No issue-621 product failure was reproduced from those external diagnostics.
 
-<promise>FAIL</promise>
+<promise>PASS</promise>
