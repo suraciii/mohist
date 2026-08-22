@@ -2,50 +2,30 @@
 
 ## Verdict
 
-FAIL — one previous must-fix finding remains unresolved: the changed Server boundary still leaves the full Server SpecTests assembly failing.
+PASS — no must-fix problems remain; the change is ready to merge.
 
 ## Re-review disposition
 
-- **Previous MF-1 — valid empty Workflow input responses were rejected by `ServerConnection`: fixed.** `packages/runner/src/server/connection.ts:524` now preserves a valid empty JSON array when the Server returns `[]` for a submitted batch, while still rejecting non-empty count mismatches. The connection test, delivery-adapter test, and real-adapter outbox test cover the path through to already-consumed settlement. The focused Runner suites passed 88 tests and both Runner typechecks passed.
-- **Previous MF-2 — the Server SpecTests assembly was red after the shared boundary change: not fixed.** The recorded progress explicitly leaves this unresolved, and a fresh full run still fails 48 of 3005 tests. No valid won't-fix justification is present; the failures are direct effects of the changed runtime-event boundary.
-
-## Must-fix findings
-
-### MF-1 — The changed Workflow-session boundary is not integrated with the existing Server callers and fixtures
-
-**Where:** `packages/server/src/Mohist.Server/Sessions/Grains/AgentSessionGrain.cs:1698-1711`, especially the persisted `SourceKind == "workflow"` gate.
-
-The gate correctly enforces the issue's fail-closed rule for a Workflow-introduced session: a current-binding unattributed batch is accepted only when it is a non-empty pure `session.activity` batch. However, the surrounding Server integration/spec callers still create Workflow-labelled sessions and submit unattributed non-activity runtime events through the session route or directly to the grain. Those callers now receive `InvalidOperationException: Workflow runtime events require the acknowledged Agent turn binding.` and the full Server SpecTests assembly remains red:
-
-```text
-Failed: 48, Passed: 2957, Total: 3005
-```
-
-Representative failures include:
-
-- `AgentSessionContextEventPublishingSpecs.SessionClosed_FailedWithContextExhaustion_PersistsContextExhaustedEventRow`
-- `AgentSessionLifecycleDedupSpecs.AttachThenFirstRuntimeAppend_PersistsRuntimeBoundOnceAcrossRuntimeEvents`
-- `AgentSessionGrainPersistSuccessSpecs.Persistence_SavesBoundRuntimeEventsAndTranscript`
-- `AgentSessionReconnectRecoveryGrainSpecs.ReconcileMissingBinding_UnknownSession_SettlesIdleAndRebindsAtomically`
-- `WorkflowSessionSpecs.GivenRunnerReportsAcpSessionEvents_WhenSessionIsQueried_ThenEventsAreSavedInSessionOrder`
-- `GenericAgentSessionCanonicalFollowupApiSpecs.IssueSessionMetadata_ExposesFollowupInputAndTurnStatus`
-
-This violates T-001's Server integration/spec-test acceptance criterion in `openspec/changes/issue-639/tasks.json`: the changed boundary must be covered and the focused Server verification must pass without leaving surrounding Server callers incompatible. It also fails the review requirement that the changed behavior be covered and verified consistently with the surrounding codebase. The focused new boundary classes pass, but that does not make the shared contract integrated when 48 existing callers fail at the changed guard.
-
-Align the affected route/fixture/direct-caller boundaries with the new contract and rerun the full Server SpecTests assembly. Do not weaken the product rule: Workflow-labelled sessions must continue rejecting unattributed non-activity and mixed batches; legitimate generic/session-follow-up callers should use the appropriate generic fixture or provide the complete acknowledged identity.
+- **Previous MF-1 — valid empty Workflow responses were rejected by `ServerConnection`: fixed and remains fixed.** `packages/runner/src/server/connection.ts:501-525` now preserves a valid HTTP 2xx empty array while still rejecting non-empty receipt-count mismatches. The cleanup route and adapter also preserve `[]`, so both ordinary Workflow input and cleanup can reach the outbox's double-empty settlement path.
+- **Previous MF-2 — the changed Server boundary left the full Server SpecTests assembly failing: fixed.** The final fixture/route/caller migration in the current change aligns generic sessions with the generic route and gives Workflow callers complete acknowledged identity where required. A fresh full Server SpecTests run passed **3005/3005**. The persisted `SourceKind == "workflow"` fail-closed rule remains in production code; the repair did not weaken it.
 
 ## Review dimensions
 
-- **Issue basis: checked, no new issue.** The issue acceptance criteria and the capability specs were reread before evaluating the re-review. The required activity-only relaxation, fail-closed attribution, outbox convergence, retry preservation, retention warning behavior, and live-delivery liveness remain the review basis.
-- **Previous findings: FAIL.** The empty-array delivery finding is properly fixed. The Server integration/test failure finding remains open and is independently sufficient for FAIL.
-- **Regression check: checked, no additional must-fix issue.** The `ServerConnection` change now permits the required valid empty response without accepting a non-empty count mismatch. The pure current-binding active/idle activity path and no-turn non-activity/mixed rejection path pass their focused Server tests. The focused Runner convergence and adapter suites passed.
-- **Correctness and consistency: FAIL.** The persisted `SourceKind` boundary matches the plan/spec, but the change is not complete in the surrounding Server codebase while the full assembly still fails at that boundary.
-- **Tests: FAIL.** Runner typechecks and focused Runner tests pass; the focused Server boundary classes pass, but the full Server SpecTests assembly still reports 48 failures caused by the changed runtime-event boundary.
+- **Issue basis: checked, no issue.** The issue acceptance criteria and both capability specifications were reread before reviewing the implementation: current-binding activity-only acceptance, preserved Workflow attribution, bounded deterministic-refusal settlement, double-empty input/cleanup settlement, warn-once retention behavior, retry preservation, and saturated-queue liveness.
+- **Coverage: checked, no issue.** The current change covers every criterion. Server boundary specs cover active and idle current-binding activity, stale binding no-op behavior, mixed/non-activity rejection before mutation, absent and mismatched Workflow identity, and absence of Workflow observations. Runner tests cover the explicit refusal allowlist, exactly-three threshold, key isolation, persistence failure, two-empty input and cleanup settlement, positive receipt identity checks, interrupted confirmations, retention crossings/recovery, fairness, and saturated historical/live progress. Workflow reporter tests cover fail-closed already-consumed behavior without inventing an Agent turn or enqueueing cleanup follow-on input.
+- **Correctness: checked, no issue.** `AgentSessionGrain.AppendRuntimeEventsAsync` classifies Workflow-introduced sessions from persisted metadata, restricts unattributed current-binding batches to non-empty pure `session.activity`, and delegates the physical binding fence to `AppendEventsAsync`. Accepted activity is applied as session-level state without Workflow observations. Workflow-attributed routes still require the complete frozen execution binding. The outbox removes all records for a refused binding key only after the durable snapshot write, confirms matching records only after two consecutive valid empty responses, and restores records/confirmation state on persistence failure.
+- **Consistency with the surrounding codebase: checked, no issue.** The implementation uses the existing version-1 snapshot, delivery-group scheduler, route boundaries, structured `ApiResponse` codes, injected timers, and existing persistence/retry mechanisms. Generic fixture changes now use the generic session contract rather than relying on Workflow-labelled sessions to exercise unrelated behavior.
+- **Tests: checked, no issue.** Verification completed successfully:
+  - Server SpecTests: **3005 passed, 0 failed**.
+  - Server UnitTests: **3712 passed, 0 failed**.
+  - Runner tests: **1701 passed, 0 failed** across 155 files.
+  - Runner production and test TypeScript typechecks passed.
+  - Format, file-size, script typecheck, and architecture-script checks passed.
 
 ## Observations
 
-- The previous empty-response defect is addressed at the actual connection boundary, not only in a mock: `connection.test.ts`, `runtime-event-delivery.spec.ts`, and `runtime-event-outbox.spec.ts` exercise the valid `[]` response and the two-empty already-consumed settlement.
-- The current grain implementation correctly uses persisted `SourceKind == "workflow"` rather than payload source or the presence of an existing Workflow turn. The focused tests cover active and idle activity-only acceptance, no-turn non-activity/mixed rejection, stale binding no-op behavior, and absence of Workflow observations.
-- The deterministic refusal allowlist, three-refusal settlement, cleanup empty-receipt path, persistence ordering, retention warning edge tracking, and saturated-group Runner coverage showed no additional must-fix problem in the executed focused suites.
+- `SessionTranscriptBuilder.PublicPromptText` now strips internal execution-envelope sections from canonical input text as well as the legacy accumulator path. This is a small adjacent correctness repair included with the fixture migration; the relevant Server unit and specification tests pass, and it does not affect the issue verdict.
+- Snapshot persistence remains a full version-1 snapshot rewrite for durable settlements. The design explicitly keeps this format and defers a storage redesign; the batching, terminal multi-record removal, retention warning edge tracking, and fair scheduler provide the issue-required convergence behavior within that constraint.
+- Refusal and empty-confirmation counters are intentionally process-local and reset across Runner restart, as specified by the plan; recovered records remain durable and retryable without a snapshot migration.
 
-<promise>FAIL</promise>
+<promise>PASS</promise>
