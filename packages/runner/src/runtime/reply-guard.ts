@@ -7,7 +7,7 @@ import {
 import type { ResolvedSkill } from './skill-resolver.js'
 import { createTimeoutSignal } from '../system/timeout-signal.js'
 
-export const DEFAULT_REPLY_GUARD_REMINDER_BUDGET = 2
+export const DEFAULT_REPLY_GUARD_REMINDER_BUDGET = 1
 export const DEFAULT_REPLY_GUARD_ADVISORY_TIMEOUT_MS = 30_000
 
 export type ReplyGuardRuntimeKind = 'pi' | 'opencode'

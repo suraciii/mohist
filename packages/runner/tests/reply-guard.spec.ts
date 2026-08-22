@@ -138,7 +138,7 @@ describe('reply action observation', () => {
 })
 
 describe('ReplyGuardCoordinator', () => {
-  it('uses the default two-reminder budget and closes after two silent opportunities', async () => {
+  it('uses the default one-reminder budget and closes after one silent opportunity', async () => {
     const requests: ReplyGuardAdvisoryRequest[] = []
     const guard = coordinator({
       runAdvisory: async (request) => {
@@ -151,12 +151,12 @@ describe('ReplyGuardCoordinator', () => {
     await guard.evaluate({ status: 'duplicate' })
 
     expect(result).toEqual({ status: 'success' })
-    expect(DEFAULT_REPLY_GUARD_REMINDER_BUDGET).toBe(2)
+    expect(DEFAULT_REPLY_GUARD_REMINDER_BUDGET).toBe(1)
     expect(DEFAULT_REPLY_GUARD_ADVISORY_TIMEOUT_MS).toBe(30_000)
-    expect(requests).toHaveLength(2)
+    expect(requests).toHaveLength(1)
     expect(guard.state).toEqual({
       replyActionAttempted: false,
-      remindersIssued: 2,
+      remindersIssued: 1,
       phase: 'closed',
     })
   })

@@ -247,7 +247,7 @@ function makePiRuntime(
   return { runtime: runtime as PiRuntime, runTurnCalls, followupCalls }
 }
 
-test('guards an unpublished initial OpenCode turn with two bounded reminders and preserves its result', async () => {
+test('guards an unpublished initial OpenCode turn with one bounded advisory and preserves its result', async () => {
   const runtime = makeOpenCodeRuntime({ followupMode: 'silent' })
   const result = await new AgentJobExecutor(connection(), { openCode: runtime.runtime, pi: null }).execute(
     buildWork({
@@ -262,7 +262,7 @@ test('guards an unpublished initial OpenCode turn with two bounded reminders and
     output: expect.objectContaining({ runtimeSessionId: SESSION_ID, text: 'finished' }),
   })
   expect(runtime.runTurnCalls).toHaveLength(1)
-  expect(runtime.followupCalls).toHaveLength(2)
+  expect(runtime.followupCalls).toHaveLength(1)
   expect(runtime.followupCalls.every((request) => request.target.runtimeSessionId === SESSION_ID)).toBe(true)
   expect(runtime.followupCalls.every((request) => request.target.workDir === WORK_DIR)).toBe(true)
   expect(runtime.followupCalls.every((request) => request.prompt.includes('deliberately remain silent'))).toBe(true)
@@ -282,7 +282,7 @@ test('guards an unpublished initial Pi turn through the same follow-up path', as
 
   expect(result.status).toBe('completed')
   expect(runtime.runTurnCalls).toHaveLength(1)
-  expect(runtime.followupCalls).toHaveLength(2)
+  expect(runtime.followupCalls).toHaveLength(1)
   expect(runtime.followupCalls[0]?.target.runtimeSessionId).toBe('/workspace/session.jsonl')
   expect(runtime.followupCalls[0]?.target.workDir).toBe(WORK_DIR)
 })
@@ -393,7 +393,7 @@ test('does not treat final assistant output alone as a reply attempt on Pi', asy
   )
 
   expect(result.output).toEqual(expect.objectContaining({ text: 'finished' }))
-  expect(runtime.followupCalls).toHaveLength(2)
+  expect(runtime.followupCalls).toHaveLength(1)
 })
 
 afterEach(() => {
