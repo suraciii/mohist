@@ -242,6 +242,18 @@ public sealed class AgentSessionRetryService : IScopedService
             ?? throw new InvalidOperationException($"Agent '{agentId}' was not found.");
         var connectionId = provenance.ConnectionId
             ?? throw new InvalidOperationException("Retry target has no durable Connection identity.");
+        var definition = target.Session.Settings.Definition
+            ?? throw new InvalidOperationException("Retry target has no durable execution definition.");
+        var startup = target.Session.Settings.AgentSessionStartup is { } recordedStartup
+            ? recordedStartup with
+            {
+                SessionId = operation.PreAllocatedSessionId,
+                SpawnCommand = recordedStartup.SpawnCommand.Replace(
+                    $"--parent-session {recordedStartup.SessionId}",
+                    $"--parent-session {operation.PreAllocatedSessionId}",
+                    StringComparison.Ordinal),
+            }
+            : null;
 
         var origin = new ConnectionLaunchOrigin(
             connectionId,
@@ -256,10 +268,16 @@ public sealed class AgentSessionRetryService : IScopedService
             input.Text,
             origin,
             workspaceName: target.Session.Metadata.Label(GenericAgentSessionMetadata.WorkspaceName),
+            startupContext: input.StartupContext,
+            attachments: input.Attachments,
+            attachmentIds: input.Attachments?.Select(attachment => attachment.Id).ToArray(),
             preMintedSessionId: operation.PreAllocatedSessionId,
             preMintedInputId: operation.PreAllocatedInputId,
             preMintedTurnId: operation.PreAllocatedTurnId,
             idempotencyKeyOverride: $"agent-retry:{operation.OperationId}",
+            definitionOverride: definition,
+            agentSessionStartup: startup,
+            skipLaunchability: true,
             ct: ct);
         return new RetryDispatchResult(launch.SessionId, launch.JobKey, launch.InputId, launch.TurnId);
     }

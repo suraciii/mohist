@@ -9,6 +9,7 @@ using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging.Abstractions;
 using Mohist.Server.Agent.Grains;
 using Mohist.Server.Agent.Services;
+using Mohist.Server.Contracts;
 using Mohist.Server.Agent.Domain;
 using Mohist.Server.Agent.Subscriptions;
 using Mohist.Server.Infrastructure;
@@ -727,6 +728,96 @@ public class AgentLauncherSpecs
         Assert.Equal(AgentTurnStatus.Failed, failedAfter!.Turn!.Status);
         Assert.Equal(AgentJobFailureReasons.RunnerUnavailable, failedAfter.Turn.Result!.FailureCategory);
         Assert.Equal("runner unavailable while starting", failedAfter.Turn.Result.FailureReason);
+    }
+
+    [Fact]
+    public async Task RetryService_RootRetryPreservesRecordedExecutionFactsAfterAgentChanges()
+    {
+        var projectId = await CreateProjectAsync("agent-retry-root-snapshot");
+        var agent = await CreateAgentAsync(projectId, "agent-retry-root-snapshot-agent", runtime: "opencode");
+        var sourceOrigin = new ConnectionLaunchOrigin(
+            "connection-retry-snapshot",
+            "T-retry-snapshot",
+            "U-retry-snapshot",
+            "C-retry-snapshot",
+            "1710000000.000010");
+        var attachment = new AgentSessionInputAttachmentDescriptor(
+            "attachment-retry-snapshot",
+            "review.txt",
+            "text/plain",
+            12,
+            _fixture.TimeProvider.GetUtcNow());
+        var startupContext = new AgentStartupContext(
+            "earlier discussion",
+            new AgentStartupContextProvenance("slack-history", Truncated: true, "2 oldest messages omitted", 2));
+
+        AgentLaunchResult failedLaunch;
+        await using (var scope = _fixture.Services.CreateAsyncScope())
+        {
+            var launcher = scope.ServiceProvider.GetRequiredService<IAgentLauncher>();
+            failedLaunch = await launcher.LaunchConnectionAsync(
+                agent,
+                "retry the recorded request",
+                sourceOrigin,
+                workspaceName: "workspace-at-launch",
+                startupContext: startupContext,
+                attachments: [attachment],
+                attachmentIds: [attachment.Id]);
+        }
+
+        var sourceGrain = _fixture.Grains.GetGrain<IAgentSessionGrain>(failedLaunch.SessionId);
+        var sourceInitial = await sourceGrain.GetInitialLaunchAsync();
+        var sourceRecord = await LoadSessionByIdAsync(failedLaunch.SessionId);
+        var sourceSettings = sourceRecord!.Session.Settings;
+        Assert.NotNull(sourceInitial?.Turn);
+        Assert.NotNull(sourceSettings.Definition);
+        await sourceGrain.MarkInitialTurnTerminalAsync(
+            sourceInitial.Turn!.JobId!,
+            AgentTurnStatus.Failed,
+            new AgentTurnResult(
+                FailureReason: "runner unavailable",
+                FailureCategory: AgentJobFailureReasons.RunnerUnavailable));
+
+        using (var update = await _fixture.Client.PatchAsJsonAsync(
+            $"/api/projects/{projectId}/agents/{agent.Id}",
+            new
+            {
+                instructions = "changed after the failed launch",
+                agentConfig = new { model = "openai/changed-model", runtime = "pi", variant = "fast" },
+                skills = new[] { "changed-skill" },
+            }))
+        {
+            update.EnsureSuccessStatusCode();
+        }
+
+        AgentSessionRetryResult retry;
+        await using (var scope = _fixture.Services.CreateAsyncScope())
+        {
+            retry = await scope.ServiceProvider.GetRequiredService<AgentSessionRetryService>()
+                .RetryAsync(projectId, failedLaunch.SessionId, sourceInitial.Turn.Id, "retry-click-root-snapshot");
+        }
+
+        Assert.Equal(AgentSessionRetryOutcome.Finished, retry.Outcome);
+        var retriedGrain = _fixture.Grains.GetGrain<IAgentSessionGrain>(retry.SessionId!);
+        var retried = await retriedGrain.GetInitialLaunchAsync();
+        var retriedRecord = await LoadSessionByIdAsync(retry.SessionId!);
+        Assert.NotNull(retried?.Input);
+        Assert.NotNull(retriedRecord);
+        Assert.NotNull(retriedRecord!.Session.Settings.Definition);
+        Assert.Equal(sourceSettings.Definition!.Instructions, retriedRecord.Session.Settings.Definition!.Instructions);
+        Assert.Equal(sourceSettings.Definition.Runtime, retriedRecord.Session.Settings.Definition.Runtime);
+        Assert.Equal(sourceSettings.Definition.Model, retriedRecord.Session.Settings.Definition.Model);
+        Assert.Equal(sourceSettings.Definition.Variant, retriedRecord.Session.Settings.Definition.Variant);
+        Assert.Equal(sourceSettings.Definition.ReasoningEffort, retriedRecord.Session.Settings.Definition.ReasoningEffort);
+        Assert.Equal(sourceSettings.Definition.Skills, retriedRecord.Session.Settings.Definition.Skills);
+        Assert.Equal(sourceSettings.AgentSessionStartup!.ProjectId, retriedRecord.Session.Settings.AgentSessionStartup!.ProjectId);
+        Assert.Equal(retry.SessionId, retriedRecord.Session.Settings.AgentSessionStartup.SessionId);
+        Assert.Equal(sourceSettings.AgentSessionStartup.AllowedSubagents, retriedRecord.Session.Settings.AgentSessionStartup.AllowedSubagents);
+        Assert.Equal(sourceSettings.AgentSessionStartup.SpawnCommand, retriedRecord.Session.Settings.AgentSessionStartup.SpawnCommand);
+        Assert.Equal(sourceInitial.Input!.Attachments, retried!.Input!.Attachments);
+        Assert.Equal(sourceInitial.Input.StartupContext, retried.Input.StartupContext);
+        Assert.Equal(sourceInitial.Input.Text, retried.Input.Text);
+        Assert.Equal(sourceOrigin.ConnectionId, retried.Input.Provenance!.ConnectionId);
     }
 
     [Fact]

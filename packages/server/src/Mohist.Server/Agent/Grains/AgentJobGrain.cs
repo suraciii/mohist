@@ -1002,7 +1002,8 @@ public sealed partial class AgentJobGrain : Grain, IAgentJobGrain
             AgentSessionStartup: command.AgentSessionStartup,
             SpawnOrigin: command.SpawnOrigin,
             WorkspaceRepositories: command.WorkspaceRepositories,
-            OriginMarker: command.OriginMarker);
+            OriginMarker: command.OriginMarker,
+            Skills: command.Skills);
 
     private static bool PlansEquivalent(PrepareManualLaunchCommand left, PrepareManualLaunchCommand right) =>
         string.Equals(left.Prompt, right.Prompt, StringComparison.Ordinal)

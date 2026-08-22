@@ -98,4 +98,5 @@ public sealed record AgentLaunchCoordinatorCommandEnvelope(
     /// Marks a task-first envelope whose definition was created before the
     /// canonical launch plan. Append-only Orleans field id.
     /// </summary>
-    [property: Id(40)] bool DefinitionCreatedByLaunch = false);
+    [property: Id(40)] bool DefinitionCreatedByLaunch = false,
+    [property: Id(41)] string[]? Skills = null);

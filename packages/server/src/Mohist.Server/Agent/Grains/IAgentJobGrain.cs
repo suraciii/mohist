@@ -220,7 +220,8 @@ public sealed record PrepareManualLaunchCommand(
     /// <summary>
     /// Non-secret control-plane origin marker copied from the launch origin.
     /// </summary>
-    [property: Id(25)] string? OriginMarker = null);
+    [property: Id(25)] string? OriginMarker = null,
+    [property: Id(26)] string[]? Skills = null);
 
 [GenerateSerializer]
 public sealed record AgentJobSpawnOrigin(

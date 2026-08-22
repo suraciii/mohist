@@ -126,6 +126,9 @@ public interface IAgentLauncher
         string? preMintedInputId = null,
         string? preMintedTurnId = null,
         string? idempotencyKeyOverride = null,
+        AgentExecutionDefinition? definitionOverride = null,
+        AgentSessionStartup? agentSessionStartup = null,
+        bool skipLaunchability = false,
         CancellationToken ct = default);
 
     Task<AgentLaunchResult?> ResumeIdempotentAsync(
