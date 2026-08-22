@@ -52,4 +52,6 @@
 
 ## Review follow-up
 - MF-1 from `review.md` is the remaining must-fix: handler-level deterministic coverage for retryable terminal presentation and signing/durable-fact fallback.
-- Plan: add integration-backed `SlackTerminalDeliveryHandler` specs that invoke the real handler, inspect the `ExplicitFailure` outbox blocks/action payload, and verify fallback to reaction-only when signing material or durable Session/Turn facts are unavailable. Do not edit `review.md`.
+- Implemented `SlackTerminalDeliveryPresentationSpecs`: the real handler now has deterministic positive coverage for explicit-failure outbox blocks, signed Retry action value, durable Session/Turn/Slack identity, and five-minute expiry; negative coverage verifies reaction-only fallback for missing durable facts and missing signing material.
+- Hardened terminal presentation so unavailable durable retry facts are logged and fall back to reaction-only instead of failing the terminal event.
+- Verification: SpecTests build passes; full UnitTests pass (3793); full SpecTests pass (3059); `git diff --check` is clean. `review.md` was not edited.
