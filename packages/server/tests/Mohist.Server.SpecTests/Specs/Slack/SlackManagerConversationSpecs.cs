@@ -104,12 +104,19 @@ public sealed class SlackManagerConversationSpecs
             team,
             "D_MANAGER_CONVERSATION_NEW"))}";
 
-        _fixture.LaunchFaults.BlockNext(LaunchParticipantGate.SubmitJob);
+        // Scope the fence to THIS session's initial-launch participant: an
+        // unscoped one-shot SubmitJob block can be stolen by any unrelated
+        // background launch in the shared host, releasing the wait before
+        // this conversation published its mapping. EnsureInitialLaunch
+        // carries the deterministic session id and fires before submit.
+        _fixture.LaunchFaults.BlockNext(
+            LaunchParticipantGate.EnsureInitialLaunch,
+            participantId => participantId == sessionId);
         try
         {
             var firstTask = SendManagerMessageAsync(
                 appId, team, owner, firstTs, "Inspect the current Manager state.");
-            await _fixture.LaunchFaults.WaitUntilBlockedAsync(LaunchParticipantGate.SubmitJob);
+            await _fixture.LaunchFaults.WaitUntilBlockedAsync(LaunchParticipantGate.EnsureInitialLaunch);
 
             await using (var scope = _fixture.Services.CreateAsyncScope())
             {
@@ -128,7 +135,7 @@ public sealed class SlackManagerConversationSpecs
             Assert.Equal("accepted", later.GetProperty("decision").GetString());
             Assert.Equal(sessionId, later.GetProperty("sessionId").GetString());
 
-            _fixture.LaunchFaults.ReleaseBlocked(LaunchParticipantGate.SubmitJob);
+            _fixture.LaunchFaults.ReleaseBlocked(LaunchParticipantGate.EnsureInitialLaunch);
             var first = await firstTask;
             Assert.Equal("accepted", first.GetProperty("decision").GetString());
 
@@ -140,7 +147,7 @@ public sealed class SlackManagerConversationSpecs
         }
         finally
         {
-            _fixture.LaunchFaults.ReleaseBlocked(LaunchParticipantGate.SubmitJob);
+            _fixture.LaunchFaults.ReleaseBlocked(LaunchParticipantGate.EnsureInitialLaunch);
         }
     }
 
@@ -158,12 +165,14 @@ public sealed class SlackManagerConversationSpecs
             team,
             "D_MANAGER_CONVERSATION_NEW"))}";
 
-        _fixture.LaunchFaults.BlockNext(LaunchParticipantGate.SubmitJob);
+        _fixture.LaunchFaults.BlockNext(
+            LaunchParticipantGate.EnsureInitialLaunch,
+            participantId => participantId == sessionId);
         try
         {
             var firstTask = SendManagerMessageAsync(
                 appId, team, owner, firstTs, "Inspect the current Manager state.");
-            await _fixture.LaunchFaults.WaitUntilBlockedAsync(LaunchParticipantGate.SubmitJob);
+            await _fixture.LaunchFaults.WaitUntilBlockedAsync(LaunchParticipantGate.EnsureInitialLaunch);
 
             // Slack replays the SAME message while the initial launch is
             // still between inbox acceptance and route stamping: the replay
@@ -173,7 +182,7 @@ public sealed class SlackManagerConversationSpecs
                 appId, team, owner, firstTs, "Inspect the current Manager state.");
             Assert.Equal("duplicate", replay.GetProperty("decision").GetString());
 
-            _fixture.LaunchFaults.ReleaseBlocked(LaunchParticipantGate.SubmitJob);
+            _fixture.LaunchFaults.ReleaseBlocked(LaunchParticipantGate.EnsureInitialLaunch);
             var first = await firstTask;
             Assert.Equal("accepted", first.GetProperty("decision").GetString());
 
@@ -185,7 +194,7 @@ public sealed class SlackManagerConversationSpecs
         }
         finally
         {
-            _fixture.LaunchFaults.ReleaseBlocked(LaunchParticipantGate.SubmitJob);
+            _fixture.LaunchFaults.ReleaseBlocked(LaunchParticipantGate.EnsureInitialLaunch);
         }
     }
 
