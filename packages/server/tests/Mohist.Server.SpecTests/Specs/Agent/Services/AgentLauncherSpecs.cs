@@ -10,6 +10,7 @@ using Mohist.Server.Agent.Domain;
 using Mohist.Server.Agent.Subscriptions;
 using Mohist.Server.Infrastructure;
 using Mohist.Server.Infrastructure.Data.Events;
+using Mohist.Server.Infrastructure.Data.Sessions;
 using Mohist.Server.Infrastructure.Events;
 using Mohist.Server.Runner.Grains;
 using Mohist.Server.Sessions.Domain;
@@ -235,6 +236,79 @@ public class AgentLauncherSpecs
                 .GetGrain<IRunnerRegistryGrain>(RunnerRegistryKeys.Global)
                 .UnregisterAsync(runnerId);
         }
+    }
+
+    [Fact]
+    public async Task RetryService_RootRetryCommitsReceiptAndCreatesDistinctSession()
+    {
+        var projectId = await CreateProjectAsync("agent-retry-root");
+        var agent = await CreateAgentAsync(projectId, "agent-retry-root-agent");
+        var sourceOrigin = new ConnectionLaunchOrigin(
+            "connection-retry",
+            "T-retry",
+            "U-retry",
+            "C-retry",
+            "1710000000.000001");
+
+        AgentLaunchResult failedLaunch;
+        await using (var scope = _fixture.Services.CreateAsyncScope())
+        {
+            var launcher = scope.ServiceProvider.GetRequiredService<IAgentLauncher>();
+            failedLaunch = await launcher.LaunchConnectionAsync(agent, "retry this", sourceOrigin);
+        }
+
+        var sourceGrain = _fixture.Grains.GetGrain<IAgentSessionGrain>(failedLaunch.SessionId);
+        var sourceInitial = await sourceGrain.GetInitialLaunchAsync();
+        Assert.NotNull(sourceInitial?.Turn);
+        Assert.NotNull(sourceInitial.Turn!.JobId);
+        await sourceGrain.MarkInitialTurnTerminalAsync(
+            sourceInitial.Turn.JobId!,
+            AgentTurnStatus.Failed,
+            new AgentTurnResult(
+                Message: "runner unavailable",
+                FailureReason: "runner unavailable while starting",
+                FailureCategory: AgentJobFailureReasons.RunnerUnavailable));
+
+        AgentSessionRetryResult retry;
+        await using (var scope = _fixture.Services.CreateAsyncScope())
+        {
+            var service = scope.ServiceProvider.GetRequiredService<AgentSessionRetryService>();
+            retry = await service.RetryAsync(
+                projectId,
+                failedLaunch.SessionId,
+                sourceInitial.Turn.Id,
+                "retry-click-root");
+        }
+
+        Assert.Equal(AgentSessionRetryOutcome.Finished, retry.Outcome);
+        Assert.NotEqual(failedLaunch.SessionId, retry.SessionId);
+        Assert.NotNull(retry.OperationId);
+
+        await using (var verify = _fixture.Services.CreateAsyncScope())
+        {
+            var operations = verify.ServiceProvider.GetRequiredService<AgentRetryOperationStore>();
+            var operation = await operations.GetAsync(projectId, retry.OperationId!);
+            Assert.NotNull(operation);
+            Assert.Equal(AgentRetryOperationState.Finished, operation!.State);
+            Assert.Equal(operation.PreAllocatedSessionId, retry.SessionId);
+            Assert.Equal(operation.PreAllocatedInputId, retry.InputId);
+            Assert.Equal(operation.PreAllocatedTurnId, retry.TurnId);
+        }
+
+        var retriedGrain = _fixture.Grains.GetGrain<IAgentSessionGrain>(retry.SessionId!);
+        var retriedInitial = await retriedGrain.GetInitialLaunchAsync();
+        Assert.NotNull(retriedInitial?.Input);
+        Assert.NotNull(retriedInitial.Turn);
+        Assert.Equal(sourceOrigin.ConnectionId, retriedInitial.Input!.Provenance!.ConnectionId);
+        Assert.Equal(sourceOrigin.WorkspaceTeamId, retriedInitial.Input.Provenance.WorkspaceId);
+        Assert.Equal(sourceOrigin.ConversationId, retriedInitial.Input.Provenance.ConversationId);
+        Assert.Equal(sourceOrigin.MessageTs, retriedInitial.Input.Provenance.MessageId);
+        Assert.Equal(sourceOrigin.SlackUserId, retriedInitial.Input.Provenance.MemberId);
+
+        var failedAfter = await sourceGrain.GetInitialLaunchAsync();
+        Assert.Equal(AgentTurnStatus.Failed, failedAfter!.Turn!.Status);
+        Assert.Equal(AgentJobFailureReasons.RunnerUnavailable, failedAfter.Turn.Result!.FailureCategory);
+        Assert.Equal("runner unavailable while starting", failedAfter.Turn.Result.FailureReason);
     }
 
     [Fact]
