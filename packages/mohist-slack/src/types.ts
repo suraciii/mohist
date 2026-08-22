@@ -90,14 +90,13 @@ export interface SlackInteractionEnvelope {
 
 export type SlackSenderKind = 'human' | 'bot' | 'unknown'
 
-export type IngressResult =
-  | { readonly kind: 'accepted' }
-  | { readonly kind: 'rejected'; readonly reason?: string }
-  | { readonly kind: 'claimed' }
-  | { readonly kind: 'transferred' }
-  | { readonly kind: 'ignored' }
-  | { readonly kind: 'backpressured'; readonly reason: string }
-  | { readonly kind: string; readonly reason?: string }
+export type IngressResponseOwner = 'none' | 'server' | 'adapter'
+
+export interface IngressResult {
+  readonly kind: string
+  readonly responseOwner: IngressResponseOwner
+  readonly reason?: string
+}
 
 export interface InteractionResult {
   readonly state: string

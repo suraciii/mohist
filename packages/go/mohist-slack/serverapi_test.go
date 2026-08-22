@@ -285,6 +285,55 @@ func TestReportHelloOutcomes(t *testing.T) {
 	}
 }
 
+func TestIngressDecodesResponseOwnersAndLegacyFallback(t *testing.T) {
+	tests := []struct {
+		name          string
+		response      string
+		wantOwner     ResponseOwner
+		wantReason    string
+		wantReasonNil bool
+	}{
+		{"none", `{"success":true,"data":{"kind":"accepted","responseOwner":"none"}}`, ResponseOwnerNone, "", true},
+		{"server", `{"success":true,"data":{"kind":"rejected","responseOwner":"server","reason":"durable nudge"}}`, ResponseOwnerServer, "durable nudge", false},
+		{"adapter", `{"success":true,"data":{"kind":"backpressured","responseOwner":"adapter","reason":"retry"}}`, ResponseOwnerAdapter, "retry", false},
+		{"legacy backpressure", `{"success":true,"data":{"kind":"backpressured","reason":"legacy retry"}}`, ResponseOwnerAdapter, "legacy retry", false},
+		{"legacy other result", `{"success":true,"data":{"kind":"rejected","reason":"legacy rejection"}}`, ResponseOwnerNone, "legacy rejection", false},
+	}
+	for _, testCase := range tests {
+		t.Run(testCase.name, func(t *testing.T) {
+			var captured capturedRequest
+			api := serveAPI(t, http.StatusOK, testCase.response, &captured)
+			result, err := api.Ingress(context.Background(), ConnectionTarget{ProjectID: "p", ConnectionID: "c"}, Envelope{SenderKind: SenderUnknown}, "l", "a")
+			if err != nil || result.ResponseOwner != testCase.wantOwner {
+				t.Fatalf("Ingress() = (%#v, %v), want owner %q", result, err, testCase.wantOwner)
+			}
+			if testCase.wantReasonNil != (result.Reason == nil) || result.Reason != nil && *result.Reason != testCase.wantReason {
+				t.Fatalf("Ingress() reason = %v, want %q / nil=%t", result.Reason, testCase.wantReason, testCase.wantReasonNil)
+			}
+		})
+	}
+}
+
+func TestIngressRejectsInvalidResponseOwnersAndMalformedResults(t *testing.T) {
+	tests := []string{
+		`{"success":true,"data":{"kind":"rejected","responseOwner":"unknown"}}`,
+		`{"success":true,"data":{"kind":"rejected","responseOwner":null}}`,
+		`{"success":true,"data":{"responseOwner":"server"}}`,
+		`{"success":true,"data":{"kind":"rejected","reason":42}}`,
+		`{"success":true,"data":{"kind":"rejected","reason":null}}`,
+		`{"success":true,"data":{"kind":"backpressured"}}`,
+	}
+	for _, response := range tests {
+		t.Run(response, func(t *testing.T) {
+			var captured capturedRequest
+			api := serveAPI(t, http.StatusOK, response, &captured)
+			if _, err := api.Ingress(context.Background(), ConnectionTarget{ProjectID: "p", ConnectionID: "c"}, Envelope{SenderKind: SenderUnknown}, "l", "a"); err == nil {
+				t.Fatalf("Ingress() accepted malformed result")
+			}
+		})
+	}
+}
+
 func TestIngressRoutesByTargetKind(t *testing.T) {
 	envelope := Envelope{
 		EventType:        "message",
@@ -339,11 +388,11 @@ func TestIngressRoutesByTargetKind(t *testing.T) {
 	})
 }
 
-func TestIngressSurfacesBackpressureReason(t *testing.T) {
+func TestIngressSurfacesResponseOwnershipAndBackpressureReason(t *testing.T) {
 	var captured capturedRequest
-	api := serveAPI(t, http.StatusOK, `{"success":true,"data":{"kind":"backpressured","reason":"drain first"}}`, &captured)
+	api := serveAPI(t, http.StatusOK, `{"success":true,"data":{"kind":"backpressured","responseOwner":"adapter","reason":"drain first"}}`, &captured)
 	result, err := api.Ingress(context.Background(), ConnectionTarget{ProjectID: "p", ConnectionID: "c"}, Envelope{SenderKind: SenderUnknown}, "l", "a")
-	if err != nil || result.Kind != "backpressured" || result.Reason == nil || *result.Reason != "drain first" {
+	if err != nil || result.Kind != "backpressured" || result.ResponseOwner != ResponseOwnerAdapter || result.Reason == nil || *result.Reason != "drain first" {
 		t.Fatalf("Ingress() = (%#v, %v)", result, err)
 	}
 	// The Server dereferences the list fields without a null guard, so a

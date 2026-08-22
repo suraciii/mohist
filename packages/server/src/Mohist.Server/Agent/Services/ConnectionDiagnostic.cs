@@ -34,7 +34,8 @@ public sealed record DiagnosticInputs(
     bool AdapterOnline = true,
     string OwnerAvailability = OwnerAvailabilityKind.Unknown,
     string AgentReadiness = AgentReadinessKind.Unknown,
-    string? AgentName = null);
+    string? AgentName = null,
+    AgentExecutabilityResult? AgentExecutability = null);
 
 public sealed record ConnectionDiagnosticResult(
     string PrimaryState,
@@ -52,7 +53,8 @@ public sealed record ConnectionDiagnosticFacts(
     string OwnerAvailability,
     string AgentReadiness,
     ConnectionIdentityFacts Identity,
-    DateTimeOffset? OfflineGapAt = null)
+    DateTimeOffset? OfflineGapAt = null,
+    AgentExecutabilityResult? AgentExecutability = null)
 {
     public bool IdentityDrift => Identity.HasDrift;
     public bool HasOfflineGap => OfflineGapAt is not null;
@@ -88,7 +90,8 @@ public static class ConnectionDiagnostic
             inputs.OwnerAvailability,
             inputs.AgentReadiness,
             identity,
-            connection.OfflineGapAt);
+            connection.OfflineGapAt,
+            inputs.AgentExecutability);
 
         if (!string.Equals(connection.SetupProgress, SetupProgressKind.Complete, StringComparison.Ordinal))
             return new(
@@ -125,6 +128,14 @@ public static class ConnectionDiagnostic
                 ConnectionDiagnosticState.OwnerUnavailable,
                 "The current Slack Owner is no longer an eligible workspace member.",
                 "Transfer ownership.",
+                facts);
+
+        if (inputs.AgentExecutability is { State: var executability }
+            && AgentExecutabilityStates.IsBlocked(executability))
+            return new(
+                ConnectionDiagnosticState.AgentNeedsSetup,
+                "The bound Agent is not ready to accept new work.",
+                "Review the Agent execution settings.",
                 facts);
 
         if (string.Equals(inputs.AgentReadiness, AgentReadinessKind.NeedsSetup, StringComparison.Ordinal))
