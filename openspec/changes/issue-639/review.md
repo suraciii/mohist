@@ -2,33 +2,62 @@
 
 ## Verdict
 
-FAIL — one must-fix problem remains in the Server boundary.
+FAIL — two must-fix problems remain: the ordinary Workflow input empty-receipt path is blocked before the outbox can confirm consumption, and the Server SpecTests assembly is left red by the changed boundary.
+
+## Re-review disposition
+
+- **Previous MF-1 — Workflow-session pure-activity boundary:** fixed. `AgentSessionGrain.AppendRuntimeEventsAsync` now uses persisted `SourceKind == "workflow"`, rejects current-binding unattributed non-activity and mixed batches before append, and the new no-turn grain/API tests cover the required cases.
+- The findings below are new implementation/integration problems found after that disposition.
 
 ## Must-fix findings
 
-### MF-1 — Unattributed non-activity and mixed batches still pass before a Workflow turn exists
+### MF-1 — Valid empty Workflow input responses are rejected by `ServerConnection`
 
-**Where:** `packages/server/src/Mohist.Server/Sessions/Grains/AgentSessionGrain.cs:1703-1724`, in `AppendRuntimeEventsAsync`.
+**Where:** `packages/runner/src/server/connection.ts:501-525`, in `workflowAgentSessionRuntimeEvents`.
 
-The implementation now recognizes a reconnect batch by requiring every event to be `session.activity` **and** its payload to contain `source: "runner-reconnect"`. However, it only rejects an unattributed non-reconnect batch when `hasWorkflowTurnForRuntime` is already true. It no longer uses the persisted `SourceKind == "workflow"` classification to enforce the pure-activity boundary.
+The Workflow runtime-events route can validly return HTTP 2xx with `[]` for a `session.input` whose server-side binding was already consumed or not accepted. The Server route explicitly returns `Results.Ok(Array.Empty<RunnerRuntimeEventReceipt>())` for that case in `packages/server/src/Mohist.Server/Api/RunnerRoutes.cs` (the `!receipt.WorkflowBindingAccepted` branch).
 
-Therefore, for a Workflow-introduced session with the current `runtimeSessionId` but no persisted Workflow turn, an unattributed `message.delta` (and an unattributed mixed `session.activity` + `message.delta` batch) reaches `AppendEventsAsync` and is appended instead of being rejected before append. The same failure occurs for a pure activity batch without the special source field once a Workflow turn is present: it is not treated as the specified activity-only relaxation.
+However, `ServerConnection.workflowAgentSessionRuntimeEvents` rejects that response whenever the request contained events:
 
-This violates the issue acceptance criterion that `AppendRuntimeEventsAsync` must still reject non-activity events without turn binding on Workflow-introduced sessions, and the capability requirement **“The relaxed path is limited to pure activity batches”** in `openspec/changes/issue-639/specs/session-runtime-activity-reconciliation/spec.md` (especially the scenario for an unattributed non-activity event when no matching persisted turn exists). It also violates the design decision that persisted `SourceKind == "workflow"` is authoritative and that mixed/non-activity unattributed batches are rejected before append.
+```ts
+if (submitted > 0 && payload.length !== submitted)
+  throw new Error(`session runtime events acceptance mismatch ...`)
+```
 
-The boundary must enforce the Workflow-session pure-activity rule independently of whether a Workflow turn has already been persisted, while retaining acceptance for current-binding unattributed activity-only observations. Add regression coverage for both a no-turn unattributed `message.delta` and a no-turn mixed batch, and verify that neither mutates transcript/session state.
+Consequently the Runner delivery adapter never receives the valid empty receipt array. The outbox's two-consecutive-empty confirmation path is therefore unreachable for ordinary `workflow-session` `session.input` records; it sees a malformed/failing delivery instead of two valid empty 2xx responses. This leaves the exact stale input records described by the issue retryable forever and violates the acceptance criterion that `session.input` settles after two consecutive valid 2xx empty-receipt responses. It also violates the convergence spec scenario **“A lost Workflow input acknowledgement is confirmed consumed”** and the design/T-003 requirement to preserve empty receipt arrays through the connection and delivery adapter.
+
+The connection method must allow and return a valid empty array for this response shape while retaining validation for malformed responses and preserving the existing count/identity checks for non-empty responses. Add a connection/outbox regression test that delivers two empty Workflow input responses through the real adapter boundary and verifies already-consumed settlement.
+
+### MF-2 — The Server SpecTests assembly is red after the shared boundary change
+
+**Where:** `packages/server/src/Mohist.Server/Sessions/Grains/AgentSessionGrain.cs:1697-1711`.
+
+The current `SourceKind == "workflow"` gate is now exercised by many existing Server fixtures and callers that create Workflow-labelled sessions and submit unattributed non-activity events through the session route/direct grain API. The full Server SpecTests run currently fails **48 of 3005 tests**, with failures such as:
+
+- `WorkflowSessionSpecs.GivenRunnerReportsAcpSessionEvents_WhenSessionIsQueried_ThenEventsAreSavedInSessionOrder`
+- `WorkflowSessionSpecs.GivenMohistPromptAndTerminalFailure_WhenIssueWorkflowSessionEventsAreQueried_ThenRawEventsReturnInSequence`
+- `GenericAgentSessionCanonicalFollowupApiSpecs.IssueSessionMetadata_ExposesFollowupInputAndTurnStatus`
+- `AgentSessionReconnectRecoveryGrainSpecs.ReconcileMissingBinding_UnknownSession_SettlesIdleAndRebindsAtomically`
+- `AgentSessionGrainPersistSuccessSpecs.Persistence_SavesBoundRuntimeEventsAndTranscript`
+
+The failures are caused by the new `InvalidOperationException` at line 1711, not by compilation or infrastructure. The focused new boundary tests pass, but the changed shared grain contract has not been reconciled with the surrounding route fixtures and direct grain callers, so the repository's Server verification is not green. This violates the review requirement that changed behavior be covered and verified and leaves the change incomplete relative to the issue's Server integration/spec-test acceptance criterion.
+
+Repair the affected route/fixture boundaries without weakening the issue's fail-closed rule: Workflow-labelled sessions must continue to reject unattributed non-activity or mixed batches, while legitimate generic/session-follow-up tests and callers must submit the appropriate complete identity or use a non-Workflow session fixture. Re-run the full Server SpecTests assembly and resolve all failures attributable to this change.
 
 ## Review dimensions
 
-- **Issue basis: checked, no issue.** The issue acceptance criteria and the plan/spec artifacts were read before judging the implementation.
-- **Coverage: FAIL.** The changed boundary tests cover non-activity and mixed batches only after seeding an acknowledged Workflow turn. They do not cover the required no-turn cases, which is where the implementation is incorrect.
-- **Correctness: FAIL.** MF-1 leaves the fail-closed Workflow attribution boundary incomplete.
-- **Consistency with the surrounding codebase and plan artifacts: FAIL.** The final implementation diverges from `design.md` decision 1 and the session-runtime-activity specification by replacing persisted Workflow source classification with a payload-source special case.
-- **Tests: checked, no issue in the executed suites, but insufficient for this criterion.** `npm run verify` passed; the focused Runner suites passed 70 tests, and the Server SpecTests passed 3003 tests. Those results do not establish the missing no-turn rejection behavior because the relevant regression case is absent.
+- **Issue basis: checked, no issue.** The issue acceptance criteria were reread before judging the implementation: current-binding activity-only acceptance, preserved Workflow attribution, bounded refusal settlement, double-empty input/cleanup settlement, warn-once retention behavior, retry preservation, and live delivery progress.
+- **Coverage: FAIL.** The new no-turn pure-activity boundary coverage is present, but the ordinary Workflow input empty-array path has no end-to-end regression coverage and is blocked by the connection's acceptance-count check. The full Server suite also has 48 failures.
+- **Correctness: FAIL.** MF-1 prevents the required already-consumed settlement for ordinary `workflow-session` input records. MF-2 leaves the shared Server behavior incompletely integrated with existing callers and tests.
+- **Consistency with the surrounding codebase and plan artifacts: FAIL.** The Server boundary matches the revised design, but the surrounding Server SpecTests and direct callers have not been brought into that contract; the Runner connection simultaneously contradicts the design by rejecting the valid empty input response.
+- **Tests: FAIL.** Runner focused verification passed: the six relevant suites ran 71/71 and both Runner TypeScript typechecks passed. The full Server SpecTests command
+  `dotnet test packages/server/tests/Mohist.Server.SpecTests/Mohist.Server.SpecTests.csproj --filter 'FullyQualifiedName~WorkflowAgentSessionExecutionBoundaryApiSpecs|FullyQualifiedName~AgentSessionGrainInputBoundarySpecs|FullyQualifiedName~AgentSessionRuntimeEventSpecs' --no-restore -p:SkipWebBuild=true`
+  still reports 48 failures out of 3005, so the changed Server behavior is not fully verified.
 
 ## Observations
 
-- The Runner outbox changes for structured deterministic-refusal classification, three-refusal settlement, two-empty already-consumed settlement, cleanup receipt arrays, retention warning edge-triggering, and saturated-group liveness were covered by the focused tests and showed no additional must-fix issue in this review.
-- The full repository verification completed successfully, including Runner typechecking, Server tests, formatting, file-size checks, and architecture checks.
+- The prior pure-activity finding is properly addressed: current-binding active and idle observations are accepted without Workflow attribution, while no-turn non-activity and mixed batches are rejected before mutation.
+- The cleanup receipt-array route/connection/delivery path appears internally consistent: new cleanup returns one `session.cleanup` receipt and an idempotent replay returns `[]`; the focused cleanup tests pass.
+- The deterministic 4xx allowlist, three-refusal per-key settlement, persistence ordering, two-empty cleanup settlement, retention warning edge tracking, and saturated-group Runner tests showed no additional must-fix issue in the executed focused suites.
 
 <promise>FAIL</promise>
