@@ -543,6 +543,7 @@ public partial class WorkflowRunStoreSpecs
     private sealed class NullEventDispatcherGrain : IGrainWithStringKey, IEventDispatcherGrain
     {
         public Task DispatchNowAsync(CancellationToken ct = default) => Task.CompletedTask;
+    public Task PokeAsync(CancellationToken ct = default) => Task.CompletedTask;
 
         public Task<DeadLetterRedeliveryResult> RedeliverAsync(long deadLetterId, CancellationToken ct = default) =>
             Task.FromResult(new DeadLetterRedeliveryResult(false, false, 0, "null grain"));

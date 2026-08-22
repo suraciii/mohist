@@ -64,6 +64,15 @@ public sealed class EventDispatcherGrain : Grain, IEventDispatcherGrain
         return _dispatcher.DispatchAsync(ct);
     }
 
+    public Task PokeAsync(CancellationToken ct = default)
+    {
+        // Skip entirely when a cycle already runs: queuing here is what
+        // turned producer bursts into unbounded dispatcher latency under
+        // concurrent load (#701). The reminder tick drains the remainder.
+        if (!IsFixedKey || _dispatcher.IsBusy) return Task.CompletedTask;
+        return _dispatcher.DispatchAsync(ct);
+    }
+
     public Task<DeadLetterRedeliveryResult> RedeliverAsync(long deadLetterId, CancellationToken ct = default)
     {
         if (!IsFixedKey)

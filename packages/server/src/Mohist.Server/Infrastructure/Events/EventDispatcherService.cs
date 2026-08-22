@@ -63,6 +63,9 @@ public sealed class EventDispatcherService : IDisposable
             "1");
     }
 
+    /// <summary>True while a dispatch cycle holds the gate.</summary>
+    public bool IsBusy => _dispatchGate.CurrentCount == 0;
+
     public async Task DispatchAsync(CancellationToken ct)
     {
         await _dispatchGate.WaitAsync(ct).ConfigureAwait(false);
