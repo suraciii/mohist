@@ -2,13 +2,14 @@ import { errorMessage } from '../core/errors.js'
 import type { JsonObject, DispatchWorkItem, WorkItemResult } from '../core/types.js'
 import type {
   RuntimeResult,
+  RuntimeTurnEvent,
   RuntimeTurnObserver,
   RuntimeTurnRequest,
   RuntimeTurnResult,
   RuntimeFilePart,
 } from './opencode/index.js'
 import type { PiRuntimeEvent, PiResult, PiTurnObserver, PiTurnRequest, PiTurnResult } from './pi/index.js'
-import { resolveAccessor } from '../server/command-runtime.js'
+import { callFollowup, resolveAccessor, type CommandRuntimeHandle } from '../server/command-runtime.js'
 import type { ServerConnection } from '../server/connection.js'
 import { resolveOrRecoverBinding, type BindingRecoveryCoordinator, type RuntimeBinding } from './binding-recovery.js'
 import type { RuntimeTurnRegistry } from './runtime-turn-registry.js'
@@ -18,6 +19,7 @@ import type { ResolvedSkill } from './skill-resolver.js'
 import { runnerLogger } from '../system/logger.js'
 import type { DeliveredAttachment } from './attachment-delivery.js'
 import type { ManagerExecutionBoundary } from './manager-execution-boundary.js'
+import { ReplyActionObservationTracker, ReplyGuardCoordinator, type ReplyGuardAdvisoryResult } from './reply-guard.js'
 import type {
   AgentJobExecutorOptions,
   AgentJobRuntimeAccessors,
@@ -138,7 +140,9 @@ export async function executeOpenCodeTurn(
     },
   }
 
-  const eventSink = createAgentSessionEventSink(deps.connection, work, signal, binding.agentSessionId)
+  const observation = new ReplyActionObservationTracker()
+  const eventSink = createAgentSessionEventSink(deps.connection, work, signal, binding.agentSessionId, observation)
+  const runtimeHandle: CommandRuntimeHandle = { kind: 'opencode', runtime }
   const turnKey = workKey(work)
   // Issue-512 T-001: when the coordinator durably recorded the
   // initial input on the AgentSession before dispatch, the runner
@@ -149,29 +153,27 @@ export async function executeOpenCodeTurn(
   const skipInitialInput = Boolean(work.initialInputId && work.initialTurnId)
   let attachedRuntimeSessionId: string | null = null
   let attachedInputPublished = false
-  const observer: RuntimeTurnObserver | undefined = binding.agentSessionId
-    ? {
-        onSessionReady: async (session) => {
-          attachedRuntimeSessionId = session.runtimeSessionId
-          deps.runtimeTurnRegistry?.update(turnKey, {
-            runtimeSessionId: session.runtimeSessionId,
-            workDir: session.workDir,
-          })
-          await eventSink.attachSession(session.runtimeSessionId, session.workDir, modelInput)
-          if (!skipInitialInput && !attachedInputPublished) {
-            attachedInputPublished = true
-            await eventSink.publishSessionInput(composed, session.runtimeSessionId)
-          }
-        },
-        onEvent: (event) => {
-          eventSink.observeEvent(
-            managerExecution
-              ? { ...event, payload: managerExecution.redact(event.payload) as Record<string, unknown> }
-              : event,
-          )
-        },
+  const observer: RuntimeTurnObserver = {
+    onSessionReady: async (session) => {
+      attachedRuntimeSessionId = session.runtimeSessionId
+      deps.runtimeTurnRegistry?.update(turnKey, {
+        runtimeSessionId: session.runtimeSessionId,
+        workDir: session.workDir,
+      })
+      await eventSink.attachSession(session.runtimeSessionId, session.workDir, modelInput)
+      if (!skipInitialInput && !attachedInputPublished) {
+        attachedInputPublished = true
+        await eventSink.publishSessionInput(composed, session.runtimeSessionId)
       }
-    : undefined
+    },
+    onEvent: (event) => {
+      eventSink.observeEvent(
+        managerExecution
+          ? { ...event, payload: managerExecution.redact(event.payload) as Record<string, unknown> }
+          : event,
+      )
+    },
+  }
 
   deps.runtimeTurnRegistry?.register(turnKey, {
     agentSessionId: binding.agentSessionId ?? '',
@@ -198,21 +200,44 @@ export async function executeOpenCodeTurn(
     )
   } catch (error) {
     const message = errorMessage(error)
-    return failureResult(
+    const originalResult = failureResult(
       managerExecution?.hasExpired() ? 'manager-credential-expired' : 'turn-failed',
       managerExecution?.hasExpired()
         ? 'Manager credentials expired before this execution completed; inspect current state before retrying.'
         : `AgentJob turn threw: ${managerExecution ? managerExecution.mask(message) : message}`,
     )
+    await eventSink.drain()
+    return await evaluateInitialReplyGuard({
+      runtime: runtimeHandle,
+      runtimeSessionId: attachedRuntimeSessionId ?? selected,
+      workDir,
+      payload,
+      signal,
+      observation,
+      eventSink,
+      managerExecution,
+      originalResult,
+    })
   }
   await eventSink.drain()
-  if (managerExecution?.hasExpired())
-    return failureResult(
-      'manager-credential-expired',
-      'Manager credentials expired before this execution completed; inspect current state before retrying.',
-      'opencode',
-    )
-  return redactManagerResult(projectTurnToWorkItemResult(result, 'opencode', modelInput, variant), managerExecution)
+  const originalResult = managerExecution?.hasExpired()
+    ? failureResult(
+        'manager-credential-expired',
+        'Manager credentials expired before this execution completed; inspect current state before retrying.',
+        'opencode',
+      )
+    : redactManagerResult(projectTurnToWorkItemResult(result, 'opencode', modelInput, variant), managerExecution)
+  return await evaluateInitialReplyGuard({
+    runtime: runtimeHandle,
+    runtimeSessionId: result.ok ? result.value.facts.runtimeSessionId : (attachedRuntimeSessionId ?? selected),
+    workDir,
+    payload,
+    signal,
+    observation,
+    eventSink,
+    managerExecution,
+    originalResult,
+  })
 }
 
 export async function executePiTurn(
@@ -261,7 +286,9 @@ export async function executePiTurn(
     )
   }
 
-  const eventSink = createAgentSessionEventSink(deps.connection, work, signal, binding.agentSessionId)
+  const observation = new ReplyActionObservationTracker()
+  const eventSink = createAgentSessionEventSink(deps.connection, work, signal, binding.agentSessionId, observation)
+  const runtimeHandle: CommandRuntimeHandle = { kind: 'pi', runtime }
   let runtimeSessionId = binding.runtimeSessionId
   if (binding.agentSessionId && work.projectId && runtimeSessionId && typeof runtime.resolveSession === 'function') {
     const expected: RuntimeBinding = { runnerId: binding.runnerId, runtime: 'pi', runtimeSessionId, workDir }
@@ -324,17 +351,15 @@ export async function executePiTurn(
     },
     managerExecution,
   }
-  const observer: PiTurnObserver | undefined = binding.agentSessionId
-    ? {
-        onEvent: (event) => {
-          eventSink.observePiEvent(
-            managerExecution
-              ? { ...event, payload: managerExecution.redact(event.payload) as Record<string, unknown> }
-              : event,
-          )
-        },
-      }
-    : undefined
+  const observer: PiTurnObserver = {
+    onEvent: (event) => {
+      eventSink.observePiEvent(
+        managerExecution
+          ? { ...event, payload: managerExecution.redact(event.payload) as Record<string, unknown> }
+          : event,
+      )
+    },
+  }
 
   deps.runtimeTurnRegistry?.register(workKey(work), {
     agentSessionId: binding.agentSessionId ?? '',
@@ -351,26 +376,118 @@ export async function executePiTurn(
     )
   } catch (error) {
     const message = errorMessage(error)
-    return failureResult(
+    const originalResult = failureResult(
       managerExecution?.hasExpired() ? 'manager-credential-expired' : 'turn-failed',
       managerExecution?.hasExpired()
         ? 'Manager credentials expired before this execution completed; inspect current state before retrying.'
         : `AgentJob turn threw: ${managerExecution ? managerExecution.mask(message) : message}`,
     )
+    await eventSink.drain()
+    return await evaluateInitialReplyGuard({
+      runtime: runtimeHandle,
+      runtimeSessionId,
+      workDir,
+      payload,
+      signal,
+      observation,
+      eventSink,
+      managerExecution,
+      originalResult,
+    })
   }
   await eventSink.drain()
-  if (managerExecution?.hasExpired())
-    return failureResult(
-      'manager-credential-expired',
-      'Manager credentials expired before this execution completed; inspect current state before retrying.',
-      'pi',
-    )
-  return redactManagerResult(projectPiTurnToWorkItemResult(result, 'pi', modelInput, variant), managerExecution)
+  const originalResult = managerExecution?.hasExpired()
+    ? failureResult(
+        'manager-credential-expired',
+        'Manager credentials expired before this execution completed; inspect current state before retrying.',
+        'pi',
+      )
+    : redactManagerResult(projectPiTurnToWorkItemResult(result, 'pi', modelInput, variant), managerExecution)
+  return await evaluateInitialReplyGuard({
+    runtime: runtimeHandle,
+    runtimeSessionId: result.ok ? result.value.facts.runtimeSessionId : runtimeSessionId,
+    workDir,
+    payload,
+    signal,
+    observation,
+    eventSink,
+    managerExecution,
+    originalResult,
+  })
 }
 
 function redactManagerResult(result: WorkItemResult, boundary: ManagerExecutionBoundary | null): WorkItemResult {
   if (!boundary) return result
   return boundary.redact(result) as WorkItemResult
+}
+
+async function evaluateInitialReplyGuard(args: {
+  runtime: CommandRuntimeHandle
+  runtimeSessionId: string | null
+  workDir: string
+  payload: JsonObject | null
+  signal: AbortSignal
+  observation: ReplyActionObservationTracker
+  eventSink: AgentSessionEventSink
+  managerExecution: ManagerExecutionBoundary | null
+  originalResult: WorkItemResult
+}): Promise<WorkItemResult> {
+  const guard = new ReplyGuardCoordinator({
+    runtime: {
+      kind: args.runtime.kind,
+      isAvailable: () => args.runtime.runtime.ready(),
+    },
+    runtimeSessionId: args.runtimeSessionId,
+    workDir: args.workDir,
+    slackExecutionContext: args.payload?.['slackExecutionContext'],
+    observation: args.observation,
+    signal: args.signal,
+    runAdvisory: async (request) => {
+      const observer: RuntimeTurnObserver | PiTurnObserver =
+        args.runtime.kind === 'opencode'
+          ? {
+              onEvent: (event: RuntimeTurnEvent) =>
+                args.eventSink.observeEvent(
+                  args.managerExecution
+                    ? { ...event, payload: args.managerExecution.redact(event.payload) as Record<string, unknown> }
+                    : event,
+                ),
+            }
+          : {
+              onEvent: (event: PiRuntimeEvent) =>
+                args.eventSink.observePiEvent(
+                  args.managerExecution
+                    ? { ...event, payload: args.managerExecution.redact(event.payload) as Record<string, unknown> }
+                    : event,
+                ),
+            }
+      const result = await callFollowup(
+        args.runtime,
+        {
+          target: {
+            runtime: args.runtime.kind,
+            runtimeSessionId: request.runtimeSessionId,
+            workDir: request.workDir,
+          },
+          prompt: request.prompt,
+          managerExecution: args.managerExecution,
+          options: { skills: [request.collaborationSkill] },
+        },
+        observer,
+        request.signal,
+      )
+      await args.eventSink.drain()
+      if (!result.ok) return replyGuardAdvisoryResult(result.error.kind)
+      return { kind: 'completed' }
+    },
+  })
+  return await guard.evaluate(args.originalResult)
+}
+
+function replyGuardAdvisoryResult(errorKind: string): ReplyGuardAdvisoryResult {
+  if (errorKind === 'unavailable-runtime') return { kind: 'unavailable' }
+  if (errorKind === 'interrupted' || errorKind === 'deadline-exceeded') return { kind: 'interrupted' }
+  return { kind: 'failed' }
 }
 
 async function runWithModelRetry<T extends ModelTurnResult>(
@@ -491,6 +608,7 @@ export function createAgentSessionEventSink(
   work: DispatchWorkItem,
   signal: AbortSignal,
   agentSessionId: string | null,
+  observation: ReplyActionObservationTracker = new ReplyActionObservationTracker(),
 ): AgentSessionEventSink {
   let pending: Promise<void> = Promise.resolve()
   const deliverySignal = () => AbortSignal.any([signal, AbortSignal.timeout(AGENT_EVENT_DELIVERY_TIMEOUT_MS)])
@@ -500,8 +618,8 @@ export function createAgentSessionEventSink(
     return {
       attachSession: noop,
       publishSessionInput: noop,
-      observeEvent: () => undefined,
-      observePiEvent: () => undefined,
+      observeEvent: (event) => observation.observe(event),
+      observePiEvent: (event) => observation.observe(event),
       drain: noop,
     }
   }
@@ -566,6 +684,7 @@ export function createAgentSessionEventSink(
       }
     },
     observeEvent(event) {
+      observation.observe(event)
       pending = pending
         .then(() =>
           connection
@@ -592,6 +711,7 @@ export function createAgentSessionEventSink(
         })
     },
     observePiEvent(event) {
+      observation.observe(event)
       pending = pending
         .then(() =>
           connection
