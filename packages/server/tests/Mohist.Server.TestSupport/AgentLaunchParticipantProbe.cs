@@ -42,6 +42,8 @@ public sealed class AgentLaunchParticipantProbe : IAgentLaunchParticipantProbe
         new();
     private readonly ConcurrentDictionary<LaunchParticipantGate, TaskCompletionSource> _entered =
         new();
+    private readonly ConcurrentDictionary<LaunchParticipantGate, Func<string, bool>> _blockMatchers =
+        new();
 
     public void FailNext(LaunchParticipantGate gate, int times = 1)
     {
@@ -59,10 +61,24 @@ public sealed class AgentLaunchParticipantProbe : IAgentLaunchParticipantProbe
     public void StopFailing(LaunchParticipantGate gate) =>
         _remaining.TryRemove(gate, out _);
 
-    public void BlockNext(LaunchParticipantGate gate)
+    /// <summary>
+    /// Arms a one-shot block at <paramref name="gate"/>. Without
+    /// <paramref name="match"/> the next participant to reach the gate is
+    /// held; with it, only a participant whose id satisfies the predicate
+    /// engages the block — unrelated launches (background event dispatch,
+    /// concurrently running specs) pass through. The gate fires after the
+    /// participant's own grain call, so the participant id is the durable
+    /// key of that call (session id, job key, or edge id) and can be
+    /// predicted by the arming test.
+    /// </summary>
+    public void BlockNext(LaunchParticipantGate gate, Func<string, bool>? match = null)
     {
         _entered[gate] = NewSignal();
         _blocked[gate] = NewSignal();
+        if (match is null)
+            _blockMatchers.TryRemove(gate, out _);
+        else
+            _blockMatchers[gate] = match;
     }
 
     public Task WaitUntilBlockedAsync(LaunchParticipantGate gate) =>
@@ -72,6 +88,7 @@ public sealed class AgentLaunchParticipantProbe : IAgentLaunchParticipantProbe
 
     public void ReleaseBlocked(LaunchParticipantGate gate)
     {
+        _blockMatchers.TryRemove(gate, out _);
         if (_blocked.TryRemove(gate, out var blocked))
             blocked.TrySetResult();
         _entered.TryRemove(gate, out _);
@@ -122,7 +139,8 @@ public sealed class AgentLaunchParticipantProbe : IAgentLaunchParticipantProbe
     {
         _participantIds.GetOrAdd(gate, _ => new()).Enqueue(participantId);
         _commandIds.GetOrAdd(gate, _ => new()).Enqueue(commandId);
-        if (_blocked.TryGetValue(gate, out var blocked))
+        if (_blocked.TryGetValue(gate, out var blocked)
+            && (!_blockMatchers.TryGetValue(gate, out var match) || match(participantId)))
         {
             _entered.GetOrAdd(gate, _ => NewSignal()).TrySetResult();
             await blocked.Task;
