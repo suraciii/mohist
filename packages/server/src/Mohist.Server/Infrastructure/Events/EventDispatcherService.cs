@@ -42,11 +42,12 @@ public sealed class EventDispatcherService : IEventDispatcher, IDisposable
     /// process owners are invisible here and stay covered by lease
     /// expiry. Registrations live only inside ClaimAndDrainOneAsync, so a
     /// draining caller never holds one and concurrent drains cannot wait
-    /// on each other forever.
+    /// on each other forever. The pulse is task-based, never clock-based:
+    /// test hosts run fake clocks that do not advance on their own.
     /// </summary>
+    private readonly object _claimsGate = new();
     private readonly System.Collections.Concurrent.ConcurrentDictionary<string, byte> _activeClaims = [];
-
-    private static readonly TimeSpan s_barrierWaitStep = TimeSpan.FromMilliseconds(20);
+    private TaskCompletionSource _claimsIdle = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
     public EventDispatcherService(
         IEventStore events,
@@ -107,14 +108,24 @@ public sealed class EventDispatcherService : IEventDispatcher, IDisposable
     /// </summary>
     public async Task<bool> ClaimAndDrainOneAsync(string owner, CancellationToken ct = default)
     {
-        _activeClaims.TryAdd(owner, 0);
+        lock (_claimsGate)
+        {
+            if (_activeClaims.IsEmpty)
+                _claimsIdle = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            _activeClaims.TryAdd(owner, 0);
+        }
         try
         {
             return await ClaimAndDrainOneCoreAsync(owner, ct).ConfigureAwait(false);
         }
         finally
         {
-            _activeClaims.TryRemove(owner, out _);
+            lock (_claimsGate)
+            {
+                _activeClaims.TryRemove(owner, out _);
+                if (_activeClaims.IsEmpty)
+                    _claimsIdle.TrySetResult();
+            }
         }
     }
 
@@ -158,17 +169,15 @@ public sealed class EventDispatcherService : IEventDispatcher, IDisposable
         {
             if (await ClaimAndDrainOneAsync(owner, ct).ConfigureAwait(false))
                 continue;
-            if (_activeClaims.IsEmpty)
-                break;
-            await BarrierDelayAsync(ct).ConfigureAwait(false);
+            Task idle;
+            lock (_claimsGate)
+            {
+                if (_activeClaims.IsEmpty)
+                    break;
+                idle = _claimsIdle.Task;
+            }
+            await idle.WaitAsync(ct).ConfigureAwait(false);
         }
-    }
-
-    private Task BarrierDelayAsync(CancellationToken ct)
-    {
-        var tcs = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        using var timer = _time.CreateTimer(_ => tcs.TrySetResult(), null, s_barrierWaitStep, TimeSpan.FromMilliseconds(-1));
-        return tcs.Task.WaitAsync(ct);
     }
 
     public async Task<DeadLetterRedeliveryResult> RedeliverAsync(long deadLetterId, CancellationToken ct = default)
