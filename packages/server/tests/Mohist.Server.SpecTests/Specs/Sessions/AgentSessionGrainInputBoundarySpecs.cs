@@ -88,6 +88,42 @@ public class AgentSessionGrainInputBoundaryPersistSuccessSpecs : AgentSessionGra
     }
 
     [Fact]
+    public async Task AppendRuntimeEvents_AttributionFreeWorkflowBatch_RejectsNonActivityWithoutTurnBinding()
+    {
+        var grain = await OpenBoundGrainAsync(
+            metadata: new AgentSessionMetadata()
+                .WithLabel(AgentSessionQueryMetadataKeys.ProjectId, "project-1")
+                .WithLabel(AgentSessionQueryMetadataKeys.SourceKind, "workflow")
+                .WithLabel(AgentSessionQueryMetadataKeys.WorkflowRunId, "workflow-1")
+                .WithLabel(AgentSessionQueryMetadataKeys.SessionName, "build"));
+        var before = await grain.GetAsync();
+        var saveCount = Fixture.StateStore.SaveCount;
+        var flushCount = Fixture.TranscriptStore.Flushes.Count;
+        var observationCount = Fixture.SessionWork.Observations.Count;
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() => grain.AppendRuntimeEventsAsync(
+            new AppendAgentSessionRuntimeEventsCommand(
+                new List<AgentSessionRuntimeEventInput>
+                {
+                    new("message.delta", "{\"text\":\"unattributed\"}"),
+                },
+                "runtime-1")));
+        await Assert.ThrowsAsync<InvalidOperationException>(() => grain.AppendRuntimeEventsAsync(
+            new AppendAgentSessionRuntimeEventsCommand(
+                new List<AgentSessionRuntimeEventInput>
+                {
+                    new(RuntimeEventTypes.SessionActivity, "{\"activity\":\"active\"}"),
+                    new("message.delta", "{\"text\":\"mixed\"}"),
+                },
+                "runtime-1")));
+
+        Assert.Equal(saveCount, Fixture.StateStore.SaveCount);
+        Assert.Equal(before, await grain.GetAsync());
+        Assert.Equal(flushCount, Fixture.TranscriptStore.Flushes.Count);
+        Assert.Equal(observationCount, Fixture.SessionWork.Observations.Count);
+    }
+
+    [Fact]
     public async Task AppendRuntimeEvents_AttributionFreeWorkflowBatch_RejectsNonActivityAfterTurnBinding()
     {
         var grain = await OpenBoundGrainAsync(

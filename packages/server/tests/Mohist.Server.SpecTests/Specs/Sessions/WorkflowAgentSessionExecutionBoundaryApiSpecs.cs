@@ -101,6 +101,38 @@ public sealed class WorkflowAgentSessionExecutionBoundaryApiSpecs : AgentSession
     }
 
     [Fact]
+    public async Task SessionRuntimeEvents_UnattributedNonActivityAndMixedBatch_FailClosedWithoutTurnBinding()
+    {
+        var (_, _, _, session) = await CreateStartedAgentSessionAsync("session-activity-boundary-no-turn");
+        var grain = _fixture.Grains.GetGrain<IAgentSessionGrain>(session.Id);
+        var before = await grain.GetAsync();
+
+        using var nonActivity = await _client.PostAsJsonAsync(RunnerSessionRuntimeEventsPath(session), new
+        {
+            runtimeSessionId = session.Id,
+            runtimeEvents = new[]
+            {
+                new { type = RuntimeEventTypes.MessageDelta, payload = new { text = "unattributed" } }
+            }
+        });
+        Assert.Equal(HttpStatusCode.Conflict, nonActivity.StatusCode);
+
+        using var mixed = await _client.PostAsJsonAsync(RunnerSessionRuntimeEventsPath(session), new
+        {
+            runtimeSessionId = session.Id,
+            runtimeEvents = new object[]
+            {
+                new { type = RuntimeEventTypes.SessionActivity, payload = new { activity = "active" } },
+                new { type = RuntimeEventTypes.MessageDelta, payload = new { text = "mixed" } }
+            }
+        });
+        Assert.Equal(HttpStatusCode.Conflict, mixed.StatusCode);
+
+        Assert.Equal(before, await grain.GetAsync());
+        Assert.Empty(await grain.ListTurnsAsync());
+    }
+
+    [Fact]
     public async Task SessionRuntimeEvents_UnattributedNonActivityAndMixedBatch_FailClosedAfterTurnBinding()
     {
         var (_, _, work, session) = await CreateStartedAgentSessionAsync("session-activity-boundary");

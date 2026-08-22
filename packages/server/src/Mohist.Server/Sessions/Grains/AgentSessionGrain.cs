@@ -1687,30 +1687,24 @@ public sealed partial class AgentSessionGrain : Grain, IAgentSessionGrain, IRemi
             throw new InvalidOperationException("Runtime events cannot carry both Workflow execution and Session turn identity.");
 
         var isUnattributed = command.WorkflowExecution is null && command.SessionTurnId is null;
-        // Runner reconnect observations are pure session.activity batches whose
-        // payload source is "runner-reconnect" (BindingConvergence). They are
-        // status observations, not workflow-attributed facts, so they are
-        // accepted on the current runtime binding even for workflow sessions;
-        // every other unattributed batch keeps master semantics unchanged.
-        var isReconnectObservationBatch = command.RuntimeEvents.Count > 0
+        var isWorkflowIntroduced = string.Equals(
+            session.Metadata.Label(AgentSessionQueryMetadataKeys.SourceKind),
+            "workflow",
+            StringComparison.Ordinal);
+        var isPureActivityBatch = command.RuntimeEvents.Count > 0
             && command.RuntimeEvents.All(runtimeEvent =>
-                string.Equals(runtimeEvent.Type, RuntimeEventTypes.SessionActivity, StringComparison.Ordinal)
-                && string.Equals(
-                    AgentSessionJsonHelper.GetStringProp(JSON.DeserializeElement(runtimeEvent.PayloadJson), "source"),
-                    "runner-reconnect",
-                    StringComparison.Ordinal));
+                string.Equals(runtimeEvent.Type, RuntimeEventTypes.SessionActivity, StringComparison.Ordinal));
         var isCurrentRuntimeBinding = !string.IsNullOrWhiteSpace(command.RuntimeSessionId)
             && string.Equals(command.RuntimeSessionId, session.Status.AgentRuntimeSessionId, StringComparison.Ordinal);
         var hasWorkflowTurnForRuntime = (session.Status.Turns ?? []).Any(turn =>
             turn.WorkflowExecution is { } binding
             && string.Equals(binding.RuntimeSessionId, command.RuntimeSessionId, StringComparison.Ordinal));
+        if (isWorkflowIntroduced && isUnattributed && isCurrentRuntimeBinding && !isPureActivityBatch)
+            throw new InvalidOperationException("Workflow runtime events require the acknowledged Agent turn binding.");
+
         if (command.SessionTurnId is not null)
             ValidateSessionRuntimeEventTurnIds(session, command.RuntimeEvents, command.SessionTurnId);
-        // Master semantics stay intact for every non-reconnect append: the
-        // strict workflow-identity gate applies only once a turn already
-        // carries an acknowledged workflow binding. Reconnect observations
-        // bypass that gate as session-level status updates.
-        if (hasWorkflowTurnForRuntime && command.SessionTurnId is null && !isReconnectObservationBatch)
+        if (hasWorkflowTurnForRuntime && command.SessionTurnId is null && !isPureActivityBatch)
         {
             if (command.WorkflowExecution is null)
                 throw new InvalidOperationException("Workflow runtime events require the acknowledged Agent turn binding.");
@@ -1727,7 +1721,7 @@ public sealed partial class AgentSessionGrain : Grain, IAgentSessionGrain, IRemi
             command.RuntimeEvents,
             command.RuntimeSessionId,
             requireCurrentRuntimeBinding: true,
-            sessionLevelActivityOnly: isUnattributed && isCurrentRuntimeBinding && isReconnectObservationBatch);
+            sessionLevelActivityOnly: isWorkflowIntroduced && isUnattributed && isCurrentRuntimeBinding && isPureActivityBatch);
         if (command.WorkflowExecution is { } binding)
         {
             var observations = BuildWorkflowRuntimeObservations(command.RuntimeEvents);
