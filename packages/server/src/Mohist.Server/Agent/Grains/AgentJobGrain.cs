@@ -1522,7 +1522,9 @@ public sealed partial class AgentJobGrain : Grain, IAgentJobGrain
             Key,
             obligation,
             extensions,
-            sessionLaunchPrompt);
+            sessionLaunchPrompt,
+            State.Input?.AgentSessionId,
+            State.Input?.InitialTurnId);
     }
 
     private async Task UnregisterSelfAsync(string reminderName)

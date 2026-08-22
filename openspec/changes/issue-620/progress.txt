@@ -14,8 +14,14 @@
 - Verification: server, UnitTests, and SpecTests projects build; dotnet test executed the full UnitTests (3787) and full SpecTests (3042) successfully. MTP reports the VSTest filter is ignored, so the runs were full suites.
 
 ## T-002 decisions
-
 - Thread retry accepts a fresh follow-up with `agent-retry:{operationId}`, the operation receipt's pre-minted input/turn ids, the failed input's text/source/provenance, and `ForceNewTurn=true`; this prevents the Session's normal queued-turn coalescing from merging the retry into an unrelated queued turn.
 - `BeginFollowupDispatchForTurnAsync(turnId)` shares the existing follow-up dispatch body and guards with `BeginNextFollowupDispatchAsync`; it only changes turn selection. The retry calls the common follow-up dispatcher with the target turn. A busy Session returns no dispatch and leaves the accepted retry queued for the ordinary scheduler.
 - Targeted-dispatch specs cover unrelated queued turns, the launch-turn guard, busy-session scheduler order, pre-minted identities, Slack provenance, failed-turn immutability, and pending-operation replay/idempotency.
 - Verification: server build with `-p:SkipWebBuild=true` and focused T-002/related SpecTests passed (3048 total because the Microsoft Testing Platform ignores VSTest filters).
+
+## T-003 work
+- Extracted Slack HMAC signing/key loading and constant-time verification into `SlackActionSigningHelper` behind `ISlackActionSigner`; Stop canonicalization and observable behavior remain unchanged.
+- Added `SlackRetryActionService.CreateRetryActionAsync` and v1 `retry` payload/action with initiator-bound operator, conversation/message/thread identity, nonce, five-minute expiry, and signed Retry Block Kit button. Missing signing material returns no action.
+- Added additive `sessionId`/`turnId` fields to terminal delivery envelopes. Initial AgentJob terminal envelopes populate them from the durable input; follow-up envelopes populate them from the session/turn and now forward `turn.Result.FailureReason`/`FailureCategory`.
+- Terminal delivery presentation uses the single `AgentSessionRetryPolicy`; only ordinary failed deliveries with retryable categories and resolvable durable facts attempt an explicit failure notice with Retry blocks. Manager, nonretryable/absent facts, and non-failure deliveries retain reaction-only finalization. If action creation cannot sign, it falls back to reaction-only.
+- Verification: server build (`-p:SkipWebBuild=true`), full UnitTests (3793), and full SpecTests (3048) pass. Added UnitTests for exact canonical signing, tamper/missing payload fields, and unavailable signing material.

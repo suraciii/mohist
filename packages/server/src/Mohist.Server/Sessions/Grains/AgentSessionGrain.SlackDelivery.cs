@@ -43,6 +43,8 @@ public sealed partial class AgentSessionGrain
         var delivery = new
         {
             jobKey = $"agent-session-followup:{session.Id}:{turn.Id}",
+            sessionId = session.Id,
+            turnId = turn.Id,
             workLabel = !string.IsNullOrWhiteSpace(title) ? title : "Follow-up",
             connectionId,
             workspaceTeamId,
@@ -52,8 +54,8 @@ public sealed partial class AgentSessionGrain
             messageTs,
             status,
             message = turn.Result?.Message,
-            failureReason = (string?)null,
-            failureCategory = (string?)null,
+            failureReason = turn.Result?.FailureReason,
+            failureCategory = turn.Result?.FailureCategory,
             artifactCount = 0,
             exitCode = (int?)null,
             assistantText = string.Equals(projectId, SlackDeliveryOwnerIds.ManagerProjectId, StringComparison.Ordinal)
