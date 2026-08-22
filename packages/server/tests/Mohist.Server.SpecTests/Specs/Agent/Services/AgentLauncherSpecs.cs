@@ -813,7 +813,7 @@ public class AgentLauncherSpecs
         Assert.Equal(sourceSettings.AgentSessionStartup!.ProjectId, retriedRecord.Session.Settings.AgentSessionStartup!.ProjectId);
         Assert.Equal(retry.SessionId, retriedRecord.Session.Settings.AgentSessionStartup.SessionId);
         Assert.Equal(sourceSettings.AgentSessionStartup.AllowedSubagents, retriedRecord.Session.Settings.AgentSessionStartup.AllowedSubagents);
-        Assert.Equal(sourceSettings.AgentSessionStartup.SpawnCommand, retriedRecord.Session.Settings.AgentSessionStartup.SpawnCommand);
+        Assert.Contains($"--parent-session {retry.SessionId}", retriedRecord.Session.Settings.AgentSessionStartup.SpawnCommand, StringComparison.Ordinal);
         Assert.Equal(sourceInitial.Input!.Attachments, retried!.Input!.Attachments);
         Assert.Equal(sourceInitial.Input.StartupContext, retried.Input.StartupContext);
         Assert.Equal(sourceInitial.Input.Text, retried.Input.Text);
