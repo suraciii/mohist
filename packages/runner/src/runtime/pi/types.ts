@@ -154,21 +154,14 @@ export interface PiFollowupRequest {
 export interface PiFollowupFacts {
   readonly runtimeSessionId: string
   readonly workDir: string
-  readonly finalAssistantText?: string | null
-  /**
-   * Present for an un-signalled user follow-up. It settles only after the
-   * admitted Pi turn reaches its terminal state and its projected events
-   * have been reconciled. The promise is Runner-internal and is never sent
-   * across the Server boundary.
-   */
-  readonly completion?: Promise<PiFollowupResult>
 }
 
 /**
- * Result of a Follow-up. Without a signal, Pi resolves this result at
- * admission and carries a completion handle in the success facts. With a
- * signal, runtime callers receive the terminal result directly so bounded
- * internal advisories can be interrupted.
+ * Result of a Follow-up. The Follow-up resolves to a success only once
+ * the runtime has either injected into the running turn (`steer`) or
+ * received `preflight(true)` from the SDK (`prompt`); a preflight
+ * rejection on the idle path means the Follow-up is reported as a
+ * command failure without automatic retry — see `PiResult<PiFollowupFacts>`.
  */
 export type PiFollowupResult = PiResult<PiFollowupFacts>
 

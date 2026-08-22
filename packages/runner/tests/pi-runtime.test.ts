@@ -413,35 +413,9 @@ describe('PiRuntime', () => {
       ok: true,
       value: { runtimeSessionId: '/virtual/sessions/one.jsonl', workDir: '/workspace' },
     })
-    if (!result.ok) throw new Error('expected admission success')
-    expect(result.value.completion).toBeInstanceOf(Promise)
-    let completed = false
-    void result.value.completion?.then(() => {
-      completed = true
-    })
-    await new Promise<void>((resolve) => setImmediate(resolve))
-    expect(completed).toBe(false)
     expect(session.steerCalls).toEqual(['additional guidance'])
     expect(session.promptCalls).toEqual([])
     expect(events).toEqual([])
-    session.emit({
-      type: 'tool_execution_start',
-      toolCallId: 'reply-after-steer',
-      toolName: 'bash',
-      args: { command: 'mo slack message send --conversation C1 --reply-to T1 --text done' },
-    })
-    expect(events).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({
-          type: 'tool_call.started',
-          payload: expect.objectContaining({ toolCallId: 'reply-after-steer' }),
-        }),
-      ]),
-    )
-    session.complete('steered result')
-    session.isStreaming = false
-    await result.value.completion
-    expect(completed).toBe(true)
   })
 
   it('followup starts a new turn when idle and resolves once Pi confirms reception', async () => {
@@ -466,17 +440,8 @@ describe('PiRuntime', () => {
       ok: true,
       value: { runtimeSessionId: '/virtual/sessions/one.jsonl', workDir: '/workspace' },
     })
-    if (!accepted.ok) throw new Error('expected admission success')
-    expect(accepted.value.completion).toBeInstanceOf(Promise)
-    let terminal: unknown
-    void accepted.value.completion?.then((result) => {
-      terminal = result
-    })
-    await new Promise<void>((resolve) => setImmediate(resolve))
-    expect(terminal).toBeUndefined()
     session.complete('done')
-    await accepted.value.completion
-    expect(terminal).toMatchObject({ ok: true, value: { finalAssistantText: 'done' } })
+    await new Promise<void>((resolve) => setImmediate(resolve))
     expect(session.pendingPrompts()).toBe(0)
   })
 

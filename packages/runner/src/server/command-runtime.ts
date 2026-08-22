@@ -130,21 +130,6 @@ export type FollowupCallResult = RuntimeResult<RuntimeFollowupResult> | PiResult
 
 export type CancelCallResult = RuntimeResult<RuntimeCancelResult> | PiResult<PiCancelFacts>
 
-/**
- * Pi user follow-ups resolve at admission and carry their real terminal
- * promise in the success facts. Internal callers that pass a signal already
- * receive a terminal result and therefore have no completion handle.
- */
-export async function awaitFollowupCompletion(
-  handle: CommandRuntimeHandle,
-  result: FollowupCallResult,
-): Promise<FollowupCallResult> {
-  if (handle.kind !== 'pi' || !result.ok) return result
-  const value = result.value as PiFollowupFacts
-  if (!value.completion) return result
-  return await value.completion
-}
-
 export function callFollowup(
   handle: CommandRuntimeHandle,
   request: FollowupCallRequest,
