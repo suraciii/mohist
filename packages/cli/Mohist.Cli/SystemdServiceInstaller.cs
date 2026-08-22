@@ -96,7 +96,7 @@ internal sealed class SystemdServiceInstaller : IServiceInstaller, IManagedRunti
             Name: SlackUnit,
             Description: "Mohist Slack adapter",
             WorkingDirectory: repoRoot,
-            ExecStart: $"{ResolveExecutable("node")} packages/mohist-slack/dist/cli.js",
+            ExecStart: $"{Path.Combine(repoRoot, "packages/go/mohist-slack/bin/mohist-slack")}",
             Environment: environment,
             LoadCredentials: loadCredentials);
         return await InstallAsync(unit, options);

@@ -77,7 +77,7 @@ public class InstallSpecs
 
         Assert.Equal(0, exitCode);
         var unitContent = files.Read("/units/mohist-slack.service");
-        Assert.Contains("ExecStart=node packages/mohist-slack/dist/cli.js", unitContent);
+        Assert.Contains("ExecStart=/repo/packages/go/mohist-slack/bin/mohist-slack", unitContent);
         Assert.Contains("Restart=on-failure", unitContent);
         Assert.Contains("Environment=\"SERVER_URL=http://127.0.0.1:4567\"", unitContent);
         Assert.Contains("Environment=\"MOHIST_OPERATOR_TOKEN=operator-token-for-test\"", unitContent);

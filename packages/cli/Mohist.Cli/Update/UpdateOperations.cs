@@ -233,10 +233,13 @@ internal sealed class UpdateOperations
     {
         var root = ResolveRepoRoot(repoRoot);
         _out.WriteLine($"Updating Slack adapter from source: {root}");
+        var adapterDir = Path.Combine(root, "packages", "go", "mohist-slack");
+        var binaryName = OperatingSystem.IsWindows() ? "mohist-slack.exe" : "mohist-slack";
+        var binary = Path.Combine("bin", binaryName);
         if (dryRun)
         {
             _out.WriteLine("Dry run: would execute:");
-            _out.WriteLine($"  cd {root} && npm run build -w packages/mohist-slack");
+            _out.WriteLine($"  cd {adapterDir} && go build -o {binary} ./cmd/mohist-slack");
             _out.WriteLine("  mo service restart slack (if installed)");
             return 0;
         }
@@ -248,7 +251,7 @@ internal sealed class UpdateOperations
         }
 
         var (build, buildOut, buildErr) = await _commandExecutor.ExecuteAsync(
-            "npm", ["run", "build", "-w", "packages/mohist-slack"], root, cancellationToken);
+            "go", ["build", "-o", binary, "./cmd/mohist-slack"], adapterDir, cancellationToken);
         if (build != 0)
         {
             WriteCommandFailureOutput(buildOut, buildErr);
