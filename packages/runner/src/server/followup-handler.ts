@@ -37,7 +37,6 @@ import {
 } from './session-target.js'
 import type { AgentSessionRuntimeEventOutbox, RuntimeEventRecord } from './runtime-event-outbox.js'
 import {
-  awaitFollowupCompletion,
   callFollowup,
   ensureCommandRuntimeReady,
   resolveCommandRuntime,
@@ -371,17 +370,11 @@ async function handleFollowup(
   let terminalFinalized = false
   try {
     const completion = callFollowup(handle, followupRequest, observerState.observer).then(
-      async (admission) => {
-        const guardEligible = handle.kind === "opencode" || admission.ok
-        const result = await awaitFollowupCompletion(handle, admission)
-        return { guardEligible, result }
-      },
-    ).then(
-      async ({ guardEligible, result }) => {
+      async (result) => {
         if (terminalFinalized) return
         terminalFinalized = true
         const observerError = await observerState.flush()
-        if (guardEligible) {
+        if (handle.kind === 'opencode' && !managerExecution?.hasExpired()) {
           try {
             await evaluateFollowupReplyGuard({
               handle,
@@ -391,7 +384,7 @@ async function handleFollowup(
               managerExecution,
             })
           } catch (error) {
-            log.error("followup reply guard failed", { exception: error, session: selectedTarget.runtimeSessionId })
+            log.error('followup reply guard failed', { exception: error, session: selectedTarget.runtimeSessionId })
           }
         }
         if (!result.ok) {
@@ -552,7 +545,6 @@ function replyGuardAdvisoryResult(errorKind: string): ReplyGuardAdvisoryResult {
   if (errorKind === 'unavailable-runtime') return { kind: 'unavailable' }
   if (errorKind === 'interrupted' || errorKind === 'deadline-exceeded') return { kind: 'interrupted' }
   return { kind: 'failed' }
-}
 }
 
 function sessionTargetKey(target: SessionTarget): string {

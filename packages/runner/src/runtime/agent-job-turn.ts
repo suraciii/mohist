@@ -19,11 +19,7 @@ import type { ResolvedSkill } from './skill-resolver.js'
 import { runnerLogger } from '../system/logger.js'
 import type { DeliveredAttachment } from './attachment-delivery.js'
 import type { ManagerExecutionBoundary } from './manager-execution-boundary.js'
-import {
-  ReplyActionObservationTracker,
-  ReplyGuardCoordinator,
-  type ReplyGuardAdvisoryResult,
-} from './reply-guard.js'
+import { ReplyActionObservationTracker, ReplyGuardCoordinator, type ReplyGuardAdvisoryResult } from './reply-guard.js'
 import type {
   AgentJobExecutorOptions,
   AgentJobRuntimeAccessors,
@@ -233,7 +229,7 @@ export async function executeOpenCodeTurn(
     : redactManagerResult(projectTurnToWorkItemResult(result, 'opencode', modelInput, variant), managerExecution)
   return await evaluateInitialReplyGuard({
     runtime: runtimeHandle,
-    runtimeSessionId: result.ok ? result.value.facts.runtimeSessionId : attachedRuntimeSessionId ?? selected,
+    runtimeSessionId: result.ok ? result.value.facts.runtimeSessionId : (attachedRuntimeSessionId ?? selected),
     workDir,
     payload,
     signal,
@@ -447,23 +443,24 @@ async function evaluateInitialReplyGuard(args: {
     observation: args.observation,
     signal: args.signal,
     runAdvisory: async (request) => {
-      const observer: RuntimeTurnObserver | PiTurnObserver = args.runtime.kind === 'opencode'
-        ? {
-            onEvent: (event: RuntimeTurnEvent) =>
-              args.eventSink.observeEvent(
-                args.managerExecution
-                  ? { ...event, payload: args.managerExecution.redact(event.payload) as Record<string, unknown> }
-                  : event,
-              ),
-          }
-        : {
-            onEvent: (event: PiRuntimeEvent) =>
-              args.eventSink.observePiEvent(
-                args.managerExecution
-                  ? { ...event, payload: args.managerExecution.redact(event.payload) as Record<string, unknown> }
-                  : event,
-              ),
-          }
+      const observer: RuntimeTurnObserver | PiTurnObserver =
+        args.runtime.kind === 'opencode'
+          ? {
+              onEvent: (event: RuntimeTurnEvent) =>
+                args.eventSink.observeEvent(
+                  args.managerExecution
+                    ? { ...event, payload: args.managerExecution.redact(event.payload) as Record<string, unknown> }
+                    : event,
+                ),
+            }
+          : {
+              onEvent: (event: PiRuntimeEvent) =>
+                args.eventSink.observePiEvent(
+                  args.managerExecution
+                    ? { ...event, payload: args.managerExecution.redact(event.payload) as Record<string, unknown> }
+                    : event,
+                ),
+            }
       const result = await callFollowup(
         args.runtime,
         {
@@ -491,7 +488,6 @@ function replyGuardAdvisoryResult(errorKind: string): ReplyGuardAdvisoryResult {
   if (errorKind === 'unavailable-runtime') return { kind: 'unavailable' }
   if (errorKind === 'interrupted' || errorKind === 'deadline-exceeded') return { kind: 'interrupted' }
   return { kind: 'failed' }
-}
 }
 
 async function runWithModelRetry<T extends ModelTurnResult>(
