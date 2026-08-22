@@ -92,3 +92,24 @@ not edited; the next self-review regenerates it.
   Node adapter tests pass (85). The Go toolchain is not installed, so Go tests
   remain unavailable. No schema migration was added; Disabled claim/discard
   semantics remain unchanged.
+
+## Re-review implementation notes
+
+- MF-1: wired the cross-component bridge build into the Slack application build
+  commands, added .NET setup/restore to the Slack CI job, and included the bridge
+  project in `Mohist.Server.Tests.slnf` so the normal clean-checkout paths build
+  the ignored runtime output before the test starts.
+- MF-2: expanded the real Server-route/real Node-handler harness with channel-root
+  and unbound-thread events. Each case asserts the correct durable reply anchor,
+  one delivered UserAction nudge, no direct adapter rejection, and zero inbox,
+  session, and job side effects; the adapter-owned backpressure case retains its
+  one direct post and zero durable/execution side effects.
+- Re-review verification: after deleting ignored `dist`, `bin`, and `obj` outputs,
+  `TMPDIR=/tmp/mohist-issue-619-clean-2 npm run test:app -- slack` rebuilt both
+  outputs and passed all 87 Slack tests. The cross-component suite now has a
+  30-second suite timeout because its real bridge startup is intentionally slower
+  than Vitest's default 5-second test timeout. `dotnet build
+  Mohist.Server.Tests.slnf --no-restore -p:SkipWebBuild=true`, Node test typecheck,
+  and script typecheck pass. Full `npm run verify` reaches the repository checks
+  but remains blocked by the pre-existing format debt in four other Slack files;
+  the review classified that as an observation, not a must-fix.

@@ -48,7 +48,8 @@
         { "command": "npm", "args": ["run", "build", "-w", "packages/runner"] }
       ],
       "slack": [
-        { "command": "npm", "args": ["run", "build", "-w", "packages/mohist-slack"] }
+        { "command": "npm", "args": ["run", "build", "-w", "packages/mohist-slack"] },
+        { "command": "dotnet", "args": ["build", "packages/server/tests/Mohist.Server.CrossComponentBridge/Mohist.Server.CrossComponentBridge.csproj", "-p:SkipWebBuild=true"] }
       ]
     },
     "repositoryChecks": [

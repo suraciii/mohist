@@ -181,6 +181,10 @@ async Task WriteSnapshotAsync()
         .ToListAsync();
     var inbox = await db.SlackProviderInboxRows.AsNoTracking()
         .CountAsync(row => row.ConnectionId == connectionId);
+    var sessions = await db.AgentSessions.AsNoTracking()
+        .CountAsync(row => row.LabelConnectionId == connectionId);
+    var jobs = await db.AgentJobs.AsNoTracking()
+        .CountAsync(row => row.ProjectId == projectId);
     Write(new
     {
         type = "snapshot",
@@ -188,6 +192,8 @@ async Task WriteSnapshotAsync()
         nudgeCount = rows.Count(row => row.Kind == SlackOutboxKinds.UserAction),
         deliveredNudgeCount = rows.Count(row => row.Kind == SlackOutboxKinds.UserAction && row.State == SlackOutboxStates.Delivered),
         inboxCount = inbox,
+        sessionCount = sessions,
+        jobCount = jobs,
     });
 }
 

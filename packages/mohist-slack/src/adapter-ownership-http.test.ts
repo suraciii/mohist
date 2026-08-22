@@ -18,6 +18,8 @@ interface BridgeMessage {
   readonly nudgeCount?: number
   readonly deliveredNudgeCount?: number
   readonly inboxCount?: number
+  readonly sessionCount?: number
+  readonly jobCount?: number
 }
 
 interface Bridge {
@@ -43,6 +45,29 @@ const event = {
   },
 }
 
+const channelRootEvent = {
+  ...event,
+  event: {
+    ...event.event,
+    channel: 'C-root',
+    channel_type: 'channel',
+    ts: '1710000000.000010',
+    text: '<@U-cross-component> please help',
+  },
+}
+
+const unboundThreadEvent = {
+  ...event,
+  event: {
+    ...event.event,
+    channel: 'C-thread',
+    channel_type: 'channel',
+    ts: '1710000000.000021',
+    thread_ts: '1710000000.000020',
+    text: '<@U-cross-component> please help',
+  },
+}
+
 function startBridge(command: string, args: readonly string[] = []): Bridge {
   const child = spawn(command, args, { stdio: ['pipe', 'pipe', 'pipe'] })
   const lines = createInterface({ input: child.stdout })
@@ -65,11 +90,18 @@ function startBridge(command: string, args: readonly string[] = []): Bridge {
 }
 
 function startServerBridge(): Bridge {
-  return startBridge('dotnet', [resolve(repoRoot, 'packages/server/tests/Mohist.Server.CrossComponentBridge/bin/Debug/net11.0/Mohist.Server.CrossComponentBridge.dll')])
+  return startBridge('dotnet', [
+    resolve(
+      repoRoot,
+      'packages/server/tests/Mohist.Server.CrossComponentBridge/bin/Debug/net11.0/Mohist.Server.CrossComponentBridge.dll',
+    ),
+  ])
 }
 
 function startNodeBridge(): Bridge {
-  return startBridge(process.execPath, [resolve(repoRoot, 'packages/mohist-slack/dist/cross-component-ownership-bridge.js')])
+  return startBridge(process.execPath, [
+    resolve(repoRoot, 'packages/mohist-slack/dist/cross-component-ownership-bridge.js'),
+  ])
 }
 
 async function nextMessage(messages: AsyncGenerator<BridgeMessage, void, void>): Promise<BridgeMessage> {
@@ -130,23 +162,66 @@ async function closeBoth(node: Bridge, server: Bridge): Promise<void> {
   await server.close()
 }
 
-describe('Server ingress and Node adapter ownership boundary', () => {
+async function expectServerOwnedNudge(
+  node: Bridge,
+  server: Bridge,
+  body: unknown,
+  post: Record<string, unknown>,
+): Promise<void> {
+  const result = await runEvent(node, server, body)
+  const snapshot = await inspectServer(server)
+
+  expect(result.acknowledged).toBe(true)
+  expect(result.acknowledgementCount).toBe(1)
+  expect(result.posted).toEqual([post])
+  expect(snapshot.outboxCount).toBe(1)
+  expect(snapshot.nudgeCount).toBe(1)
+  expect(snapshot.deliveredNudgeCount).toBe(1)
+  expect(snapshot.inboxCount).toBe(0)
+  expect(snapshot.sessionCount).toBe(0)
+  expect(snapshot.jobCount).toBe(0)
+}
+
+describe('Server ingress and Node adapter ownership boundary', { timeout: 30_000 }, () => {
   it('passes a real Server ingress response through the real adapter and drains one durable nudge without a direct post', async () => {
     const { node, server } = await startBoth()
     try {
       await setServerScenario(server, 'server-owned')
-      const result = await runEvent(node, server, event)
-      const snapshot = await inspectServer(server)
+      await expectServerOwnedNudge(node, server, event, {
+        channel: 'D1',
+        text: expect.any(String),
+        client_msg_id: expect.stringContaining('slack-admission-nudge:'),
+      })
+    } finally {
+      await closeBoth(node, server)
+    }
+  })
 
-      expect(result.acknowledged).toBe(true)
-      expect(result.acknowledgementCount).toBe(1)
-      expect(result.posted).toEqual([
-        { channel: 'D1', text: expect.any(String), client_msg_id: expect.stringContaining('slack-admission-nudge:') },
-      ])
-      expect(snapshot.outboxCount).toBe(1)
-      expect(snapshot.nudgeCount).toBe(1)
-      expect(snapshot.deliveredNudgeCount).toBe(1)
-      expect(snapshot.inboxCount).toBe(0)
+  it('passes a real Server channel-root response through the real adapter with one anchored durable nudge and no execution side effects', async () => {
+    const { node, server } = await startBoth()
+    try {
+      await setServerScenario(server, 'server-owned')
+      await expectServerOwnedNudge(node, server, channelRootEvent, {
+        channel: 'C-root',
+        text: expect.any(String),
+        thread_ts: '1710000000.000010',
+        client_msg_id: expect.stringContaining('slack-admission-nudge:'),
+      })
+    } finally {
+      await closeBoth(node, server)
+    }
+  })
+
+  it('passes a real Server unbound-thread response through the real adapter with one incoming-thread durable nudge and no execution side effects', async () => {
+    const { node, server } = await startBoth()
+    try {
+      await setServerScenario(server, 'server-owned')
+      await expectServerOwnedNudge(node, server, unboundThreadEvent, {
+        channel: 'C-thread',
+        text: expect.any(String),
+        thread_ts: '1710000000.000020',
+        client_msg_id: expect.stringContaining('slack-admission-nudge:'),
+      })
     } finally {
       await closeBoth(node, server)
     }
@@ -161,10 +236,14 @@ describe('Server ingress and Node adapter ownership boundary', () => {
 
       expect(result.acknowledged).toBe(true)
       expect(result.acknowledgementCount).toBe(1)
-      expect(result.posted).toEqual([{ channel: 'D1', text: 'This Slack Connection is temporarily busy. Please retry shortly.' }])
+      expect(result.posted).toEqual([
+        { channel: 'D1', text: 'This Slack Connection is temporarily busy. Please retry shortly.' },
+      ])
       expect(snapshot.nudgeCount).toBe(0)
       expect(snapshot.outboxCount).toBe(0)
       expect(snapshot.inboxCount).toBe(0)
+      expect(snapshot.sessionCount).toBe(0)
+      expect(snapshot.jobCount).toBe(0)
     } finally {
       await closeBoth(node, server)
     }
