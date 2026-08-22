@@ -57,8 +57,10 @@ must be an exact allowlist, never text heuristics.
 
 - Multi-Bot interaction selection (issue #634); stale draft PR #635 is not
   reused.
-- Automatic retry / backoff policies; changing what failure facts AgentJob or
-  Session reconciliation records.
+- Automatic retry / backoff policies; changing what failure facts AgentJob
+  reconciliation records. (Reporting the runtime error kind as
+  `failureCategory` on terminal follow-up events *is* in scope — thread
+  retryability needs that fact at the source; see Decision 3 / T-007.)
 - Manager DM conversations (`SlackDeliveryOwnerIds.ManagerProjectId`): their
   terminal presentation stays reaction-only; no Retry button there (see Open
   Questions).
@@ -70,15 +72,55 @@ must be an exact allowlist, never text heuristics.
 
 ## Decisions
 
-### 1. One classifier, placed with the retry service
+### 1. One classifier over the recorded vocabulary, placed with the retry service
 
 A static `AgentSessionRetryPolicy.IsRetryable(string? category)` holds the
-allowlist: `runner-unavailable`, `runner-lost`, `report-timeout`, `deadline`,
-`timeout`, `probe-timeout`, `runtime-transport-unavailable`, `rate-limited`,
-`retry-safe`. Exact ordinal comparison; absent, empty, or unknown values are
-not retryable. It lives next to the retry application service (Agent/Sessions
+allowlist. Exact ordinal comparison; absent, empty, or unknown values are not
+retryable. It lives next to the retry application service (Agent/Sessions
 services), not in the Slack folder, because both the Slack presentation and the
 provider-agnostic acceptance path consume it.
+
+The allowlist is defined over the failure-category vocabulary the system
+actually records — not an invented parallel vocabulary — so every transient
+class the issue names has a token a real producer emits:
+
+| Allowlist token | Recorded by | Issue family |
+| --- | --- | --- |
+| `runner-unavailable` | Server reconciliation (`AgentJobFailureReasons.RunnerUnavailable`) | runner unavailable |
+| `runner-lost` | Server reconciliation (`AgentJobFailureReasons.RunnerLost`) | runner lost |
+| `report-timeout` | Server reconciliation (`AgentJobFailureReasons.ReportTimeout`) | report timeout |
+| `deadline-exceeded` | Runner OpenCode turn deadline (`RuntimeError` kind, verbatim) | deadline/timeout |
+| `timeout` | Runner Pi deadline, renamed by `mapPiErrorKind('deadline-exceeded')` | deadline/timeout |
+| `generation-drain-timeout` | Runner OpenCode generation drain | deadline/timeout |
+| `unavailable-runtime` | Runner turn-time runtime unavailability (both runtimes) | runtime transport unavailable |
+| `runtime-unavailable` | Runner dispatch preflight — runtime missing or not ready | runtime transport unavailable |
+| `rate-limited` | Reserved — no producer today | rate limited |
+| `probe-timeout` | Reserved — no producer today | probe timeout |
+| `retry-safe` | Reserved explicit opt-in marker — no producer today | explicit retry-safe |
+
+How runner kinds reach the Turn: `AgentJobGrain.FailureCategoryFromErrorCode`
+copies the runner's mapped `RuntimeError` kind verbatim
+(`agent-job-turn.ts`: OpenCode kinds pass through `mapOpenCodeErrorKind`
+unchanged except `unsupported-execution-configuration` →
+`unsupported_execution_configuration`; the Pi path renames `deadline-exceeded`
+→ `timeout` and `missing-session` → `runtime-session-missing` via
+`mapPiErrorKind`, and dispatch preflight records `runtime-unavailable` /
+`incompatible-execution-configuration` directly). Recorded permanent categories
+that stay non-retryable include `invalid-input`, `permission-required`,
+`incompatible-runtime`, `incompatible-execution-configuration`,
+`unsupported_execution_configuration`, `missing-session`,
+`runtime-session-missing`, `conflict`, `interrupted`, `turn-failed`,
+`manager-credential-expired`, `workspace-unavailable`, `context_exhaustion`,
+`context_exhaustion_suspected`, and `unknown`.
+
+`workspace-unavailable` (routed-launch preflight) is deliberately outside the
+allowlist: the issue does not name it and unknown ⇒ not retryable is the safe
+default; admitting it later is a deliberate allowlist change. The classifier
+tests pin the real recorded strings — referencing the
+`AgentJobFailureReasons` constants directly (so a renamed server-side reason
+breaks the test) and the runner kind strings — never the allowlist's own
+re-typed tokens, so vocabulary drift between producers and the allowlist is
+caught by tests instead of silently losing Retry buttons.
 
 *Alternative:* a Slack-local copy — rejected: the spec forbids divergent
 presentation/acceptance copies, and a CLI/Web retry needs the same definition.
@@ -121,8 +163,20 @@ Two payload gaps must close for this to work:
   not — no reverse lookup from jobKey should be needed at render time).
 - `AgentSessionGrain.TryEmitFollowupDeliveryAsync` currently nulls
   `failureReason`/`failureCategory`; it starts populating them from
-  `turn.Result`. Until/unless present, presentation classifies as not
-  retryable (safe default).
+  `turn.Result`. But the root cause is one layer deeper and producer-side:
+  the runner's follow-up terminal events carry only `failureReason`
+  (`followup-handler.ts` → `recordFollowupActivity`; the only category ever
+  recorded is `unknown` for expired manager credentials), and follow-up turns
+  never pass through `AgentJobGrain`, so no server-side reconciliation
+  supplies a category either. A runner-side task (T-007) therefore reports the
+  failing runtime's error kind as `failureCategory` on terminal follow-up
+  `session.activity` events, applying the same kind→category mapping the
+  AgentJob path applies (Decision 1). The Server already consumes the field
+  end-to-end (`ResolveFollowupTurnResult` → `turn.Result` → delivery
+  envelope), so no additional Server change is needed. Absent facts — runners
+  predating the change, failures with no recoverable error kind — still
+  degrade to no button; that degradation is the safety net, not the permanent
+  behavior.
 
 *Alternative:* post a brand-new failure message instead of promoting the
 progress row — rejected: duplicates the established in-place terminal pattern
@@ -242,12 +296,19 @@ id to existing forwarding tests.
 
 ## Risks / Trade-offs
 
-- [Free-form category vocabulary drifts (runner-derived strings)] -> allowlist
-  is exact-match and unknown ⇒ not retryable; new transient categories require
-  a deliberate allowlist change, never a guess.
-- [Follow-up terminal events currently carry null failure facts] -> Decision 3
-  populates them; absent facts degrade to the current no-button presentation,
-  which is always safe.
+- [Free-form category vocabulary drifts (runner-derived strings)] -> the
+  allowlist is exact-match and defined over the recorded producer vocabulary
+  (Decision 1), and its tests pin real recorded strings plus the
+  `AgentJobFailureReasons` constants, so a renamed or newly added transient
+  producer category fails a test instead of silently losing the Retry button;
+  unknown ⇒ not retryable remains the default, and new transient categories
+  still require a deliberate allowlist change, never a guess.
+- [Follow-up terminal events currently carry null failure facts] -> the
+  runner-side task (T-007) reports the mapped runtime error kind as
+  `failureCategory` on terminal follow-up events, and Decision 3's
+  server-side change forwards `turn.Result` facts into the delivery envelope;
+  runners that predate the change and genuinely unknown failures still degrade
+  to no button, which is always safe.
 - [Second button for the same Turn (event redelivery re-renders a notice with
   a fresh nonce) could double-retry] -> unique (session, turn) index resolves
   any later click to the one recorded operation and its recorded result.

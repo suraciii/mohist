@@ -1,15 +1,25 @@
 ### Requirement: Authoritative retryable failure-category allowlist
 
-The system SHALL define exactly one authoritative failure-category retryability allowlist. A failed Turn's recorded failure category is retryable if, and only if, it is one of: `runner-unavailable`, `runner-lost`, `report-timeout`, `deadline`, `timeout`, `probe-timeout`, `runtime-transport-unavailable`, `rate-limited`, or `retry-safe`. Every other recorded category — including `input`, `permission`, `configuration`, `context`, `unknown`, and a generic turn failure — MUST be classified as not retryable.
+The system SHALL define exactly one authoritative failure-category retryability allowlist, defined over the failure-category vocabulary the system actually records. A failed Turn's recorded failure category is retryable if, and only if, it is one of: `runner-unavailable`, `runner-lost`, `report-timeout` (the server-side reconciliation reasons), `deadline-exceeded`, `timeout` (the Pi-mapped form of `deadline-exceeded`), `generation-drain-timeout` (the deadline/timeout family), `unavailable-runtime`, `runtime-unavailable` (runtime unavailability at turn time and at dispatch preflight), or the reserved forward-looking tokens `rate-limited`, `probe-timeout`, `retry-safe` (no producer records them today; they classify as retryable the moment one does). Every other recorded category — including `invalid-input`, `permission-required`, `incompatible-runtime`, `incompatible-execution-configuration`, `unsupported_execution_configuration`, `missing-session`, `runtime-session-missing`, `conflict`, `interrupted`, `turn-failed`, `manager-credential-expired`, `workspace-unavailable`, `context_exhaustion`, `unknown`, and a generic turn failure — MUST be classified as not retryable.
 
-#### Scenario: Recorded category is in the allowlist
+#### Scenario: Server-recorded reconciliation category is in the allowlist
 
-- **WHEN** a failed Turn's authoritative failure facts record a failure category of `runner-unavailable`, `runner-lost`, `report-timeout`, `deadline`, `timeout`, `probe-timeout`, `runtime-transport-unavailable`, `rate-limited`, or `retry-safe`
+- **WHEN** a failed Turn's authoritative failure facts record a failure category of `runner-unavailable`, `runner-lost`, or `report-timeout`
+- **THEN** the failed Turn MUST be classified as retryable
+
+#### Scenario: Runner-recorded transient error kind is in the allowlist
+
+- **WHEN** a failed Turn's authoritative failure facts record a failure category of `deadline-exceeded`, `timeout`, `generation-drain-timeout`, `unavailable-runtime`, or `runtime-unavailable` — the categories runner-reported turn failures actually carry
+- **THEN** the failed Turn MUST be classified as retryable
+
+#### Scenario: Reserved token is in the allowlist
+
+- **WHEN** a failed Turn's authoritative failure facts record a failure category of `rate-limited`, `probe-timeout`, or `retry-safe`
 - **THEN** the failed Turn MUST be classified as retryable
 
 #### Scenario: Recorded category is a permanent failure
 
-- **WHEN** a failed Turn's authoritative failure facts record a failure category of `input`, `permission`, `configuration`, `context`, `unknown`, or a generic turn failure
+- **WHEN** a failed Turn's authoritative failure facts record a failure category of `invalid-input`, `permission-required`, `incompatible-runtime`, `missing-session`, `turn-failed`, `manager-credential-expired`, `workspace-unavailable`, `context_exhaustion`, or `unknown`
 - **THEN** the failed Turn MUST be classified as not retryable
 
 #### Scenario: Recorded category is absent
@@ -28,7 +38,7 @@ The system MUST decide retryability exclusively from the failed Turn's recorded 
 
 #### Scenario: Transient-sounding error text with a permanent category
 
-- **WHEN** a failed Turn records a permanent category such as `input` while its failure reason or error text mentions transient-sounding words like "unavailable", "timeout", or "retry"
+- **WHEN** a failed Turn records a permanent category such as `invalid-input` while its failure reason or error text mentions transient-sounding words like "unavailable", "timeout", or "retry"
 - **THEN** the failed Turn MUST be classified as not retryable
 - **AND** no retry affordance or retry acceptance MUST be granted on the basis of that text
 
@@ -36,6 +46,28 @@ The system MUST decide retryability exclusively from the failed Turn's recorded 
 
 - **WHEN** a failed Turn records the failure category `retry-safe` regardless of how ordinary its error text reads
 - **THEN** the failed Turn MUST be classified as retryable
+
+### Requirement: Failed thread follow-up turns record a failure category
+
+Terminal follow-up activity events for failed thread follow-up Turns MUST record the failing runtime's error kind as the failure category, applying the same error-kind-to-category mapping the AgentJob execution path applies, so that thread retryability is decided from recorded facts rather than permanently absent ones. A follow-up failure for which no runtime error kind is recoverable MAY record no failure category, and expired manager credentials keep recording `unknown`; such Turns are classified as not retryable.
+
+#### Scenario: Runtime error kind is recorded as the category
+
+- **WHEN** a thread follow-up Turn fails with a runtime error kind such as `unavailable-runtime` or `deadline-exceeded` from the OpenCode runtime, or `deadline-exceeded` from the Pi runtime (mapped to `timeout`)
+- **THEN** the terminal follow-up event MUST record the mapped kind as the failure category
+- **AND** the failed follow-up Turn MUST be classifiable as retryable from that recorded category alone
+
+#### Scenario: Unknown failure records no category and is not retryable
+
+- **WHEN** a thread follow-up Turn fails without a recoverable runtime error kind (for example an observer or transport failure carrying no error kind), or its terminal event comes from a runner that predates category reporting
+- **THEN** the event MAY omit the failure category
+- **AND** the Turn MUST be classified as not retryable
+
+#### Scenario: Expired manager credentials keep recording unknown
+
+- **WHEN** a thread follow-up Turn fails because its manager execution boundary expired
+- **THEN** the terminal follow-up event MUST keep recording the failure category `unknown`
+- **AND** the Turn MUST be classified as not retryable
 
 ### Requirement: Retryability is re-evaluated at click acceptance
 
