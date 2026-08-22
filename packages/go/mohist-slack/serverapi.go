@@ -171,10 +171,20 @@ type InteractionEnvelope struct {
 	ActionValue      string  `json:"actionValue"`
 }
 
+// ResponseOwner identifies which side owns a user-visible ingress response.
+type ResponseOwner string
+
+const (
+	ResponseOwnerNone    ResponseOwner = "none"
+	ResponseOwnerServer  ResponseOwner = "server"
+	ResponseOwnerAdapter ResponseOwner = "adapter"
+)
+
 // IngressResult is the Server's disposition of one inbound message.
 type IngressResult struct {
-	Kind   string
-	Reason *string
+	Kind          string
+	ResponseOwner ResponseOwner
+	Reason        *string
 }
 
 // InteractionResult is the Server's disposition of one interaction.
@@ -606,12 +616,40 @@ func (s *ServerAPI) Ingress(ctx context.Context, target Target, envelope Envelop
 	if err := json.Unmarshal(payload.Data, &record); err != nil {
 		return IngressResult{}, errors.New("Slack adapter returned an invalid ingress result")
 	}
-	result := IngressResult{}
-	if kind, ok := stringValue(record, "kind"); ok {
-		result.Kind = kind
+	kind, kindOK := stringValue(record, "kind")
+	if !kindOK {
+		return IngressResult{}, errors.New("Slack adapter returned an invalid ingress result")
 	}
-	if reason, ok := record["reason"].(string); ok {
+
+	responseOwner := ResponseOwnerNone
+	if rawOwner, present := record["responseOwner"]; present {
+		owner, ok := rawOwner.(string)
+		if !ok {
+			return IngressResult{}, errors.New("Slack adapter returned an invalid ingress response owner")
+		}
+		switch ResponseOwner(owner) {
+		case ResponseOwnerNone, ResponseOwnerServer, ResponseOwnerAdapter:
+			responseOwner = ResponseOwner(owner)
+		default:
+			return IngressResult{}, errors.New("Slack adapter returned an invalid ingress response owner")
+		}
+	} else if kind == "backpressured" {
+		// Older Servers used this kind only for the no-intent direct fallback.
+		// Keep that compatibility case adapter-owned; other legacy results do
+		// not authorize a direct post.
+		responseOwner = ResponseOwnerAdapter
+	}
+
+	result := IngressResult{Kind: kind, ResponseOwner: responseOwner}
+	if rawReason, present := record["reason"]; present {
+		reason, ok := rawReason.(string)
+		if !ok {
+			return IngressResult{}, errors.New("Slack adapter returned an invalid ingress result")
+		}
 		result.Reason = &reason
+	}
+	if responseOwner == ResponseOwnerAdapter && (result.Reason == nil || *result.Reason == "") {
+		return IngressResult{}, errors.New("Slack adapter returned an invalid ingress result")
 	}
 	return result, nil
 }

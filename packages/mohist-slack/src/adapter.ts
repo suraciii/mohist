@@ -348,7 +348,12 @@ export class SlackAdapter {
         signal,
       )
       this.assertCurrent(runtime, snapshot, signal)
-      this.log.info('ingress accepted', { target, event: eventType, kind: result.kind })
+      this.log.info('ingress accepted', {
+        target,
+        event: eventType,
+        kind: result.kind,
+        responseOwner: result.responseOwner,
+      })
       if (!(await this.renderUserFacingRejection(runtime, snapshot, envelope, result, signal))) return
       this.assertCurrent(runtime, snapshot, signal)
       await ack()
@@ -373,18 +378,21 @@ export class SlackAdapter {
     result: IngressResult,
     signal: AbortSignal,
   ): Promise<boolean> {
-    if (result.kind !== 'backpressured') return this.isCurrent(runtime, snapshot, signal)
-    if (runtime.draining) return this.isCurrent(runtime, snapshot, signal)
+    if (result.responseOwner !== 'none' && result.responseOwner !== 'server' && result.responseOwner !== 'adapter')
+      return false
+    if (result.responseOwner !== 'adapter') return this.isCurrent(runtime, snapshot, signal)
+    if (typeof result.reason !== 'string' || result.reason.length === 0) return false
     if (!this.isCurrent(runtime, snapshot, signal)) return false
-    const reason = result.reason ?? 'This Slack Connection is backpressured; retry after pending deliveries drain.'
     const message: { channel: string; text: string; thread_ts?: string } = {
       channel: envelope.conversationId,
-      text: reason,
+      text: result.reason,
     }
     if (envelope.threadTs) message.thread_ts = envelope.threadTs
     this.assertCurrent(runtime, snapshot, signal)
-    await snapshot.web.chat.postMessage(message)
-    return this.isCurrent(runtime, snapshot, signal)
+    const response = await snapshot.web.chat.postMessage(message)
+    this.assertCurrent(runtime, snapshot, signal)
+    if (response.ok === false) throw new Error(response.error ?? 'Slack rejected the direct ingress response')
+    return true
   }
 
   private async drain(runtime: ConnectionRuntime, signal: AbortSignal) {

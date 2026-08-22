@@ -21,6 +21,7 @@
 
   <ItemGroup>
     <Content Include="xunit.runner.json" CopyToOutputDirectory="PreserveNewest" />
+    <EmbeddedResource Include="..\..\..\..\fixtures\slack-ingress-response-ownership.json" LogicalName="Mohist.SlackIngressResponseOwnershipFixtures.json" />
   </ItemGroup>
 
 

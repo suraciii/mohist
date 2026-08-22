@@ -129,6 +129,85 @@ public sealed partial class SlackChannelThreadIngressSpecs
     }
 
     [Fact]
+    public async Task Unconfigured_channel_root_gets_one_thread_anchored_durable_nudge_without_execution_side_effects()
+    {
+        var connection = await CreateConnectionAsync();
+        await SetAgentConfigAsync(connection, null);
+        const string conversationId = "C-channel-setup";
+        const string rootTs = "1710000000.000150";
+
+        var first = await PostChannelAsync(
+            connection,
+            conversationId,
+            rootTs,
+            threadTs: null,
+            mentions: new[] { connection.BotUserId },
+            text: "<@U123> please do this");
+        var replay = await PostChannelAsync(
+            connection,
+            conversationId,
+            rootTs,
+            threadTs: null,
+            mentions: new[] { connection.BotUserId },
+            text: "<@U123> please do this");
+
+        Assert.Equal("agent_not_configured", first.GetProperty("kind").GetString());
+        Assert.Equal("server", first.GetProperty("responseOwner").GetString());
+        Assert.Equal("server", replay.GetProperty("responseOwner").GetString());
+
+        await using var scope = _fixture.Services.CreateAsyncScope();
+        var db = scope.ServiceProvider.GetRequiredService<MohistDbContext>();
+        var nudge = Assert.Single(
+            await db.SlackOutboxRows
+                .Where(row => row.ConnectionId == connection.Id
+                    && row.ConversationId == conversationId
+                    && row.DispatchRef != null)
+                .ToListAsync(),
+            row => row.DispatchRef!.StartsWith("slack-admission-nudge:", StringComparison.Ordinal));
+        Assert.Equal(rootTs, nudge.ThreadTs);
+        Assert.Equal(nudge.DispatchRef, SlackDeliveryPayload.Parse(nudge.PayloadJson).ClientMessageId);
+        Assert.Empty(await db.SlackProviderInboxRows
+            .Where(row => row.ConnectionId == connection.Id && row.ConversationId == conversationId)
+            .ToListAsync());
+        Assert.Empty(await db.AgentSessions.Where(row => row.LabelConnectionId == connection.Id).ToListAsync());
+        Assert.Empty(await db.AgentJobs.Where(row => row.ProjectId == connection.ProjectId).ToListAsync());
+    }
+
+    [Fact]
+    public async Task Unconfigured_unbound_thread_first_mention_uses_incoming_thread_anchor()
+    {
+        var connection = await CreateConnectionAsync();
+        await SetAgentConfigAsync(connection, null);
+        const string conversationId = "C-channel-unbound-setup";
+        const string threadTs = "1710000000.000160";
+        const string messageTs = "1710000000.000161";
+
+        var result = await PostChannelAsync(
+            connection,
+            conversationId,
+            messageTs,
+            threadTs,
+            new[] { connection.BotUserId },
+            "<@U123> please do this");
+
+        Assert.Equal("agent_not_configured", result.GetProperty("kind").GetString());
+        Assert.Equal("server", result.GetProperty("responseOwner").GetString());
+        await using var scope = _fixture.Services.CreateAsyncScope();
+        var db = scope.ServiceProvider.GetRequiredService<MohistDbContext>();
+        var nudge = Assert.Single(
+            await db.SlackOutboxRows
+                .Where(row => row.ConnectionId == connection.Id
+                    && row.ConversationId == conversationId)
+                .ToListAsync(),
+            row => row.DispatchRef!.StartsWith("slack-admission-nudge:", StringComparison.Ordinal));
+        Assert.Equal(threadTs, nudge.ThreadTs);
+        Assert.Empty(await db.SlackProviderInboxRows
+            .Where(row => row.ConnectionId == connection.Id && row.ConversationId == conversationId)
+            .ToListAsync());
+        Assert.Empty(await db.AgentSessions.Where(row => row.LabelConnectionId == connection.Id).ToListAsync());
+    }
+
+    [Fact]
     public async Task Followup_after_terminal_continues_bound_session()
     {
         var connection = await CreateConnectionAsync();
@@ -337,6 +416,7 @@ public sealed partial class SlackChannelThreadIngressSpecs
         using var doc = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
         var data = doc.RootElement.GetProperty("data");
         Assert.Equal("backpressured", data.GetProperty("kind").GetString());
+        Assert.Equal("adapter", data.GetProperty("responseOwner").GetString());
         Assert.False(string.IsNullOrEmpty(data.GetProperty("reason").GetString()));
 
         await using var verify = _fixture.Services.CreateAsyncScope();
@@ -434,6 +514,24 @@ public sealed partial class SlackChannelThreadIngressSpecs
                 && EF.Functions.Like(row.DispatchRef, progressRef + "%"))
             .SingleAsync();
         Assert.Equal(SlackDeliveryOperations.PostMessage, SlackDeliveryPayload.Parse(progress.PayloadJson).Operation);
+    }
+
+    private async Task SetAgentConfigAsync(AgentConnection connection, object? config)
+    {
+        await using var scope = _fixture.Services.CreateAsyncScope();
+        var db = scope.ServiceProvider.GetRequiredService<MohistDbContext>();
+        var row = await db.Agents.SingleAsync(agent => agent.ProjectId == connection.ProjectId);
+        var agent = new Mohist.Server.Agent.Domain.Agent
+        {
+            Id = row.Id,
+            ProjectId = connection.ProjectId,
+            Name = "Mohist Agent",
+            Status = AgentStatus.Active,
+            Instructions = "Handle Slack requests.",
+            AgentConfig = config is null ? null : JsonSerializer.SerializeToElement(config),
+        };
+        row.State = JsonSerializer.Serialize(agent, JSON.Options);
+        await db.SaveChangesAsync();
     }
 
     private async Task<AgentConnection> CreateConnectionAsync(string agentNameSuffix = "")

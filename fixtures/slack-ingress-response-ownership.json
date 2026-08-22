@@ -1,0 +1,16 @@
+{
+  "server": {
+    "kind": "agent_not_configured",
+    "responseOwner": "server",
+    "reason": "The Agent is not ready to accept new work. Please contact the Connection owner or complete setup through the normal owner workflow."
+  },
+  "adapter": {
+    "kind": "backpressured",
+    "responseOwner": "adapter",
+    "reason": "This Slack Connection is temporarily busy. Please retry shortly."
+  },
+  "none": {
+    "kind": "accepted",
+    "responseOwner": "none"
+  }
+}

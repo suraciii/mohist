@@ -235,8 +235,24 @@ jobs:
           cache: npm
           cache-dependency-path: package-lock.json
 
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v5
+        with:
+          global-json-file: global.json
+
+      - name: Cache NuGet packages
+        uses: actions/cache@v6
+        with:
+          path: ~/.nuget/packages
+          key: ${{ runner.os }}-nuget-${{ hashFiles('Directory.Packages.props') }}
+          restore-keys: |
+            ${{ runner.os }}-nuget-
+
       - name: Install dependencies
         run: npm ci
+
+      - name: Restore .NET
+        run: dotnet restore packages/server/tests/Mohist.Server.CrossComponentBridge/Mohist.Server.CrossComponentBridge.csproj
 
       - name: Run Slack scope
         run: |

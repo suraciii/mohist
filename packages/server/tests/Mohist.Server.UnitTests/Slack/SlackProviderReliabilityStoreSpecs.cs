@@ -163,6 +163,53 @@ public sealed class SlackProviderReliabilityStoreSpecs
     }
 
     [Fact]
+    public async Task Outbox_uncertain_reconciliation_and_retry_keep_one_row_and_stable_delivery_identity()
+    {
+        using var database = TestSqliteDatabase.CreateModelSchema();
+        await SeedEnabledConnectionAsync(database);
+        var time = new FakeTimeProvider(Start);
+        var store = NewOutbox(database, new RecordingHealthBackpressurer(), capacity: 3, time);
+        var dispatchRef = "slack-admission-nudge:stable";
+        var payload = System.Text.Json.JsonSerializer.Serialize(new SlackDeliveryPayload(
+            SlackDeliveryOperations.PostMessage,
+            "The Agent is not ready.",
+            ClientMessageId: dispatchRef));
+        var queued = await store.EnqueueRequiredAsync(new SlackOutboxDraft(
+            "proj_a", "conn_1", "team-1", "D1", SlackOutboxKinds.UserAction,
+            dispatchRef, payload, "1710000000.000001"));
+
+        var claimed = await store.ClaimAsync("proj_a", "conn_1", "adapter-a");
+        Assert.Equal(queued.Id, claimed?.Id);
+        await store.MarkDeliveryUncertainAsync("proj_a", queued.Id, "provider response lost", "adapter-a");
+        var uncertain = Assert.Single((await store.ListAsync("proj_a", "conn_1")).Entries);
+        Assert.Equal(queued.Id, uncertain.Id);
+        Assert.Equal(dispatchRef, uncertain.DispatchRef);
+        Assert.Equal(dispatchRef, SlackDeliveryPayload.Parse(uncertain.PayloadJson).ClientMessageId);
+
+        await store.ClaimUncertainAsync("proj_a", "conn_1", "adapter-b");
+        await store.ScheduleRetryAsync("proj_a", queued.Id, "provider message absent", "adapter-b");
+        var retry = Assert.Single((await store.ListAsync("proj_a", "conn_1")).Entries);
+        Assert.Equal(queued.Id, retry.Id);
+        Assert.Equal(dispatchRef, retry.DispatchRef);
+        Assert.Equal(dispatchRef, SlackDeliveryPayload.Parse(retry.PayloadJson).ClientMessageId);
+
+        time.Advance(TimeSpan.FromMinutes(1));
+        await store.ClaimAsync("proj_a", "conn_1", "adapter-c");
+        await store.MarkDeliveredAsync(
+            "proj_a",
+            queued.Id,
+            new SlackProviderMessageIdentity("D1", "1710000000.000002"),
+            "adapter-c");
+        var delivered = Assert.Single((await store.ListAsync("proj_a", "conn_1")).Entries);
+        Assert.Equal(queued.Id, delivered.Id);
+        Assert.Equal(SlackOutboxStates.Delivered, delivered.State);
+        Assert.Equal(dispatchRef, delivered.DispatchRef);
+        var deliveredPayload = SlackDeliveryPayload.Parse(delivered.PayloadJson);
+        Assert.Equal(dispatchRef, deliveredPayload.ClientMessageId);
+        Assert.Equal("1710000000.000002", deliveredPayload.ProviderMessageIdentity?.MessageTs);
+    }
+
+    [Fact]
     public async Task Outbox_ack_rejects_a_stale_adapter_lease()
     {
         using var database = TestSqliteDatabase.CreateModelSchema();
