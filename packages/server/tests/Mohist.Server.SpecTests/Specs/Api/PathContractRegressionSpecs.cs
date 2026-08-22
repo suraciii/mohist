@@ -1,6 +1,7 @@
 using System.Net.Http.Json;
+using Mohist.Server.Infrastructure.Events;
+using Microsoft.Extensions.DependencyInjection;
 using System.Text.Json;
-using Mohist.Server.Events.Grains;
 using Mohist.Server.Infrastructure.Workspace;
 using Mohist.Server.Project.Services;
 using Mohist.Server.SpecTests.Support;
@@ -416,5 +417,5 @@ public class PathContractRegressionSpecs
     }
 
     private Task DispatchEventsAsync() =>
-        _fixture.Grains.GetGrain<IEventDispatcherGrain>(EventDispatcherGrain.Global).DispatchNowAsync();
+        _fixture.Services.GetRequiredService<IEventDispatcher>().DrainAsync();
 }

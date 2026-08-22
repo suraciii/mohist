@@ -432,6 +432,122 @@ public class EventStore : IEventStore
 
         return rows.Select(ToUndeliveredEvent).ToList();
     }
+
+    public async Task<IReadOnlyList<PendingStream>> ListPendingStreamsAsync(int limit = 100, CancellationToken ct = default)
+    {
+        await using var db = await _dbFactory.CreateDbContextAsync(ct);
+
+        const string sql = """
+            SELECT "Origin", "Source", MIN("Time") AS "OldestPendingTime"
+            FROM (
+                SELECT 'WorkflowRun' AS "Origin", "Source", "Time" FROM "WorkflowRunEvents" WHERE "DispatchedAt" IS NULL
+                UNION ALL
+                SELECT 'Issue' AS "Origin", "Source", "Time" FROM "IssueEvents" WHERE "DispatchedAt" IS NULL
+                UNION ALL
+                SELECT 'Epic' AS "Origin", "Source", "Time" FROM "EpicEvents" WHERE "DispatchedAt" IS NULL
+                UNION ALL
+                SELECT 'AgentSession' AS "Origin", "Source", "Time" FROM "AgentSessionEvents" WHERE "DispatchedAt" IS NULL
+                UNION ALL
+                SELECT 'AgentJob' AS "Origin", "Source", "Time" FROM "AgentJobEvents" WHERE "DispatchedAt" IS NULL
+                UNION ALL
+                SELECT 'Ingress' AS "Origin", "Source", "Time" FROM "IngressEvents" WHERE "DispatchedAt" IS NULL
+                UNION ALL
+                SELECT 'Workspace' AS "Origin", "Source", "Time" FROM "WorkspaceEvents" WHERE "DispatchedAt" IS NULL
+            )
+            GROUP BY "Origin", "Source"
+            ORDER BY "OldestPendingTime"
+            LIMIT @limit
+            """;
+
+        var parameter = new Microsoft.Data.Sqlite.SqliteParameter("@limit", limit);
+        var rows = await db.Database
+            .SqlQueryRaw<PendingStreamSqlRow>(sql, parameter)
+            .ToListAsync(ct);
+
+        return rows
+            .Select(r => new PendingStream(ParseOrigin(r.Origin), r.Source, r.OldestPendingTime))
+            .ToList();
+    }
+
+    public async Task<IReadOnlyList<UndeliveredEvent>> ListUndeliveredByStreamAsync(
+        EventOrigin origin,
+        string source,
+        int limit,
+        CancellationToken ct = default)
+    {
+        await using var db = await _dbFactory.CreateDbContextAsync(ct);
+
+        // Raw SQL like ListUndeliveredAsync: the LINQ projector cannot
+        // translate the JsonElement Data column through the generic
+        // envelope interface.
+        var sql = $"""
+            SELECT @origin AS "Origin", "Id", "Source", "EventId", "Type", "Time",
+                   "SpecVersion", "Subject", "DataContentType", "Data", "ExtensionsJson"
+            FROM "{TableName(origin)}"
+            WHERE "DispatchedAt" IS NULL AND "Source" = @source
+            ORDER BY "Id"
+            LIMIT @limit
+            """;
+
+        var rows = await db.Database
+            .SqlQueryRaw<UndeliveredSqlRow>(
+                sql,
+                new Microsoft.Data.Sqlite.SqliteParameter("@origin", origin.ToString()),
+                new Microsoft.Data.Sqlite.SqliteParameter("@source", source),
+                new Microsoft.Data.Sqlite.SqliteParameter("@limit", limit))
+            .ToListAsync(ct);
+
+        return rows
+            .Select(r => new UndeliveredEvent(
+                origin,
+                r.Id,
+                r.Source,
+                r.EventId,
+                r.Type,
+                r.Time,
+                r.SpecVersion,
+                r.Subject,
+                r.DataContentType,
+                ParseJsonElement(r.Data),
+                r.ExtensionsJson))
+            .ToList();
+    }
+
+    public async Task MarkDispatchedRangeAsync(
+        EventOrigin origin,
+        string source,
+        IReadOnlyList<long> ids,
+        DateTimeOffset dispatchedAt,
+        CancellationToken ct = default)
+    {
+        if (ids.Count == 0)
+            return;
+        await using var db = await _dbFactory.CreateDbContextAsync(ct);
+        await Task.FromResult(origin switch
+        {
+            EventOrigin.WorkflowRun => MarkRangeAsync(db.WorkflowRunEvents, source, ids, dispatchedAt, ct),
+            EventOrigin.Issue => MarkRangeAsync(db.IssueEvents, source, ids, dispatchedAt, ct),
+            EventOrigin.Epic => MarkRangeAsync(db.EpicEvents, source, ids, dispatchedAt, ct),
+            EventOrigin.AgentSession => MarkRangeAsync(db.AgentSessionEvents, source, ids, dispatchedAt, ct),
+            EventOrigin.AgentJob => MarkRangeAsync(db.AgentJobEvents, source, ids, dispatchedAt, ct),
+            EventOrigin.Ingress => MarkRangeAsync(db.IngressEvents, source, ids, dispatchedAt, ct),
+            EventOrigin.Workspace => MarkRangeAsync(db.WorkspaceEvents, source, ids, dispatchedAt, ct),
+            _ => throw new ArgumentOutOfRangeException(nameof(origin), origin, "Unknown event origin."),
+        });
+    }
+
+    private static Task MarkRangeAsync<T>(
+        IQueryable<T> rows,
+        string source,
+        IReadOnlyList<long> ids,
+        DateTimeOffset dispatchedAt,
+        CancellationToken ct)
+        where T : class, IEventEnvelopeRow =>
+        rows
+            .Where(e => e.Source == source && ids.Contains(e.Id))
+            .ExecuteUpdateAsync(
+                setters => setters.SetProperty(e => e.DispatchedAt, dispatchedAt),
+                ct);
     private static StoredCloudEvent ToStored(WorkflowRunEventRow row) =>
         new(row.Id, new CloudEvent(
             id: row.EventId,
@@ -546,6 +662,13 @@ public class EventStore : IEventStore
             .MaxAsync(ct);
         return Math.Max(localMax ?? 0, committedMax ?? 0) + 1;
     }
+private sealed class PendingStreamSqlRow
+    {
+        public string Origin { get; set; } = "";
+        public string Source { get; set; } = "";
+        public DateTimeOffset OldestPendingTime { get; set; }
+    }
+
 private sealed class UndeliveredSqlRow
     {
         public string Origin { get; set; } = "";
@@ -585,6 +708,18 @@ private sealed class UndeliveredSqlRow
         "Ingress" => EventOrigin.Ingress,
         "Workspace" => EventOrigin.Workspace,
         _ => throw new InvalidOperationException($"Unknown event origin '{text}'."),
+    };
+
+    private static string TableName(EventOrigin origin) => origin switch
+    {
+        EventOrigin.WorkflowRun => "WorkflowRunEvents",
+        EventOrigin.Issue => "IssueEvents",
+        EventOrigin.Epic => "EpicEvents",
+        EventOrigin.AgentSession => "AgentSessionEvents",
+        EventOrigin.AgentJob => "AgentJobEvents",
+        EventOrigin.Ingress => "IngressEvents",
+        EventOrigin.Workspace => "WorkspaceEvents",
+        _ => throw new InvalidOperationException($"Unknown event origin '{origin}'."),
     };
 
     private static JsonElement ParseJsonElement(string json) =>

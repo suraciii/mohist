@@ -5,7 +5,6 @@ using System.Text;
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
-using Mohist.Server.Events.Grains;
 using Mohist.Server.GitHub.Domain;
 using Mohist.Server.GitHub.Infrastructure;
 using Mohist.Server.Infrastructure.Data.Db;
@@ -77,9 +76,9 @@ public sealed class GitHubIssueFeedSpecs
         // Dispatch twice: the ingest response may return before the event
         // row is visible to the dispatcher, so the first pass can settle
         // only earlier leftovers and the second delivers this test's event.
-        var dispatcher = _fixture.Grains.GetGrain<IEventDispatcherGrain>(EventDispatcherGrain.Global);
-        await dispatcher.DispatchNowAsync();
-        await dispatcher.DispatchNowAsync();
+        var dispatcher = _fixture.Services.GetRequiredService<IEventDispatcher>();
+        await dispatcher.DrainAsync();
+        await dispatcher.DrainAsync();
     }
 
     private async Task<GitHubIssueLink?> LoadLinkAsync(string projectId, string repositoryName)

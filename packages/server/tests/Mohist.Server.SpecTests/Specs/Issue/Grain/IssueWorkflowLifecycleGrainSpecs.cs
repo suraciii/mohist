@@ -1,7 +1,6 @@
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
-using Mohist.Server.Events.Grains;
 using Mohist.Server.Infrastructure;
 using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Infrastructure.Data.Events;
@@ -307,7 +306,7 @@ public sealed class IssueWorkflowLifecycleGrainSpecs
 
         var grain = _grains.GetGrain<IIssueGrain>(issueKey);
         var wrId = await grain.StartWorkAsync();
-        await _grains.GetGrain<IEventDispatcherGrain>(EventDispatcherGrain.Global).DispatchNowAsync();
+        await _fixture.Cluster.GetSiloServiceProvider(null).GetRequiredService<IEventDispatcher>().DrainAsync();
 
         return (projectId, projectName, number, issueKey, wrId);
     }

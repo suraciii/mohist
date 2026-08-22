@@ -69,6 +69,7 @@ public sealed class AgentSessionGrainFixture : IAsyncLifetime
             siloBuilder.Configure<ReminderOptions>(options =>
                 options.MinimumReminderPeriod = TimeSpan.FromMilliseconds(100));
             siloBuilder.Services.AddDbContextFactory<MohistDbContext>(options => options.UseSqlite(ConnectionString));
+            siloBuilder.Services.AddSingleton(new Mohist.Server.Infrastructure.Events.EventDispatchSignal());
 
             siloBuilder.Services.AddSingleton<IAgentSessionStore>(StateStore);
             siloBuilder.Services.AddSingleton<IAgentSessionTranscriptStore>(TranscriptStore);

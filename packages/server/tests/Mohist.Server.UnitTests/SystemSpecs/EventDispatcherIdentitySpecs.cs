@@ -1,8 +1,8 @@
 using System.Text.Json;
+using Mohist.Server.TestSupport;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using Microsoft.Extensions.Time.Testing;
-using Mohist.Server.Events.Grains;
 using Mohist.Server.Infrastructure.Data.Events;
 using Mohist.Server.Infrastructure.Events;
 using Mohist.Server.UnitTests.Support;
@@ -36,10 +36,10 @@ public class EventDispatcherIdentitySpecs
             events,
             subs,
             deadLetters,
+            new FakeDispatchStreamLeaseStore(),
             time,
             Options.Create(new EventDispatcherOptions
             {
-                BatchSize = 100,
                 MaxAttempts = handlerMaxAttempts,
                 BaseBackoff = TimeSpan.FromSeconds(1),
                 MaxBackoff = TimeSpan.FromSeconds(30),
@@ -72,7 +72,7 @@ public class EventDispatcherIdentitySpecs
             id: 1,
             eventId: "evt_legacy_id"));
 
-        await dispatcher.DispatchAsync(CancellationToken.None);
+        await dispatcher.DrainAsync(CancellationToken.None);
 
         var dl = Assert.Single(dlq.Written);
         Assert.Equal(durableIdentity, dl.FailingHandler);
@@ -101,7 +101,7 @@ public class EventDispatcherIdentitySpecs
             id: 1,
             eventId: "evt_default_id"));
 
-        await dispatcher.DispatchAsync(CancellationToken.None);
+        await dispatcher.DrainAsync(CancellationToken.None);
 
         var dl = Assert.Single(dlq.Written);
         Assert.Equal(typeof(FlakyRecorder).FullName, dl.FailingHandler);

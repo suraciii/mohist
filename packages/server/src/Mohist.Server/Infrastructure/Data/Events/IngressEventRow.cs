@@ -10,7 +10,7 @@ namespace Mohist.Server.Infrastructure.Data.Events;
 /// GitHub traffic stays distinct from workflow/issue/epic domain events at
 /// the storage layer.
 /// </summary>
-public sealed class IngressEventRow : IEventRow
+public sealed class IngressEventRow : IEventEnvelopeRow
 {
     public required long Id { get; init; }
     public required string Source { get; init; }

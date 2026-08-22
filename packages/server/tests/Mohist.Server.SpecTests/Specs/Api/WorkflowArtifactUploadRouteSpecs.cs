@@ -7,7 +7,6 @@ using Microsoft.Extensions.DependencyInjection;
 using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Infrastructure.Data.Workflow;
 using Mohist.Server.Infrastructure.Events;
-using Mohist.Server.Events.Grains;
 using Mohist.Server.Infrastructure.Orleans;
 using Mohist.Server.Agent.Grains;
 using Mohist.Server.Issue.Grains;
@@ -289,6 +288,6 @@ public class WorkflowArtifactUploadRouteSpecs
 
     private async Task DispatchEventsAsync()
     {
-        await _fixture.Grains.GetGrain<IEventDispatcherGrain>(EventDispatcherGrain.Global).DispatchNowAsync();
+        await _fixture.Services.GetRequiredService<IEventDispatcher>().DrainAsync();
     }
 }

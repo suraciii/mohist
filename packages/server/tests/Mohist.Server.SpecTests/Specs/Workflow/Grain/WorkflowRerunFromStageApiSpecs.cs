@@ -1,9 +1,9 @@
 using System.Net;
+using Mohist.Server.Infrastructure.Events;
 using System.Net.Http.Json;
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
-using Mohist.Server.Events.Grains;
 using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Infrastructure.Data.Workflow;
 using Mohist.Server.Infrastructure.Orleans;
@@ -486,5 +486,5 @@ public class WorkflowRerunFromStageApiSpecs : IAsyncLifetime
     }
 
     private Task DispatchEventsAsync() =>
-        _grains.GetGrain<IEventDispatcherGrain>(EventDispatcherGrain.Global).DispatchNowAsync();
+        _services.GetRequiredService<IEventDispatcher>().DrainAsync();
 }

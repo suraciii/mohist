@@ -3,7 +3,6 @@ using System.Net.Http.Json;
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
-using Mohist.Server.Events.Grains;
 using Mohist.Server.Infrastructure;
 using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Infrastructure.Data.Issue;
@@ -205,7 +204,7 @@ public class WorkflowRunDetailApiSpecs
         WorkflowApiTestSupport.CreateIssueInBacklogAsync(_grains, projectId);
 
     private Task DispatchEventsAsync() =>
-        WorkflowApiTestSupport.DispatchEventsAsync(_grains);
+        WorkflowApiTestSupport.DispatchEventsAsync(_services);
 
     private Task SeedWorkflowTemplateAsync(string projectId) =>
         WorkflowApiTestSupport.SeedWorkflowTemplateAsync(_connectionString, projectId);

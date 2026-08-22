@@ -5,7 +5,6 @@ using System.Text;
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
-using Mohist.Server.Events.Grains;
 using Mohist.Server.GitHub.Infrastructure;
 using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Infrastructure.Data.Events;
@@ -316,7 +315,7 @@ public sealed class GitHubReviewApprovalSpecs
     }
 
     private Task PumpAsync() =>
-        _fixture.Grains.GetGrain<IEventDispatcherGrain>(EventDispatcherGrain.Global).DispatchNowAsync();
+        _fixture.Services.GetRequiredService<IEventDispatcher>().DrainAsync();
 
     private static string Sign(byte[] payload, string secret) =>
         "sha256=" + Convert.ToHexString(HMACSHA256.HashData(Encoding.UTF8.GetBytes(secret), payload)).ToLowerInvariant();

@@ -1,6 +1,5 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging.Abstractions;
-using Mohist.Server.Events.Grains;
 using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Infrastructure.Data.Epic;
 using Mohist.Server.Infrastructure.Data.Events;
@@ -35,7 +34,7 @@ public class TransactionalEventAppendTests : IAsyncLifetime
 
     private readonly TestSqliteDatabase _database;
     private readonly IDbContextFactory<MohistDbContext> _dbFactory;
-    private readonly NullEventDispatchGrainFactory _grainFactory = new();
+    private readonly EventDispatchSignal _dispatchSignal = new();
     private EventStore _eventStore = null!;
 
     public TransactionalEventAppendTests()
@@ -46,7 +45,7 @@ public class TransactionalEventAppendTests : IAsyncLifetime
     }
 
     private WorkflowRunStore CreateStore(IEventStore? eventStore = null) =>
-        new(_dbFactory, eventStore ?? _eventStore, _grainFactory, NullLogger<WorkflowRunStore>.Instance, TestServices.BackgroundTasks, new DispatchSnapshotStore(_dbFactory, NullLogger<DispatchSnapshotStore>.Instance) as IDispatchSnapshotStore);
+        new(_dbFactory, eventStore ?? _eventStore, NullLogger<WorkflowRunStore>.Instance, _dispatchSignal, new DispatchSnapshotStore(_dbFactory, NullLogger<DispatchSnapshotStore>.Instance) as IDispatchSnapshotStore);
 
     public async ValueTask InitializeAsync()
     {

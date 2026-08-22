@@ -1,45 +1,29 @@
-using Mohist.Server.TestSupport;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.DependencyInjection.Extensions;
+using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.Options;
 using Microsoft.Extensions.Time.Testing;
-using Mohist.Server.Agent.Grains;
-using Mohist.Server.Events.Grains;
-using Mohist.Server.Events.Hosting;
-using Mohist.Server.Infrastructure;
-using Mohist.Server.Infrastructure.Data;
 using Mohist.Server.Infrastructure.Data.AgentJobs;
 using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Infrastructure.Data.Events;
-using Mohist.Server.Infrastructure.Data.Runner;
+using Mohist.Server.Infrastructure.Data.Issue;
+using Mohist.Server.Infrastructure.Data.Sessions;
 using Mohist.Server.Infrastructure.Data.Workflow;
 using Mohist.Server.Infrastructure.Events;
-using Mohist.Server.Infrastructure.Hosting;
-using Mohist.Server.Issue.Domain.Events;
-using Mohist.Server.Issue.Services.WorkflowProfiles;
-using Mohist.Server.Runner.Grains;
-using Mohist.Server.Runner.Services;
-using Mohist.Server.Sessions.Services;
-using Mohist.Server.SpecTests.Specs.Issue.Profile;
 using Mohist.Server.SpecTests.Support;
-using Mohist.Server.Workflow.Grains;
-using Mohist.Server.Workflow.Services;
-using Mohist.Server.Workflow.Services.Artifacts;
-using Mohist.Server.Workflow.Services.Prompts;
-using Orleans;
-using Orleans.Configuration;
-using Orleans.TestingHost;
+using Mohist.Server.SpecTests.Specs.Issue.Profile;
+using Mohist.Server.TestSupport;
 using Xunit;
 
 namespace Mohist.Server.SpecTests.Specs.Events;
 
 /// <summary>
 /// Captures every CloudEvent <see cref="IEventStore.AppendAsync"/> call and
-/// serves the same events back from <see cref="ListUndeliveredAsync"/> as
-/// fresh undelivered rows. Lets spec tests drive the dispatcher's
-/// pull–fan-out–mark cycle without a real EF store — the dispatcher only
-/// needs a controllable <see cref="IEventStore"/> seam.
+/// serves the same events back as fresh undelivered rows. Lets spec tests
+/// drive the dispatcher's claim–drain–settle cycle against the real
+/// <see cref="DispatchStreamLeaseStore"/> on SQLite, with the rest of the
+/// store seams faked.
 /// </summary>
 public sealed class CapturingEventStore : IEventStore
 {
@@ -138,6 +122,65 @@ public sealed class CapturingEventStore : IEventStore
                 .Select(r => r)
                 .ToList());
         }
+    }
+
+    public Task<IReadOnlyList<PendingStream>> ListPendingStreamsAsync(int limit = 100, CancellationToken ct = default)
+    {
+        lock (_gate)
+        {
+            return Task.FromResult<IReadOnlyList<PendingStream>>(_rows
+                .GroupBy(r => (r.Origin, r.Source))
+                .Select(group => new PendingStream(
+                    group.Key.Origin,
+                    group.Key.Source,
+                    group.Min(r => r.Time)))
+                .OrderBy(stream => stream.OldestPendingTime)
+                .Take(limit)
+                .ToList());
+        }
+    }
+
+    public Task<IReadOnlyList<UndeliveredEvent>> ListUndeliveredByStreamAsync(
+        EventOrigin origin,
+        string source,
+        int limit,
+        CancellationToken ct = default)
+    {
+        lock (_gate)
+        {
+            return Task.FromResult<IReadOnlyList<UndeliveredEvent>>(_rows
+                .Where(r => r.Origin == origin && r.Source == source)
+                .OrderBy(r => r.Id)
+                .Take(limit)
+                .ToList());
+        }
+    }
+
+    public Task MarkDispatchedRangeAsync(
+        EventOrigin origin,
+        string source,
+        IReadOnlyList<long> ids,
+        DateTimeOffset dispatchedAt,
+        CancellationToken ct = default)
+    {
+        ct.ThrowIfCancellationRequested();
+        List<UndeliveredEvent> settled = [];
+        lock (_gate)
+        {
+            foreach (var id in ids)
+            {
+                var match = _rows.SingleOrDefault(r =>
+                    r.Origin == origin && r.Source == source && r.Id == id);
+                if (match is not null)
+                {
+                    _rows.Remove(match);
+                    settled.Add(match);
+                }
+            }
+        }
+        foreach (var row in settled)
+            NotifySettlement(row);
+        return Task.CompletedTask;
     }
 
     public int PendingCount
@@ -248,7 +291,7 @@ public sealed class CapturingEventStore : IEventStore
 /// <summary>
 /// In-memory <see cref="IDeadLetterStore"/> for the dispatcher fixture.
 /// Records every dead-letter write and supports the query/get paths so
-/// spec tests can assert the grain → service → dead-letter wiring.
+/// spec tests can assert the engine → dead-letter wiring.
 /// </summary>
 public sealed class CapturingDeadLetterStore : IDeadLetterStore
 {
@@ -501,28 +544,32 @@ public sealed class CapturingDeadLetterStore : IDeadLetterStore
         };
 }
 
+/// <summary>
+/// In-proc spec harness for the stream-lease dispatch engine. Builds the
+/// production dispatcher graph (real <see cref="DispatchStreamLeaseStore"/>
+/// on SQLite, production subscription discovery, <see cref="EventDispatcherService"/>)
+/// around capturing event/dead-letter fakes. No Orleans silo: the engine
+/// is plain .NET and the specs drive it with explicit drains.
+/// </summary>
 public sealed class DispatcherFixture : IAsyncLifetime
 {
-    public InProcessTestCluster Cluster { get; private set; } = null!;
-    public IGrainFactory Grains => Cluster.Client;
     public FakeTimeProvider TimeProvider { get; } = new(new DateTimeOffset(2026, 7, 1, 0, 0, 0, TimeSpan.Zero));
     public CapturingEventStore EventStore { get; } = new();
     public CapturingEventPublisher EventPublisher { get; } = new();
     public CapturingDeadLetterStore DeadLetterStore { get; }
-    public FakeRunnerWorkspaceClient RunnerWorkspace { get; private set; } = null!;
-    public SharedReminderTable ReminderTable { get; } = new();
-    public RecordingBackgroundTaskLauncher BackgroundTasks { get; } = new();
+    public EventDispatchSignal DispatchSignal { get; } = new();
     internal DispatcherDeliverySignals DeliverySignals { get; } = new();
 
-    public IEventDispatcherGrain EventDispatcher => Grains.GetGrain<IEventDispatcherGrain>(EventDispatcherGrain.Global);
+    public IServiceProvider Services { get; private set; } = null!;
+    public IEventDispatcher EventDispatcher { get; private set; } = null!;
 
     /// <summary>
-    /// Per-silo call lists shared by the test handlers
+    /// Call lists shared by the test handlers
     /// (<see cref="DispatcherClosedGenericHandler"/>,
     /// <see cref="DispatcherCatchAllHandler"/>,
-    /// <see cref="DispatcherSpecificHandler"/>) via the silo's
-    /// <see cref="IServiceProvider"/>. The handlers resolve the
-    /// fixture instance from DI so they can record invocations here.
+    /// <see cref="DispatcherSpecificHandler"/>) via the service provider.
+    /// The handlers resolve the fixture instance from DI so they can
+    /// record invocations here.
     /// </summary>
     public List<string> ClosedGenericInvocations { get; } = [];
     public List<string> CatchAllInvocations { get; } = [];
@@ -547,24 +594,46 @@ public sealed class DispatcherFixture : IAsyncLifetime
         var connectionString = $"Data Source={dbName};Mode=Memory;Cache=Shared";
         _keeper = new SqliteConnection(connectionString);
         _keeper.Open();
-        // Provision the production schema so the event-store factories in
-        // the silo DI have a complete WorkflowRunEvents / IssueEvents /
-        // EpicEvents / AgentSessionEvents / DeadLetters set to write into.
-        // Without this the producer-side WorkflowRunStore.SaveAsync
-        // fails on the first row insert ("no such table").
+        // Provision the production schema so the real lease store has the
+        // DispatchStreamLeases table, and the producer-side stores have the
+        // WorkflowRunEvents / IssueEvents / AgentSessionEvents tables.
         MigratedSqliteTemplate.CopyTo(_keeper);
 
-        var builder = new InProcessTestClusterBuilder().UseLogicalPorts();
-        builder.Options.InitialSilosCount = 2;
-        builder.ConfigureClient(clientBuilder =>
-            clientBuilder.Services.Configure<ClusterMembershipOptions>(ConfigureTestClusterMembership));
-        builder.ConfigureSilo((_, siloBuilder) =>
-            ConfigureDispatcherSilo(siloBuilder, connectionString));
-        Cluster = builder.Build();
-        await Cluster.DeployAsync();
-        await Cluster.WaitForLivenessToStabilizeAsync();
+        var services = new ServiceCollection();
+        services.AddLogging();
+        services.AddSingleton<TimeProvider>(TimeProvider);
+        services.AddDbContextFactory<MohistDbContext>(o => o.UseSqlite(connectionString));
 
-        RunnerWorkspace = Cluster.GetSiloServiceProvider(null).GetRequiredService<FakeRunnerWorkspaceClient>();
+        services.AddSingleton<IEventStore>(EventStore);
+        services.AddSingleton<IDeadLetterStore>(DeadLetterStore);
+        services.AddSingleton(DispatchSignal);
+        services.AddSingleton<EventDispatchSignal>(DispatchSignal);
+
+        services.AddCloudEventBus();
+        services.AddSingleton(this);
+        services.AddCloudEventHandlersFromAssembly(typeof(DispatcherFixture).Assembly);
+
+        services.AddSingleton<IDispatchStreamLeaseStore, DispatchStreamLeaseStore>();
+        services.AddSingleton<IEventPushQueue>(NullEventPushQueue.Instance);
+        services.Configure<EventDispatcherOptions>(options =>
+        {
+            options.MaxAttempts = 3;
+            options.BaseBackoff = TimeSpan.Zero;
+            options.MaxBackoff = TimeSpan.Zero;
+        });
+        services.AddSingleton<EventDispatcherService>();
+        services.AddSingleton<IEventDispatcher>(sp => sp.GetRequiredService<EventDispatcherService>());
+
+        // Producer-side stores for the wake-signal specs. Their grain
+        // counterparts compile against the same wake wiring.
+        services.AddScoped<IWorkflowRunStore, WorkflowRunStore>();
+        services.AddScoped<IDispatchSnapshotStore, DispatchSnapshotStore>();
+        services.AddScoped<IIssueStore, IssueStore>();
+        services.AddScoped<IAgentSessionStore, AgentSessionStore>();
+        services.AddScoped<IAgentJobStore, AgentJobStore>();
+
+        Services = services.BuildServiceProvider();
+        EventDispatcher = Services.GetRequiredService<IEventDispatcher>();
         EventPublisher.RegisterSink(EventStore);
     }
 
@@ -572,7 +641,6 @@ public sealed class DispatcherFixture : IAsyncLifetime
     {
         EventStore.Reset();
         DeadLetterStore.Reset();
-        BackgroundTasks.Reset();
         lock (ClosedGenericInvocations)
             ClosedGenericInvocations.Clear();
         lock (CatchAllInvocations)
@@ -584,23 +652,6 @@ public sealed class DispatcherFixture : IAsyncLifetime
         lock (_catchAllDeliverySignalsGate)
             _catchAllDeliverySignals.Clear();
         EventDispatcherImmediateTriggerTestSupport.ResetHandlerDeliveries(this);
-    }
-
-    public async Task<IAgentJobGrain> DeactivateAndReactivateAgentJobAsync(string jobKey)
-    {
-        var job = Grains.GetGrain<IAgentJobGrain>(jobKey);
-        var grainId = job.GetGrainId();
-        Assert.True(Cluster.TryGetGrainContext(grainId, out var previousContext));
-        var deactivated = Cluster.WaitForDeactivationAsync(grainId);
-        await TestLifecycle.Deactivate(job);
-        await deactivated;
-        Assert.False(Cluster.TryGetGrainContext(grainId, out _));
-
-        var reactivated = Grains.GetGrain<IAgentJobGrain>(jobKey);
-        await reactivated.GetStatusAsync();
-        Assert.True(Cluster.TryGetGrainContext(grainId, out var currentContext));
-        Assert.NotSame(previousContext, currentContext);
-        return reactivated;
     }
 
     public Task WaitForSpecificInvocationAsync(string eventId)
@@ -635,103 +686,9 @@ public sealed class DispatcherFixture : IAsyncLifetime
 
     public async ValueTask DisposeAsync()
     {
-        try
-        {
-            await BackgroundTasks.DisposeAsync();
-        }
-        finally
-        {
-            try
-            {
-                Cluster?.Dispose();
-            }
-            finally
-            {
-                _keeper?.Dispose();
-            }
-        }
-    }
-
-    private void ConfigureDispatcherSilo(ISiloBuilder siloBuilder, string connectionString)
-    {
-        siloBuilder.UseInMemoryReminderService();
-        siloBuilder.Services.RemoveAll<IReminderTable>();
-        siloBuilder.Services.AddSingleton<IReminderTable>(ReminderTable);
-        siloBuilder.Configure<ClusterMembershipOptions>(ConfigureTestClusterMembership);
-        siloBuilder.Configure<ReminderOptions>(o =>
-            o.MinimumReminderPeriod = TimeSpan.FromMilliseconds(100));
-        siloBuilder.AddMemoryGrainStorageAsDefault();
-        siloBuilder.Services.AddDbContextFactory<MohistDbContext>(o => o.UseSqlite(connectionString));
-        siloBuilder.Services.AddScoped<IWorkflowRunStore, WorkflowRunStore>();
-        siloBuilder.Services.AddScoped<IDispatchSnapshotStore, DispatchSnapshotStore>();
-        siloBuilder.Services.AddScoped<DispatchSnapshotStore>();
-        siloBuilder.Services.AddScoped<Mohist.Server.Infrastructure.Data.Issue.IIssueStore, Mohist.Server.Infrastructure.Data.Issue.IssueStore>();
-        siloBuilder.Services.AddScoped<Mohist.Server.Infrastructure.Data.Sessions.IAgentSessionStore, Mohist.Server.Infrastructure.Data.Sessions.AgentSessionStore>();
-        siloBuilder.Services.AddScoped<IAgentJobStore, AgentJobStore>();
-        siloBuilder.Services.AddScoped<RunnerDefinitionStore>();
-        siloBuilder.Services.AddScoped<WorkflowRunVariablesStore>();
-        siloBuilder.Services.AddScoped<ProjectVariableStore>();
-        siloBuilder.Services.AddScoped<IssueVariableStore>();
-        siloBuilder.Services.AddSingleton<IPromptLoader>(_ => new FakePromptLoader());
-        siloBuilder.Services.AddSingleton<PromptTemplateEngine>();
-        siloBuilder.Services.AddScoped<ProjectPromptStore>();
-        siloBuilder.Services.AddScoped<WorkflowPromptResolver>();
-        siloBuilder.Services.AddSingleton(WorkflowGrainTestHelpers.CreateEmptyConfigService());
-        siloBuilder.Services.AddScoped<WorkflowDefinitionResolver>();
-        siloBuilder.Services.AddScoped<Mohist.Server.Workflow.Services.WorkflowVariableResolver>();
-        siloBuilder.Services.AddScoped<Mohist.Server.Runner.Services.DispatchService>();
-        siloBuilder.Services.AddScoped<Mohist.Server.Runner.Services.WorkflowReportService>();
-        siloBuilder.Services.AddScoped<WorkflowItemTranslator>();
-        siloBuilder.Services.AddScoped<IssueWorkflowProfileRegistry>();
-        siloBuilder.Services.AddScoped<EffectiveWorkflowProfileResolver>();
-        siloBuilder.Services.AddSingleton<FakeRunnerWorkspaceClient>();
-        siloBuilder.Services.AddSingleton<IRunnerWorkspaceClient>(sp => sp.GetRequiredService<FakeRunnerWorkspaceClient>());
-
-        siloBuilder.Services.RemoveAll<IEventStore>();
-        siloBuilder.Services.AddSingleton<IEventStore>(EventStore);
-        siloBuilder.Services.RemoveAll<IDeadLetterStore>();
-        siloBuilder.Services.AddSingleton<IDeadLetterStore>(DeadLetterStore);
-
-        siloBuilder.Services.AddCloudEventBus();
-        siloBuilder.Services.AddSingleton(this);
-        siloBuilder.Services.AddCloudEventHandlersFromAssembly(typeof(DispatcherFixture).Assembly);
-
-        siloBuilder.Services.AddSingleton<EventDispatcherService>();
-        siloBuilder.Services.AddHostedService<DispatcherActivationService>();
-        siloBuilder.Services.AddSingleton<TimeProvider>(TimeProvider);
-        siloBuilder.Services.Configure<EventDispatcherOptions>(options =>
-        {
-            options.ReminderPeriod = TimeSpan.FromHours(1);
-            options.MaxAttempts = 3;
-            options.BaseBackoff = TimeSpan.Zero;
-            options.MaxBackoff = TimeSpan.Zero;
-        });
-
-        siloBuilder.Services.AddSingleton<ITranscriptEventPublisher, TestNoopTranscriptEventPublisher>();
-        siloBuilder.Services.AddScoped<IWorkflowArtifactBindService, WorkflowArtifactBindService>();
-        siloBuilder.Services.AddScoped<AgentSessionQuery>();
-        siloBuilder.Services.Configure<AgentJobOptions>(opts =>
-        {
-            opts.DispatchBackoffInitial = TimeSpan.FromMilliseconds(50);
-            opts.DispatchBackoffCap = TimeSpan.FromMilliseconds(200);
-            opts.DispatchRetryBound = TimeSpan.FromSeconds(5);
-            opts.JobTimeout = TimeSpan.FromSeconds(10);
-        });
-        siloBuilder.Services.AddRequiredInfrastructure();
-        siloBuilder.Services.RemoveAll<IBackgroundTaskLauncher>();
-        siloBuilder.Services.AddSingleton<IBackgroundTaskLauncher>(BackgroundTasks);
-        siloBuilder.Services.Configure<WorkflowOptions>(_ => { });
-    }
-
-    private static void ConfigureTestClusterMembership(ClusterMembershipOptions options)
-    {
-        options.ProbeTimeout = TimeSpan.FromMilliseconds(100);
-        options.TableRefreshTimeout = TimeSpan.FromMilliseconds(100);
-        options.DeathVoteExpirationTimeout = TimeSpan.FromSeconds(1);
-        options.NumProbedSilos = 1;
-        options.NumMissedProbesLimit = 1;
-        options.NumVotesForDeathDeclaration = 1;
-        options.UseLivenessGossip = false;
+        if (Services is IDisposable d)
+            d.Dispose();
+        await _keeper.DisposeAsync();
     }
 
     private TaskCompletionSource GetSpecificDeliverySignal(string eventId) =>

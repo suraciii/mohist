@@ -137,11 +137,11 @@ public abstract class EpicProgressionTestSupport
                 identity.Context,
                 identity.Runtime,
                 _dbFactory,
-                this,
                 new FakeTimeProvider(new DateTimeOffset(2026, 6, 30, 0, 0, 0, TimeSpan.Zero)),
                 _eventStore,
                 NullLogger<EpicGrain>.Instance,
-                TestServices.BackgroundTasks);
+                this,
+                new EventDispatchSignal());
         }
 
         public IIssueGrain GetIssueGrain(string issueKey) => new RecordingIssueGrain(this, issueKey);

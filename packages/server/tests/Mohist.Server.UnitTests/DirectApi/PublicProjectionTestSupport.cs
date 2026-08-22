@@ -14,6 +14,7 @@ using Mohist.Server.Infrastructure.Data.Sessions;
 using Mohist.Server.Sessions.Domain;
 using Mohist.Server.TestSupport;
 using Mohist.Server.UnitTests.Support;
+using Mohist.Server.Infrastructure.Events;
 
 namespace Mohist.Server.UnitTests.DirectApi;
 
@@ -37,9 +38,8 @@ public sealed class PublicProjectionTestSupport : IAsyncDisposable
         SessionStore = new AgentSessionStore(
             DbFactory,
             EventStore,
-            new NullEventDispatchGrainFactory(),
             NullLogger<AgentSessionStore>.Instance,
-            new BackgroundTaskLauncher());
+            new EventDispatchSignal());
         JobStore = new AgentJobStore(
             DbFactory,
             NullLogger<AgentJobStore>.Instance,

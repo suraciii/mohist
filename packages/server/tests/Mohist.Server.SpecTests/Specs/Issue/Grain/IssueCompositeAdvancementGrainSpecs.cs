@@ -1,5 +1,4 @@
 using Microsoft.Extensions.DependencyInjection;
-using Mohist.Server.Events.Grains;
 using Mohist.Server.Infrastructure.Data.Issue;
 using Mohist.Server.Infrastructure.Events;
 using Mohist.Server.Infrastructure.Orleans;
@@ -183,7 +182,7 @@ public class IssueCompositeAdvancementGrainSpecs
 
     private async Task DispatchEventsAsync()
     {
-        await Grains.GetGrain<IEventDispatcherGrain>(EventDispatcherGrain.Global).DispatchNowAsync();
+        await Services.GetRequiredService<IEventDispatcher>().DrainAsync();
     }
 
     private async Task<IssueReadModel?> GetIssueReadModelAsync(string projectId, int number)

@@ -11,7 +11,7 @@ namespace Mohist.Server.Infrastructure.Data.Events;
 /// separate tables so workflow and issue remain distinct bounded
 /// contexts at the storage layer.
 /// </summary>
-public sealed class IssueEventRow : IEventRow
+public sealed class IssueEventRow : IEventEnvelopeRow
 {
     public required long Id { get; init; }
     public required string Source { get; init; }

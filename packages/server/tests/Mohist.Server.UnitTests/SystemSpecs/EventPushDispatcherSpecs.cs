@@ -1,7 +1,7 @@
 using Microsoft.Extensions.Logging.Abstractions;
+using Mohist.Server.TestSupport;
 using Microsoft.Extensions.Options;
 using Microsoft.Extensions.Time.Testing;
-using Mohist.Server.Events.Grains;
 using Mohist.Server.Infrastructure.Events;
 using Mohist.Server.Issue.Domain.Events;
 using Mohist.Server.UnitTests.Support;
@@ -14,7 +14,7 @@ public sealed class EventPushDispatcherSpecs
     private static readonly DateTimeOffset StartTime = new(2026, 7, 1, 0, 0, 0, TimeSpan.Zero);
 
     [Fact]
-    public async Task DispatchAsync_OffersPersistedEventToPushQueueWithoutDurableHandler()
+    public async Task DrainAsync_OffersPersistedEventToPushQueueWithoutDurableHandler()
     {
         var events = new FakeEventStore();
         var queue = new RecordingPushQueue();
@@ -24,14 +24,14 @@ public sealed class EventPushDispatcherSpecs
             "/mohist/issues/issue_push",
             eventId: "evt_push"));
 
-        await dispatcher.DispatchAsync(CancellationToken.None);
+        await dispatcher.DrainAsync(CancellationToken.None);
 
         Assert.Equal("evt_push", Assert.Single(queue.Events).Id);
         Assert.Single(events.Marked);
     }
 
     [Fact]
-    public async Task DispatchAsync_PushHandlerFailure_SettlesSourceAndDoesNotBlockLaterEvent()
+    public async Task DrainAsync_PushHandlerFailure_SettlesSourceAndDoesNotBlockLaterEvent()
     {
         var options = Options.Create(new EventDispatcherOptions
         {
@@ -60,7 +60,7 @@ public sealed class EventPushDispatcherSpecs
         await worker.StartAsync(CancellationToken.None);
         try
         {
-            await dispatcher.DispatchAsync(CancellationToken.None);
+            await dispatcher.DrainAsync(CancellationToken.None);
             await pushFailed.Task;
 
             Assert.Equal([1L, 2L], events.Marked.Select(item => item.Id));
@@ -84,6 +84,7 @@ public sealed class EventPushDispatcherSpecs
             events,
             subscriptions,
             deadLetters,
+            new FakeDispatchStreamLeaseStore(),
             new FakeTimeProvider(StartTime),
             Options.Create(new EventDispatcherOptions()),
             NullLogger<EventDispatcherService>.Instance,

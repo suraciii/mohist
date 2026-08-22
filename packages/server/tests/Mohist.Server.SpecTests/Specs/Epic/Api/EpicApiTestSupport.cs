@@ -1,5 +1,6 @@
 using Mohist.Server.Epic.Grains;
-using Mohist.Server.Events.Grains;
+using Mohist.Server.Infrastructure.Events;
+using Microsoft.Extensions.DependencyInjection;
 using Mohist.Server.Infrastructure.Orleans;
 using Mohist.Server.Issue.Grains;
 using Mohist.Server.Issue.Services.WorkflowProfiles;
@@ -48,7 +49,7 @@ public abstract class EpicApiTestSupport
     }
 
     protected Task DispatchPendingEventsAsync() =>
-        _grains.GetGrain<IEventDispatcherGrain>(EventDispatcherGrain.Global).DispatchNowAsync();
+        _fixture.Services.GetRequiredService<IEventDispatcher>().DrainAsync();
 
     protected sealed record ProjectDto(string Id);
     protected sealed record EpicDto(int Number, string Title, string Description, string Priority, string Status, string CreatedAt, string UpdatedAt);

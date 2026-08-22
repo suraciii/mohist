@@ -3,7 +3,6 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
-using Mohist.Server.Events.Grains;
 using Mohist.Server.Infrastructure;
 using Mohist.Server.Infrastructure.Data;
 using Mohist.Server.Infrastructure.Data.Db;
@@ -189,8 +188,7 @@ public class IssueWorkflowReadPathSpecs
             services.GetRequiredService<WorkflowQuerier>(),
             services.GetRequiredService<IDbContextFactory<MohistDbContext>>(),
             services.GetRequiredService<IEventStore>(),
-            services.GetRequiredService<IGrainFactory>(),
-            services.GetRequiredService<IBackgroundTaskLauncher>(),
+            services.GetRequiredService<EventDispatchSignal>(),
             services.GetRequiredService<IssueRepositoryResolver>(),
             services.GetRequiredService<WorkflowDefinitionResolver>(),
             services.GetRequiredService<WorkflowPromptResolver>(),
@@ -286,8 +284,7 @@ public class IssueWorkflowReadPathSpecs
             IGrainFactory grainFactory,
             ILogger<IssueStore> log)
         {
-            _delegate = new IssueStore(dbFactory, new NoopEventStore(), grainFactory, log,
-                new Mohist.Server.Infrastructure.BackgroundTaskLauncher());
+            _delegate = new IssueStore(dbFactory, new NoopEventStore(), log, new EventDispatchSignal());
         }
 
         public IReadOnlyList<string> SaveCalls => _saveCalls;

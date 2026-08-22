@@ -1,9 +1,5 @@
-using System.Runtime.CompilerServices;
-using Mohist.Server.Infrastructure;
 using Mohist.Server.Infrastructure.Events;
-using Mohist.Server.Otel;
 using Mohist.Server.TestSupport;
-using Xunit;
 
 namespace Mohist.Server.SpecTests.Specs.Events;
 
@@ -37,65 +33,8 @@ internal readonly record struct DispatcherEventKey(
         new(envelope.Source.ToString(), envelope.Type, envelope.Id, handler);
 }
 
-internal sealed record DispatcherDeliveryAwaiter(
-    Task<RecordingBackgroundTaskLauncher.PokeWork> PokeEnqueued,
-    Func<UndeliveredEvent, bool> EventMatcher,
-    DispatcherHandler Handler);
-
 internal static class EventDispatcherImmediateTriggerTestSupport
 {
-    internal static DispatcherDeliveryAwaiter ExpectPokeDelivery(
-        DispatcherFixture fixture,
-        Func<UndeliveredEvent, bool> eventMatcher,
-        DispatcherHandler handler)
-    {
-        ArgumentNullException.ThrowIfNull(eventMatcher);
-        return new(fixture.BackgroundTasks.ExpectNextLaunch(), eventMatcher, handler);
-    }
-
-    internal static async Task AwaitPokeDeliveryAsync(
-        DispatcherFixture fixture,
-        DispatcherDeliveryAwaiter delivery)
-    {
-        var poke = fixture.BackgroundTasks.RequireExpectedLaunch(
-            delivery.PokeEnqueued,
-            "producer commit did not enqueue a dispatcher poke");
-        var pending = await fixture.EventStore.ListUndeliveredAsync().ConfigureAwait(false);
-        var matching = pending.Where(delivery.EventMatcher).ToArray();
-        Assert.Single(matching);
-        var appended = matching[0];
-        var handlerDelivery = WaitForHandlerDeliveryAsync(
-            fixture,
-            DispatcherDeliveryKey.From(appended, delivery.Handler));
-
-        var started = fixture.BackgroundTasks.StartAsync(poke);
-        try
-        {
-            await poke.Started.ConfigureAwait(false);
-            await Task.WhenAny(handlerDelivery, poke.Completed).ConfigureAwait(false);
-            if (poke.Completed.IsCompleted && !handlerDelivery.IsCompleted)
-            {
-                await poke.Completed.ConfigureAwait(false);
-                Assert.Fail($"Poke completed before event {appended.EventId} reached its handler.");
-            }
-
-            await handlerDelivery.ConfigureAwait(false);
-            await poke.Completed.ConfigureAwait(false);
-            var remaining = await fixture.EventStore.ListUndeliveredAsync().ConfigureAwait(false);
-            Assert.DoesNotContain(remaining, row =>
-                row.Origin == appended.Origin
-                && row.Id == appended.Id
-                && row.Source == appended.Source
-                && row.Type == appended.Type
-                && row.EventId == appended.EventId);
-        }
-        finally
-        {
-            fixture.BackgroundTasks.Release(poke);
-            await started.ConfigureAwait(false);
-        }
-    }
-
     internal static Task WaitForHandlerInvocationAsync(
         DispatcherFixture fixture,
         DispatcherDeliveryKey key) =>

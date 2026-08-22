@@ -1,6 +1,5 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
-using Mohist.Server.Events.Grains;
 using Mohist.Server.Infrastructure;
 using Mohist.Server.Infrastructure.Events;
 using Mohist.Server.Infrastructure.Data.Db;
@@ -25,24 +24,21 @@ public class WorkflowRunStore : IWorkflowRunStore
 
     private readonly IDbContextFactory<MohistDbContext> _dbFactory;
     private readonly IEventStore _eventStore;
-    private readonly IGrainFactory _grainFactory;
     private readonly ILogger<WorkflowRunStore> _log;
-    private readonly IBackgroundTaskLauncher _backgroundTasks;
+    private readonly EventDispatchSignal _dispatchSignal;
     private readonly IDispatchSnapshotStore _dispatchSnapshotStore;
 
     public WorkflowRunStore(
         IDbContextFactory<MohistDbContext> dbFactory,
         IEventStore eventStore,
-        IGrainFactory grainFactory,
         ILogger<WorkflowRunStore> log,
-        IBackgroundTaskLauncher backgroundTasks,
+        EventDispatchSignal dispatchSignal,
         IDispatchSnapshotStore dispatchSnapshotStore)
     {
         _dbFactory = dbFactory;
         _eventStore = eventStore;
-        _grainFactory = grainFactory;
         _log = log;
-        _backgroundTasks = backgroundTasks;
+        _dispatchSignal = dispatchSignal;
         _dispatchSnapshotStore = dispatchSnapshotStore;
     }
 
@@ -88,7 +84,7 @@ public class WorkflowRunStore : IWorkflowRunStore
     }
 
     private void PokeDispatcherBestEffort() =>
-        EventDispatcherPoke.PokeAfterCommit(_grainFactory, _log, nameof(WorkflowRunStore), _backgroundTasks);
+        _dispatchSignal.Wake();
 
     /// <summary>
     /// Build the CloudEvent envelope for a workflow domain event, stamping its

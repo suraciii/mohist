@@ -960,6 +960,41 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
                     b.ToTable("DeadLetters", (string)null);
                 });
 
+            modelBuilder.Entity("Mohist.Server.Infrastructure.Data.Events.DispatchStreamLeaseRow", b =>
+                {
+                    b.Property<string>("Origin")
+                        .HasMaxLength(32)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Source")
+                        .HasMaxLength(256)
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("Attempts")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("LastError")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("LeaseOwner")
+                        .IsRequired()
+                        .HasMaxLength(128)
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTimeOffset>("LeaseUntil")
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTimeOffset?>("NextAttemptAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Origin", "Source");
+
+                    b.ToTable("DispatchStreamLeases", (string)null);
+                });
+
             modelBuilder.Entity("Mohist.Server.Infrastructure.Data.Events.EpicEventRow", b =>
                 {
                     b.Property<string>("Source")

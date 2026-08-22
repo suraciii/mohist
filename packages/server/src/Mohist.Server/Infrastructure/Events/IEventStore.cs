@@ -45,7 +45,41 @@ public interface IEventStore
         DateTimeOffset dispatchedAt,
         CancellationToken ct = default);
     Task<IReadOnlyList<UndeliveredEvent>> ListUndeliveredAsync(int limit = 100, CancellationToken ct = default);
+
+    /// <summary>
+    /// Streams with at least one undispatched row, oldest pending event
+    /// first, so discovery ages fairly across streams.
+    /// </summary>
+    Task<IReadOnlyList<PendingStream>> ListPendingStreamsAsync(int limit = 100, CancellationToken ct = default);
+
+    /// <summary>
+    /// Undispatched rows of one stream in per-source Id order — the FIFO
+    /// order a lease holder must deliver in.
+    /// </summary>
+    Task<IReadOnlyList<UndeliveredEvent>> ListUndeliveredByStreamAsync(
+        EventOrigin origin,
+        string source,
+        int limit,
+        CancellationToken ct = default);
+
+    /// <summary>
+    /// Marks an arbitrary set of a stream's rows dispatched in one
+    /// statement. Callers pass the contiguous delivered prefix.
+    /// </summary>
+    Task MarkDispatchedRangeAsync(
+        EventOrigin origin,
+        string source,
+        IReadOnlyList<long> ids,
+        DateTimeOffset dispatchedAt,
+        CancellationToken ct = default);
 }
+
+/// <summary>One stream with undispatched rows. OldestPendingTime drives
+/// fair ordering in discovery.</summary>
+public sealed record PendingStream(
+    EventOrigin Origin,
+    string Source,
+    DateTimeOffset OldestPendingTime);
 
 public sealed record StoredCloudEvent(
     long Id,

@@ -2,10 +2,10 @@ using Mohist.Server.TestSupport;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Time.Testing;
 using Mohist.Server.Agent.Grains;
-using Mohist.Server.Events.Grains;
 using Mohist.Server.Infrastructure.Data;
 using Mohist.Server.Infrastructure.Data.AgentJobs;
 using Mohist.Server.Infrastructure.Data.Db;
@@ -305,12 +305,19 @@ public static class GrainTestConfig
                     "Mohist.Server.Events.Subscriptions.WorkflowStageLockReleaseHandler"),
             ];
         });
+        siloBuilder.Services.AddSingleton<EventDispatchSignal>();
+        siloBuilder.Services.TryAddSingleton<Mohist.Server.Infrastructure.Data.Events.IDispatchStreamLeaseStore, Mohist.Server.Infrastructure.Data.Events.DispatchStreamLeaseStore>();
+        siloBuilder.Services.TryAddSingleton<IEventPushQueue>(NullEventPushQueue.Instance);
         siloBuilder.Services.Configure<EventDispatcherOptions>(options =>
         {
-            options.BatchSize = 100;
             options.MaxAttempts = 3;
         });
+        // No EventDispatchWorker here: specs drive draining explicitly
+        // through IEventDispatcher.DrainAsync so delivery is synchronous
+        // with the test body. Producers' wake signals are best-effort.
         siloBuilder.Services.AddSingleton<EventDispatcherService>();
+        siloBuilder.Services.AddSingleton<IEventDispatcher>(services =>
+            services.GetRequiredService<EventDispatcherService>());
         siloBuilder.Services.AddSingleton<ITranscriptEventPublisher, NoopTranscriptEventPublisher>();
         siloBuilder.Services.AddSingleton<IAgentSessionPersistenceObserver>(
             persistence ?? new AgentSessionPersistenceTestProbe());

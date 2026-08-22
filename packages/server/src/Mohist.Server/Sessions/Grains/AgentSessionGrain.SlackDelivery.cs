@@ -77,7 +77,7 @@ public sealed partial class AgentSessionGrain
         try
         {
             await _eventStore.AppendAsync(envelope, CancellationToken.None);
-            EventDispatcherPoke.PokeAfterCommit(GrainFactory, _log, nameof(AgentSessionGrain), _backgroundTasks);
+            _dispatchSignal.Wake();
         }
         catch (Exception ex)
         {

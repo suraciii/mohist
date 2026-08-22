@@ -351,6 +351,6 @@ public class StageLockSpecs : WorkflowGrainSpecs
 
         await scope.ServiceProvider
             .GetRequiredService<EventDispatcherService>()
-            .DispatchAsync(CancellationToken.None);
+            .DrainAsync(CancellationToken.None);
     }
 }

@@ -6,7 +6,6 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Time.Testing;
-using Mohist.Server.Events.Grains;
 using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Infrastructure.Data.Issue;
 using Mohist.Server.Infrastructure.Data.Sessions;
@@ -130,13 +129,14 @@ public sealed class MohistDbFixture : IAsyncLifetime
         // query scope.
         services.RemoveAll<IEventPublisher>();
         services.AddSingleton<IEventPublisher>(_eventBus);
-        // Issue-362 T-003: the three event producers (WorkflowRunStore,
-        // IssueStore, AgentSessionStore) take an IGrainFactory in their
-        // constructor so they can poke the dispatcher grain after commit.
-        // MohistDbFixture has no silo, so register a no-op grain factory
-        // whose dispatcher reference is a no-op. The poke is a pure
-        // latency optimization — a missing poke is invisible to specs
-        // that exercise the stores without the dispatcher.
+        // Issue-362 T-003: the event producers (WorkflowRunStore,
+        // IssueStore, AgentSessionStore) wake the in-proc dispatch signal
+        // after commit. MohistDbFixture has no dispatch workers, so a bare
+        // signal whose Wake() goes unobserved is enough — a missing wake is
+        // invisible to specs that exercise the stores without draining.
+        services.RemoveAll<EventDispatchSignal>();
+        services.AddSingleton(new EventDispatchSignal());
+        services.RemoveAll<IGrainFactory>();
         services.AddSingleton<IGrainFactory, NullDispatchGrainFactory>();
         // RunnerStatusService internally calls IRunnerRegistryGrain via the
         // grain factory, which the null dispatch above rejects. Replace the
@@ -182,18 +182,14 @@ public sealed class MohistDbFixture : IAsyncLifetime
 
     /// <summary>
     /// Minimal <see cref="IGrainFactory"/> stand-in for
-    /// <see cref="MohistDbFixture"/>, which has no silo. The dispatcher
-    /// grain is a no-op reference so the stores' post-commit poke runs
-    /// without an Orleans activation. The poke is a pure latency
-    /// optimization — its absence is invisible to specs that exercise
+    /// <see cref="MohistDbFixture"/>, which has no silo. The poke is a pure
+    /// latency optimization — its absence is invisible to specs that exercise
     /// the stores directly without driving the dispatcher.
     /// </summary>
     private sealed class NullDispatchGrainFactory : IGrainFactory
     {
         TGrainInterface IGrainFactory.GetGrain<TGrainInterface>(string primaryKey, string? grainClassNamePrefix)
         {
-            if (typeof(TGrainInterface) == typeof(IEventDispatcherGrain))
-                return (TGrainInterface)(object)new NullEventDispatcherGrain();
             throw new NotSupportedException($"NullDispatchGrainFactory does not support {typeof(TGrainInterface).Name}");
         }
 
@@ -244,21 +240,6 @@ public sealed class MohistDbFixture : IAsyncLifetime
 
         IAddressable IGrainFactory.GetGrain(Type interfaceType, IdSpan grainKey)
             => throw new NotSupportedException();
-    }
-
-    private sealed class NullEventDispatcherGrain : IGrainWithStringKey, IEventDispatcherGrain
-    {
-        public Task DispatchNowAsync(CancellationToken ct = default) => Task.CompletedTask;
-
-        public Task PokeAsync(CancellationToken ct = default) => Task.CompletedTask;
-
-        public Task<DeadLetterRedeliveryResult> RedeliverAsync(long deadLetterId, CancellationToken ct = default) =>
-            Task.FromResult(new DeadLetterRedeliveryResult(false, false, 0, "null grain"));
-
-        public Task ReceiveReminder(string reminderName, TickStatus status) => Task.CompletedTask;
-
-        public GrainId GrainId => default;
-        public string Key => string.Empty;
     }
 
     /// <summary>

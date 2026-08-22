@@ -1,8 +1,8 @@
 using System.Diagnostics.Metrics;
+using Mohist.Server.TestSupport;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using Microsoft.Extensions.Time.Testing;
-using Mohist.Server.Events.Grains;
 using Mohist.Server.Infrastructure.Events;
 using Mohist.Server.Otel;
 using Mohist.Server.UnitTests.Support;
@@ -11,13 +11,12 @@ using Xunit;
 namespace Mohist.Server.UnitTests.SystemSpecs;
 
 /// <summary>
-/// Focused unit coverage for the T-003 <c>mohist.server.event_dispatcher.blocked_sources</c>
-/// observable gauge: <see cref="EventDispatcherService"/> publishes the count of
-/// sources blocked by a pending handler retry in the most recent dispatch cycle,
-/// without any high-cardinality source identifier tags. The dispatcher service
-/// owns its own meter so the singleton lifetime lines up with the reminder
-/// grain. Spec: <c>openspec/changes/issue-502/specs/event-dispatcher/spec.md
-/// #Blocked-source-count-is-observable</c>.
+/// Focused unit coverage for the <c>mohist.server.event_dispatcher.blocked_sources</c>
+/// observable gauge: <see cref="EventDispatcherService"/> publishes the number
+/// of streams parked on their lease with a pending retry, without any
+/// high-cardinality source identifier tags. A parked stream is one whose head
+/// failed and whose next attempt time has not elapsed; other streams keep
+/// draining.
 /// </summary>
 public class EventDispatcherBlockedSourcesGaugeSpecs
 {
@@ -37,10 +36,10 @@ public class EventDispatcherBlockedSourcesGaugeSpecs
             events,
             subs,
             deadLetters,
+            new FakeDispatchStreamLeaseStore(),
             time,
             Options.Create(new EventDispatcherOptions
             {
-                BatchSize = 100,
                 MaxAttempts = handlerMaxAttempts,
                 BaseBackoff = baseBackoff ?? TimeSpan.FromSeconds(1),
                 MaxBackoff = TimeSpan.FromSeconds(30),
@@ -49,14 +48,32 @@ public class EventDispatcherBlockedSourcesGaugeSpecs
             NullEventPushQueue.Instance);
     }
 
-    [Fact]
-    public async Task PendingRetry_PublishesPositiveBlockedSourceCount_AndSkipsLaterRowsInSameSource()
+    private static MeterListener Listen(Meter meter, Action<long> observe)
     {
-        // One handler always throws; the first row for the same source consumes
-        // its retry budget and the dispatcher's blockedSources set records the
-        // source as blocked. The later row from the same source is skipped in
-        // this cycle, the handler is not re-invoked, and the gauge reports a
-        // positive count for the completed cycle.
+        var listener = new MeterListener
+        {
+            InstrumentPublished = (instrument, current) =>
+            {
+                if (instrument.Meter == meter)
+                    current.EnableMeasurementEvents(instrument);
+            },
+        };
+        listener.SetMeasurementEventCallback<long>((instrument, value, _, _) =>
+        {
+            if (instrument.Name == RuntimeMetricCatalog.EventDispatcherBlockedSources)
+                observe(value);
+        });
+        listener.Start();
+        return listener;
+    }
+
+    [Fact]
+    public async Task ParkedStream_PublishesPositiveCount_HeadFailureBlocksOnlyItsStream()
+    {
+        // One handler always throws; the head row parks its stream on the
+        // lease with backoff. The later row in the same stream is not
+        // delivered this pass (FIFO head-of-line), the handler is invoked
+        // once, and the gauge reports one parked stream.
         var time = new FakeTimeProvider(StartTime);
         var events = new FakeEventStore();
         var dlq = new FakeDeadLetterStore();
@@ -70,23 +87,9 @@ public class EventDispatcherBlockedSourcesGaugeSpecs
             }),
             DispatchDynamic);
         using var dispatcher = BuildDispatcher(events, dlq, [sub], time, handlerMaxAttempts: 3);
-        var dispatcherMeter = dispatcher.Meter;
 
         var observed = new List<long>();
-        using var listener = new MeterListener
-        {
-            InstrumentPublished = (instrument, current) =>
-            {
-                if (instrument.Meter == dispatcherMeter)
-                    current.EnableMeasurementEvents(instrument);
-            },
-        };
-        listener.SetMeasurementEventCallback<long>((instrument, value, _, _) =>
-        {
-            if (instrument.Name == RuntimeMetricCatalog.EventDispatcherBlockedSources)
-                observed.Add(value);
-        });
-        listener.Start();
+        using var listener = Listen(dispatcher.Meter, observed.Add);
 
         events.Enqueue(FakeEventStore.Build(
             IssueCompleted,
@@ -99,25 +102,21 @@ public class EventDispatcherBlockedSourcesGaugeSpecs
             id: 2,
             eventId: "evt_blocked_2"));
 
-        await dispatcher.DispatchAsync(CancellationToken.None);
+        await dispatcher.DrainAsync(CancellationToken.None);
         listener.RecordObservableInstruments();
 
-        // The pending retry blocked the source; the later row was not delivered
-        // this cycle. The single call into the handler is the only one for the
-        // blocked source — the FIFO skip must not re-invoke the handler.
         Assert.Equal(1, calls);
         Assert.Single(observed);
         Assert.Equal(1L, observed[0]);
     }
 
     [Fact]
-    public async Task NoBlockedSource_PublishesZero_AfterRecoveryCycle()
+    public async Task NoParkedStream_PublishesZero_AfterRecoveryPass()
     {
-        // The blocked-source gauge reports the last completed cycle's outcome.
-        // The first cycle blocks the source because a handler is awaiting its
-        // next retry time. After the backoff elapses and the next cycle settles
-        // the row successfully, the source is no longer blocked and the gauge
-        // reports zero.
+        // The gauge reports parked-lease counts refreshed after each claimed
+        // pass. The first pass parks the stream until backoff elapses. After
+        // the backoff passes and the retry settles the rows, the lease is
+        // released and the gauge reports zero.
         var time = new FakeTimeProvider(StartTime);
         var events = new FakeEventStore();
         var dlq = new FakeDeadLetterStore();
@@ -138,23 +137,9 @@ public class EventDispatcherBlockedSourcesGaugeSpecs
             time,
             handlerMaxAttempts: 3,
             baseBackoff: TimeSpan.FromSeconds(1));
-        var dispatcherMeter = dispatcher.Meter;
 
         var observed = new List<long>();
-        using var listener = new MeterListener
-        {
-            InstrumentPublished = (instrument, current) =>
-            {
-                if (instrument.Meter == dispatcherMeter)
-                    current.EnableMeasurementEvents(instrument);
-            },
-        };
-        listener.SetMeasurementEventCallback<long>((instrument, value, _, _) =>
-        {
-            if (instrument.Name == RuntimeMetricCatalog.EventDispatcherBlockedSources)
-                observed.Add(value);
-        });
-        listener.Start();
+        using var listener = Listen(dispatcher.Meter, observed.Add);
 
         events.Enqueue(FakeEventStore.Build(
             IssueCompleted,
@@ -167,20 +152,17 @@ public class EventDispatcherBlockedSourcesGaugeSpecs
             id: 2,
             eventId: "evt_recover_2"));
 
-        await dispatcher.DispatchAsync(CancellationToken.None);
+        await dispatcher.DrainAsync(CancellationToken.None);
         listener.RecordObservableInstruments();
-        // Cycle one: first row throws → pending retry → source is blocked.
-        // The second row is skipped under FIFO blocking.
+        // Pass one: head row throws → stream parked for backoff.
         Assert.Equal(1L, observed[0]);
 
         time.Advance(TimeSpan.FromSeconds(1));
-        await dispatcher.DispatchAsync(CancellationToken.None);
+        await dispatcher.DrainAsync(CancellationToken.None);
         listener.RecordObservableInstruments();
 
-        // Cycle two: the retry elapses, the handler now succeeds, the source
-        // is settled, the second row is delivered in the same cycle. The
-        // completed cycle has no source whose earlier event is awaiting retry,
-        // so the gauge reports zero.
+        // Pass two: the parked retry is claimable again, the handler now
+        // succeeds, both rows settle, and the lease is released.
         Assert.Equal(2, observed.Count);
         Assert.Equal(0L, observed[1]);
     }
@@ -203,14 +185,13 @@ public class EventDispatcherBlockedSourcesGaugeSpecs
             }),
             DispatchDynamic);
         using var dispatcher = BuildDispatcher(events, dlq, [sub], time, handlerMaxAttempts: 5);
-        var dispatcherMeter = dispatcher.Meter;
 
         var samples = new List<KeyValuePair<string, object?>[]>();
         using var listener = new MeterListener
         {
             InstrumentPublished = (instrument, current) =>
             {
-                if (instrument.Meter == dispatcherMeter)
+                if (instrument.Meter == dispatcher.Meter)
                     current.EnableMeasurementEvents(instrument);
             },
         };
@@ -232,7 +213,7 @@ public class EventDispatcherBlockedSourcesGaugeSpecs
             id: 2,
             eventId: "evt_tags_2"));
 
-        await dispatcher.DispatchAsync(CancellationToken.None);
+        await dispatcher.DrainAsync(CancellationToken.None);
         listener.RecordObservableInstruments();
 
         Assert.Equal(1, calls);

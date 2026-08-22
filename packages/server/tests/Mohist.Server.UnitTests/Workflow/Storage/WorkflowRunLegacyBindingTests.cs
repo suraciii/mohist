@@ -19,9 +19,8 @@ public sealed class WorkflowRunLegacyBindingSpecs
         var store = new WorkflowRunStore(
             factory,
             new EventStore(factory, NullLogger<EventStore>.Instance),
-            new NullEventDispatchGrainFactory(),
             NullLogger<WorkflowRunStore>.Instance,
-            new Mohist.Server.Infrastructure.BackgroundTaskLauncher(),
+            new EventDispatchSignal(),
             new DispatchSnapshotStore(factory, NullLogger<DispatchSnapshotStore>.Instance) as IDispatchSnapshotStore);
 
         await using (var db = factory.CreateDbContext())

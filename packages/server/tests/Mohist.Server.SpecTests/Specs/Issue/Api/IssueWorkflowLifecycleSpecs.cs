@@ -1,7 +1,6 @@
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
-using Mohist.Server.Events.Grains;
 using Mohist.Server.Infrastructure;
 using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Infrastructure.Data.Events;
@@ -135,7 +134,7 @@ public class IssueWorkflowLifecycleSpecs
 
     private async Task DispatchEventsAsync()
     {
-        await _grains.GetGrain<IEventDispatcherGrain>(EventDispatcherGrain.Global).DispatchNowAsync();
+        await _fixture.Services.GetRequiredService<IEventDispatcher>().DrainAsync();
     }
 
     private async Task DeleteWorkflowRunAsync(string workflowRunId)

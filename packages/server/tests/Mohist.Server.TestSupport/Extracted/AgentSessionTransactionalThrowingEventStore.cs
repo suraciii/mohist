@@ -1,6 +1,5 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging.Abstractions;
-using Mohist.Server.Events.Grains;
 using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Infrastructure.Data.Events;
 using Mohist.Server.Infrastructure.Data.Sessions;
@@ -60,6 +59,14 @@ internal sealed class AgentSessionTransactionalThrowingEventStore : IEventStore
         Task.FromResult<IReadOnlyList<StoredCloudEvent>>([]);
 
     public Task MarkDispatchedAsync(EventOrigin origin, string source, long id, DateTimeOffset dispatchedAt, CancellationToken ct = default) => Task.CompletedTask;
+
+    public Task<IReadOnlyList<PendingStream>> ListPendingStreamsAsync(int limit = 100, CancellationToken ct = default) =>
+        Task.FromResult<IReadOnlyList<PendingStream>>([]);
+
+    public Task<IReadOnlyList<UndeliveredEvent>> ListUndeliveredByStreamAsync(EventOrigin origin, string source, int limit, CancellationToken ct = default) =>
+        Task.FromResult<IReadOnlyList<UndeliveredEvent>>([]);
+
+    public Task MarkDispatchedRangeAsync(EventOrigin origin, string source, IReadOnlyList<long> ids, DateTimeOffset dispatchedAt, CancellationToken ct = default) => Task.CompletedTask;
 
     public Task<IReadOnlyList<UndeliveredEvent>> ListUndeliveredAsync(int limit = 100, CancellationToken ct = default) =>
         Task.FromResult<IReadOnlyList<UndeliveredEvent>>([]);

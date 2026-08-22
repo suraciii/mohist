@@ -133,6 +133,68 @@ public class RecordingEventStore : IEventStore
         }
     }
 
+    public Task<IReadOnlyList<PendingStream>> ListPendingStreamsAsync(int limit = 100, CancellationToken ct = default)
+    {
+        lock (_gate)
+        {
+            return Task.FromResult<IReadOnlyList<PendingStream>>(_events
+                .Where(recorded => !_dispatched.Contains((recorded.Envelope.Source.ToString(), recorded.Id)))
+                .GroupBy(recorded => recorded.Envelope.Source.ToString(), StringComparer.Ordinal)
+                .Select(group => new PendingStream(
+                    ParseOrigin(group.Key),
+                    group.Key,
+                    group.Min(recorded => recorded.Envelope.Time)))
+                .OrderBy(stream => stream.OldestPendingTime)
+                .Take(limit)
+                .ToArray());
+        }
+    }
+
+    public Task<IReadOnlyList<UndeliveredEvent>> ListUndeliveredByStreamAsync(
+        EventOrigin origin,
+        string source,
+        int limit,
+        CancellationToken ct = default)
+    {
+        lock (_gate)
+        {
+            return Task.FromResult<IReadOnlyList<UndeliveredEvent>>(_events
+                .Where(recorded => recorded.Envelope.Source.ToString() == source
+                    && !_dispatched.Contains((source, recorded.Id)))
+                .OrderBy(recorded => recorded.Id)
+                .Take(limit)
+                .Select(ToUndelivered)
+                .ToArray());
+        }
+    }
+
+    public Task MarkDispatchedRangeAsync(
+        EventOrigin origin,
+        string source,
+        IReadOnlyList<long> ids,
+        DateTimeOffset dispatchedAt,
+        CancellationToken ct = default)
+    {
+        lock (_gate)
+        {
+            foreach (var id in ids)
+                _dispatched.Add((source, id));
+        }
+        return Task.CompletedTask;
+    }
+
+    private static EventOrigin ParseOrigin(string source) => source switch
+    {
+        string s when s.StartsWith("/mohist/issues", StringComparison.Ordinal) => EventOrigin.Issue,
+        string s when s.StartsWith("/mohist/epics", StringComparison.Ordinal) => EventOrigin.Epic,
+        string s when s.StartsWith("/mohist/workflow-runs", StringComparison.Ordinal) => EventOrigin.WorkflowRun,
+        string s when s.StartsWith("/mohist/agent-sessions", StringComparison.Ordinal) => EventOrigin.AgentSession,
+        string s when s.StartsWith("/mohist/agent-jobs", StringComparison.Ordinal) => EventOrigin.AgentJob,
+        string s when s.StartsWith("/mohist/ingress", StringComparison.Ordinal) => EventOrigin.Ingress,
+        string s when s.StartsWith("/mohist/workspaces", StringComparison.Ordinal) => EventOrigin.Workspace,
+        _ => EventOrigin.WorkflowRun,
+    };
+
     public IReadOnlyList<RecordedEnvelope> Appended
     {
         get

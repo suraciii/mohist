@@ -18,8 +18,7 @@ namespace Mohist.Server.UnitTests.Sessions;
 /// equivalence, append ordering, rollback/cancellation atomicity and
 /// cross-session isolation, observed against a real in-memory SQLite schema
 /// (the established UnitTests pattern) with fake collaborators at the other
-/// seams — a recording <see cref="IEventStore"/>, the null dispatcher grain
-/// factory and a recording background-task launcher. SQLite serializes
+/// seams — a recording <see cref="IEventStore"/>, an in-proc dispatch signal. SQLite serializes
 /// concurrent writers, matching the production contract that callers
 /// (session grains) serialize saves per key, so isolation is asserted as
 /// key scoping plus last-committed-wins.
@@ -63,6 +62,12 @@ public sealed class AgentSessionStoreSchedulePersistenceTests
             => Task.CompletedTask;
         public Task<IReadOnlyList<UndeliveredEvent>> ListUndeliveredAsync(int limit = 100, CancellationToken ct = default)
             => Task.FromResult<IReadOnlyList<UndeliveredEvent>>([]);
+        public Task<IReadOnlyList<PendingStream>> ListPendingStreamsAsync(int limit = 100, CancellationToken ct = default)
+            => Task.FromResult<IReadOnlyList<PendingStream>>([]);
+        public Task<IReadOnlyList<UndeliveredEvent>> ListUndeliveredByStreamAsync(EventOrigin origin, string source, int limit, CancellationToken ct = default)
+            => Task.FromResult<IReadOnlyList<UndeliveredEvent>>([]);
+        public Task MarkDispatchedRangeAsync(EventOrigin origin, string source, IReadOnlyList<long> ids, DateTimeOffset dispatchedAt, CancellationToken ct = default)
+            => Task.CompletedTask;
     }
 
     private sealed class TestDbContextFactory(DbContextOptions<MohistDbContext> options)
@@ -146,10 +151,9 @@ public sealed class AgentSessionStoreSchedulePersistenceTests
         await using var keeper = await OpenSchemaAsync("schedule-rollback");
         var factory = new TestDbContextFactory(Options(keeper));
         var events = new RecordingEventStore { FailStagedAppends = true };
-        var launcher = new RecordingBackgroundTaskLauncher();
         var store = new AgentSessionStore(
-            factory, events, new NullEventDispatchGrainFactory(),
-            NullLogger<AgentSessionStore>.Instance, launcher);
+            factory, events,
+            NullLogger<AgentSessionStore>.Instance, new EventDispatchSignal());
 
         var session = CreateSession("session-rollback");
         _ = session.CreateSchedule("sch-doomed", "doomed", FixedTime.AddHours(2), "idem-doomed", FixedTime);
@@ -158,7 +162,6 @@ public sealed class AgentSessionStoreSchedulePersistenceTests
             () => store.SaveAsync("session-rollback", session, [new AgentSessionRuntimeBound("runtime-rollback")]));
 
         Assert.Single(events.Appended);
-        Assert.Equal(0, launcher.LaunchCount);
 
         await using var db = await factory.CreateDbContextAsync();
         Assert.False(await db.AgentSessions.AnyAsync(r => r.Id == "session-rollback"));
@@ -171,10 +174,9 @@ public sealed class AgentSessionStoreSchedulePersistenceTests
         await using var keeper = await OpenSchemaAsync("schedule-cancel");
         var factory = new TestDbContextFactory(Options(keeper));
         var events = new RecordingEventStore();
-        var launcher = new RecordingBackgroundTaskLauncher();
         var store = new AgentSessionStore(
-            factory, events, new NullEventDispatchGrainFactory(),
-            NullLogger<AgentSessionStore>.Instance, launcher);
+            factory, events,
+            NullLogger<AgentSessionStore>.Instance, new EventDispatchSignal());
 
         var session = CreateSession("session-cancel");
         _ = session.CreateSchedule("sch-cancel", "cancelled", FixedTime.AddHours(1), "idem-cancel", FixedTime);
@@ -185,7 +187,6 @@ public sealed class AgentSessionStoreSchedulePersistenceTests
             () => store.SaveAsync("session-cancel", session, [new AgentSessionRuntimeBound("runtime-cancel")], cts.Token));
 
         Assert.Empty(events.Appended);
-        Assert.Equal(0, launcher.LaunchCount);
 
         await using var db = await factory.CreateDbContextAsync();
         Assert.False(await db.AgentSessions.AnyAsync(r => r.Id == "session-cancel"));
@@ -227,8 +228,8 @@ public sealed class AgentSessionStoreSchedulePersistenceTests
 
     private static AgentSessionStore NewStore(
         TestDbContextFactory factory, RecordingEventStore events) =>
-        new(factory, events, new NullEventDispatchGrainFactory(),
-            NullLogger<AgentSessionStore>.Instance, new RecordingBackgroundTaskLauncher());
+        new(factory, events,
+            NullLogger<AgentSessionStore>.Instance, new EventDispatchSignal());
 
     private static DbContextOptions<MohistDbContext> Options(SqliteConnection keeper) =>
         new DbContextOptionsBuilder<MohistDbContext>().UseSqlite(keeper).Options;

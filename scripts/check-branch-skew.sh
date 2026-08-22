@@ -17,9 +17,9 @@ if [ "$base" = "$(git rev-parse origin/master)" ]; then
   exit 0
 fi
 
-overlap=$(comm -12 \
-  <(git diff --name-only "$base" origin/master -- | sort) \
-  <(git diff --name-only "$base" HEAD -- | sort))
+overlap=$(LC_ALL=C comm -12 \
+  <(git diff --name-only "$base" origin/master -- | LC_ALL=C sort) \
+  <(git diff --name-only "$base" HEAD -- | LC_ALL=C sort))
 
 if [ -z "$overlap" ]; then
   exit 0

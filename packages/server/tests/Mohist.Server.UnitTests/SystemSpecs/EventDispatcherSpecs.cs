@@ -1,10 +1,9 @@
 using System.Text.Json;
-using Microsoft.Extensions.DependencyInjection;
+using Mohist.Server.TestSupport;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using Microsoft.Extensions.Time.Testing;
 using Mohist.Server.Agent.Subscriptions;
-using Mohist.Server.Events.Grains;
 using Mohist.Server.Infrastructure.Data.Events;
 using Mohist.Server.Infrastructure.Events;
 using Mohist.Server.Issue.Domain.Events;
@@ -14,11 +13,11 @@ using Xunit;
 namespace Mohist.Server.UnitTests.SystemSpecs;
 
 /// <summary>
-/// Unit specs for <see cref="EventDispatcherService"/>: the pure-DI fan-out
-/// core that the cluster-singleton <see cref="EventDispatcherGrain"/> delegates
-/// to. All paths are driven against fakes so the spec surface stays under
-/// the unit ceiling (&lt; 50ms / test, no real silo, no real time). Spec:
-/// <c>openspec/changes/issue-362/specs/event-dispatch/spec.md</c>.
+/// Unit specs for <see cref="EventDispatcherService"/>: the stream-lease
+/// drain engine that dispatch workers drive. All paths run against fakes
+/// so the spec surface stays under the unit ceiling (&lt; 50ms / test, no
+/// real silo, no real time, no real database — lease semantics use the
+/// in-memory fake; the SQL lease store is covered by SpecTests).
 /// </summary>
 public class EventDispatcherSpecs
 {
@@ -33,7 +32,7 @@ public class EventDispatcherSpecs
         IEnumerable<Subscription> subs,
         FakeTimeProvider time,
         int handlerMaxAttempts = 3,
-        int batchLimit = 100,
+        int streamPassLimit = 200,
         TimeSpan? baseBackoff = null,
         TimeSpan? maxBackoff = null)
     {
@@ -42,10 +41,11 @@ public class EventDispatcherSpecs
             events,
             subs,
             deadLetters,
+            new FakeDispatchStreamLeaseStore(),
             time,
             Options.Create(new EventDispatcherOptions
             {
-                BatchSize = batchLimit,
+                MaxEventsPerStreamPass = streamPassLimit,
                 MaxAttempts = handlerMaxAttempts,
                 BaseBackoff = baseBackoff ?? TimeSpan.FromSeconds(1),
                 MaxBackoff = maxBackoff ?? TimeSpan.FromSeconds(30),
@@ -55,7 +55,7 @@ public class EventDispatcherSpecs
     }
 
     [Fact]
-    public async Task DispatchAsync_PullsUndeliveredRow_MatchesHandler_InvokesAndMarks()
+    public async Task DrainAsync_PullsUndeliveredRow_MatchesHandler_InvokesAndMarks()
     {
         var time = new FakeTimeProvider(StartTime);
         var events = new FakeEventStore();
@@ -73,7 +73,7 @@ public class EventDispatcherSpecs
             id: 1,
             eventId: "evt_1"));
 
-        await dispatcher.DispatchAsync(CancellationToken.None);
+        await dispatcher.DrainAsync(CancellationToken.None);
 
         Assert.Equal(new[] { "evt_1" }, calls);
         var marked = Assert.Single(events.Marked);
@@ -85,7 +85,7 @@ public class EventDispatcherSpecs
     }
 
     [Fact]
-    public async Task DispatchAsync_NoUndeliveredRows_CompletesWithoutInvokingHandler()
+    public async Task DrainAsync_NoUndeliveredRows_CompletesWithoutInvokingHandler()
     {
         var time = new FakeTimeProvider(StartTime);
         var events = new FakeEventStore();
@@ -97,7 +97,7 @@ public class EventDispatcherSpecs
             DispatchDynamic);
         var dispatcher = BuildDispatcher(events, dlq, [sub], time);
 
-        await dispatcher.DispatchAsync(CancellationToken.None);
+        await dispatcher.DrainAsync(CancellationToken.None);
 
         Assert.Empty(calls);
         Assert.Empty(events.Marked);
@@ -105,7 +105,7 @@ public class EventDispatcherSpecs
     }
 
     [Fact]
-    public async Task DispatchAsync_DispatchesPerStreamFifo_NoSkipNoReorder()
+    public async Task DrainAsync_DispatchesPerStreamFifo_NoSkipNoReorder()
     {
         var time = new FakeTimeProvider(StartTime);
         var events = new FakeEventStore();
@@ -118,32 +118,24 @@ public class EventDispatcherSpecs
         var dispatcher = BuildDispatcher(events, dlq, [sub], time);
 
         // Two streams, several ids each. Stage out of order so the
-        // (Source, Id) sort is the only thing keeping FIFO correct.
+        // per-stream Id sort is the only thing keeping FIFO correct.
         events.Enqueue(FakeEventStore.Build(IssueCompleted, "/mohist/issues/issue_A", id: 3, eventId: "A_3"));
         events.Enqueue(FakeEventStore.Build(IssueCompleted, "/mohist/issues/issue_B", id: 2, eventId: "B_2"));
         events.Enqueue(FakeEventStore.Build(IssueCompleted, "/mohist/issues/issue_A", id: 1, eventId: "A_1"));
         events.Enqueue(FakeEventStore.Build(IssueCompleted, "/mohist/issues/issue_B", id: 1, eventId: "B_1"));
         events.Enqueue(FakeEventStore.Build(IssueCompleted, "/mohist/issues/issue_A", id: 2, eventId: "A_2"));
 
-        await dispatcher.DispatchAsync(CancellationToken.None);
+        await dispatcher.DrainAsync(CancellationToken.None);
 
-        // Source ordering first (issue_A < issue_B), then per-source id.
-        Assert.Equal(
-            new[] { "A_1", "A_2", "A_3", "B_1", "B_2" },
-            seen);
-        Assert.Equal(
-            new[] { "A_1", "A_2", "A_3", "B_1", "B_2" },
-            events.Marked.Select(m => m.Source switch
-            {
-                "/mohist/issues/issue_A" => $"A_{m.Id}",
-                "/mohist/issues/issue_B" => $"B_{m.Id}",
-                _ => "?",
-            }).ToArray());
+        // Cross-stream order is not a contract; per-stream FIFO is.
+        Assert.Equal(new[] { "A_1", "A_2", "A_3" }, seen.Where(id => id.StartsWith("A_", StringComparison.Ordinal)));
+        Assert.Equal(new[] { "B_1", "B_2" }, seen.Where(id => id.StartsWith("B_", StringComparison.Ordinal)));
+        Assert.Equal(5, events.Marked.Count);
         Assert.Empty(dlq.Written);
     }
 
     [Fact]
-    public async Task DispatchAsync_RetryingStream_DoesNotBlockOtherStreams()
+    public async Task DrainAsync_ParkedStream_DoesNotBlockOtherStreams()
     {
         var time = new FakeTimeProvider(StartTime);
         var events = new FakeEventStore();
@@ -168,13 +160,13 @@ public class EventDispatcherSpecs
         events.Enqueue(FakeEventStore.Build(IssueCompleted, "/mohist/issues/issue_A", id: 2, eventId: "A_2"));
         events.Enqueue(FakeEventStore.Build(IssueCompleted, "/mohist/issues/issue_B", id: 1, eventId: "B_1"));
 
-        await dispatcher.DispatchAsync(CancellationToken.None);
+        await dispatcher.DrainAsync(CancellationToken.None);
 
         Assert.Equal(["B_1"], seen);
         Assert.Equal(["B_1"], events.Marked.Select(ToStreamEventId));
 
         time.Advance(TimeSpan.FromSeconds(1));
-        await dispatcher.DispatchAsync(CancellationToken.None);
+        await dispatcher.DrainAsync(CancellationToken.None);
 
         Assert.Equal(["B_1", "A_1", "A_2"], seen);
         Assert.Equal(["B_1", "A_1", "A_2"], events.Marked.Select(ToStreamEventId));
@@ -184,7 +176,7 @@ public class EventDispatcherSpecs
         dispatch.Source.EndsWith("issue_A", StringComparison.Ordinal) ? $"A_{dispatch.Id}" : $"B_{dispatch.Id}";
 
     [Fact]
-    public async Task DispatchAsync_PerHandlerRetry_RecoversOnSecondAttempt_StillMarksDelivered()
+    public async Task DrainAsync_TransientFailure_RecoversOnSecondAttempt_StillMarksDelivered()
     {
         var time = new FakeTimeProvider(StartTime);
         var events = new FakeEventStore();
@@ -203,12 +195,12 @@ public class EventDispatcherSpecs
 
         events.Enqueue(FakeEventStore.Build(IssueCompleted, "/mohist/issues/issue_1", id: 1, eventId: "evt_1"));
 
-        await dispatcher.DispatchAsync(CancellationToken.None);
+        await dispatcher.DrainAsync(CancellationToken.None);
         Assert.Equal(1, attempts);
         Assert.Empty(events.Marked);
 
         time.Advance(TimeSpan.FromSeconds(1));
-        await dispatcher.DispatchAsync(CancellationToken.None);
+        await dispatcher.DrainAsync(CancellationToken.None);
 
         Assert.Equal(2, attempts);
         Assert.Single(events.Marked);
@@ -216,7 +208,52 @@ public class EventDispatcherSpecs
     }
 
     [Fact]
-    public async Task DispatchAsync_RoutingFailure_PropagatesToDispatcher_RetriesUntilDeadLetter()
+    public async Task DrainAsync_EventRetry_InvokesAllHandlersEachAttempt_AndDeadLettersFirstFailure()
+    {
+        // The retry unit is the event: every matching handler rides along
+        // on each attempt (idempotency by EventId is the handler contract).
+        // Exhaustion dead-letters the event once, recording the first
+        // failing handler.
+        var time = new FakeTimeProvider(StartTime);
+        var events = new FakeEventStore();
+        var dlq = new FakeDeadLetterStore();
+        var goodAttempts = 0;
+        var badAttempts = 0;
+        var good = new Subscription(
+            IssueCompleted,
+            new FlakyRecorder(() => goodAttempts++),
+            DispatchDynamic,
+            "good-handler");
+        var bad = new Subscription(
+            IssueCompleted,
+            new FlakyRecorder(() =>
+            {
+                badAttempts++;
+                throw new InvalidOperationException("permanent");
+            }),
+            DispatchDynamic,
+            "bad-handler");
+        var dispatcher = BuildDispatcher(events, dlq, [good, bad], time, handlerMaxAttempts: 2);
+
+        events.Enqueue(FakeEventStore.Build(IssueCompleted, "/mohist/issues/issue_1", id: 1, eventId: "evt_iso"));
+
+        await dispatcher.DrainAsync(CancellationToken.None);
+        Assert.Equal(1, goodAttempts);
+        Assert.Equal(1, badAttempts);
+        Assert.Empty(events.Marked);
+
+        time.Advance(TimeSpan.FromSeconds(1));
+        await dispatcher.DrainAsync(CancellationToken.None);
+
+        Assert.Equal(2, goodAttempts);
+        Assert.Equal(2, badAttempts);
+        var deadLetter = Assert.Single(dlq.Written);
+        Assert.Equal("bad-handler", deadLetter.FailingHandler);
+        Assert.Single(events.Marked);
+    }
+
+    [Fact]
+    public async Task DrainAsync_RoutingFailure_PropagatesToDispatcher_RetriesUntilDeadLetter()
     {
         // issue-363 T-002: subscription dispatch no longer swallows exceptions
         // locally. A launch failure must reach the dispatcher's retry/DLQ
@@ -241,13 +278,13 @@ public class EventDispatcherSpecs
             eventId: "evt_agent_failure",
             extensions: new Dictionary<string, string> { ["projectid"] = "project_agent" }));
 
-        await dispatcher.DispatchAsync(CancellationToken.None);
+        await dispatcher.DrainAsync(CancellationToken.None);
         Assert.Empty(events.Marked);
         Assert.Single(events.PendingUndelivered);
         Assert.Empty(dlq.Written);
 
         time.Advance(TimeSpan.FromSeconds(1));
-        await dispatcher.DispatchAsync(CancellationToken.None);
+        await dispatcher.DrainAsync(CancellationToken.None);
 
         var deadLetter = Assert.Single(dlq.Written);
         Assert.Equal("evt_agent_failure", deadLetter.EventId);
@@ -257,21 +294,16 @@ public class EventDispatcherSpecs
         Assert.Equal("/mohist/issues/issue_agent_failure", marked.Source);
         Assert.Empty(events.PendingUndelivered);
 
-        // The row is gone from the queue so a subsequent tick must not
+        // The row is gone from the queue so a subsequent drain must not
         // re-attempt the dispatch.
-        await dispatcher.DispatchAsync(CancellationToken.None);
+        await dispatcher.DrainAsync(CancellationToken.None);
         Assert.Single(events.Marked);
         Assert.Single(dlq.Written);
     }
 
     [Fact]
-    public async Task DispatchAsync_RoutingFailure_RangeEnvelopeIsStillNoOp()
+    public async Task DrainAsync_RoutingFailure_RangeEnvelopeIsStillNoOp()
     {
-        // The dispatcher-scoped retry/DLQ path runs only when an envelope
-        // proceeds into the launch pipeline. An envelope that lacks the
-        // projectid extension is a valid no-op outcome: the handler
-        // returns a completed task without throwing, so the dispatcher
-        // marks the row delivered without retry or dead-letter.
         var time = new FakeTimeProvider(StartTime);
         var events = new FakeEventStore();
         var dlq = new FakeDeadLetterStore();
@@ -289,7 +321,7 @@ public class EventDispatcherSpecs
             source: "/mohist/issues/issue_agent_no_projectid",
             eventId: "evt_agent_no_projectid"));
 
-        await dispatcher.DispatchAsync(CancellationToken.None);
+        await dispatcher.DrainAsync(CancellationToken.None);
 
         Assert.Single(events.Marked);
         Assert.Empty(events.PendingUndelivered);
@@ -297,7 +329,7 @@ public class EventDispatcherSpecs
     }
 
     [Fact]
-    public async Task DispatchAsync_ExhaustionWritesDeadLetter_MarksDispatched_AndStopsRetrying()
+    public async Task DrainAsync_ExhaustionWritesDeadLetter_MarksDispatched_AndStopsRetrying()
     {
         var time = new FakeTimeProvider(StartTime);
         var events = new FakeEventStore();
@@ -315,13 +347,13 @@ public class EventDispatcherSpecs
 
         events.Enqueue(FakeEventStore.Build(IssueCompleted, "/mohist/issues/issue_1", id: 1, eventId: "evt_poison"));
 
-        await dispatcher.DispatchAsync(CancellationToken.None);
+        await dispatcher.DrainAsync(CancellationToken.None);
         Assert.Equal(1, attempts);
         time.Advance(TimeSpan.FromSeconds(1));
-        await dispatcher.DispatchAsync(CancellationToken.None);
+        await dispatcher.DrainAsync(CancellationToken.None);
         Assert.Equal(2, attempts);
         time.Advance(TimeSpan.FromSeconds(2));
-        await dispatcher.DispatchAsync(CancellationToken.None);
+        await dispatcher.DrainAsync(CancellationToken.None);
         Assert.Equal(3, attempts);
 
         var dl = Assert.Single(dlq.Written);
@@ -337,17 +369,19 @@ public class EventDispatcherSpecs
         Assert.Equal("/mohist/issues/issue_1", marked.Source);
         Assert.Equal(1, marked.Id);
 
-        // Second tick must NOT re-deliver — MarkDispatched dropped the row
-        // from the undelivered queue.
-        await dispatcher.DispatchAsync(CancellationToken.None);
+        // Second drain must NOT re-deliver — the DLQ settlement dropped the
+        // row from the undelivered queue.
+        await dispatcher.DrainAsync(CancellationToken.None);
         Assert.Equal(3, attempts);
         Assert.Single(events.Marked);
         Assert.Single(dlq.Written);
     }
 
     [Fact]
-    public async Task DispatchAsync_DeadLetterSettlementFailure_RollsBackSourceMarkAndDeadLetterRows()
+    public async Task DrainAsync_DeadLetterSettlementFailure_ParksStream_RetriesSettlementNextPass()
     {
+        // Settlement failure must not lose the event or the attempt budget:
+        // the stream parks and the next pass retries only settlement.
         var time = new FakeTimeProvider(StartTime);
         var events = new FakeEventStore();
         var dlq = new FakeDeadLetterStore { ThrowAfterSourceMark = true };
@@ -362,67 +396,31 @@ public class EventDispatcherSpecs
             id: 1,
             eventId: "evt_settlement_rollback"));
 
-        await Assert.ThrowsAsync<InvalidOperationException>(() =>
-            dispatcher.DispatchAsync(CancellationToken.None));
+        await dispatcher.DrainAsync(CancellationToken.None);
 
         Assert.Empty(events.Marked);
         Assert.Single(events.PendingUndelivered);
         Assert.Empty(dlq.Written);
-    }
 
-    [Fact]
-    public async Task DispatchAsync_PerHandlerIsolation_SiblingSucceedsWhenPeerExhausts()
-    {
-        var time = new FakeTimeProvider(StartTime);
-        var events = new FakeEventStore();
-        var dlq = new FakeDeadLetterStore();
-        var goodAttempts = 0;
-        var badAttempts = 0;
-        var good = new Subscription(
-            IssueCompleted,
-            new FlakyRecorder(() => goodAttempts++),
-            DispatchDynamic);
-        var bad = new Subscription(
-            IssueCompleted,
-            new FlakyRecorder(() =>
-            {
-                badAttempts++;
-                throw new InvalidOperationException("permanent");
-            }),
-            DispatchDynamic);
-        var dispatcher = BuildDispatcher(events, dlq, [good, bad], time, handlerMaxAttempts: 2);
-
-        events.Enqueue(FakeEventStore.Build(IssueCompleted, "/mohist/issues/issue_1", id: 1, eventId: "evt_iso"));
-
-        await dispatcher.DispatchAsync(CancellationToken.None);
-        Assert.Equal(1, goodAttempts);
-        Assert.Equal(1, badAttempts);
-        Assert.Empty(events.Marked);
-
+        dlq.ThrowAfterSourceMark = false;
         time.Advance(TimeSpan.FromSeconds(1));
-        await dispatcher.DispatchAsync(CancellationToken.None);
+        await dispatcher.DrainAsync(CancellationToken.None);
 
-        Assert.Equal(1, goodAttempts);
-        Assert.Equal(2, badAttempts);
-        Assert.Single(dlq.Written);
         Assert.Single(events.Marked);
+        Assert.Single(dlq.Written);
+        Assert.Empty(events.PendingUndelivered);
     }
 
     [Fact]
-    public async Task DispatchAsync_DeliverBeforeMarkCrash_RowStaysUndelivered_AndIsRedeliveredOnNextTick()
+    public async Task DrainAsync_DeliverBeforeSettleCrash_RowStaysUndelivered_AndIsRedelivered()
     {
+        // At-least-once: a settle failure parks the stream; the next pass
+        // re-invokes the handler (idempotent by EventId) and settles.
         var time = new FakeTimeProvider(StartTime);
         var events = new FakeEventStore();
         var dlq = new FakeDeadLetterStore();
-        var seenEventIds = new List<string>();
-        var processed = new HashSet<string>();
-        var uniqueDeliveries = 0;
-        var rec = new IdempotentRecorder(evt =>
-        {
-            seenEventIds.Add(evt.Id);
-            if (processed.Add(evt.Id))
-                uniqueDeliveries++;
-        });
+        var deliveries = 0;
+        var rec = new IdempotentRecorder(_ => deliveries++);
         var sub = new Subscription(IssueCompleted, rec, DispatchDynamic);
         var dispatcher = BuildDispatcher(events, dlq, [sub], time);
 
@@ -430,25 +428,28 @@ public class EventDispatcherSpecs
         events.ThrowOnMark = _ => true;
 
         await Assert.ThrowsAsync<InvalidOperationException>(() =>
-            dispatcher.DispatchAsync(CancellationToken.None));
+            dispatcher.DrainAsync(CancellationToken.None));
 
-        Assert.Equal(new[] { "evt_crash" }, seenEventIds);
-        Assert.Equal(1, uniqueDeliveries);
+        Assert.Equal(1, deliveries);
         Assert.Empty(events.Marked);
         Assert.Single(events.PendingUndelivered);
 
         events.ThrowOnMark = null;
-        await dispatcher.DispatchAsync(CancellationToken.None);
+        time.Advance(TimeSpan.FromSeconds(1));
+        await dispatcher.DrainAsync(CancellationToken.None);
 
-        Assert.Equal(new[] { "evt_crash" }, seenEventIds);
-        Assert.Equal(1, uniqueDeliveries);
+        // Redelivered at least once more, then settled.
+        Assert.True(deliveries >= 2);
         Assert.Single(events.Marked);
         Assert.Empty(events.PendingUndelivered);
     }
 
     [Fact]
-    public async Task DispatchAsync_MarkFailure_StopsBeforeNextEventInSameStream()
+    public async Task DrainAsync_SettleFailure_KeepsWholePassPending_AndRedrives()
     {
+        // Settle is chunked and deferred: a settle failure leaves every
+        // delivered-but-unsettled row pending; the next pass redelivers and
+        // settles them (at-least-once amplification, bounded by the chunk).
         var time = new FakeTimeProvider(StartTime);
         var events = new FakeEventStore();
         var dlq = new FakeDeadLetterStore();
@@ -464,34 +465,29 @@ public class EventDispatcherSpecs
         events.ThrowOnMark = evt => evt.Id == 1;
 
         await Assert.ThrowsAsync<InvalidOperationException>(() =>
-            dispatcher.DispatchAsync(CancellationToken.None));
+            dispatcher.DrainAsync(CancellationToken.None));
 
-        Assert.Equal(["evt_1"], seen);
+        Assert.Equal(["evt_1", "evt_2"], seen);
         Assert.Equal([1L, 2L], events.PendingUndelivered.Select(evt => evt.Id));
 
         events.ThrowOnMark = null;
-        await dispatcher.DispatchAsync(CancellationToken.None);
+        time.Advance(TimeSpan.FromSeconds(1));
+        await dispatcher.DrainAsync(CancellationToken.None);
 
-        Assert.Equal(["evt_1", "evt_2"], seen);
+        // Per-stream FIFO holds across the redrive.
+        Assert.Equal(["evt_1", "evt_2", "evt_1", "evt_2"], seen);
         Assert.Equal([1L, 2L], events.Marked.Select(mark => mark.Id));
     }
 
     [Fact]
-    public async Task DispatchAsync_FanOutByType_MatchesClosedGenericHandler()
+    public async Task DrainAsync_FanOutByType_MatchesClosedGenericHandler()
     {
-        // Verifies the closed-generic discovery fix landed: a closed
-        // ICloudEventHandler<TData> registered as a Subscription(Type=...)
-        // gets invoked through the same DispatchDelegate as the
-        // non-generic handlers when the CloudEventTypeMatcher matches.
         var time = new FakeTimeProvider(StartTime);
         var events = new FakeEventStore();
         var dlq = new FakeDeadLetterStore();
 
         var received = new List<CloudEvent<IssueCompleted>>();
         var handler = new CapturingTypedHandler(received);
-        // Build the closed-generic Subscription the same way
-        // AddCloudEventHandlersFromAssembly would for an
-        // ICloudEventHandler<TData> handler.
         var sub = new Subscription(
             IssueCompleted,
             handler,
@@ -509,7 +505,7 @@ public class EventDispatcherSpecs
             eventId: "evt_typed",
             data: data));
 
-        await dispatcher.DispatchAsync(CancellationToken.None);
+        await dispatcher.DrainAsync(CancellationToken.None);
 
         var evt = Assert.Single(received);
         Assert.Equal(IssueCompleted, evt.Type);
@@ -520,7 +516,7 @@ public class EventDispatcherSpecs
     }
 
     [Fact]
-    public async Task DispatchAsync_TypeMatcher_DoesNotInvokeNonMatchingSubscriptions()
+    public async Task DrainAsync_TypeMatcher_DoesNotInvokeNonMatchingSubscriptions()
     {
         var time = new FakeTimeProvider(StartTime);
         var events = new FakeEventStore();
@@ -533,14 +529,14 @@ public class EventDispatcherSpecs
 
         events.Enqueue(FakeEventStore.Build(IssueCompleted, "/mohist/issues/issue_1", id: 1, eventId: "evt_match"));
 
-        await dispatcher.DispatchAsync(CancellationToken.None);
+        await dispatcher.DrainAsync(CancellationToken.None);
 
         Assert.Equal(1, matchedCalls);
         Assert.Equal(0, otherCalls);
     }
 
     [Fact]
-    public async Task DispatchAsync_DeadLetterWriteFailure_KeepsRowUndelivered()
+    public async Task DrainAsync_DeadLetterWriteFailure_KeepsRowUndelivered()
     {
         var time = new FakeTimeProvider(StartTime);
         var events = new FakeEventStore();
@@ -559,12 +555,9 @@ public class EventDispatcherSpecs
 
         events.Enqueue(FakeEventStore.Build(IssueCompleted, "/mohist/issues/issue_1", id: 1, eventId: "evt_dl_crash"));
 
-        await dispatcher.DispatchAsync(CancellationToken.None);
+        await dispatcher.DrainAsync(CancellationToken.None);
         time.Advance(TimeSpan.FromSeconds(1));
-        var ex = await Record.ExceptionAsync(() =>
-            dispatcher.DispatchAsync(CancellationToken.None));
-        Assert.NotNull(ex);
-        Assert.Contains("dead-letter", ex.Message);
+        await dispatcher.DrainAsync(CancellationToken.None);
 
         Assert.Equal(2, attempts);
         Assert.Empty(dlq.Written);
@@ -573,49 +566,8 @@ public class EventDispatcherSpecs
     }
 
     [Fact]
-    public async Task DispatchAsync_PoisonSettlementMarkFailureCommitsNeitherSide()
+    public async Task DrainAsync_NoMatchingSubscription_MarksRowDeliveredWithoutInvoking()
     {
-        var time = new FakeTimeProvider(StartTime);
-        var events = new FakeEventStore { ThrowOnMark = _ => true };
-        var dlq = new FakeDeadLetterStore();
-        var attempts = 0;
-        var sub = new Subscription(
-            IssueCompleted,
-            new FlakyRecorder(() =>
-            {
-                attempts++;
-                throw new InvalidOperationException("poison");
-            }),
-            DispatchDynamic);
-        var dispatcher = BuildDispatcher(events, dlq, [sub], time, handlerMaxAttempts: 1);
-        events.Enqueue(FakeEventStore.Build(
-            IssueCompleted,
-            "/mohist/issues/issue_atomic",
-            id: 1,
-            eventId: "evt_atomic_failure"));
-
-        await Assert.ThrowsAsync<InvalidOperationException>(() =>
-            dispatcher.DispatchAsync(CancellationToken.None));
-
-        Assert.Equal(1, attempts);
-        Assert.Empty(events.Marked);
-        Assert.Empty(dlq.Written);
-        Assert.Single(events.PendingUndelivered);
-
-        events.ThrowOnMark = null;
-        await dispatcher.DispatchAsync(CancellationToken.None);
-
-        Assert.Equal(1, attempts);
-        Assert.Single(events.Marked);
-        Assert.Single(dlq.Written);
-    }
-
-    [Fact]
-    public async Task DispatchAsync_NoMatchingSubscription_MarksRowDeliveredWithoutInvoking()
-    {
-        // An event with no fan-out target is still marked DispatchedAt
-        // (the dispatcher never retries it — there is nothing to retry).
-        // This avoids leaving orphan undelivered rows forever.
         var time = new FakeTimeProvider(StartTime);
         var events = new FakeEventStore();
         var dlq = new FakeDeadLetterStore();
@@ -624,14 +576,48 @@ public class EventDispatcherSpecs
 
         events.Enqueue(FakeEventStore.Build(AnyEvent, "/mohist/issues/issue_1", id: 1, eventId: "evt_orphan"));
 
-        await dispatcher.DispatchAsync(CancellationToken.None);
+        await dispatcher.DrainAsync(CancellationToken.None);
 
         Assert.Single(events.Marked);
         Assert.Empty(dlq.Written);
     }
 
     [Fact]
-    public async Task DispatchAsync_DispatchedAtUsesInjectedTimeProvider()
+    public async Task DrainAsync_DeadLettersOnlyFirstFailingHandler_AtExhaustion()
+    {
+        // One dead-letter row per exhausted event, recording the first
+        // failing handler in subscription order.
+        var time = new FakeTimeProvider(StartTime);
+        var events = new FakeEventStore();
+        var dlq = new FakeDeadLetterStore();
+        var first = new FlakyRecorder(() => throw new InvalidOperationException("first poison"));
+        var second = new Recorder(_ => throw new InvalidOperationException("second poison"));
+        var dispatcher = BuildDispatcher(
+            events,
+            dlq,
+            [
+                new Subscription(IssueCompleted, first, DispatchDynamic, "first-handler"),
+                new Subscription(IssueCompleted, second, DispatchDynamic, "second-handler"),
+            ],
+            time,
+            handlerMaxAttempts: 2);
+        events.Enqueue(FakeEventStore.Build(
+            IssueCompleted,
+            "/mohist/issues/issue_two_poison",
+            eventId: "evt_two_poison"));
+
+        await dispatcher.DrainAsync(CancellationToken.None);
+        time.Advance(TimeSpan.FromSeconds(1));
+        await dispatcher.DrainAsync(CancellationToken.None);
+
+        var deadLetter = Assert.Single(dlq.Written);
+        Assert.Equal("first-handler", deadLetter.FailingHandler);
+        Assert.Equal(2, deadLetter.AttemptCount);
+        Assert.Single(events.Marked);
+    }
+
+    [Fact]
+    public async Task DrainAsync_DispatchedAtUsesInjectedTimeProvider()
     {
         var initial = StartTime;
         var later = initial.AddSeconds(42);
@@ -643,14 +629,14 @@ public class EventDispatcherSpecs
 
         events.Enqueue(FakeEventStore.Build(IssueCompleted, "/mohist/issues/issue_1", id: 1, eventId: "evt_t1"));
 
-        await dispatcher.DispatchAsync(CancellationToken.None);
+        await dispatcher.DrainAsync(CancellationToken.None);
         time.SetUtcNow(later);
 
         events.Enqueue(FakeEventStore.Build(IssueCompleted, "/mohist/issues/issue_2", id: 2, eventId: "evt_t2"));
-        await dispatcher.DispatchAsync(CancellationToken.None);
+        await dispatcher.DrainAsync(CancellationToken.None);
 
         Assert.Collection(
-            events.Marked,
+            events.Marked.OrderBy(m => m.Id),
             m => Assert.Equal(initial, m.DispatchedAt),
             m => Assert.Equal(later, m.DispatchedAt));
     }
@@ -661,9 +647,6 @@ public class EventDispatcherSpecs
         var time = new FakeTimeProvider(StartTime);
         var events = new FakeEventStore();
         var dlq = new FakeDeadLetterStore();
-        // First attempt always throws → exhausts → DL row written.
-        // Second attempt succeeds. The handler tracks per-attempt state
-        // so the redelivery can observe the recovery.
         var attempt = 0;
         var sub = new Subscription(
             IssueCompleted,
@@ -677,24 +660,20 @@ public class EventDispatcherSpecs
 
         events.Enqueue(FakeEventStore.Build(IssueCompleted, "/mohist/issues/issue_1", id: 1, eventId: "evt_redeliver"));
 
-        await dispatcher.DispatchAsync(CancellationToken.None);
+        await dispatcher.DrainAsync(CancellationToken.None);
         time.Advance(TimeSpan.FromSeconds(1));
-        await dispatcher.DispatchAsync(CancellationToken.None);
+        await dispatcher.DrainAsync(CancellationToken.None);
         time.Advance(TimeSpan.FromSeconds(2));
-        await dispatcher.DispatchAsync(CancellationToken.None);
+        await dispatcher.DrainAsync(CancellationToken.None);
         var dl = Assert.Single(dlq.Written);
         Assert.Equal(3, attempt);
 
-        // Operator triggers redelivery — fresh dispatch from the DL row,
-        // not from the (now marked) original event row.
         var result = await dispatcher.RedeliverAsync(dl.DeadLetterId, CancellationToken.None);
 
         Assert.Equal(4, attempt);
         Assert.True(result.Found);
         Assert.True(result.Delivered);
         Assert.Equal(1, result.Attempts);
-        // The original event row's DispatchedAt is left untouched on a
-        // redelivery so the dispatcher does not double-claim it.
         Assert.Single(events.Marked);
         Assert.Empty(dlq.Written);
     }
@@ -725,10 +704,7 @@ public class EventDispatcherSpecs
         var goodCalls = 0;
         var badCalls = 0;
         var badStillFails = true;
-        var good = new Subscription(
-            IssueCompleted,
-            new Recorder(_ => goodCalls++),
-            DispatchDynamic);
+        var good = new Subscription(IssueCompleted, new Recorder(_ => goodCalls++), DispatchDynamic, "good-handler");
         var bad = new Subscription(
             IssueCompleted,
             new FlakyRecorder(() =>
@@ -737,22 +713,23 @@ public class EventDispatcherSpecs
                 if (badStillFails)
                     throw new InvalidOperationException("poison");
             }),
-            DispatchDynamic);
+            DispatchDynamic,
+            "bad-handler");
         var dispatcher = BuildDispatcher(events, dlq, [good, bad], time, handlerMaxAttempts: 2);
 
         events.Enqueue(FakeEventStore.Build(IssueCompleted, "/mohist/issues/issue_1", id: 1, eventId: "evt_redeliver_one"));
-        await dispatcher.DispatchAsync(CancellationToken.None);
+        await dispatcher.DrainAsync(CancellationToken.None);
         time.Advance(TimeSpan.FromSeconds(1));
-        await dispatcher.DispatchAsync(CancellationToken.None);
+        await dispatcher.DrainAsync(CancellationToken.None);
         var deadLetter = Assert.Single(dlq.Written);
-        Assert.Equal(1, goodCalls);
+        Assert.Equal(2, goodCalls);
         Assert.Equal(2, badCalls);
 
         badStillFails = false;
         var result = await dispatcher.RedeliverAsync(deadLetter.DeadLetterId, CancellationToken.None);
 
         Assert.True(result.Delivered);
-        Assert.Equal(1, goodCalls);
+        Assert.Equal(2, goodCalls);
         Assert.Equal(3, badCalls);
         Assert.Empty(dlq.Written);
     }
@@ -778,7 +755,7 @@ public class EventDispatcherSpecs
             "/mohist/issues/issue_redelivery_state",
             id: 1,
             eventId: "evt_redelivery_state"));
-        await dispatcher.DispatchAsync(CancellationToken.None);
+        await dispatcher.DrainAsync(CancellationToken.None);
         var deadLetter = Assert.Single(dlq.Written);
 
         poison = false;
@@ -842,37 +819,8 @@ public class EventDispatcherSpecs
     }
 
     [Fact]
-    public async Task RecordingEventStore_SeedsOrdersLimitsAndRecordsDispatch()
+    public async Task DrainAsync_BackoffSchedule_DoublesAndCapsAtMaxViaFakeTimeProvider()
     {
-        var store = new RecordingEventStore();
-        var later = FakeEventStore.Build(IssueCompleted, "/mohist/issues/issue_recording", id: 9, eventId: "evt_9");
-        var earlier = FakeEventStore.Build(IssueCompleted, "/mohist/issues/issue_recording", id: 5, eventId: "evt_5");
-        store.SeedUndelivered(later, earlier);
-
-        var rows = await store.ListUndeliveredAsync(limit: 1);
-        await store.MarkDispatchedAsync(
-            rows[0].Origin,
-            rows[0].Source,
-            rows[0].Id,
-            StartTime);
-
-        Assert.Equal(1, store.ListUndeliveredCallCount);
-        Assert.Equal(5, Assert.Single(rows).Id);
-        Assert.Equal(5, Assert.Single(store.MarkedDispatched).Id);
-        Assert.Equal(9, Assert.Single(await store.ListUndeliveredAsync()).Id);
-    }
-
-    [Fact]
-    public async Task DispatchAsync_BackoffSchedule_DoublesAndCapsAtMaxViaFakeTimeProvider()
-    {
-        // Drives the dispatch loop and observes retry cadence through the
-        // recorded handler invocation timestamps rather than the (now
-        // private) Backoff helper directly. Each timestamp is the moment
-        // a failing attempt fired; the delta between consecutive
-        // timestamps is the backoff computed for that attempt. With
-        // baseBackoff=2s and maxBackoff=5s the expected schedule is
-        // Backoff(1)=2s, Backoff(2)=4s, Backoff(3)=5s (clamped from 8s),
-        // Backoff(4)=5s (clamped from 16s).
         var time = new FakeTimeProvider(StartTime);
         var events = new FakeEventStore();
         var dlq = new FakeDeadLetterStore();
@@ -895,10 +843,7 @@ public class EventDispatcherSpecs
             maxBackoff: TimeSpan.FromSeconds(5));
         events.Enqueue(FakeEventStore.Build(IssueCompleted, "/mohist/issues/issue_1", id: 1, eventId: "evt_backoff"));
 
-        // Attempt 1 at StartTime. Then advance by each expected backoff
-        // and re-dispatch; the handler fires once per advance, recording
-        // the timestamp it ran at.
-        await dispatcher.DispatchAsync(CancellationToken.None);
+        await dispatcher.DrainAsync(CancellationToken.None);
         var expectedDeltas = new[]
         {
             TimeSpan.FromSeconds(2),
@@ -909,12 +854,10 @@ public class EventDispatcherSpecs
         foreach (var delta in expectedDeltas)
         {
             time.Advance(delta);
-            await dispatcher.DispatchAsync(CancellationToken.None);
+            await dispatcher.DrainAsync(CancellationToken.None);
         }
 
-        // Attempt 5 hit MaxAttempts=5 and dead-lettered; a follow-up
-        // tick must NOT re-invoke the handler.
-        await dispatcher.DispatchAsync(CancellationToken.None);
+        await dispatcher.DrainAsync(CancellationToken.None);
 
         Assert.Equal(expectedDeltas, attemptTimes.Zip(attemptTimes.Skip(1), (a, b) => b - a).ToArray());
         Assert.Equal(5, attemptTimes.Count);
@@ -922,8 +865,13 @@ public class EventDispatcherSpecs
     }
 
     [Fact]
-    public async Task DispatchAsync_CrossTickBackoffAndRetryBudgetArePerHandler()
+    public async Task DrainAsync_BackoffIsEventLevel_AllMatchingHandlersRideAlong()
     {
+        // Backoff gates the event, not individual handlers: each attempt
+        // re-invokes every matching handler from the top (idempotency by
+        // EventId), and one attempt stops at the first failing handler —
+        // the recorded head. A sibling that recovered early keeps riding
+        // along until the slowest handler settles.
         var time = new FakeTimeProvider(StartTime);
         var events = new FakeEventStore();
         var dlq = new FakeDeadLetterStore();
@@ -952,7 +900,7 @@ public class EventDispatcherSpecs
             dlq,
             [first, second],
             time,
-            handlerMaxAttempts: 3,
+            handlerMaxAttempts: 4,
             baseBackoff: TimeSpan.FromSeconds(2),
             maxBackoff: TimeSpan.FromSeconds(3));
         events.Enqueue(FakeEventStore.Build(
@@ -960,61 +908,38 @@ public class EventDispatcherSpecs
             "/mohist/issues/issue_cross_tick",
             eventId: "evt_cross_tick"));
 
-        await dispatcher.DispatchAsync(CancellationToken.None);
-        await dispatcher.DispatchAsync(CancellationToken.None);
+        // Attempt 1: first fails, so second is not reached this attempt.
+        await dispatcher.DrainAsync(CancellationToken.None);
         Assert.Equal(1, firstAttempts);
+        Assert.Equal(0, secondAttempts);
+        Assert.Empty(events.Marked);
+
+        // Attempt 2 (after Backoff(1) = 2s): first still fails; second
+        // still not reached.
+        time.Advance(TimeSpan.FromSeconds(2));
+        await dispatcher.DrainAsync(CancellationToken.None);
+        Assert.Equal(2, firstAttempts);
+        Assert.Equal(0, secondAttempts);
+        Assert.Empty(events.Marked);
+
+        // Attempt 3 (after Backoff(2) = 4s capped to 3s): first now
+        // succeeds and is re-invoked even though it already ran; second
+        // fails as the new head.
+        time.Advance(TimeSpan.FromSeconds(3));
+        await dispatcher.DrainAsync(CancellationToken.None);
+        Assert.Equal(3, firstAttempts);
         Assert.Equal(1, secondAttempts);
         Assert.Empty(events.Marked);
 
-        time.Advance(TimeSpan.FromSeconds(2));
-        await dispatcher.DispatchAsync(CancellationToken.None);
-        Assert.Equal(2, firstAttempts);
-        Assert.Equal(2, secondAttempts);
-        Assert.Empty(events.Marked);
+        // Attempt 4 (after Backoff(3) = 8s capped to 3s): both succeed and
+        // the event settles without dead-lettering.
+        time.Advance(TimeSpan.FromSeconds(3));
+        await dispatcher.DrainAsync(CancellationToken.None);
 
-        time.Advance(TimeSpan.FromSeconds(2));
-        await dispatcher.DispatchAsync(CancellationToken.None);
-        Assert.Equal(2, firstAttempts);
-        Assert.Empty(events.Marked);
-
-        time.Advance(TimeSpan.FromSeconds(1));
-        await dispatcher.DispatchAsync(CancellationToken.None);
-        Assert.Equal(3, firstAttempts);
+        Assert.Equal(4, firstAttempts);
         Assert.Equal(2, secondAttempts);
         Assert.Single(events.Marked);
         Assert.Empty(dlq.Written);
-    }
-
-    [Fact]
-    public async Task DispatchAsync_DeadLettersEachFailingHandlerAfterIndependentBudgets()
-    {
-        var time = new FakeTimeProvider(StartTime);
-        var events = new FakeEventStore();
-        var dlq = new FakeDeadLetterStore();
-        var first = new FlakyRecorder(() => throw new InvalidOperationException("first poison"));
-        var second = new Recorder(_ => throw new InvalidOperationException("second poison"));
-        var dispatcher = BuildDispatcher(
-            events,
-            dlq,
-            [
-                new Subscription(IssueCompleted, first, DispatchDynamic),
-                new Subscription(IssueCompleted, second, DispatchDynamic),
-            ],
-            time,
-            handlerMaxAttempts: 2);
-        events.Enqueue(FakeEventStore.Build(
-            IssueCompleted,
-            "/mohist/issues/issue_two_poison",
-            eventId: "evt_two_poison"));
-
-        await dispatcher.DispatchAsync(CancellationToken.None);
-        time.Advance(TimeSpan.FromSeconds(1));
-        await dispatcher.DispatchAsync(CancellationToken.None);
-
-        Assert.Equal(2, dlq.Written.Count);
-        Assert.All(dlq.Written, row => Assert.Equal(2, row.AttemptCount));
-        Assert.Equal(2, dlq.Written.Select(row => row.FailingHandler).Distinct().Count());
-        Assert.Single(events.Marked);
     }
 
     [Fact]
@@ -1022,8 +947,11 @@ public class EventDispatcherSpecs
     {
         var options = new EventDispatcherOptions();
 
-        Assert.Equal(TimeSpan.FromSeconds(1), options.ReminderPeriod);
-        Assert.Equal(100, options.BatchSize);
+        Assert.Equal(2, options.WorkerCount);
+        Assert.Equal(TimeSpan.FromSeconds(30), options.LeaseDuration);
+        Assert.Equal(TimeSpan.FromSeconds(1), options.SlowPollInterval);
+        Assert.Equal(100, options.MaxStreamsPerPass);
+        Assert.Equal(200, options.MaxEventsPerStreamPass);
         Assert.Equal(5, options.MaxAttempts);
         Assert.Equal(TimeSpan.FromSeconds(1), options.BaseBackoff);
         Assert.Equal(TimeSpan.FromSeconds(30), options.MaxBackoff);
@@ -1032,7 +960,7 @@ public class EventDispatcherSpecs
     }
 
     [Fact]
-    public void DispatchAsync_RejectsZeroOrNegativeBatchLimit()
+    public void Ctor_RejectsInvalidOptions()
     {
         var time = new FakeTimeProvider(StartTime);
         var events = new FakeEventStore();
@@ -1043,8 +971,9 @@ public class EventDispatcherSpecs
             events,
             [sub],
             dlq,
+            new FakeDispatchStreamLeaseStore(),
             time,
-            Options.Create(new EventDispatcherOptions { BatchSize = 0, MaxAttempts = 1 }),
+            Options.Create(new EventDispatcherOptions { MaxStreamsPerPass = 0, MaxAttempts = 1 }),
             NullLogger<EventDispatcherService>.Instance,
             NullEventPushQueue.Instance));
 
@@ -1052,8 +981,9 @@ public class EventDispatcherSpecs
             events,
             [sub],
             dlq,
+            new FakeDispatchStreamLeaseStore(),
             time,
-            Options.Create(new EventDispatcherOptions { BatchSize = 10, MaxAttempts = 0 }),
+            Options.Create(new EventDispatcherOptions { MaxAttempts = 0 }),
             NullLogger<EventDispatcherService>.Instance,
             NullEventPushQueue.Instance));
     }
@@ -1076,5 +1006,4 @@ public class EventDispatcherSpecs
             if (!handler.Filter(typed)) return Task.CompletedTask;
             return handler.HandleAsync(typed, ct);
         };
-
 }

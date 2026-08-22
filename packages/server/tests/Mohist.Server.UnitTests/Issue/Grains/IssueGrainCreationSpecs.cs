@@ -5,7 +5,6 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
-using Mohist.Server.Events.Grains;
 using Mohist.Server.Infrastructure;
 using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Infrastructure.Data.Issue;
@@ -121,8 +120,7 @@ public sealed class IssueGrainCreationSpecs
             services.GetRequiredService<WorkflowQuerier>(),
             services.GetRequiredService<IDbContextFactory<MohistDbContext>>(),
             services.GetRequiredService<IEventStore>(),
-            _grains,
-            services.GetRequiredService<IBackgroundTaskLauncher>(),
+            new EventDispatchSignal(),
             services.GetRequiredService<IssueRepositoryResolver>(),
             services.GetRequiredService<WorkflowDefinitionResolver>(),
             services.GetRequiredService<WorkflowPromptResolver>(),
@@ -529,8 +527,6 @@ public sealed class IssueGrainCreationSpecs
                     k => new FakePersistentState<IssueCounterState>(k, _counters));
                 return (TGrainInterface)(object)new IssueCounterGrain(state);
             }
-            if (typeof(TGrainInterface) == typeof(IEventDispatcherGrain))
-                return (TGrainInterface)(object)new NullEventDispatcherGrain();
             throw new NotSupportedException($"StubGrainFactory does not support {typeof(TGrainInterface).Name}");
         }
 

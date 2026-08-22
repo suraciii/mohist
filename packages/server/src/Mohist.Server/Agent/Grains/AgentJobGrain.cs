@@ -61,7 +61,7 @@ public sealed partial class AgentJobGrain : Grain, IAgentJobGrain
     private readonly TimeProvider _timeProvider;
     private readonly IAgentJobStore _jobStore;
     private readonly IEventStore _eventStore;
-    private readonly IBackgroundTaskLauncher _backgroundTasks;
+    private readonly EventDispatchSignal _dispatchSignal;
     private readonly IGrainFactory _grains;
     private readonly IAgentJobDispatchObserver _dispatchObserver;
     private readonly ManagerExecutionCapabilityIssuer _managerCredentials;
@@ -78,7 +78,7 @@ public sealed partial class AgentJobGrain : Grain, IAgentJobGrain
         TimeProvider timeProvider,
         IAgentJobStore jobStore,
         IEventStore eventStore,
-        IBackgroundTaskLauncher backgroundTasks,
+        EventDispatchSignal dispatchSignal,
         IGrainFactory grains,
         IAgentJobDispatchObserver dispatchObserver,
         ManagerExecutionCapabilityIssuer managerCredentials)
@@ -88,7 +88,7 @@ public sealed partial class AgentJobGrain : Grain, IAgentJobGrain
         _timeProvider = timeProvider;
         _jobStore = jobStore;
         _eventStore = eventStore;
-        _backgroundTasks = backgroundTasks;
+        _dispatchSignal = dispatchSignal;
         _grains = grains;
         _dispatchObserver = dispatchObserver;
         _managerCredentials = managerCredentials;
@@ -1352,7 +1352,7 @@ public sealed partial class AgentJobGrain : Grain, IAgentJobGrain
         try
         {
             await _eventStore.AppendAsync(BuildUpdateInterruptionEnvelope(obligation), CancellationToken.None);
-            EventDispatcherPoke.PokeAfterCommit(GrainFactory, _log, nameof(AgentJobGrain), _backgroundTasks);
+            _dispatchSignal.Wake();
         }
         catch (Exception ex)
         {
@@ -1385,7 +1385,7 @@ public sealed partial class AgentJobGrain : Grain, IAgentJobGrain
         try
         {
             await _eventStore.AppendAsync(envelope, CancellationToken.None);
-            EventDispatcherPoke.PokeAfterCommit(GrainFactory, _log, nameof(AgentJobGrain), _backgroundTasks);
+            _dispatchSignal.Wake();
         }
         catch (Exception ex)
         {
@@ -1465,7 +1465,7 @@ public sealed partial class AgentJobGrain : Grain, IAgentJobGrain
         {
             var envelope = BuildTerminalDeliveryEnvelope(pending);
             await _eventStore.AppendAsync(envelope, CancellationToken.None);
-            EventDispatcherPoke.PokeAfterCommit(GrainFactory, _log, nameof(AgentJobGrain), _backgroundTasks);
+            _dispatchSignal.Wake();
             State.PendingTerminalDeliveryEvent = null;
             await PersistAsync();
         }
@@ -1499,7 +1499,7 @@ public sealed partial class AgentJobGrain : Grain, IAgentJobGrain
         try
         {
             await _eventStore.AppendAsync(BuildSubagentTerminalEnvelope(pending), CancellationToken.None);
-            EventDispatcherPoke.PokeAfterCommit(GrainFactory, _log, nameof(AgentJobGrain), _backgroundTasks);
+            _dispatchSignal.Wake();
             State.PendingSubagentTerminalEvent = null;
             await PersistAsync();
         }

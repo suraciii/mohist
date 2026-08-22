@@ -126,6 +126,47 @@ public class RecordingEventStore : IEventStore
         return Task.CompletedTask;
     }
 
+    public Task<IReadOnlyList<PendingStream>> ListPendingStreamsAsync(int limit = 100, CancellationToken ct = default)
+    {
+        lock (_gate)
+        {
+            return Task.FromResult<IReadOnlyList<PendingStream>>(_undelivered
+                .GroupBy(row => (row.Origin, row.Source))
+                .Select(group => new PendingStream(
+                    group.Key.Origin,
+                    group.Key.Source,
+                    group.Min(row => row.Time)))
+                .OrderBy(stream => stream.OldestPendingTime)
+                .Take(limit)
+                .ToArray());
+        }
+    }
+
+    public Task<IReadOnlyList<UndeliveredEvent>> ListUndeliveredByStreamAsync(EventOrigin origin, string source, int limit, CancellationToken ct = default)
+    {
+        lock (_gate)
+        {
+            return Task.FromResult<IReadOnlyList<UndeliveredEvent>>(_undelivered
+                .Where(row => row.Origin == origin && row.Source == source)
+                .OrderBy(row => row.Id)
+                .Take(limit)
+                .ToList());
+        }
+    }
+
+    public Task MarkDispatchedRangeAsync(EventOrigin origin, string source, IReadOnlyList<long> ids, DateTimeOffset dispatchedAt, CancellationToken ct = default)
+    {
+        lock (_gate)
+        {
+            foreach (var id in ids)
+            {
+                _marked.Add(new RecordedDispatch(origin, source, id, dispatchedAt));
+                _undelivered.RemoveAll(row => row.Origin == origin && row.Source == source && row.Id == id);
+            }
+        }
+        return Task.CompletedTask;
+    }
+
     public Task<IReadOnlyList<UndeliveredEvent>> ListUndeliveredAsync(int limit = 100, CancellationToken ct = default)
     {
         lock (_gate)

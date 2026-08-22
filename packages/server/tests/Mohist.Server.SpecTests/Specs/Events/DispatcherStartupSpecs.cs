@@ -1,9 +1,7 @@
 using Microsoft.Extensions.DependencyInjection;
-using Mohist.Server.Events.Grains;
+using Microsoft.Extensions.Hosting;
+using Mohist.Server.Infrastructure.Events;
 using Mohist.Server.SpecTests.Support;
-using Mohist.Server.TestSupport;
-using Orleans;
-using Orleans.Runtime;
 using Xunit;
 
 namespace Mohist.Server.SpecTests.Specs.Events;
@@ -18,16 +16,13 @@ public sealed class DispatcherStartupSpecs
     }
 
     [Fact]
-    public async Task HostStartup_ActivatesDispatcherAndRegistersReminder()
+    public void HostStartup_RegistersDispatcherEngineAndWorkers()
     {
-        var dispatcherId = _fixture.Grains
-            .GetGrain<IEventDispatcherGrain>(EventDispatcherGrain.Global)
-            .GetGrainId();
-        var reminderTable = _fixture.Services.GetRequiredService<IReminderTable>();
-
-        var row = await reminderTable.ReadRow(dispatcherId, EventDispatcherGrain.ReminderName);
-
-        Assert.NotNull(row);
-        Assert.Equal(EventDispatcherGrain.ReminderName, row.ReminderName);
+        // The stream-lease engine replaces the reminder grain: the host
+        // must expose IEventDispatcher and run the dispatch workers as a
+        // hosted service.
+        Assert.NotNull(_fixture.Services.GetRequiredService<IEventDispatcher>());
+        var hosted = _fixture.Services.GetServices<IHostedService>();
+        Assert.Contains(hosted, service => service is EventDispatchWorker);
     }
 }

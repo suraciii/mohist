@@ -1,6 +1,6 @@
 using Microsoft.EntityFrameworkCore;
+using Mohist.Server.Infrastructure.Events;
 using Microsoft.Extensions.DependencyInjection;
-using Mohist.Server.Events.Grains;
 using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Infrastructure.Data.Workflow;
 using Mohist.Server.Infrastructure.Orleans;
@@ -26,8 +26,8 @@ internal static class WorkflowApiTestSupport
         return (issueKey, number);
     }
 
-    public static Task DispatchEventsAsync(IGrainFactory grains) =>
-        grains.GetGrain<IEventDispatcherGrain>(EventDispatcherGrain.Global).DispatchNowAsync();
+    public static Task DispatchEventsAsync(IServiceProvider services) =>
+        services.GetRequiredService<IEventDispatcher>().DrainAsync();
 
     public static async Task SeedWorkflowTemplateAsync(string connectionString, string projectId)
     {
