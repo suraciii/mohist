@@ -385,7 +385,7 @@ public class AgentSessionStopClaimRecoverySpecs : AgentJobGrainTestSupport
             Metadata: new AgentSessionMetadata(new Dictionary<string, string>(StringComparer.Ordinal)
             {
                 [AgentSessionQueryMetadataKeys.ProjectId] = "project-work-settlement",
-                [AgentSessionQueryMetadataKeys.SourceKind] = "workflow",
+                [AgentSessionQueryMetadataKeys.SourceKind] = "agent-launch",
                 [AgentSessionQueryMetadataKeys.WorkflowRunId] = "workflow-work-settlement",
                 [AgentSessionQueryMetadataKeys.SessionName] = "session-work-settlement",
                 [AgentSessionQueryMetadataKeys.WorkId] = "work-work-settlement",
@@ -404,7 +404,8 @@ public class AgentSessionStopClaimRecoverySpecs : AgentJobGrainTestSupport
             new[] { new AgentSessionRuntimeEventInput(
                 RuntimeEventTypes.SessionActivity,
                 "{\"activity\":\"idle\",\"status\":\"failed\",\"turnId\":\"turn-work-settlement-1\"}") },
-            "runtime-work-settlement"));
+            "runtime-work-settlement",
+            SessionTurnId: "turn-work-settlement-1"));
 
         Assert.Empty(_fixture.WorkPort.Requests);
 
@@ -418,7 +419,8 @@ public class AgentSessionStopClaimRecoverySpecs : AgentJobGrainTestSupport
             new[] { new AgentSessionRuntimeEventInput(
                 RuntimeEventTypes.SessionActivity,
                 "{\"activity\":\"active\",\"status\":\"running\",\"turnId\":\"turn-work-settlement-2\"}") },
-            "runtime-work-settlement"));
+            "runtime-work-settlement",
+            SessionTurnId: "turn-work-settlement-2"));
 
         Assert.Empty(_fixture.WorkPort.Requests);
     }

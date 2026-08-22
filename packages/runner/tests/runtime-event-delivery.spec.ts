@@ -1,32 +1,32 @@
-import { describe, expect, it, vi } from "vitest"
-import type { AgentSessionRuntimeEventReceipt, ServerConnection } from "../src/server/connection.js"
-import { createServerRuntimeEventDelivery } from "../src/server/runtime-event-delivery.js"
-import type { RuntimeEventRecord } from "../src/server/runtime-event-outbox.js"
+import { describe, expect, it, vi } from 'vitest'
+import type { AgentSessionRuntimeEventReceipt, ServerConnection } from '../src/server/connection.js'
+import { createServerRuntimeEventDelivery } from '../src/server/runtime-event-delivery.js'
+import type { RuntimeEventRecord } from '../src/server/runtime-event-outbox.js'
 
-function workflowRecord(id: string, type = "reasoning.delta"): RuntimeEventRecord {
+function workflowRecord(id: string, type = 'reasoning.delta'): RuntimeEventRecord {
   return {
     id,
-    producerFamily: "workflow-session",
-    target: { kind: "workflow", projectId: "proj-1", workflowRunId: "wf-1", sessionName: "plan" },
-    runtimeSessionId: "ses_1",
-    runtime: "opencode",
+    producerFamily: 'workflow-session',
+    target: { kind: 'workflow', projectId: 'proj-1', workflowRunId: 'wf-1', sessionName: 'plan' },
+    runtimeSessionId: 'ses_1',
+    runtime: 'opencode',
     work: {
-      workId: "work-1",
-      taskRunId: "task-1.1",
-      runnerId: "runner-1",
-      agentSessionId: "agent-session-1",
-      inputDeliveryId: "input-1",
-      agentTurnId: "turn-1",
-      workType: "task",
-      stage: "plan",
+      workId: 'work-1',
+      taskRunId: 'task-1.1',
+      runnerId: 'runner-1',
+      agentSessionId: 'agent-session-1',
+      inputDeliveryId: 'input-1',
+      agentTurnId: 'turn-1',
+      workType: 'task',
+      stage: 'plan',
     },
     event: { type, payload: { text: id } },
-    acknowledgementPolicy: "matching-receipt",
+    acknowledgementPolicy: 'matching-receipt',
   }
 }
 
-describe("createServerRuntimeEventDelivery — sendBatch", () => {
-  it("posts every workflow record in one batch call", async () => {
+describe('createServerRuntimeEventDelivery — sendBatch', () => {
+  it('posts every workflow record in one batch call', async () => {
     const calls: Array<{ runtimeEvents: Array<{ type: string }> }> = []
     const connection = {
       async workflowAgentSessionRuntimeEvents(
@@ -41,19 +41,19 @@ describe("createServerRuntimeEventDelivery — sendBatch", () => {
       },
     } as unknown as ServerConnection
     const delivery = createServerRuntimeEventDelivery({ connection })
-    const records = [workflowRecord("a"), workflowRecord("b"), workflowRecord("c")]
+    const records = [workflowRecord('a'), workflowRecord('b'), workflowRecord('c')]
 
     const result = await delivery.sendBatch!(records, new AbortController().signal)
 
     expect(calls).toHaveLength(1)
     expect(calls[0].runtimeEvents).toHaveLength(3)
-    expect(calls[0].runtimeEvents.map((e) => e.type)).toEqual(["reasoning.delta", "reasoning.delta", "reasoning.delta"])
+    expect(calls[0].runtimeEvents.map((e) => e.type)).toEqual(['reasoning.delta', 'reasoning.delta', 'reasoning.delta'])
     // One receipt-set per record, in order.
     expect(result).toHaveLength(3)
-    expect(result[0]).toEqual([{ type: "reasoning.delta" }])
+    expect(result[0]).toEqual([{ type: 'reasoning.delta' }])
   })
 
-  it("passes an empty Workflow input response through the real delivery adapter", async () => {
+  it('passes an empty Workflow input response through the real delivery adapter', async () => {
     const connection = {
       async workflowAgentSessionRuntimeEvents() {
         return []
@@ -61,11 +61,13 @@ describe("createServerRuntimeEventDelivery — sendBatch", () => {
     } as unknown as ServerConnection
     const delivery = createServerRuntimeEventDelivery({ connection })
 
-    await expect(delivery.send(workflowRecord("input-1", "session.input"), new AbortController().signal)).resolves.toEqual([])
+    await expect(
+      delivery.send(workflowRecord('input-1', 'session.input'), new AbortController().signal),
+    ).resolves.toEqual([])
   })
 
-  it("send (single) still works unchanged", async () => {
-    const sendSpy = vi.fn(async () => [{ type: "reasoning.delta" }])
+  it('send (single) still works unchanged', async () => {
+    const sendSpy = vi.fn(async () => [{ type: 'reasoning.delta' }])
     const connection = {
       async workflowAgentSessionRuntimeEvents() {
         return await sendSpy()
@@ -73,14 +75,14 @@ describe("createServerRuntimeEventDelivery — sendBatch", () => {
     } as unknown as ServerConnection
     const delivery = createServerRuntimeEventDelivery({ connection })
 
-    const result = await delivery.send(workflowRecord("a"), new AbortController().signal)
+    const result = await delivery.send(workflowRecord('a'), new AbortController().signal)
 
     expect(sendSpy).toHaveBeenCalledTimes(1)
-    expect(result).toEqual([{ type: "reasoning.delta" }])
+    expect(result).toEqual([{ type: 'reasoning.delta' }])
   })
 
-  it("delivers binding reconciliation facts through the runner-scoped session endpoint", async () => {
-    const sendSpy = vi.fn(async (_sessionId: string, _body: unknown) => [{ type: "session.activity" }])
+  it('delivers binding reconciliation facts through the runner-scoped session endpoint', async () => {
+    const sendSpy = vi.fn(async (_sessionId: string, _body: unknown) => [{ type: 'session.activity' }])
     const connection = {
       async reconcileAgentSessionRuntimeEvents(sessionId: string, body: unknown) {
         return await sendSpy(sessionId, body)
@@ -88,18 +90,18 @@ describe("createServerRuntimeEventDelivery — sendBatch", () => {
     } as unknown as ServerConnection
     const delivery = createServerRuntimeEventDelivery({ connection })
     const record: RuntimeEventRecord = {
-      id: "reconcile-1",
-      producerFamily: "binding-reconcile",
-      target: { kind: "session", sessionId: "session-1" },
-      runtimeSessionId: "runtime-1",
+      id: 'reconcile-1',
+      producerFamily: 'binding-reconcile',
+      target: { kind: 'session', sessionId: 'session-1' },
+      runtimeSessionId: 'runtime-1',
       work: null,
-      event: { type: "session.activity", payload: { activity: "idle" } },
-      acknowledgementPolicy: "successful-response",
+      event: { type: 'session.activity', payload: { activity: 'idle' } },
+      acknowledgementPolicy: 'successful-response',
     }
 
     const result = await delivery.send(record, new AbortController().signal)
 
-    expect(sendSpy).toHaveBeenCalledWith("session-1", {
+    expect(sendSpy).toHaveBeenCalledWith('session-1', {
       workId: null,
       workType: null,
       stage: null,
@@ -108,14 +110,14 @@ describe("createServerRuntimeEventDelivery — sendBatch", () => {
       agentSessionId: null,
       agentTurnId: null,
       runtime: null,
-      runtimeSessionId: "runtime-1",
-      runtimeEvents: [{ type: "session.activity", payload: { activity: "idle" } }],
+      runtimeSessionId: 'runtime-1',
+      runtimeEvents: [{ type: 'session.activity', payload: { activity: 'idle' } }],
     })
-    expect(result).toEqual([{ type: "session.activity" }])
+    expect(result).toEqual([{ type: 'session.activity' }])
   })
 
-  it("delivers follow-up facts with the exact Session and Agent turn identity", async () => {
-    const sendSpy = vi.fn(async (_sessionId: string, _body: unknown) => [{ type: "session.input" }])
+  it('delivers follow-up facts with the exact Session and Agent turn identity', async () => {
+    const sendSpy = vi.fn(async (_sessionId: string, _body: unknown) => [{ type: 'session.input' }])
     const connection = {
       async reconcileAgentSessionRuntimeEvents(sessionId: string, body: unknown) {
         return await sendSpy(sessionId, body)
@@ -123,35 +125,35 @@ describe("createServerRuntimeEventDelivery — sendBatch", () => {
     } as unknown as ServerConnection
     const delivery = createServerRuntimeEventDelivery({ connection })
     const record: RuntimeEventRecord = {
-      id: "input-followup-1",
-      producerFamily: "session-followup",
-      target: { kind: "session", sessionId: "session-1" },
-      runtimeSessionId: "runtime-1",
-      sessionTurnId: "turn-1",
+      id: 'input-followup-1',
+      producerFamily: 'session-followup',
+      target: { kind: 'session', sessionId: 'session-1' },
+      runtimeSessionId: 'runtime-1',
+      sessionTurnId: 'turn-1',
       work: null,
-      event: { type: "session.input", payload: { text: "continue", turnId: "turn-1" } },
-      acknowledgementPolicy: "matching-receipt",
+      event: { type: 'session.input', payload: { text: 'continue', turnId: 'turn-1' } },
+      acknowledgementPolicy: 'matching-receipt',
     }
 
     const result = await delivery.send(record, new AbortController().signal)
 
-    expect(sendSpy).toHaveBeenCalledWith("session-1", {
+    expect(sendSpy).toHaveBeenCalledWith('session-1', {
       workId: null,
       workType: null,
       stage: null,
       taskRunId: null,
       inputDeliveryId: null,
-      agentSessionId: "session-1",
-      agentTurnId: "turn-1",
+      agentSessionId: 'session-1',
+      agentTurnId: 'turn-1',
       runtime: null,
-      runtimeSessionId: "runtime-1",
-      runtimeEvents: [{ type: "session.input", payload: { text: "continue", turnId: "turn-1" } }],
+      runtimeSessionId: 'runtime-1',
+      runtimeEvents: [{ type: 'session.input', payload: { text: 'continue', turnId: 'turn-1' } }],
     })
-    expect(result).toEqual([{ type: "session.input" }])
+    expect(result).toEqual([{ type: 'session.input' }])
   })
 
-  it("returns an empty array for an empty batch without calling the server", async () => {
-    const sendSpy = vi.fn(async () => [{ type: "reasoning.delta" }])
+  it('returns an empty array for an empty batch without calling the server', async () => {
+    const sendSpy = vi.fn(async () => [{ type: 'reasoning.delta' }])
     const connection = {
       async workflowAgentSessionRuntimeEvents() {
         return await sendSpy()
@@ -166,26 +168,30 @@ describe("createServerRuntimeEventDelivery — sendBatch", () => {
   })
 
   it.each([
-    ["task attempt", (record: RuntimeEventRecord) => ({ ...record, work: { ...record.work!, taskRunId: "task-2.1" } })],
-    ["work", (record: RuntimeEventRecord) => ({ ...record, work: { ...record.work!, workId: "work-2" } })],
-    ["Runner", (record: RuntimeEventRecord) => ({ ...record, work: { ...record.work!, runnerId: "runner-2" } })],
-    ["Agent Session", (record: RuntimeEventRecord) => ({ ...record, work: { ...record.work!, agentSessionId: "agent-session-2" } })],
-    ["input", (record: RuntimeEventRecord) => ({ ...record, work: { ...record.work!, inputDeliveryId: "input-2" } })],
-    ["Agent turn", (record: RuntimeEventRecord) => ({ ...record, work: { ...record.work!, agentTurnId: "turn-2" } })],
-    ["runtime", (record: RuntimeEventRecord) => ({ ...record, runtime: "pi" })],
-    ["runtime Session", (record: RuntimeEventRecord) => ({ ...record, runtimeSessionId: "ses_2" })],
-  ])("rejects a mixed %s batch before using the batch head envelope", async (_name, change) => {
-    const sendSpy = vi.fn(async () => [{ type: "reasoning.delta" }])
+    ['task attempt', (record: RuntimeEventRecord) => ({ ...record, work: { ...record.work!, taskRunId: 'task-2.1' } })],
+    ['work', (record: RuntimeEventRecord) => ({ ...record, work: { ...record.work!, workId: 'work-2' } })],
+    ['Runner', (record: RuntimeEventRecord) => ({ ...record, work: { ...record.work!, runnerId: 'runner-2' } })],
+    [
+      'Agent Session',
+      (record: RuntimeEventRecord) => ({ ...record, work: { ...record.work!, agentSessionId: 'agent-session-2' } }),
+    ],
+    ['input', (record: RuntimeEventRecord) => ({ ...record, work: { ...record.work!, inputDeliveryId: 'input-2' } })],
+    ['Agent turn', (record: RuntimeEventRecord) => ({ ...record, work: { ...record.work!, agentTurnId: 'turn-2' } })],
+    ['runtime', (record: RuntimeEventRecord) => ({ ...record, runtime: 'pi' })],
+    ['runtime Session', (record: RuntimeEventRecord) => ({ ...record, runtimeSessionId: 'ses_2' })],
+  ])('rejects a mixed %s batch before using the batch head envelope', async (_name, change) => {
+    const sendSpy = vi.fn(async () => [{ type: 'reasoning.delta' }])
     const connection = {
       async workflowAgentSessionRuntimeEvents() {
         return await sendSpy()
       },
     } as unknown as ServerConnection
     const delivery = createServerRuntimeEventDelivery({ connection })
-    const first = workflowRecord("a")
+    const first = workflowRecord('a')
 
-    await expect(delivery.sendBatch!([first, change(workflowRecord("b"))], new AbortController().signal))
-      .rejects.toThrow("mixed execution identity batch")
+    await expect(
+      delivery.sendBatch!([first, change(workflowRecord('b'))], new AbortController().signal),
+    ).rejects.toThrow('mixed execution identity batch')
 
     expect(sendSpy).not.toHaveBeenCalled()
   })

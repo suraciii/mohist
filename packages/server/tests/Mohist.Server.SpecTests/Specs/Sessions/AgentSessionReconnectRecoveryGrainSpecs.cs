@@ -65,7 +65,8 @@ public sealed class AgentSessionReconnectRecoveryGrainSpecs : IClassFixture<Agen
             WorkDir: "/work",
             Metadata: new AgentSessionMetadata()
                 .WithLabel("mohist.io/project-id", "project-1")
-                .WithLabel("mohist.io/source-kind", "workflow")
+                .WithLabel("mohist.io/source-kind", "agent-launch")
+            .WithLabel("mohist.io/agent-id", "agent-1")
                 .WithLabel("mohist.io/source-id", "workflow-1")
                 .WithLabel("mohist.io/session-name", "build")));
         await grain.AttachPhysicalSessionAsync(new AttachPhysicalSessionCommand(runtimeSessionId));

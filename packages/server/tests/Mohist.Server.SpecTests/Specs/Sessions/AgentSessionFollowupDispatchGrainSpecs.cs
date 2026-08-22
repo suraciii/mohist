@@ -28,8 +28,9 @@ public sealed partial class AgentSessionFollowupGrainSpecs
         await grain.AppendRuntimeEventsAsync(new AppendAgentSessionRuntimeEventsCommand(
             new[] { new AgentSessionRuntimeEventInput(
                 RuntimeEventTypes.SessionInput,
-                $$"""{"text":"event exec test","kind":"followup","source":"agent-session-followup","operationId":"{{accept.OperationId}}"}""") },
-            "runtime-input-event-exec"));
+                $$"""{"text":"event exec test","kind":"followup","source":"agent-session-followup","operationId":"{{accept.OperationId}}","turnId":"{{accept.TurnId}}"}""") },
+            "runtime-input-event-exec",
+            SessionTurnId: accept.TurnId));
         await persistence.WaitAsync();
 
         var stateAfter = await _fixture.StateStore.LoadAsync(sessionId);

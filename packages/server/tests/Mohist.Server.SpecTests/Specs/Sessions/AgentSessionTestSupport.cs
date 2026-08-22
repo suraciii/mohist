@@ -36,7 +36,7 @@ public abstract class AgentSessionTestSupport
         _client = fixture.Client;
     }
 
-    protected async Task<(ProjectDto Project, IssueDto Issue, WorkDispatch Work, CreatedSession Session)> CreateStartedAgentSessionAsync(string name, bool start = true, string? title = null, string? sessionName = null)
+    protected async Task<(ProjectDto Project, IssueDto Issue, WorkDispatch Work, CreatedSession Session)> CreateStartedAgentSessionAsync(string name, bool start = true, string? title = null, string? sessionName = null, bool workflow = true)
     {
         var projectName = $"asg-{Guid.NewGuid():N}";
         var project = await _client.CreateProjectWithDefaultRepositoryAsync<ProjectDto>("/api/projects", projectName);
@@ -55,13 +55,19 @@ var issue = await _client.PostDataAsync<IssueDto>($"/api/projects/{project.Id}/i
             Issue: new WorkIssueRef(project.Id, issue.Number));
         sessionName ??= work.WorkId;
         var grain = _fixture.Grains.GetGrain<IAgentSessionGrain>(Guid.NewGuid().ToString("N"));
+        var metadata = workflow
+            ? WorkflowSessionMetadata(project.Id, issue.Number, work.WorkflowRunId, sessionName, work.WorkId, work.WorkType, work.Stage, work.Title)
+            : GenericAgentSessionMetadata.Metadata(new GenericAgentSessionContext(project.Id, "agent-1", "Agent One", issue.Number, Title: issueTitle));
         var info = await grain.OpenAsync(new OpenAgentSessionCommand(
             _runnerId,
             "opencode",
-            Metadata: WorkflowSessionMetadata(project.Id, issue.Number, work.WorkflowRunId, sessionName, work.WorkId, work.WorkType, work.Stage, work.Title)));
+            Metadata: metadata));
         var session = new CreatedSession(project.Id, issue.Number, work.WorkflowRunId, sessionName, info);
         if (start)
-            await _client.PostOkAsync(RunnerAgentSessionAttachPath(session), new { runtimeSessionId = session.Id, runtime = "opencode", expectedRuntime = "opencode", expectedRuntimeSessionId = (string?)null, workDir = $"/workspaces/{project.Id}", processPid = 1234 });
+        {
+            var attachPath = workflow ? RunnerAgentSessionAttachPath(session) : RunnerGenericAgentSessionAttachPath(session);
+            await _client.PostOkAsync(attachPath, new { runtimeSessionId = session.Id, runtime = "opencode", expectedRuntime = "opencode", expectedRuntimeSessionId = (string?)null, workDir = $"/workspaces/{project.Id}", processPid = 1234 });
+        }
         return (project, issue, work, session);
     }
 
@@ -73,6 +79,9 @@ var issue = await _client.PostDataAsync<IssueDto>($"/api/projects/{project.Id}/i
 
     protected string RunnerSessionRuntimeEventsPath(CreatedSession session) =>
         $"/api/runner/{_runnerId}/agent-sessions/{session.Id}/runtime-events";
+
+    protected string RunnerGenericAgentSessionAttachPath(CreatedSession session) =>
+        $"/api/runner/{_runnerId}/agent-sessions/{Uri.EscapeDataString(session.ProjectId)}/{Uri.EscapeDataString(session.Id)}/attach";
 
     protected string RunnerSessionPath(CreatedSession session) =>
         $"/api/runner/{_runnerId}/sessions/{Uri.EscapeDataString(session.ProjectId)}/{Uri.EscapeDataString(session.WorkflowRunId)}/{Uri.EscapeDataString(session.SessionName)}";

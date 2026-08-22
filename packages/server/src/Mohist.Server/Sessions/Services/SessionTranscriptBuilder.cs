@@ -245,7 +245,11 @@ internal static class SessionTranscriptBuilder
                 .Select(inputId => inputById[inputId].Text)
                 .Where(text => !string.IsNullOrWhiteSpace(text))
                 .ToArray();
-            if (texts.Length > 0) return string.Join("\n", texts);
+            // Canonical input text carries the runner execution envelope
+            // markers; the public transcript strips them exactly like the
+            // legacy accumulator path did.
+            var canonical = StripInternalPromptSections(string.Join("\n", texts));
+            if (!string.IsNullOrWhiteSpace(canonical)) return canonical;
             if (canonicalTurn.InputIds.Count > 0) return "Attachment input";
         }
 
