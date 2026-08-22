@@ -51,6 +51,10 @@
 - Verification: `npm --prefix packages/mohist-slack run typecheck:tests` and `npm --prefix packages/mohist-slack test` pass (91 tests). Go verification could not run because the workspace environment has no `go` executable.
 
 ## Review follow-up
+
+- Addressed review MF-1: report-timeout reconciliation now retains the canonical `report-timeout` category separately from its diagnostic reason, arms the bounded recovery deadline, and converts an unresolved timeout to a failed Turn with the exact retryable category. Existing runner-loss recovery keeps `runner-lost`; Unknown delivery remains non-retryable while reconciliation is pending.
+- Addressed review MF-2: root retry now uses the failed Session's durable execution definition, Skills, AgentSessionStartup (rebased to the new Session identity), input attachments, startup context, workspace label, prompt, and Slack provenance. `LaunchConnectionAsync` accepts explicit durable definition/startup snapshots and forwards them through the coordinator/job/session pipeline; root retry skips current launchability re-evaluation because the accepted attempt is a replay of the recorded request.
+- Added SpecTest coverage for changed Agent configuration plus attachments/startup context and report-timeout recovery deadline/category setup. Verification: Server and SpecTests builds pass; full SpecTests pass (3060). `review.md` was not edited.
 - MF-1 from `review.md` is the remaining must-fix: handler-level deterministic coverage for retryable terminal presentation and signing/durable-fact fallback.
 - Implemented `SlackTerminalDeliveryPresentationSpecs`: the real handler now has deterministic positive coverage for explicit-failure outbox blocks, signed Retry action value, durable Session/Turn/Slack identity, and five-minute expiry; negative coverage verifies reaction-only fallback for missing durable facts and missing signing material.
 - Hardened terminal presentation so unavailable durable retry facts are logged and fall back to reaction-only instead of failing the terminal event.
