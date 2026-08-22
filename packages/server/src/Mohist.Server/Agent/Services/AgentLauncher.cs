@@ -464,13 +464,7 @@ public sealed class AgentLauncher : IAgentLauncher, IScopedService
         var agentConfigJson = agent.AgentConfig is { ValueKind: not JsonValueKind.Undefined }
             ? agent.AgentConfig.Value.GetRawText()
             : null;
-        var launchSessionId = preMintedSessionId ?? $"agent-session-{Guid.NewGuid():N}";
-        var launchStartup = agentSessionStartup ?? BuildStartup(
-            agent.ProjectId,
-            launchSessionId,
-            definition,
-            agentId: agent.Id,
-            agentName: agent.Name);
+        var launchSessionId = preMintedSessionId;
         var coordinator = _grains.GetGrain<IAgentLaunchCoordinatorGrain>(
             AgentLaunchCoordinatorCodec.KeyFor(context.ProjectId, key));
         var outcome = await coordinator.LaunchAsync(new AgentLaunchCoordinatorCommandEnvelope(
@@ -508,7 +502,7 @@ public sealed class AgentLauncher : IAgentLauncher, IScopedService
             PreMintedTurnId: preMintedTurnId,
             Attachments: launchAttachments,
             StartupContext: startupContext,
-            AgentSessionStartup: launchStartup,
+            AgentSessionStartup: agentSessionStartup,
             Skills: definition.Skills.ToArray()));
 
         return new AgentLaunchResult(outcome.SessionId, outcome.JobKey, outcome.InputId, outcome.TurnId, outcome.AgentId, outcome.AgentName);
