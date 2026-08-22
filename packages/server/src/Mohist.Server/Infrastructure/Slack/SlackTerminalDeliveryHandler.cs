@@ -52,20 +52,37 @@ public sealed class SlackTerminalDeliveryHandler : ICloudEventHandler
                 : null;
         if (ShouldRenderRetry(projectId, delivery))
         {
-            var connection = await scope.ServiceProvider
-                .GetRequiredService<AgentConnectionStore>()
-                .GetAsync(projectId, delivery.ConnectionId, ct);
-            var retry = connection is null
-                ? null
-                : await scope.ServiceProvider
-                    .GetRequiredService<SlackRetryActionService>()
-                    .CreateRetryActionAsync(
-                        connection,
-                        delivery.SessionId!,
-                        delivery.TurnId!,
-                        source,
-                        delivery.ThreadTs,
-                        ct);
+            SlackRetryAction? retry = null;
+            try
+            {
+                var connection = await scope.ServiceProvider
+                    .GetRequiredService<AgentConnectionStore>()
+                    .GetAsync(projectId, delivery.ConnectionId, ct);
+                if (connection is not null)
+                {
+                    retry = await scope.ServiceProvider
+                        .GetRequiredService<SlackRetryActionService>()
+                        .CreateRetryActionAsync(
+                            connection,
+                            delivery.SessionId!,
+                            delivery.TurnId!,
+                            source,
+                            delivery.ThreadTs,
+                            ct);
+                }
+            }
+            catch (Exception ex) when (!ct.IsCancellationRequested)
+            {
+                // Terminal presentation must not turn a missing or
+                // temporarily unavailable durable Session/Turn into a lost
+                // liveness update. The signed action is optional; reactions
+                // remain the safe fallback until the durable facts can be
+                // resolved by a later delivery attempt.
+                _log.LogWarning(
+                    ex,
+                    "Could not resolve retry facts for terminal AgentJob {JobKey}; falling back to reaction-only presentation",
+                    delivery.JobKey);
+            }
             if (retry is not null)
             {
                 await projection.EnqueueTerminalAsync(

@@ -49,3 +49,7 @@
 - Extended the Go `ServerAPI.Interaction` forwarding test to run the same Stop/Retry action matrix and assert the complete envelope, including thread timestamp, action value, lease id, and adapter id.
 - No adapter source or fixture changes were needed; all changes are test-only.
 - Verification: `npm --prefix packages/mohist-slack run typecheck:tests` and `npm --prefix packages/mohist-slack test` pass (91 tests). Go verification could not run because the workspace environment has no `go` executable.
+
+## Review follow-up
+- MF-1 from `review.md` is the remaining must-fix: handler-level deterministic coverage for retryable terminal presentation and signing/durable-fact fallback.
+- Plan: add integration-backed `SlackTerminalDeliveryHandler` specs that invoke the real handler, inspect the `ExplicitFailure` outbox blocks/action payload, and verify fallback to reaction-only when signing material or durable Session/Turn facts are unavailable. Do not edit `review.md`.
