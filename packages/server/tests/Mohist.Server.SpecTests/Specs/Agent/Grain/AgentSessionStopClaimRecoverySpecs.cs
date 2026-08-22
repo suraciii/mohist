@@ -385,10 +385,7 @@ public class AgentSessionStopClaimRecoverySpecs : AgentJobGrainTestSupport
             Metadata: new AgentSessionMetadata(new Dictionary<string, string>(StringComparer.Ordinal)
             {
                 [AgentSessionQueryMetadataKeys.ProjectId] = "project-work-settlement",
-                [AgentSessionQueryMetadataKeys.SourceKind] = "workflow",
-                [AgentSessionQueryMetadataKeys.WorkflowRunId] = "workflow-work-settlement",
-                [AgentSessionQueryMetadataKeys.SessionName] = "session-work-settlement",
-                [AgentSessionQueryMetadataKeys.WorkId] = "work-work-settlement",
+                [AgentSessionQueryMetadataKeys.SourceKind] = "agent-launch",
                 [GenericAgentSessionMetadata.AgentId] = "agent-test",
             })));
         await session.AttachPhysicalSessionAsync(
