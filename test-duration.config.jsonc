@@ -48,7 +48,8 @@
         { "command": "npm", "args": ["run", "build", "-w", "packages/runner"] }
       ],
       "slack": [
-        { "command": "npm", "args": ["run", "build", "-w", "packages/mohist-slack"] }
+        { "command": "npm", "args": ["run", "build", "-w", "packages/mohist-slack"] },
+        { "command": "dotnet", "args": ["build", "packages/server/tests/Mohist.Server.CrossComponentBridge/Mohist.Server.CrossComponentBridge.csproj", "-p:SkipWebBuild=true"] }
       ]
     },
     "repositoryChecks": [
@@ -67,8 +68,12 @@
     ]
   },
   "tracks": [
-    { "id": "mohist-slack", "kind": "vitest", "trackType": "behavior", "application": "slack", "specKind": "Design", "level": "L0", "resources": [], "run": ["npm","run","test:duration","-w","packages/mohist-slack","--","--reporter=json","--outputFile={report}"], "report": "reports/mohist-slack.json", "reportFormat": "vitest", "deadlineMs": 30000, "enforce": true, "rules": [
+    { "id": "mohist-slack", "kind": "vitest", "trackType": "behavior", "application": "slack", "specKind": "Design", "level": "L0", "resources": [], "run": ["npm","run","test:duration","-w","packages/mohist-slack","--","--exclude","src/adapter-ownership-http.test.ts","--reporter=json","--outputFile={report}"], "report": "reports/mohist-slack.json", "reportFormat": "vitest", "deadlineMs": 30000, "enforce": true, "rules": [
         { "id": "unit", "percentile": 95, "percentileMs": 50 }
+      ]
+    },
+    { "id": "mohist-slack-integration", "kind": "vitest", "trackType": "behavior", "application": "slack", "specKind": "Product", "level": "L1", "resources": [], "run": ["npm","run","test:duration","-w","packages/mohist-slack","--","src/adapter-ownership-http.test.ts","--reporter=json","--outputFile={report}"], "report": "reports/mohist-slack-integration.json", "reportFormat": "vitest", "deadlineMs": 30000, "enforce": true, "rules": [
+        { "id": "spec", "percentile": 95, "percentileMs": 500 }
       ]
     },
     { "id": "runner", "kind": "vitest", "trackType": "behavior", "application": "runner", "specKind": "Design", "level": "L0", "resources": [], "run": ["npm","run","test:duration","-w","packages/runner","--","--reporter=json","--outputFile={report}"], "report": "reports/runner.json", "reportFormat": "vitest", "deadlineMs": 90000, "enforce": true, "rules": [

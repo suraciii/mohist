@@ -109,17 +109,14 @@ export class HttpAdapterTransport implements AdapterTransport {
     adapterId: string,
     signal: AbortSignal,
   ): Promise<IngressResult> {
-    if (isManagerTarget(ref))
-      return await this.post<IngressResult>(
-        '/api/slack-manager/ingress',
-        { ...managerIngressBody(ref, envelope), leaseId, adapterId },
-        signal,
-      )
-    return await this.post<IngressResult>(
-      `${connectionRoute(ref)}/ingress`,
-      { ...envelope, leaseId, adapterId },
-      signal,
-    )
+    const data = isManagerTarget(ref)
+      ? await this.post<unknown>(
+          '/api/slack-manager/ingress',
+          { ...managerIngressBody(ref, envelope), leaseId, adapterId },
+          signal,
+        )
+      : await this.post<unknown>(`${connectionRoute(ref)}/ingress`, { ...envelope, leaseId, adapterId }, signal)
+    return ingressResultFromData(data)
   }
 
   async interaction(
@@ -291,6 +288,34 @@ function renewalFromData(value: unknown): LeaseRenewal {
   if (!leaseId || !kind || generation === null || !expiresAt)
     throw new Error('Slack adapter returned an invalid lease renewal response')
   return { leaseId, kind: kind === 'validation' ? 'validation' : 'runtime', generation, expiresAt }
+}
+
+function ingressResultFromData(value: unknown): IngressResult {
+  if (!isRecord(value)) throw new Error('Slack adapter returned an invalid ingress result')
+  const kind = stringValue(value.kind)
+  if (!kind) throw new Error('Slack adapter returned an invalid ingress result')
+
+  let responseOwner: IngressResult['responseOwner'] = 'none'
+  if (Object.prototype.hasOwnProperty.call(value, 'responseOwner')) {
+    const owner = stringValue(value.responseOwner)
+    if (owner !== 'none' && owner !== 'server' && owner !== 'adapter')
+      throw new Error('Slack adapter returned an invalid ingress response owner')
+    responseOwner = owner
+  } else if (kind === 'backpressured') {
+    // Older Servers only sent kind=backpressured for the no-intent direct
+    // fallback. Keep that one compatibility case adapter-owned; all other
+    // legacy results are deliberately non-posting.
+    responseOwner = 'adapter'
+  }
+
+  let reason: string | undefined
+  if (value.reason !== undefined) {
+    if (typeof value.reason !== 'string') throw new Error('Slack adapter returned an invalid ingress result')
+    reason = value.reason
+  }
+  if (responseOwner === 'adapter' && (reason === undefined || reason.length === 0))
+    throw new Error('Slack adapter returned an invalid ingress result')
+  return reason === undefined ? { kind, responseOwner } : { kind, responseOwner, reason }
 }
 
 function deliveryFromData(value: unknown): Delivery | null {

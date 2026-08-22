@@ -19,6 +19,16 @@ export interface ConnectionDiagnosticFacts {
   agentReadiness: string
   identity: ConnectionIdentityFacts
   offlineGapAt: string | null
+  agentExecutability?: {
+    state: string
+    gaps: Array<{
+      code: string
+      message: string
+      nextAction: string
+      fixEntryPoint: { label: string; path: string; command: string }
+    }>
+    pendingLaunchNote: string | null
+  } | null
 }
 
 export interface ConnectionDiagnostic {

@@ -68,7 +68,7 @@ describe('mohist-slack adapter', () => {
     expect(logger.entries).toContainEqual({
       level: 'info',
       message: 'ingress accepted',
-      fields: { target: 'connection:p1:c1', event: 'message', kind: 'accepted' },
+      fields: { target: 'connection:p1:c1', event: 'message', kind: 'accepted', responseOwner: 'none' },
     })
     expect(webs.get('c1')?.posted).toEqual([{ channel: 'D1', text: 'accepted' }])
     expect(transport.acks).toEqual([
@@ -522,6 +522,7 @@ describe('mohist-slack adapter', () => {
     transport.nextIngressResults = [
       {
         kind: 'backpressured',
+        responseOwner: 'adapter',
         reason: 'This Slack Connection is backpressured; retry after pending deliveries drain.',
       },
     ]
@@ -553,6 +554,7 @@ describe('mohist-slack adapter', () => {
     })
 
     expect(acknowledged).toBe(true)
+    expect(socket.acknowledgementCount).toBe(1)
     expect(web.posted).toEqual([
       {
         channel: 'D1',
@@ -564,11 +566,13 @@ describe('mohist-slack adapter', () => {
     controller.abort()
   })
 
-  it('does not render server-enqueued rejected kinds so the outbox reply is not duplicated', async () => {
+  it('does not render server-owned results so the outbox reply is not duplicated regardless of kind', async () => {
     const transport = new FakeTransport()
     transport.connections = [{ projectId: 'p', connectionId: 'c' }]
     transport.deliveries.length = 0
-    transport.nextIngressResults = [{ kind: 'rejected', reason: 'Please send a task for the Agent to perform.' }]
+    transport.nextIngressResults = [
+      { kind: 'backpressured', responseOwner: 'server', reason: 'Please send a task for the Agent to perform.' },
+    ]
     const web = new FakeWeb()
     const socket = new FakeSocket()
     const adapter = new SlackAdapter({
@@ -589,6 +593,68 @@ describe('mohist-slack adapter', () => {
     })
 
     expect(acknowledged).toBe(true)
+    expect(socket.acknowledgementCount).toBe(1)
+    expect(web.posted).toEqual([])
+    controller.abort()
+  })
+
+  it('does not acknowledge an adapter-owned fallback when the direct post fails', async () => {
+    const transport = new FakeTransport()
+    transport.connections = [{ projectId: 'p', connectionId: 'c' }]
+    transport.deliveries.length = 0
+    transport.nextIngressResults = [{ kind: 'backpressured', responseOwner: 'adapter', reason: 'retry shortly' }]
+    const web = new FakeWeb()
+    web.nextResponses = [{ ok: false, error: 'channel_not_found' }]
+    const socket = new FakeSocket()
+    const adapter = new SlackAdapter({
+      adapterId: 'a',
+      transport,
+      socketFactory: () => socket,
+      webFactory: () => web,
+      heartbeatIntervalMs: 60_000,
+      deliveryPollIntervalMs: 60_000,
+    })
+    const controller = new AbortController()
+    await adapter.start(controller.signal)
+
+    const acknowledged = await socket.emit({
+      team_id: 'T1',
+      api_app_id: 'A1',
+      event: { type: 'message', channel: 'D1', channel_type: 'im', ts: '123.456', user: 'U1', text: 'do work' },
+    })
+
+    expect(acknowledged).toBe(false)
+    expect(socket.acknowledgementCount).toBe(0)
+    expect(web.posted).toEqual([{ channel: 'D1', text: 'retry shortly' }])
+    controller.abort()
+  })
+
+  it('does not acknowledge malformed ownership outcomes', async () => {
+    const transport = new FakeTransport()
+    transport.connections = [{ projectId: 'p', connectionId: 'c' }]
+    transport.deliveries.length = 0
+    transport.nextIngressResults = [{ kind: 'rejected', responseOwner: 'unknown' as never }]
+    const web = new FakeWeb()
+    const socket = new FakeSocket()
+    const adapter = new SlackAdapter({
+      adapterId: 'a',
+      transport,
+      socketFactory: () => socket,
+      webFactory: () => web,
+      heartbeatIntervalMs: 60_000,
+      deliveryPollIntervalMs: 60_000,
+    })
+    const controller = new AbortController()
+    await adapter.start(controller.signal)
+
+    const acknowledged = await socket.emit({
+      team_id: 'T1',
+      api_app_id: 'A1',
+      event: { type: 'message', channel: 'D1', channel_type: 'im', ts: '123.456', user: 'U1', text: 'do work' },
+    })
+
+    expect(acknowledged).toBe(false)
+    expect(socket.acknowledgementCount).toBe(0)
     expect(web.posted).toEqual([])
     controller.abort()
   })
@@ -597,7 +663,10 @@ describe('mohist-slack adapter', () => {
     const transport = new FakeTransport()
     transport.connections = [{ projectId: 'p', connectionId: 'c' }]
     transport.deliveries.length = 0
-    transport.nextIngressResults = [{ kind: 'accepted' }, { kind: 'backpressured', reason: 'retry shortly' }]
+    transport.nextIngressResults = [
+      { kind: 'accepted', responseOwner: 'none' },
+      { kind: 'backpressured', responseOwner: 'adapter', reason: 'retry shortly' },
+    ]
     const web = new FakeWeb()
     const socket = new FakeSocket()
     const adapter = new SlackAdapter({
@@ -737,7 +806,7 @@ describe('mohist-slack adapter', () => {
           await first
         }
         active -= 1
-        return { kind: 'accepted' }
+        return { kind: 'accepted', responseOwner: 'none' }
       },
       interaction: async () => ({ state: 'stop_requested' }),
       claimDelivery: async () => null,
