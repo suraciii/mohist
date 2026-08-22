@@ -64,3 +64,8 @@
 - Fixed `AgentJobGrain.StageTerminalDeliveryEvent` so a pending interim Unknown delivery obligation is replaced by the distinct final terminal-delivery obligation when recovery enters Failed. Existing final obligations remain stable on terminal-entry replay.
 - Added deterministic `AgentJobRunnerRecoverySpecs.ReconciliationFailure_ReplacesPendingUnknownDeliveryAfterInterimAppendFailure`, which forces the Unknown terminal-delivery append to fail, advances the persisted recovery deadline, and verifies the final event is `failed` with `runner-lost`.
 - Verification: server build with `-p:SkipWebBuild=true --no-restore` passed; SpecTests command ran the full assembly because Microsoft Testing Platform ignores the VSTest filter (3064 passed); `git diff --check` clean. `review.md` was not edited.
+
+## Review follow-up (MF-1 generation-drain-timeout)
+- Fixed the remaining retryability gap: OpenCode `generation-drain-timeout` follow-up failures now use terminal activity `unknown`, which records `status: failed` instead of the previous completed/idle shape, while preserving the mapped `failureCategory`.
+- Added runner coverage for the producer terminal payload, Session grain coverage for failed Turn settlement and category preservation, and Slack terminal presentation coverage for a signed Retry action for this category.
+- Verification: runner test typecheck and focused follow-up tests pass (11 tests); runner full suite passes (156 files, 1691 tests); Server and SpecTests builds pass; `git diff --check` clean. Full Server test suites remain to be run.

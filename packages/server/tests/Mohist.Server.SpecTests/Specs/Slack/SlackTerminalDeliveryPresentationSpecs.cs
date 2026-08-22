@@ -33,6 +33,7 @@ public sealed class SlackTerminalDeliveryPresentationSpecs
     [InlineData(AgentJobFailureReasons.RunnerUnavailable)]
     [InlineData(AgentJobFailureReasons.RunnerLost)]
     [InlineData(AgentJobFailureReasons.ReportTimeout)]
+    [InlineData("generation-drain-timeout")]
     public async Task HandleAsync_retryable_failure_promotes_a_signed_retry_notice_with_durable_target_facts(
         string failureCategory)
     {

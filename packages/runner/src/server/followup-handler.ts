@@ -560,7 +560,7 @@ function followupOperationKey(payload: ReceiveFollowupPayload | null | undefined
 }
 
 function isUncertainFollowupFailure(kind: string): boolean {
-  return kind === 'unavailable-runtime' || kind === 'deadline-exceeded'
+  return kind === 'unavailable-runtime' || kind === 'deadline-exceeded' || kind === 'generation-drain-timeout'
 }
 
 function isManagerSlackContext(value: unknown): boolean {

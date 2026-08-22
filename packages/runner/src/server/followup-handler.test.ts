@@ -71,6 +71,42 @@ describe('follow-up terminal failure categories', () => {
     ])
   })
 
+  it('settles generation-drain-timeout as a failed terminal with its retryable category', async () => {
+    const records: any[] = []
+    const outbox = {
+      ready: () => true,
+      enqueueBeforeExecution: vi.fn(async (record: unknown) => records.push(record)),
+      enqueueProducedFact: vi.fn(async (record: unknown) => records.push(record)),
+    }
+    const receive = createFollowupHandler({
+      followupTargetResolver: () => ({ runtimeSessionId: 'runtime-1', workDir: '/work', projectId: 'project-1' }),
+      agentSessionRuntimeEventOutbox: outbox as never,
+      openCodeRuntime: {
+        ready: () => true,
+        followup: vi.fn(async () => ({
+          ok: false as const,
+          error: {
+            kind: 'generation-drain-timeout' as const,
+            message: 'generation did not drain',
+            diagnostics: [],
+          },
+          diagnostics: [],
+        })),
+      } as never,
+    })
+
+    expect(await receive(genericFollowupPayload('opencode'))).toEqual({ accepted: true })
+    await flushMicrotasks()
+
+    const terminal = records.find((record) => record.event?.type === 'session.activity')
+    expect(terminal.event.payload).toMatchObject({
+      activity: 'unknown',
+      status: 'failed',
+      failureCategory: 'generation-drain-timeout',
+      failureReason: 'generation did not drain',
+    })
+  })
+
   it('uses the shared Pi mapping for deadline-exceeded and missing-session', async () => {
     for (const [kind, category] of [
       ['deadline-exceeded', 'timeout'],
