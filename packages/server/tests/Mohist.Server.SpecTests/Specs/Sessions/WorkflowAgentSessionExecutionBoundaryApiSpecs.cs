@@ -19,7 +19,7 @@ public sealed class WorkflowAgentSessionExecutionBoundaryApiSpecs : AgentSession
     [Fact]
     public async Task WorkflowInput_WithoutAnAcceptedWorkflowBinding_ReturnsNoReceiptAndReusesItsTurn()
     {
-        var (_, _, work, session) = await CreateStartedAgentSessionAsync("workflow-input-binding-rejected");
+        var (_, _, work, session) = await CreateStartedAgentSessionAsync("workflow-input-binding-rejected", workflow: true);
         var request = new
         {
             runtimeSessionId = session.Id,
@@ -56,7 +56,7 @@ public sealed class WorkflowAgentSessionExecutionBoundaryApiSpecs : AgentSession
     [Fact]
     public async Task SessionRuntimeEvents_CurrentBindingActivityWithoutTurn_IsAcceptedWithoutWorkflowAttribution()
     {
-        var (_, _, _, session) = await CreateStartedAgentSessionAsync("session-activity-only");
+        var (_, _, _, session) = await CreateStartedAgentSessionAsync("session-activity-only", workflow: true);
         var grain = _fixture.Grains.GetGrain<IAgentSessionGrain>(session.Id);
         var persistence = _fixture.Persistence.Checkpoint(session.Id);
 
@@ -103,7 +103,7 @@ public sealed class WorkflowAgentSessionExecutionBoundaryApiSpecs : AgentSession
     [Fact]
     public async Task SessionRuntimeEvents_UnattributedNonActivityAndMixedBatch_FailClosedWithoutTurnBinding()
     {
-        var (_, _, _, session) = await CreateStartedAgentSessionAsync("session-activity-boundary-no-turn");
+        var (_, _, _, session) = await CreateStartedAgentSessionAsync("session-activity-boundary-no-turn", workflow: true);
         var grain = _fixture.Grains.GetGrain<IAgentSessionGrain>(session.Id);
         var before = await grain.GetAsync();
 
@@ -135,7 +135,7 @@ public sealed class WorkflowAgentSessionExecutionBoundaryApiSpecs : AgentSession
     [Fact]
     public async Task SessionRuntimeEvents_UnattributedNonActivityAndMixedBatch_FailClosedAfterTurnBinding()
     {
-        var (_, _, work, session) = await CreateStartedAgentSessionAsync("session-activity-boundary");
+        var (_, _, work, session) = await CreateStartedAgentSessionAsync("session-activity-boundary", workflow: true);
         // Seed the acknowledged workflow turn binding exactly as the
         // runner's first workflow input does; without it master semantics
         // accept unattributed pre-turn streaming batches.
@@ -183,7 +183,7 @@ public sealed class WorkflowAgentSessionExecutionBoundaryApiSpecs : AgentSession
     [Fact]
     public async Task SessionRuntimeEvents_StaleOrMissingBinding_DoesNotMutateSession()
     {
-        var (_, _, _, session) = await CreateStartedAgentSessionAsync("session-activity-stale");
+        var (_, _, _, session) = await CreateStartedAgentSessionAsync("session-activity-stale", workflow: true);
         var grain = _fixture.Grains.GetGrain<IAgentSessionGrain>(session.Id);
         var before = await grain.GetAsync();
 
@@ -215,7 +215,7 @@ public sealed class WorkflowAgentSessionExecutionBoundaryApiSpecs : AgentSession
     [Fact]
     public async Task WorkflowRuntimeEvents_WithoutExecutionIdentity_FailClosed()
     {
-        var (_, _, _, session) = await CreateStartedAgentSessionAsync("workflow-runtime-no-identity");
+        var (_, _, _, session) = await CreateStartedAgentSessionAsync("workflow-runtime-no-identity", workflow: true);
 
         using var response = await _client.PostAsJsonAsync(RunnerAgentSessionRuntimeEventsPath(session), new
         {
@@ -235,7 +235,7 @@ public sealed class WorkflowAgentSessionExecutionBoundaryApiSpecs : AgentSession
     [Fact]
     public async Task WorkflowRuntimeEvents_ForReplacedAgentSession_AreRejectedBeforeAppend()
     {
-        var (_, _, work, session) = await CreateStartedAgentSessionAsync("workflow-runtime-replaced");
+        var (_, _, work, session) = await CreateStartedAgentSessionAsync("workflow-runtime-replaced", workflow: true);
 
         using var response = await _client.PostAsJsonAsync(RunnerAgentSessionRuntimeEventsPath(session), new
         {
@@ -260,7 +260,7 @@ public sealed class WorkflowAgentSessionExecutionBoundaryApiSpecs : AgentSession
     [Fact]
     public async Task SessionFollowupRuntimeEvents_RequireTheRecordedSessionAndTurn()
     {
-        var (_, _, _, session) = await CreateStartedAgentSessionAsync("session-followup-identity");
+        var (_, _, _, session) = await CreateStartedAgentSessionAsync("session-followup-identity", workflow: true);
         var grain = _fixture.Grains.GetGrain<IAgentSessionGrain>(session.Id);
         var accepted = await grain.AcceptFollowupAsync(new AcceptFollowupCommand(
             "continue",

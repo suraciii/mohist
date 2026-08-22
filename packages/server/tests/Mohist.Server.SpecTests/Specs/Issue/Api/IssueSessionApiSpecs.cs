@@ -42,7 +42,7 @@ public class IssueSessionApiSpecs
         // transcript segment ordering across insert batches,
         // context-exhaustion failure category projection — live in
         // IssueSessionProjectionSpecs (querier-level, MohistDbFixture).
-        var (project, issue, work, session) = await CreateStartedAgentSessionAsync("metadata-shape", sessionName: "plan");
+        var (project, issue, work, session) = await CreateStartedAgentSessionAsync("metadata-shape", sessionName: "plan", workflow: true);
         var issueGrain = _fixture.Grains.GetGrain<IIssueGrain>(GrainKey.Issue(new IssueKey(project.Id, issue.Number)));
         await issueGrain.StartWorkAsync();
 
@@ -172,7 +172,7 @@ public class IssueSessionApiSpecs
         Assert.False(transcriptRoot.TryGetProperty("metadata", out _));
     }
 
-    private async Task<(ProjectDto Project, IssueDto Issue, WorkDispatch Work, CreatedSession Session)> CreateStartedAgentSessionAsync(string name, bool start = true, string? title = null, string? sessionName = null)
+    private async Task<(ProjectDto Project, IssueDto Issue, WorkDispatch Work, CreatedSession Session)> CreateStartedAgentSessionAsync(string name, bool start = true, string? title = null, string? sessionName = null, bool workflow = true)
     {
         var projectName = $"isa-{Guid.NewGuid():N}";
         var project = await _client.CreateProjectWithDefaultRepositoryAsync<ProjectDto>("/api/projects", projectName);
@@ -194,7 +194,9 @@ var issue = await _client.PostDataAsync<IssueDto>($"/api/projects/{project.Id}/i
         var info = await grain.OpenAsync(new OpenAgentSessionCommand(
             _runnerId,
             "opencode",
-            Metadata: WorkflowSessionMetadata(project.Id, issue.Number, work.WorkflowRunId, sessionName, work.WorkId, work.WorkType, work.Stage, work.Title)));
+            Metadata: workflow
+                ? WorkflowSessionMetadata(project.Id, issue.Number, work.WorkflowRunId, sessionName, work.WorkId, work.WorkType, work.Stage, work.Title)
+                : GenericAgentSessionMetadata.Metadata(new GenericAgentSessionContext(project.Id, "agent-1", $"test-agent-{name}"))));
         var session = new CreatedSession(project.Id, issue.Number, work.WorkflowRunId, sessionName, info);
         if (start)
             await _client.PostOkAsync(RunnerAgentSessionAttachPath(session), new { runtimeSessionId = session.Id, runtime = "opencode", expectedRuntime = "opencode", expectedRuntimeSessionId = (string?)null, workDir = $"/workspaces/{project.Id}", processPid = 1234 });

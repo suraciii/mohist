@@ -35,7 +35,7 @@ public class AgentSessionTranscriptProjectionSpecs : AgentSessionTestSupport
     [Fact]
     public async Task SessionTranscriptEndpoints_PersistAggregatedPartsAndProjectPublicRawViews()
     {
-        var (project, issue, work, _) = await CreateStartedAgentSessionAsync("transcript-representative", sessionName: "plan");
+        var (project, issue, work, _) = await CreateStartedAgentSessionAsync("transcript-representative", sessionName: "plan", workflow: true);
         var issueGrain = _fixture.Grains.GetGrain<IIssueGrain>(GrainKey.Issue(new IssueKey(project.Id, issue.Number)));
         await issueGrain.StartWorkAsync();
 

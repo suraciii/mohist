@@ -33,7 +33,7 @@ public class AgentSessionBindingSpecs : AgentSessionTestSupport
     [Fact]
     public async Task AgentSessionGrain_ForAgentWork_CreatesGuidSessionAndKeepsPollIdempotent()
     {
-        var (_, _, work, session) = await CreateStartedAgentSessionAsync("idempotent", start: false);
+        var (_, _, work, session) = await CreateStartedAgentSessionAsync("idempotent", start: false, workflow: false);
         Assert.True(Guid.TryParseExact(session.Id, "N", out _));
 
         var repeated = await _fixture.Grains
@@ -46,10 +46,10 @@ public class AgentSessionBindingSpecs : AgentSessionTestSupport
     [Fact]
     public async Task RunnerAttach_DifferentPhysicalSession_ReturnsConflictAndPreservesBinding()
     {
-        var (_, _, _, session) = await CreateStartedAgentSessionAsync("attach-conflict", start: false);
-        await _client.PostOkAsync(RunnerAgentSessionAttachPath(session), new { runtimeSessionId = "runtime-1", runtime = "opencode", expectedRuntime = "opencode", expectedRuntimeSessionId = (string?)null, workDir = "/work", processPid = 1234 });
+        var (_, _, _, session) = await CreateStartedAgentSessionAsync("attach-conflict", start: false, workflow: false);
+        await _client.PostOkAsync(RunnerGenericAgentSessionAttachPath(session), new { runtimeSessionId = "runtime-1", runtime = "opencode", expectedRuntime = "opencode", expectedRuntimeSessionId = (string?)null, workDir = "/work", processPid = 1234 });
 
-        using var response = await _client.PostAsJsonAsync(RunnerAgentSessionAttachPath(session), new { runtimeSessionId = "runtime-2", runtime = "opencode", expectedRuntime = "opencode", expectedRuntimeSessionId = "runtime-1", workDir = "/work", processPid = 1234 });
+        using var response = await _client.PostAsJsonAsync(RunnerGenericAgentSessionAttachPath(session), new { runtimeSessionId = "runtime-2", runtime = "opencode", expectedRuntime = "opencode", expectedRuntimeSessionId = "runtime-1", workDir = "/work", processPid = 1234 });
 
         Assert.Equal(HttpStatusCode.Conflict, response.StatusCode);
         using var body = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
@@ -64,7 +64,7 @@ public class AgentSessionBindingSpecs : AgentSessionTestSupport
     [Fact]
     public async Task RunnerReportsTerminalSession_TerminalStatusExists_IgnoresLaterStatusChanges()
     {
-        var (project, _, _, session) = await CreateStartedAgentSessionAsync("terminal-lock");
+        var (project, _, _, session) = await CreateStartedAgentSessionAsync("terminal-lock", workflow: false);
 
         await _client.PostOkAsync(RunnerSessionRuntimeEventsPath(session), new
         {
@@ -101,7 +101,7 @@ public class AgentSessionBindingSpecs : AgentSessionTestSupport
     [Fact]
     public async Task AgentSessionOpen_ClosedRuntimeObservation_DoesNotRebindSession()
     {
-        var (project, _, work, session) = await CreateStartedAgentSessionAsync("retry-reuse");
+        var (project, _, work, session) = await CreateStartedAgentSessionAsync("retry-reuse", workflow: false);
 
         await _client.PostOkAsync(RunnerSessionRuntimeEventsPath(session), new
         {
@@ -117,7 +117,7 @@ public class AgentSessionBindingSpecs : AgentSessionTestSupport
         var reopened = await grain.OpenAsync(new OpenAgentSessionCommand(
             retryRunnerId,
             "opencode",
-            Metadata: WorkflowSessionMetadata(project.Id, session.IssueNumber, session.WorkflowRunId, session.SessionName, work.WorkId, work.WorkType, work.Stage, work.Title)));
+            Metadata: GenericAgentSessionMetadata.Metadata(new GenericAgentSessionContext(project.Id, "agent-1", "test-agent"))));
 
         Assert.Equal(session.Id, reopened.Id);
         Assert.Equal("idle", reopened.Status);
@@ -127,7 +127,7 @@ public class AgentSessionBindingSpecs : AgentSessionTestSupport
         var repeated = await grain.OpenAsync(new OpenAgentSessionCommand(
             nextRunnerId,
             "opencode",
-            Metadata: WorkflowSessionMetadata(project.Id, session.IssueNumber, session.WorkflowRunId, session.SessionName, work.WorkId, work.WorkType, work.Stage, work.Title)));
+            Metadata: GenericAgentSessionMetadata.Metadata(new GenericAgentSessionContext(project.Id, "agent-1", "test-agent"))));
 
         Assert.Equal(session.Id, repeated.Id);
         Assert.Equal("idle", repeated.Status);
@@ -137,7 +137,7 @@ public class AgentSessionBindingSpecs : AgentSessionTestSupport
     [Fact]
     public async Task RuntimeEvents_AfterFailedClosedObservation_KeepSessionActive()
     {
-        var (_, _, _, session) = await CreateStartedAgentSessionAsync("runner-unregister");
+        var (_, _, _, session) = await CreateStartedAgentSessionAsync("runner-unregister", workflow: false);
 
         await _client.PostOkAsync(RunnerSessionRuntimeEventsPath(session), new
         {
@@ -161,13 +161,13 @@ public class AgentSessionBindingSpecs : AgentSessionTestSupport
     [Fact]
     public async Task OpenAgentSession_ExistingBoundSessionKeepsRuntimeBinding()
     {
-        var (project, _, work, session) = await CreateStartedAgentSessionAsync("retry-terminal");
+        var (project, _, work, session) = await CreateStartedAgentSessionAsync("retry-terminal", workflow: false);
 
         var opened = await _fixture.Grains.GetGrain<IAgentSessionGrain>(session.Id)
             .OpenAsync(new OpenAgentSessionCommand(
                 _runnerId,
                 "opencode",
-                Metadata: WorkflowSessionMetadata(project.Id, work.Issue!.IssueNumber, work.WorkflowRunId, session.SessionName, work.WorkId, work.WorkType, work.Stage, work.Title)));
+                Metadata: GenericAgentSessionMetadata.Metadata(new GenericAgentSessionContext(project.Id, "agent-1", "test-agent"))));
 
         Assert.Equal(session.Id, opened.Id);
         Assert.Equal("idle", opened.Status);
@@ -177,7 +177,7 @@ public class AgentSessionBindingSpecs : AgentSessionTestSupport
     [Fact]
     public async Task OpenAgentSession_ClosedObservationKeepsRuntimeBinding()
     {
-        var (project, issue, work, session) = await CreateStartedAgentSessionAsync("named-reuse", sessionName: "check");
+        var (project, issue, work, session) = await CreateStartedAgentSessionAsync("named-reuse", sessionName: "check", workflow: false);
 
         await _client.PostOkAsync(RunnerSessionRuntimeEventsPath(session), new
         {
@@ -192,7 +192,7 @@ public class AgentSessionBindingSpecs : AgentSessionTestSupport
             .OpenAsync(new OpenAgentSessionCommand(
                 _runnerId,
                 "opencode",
-                Metadata: WorkflowSessionMetadata(project.Id, issue.Number, work.WorkflowRunId, session.SessionName, "fix-review-findings:1.1", "task", "check", "Fix review findings")));
+                Metadata: GenericAgentSessionMetadata.Metadata(new GenericAgentSessionContext(project.Id, "agent-1", "test-agent"))));
 
         Assert.Equal(session.Id, opened.Id);
         Assert.Equal("idle", opened.Status);

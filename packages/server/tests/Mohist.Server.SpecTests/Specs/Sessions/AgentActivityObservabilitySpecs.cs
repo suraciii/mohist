@@ -33,7 +33,7 @@ public class AgentActivityObservabilitySpecs : AgentSessionTestSupport
     [Fact]
     public async Task AgentActivity_WithResolvableWorkflowStage_ReturnsTaskProgress()
     {
-        var (project, issue, work, session) = await CreateStartedAgentSessionAsync("activity-task-progress");
+        var (project, issue, work, session) = await CreateStartedAgentSessionAsync("activity-task-progress", workflow: true);
 
         var runState = JsonSerializer.Serialize(new
         {
@@ -88,7 +88,7 @@ public class AgentActivityObservabilitySpecs : AgentSessionTestSupport
     [Fact]
     public async Task AgentActivity_WhenSessionStageIsStale_UsesWorkflowCurrentStageTaskProgress()
     {
-        var (project, issue, work, session) = await CreateStartedAgentSessionAsync("activity-task-progress-stale-stage");
+        var (project, issue, work, session) = await CreateStartedAgentSessionAsync("activity-task-progress-stale-stage", workflow: true);
 
         await using (var db = await _fixture.Services.GetRequiredService<IDbContextFactory<MohistDbContext>>().CreateDbContextAsync())
         {
