@@ -26,6 +26,12 @@
 - Terminal delivery presentation uses the single `AgentSessionRetryPolicy`; only ordinary failed deliveries with retryable categories and resolvable durable facts attempt an explicit failure notice with Retry blocks. Manager, nonretryable/absent facts, and non-failure deliveries retain reaction-only finalization. If action creation cannot sign, it falls back to reaction-only.
 - Verification: server build (`-p:SkipWebBuild=true`), full UnitTests (3793), and full SpecTests (3048) pass. Added UnitTests for exact canonical signing, tamper/missing payload fields, and unavailable signing material.
 
+## T-004 work
+- Extended `SlackInteractionRoutes` to dispatch `mohist_retry_turn` through `SlackRetryActionService` while retaining the existing Stop route and lease envelope. Retry replies use the existing hash-based `ActionDispatchRef` and outbox UserAction path.
+- Implemented Retry click acceptance ordering: payload verification, expiry, Connection/team/conversation match, exact bound member, session initiator/Connection ownership, current `SlackConnectionAccessDecider` policy evaluation under the validated lease, then `AgentSessionRetryService` with the action nonce as idempotency key. Results map to explicit invalid/expired/stale/unauthorized/no-longer-retryable/accepted-pending/attempt-accepted states and text.
+- Added `SlackRetryInteractionSpecs` covering accepted idempotent replay, invalid/expired/stale/member/policy rejections, target revalidation, and disabled Connection handling. The disabled retry check is surfaced even when disabling invalidates the lease; Stop keeps its prior stale-lease behavior.
+- Verification: Server and SpecTests builds pass; focused retry spec invocation passes (MTP ignores the VSTest filter and executes the full SpecTests assembly: 3052 tests). Earlier full run had unrelated parallel runner-test flakes; UnitTests previously passed 3793 tests.
+
 ## T-007 work
 - Extracted the AgentJob runtime-kind category mappings into `packages/runner/src/runtime/error-kind-mapping.ts`; AgentJob and follow-up terminal activity now share the same helper (`mapOpenCodeErrorKind` / `mapPiErrorKind`).
 - Follow-up runtime result failures record the mapped `failureCategory` alongside `failureReason`. Observer flush failures, rejected calls, thrown exceptions, and successful turns omit the additive category; manager credential expiry still overrides it with `unknown`.
