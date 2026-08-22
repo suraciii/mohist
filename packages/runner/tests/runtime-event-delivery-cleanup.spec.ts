@@ -16,12 +16,15 @@ describe('createServerRuntimeEventDelivery - workflow cleanup', () => {
           runtime: 'pi',
           runtimeSessionId: 'runtime-1',
         })
-        return {
-          cleanupOperationId: 'workflow-cleanup:wf-1:task-1.1:work-1:1',
-          inputDeliveryId: 'workflow-cleanup-input:workflow-cleanup:wf-1:task-1.1:work-1:1',
-          agentTurnId: 'workflow-cleanup-turn:workflow-cleanup:wf-1:task-1.1:work-1:1',
-          agentSessionId: 'agent-session-1',
-        }
+        return [
+          {
+            type: 'session.cleanup',
+            cleanupOperationId: 'workflow-cleanup:wf-1:task-1.1:work-1:1',
+            inputDeliveryId: 'workflow-cleanup-input:workflow-cleanup:wf-1:task-1.1:work-1:1',
+            agentTurnId: 'workflow-cleanup-turn:workflow-cleanup:wf-1:task-1.1:work-1:1',
+            agentSessionId: 'agent-session-1',
+          },
+        ]
       },
     )
     const delivery = createServerRuntimeEventDelivery({
@@ -56,11 +59,46 @@ describe('createServerRuntimeEventDelivery - workflow cleanup', () => {
     await expect(delivery.send(record, new AbortController().signal)).resolves.toEqual([
       {
         type: 'session.cleanup',
+        cleanupOperationId: 'workflow-cleanup:wf-1:task-1.1:work-1:1',
         inputDeliveryId: 'workflow-cleanup-input:workflow-cleanup:wf-1:task-1.1:work-1:1',
         agentTurnId: 'workflow-cleanup-turn:workflow-cleanup:wf-1:task-1.1:work-1:1',
         agentSessionId: 'agent-session-1',
       },
     ])
     expect(cleanupTurn).toHaveBeenCalledTimes(1)
+  })
+
+  it('preserves an idempotent empty cleanup receipt array', async () => {
+    const cleanupTurn = vi.fn(async () => [])
+    const delivery = createServerRuntimeEventDelivery({
+      connection: { workflowAgentSessionCleanupTurn: cleanupTurn } as unknown as ServerConnection,
+    })
+    const record = {
+      id: 'workflow-cleanup:wf-1:task-1.1:work-1:1',
+      producerFamily: 'workflow-cleanup' as const,
+      target: { kind: 'workflow' as const, projectId: 'proj-1', workflowRunId: 'wf-1', sessionName: 'build' },
+      runtime: 'pi',
+      runtimeSessionId: 'runtime-1',
+      work: {
+        workId: 'work-1',
+        taskRunId: 'task-1.1',
+        runnerId: 'runner-1',
+        agentSessionId: 'agent-session-1',
+        inputDeliveryId: 'workflow-cleanup-input:workflow-cleanup:wf-1:task-1.1:work-1:1',
+        agentTurnId: null,
+        workType: 'task',
+        stage: 'build',
+      },
+      event: {
+        type: 'session.cleanup',
+        payload: {
+          text: 'clean the worktree',
+          cleanupOperationId: 'workflow-cleanup:wf-1:task-1.1:work-1:1',
+        },
+      },
+      acknowledgementPolicy: 'matching-receipt' as const,
+    } satisfies RuntimeEventRecord
+
+    await expect(delivery.send(record, new AbortController().signal)).resolves.toEqual([])
   })
 })

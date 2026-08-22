@@ -361,7 +361,7 @@ public class AgentSessionLifecycleDedupSpecs
             body);
 
     private string RunnerAgentSessionAttachPath(CreatedSession session) =>
-        $"{RunnerSessionPath(session)}/attach";
+        $"/api/runner/{_runnerId}/agent-sessions/{Uri.EscapeDataString(session.ProjectId)}/{Uri.EscapeDataString(session.Id)}/attach";
 
     private string RunnerSessionRuntimeEventsPath(CreatedSession session) =>
         $"/api/runner/{_runnerId}/agent-sessions/{session.Id}/runtime-events";
@@ -403,7 +403,11 @@ public class AgentSessionLifecycleDedupSpecs
         new AgentSessionMetadata()
             .WithLabel(AgentSessionQueryMetadataKeys.ProjectId, projectId)
             .WithLabel(AgentSessionQueryMetadataKeys.IssueNumber, issueNumber.ToString())
-            .WithLabel(AgentSessionQueryMetadataKeys.SourceKind, "workflow")
+            // These suites exercise source-independent lifecycle dedup with
+            // unattributed runner reports; a workflow-introduced session would
+            // require the acknowledged turn binding for the same batch.
+            .WithLabel(AgentSessionQueryMetadataKeys.SourceKind, "agent-launch")
+            .WithLabel("mohist.io/agent-id", "agent-1")
             .WithLabel(AgentSessionQueryMetadataKeys.WorkflowRunId, workflowRunId)
             .WithLabel(AgentSessionQueryMetadataKeys.SessionName, sessionName)
             .WithLabel(AgentSessionQueryMetadataKeys.WorkId, workId)

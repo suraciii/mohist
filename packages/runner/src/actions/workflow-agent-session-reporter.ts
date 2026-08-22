@@ -1,5 +1,9 @@
 import type { RuntimeTurnEvent } from '../runtime/opencode/index.js'
-import type { AgentSessionRuntimeEventOutbox, RuntimeEventRecord } from '../server/runtime-event-outbox.js'
+import {
+  AlreadyConsumedRuntimeEventError,
+  type AgentSessionRuntimeEventOutbox,
+  type RuntimeEventRecord,
+} from '../server/runtime-event-outbox.js'
 import { runnerLogger } from '../system/logger.js'
 
 const log = runnerLogger.child('session')
@@ -145,16 +149,18 @@ export class WorkflowAgentSessionReporter {
         this.inputAccepted = true
       })
       .catch((error) => {
-        if (this.inputRejected) return
         this.inputRejected = true
-        log.error('workflow agent-session input enqueue failed', {
-          run: this.workflowRunId,
-          work: this.workMetadata.workId,
-          session: this.sessionName,
-          exception: error,
-        })
+        if (!(error instanceof AlreadyConsumedRuntimeEventError)) {
+          log.error('workflow agent-session input enqueue failed', {
+            run: this.workflowRunId,
+            work: this.workMetadata.workId,
+            session: this.sessionName,
+            exception: error,
+          })
+        }
         throw error
       })
+
     this.pendingPromises.add(promise)
     try {
       await promise
@@ -451,14 +457,15 @@ export class WorkflowAgentSessionReporter {
         this.inputAccepted = true
       })
       .catch((error) => {
-        if (this.inputRejected) return
         this.inputRejected = true
-        log.error('workflow cleanup input enqueue failed', {
-          run: this.workflowRunId,
-          work: this.workMetadata.workId,
-          session: this.sessionName,
-          exception: error,
-        })
+        if (!(error instanceof AlreadyConsumedRuntimeEventError)) {
+          log.error('workflow cleanup input enqueue failed', {
+            run: this.workflowRunId,
+            work: this.workMetadata.workId,
+            session: this.sessionName,
+            exception: error,
+          })
+        }
         throw error
       })
     this.pendingPromises.add(promise)

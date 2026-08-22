@@ -25,10 +25,16 @@ public abstract class AgentSessionGrainInputBoundarySpecsBase : IClassFixture<Ag
         WorkDir: "/work",
         Metadata: WorkflowAgentSessionMetadata.Metadata(new WorkflowAgentSessionContext("project-1", "workflow-1", "build")));
 
-    protected async Task<IAgentSessionGrain> OpenBoundGrainAsync(string runtime = "test")
+    protected async Task<IAgentSessionGrain> OpenBoundGrainAsync(
+        string runtime = "test",
+        AgentSessionMetadata? metadata = null)
     {
         var grain = NewGrain();
-        await grain.OpenAsync(Open(runtime));
+        await grain.OpenAsync(metadata is null ? Open(runtime) : new OpenAgentSessionCommand(
+            "runner-1",
+            runtime,
+            WorkDir: "/work",
+            Metadata: metadata));
         await grain.AttachPhysicalSessionAsync(new AttachPhysicalSessionCommand("runtime-1"));
         return grain;
     }
@@ -39,6 +45,160 @@ public class AgentSessionGrainInputBoundaryPersistSuccessSpecs : AgentSessionGra
     public AgentSessionGrainInputBoundaryPersistSuccessSpecs(AgentSessionGrainFixture fixture) : base(fixture) { }
 
     [Fact]
+    public async Task AppendRuntimeEvents_AttributionFreeCurrentBindingActivity_UpdatesSessionWithoutWorkflowObservation()
+    {
+        var grain = await OpenBoundGrainAsync(
+            metadata: new AgentSessionMetadata()
+                .WithLabel(AgentSessionQueryMetadataKeys.ProjectId, "project-1")
+                .WithLabel(AgentSessionQueryMetadataKeys.SourceKind, "workflow")
+                .WithLabel(AgentSessionQueryMetadataKeys.WorkflowRunId, "workflow-1")
+                .WithLabel(AgentSessionQueryMetadataKeys.SessionName, "build"));
+        var firstPersistence = grain.PersistenceCheckpoint(Fixture.Persistence);
+
+        var active = await grain.AppendRuntimeEventsAsync(new AppendAgentSessionRuntimeEventsCommand(
+            new List<AgentSessionRuntimeEventInput>
+            {
+                new(RuntimeEventTypes.SessionActivity, "{\"activity\":\"active\"}"),
+            },
+            "runtime-1"));
+
+        Assert.Single(active);
+        await firstPersistence.WaitAsync();
+        var activeState = Assert.IsType<AgentSession>(Fixture.StateStore.State);
+        Assert.Equal(AgentSessionActivity.Active, activeState.Status.Activity);
+        Assert.Empty(activeState.Status.Turns ?? []);
+        Assert.Empty(Fixture.SessionWork.Observations);
+
+        var secondPersistence = grain.PersistenceCheckpoint(Fixture.Persistence);
+        var idle = await grain.AppendRuntimeEventsAsync(new AppendAgentSessionRuntimeEventsCommand(
+            new List<AgentSessionRuntimeEventInput>
+            {
+                new(RuntimeEventTypes.SessionActivity, "{\"activity\":\"idle\"}"),
+            },
+            "runtime-1"));
+
+        Assert.Single(idle);
+        await secondPersistence.WaitAsync();
+        var idleState = Assert.IsType<AgentSession>(Fixture.StateStore.State);
+        Assert.Equal(AgentSessionActivity.Idle, idleState.Status.Activity);
+        Assert.Empty(idleState.Status.Turns ?? []);
+        Assert.Empty(Fixture.SessionWork.Observations);
+        Assert.Equal(2, Fixture.TranscriptStore.Flushes.Count(flush =>
+            flush.Turn.SessionId == grain.GetPrimaryKeyString()));
+    }
+
+    [Fact]
+    public async Task AppendRuntimeEvents_AttributionFreeWorkflowBatch_RejectsNonActivityWithoutTurnBinding()
+    {
+        var grain = await OpenBoundGrainAsync(
+            metadata: new AgentSessionMetadata()
+                .WithLabel(AgentSessionQueryMetadataKeys.ProjectId, "project-1")
+                .WithLabel(AgentSessionQueryMetadataKeys.SourceKind, "workflow")
+                .WithLabel(AgentSessionQueryMetadataKeys.WorkflowRunId, "workflow-1")
+                .WithLabel(AgentSessionQueryMetadataKeys.SessionName, "build"));
+        var before = await grain.GetAsync();
+        var saveCount = Fixture.StateStore.SaveCount;
+        var flushCount = Fixture.TranscriptStore.Flushes.Count;
+        var observationCount = Fixture.SessionWork.Observations.Count;
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() => grain.AppendRuntimeEventsAsync(
+            new AppendAgentSessionRuntimeEventsCommand(
+                new List<AgentSessionRuntimeEventInput>
+                {
+                    new("message.delta", "{\"text\":\"unattributed\"}"),
+                },
+                "runtime-1")));
+        await Assert.ThrowsAsync<InvalidOperationException>(() => grain.AppendRuntimeEventsAsync(
+            new AppendAgentSessionRuntimeEventsCommand(
+                new List<AgentSessionRuntimeEventInput>
+                {
+                    new(RuntimeEventTypes.SessionActivity, "{\"activity\":\"active\"}"),
+                    new("message.delta", "{\"text\":\"mixed\"}"),
+                },
+                "runtime-1")));
+
+        Assert.Equal(saveCount, Fixture.StateStore.SaveCount);
+        Assert.Equal(before, await grain.GetAsync());
+        Assert.Equal(flushCount, Fixture.TranscriptStore.Flushes.Count);
+        Assert.Equal(observationCount, Fixture.SessionWork.Observations.Count);
+    }
+
+    [Fact]
+    public async Task AppendRuntimeEvents_AttributionFreeWorkflowBatch_RejectsNonActivityAfterTurnBinding()
+    {
+        var grain = await OpenBoundGrainAsync(
+            metadata: new AgentSessionMetadata()
+                .WithLabel(AgentSessionQueryMetadataKeys.ProjectId, "project-1")
+                .WithLabel(AgentSessionQueryMetadataKeys.SourceKind, "workflow")
+                .WithLabel(AgentSessionQueryMetadataKeys.WorkflowRunId, "workflow-1")
+                .WithLabel(AgentSessionQueryMetadataKeys.SessionName, "build"));
+        // Seed the acknowledged workflow turn binding exactly as the
+        // runner's first workflow input does; without it master semantics
+        // accept unattributed pre-turn streaming batches.
+        await grain.AcceptWorkflowInputAsync(new AcceptWorkflowAgentSessionInputCommand(
+            "delivery-boundary-1",
+            "seed the acknowledged turn binding",
+            "workflow-1",
+            "task-boundary.1",
+            "work-boundary-1",
+            "runner-1",
+            "test",
+            "runtime-1",
+            "{\"text\":\"seed the acknowledged turn binding\"}"));
+        var before = await grain.GetAsync();
+        var saveCount = Fixture.StateStore.SaveCount;
+        var flushCount = Fixture.TranscriptStore.Flushes.Count;
+        var observationCount = Fixture.SessionWork.Observations.Count;
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() => grain.AppendRuntimeEventsAsync(
+            new AppendAgentSessionRuntimeEventsCommand(
+                new List<AgentSessionRuntimeEventInput>
+                {
+                    new("message.delta", "{\"text\":\"unattributed\"}"),
+                },
+                "runtime-1")));
+        await Assert.ThrowsAsync<InvalidOperationException>(() => grain.AppendRuntimeEventsAsync(
+            new AppendAgentSessionRuntimeEventsCommand(
+                new List<AgentSessionRuntimeEventInput>
+                {
+                    new(RuntimeEventTypes.SessionActivity, "{\"activity\":\"active\"}"),
+                    new("message.delta", "{\"text\":\"mixed\"}"),
+                },
+                "runtime-1")));
+
+        Assert.Equal(saveCount, Fixture.StateStore.SaveCount);
+        Assert.Equal(before, await grain.GetAsync());
+        Assert.Equal(flushCount, Fixture.TranscriptStore.Flushes.Count);
+        Assert.Equal(observationCount, Fixture.SessionWork.Observations.Count);
+    }
+
+    [Fact]
+    public async Task AppendRuntimeEvents_AttributionFreeActivity_StaleBindingIsIgnoredWithoutMutation()
+    {
+        var grain = await OpenBoundGrainAsync(
+            metadata: new AgentSessionMetadata()
+                .WithLabel(AgentSessionQueryMetadataKeys.ProjectId, "project-1")
+                .WithLabel(AgentSessionQueryMetadataKeys.SourceKind, "workflow")
+                .WithLabel(AgentSessionQueryMetadataKeys.WorkflowRunId, "workflow-1")
+                .WithLabel(AgentSessionQueryMetadataKeys.SessionName, "build"));
+        var before = await grain.GetAsync();
+        var saveCount = Fixture.StateStore.SaveCount;
+
+        var result = await grain.AppendRuntimeEventsAsync(new AppendAgentSessionRuntimeEventsCommand(
+            new List<AgentSessionRuntimeEventInput>
+            {
+                new(RuntimeEventTypes.SessionActivity, "{\"activity\":\"active\"}"),
+            },
+            "runtime-stale"));
+
+        Assert.Empty(result);
+        Assert.Equal(saveCount, Fixture.StateStore.SaveCount);
+        Assert.Equal(before, await grain.GetAsync());
+        Assert.Empty(Fixture.TranscriptStore.Flushes);
+        Assert.Empty(Fixture.SessionWork.Observations);
+    }
+
+    [Fact]
     public async Task AppendRuntimeEvents_TwoBackToBackInputs_ProduceDistinctTurnsWithoutTimeAdvance()
     {
         // The new `session.input` boundary fences pending transcript data
@@ -46,7 +206,11 @@ public class AgentSessionGrainInputBoundaryPersistSuccessSpecs : AgentSessionGra
         // same logical and physical session must produce two distinct
         // persisted turns with their own prompts and parts, with a single
         // explicit flush at the end for observation.
-        var grain = await OpenBoundGrainAsync();
+        var grain = await OpenBoundGrainAsync(
+            metadata: new AgentSessionMetadata()
+                .WithLabel(AgentSessionQueryMetadataKeys.ProjectId, "project-1")
+                .WithLabel(AgentSessionQueryMetadataKeys.SourceKind, "agent-launch")
+                .WithLabel(GenericAgentSessionMetadata.AgentId, "agent-1"));
         var persistence = grain.PersistenceCheckpoint(Fixture.Persistence);
 
         await grain.AppendRuntimeEventsAsync(new AppendAgentSessionRuntimeEventsCommand(
@@ -298,7 +462,11 @@ public class AgentSessionGrainInputBoundaryPersistFailureSpecs : AgentSessionGra
         // When that flush fails, the new input is rejected, the
         // prior pending accumulator state remains retryable, and no
         // part of the second input is appended.
-        var grain = await OpenBoundGrainAsync();
+        var grain = await OpenBoundGrainAsync(
+            metadata: new AgentSessionMetadata()
+                .WithLabel(AgentSessionQueryMetadataKeys.ProjectId, "project-1")
+                .WithLabel(AgentSessionQueryMetadataKeys.SourceKind, "agent-launch")
+                .WithLabel(GenericAgentSessionMetadata.AgentId, "agent-1"));
 
         await grain.AppendRuntimeEventsAsync(new AppendAgentSessionRuntimeEventsCommand(
             new List<AgentSessionRuntimeEventInput>

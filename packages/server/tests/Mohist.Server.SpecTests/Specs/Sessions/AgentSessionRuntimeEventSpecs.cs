@@ -158,14 +158,9 @@ public class AgentSessionRuntimeEventSpecs : AgentSessionTestSupport
             await db.SaveChangesAsync();
         }
 
-        await _fixture.Grains.GetGrain<IRunnerGrain>(runnerId).RegisterAsync(new RunnerInfo(
-            runnerId,
-            ["spec/*"],
-            "manager-recovery-runner",
-            SlackDeliveryOwnerIds.ManagerProjectId,
-            RuntimeCatalogs: CapabilityCatalogTestHelpers.Create()));
-
         var grain = _fixture.Grains.GetGrain<IAgentSessionGrain>(sessionId);
+        var transport = _fixture.Services.GetRequiredService<RecordingRunnerControlTransport>();
+        transport.Clear();
         var persistence = grain.PersistenceCheckpoint(_fixture.Persistence);
         await grain.OpenAsync(new OpenAgentSessionCommand(
             runnerId,
@@ -190,12 +185,22 @@ public class AgentSessionRuntimeEventSpecs : AgentSessionTestSupport
         await grain.EnsureManagerCredentialExpiryRecoveryAsync();
         await persistence.WaitAsync();
 
-        var transport = _fixture.Services.GetRequiredService<RecordingRunnerControlTransport>();
-        transport.Clear();
+        var turns = await grain.ListTurnsAsync();
+        Assert.Contains(turns, turn => turn.Id == "manager-recovery-turn:" + sessionId && turn.Status == AgentTurnStatus.Queued);
+
+        // Register only after the initial unknown transition has completed.
+        // That transition may schedule a best-effort dispatch, but there is
+        // no eligible Runner while it runs; the manual delivery below then
+        // exercises the same wire payload without competing grant issuance.
+        await _fixture.Grains.GetGrain<IRunnerGrain>(runnerId).RegisterAsync(new RunnerInfo(
+            runnerId,
+            ["spec/*"],
+            "manager-recovery-runner",
+            SlackDeliveryOwnerIds.ManagerProjectId,
+            RuntimeCatalogs: CapabilityCatalogTestHelpers.Create()));
+
         await using (var scope = _fixture.Services.CreateAsyncScope())
         {
-            var turns = await grain.ListTurnsAsync();
-            Assert.Contains(turns, turn => turn.Id == "manager-recovery-turn:" + sessionId && turn.Status == AgentTurnStatus.Queued);
             var dispatch = new AgentSessionFollowupDispatch(
                 TurnId: $"manager-recovery-turn:{sessionId}",
                 OperationId: $"system-turn:manager-recovery-turn:{sessionId}",

@@ -1,3 +1,4 @@
+using System.Text.Json;
 using System.Net.Http.Json;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
@@ -51,35 +52,49 @@ public class WorkflowSessionTerminalConvergenceSpecs
         });
 
         var persistence = _fixture.Persistence.Checkpoint(sessionId);
-        await _client.PostOkAsync(RunnerSessionRuntimeEventsPath(_runnerId, sessionId), new
+        var firstTurnId = await AcceptWorkflowInputAsync(
+            project.Id, workflowRunId, sessionName, sessionId, "delivery-convergence-1", "first-prompt");
+        await _client.PostOkAsync(WorkflowRuntimeEventsPath(_runnerId, project.Id, workflowRunId, sessionName), new
         {
             runtimeSessionId = sessionId,
+            runtime = "opencode",
+            agentSessionId = sessionId,
+            agentTurnId = firstTurnId,
+            inputDeliveryId = "delivery-convergence-1",
+            taskRunId = sessionName,
+            workId = sessionName,
             runtimeEvents = new object[]
             {
-                new { type = "session.input", payload = new { text = "first-prompt", kind = "task" } },
-                new { type = "message.delta", payload = new { text = "first-answer" } },
+                new { type = "message.delta", payload = new { text = "first-answer", turnId = firstTurnId } },
                 new
                 {
                     type = "tool_call.started",
-                    payload = new { toolCallId = "tool-1", kind = "read", status = "in_progress", title = "Read README", rawInput = new { filePath = "README.md" } }
+                    payload = new { toolCallId = "tool-1", kind = "read", status = "in_progress", title = "Read README", rawInput = new { filePath = "README.md" }, turnId = firstTurnId }
                 },
                 new
                 {
                     type = "tool_call.updated",
-                    payload = new { toolCallId = "tool-1", kind = "read", status = "completed", rawOutput = new { text = "first-result" } }
+                    payload = new { toolCallId = "tool-1", kind = "read", status = "completed", rawOutput = new { text = "first-result" }, turnId = firstTurnId }
                 },
-                new { type = "session.activity", payload = new { activity = "idle", status = "completed", exitCode = 0, operationId = "op-turn1" } }
+                new { type = "session.activity", payload = new { activity = "idle", status = "completed", exitCode = 0, operationId = "op-turn1", turnId = firstTurnId } }
             }
         });
 
-        await _client.PostOkAsync(RunnerSessionRuntimeEventsPath(_runnerId, sessionId), new
+        var secondTurnId = await AcceptWorkflowInputAsync(
+            project.Id, workflowRunId, sessionName, sessionId, "delivery-convergence-2", "second-prompt");
+        await _client.PostOkAsync(WorkflowRuntimeEventsPath(_runnerId, project.Id, workflowRunId, sessionName), new
         {
             runtimeSessionId = sessionId,
+            runtime = "opencode",
+            agentSessionId = sessionId,
+            agentTurnId = secondTurnId,
+            inputDeliveryId = "delivery-convergence-2",
+            taskRunId = sessionName,
+            workId = sessionName,
             runtimeEvents = new object[]
             {
-                new { type = "session.input", payload = new { text = "second-prompt", kind = "task" } },
-                new { type = "message.delta", payload = new { text = "second-answer" } },
-                new { type = "session.activity", payload = new { activity = "idle", status = "failed", failureReason = "second-turn-failure", exitCode = 1, operationId = "op-turn2" } }
+                new { type = "message.delta", payload = new { text = "second-answer", turnId = secondTurnId } },
+                new { type = "session.activity", payload = new { activity = "idle", status = "failed", failureReason = "second-turn-failure", exitCode = 1, operationId = "op-turn2", turnId = secondTurnId } }
             }
         });
 
@@ -170,6 +185,46 @@ public class WorkflowSessionTerminalConvergenceSpecs
 
     private static string RunnerAgentSessionAttachPath(string runnerId, string projectId, string workflowRunId, string sessionName) =>
         $"{RunnerSessionPath(runnerId, projectId, workflowRunId, sessionName)}/attach";
+
+    private static string WorkflowRuntimeEventsPath(string runnerId, string projectId, string workflowRunId, string sessionName) =>
+        $"{RunnerSessionPath(runnerId, projectId, workflowRunId, sessionName)}/runtime-events";
+
+    private async Task<string> AcceptWorkflowInputAsync(
+        string projectId,
+        string workflowRunId,
+        string sessionName,
+        string sessionId,
+        string inputDeliveryId,
+        string prompt)
+    {
+        using var response = await _client.PostAsJsonAsync(
+            WorkflowRuntimeEventsPath(_runnerId, projectId, workflowRunId, sessionName),
+            new
+            {
+                runtimeSessionId = sessionId,
+                runtime = "opencode",
+                agentSessionId = sessionId,
+                inputDeliveryId,
+                taskRunId = sessionName,
+                workId = sessionName,
+                runtimeEvents = new object[]
+                {
+                    new { type = "session.input", payload = new { text = prompt } }
+                }
+            });
+        var body = await response.Content.ReadAsStringAsync();
+        Assert.True(response.IsSuccessStatusCode, $"workflow input failed: {(int)response.StatusCode} {body}");
+        // The AgentSession turn is created before the cross-grain Workflow
+        // binding port answers; when the Workflow run has no matching task the
+        // receipt degrades to already-consumed ([]), but the frozen turn
+        // binding is still the acknowledged identity for subsequent events.
+        using var document = JsonDocument.Parse(body);
+        var receipts = document.RootElement.EnumerateArray().ToArray();
+        if (receipts.Length == 1)
+            return receipts[0].GetProperty("agentTurnId").GetString()!;
+        var turns = await _fixture.Grains.GetGrain<IAgentSessionGrain>(sessionId).ListTurnsAsync();
+        return turns.Single(turn => turn.WorkflowExecution?.InputDeliveryId == inputDeliveryId).WorkflowExecution!.AgentTurnId;
+    }
 
     private static string RunnerSessionRuntimeEventsPath(string runnerId, string sessionId) =>
         $"/api/runner/{runnerId}/agent-sessions/{sessionId}/runtime-events";

@@ -54,11 +54,18 @@ public static partial class RunnerRoutes
                         req.AgentSessionId,
                         req.Runtime,
                         req.RuntimeSessionId));
-                return Results.Ok(new WorkflowAgentSessionCleanupTurnResponse(
-                    receipt.CleanupOperationId,
-                    receipt.InputDeliveryId,
-                    receipt.AgentTurnId,
-                    receipt.AgentSessionId));
+                if (receipt.AlreadyRecorded)
+                    return Results.Ok(Array.Empty<WorkflowAgentSessionCleanupTurnResponse>());
+
+                return Results.Ok(new[]
+                {
+                    new WorkflowAgentSessionCleanupTurnResponse(
+                        "session.cleanup",
+                        receipt.CleanupOperationId,
+                        receipt.InputDeliveryId,
+                        receipt.AgentTurnId,
+                        receipt.AgentSessionId),
+                });
             }
             catch (InvalidOperationException ex)
             {
@@ -78,6 +85,7 @@ public record WorkflowAgentSessionCleanupTurnRequest(
     string RuntimeSessionId);
 
 public record WorkflowAgentSessionCleanupTurnResponse(
+    string Type,
     string CleanupOperationId,
     string InputDeliveryId,
     string AgentTurnId,

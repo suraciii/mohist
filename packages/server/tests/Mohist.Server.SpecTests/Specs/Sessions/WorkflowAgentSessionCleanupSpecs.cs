@@ -47,7 +47,9 @@ public sealed class WorkflowAgentSessionCleanupSpecs : AgentSessionGrainInputBou
         var cleanup = await grain.AcceptWorkflowCleanupAsync(command);
         var replay = await grain.AcceptWorkflowCleanupAsync(command);
 
-        Assert.Equal(cleanup, replay);
+        Assert.False(cleanup.AlreadyRecorded);
+        Assert.True(replay.AlreadyRecorded);
+        Assert.Equal(cleanup with { AlreadyRecorded = true }, replay);
         Assert.NotEqual(original.AgentTurnId, cleanup.AgentTurnId);
         Assert.Equal("workflow-cleanup-input:cleanup-1", cleanup.InputDeliveryId);
         Assert.Equal("workflow-cleanup-turn:cleanup-1", cleanup.AgentTurnId);

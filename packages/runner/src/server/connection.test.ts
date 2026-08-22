@@ -121,6 +121,20 @@ describe('ServerConnection workflow runtime events', () => {
     expect(accepted).toHaveLength(2)
   })
 
+  it('preserves a valid empty acceptance response for an already-consumed input', async () => {
+    fetchSpy.mockResolvedValueOnce(new Response('[]', { status: 200 }))
+
+    await expect(
+      new ServerConnection(options).workflowAgentSessionRuntimeEvents(
+        'project',
+        'run',
+        'session',
+        { runtimeEvents: [{ type: 'session.input' }] },
+        signal,
+      ),
+    ).resolves.toEqual([])
+  })
+
   it('surfaces malformed and count-mismatched acceptance responses', async () => {
     fetchSpy.mockResolvedValueOnce(new Response('not-json', { status: 200 }))
     await expect(
@@ -133,13 +147,13 @@ describe('ServerConnection workflow runtime events', () => {
       ),
     ).rejects.toThrow('malformed JSON')
 
-    fetchSpy.mockResolvedValueOnce(new Response('[]', { status: 200 }))
+    fetchSpy.mockResolvedValueOnce(new Response('[{"type":"session.input"}]', { status: 200 }))
     await expect(
       new ServerConnection(options).workflowAgentSessionRuntimeEvents(
         'project',
         'run',
         'session',
-        { runtimeEvents: [{ type: 'session.input' }] },
+        { runtimeEvents: [{ type: 'session.input' }, { type: 'message.delta' }] },
         signal,
       ),
     ).rejects.toThrow('acceptance mismatch')

@@ -140,8 +140,7 @@ public sealed class AgentSessionEventDiscardObservabilitySpecs : IClassFixture<A
             "runner-1",
             "opencode",
             WorkDir: "/work",
-            Metadata: WorkflowAgentSessionMetadata.Metadata(
-                new WorkflowAgentSessionContext("project-1", "workflow-1", "build"))));
+            Metadata: GenericAgentSessionMetadata.Metadata(new GenericAgentSessionContext("project-1", "agent-1", "Agent One"))));
         await grain.AttachPhysicalSessionAsync(new AttachPhysicalSessionCommand(runtimeSessionId));
         return grain;
     }

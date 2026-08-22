@@ -36,7 +36,7 @@ public class WorkflowSessionSpecs
         var projectId = project.Id;
         var sessionName = "builder";
 
-        var opened = await PostRawAsync<RunnerAgentSessionDto>($"/api/runner/runner-1/sessions/{projectId}/{workflowRunId}/{sessionName}/open", new
+        var opened = await PostRawAsync<RunnerAgentSessionDto>($"/api/runner/{_runnerId}/sessions/{projectId}/{workflowRunId}/{sessionName}/open", new
         {
             workId = "proposal",
             workType = "task",
@@ -45,7 +45,7 @@ public class WorkflowSessionSpecs
             issueNumber = issue.Number,
             runtime = "opencode",
         });
-        await PostRawAsync<RunnerAgentSessionDto>(RunnerAgentSessionAttachPath("runner-1", projectId, workflowRunId, sessionName), new
+        await PostRawAsync<RunnerAgentSessionDto>(RunnerAgentSessionAttachPath(_runnerId, projectId, workflowRunId, sessionName), new
         {
             runtimeSessionId = "runtime-1",
             workDir = "/workspace",
@@ -55,26 +55,39 @@ public class WorkflowSessionSpecs
             expectedRuntime = "opencode",
             expectedRuntimeSessionId = (string?)null,
         });
-        var fetched = await GetRawAsync<RunnerAgentSessionDto>(RunnerSessionPath("runner-1", projectId, workflowRunId, sessionName));
+        var fetched = await GetRawAsync<RunnerAgentSessionDto>(RunnerSessionPath(_runnerId, projectId, workflowRunId, sessionName));
         var sessionId = await ResolveSessionIdAsync(workflowRunId, sessionName);
         var persistence = _fixture.Persistence.Checkpoint(sessionId);
+        var agentTurnId = await AcceptWorkflowInputAsync(
+            projectId, workflowRunId, sessionName, sessionId, "runtime-1", "delivery-acp-order", "proposal.1", "proposal", "write proposal");
 
-        await PostRawAsync<SessionEventDto[]>(RunnerSessionRuntimeEventsPath("runner-1", sessionId), new
+        await PostRawAsync<SessionEventDto[]>(WorkflowRuntimeEventsPath(_runnerId, projectId, workflowRunId, sessionName), new
         {
             runtimeSessionId = "runtime-1",
+            runtime = "opencode",
+            agentSessionId = sessionId,
+            agentTurnId,
+            inputDeliveryId = "delivery-acp-order",
+            taskRunId = "proposal.1",
+            workId = "proposal",
             runtimeEvents = new object[]
             {
-                new { type = "session.input", payload = new { text = "write proposal" } },
-                new { type = "message.delta", payload = new { content = new { text = "done" } } },
-                new { type = "usage.updated", payload = new { inputTokens = 10, outputTokens = 5, totalTokens = 15 } },
+                new { type = "message.delta", payload = new { content = new { text = "done" }, turnId = agentTurnId } },
+                new { type = "usage.updated", payload = new { inputTokens = 10, outputTokens = 5, totalTokens = 15, turnId = agentTurnId } },
             },
         });
-        await PostRawAsync<SessionEventDto[]>(RunnerSessionRuntimeEventsPath("runner-1", sessionId), new
+        await PostRawAsync<SessionEventDto[]>(WorkflowRuntimeEventsPath(_runnerId, projectId, workflowRunId, sessionName), new
         {
             runtimeSessionId = "runtime-1",
+            runtime = "opencode",
+            agentSessionId = sessionId,
+            agentTurnId,
+            inputDeliveryId = "delivery-acp-order",
+            taskRunId = "proposal.1",
+            workId = "proposal",
             runtimeEvents = new[]
             {
-                new { type = "session.activity", payload = new { activity = "idle", status = "completed", exitCode = 0, operationId = "op-acp" } }
+                new { type = "session.activity", payload = new { activity = "idle", status = "completed", exitCode = 0, operationId = "op-acp", turnId = agentTurnId } }
             },
         });
 
@@ -147,31 +160,35 @@ public class WorkflowSessionSpecs
             processPid = 1234
         });
         var persistence = _fixture.Persistence.Checkpoint(sessionId);
-        await _client.PostOkAsync(RunnerSessionRuntimeEventsPath(_runnerId, sessionId), new
+        var agentTurnId = await AcceptWorkflowInputAsync(
+            project.Id, workflowRunId, sessionName, sessionId, sessionId,
+            "delivery-mohist-prompt", "task-mohist-prompt.1", sessionName, promptBody);
+        await _client.PostOkAsync(WorkflowRuntimeEventsPath(_runnerId, project.Id, workflowRunId, sessionName), new
         {
             runtimeSessionId = sessionId,
+            runtime = "opencode",
+            agentSessionId = sessionId,
+            agentTurnId,
+            inputDeliveryId = "delivery-mohist-prompt",
+            taskRunId = "task-mohist-prompt.1",
+            workId = sessionName,
             runtimeEvents = new object[]
             {
-                new
-                {
-                    type = "session.input",
-                    payload = new { text = promptBody, kind = "task" }
-                },
-                new { type = "message.delta", payload = new { text = "starting work" } },
+                new { type = "message.delta", payload = new { text = "starting work", turnId = agentTurnId } },
                 new
                 {
                     type = "session.liveness",
-                    payload = new { status = "probing", probeDeadlineAt = "2026-06-03T12:00:00Z", lastActivityType = "session" }
+                    payload = new { status = "probing", probeDeadlineAt = "2026-06-03T12:00:00Z", lastActivityType = "session", turnId = agentTurnId }
                 },
                 new
                 {
                     type = "session.liveness",
-                    payload = new { status = "failed", failureReason = "no progress", lastActivityType = "message" }
+                    payload = new { status = "failed", failureReason = "no progress", lastActivityType = "message", turnId = agentTurnId }
                 },
                 new
                 {
                     type = "session.activity",
-                    payload = new { activity = "idle", status = "failed", failureReason, exitCode = 1, operationId = "op-fail" }
+                    payload = new { activity = "idle", status = "failed", failureReason, exitCode = 1, operationId = "op-fail", turnId = agentTurnId }
                 }
             }
         });
@@ -289,6 +306,49 @@ public class WorkflowSessionSpecs
 
     private static string RunnerAgentSessionAttachPath(string runnerId, string projectId, string workflowRunId, string sessionName) =>
         $"{RunnerSessionPath(runnerId, projectId, workflowRunId, sessionName)}/attach";
+
+    private static string WorkflowRuntimeEventsPath(string runnerId, string projectId, string workflowRunId, string sessionName) =>
+        $"{RunnerSessionPath(runnerId, projectId, workflowRunId, sessionName)}/runtime-events";
+
+    private async Task<string> AcceptWorkflowInputAsync(
+        string projectId,
+        string workflowRunId,
+        string sessionName,
+        string sessionId,
+        string runtimeSessionId,
+        string inputDeliveryId,
+        string taskRunId,
+        string workId,
+        string prompt)
+    {
+        using var response = await _client.PostAsJsonAsync(
+            WorkflowRuntimeEventsPath(_runnerId, projectId, workflowRunId, sessionName),
+            new
+            {
+                runtimeSessionId,
+                runtime = "opencode",
+                agentSessionId = sessionId,
+                inputDeliveryId,
+                taskRunId,
+                workId,
+                runtimeEvents = new object[]
+                {
+                    new { type = "session.input", payload = new { text = prompt } }
+                }
+            });
+        var body = await response.Content.ReadAsStringAsync();
+        Assert.True(response.IsSuccessStatusCode, $"workflow input failed: {(int)response.StatusCode} {body}");
+        // The AgentSession turn is created before the cross-grain Workflow
+        // binding port answers; when the Workflow run has no matching task the
+        // receipt degrades to already-consumed ([]), but the frozen turn
+        // binding is still the acknowledged identity for subsequent events.
+        using var document = JsonDocument.Parse(body);
+        var receipts = document.RootElement.EnumerateArray().ToArray();
+        if (receipts.Length == 1)
+            return receipts[0].GetProperty("agentTurnId").GetString()!;
+        var turns = await _fixture.Grains.GetGrain<IAgentSessionGrain>(sessionId).ListTurnsAsync();
+        return Assert.Single(turns).WorkflowExecution!.AgentTurnId;
+    }
 
     private static string RunnerSessionRuntimeEventsPath(string runnerId, string sessionId) =>
         $"/api/runner/{runnerId}/agent-sessions/{sessionId}/runtime-events";

@@ -187,8 +187,9 @@ public sealed partial class AgentSessionFollowupGrainSpecs : IClassFixture<Agent
         await grain.AppendRuntimeEventsAsync(new AppendAgentSessionRuntimeEventsCommand(
             new[] { new AgentSessionRuntimeEventInput(
                 RuntimeEventTypes.SessionInput,
-                $$"""{"text":"first","kind":"followup","source":"agent-session-followup","operationId":"{{first.OperationId}}"}""") },
-            "runtime-executing-new-turn"));
+                $$"""{"text":"first","kind":"followup","source":"agent-session-followup","operationId":"{{first.OperationId}}","turnId":"{{first.TurnId}}"}""") },
+            "runtime-executing-new-turn",
+            SessionTurnId: first.TurnId));
 
         var second = await grain.AcceptFollowupAsync(new AcceptFollowupCommand(
             Text: "second during executing",
@@ -227,8 +228,9 @@ public sealed partial class AgentSessionFollowupGrainSpecs : IClassFixture<Agent
         await grain.AppendRuntimeEventsAsync(new AppendAgentSessionRuntimeEventsCommand(
             new[] { new AgentSessionRuntimeEventInput(
                 RuntimeEventTypes.SessionInput,
-                $$"""{"text":"first","kind":"followup","source":"agent-session-followup","operationId":"{{first.OperationId}}"}""") },
-            "runtime-no-interrupt"));
+                $$"""{"text":"first","kind":"followup","source":"agent-session-followup","operationId":"{{first.OperationId}}","turnId":"{{first.TurnId}}"}""") },
+            "runtime-no-interrupt",
+            SessionTurnId: first.TurnId));
 
         var second = await grain.AcceptFollowupAsync(new AcceptFollowupCommand(
             Text: "second during executing",
@@ -321,8 +323,9 @@ public sealed partial class AgentSessionFollowupGrainSpecs : IClassFixture<Agent
         await grain.AppendRuntimeEventsAsync(new AppendAgentSessionRuntimeEventsCommand(
             new[] { new AgentSessionRuntimeEventInput(
                 RuntimeEventTypes.SessionInput,
-                $$"""{"text":"same text","kind":"followup","source":"agent-session-followup","operationId":"{{first.OperationId}}"}""") },
-            "runtime-distinct-keys-executing"));
+                $$"""{"text":"same text","kind":"followup","source":"agent-session-followup","operationId":"{{first.OperationId}}","turnId":"{{first.TurnId}}"}""") },
+            "runtime-distinct-keys-executing",
+            SessionTurnId: first.TurnId));
         await persistence.WaitAsync();
 
         var second = await grain.AcceptFollowupAsync(new AcceptFollowupCommand(
@@ -375,8 +378,9 @@ public sealed partial class AgentSessionFollowupGrainSpecs : IClassFixture<Agent
         await grain.AppendRuntimeEventsAsync(new AppendAgentSessionRuntimeEventsCommand(
             new[] { new AgentSessionRuntimeEventInput(
                 RuntimeEventTypes.SessionInput,
-                $$"""{"text":"identity only","kind":"followup","source":"agent-session-followup","operationId":"{{first.OperationId}}"}""") },
-            "runtime-identity-executing"));
+                $$"""{"text":"identity only","kind":"followup","source":"agent-session-followup","operationId":"{{first.OperationId}}","turnId":"{{first.TurnId}}"}""") },
+            "runtime-identity-executing",
+            SessionTurnId: first.TurnId));
 
         var second = await grain.AcceptFollowupAsync(new AcceptFollowupCommand(
             Text: "identity only",
@@ -450,8 +454,9 @@ public sealed partial class AgentSessionFollowupGrainSpecs : IClassFixture<Agent
         await grain.AppendRuntimeEventsAsync(new AppendAgentSessionRuntimeEventsCommand(
             new[] { new AgentSessionRuntimeEventInput(
                 RuntimeEventTypes.SessionActivity,
-                $$"""{"activity":"idle","operationId":"{{first.OperationId}}","status":"completed"}""") },
-            "runtime-identity-terminal"));
+                $$"""{"activity":"idle","operationId":"{{first.OperationId}}","status":"completed","turnId":"{{first.TurnId}}"}""") },
+            "runtime-identity-terminal",
+            SessionTurnId: first.TurnId));
 
         var second = await grain.AcceptFollowupAsync(new AcceptFollowupCommand(
             Text: "terminal identity",
@@ -527,8 +532,9 @@ public sealed partial class AgentSessionFollowupGrainSpecs : IClassFixture<Agent
         await grain.AppendRuntimeEventsAsync(new AppendAgentSessionRuntimeEventsCommand(
             new[] { new AgentSessionRuntimeEventInput(
                 RuntimeEventTypes.SessionInput,
-                $$"""{"text":"progress me","kind":"followup","source":"agent-session-followup","operationId":"{{accept.OperationId}}"}""") },
-            "runtime-progress-executing"));
+                $$"""{"text":"progress me","kind":"followup","source":"agent-session-followup","operationId":"{{accept.OperationId}}","turnId":"{{accept.TurnId}}"}""") },
+            "runtime-progress-executing",
+            SessionTurnId: accept.TurnId));
         await persistence.WaitAsync();
 
         var state = await _fixture.StateStore.LoadAsync(sessionId);
@@ -551,11 +557,12 @@ public sealed partial class AgentSessionFollowupGrainSpecs : IClassFixture<Agent
         await grain.AppendRuntimeEventsAsync(new AppendAgentSessionRuntimeEventsCommand(
             new[] { new AgentSessionRuntimeEventInput(
                 RuntimeEventTypes.MessageDelta,
-                "{\"text\":\"follow-up assistant output\"}"),
+                $$"""{"text":"follow-up assistant output","turnId":"{{accept.TurnId}}"}"""),
                 new AgentSessionRuntimeEventInput(
                     RuntimeEventTypes.SessionActivity,
-                    $$"""{"activity":"idle","operationId":"{{accept.OperationId}}","status":"completed","message":"follow-up assistant output","output":"follow-up assistant output"}""") },
-            "runtime-progress-terminal"));
+                    $$"""{"activity":"idle","operationId":"{{accept.OperationId}}","status":"completed","message":"follow-up assistant output","output":"follow-up assistant output","turnId":"{{accept.TurnId}}"}""") },
+            "runtime-progress-terminal",
+            SessionTurnId: accept.TurnId));
         await persistence.WaitAsync();
 
         var state = await _fixture.StateStore.LoadAsync(sessionId);
@@ -584,8 +591,9 @@ public sealed partial class AgentSessionFollowupGrainSpecs : IClassFixture<Agent
         await grain.AppendRuntimeEventsAsync(new AppendAgentSessionRuntimeEventsCommand(
             new[] { new AgentSessionRuntimeEventInput(
                 RuntimeEventTypes.SessionActivity,
-                $$"""{"activity":"idle","operationId":"{{accept.OperationId}}","status":"completed"}""") },
-            "runtime-clear-lease"));
+                $$"""{"activity":"idle","operationId":"{{accept.OperationId}}","status":"completed","turnId":"{{accept.TurnId}}"}""") },
+            "runtime-clear-lease",
+            SessionTurnId: accept.TurnId));
         await persistence.WaitAsync();
 
         var state = await _fixture.StateStore.LoadAsync(sessionId);
@@ -607,8 +615,9 @@ public sealed partial class AgentSessionFollowupGrainSpecs : IClassFixture<Agent
         await grain.AppendRuntimeEventsAsync(new AppendAgentSessionRuntimeEventsCommand(
             new[] { new AgentSessionRuntimeEventInput(
                 RuntimeEventTypes.SessionActivity,
-                $$"""{"activity":"idle","operationId":"{{first.OperationId}}","status":"completed"}""") },
-            "runtime-after-terminal"));
+                $$"""{"activity":"idle","operationId":"{{first.OperationId}}","status":"completed","turnId":"{{first.TurnId}}"}""") },
+            "runtime-after-terminal",
+            SessionTurnId: first.TurnId));
         await persistence.WaitAsync();
 
         var second = await grain.AcceptFollowupAsync(new AcceptFollowupCommand(
@@ -712,8 +721,9 @@ public sealed partial class AgentSessionFollowupGrainSpecs : IClassFixture<Agent
         await grain.AppendRuntimeEventsAsync(new AppendAgentSessionRuntimeEventsCommand(
             new[] { new AgentSessionRuntimeEventInput(
                 RuntimeEventTypes.SessionInput,
-                $$"""{"text":"first exec","kind":"followup","source":"agent-session-followup","operationId":"{{first.OperationId}}"}""") },
-            "runtime-concurrent-executing"));
+                $$"""{"text":"first exec","kind":"followup","source":"agent-session-followup","operationId":"{{first.OperationId}}","turnId":"{{first.TurnId}}"}""") },
+            "runtime-concurrent-executing",
+            SessionTurnId: first.TurnId));
 
         var second = await grain.AcceptFollowupAsync(new AcceptFollowupCommand(
             Text: "second exec",

@@ -11,3 +11,24 @@ function readRecord(value: unknown): Record<string, unknown> | null {
     ? (value as Record<string, unknown>)
     : null
 }
+export interface RuntimeEventDeliveryErrorMetadata {
+  readonly status: number
+  readonly code: string | null
+}
+
+/**
+ * HTTP failure returned by a runtime-event endpoint. The Server's structured
+ * ApiResponse.Code is kept separate from the human-readable message so
+ * delivery policy does not need to inspect exception text.
+ */
+export class RuntimeEventDeliveryError extends Error implements RuntimeEventDeliveryErrorMetadata {
+  readonly status: number
+  readonly code: string | null
+
+  constructor(operation: string, status: number, code: string | null, responseBody: string) {
+    super(`${operation} failed: ${status}${responseBody ? ` ${responseBody}` : ''}`)
+    this.name = 'RuntimeEventDeliveryError'
+    this.status = status
+    this.code = code
+  }
+}
