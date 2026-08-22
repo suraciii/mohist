@@ -50,6 +50,7 @@ import type { ServerConnection } from './connection.js'
 import { SkillResolver } from '../runtime/skill-resolver.js'
 import { ManagerExecutionBoundary } from '../runtime/manager-execution-boundary.js'
 import { ManagerExecutionRegistry } from '../runtime/manager-execution-registry.js'
+import { mapRuntimeErrorKind } from '../runtime/error-kind-mapping.js'
 import { buildExecutionEnvelope } from '../runtime/execution-envelope.js'
 import { inlineSlackCollaborationSkill, readExecutionSourceContext } from '../runtime/slack-execution-context.js'
 import {
@@ -399,6 +400,7 @@ async function handleFollowup(
             message,
             undefined,
             managerExecution,
+            readRuntimeErrorCategory(handle.kind, result),
           )
           if (readErrorKind(result) === 'unavailable-runtime') {
             log.error('followup runtime unavailable', { reason: message, session: selectedTarget.runtimeSessionId })
@@ -660,6 +662,15 @@ function readErrorKind(result: { readonly error?: { readonly kind?: string } }):
   return result.error?.kind ?? ''
 }
 
+function readRuntimeErrorCategory(
+  runtime: 'opencode' | 'pi',
+  result: { readonly ok: boolean; readonly error?: { readonly kind?: string } },
+): string | undefined {
+  if (result.ok) return undefined
+  const kind = result.error?.kind
+  return kind ? mapRuntimeErrorKind(runtime, kind) : undefined
+}
+
 async function enqueueFollowupInput(
   outbox: AgentSessionRuntimeEventOutbox,
   sessionTarget: SessionTarget,
@@ -712,6 +723,7 @@ function recordFollowupActivity(
   error?: unknown,
   output?: string | null,
   managerExecution: ManagerExecutionBoundary | null = null,
+  failureCategory?: string,
 ): void {
   if (!operationId) return
   const managerCredentialExpired = managerExecution?.hasExpired() === true
@@ -729,7 +741,11 @@ function recordFollowupActivity(
       payload: {
         activity: terminalActivity,
         status: managerCredentialExpired ? 'unknown' : terminalActivity === 'idle' ? 'completed' : 'failed',
-        ...(managerCredentialExpired ? { reason: 'manager-credential-expired', failureCategory: 'unknown' } : {}),
+        ...(managerCredentialExpired
+          ? { reason: 'manager-credential-expired', failureCategory: 'unknown' }
+          : failureCategory
+            ? { failureCategory }
+            : {}),
         ...(error
           ? {
               failureReason: managerExecution

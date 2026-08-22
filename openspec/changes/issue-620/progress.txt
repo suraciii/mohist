@@ -25,3 +25,9 @@
 - Added additive `sessionId`/`turnId` fields to terminal delivery envelopes. Initial AgentJob terminal envelopes populate them from the durable input; follow-up envelopes populate them from the session/turn and now forward `turn.Result.FailureReason`/`FailureCategory`.
 - Terminal delivery presentation uses the single `AgentSessionRetryPolicy`; only ordinary failed deliveries with retryable categories and resolvable durable facts attempt an explicit failure notice with Retry blocks. Manager, nonretryable/absent facts, and non-failure deliveries retain reaction-only finalization. If action creation cannot sign, it falls back to reaction-only.
 - Verification: server build (`-p:SkipWebBuild=true`), full UnitTests (3793), and full SpecTests (3048) pass. Added UnitTests for exact canonical signing, tamper/missing payload fields, and unavailable signing material.
+
+## T-007 work
+- Extracted the AgentJob runtime-kind category mappings into `packages/runner/src/runtime/error-kind-mapping.ts`; AgentJob and follow-up terminal activity now share the same helper (`mapOpenCodeErrorKind` / `mapPiErrorKind`).
+- Follow-up runtime result failures record the mapped `failureCategory` alongside `failureReason`. Observer flush failures, rejected calls, thrown exceptions, and successful turns omit the additive category; manager credential expiry still overrides it with `unknown`.
+- Added follow-up handler coverage for OpenCode `unavailable-runtime`, Pi `deadline-exceeded` → `timeout`, Pi `missing-session` → `runtime-session-missing`, missing-category failures, expired manager credentials, and unchanged terminal payload keys.
+- Verification: runner source and test typechecks pass; the full `npm test` suite passes (156 files, 1690 tests), including the focused follow-up/AgentJob coverage.

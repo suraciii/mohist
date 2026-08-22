@@ -17,6 +17,194 @@ function it(name: string, body: (fileSystem: MemoryFileSystem) => Promise<void>)
   })
 }
 
+describe('follow-up terminal failure categories', () => {
+  it('records an OpenCode runtime error kind as failureCategory without changing the terminal shape', async () => {
+    const records: any[] = []
+    const outbox = {
+      ready: () => true,
+      enqueueBeforeExecution: vi.fn(async (record: unknown) => records.push(record)),
+      enqueueProducedFact: vi.fn(async (record: unknown) => records.push(record)),
+    }
+    const receive = createFollowupHandler({
+      followupTargetResolver: () => ({ runtimeSessionId: 'runtime-1', workDir: '/work', projectId: 'project-1' }),
+      agentSessionRuntimeEventOutbox: outbox as never,
+      openCodeRuntime: {
+        ready: () => true,
+        followup: vi.fn(async () => ({
+          ok: false as const,
+          error: { kind: 'unavailable-runtime' as const, message: 'runtime unavailable', diagnostics: [] },
+          diagnostics: [],
+        })),
+      } as never,
+    })
+
+    expect(await receive(genericFollowupPayload('opencode'))).toEqual({ accepted: true })
+    await flushMicrotasks()
+
+    const terminal = records.find((record) => record.event?.type === 'session.activity')
+    expect(terminal).toMatchObject({
+      id: expect.stringContaining('followup-activity:operation-1:'),
+      event: {
+        type: 'session.activity',
+        payload: {
+          activity: 'unknown',
+          status: 'failed',
+          failureCategory: 'unavailable-runtime',
+          failureReason: 'runtime unavailable',
+          source: 'followup',
+          operationId: 'operation-1',
+          turnId: 'turn-1',
+          runtimeSessionId: 'runtime-1',
+        },
+      },
+    })
+    expect(Object.keys(terminal.event.payload).sort()).toEqual([
+      'activity',
+      'completedAt',
+      'failureCategory',
+      'failureReason',
+      'operationId',
+      'runtimeSessionId',
+      'source',
+      'status',
+      'turnId',
+    ])
+  })
+
+  it('uses the shared Pi mapping for deadline-exceeded and missing-session', async () => {
+    for (const [kind, category] of [
+      ['deadline-exceeded', 'timeout'],
+      ['missing-session', 'runtime-session-missing'],
+    ] as const) {
+      const records: any[] = []
+      const outbox = {
+        ready: () => true,
+        enqueueBeforeExecution: vi.fn(async (record: unknown) => records.push(record)),
+        enqueueProducedFact: vi.fn(async (record: unknown) => records.push(record)),
+      }
+      const receive = createFollowupHandler({
+        followupTargetResolver: () => ({ runtimeSessionId: 'runtime-1', workDir: '/work', projectId: 'project-1' }),
+        agentSessionRuntimeEventOutbox: outbox as never,
+        piRuntime: {
+          ready: () => true,
+          followup: vi.fn(async () => ({
+            ok: false as const,
+            error: { kind, message: `${kind} message`, diagnostics: [] },
+            diagnostics: [],
+          })),
+        } as never,
+      })
+
+      expect(await receive(genericFollowupPayload('pi'))).toEqual({ accepted: true })
+      await flushMicrotasks()
+
+      const terminal = records.find((record) => record.event?.type === 'session.activity')
+      expect(terminal.event.payload).toMatchObject({
+        failureCategory: category,
+        failureReason: `${kind} message`,
+      })
+    }
+  })
+
+  it('keeps failureCategory absent when observer event flushing fails', async () => {
+    const records: any[] = []
+    const outbox = {
+      ready: () => true,
+      enqueueBeforeExecution: vi.fn(async (record: unknown) => records.push(record)),
+      enqueueProducedFact: vi
+        .fn()
+        .mockRejectedValueOnce(new Error('observer flush failed'))
+        .mockImplementation(async (record: unknown) => records.push(record)),
+    }
+    const receive = createFollowupHandler({
+      followupTargetResolver: () => ({ runtimeSessionId: 'runtime-1', workDir: '/work', projectId: 'project-1' }),
+      agentSessionRuntimeEventOutbox: outbox as never,
+      openCodeRuntime: {
+        ready: () => true,
+        followup: vi.fn(async (_request: unknown, observer: { onEvent?: (event: unknown) => void } | undefined) => {
+          observer?.onEvent?.({ type: 'session.status', runtimeSessionId: 'runtime-1', workDir: '/work', payload: {} })
+          return { ok: true as const, value: { facts: {} }, diagnostics: [] }
+        }),
+      } as never,
+    })
+
+    expect(await receive(genericFollowupPayload('opencode'))).toEqual({ accepted: true })
+    await flushMicrotasks()
+
+    const terminal = records.find((record) => record.event?.type === 'session.activity')
+    expect(terminal.event.payload).toMatchObject({ status: 'failed', failureReason: 'observer flush failed' })
+    expect(terminal.event.payload).not.toHaveProperty('failureCategory')
+  })
+
+  it('keeps failureCategory absent when follow-up execution rejects or throws', async () => {
+    for (const followup of [
+      vi.fn(async () => {
+        throw new Error('rejected followup')
+      }),
+      vi.fn(() => {
+        throw new Error('thrown followup')
+      }),
+    ]) {
+      const records: any[] = []
+      const outbox = {
+        ready: () => true,
+        enqueueBeforeExecution: vi.fn(async (record: unknown) => records.push(record)),
+        enqueueProducedFact: vi.fn(async (record: unknown) => records.push(record)),
+      }
+      const receive = createFollowupHandler({
+        followupTargetResolver: () => ({ runtimeSessionId: 'runtime-1', workDir: '/work', projectId: 'project-1' }),
+        agentSessionRuntimeEventOutbox: outbox as never,
+        openCodeRuntime: { ready: () => true, followup } as never,
+      })
+
+      const result = await receive(genericFollowupPayload('opencode'))
+      await flushMicrotasks()
+      const terminal = records.find((record) => record.event?.type === 'session.activity')
+      expect(result).toEqual({ accepted: true })
+      expect(terminal.event.payload).toMatchObject({ status: 'failed', failureReason: expect.any(String) })
+      expect(terminal.event.payload).not.toHaveProperty('failureCategory')
+    }
+  })
+
+  it('keeps unknown for an expired manager credential even when the runtime has an error kind', async () => {
+    const records: any[] = []
+    const outbox = {
+      ready: () => true,
+      enqueueBeforeExecution: vi.fn(async (record: unknown) => records.push(record)),
+      enqueueProducedFact: vi.fn(async (record: unknown) => records.push(record)),
+    }
+    const receive = createFollowupHandler({
+      followupTargetResolver: () => ({ runtimeSessionId: 'runtime-1', workDir: '/work', projectId: '__mohist_slack_manager__' }),
+      agentSessionRuntimeEventOutbox: outbox as never,
+      piRuntime: {
+        ready: () => true,
+        followup: vi.fn(async () => ({
+          ok: false as const,
+          error: { kind: 'deadline-exceeded' as const, message: 'deadline', diagnostics: [] },
+          diagnostics: [],
+        })),
+      } as never,
+      runnerRoot: '/tmp/runner',
+      createManagerExecutionBoundary: vi.fn(async () => ({
+        hasExpired: () => true,
+        mask: (value: string) => value,
+        redact: (value: unknown) => value,
+        dispose: vi.fn(async () => undefined),
+      })) as never,
+    })
+
+    expect(await receive(managerFollowupPayload())).toEqual({ accepted: true })
+    await flushMicrotasks()
+
+    const terminal = records.find((record) => record.event?.type === 'session.activity')
+    expect(terminal.event.payload).toMatchObject({
+      status: 'unknown',
+      reason: 'manager-credential-expired',
+      failureCategory: 'unknown',
+    })
+  })
+})
+
 describe('follow-up attachment delivery', () => {
   it('rejects an explicit Slack follow-up without context before resolver or enqueue', async () => {
     const resolver = vi.fn()
@@ -270,6 +458,25 @@ async function flushMicrotasks(): Promise<void> {
   await Promise.resolve()
   await Promise.resolve()
   await Promise.resolve()
+}
+
+function genericFollowupPayload(runtime: 'opencode' | 'pi') {
+  return {
+    target: {
+      kind: 'generic',
+      projectId: 'project-1',
+      sessionId: 'session-1',
+      binding: {
+        runtime,
+        runtimeSessionId: 'runtime-1',
+        runnerId: 'runner-1',
+        workDir: '/work',
+      },
+    },
+    text: 'continue',
+    operationId: 'operation-1',
+    turnId: 'turn-1',
+  } as const
 }
 
 function managerFollowupPayload() {
