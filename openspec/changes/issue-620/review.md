@@ -2,30 +2,112 @@
 
 ## Verdict
 
-**FAIL** — one must-fix coverage gap leaves an issue acceptance criterion unverified.
+**FAIL** — two must-fix gaps leave the retry behavior incomplete for a real
+retryable failure category and for faithful root-attempt recovery.
 
 ## Must-fix findings
 
-### MF-1 — Retryable terminal presentation has no deterministic end-to-end verification
+### MF-1 — The real `report-timeout` reconciliation path never becomes a retryable terminal failure
 
-**Violates issue acceptance criterion 7** ("Retry presentation ... has deterministic verification").
+**Violates issue acceptance criterion 1** (retryable failures display Retry) and
+criterion 7's deterministic failure-category allowlist verification.
 
-The new production path is in `packages/server/src/Mohist.Server/Infrastructure/Slack/SlackTerminalDeliveryHandler.cs:53-81`: for a retryable failed delivery it resolves the durable Session/Turn, creates the signed action, and enqueues an explicit failure outbox entry with Retry blocks. No test exercises this path.
+The authoritative policy in
+`packages/server/src/Mohist.Server/Sessions/Services/AgentSessionRetryPolicy.cs:12-29`
+accepts the exact category `report-timeout`, but the real AgentJob recovery path
+does not record that category on a retryable terminal Turn. In
+`packages/server/src/Mohist.Server/Agent/Grains/AgentJobGrain.Recovery.cs:113-124`,
+`OnJobTimeoutAsync` builds the reason
+`report-timeout: report timeout after <duration>` and calls
+`EnterUnknownStateAsync`. That method stages an `unknown` terminal-delivery
+envelope with `failureCategory: "unknown"` at lines 179-194, while leaving the
+AgentJob in `Unknown`. The report-timeout branch also sets no recovery deadline
+(line 117-119), so `FailRecoveringJobIfDueAsync` does not later convert it to a
+failed Turn. The only path that reaches that conversion is the runner-loss path;
+if it did receive the suffixed reason, lines 210-215 would also pass the whole
+reason as `failureCategory`, which would not equal the exact allowlisted token.
 
-`packages/server/tests/Mohist.Server.SpecTests/Specs/Slack/SlackTerminalDeliveryHandlerSpecs.cs` only covers the pre-existing reaction-only behavior, using `failureCategory = "runtime-failed"` (non-retryable), completed/cancelled/unknown cases, and Manager deliveries. Those cases therefore all bypass the new branch. `SlackRetryInteractionSpecs` tests `SlackRetryActionService.CreateRetryActionAsync` and the interaction route directly, but never feeds a terminal delivery event through `SlackTerminalDeliveryHandler` or inspects the resulting `ExplicitFailure` outbox payload.
+As a result, a genuine report-timeout reconciliation failure gets no Retry
+button: presentation requires `status == "failed"` and an exact allowlisted
+category in `SlackTerminalDeliveryHandler.ShouldRenderRetry` at
+`packages/server/src/Mohist.Server/Infrastructure/Slack/SlackTerminalDeliveryHandler.cs:130-135`.
+The fix must define the intended terminal/retryable state for report-timeout,
+record the canonical category token `report-timeout` separately from the
+human-readable reason, and add deterministic coverage using the real
+report-timeout producer through presentation and acceptance.
 
-As a result, the change does not verify that a real retryable terminal event actually renders a Retry button with the correct action value, durable Session/Turn identity, Slack message/thread target, and five-minute expiry, nor that the new path falls back to reaction-only when signing material or durable facts are unavailable. Add deterministic handler-level coverage for the positive path and the relevant negative/fallback cases, including assertions on the actual outbox blocks/action payload. The implementation task can then catch regressions in event-field propagation, outbox promotion, and signing-material handling rather than only testing the action service in isolation.
+### MF-2 — Root retry does not preserve the original launch's durable execution facts
+
+**Violates the `slack-retry-attempt-execution` plan requirement** that a root
+retry create a new Session from the original durable Slack provenance **and the
+recorded execution facts of the original launch**; this makes the accepted
+root retry an incomplete reproduction of the failed request.
+
+`packages/server/src/Mohist.Server/Sessions/Services/AgentSessionRetryService.cs:236-264`
+rebuilds only a `ConnectionLaunchOrigin`, the input text, and a workspace-name
+label. It then calls `LaunchConnectionAsync`, which resolves the *current*
+Agent definition in `packages/server/src/Mohist.Server/Agent/Services/AgentLauncher.cs:451-457`
+instead of using the failed Session's persisted
+`Session.Settings.Definition`. The retry also does not pass the original input's
+`Attachments` or `StartupContext`, nor the persisted
+`Session.Settings.AgentSessionStartup`.
+
+If the Agent configuration/defaults change after the failure, the new Session
+can run with a different runtime, model, variant, instructions, or skills. If
+the original Slack request carried accepted attachments or startup context,
+the retry silently drops them. The new Session therefore has the right Slack
+identity but not the recorded execution request/facts that the plan requires.
+The retry path must source these values from the failed Session/Input snapshot,
+carry them through the launch pipeline, and add coverage for changed current
+configuration plus attachments/startup context so a root retry remains the
+same durable request with fresh execution identities.
+
+## Re-review of previous finding
+
+The previous review's MF-1 (missing deterministic handler-level presentation
+coverage) is fixed properly. The new
+`SlackTerminalDeliveryPresentationSpecs` invokes the real
+`SlackTerminalDeliveryHandler`, inspects the explicit-failure outbox payload
+and signed action value, and covers reaction-only fallback for missing durable
+facts and missing signing material. The handler also now catches unavailable
+durable retry facts and preserves the reaction-only liveness fallback. No
+regression was found in the existing Stop path: the signing extraction is
+internal, Stop canonicalization remains unchanged, and the Stop interaction
+specs pass.
 
 ## Dimension checks
 
-- **Acceptance criteria — FAIL:** the retry operation, authorization revalidation, root/thread attempt paths, restart worker, allowlist, and cleanup are implemented, but the presentation portion of criterion 7 is not deterministically verified.
-- **Correctness — checked, no additional must-fix issue found:** the reviewed paths use the single `AgentSessionRetryPolicy`, preserve the failed Turn, persist the operation before dispatch, use preallocated identities, target follow-up dispatch explicitly, and route Retry through the existing lease/outbox interaction surface.
-- **Consistency — checked, no additional must-fix issue found:** Stop continues to use the same route and signing behavior; the adapter changes are test-only; the runner category mapping is shared between AgentJob and follow-up handling.
-- **Tests — FAIL for MF-1:** UnitTests (3793) and SpecTests (3056) pass, runner tests (1690) pass, and TypeScript Slack adapter tests (91) pass. Those suites do not cover the missing terminal-presentation path described above. Go adapter tests could not be run because this workspace has no `go` executable; that is recorded as an observation, not a verdict driver.
+- **Coverage — FAIL:** the allowlist includes `report-timeout`, but the real
+  producer records a suffixed value, and root retries omit recorded execution
+  facts described by the attempt-execution contract.
+- **Correctness — FAIL for MF-1 and MF-2:** the remaining retryable categories,
+  signed presentation, acceptance revalidation, durable receipt, targeted
+  thread dispatch, recovery worker, and failed-Turn immutability were checked;
+  these two paths do not satisfy their contracts.
+- **Consistency — checked, no additional must-fix issue found:** Retry uses the
+  shared classifier and signing helper, Stop remains on its existing route,
+  and adapter source contracts remain unchanged. The project-scoped lookup vs
+  global unique-index concern is recorded below as an observation.
+- **Tests — checked with the gaps above:** Server build succeeds; UnitTests
+  pass (3793), SpecTests pass (3059), runner tests pass (1690), and TypeScript
+  Slack adapter tests pass (91). The existing suites do not exercise the real
+  report-timeout category producer or root retries after execution facts/config
+  changes. Go adapter tests could not run because `go` is not installed.
 
 ## Observations
 
-- `AgentRetryOperationStore.FindAsync` scopes lookups by `ProjectId` (`packages/server/src/Mohist.Server/Infrastructure/Data/Sessions/AgentRetryOperationStore.cs:189-199`), while the migration creates global unique indexes for `IdempotencyKey` and `(SessionId, TurnId)` (`packages/server/src/Mohist.Server/Infrastructure/Data/Migrations/20260912000000_AddAgentRetryOperations.cs:44-54`). If the same idempotency key is legitimately used in two projects, the second insert can hit the global unique constraint and then fail to find the winner because the read is project-scoped. The issue does not state a cross-project idempotency-key policy, so this is an implementation-consistency concern rather than a must-fix finding for this review.
-- Go adapter verification remains unavailable in this environment because `go` is not installed.
+- `AgentRetryOperationStore` scopes reads by `ProjectId`, while the migration
+  creates global unique indexes for `IdempotencyKey` and `(SessionId, TurnId)`.
+  A caller reusing an idempotency key in a different project could hit a
+  uniqueness exception and fail to read the winner. The issue does not define
+  a cross-project idempotency-key namespace, so this is an implementation
+  consistency risk rather than a must-fix finding here.
+- Retry acceptance validates Connection, team, and conversation context, as
+  required, but does not separately compare the signed message/thread
+  identity with the interaction's message/thread fields. This matches the
+  existing Stop route's context convention; the signed fields still bind the
+  rendered target, so this remains an observation rather than a verdict driver.
+- Go adapter verification remains unavailable in this environment because the
+  workspace has no `go` executable.
 
 <promise>FAIL</promise>
