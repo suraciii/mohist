@@ -2,113 +2,118 @@
 
 ## Verdict
 
-**FAIL** — the reconciliation path for a real retryable failure still does not
-produce a retryable Slack terminal notice.
+**FAIL** — the reconciliation delivery fix handles the normal append path, but a
+failed interim Unknown delivery can still suppress the final retryable Failed
+delivery permanently.
 
 ## Must-fix findings
 
-### MF-1 — Reconciliation failures become failed in the Job, but the final Slack delivery is deduplicated away
+### MF-1 — A pending interim Unknown delivery prevents the final Failed delivery from being staged
 
-**Violates issue acceptance criterion 1** (retryable failures display Retry) and
-criterion 7's deterministic presentation verification. It also leaves the
-`slack-failure-retryability` and `slack-retry-action` contracts incomplete for
-`runner-lost`/`report-timeout` reconciliation.
+**Violates acceptance criterion 1** (a retryable failure must display Retry) and
+criterion 7's deterministic presentation/reconciliation verification. It also
+leaves the retryability and Retry-action contracts incomplete for a real
+`runner-lost` or `report-timeout` reconciliation when terminal event delivery
+has a transient failure.
 
-`packages/server/src/Mohist.Server/Agent/Grains/AgentJobGrain.Recovery.cs:108-129`
-now records a canonical `report-timeout` (or `runner-lost`) category and arms a
-recovery deadline. However, the initial transition to `Unknown` immediately
-stages and emits a terminal-delivery event at lines 203-208. That event uses the
-stable id `agent-job:{jobKey}:terminal-delivery`, created in
-`packages/server/src/Mohist.Server/Agent/Grains/AgentJobGrain.cs:1446-1452`.
+`AgentJobGrain.StageTerminalDeliveryEvent` refuses to stage anything when
+`State.PendingTerminalDeliveryEvent` is already populated
+(`packages/server/src/Mohist.Server/Agent/Grains/AgentJobGrain.cs:1446-1448`).
+The interim Unknown transition stores an Unknown pending event and attempts to
+append it (`AgentJobGrain.Recovery.cs:203-208`). If that append fails, the
+exception is swallowed and the Unknown event remains pending
+(`AgentJobGrain.cs:1470-1483`).
 
-When the reconciliation deadline expires, `FailRecoveringJobIfDueAsync` does
-enter the Job's `Failed` state with the exact category at
-`AgentJobGrain.Recovery.cs:215-237`, but the subsequent terminal-delivery event
-has the same source and event id. `EventStore.AppendAsync` treats that pair as
-already persisted and returns without storing the new failed payload at
-`packages/server/src/Mohist.Server/Infrastructure/Data/Events/EventStore.cs:94-102`.
-Consequently Slack only receives the earlier `status=unknown,
-failureCategory=unknown` delivery, not the final `status=failed,
-failureCategory=report-timeout`/`runner-lost` delivery.
+When the recovery deadline later expires, `FailRecoveringJobIfDueAsync` correctly
+enters the Job's terminal Failed state with the retryable category
+(`AgentJobGrain.Recovery.cs:215-237`), but `EnterTerminalStateAsync` calls
+`StageTerminalDeliveryEvent` while the Unknown event is still pending
+(`AgentJobGrain.cs:1219-1274`). The guard returns without creating the final
+Failed event. The terminal path then retries/emits only the existing Unknown
+pending event (`AgentJobGrain.cs:1229-1235`), after which it can be cleared;
+there is no durable obligation left for the final Failed payload.
 
-The presentation handler would only render Retry for the final failed payload
-(`packages/server/src/Mohist.Server/Infrastructure/Slack/SlackTerminalDeliveryHandler.cs:127-135`),
-and `SlackRetryActionService.CreateRetryActionAsync` independently re-reads
-the target Turn and requires it to be `Failed` at
-`packages/server/src/Mohist.Server/Slack/Services/SlackRetryActionService.cs:40-49`.
-Thus the real unresolved report-timeout path remains reaction-only despite the
-allowlist containing `report-timeout`. The new tests only assert that a recovery
-deadline is present; they do not advance past that deadline, emit the final
-reconciliation result, and run it through the actual Slack handler.
+Therefore the Session/Turn can be Failed with `runner-lost` or `report-timeout`,
+while Slack receives only the earlier `status=unknown,
+failureCategory=unknown` projection. `SlackTerminalDeliveryHandler` quite
+correctly renders Retry only for the missing final `status=failed` payload, so
+the user remains reaction-only and cannot recover the turn.
 
-The fix must make the interim Unknown delivery and the final failed delivery
-distinct or otherwise updateable while retaining idempotency, and must add a
-deterministic end-to-end spec using the real report-timeout producer through
-reconciliation and Slack presentation. The spec must assert the exact
-`report-timeout` category, `failed` target state, and signed Retry action.
+The new distinct Unknown event id fixes the earlier event-store deduplication
+case only when the Unknown append has already succeeded. The fix must also
+handle a pending Unknown obligation during finalization: replace or otherwise
+chain it to a distinct final Failed obligation, preserving idempotency and
+ensuring the final payload is eventually appended. Add deterministic coverage
+that forces the interim terminal-delivery append (or its pending-state
+persistence) to fail, advances the recovery deadline, and asserts that the
+final `failed` payload contains the exact retryable category and reaches Slack
+with a signed Retry action.
 
 ## Re-review of previous findings
 
-- **Previous MF-1 (report-timeout reconciliation): not fixed.** The canonical
-  category and deadline are now stored, but the stable terminal-delivery event
-  id prevents the final failed presentation from reaching Slack. The prior
-  disposition therefore does not hold.
+- **Previous MF-1 (shared event id for Unknown and final reconciliation):
+  partially fixed.** The Unknown delivery now uses
+  `agent-job:{jobKey}:terminal-delivery:unknown`, while the final delivery uses
+the original id, so successful Unknown append followed by reconciliation now
+  produces two persisted events. The pending-obligation case above means the
+  reconciliation path is not fully fixed and still meets the must-fix bar.
 - **Previous MF-2 (root retry execution facts): fixed for the reviewed scope.**
-  Root retry now reads the failed Session's durable `Definition`, startup
-  snapshot, input text, attachments, startup context, workspace label, and Slack
-  provenance; it passes the definition/startup overrides and pre-allocated
-  identities through the coordinator instead of resolving a new execution
-  definition from current Agent settings. The changed-Agent integration spec
-  passes, and the failed Turn remains unchanged.
-- **Previous presentation-coverage finding: fixed.** The real terminal handler
-  is exercised for a positive signed Retry notice and reaction-only fallback
-  cases. That coverage does not, however, cover the missing real
-  report-timeout-to-final-delivery transition described above.
+  Root retry uses the failed Session's recorded definition, startup snapshot,
+  input text, attachments, startup context, workspace label, Slack provenance,
+  and pre-allocated identities; the changed-Agent integration coverage passes
+  and the failed Turn remains unchanged.
+- **Previous presentation-coverage finding: fixed for the reviewed scope.**
+  The real terminal handler has positive coverage for the three server-recorded
+  retryable categories and reaction-only fallback coverage. It does not cover
+  the pending-obligation failure in MF-1.
 
 ## Dimension checks
 
-- **Acceptance-criteria coverage — FAIL:** ordinary seeded retryable failures,
-  signed acceptance, root/thread execution, operation persistence/recovery,
-  cleanup, and Stop compatibility are covered; the actual reconciliation
-  producer does not reach Retry presentation.
-- **Correctness — FAIL:** the final Job facts contain the canonical category,
-  but the event-store identity/idempotency behavior suppresses the final Slack
-  projection.
+- **Acceptance-criteria coverage — FAIL:** the signed action, authorization,
+  idempotent operation, root/thread execution, restart recovery, cleanup, and
+  Stop compatibility are implemented. The final Slack presentation is still
+  incomplete when reconciliation's interim delivery remains pending.
+- **Correctness — FAIL:** the Job's authoritative facts can reach Failed with a
+  retryable category while the corresponding terminal delivery remains the
+  Unknown payload.
 - **Consistency — checked, no additional must-fix issue found:** the shared
-  classifier is used by presentation and acceptance, the Retry route preserves
-  the Stop route envelope, and root retry uses the recorded execution
-  definition.
-- **Tests — FAIL for coverage completeness:** the final build and test runs
-  below pass, but no test exercises the real report-timeout deadline through
-  final terminal delivery and Retry rendering, which is the path that currently
-  fails.
+  retryability policy is used by presentation and acceptance; the Retry route
+  preserves the Stop route envelope; root retry uses recorded execution facts.
+- **Tests — FAIL for the uncovered failure mode:** the added reconciliation
+  spec verifies distinct ids after a successful Unknown append, and the
+  presentation spec seeds retryable categories directly. No test exercises a
+  failed interim append followed by deadline reconciliation, which is the path
+  that still loses the final Retry notice.
 
 ## Verification
 
-- Server build: passed.
-- Server UnitTests: 3793 passed.
-- Server SpecTests: 3060 passed after rebuilding the test project.
-- Runner tests: 1690 passed.
-- TypeScript Slack adapter typecheck/tests: 91 passed.
-- Go adapter tests could not run because no `go` executable is installed.
+- Server build with `-p:SkipWebBuild=true`: passed.
+- Runner follow-up-handler tests: 10 passed.
+- Full SpecTests invocation was started but exceeded the 300-second environment
+  timeout; the latest change commit reports 3063 passing tests, but that result
+  was not independently reproduced in this review.
+- Go adapter tests remain unavailable because the workspace has no `go`
+  executable.
+- `git diff --check`: clean.
 
 ## Observations
 
+- The current presentation tests parameterize `report-timeout` as a seeded
+  terminal fact, but do not drive the real report-timeout producer through its
+  deadline and Slack projection. This is useful coverage but weaker than an
+  end-to-end producer-to-button test; it does not add a second verdict driver
+  beyond MF-1.
 - `AgentRetryOperationStore` scopes reads by `ProjectId`, while the migration's
-  unique indexes for idempotency key and `(SessionId, TurnId)` are global. A
-  cross-project reuse of an idempotency key can therefore raise a uniqueness
-  error without a project-scoped winner being readable. The issue does not
-  define the idempotency-key namespace, so this remains an observation.
-- Retry acceptance validates Connection, team, and conversation context but does
-  not separately compare the signed message/thread identity with the
-  interaction's message/thread fields. The signed target still binds the
-  rendered notice and this follows the existing Stop convention.
-- Root retry copies attachment descriptors but the reviewed test does not prove
-  that attachment rows are rebound from the failed input owner to the new
-  Session/Input owner. If accepted Slack attachments become available through
-  this path, the new input-scoped content URL may not be able to read rows still
-  owned by the old input; this is not used as a verdict driver because the
-  current Slack binder accepts no file content.
-- Go adapter verification remains unavailable in this environment.
+  unique indexes for idempotency key and `(SessionId, TurnId)` are global. The
+  issue does not define whether those keys are globally or project-scoped, so
+  this remains an observation rather than a must-fix.
+- Retry acceptance validates Connection/team/conversation context but does not
+  separately compare the signed message/thread identity with the interaction's
+  message/thread fields. The signed target remains bound to the rendered notice,
+  and this follows the existing Stop convention.
+- Root retry copies attachment descriptors, but the reviewed tests do not prove
+  that any attachment rows are rebound from the failed input owner to the new
+  Session/Input owner. The current Slack binder does not supply file content,
+  so this remains out of scope for the verdict.
 
 <promise>FAIL</promise>
