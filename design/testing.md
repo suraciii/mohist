@@ -475,9 +475,10 @@ review guidelines. The source-file ratchet is the automated size gate.
 
 Server L0 has two ownership boundaries. Component and module Specs that do not
 need Orleans belong to `Mohist.Server.UnitTests`. Specs whose claim includes
-activation, serialization, reminder, reentrancy, or real grain dispatch belong
-to the single `Mohist.Server.OrleansTests` project and its `server-orleans-l0`
-track. This is one Resource lane, not a project or CI job per domain.
+activation, serialization, reminder, reentrancy, or real grain dispatch live in
+`Mohist.Server.SpecTests`, carry the `tier=L0` trait, and are selected by the
+`server-orleans-l0` track through a runner filter. This is one Resource lane,
+not a project or CI job per domain.
 
 The Orleans L0 fixture uses only the controlled in-process transport, fake time,
 and in-memory SQLite. It owns setup, reset, and disposal, and performs runtime

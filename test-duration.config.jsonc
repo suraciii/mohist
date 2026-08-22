@@ -68,10 +68,6 @@
         { "id": "unit", "percentile": 95, "percentileMs": 50 }
       ]
     },
-    { "id": "workflow-def", "kind": "dotnet-vstest", "trackType": "behavior", "application": "server", "specKind": "Design", "level": "L0", "resources": [], "csproj": "packages/server/tests/Mohist.Workflow.Definition.Tests/Mohist.Workflow.Definition.Tests.csproj", "report": "reports/workflow-def.trx", "reportFormat": "trx", "deadlineMs": 30000, "enforce": true, "rules": [
-        { "id": "unit", "percentile": 95, "percentileMs": 50 }
-      ]
-    },
     // Four collection workers retain parallelism without letting concurrent cold command-tree construction dominate native test execution time.
     { "id": "cli", "kind": "dotnet-apphost", "trackType": "behavior", "application": "cli", "specKind": "Product", "level": "L1", "resources": [], "csproj": "packages/cli/tests/Mohist.Cli.Tests/Mohist.Cli.Tests.csproj", "apphostArgs": ["-preEnumerateTheories", "-parallel", "collections", "-parallelAlgorithm", "conservative", "-maxThreads", "4"], "report": "reports/cli.trx", "executionLedger": "reports/cli.execution-ledger.json", "executionProvenance": "reports/cli.execution-provenance.json", "executionSourceRoots": ["packages/cli", "Directory.Build.props", "Directory.Packages.props", "global.json"], "reportFormat": "trx", "deadlineMs": 60000, "enforce": true, "rules": [
         { "id": "spec", "namePattern": "Specs\\.", "percentile": 95, "percentileMs": 500 },
@@ -86,7 +82,7 @@
         { "id": "unit", "percentile": 95, "percentileMs": 50 }
       ]
     },
-    { "id": "server-orleans-l0", "kind": "dotnet-apphost", "trackType": "behavior", "application": "server", "specKind": "Product", "level": "L0", "resources": ["orleans", "sqlite", "server-runtime", "duration-measurement"], "csproj": "packages/server/tests/Mohist.Server.OrleansTests/Mohist.Server.OrleansTests.csproj", "apphostArgs": ["-parallel", "none"], "report": "reports/server-orleans-l0.trx", "reportFormat": "trx", "deadlineMs": 90000, "enforce": true, "rules": [
+    { "id": "server-orleans-l0", "kind": "dotnet-apphost", "trackType": "behavior", "application": "server", "specKind": "Product", "level": "L0", "resources": ["orleans", "sqlite", "server-runtime", "duration-measurement"], "csproj": "packages/server/tests/Mohist.Server.SpecTests/Mohist.Server.SpecTests.csproj", "apphostArgs": ["-parallel", "none", "-trait", "tier=L0"], "report": "reports/server-orleans-l0.trx", "reportFormat": "trx", "deadlineMs": 90000, "enforce": true, "rules": [
         { "id": "spec", "percentile": 95, "percentileMs": 50 }
       ]
     },
@@ -94,7 +90,7 @@
         { "id": "arch" }
       ]
     },
-    { "id": "server-spec", "kind": "dotnet-apphost", "trackType": "behavior", "application": "server", "specKind": "Product", "level": "L1", "resources": ["orleans", "sqlite", "server-runtime"], "csproj": "packages/server/tests/Mohist.Server.SpecTests/Mohist.Server.SpecTests.csproj", "apphostArgs": ["-parallel", "collections", "-parallelAlgorithm", "conservative", "-maxThreads", "2"], "report": "reports/server-spec.trx", "reportFormat": "trx", "deadlineMs": 240000, "enforce": true, "rules": [
+    { "id": "server-spec", "kind": "dotnet-apphost", "trackType": "behavior", "application": "server", "specKind": "Product", "level": "L1", "resources": ["orleans", "sqlite", "server-runtime"], "csproj": "packages/server/tests/Mohist.Server.SpecTests/Mohist.Server.SpecTests.csproj", "apphostArgs": ["-parallel", "collections", "-parallelAlgorithm", "conservative", "-maxThreads", "2", "-trait-", "tier=L0"], "report": "reports/server-spec.trx", "reportFormat": "trx", "deadlineMs": 240000, "enforce": true, "rules": [
         { "id": "spec", "percentile": 95, "percentileMs": 500 }
       ]
     },

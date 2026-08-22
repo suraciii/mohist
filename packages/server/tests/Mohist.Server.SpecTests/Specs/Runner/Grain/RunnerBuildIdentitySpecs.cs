@@ -1,11 +1,12 @@
-using Mohist.Server.OrleansTests.Support;
+using Mohist.Server.SpecTests.Support;
 using Mohist.Server.Runner.Grains;
 using Mohist.Server.SpecTests.Specs.Workflow;
 using Xunit;
 
-namespace Mohist.Server.OrleansTests.Specs.Runner.Grain;
+namespace Mohist.Server.SpecTests.Specs.Runner.Grain;
 
-[Collection("RunnerGrain")]
+[Collection("OrleansGrainL0")]
+[Trait("tier", "L0")]
 public class RunnerBuildIdentitySpecs : WorkflowGrainSpecs
 {
     public RunnerBuildIdentitySpecs(OrleansL0WorkflowGrainFixture fixture) : base(fixture) { }

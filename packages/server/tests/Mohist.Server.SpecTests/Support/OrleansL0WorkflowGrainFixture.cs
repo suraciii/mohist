@@ -10,7 +10,7 @@ using Mohist.Server.Workflow.Grains;
 using Mohist.Server.Workspace.Grains;
 using Mohist.Workflow.Definition;
 
-namespace Mohist.Server.OrleansTests.Support;
+namespace Mohist.Server.SpecTests.Support;
 
 public sealed class OrleansL0WorkflowGrainFixture : WorkflowGrainFixture
 {

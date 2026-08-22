@@ -384,22 +384,6 @@ test('canonical lane commands keep reporter arguments on the final test process 
       '--outputFile=/evidence/reports/' + track.id + '.json',
     ])
   }
-
-  const workflow: TrackConfig = {
-    id: 'workflow-def',
-    kind: 'dotnet-vstest',
-    csproj: 'packages/server/tests/Mohist.Workflow.Definition.Tests/Mohist.Workflow.Definition.Tests.csproj',
-    report: 'reports/workflow-def.trx',
-    reportFormat: 'trx',
-    deadlineMs: 1000,
-    enforce: true,
-    rules: [{ id: 'unit' }],
-  }
-  const workflowCommand = commandFor(workflow, '/evidence')
-  assert.equal(workflowCommand.command, 'dotnet')
-  assert.ok(workflowCommand.args.includes('--no-build'))
-  assert.ok(workflowCommand.args.includes('--no-restore'))
-  assert.ok(workflowCommand.args.includes('--results-directory'))
 })
 
 test('prepareReportTarget creates the report parent and removes stale output before lane start', () => {

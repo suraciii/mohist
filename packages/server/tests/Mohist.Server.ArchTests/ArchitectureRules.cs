@@ -711,7 +711,9 @@ public class ArchitectureRules
             "IsolatedMohistIntegrationFixture",
         };
 
-        var violations = EmbeddedSources("TestSources/Mohist.Server.OrleansTests/")
+        const string l0TraitMarker = "[Trait(\"tier\", \"L0\")]";
+        var violations = EmbeddedSources("TestSources/Mohist.Server.SpecTests/Specs/")
+            .Where(source => source.Content.Contains(l0TraitMarker, StringComparison.Ordinal))
             .Where(source => forbiddenMarkers.Any(source.Content.Contains))
             .Select(source => source.Path)
             .OrderBy(path => path)

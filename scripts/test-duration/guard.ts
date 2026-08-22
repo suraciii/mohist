@@ -207,24 +207,6 @@ export function commandFor(
       ],
     }
   }
-  if (track.kind === 'dotnet-vstest') {
-    if (!track.csproj) throw new Error(`track "${track.id}": dotnet-vstest needs csproj`)
-    const reportDir = resolve(reportRoot, dirname(track.report))
-    const logName = `${track.id}.trx`
-    return {
-      command: 'dotnet',
-      args: [
-        'test',
-        resolve(repoRoot, track.csproj),
-        '--no-build',
-        '--no-restore',
-        '--logger',
-        `trx;LogFileName=${logName}`,
-        '--results-directory',
-        reportDir,
-      ],
-    }
-  }
   if (track.run && track.run.length > 0) {
     // `{report}` resolves to an absolute report path so workspace-relative
     // tools (vitest runs with cwd = package dir) write where the guard reads.

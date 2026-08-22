@@ -85,7 +85,7 @@ export interface BudgetRule {
   readonly percentileMs?: number
 }
 
-export type TrackKind = 'vitest' | 'dotnet-apphost' | 'dotnet-vstest' | 'report-only'
+export type TrackKind = 'vitest' | 'dotnet-apphost' | 'report-only'
 
 export type SpecKind = 'Product' | 'Design'
 
