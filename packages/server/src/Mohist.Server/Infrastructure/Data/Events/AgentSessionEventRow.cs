@@ -10,7 +10,7 @@ namespace Mohist.Server.Infrastructure.Data.Events;
 /// separate tables so workflow runs and agent sessions remain distinct
 /// bounded contexts at the storage layer.
 /// </summary>
-public sealed class AgentSessionEventRow : IEventRow
+public sealed class AgentSessionEventRow : IEventEnvelopeRow
 {
     public required long Id { get; init; }
     public required string Source { get; init; }

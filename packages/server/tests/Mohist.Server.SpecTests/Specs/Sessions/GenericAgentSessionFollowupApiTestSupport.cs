@@ -1,10 +1,10 @@
 using System.Net;
+using Mohist.Server.Infrastructure.Events;
 using System.Net.Http.Json;
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Mohist.Server.Api;
-using Mohist.Server.Events.Grains;
 using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Infrastructure.Orleans;
 using Mohist.Server.Issue.Domain;
@@ -213,7 +213,7 @@ public abstract class GenericAgentSessionFollowupApiTestSupport : IAsyncLifetime
     }
 
     protected Task DispatchEventsAsync() =>
-        _fixture.Grains.GetGrain<IEventDispatcherGrain>(EventDispatcherGrain.Global).DispatchNowAsync();
+        _fixture.Services.GetRequiredService<IEventDispatcher>().DrainAsync();
 
     protected async Task<ProjectRef> CreateProjectAsync(string name)
     {

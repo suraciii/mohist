@@ -11,6 +11,7 @@ using Mohist.Server.Issue.Domain;
 using Mohist.Server.SpecTests.Support;
 using Mohist.Server.TestSupport;
 using Xunit;
+using Mohist.Server.Infrastructure.Events;
 
 namespace Mohist.Server.SpecTests.Specs.Epic.Grain;
 
@@ -399,11 +400,11 @@ public class EpicAutoDoneSpecs
             identity.Context,
             identity.Runtime,
             factory,
-            null!,
             new FakeTimeProvider(new DateTimeOffset(2026, 6, 30, 0, 0, 0, TimeSpan.Zero)),
             new NoopEventStore(),
             NullLogger<EpicGrain>.Instance,
-            TestServices.BackgroundTasks);
+            null!,
+            new EventDispatchSignal());
     }
 
     private static async Task SeedEpicAsync(

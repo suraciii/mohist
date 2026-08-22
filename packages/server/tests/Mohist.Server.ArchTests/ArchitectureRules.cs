@@ -93,24 +93,10 @@ public class ArchitectureRules
     [Fact]
     public void InfrastructureData_ShouldNotDependOnApplicationLayer()
     {
-        // Cross-cutting event infrastructure (Events.Grains) is exempt:
-        // the IEventDispatcherGrain poke is fired from the three event
-        // producers (WorkflowRunStore, IssueStore, AgentSessionStore)
-        // after commit, so Infrastructure.Data necessarily references the
-        // grain interface. Events.Grains is a horizontal concern (event
-        // delivery), not a feature-slice application service — the
-        // dependency is unidirectional (poke only, no callback into the
-        // stores) and is documented in openspec/changes/issue-362/design.md
-        // (D5) as the intended wiring.
-        var applicationLayerExcludingEventsGrains = Types()
-            .That().Are(ApplicationLayer)
-            .And().DoNotResideInNamespace("Mohist.Server.Events.Grains")
-            .As("Application Layer excluding Events.Grains");
-
         Types().That().Are(DataLayer)
             .And().DoNotHaveName("WorkflowProfileDataMigrator")
-            .Should().NotDependOnAny(applicationLayerExcludingEventsGrains)
-            .Because("Infrastructure.Data is the persistence boundary and must not depend on application services, grains, or queriers; Events.Grains is the documented cross-cutting event delivery exception.")
+            .Should().NotDependOnAny(ApplicationLayer)
+            .Because("Infrastructure.Data is the persistence boundary and must not depend on application services, grains, or queriers")
             .Check(_architecture);
     }
 

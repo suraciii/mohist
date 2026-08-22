@@ -6,8 +6,6 @@ using Microsoft.AspNetCore.ResponseCompression;
 using Microsoft.Extensions.Http;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Mohist.Server.Api;
-using Mohist.Server.Events.Grains;
-using Mohist.Server.Events.Hosting;
 using Mohist.Server.Events.WebSocket;
 using Mohist.Server.Infrastructure.Events;
 using Mohist.Server.Infrastructure.Events.Matching;
@@ -184,7 +182,16 @@ public static class MohistServiceRegistration
         services.AddSingleton<Mohist.Server.Workflow.Services.Prompts.IPromptLoader, Mohist.Server.Workflow.Services.Prompts.FilePromptLoader>();
         services.AddSingleton<IEventStore, EventStore>();
         services.TryAddSingleton<IDeadLetterStore, DeadLetterStore>();
+        services.TryAddSingleton<IDispatchStreamLeaseStore, DispatchStreamLeaseStore>();
+        // Capacity follows worker count so one burst wakes every idle
+        // worker; registered via factory to keep the ctor surface simple.
+        services.AddSingleton<EventDispatchSignal>(sp =>
+            new EventDispatchSignal(Math.Max(
+                1,
+                sp.GetRequiredService<Microsoft.Extensions.Options.IOptions<EventDispatcherOptions>>()
+                    .Value.WorkerCount)));
         services.AddSingleton<EventDispatcherService>();
+        services.AddSingleton<IEventDispatcher>(sp => sp.GetRequiredService<EventDispatcherService>());
         services.Configure<EventDispatcherOptions>(configuration.GetSection(EventDispatcherOptions.SectionName));
         services.AddSingleton<EventPushQueue>();
         services.AddSingleton<IEventPushQueue>(sp => sp.GetRequiredService<EventPushQueue>());
@@ -249,7 +256,7 @@ public static class MohistServiceRegistration
         services.AddSingleton<ITranscriptEventPublisher, WebSocketTranscriptEventPublisher>();
         services.AddSingleton<ITaskLogDeltaPublisher, WebSocketTaskLogDeltaPublisher>();
         services.AddHostedService<AttachmentCleanupService>();
-        services.AddHostedService<DispatcherActivationService>();
+        services.AddHostedService<EventDispatchWorker>();
         services.AddHostedService<EventPushWorker>();
 
         // The public execution projection: one engine, one hosted

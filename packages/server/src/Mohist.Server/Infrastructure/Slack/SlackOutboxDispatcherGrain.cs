@@ -5,9 +5,8 @@ using Orleans.Runtime;
 namespace Mohist.Server.Infrastructure.Slack.Grains;
 
 /// <summary>
-/// Cluster-singleton dispatcher for the Slack outbound outbox. Mirrors
-/// <see cref="Mohist.Server.Events.Grains.IEventDispatcherGrain"/>:
-/// activated under a fixed string key
+/// Cluster-singleton dispatcher for the Slack outbound outbox. Activated
+/// under a fixed string key
 /// (<see cref="SlackOutboxDispatcherGrain.Global"/>) so Orleans'
 /// placement guarantees exactly one active instance per cluster, with
 /// a persistent reminder driving the dispatch cadence. A rogue

@@ -1,9 +1,9 @@
 using System.Net;
+using Mohist.Server.Infrastructure.Events;
 using System.Net.Http.Json;
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
-using Mohist.Server.Events.Grains;
 using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Infrastructure.Orleans;
 using Mohist.Server.Issue.Domain;
@@ -148,7 +148,7 @@ public class WorkflowRetryIgnoresContextUsageSpecs
 
         var issueGrain = _fixture.Grains.GetGrain<IIssueGrain>(GrainKey.Issue(new IssueKey(project.Id, issue.Number)));
         var workflowRunId = await issueGrain.StartWorkAsync();
-        await _fixture.Grains.GetGrain<IEventDispatcherGrain>(EventDispatcherGrain.Global).DispatchNowAsync();
+        await _fixture.Services.GetRequiredService<IEventDispatcher>().DrainAsync();
 
         var sessionName = $"task-{Guid.NewGuid():N}";
         return (project.Id, issue.Number, workflowRunId, sessionName);

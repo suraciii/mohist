@@ -1,6 +1,5 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
-using Mohist.Server.Events.Grains;
 using Mohist.Server.Infrastructure;
 using Mohist.Server.Infrastructure.Data;
 using Mohist.Server.Infrastructure.Data.Db;
@@ -26,22 +25,19 @@ public class IssueStore : IIssueStore
 
     private readonly IDbContextFactory<MohistDbContext> _dbFactory;
     private readonly IEventStore _eventStore;
-    private readonly IGrainFactory _grainFactory;
     private readonly ILogger<IssueStore> _log;
-    private readonly IBackgroundTaskLauncher _backgroundTasks;
+    private readonly EventDispatchSignal _dispatchSignal;
 
     public IssueStore(
         IDbContextFactory<MohistDbContext> dbFactory,
         IEventStore eventStore,
-        IGrainFactory grainFactory,
         ILogger<IssueStore> log,
-        IBackgroundTaskLauncher backgroundTasks)
+        EventDispatchSignal dispatchSignal)
     {
         _dbFactory = dbFactory;
         _eventStore = eventStore;
-        _grainFactory = grainFactory;
         _log = log;
-        _backgroundTasks = backgroundTasks;
+        _dispatchSignal = dispatchSignal;
     }
 
     public async Task<DomainIssue?> LoadAsync(string key)
@@ -98,7 +94,7 @@ public class IssueStore : IIssueStore
     }
 
     private void PokeDispatcherBestEffort() =>
-        EventDispatcherPoke.PokeAfterCommit(_grainFactory, _log, nameof(IssueStore), _backgroundTasks);
+        _dispatchSignal.Wake();
 
     /// <summary>
     /// When a Profile deletion commits between the Issue participant's

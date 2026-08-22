@@ -80,6 +80,7 @@ public partial class MohistDbContext : DbContext
     public DbSet<GitHubIssueLinkRow> GitHubIssueLinks { get; set; } = null!;
     public DbSet<GitHubWriteBackFailureRow> GitHubWriteBackFailures { get; set; } = null!;
     public DbSet<DeadLetterRow> DeadLetters { get; set; } = null!;
+    public DbSet<DispatchStreamLeaseRow> DispatchStreamLeases { get; set; } = null!;
     public DbSet<IssueWorkflowProfile> IssueWorkflowProfiles { get; set; } = null!;
     public DbSet<WorkflowRunRow> WorkflowRuns { get; set; } = null!;
     public DbSet<WorkflowRunTaskMapRow> WorkflowRunTaskMaps { get; set; } = null!;
@@ -1484,6 +1485,28 @@ public partial class MohistDbContext : DbContext
             entity.HasIndex(e => new { e.FailingHandler, e.DeadLetteredAt });
             entity.HasIndex(e => new { e.Source, e.Id, e.FailingHandler })
                 .IsUnique();
+        });
+
+        modelBuilder.Entity<DispatchStreamLeaseRow>(entity =>
+        {
+            entity.ToTable("DispatchStreamLeases");
+            entity.HasKey(e => new { e.Origin, e.Source });
+            entity.Property(e => e.Origin)
+                .HasMaxLength(32)
+                .IsRequired();
+            entity.Property(e => e.Source)
+                .HasMaxLength(256)
+                .IsRequired();
+            entity.Property(e => e.LeaseOwner)
+                .HasMaxLength(128)
+                .IsRequired();
+            entity.Property(e => e.LeaseUntil)
+                .IsRequired();
+            entity.Property(e => e.Attempts)
+                .IsRequired();
+            entity.Property(e => e.LastError);
+            entity.Property(e => e.UpdatedAt)
+                .IsRequired();
         });
 
         modelBuilder.Entity<WorkflowRunRow>(entity =>

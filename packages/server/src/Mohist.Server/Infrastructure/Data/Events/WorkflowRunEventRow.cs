@@ -10,7 +10,7 @@ namespace Mohist.Server.Infrastructure.Data.Events;
 /// type, time, subject, data, extensions, specversion) are stored as
 /// columns so the row is self-describing without the dispatch layer.
 /// </summary>
-public sealed class WorkflowRunEventRow : IEventRow
+public sealed class WorkflowRunEventRow : IEventEnvelopeRow
 {
     public required long Id { get; init; }
     public required string Source { get; init; }

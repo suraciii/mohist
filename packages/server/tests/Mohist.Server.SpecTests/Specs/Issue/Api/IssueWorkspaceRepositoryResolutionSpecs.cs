@@ -4,7 +4,6 @@ using System.Text.Json;
 using Microsoft.Extensions.DependencyInjection;
 using Mohist.Server.Infrastructure.Orleans;
 using Mohist.Server.Infrastructure.Events;
-using Mohist.Server.Events.Grains;
 using Mohist.Server.Infrastructure.Workspace;
 using Mohist.Server.Issue.Grains;
 using Mohist.Server.Project.Grains;
@@ -242,7 +241,7 @@ public class IssueWorkspaceRepositoryResolutionSpecs : IAsyncLifetime
 
     private async Task DispatchEventsAsync()
     {
-        await _fixture.Grains.GetGrain<IEventDispatcherGrain>(EventDispatcherGrain.Global).DispatchNowAsync();
+        await _fixture.Services.GetRequiredService<IEventDispatcher>().DrainAsync();
     }
 
     private async Task DriveIssueToTerminalAsync(string projectId, IssueDto issue)

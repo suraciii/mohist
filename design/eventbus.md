@@ -1,5 +1,5 @@
 ---
-status: converged
+status: draft
 ---
 
 # Event Bus
@@ -8,154 +8,152 @@ status: converged
 
 Aggregate event tables already persist domain events. The system needs one
 notifier that delivers persisted events to subscribers with at-least-once
-semantics. Do not add a broker, queue, streaming SDK, or per-stream grain. Use
-one self-driven dispatcher.
+semantics. Do not add a broker, queue, streaming SDK, or per-stream grain.
+
+The previous design fused all dispatch work into one cluster-singleton grain.
+That design cannot scale; this revision replaces it with lease-based stream
+workers. What does not change: the event tables are the queue, handlers are
+idempotent by `EventId`, and delivery is at-least-once.
 
 ## Durable Sources
 
-One dispatch cycle queries undispatched rows from five event tables, one per
-durable source aggregate: WorkflowRun (state transitions, Completed, Failed),
-Issue (work-started, work-completed, closed), Epic (state transitions and
-automatic revival), AgentSession (Runtime bound and state changes), and
-AgentJob (Failed).
+One dispatch query covers undispatched rows from the event tables, one per
+durable source aggregate: WorkflowRun, Issue, Epic, AgentSession, AgentJob,
+Ingress, and Workspace.
 
-These sources cover all current cross-aggregate processes advanced by the event
-bus. Other domains such as Runner and Project either produce no dispatchable
-domain event or place required context on an event from these aggregates.
-Session is a leaf tracking domain to which no other domain reacts. AgentSession
-rows enter the bus only for dispatch and do not imply a business subscriber.
+A stream contains rows from one event table with the same `Source`, ordered by
+per-source `Id`. Stream ID is Source, such as `/mohist/workflow-runs/{runId}`.
+This is not event sourcing. State is stored separately. A stream provides
+notification and audit.
+
+Per-stream FIFO order is the only ordering contract. Cross-stream order has
+never been a contract and is not one now.
 
 ## Subscription Contract
 
 The stable mechanism is `ICloudEventHandler`, `[Subscription]`, and dependency
-injection.
-
-Two consumer types match the same envelope through mechanisms suited to their
-surface:
+injection, unchanged.
 
 - **System consumers** are compile-time `[Subscription]` handlers using a type
-  glob. This is a subset of expression behavior equivalent to exact event type
-  or prefix matching. Code handlers do not need runtime expressions.
+  glob: exact type, prefix wildcard, `*`, or `a|b|c`.
 - **User consumers** are Agent routing rules using the CEL-subset matcher in
-  [`event-protocol.md`](event-protocol.md). They match the complete envelope,
-  including `type`, `source`, and every context extension attribute.
+  [`event-protocol.md`](event-protocol.md).
 
-Any event routable to a system handler must also be subscribable through a user
-expression.
-
-`[Subscription]` type matching supports an exact type such as
-`com.mohist.workflow.run.completed`, a prefix wildcard such as
-`com.mohist.workflow.*`, `*` for all events, and `a|b|c` for any listed value.
-A wildcard in the middle, such as `foo.*.bar`, is rejected.
+Handlers must be idempotent by `EventId`. A retried event re-invokes every
+matching handler, including ones that succeeded on an earlier attempt. No
+per-handler attempt state exists anywhere; the retry unit is the event.
 
 ## Persistence
-
-Each event table carries one nullable delivery timestamp as its only delivery
-marker.
-
-- Null means undispatched.
-- A timestamp means dispatched.
-- There is no cursor table or per-stream offset.
 
 State and its events save in one EF transaction. Commit makes both durable.
 `PublishAsync` only writes one row and never invokes a handler. Dispatcher owns
 notification.
 
-## Stream
-
-A stream contains rows from one event table with the same `Source`, ordered by
-per-source `Id`.
-
-- Stream ID is Source, such as `/mohist/workflow-runs/{runId}`.
-- This is not event sourcing. State is stored separately. A stream provides
-  notification and audit.
-- Cross-stream work is event to command, such as
-  `WorkflowRunCompleted -> CompleteIssue`.
+Each event table carries one nullable delivery timestamp as its only delivery
+marker. Null means undispatched; a timestamp means dispatched. There is no
+cursor table and no per-stream offset. The lease table below is worker
+coordination state, not an offset; a lost lease never loses or reorders a row.
 
 ## Dispatcher
 
 ```text diagram
-Producer transaction -- append row --> commit -- poke after commit --+
-                                                                  |
-                                                                  v
-+-----------------------------------------------------------------------+
-| IEventDispatcherGrain, cluster singleton                              |
-|                                                                       |
-| Orleans reminder tick                                                 |
-|   query undispatched rows ordered by Source and Id                    |
-|   fan out each row to matching handlers                               |
-|   apply EventDispatcherOptions exponential backoff                    |
-|   after excess attempts, dead-letter the row and mark it dispatched   |
-+-----------------------------------------------------------------------+
+Producer transaction -- append row --> commit -- signal channel (in-proc) --+
+                                                                          |
+                                                                          v
++---------------------------------------------------------------------------+
+| N dispatch workers (in-proc hosted services)                              |
+|                                                                           |
+| discover streams with undelivered rows (slow poll = correctness path)     |
+| claim a stream: write lease row if free or expired   (stream lease table) |
+| drain claimed stream in Id order:                                          |
+|   run every matching handler once per attempt                              |
+|   on failure: attempts++ on lease, park stream until backoff elapses      |
+|   at MaxAttempts: dead-letter the head row, mark it dispatched, advance   |
+|   settle the contiguous delivered prefix in one transaction               |
+| release lease when the stream is empty                                     |
++---------------------------------------------------------------------------+
 ```
+
+### Stream leases
+
+One table, `DispatchStreamLease`, keyed by (Origin, Source), holds
+`LeaseOwner`, `LeaseUntil`, `Attempts`, `NextAttemptAt`, and `LastError`.
+A lease row exists only while a stream is claimed or parked; an idle stream
+has no row. Leases are advisory locks: claiming is an atomic
+insert-or-steal on the row. A crashed worker's lease expires by
+`LeaseUntil` and another worker steals the stream. Because a lease only
+gates who drains, never what is durable, expiry costs at-least-once
+redelivery, exactly like a crashed cycle today.
+
+### Ordering and parking
+
+One worker owns one stream at a time and delivers rows in Id order, so
+per-stream FIFO holds by construction. A failing head row parks its stream:
+`Attempts` and `NextAttemptAt` on the lease delay the next attempt, and the
+stream stops occupying worker attention until then. Other streams advance
+independently — parked streams cannot starve them, because discovery skips
+streams whose lease is parked and batch capacity is never consumed by
+skipped rows. The blocked-sources gauge now counts parked leases, which is
+durable and exact, instead of a per-cycle in-memory snapshot.
 
 ### Wake-up
 
-After an event transaction commits or a failure event appends successfully,
-each durable producer, WorkflowRun, Issue, Epic, AgentSession, and AgentJob,
-calls `EventDispatcherPoke.PokeAfterCommit` to send a fire-and-forget wake-up to
-`IEventDispatcherGrain`. The helper absorbs poke failures such as unavailable
-grain or serialization failure and writes a debug log. Producer command result
-and persisted event remain unchanged. A command that produces no event, such as
-an idempotent Epic operation, does not poke.
+After an event transaction commits, the producer writes to an in-process
+signal channel; idle workers wake immediately. The signal is best-effort: a
+lost signal costs at most one slow-poll interval. The slow poll is the
+correctness path, replacing the Orleans reminder. There is no grain call in
+the wake-up path and no cluster-singleton activation.
 
-The **reminder is the correctness path**. A poke only advances the next cycle
-from at most `ReminderPeriod` later to the next dispatcher scheduling yield. A
-lost poke, failed process, or reminder that ticks before the event cannot lose
-the row. The reminder later finds it and delivers in FIFO order.
+An explicit `DrainAsync` (operator nudge, test pump) is also an in-proc
+barrier: while another local claim is in flight the drain waits and
+re-checks instead of returning early, so it returns only when this process
+has settled everything it can. Claims held by other processes are not
+waited on — lease expiry covers them.
 
-### Backoff
+### Backoff and dead-letter
 
-Use custom exponential backoff, with no third-party retry or resilience
-library. Each handler matched to one event has independent attempt count and
-next retry time. Compute delay as
-`EventDispatcherOptions.BaseBackoff * 2^(attempt-1)`, capped by
-`EventDispatcherOptions.MaxBackoff`. At
-`EventDispatcherOptions.MaxAttempts`, stop retries, write the row to the
-dead-letter queue (DLQ) through `IDeadLetterStore`, and mark the event
-dispatched. Attempt count and next retry time are not persisted.
+Exponential backoff `BaseBackoff * 2^(attempt-1)`, capped at `MaxBackoff`,
+attempts counted per stream head and persisted on the lease. At
+`MaxAttempts` the head row is written to the dead-letter queue through
+`IDeadLetterStore` with the last failure, marked dispatched, and the stream
+advances with attempts reset. `Attempts` survives restarts; a parked stream
+recovers with its retry budget intact.
 
-Failure of one handler does not affect another handler's attempt count. Each
-handler for one row advances independently.
+### Settlement
 
-### Settlement Retention
+Delivered rows are marked in one transaction per contiguous prefix per
+drain, not one round-trip per row. A settlement failure retries the same
+prefix on the next attempt without re-running handlers that already
+succeeded in the current drain pass.
 
-Dispatcher keeps an in-process table of settled handler state, `Completed` or
-`DeadLettered`, for each event key. It removes an event key only after
-`IEventStore.MarkDispatchedAsync` or `IDeadLetterStore.SettleAsync` persists.
-When a settlement write fails, the next cycle retries only that write. It does
-not rerun handlers or reset attempt counts.
+## Removed
 
-This retention is **in process**. A dispatcher restart clears the table. The
-reminder supplies an undispatched row again and handler attempts restart from
-zero. Persistent retry state is outside current scope.
+The singleton grain design and everything it needed:
 
-### FIFO Blocking and Visibility
+- `IEventDispatcherGrain`, `EventDispatcherGrain`, its reminder, and
+  `DispatcherActivationService`.
+- The in-memory handler-state table and its restart-amnesia.
+- The poke round-trip and the `PokeAsync` coalescing from #702; the signal
+  channel supersedes both.
+- Per-handler attempt independence; the retry unit is the event.
+- `DispatchNowAsync` as a grain call. The drain entry point is an in-proc
+  interface used by tests and the operator redelivery route.
 
-Within a dispatch cycle, deliver rows for one Source in `(Source, Id)` order.
-If a row has a handler waiting for its next retry time, skip later rows for that
-Source during the cycle to preserve FIFO. Other Sources advance independently.
+## External delivery
 
-After each cycle, dispatcher writes the number of blocked Sources to an
-attribute-free gauge. Source identifiers, event IDs, and attempts must never be
-metric attributes because they create high cardinality. The gauge reports the
-most recently completed cycle and is zero during a cycle or immediately after
-dispatcher startup. This is the only current operations signal for blocking.
-
-### Crash and Recovery
-
-- After a crash during any cycle, a row without a delivery timestamp remains.
-  The reminder redelivers it. Every handler must be idempotent by `EventId`.
-- A DLQ row is marked dispatched immediately. It remains queryable and can be
-  redelivered manually through `IDeadLetterStore.StartRedeliveryAsync`,
-  `ResolveAsync`, and `RecordRedeliveryFailureAsync`. HTTP contracts remain
-  unchanged. This design adds no DLQ query or redelivery API.
+Subscription handlers that call external systems (webhook fan-out, GitHub
+write-back) run inline in workers today. A worker occupied by slow external
+I/O delays only the streams it owns. The proven extraction pattern is the
+Slack outbox: a handler writes a delivery outbox row in the drain, and a
+separate dispatcher owns the external call. Webhook and GitHub handlers
+should move to that pattern when their latency shows up in dispatch lag;
+that extraction is deliberately not part of this change.
 
 ## Error Ladder
 
 - **Eliminate:** Persist event and state in one transaction.
-- **Absorb:** Apply custom exponential backoff through
-  `EventDispatcherOptions.BaseBackoff`, `MaxBackoff`, and `MaxAttempts`.
-- **Aggregate:** Dispatcher catches at the boundary. A handler must not swallow
+- **Absorb:** Lease-level exponential backoff, durable across restarts.
+- **Aggregate:** Workers catch at the boundary. A handler must not swallow
   an exception.
-- **Expose:** Put exhausted delivery in a queryable and retryable DLQ.
+- **Expose:** Exhausted delivery lands in the queryable, retryable DLQ;
+  parked streams are visible as durable lease rows and one gauge.

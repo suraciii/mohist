@@ -29,6 +29,14 @@ public class NoopEventStore : IEventStore
 
     public Task MarkDispatchedAsync(EventOrigin origin, string source, long id, DateTimeOffset dispatchedAt, CancellationToken ct = default) => Task.CompletedTask;
 
+    public Task<IReadOnlyList<PendingStream>> ListPendingStreamsAsync(int limit = 100, CancellationToken ct = default) =>
+        Task.FromResult<IReadOnlyList<PendingStream>>([]);
+
+    public Task<IReadOnlyList<UndeliveredEvent>> ListUndeliveredByStreamAsync(EventOrigin origin, string source, int limit, CancellationToken ct = default) =>
+        Task.FromResult<IReadOnlyList<UndeliveredEvent>>([]);
+
+    public Task MarkDispatchedRangeAsync(EventOrigin origin, string source, IReadOnlyList<long> ids, DateTimeOffset dispatchedAt, CancellationToken ct = default) => Task.CompletedTask;
+
     public Task<IReadOnlyList<UndeliveredEvent>> ListUndeliveredAsync(int limit = 100, CancellationToken ct = default) =>
         Task.FromResult<IReadOnlyList<UndeliveredEvent>>([]);
 }

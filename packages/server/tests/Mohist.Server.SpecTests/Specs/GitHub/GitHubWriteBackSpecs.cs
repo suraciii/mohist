@@ -1,10 +1,10 @@
 using System.Net;
+using Mohist.Server.Infrastructure.Events;
 using System.Net.Http.Headers;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using Microsoft.Extensions.DependencyInjection;
-using Mohist.Server.Events.Grains;
 using Mohist.Server.GitHub.Domain;
 using Mohist.Server.GitHub.Infrastructure;
 using Mohist.Server.Infrastructure.Data.Issue;
@@ -75,9 +75,9 @@ public sealed class GitHubWriteBackSpecs
 
     private async Task PumpAsync()
     {
-        var dispatcher = _fixture.Grains.GetGrain<IEventDispatcherGrain>(EventDispatcherGrain.Global);
-        await dispatcher.DispatchNowAsync();
-        await dispatcher.DispatchNowAsync();
+        var dispatcher = _fixture.Services.GetRequiredService<IEventDispatcher>();
+        await dispatcher.DrainAsync();
+        await dispatcher.DrainAsync();
     }
 
     [Fact]

@@ -1,7 +1,6 @@
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
-using Mohist.Server.Events.Grains;
 using Mohist.Server.Infrastructure;
 using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Infrastructure.Data.Events;
@@ -21,8 +20,7 @@ public sealed class WorkspaceGrain : Grain, IWorkspaceGrain
     private readonly WorkspaceQuerier _querier;
     private readonly ProjectQuerier _projects;
     private readonly IEventStore _eventStore;
-    private readonly IGrainFactory _grainFactory;
-    private readonly IBackgroundTaskLauncher _backgroundTasks;
+    private readonly EventDispatchSignal _dispatchSignal;
     private readonly ILogger<WorkspaceGrain> _log;
     private WorkspaceState? _state;
 
@@ -34,8 +32,7 @@ public sealed class WorkspaceGrain : Grain, IWorkspaceGrain
         WorkspaceQuerier querier,
         ProjectQuerier projects,
         IEventStore eventStore,
-        IGrainFactory grainFactory,
-        IBackgroundTaskLauncher backgroundTasks,
+        EventDispatchSignal dispatchSignal,
         ILogger<WorkspaceGrain> log)
     {
         _dbFactory = dbFactory;
@@ -43,8 +40,7 @@ public sealed class WorkspaceGrain : Grain, IWorkspaceGrain
         _querier = querier;
         _projects = projects;
         _eventStore = eventStore;
-        _grainFactory = grainFactory;
-        _backgroundTasks = backgroundTasks;
+        _dispatchSignal = dispatchSignal;
         _log = log;
     }
 
@@ -343,7 +339,7 @@ public sealed class WorkspaceGrain : Grain, IWorkspaceGrain
     }
 
     private void PokeDispatcherBestEffort() =>
-        EventDispatcherPoke.PokeAfterCommit(_grainFactory, _log, nameof(WorkspaceGrain), _backgroundTasks);
+        _dispatchSignal.Wake();
 }
 
 internal readonly record struct WorkspaceGrainKey(string ProjectId, string Name)

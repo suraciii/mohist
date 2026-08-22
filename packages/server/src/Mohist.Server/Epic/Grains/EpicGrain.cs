@@ -21,45 +21,45 @@ namespace Mohist.Server.Epic.Grains;
 public class EpicGrain : Grain, IEpicGrain
 {
     private readonly IDbContextFactory<MohistDbContext> _dbFactory;
-    private readonly IGrainFactory _grains;
     private readonly TimeProvider _timeProvider;
     private readonly IEventStore _eventStore;
     private readonly ILogger<EpicGrain> _log;
-    private readonly IBackgroundTaskLauncher _backgroundTasks;
+    private readonly IGrainFactory _grains;
+    private readonly EventDispatchSignal _dispatchSignal;
 
     internal EpicGrain(
         Orleans.Runtime.IGrainContext context,
         Orleans.Runtime.IGrainRuntime runtime,
         IDbContextFactory<MohistDbContext> dbFactory,
-        IGrainFactory grains,
         TimeProvider timeProvider,
         IEventStore eventStore,
         ILogger<EpicGrain> log,
-        IBackgroundTaskLauncher backgroundTasks)
+        IGrainFactory grains,
+        EventDispatchSignal dispatchSignal)
         : base(context, runtime)
     {
         _dbFactory = dbFactory;
-        _grains = grains;
         _timeProvider = timeProvider;
         _eventStore = eventStore;
         _log = log;
-        _backgroundTasks = backgroundTasks;
+        _grains = grains;
+        _dispatchSignal = dispatchSignal;
     }
 
     public EpicGrain(
         IDbContextFactory<MohistDbContext> dbFactory,
-        IGrainFactory grains,
         TimeProvider timeProvider,
         IEventStore eventStore,
         ILogger<EpicGrain> log,
-        IBackgroundTaskLauncher backgroundTasks)
+        IGrainFactory grains,
+        EventDispatchSignal dispatchSignal)
     {
         _dbFactory = dbFactory;
-        _grains = grains;
         _timeProvider = timeProvider;
         _eventStore = eventStore;
         _log = log;
-        _backgroundTasks = backgroundTasks;
+        _grains = grains;
+        _dispatchSignal = dispatchSignal;
     }
 
     private string GrainKey => this.GetPrimaryKeyString();
@@ -742,7 +742,7 @@ public class EpicGrain : Grain, IEpicGrain
     {
         await db.SaveChangesAsync();
         if (pending.Count > 0)
-            EventDispatcherPoke.PokeAfterCommit(_grains, _log, nameof(EpicGrain), _backgroundTasks);
+            _dispatchSignal.Wake();
     }
 
     /// <summary>

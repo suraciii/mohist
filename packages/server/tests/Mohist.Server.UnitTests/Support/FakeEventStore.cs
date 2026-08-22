@@ -111,6 +111,56 @@ public sealed class FakeEventStore : IEventStore
         }
     }
 
+    public Task<IReadOnlyList<PendingStream>> ListPendingStreamsAsync(int limit = 100, CancellationToken ct = default)
+    {
+        if (ThrowOnList?.Invoke(limit) == true)
+            throw new InvalidOperationException("simulated list-undelivered failure");
+        lock (_gate)
+        {
+            var rows = _undelivered
+                .GroupBy(e => (e.Origin, e.Source))
+                .Select(group => new PendingStream(
+                    group.Key.Origin,
+                    group.Key.Source,
+                    group.Min(e => e.Time)))
+                .OrderBy(stream => stream.OldestPendingTime)
+                .Take(limit)
+                .ToList();
+            return Task.FromResult<IReadOnlyList<PendingStream>>(rows);
+        }
+    }
+
+    public Task<IReadOnlyList<UndeliveredEvent>> ListUndeliveredByStreamAsync(
+        EventOrigin origin,
+        string source,
+        int limit,
+        CancellationToken ct = default)
+    {
+        lock (_gate)
+        {
+            var rows = _undelivered
+                .Where(e => e.Origin == origin && e.Source == source)
+                .OrderBy(e => e.Id)
+                .Take(limit)
+                .ToList();
+            return Task.FromResult<IReadOnlyList<UndeliveredEvent>>(rows);
+        }
+    }
+
+    public Task MarkDispatchedRangeAsync(
+        EventOrigin origin,
+        string source,
+        IReadOnlyList<long> ids,
+        DateTimeOffset dispatchedAt,
+        CancellationToken ct = default)
+    {
+        foreach (var id in ids)
+        {
+            MarkDispatchedAsync(origin, source, id, dispatchedAt, ct).Wait(ct);
+        }
+        return Task.CompletedTask;
+    }
+
     public IReadOnlyList<UndeliveredEvent> PendingUndelivered
     {
         get

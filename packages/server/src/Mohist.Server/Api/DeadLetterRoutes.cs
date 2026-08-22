@@ -1,6 +1,5 @@
 using Mohist.Server.Auth.Domain;
 using Mohist.Server.Auth.Identity;
-using Mohist.Server.Events.Grains;
 using Mohist.Server.Infrastructure.Events;
 using System.Text.Json;
 
@@ -53,12 +52,10 @@ public static class DeadLetterRoutes
 
         group.MapPost("/{deadLetterId:long}/redeliver", async (
             long deadLetterId,
-            IGrainFactory grains,
+            IEventDispatcher dispatcher,
             CancellationToken ct) =>
         {
-            var result = await grains
-                .GetGrain<IEventDispatcherGrain>(EventDispatcherGrain.Global)
-                .RedeliverAsync(deadLetterId, ct);
+            var result = await dispatcher.RedeliverAsync(deadLetterId, ct);
 
             if (!result.Found)
                 return ApiResults.NotFound($"Dead-letter {deadLetterId} not found");

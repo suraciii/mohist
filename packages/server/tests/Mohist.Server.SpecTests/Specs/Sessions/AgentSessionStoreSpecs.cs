@@ -2,7 +2,6 @@ using System.Text.Json;
 using System.Text.Json.Nodes;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging.Abstractions;
-using Mohist.Server.Events.Grains;
 using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Infrastructure.Data.Sessions;
 using Mohist.Server.Sessions.Domain;
@@ -23,7 +22,7 @@ public class AgentSessionStoreSpecs : IAsyncLifetime
     public AgentSessionStoreSpecs()
     {
         _database = TestSqliteDatabase.CreateMigrated();
-        _store = new AgentSessionStore(new TestDbContextFactory(_database.Options), new NoopEventStore(), new NullDispatchGrainFactory(), NullLogger<AgentSessionStore>.Instance, new Mohist.Server.Infrastructure.BackgroundTaskLauncher());
+        _store = new AgentSessionStore(new TestDbContextFactory(_database.Options), new NoopEventStore(), NullLogger<AgentSessionStore>.Instance, new Mohist.Server.Infrastructure.Events.EventDispatchSignal());
         _transcriptStore = new AgentSessionTranscriptStore(new TestDbContextFactory(_database.Options));
     }
 
@@ -266,8 +265,6 @@ public class AgentSessionStoreSpecs : IAsyncLifetime
     {
         TGrainInterface IGrainFactory.GetGrain<TGrainInterface>(string primaryKey, string? grainClassNamePrefix)
         {
-            if (typeof(TGrainInterface) == typeof(IEventDispatcherGrain))
-                return (TGrainInterface)(object)new NullEventDispatcherGrain();
             throw new NotSupportedException($"NullDispatchGrainFactory does not support {typeof(TGrainInterface).Name}");
         }
 
@@ -320,22 +317,4 @@ public class AgentSessionStoreSpecs : IAsyncLifetime
             => throw new NotSupportedException();
     }
 
-    /// <summary>
-    /// Drop-in <see cref="IEventDispatcherGrain"/> reference whose
-    /// <see cref="DispatchNowAsync"/> returns <see cref="Task.CompletedTask"/>.
-    /// Lets the post-commit poke fire without an Orleans silo.
-    /// </summary>
-    private sealed class NullEventDispatcherGrain : IGrainWithStringKey, IEventDispatcherGrain
-    {
-        public Task DispatchNowAsync(CancellationToken ct = default) => Task.CompletedTask;
-    public Task PokeAsync(CancellationToken ct = default) => Task.CompletedTask;
-
-        public Task<DeadLetterRedeliveryResult> RedeliverAsync(long deadLetterId, CancellationToken ct = default) =>
-            Task.FromResult(new DeadLetterRedeliveryResult(false, false, 0, "null grain"));
-
-        public Task ReceiveReminder(string reminderName, TickStatus status) => Task.CompletedTask;
-
-        public GrainId GrainId => default;
-        public string Key => string.Empty;
-    }
 }

@@ -7,7 +7,6 @@ using Mohist.Server.Epic.Domain.Events;
 using Mohist.Server.Epic.Grains;
 using Mohist.Server.Epic.Services;
 using Mohist.Server.Epic.Subscriptions;
-using Mohist.Server.Events.Grains;
 using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Infrastructure.Data.Epic;
 using Mohist.Server.Infrastructure.Data.Events;
@@ -259,11 +258,11 @@ public abstract class EpicAutoDoneHandlerTestSupport
                 identity.Context,
                 identity.Runtime,
                 _dbFactory,
-                this,
                 new FakeTimeProvider(new DateTimeOffset(2026, 6, 30, 0, 0, 0, TimeSpan.Zero)),
                 new NoopEventStore(),
                 NullLogger<EpicGrain>.Instance,
-                TestServices.BackgroundTasks);
+                this,
+                new EventDispatchSignal());
         }
 
         private IIssueGrain GetIssueGrain(string issueId) => new TestIssueGrain(this, issueId);

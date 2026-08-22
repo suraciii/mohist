@@ -2,7 +2,7 @@ using System.Text.Json;
 
 namespace Mohist.Server.Infrastructure.Data.Events;
 
-public sealed class WorkspaceEventRow : IEventRow
+public sealed class WorkspaceEventRow : IEventEnvelopeRow
 {
     public required long Id { get; init; }
     public required string Source { get; init; }
