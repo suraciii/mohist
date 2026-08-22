@@ -3,13 +3,17 @@ using System.Text;
 using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Logging.Abstractions;
 using Mohist.Server.Agent.Grains;
 using Mohist.Server.Agent.Services;
 using Mohist.Server.Agent.Domain;
 using Mohist.Server.Agent.Subscriptions;
 using Mohist.Server.Infrastructure;
 using Mohist.Server.Infrastructure.Data.Events;
+using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Infrastructure.Data.Sessions;
 using Mohist.Server.Infrastructure.Events;
 using Mohist.Server.Runner.Grains;
@@ -438,6 +442,218 @@ public class AgentLauncherSpecs
         {
             await _fixture.Grains.GetGrain<IRunnerRegistryGrain>(RunnerRegistryKeys.Global).UnregisterAsync(runnerId);
         }
+    }
+
+    [Fact]
+    public async Task RetryObligationWorker_ResumesPendingRootRetryWithRecordedIdentitiesExactlyOnce()
+    {
+        var projectId = await CreateProjectAsync("agent-retry-worker-recovery");
+        var agent = await CreateAgentAsync(projectId, "agent-retry-worker-recovery-agent");
+        var origin = new ConnectionLaunchOrigin(
+            "connection-worker-recovery",
+            "T-worker-recovery",
+            "U-worker-recovery",
+            "C-worker-recovery",
+            "1710000000.000001");
+
+        AgentLaunchResult failedLaunch;
+        await using (var scope = _fixture.Services.CreateAsyncScope())
+        {
+            failedLaunch = await scope.ServiceProvider.GetRequiredService<IAgentLauncher>()
+                .LaunchConnectionAsync(agent, "recover this root", origin);
+        }
+
+        var failedSession = _fixture.Grains.GetGrain<IAgentSessionGrain>(failedLaunch.SessionId);
+        var failedInitial = await failedSession.GetInitialLaunchAsync();
+        await failedSession.MarkInitialTurnTerminalAsync(
+            failedInitial!.Turn!.JobId!,
+            AgentTurnStatus.Failed,
+            new AgentTurnResult(FailureCategory: AgentJobFailureReasons.RunnerUnavailable));
+
+        AgentRetryOperation operation;
+        await using (var scope = _fixture.Services.CreateAsyncScope())
+        {
+            operation = (await scope.ServiceProvider.GetRequiredService<AgentRetryOperationStore>()
+                .ClaimOrCreateAsync(
+                    projectId,
+                    failedLaunch.SessionId,
+                    failedInitial.Turn.Id,
+                    "worker-recovery-click",
+                    AgentRetryOperationKind.Root,
+                    "worker-preallocated-session",
+                    "worker-preallocated-input",
+                    "worker-preallocated-turn")).Operation;
+        }
+
+        var worker = new AgentRetryObligationWorker(
+            _fixture.Services.GetRequiredService<IServiceScopeFactory>(),
+            _fixture.TimeProvider,
+            NullLogger<AgentRetryObligationWorker>.Instance);
+        await worker.ProcessPendingAsync();
+
+        await using (var scope = _fixture.Services.CreateAsyncScope())
+        {
+            var store = scope.ServiceProvider.GetRequiredService<AgentRetryOperationStore>();
+            var finished = await store.GetAsync(projectId, operation.OperationId);
+            Assert.NotNull(finished);
+            Assert.Equal(AgentRetryOperationState.Finished, finished!.State);
+            Assert.Equal(operation.PreAllocatedSessionId, finished.ResultSessionId);
+            Assert.Equal(operation.PreAllocatedInputId, finished.ResultInputId);
+            Assert.Equal(operation.PreAllocatedTurnId, finished.ResultTurnId);
+        }
+
+        var recovered = _fixture.Grains.GetGrain<IAgentSessionGrain>(operation.PreAllocatedSessionId);
+        var recoveredInitial = await recovered.GetInitialLaunchAsync();
+        Assert.Equal(operation.PreAllocatedSessionId, recoveredInitial!.SessionId);
+        Assert.Equal(operation.PreAllocatedInputId, recoveredInitial.Input!.Id);
+        Assert.Equal(operation.PreAllocatedTurnId, recoveredInitial.Turn!.Id);
+        Assert.Equal(origin.ConversationId, recoveredInitial.Input.Provenance!.ConversationId);
+        Assert.Equal(origin.MessageTs, recoveredInitial.Input.Provenance.MessageId);
+
+        // A second pass is the adapter-failover/redelivery case. The durable
+        // receipt and launch idempotency key make it a no-op.
+        await worker.ProcessPendingAsync();
+        Assert.Single(await recovered.ListInputsAsync());
+        Assert.Single(await recovered.ListTurnsAsync());
+
+        Assert.Contains(
+            _fixture.Services.GetServices<IHostedService>(),
+            service => service is AgentRetryObligationWorker);
+    }
+
+    [Fact]
+    public async Task RetryObligationWorker_ContinuesAfterFailureAndRetriesPendingOnNextPass()
+    {
+        var projectId = await CreateProjectAsync("agent-retry-worker-failure");
+        AgentRetryOperation missingOperation;
+        await using (var scope = _fixture.Services.CreateAsyncScope())
+        {
+            missingOperation = (await scope.ServiceProvider.GetRequiredService<AgentRetryOperationStore>()
+                .ClaimOrCreateAsync(
+                    projectId,
+                    "missing-session",
+                    "missing-turn",
+                    "worker-failing-row",
+                    AgentRetryOperationKind.Root,
+                    "missing-new-session",
+                    "missing-new-input",
+                    "missing-new-turn")).Operation;
+        }
+
+        var agent = await CreateAgentAsync(projectId, "agent-retry-worker-other-agent");
+        AgentLaunchResult failedLaunch;
+        await using (var scope = _fixture.Services.CreateAsyncScope())
+        {
+            failedLaunch = await scope.ServiceProvider.GetRequiredService<IAgentLauncher>()
+                .LaunchConnectionAsync(
+                    agent,
+                    "other recoverable root",
+                    new ConnectionLaunchOrigin(
+                        "connection-worker-other",
+                        "T-worker-other",
+                        "U-worker-other",
+                        "C-worker-other",
+                        "1710000000.000002"));
+        }
+        var session = _fixture.Grains.GetGrain<IAgentSessionGrain>(failedLaunch.SessionId);
+        var initial = await session.GetInitialLaunchAsync();
+        await session.MarkInitialTurnTerminalAsync(
+            initial!.Turn!.JobId!,
+            AgentTurnStatus.Failed,
+            new AgentTurnResult(FailureCategory: AgentJobFailureReasons.RunnerUnavailable));
+
+        AgentRetryOperation otherOperation;
+        await using (var scope = _fixture.Services.CreateAsyncScope())
+        {
+            otherOperation = (await scope.ServiceProvider.GetRequiredService<AgentRetryOperationStore>()
+                .ClaimOrCreateAsync(
+                    projectId,
+                    failedLaunch.SessionId,
+                    initial.Turn.Id,
+                    "worker-other-row",
+                    AgentRetryOperationKind.Root,
+                    "other-new-session",
+                    "other-new-input",
+                    "other-new-turn")).Operation;
+        }
+
+        var worker = new AgentRetryObligationWorker(
+            _fixture.Services.GetRequiredService<IServiceScopeFactory>(),
+            _fixture.TimeProvider,
+            NullLogger<AgentRetryObligationWorker>.Instance);
+        await worker.ProcessPendingAsync();
+
+        await using (var scope = _fixture.Services.CreateAsyncScope())
+        {
+            var store = scope.ServiceProvider.GetRequiredService<AgentRetryOperationStore>();
+            Assert.Equal(
+                AgentRetryOperationState.Pending,
+                (await store.GetAsync(projectId, missingOperation.OperationId))!.State);
+            Assert.Equal(
+                AgentRetryOperationState.Finished,
+                (await store.GetAsync(projectId, otherOperation.OperationId))!.State);
+        }
+
+        // The failed row remains durable and is attempted again by the next
+        // pass; it does not stop the worker or get silently discarded.
+        await worker.ProcessPendingAsync();
+        await using var verify = _fixture.Services.CreateAsyncScope();
+        var stillPending = await verify.ServiceProvider.GetRequiredService<AgentRetryOperationStore>()
+            .GetAsync(projectId, missingOperation.OperationId);
+        Assert.Equal(AgentRetryOperationState.Pending, stillPending!.State);
+    }
+
+    [Fact]
+    public async Task RetryObligationWorker_CleansExpiredFinishedRowsButNeverPendingRows()
+    {
+        var projectId = await CreateProjectAsync("agent-retry-worker-cleanup");
+        AgentRetryOperation finished;
+        AgentRetryOperation pending;
+        await using (var scope = _fixture.Services.CreateAsyncScope())
+        {
+            var store = scope.ServiceProvider.GetRequiredService<AgentRetryOperationStore>();
+            finished = (await store.ClaimOrCreateAsync(
+                projectId,
+                "cleanup-finished-session",
+                "cleanup-finished-turn",
+                "cleanup-finished",
+                AgentRetryOperationKind.Root,
+                "cleanup-finished-new-session",
+                "cleanup-finished-new-input",
+                "cleanup-finished-new-turn")).Operation;
+            await store.MarkFinishedAsync(finished.OperationId, "accepted", "done");
+            pending = (await store.ClaimOrCreateAsync(
+                projectId,
+                "cleanup-pending-session",
+                "cleanup-pending-turn",
+                "cleanup-pending",
+                AgentRetryOperationKind.Root,
+                "cleanup-pending-new-session",
+                "cleanup-pending-new-input",
+                "cleanup-pending-new-turn")).Operation;
+        }
+
+        await using (var ageScope = _fixture.Services.CreateAsyncScope())
+        {
+            var db = ageScope.ServiceProvider.GetRequiredService<MohistDbContext>();
+            var oldFinishedAt = _fixture.TimeProvider.GetUtcNow().UtcDateTime.AddHours(-25);
+            var row = await db.AgentRetryOperations
+                .SingleAsync(item => item.OperationId == finished.OperationId);
+            row.FinishedAt = oldFinishedAt;
+            row.UpdatedAt = oldFinishedAt;
+            await db.SaveChangesAsync();
+        }
+
+        var worker = new AgentRetryObligationWorker(
+            _fixture.Services.GetRequiredService<IServiceScopeFactory>(),
+            _fixture.TimeProvider,
+            NullLogger<AgentRetryObligationWorker>.Instance);
+        await worker.ProcessPendingAsync();
+
+        await using var verify = _fixture.Services.CreateAsyncScope();
+        var storeAfter = verify.ServiceProvider.GetRequiredService<AgentRetryOperationStore>();
+        Assert.Null(await storeAfter.GetAsync(projectId, finished.OperationId));
+        Assert.NotNull(await storeAfter.GetAsync(projectId, pending.OperationId));
     }
 
     [Fact]

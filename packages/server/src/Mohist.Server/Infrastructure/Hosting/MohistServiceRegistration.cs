@@ -311,6 +311,7 @@ public static class MohistServiceRegistration
         services.AddScoped<SlackOutboxDispatcherService>();
         services.AddHostedService<SlackOutboxDispatcherActivationService>();
         services.AddHostedService<SlackAgentAppBindingObligationWorker>();
+        services.AddHostedService<AgentRetryObligationWorker>();
         services.AddScoped<IWorkflowArtifactBindService, WorkflowArtifactBindService>();
         services.AddScoped<IWorkflowArtifactQuerier, WorkflowArtifactQuerier>();
         services.AddScoped<Mohist.Server.Workflow.Services.IWorkflowProfileProvider, Mohist.Server.Workflow.Services.WorkflowProfileProvider>();

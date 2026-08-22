@@ -37,3 +37,9 @@
 - Follow-up runtime result failures record the mapped `failureCategory` alongside `failureReason`. Observer flush failures, rejected calls, thrown exceptions, and successful turns omit the additive category; manager credential expiry still overrides it with `unknown`.
 - Added follow-up handler coverage for OpenCode `unavailable-runtime`, Pi `deadline-exceeded` → `timeout`, Pi `missing-session` → `runtime-session-missing`, missing-category failures, expired manager credentials, and unchanged terminal payload keys.
 - Verification: runner source and test typechecks pass; the full `npm test` suite passes (156 files, 1690 tests), including the focused follow-up/AgentJob coverage.
+
+## T-005 work
+- Added `AgentRetryObligationWorker` under `Sessions/Services`, using the existing BackgroundService shape: one-minute initial/recurring interval, a fresh DI scope per pass, per-operation catch-all logging, cancellation-safe shutdown, pending receipt replay through `AgentSessionRetryService.DispatchPendingAsync`, and 24-hour cleanup of Finished receipts only. The worker exposes `ProcessPendingAsync` so deterministic specs can exercise a complete pass without waiting on the timer.
+- Registered the worker in `MohistServiceRegistration`, so the Server host owns its lifecycle and test hosts receive the same registration.
+- Added SpecTests for restart recovery using the receipt's preallocated root identities, exactly-once replay after a second pass, exception isolation/retry of a failing row, and injectable-clock retention cleanup that preserves Pending rows. Existing completed-operation replay remains covered by the T-001/T-002 service specs.
+- Verification: Server and SpecTests build successfully; full SpecTests (3056) and UnitTests (3793) pass. `git diff --check` is clean.
