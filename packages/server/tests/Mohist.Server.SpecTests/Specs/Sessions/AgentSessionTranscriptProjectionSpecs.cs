@@ -1,4 +1,5 @@
 using System.Text.Json;
+using Mohist.Server.Sessions.Grains;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Mohist.Server.Infrastructure.Data.Db;
@@ -44,29 +45,64 @@ public class AgentSessionTranscriptProjectionSpecs : AgentSessionTestSupport
         var persistence = _fixture.Persistence.Checkpoint(session.Id);
         await _client.PostOkAsync(RunnerAgentSessionAttachPath(session), new { runtimeSessionId = session.Id, workDir = $"/workspaces/{project.Id}", processPid = 1234 });
 
-        await _client.PostOkAsync(RunnerSessionRuntimeEventsPath(session), new
+        const string inputDeliveryId = "delivery-transcript-projection";
+        const string taskRunId = "transcript-representative.1";
+        using (var inputResponse = await _client.PostAsJsonAsync(RunnerAgentSessionRuntimeEventsPath(session), new
         {
             runtimeSessionId = session.Id,
+            runtime = "opencode",
+            inputDeliveryId,
+            agentSessionId = session.Id,
+            taskRunId,
+            workId = work.WorkId,
             runtimeEvents = new object[]
             {
                 new { type = "session.input", payload = new { text = "[mohist-workspace-anchor]\n/workspaces/internal\n[/mohist-workspace-anchor]\n\ninternal system prompt\n\nplan the refactor", kind = "task" } },
-                new { type = "model.resolved", payload = new { resolvedModel = "gpt-5.6-sol" } },
-                new { type = "message.delta", payload = new { text = "first", messageId = "msg-1" } },
-                new { type = "message.delta", payload = new { text = " second", messageId = "msg-1" } },
-                new { type = "reasoning.delta", payload = new { text = "thinking", messageId = "reason-1" } },
-                new { type = "reasoning.delta", payload = new { text = "deeper", messageId = "reason-2" } },
-                new
-                {
-                    type = "tool_call.started",
-                    payload = new { toolCallId = "tool-1", kind = "read", status = "in_progress", title = "Read README", rawInput = new { filePath = "README.md" } }
-                },
-                new
-                {
-                    type = "tool_call.completed",
-                    payload = new { toolCallId = "tool-1", kind = "read", status = "completed", title = "Read README", rawOutput = new { content = "# Project" } }
-                },
             }
-        });
+        }))
+        {
+            inputResponse.EnsureSuccessStatusCode();
+            using var inputDocument = JsonDocument.Parse(await inputResponse.Content.ReadAsStringAsync());
+            var receipts = inputDocument.RootElement.EnumerateArray().ToArray();
+            // When the Workflow run has no matching task the receipt degrades
+            // to already-consumed ([]); the frozen AgentSession turn binding is
+            // still the acknowledged identity for the streaming batch.
+            string? agentTurnId = receipts.Length == 1
+                ? receipts[0].GetProperty("agentTurnId").GetString()
+                : (await _fixture.Grains.GetGrain<IAgentSessionGrain>(session.Id).ListTurnsAsync())
+                    .Single(turn => turn.WorkflowExecution?.InputDeliveryId == inputDeliveryId)
+                    .WorkflowExecution?.AgentTurnId;
+            Assert.False(string.IsNullOrWhiteSpace(agentTurnId));
+
+            await _client.PostOkAsync(RunnerAgentSessionRuntimeEventsPath(session), new
+            {
+                runtimeSessionId = session.Id,
+                runtime = "opencode",
+                inputDeliveryId,
+                agentSessionId = session.Id,
+                agentTurnId,
+                taskRunId,
+                workId = work.WorkId,
+                runtimeEvents = new object[]
+                {
+                    new { type = "model.resolved", payload = new { resolvedModel = "gpt-5.6-sol", turnId = agentTurnId } },
+                    new { type = "message.delta", payload = new { text = "first", messageId = "msg-1", turnId = agentTurnId } },
+                    new { type = "message.delta", payload = new { text = " second", messageId = "msg-1", turnId = agentTurnId } },
+                    new { type = "reasoning.delta", payload = new { text = "thinking", messageId = "reason-1", turnId = agentTurnId } },
+                    new { type = "reasoning.delta", payload = new { text = "deeper", messageId = "reason-2", turnId = agentTurnId } },
+                    new
+                    {
+                        type = "tool_call.started",
+                        payload = new { toolCallId = "tool-1", kind = "read", status = "in_progress", title = "Read README", rawInput = new { filePath = "README.md" }, turnId = agentTurnId }
+                    },
+                    new
+                    {
+                        type = "tool_call.completed",
+                        payload = new { toolCallId = "tool-1", kind = "read", status = "completed", title = "Read README", rawOutput = new { content = "# Project" }, turnId = agentTurnId }
+                    },
+                }
+            });
+        }
 
         var dbFactory = _fixture.Services.GetRequiredService<IDbContextFactory<MohistDbContext>>();
         await dbFactory.WaitForTranscriptPartsAsync(session.Id, 5, persistence);

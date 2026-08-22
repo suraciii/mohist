@@ -269,7 +269,8 @@ public sealed record WorkflowAgentSessionCleanupReceipt(
     [property: Id(0)] string CleanupOperationId,
     [property: Id(1)] string InputDeliveryId,
     [property: Id(2)] string AgentTurnId,
-    [property: Id(3)] string AgentSessionId);
+    [property: Id(3)] string AgentSessionId,
+    [property: Id(4)] bool AlreadyRecorded);
 
 [GenerateSerializer]
 public sealed record AppendAgentSessionSystemEventsCommand(
