@@ -375,19 +375,6 @@ async function handleFollowup(
         if (terminalFinalized) return
         terminalFinalized = true
         const observerError = await observerState.flush()
-        if (handle.kind === 'opencode' && !managerExecution?.hasExpired()) {
-          try {
-            await evaluateFollowupReplyGuard({
-              handle,
-              selectedTarget,
-              payload,
-              observer: observerState,
-              managerExecution,
-            })
-          } catch (error) {
-            log.error('followup reply guard failed', { exception: error, session: selectedTarget.runtimeSessionId })
-          }
-        }
         if (!result.ok) {
           const message = readErrorMessage(result)
           recordFollowupActivity(
@@ -420,6 +407,19 @@ async function handleFollowup(
             managerExecution,
           )
           return
+        }
+        if (handle.kind === 'opencode' && !managerExecution?.hasExpired()) {
+          try {
+            await evaluateFollowupReplyGuard({
+              handle,
+              selectedTarget,
+              payload,
+              observer: observerState,
+              managerExecution,
+            })
+          } catch (error) {
+            log.error('followup reply guard failed', { exception: error, session: selectedTarget.runtimeSessionId })
+          }
         }
         recordFollowupActivity(
           outbox,
