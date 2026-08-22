@@ -6,11 +6,11 @@
       "id": "T-001",
       "title": "Retry application service core: failure-category allowlist, durable operation store, root-message retry into a new Session",
       "spec": "specs/slack-retry-operation/spec.md#the-retry-operation-is-persisted-before-dispatch",
-      "description": "Build the provider-agnostic retry operation surface. Add the authoritative AgentSessionRetryPolicy.IsRetryable exact-match allowlist (runner-unavailable, runner-lost, report-timeout, deadline, timeout, probe-timeout, runtime-transport-unavailable, rate-limited, retry-safe; absent/empty/unknown are not retryable) next to the future retry service in Sessions services. Add the agent_retry_operations EF migration (operation id PK, unique idempotency key, unique session+turn, kind, pre-allocated execution identity, Pending→Finished state, recorded result, timestamps) with an AgentRetryOperationStore implementing claim-or-create on the two unique indexes. Implement AgentSessionRetryService.RetryAsync(projectId, sessionId, turnId, idempotencyKey): re-read the target Turn's current failure facts and re-apply the policy (reject no_longer_retryable, creating nothing), decide root vs thread from IsLaunchTurn, pre-allocate execution identity, commit the pending record BEFORE any dispatch, then for root retries rebuild ConnectionLaunchOrigin from the failed Turn's provenance and call IAgentLauncher.LaunchConnectionAsync with a new optional idempotency-key override (agent-retry:{operationId}) so a genuinely new Session with fresh identities is minted, and record the Finished result. The failed Turn is never modified.",
+      "description": "Build the provider-agnostic retry operation surface. Add the authoritative AgentSessionRetryPolicy.IsRetryable exact-match allowlist, defined over the failure-category vocabulary the system actually records (runner-unavailable, runner-lost, report-timeout from server reconciliation; deadline-exceeded, timeout, generation-drain-timeout, unavailable-runtime, runtime-unavailable from runner error kinds; reserved forward-looking rate-limited, probe-timeout, retry-safe; absent/empty/unknown are not retryable) next to the future retry service in Sessions services. Add the agent_retry_operations EF migration (operation id PK, unique idempotency key, unique session+turn, kind, pre-allocated execution identity, Pending→Finished state, recorded result, timestamps) with an AgentRetryOperationStore implementing claim-or-create on the two unique indexes. Implement AgentSessionRetryService.RetryAsync(projectId, sessionId, turnId, idempotencyKey): re-read the target Turn's current failure facts and re-apply the policy (reject no_longer_retryable, creating nothing), decide root vs thread from IsLaunchTurn, pre-allocate execution identity, commit the pending record BEFORE any dispatch, then for root retries rebuild ConnectionLaunchOrigin from the failed Turn's provenance and call IAgentLauncher.LaunchConnectionAsync with a new optional idempotency-key override (agent-retry:{operationId}) so a genuinely new Session with fresh identities is minted, and record the Finished result. The failed Turn is never modified.",
       "acceptanceCriteria": [
-        "UnitTests cover the classifier matrix: every allowlist category is retryable; input/permission/configuration/context/unknown/generic are not; absent and unknown values are not; transient-sounding reason text with a permanent category is not retryable; retry-safe with ordinary text is retryable",
+        "UnitTests cover the classifier matrix pinned to the real recorded vocabulary, never the allowlist's own re-typed tokens: server reconciliation reasons (referencing the AgentJobFailureReasons constants directly) — runner-unavailable, runner-lost, report-timeout retryable, workspace-unavailable not; runner runtime error kinds — deadline-exceeded, timeout, generation-drain-timeout, unavailable-runtime, runtime-unavailable retryable, invalid-input, permission-required, incompatible-runtime, incompatible-execution-configuration, unsupported_execution_configuration, missing-session, runtime-session-missing, conflict, interrupted, turn-failed, manager-credential-expired not; reserved tokens rate-limited, probe-timeout, retry-safe retryable; absent, empty, and unknown values are not; transient-sounding reason text with a permanent category is not retryable; retry-safe with ordinary text is retryable",
         "SpecTests prove persist-before-dispatch: a crash between commit and dispatch leaves a Pending record with its pre-allocated identity, and the dispatch path refuses to run without a committed pending record",
-        "SpecTests prove at-most-once: two concurrent RetryAsync calls with the same idempotency key resolve to one operation row and both return the same recorded result; a second call for the same (session, turn) with a different key resolves to the existing row's recorded result",
+        "SpecTests prove at-most-once: two concurrent RetryAsync calls with the same idempotency key resolve to one operation row and both return the same recorded result (a loser reading while the winner is still Pending reports the accepted-pending record; a later redelivery reports the finished one); a second call for the same (session, turn) with a different key resolves to the existing row's recorded result",
         "SpecTests prove root retry: accepted retry of a launch Turn creates a new Session with the pre-allocated identity, distinct from and independently observable alongside the failed Session, launched through the same launch path as the original",
         "SpecTests prove the failed Turn keeps its original status, failure reason, and failure category unchanged after the retry attempt is created",
         "SpecTests prove no_longer_retryable re-evaluation (target facts superseded) creates no operation row and no execution resources",
@@ -22,7 +22,7 @@
       "output": "packages/server/src/Mohist.Server/Sessions/Services/AgentSessionRetryPolicy.cs, AgentSessionRetryService, Infrastructure/Data agent_retry_operations migration, AgentRetryOperationStore, plus UnitTests and SpecTests coverage",
       "dependsOn": [],
       "passes": false,
-      "notes": "Classification is exact ordinal comparison on recorded AgentTurnResult.FailureCategory only; never text heuristics (design Decision 1). The unique (session, turn) index is what makes later re-rendered buttons safe. CLI/Web routes later call this same service unchanged."
+      "notes": "Classification is exact ordinal comparison on recorded AgentTurnResult.FailureCategory only; never text heuristics (design Decision 1). The allowlist tokens are pinned to the recorded producer vocabulary (design Decision 1 table): server AgentJobFailureReasons constants and runner RuntimeError kinds (Pi maps deadline-exceeded→timeout and missing-session→runtime-session-missing via mapPiErrorKind; OpenCode kinds pass verbatim via mapOpenCodeErrorKind). The unique (session, turn) index is what makes later re-rendered buttons safe. CLI/Web routes later call this same service unchanged."
     },
     {
       "id": "T-002",
@@ -42,6 +42,7 @@
       "type": "WRITE",
       "output": "packages/server/src/Mohist.Server/Sessions/Grains/IAgentSessionGrain.cs and AgentSessionGrain.FollowupDispatch.cs targeted-dispatch method, AgentSessionRetryService thread path, plus grain and SpecTests coverage",
       "dependsOn": ["T-001"],
+      "passes": false,
       "notes": "Do NOT force-dispatch past the executing guard (design Decision 7): queueing is the Session's existing answer to a busy session. Keep BeginNextFollowupDispatchAsync behavior unchanged apart from sharing its selection body."
     },
     {
@@ -62,7 +63,28 @@
       "type": "WRITE",
       "output": "packages/server/src/Mohist.Server/Slack/Services/SlackRetryActionService.cs (creation side) and shared signing helper, Infrastructure/Slack SlackTerminalDelivery + SlackTerminalDeliveryHandler changes, AgentSessionGrain.SlackDelivery failure-fact population, plus UnitTests and SpecTests coverage",
       "dependsOn": ["T-001"],
-      "notes": "Operator binding is the session initiator (initial launch provenance member), the same binding Stop uses. Until the route task lands, a click on the rendered button is harmlessly rejected as unsupported by the existing route."
+      "passes": false,
+      "notes": "Operator binding is the session initiator (initial launch provenance member), the same binding Stop uses. Until the route task lands, a click on the rendered button is harmlessly rejected as unsupported by the existing route. The production fact source for follow-up failure categories lands in T-007 (runner-side); T-003's specs inject categories to pin the server-side forwarding and degradation independently."
+    },
+    {
+      "id": "T-007",
+      "title": "Runner reports the runtime error kind as failureCategory on terminal follow-up activity events",
+      "spec": "specs/slack-failure-retryability/spec.md#failed-thread-follow-up-turns-record-a-failure-category",
+      "description": "Close the producer-side gap that keeps thread-retry presentation unreachable in production. Today the runner's follow-up terminal events carry only failureReason (packages/runner/src/server/followup-handler.ts recordFollowupActivity sets failureCategory only for expired manager credentials, as unknown), and follow-up turns never pass through AgentJobGrain, so no server-side reconciliation supplies a category either — every ordinary thread failure settles with a null category and can never render a Retry button. When a follow-up turn fails with a runtime error kind, recordFollowupActivity MUST emit that kind as failureCategory on the terminal session.activity payload, applying the same kind→category mapping the AgentJob path applies (mapOpenCodeErrorKind / mapPiErrorKind semantics — Pi deadline-exceeded reports timeout and missing-session reports runtime-session-missing; OpenCode kinds report verbatim): extract or reuse the mapping from runtime/agent-job-turn.ts rather than duplicating it. Failures without a recoverable error kind (observer flush errors, rejected calls, thrown exceptions) keep omitting failureCategory, and expired manager credentials keep recording unknown; both degrade to no button. The field is additive on the event payload — runners predating it remain valid and the Server classifies absent categories as not retryable. No Server change is required: AgentSessionGrain.ResolveFollowupTurnResult already reads failureCategory from the payload, and T-003 forwards turn.Result facts into the follow-up delivery envelope.",
+      "acceptanceCriteria": [
+        "Runner tests prove a failed follow-up whose runtime result carries an error kind (for example unavailable-runtime or deadline-exceeded from OpenCode, deadline-exceeded from Pi) records that mapped kind as failureCategory on the terminal session.activity event alongside failureReason",
+        "Runner tests prove the mapping matches the AgentJob path exactly (Pi deadline-exceeded → timeout, missing-session → runtime-session-missing, OpenCode kinds verbatim) via a shared mapping helper, not a copied table",
+        "Runner tests prove failures without a recoverable error kind omit failureCategory and expired manager credentials keep recording unknown",
+        "The terminal event shape stays otherwise unchanged (id, activity, status, failureReason, message/output, source, operationId fields as today) and existing runner follow-up-handler tests remain green",
+        "npm test in packages/runner passes"
+      ],
+      "priority": 3,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/runner/src/server/followup-handler.ts failure-category reporting (kind→category mapping shared with runtime/agent-job-turn.ts), plus runner test coverage",
+      "dependsOn": [],
+      "passes": false,
+      "notes": "Producer side of the thread-retry fact chain: runner emits failureCategory → AgentSessionGrain.ResolveFollowupTurnResult stores it on turn.Result → T-003's TryEmitFollowupDeliveryAsync forwards it → presentation classifies it. Independent of the Server tasks (different package) and composes with T-003 by value; the absent ⇒ no-button degradation stays as the safety net for old runners and unknown failures, not as the permanent behavior."
     },
     {
       "id": "T-004",
@@ -72,7 +94,7 @@
       "acceptanceCriteria": [
         "SpecTests prove each rejection outcome creates no execution resources and returns explicit text: tampered/invalid action, expired, stale context (Connection/team/conversation mismatch), different Slack member, operator no longer Owner/initiator or denied by current access policy, disabled Connection, and no-longer-retryable target",
         "SpecTests prove an accepted Retry click passes the same adapter lease validation and Connection resolution as a Stop click, dispatches to AgentSessionRetryService (the same service a CLI/Web retry uses), and Slack receives attempt-accepted feedback through the outbox user-action reply",
-        "SpecTests prove redelivery/replay of the same click updates the same identity-stable reply (no duplicate feedback) and resolves to the same recorded operation result with no second attempt",
+        "SpecTests prove redelivery/replay of the same click updates the same identity-stable reply (no duplicate feedback) and resolves to the same recorded operation result with no second attempt (including a replay arriving while the operation is still Pending, which reports the accepted-pending record)",
         "SpecTests prove Stop behavior (signature, five-minute lifetime, revalidation, outcome states, replay handling) is unchanged before and after the Retry action id exists on the same route",
         "The route performs no retry decision logic itself — all retry semantics flow through AgentSessionRetryService",
         "dotnet build and the full Server test suite pass"
@@ -82,6 +104,7 @@
       "type": "WRITE",
       "output": "packages/server/src/Mohist.Server/Api/SlackInteractionRoutes.cs action-id dispatch, Slack/Services/SlackRetryActionService.cs HandleAsync acceptance path, plus SpecTests coverage (new SlackRetryInteractionSpecs alongside SlackTurnControlInteractionSpecs)",
       "dependsOn": ["T-001", "T-002", "T-003"],
+      "passes": false,
       "notes": "Click idempotency lives in the operation receipt (unique indexes), NOT in SlackProviderInboxStore — the inbox keeps owning only raw Slack message ingress. Concurrent/redelivered clicks converge on the recorded result from T-001."
     },
     {
@@ -101,6 +124,7 @@
       "type": "WRITE",
       "output": "packages/server/src/Mohist.Server/Sessions/Services/AgentRetryObligationWorker.cs (or Agent/Services per placement convention), DI registration, plus SpecTests recovery/cleanup coverage",
       "dependsOn": ["T-001", "T-002"],
+      "passes": false,
       "notes": "Recovery reuses the same idempotent pipelines as the live click path — no separate recovery code path. Retention window 24 h per design open question (flag shorter windows in review, do not block)."
     },
     {
@@ -119,6 +143,7 @@
       "type": "TEST",
       "output": "Updated block_actions forwarding tests in packages/mohist-slack/src and packages/go/mohist-slack covering the mohist_retry_turn action id",
       "dependsOn": ["T-003"],
+      "passes": false,
       "notes": "Per design migration step 2: adapter packages need no deploy-time change; only their tests gain the new action id."
     }
   ]

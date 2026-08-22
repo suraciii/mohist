@@ -333,9 +333,13 @@ id to existing forwarding tests.
 1. Additive EF migration creating `agent_retry_operations` (no backfill; no
    existing table changes).
 2. Server-side deploy: classifier, presentation, action service, application
-   service, store, worker. The Slack adapter (TS and Go ports) needs no
-   deploy-time change — `block_actions` forwarding is generic over action ids;
-   only their tests gain the `mohist_retry_turn` id.
+   service, store, worker. The runner ships the follow-up `failureCategory`
+   reporting (T-007) — an additive event field, safe in any deploy order: a new
+   runner against an old Server is simply ignored, and an old runner against a
+   new Server leaves follow-up categories absent, degrading to no button. The
+   Slack adapter (TS and Go ports) needs no deploy-time change — `block_actions`
+   forwarding is generic over action ids; only their tests gain the
+   `mohist_retry_turn` id.
 3. Rollback: redeploy the previous Server build. New rows stop being written;
   already-`Pending` rows stop dispatching (the user can re-issue the request
   manually); `Finished` history is inert. Dropping the table is optional and
