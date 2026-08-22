@@ -68,4 +68,4 @@
 ## Review follow-up (MF-1 generation-drain-timeout)
 - Fixed the remaining retryability gap: OpenCode `generation-drain-timeout` follow-up failures now use terminal activity `unknown`, which records `status: failed` instead of the previous completed/idle shape, while preserving the mapped `failureCategory`.
 - Added runner coverage for the producer terminal payload, Session grain coverage for failed Turn settlement and category preservation, and Slack terminal presentation coverage for a signed Retry action for this category.
-- Verification: runner test typecheck and focused follow-up tests pass (11 tests); runner full suite passes (156 files, 1691 tests); Server and SpecTests builds pass; `git diff --check` clean. Full Server test suites remain to be run.
+- Verification: runner test typecheck and focused follow-up tests pass (11 tests); runner full suite passes (156 files, 1691 tests); Server and SpecTests builds pass; Server UnitTests pass (3793) and SpecTests pass (3066); `git diff --check` clean.
