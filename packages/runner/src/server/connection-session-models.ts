@@ -40,5 +40,4 @@ export interface AgentSessionRuntimeEventAcceptance {
   agentSessionId?: string
 }
 
-
 export type AgentSession = WorkflowAgentSession
