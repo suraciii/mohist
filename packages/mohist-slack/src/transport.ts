@@ -115,11 +115,7 @@ export class HttpAdapterTransport implements AdapterTransport {
           { ...managerIngressBody(ref, envelope), leaseId, adapterId },
           signal,
         )
-      : await this.post<unknown>(
-          `${connectionRoute(ref)}/ingress`,
-          { ...envelope, leaseId, adapterId },
-          signal,
-        )
+      : await this.post<unknown>(`${connectionRoute(ref)}/ingress`, { ...envelope, leaseId, adapterId }, signal)
     return ingressResultFromData(data)
   }
 

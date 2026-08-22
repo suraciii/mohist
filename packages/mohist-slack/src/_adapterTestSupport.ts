@@ -248,9 +248,7 @@ export class FakeWeb implements SlackWebClient {
     },
   }
   get conversations() {
-    return this.historyAvailable
-      ? { history: async () => ({ ok: true, messages: this.historyMessages }) }
-      : undefined
+    return this.historyAvailable ? { history: async () => ({ ok: true, messages: this.historyMessages }) } : undefined
   }
   readonly filesUploadV2 = async (
     input:

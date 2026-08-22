@@ -58,6 +58,8 @@ async function start(): Promise<void> {
 
 async function emit(body: unknown): Promise<void> {
   if (!socket) throw new Error('Slack adapter bridge is not started')
+  web.posted.length = 0
+  socket.acknowledgementCount = 0
   const acknowledged = await socket.emit(body)
   write({
     type: 'emitResult',

@@ -411,8 +411,12 @@ describe('HttpAdapterTransport', () => {
     const signal = new AbortController().signal
     const ref = { projectId: 'p', connectionId: 'c' }
 
-    await expect(transport.ingress(ref, envelope, 'lease', 'a', signal)).rejects.toThrow('invalid ingress response owner')
-    await expect(transport.ingress(ref, envelope, 'lease', 'a', signal)).rejects.toThrow('invalid ingress response owner')
+    await expect(transport.ingress(ref, envelope, 'lease', 'a', signal)).rejects.toThrow(
+      'invalid ingress response owner',
+    )
+    await expect(transport.ingress(ref, envelope, 'lease', 'a', signal)).rejects.toThrow(
+      'invalid ingress response owner',
+    )
     await expect(transport.ingress(ref, envelope, 'lease', 'a', signal)).rejects.toThrow('invalid ingress result')
     await expect(transport.ingress(ref, envelope, 'lease', 'a', signal)).rejects.toThrow('invalid ingress result')
     await expect(transport.ingress(ref, envelope, 'lease', 'a', signal)).rejects.toThrow('invalid ingress result')

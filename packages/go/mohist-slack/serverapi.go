@@ -182,9 +182,9 @@ const (
 
 // IngressResult is the Server's disposition of one inbound message.
 type IngressResult struct {
-	Kind         string
+	Kind          string
 	ResponseOwner ResponseOwner
-	Reason       *string
+	Reason        *string
 }
 
 // InteractionResult is the Server's disposition of one interaction.

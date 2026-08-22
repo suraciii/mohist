@@ -1,33 +1,84 @@
-import { describe, expect, it } from "vitest"
-import { SlackAdapter } from "./adapter.js"
-import type { AdapterLease, AdapterTransport, Delivery, DeliveryAck, LeaseRenewal, SlackConnectionRef, SlackEnvelope, SlackHelloOutcome, SlackInteractionEnvelope, SlackWebClient, SocketClient, SocketEvent } from "./types.js"
+import { describe, expect, it } from 'vitest'
+import { SlackAdapter } from './adapter.js'
+import type {
+  AdapterLease,
+  AdapterTransport,
+  Delivery,
+  DeliveryAck,
+  LeaseRenewal,
+  SlackConnectionRef,
+  SlackEnvelope,
+  SlackHelloOutcome,
+  SlackInteractionEnvelope,
+  SlackWebClient,
+  SocketClient,
+  SocketEvent,
+} from './types.js'
 
 class Socket implements SocketClient {
   private handler?: (event: SocketEvent) => Promise<void>
-  on(_event: "slack_event", handler: (event: SocketEvent) => Promise<void>) { this.handler = handler }
-  async start() { return { appId: "A1" } }
-  async emit() { await this.handler?.({ body: {}, ack: () => undefined }) }
+  on(_event: 'slack_event', handler: (event: SocketEvent) => Promise<void>) {
+    this.handler = handler
+  }
+  async start() {
+    return { appId: 'A1' }
+  }
+  async emit() {
+    await this.handler?.({ body: {}, ack: () => undefined })
+  }
 }
 
 class Transport implements AdapterTransport {
-  readonly ref: SlackConnectionRef = { projectId: "p", connectionId: "c" }
+  readonly ref: SlackConnectionRef = { projectId: 'p', connectionId: 'c' }
   readonly deliveries: Delivery[] = []
   readonly uncertain: Delivery[] = []
   readonly acks: DeliveryAck[] = []
-  async discover() { return [this.ref] }
-  async acquireLease(): Promise<AdapterLease | null> { return { kind: "runtime", leaseId: "lease", generation: 1, expiresAt: "2026-01-01T00:05:00Z", appToken: "app", botToken: "bot" } }
-  async renewLease(): Promise<LeaseRenewal | null> { return { leaseId: "lease", kind: "runtime", generation: 1, expiresAt: "2026-01-01T00:05:00Z" } }
-  async reportHello(): Promise<SlackHelloOutcome> { return "verified" }
-  async ingress(_ref: SlackConnectionRef, _envelope: SlackEnvelope) { return { kind: "accepted", responseOwner: "none" as const } }
-  async interaction(_ref: SlackConnectionRef, _envelope: SlackInteractionEnvelope) { return { state: "stop_requested" } }
-  async claimDelivery() { return this.deliveries.shift() ?? null }
-  async claimUncertainDelivery() { return this.uncertain.shift() ?? null }
-  async ackDelivery(_ref: SlackConnectionRef, ack: DeliveryAck) { this.acks.push(ack) }
+  async discover() {
+    return [this.ref]
+  }
+  async acquireLease(): Promise<AdapterLease | null> {
+    return {
+      kind: 'runtime',
+      leaseId: 'lease',
+      generation: 1,
+      expiresAt: '2026-01-01T00:05:00Z',
+      appToken: 'app',
+      botToken: 'bot',
+    }
+  }
+  async renewLease(): Promise<LeaseRenewal | null> {
+    return { leaseId: 'lease', kind: 'runtime', generation: 1, expiresAt: '2026-01-01T00:05:00Z' }
+  }
+  async reportHello(): Promise<SlackHelloOutcome> {
+    return 'verified'
+  }
+  async ingress(_ref: SlackConnectionRef, _envelope: SlackEnvelope) {
+    return { kind: 'accepted', responseOwner: 'none' as const }
+  }
+  async interaction(_ref: SlackConnectionRef, _envelope: SlackInteractionEnvelope) {
+    return { state: 'stop_requested' }
+  }
+  async claimDelivery() {
+    return this.deliveries.shift() ?? null
+  }
+  async claimUncertainDelivery() {
+    return this.uncertain.shift() ?? null
+  }
+  async ackDelivery(_ref: SlackConnectionRef, ack: DeliveryAck) {
+    this.acks.push(ack)
+  }
 }
 
 class Web implements SlackWebClient {
-  readonly updated: Array<{ channel: string; ts: string; text: string; blocks?: readonly Record<string, unknown>[] }> = []
-  readonly posted: Array<{ channel: string; text: string; thread_ts?: string; client_msg_id?: string; blocks?: readonly Record<string, unknown>[] }> = []
+  readonly updated: Array<{ channel: string; ts: string; text: string; blocks?: readonly Record<string, unknown>[] }> =
+    []
+  readonly posted: Array<{
+    channel: string
+    text: string
+    thread_ts?: string
+    client_msg_id?: string
+    blocks?: readonly Record<string, unknown>[]
+  }> = []
   reactionError: string | undefined
   reactionThrow: unknown = undefined
   reactionPresent = false
@@ -35,11 +86,22 @@ class Web implements SlackWebClient {
   updateError: string | undefined
   historyMessages: Array<{ ts?: string; client_msg_id?: string; text?: string }> = []
   readonly chat = {
-    postMessage: async (input: { channel: string; text: string; thread_ts?: string; client_msg_id?: string; blocks?: readonly Record<string, unknown>[] }) => {
+    postMessage: async (input: {
+      channel: string
+      text: string
+      thread_ts?: string
+      client_msg_id?: string
+      blocks?: readonly Record<string, unknown>[]
+    }) => {
       this.posted.push(input)
-      return { ok: true, ts: "200.001" }
+      return { ok: true, ts: '200.001' }
     },
-    update: async (input: { channel: string; ts: string; text: string; blocks?: readonly Record<string, unknown>[] }) => {
+    update: async (input: {
+      channel: string
+      ts: string
+      text: string
+      blocks?: readonly Record<string, unknown>[]
+    }) => {
       this.updated.push(input)
       return { ok: this.updateError === undefined, error: this.updateError, ts: input.ts }
     },
@@ -52,7 +114,7 @@ class Web implements SlackWebClient {
     remove: async () => ({ ok: true }),
     get: async () => {
       if (this.reactionReadThrow !== undefined) throw this.reactionReadThrow
-      return { ok: true, message: { reactions: this.reactionPresent ? [{ name: "eyes" }] : [] } }
+      return { ok: true, message: { reactions: this.reactionPresent ? [{ name: 'eyes' }] : [] } }
     },
   }
   readonly conversations = {
@@ -63,7 +125,7 @@ class Web implements SlackWebClient {
 async function start(transport: Transport, web: Web) {
   const socket = new Socket()
   const adapter = new SlackAdapter({
-    adapterId: "a",
+    adapterId: 'a',
     transport,
     socketFactory: () => socket,
     webFactory: () => web,
@@ -73,276 +135,316 @@ async function start(transport: Transport, web: Web) {
   await adapter.start(new AbortController().signal)
 }
 
-describe("Slack status provider mutations", () => {
-  it("updates the durable provider message identity in place", async () => {
+describe('Slack status provider mutations', () => {
+  it('updates the durable provider message identity in place', async () => {
     const transport = new Transport()
     const web = new Web()
     transport.deliveries.push({
-      id: "progress",
-      conversationId: "C1",
-      threadTs: "100.001",
+      id: 'progress',
+      conversationId: 'C1',
+      threadTs: '100.001',
       payloadJson: JSON.stringify({
-        operation: "chat_update",
-        text: "Completed",
-        providerMessageIdentity: { conversationId: "C1", messageTs: "100.002" },
+        operation: 'chat_update',
+        text: 'Completed',
+        providerMessageIdentity: { conversationId: 'C1', messageTs: '100.002' },
       }),
     })
 
     await start(transport, web)
 
-    expect(web.updated).toEqual([{ channel: "C1", ts: "100.002", text: "Completed" }])
-    expect(transport.acks).toEqual([{
-      id: "progress",
-      outcome: "delivered",
-      adapterId: "a",
-      providerMessageIdentity: { conversationId: "C1", messageTs: "100.002" },
-    }])
+    expect(web.updated).toEqual([{ channel: 'C1', ts: '100.002', text: 'Completed' }])
+    expect(transport.acks).toEqual([
+      {
+        id: 'progress',
+        outcome: 'delivered',
+        adapterId: 'a',
+        providerMessageIdentity: { conversationId: 'C1', messageTs: '100.002' },
+      },
+    ])
   })
 
-  it("sends the Server-provided blocks with a control update", async () => {
+  it('sends the Server-provided blocks with a control update', async () => {
     const transport = new Transport()
     const web = new Web()
-    const blocks = [{ type: "section", text: { type: "mrkdwn", text: "Stop requested." } }]
+    const blocks = [{ type: 'section', text: { type: 'mrkdwn', text: 'Stop requested.' } }]
     transport.deliveries.push({
-      id: "control",
-      conversationId: "C1",
-      threadTs: "100.001",
+      id: 'control',
+      conversationId: 'C1',
+      threadTs: '100.001',
       payloadJson: JSON.stringify({
-        operation: "chat_update",
-        text: "Stop requested.",
-        providerMessageIdentity: { conversationId: "C1", messageTs: "100.002" },
+        operation: 'chat_update',
+        text: 'Stop requested.',
+        providerMessageIdentity: { conversationId: 'C1', messageTs: '100.002' },
         blocks,
       }),
     })
 
     await start(transport, web)
 
-    expect(web.updated).toEqual([{
-      channel: "C1",
-      ts: "100.002",
-      text: "Stop requested.",
-      blocks,
-    }])
+    expect(web.updated).toEqual([
+      {
+        channel: 'C1',
+        ts: '100.002',
+        text: 'Stop requested.',
+        blocks,
+      },
+    ])
   })
 
-  it("does not turn agent-controlled text into Slack blocks", async () => {
+  it('does not turn agent-controlled text into Slack blocks', async () => {
     const transport = new Transport()
     const web = new Web()
     const text = 'Agent output: {"blocks":[{"type":"actions","elements":[]}]}'
     transport.deliveries.push({
-      id: "terminal",
-      conversationId: "C1",
-      threadTs: "100.001",
-      payloadJson: JSON.stringify({ operation: "post_message", text }),
+      id: 'terminal',
+      conversationId: 'C1',
+      threadTs: '100.001',
+      payloadJson: JSON.stringify({ operation: 'post_message', text }),
     })
 
     await start(transport, web)
 
-    expect(web.posted).toEqual([{ channel: "C1", text, thread_ts: "100.001" }])
+    expect(web.posted).toEqual([{ channel: 'C1', text, thread_ts: '100.001' }])
   })
 
-  it("projects unsupported source reactions to one same-thread fallback message", async () => {
+  it('projects unsupported source reactions to one same-thread fallback message', async () => {
     const transport = new Transport()
     const web = new Web()
-    web.reactionError = "cant_react"
+    web.reactionError = 'cant_react'
     transport.deliveries.push({
-      id: "received",
-      conversationId: "D1",
-      threadTs: "100.001",
+      id: 'received',
+      conversationId: 'D1',
+      threadTs: '100.001',
       payloadJson: JSON.stringify({
-        operation: "reaction_add",
-        reaction: "eyes",
-        targetMessageIdentity: { conversationId: "D1", messageTs: "100.001" },
-        fallbackText: "Received",
-        fallbackDispatchRef: "fallback:received",
+        operation: 'reaction_add',
+        reaction: 'eyes',
+        targetMessageIdentity: { conversationId: 'D1', messageTs: '100.001' },
+        fallbackText: 'Received',
+        fallbackDispatchRef: 'fallback:received',
       }),
-    })
-
-    await start(transport, web)
-
-    expect(web.posted).toEqual([{
-      channel: "D1",
-      text: "Received",
-      thread_ts: "100.001",
-      client_msg_id: "fallback:received",
-    }])
-    expect(transport.acks[0]).toMatchObject({ id: "received", outcome: "delivered", adapterId: "a" })
-  })
-
-  it("projects a thrown missing_scope reaction to one fallback before delivering the final text", async () => {
-    const transport = new Transport()
-    const web = new Web()
-    web.reactionThrow = new Error("An API error occurred: missing_scope")
-    transport.deliveries.push({
-      id: "received",
-      conversationId: "D1",
-      threadTs: "100.001",
-      payloadJson: JSON.stringify({
-        operation: "reaction_add",
-        reaction: "eyes",
-        targetMessageIdentity: { conversationId: "D1", messageTs: "100.001" },
-        fallbackText: "Received",
-        fallbackDispatchRef: "fallback:received",
-      }),
-    }, {
-      id: "terminal",
-      conversationId: "D1",
-      threadTs: "100.001",
-      payloadJson: JSON.stringify({ operation: "post_message", text: "Final answer" }),
     })
 
     await start(transport, web)
 
     expect(web.posted).toEqual([
-      { channel: "D1", text: "Received", thread_ts: "100.001", client_msg_id: "fallback:received" },
-      { channel: "D1", text: "Final answer", thread_ts: "100.001" },
+      {
+        channel: 'D1',
+        text: 'Received',
+        thread_ts: '100.001',
+        client_msg_id: 'fallback:received',
+      },
+    ])
+    expect(transport.acks[0]).toMatchObject({ id: 'received', outcome: 'delivered', adapterId: 'a' })
+  })
+
+  it('projects a thrown missing_scope reaction to one fallback before delivering the final text', async () => {
+    const transport = new Transport()
+    const web = new Web()
+    web.reactionThrow = new Error('An API error occurred: missing_scope')
+    transport.deliveries.push(
+      {
+        id: 'received',
+        conversationId: 'D1',
+        threadTs: '100.001',
+        payloadJson: JSON.stringify({
+          operation: 'reaction_add',
+          reaction: 'eyes',
+          targetMessageIdentity: { conversationId: 'D1', messageTs: '100.001' },
+          fallbackText: 'Received',
+          fallbackDispatchRef: 'fallback:received',
+        }),
+      },
+      {
+        id: 'terminal',
+        conversationId: 'D1',
+        threadTs: '100.001',
+        payloadJson: JSON.stringify({ operation: 'post_message', text: 'Final answer' }),
+      },
+    )
+
+    await start(transport, web)
+
+    expect(web.posted).toEqual([
+      { channel: 'D1', text: 'Received', thread_ts: '100.001', client_msg_id: 'fallback:received' },
+      { channel: 'D1', text: 'Final answer', thread_ts: '100.001' },
     ])
     expect(transport.acks).toEqual([
-      { id: "received", outcome: "delivered", adapterId: "a", providerMessageIdentity: { conversationId: "D1", messageTs: "200.001" } },
-      { id: "terminal", outcome: "delivered", adapterId: "a", providerMessageIdentity: { conversationId: "D1", messageTs: "200.001" } },
+      {
+        id: 'received',
+        outcome: 'delivered',
+        adapterId: 'a',
+        providerMessageIdentity: { conversationId: 'D1', messageTs: '200.001' },
+      },
+      {
+        id: 'terminal',
+        outcome: 'delivered',
+        adapterId: 'a',
+        providerMessageIdentity: { conversationId: 'D1', messageTs: '200.001' },
+      },
     ])
   })
 
-  it("uses one stable same-thread fallback after a terminal update failure", async () => {
+  it('uses one stable same-thread fallback after a terminal update failure', async () => {
     const transport = new Transport()
     const web = new Web()
-    web.updateError = "message_not_found"
-    const blocks = [{
-      type: "actions",
-      elements: [{ type: "button", text: { type: "plain_text", text: "Open in Mohist" }, url: "https://mohist.example/demo/sessions/s1" }],
-    }]
+    web.updateError = 'message_not_found'
+    const blocks = [
+      {
+        type: 'actions',
+        elements: [
+          {
+            type: 'button',
+            text: { type: 'plain_text', text: 'Open in Mohist' },
+            url: 'https://mohist.example/demo/sessions/s1',
+          },
+        ],
+      },
+    ]
     transport.deliveries.push({
-      id: "terminal",
-      conversationId: "C1",
-      threadTs: "100.001",
+      id: 'terminal',
+      conversationId: 'C1',
+      threadTs: '100.001',
       payloadJson: JSON.stringify({
-        operation: "chat_update",
-        text: "Completed",
-        providerMessageIdentity: { conversationId: "C1", messageTs: "100.002" },
-        fallbackText: "Completed",
-        fallbackDispatchRef: "fallback:terminal",
+        operation: 'chat_update',
+        text: 'Completed',
+        providerMessageIdentity: { conversationId: 'C1', messageTs: '100.002' },
+        fallbackText: 'Completed',
+        fallbackDispatchRef: 'fallback:terminal',
         blocks,
       }),
     })
 
     await start(transport, web)
 
-    expect(web.updated).toEqual([{ channel: "C1", ts: "100.002", text: "Completed", blocks }])
-    expect(web.posted).toEqual([{
-      channel: "C1",
-      text: "Completed",
-      thread_ts: "100.001",
-      client_msg_id: "fallback:terminal",
-      blocks,
-    }])
-    expect(transport.acks).toEqual([{ id: "terminal", outcome: "delivered", adapterId: "a", providerMessageIdentity: { conversationId: "C1", messageTs: "200.001" } }])
+    expect(web.updated).toEqual([{ channel: 'C1', ts: '100.002', text: 'Completed', blocks }])
+    expect(web.posted).toEqual([
+      {
+        channel: 'C1',
+        text: 'Completed',
+        thread_ts: '100.001',
+        client_msg_id: 'fallback:terminal',
+        blocks,
+      },
+    ])
+    expect(transport.acks).toEqual([
+      {
+        id: 'terminal',
+        outcome: 'delivered',
+        adapterId: 'a',
+        providerMessageIdentity: { conversationId: 'C1', messageTs: '200.001' },
+      },
+    ])
   })
 
-  it("reconciles uncertain updates before allowing another mutation", async () => {
+  it('reconciles uncertain updates before allowing another mutation', async () => {
     const transport = new Transport()
     const web = new Web()
-    web.historyMessages = [{ ts: "100.002", text: "Completed" }]
+    web.historyMessages = [{ ts: '100.002', text: 'Completed' }]
     transport.uncertain.push({
-      id: "uncertain",
-      conversationId: "C1",
-      threadTs: "100.001",
+      id: 'uncertain',
+      conversationId: 'C1',
+      threadTs: '100.001',
       payloadJson: JSON.stringify({
-        operation: "chat_update",
-        text: "Completed",
-        providerMessageIdentity: { conversationId: "C1", messageTs: "100.002" },
+        operation: 'chat_update',
+        text: 'Completed',
+        providerMessageIdentity: { conversationId: 'C1', messageTs: '100.002' },
       }),
     })
 
     await start(transport, web)
 
     expect(web.updated).toEqual([])
-    expect(transport.acks).toEqual([{
-      id: "uncertain",
-      outcome: "delivered",
-      adapterId: "a",
-      providerMessageIdentity: { conversationId: "C1", messageTs: "100.002" },
-    }])
+    expect(transport.acks).toEqual([
+      {
+        id: 'uncertain',
+        outcome: 'delivered',
+        adapterId: 'a',
+        providerMessageIdentity: { conversationId: 'C1', messageTs: '100.002' },
+      },
+    ])
   })
 
-  it("reconciles an uncertain reaction missing_scope with one fallback and a delivered identity", async () => {
+  it('reconciles an uncertain reaction missing_scope with one fallback and a delivered identity', async () => {
     const transport = new Transport()
     const web = new Web()
-    web.reactionReadThrow = new Error("An API error occurred: missing_scope")
+    web.reactionReadThrow = new Error('An API error occurred: missing_scope')
     transport.deliveries.push({
-      id: "terminal",
-      conversationId: "D1",
-      threadTs: "100.001",
-      payloadJson: JSON.stringify({ operation: "post_message", text: "Final answer" }),
+      id: 'terminal',
+      conversationId: 'D1',
+      threadTs: '100.001',
+      payloadJson: JSON.stringify({ operation: 'post_message', text: 'Final answer' }),
     })
     transport.uncertain.push({
-      id: "uncertain-received",
-      conversationId: "D1",
-      threadTs: "100.001",
+      id: 'uncertain-received',
+      conversationId: 'D1',
+      threadTs: '100.001',
       payloadJson: JSON.stringify({
-        operation: "reaction_add",
-        reaction: "eyes",
-        targetMessageIdentity: { conversationId: "D1", messageTs: "100.001" },
-        fallbackText: "Received",
-        fallbackDispatchRef: "fallback:received",
+        operation: 'reaction_add',
+        reaction: 'eyes',
+        targetMessageIdentity: { conversationId: 'D1', messageTs: '100.001' },
+        fallbackText: 'Received',
+        fallbackDispatchRef: 'fallback:received',
       }),
     })
 
     await start(transport, web)
 
     expect(web.posted).toEqual([
-      { channel: "D1", text: "Received", thread_ts: "100.001", client_msg_id: "fallback:received" },
-      { channel: "D1", text: "Final answer", thread_ts: "100.001" },
+      { channel: 'D1', text: 'Received', thread_ts: '100.001', client_msg_id: 'fallback:received' },
+      { channel: 'D1', text: 'Final answer', thread_ts: '100.001' },
     ])
     expect(transport.acks).toEqual([
       {
-        id: "uncertain-received",
-        outcome: "delivered",
-        adapterId: "a",
-        providerMessageIdentity: { conversationId: "D1", messageTs: "200.001" },
+        id: 'uncertain-received',
+        outcome: 'delivered',
+        adapterId: 'a',
+        providerMessageIdentity: { conversationId: 'D1', messageTs: '200.001' },
       },
       {
-        id: "terminal",
-        outcome: "delivered",
-        adapterId: "a",
-        providerMessageIdentity: { conversationId: "D1", messageTs: "200.001" },
+        id: 'terminal',
+        outcome: 'delivered',
+        adapterId: 'a',
+        providerMessageIdentity: { conversationId: 'D1', messageTs: '200.001' },
       },
     ])
   })
 
-  it("reconciles a delivered uncertain reaction with its target identity", async () => {
+  it('reconciles a delivered uncertain reaction with its target identity', async () => {
     const transport = new Transport()
     const web = new Web()
     web.reactionPresent = true
     transport.uncertain.push({
-      id: "uncertain-reaction",
-      conversationId: "C1",
-      threadTs: "100.001",
+      id: 'uncertain-reaction',
+      conversationId: 'C1',
+      threadTs: '100.001',
       payloadJson: JSON.stringify({
-        operation: "reaction_add",
-        reaction: "eyes",
-        targetMessageIdentity: { conversationId: "C1", messageTs: "100.002" },
+        operation: 'reaction_add',
+        reaction: 'eyes',
+        targetMessageIdentity: { conversationId: 'C1', messageTs: '100.002' },
       }),
     })
 
     await start(transport, web)
 
-    expect(transport.acks).toEqual([{
-      id: "uncertain-reaction",
-      outcome: "delivered",
-      adapterId: "a",
-      providerMessageIdentity: { conversationId: "C1", messageTs: "100.002" },
-    }])
+    expect(transport.acks).toEqual([
+      {
+        id: 'uncertain-reaction',
+        outcome: 'delivered',
+        adapterId: 'a',
+        providerMessageIdentity: { conversationId: 'C1', messageTs: '100.002' },
+      },
+    ])
   })
 
-  it("reconciles an explicit unknown operation without posting a message", async () => {
+  it('reconciles an explicit unknown operation without posting a message', async () => {
     const transport = new Transport()
     const web = new Web()
-    web.historyMessages = [{ ts: "100.003", client_msg_id: "unknown:1" }]
+    web.historyMessages = [{ ts: '100.003', client_msg_id: 'unknown:1' }]
     transport.deliveries.push({
-      id: "unknown",
-      conversationId: "C1",
-      threadTs: "100.001",
-      payloadJson: JSON.stringify({ operation: "delete_message", clientMessageId: "unknown:1", text: "ignored" }),
+      id: 'unknown',
+      conversationId: 'C1',
+      threadTs: '100.001',
+      payloadJson: JSON.stringify({ operation: 'delete_message', clientMessageId: 'unknown:1', text: 'ignored' }),
     })
 
     await start(transport, web)
@@ -350,61 +452,63 @@ describe("Slack status provider mutations", () => {
     expect(web.posted).toEqual([])
     expect(web.updated).toEqual([])
     expect(transport.acks).toContainEqual({
-      id: "unknown",
-      outcome: "delivered",
-      adapterId: "a",
+      id: 'unknown',
+      outcome: 'delivered',
+      adapterId: 'a',
     })
   })
 
-  it("does not persist a reaction target as a created message identity", async () => {
+  it('does not persist a reaction target as a created message identity', async () => {
     const transport = new Transport()
     const web = new Web()
     transport.deliveries.push({
-      id: "reaction",
-      conversationId: "C1",
-      threadTs: "100.001",
+      id: 'reaction',
+      conversationId: 'C1',
+      threadTs: '100.001',
       payloadJson: JSON.stringify({
-        operation: "reaction_add",
-        targetMessageIdentity: { conversationId: "C1", messageTs: "100.001" },
-        reaction: "eyes",
+        operation: 'reaction_add',
+        targetMessageIdentity: { conversationId: 'C1', messageTs: '100.001' },
+        reaction: 'eyes',
       }),
     })
 
     await start(transport, web)
 
-    expect(transport.acks).toContainEqual({ id: "reaction", outcome: "delivered", adapterId: "a" })
+    expect(transport.acks).toContainEqual({ id: 'reaction', outcome: 'delivered', adapterId: 'a' })
   })
 
-  it("posts the stable fallback only after reconciliation confirms an update target is absent", async () => {
+  it('posts the stable fallback only after reconciliation confirms an update target is absent', async () => {
     const transport = new Transport()
     const web = new Web()
     transport.uncertain.push({
-      id: "uncertain-missing",
-      conversationId: "C1",
-      threadTs: "100.001",
+      id: 'uncertain-missing',
+      conversationId: 'C1',
+      threadTs: '100.001',
       payloadJson: JSON.stringify({
-        operation: "chat_update",
-        text: "Completed",
-        providerMessageIdentity: { conversationId: "C1", messageTs: "100.002" },
-        fallbackText: "Completed",
-        fallbackDispatchRef: "fallback:terminal",
+        operation: 'chat_update',
+        text: 'Completed',
+        providerMessageIdentity: { conversationId: 'C1', messageTs: '100.002' },
+        fallbackText: 'Completed',
+        fallbackDispatchRef: 'fallback:terminal',
       }),
     })
 
     await start(transport, web)
 
     expect(web.updated).toEqual([])
-    expect(web.posted).toEqual([{
-      channel: "C1",
-      text: "Completed",
-      thread_ts: "100.001",
-      client_msg_id: "fallback:terminal",
-    }])
+    expect(web.posted).toEqual([
+      {
+        channel: 'C1',
+        text: 'Completed',
+        thread_ts: '100.001',
+        client_msg_id: 'fallback:terminal',
+      },
+    ])
     expect(transport.acks).toContainEqual({
-      id: "uncertain-missing",
-      outcome: "delivered",
-      adapterId: "a",
-      providerMessageIdentity: { conversationId: "C1", messageTs: "200.001" },
+      id: 'uncertain-missing',
+      outcome: 'delivered',
+      adapterId: 'a',
+      providerMessageIdentity: { conversationId: 'C1', messageTs: '200.001' },
     })
   })
 })
