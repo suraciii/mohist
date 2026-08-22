@@ -1,7 +1,6 @@
 using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
-using Mohist.Server.Events.Grains;
 using Mohist.Server.Issue.Grains;
 using Mohist.Server.Project.Grains;
 using Mohist.Server.SpecTests.Support;
@@ -224,7 +223,7 @@ public partial class WorkflowRunControlApiSpecs
         WorkflowApiTestSupport.CreateIssueInBacklogAsync(_grains, projectId);
 
     private Task DispatchEventsAsync() =>
-        WorkflowApiTestSupport.DispatchEventsAsync(_grains);
+        WorkflowApiTestSupport.DispatchEventsAsync(_services);
 
     private Task SeedWorkflowTemplateAsync(string projectId) =>
         WorkflowApiTestSupport.SeedWorkflowTemplateAsync(_connectionString, projectId);

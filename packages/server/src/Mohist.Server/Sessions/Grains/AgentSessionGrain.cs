@@ -37,7 +37,7 @@ public sealed partial class AgentSessionGrain : Grain, IAgentSessionGrain, IRemi
     private readonly IAgentSessionConnectionRegistry _connections;
     private readonly IGrainFactory _grains;
     private readonly IEventStore _eventStore;
-    private readonly IBackgroundTaskLauncher _backgroundTasks;
+    private readonly EventDispatchSignal _dispatchSignal;
     private readonly IFollowupDispatchScheduler? _followupDispatchScheduler;
     private readonly ISessionWorkPort? _sessionWorkPort;
     private readonly ISessionStopDelivery? _sessionStopDelivery;
@@ -64,7 +64,7 @@ public sealed partial class AgentSessionGrain : Grain, IAgentSessionGrain, IRemi
         IGrainFactory grains,
         ILogger<AgentSessionGrain> log,
         IEventStore eventStore,
-        IBackgroundTaskLauncher backgroundTasks,
+        EventDispatchSignal dispatchSignal,
         IFollowupDispatchScheduler? followupDispatchScheduler = null,
         ISessionWorkPort? sessionWorkPort = null,
         ISessionStopDelivery? sessionStopDelivery = null)
@@ -78,7 +78,7 @@ public sealed partial class AgentSessionGrain : Grain, IAgentSessionGrain, IRemi
         _connections = connections;
         _grains = grains;
         _eventStore = eventStore;
-        _backgroundTasks = backgroundTasks;
+        _dispatchSignal = dispatchSignal;
         _followupDispatchScheduler = followupDispatchScheduler;
         _sessionWorkPort = sessionWorkPort;
         _sessionStopDelivery = sessionStopDelivery;

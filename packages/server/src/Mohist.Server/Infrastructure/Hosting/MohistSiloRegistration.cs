@@ -1,5 +1,4 @@
 using Microsoft.Extensions.Configuration;
-using Mohist.Server.Events.Grains;
 using Mohist.Server.Otel;
 using Orleans.Configuration;
 using Orleans.Hosting;
@@ -36,23 +35,15 @@ public static class MohistSiloRegistration
             options.ConnectionString = MohistServiceRegistration.ResolveSqliteConnectionString(configuration);
         });
 
-        // The dispatcher grain registers a ~1s reminder, well
+        // The Slack outbox dispatcher grain registers a ~1s reminder, well
         // below the runtime's default MinimumReminderPeriod (~1 minute).
         // Lower the floor to 100ms so a fast cadence is accepted at
-        // registration time; the grain's EventDispatcherOptions still
+        // registration time; the grain's SlackProviderOptions still
         // decides the actual cadence.
         silo.Configure<ReminderOptions>(options =>
         {
             options.MinimumReminderPeriod = TimeSpan.FromMilliseconds(100);
         });
-
-        // The cluster-singleton EventDispatcherGrain
-        // resolves EventDispatcherOptions from its constructor. Options
-        // binding happens in the silo DI scope so the reminder cadence
-        // configured under "EventDispatcher" reaches the grain regardless
-        // of whether the host DI is populated.
-        silo.Services.Configure<EventDispatcherOptions>(
-            configuration.GetSection(EventDispatcherOptions.SectionName));
 
         return silo;
     }

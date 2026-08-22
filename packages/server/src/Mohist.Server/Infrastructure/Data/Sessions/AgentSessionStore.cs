@@ -2,7 +2,6 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
-using Mohist.Server.Events.Grains;
 using Mohist.Server.Infrastructure;
 using Mohist.Server.Infrastructure.Data.AgentJobs;
 using Mohist.Server.Infrastructure.Data.Events;
@@ -42,24 +41,21 @@ public class AgentSessionStore : IAgentSessionStore, IAgentSessionStreamRetentio
 
     private readonly IDbContextFactory<MohistDbContext> _dbFactory;
     private readonly IEventStore _eventStore;
-    private readonly IGrainFactory _grainFactory;
     private readonly ILogger<AgentSessionStore> _log;
-    private readonly IBackgroundTaskLauncher _backgroundTasks;
+    private readonly EventDispatchSignal _dispatchSignal;
     private readonly IPublicProjectionNudge? _publicProjectionNudge;
 
     public AgentSessionStore(
         IDbContextFactory<MohistDbContext> dbFactory,
         IEventStore eventStore,
-        IGrainFactory grainFactory,
         ILogger<AgentSessionStore> log,
-        IBackgroundTaskLauncher backgroundTasks,
+        EventDispatchSignal dispatchSignal,
         IPublicProjectionNudge? publicProjectionNudge = null)
     {
         _dbFactory = dbFactory;
         _eventStore = eventStore;
-        _grainFactory = grainFactory;
         _log = log;
-        _backgroundTasks = backgroundTasks;
+        _dispatchSignal = dispatchSignal;
         _publicProjectionNudge = publicProjectionNudge;
     }
 
@@ -143,7 +139,7 @@ public class AgentSessionStore : IAgentSessionStore, IAgentSessionStreamRetentio
 
     private void PokeDispatcherBestEffort()
     {
-        EventDispatcherPoke.PokeAfterCommit(_grainFactory, _log, nameof(AgentSessionStore), _backgroundTasks);
+        _dispatchSignal.Wake();
         // Best-effort latency nudge for the public execution projector;
         // its timer sweep recovers anything lost here.
         try

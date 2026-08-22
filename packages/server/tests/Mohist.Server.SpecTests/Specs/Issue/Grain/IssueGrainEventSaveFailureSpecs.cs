@@ -178,8 +178,7 @@ public class IssueGrainEventSaveFailureSpecs
             services.GetRequiredService<WorkflowQuerier>(),
             services.GetRequiredService<IDbContextFactory<MohistDbContext>>(),
             services.GetRequiredService<IEventStore>(),
-            services.GetRequiredService<IGrainFactory>(),
-            services.GetRequiredService<IBackgroundTaskLauncher>(),
+            services.GetRequiredService<EventDispatchSignal>(),
             services.GetRequiredService<IssueRepositoryResolver>(),
             services.GetRequiredService<WorkflowDefinitionResolver>(),
             services.GetRequiredService<WorkflowPromptResolver>(),
@@ -235,9 +234,8 @@ public class IssueGrainEventSaveFailureSpecs
             _delegate = new IssueStore(
                 scopeFactory.GetRequiredService<IDbContextFactory<MohistDbContext>>(),
                 scopeFactory.GetRequiredService<IEventStore>(),
-                scopeFactory.GetRequiredService<IGrainFactory>(),
                 scopeFactory.GetRequiredService<ILoggerFactory>().CreateLogger<IssueStore>(),
-                scopeFactory.GetRequiredService<IBackgroundTaskLauncher>());
+                scopeFactory.GetRequiredService<EventDispatchSignal>());
             _eventsSaveFailures = failEventsSaveOnce ? 1 : 0;
         }
 

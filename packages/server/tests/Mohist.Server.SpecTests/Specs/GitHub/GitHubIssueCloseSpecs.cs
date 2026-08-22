@@ -4,7 +4,6 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using Microsoft.Extensions.DependencyInjection;
-using Mohist.Server.Events.Grains;
 using Mohist.Server.GitHub.Infrastructure;
 using Mohist.Server.Infrastructure.Data.Issue;
 using Mohist.Server.Infrastructure.Events;
@@ -124,7 +123,7 @@ public sealed class GitHubIssueCloseSpecs
     }
 
     private Task PumpAsync() =>
-        _fixture.Grains.GetGrain<IEventDispatcherGrain>(EventDispatcherGrain.Global).DispatchNowAsync();
+        _fixture.Services.GetRequiredService<IEventDispatcher>().DrainAsync();
 
     private async Task SeedLinkAsync(string projectId, int issueNumber)
     {

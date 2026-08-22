@@ -115,6 +115,7 @@ public sealed class AgentSessionFollowupConcurrencyFixture : IAsyncLifetime
         builder.ConfigureSilo((_, siloBuilder) =>
         {
             siloBuilder.UseInMemoryReminderService();
+            siloBuilder.Services.AddSingleton(new Mohist.Server.Infrastructure.Events.EventDispatchSignal());
             siloBuilder.AddMemoryGrainStorageAsDefault();
             siloBuilder.Configure<GrainCollectionOptions>(options => options.CollectionAge = TimeSpan.FromMinutes(10));
             // AgentConcurrencyGrain's reconciliation reminder (issue-520 T-001

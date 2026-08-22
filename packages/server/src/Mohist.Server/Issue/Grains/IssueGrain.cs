@@ -37,8 +37,7 @@ public class IssueGrain : Grain, IIssueGrain, Coordinator.IIssueBindingTarget
     private readonly WorkflowQuerier _workflowQuerier;
     private readonly IDbContextFactory<MohistDbContext> _dbFactory;
     private readonly IEventStore _eventStore;
-    private readonly IGrainFactory _grainFactory;
-    private readonly IBackgroundTaskLauncher _backgroundTasks;
+    private readonly EventDispatchSignal _dispatchSignal;
     private readonly IssueRepositoryResolver _repositoryResolver;
     private readonly WorkflowDefinitionResolver _workflowDefinitionResolver;
     private readonly WorkflowPromptResolver _workflowPromptResolver;
@@ -57,8 +56,7 @@ public class IssueGrain : Grain, IIssueGrain, Coordinator.IIssueBindingTarget
         WorkflowQuerier workflowQuerier,
         IDbContextFactory<MohistDbContext> dbFactory,
         IEventStore eventStore,
-        IGrainFactory grainFactory,
-        IBackgroundTaskLauncher backgroundTasks,
+        EventDispatchSignal dispatchSignal,
         IssueRepositoryResolver repositoryResolver,
         WorkflowDefinitionResolver workflowDefinitionResolver,
         WorkflowPromptResolver workflowPromptResolver,
@@ -77,8 +75,7 @@ public class IssueGrain : Grain, IIssueGrain, Coordinator.IIssueBindingTarget
         _workflowQuerier = workflowQuerier;
         _dbFactory = dbFactory;
         _eventStore = eventStore;
-        _grainFactory = grainFactory;
-        _backgroundTasks = backgroundTasks;
+        _dispatchSignal = dispatchSignal;
         _repositoryResolver = repositoryResolver;
         _workflowDefinitionResolver = workflowDefinitionResolver;
         _workflowPromptResolver = workflowPromptResolver;
@@ -96,8 +93,7 @@ public class IssueGrain : Grain, IIssueGrain, Coordinator.IIssueBindingTarget
         WorkflowQuerier workflowQuerier,
         IDbContextFactory<MohistDbContext> dbFactory,
         IEventStore eventStore,
-        IGrainFactory grainFactory,
-        IBackgroundTaskLauncher backgroundTasks,
+        EventDispatchSignal dispatchSignal,
         IssueRepositoryResolver repositoryResolver,
         WorkflowDefinitionResolver workflowDefinitionResolver,
         WorkflowPromptResolver workflowPromptResolver,
@@ -115,8 +111,7 @@ public class IssueGrain : Grain, IIssueGrain, Coordinator.IIssueBindingTarget
         _workflowQuerier = workflowQuerier;
         _dbFactory = dbFactory;
         _eventStore = eventStore;
-        _grainFactory = grainFactory;
-        _backgroundTasks = backgroundTasks;
+        _dispatchSignal = dispatchSignal;
         _repositoryResolver = repositoryResolver;
         _workflowDefinitionResolver = workflowDefinitionResolver;
         _workflowPromptResolver = workflowPromptResolver;
@@ -1461,7 +1456,7 @@ public class IssueGrain : Grain, IIssueGrain, Coordinator.IIssueBindingTarget
         db.IssueComments.Add(comment);
         await _eventStore.AppendAsync(db, envelope);
         await db.SaveChangesAsync();
-        EventDispatcherPoke.PokeAfterCommit(_grainFactory, _log, nameof(IssueGrain), _backgroundTasks);
+        _dispatchSignal.Wake();
 
         await _attachmentService.BindCommentAsync(_issue.ProjectId, comment.Id, attachmentIds);
 

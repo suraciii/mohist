@@ -2,7 +2,6 @@ using System.Text.Json;
 using System.Text.Json.Nodes;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging.Abstractions;
-using Mohist.Server.Events.Grains;
 using Mohist.Server.Infrastructure;
 using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Infrastructure.Data.Events;
@@ -28,7 +27,7 @@ public partial class WorkflowRunStoreSpecs
     private static readonly DateTimeOffset FixedTime = new(2026, 7, 15, 0, 0, 0, TimeSpan.Zero);
 
     private static WorkflowRunStore CreateStore(IDbContextFactory<MohistDbContext> factory, IEventStore eventStore) =>
-        new(factory, eventStore, new NullDispatchGrainFactory(), NullLogger<WorkflowRunStore>.Instance, TestServices.BackgroundTasks, new DispatchSnapshotStore(factory, NullLogger<DispatchSnapshotStore>.Instance) as IDispatchSnapshotStore);
+        new(factory, eventStore, NullLogger<WorkflowRunStore>.Instance, new EventDispatchSignal(), new DispatchSnapshotStore(factory, NullLogger<DispatchSnapshotStore>.Instance) as IDispatchSnapshotStore);
 
     [Fact]
     public async Task SaveAsync_WithProjectAnnotation_StampsProjectIdOnPersistedEventExtensions()
@@ -481,8 +480,6 @@ public partial class WorkflowRunStoreSpecs
     {
         TGrainInterface IGrainFactory.GetGrain<TGrainInterface>(string primaryKey, string? grainClassNamePrefix)
         {
-            if (typeof(TGrainInterface) == typeof(IEventDispatcherGrain))
-                return (TGrainInterface)(object)new NullEventDispatcherGrain();
             throw new NotSupportedException($"NullDispatchGrainFactory does not support {typeof(TGrainInterface).Name}");
         }
 
@@ -535,22 +532,4 @@ public partial class WorkflowRunStoreSpecs
             => throw new NotSupportedException();
     }
 
-    /// <summary>
-    /// Drop-in <see cref="IEventDispatcherGrain"/> reference whose
-    /// <see cref="DispatchNowAsync"/> returns <see cref="Task.CompletedTask"/>.
-    /// Lets the post-commit poke fire without an Orleans silo.
-    /// </summary>
-    private sealed class NullEventDispatcherGrain : IGrainWithStringKey, IEventDispatcherGrain
-    {
-        public Task DispatchNowAsync(CancellationToken ct = default) => Task.CompletedTask;
-    public Task PokeAsync(CancellationToken ct = default) => Task.CompletedTask;
-
-        public Task<DeadLetterRedeliveryResult> RedeliverAsync(long deadLetterId, CancellationToken ct = default) =>
-            Task.FromResult(new DeadLetterRedeliveryResult(false, false, 0, "null grain"));
-
-        public Task ReceiveReminder(string reminderName, TickStatus status) => Task.CompletedTask;
-
-        public GrainId GrainId => default;
-        public string Key => string.Empty;
-    }
 }

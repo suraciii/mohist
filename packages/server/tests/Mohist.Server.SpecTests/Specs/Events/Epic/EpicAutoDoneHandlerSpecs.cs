@@ -8,7 +8,6 @@ using Mohist.Server.Epic.Domain.Events;
 using Mohist.Server.Epic.Grains;
 using Mohist.Server.Epic.Services;
 using Mohist.Server.Epic.Subscriptions;
-using Mohist.Server.Events.Grains;
 using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Infrastructure.Data.Epic;
 using Mohist.Server.Infrastructure.Data.Events;
@@ -246,10 +245,10 @@ public class EpicAutoDoneHandlerSpecs : EpicAutoDoneHandlerTestSupport
                     return typedHandler.HandleAsync(typedEvent, ct);
                 })],
             deadLetters,
+            new FakeDispatchStreamLeaseStore(),
             time,
             Options.Create(new EventDispatcherOptions
             {
-                BatchSize = 10,
                 MaxAttempts = 2,
                 BaseBackoff = TimeSpan.FromSeconds(1),
                 MaxBackoff = TimeSpan.FromSeconds(1),
@@ -270,14 +269,14 @@ public class EpicAutoDoneHandlerSpecs : EpicAutoDoneHandlerTestSupport
                 [EventCatalog.Lineage.Issue] = "1",
             }));
 
-        await dispatcher.DispatchAsync(CancellationToken.None);
+        await dispatcher.DrainAsync(CancellationToken.None);
 
         Assert.Equal(["project_1:2"], grains.IssueStartCalls);
         Assert.Equal(1, events.PendingCount);
         Assert.Empty(deadLetters.Written);
 
         time.Advance(TimeSpan.FromSeconds(1));
-        await dispatcher.DispatchAsync(CancellationToken.None);
+        await dispatcher.DrainAsync(CancellationToken.None);
 
         Assert.Equal(["project_1:2", "project_1:2"], grains.IssueStartCalls);
         var deadLetter = Assert.Single(deadLetters.Written);

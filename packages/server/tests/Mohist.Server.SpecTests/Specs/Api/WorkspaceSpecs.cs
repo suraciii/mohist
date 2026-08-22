@@ -1,5 +1,5 @@
 using Microsoft.Extensions.DependencyInjection;
-using Mohist.Server.Events.Grains;
+using Mohist.Server.Infrastructure.Events;
 using Mohist.Server.Infrastructure.Workspace;
 using Mohist.Server.Runner.Services;
 using Mohist.Server.Contracts;
@@ -344,7 +344,7 @@ public class WorkspaceSpecs
     }
 
     private Task DispatchEventsAsync() =>
-        _fixture.Grains.GetGrain<IEventDispatcherGrain>(EventDispatcherGrain.Global).DispatchNowAsync();
+        _fixture.Services.GetRequiredService<IEventDispatcher>().DrainAsync();
 
     private static WorkspaceStatus AvailableStatus(string runId, string baseBranch, int ahead = 0, int behind = 0) => new()
     {
