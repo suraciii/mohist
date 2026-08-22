@@ -1694,10 +1694,12 @@ public sealed partial class AgentSessionGrain : Grain, IAgentSessionGrain, IRemi
         var isPureActivityBatch = command.RuntimeEvents.Count > 0
             && command.RuntimeEvents.All(runtimeEvent =>
                 string.Equals(runtimeEvent.Type, RuntimeEventTypes.SessionActivity, StringComparison.Ordinal));
+        var isCurrentRuntimeBinding = !string.IsNullOrWhiteSpace(command.RuntimeSessionId)
+            && string.Equals(command.RuntimeSessionId, session.Status.AgentRuntimeSessionId, StringComparison.Ordinal);
         var hasWorkflowTurnForRuntime = (session.Status.Turns ?? []).Any(turn =>
             turn.WorkflowExecution is { } binding
             && string.Equals(binding.RuntimeSessionId, command.RuntimeSessionId, StringComparison.Ordinal));
-        if (isWorkflowIntroduced && isUnattributed && !isPureActivityBatch)
+        if (isWorkflowIntroduced && isUnattributed && isCurrentRuntimeBinding && !isPureActivityBatch)
             throw new InvalidOperationException("Workflow runtime events require the acknowledged Agent turn binding.");
 
         if (command.SessionTurnId is not null)
@@ -1719,7 +1721,7 @@ public sealed partial class AgentSessionGrain : Grain, IAgentSessionGrain, IRemi
             command.RuntimeEvents,
             command.RuntimeSessionId,
             requireCurrentRuntimeBinding: true,
-            sessionLevelActivityOnly: isWorkflowIntroduced && isUnattributed && isPureActivityBatch);
+            sessionLevelActivityOnly: isWorkflowIntroduced && isUnattributed && isCurrentRuntimeBinding && isPureActivityBatch);
         if (command.WorkflowExecution is { } binding)
         {
             var observations = BuildWorkflowRuntimeObservations(command.RuntimeEvents);
