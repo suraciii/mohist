@@ -1444,7 +1444,16 @@ public sealed partial class AgentJobGrain : Grain, IAgentJobGrain
         int? exitCode)
     {
         var origin = State.ManualPlan?.ConnectionOrigin;
-        if (origin is null || State.PendingTerminalDeliveryEvent is not null)
+        if (origin is null)
+            return;
+
+        // A failed interim Unknown append leaves its obligation in state. The
+        // recovery deadline is authoritative, so the final terminal payload
+        // must replace that stale obligation rather than being suppressed by
+        // it. A non-Unknown obligation is already the final payload and must
+        // remain stable across terminal-entry replays.
+        if (State.PendingTerminalDeliveryEvent is { } pending
+            && (status == AgentJobStatus.Unknown || pending.Status != AgentJobStatus.Unknown))
             return;
 
         // The interim Unknown delivery and the final reconciled delivery must

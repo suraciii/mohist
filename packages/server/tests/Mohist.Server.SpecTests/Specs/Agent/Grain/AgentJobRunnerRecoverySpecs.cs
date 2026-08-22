@@ -280,6 +280,79 @@ public sealed class AgentJobRunnerRecoverySpecs : AgentJobGrainTestSupport
     }
 
     [Fact]
+    public async Task ReconciliationFailure_ReplacesPendingUnknownDeliveryAfterInterimAppendFailure()
+    {
+        var (runnerId, projectId) = await RegisterAgentJobRunnerAsync(
+            $"agent-job-retry-delivery-failure-runner-{Guid.NewGuid():N}",
+            projectId: $"agent-job-retry-delivery-failure-project-{Guid.NewGuid():N}");
+        var jobKey = $"agent-job-retry-delivery-failure-{Guid.NewGuid():N}";
+        var sessionId = $"session-retry-delivery-failure-{Guid.NewGuid():N}";
+        var session = Grains.GetGrain<IAgentSessionGrain>(sessionId);
+        await session.OpenAsync(new OpenAgentSessionCommand(
+            RunnerId: string.Empty,
+            AgentRuntime: "opencode",
+            WorkDir: "/tmp/agent-job-fixture",
+            Metadata: new AgentSessionMetadata(new Dictionary<string, string>(StringComparer.Ordinal)
+            {
+                [AgentSessionQueryMetadataKeys.ProjectId] = projectId,
+                [AgentSessionQueryMetadataKeys.SourceKind] = "agent-launch",
+                [GenericAgentSessionMetadata.AgentId] = "agent-test",
+            })));
+
+        var job = JobGrain(jobKey);
+        await job.PrepareManualLaunchAsync(new PrepareManualLaunchCommand(
+            SessionId: sessionId,
+            InputId: Guid.NewGuid().ToString("N"),
+            TurnId: Guid.NewGuid().ToString("N"),
+            Prompt: "retryable reconciliation failure with a pending unknown delivery",
+            ProjectId: projectId,
+            AgentId: "agent-test",
+            ConnectionOrigin: new ConnectionLaunchOrigin(
+                "conn-retry-delivery-failure",
+                "team-1",
+                "U_OWNER",
+                "C-retry-delivery-failure",
+                "1710000000.000001")));
+        await job.SubmitPreparedLaunchAsync();
+        await WaitForStatusAsync(job, AgentJobStatus.Running, TimeSpan.FromSeconds(5));
+
+        _fixture.EventStore.ThrowOnAppend = envelope =>
+            envelope.Type == EventCatalog.ReverseDns.AgentJobTerminalDelivery
+            && envelope.Id == AgentJobSessionDeliveryIds.UnknownTerminalDeliveryEventId(jobKey);
+        try
+        {
+            await Grains.GetGrain<IRunnerGrain>(runnerId).UnregisterAsync();
+            var recovering = await job.GetRuntimeSnapshotAsync();
+            Assert.Equal(AgentJobStatus.Unknown, recovering.Status);
+            Assert.DoesNotContain(
+                _fixture.EventStore.Appended,
+                envelope => envelope.Envelope.Id == AgentJobSessionDeliveryIds.UnknownTerminalDeliveryEventId(jobKey));
+
+            var deadline = Assert.IsType<DateTimeOffset>(recovering.RecoveryDeadlineAt);
+            _fixture.TimeProvider.Advance(deadline - _fixture.TimeProvider.GetUtcNow());
+            _fixture.EventStore.ThrowOnAppend = null;
+            await job.ReceiveReminder(AgentJobGrain.RecoveryReminderName, default);
+
+            var terminal = await job.GetTerminalResultAsync();
+            Assert.Equal(AgentJobStatus.Failed, terminal.Status);
+            Assert.Equal(AgentJobFailureReasons.RunnerLost, terminal.FailureReason);
+
+            var failedDelivery = Assert.Single(
+                _fixture.EventStore.Appended,
+                envelope => envelope.Envelope.Type == EventCatalog.ReverseDns.AgentJobTerminalDelivery
+                    && envelope.Envelope.Id == AgentJobSessionDeliveryIds.TerminalDeliveryEventId(jobKey));
+            Assert.Equal("failed", failedDelivery.Envelope.Data!.Value.GetProperty("status").GetString());
+            Assert.Equal(
+                AgentJobFailureReasons.RunnerLost,
+                failedDelivery.Envelope.Data.Value.GetProperty("failureCategory").GetString());
+        }
+        finally
+        {
+            _fixture.EventStore.ThrowOnAppend = null;
+        }
+    }
+
+    [Fact]
     public async Task RunnerLossRecoveryReminder_FailsAtPersistedDeadlineWithRecordedReason()
     {
         var (runnerId, projectId) = await RegisterAgentJobRunnerAsync(
