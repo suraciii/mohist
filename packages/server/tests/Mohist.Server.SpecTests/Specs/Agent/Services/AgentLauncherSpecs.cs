@@ -762,6 +762,12 @@ public class AgentLauncherSpecs
                 workspaceName: "workspace-at-launch",
                 startupContext: startupContext,
                 attachments: [attachment],
+                agentSessionStartup: new AgentSessionStartup(
+                    projectId,
+                    "source-startup-session",
+                    ParentSessionId: null,
+                    AllowedSubagents: [],
+                    SpawnCommand: "mo agent spawn original"),
                 attachmentIds: [attachment.Id]);
         }
 
@@ -813,7 +819,7 @@ public class AgentLauncherSpecs
         Assert.Equal(sourceSettings.AgentSessionStartup!.ProjectId, retriedRecord.Session.Settings.AgentSessionStartup!.ProjectId);
         Assert.Equal(retry.SessionId, retriedRecord.Session.Settings.AgentSessionStartup.SessionId);
         Assert.Equal(sourceSettings.AgentSessionStartup.AllowedSubagents, retriedRecord.Session.Settings.AgentSessionStartup.AllowedSubagents);
-        Assert.Contains($"--parent-session {retry.SessionId}", retriedRecord.Session.Settings.AgentSessionStartup.SpawnCommand, StringComparison.Ordinal);
+        Assert.Equal("mo agent spawn original", retriedRecord.Session.Settings.AgentSessionStartup.SpawnCommand);
         Assert.Equal(sourceInitial.Input!.Attachments, retried!.Input!.Attachments);
         Assert.Equal(sourceInitial.Input.StartupContext, retried.Input.StartupContext);
         Assert.Equal(sourceInitial.Input.Text, retried.Input.Text);
