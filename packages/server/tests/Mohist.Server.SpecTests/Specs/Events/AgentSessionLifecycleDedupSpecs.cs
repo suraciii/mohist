@@ -351,7 +351,7 @@ public class AgentSessionLifecycleDedupSpecs
             .OpenAsync(new OpenAgentSessionCommand(
                 _runnerId,
                 "opencode",
-                Metadata: GenericAgentSessionMetadata.Metadata(new GenericAgentSessionContext(project.Id, "agent-1", $"dedup-agent-{name}"))));
+                Metadata: WorkflowSessionMetadata(project.Id, issue.Number, workflowRunId, sessionName, sessionName, "task", "Build", $"Dedup {name}")));
 
         return new CreatedSession(project.Id, workflowRunId, sessionName, session.Id);
     }
@@ -361,7 +361,7 @@ public class AgentSessionLifecycleDedupSpecs
             body);
 
     private string RunnerAgentSessionAttachPath(CreatedSession session) =>
-        $"/api/runner/{_runnerId}/agent-sessions/{Uri.EscapeDataString(session.ProjectId)}/{Uri.EscapeDataString(session.Id)}/attach";
+        $"{RunnerSessionPath(session)}/attach";
 
     private string RunnerSessionRuntimeEventsPath(CreatedSession session) =>
         $"/api/runner/{_runnerId}/agent-sessions/{session.Id}/runtime-events";

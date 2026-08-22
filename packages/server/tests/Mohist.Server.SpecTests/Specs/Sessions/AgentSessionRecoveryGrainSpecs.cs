@@ -600,6 +600,5 @@ public sealed class AgentSessionRecoveryGrainSpecs : IClassFixture<AgentSessionG
             .WithLabel("mohist.io/project-id", "project-1")
             .WithLabel("mohist.io/source-kind", "agent-launch")
             .WithLabel("mohist.io/source-id", "workflow-1")
-            .WithLabel("mohist.io/session-name", "build")
-            .WithLabel(GenericAgentSessionMetadata.AgentId, "agent-1"));
+            .WithLabel("mohist.io/session-name", "build"));
 }

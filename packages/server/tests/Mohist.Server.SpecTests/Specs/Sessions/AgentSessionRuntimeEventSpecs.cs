@@ -270,7 +270,7 @@ public class AgentSessionRuntimeEventSpecs : AgentSessionTestSupport
     [Fact]
     public async Task RunnerAppendsSessionEvents_ConcurrentChunks_BuffersUntilFlush()
     {
-        var (project, _, _, session) = await CreateStartedAgentSessionAsync("sequence", workflow: false);
+        var (project, _, _, session) = await CreateStartedAgentSessionAsync("sequence");
         var turnId = await AcceptSessionRuntimeEventTurnAsync(session);
         var persistence = _fixture.Persistence.Checkpoint(session.Id);
 
@@ -296,7 +296,7 @@ public class AgentSessionRuntimeEventSpecs : AgentSessionTestSupport
     [Fact]
     public async Task RunnerAppendsSessionEvents_StoresAggregateDomainEvents()
     {
-        var (_, _, _, session) = await CreateStartedAgentSessionAsync("runner-events-store", workflow: false);
+        var (_, _, _, session) = await CreateStartedAgentSessionAsync("runner-events-store");
         var turnId = await AcceptSessionRuntimeEventTurnAsync(session);
         var eventStore = _fixture.Services.GetRequiredService<IEventStore>();
         var before = await eventStore.ListAgentSessionEventsAsync(session.Id);
@@ -321,7 +321,7 @@ public class AgentSessionRuntimeEventSpecs : AgentSessionTestSupport
     [Fact]
     public async Task RunnerAppendsUsageUpdate_AccumulatesTokenAndCostCounters()
     {
-        var (project, _, _, session) = await CreateStartedAgentSessionAsync("usage-accumulate", workflow: false);
+        var (project, _, _, session) = await CreateStartedAgentSessionAsync("usage-accumulate");
         var turnId = await AcceptSessionRuntimeEventTurnAsync(session);
 
         await PostSessionTurnRuntimeEventsAsync(
@@ -368,7 +368,7 @@ public class AgentSessionRuntimeEventSpecs : AgentSessionTestSupport
     [Fact]
     public async Task RunnerAppendsUsageUpdate_PartialFields_DoesNotEraseExistingValues()
     {
-        var (project, _, _, session) = await CreateStartedAgentSessionAsync("usage-partial", workflow: false);
+        var (project, _, _, session) = await CreateStartedAgentSessionAsync("usage-partial");
         var turnId = await AcceptSessionRuntimeEventTurnAsync(session);
 
         await PostSessionTurnRuntimeEventsAsync(
@@ -396,7 +396,7 @@ public class AgentSessionRuntimeEventSpecs : AgentSessionTestSupport
     [Fact]
     public async Task RunnerAppendsUsageUpdate_TerminalSession_PersistsEventButDoesNotMutateCounters()
     {
-        var (project, _, _, session) = await CreateStartedAgentSessionAsync("usage-terminal", workflow: false);
+        var (project, _, _, session) = await CreateStartedAgentSessionAsync("usage-terminal");
         var turnId = await AcceptSessionRuntimeEventTurnAsync(session);
         var persistence = _fixture.Persistence.Checkpoint(session.Id);
 
@@ -435,7 +435,7 @@ public class AgentSessionRuntimeEventSpecs : AgentSessionTestSupport
     [Fact]
     public async Task RunnerAppendsResolvedModelEvent_UpdatesResolvedModel()
     {
-        var (project, _, _, session) = await CreateStartedAgentSessionAsync("resolved-model", workflow: false);
+        var (project, _, _, session) = await CreateStartedAgentSessionAsync("resolved-model");
         var turnId = await AcceptSessionRuntimeEventTurnAsync(session);
         var persistence = _fixture.Persistence.Checkpoint(session.Id);
 
@@ -459,7 +459,7 @@ public class AgentSessionRuntimeEventSpecs : AgentSessionTestSupport
     [Fact]
     public async Task RunnerAppendsResolvedModelEvent_WithoutResolvedModelField_DoesNotSetModel()
     {
-        var (project, _, _, session) = await CreateStartedAgentSessionAsync("resolved-model-divergent", workflow: false);
+        var (project, _, _, session) = await CreateStartedAgentSessionAsync("resolved-model-divergent");
         var turnId = await AcceptSessionRuntimeEventTurnAsync(session);
         var persistence = _fixture.Persistence.Checkpoint(session.Id);
 
@@ -483,7 +483,7 @@ public class AgentSessionRuntimeEventSpecs : AgentSessionTestSupport
     [Fact]
     public async Task RunnerAppendsTerminalEvent_WithFailureCategory_PersistsCategory()
     {
-        var (project, _, _, session) = await CreateStartedAgentSessionAsync("failure-category", workflow: false);
+        var (project, _, _, session) = await CreateStartedAgentSessionAsync("failure-category");
         var turnId = await AcceptSessionRuntimeEventTurnAsync(session);
         var persistence = _fixture.Persistence.Checkpoint(session.Id);
 
@@ -512,7 +512,7 @@ public class AgentSessionRuntimeEventSpecs : AgentSessionTestSupport
     [Fact]
     public async Task RunnerAppendsToolCallEvents_CountsCallsAndErrors()
     {
-        var (project, _, _, session) = await CreateStartedAgentSessionAsync("tool-calls", workflow: false);
+        var (project, _, _, session) = await CreateStartedAgentSessionAsync("tool-calls");
         var turnId = await AcceptSessionRuntimeEventTurnAsync(session);
         var persistence = _fixture.Persistence.Checkpoint(session.Id);
 

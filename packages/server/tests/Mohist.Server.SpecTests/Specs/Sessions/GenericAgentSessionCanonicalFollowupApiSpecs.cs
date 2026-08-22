@@ -106,9 +106,8 @@ public class GenericAgentSessionCanonicalFollowupApiSpecs : GenericAgentSessionF
             await grain.AppendRuntimeEventsAsync(new AppendAgentSessionRuntimeEventsCommand(
                 new[] { new AgentSessionRuntimeEventInput(
                     RuntimeEventTypes.SessionInput,
-                    $$"""{"text":"show follow-up status","kind":"followup","source":"agent-session-followup","operationId":"{{operationId}}","turnId":"{{turnId}}"}""") },
-                sessionId,
-                SessionTurnId: turnId));
+                    $$"""{"text":"show follow-up status","kind":"followup","source":"agent-session-followup","operationId":"{{operationId}}"}""") },
+                sessionId));
             await persistence.WaitAsync();
 
             using var executing = await _client.GetAsync($"/api/projects/{project.Id}/issues/{issue.Number}/sessions/{sessionName}");

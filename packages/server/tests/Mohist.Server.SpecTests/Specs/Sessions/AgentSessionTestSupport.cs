@@ -36,7 +36,7 @@ public abstract class AgentSessionTestSupport
         _client = fixture.Client;
     }
 
-    protected async Task<(ProjectDto Project, IssueDto Issue, WorkDispatch Work, CreatedSession Session)> CreateStartedAgentSessionAsync(string name, bool start = true, string? title = null, string? sessionName = null, bool workflow = false)
+    protected async Task<(ProjectDto Project, IssueDto Issue, WorkDispatch Work, CreatedSession Session)> CreateStartedAgentSessionAsync(string name, bool start = true, string? title = null, string? sessionName = null)
     {
         var projectName = $"asg-{Guid.NewGuid():N}";
         var project = await _client.CreateProjectWithDefaultRepositoryAsync<ProjectDto>("/api/projects", projectName);
@@ -58,14 +58,10 @@ var issue = await _client.PostDataAsync<IssueDto>($"/api/projects/{project.Id}/i
         var info = await grain.OpenAsync(new OpenAgentSessionCommand(
             _runnerId,
             "opencode",
-            Metadata: workflow
-                ? WorkflowSessionMetadata(project.Id, issue.Number, work.WorkflowRunId, sessionName, work.WorkId, work.WorkType, work.Stage, work.Title)
-                : GenericAgentSessionMetadata.Metadata(new GenericAgentSessionContext(project.Id, "agent-1", $"test-agent-{name}"))));
+            Metadata: WorkflowSessionMetadata(project.Id, issue.Number, work.WorkflowRunId, sessionName, work.WorkId, work.WorkType, work.Stage, work.Title)));
         var session = new CreatedSession(project.Id, issue.Number, work.WorkflowRunId, sessionName, info);
         if (start)
-            await _client.PostOkAsync(
-                workflow ? RunnerAgentSessionAttachPath(session) : RunnerGenericAgentSessionAttachPath(session),
-                new { runtimeSessionId = session.Id, runtime = "opencode", expectedRuntime = "opencode", expectedRuntimeSessionId = (string?)null, workDir = $"/workspaces/{project.Id}", processPid = 1234 });
+            await _client.PostOkAsync(RunnerAgentSessionAttachPath(session), new { runtimeSessionId = session.Id, runtime = "opencode", expectedRuntime = "opencode", expectedRuntimeSessionId = (string?)null, workDir = $"/workspaces/{project.Id}", processPid = 1234 });
         return (project, issue, work, session);
     }
 
@@ -74,9 +70,6 @@ var issue = await _client.PostDataAsync<IssueDto>($"/api/projects/{project.Id}/i
 
     protected string RunnerAgentSessionRuntimeEventsPath(CreatedSession session) =>
         $"{RunnerSessionPath(session)}/runtime-events";
-
-    protected string RunnerGenericAgentSessionAttachPath(CreatedSession session) =>
-        $"/api/runner/{_runnerId}/agent-sessions/{Uri.EscapeDataString(session.ProjectId)}/{Uri.EscapeDataString(session.Id)}/attach";
 
     protected string RunnerSessionRuntimeEventsPath(CreatedSession session) =>
         $"/api/runner/{_runnerId}/agent-sessions/{session.Id}/runtime-events";
