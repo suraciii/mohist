@@ -33,8 +33,6 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Mohist.Server.UnitTests", "
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Mohist.Workflow.Definition.Tests", "packages\server\tests\Mohist.Workflow.Definition.Tests\Mohist.Workflow.Definition.Tests.csproj", "{D3F1A4B5-0005-0005-0005-000000000005}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Mohist.Server.CrossComponentBridge", "packages\server\tests\Mohist.Server.CrossComponentBridge\Mohist.Server.CrossComponentBridge.csproj", "{7FF7F51B-F5BD-4615-9A24-EE4842885F5B}"
-EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -181,6 +179,5 @@ Global
 		{E2CF616E-7F27-41A3-AACA-E78E00858850} = {B89EF008-B110-7D42-B933-EBA1204D5139}
 		{B2776360-BAF2-4D60-908B-D73225F8D307} = {5204C9C1-8FDE-E187-EC0A-21FCBD43FA71}
 		{D3F1A4B5-0005-0005-0005-000000000005} = {5204C9C1-8FDE-E187-EC0A-21FCBD43FA71}
-		{7FF7F51B-F5BD-4615-9A24-EE4842885F5B} = {5204C9C1-8FDE-E187-EC0A-21FCBD43FA71}
 	EndGlobalSection
 EndGlobal

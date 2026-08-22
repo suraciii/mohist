@@ -836,7 +836,6 @@ internal sealed class WindowsScheduledTaskInstaller : IServiceInstaller
 
     internal string RenderSlackLauncher(SlackLauncherSpec spec)
     {
-        var logFile = @"%USERPROFILE%\.mohist\slack\out.log";
         var repoRoot = QuoteForCmdBody(spec.RepoRoot);
         var sb = new StringBuilder();
         sb.AppendLine("@echo off");
@@ -844,7 +843,7 @@ internal sealed class WindowsScheduledTaskInstaller : IServiceInstaller
         sb.AppendLine($"set \"SERVER_URL={spec.ServerUrl}\"");
         if (!string.IsNullOrEmpty(spec.OperatorToken))
             sb.AppendLine($"set \"{SlackAdapterTokenEnvironmentVariable}={spec.OperatorToken}\"");
-        sb.AppendLine($"node packages\\mohist-slack\\dist\\cli.js >> \"{logFile}\" 2>&1");
+        sb.AppendLine("\"packages\\go\\mohist-slack\\bin\\mohist-slack.exe\" >> \"%USERPROFILE%\\.mohist\\slack\\out.log\" 2>&1");
         return sb.ToString();
     }
 
