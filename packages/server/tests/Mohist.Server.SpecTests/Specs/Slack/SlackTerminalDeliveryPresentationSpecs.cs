@@ -29,11 +29,15 @@ public sealed class SlackTerminalDeliveryPresentationSpecs
 
     public SlackTerminalDeliveryPresentationSpecs(MohistIntegrationFixture fixture) => _fixture = fixture;
 
-    [Fact]
-    public async Task HandleAsync_retryable_failure_promotes_a_signed_retry_notice_with_durable_target_facts()
+    [Theory]
+    [InlineData(AgentJobFailureReasons.RunnerUnavailable)]
+    [InlineData(AgentJobFailureReasons.RunnerLost)]
+    [InlineData(AgentJobFailureReasons.ReportTimeout)]
+    public async Task HandleAsync_retryable_failure_promotes_a_signed_retry_notice_with_durable_target_facts(
+        string failureCategory)
     {
         var connection = await CreateConnectionAsync();
-        var failed = await SeedFailedLaunchAsync(connection, "C-terminal-positive");
+        var failed = await SeedFailedLaunchAsync(connection, "C-terminal-positive", failureCategory);
         var source = new SlackMessageIdentity(
             connection.WorkspaceTeamId,
             failed.ConversationId,
@@ -58,7 +62,7 @@ public sealed class SlackTerminalDeliveryPresentationSpecs
             Status: "failed",
             Message: "failed",
             FailureReason: "runner unavailable",
-            FailureCategory: AgentJobFailureReasons.RunnerUnavailable,
+            FailureCategory: failureCategory,
             ArtifactCount: 0,
             ExitCode: 1,
             ThreadTs: failed.ThreadTs,
@@ -276,7 +280,8 @@ public sealed class SlackTerminalDeliveryPresentationSpecs
 
     private async Task<SeededFailedLaunch> SeedFailedLaunchAsync(
         AgentConnection connection,
-        string conversationId)
+        string conversationId,
+        string failureCategory = AgentJobFailureReasons.RunnerUnavailable)
     {
         await using var scope = _fixture.Services.CreateAsyncScope();
         var agent = await scope.ServiceProvider.GetRequiredService<AgentQuerier>()
@@ -299,7 +304,7 @@ public sealed class SlackTerminalDeliveryPresentationSpecs
             AgentTurnStatus.Failed,
             new AgentTurnResult(
                 FailureReason: "runner unavailable",
-                FailureCategory: AgentJobFailureReasons.RunnerUnavailable));
+                FailureCategory: failureCategory));
         return new SeededFailedLaunch(launch.SessionId, launch.TurnId, conversationId, messageTs, threadTs);
     }
 

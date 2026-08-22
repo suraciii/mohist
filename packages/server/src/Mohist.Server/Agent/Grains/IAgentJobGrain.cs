@@ -403,6 +403,9 @@ public static class AgentJobSessionDeliveryIds
     public static string TerminalDeliveryEventId(string jobKey) =>
         $"agent-job:{jobKey}:terminal-delivery";
 
+    public static string UnknownTerminalDeliveryEventId(string jobKey) =>
+        $"agent-job:{jobKey}:terminal-delivery:unknown";
+
     public static string SubagentTerminalEventId(string jobKey) =>
         $"agent-job:{jobKey}:subagent-terminal";
 }

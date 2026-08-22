@@ -1447,8 +1447,15 @@ public sealed partial class AgentJobGrain : Grain, IAgentJobGrain
         if (origin is null || State.PendingTerminalDeliveryEvent is not null)
             return;
 
+        // The interim Unknown delivery and the final reconciled delivery must
+        // stay distinct persisted events: the event store deduplicates by
+        // (source, event id), and a reconciliation that resolves to Failed has
+        // to reach Slack as its own payload.
+        var eventId = status == AgentJobStatus.Unknown
+            ? AgentJobSessionDeliveryIds.UnknownTerminalDeliveryEventId(Key)
+            : AgentJobSessionDeliveryIds.TerminalDeliveryEventId(Key);
         State.PendingTerminalDeliveryEvent = new PendingTerminalDeliveryEvent(
-            AgentJobSessionDeliveryIds.TerminalDeliveryEventId(Key),
+            eventId,
             origin,
             status,
             message,
@@ -1513,20 +1520,7 @@ public sealed partial class AgentJobGrain : Grain, IAgentJobGrain
     internal CloudEvent BuildSubagentTerminalEnvelope(PendingSubagentTerminalEvent pending) =>
         AgentJobLineage.BuildSubagentTerminalEnvelope(Key, pending);
 
-    internal CloudEvent BuildTerminalDeliveryEnvelope(PendingTerminalDeliveryEvent obligation)
-    {
-        var extensions = AgentJobLineage.BuildExtensions(State.Input, State.RoutedPlan);
-        var sessionLaunchPrompt = State.Input?.Prompt
-            ?? State.ManualPlan?.Prompt
-            ?? State.RoutedPlan?.Prompt;
-        return AgentJobLineage.BuildTerminalDeliveryEnvelope(
-            Key,
-            obligation,
-            extensions,
-            sessionLaunchPrompt,
-            State.Input?.AgentSessionId,
-            State.Input?.InitialTurnId);
-    }
+
 
     private async Task UnregisterSelfAsync(string reminderName)
     {

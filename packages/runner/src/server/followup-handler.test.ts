@@ -174,7 +174,11 @@ describe('follow-up terminal failure categories', () => {
       enqueueProducedFact: vi.fn(async (record: unknown) => records.push(record)),
     }
     const receive = createFollowupHandler({
-      followupTargetResolver: () => ({ runtimeSessionId: 'runtime-1', workDir: '/work', projectId: '__mohist_slack_manager__' }),
+      followupTargetResolver: () => ({
+        runtimeSessionId: 'runtime-1',
+        workDir: '/work',
+        projectId: '__mohist_slack_manager__',
+      }),
       agentSessionRuntimeEventOutbox: outbox as never,
       piRuntime: {
         ready: () => true,
