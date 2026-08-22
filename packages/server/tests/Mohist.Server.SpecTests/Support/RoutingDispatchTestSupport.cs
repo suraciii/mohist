@@ -510,6 +510,7 @@ public sealed class RecordingAgentLauncher : IAgentLauncher
         string? preMintedSessionId = null,
         string? preMintedInputId = null,
         string? preMintedTurnId = null,
+        string? idempotencyKeyOverride = null,
         CancellationToken ct = default) =>
         throw new NotSupportedException("RecordingAgentLauncher does not exercise the connection launch path.");
 

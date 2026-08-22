@@ -441,6 +441,7 @@ public sealed class AgentLauncher : IAgentLauncher, IScopedService
         string? preMintedSessionId = null,
         string? preMintedInputId = null,
         string? preMintedTurnId = null,
+        string? idempotencyKeyOverride = null,
         CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(agent);
@@ -450,7 +451,9 @@ public sealed class AgentLauncher : IAgentLauncher, IScopedService
         await EnsureLaunchableAsync(agent, ct);
 
         var context = new AgentLaunchContext(agent.ProjectId);
-        var key = $"slack:{origin.WorkspaceTeamId}:{origin.ConversationId}:{origin.MessageTs}";
+        var key = string.IsNullOrWhiteSpace(idempotencyKeyOverride)
+            ? $"slack:{origin.WorkspaceTeamId}:{origin.ConversationId}:{origin.MessageTs}"
+            : idempotencyKeyOverride;
         var definition = ResolveExecutionDefinition(agent);
         var agentConfigJson = agent.AgentConfig is { ValueKind: not JsonValueKind.Undefined }
             ? agent.AgentConfig.Value.GetRawText()

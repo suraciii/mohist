@@ -1,0 +1,13 @@
+## Codebase Patterns
+- AgentSession is an Orleans grain aggregate; target facts are read through IAgentSessionGrain.GetInitialLaunchAsync/ListTurnsAsync/ListInputsAsync. Launch turns are identified by non-empty AgentTurnRecord.JobId, and input provenance is AgentSessionInputProvenance.
+- Connection launches flow through AgentLauncher.LaunchConnectionAsync and AgentLaunchCoordinatorGrain. The coordinator adopts pre-minted Session/Input/Turn ids and deduplicates on its idempotency key; the Slack default key is slack:{team}:{conversation}:{messageTs}.
+- EF models live in MohistDbContext with row classes under Infrastructure/Data; migrations are timestamped 202609... and the model snapshot is generated. Test fixtures use EnsureCreated for L0 and a migrated SQLite template for integration specs.
+- Conventional DI scans IScopedService as self; interface aliases are added manually in MohistServiceRegistration.
+- Existing AgentJobFailureReasons constants are in Agent/Grains/IAgentJobGrain.cs: RunnerUnavailable, RunnerLost, ReportTimeout, WorkspaceUnavailable.
+
+## T-001 Work
+- Implemented the exact-ordinal AgentSessionRetryPolicy over AgentJobFailureReasons plus runner/reserved recorded categories; tests pin producer constants and permanent/unknown cases.
+- Added agent_retry_operations EF model/migration/snapshot and AgentRetryOperationStore. Claim-or-create uses unique idempotency and session+turn boundaries; Finished cleanup leaves Pending rows intact.
+- Added AgentSessionRetryService. It re-reads target facts, claims/commits Pending before root dispatch, rebuilds ConnectionLaunchOrigin from durable provenance, uses preallocated identities and `agent-retry:{operationId}`, and leaves the failed turn untouched. Thread dispatch remains intentionally deferred to T-002.
+- Extended IAgentLauncher.LaunchConnectionAsync with an optional idempotency-key override; existing Slack callers retain the original key behavior.
+- Verification: server, UnitTests, and SpecTests projects build; dotnet test executed the full UnitTests (3787) and full SpecTests (3041) successfully. MTP reports the VSTest filter is ignored, so the runs were full suites.

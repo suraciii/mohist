@@ -55,6 +55,7 @@ public partial class MohistDbContext : DbContext
     public DbSet<WorkflowProfileRecordRow> WorkflowProfileRecords { get; set; } = null!;
     public DbSet<WorkflowRunEventRow> WorkflowRunEvents { get; set; } = null!;
     public DbSet<AgentSessionRow> AgentSessions { get; set; } = null!;
+    public DbSet<AgentRetryOperationRow> AgentRetryOperations { get; set; } = null!;
     public DbSet<AgentSessionLifecycleTransitionRow> AgentSessionLifecycleTransitions { get; set; } = null!;
     public DbSet<SessionTreeGraphRevisionRow> SessionTreeGraphRevisions { get; set; } = null!;
     public DbSet<AgentSessionTranscriptTurnRow> AgentSessionTranscriptTurns { get; set; } = null!;
@@ -255,6 +256,34 @@ public partial class MohistDbContext : DbContext
             entity.HasIndex(e => new { e.Source, e.Id, e.DispatchedAt })
                 .HasFilter("\"DispatchedAt\" IS NULL")
                 .HasDatabaseName("IX_WorkflowRunEvents_Source_Id_DispatchedAt");
+        });
+
+        modelBuilder.Entity<AgentRetryOperationRow>(entity =>
+        {
+            entity.ToTable("agent_retry_operations");
+            entity.HasKey(row => row.OperationId);
+            entity.Property(row => row.OperationId).HasMaxLength(128).IsRequired();
+            entity.Property(row => row.ProjectId).HasMaxLength(256).IsRequired();
+            entity.Property(row => row.IdempotencyKey).HasMaxLength(512).IsRequired();
+            entity.Property(row => row.SessionId).HasMaxLength(512).IsRequired();
+            entity.Property(row => row.TurnId).HasMaxLength(128).IsRequired();
+            entity.Property(row => row.Kind).HasMaxLength(16).IsRequired();
+            entity.Property(row => row.PreAllocatedSessionId).HasMaxLength(512).IsRequired();
+            entity.Property(row => row.PreAllocatedInputId).HasMaxLength(128).IsRequired();
+            entity.Property(row => row.PreAllocatedTurnId).HasMaxLength(128).IsRequired();
+            entity.Property(row => row.State).HasMaxLength(16).IsRequired();
+            entity.Property(row => row.ResultState).HasMaxLength(64);
+            entity.Property(row => row.ResultText).HasMaxLength(2048);
+            entity.Property(row => row.ResultJobKey).HasMaxLength(512);
+            entity.Property(row => row.ResultSessionId).HasMaxLength(512);
+            entity.Property(row => row.ResultInputId).HasMaxLength(128);
+            entity.Property(row => row.ResultTurnId).HasMaxLength(128);
+            entity.Property(row => row.CreatedAt).IsRequired();
+            entity.Property(row => row.UpdatedAt).IsRequired();
+            entity.HasIndex(row => row.IdempotencyKey).IsUnique()
+                .HasDatabaseName("UX_agent_retry_operations_IdempotencyKey");
+            entity.HasIndex(row => new { row.SessionId, row.TurnId }).IsUnique()
+                .HasDatabaseName("UX_agent_retry_operations_SessionId_TurnId");
         });
 
         modelBuilder.Entity<AgentSessionLifecycleTransitionRow>(entity =>
