@@ -1030,7 +1030,6 @@ public sealed partial class AgentSessionGrain : Grain, IAgentSessionGrain, IRemi
         _ => SessionWorkflowObservationKind.Unknown,
     };
 
-
     private async Task<bool> AcquireFollowupDispatchPermitAsync(
         AgentSession session,
         AgentSessionFollowupLease lease)

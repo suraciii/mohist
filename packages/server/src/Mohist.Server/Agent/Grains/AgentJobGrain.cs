@@ -1547,21 +1547,6 @@ public sealed partial class AgentJobGrain : Grain, IAgentJobGrain
         }
     }
 
-    private static string? FailureCategoryFromOutput(JsonElement? output)
-    {
-        if (output is not { ValueKind: JsonValueKind.Object } element) return null;
-        return element.TryGetProperty("failureCategory", out var category)
-            && category.ValueKind == JsonValueKind.String
-            ? category.GetString()
-            : null;
-    }
-
-    private static string? FailureCategoryFromErrorCode(string? code) =>
-        string.IsNullOrWhiteSpace(code) ? null : code;
-
-    private static string? FailureCategoryFromStatus(string? status) =>
-        string.IsNullOrWhiteSpace(status) ? null : status;
-
     /// <summary>
     /// Reads the AgentJob ledger row and hydrates the in-memory state
     /// caches. Called on activation and after every state transition
