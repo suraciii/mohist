@@ -20,6 +20,16 @@ public interface IEventDispatcherGrain : IGrainWithStringKey, IRemindable
     Task DispatchNowAsync(CancellationToken ct = default);
 
     /// <summary>
+    /// Latency-shaving poke fired by automatic producers after committing
+    /// events. Unlike <see cref="DispatchNowAsync"/>, a poke NEVER queues
+    /// behind an in-flight cycle: when a dispatch cycle is already running
+    /// it returns immediately, because the reminder cadence alone guarantees
+    /// eventual delivery. Callers that must observe a completed drain before
+    /// proceeding (tests, operator actions) use <see cref="DispatchNowAsync"/>.
+    /// </summary>
+    Task PokeAsync(CancellationToken ct = default);
+
+    /// <summary>
     /// Loads the dead-letter row identified by <paramref name="deadLetterId"/>
     /// and re-dispatches the original event to the failing handler recorded
     /// on that row. Used as the manual operator recovery path for poison

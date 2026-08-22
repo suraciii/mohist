@@ -37,7 +37,7 @@ public static class EventDispatcherPoke
                 {
                     var dispatcher = grainFactory
                         .GetGrain<IEventDispatcherGrain>(EventDispatcherGrain.Global);
-                    await dispatcher.DispatchNowAsync().ConfigureAwait(false);
+                    await dispatcher.PokeAsync().ConfigureAwait(false);
                 }
                 catch (Exception ex)
                 {
