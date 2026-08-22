@@ -1,15 +1,19 @@
-import { afterEach, describe, expect, it, vi } from "vitest"
-import { opencodeAction } from "../src/actions/opencode.js"
-import { OpenCodeRuntime } from "../src/runtime/opencode/index.js"
-import type { OpenCodeRuntimeDeps } from "../src/runtime/opencode/runtime.js"
-import type { OpencodeServerHandle } from "../src/runtime/opencode/server-process.js"
-import type { RuntimeEventSubscription, RuntimeGlobalEvent } from "../src/runtime/opencode/event-subscription.js"
-import type { OpencodeClient } from "@opencode-ai/sdk/v2"
-import type { ActionTestContext as ActionContext } from "./support/action-test-context.js"
-import { WorkflowAgentSessionReporter } from "../src/actions/workflow-agent-session-reporter.js"
-import { AlreadyConsumedRuntimeEventError, type AgentSessionRuntimeEventOutbox, type RuntimeEventRecord } from "../src/server/runtime-event-outbox.js"
-import { makeRecordingOutbox, type OutboxHandles } from "./support/outbox-test-helpers.js"
-import { callAction } from "./support/call-action.js"
+import { afterEach, describe, expect, it, vi } from 'vitest'
+import { opencodeAction } from '../src/actions/opencode.js'
+import { OpenCodeRuntime } from '../src/runtime/opencode/index.js'
+import type { OpenCodeRuntimeDeps } from '../src/runtime/opencode/runtime.js'
+import type { OpencodeServerHandle } from '../src/runtime/opencode/server-process.js'
+import type { RuntimeEventSubscription, RuntimeGlobalEvent } from '../src/runtime/opencode/event-subscription.js'
+import type { OpencodeClient } from '@opencode-ai/sdk/v2'
+import type { ActionTestContext as ActionContext } from './support/action-test-context.js'
+import { WorkflowAgentSessionReporter } from '../src/actions/workflow-agent-session-reporter.js'
+import {
+  AlreadyConsumedRuntimeEventError,
+  type AgentSessionRuntimeEventOutbox,
+  type RuntimeEventRecord,
+} from '../src/server/runtime-event-outbox.js'
+import { makeRecordingOutbox, type OutboxHandles } from './support/outbox-test-helpers.js'
+import { callAction } from './support/call-action.js'
 
 class FakeSubscription implements RuntimeEventSubscription {
   private listeners = new Set<(event: RuntimeGlobalEvent) => void>()
@@ -17,7 +21,9 @@ class FakeSubscription implements RuntimeEventSubscription {
   subscribe(listener: (event: RuntimeGlobalEvent) => void): () => void {
     if (this.closed) return () => {}
     this.listeners.add(listener)
-    return () => { this.listeners.delete(listener) }
+    return () => {
+      this.listeners.delete(listener)
+    }
   }
   emit(event: RuntimeGlobalEvent): void {
     for (const listener of [...this.listeners]) listener(event)
@@ -52,21 +58,21 @@ interface BuildResult {
 
 function buildRuntime(args: BuildArgs = {}): BuildResult {
   const subscription = new FakeSubscription()
-  const sessionCreate = vi.fn(async () => ({ data: { id: "ses_bound" } }))
+  const sessionCreate = vi.fn(async () => ({ data: { id: 'ses_bound' } }))
   const sessionPrompt = vi.fn(async (params: { sessionID: string; directory?: string; parts?: unknown }) => {
     if (args.emitDuringPrompt) {
       await args.emitDuringPrompt(subscription, params.sessionID)
     }
-    if (args.failPrompt) throw new Error(args.failPromptMessage ?? "opencode prompt failed")
+    if (args.failPrompt) throw new Error(args.failPromptMessage ?? 'opencode prompt failed')
     if (args.promptResult !== undefined) return args.promptResult
     return {
       data: {
         info: {
-          id: "msg_1",
-          sessionID: "ses_bound",
-          role: "assistant",
-          providerID: "openai",
-          modelID: "gpt-5.6",
+          id: 'msg_1',
+          sessionID: 'ses_bound',
+          role: 'assistant',
+          providerID: 'openai',
+          modelID: 'gpt-5.6',
           tokens: { input: 0, output: 0, total: 0, reasoning: 0, cache: { read: 0, write: 0 } },
           cost: 0,
         },
@@ -76,7 +82,7 @@ function buildRuntime(args: BuildArgs = {}): BuildResult {
   })
   const sessionPromptAsync = vi.fn(async () => undefined)
   const sessionAbort = vi.fn(async () => undefined)
-  const sessionGet = vi.fn(async () => ({ data: { id: "ses_bound" } }))
+  const sessionGet = vi.fn(async () => ({ data: { id: 'ses_bound' } }))
   const sessionStatus = vi.fn(async () => ({ data: {} }))
   const client: OpencodeClient = {
     global: { health: vi.fn(async () => ({ data: { ok: true } })), event: vi.fn() },
@@ -90,15 +96,15 @@ function buildRuntime(args: BuildArgs = {}): BuildResult {
     },
   } as unknown as OpencodeClient
   const serverHandle: OpencodeServerHandle = {
-    url: "http://fake",
-    directory: "/tmp/work",
+    url: 'http://fake',
+    directory: '/tmp/work',
     client,
     async close() {
       subscription.closed = true
     },
   }
   const deps: OpenCodeRuntimeDeps = {
-    directory: "/tmp/work",
+    directory: '/tmp/work',
     serverFactory: async () => serverHandle,
     eventSubscriptionFactory: () => subscription,
   }
@@ -118,17 +124,17 @@ async function ensureReady(runtime: OpenCodeRuntime): Promise<void> {
 
 function baseContext(overrides: Partial<ActionContext> = {}): ActionContext {
   return {
-    workflowRunId: "wf-1",
-    workId: "work-1",
-    workType: "task",
-    stage: "plan",
-    title: "Workflow turn",
-    uses: "mohist/opencode",
-    with: { prompt: "do the work", session: "plan" } as never,
+    workflowRunId: 'wf-1',
+    workId: 'work-1',
+    workType: 'task',
+    stage: 'plan',
+    title: 'Workflow turn',
+    uses: 'mohist/opencode',
+    with: { prompt: 'do the work', session: 'plan' } as never,
     variables: {},
-    workDir: "/tmp/work",
+    workDir: '/tmp/work',
     signal: new AbortController().signal,
-    projectId: "proj-1",
+    projectId: 'proj-1',
     writeVars: async () => {},
     ...overrides,
   }
@@ -140,43 +146,43 @@ afterEach(() => {
 
 async function emitStandardSequence(subscription: FakeSubscription, sessionId: string): Promise<void> {
   subscription.emit({
-    type: "message.updated",
+    type: 'message.updated',
     sessionID: sessionId,
     payload: {
       info: {
-        id: "msg_1",
-        role: "assistant",
-        providerID: "openai",
-        modelID: "gpt-5",
+        id: 'msg_1',
+        role: 'assistant',
+        providerID: 'openai',
+        modelID: 'gpt-5',
         tokens: { input: 5, output: 7, total: 12, reasoning: 0, cache: { read: 0 } },
         cost: 0.0001,
       },
     },
   })
   subscription.emit({
-    type: "session.next.reasoning.delta",
+    type: 'session.next.reasoning.delta',
     sessionID: sessionId,
-    payload: { reasoningID: "r_1", assistantMessageID: "msg_1", delta: "thinking... " },
+    payload: { reasoningID: 'r_1', assistantMessageID: 'msg_1', delta: 'thinking... ' },
   })
   subscription.emit({
-    type: "session.next.tool.called",
+    type: 'session.next.tool.called',
     sessionID: sessionId,
-    payload: { callID: "tool_1", tool: "read", input: { path: "/etc" } },
+    payload: { callID: 'tool_1', tool: 'read', input: { path: '/etc' } },
   })
   subscription.emit({
-    type: "session.next.tool.progress",
+    type: 'session.next.tool.progress',
     sessionID: sessionId,
-    payload: { callID: "tool_1", tool: "read", input: { path: "/etc" } },
+    payload: { callID: 'tool_1', tool: 'read', input: { path: '/etc' } },
   })
   subscription.emit({
-    type: "session.next.tool.success",
+    type: 'session.next.tool.success',
     sessionID: sessionId,
-    payload: { callID: "tool_1", tool: "read", result: "ok" },
+    payload: { callID: 'tool_1', tool: 'read', result: 'ok' },
   })
   subscription.emit({
-    type: "message.part.updated",
+    type: 'message.part.updated',
     sessionID: sessionId,
-    payload: { part: { id: "txt_1", messageID: "msg_1", type: "text", text: "hi" } },
+    payload: { part: { id: 'txt_1', messageID: 'msg_1', type: 'text', text: 'hi' } },
   })
   await new Promise((resolve) => setImmediate(resolve))
 }
@@ -186,12 +192,20 @@ function makeFailureOutbox(): AgentSessionRuntimeEventOutbox {
     ready: () => true,
     load: async () => {},
     recover: async () => {},
-    async enqueueBeforeExecution() { throw new Error("disk full (input)") },
-    async enqueueProducedFact() { throw new Error("disk full (produced)") },
-    async enqueueProducedFactBatch() { throw new Error("disk full (produced)") },
+    async enqueueBeforeExecution() {
+      throw new Error('disk full (input)')
+    },
+    async enqueueProducedFact() {
+      throw new Error('disk full (produced)')
+    },
+    async enqueueProducedFactBatch() {
+      throw new Error('disk full (produced)')
+    },
     kick: async () => {},
     stop: async () => {},
-    snapshot() { return [] },
+    snapshot() {
+      return []
+    },
   }
 }
 
@@ -201,17 +215,30 @@ function makeProducedFactFailureOutbox(): AgentSessionRuntimeEventOutbox {
     load: async () => {},
     recover: async () => {},
     async enqueueBeforeExecution() {},
-    async awaitInputReceipt(recordId) { return { type: "session.input", inputDeliveryId: recordId, agentTurnId: `turn-${recordId}`, agentSessionId: "agent-session-test" } },
-    async enqueueProducedFact() { throw new Error("disk full (produced)") },
-    async enqueueProducedFactBatch() { throw new Error("disk full (produced)") },
+    async awaitInputReceipt(recordId) {
+      return {
+        type: 'session.input',
+        inputDeliveryId: recordId,
+        agentTurnId: `turn-${recordId}`,
+        agentSessionId: 'agent-session-test',
+      }
+    },
+    async enqueueProducedFact() {
+      throw new Error('disk full (produced)')
+    },
+    async enqueueProducedFactBatch() {
+      throw new Error('disk full (produced)')
+    },
     kick: async () => {},
     stop: async () => {},
-    snapshot() { return [] },
+    snapshot() {
+      return []
+    },
   }
 }
 
-describe("opencodeAction — Workflow AgentSession transcript reporting", () => {
-  it("enqueues the composed prompt as session.input and forwards projected events in production order", async () => {
+describe('opencodeAction — Workflow AgentSession transcript reporting', () => {
+  it('enqueues the composed prompt as session.input and forwards projected events in production order', async () => {
     const { runtime } = buildRuntime({
       emitDuringPrompt: emitStandardSequence,
     })
@@ -227,44 +254,46 @@ describe("opencodeAction — Workflow AgentSession transcript reporting", () => 
 
     expect(result.error).toBeUndefined()
     const types = handles.eventTypeList()
-    expect(types[0]).toBe("session.input")
-    expect(types).toEqual(expect.arrayContaining([
-      "model.resolved",
-      "usage.updated",
-      "reasoning.delta",
-      "tool_call.started",
-      "tool_call.updated",
-      "tool_call.completed",
-      "message.delta",
-    ]))
-    expect(handles.eventsByType("session.input")[0]).toMatchObject({
+    expect(types[0]).toBe('session.input')
+    expect(types).toEqual(
+      expect.arrayContaining([
+        'model.resolved',
+        'usage.updated',
+        'reasoning.delta',
+        'tool_call.started',
+        'tool_call.updated',
+        'tool_call.completed',
+        'message.delta',
+      ]),
+    )
+    expect(handles.eventsByType('session.input')[0]).toMatchObject({
       event: {
-        type: "session.input",
+        type: 'session.input',
         payload: expect.objectContaining({
-          text: "do the work",
-          kind: "task",
-          source: "workflow",
-          role: "user",
-          runtimeSessionId: "ses_bound",
+          text: 'do the work',
+          kind: 'task',
+          source: 'workflow',
+          role: 'user',
+          runtimeSessionId: 'ses_bound',
         }),
       },
     })
-    const closeEvent = handles.eventsByType("session.activity")[0]
-    expect(closeEvent?.event.payload).toMatchObject({ status: "completed", exitCode: 0 })
+    const closeEvent = handles.eventsByType('session.activity')[0]
+    expect(closeEvent?.event.payload).toMatchObject({ status: 'completed', exitCode: 0 })
   })
 
-  it("does not reproject SDK payloads; reporter receives runtime event payloads as-is", async () => {
+  it('does not reproject SDK payloads; reporter receives runtime event payloads as-is', async () => {
     const { runtime } = buildRuntime({
       emitDuringPrompt: async (subscription, sessionId) => {
         subscription.emit({
-          type: "session.next.tool.called",
+          type: 'session.next.tool.called',
           sessionID: sessionId,
-          payload: { callID: "tool_2", tool: "bash", input: { cmd: "ls" } },
+          payload: { callID: 'tool_2', tool: 'bash', input: { cmd: 'ls' } },
         })
         subscription.emit({
-          type: "session.next.tool.failed",
+          type: 'session.next.tool.failed',
           sessionID: sessionId,
-          payload: { callID: "tool_2", tool: "bash", error: "boom" },
+          payload: { callID: 'tool_2', tool: 'bash', error: 'boom' },
         })
         await new Promise((resolve) => setImmediate(resolve))
       },
@@ -278,40 +307,40 @@ describe("opencodeAction — Workflow AgentSession transcript reporting", () => 
     })
     await callAction(opencodeAction, context)
 
-    const started = handles.eventsByType("tool_call.started")[0]
-    const failed = handles.eventsByType("tool_call.completed")[0]
+    const started = handles.eventsByType('tool_call.started')[0]
+    const failed = handles.eventsByType('tool_call.completed')[0]
     expect(started?.event.payload).toMatchObject({
-      toolCallId: "tool_2",
-      toolName: "bash",
-      rawInput: { cmd: "ls" },
+      toolCallId: 'tool_2',
+      toolName: 'bash',
+      rawInput: { cmd: 'ls' },
     })
     expect(failed?.event.payload).toMatchObject({
-      toolCallId: "tool_2",
-      toolName: "bash",
-      status: "failed",
-      state: "failed",
+      toolCallId: 'tool_2',
+      toolName: 'bash',
+      status: 'failed',
+      state: 'failed',
     })
-    expect(handles.eventsByType("turn.failed")).toHaveLength(0)
+    expect(handles.eventsByType('turn.failed')).toHaveLength(0)
   })
 
-  it("serializes input and projected event enqueues in observation order", async () => {
+  it('serializes input and projected event enqueues in observation order', async () => {
     const { runtime } = buildRuntime({
       promptResult: {
         data: {
-          info: { id: "msg_1", sessionID: "ses_bound", role: "assistant" },
+          info: { id: 'msg_1', sessionID: 'ses_bound', role: 'assistant' },
           parts: [],
         },
       },
       emitDuringPrompt: async (subscription, sessionId) => {
         subscription.emit({
-          type: "session.next.text.delta",
+          type: 'session.next.text.delta',
           sessionID: sessionId,
-          payload: { textID: "txt_a", assistantMessageID: "msg_1", delta: "alpha " },
+          payload: { textID: 'txt_a', assistantMessageID: 'msg_1', delta: 'alpha ' },
         })
         subscription.emit({
-          type: "session.next.text.delta",
+          type: 'session.next.text.delta',
           sessionID: sessionId,
-          payload: { textID: "txt_b", assistantMessageID: "msg_1", delta: "beta" },
+          payload: { textID: 'txt_b', assistantMessageID: 'msg_1', delta: 'beta' },
         })
         await new Promise((resolve) => setImmediate(resolve))
       },
@@ -325,21 +354,16 @@ describe("opencodeAction — Workflow AgentSession transcript reporting", () => 
     })
     await callAction(opencodeAction, context)
 
-    expect(handles.eventTypeList()).toEqual([
-      "session.input",
-      "message.delta",
-      "message.delta",
-      "session.activity",
-    ])
+    expect(handles.eventTypeList()).toEqual(['session.input', 'message.delta', 'message.delta', 'session.activity'])
   })
 
-  it("rejected input persistence returns execution-unavailable and never invokes OpenCodeRuntime.runTurn", async () => {
+  it('rejected input persistence returns execution-unavailable and never invokes OpenCodeRuntime.runTurn', async () => {
     const { runtime, client } = buildRuntime({
       emitDuringPrompt: async (subscription, sessionId) => {
         subscription.emit({
-          type: "message.part.updated",
+          type: 'message.part.updated',
           sessionID: sessionId,
-          payload: { part: { id: "txt_a", messageID: "msg_1", type: "text", text: "alpha" } },
+          payload: { part: { id: 'txt_a', messageID: 'msg_1', type: 'text', text: 'alpha' } },
         })
         await new Promise((resolve) => setImmediate(resolve))
       },
@@ -347,7 +371,7 @@ describe("opencodeAction — Workflow AgentSession transcript reporting", () => 
     await ensureReady(runtime)
     const outbox = makeFailureOutbox()
     const handles = makeRecordingOutbox()
-    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined)
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => undefined)
     const context = baseContext({
       openCodeRuntime: runtime,
       serverConnection: handles.connection,
@@ -356,19 +380,19 @@ describe("opencodeAction — Workflow AgentSession transcript reporting", () => 
 
     try {
       const result = await callAction(opencodeAction, context)
-      expect(result.error?.code).toBe("execution-unavailable")
+      expect(result.error?.code).toBe('execution-unavailable')
       expect(client.sessionPrompt).not.toHaveBeenCalled()
     } finally {
       errorSpy.mockRestore()
     }
   })
 
-  it("rejected Server input receipt returns execution-unavailable and never invokes OpenCodeRuntime.runTurn", async () => {
+  it('rejected Server input receipt returns execution-unavailable and never invokes OpenCodeRuntime.runTurn', async () => {
     const { runtime, client } = buildRuntime()
     await ensureReady(runtime)
     const handles = makeRecordingOutbox()
     handles.setInputAccepted(false)
-    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined)
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => undefined)
     const context = baseContext({
       openCodeRuntime: runtime,
       serverConnection: handles.connection,
@@ -377,21 +401,21 @@ describe("opencodeAction — Workflow AgentSession transcript reporting", () => 
 
     try {
       const result = await callAction(opencodeAction, context)
-      expect(result.error?.code).toBe("execution-unavailable")
+      expect(result.error?.code).toBe('execution-unavailable')
       expect(client.sessionPrompt).not.toHaveBeenCalled()
-      expect(handles.eventsByType("session.input")).toHaveLength(1)
+      expect(handles.eventsByType('session.input')).toHaveLength(1)
     } finally {
       errorSpy.mockRestore()
     }
   })
 
-  it("does not replace a successful Action result when a projected event enqueue fails after input accepted", async () => {
+  it('does not replace a successful Action result when a projected event enqueue fails after input accepted', async () => {
     const { runtime } = buildRuntime({
       emitDuringPrompt: async (subscription, sessionId) => {
         subscription.emit({
-          type: "session.next.text.delta",
+          type: 'session.next.text.delta',
           sessionID: sessionId,
-          payload: { textID: "txt_a", assistantMessageID: "msg_1", delta: "alpha" },
+          payload: { textID: 'txt_a', assistantMessageID: 'msg_1', delta: 'alpha' },
         })
         await new Promise((resolve) => setImmediate(resolve))
       },
@@ -405,25 +429,34 @@ describe("opencodeAction — Workflow AgentSession transcript reporting", () => 
       async enqueueBeforeExecution(record) {
         handles.records.push(record as RuntimeEventRecord)
       },
-      async awaitInputReceipt(recordId) { return { type: "session.input", inputDeliveryId: recordId, agentTurnId: `turn-${recordId}`, agentSessionId: "agent-session-test" } },
+      async awaitInputReceipt(recordId) {
+        return {
+          type: 'session.input',
+          inputDeliveryId: recordId,
+          agentTurnId: `turn-${recordId}`,
+          agentSessionId: 'agent-session-test',
+        }
+      },
       async enqueueProducedFact() {
         if (firstCall) {
           firstCall = false
-          throw new Error("disk full (produced)")
+          throw new Error('disk full (produced)')
         }
       },
       async enqueueProducedFactBatch() {
         if (firstCall) {
           firstCall = false
-          throw new Error("disk full (produced)")
+          throw new Error('disk full (produced)')
         }
       },
       kick: async () => {},
       stop: async () => {},
-      snapshot() { return [] },
+      snapshot() {
+        return []
+      },
     }
     const handles = makeRecordingOutbox()
-    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined)
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => undefined)
     const context = baseContext({
       openCodeRuntime: runtime,
       serverConnection: handles.connection,
@@ -437,22 +470,22 @@ describe("opencodeAction — Workflow AgentSession transcript reporting", () => 
     }
   })
 
-  it("does not replace a runtime failure when produced-fact enqueue also fails", async () => {
+  it('does not replace a runtime failure when produced-fact enqueue also fails', async () => {
     const { runtime } = buildRuntime({
       failPrompt: true,
-      failPromptMessage: "opencode crashed",
+      failPromptMessage: 'opencode crashed',
       emitDuringPrompt: async (subscription, sessionId) => {
         subscription.emit({
-          type: "session.next.text.delta",
+          type: 'session.next.text.delta',
           sessionID: sessionId,
-          payload: { textID: "txt_a", assistantMessageID: "msg_1", delta: "alpha" },
+          payload: { textID: 'txt_a', assistantMessageID: 'msg_1', delta: 'alpha' },
         })
         await new Promise((resolve) => setImmediate(resolve))
       },
     })
     await ensureReady(runtime)
     const outbox = makeProducedFactFailureOutbox()
-    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined)
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => undefined)
     const handles = makeRecordingOutbox()
     const context = baseContext({
       openCodeRuntime: runtime,
@@ -461,14 +494,14 @@ describe("opencodeAction — Workflow AgentSession transcript reporting", () => 
     })
     try {
       const result = await callAction(opencodeAction, context)
-      expect(result.error?.code).toBe("turn-failed")
-      expect(result.error?.message).toBe("opencode crashed")
+      expect(result.error?.code).toBe('turn-failed')
+      expect(result.error?.message).toBe('opencode crashed')
     } finally {
       errorSpy.mockRestore()
     }
   })
 
-  it("does not wire a reporter when no outbox is provided", async () => {
+  it('does not wire a reporter when no outbox is provided', async () => {
     const { runtime } = buildRuntime()
     await ensureReady(runtime)
     const handles = makeRecordingOutbox()
@@ -481,7 +514,7 @@ describe("opencodeAction — Workflow AgentSession transcript reporting", () => 
     expect(handles.records).toHaveLength(0)
   })
 
-  it("the observer passes events to the reporter synchronously without awaiting", () => {
+  it('the observer passes events to the reporter synchronously without awaiting', () => {
     const events: string[] = []
     const observer = {
       onEvent(event: { type: string }) {
@@ -489,15 +522,15 @@ describe("opencodeAction — Workflow AgentSession transcript reporting", () => 
       },
     }
     const observed = [
-      { type: "message.delta", runtimeSessionId: "x", workDir: "/w", payload: {} },
-      { type: "tool_call.started", runtimeSessionId: "x", workDir: "/w", payload: {} },
+      { type: 'message.delta', runtimeSessionId: 'x', workDir: '/w', payload: {} },
+      { type: 'tool_call.started', runtimeSessionId: 'x', workDir: '/w', payload: {} },
     ]
     for (const event of observed) observer.onEvent?.(event)
-    expect(events).toEqual(["message.delta", "tool_call.started"])
+    expect(events).toEqual(['message.delta', 'tool_call.started'])
   })
 })
 
-describe("WorkflowAgentSessionReporter — outbox-driven failure semantics", () => {
+describe('WorkflowAgentSessionReporter — outbox-driven failure semantics', () => {
   function buildReporter(
     failEnqueueBeforeExecution = false,
     failEnqueueProducedFact = false,
@@ -515,17 +548,22 @@ describe("WorkflowAgentSessionReporter — outbox-driven failure semantics", () 
       recover: async () => {},
       async enqueueBeforeExecution(record) {
         beforeExecutionCalls.push(record as RuntimeEventRecord)
-        if (failEnqueueBeforeExecution) throw new Error("input snapshot failed")
+        if (failEnqueueBeforeExecution) throw new Error('input snapshot failed')
         records.push(record as RuntimeEventRecord)
       },
       async awaitInputReceipt(recordId) {
         if (receiptError) throw receiptError
-        return { type: "session.input", inputDeliveryId: recordId, agentTurnId: `turn-${recordId}`, agentSessionId: "agent-session-1" }
+        return {
+          type: 'session.input',
+          inputDeliveryId: recordId,
+          agentTurnId: `turn-${recordId}`,
+          agentSessionId: 'agent-session-1',
+        }
       },
       async enqueueProducedFact(record) {
         producedFactSingleCalls.push(record as RuntimeEventRecord)
         producedFactCalls.push(record as RuntimeEventRecord)
-        if (failEnqueueProducedFact) throw new Error("produced-fact snapshot failed")
+        if (failEnqueueProducedFact) throw new Error('produced-fact snapshot failed')
         records.push(record as RuntimeEventRecord)
       },
       async enqueueProducedFactBatch(batch) {
@@ -533,7 +571,7 @@ describe("WorkflowAgentSessionReporter — outbox-driven failure semantics", () 
         for (const record of batch) {
           producedFactCalls.push(record as RuntimeEventRecord)
         }
-        if (failEnqueueProducedFact) throw new Error("produced-fact snapshot failed")
+        if (failEnqueueProducedFact) throw new Error('produced-fact snapshot failed')
         for (const record of batch) {
           records.push(record as RuntimeEventRecord)
         }
@@ -546,25 +584,40 @@ describe("WorkflowAgentSessionReporter — outbox-driven failure semantics", () 
     }
     const reporter = new WorkflowAgentSessionReporter({
       outbox,
-      projectId: "proj-1",
-      workflowRunId: "wf-1",
-      sessionName: "plan",
-      workMetadata: { workId: "work-1", taskRunId: "task-1.1", runnerId: "runner-1", agentSessionId: "agent-session-1", workType: "task", stage: "plan" },
-      runtime: "opencode",
+      projectId: 'proj-1',
+      workflowRunId: 'wf-1',
+      sessionName: 'plan',
+      workMetadata: {
+        workId: 'work-1',
+        taskRunId: 'task-1.1',
+        runnerId: 'runner-1',
+        agentSessionId: 'agent-session-1',
+        workType: 'task',
+        stage: 'plan',
+      },
+      runtime: 'opencode',
       randomId: (() => {
         let counter = 0
         return () => `id_${++counter}`
       })(),
       cleanupAttempt,
     })
-    return { reporter, outbox, records, beforeExecutionCalls, producedFactCalls, producedFactSingleCalls, producedFactBatchCalls }
+    return {
+      reporter,
+      outbox,
+      records,
+      beforeExecutionCalls,
+      producedFactCalls,
+      producedFactSingleCalls,
+      producedFactBatchCalls,
+    }
   }
 
-  it("settles after all queued produced-fact enqueues, including a rejected input", async () => {
-    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined)
+  it('settles after all queued produced-fact enqueues, including a rejected input', async () => {
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => undefined)
     try {
       const { reporter } = buildReporter(true)
-      await expect(reporter.awaitInput("p", "ses_1")).rejects.toThrow(/input snapshot failed/)
+      await expect(reporter.awaitInput('p', 'ses_1')).rejects.toThrow(/input snapshot failed/)
       expect(reporter.inputWasAccepted()).toBe(false)
       expect(reporter.inputWasRejected()).toBe(true)
     } finally {
@@ -572,13 +625,18 @@ describe("WorkflowAgentSessionReporter — outbox-driven failure semantics", () 
     }
   })
 
-  it("rejected input suppresses later close reports", async () => {
-    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined)
+  it('rejected input suppresses later close reports', async () => {
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => undefined)
     try {
       const { reporter, producedFactCalls } = buildReporter(true)
-      await expect(reporter.awaitInput("p", "ses_1")).rejects.toThrow()
-      reporter.registerEvent({ type: "message.delta", runtimeSessionId: "ses_1", workDir: "/w", payload: { text: "x" } })
-      reporter.registerClose({ status: "completed", exitCode: 0, runtimeSessionId: "ses_1" })
+      await expect(reporter.awaitInput('p', 'ses_1')).rejects.toThrow()
+      reporter.registerEvent({
+        type: 'message.delta',
+        runtimeSessionId: 'ses_1',
+        workDir: '/w',
+        payload: { text: 'x' },
+      })
+      reporter.registerClose({ status: 'completed', exitCode: 0, runtimeSessionId: 'ses_1' })
       await reporter.settle()
       expect(producedFactCalls).toHaveLength(0)
     } finally {
@@ -586,7 +644,7 @@ describe("WorkflowAgentSessionReporter — outbox-driven failure semantics", () 
     }
   })
 
-  it("fails closed on an already-consumed input without inventing an Agent turn", async () => {
+  it('fails closed on an already-consumed input without inventing an Agent turn', async () => {
     const { reporter } = buildReporter(false, false, new AlreadyConsumedRuntimeEventError('input-1'))
     await expect(reporter.awaitInput('p', 'ses_1')).rejects.toMatchObject({
       classification: 'already-consumed',
@@ -597,7 +655,7 @@ describe("WorkflowAgentSessionReporter — outbox-driven failure semantics", () 
     expect(reporter.inputWasAccepted()).toBe(false)
   })
 
-  it("fails closed on an already-consumed cleanup without enqueuing follow-up input", async () => {
+  it('fails closed on an already-consumed cleanup without enqueuing follow-up input', async () => {
     const { reporter, records } = buildReporter(
       false,
       false,
@@ -608,106 +666,156 @@ describe("WorkflowAgentSessionReporter — outbox-driven failure semantics", () 
     expect(reporter.getAgentTurnId()).toBeNull()
     expect(reporter.inputWasRejected()).toBe(true)
     expect(records).toHaveLength(1)
-    reporter.registerEvent({ type: 'message.delta', runtimeSessionId: 'ses_1', workDir: '/w', payload: { text: 'ignored' } })
+    reporter.registerEvent({
+      type: 'message.delta',
+      runtimeSessionId: 'ses_1',
+      workDir: '/w',
+      payload: { text: 'ignored' },
+    })
     expect(records).toHaveLength(1)
   })
 
-  it("continues after a later produced-fact rejection when input was accepted", async () => {
-    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined)
+  it('continues after a later produced-fact rejection when input was accepted', async () => {
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => undefined)
     try {
       const { reporter, producedFactCalls } = buildReporter(false, true)
-      await reporter.awaitInput("p", "ses_1")
-      reporter.registerEvent({ type: "message.delta", runtimeSessionId: "ses_1", workDir: "/w", payload: { text: "x" } })
-      reporter.registerEvent({ type: "message.delta", runtimeSessionId: "ses_1", workDir: "/w", payload: { text: "y" } })
+      await reporter.awaitInput('p', 'ses_1')
+      reporter.registerEvent({
+        type: 'message.delta',
+        runtimeSessionId: 'ses_1',
+        workDir: '/w',
+        payload: { text: 'x' },
+      })
+      reporter.registerEvent({
+        type: 'message.delta',
+        runtimeSessionId: 'ses_1',
+        workDir: '/w',
+        payload: { text: 'y' },
+      })
       await expect(reporter.settle()).resolves.toBeUndefined()
-      expect(producedFactCalls.map((r) => r.event.type)).toEqual(["message.delta", "message.delta"])
+      expect(producedFactCalls.map((r) => r.event.type)).toEqual(['message.delta', 'message.delta'])
       expect(reporter.inputWasAccepted()).toBe(true)
     } finally {
       errorSpy.mockRestore()
     }
   })
 
-  it("stamps every later runtime event with the acknowledged Workflow turn", async () => {
+  it('stamps every later runtime event with the acknowledged Workflow turn', async () => {
     const { reporter, beforeExecutionCalls, producedFactCalls } = buildReporter()
 
-    await reporter.awaitInput("p", "ses_1")
-    reporter.registerEvent({ type: "tool_call.started", runtimeSessionId: "ses_1", workDir: "/w", payload: { tool: "test" } })
+    await reporter.awaitInput('p', 'ses_1')
+    reporter.registerEvent({
+      type: 'tool_call.started',
+      runtimeSessionId: 'ses_1',
+      workDir: '/w',
+      payload: { tool: 'test' },
+    })
     await reporter.settle()
 
     const input = beforeExecutionCalls[0]
     const fact = producedFactCalls[0]
-    if (!input || !fact) throw new Error("expected input and produced runtime event")
-    expect(input.event.type).toBe("session.input")
-    expect(fact.event.type).toBe("tool_call.started")
+    if (!input || !fact) throw new Error('expected input and produced runtime event')
+    expect(input.event.type).toBe('session.input')
+    expect(fact.event.type).toBe('tool_call.started')
     expect(input.work).toMatchObject({
-      taskRunId: "task-1.1",
+      taskRunId: 'task-1.1',
       inputDeliveryId: input.id,
       agentTurnId: null,
     })
     expect(fact.work).toMatchObject({
-      taskRunId: "task-1.1",
+      taskRunId: 'task-1.1',
       inputDeliveryId: input.id,
       agentTurnId: `turn-${input.id}`,
     })
     expect(fact.event.payload).toMatchObject({ turnId: `turn-${input.id}` })
   })
 
-  it("buffers streaming deltas and flushes them as one batch before the close fact", async () => {
+  it('buffers streaming deltas and flushes them as one batch before the close fact', async () => {
     const { reporter, producedFactCalls, producedFactSingleCalls, producedFactBatchCalls } = buildReporter()
-    await reporter.awaitInput("p", "ses_1")
-    reporter.registerEvent({ type: "reasoning.delta", runtimeSessionId: "ses_1", workDir: "/w", payload: { text: "a" } })
-    reporter.registerEvent({ type: "reasoning.delta", runtimeSessionId: "ses_1", workDir: "/w", payload: { text: "b" } })
-    reporter.registerEvent({ type: "reasoning.delta", runtimeSessionId: "ses_1", workDir: "/w", payload: { text: "c" } })
-    reporter.registerClose({ status: "completed", exitCode: 0, runtimeSessionId: "ses_1" })
+    await reporter.awaitInput('p', 'ses_1')
+    reporter.registerEvent({
+      type: 'reasoning.delta',
+      runtimeSessionId: 'ses_1',
+      workDir: '/w',
+      payload: { text: 'a' },
+    })
+    reporter.registerEvent({
+      type: 'reasoning.delta',
+      runtimeSessionId: 'ses_1',
+      workDir: '/w',
+      payload: { text: 'b' },
+    })
+    reporter.registerEvent({
+      type: 'reasoning.delta',
+      runtimeSessionId: 'ses_1',
+      workDir: '/w',
+      payload: { text: 'c' },
+    })
+    reporter.registerClose({ status: 'completed', exitCode: 0, runtimeSessionId: 'ses_1' })
     await reporter.settle()
 
     expect(producedFactSingleCalls).toHaveLength(0)
     expect(producedFactBatchCalls.map((batch) => batch.map((record) => record.event.type))).toEqual([
-      ["reasoning.delta", "reasoning.delta", "reasoning.delta"],
-      ["session.activity"],
+      ['reasoning.delta', 'reasoning.delta', 'reasoning.delta'],
+      ['session.activity'],
     ])
     expect(producedFactCalls.map((r) => r.event.type)).toEqual([
-      "reasoning.delta",
-      "reasoning.delta",
-      "reasoning.delta",
-      "session.activity",
+      'reasoning.delta',
+      'reasoning.delta',
+      'reasoning.delta',
+      'session.activity',
     ])
   })
 
-  it("flushes buffered deltas when a non-delta event arrives mid-turn", async () => {
+  it('flushes buffered deltas when a non-delta event arrives mid-turn', async () => {
     const { reporter, producedFactCalls, producedFactSingleCalls, producedFactBatchCalls } = buildReporter()
-    await reporter.awaitInput("p", "ses_1")
-    reporter.registerEvent({ type: "reasoning.delta", runtimeSessionId: "ses_1", workDir: "/w", payload: { text: "a" } })
-    reporter.registerEvent({ type: "tool_call.started", runtimeSessionId: "ses_1", workDir: "/w", payload: {} })
-    reporter.registerEvent({ type: "reasoning.delta", runtimeSessionId: "ses_1", workDir: "/w", payload: { text: "b" } })
-    reporter.registerClose({ status: "completed", exitCode: 0, runtimeSessionId: "ses_1" })
+    await reporter.awaitInput('p', 'ses_1')
+    reporter.registerEvent({
+      type: 'reasoning.delta',
+      runtimeSessionId: 'ses_1',
+      workDir: '/w',
+      payload: { text: 'a' },
+    })
+    reporter.registerEvent({ type: 'tool_call.started', runtimeSessionId: 'ses_1', workDir: '/w', payload: {} })
+    reporter.registerEvent({
+      type: 'reasoning.delta',
+      runtimeSessionId: 'ses_1',
+      workDir: '/w',
+      payload: { text: 'b' },
+    })
+    reporter.registerClose({ status: 'completed', exitCode: 0, runtimeSessionId: 'ses_1' })
     await reporter.settle()
 
-    expect(producedFactSingleCalls.map((record) => record.event.type)).toEqual(["tool_call.started"])
+    expect(producedFactSingleCalls.map((record) => record.event.type)).toEqual(['tool_call.started'])
     expect(producedFactBatchCalls.map((batch) => batch.map((record) => record.event.type))).toEqual([
-      ["reasoning.delta"],
-      ["reasoning.delta"],
-      ["session.activity"],
+      ['reasoning.delta'],
+      ['reasoning.delta'],
+      ['session.activity'],
     ])
     expect(producedFactCalls.map((r) => r.event.type)).toEqual([
-      "reasoning.delta",
-      "tool_call.started",
-      "reasoning.delta",
-      "session.activity",
+      'reasoning.delta',
+      'tool_call.started',
+      'reasoning.delta',
+      'session.activity',
     ])
   })
 
-  it("bounds streaming delta batches before a turn ends", async () => {
+  it('bounds streaming delta batches before a turn ends', async () => {
     const { reporter, producedFactSingleCalls, producedFactBatchCalls } = buildReporter()
-    await reporter.awaitInput("p", "ses_1")
+    await reporter.awaitInput('p', 'ses_1')
     for (let index = 0; index < 300; index += 1) {
-      reporter.registerEvent({ type: "message.delta", runtimeSessionId: "ses_1", workDir: "/w", payload: { text: String(index) } })
+      reporter.registerEvent({
+        type: 'message.delta',
+        runtimeSessionId: 'ses_1',
+        workDir: '/w',
+        payload: { text: String(index) },
+      })
     }
-    reporter.registerClose({ status: "completed", exitCode: 0, runtimeSessionId: "ses_1" })
+    reporter.registerClose({ status: 'completed', exitCode: 0, runtimeSessionId: 'ses_1' })
     await reporter.settle()
 
     expect(producedFactSingleCalls).toHaveLength(0)
     expect(producedFactBatchCalls.map((batch) => batch.length)).toEqual([256, 44, 1])
-    expect(producedFactBatchCalls.at(-1)?.[0].event.type).toBe("session.activity")
+    expect(producedFactBatchCalls.at(-1)?.[0].event.type).toBe('session.activity')
   })
 })

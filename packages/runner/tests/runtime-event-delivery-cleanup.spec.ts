@@ -16,13 +16,15 @@ describe('createServerRuntimeEventDelivery - workflow cleanup', () => {
           runtime: 'pi',
           runtimeSessionId: 'runtime-1',
         })
-        return [{
-          type: 'session.cleanup',
-          cleanupOperationId: 'workflow-cleanup:wf-1:task-1.1:work-1:1',
-          inputDeliveryId: 'workflow-cleanup-input:workflow-cleanup:wf-1:task-1.1:work-1:1',
-          agentTurnId: 'workflow-cleanup-turn:workflow-cleanup:wf-1:task-1.1:work-1:1',
-          agentSessionId: 'agent-session-1',
-        }]
+        return [
+          {
+            type: 'session.cleanup',
+            cleanupOperationId: 'workflow-cleanup:wf-1:task-1.1:work-1:1',
+            inputDeliveryId: 'workflow-cleanup-input:workflow-cleanup:wf-1:task-1.1:work-1:1',
+            agentTurnId: 'workflow-cleanup-turn:workflow-cleanup:wf-1:task-1.1:work-1:1',
+            agentSessionId: 'agent-session-1',
+          },
+        ]
       },
     )
     const delivery = createServerRuntimeEventDelivery({
@@ -78,13 +80,22 @@ describe('createServerRuntimeEventDelivery - workflow cleanup', () => {
       runtime: 'pi',
       runtimeSessionId: 'runtime-1',
       work: {
-        workId: 'work-1', taskRunId: 'task-1.1', runnerId: 'runner-1', agentSessionId: 'agent-session-1',
-        inputDeliveryId: 'workflow-cleanup-input:workflow-cleanup:wf-1:task-1.1:work-1:1', agentTurnId: null,
-        workType: 'task', stage: 'build',
+        workId: 'work-1',
+        taskRunId: 'task-1.1',
+        runnerId: 'runner-1',
+        agentSessionId: 'agent-session-1',
+        inputDeliveryId: 'workflow-cleanup-input:workflow-cleanup:wf-1:task-1.1:work-1:1',
+        agentTurnId: null,
+        workType: 'task',
+        stage: 'build',
       },
-      event: { type: 'session.cleanup', payload: {
-        text: 'clean the worktree', cleanupOperationId: 'workflow-cleanup:wf-1:task-1.1:work-1:1',
-      } },
+      event: {
+        type: 'session.cleanup',
+        payload: {
+          text: 'clean the worktree',
+          cleanupOperationId: 'workflow-cleanup:wf-1:task-1.1:work-1:1',
+        },
+      },
       acknowledgementPolicy: 'matching-receipt' as const,
     } satisfies RuntimeEventRecord
 

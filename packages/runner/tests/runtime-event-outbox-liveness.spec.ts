@@ -38,12 +38,14 @@ describe('AgentSessionRuntimeEventOutbox delivery liveness', () => {
           }
           if (first.id === 'historical-input') return records.map(() => [])
           if (first.id === 'live-input') {
-            return records.map((record) => [{
-              type: record.event.type,
-              inputDeliveryId: record.id,
-              agentTurnId: 'live-turn',
-              agentSessionId: record.work?.agentSessionId ?? undefined,
-            }])
+            return records.map((record) => [
+              {
+                type: record.event.type,
+                inputDeliveryId: record.id,
+                agentTurnId: 'live-turn',
+                agentSessionId: record.work?.agentSessionId ?? undefined,
+              },
+            ])
           }
           throw new Error('historical retry remains unavailable')
         },
@@ -76,11 +78,18 @@ describe('AgentSessionRuntimeEventOutbox delivery liveness', () => {
       refused('refused-2'),
       historicalInput,
       liveInput,
-      followupTerminal({ id: 'retryable-live-neighbor', target: { kind: 'generic', projectId: 'proj-1', sessionId: 'retryable' } }),
+      followupTerminal({
+        id: 'retryable-live-neighbor',
+        target: { kind: 'generic', projectId: 'proj-1', sessionId: 'retryable' },
+      }),
     ])
     const liveReceipt = awaitReceipt.call(outbox, liveInput.id)
 
-    for (let tick = 0; tick < 8 && outbox.snapshot().some((record) => record.id !== 'retryable-live-neighbor'); tick += 1) {
+    for (
+      let tick = 0;
+      tick < 8 && outbox.snapshot().some((record) => record.id !== 'retryable-live-neighbor');
+      tick += 1
+    ) {
       await vi.advanceTimersByTimeAsync(100)
       await flushMicrotasks(12)
     }

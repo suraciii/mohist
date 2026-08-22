@@ -5,7 +5,13 @@ import { flushMicrotasks, makeOutbox, workflowFact } from './support/runtime-eve
 describe('AgentSessionRuntimeEventOutbox - workflow cleanup FIFO', () => {
   it('settles a cleanup record as already consumed after two consecutive empty receipts', async () => {
     const cleanupOperationId = 'workflow-cleanup:wf-1:task-1.1:work-1:1'
-    const { outbox } = makeOutbox({ deliver: { async send() { return [] } } })
+    const { outbox } = makeOutbox({
+      deliver: {
+        async send() {
+          return []
+        },
+      },
+    })
     await outbox.load()
     const record: RuntimeEventRecord = {
       id: cleanupOperationId,
@@ -14,14 +20,20 @@ describe('AgentSessionRuntimeEventOutbox - workflow cleanup FIFO', () => {
       runtime: 'pi',
       runtimeSessionId: 'runtime-1',
       work: {
-        workId: 'work-1', taskRunId: 'task-1.1', runnerId: 'runner-1', agentSessionId: 'agent-session-1',
-        inputDeliveryId: `workflow-cleanup-input:${cleanupOperationId}`, agentTurnId: null,
-        workType: 'task', stage: 'build',
+        workId: 'work-1',
+        taskRunId: 'task-1.1',
+        runnerId: 'runner-1',
+        agentSessionId: 'agent-session-1',
+        inputDeliveryId: `workflow-cleanup-input:${cleanupOperationId}`,
+        agentTurnId: null,
+        workType: 'task',
+        stage: 'build',
       },
       event: {
         type: 'session.cleanup',
         payload: {
-          text: 'clean the worktree', cleanupOperationId,
+          text: 'clean the worktree',
+          cleanupOperationId,
           inputDeliveryId: `workflow-cleanup-input:${cleanupOperationId}`,
           turnId: `workflow-cleanup-turn:${cleanupOperationId}`,
         },

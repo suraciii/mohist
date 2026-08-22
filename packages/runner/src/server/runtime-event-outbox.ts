@@ -37,10 +37,7 @@
 
 import { errorMessage } from '../core/errors.js'
 import { runnerLogger } from '../system/logger.js'
-import {
-  RuntimeEventDeliveryError,
-  type AgentSessionRuntimeEventReceipt,
-} from './connection.js'
+import { RuntimeEventDeliveryError, type AgentSessionRuntimeEventReceipt } from './connection.js'
 import {
   isWorkflowSessionBoundary,
   runtimeEventDeliveryKey,
