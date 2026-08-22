@@ -59,3 +59,8 @@
 - Implemented `SlackTerminalDeliveryPresentationSpecs`: the real handler now has deterministic positive coverage for explicit-failure outbox blocks, signed Retry action value, durable Session/Turn/Slack identity, and five-minute expiry; negative coverage verifies reaction-only fallback for missing durable facts and missing signing material.
 - Hardened terminal presentation so unavailable durable retry facts are logged and fall back to reaction-only instead of failing the terminal event.
 - Verification: SpecTests build passes; full UnitTests pass (3793); full SpecTests pass (3059); `git diff --check` is clean. `review.md` was not edited.
+
+## Review follow-up (MF-1 pending interim Unknown delivery)
+- Fixed `AgentJobGrain.StageTerminalDeliveryEvent` so a pending interim Unknown delivery obligation is replaced by the distinct final terminal-delivery obligation when recovery enters Failed. Existing final obligations remain stable on terminal-entry replay.
+- Added deterministic `AgentJobRunnerRecoverySpecs.ReconciliationFailure_ReplacesPendingUnknownDeliveryAfterInterimAppendFailure`, which forces the Unknown terminal-delivery append to fail, advances the persisted recovery deadline, and verifies the final event is `failed` with `runner-lost`.
+- Verification: server build with `-p:SkipWebBuild=true --no-restore` passed; SpecTests command ran the full assembly because Microsoft Testing Platform ignores the VSTest filter (3064 passed); `git diff --check` clean. `review.md` was not edited.
