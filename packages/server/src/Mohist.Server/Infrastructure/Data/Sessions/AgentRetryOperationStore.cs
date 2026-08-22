@@ -78,7 +78,7 @@ public sealed class AgentRetryOperationStore : IScopedService
         ArgumentException.ThrowIfNullOrWhiteSpace(idempotencyKey);
 
         await using var db = await _dbFactory.CreateDbContextAsync(ct);
-        var existing = await FindAsync(db, sessionId, turnId, idempotencyKey, ct);
+        var existing = await FindAsync(db, projectId, sessionId, turnId, idempotencyKey, ct);
         if (existing is not null)
             return new AgentRetryOperationClaim(ToDomain(existing), true);
 
@@ -109,7 +109,7 @@ public sealed class AgentRetryOperationStore : IScopedService
             // The unique indexes are the concurrency boundary. A fresh
             // context is required because the failed insert is tracked.
             await using var retryDb = await _dbFactory.CreateDbContextAsync(ct);
-            var winner = await FindAsync(retryDb, sessionId, turnId, idempotencyKey, ct)
+            var winner = await FindAsync(retryDb, projectId, sessionId, turnId, idempotencyKey, ct)
                 ?? throw new InvalidOperationException("Retry operation insert lost a uniqueness race but no winner was readable.", ex);
             return new AgentRetryOperationClaim(ToDomain(winner), true);
         }
@@ -131,7 +131,7 @@ public sealed class AgentRetryOperationStore : IScopedService
         CancellationToken ct = default)
     {
         await using var db = await _dbFactory.CreateDbContextAsync(ct);
-        var row = await FindAsync(db, sessionId, turnId, idempotencyKey, ct);
+        var row = await FindAsync(db, projectId, sessionId, turnId, idempotencyKey, ct);
         return row is null ? null : ToDomain(row);
     }
 
@@ -188,13 +188,15 @@ public sealed class AgentRetryOperationStore : IScopedService
 
     private static async Task<AgentRetryOperationRow?> FindAsync(
         MohistDbContext db,
+        string projectId,
         string sessionId,
         string turnId,
         string idempotencyKey,
         CancellationToken ct) =>
         await db.AgentRetryOperations.AsNoTracking().SingleOrDefaultAsync(row =>
-            row.IdempotencyKey == idempotencyKey
-            || row.SessionId == sessionId && row.TurnId == turnId, ct);
+            row.ProjectId == projectId
+            && (row.IdempotencyKey == idempotencyKey
+                || row.SessionId == sessionId && row.TurnId == turnId), ct);
 
     private static AgentRetryOperation ToDomain(AgentRetryOperationRow row) => new(
         row.OperationId,
