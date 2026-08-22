@@ -43,3 +43,9 @@
 - Registered the worker in `MohistServiceRegistration`, so the Server host owns its lifecycle and test hosts receive the same registration.
 - Added SpecTests for restart recovery using the receipt's preallocated root identities, exactly-once replay after a second pass, exception isolation/retry of a failing row, and injectable-clock retention cleanup that preserves Pending rows. Existing completed-operation replay remains covered by the T-001/T-002 service specs.
 - Verification: Server and SpecTests build successfully; full SpecTests (3056) and UnitTests (3793) pass. `git diff --check` is clean.
+
+## T-006 work
+- Extended the TypeScript adapter interaction normalization and end-to-end Socket Mode forwarding tests to run for both `mohist_stop_turn` and `mohist_retry_turn`, preserving team/conversation/message/thread/actor/action value fidelity. Added a focused HTTP transport test for both action ids asserting the complete interaction body and adapter lease fields.
+- Extended the Go `ServerAPI.Interaction` forwarding test to run the same Stop/Retry action matrix and assert the complete envelope, including thread timestamp, action value, lease id, and adapter id.
+- No adapter source or fixture changes were needed; all changes are test-only.
+- Verification: `npm --prefix packages/mohist-slack run typecheck:tests` and `npm --prefix packages/mohist-slack test` pass (91 tests). Go verification could not run because the workspace environment has no `go` executable.
