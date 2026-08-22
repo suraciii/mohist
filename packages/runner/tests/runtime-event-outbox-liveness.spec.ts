@@ -1,9 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import type { AgentSessionRuntimeEventReceipt } from '../src/server/connection.js'
-import { RUNTIME_EVENT_OUTBOX_FILE } from '../src/server/runtime-event-outbox.js'
+import { RuntimeEventDeliveryError, type AgentSessionRuntimeEventReceipt } from '../src/server/connection.js'
+import { RUNTIME_EVENT_OUTBOX_FILE, type RuntimeEventRecord } from '../src/server/runtime-event-outbox.js'
 import {
   RecordingFileSystem,
   flushMicrotasks,
+  followupTerminal,
   inputRecord,
   makeOutbox,
   workflowFact,
@@ -18,6 +19,94 @@ afterEach(() => {
 })
 
 describe('AgentSessionRuntimeEventOutbox delivery liveness', () => {
+  it('converges saturated historical groups while a live Workflow input receives its receipt', async () => {
+    const attempts = new Map<string, number>()
+    const { outbox } = makeOutbox({
+      boundedConcurrency: 2,
+      retryDelayMs: 100,
+      deliver: {
+        async send() {
+          throw new Error('batched delivery expected')
+        },
+        async sendBatch(records) {
+          const first = records[0]
+          if (!first) return []
+          const key = first.runtimeSessionId
+          attempts.set(key, (attempts.get(key) ?? 0) + 1)
+          if (first.producerFamily === 'binding-reconcile') {
+            throw new RuntimeEventDeliveryError('runtime events', 409, 'conflict', '')
+          }
+          if (first.id === 'historical-input') return records.map(() => [])
+          if (first.id === 'live-input') {
+            return records.map((record) => [
+              {
+                type: record.event.type,
+                inputDeliveryId: record.id,
+                agentTurnId: 'live-turn',
+                agentSessionId: record.work?.agentSessionId ?? undefined,
+              },
+            ])
+          }
+          throw new Error('historical retry remains unavailable')
+        },
+      },
+    })
+    await outbox.load()
+    const awaitReceipt = outbox.awaitInputReceipt
+    if (!awaitReceipt) throw new Error('outbox must support Workflow input receipts')
+
+    const historicalInput = inputRecord({
+      id: 'historical-input',
+      target: { kind: 'workflow', projectId: 'proj-1', workflowRunId: 'historical-run', sessionName: 'build' },
+    })
+    const liveInput = inputRecord({
+      id: 'live-input',
+      target: { kind: 'workflow', projectId: 'proj-1', workflowRunId: 'live-run', sessionName: 'build' },
+    })
+    const refused = (id: string): RuntimeEventRecord => ({
+      id,
+      producerFamily: 'binding-reconcile',
+      target: { kind: 'session', sessionId: 'historical-session' },
+      runtimeSessionId: 'historical-runtime',
+      work: null,
+      event: { type: 'session.activity', payload: { activity: 'idle' } },
+      acknowledgementPolicy: 'successful-response',
+    })
+
+    await outbox.enqueueProducedFactBatch([
+      refused('refused-1'),
+      refused('refused-2'),
+      historicalInput,
+      liveInput,
+      followupTerminal({
+        id: 'retryable-live-neighbor',
+        target: { kind: 'generic', projectId: 'proj-1', sessionId: 'retryable' },
+      }),
+    ])
+    const liveReceipt = awaitReceipt.call(outbox, liveInput.id)
+
+    for (
+      let tick = 0;
+      tick < 8 && outbox.snapshot().some((record) => record.id !== 'retryable-live-neighbor');
+      tick += 1
+    ) {
+      await vi.advanceTimersByTimeAsync(100)
+      await flushMicrotasks(12)
+    }
+
+    await expect(liveReceipt).resolves.toMatchObject({
+      inputDeliveryId: 'live-input',
+      agentTurnId: 'live-turn',
+    })
+    expect(outbox.snapshot().map((record) => record.id)).toEqual(['retryable-live-neighbor'])
+    expect(attempts.get('historical-runtime')).toBe(3)
+    await expect(awaitReceipt.call(outbox, historicalInput.id)).rejects.toMatchObject({
+      classification: 'already-consumed',
+      recordId: 'historical-input',
+    })
+    await outbox.stop()
+  })
+
   it('isolates a non-settling batch without replaying it before its late receipt', async () => {
     let resolveStalled!: (receipts: AgentSessionRuntimeEventReceipt[][]) => void
     const stalled = new Promise<AgentSessionRuntimeEventReceipt[][]>((resolve) => {

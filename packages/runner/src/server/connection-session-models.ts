@@ -18,6 +18,7 @@ export interface WorkflowAgentSession {
 
 export interface AgentSessionRuntimeEventReceipt {
   type: string
+  cleanupOperationId?: string
   inputDeliveryId?: string
   agentTurnId?: string
   agentSessionId?: string
@@ -32,17 +33,11 @@ export interface AgentInputAttachmentContent {
 export interface AgentSessionRuntimeEventAcceptance {
   id?: string
   type?: string
+  cleanupOperationId?: string
   sequence?: number
   inputDeliveryId?: string
   agentTurnId?: string
   agentSessionId?: string
-}
-
-export interface WorkflowAgentSessionCleanupTurnAcceptance {
-  cleanupOperationId: string
-  inputDeliveryId: string
-  agentTurnId: string
-  agentSessionId: string
 }
 
 export type AgentSession = WorkflowAgentSession

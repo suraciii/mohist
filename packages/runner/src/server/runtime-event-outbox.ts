@@ -6,10 +6,11 @@
 // Two acknowledgement policies share the same ordered state:
 //   - `matching-receipt` (Workflow input/activity/close and follow-up
 //     input): the head is removed only when the response carries the
-//     submitted event type. A timeout, transport failure, non-2xx,
-//     malformed/empty response, or a receipt without that type retains
-//     the head for retry. Stale binding (a 2xx with `[]`) is also a
-//     "no-match" outcome.
+//     submitted event type. For session.input and Workflow session.cleanup,
+//     two consecutive valid 2xx empty arrays instead confirm an already
+//     consumed record. A timeout, transport failure, non-2xx, malformed
+//     response, or a receipt without that type retains the head for retry and
+//     interrupts an empty confirmation sequence.
 //   - `successful-response` (operation-correlated follow-up terminals):
 //     any 2xx with a valid receipt array — even `[]` — settles the head.
 //     A consumed operation lease means replay legitimately returns `[]`,
@@ -36,12 +37,19 @@
 
 import { errorMessage } from '../core/errors.js'
 import { runnerLogger } from '../system/logger.js'
-import type { AgentSessionRuntimeEventReceipt } from './connection.js'
+import { RuntimeEventDeliveryError, type AgentSessionRuntimeEventReceipt } from './connection.js'
 import {
   isWorkflowSessionBoundary,
   runtimeEventDeliveryKey,
   runtimeEventSchedulingKey,
 } from './runtime-event-outbox-identity.js'
+import {
+  parseSnapshot,
+  serializeSnapshot,
+  stripInternal,
+  RUNTIME_EVENT_OUTBOX_FILE,
+  RUNTIME_EVENT_OUTBOX_VERSION,
+} from './runtime-event-outbox-snapshot.js'
 import {
   defaultRuntimeEventOutboxTimer,
   NodeRuntimeEventOutboxFileSystem,
@@ -59,6 +67,18 @@ import {
 
 export { nextTemporaryFilePath } from './runtime-event-outbox-ports.js'
 export { runtimeEventDeliveryKey, workflowExecutionIdentity } from './runtime-event-outbox-identity.js'
+
+export class AlreadyConsumedRuntimeEventError extends Error {
+  readonly classification = 'already-consumed' as const
+  readonly recordId: string
+
+  constructor(recordId: string) {
+    super(`runtime-event record ${recordId} was already consumed`)
+    this.name = 'AlreadyConsumedRuntimeEventError'
+    this.recordId = recordId
+  }
+}
+
 export type {
   AgentSessionRuntimeEventOutbox,
   AgentSessionRuntimeEventOutboxOptions,
@@ -75,8 +95,7 @@ export type { WorkflowRuntimeEventExecutionIdentity } from './runtime-event-outb
 
 const log = runnerLogger.child('session')
 
-export const RUNTIME_EVENT_OUTBOX_FILE = '.mohist/runner-state/runtime-events.json'
-const RUNTIME_EVENT_OUTBOX_VERSION = 1
+export { RUNTIME_EVENT_OUTBOX_FILE } from './runtime-event-outbox-snapshot.js'
 const DEFAULT_DELIVERY_TIMEOUT_MS = 5_000
 const DEFAULT_RETRY_DELAY_MS = 2_000
 const DEFAULT_LOCAL_RETRY_DELAY_MS = 1_000
@@ -91,13 +110,28 @@ const DEFAULT_DELIVERY_BATCH_SIZE = 64
 // final assistant message; non-delta facts are never dropped). This is
 // the last line of defense against a runaway turn exhausting runner memory.
 const DEFAULT_MAX_RETENTION_ENTRIES = 5_000
+const DETERMINISTIC_BINDING_REFUSAL_THRESHOLD = 3
+const DETERMINISTIC_BINDING_REFUSAL_409_CODES = new Set([
+  'conflict',
+  'agent_session_changed',
+  'workflow_agent_session_changed',
+  'workflow_runtime_binding_rejected',
+  'workflow_cleanup_binding_rejected',
+])
+const DETERMINISTIC_BINDING_REFUSAL_400_CODES = new Set([
+  'validation',
+  'runtime_session_id_required',
+  'session_runtime_identity_required',
+  'session_runtime_task_identity_invalid',
+  'workflow_runtime_binding_required',
+])
 // Event types that are pure streaming increments — losing a bounded
 // number of them does not corrupt the transcript, which is rebuilt from
 // later deltas and the final message. These are eligible for batch
 // delivery and are the first to be dropped under retention pressure.
 const STREAMING_DELTA_TYPES = new Set(['reasoning.delta', 'message.delta'])
 
-interface InternalRecord extends RuntimeEventRecord {
+export interface InternalRecord extends RuntimeEventRecord {
   readonly sequence: number
   readonly enqueuedAt: string
 }
@@ -141,6 +175,9 @@ class AgentSessionRuntimeEventOutboxImpl implements AgentSessionRuntimeEventOutb
   private readonly now: () => Date
   private readonly timer: RuntimeEventOutboxTimer
   private readonly records = new Map<string, InternalRecord>()
+  private readonly deterministicBindingRefusalCounts = new Map<string, number>()
+  private readonly emptyReceiptConfirmationCounts = new Map<string, number>()
+  private readonly inputReceiptTerminalErrors = new Map<string, Error>()
   private readonly inputReceiptWaiters = new Map<
     string,
     {
@@ -152,6 +189,10 @@ class AgentSessionRuntimeEventOutboxImpl implements AgentSessionRuntimeEventOutb
   // A deadline fails the current action while its original request remains fenced.
   private readonly timedOutInputReceiptErrors = new Map<string, Error>()
   private readonly activeDeliveryGroups = new Map<string, DeliveryLease>()
+  // Tracks the current in-memory retention interval. This is deliberately not
+  // persisted: recovery starts a fresh observation interval for the loaded
+  // version-1 snapshot.
+  private retentionOverCap = false
   private loaded = false
   private healthy = false
   private kicked: Promise<void> | null = null
@@ -194,6 +235,7 @@ class AgentSessionRuntimeEventOutboxImpl implements AgentSessionRuntimeEventOutb
 
   async load(): Promise<void> {
     this.records.clear()
+    this.retentionOverCap = false
     this.healthy = false
     this.loaded = true
     this.loadAttempts += 1
@@ -253,9 +295,15 @@ class AgentSessionRuntimeEventOutboxImpl implements AgentSessionRuntimeEventOutb
       sequence,
       enqueuedAt: this.now().toISOString(),
     }
+    this.receivedInputReceipts.delete(internal.id)
+    this.timedOutInputReceiptErrors.delete(internal.id)
+    this.inputReceiptTerminalErrors.delete(internal.id)
+    this.emptyReceiptConfirmationCounts.delete(internal.id)
     this.records.set(internal.id, internal)
+    this.updateRetentionCapState()
     await this.enqueueSnapshotWrite((error) => {
       this.records.delete(internal.id)
+      this.updateRetentionCapState()
       this.healthy = false
       this.lastLoadError = error instanceof Error ? error : new Error(errorMessage(error))
       this.scheduleLocalRetry()
@@ -272,6 +320,8 @@ class AgentSessionRuntimeEventOutboxImpl implements AgentSessionRuntimeEventOutb
     }
     const timedOut = this.timedOutInputReceiptErrors.get(recordId)
     if (timedOut) throw timedOut
+    const terminal = this.inputReceiptTerminalErrors.get(recordId)
+    if (terminal) throw terminal
     if (!this.records.has(recordId))
       throw new Error(`workflow input ${recordId} is no longer pending and has no matching receipt`)
     if (this.inputReceiptWaiters.has(recordId))
@@ -316,22 +366,31 @@ class AgentSessionRuntimeEventOutboxImpl implements AgentSessionRuntimeEventOutb
   // Dropped deltas are reconstructible from later deltas and the final
   // assistant message on the server side.
   private enforceRetentionCap(): void {
-    if (this.records.size <= this.maxRetentionEntries) return
-    let overflow = this.records.size - this.maxRetentionEntries
-    const candidates = [...this.records.values()]
-      .filter((record) => STREAMING_DELTA_TYPES.has(record.event.type))
-      .sort(sortBySequence)
-    for (const record of candidates) {
-      if (overflow <= 0) break
-      this.records.delete(record.id)
-      overflow -= 1
-    }
     if (this.records.size > this.maxRetentionEntries) {
-      log.warn('runtime-event outbox retention cap exceeded', {
-        reason: `limit=${this.maxRetentionEntries} remaining=${this.records.size}`,
-        session: 'outbox',
-      })
+      let overflow = this.records.size - this.maxRetentionEntries
+      const candidates = [...this.records.values()]
+        .filter((record) => STREAMING_DELTA_TYPES.has(record.event.type))
+        .sort(sortBySequence)
+      for (const record of candidates) {
+        if (overflow <= 0) break
+        this.records.delete(record.id)
+        overflow -= 1
+      }
     }
+    this.updateRetentionCapState()
+  }
+
+  private updateRetentionCapState(): void {
+    if (this.records.size <= this.maxRetentionEntries) {
+      this.retentionOverCap = false
+      return
+    }
+    if (this.retentionOverCap) return
+    this.retentionOverCap = true
+    log.warn('runtime-event outbox retention cap exceeded', {
+      reason: `limit=${this.maxRetentionEntries} remaining=${this.records.size}`,
+      session: 'outbox',
+    })
   }
 
   async kick(): Promise<void> {
@@ -473,6 +532,11 @@ class AgentSessionRuntimeEventOutboxImpl implements AgentSessionRuntimeEventOutb
     signal.removeEventListener('abort', abortFromStop)
 
     if (outcome.kind === 'timed-out') {
+      // A timeout is retryable and interrupts any deterministic refusal or
+      // already-consumed confirmation run.
+      const bindingKey = bindingReconcileDeliveryKey(batch)
+      if (bindingKey !== null) this.deterministicBindingRefusalCounts.delete(bindingKey)
+      this.resetEmptyReceiptConfirmations(batch)
       // Abort is advisory: the original request may still commit and reply later.
       this.rejectTimedOutInputReceipts(batch, timeoutError)
       this.settleTimedOutDelivery(lease, completion)
@@ -516,28 +580,96 @@ class AgentSessionRuntimeEventOutboxImpl implements AgentSessionRuntimeEventOutb
   private async settleDeliveryLease(lease: DeliveryLease, outcome: DeliveryCompletion): Promise<boolean> {
     if (this.stopped || this.activeDeliveryGroups.get(lease.label) !== lease) return false
     try {
+      const bindingKey = bindingReconcileDeliveryKey(lease.batch)
       if (outcome.kind === 'failure') {
+        this.resetEmptyReceiptConfirmations(lease.batch)
+        if (bindingKey !== null && isDeterministicBindingRefusal(outcome.error)) {
+          const refusalCount = (this.deterministicBindingRefusalCounts.get(bindingKey) ?? 0) + 1
+          this.deterministicBindingRefusalCounts.set(bindingKey, refusalCount)
+          if (refusalCount >= DETERMINISTIC_BINDING_REFUSAL_THRESHOLD) {
+            return await this.settleDeterministicBindingRefusal(lease.batch, bindingKey, outcome.error, refusalCount)
+          }
+        } else if (bindingKey !== null) {
+          this.deterministicBindingRefusalCounts.delete(bindingKey)
+        }
         for (const record of lease.batch) this.rejectInputReceipt(record.id, outcome.error)
         return false
       }
+      if (bindingKey !== null) this.deterministicBindingRefusalCounts.delete(bindingKey)
       return await this.settleDeliveryReceipts(lease.batch, outcome.perRecord)
     } finally {
       this.releaseDeliveryLease(lease)
     }
   }
 
+  private async settleDeterministicBindingRefusal(
+    _batch: readonly InternalRecord[],
+    deliveryKey: string,
+    error: RuntimeEventDeliveryError,
+    refusalCount: number,
+  ): Promise<boolean> {
+    const removed = [...this.records.values()].filter((record) => runtimeEventDeliveryKey(record) === deliveryKey)
+    if (removed.length === 0) return false
+    for (const record of removed) this.records.delete(record.id)
+    try {
+      await this.enqueueSnapshotWrite((writeError) => {
+        for (const record of removed) this.records.set(record.id, record)
+        this.updateRetentionCapState()
+        this.healthy = false
+        this.lastLoadError = writeError instanceof Error ? writeError : new Error(errorMessage(writeError))
+        this.scheduleLocalRetry()
+      })
+    } catch {
+      // A failed removal must start a fresh consecutive refusal window. The
+      // durable record is restored by the write failure callback and remains
+      // retryable rather than being immediately terminal on the next attempt.
+      this.deterministicBindingRefusalCounts.delete(deliveryKey)
+      return false
+    }
+    this.updateRetentionCapState()
+    log.error('runtime-event binding refusal reached terminal settlement', {
+      deliveryKey,
+      status: error.status,
+      code: error.code,
+      refusalCount,
+      removedRecords: removed.length,
+      session: 'outbox',
+    })
+    return true
+  }
+
   private async settleDeliveryReceipts(
     batch: readonly InternalRecord[],
     perRecord: AgentSessionRuntimeEventReceipt[][],
   ): Promise<boolean> {
-    // Settle each record against its own policy and the receipts returned
-    // for its position in the batch. Only records whose head pointer is
-    // unchanged (not rolled back / replaced mid-flight) are removed.
+    // Stage every removal first. Waiters are resolved only after the new
+    // snapshot is durable; a failed write must leave both the record and its
+    // confirmation sequence retryable.
     const removed: InternalRecord[] = []
-    let anyAcknowledged = false
+    const positiveReceipts: Array<{ record: InternalRecord; receipt: AgentSessionRuntimeEventReceipt }> = []
+    const alreadyConsumed: InternalRecord[] = []
+    const confirmationCountsBeforeSettlement = new Map<string, number>()
+
     for (let i = 0; i < batch.length; i += 1) {
       const record = batch[i]
       const receipts = perRecord[i] ?? []
+      if (receipts.length === 0 && isConfirmedConsumedRecord(record)) {
+        const previousConfirmationCount = this.emptyReceiptConfirmationCounts.get(record.id) ?? 0
+        const confirmationCount = previousConfirmationCount + 1
+        this.emptyReceiptConfirmationCounts.set(record.id, confirmationCount)
+        if (confirmationCount < 2) continue
+        confirmationCountsBeforeSettlement.set(record.id, previousConfirmationCount)
+        this.emptyReceiptConfirmationCounts.delete(record.id)
+        if (this.records.get(record.id) !== record) continue
+        this.records.delete(record.id)
+        removed.push(record)
+        alreadyConsumed.push(record)
+        continue
+      }
+
+      // Any non-empty response, including a non-matching positive response,
+      // interrupts an empty-confirmation sequence.
+      this.emptyReceiptConfirmationCounts.delete(record.id)
       const receipt = matchingReceipt(record.acknowledgementPolicy, record, receipts)
       if (!receipt) {
         this.rejectInputReceipt(
@@ -549,16 +681,19 @@ class AgentSessionRuntimeEventOutboxImpl implements AgentSessionRuntimeEventOutb
       if (this.records.get(record.id) !== record) continue
       this.records.delete(record.id)
       removed.push(record)
-      if (requiresInputReceipt(record)) this.resolveInputReceipt(record.id, receipt)
-      anyAcknowledged = true
+      if (requiresInputReceipt(record)) positiveReceipts.push({ record, receipt })
     }
-    if (!anyAcknowledged) {
-      return false
-    }
-    if (removed.length === 0) return true
+
+    if (removed.length === 0) return false
     try {
       await this.enqueueSnapshotWrite((error) => {
         for (const record of removed) this.records.set(record.id, record)
+        for (const record of removed) {
+          const previousCount = confirmationCountsBeforeSettlement.get(record.id)
+          if (previousCount === undefined) this.emptyReceiptConfirmationCounts.delete(record.id)
+          else this.emptyReceiptConfirmationCounts.set(record.id, previousCount)
+        }
+        this.updateRetentionCapState()
         this.healthy = false
         this.lastLoadError = error instanceof Error ? error : new Error(errorMessage(error))
         this.scheduleLocalRetry()
@@ -566,7 +701,19 @@ class AgentSessionRuntimeEventOutboxImpl implements AgentSessionRuntimeEventOutb
     } catch {
       return false
     }
+
+    this.updateRetentionCapState()
+    for (const { record, receipt } of positiveReceipts) this.resolveInputReceipt(record.id, receipt)
+    for (const record of alreadyConsumed) {
+      const error = new AlreadyConsumedRuntimeEventError(record.id)
+      this.inputReceiptTerminalErrors.set(record.id, error)
+      this.rejectInputReceipt(record.id, error)
+    }
     return true
+  }
+
+  private resetEmptyReceiptConfirmations(records: readonly InternalRecord[]): void {
+    for (const record of records) this.emptyReceiptConfirmationCounts.delete(record.id)
   }
 
   private rejectTimedOutInputReceipts(batch: readonly InternalRecord[], error: Error): void {
@@ -710,6 +857,19 @@ class AgentSessionRuntimeEventOutboxImpl implements AgentSessionRuntimeEventOutb
   }
 }
 
+export function isDeterministicBindingRefusal(error: unknown): error is RuntimeEventDeliveryError {
+  if (!(error instanceof RuntimeEventDeliveryError)) return false
+  if (error.status === 409) return DETERMINISTIC_BINDING_REFUSAL_409_CODES.has(error.code ?? '')
+  if (error.status === 400) return DETERMINISTIC_BINDING_REFUSAL_400_CODES.has(error.code ?? '')
+  return false
+}
+
+function bindingReconcileDeliveryKey(batch: readonly InternalRecord[]): string | null {
+  const first = batch[0]
+  if (!first || first.producerFamily !== 'binding-reconcile') return null
+  return runtimeEventDeliveryKey(first)
+}
+
 interface GroupSnapshot {
   readonly label: string
   readonly records: InternalRecord[]
@@ -768,10 +928,13 @@ function matchingReceipt(
       : null
   }
   if (record.producerFamily === 'workflow-cleanup' && record.event.type === 'session.cleanup') {
+    const cleanupOperationId = record.event.payload.cleanupOperationId
     const inputDeliveryId = record.event.payload.inputDeliveryId
     const agentTurnId = record.event.payload.turnId
-    return typeof inputDeliveryId === 'string' &&
+    return typeof cleanupOperationId === 'string' &&
+      typeof inputDeliveryId === 'string' &&
       typeof agentTurnId === 'string' &&
+      matching.cleanupOperationId === cleanupOperationId &&
       matching.inputDeliveryId === inputDeliveryId &&
       matching.agentSessionId === record.work?.agentSessionId &&
       matching.agentTurnId === agentTurnId
@@ -788,160 +951,12 @@ function requiresInputReceipt(record: RuntimeEventRecord): boolean {
   )
 }
 
+function isConfirmedConsumedRecord(record: RuntimeEventRecord): boolean {
+  return record.acknowledgementPolicy === 'matching-receipt' && requiresInputReceipt(record)
+}
+
 function sortBySequence(a: InternalRecord, b: InternalRecord): number {
   return a.sequence - b.sequence
-}
-
-function serializeSnapshot(entries: InternalRecord[]): string {
-  const snapshot: SnapshotShape = { version: RUNTIME_EVENT_OUTBOX_VERSION, entries: entries.map(cloneInternal) }
-  return JSON.stringify(snapshot, null, 2)
-}
-
-function parseSnapshot(raw: string): SnapshotShape | null {
-  try {
-    const value = JSON.parse(raw) as unknown
-    if (
-      !isPlainObject(value) ||
-      value['version'] !== RUNTIME_EVENT_OUTBOX_VERSION ||
-      !Array.isArray(value['entries'])
-    ) {
-      return null
-    }
-    const entries: InternalRecord[] = []
-    for (const item of value['entries']) {
-      const parsed = parseInternalRecord(item)
-      if (!parsed) return null
-      entries.push(parsed)
-    }
-    return { version: RUNTIME_EVENT_OUTBOX_VERSION, entries }
-  } catch {
-    return null
-  }
-}
-
-function parseInternalRecord(value: unknown): InternalRecord | null {
-  if (!isPlainObject(value)) return null
-  const id = value['id']
-  const target = value['target']
-  const family = value['producerFamily']
-  const runtimeSessionId = value['runtimeSessionId']
-  const runtime = value['runtime']
-  const sessionTurnId = value['sessionTurnId']
-  const event = value['event']
-  const policy = value['acknowledgementPolicy']
-  const work = value['work'] ?? null
-  const sequence = value['sequence']
-  const enqueuedAt = value['enqueuedAt']
-  if (
-    typeof id !== 'string' ||
-    !isRuntimeTarget(target) ||
-    (family !== 'workflow-session' &&
-      family !== 'workflow-cleanup' &&
-      family !== 'session-followup' &&
-      family !== 'generic-followup' &&
-      family !== 'binding-reconcile') ||
-    typeof runtimeSessionId !== 'string' ||
-    (runtime !== undefined && runtime !== null && typeof runtime !== 'string') ||
-    (sessionTurnId !== undefined && sessionTurnId !== null && typeof sessionTurnId !== 'string') ||
-    !isRuntimeEvent(event) ||
-    (policy !== 'matching-receipt' && policy !== 'successful-response') ||
-    typeof sequence !== 'number' ||
-    typeof enqueuedAt !== 'string'
-  ) {
-    return null
-  }
-  if (work !== null && !isRuntimeWorkMetadata(work)) return null
-  return {
-    id,
-    producerFamily: family,
-    target,
-    runtimeSessionId,
-    runtime: typeof runtime === 'string' ? runtime : null,
-    sessionTurnId: typeof sessionTurnId === 'string' ? sessionTurnId : null,
-    work,
-    event,
-    acknowledgementPolicy: policy,
-    sequence,
-    enqueuedAt,
-  }
-}
-
-function stripInternal(record: InternalRecord): RuntimeEventRecord {
-  return {
-    id: record.id,
-    producerFamily: record.producerFamily,
-    target: record.target,
-    runtimeSessionId: record.runtimeSessionId,
-    runtime: record.runtime ?? null,
-    sessionTurnId: record.sessionTurnId ?? null,
-    work: record.work,
-    event: record.event,
-    acknowledgementPolicy: record.acknowledgementPolicy,
-  }
-}
-
-function isPlainObject(value: unknown): value is Record<string, unknown> {
-  return value !== null && typeof value === 'object' && !Array.isArray(value)
-}
-
-function isRuntimeTarget(value: unknown): value is RuntimeEventTarget {
-  if (!isPlainObject(value)) return false
-  if (value['kind'] === 'workflow') {
-    return (
-      typeof value['projectId'] === 'string' &&
-      typeof value['workflowRunId'] === 'string' &&
-      typeof value['sessionName'] === 'string'
-    )
-  }
-  if (value['kind'] === 'generic') {
-    return typeof value['projectId'] === 'string' && typeof value['sessionId'] === 'string'
-  }
-  if (value['kind'] === 'session') return typeof value['sessionId'] === 'string'
-  return false
-}
-
-function isRuntimeEvent(value: unknown): value is RuntimeEventEntry {
-  if (!isPlainObject(value)) return false
-  const type = value['type']
-  const payload = value['payload']
-  return typeof type === 'string' && isPlainObject(payload)
-}
-
-function isRuntimeWorkMetadata(value: unknown): value is RuntimeEventWorkMetadata {
-  if (!isPlainObject(value)) return false
-  return (
-    typeof value['workId'] === 'string' &&
-    typeof value['workType'] === 'string' &&
-    (value['stage'] === null || typeof value['stage'] === 'string') &&
-    (value['taskRunId'] === undefined || value['taskRunId'] === null || typeof value['taskRunId'] === 'string') &&
-    (value['runnerId'] === undefined || value['runnerId'] === null || typeof value['runnerId'] === 'string') &&
-    (value['agentSessionId'] === undefined ||
-      value['agentSessionId'] === null ||
-      typeof value['agentSessionId'] === 'string') &&
-    (value['inputDeliveryId'] === undefined ||
-      value['inputDeliveryId'] === null ||
-      typeof value['inputDeliveryId'] === 'string') &&
-    (value['agentTurnId'] === undefined || value['agentTurnId'] === null || typeof value['agentTurnId'] === 'string')
-  )
-}
-
-function cloneInternal(record: InternalRecord): InternalRecord {
-  return {
-    id: record.id,
-    producerFamily: record.producerFamily,
-    target: { ...record.target },
-    runtimeSessionId: record.runtimeSessionId,
-    runtime: record.runtime ?? null,
-    sessionTurnId: record.sessionTurnId ?? null,
-    work: record.work ? { ...record.work } : null,
-    event: {
-      type: record.event.type,
-      payload: { ...record.event.payload },
-    },
-    acknowledgementPolicy: record.acknowledgementPolicy,
-    sequence: record.sequence,
-    enqueuedAt: record.enqueuedAt,
-  }
 }
 
 async function defaultDelivery(

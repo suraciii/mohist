@@ -51,13 +51,19 @@ public class IssueSessionApiSpecs
         var persistence = _fixture.Persistence.Checkpoint(currentSession.Id);
         await _client.PostOkAsync(RunnerAgentSessionAttachPath(currentSession), new { runtimeSessionId = currentSession.Id, workDir = $"/workspaces/{project.Id}", processPid = 1234 });
 
-        await _client.PostOkAsync(RunnerSessionRuntimeEventsPath(currentSession), new
+        var agentTurnId = await AcceptWorkflowInputAsync(currentSession, currentWorkflowRunId, "delivery-metadata-shape", "Plan session");
+        await _client.PostOkAsync(WorkflowRuntimeEventsPath(currentSession, currentWorkflowRunId), new
         {
             runtimeSessionId = currentSession.Id,
+            runtime = "opencode",
+            agentSessionId = currentSession.Id,
+            agentTurnId,
+            inputDeliveryId = "delivery-metadata-shape",
+            taskRunId = currentSession.SessionName,
+            workId = currentSession.SessionName,
             runtimeEvents = new object[]
             {
-                new { type = "session.input", payload = new { text = "Plan session", kind = "task" } },
-                new { type = "message.delta", payload = new { text = "hello" } },
+                new { type = "message.delta", payload = new { text = "hello", turnId = agentTurnId } },
                 new
                 {
                     type = "usage.updated",
@@ -71,13 +77,14 @@ public class IssueSessionApiSpecs
                         costAmount = 0.01,
                         costCurrency = "USD",
                         contextWindowSize = 200000,
-                        contextWindowUsed = 150
+                        contextWindowUsed = 150,
+                        turnId = agentTurnId
                     }
                 },
                 new
                 {
                     type = "model.resolved",
-                    payload = new { resolvedModel = "anthropic/claude-sonnet-4", source = "newSession" }
+                    payload = new { resolvedModel = "anthropic/claude-sonnet-4", source = "newSession", turnId = agentTurnId }
                 },
                 new
                 {
@@ -88,20 +95,21 @@ public class IssueSessionApiSpecs
                         kind = "read",
                         status = "in_progress",
                         title = "Read README",
-                        rawInput = new { filePath = "README.md" }
+                        rawInput = new { filePath = "README.md" },
+                        turnId = agentTurnId
                     }
                 },
                 new
                 {
                     type = "tool_call.updated",
-                    payload = new { toolCallId = "tool-1", kind = "read", status = "failed", title = "Read README" }
+                    payload = new { toolCallId = "tool-1", kind = "read", status = "failed", title = "Read README", turnId = agentTurnId }
                 },
                 new
                 {
                     type = "session.activity",
-                    payload = new { activity = "idle", status = "failed", failureReason = "probe timed out", failureCategory = "probe_timeout", exitCode = 1 }
+                    payload = new { activity = "idle", status = "failed", failureReason = "probe timed out", failureCategory = "probe_timeout", exitCode = 1, turnId = agentTurnId }
                 },
-                new { type = "message.delta", payload = new { text = "world" } }
+                new { type = "message.delta", payload = new { text = "world", turnId = agentTurnId } }
             }
         });
 
@@ -148,9 +156,10 @@ public class IssueSessionApiSpecs
 
         // Negative envelope shape: the metadata envelope does NOT carry
         // the per-part transcript projection fields. Servers keep these
-        // fields off the wire — the transcript is its own route.
+        // fields off the wire — the transcript is its own route. Turn
+        // observations are follow-up status facts, not transcript parts;
+        // with an acknowledged workflow turn they may be present.
         Assert.False(root.TryGetProperty("events", out _));
-        Assert.False(root.TryGetProperty("turns", out _));
         Assert.False(root.TryGetProperty("assistant", out _));
         Assert.False(root.TryGetProperty("workflowLogs", out _));
         Assert.False(root.TryGetProperty("transcript", out _));
@@ -203,6 +212,36 @@ var issue = await _client.PostDataAsync<IssueDto>($"/api/projects/{project.Id}/i
 
     private string RunnerAgentSessionAttachPath(CreatedSession session) =>
         $"{RunnerSessionPath(session)}/attach";
+
+    private string WorkflowRuntimeEventsPath(CreatedSession session, string workflowRunId) =>
+        $"{RunnerSessionPath(session)}/runtime-events";
+
+    private async Task<string> AcceptWorkflowInputAsync(CreatedSession session, string workflowRunId, string inputDeliveryId, string prompt)
+    {
+        using var response = await _client.PostAsJsonAsync(
+            WorkflowRuntimeEventsPath(session, workflowRunId),
+            new
+            {
+                runtimeSessionId = session.Id,
+                runtime = "opencode",
+                agentSessionId = session.Id,
+                inputDeliveryId,
+                taskRunId = session.SessionName,
+                workId = session.SessionName,
+                runtimeEvents = new object[]
+                {
+                    new { type = "session.input", payload = new { text = prompt } }
+                }
+            });
+        var body = await response.Content.ReadAsStringAsync();
+        Assert.True(response.IsSuccessStatusCode, $"workflow input failed: {(int)response.StatusCode} {body}");
+        using var document = JsonDocument.Parse(body);
+        var receipts = document.RootElement.EnumerateArray().ToArray();
+        if (receipts.Length == 1)
+            return receipts[0].GetProperty("agentTurnId").GetString()!;
+        var turns = await _fixture.Grains.GetGrain<IAgentSessionGrain>(session.Id).ListTurnsAsync();
+        return turns.Single(turn => turn.WorkflowExecution?.InputDeliveryId == inputDeliveryId).WorkflowExecution!.AgentTurnId;
+    }
 
     private string RunnerSessionRuntimeEventsPath(CreatedSession session) =>
         $"/api/runner/{_runnerId}/agent-sessions/{session.Id}/runtime-events";

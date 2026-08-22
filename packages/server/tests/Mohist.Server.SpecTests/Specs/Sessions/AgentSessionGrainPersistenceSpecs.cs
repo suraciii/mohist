@@ -33,7 +33,7 @@ public abstract class AgentSessionGrainPersistenceSpecsBase : IClassFixture<Agen
         "runner-1",
         runtime,
         WorkDir: "/work",
-        Metadata: WorkflowAgentSessionMetadata.Metadata(new WorkflowAgentSessionContext("project-1", "workflow-1", "build")));
+        Metadata: GenericAgentSessionMetadata.Metadata(new GenericAgentSessionContext("project-1", "agent-1", "Agent One")));
 
     protected async Task DeactivateAsync(IAgentSessionGrain grain)
     {
