@@ -1,0 +1,170 @@
+{
+  "project": "mohist-local",
+  "description": "Server-owned failure notices for failed Slack-origin turns with an expiring, signed, actor- and context-bound Retry action verified at the existing interaction boundary, and a durable, recoverable fresh execution attempt (root re-launch or force-new-turn follow-up) that converges on exactly one attempt across replay, redelivery, concurrency, and restart.",
+  "tasks": [
+    {
+      "id": "T-001",
+      "title": "Extend terminal delivery contracts and render the Server-owned failure notice",
+      "spec": "specs/slack-failure-retry-action/spec.md#requirement-failed-slack-origin-turns-shall-render-a-server-owned-failure-notice",
+      "description": "Extend SlackTerminalDelivery additively with optional sessionId/inputId/turnId and failure facts: initial-launch events (AgentJobLineage.BuildTerminalDeliveryEnvelope) stamp identity from AgentJobInput, follow-up events (AgentSessionGrain.TryEmitFollowupDeliveryAsync) stamp turn ids and the currently-hardcoded-null failure reason/category. SlackTerminalDeliveryHandler consumes both event kinds for status failed and renders one Server-owned failure notice via a new SlackStatusProjection.EnqueueExplicitFailureAsync (outbox kind ExplicitFailure, dispatch key slack-failure:{sessionId}:{turnId}, legacy slack-failure:{jobKey}) in the originating conversation/thread, presenting only sanitized reason/category/next-step facts through the existing redaction pipeline. Legacy events without identity render text-only; Manager (Mohist App) deliveries render text-only; reaction closeout (FinalizeLivenessAsync) and Agent reply-action promotion stay unchanged (design A, K).",
+      "acceptanceCriteria": [
+        "A failed Slack-origin initial launch (terminal-delivery event, status failed) posts a failure notice in the originating conversation/thread stating sanitized reason, category when known, and a next step — verified by a spec test under packages/server/tests/Mohist.Server.SpecTests/Specs/Slack/",
+        "A failed follow-up turn (followup-delivery event) renders the same sanitized notice shape in the same thread — spec test",
+        "Notice text is produced through the terminal redaction/summary pipeline: a test feeding raw provider errors, credentials, endpoints, and stack traces asserts none are reproduced verbatim and text length is bounded",
+        "The notice uses its own outbox dispatch key and never promotes, embeds, or overwrites the Agent reply row; a test proves reply-action delivery and the notice coexist without dispatch-key contention",
+        "New terminal-delivery events carry sessionId, inputId, turnId, and failureCategory; a JSON round-trip test shows legacy events (missing fields) deserialize tolerantly and still render a readable text-only notice with no Retry control",
+        "Manager (Mohist App) failure deliveries render a text-only notice with no Retry control — spec test",
+        "Existing FinalizeLivenessAsync reaction-closeout behavior and terminal liveness suites remain green (regression)"
+      ],
+      "priority": 1,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Extended SlackTerminalDelivery contract (AgentJobLineage.cs, AgentSessionGrain.SlackDelivery.cs), SlackTerminalDeliveryHandler failure branch, SlackStatusProjection.EnqueueExplicitFailureAsync with ExplicitFailure outbox kind, and new Specs/Slack failure-notice spec suites",
+      "dependsOn": [],
+      "passes": false,
+      "notes": "Nullable fields + JSON-tolerant deserialization keep old events and old readers compatible in both directions (design K). No Retry control is attached in this task; the notice is the terminal explicit-failure projection replacing reaction-only closeout."
+    },
+    {
+      "id": "T-002",
+      "title": "Retryability matrix and signed Retry action attached to retryable failure notices",
+      "spec": "specs/slack-failure-retry-action/spec.md#requirement-the-retry-control-shall-appear-only-for-authoritative-retryable-failure-categories",
+      "description": "Add a static, code-owned classifier (SlackFailureRetryPolicy, beside the EventCatalog failure-category vocabulary) mapping the authoritative failure category to retryable/not-retryable (retryable: runner-unavailable, runner-lost, report-timeout, timeout/deadline, transport, rate-limit; never retryable: category-less, unknown, legacy, input/configuration/permission, context exhaustion) and deriving the per-class next-step copy. Extract the canonical-form + HMAC-SHA256 + FixedTimeEquals signing helpers from SlackTurnControlService into a shared implementation used by both Stop and the new mohist_retry_turn action (v1 SlackRetryActionPayload binding failed session/input/turn identity, actor and initiator user ids, connection, team, conversation, message ts, thread ts, nonce, expiry — code-owned constant, proposed 24h), key still the Connection's BotToken secret. The failure-notice render path attaches the signed Retry block only when the category is retryable and the signing credential loads; no key or non-retryable category means text-only (design B, C; part of the 'Retry action SHALL be signed' requirement).",
+      "acceptanceCriteria": [
+        "Each retryable category (runner-unavailable, runner-lost, report-timeout, timeout/deadline, transport, rate-limit) attaches the signed Retry control as the only recovery control on the notice; input/configuration/permission, category-less, unknown, and legacy failures render text-only — matrix unit tests covering every classification branch",
+        "Retryability is decided from the authoritative category alone: a test with transient-sounding failure text ('timeout', 'unavailable') but a non-retryable category asserts no Retry control is attached",
+        "The mohist_retry_turn value binds session/input/turn identity, actor and initiator Slack user ids, connection id, team id, conversation id, message ts, thread ts, unique nonce, and a bounded expiry; signature is HMAC-SHA256 over the canonical payload with the Connection BotToken key and verifies in constant time — creation/verification unit tests",
+        "A Connection whose signing credential cannot be loaded renders the readable text notice with no Retry control — test",
+        "The canonical-form + HMAC + FixedTimeEquals helpers are extracted and shared; Stop creation and verification now route through the shared implementation with all existing Stop spec suites green (no behavior change)",
+        "Next-step copy per failure class (retryable / fix-then-resent / inspect-timeline) is rendered on the notice and asserted by tests"
+      ],
+      "priority": 2,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "SlackFailureRetryPolicy classifier, shared Slack action-signing helper (Stop migrated onto it), SlackRetryActionPayload + mohist_retry_turn action id with 24h expiry constant, Retry block attachment in the failure-notice render path, and unit/spec tests for the matrix, signing, and attachment",
+      "dependsOn": [
+        "T-001"
+      ],
+      "passes": false,
+      "notes": "Click handling lands in T-006 within the same change; until then mohist_retry_turn clicks fall through SlackTurnControlService.HandleAsync's existing unknown-action handling — no release boundary ever carries a live-but-unhandled control. Confirm the exact lifetime constant (design Open Question proposes 24h) during implementation."
+    },
+    {
+      "id": "T-003",
+      "title": "Durable retry-operation store, terminal-state validation, and retry-keyed root re-launch",
+      "spec": "specs/slack-retry-execution-attempt/spec.md#requirement-a-durable-retry-operation-shall-be-committed-before-any-dispatch",
+      "description": "Create the SlackRetryOperationStore with its own additive EF Core migration (SlackRetryOperations: unique action_key, unique retry_dispatch_key slack-retry:{connectionId}:{failedSessionId}:{failedTurnId}, target kind root|followup with failed ids, pre-minted attempt identities, pending/dispatching/applied/failed state, outcome, recovery lease, timestamps) and a Server-side retry execution service that validates the failed target against authoritative session state before any side effect, classifying it as exactly accepted / already_applied / stale / unavailable (root vs threaded derived from the failed turn's Job binding). For accepted root targets the service pre-mints fresh session/input/turn ids deterministically from the retry key (AgentLaunchCoordinatorCodec.StableToken scheme), commits the operation row pending, then re-launches through the shared IAgentLauncher.LaunchConnectionAsync boundary with an explicit idempotency-key override (default key unchanged for ordinary launches), copying provenance from the failed input, re-binding accepted attachments with availability re-check, and rebinding the thread/current-session routing mapping to the fresh session (design E, F, H; also requirements 'root request SHALL re-launch with fresh identities', 'validated before dispatch', 'immutable history', 'context-bound').",
+      "acceptanceCriteria": [
+        "The SlackRetryOperations migration is applied at startup by DatabaseInitializer per db-migrations.md authoring rules, and a committed row captures action key, retry dispatch key, target, pre-minted identities, pending state, and recovery lease — migration + store round-trip tests",
+        "Terminal-state validation reports exactly one of accepted / already_applied / stale / unavailable against authoritative session state: still-failed un-retried resolvable targets are accepted; a target with an existing retry operation reports already_applied; a no-longer-failed target reports stale; an unresolvable session/input/turn reports unavailable with nothing dispatched — one test per result",
+        "A root retry re-launches with a new Session, initial Input, and Turn distinct from the failed attempt, under the retry-specific idempotency key, through the same LaunchConnectionAsync boundary a CLI/Web surface would call (no Slack-only dispatch path) — test",
+        "Re-processing the same retry under its key resolves to the same pre-minted identities rather than a second launch, and a conflicting payload under the same key is rejected as an idempotency conflict by coordinator fencing — tests",
+        "Commit precedes dispatch: the operation row is durably committed pending before any execution side effect, and a forced commit failure aborts the retry with an explicit outcome and zero side effect — test",
+        "The failed attempt's session/input/turn records remain unchanged as immutable history, and the fresh attempt executes against the same Connection and conversation — tests",
+        "The thread session mapping (channel) or current-session mapping (DM) is rebound to the fresh session idempotently, and a racing ordinary follow-up is never lost — test",
+        "Ordinary launches keep today's default idempotency key and existing launch-coordinator suites stay green (regression)"
+      ],
+      "priority": 3,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "SlackRetryOperationStore + EF migration (Infrastructure/Data/Migrations), retry execution service with terminal-state validation and commit-before-dispatch orchestration, IAgentLauncher/AgentLaunchCoordinatorGrain idempotency-key override with retry-keyed pre-minted ids, mapping rebind, and server spec tests under Specs/Sessions or Specs/Slack",
+      "dependsOn": [],
+      "passes": false,
+      "notes": "Independent of the presentation tasks (T-001/T-002): the store and validation operate on durable session state, not on the notice. UNIQUE(action_key) plus UNIQUE(retry_dispatch_key) make concurrency converge structurally: a concurrent first-click insert race is decided by the single-row insert; losers re-read and return the winner's recorded outcome. Attachment re-binding re-verifies availability at click time (design Open Question, proposed answer)."
+    },
+    {
+      "id": "T-004",
+      "title": "Force-new-turn threaded retry in the original session",
+      "spec": "specs/slack-retry-execution-attempt/spec.md#requirement-a-failed-threaded-turn-shall-retry-as-a-force-new-turn-follow-up-in-the-original-session",
+      "description": "Extend AcceptFollowupCommand with a force-new-turn admission mode that bypasses ChooseFollowupTurnForAssignment entirely: it always creates its own new Turn (queued when another turn is executing or queued) and never attaches the input to an existing turn, while ordinary message admission keeps today's steer/new-turn behavior. The retry follow-up carries the retry idempotency key, pre-minted input/turn ids derived from it, and provenance copied from the failed input (identical member/message/thread facts; the clicking actor is recorded on the retry operation, not forged into provenance), commits into the SlackRetryOperationStore before dispatch, and dispatches through a turn-targeted variant of BeginNextFollowupDispatchAsync exposed by the session grain and driven by AgentSessionFollowupDispatcher so the retry never depends on FIFO position (design G).",
+      "acceptanceCriteria": [
+        "Force-new-turn admission always creates its own new Turn — queued behind any executing or queued turn — and never joins, merges with, or extends another turn; domain tests cover the idle, queued, and executing cases",
+        "Ordinary follow-up admission (steer/new-turn decision via ChooseFollowupTurnForAssignment) is unchanged for ordinary messages, and an unrelated queued or executing follow-up continues its own admission untouched — regression tests",
+        "The retry follow-up is admitted under the retry idempotency key with pre-minted input/turn ids; re-processing resolves to the same ids instead of a second turn — test",
+        "The turn-targeted dispatch variant dispatches exactly the retry's turn regardless of FIFO position; the retry never rides an unrelated follow-up's dispatch — test",
+        "The retry stays bound to the original Session and conversation, the failed turn's records remain immutable, and the operation row is committed before the targeted dispatch — tests"
+      ],
+      "priority": 4,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "AcceptFollowupCommand force-new-turn admission mode (Sessions/Domain + AgentSessionGrain), turn-targeted BeginNextFollowupDispatchAsync variant (AgentSessionGrain.FollowupDispatch.cs + AgentSessionFollowupDispatcher), threaded retry orchestration wired into the T-003 store/service, and domain/spec tests",
+      "dependsOn": [
+        "T-003"
+      ],
+      "passes": false,
+      "notes": "Provenance copying preserves reply anchoring and thread binding; identity is copied from the failed input, never synthesized from the clicking actor."
+    },
+    {
+      "id": "T-005",
+      "title": "Fixed-key retry recovery reminder grain",
+      "spec": "specs/slack-retry-execution-attempt/spec.md#requirement-retry-operations-shall-converge-on-one-attempt-across-replay-redelivery-failover-concurrency-and-restart",
+      "description": "Add a SlackRetryRecoveryGrain mirroring the SlackOutboxDispatcherGrain pattern: fixed string key (rogue activations ignored), persistent reminder, startup activation service, and a post-commit poke API the click path will call (T-006). The reminder scans SlackRetryOperations for committed-but-pending rows whose recovery lease expired, claims them optimatively, and resumes them exactly once — root operations re-drive the launch coordinator, threaded operations re-drive the turn-targeted follow-up dispatch, and an interrupted mapping rebind is completed — relying on the execution layer's idempotency keys as the true exactly-once fence (design I).",
+      "acceptanceCriteria": [
+        "The grain activates only under its fixed string key (rogue activations ignored), registers a persistent reminder, is activated at startup by an activation service, and exposes a post-commit poke — unit tests mirroring the outbox-dispatcher suites",
+        "A crash between operation commit and dispatch resumes on restart via the reminder and dispatches the pre-minted attempt exactly once, without minting a second attempt — crash-recovery test (root and threaded variants)",
+        "The recovery lease prevents two in-flight drivers from duplicating presentation work; an expired lease allows takeover — lease-contention test",
+        "Resumption uses only the durable record (pre-minted identities, target kind, state) and re-enters the existing operation rather than creating a new one — test",
+        "Execution idempotency keys (coordinator key / follow-up key) remain the exactly-once fence; the lease is presentation-only — asserted by a test where the lease expires mid-drive without duplicating the attempt"
+      ],
+      "priority": 5,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "SlackRetryRecoveryGrain + activation service (Infrastructure/Slack), recovery-lease claiming and resume logic for root and threaded operations, post-commit poke API, and reminder/recovery spec tests",
+      "dependsOn": [
+        "T-003",
+        "T-004"
+      ],
+      "passes": false,
+      "notes": "Fixed-key sweep is the established pattern (SlackOutboxDispatcherGrain, EventDispatcherGrain); per-operation reminder grains were rejected in the design as unbounded churn."
+    },
+    {
+      "id": "T-006",
+      "title": "Retry click handling: verification, re-authorization, dispatch wiring, and durable outcome presentations",
+      "spec": "specs/slack-failure-retry-action/spec.md#requirement-retry-clicks-shall-be-verified-and-re-authorized-at-the-interaction-boundary",
+      "description": "Dispatch mohist_retry_turn at the existing /interactions boundary (SlackInteractionRoutes) into a Retry branch of SlackTurnControlService that verifies in order: parse + constant-time signature + version/discriminator, expiry, context binding against the live Connection and click envelope, actor equality with the payload-bound actor, nonce consumption in the provider inbox under message identity action:{nonce} with a new Retry route kind (a consumed nonce re-enters the recorded operation), and current authorization via SlackConnectionAccessDecider.EvaluateAsync — a bound actor alone is not authorization. Accepted clicks invoke the T-003/T-004 retry execution service, poke the T-005 recovery grain, and update the failure notice through the existing outbox to acknowledge the retry, project the new attempt's working state, and include a newly signed Stop control via CreateStopActionAsync; rejected, expired, stale, unavailable, already-applied, and replayed clicks remove or replace the obsolete Retry control with the explicit outcome text, converging on one presentation mutation via ActionDispatchRef, with every click audited (design D, E, J).",
+      "acceptanceCriteria": [
+        "mohist_retry_turn is dispatched at the existing /interactions endpoint with no new adapter-facing endpoint; the verification chain (unparseable value, tampered signature, unsupported version, expired action, context mismatch, actor mismatch) rejects each case with an explicit user-visible outcome and zero execution side effect — one test per case",
+        "A payload-bound actor whom the current Connection access policy no longer authorizes gets an explicit unauthorized outcome with no side effect — lost-access test (allowlist change after notice render)",
+        "A replayed interaction (consumed nonce, Slack redelivery, adapter failover under a different lease) re-enters the recorded retry operation and returns its recorded outcome, re-projecting the presentation if needed rather than returning only a duplicate receipt — tests",
+        "An accepted click starts exactly one fresh attempt — root via the retry-keyed re-launch, threaded via force-new-turn follow-up — and repeat deliveries of that click's outcome start no additional attempt — end-to-end test",
+        "The accepted outcome updates the notice in place (outbox UserAction chat.update at the notice message) to acknowledge the retry, project the new attempt's working state, and include a signed Stop control when the new attempt is stoppable — test",
+        "Rejected / stale / unavailable / already-applied outcomes remove or replace the obsolete Retry control on the notice through existing outbox durability and retry semantics — test",
+        "Repeated delivery of the same click converges on one presentation mutation keyed on ActionDispatchRef — convergence test",
+        "Every Retry click is audited with workspace, conversation, actor, target, and outcome, matching the existing Slack control audit shape",
+        "A retried attempt that fails again flows through the ordinary terminal pipeline to a new failure notice with a fresh Retry action on new attempt identities, without violating the unique-key rule — chained-retry test"
+      ],
+      "priority": 6,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "SlackInteractionRoutes retry dispatch, SlackTurnControlService Retry branch with full verification/authorization chain, SlackProviderInboxRouteKinds.Retry, accepted/rejected outcome presentations via the outbox, post-commit poke wiring, audit records, and Specs/Slack click-matrix suites",
+      "dependsOn": [
+        "T-002",
+        "T-003",
+        "T-004",
+        "T-005"
+      ],
+      "passes": false,
+      "notes": "This task closes the loop between the action capability and the execution capability; after it lands, a failed retryable Slack turn is recoverable end-to-end in-conversation. Stop behavior, Agent reply ownership, and Workflow recovery semantics must remain unchanged (regression suites)."
+    },
+    {
+      "id": "T-007",
+      "title": "Adapter pass-through contract coverage (TypeScript and Go)",
+      "spec": "specs/slack-failure-retry-action/spec.md#requirement-the-adapter-shall-pass-the-retry-control-through-unchanged",
+      "description": "Add contract tests proving both adapters treat Retry as pure pass-through with no production code changes: the TypeScript adapter (packages/mohist-slack) forwards the mohist_retry_turn action id and signed value unchanged in the interaction envelope under the existing lease identity, acknowledges Slack promptly exactly as for Stop, and delivers Server-provided failure-notice blocks, Retry blocks, and outcome-update blocks without rewriting, filtering, or interpreting them; the Go transport port (packages/go/mohist-slack) gets the equivalent InteractionEnvelope forwarding and blocks pass-through coverage (design L).",
+      "acceptanceCriteria": [
+        "TypeScript contract tests (adapter-events/transport suites) assert mohist_retry_turn action id and signed value are forwarded unchanged under the lease identity with prompt acknowledgement and no Retry-specific processing — vitest green",
+        "TypeScript delivery tests assert Server-provided notice blocks, Retry blocks, and outcome-update blocks are delivered byte-unchanged — vitest green",
+        "Go contract tests (serverapi_test.go) assert the InteractionEnvelope forwards the Retry action id/value unchanged and Server blocks pass through — go test green",
+        "Both adapters gain no new action grammar, endpoint, authorization logic, or persisted state — verified by review of the diff showing test-only changes",
+        "Existing Stop forwarding and delivery contract suites remain green (regression)"
+      ],
+      "priority": 7,
+      "mode": "AFK",
+      "type": "TEST",
+      "output": "New/extended contract tests in packages/mohist-slack/src (adapter-events, adapter-delivery, transport suites) and packages/go/mohist-slack/serverapi_test.go; zero production adapter code changes",
+      "dependsOn": [
+        "T-006"
+      ],
+      "passes": false,
+      "notes": "Depends transitively on the finalized action grammar (T-002) and outcome block shapes (T-001, T-006). The adapters already forward arbitrary actionId/actionValue under the lease identity, so this is coverage only."
+    }
+  ]
+}
