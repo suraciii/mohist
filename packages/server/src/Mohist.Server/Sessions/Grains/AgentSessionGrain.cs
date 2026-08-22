@@ -658,7 +658,8 @@ public sealed partial class AgentSessionGrain : Grain, IAgentSessionGrain, IRemi
             idempotencyKey: key,
             now: Now(),
             attachments: command.Attachments,
-            provenance: command.Provenance);
+            provenance: command.Provenance,
+            forceNewTurn: command.ForceNewTurn);
         StampFollowupConcurrencyToken(session, result.OperationId);
         await CommitAsync(session, Array.Empty<AgentSessionEvent>());
         var acceptedLease = GetPendingFollowups(session).FirstOrDefault(candidate =>

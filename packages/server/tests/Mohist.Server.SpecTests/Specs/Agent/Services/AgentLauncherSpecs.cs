@@ -239,6 +239,208 @@ public class AgentLauncherSpecs
     }
 
     [Fact]
+    public async Task RetryService_ThreadRetryCreatesTargetedFollowupWithOriginalSlackProvenance()
+    {
+        var projectId = await CreateProjectAsync("agent-retry-thread");
+        var agent = await CreateAgentAsync(projectId, "agent-retry-thread-agent", maxConcurrentRuns: 2);
+        var origin = new ConnectionLaunchOrigin(
+            "connection-thread-retry",
+            "T-thread-retry",
+            "U-thread-retry",
+            "C-thread-retry",
+            "1710000000.000001");
+
+        AgentLaunchResult launch;
+        await using (var scope = _fixture.Services.CreateAsyncScope())
+        {
+            launch = await scope.ServiceProvider.GetRequiredService<IAgentLauncher>()
+                .LaunchConnectionAsync(agent, "original root", origin);
+        }
+
+        var session = _fixture.Grains.GetGrain<IAgentSessionGrain>(launch.SessionId);
+        var initial = await session.GetInitialLaunchAsync();
+        Assert.NotNull(initial?.Input?.Provenance);
+        await session.AttachPhysicalSessionAsync(new AttachPhysicalSessionCommand(
+            "thread-retry-runtime",
+            WorkDir: "/tmp/thread-retry"));
+        await session.MarkInitialTurnTerminalAsync(initial!.Turn!.JobId!, AgentTurnStatus.Completed, null);
+
+        var failedProvenance = initial.Input!.Provenance! with
+        {
+            ThreadId = "1710000000.000001",
+            MessageId = "1710000000.000002",
+            BoundThreadRootMessageId = initial.Input.Provenance.MessageId,
+        };
+        var failed = await session.AcceptFollowupAsync(new AcceptFollowupCommand(
+            Text: "original thread follow-up",
+            Source: "agent-session-followup",
+            IdempotencyKey: "original-thread-followup",
+            Provenance: failedProvenance));
+        await session.MarkFollowupTurnTerminalAsync(
+            failed.OperationId,
+            AgentTurnStatus.Failed,
+            new AgentTurnResult(
+                FailureReason: "runner unavailable",
+                FailureCategory: AgentJobFailureReasons.RunnerUnavailable));
+
+        var unrelated = await session.AcceptFollowupAsync(new AcceptFollowupCommand(
+            Text: "unrelated queued turn",
+            Source: "agent-session-followup",
+            IdempotencyKey: "unrelated-thread-followup",
+            Provenance: failedProvenance with { MessageId = "1710000000.000003" }));
+
+        var runnerId = $"thread-retry-runner-{Guid.NewGuid():N}";
+        await session.OpenAsync(new OpenAgentSessionCommand(
+            runnerId,
+            "opencode",
+            WorkDir: "/tmp/thread-retry"));
+        await _fixture.Grains.GetGrain<IRunnerGrain>(runnerId).RegisterAsync(new RunnerInfo(
+            runnerId,
+            ["spec/*"],
+            "thread-retry-runner",
+            projectId,
+            RuntimeCatalogs: CapabilityCatalogTestHelpers.Create()));
+        try
+        {
+            var transport = _fixture.Services.GetRequiredService<RecordingRunnerControlTransport>();
+            transport.Clear();
+
+            AgentSessionRetryResult retry;
+            await using (var scope = _fixture.Services.CreateAsyncScope())
+            {
+                retry = await scope.ServiceProvider.GetRequiredService<AgentSessionRetryService>()
+                    .RetryAsync(projectId, launch.SessionId, failed.TurnId, "retry-thread-click");
+            }
+
+            Assert.Equal(AgentSessionRetryOutcome.Finished, retry.Outcome);
+            Assert.Equal(launch.SessionId, retry.SessionId);
+            Assert.NotEqual(failed.InputId, retry.InputId);
+            Assert.NotEqual(failed.TurnId, retry.TurnId);
+            var followupRequest = Assert.Single(transport.Invocations, request => request.Method == "session.followup");
+            var followupPayload = Assert.IsType<Mohist.Server.Contracts.FollowupParams>(followupRequest.Arguments[0]);
+            Assert.Equal(retry.TurnId, followupPayload.TurnId);
+            Assert.DoesNotContain(transport.Invocations, request =>
+                request.Method == "session.followup"
+                && request.Arguments.FirstOrDefault() is Mohist.Server.Contracts.FollowupParams payload
+                && payload.TurnId == unrelated.TurnId);
+            var state = await session.ListTurnsAsync();
+            var failedAfter = state.Single(turn => turn.Id == failed.TurnId);
+            Assert.Equal(AgentTurnStatus.Failed, failedAfter.Status);
+            Assert.Equal(AgentJobFailureReasons.RunnerUnavailable, failedAfter.Result!.FailureCategory);
+            Assert.Equal("runner unavailable", failedAfter.Result.FailureReason);
+            var retryInput = (await session.ListInputsAsync()).Single(input => input.Id == retry.InputId);
+            Assert.Equal(AgentTurnStatus.Queued, (await session.ListTurnsAsync()).Single(turn => turn.Id == unrelated.TurnId).Status);
+            Assert.Equal(failedProvenance.ConversationId, retryInput.Provenance!.ConversationId);
+            Assert.Equal(failedProvenance.BoundThreadRootMessageId, retryInput.Provenance.BoundThreadRootMessageId);
+        }
+        finally
+        {
+            await _fixture.Grains.GetGrain<IRunnerRegistryGrain>(RunnerRegistryKeys.Global).UnregisterAsync(runnerId);
+        }
+    }
+
+    [Fact]
+    public async Task RetryService_ThreadRetryPendingRecoveryIsIdempotent()
+    {
+        var projectId = await CreateProjectAsync("agent-retry-thread-recovery");
+        var agent = await CreateAgentAsync(projectId, "agent-retry-thread-recovery-agent");
+        var origin = new ConnectionLaunchOrigin(
+            "connection-thread-recovery",
+            "T-thread-recovery",
+            "U-thread-recovery",
+            "C-thread-recovery",
+            "1710000000.000001");
+
+        AgentLaunchResult launch;
+        await using (var scope = _fixture.Services.CreateAsyncScope())
+        {
+            launch = await scope.ServiceProvider.GetRequiredService<IAgentLauncher>()
+                .LaunchConnectionAsync(agent, "original root", origin);
+        }
+
+        var session = _fixture.Grains.GetGrain<IAgentSessionGrain>(launch.SessionId);
+        var initial = await session.GetInitialLaunchAsync();
+        await session.AttachPhysicalSessionAsync(new AttachPhysicalSessionCommand(
+            "thread-recovery-runtime",
+            WorkDir: "/tmp/thread-recovery"));
+        await session.MarkInitialTurnTerminalAsync(initial!.Turn!.JobId!, AgentTurnStatus.Completed, null);
+        var provenance = initial.Input!.Provenance! with
+        {
+            ThreadId = "1710000000.000001",
+            MessageId = "1710000000.000002",
+            BoundThreadRootMessageId = initial.Input.Provenance.MessageId,
+        };
+        var failed = await session.AcceptFollowupAsync(new AcceptFollowupCommand(
+            Text: "recover this thread follow-up",
+            Source: "agent-session-followup",
+            IdempotencyKey: "failed-thread-recovery",
+            Provenance: provenance));
+        await session.MarkFollowupTurnTerminalAsync(
+            failed.OperationId,
+            AgentTurnStatus.Failed,
+            new AgentTurnResult(FailureCategory: AgentJobFailureReasons.RunnerUnavailable));
+
+        var runnerId = $"thread-recovery-runner-{Guid.NewGuid():N}";
+        await session.OpenAsync(new OpenAgentSessionCommand(runnerId, "opencode", WorkDir: "/tmp/thread-recovery"));
+        await _fixture.Grains.GetGrain<IRunnerGrain>(runnerId).RegisterAsync(new RunnerInfo(
+            runnerId,
+            ["spec/*"],
+            "thread-recovery-runner",
+            projectId,
+            RuntimeCatalogs: CapabilityCatalogTestHelpers.Create()));
+        var transport = _fixture.Services.GetRequiredService<RecordingRunnerControlTransport>();
+        transport.Clear();
+
+        try
+        {
+        AgentRetryOperation operation;
+        await using (var scope = _fixture.Services.CreateAsyncScope())
+        {
+            operation = (await scope.ServiceProvider.GetRequiredService<AgentRetryOperationStore>()
+                .ClaimOrCreateAsync(
+                    projectId,
+                    launch.SessionId,
+                    failed.TurnId,
+                    "retry-thread-recovery",
+                    AgentRetryOperationKind.Thread,
+                    "recovery-session",
+                    "recovery-input",
+                    "recovery-turn")).Operation;
+        }
+
+        AgentSessionRetryResult first;
+        await using (var scope = _fixture.Services.CreateAsyncScope())
+        {
+            first = await scope.ServiceProvider.GetRequiredService<AgentSessionRetryService>()
+                .DispatchPendingAsync(projectId, operation.OperationId);
+        }
+        var inputCount = (await session.ListInputsAsync()).Count;
+        var dispatchCount = transport.Invocations.Count(request => request.Method == "session.followup");
+
+        AgentSessionRetryResult replay;
+        await using (var scope = _fixture.Services.CreateAsyncScope())
+        {
+            replay = await scope.ServiceProvider.GetRequiredService<AgentSessionRetryService>()
+                .DispatchPendingAsync(projectId, operation.OperationId);
+        }
+
+        Assert.Equal(AgentSessionRetryOutcome.Finished, first.Outcome);
+        Assert.Equal(first.OperationId, replay.OperationId);
+        Assert.Equal(inputCount, (await session.ListInputsAsync()).Count);
+        Assert.Equal(dispatchCount, transport.Invocations.Count(request => request.Method == "session.followup"));
+        Assert.Equal(3, inputCount);
+        await using var verify = _fixture.Services.CreateAsyncScope();
+        var stored = await verify.ServiceProvider.GetRequiredService<AgentRetryOperationStore>()
+            .GetAsync(projectId, operation.OperationId);
+        Assert.Equal(AgentRetryOperationState.Finished, stored!.State);
+        }
+        finally
+        {
+            await _fixture.Grains.GetGrain<IRunnerRegistryGrain>(RunnerRegistryKeys.Global).UnregisterAsync(runnerId);
+        }
+    }
+
+    [Fact]
     public async Task RetryService_RootRetryCommitsReceiptAndCreatesDistinctSession()
     {
         var projectId = await CreateProjectAsync("agent-retry-root");
@@ -529,7 +731,7 @@ public class AgentLauncherSpecs
             ?? throw new InvalidOperationException($"CreateProject '{name}' returned no id");
     }
 
-    private async Task<AgentInfo> CreateAgentAsync(string projectId, string name, string? runtime = null)
+    private async Task<AgentInfo> CreateAgentAsync(string projectId, string name, string? runtime = null, int maxConcurrentRuns = 1)
     {
         using var response = await _fixture.Client.PostAsJsonAsync(
             $"/api/projects/{projectId}/agents",
@@ -542,7 +744,7 @@ public class AgentLauncherSpecs
                      ? (object)new { model = "openai/gpt-5.6" }
                      : new { model = "openai/gpt-5.6", runtime },
                 skills = new[] { "coding" },
-                maxConcurrentRuns = 1,
+                maxConcurrentRuns,
             });
         response.EnsureSuccessStatusCode();
         var body = await response.Content.ReadFromJsonAsync<JsonElement>();

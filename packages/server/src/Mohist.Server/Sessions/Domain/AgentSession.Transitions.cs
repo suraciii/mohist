@@ -1138,7 +1138,8 @@ public static partial class AgentSessionExtensions
             string idempotencyKey,
             DateTime now,
             IReadOnlyList<AgentSessionInputAttachmentDescriptor>? attachments = null,
-            AgentSessionInputProvenance? provenance = null)
+            AgentSessionInputProvenance? provenance = null,
+            bool forceNewTurn = false)
         {
             if (string.IsNullOrWhiteSpace(inputId))
                 throw new ArgumentException("Input id is required.", nameof(inputId));
@@ -1205,12 +1206,14 @@ public static partial class AgentSessionExtensions
             }
 
             var executionSource = ExecutionSourceFor(provenance);
-            var candidateTurn = ChooseFollowupTurnForAssignment(
-                turns,
-                leases,
-                inputs,
-                hasAttachments,
-                executionSource);
+            var candidateTurn = forceNewTurn
+                ? null
+                : ChooseFollowupTurnForAssignment(
+                    turns,
+                    leases,
+                    inputs,
+                    hasAttachments,
+                    executionSource);
 
             var newInput = new AgentSessionInputRecord(
                 Id: inputId,

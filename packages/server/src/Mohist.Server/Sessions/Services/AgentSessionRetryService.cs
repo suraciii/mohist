@@ -1,4 +1,5 @@
 using Mohist.Server.Agent.Services;
+using Mohist.Server.Api;
 using Mohist.Server.Infrastructure.Data.Sessions;
 using Mohist.Server.Infrastructure.Hosting;
 using Mohist.Server.Sessions.Domain;
@@ -49,6 +50,7 @@ public sealed class AgentSessionRetryService : IScopedService
     private readonly AgentQuerier _agents;
     private readonly AgentRetryOperationStore _operations;
     private readonly IAgentLauncher _launcher;
+    private readonly AgentSessionFollowupDispatcher _followups;
     private readonly IGrainFactory _grains;
 
     public AgentSessionRetryService(
@@ -56,12 +58,14 @@ public sealed class AgentSessionRetryService : IScopedService
         AgentQuerier agents,
         AgentRetryOperationStore operations,
         IAgentLauncher launcher,
+        AgentSessionFollowupDispatcher followups,
         IGrainFactory grains)
     {
         _sessions = sessions;
         _agents = agents;
         _operations = operations;
         _launcher = launcher;
+        _followups = followups;
         _grains = grains;
     }
 
@@ -186,7 +190,7 @@ public sealed class AgentSessionRetryService : IScopedService
             result.TurnId);
     }
 
-    private async Task<AgentLaunchResult> DispatchPendingAsync(
+    private async Task<RetryDispatchResult> DispatchPendingAsync(
         AgentRetryOperation operation,
         RetryTarget target,
         CancellationToken ct)
@@ -197,11 +201,38 @@ public sealed class AgentSessionRetryService : IScopedService
             || !AgentSessionRetryPolicy.IsRetryable(target.Turn.Result?.FailureCategory))
             throw new InvalidOperationException("Retry target is no longer retryable.");
 
-        if (operation.Kind != AgentRetryOperationKind.Root)
-            throw new NotSupportedException("Thread retry dispatch is implemented by the next retry task.");
-
         var input = target.Inputs.FirstOrDefault(candidate => target.Turn.InputIds.Contains(candidate.Id))
-            ?? throw new InvalidOperationException("Retry target's launch input was not found.");
+            ?? throw new InvalidOperationException("Retry target input was not found.");
+
+        if (operation.Kind == AgentRetryOperationKind.Thread)
+        {
+            var grain = _grains.GetGrain<IAgentSessionGrain>(target.Session.Id);
+            var accepted = await grain.AcceptFollowupAsync(new AcceptFollowupCommand(
+                Text: input.Text,
+                Source: input.Source,
+                IdempotencyKey: $"agent-retry:{operation.OperationId}",
+                PreMintedInputId: operation.PreAllocatedInputId,
+                PreMintedTurnId: operation.PreAllocatedTurnId,
+                Provenance: input.Provenance,
+                ForceNewTurn: true));
+
+            // A busy Session deliberately returns no dispatch here. The
+            // accepted turn remains queued and the ordinary scheduler will
+            // select it in order after the executing turn ends. When idle,
+            // the targeted call cannot select an unrelated queued turn.
+            await _followups.DispatchForTurnAsync(
+                target.ProjectId,
+                target.Session.Id,
+                accepted.TurnId,
+                ct);
+
+            return new RetryDispatchResult(
+                SessionId: target.Session.Id,
+                JobKey: null,
+                InputId: accepted.InputId,
+                TurnId: accepted.TurnId);
+        }
+
         var provenance = input.Provenance
             ?? throw new InvalidOperationException("Retry target has no durable Connection provenance.");
         var agentId = target.Session.Metadata.Label(GenericAgentSessionMetadata.AgentId);
@@ -220,7 +251,7 @@ public sealed class AgentSessionRetryService : IScopedService
             provenance.MessageId,
             provenance.ThreadId,
             provenance.OriginMarker);
-        return await _launcher.LaunchConnectionAsync(
+        var launch = await _launcher.LaunchConnectionAsync(
             agent,
             input.Text,
             origin,
@@ -230,6 +261,7 @@ public sealed class AgentSessionRetryService : IScopedService
             preMintedTurnId: operation.PreAllocatedTurnId,
             idempotencyKeyOverride: $"agent-retry:{operation.OperationId}",
             ct: ct);
+        return new RetryDispatchResult(launch.SessionId, launch.JobKey, launch.InputId, launch.TurnId);
     }
 
     private async Task<RetryTarget?> ReadTargetAsync(
@@ -282,4 +314,10 @@ public sealed class AgentSessionRetryService : IScopedService
         AgentSession Session,
         AgentTurnRecord? Turn,
         IReadOnlyList<AgentSessionInputRecord> Inputs);
+
+    private sealed record RetryDispatchResult(
+        string SessionId,
+        string? JobKey,
+        string InputId,
+        string TurnId);
 }

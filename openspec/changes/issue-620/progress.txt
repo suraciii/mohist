@@ -12,3 +12,10 @@
 - Extended IAgentLauncher.LaunchConnectionAsync with an optional idempotency-key override; existing Slack callers retain the original key behavior.
 - Added an integration spec for root retry: it records a real failed launch turn, verifies a distinct new Session uses the receipt's preallocated identities and original Slack provenance, and verifies the failed turn's status/reason/category remain unchanged.
 - Verification: server, UnitTests, and SpecTests projects build; dotnet test executed the full UnitTests (3787) and full SpecTests (3042) successfully. MTP reports the VSTest filter is ignored, so the runs were full suites.
+
+## T-002 decisions
+
+- Thread retry accepts a fresh follow-up with `agent-retry:{operationId}`, the operation receipt's pre-minted input/turn ids, the failed input's text/source/provenance, and `ForceNewTurn=true`; this prevents the Session's normal queued-turn coalescing from merging the retry into an unrelated queued turn.
+- `BeginFollowupDispatchForTurnAsync(turnId)` shares the existing follow-up dispatch body and guards with `BeginNextFollowupDispatchAsync`; it only changes turn selection. The retry calls the common follow-up dispatcher with the target turn. A busy Session returns no dispatch and leaves the accepted retry queued for the ordinary scheduler.
+- Targeted-dispatch specs cover unrelated queued turns, the launch-turn guard, busy-session scheduler order, pre-minted identities, Slack provenance, failed-turn immutability, and pending-operation replay/idempotency.
+- Verification: server build with `-p:SkipWebBuild=true` and focused T-002/related SpecTests passed (3048 total because the Microsoft Testing Platform ignores VSTest filters).
