@@ -9,11 +9,10 @@
   },
   "workspaces": [
     "packages/web",
-    "packages/runner",
-    "packages/mohist-slack"
+    "packages/runner"
   ],
   "scripts": {
-    "build": "dotnet build Mohist.sln -p:SkipWebBuild=true && concurrently --kill-others-on-fail --names web,runner,slack \"npm run build -w packages/web\" \"npm run build -w packages/runner\" \"npm run build -w packages/mohist-slack\"",
+    "build": "dotnet build Mohist.sln -p:SkipWebBuild=true && concurrently --kill-others-on-fail --names web,runner \"npm run build -w packages/web\" \"npm run build -w packages/runner\"",
     "test": "tsx scripts/test-duration/command.ts portfolio",
     "test:fast": "tsx scripts/test-duration/command.ts fast",
     "verify": "tsx scripts/test-duration/verify.ts",

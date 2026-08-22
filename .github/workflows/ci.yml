@@ -218,63 +218,6 @@ jobs:
           if-no-files-found: warn
           retention-days: 7
 
-  slack:
-    name: Slack
-    runs-on: ubuntu-latest
-    timeout-minutes: 8
-    env:
-      TMPDIR: /tmp/mohist-scope
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v6
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v6
-        with:
-          node-version: 22.19.0
-          cache: npm
-          cache-dependency-path: package-lock.json
-
-      - name: Setup .NET
-        uses: actions/setup-dotnet@v5
-        with:
-          global-json-file: global.json
-
-      - name: Cache NuGet packages
-        uses: actions/cache@v6
-        with:
-          path: ~/.nuget/packages
-          key: ${{ runner.os }}-nuget-${{ hashFiles('Directory.Packages.props') }}
-          restore-keys: |
-            ${{ runner.os }}-nuget-
-
-      - name: Install dependencies
-        run: npm ci
-
-      - name: Restore .NET
-        run: dotnet restore packages/server/tests/Mohist.Server.CrossComponentBridge/Mohist.Server.CrossComponentBridge.csproj
-
-      - name: Run Slack scope
-        run: |
-          mkdir -p "$TMPDIR" artifacts/slack
-          npm run test:app -- slack
-
-      - name: Capture Slack evidence
-        if: always()
-        shell: bash
-        run: |
-          scope_root="$(find "$TMPDIR" -mindepth 1 -maxdepth 1 -type d -name 'mohist-canonical-gate-*' -print -quit 2>/dev/null || true)"
-          if [[ -n "$scope_root" ]]; then cp -a "$scope_root"/. artifacts/slack/; fi
-
-      - name: Upload Slack evidence
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: scope-slack
-          path: artifacts
-          if-no-files-found: warn
-          retention-days: 7
-
   go:
     name: Go
     runs-on: ubuntu-latest
