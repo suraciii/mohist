@@ -64,7 +64,8 @@ public class AgentSessionGrainInputBoundaryPersistSuccessSpecs : AgentSessionGra
 
         Assert.Single(active);
         await firstPersistence.WaitAsync();
-        var activeState = Assert.IsType<AgentSession>(Fixture.StateStore.State);
+        var activeState = Assert.IsType<AgentSession>(
+            await Fixture.StateStore.LoadAsync(grain.GetPrimaryKeyString()));
         Assert.Equal(AgentSessionActivity.Active, activeState.Status.Activity);
         Assert.Empty(activeState.Status.Turns ?? []);
         Assert.Empty(Fixture.SessionWork.Observations);
@@ -79,7 +80,8 @@ public class AgentSessionGrainInputBoundaryPersistSuccessSpecs : AgentSessionGra
 
         Assert.Single(idle);
         await secondPersistence.WaitAsync();
-        var idleState = Assert.IsType<AgentSession>(Fixture.StateStore.State);
+        var idleState = Assert.IsType<AgentSession>(
+            await Fixture.StateStore.LoadAsync(grain.GetPrimaryKeyString()));
         Assert.Equal(AgentSessionActivity.Idle, idleState.Status.Activity);
         Assert.Empty(idleState.Status.Turns ?? []);
         Assert.Empty(Fixture.SessionWork.Observations);

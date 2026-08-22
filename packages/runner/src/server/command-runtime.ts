@@ -134,11 +134,12 @@ export function callFollowup(
   handle: CommandRuntimeHandle,
   request: FollowupCallRequest,
   observer: PiTurnObserver | RuntimeTurnObserver | null,
+  signal?: AbortSignal,
 ): Promise<FollowupCallResult> {
   if (handle.kind === 'opencode') {
-    return callOpenCodeFollowup(handle.runtime, request, observer as RuntimeTurnObserver | null)
+    return callOpenCodeFollowup(handle.runtime, request, observer as RuntimeTurnObserver | null, signal)
   }
-  return callPiFollowup(handle.runtime, request, observer)
+  return callPiFollowup(handle.runtime, request, observer, signal)
 }
 
 export function callCancel(handle: CommandRuntimeHandle, target: CancelCallTarget): Promise<CancelCallResult> {
@@ -260,6 +261,7 @@ async function callOpenCodeFollowup(
   runtime: OpenCodeRuntime,
   request: FollowupCallRequest,
   observer: RuntimeTurnObserver | null,
+  signal?: AbortSignal,
 ): Promise<RuntimeResult<RuntimeFollowupResult>> {
   const opencodeRequest: RuntimeFollowupRequest = {
     target: { runtime: 'opencode', runtimeSessionId: request.target.runtimeSessionId, workDir: request.target.workDir },
@@ -276,13 +278,16 @@ async function callOpenCodeFollowup(
         }
       : {}),
   }
-  return await runtime.followup(opencodeRequest, observer ?? undefined)
+  return signal === undefined
+    ? await runtime.followup(opencodeRequest, observer ?? undefined)
+    : await runtime.followup(opencodeRequest, observer ?? undefined, signal)
 }
 
 async function callPiFollowup(
   runtime: PiRuntime,
   request: FollowupCallRequest,
   observer: PiTurnObserver | null,
+  signal?: AbortSignal,
 ): Promise<PiFollowupResult> {
   const piRequest: PiFollowupRequest = {
     target: { runtime: 'pi', runtimeSessionId: request.target.runtimeSessionId, workDir: request.target.workDir },
@@ -299,7 +304,9 @@ async function callPiFollowup(
       : {}),
     managerExecution: request.managerExecution ?? null,
   }
-  return await runtime.followup(piRequest, observer ?? undefined)
+  return signal === undefined
+    ? await runtime.followup(piRequest, observer ?? undefined)
+    : await runtime.followup(piRequest, observer ?? undefined, signal)
 }
 
 function parseFollowupModel(value: string | null | undefined): { providerID: string; modelID: string } | null {

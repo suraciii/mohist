@@ -154,6 +154,8 @@ export interface PiFollowupRequest {
 export interface PiFollowupFacts {
   readonly runtimeSessionId: string
   readonly workDir: string
+  /** Terminal completion for the admitted Pi follow-up, when available. */
+  readonly completion?: Promise<PiFollowupResult>
 }
 
 /**

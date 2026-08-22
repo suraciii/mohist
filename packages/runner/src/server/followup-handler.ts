@@ -52,6 +52,11 @@ import { ManagerExecutionBoundary } from '../runtime/manager-execution-boundary.
 import { ManagerExecutionRegistry } from '../runtime/manager-execution-registry.js'
 import { buildExecutionEnvelope } from '../runtime/execution-envelope.js'
 import { inlineSlackCollaborationSkill, readExecutionSourceContext } from '../runtime/slack-execution-context.js'
+import {
+  ReplyActionObservationTracker,
+  ReplyGuardCoordinator,
+  type ReplyGuardAdvisoryResult,
+} from '../runtime/reply-guard.js'
 import { runnerLogger } from '../system/logger.js'
 import {
   attachmentManifestEnvelope,
@@ -362,10 +367,26 @@ async function handleFollowup(
     payload.turnId,
     managerExecution,
   )
+  let terminalFinalized = false
   try {
     const completion = callFollowup(handle, followupRequest, observerState.observer).then(
       async (result) => {
+        if (terminalFinalized) return
+        terminalFinalized = true
         const observerError = await observerState.flush()
+        if (handle.kind === 'opencode' && !managerExecution?.hasExpired()) {
+          try {
+            await evaluateFollowupReplyGuard({
+              handle,
+              selectedTarget,
+              payload,
+              observer: observerState,
+              managerExecution,
+            })
+          } catch (error) {
+            log.error('followup reply guard failed', { exception: error, session: selectedTarget.runtimeSessionId })
+          }
+        }
         if (!result.ok) {
           const message = readErrorMessage(result)
           recordFollowupActivity(
@@ -411,6 +432,8 @@ async function handleFollowup(
         )
       },
       (error) => {
+        if (terminalFinalized) return
+        terminalFinalized = true
         log.error('followup runtime.followup rejected', { exception: error, session: selectedTarget.runtimeSessionId })
         recordFollowupActivity(
           outbox,
@@ -477,6 +500,53 @@ async function revokeFinishedManagerExecution(
   }
 }
 
+async function evaluateFollowupReplyGuard(args: {
+  handle: NonNullable<ReturnType<typeof resolveCommandRuntime>>
+  selectedTarget: FollowupTarget
+  payload: ReceiveFollowupPayload
+  observer: ReturnType<typeof buildFollowupObserver>
+  managerExecution: ManagerExecutionBoundary | null
+}): Promise<void> {
+  const guard = new ReplyGuardCoordinator({
+    runtime: {
+      kind: args.handle.kind,
+      isAvailable: () => args.handle.runtime.ready(),
+    },
+    runtimeSessionId: args.selectedTarget.runtimeSessionId,
+    workDir: args.selectedTarget.workDir,
+    slackExecutionContext: args.payload.slackExecutionContext,
+    observation: args.observer.observation,
+    signal: new AbortController().signal,
+    runAdvisory: async (request) => {
+      const result = await callFollowup(
+        args.handle,
+        {
+          target: {
+            runtime: args.handle.kind,
+            runtimeSessionId: request.runtimeSessionId,
+            workDir: request.workDir,
+          },
+          prompt: request.prompt,
+          managerExecution: args.managerExecution,
+          options: { skills: [request.collaborationSkill] },
+        },
+        args.observer.observer,
+        request.signal,
+      )
+      await args.observer.flush()
+      if (!result.ok) return replyGuardAdvisoryResult(readErrorKind(result))
+      return { kind: 'completed' }
+    },
+  })
+  await guard.evaluate(undefined)
+}
+
+function replyGuardAdvisoryResult(errorKind: string): ReplyGuardAdvisoryResult {
+  if (errorKind === 'unavailable-runtime') return { kind: 'unavailable' }
+  if (errorKind === 'interrupted' || errorKind === 'deadline-exceeded') return { kind: 'interrupted' }
+  return { kind: 'failed' }
+}
+
 function sessionTargetKey(target: SessionTarget): string {
   return `session:${sessionTargetId(target)}`
 }
@@ -508,15 +578,23 @@ function buildFollowupObserver(
   managerExecution: ManagerExecutionBoundary | null = null,
 ): {
   observer: PiTurnObserver | RuntimeTurnObserver | null
+  observation: ReplyActionObservationTracker
   flush: () => Promise<unknown>
 } {
+  const observation = new ReplyActionObservationTracker()
   const pending: Promise<void>[] = []
   let observerError: unknown = null
   let openCodeEventOrdinal = 0
-  if (!operationId) return { observer: null, flush: async () => null }
+  if (!operationId) {
+    const observer: PiTurnObserver | RuntimeTurnObserver = {
+      onEvent: (event: PiRuntimeEvent | RuntimeTurnEvent) => observation.observe(event),
+    }
+    return { observer, observation, flush: async () => null }
+  }
   const completedAt = new Date().toISOString()
   const observer: PiTurnObserver | RuntimeTurnObserver = {
     onEvent: (event: PiRuntimeEvent | RuntimeTurnEvent) => {
+      observation.observe(event)
       const ordinal = 'id' in event ? 0 : ++openCodeEventOrdinal
       const eventPayload = {
         ...event.payload,
@@ -552,6 +630,7 @@ function buildFollowupObserver(
   }
   return {
     observer,
+    observation,
     flush: async () => {
       await Promise.allSettled(pending)
       return observerError

@@ -561,6 +561,7 @@ export class OpenCodeRuntime {
   async followup(
     request: RuntimeFollowupRequest,
     observer?: RuntimeTurnObserver,
+    signal: AbortSignal = new AbortController().signal,
   ): Promise<RuntimeResult<RuntimeFollowupResult>> {
     const diagnostics: RuntimeDiagnostic[] = []
 
@@ -599,7 +600,7 @@ export class OpenCodeRuntime {
           variant,
         },
       },
-      new AbortController().signal,
+      signal,
       observer,
     )
     if (!result.ok) return result
