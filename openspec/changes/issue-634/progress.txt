@@ -329,6 +329,7 @@ open).
 - Added `SlackSelectionActionPayload` canonical signing and chooser button rendering. Buttons are emitted only for 2–5 candidates; the readable fallback is always in the plain-text payload and >5 candidates intentionally emit no blocks.
 - Extended workspace-thread bindings and multi-agent routing candidates to carry owning ProjectId; duplicate candidate identities are collapsed before routing.
 - Existing unit tests initially surfaced the expected EF pending-model warning after changing the model; the model snapshot was updated and the focused unit suite now passes.
+- T-002 remains incomplete: signed selection interaction routing/handling, durable CAS decision mutation and dispatch, and the obligation worker are intentionally left for T-003/T-004. The current slice only renders and durably records the chooser claim.
 
 ## T-001 implementation notes
 
