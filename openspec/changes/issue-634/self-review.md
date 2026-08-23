@@ -7,150 +7,161 @@ re-read the canonical issue with:
 mo issue view 634 --project proj_f6c141d63b6243bfbb481737b2243b87 --json number,title,body,comments,attachments,feedback,updatedAt
 ```
 
-I then checked every must-fix finding from the previous review against the
-current `proposal.md`, `design.md`, `tasks.json`, and all three specs, inspected
-the disposal commits (`e8bf2b644`, `7657d71ed`, `98256b33c`), and checked the
-fixes against the current lease/access code paths.
+I then verified the previous review's findings against the current
+`proposal.md`, `design.md`, `tasks.json`, and all three specs, inspected the
+MF-4 disposal changes, and traced the resulting design through the current
+workspace-wide candidate, project-scoped Connection, lease, and launch paths.
 
 ## Verdict: FAIL
 
-One must-fix problem remains in the plan. The three previously reported
-must-fixes were fixed correctly, but the re-review exposed a pre-existing
-coverage gap that meets the must-fix bar.
+The four previously reported must-fix findings are now disposed correctly, but
+one pre-existing must-fix problem remains: the plan cannot select a candidate
+Connection belonging to a different Mohist Project from the prompt owner, even
+though the current ambiguity domain is workspace-wide and includes such
+Connections.
 
 ## Must-fix findings
 
-### MF-4 — Click acceptance never re-authorizes the prompt-owner Connection under its current access policy
+### MF-5 — Candidate identity loses Project ownership, so cross-Project candidates cannot be selected
 
-The issue's Product Shape requires both Connections to be re-authorized at
-click time, each under its own current lease and current authorization state:
+The issue does not limit a multi-Bot chooser to Connections in one Project. Its
+Acceptance Criteria #2 requires an authorized choice to start the **selected
+Bot**, #3 requires the selected Connection to use **its own** current lease and
+access policy, #8 requires the original root/thread provenance to route to that
+selected Connection, and #9 requires deterministic verification of
+cross-Connection authorization.
 
-> 并分别使用 prompt-owner Connection 与 selected Connection 各自当前的
-> runtime lease、access policy、allowlist、owner/live-member/channel
-> membership 重新授权。
+The current codebase deliberately discovers ambiguity across the whole Slack
+workspace, not just the inbound Connection's Project:
 
-This also feeds Acceptance Criteria #4 and #5: a current-policy denial must be
-`unauthorized`, and an unauthorized result must not commit a winner or create
-execution resources.
+- `AgentConnectionStore.ListBoundBotsByWorkspaceAsync` filters by
+  `WorkspaceTeamId` without filtering `ProjectId` and returns each
+  `WorkspaceBoundBot.ProjectId` (`packages/server/src/Mohist.Server/Agent/Services/AgentConnectionStore.cs:131-151`).
+- Channel ingress passes that workspace-wide set into
+  `SlackMultiAgentRoutingPolicy` (`SlackConnectionRoutes.ChannelIngress.cs:119-135`).
+- Project isolation is otherwise explicit: `AgentConnectionStore.GetAsync`
+  resolves a Connection only when both `projectId` and `id` match
+  (`AgentConnectionStore.cs:58-67`), and runtime lease targets are keyed by
+  both Project and Connection.
 
-The corrected plan now does the selected-Connection half properly, but still
-omits the prompt-owner policy half:
+The plan drops the Project half of candidate identity at every durable and
+action boundary:
 
-- `design.md` Decision 4 says the shared route performs operator auth,
-  delivering-lease validation, and delivering-Connection lookup/disabled
-  checks. Those checks prove the prompt-owner adapter lease, but they do not
-  invoke `SlackConnectionAccessDecider` or re-evaluate the prompt-owner's
-  current policy, allowlist, live-member status, or channel membership.
-- Decision 4 steps 7–8 resolve and evaluate only the **chosen** Connection.
-  Step 4 checks actor identity, but actor binding is not current policy
-  authorization.
-- Decision 8 explicitly passes no interaction lease context to selection
-  handling and describes the delivering lease only as a shared route gate.
-  It defines no prompt-owner access-decision step.
-- `specs/slack-agent-selection-action/spec.md` specifies current-policy and
-  own-lease evaluation only for the chosen Connection. It has no requirement
-  or scenario for a prompt-owner policy/allowlist/member/channel change
-  between render and click.
-- T-003 likewise tests the delivering lease gate and selected-Connection
-  authorization, but contains no prompt-owner current-policy re-authorization.
+- Design Decision 2 derives candidates from `MentionedWorkspaceBots`, but
+  Decision 3 signs only an ordered **connection-id** set and a
+  `ChosenConnectionId` (`design.md:150-165`).
+- The claim stores only `MentionedConnectionIdsJson`, not durable candidate
+  Project/Connection references.
+- Decision 4 step 8 resolves the chosen lease at
+  `connection:{ProjectId}:{ChosenConnectionId}` (`design.md:231-235`), but the
+  selection service is entered through the prompt-owner's project-scoped
+  interaction route and the payload/snapshot contains no chosen Project id.
+- T-002 and T-003 likewise specify only candidate Connection ids and never add
+  a global-to-owning-Project resolution step or a durable selected Project id
+  (`tasks.json:29`, `tasks.json:54-65`).
 
-Concrete failure case: Connection A wins and posts the chooser while the
-sender is allowed. Before the click, A's policy is narrowed, the sender is
-removed from A's allowlist, or A can no longer verify the sender/channel.
-Connection B remains valid and permits the sender. The planned pipeline passes
-A's lease gate and actor check, authorizes under B, and commits B as winner,
-even though the issue requires A's current authorization to deny the click as
-`unauthorized`. That is a direct behavioral violation, not a speculative
-hardening opportunity.
+Concrete failure case: Bot A belongs to Project PA and Bot B belongs to Project
+PB, both are active identity-bound Bots in the same Slack workspace. One
+message mentions both. A wins the workspace-wide chooser claim, so the click
+arrives through PA's interaction route. Choosing B leaves the planned service
+with PA plus B's Connection id. The normal project-scoped Connection lookup
+cannot resolve B, and the planned lease key becomes
+`connection:PA:B` rather than B's actual `connection:PB:B`. The click therefore
+returns a stale/unavailable-style rejection instead of starting B, even when B
+has a valid lease and both policies authorize the actor.
 
-The plan must add prompt-owner re-authorization before winner commit using the
-prompt-owner's own currently validated lease context and
-`SlackConnectionAccessDecider`, separately from the selected Connection's own
-lease/policy evaluation. A prompt-owner denial must return a visible
-`unauthorized` result with no selection mutation, winner, provider inbox
-entry, Session, Turn, or AgentJob. The specs and T-003 need deterministic
-coverage for prompt-owner policy/allowlist/live-member/channel-membership
-changes; when prompt owner and selected Connection are the same, one equivalent
-current evaluation may satisfy both roles.
+That directly violates Acceptance Criteria #2, #3, and #8; it also leaves AC
+#9's cross-Connection verification incomplete for a reachable codebase case.
+This is not optional cross-Server coordination: both Connections are on the
+same Mohist Server and are already placed in the same ambiguity set by the
+current workspace-wide lookup.
+
+The plan must preserve a complete candidate reference sufficient to recover
+and authorize the chosen Connection in its owning Project — for example,
+ordered `(ProjectId, ConnectionId)` references in the durable snapshot and
+signed payload, with the chosen Project recorded at winner commit. Selected
+Connection lookup, lease resolution, policy evaluation, admission, launch or
+follow-up dispatch, pre-allocated identity, and recovery must all use that
+selected Project. Specs and T-003 need deterministic coverage where prompt
+owner and selected Connection belong to different Projects in the same Slack
+workspace, including successful execution and selected-policy/lease rejection.
+Constraining candidates to the prompt owner's Project would not satisfy the
+issue or current workspace-wide routing behavior.
 
 ## Previous finding dispositions
 
 ### MF-1 — More than five candidates: FIXED
 
-The artifacts now consistently implement the issue boundary:
+The proposal, Design Decision 2, prompt spec, and T-002 now consistently state:
+2–5 candidates render signed controls with readable text; more than five
+render no interactive control, no truncation, no automatic choice, and no
+pagination, and require an explicit single-Bot re-mention. The readable text
+also covers clients without interaction support.
 
-- two to five eligible candidates render signed controls plus readable text;
-- more than five render no interactive control, no truncation, no automatic
-  choice, and no pagination;
-- the once-only readable fallback requires an explicit single-Bot re-mention;
-- readable summary/re-mention guidance is present for clients without
-  interaction support.
+### MF-2 — Selected Connection used the prompt-owner lease: FIXED within the represented candidate scope
 
-This is stated in `proposal.md`, Design Decision 2 and its risk entry, the
-prompt spec's dedicated candidate-count requirement/scenarios, and T-002's
-description, acceptance criteria, and tests. No remaining contradictory
-large-button-list path was found.
-
-### MF-2 — Selected Connection used the prompt-owner lease: FIXED
-
-The artifacts now resolve the selected Connection's own active lease at click
-time from its connection target, re-prove it through
-`ValidateRuntimeLeaseAsync`, build the selected Connection's
-`SlackLeaseContext` from that lease, and return visible `unavailable` for a
-missing/expired/superseded/invalid lease. They explicitly prohibit using the
-delivering prompt-owner lease for selected-Connection authorization.
-
-The action spec and T-003 include both the successful cross-Connection case and
-the selected-lease-missing/selected-policy-denial cases. The proposed mechanism
-matches the current per-target lease model (`ISlackLeaseStore.GetActiveAsync`,
-`SlackAdapterLeaseService.ValidateRuntimeLeaseAsync`, and
-`ResolveRuntimeLeaseBotTokenAsync`). This disposition does not cure MF-4:
-validating the prompt-owner lease is not the same as re-evaluating the
-prompt-owner access policy.
+The plan now resolves and validates the selected Connection's own active lease,
+builds its own `SlackLeaseContext`, forbids substitution of the prompt-owner
+lease, and returns visible `unavailable` for a missing or invalid selected
+lease. The action spec and T-003 cover same-Project cross-Connection success and
+failure. MF-5 is a separate identity/scope omission: the own-lease mechanism
+cannot reach a selected Connection whose owning Project was discarded.
 
 ### MF-3 — Action lifetime and retention bounds: FIXED
 
-The plan now uses the issue-pinned five-minute signed-action lifetime, settles
-expired pending prompts without a new grace regime, and reaps finished records
-under the existing `SlackProviderOptions.SlackEventRetentionWindow` (30-minute
-default), with no new long-term audit archive. The old 24-hour action lifetime,
-seven-day retention, and 24-hour grace are gone from the operative artifacts.
+The plan uses the issue-pinned five-minute action lifetime, settles expired
+pending prompts without a new grace regime, and cleans finished records under
+`SlackProviderOptions.SlackEventRetentionWindow`, with no long-term audit
+archive.
+
+### MF-4 — Prompt-owner current-policy re-authorization: FIXED
+
+The pending-click pipeline now evaluates the prompt-owner through
+`SlackConnectionAccessDecider` under its route-validated current lease before
+candidate commit, separately from the selected Connection's own lease and
+policy evaluation. The action spec and T-003 cover policy narrowing, allowlist
+removal, live-member failure, channel-membership failure, and same-Connection
+de-duplication, all with no winner or execution resources on denial.
 
 ## Re-review checks
 
-- **Every prior must-fix disposition:** checked; MF-1, MF-2, and MF-3 are fixed
-  properly as described above.
-- **Regressions introduced by those fixes:** checked; no must-fix regression was
-  found in candidate rendering, selected-Connection lease handling, action
-  expiry, retention, task ordering, or task/spec anchors.
-- **Pre-existing problem missed previously:** FAIL due to MF-4. The earlier
-  coverage/correctness verdict focused on the issue's explicit
-  selected-Connection lease criterion and incorrectly treated the shared
-  prompt-owner route lease gate as completing the other half of the Product
-  Shape's “分别…重新授权” requirement. Re-reading the canonical issue and
-  comparing that wording directly with `SlackInteractionRoutes` and
-  `SlackConnectionAccessDecider` made the distinction clear: lease validation
-  proves the adapter's authority, but does not re-evaluate the sender under the
-  prompt-owner's mutable access policy. That is why the earlier per-dimension
-  sweep did not catch this pre-existing omission.
+- **Every prior must-fix disposition:** checked; MF-1 through MF-4 are fixed as
+  described above.
+- **Regressions introduced by the fixes:** checked; no must-fix regression was
+  found in candidate-count handling, five-minute expiry/retention, either
+  Connection's authorization order, same-Project lease handling, task order,
+  or spec anchors.
+- **Pre-existing problem missed earlier:** FAIL due to MF-5. The earlier
+  codebase sweep verified that candidate discovery is workspace-scoped and
+  that leases are per target, but it incorrectly treated Connection id alone
+  as sufficient durable identity and did not trace the selected candidate's
+  owning `ProjectId` from `WorkspaceBoundBot` through the signed payload,
+  project-scoped interaction route, `AgentConnectionStore.GetAsync`, lease
+  target, and launch/recovery calls. The MF-2/MF-4 rework made the singular
+  `ProjectId` in the selected-lease key explicit, which exposed the omission.
+  That explains why the previous per-dimension verdicts did not catch this
+  reachable failure.
 
 ## Observations
 
 1. The action spec still says the signed payload binds the chooser message
    identity, while Design Decision 3 signs the original message identity and
-   enforces chooser-message identity through the acked outbox provider
-   identity. The design gives an implementable authoritative mechanism and
-   T-003 follows it, so this remains a wording consistency observation rather
-   than a must-fix issue.
-2. The issue groups failures into `unavailable`, `unauthorized`, and `stale`,
-   while the plan keeps finer existing outcomes such as `expired`,
-   `invalid_action`, `no_longer_valid`, `connection_disabled`, and setup nudge.
-   Design Decision 4 now maps those outcomes explicitly enough to verify the
-   required behavior.
-3. The additive migration still needs careful sentinel handling for old
-   pre-fact ambiguity rows: “non-nullable facts” and “no backfill” do not alone
-   prove that an old row cannot enter selection execution. T-002 requires such
-   rows to start no execution, which is sufficient plan coverage, but the
-   implementation must make that guard structural and test it.
+   enforces chooser identity through the acked outbox provider identity. The
+   design provides an implementable mechanism, so this is wording consistency,
+   not a must-fix issue.
+2. The additive migration still needs explicit sentinel/default handling for
+   pre-fact rows. “Non-nullable facts” and “no backfill” do not by themselves
+   make an old row structurally incapable of selection execution, although
+   T-002 does require that behavior and a deterministic test.
+3. The plan equates render-time candidates with mentioned, enabled,
+   identity-bound workspace Bots, while the issue uses the term “eligible” and
+   separately requires current availability and authorization at click time.
+   The click-time checks make the intended behavior plausible, but the exact
+   render-time eligibility definition would benefit from being stated
+   explicitly.
+4. The concurrency scenario describing “two users” clicking different choices
+   is slightly misleading because actor binding permits only the original
+   sender. Same-actor double clicks, Slack redelivery, and adapter failover are
+   the meaningful CAS race, and those are already covered.
 
 <promise>FAIL</promise>
