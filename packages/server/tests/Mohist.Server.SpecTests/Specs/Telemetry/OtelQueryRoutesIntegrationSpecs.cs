@@ -57,8 +57,9 @@ public class OtelQueryRoutesIntegrationSpecs : IAsyncLifetime
     [Fact]
     public async Task PostQuery_SelectCount_ReturnsQueryResultEnvelope()
     {
-        SeedTrace("t1", "svc", "2026-01-01T00:00:00Z", "2026-01-01T00:00:01Z", 1);
-        SeedTrace("t2", "svc", "2026-01-02T00:00:00Z", "2026-01-02T00:00:01Z", 1);
+        var now = _factory.TimeProvider.GetUtcNow();
+        SeedTrace("t1", "svc", now.AddMinutes(-2), now.AddMinutes(-1), 1);
+        SeedTrace("t2", "svc", now.AddMinutes(-1), now, 1);
 
         using var client = _factory.CreateMainApiClient();
         using var content = new StringContent(
@@ -339,7 +340,10 @@ public class OtelQueryRoutesIntegrationSpecs : IAsyncLifetime
         Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
     }
 
-    private void SeedTrace(string traceId, string serviceName, string startTime, string endTime, long spanCount)
+    private void SeedTrace(string traceId, string serviceName, string startTime, string endTime, long spanCount) =>
+        SeedTrace(traceId, serviceName, DateTimeOffset.Parse(startTime), DateTimeOffset.Parse(endTime), spanCount);
+
+    private void SeedTrace(string traceId, string serviceName, DateTimeOffset startTime, DateTimeOffset endTime, long spanCount)
     {
         var db = _factory.Services.GetRequiredService<OtelDb>();
         using var connection = db.OpenReadWriteConnection();
@@ -355,8 +359,8 @@ public class OtelQueryRoutesIntegrationSpecs : IAsyncLifetime
             """;
         cmd.Parameters.AddWithValue("$trace_id", traceId);
         cmd.Parameters.AddWithValue("$service_name", serviceName);
-        cmd.Parameters.AddWithValue("$start_time", startTime);
-        cmd.Parameters.AddWithValue("$end_time", endTime);
+        cmd.Parameters.AddWithValue("$start_time", startTime.UtcDateTime.ToString("O"));
+        cmd.Parameters.AddWithValue("$end_time", endTime.UtcDateTime.ToString("O"));
         cmd.Parameters.AddWithValue("$span_count", spanCount);
         cmd.ExecuteNonQuery();
     }

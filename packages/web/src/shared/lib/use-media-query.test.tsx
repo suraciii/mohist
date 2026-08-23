@@ -1,4 +1,4 @@
-import { act, renderHook } from '@testing-library/react'
+import { act, cleanup, renderHook } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { setMatchesForTest, useMediaQuery } from './use-media-query'
 
@@ -8,6 +8,7 @@ function installMatchMediaStub(impl: (query: string) => MediaQueryList) {
 
 describe('useMediaQuery', () => {
   afterEach(() => {
+    cleanup()
     act(() => {
       setMatchesForTest(null)
     })

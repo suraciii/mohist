@@ -112,6 +112,10 @@ export const builtInActions: ReadonlyArray<ActionDefinition> = [
         { code: 'runtime-unavailable', description: 'The OpenCode runtime is unavailable' },
         { code: 'session-workspace-mismatch', description: 'AgentSession is bound to a different workspace' },
         { code: 'session-binding-failed', description: 'Failed to resolve or persist the AgentSession binding' },
+        {
+          code: 'session-delivery-wait-timeout',
+          description: 'Cleanup predecessor terminal facts were not delivered within the bounded wait',
+        },
         { code: 'runtime-session-missing', description: 'Runtime session is missing' },
         { code: 'unavailable-runtime', description: 'Runtime reported unavailable' },
         { code: 'incompatible-runtime', description: 'Runtime is incompatible with the request' },
@@ -142,6 +146,10 @@ export const builtInActions: ReadonlyArray<ActionDefinition> = [
         { code: 'runtime-unavailable', description: 'The Pi runtime is unavailable' },
         { code: 'session-workspace-mismatch', description: 'AgentSession is bound to a different workspace' },
         { code: 'session-binding-failed', description: 'Failed to resolve or persist the AgentSession binding' },
+        {
+          code: 'session-delivery-wait-timeout',
+          description: 'Cleanup predecessor terminal facts were not delivered within the bounded wait',
+        },
         { code: 'runtime-session-missing', description: 'Runtime session is missing' },
         { code: 'unavailable-runtime', description: 'Runtime reported unavailable' },
         { code: 'turn-failed', description: 'Pi turn failed for an unspecified reason' },
