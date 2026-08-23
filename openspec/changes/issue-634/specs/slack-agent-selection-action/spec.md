@@ -1,6 +1,6 @@
 ### Requirement: Every choice carries a Server-signed selection payload
 
-Every candidate choice on the chooser SHALL carry a Server-signed action payload that binds the posting Connection, the workspace, conversation, and message identity of the chooser, the original sender, the full candidate set, the chosen candidate, a fresh nonce, and a bounded expiry fixed when the chooser is rendered. The payload SHALL use the same signing material (the Connection's bot token), canonical field ordering, and constant-time HMAC verification the Stop and Retry actions use. A payload that fails structural validation or whose signature does not verify SHALL be rejected as an invalid action.
+Every candidate choice on the chooser SHALL carry a Server-signed action payload that binds the posting Connection, the workspace, conversation, and message identity of the chooser, the original sender, the full candidate set, the chosen candidate, a fresh nonce, and a bounded expiry fixed when the chooser is rendered — the same five-minute signed-action lifetime the Stop and Retry actions use, per the issue's pinned parameter. The payload SHALL use the same signing material (the Connection's bot token), canonical field ordering, and constant-time HMAC verification the Stop and Retry actions use. A payload that fails structural validation or whose signature does not verify SHALL be rejected as an invalid action.
 
 #### Scenario: A tampered choice value is rejected
 

@@ -84,11 +84,11 @@ After a Server restart, a selection operation that was committed but not complet
 
 ### Requirement: Finished selection records are cleaned up under bounded retention
 
-Selection records that reached a finished or settled state SHALL be removed under a bounded retention rule. The retention rule SHALL NOT remove pending or in-progress selection operations.
+Selection records that reached a finished or settled state SHALL be removed under the existing Slack redelivery / delivery-reconciliation retention window (the Slack event retention window the Server already uses), not under a new long-term audit retention. The retention rule SHALL NOT remove pending or in-progress selection operations.
 
 #### Scenario: A finished selection record is reaped after retention
 
-- **WHEN** a selection record has been finished longer than the retention bound
+- **WHEN** a selection record has been finished longer than the existing retention window
 - **THEN** the record is removed by cleanup
 
 #### Scenario: A pending selection record is never reaped

@@ -185,12 +185,15 @@ enqueue; a two-phase sign-then-update would be a new delivery mechanism) and
 omitting the chooser-message check (reopens replay from duplicated chooser
 messages).
 
-Expiry is fixed when the chooser is rendered — unlike Stop/Retry's 5 minutes,
-a chooser must survive a user reading the thread later; default **24 hours**
-(see Open Questions). Actor binding is the original sender only; the
-Connection Owner clicking another member's chooser is `unauthorized`, matching
-the spec's strict actor rule (Stop/Retry's owner-or-initiator relaxation does
-not carry over).
+Expiry is fixed when the chooser is rendered at the issue-pinned **five
+minutes** — the same signed-action lifetime Stop and Retry use
+(`动作沿用现有五分钟有效期`); no new action lifetime is introduced. A user
+who returns to the thread later gets a visible `expired` notice and the
+re-mention fallback — the same posture as the >5-candidate and
+interaction-unavailable text fallbacks. Actor binding is the original
+sender only; the Connection Owner clicking another member's chooser is
+`unauthorized`, matching the spec's strict actor rule (Stop/Retry's
+owner-or-initiator relaxation does not carry over).
 
 ### 4. Acceptance is a fixed-order revalidation pipeline, each failure distinct and visible
 
@@ -327,16 +330,25 @@ A `SlackAgentSelectionObligationWorker` (mirroring
   the pre-allocated lineage irrecoverable): mark `Settled` with a reason and
   post one visible outcome through the outbox `UserAction` path under a
   stable dispatch reference; nothing may execute afterwards.
-- **Expires stale pending choosers**: a `Pending` row whose expiry passed by
-  more than a grace margin is settled `expired`. This is what makes retention
+- **Expires stale pending choosers**: a `Pending` row whose five-minute
+  expiry has passed is settled `expired` (no additional grace — the
+  freshness check rejects a late click as `expired` regardless, so sweep
+  timing is not correctness-critical; the sweep interval only needs to stay
+  short relative to the retention window, which the obligation-worker
+  pattern's bounded intervals already provide). This is what makes retention
   safe — the spec forbids reaping pending/in-progress *operations*, and an
-  expired chooser is no longer an operable one (a late click on it is
-  rejected as `expired` by the freshness check regardless).
+  expired chooser is no longer an operable one.
 - **Reaps** finished records: `Completed`/`Settled` rows older than the
-  retention bound (default 7 days, comfortably beyond the expiry + grace and
-  Slack's redelivery windows, so a late interaction redelivery still finds the
-  decision authority and returns the decision view rather than a bare
-  `stale_action`) are deleted. Pending/in-progress rows are never removed.
+  **existing** Slack event retention window
+  (`SlackProviderOptions.SlackEventRetentionWindow`, 30-minute default) — the
+  redelivery / delivery-reconciliation posture the issue pins (`只保留到现有
+  Slack redelivery 与 delivery-reconciliation retention window，不新增长期
+  审计存档`) — are deleted. No new, materially longer retention regime and no
+  long-term audit archive are introduced; pending/in-progress rows are never
+  removed. A late interaction redelivery is visible and resource-free either
+  way: past the five-minute expiry the freshness check rejects it as
+  `expired` even while the record lives, and after the window reaps the
+  record it returns `stale_action`.
 
 ### 8. Route integration is a three-way action-id dispatch; the adapter changes only in tests
 
@@ -385,9 +397,11 @@ row from planned to delivered.
   explicit single-Bot re-mention — no truncation, no auto-selection, no
   pagination (non-goal) — and the claim keeps it to exactly one fallback
   message.
-- [Late interaction redelivery after retention reaped the record] -> Returns
-  `stale_action` (visible, no resources) instead of the decision view;
-  retention default keeps this beyond any realistic redelivery window.
+- [Late interaction redelivery after retention reaped the record] -> Past
+  the five-minute expiry the freshness check rejects it as `expired` whether
+  or not the record survives; once the existing retention window reaps the
+  record it returns `stale_action` — visible and resource-free either way,
+  with no new retention regime.
 
 ## Migration Plan
 
@@ -411,9 +425,6 @@ row from planned to delivered.
 
 ## Open Questions
 
-- Exact expiry bound (proposed 24h) and retention/grace bounds (proposed 7d
-  finished, 24h past expiry for pending settlement) — confirm against
-  expected Slack delayed-events and interaction-redelivery windows.
 - Button label source: Bot display name versus `@mention` label — the current
   prompt summary uses the Bot user id label; a friendlier verified Bot name
   may be preferable if cheaply available at claim time.
