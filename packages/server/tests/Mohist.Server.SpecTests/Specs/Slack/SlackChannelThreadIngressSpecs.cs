@@ -343,9 +343,6 @@ public sealed partial class SlackChannelThreadIngressSpecs
             }, runtimeSessionId));
         Assert.NotEmpty(runtimeEvents);
 
-        await using var scope = _fixture.Services.CreateAsyncScope();
-        var db = scope.ServiceProvider.GetRequiredService<MohistDbContext>();
-
         // The Agent sends its reply via the reply action API (mo slack message send).
         // The reply lands in the outbox — preferring an in-place update of the
         // liveness progress message — and is the only reply body Slack sees.
@@ -359,24 +356,22 @@ public sealed partial class SlackChannelThreadIngressSpecs
             Assert.Fail($"reply action failed {(int)reply.StatusCode}: {body}");
         }
 
-        var delivered = await TestWait.ForAsync(
-            async () =>
-            {
-                var json = await db.SlackOutboxRows.AsNoTracking()
-                    .Where(row => row.ConnectionId == connection.Id
-                        && row.ConversationId == conversationId
-                        && row.Kind == SlackOutboxKinds.TerminalResult)
-                    .Select(row => row.PayloadJson)
-                    .FirstOrDefaultAsync();
-                return json is null ? null : SlackDeliveryPayload.Parse(json);
-            },
-            payload => payload?.Text is { } text
-                && text.Contains("the follow-up is resolved", StringComparison.Ordinal),
-            TimeSpan.FromSeconds(30),
-            TimeSpan.FromMilliseconds(50),
-            "agent reply action terminal row");
+        using var replyDocument = JsonDocument.Parse(await reply.Content.ReadAsStringAsync());
+        var deliveryId = replyDocument.RootElement.GetProperty("data").GetProperty("deliveryId").GetString();
+        Assert.False(string.IsNullOrWhiteSpace(deliveryId));
 
-        Assert.Contains("the follow-up is resolved", delivered!.Text, StringComparison.Ordinal);
+        await using var scope = _fixture.Services.CreateAsyncScope();
+        var db = scope.ServiceProvider.GetRequiredService<MohistDbContext>();
+        var deliveredJson = await db.SlackOutboxRows.AsNoTracking()
+            .Where(row => row.Id == deliveryId
+                && row.ConnectionId == connection.Id
+                && row.ConversationId == conversationId
+                && row.Kind == SlackOutboxKinds.TerminalResult)
+            .Select(row => row.PayloadJson)
+            .SingleAsync();
+        var delivered = SlackDeliveryPayload.Parse(deliveredJson);
+
+        Assert.Contains("the follow-up is resolved", delivered.Text, StringComparison.Ordinal);
         // Sensitive values carried by the reply action must be redacted out of
         // the Slack body — the reply anchor / secrets never reach the channel.
         Assert.DoesNotContain("xoxb-leak-attempt", delivered.Text, StringComparison.Ordinal);
@@ -613,10 +608,14 @@ public sealed partial class SlackChannelThreadIngressSpecs
         await db.SaveChangesAsync();
 
         var secrets = scope.ServiceProvider.GetRequiredService<ISecretStore>();
-        await secrets.StoreAsync(new SecretStoreAddress(projectId, id, SecretKind.AppToken), Encoding.UTF8.GetBytes("xapp"));
-        await secrets.StoreAsync(new SecretStoreAddress(projectId, id, SecretKind.BotToken), Encoding.UTF8.GetBytes("xoxb"));
-        await secrets.StoreAsync(SecretStoreAddress.ForManagedSlackAgentApp(agentAppId, SecretKind.AppToken), Encoding.UTF8.GetBytes("xapp"));
-        await secrets.StoreAsync(SecretStoreAddress.ForManagedSlackAgentApp(agentAppId, SecretKind.BotToken), Encoding.UTF8.GetBytes("xoxb"));
+        await secrets.StoreAtomicallyAsync([
+            new SecretStoreWrite(
+                SecretStoreAddress.ForManagedSlackAgentApp(agentAppId, SecretKind.AppToken),
+                Encoding.UTF8.GetBytes("xapp")),
+            new SecretStoreWrite(
+                SecretStoreAddress.ForManagedSlackAgentApp(agentAppId, SecretKind.BotToken),
+                Encoding.UTF8.GetBytes("xoxb")),
+        ]);
         var leaseId = await SlackRuntimeLeaseTestSupport.AcquireConnectionLeaseAsync(_fixture, projectId, id);
         _connectionLeases[id] = leaseId;
         return new AgentConnection
