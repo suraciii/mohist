@@ -5,26 +5,35 @@ findings MF-1..MF-7 are verified fixed).
 Rule: fix each must-fix in the plan artifacts, or justify won't-fix. Do not
 edit self-review.md. Observations need no action.
 
-Status: MF-8 IN PROGRESS. MF-1..MF-7 remain fixed. No won't-fixes.
+Status: ALL EIGHT MUST-FIX FINDINGS FIXED. No won't-fixes.
 
 ## Dispositions
 
-### MF-8 — selected-Connection lookup does not recognize soft deletion — IN PROGRESS
+### MF-8 — selected-Connection lookup does not recognize soft deletion — FIXED
 
-The current `AgentConnectionStore.GetAsync(projectId, connectionId)` is
-project-scoped but intentionally returns soft-deleted rows; `DeleteAsync`
-stamps `DeletedAt` rather than physically removing the row. The plan currently
-mistakes a null result for both absence and deletion, making its explicit
-deleted-Connection branch unreachable for the repository's actual deletion
-path.
+The plan now matches the repository's actual soft-delete semantics. It keeps
+the complete-pair, project-scoped
+`AgentConnectionStore.GetAsync(ChosenProjectId, ChosenConnectionId)` lookup,
+but no longer treats null as the only deletion signal: candidate resolution
+requires both a non-null result and `DeletedAt is null`. A null row or a
+soft-deleted row is visibly `unavailable` before workspace binding, selected
+lease, authorization, executability, or commit, so surviving/fake downstream
+artifacts cannot admit a deleted candidate.
 
-Planned disposition: keep the existing project-scoped lookup but require the
-selection service to classify `selectedConnection is null ||
-selectedConnection.DeletedAt is not null` as `unavailable` before workspace
-binding, lease, authorization, executability, or commit. Update the action
-scenario and T-003 deterministic matrix to create a real soft-deleted row via
-the store deletion path and prove that it is rejected even if test lease or
-binding artifacts survive.
+- proposal.md now calls out that the existing project-scoped `GetAsync`
+  includes soft-deleted rows and requires an explicit `DeletedAt` rejection.
+- design.md Decision 4 step 7 names the exact predicate, explains the
+  `DeleteAsync`/`GetAsync` codebase semantics, and places the deletion check
+  before all downstream selected-candidate checks.
+- the action spec requires explicit `DeletedAt` inspection and its deterministic
+  scenario uses the normal soft-delete path, confirms lookup still returns the
+  row, and retains stale fake lease/binding artifacts to prove precedence.
+- T-003 prescribes the same implementation boundary and requires the test to
+  use `AgentConnectionStore.DeleteAsync` (or equivalent real soft deletion),
+  assert `GetAsync` returns `DeletedAt`, and prove no winner or resources even
+  with fake downstream artifacts.
+
+Commit: d97ec8187.
 
 ### MF-7 — missing selected Connection is classified as stale instead of unavailable — FIXED
 
@@ -90,9 +99,10 @@ require a binding and commit `ThreadFollowup`.
 The plan now carries each candidate as an ordered `(ProjectId, ConnectionId)`
 reference through both ambiguity sources, the durable claim, and the signed
 payload; commit records `ChosenProjectId` with `ChosenConnectionId`. Selected
-lookup uses the normal project-scoped store with that pair, and the selected
-lease target, policy evaluation, executability, admission, launch/follow-up,
-project-scoped pre-allocation, persistence, and recovery all use the committed
+lookup uses the project-scoped store with that pair (plus the MF-8 explicit
+soft-delete check), and the selected lease target, policy evaluation,
+executability, admission, launch/follow-up, project-scoped pre-allocation,
+persistence, and recovery all use the committed
 selected Project rather than the prompt-owner route's Project.
 
 - proposal.md: retained facts, signed payload, click handling, execution,
@@ -260,12 +270,14 @@ open).
 
 ## Consistency sweep (post-fix)
 
-- MF-7 sweep: proposal, Design Decision 4, the action spec, and T-003 all
-  classify a missing/deleted selected Connection row as `unavailable`; none
-  retains the old "vanished candidate -> no_longer_valid" rule. The remaining
-  `no_longer_valid` cases explicitly require a still-existing Connection with
-  candidate/workspace/thread fact drift. Deterministic coverage names both
-  sides of the distinction.
+- MF-8 sweep: proposal, Design Decision 4, the action spec, and T-003 all
+  classify both a null project-scoped lookup and a returned row with non-null
+  `DeletedAt` as `unavailable` before binding, lease, policy, executability, or
+  commit. Deterministic coverage uses real soft deletion and proves the row is
+  still returned by `GetAsync`; no artifact still says null means deleted.
+- MF-7 sweep: the same artifacts preserve the outcome taxonomy: absent or
+  soft-deleted selected Connections are `unavailable`; `no_longer_valid`
+  requires an active Connection whose candidate workspace/thread facts drifted.
 - MF-5 sweep: no plan artifact retains bare Connection-id candidate identity;
   root mentions and thread bindings both produce complete ordered references,
   and payload, snapshot, CAS, selected lookup, lease target, admission,
@@ -308,3 +320,5 @@ open).
 - c75e5f019 MF-7 deleted selected Connection -> unavailable
 - 772181d8a MF-7 final disposition notes
 - 3825cab8c MF-7 stale snapshot precedence clarification
+- 52406fbd9 MF-8 progress checkpoint
+- d97ec8187 MF-8 soft-delete-aware selected-Connection resolution
