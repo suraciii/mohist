@@ -50,7 +50,10 @@
     },
     "repositoryChecks": [
       { "command": "npm", "args": ["run", "docs:check"] },
-      { "command": "npm", "args": ["run", "archtest"] }
+      { "command": "npm", "args": ["run", "archtest"] },
+      { "command": "npm", "args": ["run", "build:slack"] },
+      { "command": "go", "args": ["-C", "packages/go/mohist-slack", "vet", "./..."] },
+      { "command": "go", "args": ["-C", "packages/go/mohist-slack", "test", "./..."] }
     ],
     "fastChecks": [
       { "command": "npm", "args": ["run", "typecheck:scripts"] }

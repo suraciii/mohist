@@ -4,7 +4,7 @@ using System.Text.Json;
 
 namespace Mohist.Cli;
 
-internal sealed class WindowsScheduledTaskInstaller : IServiceInstaller
+internal sealed partial class WindowsScheduledTaskInstaller : IServiceInstaller
 {
     private readonly TextWriter _out;
     private readonly TextWriter _err;
@@ -15,6 +15,8 @@ internal sealed class WindowsScheduledTaskInstaller : IServiceInstaller
     private readonly Func<string, Task<bool>> _healthProbe;
     private readonly IEnvironmentVariableProvider _environment;
     private readonly string _userProfilePath;
+    private readonly TimeProvider _timeProvider;
+    private readonly Func<TimeSpan, CancellationToken, Task> _pollWait;
 
     internal CancellationToken TestFollowToken { get; set; }
     internal Action? TestFollowStarted { get; set; }
@@ -34,7 +36,9 @@ internal sealed class WindowsScheduledTaskInstaller : IServiceInstaller
         Func<string, ILogChangeObserver>? logChangeObserverFactory = null,
         Func<string, Task<bool>>? healthProbe = null,
         string? userProfilePath = null,
-        IEnvironmentVariableProvider? environment = null)
+        IEnvironmentVariableProvider? environment = null,
+        TimeProvider? timeProvider = null,
+        Func<TimeSpan, CancellationToken, Task>? pollWait = null)
     {
         _out = output;
         _err = error;
@@ -57,6 +61,8 @@ internal sealed class WindowsScheduledTaskInstaller : IServiceInstaller
         });
         _userProfilePath = userProfilePath ?? Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
         _environment = environment ?? SystemEnvironmentVariableProvider.Instance;
+        _timeProvider = timeProvider ?? TimeProvider.System;
+        _pollWait = pollWait ?? ((delay, cancellationToken) => Task.Delay(delay, _timeProvider, cancellationToken));
     }
 
     public async Task<int> InstallServerAsync(ServiceInstallOptions options)
@@ -93,12 +99,12 @@ internal sealed class WindowsScheduledTaskInstaller : IServiceInstaller
         if (exitCode != 0)
         {
             if (!string.IsNullOrWhiteSpace(stderr)) _err.Write(stderr);
-            await InstallStartupFallbackAsync(startupPath, launcherPath, metadataPath, listenUrl: listenUrl);
+            await InstallStartupFallbackAsync(startupPath, launcherPath, metadataPath, repoRoot, listenUrl: listenUrl);
             _out.WriteLine("Installed with Startup-folder fallback (Scheduled Task creation was blocked).");
             return 0;
         }
 
-        await WriteMetadataAsync(metadataPath, "scheduled-task", listenUrl: listenUrl);
+        await WriteMetadataAsync(metadataPath, "scheduled-task", repoRoot, listenUrl: listenUrl);
         _out.WriteLine($"Registered Scheduled Task {taskName}");
         return 0;
     }
@@ -134,64 +140,27 @@ internal sealed class WindowsScheduledTaskInstaller : IServiceInstaller
         if (exitCode != 0)
         {
             if (!string.IsNullOrWhiteSpace(stderr)) _err.Write(stderr);
-            await InstallStartupFallbackAsync(startupPath, launcherPath, metadataPath, serverUrl: serverUrl);
+            await InstallStartupFallbackAsync(startupPath, launcherPath, metadataPath, repoRoot, serverUrl: serverUrl);
             _out.WriteLine("Installed with Startup-folder fallback (Scheduled Task creation was blocked).");
             return 0;
         }
 
-        await WriteMetadataAsync(metadataPath, "scheduled-task", serverUrl: serverUrl);
-        _out.WriteLine($"Registered Scheduled Task {taskName}");
-        return 0;
-    }
-
-    public async Task<int> InstallSlackAsync(ServiceInstallOptions options)
-    {
-        var repoRoot = ResolveRepoRoot(options.RepoRoot);
-        var launcherPath = SlackLauncherPath();
-        var taskName = SlackTaskName;
-        var startupPath = SlackStartupPath();
-        var metadataPath = SlackMetadataPath();
-        var serverUrl = options.ServerUrl ?? "http://127.0.0.1:3456";
-        var operatorToken = _environment.GetEnvironmentVariable(SlackAdapterTokenEnvironmentVariable);
-        var spec = new SlackLauncherSpec(
-            SanitizeForCmdAssignment(repoRoot),
-            SanitizeForCmdAssignment(serverUrl),
-            operatorToken is null ? null : SanitizeForCmdAssignment(operatorToken));
-        var launcherBody = RenderSlackLauncher(spec);
-        if (options.DryRun)
-        {
-            PreviewInstall(launcherPath, launcherBody, taskName);
-            return 0;
-        }
-        RemoveStaleStartupFallbackIfBackendChanges(metadataPath, startupPath, "scheduled-task");
-        EnsureDirectory(launcherPath);
-        await _fileSystem.WriteAllTextAsync(launcherPath, launcherBody);
-        _out.WriteLine($"Wrote {launcherPath}");
-        var createArgs = BuildCreateTaskArgs(new TaskCreateSpec(taskName, QuoteForSchtasksTr(launcherPath)));
-        var (exitCode, _, stderr) = await _commandExecutor.ExecuteAsync("schtasks", createArgs);
-        if (exitCode != 0)
-        {
-            if (!string.IsNullOrWhiteSpace(stderr)) _err.Write(stderr);
-            await InstallStartupFallbackAsync(startupPath, launcherPath, metadataPath, serverUrl: serverUrl);
-            _out.WriteLine("Installed with Startup-folder fallback (Scheduled Task creation was blocked).");
-            return 0;
-        }
-        await WriteMetadataAsync(metadataPath, "scheduled-task", serverUrl: serverUrl);
+        await WriteMetadataAsync(metadataPath, "scheduled-task", repoRoot, serverUrl: serverUrl);
         _out.WriteLine($"Registered Scheduled Task {taskName}");
         return 0;
     }
 
     public Task<int> StartServerAsync(ServiceCommandOptions options) =>
-        StartAsync(ServerTaskName, ServerLauncherPath(), ServerStartupPath(), ServerMetadataPath(), "Server", isServer: true, options);
+        StartAsync(ServerTaskName, ServerLauncherPath(), ServerStartupPath(), ServerMetadataPath(), "Server", options);
 
     public Task<int> StartRunnerAsync(ServiceCommandOptions options) =>
-        StartAsync(RunnerTaskName, RunnerLauncherPath(), RunnerStartupPath(), RunnerMetadataPath(), "Runner", isServer: false, options);
+        StartAsync(RunnerTaskName, RunnerLauncherPath(), RunnerStartupPath(), RunnerMetadataPath(), "Runner", options);
 
     public Task<int> StopServerAsync(ServiceCommandOptions options) =>
-        StopAsync(ServerTaskName, ServerLauncherPath(), ServerStartupPath(), ServerMetadataPath(), "Server", isServer: true, options);
+        StopAsync(ServerTaskName, ServerLauncherPath(), ServerStartupPath(), ServerMetadataPath(), "Server", "dotnet", options);
 
     public Task<int> StopRunnerAsync(ServiceCommandOptions options) =>
-        StopAsync(RunnerTaskName, RunnerLauncherPath(), RunnerStartupPath(), RunnerMetadataPath(), "Runner", isServer: false, options);
+        StopAsync(RunnerTaskName, RunnerLauncherPath(), RunnerStartupPath(), RunnerMetadataPath(), "Runner", "node", options);
 
     public async Task<int> RestartServerAsync(ServiceCommandOptions options)
     {
@@ -208,10 +177,10 @@ internal sealed class WindowsScheduledTaskInstaller : IServiceInstaller
     }
 
     public Task<int> StatusServerAsync(ServiceCommandOptions options) =>
-        StatusAsync(ServerTaskName, ServerLauncherPath(), ServerStartupPath(), ServerMetadataPath(), "Server", isServer: true, options);
+        StatusAsync(ServerTaskName, ServerLauncherPath(), ServerStartupPath(), ServerMetadataPath(), "Server", "dotnet", probeHealth: true, options);
 
     public Task<int> StatusRunnerAsync(ServiceCommandOptions options) =>
-        StatusAsync(RunnerTaskName, RunnerLauncherPath(), RunnerStartupPath(), RunnerMetadataPath(), "Runner", isServer: false, options);
+        StatusAsync(RunnerTaskName, RunnerLauncherPath(), RunnerStartupPath(), RunnerMetadataPath(), "Runner", "node", probeHealth: false, options);
 
     public async Task<bool> IsRunnerRunningAsync(CancellationToken cancellationToken = default)
     {
@@ -231,21 +200,55 @@ internal sealed class WindowsScheduledTaskInstaller : IServiceInstaller
     public Task<int> UninstallRunnerAsync(ServiceCommandOptions options) =>
         UninstallAsync(RunnerTaskName, RunnerLauncherPath(), RunnerStartupPath(), RunnerMetadataPath(), "Runner", options);
 
-    public Task<int> StartSlackAsync(ServiceCommandOptions options) =>
-        StartAsync(SlackTaskName, SlackLauncherPath(), SlackStartupPath(), SlackMetadataPath(), "Slack", isServer: false, options);
+    public Task<int> StartSlackAsync(ServiceCommandOptions options, CancellationToken cancellationToken = default) =>
+        StartAsync(SlackTaskName, SlackLauncherPath(), SlackStartupPath(), SlackMetadataPath(), "Slack", options, cancellationToken);
 
-    public Task<int> StopSlackAsync(ServiceCommandOptions options) =>
-        StopAsync(SlackTaskName, SlackLauncherPath(), SlackStartupPath(), SlackMetadataPath(), "Slack", isServer: false, options);
+    public Task<int> StopSlackAsync(ServiceCommandOptions options, CancellationToken cancellationToken = default) =>
+        StopAsync(SlackTaskName, SlackLauncherPath(), SlackStartupPath(), SlackMetadataPath(), "Slack", "mohist-slack", options, cancellationToken);
 
-    public async Task<int> RestartSlackAsync(ServiceCommandOptions options)
+    public async Task<int> RestartSlackAsync(
+        ServiceCommandOptions options,
+        CancellationToken cancellationToken = default)
     {
-        var stop = await StopSlackAsync(options);
-        var start = await StartSlackAsync(options);
-        return stop != 0 ? stop : start;
+        var wasRunning = false;
+        if (!options.DryRun)
+        {
+            var (queryCode, pids, queryError) = await QuerySlackProcessPidsAsync(
+                SlackLauncherPath(),
+                SlackStartupPath(),
+                SlackMetadataPath(),
+                cancellationToken);
+            if (queryCode != 0)
+            {
+                if (!string.IsNullOrWhiteSpace(queryError)) _err.Write(queryError);
+                return queryCode;
+            }
+            wasRunning = pids.Count > 0;
+        }
+        try
+        {
+            var stop = await StopSlackAsync(options, cancellationToken);
+            return stop != 0 ? stop : await StartSlackAsync(options, cancellationToken);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            try
+            {
+                var recovery = wasRunning
+                    ? await StartSlackAsync(options, CancellationToken.None)
+                    : await StopSlackAsync(options, CancellationToken.None);
+                if (recovery != 0) _err.WriteLine("Slack restart cancellation recovery could not restore the previous service state.");
+            }
+            catch (Exception ex)
+            {
+                _err.WriteLine($"Slack restart cancellation recovery failed: {ex.Message}");
+            }
+            throw;
+        }
     }
 
     public Task<int> StatusSlackAsync(ServiceCommandOptions options) =>
-        StatusAsync(SlackTaskName, SlackLauncherPath(), SlackStartupPath(), SlackMetadataPath(), "Slack", isServer: false, options);
+        StatusAsync(SlackTaskName, SlackLauncherPath(), SlackStartupPath(), SlackMetadataPath(), "Slack", "mohist-slack", probeHealth: false, options);
 
     public Task<int> LogsSlackAsync(ServiceCommandOptions options) => LogsAsync(SlackLogPath(), "Slack", options);
 
@@ -266,6 +269,7 @@ internal sealed class WindowsScheduledTaskInstaller : IServiceInstaller
     public async Task<bool> IsSlackInstalledAsync(string? unitDir = null)
     {
         _ = unitDir;
+        if (_fileSystem.Exists(SlackLauncherPath()) || _fileSystem.Exists(SlackStartupPath())) return true;
         return await DetectBackendAsync(SlackTaskName, SlackStartupPath(), SlackLauncherPath(), SlackMetadataPath()) != BackendKind.None;
     }
 
@@ -275,10 +279,10 @@ internal sealed class WindowsScheduledTaskInstaller : IServiceInstaller
         string startupPath,
         string metadataPath,
         string kindDisplay,
-        bool isServer,
-        ServiceCommandOptions options)
+        ServiceCommandOptions options,
+        CancellationToken cancellationToken = default)
     {
-        var backend = await DetectBackendAsync(taskName, startupPath, launcherPath, metadataPath);
+        var backend = await DetectBackendAsync(taskName, startupPath, launcherPath, metadataPath, cancellationToken);
 
         if (options.DryRun)
         {
@@ -291,17 +295,46 @@ internal sealed class WindowsScheduledTaskInstaller : IServiceInstaller
             return 0;
         }
 
+        if (backend == BackendKind.Unknown)
+        {
+            _err.WriteLine($"Installed backend state could not be verified for {kindDisplay}.");
+            return 1;
+        }
+
+        if (taskName == SlackTaskName && backend != BackendKind.None)
+        {
+            var (queryCode, pids, queryError) = await QuerySlackProcessPidsAsync(
+                launcherPath,
+                startupPath,
+                metadataPath,
+                cancellationToken);
+            if (queryCode != 0)
+            {
+                if (!string.IsNullOrWhiteSpace(queryError)) _err.Write(queryError);
+                return queryCode;
+            }
+            if (pids.Count > 0)
+            {
+                _out.WriteLine($"{kindDisplay} is already running.");
+                return 0;
+            }
+        }
+
         switch (backend)
         {
             case BackendKind.ScheduledTask:
                 {
-                    var (code, _, stderr) = await _commandExecutor.ExecuteAsync("schtasks", BuildRunArgs(taskName));
+                    var (code, _, stderr) = await _commandExecutor.ExecuteAsync(
+                        "schtasks",
+                        BuildRunArgs(taskName),
+                        cancellationToken: cancellationToken);
                     if (code != 0 && !string.IsNullOrWhiteSpace(stderr)) _err.Write(stderr);
                     return code;
                 }
             case BackendKind.StartupFallback:
             case BackendKind.LauncherOnly:
                 {
+                    cancellationToken.ThrowIfCancellationRequested();
                     var psi = new ProcessStartInfo(launcherPath)
                     {
                         UseShellExecute = true,
@@ -330,10 +363,11 @@ internal sealed class WindowsScheduledTaskInstaller : IServiceInstaller
         string startupPath,
         string metadataPath,
         string kindDisplay,
-        bool isServer,
-        ServiceCommandOptions options)
+        string processImage,
+        ServiceCommandOptions options,
+        CancellationToken cancellationToken = default)
     {
-        var backend = await DetectBackendAsync(taskName, startupPath, launcherPath, metadataPath);
+        var backend = await DetectBackendAsync(taskName, startupPath, launcherPath, metadataPath, cancellationToken);
 
         if (options.DryRun)
         {
@@ -341,16 +375,51 @@ internal sealed class WindowsScheduledTaskInstaller : IServiceInstaller
             _out.WriteLine($"Dry run: would stop {kindDisplay}");
             if (backend == BackendKind.ScheduledTask)
                 _out.WriteLine($"Dry run: would run schtasks.exe with args: {string.Join(' ', BuildEndArgs(taskName))}");
-            if (backend == BackendKind.StartupFallback || backend == BackendKind.LauncherOnly)
-                _out.WriteLine($"Dry run: would taskkill matching {kindDisplay} processes ({(isServer ? "dotnet.exe" : "node.exe")})");
+            if (backend == BackendKind.StartupFallback || backend == BackendKind.LauncherOnly
+                || processImage.Equals("mohist-slack", StringComparison.OrdinalIgnoreCase) && backend != BackendKind.None)
+                _out.WriteLine($"Dry run: would taskkill matching {kindDisplay} processes ({processImage}.exe)");
             return 0;
+        }
+
+        if (backend == BackendKind.Unknown)
+        {
+            _err.WriteLine($"Installed backend state could not be verified for {kindDisplay}.");
+            return 1;
         }
 
         var exitCode = 0;
 
+        if (processImage.Equals("mohist-slack", StringComparison.OrdinalIgnoreCase)
+            && IsLegacyNodeSlackLauncher(launcherPath))
+        {
+            var (queryCode, launcherPids, queryError) = await QuerySlackProcessPidsAsync(
+                launcherPath,
+                startupPath,
+                metadataPath,
+                cancellationToken);
+            if (queryCode != 0)
+            {
+                if (!string.IsNullOrWhiteSpace(queryError)) _err.Write(queryError);
+                return queryCode;
+            }
+            if (launcherPids.Count > 0)
+            {
+                // The exact launcher cmd.exe is still alive here, so /T can
+                // terminate its Node descendants before Task Scheduler can
+                // orphan them by ending only the scheduled action.
+                return await KillPidsAsync(
+                    launcherPids,
+                    includeTree: true,
+                    cancellationToken: cancellationToken);
+            }
+        }
+
         if (backend == BackendKind.ScheduledTask)
         {
-            var (code, _, stderr) = await _commandExecutor.ExecuteAsync("schtasks", BuildEndArgs(taskName));
+            var (code, _, stderr) = await _commandExecutor.ExecuteAsync(
+                "schtasks",
+                BuildEndArgs(taskName),
+                cancellationToken: cancellationToken);
             if (code != 0)
             {
                 if (!string.IsNullOrWhiteSpace(stderr)) _err.Write(stderr);
@@ -358,10 +427,17 @@ internal sealed class WindowsScheduledTaskInstaller : IServiceInstaller
             }
         }
 
-        if (backend == BackendKind.StartupFallback || backend == BackendKind.LauncherOnly)
+        if (backend == BackendKind.StartupFallback || backend == BackendKind.LauncherOnly
+            || processImage.Equals("mohist-slack", StringComparison.OrdinalIgnoreCase) && backend != BackendKind.None)
         {
-            var killCode = await KillMatchingProcessesAsync(launcherPath, isServer);
+            var killCode = await KillMatchingProcessesAsync(
+                launcherPath,
+                startupPath,
+                metadataPath,
+                processImage,
+                cancellationToken);
             if (killCode != 0 && exitCode == 0) exitCode = killCode;
+            else if (killCode == 0 && processImage.Equals("mohist-slack", StringComparison.OrdinalIgnoreCase)) exitCode = 0;
         }
 
         if (backend == BackendKind.None)
@@ -378,7 +454,8 @@ internal sealed class WindowsScheduledTaskInstaller : IServiceInstaller
         string startupPath,
         string metadataPath,
         string kindDisplay,
-        bool isServer,
+        string processImage,
+        bool probeHealth,
         ServiceCommandOptions options)
     {
         var backend = await DetectBackendAsync(taskName, startupPath, launcherPath, metadataPath);
@@ -393,7 +470,7 @@ internal sealed class WindowsScheduledTaskInstaller : IServiceInstaller
             _out.WriteLine($"Dry run: scheduled-task: {(taskRegistered ? "yes" : "no")}");
             _out.WriteLine($"Dry run: startup-fallback: {(fallbackInstalled ? "yes" : "no")}");
             _out.WriteLine($"Dry run: launcher file: {(launcherPresent ? "present" : "missing")}");
-            if (isServer)
+            if (probeHealth)
                 _out.WriteLine("Dry run: would probe http://localhost:3456/api/health");
             return 0;
         }
@@ -403,10 +480,10 @@ internal sealed class WindowsScheduledTaskInstaller : IServiceInstaller
         _out.WriteLine($"  startup-fallback: {(fallbackInstalled ? "yes" : "no")}");
         _out.WriteLine($"  launcher file: {(launcherPresent ? "present" : "missing")}");
 
-        var running = await IsProcessRunningAsync(isServer ? "dotnet" : "node");
+        var running = await IsProcessRunningAsync(processImage, metadataPath);
         _out.WriteLine($"  running: {(running ? "yes" : "no")}");
 
-        if (isServer)
+        if (probeHealth)
         {
             var metadata = ReadMetadata(metadataPath);
             var healthUrl = metadata?.ListenUrl != null
@@ -523,13 +600,34 @@ internal sealed class WindowsScheduledTaskInstaller : IServiceInstaller
         string taskName,
         string startupPath,
         string launcherPath,
-        string metadataPath)
+        string metadataPath,
+        CancellationToken cancellationToken = default)
     {
         var metadata = ReadMetadata(metadataPath);
+        if (taskName == SlackTaskName)
+        {
+            var probe = await ProbeSlackScheduledTaskAsync(taskName, launcherPath, cancellationToken);
+            if (probe == ScheduledTaskProbe.Owned) return BackendKind.ScheduledTask;
+            if (probe is ScheduledTaskProbe.Unknown or ScheduledTaskProbe.Conflict) return BackendKind.Unknown;
+            if (metadata?.Backend == "startup-fallback" && _fileSystem.Exists(startupPath))
+                return BackendKind.StartupFallback;
+            if (metadata?.Backend == "launcher-only" && _fileSystem.Exists(launcherPath))
+                return BackendKind.LauncherOnly;
+            return BackendKind.None;
+        }
+
         if (metadata?.Backend == "scheduled-task")
         {
             var (code, _, _) = await _commandExecutor.ExecuteAsync("schtasks", BuildQueryArgs(taskName));
             if (code == 0) return BackendKind.ScheduledTask;
+        }
+        else if (metadata?.Backend == "startup-fallback" && _fileSystem.Exists(startupPath))
+        {
+            return BackendKind.StartupFallback;
+        }
+        else if (metadata?.Backend == "launcher-only" && _fileSystem.Exists(launcherPath))
+        {
+            return BackendKind.LauncherOnly;
         }
 
         if (_fileSystem.Exists(startupPath)) return BackendKind.StartupFallback;
@@ -537,64 +635,16 @@ internal sealed class WindowsScheduledTaskInstaller : IServiceInstaller
         return BackendKind.None;
     }
 
-    private async Task<int> KillMatchingProcessesAsync(string launcherPath, bool isServer)
+    private async Task<bool> IsProcessRunningAsync(string imageName, string? metadataPath = null)
     {
-        // Best-effort stop: enumerate tasklist to find PIDs whose command line references
-        // the generated launcher path, then taskkill /F /PID for each. This avoids
-        // killing unrelated dotnet.exe / node.exe processes on the user's box.
-        // When tasklist is not available or yields no PIDs, fall back to killing the
-        // image name (broader scope) and surface a warning.
-        var imageName = isServer ? "dotnet.exe" : "node.exe";
-        var (listCode, listOut, _) = await _commandExecutor.ExecuteAsync(
-            "tasklist",
-            ["/FI", $"IMAGENAME eq {imageName}", "/FO", "CSV", "/NH", "/V"]);
-        var pids = ParseTaskListPids(listOut, imageName, launcherPath);
-
-        if (pids.Count == 0)
+        if (imageName.Equals("mohist-slack", StringComparison.OrdinalIgnoreCase))
         {
-            if (listCode != 0) return 0;
-            return 0;
+            var (queryCode, pids, queryError) = metadataPath is null
+                ? (1, new List<int>(), "Cannot identify the installed Slack process because its installation metadata is unavailable.\n")
+                : await QuerySlackProcessPidsAsync(SlackLauncherPath(), SlackStartupPath(), metadataPath);
+            if (queryCode != 0 && !string.IsNullOrWhiteSpace(queryError)) _err.Write(queryError);
+            return queryCode == 0 && pids.Count > 0;
         }
-
-        var lastCode = 0;
-        foreach (var pid in pids)
-        {
-            var (code, _, stderr) = await _commandExecutor.ExecuteAsync("taskkill", ["/F", "/PID", pid.ToString()]);
-            if (code != 0)
-            {
-                if (!string.IsNullOrWhiteSpace(stderr)) _err.Write(stderr);
-                lastCode = code;
-            }
-        }
-
-        return lastCode;
-    }
-
-    private static List<int> ParseTaskListPids(string stdout, string imageName, string launcherPath)
-    {
-        var result = new List<int>();
-        if (string.IsNullOrWhiteSpace(stdout)) return result;
-        var lines = stdout.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries);
-        var marker = Path.GetFileName(launcherPath);
-        foreach (var line in lines)
-        {
-            // CSV header line or non-matching row is filtered out; we only
-            // accept rows whose image name matches AND whose command line / window
-            // title contains the generated launcher marker.
-            if (line.IndexOf(imageName, StringComparison.OrdinalIgnoreCase) < 0) continue;
-            if (line.IndexOf(marker, StringComparison.OrdinalIgnoreCase) < 0) continue;
-            // The first CSV field is image name; PID is typically the second field
-            // when output is /FO CSV /NH.
-            var fields = line.Split(',');
-            if (fields.Length < 2) continue;
-            var pidField = fields[1].Trim(' ', '"');
-            if (int.TryParse(pidField, out var pid)) result.Add(pid);
-        }
-        return result;
-    }
-
-    private async Task<bool> IsProcessRunningAsync(string imageName)
-    {
         var (code, stdout, _) = await _commandExecutor.ExecuteAsync("tasklist", ["/FI", $"IMAGENAME eq {imageName}.exe", "/FO", "CSV"]);
         if (code != 0) return false;
         var lines = stdout.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries);
@@ -678,6 +728,7 @@ internal sealed class WindowsScheduledTaskInstaller : IServiceInstaller
         string startupPath,
         string launcherPath,
         string metadataPath,
+        string repoRoot,
         string? listenUrl = null,
         string? serverUrl = null)
     {
@@ -689,38 +740,43 @@ internal sealed class WindowsScheduledTaskInstaller : IServiceInstaller
         var body = $"@echo off{Environment.NewLine}call \"{safeLauncherPath}\"{Environment.NewLine}";
         await _fileSystem.WriteAllTextAsync(startupPath, body);
         _out.WriteLine($"Wrote Startup fallback {startupPath}");
-        await WriteMetadataAsync(metadataPath, "startup-fallback", listenUrl: listenUrl, serverUrl: serverUrl);
+        await WriteMetadataAsync(metadataPath, "startup-fallback", repoRoot, listenUrl: listenUrl, serverUrl: serverUrl);
     }
 
-    private void RemoveStaleStartupFallbackIfBackendChanges(
+    private bool RemoveStaleStartupFallbackIfBackendChanges(
         string metadataPath,
         string startupPath,
         string newBackend)
     {
-        if (newBackend != "scheduled-task") return;
+        if (newBackend != "scheduled-task") return true;
         var metadata = ReadMetadata(metadataPath);
-        if (metadata?.Backend != "startup-fallback") return;
-        if (!_fileSystem.Exists(startupPath)) return;
+        if (metadata?.Backend != "startup-fallback") return true;
+        if (!_fileSystem.Exists(startupPath)) return true;
         try
         {
             _fileSystem.Delete(startupPath);
             _out.WriteLine($"Removed stale Startup-folder fallback {startupPath}");
+            return true;
         }
         catch (Exception ex)
         {
-            _err.WriteLine($"Warning: failed to remove stale Startup-folder fallback {startupPath}: {ex.Message}");
+            _err.WriteLine($"Failed to remove stale Startup-folder fallback {startupPath}: {ex.Message}");
+            return false;
         }
     }
 
     private async Task WriteMetadataAsync(
         string metadataPath,
         string backend,
+        string repoRoot,
         string? listenUrl = null,
         string? serverUrl = null)
     {
         EnsureDirectory(metadataPath);
-        var metadata = new InstallMetadata(backend, listenUrl, serverUrl);
-        await _fileSystem.WriteAllTextAsync(metadataPath, JsonSerializer.Serialize(metadata, MetadataJsonOptions));
+        var metadata = new InstallMetadata(backend, repoRoot, listenUrl, serverUrl);
+        var tempPath = $"{metadataPath}.tmp";
+        await _fileSystem.WriteAllTextAsync(tempPath, JsonSerializer.Serialize(metadata, MetadataJsonOptions));
+        _fileSystem.MoveFile(tempPath, metadataPath);
     }
 
     private InstallMetadata? ReadMetadata(string metadataPath)
@@ -757,24 +813,28 @@ internal sealed class WindowsScheduledTaskInstaller : IServiceInstaller
         BackendKind.ScheduledTask => "scheduled-task",
         BackendKind.StartupFallback => "startup-fallback",
         BackendKind.LauncherOnly => "launcher-only",
+        BackendKind.Unknown => "unknown",
         _ => "none",
     };
 
     private static string ResolveRepoRoot(string? explicitRoot)
     {
         if (!string.IsNullOrWhiteSpace(explicitRoot))
-            return explicitRoot!;
+            return CanonicalizeWindowsPath(explicitRoot!);
 
         var dir = new DirectoryInfo(AppContext.BaseDirectory);
         while (dir is not null)
         {
             if (File.Exists(Path.Combine(dir.FullName, "Mohist.sln")))
-                return dir.FullName;
+                return CanonicalizeWindowsPath(dir.FullName);
             dir = dir.Parent;
         }
 
-        return Directory.GetCurrentDirectory();
+        return CanonicalizeWindowsPath(Directory.GetCurrentDirectory());
     }
+
+    private static string CanonicalizeWindowsPath(string path) =>
+        OperatingSystem.IsWindows() ? Path.GetFullPath(path) : path;
 
     private string ServiceDirectory() => Path.Combine(_userProfilePath, ".mohist", "service");
     private string StartupDirectory() => Path.Combine(_userProfilePath, "AppData", "Roaming", "Microsoft", "Windows", "Start Menu", "Programs", "Startup");
@@ -884,14 +944,23 @@ internal sealed class WindowsScheduledTaskInstaller : IServiceInstaller
     internal sealed record RunnerLauncherSpec(string RepoRoot, string? ServerUrl, string? RunnerRoot, string? EnrollmentToken = null);
     internal sealed record SlackLauncherSpec(string RepoRoot, string ServerUrl, string? OperatorToken = null);
     internal sealed record TaskCreateSpec(string TaskName, string TrPayload);
-    internal sealed record InstallMetadata(string Backend, string? ListenUrl, string? ServerUrl);
+    internal sealed record InstallMetadata(string Backend, string? RepoRoot, string? ListenUrl, string? ServerUrl);
 
     private enum BackendKind
     {
         None,
+        Unknown,
         ScheduledTask,
         StartupFallback,
         LauncherOnly,
+    }
+
+    private enum ScheduledTaskProbe
+    {
+        Owned,
+        Absent,
+        Conflict,
+        Unknown,
     }
 
     internal static string QuoteForSchtasksTr(string value)

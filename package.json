@@ -12,7 +12,7 @@
     "packages/runner"
   ],
   "scripts": {
-    "build": "dotnet build Mohist.sln -p:SkipWebBuild=true && concurrently --kill-others-on-fail --names web,runner \"npm run build -w packages/web\" \"npm run build -w packages/runner\"",
+    "build": "dotnet build Mohist.sln -p:SkipWebBuild=true && concurrently --kill-others-on-fail --names web,runner,slack \"npm run build -w packages/web\" \"npm run build -w packages/runner\" \"npm run build:slack\"",
     "test": "tsx scripts/test-duration/command.ts portfolio",
     "test:fast": "tsx scripts/test-duration/command.ts fast",
     "verify": "tsx scripts/test-duration/verify.ts",
@@ -27,6 +27,8 @@
     "archtest": "npm run format:check && npm run check:filesizes && npm run typecheck:scripts && npm run test:archscripts",
     "build:web": "npm run build -w packages/web",
     "build:runner": "npm run build -w packages/runner",
+    "build:slack": "go -C packages/go/mohist-slack build -tags netgo,osusergo -buildvcs=false -o bin/build/ ./cmd/mohist-slack",
+    "test:slack:race": "go -C packages/go/mohist-slack test -race ./...",
     "dev:runner": "npm run dev -w packages/runner",
     "dev:web": "npm run dev -w packages/web",
     "dev:server": "dotnet run --project packages/server/src/Mohist.Server/Mohist.Server.csproj",

@@ -1,7 +1,10 @@
 namespace Mohist.Cli;
 
-internal sealed class UpdateOperations
+internal sealed partial class UpdateOperations
 {
+    private static readonly TimeSpan SlackActivationTimeout = TimeSpan.FromSeconds(5);
+    private static readonly TimeSpan SlackActivationPollInterval = TimeSpan.FromMilliseconds(250);
+
     private readonly TextWriter _out;
     private readonly TextWriter _err;
     private readonly IServiceInstaller _systemd;
@@ -11,6 +14,8 @@ internal sealed class UpdateOperations
     private readonly string? _unitDir;
     private readonly Func<string?>? _getUserHome;
     private readonly ManagedRuntimeTransaction? _managedRuntime;
+    private readonly TimeProvider _timeProvider;
+    private readonly Func<TimeSpan, CancellationToken, Task> _pollWait;
 
     public UpdateOperations(
         TextWriter output,
@@ -20,7 +25,9 @@ internal sealed class UpdateOperations
         IFileSystem fileSystem,
         IEnvironmentVariableProvider environment,
         string? unitDir = null,
-        Func<string?>? getUserHome = null)
+        Func<string?>? getUserHome = null,
+        TimeProvider? timeProvider = null,
+        Func<TimeSpan, CancellationToken, Task>? pollWait = null)
     {
         _out = output;
         _err = error;
@@ -30,6 +37,9 @@ internal sealed class UpdateOperations
         _environment = environment;
         _unitDir = unitDir;
         _getUserHome = getUserHome;
+        _timeProvider = timeProvider ?? TimeProvider.System;
+        _pollWait = pollWait
+            ?? ((delay, cancellationToken) => Task.Delay(delay, _timeProvider, cancellationToken));
         if (systemd is IManagedRuntimeActivator activator)
         {
             var sourceResolver = new UpdateSourceResolver(
@@ -234,39 +244,406 @@ internal sealed class UpdateOperations
         var root = ResolveRepoRoot(repoRoot);
         _out.WriteLine($"Updating Slack adapter from source: {root}");
         var adapterDir = Path.Combine(root, "packages", "go", "mohist-slack");
-        var binaryName = OperatingSystem.IsWindows() ? "mohist-slack.exe" : "mohist-slack";
-        var binary = Path.Combine("bin", binaryName);
+        var stagingOutput = Path.Combine("bin", ".update") + Path.DirectorySeparatorChar;
+        var stagingDir = Path.Combine(adapterDir, "bin", ".update");
+        var recoveryMarker = Path.Combine(stagingDir, "recovery-required");
+        var binaryName = _systemd.SlackBinaryName;
+        var stagedBinary = Path.Combine(stagingDir, binaryName);
+        var backupBinary = Path.Combine(stagingDir, $"{binaryName}.previous");
+        var installedBinary = Path.Combine(adapterDir, "bin", binaryName);
         if (dryRun)
         {
             _out.WriteLine("Dry run: would execute:");
-            _out.WriteLine($"  cd {adapterDir} && go build -o {binary} ./cmd/mohist-slack");
-            _out.WriteLine("  mo service restart slack (if installed)");
+            _out.WriteLine($"  cd {adapterDir} && go build -tags netgo,osusergo -buildvcs=false -o {stagingOutput} ./cmd/mohist-slack");
+            _out.WriteLine("  mo service stop slack (if installed)");
+            _out.WriteLine($"  replace {installedBinary} from the staged binary");
+            _out.WriteLine("  refresh the installed Slack service launcher");
+            _out.WriteLine("  mo service start slack");
             return 0;
         }
+        var recoveryDirectory = ResolveSlackRecoveryDirectory();
+        var globalRecoveryMarker = Path.Combine(recoveryDirectory, "recovery-required");
+        using var transactionLock = _fileSystem.TryAcquireFileLock(
+            Path.Combine(recoveryDirectory, "transaction.lock"));
+        if (transactionLock is null)
+        {
+            _err.WriteLine("Another Slack install or update is already running for this user.");
+            return 1;
+        }
+        var snapshotId = CreateSlackRecoverySnapshotId(installedBinary);
+        var serviceSnapshotPath = ResolveSlackRecoverySnapshotPath(recoveryDirectory, snapshotId);
+
+        if (_fileSystem.Exists(globalRecoveryMarker) && !_fileSystem.Exists(recoveryMarker))
+        {
+            _err.WriteLine("A Slack update transaction from another repository is unresolved. Complete recovery from its original repository before retrying.");
+            return 1;
+        }
+        if (_fileSystem.Exists(recoveryMarker))
+        {
+            return await RecoverInterruptedSlackUpdateAsync(
+                stagingDir,
+                recoveryMarker,
+                recoveryDirectory,
+                root,
+                installedBinary,
+                stagedBinary,
+                backupBinary,
+                globalRecoveryMarker,
+                cancellationToken);
+        }
+        if (_fileSystem.Exists(serviceSnapshotPath)
+            || _fileSystem.Exists(Path.Combine(stagingDir, "mohist-slack.previous"))
+            || _fileSystem.Exists(Path.Combine(stagingDir, "mohist-slack.exe.previous")))
+        {
+            _err.WriteLine($"Slack recovery files exist without a valid transaction manifest. Preserve and inspect {stagingDir} before retrying.");
+            return 1;
+        }
+        if (_fileSystem.DirectoryExists(stagingDir))
+            _fileSystem.DeleteDirectory(stagingDir);
 
         if (!await _systemd.IsSlackInstalledAsync(_unitDir))
         {
             _out.WriteLine("Slack refresh skipped: slack service is not installed");
             return 0;
         }
-
-        var (build, buildOut, buildErr) = await _commandExecutor.ExecuteAsync(
-            "go", ["build", "-o", binary, "./cmd/mohist-slack"], adapterDir, cancellationToken);
-        if (build != 0)
+        var preserveStaging = false;
+        try
         {
-            WriteCommandFailureOutput(buildOut, buildErr);
-            _err.WriteLine("Build failed. Aborting update.");
-            return build;
-        }
+            // Mohist does not consume Go's embedded VCS stamp, and linked worktrees
+            // can place Git metadata outside the source tree.
+            var (build, buildOut, buildErr) = await _commandExecutor.ExecuteAsync(
+                "go", ["build", "-tags", "netgo,osusergo", "-buildvcs=false", "-o", stagingOutput, "./cmd/mohist-slack"], adapterDir, cancellationToken);
+            if (build != 0)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                WriteCommandFailureOutput(buildOut, buildErr);
+                _err.WriteLine("Build failed. Aborting update.");
+                return build;
+            }
+            if (!_fileSystem.Exists(stagedBinary))
+            {
+                _err.WriteLine($"Build completed without producing {stagedBinary}.");
+                return 1;
+            }
 
-        var restart = await _systemd.RestartSlackAsync(new ServiceCommandOptions(false, null, 100, false));
-        if (restart != 0)
-        {
-            _err.WriteLine("Warning: Failed to restart Slack service. You may need to restart manually.");
-            return restart;
+            var hasBackup = _fileSystem.Exists(installedBinary);
+            if (hasBackup)
+            {
+                try
+                {
+                    _fileSystem.CopyFileDurable(installedBinary, backupBinary);
+                }
+                catch (Exception ex)
+                {
+                    _err.WriteLine($"Slack binary backup failed: {ex.Message}");
+                    return 1;
+                }
+            }
+
+            SlackServiceSnapshot? snapshot;
+            try
+            {
+                snapshot = await _systemd.CaptureSlackServiceAsync(_unitDir, cancellationToken);
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                _err.WriteLine($"Slack service snapshot failed: {ex.Message}");
+                return 1;
+            }
+            if (snapshot is null)
+            {
+                _err.WriteLine("Slack service snapshot failed. The service was not stopped.");
+                return 1;
+            }
+            var wasNodeLauncher = IsNodeSlackServiceSnapshot(snapshot);
+
+            cancellationToken.ThrowIfCancellationRequested();
+            var recoveryManifest = PersistSlackRecoveryState(
+                snapshot,
+                serviceSnapshotPath,
+                recoveryMarker,
+                hasBackup,
+                backupBinary,
+                binaryName,
+                snapshotId,
+                wasNodeLauncher,
+                globalRecoveryMarker);
+            if (recoveryManifest is null) return 1;
+            var requiresRollForward = wasNodeLauncher || !hasBackup;
+
+            var serviceOptions = new ServiceCommandOptions(false, _unitDir, 100, false);
+            void PreserveRecoveryFiles()
+            {
+                preserveStaging = true;
+            }
+
+            async Task<bool> RecoverPreviousServiceAsync(bool restoreBinary, bool restoreConfiguration, bool stopFirst)
+            {
+                var canStart = true;
+                if (stopFirst)
+                {
+                    try
+                    {
+                        var recoveryStop = await _systemd.StopSlackAsync(serviceOptions, CancellationToken.None);
+                        if (recoveryStop != 0) canStart = false;
+                    }
+                    catch (Exception ex)
+                    {
+                        _err.WriteLine($"Slack recovery stop failed: {ex.Message}");
+                        canStart = false;
+                    }
+                }
+
+                if (requiresRollForward || restoreConfiguration)
+                {
+                    try
+                    {
+                        var restore = await _systemd.RestoreSlackServiceAsync(snapshot, CancellationToken.None);
+                        if (restore != 0) canStart = false;
+                    }
+                    catch (Exception ex)
+                    {
+                        _err.WriteLine($"Slack service rollback failed: {ex.Message}");
+                        canStart = false;
+                    }
+                }
+
+                if (restoreBinary && !requiresRollForward && canStart)
+                {
+                    try
+                    {
+                        if (_fileSystem.Exists(backupBinary))
+                        {
+                            var rollbackBinary = $"{installedBinary}.rollback.tmp";
+                            _fileSystem.CopyFileDurable(backupBinary, rollbackBinary);
+                            _fileSystem.MoveFile(rollbackBinary, installedBinary);
+                        }
+                        else canStart = false;
+                    }
+                    catch (Exception ex)
+                    {
+                        _err.WriteLine($"Slack binary rollback failed: {ex.Message}");
+                        canStart = false;
+                    }
+                }
+
+                if (requiresRollForward && canStart)
+                {
+                    try
+                    {
+                        if (_fileSystem.Exists(stagedBinary))
+                        {
+                            _fileSystem.MoveFile(stagedBinary, installedBinary);
+                        }
+                        else if (!_fileSystem.Exists(installedBinary))
+                        {
+                            throw new FileNotFoundException("The staged Go binary is unavailable for first-migration recovery.", stagedBinary);
+                        }
+                        var refreshRecovery = await _systemd.RefreshSlackServiceAsync(root, _unitDir, CancellationToken.None);
+                        if (refreshRecovery != 0) canStart = false;
+                    }
+                    catch (Exception ex)
+                    {
+                        _err.WriteLine($"Slack first-migration recovery failed: {ex.Message}");
+                        canStart = false;
+                    }
+                }
+
+                if (!canStart)
+                {
+                    PreserveRecoveryFiles();
+                    _err.WriteLine($"Slack update recovery is incomplete; staged recovery files remain at {stagingDir}.");
+                    return false;
+                }
+
+                try
+                {
+                    var recovery = await _systemd.StartSlackAsync(serviceOptions, CancellationToken.None);
+                    var running = recovery == 0 && await WaitForSlackRunningAsync(CancellationToken.None);
+                    if (running)
+                    {
+                        if (!MarkSlackRecoveryCommitted(recoveryMarker, recoveryManifest))
+                        {
+                            PreserveRecoveryFiles();
+                            return false;
+                        }
+                        _out.WriteLine(!requiresRollForward
+                            ? "Previous Slack service was restarted after the failed update."
+                            : "Slack first-migration recovery completed the Go launcher activation.");
+                        return true;
+                    }
+                }
+                catch (Exception ex)
+                {
+                    _err.WriteLine($"Slack update recovery failed: {ex.Message}");
+                }
+                PreserveRecoveryFiles();
+                _err.WriteLine($"Slack update recovery failed; staged recovery files remain at {stagingDir}.");
+                return false;
+            }
+
+            int stop;
+            try
+            {
+                stop = await _systemd.StopSlackAsync(serviceOptions, cancellationToken);
+                cancellationToken.ThrowIfCancellationRequested();
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                await RecoverPreviousServiceAsync(
+                    restoreBinary: false,
+                    restoreConfiguration: false,
+                    stopFirst: false);
+                throw;
+            }
+            catch (Exception ex)
+            {
+                PreserveRecoveryFiles();
+                _err.WriteLine($"Slack service stop failed with unknown state: {ex.Message}");
+                return 1;
+            }
+            if (stop != 0)
+            {
+                PreserveRecoveryFiles();
+                _err.WriteLine("Failed to stop Slack service. The installed binary was not replaced.");
+                return stop;
+            }
+            try
+            {
+                _fileSystem.MoveFile(stagedBinary, installedBinary);
+            }
+            catch (Exception ex)
+            {
+                _err.WriteLine($"Slack binary replacement failed: {ex.Message}");
+                await RecoverPreviousServiceAsync(
+                    restoreBinary: false,
+                    restoreConfiguration: false,
+                    stopFirst: false);
+                return 1;
+            }
+
+            int refresh;
+            try
+            {
+                refresh = await _systemd.RefreshSlackServiceAsync(root, _unitDir, cancellationToken);
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                await RecoverPreviousServiceAsync(
+                    restoreBinary: true,
+                    restoreConfiguration: true,
+                    stopFirst: false);
+                throw;
+            }
+            catch (Exception ex)
+            {
+                _err.WriteLine($"Slack service launcher refresh failed: {ex.Message}");
+                await RecoverPreviousServiceAsync(
+                    restoreBinary: true,
+                    restoreConfiguration: true,
+                    stopFirst: false);
+                return 1;
+            }
+            if (refresh != 0)
+            {
+                _err.WriteLine("Failed to refresh the installed Slack service launcher.");
+                await RecoverPreviousServiceAsync(
+                    restoreBinary: true,
+                    restoreConfiguration: true,
+                    stopFirst: false);
+                cancellationToken.ThrowIfCancellationRequested();
+                return refresh;
+            }
+
+            int start;
+            try
+            {
+                start = await _systemd.StartSlackAsync(serviceOptions, cancellationToken);
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                await RecoverPreviousServiceAsync(
+                    restoreBinary: true,
+                    restoreConfiguration: true,
+                    stopFirst: true);
+                throw;
+            }
+            catch (Exception ex)
+            {
+                _err.WriteLine($"Slack service start failed: {ex.Message}");
+                await RecoverPreviousServiceAsync(
+                    restoreBinary: true,
+                    restoreConfiguration: true,
+                    stopFirst: true);
+                return 1;
+            }
+            if (start != 0)
+            {
+                _err.WriteLine("Warning: Failed to start Slack service. You may need to start it manually.");
+                await RecoverPreviousServiceAsync(
+                    restoreBinary: true,
+                    restoreConfiguration: true,
+                    stopFirst: true);
+                return start;
+            }
+            bool running;
+            try
+            {
+                running = await WaitForSlackRunningAsync(cancellationToken);
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                await RecoverPreviousServiceAsync(
+                    restoreBinary: true,
+                    restoreConfiguration: true,
+                    stopFirst: true);
+                throw;
+            }
+            catch (Exception ex)
+            {
+                _err.WriteLine($"Slack service activation check failed: {ex.Message}");
+                running = false;
+            }
+            if (!running)
+            {
+                _err.WriteLine("Slack service did not remain running after start.");
+                await RecoverPreviousServiceAsync(
+                    restoreBinary: true,
+                    restoreConfiguration: true,
+                    stopFirst: true);
+                return 1;
+            }
+            if (!MarkSlackRecoveryCommitted(recoveryMarker, recoveryManifest))
+            {
+                PreserveRecoveryFiles();
+                return 1;
+            }
+            _out.WriteLine("Slack adapter updated and service launcher refreshed.");
+            return 0;
         }
-        _out.WriteLine("Slack adapter updated and service restarted.");
-        return 0;
+        finally
+        {
+            if (!preserveStaging)
+            {
+                try
+                {
+                    if (_fileSystem.Exists(globalRecoveryMarker))
+                        _fileSystem.Delete(globalRecoveryMarker);
+                    if (_fileSystem.Exists(serviceSnapshotPath))
+                        _fileSystem.Delete(serviceSnapshotPath);
+                    if (_fileSystem.DirectoryExists(stagingDir))
+                        _fileSystem.DeleteDirectory(stagingDir);
+                }
+                catch (Exception ex)
+                {
+                    _err.WriteLine($"Slack recovery cleanup was deferred: {ex.Message}");
+                }
+            }
+        }
     }
 
     public async Task<int> UpdateCliResolvedAsync(string root, string? cliPath, bool dryRun)
@@ -508,7 +885,7 @@ internal sealed class UpdateOperations
     public string ResolveRepoRoot(string? explicitRoot)
     {
         if (!string.IsNullOrWhiteSpace(explicitRoot))
-            return explicitRoot.Replace('\\', '/');
+            return Path.GetFullPath(explicitRoot, _fileSystem.CurrentDirectory).Replace('\\', '/');
 
         var dir = new DirectoryInfo(AppContext.BaseDirectory);
         while (dir is not null)

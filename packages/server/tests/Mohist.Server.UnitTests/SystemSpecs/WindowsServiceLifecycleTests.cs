@@ -8,6 +8,195 @@ namespace Mohist.Server.UnitTests.SystemSpecs;
 
 public class WindowsServiceLifecycleTests
 {
+    [Fact]
+    public async Task StopSlack_WithLauncherOnlyBackend_KillsOnlyInstalledExecutable()
+    {
+        var files = new FakeFileSystem();
+        var commands = new FakeCommandExecutor
+        {
+            ResponseFactory = (fileName, args) => IsSlackTaskProbe(fileName, args)
+                ? (2, "", "")
+                : IsSlackProcessProbe(fileName, args)
+                    ? (0, "1234\r\n", "")
+                    : (0, "", "")
+        };
+        files.WriteAllText(SlackLauncher, "@echo off\r\ncd /d /repo\r\n");
+        files.WriteAllText(SlackMetadata, "{\"backend\":\"launcher-only\"}");
+        var installer = CreateInstaller(files, commands);
+
+        var exitCode = await installer.StopSlackAsync(CommandOptions());
+
+        Assert.Equal(0, exitCode);
+        var processQuery = Assert.Single(commands.ExecutedCommands, command => IsSlackProcessProbe(command.FileName, command.Args));
+        Assert.Contains("$ErrorActionPreference = 'Stop'", processQuery.Args[^1]);
+        Assert.Contains("-ErrorAction Stop", processQuery.Args[^1]);
+        Assert.Contains("ExecutablePath -ieq $path", processQuery.Args[^1]);
+        Assert.Contains(SlackExecutable, processQuery.Args[^1]);
+        Assert.DoesNotContain(commands.ExecutedCommands, command => command.FileName == "tasklist");
+        var taskkill = Assert.Single(commands.ExecutedCommands, command => command.FileName == "taskkill");
+        Assert.Equal(["/F", "/PID", "1234"], taskkill.Args);
+    }
+
+    [Fact]
+    public async Task StatusSlack_ReportsGoProcessAsRunning()
+    {
+        var files = new FakeFileSystem();
+        var commands = new FakeCommandExecutor
+        {
+            ResponseFactory = (fileName, args) => IsSlackTaskProbe(fileName, args)
+                ? (2, "", "")
+                : IsSlackProcessProbe(fileName, args)
+                    ? (0, "1234\r\n", "")
+                    : (0, "", "")
+        };
+        files.WriteAllText(SlackLauncher, "@echo off\r\ncd /d /repo\r\n");
+        files.WriteAllText(SlackMetadata, "{\"backend\":\"launcher-only\"}");
+        var output = new StringWriter();
+        var installer = CreateInstaller(files, commands, output: output);
+
+        var exitCode = await installer.StatusSlackAsync(CommandOptions());
+
+        Assert.Equal(0, exitCode);
+        Assert.Contains("running: yes", output.ToString());
+        var processQuery = Assert.Single(commands.ExecutedCommands, command => IsSlackProcessProbe(command.FileName, command.Args));
+        Assert.Contains(SlackExecutable, processQuery.Args[^1]);
+        Assert.DoesNotContain(commands.ExecutedCommands, command => command.FileName == "tasklist");
+    }
+
+    [Fact]
+    public async Task StopSlack_WithoutInstalledRepoPath_RefusesBroadImageKill()
+    {
+        var files = new FakeFileSystem();
+        var commands = new FakeCommandExecutor
+        {
+            ResponseFactory = (fileName, args) => IsSlackTaskProbe(fileName, args)
+                ? (0, "", "")
+                : (0, "", ""),
+        };
+        files.WriteAllText(SlackLauncher, "@echo off");
+        var error = new StringWriter();
+        var installer = CreateInstaller(files, commands, error: error);
+
+        var exitCode = await installer.StopSlackAsync(CommandOptions());
+
+        Assert.Equal(1, exitCode);
+        Assert.Contains("Cannot safely stop Slack", error.ToString());
+        Assert.DoesNotContain(commands.ExecutedCommands, command => command.FileName is "taskkill" or "tasklist");
+    }
+
+    [Fact]
+    public async Task StopSlack_WhenExactProcessQueryFails_ReturnsFailure()
+    {
+        var files = new FakeFileSystem();
+        var commands = new FakeCommandExecutor
+        {
+            ResponseFactory = (fileName, args) => IsSlackTaskProbe(fileName, args)
+                ? (0, "", "")
+                : IsSlackProcessProbe(fileName, args)
+                    ? (7, "", "CIM unavailable")
+                    : (0, "", "")
+        };
+        files.WriteAllText(SlackLauncher, "@echo off\r\ncd /d /repo\r\n");
+        var installer = CreateInstaller(files, commands);
+
+        var exitCode = await installer.StopSlackAsync(CommandOptions());
+
+        Assert.Equal(7, exitCode);
+        Assert.DoesNotContain(commands.ExecutedCommands, command => command.FileName == "taskkill");
+    }
+
+    [Fact]
+    public async Task RestartSlack_WhenStopFails_DoesNotStartAnotherProcess()
+    {
+        var files = new FakeFileSystem();
+        var launched = new List<ProcessStartInfo>();
+        files.WriteAllText(SlackLauncher, "@echo off");
+        var commands = new FakeCommandExecutor
+        {
+            ResponseFactory = (fileName, args) => IsSlackTaskProbe(fileName, args)
+                ? (0, "", "")
+                : (0, "", ""),
+        };
+        var installer = CreateInstaller(files, commands, processLauncher: info =>
+        {
+            launched.Add(info);
+            return null;
+        });
+
+        var exitCode = await installer.RestartSlackAsync(CommandOptions());
+
+        Assert.Equal(1, exitCode);
+        Assert.Empty(launched);
+    }
+
+    [Fact]
+    public async Task RestartSlack_WhenCancelledAfterEndingTask_AttemptsNonCancellableStart()
+    {
+        var files = new FakeFileSystem();
+        files.WriteAllText(SlackLauncher, "@echo off\r\ncd /d /repo\r\npackages\\go\\mohist-slack\\bin\\mohist-slack.exe\r\n");
+        files.WriteAllText(SlackMetadata, "{\"backend\":\"scheduled-task\",\"repoRoot\":\"/repo\"}");
+        using var cancellation = new CancellationTokenSource();
+        var processProbeCount = 0;
+        var commands = new FakeCommandExecutor
+        {
+            ResponseFactory = (fileName, args) => IsSlackProcessProbe(fileName, args)
+                ? (++processProbeCount == 1 ? (0, "4321\r\n", "") : (0, "", ""))
+                : (0, "", ""),
+            OnExecute = (fileName, args) =>
+            {
+                if (fileName == "schtasks" && args[0] == "/End") cancellation.Cancel();
+            },
+        };
+        var installer = CreateInstaller(files, commands);
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
+            installer.RestartSlackAsync(CommandOptions(), cancellation.Token));
+
+        Assert.Contains(commands.ExecutedCommands, command => command.FileName == "schtasks" && command.Args[0] == "/Run");
+    }
+
+    [Fact]
+    public async Task RestartSlack_WhenAlreadyCancelled_DoesNotStartStoppedService()
+    {
+        var files = new FakeFileSystem();
+        files.WriteAllText(SlackLauncher, "@echo off\r\ncd /d /repo\r\npackages\\go\\mohist-slack\\bin\\mohist-slack.exe\r\n");
+        files.WriteAllText(SlackMetadata, "{\"backend\":\"scheduled-task\",\"repoRoot\":\"/repo\"}");
+        using var cancellation = new CancellationTokenSource();
+        cancellation.Cancel();
+        var commands = new FakeCommandExecutor();
+        var installer = CreateInstaller(files, commands);
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
+            installer.RestartSlackAsync(CommandOptions(), cancellation.Token));
+
+        Assert.Empty(commands.ExecutedCommands);
+    }
+
+    [Fact]
+    public async Task RestartSlack_WhenStoppedAndCancelledAfterRun_RestoresStoppedState()
+    {
+        var files = new FakeFileSystem();
+        files.WriteAllText(SlackLauncher, "@echo off\r\ncd /d /repo\r\npackages\\go\\mohist-slack\\bin\\mohist-slack.exe\r\n");
+        files.WriteAllText(SlackMetadata, "{\"backend\":\"scheduled-task\",\"repoRoot\":\"/repo\"}");
+        using var cancellation = new CancellationTokenSource();
+        var commands = new FakeCommandExecutor
+        {
+            OnExecute = (fileName, args) =>
+            {
+                if (fileName == "schtasks" && args[0] == "/Run") cancellation.Cancel();
+            },
+        };
+        var installer = CreateInstaller(files, commands);
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
+            installer.RestartSlackAsync(CommandOptions(), cancellation.Token));
+
+        var run = Assert.Single(commands.ExecutedCommands, command => command.FileName == "schtasks" && command.Args[0] == "/Run");
+        var ends = commands.ExecutedCommands.Where(command => command.FileName == "schtasks" && command.Args[0] == "/End").ToArray();
+        Assert.Equal(2, ends.Length);
+        Assert.True(commands.ExecutedCommands.IndexOf(run) < commands.ExecutedCommands.IndexOf(ends[^1]));
+    }
+
     [Theory]
     [InlineData(WindowsServiceTarget.Server)]
     [InlineData(WindowsServiceTarget.Runner)]
