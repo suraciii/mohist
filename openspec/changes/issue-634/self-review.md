@@ -1,120 +1,108 @@
 # Self-Review — Issue 634 plan (re-review)
 
 Reviewer: pi. I re-read the canonical issue body and acceptance criteria, then
-verified the prior review findings against the current `proposal.md`,
-`design.md`, `tasks.json`, and all three capability specs. I also checked the
-current Connection lookup/deletion, ambiguity claim, interaction route, thread
-binding, launch/follow-up, outbox identity, lease, and worker conventions.
+verified every prior must-fix disposition against the current `proposal.md`,
+`design.md`, `tasks.json`, all three capability specs, and the relevant current
+Connection-store, lease, thread-binding, interaction-route, outbox, launch, and
+recovery conventions.
 
-## Verdict: FAIL
+## Verdict: PASS
 
-MF-1 through MF-7 are correctly disposed in the plan text, and the latest MF-7
-classification change introduced no must-fix regression. One codebase-consistency
-problem prevents the plan from actually satisfying issue Acceptance Criterion
-#4: its prescribed selected-Connection lookup cannot detect a soft-deleted
-Connection, so the required `unavailable` branch is unreachable as written.
+No must-fix problem remains. The prior MF-8 failure is correctly disposed, the
+fix matches the current codebase's soft-delete semantics, and it introduces no
+must-fix regression. The plan is ready to build.
 
 ## Must-fix findings
 
-### MF-8 — The prescribed lookup cannot recognize a deleted selected Connection
-
-Issue Acceptance Criterion #4 requires **“selected Connection 缺失或 lease
-失效返回 unavailable”**. The corrected plan now intends to satisfy that rule by
-calling the “normal project-scoped”
-`AgentConnectionStore.GetAsync(ChosenProjectId, ChosenConnectionId)` and treating
-a null result as absent/deleted:
-
-- `design.md:257-264`
-- `specs/slack-agent-selection-action/spec.md:46-64`
-- T-003 in `tasks.json:54-65`
-
-That approach is inconsistent with the current store semantics. Connection
-deletion is soft deletion: `AgentConnectionStore.DeleteAsync` sets
-`DeletedAt` (`packages/server/src/Mohist.Server/Agent/Services/AgentConnectionStore.cs:378-389`).
-But `AgentConnectionStore.GetAsync` queries only by Project and id and does not
-filter `DeletedAt` (`AgentConnectionStore.cs:58-67`). Therefore a Connection
-deleted after chooser render still resolves as a non-null `AgentConnection`.
-The plan's stated “null means absent or deleted” invariant is false.
-
-Concrete failure case: chooser candidate `(ProjectB, ConnectionB)` is durably
-snapshotted, then `ConnectionB` is deleted before click. The cleanup removes its
-lease and thread mappings and stamps `DeletedAt`, but `GetAsync(ProjectB,
-ConnectionB)` still returns the row. The service does not enter the planned
-“deleted selected Connection → unavailable” branch; it proceeds to another
-classification, most likely lease-unavailable. Although the resulting broad
-state may still be `unavailable`, the deterministic deleted-Connection
-criterion and its prescribed resolution boundary are not actually implemented,
-and a deleted row with any surviving/fake lease context could proceed farther
-than the issue permits.
-
-The plan must specify a deletion-aware project-scoped resolution, for example
-an active-only lookup or an explicit `DeletedAt` check, and the deleted-selected-
-Connection deterministic test must exercise a soft-deleted row rather than a
-physically absent row. This is must-fix because leaving the plan unchanged makes
-its explicit implementation approach incapable of reliably enforcing issue AC
-#4's selected-Connection-missing outcome.
+None.
 
 ## Previous finding dispositions
 
-- **MF-1 — more than five candidates:** fixed. Two-to-five renders controls plus
-  readable text; more than five renders one non-interactive re-mention fallback
-  with no truncation, auto-selection, or pagination.
-- **MF-2 — selected Connection used prompt-owner lease:** fixed. The selected
-  target resolves and validates its own current lease.
-- **MF-3 — validity and retention bounds:** fixed. The plan uses five minutes
-  and the existing Slack event reconciliation window.
-- **MF-4 — prompt-owner current-policy reauthorization:** fixed. Both roles are
-  authorized before winner commit under their respective current lease context.
-- **MF-5 — cross-Project ownership:** fixed. Complete `(ProjectId,
-  ConnectionId)` references survive snapshot, signing, lookup, commit,
-  dispatch, and recovery.
-- **MF-6 — explicit existing-thread routing:** fixed. The plan distinguishes
-  bound follow-up from unbound launch-and-bind under the retained thread anchor.
-- **MF-7 — deleted/missing Connection outcome taxonomy:** fixed in the artifacts.
-  The issue-required `unavailable` classification now appears consistently in
-  proposal, design, action spec, and T-003. MF-8 is not a taxonomy regression;
-  it is the codebase mismatch that makes the corrected branch unreachable for
-  the repository's actual soft-delete behavior.
+- **MF-1 — more than five candidates:** fixed. Two-to-five candidates render
+  signed controls plus readable text; more than five renders exactly one
+  non-interactive re-mention fallback with no truncation, automatic choice, or
+  pagination.
+- **MF-2 — selected Connection used the prompt-owner lease:** fixed. The chosen
+  target resolves and validates its own current lease under
+  `connection:{ChosenProjectId}:{ChosenConnectionId}`, and the prompt-owner
+  lease is not accepted as a substitute.
+- **MF-3 — validity and retention bounds:** fixed. The action lifetime is the
+  issue-pinned five minutes, and finished records use the existing
+  `SlackProviderOptions.SlackEventRetentionWindow` rather than a new long-term
+  retention regime.
+- **MF-4 — prompt-owner current-policy reauthorization:** fixed. Before winner
+  commit, both prompt owner and selected Connection are re-authorized under
+  their respective current lease contexts and mutable policy state; either
+  denial is resource-free and visible.
+- **MF-5 — cross-Project ownership:** fixed. Candidate identity remains the
+  complete `(ProjectId, ConnectionId)` pair through discovery, durable
+  snapshot, signing, lookup, lease targeting, CAS, dispatch, identity
+  allocation, persistence, and recovery.
+- **MF-6 — explicit existing-thread routing:** fixed. The durable ambiguity and
+  dispatch kinds distinguish root launch, selected bound follow-up, selected
+  unbound launch-and-bind under the retained thread anchor, and multi-bound
+  reply follow-up.
+- **MF-7 — missing/deleted selected Connection taxonomy:** fixed. An absent or
+  soft-deleted selected Connection is `unavailable`; stale/no-longer-valid is
+  reserved for an active Connection whose snapshotted workspace or required
+  thread facts changed.
+- **MF-8 — soft-deleted selected Connection lookup:** fixed. The plan now calls
+  `AgentConnectionStore.GetAsync(ChosenProjectId, ChosenConnectionId)` and
+  explicitly rejects `null` or non-null `DeletedAt` before binding, lease,
+  policy, executability, or commit checks (`design.md:254-274`,
+  `specs/slack-agent-selection-action/spec.md:44-71`, T-003 in
+  `tasks.json:54-65`). This matches the repository: `GetAsync` does not filter
+  `DeletedAt` (`packages/server/src/Mohist.Server/Agent/Services/AgentConnectionStore.cs:58-67`),
+  while `DeleteAsync` stamps `DeletedAt` (`AgentConnectionStore.cs:378-391`).
+  T-003 also requires a real soft-delete test and surviving fake downstream
+  artifacts, proving the deletion check's precedence rather than merely
+  testing a physically absent row.
 
 ## Re-review checks
 
-- **Previous dispositions:** checked every prior must-fix finding. MF-1 through
-  MF-7 are represented consistently and no prior must-fix remains textually
-  undisposed.
-- **Regression check:** checked the MF-7 edits across proposal, design, action
-  spec, and T-003. No new coverage, authorization, dispatch, recovery, or
-  retention regression was introduced.
-- **Pre-existing problem missed earlier:** MF-8 meets the must-fix bar because
-  it invalidates the exact implementation mechanism added to satisfy issue AC
-  #4. The previous review verified outcome taxonomy but incorrectly assumed
-  the named `GetAsync` returned null for deleted rows; tracing the current
-  `DeleteAsync` and `GetAsync` implementations exposes the soft-delete mismatch.
-- **Task breakdown:** ordering is otherwise sound: T-003 depends on the launch
-  extraction and durable chooser state, and T-004 depends on committed live-path
-  dispatch. Acceptance criteria are deterministic and broadly verifiable.
+- **Every prior finding:** checked. MF-1 through MF-8 are disposed consistently
+  across proposal, design, capability specs, and task acceptance criteria.
+- **Fix correctness:** checked. MF-8's explicit `DeletedAt` predicate reaches
+  the issue-required `unavailable` outcome under the codebase's actual normal
+  deletion path and closes the concrete failure case from the prior review.
+- **Regression check:** checked. The MF-8 edits only sharpen selected-Connection
+  resolution and deterministic coverage. They do not weaken candidate snapshot
+  validation, cross-Project attribution, per-Connection lease/policy checks,
+  dispatch classification, single-winner CAS, recovery, or retention.
+- **Task breakdown:** checked. T-001 extracts the reusable launch boundary;
+  T-002 creates the durable chooser authority; T-003 depends on both and adds
+  acceptance, CAS, and live dispatch; T-004 depends on T-003 and adds hosted
+  recovery/cleanup. Each task has deterministic acceptance criteria and named
+  regression suites.
+- **Artifact integrity:** checked. `tasks.json` parses, the task spec anchors
+  name existing requirement headings, and `git diff --check` reports no
+  whitespace errors in the post-review plan changes.
+- **Newly found must-fix problems:** none.
 
 ## Observations
 
-1. The action spec says the signed payload binds the chooser message identity,
-   while Design Decision 3 signs the original message identity and checks the
-   chooser presentation identity separately via the acknowledged outbox
-   provider identity. The security property is planned, but the terminology
-   should be kept precise during implementation.
-2. The additive migration needs concrete defaults or a legacy sentinel for
-   existing pre-fact rows. T-002 requires additive migration tests and blocks
-   execution from incomplete claims, so this is an implementation detail rather
-   than a separate must-fix omission.
-3. The concurrency spec says “two users” click different candidates, but actor
-   binding permits only the original sender. The meaningful winner race is
-   same-actor concurrent clicks plus redelivery/failover; those cases are also
-   required by the plan.
-4. T-003 asks for restart-recovery coverage although the hosted obligation
-   worker arrives in dependent T-004. The dispatch core can be tested directly
-   in T-003, but task completion should not imply the worker already exists.
-5. The plan retains finer visible outcomes for disabled Connections and
-   Agent-not-ready setup nudges instead of naming every non-executable case
-   literally `unavailable`. These remain resource-free and fit existing product
-   behavior; the issue only pins the exact `unavailable` result for missing
-   selected Connections and invalid selected leases.
+1. The action spec describes the signed payload as binding the chooser message
+   identity, while Design Decision 3 signs the original message identity and
+   enforces chooser presentation identity separately through the acknowledged
+   outbox `ProviderMessageIdentity`. The security property is covered, but
+   implementation and documentation should preserve this terminology
+   distinction.
+2. The additive migration will need concrete defaults or a legacy sentinel for
+   existing pre-fact rows. T-002 already requires additive migration coverage
+   and forbids incomplete claims from executing, so this is an implementation
+   detail rather than a missing issue requirement.
+3. The concurrency attribution spec says “two users” click different choices,
+   although actor binding permits only the original sender. The meaningful
+   winner race is same-actor concurrent clicks plus interaction redelivery and
+   failover; those cases are also explicitly required.
+4. T-003 includes direct restart-recovery coverage even though the hosted
+   obligation worker is delivered by dependent T-004. The dispatch/recovery
+   core can be tested directly in T-003; task completion should not imply that
+   the hosted worker already exists.
+5. Disabled Connections and Agent-not-ready cases retain the existing
+   `connection_disabled` and setup-nudge presentations rather than naming every
+   non-executable case literally `unavailable`. They remain visible,
+   resource-free outcomes, while the issue's exact `unavailable` requirements
+   for absent/deleted Connections and invalid selected leases are explicit.
 
-<promise>FAIL</promise>
+<promise>PASS</promise>
