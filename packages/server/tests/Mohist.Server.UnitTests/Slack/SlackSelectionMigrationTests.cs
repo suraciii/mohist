@@ -56,6 +56,32 @@ public sealed class SlackSelectionMigrationTests
         Assert.Null(migrated.DispatchKind);
         Assert.Null(migrated.SelectionSessionId);
 
+        var redelivery = await store.TryClaimAsync(
+            migrated.ProjectId,
+            migrated.WorkspaceTeamId,
+            migrated.ConversationId,
+            migrated.MessageTs,
+            migrated.ThreadTs,
+            migrated.WinningConnectionId,
+            [
+                new SlackSelectionCandidateReference(
+                    migrated.ProjectId,
+                    migrated.WinningConnectionId,
+                    "U_LEGACY_WINNER"),
+                new SlackSelectionCandidateReference(
+                    migrated.ProjectId,
+                    "other",
+                    "U_LEGACY_OTHER"),
+            ],
+            "U_LEGACY_ACTOR",
+            "current redelivery text",
+            "[]",
+            SlackAmbiguityKinds.RootMultiMention);
+        Assert.False(redelivery.Claimed);
+        Assert.False(redelivery.HasCompleteSelectionFacts);
+        Assert.Equal(SlackAmbiguityKinds.Legacy, redelivery.Snapshot.AmbiguityKind);
+        Assert.Equal("[]", redelivery.Snapshot.CandidateReferencesJson);
+
         await Assert.ThrowsAsync<ArgumentException>(() => store.TryDecideAsync(
             migrated.WorkspaceTeamId,
             migrated.ConversationId,

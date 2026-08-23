@@ -150,7 +150,9 @@ public sealed class SlackAmbiguousPromptStore : IScopedService
             .SingleAsync(ct);
 
         var claimed = inserted > 0;
-        if (!claimed && string.Equals(existing.WinningConnectionId, winningConnectionId, StringComparison.Ordinal))
+        if (!claimed
+            && existing.HasCompleteSelectionFacts
+            && string.Equals(existing.WinningConnectionId, winningConnectionId, StringComparison.Ordinal))
         {
             var deliveryExists = await db.SlackOutboxRows.AsNoTracking()
                 .AnyAsync(row => row.ProjectId == existing.ProjectId
@@ -464,6 +466,26 @@ public sealed class SlackAmbiguousPromptStore : IScopedService
         try { return JSON.Deserialize<List<string>>(json) ?? []; }
         catch (JsonException) { return Array.Empty<string>(); }
     }
+
+    internal static bool HasCompleteSelectionFacts(SlackAmbiguousPromptSnapshot snapshot)
+    {
+        if (snapshot.AmbiguityKind == SlackAmbiguityKinds.Legacy
+            || string.IsNullOrWhiteSpace(snapshot.SenderSlackUserId))
+            return false;
+        try
+        {
+            var candidates = JSON.Deserialize<List<SlackSelectionCandidateReference>>(
+                snapshot.CandidateReferencesJson);
+            return candidates is { Count: >= 2 }
+                && candidates.All(candidate =>
+                    !string.IsNullOrWhiteSpace(candidate.ProjectId)
+                    && !string.IsNullOrWhiteSpace(candidate.ConnectionId));
+        }
+        catch (JsonException)
+        {
+            return false;
+        }
+    }
 }
 
 public sealed record SlackAmbiguousPromptSnapshot(
@@ -493,7 +515,11 @@ public sealed record SlackAmbiguousPromptSnapshot(
     string? SettleReason,
     DateTimeOffset PromptedAt,
     DateTimeOffset CreatedAt,
-    DateTimeOffset UpdatedAt);
+    DateTimeOffset UpdatedAt)
+{
+    public bool HasCompleteSelectionFacts =>
+        SlackAmbiguousPromptStore.HasCompleteSelectionFacts(this);
+}
 
 public sealed record SlackAmbiguousPromptResult(
     bool Claimed,
@@ -503,6 +529,7 @@ public sealed record SlackAmbiguousPromptResult(
     public string RowId => Snapshot.Id;
     public string WinningConnectionId => Snapshot.WinningConnectionId;
     public string? ThreadTs => Snapshot.ThreadTs;
+    public bool HasCompleteSelectionFacts => Snapshot.HasCompleteSelectionFacts;
 }
 
 public sealed record SlackAmbiguousPromptDecisionResult(

@@ -26,7 +26,8 @@ using Xunit;
 
 namespace Mohist.Server.SpecTests.Specs.Slack;
 
-public sealed partial class SlackMultiAgentIngressSpecs
+[Collection("SharedSlackApi")]
+public sealed partial class SlackMultiAgentIngressSpecs : IAsyncLifetime
 {
     private readonly MohistIntegrationFixture _fixture;
     private readonly Dictionary<string, string> _connectionLeases = new(StringComparer.Ordinal);
@@ -35,6 +36,18 @@ public sealed partial class SlackMultiAgentIngressSpecs
 
     private SlackApiTestScript SlackApi =>
         _fixture.Services.GetRequiredService<SlackApiTestScript>();
+
+    public ValueTask InitializeAsync()
+    {
+        SlackApi.Clear();
+        return ValueTask.CompletedTask;
+    }
+
+    public ValueTask DisposeAsync()
+    {
+        SlackApi.Clear();
+        return ValueTask.CompletedTask;
+    }
 
     [Fact]
     public async Task Multi_bot_mention_starts_no_work_and_prompts_once()
@@ -454,64 +467,70 @@ public sealed partial class SlackMultiAgentIngressSpecs
             actor,
             addAllowlistMember: usesAllowlist);
         SlackApi.Clear();
-        SlackApi.Responder = request => PolicySlackResponse(
-            request,
-            actor,
-            target.WorkspaceTeamId!,
-            memberMode: "regular",
-            conversationMode: "member");
-
-        var suffix = $"{targetRole}-{failure}".Replace('_', '-');
-        var identity = new SlackMessageIdentity(
-            promptOwner.WorkspaceTeamId!,
-            $"C-selection-policy-{suffix}",
-            $"1710000000.{Math.Abs(suffix.GetHashCode()):D6}");
-        await PostChannelAsync(
-            promptOwner,
-            identity.ConversationId,
-            identity.MessageTs,
-            null,
-            [promptOwner.BotUserId!, selected.BotUserId!],
-            $"<@{promptOwner.BotUserId}> <@{selected.BotUserId}> mutable policy",
-            actor);
-        var choice = await DeliverChooserAndGetChoiceAsync(
-            promptOwner,
-            identity,
-            selected.ProjectId,
-            selected.Id,
-            $"{identity.MessageTs}1");
-
-        if (failure == "allowlist_removed")
+        try
         {
-            await RemoveAllowedMemberAsync(target, actor);
-        }
-        else
-        {
-            var memberMode = failure switch
-            {
-                "member_lost" => "deleted",
-                "member_unverifiable" => "unverifiable",
-                _ => "regular",
-            };
-            var conversationMode = failure switch
-            {
-                "channel_lost" => "not_member",
-                "conversation_unverifiable" => "unverifiable",
-                _ => "member",
-            };
-            SlackApi.Clear();
             SlackApi.Responder = request => PolicySlackResponse(
                 request,
                 actor,
                 target.WorkspaceTeamId!,
-                memberMode,
-                conversationMode);
-        }
+                memberMode: "regular",
+                conversationMode: "member");
 
-        var result = await PostSelectionAsync(promptOwner, choice, actor);
-        Assert.Equal("unauthorized", result.GetProperty("state").GetString());
-        await AssertPendingWithoutOriginalResourcesAsync(identity, selected);
-        SlackApi.Clear();
+            var suffix = $"{targetRole}-{failure}".Replace('_', '-');
+            var identity = new SlackMessageIdentity(
+                promptOwner.WorkspaceTeamId!,
+                $"C-selection-policy-{suffix}",
+                $"1710000000.{Math.Abs(suffix.GetHashCode()):D6}");
+            await PostChannelAsync(
+                promptOwner,
+                identity.ConversationId,
+                identity.MessageTs,
+                null,
+                [promptOwner.BotUserId!, selected.BotUserId!],
+                $"<@{promptOwner.BotUserId}> <@{selected.BotUserId}> mutable policy",
+                actor);
+            var choice = await DeliverChooserAndGetChoiceAsync(
+                promptOwner,
+                identity,
+                selected.ProjectId,
+                selected.Id,
+                $"{identity.MessageTs}1");
+
+            if (failure == "allowlist_removed")
+            {
+                await RemoveAllowedMemberAsync(target, actor);
+            }
+            else
+            {
+                var memberMode = failure switch
+                {
+                    "member_lost" => "deleted",
+                    "member_unverifiable" => "unverifiable",
+                    _ => "regular",
+                };
+                var conversationMode = failure switch
+                {
+                    "channel_lost" => "not_member",
+                    "conversation_unverifiable" => "unverifiable",
+                    _ => "member",
+                };
+                SlackApi.Clear();
+                SlackApi.Responder = request => PolicySlackResponse(
+                    request,
+                    actor,
+                    target.WorkspaceTeamId!,
+                    memberMode,
+                    conversationMode);
+            }
+
+            var result = await PostSelectionAsync(promptOwner, choice, actor);
+            Assert.Equal("unauthorized", result.GetProperty("state").GetString());
+            await AssertPendingWithoutOriginalResourcesAsync(identity, selected);
+        }
+        finally
+        {
+            SlackApi.Clear();
+        }
     }
 
     [Fact]
@@ -1167,6 +1186,83 @@ public sealed partial class SlackMultiAgentIngressSpecs
             && string.Equals(candidate.ChosenConnectionId, selectedConnectionId, StringComparison.Ordinal));
         Assert.Equal(threadTs, choice.ThreadTs);
         return choice;
+    }
+
+    [Fact]
+    public async Task Migrated_legacy_claim_with_lost_delivery_is_settled_without_rendering_a_stale_chooser()
+    {
+        var promptOwner = await CreateConnectionAsync(
+            "legacy-redelivery-owner",
+            "T-legacy-redelivery",
+            "U_LEGACY_REDELIVERY",
+            "A_LEGACY_REDELIVERY_OWNER");
+        var selected = await CreateConnectionAsync(
+            "legacy-redelivery-selected",
+            "T-legacy-redelivery",
+            "U_LEGACY_SELECTED",
+            "A_LEGACY_REDELIVERY_SELECTED");
+        var identity = new SlackMessageIdentity(
+            promptOwner.WorkspaceTeamId!,
+            "C-legacy-redelivery",
+            "1710000000.040001");
+        var now = _fixture.TimeProvider.GetUtcNow();
+
+        await using (var scope = _fixture.Services.CreateAsyncScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<MohistDbContext>();
+            db.SlackAmbiguousPrompts.Add(new SlackAmbiguousPromptRow
+            {
+                Id = $"slkamb_{Guid.NewGuid():N}",
+                ProjectId = promptOwner.ProjectId,
+                WorkspaceTeamId = identity.WorkspaceTeamId,
+                ConversationId = identity.ConversationId,
+                MessageTs = identity.MessageTs,
+                WinningConnectionId = promptOwner.Id,
+                MentionedConnectionIdsJson = JSON.Serialize(new[] { promptOwner.Id, selected.Id }),
+                SenderSlackUserId = string.Empty,
+                TaskText = string.Empty,
+                FilesJson = "[]",
+                AmbiguityKind = SlackAmbiguityKinds.Legacy,
+                CandidateReferencesJson = "[]",
+                SelectionState = SlackSelectionStates.Pending,
+                PromptedAt = now.AddMinutes(-1),
+                CreatedAt = now.AddMinutes(-1),
+                UpdatedAt = now.AddMinutes(-1),
+            });
+            await db.SaveChangesAsync();
+        }
+
+        var result = await PostChannelAsync(
+            promptOwner,
+            identity.ConversationId,
+            identity.MessageTs,
+            null,
+            [promptOwner.BotUserId!, selected.BotUserId!],
+            $"<@{promptOwner.BotUserId}> <@{selected.BotUserId}> current redelivery",
+            promptOwner.OwnerSlackUserId);
+        Assert.Equal("ambiguous", result.GetProperty("kind").GetString());
+        Assert.Contains("older Agent selection", result.GetProperty("reason").GetString());
+
+        await using var verify = _fixture.Services.CreateAsyncScope();
+        var dbVerify = verify.ServiceProvider.GetRequiredService<MohistDbContext>();
+        var claim = await dbVerify.SlackAmbiguousPrompts.SingleAsync(row =>
+            row.WorkspaceTeamId == identity.WorkspaceTeamId
+            && row.ConversationId == identity.ConversationId
+            && row.MessageTs == identity.MessageTs);
+        Assert.Equal(SlackSelectionStates.Settled, claim.SelectionState);
+        Assert.Equal("legacy_missing_selection_facts", claim.SettleReason);
+        Assert.Empty(await dbVerify.SlackOutboxRows.Where(row =>
+            row.DispatchRef == SlackAmbiguousPromptStore.PromptDispatchRef(
+                identity.WorkspaceTeamId,
+                identity.ConversationId,
+                identity.MessageTs)).ToListAsync());
+        Assert.Empty(await dbVerify.AgentJobs.Where(row =>
+            row.ProjectId == promptOwner.ProjectId || row.ProjectId == selected.ProjectId).ToListAsync());
+        Assert.Empty(await dbVerify.AgentSessions.Where(row =>
+            row.LabelConnectionId == promptOwner.Id || row.LabelConnectionId == selected.Id).ToListAsync());
+        Assert.Empty(await dbVerify.SlackProviderInboxRows.Where(row =>
+            row.ConversationId == identity.ConversationId
+            && row.SlackMessageIdentity.EndsWith(identity.MessageTs)).ToListAsync());
     }
 
     private async Task<JsonElement> PostSelectionAsync(

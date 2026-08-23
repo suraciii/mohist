@@ -420,6 +420,20 @@ public static partial class SlackConnectionRoutes
             body.ThreadTs, connection.Id, candidateReferences,
             req.SenderSlackUserId, taskText, filesJson, ambiguityKind, ct);
 
+        if (!claim.HasCompleteSelectionFacts)
+        {
+            if (claim.Snapshot.SelectionState == SlackSelectionStates.Pending)
+                await req.AmbiguousPrompts.TrySettleAsync(
+                    claim.RowId,
+                    SlackSelectionStates.Pending,
+                    "legacy_missing_selection_facts",
+                    ct);
+            return ApiResults.Ok(new
+            {
+                kind = "ambiguous",
+                reason = "This older Agent selection cannot be retried. Re-mention a single Bot.",
+            });
+        }
         if (!claim.Claimed)
             return ApiResults.Ok(new { kind = "ambiguous", reason = "Another Bot is responding.", winner = claim.WinningConnectionId });
         if (claim.Snapshot.SelectionState != SlackSelectionStates.Pending)
@@ -479,6 +493,16 @@ public static partial class SlackConnectionRoutes
             JSON.Serialize(body.Files),
             ambiguityKind,
             ct);
+        if (!claim.HasCompleteSelectionFacts)
+        {
+            if (claim.Snapshot.SelectionState == SlackSelectionStates.Pending)
+                await req.AmbiguousPrompts.TrySettleAsync(
+                    claim.RowId,
+                    SlackSelectionStates.Pending,
+                    "legacy_missing_selection_facts",
+                    ct);
+            return ApiResults.Ok(new { kind = "ignored" });
+        }
         if (!claim.Claimed || claim.Snapshot.SelectionState != SlackSelectionStates.Pending)
             return ApiResults.Ok(new { kind = "ignored" });
 

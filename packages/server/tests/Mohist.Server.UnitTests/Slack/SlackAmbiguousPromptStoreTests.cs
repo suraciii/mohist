@@ -44,12 +44,19 @@ public sealed class SlackAmbiguousPromptStoreTests
         const string messageTs = "2.001";
         const string connectionId = "connection-a";
 
+        var candidates = new[]
+        {
+            new SlackSelectionCandidateReference("project-a", connectionId, "U_A"),
+            new SlackSelectionCandidateReference("project-a", "connection-b", "U_B"),
+        };
         await store.TryClaimAsync(
             "project-a", teamId, conversationId, messageTs, null,
-            connectionId, [connectionId, "connection-b"]);
+            connectionId, candidates, "U_ACTOR", "do work", "[]",
+            SlackAmbiguityKinds.RootMultiMention);
         var retryBeforeDelivery = await store.TryClaimAsync(
             "project-a", teamId, conversationId, messageTs, null,
-            connectionId, [connectionId, "connection-b"]);
+            connectionId, candidates, "U_ACTOR", "do work", "[]",
+            SlackAmbiguityKinds.RootMultiMention);
         Assert.True(retryBeforeDelivery.Claimed);
 
         await using (var db = database.CreateContext())
@@ -73,7 +80,8 @@ public sealed class SlackAmbiguousPromptStoreTests
 
         var retryAfterDelivery = await store.TryClaimAsync(
             "project-a", teamId, conversationId, messageTs, null,
-            connectionId, [connectionId, "connection-b"]);
+            connectionId, candidates, "U_ACTOR", "do work", "[]",
+            SlackAmbiguityKinds.RootMultiMention);
         Assert.False(retryAfterDelivery.Claimed);
     }
 
