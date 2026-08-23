@@ -8,7 +8,9 @@ function installMatchMediaStub(impl: (query: string) => MediaQueryList) {
 
 describe('useMediaQuery', () => {
   afterEach(() => {
-    setMatchesForTest(null)
+    act(() => {
+      setMatchesForTest(null)
+    })
   })
 
   it('reads the initial value from the test seam when set before render', () => {
