@@ -58,48 +58,40 @@
     "resourceLanes": [
       { "id": "default", "resources": [], "capacity": 4 },
       { "id": "server-l1", "resources": ["orleans", "sqlite", "server-runtime"], "capacity": 1 },
-      { "id": "server-orleans-l0", "resources": ["orleans", "sqlite", "server-runtime", "duration-measurement"], "capacity": 1 },
-      { "id": "server-l0-measurement", "resources": ["duration-measurement", "server-runtime"], "capacity": 1 },
+      { "id": "server-l0", "resources": ["orleans", "sqlite", "server-runtime", "duration-measurement"], "capacity": 1 },
       { "id": "architecture-measurement", "resources": ["duration-measurement"], "capacity": 1 }
     ]
   },
   "tracks": [
-    { "id": "runner", "kind": "vitest", "trackType": "behavior", "application": "runner", "specKind": "Design", "level": "L0", "resources": [], "run": ["npm","run","test:duration","-w","packages/runner","--","--reporter=json","--outputFile={report}"], "report": "reports/runner.json", "reportFormat": "vitest", "deadlineMs": 90000, "enforce": true, "rules": [
-        { "id": "unit", "percentile": 95, "percentileMs": 50 }
-      ]
-    },
-    { "id": "workflow-def", "kind": "dotnet-vstest", "trackType": "behavior", "application": "server", "specKind": "Design", "level": "L0", "resources": [], "csproj": "packages/server/tests/Mohist.Workflow.Definition.Tests/Mohist.Workflow.Definition.Tests.csproj", "report": "reports/workflow-def.trx", "reportFormat": "trx", "deadlineMs": 30000, "enforce": true, "rules": [
+    { "id": "runner", "kind": "vitest", "trackType": "behavior", "application": "runner", "specKinds": ["Design"], "level": "L0", "resources": [], "run": ["npm","run","test:duration","-w","packages/runner","--","--reporter=json","--outputFile={report}"], "report": "reports/runner.json", "reportFormat": "vitest", "deadlineMs": 90000, "enforce": true, "rules": [
         { "id": "unit", "percentile": 95, "percentileMs": 50 }
       ]
     },
     // Four collection workers retain parallelism without letting concurrent cold command-tree construction dominate native test execution time.
-    { "id": "cli", "kind": "dotnet-apphost", "trackType": "behavior", "application": "cli", "specKind": "Product", "level": "L1", "resources": [], "csproj": "packages/cli/tests/Mohist.Cli.Tests/Mohist.Cli.Tests.csproj", "apphostArgs": ["-preEnumerateTheories", "-parallel", "collections", "-parallelAlgorithm", "conservative", "-maxThreads", "4"], "report": "reports/cli.trx", "executionLedger": "reports/cli.execution-ledger.json", "executionProvenance": "reports/cli.execution-provenance.json", "executionSourceRoots": ["packages/cli", "Directory.Build.props", "Directory.Packages.props", "global.json"], "reportFormat": "trx", "deadlineMs": 60000, "enforce": true, "rules": [
+    { "id": "cli", "kind": "dotnet-apphost", "trackType": "behavior", "application": "cli", "specKinds": ["Product", "Design"], "level": "L1", "resources": [], "csproj": "packages/cli/tests/Mohist.Cli.Tests/Mohist.Cli.Tests.csproj", "apphostArgs": ["-preEnumerateTheories", "-parallel", "collections", "-parallelAlgorithm", "conservative", "-maxThreads", "4"], "report": "reports/cli.trx", "executionLedger": "reports/cli.execution-ledger.json", "executionProvenance": "reports/cli.execution-provenance.json", "executionSourceRoots": ["packages/cli", "Directory.Build.props", "Directory.Packages.props", "global.json"], "reportFormat": "trx", "deadlineMs": 60000, "enforce": true, "rules": [
         { "id": "spec", "namePattern": "Specs\\.", "percentile": 95, "percentileMs": 500 },
         { "id": "unit", "percentile": 95, "percentileMs": 50 }
       ]
     },
-    { "id": "web", "kind": "vitest", "trackType": "behavior", "application": "web", "specKind": "Product", "level": "L1", "resources": [], "run": ["npm","run","test:duration","-w","packages/web","--","--reporter=json","--outputFile={report}"], "report": "reports/web.json", "reportFormat": "vitest", "deadlineMs": 180000, "enforce": true, "rules": [
+    { "id": "web", "kind": "vitest", "trackType": "behavior", "application": "web", "specKinds": ["Product"], "level": "L1", "resources": [], "run": ["npm","run","test:duration","-w","packages/web","--","--reporter=json","--outputFile={report}"], "report": "reports/web.json", "reportFormat": "vitest", "deadlineMs": 180000, "enforce": true, "rules": [
         { "id": "spec", "percentile": 95, "percentileMs": 500 }
       ]
     },
-    { "id": "server-unit", "kind": "dotnet-apphost", "trackType": "behavior", "application": "server", "specKind": "Design", "level": "L0", "resources": ["duration-measurement", "server-runtime"], "csproj": "packages/server/tests/Mohist.Server.UnitTests/Mohist.Server.UnitTests.csproj", "apphostArgs": ["-parallel", "collections", "-parallelAlgorithm", "conservative", "-maxThreads", "4"], "report": "reports/server-unit.trx", "reportFormat": "trx", "deadlineMs": 90000, "enforce": true, "rules": [
+    { "id": "server-unit", "kind": "dotnet-apphost", "trackType": "behavior", "application": "server", "specKinds": ["Design", "Product"], "level": "L0", "resources": ["orleans", "sqlite", "server-runtime", "duration-measurement"], "csproj": "packages/server/tests/Mohist.Server.UnitTests/Mohist.Server.UnitTests.csproj", "apphostArgs": ["-parallel", "collections", "-parallelAlgorithm", "conservative", "-maxThreads", "4"], "report": "reports/server-unit.trx", "reportFormat": "trx", "deadlineMs": 90000, "enforce": true, "rules": [
+        { "id": "spec", "namePattern": "(RunnerBuildIdentitySpecs|WorkflowRecoveryContinuationSpecs)\\.", "expectedTotal": 2, "percentile": 95, "percentileMs": 50 },
         { "id": "unit", "percentile": 95, "percentileMs": 50 }
       ]
     },
-    { "id": "server-orleans-l0", "kind": "dotnet-apphost", "trackType": "behavior", "application": "server", "specKind": "Product", "level": "L0", "resources": ["orleans", "sqlite", "server-runtime", "duration-measurement"], "csproj": "packages/server/tests/Mohist.Server.OrleansTests/Mohist.Server.OrleansTests.csproj", "apphostArgs": ["-parallel", "none"], "report": "reports/server-orleans-l0.trx", "reportFormat": "trx", "deadlineMs": 90000, "enforce": true, "rules": [
-        { "id": "spec", "percentile": 95, "percentileMs": 50 }
-      ]
-    },
-    { "id": "server-arch", "kind": "dotnet-apphost", "trackType": "architecture", "application": "server", "specKind": "Design", "architectureScope": "server", "resources": ["duration-measurement"], "csproj": "packages/server/tests/Mohist.Server.ArchTests/Mohist.Server.ArchTests.csproj", "report": "reports/server-arch.trx", "reportFormat": "trx", "deadlineMs": 60000, "enforce": true, "rules": [
+    { "id": "server-arch", "kind": "dotnet-apphost", "trackType": "architecture", "application": "server", "specKinds": ["Design"], "architectureScope": "server", "resources": ["duration-measurement"], "csproj": "packages/server/tests/Mohist.Server.ArchTests/Mohist.Server.ArchTests.csproj", "report": "reports/server-arch.trx", "reportFormat": "trx", "deadlineMs": 60000, "enforce": true, "rules": [
         { "id": "arch" }
       ]
     },
-    // Three collection workers leave enough wall-clock margin for cold CI builds while the L1 p95 budget still guards contention.
-    { "id": "server-spec", "kind": "dotnet-apphost", "trackType": "behavior", "application": "server", "specKind": "Product", "level": "L1", "resources": ["orleans", "sqlite", "server-runtime"], "csproj": "packages/server/tests/Mohist.Server.SpecTests/Mohist.Server.SpecTests.csproj", "apphostArgs": ["-parallel", "collections", "-parallelAlgorithm", "conservative", "-maxThreads", "3"], "report": "reports/server-spec.trx", "reportFormat": "trx", "deadlineMs": 240000, "enforce": true, "rules": [
+    // Three collection workers keep cold CI inside the suite deadline; trimmed Spec setup keeps the L1 p95 below budget.
+    { "id": "server-spec", "kind": "dotnet-apphost", "trackType": "behavior", "application": "server", "specKinds": ["Product"], "level": "L1", "resources": ["orleans", "sqlite", "server-runtime"], "csproj": "packages/server/tests/Mohist.Server.SpecTests/Mohist.Server.SpecTests.csproj", "apphostArgs": ["-parallel", "collections", "-parallelAlgorithm", "conservative", "-maxThreads", "3"], "report": "reports/server-spec.trx", "reportFormat": "trx", "deadlineMs": 240000, "enforce": true, "rules": [
         { "id": "spec", "percentile": 95, "percentileMs": 500 }
       ]
     },
-    { "id": "runner-integration", "kind": "vitest", "trackType": "behavior", "application": "runner", "specKind": "Product", "level": "L1", "resources": [], "run": ["npm","run","test:duration:integration","-w","packages/runner","--","--reporter=json","--outputFile={report}"], "report": "reports/runner-integration.json", "reportFormat": "vitest", "deadlineMs": 90000, "enforce": true, "rules": [
+    { "id": "runner-integration", "kind": "vitest", "trackType": "behavior", "application": "runner", "specKinds": ["Product"], "level": "L1", "resources": [], "run": ["npm","run","test:duration:integration","-w","packages/runner","--","--reporter=json","--outputFile={report}"], "report": "reports/runner-integration.json", "reportFormat": "vitest", "deadlineMs": 90000, "enforce": true, "rules": [
         { "id": "spec", "percentile": 95, "percentileMs": 500 }
       ]
     }

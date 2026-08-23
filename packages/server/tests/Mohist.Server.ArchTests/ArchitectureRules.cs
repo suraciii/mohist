@@ -685,6 +685,7 @@ public class ArchitectureRules
             "MohistIntegrationFixture",
             "IsolatedMohistIntegrationFixture",
             "InProcessTestCluster",
+            "AssemblyFixture",
         };
 
         var violations = EmbeddedSources("TestSources/Mohist.Server.UnitTests/")
@@ -700,7 +701,7 @@ public class ArchitectureRules
     }
 
     [Fact]
-    public void ServerOrleansL0Tests_MustNotStartApplicationHosts()
+    public void ServerOrleansL0Boundary_MustStayInTheUnitAssemblyAndHostFree()
     {
         var forbiddenMarkers = new[]
         {
@@ -711,15 +712,52 @@ public class ArchitectureRules
             "IsolatedMohistIntegrationFixture",
         };
 
-        var violations = EmbeddedSources("TestSources/Mohist.Server.OrleansTests/")
+        const string l0TraitMarker = "[Trait(\"tier\", \"L0\")]";
+        var misplacedSpecs = EmbeddedSources("TestSources/Mohist.Server.SpecTests/Specs/")
+            .Where(source => source.Content.Contains(l0TraitMarker, StringComparison.Ordinal))
+            .Select(source => source.Path)
+            .OrderBy(path => path)
+            .ToList();
+
+        var expectedPaths = new HashSet<string>(StringComparer.Ordinal)
+        {
+            "Mohist.Server.TestSupport/GrainTestConfig.cs",
+            "Mohist.Server.TestSupport/FakePromptLoader.cs",
+            "Mohist.Server.TestSupport/LogicalTestClusterPortAllocator.cs",
+            "Mohist.Server.TestSupport/MigratedSqliteTemplate.cs",
+            "Mohist.Server.TestSupport/WorkflowGrainFixture.cs",
+            "Mohist.Server.UnitTests/Runner/RunnerBuildIdentitySpecs.cs",
+            "Mohist.Server.UnitTests/Support/OrleansL0Collection.cs",
+            "Mohist.Server.UnitTests/Support/OrleansL0WorkflowGrainFixture.cs",
+            "Mohist.Server.UnitTests/Workflow/Grain/WorkflowRecoveryContinuationSpecs.cs",
+        };
+        var boundarySources = EmbeddedSources("TestSources/Mohist.Server.TestSupport/")
+            .Select(source => source with { Path = "Mohist.Server.TestSupport/" + source.Path })
+            .Concat(EmbeddedSources("TestSources/Mohist.Server.UnitTests/")
+                .Select(source => source with { Path = "Mohist.Server.UnitTests/" + source.Path }))
+            .Where(source => expectedPaths.Contains(source.Path))
+            .ToList();
+        var missingSources = expectedPaths
+            .Except(boundarySources.Select(source => source.Path), StringComparer.Ordinal)
+            .OrderBy(path => path)
+            .ToList();
+        var violations = boundarySources
             .Where(source => forbiddenMarkers.Any(source.Content.Contains))
             .Select(source => source.Path)
             .OrderBy(path => path)
             .ToList();
 
         Assert.True(
+            misplacedSpecs.Count == 0,
+            "Server Orleans L0 specs must live in the UnitTests assembly. Violations: " +
+            string.Join(", ", misplacedSpecs));
+        Assert.True(
+            missingSources.Count == 0,
+            "Server Orleans L0 architecture coverage is missing fixture sources: " +
+            string.Join(", ", missingSources));
+        Assert.True(
             violations.Count == 0,
-            "Server Orleans L0 tests must not start application hosts or HTTP fixtures. " +
+            "Server Orleans L0 tests and fixtures must not start application hosts or HTTP fixtures. " +
             "Violations: " + string.Join(", ", violations));
     }
 
