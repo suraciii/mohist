@@ -1,7 +1,7 @@
-import type { StatusKind } from '../data/SessionDataSource'
+import type { SessionStatusKind } from '../../../entities/coder-session'
 
 const sessionStatusPresentation: Partial<
-  Record<StatusKind, { label: string; className: string; dotClassName?: string; withDot?: boolean }>
+  Record<SessionStatusKind, { label: string; className: string; dotClassName?: string; withDot?: boolean }>
 > = {
   active: {
     label: 'Active',
@@ -19,14 +19,9 @@ const sessionStatusPresentation: Partial<
     className: 'bg-warning-subtle text-warning border-warning-border',
     dotClassName: 'bg-warning',
   },
-  recovering: {
-    label: 'Recovering',
-    className: 'bg-warning-subtle text-warning border-warning-border',
-    dotClassName: 'bg-warning',
-  },
 }
 
-export function StatusBadge({ kind }: { kind: StatusKind }) {
+export function StatusBadge({ kind }: { kind: SessionStatusKind }) {
   const presentation = sessionStatusPresentation[kind] ?? sessionStatusPresentation.unknown!
   const { label, className, dotClassName, withDot } = presentation
   return (

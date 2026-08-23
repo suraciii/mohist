@@ -3,7 +3,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { ProjectProvider } from '../src/entities/project/model/ProjectContext'
 import { MemoryRouter, Routes, Route } from 'react-router-dom'
 import React from 'react'
-import type { SessionTurn, CoderSessionDetail, AgentSessionMetadata } from '../src/entities/coder-session'
+import type { SessionTurn } from '../src/entities/coder-session'
 
 export const queryClients: QueryClient[] = []
 
@@ -63,37 +63,5 @@ export function makeTurn(overrides: Partial<SessionTurn> = {}): SessionTurn {
     },
     assistant: [],
     ...overrides,
-  }
-}
-
-export function convertLegacyToAgentMetadata(detail: CoderSessionDetail): AgentSessionMetadata {
-  const legacy = detail.metadata
-  return {
-    id: detail.id,
-    sessionName: legacy.sessionId,
-    runtimeSessionId: detail.runtimeSessionId,
-    // issue-484: session no longer carries a terminal status; the UI keys off
-    // `activity` (idle/active/unknown). Propagate the activity already on the
-    // detail/metadata (defaulting to the detail-level activity) so tests that
-    // supply `activity` on the fixture see the correct badge/empty-state.
-    activity: legacy.activity ?? detail.activity,
-    status: legacy.status ?? detail.status,
-    statusKind: legacy.statusKind,
-    model: legacy.model ?? detail.model,
-    stage: legacy.stage ?? detail.stage,
-    title: legacy.title ?? detail.title,
-    createdAt: detail.createdAt,
-    completedAt: detail.completedAt,
-    lastActivityAt: legacy.lastActivityAt ?? null,
-    lastDataAt: legacy.lastDataAt ?? null,
-    probeSentAt: legacy.probeSentAt ?? null,
-    probeDeadlineAt: legacy.probeDeadlineAt ?? null,
-    failureReason: legacy.failureReason ?? null,
-    turnCount: legacy.turnCount ?? 0,
-    changedFiles: legacy.changedFiles,
-    metadata: {
-      eventCount: legacy.eventCount ?? 0,
-      toolCount: legacy.toolCount ?? 0,
-    },
   }
 }

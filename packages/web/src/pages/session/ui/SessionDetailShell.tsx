@@ -10,50 +10,15 @@ import { ContextHealthBar as DefaultContextHealthBar } from '../../../widgets/co
 import { Button } from '@/shared/ui/components/button'
 import { AlertDialog } from '@/shared/ui/components/alert-dialog'
 import { formatSessionTime } from '@/shared/lib/format-time'
-import { useMediaQuery } from '@/shared/lib/use-media-query'
 import { getAgentLaunchObservationMeaning } from '../../../entities/agent'
 import { useProjectPath } from '../../../entities/project'
-import type { StatusKind, SessionDataSourceResult } from '../data/SessionDataSource'
+import type { SessionStatusKind } from '../../../entities/coder-session'
+import type { UnifiedSessionDataSourceResult } from '../data/useUnifiedSessionDataSource'
 import { SessionUsageSummary } from './SessionUsageSummary'
 import { SessionErrorsEvidence } from './SessionErrorsEvidence'
 import { TimelineViewToggle } from './TimelineViewToggle'
 import { StatusBadge } from './StatusBadge'
 import { getStageLabel, sessionTimeAnchorMs } from './sessionPresentation'
-import type { AgentWorkInterruption } from '../../../entities/coder-session'
-
-function SessionInterruptionBanner({ interruption }: { interruption: AgentWorkInterruption }) {
-  return (
-    <section
-      className="border-b border-warning-border bg-warning-subtle px-4 py-2.5 text-sm text-warning"
-      data-testid="session-interruption-banner"
-      role="status"
-    >
-      <div className="font-semibold">Runner update interruption: {interruption.state}</div>
-      <div className="mt-1 grid gap-x-3 gap-y-0.5 text-xs sm:grid-cols-[auto_1fr]">
-        <span>Update</span>
-        <span className="break-all font-mono">{interruption.updateOperationId}</span>
-        <span>Work</span>
-        <span className="break-all font-mono">{interruption.workId}</span>
-        <span>Recovery generation</span>
-        <span>{interruption.recoveryGeneration}</span>
-        {interruption.originalTurnId && (
-          <>
-            <span>Original turn</span>
-            <span className="break-all font-mono">{interruption.originalTurnId}</span>
-          </>
-        )}
-        {interruption.replacementTurnId && (
-          <>
-            <span>Replacement turn</span>
-            <span className="break-all font-mono">{interruption.replacementTurnId}</span>
-          </>
-        )}
-      </div>
-      <p className="mt-1 text-xs">{interruption.expectedRecoveryPath}</p>
-      {interruption.stopFailure && <p className="mt-1 text-xs">{interruption.stopFailure}</p>}
-    </section>
-  )
-}
 
 export interface SessionDetailShellComponents {
   SessionTranscriptLayout: typeof DefaultSessionTranscriptLayout
@@ -74,7 +39,7 @@ export function SessionDetailShell({
   data,
   components,
 }: {
-  data: SessionDataSourceResult
+  data: UnifiedSessionDataSourceResult
   components?: Partial<SessionDetailShellComponents>
 }) {
   const { SessionTranscriptLayout, SessionFollowupComposer, SessionRecoveryActions, ContextHealthBar } = {
@@ -93,11 +58,8 @@ export function SessionDetailShell({
     entries,
     currentActivity,
     resolveTimelineReference,
-    siblingNav,
-    siblingSidebar,
     backPath,
     backLabel,
-    issueTitle,
     workflowContextPath,
     workflowContextLabel,
     newContentAvailable,
@@ -217,19 +179,16 @@ export function SessionDetailShell({
     </div>
   ) : null
 
-  const observationIsRecovering = launchObservation?.jobStatus === 'recovering'
   const observationGuidance = launchObservation
-    ? observationIsRecovering
-      ? 'The AgentJob is recovering from an interrupted runner. The original work identity remains recoverable.'
-      : getAgentLaunchObservationMeaning(launchObservation) === 'reconcile'
-        ? 'Launch outcome is unresolved. Re-read this observation or retry with the original Idempotency-Key.'
-        : getAgentLaunchObservationMeaning(launchObservation) === 'result'
-          ? 'Initial launch is terminal. Read the result and transcript; this Session remains available.'
-          : 'Initial launch is accepted and still progressing. Continue observing the Job and transcript.'
+    ? getAgentLaunchObservationMeaning(launchObservation) === 'reconcile'
+      ? 'Launch outcome is unresolved. Re-read this observation or retry with the original Idempotency-Key.'
+      : getAgentLaunchObservationMeaning(launchObservation) === 'result'
+        ? 'Initial launch is terminal. Read the result and transcript; this Session remains available.'
+        : 'Initial launch is accepted and still progressing. Continue observing the Job and transcript.'
     : null
 
   // Errors evidence (region between usage summary and transcript)
-  const errorsEvidence = meta?.interruption ? null : (
+  const errorsEvidence = (
     <SessionErrorsEvidence
       failureCategory={meta?.eventSummary?.failureCategory ?? null}
       toolErrorCount={meta?.eventSummary?.toolErrorCount ?? null}
@@ -390,13 +349,11 @@ export function SessionDetailShell({
     <SessionHeader
       backPath={backPath}
       backLabel={backLabel}
-      issueTitle={issueTitle}
       workflowContextPath={workflowContextPath}
       workflowContextLabel={workflowContextLabel}
       meta={meta}
       statusKind={statusKind}
       turnCount={displayTurnCount}
-      siblingNav={siblingNav}
       stop={stop}
       headerRef={headerRef}
     />
@@ -406,7 +363,7 @@ export function SessionDetailShell({
   const showFollowupComposer = hasTurns || canFollowup || !isRunning
 
   return (
-    <div className="flex flex-col flex-1 min-h-0 relative xl:flex-row">
+    <div className="flex flex-col flex-1 min-h-0 relative">
       <div className="flex flex-col flex-1 min-h-0">
         <div
           ref={scrollContainerRef}
@@ -422,7 +379,6 @@ export function SessionDetailShell({
             turnCount={displayTurnCount}
           />
           <SessionUsageSummary usage={meta.usage} />
-          {meta.interruption && <SessionInterruptionBanner interruption={meta.interruption} />}
           {errorsEvidence}
           {observationGuidance && (
             <div
@@ -430,18 +386,6 @@ export function SessionDetailShell({
               data-testid="launch-observation-guidance"
             >
               {observationGuidance}
-            </div>
-          )}
-          {observationIsRecovering && launchObservation && (
-            <div
-              data-testid="launch-observation-recovering"
-              className="border-b border-warning-border bg-warning-subtle px-4 py-2 text-xs text-warning"
-            >
-              <div className="font-semibold">Recovering</div>
-              {launchObservation.jobFailureReason && <div>Reason: {launchObservation.jobFailureReason}</div>}
-              {launchObservation.recoveryDeadlineAt && (
-                <div>Recovery deadline: {launchObservation.recoveryDeadlineAt}</div>
-              )}
             </div>
           )}
           {recoveryBarContent && (
@@ -480,7 +424,6 @@ export function SessionDetailShell({
 
         {hasTurns && newContentAvailable && <JumpToBottomButton onClick={handleScrollToBottom} />}
       </div>
-      {siblingSidebar}
     </div>
   )
 }
@@ -497,26 +440,22 @@ const stageChipPresentation: Record<string, string> = {
 function SessionHeader({
   backPath,
   backLabel,
-  issueTitle,
   workflowContextPath,
   workflowContextLabel,
   meta,
   statusKind,
   turnCount,
-  siblingNav,
   stop,
   headerRef,
 }: {
   backPath: string
   backLabel: string
-  issueTitle?: string
   workflowContextPath?: string
   workflowContextLabel?: string
   meta: import('../../../entities/coder-session').SessionMetadata
-  statusKind: StatusKind
+  statusKind: SessionStatusKind
   turnCount: number
-  siblingNav?: React.ReactNode
-  stop: SessionDataSourceResult['stop']
+  stop: UnifiedSessionDataSourceResult['stop']
   headerRef: RefObject<HTMLDivElement | null>
 }) {
   const [stopDialogOpen, setStopDialogOpen] = useState(false)
@@ -537,7 +476,6 @@ function SessionHeader({
   const stageLower = (meta?.stage ?? '').toLowerCase()
   const stageClassName = stageChipPresentation[stageLower] ?? 'bg-muted text-muted-foreground border-border'
 
-  const isWideViewport = useMediaQuery('(min-width: 1280px)')
   const toProjectPath = useProjectPath()
 
   const lastActivityAnchorMs = sessionTimeAnchorMs(meta)
@@ -565,12 +503,6 @@ function SessionHeader({
           <ChevronLeftIcon className="h-4 w-4 shrink-0" />
           <span>{backLabel}</span>
         </Link>
-        {issueTitle && (
-          <>
-            <span className="hidden md:inline text-muted-foreground/40 shrink-0">/</span>
-            <span className="hidden md:inline text-muted-foreground truncate min-w-0">{issueTitle}</span>
-          </>
-        )}
         {workflowContextPath && workflowContextLabel && (
           <Link
             to={workflowContextPath}
@@ -581,15 +513,6 @@ function SessionHeader({
             <ChevronRightIcon className="h-3.5 w-3.5" aria-hidden="true" />
             <span>{workflowContextLabel}</span>
           </Link>
-        )}
-        {siblingNav && !isWideViewport && (
-          <div
-            className="ml-auto flex max-w-full min-w-0 flex-wrap items-center gap-1"
-            data-testid="session-sibling-navigation-slot"
-            data-viewport="narrow"
-          >
-            {siblingNav}
-          </div>
         )}
       </div>
 
@@ -739,7 +662,7 @@ function ScrollEngagedStickyTitle({
   headerRef: RefObject<HTMLDivElement | null>
   scrollContainerRef: RefObject<HTMLDivElement | null>
   meta: import('../../../entities/coder-session').SessionMetadata
-  statusKind: StatusKind
+  statusKind: SessionStatusKind
   turnCount: number
 }) {
   const [engaged, setEngaged] = useState(false)
@@ -773,7 +696,7 @@ function StickySessionTitle({
   turnCount,
 }: {
   meta: import('../../../entities/coder-session').SessionMetadata
-  statusKind: StatusKind
+  statusKind: SessionStatusKind
   turnCount: number
 }) {
   return (
