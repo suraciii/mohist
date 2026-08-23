@@ -253,10 +253,11 @@ envelope completeness, and delivering-Connection lookup/disabled check:
 Steps 1–9 create no AgentJob, Session, SessionInput, selection record
 mutation, or provider inbox entry. Outcome names map onto the issue's domain
 model as follows: the issue's `unavailable` ← step 7's missing/invalid
-chosen-Connection lease (adopted verbatim) and, for its broader "目标当前不可
-执行" leg, the existing `connection_disabled` and setup-nudge outcomes; the
-issue's `unauthorized` ← `unauthorized`; the issue's `stale` ← `expired`,
-`stale_action`, `invalid_action`, and `no_longer_valid`. Every outcome returns
+chosen-Connection lease (adopted verbatim) and, for its broader
+"目标当前不可执行" leg, the existing `connection_disabled` and setup-nudge
+outcomes; the issue's `unauthorized` ← `unauthorized`; the issue's `stale` ←
+`expired`, `stale_action`, `invalid_action`, and `no_longer_valid`. Every
+outcome returns
 `SlackTurnControlResult`-shaped state/text/blocks; the route's existing reply
 enqueue updates the chooser message via `chat.update`, so late and second
 clickers see the decision instead of a second chooser. Reply idempotency comes

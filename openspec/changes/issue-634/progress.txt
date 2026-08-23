@@ -4,46 +4,127 @@ Source: self-review.md (first review, FAIL verdict, findings MF-1..MF-3).
 Rule: fix each must-fix in the plan artifacts, or justify won't-fix. Do not
 edit self-review.md. Observations need no action.
 
-## Dispositions (summary)
+Status: ALL THREE MUST-FIX FINDINGS FIXED. No won't-fixes.
 
-- MF-1 (>5-candidate criterion unaddressed; design contradicts it): FIX.
-  2-5 candidates -> signed buttons + readable text; >5 -> no interactive
-  control, readable text fallback requiring explicit single-Bot re-mention,
-  no truncation/auto-selection/pagination; chooser text field always carries
-  summary + re-mention instruction (covers the interaction-unavailable leg).
-  Touches: proposal.md, design.md (Decision 2, risks, non-goals),
-  slack-agent-selection-prompt spec (requirement 1 rescoped+retitled, new
-  candidate-count requirement, candidates requirement qualified), tasks.json
-  T-002.
-- MF-2 (selected Connection's own lease never resolved; plan codified reusing
-  prompt-owner's interaction lease): FIX. New pipeline step resolves the
-  chosen Connection's current active lease from the lease store and re-proves
-  it via ValidateRuntimeLeaseAsync; missing/invalid -> distinct visible
-  `unavailable`, no resources; access decider runs under a SlackLeaseContext
-  built from that lease, never the delivering adapter's. Route integration no
-  longer passes the interaction lease to selection handling. Added
-  cross-Connection authorization-rejection and lease-unavailable spec
-  scenarios; recovery requirement states it never re-runs click-time
-  authorization or depends on the old click lease. Touches: proposal.md,
-  design.md (Decision 4 steps 7/8 + outcome mapping, Decision 7 resume note,
-  Decision 8), slack-agent-selection-action spec, slack-selection-execution-
-  attribution spec, tasks.json T-003.
-- MF-3 (24h validity / 7d+24h retention contradict issue's pinned 5-minute
-  validity and existing retention window): FIX (conform to the issue; the
-  issue text is unambiguous and we cannot amend it from the plan). Expiry =
-  5 minutes, same as Stop/Retry. Retention = existing
-  SlackProviderOptions.SlackEventRetentionWindow (30-min default); pending
-  rows settle expired once past expiry (no 24h grace); no new long-term
-  archive. Open question on bounds removed (parameters are pinned).
-  Touches: proposal.md, design.md (Decision 3, Decision 7, risks, open
-  questions), slack-agent-selection-action spec (expiry clause),
-  slack-selection-execution-attribution spec (retention requirement),
-  tasks.json T-002/T-003/T-004.
+## Dispositions
 
-## Progress log
+### MF-1 — ">5 candidates" acceptance criterion unaddressed / design contradicted — FIXED
 
-- [x] Created progress notes (this file).
-- [ ] MF-1 applied
-- [ ] MF-2 applied
-- [ ] MF-3 applied
-- [ ] Final consistency sweep (anchors, cross-references, openspec validate)
+Conforms the plan to issue AC #1 and the Product Shape's 最多展示五个候选
+rule (2-5 candidates -> signed chooser controls + readable text; >5 -> no
+interactive control, readable text fallback requiring an explicit single-Bot
+re-mention, no truncation, no auto-selection, no pagination; the chooser's
+plain-text field always carries the summary + re-mention instruction, which
+also covers the "Slack interaction 不可用" leg).
+
+- proposal.md: What Changes bullet 1 rewritten (cap + fallback + readable
+  text); capabilities bullet updated; out-of-scope gains "no interactive
+  pagination/control beyond five".
+- design.md: Decision 2 retitled "at most five buttons", new "Interactive
+  bound of five" and "Readable text in every case" bullets; static_select
+  bullet notes the cap is a product rule, not a UI bound; the "large
+  candidate sets" risk entry replaced with the >5 fallback entry; Non-Goals
+  gains the no->5-interactive non-goal.
+- specs/slack-agent-selection-prompt: requirement 1 rescoped and retitled
+  ("produces one chooser message"; 2-5 interactive, >5 defers to the count
+  requirement); NEW requirement "Interactive controls are bounded at five
+  candidates; beyond five the chooser is a readable text fallback" with 3
+  scenarios (2-5 controls + text; >5 fallback, no truncation/auto-select;
+  interaction-unavailable text guidance); scenarios 1-2 WHENs scoped to
+  "two to five"; candidates requirement qualified with the interactive
+  bound.
+- tasks.json T-002: description states the boundary (2-5 buttons, >5 text
+  fallback, always-present readable text); three new/updated acceptance
+  criteria (>5 fallback, readable-text field, candidates bound qualifier);
+  spec-test list gains the candidate-count boundary; T-002 spec anchor
+  updated to the retitled requirement slug.
+
+### MF-2 — selected Connection's current lease never resolved; plan codified reusing the prompt-owner's interaction lease — FIXED
+
+Conforms the plan to issue AC #3/#4 (selected Connection uses its own
+current lease; prompt-owner lease not reused; missing/invalid lease ->
+unavailable) and gives AC #9's cross-Connection authorization rejection a
+deterministic scenario. Mechanism: new pipeline step resolves the chosen
+Connection's active lease from the lease store
+(ISlackLeaseStore.GetActiveAsync on connection:{ProjectId}:{ChosenConnectionId})
+and re-proves it via SlackAdapterLeaseService.ValidateRuntimeLeaseAsync;
+absent/expired/superseded/rotated -> distinct visible `unavailable`, no
+resources; the access decider's SlackLeaseContext is built from that
+resolved lease (ResolveRuntimeLeaseBotTokenAsync bound to the resolved
+LeaseId/AdapterId), never the delivering adapter's.
+
+- proposal.md: click-time revalidation bullet names the chosen Connection's
+  own lease, the unavailable outcome, and evaluation under that lease.
+- design.md: Decision 4 gains step 7 "Selected-Connection lease
+  (unavailable)" (full rationale: per-target leases, Retry's case differs,
+  cross-Connection pick is mainline); step 8 (permission) rebuilt around the
+  chosen Connection's own lease context; executability/commit renumbered
+  9/10; "Steps 1-9 create no resources" + an outcome-name mapping paragraph
+  (issue unavailable/unauthorized/stale vs implementation outcomes);
+  Decision 7 resume bullet states recovery never re-authorizes nor depends
+  on the old click lease; Decision 8 no longer passes the interaction lease
+  to selection dispatch.
+- specs/slack-agent-selection-action: permission requirement retitled "...
+  and own current lease", requirement text now mandates the chosen
+  Connection's own lease and forbids the delivering lease; NEW requirement
+  "The chosen Connection's current runtime lease is resolved at click time"
+  with unavailable + no-substitute scenarios; NEW cross-Connection scenarios
+  (allowed clicker authorized under chosen lease — pins the mainline;
+  policy denial -> unauthorized — AC #9); rejections requirement/scenario
+  gain `unavailable`.
+- specs/slack-selection-execution-attribution: restart-recovery requirement
+  adds "Recovery SHALL NOT depend on the original click's adapter lease and
+  SHALL NOT re-run click-time authorization or change the chosen candidate"
+  (issue AC #7 clause).
+- tasks.json T-003: route-dispatch sentence distinguishes the delivering
+  lease gate from chosen-Connection authorization; pipeline description
+  gains the lease-resolution step and unavailable outcome; new acceptance
+  criterion pinning both directions of the chosen-lease behavior; spec-test
+  criterion names the cross-Connection rejection and lease-unavailable
+  scenarios.
+
+### MF-3 — 24h validity / 7d+24h-grace retention contradicted the issue's pinned parameters — FIXED (conform)
+
+The issue text is unambiguous (动作沿用现有五分钟有效期; retention only to
+the existing redelivery/delivery-reconciliation window, no new long-term
+archive) and the plan cannot amend the issue, so the plan conforms: expiry =
+five minutes (same signed-action lifetime as Stop/Retry); pending rows
+settle expired once past expiry (no 24h grace — late clicks are rejected by
+the freshness check regardless); finished records reap after the existing
+SlackProviderOptions.SlackEventRetentionWindow (30-min default), the window
+SlackAmbiguousPromptRow's docs already contemplate; no new retention regime.
+The expiry/retention Open Question is removed (parameters are pinned, not
+open).
+
+- proposal.md: payload bullet names the existing five-minute validity;
+  retention bullet names the existing window and no-new-archive.
+- design.md: Decision 3 expiry paragraph rewritten (five minutes, pinned;
+  late reader gets expired notice + re-mention fallback); Decision 7
+  expires/reaps bullets rewritten (no grace; existing window; late
+  redelivery visible/resource-free either way); risk entry for late
+  redelivery rewritten; Open Questions bounds bullet deleted.
+- specs/slack-agent-selection-action: signed-payload requirement pins the
+  five-minute lifetime.
+- specs/slack-selection-execution-attribution: retention requirement
+  mandates the existing window, not a new long-term audit retention.
+- tasks.json: T-002 description/notes (five-minute expiry; no new bounds);
+  T-004 description/criteria/notes (settle past five-minute expiry; reap
+  after SlackEventRetentionWindow; bounds pinned by the issue).
+
+## Consistency sweep (post-fix)
+
+- No remaining "24h/24 hours/7 days/grace" deviations (only negated
+  mentions: "no additional grace", "no ... grace margin is introduced").
+- All task spec anchors resolve to current requirement headings (T-002's
+  anchor updated for the retitled requirement; T-001/T-003/T-004 unchanged
+  and intact).
+- tasks.json parses as valid JSON; spec files keep the Requirement/Scenario
+  structure; self-review.md untouched.
+
+## Commits
+
+- e95a2607c progress notes skeleton
+- e8bf2b644 MF-1 cap chooser at five candidates with >5 text fallback
+- 7657d71ed MF-2 chosen Connection's own lease; unavailable outcome; scenarios
+- 98256b33c MF-3 five-minute validity + existing retention window
+- (final) consistency sweep + these notes
