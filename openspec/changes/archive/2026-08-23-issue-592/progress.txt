@@ -1,0 +1,132 @@
+# issue-592 plan — self-review disposition progress
+
+Working through `self-review.md` (2026-08-14, FAIL verdict). Must-fix findings only;
+observations handled opportunistically where a wording fix was already in flight.
+
+## Dispositions
+
+### MF-1 — plan omits issue groups 2, 4, 5 → FIX (extend plan)
+Verified in code before writing:
+- Group 2: `shared/ui/components/markdown-content.tsx` zero prod refs (own test +
+  one stale test name in MarkdownReader.test.tsx); `shared/ui/toast/` (RuntimeToastHost
+  265 ln + test 148 + index) mounted in `app/App.tsx` with zero production
+  `useRuntimeToast` pushers — every production toast goes through sonner
+  (AppContent `Toaster`, run-lifecycle-toast, handle-event, CreateIssueDialog).
+  Toast-dependent test scaffolding: `shared/api/events-hub.test.tsx` (wrapper +
+  ToastProbe + transport describe), `pages/issue-detail/ui/IssueDetailPage.test.tsx`
+  (renderPageWithToastHost + TransportNoticeTrigger + disconnected-notice describe),
+  `tests/live-task-cloud-event.spec.tsx` (rtlRender wrapper only).
+- Group 4: `use-narrow-viewport.ts` (IssueDetailPage:123), `use-media-query.ts`
+  (SessionDetailShell:684), `hooks/use-mobile.ts` (sidebar.tsx:53) — one usage point
+  each. MarkdownReader.tsx:338-340 toggles default false, never set in production;
+  they drag copy-code-button.tsx, MarkdownToc, and the slugger/anchor machinery in
+  heading-remap.tsx (base heading remap is live and stays).
+- Group 5: packages/web/AGENTS.md has no query-convention section.
+Actions: proposal What Changes/Capabilities/Impact extended; design D6/D7/D8 added;
+new spec delta `specs/web-client-conventions/spec.md` (4 requirements); new tasks
+T-005 (group 2), T-006 (group 4, after T-004), T-007 (group 5 + final whole-change
+gate). Done-When #1/#3/#4 now coverable.
+
+### MF-2 — T-001/T-002 sweeps name live symbols → FIX (scope sweeps)
+Verified: live homonyms are `widgets/session-transcript` `useSessionTimeline` /
+`SessionTimelineCurrentActivity`, `entities/session` `SessionTimeline*` view types
+(die only in T-003), `entities/agent-ops` `WaitingCard` interface, and the unified
+hook's internal `stopSession` callback (useUnifiedSessionDataSource.tsx:203).
+Actions: T-001/T-002/T-004 sweeps rewritten as word-boundary (`rg -w`) exact-token
+patterns; `useSessionTimeline` and `WaitingCard` dropped from T-001's zero-hit list
+(covered by file-deletion criterion + explicit exemption notes); T-002 adds a
+one-line internal rename `stopSession` → `stopCurrentTurn` in the unified hook so
+the sweep is unambiguous (chosen over an exemption carve-out).
+
+### MF-3 — always-empty fields + empty-render branches stay → FIX (add removal)
+Verified: `issueTitle: undefined` (:303), `siblingNav: null` (:306),
+`siblingSidebar: null` (:307) in useUnifiedSessionDataSource return; shell
+destructures 174-178, renders 461/467/535, SessionHeader props 647-665,
+`issueTitle` branch 709-712, sibling-nav branch 726-728 (only user of
+`isWideViewport`/`useMediaQuery` in the shell), `{siblingSidebar}` slot 535,
+inert `xl:flex-row` on shell root. tests/SessionDetailShell.sibling-nav-dedup.spec.tsx
+tests only these dead branches → deleted. Fixtures: SessionDetailShell.test.tsx:86-87,
+followup-queue.spec.tsx:51-52 (context-health spec's issueTitle is agent-ops
+SessionCard's own field — untouched). Actions: D4 + T-004 extended; new scenario in
+session-detail-data-source spec delta. Interaction handled: shell's viewport usage
+point disappears in T-004; T-006's convergence criterion states the final usage
+points accordingly (IssueDetailPage + sidebar; shell point deleted with the dead
+branch).
+
+### Observations (non-blocking) — cheap fixes taken in passing
+- Obs-1: D3/T-002 @x wording harmonized — agent-sessions.ts import list drops all
+  four types; @x re-export list keeps AgentSessionActivity, AgentSessionUsage
+  (entities/agent/model/types.ts:216 is a live consumer), AgentSessionEventSummary,
+  SessionFollowupResult; drops AgentSessionTranscriptResponse/AgentTurnObservation/
+  SessionInputObservation (no remaining @x consumer); all four definitions survive
+  in coder-session/model/types.ts. Open Question resolved accordingly.
+- Obs-2: stopGenericSession rationale corrected — it is the engine of the live
+  stopGenericSessionMutationOptions → genericTurnControlMutationOptions →
+  useGenericTurnControl chain (agent-sessions.ts:360-384), not a zero-consumer alias.
+- Obs-3: proposal now acknowledges the beyond-issue data-layer deletions.
+- Obs-4/Obs-5/Obs-6: no artifact text is wrong; no change (T-004 already covers all
+  five SessionDataSourceResult import sites; -w matching now baked into sweep
+  criteria per MF-2).
+
+Additional fixes made during the final coherence pass:
+- T-003's sweep converted to word-boundary with the full SessionView*/SessionChat*
+  family enumerated (bare `SessionEvent` matched the live AgentSessionEventSummary).
+- MarkdownContent test-title retitle moved to T-005 (its sweep requires the token
+  gone at T-005 time); D6/D7 wording aligned.
+- Dual-write spec softened from "every entity server read SHALL be written twice"
+  (not universally true today — many entity hooks build useQuery({...}) inline and
+  handle-event.ts invalidates with raw key arrays) to "the convention is documented
+  + the reference implementation keeps the pairing", which is what issue group 5
+  asks and what is verifiable at review time.
+- Design risks: "three test files" → two surviving shell test files; proposal test
+  list cleaned up.
+
+## File-by-file status
+- [x] progress.txt created and finalized
+- [x] proposal.md (Why/What Changes/Capabilities/Impact extended; scope-addition note)
+- [x] design.md (clusters 5-6, goals, Non-Goals fix, D3 @x fix, D4 trio removal,
+  D5 additions, D6/D7/D8, risks, migration steps 5-8, open questions resolved)
+- [x] specs/session-detail-data-source/spec.md (always-empty-fields scenario)
+- [x] specs/web-client-conventions/spec.md (new, 4 requirements)
+- [x] tasks.json (T-001/T-002/T-003/T-004 sweeps + MF-3; new T-005/T-006/T-007)
+- self-review.md — NOT edited (regenerated by next review)
+
+All three must-fix findings disposed of by fixing. No won't-fix dispositions.
+
+### T-001 implementation (2026-08-16)
+- Deleted the superseded `widgets/coder-session` presentation chain and its tests: session cards, session timeline, plan panel, compaction views, anomaly model, and coder-session timeline reducer/hooks.
+- Pruned `widgets/coder-session/index.ts` to activity events, usage snapshot, followup composer, recovery actions, context health bar, and usage snapshot label exports.
+- Deleted `tests/integrate-stage.spec.tsx`; changed the context-health consistency spec to compare the live `ContextHealthIndicator` with `CompactSessionCard`, removing its `ActiveSessionCard` dependency.
+- The requested word-boundary sweep for the removed presentation tokens is empty. Baseline survivor tests passed before deletion; post-change focused tests (130), typecheck, FSD/test-boundary checks, and the full Vitest suite (365 files, 4,573 tests) all pass.
+
+### T-002 implementation (2026-08-16)
+- Deleted the issue-scoped session list/followup/stop hooks and tests, plus the orphaned generic metadata helper; removed their client functions and orphaned model types while retaining unified, workflow-run, recovery, and generic operation clients.
+- Pruned the generic summary/transcript DTO, clients, query options, hooks, tests, and public exports in `entities/agent`; reduced the `@x/agent-session` boundary to the four types still consumed by `entities/agent`.
+- Inlined activity normalization into `deriveSessionStatusKind`, retained `canFollowupSession`, removed the recovery/activity helper tests, and renamed the unified data source's local stop callback to `stopCurrentTurn`.
+- Baseline focused coverage passed with 102 tests before the refactor. After cleanup, focused coverage passed with 85 tests; typecheck, FSD boundaries, test boundaries, and the full Vitest suite passed (363 files, 4,542 tests). The required word-boundary sweep is empty and all deleted files are absent.
+
+### T-003 implementation (2026-08-16)
+- Deleted `entities/session`'s legacy SessionEvent view family: `model/types.ts`, `model/view.ts`, the `model/view/` builders and tests, and `@x/session-view.ts`; pruned the slice index to the five timeline functions and `Timeline*` types.
+- The transcript widget had a separate local `SessionTimelineView` mode alias, but T-003's mandatory exact word-boundary sweep includes that token. Renamed only that alias to `SessionTranscriptViewMode`; timeline behavior and `model/timeline` sources remain unchanged.
+- Baseline legacy-view/timeline coverage passed with 49 tests before deletion. Post-change timeline/transcript coverage passed with 128 tests; the exact removed-family sweep is empty and `tsc -b` passes.
+
+### T-004 implementation (2026-08-16)
+- Deleted `pages/session/data/SessionDataSource.ts` and exported `UnifiedSessionDataSourceResult` as `ReturnType<typeof useUnifiedSessionDataSource>`; the hook now infers its return and stop handle, with the stop options type inline and the queued/executing negative literal guard unchanged.
+- Removed the unread `emptyStateKind` and constant-empty `issueTitle`, `siblingNav`, and `siblingSidebar` fields from the hook and shell. Removed the shell's duplicate header/sidebar branches, viewport hook usage, and inert `xl:flex-row` class; deleted the sibling-nav-only shell spec.
+- Switched `SessionDetailShell` and both surviving shell fixtures to the inferred alias. Fixtures now include the hook's required literal query-key and state-setter fields; old runtime-lineage, sibling, issue-title, and empty-state fields are absent.
+- Baseline T-004 coverage passed with 25 tests before edits. Focused post-change coverage passed with 21 tests; `tsc -b`, `npm run test:ci` (357 files, 4,500 tests), `git diff --check`, and the `rg -w` sweep for T-001 through T-004 removed symbols are green.
+
+### T-006 implementation (2026-08-16)
+- Repointed `IssueDetailPage` to `useMediaQuery('(max-width: 1023.98px)')` and the shared `SidebarProvider` to `useMediaQuery('(max-width: 767px)')`; deleted the two superseded viewport hooks and the emptied `shared/hooks` directory while leaving `use-media-query.ts` and its test seam/test unchanged.
+- Removed MarkdownReader's disabled TOC, heading-anchor, and copy-code paths; reduced `heading-remap.tsx` to heading-level remapping only, removed slugger-derived heading ids, deleted `copy-code-button.tsx`, and pruned the corresponding affordance test describes/prop usage.
+- Baseline affected coverage passed with 136 tests before edits. Focused post-change coverage passed with 129 tests; `tsc -b`, FSD/test-boundary checks, full Vitest (357 files, 4,493 tests), `git diff --check`, and the required T-006 word-boundary sweep are green.
+
+### T-007 implementation (2026-08-16)
+- The run branch had T-001 through T-004 and T-006, but no T-005 commit or cleanup; the final T-007 acceptance sweep was therefore not satisfiable from the recorded branch state. Restored the missing T-005 prerequisite exactly within its stated scope: removed the custom toast host and retired markdown renderer, unmounted/pruned their test scaffolding, and kept sonner production behavior unchanged.
+- Added the entity query-client dual-write convention to `packages/web/AGENTS.md`: options factory plus thin hook, single-sourced keys for reads/invalidation/prefetch, and client function plus mutation-options factory plus thin hook for mutations. Cited the unified session clients as the reference implementation and left older modules as follow-up cleanup.
+- Whole-change verification passed: `npm run typecheck`; `npm run test:ci` (`check:fsd`, `check:test-boundaries`, and Vitest: 355 files, 4,483 tests); and `npm run build`. The build emitted only existing Rollup chunk-size and SignalR pure-annotation warnings. `git diff --check` is clean.
+- Final `rg -w` union sweep over `packages/web` was zero-hit for: `ActiveSessionCard`, `RecentCard`, `PlanProgressPanel`, `CompactionTimelineEntry`, `CompactionCompactSummary`, `WorkflowStatusTimeline`, `deriveToolCallTitle`, `session-timeline-reducer`, `SessionTimeline`, `useCoderSessions`, `useFollowupMutation`, `useStopSessionMutation`, `postFollowup`, `stopSession`, `SessionStopResult`, `getCoderSessions`, `getAgentSessionMetadata`, `getAgentSessionTranscript`, `getAgentSessionEvents`, `canRecoverSession`, `deriveSessionActivity`, `buildGenericSessionMetadata`, `getGenericSessionSummary`, `getGenericSessionTranscript`, `genericSessionSummaryQueryOptions`, `genericSessionTranscriptQueryOptions`, `useGenericSessionSummary`, `useGenericSessionTranscript`, `GenericAgentSessionSummaryDto`, `AgentSessionEvent`, `AgentSessionMetadata`, `AgentSessionMetadataCounts`, `CoderSessionSummary`, `CoderSessionItem`, `CoderSessionDetail`, `ToolCallEntry`, `LoopProgress`, `TaskProgressEntry`, `TaskProgressMap`, `CoderTextBuffer`, `viewSessionEvents`, `SessionEvent`, `SessionView`, `SessionViewKind`, `SessionChat`, `SessionChatPart`, `SessionChatTurn`, `SessionChatView`, `SessionCompactView`, `SessionTimelineRound`, `SessionTimelineToolCall`, `SessionTimelineCompaction`, `SessionTimelineRecovery`, `SessionTimelineView`, `session-view`, `SessionDataSource`, `SessionDataSourceResult`, `SessionTurnControlHandle`, `SessionStopOptions`, `StatusKind`, `emptyStateKind`, `EmptyStateKind`, `siblingNav`, `siblingSidebar`, `MarkdownContent`, `markdown-content`, `RuntimeToast`, `RuntimeToastHost`, `RuntimeToastHostProps`, `useRuntimeToast`, `RuntimeToastContext`, `RuntimeToastTone`, `PushRuntimeToastInput`, `useNarrowViewport`, `use-narrow-viewport`, `useIsMobile`, `use-mobile`, `showToc`, `showHeadingAnchors`, `showCopyCode`, `CopyCodeButton`, `copy-code-button`, `extractTextFromChildren`, `collectHeadings`, `HeadingEntry`, `HeadingSlugger`, `HeadingSlugQueue`, `createHeadingSlugger`, `createHeadingSlugQueue`, `defaultSlugify`, `MarkdownToc`, `markdown-toc`, `HeadingRemapOptions`, and `showAnchors`.
+
+### Review repair (2026-08-23)
+- MF-1: reverted the unrelated server test and architecture-ledger changes from `bfaf78f77`; issue-592 now contains only its web changes and workflow artifacts. The finding is fixed rather than waived.
+- `review.md` was intentionally left unchanged, as required by the review workflow.

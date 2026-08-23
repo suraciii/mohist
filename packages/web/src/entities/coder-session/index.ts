@@ -1,23 +1,8 @@
-export { useCoderSessions } from './model/useCoderSessions'
-export {
-  canFollowupSession,
-  canRecoverSession,
-  deriveSessionActivity,
-  deriveSessionStatusKind,
-} from './model/sessionActivity'
+export { canFollowupSession, deriveSessionStatusKind } from './model/sessionActivity'
 export { useWorkflowRunSessions } from './model/useWorkflowRunSessions'
-export { useFollowupMutation } from './model/useFollowupMutation'
-export type { FollowupMutationInput } from './model/useFollowupMutation'
-export { useStopSessionMutation } from './model/useStopSessionMutation'
-export type { StopSessionMutationInput } from './model/useStopSessionMutation'
 export {
   compactSession,
-  stopSession,
   compactGenericSession,
-  getAgentSessionEvents,
-  getAgentSessionMetadata,
-  getAgentSessionTranscript,
-  getCoderSessions,
   getUnifiedSessionSummary,
   getUnifiedSessionTranscript,
   unifiedSessionSummaryQueryOptions,
@@ -29,7 +14,6 @@ export {
   resetGenericSession,
 } from './api/client'
 export type {
-  SessionStopResult,
   SessionRecoveryResult,
   SessionFollowupResult,
   SessionAttachment,
@@ -37,7 +21,6 @@ export type {
 } from './api/client'
 export type {
   AgentTurnObservation,
-  AgentWorkInterruption,
   FollowupOutcome,
   FollowupStatus,
   SessionInputObservation,

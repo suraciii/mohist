@@ -22,12 +22,6 @@ import { useDocumentTitle } from '../../../shared/lib/useDocumentTitle'
 import { createIdempotencyKey } from '../../../shared/lib/idempotency-key'
 import { ApiError } from '../../../shared/api/client'
 import { resolveFollowupStatus } from './followupStatus'
-import type {
-  EmptyStateKind,
-  SessionStopOptions,
-  SessionDataSourceResult,
-  SessionTurnControlHandle,
-} from './SessionDataSource'
 
 export interface UnifiedSessionDataSourceDependencies {
   useSessionTranscript: typeof useSessionTranscript
@@ -84,14 +78,10 @@ function buildMetadata(summary: UnifiedSessionSummaryDto, turnCount: number): Se
     inputs: summary.inputs,
     turns: summary.turns,
     recoveryHistory: summary.recoveryHistory,
-    interruption: summary.interruption,
-    interruptionHistory: summary.interruptionHistory,
   }
 }
 
-export function useUnifiedSessionDataSource(
-  dependencies: Partial<UnifiedSessionDataSourceDependencies> = {},
-): SessionDataSourceResult {
+export function useUnifiedSessionDataSource(dependencies: Partial<UnifiedSessionDataSourceDependencies> = {}) {
   const {
     useSessionTranscript: useTranscript,
     useUnifiedSessionSummary: useSummary,
@@ -130,11 +120,10 @@ export function useUnifiedSessionDataSource(
     [initialTurns.length, summary],
   )
   const activity = summary?.activity
-  const isRecovering = launchObservation?.jobStatus === 'recovering'
-  const statusKind = isRecovering ? 'recovering' : deriveSessionStatusKind(activity)
-  const isRunning = activity === 'active' && !isRecovering
+  const statusKind = deriveSessionStatusKind(activity)
+  const isRunning = activity === 'active'
   const runtimeSessionId = summary?.runtimeSessionId ?? ''
-  const canFollowup = !isRecovering && canFollowupSession(activity) && !!runtimeSessionId && !!summary?.runtime
+  const canFollowup = canFollowupSession(activity) && !!runtimeSessionId && !!summary?.runtime
   const metadataQueryKey = useMemo(() => ['unified-session', projectId, sessionId] as const, [projectId, sessionId])
   const transcriptQueryKey = useMemo(
     () => ['unified-session', projectId, sessionId, 'transcript', runtimeSessionId || null, transcriptView] as const,
@@ -225,8 +214,8 @@ export function useUnifiedSessionDataSource(
     return resolveFollowupStatus(followupResult, input, turn)
   }, [followupResult, summary?.inputs, summary?.turns])
 
-  const stopSession = useCallback(
-    (options?: SessionStopOptions) => {
+  const stopCurrentTurn = useCallback(
+    (options?: { onSuccess?: (result: { state: string }) => void; onSettled?: () => void }) => {
       if (!summary?.currentTurnId) {
         options?.onSettled?.()
         return
@@ -253,16 +242,16 @@ export function useUnifiedSessionDataSource(
     return summary.turns.find((turn) => turn.id === summary.currentTurnId) ?? null
   }, [summary?.currentTurnId, summary?.turns])
 
-  const stop = useMemo<SessionTurnControlHandle | null>(() => {
+  const stop = useMemo(() => {
     if (!summary?.currentTurnId || (currentTurn?.status !== 'queued' && currentTurn?.status !== 'executing'))
       return null
     return {
       turnId: summary.currentTurnId,
       state: currentTurn.status,
-      mutate: stopSession,
+      mutate: stopCurrentTurn,
       isPending: turnControl.isPending,
     }
-  }, [currentTurn?.status, stopSession, summary?.currentTurnId, turnControl.isPending])
+  }, [currentTurn?.status, stopCurrentTurn, summary?.currentTurnId, turnControl.isPending])
 
   const fromActivity = searchParams.get('from') === 'activity'
   const issueNumber = summary?.contextRefs?.issueNumber ?? 0
@@ -292,8 +281,6 @@ export function useUnifiedSessionDataSource(
     : summary?.source === 'workflow' && workflowContextPath
       ? `Issue #${issueNumber}`
       : (summary?.agentName ?? 'Agents')
-  const emptyStateKind: EmptyStateKind | null = transcript.turns.length > 0 ? null : `${statusKind}-no-content`
-
   return {
     isLoading: summaryLoading,
     isError: summaryError,
@@ -330,11 +317,8 @@ export function useUnifiedSessionDataSource(
     handleRecoverySuccess,
     backPath,
     backLabel,
-    issueTitle: undefined,
     workflowContextPath,
     workflowContextLabel,
-    siblingNav: null,
-    siblingSidebar: null,
     sessionTurns: transcript.turns,
     transcriptVersion: transcript.transcriptVersion,
     scrollToBottom: transcript.scrollToBottom,
@@ -348,7 +332,8 @@ export function useUnifiedSessionDataSource(
     entries: timeline.entries,
     currentActivity: timeline.currentActivity,
     resolveTimelineReference,
-    emptyStateKind,
     issueNumber,
   }
 }
+
+export type UnifiedSessionDataSourceResult = ReturnType<typeof useUnifiedSessionDataSource>

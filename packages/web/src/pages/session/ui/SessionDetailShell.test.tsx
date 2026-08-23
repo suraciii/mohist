@@ -2,10 +2,9 @@ import '@testing-library/jest-dom'
 import { fireEvent, render, screen, cleanup } from '@testing-library/react'
 import { MemoryRouter } from 'react-router-dom'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import type { AgentLaunchObservationDto } from '../../../entities/agent'
-import type { AgentWorkInterruption, SessionMetadata } from '../../../entities/coder-session'
+import type { SessionMetadata } from '../../../entities/coder-session'
 import type { TimelineFact, TimelineItem } from '../../../entities/session'
-import type { SessionDataSourceResult } from '../data/SessionDataSource'
+import type { UnifiedSessionDataSourceResult } from '../data/useUnifiedSessionDataSource'
 import { SessionDetailShell, type SessionDetailShellComponents } from './SessionDetailShell'
 
 const sourceId = 'part:tool-1'
@@ -29,7 +28,7 @@ const item: TimelineItem = {
   isTerminal: true,
 }
 
-function makeData(interruption?: AgentWorkInterruption, failureReason: string | null = null): SessionDataSourceResult {
+function makeData(): UnifiedSessionDataSourceResult {
   const meta: SessionMetadata = {
     sessionId: 'session-1',
     sessionName: 'Session one',
@@ -47,14 +46,13 @@ function makeData(interruption?: AgentWorkInterruption, failureReason: string | 
     createdAt: '2026-08-03T09:00:00.000Z',
     completedAt: null,
     lastActivityAt: fact.occurredAt,
-    failureReason,
+    failureReason: null,
     inputs: [{ id: 'input-1', sequence: 1, source: 'web', acceptance: 'accepted' }],
     turns: [{ id: 'turn-1', sequence: 1, inputIds: ['input-1'], status: 'completed' }],
     recoveryHistory: [{ type: 'reset', recordedAt: '2026-08-03T10:01:00.000Z', reason: 'reset' }],
-    interruption,
   }
 
-  return {
+  const data: UnifiedSessionDataSourceResult = {
     isLoading: false,
     isError: false,
     notFound: false,
@@ -62,11 +60,18 @@ function makeData(interruption?: AgentWorkInterruption, failureReason: string | 
     runtimeSessionId: 'runtime-1',
     meta,
     transcriptResponse: null,
+    transcriptView: 'public',
+    setTranscriptView: (view) => {
+      data.transcriptView = typeof view === 'function' ? view(data.transcriptView) : view
+    },
+    transcriptViewLoading: false,
+    launchObservation: null,
     initialTurns: [],
     statusKind: 'idle',
     isRunning: false,
     canFollowup: true,
     followupIsPending: false,
+    followupStatus: null,
     sendFollowup: vi.fn(),
     supportsInputAttachments: false,
     projectId: 'project-1',
@@ -77,16 +82,16 @@ function makeData(interruption?: AgentWorkInterruption, failureReason: string | 
     healthStatus: null,
     hasRecoveryActions: false,
     recoveryAvailable: false,
-    recoverySessionName: null,
-    recoverySessionId: null,
-    recoveryHistory: meta.recoveryHistory,
-    metadataQueryKey: ['session'],
-    transcriptQueryKey: ['transcript'],
+    recoverySessionName: 'Session one',
+    recoverySessionId: 'session-1',
+    recoveryHistory: meta.recoveryHistory ?? null,
+    metadataQueryKey: ['unified-session', 'project-1', 'session-1'] as const,
+    transcriptQueryKey: ['unified-session', 'project-1', 'session-1', 'transcript', 'runtime-1', 'public'] as const,
     handleRecoverySuccess: vi.fn(),
     backPath: '/agents',
     backLabel: 'Agents',
-    siblingNav: null,
-    siblingSidebar: null,
+    workflowContextPath: undefined,
+    workflowContextLabel: undefined,
     sessionTurns: [],
     transcriptVersion: 0,
     scrollToBottom: vi.fn(),
@@ -100,9 +105,9 @@ function makeData(interruption?: AgentWorkInterruption, failureReason: string | 
     entries: [item],
     currentActivity: { state: 'idle', label: '空闲' },
     resolveTimelineReference: () => '/Project/issues/42',
-    emptyStateKind: null,
     issueNumber: 42,
   }
+  return data
 }
 
 function makeComponents(): Partial<SessionDetailShellComponents> {
@@ -143,79 +148,24 @@ describe('SessionDetailShell timeline integration', () => {
     expect(screen.queryByTestId('session-recovery-history')).not.toBeInTheDocument()
   })
 
-  it('renders a recovering launch observation with its recorded reason and deadline', () => {
-    const data = makeData()
-    data.statusKind = 'recovering'
-    data.launchObservation = {
-      jobId: 'job-1',
-      jobStatus: 'recovering',
-      jobFailureReason: 'runner-lost',
-      sessionId: 'session-1',
-      sessionActivity: 'unknown',
-      sessionRuntime: 'opencode',
-      transcriptUrl: '/transcript',
-      inputAcceptance: 'accepted',
-      turnStatus: 'unknown',
-      observationUrl: '/observation',
-      recoveryDeadlineAt: '2026-08-15T01:15:00Z',
-    } satisfies AgentLaunchObservationDto
-
-    render(
-      <MemoryRouter>
-        <SessionDetailShell data={data} components={makeComponents()} />
-      </MemoryRouter>,
-    )
-
-    expect(screen.getByTestId('session-status-badge')).toHaveTextContent('Recovering')
-    const recovery = screen.getByTestId('launch-observation-recovering')
-    expect(recovery).toHaveTextContent('runner-lost')
-    expect(recovery).toHaveTextContent('2026-08-15T01:15:00Z')
-  })
-
-  it('renders update interruption context instead of a raw runtime abort failure', () => {
-    render(
-      <MemoryRouter>
-        <SessionDetailShell
-          data={makeData(
-            {
-              state: 'interrupted',
-              updateOperationId: 'update-567',
-              workId: 'work-old',
-              recoveryGeneration: 0,
-              originalTurnId: 'turn-old',
-              replacementTurnId: 'turn-recovery',
-              expectedRecoveryPath: 'The replacement dispatch will resume this work.',
-              stopFailure: 'Stop confirmation is pending; recovery remains durable and will be retried.',
-              recordedAt: '2026-08-15T00:00:00.000Z',
-            },
-            'session.abort fetch failed',
-          )}
-          components={makeComponents()}
-        />
-      </MemoryRouter>,
-    )
-
-    const banner = screen.getByTestId('session-interruption-banner')
-    expect(banner).toHaveTextContent('update-567')
-    expect(banner).toHaveTextContent('work-old')
-    expect(banner).toHaveTextContent('turn-recovery')
-    expect(banner).not.toHaveTextContent('session.abort fetch failed')
-    expect(screen.queryByTestId('session-errors-region')).not.toBeInTheDocument()
-    expect(screen.queryByText('session.abort fetch failed')).not.toBeInTheDocument()
-  })
-
   it('switches between summary and raw views on the same source anchor', () => {
     const rect = { top: 0, bottom: 100, left: 0, right: 100, width: 100, height: 100, x: 0, y: 0, toJSON: () => ({}) }
     const rectSpy = vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockReturnValue(rect as DOMRect)
     const scrollSpy = vi.spyOn(Element.prototype, 'scrollIntoView').mockImplementation(() => {})
 
-    render(
+    const data = makeData()
+    const { rerender } = render(
       <MemoryRouter>
-        <SessionDetailShell data={makeData()} components={makeComponents()} />
+        <SessionDetailShell data={data} components={makeComponents()} />
       </MemoryRouter>,
     )
 
     fireEvent.click(screen.getByTestId('session-timeline-raw-trigger'))
+    rerender(
+      <MemoryRouter>
+        <SessionDetailShell data={data} components={makeComponents()} />
+      </MemoryRouter>,
+    )
 
     expect(screen.getByTestId('timeline-fixture')).toHaveAttribute('data-view', 'raw')
     expect(scrollSpy).toHaveBeenCalledTimes(1)

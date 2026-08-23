@@ -1,18 +1,10 @@
-import type { AgentSessionActivity, SessionStatusKind } from './types'
+import type { SessionStatusKind } from './types'
 
-export function deriveSessionActivity(activity: string | null | undefined): AgentSessionActivity {
+export function deriveSessionStatusKind(activity: string | null | undefined): SessionStatusKind {
   if (activity === 'idle' || activity === 'active') return activity
   return 'unknown'
 }
 
-export function deriveSessionStatusKind(activity: string | null | undefined): SessionStatusKind {
-  return deriveSessionActivity(activity)
-}
-
 export function canFollowupSession(activity: string | null | undefined): boolean {
-  return deriveSessionActivity(activity) !== 'unknown'
-}
-
-export function canRecoverSession(activity: string | null | undefined): boolean {
-  return deriveSessionActivity(activity) === 'idle'
+  return deriveSessionStatusKind(activity) !== 'unknown'
 }

@@ -25,7 +25,7 @@ import {
 } from '../../../widgets/issue-workflow'
 import { ActivityDialog, type EventTimelinePanelProps } from '../../../widgets/issue-event-timeline'
 import { formatTime } from '../../../shared/lib/format-time'
-import { useNarrowViewport } from '../../../shared/lib/use-narrow-viewport'
+import { useMediaQuery } from '../../../shared/lib/use-media-query'
 import { useProject, useProjectPath } from '../../../entities/project'
 import { Button } from '@/shared/ui/components/button'
 import { getLabelStyle, sortLabels } from '../../../shared/lib/label-colors'
@@ -142,7 +142,7 @@ export function IssueDetailPage({ components, mutationDependencies }: IssueDetai
     if (eventsReconnectVersion === 0 || !workflowDataEnabled) return
     void refetchWorkflowTimeline()
   }, [eventsReconnectVersion, refetchWorkflowTimeline, workflowDataEnabled])
-  const isNarrowViewport = useNarrowViewport()
+  const isNarrowViewport = useMediaQuery('(max-width: 1023.98px)')
 
   const activeAgents = agentStatus?.activeAgents ?? []
   const isAgentRunningOnThis = activeAgents.some((a) => a.issueNumber === issueNumber)

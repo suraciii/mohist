@@ -1,10 +1,3 @@
-export { viewSessionEvents } from './model/view'
-export type {
-  SessionEvent,
-  SessionTimelineCompaction,
-  SessionTimelineRecovery,
-  SessionTimelineToolCall,
-} from './model/types'
 export { detectShellDomainAction, detectToolDomainAction } from './model/timeline/domain-actions'
 export { deriveTimelineItems } from './model/timeline/derive'
 export { groupTimelineItems } from './model/timeline/group'

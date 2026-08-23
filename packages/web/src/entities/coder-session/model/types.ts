@@ -1,5 +1,3 @@
-import type { SessionEvent } from '../../session/@x/session-view'
-
 export type AgentSessionActivity = 'idle' | 'active' | 'unknown'
 export type SessionStatusKind = AgentSessionActivity
 
@@ -110,47 +108,6 @@ export interface UnifiedSessionSummaryDto {
   interruptionHistory?: AgentWorkInterruption[] | null
 }
 
-export interface AgentSessionMetadataCounts {
-  partCount?: number
-  eventCount?: number
-  toolCount: number
-  promptCount?: number
-}
-
-export type AgentSessionEvent = SessionEvent
-
-export interface AgentSessionMetadata {
-  id: string
-  sessionName: string
-  runtimeSessionId: string | null
-  runtime?: string | null
-  activity?: AgentSessionActivity | string
-  status?: string
-  statusKind?: string
-  runtimeSessionLineage?: unknown
-  model: string | null
-  stage: string | null
-  title: string | null
-  createdAt: string
-  completedAt: string | null
-  lastActivityAt?: string | null
-  lastDataAt?: string | null
-  probeSentAt?: string | null
-  probeDeadlineAt?: string | null
-  failureReason?: string | null
-  currentTurnId?: string | null
-  turnCount?: number
-  changedFiles?: FileChangeSummary[]
-  metadata: AgentSessionMetadataCounts
-  eventSummary?: AgentSessionEventSummary
-  usage?: AgentSessionUsage
-  inputs?: SessionInputObservation[] | null
-  turns?: AgentTurnObservation[] | null
-  recoveryHistory?: SessionRecoveryObservation[] | null
-  interruption?: AgentWorkInterruption | null
-  interruptionHistory?: AgentWorkInterruption[] | null
-}
-
 export interface SessionInputObservation {
   id: string
   sequence: number
@@ -216,28 +173,6 @@ export interface FileChangeSummary {
   rawDetail?: string
 }
 
-export interface CoderSessionSummary {
-  id: string
-  sessionName?: string | null
-  runtimeSessionId: string | null
-  executionId: string | null
-  taskDescription: string | null
-  activity?: AgentSessionActivity
-  status?: string
-  createdAt: string
-  completedAt: string | null
-  model: string | null
-  runtime: string | null
-  stage: string | null
-  title: string | null
-  lastDataAt: string | null
-  probeSentAt: string | null
-  probeDeadlineAt: string | null
-  failureReason: string | null
-  eventSummary?: AgentSessionEventSummary
-  usage?: AgentSessionUsage
-}
-
 export interface WorkflowRunSession {
   id: string
   workflowRunId: string
@@ -264,8 +199,6 @@ export interface WorkflowRunSession {
   interruption?: AgentWorkInterruption | null
   interruptionHistory?: AgentWorkInterruption[] | null
 }
-
-export type CoderSessionItem = CoderSessionSummary
 
 export type PromptKind = 'initial' | 'task' | 'retry' | 'followup' | 'recovery' | 'legacy-missing'
 
@@ -416,70 +349,10 @@ export interface SessionTurn {
   assistant: SessionPart[]
 }
 
-export interface CoderSessionDetail {
-  id: string
-  runtimeSessionId: string
-  executionId: string | null
-  taskDescription: string | null
-  activity?: AgentSessionActivity | string
-  status?: string
-  createdAt: string
-  completedAt: string | null
-  model: string | null
-  runtime: string | null
-  stage: string | null
-  title: string | null
-  metadata: SessionMetadata
-  turns: SessionTurn[]
-  incomplete: boolean
-}
-
 export interface AgentSessionTranscriptResponse {
   turns: SessionTurn[]
   partCount: number
   lastActivityAt: string | null
   activity?: AgentSessionActivity | string
   status?: string
-}
-
-export interface ToolCallEntry {
-  executionId: string
-  toolName: string
-  state: 'started' | 'completed' | 'failed' | 'pending' | 'running' | 'cancelled'
-  args?: string
-  result?: string
-  error?: string
-  duration?: number
-  stepIndex?: number
-  timestamp: number
-  runtimeSessionId?: string
-  toolCallId?: string
-  rawInput?: string
-  rawOutput?: string
-  title?: string
-  changedFiles?: FileChangeSummary[]
-}
-
-export interface TaskProgressEntry {
-  taskId: string
-  taskIndex: number
-  totalTasks: number
-  status: 'pending' | 'running' | 'passed' | 'failed' | 'retrying'
-  executionId?: string
-  attempt?: number
-  error?: string
-}
-
-export type TaskProgressMap = Map<string, TaskProgressEntry>
-
-export interface LoopProgress {
-  completed: number
-  failed: number
-  total: number
-}
-
-export interface CoderTextBuffer {
-  executionId: string
-  runtimeSessionId: string
-  text: string
 }
