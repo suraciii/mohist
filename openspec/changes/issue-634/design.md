@@ -49,10 +49,12 @@ itself creates no execution resources.
 - Replace the free-text ambiguity prompt with one interactive chooser per
   ambiguous message, claimed once across concurrent Connections, Slack
   redelivery, and adapter failover.
-- Retain the original message's normalized input facts durably with the claim
-  so an accepted selection starts work with no resend, with the original
-  sender as initiator of record and the original message identity as
-  provenance.
+- Retain the original message's normalized input facts and every candidate's
+  complete owning-Project/Connection reference durably with the claim so an
+  accepted selection starts work with no resend, including when prompt owner
+  and selected Connection belong to different Projects in the same workspace,
+  with the original sender as initiator of record and the original message
+  identity as provenance.
 - Bind every choice to a Server-signed payload verified with the same signing
   material, canonicalization, and constant-time comparison Stop and Retry use.
 - Revalidate at click time: signature, freshness, context (including the
@@ -94,13 +96,17 @@ key — gains:
   NOTHING` that claims the row): `SenderSlackUserId`, `TaskText` (all
   mentioned workspace-Bot mention tokens removed, not just the winner's own —
   a multi-mention variant of `RemoveBotMention`), `FilesJson` (the serialized
-  `SlackIngressFile` list), plus the existing `ThreadTs` anchor and
-  `MentionedConnectionIdsJson` candidate set. Facts are non-nullable columns,
-  so a claim cannot exist without them: the spec's "claim lacks facts cannot
-  silently degrade" is enforced structurally, and acceptance never
-  reconstructs input.
+  `SlackIngressFile` list), plus the existing `ThreadTs` anchor and an ordered
+  `CandidateReferencesJson` snapshot of `(ProjectId, ConnectionId)` pairs.
+  `WorkspaceBoundBot` already supplies both values from the workspace-wide
+  lookup; preserving both prevents the prompt-owner's Project from being
+  substituted when another Project owns the selected Connection. Facts and
+  candidate references are non-nullable columns, so a claim cannot exist
+  without them: the spec's "claim lacks facts cannot silently degrade" is
+  enforced structurally, and acceptance never reconstructs input or performs
+  a global Connection-id-to-Project guess.
 - **Selection state**: `SelectionState` (`Pending` → `Decided` →
-  `Completed` | `Settled`), `ChosenConnectionId`, `DecidedAt`,
+  `Completed` | `Settled`), `ChosenProjectId`, `ChosenConnectionId`, `DecidedAt`,
   pre-allocated `SelectionSessionId`/`SelectionInputId`/`SelectionTurnId`,
   worker bookkeeping (`AttemptCount`, `LastAttemptAt`), and
   `FinishedAt`/`SettleReason` for retention.
@@ -147,12 +153,20 @@ reference, with readable text summarizing the candidates.
   adapter contract change the spec forbids. With the five-candidate cap the
   actions-block element limit is never the operative constraint; the cap is
   the product rule, not a UI bound.
-- **Candidate set**: derived exactly as today (`MentionedWorkspaceBots`:
-  parsed mentions ∩ workspace identity-bound Bots, deduplicated by Bot user
-  id) — humans and other-Servers' Bots never appear; duplicate Bot identities
-  collapse to one choice and do not add ambiguity. `SlackMultiAgentRoutingPolicy`
-  is unchanged; only the `Prompt` disposition's side effect changes from text
-  to blocks (or, beyond five candidates, to the text fallback).
+- **Candidate set**: root-message candidates are derived exactly as today
+  (`MentionedWorkspaceBots`: parsed mentions ∩ workspace identity-bound Bots,
+  deduplicated by Bot user id) — humans and other-Servers' Bots never appear;
+  duplicate Bot identities collapse to one choice and do not add ambiguity.
+  Thread-reply candidates come from the workspace-wide binding query. Both
+  workspace queries are deliberately not Project-filtered: extend
+  `SlackThreadBinding` to project `ProjectId` from its mapping row, and carry
+  `(ProjectId, ConnectionId)` through `SlackMultiAgentRoutingCandidate` and
+  `SlackMultiAgentRoutingDecision` rather than returning bare Connection ids.
+  Root choices retain `WorkspaceBoundBot.ProjectId`; thread choices retain
+  `SlackThreadBinding.ProjectId`; label joins use the complete pair. The
+  routing policy's attribution behavior is unchanged; only candidate identity
+  becomes complete and the `Prompt` disposition's side effect changes from
+  text to blocks (or, beyond five candidates, to the text fallback).
 - **Placement**: the delivery keeps the inbound `ThreadTs`, so a root chooser
   posts at the channel root and a thread chooser posts in that thread, exactly
   as the current prompt does.
@@ -160,12 +174,15 @@ reference, with readable text summarizing the candidates.
 ### 3. The signed payload binds the original message identity; the chooser message identity is enforced durably
 
 `SlackSelectionActionPayload` (beside `SlackStopActionPayload`): `Version`
-("v1"), `Action` ("select_agent"), posting `ConnectionId`, `WorkspaceTeamId`,
-`ConversationId`, `OriginalMessageTs`, `ThreadTs`, `ActorSlackUserId` (the
-original sender), the ordered candidate connection-id set, the
-`ChosenConnectionId`, `Nonce`, `ExpiresAt` — signed with
-`ISlackActionSigner` over a `\n`-joined canonical form, identical in shape to
-Stop/Retry.
+("v1"), `Action` ("select_agent"), posting `ProjectId` and `ConnectionId`,
+`WorkspaceTeamId`, `ConversationId`, `OriginalMessageTs`, `ThreadTs`,
+`ActorSlackUserId` (the original sender), the ordered candidate reference set
+of `(ProjectId, ConnectionId)` pairs, `ChosenProjectId`,
+`ChosenConnectionId`, `Nonce`, `ExpiresAt` — signed with `ISlackActionSigner`
+over a `\n`-joined canonical form, identical in shape to Stop/Retry. The
+canonical representation length-prefixes or otherwise unambiguously encodes
+each pair and preserves ordering; Project and Connection ids are never signed
+as independent unordered lists.
 
 The chooser's own Slack message ts is assigned by Slack at delivery time and
 cannot be known when the value is signed. The spec still requires the
@@ -206,9 +223,10 @@ envelope completeness, and delivering-Connection lookup/disabled check:
    constant-time HMAC verify. Tampered or foreign-key values die here.
 2. **Freshness** (`expired`).
 3. **Context** (`stale_action`) — envelope team/conversation match payload and
-   delivering Connection; the claim row resolves for the payload's original
-   message identity and was posted by the same Connection; the
-   chooser-message identity check of Decision 3.
+   delivering `(ProjectId, ConnectionId)`; the claim row resolves for the
+   payload's original message identity and was posted by that same pair; the
+   payload's ordered candidate references exactly match the durable snapshot;
+   the chooser-message identity check of Decision 3.
 4. **Actor binding** (`unauthorized`) — clicker equals the bound original
    sender.
 5. **Recorded decision** — if the claim is already `Decided`/`Completed`, skip
@@ -224,13 +242,18 @@ envelope completeness, and delivering-Connection lookup/disabled check:
    current lease; this separate decider call proves that the clicker remains
    authorized under that Connection's current mutable access state. A denial
    stops before candidate handling or mutation.
-7. **Candidate validity** (`no_longer_valid`) — the chosen connection still
-   exists, is still bound to the same workspace Bot, and is still in the
-   claim's candidate set; a vanished follow-up target session is also
+7. **Candidate validity** (`no_longer_valid`) — the chosen
+   `(ChosenProjectId, ChosenConnectionId)` pair is in the signed payload and
+   durable candidate snapshot; resolve it with the normal project-scoped
+   `AgentConnectionStore.GetAsync(ChosenProjectId, ChosenConnectionId)`, then
+   prove it still exists and is still bound to the same workspace Bot. No
+   global lookup by Connection id and no fallback to the prompt-owner Project
+   is allowed. A vanished follow-up target session in `ChosenProjectId` is also
    `no_longer_valid`.
 8. **Selected-Connection lease** (`unavailable`) — resolve the **chosen**
    Connection's own current runtime lease at click time: read the active
-   lease for its target key `connection:{ProjectId}:{ChosenConnectionId}`
+   lease for its target key
+   `connection:{ChosenProjectId}:{ChosenConnectionId}`
    from the lease store (`ISlackLeaseStore.GetActiveAsync`), then re-prove
    it through `SlackAdapterLeaseService.ValidateRuntimeLeaseAsync` with the
    store-resolved `LeaseId`/`AdapterId` (which also fails closed when the
@@ -240,8 +263,9 @@ envelope completeness, and delivering-Connection lookup/disabled check:
    AC #4: lease 失效返回 unavailable). The lease is **never** derived from
    the interaction's delivering adapter: the interaction arrives over the
    posting (prompt-owner) Connection's socket, and leases are per-target
-   (`connection:{ProjectId}:{ConnectionId}`), so presenting the
-   prompt-owner's `LeaseId`/`AdapterId` against the chosen Connection's
+   (`connection:{ProjectId}:{ConnectionId}`), so both components must come
+   from the selected candidate reference. Presenting the prompt-owner's
+   `LeaseId`/`AdapterId` or Project id against the chosen Connection's
    target simply fails validation. Retry gets away with the interaction's
    lease only because its evaluated Connection *is* the delivering
    Connection; for a chooser, picking a candidate other than the posting
@@ -253,11 +277,12 @@ envelope completeness, and delivering-Connection lookup/disabled check:
    resolved `LeaseId`/`AdapterId`, with `ResolveRuntimeLeaseBotTokenAsync`
    bound to that pair) — **not** the interaction's delivering lease
    (issue AC #3: prompt-owner lease 不被复用). Render-time authorization is
-   never trusted. When the posting and chosen Connection ids are equal, the
-   prompt-owner evaluation in step 6 is an equivalent current evaluation
-   under the same current lease and may satisfy this step without a duplicate
-   Slack API call.
-10. **Executability** — chosen Connection disabled → existing
+   never trusted. When the posting and chosen Project/Connection pairs are
+   equal, the prompt-owner evaluation in step 6 is an equivalent current
+   evaluation under the same current lease and may satisfy this step without
+   a duplicate Slack API call.
+10. **Executability** — evaluate the chosen Agent and Connection in
+   `ChosenProjectId`; chosen Connection disabled → existing
    `connection_disabled` outcome; Agent not ready → the existing
    `SlackAdmissionService` setup-nudge path, invoked with the original
    message identity so its once-only nudge deduplicates per ambiguous message
@@ -281,16 +306,19 @@ interaction redelivery coalesce onto the already-delivered update.
 ### 5. The decision fence is a compare-and-swap on the claim row; no extra inbox row
 
 The commit step is a single conditional update:
-`UPDATE ... SET SelectionState='Decided', ChosenConnectionId=...,
-SelectionSessionId/InputId/TurnId=... WHERE Id=... AND
+`UPDATE ... SET SelectionState='Decided', ChosenProjectId=...,
+ChosenConnectionId=..., SelectionSessionId/InputId/TurnId=... WHERE Id=...
+AND
 SelectionState='Pending'`, evaluated atomically in the store. Concurrent
 clicks on the same or different candidates, repeated clicks, Slack
 interaction redelivery, and adapter failover all collapse: one CAS wins, every
-loser re-reads the row, observes the decision, and returns the decision view.
-The execution identity is pre-allocated at CAS time by reusing
-`PreMintSlackLaunchIds`' deterministic derivation over the original message
-identity (root launches: session/input/turn triple; follow-ups: the recorded
-bound session id, since no new Session may be created).
+loser re-reads the row, observes the complete chosen pair, and returns the
+same decision view. The execution identity is pre-allocated at CAS time by
+reusing `PreMintSlackLaunchIds(ChosenProjectId, originalMessageIdentity)` so
+Project-scoped deterministic ids are minted for the selected Project, not the
+prompt owner's (root launches: session/input/turn triple; follow-ups: the
+recorded bound session id in `ChosenProjectId`, since no new Session may be
+created).
 
 Stop needs a provider-inbox `action:{nonce}` row because stopping has no row
 fence of its own; here the claim row *is* the fence, and the accepted
@@ -299,10 +327,14 @@ triggers (`LaunchThread`/`FollowupThread` route kinds) — satisfying "an
 accepted click enters the durable provider inbox like any other input" without
 a redundant dedup row that rejections would then have to avoid creating.
 
-### 6. Dispatch reuses the launch and follow-up services under the chosen Connection
+### 6. Dispatch reuses the launch and follow-up services under the chosen Project and Connection
+
+Every project-scoped call in dispatch receives the committed
+`ChosenProjectId`; the interaction route's prompt-owner `ProjectId` is not an
+execution default.
 
 - **Root multi-mention**: run the existing channel-root launch sequence for
-  the chosen Connection from the retained facts — thread launch reservation on
+  the chosen Connection in `ChosenProjectId` from the retained facts — thread launch reservation on
   the original message ts as thread root, provider inbox accept with the
   original message identity, attachment binder over `FilesJson`,
   `InteractionWorkspaceProvisioner`, `LaunchConnectionAsync` with
@@ -311,14 +343,15 @@ a redundant dedup row that rejections would then have to avoid creating.
   message, not the click), pre-minted ids from the decision record. Because
   `LaunchChannelRootAsync` is private to the route partial and bound to the
   delivering Connection's request, extract its core into an internal service
-  (e.g. `SlackChannelLaunchService`) parameterized by connection, identity,
-  sender, text, files, and thread anchor; the ingress route and the selection
-  dispatch call the same code, so the button is literally the same launch the
-  CLI/Web surface uses.
+  (e.g. `SlackChannelLaunchService`) parameterized by project id, connection,
+  identity, sender, text, files, and thread anchor; the ingress route and the
+  selection dispatch call the same code, so the button is literally the same
+  launch the CLI/Web surface uses.
 - **Ambiguous multi-bound-thread reply**: dispatch a follow-up to the chosen
-  Connection's bound session via the existing `RouteFollowupAsync` helper
-  (already explicitly parameterized) with the retained reply facts and the
-  message-identity idempotency key; the chosen Connection's thread binding is
+  Connection's bound session in `ChosenProjectId` via the existing
+  `RouteFollowupAsync` helper (already explicitly parameterized) with the
+  retained reply facts and the message-identity idempotency key; the chosen
+  Connection's thread binding is
   resolved at click time (with the existing reconciliation sources), and a
   missing binding is a `no_longer_valid` rejection — the selection never
   launches a new Session for a follow-up case.
@@ -338,9 +371,12 @@ A `SlackAgentSelectionObligationWorker` (mirroring
   the same execution identity, never a second one. Recovery re-runs the
   dispatch only — per the issue's winner-commit rule it never re-authorizes,
   never depends on the original click's lease, and never changes the chosen
-  candidate (the pipeline's mutable-state checks, including prompt-owner
-  permission in step 6 and selected-Connection lease/permission in steps 8–9,
-  live before the commit fence and are skipped by replays).
+  candidate or its owning Project (the pipeline's mutable-state checks,
+  including prompt-owner permission in step 6 and selected-Connection
+  lease/permission in steps 8–9, live before the commit fence and are skipped
+  by replays). Recovery resolves, dispatches, admits, and settles using the
+  committed `ChosenProjectId` and `ChosenConnectionId`, never the row's
+  prompt-owner `ProjectId` as the selected Project.
 - **Settles terminally** when a committed selection can no longer produce its
   execution (chosen Connection or Agent deleted after repeated failures, or
   the pre-allocated lineage irrecoverable): mark `Settled` with a reason and
@@ -372,9 +408,11 @@ A `SlackAgentSelectionObligationWorker` (mirroring
 context), the new selection id (with a `SlackLeaseContext` built from the
 route-validated delivering adapter lease for the prompt-owner authorization
 in Decision 4 step 6), and Stop/unsupported via the existing fall-through.
-The selection service resolves the chosen Connection's own current lease
-internally per Decision 4 step 8 and must not evaluate that Connection under
-the delivering lease. Adapter operator authentication, runtime-lease
+The selection service resolves the chosen Connection by the signed and
+snapshotted `ChosenProjectId`/`ChosenConnectionId` pair and resolves that
+Connection's own current lease internally per Decision 4 step 8; it must not
+evaluate that Connection under the delivering lease or prompt-owner Project.
+Adapter operator authentication, runtime-lease
 validation (stale lease → existing `lease_stale_or_expired` before any
 selection processing), delivering-Connection lookup, disabled check, and the
 reply enqueue are reused unchanged. The route lease gate and service-level
@@ -403,6 +441,12 @@ delivered.
 - [Long-lived pending rows accumulate if users never click] -> Bounded by the
   expiry sweep settling them (Decision 7); rows are small and one per
   ambiguous message.
+- [A workspace-wide candidate belongs to a different Project from the prompt
+  owner] -> Candidate identity is always the ordered `(ProjectId,
+  ConnectionId)` pair from `WorkspaceBoundBot`; the snapshot, signed payload,
+  CAS winner, selected lease target, authorization, launch/follow-up,
+  pre-allocation, and recovery all preserve that pair. No component infers
+  Project ownership from the interaction route.
 - [Either Connection's permission or the chosen candidate's executability
   changes between click and dispatch] -> The CAS commits only after separate
   prompt-owner and chosen-Connection current-policy reauthorization plus
@@ -427,7 +471,8 @@ delivered.
 ## Migration Plan
 
 1. Add the EF migration: new columns and indexes on `SlackAmbiguousPrompts`
-   (selection state, worker scan on `(ProjectId, SelectionState, UpdatedAt)`),
+   (`CandidateReferencesJson`, `ChosenProjectId`, selection state, worker scan
+   on `(ProjectId, SelectionState, UpdatedAt)`),
    additive only. Existing rows predate fact retention; they carry no facts
    and can never start an execution (enforced structurally), and age out via
    the new cleanup once settled — no backfill.

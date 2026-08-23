@@ -64,7 +64,7 @@ The chooser claim SHALL be once-only per ambiguous message identity (workspace, 
 
 ### Requirement: The claim durably retains the original message's input facts
 
-The chooser claim SHALL durably retain the ambiguous message's normalized input facts at claim time: the original sender's Slack identity, the task text with Bot mentions removed, attachment metadata, and the thread anchor, alongside the workspace, conversation, and message identity. The retained facts SHALL be sufficient for a later accepted selection to start work from the original message with no resend by the user.
+The chooser claim SHALL durably retain the ambiguous message's normalized input facts at claim time: the original sender's Slack identity, the task text with Bot mentions removed, attachment metadata, and the thread anchor, alongside the workspace, conversation, and message identity. It SHALL also retain the ordered candidate set as complete `(ProjectId, ConnectionId)` references from the workspace-wide Bot lookup. The retained facts and candidate references SHALL be sufficient for a later accepted selection to start work from the original message with no resend by the user, including when the selected Connection belongs to a different Mohist Project from the prompt owner.
 
 #### Scenario: Retained facts survive to selection time
 
@@ -72,11 +72,17 @@ The chooser claim SHALL durably retain the ambiguous message's normalized input 
 - **THEN** the work started by that selection uses the retained sender identity, task text, attachment metadata, and thread anchor of the original message
 - **AND** the user is not required to retype or resend the task
 
-#### Scenario: A chooser whose claim lacks facts cannot silently degrade
+#### Scenario: Cross-Project candidate ownership survives to selection time
 
-- **WHEN** an ambiguous message is claimed without its input facts being durably recorded
+- **WHEN** one workspace-wide chooser contains a prompt-owner Connection in Project A and a candidate Connection in Project B
+- **THEN** the claim retains Project B together with that candidate's Connection id
+- **AND** later selection does not infer the candidate's Project from the prompt-owner route
+
+#### Scenario: A chooser whose claim lacks facts or complete candidate references cannot silently degrade
+
+- **WHEN** an ambiguous message is claimed without its input facts or owning-Project/Connection candidate references being durably recorded
 - **THEN** no execution may be started from that claim
-- **AND** the failure is surfaced rather than answered from reconstructed or guessed input
+- **AND** the failure is surfaced rather than answered from reconstructed or guessed input or Project ownership
 
 ### Requirement: The ambiguous message itself starts no work
 
@@ -94,7 +100,7 @@ The ambiguous message SHALL NOT cause any mentioned Connection to create an Agen
 
 ### Requirement: Chooser candidates are exactly the mentioned workspace Bots
 
-The chooser's candidate set SHALL be derived by intersecting the message's parsed mentions with the workspace's identity-bound Mohist Bots, deduplicated by Bot user id, so that, within the interactive bound of two to five candidates, each mentioned Bot renders exactly one labeled choice. Human mentions, unknown senders, and Bots managed by other Mohist Servers SHALL NOT appear as choices.
+For root messages, the chooser's candidate set SHALL be derived by intersecting the message's parsed mentions with the workspace's identity-bound Mohist Bots, deduplicated by Bot user id, so that, within the interactive bound of two to five candidates, each mentioned Bot renders exactly one labeled choice. For ambiguous thread replies, candidates SHALL be the workspace-wide thread bindings. Both discovery paths SHALL remain workspace-wide rather than prompt-owner-Project-scoped, and every choice SHALL preserve its owning `ProjectId` together with its `ConnectionId`; the thread-binding projection SHALL therefore include both. Human mentions, unknown senders, and Bots managed by other Mohist Servers SHALL NOT appear as root-message choices.
 
 #### Scenario: Human mentions are never choices
 
@@ -105,6 +111,12 @@ The chooser's candidate set SHALL be derived by intersecting the message's parse
 
 - **WHEN** multiple Connections in the workspace are bound to the same Bot user id
 - **THEN** that Bot appears at most once in the chooser and the message is not treated as more ambiguous because of the duplicates
+
+#### Scenario: Candidates may span Projects in one workspace
+
+- **WHEN** mentioned identity-bound Bots belong to different Mohist Projects served by the same Server in one Slack workspace
+- **THEN** each Bot remains an eligible chooser candidate with its own owning-Project/Connection reference
+- **AND** the candidate set is not restricted to the prompt owner's Project
 
 ### Requirement: Unauthorized senders keep the existing owner-only guidance
 

@@ -1,6 +1,6 @@
 ### Requirement: Every choice carries a Server-signed selection payload
 
-Every candidate choice on the chooser SHALL carry a Server-signed action payload that binds the posting Connection, the workspace, conversation, and message identity of the chooser, the original sender, the full candidate set, the chosen candidate, a fresh nonce, and a bounded expiry fixed when the chooser is rendered — the same five-minute signed-action lifetime the Stop and Retry actions use, per the issue's pinned parameter. The payload SHALL use the same signing material (the Connection's bot token), canonical field ordering, and constant-time HMAC verification the Stop and Retry actions use. A payload that fails structural validation or whose signature does not verify SHALL be rejected as an invalid action.
+Every candidate choice on the chooser SHALL carry a Server-signed action payload that binds the posting Project and Connection, the workspace, conversation, and message identity of the chooser, the original sender, the full ordered candidate set as `(ProjectId, ConnectionId)` references, the chosen Project/Connection reference, a fresh nonce, and a bounded expiry fixed when the chooser is rendered — the same five-minute signed-action lifetime the Stop and Retry actions use, per the issue's pinned parameter. The payload SHALL use the same signing material (the posting Connection's bot token), unambiguous canonical field ordering, and constant-time HMAC verification the Stop and Retry actions use. A payload that fails structural validation or whose signature does not verify SHALL be rejected as an invalid action.
 
 #### Scenario: A tampered choice value is rejected
 
@@ -15,7 +15,7 @@ Every candidate choice on the chooser SHALL carry a Server-signed action payload
 
 ### Requirement: Acceptance revalidates freshness, context, and actor binding
 
-On every click the Server SHALL revalidate the selection payload before any work starts: the expiry SHALL not have passed; the interaction's workspace, conversation, and chooser message identity SHALL match the payload; the interaction SHALL be delivered to the posting Connection; and the clicking member SHALL match the actor bound in the payload. An expired selection SHALL be rejected as expired, a context or Connection mismatch as stale, and an actor mismatch as unauthorized.
+On every click the Server SHALL revalidate the selection payload before any work starts: the expiry SHALL not have passed; the interaction's workspace, conversation, and chooser message identity SHALL match the payload; the interaction SHALL be delivered to the posting Project/Connection pair; the ordered candidate references SHALL exactly match the durable claim snapshot; and the clicking member SHALL match the actor bound in the payload. An expired selection SHALL be rejected as expired, a context, Project/Connection, or candidate-snapshot mismatch as stale, and an actor mismatch as unauthorized.
 
 #### Scenario: An expired choice is rejected
 
@@ -35,9 +35,25 @@ On every click the Server SHALL revalidate the selection payload before any work
 - **THEN** the selection is rejected as unauthorized
 - **AND** no execution resources are created
 
+### Requirement: Candidate identity preserves the selected Connection's owning Project
+
+Acceptance SHALL treat a candidate as the complete `(ProjectId, ConnectionId)` reference stored in the claim and signed payload. It SHALL resolve the chosen Connection through the normal project-scoped lookup using `ChosenProjectId` and `ChosenConnectionId`; it SHALL NOT perform a global lookup by Connection id or substitute the posting Connection's Project. The candidate SHALL remain in the exact durable candidate snapshot and bound to the chooser workspace, otherwise the click SHALL be rejected as no longer valid with no selection mutation or execution resources.
+
+#### Scenario: A candidate in another Project resolves by its owning Project
+
+- **WHEN** a chooser posted by Project A contains a signed and snapshotted candidate `(ProjectB, ConnectionB)`
+- **THEN** acceptance resolves Connection B with Project B and continues to Project B's lease and policy checks
+- **AND** it does not attempt to resolve Connection B under Project A
+
+#### Scenario: A selected Project id cannot be replaced independently
+
+- **WHEN** a click value changes `ChosenProjectId` while retaining `ChosenConnectionId`, or names a pair absent from the durable ordered candidate snapshot
+- **THEN** signature or context/candidate validation rejects the click
+- **AND** no selection mutation or execution resource is created
+
 ### Requirement: The prompt-owner Connection is re-authorized under its current access policy and own current lease
 
-Before candidate selection can commit, acceptance SHALL evaluate the clicker's current permission under the posting (prompt-owner) Connection's access policy using `SlackConnectionAccessDecider` and the prompt-owner's own currently route-validated runtime lease context. This evaluation SHALL re-read current policy and allowlist state and, where the policy requires it, re-prove current owner/live-member/channel-membership authorization; render-time authorization and actor binding alone SHALL NOT substitute for it. A prompt-owner denial SHALL be rejected as unauthorized with that policy's actionable reason and SHALL create no selection mutation, winner, provider inbox entry, AgentSession, Turn, or AgentJob. When the prompt-owner and chosen Connection are the same, one equivalent current evaluation under that Connection's current lease MAY satisfy both authorization roles.
+Before candidate selection can commit, acceptance SHALL evaluate the clicker's current permission under the posting (prompt-owner) Connection's access policy using `SlackConnectionAccessDecider` and the prompt-owner's own currently route-validated runtime lease context. This evaluation SHALL re-read current policy and allowlist state and, where the policy requires it, re-prove current owner/live-member/channel-membership authorization; render-time authorization and actor binding alone SHALL NOT substitute for it. A prompt-owner denial SHALL be rejected as unauthorized with that policy's actionable reason and SHALL create no selection mutation, winner, provider inbox entry, AgentSession, Turn, or AgentJob. When the prompt-owner and chosen Project/Connection pairs are the same, one equivalent current evaluation under that Connection's current lease MAY satisfy both authorization roles.
 
 #### Scenario: The prompt-owner policy narrows between render and click
 
@@ -63,15 +79,15 @@ Before candidate selection can commit, acceptance SHALL evaluate the clicker's c
 - **THEN** prompt-owner re-authorization rejects the click as unauthorized with the current access decision reason
 - **AND** no selection mutation or execution resource is created
 
-#### Scenario: The same Connection may satisfy both authorization roles with one current evaluation
+#### Scenario: The same Project/Connection pair may satisfy both authorization roles with one current evaluation
 
-- **WHEN** the posting Connection is also the chosen Connection and its current lease and access decision allow the actor
+- **WHEN** the posting Project/Connection pair is also the chosen pair and its current lease and access decision allow the actor
 - **THEN** one equivalent current lease-and-policy evaluation may satisfy both prompt-owner and selected-Connection authorization
 - **AND** selection processing continues without weakening either authorization requirement
 
 ### Requirement: The clicker's permission is re-evaluated under the chosen Connection's current access policy and own current lease
 
-Acceptance SHALL separately evaluate the clicker's current permission under the chosen candidate Connection's access policy using the existing Slack access decision path at click time, rather than trusting authorization state captured when the chooser was rendered. The evaluation SHALL run under the chosen Connection's own currently active runtime lease, resolved from the Server's lease authority at click time; the delivering (prompt-owner) adapter's lease SHALL NOT be used for the chosen Connection's evaluation. A clicker not currently allowed SHALL be rejected as unauthorized with that policy's actionable reason, and no selection mutation or execution resources SHALL be created. The only permitted de-duplication is the same-Connection case defined by the prompt-owner authorization requirement.
+Acceptance SHALL separately evaluate the clicker's current permission under the chosen candidate Connection's access policy using the existing Slack access decision path at click time, rather than trusting authorization state captured when the chooser was rendered. The evaluation SHALL run under the chosen Connection's own currently active runtime lease, resolved from the Server's lease authority at click time; the delivering (prompt-owner) adapter's lease SHALL NOT be used for the chosen Connection's evaluation. A clicker not currently allowed SHALL be rejected as unauthorized with that policy's actionable reason, and no selection mutation or execution resources SHALL be created. The only permitted de-duplication is the identical Project/Connection-pair case defined by the prompt-owner authorization requirement.
 
 #### Scenario: Access narrowed between render and click
 
@@ -84,21 +100,21 @@ Acceptance SHALL separately evaluate the clicker's current permission under the 
 - **WHEN** the clicker remains allowed under the chosen Connection's current access policy
 - **THEN** the permission re-evaluation passes and selection processing continues
 
-#### Scenario: A cross-Connection selection by an allowed clicker is authorized under the chosen Connection's own lease
+#### Scenario: A cross-Project selection by an allowed clicker is authorized under the chosen Connection's own lease
 
-- **WHEN** the clicker selects a candidate Connection other than the posting Connection, remains allowed under the chosen Connection's current access policy, and the chosen Connection holds a valid current runtime lease
-- **THEN** the permission evaluation passes under the chosen Connection's own lease and policy, and the selection proceeds
-- **AND** the selection is not rejected merely because the delivering Connection's lease does not validate against the chosen Connection's target
+- **WHEN** the clicker selects a candidate in Project B while the prompt owner is in Project A, remains allowed under both current access policies, and the chosen Connection holds a valid current runtime lease for `connection:ProjectB:ChosenConnection`
+- **THEN** the chosen Connection is resolved in Project B and the permission evaluation passes under its own lease and policy
+- **AND** the selection is not rejected merely because the interaction arrived through Project A or because the delivering Connection's lease does not validate against the chosen target
 
-#### Scenario: A cross-Connection selection is rejected when the chosen Connection's policy denies the clicker
+#### Scenario: A cross-Project selection is rejected when the chosen Connection's policy denies the clicker
 
-- **WHEN** the clicker selects a candidate Connection other than the posting Connection and the chosen Connection's current access policy does not allow the clicker
-- **THEN** the selection is rejected as unauthorized with that policy's actionable reason
-- **AND** no execution resources are created
+- **WHEN** the prompt owner is in Project A, the selected Connection is in Project B, and Project B's chosen Connection current access policy does not allow the clicker
+- **THEN** the selection is rejected as unauthorized with the chosen Connection's policy reason
+- **AND** no selection mutation or execution resource is created in either Project
 
 ### Requirement: The chosen Connection's current runtime lease is resolved at click time
 
-Acceptance SHALL resolve the chosen candidate Connection's own current runtime lease at click time and SHALL reject the selection as unavailable when the chosen Connection holds no currently valid runtime lease — absent, expired, superseded, or invalidated by a target or credential-generation change. The prompt-owner Connection's lease SHALL NOT be accepted as a substitute for the chosen Connection's lease, and no execution resources SHALL be created for an unavailable selection.
+Acceptance SHALL resolve the chosen candidate through its signed and snapshotted owning `ProjectId` plus `ConnectionId`, then resolve that Connection's own current runtime lease at click time under target `connection:{ChosenProjectId}:{ChosenConnectionId}`. It SHALL reject the selection as unavailable when the chosen Connection holds no currently valid runtime lease — absent, expired, superseded, or invalidated by a target or credential-generation change. The prompt-owner Project or Connection lease SHALL NOT be accepted as a substitute, and no execution resources SHALL be created for an unavailable selection.
 
 #### Scenario: The chosen Connection has no current runtime lease
 
@@ -106,11 +122,11 @@ Acceptance SHALL resolve the chosen candidate Connection's own current runtime l
 - **THEN** the selection is rejected as unavailable with a visible notice
 - **AND** no execution resources are created
 
-#### Scenario: The prompt-owner's lease does not substitute for the chosen Connection's lease
+#### Scenario: The prompt-owner Project and lease do not substitute for the chosen target
 
-- **WHEN** a cross-Connection choice is clicked while the posting Connection's lease is valid but the chosen Connection's own lease is missing or expired
-- **THEN** the selection is rejected as unavailable rather than evaluated under the posting Connection's lease
-- **AND** no execution resources are created
+- **WHEN** a Project A prompt receives a choice for a Project B candidate while the posting Connection's lease is valid but the Project B Connection's own lease is missing or expired
+- **THEN** the selection is rejected as unavailable after checking `connection:ProjectB:ChosenConnection`, not `connection:ProjectA:ChosenConnection`
+- **AND** no selection mutation or execution resources are created
 
 ### Requirement: The chosen candidate's executability is revalidated before work starts
 

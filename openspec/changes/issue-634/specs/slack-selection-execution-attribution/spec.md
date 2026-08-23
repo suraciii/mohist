@@ -1,12 +1,18 @@
 ### Requirement: A selection starts the chosen Agent's work from the original message
 
-An accepted selection SHALL start the chosen candidate Agent's work from the chooser claim's retained original-message facts, with the original sender as the initiator of record: the resulting execution records the original message's workspace, conversation, message identity, and thread anchor as its provenance, not the click or the chooser message. A root multi-Bot mention SHALL launch the chosen Connection's Session in that thread through the existing channel-root launch path (thread launch reservation, provider inbox route, attachment binding, admission); an ambiguous reply in a multi-bound thread SHALL dispatch a follow-up to the chosen Connection's bound Session. The same launch and admission services the CLI and Web use SHALL be invoked, with no Slack-only execution path.
+An accepted selection SHALL start the chosen candidate Agent's work in the chosen Connection's owning Project from the chooser claim's retained original-message facts, with the original sender as the initiator of record: the resulting execution records the original message's workspace, conversation, message identity, and thread anchor as its provenance, not the click or the chooser message. A root multi-Bot mention SHALL launch the chosen Connection's Session in that thread through the existing channel-root launch path (thread launch reservation, provider inbox route, attachment binding, admission); an ambiguous reply in a multi-bound thread SHALL dispatch a follow-up to the chosen Connection's bound Session. Every project-scoped lookup, identity allocation, admission, launch, follow-up, and persistence call SHALL use the selected candidate's durable `ChosenProjectId`, not the prompt owner's Project. The same launch and admission services the CLI and Web use SHALL be invoked, with no Slack-only execution path.
 
 #### Scenario: Choosing an Agent from a root multi-mention launches its Session in the thread
 
 - **WHEN** an accepted selection resolves a root message that mentioned several Bots
 - **THEN** the chosen Connection's Session is launched in that thread from the retained task text and attachments
 - **AND** the execution's provenance records the original sender as initiator and the original message identity, not the click
+
+#### Scenario: A cross-Project choice executes in the selected Project
+
+- **WHEN** the chooser was posted by a Connection in Project A and the accepted candidate belongs to Project B in the same Slack workspace
+- **THEN** pre-allocated ids, provider inbox acceptance, admission, Session launch or follow-up dispatch, and execution persistence all use Project B and its selected Connection
+- **AND** no lookup, lease target, Session, input, or job is attributed to Project A merely because its Connection posted the chooser
 
 #### Scenario: Choosing an Agent for an ambiguous multi-bound-thread reply dispatches a follow-up
 
@@ -21,7 +27,7 @@ An accepted selection SHALL start the chosen candidate Agent's work from the cho
 
 ### Requirement: Exactly one execution is attributed to exactly one Connection
 
-A resolved ambiguous message SHALL produce exactly one execution, owned by exactly the chosen Connection. No other mentioned or bound Connection SHALL create an AgentJob, AgentSession, SessionInput, or provider inbox entry for that message. Connections that lost the chooser race SHALL remain no-ops for the message even after the selection resolves to another Connection.
+A resolved ambiguous message SHALL produce exactly one execution, owned by exactly the chosen Project/Connection pair. No other mentioned or bound Connection SHALL create an AgentJob, AgentSession, SessionInput, or provider inbox entry for that message. Connections that lost the chooser race SHALL remain no-ops for the message even after the selection resolves to another Connection or another Project.
 
 #### Scenario: Only the chosen Connection owns the execution
 
@@ -31,7 +37,7 @@ A resolved ambiguous message SHALL produce exactly one execution, owned by exact
 
 ### Requirement: The selection decision is durably persisted before dispatch with a pre-allocated execution identity
 
-The accepted selection SHALL be durably recorded as a selection operation before any dispatch occurs, and the execution identity for the resulting work SHALL be pre-allocated when the decision is recorded. The persisted selection record SHALL be the single authority for whether and how work may start for that ambiguous message.
+The accepted selection SHALL be durably recorded as a selection operation before any dispatch occurs, including both `ChosenProjectId` and `ChosenConnectionId`, and the execution identity for the resulting work SHALL be pre-allocated in that selected Project when the decision is recorded. The persisted selection record SHALL be the single authority for whether and how work may start for that ambiguous message.
 
 #### Scenario: A crash between decision and dispatch leaves the authority intact
 
@@ -68,13 +74,13 @@ Concurrent clicks on the same or different candidates, repeated clicks by the sa
 
 ### Requirement: Server restart resumes or settles committed selections without a second execution
 
-After a Server restart, a selection operation that was committed but not completed SHALL be resumed to completion or terminally settled, using its pre-allocated execution identity, without creating a second execution. Recovery SHALL NOT depend on the original click's adapter lease and SHALL NOT re-run click-time authorization or change the chosen candidate. A committed selection SHALL never be silently orphaned and never executed twice.
+After a Server restart, a selection operation that was committed but not completed SHALL be resumed to completion or terminally settled, using its pre-allocated execution identity, without creating a second execution. Recovery SHALL resolve and dispatch from the committed `ChosenProjectId` and `ChosenConnectionId`; it SHALL NOT substitute the claim's prompt-owner Project, depend on the original click's adapter lease, re-run click-time authorization, or change the chosen candidate. A committed selection SHALL never be silently orphaned and never executed twice.
 
 #### Scenario: A restart between commit and dispatch resumes the selection
 
-- **WHEN** the Server restarts after a selection was committed but before its work was dispatched
-- **THEN** recovery resumes the selection using the pre-allocated execution identity
-- **AND** the resulting execution is the one recorded by the selection, not a duplicate
+- **WHEN** the Server restarts after a cross-Project selection was committed for Project B but before its work was dispatched through a Project A prompt
+- **THEN** recovery resumes the selection in Project B using the pre-allocated execution identity and selected Connection recorded at commit
+- **AND** the resulting execution is the one recorded by the selection, not a duplicate or a Project A execution
 
 #### Scenario: An unrecoverable committed selection settles terminally
 
