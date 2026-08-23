@@ -1,13 +1,30 @@
 # Disposal of self-review must-fix findings (issue-634 plan)
 
-Source: self-review.md (current re-review FAIL verdict: MF-7; previous
-findings MF-1..MF-6 are verified fixed).
+Source: self-review.md (current re-review FAIL verdict: MF-8; previous
+findings MF-1..MF-7 are verified fixed).
 Rule: fix each must-fix in the plan artifacts, or justify won't-fix. Do not
 edit self-review.md. Observations need no action.
 
-Status: ALL SEVEN MUST-FIX FINDINGS FIXED. No won't-fixes.
+Status: MF-8 IN PROGRESS. MF-1..MF-7 remain fixed. No won't-fixes.
 
 ## Dispositions
+
+### MF-8 — selected-Connection lookup does not recognize soft deletion — IN PROGRESS
+
+The current `AgentConnectionStore.GetAsync(projectId, connectionId)` is
+project-scoped but intentionally returns soft-deleted rows; `DeleteAsync`
+stamps `DeletedAt` rather than physically removing the row. The plan currently
+mistakes a null result for both absence and deletion, making its explicit
+deleted-Connection branch unreachable for the repository's actual deletion
+path.
+
+Planned disposition: keep the existing project-scoped lookup but require the
+selection service to classify `selectedConnection is null ||
+selectedConnection.DeletedAt is not null` as `unavailable` before workspace
+binding, lease, authorization, executability, or commit. Update the action
+scenario and T-003 deterministic matrix to create a real soft-deleted row via
+the store deletion path and prove that it is rejected even if test lease or
+binding artifacts survive.
 
 ### MF-7 — missing selected Connection is classified as stale instead of unavailable — FIXED
 
