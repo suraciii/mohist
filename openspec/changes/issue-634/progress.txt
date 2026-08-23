@@ -12,9 +12,16 @@ open. No won't-fixes planned.
   a routed follow-up inbox row as completion proof. Deterministic tests cover
   both Bound resolution and the crash after inbox acceptance but before
   Session acceptance.
-- MF-2 pending: add additive legacy-row migration coverage, successful live
-  route coverage for all thread dispatch shapes and retained attachments, the
-  full mutable-policy rejection matrix, and worker-level retention coverage.
+- MF-2 fixed: additive migration coverage applies
+  20260913000000_AddSlackSelectionFacts over a pre-fact row and proves inert
+  legacy defaults plus safe cleanup. Live signed interaction specs now cover
+  already-bound ThreadFollowup (including retained file facts), unbound
+  existing-thread ThreadLaunch, and unmentioned multi-bound follow-up. A
+  ten-case matrix covers prompt-owner and selected-Connection allowlist
+  removal, live-member loss/unverifiable identity, and channel-membership
+  loss/unverifiable conversation. A worker-level retention spec proves only
+  old Completed/Settled rows are reaped while Pending, Decided, and recent
+  Completed rows survive.
 
 Previous checkpoint (superseded by the re-review): all six earlier must-fix
 findings were implemented and focused verification passed.
