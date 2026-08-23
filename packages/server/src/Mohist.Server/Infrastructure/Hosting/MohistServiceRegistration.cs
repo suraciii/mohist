@@ -116,6 +116,7 @@ public static class MohistServiceRegistration
         services.AddScoped<IAgentLauncher>(sp => sp.GetRequiredService<AgentLauncher>());
         services.AddScoped<SlackActionSigningHelper>();
         services.AddScoped<SlackChannelLaunchService>();
+        services.AddScoped<SlackAgentSelectionService>();
         services.AddScoped<ISlackActionSigner>(sp => sp.GetRequiredService<SlackActionSigningHelper>());
         services.AddScoped<ISessionTreeMutationFenceReadPort>(sp =>
             new SessionTreeMutationFenceReadPort(

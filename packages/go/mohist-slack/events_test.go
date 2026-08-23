@@ -132,6 +132,18 @@ func interactionBody() map[string]any {
 	}
 }
 
+func TestNormalizeSlackInteractionForwardsSelectionActionID(t *testing.T) {
+	body := cloneMap(interactionBody())
+	body["actions"].([]any)[0].(map[string]any)["action_id"] = "mohist_select_agent"
+	envelope, err := NormalizeSlackInteraction(body)
+	if err != nil {
+		t.Fatalf("selection interaction rejected: %v", err)
+	}
+	if envelope.ActionID != "mohist_select_agent" {
+		t.Fatalf("selection action id = %q", envelope.ActionID)
+	}
+}
+
 func TestNormalizeSlackInteractionAcceptsCompletePayload(t *testing.T) {
 	envelope, err := NormalizeSlackInteraction(interactionBody())
 	if err != nil {

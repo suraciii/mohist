@@ -9,7 +9,8 @@ namespace Mohist.Server.Infrastructure.Slack;
 /// </summary>
 public sealed record SlackSelectionCandidateReference(
     [property: JsonPropertyName("projectId")] string ProjectId,
-    [property: JsonPropertyName("connectionId")] string ConnectionId);
+    [property: JsonPropertyName("connectionId")] string ConnectionId,
+    [property: JsonPropertyName("botUserId")] string? BotUserId = null);
 
 /// <summary>
 /// The original facts captured atomically with an ambiguity claim.

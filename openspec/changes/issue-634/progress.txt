@@ -340,3 +340,13 @@ open).
 - Added a focused unit test for project-scoped deterministic launch ids. The extracted service is conventionally registered as a scoped service; no extra DI wiring is needed.
 - The route wrapper preserves the existing HTTP response shapes, including adapter-owned backpressure, agent-not-found, launch conflicts, and bound-thread follow-up behavior.
 - Final verification: `dotnet build packages/server/src/Mohist.Server/Mohist.Server.csproj --no-restore -p:SkipWebBuild=true` passed; focused channel ingress spec and launch/attachment/reservation unit filters passed; `dotnet test Mohist.Server.Tests.slnf --no-restore -p:SkipWebBuild=true` passed. The repository `npm run test:fast` command could not run because `tsx` is not installed in the workspace.
+
+
+## T-003 implementation checkpoint
+
+- Added SlackInteractionRoutes dispatch for `mohist_select_agent`, preserving the existing operator authentication, delivering-Connection runtime lease gate, disabled check, and ActionDispatchRef outbox reply path. Stop and Retry continue through their existing branches.
+- Added `SlackAmbiguousPromptStore.TryDecideAsync`, a Pending-only atomic compare-and-swap that records selected Project/Connection, DispatchKind, and pre-allocated Session/Input/Turn ids before dispatch.
+- Added the initial `SlackAgentSelectionService` live path: signed payload verification, expiry/context/chooser provider-identity checks, strict actor binding, prompt-owner current policy reauthorization, selected pair lookup with explicit soft-delete check, selected lease resolution/validation, selected policy evaluation, dispatch-kind classification, deterministic id allocation, root/thread launch reuse, and bound-thread follow-up reuse.
+- Added a Go adapter normalization test proving `mohist_select_agent` forwards unchanged; no adapter contract code changed.
+- Verification: baseline focused Server unit/spec tests passed before implementation; Server build passes after implementation. Go tests could not run because `go` is not installed in the workspace.
+- Remaining known T-003/T-004 scope: comprehensive interaction spec coverage, recovery/obligation worker, and hardening the selection dispatch path around durable post-CAS recovery. Do not treat this checkpoint as task completion until those acceptance requirements are implemented and tested.

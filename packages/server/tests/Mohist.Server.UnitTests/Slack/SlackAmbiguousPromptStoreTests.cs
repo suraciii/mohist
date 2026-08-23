@@ -132,6 +132,36 @@ public sealed class SlackAmbiguousPromptStoreTests
     }
 
     [Fact]
+    public async Task Selection_decision_is_a_pending_only_compare_and_swap_with_preallocated_ids()
+    {
+        using var database = TestSqliteDatabase.CreateModelSchema();
+        var store = NewStore(database);
+        await store.TryClaimAsync(
+            "project-a", "team-cas", "channel-cas", "6.001", "6.000",
+            "connection-a", new[]
+            {
+                new SlackSelectionCandidateReference("project-a", "connection-a"),
+                new SlackSelectionCandidateReference("project-b", "connection-b"),
+            }, "user-original", "task", "[]", SlackAmbiguityKinds.RootMultiMention);
+
+        var first = await store.TryDecideAsync(
+            "team-cas", "channel-cas", "6.001", "project-b", "connection-b",
+            SlackSelectionDispatchKinds.RootLaunch, "session-b", "input-b", "turn-b");
+        var loser = await store.TryDecideAsync(
+            "team-cas", "channel-cas", "6.001", "project-a", "connection-a",
+            SlackSelectionDispatchKinds.RootLaunch, "session-a", "input-a", "turn-a");
+
+        Assert.True(first.Decided);
+        Assert.False(loser.Decided);
+        Assert.Equal(SlackSelectionStates.Decided, loser.Snapshot.SelectionState);
+        Assert.Equal("project-b", loser.Snapshot.ChosenProjectId);
+        Assert.Equal("connection-b", loser.Snapshot.ChosenConnectionId);
+        Assert.Equal("session-b", loser.Snapshot.SelectionSessionId);
+        Assert.Equal("input-b", loser.Snapshot.SelectionInputId);
+        Assert.Equal("turn-b", loser.Snapshot.SelectionTurnId);
+    }
+
+    [Fact]
     public async Task Equal_channel_and_message_identities_remain_isolated_by_workspace()
     {
         using var database = TestSqliteDatabase.CreateModelSchema();

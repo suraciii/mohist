@@ -405,7 +405,10 @@ public static partial class SlackConnectionRoutes
         var dispatchRef = SlackAmbiguousPromptStore.PromptDispatchRef(
             body.TeamId, body.ConversationId, body.MessageTs);
         var candidateReferences = candidates
-            .Select(candidate => new SlackSelectionCandidateReference(candidate.ProjectId, candidate.ConnectionId))
+            .Select(candidate => new SlackSelectionCandidateReference(
+                candidate.ProjectId,
+                candidate.ConnectionId,
+                candidate.BotUserId))
             .ToArray();
         var taskText = RemoveBotMentions(
             body.Text ?? string.Empty,
@@ -467,7 +470,8 @@ public static partial class SlackConnectionRoutes
             req.Connection.Id,
             candidates.Select(candidate => new SlackSelectionCandidateReference(
                 candidate.ProjectId,
-                candidate.ConnectionId)).ToArray(),
+                candidate.ConnectionId,
+                candidate.BotUserId)).ToArray(),
             req.SenderSlackUserId,
             RemoveBotMentions(body.Text ?? string.Empty, candidates.Select(candidate => candidate.BotUserId)),
             JSON.Serialize(body.Files),

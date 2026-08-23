@@ -85,8 +85,7 @@ public sealed class SlackAmbiguousPromptStore : IScopedService
         var now = _timeProvider.GetUtcNow();
         var dispatchRef = PromptDispatchRef(workspaceTeamId, conversationId, messageTs);
         var candidateSnapshot = candidates
-            .GroupBy(candidate => candidate.ConnectionId, StringComparer.Ordinal)
-            .Select(group => group.First())
+            .Distinct()
             .ToArray();
         if (candidateSnapshot.Length < 2
             || !candidateSnapshot.Any(candidate => string.Equals(
@@ -178,6 +177,60 @@ public sealed class SlackAmbiguousPromptStore : IScopedService
             .SingleOrDefaultAsync(ct);
     }
 
+    /// <summary>
+    /// Atomically records the selection and all pre-allocated execution ids.
+    /// The Pending predicate is the single decision fence: only the caller
+    /// that changes the row may dispatch work for the ambiguous message.
+    /// </summary>
+    public async Task<SlackAmbiguousPromptDecisionResult> TryDecideAsync(
+        string workspaceTeamId,
+        string conversationId,
+        string messageTs,
+        string chosenProjectId,
+        string chosenConnectionId,
+        string dispatchKind,
+        string selectionSessionId,
+        string selectionInputId,
+        string selectionTurnId,
+        CancellationToken ct = default)
+    {
+        ValidateRequired(workspaceTeamId, nameof(workspaceTeamId));
+        ValidateRequired(conversationId, nameof(conversationId));
+        ValidateRequired(messageTs, nameof(messageTs));
+        ValidateRequired(chosenProjectId, nameof(chosenProjectId));
+        ValidateRequired(chosenConnectionId, nameof(chosenConnectionId));
+        ValidateRequired(dispatchKind, nameof(dispatchKind));
+        ValidateRequired(selectionSessionId, nameof(selectionSessionId));
+        ValidateRequired(selectionInputId, nameof(selectionInputId));
+        ValidateRequired(selectionTurnId, nameof(selectionTurnId));
+        if (dispatchKind is not (SlackSelectionDispatchKinds.RootLaunch
+            or SlackSelectionDispatchKinds.ThreadLaunch
+            or SlackSelectionDispatchKinds.ThreadFollowup))
+            throw new ArgumentException("Unknown selection dispatch kind.", nameof(dispatchKind));
+
+        var now = _timeProvider.GetUtcNow();
+        await using var db = await _dbFactory.CreateDbContextAsync(ct);
+        var changed = await db.SlackAmbiguousPrompts
+            .Where(row => row.WorkspaceTeamId == workspaceTeamId
+                && row.ConversationId == conversationId
+                && row.MessageTs == messageTs
+                && row.SelectionState == SlackSelectionStates.Pending)
+            .ExecuteUpdateAsync(setters => setters
+                .SetProperty(row => row.SelectionState, SlackSelectionStates.Decided)
+                .SetProperty(row => row.ChosenProjectId, chosenProjectId)
+                .SetProperty(row => row.ChosenConnectionId, chosenConnectionId)
+                .SetProperty(row => row.DispatchKind, dispatchKind)
+                .SetProperty(row => row.DecidedAt, now)
+                .SetProperty(row => row.SelectionSessionId, selectionSessionId)
+                .SetProperty(row => row.SelectionInputId, selectionInputId)
+                .SetProperty(row => row.SelectionTurnId, selectionTurnId)
+                .SetProperty(row => row.UpdatedAt, now), ct);
+
+        var snapshot = await FindAsync(workspaceTeamId, conversationId, messageTs, ct)
+            ?? throw new InvalidOperationException("The ambiguity claim disappeared while recording a selection.");
+        return new SlackAmbiguousPromptDecisionResult(changed > 0, snapshot);
+    }
+
     public static string PromptDispatchRef(string workspaceTeamId, string conversationId, string messageTs) =>
         $"slack-ambiguous:{workspaceTeamId}:{conversationId}:{messageTs}";
 
@@ -223,3 +276,7 @@ public sealed record SlackAmbiguousPromptResult(
     public string WinningConnectionId => Snapshot.WinningConnectionId;
     public string? ThreadTs => Snapshot.ThreadTs;
 }
+
+public sealed record SlackAmbiguousPromptDecisionResult(
+    bool Decided,
+    SlackAmbiguousPromptSnapshot Snapshot);
