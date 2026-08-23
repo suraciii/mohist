@@ -31,13 +31,15 @@ implemented and focused verification passes. No won't-fixes.
 Focused verification completed:
 - Server build passed.
 - `SlackChannelLaunchServiceTests`: 4/4 passed.
-- `SlackMultiAgentIngressSpecs`: 13/13 passed, including >3 transient recovery
-  attempts remaining Decided and a committed ThreadLaunch/Bound recovery race
-  dispatching the retained original message as one follow-up.
+- `SlackMultiAgentIngressSpecs`: 15/15 passed, including the mutable rejection
+  matrix, >3 transient recovery attempts remaining Decided, and a committed
+  ThreadLaunch/Bound recovery race dispatching the retained original message
+  as one follow-up.
 - Full Server solution verification passed:
   `dotnet test Mohist.Server.Tests.slnf --no-restore -p:SkipWebBuild=true`
-  (Workflow Definition 178, Orleans 2, Arch 53, Unit 3799, Spec 3071; all
-  passed). `git diff --check` passed and the worktree is clean.
+  (Workflow Definition 178, Orleans 2, Arch 53, Unit 3799, Spec 3073; all
+  passed). `git diff --check` passed. Go verification remains unavailable
+  because `go` is not installed in this workspace.
 
 ## Previous plan self-review record
 
