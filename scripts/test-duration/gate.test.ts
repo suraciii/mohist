@@ -14,7 +14,7 @@ function config(): SuiteConfig {
     kind: 'report-only' as const,
     trackType: 'behavior' as const,
     application,
-    specKind: 'Design' as const,
+    specKinds: ['Design'] as const,
     level: 'L0' as const,
     resources: [],
     report: `reports/${id}.json`,

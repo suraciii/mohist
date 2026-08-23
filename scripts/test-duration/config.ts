@@ -200,5 +200,8 @@ function validateRule(rule: BudgetRule, prefix: string): string[] {
   if (rule.percentile !== undefined && (rule.percentileMs === undefined || rule.percentileMs < 0)) {
     errors.push(`${rp}: percentile set without a valid percentileMs`)
   }
+  if (rule.expectedTotal !== undefined && (!Number.isInteger(rule.expectedTotal) || rule.expectedTotal <= 0)) {
+    errors.push(`${rp}: expectedTotal must be a positive integer`)
+  }
   return errors
 }

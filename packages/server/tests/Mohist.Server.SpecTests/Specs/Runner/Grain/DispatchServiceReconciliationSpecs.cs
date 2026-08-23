@@ -18,7 +18,7 @@ namespace Mohist.Server.SpecTests.Specs.Runner.Grain;
 [Collection("RunnerGrain")]
 public partial class DispatchServiceReconciliationSpecs : Mohist.Server.SpecTests.Specs.Workflow.WorkflowGrainSpecs
 {
-    public DispatchServiceReconciliationSpecs(Mohist.Server.SpecTests.Specs.Workflow.WorkflowGrainFixture fixture) : base(fixture) { }
+    public DispatchServiceReconciliationSpecs(WorkflowGrainFixture fixture) : base(fixture) { }
 
     private DispatchService Dispatch => _fixture.Cluster.GetSiloServiceProvider(null)
         .GetRequiredService<IServiceScopeFactory>().CreateScope()

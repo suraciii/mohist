@@ -81,6 +81,7 @@ export interface ExecutionLedgerValidation {
 export interface BudgetRule {
   readonly id: string
   readonly namePattern?: string
+  readonly expectedTotal?: number
   readonly percentile?: number
   readonly percentileMs?: number
 }
@@ -100,7 +101,7 @@ export interface TrackConfig {
   readonly kind: TrackKind
   /** Semantic ownership metadata. Required by the canonical plan. */
   readonly application?: string
-  readonly specKind?: SpecKind
+  readonly specKinds?: readonly SpecKind[]
   readonly trackType?: SpecTrackType
   readonly level?: SpecLevel
   readonly architectureScope?: string
@@ -176,13 +177,16 @@ export interface PercentileViolation {
 export interface RuleDiagnosis {
   readonly ruleId: string
   readonly total: number
+  readonly expectedTotal?: number
   readonly percentiles: Readonly<Record<number, number>>
   readonly maxMs: number
+  readonly populationViolation?: { readonly expectedTotal: number; readonly actualTotal: number }
   readonly percentileViolation?: PercentileViolation
 }
 
 export interface TrackEvaluation {
   readonly trackId: string
+  readonly specKinds?: readonly SpecKind[]
   readonly enforce: boolean
   readonly status?: string
   readonly reason?: string

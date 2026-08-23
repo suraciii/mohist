@@ -14,7 +14,7 @@ namespace Mohist.Server.SpecTests.Specs.Runner.Grain;
 [Collection("RunnerGrain")]
 public sealed class MixedOwnerDispatchSpecs : Mohist.Server.SpecTests.Specs.Workflow.WorkflowGrainSpecs
 {
-    public MixedOwnerDispatchSpecs(Mohist.Server.SpecTests.Specs.Workflow.WorkflowGrainFixture fixture) : base(fixture) { }
+    public MixedOwnerDispatchSpecs(WorkflowGrainFixture fixture) : base(fixture) { }
 
     private DispatchService Dispatch => _fixture.Cluster.GetSiloServiceProvider(null)
         .GetRequiredService<IServiceScopeFactory>().CreateScope()

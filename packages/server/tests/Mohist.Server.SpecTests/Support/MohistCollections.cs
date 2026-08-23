@@ -90,12 +90,6 @@ public class WorkflowRecoveryCollection : ICollectionFixture<WorkflowGrainFixtur
 [CollectionDefinition("RunnerGrain")]
 public class RunnerGrainCollection : ICollectionFixture<WorkflowGrainFixture>;
 
-// The L0 grain specs carry the tier=L0 trait so the server-orleans-l0 lane
-// can select them with a runner filter; DisableParallelization preserves
-// their previous serialized execution around the shared warm fixture.
-[CollectionDefinition("OrleansGrainL0", DisableParallelization = true)]
-public class OrleansGrainL0Collection : ICollectionFixture<OrleansL0WorkflowGrainFixture>;
-
 [CollectionDefinition("AgentJobGrain")]
 public class AgentJobGrainCollection : ICollectionFixture<AgentJobGrainFixture>;
 

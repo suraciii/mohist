@@ -806,6 +806,7 @@ function startLane(
 function failedEvaluation(track: TrackConfig, reportError: string): TrackEvaluation {
   return {
     trackId: track.id,
+    specKinds: track.specKinds,
     enforce: track.enforce,
     status: track.status,
     reason: track.reason,

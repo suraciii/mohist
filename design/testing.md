@@ -112,8 +112,9 @@ dependency and is forbidden.
 
 ### Identity And Metadata
 
-A behavior execution track is identified by owning application and Level. Kind
-is declared and reported across tracks. Resources may be used within either Level.
+A behavior execution track is identified by owning application and Level. It
+declares and reports every Kind represented in its population. Resources may be
+used within either Level.
 An Architecture track instead declares an application or repository structural
 scope and has no behavior Level. File and project names do not define these
 dimensions.
@@ -473,12 +474,14 @@ review guidelines. The source-file ratchet is the automated size gate.
 
 ## Server L0 Resource Ownership
 
-Server L0 has two ownership boundaries. Component and module Specs that do not
-need Orleans belong to `Mohist.Server.UnitTests`. Specs whose claim includes
-activation, serialization, reminder, reentrancy, or real grain dispatch live in
-`Mohist.Server.SpecTests`, carry the `tier=L0` trait, and are selected by the
-`server-orleans-l0` track through a runner filter. This is one Resource lane,
-not a project or CI job per domain.
+Server L0 has two Resource boundaries inside `Mohist.Server.UnitTests`.
+Component and module Specs that do not need Orleans use ordinary class or
+collection fixtures. Specs whose claim includes activation, serialization,
+reminder, reentrancy, or real grain dispatch use the `OrleansGrainL0`
+collection and its shared TestSupport fixture. The `server-unit` track combines
+both boundaries into the complete Server L0 population while retaining a
+separate 50 ms budget bucket for the grain Specs. This is one
+application-and-Level track, not a project or track per Resource lane.
 
 The Orleans L0 fixture uses only the controlled in-process transport, fake time,
 and in-memory SQLite. It owns setup, reset, and disposal, and performs runtime
