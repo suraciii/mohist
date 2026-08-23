@@ -214,19 +214,46 @@ envelope completeness, and delivering-Connection lookup/disabled check:
    exists, is still bound to the same workspace Bot, and is still in the
    claim's candidate set; a vanished follow-up target session is also
    `no_longer_valid`.
-7. **Clicker permission** (`unauthorized` + actionable reason) —
+7. **Selected-Connection lease** (`unavailable`) — resolve the **chosen**
+   Connection's own current runtime lease at click time: read the active
+   lease for its target key `connection:{ProjectId}:{ChosenConnectionId}`
+   from the lease store (`ISlackLeaseStore.GetActiveAsync`), then re-prove
+   it through `SlackAdapterLeaseService.ValidateRuntimeLeaseAsync` with the
+   store-resolved `LeaseId`/`AdapterId` (which also fails closed when the
+   target is no longer active/verified/bot-token-provisioned or the pinned
+   credential generation rotated). Absent, expired, superseded, or otherwise
+   invalid → distinct visible `unavailable` outcome, no resources (issue
+   AC #4: lease 失效返回 unavailable). The lease is **never** derived from
+   the interaction's delivering adapter: the interaction arrives over the
+   posting (prompt-owner) Connection's socket, and leases are per-target
+   (`connection:{ProjectId}:{ConnectionId}`), so presenting the
+   prompt-owner's `LeaseId`/`AdapterId` against the chosen Connection's
+   target simply fails validation. Retry gets away with the interaction's
+   lease only because its evaluated Connection *is* the delivering
+   Connection; for a chooser, picking a candidate other than the posting
+   Connection is the mainline case the feature exists for.
+8. **Clicker permission** (`unauthorized` + actionable reason) —
    `SlackConnectionAccessDecider.EvaluateAsync` under the **chosen**
-   Connection's current policy with the interaction's lease context, exactly
-   as Retry does. Render-time authorization is never trusted.
-8. **Executability** — chosen Connection disabled → existing
+   Connection's current policy, with a `SlackLeaseContext` built from the
+   chosen Connection's own lease resolved in step 7 (operator id plus the
+   resolved `LeaseId`/`AdapterId`, with `ResolveRuntimeLeaseBotTokenAsync`
+   bound to that pair) — **not** the interaction's delivering lease
+   (issue AC #3: prompt-owner lease 不被复用). Render-time authorization is
+   never trusted.
+9. **Executability** — chosen Connection disabled → existing
    `connection_disabled` outcome; Agent not ready → the existing
    `SlackAdmissionService` setup-nudge path, invoked with the original
    message identity so its once-only nudge deduplicates per ambiguous message
    (and per the admission store's existing dedup, survives redelivery).
-9. **Commit** — the decision fence (Decision 5), then dispatch (Decision 6).
+10. **Commit** — the decision fence (Decision 5), then dispatch (Decision 6).
 
-Steps 1–8 create no AgentJob, Session, SessionInput, selection record
-mutation, or provider inbox entry. Every outcome returns
+Steps 1–9 create no AgentJob, Session, SessionInput, selection record
+mutation, or provider inbox entry. Outcome names map onto the issue's domain
+model as follows: the issue's `unavailable` ← step 7's missing/invalid
+chosen-Connection lease (adopted verbatim) and, for its broader "目标当前不可
+执行" leg, the existing `connection_disabled` and setup-nudge outcomes; the
+issue's `unauthorized` ← `unauthorized`; the issue's `stale` ← `expired`,
+`stale_action`, `invalid_action`, and `no_longer_valid`. Every outcome returns
 `SlackTurnControlResult`-shaped state/text/blocks; the route's existing reply
 enqueue updates the chooser message via `chat.update`, so late and second
 clickers see the decision instead of a second chooser. Reply idempotency comes
@@ -290,7 +317,11 @@ A `SlackAgentSelectionObligationWorker` (mirroring
   dispatch is safe: the launch path is idempotent (reservation, inbox route,
   deterministic pre-allocated ids) and the follow-up path is idempotent by
   message identity. A restart between commit and dispatch therefore resumes to
-  the same execution identity, never a second one.
+  the same execution identity, never a second one. Recovery re-runs the
+  dispatch only — per the issue's winner-commit rule it never re-authorizes,
+  never depends on the original click's lease, and never changes the chosen
+  candidate (the pipeline's mutable-state checks, step 7's lease included,
+  live before the commit fence and are skipped by replays).
 - **Settles terminally** when a committed selection can no longer produce its
   execution (chosen Connection or Agent deleted after repeated failures, or
   the pre-allocated lineage irrecoverable): mark `Settled` with a reason and
@@ -310,8 +341,12 @@ A `SlackAgentSelectionObligationWorker` (mirroring
 ### 8. Route integration is a three-way action-id dispatch; the adapter changes only in tests
 
 `SlackInteractionRoutes` dispatches by action id: Retry (as today, with lease
-context), the new selection id (with lease context — the access re-evaluation
-needs it), and Stop/unsupported via the existing fall-through. Adapter
+context), the new selection id (no lease context is passed in — the route's
+lease validation stays what it already is for every action: the shared gate
+on the **delivering** adapter's lease; the selection service resolves the
+chosen Connection's own current lease internally per Decision 4 step 7, and
+must not evaluate the chosen Connection under the delivering lease), and
+Stop/unsupported via the existing fall-through. Adapter
 operator authentication, runtime-lease validation (stale lease → existing
 `lease_stale_or_expired` before any selection processing), delivering-
 Connection lookup, and the reply enqueue are reused unchanged. The Go adapter

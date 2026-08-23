@@ -35,9 +35,9 @@ On every click the Server SHALL revalidate the selection payload before any work
 - **THEN** the selection is rejected as unauthorized
 - **AND** no execution resources are created
 
-### Requirement: The clicker's permission is re-evaluated under the chosen Connection's current access policy
+### Requirement: The clicker's permission is re-evaluated under the chosen Connection's current access policy and own current lease
 
-Acceptance SHALL evaluate the clicker's current permission under the chosen candidate Connection's access policy using the existing Slack access decision path at click time, rather than trusting authorization state captured when the chooser was rendered. The evaluation SHALL include the lease context of the delivering adapter. A clicker not currently allowed SHALL be rejected as unauthorized with that policy's actionable reason, and no execution resources SHALL be created.
+Acceptance SHALL evaluate the clicker's current permission under the chosen candidate Connection's access policy using the existing Slack access decision path at click time, rather than trusting authorization state captured when the chooser was rendered. The evaluation SHALL run under the chosen Connection's own currently active runtime lease, resolved from the Server's lease authority at click time; the delivering (prompt-owner) adapter's lease SHALL NOT be used for the chosen Connection's evaluation. A clicker not currently allowed SHALL be rejected as unauthorized with that policy's actionable reason, and no execution resources SHALL be created.
 
 #### Scenario: Access narrowed between render and click
 
@@ -49,6 +49,34 @@ Acceptance SHALL evaluate the clicker's current permission under the chosen cand
 
 - **WHEN** the clicker remains allowed under the chosen Connection's current access policy
 - **THEN** the permission re-evaluation passes and selection processing continues
+
+#### Scenario: A cross-Connection selection by an allowed clicker is authorized under the chosen Connection's own lease
+
+- **WHEN** the clicker selects a candidate Connection other than the posting Connection, remains allowed under the chosen Connection's current access policy, and the chosen Connection holds a valid current runtime lease
+- **THEN** the permission evaluation passes under the chosen Connection's own lease and policy, and the selection proceeds
+- **AND** the selection is not rejected merely because the delivering Connection's lease does not validate against the chosen Connection's target
+
+#### Scenario: A cross-Connection selection is rejected when the chosen Connection's policy denies the clicker
+
+- **WHEN** the clicker selects a candidate Connection other than the posting Connection and the chosen Connection's current access policy does not allow the clicker
+- **THEN** the selection is rejected as unauthorized with that policy's actionable reason
+- **AND** no execution resources are created
+
+### Requirement: The chosen Connection's current runtime lease is resolved at click time
+
+Acceptance SHALL resolve the chosen candidate Connection's own current runtime lease at click time and SHALL reject the selection as unavailable when the chosen Connection holds no currently valid runtime lease — absent, expired, superseded, or invalidated by a target or credential-generation change. The prompt-owner Connection's lease SHALL NOT be accepted as a substitute for the chosen Connection's lease, and no execution resources SHALL be created for an unavailable selection.
+
+#### Scenario: The chosen Connection has no current runtime lease
+
+- **WHEN** a choice is clicked whose chosen Connection no longer holds a valid current runtime lease
+- **THEN** the selection is rejected as unavailable with a visible notice
+- **AND** no execution resources are created
+
+#### Scenario: The prompt-owner's lease does not substitute for the chosen Connection's lease
+
+- **WHEN** a cross-Connection choice is clicked while the posting Connection's lease is valid but the chosen Connection's own lease is missing or expired
+- **THEN** the selection is rejected as unavailable rather than evaluated under the posting Connection's lease
+- **AND** no execution resources are created
 
 ### Requirement: The chosen candidate's executability is revalidated before work starts
 
@@ -68,11 +96,11 @@ At click time the Server SHALL revalidate that the chosen Connection is enabled 
 
 ### Requirement: Rejections are visible and create no execution resources
 
-Expired, tampered, stale, unauthorized, and no-longer-valid selections SHALL be explicitly rejected with distinct, user-visible notices delivered through the existing interaction reply path that updates the chooser message. Every rejection outcome SHALL create no AgentJob, AgentSession, SessionInput, selection execution record, or provider inbox entry.
+Expired, tampered, stale, unauthorized, unavailable, and no-longer-valid selections SHALL be explicitly rejected with distinct, user-visible notices delivered through the existing interaction reply path that updates the chooser message. Every rejection outcome SHALL create no AgentJob, AgentSession, SessionInput, selection execution record, or provider inbox entry.
 
 #### Scenario: Each rejection kind surfaces a distinct visible notice
 
-- **WHEN** a click is rejected as expired, invalid, stale, unauthorized, or no longer valid
+- **WHEN** a click is rejected as expired, invalid, stale, unauthorized, unavailable, or no longer valid
 - **THEN** the chooser message is updated with a notice naming that rejection outcome
 - **AND** no AgentJob, AgentSession, SessionInput, or provider inbox entry is created
 

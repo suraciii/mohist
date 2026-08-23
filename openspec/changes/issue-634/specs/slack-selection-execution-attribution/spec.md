@@ -68,7 +68,7 @@ Concurrent clicks on the same or different candidates, repeated clicks by the sa
 
 ### Requirement: Server restart resumes or settles committed selections without a second execution
 
-After a Server restart, a selection operation that was committed but not completed SHALL be resumed to completion or terminally settled, using its pre-allocated execution identity, without creating a second execution. A committed selection SHALL never be silently orphaned and never executed twice.
+After a Server restart, a selection operation that was committed but not completed SHALL be resumed to completion or terminally settled, using its pre-allocated execution identity, without creating a second execution. Recovery SHALL NOT depend on the original click's adapter lease and SHALL NOT re-run click-time authorization or change the chosen candidate. A committed selection SHALL never be silently orphaned and never executed twice.
 
 #### Scenario: A restart between commit and dispatch resumes the selection
 
