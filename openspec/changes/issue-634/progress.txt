@@ -31,7 +31,10 @@ Focused verification completed:
 - `SlackMultiAgentIngressSpecs`: 13/13 passed, including >3 transient recovery
   attempts remaining Decided and a committed ThreadLaunch/Bound recovery race
   dispatching the retained original message as one follow-up.
-- Full Server solution verification remains the final pre-response step.
+- Full Server solution verification passed:
+  `dotnet test Mohist.Server.Tests.slnf --no-restore -p:SkipWebBuild=true`
+  (Workflow Definition 178, Orleans 2, Arch 53, Unit 3799, Spec 3071; all
+  passed). `git diff --check` passed and the worktree is clean.
 
 ## Previous plan self-review record
 
