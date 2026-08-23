@@ -1,18 +1,16 @@
-using Mohist.Server.SpecTests.Support;
-using Mohist.Server.SpecTests.Specs.Workflow;
+using Mohist.Server.UnitTests.Support;
 using Mohist.Server.Workflow.Domain.Run;
 using Mohist.Server.Workflow.Grains;
 using Xunit;
 
-namespace Mohist.Server.SpecTests.Specs.Workflow.Grain;
+namespace Mohist.Server.UnitTests.Workflow.Grain;
 
 [Collection("OrleansGrainL0")]
-[Trait("tier", "L0")]
-public sealed class WorkflowRecoveryContinuationSpecs : WorkflowGrainSpecs
+public sealed class WorkflowRecoveryContinuationSpecs
 {
     private readonly OrleansL0WorkflowGrainFixture _orleansFixture;
 
-    public WorkflowRecoveryContinuationSpecs(OrleansL0WorkflowGrainFixture fixture) : base(fixture)
+    public WorkflowRecoveryContinuationSpecs(OrleansL0WorkflowGrainFixture fixture)
     {
         _orleansFixture = fixture;
     }
@@ -20,7 +18,7 @@ public sealed class WorkflowRecoveryContinuationSpecs : WorkflowGrainSpecs
     [Fact]
     public async Task AcceptedReport_CommitsClaimableContinuationContract()
     {
-        var workflow = Grains.GetGrain<IWorkflowGrain>(OrleansL0WorkflowGrainFixture.RecoveryWorkflowId);
+        var workflow = _orleansFixture.Grains.GetGrain<IWorkflowGrain>(OrleansL0WorkflowGrainFixture.RecoveryWorkflowId);
         var freshWorkId = _orleansFixture.RecoveryFreshWorkId;
 
         var acknowledgement = await workflow.ReceiveTaskReportAsync(

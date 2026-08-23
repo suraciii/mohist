@@ -17,7 +17,7 @@ namespace Mohist.Server.SpecTests.Specs.Runner.Grain;
 [Collection("RunnerGrain")]
 public sealed class RunnerUpdateInterruptSpecs : Mohist.Server.SpecTests.Specs.Workflow.WorkflowGrainSpecs
 {
-    public RunnerUpdateInterruptSpecs(Mohist.Server.SpecTests.Specs.Workflow.WorkflowGrainFixture fixture)
+    public RunnerUpdateInterruptSpecs(WorkflowGrainFixture fixture)
         : base(fixture) { }
 
     [Fact]

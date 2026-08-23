@@ -90,12 +90,14 @@ database, logical endpoint scope, and report path. Fixtures use Orleans
 in-memory transport and never probe or bind host ports. Node TypeScript checks
 run through `node --import tsx` without a shared IPC server.
 
-The Server Orleans L0 lane is the single controlled in-process Orleans boundary
-for grain activation and dispatch Specs. It is selected by `test:fast` through
-the `server-orleans-l0` track, which filters the shared Server Spec assembly on
-the `tier=L0` trait; no domain-specific project or CI selector is created.
-Fixture warm-up is setup evidence, while the track still reports its wall time
-and the complete Spec population.
+The Server L0 lane is the `server-unit` track. Grain activation and dispatch
+Specs run in its `OrleansGrainL0` collection through the controlled in-process
+fixture in TestSupport; ordinary L0 tests do not acquire that fixture. The first
+budget rule selects the grain Spec classes, pins their expected population at
+two, and preserves their 50 ms budget before the default unit rule classifies
+the remaining tests. The track reports both Product and Design Kinds. Fixture
+warm-up is setup evidence, while the track still reports its wall time and the
+complete Server L0 population.
 
 Duration-measurement tracks claim an exclusive measurement Resource on their
 host and run in deterministic order. Throughput lanes begin after the
