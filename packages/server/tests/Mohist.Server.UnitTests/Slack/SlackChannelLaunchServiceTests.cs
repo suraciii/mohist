@@ -80,11 +80,14 @@ public sealed class SlackChannelLaunchServiceTests
         var selected = new AgentConnection { AgentId = "agent-selected" };
         var matching = new CanonicalFollowupTarget(
             "runner", "session", "agent-launch", null, null, "runtime", "runtime-session", "/tmp",
-            ProjectId: "project", AgentId: "agent-selected");
+            ProjectId: "project", AgentId: "agent-selected", ConnectionId: "connection-selected");
+        selected.Id = "connection-selected";
         var wrongAgent = matching with { AgentId = "agent-other" };
+        var wrongConnection = matching with { ConnectionId = "connection-other" };
 
         Assert.True(SlackAgentSelectionService.IsSelectedSessionTarget(matching, selected));
         Assert.False(SlackAgentSelectionService.IsSelectedSessionTarget(wrongAgent, selected));
+        Assert.False(SlackAgentSelectionService.IsSelectedSessionTarget(wrongConnection, selected));
         Assert.False(SlackAgentSelectionService.IsSelectedSessionTarget(null, selected));
     }
 }

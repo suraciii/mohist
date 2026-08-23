@@ -498,7 +498,8 @@ public partial class AgentSessionQuerier : IScopedService
                 ? session.Settings.Definition
                 : null,
             record.Label(AgentSessionQueryMetadataKeys.ProjectId),
-            record.Label(GenericAgentSessionMetadata.AgentId));
+            record.Label(GenericAgentSessionMetadata.AgentId),
+            record.Label(AgentSessionQueryMetadataKeys.ConnectionId));
     }
 
     public async Task<SessionStopTarget?> ResolveStopTargetAsync(string projectId, string sessionId, CancellationToken ct = default)

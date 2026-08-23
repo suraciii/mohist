@@ -648,7 +648,8 @@ internal sealed class SlackAgentSelectionService : IScopedService
         CanonicalFollowupTarget? target,
         AgentConnection selected) =>
         target is not null
-        && string.Equals(target.AgentId, selected.AgentId, StringComparison.Ordinal);
+        && string.Equals(target.AgentId, selected.AgentId, StringComparison.Ordinal)
+        && string.Equals(target.ConnectionId, selected.Id, StringComparison.Ordinal);
 
     private static IReadOnlyList<SlackSelectionCandidateReference> DeserializeCandidates(string json) =>
         JSON.Deserialize<List<SlackSelectionCandidateReference>>(json) ?? [];
