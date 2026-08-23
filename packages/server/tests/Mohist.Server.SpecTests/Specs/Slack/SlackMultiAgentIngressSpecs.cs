@@ -329,6 +329,7 @@ public sealed partial class SlackMultiAgentIngressSpecs
                     identity.ConversationId,
                     identity.MessageTs));
         }
+        await RefreshAllConnectionLeasesAsync();
     }
 
     [Fact]
@@ -397,6 +398,7 @@ public sealed partial class SlackMultiAgentIngressSpecs
                 identity.WorkspaceTeamId,
                 identity.ConversationId,
                 identity.MessageTs)));
+        await RefreshAllConnectionLeasesAsync();
     }
 
     [Fact]
@@ -473,6 +475,7 @@ public sealed partial class SlackMultiAgentIngressSpecs
             .ToListAsync());
         Assert.Equal(SlackProviderInboxRouteKinds.FollowupThread, inbox.RouteKind);
         Assert.Equal(boundSessionId, inbox.RouteSessionId);
+        await RefreshAllConnectionLeasesAsync();
     }
 
     [Fact]
@@ -546,6 +549,24 @@ public sealed partial class SlackMultiAgentIngressSpecs
         Assert.Empty(await db.AgentSessions
             .Where(row => row.LabelConnectionId == promptOwner.Id)
             .ToListAsync());
+        await RefreshAllConnectionLeasesAsync();
+    }
+
+    private async Task RefreshAllConnectionLeasesAsync()
+    {
+        await using var scope = _fixture.Services.CreateAsyncScope();
+        var db = scope.ServiceProvider.GetRequiredService<MohistDbContext>();
+        var targets = await db.AgentConnections.AsNoTracking()
+            .Where(row => row.DeletedAt == null && row.ProviderKind == ConnectionProviderKind.Slack)
+            .Select(row => new { row.ProjectId, row.Id })
+            .ToListAsync();
+        foreach (var target in targets)
+        {
+            _connectionLeases[target.Id] = await SlackRuntimeLeaseTestSupport.AcquireConnectionLeaseAsync(
+                _fixture,
+                target.ProjectId,
+                target.Id);
+        }
     }
 
     private async Task<IReadOnlyList<SlackSelectionActionPayload>> DeliverChooserAndGetChoicesAsync(
