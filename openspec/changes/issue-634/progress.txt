@@ -20,10 +20,13 @@ implemented and focused verification passes. No won't-fixes.
 - MF-5 fixed: exceptions never settle a Decided claim by attempt count. Only an
   explicit terminal `RecoverAsync` result can settle the committed winner.
 - MF-6 fixed for the reviewed gaps: real interaction-route specs now cover a
-  signed cross-Project root selection, concurrent different-choice CAS, follow-
-  up executability rejection, dangling Session rejection, non-interactive
-  expiry, and existing restart recovery. Unit coverage pins payload interactivity,
-  selected Session identity, deterministic ids, and Bound-result handling.
+  signed cross-Project root selection, concurrent different-choice CAS,
+  tampered/wrong-actor/copied-chooser rejection, prompt-owner and selected-
+  Connection policy denial, selected lease expiry, selected soft deletion,
+  workspace-binding drift, follow-up executability rejection, dangling Session
+  rejection, non-interactive expiry, and existing restart recovery. Unit
+  coverage pins payload interactivity, selected Session identity, deterministic
+  ids, and Bound-result handling.
 
 Focused verification completed:
 - Server build passed.
