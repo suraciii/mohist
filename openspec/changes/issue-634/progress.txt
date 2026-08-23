@@ -1,3 +1,24 @@
+# Disposal of implementation-review must-fix findings (issue-634)
+
+Source: review.md. Do not edit review.md.
+
+Current checkpoint (2026-09 review follow-up): investigating and fixing all six
+must-fix findings. Planned dispositions: MF-1..MF-6 fixed; no won't-fixes.
+
+- MF-1: add a durable interactive-selection presentation flag so expiry only
+  settles claims that actually offered clickable choices; legacy, >5, signing-
+  unavailable, and non-owner claims remain once-only/non-interactive.
+- MF-2/MF-3: revalidate Agent executability for every dispatch kind and validate
+  the selected bound Session through the Session repository boundary before CAS.
+- MF-4: explicitly route a post-CAS ThreadLaunch `Bound` race as the retained
+  original message's idempotent follow-up instead of silently completing it.
+- MF-5: keep retryable recovery exceptions Decided indefinitely; only explicit
+  terminal recovery results settle a committed selection.
+- MF-6: add route/service/worker regression specs covering the real selection
+  action and MF-1..MF-5, then run focused and full Server verification.
+
+## Previous plan self-review record
+
 # Disposal of self-review must-fix findings (issue-634 plan)
 
 Source: self-review.md (current re-review FAIL verdict: MF-8; previous
