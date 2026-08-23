@@ -221,3 +221,24 @@ test('validateConfig requires the last rule to be the default catch-all', () => 
   const errors = validateConfig(config)
   assert.ok(errors.some((e) => e.includes('default catch-all')))
 })
+
+test('validateConfig requires expectedTotal to be a positive integer', () => {
+  const config = parseSuiteConfig(
+    JSON.stringify({
+      suiteDeadlineMs: 1000,
+      tracks: [
+        {
+          id: 't',
+          kind: 'report-only',
+          report: 'r',
+          reportFormat: 'trx',
+          deadlineMs: 100,
+          enforce: true,
+          rules: [{ id: 'spec', namePattern: 'Specs\\.', expectedTotal: 0 }, { id: 'unit' }],
+        },
+      ],
+    }),
+  )
+
+  assert.ok(validateConfig(config).some((e) => e.includes('expectedTotal must be a positive integer')))
+})

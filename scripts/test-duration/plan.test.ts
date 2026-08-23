@@ -10,7 +10,7 @@ function track(overrides: Partial<TrackConfig> = {}): TrackConfig {
     kind: 'report-only',
     trackType: 'behavior',
     application: 'server',
-    specKind: 'Design',
+    specKinds: ['Design'],
     level: 'L0',
     resources: [],
     report: 'reports/server-unit.json',
@@ -77,6 +77,14 @@ test('selectApplicationTracks rejects an unknown application before execution', 
 test('validatePlan rejects a behavior track without a Level', () => {
   const errors = validatePlan(planConfig([track({ level: undefined })]))
   assert.ok(errors.some((error) => error.includes('behavior track must declare Level L0 or L1')))
+})
+
+test('validatePlan requires a unique non-empty Kind set', () => {
+  const missing = validatePlan(planConfig([track({ specKinds: [] })]))
+  assert.ok(missing.some((error) => error.includes('specKinds must be a non-empty array')))
+
+  const duplicate = validatePlan(planConfig([track({ specKinds: ['Design', 'Design'] })]))
+  assert.ok(duplicate.some((error) => error.includes('specKinds must not contain duplicates')))
 })
 
 test('validatePlan rejects duplicate Resource lanes for one Resource set', () => {

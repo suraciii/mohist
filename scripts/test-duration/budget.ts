@@ -90,11 +90,18 @@ export function evaluateRule(rule: BudgetRule, cases: readonly TestCase[]): Rule
     }
   }
 
+  const populationViolation =
+    rule.expectedTotal !== undefined && cases.length !== rule.expectedTotal
+      ? { expectedTotal: rule.expectedTotal, actualTotal: cases.length }
+      : undefined
+
   return {
     ruleId: rule.id,
     total: cases.length,
+    expectedTotal: rule.expectedTotal,
     percentiles,
     maxMs: durations.length ? Math.max(...durations) : 0,
+    populationViolation,
     percentileViolation,
   }
 }
@@ -105,6 +112,7 @@ export function evaluateTrack(track: TrackConfig, cases: readonly TestCase[]): T
   if (!track.enforce) {
     return {
       trackId: track.id,
+      specKinds: track.specKinds,
       enforce: false,
       status: track.status,
       reason: track.reason,
@@ -118,9 +126,18 @@ export function evaluateTrack(track: TrackConfig, cases: readonly TestCase[]): T
   const rules = track.rules ?? []
   const buckets = classify(cases, rules)
   const diagnoses = rules.map((rule) => evaluateRule(rule, buckets.get(rule) ?? []))
-  const ruleFailing = diagnoses.some((d) => d.percentileViolation !== undefined)
+  const ruleFailing = diagnoses.some((d) => d.populationViolation !== undefined || d.percentileViolation !== undefined)
   // An enforced track with a parseable but empty report produced no evidence;
   // treat it as failed so a broken producer cannot fake green.
   const passed = cases.length > 0 && failedTests.length === 0 && !ruleFailing
-  return { trackId: track.id, enforce: true, total: cases.length, outcomes, failedTests, rules: diagnoses, passed }
+  return {
+    trackId: track.id,
+    specKinds: track.specKinds,
+    enforce: true,
+    total: cases.length,
+    outcomes,
+    failedTests,
+    rules: diagnoses,
+    passed,
+  }
 }
