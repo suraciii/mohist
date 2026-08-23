@@ -14,3 +14,11 @@
 - `tasks.json` parses with Node JSON.parse.
 - `git diff --check` passes.
 - `self-review.md` was not edited.
+
+## T-001 implementation
+
+- Added the optional `awaitCleanupPredecessorDelivery` outbox port and production implementation.
+- Added scheduling/correlation helpers: attempt 1 uses the Workflow scheduling identity; later attempts use the deterministic cleanup operation id across the Workflow cleanup boundary and Session follow-up records.
+- Waiters are resolved only from successful durable removals or deterministic-refusal removals, and recovered snapshots are rechecked. Timeout and abort use the injected outbox timer only for failure/cancellation; no polling was added.
+- Added focused fake-timer coverage for immediate completion, original-turn settlement, attempt-2 Session follow-up correlation, unrelated cleanup records, timeout evidence, cancellation, and persistence failure.
+- Verification: runner typecheck, test typecheck, build, full runner suite (159 files / 1735 tests), and focused outbox suite (38 tests) pass.

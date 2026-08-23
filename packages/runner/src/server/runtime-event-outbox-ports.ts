@@ -44,6 +44,19 @@ export interface RuntimeEventEntry {
   readonly payload: Record<string, unknown>
 }
 
+export interface CleanupPredecessorDeliveryTarget {
+  readonly projectId: string
+  readonly workflowRunId: string
+  readonly sessionName: string
+  readonly cleanupAttempt: number
+  readonly precedingCleanupOperationId: string | null
+}
+
+export interface CleanupPredecessorDeliveryWaitOptions {
+  readonly budgetMs: number
+  readonly signal: AbortSignal
+}
+
 export interface AgentSessionRuntimeEventOutboxOptions {
   readonly fileSystem?: RuntimeEventOutboxFileSystem
   readonly filePath?: string
@@ -114,6 +127,10 @@ export interface AgentSessionRuntimeEventOutbox {
     >,
   ): Promise<void>
   awaitInputReceipt?(recordId: string): Promise<AgentSessionRuntimeEventReceipt>
+  awaitCleanupPredecessorDelivery?(
+    target: CleanupPredecessorDeliveryTarget,
+    options: CleanupPredecessorDeliveryWaitOptions,
+  ): Promise<void>
   enqueueProducedFact(record: RuntimeEventRecord): Promise<void>
   /**
    * Enqueue a batch of produced facts sharing one target in one

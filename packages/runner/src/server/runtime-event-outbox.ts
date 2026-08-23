@@ -39,10 +39,12 @@ import { errorMessage } from '../core/errors.js'
 import { runnerLogger } from '../system/logger.js'
 import { RuntimeEventDeliveryError, type AgentSessionRuntimeEventReceipt } from './connection.js'
 import {
+  isCleanupPredecessorRecord,
   isWorkflowSessionBoundary,
   runtimeEventDeliveryKey,
   runtimeEventSchedulingKey,
 } from './runtime-event-outbox-identity.js'
+import { CleanupPredecessorDeliveryWaiters } from './runtime-event-outbox-delivery-wait.js'
 import {
   parseSnapshot,
   serializeSnapshot,
@@ -54,6 +56,8 @@ import {
   defaultRuntimeEventOutboxTimer,
   NodeRuntimeEventOutboxFileSystem,
   type AgentSessionRuntimeEventOutbox,
+  type CleanupPredecessorDeliveryTarget,
+  type CleanupPredecessorDeliveryWaitOptions,
   type AgentSessionRuntimeEventOutboxOptions,
   type RuntimeEventAcknowledgementPolicy,
   type RuntimeEventDelivery,
@@ -65,8 +69,14 @@ import {
   type RuntimeEventWorkMetadata,
 } from './runtime-event-outbox-ports.js'
 
+export { CleanupPredecessorDeliveryWaitTimeoutError } from './runtime-event-outbox-delivery-wait.js'
 export { nextTemporaryFilePath } from './runtime-event-outbox-ports.js'
-export { runtimeEventDeliveryKey, workflowExecutionIdentity } from './runtime-event-outbox-identity.js'
+export {
+  cleanupPredecessorDeliveryKey,
+  runtimeEventDeliveryKey,
+  workflowExecutionIdentity,
+  workflowSessionSchedulingKey,
+} from './runtime-event-outbox-identity.js'
 
 export class AlreadyConsumedRuntimeEventError extends Error {
   readonly classification = 'already-consumed' as const
@@ -84,6 +94,8 @@ export type {
   AgentSessionRuntimeEventOutboxOptions,
   RuntimeEventAcknowledgementPolicy,
   RuntimeEventDelivery,
+  CleanupPredecessorDeliveryTarget,
+  CleanupPredecessorDeliveryWaitOptions,
   RuntimeEventEntry,
   RuntimeEventOutboxFileSystem,
   RuntimeEventOutboxTimer,
@@ -185,6 +197,7 @@ class AgentSessionRuntimeEventOutboxImpl implements AgentSessionRuntimeEventOutb
       reject: (error: Error) => void
     }
   >()
+  private readonly cleanupPredecessorWaiters: CleanupPredecessorDeliveryWaiters
   private readonly receivedInputReceipts = new Map<string, AgentSessionRuntimeEventReceipt>()
   // A deadline fails the current action while its original request remains fenced.
   private readonly timedOutInputReceiptErrors = new Map<string, Error>()
@@ -222,6 +235,11 @@ class AgentSessionRuntimeEventOutboxImpl implements AgentSessionRuntimeEventOutb
     this.now = options.clock ?? (() => new Date())
     this.timer = options.timer ?? defaultRuntimeEventOutboxTimer
     this.filePath = options.filePath ?? RUNTIME_EVENT_OUTBOX_FILE
+    this.cleanupPredecessorWaiters = new CleanupPredecessorDeliveryWaiters(
+      this.timer,
+      (target) => this.hasCleanupPredecessorRecords(target),
+      () => this.kick(),
+    )
   }
 
   ready(): boolean {
@@ -253,6 +271,7 @@ class AgentSessionRuntimeEventOutboxImpl implements AgentSessionRuntimeEventOutb
     if (raw === null) {
       this.healthy = true
       this.recoveryRequiresLoad = false
+      this.resolveCleanupPredecessorWaiters()
       return
     }
     const snapshot = parseSnapshot(raw)
@@ -271,6 +290,7 @@ class AgentSessionRuntimeEventOutboxImpl implements AgentSessionRuntimeEventOutb
     this.enforceRetentionCap()
     this.healthy = true
     this.recoveryRequiresLoad = false
+    this.resolveCleanupPredecessorWaiters()
   }
 
   async enqueueBeforeExecution(
@@ -309,6 +329,15 @@ class AgentSessionRuntimeEventOutboxImpl implements AgentSessionRuntimeEventOutb
       this.scheduleLocalRetry()
     })
     void this.kick()
+  }
+
+  async awaitCleanupPredecessorDelivery(
+    target: CleanupPredecessorDeliveryTarget,
+    options: CleanupPredecessorDeliveryWaitOptions,
+  ): Promise<void> {
+    this.requireLoaded('awaitCleanupPredecessorDelivery')
+    if (!this.hasCleanupPredecessorRecords(target)) return
+    return await this.cleanupPredecessorWaiters.wait(target, options)
   }
 
   async awaitInputReceipt(recordId: string): Promise<AgentSessionRuntimeEventReceipt> {
@@ -409,6 +438,7 @@ class AgentSessionRuntimeEventOutboxImpl implements AgentSessionRuntimeEventOutb
     this.stopped = true
     this.deliveryStop.abort()
     this.activeDeliveryGroups.clear()
+    this.cleanupPredecessorWaiters.stop()
     if (this.networkRetry) {
       this.timer.clearTimeout(this.networkRetry)
       this.networkRetry = null
@@ -627,6 +657,7 @@ class AgentSessionRuntimeEventOutboxImpl implements AgentSessionRuntimeEventOutb
       return false
     }
     this.updateRetentionCapState()
+    this.resolveCleanupPredecessorWaiters(removed)
     log.error('runtime-event binding refusal reached terminal settlement', {
       deliveryKey,
       status: error.status,
@@ -703,6 +734,7 @@ class AgentSessionRuntimeEventOutboxImpl implements AgentSessionRuntimeEventOutb
     }
 
     this.updateRetentionCapState()
+    this.resolveCleanupPredecessorWaiters(removed)
     for (const { record, receipt } of positiveReceipts) this.resolveInputReceipt(record.id, receipt)
     for (const record of alreadyConsumed) {
       const error = new AlreadyConsumedRuntimeEventError(record.id)
@@ -836,6 +868,18 @@ class AgentSessionRuntimeEventOutboxImpl implements AgentSessionRuntimeEventOutb
 
   private requireLoaded(op: string): void {
     if (!this.loaded) throw new Error(`runtime-event outbox is not loaded; cannot ${op}`)
+  }
+
+  private hasCleanupPredecessorRecords(target: CleanupPredecessorDeliveryTarget): boolean {
+    for (const record of this.records.values()) {
+      if (isCleanupPredecessorRecord(record, target)) return true
+    }
+    return false
+  }
+
+  private resolveCleanupPredecessorWaiters(removed?: readonly InternalRecord[]): void {
+    if (removed) this.cleanupPredecessorWaiters.recordsRemoved(removed)
+    else this.cleanupPredecessorWaiters.stateLoaded()
   }
 
   private resolveInputReceipt(recordId: string, receipt: AgentSessionRuntimeEventReceipt): void {
