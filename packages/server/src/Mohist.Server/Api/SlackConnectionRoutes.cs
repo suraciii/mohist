@@ -23,6 +23,10 @@ namespace Mohist.Server.Api;
 
 public static partial class SlackConnectionRoutes
 {
+    private static bool IsBackpressured(AgentConnection connection) =>
+        connection.ConnectionHealth == ConnectionHealthKind.Degraded
+        && SlackConnectionBackpressureReasons.IsBackpressureReason(connection.HealthReason);
+
     private const string SlackAppCreationReference = "https://api.slack.com/apps?new_app=1";
     private static readonly Regex SlackMentionToken = new(
         @"<@(?<id>[A-Za-z0-9_-]+)(?:\|[^>]*)?>",
@@ -1355,7 +1359,7 @@ public static partial class SlackConnectionRoutes
             SlackAttachmentBinding? attachmentBinding = null;
             if (string.IsNullOrWhiteSpace(sessionId))
             {
-                var launchIds = PreMintSlackLaunchIds(projectId, req.Identity);
+                var launchIds = SlackChannelLaunchService.PreMintSlackLaunchIds(projectId, req.Identity);
                 attachmentBinding = await req.AttachmentBinder.PrepareAsync(
                     projectId,
                     connection,
@@ -1499,41 +1503,11 @@ public static partial class SlackConnectionRoutes
         });
     }
 
-    private static (string SessionId, string InputId, string TurnId) PreMintSlackLaunchIds(
-        string projectId,
-        SlackMessageIdentity identity)
-    {
-        var ownershipIdentity = $"{projectId}\nslack:{identity.WorkspaceTeamId}:{identity.ConversationId}:{identity.MessageTs}";
-        return (
-            $"agent-session-{AgentLaunchCoordinatorCodec.StableToken($"{ownershipIdentity}\nsession")}",
-            AgentLaunchCoordinatorCodec.StableToken($"{ownershipIdentity}\ninput"),
-            AgentLaunchCoordinatorCodec.StableToken($"{ownershipIdentity}\nturn"));
-    }
-
     internal static string BuildAttachmentAck(
         string acknowledgement,
         IReadOnlyList<SlackIngressFile> files,
-        SlackAttachmentBinding? binding)
-    {
-        if (binding is null || binding.Results.Count == 0)
-            return acknowledgement;
-
-        var accepted = binding.Results
-            .Where(result => result.IsAccepted && result.Descriptor is not null)
-            .Select(result => result.Descriptor!.OriginalFileName)
-            .ToArray();
-        var rejected = binding.Results
-            .Select((result, index) => (Result: result, File: files[index]))
-            .Where(item => !item.Result.IsAccepted)
-            .Select(item => $"{item.File.Name} ({item.Result.RejectionReason}: {item.Result.RejectionMessage})")
-            .ToArray();
-        var parts = new List<string> { acknowledgement };
-        if (accepted.Length > 0)
-            parts.Add($"Files received: {string.Join(", ", accepted)}.");
-        if (rejected.Length > 0)
-            parts.Add($"Files not used: {string.Join("; ", rejected)}.");
-        return string.Join(' ', parts);
-    }
+        SlackAttachmentBinding? binding) =>
+        SlackChannelLaunchService.BuildAttachmentAck(acknowledgement, files, binding);
 
     private static string BuildLaunchAck(AgentStartupContext? startupContext, bool alreadyExisted)
     {

@@ -1,23 +1,11 @@
-using System.Text;
-using System.Text.Json;
-using System.Text.RegularExpressions;
-using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
-using Mohist.Server.Agent.Grains;
 using Mohist.Server.Agent.Services;
 using Mohist.Server.Contracts;
 using Mohist.Server.Infrastructure.Data.Slack;
-using Mohist.Server.Infrastructure.Security.Secrets;
 using Mohist.Server.Infrastructure.Slack;
-using Mohist.Server.Project.Services;
-using Mohist.Server.Sessions.Grains;
-using Mohist.Server.Sessions.Domain;
-using Mohist.Server.Sessions.Services;
 using Mohist.Server.Slack;
 using Mohist.Server.Slack.Domain;
 using Mohist.Server.Slack.Services;
-using Mohist.Server.Agent.Domain;
-using Mohist.Server.Workspace.Services;
 
 namespace Mohist.Server.Api;
 
@@ -40,30 +28,6 @@ public static partial class SlackConnectionRoutes
     /// treated as Bot mentions.
     /// </para>
     /// </summary>
-    private sealed record ChannelNewWorkAdmission(
-        AgentInfo? Agent,
-        SlackAdmissionDecision? Decision);
-
-    private static async Task<ChannelNewWorkAdmission> AdmitChannelNewWorkAsync(
-        HandleChannelIngressRequest req,
-        string threadAnchor,
-        CancellationToken ct)
-    {
-        var agent = await req.Agents.GetByIdAsync(req.ProjectId, req.Connection.AgentId);
-        if (agent is null)
-            return new(null, null);
-
-        var decision = await req.Services.GetRequiredService<SlackAdmissionService>()
-            .AdmitNewWorkAsync(
-                req.ProjectId,
-                req.Connection,
-                agent,
-                req.Identity,
-                threadAnchor,
-                ct);
-        return new(agent, decision);
-    }
-
     private static IResult AgentNotFoundResponse() =>
         ApiResults.Fail("The Agent bound to this Connection no longer exists.", 409, "agent_not_found");
 
@@ -165,12 +129,7 @@ public static partial class SlackConnectionRoutes
                     await EnqueueReplyAsync(req.Outbox, projectId, connection, body.ConversationId, reason, null, ct, body.ThreadTs);
                     return ApiResults.Ok(new { kind = "rejected", reason });
                 }
-                var channelAdmissionRoot = await AdmitChannelNewWorkAsync(req, rootTs, ct);
-                if (channelAdmissionRoot.Agent is null)
-                    return AgentNotFoundResponse();
-                if (!channelAdmissionRoot.Decision!.Admitted)
-                    return AdmissionResponse(channelAdmissionRoot.Decision);
-                return await LaunchChannelRootAsync(req, channelAdmissionRoot.Agent, prompt, rootTs, null, ct);
+                return await LaunchChannelRootAsync(req, prompt, rootTs, null, ct);
             }
 
             if (otherBotsInThread)
@@ -181,12 +140,7 @@ public static partial class SlackConnectionRoutes
                     await EnqueueReplyAsync(req.Outbox, projectId, connection, body.ConversationId, reason, null, ct, body.ThreadTs);
                     return ApiResults.Ok(new { kind = "rejected", reason });
                 }
-                var channelAdmissionOtherThread = await AdmitChannelNewWorkAsync(req, rootTs, ct);
-                if (channelAdmissionOtherThread.Agent is null)
-                    return AgentNotFoundResponse();
-                if (!channelAdmissionOtherThread.Decision!.Admitted)
-                    return AdmissionResponse(channelAdmissionOtherThread.Decision);
-                return await LaunchChannelRootAsync(req, channelAdmissionOtherThread.Agent, prompt, rootTs, null, ct);
+                return await LaunchChannelRootAsync(req, prompt, rootTs, null, ct);
             }
 
             var reconciled = await ReconcileSessionIdAsync(
@@ -201,12 +155,6 @@ public static partial class SlackConnectionRoutes
                 return ApiResults.Ok(new { kind = "rejected", reason });
             }
 
-            var channelAdmissionUnbound = await AdmitChannelNewWorkAsync(req, rootTs, ct);
-            if (channelAdmissionUnbound.Agent is null)
-                return AgentNotFoundResponse();
-            if (!channelAdmissionUnbound.Decision!.Admitted)
-                return AdmissionResponse(channelAdmissionUnbound.Decision);
-
             var historyOutcome = await ReadThreadHistoryIfAnyAsync(req, rootTs, ct);
 
             if (historyOutcome.Outcome == SlackThreadHistoryReadOutcome.Refused)
@@ -219,7 +167,7 @@ public static partial class SlackConnectionRoutes
             var startupContext = historyOutcome.Outcome == SlackThreadHistoryReadOutcome.Imported
                 ? BuildStartupContext(req, historyOutcome.Messages)
                 : null;
-            return await LaunchChannelRootAsync(req, channelAdmissionUnbound.Agent, prompt, rootTs, startupContext, ct);
+            return await LaunchChannelRootAsync(req, prompt, rootTs, startupContext, ct);
         }
 
         if (threadBindings.Count >= 2)
@@ -473,185 +421,55 @@ public static partial class SlackConnectionRoutes
         return ApiResults.Ok(new { kind = "rejected", reason });
     }
 
-    private static bool IsBackpressured(AgentConnection connection) =>
-        connection.ConnectionHealth == Agent.Domain.ConnectionHealthKind.Degraded
-        && SlackConnectionBackpressureReasons.IsBackpressureReason(connection.HealthReason);
-
     private static async Task<IResult> LaunchChannelRootAsync(
         HandleChannelIngressRequest req,
-        AgentInfo agent,
         string prompt,
         string rootTs,
         AgentStartupContext? startupContext,
         CancellationToken ct)
     {
         var body = req.Body;
-        var projectId = req.ProjectId;
-        var connection = req.Connection;
-        var dispatchRef = $"slack-thread:{body.TeamId}:{body.ConversationId}:{rootTs}";
-
-        if (IsBackpressured(connection))
-            return ApiResults.Ok(new
-            {
-                kind = "backpressured",
-                reason = SlackAdmissionMessages.Backpressured,
-                responseOwner = SlackIngressResponseOwners.Adapter,
-            });
-
-        var reservation = await req.ThreadLaunchReservations.ReserveAsync(
-            projectId,
-            body.TeamId,
-            connection.Id,
-            body.ConversationId,
-            rootTs,
-            body.MessageTs,
-            req.SenderSlackUserId,
-            ct);
-        if (reservation.Kind == SlackThreadLaunchReservationKind.InProgress)
-            return ApiResults.Conflict(
-                "Another launch is already being established for this Slack thread; retry this message.",
-                "slack_thread_launch_in_progress");
-        if (reservation.Kind == SlackThreadLaunchReservationKind.Bound)
-        {
-            await req.ThreadMapping.UpsertAsync(
-                projectId,
-                body.TeamId,
-                connection.Id,
-                body.ConversationId,
-                rootTs,
-                req.SenderSlackUserId,
-                reservation.SessionId!,
-                rootTs,
-                ct);
-            return await DispatchChannelFollowupAsync(req, reservation.SessionId!, prompt, ct);
-        }
-
-        var routeDraft = new SlackProviderInboxRouteDraft(SlackProviderInboxRouteKinds.LaunchThread);
-        SlackProviderInboxAcceptResult accepted;
-        try
-        {
-            accepted = await req.Inbox.AcceptAsync(new SlackProviderInboxDraft(
-                projectId, connection.Id, req.Identity, req.SenderSlackUserId, rootTs), routeDraft, ct);
-        }
-        catch (SlackProviderInboxCapacityExceededException)
-        {
-            return ApiResults.Ok(new
-            {
-                kind = "backpressured",
-                reason = SlackAdmissionMessages.Backpressured,
-                responseOwner = SlackIngressResponseOwners.Adapter,
-            });
-        }
-
-        if (!accepted.AlreadyExisted)
-            await req.Connections.ClearOfflineGapIfSetAsync(projectId, connection.Id, ct);
-
-        AgentLaunchResult? launch = null;
-        SlackAttachmentBinding? attachmentBinding = null;
-        var existingRoute = accepted.AlreadyExisted
-            ? await req.Inbox.GetRouteAsync(projectId, accepted.Id, ct)
-            : null;
-        var sessionId = existingRoute?.SessionId ?? reservation.SessionId;
-        if (string.IsNullOrWhiteSpace(sessionId))
-        {
-            var launchIds = PreMintSlackLaunchIds(projectId, req.Identity);
-            attachmentBinding = await req.AttachmentBinder.PrepareAsync(
-                projectId,
-                connection,
+        var result = await req.Services.GetRequiredService<SlackChannelLaunchService>().LaunchAsync(
+            new SlackChannelLaunchRequest(
+                req.ProjectId,
+                req.Connection,
                 req.Identity,
-                launchIds.SessionId,
-                launchIds.InputId,
+                req.SenderSlackUserId,
+                prompt,
                 body.Files,
-                ct);
-            if (string.IsNullOrWhiteSpace(prompt) && attachmentBinding.AcceptedCount == 0)
-            {
-                await req.AttachmentBinder.RollbackAsync(
-                    projectId, launchIds.SessionId, launchIds.InputId, attachmentBinding, CancellationToken.None);
-                var rejection = BuildAttachmentAck(
-                    "No usable file was accepted, so the task was not started.",
-                    body.Files,
-                    attachmentBinding);
-                await EnqueueRequiredReplyAsync(req.Outbox, projectId, connection, body.ConversationId,
-                    rejection, dispatchRef, ct, rootTs);
-                await req.Inbox.MarkDispatchedAsync(projectId, accepted.Id, ct);
-                return ApiResults.Ok(new { kind = "rejected", reason = rejection });
-            }
-
-            try
-            {
-                var time = req.Services.GetRequiredService<TimeProvider>();
-                var workspaceName = await req.Services.GetRequiredService<InteractionWorkspaceProvisioner>()
-                    .EnsureSlackWorkspaceAsync(projectId, body.TeamId, body.ConversationId, time.GetUtcNow());
-                launch = await req.Launcher.LaunchConnectionAsync(
-                    agent,
-                    prompt,
-                    new ConnectionLaunchOrigin(
-                        connection.Id, body.TeamId, req.SenderSlackUserId, body.ConversationId, body.MessageTs, rootTs),
-                    workspaceName: workspaceName,
-                    startupContext: startupContext,
-                    attachments: attachmentBinding.AcceptedDescriptors,
-                    attachmentIds: attachmentBinding.AttachmentIds,
-                    preMintedSessionId: launchIds.SessionId,
-                    preMintedInputId: launchIds.InputId,
-                    preMintedTurnId: launchIds.TurnId,
-                    ct: ct);
-            }
-            catch
-            {
-                await req.AttachmentBinder.RollbackAsync(
-                    projectId, launchIds.SessionId, launchIds.InputId, attachmentBinding, CancellationToken.None);
-                throw;
-            }
-            sessionId = launch.SessionId;
-        }
-
-
-        if (existingRoute?.SessionId is null)
-            sessionId = await req.Inbox.SetRouteSessionIdAsync(projectId, accepted.Id, sessionId!, ct);
-
-        if (!string.IsNullOrWhiteSpace(sessionId))
-        {
-            var bindResult = await req.ThreadMapping.UpsertAsync(
-                projectId, body.TeamId, connection.Id, body.ConversationId, rootTs,
-                req.SenderSlackUserId, sessionId, rootTs, ct);
-            sessionId = bindResult.SessionId;
-            if (bindResult.AlreadyExisted)
-                sessionId = await req.Inbox.SetRouteSessionIdAsync(projectId, accepted.Id, sessionId, ct);
-            await req.ThreadLaunchReservations.BindSessionAsync(
-                projectId,
-                body.TeamId,
-                connection.Id,
-                body.ConversationId,
                 rootTs,
-                sessionId,
-                ct);
-        }
+                body.ThreadTs,
+                ToServiceLaunchIds(SlackChannelLaunchService.PreMintSlackLaunchIds(req.ProjectId, req.Identity)),
+                startupContext,
+                req.ThreadMapping),
+            ct);
 
-        await req.Services.GetRequiredService<SlackStatusProjection>().EnqueueReceivedAsync(
-            projectId, connection.Id, req.Identity, body.ThreadTs, ct);
-        if (launch is not null)
-        {
-            await EnqueueInitialLaunchStatusAsync(
-                req.Services,
-                req.Grains,
-                projectId,
-                connection,
-                req.Identity,
-                rootTs,
-                launch,
-                req.SenderSlackUserId,
-                ct);
-        }
-        await req.Inbox.MarkDispatchedAsync(projectId, accepted.Id, ct);
+        if (result.BoundSessionId is not null)
+            return await DispatchChannelFollowupAsync(req, result.BoundSessionId, prompt, ct);
+        if (result.Kind == "agent_not_found")
+            return AgentNotFoundResponse();
+        if (result.Conflict)
+            return ApiResults.Conflict(result.Reason!, result.Kind);
+        if (result.ResponseOwner is not null || result.Kind == "rejected")
+            return ApiResults.Ok(new
+            {
+                kind = result.Kind,
+                reason = result.Reason,
+                responseOwner = result.ResponseOwner,
+            });
         return ApiResults.Ok(new
         {
-            kind = accepted.AlreadyExisted ? "queued" : "accepted",
-            sessionId,
-            jobKey = launch?.JobKey,
-            inputId = launch?.InputId,
-            turnId = launch?.TurnId,
-            threadRoot = rootTs,
+            kind = result.Kind,
+            sessionId = result.SessionId,
+            jobKey = result.JobKey,
+            inputId = result.InputId,
+            turnId = result.TurnId,
+            threadRoot = result.ThreadRoot ?? rootTs,
         });
     }
+
+    private static SlackChannelLaunchServiceLaunchIds ToServiceLaunchIds(
+        (string SessionId, string InputId, string TurnId) ids) =>
+        new(ids.SessionId, ids.InputId, ids.TurnId);
 
 }
