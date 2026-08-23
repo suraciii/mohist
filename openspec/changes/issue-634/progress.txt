@@ -28,10 +28,10 @@ Verification for this disposal:
 - `SlackMultiAgentIngressSpecs`: 30/30 passed.
 - Focused migration/store unit tests: 9/9 passed.
 - Full `dotnet test Mohist.Server.Tests.slnf --no-restore -p:SkipWebBuild=true`
-  passed Workflow Definition 178, Orleans 2, Arch 53, Unit 3800, and 3087 of
-  3088 Spec tests. One unrelated pre-existing flaky workspace spec failed
-  (`InteractionWorkspaceSpecs.SlackChannel_TwoProjects_HaveIndependentWorkspaces`)
-  and passed immediately when rerun alone. `git diff --check` passed.
+  passed on rerun: Workflow Definition 178, Orleans 2, Arch 53, Unit 3800,
+  Spec 3088. The first run had one unrelated flaky workspace-spec failure;
+  that test passed alone and the complete rerun was green. `git diff --check`
+  passed.
 
 Previous checkpoint (superseded by the re-review): all six earlier must-fix
 findings were implemented and focused verification passed.
