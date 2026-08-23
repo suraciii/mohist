@@ -1,13 +1,24 @@
 # Disposal of self-review must-fix findings (issue-634 plan)
 
-Source: self-review.md (current re-review FAIL verdict: MF-6; previous
-findings MF-1..MF-5 are verified fixed).
+Source: self-review.md (current re-review FAIL verdict: MF-7; previous
+findings MF-1..MF-6 are verified fixed).
 Rule: fix each must-fix in the plan artifacts, or justify won't-fix. Do not
 edit self-review.md. Observations need no action.
 
-Status: ALL SIX MUST-FIX FINDINGS FIXED. No won't-fixes.
+Status: MF-7 IN PROGRESS. MF-1..MF-6 remain fixed. No won't-fixes.
 
 ## Dispositions
+
+### MF-7 — missing selected Connection is classified as stale instead of unavailable — IN PROGRESS
+
+The issue explicitly requires a missing selected Connection to return the
+visible `unavailable` outcome. The action spec, Design Decision 4, and T-003
+currently classify a vanished selected Connection as `no_longer_valid`/stale.
+Planned fix: reserve `unavailable` for an absent/deleted selected Connection
+row and for its absent/invalid current lease; retain `no_longer_valid` only
+when the Connection still exists but durable candidate facts no longer hold
+(such as workspace-Bot binding drift) or a required follow-up binding/session
+has vanished. Add deterministic coverage for both classifications.
 
 ### MF-6 — explicit multi-Bot mentions inside an existing thread lacked correct selected dispatch — FIXED
 
