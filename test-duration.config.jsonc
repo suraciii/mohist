@@ -86,8 +86,8 @@
         { "id": "arch" }
       ]
     },
-    // Two collection workers keep cold CI runs below the L1 p95 budget without exhausting the track deadline.
-    { "id": "server-spec", "kind": "dotnet-apphost", "trackType": "behavior", "application": "server", "specKinds": ["Product"], "level": "L1", "resources": ["orleans", "sqlite", "server-runtime"], "csproj": "packages/server/tests/Mohist.Server.SpecTests/Mohist.Server.SpecTests.csproj", "apphostArgs": ["-parallel", "collections", "-parallelAlgorithm", "conservative", "-maxThreads", "2"], "report": "reports/server-spec.trx", "reportFormat": "trx", "deadlineMs": 240000, "enforce": true, "rules": [
+    // Three collection workers keep cold CI inside the suite deadline; trimmed Spec setup keeps the L1 p95 below budget.
+    { "id": "server-spec", "kind": "dotnet-apphost", "trackType": "behavior", "application": "server", "specKinds": ["Product"], "level": "L1", "resources": ["orleans", "sqlite", "server-runtime"], "csproj": "packages/server/tests/Mohist.Server.SpecTests/Mohist.Server.SpecTests.csproj", "apphostArgs": ["-parallel", "collections", "-parallelAlgorithm", "conservative", "-maxThreads", "3"], "report": "reports/server-spec.trx", "reportFormat": "trx", "deadlineMs": 240000, "enforce": true, "rules": [
         { "id": "spec", "percentile": 95, "percentileMs": 500 }
       ]
     },
