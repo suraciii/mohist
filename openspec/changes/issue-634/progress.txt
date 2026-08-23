@@ -1,13 +1,24 @@
 # Disposal of self-review must-fix findings (issue-634 plan)
 
-Source: self-review.md (current re-review FAIL verdict: MF-4; previous
-findings MF-1..MF-3 remain fixed).
+Source: self-review.md (current re-review FAIL verdict: MF-5; previous
+findings MF-1..MF-4 are verified fixed).
 Rule: fix each must-fix in the plan artifacts, or justify won't-fix. Do not
 edit self-review.md. Observations need no action.
 
-Status: ALL FOUR MUST-FIX FINDINGS FIXED. No won't-fixes.
+Status: MF-5 FIX IN PROGRESS. Previous MF-1..MF-4 remain fixed. No won't-fixes.
 
 ## Dispositions
+
+### MF-5 — candidate identity loses owning Project for cross-Project selection — IN PROGRESS
+
+The fix will carry an ordered candidate reference `(ProjectId, ConnectionId)`
+through the durable claim and signed payload, commit both `ChosenProjectId` and
+`ChosenConnectionId`, and require selected lookup, lease/policy evaluation,
+admission, launch/follow-up dispatch, pre-allocated lineage use, and recovery
+to execute in the selected Project. Specs and T-003 will add deterministic
+same-workspace cross-Project success and selected-policy/lease rejection
+coverage.
+
 
 ### MF-4 — prompt-owner Connection is not re-authorized under its current policy at click time — FIXED
 
