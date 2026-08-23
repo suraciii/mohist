@@ -115,6 +115,7 @@ public static class MohistServiceRegistration
         // concrete type — scoped, like IssueQuerier.
         services.AddScoped<IAgentLauncher>(sp => sp.GetRequiredService<AgentLauncher>());
         services.AddScoped<SlackActionSigningHelper>();
+        services.AddScoped<SlackChannelLaunchService>();
         services.AddScoped<ISlackActionSigner>(sp => sp.GetRequiredService<SlackActionSigningHelper>());
         services.AddScoped<ISessionTreeMutationFenceReadPort>(sp =>
             new SessionTreeMutationFenceReadPort(
