@@ -5,9 +5,13 @@ Source: review.md. Do not edit review.md.
 Current checkpoint (2026-09 re-review disposal): two must-fix findings are
 open. No won't-fixes planned.
 
-- MF-1 in progress: make the committed ThreadLaunch/Bound recovery path prove
-  Session acceptance rather than treating a provider-inbox route as proof, and
-  add a deterministic crash-window regression test.
+- MF-1 fixed: a Bound race is durably rewritten from ThreadLaunch to
+  ThreadFollowup with the winning Session while retaining the committed
+  input/turn ids. Recovery distinguishes launch inbox routes from follow-up
+  inbox routes and idempotently replays Session acceptance; it no longer treats
+  a routed follow-up inbox row as completion proof. Deterministic tests cover
+  both Bound resolution and the crash after inbox acceptance but before
+  Session acceptance.
 - MF-2 pending: add additive legacy-row migration coverage, successful live
   route coverage for all thread dispatch shapes and retained attachments, the
   full mutable-policy rejection matrix, and worker-level retention coverage.

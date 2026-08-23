@@ -360,15 +360,32 @@ internal sealed class SlackAgentSelectionService : IScopedService
             // If the original message was already accepted before a later
             // thread reservation became Bound, replay that same launch route
             // instead of rerouting the retained message as a second follow-up.
-            var existingRoute = await _inbox.FindMessageRouteSessionIdAsync(
+            var existingRoute = await _inbox.FindMessageRouteAsync(
                 selected.ProjectId,
                 selected.Id,
                 identity.WorkspaceTeamId,
                 identity.ConversationId,
                 identity.MessageTs,
                 ct);
-            if (!string.IsNullOrWhiteSpace(existingRoute))
+            if (existingRoute is { Kind: SlackProviderInboxRouteKinds.LaunchThread, SessionId: not null })
                 return Confirmed("already_accepted", "This Agent selection was already accepted.");
+            if (existingRoute is { Kind: SlackProviderInboxRouteKinds.FollowupThread, SessionId: not null })
+            {
+                // AcceptAsync persists a follow-up inbox route before the
+                // Session accepts its input. Recovery must replay that accept;
+                // the inbox row alone is not completion evidence.
+                var resolved = await ResolveBoundThreadLaunchAsync(
+                    claim,
+                    existingRoute.SessionId,
+                    ct);
+                return await DispatchFollowupAsync(
+                    selected,
+                    identity,
+                    resolved,
+                    existingRoute.SessionId,
+                    SelectionIds(resolved),
+                    ct);
+            }
 
             var threadAnchor = dispatchKind == SlackSelectionDispatchKinds.RootLaunch
                 ? identity.MessageTs
@@ -403,26 +420,47 @@ internal sealed class SlackAgentSelectionService : IScopedService
             if (result.BoundSessionId is not null)
             {
                 // A competing launch bound this Connection after click-time
-                // classification. The retained original message still has to
-                // enter that durable lineage; treating Bound as success would
-                // silently drop it. Follow-up ids are deterministic from the
-                // winning bound Session, so recovery repeats the same accept.
+                // classification. Persist that effective lineage before the
+                // retained message enters the inbox. The original committed
+                // input/turn ids remain authoritative and recovery replays
+                // the now-durable ThreadFollowup dispatch.
+                var resolved = await ResolveBoundThreadLaunchAsync(
+                    claim,
+                    result.BoundSessionId,
+                    ct);
                 return await DispatchFollowupAsync(
                     selected,
                     identity,
-                    claim,
+                    resolved,
                     result.BoundSessionId,
-                    PreAllocateIds(
-                        SlackSelectionDispatchKinds.ThreadFollowup,
-                        selected.ProjectId,
-                        identity,
-                        result.BoundSessionId),
+                    SelectionIds(resolved),
                     ct);
             }
             return Confirmed("accepted", "Agent selection accepted and work is being started.");
         }
 
         return await DispatchFollowupAsync(selected, identity, claim, binding!, ids, ct);
+    }
+
+    private async Task<SlackAmbiguousPromptSnapshot> ResolveBoundThreadLaunchAsync(
+        SlackAmbiguousPromptSnapshot claim,
+        string boundSessionId,
+        CancellationToken ct)
+    {
+        var resolved = await _prompts.ResolveBoundThreadLaunchAsync(
+            claim.Id,
+            boundSessionId,
+            ct);
+        if (resolved.SelectionState != SlackSelectionStates.Decided
+            || resolved.DispatchKind != SlackSelectionDispatchKinds.ThreadFollowup
+            || !string.Equals(resolved.SelectionSessionId, boundSessionId, StringComparison.Ordinal)
+            || string.IsNullOrWhiteSpace(resolved.SelectionInputId)
+            || string.IsNullOrWhiteSpace(resolved.SelectionTurnId))
+        {
+            throw new InvalidOperationException(
+                $"Committed Slack Agent selection {claim.Id} resolved to a different execution lineage.");
+        }
+        return resolved;
     }
 
     private async Task<SlackTurnControlResult> DispatchFollowupAsync(
@@ -498,8 +536,10 @@ internal sealed class SlackAgentSelectionService : IScopedService
         }
 
         await _followups.DispatchNextAsync(selected.ProjectId, bindingSession, ct);
-        if (!inbox.AlreadyExisted)
-            await _inbox.MarkDispatchedAsync(selected.ProjectId, inbox.Id, ct);
+        // An existing inbox row can be the residue of a crash before Session
+        // acceptance. Once acceptance and dispatch have succeeded, close that
+        // durable inbox obligation regardless of who inserted the row.
+        await _inbox.MarkDispatchedAsync(selected.ProjectId, inbox.Id, ct);
 
         return Confirmed(
             accepted.AlreadyAccepted ? "already_accepted" : "accepted",
@@ -656,6 +696,9 @@ internal sealed class SlackAgentSelectionService : IScopedService
 
     private static IReadOnlyList<SlackIngressFile> DeserializeFiles(string json) =>
         JSON.Deserialize<List<SlackIngressFile>>(json) ?? [];
+
+    private static SelectionExecutionIds SelectionIds(SlackAmbiguousPromptSnapshot claim) =>
+        new(claim.SelectionSessionId!, claim.SelectionInputId!, claim.SelectionTurnId!);
 
     private static SelectionExecutionIds PreAllocateIds(
         string dispatchKind,

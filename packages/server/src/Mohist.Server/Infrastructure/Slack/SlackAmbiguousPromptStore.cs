@@ -245,6 +245,37 @@ public sealed class SlackAmbiguousPromptStore : IScopedService
     }
 
     /// <summary>
+    /// Durably resolves a committed thread launch onto a Session that won a
+    /// concurrent thread-binding race. The original pre-allocated input and
+    /// turn ids remain authoritative; only the effective dispatch kind and
+    /// Session lineage change before the retained message enters the inbox.
+    /// </summary>
+    public async Task<SlackAmbiguousPromptSnapshot> ResolveBoundThreadLaunchAsync(
+        string rowId,
+        string boundSessionId,
+        CancellationToken ct = default)
+    {
+        ValidateRequired(rowId, nameof(rowId));
+        ValidateRequired(boundSessionId, nameof(boundSessionId));
+        var now = _timeProvider.GetUtcNow();
+        await using var db = await _dbFactory.CreateDbContextAsync(ct);
+        await db.SlackAmbiguousPrompts
+            .Where(row => row.Id == rowId
+                && row.SelectionState == SlackSelectionStates.Decided
+                && row.DispatchKind == SlackSelectionDispatchKinds.ThreadLaunch)
+            .ExecuteUpdateAsync(setters => setters
+                .SetProperty(row => row.DispatchKind, SlackSelectionDispatchKinds.ThreadFollowup)
+                .SetProperty(row => row.SelectionSessionId, boundSessionId)
+                .SetProperty(row => row.UpdatedAt, now), ct);
+
+        var row = await db.SlackAmbiguousPrompts.AsNoTracking()
+            .Where(candidate => candidate.Id == rowId)
+            .SingleOrDefaultAsync(ct)
+            ?? throw new InvalidOperationException("The ambiguity claim disappeared while resolving its bound launch.");
+        return ToSnapshot(row);
+    }
+
+    /// <summary>
     /// Returns the rows that need one bounded obligation pass. The caller
     /// supplies the retry interval so the database remains the scheduling
     /// fence: a second worker cannot immediately claim the same Decided row.
