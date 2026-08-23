@@ -2,8 +2,18 @@
 
 Source: review.md. Do not edit review.md.
 
-Current checkpoint (2026-09 review follow-up): all six must-fix findings are
-implemented and focused verification passes. No won't-fixes.
+Current checkpoint (2026-09 re-review disposal): two must-fix findings are
+open. No won't-fixes planned.
+
+- MF-1 in progress: make the committed ThreadLaunch/Bound recovery path prove
+  Session acceptance rather than treating a provider-inbox route as proof, and
+  add a deterministic crash-window regression test.
+- MF-2 pending: add additive legacy-row migration coverage, successful live
+  route coverage for all thread dispatch shapes and retained attachments, the
+  full mutable-policy rejection matrix, and worker-level retention coverage.
+
+Previous checkpoint (superseded by the re-review): all six earlier must-fix
+findings were implemented and focused verification passed.
 
 - MF-1 fixed: expiry determines interactivity from the durable chooser outbox
   payload. Only a claim whose delivered payload contains `mohist_select_agent`
