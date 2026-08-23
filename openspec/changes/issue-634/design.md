@@ -252,9 +252,10 @@ envelope completeness, and delivering-Connection lookup/disabled check:
    authorized under that Connection's current mutable access state. A denial
    stops before candidate handling or mutation.
 7. **Candidate resolution and validity** (`unavailable` or
-   `no_longer_valid`) — the chosen `(ChosenProjectId, ChosenConnectionId)`
-   pair must be in the signed payload and durable candidate snapshot. Resolve
-   that exact pair with the normal project-scoped
+   `no_longer_valid`) — after step 3 has proved that the chosen
+   `(ChosenProjectId, ChosenConnectionId)` pair is in the signed payload and
+   exact durable candidate snapshot, resolve that pair with the normal
+   project-scoped
    `AgentConnectionStore.GetAsync(ChosenProjectId, ChosenConnectionId)`; a
    null result means the selected Connection row is absent or was deleted and
    returns the distinct visible `unavailable` outcome required by issue AC #4.
@@ -266,8 +267,7 @@ envelope completeness, and delivering-Connection lookup/disabled check:
    still exists but the retained thread-dispatch facts no longer hold.
 8. **Selected-Connection lease** (`unavailable`) — for the selected
    Connection that exists after step 7, resolve its **own current runtime
-   lease** at click time: read the active
-   lease for its target key
+   lease** at click time: read the active lease for its target key
    `connection:{ChosenProjectId}:{ChosenConnectionId}`
    from the lease store (`ISlackLeaseStore.GetActiveAsync`), then re-prove
    it through `SlackAdapterLeaseService.ValidateRuntimeLeaseAsync` with the
