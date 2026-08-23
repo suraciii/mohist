@@ -14,21 +14,20 @@ interface SessionTranscriptLayoutProps {
   resolveReference?: TimelineReferenceResolver
 }
 
-export function TranscriptEmptyState({
-  currentActivity,
-}: {
-  currentActivity: SessionTimelineCurrentActivity
-}) {
-  const stateKind = currentActivity.state === 'active' || currentActivity.state === 'queued'
-    ? 'active-no-content'
-    : `${currentActivity.state}-no-content`
+export function TranscriptEmptyState({ currentActivity }: { currentActivity: SessionTimelineCurrentActivity }) {
+  const stateKind =
+    currentActivity.state === 'active' || currentActivity.state === 'queued'
+      ? 'active-no-content'
+      : `${currentActivity.state}-no-content`
 
   return (
     <div
       className="flex items-center justify-center py-12"
       data-testid="session-empty-state"
       data-state-kind={stateKind}
-      data-tone={currentActivity.state === 'unknown' ? 'warning' : currentActivity.state === 'idle' ? 'neutral' : 'info'}
+      data-tone={
+        currentActivity.state === 'unknown' ? 'warning' : currentActivity.state === 'idle' ? 'neutral' : 'info'
+      }
     >
       <div className="text-center space-y-2">
         <div className="text-sm font-medium">{currentActivity.label}</div>
@@ -67,7 +66,12 @@ export function SessionTranscriptLayout({
   resolveReference,
 }: SessionTranscriptLayoutProps) {
   return (
-    <div className="block px-4 py-6 min-w-0" data-scrollable="" data-testid="session-timeline-layout" data-timeline-view={viewMode}>
+    <div
+      className="block px-4 py-6 min-w-0"
+      data-scrollable=""
+      data-testid="session-timeline-layout"
+      data-timeline-view={viewMode}
+    >
       <div className="min-w-0">
         <CurrentActivity activity={currentActivity} />
         {entries.length === 0 ? (

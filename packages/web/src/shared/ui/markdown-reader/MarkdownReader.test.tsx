@@ -177,7 +177,13 @@ describe('MarkdownReader attachment references', () => {
 
   it('renders unresolved att references as safe fallbacks without using untrusted URLs', () => {
     const resolveAttachment = vi.fn(() => null)
-    render(<MarkdownReader content="Missing [file](att:missing) and ![image](att:gone)." baseHeadingLevel={2} resolveAttachment={resolveAttachment} />)
+    render(
+      <MarkdownReader
+        content="Missing [file](att:missing) and ![image](att:gone)."
+        baseHeadingLevel={2}
+        resolveAttachment={resolveAttachment}
+      />,
+    )
 
     expect(resolveAttachment).toHaveBeenCalledWith('missing')
     expect(resolveAttachment).toHaveBeenCalledWith('gone')
@@ -362,9 +368,7 @@ describe('MarkdownReader collapsible vs full modes', () => {
 
   it('does not render an Expand control in collapsible mode for short content', () => {
     withSimulatedHeight(100, () => {
-      render(
-        <MarkdownReader content="Short content." mode="collapsible" collapsedHeight={600} baseHeadingLevel={2} />,
-      )
+      render(<MarkdownReader content="Short content." mode="collapsible" collapsedHeight={600} baseHeadingLevel={2} />)
 
       expect(screen.queryByTestId('markdown-expand-control')).not.toBeInTheDocument()
       expect(screen.queryByTestId('markdown-collapse-control')).not.toBeInTheDocument()

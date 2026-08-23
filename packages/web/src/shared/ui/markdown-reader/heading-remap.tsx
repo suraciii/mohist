@@ -15,10 +15,7 @@ export function remapHeadingLevel(original: HeadingLevel, base: HeadingLevel): H
 
 type HeadingProps = HTMLAttributes<HTMLHeadingElement> & ExtraProps
 
-function makeHeading(
-  originalLevel: HeadingLevel,
-  base: HeadingLevel,
-): ComponentType<HeadingProps> {
+function makeHeading(originalLevel: HeadingLevel, base: HeadingLevel): ComponentType<HeadingProps> {
   const targetLevel = remapHeadingLevel(originalLevel, base)
 
   const Heading = ({ children, node: _node, ...props }: HeadingProps) => {
@@ -34,7 +31,9 @@ function makeHeading(
   return Heading
 }
 
-export function buildHeadingOverrides(options: { base: HeadingLevel }): Pick<Components, 'h1' | 'h2' | 'h3' | 'h4' | 'h5' | 'h6'> {
+export function buildHeadingOverrides(options: {
+  base: HeadingLevel
+}): Pick<Components, 'h1' | 'h2' | 'h3' | 'h4' | 'h5' | 'h6'> {
   return {
     h1: makeHeading(1, options.base),
     h2: makeHeading(2, options.base),

@@ -195,9 +195,9 @@ describe('LiveTaskProvider transcript routing', () => {
     rtlRender(
       <QueryClientProvider client={queryClient}>
         <ProjectProvider initialProjectId="project-1">
-            <LiveTaskProvider eventsConnectionHook={eventsConnectionHook}>
-              <LiveTaskProbe />
-            </LiveTaskProvider>
+          <LiveTaskProvider eventsConnectionHook={eventsConnectionHook}>
+            <LiveTaskProbe />
+          </LiveTaskProvider>
         </ProjectProvider>
       </QueryClientProvider>,
     )
@@ -235,9 +235,9 @@ describe('LiveTaskProvider transcript routing', () => {
     rtlRender(
       <QueryClientProvider client={queryClient}>
         <ProjectProvider initialProjectId="project-1">
-            <LiveTaskProvider eventsConnectionHook={eventsConnectionHook}>
-              <LiveTaskProbe />
-            </LiveTaskProvider>
+          <LiveTaskProvider eventsConnectionHook={eventsConnectionHook}>
+            <LiveTaskProbe />
+          </LiveTaskProvider>
         </ProjectProvider>
       </QueryClientProvider>,
     )
@@ -288,9 +288,9 @@ describe('LiveTaskProvider transcript routing', () => {
     rtlRender(
       <QueryClientProvider client={queryClient}>
         <ProjectProvider initialProjectId="project-1">
-            <LiveTaskProvider eventsConnectionHook={eventsConnectionHook}>
-              <LiveTaskProbe />
-            </LiveTaskProvider>
+          <LiveTaskProvider eventsConnectionHook={eventsConnectionHook}>
+            <LiveTaskProbe />
+          </LiveTaskProvider>
         </ProjectProvider>
       </QueryClientProvider>,
     )
@@ -335,9 +335,9 @@ describe('LiveTaskProvider transcript routing', () => {
     rtlRender(
       <QueryClientProvider client={queryClient}>
         <ProjectProvider initialProjectId="project-1">
-            <LiveTaskProvider eventsConnectionHook={eventsConnectionHook}>
-              <LiveTaskProbe />
-            </LiveTaskProvider>
+          <LiveTaskProvider eventsConnectionHook={eventsConnectionHook}>
+            <LiveTaskProbe />
+          </LiveTaskProvider>
         </ProjectProvider>
       </QueryClientProvider>,
     )
@@ -375,9 +375,9 @@ describe('LiveTaskProvider transcript routing', () => {
     rtlRender(
       <QueryClientProvider client={queryClient}>
         <ProjectProvider initialProjectId="project-1">
-            <LiveTaskProvider eventsConnectionHook={eventsConnectionHook}>
-              <LiveTaskProbe />
-            </LiveTaskProvider>
+          <LiveTaskProvider eventsConnectionHook={eventsConnectionHook}>
+            <LiveTaskProbe />
+          </LiveTaskProvider>
         </ProjectProvider>
       </QueryClientProvider>,
     )
@@ -414,9 +414,9 @@ describe('LiveTaskProvider transcript routing', () => {
     rtlRender(
       <QueryClientProvider client={queryClient}>
         <ProjectProvider initialProjectId="project-1">
-            <LiveTaskProvider eventsConnectionHook={eventsConnectionHook}>
-              <LiveTaskProbe />
-            </LiveTaskProvider>
+          <LiveTaskProvider eventsConnectionHook={eventsConnectionHook}>
+            <LiveTaskProbe />
+          </LiveTaskProvider>
         </ProjectProvider>
       </QueryClientProvider>,
     )
@@ -449,9 +449,9 @@ describe('LiveTaskProvider transcript routing', () => {
     rtlRender(
       <QueryClientProvider client={queryClient}>
         <ProjectProvider initialProjectId="project-1">
-            <LiveTaskProvider eventsConnectionHook={eventsConnectionHook}>
-              <LiveTaskProbe />
-            </LiveTaskProvider>
+          <LiveTaskProvider eventsConnectionHook={eventsConnectionHook}>
+            <LiveTaskProbe />
+          </LiveTaskProvider>
         </ProjectProvider>
       </QueryClientProvider>,
     )
@@ -487,9 +487,9 @@ describe('LiveTaskProvider transcript routing', () => {
     rtlRender(
       <QueryClientProvider client={queryClient}>
         <ProjectProvider initialProjectId="project-1">
-            <LiveTaskProvider eventsConnectionHook={eventsConnectionHook}>
-              <LiveTaskProbe />
-            </LiveTaskProvider>
+          <LiveTaskProvider eventsConnectionHook={eventsConnectionHook}>
+            <LiveTaskProbe />
+          </LiveTaskProvider>
         </ProjectProvider>
       </QueryClientProvider>,
     )
@@ -518,9 +518,9 @@ describe('LiveTaskProvider transcript routing', () => {
     rtlRender(
       <QueryClientProvider client={queryClient}>
         <ProjectProvider initialProjectId="project-1">
-            <LiveTaskProvider eventsConnectionHook={eventsConnectionHook}>
-              <LiveTaskProbe />
-            </LiveTaskProvider>
+          <LiveTaskProvider eventsConnectionHook={eventsConnectionHook}>
+            <LiveTaskProbe />
+          </LiveTaskProvider>
         </ProjectProvider>
       </QueryClientProvider>,
     )
@@ -548,9 +548,9 @@ describe('LiveTaskProvider transcript routing', () => {
     rtlRender(
       <QueryClientProvider client={queryClient}>
         <ProjectProvider initialProjectId="project-1">
-            <LiveTaskProvider eventsConnectionHook={eventsConnectionHook}>
-              <LiveTaskProbe />
-            </LiveTaskProvider>
+          <LiveTaskProvider eventsConnectionHook={eventsConnectionHook}>
+            <LiveTaskProbe />
+          </LiveTaskProvider>
         </ProjectProvider>
       </QueryClientProvider>,
     )

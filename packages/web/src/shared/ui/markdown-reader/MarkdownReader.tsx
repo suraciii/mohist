@@ -79,12 +79,7 @@ function MarkdownAttachmentFallback({ id }: { id: string }) {
   )
 }
 
-function MarkdownCodeBlock({
-  children,
-  className,
-  node,
-  ...props
-}: CodeProps) {
+function MarkdownCodeBlock({ children, className, node, ...props }: CodeProps) {
   const isBlock = useContext(CodeBlockContext)
   if (!isBlock) {
     return (
@@ -114,14 +109,17 @@ function MarkdownPre({ children, ...props }: PreProps) {
       className="relative my-3 overflow-x-auto rounded bg-gray-50 p-3 text-xs font-mono"
       {...props}
     >
-      <CodeBlockContext.Provider value>
-        {children}
-      </CodeBlockContext.Provider>
+      <CodeBlockContext.Provider value>{children}</CodeBlockContext.Provider>
     </pre>
   )
 }
 
-function MarkdownLink({ children, href, resolveAttachment, ...props }: AnchorProps & { resolveAttachment?: MarkdownReaderProps['resolveAttachment'] }) {
+function MarkdownLink({
+  children,
+  href,
+  resolveAttachment,
+  ...props
+}: AnchorProps & { resolveAttachment?: MarkdownReaderProps['resolveAttachment'] }) {
   if (isAttachmentHref(href) && resolveAttachment) {
     const id = getAttachmentId(href)
     const attachment = resolveAttachment(id)
@@ -149,17 +147,19 @@ function MarkdownLink({ children, href, resolveAttachment, ...props }: AnchorPro
   }
 
   return (
-    <a
-      href={href}
-      className="text-blue-600 underline-offset-2 hover:underline [overflow-wrap:anywhere]"
-      {...props}
-    >
+    <a href={href} className="text-blue-600 underline-offset-2 hover:underline [overflow-wrap:anywhere]" {...props}>
       {children}
     </a>
   )
 }
 
-function MarkdownImage({ alt, src, resolveAttachment, onOpenLightbox, ...props }: ImageProps & {
+function MarkdownImage({
+  alt,
+  src,
+  resolveAttachment,
+  onOpenLightbox,
+  ...props
+}: ImageProps & {
   resolveAttachment?: MarkdownReaderProps['resolveAttachment']
   onOpenLightbox: (attachment: MarkdownAttachment) => void
 }) {
@@ -222,9 +222,7 @@ function buildReaderComponents(
         {children}
       </thead>
     )) as Components['thead'],
-    tbody: (({ children, ...props }: TableSectionProps) => (
-      <tbody {...props}>{children}</tbody>
-    )) as Components['tbody'],
+    tbody: (({ children, ...props }: TableSectionProps) => <tbody {...props}>{children}</tbody>) as Components['tbody'],
     tr: (({ children, ...props }: TableRowProps) => (
       <tr className="border-b border-gray-100 last:border-0" {...props}>
         {children}
@@ -268,7 +266,13 @@ function buildReaderComponents(
   }
 }
 
-function MarkdownAttachmentLightbox({ attachment, onDismiss }: { attachment: MarkdownAttachment; onDismiss: () => void }) {
+function MarkdownAttachmentLightbox({
+  attachment,
+  onDismiss,
+}: {
+  attachment: MarkdownAttachment
+  onDismiss: () => void
+}) {
   return createPortal(
     <div
       role="dialog"
@@ -307,9 +311,7 @@ export function MarkdownReader({
     [baseHeadingLevel, resolveAttachment],
   )
   const urlTransform = useMemo(
-    () => (resolveAttachment
-      ? (url: string) => (isAttachmentHref(url) ? url : defaultUrlTransform(url))
-      : undefined),
+    () => (resolveAttachment ? (url: string) => (isAttachmentHref(url) ? url : defaultUrlTransform(url)) : undefined),
     [resolveAttachment],
   )
 
@@ -353,10 +355,7 @@ export function MarkdownReader({
         ref={bodyRef}
         data-testid="markdown-reader-body"
         data-overflow={shouldConstrain ? 'constrained' : 'free'}
-        className={cn(
-          'relative',
-          shouldConstrain && 'overflow-hidden',
-        )}
+        className={cn('relative', shouldConstrain && 'overflow-hidden')}
         style={shouldConstrain ? { maxHeight: `${collapsedHeight}px` } : undefined}
       >
         <Markdown remarkPlugins={[remarkGfm]} components={components} urlTransform={urlTransform}>

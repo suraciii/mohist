@@ -4,9 +4,7 @@ import { useProject } from '../../project/@x/project-context'
 import type { AgentSessionTranscriptResponse, UnifiedSessionSummaryDto, WorkflowRunSession } from '../model/types'
 
 export function getUnifiedSessionSummary(projectId: string, sessionId: string) {
-  return request<UnifiedSessionSummaryDto>(
-    projectApiPath(projectId, `/sessions/${encodeURIComponent(sessionId)}`),
-  )
+  return request<UnifiedSessionSummaryDto>(projectApiPath(projectId, `/sessions/${encodeURIComponent(sessionId)}`))
 }
 
 export function getUnifiedSessionTranscript(
@@ -64,7 +62,9 @@ export function useUnifiedSessionTranscript(
   view: 'public' | 'raw' = 'public',
 ) {
   const { projectId } = useProject()
-  return useQuery<AgentSessionTranscriptResponse>(unifiedSessionTranscriptQueryOptions(projectId, sessionId, runtimeSessionId, view))
+  return useQuery<AgentSessionTranscriptResponse>(
+    unifiedSessionTranscriptQueryOptions(projectId, sessionId, runtimeSessionId, view),
+  )
 }
 
 export function getWorkflowRunSessions(workflowRunId: string) {

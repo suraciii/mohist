@@ -10,7 +10,12 @@ import {
   useUnifiedSessionSummary,
   useUnifiedSessionTranscript,
 } from '../../../entities/coder-session'
-import type { SessionFollowupResult, SessionMetadata, SessionTurn, UnifiedSessionSummaryDto } from '../../../entities/coder-session'
+import type {
+  SessionFollowupResult,
+  SessionMetadata,
+  SessionTurn,
+  UnifiedSessionSummaryDto,
+} from '../../../entities/coder-session'
 import type { TimelineReference } from '../../../entities/session'
 import { useSessionTimeline, useSessionTranscript } from '../../../widgets/session-transcript'
 import { useDocumentTitle } from '../../../shared/lib/useDocumentTitle'
@@ -76,9 +81,7 @@ function buildMetadata(summary: UnifiedSessionSummaryDto, turnCount: number): Se
   }
 }
 
-export function useUnifiedSessionDataSource(
-  dependencies: Partial<UnifiedSessionDataSourceDependencies> = {},
-) {
+export function useUnifiedSessionDataSource(dependencies: Partial<UnifiedSessionDataSourceDependencies> = {}) {
   const {
     useSessionTranscript: useTranscript,
     useUnifiedSessionSummary: useSummary,
@@ -103,7 +106,9 @@ export function useUnifiedSessionDataSource(
     summary?.runtimeSessionId,
     transcriptView,
   )
-  const { data: launchObservation } = useQuery<AgentLaunchObservationDto>(launchObservationQueryOptions(projectId, jobId))
+  const { data: launchObservation } = useQuery<AgentLaunchObservationDto>(
+    launchObservationQueryOptions(projectId, jobId),
+  )
   const followup = useFollowup()
   const turnControl = useTurnControl()
   const followupKeys = useRef(new Map<string, string>())
@@ -111,7 +116,7 @@ export function useUnifiedSessionDataSource(
 
   const initialTurns = useMemo<SessionTurn[]>(() => transcriptResponse?.turns ?? [], [transcriptResponse])
   const meta = useMemo<SessionMetadata | null>(
-    () => summary ? buildMetadata(summary, initialTurns.length) : null,
+    () => (summary ? buildMetadata(summary, initialTurns.length) : null),
     [initialTurns.length, summary],
   )
   const activity = summary?.activity
@@ -119,10 +124,7 @@ export function useUnifiedSessionDataSource(
   const isRunning = activity === 'active'
   const runtimeSessionId = summary?.runtimeSessionId ?? ''
   const canFollowup = canFollowupSession(activity) && !!runtimeSessionId && !!summary?.runtime
-  const metadataQueryKey = useMemo(
-    () => ['unified-session', projectId, sessionId] as const,
-    [projectId, sessionId],
-  )
+  const metadataQueryKey = useMemo(() => ['unified-session', projectId, sessionId] as const, [projectId, sessionId])
   const transcriptQueryKey = useMemo(
     () => ['unified-session', projectId, sessionId, 'transcript', runtimeSessionId || null, transcriptView] as const,
     [projectId, runtimeSessionId, sessionId, transcriptView],
@@ -153,44 +155,57 @@ export function useUnifiedSessionDataSource(
     isRunning,
     terminalInvalidationKey: metadataQueryKey,
   })
-  const timelineInput = useMemo(() => ({
-    turns: transcript.turns,
-    liveDetails: transcript.liveDetails,
-    summary: summary ? {
-      activity: summary.activity,
-      lastActivityAt: summary.lastActivityAt,
-      currentTurnId: summary.currentTurnId,
-      inputs: summary.inputs,
-      turns: summary.turns,
-      recoveryHistory: summary.recoveryHistory,
-    } : null,
-  }), [summary, transcript.liveDetails, transcript.turns])
+  const timelineInput = useMemo(
+    () => ({
+      turns: transcript.turns,
+      liveDetails: transcript.liveDetails,
+      summary: summary
+        ? {
+            activity: summary.activity,
+            lastActivityAt: summary.lastActivityAt,
+            currentTurnId: summary.currentTurnId,
+            inputs: summary.inputs,
+            turns: summary.turns,
+            recoveryHistory: summary.recoveryHistory,
+          }
+        : null,
+    }),
+    [summary, transcript.liveDetails, transcript.turns],
+  )
   const timeline = useSessionTimeline(timelineInput)
 
-  const sendFollowup = useCallback(async (text: string, attachmentIds: string[] = []) => {
-    const retryKey = `${sessionId}:${text}:${attachmentIds.join(',')}`
-    const idempotencyKey = followupKeys.current.get(retryKey) ?? createIdempotencyKey()
-    followupKeys.current.set(retryKey, idempotencyKey)
-    let result: SessionFollowupResult
-    try {
-      result = (await followup.mutateAsync({ sessionId, text, attachments: attachmentIds, idempotencyKey })) as SessionFollowupResult
-    } catch (error) {
-      const isDefinitiveError = error instanceof ApiError && error.status >= 400 && error.status < 500
-      if (isDefinitiveError) {
-        followupKeys.current.delete(retryKey)
+  const sendFollowup = useCallback(
+    async (text: string, attachmentIds: string[] = []) => {
+      const retryKey = `${sessionId}:${text}:${attachmentIds.join(',')}`
+      const idempotencyKey = followupKeys.current.get(retryKey) ?? createIdempotencyKey()
+      followupKeys.current.set(retryKey, idempotencyKey)
+      let result: SessionFollowupResult
+      try {
+        result = (await followup.mutateAsync({
+          sessionId,
+          text,
+          attachments: attachmentIds,
+          idempotencyKey,
+        })) as SessionFollowupResult
+      } catch (error) {
+        const isDefinitiveError = error instanceof ApiError && error.status >= 400 && error.status < 500
+        if (isDefinitiveError) {
+          followupKeys.current.delete(retryKey)
+        }
+        reconcileUnifiedQueries()
+        throw error
       }
+      const normalized = result
+      setFollowupResult(normalized)
       reconcileUnifiedQueries()
-      throw error
-    }
-    const normalized = result
-    setFollowupResult(normalized)
-    reconcileUnifiedQueries()
-    if (normalized.status === 'unknown') {
-      throw new Error('Follow-up outcome is unknown. Retry with the same key.')
-    }
-    followupKeys.current.delete(retryKey)
-    return normalized
-  }, [followup, reconcileUnifiedQueries, sessionId])
+      if (normalized.status === 'unknown') {
+        throw new Error('Follow-up outcome is unknown. Retry with the same key.')
+      }
+      followupKeys.current.delete(retryKey)
+      return normalized
+    },
+    [followup, reconcileUnifiedQueries, sessionId],
+  )
 
   const followupStatus = useMemo(() => {
     if (!followupResult) return null
@@ -199,28 +214,28 @@ export function useUnifiedSessionDataSource(
     return resolveFollowupStatus(followupResult, input, turn)
   }, [followupResult, summary?.inputs, summary?.turns])
 
-  const stopCurrentTurn = useCallback((options?: {
-    onSuccess?: (result: { state: string }) => void
-    onSettled?: () => void
-  }) => {
-    if (!summary?.currentTurnId) {
-      options?.onSettled?.()
-      return
-    }
-    turnControl.mutate(
-      { sessionId, turnId: summary.currentTurnId },
-      {
-        onSuccess: (result) => {
-          reconcileUnifiedQueries()
-          options?.onSuccess?.({ state: result.state ?? 'unknown' })
+  const stopCurrentTurn = useCallback(
+    (options?: { onSuccess?: (result: { state: string }) => void; onSettled?: () => void }) => {
+      if (!summary?.currentTurnId) {
+        options?.onSettled?.()
+        return
+      }
+      turnControl.mutate(
+        { sessionId, turnId: summary.currentTurnId },
+        {
+          onSuccess: (result) => {
+            reconcileUnifiedQueries()
+            options?.onSuccess?.({ state: result.state ?? 'unknown' })
+          },
+          onSettled: () => {
+            reconcileUnifiedQueries()
+            options?.onSettled?.()
+          },
         },
-        onSettled: () => {
-          reconcileUnifiedQueries()
-          options?.onSettled?.()
-        },
-      },
-    )
-  }, [reconcileUnifiedQueries, sessionId, summary?.currentTurnId, turnControl])
+      )
+    },
+    [reconcileUnifiedQueries, sessionId, summary?.currentTurnId, turnControl],
+  )
 
   const currentTurn = useMemo(() => {
     if (!summary?.currentTurnId || !summary.turns) return null
@@ -228,7 +243,8 @@ export function useUnifiedSessionDataSource(
   }, [summary?.currentTurnId, summary?.turns])
 
   const stop = useMemo(() => {
-    if (!summary?.currentTurnId || (currentTurn?.status !== 'queued' && currentTurn?.status !== 'executing')) return null
+    if (!summary?.currentTurnId || (currentTurn?.status !== 'queued' && currentTurn?.status !== 'executing'))
+      return null
     return {
       turnId: summary.currentTurnId,
       state: currentTurn.status,
@@ -241,15 +257,18 @@ export function useUnifiedSessionDataSource(
   const issueNumber = summary?.contextRefs?.issueNumber ?? 0
   const workflowContextPath = issueNumber > 0 ? toProjectPath(`/issues/${issueNumber}`) : undefined
   const workflowContextLabel = workflowContextPath ? 'Workflow context' : undefined
-  const resolveTimelineReference = useCallback((reference: TimelineReference) => {
-    if (reference.kind === 'issue' && reference.issueNumber && reference.issueNumber > 0) {
-      return toProjectPath(`/issues/${reference.issueNumber}`)
-    }
-    if (reference.kind === 'agent' && reference.agentId) {
-      return toProjectPath(`/agents/${encodeURIComponent(reference.agentId)}`)
-    }
-    return null
-  }, [toProjectPath])
+  const resolveTimelineReference = useCallback(
+    (reference: TimelineReference) => {
+      if (reference.kind === 'issue' && reference.issueNumber && reference.issueNumber > 0) {
+        return toProjectPath(`/issues/${reference.issueNumber}`)
+      }
+      if (reference.kind === 'agent' && reference.agentId) {
+        return toProjectPath(`/agents/${encodeURIComponent(reference.agentId)}`)
+      }
+      return null
+    },
+    [toProjectPath],
+  )
   const backPath = fromActivity
     ? toProjectPath('/activity')
     : summary?.source === 'workflow' && workflowContextPath
@@ -261,7 +280,7 @@ export function useUnifiedSessionDataSource(
     ? 'Activity'
     : summary?.source === 'workflow' && workflowContextPath
       ? `Issue #${issueNumber}`
-      : summary?.agentName ?? 'Agents'
+      : (summary?.agentName ?? 'Agents')
   return {
     isLoading: summaryLoading,
     isError: summaryError,
