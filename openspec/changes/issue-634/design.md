@@ -3,8 +3,9 @@
 ## Context
 
 Slack fans one channel event out to every mentioned App, so a message that
-mentions several Mohist Bots (or an unmentioned reply in a thread bound to
-several Connections) reaches every mentioned Connection's ingress concurrently.
+mentions several Mohist Bots at a channel root or inside an existing thread
+(or an unmentioned reply in a thread bound to several Connections) reaches
+every mentioned Connection's ingress concurrently.
 Today the race winner of `SlackAmbiguousPromptStore.TryClaimAsync`
 (`SlackConnectionRoutes.ChannelIngress.cs`, `HandleAmbiguousPromptAsync`)
 answers with a plain-text prompt — "Multiple Agents could answer this; mention
@@ -49,12 +50,12 @@ itself creates no execution resources.
 - Replace the free-text ambiguity prompt with one interactive chooser per
   ambiguous message, claimed once across concurrent Connections, Slack
   redelivery, and adapter failover.
-- Retain the original message's normalized input facts and every candidate's
-  complete owning-Project/Connection reference durably with the claim so an
-  accepted selection starts work with no resend, including when prompt owner
-  and selected Connection belong to different Projects in the same workspace,
-  with the original sender as initiator of record and the original message
-  identity as provenance.
+- Retain the original message's normalized input facts, its ambiguity kind,
+  and every candidate's complete owning-Project/Connection reference durably
+  with the claim so an accepted selection starts work with no resend,
+  including when prompt owner and selected Connection belong to different
+  Projects in the same workspace, with the original sender as initiator of
+  record and the original message identity/thread anchor as provenance.
 - Bind every choice to a Server-signed payload verified with the same signing
   material, canonicalization, and constant-time comparison Stop and Retry use.
 - Revalidate at click time: signature, freshness, context (including the
@@ -75,7 +76,7 @@ itself creates no execution resources.
 
 - Coordination across separate Mohist Servers (still none).
 - Managed-Bot self-message suppression (#616).
-- Re-routing already-bound single-Agent threads.
+- Changing ordinary non-ambiguous single-Bot thread routing.
 - Letting anyone other than the original sender click (the Owner cannot click
   another member's chooser; the spec binds the actor to the original sender).
 - A second command grammar — the button is a shortcut to the same services.
@@ -96,8 +97,10 @@ key — gains:
   NOTHING` that claims the row): `SenderSlackUserId`, `TaskText` (all
   mentioned workspace-Bot mention tokens removed, not just the winner's own —
   a multi-mention variant of `RemoveBotMention`), `FilesJson` (the serialized
-  `SlackIngressFile` list), plus the existing `ThreadTs` anchor and an ordered
-  `CandidateReferencesJson` snapshot of `(ProjectId, ConnectionId)` pairs.
+  `SlackIngressFile` list), plus the existing `ThreadTs` anchor, a non-null
+  `AmbiguityKind` (`RootMultiMention`, `ThreadMultiMention`, or
+  `MultiBoundThreadReply`), and an ordered `CandidateReferencesJson` snapshot
+  of `(ProjectId, ConnectionId)` pairs.
   `WorkspaceBoundBot` already supplies both values from the workspace-wide
   lookup; preserving both prevents the prompt-owner's Project from being
   substituted when another Project owns the selected Connection. Facts and
@@ -106,10 +109,13 @@ key — gains:
   enforced structurally, and acceptance never reconstructs input or performs
   a global Connection-id-to-Project guess.
 - **Selection state**: `SelectionState` (`Pending` → `Decided` →
-  `Completed` | `Settled`), `ChosenProjectId`, `ChosenConnectionId`, `DecidedAt`,
-  pre-allocated `SelectionSessionId`/`SelectionInputId`/`SelectionTurnId`,
-  worker bookkeeping (`AttemptCount`, `LastAttemptAt`), and
-  `FinishedAt`/`SettleReason` for retention.
+  `Completed` | `Settled`), `ChosenProjectId`, `ChosenConnectionId`,
+  `DispatchKind` (`RootLaunch`, `ThreadLaunch`, or `ThreadFollowup`),
+  `DecidedAt`, pre-allocated `SelectionSessionId`/`SelectionInputId`/
+  `SelectionTurnId`, worker bookkeeping (`AttemptCount`, `LastAttemptAt`),
+  and `FinishedAt`/`SettleReason` for retention. `ThreadFollowup` stores the
+  selected binding's existing Session id; launch kinds store the pre-minted
+  Session id.
 
 The claim key *is* the ambiguous-message identity both the chooser fence and
 the execution fence need. Two tables would force a two-phase coordination
@@ -153,20 +159,23 @@ reference, with readable text summarizing the candidates.
   adapter contract change the spec forbids. With the five-candidate cap the
   actions-block element limit is never the operative constraint; the cap is
   the product rule, not a UI bound.
-- **Candidate set**: root-message candidates are derived exactly as today
-  (`MentionedWorkspaceBots`: parsed mentions ∩ workspace identity-bound Bots,
-  deduplicated by Bot user id) — humans and other-Servers' Bots never appear;
-  duplicate Bot identities collapse to one choice and do not add ambiguity.
-  Thread-reply candidates come from the workspace-wide binding query. Both
-  workspace queries are deliberately not Project-filtered: extend
-  `SlackThreadBinding` to project `ProjectId` from its mapping row, and carry
-  `(ProjectId, ConnectionId)` through `SlackMultiAgentRoutingCandidate` and
+- **Candidate set and ambiguity kind**: explicit multi-Bot mentions use
+  `MentionedWorkspaceBots` (parsed mentions ∩ workspace identity-bound Bots,
+  deduplicated by Bot user id) at both a channel root and inside an existing
+  thread; humans and other-Servers' Bots never appear, and duplicate Bot
+  identities do not add ambiguity. An unmentioned ambiguous thread reply uses
+  the workspace-wide binding query. The claim records which of these three
+  ingress shapes produced the chooser. Both workspace queries remain
+  deliberately not Project-filtered: extend `SlackThreadBinding` to project
+  `ProjectId` from its mapping row, and carry `(ProjectId, ConnectionId)`
+  through `SlackMultiAgentRoutingCandidate` and
   `SlackMultiAgentRoutingDecision` rather than returning bare Connection ids.
-  Root choices retain `WorkspaceBoundBot.ProjectId`; thread choices retain
+  Mention choices retain `WorkspaceBoundBot.ProjectId`; binding choices retain
   `SlackThreadBinding.ProjectId`; label joins use the complete pair. The
   routing policy's attribution behavior is unchanged; only candidate identity
-  becomes complete and the `Prompt` disposition's side effect changes from
-  text to blocks (or, beyond five candidates, to the text fallback).
+  and the durable ambiguity kind become complete, and the `Prompt`
+  disposition's side effect changes from text to blocks (or, beyond five
+  candidates, to the text fallback).
 - **Placement**: the delivery keeps the inbound `ThreadTs`, so a root chooser
   posts at the channel root and a thread chooser posts in that thread, exactly
   as the current prompt does.
@@ -176,7 +185,7 @@ reference, with readable text summarizing the candidates.
 `SlackSelectionActionPayload` (beside `SlackStopActionPayload`): `Version`
 ("v1"), `Action` ("select_agent"), posting `ProjectId` and `ConnectionId`,
 `WorkspaceTeamId`, `ConversationId`, `OriginalMessageTs`, `ThreadTs`,
-`ActorSlackUserId` (the original sender), the ordered candidate reference set
+`AmbiguityKind`, `ActorSlackUserId` (the original sender), the ordered candidate reference set
 of `(ProjectId, ConnectionId)` pairs, `ChosenProjectId`,
 `ChosenConnectionId`, `Nonce`, `ExpiresAt` — signed with `ISlackActionSigner`
 over a `\n`-joined canonical form, identical in shape to Stop/Retry. The
@@ -225,8 +234,8 @@ envelope completeness, and delivering-Connection lookup/disabled check:
 3. **Context** (`stale_action`) — envelope team/conversation match payload and
    delivering `(ProjectId, ConnectionId)`; the claim row resolves for the
    payload's original message identity and was posted by that same pair; the
-   payload's ordered candidate references exactly match the durable snapshot;
-   the chooser-message identity check of Decision 3.
+   payload's ambiguity kind and ordered candidate references exactly match the
+   durable snapshot; the chooser-message identity check of Decision 3.
 4. **Actor binding** (`unauthorized`) — clicker equals the bound original
    sender.
 5. **Recorded decision** — if the claim is already `Decided`/`Completed`, skip
@@ -305,20 +314,33 @@ interaction redelivery coalesce onto the already-delivered update.
 
 ### 5. The decision fence is a compare-and-swap on the claim row; no extra inbox row
 
+Before the conditional update, dispatch classification uses only retained
+provenance plus the selected candidate's current thread binding:
+
+- `RootMultiMention` always commits `RootLaunch`, with the original message ts
+  as the thread root.
+- `ThreadMultiMention` commits `ThreadFollowup` when the selected
+  Project/Connection is already bound under the retained `ThreadTs`; otherwise
+  it commits `ThreadLaunch`, using that retained `ThreadTs` as the launch-and-
+  bind anchor. It never substitutes the reply's own message ts as a new root.
+- `MultiBoundThreadReply` requires the selected candidate's existing binding
+  and commits `ThreadFollowup`; a missing binding is `no_longer_valid`.
+
 The commit step is a single conditional update:
 `UPDATE ... SET SelectionState='Decided', ChosenProjectId=...,
-ChosenConnectionId=..., SelectionSessionId/InputId/TurnId=... WHERE Id=...
-AND
+ChosenConnectionId=..., DispatchKind=...,
+SelectionSessionId/InputId/TurnId=... WHERE Id=... AND
 SelectionState='Pending'`, evaluated atomically in the store. Concurrent
 clicks on the same or different candidates, repeated clicks, Slack
 interaction redelivery, and adapter failover all collapse: one CAS wins, every
 loser re-reads the row, observes the complete chosen pair, and returns the
-same decision view. The execution identity is pre-allocated at CAS time by
-reusing `PreMintSlackLaunchIds(ChosenProjectId, originalMessageIdentity)` so
+same decision view. The execution identity is pre-allocated at CAS time according to the persisted
+`DispatchKind`: `RootLaunch` and `ThreadLaunch` reuse
+`PreMintSlackLaunchIds(ChosenProjectId, originalMessageIdentity)` so
 Project-scoped deterministic ids are minted for the selected Project, not the
-prompt owner's (root launches: session/input/turn triple; follow-ups: the
-recorded bound session id in `ChosenProjectId`, since no new Session may be
-created).
+prompt owner's; `ThreadFollowup` records the selected candidate's existing
+bound Session id plus deterministic input/turn identity. Replays use the
+persisted kind and ids and do not reclassify the message.
 
 Stop needs a provider-inbox `action:{nonce}` row because stopping has no row
 fence of its own; here the claim row *is* the fence, and the accepted
@@ -333,28 +355,33 @@ Every project-scoped call in dispatch receives the committed
 `ChosenProjectId`; the interaction route's prompt-owner `ProjectId` is not an
 execution default.
 
-- **Root multi-mention**: run the existing channel-root launch sequence for
-  the chosen Connection in `ChosenProjectId` from the retained facts — thread launch reservation on
-  the original message ts as thread root, provider inbox accept with the
-  original message identity, attachment binder over `FilesJson`,
-  `InteractionWorkspaceProvisioner`, `LaunchConnectionAsync` with
-  `ConnectionLaunchOrigin` built from the **original** sender and message
-  identity (this is what makes the execution's provenance the original
-  message, not the click), pre-minted ids from the decision record. Because
-  `LaunchChannelRootAsync` is private to the route partial and bound to the
-  delivering Connection's request, extract its core into an internal service
-  (e.g. `SlackChannelLaunchService`) parameterized by project id, connection,
-  identity, sender, text, files, and thread anchor; the ingress route and the
-  selection dispatch call the same code, so the button is literally the same
-  launch the CLI/Web surface uses.
-- **Ambiguous multi-bound-thread reply**: dispatch a follow-up to the chosen
-  Connection's bound session in `ChosenProjectId` via the existing
-  `RouteFollowupAsync` helper (already explicitly parameterized) with the
-  retained reply facts and the message-identity idempotency key; the chosen
-  Connection's thread binding is
-  resolved at click time (with the existing reconciliation sources), and a
-  missing binding is a `no_longer_valid` rejection — the selection never
-  launches a new Session for a follow-up case.
+- **Root multi-mention / `RootLaunch`**: run the existing channel-root launch
+  sequence for the chosen Connection in `ChosenProjectId` from the retained
+  facts — thread launch reservation on the original message ts as thread root,
+  provider inbox accept with the original message identity, attachment binder
+  over `FilesJson`, `InteractionWorkspaceProvisioner`,
+  `LaunchConnectionAsync` with `ConnectionLaunchOrigin` built from the
+  **original** sender and message identity, and pre-minted ids from the
+  decision record.
+- **Explicit multi-Bot mention in an existing thread**: resolve the chosen
+  candidate's binding under the retained original `ThreadTs` at click time.
+  An existing binding executes `ThreadFollowup` through `RouteFollowupAsync`;
+  an unbound choice executes `ThreadLaunch` through the same extracted launch
+  service, using the retained `ThreadTs` as the thread anchor so the selected
+  Bot gains an independent Session in the existing thread. The reply's own
+  message ts never becomes a replacement thread root.
+- **Unmentioned multi-bound-thread reply / `ThreadFollowup`**: dispatch a
+  follow-up to the chosen Connection's bound Session in `ChosenProjectId` via
+  `RouteFollowupAsync` with the retained reply facts and message-identity
+  idempotency key; a missing binding is `no_longer_valid` and never launches a
+  new Session.
+
+Because `LaunchChannelRootAsync` is private to the route partial and bound to
+the delivering Connection's request, extract its core into an internal service
+(e.g. `SlackChannelLaunchService`) parameterized by project id, connection,
+identity, sender, text, files, and thread anchor. Both root launch and existing-
+thread launch-and-bind use this service, so selection remains the same launch
+path as ordinary channel ingress.
 - Loser Connections stay no-ops: the multi-mention and multi-binding ingress
   branches always route through the claim, which exists from render time on,
   so no mentioned Connection can create work for the message by any path.
@@ -374,9 +401,11 @@ A `SlackAgentSelectionObligationWorker` (mirroring
   candidate or its owning Project (the pipeline's mutable-state checks,
   including prompt-owner permission in step 6 and selected-Connection
   lease/permission in steps 8–9, live before the commit fence and are skipped
-  by replays). Recovery resolves, dispatches, admits, and settles using the
-  committed `ChosenProjectId` and `ChosenConnectionId`, never the row's
-  prompt-owner `ProjectId` as the selected Project.
+  by replays). Recovery resolves, dispatches, admits, and settles using the committed
+  `ChosenProjectId`, `ChosenConnectionId`, `DispatchKind`, retained thread
+  anchor, and pre-allocated identity, never the row's prompt-owner `ProjectId`
+  as the selected Project and never reclassifying launch versus follow-up from
+  mutable bindings.
 - **Settles terminally** when a committed selection can no longer produce its
   execution (chosen Connection or Agent deleted after repeated failures, or
   the pre-allocated lineage irrecoverable): mark `Settled` with a reason and
@@ -453,10 +482,12 @@ delivered.
   executability revalidation; post-commit changes are the same race every
   launch path has (admission is re-run by recovery only for not-yet-completed
   dispatches); no second execution is possible because the fence is the row.
-- [Extracting the launch core risks regressing the ingress path] -> The
-  extraction is behavior-preserving and covered by the existing channel
-  ingress specs plus new selection specs asserting the same outcomes through
-  both callers.
+- [Extracting the launch core or adding existing-thread launch-and-bind risks
+  regressing ingress routing] -> The extraction is behavior-preserving and
+  covered by existing root/thread ingress specs plus new selection scenarios
+  for root launch, existing-thread bound follow-up, existing-thread unbound
+  launch-and-bind under the original anchor, and unmentioned multi-bound
+  follow-up.
 - [More than five eligible candidates] -> No interactive control is rendered
   at all: the once-only delivery is the readable text fallback requiring an
   explicit single-Bot re-mention — no truncation, no auto-selection, no
@@ -471,8 +502,9 @@ delivered.
 ## Migration Plan
 
 1. Add the EF migration: new columns and indexes on `SlackAmbiguousPrompts`
-   (`CandidateReferencesJson`, `ChosenProjectId`, selection state, worker scan
-   on `(ProjectId, SelectionState, UpdatedAt)`),
+   (`AmbiguityKind`, `CandidateReferencesJson`, `ChosenProjectId`,
+   `DispatchKind`, selection state, worker scan on
+   `(ProjectId, SelectionState, UpdatedAt)`),
    additive only. Existing rows predate fact retention; they carry no facts
    and can never start an execution (enforced structurally), and age out via
    the new cleanup once settled — no backfill.

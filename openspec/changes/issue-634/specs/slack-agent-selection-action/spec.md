@@ -1,6 +1,6 @@
 ### Requirement: Every choice carries a Server-signed selection payload
 
-Every candidate choice on the chooser SHALL carry a Server-signed action payload that binds the posting Project and Connection, the workspace, conversation, and message identity of the chooser, the original sender, the full ordered candidate set as `(ProjectId, ConnectionId)` references, the chosen Project/Connection reference, a fresh nonce, and a bounded expiry fixed when the chooser is rendered — the same five-minute signed-action lifetime the Stop and Retry actions use, per the issue's pinned parameter. The payload SHALL use the same signing material (the posting Connection's bot token), unambiguous canonical field ordering, and constant-time HMAC verification the Stop and Retry actions use. A payload that fails structural validation or whose signature does not verify SHALL be rejected as an invalid action.
+Every candidate choice on the chooser SHALL carry a Server-signed action payload that binds the posting Project and Connection, the workspace, conversation, and message identity of the chooser, the original sender, the durable ambiguity kind, the full ordered candidate set as `(ProjectId, ConnectionId)` references, the chosen Project/Connection reference, a fresh nonce, and a bounded expiry fixed when the chooser is rendered — the same five-minute signed-action lifetime the Stop and Retry actions use, per the issue's pinned parameter. The payload SHALL use the same signing material (the posting Connection's bot token), unambiguous canonical field ordering, and constant-time HMAC verification the Stop and Retry actions use. A payload that fails structural validation or whose signature does not verify SHALL be rejected as an invalid action.
 
 #### Scenario: A tampered choice value is rejected
 
@@ -15,7 +15,7 @@ Every candidate choice on the chooser SHALL carry a Server-signed action payload
 
 ### Requirement: Acceptance revalidates freshness, context, and actor binding
 
-On every click the Server SHALL revalidate the selection payload before any work starts: the expiry SHALL not have passed; the interaction's workspace, conversation, and chooser message identity SHALL match the payload; the interaction SHALL be delivered to the posting Project/Connection pair; the ordered candidate references SHALL exactly match the durable claim snapshot; and the clicking member SHALL match the actor bound in the payload. An expired selection SHALL be rejected as expired, a context, Project/Connection, or candidate-snapshot mismatch as stale, and an actor mismatch as unauthorized.
+On every click the Server SHALL revalidate the selection payload before any work starts: the expiry SHALL not have passed; the interaction's workspace, conversation, and chooser message identity SHALL match the payload; the interaction SHALL be delivered to the posting Project/Connection pair; the ambiguity kind and ordered candidate references SHALL exactly match the durable claim snapshot; and the clicking member SHALL match the actor bound in the payload. An expired selection SHALL be rejected as expired, a context, Project/Connection, or candidate-snapshot mismatch as stale, and an actor mismatch as unauthorized.
 
 #### Scenario: An expired choice is rejected
 
@@ -28,6 +28,12 @@ On every click the Server SHALL revalidate the selection payload before any work
 - **WHEN** a selection payload is submitted with a workspace, conversation, or chooser message identity that differs from the interaction envelope
 - **THEN** the selection is rejected as stale
 - **AND** no execution resources are created
+
+#### Scenario: A changed ambiguity kind is rejected
+
+- **WHEN** a click payload's ambiguity kind differs from the durable chooser claim or was changed after signing
+- **THEN** the click is rejected as invalid or stale
+- **AND** no selection mutation or execution resource is created
 
 #### Scenario: A different member cannot click another member's choice
 

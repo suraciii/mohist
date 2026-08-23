@@ -1,13 +1,46 @@
 # Disposal of self-review must-fix findings (issue-634 plan)
 
-Source: self-review.md (current re-review FAIL verdict: MF-5; previous
-findings MF-1..MF-4 are verified fixed).
+Source: self-review.md (current re-review FAIL verdict: MF-6; previous
+findings MF-1..MF-5 are verified fixed).
 Rule: fix each must-fix in the plan artifacts, or justify won't-fix. Do not
 edit self-review.md. Observations need no action.
 
-Status: ALL FIVE MUST-FIX FINDINGS FIXED. No won't-fixes.
+Status: ALL SIX MUST-FIX FINDINGS FIXED. No won't-fixes.
 
 ## Dispositions
+
+### MF-6 — explicit multi-Bot mentions inside an existing thread lacked correct selected dispatch — FIXED
+
+The plan now preserves the original ambiguity shape and commits one durable
+dispatch kind before execution. `AmbiguityKind` distinguishes a root
+multi-mention, an explicit multi-mention inside an existing thread, and an
+unmentioned multi-bound-thread reply. For the explicit existing-thread case,
+click-time binding resolution follows the existing single-Bot behavior:
+selecting an already-bound candidate commits `ThreadFollowup`; selecting an
+unbound candidate commits `ThreadLaunch` under the retained original thread
+anchor. Root messages commit `RootLaunch`; unmentioned multi-bound replies
+require a binding and commit `ThreadFollowup`.
+
+- proposal.md: the problem statement, retained facts, signed payload,
+  execution shape, capabilities, launch-service impact, and non-goals now
+  include explicit thread multi-mentions and the bound-vs-unbound decision.
+- design.md: Decisions 1–3 add `AmbiguityKind`; Decision 5 classifies and
+  persists `DispatchKind` with the winner; Decision 6 specifies root launch,
+  existing-thread bound follow-up, existing-thread unbound launch-and-bind,
+  and unmentioned multi-bound follow-up. Recovery replays the committed kind,
+  thread anchor, selected Project/Connection, and pre-allocated identity
+  without reclassifying from mutable bindings. Migration and risk sections
+  pin the same state.
+- specs: the prompt capability covers an explicit multi-Bot mention inside a
+  thread and records `ThreadMultiMention`; the signed payload binds the
+  ambiguity kind; execution attribution has deterministic scenarios for an
+  already-bound chosen Bot (follow-up, no new Session) and an unbound chosen
+  Bot (new independent Session under the original thread anchor), plus
+  committed-kind recovery.
+- tasks.json: T-002 adds `AmbiguityKind` and all three ingress shapes; T-003
+  persists `DispatchKind` and covers root launch, existing-thread bound
+  follow-up, existing-thread unbound launch-and-bind, and unmentioned
+  multi-bound follow-up; T-004 recovers the committed kind and anchor.
 
 ### MF-5 — candidate identity loses owning Project for cross-Project selection — FIXED
 

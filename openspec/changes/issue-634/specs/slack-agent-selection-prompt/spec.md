@@ -1,6 +1,6 @@
 ### Requirement: An ambiguous multi-Bot message produces one chooser message
 
-When a channel message's target Agent is ambiguous — a root message that mentions two or more Mohist Bots bound in the same workspace, or an unmentioned reply in a thread bound to two or more Connections — the race-winning Connection SHALL render exactly one chooser message. When two to five candidate Agents are eligible, the chooser SHALL offer one interactive selection control per candidate Agent accompanied by readable text, and SHALL be an interactive Slack selection the user clicks, not free text the user must retype or re-mention. When more than five candidates are eligible, the chooser SHALL be the readable text fallback defined by the candidate-count requirement: no interactive control, and an instruction to re-mention a single Bot explicitly. For an ambiguous root message the chooser SHALL be posted at the channel root; for an ambiguous thread reply the chooser SHALL be posted in that same thread. The chooser SHALL be delivered through the posting Connection's outbox user-action delivery.
+When a channel message's target Agent is ambiguous — a root message or existing-thread reply that explicitly mentions two or more Mohist Bots bound in the same workspace, or an unmentioned reply in a thread bound to two or more Connections — the race-winning Connection SHALL render exactly one chooser message. When two to five candidate Agents are eligible, the chooser SHALL offer one interactive selection control per candidate Agent accompanied by readable text, and SHALL be an interactive Slack selection the user clicks, not free text the user must retype or re-mention. When more than five candidates are eligible, the chooser SHALL be the readable text fallback defined by the candidate-count requirement: no interactive control, and an instruction to re-mention a single Bot explicitly. For an ambiguous root message the chooser SHALL be posted at the channel root; for an ambiguous thread reply the chooser SHALL be posted in that same thread. The chooser SHALL be delivered through the posting Connection's outbox user-action delivery.
 
 #### Scenario: A root message mentioning several Bots renders one chooser
 
@@ -8,10 +8,18 @@ When a channel message's target Agent is ambiguous — a root message that menti
 - **THEN** exactly one chooser message is posted at the channel root with one selectable choice per mentioned Bot and readable text alongside the controls
 - **AND** no standalone plain-text "mention a single Bot" ambiguity prompt is posted
 
+#### Scenario: An explicit multi-Bot mention inside a thread renders the chooser in that thread
+
+- **WHEN** a sender posts inside an existing thread and explicitly mentions two to five eligible workspace Bots
+- **THEN** exactly one chooser message is posted in that same thread with one selectable choice per mentioned Bot
+- **AND** the claim records `ThreadMultiMention` plus the original thread anchor
+- **AND** it is not posted as a channel root message
+
 #### Scenario: An ambiguous reply in a multi-bound thread renders the chooser in that thread
 
 - **WHEN** an unmentioned reply arrives in a thread bound to two to five Connections and its sender is authorized by the bound Connections
 - **THEN** exactly one chooser message is posted in that same thread
+- **AND** the claim records `MultiBoundThreadReply` plus the original thread anchor
 - **AND** it is not posted as a channel root message
 
 #### Scenario: An unambiguous message never renders a chooser
@@ -64,7 +72,7 @@ The chooser claim SHALL be once-only per ambiguous message identity (workspace, 
 
 ### Requirement: The claim durably retains the original message's input facts
 
-The chooser claim SHALL durably retain the ambiguous message's normalized input facts at claim time: the original sender's Slack identity, the task text with Bot mentions removed, attachment metadata, and the thread anchor, alongside the workspace, conversation, and message identity. It SHALL also retain the ordered candidate set as complete `(ProjectId, ConnectionId)` references from the workspace-wide Bot lookup. The retained facts and candidate references SHALL be sufficient for a later accepted selection to start work from the original message with no resend by the user, including when the selected Connection belongs to a different Mohist Project from the prompt owner.
+The chooser claim SHALL durably retain the ambiguous message's normalized input facts at claim time: the original sender's Slack identity, the task text with Bot mentions removed, attachment metadata, thread anchor, and ambiguity kind (`RootMultiMention`, `ThreadMultiMention`, or `MultiBoundThreadReply`), alongside the workspace, conversation, and message identity. It SHALL also retain the ordered candidate set as complete `(ProjectId, ConnectionId)` references from the workspace-wide Bot lookup. The retained facts and candidate references SHALL be sufficient for a later accepted selection to start work from the original message with no resend by the user, including when the selected Connection belongs to a different Mohist Project from the prompt owner.
 
 #### Scenario: Retained facts survive to selection time
 
@@ -93,6 +101,11 @@ The ambiguous message SHALL NOT cause any mentioned Connection to create an Agen
 - **WHEN** a root message mentioning two or more workspace Bots is processed by any mentioned Connection
 - **THEN** no AgentJob, AgentSession, SessionInput, or provider inbox entry is created for that message
 
+#### Scenario: An explicit multi-Bot mention inside an existing thread creates no execution resources
+
+- **WHEN** a message in an existing thread explicitly mentions two or more workspace Bots
+- **THEN** no AgentJob, AgentSession, SessionInput, or provider inbox entry is created before selection
+
 #### Scenario: An ambiguous multi-bound-thread reply creates no execution resources
 
 - **WHEN** an unmentioned reply in a thread bound to two or more Connections is processed
@@ -100,7 +113,7 @@ The ambiguous message SHALL NOT cause any mentioned Connection to create an Agen
 
 ### Requirement: Chooser candidates are exactly the mentioned workspace Bots
 
-For root messages, the chooser's candidate set SHALL be derived by intersecting the message's parsed mentions with the workspace's identity-bound Mohist Bots, deduplicated by Bot user id, so that, within the interactive bound of two to five candidates, each mentioned Bot renders exactly one labeled choice. For ambiguous thread replies, candidates SHALL be the workspace-wide thread bindings. Both discovery paths SHALL remain workspace-wide rather than prompt-owner-Project-scoped, and every choice SHALL preserve its owning `ProjectId` together with its `ConnectionId`; the thread-binding projection SHALL therefore include both. Human mentions, unknown senders, and Bots managed by other Mohist Servers SHALL NOT appear as root-message choices.
+For explicit multi-Bot mentions at a channel root or inside an existing thread, the chooser's candidate set SHALL be derived by intersecting the message's parsed mentions with the workspace's identity-bound Mohist Bots, deduplicated by Bot user id, so that, within the interactive bound of two to five candidates, each mentioned Bot renders exactly one labeled choice. For unmentioned ambiguous thread replies, candidates SHALL be the workspace-wide thread bindings. Both discovery paths SHALL remain workspace-wide rather than prompt-owner-Project-scoped, and every choice SHALL preserve its owning `ProjectId` together with its `ConnectionId`; the thread-binding projection SHALL therefore include both. Human mentions, unknown senders, and Bots managed by other Mohist Servers SHALL NOT appear as root-message choices.
 
 #### Scenario: Human mentions are never choices
 
