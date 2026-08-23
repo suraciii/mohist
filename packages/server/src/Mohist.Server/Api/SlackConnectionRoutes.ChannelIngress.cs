@@ -1,6 +1,7 @@
 using Microsoft.Extensions.Options;
 using Mohist.Server.Agent.Services;
 using Mohist.Server.Contracts;
+using Mohist.Server.Infrastructure;
 using Mohist.Server.Infrastructure.Data.Slack;
 using Mohist.Server.Infrastructure.Slack;
 using Mohist.Server.Slack;
@@ -88,15 +89,26 @@ public static partial class SlackConnectionRoutes
                 decision.Allowed,
                 mentionedWorkspaceBots
                     .Select(bot => new SlackMultiAgentRoutingCandidate(
-                        bot.ConnectionId, bot.BotUserId, bot.OwnerSlackUserId))
+                        bot.ProjectId, bot.ConnectionId, bot.BotUserId, bot.OwnerSlackUserId))
                     .ToArray())!;
             return routing.Disposition switch
             {
                 SlackMultiAgentRoutingDisposition.Ignore => ApiResults.Ok(new { kind = "ignored" }),
                 SlackMultiAgentRoutingDisposition.RejectNonOwner =>
-                    await HandleAmbiguousNonOwnerAsync(req, routing.ConnectionIds, ct),
+                    await HandleAmbiguousNonOwnerAsync(
+                        req,
+                        routing.Candidates,
+                        string.IsNullOrWhiteSpace(body.ThreadTs)
+                            ? SlackAmbiguityKinds.RootMultiMention
+                            : SlackAmbiguityKinds.ThreadMultiMention,
+                        ct),
                 SlackMultiAgentRoutingDisposition.Prompt => await HandleAmbiguousPromptAsync(
-                    req, routing.BotLabels, routing.ConnectionIds, ct),
+                    req,
+                    routing.Candidates,
+                    string.IsNullOrWhiteSpace(body.ThreadTs)
+                        ? SlackAmbiguityKinds.RootMultiMention
+                        : SlackAmbiguityKinds.ThreadMultiMention,
+                    ct),
                 _ => throw new InvalidOperationException("Unknown multi-agent routing disposition."),
             };
         }
@@ -188,13 +200,27 @@ public static partial class SlackConnectionRoutes
                     && !senderAuthorizedForCurrentConnection
                     && !string.Equals(ownerClaimantConnectionId, connection.Id, StringComparison.Ordinal)))
                 return ApiResults.Ok(new { kind = "ignored" });
-            if (!senderAuthorizedForCurrentConnection)
-                return await HandleAmbiguousNonOwnerAsync(req, bindingConnectionIds, ct);
             var botLookup = workspaceBots.ToDictionary(b => b.ConnectionId, b => b.BotUserId, StringComparer.Ordinal);
-            var botLabels = threadBindings
-                .Select(binding => botLookup.TryGetValue(binding.ConnectionId, out var label) ? label : binding.ConnectionId)
+            var routingCandidates = threadBindings
+                .Select(binding => new SlackMultiAgentRoutingCandidate(
+                    binding.ProjectId,
+                    binding.ConnectionId,
+                    botLookup.TryGetValue(binding.ConnectionId, out var label) ? label : binding.ConnectionId,
+                    workspaceBots.FirstOrDefault(bot => string.Equals(bot.ConnectionId, binding.ConnectionId, StringComparison.Ordinal))?.OwnerSlackUserId,
+                    binding.SessionId,
+                    binding.RootMessageTs))
                 .ToArray();
-            return await HandleAmbiguousPromptAsync(req, botLabels, bindingConnectionIds, ct);
+            if (!senderAuthorizedForCurrentConnection)
+                return await HandleAmbiguousNonOwnerAsync(
+                    req,
+                    routingCandidates,
+                    SlackAmbiguityKinds.MultiBoundThreadReply,
+                    ct);
+            return await HandleAmbiguousPromptAsync(
+                req,
+                routingCandidates,
+                SlackAmbiguityKinds.MultiBoundThreadReply,
+                ct);
         }
 
         if (threadBindings.Count == 1)
@@ -328,6 +354,17 @@ public static partial class SlackConnectionRoutes
         return result;
     }
 
+    private static string RemoveBotMentions(string text, IEnumerable<string> botUserIds)
+    {
+        var ids = botUserIds
+            .Where(id => !string.IsNullOrWhiteSpace(id))
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        if (ids.Count == 0)
+            return text.Trim();
+        return SlackMentionToken.Replace(text.Trim(), match =>
+            ids.Contains(match.Groups["id"].Value) ? string.Empty : match.Value).Trim();
+    }
+
     private static IReadOnlyList<string> BuildMentionedBotIds(IReadOnlyList<string>? mentioned)
     {
         if (mentioned is null || mentioned.Count == 0) return Array.Empty<string>();
@@ -355,28 +392,52 @@ public static partial class SlackConnectionRoutes
     /// </summary>
     private static async Task<IResult> HandleAmbiguousPromptAsync(
         HandleChannelIngressRequest req,
-        IReadOnlyList<string> ambiguousBotLabels,
-        IReadOnlyList<string> mentionedConnectionIds,
+        IReadOnlyList<SlackMultiAgentRoutingCandidate> candidates,
+        string ambiguityKind,
         CancellationToken ct)
     {
         var body = req.Body;
         var projectId = req.ProjectId;
         var connection = req.Connection;
 
-        var labelSummary = string.Join(", ", ambiguousBotLabels);
-        var promptText = $"Multiple Agents could answer this; mention a single Bot to address one. Mentioned: {labelSummary}.";
+        var labelSummary = string.Join(", ", candidates.Select(candidate => candidate.BotUserId));
+        var promptText = $"Multiple Agents could answer this: {labelSummary}. Re-mention a single Bot explicitly to proceed.";
         var dispatchRef = SlackAmbiguousPromptStore.PromptDispatchRef(
             body.TeamId, body.ConversationId, body.MessageTs);
+        var candidateReferences = candidates
+            .Select(candidate => new SlackSelectionCandidateReference(candidate.ProjectId, candidate.ConnectionId))
+            .ToArray();
+        var taskText = RemoveBotMentions(
+            body.Text ?? string.Empty,
+            candidates.Select(candidate => candidate.BotUserId));
+        var filesJson = JSON.Serialize(body.Files);
 
         var claim = await req.AmbiguousPrompts.TryClaimAsync(
             projectId, body.TeamId, body.ConversationId, body.MessageTs,
-            body.ThreadTs, connection.Id, mentionedConnectionIds, ct);
+            body.ThreadTs, connection.Id, candidateReferences,
+            req.SenderSlackUserId, taskText, filesJson, ambiguityKind, ct);
 
         if (!claim.Claimed)
             return ApiResults.Ok(new { kind = "ambiguous", reason = "Another Bot is responding.", winner = claim.WinningConnectionId });
 
+        var signer = req.Services.GetRequiredService<ISlackActionSigner>();
+        var expiresAt = req.Services.GetRequiredService<TimeProvider>().GetUtcNow()
+            .Add(SlackSelectionActionPayload.Lifetime);
+        var blocks = await SlackSelectionChooserRenderer.BuildBlocksAsync(
+            signer,
+            connection,
+            body.TeamId,
+            body.ConversationId,
+            body.MessageTs,
+            body.ThreadTs,
+            req.SenderSlackUserId,
+            ambiguityKind,
+            candidateReferences,
+            candidates.Select(candidate => candidate.BotUserId).ToArray(),
+            expiresAt,
+            ct);
         await EnqueueRequiredReplyAsync(req.Outbox, projectId, connection, body.ConversationId,
-            promptText, dispatchRef, ct, body.ThreadTs);
+            promptText, dispatchRef, ct, body.ThreadTs, blocks);
         return ApiResults.Ok(new { kind = "ambiguous", reason = promptText });
     }
 
@@ -392,7 +453,8 @@ public static partial class SlackConnectionRoutes
 
     private static async Task<IResult> HandleAmbiguousNonOwnerAsync(
         HandleChannelIngressRequest req,
-        IReadOnlyList<string> connectionIds,
+        IReadOnlyList<SlackMultiAgentRoutingCandidate> candidates,
+        string ambiguityKind,
         CancellationToken ct)
     {
         var body = req.Body;
@@ -403,7 +465,13 @@ public static partial class SlackConnectionRoutes
             body.MessageTs,
             body.ThreadTs,
             req.Connection.Id,
-            connectionIds,
+            candidates.Select(candidate => new SlackSelectionCandidateReference(
+                candidate.ProjectId,
+                candidate.ConnectionId)).ToArray(),
+            req.SenderSlackUserId,
+            RemoveBotMentions(body.Text ?? string.Empty, candidates.Select(candidate => candidate.BotUserId)),
+            JSON.Serialize(body.Files),
+            ambiguityKind,
             ct);
         if (!claim.Claimed)
             return ApiResults.Ok(new { kind = "ignored" });

@@ -1972,6 +1972,19 @@ protected override void OnModelCreating(ModelBuilder modelBuilder)
             entity.Property(e => e.ThreadTs).HasMaxLength(64);
             entity.Property(e => e.WinningConnectionId).HasMaxLength(256).IsRequired();
             entity.Property(e => e.MentionedConnectionIdsJson).IsRequired();
+            entity.Property(e => e.SenderSlackUserId).HasMaxLength(256).IsRequired();
+            entity.Property(e => e.TaskText).IsRequired();
+            entity.Property(e => e.FilesJson).IsRequired();
+            entity.Property(e => e.AmbiguityKind).HasMaxLength(32).IsRequired();
+            entity.Property(e => e.CandidateReferencesJson).IsRequired();
+            entity.Property(e => e.SelectionState).HasMaxLength(32).IsRequired();
+            entity.Property(e => e.ChosenProjectId).HasMaxLength(256);
+            entity.Property(e => e.ChosenConnectionId).HasMaxLength(256);
+            entity.Property(e => e.DispatchKind).HasMaxLength(32);
+            entity.Property(e => e.SelectionSessionId).HasMaxLength(512);
+            entity.Property(e => e.SelectionInputId).HasMaxLength(128);
+            entity.Property(e => e.SelectionTurnId).HasMaxLength(128);
+            entity.Property(e => e.SettleReason).HasMaxLength(256);
             entity.Property(e => e.PromptedAt).IsRequired();
             entity.Property(e => e.CreatedAt).IsRequired();
             entity.Property(e => e.UpdatedAt).IsRequired();
@@ -1980,6 +1993,8 @@ protected override void OnModelCreating(ModelBuilder modelBuilder)
                 .HasDatabaseName("UX_SlackAmbiguousPrompts_WorkspaceTeamId_ConversationId_MessageTs");
             entity.HasIndex(e => new { e.ProjectId, e.UpdatedAt })
                 .HasDatabaseName("IX_SlackAmbiguousPrompts_ProjectId_UpdatedAt");
+            entity.HasIndex(e => new { e.ProjectId, e.SelectionState, e.UpdatedAt })
+                .HasDatabaseName("IX_SlackAmbiguousPrompts_ProjectId_SelectionState_UpdatedAt");
         });
 
         modelBuilder.Entity<SlackConnectionAllowedMemberRow>(entity =>

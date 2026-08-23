@@ -323,6 +323,13 @@ open).
 - 52406fbd9 MF-8 progress checkpoint
 - d97ec8187 MF-8 soft-delete-aware selected-Connection resolution
 
+## T-002 implementation notes
+
+- Added durable ambiguity claim facts, ordered complete candidate references, selection-state slots, and the worker-scan index through `SlackAmbiguousPromptRow`, `SlackAmbiguousPromptStore`, `MohistDbContext`, and additive migration `20260913000000_AddSlackSelectionFacts`.
+- Added `SlackSelectionActionPayload` canonical signing and chooser button rendering. Buttons are emitted only for 2–5 candidates; the readable fallback is always in the plain-text payload and >5 candidates intentionally emit no blocks.
+- Extended workspace-thread bindings and multi-agent routing candidates to carry owning ProjectId; duplicate candidate identities are collapsed before routing.
+- Existing unit tests initially surfaced the expected EF pending-model warning after changing the model; the model snapshot was updated and the focused unit suite now passes.
+
 ## T-001 implementation notes
 
 - Existing channel-root ingress performs admission immediately before the private launch core; the extraction must move that admission into the new service to keep the full reservation/inbox/attachment/provision/launch sequence in one reusable path.

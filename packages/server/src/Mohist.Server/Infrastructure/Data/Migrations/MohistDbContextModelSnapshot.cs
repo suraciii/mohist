@@ -2812,6 +2812,43 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
                     b.Property<DateTimeOffset>("CreatedAt")
                         .HasColumnType("TEXT");
 
+                    b.Property<int>("AttemptCount")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("AmbiguityKind")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("CandidateReferencesJson")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ChosenConnectionId")
+                        .HasMaxLength(256)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ChosenProjectId")
+                        .HasMaxLength(256)
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTimeOffset?>("DecidedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("DispatchKind")
+                        .HasMaxLength(32)
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTimeOffset?>("FinishedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("FilesJson")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTimeOffset?>("LastAttemptAt")
+                        .HasColumnType("TEXT");
+
                     b.Property<string>("MentionedConnectionIdsJson")
                         .IsRequired()
                         .HasColumnType("TEXT");
@@ -2824,6 +2861,36 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
                     b.Property<string>("ProjectId")
                         .IsRequired()
                         .HasMaxLength(256)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("SelectionInputId")
+                        .HasMaxLength(128)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("SelectionSessionId")
+                        .HasMaxLength(512)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("SelectionState")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("SelectionTurnId")
+                        .HasMaxLength(128)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("SenderSlackUserId")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("SettleReason")
+                        .HasMaxLength(256)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("TaskText")
+                        .IsRequired()
                         .HasColumnType("TEXT");
 
                     b.Property<DateTimeOffset>("PromptedAt")
@@ -2850,6 +2917,9 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
 
                     b.HasIndex("ProjectId", "UpdatedAt")
                         .HasDatabaseName("IX_SlackAmbiguousPrompts_ProjectId_UpdatedAt");
+
+                    b.HasIndex("ProjectId", "SelectionState", "UpdatedAt")
+                        .HasDatabaseName("IX_SlackAmbiguousPrompts_ProjectId_SelectionState_UpdatedAt");
 
                     b.HasIndex("WorkspaceTeamId", "ConversationId", "MessageTs")
                         .IsUnique()

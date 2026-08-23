@@ -1,4 +1,5 @@
 using Microsoft.Extensions.Time.Testing;
+using Mohist.Server.Infrastructure;
 using Mohist.Server.Infrastructure.Data.Slack;
 using Mohist.Server.Infrastructure.Slack;
 using Mohist.Server.TestSupport;
@@ -73,6 +74,61 @@ public sealed class SlackAmbiguousPromptStoreTests
             "project-a", teamId, conversationId, messageTs, null,
             connectionId, [connectionId, "connection-b"]);
         Assert.False(retryAfterDelivery.Claimed);
+    }
+
+    [Fact]
+    public async Task Claim_persists_original_facts_and_complete_cross_project_candidates()
+    {
+        using var database = TestSqliteDatabase.CreateModelSchema();
+        var store = NewStore(database);
+        var candidates = new[]
+        {
+            new SlackSelectionCandidateReference("project-a", "connection-a"),
+            new SlackSelectionCandidateReference("project-b", "connection-b"),
+        };
+
+        var result = await store.TryClaimAsync(
+            "project-a", "team-facts", "channel-facts", "4.001", "4.000",
+            "connection-a", candidates, "user-original", "do the task",
+            "[{\"id\":\"file-1\"}]", SlackAmbiguityKinds.ThreadMultiMention);
+
+        Assert.True(result.Claimed);
+        Assert.Equal("user-original", result.Snapshot.SenderSlackUserId);
+        Assert.Equal("do the task", result.Snapshot.TaskText);
+        Assert.Equal("[{\"id\":\"file-1\"}]", result.Snapshot.FilesJson);
+        Assert.Equal(SlackAmbiguityKinds.ThreadMultiMention, result.Snapshot.AmbiguityKind);
+        Assert.Equal(
+            candidates,
+            JSON.Deserialize<List<SlackSelectionCandidateReference>>(result.Snapshot.CandidateReferencesJson));
+
+        var lookup = await store.FindAsync("team-facts", "channel-facts", "4.001");
+        Assert.NotNull(lookup);
+        Assert.Equal("project-b", JSON.Deserialize<List<SlackSelectionCandidateReference>>(
+            lookup!.CandidateReferencesJson)![1].ProjectId);
+    }
+
+    [Fact]
+    public async Task Claim_rejects_incomplete_facts_or_candidate_references()
+    {
+        using var database = TestSqliteDatabase.CreateModelSchema();
+        var store = NewStore(database);
+        var candidates = new[]
+        {
+            new SlackSelectionCandidateReference("project-a", "connection-a"),
+            new SlackSelectionCandidateReference("", "connection-b"),
+        };
+
+        await Assert.ThrowsAsync<ArgumentException>(() => store.TryClaimAsync(
+            "project-a", "team-invalid", "channel-invalid", "5.001", null,
+            "connection-a", candidates, "user-original", "task", "[]",
+            SlackAmbiguityKinds.RootMultiMention));
+        await Assert.ThrowsAsync<ArgumentException>(() => store.TryClaimAsync(
+            "project-a", "team-invalid", "channel-invalid", "5.002", null,
+            "connection-a", new[]
+            {
+                new SlackSelectionCandidateReference("project-a", "connection-a"),
+                new SlackSelectionCandidateReference("project-b", "connection-b"),
+            }, "", "task", "[]", SlackAmbiguityKinds.RootMultiMention));
     }
 
     [Fact]

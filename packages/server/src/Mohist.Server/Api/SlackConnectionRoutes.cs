@@ -972,7 +972,8 @@ public static partial class SlackConnectionRoutes
         string text,
         string dispatchRef,
         CancellationToken ct,
-        string? threadTs = null) =>
+        string? threadTs = null,
+        JsonElement? blocks = null) =>
         await outbox.EnqueueRequiredAsync(new SlackOutboxDraft(
             projectId,
             connection.Id,
@@ -980,7 +981,12 @@ public static partial class SlackConnectionRoutes
             conversationId,
             SlackOutboxKinds.UserAction,
             dispatchRef,
-            JsonSerializer.Serialize(new { text }),
+            JsonSerializer.Serialize(new SlackDeliveryPayload(
+                SlackDeliveryOperations.PostMessage,
+                text,
+                ClientMessageId: dispatchRef,
+                FallbackText: text,
+                Blocks: blocks)),
             threadTs), ct);
 
     private static string RemoveBotMention(string text, string botUserId)
