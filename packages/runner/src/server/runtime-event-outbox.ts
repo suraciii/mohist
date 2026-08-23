@@ -346,8 +346,15 @@ class AgentSessionRuntimeEventOutboxImpl implements AgentSessionRuntimeEventOutb
     if (timedOut) throw timedOut
     const terminal = this.inputReceiptTerminalErrors.get(recordId)
     if (terminal) throw terminal
-    if (!this.records.has(recordId))
+    if (!this.records.has(recordId)) {
+      await this.snapshotWriteTail
+      const settled = this.receivedInputReceipts.get(recordId)
+      if (settled) {
+        this.receivedInputReceipts.delete(recordId)
+        return settled
+      }
       throw new Error(`workflow input ${recordId} is no longer pending and has no matching receipt`)
+    }
     if (this.inputReceiptWaiters.has(recordId))
       throw new Error(`workflow input ${recordId} already has a receipt waiter`)
 
