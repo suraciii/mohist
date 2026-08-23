@@ -46,11 +46,12 @@ Constraints:
 **Goals:**
 
 - A task's own cleanup follow-up turn (both runtimes) waits — event-driven, bounded —
-  for the previous turn's terminal facts to complete outbound delivery before opening
-  the Workflow AgentSession and submitting the cleanup turn.
-- The outbox exposes a delivery-completion wait keyed by the Workflow session's
-  scheduling identity (project, workflow run, session name), with no polling loops and
-  no new server status round-trips.
+  for the immediately preceding turn's terminal facts to complete outbound delivery
+  before opening the Workflow AgentSession and submitting the cleanup turn. This
+  includes a preceding cleanup turn's Session-scoped `session-followup` facts.
+- The outbox exposes a delivery-completion wait keyed either by the original Workflow
+  turn's scheduling identity or by the preceding cleanup turn's deterministic cleanup
+  operation id, with no polling loops and no new server status round-trips.
 - Budget-exhausted waits fail the cleanup attempt with structured evidence (awaited
   session, work item, budget) instead of a generic unsettled-session error.
 - Runner vitest coverage (fake timers) for admission under delivery lag, preserved
@@ -71,56 +72,82 @@ Constraints:
 
 ## Decisions
 
-### D1: Delivery-completion wait as an outbox primitive, keyed by scheduling identity
+### D1: Delivery-completion wait as an outbox primitive, keyed by the immediate predecessor
 
 Add to `AgentSessionRuntimeEventOutbox` (ports + implementation):
 
 ```ts
-awaitWorkflowSessionDelivery(
-  target: { projectId: string; workflowRunId: string; sessionName: string },
+awaitCleanupPredecessorDelivery(
+  target: {
+    projectId: string
+    workflowRunId: string
+    sessionName: string
+    cleanupAttempt: number
+    precedingCleanupOperationId: string | null
+  },
   options: { budgetMs: number; signal: AbortSignal },
 ): Promise<void>
 ```
 
-- **Completion condition**: no record retained in the outbox shares the session's
-  scheduling identity. This is exactly `runtimeEventSchedulingKey` for both workflow
-  families (`workflow-session` and `workflow-cleanup` collapse to the same
-  `{family: 'workflow-session', projectId, workflowRunId, sessionName}` label), so the
-  wait covers *every* retained record for the logical session — terminal close/idle
-  facts, undelivered streaming deltas, and any prior cleanup boundary record — not a
-  hand-picked subset. A record counts as delivery-complete when it is no longer
-  retained: acknowledged and removed via its acknowledgement policy, terminally
-  settled by the existing deterministic-binding-refusal settlement, or dropped by the
-  existing retention cap.
-- **Event-driven resolution**: the implementation keeps
-  `deliveryWaiters: Map<schedulingLabel, Set<waiter>>`. Waiters are resolved at the
-  points where records are removed — after the removal snapshot write commits in
-  `settleDeliveryReceipts`, after deterministic-binding-refusal settlement commits, and
-  after retention-cap drops / `load()`. If nothing is retained at call time, the wait
-  resolves immediately (zero added delay for the already-delivered case). Registering
-  a waiter kicks delivery once (`void this.kick()`), mirroring `awaitInputReceipt` —
-  the kick is the normal delivery path, not a status query.
+The caller passes `precedingCleanupOperationId = null` for cleanup attempt 1. For
+attempt N greater than 1 it passes the deterministic operation id for attempt N minus
+1 (`workflowCleanupOperationId(workflowRunId, taskRunId, workId, N - 1)`).
+
+- **Completion condition for attempt 1**: no retained `workflow-session` record has
+  the Workflow scheduling identity `{projectId, workflowRunId, sessionName}`. This
+  covers the original task turn's boundary, deltas, and terminal close/idle facts.
+- **Completion condition for attempt 2+**: neither the preceding
+  `workflow-cleanup` boundary record with the supplied operation id nor any
+  `session-followup` record whose event payload carries that `cleanupOperationId`
+  remains retained. `WorkflowAgentSessionReporter.buildRecord` stamps that id on the
+  cleanup runtime input and every produced cleanup fact, so this predicate crosses the
+  deliberate key-family transition from Workflow target to AgentSession target without
+  changing delivery keys or wire records. It covers the preceding cleanup turn's
+  terminal activity even though delivery remains keyed by AgentSession id and cleanup
+  turn id.
+- **Settlement semantics**: a matching record is delivery-complete when it is
+  acknowledged and durably removed via its acknowledgement policy, or terminally
+  settled by the existing deterministic-binding-refusal path. Existing retention-cap
+  behavior is unchanged and is not redefined as acknowledgement; only reconstructible
+  streaming deltas are eligible for retention removal, while boundary and terminal
+  convergence records remain fail-closed until settled.
+- **Event-driven resolution**: the implementation keeps waiters indexed by a stable
+  predecessor label (the Workflow scheduling label for attempt 1, otherwise
+  `cleanup-operation:<id>`). After a durable record-removal commit, it derives the
+  affected predecessor labels from the removed records and resolves a waiter only when
+  a fresh in-memory predicate check finds no matching retained record. The same check
+  runs after `load()` establishes recovered state. If nothing matching is retained at
+  call time, the wait resolves immediately. Registering a waiter kicks delivery once
+  (`void this.kick()`), mirroring `awaitInputReceipt`; the kick is the normal delivery
+  path, not a status query.
 - **Budget and cancellation**: the budget uses the injected `RuntimeEventOutboxTimer`
   (fake-timer friendly) and only ever fires to *fail* the wait — it never wakes to
   re-evaluate retained state. Caller abort rejects promptly. The wait never removes,
   reorders, or mutates records.
 - **Error type**: a dedicated exported error (e.g.
-  `WorkflowSessionDeliveryWaitTimeoutError`) carrying the session identity and the
-  exhausted budget, so callers can render structured evidence.
+  `CleanupPredecessorDeliveryWaitTimeoutError`) carrying the Workflow session identity,
+  preceding cleanup operation id when present, cleanup attempt, and exhausted budget,
+  so callers can render structured evidence.
 
-Why the caller-visible completion check is safe: both runtimes enqueue all of a turn's
-terminal facts before the action returns (`reporter.settle()` /
-`reportWithTerminalSignal`), and the cleanup attempt starts strictly after the original
-action returns. So "nothing retained for the session" at wait time genuinely means
-"delivered", never "not yet enqueued".
+Why an absent matching record is safe at call time: both runtimes enqueue all of a
+turn's runtime input and terminal facts before the action returns (`reporter.settle()` /
+`reportWithTerminalSignal`), and the next cleanup attempt starts strictly after that
+return. Thus the preceding cleanup operation's records cannot appear after its wait
+has already observed absence.
 
 **Alternatives considered:**
 
-- *Wait on specific terminal-fact record IDs*: the reporter's record IDs are
-  internal, batching settles records collectively, and the server needs the whole
-  session's retained set drained (a prior cleanup boundary record also gates
-  admission). Rejected as both mechanically awkward and semantically narrower than the
-  spec.
+- *Use only `runtimeEventSchedulingKey` for every attempt*: rejected because cleanup
+  runtime input and terminal activity are emitted as `session-followup` records whose
+  scheduling key is AgentSession/turn scoped, so a Workflow-only wait can admit attempt
+  2+ while the preceding cleanup turn is still active server-side.
+- *Change cleanup follow-up records back to the Workflow producer family*: rejected;
+  the runner-scoped Session route deliberately makes the immutable Session turn their
+  owner, and changing that wire identity would broaden this runner-only admission fix.
+- *Wait on specific terminal-fact record IDs*: the reporter's fact ids are internal and
+  batching settles records collectively. The cleanup operation id is already the
+  authoritative correlation stamped on the entire cleanup turn, so record-id plumbing
+  would be narrower and more invasive.
 - *Poll `snapshot()` on a timer from the caller*: explicitly forbidden by the
   `runtime-event-delivery-wait` spec (no polling, no timer-driven re-evaluation).
 - *Ask the server (GET session status until terminal)*: adds a new status round-trip,
@@ -131,23 +158,28 @@ action returns. So "nothing retained for the session" at wait time genuinely mea
 
 - **OpenCode** (`executor-capabilities.ts`, `buildAgentTurnCapability.turn`): when
   `cleanupAttempt` is a positive integer and the workflow identity is available
-  (`work.projectId`, outbox present), await
-  `awaitWorkflowSessionDelivery({projectId, workflowRunId, sessionName}, …)` **before**
-  `openWorkflowAgentSession`, with `sessionName = request.session ?? work.workId` —
-  the same name the open call uses (`buildCleanupWith` preserves an explicit
-  `session`, otherwise both turns fall back to `workId`, so the identities match).
+  (`work.projectId`, outbox present), derive the predecessor as `null` for attempt 1 or
+  `workflowCleanupOperationId(work.workflowRunId, work.taskRunId, work.workId,
+  cleanupAttempt - 1)` for later attempts, then await
+  `awaitCleanupPredecessorDelivery(...)` **before** `openWorkflowAgentSession`, with
+  `sessionName = request.session ?? work.workId` — the same name the open call uses.
+  A cleanup attempt requires the existing non-empty `taskRunId` reporter prerequisite,
+  so later-attempt correlation is deterministic.
 - **Pi** (`pi.ts`, `piAction`): after `sessionNameFromContext` resolves the name and
-  `canBind` holds, before `openWorkflowAgentSession`, under the same
-  positive-`cleanupAttempt` gate.
+  `canBind` holds, derive the same predecessor from the context work identity and wait
+  before `openWorkflowAgentSession`, under the same positive-`cleanupAttempt` gate.
 
 Waiting before `open` (not before the outbox enqueue inside the reporter) is what
-fixes both observed failures: the OpenCode guard evaluates the post-wait projection,
-and the Pi `session.cleanup` admission record is only enqueued once the original turn
-is terminal server-side, so frozen-binding validation passes.
+fixes both observed failures: the OpenCode guard evaluates only after the immediate
+predecessor has converged, and the Pi `session.cleanup` admission record is enqueued
+only once that predecessor — original turn or prior cleanup turn — is terminal
+server-side, so frozen-binding validation passes.
 
 The method is declared optional on the `AgentSessionRuntimeEventOutbox` interface
 (mirroring `awaitInputReceipt`) so existing test doubles keep compiling; a missing
 implementation degrades to today's no-wait behavior. The real outbox implements it.
+Production admission tests cover both predecessor forms through the real outbox so the
+Session-scoped attempt-2+ path cannot silently collapse to the Workflow-only case.
 
 **Alternatives considered:**
 
@@ -176,8 +208,9 @@ unsettled-session error, exactly what this change removes).
 
 ### D4: Budget exhaustion fails the cleanup attempt with structured, declared evidence
 
-- The outbox rejects with `WorkflowSessionDeliveryWaitTimeoutError` (session identity +
-  budget). Each admission site converts it into an action failure with a new code
+- The outbox rejects with `CleanupPredecessorDeliveryWaitTimeoutError` (Workflow
+  session identity + cleanup attempt + preceding operation id when present + budget).
+  Each admission site converts it into an action failure with a new code
   `session-delivery-wait-timeout` and a message that names the awaited Workflow
   session (`projectId/workflowRunId/sessionName`), the work item, and the exhausted
   budget — not the unsettled-session text.
@@ -210,9 +243,10 @@ the happy path pays nothing.
 
 No server code changes. The design relies only on an existing invariant: the
 runtime-events route processes a batch inside the session grain before
-acknowledging, and the cleanup admission validates inside the same grain — so
-delivery-complete ⇒ original turn terminal ⇒ admission succeeds. `needsFreshRuntimeSession`
-and open semantics are unaffected (a completed turn never sets the fresh-session flag).
+acknowledging, and cleanup admission validates inside the same grain — so predecessor
+delivery-complete ⇒ immediately preceding turn terminal ⇒ admission succeeds.
+`needsFreshRuntimeSession` and open semantics are unaffected (a completed turn never
+sets the fresh-session flag).
 
 ## Risks / Trade-offs
 
@@ -220,14 +254,14 @@ and open semantics are unaffected (a completed turn never sets the fresh-session
   The failure carries session/work/budget evidence and the task can be retried as a
   new attempt; the budget is generous relative to the retry cadence and only the
   cleanup path waits.
-- [New records for the same session enqueued during the wait extend it] -> The wait
-  covers every retained record for the scheduling identity; the previous turn is
-  already settled and later cleanup turns are strictly sequential, so the retained set
-  is finite and the budget bounds the wait regardless.
-- [Waiter resolution missed on an unhandled removal path] -> Resolution hooks are
-  placed at every removal site (receipt settlement, deterministic-refusal settlement,
-  retention-cap drop, `load`); a missed hook degrades to budget-timeout failure, never
-  to incorrect admission.
+- [A predecessor record is enqueued after the wait observes none] -> The preceding
+  action awaits reporter settlement before returning, and cleanup attempts are strictly
+  sequential, so all original-turn or prior-cleanup records exist before the next wait
+  starts. Tests assert this ordering for attempt 2+.
+- [Waiter resolution missed on an unhandled settlement path] -> Resolution hooks are
+  placed after durable receipt settlement, deterministic-refusal settlement, and
+  recovered-state `load`; a missed hook degrades to budget-timeout failure, never to
+  incorrect admission.
 - [Outbox unhealthy (snapshot write failing) while the wait is pending] -> `kick()`
   no-ops but local-retry recovery continues; if health never returns, the budget
   expires and the cleanup fails with evidence rather than hanging the executor.
@@ -243,14 +277,18 @@ and open semantics are unaffected (a completed turn never sets the fresh-session
 ## Migration Plan
 
 1. Land the outbox primitive (`runtime-event-outbox-ports.ts`, `runtime-event-outbox.ts`,
-   shared scheduling-label helper in `runtime-event-outbox-identity.ts`) with unit
-   tests; no behavior change for existing callers.
+   predecessor-label/correlation helpers in `runtime-event-outbox-identity.ts`) with
+   unit tests for both original-turn and prior-cleanup predecessor sets; no behavior
+   change for existing callers.
 2. Wire the admission wait into `executor-capabilities.ts` and `pi.ts` with the
-   cleanup-attempt gate, skip the runner-side unsettled guard for cleanup turns, add
-   the `session-delivery-wait-timeout` code to both manifests, and teach
+   cleanup-attempt gate and deterministic prior-operation derivation, skip the
+   runner-side unsettled guard for cleanup turns, add the
+   `session-delivery-wait-timeout` code to both manifests, and teach
    `runAgentCleanupAttempt` to preserve it.
-3. Verify with the full runner vitest suite (fake timers for lag, budget exhaustion,
-   cross-attempt fail-closed preservation, non-polling semantics).
+3. Verify with the full runner vitest suite (fake timers for first-attempt and
+   attempt-2+ lag in both runtimes, budget exhaustion, cross-attempt fail-closed
+   preservation, maximum-attempt accounting, actual cleanup outcomes, and non-polling
+   semantics).
 
 Deployment: runner-only release; no server, API, schema, snapshot-format, or
 configuration changes — old runners and new servers (and vice versa) remain

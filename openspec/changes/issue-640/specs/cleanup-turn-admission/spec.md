@@ -1,6 +1,6 @@
 ### Requirement: A task's own cleanup turn converges on delivered terminal facts
 
-For a work item's own worktree-cleanup follow-up turn (a positive cleanup attempt on the same work item), the Runner MUST wait — event-driven, within a bounded budget — for the previous turn's terminal close/idle facts to complete outbound delivery from the runtime-event outbox before opening the Workflow AgentSession and submitting the cleanup turn. This MUST hold for both the OpenCode path and the Pi path. Once the wait completes, cleanup admission MUST proceed even though the session-activity projection observed before the wait was `active` or `unknown`, and the cleanup turn MUST NOT be rejected by the unsettled-session fail-closed guard on account of that pre-wait projection.
+For a work item's own worktree-cleanup follow-up turn (a positive cleanup attempt on the same work item), the Runner MUST wait — event-driven, within a bounded budget — for the immediately preceding turn's terminal close/idle facts to complete outbound delivery from the runtime-event outbox before opening the Workflow AgentSession and submitting the cleanup turn. Cleanup attempt 1 MUST wait for the original Workflow turn's retained records. Cleanup attempt N greater than 1 MUST wait for attempt N minus 1's cleanup boundary and Session-scoped `session-followup` runtime input and terminal facts, correlated by the prior attempt's deterministic cleanup operation id. This MUST hold for both the OpenCode path and the Pi path. Once the wait completes, cleanup admission MUST proceed even though the session-activity projection observed before the wait was `active` or `unknown`, and the cleanup turn MUST NOT be rejected by the unsettled-session fail-closed guard on account of that pre-wait projection.
 
 #### Scenario: OpenCode cleanup turn under delivery lag
 
@@ -16,9 +16,21 @@ For a work item's own worktree-cleanup follow-up turn (a positive cleanup attemp
 - **AND** the cleanup channel admission against the frozen execution binding MUST succeed, because the original turn is terminal server-side once the facts are delivered
 - **AND** the cleanup turn MUST NOT fail with a frozen-binding conflict caused by the original turn not yet being terminal server-side
 
+#### Scenario: Later OpenCode cleanup attempt under prior cleanup delivery lag
+
+- **WHEN** an OpenCode cleanup attempt completes but leaves the worktree dirty, its Session-scoped `session-followup` terminal activity remains retained, and the next bounded cleanup attempt starts
+- **THEN** the Runner MUST wait for the immediately preceding cleanup attempt's boundary and correlated `session-followup` records before opening the Workflow AgentSession
+- **AND** the next cleanup prompt MUST be admitted rather than rejected because the prior cleanup turn is still projected active server-side
+
+#### Scenario: Later Pi cleanup attempt under prior cleanup delivery lag
+
+- **WHEN** a Pi cleanup attempt completes but leaves the worktree dirty, its Session-scoped `session-followup` terminal activity remains retained, and the next bounded cleanup attempt starts
+- **THEN** the Runner MUST wait for the immediately preceding cleanup attempt's boundary and correlated `session-followup` records before opening the Workflow AgentSession
+- **AND** the next `session.cleanup` boundary MUST be enqueued only after the prior cleanup turn is terminal server-side
+
 #### Scenario: Terminal facts already delivered
 
-- **WHEN** the previous turn's terminal facts have already completed outbound delivery at the moment the cleanup turn starts
+- **WHEN** the immediately preceding turn's terminal facts have already completed outbound delivery at the moment the cleanup turn starts
 - **THEN** the wait MUST complete without added delay
 - **AND** cleanup admission MUST proceed without re-consulting the session-activity projection as a gate
 
@@ -51,6 +63,7 @@ The admission wait MUST NOT alter the cleanup prompt semantics, the cleanup atte
 
 - **WHEN** a cleanup turn is admitted after the delivery wait completes
 - **THEN** the cleanup turn MUST run with the same constrained cleanup prompt and the same maximum cleanup attempt budget as before this change
+- **AND** each allowed attempt, including attempt 2 and later, MUST remain usable when only the preceding cleanup turn's terminal-fact delivery is delayed
 - **AND** task completion MUST still require a clean worktree after the bounded cleanup attempts
 
 #### Scenario: Server-side validation is not weakened

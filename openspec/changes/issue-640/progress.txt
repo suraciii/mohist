@@ -1,0 +1,16 @@
+# Issue 640 plan-review repair progress
+
+## Self-review disposition
+
+- MF-1 fixed in the plan artifacts. The delivery wait is now defined by the cleanup attempt's immediate predecessor rather than only the Workflow scheduling key:
+  - attempt 1 waits for the original turn's retained `workflow-session` records;
+  - attempt 2+ waits for the prior deterministic `workflow-cleanup` operation id and every Session-scoped `session-followup` record carrying that id, including runtime input and terminal activity.
+- Added explicit OpenCode and Pi scenarios and task acceptance coverage for attempt 2+ under delayed prior-cleanup terminal delivery.
+- Added maximum-attempt accounting and actual cleanup outcome coverage to T-002.
+- Aligned retention terminology: completion means acknowledgement/durable removal or deterministic-refusal settlement; retention-cap behavior is unchanged and is not called acknowledgement.
+
+## Validation
+
+- `tasks.json` parses with Node JSON.parse.
+- `git diff --check` passes.
+- `self-review.md` was not edited.
