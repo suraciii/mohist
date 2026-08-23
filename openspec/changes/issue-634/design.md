@@ -77,6 +77,8 @@ itself creates no execution resources.
   another member's chooser; the spec binds the actor to the original sender).
 - A second command grammar — the button is a shortcut to the same services.
 - Making the chooser a dropdown (`static_select`); see Decision 2.
+- Any interactive presentation — pagination included — of more than five
+  candidates; the >5 case is the readable text fallback (issue non-goal).
 
 ## Decisions
 
@@ -113,27 +115,43 @@ crash window (claim written, operation not) the single record closes.
 The non-owner path (`HandleAmbiguousNonOwnerAsync`) is unchanged: same claim,
 same once-only owner-only guidance text, no chooser, no facts consumed.
 
-### 2. The chooser is one `actions` block of buttons sharing one action id
+### 2. The chooser is one `actions` block of at most five buttons sharing one action id
 
 Render one button per candidate Bot (label from the Bot identity, as the
 current prompt summary does), all carrying action id
 `mohist_select_agent`, each with its own signed value. Post it through the
 winner's outbox `UserAction` delivery under the existing stable dispatch
-reference, with a plain-text fallback summarizing the candidates.
+reference, with readable text summarizing the candidates.
 
+- **Interactive bound of five (issue AC #1 / Product Shape: 最多展示五个
+  候选).** With two to five eligible candidates the chooser renders one
+  button per candidate plus readable text. With more than five eligible
+  candidates the winner renders **no interactive control at all**: the
+  once-only delivery becomes a readable text fallback requiring the sender
+  to explicitly re-mention a single Bot — no truncation (a partial button
+  list would silently drop candidates the user could have chosen), no
+  auto-selection, and no pagination (an explicit non-goal of the issue).
+  The claim and its once-only semantics are unchanged; only the rendering
+  differs, so fan-out, redelivery, and failover still produce exactly one
+  fallback message.
+- **Readable text in every case.** The chooser message's plain-text field
+  always carries the candidate summary and the single-Bot re-mention
+  instruction, so a client that cannot render the interactive controls
+  (the Product Shape's "Slack interaction 不可用" leg) shows the same
+  guidance.
 - **Buttons, not a `static_select`**: the Go adapter's
   `NormalizeSlackInteraction` reads `actions[0].value`, which Slack populates
   for button clicks; a select menu puts the value in
   `selected_option.value`, which the adapter does not read — that would be an
-  adapter contract change the spec forbids. Trade-off: a long candidate list
-  renders as many buttons; realistic workspaces mention two or three Bots, and
-  the actions block bound (25 elements) comfortably covers it.
+  adapter contract change the spec forbids. With the five-candidate cap the
+  actions-block element limit is never the operative constraint; the cap is
+  the product rule, not a UI bound.
 - **Candidate set**: derived exactly as today (`MentionedWorkspaceBots`:
   parsed mentions ∩ workspace identity-bound Bots, deduplicated by Bot user
   id) — humans and other-Servers' Bots never appear; duplicate Bot identities
   collapse to one choice and do not add ambiguity. `SlackMultiAgentRoutingPolicy`
   is unchanged; only the `Prompt` disposition's side effect changes from text
-  to blocks.
+  to blocks (or, beyond five candidates, to the text fallback).
 - **Placement**: the delivery keeps the inbound `ThreadTs`, so a root chooser
   posts at the channel root and a thread chooser posts in that thread, exactly
   as the current prompt does.
@@ -327,9 +345,11 @@ row from planned to delivered.
   extraction is behavior-preserving and covered by the existing channel
   ingress specs plus new selection specs asserting the same outcomes through
   both callers.
-- [Large candidate sets render many buttons] -> Capped by the actions-block
-  element limit; realistic workspaces mention few Bots; a dropdown would
-  require the adapter change this design excludes.
+- [More than five eligible candidates] -> No interactive control is rendered
+  at all: the once-only delivery is the readable text fallback requiring an
+  explicit single-Bot re-mention — no truncation, no auto-selection, no
+  pagination (non-goal) — and the claim keeps it to exactly one fallback
+  message.
 - [Late interaction redelivery after retention reaped the record] -> Returns
   `stale_action` (visible, no resources) instead of the decision view;
   retention default keeps this beyond any realistic redelivery window.
