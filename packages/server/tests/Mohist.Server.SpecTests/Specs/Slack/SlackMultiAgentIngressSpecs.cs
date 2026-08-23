@@ -173,6 +173,24 @@ public sealed partial class SlackMultiAgentIngressSpecs : IAsyncLifetime
                 UpdatedAt = now,
             });
         }
+        var enrollment = await db.SlackWorkspaceEnrollments
+            .FirstOrDefaultAsync(row => row.WorkspaceTeamId == workspaceTeamId);
+        if (enrollment is null)
+        {
+            enrollment = new SlackWorkspaceEnrollmentRow
+            {
+                Id = $"enrollment-{workspaceTeamId}",
+                WorkspaceTeamId = workspaceTeamId,
+                Lifecycle = SlackEnrollmentLifecycle.Active,
+                ManagerCapability = SlackManagerCapability.Available,
+                PlanCode = "unknown",
+                AuditJson = "[]",
+                CreatedAt = now,
+                UpdatedAt = now,
+            };
+            db.SlackWorkspaceEnrollments.Add(enrollment);
+        }
+
         var botUserId = $"U{agentNameSuffix.GetHashCode():X}".PadRight(8, '0').Substring(0, 8);
         db.Agents.Add(new AgentRow
         {
@@ -211,11 +229,10 @@ public sealed partial class SlackMultiAgentIngressSpecs : IAsyncLifetime
         });
 
         var agentAppId = $"agent_app_{Guid.NewGuid():N}";
-        var enrollmentId = await SlackRuntimeLeaseTestSupport.EnsureEnrollmentAsync(_fixture, workspaceTeamId);
         db.ManagedSlackAgentApps.Add(new ManagedSlackAgentAppRow
         {
             Id = agentAppId,
-            EnrollmentId = enrollmentId,
+            EnrollmentId = enrollment.Id,
             WorkspaceTeamId = workspaceTeamId,
             AgentConnectionId = id,
             AppId = appId,
@@ -234,27 +251,42 @@ public sealed partial class SlackMultiAgentIngressSpecs : IAsyncLifetime
             CreatedAt = now,
             UpdatedAt = now,
         });
-        await db.SaveChangesAsync();
 
+        var appToken = Encoding.UTF8.GetBytes("xapp");
+        var botToken = Encoding.UTF8.GetBytes("xoxb");
         var secrets = scope.ServiceProvider.GetRequiredService<AesGcmSecretStore>();
         await secrets.StoreAtomicallyAsync(
             db,
             [
                 new SecretStoreWrite(
                     new SecretStoreAddress(resolvedProjectId, id, SecretKind.AppToken),
-                    Encoding.UTF8.GetBytes("xapp")),
+                    appToken),
                 new SecretStoreWrite(
                     new SecretStoreAddress(resolvedProjectId, id, SecretKind.BotToken),
-                    Encoding.UTF8.GetBytes("xoxb")),
+                    botToken),
                 new SecretStoreWrite(
                     SecretStoreAddress.ForManagedSlackAgentApp(agentAppId, SecretKind.AppToken),
-                    Encoding.UTF8.GetBytes("xapp")),
+                    appToken),
                 new SecretStoreWrite(
                     SecretStoreAddress.ForManagedSlackAgentApp(agentAppId, SecretKind.BotToken),
-                    Encoding.UTF8.GetBytes("xoxb")),
+                    botToken),
             ]);
+
+        var leaseId = $"slklease_spec_{Guid.NewGuid():N}";
+        db.SlackAdapterLeases.Add(new SlackAdapterLeaseRow
+        {
+            TargetKey = new SlackLeaseTargetRef.Connection(resolvedProjectId, id).TargetKey,
+            Generation = 1,
+            LeaseId = leaseId,
+            LeaseKind = SlackLeaseKind.Runtime,
+            AdapterId = SlackRuntimeLeaseTestSupport.AdapterId,
+            IssuedAt = now,
+            ExpiresAt = now + SlackAdapterLeaseService.RuntimeLeaseTtl,
+            UpdatedAt = now,
+            CredentialFingerprint = Convert.ToHexStringLower(
+                System.Security.Cryptography.SHA256.HashData(Encoding.UTF8.GetBytes("xappxoxb"))),
+        });
         await db.SaveChangesAsync();
-        var leaseId = await SlackRuntimeLeaseTestSupport.AcquireConnectionLeaseAsync(_fixture, resolvedProjectId, id);
         _connectionLeases[id] = leaseId;
         return new AgentConnection
         {
