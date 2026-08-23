@@ -2,34 +2,28 @@
 
 ## Verdict
 
-**FAIL**
+**PASS**
+
+## Re-review: previous finding disposition
+
+- **MF-1 from the previous review — fixed properly.** The unrelated server test and the three server architecture-ledger files are no longer in the change. Comparing `origin/master...HEAD` shows product changes only under `packages/web` (plus the issue-592 workflow artifacts); no server, runner, or CLI file remains in the change.
+- No prior must-fix finding remains unaddressed, and the repair did not introduce a regression meeting the must-fix bar.
 
 ## Must-fix findings
 
-### MF-1 — The change is not limited to the web package
+None.
 
-The issue plan explicitly scopes the change to `packages/web` and states that there are no server, runner, or CLI changes. The current diff nevertheless includes unrelated server test and architecture-ledger modifications:
+## Review sweep
 
-- `packages/server/tests/Mohist.Server.SpecTests/Specs/Agent/Api/AgentSessionLaunchRuntimeResolutionSpecs.cs`
-  changes runtime-resolution test orchestration from polling to claiming jobs and changes the dispatch helper shape.
-- `packages/server/tests/Mohist.Server.ArchTests/SpecUnitMigrationLedger.json`
-- `packages/server/tests/Mohist.Server.ArchTests/SpecUnitMigrationLedgerModel.cs`
-- `packages/server/tests/Mohist.Server.ArchTests/SpecUnitMigrationProvenance.json`
-  update the checked-in source-tree digest to account for that server test change.
-
-These files are outside the issue's stated `packages/web` impact and are unrelated to deleting the dead web session/UI surface. Leaving them in this change violates the explicit scope/no-server-change constraint, even though the server tests pass. The separate fix-up must remove these server changes (or deliver them independently) so issue-592 contains only its web changes and workflow artifacts.
-
-## First-review sweep
-
-- **Acceptance criteria — FAIL:** The web acceptance criteria are implemented, but the current change violates the plan's explicit package scope/no server-change requirement noted above.
-- **Coverage — checked:** The dead `widgets/coder-session` chain, legacy `entities/session` view projection, duplicate session data clients, inferred session data contract, custom toast host, retired markdown renderer/toggles, duplicate viewport hooks, and query-client convention are all addressed in the current tree.
-- **Correctness — checked, no web must-fix issue found:** The unified session hook is the sole session-detail data source; removed fields and shell branches are absent; generic followup/turn-control and recovery paths remain wired; the surviving timeline projection and widget exports remain present.
-- **Consistency — checked:** The web edits follow the existing FSD public-API and `@x` boundary conventions. `SessionTranscriptLayout.tsx` has a behavior-neutral local type rename (`SessionTimelineView` to `SessionTranscriptViewMode`) to satisfy the removed-token sweep; this is noted as an observation because the surrounding timeline chain otherwise remains intact.
-- **Tests — checked:** `npm run typecheck -w packages/web`, `npm run check:fsd -w packages/web`, `npm run check:test-boundaries -w packages/web`, and `npm run test:ci -w packages/web` pass. The full repository `npm run verify` also passes, including the web build and all server/runner/Slack tests.
+- **Acceptance criteria — checked, no issue:** the dead coder-session presentation chain and legacy session view family are deleted; the unified session hook is the session-detail contract and sole detail data path; duplicate session clients and orphaned types are removed; generic followup/turn-control and recovery paths remain; the toast host, retired markdown component, disabled MarkdownReader affordances, and duplicate viewport hooks are removed; the query-client convention is documented.
+- **Coverage — checked, no issue:** the changed files cover all task groups T-001 through T-007. Public APIs were pruned, deleted-only tests were removed or narrowed, and the surviving transcript/timeline chain remains present.
+- **Correctness — checked, no issue:** `useUnifiedSessionDataSource` now exports `ReturnType<typeof useUnifiedSessionDataSource>`; the shell consumes that alias and no longer reads the constant-empty sibling/title fields. Followups still use the generic mutation with stable retry idempotency keys, and the stop handle is null unless the current turn is queued or executing. The viewport replacements preserve the original media-query boundaries, and MarkdownReader retains heading-level remapping, attachments, tables, and collapsible rendering.
+- **Consistency — checked, no issue:** FSD boundary and test-boundary checks pass. The remaining slice public APIs and `@x` boundary exports are consistent with the surviving consumers. The `SessionTranscriptViewMode` rename is behavior-neutral and only avoids colliding with the removed exact token.
+- **Tests/build — checked, no issue:** `npm run typecheck -w packages/web`, `npm run check:fsd -w packages/web`, `npm run check:test-boundaries -w packages/web`, and `npm run test:run -w packages/web` pass. Vitest reports **355 files and 4,483 tests passed**. `npm run build -w packages/web` passes; only the documented existing Rollup warnings remain.
 
 ## Observations
 
-- The production build still emits existing non-blocking Rollup warnings about SignalR `/*#__PURE__*/` annotations and large chunks; no issue-592 acceptance criterion is affected.
-- The surviving session-transcript layout received only the disclosed local type-alias rename needed for the exact removed-family sweep; no timeline behavior changed.
+- Two specialized, pre-existing components still import `react-markdown`: `packages/web/src/widgets/session-transcript/ui/TranscriptMarkdown.tsx` and `packages/web/src/widgets/issue-workflow/ui/ReviewReportModal.tsx`. The plan's broad phrase “MarkdownReader is web's only markdown renderer” could be read to include them, but the executable T-005/T-006 criteria target the unused `shared/ui/components/markdown-content.tsx` and never-enabled MarkdownReader affordances, while the plan explicitly keeps the surviving transcript chain untouched. Treat this as follow-up clarification or migration work, not a must-fix for this scoped deletion change.
+- The production build continues to emit existing SignalR `/*#__PURE__*/` annotation and large-chunk warnings; neither affects issue-592's acceptance criteria.
 
-<promise>FAIL</promise>
+<promise>PASS</promise>
