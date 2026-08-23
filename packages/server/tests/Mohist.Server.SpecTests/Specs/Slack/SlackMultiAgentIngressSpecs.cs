@@ -4,6 +4,9 @@ using System.Text;
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.Options;
 using Mohist.Server.Agent.Domain;
 using Mohist.Server.Infrastructure;
 using Mohist.Server.Infrastructure.Data.Agent;
@@ -13,6 +16,7 @@ using Mohist.Server.Infrastructure.Data.Slack;
 using Mohist.Server.Infrastructure.Security.Secrets;
 using Mohist.Server.Infrastructure.Slack;
 using Mohist.Server.Slack.Domain;
+using Mohist.Server.Slack.Services;
 using Mohist.Server.SpecTests.Support;
 using Mohist.Server.TestSupport;
 using Xunit;
@@ -64,6 +68,79 @@ public sealed partial class SlackMultiAgentIngressSpecs
             .ToListAsync());
         Assert.Empty(await db.SlackThreadSessionMappings
             .Where(row => row.ConversationId == "C-multi-bot")
+            .ToListAsync());
+    }
+
+    [Fact]
+    public async Task Selection_obligation_worker_recovers_cross_project_root_once()
+    {
+        var promptOwner = await CreateConnectionAsync("recovery-owner", "T-recovery", "U_RECOVERY", "A_RECOVERY");
+        var selected = await CreateConnectionAsync("recovery-selected", "T-recovery", "U_SELECTED", "B_RECOVERY");
+        var identity = new SlackMessageIdentity("T-recovery", "C-recovery", "1710000000.020100");
+        var candidates = new[]
+        {
+            new SlackSelectionCandidateReference(promptOwner.ProjectId, promptOwner.Id, promptOwner.BotUserId),
+            new SlackSelectionCandidateReference(selected.ProjectId, selected.Id, selected.BotUserId),
+        };
+
+        await using (var scope = _fixture.Services.CreateAsyncScope())
+        {
+            var prompts = scope.ServiceProvider.GetRequiredService<SlackAmbiguousPromptStore>();
+            await prompts.TryClaimAsync(
+                promptOwner.ProjectId,
+                identity.WorkspaceTeamId,
+                identity.ConversationId,
+                identity.MessageTs,
+                threadTs: null,
+                promptOwner.Id,
+                candidates,
+                "U_RECOVERY",
+                "recover in the selected project",
+                "[]",
+                SlackAmbiguityKinds.RootMultiMention);
+            var ids = SlackChannelLaunchService.PreMintSlackLaunchIds(selected.ProjectId, identity);
+            await prompts.TryDecideAsync(
+                identity.WorkspaceTeamId,
+                identity.ConversationId,
+                identity.MessageTs,
+                selected.ProjectId,
+                selected.Id,
+                SlackSelectionDispatchKinds.RootLaunch,
+                ids.SessionId,
+                ids.InputId,
+                ids.TurnId);
+        }
+
+        var worker = new SlackAgentSelectionObligationWorker(
+            _fixture.Services.GetRequiredService<IServiceScopeFactory>(),
+            _fixture.TimeProvider,
+            Options.Create(new SlackProviderOptions()),
+            NullLogger<SlackAgentSelectionObligationWorker>.Instance);
+        _fixture.TimeProvider.Advance(TimeSpan.FromMinutes(1));
+        await worker.ProcessPendingAsync();
+        _fixture.TimeProvider.Advance(TimeSpan.FromMinutes(1));
+        await worker.ProcessPendingAsync();
+
+        await using var verify = _fixture.Services.CreateAsyncScope();
+        var promptsAfter = verify.ServiceProvider.GetRequiredService<SlackAmbiguousPromptStore>();
+        var claim = await promptsAfter.FindAsync(
+            identity.WorkspaceTeamId,
+            identity.ConversationId,
+            identity.MessageTs);
+        Assert.NotNull(claim);
+        Assert.Equal(SlackSelectionStates.Completed, claim!.SelectionState);
+        Assert.Equal(selected.ProjectId, claim.ChosenProjectId);
+        Assert.Equal(selected.Id, claim.ChosenConnectionId);
+        Assert.Equal(
+            SlackChannelLaunchService.PreMintSlackLaunchIds(selected.ProjectId, identity).SessionId,
+            claim.SelectionSessionId);
+
+        var db = verify.ServiceProvider.GetRequiredService<MohistDbContext>();
+        Assert.Single(await db.AgentSessions
+            .Where(row => row.Id == claim.SelectionSessionId)
+            .ToListAsync());
+        Assert.Empty(await db.AgentSessions
+            .Where(row => row.LabelConnectionId == promptOwner.Id)
             .ToListAsync());
     }
 

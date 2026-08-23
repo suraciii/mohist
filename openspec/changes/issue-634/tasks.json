@@ -91,8 +91,8 @@
       "type": "WRITE",
       "output": "packages/server/src/Mohist.Server/Slack/Services/SlackAgentSelectionObligationWorker.cs with DI registration, recovery/expiry/retention spec tests, and updated docs/slack.md plus design/slack.md status notes.",
       "dependsOn": ["T-003"],
-      "passes": false,
-      "notes": "Bounds are pinned by the issue, not open: five-minute action expiry (same as Stop/Retry) and the existing SlackEventRetentionWindow for finished-record reaping; no new retention regime or grace margin is introduced."
+      "passes": true,
+      "notes": "Bounds are pinned by the issue, not open: five-minute action expiry (same as Stop/Retry) and the existing SlackEventRetentionWindow for finished-record reaping; no new retention regime or grace margin is introduced. Implemented with SlackAgentSelectionObligationWorker, durable recovery/settlement/cleanup transitions, recovery and lifecycle coverage, and delivered-status documentation."
     }
   ]
 }

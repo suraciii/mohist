@@ -248,7 +248,78 @@ internal sealed class SlackAgentSelectionService : IScopedService
             binding,
             ids,
             ct);
+        if (dispatchResult.State is "accepted" or "already_accepted")
+        {
+            await _prompts.MarkCompletedAsync(claim.Id, dispatchResult.State, ct);
+        }
         return dispatchResult;
+    }
+
+    /// <summary>
+    /// Replays a committed selection without consulting the original
+    /// interaction. The claim is the authority: this path never re-runs
+    /// authorization, resolves the prompt-owner Project, or reclassifies the
+    /// dispatch kind from current bindings.
+    /// </summary>
+    internal async Task<SlackSelectionRecoveryResult> RecoverAsync(
+        SlackAmbiguousPromptSnapshot claim,
+        CancellationToken ct = default)
+    {
+        if (claim.SelectionState != SlackSelectionStates.Decided
+            || string.IsNullOrWhiteSpace(claim.ChosenProjectId)
+            || string.IsNullOrWhiteSpace(claim.ChosenConnectionId)
+            || string.IsNullOrWhiteSpace(claim.DispatchKind)
+            || string.IsNullOrWhiteSpace(claim.SelectionSessionId)
+            || string.IsNullOrWhiteSpace(claim.SelectionInputId)
+            || string.IsNullOrWhiteSpace(claim.SelectionTurnId))
+            return SlackSelectionRecoveryResult.Terminal("selection_record_incomplete");
+
+        var selected = await _connections.GetAsync(
+            claim.ChosenProjectId,
+            claim.ChosenConnectionId,
+            ct);
+        if (selected is null || selected.DeletedAt is not null)
+            return SlackSelectionRecoveryResult.Terminal("selected_connection_unavailable");
+        if (selected.DesiredState == DesiredStateKind.Disabled)
+            return SlackSelectionRecoveryResult.Terminal("selected_connection_disabled");
+
+        var identity = new SlackMessageIdentity(
+            claim.WorkspaceTeamId,
+            claim.ConversationId,
+            claim.MessageTs);
+        // The selected session id is part of the durable decision. Recovery
+        // must not reclassify a follow-up from a mutable binding lookup.
+        var binding = claim.DispatchKind == SlackSelectionDispatchKinds.ThreadFollowup
+            ? claim.SelectionSessionId
+            : null;
+        if (claim.DispatchKind == SlackSelectionDispatchKinds.ThreadFollowup
+            && string.IsNullOrWhiteSpace(binding))
+            return SlackSelectionRecoveryResult.Terminal("selected_thread_binding_missing");
+
+        var agent = await _agents.GetByIdAsync(
+            claim.ChosenProjectId,
+            selected.AgentId,
+            ct);
+        if (agent is null)
+            return SlackSelectionRecoveryResult.Terminal("selected_agent_unavailable");
+
+        var result = await DispatchAsync(
+            selected,
+            identity,
+            claim,
+            claim.DispatchKind,
+            binding,
+            new SelectionExecutionIds(
+                claim.SelectionSessionId,
+                claim.SelectionInputId,
+                claim.SelectionTurnId),
+            ct);
+        if (result.State is "accepted" or "already_accepted")
+            return SlackSelectionRecoveryResult.Success(result.State);
+        if (result.State is "connection_disabled" or "no_longer_valid")
+            return SlackSelectionRecoveryResult.Terminal(result.State);
+        throw new InvalidOperationException(
+            $"Committed Slack Agent selection {claim.Id} returned non-terminal state '{result.State}'.");
     }
 
     private async Task<SlackTurnControlResult> DispatchAsync(
@@ -278,9 +349,20 @@ internal sealed class SlackAgentSelectionService : IScopedService
                 StartupContext: null,
                 _threadMappings), ct);
             if (result.ResponseOwner == SlackIngressResponseOwners.Server)
-                return Confirmed("accepted", result.Reason ?? "Agent selection accepted.");
+                return new SlackTurnControlResult(
+                    result.Kind,
+                    result.Reason ?? "The selected Agent is not ready to execute this work.",
+                    BuildPresentationBlocks(result.Reason ?? "The selected Agent is not ready to execute this work."));
             if (result.Kind == "connection_disabled")
                 return Rejected("connection_disabled", result.Reason ?? "This Slack Connection is disabled.");
+            if (result.ResponseOwner == SlackIngressResponseOwners.Adapter
+                || result.Kind is "backpressured" or "slack_thread_launch_in_progress")
+                return new SlackTurnControlResult(
+                    result.Kind,
+                    result.Reason ?? "The selected Agent is temporarily busy. Please retry shortly.",
+                    BuildPresentationBlocks(result.Reason ?? "The selected Agent is temporarily busy. Please retry shortly."));
+            if (result.Kind == "agent_not_found")
+                return Rejected("no_longer_valid", "The selected Agent is no longer available.");
             return Confirmed("accepted", "Agent selection accepted and work is being started.");
         }
 
@@ -545,4 +627,17 @@ internal sealed class SlackAgentSelectionService : IScopedService
 
     private sealed record SelectionExecutionIds(string SessionId, string InputId, string TurnId);
 
+}
+
+internal sealed record SlackSelectionRecoveryResult(
+    bool Completed,
+    bool Settled,
+    string State,
+    string? Reason = null)
+{
+    public static SlackSelectionRecoveryResult Success(string state) =>
+        new(true, false, state);
+
+    public static SlackSelectionRecoveryResult Terminal(string reason) =>
+        new(false, true, "settled", reason);
 }

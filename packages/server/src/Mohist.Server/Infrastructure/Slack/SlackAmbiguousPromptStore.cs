@@ -122,6 +122,9 @@ public sealed class SlackAmbiguousPromptStore : IScopedService
             .Select(row => new SlackAmbiguousPromptSnapshot(
                 row.Id,
                 row.ProjectId,
+                row.WorkspaceTeamId,
+                row.ConversationId,
+                row.MessageTs,
                 row.WinningConnectionId,
                 row.ThreadTs,
                 row.MentionedConnectionIdsJson,
@@ -136,7 +139,14 @@ public sealed class SlackAmbiguousPromptStore : IScopedService
                 row.DispatchKind,
                 row.SelectionSessionId,
                 row.SelectionInputId,
-                row.SelectionTurnId))
+                row.SelectionTurnId,
+                row.AttemptCount,
+                row.LastAttemptAt,
+                row.FinishedAt,
+                row.SettleReason,
+                row.PromptedAt,
+                row.CreatedAt,
+                row.UpdatedAt))
             .SingleAsync(ct);
 
         var claimed = inserted > 0;
@@ -168,12 +178,15 @@ public sealed class SlackAmbiguousPromptStore : IScopedService
                 && row.ConversationId == conversationId
                 && row.MessageTs == messageTs)
             .Select(row => new SlackAmbiguousPromptSnapshot(
-                row.Id, row.ProjectId, row.WinningConnectionId, row.ThreadTs,
+                row.Id, row.ProjectId, row.WorkspaceTeamId, row.ConversationId,
+                row.MessageTs, row.WinningConnectionId, row.ThreadTs,
                 row.MentionedConnectionIdsJson, row.SenderSlackUserId, row.TaskText,
                 row.FilesJson, row.AmbiguityKind, row.CandidateReferencesJson,
                 row.SelectionState, row.ChosenProjectId, row.ChosenConnectionId,
                 row.DispatchKind, row.SelectionSessionId, row.SelectionInputId,
-                row.SelectionTurnId))
+                row.SelectionTurnId, row.AttemptCount, row.LastAttemptAt,
+                row.FinishedAt, row.SettleReason, row.PromptedAt, row.CreatedAt,
+                row.UpdatedAt))
             .SingleOrDefaultAsync(ct);
     }
 
@@ -231,8 +244,182 @@ public sealed class SlackAmbiguousPromptStore : IScopedService
         return new SlackAmbiguousPromptDecisionResult(changed > 0, snapshot);
     }
 
+    /// <summary>
+    /// Returns the rows that need one bounded obligation pass. The caller
+    /// supplies the retry interval so the database remains the scheduling
+    /// fence: a second worker cannot immediately claim the same Decided row.
+    /// The query is project/state/updated-at shaped to use the selection
+    /// obligation index rather than scanning finished history.
+    /// </summary>
+    public async Task<IReadOnlyList<string>> ListProjectIdsAsync(CancellationToken ct = default)
+    {
+        await using var db = await _dbFactory.CreateDbContextAsync(ct);
+        return await db.SlackAmbiguousPrompts.AsNoTracking()
+            .Where(row => row.SelectionState == SlackSelectionStates.Pending
+                || row.SelectionState == SlackSelectionStates.Decided)
+            .Select(row => row.ProjectId)
+            .Distinct()
+            .OrderBy(projectId => projectId)
+            .ToListAsync(ct);
+    }
+
+    public async Task<IReadOnlyList<SlackAmbiguousPromptSnapshot>> ListByStateAsync(
+        string projectId,
+        string selectionState,
+        DateTimeOffset updatedBefore,
+        CancellationToken ct = default)
+    {
+        ValidateRequired(projectId, nameof(projectId));
+        ValidateRequired(selectionState, nameof(selectionState));
+        await using var db = await _dbFactory.CreateDbContextAsync(ct);
+        var rows = await db.SlackAmbiguousPrompts
+            .FromSqlInterpolated($"""
+                SELECT * FROM "SlackAmbiguousPrompts"
+                WHERE "ProjectId" = {projectId}
+                  AND "SelectionState" = {selectionState}
+                  AND "UpdatedAt" <= {updatedBefore}
+                ORDER BY "UpdatedAt"
+                """)
+            .AsNoTracking()
+            .ToListAsync(ct);
+        return rows.Select(ToSnapshot).ToArray();
+    }
+
+    public async Task<IReadOnlyList<SlackAmbiguousPromptSnapshot>> ListSettledSinceAsync(
+        DateTimeOffset cutoff,
+        CancellationToken ct = default)
+    {
+        await using var db = await _dbFactory.CreateDbContextAsync(ct);
+        var rows = await db.SlackAmbiguousPrompts.AsNoTracking()
+            .Where(row => row.SelectionState == SlackSelectionStates.Settled)
+            .ToListAsync(ct);
+        return rows
+            .Where(row => row.FinishedAt is not null && row.FinishedAt >= cutoff)
+            .Select(ToSnapshot)
+            .ToArray();
+    }
+
+    /// <summary>
+    /// Claims a Decided row for dispatch and records the attempt before any
+    /// provider or Agent call. This is deliberately separate from the
+    /// Pending-to-Decided selection fence: recovery never changes the chosen
+    /// candidate or re-runs click-time authorization.
+    /// </summary>
+    public async Task<bool> TryBeginDispatchAsync(
+        string rowId,
+        DateTimeOffset now,
+        TimeSpan retryInterval,
+        CancellationToken ct = default)
+    {
+        var retryCutoff = now - retryInterval;
+        await using var db = await _dbFactory.CreateDbContextAsync(ct);
+        var changed = await db.Database.ExecuteSqlInterpolatedAsync($"""
+            UPDATE "SlackAmbiguousPrompts"
+            SET "AttemptCount" = "AttemptCount" + 1,
+                "LastAttemptAt" = {now},
+                "UpdatedAt" = {now}
+            WHERE "Id" = {rowId}
+              AND "SelectionState" = {SlackSelectionStates.Decided}
+              AND ("LastAttemptAt" IS NULL OR "LastAttemptAt" <= {retryCutoff});
+            """, ct);
+        return changed == 1;
+    }
+
+    public async Task<bool> MarkCompletedAsync(
+        string rowId,
+        string? result,
+        CancellationToken ct = default)
+    {
+        var now = _timeProvider.GetUtcNow();
+        await using var db = await _dbFactory.CreateDbContextAsync(ct);
+        var changed = await db.Database.ExecuteSqlInterpolatedAsync($"""
+            UPDATE "SlackAmbiguousPrompts"
+            SET "SelectionState" = {SlackSelectionStates.Completed},
+                "FinishedAt" = {now},
+                "SettleReason" = {result},
+                "UpdatedAt" = {now}
+            WHERE "Id" = {rowId}
+              AND "SelectionState" = {SlackSelectionStates.Decided};
+            """, ct);
+        return changed == 1;
+    }
+
+    public async Task<bool> TrySettleAsync(
+        string rowId,
+        string expectedState,
+        string reason,
+        CancellationToken ct = default)
+    {
+        ValidateRequired(rowId, nameof(rowId));
+        ValidateRequired(expectedState, nameof(expectedState));
+        ValidateRequired(reason, nameof(reason));
+        var now = _timeProvider.GetUtcNow();
+        await using var db = await _dbFactory.CreateDbContextAsync(ct);
+        var changed = await db.Database.ExecuteSqlInterpolatedAsync($"""
+            UPDATE "SlackAmbiguousPrompts"
+            SET "SelectionState" = {SlackSelectionStates.Settled},
+                "FinishedAt" = {now},
+                "SettleReason" = {reason},
+                "UpdatedAt" = {now}
+            WHERE "Id" = {rowId}
+              AND "SelectionState" = {expectedState};
+            """, ct);
+        return changed == 1;
+    }
+
+    public async Task<int> DeleteFinishedBeforeAsync(
+        DateTimeOffset cutoff,
+        CancellationToken ct = default)
+    {
+        await using var db = await _dbFactory.CreateDbContextAsync(ct);
+        var rows = await db.SlackAmbiguousPrompts
+            .Where(row => row.SelectionState == SlackSelectionStates.Completed
+                || row.SelectionState == SlackSelectionStates.Settled)
+            .ToListAsync(ct);
+        rows = rows
+            .Where(row => row.FinishedAt is not null && row.FinishedAt < cutoff)
+            .ToList();
+        if (rows.Count == 0)
+            return 0;
+        db.SlackAmbiguousPrompts.RemoveRange(rows);
+        return await db.SaveChangesAsync(ct);
+    }
+
     public static string PromptDispatchRef(string workspaceTeamId, string conversationId, string messageTs) =>
         $"slack-ambiguous:{workspaceTeamId}:{conversationId}:{messageTs}";
+
+    public static string SettlementDispatchRef(string workspaceTeamId, string conversationId, string messageTs) =>
+        $"slack-ambiguous-outcome:{workspaceTeamId}:{conversationId}:{messageTs}";
+
+    private static SlackAmbiguousPromptSnapshot ToSnapshot(SlackAmbiguousPromptRow row) =>
+        new(
+            row.Id,
+            row.ProjectId,
+            row.WorkspaceTeamId,
+            row.ConversationId,
+            row.MessageTs,
+            row.WinningConnectionId,
+            row.ThreadTs,
+            row.MentionedConnectionIdsJson,
+            row.SenderSlackUserId,
+            row.TaskText,
+            row.FilesJson,
+            row.AmbiguityKind,
+            row.CandidateReferencesJson,
+            row.SelectionState,
+            row.ChosenProjectId,
+            row.ChosenConnectionId,
+            row.DispatchKind,
+            row.SelectionSessionId,
+            row.SelectionInputId,
+            row.SelectionTurnId,
+            row.AttemptCount,
+            row.LastAttemptAt,
+            row.FinishedAt,
+            row.SettleReason,
+            row.PromptedAt,
+            row.CreatedAt,
+            row.UpdatedAt);
 
     private static void ValidateRequired(string value, string name)
     {
@@ -251,6 +438,9 @@ public sealed class SlackAmbiguousPromptStore : IScopedService
 public sealed record SlackAmbiguousPromptSnapshot(
     string Id,
     string ProjectId,
+    string WorkspaceTeamId,
+    string ConversationId,
+    string MessageTs,
     string WinningConnectionId,
     string? ThreadTs,
     string MentionedConnectionIdsJson,
@@ -265,7 +455,14 @@ public sealed record SlackAmbiguousPromptSnapshot(
     string? DispatchKind,
     string? SelectionSessionId,
     string? SelectionInputId,
-    string? SelectionTurnId);
+    string? SelectionTurnId,
+    int AttemptCount,
+    DateTimeOffset? LastAttemptAt,
+    DateTimeOffset? FinishedAt,
+    string? SettleReason,
+    DateTimeOffset PromptedAt,
+    DateTimeOffset CreatedAt,
+    DateTimeOffset UpdatedAt);
 
 public sealed record SlackAmbiguousPromptResult(
     bool Claimed,

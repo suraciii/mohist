@@ -350,3 +350,12 @@ open).
 - Added a Go adapter normalization test proving `mohist_select_agent` forwards unchanged; no adapter contract code changed.
 - Verification: baseline focused Server unit/spec tests passed before implementation; Server build passes after implementation. Go tests could not run because `go` is not installed in the workspace.
 - Remaining known T-003/T-004 scope: comprehensive interaction spec coverage, recovery/obligation worker, and hardening the selection dispatch path around durable post-CAS recovery. Do not treat this checkpoint as task completion until those acceptance requirements are implemented and tested.
+
+## T-004 implementation notes
+
+- Added `SlackAgentSelectionObligationWorker` with hosted DI registration. Its bounded pass expires Pending claims after the pinned five-minute action lifetime, retries Decided claims with a one-minute claim interval, settles unrecoverable selected-Connection/Agent/lineage failures, emits one stable UserAction outcome for settlements, and reaps only Completed/Settled claims older than `SlackProviderOptions.SlackEventRetentionWindow`.
+- Extended `SlackAmbiguousPromptStore` with indexed state scans, dispatch-attempt fencing, completion/settlement transitions, stable settlement delivery reference, and finished-row cleanup. The snapshot now includes workspace/message identity and worker bookkeeping so recovery uses the committed selected Project, DispatchKind, retained anchor, and preallocated ids.
+- Recovery is deliberately isolated from click-time authorization and lease validation. It replays the committed dispatch kind and selected Project; follow-up recovery uses the committed preallocated Session id rather than reclassifying a mutable binding.
+- Selection dispatch now marks successful live/recovered work Completed and maps non-terminal launch outcomes to visible retryable/settlement states. Settlement delivery is rechecked during the retention window to close the crash between settlement and outbox enqueue.
+- Updated `docs/slack.md` and `design/slack.md` to mark multi-Bot interactive selection, selected-Project attribution, restart recovery, five-minute expiry, and bounded retention as delivered.
+- Verification: Server build passes; the full Server.UnitTests assembly ran successfully (3796 passed after lifecycle coverage). `Mohist.Server.Tests.slnf` passes with 3796 unit tests and 3064 Server spec tests, including cross-Project worker recovery. `git diff --check` passes.

@@ -1,3 +1,4 @@
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Time.Testing;
 using Mohist.Server.Infrastructure;
 using Mohist.Server.Infrastructure.Data.Slack;
@@ -159,6 +160,88 @@ public sealed class SlackAmbiguousPromptStoreTests
         Assert.Equal("session-b", loser.Snapshot.SelectionSessionId);
         Assert.Equal("input-b", loser.Snapshot.SelectionInputId);
         Assert.Equal("turn-b", loser.Snapshot.SelectionTurnId);
+    }
+
+    [Fact]
+    public async Task Selection_lifecycle_expires_pending_retries_decided_and_reaps_only_finished_rows()
+    {
+        using var database = TestSqliteDatabase.CreateModelSchema();
+        var time = new FakeTimeProvider(Now);
+        var store = new SlackAmbiguousPromptStore(
+            new TestDbContextFactory(database.Options),
+            time);
+
+        var pending = await store.TryClaimAsync(
+            "project-a", "team-life", "channel-life", "7.001", "7.000",
+            "connection-a", ["connection-a", "connection-b"]);
+        var decided = await store.TryClaimAsync(
+            "project-a", "team-life", "channel-life", "7.002", "7.000",
+            "connection-a", ["connection-a", "connection-b"]);
+        await store.TryDecideAsync(
+            "team-life", "channel-life", "7.002", "project-a", "connection-a",
+            SlackSelectionDispatchKinds.RootLaunch, "session", "input", "turn");
+        Assert.True(await store.TryBeginDispatchAsync(
+            decided.RowId, Now, TimeSpan.FromMinutes(1)));
+        Assert.False(await store.TryBeginDispatchAsync(
+            decided.RowId, Now, TimeSpan.FromMinutes(1)));
+        Assert.True(await store.MarkCompletedAsync(decided.RowId, "accepted"));
+
+        await using (var db = database.CreateContext())
+        {
+            var pendingRow = (await db.SlackAmbiguousPrompts
+                .Where(row => row.Id == pending.RowId)
+                .ToListAsync()).Single();
+            pendingRow.PromptedAt = Now.AddMinutes(-6);
+            pendingRow.UpdatedAt = Now.AddMinutes(-6);
+
+            var completedRow = (await db.SlackAmbiguousPrompts
+                .Where(row => row.Id == decided.RowId)
+                .ToListAsync()).Single();
+            completedRow.FinishedAt = Now.AddMinutes(-31);
+            completedRow.UpdatedAt = Now.AddMinutes(-31);
+            await db.SaveChangesAsync();
+        }
+
+        var pendingRows = await store.ListByStateAsync(
+            "project-a", SlackSelectionStates.Pending, Now.AddMinutes(-5), CancellationToken.None);
+        Assert.Single(pendingRows);
+        Assert.Equal(pending.RowId, pendingRows[0].Id);
+
+        Assert.True(await store.TrySettleAsync(
+            pending.RowId, SlackSelectionStates.Pending, "expired"));
+        await using (var db = database.CreateContext())
+        {
+            var expired = (await db.SlackAmbiguousPrompts
+                .Where(row => row.Id == pending.RowId)
+                .ToListAsync()).Single();
+            expired.FinishedAt = Now.AddMinutes(-31);
+            expired.UpdatedAt = Now.AddMinutes(-31);
+            await db.SaveChangesAsync();
+        }
+        var removed = await store.DeleteFinishedBeforeAsync(Now.AddMinutes(-30));
+        Assert.Equal(2, removed);
+        Assert.Null(await store.FindAsync("team-life", "channel-life", "7.001"));
+        Assert.Null(await store.FindAsync("team-life", "channel-life", "7.002"));
+    }
+
+    [Fact]
+    public async Task Finished_cleanup_does_not_remove_pending_or_recent_settled_rows()
+    {
+        using var database = TestSqliteDatabase.CreateModelSchema();
+        var store = NewStore(database);
+        var pending = await store.TryClaimAsync(
+            "project-a", "team-retain", "channel-retain", "8.001", null,
+            "connection-a", ["connection-a", "connection-b"]);
+        var settled = await store.TryClaimAsync(
+            "project-a", "team-retain", "channel-retain", "8.002", null,
+            "connection-a", ["connection-a", "connection-b"]);
+        Assert.True(await store.TrySettleAsync(
+            settled.RowId, SlackSelectionStates.Pending, "unrecoverable"));
+
+        var removed = await store.DeleteFinishedBeforeAsync(Now.AddHours(-1));
+        Assert.Equal(0, removed);
+        Assert.NotNull(await store.FindAsync("team-retain", "channel-retain", "8.001"));
+        Assert.NotNull(await store.FindAsync("team-retain", "channel-retain", "8.002"));
     }
 
     [Fact]
