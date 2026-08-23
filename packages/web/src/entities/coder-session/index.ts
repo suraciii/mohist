@@ -1,23 +1,8 @@
-export { useCoderSessions } from './model/useCoderSessions'
-export {
-  canFollowupSession,
-  canRecoverSession,
-  deriveSessionActivity,
-  deriveSessionStatusKind,
-} from './model/sessionActivity'
+export { canFollowupSession, deriveSessionStatusKind } from './model/sessionActivity'
 export { useWorkflowRunSessions } from './model/useWorkflowRunSessions'
-export { useFollowupMutation } from './model/useFollowupMutation'
-export type { FollowupMutationInput } from './model/useFollowupMutation'
-export { useStopSessionMutation } from './model/useStopSessionMutation'
-export type { StopSessionMutationInput } from './model/useStopSessionMutation'
 export {
   compactSession,
-  stopSession,
   compactGenericSession,
-  getAgentSessionEvents,
-  getAgentSessionMetadata,
-  getAgentSessionTranscript,
-  getCoderSessions,
   getUnifiedSessionSummary,
   getUnifiedSessionTranscript,
   unifiedSessionSummaryQueryOptions,
@@ -28,22 +13,8 @@ export {
   resetSession,
   resetGenericSession,
 } from './api/client'
-export type {
-  SessionStopResult,
-  SessionRecoveryResult,
-  SessionFollowupResult,
-  SessionAttachment,
-  SessionAttachmentRejection,
-} from './api/client'
-export type {
-  AgentTurnObservation,
-  AgentWorkInterruption,
-  FollowupOutcome,
-  FollowupStatus,
-  SessionInputObservation,
-  UnifiedSessionContextRefsDto,
-  UnifiedSessionSummaryDto,
-} from './model/types'
+export type { SessionRecoveryResult, SessionFollowupResult, SessionAttachment, SessionAttachmentRejection } from './api/client'
+export type { AgentTurnObservation, FollowupOutcome, FollowupStatus, SessionInputObservation, UnifiedSessionContextRefsDto, UnifiedSessionSummaryDto } from './model/types'
 export { clampPercent, isContextHealthStatus } from './lib/context-health'
 export type { ContextHealthStatus } from './lib/context-health'
 export { ContextHealthIndicator } from './ui/ContextHealthIndicator'
