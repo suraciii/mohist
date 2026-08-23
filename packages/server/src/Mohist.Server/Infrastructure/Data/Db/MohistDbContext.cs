@@ -55,6 +55,7 @@ public partial class MohistDbContext : DbContext
     public DbSet<WorkflowProfileRecordRow> WorkflowProfileRecords { get; set; } = null!;
     public DbSet<WorkflowRunEventRow> WorkflowRunEvents { get; set; } = null!;
     public DbSet<AgentSessionRow> AgentSessions { get; set; } = null!;
+    public DbSet<AgentRetryOperationRow> AgentRetryOperations { get; set; } = null!;
     public DbSet<AgentSessionLifecycleTransitionRow> AgentSessionLifecycleTransitions { get; set; } = null!;
     public DbSet<SessionTreeGraphRevisionRow> SessionTreeGraphRevisions { get; set; } = null!;
     public DbSet<AgentSessionTranscriptTurnRow> AgentSessionTranscriptTurns { get; set; } = null!;
@@ -123,7 +124,9 @@ public partial class MohistDbContext : DbContext
     {
     }
 
-    protected override void OnModelCreating(ModelBuilder modelBuilder)
+        partial void ConfigureAgentRetryOperations(ModelBuilder modelBuilder);
+
+protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         modelBuilder.Entity<CredentialRow>(entity =>
         {
@@ -257,20 +260,8 @@ public partial class MohistDbContext : DbContext
                 .HasDatabaseName("IX_WorkflowRunEvents_Source_Id_DispatchedAt");
         });
 
-        modelBuilder.Entity<AgentSessionLifecycleTransitionRow>(entity =>
-        {
-            entity.ToTable("AgentSessionLifecycleTransitions");
-            entity.HasKey(e => e.Id);
-            entity.Property(e => e.SessionId).HasMaxLength(512).IsRequired();
-            entity.Property(e => e.SourceTransition).HasMaxLength(512).IsRequired();
-            entity.Property(e => e.EventType).HasMaxLength(64).IsRequired();
-            entity.Property(e => e.AnchorKind).HasMaxLength(16).IsRequired();
-            entity.Property(e => e.AnchorId).HasMaxLength(256).IsRequired();
-            entity.Property(e => e.SnapshotJson).IsRequired();
-            entity.Property(e => e.OccurredAt).IsRequired();
-            entity.HasIndex(e => new { e.SessionId, e.Id })
-                .HasDatabaseName("IX_AgentSessionLifecycleTransitions_SessionId_Id");
-        });
+        ConfigureAgentRetryOperations(modelBuilder);
+        ConfigureAgentSessionLifecycleTransitions(modelBuilder);
 
         modelBuilder.Entity<AgentSessionRow>(entity =>
         {

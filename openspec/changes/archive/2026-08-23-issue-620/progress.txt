@@ -1,0 +1,71 @@
+## Codebase Patterns
+- AgentSession is an Orleans grain aggregate; target facts are read through IAgentSessionGrain.GetInitialLaunchAsync/ListTurnsAsync/ListInputsAsync. Launch turns are identified by non-empty AgentTurnRecord.JobId, and input provenance is AgentSessionInputProvenance.
+- Connection launches flow through AgentLauncher.LaunchConnectionAsync and AgentLaunchCoordinatorGrain. The coordinator adopts pre-minted Session/Input/Turn ids and deduplicates on its idempotency key; the Slack default key is slack:{team}:{conversation}:{messageTs}.
+- EF models live in MohistDbContext with row classes under Infrastructure/Data; migrations are timestamped 202609... and the model snapshot is generated. Test fixtures use EnsureCreated for L0 and a migrated SQLite template for integration specs.
+- Conventional DI scans IScopedService as self; interface aliases are added manually in MohistServiceRegistration.
+- Existing AgentJobFailureReasons constants are in Agent/Grains/IAgentJobGrain.cs: RunnerUnavailable, RunnerLost, ReportTimeout, WorkspaceUnavailable.
+
+## T-001 Work
+- Implemented the exact-ordinal AgentSessionRetryPolicy over AgentJobFailureReasons plus runner/reserved recorded categories; tests pin producer constants and permanent/unknown cases.
+- Added agent_retry_operations EF model/migration/snapshot and AgentRetryOperationStore. Claim-or-create uses unique idempotency and session+turn boundaries; Finished cleanup leaves Pending rows intact.
+- Added AgentSessionRetryService. It re-reads target facts, claims/commits Pending before root dispatch, rebuilds ConnectionLaunchOrigin from durable provenance, uses preallocated identities and `agent-retry:{operationId}`, and leaves the failed turn untouched. Thread dispatch remains intentionally deferred to T-002.
+- Extended IAgentLauncher.LaunchConnectionAsync with an optional idempotency-key override; existing Slack callers retain the original key behavior.
+- Added an integration spec for root retry: it records a real failed launch turn, verifies a distinct new Session uses the receipt's preallocated identities and original Slack provenance, and verifies the failed turn's status/reason/category remain unchanged.
+- Verification: server, UnitTests, and SpecTests projects build; dotnet test executed the full UnitTests (3787) and full SpecTests (3042) successfully. MTP reports the VSTest filter is ignored, so the runs were full suites.
+
+## T-002 decisions
+- Thread retry accepts a fresh follow-up with `agent-retry:{operationId}`, the operation receipt's pre-minted input/turn ids, the failed input's text/source/provenance, and `ForceNewTurn=true`; this prevents the Session's normal queued-turn coalescing from merging the retry into an unrelated queued turn.
+- `BeginFollowupDispatchForTurnAsync(turnId)` shares the existing follow-up dispatch body and guards with `BeginNextFollowupDispatchAsync`; it only changes turn selection. The retry calls the common follow-up dispatcher with the target turn. A busy Session returns no dispatch and leaves the accepted retry queued for the ordinary scheduler.
+- Targeted-dispatch specs cover unrelated queued turns, the launch-turn guard, busy-session scheduler order, pre-minted identities, Slack provenance, failed-turn immutability, and pending-operation replay/idempotency.
+- Verification: server build with `-p:SkipWebBuild=true` and focused T-002/related SpecTests passed (3048 total because the Microsoft Testing Platform ignores VSTest filters).
+
+## T-003 work
+- Extracted Slack HMAC signing/key loading and constant-time verification into `SlackActionSigningHelper` behind `ISlackActionSigner`; Stop canonicalization and observable behavior remain unchanged.
+- Added `SlackRetryActionService.CreateRetryActionAsync` and v1 `retry` payload/action with initiator-bound operator, conversation/message/thread identity, nonce, five-minute expiry, and signed Retry Block Kit button. Missing signing material returns no action.
+- Added additive `sessionId`/`turnId` fields to terminal delivery envelopes. Initial AgentJob terminal envelopes populate them from the durable input; follow-up envelopes populate them from the session/turn and now forward `turn.Result.FailureReason`/`FailureCategory`.
+- Terminal delivery presentation uses the single `AgentSessionRetryPolicy`; only ordinary failed deliveries with retryable categories and resolvable durable facts attempt an explicit failure notice with Retry blocks. Manager, nonretryable/absent facts, and non-failure deliveries retain reaction-only finalization. If action creation cannot sign, it falls back to reaction-only.
+- Verification: server build (`-p:SkipWebBuild=true`), full UnitTests (3793), and full SpecTests (3048) pass. Added UnitTests for exact canonical signing, tamper/missing payload fields, and unavailable signing material.
+
+## T-004 work
+- Extended `SlackInteractionRoutes` to dispatch `mohist_retry_turn` through `SlackRetryActionService` while retaining the existing Stop route and lease envelope. Retry replies use the existing hash-based `ActionDispatchRef` and outbox UserAction path.
+- Implemented Retry click acceptance ordering: payload verification, expiry, Connection/team/conversation match, exact bound member, session initiator/Connection ownership, current `SlackConnectionAccessDecider` policy evaluation under the validated lease, then `AgentSessionRetryService` with the action nonce as idempotency key. Results map to explicit invalid/expired/stale/unauthorized/no-longer-retryable/accepted-pending/attempt-accepted states and text.
+- Added `SlackRetryInteractionSpecs` covering accepted idempotent replay, invalid/expired/stale/member/policy rejections, target revalidation, and disabled Connection handling. The disabled retry check is surfaced even when disabling invalidates the lease; Stop keeps its prior stale-lease behavior.
+- Verification: Server and SpecTests builds pass; focused retry spec invocation passes (MTP ignores the VSTest filter and executes the full SpecTests assembly: 3052 tests). Earlier full run had unrelated parallel runner-test flakes; UnitTests previously passed 3793 tests.
+
+## T-007 work
+- Extracted the AgentJob runtime-kind category mappings into `packages/runner/src/runtime/error-kind-mapping.ts`; AgentJob and follow-up terminal activity now share the same helper (`mapOpenCodeErrorKind` / `mapPiErrorKind`).
+- Follow-up runtime result failures record the mapped `failureCategory` alongside `failureReason`. Observer flush failures, rejected calls, thrown exceptions, and successful turns omit the additive category; manager credential expiry still overrides it with `unknown`.
+- Added follow-up handler coverage for OpenCode `unavailable-runtime`, Pi `deadline-exceeded` → `timeout`, Pi `missing-session` → `runtime-session-missing`, missing-category failures, expired manager credentials, and unchanged terminal payload keys.
+- Verification: runner source and test typechecks pass; the full `npm test` suite passes (156 files, 1690 tests), including the focused follow-up/AgentJob coverage.
+
+## T-005 work
+- Added `AgentRetryObligationWorker` under `Sessions/Services`, using the existing BackgroundService shape: one-minute initial/recurring interval, a fresh DI scope per pass, per-operation catch-all logging, cancellation-safe shutdown, pending receipt replay through `AgentSessionRetryService.DispatchPendingAsync`, and 24-hour cleanup of Finished receipts only. The worker exposes `ProcessPendingAsync` so deterministic specs can exercise a complete pass without waiting on the timer.
+- Registered the worker in `MohistServiceRegistration`, so the Server host owns its lifecycle and test hosts receive the same registration.
+- Added SpecTests for restart recovery using the receipt's preallocated root identities, exactly-once replay after a second pass, exception isolation/retry of a failing row, and injectable-clock retention cleanup that preserves Pending rows. Existing completed-operation replay remains covered by the T-001/T-002 service specs.
+- Verification: Server and SpecTests build successfully; full SpecTests (3056) and UnitTests (3793) pass. `git diff --check` is clean.
+
+## T-006 work
+- Extended the TypeScript adapter interaction normalization and end-to-end Socket Mode forwarding tests to run for both `mohist_stop_turn` and `mohist_retry_turn`, preserving team/conversation/message/thread/actor/action value fidelity. Added a focused HTTP transport test for both action ids asserting the complete interaction body and adapter lease fields.
+- Extended the Go `ServerAPI.Interaction` forwarding test to run the same Stop/Retry action matrix and assert the complete envelope, including thread timestamp, action value, lease id, and adapter id.
+- No adapter source or fixture changes were needed; all changes are test-only.
+- Verification: `npm --prefix packages/mohist-slack run typecheck:tests` and `npm --prefix packages/mohist-slack test` pass (91 tests). Go verification could not run because the workspace environment has no `go` executable.
+
+## Review follow-up
+
+- Addressed review MF-1: report-timeout reconciliation now retains the canonical `report-timeout` category separately from its diagnostic reason, arms the bounded recovery deadline, and converts an unresolved timeout to a failed Turn with the exact retryable category. Existing runner-loss recovery keeps `runner-lost`; Unknown delivery remains non-retryable while reconciliation is pending.
+- Addressed review MF-2: root retry now uses the failed Session's durable execution definition, Skills, AgentSessionStartup (rebased to the new Session identity), input attachments, startup context, workspace label, prompt, and Slack provenance. `LaunchConnectionAsync` accepts explicit durable definition/startup snapshots and forwards them through the coordinator/job/session pipeline; root retry skips current launchability re-evaluation because the accepted attempt is a replay of the recorded request.
+- Added SpecTest coverage for changed Agent configuration plus attachments/startup context and report-timeout recovery deadline/category setup. Verification: Server and SpecTests builds pass; full SpecTests pass (3060). `review.md` was not edited.
+- MF-1 from `review.md` is the remaining must-fix: handler-level deterministic coverage for retryable terminal presentation and signing/durable-fact fallback.
+- Implemented `SlackTerminalDeliveryPresentationSpecs`: the real handler now has deterministic positive coverage for explicit-failure outbox blocks, signed Retry action value, durable Session/Turn/Slack identity, and five-minute expiry; negative coverage verifies reaction-only fallback for missing durable facts and missing signing material.
+- Hardened terminal presentation so unavailable durable retry facts are logged and fall back to reaction-only instead of failing the terminal event.
+- Verification: SpecTests build passes; full UnitTests pass (3793); full SpecTests pass (3059); `git diff --check` is clean. `review.md` was not edited.
+
+## Review follow-up (MF-1 pending interim Unknown delivery)
+- Fixed `AgentJobGrain.StageTerminalDeliveryEvent` so a pending interim Unknown delivery obligation is replaced by the distinct final terminal-delivery obligation when recovery enters Failed. Existing final obligations remain stable on terminal-entry replay.
+- Added deterministic `AgentJobRunnerRecoverySpecs.ReconciliationFailure_ReplacesPendingUnknownDeliveryAfterInterimAppendFailure`, which forces the Unknown terminal-delivery append to fail, advances the persisted recovery deadline, and verifies the final event is `failed` with `runner-lost`.
+- Verification: server build with `-p:SkipWebBuild=true --no-restore` passed; SpecTests command ran the full assembly because Microsoft Testing Platform ignores the VSTest filter (3064 passed); `git diff --check` clean. `review.md` was not edited.
+
+## Review follow-up (MF-1 generation-drain-timeout)
+- Fixed the remaining retryability gap: OpenCode `generation-drain-timeout` follow-up failures now use terminal activity `unknown`, which records `status: failed` instead of the previous completed/idle shape, while preserving the mapped `failureCategory`.
+- Added runner coverage for the producer terminal payload, Session grain coverage for failed Turn settlement and category preservation, and Slack terminal presentation coverage for a signed Retry action for this category.
+- Verification: runner test typecheck and focused follow-up tests pass (11 tests); runner full suite passes (156 files, 1691 tests); Server and SpecTests builds pass; Server UnitTests pass (3793) and SpecTests pass (3066); `git diff --check` clean.

@@ -114,6 +114,8 @@ public static class MohistServiceRegistration
         // without taking on the concrete type. Lifetime matches the
         // concrete type — scoped, like IssueQuerier.
         services.AddScoped<IAgentLauncher>(sp => sp.GetRequiredService<AgentLauncher>());
+        services.AddScoped<SlackActionSigningHelper>();
+        services.AddScoped<ISlackActionSigner>(sp => sp.GetRequiredService<SlackActionSigningHelper>());
         services.AddScoped<ISessionTreeMutationFenceReadPort>(sp =>
             new SessionTreeMutationFenceReadPort(
                 sp.GetRequiredService<IGrainFactory>(),
@@ -309,6 +311,7 @@ public static class MohistServiceRegistration
         services.AddScoped<SlackOutboxDispatcherService>();
         services.AddHostedService<SlackOutboxDispatcherActivationService>();
         services.AddHostedService<SlackAgentAppBindingObligationWorker>();
+        services.AddHostedService<AgentRetryObligationWorker>();
         services.AddScoped<IWorkflowArtifactBindService, WorkflowArtifactBindService>();
         services.AddScoped<IWorkflowArtifactQuerier, WorkflowArtifactQuerier>();
         services.AddScoped<Mohist.Server.Workflow.Services.IWorkflowProfileProvider, Mohist.Server.Workflow.Services.WorkflowProfileProvider>();

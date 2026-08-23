@@ -441,20 +441,30 @@ public sealed class AgentLauncher : IAgentLauncher, IScopedService
         string? preMintedSessionId = null,
         string? preMintedInputId = null,
         string? preMintedTurnId = null,
+        string? idempotencyKeyOverride = null,
+        AgentExecutionDefinition? definitionOverride = null,
+        AgentSessionStartup? agentSessionStartup = null,
+        bool skipLaunchability = false,
         CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(agent);
         ArgumentNullException.ThrowIfNull(origin);
         var trimmedPrompt = prompt?.Trim() ?? string.Empty;
+        var launchAttachments = attachments?.ToArray();
+        var launchAttachmentIds = (attachmentIds ?? launchAttachments?.Select(attachment => attachment.Id).ToArray())?.ToArray();
 
-        await EnsureLaunchableAsync(agent, ct);
+        if (!skipLaunchability)
+            await EnsureLaunchableAsync(agent, ct);
 
         var context = new AgentLaunchContext(agent.ProjectId);
-        var key = $"slack:{origin.WorkspaceTeamId}:{origin.ConversationId}:{origin.MessageTs}";
-        var definition = ResolveExecutionDefinition(agent);
+        var key = string.IsNullOrWhiteSpace(idempotencyKeyOverride)
+            ? $"slack:{origin.WorkspaceTeamId}:{origin.ConversationId}:{origin.MessageTs}"
+            : idempotencyKeyOverride;
+        var definition = definitionOverride ?? ResolveExecutionDefinition(agent);
         var agentConfigJson = agent.AgentConfig is { ValueKind: not JsonValueKind.Undefined }
             ? agent.AgentConfig.Value.GetRawText()
             : null;
+        var launchSessionId = preMintedSessionId;
         var coordinator = _grains.GetGrain<IAgentLaunchCoordinatorGrain>(
             AgentLaunchCoordinatorCodec.KeyFor(context.ProjectId, key));
         var outcome = await coordinator.LaunchAsync(new AgentLaunchCoordinatorCommandEnvelope(
@@ -462,7 +472,7 @@ public sealed class AgentLauncher : IAgentLauncher, IScopedService
             IdempotencyKey: key,
             AgentId: agent.Id,
             AgentName: agent.Name,
-            AgentInstructions: string.IsNullOrWhiteSpace(agent.Instructions) ? null : agent.Instructions,
+            AgentInstructions: string.IsNullOrWhiteSpace(definition.Instructions) ? null : definition.Instructions,
             AgentConfigJson: agentConfigJson,
             Model: definition.Model,
             Variant: definition.Variant,
@@ -484,14 +494,16 @@ public sealed class AgentLauncher : IAgentLauncher, IScopedService
                 null,
                 null,
                 null,
-                attachmentIds ?? attachments?.Select(attachment => attachment.Id).ToArray(),
+                launchAttachmentIds,
                 StartupContext: startupContext),
             ConnectionOrigin: origin,
-            PreMintedSessionId: preMintedSessionId,
+            PreMintedSessionId: launchSessionId,
             PreMintedInputId: preMintedInputId,
             PreMintedTurnId: preMintedTurnId,
-            Attachments: attachments,
-            StartupContext: startupContext));
+            Attachments: launchAttachments,
+            StartupContext: startupContext,
+            AgentSessionStartup: agentSessionStartup,
+            Skills: definition.Skills.ToArray()));
 
         return new AgentLaunchResult(outcome.SessionId, outcome.JobKey, outcome.InputId, outcome.TurnId, outcome.AgentId, outcome.AgentName);
     }

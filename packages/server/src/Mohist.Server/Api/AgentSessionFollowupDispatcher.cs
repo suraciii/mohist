@@ -34,7 +34,13 @@ public sealed class AgentSessionFollowupDispatcher : IScopedService
         _timeProvider = timeProvider;
     }
 
-    public async Task DispatchNextAsync(string projectId, string sessionId, CancellationToken ct)
+    public Task DispatchNextAsync(string projectId, string sessionId, CancellationToken ct) =>
+        DispatchAsync(projectId, sessionId, targetTurnId: null, ct);
+
+    public Task DispatchForTurnAsync(string projectId, string sessionId, string turnId, CancellationToken ct) =>
+        DispatchAsync(projectId, sessionId, turnId, ct);
+
+    private async Task DispatchAsync(string projectId, string sessionId, string? targetTurnId, CancellationToken ct)
     {
         var target = await _sessions.ResolveCanonicalFollowupTargetAsync(projectId, sessionId, ct);
         if (target is null || string.IsNullOrWhiteSpace(target.RunnerId)
@@ -54,7 +60,9 @@ public sealed class AgentSessionFollowupDispatcher : IScopedService
             return;
 
         var grain = _grains.GetGrain<IAgentSessionGrain>(sessionId);
-        var dispatch = await grain.BeginNextFollowupDispatchAsync();
+        var dispatch = targetTurnId is null
+            ? await grain.BeginNextFollowupDispatchAsync()
+            : await grain.BeginFollowupDispatchForTurnAsync(targetTurnId);
         if (dispatch is null)
             return;
 
