@@ -332,6 +332,150 @@ public sealed partial class SlackMultiAgentIngressSpecs
     }
 
     [Fact]
+    public async Task Recovery_retries_transient_dispatch_failures_beyond_three_attempts_without_settling()
+    {
+        var promptOwner = await CreateConnectionAsync("retry-owner", "T-selection-retry", "U_RETRY", "A_SELECTION_RETRY_OWNER");
+        var selected = await CreateConnectionAsync("retry-selected", "T-selection-retry", "U_RETRY", "A_SELECTION_RETRY_SELECTED");
+        var identity = new SlackMessageIdentity("T-selection-retry", "C-selection-retry", "1710000000.020050");
+        var candidates = new[]
+        {
+            new SlackSelectionCandidateReference(promptOwner.ProjectId, promptOwner.Id, promptOwner.BotUserId),
+            new SlackSelectionCandidateReference(selected.ProjectId, selected.Id, selected.BotUserId),
+        };
+
+        await using (var scope = _fixture.Services.CreateAsyncScope())
+        {
+            var prompts = scope.ServiceProvider.GetRequiredService<SlackAmbiguousPromptStore>();
+            await prompts.TryClaimAsync(
+                promptOwner.ProjectId,
+                identity.WorkspaceTeamId,
+                identity.ConversationId,
+                identity.MessageTs,
+                null,
+                promptOwner.Id,
+                candidates,
+                "U_RETRY",
+                "retry transient failure",
+                "not-json",
+                SlackAmbiguityKinds.RootMultiMention);
+            var ids = SlackChannelLaunchService.PreMintSlackLaunchIds(selected.ProjectId, identity);
+            await prompts.TryDecideAsync(
+                identity.WorkspaceTeamId,
+                identity.ConversationId,
+                identity.MessageTs,
+                selected.ProjectId,
+                selected.Id,
+                SlackSelectionDispatchKinds.RootLaunch,
+                ids.SessionId,
+                ids.InputId,
+                ids.TurnId);
+        }
+
+        for (var attempt = 0; attempt < 4; attempt++)
+        {
+            _fixture.TimeProvider.Advance(TimeSpan.FromMinutes(1));
+            await NewSelectionWorker().ProcessPendingAsync();
+        }
+
+        await using var verify = _fixture.Services.CreateAsyncScope();
+        var promptsAfter = verify.ServiceProvider.GetRequiredService<SlackAmbiguousPromptStore>();
+        var claim = await promptsAfter.FindAsync(
+            identity.WorkspaceTeamId,
+            identity.ConversationId,
+            identity.MessageTs);
+        Assert.NotNull(claim);
+        Assert.Equal(SlackSelectionStates.Decided, claim!.SelectionState);
+        Assert.Equal(4, claim.AttemptCount);
+        Assert.Null(claim.SettleReason);
+
+        var outbox = verify.ServiceProvider.GetRequiredService<SlackOutboxStore>();
+        Assert.Null(await outbox.FindByDispatchRefAsync(
+            promptOwner.ProjectId,
+            promptOwner.Id,
+            SlackOutboxKinds.UserAction,
+            SlackAmbiguousPromptStore.SettlementDispatchRef(
+                identity.WorkspaceTeamId,
+                identity.ConversationId,
+                identity.MessageTs)));
+    }
+
+    [Fact]
+    public async Task Recovery_routes_a_committed_thread_launch_bound_race_as_the_original_followup()
+    {
+        const string owner = "U_BOUND_RACE";
+        var promptOwner = await CreateConnectionAsync("bound-owner", "T-bound-race", owner, "A_BOUND_RACE_OWNER");
+        var selected = await CreateConnectionAsync("bound-selected", "T-bound-race", owner, "A_BOUND_RACE_SELECTED");
+        const string conversationId = "C-bound-race";
+        const string threadTs = "1710000000.020060";
+        var initial = await PostChannelAsync(
+            selected,
+            conversationId,
+            threadTs,
+            null,
+            [selected.BotUserId!],
+            $"<@{selected.BotUserId}> establish selected Session",
+            owner);
+        var boundSessionId = initial.GetProperty("sessionId").GetString();
+        Assert.False(string.IsNullOrWhiteSpace(boundSessionId));
+
+        var identity = new SlackMessageIdentity("T-bound-race", conversationId, "1710000000.020061");
+        var candidates = new[]
+        {
+            new SlackSelectionCandidateReference(promptOwner.ProjectId, promptOwner.Id, promptOwner.BotUserId),
+            new SlackSelectionCandidateReference(selected.ProjectId, selected.Id, selected.BotUserId),
+        };
+        await using (var scope = _fixture.Services.CreateAsyncScope())
+        {
+            var prompts = scope.ServiceProvider.GetRequiredService<SlackAmbiguousPromptStore>();
+            await prompts.TryClaimAsync(
+                promptOwner.ProjectId,
+                identity.WorkspaceTeamId,
+                identity.ConversationId,
+                identity.MessageTs,
+                threadTs,
+                promptOwner.Id,
+                candidates,
+                owner,
+                "retain this raced message",
+                "[]",
+                SlackAmbiguityKinds.ThreadMultiMention);
+            var ids = SlackChannelLaunchService.PreMintSlackLaunchIds(selected.ProjectId, identity);
+            await prompts.TryDecideAsync(
+                identity.WorkspaceTeamId,
+                identity.ConversationId,
+                identity.MessageTs,
+                selected.ProjectId,
+                selected.Id,
+                SlackSelectionDispatchKinds.ThreadLaunch,
+                ids.SessionId,
+                ids.InputId,
+                ids.TurnId);
+        }
+
+        _fixture.TimeProvider.Advance(TimeSpan.FromMinutes(1));
+        await NewSelectionWorker().ProcessPendingAsync();
+        _fixture.TimeProvider.Advance(TimeSpan.FromMinutes(1));
+        await NewSelectionWorker().ProcessPendingAsync();
+
+        await using var verify = _fixture.Services.CreateAsyncScope();
+        var claim = await verify.ServiceProvider.GetRequiredService<SlackAmbiguousPromptStore>()
+            .FindAsync(identity.WorkspaceTeamId, identity.ConversationId, identity.MessageTs);
+        Assert.NotNull(claim);
+        Assert.Equal(SlackSelectionStates.Completed, claim!.SelectionState);
+
+        var db = verify.ServiceProvider.GetRequiredService<MohistDbContext>();
+        Assert.Single(await db.AgentSessions
+            .Where(row => row.LabelConnectionId == selected.Id)
+            .ToListAsync());
+        var inbox = Assert.Single(await db.SlackProviderInboxRows
+            .Where(row => row.ConnectionId == selected.Id
+                && row.SlackMessageIdentity.EndsWith(identity.MessageTs))
+            .ToListAsync());
+        Assert.Equal(SlackProviderInboxRouteKinds.FollowupThread, inbox.RouteKind);
+        Assert.Equal(boundSessionId, inbox.RouteSessionId);
+    }
+
+    [Fact]
     public async Task Selection_obligation_worker_recovers_cross_project_root_once()
     {
         var promptOwner = await CreateConnectionAsync("recovery-owner", "T-recovery", "U_RECOVERY", "A_RECOVERY");

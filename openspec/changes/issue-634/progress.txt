@@ -28,7 +28,9 @@ implemented and focused verification passes. No won't-fixes.
 Focused verification completed:
 - Server build passed.
 - `SlackChannelLaunchServiceTests`: 4/4 passed.
-- `SlackMultiAgentIngressSpecs`: 11/11 passed.
+- `SlackMultiAgentIngressSpecs`: 13/13 passed, including >3 transient recovery
+  attempts remaining Decided and a committed ThreadLaunch/Bound recovery race
+  dispatching the retained original message as one follow-up.
 - Full Server solution verification remains the final pre-response step.
 
 ## Previous plan self-review record
