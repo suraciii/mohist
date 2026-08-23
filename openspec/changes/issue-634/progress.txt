@@ -268,7 +268,10 @@ open).
   authorization order and same-Connection de-duplication rule.
 - tasks.json parses as valid JSON; all four task spec anchors resolve; spec
   files keep the Requirement/Scenario structure; `git diff --check` passes;
-  self-review.md is unchanged from the task-start commit.
+  self-review.md is unchanged from the task-start commit. `npm run docs:check`
+  could not run in this workspace because the local `tsx` executable is not
+  installed (`sh: 1: tsx: not found`); no product code or generated docs were
+  changed by this plan-only correction.
 
 ## Commits
 
@@ -286,3 +289,5 @@ open).
 - c957a7a74 MF-6 explicit existing-thread dispatch fix
 - 0f1b26e66 MF-7 progress checkpoint
 - c75e5f019 MF-7 deleted selected Connection -> unavailable
+- 772181d8a MF-7 final disposition notes
+- 3825cab8c MF-7 stale snapshot precedence clarification
