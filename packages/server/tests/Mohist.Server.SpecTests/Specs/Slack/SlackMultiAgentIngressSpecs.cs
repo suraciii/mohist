@@ -556,16 +556,26 @@ public sealed partial class SlackMultiAgentIngressSpecs
     {
         await using var scope = _fixture.Services.CreateAsyncScope();
         var db = scope.ServiceProvider.GetRequiredService<MohistDbContext>();
+        var leases = scope.ServiceProvider.GetRequiredService<SlackAdapterLeaseService>();
         var targets = await db.AgentConnections.AsNoTracking()
             .Where(row => row.DeletedAt == null && row.ProviderKind == ConnectionProviderKind.Slack)
             .Select(row => new { row.ProjectId, row.Id })
             .ToListAsync();
         foreach (var target in targets)
         {
-            _connectionLeases[target.Id] = await SlackRuntimeLeaseTestSupport.AcquireConnectionLeaseAsync(
-                _fixture,
-                target.ProjectId,
-                target.Id);
+            var targetRef = new SlackLeaseTargetRef.Connection(target.ProjectId, target.Id);
+            var active = await scope.ServiceProvider.GetRequiredService<ISlackLeaseStore>()
+                .GetActiveAsync(targetRef.TargetKey);
+            if (active is not null && active.ExpiresAt > _fixture.TimeProvider.GetUtcNow())
+            {
+                await leases.RenewLeaseAsync(
+                    "spec-operator",
+                    targetRef,
+                    active.LeaseId,
+                    active.AdapterId,
+                    CancellationToken.None);
+                _connectionLeases[target.Id] = active.LeaseId;
+            }
         }
     }
 
