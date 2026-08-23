@@ -33,7 +33,13 @@ test('repository executor runs the plan checks and writes scope evidence', async
   } satisfies RepositoryRuntime
 
   assert.equal(await main([], runtime), 0)
-  assert.deepEqual(phases, ['check-1', 'check-2'])
+  const repository = JSON.parse(writes.get(join(artifactRoot, 'repository.json')) ?? '{}') as {
+    checks: unknown[]
+  }
+  assert.deepEqual(
+    phases,
+    repository.checks.map((_, index) => `check-${index + 1}`),
+  )
   assert.match(writes.get(join(artifactRoot, 'summary.json')) ?? '', /"scope": "repository"/)
   assert.match(writes.get(join(artifactRoot, 'repository.json')) ?? '', /docs:check/)
 })
