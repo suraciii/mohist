@@ -57,9 +57,10 @@ itself creates no execution resources.
   material, canonicalization, and constant-time comparison Stop and Retry use.
 - Revalidate at click time: signature, freshness, context (including the
   chooser message identity), actor binding, the clicker's current permission
-  under the **chosen** Connection's access policy, and the chosen candidate's
-  current executability — each failure a distinct visible notice creating no
-  execution resources.
+  under both the **prompt-owner** and **chosen** Connections' current access
+  policies using each Connection's own current lease, and the chosen
+  candidate's current executability — each failure a distinct visible notice
+  creating no selection mutation or execution resources.
 - Guarantee single execution attribution: one durably recorded selection per
   ambiguous message, pre-allocated execution identity, at-most-one
   AgentJob/Session/SessionInput under concurrent clicks, redelivery, failover,
@@ -213,11 +214,21 @@ envelope completeness, and delivering-Connection lookup/disabled check:
 5. **Recorded decision** — if the claim is already `Decided`/`Completed`, skip
    to the decision view (late clicker, redelivery, lost response). Placed
    before permission/executability so replays never re-evaluate mutable state.
-6. **Candidate validity** (`no_longer_valid`) — the chosen connection still
+6. **Prompt-owner permission** (`unauthorized` + actionable reason) — invoke
+   `SlackConnectionAccessDecider.EvaluateAsync` for the posting Connection
+   under its current policy, allowlist, owner/live-member, and channel-
+   membership state. Build its `SlackLeaseContext` from the route-validated
+   interaction `LeaseId`/`AdapterId` and operator id, with
+   `ResolveRuntimeLeaseBotTokenAsync` bound to that same pair. The shared
+   route's lease check proves that this is the prompt-owner Connection's
+   current lease; this separate decider call proves that the clicker remains
+   authorized under that Connection's current mutable access state. A denial
+   stops before candidate handling or mutation.
+7. **Candidate validity** (`no_longer_valid`) — the chosen connection still
    exists, is still bound to the same workspace Bot, and is still in the
    claim's candidate set; a vanished follow-up target session is also
    `no_longer_valid`.
-7. **Selected-Connection lease** (`unavailable`) — resolve the **chosen**
+8. **Selected-Connection lease** (`unavailable`) — resolve the **chosen**
    Connection's own current runtime lease at click time: read the active
    lease for its target key `connection:{ProjectId}:{ChosenConnectionId}`
    from the lease store (`ISlackLeaseStore.GetActiveAsync`), then re-prove
@@ -235,29 +246,32 @@ envelope completeness, and delivering-Connection lookup/disabled check:
    lease only because its evaluated Connection *is* the delivering
    Connection; for a chooser, picking a candidate other than the posting
    Connection is the mainline case the feature exists for.
-8. **Clicker permission** (`unauthorized` + actionable reason) —
-   `SlackConnectionAccessDecider.EvaluateAsync` under the **chosen**
+9. **Selected-Connection permission** (`unauthorized` + actionable reason) —
+   invoke `SlackConnectionAccessDecider.EvaluateAsync` under the **chosen**
    Connection's current policy, with a `SlackLeaseContext` built from the
-   chosen Connection's own lease resolved in step 7 (operator id plus the
+   chosen Connection's own lease resolved in step 8 (operator id plus the
    resolved `LeaseId`/`AdapterId`, with `ResolveRuntimeLeaseBotTokenAsync`
    bound to that pair) — **not** the interaction's delivering lease
    (issue AC #3: prompt-owner lease 不被复用). Render-time authorization is
-   never trusted.
-9. **Executability** — chosen Connection disabled → existing
+   never trusted. When the posting and chosen Connection ids are equal, the
+   prompt-owner evaluation in step 6 is an equivalent current evaluation
+   under the same current lease and may satisfy this step without a duplicate
+   Slack API call.
+10. **Executability** — chosen Connection disabled → existing
    `connection_disabled` outcome; Agent not ready → the existing
    `SlackAdmissionService` setup-nudge path, invoked with the original
    message identity so its once-only nudge deduplicates per ambiguous message
    (and per the admission store's existing dedup, survives redelivery).
-10. **Commit** — the decision fence (Decision 5), then dispatch (Decision 6).
+11. **Commit** — the decision fence (Decision 5), then dispatch (Decision 6).
 
-Steps 1–9 create no AgentJob, Session, SessionInput, selection record
+Steps 1–10 create no AgentJob, Session, SessionInput, selection record
 mutation, or provider inbox entry. Outcome names map onto the issue's domain
-model as follows: the issue's `unavailable` ← step 7's missing/invalid
+model as follows: the issue's `unavailable` ← step 8's missing/invalid
 chosen-Connection lease (adopted verbatim) and, for its broader
 "目标当前不可执行" leg, the existing `connection_disabled` and setup-nudge
-outcomes; the issue's `unauthorized` ← `unauthorized`; the issue's `stale` ←
-`expired`, `stale_action`, `invalid_action`, and `no_longer_valid`. Every
-outcome returns
+outcomes; the issue's `unauthorized` ← either current-policy denial in step 6
+or 9, plus actor mismatch; the issue's `stale` ← `expired`, `stale_action`,
+`invalid_action`, and `no_longer_valid`. Every outcome returns
 `SlackTurnControlResult`-shaped state/text/blocks; the route's existing reply
 enqueue updates the chooser message via `chat.update`, so late and second
 clickers see the decision instead of a second chooser. Reply idempotency comes
@@ -324,7 +338,8 @@ A `SlackAgentSelectionObligationWorker` (mirroring
   the same execution identity, never a second one. Recovery re-runs the
   dispatch only — per the issue's winner-commit rule it never re-authorizes,
   never depends on the original click's lease, and never changes the chosen
-  candidate (the pipeline's mutable-state checks, step 7's lease included,
+  candidate (the pipeline's mutable-state checks, including prompt-owner
+  permission in step 6 and selected-Connection lease/permission in steps 8–9,
   live before the commit fence and are skipped by replays).
 - **Settles terminally** when a committed selection can no longer produce its
   execution (chosen Connection or Agent deleted after repeated failures, or
@@ -354,19 +369,22 @@ A `SlackAgentSelectionObligationWorker` (mirroring
 ### 8. Route integration is a three-way action-id dispatch; the adapter changes only in tests
 
 `SlackInteractionRoutes` dispatches by action id: Retry (as today, with lease
-context), the new selection id (no lease context is passed in — the route's
-lease validation stays what it already is for every action: the shared gate
-on the **delivering** adapter's lease; the selection service resolves the
-chosen Connection's own current lease internally per Decision 4 step 7, and
-must not evaluate the chosen Connection under the delivering lease), and
-Stop/unsupported via the existing fall-through. Adapter
-operator authentication, runtime-lease validation (stale lease → existing
-`lease_stale_or_expired` before any selection processing), delivering-
-Connection lookup, and the reply enqueue are reused unchanged. The Go adapter
-needs no code change: `block_actions` forwarding is generic and blocks already
-flow in deliveries; adapter tests add the selection action id to their
-coverage. `docs/slack.md` and `design/slack.md` move the multi-Bot selection
-row from planned to delivered.
+context), the new selection id (with a `SlackLeaseContext` built from the
+route-validated delivering adapter lease for the prompt-owner authorization
+in Decision 4 step 6), and Stop/unsupported via the existing fall-through.
+The selection service resolves the chosen Connection's own current lease
+internally per Decision 4 step 8 and must not evaluate that Connection under
+the delivering lease. Adapter operator authentication, runtime-lease
+validation (stale lease → existing `lease_stale_or_expired` before any
+selection processing), delivering-Connection lookup, disabled check, and the
+reply enqueue are reused unchanged. The route lease gate and service-level
+prompt-owner access decision are intentionally distinct: the former proves
+adapter authority, while the latter re-evaluates current policy, allowlist,
+live-member, and channel-membership state. The Go adapter needs no code change:
+`block_actions` forwarding is generic and blocks already flow in deliveries;
+adapter tests add the selection action id to their coverage. `docs/slack.md`
+and `design/slack.md` move the multi-Bot selection row from planned to
+delivered.
 
 ## Risks / Trade-offs
 
@@ -385,8 +403,10 @@ row from planned to delivered.
 - [Long-lived pending rows accumulate if users never click] -> Bounded by the
   expiry sweep settling them (Decision 7); rows are small and one per
   ambiguous message.
-- [Permission or executability changes between click and dispatch] -> The CAS
-  commits only after revalidation; post-commit changes are the same race every
+- [Either Connection's permission or the chosen candidate's executability
+  changes between click and dispatch] -> The CAS commits only after separate
+  prompt-owner and chosen-Connection current-policy reauthorization plus
+  executability revalidation; post-commit changes are the same race every
   launch path has (admission is re-run by recovery only for not-yet-completed
   dispatches); no second execution is possible because the fence is the row.
 - [Extracting the launch core risks regressing the ingress path] -> The

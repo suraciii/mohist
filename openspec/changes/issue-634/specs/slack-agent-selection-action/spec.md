@@ -35,9 +35,43 @@ On every click the Server SHALL revalidate the selection payload before any work
 - **THEN** the selection is rejected as unauthorized
 - **AND** no execution resources are created
 
+### Requirement: The prompt-owner Connection is re-authorized under its current access policy and own current lease
+
+Before candidate selection can commit, acceptance SHALL evaluate the clicker's current permission under the posting (prompt-owner) Connection's access policy using `SlackConnectionAccessDecider` and the prompt-owner's own currently route-validated runtime lease context. This evaluation SHALL re-read current policy and allowlist state and, where the policy requires it, re-prove current owner/live-member/channel-membership authorization; render-time authorization and actor binding alone SHALL NOT substitute for it. A prompt-owner denial SHALL be rejected as unauthorized with that policy's actionable reason and SHALL create no selection mutation, winner, provider inbox entry, AgentSession, Turn, or AgentJob. When the prompt-owner and chosen Connection are the same, one equivalent current evaluation under that Connection's current lease MAY satisfy both authorization roles.
+
+#### Scenario: The prompt-owner policy narrows between render and click
+
+- **WHEN** the posting Connection's access policy changes after render so the bound actor is no longer allowed, while the chosen Connection remains valid and would allow the actor
+- **THEN** the click is rejected as unauthorized with the prompt-owner policy's actionable reason
+- **AND** no selection mutation, winner, or execution resource is created
+
+#### Scenario: The actor is removed from the prompt-owner allowlist between render and click
+
+- **WHEN** the posting Connection uses allowlist access and the bound actor is removed from its allowlist before clicking
+- **THEN** prompt-owner re-authorization rejects the click as unauthorized
+- **AND** the chosen Connection is not committed even if its own current policy would allow the actor
+
+#### Scenario: The prompt owner can no longer verify the actor as a live member
+
+- **WHEN** the posting Connection's current policy requires live-member verification and the actor is deleted, restricted, external, or cannot be confirmed at click time
+- **THEN** prompt-owner re-authorization rejects the click as unauthorized with the current access decision reason
+- **AND** no selection mutation or execution resource is created
+
+#### Scenario: The prompt-owner Bot no longer has the required channel membership
+
+- **WHEN** the posting Connection's current policy requires channel membership and its Bot is no longer a member of, or cannot verify, the chooser conversation at click time
+- **THEN** prompt-owner re-authorization rejects the click as unauthorized with the current access decision reason
+- **AND** no selection mutation or execution resource is created
+
+#### Scenario: The same Connection may satisfy both authorization roles with one current evaluation
+
+- **WHEN** the posting Connection is also the chosen Connection and its current lease and access decision allow the actor
+- **THEN** one equivalent current lease-and-policy evaluation may satisfy both prompt-owner and selected-Connection authorization
+- **AND** selection processing continues without weakening either authorization requirement
+
 ### Requirement: The clicker's permission is re-evaluated under the chosen Connection's current access policy and own current lease
 
-Acceptance SHALL evaluate the clicker's current permission under the chosen candidate Connection's access policy using the existing Slack access decision path at click time, rather than trusting authorization state captured when the chooser was rendered. The evaluation SHALL run under the chosen Connection's own currently active runtime lease, resolved from the Server's lease authority at click time; the delivering (prompt-owner) adapter's lease SHALL NOT be used for the chosen Connection's evaluation. A clicker not currently allowed SHALL be rejected as unauthorized with that policy's actionable reason, and no execution resources SHALL be created.
+Acceptance SHALL separately evaluate the clicker's current permission under the chosen candidate Connection's access policy using the existing Slack access decision path at click time, rather than trusting authorization state captured when the chooser was rendered. The evaluation SHALL run under the chosen Connection's own currently active runtime lease, resolved from the Server's lease authority at click time; the delivering (prompt-owner) adapter's lease SHALL NOT be used for the chosen Connection's evaluation. A clicker not currently allowed SHALL be rejected as unauthorized with that policy's actionable reason, and no selection mutation or execution resources SHALL be created. The only permitted de-duplication is the same-Connection case defined by the prompt-owner authorization requirement.
 
 #### Scenario: Access narrowed between render and click
 
@@ -96,7 +130,7 @@ At click time the Server SHALL revalidate that the chosen Connection is enabled 
 
 ### Requirement: Rejections are visible and create no execution resources
 
-Expired, tampered, stale, unauthorized, unavailable, and no-longer-valid selections SHALL be explicitly rejected with distinct, user-visible notices delivered through the existing interaction reply path that updates the chooser message. Every rejection outcome SHALL create no AgentJob, AgentSession, SessionInput, selection execution record, or provider inbox entry.
+Expired, tampered, stale, unauthorized, unavailable, and no-longer-valid selections SHALL be explicitly rejected with distinct, user-visible notices delivered through the existing interaction reply path that updates the chooser message. Every rejection outcome — including a current-policy denial by either the prompt-owner or chosen Connection — SHALL create no selection mutation, winner, AgentJob, AgentSession, SessionInput, Turn, or provider inbox entry.
 
 #### Scenario: Each rejection kind surfaces a distinct visible notice
 
@@ -106,12 +140,13 @@ Expired, tampered, stale, unauthorized, unavailable, and no-longer-valid selecti
 
 ### Requirement: The selection action coexists with Stop and Retry on the shared interaction route
 
-The selection action id SHALL be dispatched from the existing Slack interaction route alongside the Stop and Retry action ids, reusing unchanged the adapter operator authentication, runtime lease validation, disabled-Connection check, and outbox user-action reply delivery. The Slack adapter's `block_actions` forwarding SHALL remain generic over action ids and blocks, adding no adapter contract change beyond covering the new action id in adapter tests. The chooser button SHALL be a shortcut to the same launch and admission services the CLI and Web use, never a second command grammar.
+The selection action id SHALL be dispatched from the existing Slack interaction route alongside the Stop and Retry action ids, reusing unchanged the adapter operator authentication, runtime lease validation, disabled-Connection check, and outbox user-action reply delivery. The route SHALL pass the prompt-owner's route-validated lease context to selection handling for current prompt-owner access evaluation; selection handling SHALL separately resolve the chosen Connection's own lease and SHALL NOT reuse the prompt-owner lease for that chosen-Connection evaluation. The Slack adapter's `block_actions` forwarding SHALL remain generic over action ids and blocks, adding no adapter contract change beyond covering the new action id in adapter tests. The chooser button SHALL be a shortcut to the same launch and admission services the CLI and Web use, never a second command grammar.
 
 #### Scenario: The selection action id routes to selection handling
 
 - **WHEN** the interaction route receives a `block_actions` interaction carrying the selection action id with a valid adapter lease
 - **THEN** it is dispatched to selection handling with the same authentication and lease validation the Stop and Retry actions use
+- **AND** the route-validated prompt-owner lease context is available for prompt-owner current-policy re-authorization
 
 #### Scenario: A stale lease rejects the selection before any work
 
