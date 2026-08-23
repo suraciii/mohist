@@ -31,6 +31,7 @@ internal sealed class SlackAgentSelectionService : IScopedService
     private readonly AgentQuerier _agents;
     private readonly SlackAdmissionService _admission;
     private readonly SlackThreadSessionMappingStore _threadMappings;
+    private readonly AgentSessionQuerier _sessions;
     private readonly SlackChannelLaunchService _launch;
     private readonly SlackAttachmentInputBinder _attachments;
     private readonly IGrainFactory _grains;
@@ -49,6 +50,7 @@ internal sealed class SlackAgentSelectionService : IScopedService
         AgentQuerier agents,
         SlackAdmissionService admission,
         SlackThreadSessionMappingStore threadMappings,
+        AgentSessionQuerier sessions,
         SlackChannelLaunchService launch,
         SlackAttachmentInputBinder attachments,
         IGrainFactory grains,
@@ -66,6 +68,7 @@ internal sealed class SlackAgentSelectionService : IScopedService
         _agents = agents;
         _admission = admission;
         _threadMappings = threadMappings;
+        _sessions = sessions;
         _launch = launch;
         _attachments = attachments;
         _grains = grains;
@@ -200,31 +203,41 @@ internal sealed class SlackAgentSelectionService : IScopedService
             payload.WorkspaceTeamId,
             payload.ConversationId,
             payload.OriginalMessageTs);
-        var ids = PreAllocateIds(dispatchKind, payload.ChosenProjectId, identity, binding);
 
-        if (dispatchKind is SlackSelectionDispatchKinds.RootLaunch or SlackSelectionDispatchKinds.ThreadLaunch)
+        // Executability is a candidate property, not a launch-only property.
+        // A follow-up click must not commit a winner for an Agent that became
+        // unconfigured or otherwise unavailable after the chooser rendered.
+        var agent = await _agents.GetByIdAsync(selected.ProjectId, selected.AgentId, ct);
+        if (agent is null)
+            return Rejected("no_longer_valid", "The selected Agent is no longer available.");
+
+        var admission = await _admission.AdmitNewWorkAsync(
+            selected.ProjectId,
+            selected,
+            agent,
+            identity,
+            claim.ThreadTs,
+            ct);
+        if (!admission.Admitted)
+            return new SlackTurnControlResult(
+                admission.Kind,
+                admission.Reason ?? SlackAdmissionMessages.AgentNotReady,
+                BuildPresentationBlocks(admission.Reason ?? SlackAdmissionMessages.AgentNotReady));
+
+        if (dispatchKind == SlackSelectionDispatchKinds.ThreadFollowup)
         {
-            var agent = await _agents.GetByIdAsync(selected.ProjectId, selected.AgentId, ct);
-            if (agent is null)
-                return Rejected("no_longer_valid", "The selected Agent is no longer available.");
+            if (binding is null)
+                return Rejected("no_longer_valid", "The selected Agent is no longer bound to this thread.");
 
-            var admission = await _admission.AdmitNewWorkAsync(
+            var target = await _sessions.ResolveCanonicalFollowupTargetAsync(
                 selected.ProjectId,
-                selected,
-                agent,
-                identity,
-                claim.ThreadTs,
+                binding,
                 ct);
-            if (!admission.Admitted)
-                return new SlackTurnControlResult(
-                    admission.Kind,
-                    admission.Reason ?? SlackAdmissionMessages.AgentNotReady,
-                    BuildPresentationBlocks(admission.Reason ?? SlackAdmissionMessages.AgentNotReady));
+            if (!IsSelectedSessionTarget(target, selected))
+                return Rejected("no_longer_valid", "The selected Agent's thread Session is no longer available.");
         }
-        else if (binding is null)
-        {
-            return Rejected("no_longer_valid", "The selected Agent is no longer bound to this thread.");
-        }
+
+        var ids = PreAllocateIds(dispatchKind, payload.ChosenProjectId, identity, binding);
 
         var decided = await _prompts.TryDecideAsync(
             payload.WorkspaceTeamId,
@@ -303,6 +316,16 @@ internal sealed class SlackAgentSelectionService : IScopedService
         if (agent is null)
             return SlackSelectionRecoveryResult.Terminal("selected_agent_unavailable");
 
+        if (claim.DispatchKind == SlackSelectionDispatchKinds.ThreadFollowup)
+        {
+            var target = await _sessions.ResolveCanonicalFollowupTargetAsync(
+                claim.ChosenProjectId,
+                binding!,
+                ct);
+            if (!IsSelectedSessionTarget(target, selected))
+                return SlackSelectionRecoveryResult.Terminal("selected_thread_session_unavailable");
+        }
+
         var result = await DispatchAsync(
             selected,
             identity,
@@ -333,6 +356,20 @@ internal sealed class SlackAgentSelectionService : IScopedService
     {
         if (dispatchKind is SlackSelectionDispatchKinds.RootLaunch or SlackSelectionDispatchKinds.ThreadLaunch)
         {
+            // The provider inbox is the durable execution fence for a launch.
+            // If the original message was already accepted before a later
+            // thread reservation became Bound, replay that same launch route
+            // instead of rerouting the retained message as a second follow-up.
+            var existingRoute = await _inbox.FindMessageRouteSessionIdAsync(
+                selected.ProjectId,
+                selected.Id,
+                identity.WorkspaceTeamId,
+                identity.ConversationId,
+                identity.MessageTs,
+                ct);
+            if (!string.IsNullOrWhiteSpace(existingRoute))
+                return Confirmed("already_accepted", "This Agent selection was already accepted.");
+
             var threadAnchor = dispatchKind == SlackSelectionDispatchKinds.RootLaunch
                 ? identity.MessageTs
                 : claim.ThreadTs!;
@@ -363,9 +400,39 @@ internal sealed class SlackAgentSelectionService : IScopedService
                     BuildPresentationBlocks(result.Reason ?? "The selected Agent is temporarily busy. Please retry shortly."));
             if (result.Kind == "agent_not_found")
                 return Rejected("no_longer_valid", "The selected Agent is no longer available.");
+            if (result.BoundSessionId is not null)
+            {
+                // A competing launch bound this Connection after click-time
+                // classification. The retained original message still has to
+                // enter that durable lineage; treating Bound as success would
+                // silently drop it. Follow-up ids are deterministic from the
+                // winning bound Session, so recovery repeats the same accept.
+                return await DispatchFollowupAsync(
+                    selected,
+                    identity,
+                    claim,
+                    result.BoundSessionId,
+                    PreAllocateIds(
+                        SlackSelectionDispatchKinds.ThreadFollowup,
+                        selected.ProjectId,
+                        identity,
+                        result.BoundSessionId),
+                    ct);
+            }
             return Confirmed("accepted", "Agent selection accepted and work is being started.");
         }
 
+        return await DispatchFollowupAsync(selected, identity, claim, binding!, ids, ct);
+    }
+
+    private async Task<SlackTurnControlResult> DispatchFollowupAsync(
+        AgentConnection selected,
+        SlackMessageIdentity identity,
+        SlackAmbiguousPromptSnapshot claim,
+        string bindingSession,
+        SelectionExecutionIds ids,
+        CancellationToken ct)
+    {
         var files = DeserializeFiles(claim.FilesJson);
         var provenance = new AgentSessionInputProvenance(
             ProviderKind: "slack",
@@ -376,7 +443,6 @@ internal sealed class SlackAgentSelectionService : IScopedService
             MessageId: identity.MessageTs,
             ConnectionId: selected.Id,
             BoundThreadRootMessageId: claim.ThreadTs);
-        var bindingSession = binding!;
         var attachmentBinding = await _attachments.PrepareAsync(
             selected.ProjectId,
             selected,
@@ -577,6 +643,12 @@ internal sealed class SlackAgentSelectionService : IScopedService
 
     private static bool IsDirectMessage(string conversationId) =>
         conversationId.StartsWith("D", StringComparison.Ordinal);
+
+    internal static bool IsSelectedSessionTarget(
+        CanonicalFollowupTarget? target,
+        AgentConnection selected) =>
+        target is not null
+        && string.Equals(target.AgentId, selected.AgentId, StringComparison.Ordinal);
 
     private static IReadOnlyList<SlackSelectionCandidateReference> DeserializeCandidates(string json) =>
         JSON.Deserialize<List<SlackSelectionCandidateReference>>(json) ?? [];

@@ -8,6 +8,7 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using Mohist.Server.Agent.Domain;
+using Mohist.Server.Agent.Services;
 using Mohist.Server.Infrastructure;
 using Mohist.Server.Infrastructure.Data.Agent;
 using Mohist.Server.Infrastructure.Data.Db;
@@ -69,6 +70,265 @@ public sealed partial class SlackMultiAgentIngressSpecs
         Assert.Empty(await db.SlackThreadSessionMappings
             .Where(row => row.ConversationId == "C-multi-bot")
             .ToListAsync());
+    }
+
+    [Fact]
+    public async Task Signed_selection_route_launches_only_the_chosen_cross_project_agent()
+    {
+        const string owner = "U_SELECTION_OWNER";
+        var promptOwner = await CreateConnectionAsync("route-owner", "T-selection-route", owner, "A_SELECTION_OWNER");
+        var selected = await CreateConnectionAsync("route-selected", "T-selection-route", owner, "A_SELECTION_SELECTED");
+        var identity = new SlackMessageIdentity(
+            promptOwner.WorkspaceTeamId,
+            "C-selection-route",
+            "1710000000.020000");
+
+        var ingress = await PostChannelAsync(
+            promptOwner,
+            identity.ConversationId,
+            identity.MessageTs,
+            threadTs: null,
+            mentions: [promptOwner.BotUserId!, selected.BotUserId!],
+            text: $"<@{promptOwner.BotUserId}> <@{selected.BotUserId}> route the original task",
+            senderSlackUserId: owner);
+        Assert.Equal("ambiguous", ingress.GetProperty("kind").GetString());
+
+        var choice = await DeliverChooserAndGetChoiceAsync(
+            promptOwner,
+            identity,
+            selected.ProjectId,
+            selected.Id,
+            chooserMessageTs: "1710000000.020001");
+        var action = await PostSelectionAsync(promptOwner, choice, owner);
+        Assert.Equal("accepted", action.GetProperty("state").GetString());
+
+        await using var scope = _fixture.Services.CreateAsyncScope();
+        var prompts = scope.ServiceProvider.GetRequiredService<SlackAmbiguousPromptStore>();
+        var claim = await prompts.FindAsync(
+            identity.WorkspaceTeamId,
+            identity.ConversationId,
+            identity.MessageTs);
+        Assert.NotNull(claim);
+        Assert.Equal(SlackSelectionStates.Completed, claim!.SelectionState);
+        Assert.Equal(selected.ProjectId, claim.ChosenProjectId);
+        Assert.Equal(selected.Id, claim.ChosenConnectionId);
+
+        var db = scope.ServiceProvider.GetRequiredService<MohistDbContext>();
+        Assert.Single(await db.AgentSessions
+            .Where(row => row.LabelConnectionId == selected.Id)
+            .ToListAsync());
+        Assert.Empty(await db.AgentSessions
+            .Where(row => row.LabelConnectionId == promptOwner.Id)
+            .ToListAsync());
+        Assert.Single(await db.SlackProviderInboxRows
+            .Where(row => row.ConnectionId == selected.Id
+                && row.SlackMessageIdentity.EndsWith(identity.MessageTs))
+            .ToListAsync());
+    }
+
+    [Fact]
+    public async Task Concurrent_different_selection_clicks_commit_one_winner_and_one_execution()
+    {
+        const string owner = "U_SELECTION_RACE";
+        var connectionA = await CreateConnectionAsync("race-a", "T-selection-race", owner, "A_SELECTION_RACE_A");
+        var connectionB = await CreateConnectionAsync("race-b", "T-selection-race", owner, "A_SELECTION_RACE_B");
+        var identity = new SlackMessageIdentity(
+            connectionA.WorkspaceTeamId,
+            "C-selection-race",
+            "1710000000.020010");
+        await PostChannelAsync(
+            connectionA,
+            identity.ConversationId,
+            identity.MessageTs,
+            null,
+            [connectionA.BotUserId!, connectionB.BotUserId!],
+            $"<@{connectionA.BotUserId}> <@{connectionB.BotUserId}> choose once",
+            owner);
+
+        var choices = await DeliverChooserAndGetChoicesAsync(
+            connectionA,
+            identity,
+            chooserMessageTs: "1710000000.020011");
+        Assert.Equal(2, choices.Count);
+        var results = await Task.WhenAll(choices.Select(choice =>
+            PostSelectionAsync(connectionA, choice, owner)));
+        Assert.Contains(results, result => result.GetProperty("state").GetString() == "accepted");
+        Assert.All(results, result => Assert.Contains(
+            result.GetProperty("state").GetString(),
+            new[] { "accepted", "decided" }));
+
+        await using var scope = _fixture.Services.CreateAsyncScope();
+        var db = scope.ServiceProvider.GetRequiredService<MohistDbContext>();
+        Assert.Single(await db.AgentSessions
+            .Where(row => row.LabelConnectionId == connectionA.Id
+                || row.LabelConnectionId == connectionB.Id)
+            .ToListAsync());
+        Assert.Single(await db.SlackProviderInboxRows
+            .Where(row => (row.ConnectionId == connectionA.Id || row.ConnectionId == connectionB.Id)
+                && row.SlackMessageIdentity.EndsWith(identity.MessageTs))
+            .ToListAsync());
+    }
+
+    [Fact]
+    public async Task Followup_selection_revalidates_executability_before_committing()
+    {
+        const string owner = "U_SELECTION_EXEC";
+        var promptOwner = await CreateConnectionAsync("exec-owner", "T-selection-exec", owner, "A_SELECTION_EXEC_OWNER");
+        var selected = await CreateConnectionAsync("exec-selected", "T-selection-exec", owner, "A_SELECTION_EXEC_SELECTED");
+        const string conversationId = "C-selection-exec";
+        const string threadTs = "1710000000.020020";
+        const string messageTs = "1710000000.020021";
+
+        await using (var scope = _fixture.Services.CreateAsyncScope())
+        {
+            await scope.ServiceProvider.GetRequiredService<SlackThreadSessionMappingStore>()
+                .UpsertAsync(
+                    selected.ProjectId,
+                    selected.WorkspaceTeamId!,
+                    selected.Id,
+                    conversationId,
+                    threadTs,
+                    owner,
+                    "missing-session-before-admission",
+                    threadTs);
+        }
+        await PostChannelAsync(
+            promptOwner,
+            conversationId,
+            messageTs,
+            threadTs,
+            [promptOwner.BotUserId!, selected.BotUserId!],
+            $"<@{promptOwner.BotUserId}> <@{selected.BotUserId}> continue only if executable",
+            owner);
+        var identity = new SlackMessageIdentity(promptOwner.WorkspaceTeamId!, conversationId, messageTs);
+        var choice = await DeliverChooserAndGetChoiceAsync(
+            promptOwner,
+            identity,
+            selected.ProjectId,
+            selected.Id,
+            chooserMessageTs: "1710000000.020022",
+            threadTs);
+
+        await using (var scope = _fixture.Services.CreateAsyncScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<MohistDbContext>();
+            var row = await db.Agents.SingleAsync(agent =>
+                agent.ProjectId == selected.ProjectId && agent.Id == selected.AgentId);
+            var agent = AgentStore.Deserialize(row.State)!;
+            agent.AgentConfig = null;
+            row.State = AgentStore.Serialize(agent);
+            await db.SaveChangesAsync();
+        }
+
+        var result = await PostSelectionAsync(promptOwner, choice, owner);
+        Assert.Equal("agent_not_configured", result.GetProperty("state").GetString());
+        await AssertPendingWithoutOriginalResourcesAsync(identity, selected);
+    }
+
+    [Fact]
+    public async Task Dangling_followup_mapping_is_rejected_before_selection_commit()
+    {
+        const string owner = "U_SELECTION_STALE";
+        var promptOwner = await CreateConnectionAsync("stale-owner", "T-selection-stale", owner, "A_SELECTION_STALE_OWNER");
+        var selected = await CreateConnectionAsync("stale-selected", "T-selection-stale", owner, "A_SELECTION_STALE_SELECTED");
+        const string conversationId = "C-selection-stale";
+        const string threadTs = "1710000000.020030";
+        const string messageTs = "1710000000.020031";
+
+        await using (var scope = _fixture.Services.CreateAsyncScope())
+        {
+            await scope.ServiceProvider.GetRequiredService<SlackThreadSessionMappingStore>()
+                .UpsertAsync(
+                    selected.ProjectId,
+                    selected.WorkspaceTeamId!,
+                    selected.Id,
+                    conversationId,
+                    threadTs,
+                    owner,
+                    "missing-selected-session",
+                    threadTs);
+        }
+        await PostChannelAsync(
+            promptOwner,
+            conversationId,
+            messageTs,
+            threadTs,
+            [promptOwner.BotUserId!, selected.BotUserId!],
+            $"<@{promptOwner.BotUserId}> <@{selected.BotUserId}> stale target",
+            owner);
+        var identity = new SlackMessageIdentity(promptOwner.WorkspaceTeamId!, conversationId, messageTs);
+        var choice = await DeliverChooserAndGetChoiceAsync(
+            promptOwner,
+            identity,
+            selected.ProjectId,
+            selected.Id,
+            chooserMessageTs: "1710000000.020032",
+            threadTs);
+
+        var result = await PostSelectionAsync(promptOwner, choice, owner);
+        Assert.Equal("no_longer_valid", result.GetProperty("state").GetString());
+        await AssertPendingWithoutOriginalResourcesAsync(identity, selected);
+    }
+
+    [Fact]
+    public async Task Noninteractive_fallback_and_nonowner_guidance_expire_without_second_message()
+    {
+        const string owner = "U_SELECTION_FALLBACK";
+        var connections = new List<AgentConnection>();
+        for (var index = 0; index < 6; index++)
+        {
+            connections.Add(await CreateConnectionAsync(
+                $"fallback-{index}",
+                "T-selection-fallback",
+                owner,
+                $"A_SELECTION_FALLBACK_{index}"));
+        }
+        var fallbackIdentity = new SlackMessageIdentity(
+            "T-selection-fallback",
+            "C-selection-fallback",
+            "1710000000.020040");
+        await PostChannelAsync(
+            connections[0],
+            fallbackIdentity.ConversationId,
+            fallbackIdentity.MessageTs,
+            null,
+            connections.Select(connection => connection.BotUserId!).ToArray(),
+            string.Join(' ', connections.Select(connection => $"<@{connection.BotUserId}>")) + " too many",
+            owner);
+
+        var nonOwnerA = await CreateConnectionAsync("nonowner-a", "T-selection-nonowner", "U_OWNER_A", "A_SELECTION_NONOWNER_A");
+        var nonOwnerB = await CreateConnectionAsync("nonowner-b", "T-selection-nonowner", "U_OWNER_B", "A_SELECTION_NONOWNER_B");
+        var nonOwnerIdentity = new SlackMessageIdentity(
+            "T-selection-nonowner",
+            "C-selection-nonowner",
+            "1710000000.020041");
+        await PostChannelAsync(
+            nonOwnerA,
+            nonOwnerIdentity.ConversationId,
+            nonOwnerIdentity.MessageTs,
+            null,
+            [nonOwnerA.BotUserId!, nonOwnerB.BotUserId!],
+            $"<@{nonOwnerA.BotUserId}> <@{nonOwnerB.BotUserId}> unauthorized",
+            "U_INTRUDER");
+
+        _fixture.TimeProvider.Advance(TimeSpan.FromMinutes(6));
+        await NewSelectionWorker().ProcessPendingAsync();
+
+        await using var scope = _fixture.Services.CreateAsyncScope();
+        var db = scope.ServiceProvider.GetRequiredService<MohistDbContext>();
+        foreach (var identity in new[] { fallbackIdentity, nonOwnerIdentity })
+        {
+            var rows = await db.SlackOutboxRows
+                .Where(row => row.WorkspaceTeamId == identity.WorkspaceTeamId
+                    && row.ConversationId == identity.ConversationId)
+                .ToListAsync();
+            Assert.Single(rows);
+            Assert.DoesNotContain(rows, row => row.DispatchRef ==
+                SlackAmbiguousPromptStore.SettlementDispatchRef(
+                    identity.WorkspaceTeamId,
+                    identity.ConversationId,
+                    identity.MessageTs));
+        }
     }
 
     [Fact]
@@ -143,6 +403,128 @@ public sealed partial class SlackMultiAgentIngressSpecs
             .Where(row => row.LabelConnectionId == promptOwner.Id)
             .ToListAsync());
     }
+
+    private async Task<IReadOnlyList<SlackSelectionActionPayload>> DeliverChooserAndGetChoicesAsync(
+        AgentConnection promptOwner,
+        SlackMessageIdentity identity,
+        string chooserMessageTs)
+    {
+        await using var scope = _fixture.Services.CreateAsyncScope();
+        var outbox = scope.ServiceProvider.GetRequiredService<SlackOutboxStore>();
+        var chooser = await outbox.FindByDispatchRefAsync(
+            promptOwner.ProjectId,
+            promptOwner.Id,
+            SlackOutboxKinds.UserAction,
+            SlackAmbiguousPromptStore.PromptDispatchRef(
+                identity.WorkspaceTeamId,
+                identity.ConversationId,
+                identity.MessageTs));
+        Assert.NotNull(chooser);
+        await outbox.MarkDeliveredAsync(
+            promptOwner.ProjectId,
+            chooser!.Id,
+            new SlackProviderMessageIdentity(identity.ConversationId, chooserMessageTs));
+
+        var blocks = SlackDeliveryPayload.Parse(chooser.PayloadJson).Blocks;
+        Assert.NotNull(blocks);
+        return blocks!.Value.EnumerateArray()
+            .SelectMany(block => block.GetProperty("elements").EnumerateArray())
+            .Select(button => JSON.Deserialize<SlackSelectionActionPayload>(
+                button.GetProperty("value").GetString()!)!)
+            .ToArray();
+    }
+
+    private async Task<SlackSelectionActionPayload> DeliverChooserAndGetChoiceAsync(
+        AgentConnection promptOwner,
+        SlackMessageIdentity identity,
+        string selectedProjectId,
+        string selectedConnectionId,
+        string chooserMessageTs,
+        string? threadTs = null)
+    {
+        var choices = await DeliverChooserAndGetChoicesAsync(
+            promptOwner,
+            identity,
+            chooserMessageTs);
+        var choice = Assert.Single(choices, candidate =>
+            string.Equals(candidate.ChosenProjectId, selectedProjectId, StringComparison.Ordinal)
+            && string.Equals(candidate.ChosenConnectionId, selectedConnectionId, StringComparison.Ordinal));
+        Assert.Equal(threadTs, choice.ThreadTs);
+        return choice;
+    }
+
+    private async Task<JsonElement> PostSelectionAsync(
+        AgentConnection promptOwner,
+        SlackSelectionActionPayload choice,
+        string actorSlackUserId)
+    {
+        using var response = await _fixture.Client.PostAsJsonAsync(
+            $"/api/projects/{promptOwner.ProjectId}/slack-connections/{promptOwner.Id}/interactions",
+            new
+            {
+                eventType = "block_actions",
+                interactionId = $"selection-{Guid.NewGuid():N}",
+                teamId = choice.WorkspaceTeamId,
+                conversationId = choice.ConversationId,
+                messageTs = await ChooserMessageTsAsync(promptOwner, choice),
+                threadTs = choice.ThreadTs,
+                actorSlackUserId,
+                actionId = SlackSelectionActionPayload.ActionId,
+                actionValue = JSON.Serialize(choice),
+                leaseId = _connectionLeases[promptOwner.Id],
+                adapterId = SlackRuntimeLeaseTestSupport.AdapterId,
+            });
+        response.EnsureSuccessStatusCode();
+        using var document = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        return document.RootElement.GetProperty("data").Clone();
+    }
+
+    private async Task<string> ChooserMessageTsAsync(
+        AgentConnection promptOwner,
+        SlackSelectionActionPayload choice)
+    {
+        await using var scope = _fixture.Services.CreateAsyncScope();
+        var outbox = scope.ServiceProvider.GetRequiredService<SlackOutboxStore>();
+        var chooser = await outbox.FindByDispatchRefAsync(
+            promptOwner.ProjectId,
+            promptOwner.Id,
+            SlackOutboxKinds.UserAction,
+            SlackAmbiguousPromptStore.PromptDispatchRef(
+                choice.WorkspaceTeamId,
+                choice.ConversationId,
+                choice.OriginalMessageTs));
+        Assert.NotNull(chooser);
+        var providerIdentity = SlackDeliveryPayload.Parse(chooser!.PayloadJson).ProviderMessageIdentity;
+        Assert.NotNull(providerIdentity);
+        return providerIdentity!.Value.MessageTs;
+    }
+
+    private async Task AssertPendingWithoutOriginalResourcesAsync(
+        SlackMessageIdentity identity,
+        AgentConnection selected)
+    {
+        await using var scope = _fixture.Services.CreateAsyncScope();
+        var prompts = scope.ServiceProvider.GetRequiredService<SlackAmbiguousPromptStore>();
+        var claim = await prompts.FindAsync(
+            identity.WorkspaceTeamId,
+            identity.ConversationId,
+            identity.MessageTs);
+        Assert.NotNull(claim);
+        Assert.Equal(SlackSelectionStates.Pending, claim!.SelectionState);
+        Assert.Null(claim.ChosenConnectionId);
+
+        var db = scope.ServiceProvider.GetRequiredService<MohistDbContext>();
+        Assert.Empty(await db.SlackProviderInboxRows
+            .Where(row => row.ConnectionId == selected.Id
+                && row.SlackMessageIdentity.EndsWith(identity.MessageTs))
+            .ToListAsync());
+    }
+
+    private SlackAgentSelectionObligationWorker NewSelectionWorker() => new(
+        _fixture.Services.GetRequiredService<IServiceScopeFactory>(),
+        _fixture.TimeProvider,
+        Options.Create(new SlackProviderOptions()),
+        NullLogger<SlackAgentSelectionObligationWorker>.Instance);
 
     private async Task<JsonElement> PostChannelAsync(
         AgentConnection connection,
@@ -297,7 +679,9 @@ public sealed partial class SlackMultiAgentIngressSpecs
         {
             Id = id,
             ProjectId = resolvedProjectId,
+            AgentId = agentId,
             WorkspaceTeamId = workspaceTeamId,
+            AppId = appId,
             BotUserId = botUserId,
             OwnerSlackUserId = ownerSlackUserId,
         };

@@ -422,6 +422,8 @@ public static partial class SlackConnectionRoutes
 
         if (!claim.Claimed)
             return ApiResults.Ok(new { kind = "ambiguous", reason = "Another Bot is responding.", winner = claim.WinningConnectionId });
+        if (claim.Snapshot.SelectionState != SlackSelectionStates.Pending)
+            return ApiResults.Ok(new { kind = "ambiguous", reason = "This Agent selection is no longer active." });
 
         var signer = req.Services.GetRequiredService<ISlackActionSigner>();
         var expiresAt = req.Services.GetRequiredService<TimeProvider>().GetUtcNow()
@@ -477,7 +479,7 @@ public static partial class SlackConnectionRoutes
             JSON.Serialize(body.Files),
             ambiguityKind,
             ct);
-        if (!claim.Claimed)
+        if (!claim.Claimed || claim.Snapshot.SelectionState != SlackSelectionStates.Pending)
             return ApiResults.Ok(new { kind = "ignored" });
 
         const string reason = "This Slack Connection is available only to its owner.";

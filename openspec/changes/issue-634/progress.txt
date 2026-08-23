@@ -2,20 +2,34 @@
 
 Source: review.md. Do not edit review.md.
 
-Current checkpoint (2026-09 review follow-up): investigating and fixing all six
-must-fix findings. Planned dispositions: MF-1..MF-6 fixed; no won't-fixes.
+Current checkpoint (2026-09 review follow-up): all six must-fix findings are
+implemented and focused verification passes. No won't-fixes.
 
-- MF-1: add a durable interactive-selection presentation flag so expiry only
-  settles claims that actually offered clickable choices; legacy, >5, signing-
-  unavailable, and non-owner claims remain once-only/non-interactive.
-- MF-2/MF-3: revalidate Agent executability for every dispatch kind and validate
-  the selected bound Session through the Session repository boundary before CAS.
-- MF-4: explicitly route a post-CAS ThreadLaunch `Bound` race as the retained
-  original message's idempotent follow-up instead of silently completing it.
-- MF-5: keep retryable recovery exceptions Decided indefinitely; only explicit
-  terminal recovery results settle a committed selection.
-- MF-6: add route/service/worker regression specs covering the real selection
-  action and MF-1..MF-5, then run focused and full Server verification.
+- MF-1 fixed: expiry determines interactivity from the durable chooser outbox
+  payload. Only a claim whose delivered payload contains `mohist_select_agent`
+  controls gets an expiry outcome; >5/signing-unavailable/non-owner/legacy
+  claims settle silently and cannot be re-enqueued after settlement.
+- MF-2 fixed: Agent lookup and `SlackAdmissionService.AdmitNewWorkAsync` now run
+  before CAS for RootLaunch, ThreadLaunch, and ThreadFollowup.
+- MF-3 fixed: ThreadFollowup resolves the mapped Session through
+  `AgentSessionQuerier.ResolveCanonicalFollowupTargetAsync` and verifies its
+  Agent before CAS; recovery applies the same committed-target validation.
+- MF-4 fixed: launch dispatch no longer falls through on `Bound`. It checks the
+  original-message provider-inbox route first, then routes a genuine bound race
+  as an idempotent follow-up into the bound Session before completion.
+- MF-5 fixed: exceptions never settle a Decided claim by attempt count. Only an
+  explicit terminal `RecoverAsync` result can settle the committed winner.
+- MF-6 fixed for the reviewed gaps: real interaction-route specs now cover a
+  signed cross-Project root selection, concurrent different-choice CAS, follow-
+  up executability rejection, dangling Session rejection, non-interactive
+  expiry, and existing restart recovery. Unit coverage pins payload interactivity,
+  selected Session identity, deterministic ids, and Bound-result handling.
+
+Focused verification completed:
+- Server build passed.
+- `SlackChannelLaunchServiceTests`: 4/4 passed.
+- `SlackMultiAgentIngressSpecs`: 11/11 passed.
+- Full Server solution verification remains the final pre-response step.
 
 ## Previous plan self-review record
 

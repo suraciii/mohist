@@ -18,7 +18,7 @@ public sealed class SlackAgentSelectionObligationWorker : BackgroundService
     private static readonly TimeSpan Interval = TimeSpan.FromMinutes(1);
     private static readonly TimeSpan ActionLifetime = TimeSpan.FromMinutes(5);
     private static readonly TimeSpan RetryInterval = TimeSpan.FromMinutes(1);
-    private const int MaxDispatchAttempts = 3;
+    private const string NonInteractiveExpiryReason = "non_interactive_expired";
 
     private readonly IServiceScopeFactory _scopeFactory;
     private readonly TimeProvider _timeProvider;
@@ -89,13 +89,21 @@ public sealed class SlackAgentSelectionObligationWorker : BackgroundService
         {
             try
             {
+                var offeredInteractiveSelection = await OfferedInteractiveSelectionAsync(
+                    claim,
+                    outbox,
+                    ct);
+                var reason = offeredInteractiveSelection
+                    ? "expired"
+                    : NonInteractiveExpiryReason;
                 if (await prompts.TrySettleAsync(
                         claim.Id,
                         SlackSelectionStates.Pending,
-                        "expired",
-                        ct))
+                        reason,
+                        ct)
+                    && offeredInteractiveSelection)
                 {
-                    await EnsureSettlementOutcomeAsync(claim, outbox, "expired", ct);
+                    await EnsureSettlementOutcomeAsync(claim, outbox, reason, ct);
                 }
             }
             catch (OperationCanceledException) when (ct.IsCancellationRequested)
@@ -161,40 +169,17 @@ public sealed class SlackAgentSelectionObligationWorker : BackgroundService
             }
             catch (Exception ex)
             {
-                // The attempt was recorded before dispatch. Keep the Decided
-                // row for a later idempotent retry unless repeated failures
-                // prove that the committed lineage cannot be produced.
+                // The attempt was recorded before dispatch. An exception is
+                // not evidence that the committed lineage is irrecoverable:
+                // database, Orleans, adapter, and provider failures remain
+                // retryable regardless of how many times they occur. Only an
+                // explicit terminal result from RecoverAsync may settle the
+                // durable winner.
                 _logger.LogWarning(
                     ex,
-                    "Failed to resume Slack Agent selection {SelectionId} (attempt {AttemptCount})",
+                    "Failed to resume Slack Agent selection {SelectionId} (attempt {AttemptCount}); keeping it Decided for retry",
                     claim.Id,
                     claim.AttemptCount + 1);
-
-                if (claim.AttemptCount + 1 >= MaxDispatchAttempts)
-                {
-                    try
-                    {
-                        if (await prompts.TrySettleAsync(
-                                claim.Id,
-                                SlackSelectionStates.Decided,
-                                "dispatch_unrecoverable",
-                                ct))
-                        {
-                            await EnsureSettlementOutcomeAsync(
-                                claim,
-                                outbox,
-                                "dispatch_unrecoverable",
-                                ct);
-                        }
-                    }
-                    catch (Exception settleException) when (settleException is not OperationCanceledException)
-                    {
-                        _logger.LogWarning(
-                            settleException,
-                            "Failed to settle unrecoverable Slack Agent selection {SelectionId}",
-                            claim.Id);
-                    }
-                }
             }
         }
     }
@@ -212,6 +197,12 @@ public sealed class SlackAgentSelectionObligationWorker : BackgroundService
         var cutoff = now - _options.Value.SlackEventRetentionWindow;
         foreach (var claim in await prompts.ListSettledSinceAsync(cutoff, ct))
         {
+            if (string.Equals(
+                    claim.SettleReason,
+                    NonInteractiveExpiryReason,
+                    StringComparison.Ordinal))
+                continue;
+
             try
             {
                 await EnsureSettlementOutcomeAsync(
@@ -232,6 +223,39 @@ public sealed class SlackAgentSelectionObligationWorker : BackgroundService
                     claim.Id);
             }
         }
+    }
+
+    private static async Task<bool> OfferedInteractiveSelectionAsync(
+        SlackAmbiguousPromptSnapshot claim,
+        SlackOutboxStore outbox,
+        CancellationToken ct)
+    {
+        var chooser = await outbox.FindByDispatchRefAsync(
+            claim.ProjectId,
+            claim.WinningConnectionId,
+            SlackOutboxKinds.UserAction,
+            SlackAmbiguousPromptStore.PromptDispatchRef(
+                claim.WorkspaceTeamId,
+                claim.ConversationId,
+                claim.MessageTs),
+            ct);
+        return chooser is not null && HasSelectionAction(chooser.PayloadJson);
+    }
+
+    internal static bool HasSelectionAction(string payloadJson)
+    {
+        var blocks = SlackDeliveryPayload.Parse(payloadJson).Blocks;
+        return blocks is { ValueKind: JsonValueKind.Array }
+            && blocks.Value.EnumerateArray()
+                .SelectMany(block => block.TryGetProperty("elements", out var elements)
+                    && elements.ValueKind == JsonValueKind.Array
+                        ? elements.EnumerateArray().Select(element => element.Clone())
+                        : [])
+                .Any(element => element.TryGetProperty("action_id", out var actionId)
+                    && string.Equals(
+                        actionId.GetString(),
+                        SlackSelectionActionPayload.ActionId,
+                        StringComparison.Ordinal));
     }
 
     private static async Task EnsureSettlementOutcomeAsync(
