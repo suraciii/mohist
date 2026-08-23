@@ -25,6 +25,13 @@ import type { SkillResolver } from './skill-resolver.js'
 import { buildExecutionEnvelope } from './execution-envelope.js'
 import type { RuntimeTurnRegistry } from './runtime-turn-registry.js'
 import { workKey } from './work-result-journal.js'
+import {
+  CLEANUP_TERMINAL_FACT_DELIVERY_TIMEOUT_CODE,
+  cleanupDeliveryWaitFailureMessage,
+  cleanupPredecessorTarget,
+  isCleanupDeliveryWaitTimeout,
+  waitForCleanupPredecessorDelivery,
+} from './cleanup-turn-admission.js'
 
 export interface ExecutorCapabilityDeps {
   readonly connection: ServerConnection
@@ -35,6 +42,7 @@ export interface ExecutorCapabilityDeps {
   readonly runtimeEventRecordId: () => string
   readonly bindingRecoveryCoordinator: BindingRecoveryCoordinator | null
   readonly runtimeTurnRegistry?: RuntimeTurnRegistry | null
+  readonly cleanupTerminalFactDeliveryBudgetMs?: number
 }
 
 export function renderWithDeferred(
@@ -114,6 +122,43 @@ function buildAgentTurnCapability(
 
       const runtime = self.openCodeRuntime
       const sessionName = request.session ?? work.workId
+      const cleanupAdmission =
+        cleanupPredecessorTarget({
+          projectId: work.projectId,
+          workflowRunId: work.workflowRunId,
+          sessionName,
+          workId: work.workId,
+          taskRunId: work.taskRunId,
+          cleanupAttempt,
+        }) !== null
+      if (self.connection && work.projectId) {
+        try {
+          await waitForCleanupPredecessorDelivery(
+            self.agentSessionRuntimeEventOutbox,
+            {
+              projectId: work.projectId,
+              workflowRunId: work.workflowRunId,
+              sessionName,
+              workId: work.workId,
+              taskRunId: work.taskRunId,
+              cleanupAttempt,
+            },
+            signal,
+            self.cleanupTerminalFactDeliveryBudgetMs,
+          )
+        } catch (error) {
+          if (isCleanupDeliveryWaitTimeout(error)) {
+            return runtimeActionFailure(
+              CLEANUP_TERMINAL_FACT_DELIVERY_TIMEOUT_CODE,
+              cleanupDeliveryWaitFailureMessage(error, work),
+            )
+          }
+          return runtimeActionFailure(
+            'session-binding-failed',
+            `Failed to wait for Workflow cleanup predecessor delivery: ${errorMessage(error)}`,
+          )
+        }
+      }
       let binding: {
         agentSessionId: string
         runtimeSessionId: string | null
@@ -166,7 +211,11 @@ function buildAgentTurnCapability(
               'Workflow AgentSession is bound to a different workspace; rerun the stage with a new task attempt before retrying',
             )
           }
-          if (opened.runtimeSessionId && isUnsettledWorkflowSessionStatus(opened.status)) {
+          if (
+            opened.runtimeSessionId &&
+            isUnsettledWorkflowSessionStatus(opened.status) &&
+            !cleanupAdmission
+          ) {
             return runtimeActionFailure(
               'session-binding-failed',
               `Workflow AgentSession is ${opened.status}; the previous Runtime Session has not reached a terminal state, so retry is fail-closed`,
@@ -568,6 +617,8 @@ async function runPiAgentTurn(
     runtimeTurnRegistry: deps.runtimeTurnRegistry,
     runtimeTurnKey: workKey(work),
     cleanupAttempt,
+    cleanupTerminalFactDeliveryBudgetMs: deps.cleanupTerminalFactDeliveryBudgetMs,
+    with: request.session ? { session: request.session } : undefined,
     agentRecovery: work.agentRecovery ?? null,
     preparedPrompt: composePiPrompt(request.prompt, work.parentIssueContext),
     preparedOptions: request.options,
