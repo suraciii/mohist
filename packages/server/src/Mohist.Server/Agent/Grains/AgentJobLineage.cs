@@ -131,7 +131,9 @@ public static class AgentJobLineage
         string jobKey,
         PendingTerminalDeliveryEvent payload,
         IReadOnlyDictionary<string, string> extensions,
-        string? sessionLaunchPrompt)
+        string? sessionLaunchPrompt,
+        string? sessionId = null,
+        string? turnId = null)
     {
         var data = JsonSerializer.SerializeToElement(new
         {
@@ -143,6 +145,8 @@ public static class AgentJobLineage
             conversationId = payload.Origin.ConversationId,
             threadTs = payload.Origin.ThreadTs,
             messageTs = payload.Origin.MessageTs,
+            sessionId,
+            turnId,
             status = payload.Status.ToString().ToLowerInvariant(),
             message = SafeSummaryFact(payload.Message),
             failureReason = SafeSummaryFact(payload.FailureReason),

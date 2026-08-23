@@ -142,7 +142,8 @@ public sealed record AgentLaunchCoordinatorPlan(
     /// reaches a terminal rejection. Missing on older plans, and therefore
     /// false for every definition-first launch.
     /// </summary>
-    [property: Id(53)] bool DefinitionCreatedByLaunch = false);
+    [property: Id(53)] bool DefinitionCreatedByLaunch = false,
+    [property: Id(54)] string[]? Skills = null);
 
 /// <summary>
 /// Canonical request payload captured from the launch route. The

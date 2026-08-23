@@ -1,5 +1,11 @@
+using System.Text.Json;
 using Microsoft.Extensions.DependencyInjection;
 using Mohist.Server.Agent.Grains;
+using Mohist.Server.Agent.Services;
+using Mohist.Server.Infrastructure.Events;
+using Mohist.Server.Sessions.Domain;
+using Mohist.Server.Sessions.Grains;
+using Mohist.Server.Sessions.Services;
 using Mohist.Server.Runner.Grains;
 using Mohist.Server.Runner.Services;
 using Mohist.Server.TestSupport;
@@ -202,6 +208,148 @@ public sealed class AgentJobRunnerRecoverySpecs : AgentJobGrainTestSupport
         Assert.False(duplicate.Accepted);
         Assert.Equal("stale", duplicate.Reason);
         Assert.Equal(AgentJobStatus.Failed, (await job.GetTerminalResultAsync()).Status);
+    }
+
+    [Fact]
+    public async Task ReconciliationFailure_PublishesDistinctUnknownAndFailedTerminalDeliveries()
+    {
+        var (runnerId, projectId) = await RegisterAgentJobRunnerAsync(
+            $"agent-job-retry-delivery-runner-{Guid.NewGuid():N}",
+            projectId: $"agent-job-retry-delivery-project-{Guid.NewGuid():N}");
+        var jobKey = $"agent-job-retry-delivery-{Guid.NewGuid():N}";
+        var sessionId = $"session-retry-delivery-{Guid.NewGuid():N}";
+        var session = Grains.GetGrain<IAgentSessionGrain>(sessionId);
+        await session.OpenAsync(new OpenAgentSessionCommand(
+            RunnerId: string.Empty,
+            AgentRuntime: "opencode",
+            WorkDir: "/tmp/agent-job-fixture",
+            Metadata: new AgentSessionMetadata(new Dictionary<string, string>(StringComparer.Ordinal)
+            {
+                [AgentSessionQueryMetadataKeys.ProjectId] = projectId,
+                [AgentSessionQueryMetadataKeys.SourceKind] = "agent-launch",
+                [GenericAgentSessionMetadata.AgentId] = "agent-test",
+            })));
+
+        var job = JobGrain(jobKey);
+        await job.PrepareManualLaunchAsync(new PrepareManualLaunchCommand(
+            SessionId: sessionId,
+            InputId: Guid.NewGuid().ToString("N"),
+            TurnId: Guid.NewGuid().ToString("N"),
+            Prompt: "retryable reconciliation failure",
+            ProjectId: projectId,
+            AgentId: "agent-test",
+            ConnectionOrigin: new ConnectionLaunchOrigin(
+                "conn-retry-delivery",
+                "team-1",
+                "U_OWNER",
+                "C-retry-delivery",
+                "1710000000.000001")));
+        await job.SubmitPreparedLaunchAsync();
+        await WaitForStatusAsync(job, AgentJobStatus.Running, TimeSpan.FromSeconds(5));
+
+        await Grains.GetGrain<IRunnerGrain>(runnerId).UnregisterAsync();
+        var recovering = await job.GetRuntimeSnapshotAsync();
+        Assert.Equal(AgentJobStatus.Unknown, recovering.Status);
+        var unknownDelivery = _fixture.EventStore.Appended
+            .Where(envelope => envelope.Envelope.Type == EventCatalog.ReverseDns.AgentJobTerminalDelivery)
+            .ToList();
+        Assert.Contains(unknownDelivery, envelope =>
+            envelope.Envelope.Id == AgentJobSessionDeliveryIds.UnknownTerminalDeliveryEventId(jobKey)
+            && envelope.Envelope.Data!.Value.GetProperty("status").GetString() == "unknown");
+
+        var deadline = Assert.IsType<DateTimeOffset>(recovering.RecoveryDeadlineAt);
+        _fixture.TimeProvider.Advance(deadline - _fixture.TimeProvider.GetUtcNow());
+        await job.ReceiveReminder(AgentJobGrain.RecoveryReminderName, default);
+
+        var terminal = await job.GetTerminalResultAsync();
+        Assert.Equal(AgentJobStatus.Failed, terminal.Status);
+        Assert.Equal(AgentJobFailureReasons.RunnerLost, terminal.FailureReason);
+        var failedDelivery = _fixture.EventStore.Appended
+            .Where(envelope => envelope.Envelope.Type == EventCatalog.ReverseDns.AgentJobTerminalDelivery)
+            .ToList();
+        Assert.Contains(failedDelivery, envelope =>
+            envelope.Envelope.Id == AgentJobSessionDeliveryIds.TerminalDeliveryEventId(jobKey)
+            && envelope.Envelope.Data!.Value.GetProperty("status").GetString() == "failed");
+        // The persisted-event dedup key is (source, id): the interim Unknown
+        // delivery and the reconciled Failed delivery must be two events with
+        // distinct ids, or the final failure payload would be silently
+        // dropped in production.
+        var deliveryIds = failedDelivery.Select(envelope => envelope.Envelope.Id).ToHashSet();
+        Assert.Contains(AgentJobSessionDeliveryIds.UnknownTerminalDeliveryEventId(jobKey), deliveryIds);
+        Assert.Contains(AgentJobSessionDeliveryIds.TerminalDeliveryEventId(jobKey), deliveryIds);
+    }
+
+    [Fact]
+    public async Task ReconciliationFailure_ReplacesPendingUnknownDeliveryAfterInterimAppendFailure()
+    {
+        var (runnerId, projectId) = await RegisterAgentJobRunnerAsync(
+            $"agent-job-retry-delivery-failure-runner-{Guid.NewGuid():N}",
+            projectId: $"agent-job-retry-delivery-failure-project-{Guid.NewGuid():N}");
+        var jobKey = $"agent-job-retry-delivery-failure-{Guid.NewGuid():N}";
+        var sessionId = $"session-retry-delivery-failure-{Guid.NewGuid():N}";
+        var session = Grains.GetGrain<IAgentSessionGrain>(sessionId);
+        await session.OpenAsync(new OpenAgentSessionCommand(
+            RunnerId: string.Empty,
+            AgentRuntime: "opencode",
+            WorkDir: "/tmp/agent-job-fixture",
+            Metadata: new AgentSessionMetadata(new Dictionary<string, string>(StringComparer.Ordinal)
+            {
+                [AgentSessionQueryMetadataKeys.ProjectId] = projectId,
+                [AgentSessionQueryMetadataKeys.SourceKind] = "agent-launch",
+                [GenericAgentSessionMetadata.AgentId] = "agent-test",
+            })));
+
+        var job = JobGrain(jobKey);
+        await job.PrepareManualLaunchAsync(new PrepareManualLaunchCommand(
+            SessionId: sessionId,
+            InputId: Guid.NewGuid().ToString("N"),
+            TurnId: Guid.NewGuid().ToString("N"),
+            Prompt: "retryable reconciliation failure with a pending unknown delivery",
+            ProjectId: projectId,
+            AgentId: "agent-test",
+            ConnectionOrigin: new ConnectionLaunchOrigin(
+                "conn-retry-delivery-failure",
+                "team-1",
+                "U_OWNER",
+                "C-retry-delivery-failure",
+                "1710000000.000001")));
+        await job.SubmitPreparedLaunchAsync();
+        await WaitForStatusAsync(job, AgentJobStatus.Running, TimeSpan.FromSeconds(5));
+
+        _fixture.EventStore.ThrowOnAppend = envelope =>
+            envelope.Type == EventCatalog.ReverseDns.AgentJobTerminalDelivery
+            && envelope.Id == AgentJobSessionDeliveryIds.UnknownTerminalDeliveryEventId(jobKey);
+        try
+        {
+            await Grains.GetGrain<IRunnerGrain>(runnerId).UnregisterAsync();
+            var recovering = await job.GetRuntimeSnapshotAsync();
+            Assert.Equal(AgentJobStatus.Unknown, recovering.Status);
+            Assert.DoesNotContain(
+                _fixture.EventStore.Appended,
+                envelope => envelope.Envelope.Id == AgentJobSessionDeliveryIds.UnknownTerminalDeliveryEventId(jobKey));
+
+            var deadline = Assert.IsType<DateTimeOffset>(recovering.RecoveryDeadlineAt);
+            _fixture.TimeProvider.Advance(deadline - _fixture.TimeProvider.GetUtcNow());
+            _fixture.EventStore.ThrowOnAppend = null;
+            await job.ReceiveReminder(AgentJobGrain.RecoveryReminderName, default);
+
+            var terminal = await job.GetTerminalResultAsync();
+            Assert.Equal(AgentJobStatus.Failed, terminal.Status);
+            Assert.Equal(AgentJobFailureReasons.RunnerLost, terminal.FailureReason);
+
+            var failedDelivery = Assert.Single(
+                _fixture.EventStore.Appended,
+                envelope => envelope.Envelope.Type == EventCatalog.ReverseDns.AgentJobTerminalDelivery
+                    && envelope.Envelope.Id == AgentJobSessionDeliveryIds.TerminalDeliveryEventId(jobKey));
+            Assert.Equal("failed", failedDelivery.Envelope.Data!.Value.GetProperty("status").GetString());
+            Assert.Equal(
+                AgentJobFailureReasons.RunnerLost,
+                failedDelivery.Envelope.Data.Value.GetProperty("failureCategory").GetString());
+        }
+        finally
+        {
+            _fixture.EventStore.ThrowOnAppend = null;
+        }
     }
 
     [Fact]

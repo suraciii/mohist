@@ -682,6 +682,9 @@ public class AgentJobGrainSpecs : AgentJobGrainTestSupport
         var terminal = await job.GetTerminalResultAsync();
         Assert.Equal(AgentJobStatus.Unknown, terminal.Status);
         Assert.StartsWith(AgentJobFailureReasons.ReportTimeout, terminal.FailureReason, StringComparison.Ordinal);
+
+        var recovering = await job.GetRuntimeSnapshotAsync();
+        Assert.NotNull(recovering.RecoveryDeadlineAt);
     }
 
     [Fact]

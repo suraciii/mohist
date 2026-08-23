@@ -1,11 +1,8 @@
-using System.Security.Cryptography;
-using System.Text;
 using System.Text.Json;
 using Mohist.Server.Agent.Domain;
 using Mohist.Server.Api;
 using Mohist.Server.Infrastructure;
 using Mohist.Server.Infrastructure.Hosting;
-using Mohist.Server.Infrastructure.Security.Secrets;
 using Mohist.Server.Infrastructure.Slack;
 using Mohist.Server.Sessions.Domain;
 using Mohist.Server.Sessions.Grains;
@@ -19,7 +16,7 @@ public sealed class SlackTurnControlService : IScopedService
     private const string StopAction = "stop";
     private static readonly TimeSpan StopActionLifetime = TimeSpan.FromMinutes(5);
 
-    private readonly ISecretStore _secrets;
+    private readonly ISlackActionSigner _signing;
     private readonly IGrainFactory _grains;
     private readonly AgentSessionQuerier _sessions;
     private readonly SlackProviderInboxStore _inbox;
@@ -27,14 +24,14 @@ public sealed class SlackTurnControlService : IScopedService
     private readonly TimeProvider _time;
 
     public SlackTurnControlService(
-        ISecretStore secrets,
+        ISlackActionSigner signing,
         IGrainFactory grains,
         AgentSessionQuerier sessions,
         SlackProviderInboxStore inbox,
         ISessionStopDelivery stopDelivery,
         TimeProvider time)
     {
-        _secrets = secrets;
+        _signing = signing;
         _grains = grains;
         _sessions = sessions;
         _inbox = inbox;
@@ -84,7 +81,7 @@ public sealed class SlackTurnControlService : IScopedService
             Nonce: Guid.NewGuid().ToString("N"),
             ExpiresAt: expiresAt,
             Signature: null);
-        var signature = await TrySignAsync(connection, payload, ct);
+        var signature = await _signing.TrySignAsync(connection, Canonical(payload), ct);
         if (signature is null)
             return null;
 
@@ -178,17 +175,6 @@ public sealed class SlackTurnControlService : IScopedService
         };
     }
 
-    private async Task<string?> TrySignAsync(
-        AgentConnection connection,
-        SlackStopActionPayload payload,
-        CancellationToken ct)
-    {
-        var key = await LoadSigningKeyAsync(connection, ct);
-        return key is null
-            ? null
-            : Convert.ToHexString(HMACSHA256.HashData(key, Encoding.UTF8.GetBytes(Canonical(payload))));
-    }
-
     private async Task<SlackStopActionPayload?> VerifyAsync(
         AgentConnection connection,
         string actionValue,
@@ -211,26 +197,9 @@ public sealed class SlackTurnControlService : IScopedService
             || string.IsNullOrWhiteSpace(payload.Nonce))
             return null;
 
-        var expected = await TrySignAsync(connection, payload with { Signature = null }, ct);
-        return expected is not null && CryptographicOperations.FixedTimeEquals(
-            Encoding.UTF8.GetBytes(expected),
-            Encoding.UTF8.GetBytes(payload.Signature))
+        return await _signing.VerifyAsync(connection, Canonical(payload with { Signature = null }), payload.Signature, ct)
             ? payload
             : null;
-    }
-
-    private async Task<byte[]?> LoadSigningKeyAsync(AgentConnection connection, CancellationToken ct)
-    {
-        try
-        {
-            var token = await _secrets.LoadAsync(
-                new SecretStoreAddress(connection.ProjectId, connection.Id, SecretKind.BotToken), ct);
-            return token is { Length: > 0 } ? token : null;
-        }
-        catch (Exception) when (!ct.IsCancellationRequested)
-        {
-            return null;
-        }
     }
 
     private static bool IsBoundToConnection(AgentSessionInputProvenance? provenance, string connectionId) =>

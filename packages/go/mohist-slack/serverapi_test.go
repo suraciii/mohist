@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -414,28 +415,53 @@ func TestInteractionRejectsManagerTargets(t *testing.T) {
 }
 
 func TestInteractionPostsAndParsesState(t *testing.T) {
-	var captured capturedRequest
-	api := serveAPI(t, http.StatusOK, `{"success":true,"data":{"state":"recorded"}}`, &captured)
-	envelope := InteractionEnvelope{
-		EventType:        "block_actions",
-		APIAppID:         "A1",
-		InteractionID:    "i1",
-		TeamID:           "T123",
-		ConversationID:   "C1",
-		MessageTs:        "1.2",
-		ActorSlackUserID: "U1",
-		ActionID:         "act",
-		ActionValue:      "v",
-	}
-	result, err := api.Interaction(context.Background(), ConnectionTarget{ProjectID: "p", ConnectionID: "c"}, envelope, "l", "a")
-	if err != nil || result.State != "recorded" {
-		t.Fatalf("Interaction() = (%#v, %v)", result, err)
-	}
-	if captured.Path != "/api/projects/p/slack-connections/c/interactions" {
-		t.Fatalf("path = %q", captured.Path)
-	}
-	if captured.Body["actionId"] != "act" || captured.Body["leaseId"] != "l" {
-		t.Fatalf("body = %v", captured.Body)
+	for _, testCase := range []struct {
+		actionID    string
+		actionValue string
+	}{
+		{actionID: "mohist_stop_turn", actionValue: "stop-signed-value"},
+		{actionID: "mohist_retry_turn", actionValue: "retry-signed-value"},
+	} {
+		t.Run(testCase.actionID, func(t *testing.T) {
+			var captured capturedRequest
+			api := serveAPI(t, http.StatusOK, `{"success":true,"data":{"state":"recorded"}}`, &captured)
+			envelope := InteractionEnvelope{
+				EventType:        "block_actions",
+				APIAppID:         "A1",
+				InteractionID:    "i1",
+				TeamID:           "T123",
+				ConversationID:   "C1",
+				MessageTs:        "1.2",
+				ThreadTs:         strPointer("1.1"),
+				ActorSlackUserID: "U1",
+				ActionID:         testCase.actionID,
+				ActionValue:      testCase.actionValue,
+			}
+			result, err := api.Interaction(context.Background(), ConnectionTarget{ProjectID: "p", ConnectionID: "c"}, envelope, "l", "a")
+			if err != nil || result.State != "recorded" {
+				t.Fatalf("Interaction() = (%#v, %v)", result, err)
+			}
+			if captured.Path != "/api/projects/p/slack-connections/c/interactions" {
+				t.Fatalf("path = %q", captured.Path)
+			}
+			expectedBody := map[string]any{
+				"eventType":        "block_actions",
+				"apiAppId":         "A1",
+				"interactionId":    "i1",
+				"teamId":           "T123",
+				"conversationId":   "C1",
+				"messageTs":        "1.2",
+				"threadTs":         "1.1",
+				"actorSlackUserId": "U1",
+				"actionId":         testCase.actionID,
+				"actionValue":      testCase.actionValue,
+				"leaseId":          "l",
+				"adapterId":        "a",
+			}
+			if !reflect.DeepEqual(captured.Body, expectedBody) {
+				t.Fatalf("body = %v, want %v", captured.Body, expectedBody)
+			}
+		})
 	}
 }
 

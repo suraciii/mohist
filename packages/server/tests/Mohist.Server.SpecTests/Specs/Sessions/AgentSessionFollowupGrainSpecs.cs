@@ -576,6 +576,34 @@ public sealed partial class AgentSessionFollowupGrainSpecs : IClassFixture<Agent
     }
 
     [Fact]
+    public async Task MarkFollowupTurnTerminal_RuntimeFailure_PreservesRetryableCategoryAndFailedStatus()
+    {
+        var (grain, sessionId) = await CreateAttachedSessionAsync("runtime-generation-drain-timeout");
+
+        var accept = await grain.AcceptFollowupAsync(new AcceptFollowupCommand(
+            Text: "fail with a generation drain timeout",
+            Source: "agent-session-followup",
+            IdempotencyKey: "generation-drain-timeout-key"));
+
+        var persistence = grain.PersistenceCheckpoint(_fixture.Persistence);
+        await grain.AppendRuntimeEventsAsync(new AppendAgentSessionRuntimeEventsCommand(
+            new[] { new AgentSessionRuntimeEventInput(
+                RuntimeEventTypes.SessionActivity,
+                $$"""{"activity":"unknown","operationId":"{{accept.OperationId}}","status":"failed","failureReason":"generation did not drain","failureCategory":"generation-drain-timeout","turnId":"{{accept.TurnId}}"}""") },
+            "runtime-generation-drain-timeout"));
+        await persistence.WaitAsync();
+
+        var state = await _fixture.StateStore.LoadAsync(sessionId);
+        Assert.NotNull(state);
+        Assert.Empty(state!.Status.PendingFollowups!);
+
+        var turn = Assert.Single(state.Status.Turns!);
+        Assert.Equal(AgentTurnStatus.Failed, turn.Status);
+        Assert.Equal("generation did not drain", turn.Result?.FailureReason);
+        Assert.Equal("generation-drain-timeout", turn.Result?.FailureCategory);
+    }
+
+    [Fact]
     public async Task MarkFollowupTurnTerminal_SessionActivityIdle_ClearsLease()
     {
         var (grain, sessionId) = await CreateAttachedSessionAsync("runtime-clear-lease");

@@ -1,7 +1,12 @@
 using System.Text.Json;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
+using Mohist.Server.Agent.Domain;
+using Mohist.Server.Agent.Services;
 using Mohist.Server.Infrastructure.Events;
+using Mohist.Server.Sessions.Grains;
+using Mohist.Server.Sessions.Services;
+using Mohist.Server.Slack.Services;
 
 namespace Mohist.Server.Infrastructure.Slack;
 
@@ -45,20 +50,94 @@ public sealed class SlackTerminalDeliveryHandler : ICloudEventHandler
             : delivery.JobKey.StartsWith("agent-session-followup:", StringComparison.Ordinal)
                 ? $"{delivery.JobKey}:progress"
                 : null;
-        await projection.FinalizeLivenessAsync(
-            projectId,
-            delivery.ConnectionId,
-            source,
-            delivery.ThreadTs ?? delivery.MessageTs,
-            delivery.Status,
-            progressDispatchRef,
-            ct);
+        if (ShouldRenderRetry(projectId, delivery))
+        {
+            SlackRetryAction? retry = null;
+            try
+            {
+                var connection = await scope.ServiceProvider
+                    .GetRequiredService<AgentConnectionStore>()
+                    .GetAsync(projectId, delivery.ConnectionId, ct);
+                if (connection is not null)
+                {
+                    retry = await scope.ServiceProvider
+                        .GetRequiredService<SlackRetryActionService>()
+                        .CreateRetryActionAsync(
+                            connection,
+                            delivery.SessionId!,
+                            delivery.TurnId!,
+                            source,
+                            delivery.ThreadTs,
+                            ct);
+                }
+            }
+            catch (Exception ex) when (!ct.IsCancellationRequested)
+            {
+                // Terminal presentation must not turn a missing or
+                // temporarily unavailable durable Session/Turn into a lost
+                // liveness update. The signed action is optional; reactions
+                // remain the safe fallback until the durable facts can be
+                // resolved by a later delivery attempt.
+                _log.LogWarning(
+                    ex,
+                    "Could not resolve retry facts for terminal AgentJob {JobKey}; falling back to reaction-only presentation",
+                    delivery.JobKey);
+            }
+            if (retry is not null)
+            {
+                await projection.EnqueueTerminalAsync(
+                    projectId,
+                    delivery.ConnectionId,
+                    source,
+                    delivery.ThreadTs ?? delivery.MessageTs,
+                    delivery.Status,
+                    FailureNoticeText(delivery),
+                    terminalDispatchRef: delivery.JobKey,
+                    progressDispatchRef: progressDispatchRef,
+                    blocks: retry.Blocks,
+                    ct: ct);
+            }
+            else
+            {
+                await projection.FinalizeLivenessAsync(
+                    projectId,
+                    delivery.ConnectionId,
+                    source,
+                    delivery.ThreadTs ?? delivery.MessageTs,
+                    delivery.Status,
+                    progressDispatchRef,
+                    ct);
+            }
+        }
+        else
+        {
+            await projection.FinalizeLivenessAsync(
+                projectId,
+                delivery.ConnectionId,
+                source,
+                delivery.ThreadTs ?? delivery.MessageTs,
+                delivery.Status,
+                progressDispatchRef,
+                ct);
+        }
 
         _log.LogInformation(
             "Finalized Slack liveness for AgentJob {JobKey} on connection {ConnectionId} (reply body is owned by the Agent reply action)",
             delivery.JobKey,
             delivery.ConnectionId);
     }
+
+    private static bool ShouldRenderRetry(string projectId, SlackTerminalDelivery delivery) =>
+        !string.Equals(projectId, SlackDeliveryOwnerIds.ManagerProjectId, StringComparison.Ordinal)
+        && string.Equals(delivery.Status, "failed", StringComparison.Ordinal)
+        && !string.IsNullOrWhiteSpace(delivery.SessionId)
+        && !string.IsNullOrWhiteSpace(delivery.TurnId)
+        && AgentSessionRetryPolicy.IsRetryable(delivery.FailureCategory);
+
+    private static string FailureNoticeText(SlackTerminalDelivery delivery) =>
+        string.IsNullOrWhiteSpace(delivery.FailureReason)
+            ? "The Agent run failed."
+            : $"The Agent run failed: {delivery.FailureReason}";
 
 }
 
@@ -76,6 +155,8 @@ public sealed record SlackTerminalDelivery(
     int? ExitCode,
     string? ThreadTs = null,
     string? MessageTs = null,
+    string? SessionId = null,
+    string? TurnId = null,
     string? SlackUserId = null,
     // Retained only as an additive wire field for ordinary Slack history;
     // Manager terminal delivery never populates or consumes it.

@@ -48,6 +48,7 @@ public interface IAgentSessionGrain : IGrainWithStringKey
 
     Task<AgentSessionFollowupAcceptResult> AcceptFollowupAsync(AcceptFollowupCommand command);
     Task<AgentSessionFollowupDispatch?> BeginNextFollowupDispatchAsync();
+    Task<AgentSessionFollowupDispatch?> BeginFollowupDispatchForTurnAsync(string turnId);
     Task ReleaseFollowupDispatchAsync(string operationId);
     Task MarkFollowupTurnExecutingAsync(string operationId);
     Task MarkFollowupTurnTerminalAsync(
@@ -383,7 +384,13 @@ public sealed record AcceptFollowupCommand(
     /// This does not permit dispatch to overtake the initial turn.
     /// Append-only Orleans field id.
     /// </summary>
-    [property: Id(8)] bool AllowPendingInitialLaunch = false);
+    [property: Id(8)] bool AllowPendingInitialLaunch = false,
+    /// <summary>
+    /// Prevents a retry input from joining an unrelated queued turn. The
+    /// retry path uses this when it has pre-allocated a distinct turn
+    /// identity for a failed follow-up.
+    /// </summary>
+    [property: Id(9)] bool ForceNewTurn = false);
 
 [GenerateSerializer]
 public sealed record AgentSessionRuntimeEventInput(

@@ -8,7 +8,15 @@ namespace Mohist.Server.Sessions.Grains;
 
 public sealed partial class AgentSessionGrain
 {
-    public async Task<AgentSessionFollowupDispatch?> BeginNextFollowupDispatchAsync()
+    public Task<AgentSessionFollowupDispatch?> BeginNextFollowupDispatchAsync() =>
+        BeginFollowupDispatchAsync(targetTurnId: null);
+
+    public Task<AgentSessionFollowupDispatch?> BeginFollowupDispatchForTurnAsync(string turnId) =>
+        string.IsNullOrWhiteSpace(turnId)
+            ? Task.FromResult<AgentSessionFollowupDispatch?>(null)
+            : BeginFollowupDispatchAsync(turnId);
+
+    private async Task<AgentSessionFollowupDispatch?> BeginFollowupDispatchAsync(string? targetTurnId)
     {
         var session = await GetRequiredAsync();
         var turns = session.Status.Turns ?? [];
@@ -16,7 +24,11 @@ public sealed partial class AgentSessionGrain
         if (turns.Any(turn => !string.IsNullOrWhiteSpace(turn.JobId) && turn.Status == AgentTurnStatus.Queued))
             return null;
         var leases = GetPendingFollowups(session).ToList();
-        var turn = turns.FirstOrDefault(turn => string.IsNullOrEmpty(turn.JobId) && turn.Status == AgentTurnStatus.Queued);
+        var turn = targetTurnId is null
+            ? turns.FirstOrDefault(turn => string.IsNullOrEmpty(turn.JobId) && turn.Status == AgentTurnStatus.Queued)
+            : turns.FirstOrDefault(turn => string.Equals(turn.Id, targetTurnId, StringComparison.Ordinal)
+                && string.IsNullOrEmpty(turn.JobId)
+                && turn.Status == AgentTurnStatus.Queued);
         if (turn is null) return null;
         var index = leases.FindIndex(lease => string.Equals(lease.TurnId, turn.Id, StringComparison.Ordinal));
         if (index < 0 || leases[index].Dispatching) return null;

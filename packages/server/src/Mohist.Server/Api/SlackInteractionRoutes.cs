@@ -1,8 +1,10 @@
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using Mohist.Server.Agent.Domain;
 using Mohist.Server.Agent.Services;
 using Mohist.Server.Infrastructure.Slack;
+using Mohist.Server.Slack;
 using Mohist.Server.Slack.Domain;
 using Mohist.Server.Slack.Services;
 
@@ -21,6 +23,7 @@ public static class SlackInteractionRoutes
             SlackInteractionRequest? request,
             AgentConnectionStore connections,
             SlackTurnControlService controls,
+            SlackRetryActionService retries,
             SlackOutboxStore outbox,
             SlackAdapterLeaseService leases,
             ISlackAdapterOperatorAuthenticator auth,
@@ -30,6 +33,7 @@ public static class SlackInteractionRoutes
             if (operatorId is null)
                 return ApiResults.Fail("Slack adapter authentication is required.", 403, "operator_credential_required");
             var projectId = http.GetResolvedProject().Id;
+
             if (!await leases.ValidateRuntimeLeaseAsync(
                     operatorId,
                     new SlackLeaseTargetRef.Connection(projectId, connectionId),
@@ -37,6 +41,12 @@ public static class SlackInteractionRoutes
                     request?.AdapterId ?? string.Empty,
                     ct))
             {
+                var disabledConnection = request is not null
+                    && string.Equals(request.ActionId, SlackRetryActionService.RetryActionId, StringComparison.Ordinal)
+                    ? await connections.GetAsync(projectId, connectionId, ct)
+                    : null;
+                if (disabledConnection?.DesiredState == Agent.Domain.DesiredStateKind.Disabled)
+                    return ApiResults.Conflict("This Slack Connection is disabled.", "connection_disabled");
                 return ApiResults.Conflict(
                     "The runtime Socket lease is stale, expired, or unknown; acquire a new lease.",
                     "lease_stale_or_expired");
@@ -58,7 +68,23 @@ public static class SlackInteractionRoutes
             if (connection.DesiredState == Agent.Domain.DesiredStateKind.Disabled)
                 return ApiResults.Conflict("This Slack Connection is disabled.", "connection_disabled");
 
-            var result = await controls.HandleAsync(projectId, connection, request, ct);
+            var result = string.Equals(request.ActionId, SlackRetryActionService.RetryActionId, StringComparison.Ordinal)
+                ? await retries.HandleAsync(
+                    projectId,
+                    connection,
+                    request,
+                    new SlackLeaseContext(
+                        operatorId,
+                        request.LeaseId,
+                        request.AdapterId,
+                        (targetRef, leaseCt) => leases.ResolveRuntimeLeaseBotTokenAsync(
+                            operatorId,
+                            targetRef,
+                            request.LeaseId,
+                            request.AdapterId,
+                            leaseCt)),
+                    ct)
+                : await controls.HandleAsync(projectId, connection, request, ct);
             if (!string.Equals(result.State, "replayed", StringComparison.Ordinal))
             {
                 await outbox.EnqueueRequiredAsync(new SlackOutboxDraft(

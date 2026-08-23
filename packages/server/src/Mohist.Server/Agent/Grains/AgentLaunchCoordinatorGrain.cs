@@ -160,7 +160,8 @@ public sealed partial class AgentLaunchCoordinatorGrain : Grain, IAgentLaunchCoo
                 Origin: command.Origin ?? command.Request.Origin,
                 TargetId: command.TargetId ?? command.Request.TargetId,
                 AttachmentResults: command.AttachmentResults,
-                DefinitionCreatedByLaunch: command.DefinitionCreatedByLaunch);
+                DefinitionCreatedByLaunch: command.DefinitionCreatedByLaunch,
+                Skills: command.Skills);
             _state.State.Plan = plan;
             await SaveStateAsync();
             await EnsureRecoveryReminderAsync();
@@ -354,6 +355,7 @@ public sealed partial class AgentLaunchCoordinatorGrain : Grain, IAgentLaunchCoo
             PinnedRunnerId: plan.PinnedRunnerId,
             AgentSessionStartup: plan.AgentSessionStartup,
             SpawnOrigin: SpawnOriginFor(plan),
+            Skills: plan.Skills,
             WorkspaceRepositories: plan.WorkspaceRepositories,
             OriginMarker: plan.ConnectionOrigin?.OriginMarker));
         await _participantProbe.OnPrepareJobAsync(plan.JobKey, commandId);
@@ -582,7 +584,7 @@ public sealed partial class AgentLaunchCoordinatorGrain : Grain, IAgentLaunchCoo
                 plan.Runtime ?? AgentConfigSchema.OpenCodeRuntime,
                 plan.Model,
                 plan.Variant,
-                [],
+                plan.Skills ?? [],
                 plan.AllowedSubagents,
                 plan.ReasoningEffort),
             AgentSessionStartup: plan.AgentSessionStartup,

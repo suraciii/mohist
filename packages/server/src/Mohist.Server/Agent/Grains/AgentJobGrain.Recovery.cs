@@ -114,14 +114,19 @@ public sealed partial class AgentJobGrain
         var reason = runnerLost
             ? AgentJobFailureReasons.RunnerLost
             : $"{AgentJobFailureReasons.ReportTimeout}: report timeout after {_options.JobTimeout}";
-        DateTimeOffset? recoveryDeadlineAt = runnerLost
-            ? _timeProvider.GetUtcNow() + _runnerLossRecoveryTimeout
-            : null;
+        // A report timeout is initially Unknown because the Runner may still
+        // produce authoritative evidence. If it never does, the same bounded
+        // reconciliation window used for Runner loss turns the durable
+        // timeout fact into a retryable Failed Turn.
+        DateTimeOffset? recoveryDeadlineAt = _timeProvider.GetUtcNow() + _runnerLossRecoveryTimeout;
+        var failureCategory = runnerLost
+            ? AgentJobFailureReasons.RunnerLost
+            : AgentJobFailureReasons.ReportTimeout;
 
         _log.LogWarning(
             "AgentJob {Id} report timeout after {Timeout}; transitioning to unknown with reason {Reason}",
             Key, _options.JobTimeout, reason);
-        await EnterUnknownStateAsync(reason, recoveryDeadlineAt);
+        await EnterUnknownStateAsync(reason, recoveryDeadlineAt, failureCategory);
         if (IsManagerInput())
         {
             if (State.PendingInitialTurnTerminalDelivery is { } pending)
@@ -152,7 +157,8 @@ public sealed partial class AgentJobGrain
 
     internal async Task EnterUnknownStateAsync(
         string reason,
-        DateTimeOffset? recoveryDeadlineAt = null)
+        DateTimeOffset? recoveryDeadlineAt = null,
+        string? failureCategory = null)
     {
         if (IsTerminal)
             return;
@@ -165,6 +171,13 @@ public sealed partial class AgentJobGrain
             {
                 State.RecoveryDeadlineAt = deadline;
                 State.FailureReason = reason;
+                State.RecoveryFailureCategory = failureCategory ?? CanonicalRecoveryFailureCategory(reason);
+                changed = true;
+            }
+            else if (!string.IsNullOrWhiteSpace(failureCategory)
+                && string.IsNullOrWhiteSpace(State.RecoveryFailureCategory))
+            {
+                State.RecoveryFailureCategory = failureCategory;
                 changed = true;
             }
 
@@ -180,6 +193,7 @@ public sealed partial class AgentJobGrain
         State.Status = AgentJobStatus.Unknown;
         State.FailureReason = reason;
         State.RecoveryDeadlineAt = recoveryDeadlineAt;
+        State.RecoveryFailureCategory = failureCategory ?? CanonicalRecoveryFailureCategory(reason);
         State.RunningSince = null;
         State.TerminalResult = null;
         State.TerminalAt = null;
@@ -208,11 +222,14 @@ public sealed partial class AgentJobGrain
         }
 
         var reason = State.FailureReason ?? AgentJobFailureReasons.RunnerLost;
+        var failureCategory = State.RecoveryFailureCategory
+            ?? CanonicalRecoveryFailureCategory(reason)
+            ?? AgentJobFailureReasons.RunnerLost;
         await EnterTerminalStateAsync(
             AgentJobStatus.Failed,
             exitCode: 1,
             failureReason: reason,
-            failureCategory: reason,
+            failureCategory: failureCategory,
             pendingReason: reason,
             message: reason,
             output: null,
@@ -242,6 +259,13 @@ public sealed partial class AgentJobGrain
             return true;
         }
     }
+
+    private static string? CanonicalRecoveryFailureCategory(string? reason) =>
+        string.Equals(reason, AgentJobFailureReasons.RunnerLost, StringComparison.Ordinal)
+            ? AgentJobFailureReasons.RunnerLost
+            : reason?.StartsWith($"{AgentJobFailureReasons.ReportTimeout}:", StringComparison.Ordinal) == true
+                ? AgentJobFailureReasons.ReportTimeout
+                : null;
 
     private static TimeSpan ValidateRunnerLossRecoveryTimeout(TimeSpan timeout)
     {

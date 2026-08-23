@@ -102,6 +102,105 @@ public sealed partial class AgentSessionFollowupGrainSpecs
     }
 
     [Fact]
+    public async Task BeginFollowupDispatchForTurn_TargetsRequestedTurnAndLeavesOtherQueued()
+    {
+        var (grain, sessionId) = await CreateAttachedSessionAsync("targeted-dispatch");
+        var first = await grain.AcceptFollowupAsync(new AcceptFollowupCommand(
+            Text: "first queued input",
+            Source: "agent-session-followup",
+            IdempotencyKey: "targeted-first"));
+        var second = await grain.AcceptFollowupAsync(new AcceptFollowupCommand(
+            Text: "second queued input",
+            Source: "agent-session-followup",
+            IdempotencyKey: "targeted-second",
+            ForceNewTurn: true));
+
+        var dispatch = await grain.BeginFollowupDispatchForTurnAsync(second.TurnId);
+
+        Assert.NotNull(dispatch);
+        Assert.Equal(second.TurnId, dispatch!.TurnId);
+        Assert.Equal(second.InputId, dispatch.InputId);
+        var state = await _fixture.StateStore.LoadAsync(sessionId);
+        Assert.NotNull(state);
+        Assert.Equal(AgentTurnStatus.Queued, state!.Status.Turns!.Single(turn => turn.Id == first.TurnId).Status);
+        Assert.NotNull(state.Status.PendingFollowups);
+        var pending = state.Status.PendingFollowups!;
+        Assert.False(pending.Single(lease => lease.TurnId == first.TurnId).Dispatching);
+        Assert.True(pending.Single(lease => lease.TurnId == second.TurnId).Dispatching);
+    }
+
+    [Fact]
+    public async Task BeginFollowupDispatchForTurn_RespectsLaunchTurnGuard()
+    {
+        var (grain, _) = await CreateAttachedSessionAsync("targeted-dispatch-launch-guard");
+        await grain.EnsureInitialLaunchAsync(new EnsureInitialLaunchCommand(
+            InputId: "launch-input",
+            TurnId: "launch-turn",
+            Prompt: "launch",
+            Source: "agent-connection",
+            JobId: "launch-job"));
+
+        Assert.Null(await grain.BeginFollowupDispatchForTurnAsync("launch-turn"));
+    }
+
+    [Fact]
+    public async Task BeginFollowupDispatchForTurn_BusySessionLeavesRetryQueuedForOrdinaryScheduler()
+    {
+        var (grain, sessionId) = await CreateAttachedSessionAsync("targeted-dispatch-busy");
+        var executing = await grain.AcceptFollowupAsync(new AcceptFollowupCommand(
+            Text: "currently executing",
+            Source: "agent-session-followup",
+            IdempotencyKey: "targeted-executing"));
+        await grain.AppendRuntimeEventsAsync(new AppendAgentSessionRuntimeEventsCommand(
+            new[] { new AgentSessionRuntimeEventInput(
+                RuntimeEventTypes.SessionInput,
+                $$"""{"text":"currently executing","kind":"followup","source":"agent-session-followup","operationId":"{{executing.OperationId}}"}""") },
+            "targeted-dispatch-busy"));
+
+        var retry = await grain.AcceptFollowupAsync(new AcceptFollowupCommand(
+            Text: "retry while busy",
+            Source: "agent-session-followup",
+            IdempotencyKey: "targeted-retry-busy",
+            ForceNewTurn: true));
+
+        Assert.Null(await grain.BeginFollowupDispatchForTurnAsync(retry.TurnId));
+        var before = await _fixture.StateStore.LoadAsync(sessionId);
+        Assert.NotNull(before);
+        Assert.Equal(AgentTurnStatus.Executing, before!.Status.Turns!.Single(turn => turn.Id == executing.TurnId).Status);
+        Assert.Equal(AgentTurnStatus.Queued, before.Status.Turns!.Single(turn => turn.Id == retry.TurnId).Status);
+        Assert.False(before.Status.PendingFollowups!.Single(lease => lease.TurnId == retry.TurnId).Dispatching);
+
+        await grain.MarkFollowupTurnTerminalAsync(executing.OperationId, AgentTurnStatus.Completed, null);
+        var ordinary = await grain.BeginNextFollowupDispatchAsync();
+        Assert.NotNull(ordinary);
+        Assert.Equal(retry.TurnId, ordinary!.TurnId);
+    }
+
+    [Fact]
+    public async Task AcceptFollowup_ForceNewTurn_UsesPreMintedTurnIdentity()
+    {
+        var (grain, sessionId) = await CreateAttachedSessionAsync("targeted-pre-mint");
+        await grain.AcceptFollowupAsync(new AcceptFollowupCommand(
+            Text: "first",
+            Source: "agent-session-followup",
+            IdempotencyKey: "targeted-pre-mint-first"));
+
+        var accepted = await grain.AcceptFollowupAsync(new AcceptFollowupCommand(
+            Text: "retry",
+            Source: "agent-session-followup",
+            IdempotencyKey: "targeted-pre-mint-retry",
+            PreMintedInputId: "retry-input",
+            PreMintedTurnId: "retry-turn",
+            ForceNewTurn: true));
+
+        Assert.Equal("retry-input", accepted.InputId);
+        Assert.Equal("retry-turn", accepted.TurnId);
+        var state = await _fixture.StateStore.LoadAsync(sessionId);
+        Assert.NotNull(state);
+        Assert.Contains(state!.Status.Turns!, turn => turn.Id == "retry-turn");
+    }
+
+    [Fact]
     public async Task AcceptFollowup_DispatchInProgress_CreatesNextQueuedTurn()
     {
         var (grain, sessionId) = await CreateAttachedSessionAsync("runtime-join-dispatching-turn");

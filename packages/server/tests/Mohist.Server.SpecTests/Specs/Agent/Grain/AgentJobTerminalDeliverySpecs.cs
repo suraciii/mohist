@@ -316,6 +316,7 @@ public class AgentJobTerminalDeliverySpecs : AgentJobGrainTestSupport
         var terminal = await job.GetTerminalResultAsync();
         Assert.Equal(AgentJobStatus.Unknown, terminal.Status);
         Assert.StartsWith(AgentJobFailureReasons.ReportTimeout, terminal.FailureReason, StringComparison.Ordinal);
+        Assert.NotNull((await job.GetRuntimeSnapshotAsync()).RecoveryDeadlineAt);
         var activityParts = (await ListSessionClosedPartsAsync(sessionId))
             .Where(part => part.Type == TranscriptPartTypes.SessionActivity)
             .ToList();

@@ -220,7 +220,8 @@ public sealed record PrepareManualLaunchCommand(
     /// <summary>
     /// Non-secret control-plane origin marker copied from the launch origin.
     /// </summary>
-    [property: Id(25)] string? OriginMarker = null);
+    [property: Id(25)] string? OriginMarker = null,
+    [property: Id(26)] string[]? Skills = null);
 
 [GenerateSerializer]
 public sealed record AgentJobSpawnOrigin(
@@ -401,6 +402,9 @@ public static class AgentJobSessionDeliveryIds
 
     public static string TerminalDeliveryEventId(string jobKey) =>
         $"agent-job:{jobKey}:terminal-delivery";
+
+    public static string UnknownTerminalDeliveryEventId(string jobKey) =>
+        $"agent-job:{jobKey}:terminal-delivery:unknown";
 
     public static string SubagentTerminalEventId(string jobKey) =>
         $"agent-job:{jobKey}:subagent-terminal";
