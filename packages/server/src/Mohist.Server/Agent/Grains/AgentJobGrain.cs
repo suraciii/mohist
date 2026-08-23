@@ -1002,7 +1002,8 @@ public sealed partial class AgentJobGrain : Grain, IAgentJobGrain
             AgentSessionStartup: command.AgentSessionStartup,
             SpawnOrigin: command.SpawnOrigin,
             WorkspaceRepositories: command.WorkspaceRepositories,
-            OriginMarker: command.OriginMarker);
+            OriginMarker: command.OriginMarker,
+            Skills: command.Skills);
 
     private static bool PlansEquivalent(PrepareManualLaunchCommand left, PrepareManualLaunchCommand right) =>
         string.Equals(left.Prompt, right.Prompt, StringComparison.Ordinal)
@@ -1443,11 +1444,27 @@ public sealed partial class AgentJobGrain : Grain, IAgentJobGrain
         int? exitCode)
     {
         var origin = State.ManualPlan?.ConnectionOrigin;
-        if (origin is null || State.PendingTerminalDeliveryEvent is not null)
+        if (origin is null)
             return;
 
+        // A failed interim Unknown append leaves its obligation in state. The
+        // recovery deadline is authoritative, so the final terminal payload
+        // must replace that stale obligation rather than being suppressed by
+        // it. A non-Unknown obligation is already the final payload and must
+        // remain stable across terminal-entry replays.
+        if (State.PendingTerminalDeliveryEvent is { } pending
+            && (status == AgentJobStatus.Unknown || pending.Status != AgentJobStatus.Unknown))
+            return;
+
+        // The interim Unknown delivery and the final reconciled delivery must
+        // stay distinct persisted events: the event store deduplicates by
+        // (source, event id), and a reconciliation that resolves to Failed has
+        // to reach Slack as its own payload.
+        var eventId = status == AgentJobStatus.Unknown
+            ? AgentJobSessionDeliveryIds.UnknownTerminalDeliveryEventId(Key)
+            : AgentJobSessionDeliveryIds.TerminalDeliveryEventId(Key);
         State.PendingTerminalDeliveryEvent = new PendingTerminalDeliveryEvent(
-            AgentJobSessionDeliveryIds.TerminalDeliveryEventId(Key),
+            eventId,
             origin,
             status,
             message,
@@ -1512,18 +1529,7 @@ public sealed partial class AgentJobGrain : Grain, IAgentJobGrain
     internal CloudEvent BuildSubagentTerminalEnvelope(PendingSubagentTerminalEvent pending) =>
         AgentJobLineage.BuildSubagentTerminalEnvelope(Key, pending);
 
-    internal CloudEvent BuildTerminalDeliveryEnvelope(PendingTerminalDeliveryEvent obligation)
-    {
-        var extensions = AgentJobLineage.BuildExtensions(State.Input, State.RoutedPlan);
-        var sessionLaunchPrompt = State.Input?.Prompt
-            ?? State.ManualPlan?.Prompt
-            ?? State.RoutedPlan?.Prompt;
-        return AgentJobLineage.BuildTerminalDeliveryEnvelope(
-            Key,
-            obligation,
-            extensions,
-            sessionLaunchPrompt);
-    }
+
 
     private async Task UnregisterSelfAsync(string reminderName)
     {
@@ -1540,21 +1546,6 @@ public sealed partial class AgentJobGrain : Grain, IAgentJobGrain
                 Key, reminderName);
         }
     }
-
-    private static string? FailureCategoryFromOutput(JsonElement? output)
-    {
-        if (output is not { ValueKind: JsonValueKind.Object } element) return null;
-        return element.TryGetProperty("failureCategory", out var category)
-            && category.ValueKind == JsonValueKind.String
-            ? category.GetString()
-            : null;
-    }
-
-    private static string? FailureCategoryFromErrorCode(string? code) =>
-        string.IsNullOrWhiteSpace(code) ? null : code;
-
-    private static string? FailureCategoryFromStatus(string? status) =>
-        string.IsNullOrWhiteSpace(status) ? null : status;
 
     /// <summary>
     /// Reads the AgentJob ledger row and hydrates the in-memory state

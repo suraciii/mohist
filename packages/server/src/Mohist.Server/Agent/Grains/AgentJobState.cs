@@ -100,6 +100,13 @@ public sealed class AgentJobState
     /// turn created after an unknown or epoch-invalidated execution.
     /// </summary>
     [Id(47)] public ManagerRecoveryTransition? ManagerRecovery { get; set; }
+    /// <summary>
+    /// Canonical failure category retained while an unknown execution waits
+    /// for reconciliation. The human-readable reason remains separate so a
+    /// report-timeout can become a retryable failed Turn without making the
+    /// interim Unknown projection retryable.
+    /// </summary>
+    [Id(48)] public string? RecoveryFailureCategory { get; set; }
 }
 
 
