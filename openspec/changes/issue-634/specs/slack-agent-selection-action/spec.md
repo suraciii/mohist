@@ -43,7 +43,7 @@ On every click the Server SHALL revalidate the selection payload before any work
 
 ### Requirement: Candidate identity preserves the selected Connection's owning Project
 
-Acceptance SHALL treat a candidate as the complete `(ProjectId, ConnectionId)` reference stored in the claim and signed payload. It SHALL resolve the chosen Connection through the normal project-scoped lookup using `ChosenProjectId` and `ChosenConnectionId`; it SHALL NOT perform a global lookup by Connection id or substitute the posting Connection's Project. The candidate SHALL remain in the exact durable candidate snapshot and bound to the chooser workspace, otherwise the click SHALL be rejected as no longer valid with no selection mutation or execution resources.
+Acceptance SHALL treat a candidate as the complete `(ProjectId, ConnectionId)` reference stored in the claim and signed payload. It SHALL resolve the chosen Connection through the normal project-scoped lookup using `ChosenProjectId` and `ChosenConnectionId`; it SHALL NOT perform a global lookup by Connection id or substitute the posting Connection's Project. If that exact selected Connection row is absent or was deleted, the click SHALL be rejected as unavailable. If the Connection exists but the candidate is absent from the exact durable snapshot or is no longer bound to the chooser workspace Bot, the click SHALL be rejected as no longer valid. Either result SHALL create no selection mutation or execution resources.
 
 #### Scenario: A candidate in another Project resolves by its owning Project
 
@@ -56,6 +56,18 @@ Acceptance SHALL treat a candidate as the complete `(ProjectId, ConnectionId)` r
 - **WHEN** a click value changes `ChosenProjectId` while retaining `ChosenConnectionId`, or names a pair absent from the durable ordered candidate snapshot
 - **THEN** signature or context/candidate validation rejects the click
 - **AND** no selection mutation or execution resource is created
+
+#### Scenario: A deleted selected Connection is unavailable
+
+- **WHEN** the exact signed and snapshotted selected `(ProjectId, ConnectionId)` no longer resolves because its Connection row was deleted after the chooser was rendered
+- **THEN** the click is rejected as unavailable with a visible notice
+- **AND** no selection mutation, winner, or execution resource is created
+
+#### Scenario: A still-existing candidate whose workspace binding changed is no longer valid
+
+- **WHEN** the selected Connection still exists but is no longer bound to the chooser workspace Bot recorded by the durable candidate snapshot
+- **THEN** the click is rejected as no longer valid with a visible notice
+- **AND** no selection mutation, winner, or execution resource is created
 
 ### Requirement: The prompt-owner Connection is re-authorized under its current access policy and own current lease
 
@@ -120,7 +132,7 @@ Acceptance SHALL separately evaluate the clicker's current permission under the 
 
 ### Requirement: The chosen Connection's current runtime lease is resolved at click time
 
-Acceptance SHALL resolve the chosen candidate through its signed and snapshotted owning `ProjectId` plus `ConnectionId`, then resolve that Connection's own current runtime lease at click time under target `connection:{ChosenProjectId}:{ChosenConnectionId}`. It SHALL reject the selection as unavailable when the chosen Connection holds no currently valid runtime lease — absent, expired, superseded, or invalidated by a target or credential-generation change. The prompt-owner Project or Connection lease SHALL NOT be accepted as a substitute, and no execution resources SHALL be created for an unavailable selection.
+Acceptance SHALL reject an absent selected Connection row as unavailable during candidate resolution. After the row resolves, it SHALL resolve that Connection's own current runtime lease at click time under target `connection:{ChosenProjectId}:{ChosenConnectionId}` and SHALL likewise reject the selection as unavailable when no currently valid lease exists — the lease is absent, expired, superseded, or invalidated by a target or credential-generation change. The prompt-owner Project or Connection lease SHALL NOT be accepted as a substitute, and no execution resources SHALL be created for an unavailable selection.
 
 #### Scenario: The chosen Connection has no current runtime lease
 

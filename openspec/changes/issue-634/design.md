@@ -251,16 +251,22 @@ envelope completeness, and delivering-Connection lookup/disabled check:
    current lease; this separate decider call proves that the clicker remains
    authorized under that Connection's current mutable access state. A denial
    stops before candidate handling or mutation.
-7. **Candidate validity** (`no_longer_valid`) — the chosen
-   `(ChosenProjectId, ChosenConnectionId)` pair is in the signed payload and
-   durable candidate snapshot; resolve it with the normal project-scoped
-   `AgentConnectionStore.GetAsync(ChosenProjectId, ChosenConnectionId)`, then
-   prove it still exists and is still bound to the same workspace Bot. No
-   global lookup by Connection id and no fallback to the prompt-owner Project
-   is allowed. A vanished follow-up target session in `ChosenProjectId` is also
-   `no_longer_valid`.
-8. **Selected-Connection lease** (`unavailable`) — resolve the **chosen**
-   Connection's own current runtime lease at click time: read the active
+7. **Candidate resolution and validity** (`unavailable` or
+   `no_longer_valid`) — the chosen `(ChosenProjectId, ChosenConnectionId)`
+   pair must be in the signed payload and durable candidate snapshot. Resolve
+   that exact pair with the normal project-scoped
+   `AgentConnectionStore.GetAsync(ChosenProjectId, ChosenConnectionId)`; a
+   null result means the selected Connection row is absent or was deleted and
+   returns the distinct visible `unavailable` outcome required by issue AC #4.
+   If the Connection still exists, prove it remains bound to the chooser's
+   workspace Bot; drift from those snapshotted candidate facts is
+   `no_longer_valid`. No global lookup by Connection id and no fallback to the
+   prompt-owner Project is allowed. A vanished follow-up target session in
+   `ChosenProjectId` is also `no_longer_valid` because the selected Connection
+   still exists but the retained thread-dispatch facts no longer hold.
+8. **Selected-Connection lease** (`unavailable`) — for the selected
+   Connection that exists after step 7, resolve its **own current runtime
+   lease** at click time: read the active
    lease for its target key
    `connection:{ChosenProjectId}:{ChosenConnectionId}`
    from the lease store (`ISlackLeaseStore.GetActiveAsync`), then re-prove
@@ -300,12 +306,14 @@ envelope completeness, and delivering-Connection lookup/disabled check:
 
 Steps 1–10 create no AgentJob, Session, SessionInput, selection record
 mutation, or provider inbox entry. Outcome names map onto the issue's domain
-model as follows: the issue's `unavailable` ← step 8's missing/invalid
-chosen-Connection lease (adopted verbatim) and, for its broader
-"目标当前不可执行" leg, the existing `connection_disabled` and setup-nudge
-outcomes; the issue's `unauthorized` ← either current-policy denial in step 6
-or 9, plus actor mismatch; the issue's `stale` ← `expired`, `stale_action`,
-`invalid_action`, and `no_longer_valid`. Every outcome returns
+model as follows: the issue's `unavailable` ← step 7's absent/deleted selected
+Connection row, step 8's missing/invalid selected-Connection lease (both
+adopted verbatim from AC #4), and, for its broader "目标当前不可执行" leg,
+the existing `connection_disabled` and setup-nudge outcomes; the issue's
+`unauthorized` ← either current-policy denial in step 6 or 9, plus actor
+mismatch; the issue's `stale` ← `expired`, `stale_action`, `invalid_action`,
+and `no_longer_valid` for a still-existing candidate whose snapshotted
+workspace/thread facts no longer hold. Every outcome returns
 `SlackTurnControlResult`-shaped state/text/blocks; the route's existing reply
 enqueue updates the chooser message via `chat.update`, so late and second
 clickers see the decision instead of a second chooser. Reply idempotency comes
