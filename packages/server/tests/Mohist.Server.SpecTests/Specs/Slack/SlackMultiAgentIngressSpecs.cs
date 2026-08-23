@@ -236,11 +236,24 @@ public sealed partial class SlackMultiAgentIngressSpecs : IAsyncLifetime
         });
         await db.SaveChangesAsync();
 
-        var secrets = scope.ServiceProvider.GetRequiredService<ISecretStore>();
-        await secrets.StoreAsync(new SecretStoreAddress(resolvedProjectId, id, SecretKind.AppToken), Encoding.UTF8.GetBytes("xapp"));
-        await secrets.StoreAsync(new SecretStoreAddress(resolvedProjectId, id, SecretKind.BotToken), Encoding.UTF8.GetBytes("xoxb"));
-        await secrets.StoreAsync(SecretStoreAddress.ForManagedSlackAgentApp(agentAppId, SecretKind.AppToken), Encoding.UTF8.GetBytes("xapp"));
-        await secrets.StoreAsync(SecretStoreAddress.ForManagedSlackAgentApp(agentAppId, SecretKind.BotToken), Encoding.UTF8.GetBytes("xoxb"));
+        var secrets = scope.ServiceProvider.GetRequiredService<AesGcmSecretStore>();
+        await secrets.StoreAtomicallyAsync(
+            db,
+            [
+                new SecretStoreWrite(
+                    new SecretStoreAddress(resolvedProjectId, id, SecretKind.AppToken),
+                    Encoding.UTF8.GetBytes("xapp")),
+                new SecretStoreWrite(
+                    new SecretStoreAddress(resolvedProjectId, id, SecretKind.BotToken),
+                    Encoding.UTF8.GetBytes("xoxb")),
+                new SecretStoreWrite(
+                    SecretStoreAddress.ForManagedSlackAgentApp(agentAppId, SecretKind.AppToken),
+                    Encoding.UTF8.GetBytes("xapp")),
+                new SecretStoreWrite(
+                    SecretStoreAddress.ForManagedSlackAgentApp(agentAppId, SecretKind.BotToken),
+                    Encoding.UTF8.GetBytes("xoxb")),
+            ]);
+        await db.SaveChangesAsync();
         var leaseId = await SlackRuntimeLeaseTestSupport.AcquireConnectionLeaseAsync(_fixture, resolvedProjectId, id);
         _connectionLeases[id] = leaseId;
         return new AgentConnection

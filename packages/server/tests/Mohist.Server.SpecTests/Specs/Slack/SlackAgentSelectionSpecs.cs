@@ -638,26 +638,29 @@ public sealed partial class SlackMultiAgentIngressSpecs
     {
         await using var scope = _fixture.Services.CreateAsyncScope();
         var db = scope.ServiceProvider.GetRequiredService<MohistDbContext>();
-        var leases = scope.ServiceProvider.GetRequiredService<SlackAdapterLeaseService>();
-        var targets = await db.AgentConnections.AsNoTracking()
+        var now = _fixture.TimeProvider.GetUtcNow();
+        var renewedUntil = now + SlackAdapterLeaseService.RuntimeLeaseTtl;
+        var activeLeases = await db.SlackAdapterLeases
+            .Where(row => row.LeaseKind == SlackLeaseKind.Runtime
+                && row.LeaseId != null
+                && row.AdapterId != null)
+            .ToListAsync();
+        foreach (var active in activeLeases)
+        {
+            active.ExpiresAt = renewedUntil;
+            active.UpdatedAt = now;
+        }
+        await db.SaveChangesAsync();
+
+        foreach (var connection in await db.AgentConnections.AsNoTracking()
             .Where(row => row.DeletedAt == null && row.ProviderKind == ConnectionProviderKind.Slack)
             .Select(row => new { row.ProjectId, row.Id })
-            .ToListAsync();
-        foreach (var target in targets)
+            .ToListAsync())
         {
-            var targetRef = new SlackLeaseTargetRef.Connection(target.ProjectId, target.Id);
-            var active = await scope.ServiceProvider.GetRequiredService<ISlackLeaseStore>()
-                .GetActiveAsync(targetRef.TargetKey);
-            if (active is not null && active.ExpiresAt > _fixture.TimeProvider.GetUtcNow())
-            {
-                await leases.RenewLeaseAsync(
-                    "spec-operator",
-                    targetRef,
-                    active.LeaseId,
-                    active.AdapterId,
-                    CancellationToken.None);
-                _connectionLeases[target.Id] = active.LeaseId;
-            }
+            var targetKey = new SlackLeaseTargetRef.Connection(connection.ProjectId, connection.Id).TargetKey;
+            var active = activeLeases.SingleOrDefault(lease => lease.TargetKey == targetKey);
+            if (active is not null)
+                _connectionLeases[connection.Id] = active.LeaseId!;
         }
     }
 
