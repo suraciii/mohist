@@ -1,77 +1,50 @@
-# Review — Issue 634
+# Review — Issue 634 (re-review)
 
 ## Verdict: FAIL
 
 ## Must-fix findings
 
-### MF-1 — Non-interactive ambiguity claims produce a second Slack message after five minutes
+### MF-1 — The `ThreadLaunch`/`Bound` recovery fix can complete the operation without delivering the original message
 
-**Violated criteria:** Issue AC 1 (the >5 case posts one readable fallback and no interactive chooser); prompt spec “More than five candidates render the text fallback” (`exactly one readable text fallback message`); prompt spec “Unauthorized senders keep the existing owner-only guidance” (`posted once, unchanged`).
+**Violated criteria:** Issue AC 6 (one committed winner starts one execution), AC 7 (post-commit restart resumes the same operation without duplicate or lost execution), and the execution-attribution requirements that the committed dispatch kind and pre-allocated execution identity remain the durable authority.
 
-`HandleAmbiguousPromptAsync` always leaves the durable claim in `Pending`, including when `SlackSelectionChooserRenderer.BuildBlocksAsync` returns `null` for more than five candidates or when signing/interaction presentation is unavailable (`packages/server/src/Mohist.Server/Api/SlackConnectionRoutes.ChannelIngress.cs:418-443`). `HandleAmbiguousNonOwnerAsync` likewise creates a `Pending` claim for the owner-only guidance. The obligation worker expires every `Pending` claim and enqueues a separate settlement message (`packages/server/src/Mohist.Server/Slack/Services/SlackAgentSelectionObligationWorker.cs:74-99`). Consequently:
+When a committed `ThreadLaunch` encounters a newly bound Session, `SlackAgentSelectionService.DispatchAsync` changes the dispatch to a follow-up and computes a new `ThreadFollowup` identity from that bound Session (`packages/server/src/Mohist.Server/Slack/Services/SlackAgentSelectionService.cs:403-420`). Those Session/Input/Turn values and the effective follow-up dispatch are not persisted back to the selection decision; the claim still records `ThreadLaunch` and its original launch ids.
 
-- a >5 fallback is followed five minutes later by a second “selection expired” message;
-- the unchanged once-only non-owner guidance is followed by the same extra message;
-- migrated legacy claims are also eligible for this unsolicited expiry outcome.
+More importantly, `DispatchFollowupAsync` creates the provider-inbox row before calling `AcceptFollowupAsync` (`SlackAgentSelectionService.cs:465-487`). If the process fails after `AcceptAsync` but before the Session accepts the follow-up, recovery re-enters the committed `ThreadLaunch` path, sees the inbox row's non-null route through `FindMessageRouteSessionIdAsync`, returns `already_accepted`, and lets the worker mark the selection completed (`SlackAgentSelectionService.cs:359-371`; `SlackAgentSelectionObligationWorker.cs:124-129`). The resulting operation has a winner and a completed inbox/selection record but no SessionInput/Turn for the retained original message.
 
-Non-interactive claims need a durable presentation/state distinction, or the worker must otherwise avoid emitting selection-expiry outcomes for claims that never offered a clickable selection.
+The bound-race path must preserve a durable execution authority and recovery must idempotently prove or perform Session acceptance; existence of a routed inbox row alone is not proof that the message reached the Session. Add a deterministic crash-window test for failure between inbox acceptance and `AcceptFollowupAsync`.
 
-### MF-2 — Thread-followup choices skip required executability revalidation before committing the winner
+### MF-2 — The prior deterministic-verification finding is only partially disposed
 
-**Violated criteria:** Issue AC 4/5 (current unavailability/staleness is rejected visibly and creates no winner or execution resources); action spec “The chosen candidate's executability is revalidated before work starts”; action spec scenario “The Agent is not executable at click time”.
+**Violated criteria:** Issue AC 9 (deterministic verification of migration, authorization rejection, restart/recovery, and retention cleanup), issue AC 8 (root, existing-thread Session, and new-thread launch routing), and the explicit T-002/T-003/T-004 test acceptance criteria in `openspec/changes/issue-634/tasks.json`.
 
-`SlackAgentSelectionService.HandleAsync` calls `AgentQuerier` and `SlackAdmissionService.AdmitNewWorkAsync` only for `RootLaunch` and `ThreadLaunch` (`packages/server/src/Mohist.Server/Slack/Services/SlackAgentSelectionService.cs:205-223`). A `ThreadFollowup` proceeds directly to the Pending→Decided CAS and follow-up dispatch. If the chosen Agent becomes not configured/not executable while an old thread binding remains, the click can commit a winner and create a provider-inbox/follow-up lineage instead of returning the required setup-nudge/resource-free rejection.
+The expanded `SlackMultiAgentIngressSpecs` now verifies a cross-Project root selection, a concurrent CAS race, several rejection cases, transient recovery, and one artificial `ThreadLaunch`/`Bound` recovery race. However, the required matrix still has material holes:
 
-The current-Agent/current-executability check must cover follow-up selections as well as launch selections before `TryDecideAsync`.
+- No test applies `20260913000000_AddSlackSelectionFacts` to a pre-change database containing an existing `SlackAmbiguousPrompts` row. The store tests use `TestSqliteDatabase.CreateModelSchema()` and therefore do not verify the additive migration, its legacy defaults, or that a migrated pre-fact row cannot execute and is cleaned up safely. No test references `AddSlackSelectionFacts` or its migration id.
+- There is no successful live selection-route test for an already-bound `ThreadFollowup`, an unbound existing-thread `ThreadLaunch`, or an unmentioned multi-bound-thread follow-up. The only accepted live route test is the channel-root case; the bound-race test manually commits a claim and bypasses click-time classification. Retained attachment routing is likewise not exercised.
+- The plan-required current-policy matrix is not covered: the new policy test changes `OwnerSlackUserId`, but does not deterministically exercise allowlist removal, live-member loss/unverifiable identity, or channel-membership loss/unverifiable conversation for the prompt owner and selected Connection.
+- Cleanup is tested directly at the store boundary, but there is no worker-level deterministic test proving that only `Completed`/`Settled` rows beyond `SlackEventRetentionWindow` are reaped while `Pending`/`Decided` rows survive.
 
-### MF-3 — A stale follow-up Session can commit a winner before being discovered
+These were part of the previous MF-6 finding and are not covered by the stated disposition. Add the missing migration and end-to-end/fake-port scenarios required by the issue and task acceptance criteria.
 
-**Violated criteria:** Issue AC 4 (candidate/context changes return stale), AC 5 (stale creates no winner, Session/Turn/AgentJob, or provider inbox entry), and the action spec requirement that a vanished required follow-up target is `no_longer_valid` before commit.
+## Previous finding dispositions
 
-For thread follow-up classification, the service verifies only that a mapping returns a Session id (`SlackAgentSelectionService.cs:176-197`). It does not verify that the mapped Session still exists and is a valid target before `TryDecideAsync` (`:229-239`). The first actual Session access occurs after the winner is committed and after attachment/provider-inbox work begins (`:369-434`). A dangling mapping can therefore produce a durable winner and provider-inbox side effects where the required result is a pre-commit stale/no-longer-valid rejection with no resources.
+- **Previous MF-1 — duplicate expiry messages for non-interactive claims:** fixed. Expiry detects whether the durable prompt payload actually contains `mohist_select_agent`; non-interactive and legacy claims settle without an added Slack outcome, and ingress no longer re-enqueues a settled claim.
+- **Previous MF-2 — follow-up executability not revalidated:** fixed. Agent lookup and admission now run for every dispatch kind before the decision CAS.
+- **Previous MF-3 — dangling follow-up Session discovered after commit:** fixed. The live path resolves the canonical Session and verifies its selected Agent/Connection before CAS; recovery validates the committed target as well.
+- **Previous MF-4 — `Bound` result silently treated as success:** not safely fixed. The message is now redirected to a follow-up, but the new crash window and non-persisted effective lineage are MF-1 above.
+- **Previous MF-5 — transient exceptions settled after three attempts:** fixed. Exceptions leave the operation `Decided`; only an explicit terminal recovery result settles it.
+- **Previous MF-6 — deterministic acceptance matrix missing:** partially fixed, but still fails for the cases in MF-2 above.
 
-Validate the required selected Session through the repository’s Session boundary before the CAS, and keep failures on the resource-free rejection side of the fence.
+## Re-review checks
 
-### MF-4 — A committed `ThreadLaunch` can be marked completed without starting the selected message
-
-**Violated criteria:** Issue AC 2 (an authorized selection starts only the selected Bot on the original message), AC 6 (one winner starts one execution), and AC 8 (new-thread launch preserves and routes from the original provenance).
-
-`SlackChannelLaunchService` returns `Bound` without dispatching the current message when another launch binds the selected Connection to the thread between click-time classification and dispatch (`packages/server/src/Mohist.Server/Slack/Services/SlackChannelLaunchService.cs:125-139`). `SlackAgentSelectionService.DispatchAsync` ignores `BoundSessionId` and treats every otherwise-unrecognized launch result as `accepted` (`packages/server/src/Mohist.Server/Slack/Services/SlackAgentSelectionService.cs:334-366`); the caller then marks the selection `Completed` (`:251-254`). In that race, the selected original message is neither launched with its preallocated lineage nor sent as a follow-up—it is silently dropped while the chooser reports success.
-
-The committed dispatch must not be completed unless the original retained message was idempotently accepted into the committed lineage. A post-commit bound result must be handled explicitly rather than falling through to success.
-
-### MF-5 — Recovery terminally settles ordinary transient failures after three attempts
-
-**Violated criterion:** Issue AC 7 (after winner commit, restart recovers the same operation without duplicate execution; a committed selection is resumed or settled only when it cannot produce its execution).
-
-The recovery worker treats every exception identically and changes the operation to `Settled` after three attempts (`packages/server/src/Mohist.Server/Slack/Services/SlackAgentSelectionObligationWorker.cs:162-188`). Three temporary database, Orleans, adapter, or infrastructure failures do not prove that the committed lineage is irrecoverable. This can permanently suppress a valid committed selection after a brief outage, contrary to the durable recovery requirement.
-
-Terminal settlement needs an explicit irrecoverable classification (deleted selected Connection/Agent, invalid committed lineage, etc.). Retryable exceptions must remain `Decided` and continue bounded retries without changing the winner or execution identity.
-
-### MF-6 — The required deterministic acceptance matrix is largely untested
-
-**Violated criterion:** Issue AC 9 (deterministic verification for migration, single-winner race, candidate invalidation, cross-Connection authorization denial, restart recovery, and retention cleanup).
-
-The added tests cover payload rendering/canonical ordering, store persistence and a sequential CAS, one ingress no-work case, and one manually pre-committed root recovery. There is no test that drives `mohist_select_agent` through `SlackInteractionRoutes` or `SlackAgentSelectionService.HandleAsync`; `rg` finds no selection interaction spec analogous to Stop/Retry. Therefore the following issue-required behavior is unverified:
-
-- signature/freshness/chooser-context/actor rejection through the real route;
-- prompt-owner and selected-Connection current policy, allowlist, live-member, and channel-membership denial;
-- selected Connection soft deletion, binding drift, missing/invalid own lease, and no prompt-owner lease substitution;
-- live cross-Project accepted selection;
-- root launch, bound thread follow-up, unbound thread launch-and-bind, retained attachments, and original provenance;
-- concurrent different-choice clicks, redelivery, failover/lost-response behavior, and exactly-one execution resources;
-- real migration application with legacy rows;
-- worker expiry/settlement/retention behavior and unrecoverable versus retryable recovery.
-
-Relevant current tests are limited to `packages/server/tests/Mohist.Server.SpecTests/Specs/Slack/SlackMultiAgentIngressSpecs.cs:33-145`, `packages/server/tests/Mohist.Server.UnitTests/Slack/SlackSelectionActionPayloadTests.cs`, and `packages/server/tests/Mohist.Server.UnitTests/Slack/SlackAmbiguousPromptStoreTests.cs:77-245`. Add deterministic route/service specs for the acceptance matrix, including regression cases for MF-1 through MF-5.
-
-## Review dimensions
-
-- **Issue acceptance criteria re-read before diff:** checked.
-- **Coverage:** FAIL — MF-1, MF-2, MF-3, MF-4, and MF-6 leave required cases incomplete.
-- **Correctness:** FAIL — non-interactive claims emit duplicate outcomes, follow-up validation occurs too late or not at all, a thread-launch race can report success without work, and transient recovery failures can be terminalized.
-- **Consistency with surrounding codebase:** checked. The findings above specifically identify where the new selection path diverges from the existing admission, follow-up error-handling, launch-result, and durable-recovery conventions.
-- **Tests:** FAIL — MF-6. `dotnet test Mohist.Server.Tests.slnf --no-restore -p:SkipWebBuild=true` passed all available .NET tests, and `git diff --check` passed, but the issue-required selection acceptance matrix is not represented. Go tests could not be executed because `go` is not installed in this workspace.
+- **Issue acceptance criteria re-read:** checked before reviewing the follow-up diff.
+- **Every previous finding:** checked; dispositions are recorded above.
+- **Regression check:** FAIL — MF-1 is a regression introduced by the `Bound`-race fix.
+- **Coverage:** FAIL — MF-2 leaves issue- and plan-required scenarios unverified.
+- **Correctness:** FAIL — MF-1 can terminally complete a committed selection without creating the selected message's execution input.
+- **Consistency with surrounding codebase:** checked. The new follow-up target validation and exception retry semantics follow existing boundaries; MF-1 is specifically inconsistent with the provider inbox's meaning, where insertion precedes actual Session dispatch.
+- **Tests:** FAIL on required coverage, despite the available suite being green. `dotnet test Mohist.Server.Tests.slnf --no-restore -p:SkipWebBuild=true` passed (Workflow Definition 178, Orleans 2, Arch 53, Unit 3799, Spec 3073), and `git diff --check` passed. Go tests could not run because `go` is unavailable in this workspace.
 
 ## Observations
 
