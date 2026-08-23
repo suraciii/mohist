@@ -116,7 +116,9 @@ current lease; prompt-owner lease not reused; missing/invalid lease ->
 unavailable) and gives AC #9's cross-Connection authorization rejection a
 deterministic scenario. Mechanism: new pipeline step resolves the chosen
 Connection's active lease from the lease store
-(ISlackLeaseStore.GetActiveAsync on connection:{ProjectId}:{ChosenConnectionId})
+(ISlackLeaseStore.GetActiveAsync on
+connection:{ChosenProjectId}:{ChosenConnectionId}; MF-5 later made the
+selected Project explicit)
 and re-proves it via SlackAdapterLeaseService.ValidateRuntimeLeaseAsync;
 absent/expired/superseded/rotated -> distinct visible `unavailable`, no
 resources; the access decider's SlackLeaseContext is built from that
