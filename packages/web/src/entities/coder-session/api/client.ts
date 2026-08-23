@@ -1,20 +1,10 @@
 import { request, projectApiPath } from '../../../shared/api/client'
 import { useQuery } from '@tanstack/react-query'
 import { useProject } from '../../project/@x/project-context'
-import { createIdempotencyKey } from '../../../shared/lib/idempotency-key'
-import type {
-  AgentSessionEvent,
-  AgentSessionMetadata,
-  AgentSessionTranscriptResponse,
-  CoderSessionSummary,
-  UnifiedSessionSummaryDto,
-  WorkflowRunSession,
-} from '../model/types'
+import type { AgentSessionTranscriptResponse, UnifiedSessionSummaryDto, WorkflowRunSession } from '../model/types'
 
 export function getUnifiedSessionSummary(projectId: string, sessionId: string) {
-  return request<UnifiedSessionSummaryDto>(
-    projectApiPath(projectId, `/sessions/${encodeURIComponent(sessionId)}`),
-  )
+  return request<UnifiedSessionSummaryDto>(projectApiPath(projectId, `/sessions/${encodeURIComponent(sessionId)}`))
 }
 
 export function getUnifiedSessionTranscript(
@@ -72,41 +62,13 @@ export function useUnifiedSessionTranscript(
   view: 'public' | 'raw' = 'public',
 ) {
   const { projectId } = useProject()
-  return useQuery<AgentSessionTranscriptResponse>(unifiedSessionTranscriptQueryOptions(projectId, sessionId, runtimeSessionId, view))
-}
-
-export function getCoderSessions(number: number, projectId?: string | null, signal?: AbortSignal) {
-  return request<CoderSessionSummary[]>(projectApiPath(projectId, `/issues/${number}/coder-sessions`), { signal })
+  return useQuery<AgentSessionTranscriptResponse>(
+    unifiedSessionTranscriptQueryOptions(projectId, sessionId, runtimeSessionId, view),
+  )
 }
 
 export function getWorkflowRunSessions(workflowRunId: string) {
   return request<WorkflowRunSession[]>(`/workflow-runs/${encodeURIComponent(workflowRunId)}/sessions`)
-}
-
-export function getAgentSessionMetadata(number: number, name: string, projectId?: string | null) {
-  return request<AgentSessionMetadata>(
-    projectApiPath(projectId, `/issues/${number}/sessions/${encodeURIComponent(name)}`),
-  )
-}
-
-export function getAgentSessionTranscript(
-  number: number,
-  name: string,
-  projectId?: string | null,
-  runtimeSessionId?: string | null,
-) {
-  const search = runtimeSessionId
-    ? `?${new URLSearchParams({ runtimeSessionId }).toString()}`
-    : ''
-  return request<AgentSessionTranscriptResponse>(
-    projectApiPath(projectId, `/issues/${number}/sessions/${encodeURIComponent(name)}/transcript${search}`),
-  )
-}
-
-export function getAgentSessionEvents(number: number, name: string, projectId?: string | null) {
-  return request<{ events: AgentSessionEvent[] }>(
-    projectApiPath(projectId, `/issues/${number}/sessions/${encodeURIComponent(name)}/events`),
-  )
 }
 
 export interface SessionRecoveryResult {
@@ -190,46 +152,4 @@ export interface SessionAttachmentRejection {
   id: string
   reason: string
   message: string
-}
-
-export function postFollowup(
-  number: number,
-  name: string,
-  text: string,
-  projectId?: string | null,
-  idempotencyKey?: string,
-  attachments?: string[],
-): Promise<SessionFollowupResult> {
-  const requestKey = idempotencyKey ?? createIdempotencyKey()
-  return request<SessionFollowupResult>(
-    projectApiPath(projectId, `/issues/${number}/sessions/${encodeURIComponent(name)}/followup`),
-    {
-      method: 'POST',
-      body: JSON.stringify({ text, ...(attachments?.length ? { attachments } : {}) }),
-      headers: { 'Idempotency-Key': requestKey },
-    },
-  )
-}
-
-export interface SessionStopResult {
-  state: string
-  interruptUnconfirmed?: boolean | null
-}
-
-export function stopSession(
-  number: number,
-  name: string,
-  turnId: string,
-  projectId?: string | null,
-  idempotencyKey?: string,
-): Promise<SessionStopResult> {
-  const requestKey = idempotencyKey ?? createIdempotencyKey()
-  return request<SessionStopResult>(
-    projectApiPath(projectId, `/issues/${number}/sessions/${encodeURIComponent(name)}/stop`),
-    {
-      method: 'POST',
-      body: JSON.stringify({ turnId }),
-      headers: { 'Idempotency-Key': requestKey },
-    },
-  )
 }
