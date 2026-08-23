@@ -211,11 +211,7 @@ function buildAgentTurnCapability(
               'Workflow AgentSession is bound to a different workspace; rerun the stage with a new task attempt before retrying',
             )
           }
-          if (
-            opened.runtimeSessionId &&
-            isUnsettledWorkflowSessionStatus(opened.status) &&
-            !cleanupAdmission
-          ) {
+          if (opened.runtimeSessionId && isUnsettledWorkflowSessionStatus(opened.status) && !cleanupAdmission) {
             return runtimeActionFailure(
               'session-binding-failed',
               `Workflow AgentSession is ${opened.status}; the previous Runtime Session has not reached a terminal state, so retry is fail-closed`,

@@ -1,7 +1,4 @@
-import {
-  cleanupPredecessorDeliveryKey,
-  isCleanupPredecessorRecord,
-} from './runtime-event-outbox-identity.js'
+import { cleanupPredecessorDeliveryKey, isCleanupPredecessorRecord } from './runtime-event-outbox-identity.js'
 import type {
   CleanupPredecessorDeliveryTarget,
   CleanupPredecessorDeliveryWaitOptions,
@@ -54,10 +51,7 @@ export class CleanupPredecessorDeliveryWaiters {
     private readonly kick: () => Promise<void>,
   ) {}
 
-  async wait(
-    target: CleanupPredecessorDeliveryTarget,
-    options: CleanupPredecessorDeliveryWaitOptions,
-  ): Promise<void> {
+  async wait(target: CleanupPredecessorDeliveryTarget, options: CleanupPredecessorDeliveryWaitOptions): Promise<void> {
     if (options.signal.aborted) throw abortError(options.signal.reason)
     if (!this.hasRecords(target)) return
     const key = cleanupPredecessorDeliveryKey(target)

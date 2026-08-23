@@ -3,7 +3,12 @@ import {
   CleanupPredecessorDeliveryWaitTimeoutError,
   type RuntimeEventRecord,
 } from '../src/server/runtime-event-outbox.js'
-import { RecordingFileSystem, flushMicrotasks, makeOutbox, workflowFact } from './support/runtime-event-outbox-fixture.js'
+import {
+  RecordingFileSystem,
+  flushMicrotasks,
+  makeOutbox,
+  workflowFact,
+} from './support/runtime-event-outbox-fixture.js'
 
 const workflowTarget = {
   projectId: 'proj-1',
@@ -134,7 +139,13 @@ describe('AgentSessionRuntimeEventOutbox — cleanup predecessor delivery wait',
               inputDeliveryId: entry.event.payload.inputDeliveryId,
               agentTurnId: entry.event.payload.turnId,
               agentSessionId: 'agent-session-1',
-            } as { type: string; cleanupOperationId?: string; inputDeliveryId?: string; agentTurnId?: string; agentSessionId?: string },
+            } as {
+              type: string
+              cleanupOperationId?: string
+              inputDeliveryId?: string
+              agentTurnId?: string
+              agentSessionId?: string
+            },
           ])
         },
       },
@@ -169,7 +180,13 @@ describe('AgentSessionRuntimeEventOutbox — cleanup predecessor delivery wait',
       producerFamily: 'workflow-cleanup',
       event: { type: 'session.cleanup', payload: { cleanupOperationId: 'other-operation' } },
     }
-    const { outbox } = makeOutbox({ deliver: { async send() { return [{ type: 'session.cleanup' }] } } })
+    const { outbox } = makeOutbox({
+      deliver: {
+        async send() {
+          return [{ type: 'session.cleanup' }]
+        },
+      },
+    })
     await outbox.load()
     await outbox.enqueueBeforeExecution(unrelated)
 
@@ -265,7 +282,13 @@ describe('AgentSessionRuntimeEventOutbox — cleanup predecessor delivery wait',
   })
 
   it('cancels promptly and leaves retained records unchanged', async () => {
-    const { outbox } = makeOutbox({ deliver: { send: async () => { throw new Error('unavailable') } } })
+    const { outbox } = makeOutbox({
+      deliver: {
+        send: async () => {
+          throw new Error('unavailable')
+        },
+      },
+    })
     await outbox.load()
     await outbox.enqueueProducedFact(workflowFact('cancel-me'))
     const controller = new AbortController()

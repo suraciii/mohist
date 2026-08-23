@@ -1,7 +1,4 @@
-import type {
-  CleanupPredecessorDeliveryTarget,
-  RuntimeEventRecord,
-} from './runtime-event-outbox-ports.js'
+import type { CleanupPredecessorDeliveryTarget, RuntimeEventRecord } from './runtime-event-outbox-ports.js'
 
 interface SequenceKey {
   readonly family:
@@ -59,21 +56,14 @@ export function isCleanupPredecessorRecord(
       record.target.sessionName === target.sessionName
     )
   }
-  if (
-    record.producerFamily === 'workflow-cleanup' &&
-    record.target.kind === 'workflow' &&
-    record.id === operationId
-  ) {
+  if (record.producerFamily === 'workflow-cleanup' && record.target.kind === 'workflow' && record.id === operationId) {
     return (
       record.target.projectId === target.projectId &&
       record.target.workflowRunId === target.workflowRunId &&
       record.target.sessionName === target.sessionName
     )
   }
-  return (
-    record.producerFamily === 'session-followup' &&
-    record.event.payload.cleanupOperationId === operationId
-  )
+  return record.producerFamily === 'session-followup' && record.event.payload.cleanupOperationId === operationId
 }
 
 export function runtimeEventSchedulingKey(record: RuntimeEventRecord): string {

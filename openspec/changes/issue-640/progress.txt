@@ -31,3 +31,10 @@
 - Worktree cleanup preserves timeout code/message/evidence and the completed cleanup-attempt count rather than wrapping the result as `worktree-dirty`.
 - Added admission tests for OpenCode/Pi attempt 1 and 2+, ordering, custom Pi session names, timeout evidence, non-cleanup fail-closed behavior, and worktree preservation.
 - Baseline focused suites before implementation passed: 6 files / 72 tests. Post-change typecheck, test typecheck, build, full Runner suite (160 files / 1741 tests), and changed-area focused suites pass.
+
+## Verification repair
+
+- The initial worktree was clean; the issue-640 implementation commits were intended task work, not verification side effects.
+- Reproduced the failed repository gate: `npm run format:check` reported seven Biome-cleanliness errors in changed issue-640 files, and `npm run check:filesizes` reported `runtime-event-outbox.ts` growing from 968 to 1012 lines against `origin/master` (allowed 1000). Typecheck and architecture tests were otherwise passing.
+- Fixed the real causes by applying the repository formatter and extracting the delivery/receipt/grouping helpers from `runtime-event-outbox.ts` into `runtime-event-outbox-delivery.ts`; preserved the public `isDeterministicBindingRefusal` and `InternalRecord` exports required by existing consumers.
+- Focused Runner checks now pass: 8 Vitest files / 67 tests, Runner test typecheck, test-boundary scan, format check, file-size ratchet, and diff check. Verification/build output did not create Git-visible generated changes.

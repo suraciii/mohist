@@ -1,5 +1,8 @@
 import type { DispatchWorkItem } from '../core/types.js'
-import type { AgentSessionRuntimeEventOutbox, CleanupPredecessorDeliveryTarget } from '../server/runtime-event-outbox.js'
+import type {
+  AgentSessionRuntimeEventOutbox,
+  CleanupPredecessorDeliveryTarget,
+} from '../server/runtime-event-outbox.js'
 import { CleanupPredecessorDeliveryWaitTimeoutError } from '../server/runtime-event-outbox.js'
 import { workflowCleanupOperationId } from '../actions/workflow-agent-session-reporter.js'
 
@@ -15,9 +18,7 @@ export interface CleanupTurnAdmissionInput {
   readonly cleanupAttempt?: number | null
 }
 
-export function cleanupPredecessorTarget(
-  input: CleanupTurnAdmissionInput,
-): CleanupPredecessorDeliveryTarget | null {
+export function cleanupPredecessorTarget(input: CleanupTurnAdmissionInput): CleanupPredecessorDeliveryTarget | null {
   const cleanupAttempt = input.cleanupAttempt
   const projectId = input.projectId
   if (
