@@ -1,0 +1,49 @@
+# Disposal of self-review must-fix findings (issue-634 plan)
+
+Source: self-review.md (first review, FAIL verdict, findings MF-1..MF-3).
+Rule: fix each must-fix in the plan artifacts, or justify won't-fix. Do not
+edit self-review.md. Observations need no action.
+
+## Dispositions (summary)
+
+- MF-1 (>5-candidate criterion unaddressed; design contradicts it): FIX.
+  2-5 candidates -> signed buttons + readable text; >5 -> no interactive
+  control, readable text fallback requiring explicit single-Bot re-mention,
+  no truncation/auto-selection/pagination; chooser text field always carries
+  summary + re-mention instruction (covers the interaction-unavailable leg).
+  Touches: proposal.md, design.md (Decision 2, risks, non-goals),
+  slack-agent-selection-prompt spec (requirement 1 rescoped+retitled, new
+  candidate-count requirement, candidates requirement qualified), tasks.json
+  T-002.
+- MF-2 (selected Connection's own lease never resolved; plan codified reusing
+  prompt-owner's interaction lease): FIX. New pipeline step resolves the
+  chosen Connection's current active lease from the lease store and re-proves
+  it via ValidateRuntimeLeaseAsync; missing/invalid -> distinct visible
+  `unavailable`, no resources; access decider runs under a SlackLeaseContext
+  built from that lease, never the delivering adapter's. Route integration no
+  longer passes the interaction lease to selection handling. Added
+  cross-Connection authorization-rejection and lease-unavailable spec
+  scenarios; recovery requirement states it never re-runs click-time
+  authorization or depends on the old click lease. Touches: proposal.md,
+  design.md (Decision 4 steps 7/8 + outcome mapping, Decision 7 resume note,
+  Decision 8), slack-agent-selection-action spec, slack-selection-execution-
+  attribution spec, tasks.json T-003.
+- MF-3 (24h validity / 7d+24h retention contradict issue's pinned 5-minute
+  validity and existing retention window): FIX (conform to the issue; the
+  issue text is unambiguous and we cannot amend it from the plan). Expiry =
+  5 minutes, same as Stop/Retry. Retention = existing
+  SlackProviderOptions.SlackEventRetentionWindow (30-min default); pending
+  rows settle expired once past expiry (no 24h grace); no new long-term
+  archive. Open question on bounds removed (parameters are pinned).
+  Touches: proposal.md, design.md (Decision 3, Decision 7, risks, open
+  questions), slack-agent-selection-action spec (expiry clause),
+  slack-selection-execution-attribution spec (retention requirement),
+  tasks.json T-002/T-003/T-004.
+
+## Progress log
+
+- [x] Created progress notes (this file).
+- [ ] MF-1 applied
+- [ ] MF-2 applied
+- [ ] MF-3 applied
+- [ ] Final consistency sweep (anchors, cross-references, openspec validate)
