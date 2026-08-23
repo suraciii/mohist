@@ -1,0 +1,53 @@
+{
+  "project": "mohist-local",
+  "description": "Make same-work-item Workflow cleanup turns wait for terminal runtime facts to finish outbox delivery before admission, without weakening cross-attempt or server-side fail-closed validation.",
+  "tasks": [
+    {
+      "id": "T-001",
+      "title": "Add an event-driven Workflow session delivery wait",
+      "spec": "specs/runtime-event-delivery-wait/spec.md#the-outbox-exposes-an-event-driven-delivery-completion-wait-for-a-cleanup-predecessors-retained-facts",
+      "description": "Extend the runtime-event outbox port and implementation with a bounded, cancellable wait keyed by the cleanup attempt's immediate predecessor: the original Workflow scheduling identity for attempt 1, or the prior deterministic cleanup operation id for attempt 2+. Resolve waiters from durable record-removal settlements across workflow-session, workflow-cleanup, and Session-scoped session-followup records without polling or mutating delivery state, and expose a typed timeout carrying predecessor evidence and the exhausted budget.",
+      "acceptanceCriteria": [
+        "The outbox exposes awaitCleanupPredecessorDelivery for projectId, workflowRunId, sessionName, cleanupAttempt, and precedingCleanupOperationId plus budgetMs and AbortSignal; attempt 1 selects retained workflow-session records for the Workflow scheduling identity, while attempt 2+ selects the prior workflow-cleanup boundary and every Session-scoped session-followup record carrying its deterministic cleanup operation id.",
+        "A wait completes immediately when no predecessor record is retained; attempt 1 covers every retained workflow-session record for the scheduling identity, and attempt 2+ remains pending for correlated session-followup runtime input and terminal activity even after the Workflow-keyed cleanup boundary has settled.",
+        "Pending waiters resolve only after the applicable removal snapshot has committed for acknowledgement settlement or deterministic binding-refusal settlement, or after recovered-state loading establishes that no predecessor record remains; a failed persistence attempt does not report delivery completion, and retention-cap drops are not described as acknowledgements.",
+        "Registering a pending waiter may kick the existing delivery path once, but no timer polls or re-evaluates retained state and no server session-status or delivery-status request is introduced.",
+        "Budget expiry rejects with a typed error containing projectId, workflowRunId, sessionName, cleanupAttempt, preceding cleanup operation id when present, and budgetMs, while caller abortion rejects promptly and cleans up the waiter and timer.",
+        "Waiting does not remove, reorder, rewrite, or otherwise mutate retained records and does not change acknowledgement policies, batching, ordering, retry, snapshot, or retention behavior.",
+        "Runner fake-timer tests cover immediate completion, original-turn acknowledgement-driven completion, attempt-2+ waiting on a prior cleanup boundary plus correlated session-followup runtime input and terminal activity, unrelated cleanup records not blocking, timeout evidence, cancellation, settlement persistence failure, and the absence of polling; the focused outbox tests pass."
+      ],
+      "priority": 1,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Updated runtime-event outbox ports, scheduling-identity support, implementation, typed timeout, and fake-timer regression tests in packages/runner.",
+      "dependsOn": [],
+      "passes": false,
+      "notes": "Keep the port method optional for existing test doubles, but implement it in the production outbox. Derive the prior operation with workflowCleanupOperationId(workflowRunId, taskRunId, workId, cleanupAttempt - 1); do not change the Session-scoped ownership or delivery key of session-followup records. Use the injected RuntimeEventOutboxTimer only for timeout failure, not periodic state checks, and preserve snapshot version and delivery semantics."
+    },
+    {
+      "id": "T-002",
+      "title": "Admit cleanup turns after terminal-fact delivery",
+      "spec": "specs/cleanup-turn-admission/spec.md#a-tasks-own-cleanup-turn-converges-on-delivered-terminal-facts",
+      "description": "Wire the outbox predecessor-delivery wait into the OpenCode and Pi admission paths for positive same-work-item cleanup attempts before opening the Workflow AgentSession. Attempt 1 waits for the original Workflow turn; attempt 2+ waits for the immediately preceding cleanup boundary and its Session-scoped terminal facts. Skip the runner-side unsettled projection guard only for those cleanup turns, preserve the authoritative server validation, and surface exhausted waits through a declared structured cleanup failure instead of a generic worktree or unsettled-session error.",
+      "acceptanceCriteria": [
+        "For a positive OpenCode cleanupAttempt with a bindable Workflow identity, the Runner waits on projectId, workflowRunId, the exact session name used by openWorkflowAgentSession, cleanupAttempt, and the deterministic prior cleanup operation when cleanupAttempt > 1 before opening the session; once delivery settles, it submits the existing cleanup prompt to the same runtime session even if the pre-wait projection was active or unknown.",
+        "For a positive Pi cleanupAttempt with a bindable Workflow identity, the Runner derives the same predecessor after resolving the context session name and waits before opening the session or enqueueing session.cleanup, so frozen-binding admission occurs only after the original turn or immediately preceding cleanup turn is terminal server-side.",
+        "The OpenCode unsettled-session projection guard is bypassed only for a positive same-work-item cleanup attempt; every non-cleanup or cross-attempt turn retains the existing session-binding-failed behavior and fail-closed message for active or unknown prior sessions.",
+        "When no record is retained for the selected predecessor, both runtime paths proceed without added delay or a new server status round-trip, and cleanup admission does not re-consult the session-activity projection as a gate.",
+        "A delivery-wait timeout becomes session-delivery-wait-timeout with evidence naming the awaited project/workflow/session identity, the work item, and the exhausted budget; mohist/opencode and mohist/pi declare the code, and worktree enforcement preserves that code, message, and cleanupAttempts instead of collapsing it to worktree-dirty.",
+        "The default delivery budget is the bounded 60000 ms code constant and is injectable through the existing capability/action dependency plumbing for tests without adding runner configuration.",
+        "Cleanup prompt text, maximum cleanup-attempt accounting, clean-worktree completion requirements, and the server cleanup route and frozen-binding validation remain unchanged; every allowed attempt remains usable under predecessor delivery lag, and task success or failure continues to follow the actual cleanup result.",
+        "Runner fake-timer and admission tests cover OpenCode and Pi delivery lag for attempt 1 and attempt 2+, including a retained prior-cleanup session-followup terminal fact after the Workflow-keyed boundary settled; already-delivered facts; ordering of wait before open and cleanup submission; timeout evidence and manifest validation; maximum-attempt accounting; actual cleanup success/failure; and preserved cross-attempt fail-closed behavior. The focused Runner suites pass."
+      ],
+      "priority": 2,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "OpenCode and Pi cleanup admission integrated with the outbox wait, declared timeout failures, worktree-result preservation, and end-to-end Runner regression tests.",
+      "dependsOn": [
+        "T-001"
+      ],
+      "passes": false,
+      "notes": "Use request.session ?? work.workId for OpenCode and sessionNameFromContext for Pi. For cleanupAttempt > 1, derive the immediately preceding operation from workflowRunId, non-empty taskRunId, workId, and cleanupAttempt - 1; the existing cleanup reporter prerequisites make that identity available. A missing optional wait method retains current behavior for lightweight test doubles. Do not modify Server code or weaken cleanup frozen-binding validation."
+    }
+  ]
+}

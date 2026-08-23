@@ -39,10 +39,24 @@ import { errorMessage } from '../core/errors.js'
 import { runnerLogger } from '../system/logger.js'
 import { RuntimeEventDeliveryError, type AgentSessionRuntimeEventReceipt } from './connection.js'
 import {
+  bindingReconcileDeliveryKey,
+  collectGroups,
+  defaultDelivery,
+  isConfirmedConsumedRecord,
+  isDeterministicBindingRefusal,
+  matchingReceipt,
+  requiresInputReceipt,
+  selectDeliveryGroups,
+  sortBySequence,
+  type InternalRecord,
+} from './runtime-event-outbox-delivery.js'
+import {
+  isCleanupPredecessorRecord,
   isWorkflowSessionBoundary,
   runtimeEventDeliveryKey,
   runtimeEventSchedulingKey,
 } from './runtime-event-outbox-identity.js'
+import { CleanupPredecessorDeliveryWaiters } from './runtime-event-outbox-delivery-wait.js'
 import {
   parseSnapshot,
   serializeSnapshot,
@@ -54,6 +68,8 @@ import {
   defaultRuntimeEventOutboxTimer,
   NodeRuntimeEventOutboxFileSystem,
   type AgentSessionRuntimeEventOutbox,
+  type CleanupPredecessorDeliveryTarget,
+  type CleanupPredecessorDeliveryWaitOptions,
   type AgentSessionRuntimeEventOutboxOptions,
   type RuntimeEventAcknowledgementPolicy,
   type RuntimeEventDelivery,
@@ -65,8 +81,16 @@ import {
   type RuntimeEventWorkMetadata,
 } from './runtime-event-outbox-ports.js'
 
+export { CleanupPredecessorDeliveryWaitTimeoutError } from './runtime-event-outbox-delivery-wait.js'
+export { isDeterministicBindingRefusal } from './runtime-event-outbox-delivery.js'
+export type { InternalRecord } from './runtime-event-outbox-delivery.js'
 export { nextTemporaryFilePath } from './runtime-event-outbox-ports.js'
-export { runtimeEventDeliveryKey, workflowExecutionIdentity } from './runtime-event-outbox-identity.js'
+export {
+  cleanupPredecessorDeliveryKey,
+  runtimeEventDeliveryKey,
+  workflowExecutionIdentity,
+  workflowSessionSchedulingKey,
+} from './runtime-event-outbox-identity.js'
 
 export class AlreadyConsumedRuntimeEventError extends Error {
   readonly classification = 'already-consumed' as const
@@ -84,6 +108,8 @@ export type {
   AgentSessionRuntimeEventOutboxOptions,
   RuntimeEventAcknowledgementPolicy,
   RuntimeEventDelivery,
+  CleanupPredecessorDeliveryTarget,
+  CleanupPredecessorDeliveryWaitOptions,
   RuntimeEventEntry,
   RuntimeEventOutboxFileSystem,
   RuntimeEventOutboxTimer,
@@ -111,30 +137,11 @@ const DEFAULT_DELIVERY_BATCH_SIZE = 64
 // the last line of defense against a runaway turn exhausting runner memory.
 const DEFAULT_MAX_RETENTION_ENTRIES = 5_000
 const DETERMINISTIC_BINDING_REFUSAL_THRESHOLD = 3
-const DETERMINISTIC_BINDING_REFUSAL_409_CODES = new Set([
-  'conflict',
-  'agent_session_changed',
-  'workflow_agent_session_changed',
-  'workflow_runtime_binding_rejected',
-  'workflow_cleanup_binding_rejected',
-])
-const DETERMINISTIC_BINDING_REFUSAL_400_CODES = new Set([
-  'validation',
-  'runtime_session_id_required',
-  'session_runtime_identity_required',
-  'session_runtime_task_identity_invalid',
-  'workflow_runtime_binding_required',
-])
 // Event types that are pure streaming increments — losing a bounded
 // number of them does not corrupt the transcript, which is rebuilt from
 // later deltas and the final message. These are eligible for batch
 // delivery and are the first to be dropped under retention pressure.
 const STREAMING_DELTA_TYPES = new Set(['reasoning.delta', 'message.delta'])
-
-export interface InternalRecord extends RuntimeEventRecord {
-  readonly sequence: number
-  readonly enqueuedAt: string
-}
 
 interface SnapshotShape {
   version: number
@@ -185,6 +192,7 @@ class AgentSessionRuntimeEventOutboxImpl implements AgentSessionRuntimeEventOutb
       reject: (error: Error) => void
     }
   >()
+  private readonly cleanupPredecessorWaiters: CleanupPredecessorDeliveryWaiters
   private readonly receivedInputReceipts = new Map<string, AgentSessionRuntimeEventReceipt>()
   // A deadline fails the current action while its original request remains fenced.
   private readonly timedOutInputReceiptErrors = new Map<string, Error>()
@@ -222,6 +230,11 @@ class AgentSessionRuntimeEventOutboxImpl implements AgentSessionRuntimeEventOutb
     this.now = options.clock ?? (() => new Date())
     this.timer = options.timer ?? defaultRuntimeEventOutboxTimer
     this.filePath = options.filePath ?? RUNTIME_EVENT_OUTBOX_FILE
+    this.cleanupPredecessorWaiters = new CleanupPredecessorDeliveryWaiters(
+      this.timer,
+      (target) => this.hasCleanupPredecessorRecords(target),
+      () => this.kick(),
+    )
   }
 
   ready(): boolean {
@@ -253,6 +266,7 @@ class AgentSessionRuntimeEventOutboxImpl implements AgentSessionRuntimeEventOutb
     if (raw === null) {
       this.healthy = true
       this.recoveryRequiresLoad = false
+      this.resolveCleanupPredecessorWaiters()
       return
     }
     const snapshot = parseSnapshot(raw)
@@ -271,6 +285,7 @@ class AgentSessionRuntimeEventOutboxImpl implements AgentSessionRuntimeEventOutb
     this.enforceRetentionCap()
     this.healthy = true
     this.recoveryRequiresLoad = false
+    this.resolveCleanupPredecessorWaiters()
   }
 
   async enqueueBeforeExecution(
@@ -311,6 +326,15 @@ class AgentSessionRuntimeEventOutboxImpl implements AgentSessionRuntimeEventOutb
     void this.kick()
   }
 
+  async awaitCleanupPredecessorDelivery(
+    target: CleanupPredecessorDeliveryTarget,
+    options: CleanupPredecessorDeliveryWaitOptions,
+  ): Promise<void> {
+    this.requireLoaded('awaitCleanupPredecessorDelivery')
+    if (!this.hasCleanupPredecessorRecords(target)) return
+    return await this.cleanupPredecessorWaiters.wait(target, options)
+  }
+
   async awaitInputReceipt(recordId: string): Promise<AgentSessionRuntimeEventReceipt> {
     this.requireLoaded('awaitInputReceipt')
     const received = this.receivedInputReceipts.get(recordId)
@@ -322,8 +346,15 @@ class AgentSessionRuntimeEventOutboxImpl implements AgentSessionRuntimeEventOutb
     if (timedOut) throw timedOut
     const terminal = this.inputReceiptTerminalErrors.get(recordId)
     if (terminal) throw terminal
-    if (!this.records.has(recordId))
+    if (!this.records.has(recordId)) {
+      await this.snapshotWriteTail
+      const settled = this.receivedInputReceipts.get(recordId)
+      if (settled) {
+        this.receivedInputReceipts.delete(recordId)
+        return settled
+      }
       throw new Error(`workflow input ${recordId} is no longer pending and has no matching receipt`)
+    }
     if (this.inputReceiptWaiters.has(recordId))
       throw new Error(`workflow input ${recordId} already has a receipt waiter`)
 
@@ -409,6 +440,7 @@ class AgentSessionRuntimeEventOutboxImpl implements AgentSessionRuntimeEventOutb
     this.stopped = true
     this.deliveryStop.abort()
     this.activeDeliveryGroups.clear()
+    this.cleanupPredecessorWaiters.stop()
     if (this.networkRetry) {
       this.timer.clearTimeout(this.networkRetry)
       this.networkRetry = null
@@ -627,6 +659,7 @@ class AgentSessionRuntimeEventOutboxImpl implements AgentSessionRuntimeEventOutb
       return false
     }
     this.updateRetentionCapState()
+    this.resolveCleanupPredecessorWaiters(removed)
     log.error('runtime-event binding refusal reached terminal settlement', {
       deliveryKey,
       status: error.status,
@@ -703,6 +736,7 @@ class AgentSessionRuntimeEventOutboxImpl implements AgentSessionRuntimeEventOutb
     }
 
     this.updateRetentionCapState()
+    this.resolveCleanupPredecessorWaiters(removed)
     for (const { record, receipt } of positiveReceipts) this.resolveInputReceipt(record.id, receipt)
     for (const record of alreadyConsumed) {
       const error = new AlreadyConsumedRuntimeEventError(record.id)
@@ -838,6 +872,18 @@ class AgentSessionRuntimeEventOutboxImpl implements AgentSessionRuntimeEventOutb
     if (!this.loaded) throw new Error(`runtime-event outbox is not loaded; cannot ${op}`)
   }
 
+  private hasCleanupPredecessorRecords(target: CleanupPredecessorDeliveryTarget): boolean {
+    for (const record of this.records.values()) {
+      if (isCleanupPredecessorRecord(record, target)) return true
+    }
+    return false
+  }
+
+  private resolveCleanupPredecessorWaiters(removed?: readonly InternalRecord[]): void {
+    if (removed) this.cleanupPredecessorWaiters.recordsRemoved(removed)
+    else this.cleanupPredecessorWaiters.stateLoaded()
+  }
+
   private resolveInputReceipt(recordId: string, receipt: AgentSessionRuntimeEventReceipt): void {
     this.timedOutInputReceiptErrors.delete(recordId)
     const waiter = this.inputReceiptWaiters.get(recordId)
@@ -855,113 +901,4 @@ class AgentSessionRuntimeEventOutboxImpl implements AgentSessionRuntimeEventOutb
     this.inputReceiptWaiters.delete(recordId)
     waiter.reject(error instanceof Error ? error : new Error(errorMessage(error)))
   }
-}
-
-export function isDeterministicBindingRefusal(error: unknown): error is RuntimeEventDeliveryError {
-  if (!(error instanceof RuntimeEventDeliveryError)) return false
-  if (error.status === 409) return DETERMINISTIC_BINDING_REFUSAL_409_CODES.has(error.code ?? '')
-  if (error.status === 400) return DETERMINISTIC_BINDING_REFUSAL_400_CODES.has(error.code ?? '')
-  return false
-}
-
-function bindingReconcileDeliveryKey(batch: readonly InternalRecord[]): string | null {
-  const first = batch[0]
-  if (!first || first.producerFamily !== 'binding-reconcile') return null
-  return runtimeEventDeliveryKey(first)
-}
-
-interface GroupSnapshot {
-  readonly label: string
-  readonly records: InternalRecord[]
-}
-
-function collectGroups(records: InternalRecord[]): GroupSnapshot[] {
-  const groups = new Map<string, InternalRecord[]>()
-  for (const record of records) {
-    const label = runtimeEventSchedulingKey(record)
-    const list = groups.get(label)
-    if (list) list.push(record)
-    else groups.set(label, [record])
-  }
-  return [...groups.entries()].map(([label, list]) => ({
-    label,
-    records: list.sort(sortBySequence),
-  }))
-}
-
-function selectDeliveryGroups(
-  groups: GroupSnapshot[],
-  limit: number,
-  nextLabel: string | null,
-): { groups: GroupSnapshot[]; nextLabel: string | null } {
-  if (groups.length === 0) return { groups: [], nextLabel: null }
-
-  const start =
-    nextLabel === null
-      ? 0
-      : Math.max(
-          0,
-          groups.findIndex((group) => group.label === nextLabel),
-        )
-  const count = Math.min(limit, groups.length)
-  const selected = Array.from({ length: count }, (_, offset) => groups[(start + offset) % groups.length])
-  return {
-    groups: selected,
-    nextLabel: groups[(start + count) % groups.length]?.label ?? null,
-  }
-}
-
-function matchingReceipt(
-  policy: RuntimeEventAcknowledgementPolicy,
-  record: RuntimeEventRecord,
-  receipts: AgentSessionRuntimeEventReceipt[],
-): AgentSessionRuntimeEventReceipt | null {
-  if (policy === 'successful-response') return receipts[0] ?? { type: record.event.type }
-  const matching = receipts.find((entry) => entry.type === record.event.type)
-  if (!matching) return null
-  if (record.producerFamily === 'workflow-session' && record.event.type === 'session.input' && record.work?.taskRunId) {
-    return matching.inputDeliveryId === record.id &&
-      matching.agentSessionId === record.work.agentSessionId &&
-      typeof matching.agentTurnId === 'string' &&
-      matching.agentTurnId.length > 0
-      ? matching
-      : null
-  }
-  if (record.producerFamily === 'workflow-cleanup' && record.event.type === 'session.cleanup') {
-    const cleanupOperationId = record.event.payload.cleanupOperationId
-    const inputDeliveryId = record.event.payload.inputDeliveryId
-    const agentTurnId = record.event.payload.turnId
-    return typeof cleanupOperationId === 'string' &&
-      typeof inputDeliveryId === 'string' &&
-      typeof agentTurnId === 'string' &&
-      matching.cleanupOperationId === cleanupOperationId &&
-      matching.inputDeliveryId === inputDeliveryId &&
-      matching.agentSessionId === record.work?.agentSessionId &&
-      matching.agentTurnId === agentTurnId
-      ? matching
-      : null
-  }
-  return matching
-}
-
-function requiresInputReceipt(record: RuntimeEventRecord): boolean {
-  return (
-    record.event.type === 'session.input' ||
-    (record.producerFamily === 'workflow-cleanup' && record.event.type === 'session.cleanup')
-  )
-}
-
-function isConfirmedConsumedRecord(record: RuntimeEventRecord): boolean {
-  return record.acknowledgementPolicy === 'matching-receipt' && requiresInputReceipt(record)
-}
-
-function sortBySequence(a: InternalRecord, b: InternalRecord): number {
-  return a.sequence - b.sequence
-}
-
-async function defaultDelivery(
-  _record: RuntimeEventRecord,
-  _signal: AbortSignal,
-): Promise<AgentSessionRuntimeEventReceipt[]> {
-  throw new Error('Runtime event outbox has no delivery implementation; inject one via options.deliver')
 }

@@ -1,0 +1,48 @@
+# Issue 640 plan-review repair progress
+
+## Self-review disposition
+
+- MF-1 fixed in the plan artifacts. The delivery wait is now defined by the cleanup attempt's immediate predecessor rather than only the Workflow scheduling key:
+  - attempt 1 waits for the original turn's retained `workflow-session` records;
+  - attempt 2+ waits for the prior deterministic `workflow-cleanup` operation id and every Session-scoped `session-followup` record carrying that id, including runtime input and terminal activity.
+- Added explicit OpenCode and Pi scenarios and task acceptance coverage for attempt 2+ under delayed prior-cleanup terminal delivery.
+- Added maximum-attempt accounting and actual cleanup outcome coverage to T-002.
+- Aligned retention terminology: completion means acknowledgement/durable removal or deterministic-refusal settlement; retention-cap behavior is unchanged and is not called acknowledgement.
+
+## Validation
+
+- `tasks.json` parses with Node JSON.parse.
+- `git diff --check` passes.
+- `self-review.md` was not edited.
+
+## T-001 implementation
+
+- Added the optional `awaitCleanupPredecessorDelivery` outbox port and production implementation.
+- Added scheduling/correlation helpers: attempt 1 uses the Workflow scheduling identity; later attempts use the deterministic cleanup operation id across the Workflow cleanup boundary and Session follow-up records.
+- Waiters are resolved only from successful durable removals or deterministic-refusal removals, and recovered snapshots are rechecked. Timeout and abort use the injected outbox timer only for failure/cancellation; no polling was added.
+- Added focused fake-timer coverage for immediate completion, original-turn settlement, attempt-2 Session follow-up correlation, unrelated cleanup records, timeout evidence, cancellation, and persistence failure.
+- Verification: runner typecheck, test typecheck, build, full runner suite (159 files / 1735 tests), and focused outbox suite (38 tests) pass.
+
+## T-002 implementation
+
+- Added `cleanup-turn-admission.ts` with the bounded 60000 ms default, deterministic predecessor derivation, optional outbox wait compatibility, and structured timeout rendering.
+- Wired positive same-work-item cleanup admission into production OpenCode and Pi paths before Workflow AgentSession open; OpenCode skips only the unsettled projection guard for bindable cleanup turns, while non-cleanup/cross-attempt behavior remains fail-closed.
+- Plumbed an injectable cleanup delivery budget through WorkExecutor capability dependencies and declared `session-delivery-wait-timeout` in both built-in runtime manifests.
+- Worktree cleanup preserves timeout code/message/evidence and the completed cleanup-attempt count rather than wrapping the result as `worktree-dirty`.
+- Added admission tests for OpenCode/Pi attempt 1 and 2+, ordering, custom Pi session names, timeout evidence, non-cleanup fail-closed behavior, and worktree preservation.
+- Baseline focused suites before implementation passed: 6 files / 72 tests. Post-change typecheck, test typecheck, build, full Runner suite (160 files / 1741 tests), and changed-area focused suites pass.
+
+## Verification repair
+
+- The initial worktree was clean; the issue-640 implementation commits were intended task work, not verification side effects.
+- Reproduced the failed repository gate: `npm run format:check` reported seven Biome-cleanliness errors in changed issue-640 files, and `npm run check:filesizes` reported `runtime-event-outbox.ts` growing from 968 to 1012 lines against `origin/master` (allowed 1000). Typecheck and architecture tests were otherwise passing.
+- Fixed the real causes by applying the repository formatter and extracting the delivery/receipt/grouping helpers from `runtime-event-outbox.ts` into `runtime-event-outbox-delivery.ts`; preserved the public `isDeterministicBindingRefusal` and `InternalRecord` exports required by existing consumers.
+- Focused Runner checks now pass: 8 Vitest files / 67 tests, Runner test typecheck, test-boundary scan, format check, file-size ratchet, and diff check. Verification/build output did not create Git-visible generated changes.
+
+## Review MF-1 repair
+
+- Replaced mocked admission waits with production-outbox coverage for both OpenCode and Pi: attempt 1 delivery lag, attempt 2 after the Workflow cleanup boundary settled with a retained correlated Session terminal fact, already-delivered immediate admission, both structured timeout mappings, ordering before open/submission, cross-attempt fail-closed behavior, and built-in manifest result validation.
+- The production-path tests exposed a real input-receipt race: delivery could durably remove a cleanup input after `awaitInputReceipt` checked the receipt cache but before it checked retained records. `awaitInputReceipt` now joins the in-flight snapshot settlement and rechecks the receipt cache before concluding that a removed input has no receipt.
+- Added changed-behavior cleanup-loop coverage showing all three bounded attempts wait on the correct immediate predecessor, all remain usable under lag, attempt accounting reaches 3, and task success follows the third cleanup's actual worktree result.
+- Focused verification passes: Runner test typecheck, 16 tests across cleanup admission plus delivery-wait suites, and the 4-test worktree cleanup suite.
+- Final verification passes: Runner build; full Runner `test:ci` (160 files / 1746 tests); repository format check; file-size ratchet; and `git diff --check`.

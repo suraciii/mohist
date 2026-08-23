@@ -68,6 +68,7 @@ export class WorkExecutor {
     private readonly skillResolver: SkillResolver = new SkillResolver(),
     private readonly namedWorkspaceManager: NamedWorkspaceManager | null = null,
     private readonly runtimeTurnRegistry: RuntimeTurnRegistry | null = null,
+    private readonly cleanupTerminalFactDeliveryBudgetMs?: number,
   ) {}
 
   updateOpenCodeRuntime(runtime: OpenCodeRuntime | null) {
@@ -316,6 +317,7 @@ export class WorkExecutor {
       runtimeEventRecordId: this.runtimeEventRecordId,
       bindingRecoveryCoordinator: this.bindingRecoveryCoordinator,
       runtimeTurnRegistry: this.runtimeTurnRegistry,
+      cleanupTerminalFactDeliveryBudgetMs: this.cleanupTerminalFactDeliveryBudgetMs,
     }
   }
 

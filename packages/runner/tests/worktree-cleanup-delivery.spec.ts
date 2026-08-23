@@ -1,4 +1,4 @@
-import { describe, expect, it as vitestIt } from 'vitest'
+import { describe, expect, it as vitestIt, vi } from 'vitest'
 import { WorkExecutor } from '../src/runtime/executor.js'
 import { rebaseAction } from '../src/actions/rebase.js'
 import { pushAction } from '../src/actions/push.js'
@@ -7,12 +7,25 @@ import type { ActionResult, JsonObject, DispatchWorkItem } from '../src/core/typ
 import type { ActionTestContext as ActionContext } from './support/action-test-context.js'
 import type { ActionHost } from '../src/actions/host.js'
 import type { ServerConnection } from '../src/server/connection.js'
+import {
+  workflowCleanupInputDeliveryId,
+  workflowCleanupOperationId,
+} from '../src/actions/workflow-agent-session-reporter.js'
+import type { AgentSessionRuntimeEventOutbox } from '../src/server/runtime-event-outbox.js'
 import type { CleanupAgentAction } from '../src/runtime/worktree-enforcement.js'
 import type { RunnerFileSystem, RunnerGitRunner } from '../src/system/filesystem.js'
 import { defineTestActions, type ActionRegistry, type TestActionDefinition } from './support/action-registry-test.js'
 import { callAction } from './support/call-action.js'
 import { MemoryFileSystem } from './support/memory-filesystem.js'
 import { withTestRunnerResources } from './support/test-resources.js'
+
+function deferred<T>() {
+  let resolve!: (value: T | PromiseLike<T>) => void
+  const promise = new Promise<T>((res) => {
+    resolve = res
+  })
+  return { promise, resolve }
+}
 
 interface FakeWorktree {
   workDir: string
@@ -387,6 +400,135 @@ describe('worktree cleanup before delivery', () => {
     expect(attempt).toBe(3)
     expect(agentResult.message).toMatch(/worktree dirty after 3 cleanup attempt/i)
     expect(agentResult.message).toMatch(/untracked=\[src\/never-clean\.ts\]/)
+  })
+
+  it('keeps every bounded cleanup attempt usable while predecessor delivery lags and succeeds from the actual cleanup result', async (resources) => {
+    const worktree = createFakeWorktree()
+    installExecutorGit(resources, worktree)
+    const connection = {
+      async report() {
+        return {}
+      },
+      async uploadArtifact() {
+        throw new Error('uploadArtifact should not be called in cleanup delivery tests')
+      },
+    } as unknown as Pick<ServerConnection, 'uploadArtifact' | 'report'>
+    const gates = [deferred<void>(), deferred<void>(), deferred<void>()]
+    const waits: Array<{ cleanupAttempt: number; precedingCleanupOperationId: string | null }> = []
+    const outbox: AgentSessionRuntimeEventOutbox = {
+      ready: () => true,
+      load: async () => {},
+      recover: async () => {},
+      enqueueBeforeExecution: async () => {},
+      awaitInputReceipt: async (recordId) => {
+        const operationId = recordId.replace(/^workflow-cleanup-input:/, '').replace(/:runtime-input$/, '')
+        return {
+          type: recordId.endsWith(':runtime-input') ? 'session.input' : 'session.cleanup',
+          cleanupOperationId: operationId,
+          inputDeliveryId: workflowCleanupInputDeliveryId(operationId),
+          agentTurnId: `workflow-cleanup-turn:${operationId}`,
+          agentSessionId: 'agent-session-1',
+        }
+      },
+      awaitCleanupPredecessorDelivery: async (target) => {
+        waits.push({
+          cleanupAttempt: target.cleanupAttempt,
+          precedingCleanupOperationId: target.precedingCleanupOperationId,
+        })
+        await gates[target.cleanupAttempt - 1]!.promise
+      },
+      enqueueProducedFact: async () => {},
+      enqueueProducedFactBatch: async () => {},
+      kick: async () => {},
+      stop: async () => {},
+      snapshot: () => [],
+    }
+    let cleanupAttempt = 0
+    resources.cleanupAgentAction = async (host, inputs) => {
+      cleanupAttempt += 1
+      const prompt = String(inputs.prompt ?? '')
+      expect(prompt).toContain(`attempt ${cleanupAttempt}`)
+      const cleanupTurn = host.agent!.turn({ prompt, session: 'build:agent.1' })
+      await Promise.resolve()
+      expect(runtime.runTurn).toHaveBeenCalledTimes(cleanupAttempt - 1)
+      gates[cleanupAttempt - 1]!.resolve()
+      const result = await cleanupTurn
+      if (result.error) return result
+      if (cleanupAttempt === 3) commitCleanup(worktree, ['src/delayed-cleanup.ts'], 'cleanup-sha')
+      return { output: null }
+    }
+    const open = vi.fn(async () => ({
+      sessionId: 'agent-session-1',
+      runtimeSessionId: 'runtime-1',
+      workDir: worktree.workDir,
+      status: 'active',
+    }))
+    const runtime: any = {
+      ready: () => true,
+      diagnostic: () => null,
+      createSession: vi.fn(),
+      resolveSession: vi.fn(async () => ({ ok: true, value: { activeTurn: false }, diagnostics: [] })),
+      runTurn: vi.fn(async () => ({
+        ok: true,
+        value: {
+          facts: { runtimeSessionId: 'runtime-1', workDir: worktree.workDir, finalAssistantText: 'done' },
+          diagnostics: [],
+        },
+        diagnostics: [],
+      })),
+    }
+    const registry = buildRegistry({
+      'mohist/opencode': {
+        run: async () => {
+          worktree.untracked = ['src/delayed-cleanup.ts']
+          return { output: null }
+        },
+        inputs: { prompt: { types: ['string', 'object'] } },
+        capabilities: ['agent-turn'],
+      },
+    })
+    const executor = new WorkExecutor(
+      registry,
+      verifyOnlyWorkspaceManager({ path: worktree.workDir, branch: worktree.branch }),
+      { ...connection, runnerId: 'runner-1', openWorkflowAgentSession: open } as never,
+      worktree.workDir,
+      () => new Date(),
+      runtime,
+      null,
+      outbox,
+    )
+
+    const agentResult = await executor.execute(
+      buildWork(worktree, {
+        projectId: 'project-1',
+        taskRunId: 'task-1',
+        variables: {
+          workspace: { path: worktree.workDir, branch: worktree.branch, changeDir: null },
+          project: { path: worktree.workDir },
+          issue: { title: 'Worktree cleanup delivery', number: 42 },
+          runner: { cleanup: { maxAttempts: 3 } },
+        },
+      }),
+      new AbortController().signal,
+    )
+
+    expect(agentResult.status, JSON.stringify(agentResult)).toBe('completed')
+    expect(agentResult.cleanupAttempts).toBe(3)
+    expect(cleanupAttempt).toBe(3)
+    expect(waits).toEqual([
+      { cleanupAttempt: 1, precedingCleanupOperationId: null },
+      {
+        cleanupAttempt: 2,
+        precedingCleanupOperationId: workflowCleanupOperationId('wf-worktree-cleanup', 'task-1', 'build:agent.1', 1),
+      },
+      {
+        cleanupAttempt: 3,
+        precedingCleanupOperationId: workflowCleanupOperationId('wf-worktree-cleanup', 'task-1', 'build:agent.1', 2),
+      },
+    ])
+    expect(open).toHaveBeenCalledTimes(3)
+    expect(runtime.runTurn).toHaveBeenCalledTimes(3)
+    expect(worktree.untracked).toEqual([])
   })
 
   it('treats Pi-backed tasks as agent-backed for cleanup', async (resources) => {
