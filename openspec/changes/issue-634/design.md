@@ -256,15 +256,22 @@ envelope completeness, and delivering-Connection lookup/disabled check:
    `(ChosenProjectId, ChosenConnectionId)` pair is in the signed payload and
    exact durable candidate snapshot, resolve that pair with the normal
    project-scoped
-   `AgentConnectionStore.GetAsync(ChosenProjectId, ChosenConnectionId)`; a
-   null result means the selected Connection row is absent or was deleted and
-   returns the distinct visible `unavailable` outcome required by issue AC #4.
-   If the Connection still exists, prove it remains bound to the chooser's
-   workspace Bot; drift from those snapshotted candidate facts is
-   `no_longer_valid`. No global lookup by Connection id and no fallback to the
-   prompt-owner Project is allowed. A vanished follow-up target session in
-   `ChosenProjectId` is also `no_longer_valid` because the selected Connection
-   still exists but the retained thread-dispatch facts no longer hold.
+   `AgentConnectionStore.GetAsync(ChosenProjectId, ChosenConnectionId)`, then
+   explicitly require `selectedConnection is not null &&
+   selectedConnection.DeletedAt is null`. The current `GetAsync` intentionally
+   includes soft-deleted rows, while `AgentConnectionStore.DeleteAsync` marks
+   deletion by setting `DeletedAt`; therefore either a null result or a
+   non-null `DeletedAt` returns the distinct visible `unavailable` outcome
+   required by issue AC #4. This deletion check happens before workspace-Bot
+   binding validation, lease resolution, authorization, executability, or
+   commit, so surviving/stale lease or binding artifacts cannot make a
+   soft-deleted candidate executable. If the active Connection still exists,
+   prove it remains bound to the chooser's workspace Bot; drift from those
+   snapshotted candidate facts is `no_longer_valid`. No global lookup by
+   Connection id and no fallback to the prompt-owner Project is allowed. A
+   vanished follow-up target session in `ChosenProjectId` is also
+   `no_longer_valid` because the selected Connection remains active but the
+   retained thread-dispatch facts no longer hold.
 8. **Selected-Connection lease** (`unavailable`) — for the selected
    Connection that exists after step 7, resolve its **own current runtime
    lease** at click time: read the active lease for its target key
@@ -306,8 +313,9 @@ envelope completeness, and delivering-Connection lookup/disabled check:
 
 Steps 1–10 create no AgentJob, Session, SessionInput, selection record
 mutation, or provider inbox entry. Outcome names map onto the issue's domain
-model as follows: the issue's `unavailable` ← step 7's absent/deleted selected
-Connection row, step 8's missing/invalid selected-Connection lease (both
+model as follows: the issue's `unavailable` ← step 7's absent selected row or
+soft-deleted selected row (`DeletedAt` is non-null), step 8's missing/invalid
+selected-Connection lease (both
 adopted verbatim from AC #4), and, for its broader "目标当前不可执行" leg,
 the existing `connection_disabled` and setup-nudge outcomes; the issue's
 `unauthorized` ← either current-policy denial in step 6 or 9, plus actor

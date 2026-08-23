@@ -43,7 +43,7 @@ On every click the Server SHALL revalidate the selection payload before any work
 
 ### Requirement: Candidate identity preserves the selected Connection's owning Project
 
-Acceptance SHALL treat a candidate as the complete `(ProjectId, ConnectionId)` reference stored in the claim and signed payload. The chosen pair SHALL first match the exact durable candidate snapshot as part of context validation; a mismatch is stale. Acceptance SHALL then resolve the chosen Connection through the normal project-scoped lookup using `ChosenProjectId` and `ChosenConnectionId`; it SHALL NOT perform a global lookup by Connection id or substitute the posting Connection's Project. If that exact selected Connection row is absent or was deleted, the click SHALL be rejected as unavailable. If the Connection exists but is no longer bound to the chooser workspace Bot, the click SHALL be rejected as no longer valid. Either result SHALL create no selection mutation or execution resources.
+Acceptance SHALL treat a candidate as the complete `(ProjectId, ConnectionId)` reference stored in the claim and signed payload. The chosen pair SHALL first match the exact durable candidate snapshot as part of context validation; a mismatch is stale. Acceptance SHALL then resolve the chosen Connection through the project-scoped `AgentConnectionStore.GetAsync(ChosenProjectId, ChosenConnectionId)` lookup and explicitly inspect the returned Connection's `DeletedAt`, because that lookup includes soft-deleted rows; it SHALL NOT perform a global lookup by Connection id or substitute the posting Connection's Project. If that exact selected Connection row is absent, or resolves with `DeletedAt` set, the click SHALL be rejected as unavailable before binding, lease, authorization, executability, or commit checks. If the active Connection exists but is no longer bound to the chooser workspace Bot, the click SHALL be rejected as no longer valid. Either result SHALL create no selection mutation or execution resources.
 
 #### Scenario: A candidate in another Project resolves by its owning Project
 
@@ -59,8 +59,9 @@ Acceptance SHALL treat a candidate as the complete `(ProjectId, ConnectionId)` r
 
 #### Scenario: A deleted selected Connection is unavailable
 
-- **WHEN** the exact signed and snapshotted selected `(ProjectId, ConnectionId)` no longer resolves because its Connection row was deleted after the chooser was rendered
-- **THEN** the click is rejected as unavailable with a visible notice
+- **WHEN** the exact signed and snapshotted selected `(ProjectId, ConnectionId)` is deleted after the chooser was rendered through the normal soft-delete path, so project-scoped lookup still returns the row with `DeletedAt` set
+- **AND** stale test lease or workspace-binding artifacts survive for that selected pair
+- **THEN** the click is rejected as unavailable with a visible notice before those artifacts are consulted
 - **AND** no selection mutation, winner, or execution resource is created
 
 #### Scenario: A still-existing candidate whose workspace binding changed is no longer valid
@@ -132,7 +133,7 @@ Acceptance SHALL separately evaluate the clicker's current permission under the 
 
 ### Requirement: The chosen Connection's current runtime lease is resolved at click time
 
-Acceptance SHALL reject an absent selected Connection row as unavailable during candidate resolution. After the row resolves, it SHALL resolve that Connection's own current runtime lease at click time under target `connection:{ChosenProjectId}:{ChosenConnectionId}` and SHALL likewise reject the selection as unavailable when no currently valid lease exists — the lease is absent, expired, superseded, or invalidated by a target or credential-generation change. The prompt-owner Project or Connection lease SHALL NOT be accepted as a substitute, and no execution resources SHALL be created for an unavailable selection.
+Acceptance SHALL reject an absent or soft-deleted selected Connection as unavailable during candidate resolution, based on a null project-scoped lookup result or a non-null `DeletedAt` respectively. Only after an active row resolves SHALL it resolve that Connection's own current runtime lease at click time under target `connection:{ChosenProjectId}:{ChosenConnectionId}` and SHALL likewise reject the selection as unavailable when no currently valid lease exists — the lease is absent, expired, superseded, or invalidated by a target or credential-generation change. The prompt-owner Project or Connection lease SHALL NOT be accepted as a substitute, and no execution resources SHALL be created for an unavailable selection.
 
 #### Scenario: The chosen Connection has no current runtime lease
 
