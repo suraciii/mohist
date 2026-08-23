@@ -5,20 +5,35 @@ findings MF-1..MF-6 are verified fixed).
 Rule: fix each must-fix in the plan artifacts, or justify won't-fix. Do not
 edit self-review.md. Observations need no action.
 
-Status: MF-7 IN PROGRESS. MF-1..MF-6 remain fixed. No won't-fixes.
+Status: ALL SEVEN MUST-FIX FINDINGS FIXED. No won't-fixes.
 
 ## Dispositions
 
-### MF-7 — missing selected Connection is classified as stale instead of unavailable — IN PROGRESS
+### MF-7 — missing selected Connection is classified as stale instead of unavailable — FIXED
 
-The issue explicitly requires a missing selected Connection to return the
-visible `unavailable` outcome. The action spec, Design Decision 4, and T-003
-currently classify a vanished selected Connection as `no_longer_valid`/stale.
-Planned fix: reserve `unavailable` for an absent/deleted selected Connection
-row and for its absent/invalid current lease; retain `no_longer_valid` only
-when the Connection still exists but durable candidate facts no longer hold
-(such as workspace-Bot binding drift) or a required follow-up binding/session
-has vanished. Add deterministic coverage for both classifications.
+The acceptance pipeline now distinguishes lookup absence from candidate-fact
+drift exactly as issue AC #4 requires:
+
+- A project-scoped lookup of the signed and snapshotted selected
+  `(ProjectId, ConnectionId)` that returns no Connection row is a visible
+  `unavailable` result, with no selection mutation, winner, or execution
+  resource.
+- A selected Connection that still exists but no longer has the snapshotted
+  workspace-Bot binding is `no_longer_valid`/stale. A required follow-up
+  binding or target Session that vanished while the Connection remains is
+  likewise `no_longer_valid`.
+- An existing selected Connection whose own current runtime lease is absent or
+  invalid remains `unavailable`.
+
+The proposal now states the deleted-Connection outcome. Design Decision 4
+step 7 and the domain-outcome mapping name the split and preserve the exact
+project-scoped lookup. The action capability adds deterministic scenarios for
+a deleted selected Connection (`unavailable`) and a still-existing candidate
+with binding drift (`no longer valid`), while its lease requirement retains
+missing/invalid lease as `unavailable`. T-003's pipeline, rejection matrix,
+and fixed-time test matrix require the same classifications.
+
+Commit: c75e5f019.
 
 ### MF-6 — explicit multi-Bot mentions inside an existing thread lacked correct selected dispatch — FIXED
 
@@ -228,6 +243,12 @@ open).
 
 ## Consistency sweep (post-fix)
 
+- MF-7 sweep: proposal, Design Decision 4, the action spec, and T-003 all
+  classify a missing/deleted selected Connection row as `unavailable`; none
+  retains the old "vanished candidate -> no_longer_valid" rule. The remaining
+  `no_longer_valid` cases explicitly require a still-existing Connection with
+  candidate/workspace/thread fact drift. Deterministic coverage names both
+  sides of the distinction.
 - MF-5 sweep: no plan artifact retains bare Connection-id candidate identity;
   root mentions and thread bindings both produce complete ordered references,
   and payload, snapshot, CAS, selected lookup, lease target, admission,
@@ -261,4 +282,7 @@ open).
 - 0f29bd257 MF-4 consistency sweep + updated notes
 - 2344095fe MF-5 progress checkpoint
 - a9e1a2d20 MF-5 preserve candidate Project ownership end-to-end
-- (next commit) MF-5 consistency sweep + updated notes
+- 076bcfba7 MF-5 consistency sweep + updated notes
+- c957a7a74 MF-6 explicit existing-thread dispatch fix
+- 0f1b26e66 MF-7 progress checkpoint
+- c75e5f019 MF-7 deleted selected Connection -> unavailable
