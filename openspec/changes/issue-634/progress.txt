@@ -5,21 +5,42 @@ findings MF-1..MF-3 remain fixed).
 Rule: fix each must-fix in the plan artifacts, or justify won't-fix. Do not
 edit self-review.md. Observations need no action.
 
-Status: MF-4 FIX IN PROGRESS. MF-1..MF-3 remain fixed. No won't-fixes.
+Status: ALL FOUR MUST-FIX FINDINGS FIXED. No won't-fixes.
 
 ## Dispositions
 
-### MF-4 — prompt-owner Connection is not re-authorized under its current policy at click time — IN PROGRESS
+### MF-4 — prompt-owner Connection is not re-authorized under its current policy at click time — FIXED
 
-Planned disposition: fix the acceptance pipeline so every pending click is
-re-authorized twice before winner commit: first for the prompt-owner Connection
-under the route-validated prompt-owner lease context, then for the selected
-Connection under its separately resolved current lease. Both evaluations use
-`SlackConnectionAccessDecider`; either denial is visible `unauthorized` and
-creates no winner or execution resources. When both roles name the same
-Connection, one equivalent current evaluation may satisfy both. Add action-spec
-and T-003 coverage for prompt-owner policy, allowlist, live-member, and channel-
-membership changes between render and click.
+The pending-click pipeline now re-authorizes both roles before winner commit:
+first the prompt-owner Connection under the route-validated delivering lease
+context, then the selected Connection under its separately resolved current
+lease. Both evaluations use `SlackConnectionAccessDecider`; either denial is a
+visible `unauthorized` result and creates no selection mutation, winner,
+provider inbox entry, Session, Turn, or AgentJob. When both roles name the same
+Connection, one equivalent current lease-and-policy evaluation may satisfy
+both.
+
+- proposal.md: click-time behavior and capability summary now require separate
+  current-policy authorization for prompt owner and selected Connection under
+  each Connection's own current lease.
+- design.md: Goal and Decision 4 add prompt-owner authorization as pipeline
+  step 6, before candidate handling and commit; selected lease/authorization
+  move to steps 8-9; the no-mutation boundary covers steps 1-10. Decision 8
+  passes the route-validated `SlackLeaseContext` to selection handling for the
+  prompt-owner decider call while explicitly retaining separate selected-
+  Connection lease resolution. The route lease gate is distinguished from the
+  mutable access-policy decision.
+- specs/slack-agent-selection-action: new prompt-owner authorization
+  requirement and deterministic scenarios cover policy narrowing, allowlist
+  removal, live-member loss/unverifiable identity, channel-membership loss/
+  unverifiable conversation, and same-Connection evaluation de-duplication.
+  Route and rejection requirements now pin the lease-context handoff and the
+  no-winner/no-resource result.
+- tasks.json T-003: description, acceptance criteria, and fixed-time test
+  matrix now require both current authorizations and all prompt-owner mutable-
+  policy scenarios.
+
+Commit: 432f38b4a.
 
 ### MF-1 — ">5 candidates" acceptance criterion unaddressed / design contradicted — FIXED
 
@@ -68,15 +89,14 @@ LeaseId/AdapterId), never the delivering adapter's.
 
 - proposal.md: click-time revalidation bullet names the chosen Connection's
   own lease, the unavailable outcome, and evaluation under that lease.
-- design.md: Decision 4 gains step 7 "Selected-Connection lease
-  (unavailable)" (full rationale: per-target leases, Retry's case differs,
-  cross-Connection pick is mainline); step 8 (permission) rebuilt around the
-  chosen Connection's own lease context; executability/commit renumbered
-  9/10; "Steps 1-9 create no resources" + an outcome-name mapping paragraph
-  (issue unavailable/unauthorized/stale vs implementation outcomes);
-  Decision 7 resume bullet states recovery never re-authorizes nor depends
-  on the old click lease; Decision 8 no longer passes the interaction lease
-  to selection dispatch.
+- design.md: Decision 4's selected-Connection lease and permission steps give
+  the per-target-lease rationale (Retry's case differs; cross-Connection pick
+  is mainline), build the chosen Connection's own lease context, define the
+  pre-commit no-resource boundary, and map issue unavailable/unauthorized/
+  stale outcomes; Decision 7 states recovery never re-authorizes nor depends
+  on the old click lease. After MF-4, these are steps 8-9 and Decision 8 passes
+  the delivering lease context only for prompt-owner authorization, never for
+  the selected Connection.
 - specs/slack-agent-selection-action: permission requirement retitled "...
   and own current lease", requirement text now mandates the chosen
   Connection's own lease and forbids the delivering lease; NEW requirement
@@ -131,8 +151,12 @@ open).
 - All task spec anchors resolve to current requirement headings (T-002's
   anchor updated for the retitled requirement; T-001/T-003/T-004 unchanged
   and intact).
+- MF-4 sweep finds no remaining selection path that treats prompt-owner lease
+  validation or actor binding as a substitute for current prompt-owner access
+  evaluation; proposal, design, action spec, and T-003 agree on the two-role
+  authorization order and same-Connection de-duplication rule.
 - tasks.json parses as valid JSON; spec files keep the Requirement/Scenario
-  structure; self-review.md untouched.
+  structure; self-review.md is unchanged from the task-start commit.
 
 ## Commits
 
@@ -140,4 +164,7 @@ open).
 - e8bf2b644 MF-1 cap chooser at five candidates with >5 text fallback
 - 7657d71ed MF-2 chosen Connection's own lease; unavailable outcome; scenarios
 - 98256b33c MF-3 five-minute validity + existing retention window
-- (final) consistency sweep + these notes
+- 83b0a792b first-review consistency sweep + notes
+- 15433a6e9 MF-4 progress checkpoint
+- 432f38b4a MF-4 prompt-owner current-policy re-authorization
+- (next commit) MF-4 consistency sweep + updated notes
