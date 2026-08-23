@@ -1,12 +1,25 @@
 # Disposal of self-review must-fix findings (issue-634 plan)
 
-Source: self-review.md (first review, FAIL verdict, findings MF-1..MF-3).
+Source: self-review.md (current re-review FAIL verdict: MF-4; previous
+findings MF-1..MF-3 remain fixed).
 Rule: fix each must-fix in the plan artifacts, or justify won't-fix. Do not
 edit self-review.md. Observations need no action.
 
-Status: ALL THREE MUST-FIX FINDINGS FIXED. No won't-fixes.
+Status: MF-4 FIX IN PROGRESS. MF-1..MF-3 remain fixed. No won't-fixes.
 
 ## Dispositions
+
+### MF-4 — prompt-owner Connection is not re-authorized under its current policy at click time — IN PROGRESS
+
+Planned disposition: fix the acceptance pipeline so every pending click is
+re-authorized twice before winner commit: first for the prompt-owner Connection
+under the route-validated prompt-owner lease context, then for the selected
+Connection under its separately resolved current lease. Both evaluations use
+`SlackConnectionAccessDecider`; either denial is visible `unauthorized` and
+creates no winner or execution resources. When both roles name the same
+Connection, one equivalent current evaluation may satisfy both. Add action-spec
+and T-003 coverage for prompt-owner policy, allowlist, live-member, and channel-
+membership changes between render and click.
 
 ### MF-1 — ">5 candidates" acceptance criterion unaddressed / design contradicted — FIXED
 
