@@ -5,19 +5,44 @@ findings MF-1..MF-4 are verified fixed).
 Rule: fix each must-fix in the plan artifacts, or justify won't-fix. Do not
 edit self-review.md. Observations need no action.
 
-Status: MF-5 FIX IN PROGRESS. Previous MF-1..MF-4 remain fixed. No won't-fixes.
+Status: ALL FIVE MUST-FIX FINDINGS FIXED. No won't-fixes.
 
 ## Dispositions
 
-### MF-5 — candidate identity loses owning Project for cross-Project selection — IN PROGRESS
+### MF-5 — candidate identity loses owning Project for cross-Project selection — FIXED
 
-The fix will carry an ordered candidate reference `(ProjectId, ConnectionId)`
-through the durable claim and signed payload, commit both `ChosenProjectId` and
-`ChosenConnectionId`, and require selected lookup, lease/policy evaluation,
-admission, launch/follow-up dispatch, pre-allocated lineage use, and recovery
-to execute in the selected Project. Specs and T-003 will add deterministic
-same-workspace cross-Project success and selected-policy/lease rejection
-coverage.
+The plan now carries each candidate as an ordered `(ProjectId, ConnectionId)`
+reference through both ambiguity sources, the durable claim, and the signed
+payload; commit records `ChosenProjectId` with `ChosenConnectionId`. Selected
+lookup uses the normal project-scoped store with that pair, and the selected
+lease target, policy evaluation, executability, admission, launch/follow-up,
+project-scoped pre-allocation, persistence, and recovery all use the committed
+selected Project rather than the prompt-owner route's Project.
+
+- proposal.md: retained facts, signed payload, click handling, execution,
+  capabilities, launch/admission impact, and risk now explicitly preserve the
+  selected Project across same-workspace cross-Project choices.
+- design.md: Decisions 1-3 define `CandidateReferencesJson`,
+  `ChosenProjectId`, complete-pair canonical signing, and complete candidate
+  propagation from `WorkspaceBoundBot` and workspace-wide
+  `SlackThreadBinding` through `SlackMultiAgentRoutingPolicy`. Decision 4 uses
+  `AgentConnectionStore.GetAsync(ChosenProjectId, ChosenConnectionId)` and
+  lease target `connection:{ChosenProjectId}:{ChosenConnectionId}` with no
+  prompt-owner fallback. Decisions 5-8 carry the selected Project through CAS,
+  `PreMintSlackLaunchIds`, launch/follow-up, obligation recovery, and route
+  integration. Migration and risk sections pin the same behavior.
+- specs: prompt scenarios require workspace-wide candidates spanning Projects
+  and durable complete references; action scenarios require complete-pair
+  validation, successful Project-A-to-Project-B selection, chosen-policy
+  denial, and selected-Project lease rejection; attribution scenarios require
+  selected-Project launch/provenance and restart recovery.
+- tasks.json: T-001 makes Project id an explicit launch-service input; T-002
+  carries complete references through both root mention and thread-binding
+  ambiguity; T-003 pins selected-Project lookup, lease, authorization, CAS,
+  launch/follow-up, provenance, and deterministic cross-Project success and
+  rejection tests; T-004 recovers under the committed selected pair.
+
+Commit: a9e1a2d20.
 
 
 ### MF-4 — prompt-owner Connection is not re-authorized under its current policy at click time — FIXED
@@ -157,6 +182,14 @@ open).
 
 ## Consistency sweep (post-fix)
 
+- MF-5 sweep: no plan artifact retains bare Connection-id candidate identity;
+  root mentions and thread bindings both produce complete ordered references,
+  and payload, snapshot, CAS, selected lookup, lease target, admission,
+  dispatch, identity allocation, persistence, and recovery all name the
+  selected Project explicitly. Candidate discovery remains workspace-wide.
+- Deterministic scenarios cover same-workspace cross-Project success,
+  selected-policy denial, selected-lease unavailable, no prompt-owner Project
+  substitution, selected-Project provenance, and restart recovery.
 - No remaining "24h/24 hours/7 days/grace" deviations (only negated
   mentions: "no additional grace", "no ... grace margin is introduced").
 - All task spec anchors resolve to current requirement headings (T-002's
@@ -166,8 +199,9 @@ open).
   validation or actor binding as a substitute for current prompt-owner access
   evaluation; proposal, design, action spec, and T-003 agree on the two-role
   authorization order and same-Connection de-duplication rule.
-- tasks.json parses as valid JSON; spec files keep the Requirement/Scenario
-  structure; self-review.md is unchanged from the task-start commit.
+- tasks.json parses as valid JSON; all four task spec anchors resolve; spec
+  files keep the Requirement/Scenario structure; `git diff --check` passes;
+  self-review.md is unchanged from the task-start commit.
 
 ## Commits
 
@@ -178,4 +212,7 @@ open).
 - 83b0a792b first-review consistency sweep + notes
 - 15433a6e9 MF-4 progress checkpoint
 - 432f38b4a MF-4 prompt-owner current-policy re-authorization
-- (next commit) MF-4 consistency sweep + updated notes
+- 0f29bd257 MF-4 consistency sweep + updated notes
+- 2344095fe MF-5 progress checkpoint
+- a9e1a2d20 MF-5 preserve candidate Project ownership end-to-end
+- (next commit) MF-5 consistency sweep + updated notes
