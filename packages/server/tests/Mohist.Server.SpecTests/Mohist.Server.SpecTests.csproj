@@ -17,6 +17,7 @@
 
   <ItemGroup>
     <Using Include="System.Net.Http.Json" />
+    <Using Include="Mohist.Server.TestSupport" />
   </ItemGroup>
 
   <ItemGroup>

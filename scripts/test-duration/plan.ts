@@ -152,8 +152,14 @@ function validateTrackMetadata(
     errors.push(`${prefix}: trackType must be behavior or architecture`)
     return errors
   }
-  if (track.specKind !== 'Product' && track.specKind !== 'Design') {
-    errors.push(`${prefix}: specKind must be Product or Design`)
+  if (
+    !Array.isArray(track.specKinds) ||
+    track.specKinds.length === 0 ||
+    track.specKinds.some((kind) => kind !== 'Product' && kind !== 'Design')
+  ) {
+    errors.push(`${prefix}: specKinds must be a non-empty array of Product or Design`)
+  } else if (new Set(track.specKinds).size !== track.specKinds.length) {
+    errors.push(`${prefix}: specKinds must not contain duplicates`)
   }
   if (track.trackType === 'behavior') {
     if (track.application === undefined || !applications.has(track.application)) {
@@ -166,7 +172,8 @@ function validateTrackMetadata(
       errors.push(`${prefix}: behavior track must not declare architectureScope`)
     }
   } else {
-    if (track.specKind !== 'Design') errors.push(`${prefix}: Architecture track must use specKind=Design`)
+    if (track.specKinds?.length !== 1 || track.specKinds[0] !== 'Design')
+      errors.push(`${prefix}: Architecture track must use specKinds=[Design]`)
     if (track.level !== undefined) errors.push(`${prefix}: Architecture track must not declare Level`)
     if (track.architectureScope === undefined) {
       errors.push(`${prefix}: Architecture track must declare architectureScope`)

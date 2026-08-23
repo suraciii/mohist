@@ -9,6 +9,7 @@ function describeRule(rule: RuleDiagnosis): string {
   for (const [p, value] of Object.entries(rule.percentiles)) {
     parts.push(`p${p}=${ms(value)}`)
   }
+  if (rule.expectedTotal !== undefined) parts.push(`expected=${rule.expectedTotal}`)
   parts.push(`max=${ms(rule.maxMs)}`)
   return parts.join(' ')
 }
@@ -53,6 +54,11 @@ export function formatEvaluation(eval_: TrackEvaluation): string[] {
         `      >> percentile p${rule.percentileViolation.p} ${ms(rule.percentileViolation.valueMs)} exceeds budget ${ms(rule.percentileViolation.budgetMs)}`,
       )
     }
+    if (rule.populationViolation) {
+      lines.push(
+        `      >> population ${rule.populationViolation.actualTotal} does not match expected ${rule.populationViolation.expectedTotal}`,
+      )
+    }
   }
   for (const failed of eval_.failedTests) {
     lines.push(`      >> FAILED TEST: ${failed}`)
@@ -66,6 +72,7 @@ export interface GuardSummary {
   readonly cancelledTracks: number
   readonly timeoutTracks: number
   readonly percentileBreaches: number
+  readonly populationBreaches: number
   readonly suiteDeadlineBreached: boolean
   readonly suiteElapsedMs?: number
 }
@@ -99,12 +106,17 @@ export function summarize(
     (sum, e) => sum + e.rules.filter((rule) => rule.percentileViolation !== undefined).length,
     0,
   )
+  const populationBreaches = evaluations.reduce(
+    (sum, e) => sum + e.rules.filter((rule) => rule.populationViolation !== undefined).length,
+    0,
+  )
   return {
     totalTracks: evaluations.length > 0 ? evaluations.length : runs.length,
     failedTracks: failedTrackIds.size + (suiteDeadlineBreached && failedTrackIds.size === 0 ? 1 : 0),
     cancelledTracks: cancelledTrackIds.size,
     timeoutTracks,
     percentileBreaches,
+    populationBreaches,
     suiteDeadlineBreached,
     suiteElapsedMs,
   }
@@ -118,6 +130,7 @@ export function formatSummary(summary: GuardSummary, suiteDeadlineMs: number): s
   return [
     `test-duration: ${summary.totalTracks} tracks, ${summary.failedTracks} failing, ${summary.cancelledTracks} cancelled, ${summary.timeoutTracks} timed out`,
     `  percentile budget breaches: ${summary.percentileBreaches}`,
+    `  population budget breaches: ${summary.populationBreaches}`,
     `  suite deadline: ${suite}`,
   ].join('\n')
 }
@@ -139,6 +152,9 @@ export function formatGuardOutput(input: GuardOutputInput): string {
   ]
   if (input.summary.percentileBreaches > 0) {
     lines.push(`  percentile budget breaches: ${input.summary.percentileBreaches}`)
+  }
+  if (input.summary.populationBreaches > 0) {
+    lines.push(`  population budget breaches: ${input.summary.populationBreaches}`)
   }
   if (input.summary.suiteDeadlineBreached) {
     lines.push(`  suite deadline: ${ms(input.suiteDeadlineMs)} breached`)

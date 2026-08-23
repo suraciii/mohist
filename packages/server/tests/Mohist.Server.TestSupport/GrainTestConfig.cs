@@ -1,4 +1,3 @@
-using Mohist.Server.TestSupport;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.Extensions.DependencyInjection;
@@ -31,12 +30,11 @@ using Mohist.Server.Workflow.Services.Artifacts;
 using Mohist.Server.Workflow.Services.Prompts;
 using Mohist.Server.Workflow.Subscriptions;
 using Mohist.Server.Workspace.Services;
-using Mohist.Server.SpecTests.Specs.Issue.Profile;
 using Orleans.Configuration;
 using Orleans.Hosting;
 using Orleans.TestingHost;
 
-namespace Mohist.Server.SpecTests.Support;
+namespace Mohist.Server.TestSupport;
 
 public static class GrainTestConfig
 {

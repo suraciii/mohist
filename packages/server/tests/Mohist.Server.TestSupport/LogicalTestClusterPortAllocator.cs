@@ -1,7 +1,7 @@
 using System.Reflection;
 using Orleans.TestingHost;
 
-namespace Mohist.Server.SpecTests.Support;
+namespace Mohist.Server.TestSupport;
 
 /// <summary>
 /// Supplies endpoint identities for Orleans' in-process transport without

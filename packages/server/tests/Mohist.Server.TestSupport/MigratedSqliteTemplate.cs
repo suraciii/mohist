@@ -1,5 +1,4 @@
 using System.Runtime.CompilerServices;
-using Mohist.Server.TestSupport;
 using System.Collections.Concurrent;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
@@ -8,7 +7,7 @@ using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Migrations;
 using Mohist.Server.Infrastructure.Data.Db;
 
-namespace Mohist.Server.SpecTests.Support;
+namespace Mohist.Server.TestSupport;
 
 /// <summary>
 /// Process-wide cache of Mohist SQLite schema states. Building a schema
@@ -173,6 +172,8 @@ public static class MigratedSqliteTemplate
 
 internal static class MigratedSqliteTemplateWarmup
 {
+#pragma warning disable CA2255
     [ModuleInitializer]
+#pragma warning restore CA2255
     internal static void Initialize() => MigratedSqliteTemplate.Warm();
 }

@@ -94,6 +94,27 @@ test('evaluateTrack: enforce=true fails on a percentile breach', () => {
   assert.equal(failing.rules[0].percentileViolation?.valueMs, 200)
 })
 
+test('evaluateTrack: expected rule population fails closed', () => {
+  const track: TrackConfig = {
+    id: 'server-unit',
+    kind: 'report-only',
+    specKinds: ['Design', 'Product'],
+    report: 'x',
+    reportFormat: 'trx',
+    deadlineMs: 1000,
+    enforce: true,
+    rules: [
+      { id: 'spec', namePattern: 'Specs\\.', expectedTotal: 2, percentile: 95, percentileMs: 50 },
+      { id: 'unit', percentile: 95, percentileMs: 50 },
+    ],
+  }
+  const evaluation = evaluateTrack(track, [case_('Ns.Specs.One', 5), case_('Ns.Tests.Other', 5)])
+
+  assert.equal(evaluation.passed, false)
+  assert.deepEqual(evaluation.specKinds, ['Design', 'Product'])
+  assert.deepEqual(evaluation.rules[0].populationViolation, { expectedTotal: 2, actualTotal: 1 })
+})
+
 test('evaluateTrack: enforce=true fails on a parseable but empty report (0 cases)', () => {
   const track: TrackConfig = {
     id: 'enforced',

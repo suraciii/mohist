@@ -1,26 +1,27 @@
-using Mohist.Server.OrleansTests.Support;
 using Mohist.Server.Runner.Grains;
-using Mohist.Server.SpecTests.Specs.Workflow;
+using Mohist.Server.UnitTests.Support;
 using Xunit;
 
-namespace Mohist.Server.OrleansTests.Specs.Runner.Grain;
+namespace Mohist.Server.UnitTests.Runner;
 
-[Collection("RunnerGrain")]
-public class RunnerBuildIdentitySpecs : WorkflowGrainSpecs
+[Collection("OrleansGrainL0")]
+public class RunnerBuildIdentitySpecs
 {
-    public RunnerBuildIdentitySpecs(OrleansL0WorkflowGrainFixture fixture) : base(fixture) { }
+    private readonly OrleansL0WorkflowGrainFixture _fixture;
+
+    public RunnerBuildIdentitySpecs(OrleansL0WorkflowGrainFixture fixture) => _fixture = fixture;
 
     [Fact]
     public async Task ListRunners_ExposesBuildGitHashThroughRegistry()
     {
         var runnerId = OrleansL0WorkflowGrainFixture.WarmupRunnerId;
-        var runner = Grains.GetGrain<IRunnerGrain>(runnerId);
+        var runner = _fixture.Grains.GetGrain<IRunnerGrain>(runnerId);
         await runner.UnregisterAsync();
         var projectId = $"build-hash-project-{Guid.NewGuid():N}";
         var hash = "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef";
         await runner.RegisterAsync(new RunnerInfo(runnerId, ["spec/*"], "test-host", projectId, BuildGitHash: hash));
 
-        var registry = Grains.GetGrain<IRunnerRegistryGrain>(RunnerRegistryKeys.Global);
+        var registry = _fixture.Grains.GetGrain<IRunnerRegistryGrain>(RunnerRegistryKeys.Global);
         var runners = await registry.ListRunnersAsync();
 
         var info = Assert.Single(runners, r => r.RunnerId == runnerId);
