@@ -3,11 +3,11 @@ using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Infrastructure.Data.Issue;
 using Mohist.Server.Infrastructure.Data.Workflow;
 using Mohist.Server.Issue.Services.IssueTemplates;
-using Mohist.Server.SpecTests.Support;
 using Mohist.Server.TestSupport;
+using Mohist.Server.UnitTests.Support;
 using Xunit;
 
-namespace Mohist.Server.SpecTests.Specs.Issue.IssueTemplate;
+namespace Mohist.Server.UnitTests.Issue.IssueTemplate;
 
 public sealed class FakeDbContextFactory : IDbContextFactory<MohistDbContext>
 {
@@ -15,7 +15,7 @@ public sealed class FakeDbContextFactory : IDbContextFactory<MohistDbContext>
 
     public FakeDbContextFactory(Action<MohistDbContext>? seed = null)
     {
-        _database = TestSqliteDatabase.CreateMigrated();
+        _database = TestSqliteDatabase.CreateModelSchema();
         using var db = CreateDbContext();
         seed?.Invoke(db);
     }
