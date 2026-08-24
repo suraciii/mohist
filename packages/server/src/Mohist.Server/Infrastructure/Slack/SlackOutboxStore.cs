@@ -347,7 +347,8 @@ public sealed partial class SlackOutboxStore : IScopedService, IAgentConnectionP
             && await IsLiveOwnerRowAsync(db, terminal, ct)
             && !IsAttachmentReplyPayload(SlackDeliveryPayload.Parse(terminal.PayloadJson)))
         {
-            var merged = await MergeReplyTerminalAsync(db, terminal, redactedText, ct);
+            var merged = await MergeReplyTerminalAsync(
+                db, terminal, redactedText, terminalDispatchRef is not null, ct);
             await transaction.CommitAsync(ct);
             return new SlackAgentReplyResult(
                 Accepted: true,
@@ -484,38 +485,6 @@ public sealed partial class SlackOutboxStore : IScopedService, IAgentConnectionP
         progress.UpdatedAt = _timeProvider.GetUtcNow();
         await db.SaveChangesAsync(ct);
         return progress;
-    }
-
-    private async Task<SlackOutboxRow> MergeReplyTerminalAsync(
-        MohistDbContext db,
-        SlackOutboxRow terminal,
-        string redactedText,
-        CancellationToken ct)
-    {
-        var previous = SlackDeliveryPayload.Parse(terminal.PayloadJson);
-        var previousText = !string.IsNullOrWhiteSpace(previous.FallbackText)
-            ? previous.FallbackText
-            : previous.Text;
-        if (string.Equals(previousText, redactedText, StringComparison.Ordinal))
-            return terminal;
-        var combined = string.IsNullOrWhiteSpace(previousText)
-            ? redactedText
-            : previousText + "\n\n" + redactedText;
-        var segments = SlackFinalReplyRenderer.SegmentReplyText(combined);
-        terminal.PayloadJson = JsonSerializer.Serialize(previous with
-        {
-            Text = combined,
-            Segments = segments.Count > 1 ? segments : null,
-        });
-        terminal.State = SlackOutboxStates.Pending;
-        terminal.NextAttemptAt = _timeProvider.GetUtcNow();
-        terminal.ClaimedAt = null;
-        terminal.ClaimedByAdapterId = null;
-        terminal.DeliveryUncertainAt = null;
-        terminal.LastError = null;
-        terminal.UpdatedAt = _timeProvider.GetUtcNow();
-        await db.SaveChangesAsync(ct);
-        return terminal;
     }
 
     private static SlackDeliveryPayload BuildReplyPayload(
