@@ -463,3 +463,10 @@ open).
 - Exact CI control run 32683383275 retained the original Server topology (`Unit -> (Spec || Arch)`), three Server Spec collection workers, and the unchanged 500 ms / 300 s gates while removing the autonomous `SlackAgentSelectionObligationWorker` loop from the shared fixture. It passed with Unit 4020, Spec 3093, Arch 53, Spec p95 436.0 ms, and Server scope 211.9 s.
 - This control disproved the earlier Arch-overlap attribution: the autonomous selection worker loop was the performance contaminant. Ordered `Unit -> Spec -> Arch` execution is not the final contract.
 - Restored `scripts/test-duration/guard.ts`, `scripts/test-duration/guard.test.ts`, and `test-duration.config.jsonc` exactly to commit `2c2dd71db`: global configured measurements remain `[cli, server-spec]`, application-subset planning keeps the baseline scoped behavior, and Server Spec uses three collection workers with unchanged budgets and deadlines.
+
+## Check feedback: bound finished scans and direct terminal worker Specs
+
+- `ListSettledSinceAsync` and `DeleteFinishedBeforeAsync` now apply `SelectionState` plus `FinishedAt` cutoffs in SQLite instead of loading all finished rows. The active selection migration/model snapshot add `IX_SlackAmbiguousPrompts_SelectionState_FinishedAt` for the minute pass.
+- Store coverage proves only recent Settled rows are listed, old Completed and Settled rows are deleted, and Pending, Decided, recent Settled, and recent Completed rows remain. Migration coverage proves the finished-scan index is created.
+- Direct `ProcessPendingAsync` Specs prove an interactive chooser older than five minutes settles `expired` with one stable visible outbox outcome, and a committed selection whose recovery returns `selected_connection_unavailable` settles with that exact reason and one stable visible outcome. A repeated pass remains exactly once in both cases.
+- Verification passed: focused store/migration tests, `SlackMultiAgentIngressSpecs` 37/37, script typecheck and 174 script tests, file-size/diff checks, canonical Server application (Unit 3981, Spec 3095, Arch 53), and full `npm run verify`.
