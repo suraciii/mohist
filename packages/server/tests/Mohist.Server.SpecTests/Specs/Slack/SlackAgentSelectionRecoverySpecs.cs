@@ -278,6 +278,156 @@ public sealed partial class SlackMultiAgentIngressSpecs
     }
 
     [Fact]
+    public async Task Selection_obligation_worker_expires_interactive_pending_once_with_stable_visible_outcome()
+    {
+        const string owner = "U_WORKER_EXPIRED";
+        var promptOwner = await CreateConnectionAsync(
+            "worker-expired-owner",
+            "T-worker-expired",
+            owner,
+            "A_WORKER_EXPIRED_OWNER");
+        var selected = await CreateConnectionAsync(
+            "worker-expired-selected",
+            "T-worker-expired",
+            owner,
+            "A_WORKER_EXPIRED_SELECTED");
+        var identity = new SlackMessageIdentity(
+            "T-worker-expired",
+            "C-worker-expired",
+            "1710000000.030000");
+
+        await PostChannelAsync(
+            promptOwner,
+            identity.ConversationId,
+            identity.MessageTs,
+            null,
+            [promptOwner.BotUserId!, selected.BotUserId!],
+            $"<@{promptOwner.BotUserId}> <@{selected.BotUserId}> expire this chooser",
+            owner);
+
+        _fixture.TimeProvider.Advance(TimeSpan.FromMinutes(6));
+        var worker = NewSelectionWorker();
+        await worker.ProcessPendingAsync();
+        await worker.ProcessPendingAsync();
+
+        await using var verify = _fixture.Services.CreateAsyncScope();
+        var prompts = verify.ServiceProvider.GetRequiredService<SlackAmbiguousPromptStore>();
+        var claim = await prompts.FindAsync(
+            identity.WorkspaceTeamId,
+            identity.ConversationId,
+            identity.MessageTs);
+        Assert.NotNull(claim);
+        Assert.Equal(SlackSelectionStates.Settled, claim!.SelectionState);
+        Assert.Equal("expired", claim.SettleReason);
+
+        var dispatchRef = SlackAmbiguousPromptStore.SettlementDispatchRef(
+            identity.WorkspaceTeamId,
+            identity.ConversationId,
+            identity.MessageTs);
+        var outcomes = await verify.ServiceProvider.GetRequiredService<MohistDbContext>()
+            .SlackOutboxRows
+            .Where(row => row.ProjectId == promptOwner.ProjectId
+                && row.ConnectionId == promptOwner.Id
+                && row.Kind == SlackOutboxKinds.UserAction
+                && row.DispatchRef == dispatchRef)
+            .ToListAsync();
+        var outcome = Assert.Single(outcomes);
+        var payload = SlackDeliveryPayload.Parse(outcome.PayloadJson);
+        Assert.Equal("expired", payload.ResponseKind);
+        Assert.Contains("expired", payload.Text, StringComparison.OrdinalIgnoreCase);
+        await RefreshAllConnectionLeasesAsync();
+    }
+
+    [Fact]
+    public async Task Selection_obligation_worker_settles_terminal_recovery_once_with_returned_reason()
+    {
+        const string owner = "U_WORKER_TERMINAL";
+        var promptOwner = await CreateConnectionAsync(
+            "worker-terminal-owner",
+            "T-worker-terminal",
+            owner,
+            "A_WORKER_TERMINAL_OWNER");
+        var selected = await CreateConnectionAsync(
+            "worker-terminal-selected",
+            "T-worker-terminal",
+            owner,
+            "A_WORKER_TERMINAL_SELECTED");
+        var identity = new SlackMessageIdentity(
+            "T-worker-terminal",
+            "C-worker-terminal",
+            "1710000000.030010");
+        var candidates = new[]
+        {
+            new SlackSelectionCandidateReference(promptOwner.ProjectId, promptOwner.Id, promptOwner.BotUserId),
+            new SlackSelectionCandidateReference(selected.ProjectId, selected.Id, selected.BotUserId),
+        };
+
+        await using (var scope = _fixture.Services.CreateAsyncScope())
+        {
+            var prompts = scope.ServiceProvider.GetRequiredService<SlackAmbiguousPromptStore>();
+            await prompts.TryClaimAsync(
+                promptOwner.ProjectId,
+                identity.WorkspaceTeamId,
+                identity.ConversationId,
+                identity.MessageTs,
+                null,
+                promptOwner.Id,
+                candidates,
+                owner,
+                "settle this committed selection",
+                "[]",
+                SlackAmbiguityKinds.RootMultiMention);
+            var ids = SlackChannelLaunchService.PreMintSlackLaunchIds(selected.ProjectId, identity);
+            await prompts.TryDecideAsync(
+                identity.WorkspaceTeamId,
+                identity.ConversationId,
+                identity.MessageTs,
+                selected.ProjectId,
+                selected.Id,
+                SlackSelectionDispatchKinds.RootLaunch,
+                ids.SessionId,
+                ids.InputId,
+                ids.TurnId);
+            var deleted = await scope.ServiceProvider.GetRequiredService<AgentConnectionStore>()
+                .DeleteAsync(selected.ProjectId, selected.Id);
+            Assert.NotNull(deleted);
+            Assert.NotNull(deleted!.DeletedAt);
+        }
+
+        _fixture.TimeProvider.Advance(TimeSpan.FromMinutes(1));
+        var worker = NewSelectionWorker();
+        await worker.ProcessPendingAsync();
+        await worker.ProcessPendingAsync();
+
+        await using var verify = _fixture.Services.CreateAsyncScope();
+        var promptsAfter = verify.ServiceProvider.GetRequiredService<SlackAmbiguousPromptStore>();
+        var claim = await promptsAfter.FindAsync(
+            identity.WorkspaceTeamId,
+            identity.ConversationId,
+            identity.MessageTs);
+        Assert.NotNull(claim);
+        Assert.Equal(SlackSelectionStates.Settled, claim!.SelectionState);
+        Assert.Equal("selected_connection_unavailable", claim.SettleReason);
+
+        var dispatchRef = SlackAmbiguousPromptStore.SettlementDispatchRef(
+            identity.WorkspaceTeamId,
+            identity.ConversationId,
+            identity.MessageTs);
+        var outcomes = await verify.ServiceProvider.GetRequiredService<MohistDbContext>()
+            .SlackOutboxRows
+            .Where(row => row.ProjectId == promptOwner.ProjectId
+                && row.ConnectionId == promptOwner.Id
+                && row.Kind == SlackOutboxKinds.UserAction
+                && row.DispatchRef == dispatchRef)
+            .ToListAsync();
+        var outcome = Assert.Single(outcomes);
+        var payload = SlackDeliveryPayload.Parse(outcome.PayloadJson);
+        Assert.Equal("selected_connection_unavailable", payload.ResponseKind);
+        Assert.Contains("could not be completed", payload.Text, StringComparison.OrdinalIgnoreCase);
+        await RefreshAllConnectionLeasesAsync();
+    }
+
+    [Fact]
     public async Task Selection_obligation_worker_reaps_only_old_finished_rows()
     {
         var connection = await CreateConnectionAsync("worker-retention", "T-worker-retention", "U_WORKER_RETENTION", "A_WORKER_RETENTION");

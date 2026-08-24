@@ -233,23 +233,69 @@ public sealed class SlackAmbiguousPromptStoreTests
     }
 
     [Fact]
-    public async Task Finished_cleanup_does_not_remove_pending_or_recent_settled_rows()
+    public async Task Finished_queries_apply_state_and_finished_cutoffs_and_preserve_unmatched_rows()
     {
         using var database = TestSqliteDatabase.CreateModelSchema();
         var store = NewStore(database);
-        var pending = await store.TryClaimAsync(
-            "project-a", "team-retain", "channel-retain", "8.001", null,
-            "connection-a", ["connection-a", "connection-b"]);
-        var settled = await store.TryClaimAsync(
-            "project-a", "team-retain", "channel-retain", "8.002", null,
-            "connection-a", ["connection-a", "connection-b"]);
-        Assert.True(await store.TrySettleAsync(
-            settled.RowId, SlackSelectionStates.Pending, "unrecoverable"));
+        var rows = new Dictionary<string, SlackAmbiguousPromptResult>(StringComparer.Ordinal);
+        foreach (var messageTs in new[]
+                 {
+                     "8.001", "8.002", "8.003", "8.004", "8.005", "8.006",
+                 })
+        {
+            rows[messageTs] = await store.TryClaimAsync(
+                "project-a", "team-retain", "channel-retain", messageTs, null,
+                "connection-a", ["connection-a", "connection-b"]);
+        }
 
-        var removed = await store.DeleteFinishedBeforeAsync(Now.AddHours(-1));
-        Assert.Equal(0, removed);
+        await store.TryDecideAsync(
+            "team-retain", "channel-retain", "8.002", "project-a", "connection-a",
+            SlackSelectionDispatchKinds.RootLaunch, "session-decided", "input-decided", "turn-decided");
+        await store.TryDecideAsync(
+            "team-retain", "channel-retain", "8.003", "project-a", "connection-a",
+            SlackSelectionDispatchKinds.RootLaunch, "session-old-completed", "input-old-completed", "turn-old-completed");
+        Assert.True(await store.MarkCompletedAsync(rows["8.003"].RowId, "accepted"));
+        Assert.True(await store.TrySettleAsync(
+            rows["8.004"].RowId, SlackSelectionStates.Pending, "old-settled"));
+        Assert.True(await store.TrySettleAsync(
+            rows["8.005"].RowId, SlackSelectionStates.Pending, "recent-settled"));
+        await store.TryDecideAsync(
+            "team-retain", "channel-retain", "8.006", "project-a", "connection-a",
+            SlackSelectionDispatchKinds.RootLaunch, "session-recent-completed", "input-recent-completed", "turn-recent-completed");
+        Assert.True(await store.MarkCompletedAsync(rows["8.006"].RowId, "accepted"));
+
+        await using (var db = database.CreateContext())
+        {
+            var finished = await db.SlackAmbiguousPrompts
+                .Where(row => row.MessageTs == "8.003"
+                    || row.MessageTs == "8.004"
+                    || row.MessageTs == "8.005"
+                    || row.MessageTs == "8.006")
+                .ToListAsync();
+            foreach (var row in finished)
+            {
+                row.FinishedAt = row.MessageTs is "8.003" or "8.004"
+                    ? Now.AddMinutes(-31)
+                    : Now.AddMinutes(-29);
+            }
+            await db.SaveChangesAsync();
+        }
+
+        var recentSettled = await store.ListSettledSinceAsync(Now.AddMinutes(-30));
+        var listed = Assert.Single(recentSettled);
+        Assert.Equal("8.005", listed.MessageTs);
+        Assert.Equal("recent-settled", listed.SettleReason);
+
+        var removed = await store.DeleteFinishedBeforeAsync(Now.AddMinutes(-30));
+        Assert.Equal(2, removed);
+        Assert.Null(await store.FindAsync("team-retain", "channel-retain", "8.003"));
+        Assert.Null(await store.FindAsync("team-retain", "channel-retain", "8.004"));
         Assert.NotNull(await store.FindAsync("team-retain", "channel-retain", "8.001"));
-        Assert.NotNull(await store.FindAsync("team-retain", "channel-retain", "8.002"));
+        Assert.Equal(
+            SlackSelectionStates.Decided,
+            (await store.FindAsync("team-retain", "channel-retain", "8.002"))!.SelectionState);
+        Assert.NotNull(await store.FindAsync("team-retain", "channel-retain", "8.005"));
+        Assert.NotNull(await store.FindAsync("team-retain", "channel-retain", "8.006"));
     }
 
     [Fact]

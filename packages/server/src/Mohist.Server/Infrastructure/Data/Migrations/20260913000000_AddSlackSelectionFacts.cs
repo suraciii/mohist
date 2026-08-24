@@ -120,12 +120,19 @@ public partial class AddSlackSelectionFacts : Migration
             name: "IX_SlackAmbiguousPrompts_ProjectId_SelectionState_UpdatedAt",
             table: "SlackAmbiguousPrompts",
             columns: new[] { "ProjectId", "SelectionState", "UpdatedAt" });
+        migrationBuilder.CreateIndex(
+            name: "IX_SlackAmbiguousPrompts_SelectionState_FinishedAt",
+            table: "SlackAmbiguousPrompts",
+            columns: new[] { "SelectionState", "FinishedAt" });
     }
 
     protected override void Down(MigrationBuilder migrationBuilder)
     {
         migrationBuilder.DropIndex(
             name: "IX_SlackAmbiguousPrompts_ProjectId_SelectionState_UpdatedAt",
+            table: "SlackAmbiguousPrompts");
+        migrationBuilder.DropIndex(
+            name: "IX_SlackAmbiguousPrompts_SelectionState_FinishedAt",
             table: "SlackAmbiguousPrompts");
         foreach (var column in new[]
         {

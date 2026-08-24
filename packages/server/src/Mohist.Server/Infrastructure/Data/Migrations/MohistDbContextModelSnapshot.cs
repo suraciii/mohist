@@ -2921,6 +2921,9 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
                     b.HasIndex("ProjectId", "SelectionState", "UpdatedAt")
                         .HasDatabaseName("IX_SlackAmbiguousPrompts_ProjectId_SelectionState_UpdatedAt");
 
+                    b.HasIndex("SelectionState", "FinishedAt")
+                        .HasDatabaseName("IX_SlackAmbiguousPrompts_SelectionState_FinishedAt");
+
                     b.HasIndex("WorkspaceTeamId", "ConversationId", "MessageTs")
                         .IsUnique()
                         .HasDatabaseName("UX_SlackAmbiguousPrompts_WorkspaceTeamId_ConversationId_MessageTs");

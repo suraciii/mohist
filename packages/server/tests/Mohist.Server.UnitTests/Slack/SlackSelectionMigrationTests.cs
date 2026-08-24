@@ -40,6 +40,10 @@ public sealed class SlackSelectionMigrationTests
                     {Now.AddHours(-1)}, {Now.AddHours(-1)}, {Now.AddHours(-1)});
                 """);
             await before.GetService<IMigrator>().MigrateAsync(SelectionMigration);
+            var indexes = await ReadIndexesAsync(before);
+            Assert.Contains(
+                "IX_SlackAmbiguousPrompts_SelectionState_FinishedAt",
+                indexes);
         }
 
         var store = new SlackAmbiguousPromptStore(
@@ -107,6 +111,17 @@ public sealed class SlackSelectionMigrationTests
 
         Assert.Equal(1, await store.DeleteFinishedBeforeAsync(Now.AddMinutes(-30)));
         Assert.Null(await store.FindAsync("legacy-team", "legacy-channel", "1710000000.000001"));
+    }
+
+    private static async Task<IReadOnlyList<string>> ReadIndexesAsync(MohistDbContext db)
+    {
+        await using var command = db.Database.GetDbConnection().CreateCommand();
+        command.CommandText = "PRAGMA index_list('SlackAmbiguousPrompts');";
+        await using var reader = await command.ExecuteReaderAsync();
+        var indexes = new List<string>();
+        while (await reader.ReadAsync())
+            indexes.Add(reader.GetString(reader.GetOrdinal("name")));
+        return indexes;
     }
 
     private sealed class MigrationDbContextFactory(DbContextOptions<MohistDbContext> options)

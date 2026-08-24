@@ -42,6 +42,8 @@ public partial class MohistDbContext
                 .HasDatabaseName("IX_SlackAmbiguousPrompts_ProjectId_UpdatedAt");
             entity.HasIndex(e => new { e.ProjectId, e.SelectionState, e.UpdatedAt })
                 .HasDatabaseName("IX_SlackAmbiguousPrompts_ProjectId_SelectionState_UpdatedAt");
+            entity.HasIndex(e => new { e.SelectionState, e.FinishedAt })
+                .HasDatabaseName("IX_SlackAmbiguousPrompts_SelectionState_FinishedAt");
         });
     }
 }

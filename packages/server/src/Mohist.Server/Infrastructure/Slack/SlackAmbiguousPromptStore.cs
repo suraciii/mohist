@@ -323,13 +323,17 @@ public sealed class SlackAmbiguousPromptStore : IScopedService
         CancellationToken ct = default)
     {
         await using var db = await _dbFactory.CreateDbContextAsync(ct);
-        var rows = await db.SlackAmbiguousPrompts.AsNoTracking()
-            .Where(row => row.SelectionState == SlackSelectionStates.Settled)
+        var rows = await db.SlackAmbiguousPrompts
+            .FromSqlInterpolated($"""
+                SELECT * FROM "SlackAmbiguousPrompts"
+                WHERE "SelectionState" = {SlackSelectionStates.Settled}
+                  AND "FinishedAt" IS NOT NULL
+                  AND "FinishedAt" >= {cutoff}
+                ORDER BY "FinishedAt"
+                """)
+            .AsNoTracking()
             .ToListAsync(ct);
-        return rows
-            .Where(row => row.FinishedAt is not null && row.FinishedAt >= cutoff)
-            .Select(ToSnapshot)
-            .ToArray();
+        return rows.Select(ToSnapshot).ToArray();
     }
 
     /// <summary>
@@ -405,17 +409,12 @@ public sealed class SlackAmbiguousPromptStore : IScopedService
         CancellationToken ct = default)
     {
         await using var db = await _dbFactory.CreateDbContextAsync(ct);
-        var rows = await db.SlackAmbiguousPrompts
-            .Where(row => row.SelectionState == SlackSelectionStates.Completed
-                || row.SelectionState == SlackSelectionStates.Settled)
-            .ToListAsync(ct);
-        rows = rows
-            .Where(row => row.FinishedAt is not null && row.FinishedAt < cutoff)
-            .ToList();
-        if (rows.Count == 0)
-            return 0;
-        db.SlackAmbiguousPrompts.RemoveRange(rows);
-        return await db.SaveChangesAsync(ct);
+        return await db.Database.ExecuteSqlInterpolatedAsync($"""
+            DELETE FROM "SlackAmbiguousPrompts"
+            WHERE "SelectionState" IN ({SlackSelectionStates.Completed}, {SlackSelectionStates.Settled})
+              AND "FinishedAt" IS NOT NULL
+              AND "FinishedAt" < {cutoff};
+            """, ct);
     }
 
     public static string PromptDispatchRef(string workspaceTeamId, string conversationId, string messageTs) =>
