@@ -187,7 +187,17 @@ internal partial class SourceCodeUpdater
             BaseAddress = new Uri(env.GetEnvironmentVariable(ServerUrlEnvironmentVariable) ?? "http://127.0.0.1:3456"),
             Timeout = TimeSpan.FromSeconds(5),
         };
-        var operations = new UpdateOperations(output, error, systemd, commandExecutor, fs, env, unitDir, getUserHome);
+        var operations = new UpdateOperations(
+            output,
+            error,
+            systemd,
+            commandExecutor,
+            fs,
+            env,
+            unitDir,
+            getUserHome,
+            timeProvider,
+            pollWait);
         var validator = new RuntimeConsistencyValidator(
             httpClient,
             commandExecutor,

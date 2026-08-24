@@ -36,11 +36,34 @@ internal static class SystemdUnitParser
             var key = line[..eq].Trim();
             var value = line[(eq + 1)..].Trim();
             if (string.Equals(key, "WorkingDirectory", StringComparison.Ordinal))
-                workingDir = value;
+                workingDir = DecodeGeneratedPath(value);
             else if (string.Equals(key, "ExecStart", StringComparison.Ordinal))
                 execStart = value;
         }
         return new SystemdUnitFields(workingDir, execStart);
+    }
+
+    private static string DecodeGeneratedPath(string value)
+    {
+        if (value.Length >= 2 && value[0] == '"' && value[^1] == '"')
+            value = value[1..^1];
+        var decoded = new StringBuilder(value.Length);
+        for (var i = 0; i < value.Length; i++)
+        {
+            if (value[i] == '\\' && i + 1 < value.Length && value[i + 1] is '\\' or '"')
+            {
+                decoded.Append(value[++i]);
+                continue;
+            }
+            if (value[i] == '%' && i + 1 < value.Length && value[i + 1] == '%')
+            {
+                decoded.Append('%');
+                i++;
+                continue;
+            }
+            decoded.Append(value[i]);
+        }
+        return decoded.ToString();
     }
 
     internal static Dictionary<string, string> ParseSystemdShow(string output)

@@ -218,28 +218,6 @@ jobs:
           if-no-files-found: warn
           retention-days: 7
 
-  go:
-    name: Go
-    runs-on: ubuntu-latest
-    timeout-minutes: 8
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v6
-
-      - name: Setup Go
-        uses: actions/setup-go@v6
-        with:
-          go-version: stable
-
-      - name: Check formatting
-        run: test -z "$(gofmt -l packages/go/mohist-slack)"
-
-      - name: Vet and test
-        working-directory: packages/go/mohist-slack
-        run: |
-          go vet ./...
-          go test ./...
-
   repository:
     name: Repository
     runs-on: ubuntu-latest
@@ -259,8 +237,17 @@ jobs:
           cache: npm
           cache-dependency-path: package-lock.json
 
+      - name: Setup Go
+        uses: actions/setup-go@v6
+        with:
+          go-version: stable
+          cache-dependency-path: packages/go/mohist-slack/go.sum
+
       - name: Install dependencies
         run: npm ci
+
+      - name: Race-test Slack adapter
+        run: npm run test:slack:race
 
       - name: Run Repository scope
         run: |
@@ -286,7 +273,7 @@ jobs:
   gate:
     name: Gate
     if: always()
-    needs: [server, web, cli, runner, go, repository]
+    needs: [server, web, cli, runner, repository]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:

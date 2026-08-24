@@ -7,8 +7,13 @@ public class FakeFileSystem : IFileSystem
 {
     private readonly Dictionary<string, string> _files = new(StringComparer.OrdinalIgnoreCase);
     private readonly HashSet<string> _directories = new(StringComparer.OrdinalIgnoreCase);
+    private readonly HashSet<string> _fileLocks = new(StringComparer.OrdinalIgnoreCase);
     private readonly object _gate = new();
     private string _currentDirectory = "/";
+
+    public Func<string, bool>? FailNextRead { get; set; }
+    public Func<string, bool>? FailNextWrite { get; set; }
+    public bool FileLockAvailable { get; set; } = true;
 
     public string Cwd
     {
@@ -71,9 +76,15 @@ public class FakeFileSystem : IFileSystem
 
     public string Read(string path)
     {
+        var normalized = Normalize(path);
+        if (FailNextRead?.Invoke(normalized) == true)
+        {
+            FailNextRead = null;
+            throw new IOException($"configured read failure for '{path}'");
+        }
         lock (_gate)
         {
-            if (_files.TryGetValue(Normalize(path), out var content))
+            if (_files.TryGetValue(normalized, out var content))
                 return content;
             throw new FileNotFoundException($"Fake filesystem has no file at '{path}'.");
         }
@@ -207,6 +218,11 @@ public class FakeFileSystem : IFileSystem
     public void WriteAllText(string path, string contents)
     {
         var normalized = Normalize(path);
+        if (FailNextWrite?.Invoke(normalized) == true)
+        {
+            FailNextWrite = null;
+            throw new IOException($"configured write failure for '{path}'");
+        }
         lock (_gate)
         {
             _files[normalized] = contents;
@@ -240,6 +256,22 @@ public class FakeFileSystem : IFileSystem
     public Stream OpenRead(string path) => new MemoryStream(Encoding.UTF8.GetBytes(Read(path)));
 
     public Stream OpenWrite(string path) => new RecordingStream(this, path);
+
+    public Stream? TryAcquireFileLock(string path)
+    {
+        var normalized = Normalize(path);
+        lock (_gate)
+        {
+            if (!FileLockAvailable || !_fileLocks.Add(normalized)) return null;
+        }
+        return new ReleaseStream(() =>
+        {
+            lock (_gate)
+            {
+                _fileLocks.Remove(normalized);
+            }
+        });
+    }
 
     private static string Normalize(string path) =>
         path.Replace(Path.AltDirectorySeparatorChar, Path.DirectorySeparatorChar);
@@ -276,6 +308,21 @@ public class FakeFileSystem : IFileSystem
             {
                 var content = Encoding.UTF8.GetString(ToArray());
                 _owner.WriteAllText(_path, content);
+            }
+            base.Dispose(disposing);
+        }
+    }
+
+    private sealed class ReleaseStream(Action release) : MemoryStream
+    {
+        private bool _released;
+
+        protected override void Dispose(bool disposing)
+        {
+            if (disposing && !_released)
+            {
+                _released = true;
+                release();
             }
             base.Dispose(disposing);
         }

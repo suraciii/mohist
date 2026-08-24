@@ -32,8 +32,9 @@ authoritative Server state but not responsibilities.
   `mohist-slack` handles only the Socket wire protocol. App creation,
   installation, and credential verification are recoverable product facts
   and belong in Server.
-- **Separate `mohist-slack` process.** Yes, as a toolchain choice. Slack's
-  primary client is Node and shares the Runner TypeScript toolchain.
+- **Separate `mohist-slack` process.** Yes, as a failure and dependency
+  boundary. A static Go binary owns Slack Socket Mode without sharing the
+  Runner's Node runtime.
 - **Adapter persistence.** None. A process boundary is not a state boundary;
   Server is the sole authority.
 - **Ingress, conversation mapping, outbound delivery.** Owned by Server, in
@@ -736,8 +737,9 @@ AgentSession.
 ## Security Boundary
 
 - All Slack ingress uses Socket Mode; no public ingress endpoint is required or
-  opened. A proxy may be configured explicitly toward Slack, but adapter
-  transport to the loopback Server must not use that proxy.
+  opened. A proxy may be configured explicitly for Slack HTTPS and WebSocket
+  traffic, but adapter transport to the loopback Server must not use that
+  proxy.
 - `mohist-slack` is a privileged local component in the Mohist Server trust
   domain. It receives only enough authority to call fixed Connections, read
   results, and return messages.

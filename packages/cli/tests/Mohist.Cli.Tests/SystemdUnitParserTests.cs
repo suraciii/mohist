@@ -65,6 +65,16 @@ public class SystemdUnitParserTests
     }
 
     [Fact]
+    public void ParseSystemdUnit_DecodesGeneratedWorkingDirectoryEscapes()
+    {
+        var content = "[Service]\nWorkingDirectory=\"/repo with \\\"quote\\\" %%rate\"\n";
+
+        var fields = SystemdUnitParser.ParseSystemdUnit(content);
+
+        Assert.Equal("/repo with \"quote\" %rate", fields.WorkingDirectory);
+    }
+
+    [Fact]
     public void ParseSystemdUnit_HandlesMissingKeys()
     {
         var content = "[Unit]\nDescription=Minimal\n";

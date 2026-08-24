@@ -384,8 +384,9 @@ fresh deadline or be followed by another full test command.
 CI decomposes the same acceptance plan by ownership. It has one execution job
 for each independently built application, one `Repository` job, and one final
 `Gate` job. The canonical plan declares the application IDs `server`, `web`,
-`cli`, `runner`, and `slack`. Their CI display names are `Server`, `Web`, `CLI`,
-`Runner`, and `Slack`.
+`cli`, and `runner`. Their CI display names are `Server`, `Web`, `CLI`, and
+`Runner`. The Go Slack adapter is owned by the Repository scope because it has
+no report-producing duration track.
 
 - An application job owns its application's fresh build, L0 and L1 behavior
   tracks, application-scoped Architecture tracks, owned static checks, reports,

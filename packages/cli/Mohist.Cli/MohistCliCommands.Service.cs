@@ -15,26 +15,26 @@ internal static class ServiceCommands
 {
     private const string TargetDescription = "Target managed service: 'server', 'runner', or 'slack'";
 
-    private static readonly Dictionary<(string Verb, ServiceTarget Target), Func<IServiceInstaller, ServiceCommandOptions, Task<int>>> Dispatch = new()
+    private static readonly Dictionary<(string Verb, ServiceTarget Target), Func<IServiceInstaller, ServiceCommandOptions, CancellationToken, Task<int>>> Dispatch = new()
     {
-        [("start", ServiceTarget.Server)] = (i, o) => i.StartServerAsync(o),
-        [("stop", ServiceTarget.Server)] = (i, o) => i.StopServerAsync(o),
-        [("restart", ServiceTarget.Server)] = (i, o) => i.RestartServerAsync(o),
-        [("status", ServiceTarget.Server)] = (i, o) => i.StatusServerAsync(o),
-        [("logs", ServiceTarget.Server)] = (i, o) => i.LogsServerAsync(o),
-        [("uninstall", ServiceTarget.Server)] = (i, o) => i.UninstallServerAsync(o),
-        [("start", ServiceTarget.Runner)] = (i, o) => i.StartRunnerAsync(o),
-        [("stop", ServiceTarget.Runner)] = (i, o) => i.StopRunnerAsync(o),
-        [("restart", ServiceTarget.Runner)] = (i, o) => i.RestartRunnerAsync(o),
-        [("status", ServiceTarget.Runner)] = (i, o) => i.StatusRunnerAsync(o),
-        [("logs", ServiceTarget.Runner)] = (i, o) => i.LogsRunnerAsync(o),
-        [("uninstall", ServiceTarget.Runner)] = (i, o) => i.UninstallRunnerAsync(o),
-        [("start", ServiceTarget.Slack)] = (i, o) => i.StartSlackAsync(o),
-        [("stop", ServiceTarget.Slack)] = (i, o) => i.StopSlackAsync(o),
-        [("restart", ServiceTarget.Slack)] = (i, o) => i.RestartSlackAsync(o),
-        [("status", ServiceTarget.Slack)] = (i, o) => i.StatusSlackAsync(o),
-        [("logs", ServiceTarget.Slack)] = (i, o) => i.LogsSlackAsync(o),
-        [("uninstall", ServiceTarget.Slack)] = (i, o) => i.UninstallSlackAsync(o),
+        [("start", ServiceTarget.Server)] = (i, o, _) => i.StartServerAsync(o),
+        [("stop", ServiceTarget.Server)] = (i, o, _) => i.StopServerAsync(o),
+        [("restart", ServiceTarget.Server)] = (i, o, _) => i.RestartServerAsync(o),
+        [("status", ServiceTarget.Server)] = (i, o, _) => i.StatusServerAsync(o),
+        [("logs", ServiceTarget.Server)] = (i, o, _) => i.LogsServerAsync(o),
+        [("uninstall", ServiceTarget.Server)] = (i, o, _) => i.UninstallServerAsync(o),
+        [("start", ServiceTarget.Runner)] = (i, o, _) => i.StartRunnerAsync(o),
+        [("stop", ServiceTarget.Runner)] = (i, o, _) => i.StopRunnerAsync(o),
+        [("restart", ServiceTarget.Runner)] = (i, o, _) => i.RestartRunnerAsync(o),
+        [("status", ServiceTarget.Runner)] = (i, o, _) => i.StatusRunnerAsync(o),
+        [("logs", ServiceTarget.Runner)] = (i, o, _) => i.LogsRunnerAsync(o),
+        [("uninstall", ServiceTarget.Runner)] = (i, o, _) => i.UninstallRunnerAsync(o),
+        [("start", ServiceTarget.Slack)] = (i, o, token) => i.StartSlackAsync(o, token),
+        [("stop", ServiceTarget.Slack)] = (i, o, token) => i.StopSlackAsync(o, token),
+        [("restart", ServiceTarget.Slack)] = (i, o, token) => i.RestartSlackAsync(o, token),
+        [("status", ServiceTarget.Slack)] = (i, o, _) => i.StatusSlackAsync(o),
+        [("logs", ServiceTarget.Slack)] = (i, o, _) => i.LogsSlackAsync(o),
+        [("uninstall", ServiceTarget.Slack)] = (i, o, _) => i.UninstallSlackAsync(o),
     };
 
     public static Command Build(IServiceProvider provider)
@@ -64,13 +64,20 @@ internal static class ServiceCommands
         cmd.Arguments.Add(targetArg);
         cmd.Options.Add(dryRunOpt);
         cmd.Options.Add(unitDirOpt);
-        cmd.SetAction(ctx =>
+        cmd.SetAction(async (ctx, cancellationToken) =>
         {
             var target = ctx.GetValue(targetArg);
             var dryRun = ctx.GetValue(dryRunOpt);
             var unitDir = ctx.GetValue(unitDirOpt);
             var options = new ServiceCommandOptions(dryRun, unitDir, Lines: 100, Follow: false);
-            return Dispatch[(verb, target)](installer, options);
+            try
+            {
+                return await Dispatch[(verb, target)](installer, options, cancellationToken);
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                return CliExitCode.For(CliExitOutcome.Cancelled);
+            }
         });
         return cmd;
     }
@@ -91,7 +98,7 @@ internal static class ServiceCommands
         cmd.Options.Add(followOpt);
         cmd.Options.Add(dryRunOpt);
         cmd.Options.Add(unitDirOpt);
-        cmd.SetAction(ctx =>
+        cmd.SetAction(async (ctx, cancellationToken) =>
         {
             var target = ctx.GetValue(targetArg);
             var lines = ctx.GetValue(linesOpt);
@@ -99,7 +106,14 @@ internal static class ServiceCommands
             var dryRun = ctx.GetValue(dryRunOpt);
             var unitDir = ctx.GetValue(unitDirOpt);
             var options = new ServiceCommandOptions(dryRun, unitDir, lines, follow);
-            return Dispatch[(verb, target)](installer, options);
+            try
+            {
+                return await Dispatch[(verb, target)](installer, options, cancellationToken);
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                return CliExitCode.For(CliExitOutcome.Cancelled);
+            }
         });
         return cmd;
     }

@@ -88,6 +88,15 @@ func resolveConfig(lookup envLookup, readCredentialFile func(string) (string, er
 		if err != nil || parsed.Scheme == "" || parsed.Host == "" {
 			return cfg, errors.New("SLACK_PROXY_URL must be an absolute proxy URL")
 		}
+		parsed.Scheme = strings.ToLower(parsed.Scheme)
+		if parsed.Scheme != "http" && parsed.Scheme != "socks5" {
+			return cfg, errors.New("SLACK_PROXY_URL scheme must be http or socks5")
+		}
+		if parsed.User != nil {
+			if _, hasPassword := parsed.User.Password(); !hasPassword {
+				parsed.User = url.UserPassword(parsed.User.Username(), "")
+			}
+		}
 		cfg.proxyURL = parsed
 	}
 
@@ -179,9 +188,11 @@ func run(ctx context.Context, cfg config, logger *slog.Logger) error {
 		return err
 	}
 
-	httpClient := &http.Client{}
+	httpClient := &http.Client{Timeout: 30 * time.Second}
 	if cfg.proxyURL != nil {
-		httpClient.Transport = &http.Transport{Proxy: http.ProxyURL(cfg.proxyURL)}
+		transport := http.DefaultTransport.(*http.Transport).Clone()
+		transport.Proxy = http.ProxyURL(cfg.proxyURL)
+		httpClient.Transport = transport
 	}
 
 	adapter := mohistslack.NewAdapter(mohistslack.AdapterOptions{
@@ -194,6 +205,7 @@ func run(ctx context.Context, cfg config, logger *slog.Logger) error {
 		HeartbeatEvery: cfg.heartbeatEvery,
 		DeliveryPoll:   cfg.deliveryEvery,
 		MaxInFlight:    cfg.maxInFlight,
+		Dispose:        httpClient.CloseIdleConnections,
 	})
 
 	if err := adapter.Start(ctx); err != nil {

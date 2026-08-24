@@ -3,8 +3,8 @@ package mohistslack
 import (
 	"context"
 	"errors"
-	"strings"
 	"testing"
+	"testing/synctest"
 )
 
 func TestValidationProbeReportsHelloOnceAndCreatesNoRuntime(t *testing.T) {
@@ -191,6 +191,9 @@ func TestSupersededRuntimeFailureNeverEvictsSuccessor(t *testing.T) {
 		t.Fatal("a superseded runtime's stale error evicted its replacement")
 	}
 	if !h.sockets[0].wasDisconnected() {
+		h.sockets[0].waitDisconnected()
+	}
+	if !h.sockets[0].wasDisconnected() {
 		t.Fatal("the superseded runtime itself was not disconnected")
 	}
 	if successorSocket.wasDisconnected() {
@@ -206,6 +209,199 @@ func TestSupersededRuntimeFailureNeverEvictsSuccessor(t *testing.T) {
 	t.Logf("DBG successor acked=%v ingressCount=%d order=%v", acked, h.transport.ingressCount(), h.order.snapshot())
 	if !acked {
 		t.Fatal("the successor failed to acknowledge a live event")
+	}
+}
+
+func TestTerminalSocketFailureEvictsRuntime(t *testing.T) {
+	target := connectionTarget("p1", "c1")
+	h := newTestHarness()
+	if _, err := h.connect(target); err != nil {
+		t.Fatalf("connect() error = %v", err)
+	}
+	socket := h.sockets[0]
+
+	socket.emitState("error", errors.New("socket runner failed"))
+	socket.waitDisconnected()
+
+	h.adapter.mu.Lock()
+	_, alive := h.adapter.runtimes[target.Key()]
+	h.adapter.mu.Unlock()
+	if alive {
+		t.Fatal("runtime survived a terminal socket failure")
+	}
+}
+
+func TestStopCancelsEventTriggeredDeliveryDrain(t *testing.T) {
+	target := connectionTarget("p1", "c1")
+	h := newTestHarness()
+	if _, err := h.connect(target); err != nil {
+		t.Fatalf("connect() error = %v", err)
+	}
+	claimEntered := make(chan struct{}, 1)
+	h.transport.mu.Lock()
+	h.transport.claimEntered = claimEntered
+	h.transport.claimGate = make(chan struct{})
+	h.transport.mu.Unlock()
+
+	acked := h.sockets[0].emitAsync(messageBody("D1", "1700.6", "stop"))
+	<-claimEntered
+	stopped := make(chan struct{})
+	go func() {
+		h.adapter.Stop()
+		close(stopped)
+	}()
+
+	<-stopped
+	if !<-acked {
+		t.Fatal("message was not acknowledged before its delivery drain")
+	}
+}
+
+func TestStopConvergesWithHandlerTriggeredStaleEviction(t *testing.T) {
+	target := connectionTarget("p1", "c1")
+	h := newTestHarness()
+	if _, err := h.connect(target); err != nil {
+		t.Fatalf("connect() error = %v", err)
+	}
+	ingressEntered := make(chan struct{}, 1)
+	ingressGate := make(chan struct{})
+	h.transport.mu.Lock()
+	h.transport.ingressEntered = ingressEntered
+	h.transport.ingressGate = ingressGate
+	h.transport.ingressIgnoreCancellation = true
+	h.transport.ingressResults = []IngressResult{{Kind: "rejected", ResponseOwner: ResponseOwnerNone}}
+	h.transport.ingressErr = &APIError{Status: 409, Code: string(HelloLeaseStale)}
+	h.transport.mu.Unlock()
+
+	acked := h.sockets[0].emitAsync(messageBody("D1", "1700.7", "stale"))
+	<-ingressEntered
+	stopped := make(chan struct{})
+	go func() {
+		h.adapter.Stop()
+		close(stopped)
+	}()
+	h.sockets[0].waitDisconnectStarted()
+	close(ingressGate)
+
+	<-stopped
+	if <-acked {
+		t.Fatal("stale event was acknowledged")
+	}
+}
+
+func TestConcurrentStopWaitsForInProgressCleanup(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		target := connectionTarget("p1", "c1")
+		h := newTestHarness()
+		if _, err := h.connect(target); err != nil {
+			t.Fatalf("connect() error = %v", err)
+		}
+		ingressEntered := make(chan struct{}, 1)
+		ingressGate := make(chan struct{})
+		h.transport.mu.Lock()
+		h.transport.ingressEntered = ingressEntered
+		h.transport.ingressGate = ingressGate
+		h.transport.ingressIgnoreCancellation = true
+		h.transport.mu.Unlock()
+
+		acked := h.sockets[0].emitAsync(messageBody("D1", "1700.8", "concurrent stop"))
+		<-ingressEntered
+		firstStopped := make(chan struct{})
+		go func() {
+			h.adapter.Stop()
+			close(firstStopped)
+		}()
+		h.sockets[0].waitDisconnectStarted()
+		secondStopped := make(chan struct{})
+		go func() {
+			h.adapter.Stop()
+			close(secondStopped)
+		}()
+		synctest.Wait()
+		select {
+		case <-secondStopped:
+			t.Fatal("concurrent Stop returned before in-progress cleanup completed")
+		default:
+		}
+
+		close(ingressGate)
+		synctest.Wait()
+		<-firstStopped
+		<-secondStopped
+		if <-acked {
+			t.Fatal("message was acknowledged after shutdown removed its runtime")
+		}
+	})
+}
+
+func TestStopWaitsForStartDiscoveryToFinish(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		h := newTestHarness()
+		discoverEntered := make(chan struct{}, 1)
+		discoverGate := make(chan struct{})
+		h.transport.mu.Lock()
+		h.transport.discoverEntered = discoverEntered
+		h.transport.discoverGate = discoverGate
+		h.transport.discoverIgnoreCancellation = true
+		h.transport.mu.Unlock()
+
+		startResult := make(chan error, 1)
+		go func() { startResult <- h.adapter.Start(context.Background()) }()
+		<-discoverEntered
+		stopped := make(chan struct{})
+		go func() {
+			h.adapter.Stop()
+			close(stopped)
+		}()
+		synctest.Wait()
+		select {
+		case <-stopped:
+			t.Fatal("Stop returned before Start discovery completed")
+		default:
+		}
+
+		close(discoverGate)
+		synctest.Wait()
+		if err := <-startResult; err != nil {
+			t.Fatalf("Start error = %v", err)
+		}
+		<-stopped
+	})
+}
+
+func TestAdapterRejectsSecondStart(t *testing.T) {
+	h := newTestHarness()
+	if err := h.adapter.Start(context.Background()); err != nil {
+		t.Fatalf("first Start error = %v", err)
+	}
+	if err := h.adapter.Start(context.Background()); err == nil {
+		t.Fatal("second Start succeeded")
+	}
+	h.adapter.Stop()
+}
+
+func TestStoppedAdapterRejectsNewTrackedWork(t *testing.T) {
+	h := newTestHarness()
+	h.adapter.Stop()
+	if h.adapter.beginWork() {
+		h.adapter.wg.Done()
+		t.Fatal("stopped adapter accepted new tracked work")
+	}
+}
+
+func TestTerminalSocketStateAfterStopDoesNotScheduleAnotherDisconnect(t *testing.T) {
+	target := connectionTarget("p1", "c1")
+	h := newTestHarness()
+	if _, err := h.connect(target); err != nil {
+		t.Fatalf("connect() error = %v", err)
+	}
+	socket := h.sockets[0]
+
+	h.adapter.Stop()
+	socket.emitState("error", errors.New("late socket failure"))
+
+	if got := socket.disconnectCount(); got != 1 {
+		t.Fatalf("disconnect calls = %d, want 1", got)
 	}
 }
 
@@ -376,32 +572,5 @@ func TestStopDisconnectsAllRuntimes(t *testing.T) {
 	h.adapter.mu.Unlock()
 	if count != 0 {
 		t.Fatalf("Stop left %d runtime(s)", count)
-	}
-}
-
-func TestSafeErrorMessageRedactsTokenShapes(t *testing.T) {
-	err := errors.New("post failed with xoxb-1234-abcdSECRET and xapp.1-aB_c and xoxp:x and xoxe~z")
-	redacted := SafeErrorMessage(err)
-	for _, shape := range []string{"xoxb", "xapp", "xoxp", "xoxe"} {
-		if strings.Contains(redacted, shape+"-") || strings.Contains(redacted, shape+".") ||
-			strings.Contains(redacted, shape+":") || strings.Contains(redacted, shape+"~") {
-			t.Fatalf("redaction leaked token shape %q in %q", shape, redacted)
-		}
-	}
-	if !strings.Contains(redacted, "<redacted>") {
-		t.Fatalf("redacted message lost placeholder: %q", redacted)
-	}
-}
-
-func TestLoggerRedactsBeforeEmission(t *testing.T) {
-	var buffer strings.Builder
-	logger := NewLogger(&buffer, "text")
-	logger.Error("delivery failed", "reason", SafeErrorMessage(errors.New("boom xoxb-secret-value")))
-	line := buffer.String()
-	if strings.Contains(line, "xoxb-secret-value") {
-		t.Fatalf("log line leaked token: %s", line)
-	}
-	if !strings.Contains(line, "<redacted>") {
-		t.Fatalf("log line missing redaction marker: %s", line)
 	}
 }

@@ -8,8 +8,9 @@ plane. You can also use it to configure and use a Mohist Agent directly.
 ## Prerequisites
 
 You need .NET SDK 11.0 or later (`dotnet --version`), Node.js 22.19.0 or later
-(`node --version`), npm 10 or later (`npm --version`), and an Agent Runtime:
-the OpenCode CLI (`opencode --version`) or a configured Pi Runtime.
+(`node --version`), npm 10 or later (`npm --version`), Go 1.25 or later
+(`go version`), and an Agent Runtime: the OpenCode CLI (`opencode --version`)
+or a configured Pi Runtime.
 
 For OpenCode, follow the [official opencode documentation](https://opencode.ai)
 when the CLI is not installed. Pi runs through the Runner's in-process Pi SDK
@@ -32,8 +33,14 @@ npm ci
 npm run build
 ```
 
-This command compiles the ASP.NET Core server and CLI. The first build can take
-longer because it restores NuGet packages.
+This command compiles the ASP.NET Core server and CLI, Web, Runner, and the
+optional statically linked Slack adapter at
+`packages/go/mohist-slack/bin/build/mohist-slack` (or `mohist-slack.exe` on
+Windows). `mo install slack` promotes that artifact to the service's runtime
+path; rebuilding the repository never overwrites a running adapter. The first
+build can take longer because it restores NuGet and Go modules. If the default
+Go module proxy is unreachable, set a reachable `GOPROXY`, such as
+`https://goproxy.cn,direct`, before building.
 
 ## 3. Install the `mo` CLI
 

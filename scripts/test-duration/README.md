@@ -38,10 +38,12 @@ required scope directory or final summary is missing.
 ## Execution Graph
 
 The canonical plan declares one scope for each application and one Repository
-scope. The current applications are Server, Web, CLI, Runner, and Slack. A
-local `verify` run executes all six scopes and aggregates their evidence. CI
-executes the same scopes as independent jobs and runs Gate after every producer
-job completes.
+scope. The current applications are Server, Web, CLI, and Runner. A local
+`verify` run executes all five scopes and aggregates their evidence. CI executes
+the same scopes as independent jobs and runs Gate after every producer job
+completes. The Repository scope owns the portable Go Slack adapter build, vet,
+formatting, and test checks because the adapter has no report-producing duration
+track. Provisioned Linux CI additionally runs the race detector.
 
 An application scope builds its application once from fresh outputs. Its L0,
 L1, application Architecture, and owned static-check lanes use that build. The
@@ -132,7 +134,7 @@ are not gate recovery mechanisms.
 The executor validates the checked-in application plan and exposes the closed
 `test:fast`, `test:app`, and portfolio commands. Each application builds once
 and passes the same run root to the track guard. The Repository executor runs
-the declared repository checks, Gate validates the six scope evidence bundles
+the declared repository checks, Gate validates the five scope evidence bundles
 without rerunning tests, and local `verify` runs those scopes under one
 absolute deadline before applying Gate validation. Obsolete public aliases are
 removed; new Specs are added by extending the canonical plan.

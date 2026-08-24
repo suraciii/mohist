@@ -17,10 +17,14 @@ internal static class WindowsInstallTestSupport
     internal static string ServiceDir => Path.Combine(UserProfile, ".mohist", "service");
     internal static string ServerLauncher => Path.Combine(ServiceDir, "mohist-server.cmd");
     internal static string RunnerLauncher => Path.Combine(ServiceDir, "mohist-runner.cmd");
+    internal static string SlackLauncher => Path.Combine(ServiceDir, "mohist-slack.cmd");
     internal static string ServerStartup => Path.Combine(UserProfile, "AppData", "Roaming", "Microsoft", "Windows", "Start Menu", "Programs", "Startup", "Mohist_Server.cmd");
     internal static string RunnerStartup => Path.Combine(UserProfile, "AppData", "Roaming", "Microsoft", "Windows", "Start Menu", "Programs", "Startup", "Mohist_Runner.cmd");
+    internal static string SlackStartup => Path.Combine(UserProfile, "AppData", "Roaming", "Microsoft", "Windows", "Start Menu", "Programs", "Startup", "Mohist_Slack.cmd");
     internal static string ServerMetadata => Path.Combine(ServiceDir, "mohist-server.install.json");
     internal static string RunnerMetadata => Path.Combine(ServiceDir, "mohist-runner.install.json");
+    internal static string SlackMetadata => Path.Combine(ServiceDir, "mohist-slack.install.json");
+    internal static string SlackExecutable => Path.Combine("/repo", "packages", "go", "mohist-slack", "bin", "mohist-slack.exe");
     internal static string ServerLog => Path.Combine(UserProfile, ".mohist", "server", "out.log");
     internal static string RunnerLog => Path.Combine(UserProfile, ".mohist", "runner", "out.log");
 
@@ -31,7 +35,10 @@ internal static class WindowsInstallTestSupport
         StringWriter? error = null,
         Func<ProcessStartInfo, Process?>? processLauncher = null,
         Func<string, ILogChangeObserver>? logChangeObserverFactory = null,
-        Func<string, Task<bool>>? healthProbe = null)
+        Func<string, Task<bool>>? healthProbe = null,
+        IEnvironmentVariableProvider? environment = null,
+        TimeProvider? timeProvider = null,
+        Func<TimeSpan, CancellationToken, Task>? pollWait = null)
     {
         processLauncher ??= static _ => null;
         return new WindowsScheduledTaskInstaller(
@@ -42,7 +49,10 @@ internal static class WindowsInstallTestSupport
             processLauncher,
             logChangeObserverFactory,
             healthProbe,
-            userProfilePath: UserProfile);
+            userProfilePath: UserProfile,
+            environment: environment,
+            timeProvider: timeProvider,
+            pollWait: pollWait);
     }
 
     internal static ServiceInstallOptions InstallOptions(
@@ -73,6 +83,7 @@ internal static class WindowsInstallTestSupport
     {
         public readonly List<(string FileName, string[] Args, string? WorkingDirectory)> ExecutedCommands = new();
         public Func<string, string[], (int ExitCode, string Stdout, string Stderr)>? ResponseFactory { get; set; }
+        public Action<string, string[]>? OnExecute { get; set; }
 
         public Task<(int ExitCode, string Stdout, string Stderr)> ExecuteAsync(
             string fileName,
@@ -80,7 +91,10 @@ internal static class WindowsInstallTestSupport
             string? workingDirectory = null,
             CancellationToken cancellationToken = default)
         {
+            cancellationToken.ThrowIfCancellationRequested();
             ExecutedCommands.Add((fileName, args, workingDirectory));
+            OnExecute?.Invoke(fileName, args);
+            cancellationToken.ThrowIfCancellationRequested();
             if (ResponseFactory != null)
                 return Task.FromResult(ResponseFactory(fileName, args));
             return Task.FromResult((0, "", ""));
@@ -133,6 +147,12 @@ internal static class WindowsInstallTestSupport
 
     internal static string ProcessName(WindowsServiceTarget target) =>
         target == WindowsServiceTarget.Server ? "dotnet.exe" : "node.exe";
+
+    internal static bool IsSlackTaskProbe(string fileName, string[] args) =>
+        fileName == "powershell.exe" && args[^1].Contains("Schedule.Service", StringComparison.Ordinal);
+
+    internal static bool IsSlackProcessProbe(string fileName, string[] args) =>
+        fileName == "powershell.exe" && args[^1].Contains("Win32_Process", StringComparison.Ordinal);
 
     internal static ServiceInstallOptions TargetInstallOptions(WindowsServiceTarget target) =>
         target == WindowsServiceTarget.Server

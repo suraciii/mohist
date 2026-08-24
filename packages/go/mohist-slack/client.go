@@ -9,8 +9,9 @@ import (
 // to Slack; the adapter controls when, mirroring the Node contract (messages
 // acknowledge after forwarding, interactions before).
 type SocketEvent struct {
-	Body any
-	Ack  func()
+	Context context.Context
+	Body    any
+	Ack     func()
 }
 
 // SocketClient is one Slack Socket Mode connection for a single target.
@@ -18,8 +19,10 @@ type SocketClient interface {
 	// Start connects and returns the verified Slack app identity of the
 	// connected app. It returns once the socket is usable.
 	Start(ctx context.Context) (string, error)
-	// OnEvent registers the callback invoked per inbound event. Handlers
-	// run on their own goroutine; the client does not wait for them.
+	// OnEvent registers the callback invoked per inbound event. Production
+	// clients bound callback concurrency and cancel Context on disconnect. A
+	// callback must not call Disconnect synchronously because disconnect joins
+	// all active callbacks.
 	OnEvent(handler func(SocketEvent))
 	// Disconnect closes the connection and stops background pumps.
 	Disconnect(ctx context.Context) error

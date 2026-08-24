@@ -19,16 +19,22 @@ import (
 )
 
 const (
-	slackAPIBaseURL = "https://slack.com/api/"
+	slackAPIBaseURL          = "https://slack.com/api/"
+	defaultSocketMaxInFlight = 8
 
 	// defaultConnectTimeout bounds how long Start waits for the Socket Mode
 	// hello; a dead endpoint fails the target's connection attempt so the
 	// next discovery cycle can retry.
 	defaultConnectTimeout = 10 * time.Second
 
-	// socketHandshakeTimeout matches slack-go's own default handshake bound.
-	socketHandshakeTimeout = 45 * time.Second
+	// Socket and bootstrap handshakes use the same bound so reconnects cannot
+	// remain parked behind a non-responsive proxy.
+	socketHandshakeTimeout = defaultConnectTimeout
 )
+
+var errSocketEventsClosed = errors.New("slack socket events channel closed")
+var errSocketRunnerStopped = errors.New("slack socket runner stopped")
+var errSocketDispatchSaturated = errors.New("slack socket event queue is saturated")
 
 // SlackSocket adapts slack-go's socket-mode client to SocketClient.
 //
@@ -42,24 +48,54 @@ type SlackSocket struct {
 	appToken       string
 	connectTimeout time.Duration
 	dialer         *websocket.Dialer
+	httpClient     *http.Client
+	apiURL         string
 
-	mu      sync.Mutex
-	handler func(SocketEvent)
-	stateFn func(state string, apiErr error)
-	cancel  context.CancelFunc
-	stopped bool
+	mu          sync.Mutex
+	handler     func(SocketEvent)
+	stateFn     func(state string, apiErr error)
+	cancel      context.CancelFunc
+	done        chan struct{}
+	maxInFlight int
+	stopped     bool
 }
 
 func NewSlackSocket(appToken string) *SlackSocket {
-	return &SlackSocket{appToken: appToken, connectTimeout: defaultConnectTimeout}
+	transport := http.DefaultTransport.(*http.Transport).Clone()
+	return &SlackSocket{
+		appToken:       appToken,
+		connectTimeout: defaultConnectTimeout,
+		maxInFlight:    defaultSocketMaxInFlight,
+		httpClient:     &http.Client{Transport: transport, Timeout: defaultConnectTimeout},
+	}
 }
 
-// SetProxy routes the underlying WebSocket dialer through an HTTP proxy.
+// SetMaxInFlight bounds active and queued event callbacks for this connection.
+// It must be called before Start.
+func (s *SlackSocket) SetMaxInFlight(value int) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.cancel != nil {
+		return
+	}
+	s.maxInFlight = max(1, value)
+}
+
+// SetProxy routes both Socket Mode bootstrap HTTP and WebSocket traffic through
+// the same proxy.
 func (s *SlackSocket) SetProxy(proxyURL *url.URL) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.cancel != nil {
+		return
+	}
+	transport := http.DefaultTransport.(*http.Transport).Clone()
+	transport.Proxy = http.ProxyURL(proxyURL)
 	s.dialer = &websocket.Dialer{
 		Proxy:            http.ProxyURL(proxyURL),
 		HandshakeTimeout: socketHandshakeTimeout,
 	}
+	s.httpClient = &http.Client{Transport: transport, Timeout: defaultConnectTimeout}
 }
 
 func (s *SlackSocket) OnEvent(handler func(SocketEvent)) {
@@ -69,6 +105,8 @@ func (s *SlackSocket) OnEvent(handler func(SocketEvent)) {
 }
 
 // OnState receives connection-state transitions; the adapter logs them.
+// The callback must not call Disconnect synchronously because it runs on a
+// socket pump or runner goroutine that Disconnect joins.
 func (s *SlackSocket) OnState(handler func(state string, apiErr error)) {
 	s.mu.Lock()
 	s.stateFn = handler
@@ -84,95 +122,80 @@ func (s *SlackSocket) Start(ctx context.Context) (string, error) {
 		s.mu.Unlock()
 		return "", errors.New("slack socket was already started")
 	}
+	runCtx, cancel := context.WithCancel(context.WithoutCancel(ctx))
+	done := make(chan struct{})
+	s.cancel = cancel
+	s.done = done
 	handler := s.handler
 	stateFn := s.stateFn
+	maxInFlight := max(1, s.maxInFlight)
+	dialer := s.dialer
+	httpClient := s.httpClient
+	apiURL := s.apiURL
+	appToken := s.appToken
 	s.mu.Unlock()
 
 	options := []socketmode.Option{}
-	if s.dialer != nil {
-		options = append(options, socketmode.OptionDialer(s.dialer))
+	if dialer != nil {
+		options = append(options, socketmode.OptionDialer(dialer))
 	}
-	client := socketmode.New(slack.New(s.appToken), options...)
+	apiOptions := []slack.Option{slack.OptionAppLevelToken(appToken)}
+	if httpClient != nil {
+		apiOptions = append(apiOptions, slack.OptionHTTPClient(httpClient))
+	}
+	if apiURL != "" {
+		apiOptions = append(apiOptions, slack.OptionAPIURL(apiURL))
+	}
+	client := socketmode.New(slack.New("", apiOptions...), options...)
 
-	runCtx, cancel := context.WithCancel(context.WithoutCancel(ctx))
-	s.mu.Lock()
-	s.cancel = cancel
-	s.mu.Unlock()
-
-	go func() { _ = client.RunContext(runCtx) }()
+	runner := make(chan error, 1)
+	runnerDone := make(chan struct{})
+	var runnerResultMu sync.Mutex
+	var runnerResult error
+	readRunnerResult := func() error {
+		runnerResultMu.Lock()
+		defer runnerResultMu.Unlock()
+		return runnerResult
+	}
+	go func() {
+		err := client.RunContext(runCtx)
+		runnerResultMu.Lock()
+		runnerResult = err
+		runnerResultMu.Unlock()
+		close(runnerDone)
+		runner <- err
+	}()
 
 	hello := make(chan string, 1)
 	failed := make(chan error, 1)
+	connected := make(chan struct{})
 	timeout := time.NewTimer(s.connectTimeout)
 	defer timeout.Stop()
 
+	monitorDone := make(chan struct{})
 	go func() {
-		forwarding := false
-		for {
-			select {
-			case <-runCtx.Done():
-				return
-			case evt := <-client.Events:
-				switch evt.Type {
-				case socketmode.EventTypeConnecting:
-					reportState(stateFn, "connecting", nil)
-				case socketmode.EventTypeConnected, socketmode.EventTypeHello:
-					reportState(stateFn, "connected", nil)
-					if evt.Type == socketmode.EventTypeHello && !forwarding {
-						forwarding = true
-						appID := ""
-						if evt.Request != nil {
-							appID = evt.Request.ConnectionInfo.AppID
-						}
-						select {
-						case hello <- appID:
-						default:
-						}
-					}
-				case socketmode.EventTypeConnectionError, socketmode.EventTypeInvalidAuth:
-					var apiErr error
-					if asErr, ok := evt.Data.(error); ok {
-						apiErr = asErr
-					}
-					if evt.Type == socketmode.EventTypeInvalidAuth && apiErr == nil {
-						apiErr = errors.New("slack rejected the app token")
-					}
-					reportState(stateFn, "reconnecting", apiErr)
-					if !forwarding {
-						select {
-						case failed <- orUnavailable(apiErr):
-						default:
-						}
-						return
-					}
-				case socketmode.EventTypeEventsAPI, socketmode.EventTypeInteractive:
-					if !forwarding {
-						continue
-					}
-					request := evt.Request
-					if request == nil {
-						continue
-					}
-					var body any
-					if err := json.Unmarshal(request.Payload, &body); err != nil {
-						continue // malformed payloads are dropped unacked
-					}
-					event := SocketEvent{
-						Body: body,
-						Ack: func() {
-							_ = client.AckCtx(runCtx, request.EnvelopeID, nil)
-						},
-					}
-					if handler != nil {
-						handler(event)
-					} else {
-						event.Ack()
-					}
-				default:
-					// ping/disconnect internals stay with slack-go.
-				}
-			}
-		}
+		defer close(monitorDone)
+		monitorSocketRunner(runCtx, cancel, runner, connected, stateFn, failed)
+	}()
+	executor := newSocketEventExecutor(runCtx, maxInFlight, handler)
+	go func() {
+		runSocketEventPump(
+			runCtx,
+			client.Events,
+			func(ctx context.Context, envelopeID string) error {
+				return client.AckCtx(ctx, envelopeID, nil)
+			},
+			stateFn,
+			hello,
+			failed,
+			connected,
+			executor.TryDispatch,
+		)
+		cancel()
+		executor.Wait()
+		<-runnerDone
+		<-monitorDone
+		close(done)
 	}()
 
 	select {
@@ -185,8 +208,236 @@ func (s *SlackSocket) Start(ctx context.Context) (string, error) {
 	case err := <-failed:
 		cancel()
 		return "", err
+	case <-done:
+		select {
+		case err := <-failed:
+			return "", err
+		default:
+		}
+		if err := ctx.Err(); err != nil {
+			return "", err
+		}
+		err := readRunnerResult()
+		if err == nil {
+			err = errSocketRunnerStopped
+		}
+		return "", err
 	case appID := <-hello:
+		if err := ctx.Err(); err != nil {
+			cancel()
+			return "", err
+		}
+		select {
+		case <-runnerDone:
+			err := readRunnerResult()
+			if err == nil {
+				err = errSocketRunnerStopped
+			}
+			cancel()
+			return "", err
+		default:
+		}
+		select {
+		case err := <-failed:
+			cancel()
+			return "", err
+		default:
+		}
+		if err := runCtx.Err(); err != nil {
+			return "", err
+		}
 		return appID, nil
+	}
+}
+
+type socketEventExecutor struct {
+	ctx          context.Context
+	messages     chan SocketEvent
+	interactions chan SocketEvent
+	done         chan struct{}
+}
+
+func newSocketEventExecutor(ctx context.Context, maxInFlight int, handler func(SocketEvent)) *socketEventExecutor {
+	maxInFlight = max(1, maxInFlight)
+	executor := &socketEventExecutor{
+		ctx:          ctx,
+		messages:     make(chan SocketEvent, maxInFlight),
+		interactions: make(chan SocketEvent, maxInFlight),
+		done:         make(chan struct{}),
+	}
+	var workers sync.WaitGroup
+	startWorkers := func(queue <-chan SocketEvent) {
+		workers.Add(maxInFlight)
+		for range maxInFlight {
+			go func() {
+				defer workers.Done()
+				for {
+					select {
+					case <-ctx.Done():
+						return
+					case event := <-queue:
+						if ctx.Err() != nil {
+							return
+						}
+						if handler != nil {
+							handler(event)
+						} else {
+							event.Ack()
+						}
+					}
+				}
+			}()
+		}
+	}
+	startWorkers(executor.messages)
+	startWorkers(executor.interactions)
+	go func() {
+		workers.Wait()
+		close(executor.done)
+	}()
+	return executor
+}
+
+func (e *socketEventExecutor) TryDispatch(event SocketEvent) bool {
+	queue := e.messages
+	if IsSlackInteraction(event.Body) {
+		queue = e.interactions
+	}
+	select {
+	case queue <- event:
+		return true
+	case <-e.ctx.Done():
+		return false
+	default:
+		return false
+	}
+}
+
+func (e *socketEventExecutor) Wait() { <-e.done }
+
+func monitorSocketRunner(
+	ctx context.Context,
+	cancel context.CancelFunc,
+	runner <-chan error,
+	connected <-chan struct{},
+	stateFn func(state string, apiErr error),
+	failed chan<- error,
+) {
+	select {
+	case <-ctx.Done():
+		return
+	case err := <-runner:
+		if ctx.Err() != nil {
+			return
+		}
+		if err == nil {
+			err = errSocketRunnerStopped
+		}
+		select {
+		case <-connected:
+			reportState(stateFn, "error", err)
+		default:
+			select {
+			case failed <- err:
+			default:
+			}
+		}
+		cancel()
+	}
+}
+
+func runSocketEventPump(
+	ctx context.Context,
+	events <-chan socketmode.Event,
+	ack func(context.Context, string) error,
+	stateFn func(state string, apiErr error),
+	hello chan<- string,
+	failed chan<- error,
+	connected chan struct{},
+	dispatch func(SocketEvent) bool,
+) {
+	forwarding := false
+	for {
+		if ctx.Err() != nil {
+			return
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case evt, ok := <-events:
+			if ctx.Err() != nil {
+				return
+			}
+			if !ok {
+				if forwarding {
+					reportState(stateFn, "error", errSocketEventsClosed)
+				} else {
+					select {
+					case failed <- errSocketEventsClosed:
+					default:
+					}
+				}
+				return
+			}
+			switch evt.Type {
+			case socketmode.EventTypeConnecting:
+				reportState(stateFn, "connecting", nil)
+			case socketmode.EventTypeConnected, socketmode.EventTypeHello:
+				reportState(stateFn, "connected", nil)
+				if evt.Type == socketmode.EventTypeHello && !forwarding {
+					forwarding = true
+					close(connected)
+					appID := ""
+					if evt.Request != nil {
+						appID = evt.Request.ConnectionInfo.AppID
+					}
+					select {
+					case hello <- appID:
+					default:
+					}
+				}
+			case socketmode.EventTypeConnectionError, socketmode.EventTypeInvalidAuth:
+				var apiErr error
+				if asErr, ok := evt.Data.(error); ok {
+					apiErr = asErr
+				}
+				if evt.Type == socketmode.EventTypeInvalidAuth && apiErr == nil {
+					apiErr = errors.New("slack rejected the app token")
+				}
+				reportState(stateFn, "reconnecting", apiErr)
+				if !forwarding {
+					select {
+					case failed <- orUnavailable(apiErr):
+					default:
+					}
+					return
+				}
+			case socketmode.EventTypeEventsAPI, socketmode.EventTypeInteractive:
+				if !forwarding || evt.Request == nil {
+					continue
+				}
+				var body any
+				if err := json.Unmarshal(evt.Request.Payload, &body); err != nil {
+					continue // malformed payloads are dropped unacked
+				}
+				envelopeID := evt.Request.EnvelopeID
+				event := SocketEvent{
+					Context: ctx,
+					Body:    body,
+					Ack: func() {
+						_ = ack(ctx, envelopeID)
+					},
+				}
+				// Slack retries unacknowledged Socket Mode envelopes. Rejecting
+				// admission preserves bounded memory without blocking later
+				// interactions behind a saturated message lane.
+				if !dispatch(event) {
+					reportState(stateFn, "backpressured", errSocketDispatchSaturated)
+				}
+			default:
+				// ping/disconnect internals stay with slack-go.
+			}
+		}
 	}
 }
 
@@ -205,13 +456,26 @@ func orUnavailable(apiErr error) error {
 
 // Disconnect tears down the managed connection; slack-go's run loop exits
 // on context cancellation.
-func (s *SlackSocket) Disconnect(context.Context) error {
+func (s *SlackSocket) Disconnect(ctx context.Context) error {
 	s.mu.Lock()
-	defer s.mu.Unlock()
 	if !s.stopped {
 		s.stopped = true
-		if s.cancel != nil {
-			s.cancel()
+	}
+	cancel := s.cancel
+	done := s.done
+	httpClient := s.httpClient
+	s.mu.Unlock()
+	if httpClient != nil {
+		defer httpClient.CloseIdleConnections()
+	}
+	if cancel != nil {
+		cancel()
+	}
+	if done != nil {
+		select {
+		case <-done:
+		case <-ctx.Done():
+			return ctx.Err()
 		}
 	}
 	return nil
@@ -227,14 +491,28 @@ func (s *SlackSocket) Disconnect(context.Context) error {
 type SlackWeb struct {
 	token      string
 	httpClient *http.Client
+	apiBaseURL string
 	api        *slack.Client
 }
 
 func NewSlackWeb(botToken string, httpClient *http.Client) *SlackWeb {
+	return newSlackWebWithAPIBaseURL(botToken, httpClient, slackAPIBaseURL)
+}
+
+func newSlackWebWithAPIBaseURL(botToken string, httpClient *http.Client, apiBaseURL string) *SlackWeb {
+	if strings.TrimSpace(apiBaseURL) == "" {
+		apiBaseURL = slackAPIBaseURL
+	}
+	apiBaseURL = strings.TrimRight(apiBaseURL, "/") + "/"
 	return &SlackWeb{
 		token:      botToken,
 		httpClient: httpClient,
-		api:        slack.New(botToken, slack.OptionHTTPClient(httpClient)),
+		apiBaseURL: apiBaseURL,
+		api: slack.New(
+			botToken,
+			slack.OptionHTTPClient(httpClient),
+			slack.OptionAPIURL(apiBaseURL),
+		),
 	}
 }
 
@@ -271,7 +549,7 @@ func (w *SlackWeb) UpdateMessage(ctx context.Context, input UpdateMessageInput) 
 // callChat posts one chat.* form request and normalizes the envelope:
 // ok:false decays into a coded SlackError, transport failures propagate.
 func (w *SlackWeb) callChat(ctx context.Context, method string, form url.Values) (string, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, slackAPIBaseURL+method, strings.NewReader(form.Encode()))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, w.apiBaseURL+method, strings.NewReader(form.Encode()))
 	if err != nil {
 		return "", err
 	}

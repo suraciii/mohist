@@ -3,7 +3,7 @@ using System.Text;
 
 namespace Mohist.Cli;
 
-internal sealed class SystemdServiceInstaller : IServiceInstaller, IManagedRuntimeActivator
+internal sealed partial class SystemdServiceInstaller : IServiceInstaller, IManagedRuntimeActivator
 {
     private const string ServerUnit = "mohist.service";
     private const string RunnerUnit = "mohist-runner.service";
@@ -81,27 +81,6 @@ internal sealed class SystemdServiceInstaller : IServiceInstaller, IManagedRunti
         return await InstallAsync(unit, options);
     }
 
-    public async Task<int> InstallSlackAsync(ServiceInstallOptions options)
-    {
-        var repoRoot = ResolveRepoRoot(options.RepoRoot);
-        var environment = BuildServiceEnvironment(includeOperatorToken: true);
-        var loadCredentials = Array.Empty<string>();
-        if (!environment.ContainsKey(AdapterTokenEnvironmentVariable))
-        {
-            environment[AdapterTokenPathEnvironmentVariable] = $"%d/{OperatorCredentialName}";
-            loadCredentials = [$"{OperatorCredentialName}:{ResolveOperatorCredentialSource()}"];
-        }
-        environment["SERVER_URL"] = options.ServerUrl ?? "http://127.0.0.1:3456";
-        var unit = new SystemdUnit(
-            Name: SlackUnit,
-            Description: "Mohist Slack adapter",
-            WorkingDirectory: repoRoot,
-            ExecStart: $"{Path.Combine(repoRoot, "packages/go/mohist-slack/bin/mohist-slack")}",
-            Environment: environment,
-            LoadCredentials: loadCredentials);
-        return await InstallAsync(unit, options);
-    }
-
     public Task<int> StartServerAsync(ServiceCommandOptions options) => StartAsync(ServerUnit, options);
     public Task<int> StopServerAsync(ServiceCommandOptions options) => StopAsync(ServerUnit, options);
     public Task<int> RestartServerAsync(ServiceCommandOptions options) => RestartAsync(ServerUnit, options);
@@ -115,9 +94,42 @@ internal sealed class SystemdServiceInstaller : IServiceInstaller, IManagedRunti
     public Task<int> StatusRunnerAsync(ServiceCommandOptions options) => StatusAsync(RunnerUnit, options);
     public Task<int> LogsRunnerAsync(ServiceCommandOptions options) => LogsAsync(RunnerUnit, options);
     public Task<int> UninstallRunnerAsync(ServiceCommandOptions options) => UninstallAsync(RunnerUnit, options);
-    public Task<int> StartSlackAsync(ServiceCommandOptions options) => StartAsync(SlackUnit, options);
-    public Task<int> StopSlackAsync(ServiceCommandOptions options) => StopAsync(SlackUnit, options);
-    public Task<int> RestartSlackAsync(ServiceCommandOptions options) => RestartAsync(SlackUnit, options);
+    public Task<int> StartSlackAsync(ServiceCommandOptions options, CancellationToken cancellationToken = default) =>
+        StartAsync(SlackUnit, options, cancellationToken);
+    public Task<int> StopSlackAsync(ServiceCommandOptions options, CancellationToken cancellationToken = default) =>
+        StopAsync(SlackUnit, options, cancellationToken);
+    public async Task<int> RestartSlackAsync(
+        ServiceCommandOptions options,
+        CancellationToken cancellationToken = default)
+    {
+        if (options.DryRun)
+            return await RestartAsync(SlackUnit, options, cancellationToken);
+        var (stateKnown, wasRunning) = await ProbeSlackRunningStateAsync(cancellationToken);
+        if (!stateKnown)
+        {
+            _err.WriteLine("Slack service state could not be verified before restart.");
+            return 1;
+        }
+        try
+        {
+            return await RestartAsync(SlackUnit, options, cancellationToken);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            try
+            {
+                var recovery = wasRunning
+                    ? await StartAsync(SlackUnit, options, CancellationToken.None)
+                    : await StopAsync(SlackUnit, options, CancellationToken.None);
+                if (recovery != 0) _err.WriteLine("Slack restart cancellation recovery could not restore the previous service state.");
+            }
+            catch (Exception ex)
+            {
+                _err.WriteLine($"Slack restart cancellation recovery failed: {ex.Message}");
+            }
+            throw;
+        }
+    }
     public Task<int> StatusSlackAsync(ServiceCommandOptions options) => StatusAsync(SlackUnit, options);
     public Task<int> LogsSlackAsync(ServiceCommandOptions options) => LogsAsync(SlackUnit, options);
     public Task<int> UninstallSlackAsync(ServiceCommandOptions options) => UninstallAsync(SlackUnit, options);
@@ -506,6 +518,28 @@ internal sealed class SystemdServiceInstaller : IServiceInstaller, IManagedRunti
         return code == 0 && string.Equals(trimmed, "active", StringComparison.OrdinalIgnoreCase);
     }
 
+    public async Task<bool> IsSlackRunningAsync(CancellationToken cancellationToken = default)
+    {
+        if (!OperatingSystem.IsLinux() && _commandExecutor is SystemCommandExecutor) return false;
+        var (code, stdout, _) = await _commandExecutor.ExecuteAsync(
+            "systemctl",
+            ["--user", "is-active", SlackUnit],
+            cancellationToken: cancellationToken);
+        return code == 0 && string.Equals(stdout.Trim(), "active", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private async Task<(bool Known, bool Running)> ProbeSlackRunningStateAsync(CancellationToken cancellationToken)
+    {
+        var (code, stdout, _) = await _commandExecutor.ExecuteAsync(
+            "systemctl",
+            ["--user", "is-active", SlackUnit],
+            cancellationToken: cancellationToken);
+        var state = stdout.Trim().ToLowerInvariant();
+        if (code == 0 && state is "active" or "activating" or "reloading") return (true, true);
+        if (code != 0 && state is "inactive" or "failed") return (true, false);
+        return (false, false);
+    }
+
     public Task<bool> IsRunnerInstalledAsync(string? unitDir = null) => Task.FromResult(IsRunnerUnitInstalled(unitDir));
 
     public Task<bool> IsSlackInstalledAsync(string? unitDir = null) => Task.FromResult(
@@ -559,28 +593,37 @@ internal sealed class SystemdServiceInstaller : IServiceInstaller, IManagedRunti
         return 0;
     }
 
-    private async Task<int> StartAsync(string unitName, ServiceCommandOptions options)
+    private async Task<int> StartAsync(
+        string unitName,
+        ServiceCommandOptions options,
+        CancellationToken cancellationToken = default)
     {
         if (!EnsureSystemdSupported(options.DryRun)) return 1;
-        return await RunSystemctlAsync(unitName, options, "start");
+        return await RunSystemctlAsync(unitName, options, cancellationToken, "start");
     }
 
-    private async Task<int> StopAsync(string unitName, ServiceCommandOptions options)
+    private async Task<int> StopAsync(
+        string unitName,
+        ServiceCommandOptions options,
+        CancellationToken cancellationToken = default)
     {
         if (!EnsureSystemdSupported(options.DryRun)) return 1;
-        return await RunSystemctlAsync(unitName, options, "stop");
+        return await RunSystemctlAsync(unitName, options, cancellationToken, "stop");
     }
 
-    private async Task<int> RestartAsync(string unitName, ServiceCommandOptions options)
+    private async Task<int> RestartAsync(
+        string unitName,
+        ServiceCommandOptions options,
+        CancellationToken cancellationToken = default)
     {
         if (!EnsureSystemdSupported(options.DryRun)) return 1;
-        return await RunSystemctlAsync(unitName, options, "restart");
+        return await RunSystemctlAsync(unitName, options, cancellationToken, "restart");
     }
 
     private async Task<int> StatusAsync(string unitName, ServiceCommandOptions options)
     {
         if (!EnsureSystemdSupported(options.DryRun)) return 1;
-        return await RunSystemctlAsync(unitName, options, "status", "--no-pager");
+        return await RunSystemctlAsync(unitName, options, CancellationToken.None, "status", "--no-pager");
     }
 
     private async Task<int> LogsAsync(string unitName, ServiceCommandOptions options)
@@ -637,7 +680,11 @@ internal sealed class SystemdServiceInstaller : IServiceInstaller, IManagedRunti
         return reload;
     }
 
-    private async Task<int> RunSystemctlAsync(string unitName, ServiceCommandOptions options, params string[] command)
+    private async Task<int> RunSystemctlAsync(
+        string unitName,
+        ServiceCommandOptions options,
+        CancellationToken cancellationToken,
+        params string[] command)
     {
         var args = new List<string> { "--user" };
         args.AddRange(command);
@@ -649,7 +696,10 @@ internal sealed class SystemdServiceInstaller : IServiceInstaller, IManagedRunti
             return 0;
         }
 
-        var (code, stdout, stderr) = await _commandExecutor.ExecuteAsync("systemctl", args.ToArray());
+        var (code, stdout, stderr) = await _commandExecutor.ExecuteAsync(
+            "systemctl",
+            args.ToArray(),
+            cancellationToken: cancellationToken);
         if (!string.IsNullOrWhiteSpace(stdout)) _out.Write(stdout);
         if (!string.IsNullOrWhiteSpace(stderr)) _err.Write(stderr);
         return code;
@@ -671,10 +721,10 @@ internal sealed class SystemdServiceInstaller : IServiceInstaller, IManagedRunti
             _err.WriteLine("Warning: loginctl enable-linger failed; service may stop when the user logs out.");
     }
 
-    private static string ResolveRepoRoot(string? explicitRoot)
+    private string ResolveRepoRoot(string? explicitRoot)
     {
         if (!string.IsNullOrWhiteSpace(explicitRoot))
-            return explicitRoot.Replace('\\', '/');
+            return Path.GetFullPath(explicitRoot, _fileSystem.CurrentDirectory).Replace('\\', '/');
 
         var dir = new DirectoryInfo(AppContext.BaseDirectory);
         while (dir is not null)
@@ -804,6 +854,60 @@ internal sealed class SystemdServiceInstaller : IServiceInstaller, IManagedRunti
             return value;
         return "'" + value.Replace("'", "'\\''", StringComparison.Ordinal) + "'";
     }
+
+    private static string QuoteSystemdArgument(string value)
+    {
+        if (value.Any(c => c is '\r' or '\n' or '\0'))
+            throw new ArgumentException("systemd command arguments cannot contain control characters");
+        if (value.All(c => char.IsLetterOrDigit(c) || c is '/' or '.' or '_' or '-' or ':' or '='))
+            return value;
+        var quoted = new StringBuilder(value.Length + 2);
+        quoted.Append('"');
+        foreach (var c in value)
+        {
+            switch (c)
+            {
+                case '\\': quoted.Append("\\\\"); break;
+                case '"': quoted.Append("\\\""); break;
+                case '$': quoted.Append("$$"); break;
+                case '%': quoted.Append("%%"); break;
+                default: quoted.Append(c); break;
+            }
+        }
+        quoted.Append('"');
+        return quoted.ToString();
+    }
+
+    private static string RewriteSlackServiceLaunch(string content, string workingDirectory, string execStart)
+    {
+        var lines = content.Replace("\r\n", "\n", StringComparison.Ordinal).Split('\n');
+        var inService = false;
+        var workingDirectoryCount = 0;
+        var execStartCount = 0;
+        for (var i = 0; i < lines.Length; i++)
+        {
+            var trimmed = lines[i].Trim();
+            if (trimmed.StartsWith('[') && trimmed.EndsWith(']'))
+            {
+                inService = string.Equals(trimmed, "[Service]", StringComparison.Ordinal);
+                continue;
+            }
+            if (!inService || trimmed.StartsWith('#')) continue;
+            if (trimmed.StartsWith("WorkingDirectory=", StringComparison.Ordinal))
+            {
+                lines[i] = $"WorkingDirectory={workingDirectory}";
+                workingDirectoryCount++;
+            }
+            else if (trimmed.StartsWith("ExecStart=", StringComparison.Ordinal))
+            {
+                lines[i] = $"ExecStart={execStart}";
+                execStartCount++;
+            }
+        }
+        if (workingDirectoryCount != 1 || execStartCount != 1)
+            throw new InvalidOperationException("Slack unit must contain exactly one WorkingDirectory and ExecStart setting");
+        return string.Join('\n', lines);
+    }
 }
 
 internal record SystemdUnit(
@@ -823,7 +927,7 @@ internal record SystemdUnit(
         builder.AppendLine();
         builder.AppendLine("[Service]");
         builder.AppendLine("Type=simple");
-        builder.AppendLine($"WorkingDirectory={EscapeValue(NormalizePath(WorkingDirectory))}");
+        builder.AppendLine($"WorkingDirectory={FormatWorkingDirectory(NormalizePath(WorkingDirectory))}");
         foreach (var credential in LoadCredentials ?? [])
             builder.AppendLine($"LoadCredential={EscapeValue(credential)}");
         foreach (var (key, value) in Environment)
@@ -844,6 +948,18 @@ internal record SystemdUnit(
     private static string NormalizePath(string value) => value.Replace('\\', '/');
 
     private static string EscapeValue(string value) => RejectControlChars(value);
+
+    internal static string FormatWorkingDirectory(string value)
+    {
+        value = RejectControlChars(value);
+        var escaped = value
+            .Replace("\\", "\\\\", StringComparison.Ordinal)
+            .Replace("\"", "\\\"", StringComparison.Ordinal)
+            .Replace("%", "%%", StringComparison.Ordinal);
+        return value.Any(c => char.IsWhiteSpace(c) || c is '\\' or '"')
+            ? $"\"{escaped}\""
+            : escaped;
+    }
 
     private static string EscapeEnvironment(string value) => RejectControlChars(value)
         .Replace("\\", "\\\\", StringComparison.Ordinal)
