@@ -293,80 +293,76 @@ public sealed partial class SlackMultiAgentIngressSpecs
         await AssertPendingWithoutOriginalResourcesAsync(copied.Identity, selected);
     }
 
-    [Fact]
-    public async Task Selection_route_rejects_current_policy_lease_deletion_and_binding_drift_before_commit()
+    [Theory]
+    [InlineData("selected_policy", "unauthorized")]
+    [InlineData("prompt_policy", "unauthorized")]
+    [InlineData("expired_lease", "unavailable")]
+    [InlineData("binding_drift", "no_longer_valid")]
+    [InlineData("deleted", "unavailable")]
+    public async Task Selection_route_rejects_mutable_candidate_state_before_commit(
+        string scenario,
+        string expectedState)
     {
         const string owner = "U_SELECTION_MUTABLE";
-        var promptOwner = await CreateConnectionAsync("mutable-owner", "T-selection-mutable", owner, "A_SELECTION_MUTABLE_OWNER");
-        var selected = await CreateConnectionAsync("mutable-selected", "T-selection-mutable", owner, "A_SELECTION_MUTABLE_SELECTED");
-
-        async Task<(SlackMessageIdentity Identity, SlackSelectionActionPayload Choice)> RenderAsync(
-            string suffix,
-            string chooserMessageTs)
-        {
-            var identity = new SlackMessageIdentity(
-                promptOwner.WorkspaceTeamId!,
-                $"C-selection-mutable-{suffix}",
-                $"1710000000.0220{suffix}");
-            await PostChannelAsync(
-                promptOwner,
-                identity.ConversationId,
-                identity.MessageTs,
-                null,
-                [promptOwner.BotUserId!, selected.BotUserId!],
-                $"<@{promptOwner.BotUserId}> <@{selected.BotUserId}> mutable {suffix}",
-                owner);
-            var choice = await DeliverChooserAndGetChoiceAsync(
-                promptOwner,
-                identity,
-                selected.ProjectId,
-                selected.Id,
-                chooserMessageTs);
-            return (identity, choice);
-        }
-
-        var selectedPolicy = await RenderAsync("01", "1710000000.022101");
-        await UpdateConnectionAsync(selected, row => row.OwnerSlackUserId = "U_NEW_SELECTED_OWNER");
-        var selectedPolicyResult = await PostSelectionAsync(promptOwner, selectedPolicy.Choice, owner);
-        Assert.Equal("unauthorized", selectedPolicyResult.GetProperty("state").GetString());
-        await AssertPendingWithoutOriginalResourcesAsync(selectedPolicy.Identity, selected);
-        await UpdateConnectionAsync(selected, row => row.OwnerSlackUserId = owner);
-
-        var promptPolicy = await RenderAsync("02", "1710000000.022102");
-        await UpdateConnectionAsync(promptOwner, row => row.OwnerSlackUserId = "U_NEW_PROMPT_OWNER");
-        var promptPolicyResult = await PostSelectionAsync(promptOwner, promptPolicy.Choice, owner);
-        Assert.Equal("unauthorized", promptPolicyResult.GetProperty("state").GetString());
-        await AssertPendingWithoutOriginalResourcesAsync(promptPolicy.Identity, selected);
-        await UpdateConnectionAsync(promptOwner, row => row.OwnerSlackUserId = owner);
-
-        var expiredLease = await RenderAsync("03", "1710000000.022103");
-        await ExpireConnectionLeaseAsync(selected);
-        var expiredLeaseResult = await PostSelectionAsync(promptOwner, expiredLease.Choice, owner);
-        Assert.Equal("unavailable", expiredLeaseResult.GetProperty("state").GetString());
-        await AssertPendingWithoutOriginalResourcesAsync(expiredLease.Identity, selected);
-        _connectionLeases[selected.Id] = await SlackRuntimeLeaseTestSupport.AcquireConnectionLeaseAsync(
-            _fixture,
+        var promptOwner = await CreateConnectionAsync(
+            $"mutable-owner-{scenario}",
+            "T-selection-mutable",
+            owner,
+            $"A_SELECTION_MUTABLE_OWNER_{scenario}");
+        var selected = await CreateConnectionAsync(
+            $"mutable-selected-{scenario}",
+            "T-selection-mutable",
+            owner,
+            $"A_SELECTION_MUTABLE_SELECTED_{scenario}");
+        var identity = new SlackMessageIdentity(
+            promptOwner.WorkspaceTeamId!,
+            $"C-selection-mutable-{scenario}",
+            $"1710000000.{Math.Abs(scenario.GetHashCode()):D6}");
+        await PostChannelAsync(
+            promptOwner,
+            identity.ConversationId,
+            identity.MessageTs,
+            null,
+            [promptOwner.BotUserId!, selected.BotUserId!],
+            $"<@{promptOwner.BotUserId}> <@{selected.BotUserId}> mutable {scenario}",
+            owner);
+        var choice = await DeliverChooserAndGetChoiceAsync(
+            promptOwner,
+            identity,
             selected.ProjectId,
-            selected.Id);
+            selected.Id,
+            $"{identity.MessageTs}1");
 
-        var bindingDrift = await RenderAsync("04", "1710000000.022104");
-        await UpdateConnectionAsync(selected, row => row.BotUserId = "U_DRIFTED_BOT");
-        var bindingDriftResult = await PostSelectionAsync(promptOwner, bindingDrift.Choice, owner);
-        Assert.Equal("no_longer_valid", bindingDriftResult.GetProperty("state").GetString());
-        await AssertPendingWithoutOriginalResourcesAsync(bindingDrift.Identity, selected);
-        await UpdateConnectionAsync(selected, row => row.BotUserId = selected.BotUserId!);
-
-        var deleted = await RenderAsync("05", "1710000000.022105");
-        await using (var scope = _fixture.Services.CreateAsyncScope())
+        switch (scenario)
         {
-            var store = scope.ServiceProvider.GetRequiredService<AgentConnectionStore>();
-            var deletedConnection = await store.DeleteAsync(selected.ProjectId, selected.Id);
-            Assert.NotNull(deletedConnection?.DeletedAt);
-            Assert.NotNull((await store.GetAsync(selected.ProjectId, selected.Id))?.DeletedAt);
+            case "selected_policy":
+                await UpdateConnectionAsync(selected, row => row.OwnerSlackUserId = "U_NEW_SELECTED_OWNER");
+                break;
+            case "prompt_policy":
+                await UpdateConnectionAsync(promptOwner, row => row.OwnerSlackUserId = "U_NEW_PROMPT_OWNER");
+                break;
+            case "expired_lease":
+                await ExpireConnectionLeaseAsync(selected);
+                break;
+            case "binding_drift":
+                await UpdateConnectionAsync(selected, row => row.BotUserId = "U_DRIFTED_BOT");
+                break;
+            case "deleted":
+                await using (var scope = _fixture.Services.CreateAsyncScope())
+                {
+                    var store = scope.ServiceProvider.GetRequiredService<AgentConnectionStore>();
+                    var deletedConnection = await store.DeleteAsync(selected.ProjectId, selected.Id);
+                    Assert.NotNull(deletedConnection?.DeletedAt);
+                    Assert.NotNull((await store.GetAsync(selected.ProjectId, selected.Id))?.DeletedAt);
+                }
+                break;
+            default:
+                throw new InvalidOperationException($"Unknown mutable selection scenario '{scenario}'.");
         }
-        var deletedResult = await PostSelectionAsync(promptOwner, deleted.Choice, owner);
-        Assert.Equal("unavailable", deletedResult.GetProperty("state").GetString());
-        await AssertPendingWithoutOriginalResourcesAsync(deleted.Identity, selected);
+
+        var result = await PostSelectionAsync(promptOwner, choice, owner);
+        Assert.Equal(expectedState, result.GetProperty("state").GetString());
+        await AssertPendingWithoutOriginalResourcesAsync(identity, selected);
     }
 
     [Theory]

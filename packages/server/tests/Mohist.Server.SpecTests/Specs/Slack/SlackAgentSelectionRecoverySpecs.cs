@@ -155,8 +155,6 @@ public sealed partial class SlackMultiAgentIngressSpecs
 
         _fixture.TimeProvider.Advance(TimeSpan.FromMinutes(1));
         await NewSelectionWorker().ProcessPendingAsync();
-        _fixture.TimeProvider.Advance(TimeSpan.FromMinutes(1));
-        await NewSelectionWorker().ProcessPendingAsync();
 
         await using var verify = _fixture.Services.CreateAsyncScope();
         var claim = await verify.ServiceProvider.GetRequiredService<SlackAmbiguousPromptStore>()
@@ -415,8 +413,6 @@ public sealed partial class SlackMultiAgentIngressSpecs
             _fixture.TimeProvider,
             Options.Create(new SlackProviderOptions()),
             NullLogger<SlackAgentSelectionObligationWorker>.Instance);
-        _fixture.TimeProvider.Advance(TimeSpan.FromMinutes(1));
-        await worker.ProcessPendingAsync();
         _fixture.TimeProvider.Advance(TimeSpan.FromMinutes(1));
         await worker.ProcessPendingAsync();
 

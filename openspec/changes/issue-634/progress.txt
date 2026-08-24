@@ -443,3 +443,10 @@ open).
 - Legacy migration redelivery: an existing `Legacy`/incomplete claim no longer becomes reclaimable when its winner has no outbox row. Ingress detects missing durable selection facts before rendering, settles the pending row as `legacy_missing_selection_facts`, returns a visible re-mention response, and creates no chooser, inbox row, Session, Turn, or AgentJob.
 - Added real migration/store coverage proving a migrated pre-fact row cannot be reclaimed from current redelivery facts, plus route-level same-winner/lost-delivery coverage proving no stale interactive chooser is rendered.
 - Verification: Server build PASS; migration + ambiguous-store tests 9/9 PASS; shared Slack API classes 37/37 PASS; full SpecTests passed twice consecutively (3089/3089 in 1m23s and 3089/3089 in 1m38s); `git diff --check` PASS.
+
+## Server p95 gate repair
+
+- CI evidence: PR #715 Server attempts passed every test but breached the unchanged 500 ms L1 p95 gate at 512.0, 509.9, 501.4, and 504.1 ms. Attempt-2 TRX showed p95=493.0 ms when the new selection/access classes were excluded, so the feature's full-host test shape—not product assertions—was the remaining boundary pressure.
+- Preserved the 500 ms gate. The mutable selected-state rejection matrix is now five independent Theory cases instead of one cumulative full-host Fact; each scenario remains covered with its expected visible result and resource-free invariant.
+- Removed a redundant second obligation-worker pass from the bound-race and cross-Project recovery specs. One pass already synchronously recovers and marks the committed selection complete; assertions still verify the final durable Session/inbox/selection state.
+- Verification: selection class 35/35 PASS; file-size and diff gates PASS; canonical Server gate PASS with Unit 3980/3980, Spec 3093/3093, Arch 53/53, server-spec p95=339.3 ms, suite elapsed 115.2 s.
