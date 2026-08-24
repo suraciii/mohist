@@ -137,7 +137,7 @@ public abstract class EpicProgressionTestSupport
                 identity.Context,
                 identity.Runtime,
                 _dbFactory,
-                new FakeTimeProvider(new DateTimeOffset(2026, 6, 30, 0, 0, 0, TimeSpan.Zero)),
+                new FakeTimeProvider(TestTime.UtcNow),
                 _eventStore,
                 NullLogger<EpicGrain>.Instance,
                 this,

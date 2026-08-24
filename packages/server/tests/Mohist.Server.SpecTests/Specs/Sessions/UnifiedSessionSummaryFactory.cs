@@ -36,8 +36,8 @@ internal static class UnifiedSessionSummaryFactory
     public const string EnrichedQueuedTurnId = "turn-queued-1";
     public const string UnsupportedSourceSession = "s_summary_unsupported";
 
-    public static readonly DateTime CreatedAt = new(2026, 8, 1, 9, 0, 0, DateTimeKind.Utc);
-    public static readonly FakeTimeProvider TimeProvider = new(new DateTimeOffset(2026, 8, 1, 12, 0, 0, TimeSpan.Zero));
+    public static readonly DateTime CreatedAt = TestTime.UtcDateTime;
+    public static readonly FakeTimeProvider TimeProvider = new(new DateTimeOffset(TestTime.UtcDateTime).AddHours(3));
 
     public static readonly ProjectInfo ProjectAInfo = new() { Id = ProjectA, Name = "summary-a" };
 

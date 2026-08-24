@@ -42,7 +42,7 @@ public sealed class EventPublishingIntegrationFixture : IAsyncLifetime
     public RecordingIEventPublisher RecordingPublisher => _factory.RecordingPublisher;
     public RecordingTranscriptEventPublisher RecordingTranscriptPublisher => _factory.RecordingTranscriptPublisher;
     public AgentSessionPersistenceTestProbe Persistence => _factory.Persistence;
-    public FakeTimeProvider TimeProvider { get; } = new(new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero));
+    public FakeTimeProvider TimeProvider { get; } = new(TestTime.UtcNow);
 
     public async ValueTask InitializeAsync()
     {

@@ -81,7 +81,7 @@ public sealed class SlackAdapterLeaseRoutesFixture : IAsyncLifetime
     private SqliteConnection _keeper = null!;
 
     public SlackAdapterLeaseRoutesFactory Factory { get; private set; } = null!;
-    public FakeTimeProvider TimeProvider { get; } = new(new DateTimeOffset(2026, 8, 5, 14, 0, 0, TimeSpan.Zero));
+    public FakeTimeProvider TimeProvider { get; } = new(TestTime.UtcNow);
     public InMemorySlackLeaseTargetProvider Targets => Factory.Targets;
     public FakeSlackLeaseSecretResolver Secrets => Factory.Secrets;
 

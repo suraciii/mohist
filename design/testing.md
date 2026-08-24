@@ -249,6 +249,9 @@ timers or an injected `now` function.
 
 - Specs use fixed timestamps or fake time. They must not read the wall clock
   for seed data, deadlines, or tolerance assertions.
+- Shared fixtures anchor every fake clock on one canonical epoch. Seed data
+  consumed by a retention, expiry, or cutoff window derives its timestamps
+  from the injected clock, never from an absolute constant.
 - Specs must not wait with `Delay`, `setTimeout`, `Sleep`, `Task.Yield`, timers,
   spin waits, polling, or a loop over elapsed time.
 - Specs wait for an awaitable boundary signal such as a callback, observer,
@@ -270,6 +273,11 @@ or a previous test.
 - A Spec must not depend on array, object-key, database, or scheduling order
   unless the product contract defines that order.
 - Mutable shared state must have an explicit reset or per-Spec identity.
+  A store shared across Specs keys its entries by identity so a lingering
+  writer cannot clobber another owner's entry.
+- A fixture shared across Specs exposes a deterministic quiescence signal for
+  background work it starts; reset waits on that signal instead of trusting
+  scheduling luck.
 - A flaky Spec must be fixed or deleted. It must not be skipped or retried into
   green.
 
@@ -532,6 +540,15 @@ serially.
 The canonical local gate and CI must not split Server L1 classes across
 processes. `maxParallelThreads` limits memory pressure. It must not compensate
 for expensive Specs or shared Resources.
+
+### Flake Evidence
+
+Closing a flake requires evidence at gate parameters, not a lucky rerun: the
+focused owner class repeats until its failure mechanism is understood, then the
+full track repeats enough times to cover the reported schedule space. The fix
+names the root-cause mechanism — shared state, lingering background work, or
+clock-window coupling — and removes it. Retrying, skipping, and widening
+budgets are not fixes.
 
 ## Automated Enforcement
 

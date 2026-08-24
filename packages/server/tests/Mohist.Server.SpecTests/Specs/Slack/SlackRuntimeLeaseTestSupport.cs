@@ -1,6 +1,7 @@
 using System.Net.Http.Json;
 using System.Text;
 using System.Text.Json;
+using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Mohist.Server.Infrastructure.Data.Db;
@@ -51,6 +52,8 @@ public static class SlackRuntimeLeaseTestSupport
     /// <summary>
     /// One active enrollment per team (the team unique index forbids a
     /// second one): created once and reused by every seed in the collection.
+    /// Collections run in parallel against one shared database, so a losing
+    /// concurrent insert falls back to the winning row instead of failing.
     /// </summary>
     public static async Task<string> EnsureEnrollmentAsync(MohistIntegrationFixture fixture, string teamId)
     {
@@ -72,8 +75,17 @@ public static class SlackRuntimeLeaseTestSupport
             CreatedAt = now,
             UpdatedAt = now,
         });
-        await db.SaveChangesAsync();
-        return enrollmentId;
+        try
+        {
+            await db.SaveChangesAsync();
+            return enrollmentId;
+        }
+        catch (SqliteException ex) when (ex.SqliteErrorCode == 19)
+        {
+            var winner = await db.SlackWorkspaceEnrollments.AsNoTracking()
+                .FirstAsync(row => row.WorkspaceTeamId == teamId);
+            return winner.Id;
+        }
     }
 
     public static async Task<string> AcquireConnectionLeaseAsync(

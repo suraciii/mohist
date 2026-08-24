@@ -553,7 +553,7 @@ public sealed class CapturingDeadLetterStore : IDeadLetterStore
 /// </summary>
 public sealed class DispatcherFixture : IAsyncLifetime
 {
-    public FakeTimeProvider TimeProvider { get; } = new(new DateTimeOffset(2026, 7, 1, 0, 0, 0, TimeSpan.Zero));
+    public FakeTimeProvider TimeProvider { get; } = new(TestTime.UtcNow);
     public CapturingEventStore EventStore { get; } = new();
     public CapturingEventPublisher EventPublisher { get; } = new();
     public CapturingDeadLetterStore DeadLetterStore { get; }

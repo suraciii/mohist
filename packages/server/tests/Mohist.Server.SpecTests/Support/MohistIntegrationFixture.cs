@@ -58,7 +58,7 @@ public class MohistIntegrationFixture : IAsyncLifetime
     public AgentJobDispatchProbe AgentJobDispatches => _factory.Services.GetRequiredService<AgentJobDispatchProbe>();
     public AgentLaunchParticipantProbe LaunchFaults => _factory.Services.GetRequiredService<AgentLaunchParticipantProbe>();
     public AgentSessionPersistenceTestProbe Persistence => _factory.Persistence;
-    public FakeTimeProvider TimeProvider { get; } = new(new DateTimeOffset(2026, 6, 30, 0, 0, 0, TimeSpan.Zero));
+    public FakeTimeProvider TimeProvider { get; } = new(TestTime.UtcNow);
 
     public string ConnectionString { get; private set; } = null!;
     public string RunnerRoot => VirtualRunnerRoot;
@@ -250,7 +250,7 @@ public class MohistWebApplicationFactory : WebApplicationFactory<Program>
         _runnerRoot = runnerRoot;
         _systemUpdateStatePath = systemUpdateStatePath;
         _logsPath = logsPath;
-        _timeProvider = timeProvider ?? new FakeTimeProvider(new DateTimeOffset(2026, 6, 30, 0, 0, 0, TimeSpan.Zero));
+        _timeProvider = timeProvider ?? new FakeTimeProvider(TestTime.UtcNow);
         _otelEnabled = otelEnabled;
         _manualPublicProjection = manualPublicProjection;
         Persistence = new AgentSessionPersistenceTestProbe(

@@ -58,7 +58,7 @@ public sealed class AgentAvailabilityListFixture : IAsyncLifetime
     private readonly CountingRunnerStatusSource _runnerStatus = new(Array.Empty<RunnerStatusView>());
 
     public HttpClient Client { get; private set; } = null!;
-    public FakeTimeProvider TimeProvider { get; } = new(new DateTimeOffset(2026, 7, 30, 0, 0, 0, TimeSpan.Zero));
+    public FakeTimeProvider TimeProvider { get; } = new(TestTime.UtcNow);
     public CountingRunnerStatusSource RunnerStatus => _runnerStatus;
     public IServiceProvider Services => _factory.Services;
 

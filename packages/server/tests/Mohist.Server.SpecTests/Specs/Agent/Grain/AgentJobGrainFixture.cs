@@ -34,7 +34,7 @@ public sealed class AgentJobGrainFixture : IAsyncLifetime
     public RecordingEventStore EventStore => _sharedEventStore;
     public string ConnectionString => _database.ConnectionString;
     public FakeRunnerWorkspaceClient RunnerWorkspace => Cluster.GetSiloServiceProvider(null).GetRequiredService<FakeRunnerWorkspaceClient>();
-    public FakeTimeProvider TimeProvider { get; } = new(new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero));
+    public FakeTimeProvider TimeProvider { get; } = new(TestTime.UtcNow);
     public ControllableAgentJobDispatchObserver DispatchObserver { get; } = new();
     public AgentLaunchParticipantProbe LaunchFaults { get; } = new();
     public ControllableAgentSessionTranscriptPersistence SessionPersistence { get; } = new();

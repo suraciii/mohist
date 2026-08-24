@@ -144,7 +144,7 @@ public class OtlpRoutesWebApplicationFactory : WebApplicationFactory<Program>
             services.RemoveAll<OtelDb>();
             services.AddSingleton(_otelDb);
             services.RemoveAll<TimeProvider>();
-            TimeProvider = new FakeTimeProvider(new DateTimeOffset(2026, 7, 21, 0, 0, 0, TimeSpan.Zero));
+            TimeProvider = new FakeTimeProvider(TestTime.UtcNow);
             services.AddSingleton<TimeProvider>(TimeProvider);
             services.PostConfigure<OtlpExporterOptions>("tracing", ConfigureInMemoryOtlpExporter);
             services.PostConfigure<OtlpExporterOptions>("metrics", ConfigureInMemoryOtlpExporter);

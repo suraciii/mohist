@@ -68,7 +68,7 @@ public sealed class SlackControlPlaneRoutesFixture : IAsyncLifetime
     private SqliteConnection _keeper = null!;
 
     public SlackControlPlaneRoutesFactory Factory { get; private set; } = null!;
-    public FakeTimeProvider TimeProvider { get; } = new(new DateTimeOffset(2026, 8, 5, 14, 0, 0, TimeSpan.Zero));
+    public FakeTimeProvider TimeProvider { get; } = new(TestTime.UtcNow);
     public IServiceProvider Services => Factory.Services;
     public FakeSlackConfigurationCredentialPort Configuration => Factory.Configuration;
     public FakeSlackAppManagementPort Apps => Factory.Apps;

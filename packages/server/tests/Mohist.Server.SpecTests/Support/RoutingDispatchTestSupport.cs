@@ -47,7 +47,7 @@ namespace Mohist.Server.SpecTests.Support;
 /// </summary>
 internal static class RoutingDispatchTestSupport
 {
-    public static readonly DateTimeOffset FixedEventTime = new(2026, 7, 15, 0, 0, 0, TimeSpan.Zero);
+    public static readonly DateTimeOffset FixedEventTime = TestTime.UtcNow;
 
     public static TestSqliteDatabase CreateDatabase() => TestSqliteDatabase.CreateMigrated();
 

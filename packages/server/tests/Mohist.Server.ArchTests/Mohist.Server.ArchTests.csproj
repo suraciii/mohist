@@ -38,6 +38,9 @@
                       Exclude="..\Mohist.Server.SpecTests\Specs\Workflow\WorkflowGrainFixture.cs;..\Mohist.Server.SpecTests\Specs\Workflow\WorkflowGrainSpecs.cs">
       <LogicalName>TestSources/Mohist.Server.SpecTests/Specs/%(RecursiveDir)%(Filename)%(Extension)</LogicalName>
     </EmbeddedResource>
+    <EmbeddedResource Include="..\Mohist.Server.SpecTests\Support\**\*.cs">
+      <LogicalName>TestSources/Mohist.Server.SpecTests.Support/%(RecursiveDir)%(Filename)%(Extension)</LogicalName>
+    </EmbeddedResource>
     <EmbeddedResource Include="..\Mohist.Server.UnitTests\**\*.cs">
       <LogicalName>TestSources/Mohist.Server.UnitTests/%(RecursiveDir)%(Filename)%(Extension)</LogicalName>
     </EmbeddedResource>
