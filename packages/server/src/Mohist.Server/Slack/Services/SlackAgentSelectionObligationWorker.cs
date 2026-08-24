@@ -304,11 +304,11 @@ public sealed class SlackAgentSelectionObligationWorker : BackgroundService
         }
     }
 
-    private static async Task DelayAsync(TimeSpan delay, CancellationToken cancellationToken)
+    private async Task DelayAsync(TimeSpan delay, CancellationToken cancellationToken)
     {
         try
         {
-            await Task.Delay(delay, cancellationToken);
+            await Task.Delay(delay, _timeProvider, cancellationToken);
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {

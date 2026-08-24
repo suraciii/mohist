@@ -450,3 +450,10 @@ open).
 - Preserved the 500 ms gate. The mutable selected-state rejection matrix is now five independent Theory cases instead of one cumulative full-host Fact; each scenario remains covered with its expected visible result and resource-free invariant.
 - Removed a redundant second obligation-worker pass from the bound-race and cross-Project recovery specs. One pass already synchronously recovers and marks the committed selection complete; assertions still verify the final durable Session/inbox/selection state.
 - Verification: selection class 35/35 PASS; file-size and diff gates PASS; canonical Server gate PASS with Unit 3980/3980, Spec 3093/3093, Arch 53/53, server-spec p95=339.3 ms, suite elapsed 115.2 s.
+
+## Check feedback: isolate the selection hosted loop
+
+- `SlackAgentSelectionObligationWorker` now schedules its one-minute initial delay and interval through the injected `TimeProvider`, preserving production timing and cancellation without a wall-clock timer.
+- The assembly-wide `MohistIntegrationFixture` removes only the autonomous selection hosted service. Selection recovery, expiry, and retention Specs continue to call the worker's exact `ProcessPendingAsync` pass explicitly against the shared integration database.
+- Added separate unit-level hosting coverage: production `ConfigureMohistServices` registration is asserted to include `SlackAgentSelectionObligationWorker`, and an isolated `FakeTimeProvider` plus signaling scope factory proves no pass before one minute, one pass at the boundary, and bounded stop/cancellation without polling or sleep. The dedicated test owns its clock and has no shared integration database.
+- Focused hosting and registration tests pass; the SpecTests project builds with the shared-fixture hosted-loop removal.
