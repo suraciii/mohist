@@ -643,7 +643,7 @@ test('report evaluation fails closed at the execution cutoff and after external 
   )
 })
 
-test('planTracks isolates the bounded Spec duration phase before remaining fan-out', () => {
+test('planTracks preserves ordered duration measurements for portfolio and application subsets', () => {
   const cli: TrackConfig = {
     id: 'cli',
     kind: 'dotnet-apphost',
@@ -690,19 +690,20 @@ test('planTracks isolates the bounded Spec duration phase before remaining fan-o
     deadlineMs: 1000,
     enforce: false,
   }
-  const planned = planTracks([cli, unit, runner, web, spec], '/evidence', ['cli', 'server-spec'], 'runner')
+  const measurementOrder = ['cli', 'server-unit', 'server-spec']
+  const planned = planTracks([cli, unit, runner, web, spec], '/evidence', measurementOrder, 'runner')
   const byId = new Map(planned.map((plan) => [plan.lane.id, plan.lane]))
 
   assert.deepEqual(byId.get('cli')?.dependsOn, undefined)
   assert.ok(byId.get('cli')?.resources?.includes('duration-measurement'))
-  assert.deepEqual(byId.get('server-unit')?.dependsOn, ['server-spec'])
-  assert.ok(!byId.get('server-unit')?.resources?.includes('duration-measurement'))
+  assert.deepEqual(byId.get('server-unit')?.dependsOn, ['cli'])
+  assert.ok(byId.get('server-unit')?.resources?.includes('duration-measurement'))
+  assert.deepEqual(byId.get('server-spec')?.dependsOn, ['server-unit'])
+  assert.ok(byId.get('server-spec')?.resources?.includes('duration-measurement'))
+  assert.ok(byId.get('server-spec')?.resources?.includes('server-spec'))
   assert.deepEqual(byId.get('runner')?.dependsOn, ['server-spec'])
   assert.ok(byId.get('runner')?.resources?.includes('duration-measurement'))
   assert.deepEqual(byId.get('web')?.dependsOn, ['runner'])
-  assert.deepEqual(byId.get('server-spec')?.dependsOn, ['cli'])
-  assert.ok(byId.get('server-spec')?.resources?.includes('duration-measurement'))
-  assert.ok(byId.get('server-spec')?.resources?.includes('server-spec'))
 
   const arch: TrackConfig = {
     id: 'server-arch',
@@ -713,14 +714,15 @@ test('planTracks isolates the bounded Spec duration phase before remaining fan-o
     deadlineMs: 1000,
     enforce: false,
   }
-  const serverSubset = planTracks([unit, arch, spec], '/evidence', ['cli', 'server-spec'], 'runner')
+  const serverSubset = planTracks([unit, arch, spec], '/evidence', measurementOrder, 'runner')
   const serverSubsetById = new Map(serverSubset.map((plan) => [plan.lane.id, plan.lane]))
+  assert.deepEqual(serverSubsetById.get('server-unit')?.dependsOn, undefined)
+  assert.ok(serverSubsetById.get('server-unit')?.resources?.includes('duration-measurement'))
+  assert.deepEqual(serverSubsetById.get('server-spec')?.dependsOn, ['server-unit'])
   assert.ok(serverSubsetById.get('server-spec')?.resources?.includes('duration-measurement'))
-  assert.deepEqual(serverSubsetById.get('server-spec')?.dependsOn, undefined)
-  assert.deepEqual(serverSubsetById.get('server-unit')?.dependsOn, ['server-spec'])
   assert.deepEqual(serverSubsetById.get('server-arch')?.dependsOn, ['server-spec'])
 
-  const focused = planTracks([unit], '/evidence', ['cli', 'server-spec'], 'runner')
+  const focused = planTracks([web], '/evidence', measurementOrder, 'runner')
   assert.deepEqual(focused[0].lane.dependsOn, undefined)
   assert.ok(!focused[0].lane.resources?.includes('duration-measurement'))
 })
