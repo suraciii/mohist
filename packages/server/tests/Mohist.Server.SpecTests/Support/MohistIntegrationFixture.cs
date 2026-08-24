@@ -313,19 +313,16 @@ public class MohistWebApplicationFactory : WebApplicationFactory<Program>
 
         builder.ConfigureTestServices(services =>
         {
-            // The selection worker is verified through deterministic, explicit
-            // ProcessPendingAsync calls. Do not let its minute-based background
-            // loop scan the assembly-wide integration database while unrelated
-            // specs are measuring their own request paths.
-            for (var index = services.Count - 1; index >= 0; index--)
+            if (_manualPublicProjection)
             {
-                var descriptor = services[index];
-                if (descriptor.ServiceType != typeof(IHostedService))
-                    continue;
-                if ((_manualPublicProjection && descriptor.ImplementationType == typeof(PublicExecutionProjector))
-                    || descriptor.ImplementationType == typeof(Mohist.Server.Slack.Services.SlackAgentSelectionObligationWorker))
+                for (var index = services.Count - 1; index >= 0; index--)
                 {
-                    services.RemoveAt(index);
+                    var descriptor = services[index];
+                    if (descriptor.ServiceType == typeof(IHostedService)
+                        && descriptor.ImplementationType == typeof(PublicExecutionProjector))
+                    {
+                        services.RemoveAt(index);
+                    }
                 }
             }
 
