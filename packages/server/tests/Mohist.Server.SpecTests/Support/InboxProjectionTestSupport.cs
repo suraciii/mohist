@@ -28,7 +28,7 @@ namespace Mohist.Server.SpecTests.Support;
 /// </summary>
 internal static class InboxProjectionTestSupport
 {
-    public static readonly DateTimeOffset FixedEventTime = new(2026, 7, 15, 0, 0, 0, TimeSpan.Zero);
+    public static readonly DateTimeOffset FixedEventTime = TestTime.UtcNow;
 
     public static WorkflowRunStore CreateRunStore(
         IDbContextFactory<MohistDbContext> factory,
@@ -162,7 +162,7 @@ internal static class InboxProjectionTestSupport
 
         var store = new InboxSubscriptionStore(
             new TestDbContextFactory(database.Options),
-            new FakeTimeProvider(new DateTimeOffset(2026, 6, 30, 0, 0, 0, TimeSpan.Zero)));
+            new FakeTimeProvider(FixedEventTime));
         await store.SetAsync(projectId, new InboxSubscriptionState(
             WorkflowFailedEnabled: workflowFailedEnabled,
             ApprovalRequestedEnabled: approvalRequestedEnabled,
@@ -290,7 +290,7 @@ internal static class InboxProjectionTestSupport
                 var services = new ServiceCollection();
                 var factory = new TestDbContextFactory(_database.Options);
                 services.AddSingleton<IDbContextFactory<MohistDbContext>>(factory);
-                services.AddSingleton<TimeProvider>(new FakeTimeProvider(new DateTimeOffset(2026, 6, 30, 0, 0, 0, TimeSpan.Zero)));
+                services.AddSingleton<TimeProvider>(new FakeTimeProvider(FixedEventTime));
                 services.AddSingleton(eventPublisher);
                 services.AddSingleton<IEventStore>(new PublisherEventStore(eventPublisher));
                 services.AddScoped<InboxStore>();

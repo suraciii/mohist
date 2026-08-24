@@ -7,6 +7,7 @@ using Mohist.Server.UnitTests.Support;
 using Mohist.Server.Workflow.Domain.Run;
 using Mohist.Server.Workflow.Services;
 using Xunit;
+using Mohist.Server.TestSupport;
 
 namespace Mohist.Server.UnitTests.Sessions;
 
@@ -14,8 +15,7 @@ public abstract class WorkflowActivityHistoryTestSupport : IAsyncLifetime
 {
     private TestSqliteDatabase? _database;
 
-    protected FakeTimeProvider TimeProvider { get; } = new(
-        new DateTimeOffset(2026, 6, 30, 0, 0, 0, TimeSpan.Zero));
+    protected FakeTimeProvider TimeProvider { get; } = new(TestTime.UtcNow);
     protected IDbContextFactory<MohistDbContext> DbFactory { get; private set; } = null!;
     protected AgentSessionQuery SessionQuery { get; private set; } = null!;
     protected CountingWorkflowStatusReader WorkflowStatuses { get; } = new();

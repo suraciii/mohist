@@ -10,7 +10,7 @@ namespace Mohist.Server.UnitTests.SystemSpecs;
 
 internal static class SystemUpdateTestFactory
 {
-    internal static readonly DateTimeOffset FixedNow = new(2026, 6, 30, 0, 0, 0, TimeSpan.Zero);
+    internal static readonly DateTimeOffset FixedNow = TestTime.UtcNow;
 
     internal static SystemUpdateService CreateService(
         SystemInfoResponse systemInfo,
@@ -70,7 +70,7 @@ internal static class SystemUpdateTestFactory
             store,
             commandRunner,
             readinessProbe,
-            new FakeTimeProvider(new DateTimeOffset(2026, 6, 30, 0, 0, 0, TimeSpan.Zero)),
+            new FakeTimeProvider(FixedNow),
             enabled,
             includeEnabled).Service;
     }

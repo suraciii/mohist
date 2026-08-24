@@ -27,13 +27,13 @@ namespace Mohist.Server.UnitTests.DirectApi;
 /// </summary>
 public sealed class PublicProjectionTestSupport : IAsyncDisposable
 {
-    private static readonly DateTime FixedTime = new(2026, 8, 9, 10, 15, 0, DateTimeKind.Utc);
+    private static readonly DateTime FixedTime = TestTime.UtcDateTime;
 
     public PublicProjectionTestSupport()
     {
         Database = TestSqliteDatabase.CreateModelSchema();
         DbFactory = new TestDbContextFactory(Database.Options);
-        Time = new FakeTimeProvider(new DateTimeOffset(2026, 8, 9, 10, 15, 0, TimeSpan.Zero));
+        Time = new FakeTimeProvider(new DateTimeOffset(FixedTime));
         EventStore = new EventStore(DbFactory, NullLogger<EventStore>.Instance);
         SessionStore = new AgentSessionStore(
             DbFactory,

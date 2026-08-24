@@ -761,6 +761,53 @@ public class ArchitectureRules
             "Violations: " + string.Join(", ", violations));
     }
 
+    /// <summary>
+    /// Shared test infrastructure must anchor every fake or fixed clock on
+    /// the canonical <c>TestTime</c> epoch. When one shared fixture pins its
+    /// own epoch, seed data written against another fixture's clock silently
+    /// falls outside product retention and expiry windows, which is the
+    /// root cause of the 2026-08 OTel query flake. Spec classes may derive
+    /// times from the fixture clock; only shared fixtures, factories, and
+    /// support files are constrained here.
+    /// </summary>
+    [Fact]
+    public void SharedTestFixtures_AnchorFakeClocksOnCanonicalEpoch()
+    {
+        var parameterless = new System.Text.RegularExpressions.Regex(
+            @"\bnew\s+(?:Fake|Fixed)TimeProvider\(\s*\)");
+        var inlineEpoch = new System.Text.RegularExpressions.Regex(
+            @"\bnew\s+(?:Fake|Fixed)TimeProvider\(\s*new\s+(?:DateTimeOffset|DateTime)\s*\(\s*\d{4}");
+        var targetTypedEpoch = new System.Text.RegularExpressions.Regex(
+            @"=\s*new\(\s*new\s+(?:DateTimeOffset|DateTime)\s*\(\s*\d{4}|=>\s*new\(\s*new\s+(?:DateTimeOffset|DateTime)\s*\(\s*\d{4}");
+        var returnEpoch = new System.Text.RegularExpressions.Regex(
+            @"return\s+new\(\s*new\s+(?:DateTimeOffset|DateTime)\s*\(\s*\d{4}");
+
+        var suffixes = new[]
+        {
+            "Fixture", "Factory", "TestHost", "TestSupport", "WebApplicationFactory",
+        };
+        var scopedSources = EmbeddedSources("TestSources/Mohist.Server.TestSupport/")
+            .Concat(EmbeddedSources("TestSources/Mohist.Server.SpecTests.Support/"))
+            .Concat(EmbeddedSources("TestSources/Mohist.Server.UnitTests/Support/"))
+            .Concat(EmbeddedSources("TestSources/Mohist.Server.SpecTests/Specs/")
+                .Concat(EmbeddedSources("TestSources/Mohist.Server.UnitTests/"))
+                .Where(source => suffixes.Any(s =>
+                    Path.GetFileNameWithoutExtension(source.Path)!.EndsWith(s, StringComparison.Ordinal))));
+
+        var violations = scopedSources
+            .SelectMany(source => new[] { parameterless, inlineEpoch, targetTypedEpoch, returnEpoch }
+                .SelectMany(pattern => pattern.Matches(source.Content))
+                .Select(match => $"{source.Path}: {match.Value}"))
+            .Distinct(StringComparer.Ordinal)
+            .OrderBy(violation => violation, StringComparer.Ordinal)
+            .ToList();
+
+        Assert.True(
+            violations.Count == 0,
+            "Shared test fixtures must construct fake clocks from TestTime.UtcNow (or a TestTime-derived value). " +
+            "Violations: " + string.Join("; ", violations));
+    }
+
     private static IReadOnlyList<EmbeddedSource> EmbeddedSources(string prefix)
         => ArchitectureRulesSupport.EmbeddedSources(prefix);
 
