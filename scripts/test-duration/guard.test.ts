@@ -704,22 +704,6 @@ test('planTracks isolates the bounded Spec duration phase before remaining fan-o
   assert.ok(byId.get('server-spec')?.resources?.includes('duration-measurement'))
   assert.ok(byId.get('server-spec')?.resources?.includes('server-spec'))
 
-  const arch: TrackConfig = {
-    id: 'server-arch',
-    kind: 'dotnet-apphost',
-    apphost: 'bin/arch',
-    report: 'reports/arch.trx',
-    reportFormat: 'trx',
-    deadlineMs: 1000,
-    enforce: false,
-  }
-  const serverSubset = planTracks([unit, arch, spec], '/evidence', ['cli', 'server-spec'], 'runner')
-  const serverSubsetById = new Map(serverSubset.map((plan) => [plan.lane.id, plan.lane]))
-  assert.ok(serverSubsetById.get('server-spec')?.resources?.includes('duration-measurement'))
-  assert.deepEqual(serverSubsetById.get('server-spec')?.dependsOn, undefined)
-  assert.deepEqual(serverSubsetById.get('server-unit')?.dependsOn, ['server-spec'])
-  assert.deepEqual(serverSubsetById.get('server-arch')?.dependsOn, ['server-spec'])
-
   const focused = planTracks([unit], '/evidence', ['cli', 'server-spec'], 'runner')
   assert.deepEqual(focused[0].lane.dependsOn, undefined)
   assert.ok(!focused[0].lane.resources?.includes('duration-measurement'))

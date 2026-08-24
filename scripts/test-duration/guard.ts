@@ -465,19 +465,14 @@ function applyDurationMeasurementPhase(
   if (durationMeasurementTracks.length === 0) return [...planned]
   if (new Set(durationMeasurementTracks).size !== durationMeasurementTracks.length) return [...planned]
 
-  const selectedTrackIds = new Set(
-    planned.flatMap((plan) => (plan.policyTrack === undefined ? [] : [plan.policyTrack.id])),
-  )
-  const relevantMeasurementTracks = durationMeasurementTracks.filter((trackId) => selectedTrackIds.has(trackId))
-  if (relevantMeasurementTracks.length === 0) return [...planned]
-
   const measurementGroups: Array<{
     readonly trackId: string
     readonly executionLaneIds: readonly string[]
     readonly terminalLaneIds: readonly string[]
   }> = []
-  for (const trackId of relevantMeasurementTracks) {
+  for (const trackId of durationMeasurementTracks) {
     const matching = planned.filter((plan) => plan.policyTrack?.id === trackId)
+    if (matching.length === 0) return [...planned]
     const coverage = planned.find((plan) => plan.lane.id === `${trackId}-coverage`)
     if (matching.length > 1 && coverage === undefined) return [...planned]
     measurementGroups.push({
