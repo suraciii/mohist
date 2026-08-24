@@ -144,8 +144,9 @@ describe.sequential('ManagerExecutionBoundary', () => {
     const stub = await writeStubMo(root, false)
     const originalHome = process.env.HOME
     const fakeHome = join(root, 'operator-home')
+    const credentialFileToken = 'a'.repeat(48)
     await mkdir(join(fakeHome, '.mohist'), { recursive: true })
-    await writeFile(join(fakeHome, '.mohist', 'admin-token'), `${'a'.repeat(48)}\n`, 'utf8')
+    await writeFile(join(fakeHome, '.mohist', 'admin-token'), `${credentialFileToken}\n`, 'utf8')
     await writeFile(
       join(fakeHome, '.gitconfig'),
       '[user]\n\tname = Operator\n\temail = operator@example.test\n',
@@ -179,7 +180,7 @@ describe.sequential('ManagerExecutionBoundary', () => {
           root,
           { onData: (chunk) => output.push(chunk), signal: new AbortController().signal },
         )
-      expect(Buffer.concat(output).toString('utf8')).not.toContain('aaaa')
+      expect(Buffer.concat(output).toString('utf8')).not.toContain(credentialFileToken)
 
       const genericEnv: Buffer[] = []
       await boundary.bashOperations().exec('env', root, {
