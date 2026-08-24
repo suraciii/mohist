@@ -4,7 +4,7 @@ using Mohist.Server.TestSupport;
 using Mohist.Server.SystemInfo;
 using Xunit;
 
-namespace Mohist.Server.SpecTests.Specs.Telemetry;
+namespace Mohist.Server.UnitTests.Telemetry;
 
 public class OtelStorageGuardSpecs : IDisposable
 {
