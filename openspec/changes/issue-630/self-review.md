@@ -15,4 +15,4 @@ The change is limited to the Server Workflow report acknowledgement and its exis
 
 ## Review result
 
-Implementation reviewed: the strict API mapping, persisted terminal fingerprint, exact terminal attempt lookup, and Agent binding replay fence are limited to the existing report boundary. Focused Server build and filtered tests pass with web build disabled; full web-enabled build was not runnable before npm dependencies were installed.
+Implementation reviewed: the strict API mapping, canonical fingerprint propagation, immutable terminal Agent binding, exact terminal attempt lookup, and replay fence remain limited to the existing report boundary. The fingerprint is carried from the original WorkResult rather than reconstructed from normalized TaskReport fields; malformed-output failures retain the original fingerprint when safe. Focused Server build passes with web build disabled. The filtered SpecTests run was not clean because unrelated pre-existing shared-fixture failures remain; the exact failures and environment limitations are recorded in the handoff rather than hidden.
