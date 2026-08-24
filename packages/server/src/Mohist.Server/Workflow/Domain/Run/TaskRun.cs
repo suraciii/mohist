@@ -70,6 +70,14 @@ public sealed class TaskRun
     public string? TerminalResultFingerprint { get; set; }
 
     /// <summary>
+    /// Frozen physical execution identity for an accepted terminal Agent
+    /// result. AgentResultSettlement is cleared after terminal reconciliation,
+    /// so replay validation must use this immutable attempt identity instead of
+    /// reopening the deadline-owned settlement state.
+    /// </summary>
+    public AgentExecutionBinding? TerminalExecutionBinding { get; set; }
+
+    /// <summary>
     /// Additive verification metadata populated only for tasks whose
     /// <see cref="DefinitionId"/> matches a built-in lane id from
     /// <c>VerificationLaneCatalog</c>. The presence of this value

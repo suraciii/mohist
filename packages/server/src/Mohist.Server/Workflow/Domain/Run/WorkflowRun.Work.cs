@@ -331,12 +331,14 @@ public static partial class WorkflowRunExtensions
             string runnerId)
         {
             var found = FindTaskAttempt(run, taskRunId, workId, runnerId);
-            var settlement = found?.Task.AgentResultSettlement;
+            var binding = found?.Task.TerminalExecutionBinding;
             return found is not null
                 && found.Value.Task.Status is TaskRunStatus.Completed or TaskRunStatus.Failed
-                && settlement is not null
-                && HasFullExecutionBinding(settlement)
-                ? ToExecutionBinding(settlement)
+                && binding is not null
+                && string.Equals(binding.TaskRunId, taskRunId, StringComparison.Ordinal)
+                && string.Equals(binding.WorkId, workId, StringComparison.Ordinal)
+                && string.Equals(binding.RunnerId, runnerId, StringComparison.Ordinal)
+                ? binding
                 : null;
         }
 

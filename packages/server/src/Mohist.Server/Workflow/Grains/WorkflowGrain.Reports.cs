@@ -653,15 +653,10 @@ public partial class WorkflowGrain
                 .Where(stage => string.Equals(stage.Id, terminalWork.Item.Stage, StringComparison.Ordinal))
                 .SelectMany(stage => stage.Tasks)
                 .Single(candidate => string.Equals(candidate.Id, terminalWork.TaskRunId, StringComparison.Ordinal));
-            var replayFingerprint = Mohist.Server.Runner.Grains.RuntimeRecoveryReceiptFingerprint.For(
-                new WorkResult(
-                    report.Status == TaskReportStatus.Succeeded ? "completed" : "failed",
-                    report.Detail,
-                    report.Output,
-                    ArtifactUploadIds: report.ArtifactUploadIds?.ToArray(),
-                    AddTasks: report.AddTasks?.ToList(),
-                    Error: report.Error));
-            return string.Equals(terminalTask.TerminalResultFingerprint, replayFingerprint, StringComparison.Ordinal)
+            return terminalTask.TerminalResultFingerprint is not null
+                && report.TerminalResultFingerprint is not null
+                && string.Equals(terminalTask.TerminalResultFingerprint, report.TerminalResultFingerprint, StringComparison.Ordinal)
+                && (agentBinding is null || terminalTask.TerminalExecutionBinding is not null)
                 ? ReportAck.Accepted
                 : ReportAck.Stale;
         }
@@ -785,13 +780,14 @@ public partial class WorkflowGrain
             _log.LogWarning(
                 "run {run} work {work} artifact binding failed: {reason}",
                 GrainKey, activeWork.WorkId, bindResult.Error);
-            return new TaskReport(
-                activeWork.WorkId,
-                TaskReportStatus.Failed,
-                Output: null,
-                Artifacts: null,
-                Detail: bindResult.Error ?? "artifact binding failed",
-                Error: report.Error);
+            return report with
+            {
+                Status = TaskReportStatus.Failed,
+                Output = null,
+                Artifacts = null,
+                Detail = bindResult.Error ?? "artifact binding failed",
+                Error = report.Error,
+            };
         }
 
         var boundArtifacts = bindResult.ArtifactRecordedEvents
