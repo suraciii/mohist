@@ -6,7 +6,7 @@ using Mohist.Server.Otel;
 using Mohist.Server.TestSupport;
 using Xunit;
 
-namespace Mohist.Server.SpecTests.Specs.Telemetry;
+namespace Mohist.Server.UnitTests.Telemetry;
 
 public class OtelRetentionMaintenanceSpecs : IDisposable
 {

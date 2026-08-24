@@ -4,11 +4,11 @@ using Microsoft.Extensions.Logging.Abstractions;
 using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Infrastructure.Data.Events;
 using Mohist.Server.Infrastructure.Events;
-using Mohist.Server.SpecTests.Support;
 using Mohist.Server.TestSupport;
+using Mohist.Server.UnitTests.Support;
 using Xunit;
 
-namespace Mohist.Server.SpecTests.Specs.Events;
+namespace Mohist.Server.UnitTests.Events;
 
 public class DeadLetterStoreSpecs : IAsyncLifetime
 {
@@ -23,7 +23,7 @@ public class DeadLetterStoreSpecs : IAsyncLifetime
 
     public ValueTask InitializeAsync()
     {
-        _database = TestSqliteDatabase.CreateMigrated();
+        _database = TestSqliteDatabase.CreateModelSchema();
         _factory = new TestDbContextFactory(_database.Options);
         _store = new DeadLetterStore(_factory);
         _events = new EventStore(_factory, NullLogger<EventStore>.Instance);
@@ -251,7 +251,7 @@ public class DeadLetterStoreSpecs : IAsyncLifetime
     [Fact]
     public void NoopDeadLetterStore_IsUsableFake()
     {
-        IDeadLetterStore fake = new NoopDeadLetterStore();
+        IDeadLetterStore fake = new Mohist.Server.UnitTests.Support.NoopDeadLetterStore();
         Assert.NotNull(fake);
     }
 

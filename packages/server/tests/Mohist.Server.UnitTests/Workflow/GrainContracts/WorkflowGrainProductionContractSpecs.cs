@@ -5,7 +5,6 @@ using Microsoft.Extensions.Options;
 using Microsoft.Extensions.Time.Testing;
 using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Infrastructure.Data.Workflow;
-using Mohist.Server.SpecTests.Support;
 using Mohist.Server.TestSupport;
 using Mohist.Server.Workflow.Domain;
 using Mohist.Workflow.Definition;
@@ -16,7 +15,7 @@ using Mohist.Server.Workflow.Services.Artifacts;
 using Orleans;
 using Xunit;
 
-namespace Mohist.Server.SpecTests.Specs.Workflow.Grain;
+namespace Mohist.Server.UnitTests.Workflow.GrainContracts;
 
 /// <summary>
 /// issue-511 T-001: behavioral contract that reworded

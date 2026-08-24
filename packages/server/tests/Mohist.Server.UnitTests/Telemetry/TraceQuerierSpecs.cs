@@ -2,11 +2,12 @@ using Microsoft.Extensions.Logging.Abstractions;
 using Mohist.Server.Otel;
 using Mohist.Server.SystemInfo;
 using Mohist.Server.TestSupport;
+using Mohist.Server.UnitTests.Support;
 using Microsoft.Extensions.Time.Testing;
 using Microsoft.Data.Sqlite;
 using Xunit;
 
-namespace Mohist.Server.SpecTests.Specs.Telemetry;
+namespace Mohist.Server.UnitTests.Telemetry;
 
 public class TraceQuerierSpecs : IDisposable
 {
