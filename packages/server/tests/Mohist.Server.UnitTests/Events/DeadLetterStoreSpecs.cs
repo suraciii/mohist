@@ -251,7 +251,7 @@ public class DeadLetterStoreSpecs : IAsyncLifetime
     [Fact]
     public void NoopDeadLetterStore_IsUsableFake()
     {
-        IDeadLetterStore fake = new Mohist.Server.UnitTests.Support.NoopDeadLetterStore();
+        IDeadLetterStore fake = new NoopDeadLetterStore();
         Assert.NotNull(fake);
     }
 
