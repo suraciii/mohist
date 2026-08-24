@@ -109,8 +109,8 @@ The CLI creates platform-specific Scheduled Tasks that start at login.
 
 Use an always-on NUC, NAS, mini PC, or older laptop for unattended operation.
 
-1. Install .NET 11 SDK, Node.js 22.19.0 or later, and OpenCode according to its
-   official documentation.
+1. Install .NET 11 SDK, Node.js 22.19.0 or later, Go 1.25 or later, and OpenCode
+   according to their official documentation.
 2. Build Mohist:
 
    ```bash
@@ -457,8 +457,33 @@ mo update
 # mo update slack
 ```
 
-`mo update` rebuilds and restarts installed Server, Runner, and Slack services
-and synchronizes the `mo` CLI.
+`mo update` rebuilds and restarts the installed Server and Runner and
+synchronizes the `mo` CLI. The optional host Slack adapter has its own update
+boundary; run `mo update slack` separately. That command stages the new binary,
+persists a user-only snapshot under `~/.mohist/update/slack` plus a non-secret
+recovery manifest in the staging directory, stops the adapter, replaces the
+binary,
+refreshes an existing Node-era or Go launcher without changing its configured
+Server URL or credentials, starts it, and verifies that it remains active. If
+the service cannot be stopped safely, the installed binary is left unchanged.
+Install and update are serialized by one per-user transaction lock. An
+unresolved update also leaves a user-global marker that blocks installs from a
+different checkout after the updating process exits. If a later step fails and
+a previous Go binary exists, Mohist restores that binary and
+launcher and restarts the previous service. The first Node-to-Go migration
+instead completes the Go launcher recovery because the upgraded repository no
+longer contains a runnable Node adapter. A failed recovery leaves the files in
+`packages/go/mohist-slack/bin/.update` instead of deleting the remaining backup.
+After an interrupted update, the next `mo update slack` first finalizes a
+committed transaction or converges the recorded rollback/roll-forward. If
+automatic recovery cannot be verified, it refuses to replace those files until
+the operator has preserved or resolved them.
+
+On Windows, an interrupted Slack install may leave
+`mohist-slack.exe.install.previous` beside the installed binary. A later install
+refuses to overwrite that known-good backup; preserve and resolve it before
+retrying. Mohist also refuses to adopt a disabled, foreign, or altered scheduled
+task that merely uses the `Mohist_Slack` name.
 
 For Docker:
 

@@ -154,6 +154,30 @@ public class CliServiceCommandSpecs
         Assert.Empty(handler.Requests);
     }
 
+    [Theory]
+    [InlineData("start")]
+    [InlineData("stop")]
+    [InlineData("restart")]
+    public async Task SlackLifecycle_ForwardsInvocationCancellationToken(string verb)
+    {
+        var (handler, http, output, error, fs, executor, installer) = CliTestFactory.CreateInternal();
+        using var cancellation = new CancellationTokenSource();
+        installer.SlackLifecycleAction = cancellation.Cancel;
+
+        var exitCode = await MohistCliCommands.RunAsync(
+            http,
+            ["service", verb, "slack"],
+            output,
+            error,
+            fs,
+            executor,
+            installer: installer,
+            cancellationToken: cancellation.Token);
+
+        Assert.Equal(CliExitCode.For(CliExitOutcome.Cancelled), exitCode);
+        Assert.True(Assert.Single(installer.SlackLifecycleCancellationTokens).IsCancellationRequested);
+    }
+
     [Fact]
     public async Task ServiceStop_AnyTarget_IssuesNoHttp()
     {

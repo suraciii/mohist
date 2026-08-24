@@ -94,7 +94,9 @@ internal sealed class CliComposition
             options.Output,
             options.Error,
             options.FileSystem,
-            options.CommandExecutor));
+            options.CommandExecutor,
+            timeProvider,
+            pollWait));
         if (options.Updater is not null)
             services.AddSingleton(options.Updater);
         else
@@ -106,7 +108,9 @@ internal sealed class CliComposition
             options.CommandExecutor,
             options.FileSystem,
             environment,
-            getUserHome: effectiveUserHome));
+            getUserHome: effectiveUserHome,
+            timeProvider: timeProvider,
+            pollWait: pollWait));
         services.AddSingleton(new RuntimeConsistencyValidator(
             options.Http,
             options.CommandExecutor,
@@ -152,9 +156,17 @@ internal sealed class CliComposition
         TextWriter output,
         TextWriter error,
         IFileSystem fileSystem,
-        ICommandExecutor commandExecutor) =>
+        ICommandExecutor commandExecutor,
+        TimeProvider timeProvider,
+        Func<TimeSpan, CancellationToken, Task> pollWait) =>
         OperatingSystem.IsWindows()
-            ? new WindowsScheduledTaskInstaller(output, error, fileSystem, commandExecutor)
+            ? new WindowsScheduledTaskInstaller(
+                output,
+                error,
+                fileSystem,
+                commandExecutor,
+                timeProvider: timeProvider,
+                pollWait: pollWait)
             : new SystemdServiceInstaller(output, error, fileSystem, commandExecutor);
 
     private sealed class EnvironmentVariableAdapter : ICliEnvironment

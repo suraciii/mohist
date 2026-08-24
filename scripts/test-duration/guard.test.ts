@@ -359,7 +359,7 @@ test('--check rejects a stale but internally complete artifact bundle', () => {
 
 test('canonical lane commands keep reporter arguments on the final test process and reuse the built workflow graph', () => {
   const nodeTracks: readonly TrackConfig[] = [
-    ['mohist-slack', 'packages/mohist-slack', 'test:duration'],
+    ['web-unit', 'packages/web', 'test:duration'],
     ['runner', 'packages/runner', 'test:duration'],
     ['web', 'packages/web', 'test:duration'],
     ['runner-integration', 'packages/runner', 'test:duration:integration'],

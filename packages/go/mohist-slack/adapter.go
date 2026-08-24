@@ -9,6 +9,8 @@ import (
 	"time"
 )
 
+const adapterDisconnectTimeout = 15 * time.Second
+
 // Adapter ports packages/mohist-slack/src/adapter.ts: one independent
 // runtime per target key, generation fencing across await boundaries,
 // eviction that never deletes a successor, drain single-flight with
@@ -85,11 +87,13 @@ type Adapter struct {
 
 	mu       sync.Mutex
 	runtimes map[string]*runtime
+	started  bool
 	stopped  bool
 
-	sem    chan struct{}
-	stopCh chan struct{}
-	wg     sync.WaitGroup
+	sem      chan struct{}
+	stopCh   chan struct{}
+	stopDone chan struct{}
+	wg       sync.WaitGroup
 
 	disposeOnce sync.Once
 }
@@ -107,8 +111,10 @@ type runtime struct {
 	draining       bool
 	drainRequested bool
 
-	done      chan struct{}
-	closeOnce sync.Once
+	done                chan struct{}
+	closeOnce           sync.Once
+	disconnectOnce      sync.Once
+	disconnectScheduled sync.Once
 }
 
 // runtimeSnapshot mirrors the Node fencing snapshot: the identities a flow
@@ -145,13 +151,27 @@ func NewAdapter(opts AdapterOptions) *Adapter {
 		runtimes: map[string]*runtime{},
 		sem:      make(chan struct{}, max(1, opts.MaxInFlight)),
 		stopCh:   make(chan struct{}),
+		stopDone: make(chan struct{}),
 	}
 }
 
 // Start wires abort handling, runs the first discovery cycle synchronously,
 // then leaves a discovery loop running until Stop or ctx cancellation.
 func (a *Adapter) Start(ctx context.Context) error {
+	a.mu.Lock()
+	if a.stopped {
+		a.mu.Unlock()
+		return context.Canceled
+	}
+	if a.started {
+		a.mu.Unlock()
+		return errors.New("adapter was already started")
+	}
+	a.started = true
 	a.baseCtx, a.cancelBase = context.WithCancel(context.WithoutCancel(ctx))
+	a.wg.Add(1)
+	a.mu.Unlock()
+	defer a.wg.Done()
 	go func() {
 		select {
 		case <-ctx.Done():
@@ -165,7 +185,9 @@ func (a *Adapter) Start(ctx context.Context) error {
 }
 
 func (a *Adapter) startDiscoveryLoop() {
-	a.wg.Add(1)
+	if !a.beginWork() {
+		return
+	}
 	go func() {
 		defer a.wg.Done()
 		ticker := a.opts.TickerFactory(floorDuration(a.opts.DiscoveryEvery, time.Second))
@@ -187,22 +209,26 @@ func (a *Adapter) startDiscoveryLoop() {
 func (a *Adapter) Stop() {
 	a.mu.Lock()
 	if a.stopped {
+		done := a.stopDone
 		a.mu.Unlock()
+		<-done
 		return
 	}
 	a.stopped = true
+	cancelBase := a.cancelBase
 	pending := make([]*runtime, 0, len(a.runtimes))
 	for key, rt := range a.runtimes {
 		delete(a.runtimes, key)
 		pending = append(pending, rt)
 	}
 	a.mu.Unlock()
+	defer close(a.stopDone)
 	close(a.stopCh)
 	for _, rt := range pending {
 		a.disconnectRuntime(rt)
 	}
-	if a.cancelBase != nil {
-		a.cancelBase()
+	if cancelBase != nil {
+		cancelBase()
 	}
 	if a.opts.Dispose != nil {
 		a.disposeOnce.Do(a.opts.Dispose)
@@ -216,11 +242,24 @@ func (a *Adapter) isStopped() bool {
 	return a.stopped
 }
 
+func (a *Adapter) beginWork() bool {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if a.stopped {
+		return false
+	}
+	a.wg.Add(1)
+	return true
+}
+
 func (a *Adapter) flowCtx() context.Context {
-	if a.baseCtx == nil {
+	a.mu.Lock()
+	ctx := a.baseCtx
+	a.mu.Unlock()
+	if ctx == nil {
 		return context.Background()
 	}
-	return a.baseCtx
+	return ctx
 }
 
 // RefreshConnections reconciles the served targets with discovery: vanished
@@ -241,15 +280,19 @@ func (a *Adapter) RefreshConnections(ctx context.Context) error {
 	}
 	var vanished []*runtime
 	a.mu.Lock()
+	if a.stopped {
+		a.mu.Unlock()
+		return nil
+	}
 	for key, rt := range a.runtimes {
 		if !current[key] {
 			delete(a.runtimes, key)
 			vanished = append(vanished, rt)
+			a.wg.Add(1)
 		}
 	}
 	a.mu.Unlock()
 	for _, rt := range vanished {
-		a.wg.Add(1)
 		rt := rt
 		go func() {
 			defer a.wg.Done()
@@ -259,12 +302,18 @@ func (a *Adapter) RefreshConnections(ctx context.Context) error {
 	for _, ref := range targets {
 		key := ref.Key()
 		a.mu.Lock()
+		if a.stopped {
+			a.mu.Unlock()
+			break
+		}
 		exists := a.runtimes[key] != nil
+		if !exists {
+			a.wg.Add(1)
+		}
 		a.mu.Unlock()
 		if exists {
 			continue
 		}
-		a.wg.Add(1)
 		ref := ref
 		go func() {
 			defer a.wg.Done()
@@ -355,8 +404,19 @@ func (a *Adapter) openRuntimeSocket(rt *runtime) (bool, error) {
 	ctx := a.flowCtx()
 	web := a.opts.WebFactory(rt.lease.BotToken, rt.target)
 	socket := a.opts.SocketFactory(rt.lease.AppToken, rt.target)
-	a.observeSocket(socket, rt.target)
+	if configurable, ok := socket.(interface{ SetMaxInFlight(int) }); ok {
+		configurable.SetMaxInFlight(a.opts.MaxInFlight)
+	}
+	rt.mu.Lock()
+	rt.web = web
+	rt.socket = socket
+	rt.mu.Unlock()
+	a.observeSocket(socket, rt)
 	socket.OnEvent(func(event SocketEvent) {
+		if !a.beginWork() {
+			return
+		}
+		defer a.wg.Done()
 		a.onSocketEvent(rt, socket, event)
 	})
 	// The runtime socket's hello identity was already verified by the probe;
@@ -374,10 +434,6 @@ func (a *Adapter) openRuntimeSocket(rt *runtime) (bool, error) {
 		_ = a.disconnectSocket(socket, rt.target)
 		return false, nil
 	}
-	rt.mu.Lock()
-	rt.web = web
-	rt.socket = socket
-	rt.mu.Unlock()
 	return true, nil
 }
 
@@ -392,7 +448,11 @@ func (a *Adapter) onSocketEvent(rt *runtime, socket SocketClient, event SocketEv
 	interaction := IsSlackInteraction(event.Body)
 	eventType := SlackEventType(event.Body)
 	a.log.Info("envelope received", "target", rt.key, "event", eventType)
-	if err := a.handleEvent(a.flowCtx(), rt, event.Body, event.Ack); err != nil {
+	ctx := event.Context
+	if ctx == nil {
+		ctx = a.flowCtx()
+	}
+	if err := a.handleEvent(ctx, rt, event.Body, event.Ack); err != nil {
 		message := "event handling failed before acknowledgement"
 		if interaction {
 			message = "interaction processing failed after acknowledgement"
@@ -489,14 +549,14 @@ func (a *Adapter) assertCurrent(rt *runtime, snapshot *runtimeSnapshot) {
 }
 
 // observeSocket logs connection-state transitions when the client exposes them.
-func (a *Adapter) observeSocket(socket SocketClient, target Target) {
+func (a *Adapter) observeSocket(socket SocketClient, rt *runtime) {
 	stateful, ok := socket.(interface {
 		OnState(handler func(state string, apiErr error))
 	})
 	if !ok {
 		return
 	}
-	key := target.Key()
+	key := rt.key
 	stateful.OnState(func(state string, apiErr error) {
 		if state == "error" {
 			reason := ""
@@ -504,10 +564,43 @@ func (a *Adapter) observeSocket(socket SocketClient, target Target) {
 				reason = SafeErrorMessage(apiErr)
 			}
 			a.log.Error("socket failed", "target", key, "state", state, "reason", reason)
+			a.removeRuntimeAfterSocketFailure(rt, socket)
+			return
+		}
+		if apiErr != nil {
+			a.log.Info("socket state changed", "target", key, "state", state, "reason", SafeErrorMessage(apiErr))
 			return
 		}
 		a.log.Info("socket state changed", "target", key, "state", state)
 	})
+}
+
+func (a *Adapter) removeRuntimeAfterSocketFailure(rt *runtime, socket SocketClient) {
+	rt.mu.Lock()
+	matches := rt.socket == socket
+	rt.mu.Unlock()
+	if !matches {
+		return
+	}
+	a.mu.Lock()
+	if a.stopped || a.runtimes[rt.key] != rt {
+		a.mu.Unlock()
+		return
+	}
+	delete(a.runtimes, rt.key)
+	rt.closeOnce.Do(func() { close(rt.done) })
+	scheduled := false
+	rt.disconnectScheduled.Do(func() {
+		a.wg.Add(1)
+		scheduled = true
+	})
+	a.mu.Unlock()
+	if scheduled {
+		go func() {
+			defer a.wg.Done()
+			a.disconnectRuntime(rt)
+		}()
+	}
 }
 
 // handleEvent forwards one inbound body: interactions acknowledge before
@@ -557,14 +650,14 @@ func (a *Adapter) handleEvent(ctx context.Context, rt *runtime, body any, ack fu
 		a.assertCurrent(rt, snapshot)
 		if _, err := a.opts.Transport.Interaction(ctx, rt.target, envelope, snapshot.leaseID, a.opts.AdapterID); err != nil {
 			if IsLeaseStale(err) {
-				a.removeRuntime(rt)
+				a.removeRuntimeAsync(rt)
 				return nil
 			}
 			return err
 		}
 		a.assertCurrent(rt, snapshot)
 		a.log.Info("interaction forwarded", "target", rt.key, "event", SlackEventType(body))
-		_ = a.drain(rt)
+		_ = a.drainWithContext(ctx, rt)
 		return nil
 	}
 
@@ -576,7 +669,7 @@ func (a *Adapter) handleEvent(ctx context.Context, rt *runtime, body any, ack fu
 	result, ingressErr := a.opts.Transport.Ingress(ctx, rt.target, envelope, snapshot.leaseID, a.opts.AdapterID)
 	if ingressErr != nil {
 		if IsLeaseStale(ingressErr) {
-			a.removeRuntime(rt)
+			a.removeRuntimeAsync(rt)
 			return nil
 		}
 		return ingressErr
@@ -598,7 +691,7 @@ func (a *Adapter) handleEvent(ctx context.Context, rt *runtime, body any, ack fu
 	a.assertCurrent(rt, snapshot)
 	ack()
 	a.assertCurrent(rt, snapshot)
-	_ = a.drain(rt)
+	_ = a.drainWithContext(ctx, rt)
 	return nil
 }
 
@@ -673,6 +766,10 @@ func (o *drainOutcome) recordTransport(err error) {
 // The returned error is non-nil only for a generic failure, so the initial
 // drain inside runtime setup can fail the connection like the Node await.
 func (a *Adapter) drain(rt *runtime) error {
+	return a.drainWithContext(a.flowCtx(), rt)
+}
+
+func (a *Adapter) drainWithContext(ctx context.Context, rt *runtime) error {
 	snapshot := a.snapshot(rt)
 	if snapshot == nil {
 		return nil
@@ -686,7 +783,7 @@ func (a *Adapter) drain(rt *runtime) error {
 	rt.draining = true
 	rt.drainMu.Unlock()
 
-	outcome := a.runDrain(a.flowCtx(), rt, snapshot)
+	outcome := a.runDrain(ctx, rt, snapshot)
 
 	rt.drainMu.Lock()
 	rt.draining = false
@@ -696,12 +793,12 @@ func (a *Adapter) drain(rt *runtime) error {
 
 	switch {
 	case outcome.leaseStale:
-		a.removeRuntime(rt)
+		a.removeRuntimeAsync(rt)
 	case outcome.failure != nil:
 		a.log.Error("delivery drain failed", "target", rt.key, "reason", SafeErrorMessage(outcome.failure))
 	}
 	if requested && a.isActive(rt) {
-		_ = a.drain(rt)
+		_ = a.drainWithContext(ctx, rt)
 	}
 	return outcome.failure
 }
@@ -893,17 +990,43 @@ func (a *Adapter) ackUncertain(ctx context.Context, rt *runtime, snapshot *runti
 
 func (a *Adapter) disconnectRuntime(rt *runtime) {
 	rt.closeOnce.Do(func() { close(rt.done) })
-	rt.mu.Lock()
-	socket := rt.socket
-	rt.mu.Unlock()
-	_ = a.disconnectSocket(socket, rt.target)
+	rt.disconnectOnce.Do(func() {
+		rt.mu.Lock()
+		socket := rt.socket
+		rt.mu.Unlock()
+		_ = a.disconnectSocket(socket, rt.target)
+	})
+}
+
+func (a *Adapter) removeRuntimeAsync(rt *runtime) {
+	a.mu.Lock()
+	if a.runtimes[rt.key] == rt {
+		delete(a.runtimes, rt.key)
+	}
+	rt.closeOnce.Do(func() { close(rt.done) })
+	scheduled := false
+	if !a.stopped {
+		rt.disconnectScheduled.Do(func() {
+			a.wg.Add(1)
+			scheduled = true
+		})
+	}
+	a.mu.Unlock()
+	if scheduled {
+		go func() {
+			defer a.wg.Done()
+			a.disconnectRuntime(rt)
+		}()
+	}
 }
 
 func (a *Adapter) disconnectSocket(socket SocketClient, target Target) error {
 	if socket == nil {
 		return nil
 	}
-	if err := socket.Disconnect(a.flowCtx()); err != nil {
+	ctx, cancel := context.WithTimeout(context.Background(), adapterDisconnectTimeout)
+	defer cancel()
+	if err := socket.Disconnect(ctx); err != nil {
 		a.log.Error("socket disconnect failed", "target", target.Key(), "reason", SafeErrorMessage(err))
 	}
 	return nil
@@ -912,7 +1035,9 @@ func (a *Adapter) disconnectSocket(socket SocketClient, target Target) error {
 // startTimerLoop owns one ticker goroutine for a runtime; loops exit on
 // adapter stop or runtime eviction.
 func (a *Adapter) startTimerLoop(rt *runtime, every time.Duration, fn func()) {
-	a.wg.Add(1)
+	if !a.beginWork() {
+		return
+	}
 	ticker := a.opts.TickerFactory(every)
 	go func() {
 		defer a.wg.Done()

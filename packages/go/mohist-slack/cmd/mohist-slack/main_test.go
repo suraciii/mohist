@@ -119,11 +119,27 @@ func TestResolveConfigFloorsAndOverrides(t *testing.T) {
 	}), readOK); err == nil {
 		t.Fatal("invalid proxy URL was accepted")
 	}
+	if _, err := resolveConfig(envOf(map[string]string{
+		"MOHIST_OPERATOR_TOKEN": "op",
+		"SLACK_PROXY_URL":       "https://proxy.example",
+	}), readOK); err == nil {
+		t.Fatal("proxy scheme unsupported by the Socket Mode dialer was accepted")
+	}
 	proxied, err := resolveConfig(envOf(map[string]string{
 		"MOHIST_OPERATOR_TOKEN": "op",
 		"SLACK_PROXY_URL":       "http://127.0.0.1:8080",
 	}), readOK)
 	if err != nil || proxied.proxyURL == nil {
 		t.Fatalf("proxy not resolved: %+v err=%v", proxied, err)
+	}
+	proxied, err = resolveConfig(envOf(map[string]string{
+		"MOHIST_OPERATOR_TOKEN": "op",
+		"SLACK_PROXY_URL":       "http://proxy-user@127.0.0.1:8080",
+	}), readOK)
+	if err != nil || proxied.proxyURL == nil {
+		t.Fatalf("credentialed proxy not resolved: %+v err=%v", proxied, err)
+	}
+	if password, explicit := proxied.proxyURL.User.Password(); !explicit || password != "" {
+		t.Fatal("username-only proxy credentials were not normalized with an explicit empty password")
 	}
 }

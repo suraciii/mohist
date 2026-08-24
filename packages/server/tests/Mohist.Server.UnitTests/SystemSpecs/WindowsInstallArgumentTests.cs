@@ -105,6 +105,22 @@ public class WindowsInstallArgumentTests
     }
 
     [Fact]
+    public void RenderSlackLauncher_WithSpacePath_QuotesRepositoryAndGoBinary()
+    {
+        var installer = CreateInstaller(new FakeFileSystem(), new FakeCommandExecutor());
+        var pathWithSpaces = @"C:\Users\Mohist User\repos\space repo";
+        var body = installer.RenderSlackLauncher(
+            new WindowsScheduledTaskInstaller.SlackLauncherSpec(
+                pathWithSpaces,
+                "http://127.0.0.1:3456",
+                "operator-token"));
+
+        Assert.Contains($"cd /d \"{pathWithSpaces}\"", body);
+        Assert.Contains("set \"SERVER_URL=http://127.0.0.1:3456\"", body);
+        Assert.Contains("\"packages\\go\\mohist-slack\\bin\\mohist-slack.exe\"", body);
+    }
+
+    [Fact]
     public void RenderServerLauncher_WithNonDefaultListenUrl_PassesItThrough()
     {
         var installer = CreateInstaller(new FakeFileSystem(), new FakeCommandExecutor());

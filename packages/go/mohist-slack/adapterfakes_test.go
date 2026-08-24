@@ -2,6 +2,7 @@ package mohistslack
 
 import (
 	"context"
+	"slices"
 	"sync"
 	"time"
 )
@@ -34,16 +35,32 @@ func (l *orderedLog) snapshot() []string {
 
 // fakeSocket is a controllable SocketClient for state-machine tests.
 type fakeSocket struct {
-	mu           sync.Mutex
-	appID        string
-	startErr     error
-	starts       int
-	disconnected bool
-	handler      func(SocketEvent)
-	order        *orderedLog
+	mu                sync.Mutex
+	appID             string
+	startErr          error
+	starts            int
+	disconnected      bool
+	disconnects       int
+	handler           func(SocketEvent)
+	stateFn           func(string, error)
+	disconnectedCh    chan struct{}
+	ctx               context.Context
+	cancel            context.CancelFunc
+	handlers          sync.WaitGroup
+	disconnectEntered chan struct{}
+	order             *orderedLog
 }
 
-func newFakeSocket(appID string) *fakeSocket { return &fakeSocket{appID: appID} }
+func newFakeSocket(appID string) *fakeSocket {
+	ctx, cancel := context.WithCancel(context.Background())
+	return &fakeSocket{
+		appID:             appID,
+		disconnectedCh:    make(chan struct{}),
+		disconnectEntered: make(chan struct{}, 1),
+		ctx:               ctx,
+		cancel:            cancel,
+	}
+}
 
 func (s *fakeSocket) Start(context.Context) (string, error) {
 	s.mu.Lock()
@@ -62,12 +79,41 @@ func (s *fakeSocket) OnEvent(handler func(SocketEvent)) {
 	s.mu.Unlock()
 }
 
-func (s *fakeSocket) Disconnect(context.Context) error {
+func (s *fakeSocket) OnState(handler func(string, error)) {
 	s.mu.Lock()
-	s.disconnected = true
+	s.stateFn = handler
+	s.mu.Unlock()
+}
+
+func (s *fakeSocket) Disconnect(context.Context) error {
+	select {
+	case s.disconnectEntered <- struct{}{}:
+	default:
+	}
+	s.cancel()
+	s.handlers.Wait()
+	s.mu.Lock()
+	s.disconnects++
+	if !s.disconnected {
+		s.disconnected = true
+		close(s.disconnectedCh)
+	}
 	s.mu.Unlock()
 	return nil
 }
+
+func (s *fakeSocket) emitState(state string, err error) {
+	s.mu.Lock()
+	handler := s.stateFn
+	s.mu.Unlock()
+	if handler != nil {
+		handler(state, err)
+	}
+}
+
+func (s *fakeSocket) waitDisconnected() { <-s.disconnectedCh }
+
+func (s *fakeSocket) waitDisconnectStarted() { <-s.disconnectEntered }
 
 // emit runs the registered handler synchronously and reports whether the
 // flow acknowledged the event.
@@ -83,9 +129,32 @@ func (s *fakeSocket) emit(body any) bool {
 	handler := s.handler
 	s.mu.Unlock()
 	if handler != nil {
-		handler(SocketEvent{Body: body, Ack: ack})
+		handler(SocketEvent{Context: s.ctx, Body: body, Ack: ack})
 	}
 	return acked
+}
+
+func (s *fakeSocket) emitAsync(body any) <-chan bool {
+	result := make(chan bool, 1)
+	s.mu.Lock()
+	handler := s.handler
+	s.mu.Unlock()
+	if handler == nil {
+		result <- false
+		return result
+	}
+	s.handlers.Add(1)
+	go func() {
+		defer s.handlers.Done()
+		acked := false
+		handler(SocketEvent{
+			Context: s.ctx,
+			Body:    body,
+			Ack:     func() { acked = true },
+		})
+		result <- acked
+	}()
+	return result
 }
 
 func (s *fakeSocket) wasDisconnected() bool {
@@ -98,6 +167,12 @@ func (s *fakeSocket) startCount() int {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.starts
+}
+
+func (s *fakeSocket) disconnectCount() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.disconnects
 }
 
 // fakeWeb records WebClient calls and replays scripted outcomes.
@@ -220,8 +295,13 @@ type fakeTransport struct {
 	claimQueue       []*Delivery
 	uncertainQueue   []*Delivery
 
-	ingressGate chan struct{}
-	claimGate   chan struct{}
+	discoverGate               chan struct{}
+	discoverEntered            chan struct{}
+	discoverIgnoreCancellation bool
+	ingressGate                chan struct{}
+	ingressEntered             chan struct{}
+	ingressIgnoreCancellation  bool
+	claimGate                  chan struct{}
 	// ingressHook runs inside Ingress after the envelope is recorded, so
 	// tests can land concurrent state changes mid-call deterministically.
 	ingressHook func()
@@ -232,10 +312,32 @@ type fakeTransport struct {
 	helloApps  []string
 }
 
-func (t *fakeTransport) Discover(context.Context) ([]Target, error) {
+func (t *fakeTransport) Discover(ctx context.Context) ([]Target, error) {
+	t.mu.Lock()
+	gate := t.discoverGate
+	entered := t.discoverEntered
+	ignoreCancellation := t.discoverIgnoreCancellation
+	t.mu.Unlock()
+	if entered != nil {
+		select {
+		case entered <- struct{}{}:
+		default:
+		}
+	}
+	if gate != nil {
+		if ignoreCancellation {
+			<-gate
+		} else {
+			select {
+			case <-gate:
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			}
+		}
+	}
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	return t.targets, nil
+	return slices.Clone(t.targets), nil
 }
 
 func (t *fakeTransport) AcquireLease(_ context.Context, _ Target, kind LeaseKind, _ string) (Lease, error) {
@@ -283,12 +385,24 @@ func (t *fakeTransport) ReportHello(_ context.Context, _ Target, _, appID string
 func (t *fakeTransport) Ingress(ctx context.Context, _ Target, envelope Envelope, _, _ string) (IngressResult, error) {
 	t.mu.Lock()
 	gate := t.ingressGate
+	entered := t.ingressEntered
+	ignoreCancellation := t.ingressIgnoreCancellation
 	t.mu.Unlock()
-	if gate != nil {
+	if entered != nil {
 		select {
-		case <-gate:
-		case <-ctx.Done():
-			return IngressResult{}, ctx.Err()
+		case entered <- struct{}{}:
+		default:
+		}
+	}
+	if gate != nil {
+		if ignoreCancellation {
+			<-gate
+		} else {
+			select {
+			case <-gate:
+			case <-ctx.Done():
+				return IngressResult{}, ctx.Err()
+			}
 		}
 	}
 	t.mu.Lock()

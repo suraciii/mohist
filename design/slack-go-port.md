@@ -174,22 +174,23 @@ Configuration comes from the environment:
 | MOHIST_OPERATOR_TOKEN / OPERATOR_TOKEN | none | direct operator token |
 | MOHIST_OPERATOR_TOKEN_PATH | none | file fallback read as one token |
 | MOHIST_OPERATOR_ID | `mohist-slack` | operator id header |
-| SLACK_PROXY_URL | none | outbound proxy for Slack traffic |
+| SLACK_PROXY_URL | none | absolute `http://` or `socks5://` proxy for Slack traffic |
 | HEARTBEAT_INTERVAL_MS | 15000 | lease renewal cadence, floor 1000 |
 | DELIVERY_POLL_INTERVAL_MS | 1000 | delivery poll cadence, floor 100 |
 | DISCOVERY_POLL_INTERVAL_MS | 15000 | discovery cadence, floor 1000 |
 | MAX_IN_FLIGHT | 8 | concurrent event gate |
 
-Socket reconnects back off exponentially from 1 s, doubling to a 30 s cap.
-SIGINT and SIGTERM abort the process context, stop all runtimes, and flush
-logs.
+Socket reconnect and ping liveness are owned by slack-go's managed Socket Mode
+loop. SIGINT and SIGTERM abort the process context, stop all runtimes, and flush
+logs. Concurrent stop callers join the same cleanup. Slack bootstrap and proxy
+handshakes are bounded to 10 seconds, delivery Web API calls to 30 seconds, and
+adapter disconnect waits allow the socket runner to converge before shutdown.
 
-Logging uses the standard `log/slog` facade on stderr. Handler selection at
-startup: an interactive terminal gets `lmittmann/tint` colored output; any
-captured stream (journald, scheduled-task log files, containers) gets
-`slog.TextHandler`; `MOHIST_LOG_FORMAT=json` forces `slog.JSONHandler` for
-log collectors. Call sites never reference a logging library, so the handler
-can be swapped for the OpenTelemetry slog bridge without touching them.
+Logging uses the standard `log/slog` facade on stderr. `slog.TextHandler` is the
+default and `MOHIST_LOG_FORMAT=json` selects `slog.JSONHandler`. The port does
+not add a terminal-color dependency. Call sites never reference a logging
+library, so the handler can be swapped for the OpenTelemetry slog bridge without
+touching them.
 Component names travel as a `component` attribute; error fields carrying
 Slack tokens have `xapp`, `xoxb`, `xoxp`, and `xoxe` shapes redacted before
 emission.
@@ -208,13 +209,20 @@ packages/go/mohist-slack/
   adapter.go      runtime map, generation fencing, drain loops
   delivery.go     payload operations, fallback, reconciliation
   events.go       message and interaction normalization
-  logging.go      slog assembly, tint/text/json handlers, redaction
+  logging.go      slog text/json assembly and redaction convention
+  slack.go        socketmode and Web API integration
   cmd/mohist-slack/main.go   env config, signal handling, assembly (Batch 4)
 ```
 
-Library choices: `slack-go/slack` (socketmode and api packages) for Slack
-connectivity, stdlib `net/http` for the Server client, `log/slog` for logs.
-No other dependencies.
+Library choices: `slack-go/slack` (socketmode and API packages) for Slack
+connectivity, `gorilla/websocket` for the proxy-aware Socket Mode dialer,
+stdlib `net/http` for the proxied Socket bootstrap and Server client, and
+`log/slog` for logs. No other dependencies.
+
+Build commands pass `-buildvcs=false`. Mohist does not expose Go's embedded VCS
+stamp, while linked worktrees may keep Git metadata outside the source tree and
+make automatic stamping ambiguous. Repository revision evidence remains owned
+by Mohist's existing build and verification paths.
 
 Concurrency mapping:
 
@@ -226,18 +234,24 @@ Concurrency mapping:
 | 5 ms in-flight poll | buffered-channel semaphore |
 | WebSocket client | slack-go socketmode |
 
+The Socket pump uses separate bounded message and interaction queues. Each queue
+has `MAX_IN_FLIGHT` workers and `MAX_IN_FLIGHT` waiting slots; admission never
+blocks the pump. A full queue leaves that envelope unacknowledged so Slack can
+retry it, allowing later interactions to reach their lane during message
+saturation. Adapter runtime fencing precedes every interaction acknowledgement;
+messages remain acknowledged only after Server forwarding succeeds.
+
 ## Deltas from the Node Implementation
 
 1. App identity verification. Node parses the raw Socket Mode hello frame for
-   `app_id`. slack-go encapsulates the handshake, so the port verifies the
-   presented identity with `auth.test` against the validation lease's
-   expected app id during the probe phase. The guarantee — the connected app
-   matches the lease expectation before a runtime lease is acquired — is
-   identical and pinned by a contract test.
-2. Proxied ping timeout. Node disables the client ping timeout (24 h) when an
-   outbound proxy is configured. slack-go exposes different ping controls;
-   Batch 3 must either match the behavior or document the difference and fail
-   closed. This is the one open verification item.
+   `app_id`. slack-go exposes the same `connection_info.app_id` on its hello
+   request. The probe reports that identity to the Server, which arbitrates it
+   against the validation lease before issuing a runtime lease.
+2. Proxied ping timeout. The HTTP proxy is configured on both the Slack API
+   client used for `apps.connections.open` and the WebSocket dialer. After the
+   tunnel is established, Slack ping frames and slack-go's liveness checks use
+   that same connection. The port therefore keeps slack-go's managed ping
+   timeout instead of applying Node's 24-hour proxy override.
 3. JSON tolerance. Unknown fields are ignored; required-field validation
    errors are preserved exactly where the Node implementation raises them.
 4. Discovery isolation. One failing target logs and skips; sibling targets
@@ -246,9 +260,8 @@ Concurrency mapping:
 5. Redaction. The token-shape redaction regex ports verbatim into the log
    path.
 6. Log format. The Node implementation hand-rolls a logfmt line format; the
-   port uses the standard slog facade with a tinted terminal handler, plain
-   text for captured output, and JSON on request. Line formats intentionally
-   diverge.
+   port uses standard slog text output by default and JSON on request. Line
+   formats intentionally diverge.
 
 ## Compatibility Commitments
 
@@ -257,6 +270,38 @@ Concurrency mapping:
   completes the Socket hello automatically after credentials are staged.
 - Service names unchanged; installers swap only the ExecStart / launcher
   command from `node …/dist/cli.js` to the Go binary.
+- The repository build writes the Slack executable under `bin/build`; install
+  promotes that artifact to `bin/mohist-slack[.exe]`. A root build never
+  overwrites the executable of a running Windows service.
+- `mo update slack` builds into a staging directory, stops the installed
+  service, replaces the binary, rewrites a persisted Node-era unit or launcher
+  while preserving its environment and credentials, then starts the service
+  and verifies that it remains active. Before stop, it persists a user-only
+  launcher snapshot under `~/.mohist/update/slack` and a non-secret transaction
+  manifest beside the staged binary. The manifest records the protected
+  snapshot identity and whether a previous binary and its digest are required
+  for recovery. Install and update hold one per-user Slack transaction lock from
+  preflight through cleanup, and a user-global unresolved marker blocks installs
+  from every repository checkout after an update process exits. A failed or unconfirmed stop never attempts binary
+  replacement. When a previous Go binary exists, a later failure restores that
+  binary and launcher, then restarts and verifies the previous service. The
+  first Node-to-Go migration cannot restart the retired Node runtime after the
+  repository upgrade, so its recovery restores the captured configuration and
+  completes the Go launcher promotion instead. After a process interruption,
+  the next update invocation finalizes a committed transaction or converges the
+  recorded rollback/roll-forward before allowing another build. Recovery
+  completion is marked durably before payloads are reclaimed.
+  Activation allows a bounded startup window and requires two consecutive active
+  probes. An incomplete rollback preserves the staged binary backup and blocks a
+  later update from deleting it before manual recovery.
+- Update and service-manager child processes must remain in the launched process
+  tree and preserve their inherited environment. Cancellation kills and waits
+  the tagged tree before transaction cleanup or service recovery begins.
+- Windows adopts an existing scheduled task only when it is enabled, belongs to
+  the current user, has one logon trigger, and launches the exact Mohist Slack
+  launcher. Install transfers a running Node launcher to the Go launcher only
+  after the new binary and files are ready, then requires two consecutive
+  process-identity probes before cleanup.
 - Log output stays on stderr as key=value or JSON lines; the exact line
   format intentionally diverges from the Node implementation.
 
@@ -268,7 +313,9 @@ Concurrency mapping:
 | adapter.test.ts | adapter_test.go | fake transport/socket: lease transitions, stale eviction, drain coalescing, backpressure notice |
 | adapter-delivery.test.ts | delivery_test.go | every operation's success, degradation, and reconciliation branches |
 | adapter-events.test.ts | events_test.go | required-identity failures, string-wrapped interactive payloads |
-| cli.test.ts | main_test.go | env resolution, token precedence, backoff sequence |
+| Socket Mode client tests | slack_socket_test.go | app-token bootstrap and WebSocket CONNECT through proxy, hello identity, terminal runner failure, concurrent start/disconnect, runner join, bounded lanes, saturated-message interaction admission, ack identity |
+| Web API client tests | slack_web_test.go | post/update form contract, injected endpoint, coded rejection |
+| cli.test.ts | main_test.go | env resolution, token precedence, proxy and interval configuration |
 | logger.test.ts | logging_test.go | handler selection, per-format golden lines, redaction |
 
 Time discipline follows the repository rules: injected clocks and tickers,
@@ -281,7 +328,7 @@ reaction paths.
 | Batch | Content | Exit criterion |
 | --- | --- | --- |
 | 0 | this specification | merged |
-| 1 | serverapi layer | contract tests green against fixtures; Go CI job (gofmt, vet, test) wired |
+| 1 | serverapi layer | contract tests green; canonical Repository checks run gofmt, static build, vet, and portable tests; provisioned Linux CI runs race tests |
 | 2 | adapter core | fake-injected state-machine tests green |
 | 3 | Slack integration incl. proxy ping verification | fake-socket behavior pinned; open item resolved |
 | 4 | process entry | real-Slack end-to-end pass |
@@ -291,3 +338,9 @@ reaction paths.
 Runtime leases are exclusive per target, so cutover switches whole
 connections rather than shadow-running both implementations. Rollback is
 redeploying the previous binary; no data migration exists on either side.
+
+Automated evidence covers the protocol, state machine, Socket pump, Web API
+forms, process configuration, build contract, and service launcher contracts.
+The real-Slack Batch 4 pass and a live `mo install/update/service slack` smoke
+remain deployment gates because they require external Slack credentials and an
+OS service manager; automated gates do not substitute for those checks.

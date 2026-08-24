@@ -209,8 +209,10 @@ internal sealed class FakeCommandExecutor : ICommandExecutor
     public Task<(int ExitCode, string Stdout, string Stderr)> ExecuteAsync(
         string fileName, string[] args, string? workingDirectory = null, CancellationToken cancellationToken = default)
     {
+        cancellationToken.ThrowIfCancellationRequested();
         ExecutedCommands.Add((fileName, args, workingDirectory));
         OnExecute?.Invoke(fileName, args);
+        cancellationToken.ThrowIfCancellationRequested();
         var queued = _resultQueues.FirstOrDefault(rule =>
             rule.FileName == fileName && rule.Results.Count > 0 && rule.Match(args));
         if (queued.Match is not null)
@@ -606,11 +608,15 @@ internal sealed class FakeFileSystem : IFileSystem
     private readonly Dictionary<string, string> _files = new(StringComparer.OrdinalIgnoreCase);
     private readonly HashSet<string> _directories = new(StringComparer.OrdinalIgnoreCase);
     private readonly HashSet<string> _readOnlyRoots = new(StringComparer.OrdinalIgnoreCase);
+    private readonly HashSet<string> _userOnlyFiles = new(StringComparer.OrdinalIgnoreCase);
+    private readonly HashSet<string> _fileLocks = new(StringComparer.OrdinalIgnoreCase);
     private readonly object _gate = new();
     private string _currentDirectory = "/";
 
     public Func<string, bool>? FailNextDelete { get; set; }
     public Func<string, bool>? FailNextMoveTo { get; set; }
+    public Func<string, bool>? FailNextOpenWrite { get; set; }
+    public Func<string, string, bool>? FailNextWrite { get; set; }
 
     public string Cwd
     {
@@ -757,6 +763,7 @@ internal sealed class FakeFileSystem : IFileSystem
         lock (_gate)
         {
             _files.Remove(normalized);
+            _userOnlyFiles.Remove(normalized);
         }
     }
 
@@ -768,13 +775,15 @@ internal sealed class FakeFileSystem : IFileSystem
             : normalized + Path.DirectorySeparatorChar;
         lock (_gate)
         {
-            foreach (var dir in _directories.Where(d => d == normalized || d.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)).ToArray())
+            foreach (var dir in _directories.Where(d => string.Equals(d, normalized, StringComparison.OrdinalIgnoreCase)
+                || d.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)).ToArray())
             {
                 _directories.Remove(dir);
             }
             foreach (var key in _files.Keys.Where(k => StartsWithDirectory(k, normalized)).ToArray())
             {
                 _files.Remove(key);
+                _userOnlyFiles.Remove(key);
             }
         }
     }
@@ -819,6 +828,7 @@ internal sealed class FakeFileSystem : IFileSystem
                 throw new FileNotFoundException($"Fake filesystem has no file at '{source}'.");
             _files.Remove(sourceKey);
             _files[destKey] = content;
+            if (_userOnlyFiles.Remove(sourceKey)) _userOnlyFiles.Add(destKey);
         }
     }
 
@@ -829,6 +839,11 @@ internal sealed class FakeFileSystem : IFileSystem
     public void WriteAllText(string path, string contents)
     {
         var normalized = Normalize(path);
+        if (FailNextWrite?.Invoke(normalized, contents) == true)
+        {
+            FailNextWrite = null;
+            throw new IOException($"configured write failure for '{path}'");
+        }
         EnsureWritable(normalized);
         lock (_gate)
         {
@@ -840,6 +855,23 @@ internal sealed class FakeFileSystem : IFileSystem
     {
         WriteAllText(path, contents);
         return Task.CompletedTask;
+    }
+
+    public void WriteAllTextUserOnly(string path, string contents)
+    {
+        WriteAllText(path, contents);
+        lock (_gate)
+        {
+            _userOnlyFiles.Add(Normalize(path));
+        }
+    }
+
+    public bool IsUserOnlyFile(string path)
+    {
+        lock (_gate)
+        {
+            return _userOnlyFiles.Contains(Normalize(path));
+        }
     }
 
     public IEnumerable<string> EnumerateFiles(string path, string searchPattern, SearchOption searchOption)
@@ -862,7 +894,32 @@ internal sealed class FakeFileSystem : IFileSystem
 
     public Stream OpenRead(string path) => new MemoryStream(Encoding.UTF8.GetBytes(Read(path)));
 
-    public Stream OpenWrite(string path) => new RecordingStream(this, path);
+    public Stream OpenWrite(string path)
+    {
+        var normalized = Normalize(path);
+        if (FailNextOpenWrite?.Invoke(normalized) == true)
+        {
+            FailNextOpenWrite = null;
+            throw new IOException($"configured open-write failure for '{path}'");
+        }
+        return new RecordingStream(this, path);
+    }
+
+    public Stream? TryAcquireFileLock(string path)
+    {
+        var normalized = Normalize(path);
+        lock (_gate)
+        {
+            if (!_fileLocks.Add(normalized)) return null;
+        }
+        return new ReleaseStream(() =>
+        {
+            lock (_gate)
+            {
+                _fileLocks.Remove(normalized);
+            }
+        });
+    }
 
     private void EnsureWritable(string path)
     {
@@ -908,6 +965,21 @@ internal sealed class FakeFileSystem : IFileSystem
             {
                 var content = Encoding.UTF8.GetString(ToArray());
                 _owner.WriteAllText(_path, content);
+            }
+            base.Dispose(disposing);
+        }
+    }
+
+    private sealed class ReleaseStream(Action release) : MemoryStream
+    {
+        private bool _released;
+
+        protected override void Dispose(bool disposing)
+        {
+            if (disposing && !_released)
+            {
+                _released = true;
+                release();
             }
             base.Dispose(disposing);
         }
