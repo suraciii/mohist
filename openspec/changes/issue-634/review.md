@@ -8,30 +8,28 @@ None.
 
 ## Previous finding dispositions
 
-### Previous MF-1 — shared Slack API fake made policy verification nondeterministic: fixed
+### Previous MF-1 — shared Slack API fake made policy verification nondeterministic: remains fixed
 
-`SlackAccessPolicySpecs` and `SlackMultiAgentIngressSpecs` now belong to the same non-parallel `SharedSlackApi` collection (`packages/server/tests/Mohist.Server.SpecTests/Support/MohistCollections.cs:26-30`; `SlackAccessPolicySpecs.cs:30-50`; `SlackMultiAgentIngressSpecs.cs:29-49`). Both classes clear the singleton `SlackApiTestScript` before and after each test, and the mutable-policy matrix also uses `finally` cleanup. Repository search found no other SpecTests consumer of the assembly fixture's singleton script. This removes the responder/request-reset race identified in the previous review.
+The current change keeps `SlackAccessPolicySpecs` and all partials of `SlackMultiAgentIngressSpecs` in the same `SharedSlackApi` xUnit collection. Removing `DisableParallelization = true` from the collection definition does not reintroduce the original race: xUnit still serializes test classes within one collection, while only unrelated collections regain parallel scheduling (`packages/server/tests/Mohist.Server.SpecTests/Support/MohistCollections.cs:26-32`). Both shared-fake consumers still clear the singleton script before and after each test, and the mutable-policy scenarios retain `finally` cleanup.
 
-The disposition is verified by the current full SpecTests run: 3089/3089 passed. The combined Server solution run also passed with the same 3089 SpecTests.
+The split of the selection tests into `SlackAgentSelectionSpecs.cs` and `SlackAgentSelectionRecoverySpecs.cs` uses partials of the same collected class, so those tests remain under the same collection and lifecycle isolation. The canonical gate passed all 3,093 Server SpecTests with the collection-parallel runner.
 
-### Previous MF-2 — migrated pre-fact claim could render an unusable chooser: fixed
+### Previous MF-2 — migrated pre-fact claim could render an unusable chooser: remains fixed
 
-`SlackAmbiguousPromptStore.TryClaimAsync` no longer permits same-winner reclaim unless the existing durable snapshot has complete, non-legacy selection facts (`packages/server/src/Mohist.Server/Infrastructure/Slack/SlackAmbiguousPromptStore.cs:152-163`, `466-486`). Both ambiguous ingress branches detect an incomplete legacy snapshot before rendering, settle a still-Pending row as `legacy_missing_selection_facts`, and create no chooser or execution path (`packages/server/src/Mohist.Server/Api/SlackConnectionRoutes.ChannelIngress.cs:423-436`, `493-507`).
-
-The new migration/store test applies the additive migration over a real pre-fact row, proves current redelivery facts do not reclaim or rewrite it, then verifies settlement and retention cleanup (`packages/server/tests/Mohist.Server.UnitTests/Slack/SlackSelectionMigrationTests.cs:16-111`). The route-level spec covers the same-winner/lost-delivery case and verifies no chooser outbox row, provider inbox row, Session, or AgentJob is created (`packages/server/tests/Mohist.Server.SpecTests/Specs/Slack/SlackMultiAgentIngressSpecs.cs:1189-1267`). The broken signed chooser from the previous review can no longer be produced.
+The subsequent commits do not change the legacy-claim fencing implementation. The migrated legacy redelivery scenario remains in `packages/server/tests/Mohist.Server.SpecTests/Specs/Slack/SlackAgentSelectionRecoverySpecs.cs:444-520`, verifying that a pre-fact claim with lost delivery is settled without rendering a stale chooser or creating execution resources. The production claim validation and ingress settlement behavior reviewed previously are unchanged.
 
 ## Re-review checks
 
-- **Every previous finding:** checked; both prior must-fix findings are properly fixed as recorded above.
-- **Regression check:** checked, no must-fix regression found in the isolation or legacy-fencing changes. Complete current claims retain the existing winner-retry behavior; only incomplete/legacy claims are prevented from reclaiming.
-- **Coverage:** checked. The migration-to-redelivery path and shared-fake isolation are now covered in addition to the previously verified chooser, authorization, routing, concurrency, recovery, and retention matrix.
-- **Correctness:** checked. Legacy rows remain inert and bounded by settlement/cleanup, while valid current snapshots still support stable-dispatch-ref retry. The test-collection change serializes all current users of the process-wide fake.
-- **Consistency with surrounding codebase:** checked. Legacy settlement uses the existing selection-state transition and obligation-worker outcome/retention machinery; test isolation uses the repository's centralized xUnit collection definitions and per-test lifecycle cleanup.
-- **Tests:** PASS. `dotnet test Mohist.Server.Tests.slnf --no-restore -p:SkipWebBuild=true` passed: Workflow Definition 178, Orleans 2, Arch 53, Unit 3800, Spec 3089. A separate full SpecTests run also passed 3089/3089. Server build passed, and `git diff --check master...HEAD` passed.
+- **Every previous finding:** checked. Both prior must-fix findings remain correctly disposed.
+- **Regression check:** checked. The post-review production edits only move existing model configuration into `MohistDbContext.SlackModels.cs` and move `ResolveCanonicalFollowupTargetAsync` between partial `AgentSessionQuerier` files; their bodies are unchanged. The remaining edits reorganize and optimize tests without changing product behavior.
+- **Coverage:** checked. The test split preserves the prior scenario set. Mutable candidate-state failures are now five independent Theory cases, retaining selected-policy denial, prompt-policy denial, expired selected lease, binding drift, and real soft deletion. Recovery still covers cross-Project restart, bound launch-to-follow-up races, the inbox/session crash window, transient retries, retention, and migrated legacy claims.
+- **Correctness:** checked. Atomic fixture setup preserves the same valid Connection, managed App, credentials, and runtime-lease facts while reducing setup round trips. Directly seeded lease fingerprints match the production runtime fingerprint of concatenated `xapp` and `xoxb` credentials.
+- **Consistency with surrounding codebase:** checked. The new partial files follow existing `MohistDbContext` and `AgentSessionQuerier` partial-class conventions. Shared-fake serialization uses the centralized xUnit collection definitions.
+- **Tests:** PASS. `dotnet build packages/server/src/Mohist.Server/Mohist.Server.csproj --no-restore -p:SkipWebBuild=true` succeeded. `dotnet test Mohist.Server.Tests.slnf --no-restore -p:SkipWebBuild=true` passed Arch 53/53, Unit 3,980/3,980, and Spec 3,093/3,093. The canonical `npm test` portfolio passed all seven tracks; its Server evidence passed 3,093/3,093 SpecTests with p95 331.8 ms under the unchanged 500 ms budget. `git diff --check master...HEAD` passed.
 
 ## Observations
 
-1. The migrated-legacy route spec verifies the API result and the immediate absence of a chooser, but does not run the obligation worker to assert the eventual Slack-visible settlement message. The worker does process recent `Settled` rows and enqueue a stable generic outcome (`SlackAgentSelectionObligationWorker.cs:187-224`, `253-285`), so this is a possible test-strengthening improvement rather than an unmet criterion.
-2. Go is unavailable in this workspace, so the Go adapter suite could not be rerun. The latest disposition changes no Go product code, and the Server-side route and full Server suites are green.
+1. Go is not installed in this workspace, so the Go adapter test suite could not be rerun. No Go file changed after the previous PASS review, and the current commits only reorganize Server code/tests and repair the Server duration gate.
+2. `progress.txt` still says the shared collection has “parallelization disabled.” The current setup instead serializes the collection's member classes while allowing unrelated collections to run in parallel. This is workflow-artifact wording only and does not affect the product or acceptance criteria.
 
 <promise>PASS</promise>
