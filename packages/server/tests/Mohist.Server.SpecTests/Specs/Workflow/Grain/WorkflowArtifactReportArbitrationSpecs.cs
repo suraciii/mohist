@@ -156,11 +156,9 @@ public sealed class WorkflowArtifactReportArbitrationSpecs : WorkflowGrainSpecs
         var (work, runnerId) = await PollWorkAnyAsync();
         var service = Services.GetRequiredService<WorkflowReportService>();
         var result = new WorkResult(
-            "PASS",
+            "completed",
             "same result",
-            ExitCode: 0,
-            ArtifactUploadIds: ["upload-replay"],
-            AddTasks: [new RuntimeTaskInput("replay-follow-up", "Replay follow-up", "spec/task")]);
+            ExitCode: 0);
 
         var first = await service.ReportAsync(runnerId, work.WorkflowRunId, work.WorkId, work.TaskRunId, result);
         Assert.Equal("accepted", first.Ack);

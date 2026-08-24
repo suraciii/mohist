@@ -51,7 +51,8 @@ internal sealed class WorkflowWorkLifecycle
             if (currentTask is not null
                 && report.TerminalExecutionBinding is not null
                 && IsAgentTask(currentTask.Uses)
-                && currentTask.AgentResultSettlement is null)
+                && currentTask.AgentResultSettlement is null
+                && currentTask.TerminalResultFingerprint is null)
             {
                 return [];
             }
@@ -96,7 +97,8 @@ internal sealed class WorkflowWorkLifecycle
             if (currentTask is not null
                 && report.TerminalExecutionBinding is not null
                 && IsAgentTask(currentTask.Uses)
-                && currentTask.AgentResultSettlement is null)
+                && currentTask.AgentResultSettlement is null
+                && currentTask.TerminalResultFingerprint is null)
             {
                 return [];
             }
