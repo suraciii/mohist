@@ -9,7 +9,6 @@ using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Infrastructure.Data.Workflow;
 using Mohist.Server.Infrastructure.Events;
 using Mohist.Server.Runner.Grains;
-using Mohist.Server.SpecTests.Support;
 using Mohist.Server.TestSupport;
 using Mohist.Workflow.Definition;
 using Mohist.Server.Workflow.Domain.Run;
@@ -18,7 +17,7 @@ using Mohist.Server.Workflow.Services;
 using Mohist.Server.Workflow.Services.Artifacts;
 using Xunit;
 
-namespace Mohist.Server.SpecTests.Specs.Workflow.Grain;
+namespace Mohist.Server.UnitTests.Workflow.GrainContracts;
 
 [Collection("MohistDb")]
 public sealed partial class WorkflowGrainStateSaveFailureSpecs
@@ -510,8 +509,8 @@ public sealed partial class WorkflowGrainStateSaveFailureSpecs
         private readonly ReminderCalls _calls;
 
         public ReminderWorkflowGrain(
-            Orleans.Runtime.IGrainContext context,
-            Orleans.Runtime.IGrainRuntime runtime,
+            global::Orleans.Runtime.IGrainContext context,
+            global::Orleans.Runtime.IGrainRuntime runtime,
             IWorkflowRunStore runStore,
             IDispatchSnapshotStore dispatchSnapshotStore,
             WorkflowDefinitionResolver definitionResolver,

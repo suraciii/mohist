@@ -1,18 +1,18 @@
 using Microsoft.EntityFrameworkCore;
 using Mohist.Server.Inbox;
 using Mohist.Server.Infrastructure.Data.Db;
-using Mohist.Server.SpecTests.Support;
 using Mohist.Server.TestSupport;
+using Mohist.Server.UnitTests.Support;
 using Xunit;
 
-namespace Mohist.Server.SpecTests.Specs.Inbox;
+namespace Mohist.Server.UnitTests.Inbox;
 
 public class InboxStoreSpecs
 {
     [Fact]
     public async Task InsertAsync_GeneratesIdAndPersistsRow()
     {
-        await using var database = CreateDatabase();
+        using var database = CreateDatabase();
         var store = new InboxStore(new TestDbContextFactory(database.Options));
 
         var result = await store.InsertAsync(new InboxItemDraft(
@@ -43,7 +43,7 @@ public class InboxStoreSpecs
     [Fact]
     public async Task InsertAsync_RepeatedSourceEventId_IsIdempotent()
     {
-        await using var database = CreateDatabase();
+        using var database = CreateDatabase();
         var store = new InboxStore(new TestDbContextFactory(database.Options));
 
         var first = await store.InsertAsync(new InboxItemDraft(
@@ -75,7 +75,7 @@ public class InboxStoreSpecs
     [Fact]
     public async Task InsertAsync_SameSourceEventIdAcrossDifferentSources_CreatesDistinctItems()
     {
-        await using var database = CreateDatabase();
+        using var database = CreateDatabase();
         var store = new InboxStore(new TestDbContextFactory(database.Options));
 
         var first = await store.InsertAsync(new InboxItemDraft(
@@ -105,7 +105,7 @@ public class InboxStoreSpecs
     [Fact]
     public async Task InsertAsync_InvalidNotificationKind_ThrowsAndDoesNotPersist()
     {
-        await using var database = CreateDatabase();
+        using var database = CreateDatabase();
         var store = new InboxStore(new TestDbContextFactory(database.Options));
 
         await Assert.ThrowsAsync<ArgumentException>(() => store.InsertAsync(new InboxItemDraft(
@@ -123,7 +123,7 @@ public class InboxStoreSpecs
     [Fact]
     public async Task MarkReadAsync_SetsReadAtOnMatchingItem()
     {
-        await using var database = CreateDatabase();
+        using var database = CreateDatabase();
         var store = new InboxStore(new TestDbContextFactory(database.Options));
         var result = await store.InsertAsync(Draft("proj_a", "issue_1", 1, "evt-1"));
         await store.InsertAsync(Draft("proj_a", "issue_2", 2, "evt-2"));
@@ -140,7 +140,7 @@ public class InboxStoreSpecs
     [Fact]
     public async Task MarkReadAsync_DoesNotMatchItemInOtherProject()
     {
-        await using var database = CreateDatabase();
+        using var database = CreateDatabase();
         var store = new InboxStore(new TestDbContextFactory(database.Options));
         var inA = await store.InsertAsync(Draft("proj_a", "issue_1", 1, "evt-a-1"));
         var inB = await store.InsertAsync(Draft("proj_b", "issue_1", 1, "evt-b-1"));
@@ -158,7 +158,7 @@ public class InboxStoreSpecs
     [Fact]
     public async Task MarkReadAsync_DoesNotTouchArchivedItems()
     {
-        await using var database = CreateDatabase();
+        using var database = CreateDatabase();
         var store = new InboxStore(new TestDbContextFactory(database.Options));
         var archived = await store.InsertAsync(Draft("proj_a", "issue_1", 1, "evt-arch"));
         await store.ArchiveAsync("proj_a", archived.Id);
@@ -171,7 +171,7 @@ public class InboxStoreSpecs
     [Fact]
     public async Task MarkReadAsync_RepeatedCall_StillMatches()
     {
-        await using var database = CreateDatabase();
+        using var database = CreateDatabase();
         var store = new InboxStore(new TestDbContextFactory(database.Options));
         var result = await store.InsertAsync(Draft("proj_a", "issue_1", 1, "evt-1"));
 
@@ -185,7 +185,7 @@ public class InboxStoreSpecs
     [Fact]
     public async Task MarkAllReadAsync_OnlyTouchesTargetProject()
     {
-        await using var database = CreateDatabase();
+        using var database = CreateDatabase();
         var store = new InboxStore(new TestDbContextFactory(database.Options));
         await store.InsertAsync(Draft("proj_a", "issue_1", 1, "evt-a-1"));
         await store.InsertAsync(Draft("proj_a", "issue_2", 2, "evt-a-2"));
@@ -204,7 +204,7 @@ public class InboxStoreSpecs
     [Fact]
     public async Task MarkAllReadAsync_SkipsAlreadyReadItems()
     {
-        await using var database = CreateDatabase();
+        using var database = CreateDatabase();
         var store = new InboxStore(new TestDbContextFactory(database.Options));
         var already = await store.InsertAsync(Draft("proj_a", "issue_1", 1, "evt-1"));
         await store.MarkReadAsync("proj_a", already.Id);
@@ -219,7 +219,7 @@ public class InboxStoreSpecs
     [Fact]
     public async Task MarkAllReadAsync_SkipsArchivedItems()
     {
-        await using var database = CreateDatabase();
+        using var database = CreateDatabase();
         var store = new InboxStore(new TestDbContextFactory(database.Options));
         await store.InsertAsync(Draft("proj_a", "issue_1", 1, "evt-1"));
         var archived = await store.InsertAsync(Draft("proj_a", "issue_2", 2, "evt-2"));
@@ -235,7 +235,7 @@ public class InboxStoreSpecs
     [Fact]
     public async Task ArchiveAsync_SetsArchivedAt()
     {
-        await using var database = CreateDatabase();
+        using var database = CreateDatabase();
         var store = new InboxStore(new TestDbContextFactory(database.Options));
         var first = await store.InsertAsync(Draft("proj_a", "issue_1", 1, "evt-1"));
         await store.InsertAsync(Draft("proj_a", "issue_2", 2, "evt-2"));
@@ -252,7 +252,7 @@ public class InboxStoreSpecs
     [Fact]
     public async Task ArchiveAsync_DoesNotMatchItemInOtherProject()
     {
-        await using var database = CreateDatabase();
+        using var database = CreateDatabase();
         var store = new InboxStore(new TestDbContextFactory(database.Options));
         var inA = await store.InsertAsync(Draft("proj_a", "issue_1", 1, "evt-a-1"));
         await store.InsertAsync(Draft("proj_b", "issue_1", 1, "evt-b-1"));
@@ -267,7 +267,7 @@ public class InboxStoreSpecs
     [Fact]
     public async Task ArchiveAsync_IsIdempotent()
     {
-        await using var database = CreateDatabase();
+        using var database = CreateDatabase();
         var store = new InboxStore(new TestDbContextFactory(database.Options));
         var item = await store.InsertAsync(Draft("proj_a", "issue_1", 1, "evt-1"));
 
@@ -281,7 +281,7 @@ public class InboxStoreSpecs
     [Fact]
     public async Task MarkReadAsync_AfterArchive_DoesNothing()
     {
-        await using var database = CreateDatabase();
+        using var database = CreateDatabase();
         var store = new InboxStore(new TestDbContextFactory(database.Options));
         var item = await store.InsertAsync(Draft("proj_a", "issue_1", 1, "evt-1"));
         await store.ArchiveAsync("proj_a", item.Id);
@@ -300,5 +300,5 @@ public class InboxStoreSpecs
             SourceEventSource: $"/mohist/issues/{issueId}",
             SourceEventId: sourceEventId);
 
-    private static TestSqliteDatabase CreateDatabase() => TestSqliteDatabase.CreateMigrated();
+    private static TestSqliteDatabase CreateDatabase() => TestSqliteDatabase.CreateModelSchema();
 }

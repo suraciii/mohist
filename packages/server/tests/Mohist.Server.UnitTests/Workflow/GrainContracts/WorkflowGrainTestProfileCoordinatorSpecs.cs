@@ -7,7 +7,7 @@ using Mohist.Server.Workflow.Services;
 using Mohist.Workflow.Definition;
 using Orleans;
 
-namespace Mohist.Server.SpecTests.Specs.Workflow.Grain;
+namespace Mohist.Server.UnitTests.Workflow.GrainContracts;
 
 /// <summary>
 /// Direct grain tests need the production profile-binding call to succeed

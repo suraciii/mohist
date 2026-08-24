@@ -10,11 +10,11 @@ using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Runner.Domain;
 using Mohist.Server.Runner.Grains;
 using Mohist.Server.Sessions.Domain;
-using Mohist.Server.SpecTests.Support;
 using Mohist.Server.TestSupport;
+using Mohist.Server.UnitTests.Support;
 using Xunit;
 
-namespace Mohist.Server.SpecTests.Specs.Agent.Storage;
+namespace Mohist.Server.UnitTests.Agent.Storage;
 
 public class AgentJobStoreSpecs : IAsyncLifetime
 {
@@ -25,7 +25,7 @@ public class AgentJobStoreSpecs : IAsyncLifetime
 
     public AgentJobStoreSpecs()
     {
-        _database = TestSqliteDatabase.CreateMigrated();
+        _database = TestSqliteDatabase.CreateModelSchema();
         var factory = new TestDbContextFactory(_database.Options);
         _store = new AgentJobStore(factory, NullLogger<AgentJobStore>.Instance, _time);
         _querier = new AgentJobQuerier(factory);

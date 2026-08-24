@@ -7,7 +7,7 @@ using Mohist.Server.Workflow.Domain.Run;
 using Mohist.Server.Workflow.Grains;
 using Xunit;
 
-namespace Mohist.Server.SpecTests.Specs.Workflow.Grain;
+namespace Mohist.Server.UnitTests.Workflow.GrainContracts;
 
 /// <summary>
 /// The unknown-result deadline is a liveness boundary: it releases the attempt's
