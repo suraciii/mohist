@@ -44,7 +44,7 @@ public sealed class AgentSessionFollowupConcurrencyFixture : IAsyncLifetime
     public RecordingPublisher TranscriptPublisher { get; } = new();
     public AgentSessionPersistenceTestProbe Persistence { get; }
     public TestLogger<AgentSessionGrain> Logger { get; } = new();
-    public FakeTimeProvider TimeProvider { get; } = new(new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero));
+    public FakeTimeProvider TimeProvider { get; } = new(TestTime.UtcNow);
     public IDbContextFactory<MohistDbContext> DbFactory => _database is null
         ? throw new InvalidOperationException("fixture not initialised")
         : new TestSqliteDatabaseContextFactory(_database);

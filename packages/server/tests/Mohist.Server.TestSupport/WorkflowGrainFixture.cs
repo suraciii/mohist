@@ -23,7 +23,7 @@ public class WorkflowGrainFixture : IAsyncLifetime
     public IGrainFactory Grains => Cluster.Client;
     public RecordingEventStore EventStore => _sharedEventStore;
     public string ConnectionString => _keeper.ConnectionString;
-    public FakeTimeProvider TimeProvider { get; } = new(new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero));
+    public FakeTimeProvider TimeProvider { get; } = new(TestTime.UtcNow);
     public AgentSessionPersistenceTestProbe Persistence { get; }
     public ControllableDispatchPollObserver DispatchPollObserver { get; } = new();
     public RunnerUpdateOperationWriteFailureProbe OperationWriteFailures =>

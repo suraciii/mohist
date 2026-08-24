@@ -93,7 +93,7 @@ public sealed class GitHubFeedFixture : IAsyncLifetime
     public HttpClient Client { get; private set; } = null!;
     public IServiceProvider Services => _factory.Services;
     public RecordingGitHubCommentPort Comments => _factory.Comments;
-    public FakeTimeProvider TimeProvider { get; } = new(new DateTimeOffset(2026, 6, 30, 0, 0, 0, TimeSpan.Zero));
+    public FakeTimeProvider TimeProvider { get; } = new(TestTime.UtcNow);
 
     public async ValueTask InitializeAsync()
     {

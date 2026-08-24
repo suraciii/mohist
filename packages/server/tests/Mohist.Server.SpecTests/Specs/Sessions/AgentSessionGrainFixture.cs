@@ -33,7 +33,7 @@ public sealed class AgentSessionGrainFixture : IAsyncLifetime
     public RecordingSessionWorkPort SessionWork { get; } = new();
     public AgentSessionPersistenceTestProbe Persistence { get; }
     public TestLogger<AgentSessionGrain> Logger { get; } = new();
-    public FakeTimeProvider TimeProvider { get; } = new(new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero));
+    public FakeTimeProvider TimeProvider { get; } = new(TestTime.UtcNow);
     public string ConnectionString { get; private set; } = null!;
 
     public MohistDbContext CreateDbContext() => _database.CreateContext();
