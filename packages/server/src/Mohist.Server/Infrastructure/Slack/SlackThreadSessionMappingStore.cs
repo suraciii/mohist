@@ -101,6 +101,7 @@ public sealed class SlackThreadSessionMappingStore : IScopedService, IAgentConne
                 && row.ThreadTs == threadTs)
             .OrderBy(row => row.ConnectionId)
             .Select(row => new SlackThreadBinding(
+                row.ProjectId,
                 row.ConnectionId,
                 row.SessionId,
                 row.RootMessageTs))
@@ -127,6 +128,7 @@ public sealed class SlackThreadSessionMappingStore : IScopedService, IAgentConne
                 && row.ThreadTs == threadTs)
             .OrderBy(row => row.ConnectionId)
             .Select(row => new SlackThreadBinding(
+                row.ProjectId,
                 row.ConnectionId,
                 row.SessionId,
                 row.RootMessageTs))
@@ -226,9 +228,16 @@ public async Task<SlackThreadBindingResult> UpsertAsync(
 /// another Connection" / "more than one binding, ambiguous".
 /// </summary>
 public sealed record SlackThreadBinding(
+    string ProjectId,
     string ConnectionId,
     string SessionId,
-    string RootMessageTs);
+    string RootMessageTs)
+{
+    public SlackThreadBinding(string connectionId, string sessionId, string rootMessageTs)
+        : this("", connectionId, sessionId, rootMessageTs)
+    {
+    }
+}
 
 /// <summary>
 /// Outcome of <see cref="SlackThreadSessionMappingStore.UpsertAsync"/>.

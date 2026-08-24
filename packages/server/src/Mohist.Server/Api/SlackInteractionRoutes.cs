@@ -24,6 +24,7 @@ public static class SlackInteractionRoutes
             AgentConnectionStore connections,
             SlackTurnControlService controls,
             SlackRetryActionService retries,
+            SlackAgentSelectionService selections,
             SlackOutboxStore outbox,
             SlackAdapterLeaseService leases,
             ISlackAdapterOperatorAuthenticator auth,
@@ -68,23 +69,21 @@ public static class SlackInteractionRoutes
             if (connection.DesiredState == Agent.Domain.DesiredStateKind.Disabled)
                 return ApiResults.Conflict("This Slack Connection is disabled.", "connection_disabled");
 
+            var leaseContext = new SlackLeaseContext(
+                operatorId,
+                request.LeaseId,
+                request.AdapterId,
+                (targetRef, leaseCt) => leases.ResolveRuntimeLeaseBotTokenAsync(
+                    operatorId,
+                    targetRef,
+                    request.LeaseId,
+                    request.AdapterId,
+                    leaseCt));
             var result = string.Equals(request.ActionId, SlackRetryActionService.RetryActionId, StringComparison.Ordinal)
-                ? await retries.HandleAsync(
-                    projectId,
-                    connection,
-                    request,
-                    new SlackLeaseContext(
-                        operatorId,
-                        request.LeaseId,
-                        request.AdapterId,
-                        (targetRef, leaseCt) => leases.ResolveRuntimeLeaseBotTokenAsync(
-                            operatorId,
-                            targetRef,
-                            request.LeaseId,
-                            request.AdapterId,
-                            leaseCt)),
-                    ct)
-                : await controls.HandleAsync(projectId, connection, request, ct);
+                ? await retries.HandleAsync(projectId, connection, request, leaseContext, ct)
+                : string.Equals(request.ActionId, SlackSelectionActionPayload.ActionId, StringComparison.Ordinal)
+                    ? await selections.HandleAsync(projectId, connection, request, leaseContext, ct)
+                    : await controls.HandleAsync(projectId, connection, request, ct);
             if (!string.Equals(result.State, "replayed", StringComparison.Ordinal))
             {
                 await outbox.EnqueueRequiredAsync(new SlackOutboxDraft(

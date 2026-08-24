@@ -1,6 +1,7 @@
 using System.Reflection;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
 using Mohist.Server.Agent.Grains;
 using Mohist.Server.Agent.Subscriptions;
 using Mohist.Server.Inbox.Subscriptions;
@@ -11,6 +12,7 @@ using Mohist.Server.Infrastructure.Hosting;
 using Mohist.Server.Auth.Identity;
 using Mohist.Server.Notifications;
 using Mohist.Server.Notifications.Subscriptions;
+using Mohist.Server.Slack.Services;
 using Orleans.Hosting;
 using Xunit;
 
@@ -57,6 +59,11 @@ public sealed class MohistServiceGraphRegistrationTests
         AssertSingleRegistration<IAgentJobDispatchObserver>(services);
         AssertSingleRegistration<FileCredentialLoader>(services);
         AssertSingleRegistration<TimeProvider>(services);
+        Assert.Contains(
+            services,
+            descriptor => descriptor.ServiceType == typeof(IHostedService)
+                && descriptor.ImplementationType == typeof(SlackAgentSelectionObligationWorker)
+                && descriptor.Lifetime == ServiceLifetime.Singleton);
     }
 
     private static void AssertSingleRegistration<T>(IServiceCollection services) =>

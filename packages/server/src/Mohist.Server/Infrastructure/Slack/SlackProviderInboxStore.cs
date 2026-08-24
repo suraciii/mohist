@@ -155,6 +155,40 @@ public sealed class SlackProviderInboxStore : IScopedService, IAgentConnectionPr
     }
 
     /// <summary>
+    /// Looks up the durable route for one exact Slack message identity.
+    /// The route kind matters during selection recovery: a FollowupThread
+    /// inbox row is not proof that the Session has accepted the input yet.
+    /// </summary>
+    public async Task<SlackProviderInboxRoute?> FindMessageRouteAsync(
+        string projectId,
+        string connectionId,
+        string workspaceTeamId,
+        string conversationId,
+        string messageTs,
+        CancellationToken ct = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(projectId);
+        ArgumentException.ThrowIfNullOrWhiteSpace(connectionId);
+        ArgumentException.ThrowIfNullOrWhiteSpace(workspaceTeamId);
+        ArgumentException.ThrowIfNullOrWhiteSpace(conversationId);
+        ArgumentException.ThrowIfNullOrWhiteSpace(messageTs);
+
+        await using var db = await _dbFactory.CreateDbContextAsync(ct);
+        return await db.SlackProviderInboxRows.AsNoTracking()
+            .Where(row => row.ProjectId == projectId
+                && row.ConnectionId == connectionId
+                && row.WorkspaceTeamId == workspaceTeamId
+                && row.ConversationId == conversationId
+                && row.SlackMessageIdentity == $"{workspaceTeamId}/{conversationId}/{messageTs}"
+                && row.RouteKind != null)
+            .Select(row => new SlackProviderInboxRoute(
+                row.RouteKind!,
+                row.RouteSessionId,
+                row.RouteTurnId))
+            .FirstOrDefaultAsync(ct);
+    }
+
+    /// <summary>
     /// Looks up the Session route for one exact Slack message identity.
     /// Manager ingress uses the result to distinguish its pre-dispatch
     /// mapping fence from the completed initial launch route.

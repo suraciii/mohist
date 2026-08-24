@@ -26,6 +26,7 @@ using Mohist.Server.Logging;
 using Mohist.Server.Otel;
 using Mohist.Server.Runner.Services;
 using Mohist.Server.Sessions.Services;
+using Mohist.Server.Slack.Services;
 using Mohist.Server.SystemInfo;
 using Mohist.Server.Workflow.Storage;
 using Mohist.Server.Workflow.Services.Prompts;
@@ -313,17 +314,15 @@ public class MohistWebApplicationFactory : WebApplicationFactory<Program>
 
         builder.ConfigureTestServices(services =>
         {
+            // Selection recovery/expiry Specs invoke ProcessPendingAsync on
+            // demand. The shared assembly fixture must not run the autonomous
+            // loop against the common integration database while unrelated
+            // tests advance its fake clock.
+            RemoveHostedService<SlackAgentSelectionObligationWorker>(services);
+
             if (_manualPublicProjection)
             {
-                for (var index = services.Count - 1; index >= 0; index--)
-                {
-                    var descriptor = services[index];
-                    if (descriptor.ServiceType == typeof(IHostedService)
-                        && descriptor.ImplementationType == typeof(PublicExecutionProjector))
-                    {
-                        services.RemoveAt(index);
-                    }
-                }
+                RemoveHostedService<PublicExecutionProjector>(services);
             }
 
             services.RemoveAll<IFileCredentialStore>();
@@ -425,6 +424,19 @@ public class MohistWebApplicationFactory : WebApplicationFactory<Program>
             services.RemoveAll<OtelDb>();
             services.AddSingleton(otelDb);
         });
+    }
+
+    private static void RemoveHostedService<T>(IServiceCollection services)
+    {
+        for (var index = services.Count - 1; index >= 0; index--)
+        {
+            var descriptor = services[index];
+            if (descriptor.ServiceType == typeof(IHostedService)
+                && descriptor.ImplementationType == typeof(T))
+            {
+                services.RemoveAt(index);
+            }
+        }
     }
 
     protected override void Dispose(bool disposing)

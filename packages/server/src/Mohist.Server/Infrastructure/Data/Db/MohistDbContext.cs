@@ -1960,27 +1960,7 @@ protected override void OnModelCreating(ModelBuilder modelBuilder)
                 .HasDatabaseName("IX_SlackThreadLaunchReservations_ProjectId_ConnectionId_UpdatedAt");
         });
 
-        modelBuilder.Entity<SlackAmbiguousPromptRow>(entity =>
-        {
-            entity.ToTable("SlackAmbiguousPrompts");
-            entity.HasKey(e => e.Id);
-            entity.Property(e => e.Id).HasMaxLength(64).IsRequired();
-            entity.Property(e => e.ProjectId).HasMaxLength(256).IsRequired();
-            entity.Property(e => e.WorkspaceTeamId).HasMaxLength(256).IsRequired();
-            entity.Property(e => e.ConversationId).HasMaxLength(256).IsRequired();
-            entity.Property(e => e.MessageTs).HasMaxLength(64).IsRequired();
-            entity.Property(e => e.ThreadTs).HasMaxLength(64);
-            entity.Property(e => e.WinningConnectionId).HasMaxLength(256).IsRequired();
-            entity.Property(e => e.MentionedConnectionIdsJson).IsRequired();
-            entity.Property(e => e.PromptedAt).IsRequired();
-            entity.Property(e => e.CreatedAt).IsRequired();
-            entity.Property(e => e.UpdatedAt).IsRequired();
-            entity.HasIndex(e => new { e.WorkspaceTeamId, e.ConversationId, e.MessageTs })
-                .IsUnique()
-                .HasDatabaseName("UX_SlackAmbiguousPrompts_WorkspaceTeamId_ConversationId_MessageTs");
-            entity.HasIndex(e => new { e.ProjectId, e.UpdatedAt })
-                .HasDatabaseName("IX_SlackAmbiguousPrompts_ProjectId_UpdatedAt");
-        });
+        ConfigureSlackAmbiguousPromptModel(modelBuilder);
 
         modelBuilder.Entity<SlackConnectionAllowedMemberRow>(entity =>
         {

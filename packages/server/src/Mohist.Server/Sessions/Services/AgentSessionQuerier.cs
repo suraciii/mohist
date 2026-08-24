@@ -459,48 +459,6 @@ public partial class AgentSessionQuerier : IScopedService
             AgentSessionJsonHelper.ActivityName(record.Session) == "active");
     }
 
-    public async Task<CanonicalFollowupTarget?> ResolveCanonicalFollowupTargetAsync(
-        string projectId,
-        string sessionId,
-        CancellationToken ct = default)
-    {
-        await using var db = await _dbFactory.CreateDbContextAsync(ct);
-        var records = await _sessionQuery.ListByIdsAsync([sessionId], ct);
-        var record = records.FirstOrDefault();
-        if (record is null || !string.Equals(record.Label(AgentSessionQueryMetadataKeys.ProjectId), projectId, StringComparison.Ordinal))
-            return null;
-
-        var sourceKind = record.Label(AgentSessionQueryMetadataKeys.SourceKind);
-        var workflowRunId = record.Label(AgentSessionQueryMetadataKeys.WorkflowRunId);
-        var sessionName = record.Label(AgentSessionQueryMetadataKeys.SessionName);
-        if (string.Equals(sourceKind, "workflow", StringComparison.Ordinal))
-        {
-            if (string.IsNullOrWhiteSpace(workflowRunId) || string.IsNullOrWhiteSpace(sessionName))
-                return null;
-        }
-        else if (!string.Equals(sourceKind, "agent-launch", StringComparison.Ordinal)
-            && !string.Equals(sourceKind, "agent-connection", StringComparison.Ordinal))
-        {
-            return null;
-        }
-
-        var session = record.Session;
-        return new CanonicalFollowupTarget(
-            session.Runtime.RunnerId,
-            session.Id,
-            sourceKind!,
-            workflowRunId,
-            sessionName,
-            session.Runtime.Runtime,
-            session.Status.AgentRuntimeSessionId,
-            session.Runtime.WorkDir,
-            string.Equals(sourceKind, "agent-launch", StringComparison.Ordinal)
-                ? session.Settings.Definition
-                : null,
-            record.Label(AgentSessionQueryMetadataKeys.ProjectId),
-            record.Label(GenericAgentSessionMetadata.AgentId));
-    }
-
     public async Task<SessionStopTarget?> ResolveStopTargetAsync(string projectId, string sessionId, CancellationToken ct = default)
     {
         await using var db = await _dbFactory.CreateDbContextAsync(ct);

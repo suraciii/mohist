@@ -27,7 +27,8 @@ namespace Mohist.Server.SpecTests.Specs.Slack;
 /// the default <c>owner_only</c> policy so a future widening
 /// (allowlist, anyone) cannot silently regress the Owner path.
 /// </summary>
-public sealed partial class SlackAccessPolicySpecs
+[Collection("SharedSlackApi")]
+public sealed partial class SlackAccessPolicySpecs : IAsyncLifetime
 {
     private readonly Dictionary<string, string> _connectionLeases = new(StringComparer.Ordinal);
     private readonly MohistIntegrationFixture _fixture;
@@ -36,6 +37,18 @@ public sealed partial class SlackAccessPolicySpecs
 
     private SlackApiTestScript SlackApi =>
         _fixture.Services.GetRequiredService<SlackApiTestScript>();
+
+    public ValueTask InitializeAsync()
+    {
+        SlackApi.Clear();
+        return ValueTask.CompletedTask;
+    }
+
+    public ValueTask DisposeAsync()
+    {
+        SlackApi.Clear();
+        return ValueTask.CompletedTask;
+    }
 
     [Fact]
     public async Task New_connection_defaults_to_owner_only_policy()

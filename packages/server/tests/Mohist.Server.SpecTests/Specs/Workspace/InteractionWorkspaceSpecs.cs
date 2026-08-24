@@ -39,7 +39,7 @@ public sealed class InteractionWorkspaceSpecs
         var connection = await CreateConnectionAsync();
         const string conversationId = "C-interaction-first";
 
-        var response = await PostChannelAsync(connection, conversationId, "1710000000.010001", "<@U123> first task");
+        var response = await PostChannelAsync(connection, conversationId, "1710000000.010001", $"<@{connection.BotUserId}> first task");
         var sessionId = response.GetProperty("sessionId").GetString()!;
 
         var ws = await FindWorkspaceAsync(connection.ProjectId, $"slack-{conversationId}");
@@ -61,10 +61,10 @@ public sealed class InteractionWorkspaceSpecs
         const string conversationId = "C-interaction-second-agent";
         var secondConnection = await CreateConnectionAsync(projectId: connection.ProjectId, agentNameSuffix: "second");
 
-        var first = await PostChannelAsync(connection, conversationId, "1710000000.010201", "<@U123> first task");
+        var first = await PostChannelAsync(connection, conversationId, "1710000000.010201", $"<@{connection.BotUserId}> first task");
         var firstWorkspace = await SessionWorkspaceNameAsync(first.GetProperty("sessionId").GetString()!);
 
-        var second = await PostChannelAsync(secondConnection, conversationId, "1710000000.010202", "<@U123> second agent task");
+        var second = await PostChannelAsync(secondConnection, conversationId, "1710000000.010202", $"<@{secondConnection.BotUserId}> second agent task");
 
         Assert.Equal(firstWorkspace, await SessionWorkspaceNameAsync(second.GetProperty("sessionId").GetString()!));
         Assert.Equal(firstWorkspace, await SessionWorkspaceNameAsync(first.GetProperty("sessionId").GetString()!));
@@ -90,7 +90,7 @@ public sealed class InteractionWorkspaceSpecs
         var firstEvents = await WorkspaceEventsAsync(connection.ProjectId, firstWorkspaceName!);
         Assert.Contains(firstEvents, row => row.Type == EventCatalog.ReverseDns.WorkspaceArchived);
 
-        var second = await PostChannelAsync(connection, conversationId, "1710000000.010302", "<@U123> second task");
+        var second = await PostChannelAsync(connection, conversationId, "1710000000.010302", $"<@{connection.BotUserId}> second task");
         var secondWorkspaceName = await SessionWorkspaceNameAsync(second.GetProperty("sessionId").GetString()!);
 
         Assert.NotEqual(firstWorkspaceName, secondWorkspaceName);
@@ -106,12 +106,12 @@ public sealed class InteractionWorkspaceSpecs
     public async Task SlackChannel_TwoProjects_HaveIndependentWorkspaces()
     {
         var connectionA = await CreateConnectionAsync();
-        var connectionB = await CreateConnectionAsync();
+        var connectionB = await CreateConnectionAsync(workspaceTeamId: connectionA.WorkspaceTeamId);
         const string conversationId = "C-interaction-two-projects";
         Assert.NotEqual(connectionA.ProjectId, connectionB.ProjectId);
 
-        await PostChannelAsync(connectionA, conversationId, "1710000000.010501", "<@U123> project A task");
-        await PostChannelAsync(connectionB, conversationId, "1710000000.010502", "<@U123> project B task");
+        await PostChannelAsync(connectionA, conversationId, "1710000000.010501", $"<@{connectionA.BotUserId}> project A task");
+        await PostChannelAsync(connectionB, conversationId, "1710000000.010502", $"<@{connectionB.BotUserId}> project B task");
 
         var wsA = await FindWorkspaceAsync(connectionA.ProjectId, $"slack-{conversationId}");
         var wsB = await FindWorkspaceAsync(connectionB.ProjectId, $"slack-{conversationId}");
@@ -122,8 +122,8 @@ public sealed class InteractionWorkspaceSpecs
         Assert.Equal(WorkspaceStatus.Active, wsA.Status);
         Assert.Equal(WorkspaceStatus.Active, wsB.Status);
         Assert.Equal(wsA.Name, wsB.Name);
-        Assert.Equal(new WorkspaceOrigin.Slack("T123", conversationId), wsA.Origin);
-        Assert.Equal(new WorkspaceOrigin.Slack("T123", conversationId), wsB.Origin);
+        Assert.Equal(new WorkspaceOrigin.Slack(connectionA.WorkspaceTeamId, conversationId), wsA.Origin);
+        Assert.Equal(new WorkspaceOrigin.Slack(connectionB.WorkspaceTeamId, conversationId), wsB.Origin);
     }
 
     // --- Slack DM ---
@@ -151,11 +151,15 @@ public sealed class InteractionWorkspaceSpecs
 
     // --- Helpers ---
 
-    private async Task<AgentConnection> CreateConnectionAsync(string? projectId = null, string agentNameSuffix = "")
+    private async Task<AgentConnection> CreateConnectionAsync(
+        string? projectId = null,
+        string agentNameSuffix = "",
+        string? workspaceTeamId = null)
     {
         var id = $"connection_{Guid.NewGuid():N}";
         var createsProject = projectId is null;
         projectId ??= $"project_{Guid.NewGuid():N}";
+        workspaceTeamId ??= $"T-interaction-{projectId}";
         var agentId = $"agent_{Guid.NewGuid():N}";
         var now = _fixture.TimeProvider.GetUtcNow();
         await using var scope = _fixture.Services.CreateAsyncScope();
@@ -170,8 +174,8 @@ public sealed class InteractionWorkspaceSpecs
                 UpdatedAt = now,
             });
         }
-        var enrollmentId = await SlackRuntimeLeaseTestSupport.EnsureEnrollmentAsync(_fixture, "T123");
-        var botUserId = string.IsNullOrEmpty(agentNameSuffix) ? "U123" : $"U{agentNameSuffix.GetHashCode():X}".PadRight(8, '0').Substring(0, 8);
+        var enrollmentId = await SlackRuntimeLeaseTestSupport.EnsureEnrollmentAsync(_fixture, workspaceTeamId);
+        var botUserId = $"U{id["connection_".Length..]}";
         db.Agents.Add(new AgentRow
         {
             Id = agentId,
@@ -194,7 +198,7 @@ public sealed class InteractionWorkspaceSpecs
             ProjectId = projectId,
             AgentId = agentId,
             ProviderKind = ConnectionProviderKind.Slack,
-            WorkspaceTeamId = "T123",
+            WorkspaceTeamId = workspaceTeamId,
             AppId = "A123",
             BotUserId = botUserId,
             BotName = $"Mohist {agentNameSuffix}".Trim(),
@@ -214,7 +218,7 @@ public sealed class InteractionWorkspaceSpecs
         {
             Id = agentAppId,
             EnrollmentId = enrollmentId,
-            WorkspaceTeamId = "T123",
+            WorkspaceTeamId = workspaceTeamId,
             AgentConnectionId = id,
             AppId = $"A_SPEC_{Guid.NewGuid():N}",
             BotUserId = botUserId,
@@ -245,7 +249,7 @@ public sealed class InteractionWorkspaceSpecs
         {
             Id = id,
             ProjectId = projectId,
-            WorkspaceTeamId = "T123",
+            WorkspaceTeamId = workspaceTeamId,
             BotUserId = botUserId,
         };
     }

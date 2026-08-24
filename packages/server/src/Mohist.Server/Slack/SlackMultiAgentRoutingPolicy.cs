@@ -8,12 +8,25 @@ internal enum SlackMultiAgentRoutingDisposition
 }
 
 internal sealed record SlackMultiAgentRoutingCandidate(
+    string ProjectId,
     string ConnectionId,
     string BotUserId,
-    string? OwnerSlackUserId);
+    string? OwnerSlackUserId,
+    string? SessionId = null,
+    string? RootMessageTs = null)
+{
+    public SlackMultiAgentRoutingCandidate(
+        string connectionId,
+        string botUserId,
+        string? ownerSlackUserId)
+        : this("", connectionId, botUserId, ownerSlackUserId)
+    {
+    }
+}
 
 internal sealed record SlackMultiAgentRoutingDecision(
     SlackMultiAgentRoutingDisposition Disposition,
+    IReadOnlyList<SlackMultiAgentRoutingCandidate> Candidates,
     IReadOnlyList<string> ConnectionIds,
     IReadOnlyList<string> BotLabels);
 
@@ -34,14 +47,17 @@ internal static class SlackMultiAgentRoutingPolicy
         ArgumentException.ThrowIfNullOrWhiteSpace(senderSlackUserId);
         ArgumentNullException.ThrowIfNull(candidates);
 
-        if (candidates.Count < 2)
+        var distinctCandidates = candidates
+            .GroupBy(candidate => candidate.BotUserId, StringComparer.Ordinal)
+            .Select(group => group.First())
+            .ToArray();
+        if (distinctCandidates.Length < 2)
             return null;
-
-        var connectionIds = candidates
+        var connectionIds = distinctCandidates
             .Select(candidate => candidate.ConnectionId)
             .Distinct(StringComparer.Ordinal)
             .ToArray();
-        var ownerClaimantConnectionId = candidates
+        var ownerClaimantConnectionId = distinctCandidates
             .Where(candidate => string.Equals(
                 candidate.OwnerSlackUserId, senderSlackUserId, StringComparison.Ordinal))
             .Select(candidate => candidate.ConnectionId)
@@ -60,7 +76,8 @@ internal static class SlackMultiAgentRoutingPolicy
 
         return new SlackMultiAgentRoutingDecision(
             disposition,
+            distinctCandidates,
             connectionIds,
-            candidates.Select(candidate => candidate.BotUserId).ToArray());
+            distinctCandidates.Select(candidate => candidate.BotUserId).ToArray());
     }
 }

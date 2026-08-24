@@ -339,7 +339,13 @@ One thread can host several Agents, each with an independent Session:
 - Mentioning another Mohist Bot for the first time starts an independent
   Session for it, without switching or contaminating the original context.
 - One message mentioning several Bots starts no work and produces one
-  interactive selection; choosing an Agent starts its work.
+  interactive chooser; choosing an Agent starts exactly one execution from the
+  original message, attributed to the chosen Connection and its owning Project.
+  The signed chooser expires after five minutes and survives a Server restart
+  without re-running the prompt-owner Bot. An explicit multi-Bot mention in an
+  existing thread follows an existing binding or creates one independent
+  Session under the retained thread anchor; an unmentioned multi-bound-thread
+  reply follows the selected bound Session.
 - A Bot's own message never becomes input — not for itself, not for another
   Bot. Separate Mohist Servers do not coordinate one multi-Bot message.
 
@@ -551,6 +557,17 @@ Failure handling follows fixed boundaries:
   queue shows work as queued or rejects it with retry-later.
 - **Stopping a queued Turn ends it locally as cancelled.** Stopping a first
   Turn ends its AgentJob with failure category `cancelled`.
+
+## Status
+
+Multi-Bot interactive selection is delivered. Ambiguous root messages,
+explicit multi-Bot thread mentions, and unmentioned replies in multi-bound
+threads produce one signed chooser; a choice starts at most one execution from
+the original Slack message under the selected Connection's owning Project.
+Decisions recover after restart, pending choices expire after five minutes, and
+only finished records are reaped under the existing Slack event retention
+window. The original sender remains the initiator of record and other
+mentioned Connections remain no-ops.
 
 ## Non-goals
 
