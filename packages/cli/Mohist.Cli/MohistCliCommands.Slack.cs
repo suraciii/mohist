@@ -951,6 +951,10 @@ internal static partial class SlackCommands
         {
             Description = "Thread root message timestamp to reply in a thread (the reply anchor threadRootMessageId). Omit for a DM.",
         };
+        var dispatchRef = new Option<string?>("--dispatch-ref")
+        {
+            Description = "Logical reply identity from the injected Slack reply anchor. Agent retries reuse it; separate turns use different values.",
+        };
         var text = new Option<string?>("--text")
         {
             Description = "Reply body in markdown (bold/code/lists/quotes render in Slack). Pass '-' to read it from standard input (preserves newlines).",
@@ -966,6 +970,7 @@ internal static partial class SlackCommands
         var project = MohistCliCommands.ProjectRefOption();
         command.Options.Add(conversation);
         command.Options.Add(replyTo);
+        command.Options.Add(dispatchRef);
         command.Options.Add(text);
         command.Options.Add(file);
         command.Options.Add(image);
@@ -1039,6 +1044,7 @@ internal static partial class SlackCommands
                 {
                     conversationId = ctx.GetValue(conversation),
                     threadTs = ctx.GetValue(replyTo),
+                    dispatchRef = ctx.GetValue(dispatchRef),
                     text = string.IsNullOrWhiteSpace(body) ? null : body,
                     imageUrl,
                     fileName,

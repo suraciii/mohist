@@ -259,6 +259,9 @@ public sealed partial class SlackOutboxStore
     private static string ReplyDispatchRef(string connectionId, string conversationId, string? threadTs) =>
         $"slack-reply:{connectionId}:{conversationId}:{threadTs ?? "dm"}:terminal";
 
+    private static string ReplyDispatchRef(string logicalDispatchRef) =>
+        $"slack-reply:{logicalDispatchRef}:terminal";
+
     private static string ReplyImageDispatchRef(string connectionId, string conversationId, string? threadTs) =>
         $"slack-reply:{connectionId}:{conversationId}:{threadTs ?? "dm"}:image";
 

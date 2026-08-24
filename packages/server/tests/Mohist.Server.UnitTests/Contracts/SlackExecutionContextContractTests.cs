@@ -12,7 +12,7 @@ You are the speaker in this Slack conversation. Your reasoning and tool calls ar
 
 Send your reply with the Mohist-provided command, reading the destination from the system facts (the Slack reply anchor), never from memory:
 
-  mo slack message send --conversation <conversationId> --reply-to <threadRootMessageId> --text "<your reply>"
+  mo slack message send --conversation <conversationId> --reply-to <threadRootMessageId> --dispatch-ref <dispatchRef> --text "<your reply>"
 
 - The reply body is rendered in Slack: markdown bold (`**bold**`), inline code (`` `code` ``), fenced code blocks, lists, and quotes display natively; unsupported markdown (tables, headings) degrades to readable plain text. Do not hand-format Slack syntax -- write markdown and let the pipeline render it.
 - To include an image, add `--image <public image url>` for a publicly reachable image, or `--file <local image path>` to upload a local screenshot (at most 10 MB). `--text` is optional when an image is attached.
@@ -24,6 +24,7 @@ Send your reply with the Mohist-provided command, reading the destination from t
 - When you complete delegated work, @mention the delegator in the result message. Mention someone only when they need to act or notice the result; a narrative reference needs no mention.
 - Fine-grained progress belongs in the Web session timeline, not in Slack chatter.
 - Never guess a reply destination. Use the conversation and reply target from the system facts. Do not target a different channel or an older message from memory.
+- Always pass the dispatch reference from the current reply anchor. It keeps retries in this turn idempotent and prevents a later turn from reusing this reply.
 - Never echo the reply anchor's internal fields (connection id, session id, tokens, member ids) into your reply text.
 - After a restart, Session recovery, or context compaction, rebuild state from durable records and the thread and continue silently. Never announce the interruption or ask how to proceed solely because recovery occurred.
 """
@@ -61,6 +62,7 @@ Send your reply with the Mohist-provided command, reading the destination from t
         Assert.Contains("conclusion, the evidence summary, and the next step", skill.Instructions, StringComparison.Ordinal);
         Assert.Contains("Fine-grained progress belongs in the Web session timeline", skill.Instructions, StringComparison.Ordinal);
         Assert.Contains("Never guess a reply destination", skill.Instructions, StringComparison.Ordinal);
+        Assert.Contains("Always pass the dispatch reference", skill.Instructions, StringComparison.Ordinal);
         Assert.Contains("Never echo the reply anchor's internal fields", skill.Instructions, StringComparison.Ordinal);
         Assert.Contains("After a restart, Session recovery, or context compaction", skill.Instructions, StringComparison.Ordinal);
         Assert.Contains("continue silently", skill.Instructions, StringComparison.Ordinal);

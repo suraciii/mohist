@@ -28,8 +28,8 @@ public static class AgentOriginMarkers
 public static class SlackCollaborationSkillCatalog
 {
     public const string Name = "mohist-slack-collaboration";
-    public const string Version = "1.0.0";
-    public const string ContentHash = "dedf18a796543ade06a9e0ece00c086577153e1e633f868c099b01cf910d641b";
+    public const string Version = "1.0.1";
+    public const string ContentHash = "86de2ee7c3739ee5c9830b00a4ca2780421c5f3e6fecbaedbd98b6ac048c8be6";
 
     private const string AssetSuffix = ".Agent.Services.Assets.mohist-slack-collaboration.skill.md";
     private static readonly UTF8Encoding Utf8 = new(encoderShouldEmitUTF8Identifier: false, throwOnInvalidBytes: true);

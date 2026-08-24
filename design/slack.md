@@ -614,7 +614,7 @@ matches Buzz `buzz messages send`:
 
 ```text literal
 mo slack message send --conversation <id> --text "<body>"
-mo slack message send --conversation <id> --reply-to <ts> --text "<body>"        # reply in thread
+mo slack message send --conversation <id> --reply-to <ts> --dispatch-ref <ref> --text "<body>"        # anchored Agent reply
 printf 'long body\n\nmultiple paragraphs\n' | mo slack message send --conversation <id> --text -
 mo slack message send --conversation <id> --text "see this screenshot" --file ./screenshot.png
 mo slack message send --conversation <id> --text "architecture diagram" --image https://example.com/diagram.png
@@ -624,6 +624,12 @@ mo slack message send --conversation <id> --text "architecture diagram" --image 
   optional thread anchor. The Agent reads both from the injected reply anchor
   instead of choosing from memory. Sending elsewhere states that intent
   explicitly.
+- **Explicit dispatch identity.** An Agent also passes the injected
+  `--dispatch-ref`. Server scopes terminal reply selection and coalescing to
+  that logical Turn. Retries within the Turn converge on one delivery intent;
+  another Turn in the same DM or thread cannot merge into a pending or already
+  delivered answer. Human-authored sends without an execution anchor retain
+  conversation-scoped behavior.
 - **Body through `--text`.** A string, or `-` for stdin so shell escaping does
   not consume newlines. The Agent writes standard Markdown; the renderer
   converts it to Slack mrkdwn and degrades unsupported tables and headings to

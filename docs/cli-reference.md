@@ -517,7 +517,7 @@ Mohist App.
   connection state, and one next action. Missing provisioning credentials point
   to `setup`. An incomplete Agent installation points to the same
   `install-agent` command.
-- `mo slack message send --conversation <conversation-id> [--reply-to <thread-root-ts>] --text <body> [--image <url> | --file <path>]`
+- `mo slack message send --conversation <conversation-id> [--reply-to <thread-root-ts>] [--dispatch-ref <reply-anchor-ref>] --text <body> [--image <url> | --file <path>]`
   lets an Agent speak in Slack. It renders Markdown body text as native Slack
   formatting, including bold, inline code, code blocks, lists, and quotes.
   Tables and headings degrade to readable plain text. `--image` embeds a public

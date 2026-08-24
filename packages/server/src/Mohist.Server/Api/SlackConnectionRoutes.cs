@@ -430,6 +430,7 @@ public static partial class SlackConnectionRoutes
                 body.ConversationId.Trim(),
                 string.IsNullOrWhiteSpace(body.ThreadTs) ? null : body.ThreadTs.Trim(),
                 text,
+                replyDispatchRef: string.IsNullOrWhiteSpace(body.DispatchRef) ? null : body.DispatchRef.Trim(),
                 imageUrl: string.IsNullOrWhiteSpace(body.ImageUrl) ? null : body.ImageUrl.Trim(),
                 fileName: string.IsNullOrWhiteSpace(body.FileName) ? null : body.FileName.Trim(),
                 fileContentBase64: string.IsNullOrWhiteSpace(body.FileContentBase64) ? null : body.FileContentBase64,

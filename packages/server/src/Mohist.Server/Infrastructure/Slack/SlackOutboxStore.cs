@@ -286,7 +286,9 @@ public sealed partial class SlackOutboxStore : IScopedService, IAgentConnectionP
     /// Text landing prefers an in-place update of the replaceable progress
     /// message for this input (one input = one final answer); a repeated
     /// send for the same input merges its text into the existing terminal
-    /// row, and the stable dispatch reference guards against duplication.
+    /// row. When the injected reply dispatch reference is supplied, terminal
+    /// selection and retry identity are scoped to that input rather than the
+    /// surrounding conversation.
     /// When no progress row exists the reply resolves the owning Connection
     /// from the conversation mapping and posts a fresh terminal answer.
     /// Attachments (<paramref name="imageUrl"/>/<paramref name="fileName"/>
@@ -301,6 +303,7 @@ public sealed partial class SlackOutboxStore : IScopedService, IAgentConnectionP
         string conversationId,
         string? threadTs,
         string redactedText,
+        string? replyDispatchRef = null,
         string? imageUrl = null,
         string? fileName = null,
         string? fileContentBase64 = null,
@@ -311,12 +314,15 @@ public sealed partial class SlackOutboxStore : IScopedService, IAgentConnectionP
 
         await using var db = await _dbFactory.CreateDbContextAsync(ct);
         await using var transaction = await db.Database.BeginTransactionAsync(ct);
+        var terminalDispatchRef = string.IsNullOrWhiteSpace(replyDispatchRef)
+            ? null
+            : ReplyDispatchRef(replyDispatchRef.Trim());
 
         if (imageUrl is not null || fileName is not null || fileContentBase64 is not null)
         {
             var attachment = await EnqueueAttachmentReplyAsync(
                 db, projectId, conversationId, threadTs, redactedText,
-                imageUrl, fileName, fileContentBase64, ct);
+                terminalDispatchRef, imageUrl, fileName, fileContentBase64, ct);
             await transaction.CommitAsync(ct);
             return attachment;
         }
@@ -324,7 +330,8 @@ public sealed partial class SlackOutboxStore : IScopedService, IAgentConnectionP
         var progress = await FindReplyProgressRowAsync(db, projectId, conversationId, threadTs, ct);
         if (progress is not null)
         {
-            var promoted = await PromoteReplyProgressAsync(db, progress, redactedText, threadTs, ct);
+            var promoted = await PromoteReplyProgressAsync(
+                db, progress, redactedText, threadTs, terminalDispatchRef, ct);
             await transaction.CommitAsync(ct);
             return new SlackAgentReplyResult(
                 Accepted: true,
@@ -334,7 +341,8 @@ public sealed partial class SlackOutboxStore : IScopedService, IAgentConnectionP
                 MergedIntoExisting: true);
         }
 
-        var terminal = await FindReplyTerminalRowAsync(db, projectId, conversationId, threadTs, ct);
+        var terminal = await FindReplyTerminalRowAsync(
+            db, projectId, conversationId, threadTs, terminalDispatchRef, ct);
         if (terminal is not null
             && await IsLiveOwnerRowAsync(db, terminal, ct)
             && !IsAttachmentReplyPayload(SlackDeliveryPayload.Parse(terminal.PayloadJson)))
@@ -357,7 +365,7 @@ public sealed partial class SlackOutboxStore : IScopedService, IAgentConnectionP
         }
 
         var connectionId = connection.Value.ConnectionId;
-        var dispatchRef = ReplyDispatchRef(connectionId, conversationId, threadTs);
+        var dispatchRef = terminalDispatchRef ?? ReplyDispatchRef(connectionId, conversationId, threadTs);
         var live = await db.AgentConnections.AnyAsync(c =>
             c.ProjectId == projectId && c.Id == connectionId && c.DeletedAt == null, ct);
         if (!live)
@@ -434,6 +442,7 @@ public sealed partial class SlackOutboxStore : IScopedService, IAgentConnectionP
         string projectId,
         string conversationId,
         string? threadTs,
+        string? dispatchRef,
         CancellationToken ct)
     {
         var query = db.SlackOutboxRows.Where(row =>
@@ -441,6 +450,8 @@ public sealed partial class SlackOutboxStore : IScopedService, IAgentConnectionP
             && row.ConversationId == conversationId
             && row.Kind == SlackOutboxKinds.TerminalResult
             && row.State == SlackOutboxStates.Pending);
+        if (!string.IsNullOrWhiteSpace(dispatchRef))
+            query = query.Where(row => row.DispatchRef == dispatchRef);
         if (!string.IsNullOrWhiteSpace(threadTs))
             query = query.Where(row => row.ThreadTs == threadTs);
         return await query.OrderBy(row => row.Id).FirstOrDefaultAsync(ct);
@@ -451,10 +462,11 @@ public sealed partial class SlackOutboxStore : IScopedService, IAgentConnectionP
         SlackOutboxRow progress,
         string redactedText,
         string? threadTs,
+        string? terminalDispatchRef,
         CancellationToken ct)
     {
         var previous = SlackDeliveryPayload.Parse(progress.PayloadJson);
-        var dispatchRef = progress.DispatchRef ?? progress.Id;
+        var dispatchRef = terminalDispatchRef ?? progress.DispatchRef ?? progress.Id;
         // Carry the liveness StatusDispatchRef forward so the in-place update is
         // a faithful replacement of the progress message: the post-reply
         // liveness finalization derives the reaction target (projectionSource)
@@ -465,6 +477,7 @@ public sealed partial class SlackOutboxStore : IScopedService, IAgentConnectionP
             previous.ProviderMessageIdentity,
             previous.StatusDispatchRef);
         progress.Kind = SlackOutboxKinds.TerminalResult;
+        progress.DispatchRef = dispatchRef;
         progress.PayloadJson = JsonSerializer.Serialize(payload);
         if (!string.IsNullOrWhiteSpace(threadTs))
             progress.ThreadTs = threadTs;
@@ -483,6 +496,8 @@ public sealed partial class SlackOutboxStore : IScopedService, IAgentConnectionP
         var previousText = !string.IsNullOrWhiteSpace(previous.FallbackText)
             ? previous.FallbackText
             : previous.Text;
+        if (string.Equals(previousText, redactedText, StringComparison.Ordinal))
+            return terminal;
         var combined = string.IsNullOrWhiteSpace(previousText)
             ? redactedText
             : previousText + "\n\n" + redactedText;
@@ -545,6 +560,7 @@ public sealed partial class SlackOutboxStore : IScopedService, IAgentConnectionP
         string conversationId,
         string? threadTs,
         string redactedText,
+        string? terminalDispatchRef,
         string? imageUrl,
         string? fileName,
         string? fileContentBase64,
@@ -556,9 +572,13 @@ public sealed partial class SlackOutboxStore : IScopedService, IAgentConnectionP
 
         var connectionId = connection.Value.ConnectionId;
         var isFile = !string.IsNullOrWhiteSpace(fileName);
-        var dispatchRef = isFile
-            ? ReplyFileDispatchRef(connectionId, conversationId, threadTs)
-            : ReplyImageDispatchRef(connectionId, conversationId, threadTs);
+        var dispatchRef = terminalDispatchRef is null
+            ? isFile
+                ? ReplyFileDispatchRef(connectionId, conversationId, threadTs)
+                : ReplyImageDispatchRef(connectionId, conversationId, threadTs)
+            : isFile
+                ? $"{terminalDispatchRef}:file"
+                : $"{terminalDispatchRef}:image";
         var live = await db.AgentConnections.AnyAsync(c =>
             c.ProjectId == projectId && c.Id == connectionId && c.DeletedAt == null, ct);
         if (!live)

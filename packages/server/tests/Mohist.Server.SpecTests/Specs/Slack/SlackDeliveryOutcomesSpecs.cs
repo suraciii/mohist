@@ -232,6 +232,59 @@ public sealed class SlackDeliveryOutcomesSpecs
     }
 
     [Fact]
+    public async Task Agent_reply_dispatch_identity_separates_turns_and_keeps_retries_idempotent()
+    {
+        var connection = await CreateConnectionAsync();
+        await CreateDmMappingAsync(connection, "D-reply-turns");
+        await using var scope = _fixture.Services.CreateAsyncScope();
+        var outbox = scope.ServiceProvider.GetRequiredService<SlackOutboxStore>();
+
+        var first = await outbox.EnqueueAgentReplyAsync(
+            connection.ProjectId,
+            "D-reply-turns",
+            null,
+            "ACK",
+            replyDispatchRef: "agent-session-followup:session-1:turn-1");
+        var retry = await outbox.EnqueueAgentReplyAsync(
+            connection.ProjectId,
+            "D-reply-turns",
+            null,
+            "ACK",
+            replyDispatchRef: "agent-session-followup:session-1:turn-1");
+        await outbox.MarkDeliveredAsync(connection.ProjectId, first.DeliveryId!);
+        var deliveredRetry = await outbox.EnqueueAgentReplyAsync(
+            connection.ProjectId,
+            "D-reply-turns",
+            null,
+            "ACK",
+            replyDispatchRef: "agent-session-followup:session-1:turn-1");
+        var secondTurn = await outbox.EnqueueAgentReplyAsync(
+            connection.ProjectId,
+            "D-reply-turns",
+            null,
+            "531",
+            replyDispatchRef: "agent-session-followup:session-1:turn-2");
+
+        Assert.Equal(first.DeliveryId, retry.DeliveryId);
+        Assert.Equal(first.DeliveryId, deliveredRetry.DeliveryId);
+        Assert.NotEqual(first.DeliveryId, secondTurn.DeliveryId);
+        Assert.False(secondTurn.MergedIntoExisting);
+
+        var replies = (await outbox.ListAsync(connection.ProjectId, connection.Id)).Entries
+            .Where(row => row.Kind == SlackOutboxKinds.TerminalResult)
+            .ToArray();
+        Assert.Equal(2, replies.Length);
+        var firstReply = Assert.Single(
+            replies,
+            row => row.DispatchRef == "slack-reply:agent-session-followup:session-1:turn-1:terminal");
+        var secondReply = Assert.Single(
+            replies,
+            row => row.DispatchRef == "slack-reply:agent-session-followup:session-1:turn-2:terminal");
+        Assert.Equal("ACK", SlackDeliveryPayload.Parse(firstReply.PayloadJson).Text);
+        Assert.Equal("531", SlackDeliveryPayload.Parse(secondReply.PayloadJson).Text);
+    }
+
+    [Fact]
     public async Task Agent_reply_promotion_carries_liveness_status_ref_so_finalization_locates_the_reaction_target()
     {
         var connection = await CreateConnectionAsync();
