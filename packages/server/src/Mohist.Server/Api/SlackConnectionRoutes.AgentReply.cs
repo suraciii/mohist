@@ -14,6 +14,11 @@ public static partial class SlackConnectionRoutes
         {
             if (body is null || string.IsNullOrWhiteSpace(body.ConversationId))
                 return ApiResults.BadRequest("conversationId is required.");
+            if (!string.IsNullOrWhiteSpace(body.DispatchRef)
+                && (string.IsNullOrWhiteSpace(body.ConnectionId)
+                    || string.IsNullOrWhiteSpace(body.TriggeringMessageId)))
+                return ApiResults.BadRequest(
+                    "connectionId and triggeringMessageId are required when dispatchRef is supplied.");
 
             var hasAttachment = !string.IsNullOrWhiteSpace(body.ImageUrl)
                 || !string.IsNullOrWhiteSpace(body.FileContentBase64);
@@ -44,6 +49,10 @@ public static partial class SlackConnectionRoutes
                 body.ConversationId.Trim(),
                 string.IsNullOrWhiteSpace(body.ThreadTs) ? null : body.ThreadTs.Trim(),
                 text,
+                connectionId: string.IsNullOrWhiteSpace(body.ConnectionId) ? null : body.ConnectionId.Trim(),
+                triggeringMessageId: string.IsNullOrWhiteSpace(body.TriggeringMessageId)
+                    ? null
+                    : body.TriggeringMessageId.Trim(),
                 replyDispatchRef: string.IsNullOrWhiteSpace(body.DispatchRef) ? null : body.DispatchRef.Trim(),
                 imageUrl: string.IsNullOrWhiteSpace(body.ImageUrl) ? null : body.ImageUrl.Trim(),
                 fileName: string.IsNullOrWhiteSpace(body.FileName) ? null : body.FileName.Trim(),

@@ -27,6 +27,14 @@ internal static partial class SlackCommands
         {
             Description = "Logical reply identity from the injected Slack reply anchor. Agent retries reuse it; separate turns use different values.",
         };
+        var connection = new Option<string?>("--connection")
+        {
+            Description = "Owning Connection id from the injected Slack reply anchor. Required by the Server when --dispatch-ref is supplied.",
+        };
+        var triggeringMessage = new Option<string?>("--triggering-message")
+        {
+            Description = "Triggering Slack message id from the injected reply anchor. Required by the Server when --dispatch-ref is supplied.",
+        };
         var text = new Option<string?>("--text")
         {
             Description = "Reply body in markdown (bold/code/lists/quotes render in Slack). Pass '-' to read it from standard input (preserves newlines).",
@@ -43,6 +51,8 @@ internal static partial class SlackCommands
         command.Options.Add(conversation);
         command.Options.Add(replyTo);
         command.Options.Add(dispatchRef);
+        command.Options.Add(connection);
+        command.Options.Add(triggeringMessage);
         command.Options.Add(text);
         command.Options.Add(file);
         command.Options.Add(image);
@@ -117,6 +127,8 @@ internal static partial class SlackCommands
                     conversationId = ctx.GetValue(conversation),
                     threadTs = ctx.GetValue(replyTo),
                     dispatchRef = ctx.GetValue(dispatchRef),
+                    connectionId = ctx.GetValue(connection),
+                    triggeringMessageId = ctx.GetValue(triggeringMessage),
                     text = string.IsNullOrWhiteSpace(body) ? null : body,
                     imageUrl,
                     fileName,

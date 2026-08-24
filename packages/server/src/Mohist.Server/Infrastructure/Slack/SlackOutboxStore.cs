@@ -303,6 +303,8 @@ public sealed partial class SlackOutboxStore : IScopedService, IAgentConnectionP
         string conversationId,
         string? threadTs,
         string redactedText,
+        string? connectionId = null,
+        string? triggeringMessageId = null,
         string? replyDispatchRef = null,
         string? imageUrl = null,
         string? fileName = null,
@@ -317,18 +319,23 @@ public sealed partial class SlackOutboxStore : IScopedService, IAgentConnectionP
         var terminalDispatchRef = string.IsNullOrWhiteSpace(replyDispatchRef)
             ? null
             : ReplyDispatchRef(replyDispatchRef.Trim());
+        connectionId = string.IsNullOrWhiteSpace(connectionId) ? null : connectionId.Trim();
+        triggeringMessageId = string.IsNullOrWhiteSpace(triggeringMessageId)
+            ? null
+            : triggeringMessageId.Trim();
 
         if (imageUrl is not null || fileName is not null || fileContentBase64 is not null)
         {
             var attachment = await EnqueueAttachmentReplyAsync(
                 db, projectId, conversationId, threadTs, redactedText,
-                terminalDispatchRef, imageUrl, fileName, fileContentBase64, ct);
+                connectionId, terminalDispatchRef, imageUrl, fileName, fileContentBase64, ct);
             await transaction.CommitAsync(ct);
             return attachment;
         }
 
-        var progress = await FindReplyProgressRowAsync(db, projectId, conversationId, threadTs, ct);
-        if (progress is not null)
+        var progress = await FindReplyProgressRowAsync(
+            db, projectId, conversationId, threadTs, connectionId, triggeringMessageId, ct);
+        if (progress is not null && await IsLiveOwnerRowAsync(db, progress, ct))
         {
             var promoted = await PromoteReplyProgressAsync(
                 db, progress, redactedText, threadTs, terminalDispatchRef, ct);
@@ -342,7 +349,7 @@ public sealed partial class SlackOutboxStore : IScopedService, IAgentConnectionP
         }
 
         var terminal = await FindReplyTerminalRowAsync(
-            db, projectId, conversationId, threadTs, terminalDispatchRef, ct);
+            db, projectId, conversationId, threadTs, connectionId, terminalDispatchRef, ct);
         if (terminal is not null
             && await IsLiveOwnerRowAsync(db, terminal, ct)
             && !IsAttachmentReplyPayload(SlackDeliveryPayload.Parse(terminal.PayloadJson)))
@@ -358,17 +365,18 @@ public sealed partial class SlackOutboxStore : IScopedService, IAgentConnectionP
                 MergedIntoExisting: true);
         }
 
-        var connection = await ResolveReplyConnectionAsync(db, projectId, conversationId, threadTs, ct);
+        var connection = await ResolveReplyConnectionAsync(
+            db, projectId, conversationId, threadTs, connectionId, ct);
         if (connection is null)
         {
             await transaction.CommitAsync(ct);
             return new SlackAgentReplyResult(Accepted: false);
         }
 
-        var connectionId = connection.Value.ConnectionId;
-        var dispatchRef = terminalDispatchRef ?? ReplyDispatchRef(connectionId, conversationId, threadTs);
+        var resolvedConnectionId = connection.Value.ConnectionId;
+        var dispatchRef = terminalDispatchRef ?? ReplyDispatchRef(resolvedConnectionId, conversationId, threadTs);
         var live = await db.AgentConnections.AnyAsync(c =>
-            c.ProjectId == projectId && c.Id == connectionId && c.DeletedAt == null, ct);
+            c.ProjectId == projectId && c.Id == resolvedConnectionId && c.DeletedAt == null, ct);
         if (!live)
         {
             await transaction.CommitAsync(ct);
@@ -377,7 +385,7 @@ public sealed partial class SlackOutboxStore : IScopedService, IAgentConnectionP
 
         var duplicate = await db.SlackOutboxRows.AsNoTracking()
             .Where(row => row.OwnerKind == SlackDeliveryOwnerKinds.Connection
-                && row.ConnectionId == connectionId
+                && row.ConnectionId == resolvedConnectionId
                 && row.Kind == SlackOutboxKinds.TerminalResult
                 && row.DispatchRef == dispatchRef)
             .Select(row => new { row.Id })
@@ -385,7 +393,7 @@ public sealed partial class SlackOutboxStore : IScopedService, IAgentConnectionP
         if (duplicate is not null)
         {
             await transaction.CommitAsync(ct);
-            return new SlackAgentReplyResult(true, connectionId, duplicate.Id, dispatchRef, MergedIntoExisting: true);
+            return new SlackAgentReplyResult(true, resolvedConnectionId, duplicate.Id, dispatchRef, MergedIntoExisting: true);
         }
 
         var now = _timeProvider.GetUtcNow();
@@ -393,7 +401,7 @@ public sealed partial class SlackOutboxStore : IScopedService, IAgentConnectionP
         {
             Id = $"slkout_{Guid.NewGuid():N}",
             ProjectId = projectId,
-            ConnectionId = connectionId,
+            ConnectionId = resolvedConnectionId,
             OwnerKind = SlackDeliveryOwnerKinds.Connection,
             WorkspaceTeamId = connection.Value.WorkspaceTeamId,
             ConversationId = conversationId,
@@ -416,46 +424,9 @@ public sealed partial class SlackOutboxStore : IScopedService, IAgentConnectionP
         catch (DbUpdateException ex) when (IsDispatchRefConflict(ex))
         {
             await transaction.CommitAsync(ct);
-            return new SlackAgentReplyResult(true, connectionId, row.Id, dispatchRef, MergedIntoExisting: true);
+            return new SlackAgentReplyResult(true, resolvedConnectionId, row.Id, dispatchRef, MergedIntoExisting: true);
         }
-        return new SlackAgentReplyResult(true, connectionId, row.Id, dispatchRef, MergedIntoExisting: false);
-    }
-
-    private static async Task<SlackOutboxRow?> FindReplyProgressRowAsync(
-        MohistDbContext db,
-        string projectId,
-        string conversationId,
-        string? threadTs,
-        CancellationToken ct)
-    {
-        var query = db.SlackOutboxRows.Where(row =>
-            row.ProjectId == projectId
-            && row.ConversationId == conversationId
-            && row.Kind == SlackOutboxKinds.ReplaceableProgress
-            && row.State == SlackOutboxStates.Pending);
-        if (!string.IsNullOrWhiteSpace(threadTs))
-            query = query.Where(row => row.ThreadTs == threadTs);
-        return await query.OrderBy(row => row.Id).FirstOrDefaultAsync(ct);
-    }
-
-    private static async Task<SlackOutboxRow?> FindReplyTerminalRowAsync(
-        MohistDbContext db,
-        string projectId,
-        string conversationId,
-        string? threadTs,
-        string? dispatchRef,
-        CancellationToken ct)
-    {
-        var query = db.SlackOutboxRows.Where(row =>
-            row.ProjectId == projectId
-            && row.ConversationId == conversationId
-            && row.Kind == SlackOutboxKinds.TerminalResult
-            && row.State == SlackOutboxStates.Pending);
-        if (!string.IsNullOrWhiteSpace(dispatchRef))
-            query = query.Where(row => row.DispatchRef == dispatchRef);
-        if (!string.IsNullOrWhiteSpace(threadTs))
-            query = query.Where(row => row.ThreadTs == threadTs);
-        return await query.OrderBy(row => row.Id).FirstOrDefaultAsync(ct);
+        return new SlackAgentReplyResult(true, resolvedConnectionId, row.Id, dispatchRef, MergedIntoExisting: false);
     }
 
     private async Task<SlackOutboxRow> PromoteReplyProgressAsync(
@@ -529,39 +500,41 @@ public sealed partial class SlackOutboxStore : IScopedService, IAgentConnectionP
         string conversationId,
         string? threadTs,
         string redactedText,
+        string? connectionId,
         string? terminalDispatchRef,
         string? imageUrl,
         string? fileName,
         string? fileContentBase64,
         CancellationToken ct)
     {
-        var connection = await ResolveReplyConnectionAsync(db, projectId, conversationId, threadTs, ct);
+        var connection = await ResolveReplyConnectionAsync(
+            db, projectId, conversationId, threadTs, connectionId, ct);
         if (connection is null)
             return new SlackAgentReplyResult(Accepted: false);
 
-        var connectionId = connection.Value.ConnectionId;
+        var resolvedConnectionId = connection.Value.ConnectionId;
         var isFile = !string.IsNullOrWhiteSpace(fileName);
         var dispatchRef = terminalDispatchRef is null
             ? isFile
-                ? ReplyFileDispatchRef(connectionId, conversationId, threadTs)
-                : ReplyImageDispatchRef(connectionId, conversationId, threadTs)
+                ? ReplyFileDispatchRef(resolvedConnectionId, conversationId, threadTs)
+                : ReplyImageDispatchRef(resolvedConnectionId, conversationId, threadTs)
             : isFile
                 ? $"{terminalDispatchRef}:file"
                 : $"{terminalDispatchRef}:image";
         var live = await db.AgentConnections.AnyAsync(c =>
-            c.ProjectId == projectId && c.Id == connectionId && c.DeletedAt == null, ct);
+            c.ProjectId == projectId && c.Id == resolvedConnectionId && c.DeletedAt == null, ct);
         if (!live)
             return new SlackAgentReplyResult(Accepted: false);
 
         var duplicate = await db.SlackOutboxRows.AsNoTracking()
             .Where(row => row.OwnerKind == SlackDeliveryOwnerKinds.Connection
-                && row.ConnectionId == connectionId
+                && row.ConnectionId == resolvedConnectionId
                 && row.Kind == SlackOutboxKinds.TerminalResult
                 && row.DispatchRef == dispatchRef)
             .Select(row => new { row.Id })
             .FirstOrDefaultAsync(ct);
         if (duplicate is not null)
-            return new SlackAgentReplyResult(true, connectionId, duplicate.Id, dispatchRef, MergedIntoExisting: true);
+            return new SlackAgentReplyResult(true, resolvedConnectionId, duplicate.Id, dispatchRef, MergedIntoExisting: true);
 
         var payload = isFile
             ? new SlackDeliveryPayload(
@@ -580,7 +553,7 @@ public sealed partial class SlackOutboxStore : IScopedService, IAgentConnectionP
         {
             Id = $"slkout_{Guid.NewGuid():N}",
             ProjectId = projectId,
-            ConnectionId = connectionId,
+            ConnectionId = resolvedConnectionId,
             OwnerKind = SlackDeliveryOwnerKinds.Connection,
             WorkspaceTeamId = connection.Value.WorkspaceTeamId,
             ConversationId = conversationId,
@@ -601,9 +574,9 @@ public sealed partial class SlackOutboxStore : IScopedService, IAgentConnectionP
         }
         catch (DbUpdateException ex) when (IsDispatchRefConflict(ex))
         {
-            return new SlackAgentReplyResult(true, connectionId, row.Id, dispatchRef, MergedIntoExisting: true);
+            return new SlackAgentReplyResult(true, resolvedConnectionId, row.Id, dispatchRef, MergedIntoExisting: true);
         }
-        return new SlackAgentReplyResult(true, connectionId, row.Id, dispatchRef, MergedIntoExisting: false);
+        return new SlackAgentReplyResult(true, resolvedConnectionId, row.Id, dispatchRef, MergedIntoExisting: false);
     }
 
     private static JsonElement BuildImageBlocks(string text, string imageUrl)
@@ -643,45 +616,6 @@ public sealed partial class SlackOutboxStore : IScopedService, IAgentConnectionP
                 connection.ProjectId == row.ProjectId
                 && connection.Id == row.ConnectionId
                 && connection.DeletedAt == null, ct);
-
-    private static async Task<(string ConnectionId, string WorkspaceTeamId)?> ResolveReplyConnectionAsync(
-        MohistDbContext db,
-        string projectId,
-        string conversationId,
-        string? threadTs,
-        CancellationToken ct)
-    {
-        if (!string.IsNullOrWhiteSpace(threadTs))
-        {
-            var thread = await db.SlackThreadSessionMappings
-                .Where(row => row.ProjectId == projectId
-                    && row.ConversationId == conversationId
-                    && row.ThreadTs == threadTs)
-                .Select(row => new { row.ConnectionId, row.WorkspaceTeamId })
-                .FirstOrDefaultAsync(ct);
-            if (thread is not null)
-                return (thread.ConnectionId, thread.WorkspaceTeamId);
-        }
-
-        var dm = await db.SlackDmSessionMappings
-            .Where(row => row.ProjectId == projectId && row.DmConversationId == conversationId)
-            .Select(row => new { row.ConnectionId, row.WorkspaceTeamId })
-            .FirstOrDefaultAsync(ct);
-        if (dm is not null)
-            return (dm.ConnectionId, dm.WorkspaceTeamId);
-
-        if (string.IsNullOrWhiteSpace(threadTs))
-        {
-            var anyThread = await db.SlackThreadSessionMappings
-                .Where(row => row.ProjectId == projectId && row.ConversationId == conversationId)
-                .Select(row => new { row.ConnectionId, row.WorkspaceTeamId })
-                .FirstOrDefaultAsync(ct);
-            if (anyThread is not null)
-                return (anyThread.ConnectionId, anyThread.WorkspaceTeamId);
-        }
-
-        return null;
-    }
 
     private static bool IsDispatchRefConflict(DbUpdateException ex)
     {

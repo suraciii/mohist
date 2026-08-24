@@ -409,9 +409,11 @@ message in place. One input has at most one status message and one final
 answer; retries and duplicate delivery never create a second answer. Fast work
 may skip the status message. If a status update fails, Mohist appends the final
 answer once in the same thread and records a diagnosable delivery problem.
-The injected dispatch reference identifies that input's answer: repeated sends
-for the same dispatch converge, while a later input in the same DM or thread
-creates a separately deliverable answer even after the previous one was sent.
+The injected Connection id, triggering message id, and dispatch reference
+identify that input's answer: repeated sends for the same dispatch converge only
+within its owning Connection and triggering Turn, while another Connection or a
+later input in the same DM or thread creates a separately deliverable answer
+even after the previous one was sent.
 
 Reactions are liveness signals, not work facts. Success, cancellation, and
 failure come only from confirmed Session and Turn state. Where the platform
