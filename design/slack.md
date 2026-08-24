@@ -659,8 +659,13 @@ they carry no free text, and their effects are exactly the effects of the
 operation they name.
 
 Current actions: Stop a queued or running Turn, Retry from a failure notice,
-and Agent selection for a multi-Bot mention. Mohist approval gates are not
-Slack actions; routing them into Slack requires a notification routing policy.
+and Agent selection for a multi-Bot mention. Multi-Bot selection is delivered:
+the chooser is signed and actor-bound, preserves the original message facts,
+and starts exactly one execution under the selected Connection's owning
+Project. Durable decisions recover after restart, pending choices expire after
+five minutes, and only Completed/Settled records are reaped under the existing
+Slack event retention window. Mohist approval gates are not Slack actions;
+routing them into Slack requires a notification routing policy.
 
 ### Delivery Intent, Claim/Ack, and Unknown Results
 
@@ -790,6 +795,16 @@ authorization, and operations.
   durations, Slack SDK versions, or exact retry timing.
 
 ## Status
+
+Multi-Bot interactive selection is delivered, including the chooser,
+cross-Project selected-Connection attribution, and single-execution recovery.
+A root or explicit thread multi-Bot message, or an unmentioned multi-bound
+thread reply, creates one signed chooser and no work at ingress. The accepted
+choice retains the original sender, message identity, attachments, and thread
+anchor; restart recovery uses the committed dispatch kind and pre-allocated
+identity without substituting the prompt-owner Project. Pending choices expire
+after five minutes and only finished records are reaped under the existing
+Slack event retention window.
 
 The data-plane and control-plane boundaries are implemented. Server owns
 Enrollment, managed Agent App, Connection, inbox, conversation mapping, outbox,

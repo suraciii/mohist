@@ -25,9 +25,9 @@ namespace Mohist.Server.SpecTests.Specs.Slack;
 [Collection("SlackTurnControlInteraction")]
 public sealed class SlackTerminalDeliveryPresentationSpecs
 {
-    private readonly MohistIntegrationFixture _fixture;
+    private readonly IsolatedMohistIntegrationFixture _fixture;
 
-    public SlackTerminalDeliveryPresentationSpecs(MohistIntegrationFixture fixture) => _fixture = fixture;
+    public SlackTerminalDeliveryPresentationSpecs(IsolatedMohistIntegrationFixture fixture) => _fixture = fixture;
 
     [Theory]
     [InlineData(AgentJobFailureReasons.RunnerUnavailable)]

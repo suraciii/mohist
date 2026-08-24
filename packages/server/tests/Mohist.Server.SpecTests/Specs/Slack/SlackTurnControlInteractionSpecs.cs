@@ -27,17 +27,17 @@ using Xunit;
 
 namespace Mohist.Server.SpecTests.Specs.Slack;
 
-[CollectionDefinition("SlackTurnControlInteraction", DisableParallelization = true)]
-public class SlackTurnControlInteractionCollection;
+[CollectionDefinition("SlackTurnControlInteraction")]
+public class SlackTurnControlInteractionCollection : ICollectionFixture<IsolatedMohistIntegrationFixture>;
 
 [Collection("SlackTurnControlInteraction")]
 public sealed class SlackTurnControlInteractionSpecs : IAsyncLifetime
 {
-    private readonly MohistIntegrationFixture _fixture;
+    private readonly IsolatedMohistIntegrationFixture _fixture;
     private readonly List<string> _runnerIds = [];
     private readonly Dictionary<string, string> _connectionLeases = new(StringComparer.Ordinal);
 
-    public SlackTurnControlInteractionSpecs(MohistIntegrationFixture fixture) => _fixture = fixture;
+    public SlackTurnControlInteractionSpecs(IsolatedMohistIntegrationFixture fixture) => _fixture = fixture;
 
     public ValueTask InitializeAsync() => ValueTask.CompletedTask;
 

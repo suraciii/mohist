@@ -14,4 +14,5 @@ public sealed record CanonicalFollowupTarget(
     string? WorkDir,
     AgentExecutionDefinition? Definition = null,
     string? ProjectId = null,
-    string? AgentId = null);
+    string? AgentId = null,
+    string? ConnectionId = null);

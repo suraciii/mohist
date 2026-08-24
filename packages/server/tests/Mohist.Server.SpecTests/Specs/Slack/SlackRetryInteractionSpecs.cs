@@ -31,10 +31,10 @@ namespace Mohist.Server.SpecTests.Specs.Slack;
 [Collection("SlackTurnControlInteraction")]
 public sealed class SlackRetryInteractionSpecs : IAsyncLifetime
 {
-    private readonly MohistIntegrationFixture _fixture;
+    private readonly IsolatedMohistIntegrationFixture _fixture;
     private readonly Dictionary<string, string> _connectionLeases = new(StringComparer.Ordinal);
 
-    public SlackRetryInteractionSpecs(MohistIntegrationFixture fixture) => _fixture = fixture;
+    public SlackRetryInteractionSpecs(IsolatedMohistIntegrationFixture fixture) => _fixture = fixture;
 
     public ValueTask InitializeAsync() => ValueTask.CompletedTask;
 

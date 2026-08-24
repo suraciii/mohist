@@ -1,26 +1,13 @@
+using Mohist.Server.Infrastructure.Slack;
+
 namespace Mohist.Server.Infrastructure.Data.Slack;
 
 /// <summary>
-/// First-writer-wins advisory row that records "this ambiguous Slack
-/// message has been prompted for a choose-one reply, do not prompt
-/// again". Keyed by the stable Slack message identity
-/// <c>(WorkspaceTeamId, ConversationId, MessageTs)</c> so concurrent
-/// per-Connection ingress calls (each mentioned Bot receives the
-/// event independently) collapse to one prompt via
-/// <c>INSERT ... ON CONFLICT DO NOTHING</c>. The optional
-/// <see cref="ThreadTs"/> is the inbound thread identity copied onto
-/// the prompt delivery so a thread reply is prompted in that thread
-/// and a root message is prompted at the channel root.
+/// First-writer-wins ambiguity claim and the durable authority for a later
+/// Slack agent selection. Facts and candidate references are captured in the
+/// same insert as the once-only fence; the selection path must never rebuild
+/// them from the prompt owner's Project or the original Slack text.
 /// </summary>
-/// <remarks>
-/// The row is short-lived by design — a future cleanup job may reap
-/// rows older than the Slack redelivery window. The row does not
-/// participate in per-Connection cleanup
-/// (<see cref="Mohist.Server.Agent.Services.IAgentConnectionProviderCleanup"/>)
-/// because the prompt itself is connection-agnostic; the agent owns
-/// no durable state of its own and the race-winning Connection may
-/// come from any of the mentioned Bots.
-/// </remarks>
 public sealed class SlackAmbiguousPromptRow
 {
     public string Id { get; set; } = string.Empty;
@@ -31,6 +18,26 @@ public sealed class SlackAmbiguousPromptRow
     public string? ThreadTs { get; set; }
     public string WinningConnectionId { get; set; } = string.Empty;
     public string MentionedConnectionIdsJson { get; set; } = "[]";
+
+    public string SenderSlackUserId { get; set; } = string.Empty;
+    public string TaskText { get; set; } = string.Empty;
+    public string FilesJson { get; set; } = "[]";
+    public string AmbiguityKind { get; set; } = string.Empty;
+    public string CandidateReferencesJson { get; set; } = "[]";
+
+    public string SelectionState { get; set; } = SlackSelectionStates.Pending;
+    public string? ChosenProjectId { get; set; }
+    public string? ChosenConnectionId { get; set; }
+    public string? DispatchKind { get; set; }
+    public DateTimeOffset? DecidedAt { get; set; }
+    public string? SelectionSessionId { get; set; }
+    public string? SelectionInputId { get; set; }
+    public string? SelectionTurnId { get; set; }
+    public int AttemptCount { get; set; }
+    public DateTimeOffset? LastAttemptAt { get; set; }
+    public DateTimeOffset? FinishedAt { get; set; }
+    public string? SettleReason { get; set; }
+
     public DateTimeOffset PromptedAt { get; set; }
     public DateTimeOffset CreatedAt { get; set; }
     public DateTimeOffset UpdatedAt { get; set; }
