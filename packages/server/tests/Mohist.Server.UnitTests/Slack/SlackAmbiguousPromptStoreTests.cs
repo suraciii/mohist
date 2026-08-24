@@ -9,6 +9,7 @@ using Xunit;
 
 namespace Mohist.Server.UnitTests.Slack;
 
+[Collection("MohistDb")]
 public sealed class SlackAmbiguousPromptStoreTests
 {
     private static readonly DateTimeOffset Now = new(2026, 8, 21, 12, 0, 0, TimeSpan.Zero);

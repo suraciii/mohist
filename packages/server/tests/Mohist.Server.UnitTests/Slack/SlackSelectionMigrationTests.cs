@@ -10,6 +10,7 @@ using Xunit;
 
 namespace Mohist.Server.UnitTests.Slack;
 
+[Collection("MohistDb")]
 public sealed class SlackSelectionMigrationTests
 {
     private const string SelectionMigration = "20260913000000_AddSlackSelectionFacts";
