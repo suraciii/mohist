@@ -89,8 +89,11 @@
         { "id": "arch" }
       ]
     },
-    // Three collection workers keep cold CI inside the suite deadline; trimmed Spec setup keeps the L1 p95 below budget.
-    { "id": "server-spec", "kind": "dotnet-apphost", "trackType": "behavior", "application": "server", "specKinds": ["Product"], "level": "L1", "resources": ["orleans", "sqlite", "server-runtime"], "csproj": "packages/server/tests/Mohist.Server.SpecTests/Mohist.Server.SpecTests.csproj", "apphostArgs": ["-parallel", "collections", "-parallelAlgorithm", "conservative", "-maxThreads", "3"], "report": "reports/server-spec.trx", "reportFormat": "trx", "deadlineMs": 240000, "enforce": true, "rules": [
+    // Two collection workers match the shared CI runner: the application host, the in-process
+    // Orleans silo, concurrent cluster fixtures, and three workers oversubscribe a four-vCPU
+    // machine and inflate per-Spec wall time into the p95 budget (#719). Capacity is a resource
+    // bound, not a speed control.
+    { "id": "server-spec", "kind": "dotnet-apphost", "trackType": "behavior", "application": "server", "specKinds": ["Product"], "level": "L1", "resources": ["orleans", "sqlite", "server-runtime"], "csproj": "packages/server/tests/Mohist.Server.SpecTests/Mohist.Server.SpecTests.csproj", "apphostArgs": ["-parallel", "collections", "-parallelAlgorithm", "conservative", "-maxThreads", "2"], "report": "reports/server-spec.trx", "reportFormat": "trx", "deadlineMs": 240000, "enforce": true, "rules": [
         { "id": "spec", "percentile": 95, "percentileMs": 500 }
       ]
     },
