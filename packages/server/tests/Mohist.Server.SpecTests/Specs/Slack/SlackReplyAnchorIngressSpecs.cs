@@ -207,6 +207,11 @@ public sealed class SlackReplyAnchorIngressSpecs : IAsyncLifetime
     private async Task<string> RegisterRunnerAsync(string projectId)
     {
         var runnerId = $"slack-reply-anchor-{Guid.NewGuid():N}";
+        var registry = _fixture.Grains.GetGrain<IRunnerRegistryGrain>(RunnerRegistryKeys.Global);
+        foreach (var staleId in await registry.ListRunnerIdsAsync())
+            await _fixture.Grains.GetGrain<IRunnerGrain>(staleId).UnregisterAsync();
+        Assert.Empty(await registry.ListRunnerIdsAsync());
+
         using var register = await _fixture.Client.PostAsJsonAsync($"/api/runner/{runnerId}/register", new
         {
             capabilities = new[] { "spec/*" },
@@ -218,6 +223,12 @@ public sealed class SlackReplyAnchorIngressSpecs : IAsyncLifetime
         using var slots = await _fixture.Client.PatchAsJsonAsync($"/api/runner/{runnerId}", new { slots = 1 });
         slots.EnsureSuccessStatusCode();
         _runnerIds.Add(runnerId);
+        await TestWait.ForAsync(
+            () => _fixture.Grains.GetGrain<IRunnerGrain>(runnerId).GetRuntimeStateAsync(),
+            state => state.Status == RunnerStatus.Online,
+            TimeSpan.FromSeconds(5),
+            TimeSpan.FromMilliseconds(25),
+            $"Runner '{runnerId}' to reach Online");
         return runnerId;
     }
 
