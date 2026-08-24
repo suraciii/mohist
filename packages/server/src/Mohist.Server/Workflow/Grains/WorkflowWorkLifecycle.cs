@@ -49,6 +49,8 @@ internal sealed class WorkflowWorkLifecycle
         if (report.Status == TaskReportStatus.Succeeded)
         {
             if (currentTask is not null)
+                currentTask.TerminalResultFingerprint = report.TerminalResultFingerprint;
+            if (currentTask is not null)
             {
                 currentTask.Output = report.Output;
                 currentTask.Error = report.Error;
@@ -84,6 +86,8 @@ internal sealed class WorkflowWorkLifecycle
         }
         else
         {
+            if (currentTask is not null)
+                currentTask.TerminalResultFingerprint = report.TerminalResultFingerprint;
             if (currentTask is not null)
             {
                 currentTask.Output = report.Output;

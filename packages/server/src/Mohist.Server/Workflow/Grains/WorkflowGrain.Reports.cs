@@ -636,14 +636,35 @@ public partial class WorkflowGrain
             // A Workflow Agent result must prove the complete execution
             // identity, including the binding persisted by the same turn.
             await ReconcileAgentResultSettlementIfDueAsync();
-            var bound = _run.FindBoundAgentExecution(agentBinding.TaskRunId, workId, workerId);
+            var bound = _run.FindBoundAgentExecution(agentBinding.TaskRunId, workId, workerId)
+                ?? _run.FindTerminalBoundAgentExecution(agentBinding.TaskRunId, workId, workerId);
             if (bound is null || !MatchesExecutionBinding(bound, agentBinding))
                 return ReportAck.Stale;
         }
 
         var activeWork = _run.FindReportableWork(report.TaskRunId, workId, workerId);
         if (activeWork is null || !activeWork.IsTask || activeWork.TaskRunId is null)
-            return ReportAck.Stale;
+        {
+            var terminalWork = _run.FindTerminalReportAttempt(report.TaskRunId, workId, workerId);
+            if (terminalWork?.TaskRunId is null)
+                return ReportAck.Stale;
+
+            var terminalTask = _run.Stages
+                .Where(stage => string.Equals(stage.Id, terminalWork.Item.Stage, StringComparison.Ordinal))
+                .SelectMany(stage => stage.Tasks)
+                .Single(candidate => string.Equals(candidate.Id, terminalWork.TaskRunId, StringComparison.Ordinal));
+            var replayFingerprint = Mohist.Server.Runner.Grains.RuntimeRecoveryReceiptFingerprint.For(
+                new WorkResult(
+                    report.Status == TaskReportStatus.Succeeded ? "completed" : "failed",
+                    report.Detail,
+                    report.Output,
+                    ArtifactUploadIds: report.ArtifactUploadIds?.ToArray(),
+                    AddTasks: report.AddTasks?.ToList(),
+                    Error: report.Error));
+            return string.Equals(terminalTask.TerminalResultFingerprint, replayFingerprint, StringComparison.Ordinal)
+                ? ReportAck.Accepted
+                : ReportAck.Stale;
+        }
 
         var task = _run.Stages
             .Where(stage => string.Equals(stage.Id, activeWork.Item.Stage, StringComparison.Ordinal))

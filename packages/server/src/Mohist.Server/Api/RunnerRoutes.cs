@@ -208,7 +208,8 @@ public static partial class RunnerRoutes
 
             // Workflow: report direct to the owning grain via the stateless
             // report service (the runner grain no longer relays workflow
-            // reports). Accepted and Stale are both acks.
+            // reports). Only an accepted durable transition is a terminal
+            // acknowledgement; stale reports must remain in the Runner journal.
             var (ack, workflowStatus) = await workflowReport.ReportAsync(
                 runnerId,
                 req.WorkflowRunId ?? string.Empty,
@@ -220,7 +221,7 @@ public static partial class RunnerRoutes
                 req.AgentTurnId,
                 req.Runtime,
                 req.RuntimeSessionId);
-            var tracked = ack != "missing-workflow";
+            var tracked = string.Equals(ack, ReportAck.Accepted.ToString().ToLowerInvariant(), StringComparison.Ordinal);
             return Results.Ok(new RunnerReportResponse(
                 req.WorkflowRunId ?? string.Empty, workflowStatus, tracked, ack, ownerKind, req.WorkflowRunId ?? string.Empty));
         });

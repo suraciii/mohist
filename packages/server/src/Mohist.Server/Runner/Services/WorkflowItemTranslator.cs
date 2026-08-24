@@ -658,7 +658,8 @@ public sealed class WorkflowItemTranslator : IScopedService
             Error: result.Error,
             ArtifactUploadIds: result.ArtifactUploadIds is { Length: > 0 }
                 ? result.ArtifactUploadIds.ToArray()
-                : null));
+                : null,
+            TerminalResultFingerprint: Mohist.Server.Runner.Grains.RuntimeRecoveryReceiptFingerprint.For(result)));
     }
 
     private static InboundReport TranslateChecksResult(WorkItem item, WorkResult result)

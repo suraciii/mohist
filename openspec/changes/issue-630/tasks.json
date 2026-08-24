@@ -1,0 +1,34 @@
+{
+  "tasks": [
+    {
+      "id": "T1",
+      "description": "Write the terminal report settlement proposal, design, capability spec, and self-review before implementation.",
+      "status": "done",
+      "acceptance": ["Artifacts define strict tracked acknowledgement, identical replay, mismatch rejection, and unchanged journal retry semantics."]
+    },
+    {
+      "id": "T2",
+      "description": "Persist the canonical terminal WorkResult fingerprint on TaskRun and pass it through the Workflow report boundary.",
+      "status": "done",
+      "acceptance": ["Fingerprint includes the existing canonical result fields and survives Workflow state persistence."]
+    },
+    {
+      "id": "T3",
+      "description": "Make Workflow HTTP tracked acknowledgement strict and add idempotent identical terminal replay guarded by task/work/worker and Agent binding identity.",
+      "status": "done",
+      "acceptance": ["Only durable accepted transitions and exact committed replays return tracked=true; stale or mismatched reports return tracked=false."]
+    },
+    {
+      "id": "T4",
+      "description": "Add deterministic Server specs for accepted, stale/mismatch, response-loss replay, and no agent-result-unconfirmed after accepted settlement.",
+      "status": "done",
+      "acceptance": ["Tests prove no duplicate events, Artifact side effects, or terminal-state mutation on conflicting replay."]
+    },
+    {
+      "id": "T5",
+      "description": "Run focused Server tests and available fast verification; perform self-review and commit the isolated worktree.",
+      "status": "done",
+      "acceptance": ["Worktree is clean and commit contains only Issue 630 artifacts, implementation, and tests."]
+    }
+  ]
+}

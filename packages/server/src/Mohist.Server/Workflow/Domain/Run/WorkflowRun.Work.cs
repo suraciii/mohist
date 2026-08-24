@@ -188,6 +188,36 @@ public static partial class WorkflowRunExtensions
         }
 
         /// <summary>
+        /// Finds the exact terminal attempt for an idempotent report replay.
+        /// The worker identity remains part of the attempt fence even after
+        /// terminalization; callers must still compare the stored result
+        /// fingerprint before acknowledging a replay.
+        /// </summary>
+        public WorkflowActiveWork? FindTerminalReportAttempt(
+            string taskRunId,
+            string workId,
+            string workerId)
+        {
+            if (string.IsNullOrWhiteSpace(taskRunId)
+                || string.IsNullOrWhiteSpace(workId)
+                || string.IsNullOrWhiteSpace(workerId))
+                return null;
+
+            foreach (var stage in run.Stages)
+            {
+                var task = stage.Tasks.SingleOrDefault(candidate =>
+                    string.Equals(candidate.Id, taskRunId, StringComparison.Ordinal)
+                    && string.Equals(candidate.WorkId, workId, StringComparison.Ordinal)
+                    && string.Equals(candidate.WorkerId, workerId, StringComparison.Ordinal)
+                    && candidate.Status is TaskRunStatus.Completed or TaskRunStatus.Failed);
+                if (task is not null)
+                    return ActiveTask(stage, task);
+            }
+
+            return null;
+        }
+
+        /// <summary>
         /// A terminal recovery receipt has already passed the frozen binding
         /// check in the grain. It may therefore settle the original task even
         /// after the update fence marked its settlement recoverably interrupted;
@@ -291,14 +321,22 @@ public static partial class WorkflowRunExtensions
                 && settlement is not null
                 && settlement.State != AgentResultSettlementState.RecoverablyInterrupted
                 && HasFullExecutionBinding(settlement)
-                ? new AgentExecutionBinding(
-                    settlement.TaskRunId,
-                    settlement.WorkId,
-                    settlement.RunnerId,
-                    settlement.AgentSessionId!,
-                    settlement.AgentTurnId!,
-                    settlement.Runtime!,
-                    settlement.RuntimeSessionId!)
+                ? ToExecutionBinding(settlement)
+                : null;
+        }
+
+        public AgentExecutionBinding? FindTerminalBoundAgentExecution(
+            string taskRunId,
+            string workId,
+            string runnerId)
+        {
+            var found = FindTaskAttempt(run, taskRunId, workId, runnerId);
+            var settlement = found?.Task.AgentResultSettlement;
+            return found is not null
+                && found.Value.Task.Status is TaskRunStatus.Completed or TaskRunStatus.Failed
+                && settlement is not null
+                && HasFullExecutionBinding(settlement)
+                ? ToExecutionBinding(settlement)
                 : null;
         }
 
@@ -861,6 +899,16 @@ public static partial class WorkflowRunExtensions
         && settlement.AgentTurnId is not null
         && settlement.Runtime is not null
         && settlement.RuntimeSessionId is not null;
+
+    private static AgentExecutionBinding ToExecutionBinding(AgentResultSettlement settlement) =>
+        new(
+            settlement.TaskRunId,
+            settlement.WorkId,
+            settlement.RunnerId,
+            settlement.AgentSessionId!,
+            settlement.AgentTurnId!,
+            settlement.Runtime!,
+            settlement.RuntimeSessionId!);
 
     private static bool MatchesBoundFields(AgentResultSettlement settlement, AgentExecutionBinding binding) =>
         (settlement.AgentSessionId is null || string.Equals(settlement.AgentSessionId, binding.AgentSessionId, StringComparison.Ordinal))

@@ -63,6 +63,13 @@ public sealed class TaskRun
     public ExecutionError? Error { get; set; }
 
     /// <summary>
+    /// Canonical terminal WorkResult identity accepted for this attempt. It is
+    /// retained so a response-loss replay can be acknowledged without
+    /// reapplying task, Artifact, or follow-up side effects.
+    /// </summary>
+    public string? TerminalResultFingerprint { get; set; }
+
+    /// <summary>
     /// Additive verification metadata populated only for tasks whose
     /// <see cref="DefinitionId"/> matches a built-in lane id from
     /// <c>VerificationLaneCatalog</c>. The presence of this value

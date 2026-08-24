@@ -96,6 +96,22 @@ public sealed class RunnerPollRecoveryStateApiSpecs
     }
 
     [Fact]
+    public async Task Report_StaleWorkflowResultIsNotTracked()
+    {
+        using var report = await _fixture.Client.PostAsJsonAsync($"/api/runner/stale-{Guid.NewGuid():N}/report", new
+        {
+            workflowRunId = $"missing-report-{Guid.NewGuid():N}",
+            workId = "task-1",
+            status = "completed",
+        });
+
+        Assert.Equal(HttpStatusCode.OK, report.StatusCode);
+        var body = await report.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.False(body.GetProperty("tracked").GetBoolean());
+        Assert.Equal("missing-workflow", body.GetProperty("reason").GetString());
+    }
+
+    [Fact]
     public async Task Report_AcceptsStructuredActionOutput()
     {
         using var report = await _fixture.Client.PostAsJsonAsync($"/api/runner/report-output-{Guid.NewGuid():N}/report", new
