@@ -27,8 +27,8 @@
       "server-runtime": 1,
       "duration-measurement": 1
     },
-    // Ordered duration evidence runs CLI, Server Unit, then the isolated Server Spec measurement before remaining fan-out.
-    "durationMeasurementTracks": ["cli", "server-unit", "server-spec"],
+    // CLI and the isolated Spec measurement precede the remaining fan-out.
+    "durationMeasurementTracks": ["cli", "server-spec"],
     "durationIsolationTrack": "runner"
   },
   "plan": {
