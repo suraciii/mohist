@@ -24,9 +24,10 @@ public class SlackLeaseRoutesCollection : ICollectionFixture<SlackAdapterLeaseRo
 public class SlackControlPlaneRoutesCollection : ICollectionFixture<SlackControlPlaneRoutesFixture>;
 
 // These specs mutate the one process-wide SlackApiTestScript owned by the
-// assembly fixture. Keep every consumer in one non-parallel collection so a
-// responder/reset cannot steal another class's expected API calls.
-[CollectionDefinition("SharedSlackApi", DisableParallelization = true)]
+// assembly fixture. Collection membership serializes its consumers so a
+// responder/reset cannot steal another class's expected API calls, while
+// unrelated collections remain free to use the other spec worker threads.
+[CollectionDefinition("SharedSlackApi")]
 public class SharedSlackApiCollection;
 
 // Full-stack HTTP/Orleans specs receive the assembly fixture directly. Their
