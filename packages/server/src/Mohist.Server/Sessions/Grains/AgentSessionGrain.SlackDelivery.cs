@@ -31,19 +31,22 @@ public sealed partial class AgentSessionGrain
             .OrderBy(input => input.Sequence)
             .FirstOrDefault();
         var initialProvenance = initialInput?.Provenance;
-        var durableRoot = !string.IsNullOrWhiteSpace(initialProvenance?.BoundThreadRootMessageId)
-            ? initialProvenance.BoundThreadRootMessageId
-            : !string.IsNullOrWhiteSpace(initialProvenance?.ThreadId)
-                ? initialProvenance.ThreadId
-                : initialProvenance?.MessageId;
-        if (string.IsNullOrWhiteSpace(durableRoot)
-            || !string.Equals(durableRoot, request.ThreadRootMessageId, StringComparison.Ordinal))
-            return InvalidSlackReplyAnchor();
 
         var matchingInputs = inputs.Where(input => MatchesSlackReplyProvenance(input.Provenance, request)).ToArray();
         if (matchingInputs.Length != 1)
             return InvalidSlackReplyAnchor();
         var input = matchingInputs[0];
+
+        // The expected thread root mirrors dispatch-time anchor resolution:
+        // channel-thread replies stay under the session's durable bound root,
+        // while DM follow-ups thread under their own triggering message so
+        // the terminal delivery replaces the progress projection in place.
+        var expectedThreadRoot = !string.IsNullOrWhiteSpace(input.Provenance!.ThreadId)
+            ? DurableBoundRoot(initialProvenance) ?? input.Provenance.ThreadId
+            : input.Provenance.MessageId;
+        if (string.IsNullOrWhiteSpace(expectedThreadRoot)
+            || !string.Equals(expectedThreadRoot, request.ThreadRootMessageId, StringComparison.Ordinal))
+            return InvalidSlackReplyAnchor();
 
         if (string.Equals(input.Id, initialInput?.Id, StringComparison.Ordinal))
         {
@@ -82,6 +85,13 @@ public sealed partial class AgentSessionGrain
     }
 
     private static SlackReplyAnchorValidationResult InvalidSlackReplyAnchor() => new(false, false);
+
+    private static string? DurableBoundRoot(AgentSessionInputProvenance? provenance) =>
+        !string.IsNullOrWhiteSpace(provenance?.BoundThreadRootMessageId)
+            ? provenance.BoundThreadRootMessageId
+            : !string.IsNullOrWhiteSpace(provenance?.ThreadId)
+                ? provenance.ThreadId
+                : provenance?.MessageId;
 
     private static bool MatchesSlackReplyProvenance(
         AgentSessionInputProvenance? provenance,
