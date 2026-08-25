@@ -111,8 +111,11 @@ public sealed partial class AgentSessionGrain
 
         // Follow-up terminal delivery must target the message that created
         // this turn. Session metadata identifies the conversation, while the
-        // input provenance carries the immutable message identity.
+        // input provenance carries the immutable message identity. DM inputs
+        // bind to their own triggering message so the terminal delivery lands
+        // where the progress projection was posted.
         var threadTs = provenance?.BoundThreadRootMessageId
+            ?? provenance?.MessageId
             ?? metadata.Label(AgentSessionQueryMetadataKeys.SlackThreadTs);
         var messageTs = provenance?.MessageId;
         var title = metadata.Label(AgentSessionQueryMetadataKeys.Title);
