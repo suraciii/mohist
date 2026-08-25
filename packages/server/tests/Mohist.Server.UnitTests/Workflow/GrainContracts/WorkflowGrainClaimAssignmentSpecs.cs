@@ -4,6 +4,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Time.Testing;
 using Mohist.Server.Infrastructure.Data.Workflow;
 using Mohist.Server.Infrastructure.Events;
+using Mohist.Server.Workflow.Services;
 using Mohist.Server.TestSupport;
 using Mohist.Server.Workflow.Domain.Run;
 using Mohist.Server.Workflow.Grains;
@@ -256,18 +257,18 @@ public sealed class WorkflowGrainClaimAssignmentSpecs
     private async Task<(WorkflowGrain Grain, IWorkflowRunStore Store, IEventStore Events, string RunId, string WorkerId, string ProjectId)>
         ArrangeAsync(string runId, WorkflowDefinition? definition = null, string? projectId = null)
     {
-        projectId ??= $"proj-{runId}";
+        var resolvedProject = projectId ?? $"prof-{Math.Abs(WorkflowYamlSerializer.ToYaml(definition ?? SingleStage()).GetHashCode()):x8}";
         await WorkflowGrainContractSupport.SeedTemplateAsync(
             _fixture,
-            projectId,
+            resolvedProject,
             definition ?? SingleStage(),
             FixedTime);
         await using var scope = _fixture.Services.CreateAsyncScope();
         var store = scope.ServiceProvider.GetRequiredService<IWorkflowRunStore>();
         var grain = WorkflowGrainContractSupport.CreateGrain(scope.ServiceProvider, store, runId, TimeProvider);
         await grain.OnActivateAsync(CancellationToken.None);
-        await grain.EnsureStartedAsync(new WorkflowIssueContext(projectId, 1, null));
-        return (grain, store, scope.ServiceProvider.GetRequiredService<IEventStore>(), runId, "worker-1", projectId);
+        await grain.EnsureStartedAsync(new WorkflowIssueContext(resolvedProject, 1, null));
+        return (grain, store, scope.ServiceProvider.GetRequiredService<IEventStore>(), runId, "worker-1", resolvedProject);
     }
 
     private static WorkflowStartInput TestInput(string projectId) =>

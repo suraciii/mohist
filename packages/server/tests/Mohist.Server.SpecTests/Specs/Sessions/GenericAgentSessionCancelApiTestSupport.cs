@@ -177,6 +177,12 @@ public abstract class GenericAgentSessionCancelApiTestSupport : IAsyncLifetime
 
     protected async Task<(ProjectRef Project, string SessionId, string TurnId, string JobId)> CreateExecutingLaunchSessionForStopAsync()
     {
+        // Sibling tests in this collection leave runners registered; a stale
+        // runner can win this job's assignment and poison the snapshot read
+        // below. Drop them before registering ours.
+        var registry = _fixture.Grains.GetGrain<IRunnerRegistryGrain>(RunnerRegistryKeys.Global);
+        foreach (var staleRunnerId in await registry.ListRunnerIdsAsync())
+            await registry.UnregisterAsync(staleRunnerId);
         var project = await CreateProjectAsync("launch-stop");
         await _fixture.Grains.GetGrain<IRunnerGrain>(_runnerId)
             .RegisterAsync(new RunnerInfo(
