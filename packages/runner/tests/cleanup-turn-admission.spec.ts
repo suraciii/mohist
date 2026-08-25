@@ -12,6 +12,9 @@ import type { DispatchWorkItem } from '../src/core/types.js'
 import { buildActionHost, type ExecutorCapabilityDeps } from '../src/runtime/executor-capabilities.js'
 import { type AgentSessionRuntimeEventOutbox, type RuntimeEventRecord } from '../src/server/runtime-event-outbox.js'
 import { SkillResolver } from '../src/runtime/skill-resolver.js'
+import { RuntimeTurnRegistry } from '../src/runtime/runtime-turn-registry.js'
+import { workKey } from '../src/runtime/work-result-journal.js'
+import { createTerminalRecoveryReceipt } from '../src/runtime/recovery-receipt.js'
 import { flushMicrotasks, makeOutbox, workflowFact } from './support/runtime-event-outbox-fixture.js'
 
 function deferred<T>() {
@@ -73,6 +76,7 @@ function opencodeDeps(
   runtime: unknown,
   eventOutbox: AgentSessionRuntimeEventOutbox,
   budgetMs = 60_000,
+  runtimeTurnRegistry?: RuntimeTurnRegistry,
 ): ExecutorCapabilityDeps {
   return {
     connection: connection as never,
@@ -85,6 +89,7 @@ function opencodeDeps(
       return () => `input-${++n}`
     })(),
     bindingRecoveryCoordinator: null,
+    runtimeTurnRegistry,
     cleanupTerminalFactDeliveryBudgetMs: budgetMs,
   }
 }
@@ -96,9 +101,10 @@ function admissionHost(
   item = work(),
   runtime = opencodeRuntime(),
   budgetMs = 60_000,
+  runtimeTurnRegistry?: RuntimeTurnRegistry,
 ) {
   return buildActionHost(
-    opencodeDeps(openConnection(open), runtime, eventOutbox, budgetMs),
+    opencodeDeps(openConnection(open), runtime, eventOutbox, budgetMs, runtimeTurnRegistry),
     item,
     '/workspace',
     new AbortController().signal,
@@ -133,6 +139,7 @@ function runPi(options: {
   runtime?: ReturnType<typeof piRuntime>
   budgetMs?: number
   sessionName?: string
+  runtimeTurnRegistry?: RuntimeTurnRegistry
 }) {
   return piAction({
     workflowRunId: 'workflow-1',
@@ -150,6 +157,7 @@ function runPi(options: {
       let n = 0
       return () => `record-${++n}`
     })(),
+    runtimeTurnRegistry: options.runtimeTurnRegistry,
     runnerId: 'runner-1',
     cleanupAttempt: options.cleanupAttempt,
     cleanupTerminalFactDeliveryBudgetMs: options.budgetMs ?? 60_000,
@@ -288,6 +296,59 @@ afterEach(() => {
 })
 
 describe('cleanup turn admission', () => {
+  it('preserves the original work binding and terminal receipt identity across OpenCode and Pi cleanup turns', async () => {
+    const registry = new RuntimeTurnRegistry()
+    const original = {
+      agentSessionId: 'agent-session-1',
+      agentTurnId: 'original-turn',
+      runtime: 'opencode' as const,
+      runtimeSessionId: 'runtime-1',
+      workDir: '/workspace',
+    }
+    const originalWork = work({ projectId: null })
+    const key = workKey(originalWork)
+    registry.register(key, original)
+
+    const openCodeResult = await admissionHost(
+      makeOutbox({}).outbox,
+      vi.fn(),
+      1,
+      originalWork,
+      opencodeRuntime(),
+      60_000,
+      registry,
+    ).agent!.turn({ prompt: 'cleanup', session: 'work-1' })
+    expect(openCodeResult.error).toBeUndefined()
+    expect(registry.get(key)).toEqual(original)
+
+    const piOutbox = productionOutbox(async (records) => records.map((record) => [receiptFor(record)]))
+    await piOutbox.load()
+    const piResult = await runPi({
+      outbox: piOutbox,
+      open: vi.fn(async () => ({
+        sessionId: 'agent-session-1',
+        runtimeSessionId: 'pi-runtime-1',
+        runtime: 'pi',
+        workDir: '/workspace',
+      })),
+      cleanupAttempt: 1,
+      runtime: piRuntime(),
+      runtimeTurnRegistry: registry,
+    })
+    expect(piResult.error).toBeUndefined()
+    expect(registry.get(key)).toEqual(original)
+
+    const receipt = createTerminalRecoveryReceipt(
+      originalWork,
+      registry.get(key)!,
+      'runner-1',
+      { status: 'completed', output: { ok: true } },
+      'receipt-1',
+    )
+    expect(receipt?.agentTurnId).toBe('original-turn')
+    await piOutbox.stop()
+  })
+
   it('holds OpenCode attempt 1 on the production outbox before open and cleanup submission', async () => {
     const gate = deferred<void>()
     const started = deferred<void>()
