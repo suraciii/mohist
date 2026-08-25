@@ -29,6 +29,58 @@ namespace Mohist.Server.UnitTests.Workflow.GrainContracts;
 /// Mirrors the seeding the cluster fixture performed (workflow profile +
 /// project default profile rows) without an Orleans silo.
 /// </summary>
+/// <summary>
+/// Grain factory serving explicitly registered grain instances by interface
+/// and key; anything unregistered is a programming error in the arrangement.
+/// </summary>
+internal sealed class TestDispatchGrainFactory : IGrainFactory
+{
+    private readonly Dictionary<(Type Interface, string Key), object> _map = new();
+    private Func<Type, string, object?>? _fallback;
+
+    public TestDispatchGrainFactory Register<TInterface>(string key, TInterface grain) where TInterface : class
+    {
+        _map[(typeof(TInterface), key)] = grain;
+        return this;
+    }
+
+    public TestDispatchGrainFactory WithFallback(Func<Type, string, object?> fallback)
+    {
+        _fallback = fallback;
+        return this;
+    }
+
+    private object? ResolveRaw(Type interfaceType, string key) =>
+        _map.TryGetValue((interfaceType, key), out var grain)
+            ? grain
+            : _fallback?.Invoke(interfaceType, key);
+
+    TGrainInterface IGrainFactory.GetGrain<TGrainInterface>(string primaryKey, string? grainClassNamePrefix)
+    {
+        var raw = ResolveRaw(typeof(TGrainInterface), primaryKey);
+        if (raw is TGrainInterface typed)
+            return typed;
+        throw new NotSupportedException(
+            $"{nameof(TestDispatchGrainFactory)} has no {typeof(TGrainInterface).Name} for key '{primaryKey}'");
+    }
+
+    TGrainInterface IGrainFactory.GetGrain<TGrainInterface>(long primaryKey, string? grainClassNamePrefix) => throw new NotSupportedException();
+    TGrainInterface IGrainFactory.GetGrain<TGrainInterface>(Guid primaryKey, string? grainClassNamePrefix) => throw new NotSupportedException();
+    TGrainInterface IGrainFactory.GetGrain<TGrainInterface>(Guid primaryKey, string keyExtension, string? grainClassNamePrefix) => throw new NotSupportedException();
+    TGrainInterface IGrainFactory.GetGrain<TGrainInterface>(long primaryKey, string keyExtension, string? grainClassNamePrefix) => throw new NotSupportedException();
+    TGrainObserverInterface IGrainFactory.CreateObjectReference<TGrainObserverInterface>(IGrainObserver obj) => throw new NotSupportedException();
+    void IGrainFactory.DeleteObjectReference<TGrainObserverInterface>(IGrainObserver obj) => throw new NotSupportedException();
+    IGrain IGrainFactory.GetGrain(Type grainInterfaceType, Guid grainPrimaryKey) => throw new NotSupportedException();
+    IGrain IGrainFactory.GetGrain(Type grainInterfaceType, long grainPrimaryKey) => throw new NotSupportedException();
+    IGrain IGrainFactory.GetGrain(Type grainInterfaceType, string grainPrimaryKey) => throw new NotSupportedException();
+    IGrain IGrainFactory.GetGrain(Type grainInterfaceType, Guid grainPrimaryKey, string keyExtension) => throw new NotSupportedException();
+    IGrain IGrainFactory.GetGrain(Type grainInterfaceType, long grainPrimaryKey, string keyExtension) => throw new NotSupportedException();
+    TGrainInterface IGrainFactory.GetGrain<TGrainInterface>(GrainId grainId) => throw new NotSupportedException();
+    IAddressable IGrainFactory.GetGrain(GrainId grainId) => throw new NotSupportedException();
+    IAddressable IGrainFactory.GetGrain(GrainId grainId, GrainInterfaceType interfaceType) => throw new NotSupportedException();
+    IAddressable IGrainFactory.GetGrain(Type interfaceType, IdSpan grainKey, string grainClassNamePrefix) => throw new NotSupportedException();
+    IAddressable IGrainFactory.GetGrain(Type interfaceType, IdSpan grainKey) => throw new NotSupportedException();
+}
 internal static partial class WorkflowGrainContractSupport
 {
     internal static async Task SeedTemplateAsync(
@@ -151,6 +203,7 @@ internal sealed record WorkflowGrainArrangement(
     WorkflowQuerier Querier,
     string RunId,
     string WorkerId,
+    string ProjectId,
     RunnerUpdateOperationGrainRegistry? Operations = null)
 {
     public async Task<WorkItem?> AssignAndClaimAsync()
@@ -226,13 +279,14 @@ internal sealed record WorkflowGrainArrangement(
         WorkItem item,
         System.Text.Json.JsonElement? output,
         IReadOnlyList<RuntimeTaskInput>? addTasks,
-        TaskReportStatus status = TaskReportStatus.Succeeded)
+        TaskReportStatus status = TaskReportStatus.Succeeded,
+        IReadOnlyList<string>? artifactUploadIds = null)
     {
         var taskRunId = await BuildReportTaskRunIdAsync();
         return await Grain.ReceiveTaskReportAsync(
             WorkerId,
             item.Id!,
-            new TaskReport(item.Id!, status, Output: output, Artifacts: null, AddTasks: addTasks, TaskRunId: taskRunId));
+            new TaskReport(item.Id!, status, Output: output, Artifacts: null, AddTasks: addTasks, ArtifactUploadIds: artifactUploadIds, TaskRunId: taskRunId));
     }
 
     public static async Task<WorkflowGrainArrangement> CreateAsync(
@@ -272,6 +326,7 @@ internal sealed record WorkflowGrainArrangement(
             querier,
             runId,
             workerId,
+            projectId!,
             operations);
     }
 
@@ -338,6 +393,31 @@ internal sealed class RunnerUpdateOperationGrainRegistry(
 
 internal static partial class WorkflowGrainContractSupport
 {
+    /// <summary>
+    /// Builds the stateless report service against a factory that resolves
+    /// the given workflow grain instance (plus optional operation grains),
+    /// mirroring how the silo wires it in production.
+    /// </summary>
+    internal static WorkflowReportService CreateReportService(
+        IServiceProvider services,
+        WorkflowGrain workflowGrain,
+        Func<string, IRunnerUpdateOperationGrain>? operations = null,
+        string workflowRunId = "*")
+    {
+        var factory = new TestDispatchGrainFactory()
+            .WithFallback((interfaceType, key) =>
+            {
+                if (interfaceType == typeof(IWorkflowGrain))
+                    return workflowGrain;
+                return operations is not null && interfaceType == typeof(IRunnerUpdateOperationGrain)
+                    ? operations(key)
+                    : null;
+            });
+        return ActivatorUtilities.CreateInstance<WorkflowReportService>(
+            services,
+            (IGrainFactory)factory);
+    }
+
     /// <summary>
     /// Attaches a manual test grain context to a primary-constructor grain so
     /// identity lookups (GetPrimaryKeyString) resolve without Orleans runtime
