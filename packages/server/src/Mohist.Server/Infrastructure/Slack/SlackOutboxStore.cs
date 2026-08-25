@@ -309,6 +309,7 @@ public sealed partial class SlackOutboxStore : IScopedService, IAgentConnectionP
         string? imageUrl = null,
         string? fileName = null,
         string? fileContentBase64 = null,
+        bool idempotentRetryOnly = false,
         CancellationToken ct = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(projectId);
@@ -327,14 +328,16 @@ public sealed partial class SlackOutboxStore : IScopedService, IAgentConnectionP
         if (imageUrl is not null || fileName is not null || fileContentBase64 is not null)
         {
             var attachment = await EnqueueAttachmentReplyAsync(
-                db, projectId, conversationId, threadTs, redactedText,
-                connectionId, terminalDispatchRef, imageUrl, fileName, fileContentBase64, ct);
-            await transaction.CommitAsync(ct);
+                db, transaction, projectId, conversationId, threadTs, redactedText,
+                connectionId, terminalDispatchRef, imageUrl, fileName, fileContentBase64,
+                idempotentRetryOnly, ct);
             return attachment;
         }
 
-        var progress = await FindReplyProgressRowAsync(
-            db, projectId, conversationId, threadTs, connectionId, triggeringMessageId, ct);
+        var progress = idempotentRetryOnly
+            ? null
+            : await FindReplyProgressRowAsync(
+                db, projectId, conversationId, threadTs, connectionId, triggeringMessageId, ct);
         if (progress is not null && await IsLiveOwnerRowAsync(db, progress, ct))
         {
             var promoted = await PromoteReplyProgressAsync(
@@ -354,8 +357,42 @@ public sealed partial class SlackOutboxStore : IScopedService, IAgentConnectionP
             && await IsLiveOwnerRowAsync(db, terminal, ct)
             && !IsAttachmentReplyPayload(SlackDeliveryPayload.Parse(terminal.PayloadJson)))
         {
+            var previous = SlackDeliveryPayload.Parse(terminal.PayloadJson);
+            var previousText = !string.IsNullOrWhiteSpace(previous.FallbackText)
+                ? previous.FallbackText
+                : previous.Text;
+            var sameContent = IsAgentReplyPart(previous, redactedText);
+            var immutableInFlight = terminal.State is SlackOutboxStates.Claimed or SlackOutboxStates.DeliveryUncertain;
+            var cannotUpdateDelivered = terminal.State == SlackOutboxStates.Delivered
+                && previous.ProviderMessageIdentity is null;
+            var immutableRetry = idempotentRetryOnly || immutableInFlight || cannotUpdateDelivered;
+            if (immutableRetry && !sameContent)
+            {
+                await transaction.CommitAsync(ct);
+                return ConflictingAgentReply(terminal.ConnectionId, terminal.Id, terminal.DispatchRef);
+            }
+            if (sameContent && (immutableRetry || terminalDispatchRef is not null))
+            {
+                await transaction.CommitAsync(ct);
+                return new SlackAgentReplyResult(
+                    Accepted: true,
+                    terminal.ConnectionId,
+                    terminal.Id,
+                    terminal.DispatchRef,
+                    MergedIntoExisting: true);
+            }
+            if (terminal.State == SlackOutboxStates.Delivered
+                && SlackFinalReplyRenderer.SegmentReplyText(previousText + "\n\n" + redactedText).Count > 1)
+            {
+                await transaction.CommitAsync(ct);
+                return ConflictingAgentReply(
+                    terminal.ConnectionId,
+                    terminal.Id,
+                    terminal.DispatchRef,
+                    "A delivered Slack reply cannot be extended beyond one message.");
+            }
             var merged = await MergeReplyTerminalAsync(
-                db, terminal, redactedText, terminalDispatchRef is not null, ct);
+                db, terminal, redactedText, idempotentRetry: terminalDispatchRef is not null, ct);
             await transaction.CommitAsync(ct);
             return new SlackAgentReplyResult(
                 Accepted: true,
@@ -388,12 +425,20 @@ public sealed partial class SlackOutboxStore : IScopedService, IAgentConnectionP
                 && row.ConnectionId == resolvedConnectionId
                 && row.Kind == SlackOutboxKinds.TerminalResult
                 && row.DispatchRef == dispatchRef)
-            .Select(row => new { row.Id })
+            .Select(row => new { row.Id, row.PayloadJson })
             .FirstOrDefaultAsync(ct);
         if (duplicate is not null)
         {
             await transaction.CommitAsync(ct);
-            return new SlackAgentReplyResult(true, resolvedConnectionId, duplicate.Id, dispatchRef, MergedIntoExisting: true);
+            var existing = SlackDeliveryPayload.Parse(duplicate.PayloadJson);
+            return IsAgentReplyPart(existing, redactedText)
+                ? new SlackAgentReplyResult(true, resolvedConnectionId, duplicate.Id, dispatchRef, MergedIntoExisting: true)
+                : ConflictingAgentReply(resolvedConnectionId, duplicate.Id, dispatchRef);
+        }
+        if (idempotentRetryOnly)
+        {
+            await transaction.CommitAsync(ct);
+            return ConflictingAgentReply(resolvedConnectionId, dispatchRef: dispatchRef);
         }
 
         var now = _timeProvider.GetUtcNow();
@@ -421,10 +466,16 @@ public sealed partial class SlackOutboxStore : IScopedService, IAgentConnectionP
             await db.SaveChangesAsync(ct);
             await transaction.CommitAsync(ct);
         }
-        catch (DbUpdateException ex) when (IsDispatchRefConflict(ex))
+        catch (DbUpdateException)
         {
-            await transaction.CommitAsync(ct);
-            return new SlackAgentReplyResult(true, resolvedConnectionId, row.Id, dispatchRef, MergedIntoExisting: true);
+            await transaction.RollbackAsync(ct);
+            var canonical = await FindCanonicalAgentReplyAsync(resolvedConnectionId, dispatchRef, ct);
+            if (canonical is null)
+                throw;
+            var existing = SlackDeliveryPayload.Parse(canonical.PayloadJson);
+            return IsAgentReplyPart(existing, redactedText)
+                ? new SlackAgentReplyResult(true, resolvedConnectionId, canonical.Id, dispatchRef, MergedIntoExisting: true)
+                : ConflictingAgentReply(resolvedConnectionId, canonical.Id, dispatchRef);
         }
         return new SlackAgentReplyResult(true, resolvedConnectionId, row.Id, dispatchRef, MergedIntoExisting: false);
     }
@@ -438,7 +489,8 @@ public sealed partial class SlackOutboxStore : IScopedService, IAgentConnectionP
         CancellationToken ct)
     {
         var previous = SlackDeliveryPayload.Parse(progress.PayloadJson);
-        var dispatchRef = terminalDispatchRef ?? progress.DispatchRef ?? progress.Id;
+        var progressDispatchRef = progress.DispatchRef;
+        var dispatchRef = terminalDispatchRef ?? progressDispatchRef ?? progress.Id;
         // Carry the liveness StatusDispatchRef forward so the in-place update is
         // a faithful replacement of the progress message: the post-reply
         // liveness finalization derives the reaction target (projectionSource)
@@ -447,7 +499,8 @@ public sealed partial class SlackOutboxStore : IScopedService, IAgentConnectionP
             redactedText,
             dispatchRef,
             previous.ProviderMessageIdentity,
-            previous.StatusDispatchRef);
+            previous.StatusDispatchRef,
+            progressDispatchRef);
         progress.Kind = SlackOutboxKinds.TerminalResult;
         progress.DispatchRef = dispatchRef;
         progress.PayloadJson = JsonSerializer.Serialize(payload);
@@ -462,7 +515,8 @@ public sealed partial class SlackOutboxStore : IScopedService, IAgentConnectionP
         string text,
         string dispatchRef,
         SlackProviderMessageIdentity? providerIdentity,
-        string? statusDispatchRef = null)
+        string? statusDispatchRef = null,
+        string? progressDispatchRef = null)
     {
         var operation = providerIdentity is null
             ? SlackDeliveryOperations.PostMessage
@@ -476,7 +530,9 @@ public sealed partial class SlackOutboxStore : IScopedService, IAgentConnectionP
             FallbackText: text,
             FallbackDispatchRef: $"{dispatchRef}:fallback",
             StatusDispatchRef: statusDispatchRef,
-            Segments: segments.Count > 1 ? segments : null);
+            Segments: segments.Count > 1 ? segments : null,
+            ProgressDispatchRef: progressDispatchRef,
+            ReplyParts: [text]);
     }
 
     private static bool IsAttachmentReplyPayload(SlackDeliveryPayload payload) =>
@@ -496,6 +552,7 @@ public sealed partial class SlackOutboxStore : IScopedService, IAgentConnectionP
 
     private async Task<SlackAgentReplyResult> EnqueueAttachmentReplyAsync(
         MohistDbContext db,
+        Microsoft.EntityFrameworkCore.Storage.IDbContextTransaction transaction,
         string projectId,
         string conversationId,
         string? threadTs,
@@ -505,6 +562,7 @@ public sealed partial class SlackOutboxStore : IScopedService, IAgentConnectionP
         string? imageUrl,
         string? fileName,
         string? fileContentBase64,
+        bool idempotentRetryOnly,
         CancellationToken ct)
     {
         var connection = await ResolveReplyConnectionAsync(
@@ -526,16 +584,6 @@ public sealed partial class SlackOutboxStore : IScopedService, IAgentConnectionP
         if (!live)
             return new SlackAgentReplyResult(Accepted: false);
 
-        var duplicate = await db.SlackOutboxRows.AsNoTracking()
-            .Where(row => row.OwnerKind == SlackDeliveryOwnerKinds.Connection
-                && row.ConnectionId == resolvedConnectionId
-                && row.Kind == SlackOutboxKinds.TerminalResult
-                && row.DispatchRef == dispatchRef)
-            .Select(row => new { row.Id })
-            .FirstOrDefaultAsync(ct);
-        if (duplicate is not null)
-            return new SlackAgentReplyResult(true, resolvedConnectionId, duplicate.Id, dispatchRef, MergedIntoExisting: true);
-
         var payload = isFile
             ? new SlackDeliveryPayload(
                 SlackDeliveryOperations.UploadFile,
@@ -548,6 +596,25 @@ public sealed partial class SlackOutboxStore : IScopedService, IAgentConnectionP
                 redactedText,
                 ClientMessageId: dispatchRef,
                 Blocks: BuildImageBlocks(redactedText, imageUrl!));
+        var duplicate = await db.SlackOutboxRows.AsNoTracking()
+            .Where(row => row.OwnerKind == SlackDeliveryOwnerKinds.Connection
+                && row.ConnectionId == resolvedConnectionId
+                && row.Kind == SlackOutboxKinds.TerminalResult
+                && row.DispatchRef == dispatchRef)
+            .Select(row => new { row.Id, row.PayloadJson })
+            .FirstOrDefaultAsync(ct);
+        if (duplicate is not null)
+        {
+            await transaction.CommitAsync(ct);
+            return SameReplyContent(SlackDeliveryPayload.Parse(duplicate.PayloadJson), payload)
+                ? new SlackAgentReplyResult(true, resolvedConnectionId, duplicate.Id, dispatchRef, MergedIntoExisting: true)
+                : ConflictingAgentReply(resolvedConnectionId, duplicate.Id, dispatchRef);
+        }
+        if (idempotentRetryOnly)
+        {
+            await transaction.CommitAsync(ct);
+            return ConflictingAgentReply(resolvedConnectionId, dispatchRef: dispatchRef);
+        }
         var now = _timeProvider.GetUtcNow();
         var row = new SlackOutboxRow
         {
@@ -571,10 +638,17 @@ public sealed partial class SlackOutboxStore : IScopedService, IAgentConnectionP
         try
         {
             await db.SaveChangesAsync(ct);
+            await transaction.CommitAsync(ct);
         }
-        catch (DbUpdateException ex) when (IsDispatchRefConflict(ex))
+        catch (DbUpdateException)
         {
-            return new SlackAgentReplyResult(true, resolvedConnectionId, row.Id, dispatchRef, MergedIntoExisting: true);
+            await transaction.RollbackAsync(ct);
+            var canonical = await FindCanonicalAgentReplyAsync(resolvedConnectionId, dispatchRef, ct);
+            if (canonical is null)
+                throw;
+            return SameReplyContent(SlackDeliveryPayload.Parse(canonical.PayloadJson), payload)
+                ? new SlackAgentReplyResult(true, resolvedConnectionId, canonical.Id, dispatchRef, MergedIntoExisting: true)
+                : ConflictingAgentReply(resolvedConnectionId, canonical.Id, dispatchRef);
         }
         return new SlackAgentReplyResult(true, resolvedConnectionId, row.Id, dispatchRef, MergedIntoExisting: false);
     }
@@ -720,6 +794,8 @@ public sealed partial class SlackOutboxStore : IScopedService, IAgentConnectionP
                 && row.OwnerKind == ownerKind
                 && row.ConnectionId == connectionId
                 && row.State == SlackOutboxStates.Pending
+                && row.PayloadJson == candidate.PayloadJson
+                && row.UpdatedAt == candidate.UpdatedAt
                 && (ownerKind == SlackDeliveryOwnerKinds.Manager
                     ? db.SlackWorkspaceEnrollments.Any(enrollment =>
                         enrollment.Id == connectionId

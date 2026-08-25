@@ -1020,9 +1020,12 @@ public static partial class AgentSessionExtensions
                 {
                     var turn = (session.Status.Turns ?? [])
                         .FirstOrDefault(candidate => candidate.InputIds.Contains(input.Id, StringComparer.Ordinal));
-                    var lease = (session.Status.PendingFollowups ?? [])
+                    var leases = session.Status.PendingFollowups is { Count: > 0 } pending
+                        ? pending
+                        : session.Status.PendingFollowup is null ? [] : [session.Status.PendingFollowup];
+                    var lease = leases
                         .FirstOrDefault(candidate => string.Equals(candidate.TurnId, turn?.Id, StringComparison.Ordinal));
-                    return new AgentSessionFollowupInputLookup(input, turn, lease?.OperationId);
+                    return new AgentSessionFollowupInputLookup(input, turn, lease?.OperationId ?? turn?.OperationId);
                 }
             }
             return null;
@@ -1254,15 +1257,6 @@ public static partial class AgentSessionExtensions
                 };
             }
 
-            if (!createdNewTurn)
-            {
-                var index = turns.FindIndex(candidate => candidate.Id == updatedTurn.Id);
-                turns[index] = updatedTurn;
-            }
-            else
-            {
-                turns.Add(updatedTurn);
-            }
             inputs.Add(newInput);
 
             var turnOperationId = operationId;
@@ -1282,6 +1276,10 @@ public static partial class AgentSessionExtensions
                 turnOperationId = leases.First(candidate =>
                     string.Equals(candidate.TurnId, updatedTurn.Id, StringComparison.Ordinal)).OperationId;
             }
+            updatedTurn = updatedTurn with { OperationId = turnOperationId };
+            var turnIndex = turns.FindIndex(candidate => candidate.Id == updatedTurn.Id);
+            if (turnIndex < 0) turns.Add(updatedTurn);
+            else turns[turnIndex] = updatedTurn;
 
             session.Status = session.Status with
             {
@@ -1392,6 +1390,7 @@ public static partial class AgentSessionExtensions
                         Status = status,
                         Result = result,
                         UpdatedAt = now,
+                        OperationId = operationId,
                     };
                 }
             }

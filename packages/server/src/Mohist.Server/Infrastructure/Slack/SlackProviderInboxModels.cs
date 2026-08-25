@@ -48,6 +48,8 @@ public sealed record SlackProviderInboxRoute(
     string? SessionId,
     string? TurnId);
 
+public sealed record SlackProviderInboxReplyAnchor(string WorkspaceTeamId, string SessionId);
+
 /// <summary>
 /// Read model of an inbox row, returned by <c>ListAsync</c> for operator
 /// inspection. <see cref="IsPending"/> mirrors the capacity count: a row

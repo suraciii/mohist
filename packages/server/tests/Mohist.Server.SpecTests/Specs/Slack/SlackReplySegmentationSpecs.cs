@@ -108,6 +108,44 @@ public sealed class SlackReplySegmentationSpecs
         Assert.Equal(2, markerOccurrences);
     }
 
+    [Fact]
+    public async Task Delivered_reply_rejects_an_extension_that_cannot_converge_in_one_message()
+    {
+        var connection = await CreateConnectionAsync();
+        await CreateDmMappingAsync(connection, "D-segment-update");
+        await using var scope = _fixture.Services.CreateAsyncScope();
+        var outbox = scope.ServiceProvider.GetRequiredService<SlackOutboxStore>();
+        var firstBody = new string('a', 20_000);
+        var secondBody = new string('b', 20_000);
+        const string dispatchRef = "agent-session-followup:segment-update:turn-1";
+
+        var first = await outbox.EnqueueAgentReplyAsync(
+            connection.ProjectId,
+            "D-segment-update",
+            null,
+            firstBody,
+            replyDispatchRef: dispatchRef);
+        await outbox.MarkDeliveredAsync(
+            connection.ProjectId,
+            first.DeliveryId!,
+            new SlackProviderMessageIdentity("D-segment-update", "1710000000.000700"));
+        var rejected = await outbox.EnqueueAgentReplyAsync(
+            connection.ProjectId,
+            "D-segment-update",
+            null,
+            secondBody,
+            replyDispatchRef: dispatchRef);
+
+        Assert.False(rejected.Accepted);
+        Assert.True(rejected.ConflictingDuplicate);
+        var row = (await outbox.ListAsync(connection.ProjectId, connection.Id)).Entries.Single();
+        var payload = SlackDeliveryPayload.Parse(row.PayloadJson);
+        Assert.Equal(SlackDeliveryOperations.PostMessage, payload.Operation);
+        Assert.Null(payload.Segments);
+        Assert.Equal(firstBody, payload.Text);
+        Assert.Equal("1710000000.000700", payload.ProviderMessageIdentity?.MessageTs);
+    }
+
     private async Task CreateDmMappingAsync(AgentConnection connection, string dmConversationId)
     {
         var now = _fixture.TimeProvider.GetUtcNow();

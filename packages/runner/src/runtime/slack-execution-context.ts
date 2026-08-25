@@ -4,8 +4,8 @@ import type { ResolvedSkill } from './skill-resolver.js'
 export const SLACK_EXECUTION_SOURCE = 'slack' as const
 export const NON_SLACK_EXECUTION_SOURCE = 'non-slack' as const
 export const PUBLISHED_SLACK_SKILL_NAME = 'mohist-slack-collaboration' as const
-export const PUBLISHED_SLACK_SKILL_VERSION = '1.0.3' as const
-export const PUBLISHED_SLACK_SKILL_HASH = 'c8b9f3ad543d4c9d2b1a07445e95b09b8c291563e113d0bd1264e33ccbe9aa63' as const
+export const PUBLISHED_SLACK_SKILL_VERSION = '1.0.4' as const
+export const PUBLISHED_SLACK_SKILL_HASH = '78cd2efe963d7abd299257821510a16ec0b322b8510f6773f435112ed81e3382' as const
 
 export type ExecutionSource = typeof SLACK_EXECUTION_SOURCE | typeof NON_SLACK_EXECUTION_SOURCE
 

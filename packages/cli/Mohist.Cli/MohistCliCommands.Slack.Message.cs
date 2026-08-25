@@ -21,7 +21,7 @@ internal static partial class SlackCommands
         };
         var replyTo = new Option<string?>("--reply-to")
         {
-            Description = "Thread root message timestamp to reply in a thread (the reply anchor threadRootMessageId). Omit for a DM.",
+            Description = "Durable reply root from the injected Slack anchor. Required by the Server when --dispatch-ref is supplied; optional for general sends.",
         };
         var dispatchRef = new Option<string?>("--dispatch-ref")
         {
@@ -34,6 +34,14 @@ internal static partial class SlackCommands
         var triggeringMessage = new Option<string?>("--triggering-message")
         {
             Description = "Triggering Slack message id from the injected reply anchor. Required by the Server when --dispatch-ref is supplied.",
+        };
+        var workspace = new Option<string?>("--workspace")
+        {
+            Description = "Slack workspace id from the injected reply anchor. Required by the Server when --dispatch-ref is supplied.",
+        };
+        var session = new Option<string?>("--session")
+        {
+            Description = "Owning Session id from the injected reply anchor. Required by the Server when --dispatch-ref is supplied.",
         };
         var text = new Option<string?>("--text")
         {
@@ -53,6 +61,8 @@ internal static partial class SlackCommands
         command.Options.Add(dispatchRef);
         command.Options.Add(connection);
         command.Options.Add(triggeringMessage);
+        command.Options.Add(workspace);
+        command.Options.Add(session);
         command.Options.Add(text);
         command.Options.Add(file);
         command.Options.Add(image);
@@ -127,6 +137,8 @@ internal static partial class SlackCommands
                     conversationId = ctx.GetValue(conversation),
                     threadTs = ctx.GetValue(replyTo),
                     dispatchRef = ctx.GetValue(dispatchRef),
+                    workspaceTeamId = ctx.GetValue(workspace),
+                    sessionId = ctx.GetValue(session),
                     connectionId = ctx.GetValue(connection),
                     triggeringMessageId = ctx.GetValue(triggeringMessage),
                     text = string.IsNullOrWhiteSpace(body) ? null : body,

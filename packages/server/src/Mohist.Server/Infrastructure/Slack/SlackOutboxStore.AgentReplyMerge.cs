@@ -7,6 +7,45 @@ namespace Mohist.Server.Infrastructure.Slack;
 
 public sealed partial class SlackOutboxStore
 {
+    private async Task<SlackOutboxRow?> FindCanonicalAgentReplyAsync(
+        string connectionId,
+        string dispatchRef,
+        CancellationToken ct)
+    {
+        await using var fresh = await _dbFactory.CreateDbContextAsync(ct);
+        return await fresh.SlackOutboxRows.AsNoTracking().FirstOrDefaultAsync(row =>
+            row.OwnerKind == SlackDeliveryOwnerKinds.Connection
+            && row.ConnectionId == connectionId
+            && row.Kind == SlackOutboxKinds.TerminalResult
+            && row.DispatchRef == dispatchRef, ct);
+    }
+
+    private static SlackAgentReplyResult ConflictingAgentReply(
+        string connectionId,
+        string? deliveryId = null,
+        string? dispatchRef = null,
+        string? message = null) =>
+        new(
+            Accepted: false,
+            ConnectionId: connectionId,
+            DeliveryId: deliveryId,
+            DispatchRef: dispatchRef,
+            MergedIntoExisting: true,
+            ConflictingDuplicate: true,
+            Code: "slack_reply_idempotency_conflict",
+            Message: message ?? "A different Slack reply already exists for this turn.");
+
+    private static bool IsAgentReplyPart(SlackDeliveryPayload payload, string text) =>
+        payload.ReplyParts is { Count: > 0 } parts
+            ? parts.Contains(text, StringComparer.Ordinal)
+            : IsSameOrLatestLegacyReplyPart(
+                !string.IsNullOrWhiteSpace(payload.FallbackText) ? payload.FallbackText : payload.Text,
+                text);
+
+    private static bool IsSameOrLatestLegacyReplyPart(string? combined, string text) =>
+        string.Equals(combined, text, StringComparison.Ordinal)
+        || combined?.EndsWith("\n\n" + text, StringComparison.Ordinal) == true;
+
     private static async Task<SlackOutboxRow?> FindReplyProgressRowAsync(
         MohistDbContext db,
         string projectId,
@@ -53,7 +92,10 @@ public sealed partial class SlackOutboxStore
             row.ProjectId == projectId
             && row.ConversationId == conversationId
             && row.Kind == SlackOutboxKinds.TerminalResult
-            && row.State == SlackOutboxStates.Pending);
+            && (row.State == SlackOutboxStates.Pending
+                || dispatchRef != null && (row.State == SlackOutboxStates.Claimed
+                    || row.State == SlackOutboxStates.DeliveryUncertain
+                    || row.State == SlackOutboxStates.Delivered)));
         if (!string.IsNullOrWhiteSpace(dispatchRef))
             query = query.Where(row => row.DispatchRef == dispatchRef);
         if (!string.IsNullOrWhiteSpace(threadTs))
@@ -119,7 +161,12 @@ public sealed partial class SlackOutboxStore
         var previousText = !string.IsNullOrWhiteSpace(previous.FallbackText)
             ? previous.FallbackText
             : previous.Text;
-        if (idempotentRetry && string.Equals(previousText, redactedText, StringComparison.Ordinal))
+        var replyParts = previous.ReplyParts is { Count: > 0 }
+            ? previous.ReplyParts
+            : string.IsNullOrWhiteSpace(previousText) ? [] : [previousText];
+        if (idempotentRetry && IsAgentReplyPart(previous, redactedText))
+            return terminal;
+        if (terminal.State == SlackOutboxStates.Delivered && previous.ProviderMessageIdentity is null)
             return terminal;
         var combined = string.IsNullOrWhiteSpace(previousText)
             ? redactedText
@@ -127,14 +174,20 @@ public sealed partial class SlackOutboxStore
         var segments = SlackFinalReplyRenderer.SegmentReplyText(combined);
         terminal.PayloadJson = JsonSerializer.Serialize(previous with
         {
+            Operation = previous.ProviderMessageIdentity is null
+                ? previous.Operation
+                : SlackDeliveryOperations.ChatUpdate,
             Text = combined,
+            FallbackText = combined,
             Segments = segments.Count > 1 ? segments : null,
+            ReplyParts = replyParts.Append(redactedText).ToArray(),
         });
         terminal.State = SlackOutboxStates.Pending;
         terminal.NextAttemptAt = _timeProvider.GetUtcNow();
         terminal.ClaimedAt = null;
         terminal.ClaimedByAdapterId = null;
         terminal.DeliveryUncertainAt = null;
+        terminal.DeliveredAt = null;
         terminal.LastError = null;
         terminal.UpdatedAt = _timeProvider.GetUtcNow();
         await db.SaveChangesAsync(ct);

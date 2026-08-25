@@ -17,7 +17,7 @@ public sealed partial class CliSlackCommandSpecs
             })));
 
         var exit = await MohistCliCommands.RunAsync(http,
-            ["slack", "message", "send", "--conversation", "C1", "--reply-to", "1710000000.000100", "--connection", "connection_1", "--triggering-message", "1710000000.000200", "--dispatch-ref", "agent-session-followup:session-1:turn-2", "--text", "All green. token=xoxb-leak"],
+            ["slack", "message", "send", "--workspace", "T1", "--conversation", "C1", "--reply-to", "1710000000.000100", "--connection", "connection_1", "--session", "session-1", "--triggering-message", "1710000000.000200", "--dispatch-ref", "agent-session-followup:session-1:turn-2", "--text", "All green. token=xoxb-leak"],
             output, error, fs, executor);
 
         Assert.Equal(0, exit);
@@ -27,6 +27,8 @@ public sealed partial class CliSlackCommandSpecs
         var body = JsonNode.Parse(request.Body!)!;
         Assert.Equal("C1", body["conversationId"]!.GetValue<string>());
         Assert.Equal("1710000000.000100", body["threadTs"]!.GetValue<string>());
+        Assert.Equal("T1", body["workspaceTeamId"]!.GetValue<string>());
+        Assert.Equal("session-1", body["sessionId"]!.GetValue<string>());
         Assert.Equal("connection_1", body["connectionId"]!.GetValue<string>());
         Assert.Equal("1710000000.000200", body["triggeringMessageId"]!.GetValue<string>());
         Assert.Equal("agent-session-followup:session-1:turn-2", body["dispatchRef"]!.GetValue<string>());
@@ -50,5 +52,7 @@ public sealed partial class CliSlackCommandSpecs
         Assert.Null(body["connectionId"]);
         Assert.Null(body["triggeringMessageId"]);
         Assert.Null(body["dispatchRef"]);
+        Assert.Null(body["workspaceTeamId"]);
+        Assert.Null(body["sessionId"]);
     }
 }
