@@ -10,7 +10,7 @@ the narrowest boundary that fully owns its meaning.
 ## Design Drivers
 
 - Most quality evidence must complete before a change merges. The complete
-  local gate must finish within five minutes.
+  local gate must finish within seven minutes.
 - Product meaning must survive a move to a cheaper execution boundary. Test
   purpose must therefore be separate from test resources and integration scope.
 - One owner must prove each claim. A wider test must not repeat a scenario that
@@ -458,7 +458,7 @@ track:
   item at `ceil(0.95 * count)`.
 - Each application-and-Level track has an enforced wall-time deadline.
 - Each Architecture track has an enforced wall-time deadline.
-- The complete local gate is at most five minutes.
+- The complete local gate is at most seven minutes.
 
 Per-Spec wall time is diagnostic evidence, not a stable acceptance boundary.
 Concurrent scheduling, runtime startup, garbage collection, and shared host

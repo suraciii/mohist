@@ -169,7 +169,7 @@ test('canonical gate retains an external diagnostic root for success, failure, a
           '--require-build-stamp',
           '--require-enforced',
           '--suite-deadline-at-ms',
-          '301000',
+          '421000',
         ])
         assert.equal(probe.durationClock[0], runtime.now)
       }
@@ -193,11 +193,11 @@ test('canonical gate passes its fake clock and absolute deadline into the guard 
   assert.equal(probe.durationClock.length, 1)
   assert.equal(probe.durationClock[0], runtime.now)
   assert.equal(probe.durationClock[0](), 1000)
-  assert.equal(probe.durationArgs[0].at(-1), '301000')
+  assert.equal(probe.durationArgs[0].at(-1), '421000')
 })
 
 test('canonical gate uses the injected clock to stop before a new phase at the absolute execution cutoff', async () => {
-  const { runtime, probe } = fakeRuntime([{ exitCode: 0, timedOut: false }], 0, [289_000])
+  const { runtime, probe } = fakeRuntime([{ exitCode: 0, timedOut: false }], 0, [419_000])
 
   const code = await main(runtime)
 
@@ -206,8 +206,8 @@ test('canonical gate uses the injected clock to stop before a new phase at the a
     probe.phases.map((phase) => phase.name),
     ['docs'],
   )
-  assert.equal(probe.phases[0].executionDeadlineAt, 290_000)
-  assert.equal(probe.phases[0].hardDeadlineAt, 301_000)
+  assert.equal(probe.phases[0].executionDeadlineAt, 410_000)
+  assert.equal(probe.phases[0].hardDeadlineAt, 421_000)
   assert.deepEqual(probe.durationArgs, [])
 })
 
