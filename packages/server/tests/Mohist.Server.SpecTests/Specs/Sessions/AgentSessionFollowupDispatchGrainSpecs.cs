@@ -58,7 +58,7 @@ public sealed partial class AgentSessionFollowupGrainSpecs
     }
 
     [Fact]
-    public async Task BeginNextFollowupDispatch_UsesDurableDmRootAndFirstRepresentativeForBatchedSlackInputs()
+    public async Task BeginNextFollowupDispatch_AnchorsDmInputsToTheirOwnTriggeringMessage()
     {
         var (grain, _) = await CreateAttachedSessionAsync("runtime-slack-batched-root");
         var initialProvenance = new AgentSessionInputProvenance(
@@ -97,8 +97,44 @@ public sealed partial class AgentSessionFollowupGrainSpecs
         Assert.Equal(first.InputId, dispatch.InputId);
         Assert.Equal(["first queued input", "second queued input"], dispatch.InputTexts);
         Assert.NotNull(dispatch.Provenance);
-        Assert.Equal("initial-message", dispatch.Provenance!.BoundThreadRootMessageId);
+        Assert.Equal("first-message", dispatch.Provenance!.BoundThreadRootMessageId);
         Assert.Equal("first-message", dispatch.Provenance.MessageId);
+    }
+
+    [Fact]
+    public async Task BeginNextFollowupDispatch_InheritsBoundThreadRootForChannelThreadReplies()
+    {
+        var (grain, _) = await CreateAttachedSessionAsync("runtime-channel-bound-root");
+        var initialProvenance = new AgentSessionInputProvenance(
+            ProviderKind: "slack",
+            WorkspaceId: "T123",
+            ConversationId: "C123",
+            ThreadId: "bound-thread",
+            MemberId: "U123",
+            MessageId: "initial-message",
+            ConnectionId: "connection-1",
+            BoundThreadRootMessageId: "bound-thread");
+        await grain.EnsureInitialLaunchAsync(new EnsureInitialLaunchCommand(
+            InputId: "initial-input",
+            TurnId: "initial-turn",
+            Prompt: "initial prompt",
+            Source: "agent-connection",
+            JobId: "initial-job",
+            Provenance: initialProvenance));
+        await grain.MarkInitialTurnTerminalAsync("initial-job", AgentTurnStatus.Completed, null);
+
+        await grain.AcceptFollowupAsync(new AcceptFollowupCommand(
+            Text: "thread reply input",
+            Source: "agent-session-followup",
+            IdempotencyKey: "channel-thread-reply",
+            Provenance: initialProvenance with { MessageId = "reply-message" }));
+
+        var dispatch = await grain.BeginNextFollowupDispatchAsync();
+
+        Assert.NotNull(dispatch);
+        Assert.NotNull(dispatch!.Provenance);
+        Assert.Equal("bound-thread", dispatch.Provenance!.BoundThreadRootMessageId);
+        Assert.Equal("reply-message", dispatch.Provenance.MessageId);
     }
 
     [Fact]
