@@ -159,6 +159,16 @@ internal sealed record WorkflowGrainArrangement(
         return await Grain.ClaimNextAsync(WorkerId);
     }
 
+    public async Task<string> RunningTaskRunIdAsync() => await ResolveRunningTaskRunIdAsync();
+
+    private async Task<string> ResolveRunningTaskRunIdAsync()
+    {
+        var run = await Store.LoadAsync(RunId) ?? throw new InvalidOperationException("run missing");
+        var runningTask = run.CurrentStage().RunningTask
+            ?? throw new InvalidOperationException("no running task to report");
+        return runningTask.Id;
+    }
+
     /// <summary>Reports the claimed task complete, resolving the persisted task-run id.</summary>
     public async Task<ReportAck> ReportCompletedAsync(WorkItem item) =>
         await ReportTaskAsync(item, TaskReportStatus.Succeeded);
