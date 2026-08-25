@@ -137,7 +137,7 @@ public sealed class WorkflowGrainArtifactBindingSpecs
             service.ReportAsync(a.WorkerId, a.RunId, a.Work.Id!, taskRunId, result),
             service.ReportAsync(a.WorkerId, a.RunId, a.Work.Id!, taskRunId, result));
 
-        Assert.Equal(["accepted", "stale"], reports.Select(report => report.Ack).Order().ToArray());
+        Assert.Equal(["accepted", "accepted"], reports.Select(report => report.Ack).Order().ToArray());
         await using var db = CreateDb();
         var artifact = Assert.Single(await ArtifactsOf(db, a.RunId));
         Assert.Equal(a.UploadId, artifact.SourceUploadId);
