@@ -132,6 +132,24 @@ internal static partial class WorkflowGrainContractSupport
             await db.SaveChangesAsync();
     }
 
+    /// <summary>
+    /// Builds a freshly activated WorkflowGrain over the same persisted run
+    /// and stores, standing in for silo deactivation and reactivation.
+    /// </summary>
+    internal static async Task<WorkflowGrain> ReactivateAsync(
+        WorkflowGrainArrangement arrangement,
+        TimeProvider timeProvider)
+    {
+        var grain = CreateGrain(
+            arrangement.Services,
+            arrangement.Store,
+            arrangement.RunId,
+            timeProvider,
+            arrangement.Operations is null ? null : arrangement.Operations.For);
+        await grain.OnActivateAsync(CancellationToken.None);
+        return grain;
+    }
+
     internal static WorkflowGrain CreateGrain(
         IServiceProvider services,
         IWorkflowRunStore store,
@@ -206,8 +224,13 @@ internal sealed record WorkflowGrainArrangement(
     string WorkerId,
     string ProjectId,
     RunnerUpdateOperationGrainRegistry? Operations = null,
-    int IssueNumber = 1)
+    int IssueNumber = 1,
+    IServiceProvider? Services = null)
 {
+    /// <summary>Scope services backing this arrangement (stores, queriers).</summary>
+    public IServiceProvider Services { get; } = Services
+        ?? throw new InvalidOperationException("arrangement created without services");
+
     public async Task<WorkItem?> AssignAndClaimAsync()
     {
         await Grain.AssignWorkerAsync(WorkerId);
@@ -339,7 +362,8 @@ internal sealed record WorkflowGrainArrangement(
             workerId,
             projectId!,
             operations,
-            issueNumber);
+            issueNumber,
+            scope.ServiceProvider);
     }
 
     internal static readonly DateTimeOffset Fixed = new(2026, 1, 1, 0, 0, 0, TimeSpan.Zero);
