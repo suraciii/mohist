@@ -24,7 +24,9 @@ env:
 jobs:
   server:
     name: Server
-    runs-on: ubuntu-latest
+    # 8 vCPU: the Server application scope runs unit+arch+spec tracks
+    # under one suite clock; 4 vCPU left it structurally over budget (#722).
+    runs-on: ubuntu-latest-8-cores
     timeout-minutes: 8
     env:
       TMPDIR: /tmp/mohist-scope
