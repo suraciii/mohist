@@ -66,7 +66,9 @@ public sealed record TaskReport(
     [property: Id(5)] IReadOnlyList<RuntimeTaskInput>? AddTasks = null,
     [property: Id(6)] ExecutionError? Error = null,
     [property: Id(7)] IReadOnlyList<string>? ArtifactUploadIds = null,
-    [property: Id(8)] string? TaskRunId = null);
+    [property: Id(8)] string? TaskRunId = null,
+    [property: Id(9)] string? TerminalResultFingerprint = null,
+    [property: Id(10)] AgentExecutionBinding? TerminalExecutionBinding = null);
 
 [GenerateSerializer]
 public sealed record CheckReport(

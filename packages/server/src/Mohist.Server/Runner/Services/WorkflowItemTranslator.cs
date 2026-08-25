@@ -645,7 +645,11 @@ public sealed class WorkflowItemTranslator : IScopedService
                 Output: null,
                 Artifacts: null,
                 Detail: shapeError,
-                Error: new ExecutionError("unexpected-error", shapeError)));
+                Error: new ExecutionError("unexpected-error", shapeError),
+                ArtifactUploadIds: result.ArtifactUploadIds is { Length: > 0 }
+                    ? result.ArtifactUploadIds.ToArray()
+                    : null,
+                TerminalResultFingerprint: Mohist.Server.Runner.Grains.RuntimeRecoveryReceiptFingerprint.For(result)));
         }
 
         return new InboundReport.Task(new TaskReport(
@@ -658,7 +662,8 @@ public sealed class WorkflowItemTranslator : IScopedService
             Error: result.Error,
             ArtifactUploadIds: result.ArtifactUploadIds is { Length: > 0 }
                 ? result.ArtifactUploadIds.ToArray()
-                : null));
+                : null,
+            TerminalResultFingerprint: Mohist.Server.Runner.Grains.RuntimeRecoveryReceiptFingerprint.For(result)));
     }
 
     private static InboundReport TranslateChecksResult(WorkItem item, WorkResult result)
