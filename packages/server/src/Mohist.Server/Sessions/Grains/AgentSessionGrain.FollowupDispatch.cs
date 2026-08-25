@@ -135,13 +135,7 @@ public sealed partial class AgentSessionGrain
             .OrderBy(input => input.Sequence)
             .FirstOrDefault(input => !string.IsNullOrWhiteSpace(input.JobId));
         var initialProvenance = initial?.Provenance;
-        var root = !string.IsNullOrWhiteSpace(initialProvenance?.BoundThreadRootMessageId)
-            ? initialProvenance.BoundThreadRootMessageId
-            : !string.IsNullOrWhiteSpace(initialProvenance?.ThreadId)
-                ? initialProvenance.ThreadId
-                : initialProvenance?.MessageId;
-        if (string.IsNullOrWhiteSpace(root))
-            throw new InvalidOperationException($"AgentSession {session.Id} Slack follow-up has no durable bound thread root.");
+        var root = initialProvenance?.BoundThreadRootMessageId;
 
         var representative = turnInputs[0].Provenance
             ?? throw new InvalidOperationException($"AgentSession {session.Id} Slack follow-up representative has no provenance.");
@@ -152,6 +146,16 @@ public sealed partial class AgentSessionGrain
             || string.IsNullOrWhiteSpace(representative.ConnectionId))
             throw new InvalidOperationException($"AgentSession {session.Id} Slack follow-up representative provenance is incomplete.");
 
+        // Channel-thread replies inherit the session's durable bound root so
+        // every delivery lands in the bound thread. DM inputs carry no channel
+        // binding: anchor each follow-up to its own triggering message so the
+        // terminal delivery replaces the progress projection in place instead
+        // of drifting into the session's original message thread.
+        if (string.IsNullOrWhiteSpace(representative.ThreadId))
+            return representative with { BoundThreadRootMessageId = representative.MessageId };
+
+        if (string.IsNullOrWhiteSpace(root))
+            throw new InvalidOperationException($"AgentSession {session.Id} Slack follow-up has no durable bound thread root.");
         return representative with { BoundThreadRootMessageId = root };
     }
 }
