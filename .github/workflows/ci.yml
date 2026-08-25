@@ -25,7 +25,9 @@ jobs:
   server:
     name: Server
     runs-on: ubuntu-latest
-    timeout-minutes: 8
+    # Outer failsafe: must exceed the suite deadline (420 s) plus checkout,
+    # toolchain setup, and evidence capture.
+    timeout-minutes: 12
     env:
       TMPDIR: /tmp/mohist-scope
     steps:

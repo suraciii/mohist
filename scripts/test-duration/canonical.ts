@@ -11,7 +11,9 @@ import { resolveSpawnCommand } from './spawn-command.js'
 import { nativeTimeSource } from './time.js'
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..')
-const suiteDeadlineMs = 300_000
+// Must match suiteDeadlineMs in test-duration.config.jsonc: the canonical
+// plan validates against the same envelope the executors enforce.
+const suiteDeadlineMs = 420_000
 const killGraceMs = 5_000
 
 export interface PhaseResult {
