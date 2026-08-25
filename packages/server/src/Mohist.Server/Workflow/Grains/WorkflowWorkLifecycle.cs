@@ -48,8 +48,18 @@ internal sealed class WorkflowWorkLifecycle
 
         if (report.Status == TaskReportStatus.Succeeded)
         {
+            if (currentTask is not null
+                && report.TerminalExecutionBinding is not null
+                && IsAgentTask(currentTask.Uses)
+                && currentTask.AgentResultSettlement is null
+                && currentTask.TerminalResultFingerprint is null)
+            {
+                return [];
+            }
             if (currentTask is not null)
             {
+                currentTask.TerminalResultFingerprint = report.TerminalResultFingerprint;
+                currentTask.TerminalExecutionBinding = report.TerminalExecutionBinding;
                 currentTask.Output = report.Output;
                 currentTask.Error = report.Error;
             }
@@ -84,8 +94,18 @@ internal sealed class WorkflowWorkLifecycle
         }
         else
         {
+            if (currentTask is not null
+                && report.TerminalExecutionBinding is not null
+                && IsAgentTask(currentTask.Uses)
+                && currentTask.AgentResultSettlement is null
+                && currentTask.TerminalResultFingerprint is null)
+            {
+                return [];
+            }
             if (currentTask is not null)
             {
+                currentTask.TerminalResultFingerprint = report.TerminalResultFingerprint;
+                currentTask.TerminalExecutionBinding = report.TerminalExecutionBinding;
                 currentTask.Output = report.Output;
                 currentTask.Error = report.Error;
             }
@@ -109,6 +129,11 @@ internal sealed class WorkflowWorkLifecycle
     /// attempt identity (<see cref="TaskRun.Id"/> / <see cref="TaskRun.WorkId"/>),
     /// and the failure or timeout diagnostics when applicable.
     /// </summary>
+    private static bool IsAgentTask(string? uses) =>
+        string.Equals(uses, "mohist/agent", StringComparison.Ordinal)
+        || string.Equals(uses, "mohist/opencode", StringComparison.Ordinal)
+        || string.Equals(uses, "mohist/pi", StringComparison.Ordinal);
+
     private static void ApplyLaneOutcome(TaskRun? task, TaskReport report, DateTimeOffset now)
     {
         if (task?.Lane is null) return;

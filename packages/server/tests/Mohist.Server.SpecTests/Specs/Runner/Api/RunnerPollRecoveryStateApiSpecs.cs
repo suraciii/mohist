@@ -96,6 +96,76 @@ public sealed class RunnerPollRecoveryStateApiSpecs
     }
 
     [Fact]
+    public async Task Report_StaleWorkflowResultIsNotTracked()
+    {
+        using var report = await _fixture.Client.PostAsJsonAsync($"/api/runner/stale-{Guid.NewGuid():N}/report", new
+        {
+            workflowRunId = $"missing-report-{Guid.NewGuid():N}",
+            workId = "task-1",
+            status = "completed",
+        });
+
+        Assert.Equal(HttpStatusCode.OK, report.StatusCode);
+        var body = await report.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.False(body.GetProperty("tracked").GetBoolean());
+        Assert.Equal("missing-workflow", body.GetProperty("reason").GetString());
+    }
+
+    [Fact]
+    public async Task Report_ExistingWorkflowStaleResultIsNotTracked()
+    {
+        var projectId = $"runner-stale-existing-{Guid.NewGuid():N}";
+        var workflowRunId = $"wr-stale-existing-{Guid.NewGuid():N}";
+        var runnerId = $"runner-stale-existing-{Guid.NewGuid():N}";
+        var runner = _fixture.Grains.GetGrain<IRunnerGrain>(runnerId);
+
+        try
+        {
+            await SeedWorkflowAsync(
+                projectId,
+                workflowRunId,
+                new RecoveryDefinition(1, []),
+                uses: "spec/task");
+            await runner.RegisterAsync(new RunnerInfo(runnerId, ["spec/*"], "test-host", projectId));
+
+            var fresh = await PollAsync(runnerId);
+            var workId = fresh.GetProperty("workId").GetString();
+            var taskRunId = fresh.GetProperty("taskRunId").GetString();
+            Assert.False(string.IsNullOrWhiteSpace(workId));
+            Assert.False(string.IsNullOrWhiteSpace(taskRunId));
+
+            using var firstReport = await _fixture.Client.PostAsJsonAsync($"/api/runner/{runnerId}/report", new
+            {
+                workflowRunId,
+                workId,
+                taskRunId,
+                status = "completed",
+            });
+            Assert.Equal(HttpStatusCode.OK, firstReport.StatusCode);
+            var firstBody = await firstReport.Content.ReadFromJsonAsync<JsonElement>();
+            Assert.True(firstBody.GetProperty("tracked").GetBoolean());
+            Assert.Equal("accepted", firstBody.GetProperty("reason").GetString());
+
+            using var staleReport = await _fixture.Client.PostAsJsonAsync($"/api/runner/{runnerId}/report", new
+            {
+                workflowRunId,
+                workId,
+                taskRunId,
+                status = "failed",
+                message = "conflicting late result",
+            });
+            Assert.Equal(HttpStatusCode.OK, staleReport.StatusCode);
+            var staleBody = await staleReport.Content.ReadFromJsonAsync<JsonElement>();
+            Assert.False(staleBody.GetProperty("tracked").GetBoolean());
+            Assert.Equal("stale", staleBody.GetProperty("reason").GetString());
+        }
+        finally
+        {
+            await runner.UnregisterAsync();
+        }
+    }
+
+    [Fact]
     public async Task Report_AcceptsStructuredActionOutput()
     {
         using var report = await _fixture.Client.PostAsJsonAsync($"/api/runner/report-output-{Guid.NewGuid():N}/report", new

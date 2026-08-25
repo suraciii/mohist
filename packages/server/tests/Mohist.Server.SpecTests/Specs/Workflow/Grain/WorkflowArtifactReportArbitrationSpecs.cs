@@ -148,6 +148,29 @@ public sealed class WorkflowArtifactReportArbitrationSpecs : WorkflowGrainSpecs
     }
 
     [Fact]
+    public async Task TerminalTask_IdenticalReplayIsAcceptedWithoutDuplicateEvents()
+    {
+        await StartWorkflowAsync(SingleStage(
+            tasks: [new TaskDefinition("task-1", "Task 1", "spec/task")],
+            checks: []));
+        var (work, runnerId) = await PollWorkAnyAsync();
+        var service = Services.GetRequiredService<WorkflowReportService>();
+        var result = new WorkResult(
+            "completed",
+            "same result",
+            ExitCode: 0);
+
+        var first = await service.ReportAsync(runnerId, work.WorkflowRunId, work.WorkId, work.TaskRunId, result);
+        Assert.Equal("accepted", first.Ack);
+        var eventCount = (await EventStore.ListAsync(work.WorkflowRunId)).Count;
+
+        var replay = await service.ReportAsync(runnerId, work.WorkflowRunId, work.WorkId, work.TaskRunId, result);
+        Assert.Equal("accepted", replay.Ack);
+        Assert.Equal(eventCount, (await EventStore.ListAsync(work.WorkflowRunId)).Count);
+        Assert.Equal("Completed", await Grains.GetGrain<IWorkflowGrain>(work.WorkflowRunId).GetRunStatusAsync());
+    }
+
+    [Fact]
     public async Task TerminalTask_ConflictingReportIsStaleWithoutOutputFollowUpOrArtifactSideEffects()
     {
         await StartWorkflowAsync(SingleStage(

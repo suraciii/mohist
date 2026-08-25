@@ -636,14 +636,30 @@ public partial class WorkflowGrain
             // A Workflow Agent result must prove the complete execution
             // identity, including the binding persisted by the same turn.
             await ReconcileAgentResultSettlementIfDueAsync();
-            var bound = _run.FindBoundAgentExecution(agentBinding.TaskRunId, workId, workerId);
+            var bound = _run.FindBoundAgentExecution(agentBinding.TaskRunId, workId, workerId)
+                ?? _run.FindTerminalBoundAgentExecution(agentBinding.TaskRunId, workId, workerId);
             if (bound is null || !MatchesExecutionBinding(bound, agentBinding))
                 return ReportAck.Stale;
         }
 
         var activeWork = _run.FindReportableWork(report.TaskRunId, workId, workerId);
         if (activeWork is null || !activeWork.IsTask || activeWork.TaskRunId is null)
-            return ReportAck.Stale;
+        {
+            var terminalWork = _run.FindTerminalReportAttempt(report.TaskRunId, workId, workerId);
+            if (terminalWork?.TaskRunId is null)
+                return ReportAck.Stale;
+
+            var terminalTask = _run.Stages
+                .Where(stage => string.Equals(stage.Id, terminalWork.Item.Stage, StringComparison.Ordinal))
+                .SelectMany(stage => stage.Tasks)
+                .Single(candidate => string.Equals(candidate.Id, terminalWork.TaskRunId, StringComparison.Ordinal));
+            return terminalTask.TerminalResultFingerprint is not null
+                && report.TerminalResultFingerprint is not null
+                && string.Equals(terminalTask.TerminalResultFingerprint, report.TerminalResultFingerprint, StringComparison.Ordinal)
+                && (agentBinding is null || terminalTask.TerminalExecutionBinding is not null)
+                ? ReportAck.Accepted
+                : ReportAck.Stale;
+        }
 
         var task = _run.Stages
             .Where(stage => string.Equals(stage.Id, activeWork.Item.Stage, StringComparison.Ordinal))
@@ -764,13 +780,14 @@ public partial class WorkflowGrain
             _log.LogWarning(
                 "run {run} work {work} artifact binding failed: {reason}",
                 GrainKey, activeWork.WorkId, bindResult.Error);
-            return new TaskReport(
-                activeWork.WorkId,
-                TaskReportStatus.Failed,
-                Output: null,
-                Artifacts: null,
-                Detail: bindResult.Error ?? "artifact binding failed",
-                Error: report.Error);
+            return report with
+            {
+                Status = TaskReportStatus.Failed,
+                Output = null,
+                Artifacts = null,
+                Detail = bindResult.Error ?? "artifact binding failed",
+                Error = report.Error,
+            };
         }
 
         var boundArtifacts = bindResult.ArtifactRecordedEvents
@@ -951,28 +968,6 @@ public partial class WorkflowGrain
                 receipt.TaskRunId,
                 RunnerUpdateWorkStatus.Settled);
     }
-
-    private static bool MatchesExecutionBinding(
-        AgentExecutionBinding expected,
-        AgentExecutionBinding actual) =>
-        string.Equals(expected.TaskRunId, actual.TaskRunId, StringComparison.Ordinal)
-        && string.Equals(expected.WorkId, actual.WorkId, StringComparison.Ordinal)
-        && string.Equals(expected.RunnerId, actual.RunnerId, StringComparison.Ordinal)
-        && string.Equals(expected.AgentSessionId, actual.AgentSessionId, StringComparison.Ordinal)
-        && string.Equals(expected.AgentTurnId, actual.AgentTurnId, StringComparison.Ordinal)
-        && string.Equals(expected.Runtime, actual.Runtime, StringComparison.Ordinal)
-        && string.Equals(expected.RuntimeSessionId, actual.RuntimeSessionId, StringComparison.Ordinal);
-
-    private static bool MatchesReceiptBinding(
-        AgentResultSettlement settlement,
-        RuntimeRecoveryReceipt receipt) =>
-        string.Equals(settlement.TaskRunId, receipt.TaskRunId, StringComparison.Ordinal)
-        && string.Equals(settlement.WorkId, receipt.WorkId, StringComparison.Ordinal)
-        && string.Equals(settlement.RunnerId, receipt.RunnerId, StringComparison.Ordinal)
-        && string.Equals(settlement.AgentSessionId, receipt.AgentSessionId, StringComparison.Ordinal)
-        && string.Equals(settlement.AgentTurnId, receipt.AgentTurnId, StringComparison.Ordinal)
-        && string.Equals(settlement.Runtime, receipt.Runtime, StringComparison.Ordinal)
-        && string.Equals(settlement.RuntimeSessionId, receipt.RuntimeSessionId, StringComparison.Ordinal);
 
     private async Task DeleteSnapshotBestEffortAsync(string workId)
     {

@@ -243,13 +243,19 @@ public sealed class WorkflowGrainAgentResultSettlementSpecs
         Assert.DoesNotContain(await a.Events.ListAsync(a.RunId), entry =>
             entry.Envelope.Type == EventCatalog.ReverseDns.TaskFailed);
 
-        Assert.Equal(("stale", "Completed"), await service.ReportAsync(
+        var eventCount = (await a.Events.ListAsync(a.RunId)).Count;
+        Assert.Equal(("accepted", "Completed"), await service.ReportAsync(
             a.WorkerId, a.RunId, a.Work.Id!, a.TaskRunId, receipt,
             CancellationToken.None,
             binding.AgentSessionId,
             binding.AgentTurnId,
             binding.Runtime,
             binding.RuntimeSessionId));
+        Assert.Equal(eventCount, (await a.Events.ListAsync(a.RunId)).Count);
+
+        TimeProvider.Advance(TimeSpan.FromMinutes(10));
+        await a.Grain.ReceiveReminder(WorkflowGrain.AgentResultSettlementReminderName, default);
+        Assert.Equal(eventCount, (await a.Events.ListAsync(a.RunId)).Count);
     }
 
     [Fact]

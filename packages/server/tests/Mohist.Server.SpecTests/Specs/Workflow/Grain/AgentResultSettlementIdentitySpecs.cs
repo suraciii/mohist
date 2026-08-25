@@ -14,6 +14,76 @@ namespace Mohist.Server.SpecTests.Specs.Workflow.Grain;
 public sealed partial class AgentResultSettlementSpecs
 {
     [Fact]
+    public async Task TerminalAgentReplay_RequiresTheFrozenBindingAndOriginalResult()
+    {
+        var workflow = await StartWorkflowAsync(SingleStage(
+            tasks: [new TaskDefinition("agent", "Agent", "mohist/opencode")],
+            checks: []));
+        var (work, runnerId) = await PollWorkAnyAsync();
+        var task = Assert.Single((await LoadRunAsync(_workflowId!)).CurrentStage().Tasks);
+        var binding = new AgentExecutionBinding(
+            task.Id,
+            work.WorkId,
+            runnerId,
+            "session-terminal-replay",
+            "turn-terminal-replay",
+            "opencode",
+            "runtime-terminal-replay");
+        var service = Services.GetRequiredService<WorkflowReportService>();
+        var result = new WorkResult(
+            "PASS",
+            "authoritative result",
+            Output: System.Text.Json.JsonSerializer.SerializeToElement(new { ok = true }),
+            ExitCode: 0);
+
+        Assert.Equal(ReportAck.Accepted, await workflow.BindAgentExecutionAsync(binding));
+        Assert.Equal("accepted", (await service.ReportAsync(
+            runnerId,
+            _workflowId!,
+            work.WorkId,
+            work.TaskRunId,
+            result,
+            CancellationToken.None,
+            binding.AgentSessionId,
+            binding.AgentTurnId,
+            binding.Runtime,
+            binding.RuntimeSessionId)).Ack);
+        var eventCount = (await EventStore.ListAsync(_workflowId!)).Count;
+
+        var wrongBinding = binding with { AgentTurnId = "wrong-turn" };
+        Assert.Equal("stale", (await service.ReportAsync(
+            runnerId,
+            _workflowId!,
+            work.WorkId,
+            work.TaskRunId,
+            result,
+            CancellationToken.None,
+            wrongBinding.AgentSessionId,
+            wrongBinding.AgentTurnId,
+            wrongBinding.Runtime,
+            wrongBinding.RuntimeSessionId)).Ack);
+
+        Assert.Equal("stale", (await service.ReportAsync(
+            runnerId,
+            _workflowId!,
+            work.WorkId,
+            work.TaskRunId,
+            result with { Message = "conflicting result" },
+            CancellationToken.None,
+            binding.AgentSessionId,
+            binding.AgentTurnId,
+            binding.Runtime,
+            binding.RuntimeSessionId)).Ack);
+
+        Assert.Equal(eventCount, (await EventStore.ListAsync(_workflowId!)).Count);
+        var completed = await LoadRunAsync(_workflowId!);
+        var completedTask = Assert.Single(completed.CurrentStage().Tasks);
+        Assert.Equal(TaskRunStatus.Completed, completedTask.Status);
+        Assert.Null(completedTask.AgentResultSettlement);
+        Assert.Equal(binding, completedTask.TerminalExecutionBinding);
+    }
+
+    [Fact]
     public async Task BlockedSettlement_FencesMismatchedLateReportLeavingBlockedStateUntouched()
     {
         // Issue-628 T-005: any late authoritative report whose

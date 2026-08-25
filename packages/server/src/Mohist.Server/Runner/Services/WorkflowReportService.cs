@@ -65,6 +65,13 @@ public sealed class WorkflowReportService : IScopedService
 
         var workflow = _grains.GetGrain<IWorkflowGrain>(workflowRunId);
         var report = _translator.TranslateResult(item, result, workflowRunId);
+        if (report is WorkflowItemTranslator.InboundReport.Task terminalTask
+            && agentBinding is not null)
+        {
+            report = new WorkflowItemTranslator.InboundReport.Task(
+                terminalTask.Value with { TerminalExecutionBinding = agentBinding });
+        }
+
         if (report is WorkflowItemTranslator.InboundReport.Unknown unknown && item.IsTask)
         {
             // T-005: Unknown is an observation, never an inferred task failure. Agent
