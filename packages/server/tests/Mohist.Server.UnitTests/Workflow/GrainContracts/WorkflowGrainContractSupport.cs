@@ -201,10 +201,12 @@ internal sealed record WorkflowGrainArrangement(
     IDispatchSnapshotStore Snapshots,
     IEventStore Events,
     WorkflowQuerier Querier,
+    WorkflowItemTranslator Translator,
     string RunId,
     string WorkerId,
     string ProjectId,
-    RunnerUpdateOperationGrainRegistry? Operations = null)
+    RunnerUpdateOperationGrainRegistry? Operations = null,
+    int IssueNumber = 1)
 {
     public async Task<WorkItem?> AssignAndClaimAsync()
     {
@@ -280,13 +282,14 @@ internal sealed record WorkflowGrainArrangement(
         System.Text.Json.JsonElement? output,
         IReadOnlyList<RuntimeTaskInput>? addTasks,
         TaskReportStatus status = TaskReportStatus.Succeeded,
-        IReadOnlyList<string>? artifactUploadIds = null)
+        IReadOnlyList<string>? artifactUploadIds = null,
+        string? detail = null)
     {
         var taskRunId = await BuildReportTaskRunIdAsync();
         return await Grain.ReceiveTaskReportAsync(
             WorkerId,
             item.Id!,
-            new TaskReport(item.Id!, status, Output: output, Artifacts: null, AddTasks: addTasks, ArtifactUploadIds: artifactUploadIds, TaskRunId: taskRunId));
+            new TaskReport(item.Id!, status, Output: output, Artifacts: null, Detail: detail, AddTasks: addTasks, ArtifactUploadIds: artifactUploadIds, TaskRunId: taskRunId));
     }
 
     public static async Task<WorkflowGrainArrangement> CreateAsync(
@@ -295,7 +298,8 @@ internal sealed record WorkflowGrainArrangement(
         WorkflowDefinition definition,
         TimeProvider timeProvider,
         string workerId = "worker-1",
-        string? projectId = null)
+        string? projectId = null,
+        int issueNumber = 1)
     {
         // Project identity is derived from the template content so specs
         // that share a definition shape also share one seeded profile row;
@@ -305,6 +309,7 @@ internal sealed record WorkflowGrainArrangement(
         var scope = fixture.Services.CreateAsyncScope();
         var store = scope.ServiceProvider.GetRequiredService<IWorkflowRunStore>();
         var querier = scope.ServiceProvider.GetRequiredService<WorkflowQuerier>();
+        var translator = scope.ServiceProvider.GetRequiredService<WorkflowItemTranslator>();
         // Always available: recovery-receipt handling consults the runner
         // update operation state even when no fence exists.
         var operations = new RunnerUpdateOperationGrainRegistry(
@@ -317,17 +322,19 @@ internal sealed record WorkflowGrainArrangement(
             timeProvider,
             operations is null ? null : operations.For);
         await grain.OnActivateAsync(CancellationToken.None);
-        await grain.EnsureStartedAsync(new WorkflowIssueContext(projectId, 1, null));
+        await grain.EnsureStartedAsync(new WorkflowIssueContext(projectId, issueNumber, null));
         return new WorkflowGrainArrangement(
             grain,
             store,
             scope.ServiceProvider.GetRequiredService<IDispatchSnapshotStore>(),
             scope.ServiceProvider.GetRequiredService<IEventStore>(),
             querier,
+            translator,
             runId,
             workerId,
             projectId!,
-            operations);
+            operations,
+            issueNumber);
     }
 
     internal static readonly DateTimeOffset Fixed = new(2026, 1, 1, 0, 0, 0, TimeSpan.Zero);
