@@ -517,13 +517,16 @@ Mohist App.
   connection state, and one next action. Missing provisioning credentials point
   to `setup`. An incomplete Agent installation points to the same
   `install-agent` command.
-- `mo slack message send --conversation <conversation-id> [--reply-to <thread-root-ts>] --text <body> [--image <url> | --file <path>]`
+- `mo slack message send --conversation <conversation-id> [--workspace <workspace-id>] [--reply-to <thread-root-ts>] [--connection <connection-id>] [--session <session-id>] [--triggering-message <message-id>] [--dispatch-ref <reply-anchor-ref>] --text <body> [--image <url> | --file <path>]`
   lets an Agent speak in Slack. It renders Markdown body text as native Slack
   formatting, including bold, inline code, code blocks, lists, and quotes.
   Tables and headings degrade to readable plain text. `--image` embeds a public
   image URL. `--file` uploads a local image of at most 10 MB. The options are
   mutually exclusive. `--text -` reads the body from stdin and preserves line
-  breaks. `--text` may be omitted when an image is attached.
+  breaks. `--text` may be omitted when an image is attached. Anchored Agent
+  replies pass `--workspace`, `--connection`, `--session`, `--reply-to`,
+  `--triggering-message`, and `--dispatch-ref`; general sends may omit the
+  complete anchor.
 - `mo slack claim-owner <id>` generates and displays a setup claim, expiration,
   and Slack direct-message step only after identity verification. A second call
   invalidates the old claim immediately.

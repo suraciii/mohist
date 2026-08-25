@@ -634,7 +634,8 @@ public sealed record AgentTurnRecord(
     [property: Id(6)] DateTime? RecordedAt = null,
     [property: Id(7)] DateTime? UpdatedAt = null,
     [property: Id(8)] SessionWorkflowExecutionBinding? WorkflowExecution = null,
-    [property: Id(9)] AgentWorkInterruptionTransition? Interruption = null);
+    [property: Id(9)] AgentWorkInterruptionTransition? Interruption = null,
+    [property: Id(10)] string? OperationId = null);
 
 /// <summary>
 /// Immutable Workflow execution identity frozen on the Agent turn before its

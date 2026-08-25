@@ -135,7 +135,11 @@ public sealed partial class AgentSessionGrain
             .OrderBy(input => input.Sequence)
             .FirstOrDefault(input => !string.IsNullOrWhiteSpace(input.JobId));
         var initialProvenance = initial?.Provenance;
-        var root = initialProvenance?.BoundThreadRootMessageId;
+        var root = !string.IsNullOrWhiteSpace(initialProvenance?.BoundThreadRootMessageId)
+            ? initialProvenance.BoundThreadRootMessageId
+            : !string.IsNullOrWhiteSpace(initialProvenance?.ThreadId)
+                ? initialProvenance.ThreadId
+                : initialProvenance?.MessageId;
         if (string.IsNullOrWhiteSpace(root))
             throw new InvalidOperationException($"AgentSession {session.Id} Slack follow-up has no durable bound thread root.");
 

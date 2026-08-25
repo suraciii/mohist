@@ -90,6 +90,7 @@ public sealed partial class SlackOutboxStore
                 inputDispatchRef,
                 existingPayload.ProviderMessageIdentity,
                 anchor.StatusDispatchRef,
+                progressDispatchRef,
                 imageUrl,
                 fileName,
                 fileContentBase64);
@@ -122,7 +123,7 @@ public sealed partial class SlackOutboxStore
             && row.ConnectionId == anchor.EnrollmentId
             && row.WorkspaceTeamId == anchor.Source.WorkspaceTeamId
             && row.ConversationId == anchor.Source.ConversationId
-            && row.ThreadTs == anchor.ThreadRootMessageId
+            && (row.ThreadTs ?? anchor.Source.MessageTs) == anchor.ThreadRootMessageId
             && row.DispatchRef == progressDispatchRef
             && row.Kind == SlackOutboxKinds.ReplaceableProgress, ct);
         if (progress is not null && progress.State != SlackOutboxStates.Pending)
@@ -142,6 +143,7 @@ public sealed partial class SlackOutboxStore
             inputDispatchRef,
             previousPayload?.ProviderMessageIdentity,
             anchor.StatusDispatchRef,
+            progress is null ? null : progressDispatchRef,
             imageUrl,
             fileName,
             fileContentBase64);
@@ -220,6 +222,7 @@ public sealed partial class SlackOutboxStore
         string dispatchRef,
         SlackProviderMessageIdentity? providerIdentity,
         string statusDispatchRef,
+        string? progressDispatchRef,
         string? imageUrl,
         string? fileName,
         string? fileContentBase64)
@@ -231,6 +234,7 @@ public sealed partial class SlackOutboxStore
                 text,
                 ClientMessageId: dispatchRef,
                 StatusDispatchRef: statusDispatchRef,
+                ProgressDispatchRef: progressDispatchRef,
                 FileName: fileName,
                 FileContentBase64: fileContentBase64);
         }
@@ -243,10 +247,11 @@ public sealed partial class SlackOutboxStore
                 ClientMessageId: dispatchRef,
                 ProviderMessageIdentity: providerIdentity,
                 StatusDispatchRef: statusDispatchRef,
+                ProgressDispatchRef: progressDispatchRef,
                 Blocks: BuildImageBlocks(text, imageUrl));
         }
 
-        return BuildReplyPayload(text, dispatchRef, providerIdentity, statusDispatchRef);
+        return BuildReplyPayload(text, dispatchRef, providerIdentity, statusDispatchRef, progressDispatchRef);
     }
 
     private static bool SameReplyContent(SlackDeliveryPayload existing, SlackDeliveryPayload requested) =>
@@ -258,6 +263,9 @@ public sealed partial class SlackOutboxStore
 
     private static string ReplyDispatchRef(string connectionId, string conversationId, string? threadTs) =>
         $"slack-reply:{connectionId}:{conversationId}:{threadTs ?? "dm"}:terminal";
+
+    private static string ReplyDispatchRef(string logicalDispatchRef) =>
+        $"slack-reply:{logicalDispatchRef}:terminal";
 
     private static string ReplyImageDispatchRef(string connectionId, string conversationId, string? threadTs) =>
         $"slack-reply:{connectionId}:{conversationId}:{threadTs ?? "dm"}:image";

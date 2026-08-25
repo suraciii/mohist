@@ -614,16 +614,25 @@ matches Buzz `buzz messages send`:
 
 ```text literal
 mo slack message send --conversation <id> --text "<body>"
-mo slack message send --conversation <id> --reply-to <ts> --text "<body>"        # reply in thread
+mo slack message send --workspace <workspace-id> --conversation <id> --reply-to <ts> --connection <connection-id> --session <session-id> --triggering-message <message-id> --dispatch-ref <ref> --text "<body>"        # anchored Agent reply
 printf 'long body\n\nmultiple paragraphs\n' | mo slack message send --conversation <id> --text -
 mo slack message send --conversation <id> --text "see this screenshot" --file ./screenshot.png
 mo slack message send --conversation <id> --text "architecture diagram" --image https://example.com/diagram.png
 ```
 
 - **Explicit destination.** `--conversation` is required; `--reply-to` is the
-  optional thread anchor. The Agent reads both from the injected reply anchor
+  durable root assertion for anchored replies and optional for general sends. The Agent reads both from the injected reply anchor
   instead of choosing from memory. Sending elsewhere states that intent
   explicitly.
+- **Explicit ownership and dispatch identity.** An Agent also passes the
+  injected `--workspace`, `--connection`, `--session`, `--reply-to`,
+  `--triggering-message`, and `--dispatch-ref`. Server validates the complete
+  anchor against durable Session provenance and its Turn before it scopes terminal
+  reply selection and coalescing to that logical Turn. Distinct sends are accepted
+  only while the Turn is active; an identical retry after terminal completion still
+  returns the committed delivery intent. Another Connection or pending Turn in the
+  same DM or thread cannot receive or merge the answer. Human-authored sends without
+  an execution anchor retain conversation-scoped behavior.
 - **Body through `--text`.** A string, or `-` for stdin so shell escaping does
   not consume newlines. The Agent writes standard Markdown; the renderer
   converts it to Slack mrkdwn and degrades unsupported tables and headings to
@@ -638,10 +647,13 @@ mo slack message send --conversation <id> --text "architecture diagram" --image 
 - **Success means outbox acknowledgement.** Send synchronously commits to the
   outbox and confirms that reliable delivery was accepted, not that Slack
   displayed it. Eventual Slack failure surfaces as Delivery uncertain without
-  reporting back into Agent execution.
+  reporting back into Agent execution. A different payload cannot mutate a
+  claimed or delivery-uncertain intent and is rejected instead of acknowledged.
 - **Multiple sends coalesce.** Within one Turn, Server coalesces sends into one
-  final answer for that dispatch reference. The invariant remains at most one
-  final answer per input.
+  final answer for that dispatch reference. Once delivered, an extension that
+  would exceed Slack's single-message limit is rejected rather than duplicating
+  the original through non-convergent overflow posts. The invariant remains at
+  most one final answer per input.
 - **Scope.** No broadcast across channels and no distinct message types.
   `mo slack message` is a command group; only `send` is implemented.
 

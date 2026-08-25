@@ -144,6 +144,7 @@ public interface IAgentSessionGrain : IGrainWithStringKey
 
     Task<IReadOnlyList<AgentTurnRecord>> ListTurnsAsync();
     Task<IReadOnlyList<AgentSessionInputRecord>> ListInputsAsync();
+    Task<SlackReplyAnchorValidationResult> ValidateSlackReplyAnchorAsync(SlackReplyAnchorValidationRequest request);
 
     /// <summary>
     /// Create a scheduled input (or replay an existing schedule for the

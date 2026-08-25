@@ -4,6 +4,7 @@ using System.Text.Json;
 using Microsoft.Extensions.DependencyInjection;
 using Mohist.Server.Agent.Domain;
 using Mohist.Server.Agent.Grains;
+using Mohist.Server.Contracts;
 using Mohist.Server.Infrastructure;
 using Mohist.Server.Infrastructure.Data.Agent;
 using Mohist.Server.Infrastructure.Data.Db;
@@ -15,6 +16,7 @@ using Mohist.Server.Runner.Grains;
 using Mohist.Server.Runner.Services;
 using Mohist.Server.Sessions.Domain;
 using Mohist.Server.Sessions.Grains;
+using Mohist.Server.Sessions.Services;
 using Mohist.Server.Slack.Domain;
 using Mohist.Server.SpecTests.Support;
 using Mohist.Server.TestSupport;
@@ -75,6 +77,31 @@ public sealed class SlackReplyAnchorIngressSpecs : IAsyncLifetime
         Assert.Equal(inputId, (await _fixture.Grains.GetGrain<IAgentSessionGrain>(sessionId)
             .GetInitialLaunchAsync())!.Input!.Id);
         Assert.Equal(1, _fixture.AgentJobDispatches.PreparedCount(jobKey));
+
+        var grain = _fixture.Grains.GetGrain<IAgentSessionGrain>(sessionId);
+        var anchor = ValidationRequest(connection, conversationId, messageTs, messageTs, sessionId, $"slack:{sessionId}:{inputId}");
+        Assert.Equal(new SlackReplyAnchorValidationResult(true, true), await grain.ValidateSlackReplyAnchorAsync(anchor));
+        var otherConnection = await CreateConnectionAsync();
+        Assert.False((await grain.ValidateSlackReplyAnchorAsync(anchor with { ConnectionId = otherConnection.Id })).Valid);
+        Assert.False((await grain.ValidateSlackReplyAnchorAsync(anchor with { TriggeringMessageId = "invented-trigger" })).Valid);
+        Assert.False((await grain.ValidateSlackReplyAnchorAsync(anchor with { DispatchRef = "invented-dispatch" })).Valid);
+
+        using var validReply = await PostLegacyAnchoredReplyAsync(connection, anchor, "initial answer");
+        Assert.True(validReply.IsSuccessStatusCode, await validReply.Content.ReadAsStringAsync());
+        using var currentRetry = await PostAnchoredReplyAsync(connection, anchor, "initial answer");
+        Assert.True(currentRetry.IsSuccessStatusCode, await currentRetry.Content.ReadAsStringAsync());
+        using var forgedReply = await PostAnchoredReplyAsync(connection, anchor with { ConnectionId = otherConnection.Id }, "forged");
+        Assert.Equal(System.Net.HttpStatusCode.Conflict, forgedReply.StatusCode);
+        using var inventedSessionReply = await PostAnchoredReplyAsync(
+            connection, anchor with { SessionId = "invented-session" }, "forged");
+        Assert.Equal(System.Net.HttpStatusCode.Conflict, inventedSessionReply.StatusCode);
+
+        await grain.MarkTurnTerminalAsync(initial.Turn!.Id, AgentTurnStatus.Completed, null);
+        Assert.Equal(new SlackReplyAnchorValidationResult(true, false), await grain.ValidateSlackReplyAnchorAsync(anchor));
+        using var retry = await PostAnchoredReplyAsync(connection, anchor, "initial answer");
+        Assert.True(retry.IsSuccessStatusCode, await retry.Content.ReadAsStringAsync());
+        using var staleReply = await PostAnchoredReplyAsync(connection, anchor, "different stale answer");
+        Assert.Equal(System.Net.HttpStatusCode.Conflict, staleReply.StatusCode);
     }
 
     [Fact]
@@ -121,6 +148,13 @@ public sealed class SlackReplyAnchorIngressSpecs : IAsyncLifetime
         Assert.Equal(inputId, (await _fixture.Grains.GetGrain<IAgentSessionGrain>(sessionId)
             .GetInitialLaunchAsync())!.Input!.Id);
         Assert.Equal(1, _fixture.AgentJobDispatches.PreparedCount(jobKey));
+
+        var grain = _fixture.Grains.GetGrain<IAgentSessionGrain>(sessionId);
+        var anchor = ValidationRequest(
+            connection, conversationId, messageTs, messageTs, sessionId, $"slack:{sessionId}:{inputId}");
+        await grain.MarkTurnTerminalAsync(initial.Turn!.Id, AgentTurnStatus.Completed, null);
+        using var firstSendAfterTerminal = await PostAnchoredReplyAsync(connection, anchor, "too late for a first send");
+        Assert.Equal(System.Net.HttpStatusCode.Conflict, firstSendAfterTerminal.StatusCode);
     }
 
     [Fact]
@@ -197,6 +231,21 @@ public sealed class SlackReplyAnchorIngressSpecs : IAsyncLifetime
             Assert.Single(
                 runnerHub.SentMessages,
                 message => message.ConnectionId == runnerId && message.Method == "session.followup");
+
+            var anchor = ValidationRequest(
+                connection, conversationId, rootTs, followupTs, sessionId, operationId);
+            var grain = _fixture.Grains.GetGrain<IAgentSessionGrain>(sessionId);
+            Assert.Equal(new SlackReplyAnchorValidationResult(true, true), await grain.ValidateSlackReplyAnchorAsync(anchor));
+            Assert.False((await grain.ValidateSlackReplyAnchorAsync(anchor with { DispatchRef = "invented-followup-dispatch" })).Valid);
+            using var validReply = await PostAnchoredReplyAsync(connection, anchor, "follow-up answer");
+            Assert.True(validReply.IsSuccessStatusCode, await validReply.Content.ReadAsStringAsync());
+            await grain.MarkFollowupTurnTerminalAsync(operationId, AgentTurnStatus.Completed, null);
+            Assert.Equal(new SlackReplyAnchorValidationResult(true, false), await grain.ValidateSlackReplyAnchorAsync(anchor));
+            using var retry = await PostAnchoredReplyAsync(connection, anchor, "follow-up answer");
+            Assert.True(retry.IsSuccessStatusCode, await retry.Content.ReadAsStringAsync());
+            using var inventedRetry = await PostAnchoredReplyAsync(
+                connection, anchor with { DispatchRef = "invented-terminal-dispatch" }, "follow-up answer");
+            Assert.Equal(System.Net.HttpStatusCode.Conflict, inventedRetry.StatusCode);
         }
         finally
         {
@@ -204,9 +253,51 @@ public sealed class SlackReplyAnchorIngressSpecs : IAsyncLifetime
         }
     }
 
+    [Fact]
+    public async Task Legacy_initial_root_fallback_validates_an_active_followup_anchor()
+    {
+        var connection = await CreateConnectionAsync();
+        var sessionId = $"legacy-reply-anchor-{Guid.NewGuid():N}";
+        var grain = _fixture.Grains.GetGrain<IAgentSessionGrain>(sessionId);
+        const string conversationId = "C-LEGACY-ROOT";
+        const string rootTs = "1710000000.000600";
+        const string followupTs = "1710000000.000601";
+        var metadata = new AgentSessionMetadata(new Dictionary<string, string>(StringComparer.Ordinal)
+        {
+            [AgentSessionQueryMetadataKeys.ProjectId] = connection.ProjectId,
+            [AgentSessionQueryMetadataKeys.SourceKind] = "agent-connection",
+            [GenericAgentSessionMetadata.AgentId] = "legacy-agent",
+            [AgentSessionQueryMetadataKeys.ConnectionId] = connection.Id,
+            [AgentSessionQueryMetadataKeys.SlackWorkspaceTeamId] = connection.WorkspaceTeamId,
+            [AgentSessionQueryMetadataKeys.SlackConversationId] = conversationId,
+            [AgentSessionQueryMetadataKeys.SlackThreadTs] = rootTs,
+        });
+        var legacyProvenance = new AgentSessionInputProvenance(
+            "slack", connection.WorkspaceTeamId, conversationId, rootTs,
+            "U_OWNER", rootTs, connection.Id, BoundThreadRootMessageId: null);
+        await grain.EnsureInitialLaunchAsync(new EnsureInitialLaunchCommand(
+            "legacy-input", "legacy-turn", "start", "agent-connection", "legacy-job",
+            metadata, Runtime: "opencode", Provenance: legacyProvenance));
+        await grain.OpenAsync(new OpenAgentSessionCommand("legacy-runner", "opencode", Metadata: metadata));
+        await grain.AttachPhysicalSessionAsync(new AttachPhysicalSessionCommand(
+            "legacy-runtime-session", Runtime: "opencode", ExpectedRuntime: "opencode", ExpectedRunnerId: "legacy-runner"));
+        await grain.MarkInitialTurnTerminalAsync("legacy-job", AgentTurnStatus.Completed, null);
+        var followup = await grain.AcceptFollowupAsync(new AcceptFollowupCommand(
+            "continue", "agent-session-followup", "legacy-followup",
+            Provenance: legacyProvenance with { MessageId = followupTs }));
+
+        Assert.Equal(new SlackReplyAnchorValidationResult(true, true), await grain.ValidateSlackReplyAnchorAsync(ValidationRequest(
+            connection, conversationId, rootTs, followupTs, sessionId, followup.OperationId)));
+    }
+
     private async Task<string> RegisterRunnerAsync(string projectId)
     {
         var runnerId = $"slack-reply-anchor-{Guid.NewGuid():N}";
+        var registry = _fixture.Grains.GetGrain<IRunnerRegistryGrain>(RunnerRegistryKeys.Global);
+        foreach (var staleId in await registry.ListRunnerIdsAsync())
+            await _fixture.Grains.GetGrain<IRunnerGrain>(staleId).UnregisterAsync();
+        Assert.Empty(await registry.ListRunnerIdsAsync());
+
         using var register = await _fixture.Client.PostAsJsonAsync($"/api/runner/{runnerId}/register", new
         {
             capabilities = new[] { "spec/*" },
@@ -218,6 +309,12 @@ public sealed class SlackReplyAnchorIngressSpecs : IAsyncLifetime
         using var slots = await _fixture.Client.PatchAsJsonAsync($"/api/runner/{runnerId}", new { slots = 1 });
         slots.EnsureSuccessStatusCode();
         _runnerIds.Add(runnerId);
+        await TestWait.ForAsync(
+            () => _fixture.Grains.GetGrain<IRunnerGrain>(runnerId).GetRuntimeStateAsync(),
+            state => state.Status == RunnerStatus.Online,
+            TimeSpan.FromSeconds(5),
+            TimeSpan.FromMilliseconds(25),
+            $"Runner '{runnerId}' to reach Online");
         return runnerId;
     }
 
@@ -355,6 +452,57 @@ public sealed class SlackReplyAnchorIngressSpecs : IAsyncLifetime
         Assert.DoesNotContain("xapp-anchor-secret", context.GetRawText(), StringComparison.Ordinal);
         Assert.DoesNotContain("xoxb-anchor-secret", context.GetRawText(), StringComparison.Ordinal);
     }
+
+    private static SlackReplyAnchorValidationRequest ValidationRequest(
+        AgentConnection connection,
+        string conversationId,
+        string threadRootMessageId,
+        string triggeringMessageId,
+        string sessionId,
+        string dispatchRef) =>
+        new(
+            connection.ProjectId,
+            connection.WorkspaceTeamId,
+            conversationId,
+            threadRootMessageId,
+            triggeringMessageId,
+            connection.Id,
+            sessionId,
+            dispatchRef);
+
+    private async Task<HttpResponseMessage> PostAnchoredReplyAsync(
+        AgentConnection connection,
+        SlackReplyAnchorValidationRequest anchor,
+        string text) =>
+        await _fixture.Client.PostAsJsonAsync(
+            $"/api/projects/{connection.ProjectId}/slack-connections/reply",
+            new
+            {
+                workspaceTeamId = anchor.WorkspaceId,
+                conversationId = anchor.ConversationId,
+                threadTs = anchor.ThreadRootMessageId,
+                connectionId = anchor.ConnectionId,
+                sessionId = anchor.SessionId,
+                triggeringMessageId = anchor.TriggeringMessageId,
+                dispatchRef = anchor.DispatchRef,
+                text,
+            });
+
+    private async Task<HttpResponseMessage> PostLegacyAnchoredReplyAsync(
+        AgentConnection connection,
+        SlackReplyAnchorValidationRequest anchor,
+        string text) =>
+        await _fixture.Client.PostAsJsonAsync(
+            $"/api/projects/{connection.ProjectId}/slack-connections/reply",
+            new
+            {
+                conversationId = anchor.ConversationId,
+                threadTs = anchor.ThreadRootMessageId,
+                connectionId = anchor.ConnectionId,
+                triggeringMessageId = anchor.TriggeringMessageId,
+                dispatchRef = anchor.DispatchRef,
+                text,
+            });
 
     private async Task<AgentConnection> CreateConnectionAsync()
     {

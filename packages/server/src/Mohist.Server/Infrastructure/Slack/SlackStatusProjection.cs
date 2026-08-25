@@ -230,7 +230,8 @@ public sealed class SlackStatusProjection : IScopedService
                 && entry.DispatchRef == DispatchRef(source, "working-add")
                 && payload?.Operation == SlackDeliveryOperations.ReactionAdd
                 && payload.Reaction == WorkingReaction;
-            var isProgressRow = entry.DispatchRef == dispatchRef
+            var isProgressRow = (entry.DispatchRef == dispatchRef
+                    || payload?.ProgressDispatchRef == dispatchRef)
                 && (entry.Kind == SlackOutboxKinds.ReplaceableProgress
                     || entry.Kind == SlackOutboxKinds.TerminalResult
                     || entry.Kind == SlackOutboxKinds.ExplicitFailure);
