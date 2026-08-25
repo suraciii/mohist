@@ -5,6 +5,7 @@ using Microsoft.Extensions.Time.Testing;
 using Mohist.Server.Infrastructure.Data.Workflow;
 using Mohist.Server.TestSupport;
 using Mohist.Server.Workflow.Domain.Run;
+using Mohist.Server.Workflow.Services;
 using Mohist.Server.Workflow.Grains;
 using Mohist.Workflow.Definition;
 using Xunit;
@@ -255,7 +256,7 @@ public sealed class WorkflowGrainPauseResumeSpecs
         string runId,
         WorkflowDefinition? definition = null)
     {
-        const string projectId = "proj-pause-resume";
+        var projectId = $"prof-pause-{Math.Abs(WorkflowYamlSerializer.ToYaml(definition ?? SingleStage()).GetHashCode()):x8}";
         await WorkflowGrainContractSupport.SeedTemplateAsync(
             _fixture,
             projectId,
