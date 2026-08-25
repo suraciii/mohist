@@ -23,7 +23,7 @@ using Xunit;
 
 namespace Mohist.Server.SpecTests.Specs.Slack;
 
-[Collection("RunnerMutationIntegration")]
+[Collection("SlackApiSurface")]
 public sealed class SlackDmNewTaskIngressSpecs : IAsyncLifetime
 {
     private readonly Dictionary<string, string> _connectionLeases = new(StringComparer.Ordinal);

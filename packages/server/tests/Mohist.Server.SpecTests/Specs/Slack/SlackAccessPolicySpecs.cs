@@ -27,7 +27,7 @@ namespace Mohist.Server.SpecTests.Specs.Slack;
 /// the default <c>owner_only</c> policy so a future widening
 /// (allowlist, anyone) cannot silently regress the Owner path.
 /// </summary>
-[Collection("SharedSlackApi")]
+[Collection("SlackApiSurface")]
 public sealed partial class SlackAccessPolicySpecs : IAsyncLifetime
 {
     private readonly Dictionary<string, string> _connectionLeases = new(StringComparer.Ordinal);

@@ -30,7 +30,7 @@ namespace Mohist.Server.SpecTests.Specs.Slack;
 [CollectionDefinition("SlackTurnControlInteraction")]
 public class SlackTurnControlInteractionCollection : ICollectionFixture<IsolatedMohistIntegrationFixture>;
 
-[Collection("SlackTurnControlInteraction")]
+[Collection("SlackApiSurface")]
 public sealed class SlackTurnControlInteractionSpecs : IAsyncLifetime
 {
     private readonly IsolatedMohistIntegrationFixture _fixture;
