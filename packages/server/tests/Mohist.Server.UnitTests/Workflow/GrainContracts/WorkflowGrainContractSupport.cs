@@ -121,3 +121,108 @@ internal static class WorkflowGrainContractSupport
             _inner.DeleteAsync(workflowRunId, ct);
     }
 }
+
+/// <summary>
+/// Handle over an activated, started run: assignment-gated claim/report
+/// helpers shared by direct-construction WorkflowGrain specs.
+/// </summary>
+internal sealed record WorkflowGrainArrangement(
+    WorkflowGrain Grain,
+    IWorkflowRunStore Store,
+    WorkflowQuerier Querier,
+    string RunId,
+    string WorkerId)
+{
+    public async Task<WorkItem?> AssignAndClaimAsync()
+    {
+        await Grain.AssignWorkerAsync(WorkerId);
+        return await Grain.ClaimNextAsync(WorkerId);
+    }
+
+    /// <summary>Reports the claimed task complete, resolving the persisted task-run id.</summary>
+    public async Task<ReportAck> ReportCompletedAsync(WorkItem item) =>
+        await ReportTaskAsync(item, TaskReportStatus.Succeeded);
+
+    public async Task<ReportAck> ReportFailedAsync(WorkItem item, string detail)
+    {
+        var taskRunId = await BuildReportTaskRunIdAsync();
+        return await Grain.ReceiveTaskReportAsync(
+            WorkerId,
+            item.Id!,
+            new TaskReport(item.Id!, TaskReportStatus.Failed, Output: null, Artifacts: null, Detail: detail, TaskRunId: taskRunId));
+    }
+
+    private async Task<string> BuildReportTaskRunIdAsync()
+    {
+        var run = await Store.LoadAsync(RunId) ?? throw new InvalidOperationException("run missing");
+        var runningTask = run.CurrentStage().RunningTask
+            ?? throw new InvalidOperationException("no running task to report");
+        return runningTask.Id;
+    }
+
+    private async Task<ReportAck> ReportTaskAsync(WorkItem item, TaskReportStatus status)
+    {
+        var taskRunId = await BuildReportTaskRunIdAsync();
+        return await Grain.ReceiveTaskReportAsync(
+            WorkerId, item.Id!, new TaskReport(item.Id!, status, Output: null, Artifacts: null, TaskRunId: taskRunId));
+    }
+
+    /// <summary>Reports against a work id no active work carries; the grain must fence it.</summary>
+    public async Task<ReportAck> ReportUnknownWorkAsync(string workId)
+    {
+        var taskRunId = await BuildReportTaskRunIdAsync();
+        return await Grain.ReceiveTaskReportAsync(
+            WorkerId, workId, new TaskReport(workId, TaskReportStatus.Failed, Output: null, Artifacts: null, TaskRunId: taskRunId));
+    }
+
+    public async Task<ReportAck> ReportCheckResultsAsync(
+        WorkItem check,
+        params (string Name, CheckResultStatus Status, string? Message)[] results)
+    {
+        var payload = results
+            .Select(result => new CheckResult(result.Name, result.Status, result.Message))
+            .ToList();
+        return await Grain.ReceiveCheckReportAsync(WorkerId, check.Id!, new CheckReport(check.Stage, payload));
+    }
+
+    public Task<ReportAck> ReportChecksPassAsync(WorkItem check, string checkName) =>
+        ReportCheckResultsAsync(check, (checkName, CheckResultStatus.Passed, null));
+
+    /// <summary>
+    /// Reports the claimed task with structured output and runtime follow-up
+    /// tasks (the recovery-injection path).
+    /// </summary>
+    public async Task<ReportAck> ReportTaskResultAsync(
+        WorkItem item,
+        System.Text.Json.JsonElement? output,
+        IReadOnlyList<RuntimeTaskInput>? addTasks,
+        TaskReportStatus status = TaskReportStatus.Succeeded)
+    {
+        var taskRunId = await BuildReportTaskRunIdAsync();
+        return await Grain.ReceiveTaskReportAsync(
+            WorkerId,
+            item.Id!,
+            new TaskReport(item.Id!, status, Output: output, Artifacts: null, AddTasks: addTasks, TaskRunId: taskRunId));
+    }
+
+    public static async Task<WorkflowGrainArrangement> CreateAsync(
+        MohistDbFixture fixture,
+        string runId,
+        WorkflowDefinition definition,
+        TimeProvider timeProvider,
+        string workerId = "worker-1",
+        string? projectId = null)
+    {
+        projectId ??= $"proj-{runId}";
+        await WorkflowGrainContractSupport.SeedTemplateAsync(fixture, projectId, definition, Fixed);
+        var scope = fixture.Services.CreateAsyncScope();
+        var store = scope.ServiceProvider.GetRequiredService<IWorkflowRunStore>();
+        var querier = scope.ServiceProvider.GetRequiredService<WorkflowQuerier>();
+        var grain = WorkflowGrainContractSupport.CreateGrain(scope.ServiceProvider, store, runId, timeProvider);
+        await grain.OnActivateAsync(CancellationToken.None);
+        await grain.EnsureStartedAsync(new WorkflowIssueContext(projectId, 1, null));
+        return new WorkflowGrainArrangement(grain, store, querier, runId, workerId);
+    }
+
+    internal static readonly DateTimeOffset Fixed = new(2026, 1, 1, 0, 0, 0, TimeSpan.Zero);
+}
