@@ -1,5 +1,7 @@
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Linq;
+using System.Reflection;
 using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.EntityFrameworkCore;
@@ -9,11 +11,15 @@ using Microsoft.Extensions.Options;
 using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Infrastructure.Data.Workflow;
 using Mohist.Server.Infrastructure.Events;
+using Mohist.Server.Runner.Grains;
+using Mohist.Server.Runner.Services;
 using Mohist.Server.TestSupport;
 using Mohist.Server.Workflow.Domain.Run;
 using Mohist.Server.Workflow.Grains;
 using Mohist.Server.Workflow.Services;
 using Mohist.Server.Workflow.Services.Artifacts;
+using Orleans;
+using Orleans.Runtime;
 using Mohist.Workflow.Definition;
 
 namespace Mohist.Server.UnitTests.Workflow.GrainContracts;
@@ -23,7 +29,7 @@ namespace Mohist.Server.UnitTests.Workflow.GrainContracts;
 /// Mirrors the seeding the cluster fixture performed (workflow profile +
 /// project default profile rows) without an Orleans silo.
 /// </summary>
-internal static class WorkflowGrainContractSupport
+internal static partial class WorkflowGrainContractSupport
 {
     internal static async Task SeedTemplateAsync(
         MohistDbFixture fixture,
@@ -78,12 +84,13 @@ internal static class WorkflowGrainContractSupport
         IServiceProvider services,
         IWorkflowRunStore store,
         string workflowRunId,
-        TimeProvider timeProvider)
+        TimeProvider timeProvider,
+        Func<string, IRunnerUpdateOperationGrain>? operations = null)
     {
         var resolver = services.GetRequiredService<WorkflowDefinitionResolver>();
         var identity = GrainTestContext.Create(
             workflowRunId,
-            new WorkflowGrainTestProfileCoordinatorFactory(store, resolver));
+            new WorkflowGrainTestProfileCoordinatorFactory(store, resolver, operations));
         return new WorkflowGrain(
             identity.Context,
             identity.Runtime,
@@ -94,7 +101,8 @@ internal static class WorkflowGrainContractSupport
             services.GetRequiredService<IWorkflowArtifactBindService>(),
             Options.Create(new WorkflowOptions()),
             timeProvider,
-            NullLogger<WorkflowGrain>.Instance);
+            NullLogger<WorkflowGrain>.Instance,
+            services.GetRequiredService<WorkflowItemTranslator>());
     }
 
     /// <summary>
@@ -138,9 +146,12 @@ internal static class WorkflowGrainContractSupport
 internal sealed record WorkflowGrainArrangement(
     WorkflowGrain Grain,
     IWorkflowRunStore Store,
+    IDispatchSnapshotStore Snapshots,
+    IEventStore Events,
     WorkflowQuerier Querier,
     string RunId,
-    string WorkerId)
+    string WorkerId,
+    RunnerUpdateOperationGrainRegistry? Operations = null)
 {
     public async Task<WorkItem?> AssignAndClaimAsync()
     {
@@ -230,11 +241,105 @@ internal sealed record WorkflowGrainArrangement(
         var scope = fixture.Services.CreateAsyncScope();
         var store = scope.ServiceProvider.GetRequiredService<IWorkflowRunStore>();
         var querier = scope.ServiceProvider.GetRequiredService<WorkflowQuerier>();
-        var grain = WorkflowGrainContractSupport.CreateGrain(scope.ServiceProvider, store, runId, timeProvider);
+        // Always available: recovery-receipt handling consults the runner
+        // update operation state even when no fence exists.
+        var operations = new RunnerUpdateOperationGrainRegistry(
+            new ConcurrentDictionary<string, RunnerUpdateOperationState>(),
+            new RunnerUpdateOperationWriteFailureProbe());
+        var grain = WorkflowGrainContractSupport.CreateGrain(
+            scope.ServiceProvider,
+            store,
+            runId,
+            timeProvider,
+            operations is null ? null : operations.For);
         await grain.OnActivateAsync(CancellationToken.None);
         await grain.EnsureStartedAsync(new WorkflowIssueContext(projectId, 1, null));
-        return new WorkflowGrainArrangement(grain, store, querier, runId, workerId);
+        return new WorkflowGrainArrangement(
+            grain,
+            store,
+            scope.ServiceProvider.GetRequiredService<IDispatchSnapshotStore>(),
+            scope.ServiceProvider.GetRequiredService<IEventStore>(),
+            querier,
+            runId,
+            workerId,
+            operations);
     }
 
     internal static readonly DateTimeOffset Fixed = new(2026, 1, 1, 0, 0, 0, TimeSpan.Zero);
+}
+
+/// <summary>
+/// In-memory grain storage backing directly-constructed persistent grains.
+/// </summary>
+internal sealed class TestGrainStorage<TState>(string key, ConcurrentDictionary<string, TState> store) : IPersistentState<TState>
+{
+    public TState State { get; set; } = default!;
+
+    public string Etag => Guid.NewGuid().ToString("N");
+
+    public bool RecordExists => store.ContainsKey(key);
+
+    public Task ReadStateAsync()
+    {
+        State = store.TryGetValue(key, out var value) ? value : default!;
+        return Task.CompletedTask;
+    }
+
+    public Task WriteStateAsync()
+    {
+        store[key] = State;
+        return Task.CompletedTask;
+    }
+
+    public Task ClearStateAsync()
+    {
+        store.TryRemove(key, out _);
+        State = default!;
+        return Task.CompletedTask;
+    }
+}
+
+/// <summary>
+/// Registry of directly-constructed <see cref="RunnerUpdateOperationGrain"/>
+/// instances keyed by runner id. The same instance serves both the workflow
+/// grain's internal factory lookups and direct test assertions, so operation
+/// state written by one side is visible to the other.
+/// </summary>
+internal sealed class RunnerUpdateOperationGrainRegistry(
+    ConcurrentDictionary<string, RunnerUpdateOperationState> backing,
+    RunnerUpdateOperationWriteFailureProbe probe)
+{
+    private readonly ConcurrentDictionary<string, IRunnerUpdateOperationGrain> _grains = new();
+
+    public RunnerUpdateOperationWriteFailureProbe Probe { get; } = probe;
+
+    private RunnerUpdateOperationWriteFailureProbe ProbeField { get; init; } = probe;
+
+    public IRunnerUpdateOperationGrain For(string runnerId) =>
+        _grains.GetOrAdd(runnerId, key =>
+        {
+            var grain = new RunnerUpdateOperationGrain(
+                new TestGrainStorage<RunnerUpdateOperationState>($"runner-update:{key}", backing),
+                ProbeField);
+            WorkflowGrainContractSupport.AttachTestContext(grain, key);
+            return grain;
+        });
+}
+
+internal static partial class WorkflowGrainContractSupport
+{
+    /// <summary>
+    /// Attaches a manual test grain context to a primary-constructor grain so
+    /// identity lookups (GetPrimaryKeyString) resolve without Orleans runtime
+    /// activation.
+    /// </summary>
+    internal static void AttachTestContext(global::Orleans.Grain grain, string key)
+    {
+        var identity = GrainTestContext.Create(key);
+        var property = typeof(global::Orleans.Grain)
+            .GetProperties(BindingFlags.NonPublic | BindingFlags.Public | BindingFlags.Instance)
+            .SingleOrDefault(property => property.PropertyType == typeof(IGrainContext) && property.CanWrite)
+            ?? throw new MissingMemberException(nameof(Grain), "expected writable grain-context property");
+        property.SetValue(grain, identity.Context);
+    }
 }

@@ -1,4 +1,5 @@
 using System.Reflection;
+using Microsoft.Extensions.DependencyInjection;
 using Orleans.Runtime;
 
 namespace Mohist.Server.TestSupport;
@@ -35,12 +36,53 @@ public static class GrainTestContext
     {
         public GrainId GrainId { get; set; }
 
+        private static readonly IServiceProvider EmptyServices = new ServiceCollection()
+            .AddSingleton<Orleans.Timers.IReminderRegistry>(new NoopReminderRegistry())
+            .BuildServiceProvider();
+
         protected override object? Invoke(MethodInfo? targetMethod, object?[]? args)
         {
-            if (targetMethod?.Name == "get_GrainId")
-                return GrainId;
+            switch (targetMethod?.Name)
+            {
+                case "get_GrainId":
+                    return GrainId;
+                // Manual grains may resolve ambient services through their
+                // activation context; hand back an empty provider instead of
+                // null so dependency lookups fail with a clear missing-service
+                // error rather than a null-reference inside DI.
+                case "get_ActivationServices":
+                case "get_ServiceProvider":
+                    return EmptyServices;
+            }
+
+            if (targetMethod?.ReturnType == typeof(IServiceProvider))
+                return EmptyServices;
             return DefaultValue(targetMethod?.ReturnType);
         }
+    }
+
+    /// <summary>
+    /// Reminder registry for manual grains: reminders never fire in direct
+    /// tests (specs drive ReceiveReminder explicitly), so registration is a
+    /// tracked no-op.
+    /// </summary>
+    public sealed class NoopReminderRegistry : Orleans.Timers.IReminderRegistry
+    {
+        private sealed class TestReminder(string name) : IGrainReminder
+        {
+            public string ReminderName => name;
+        }
+
+        public Task<IGrainReminder> RegisterOrUpdateReminder(GrainId grainId, string reminderName, TimeSpan dueTime, TimeSpan period)
+            => Task.FromResult<IGrainReminder>(new TestReminder(reminderName));
+
+        public Task UnregisterReminder(GrainId grainId, IGrainReminder reminder) => Task.CompletedTask;
+
+        public Task<IGrainReminder?> GetReminder(GrainId grainId, string reminderName)
+            => Task.FromResult<IGrainReminder?>(null);
+
+        public Task<List<IGrainReminder>> GetReminders(GrainId grainId)
+            => Task.FromResult(new List<IGrainReminder>());
     }
 
     private class GrainRuntimeProxy : DispatchProxy
