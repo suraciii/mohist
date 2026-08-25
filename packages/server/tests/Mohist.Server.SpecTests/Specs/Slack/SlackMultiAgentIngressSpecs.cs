@@ -26,7 +26,7 @@ using Xunit;
 
 namespace Mohist.Server.SpecTests.Specs.Slack;
 
-[Collection("SharedSlackApi")]
+[Collection("SlackApiSurface")]
 public sealed partial class SlackMultiAgentIngressSpecs : IAsyncLifetime
 {
     private readonly MohistIntegrationFixture _fixture;

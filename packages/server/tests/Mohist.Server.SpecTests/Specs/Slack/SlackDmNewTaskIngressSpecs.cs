@@ -23,12 +23,11 @@ using Xunit;
 
 namespace Mohist.Server.SpecTests.Specs.Slack;
 
-[Collection("RunnerMutationIntegration")]
+[Collection("SlackApiSurface")]
 public sealed class SlackDmNewTaskIngressSpecs : IAsyncLifetime
 {
     private readonly Dictionary<string, string> _connectionLeases = new(StringComparer.Ordinal);
     private readonly MohistIntegrationFixture _fixture;
-    private readonly string _teamId = $"T{Guid.NewGuid():N}";
     private readonly List<string> _runnerIds = [];
 
     public SlackDmNewTaskIngressSpecs(MohistIntegrationFixture fixture) => _fixture = fixture;
@@ -67,14 +66,14 @@ public sealed class SlackDmNewTaskIngressSpecs : IAsyncLifetime
             && row.ThreadTs == "1710000000.000100"
             && row.Kind == SlackOutboxKinds.ReplaceableProgress
             && row.DispatchRef == SlackStatusProjection.DispatchRef(
-                new SlackMessageIdentity(_teamId, "D-DM-NEW", "1710000000.000100"), "progress"));
+                new SlackMessageIdentity("T123", "D-DM-NEW", "1710000000.000100"), "progress"));
         var secondProgress = await db.SlackOutboxRows.SingleAsync(row =>
             row.ConnectionId == connection.Id
             && row.ConversationId == "D-DM-NEW"
             && row.ThreadTs == "1710000000.000200"
             && row.Kind == SlackOutboxKinds.ReplaceableProgress
             && row.DispatchRef == SlackStatusProjection.DispatchRef(
-                new SlackMessageIdentity(_teamId, "D-DM-NEW", "1710000000.000200"), "progress"));
+                new SlackMessageIdentity("T123", "D-DM-NEW", "1710000000.000200"), "progress"));
         var firstPayload = SlackDeliveryPayload.Parse(firstProgress.PayloadJson);
         var secondPayload = SlackDeliveryPayload.Parse(secondProgress.PayloadJson);
         Assert.Equal("Working...", firstPayload.Text);
@@ -139,7 +138,7 @@ public sealed class SlackDmNewTaskIngressSpecs : IAsyncLifetime
                 && row.ConversationId == "C-THREAD"
                 && row.ThreadTs == "1710000000.000400"
                 && row.DispatchRef == SlackStatusProjection.DispatchRef(
-                    new SlackMessageIdentity(_teamId, "C-THREAD", "1710000000.000450"), "received"))
+                    new SlackMessageIdentity("T123", "C-THREAD", "1710000000.000450"), "received"))
             .Select(row => row.PayloadJson)
             .SingleAsync();
         Assert.Equal(SlackDeliveryOperations.ReactionAdd, SlackDeliveryPayload.Parse(received).Operation);
@@ -149,7 +148,7 @@ public sealed class SlackDmNewTaskIngressSpecs : IAsyncLifetime
             && row.ThreadTs == "1710000000.000400"
             && row.Kind == SlackOutboxKinds.ReplaceableProgress
             && row.DispatchRef == SlackStatusProjection.DispatchRef(
-                new SlackMessageIdentity(_teamId, "C-THREAD", "1710000000.000450"), "progress"));
+                new SlackMessageIdentity("T123", "C-THREAD", "1710000000.000450"), "progress"));
         Assert.Equal("Working...", SlackDeliveryPayload.Parse(progress.PayloadJson).Text);
     }
 
@@ -244,7 +243,7 @@ public sealed class SlackDmNewTaskIngressSpecs : IAsyncLifetime
         Assert.Equal(SlackOutboxStates.DeliveryUncertain, original.State);
         Assert.Equal(SlackAdmissionService.DispatchRef(
             connection,
-            new SlackMessageIdentity(_teamId, "D-DM-UNCERTAIN", "1710000000.001050")), original.DispatchRef);
+            new SlackMessageIdentity("T123", "D-DM-UNCERTAIN", "1710000000.001050")), original.DispatchRef);
         Assert.Equal(original.DispatchRef, SlackDeliveryPayload.Parse(original.PayloadJson).ClientMessageId);
     }
 
@@ -495,7 +494,7 @@ public sealed class SlackDmNewTaskIngressSpecs : IAsyncLifetime
             .Where(row => row.ConnectionId == connection.Id
                 && row.ConversationId == conversationId
                 && row.DispatchRef == SlackStatusProjection.DispatchRef(
-                    new SlackMessageIdentity(_teamId, conversationId, messageTs), "received"))
+                    new SlackMessageIdentity("T123", conversationId, messageTs), "received"))
             .Select(row => row.PayloadJson)
             .SingleAsync();
         Assert.Equal(SlackDeliveryOperations.ReactionAdd, SlackDeliveryPayload.Parse(payload).Operation);
@@ -571,7 +570,7 @@ public sealed class SlackDmNewTaskIngressSpecs : IAsyncLifetime
             ProjectId = projectId,
             AgentId = agentId,
             ProviderKind = ConnectionProviderKind.Slack,
-            WorkspaceTeamId = _teamId,
+            WorkspaceTeamId = "T123",
             AppId = "A123",
             BotUserId = "U123",
             BotName = "Mohist",
@@ -586,12 +585,12 @@ public sealed class SlackDmNewTaskIngressSpecs : IAsyncLifetime
         });
 
         var agentAppId = $"agent_app_{Guid.NewGuid():N}";
-        var enrollmentId = await SlackRuntimeLeaseTestSupport.EnsureEnrollmentAsync(_fixture, _teamId);
+        var enrollmentId = await SlackRuntimeLeaseTestSupport.EnsureEnrollmentAsync(_fixture, "T123");
         db.ManagedSlackAgentApps.Add(new ManagedSlackAgentAppRow
         {
             Id = agentAppId,
             EnrollmentId = enrollmentId,
-            WorkspaceTeamId = _teamId,
+            WorkspaceTeamId = "T123",
             AgentConnectionId = id,
             AppId = $"A_SPEC_{Guid.NewGuid():N}",
             BotUserId = "U123",
@@ -618,7 +617,7 @@ public sealed class SlackDmNewTaskIngressSpecs : IAsyncLifetime
         await secrets.StoreAsync(SecretStoreAddress.ForManagedSlackAgentApp(agentAppId, SecretKind.BotToken), Encoding.UTF8.GetBytes("xoxb"));
         var leaseId = await SlackRuntimeLeaseTestSupport.AcquireConnectionLeaseAsync(_fixture, projectId, id);
         _connectionLeases[id] = leaseId;
-        return new AgentConnection { Id = id, ProjectId = projectId, WorkspaceTeamId = _teamId };
+        return new AgentConnection { Id = id, ProjectId = projectId, WorkspaceTeamId = "T123" };
     }
 
     private static string Path(AgentConnection connection, string suffix) =>

@@ -24,11 +24,11 @@ namespace Mohist.Server.SpecTests.Specs.Slack;
 /// first-use guide without echoing the code, and does not repeat the guide on
 /// an owner transfer.
 /// </summary>
+[Collection("SlackApiSurface")]
 public sealed class SlackOwnerClaimOnboardingSpecs
 {
     private readonly Dictionary<string, string> _connectionLeases = new(StringComparer.Ordinal);
     private readonly MohistIntegrationFixture _fixture;
-    private readonly string _teamId = $"T{Guid.NewGuid():N}";
 
     public SlackOwnerClaimOnboardingSpecs(MohistIntegrationFixture fixture) => _fixture = fixture;
 
@@ -151,7 +151,7 @@ public sealed class SlackOwnerClaimOnboardingSpecs
             ProjectId = projectId,
             AgentId = agentId,
             ProviderKind = ConnectionProviderKind.Slack,
-            WorkspaceTeamId = _teamId,
+            WorkspaceTeamId = "T123",
             AppId = "A123",
             BotUserId = "U123",
             BotName = "Mohist",
@@ -167,12 +167,12 @@ public sealed class SlackOwnerClaimOnboardingSpecs
         await db.SaveChangesAsync();
 
         var agentAppId = $"agent_app_{Guid.NewGuid():N}";
-        var enrollmentId = await SlackRuntimeLeaseTestSupport.EnsureEnrollmentAsync(_fixture, _teamId);
+        var enrollmentId = await SlackRuntimeLeaseTestSupport.EnsureEnrollmentAsync(_fixture, "T123");
         db.ManagedSlackAgentApps.Add(new ManagedSlackAgentAppRow
         {
             Id = agentAppId,
             EnrollmentId = enrollmentId,
-            WorkspaceTeamId = _teamId,
+            WorkspaceTeamId = "T123",
             AgentConnectionId = id,
             AppId = $"A_SPEC_{Guid.NewGuid():N}",
             BotUserId = "U123",
@@ -203,7 +203,7 @@ public sealed class SlackOwnerClaimOnboardingSpecs
         {
             Id = id,
             ProjectId = projectId,
-            WorkspaceTeamId = _teamId,
+            WorkspaceTeamId = "T123",
         };
     }
 }
