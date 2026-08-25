@@ -70,7 +70,7 @@ test('test:app builds once and hands the same run root to the application guard'
     '--require-build-stamp',
     '--require-enforced',
     '--suite-deadline-at-ms',
-    '301000',
+    '421000',
   ])
   assert.match(writes.get(join(artifactRoot, 'build-stamp.json')) ?? '', /"runId": "1000-7"/)
   const buildEvidence = JSON.parse(writes.get(join(artifactRoot, 'build.json')) ?? '{}') as {
