@@ -32,6 +32,7 @@ public sealed partial class SlackAccessPolicySpecs : IAsyncLifetime
 {
     private readonly Dictionary<string, string> _connectionLeases = new(StringComparer.Ordinal);
     private readonly MohistIntegrationFixture _fixture;
+    private readonly string _teamId = $"T{Guid.NewGuid():N}";
 
     public SlackAccessPolicySpecs(MohistIntegrationFixture fixture) => _fixture = fixture;
 
@@ -217,7 +218,7 @@ public sealed partial class SlackAccessPolicySpecs : IAsyncLifetime
             ProjectId = projectId,
             AgentId = agentId,
             ProviderKind = ConnectionProviderKind.Slack,
-            WorkspaceTeamId = "T123",
+            WorkspaceTeamId = _teamId,
             AppId = "A123",
             BotUserId = "U123",
             BotName = "Mohist",
@@ -243,7 +244,7 @@ public sealed partial class SlackAccessPolicySpecs : IAsyncLifetime
                     ProjectId = projectId,
                     ConnectionId = id,
                     SlackUserId = member,
-                    WorkspaceTeamId = "T123",
+                    WorkspaceTeamId = _teamId,
                     CreatedAt = now,
                 });
             }
@@ -252,12 +253,12 @@ public sealed partial class SlackAccessPolicySpecs : IAsyncLifetime
         }
 
         var agentAppId = $"agent_app_{Guid.NewGuid():N}";
-        var enrollmentId = await SlackRuntimeLeaseTestSupport.EnsureEnrollmentAsync(_fixture, "T123");
+        var enrollmentId = await SlackRuntimeLeaseTestSupport.EnsureEnrollmentAsync(_fixture, _teamId);
         db.ManagedSlackAgentApps.Add(new ManagedSlackAgentAppRow
         {
             Id = agentAppId,
             EnrollmentId = enrollmentId,
-            WorkspaceTeamId = "T123",
+            WorkspaceTeamId = _teamId,
             AgentConnectionId = id,
             AppId = $"A_SPEC_{Guid.NewGuid():N}",
             BotUserId = "U123",
@@ -292,7 +293,7 @@ public sealed partial class SlackAccessPolicySpecs : IAsyncLifetime
         {
             Id = id,
             ProjectId = projectId,
-            WorkspaceTeamId = "T123",
+            WorkspaceTeamId = _teamId,
             BotUserId = "U123",
         };
     }

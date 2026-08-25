@@ -28,6 +28,7 @@ namespace Mohist.Server.SpecTests.Specs.Slack;
 public sealed partial class SlackChannelThreadIngressSpecs
 {
     private readonly MohistIntegrationFixture _fixture;
+    private readonly string _teamId = $"T{Guid.NewGuid():N}";
     private readonly Dictionary<string, string> _connectionLeases = new(StringComparer.Ordinal);
 
     public SlackChannelThreadIngressSpecs(MohistIntegrationFixture fixture) => _fixture = fixture;
@@ -89,7 +90,7 @@ public sealed partial class SlackChannelThreadIngressSpecs
             && row.ThreadTs == "1710000000.000100"
             && row.Kind == SlackOutboxKinds.ReplaceableProgress
             && row.DispatchRef == SlackStatusProjection.DispatchRef(
-                new SlackMessageIdentity("T123", "C-channel-A", "1710000000.000100"), "progress"));
+                new SlackMessageIdentity(_teamId, "C-channel-A", "1710000000.000100"), "progress"));
         var initialProgressPayload = SlackDeliveryPayload.Parse(initialProgress.PayloadJson);
         Assert.Equal(SlackDeliveryOperations.PostMessage, initialProgressPayload.Operation);
         Assert.Equal("Working...", initialProgressPayload.Text);
@@ -262,7 +263,7 @@ public sealed partial class SlackChannelThreadIngressSpecs
             await db.SlackOutboxRows
                 .Where(row => row.ConnectionId == connection.Id
                     && row.DispatchRef == SlackStatusProjection.DispatchRef(
-                        new SlackMessageIdentity("T123", "C-channel-replay-ack", "1710000000.000260"), "received"))
+                        new SlackMessageIdentity(_teamId, "C-channel-replay-ack", "1710000000.000260"), "received"))
                 .ExecuteDeleteAsync();
         }
 
@@ -277,7 +278,7 @@ public sealed partial class SlackChannelThreadIngressSpecs
         var outbox = verify.ServiceProvider.GetRequiredService<MohistDbContext>();
         Assert.True(await outbox.SlackOutboxRows.AnyAsync(row => row.ConnectionId == connection.Id
             && row.DispatchRef == SlackStatusProjection.DispatchRef(
-                new SlackMessageIdentity("T123", "C-channel-replay-ack", "1710000000.000260"), "received")));
+                new SlackMessageIdentity(_teamId, "C-channel-replay-ack", "1710000000.000260"), "received")));
     }
 
     [Fact]
@@ -544,7 +545,7 @@ public sealed partial class SlackChannelThreadIngressSpecs
             CreatedAt = now,
             UpdatedAt = now,
         });
-        var enrollmentId = await SlackRuntimeLeaseTestSupport.EnsureEnrollmentAsync(_fixture, "T123");
+        var enrollmentId = await SlackRuntimeLeaseTestSupport.EnsureEnrollmentAsync(_fixture, _teamId);
         var botUserId = string.IsNullOrEmpty(agentNameSuffix) ? "U123" : $"U{agentNameSuffix.GetHashCode():X}".PadRight(8, '0').Substring(0, 8);
         db.Agents.Add(new AgentRow
         {
@@ -568,7 +569,7 @@ public sealed partial class SlackChannelThreadIngressSpecs
             ProjectId = projectId,
             AgentId = agentId,
             ProviderKind = ConnectionProviderKind.Slack,
-            WorkspaceTeamId = "T123",
+            WorkspaceTeamId = _teamId,
             AppId = "A123",
             BotUserId = botUserId,
             BotName = $"Mohist {agentNameSuffix}".Trim(),
@@ -587,7 +588,7 @@ public sealed partial class SlackChannelThreadIngressSpecs
         {
             Id = agentAppId,
             EnrollmentId = enrollmentId,
-            WorkspaceTeamId = "T123",
+            WorkspaceTeamId = _teamId,
             AgentConnectionId = id,
             AppId = $"A_SPEC_{Guid.NewGuid():N}",
             BotUserId = botUserId,
@@ -622,7 +623,7 @@ public sealed partial class SlackChannelThreadIngressSpecs
         {
             Id = id,
             ProjectId = projectId,
-            WorkspaceTeamId = "T123",
+            WorkspaceTeamId = _teamId,
             BotUserId = botUserId,
         };
     }

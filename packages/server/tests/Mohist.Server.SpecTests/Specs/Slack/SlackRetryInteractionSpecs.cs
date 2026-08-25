@@ -32,6 +32,7 @@ namespace Mohist.Server.SpecTests.Specs.Slack;
 public sealed class SlackRetryInteractionSpecs : IAsyncLifetime
 {
     private readonly IsolatedMohistIntegrationFixture _fixture;
+    private readonly string _teamId = $"T{Guid.NewGuid():N}";
     private readonly Dictionary<string, string> _connectionLeases = new(StringComparer.Ordinal);
 
     public SlackRetryInteractionSpecs(IsolatedMohistIntegrationFixture fixture) => _fixture = fixture;
@@ -324,7 +325,7 @@ public sealed class SlackRetryInteractionSpecs : IAsyncLifetime
             ProjectId = projectId,
             AgentId = agentId,
             ProviderKind = ConnectionProviderKind.Slack,
-            WorkspaceTeamId = "T123",
+            WorkspaceTeamId = _teamId,
             AppId = "A123",
             BotUserId = "U123",
             BotName = "Mohist",
@@ -341,12 +342,12 @@ public sealed class SlackRetryInteractionSpecs : IAsyncLifetime
         await db.SaveChangesAsync();
 
         var agentAppId = $"agent_app_{Guid.NewGuid():N}";
-        var enrollmentId = await SlackRuntimeLeaseTestSupport.EnsureEnrollmentAsync(_fixture, "T123");
+        var enrollmentId = await SlackRuntimeLeaseTestSupport.EnsureEnrollmentAsync(_fixture, _teamId);
         db.ManagedSlackAgentApps.Add(new ManagedSlackAgentAppRow
         {
             Id = agentAppId,
             EnrollmentId = enrollmentId,
-            WorkspaceTeamId = "T123",
+            WorkspaceTeamId = _teamId,
             AgentConnectionId = id,
             AppId = $"A_SPEC_{Guid.NewGuid():N}",
             BotUserId = "U123",
@@ -376,7 +377,7 @@ public sealed class SlackRetryInteractionSpecs : IAsyncLifetime
             Id = id,
             ProjectId = projectId,
             AgentId = agentId,
-            WorkspaceTeamId = "T123",
+            WorkspaceTeamId = _teamId,
             BotUserId = "U123",
             OwnerSlackUserId = "U_OWNER",
             AccessPolicy = AccessPolicyKind.OwnerOnly,

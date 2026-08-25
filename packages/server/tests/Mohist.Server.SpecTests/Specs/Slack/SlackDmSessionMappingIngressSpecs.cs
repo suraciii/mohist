@@ -34,6 +34,7 @@ namespace Mohist.Server.SpecTests.Specs.Slack;
 public sealed class SlackDmSessionMappingIngressSpecs
 {
     private readonly MohistIntegrationFixture _fixture;
+    private readonly string _teamId = $"T{Guid.NewGuid():N}";
     private readonly Dictionary<string, string> _connectionLeases = new(StringComparer.Ordinal);
 
     public SlackDmSessionMappingIngressSpecs(IsolatedMohistIntegrationFixture fixture) => _fixture = fixture;
@@ -142,7 +143,8 @@ public sealed class SlackDmSessionMappingIngressSpecs
                 .Replace("__PROJECT__", connection.ProjectId)
                 .Replace("__CONNECTION__", connection.Id)
                 .Replace("__JOB__", jobKey)
-                .Replace("__NOW__", now.UtcDateTime.ToString("O"));
+                .Replace("__NOW__", now.UtcDateTime.ToString("O"))
+                .Replace("T123", _teamId);
             db.AgentSessions.Add(new AgentSessionRow
             {
                 Id = sessionId,
@@ -359,7 +361,7 @@ public sealed class SlackDmSessionMappingIngressSpecs
             ProjectId = projectId,
             AgentId = agentId,
             ProviderKind = ConnectionProviderKind.Slack,
-            WorkspaceTeamId = "T123",
+            WorkspaceTeamId = _teamId,
             AppId = "A123",
             BotUserId = "U123",
             BotName = "Mohist",
@@ -375,12 +377,12 @@ public sealed class SlackDmSessionMappingIngressSpecs
         await db.SaveChangesAsync();
 
         var agentAppId = $"agent_app_{Guid.NewGuid():N}";
-        var enrollmentId = await SlackRuntimeLeaseTestSupport.EnsureEnrollmentAsync(_fixture, "T123");
+        var enrollmentId = await SlackRuntimeLeaseTestSupport.EnsureEnrollmentAsync(_fixture, _teamId);
         db.ManagedSlackAgentApps.Add(new ManagedSlackAgentAppRow
         {
             Id = agentAppId,
             EnrollmentId = enrollmentId,
-            WorkspaceTeamId = "T123",
+            WorkspaceTeamId = _teamId,
             AgentConnectionId = id,
             AppId = $"A_SPEC_{Guid.NewGuid():N}",
             BotUserId = "U123",
@@ -411,7 +413,7 @@ public sealed class SlackDmSessionMappingIngressSpecs
         {
             Id = id,
             ProjectId = projectId,
-            WorkspaceTeamId = "T123",
+            WorkspaceTeamId = _teamId,
         };
     }
 

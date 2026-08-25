@@ -34,6 +34,7 @@ public class SlackTurnControlInteractionCollection : ICollectionFixture<Isolated
 public sealed class SlackTurnControlInteractionSpecs : IAsyncLifetime
 {
     private readonly IsolatedMohistIntegrationFixture _fixture;
+    private readonly string _teamId = $"T{Guid.NewGuid():N}";
     private readonly List<string> _runnerIds = [];
     private readonly Dictionary<string, string> _connectionLeases = new(StringComparer.Ordinal);
 
@@ -380,7 +381,7 @@ public sealed class SlackTurnControlInteractionSpecs : IAsyncLifetime
             ProjectId = projectId,
             AgentId = agentId,
             ProviderKind = ConnectionProviderKind.Slack,
-            WorkspaceTeamId = "T123",
+            WorkspaceTeamId = _teamId,
             AppId = "A123",
             BotUserId = "U123",
             BotName = "Mohist",
@@ -397,12 +398,12 @@ public sealed class SlackTurnControlInteractionSpecs : IAsyncLifetime
         await db.SaveChangesAsync();
 
         var agentAppId = $"agent_app_{Guid.NewGuid():N}";
-        var enrollmentId = await SlackRuntimeLeaseTestSupport.EnsureEnrollmentAsync(_fixture, "T123");
+        var enrollmentId = await SlackRuntimeLeaseTestSupport.EnsureEnrollmentAsync(_fixture, _teamId);
         db.ManagedSlackAgentApps.Add(new ManagedSlackAgentAppRow
         {
             Id = agentAppId,
             EnrollmentId = enrollmentId,
-            WorkspaceTeamId = "T123",
+            WorkspaceTeamId = _teamId,
             AgentConnectionId = id,
             AppId = $"A_SPEC_{Guid.NewGuid():N}",
             BotUserId = "U123",
@@ -433,7 +434,7 @@ public sealed class SlackTurnControlInteractionSpecs : IAsyncLifetime
             Id = id,
             ProjectId = projectId,
             AgentId = agentId,
-            WorkspaceTeamId = "T123",
+            WorkspaceTeamId = _teamId,
             BotUserId = "U123",
             OwnerSlackUserId = "U_OWNER",
             AccessPolicy = AccessPolicyKind.Anyone,
