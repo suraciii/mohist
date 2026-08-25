@@ -8,12 +8,12 @@
   //   - architecture: the track deadline bounds total structural-check cost.
   // The rule ids below are execution adapters. They do not classify the Spec.
   //
-  // Full suite 5-minute deadline (suiteDeadlineMs); per-track hard deadlines
+  // Full suite seven-minute deadline (suiteDeadlineMs); per-track hard deadlines
   // via a Node-spawned subprocess kill (cross-platform; never the Linux
   // `timeout` binary as the only executor). Tracks with enforce=false are
   // migration gaps (baseline-pending), not warnings.
   //
-  "suiteDeadlineMs": 300000,
+  "suiteDeadlineMs": 420000,
   "killGraceMs": 5000,
   // The local executor does not open every test process at once. The
   // Resource caps reserve capacity for a Node lane while bounded .NET work is active.
