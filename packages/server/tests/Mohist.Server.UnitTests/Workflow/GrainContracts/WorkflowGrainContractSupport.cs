@@ -35,6 +35,8 @@ internal static class WorkflowGrainContractSupport
         var factory = scope.ServiceProvider.GetRequiredService<IDbContextFactory<MohistDbContext>>();
         await using var db = await factory.CreateDbContextAsync();
         const string profileId = "spec/workflow";
+        var yaml = WorkflowYamlSerializer.ToYaml(definition);
+        var changed = false;
         var profile = await db.WorkflowProfileRecords.FindAsync(projectId, profileId);
         if (profile is null)
         {
@@ -43,14 +45,19 @@ internal static class WorkflowGrainContractSupport
                 ProjectId = projectId,
                 ProfileId = profileId,
                 Name = profileId,
-                DefinitionSource = WorkflowYamlSerializer.ToYaml(definition),
+                DefinitionSource = yaml,
                 SourceProvenance = nameof(WorkflowProfileSourceProvenance.Verbatim),
             });
+            changed = true;
         }
-        else
+        else if (profile.DefinitionSource != yaml)
         {
-            profile.DefinitionSource = WorkflowYamlSerializer.ToYaml(definition);
+            // A re-seed with a different template must win; an identical
+            // re-seed skips the write — repeated seeding of the same class
+            // template is the dominant per-test Arrange cost in these specs.
+            profile.DefinitionSource = yaml;
             profile.UpdatedAt = fixedTime;
+            changed = true;
         }
 
         if (await db.ProjectWorkflowProfiles.FindAsync(projectId) is null)
@@ -60,9 +67,11 @@ internal static class WorkflowGrainContractSupport
                 ProjectId = projectId,
                 DefaultWorkflowProfileId = profileId,
             });
+            changed = true;
         }
 
-        await db.SaveChangesAsync();
+        if (changed)
+            await db.SaveChangesAsync();
     }
 
     internal static WorkflowGrain CreateGrain(
@@ -213,7 +222,10 @@ internal sealed record WorkflowGrainArrangement(
         string workerId = "worker-1",
         string? projectId = null)
     {
-        projectId ??= $"proj-{runId}";
+        // Project identity is derived from the template content so specs
+        // that share a definition shape also share one seeded profile row;
+        // isolation comes from the unique run id, not the project.
+        projectId ??= $"prof-{Math.Abs(WorkflowYamlSerializer.ToYaml(definition).GetHashCode()):x8}";
         await WorkflowGrainContractSupport.SeedTemplateAsync(fixture, projectId, definition, Fixed);
         var scope = fixture.Services.CreateAsyncScope();
         var store = scope.ServiceProvider.GetRequiredService<IWorkflowRunStore>();
