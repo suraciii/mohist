@@ -12,6 +12,11 @@ public class ChecksParallelSpecs : WorkflowGrainSpecs
 {
     public ChecksParallelSpecs(WorkflowGrainFixture fixture) : base(fixture) { }
 
+    // MultipleChecks_PartialFailure_RetryResetsOnlyFailedCheck stays here
+    // pending investigation: through the direct report path the retried
+    // checks batch is not re-claimable after RetryAsync, while the
+    // reconciliation-driven poll path re-offers it correctly.
+
     private static WorkflowDefinition MultiCheckStage(
         List<TaskDefinition>? tasks = null,
         List<CheckDefinition>? checks = null,
@@ -48,57 +53,6 @@ public class ChecksParallelSpecs : WorkflowGrainSpecs
     }
 
     [Fact]
-    public async Task MultipleChecks_AllPass_WorkflowCompletes()
-    {
-        await StartWorkflowAsync(MultiCheckStage());
-
-        var (task, r1) = await PollWorkAnyAsync();
-        await ReportAsync(r1, task.WorkId, "completed");
-
-        var (checks, r2) = await PollWorkAnyAsync();
-        await ReportChecksPassAsync(r2, checks, "typecheck", "lint", "test");
-
-        var runner = Grains.GetGrain<IRunnerGrain>(r2);
-        Assert.Null(await runner.PollAsync(Services));
-    }
-
-    [Fact]
-    public async Task MultipleChecks_OneFails_WholeBatchFails()
-    {
-        await StartWorkflowAsync(MultiCheckStage());
-
-        var (task, r1) = await PollWorkAnyAsync();
-        await ReportAsync(r1, task.WorkId, "completed");
-
-        var (checks, r2) = await PollWorkAnyAsync();
-        await ReportChecksFailAsync(r2, checks, "lint", "lint errors", "typecheck", "test");
-
-        var runner = Grains.GetGrain<IRunnerGrain>(r2);
-        Assert.Null(await runner.PollAsync(Services));
-
-        await (await StartWorkflowAsync(MultiCheckStage())).GetRunStatusAsync();
-    }
-
-    [Fact]
-    public async Task MultipleChecks_OneFails_FailureReportsCorrectCheck()
-    {
-        var workflow = await StartWorkflowAsync(MultiCheckStage());
-
-        var (task, r1) = await PollWorkAnyAsync();
-        await ReportAsync(r1, task.WorkId, "completed");
-
-        var (checks, r2) = await PollWorkAnyAsync();
-        await ReportChecksFailAsync(r2, checks, "lint", "unused imports", "typecheck", "test");
-
-        var status = await GetQuerier().GetStatusAsync(_workflowId!);
-        Assert.NotNull(status);
-        Assert.Equal("failed", status.Status);
-        Assert.NotNull(status.Failure);
-        Assert.Equal("CheckFailed", status.Failure.Reason);
-        Assert.Equal("lint", status.Failure.CheckName);
-    }
-
-    [Fact]
     public async Task MultipleChecks_PartialFailure_RetryResetsOnlyFailedCheck()
     {
         var workflow = await StartWorkflowAsync(MultiCheckStage(
@@ -125,96 +79,6 @@ public class ChecksParallelSpecs : WorkflowGrainSpecs
         await ReportChecksPassAsync(r3, retried, "lint");
 
         var runner = Grains.GetGrain<IRunnerGrain>(r3);
-        Assert.Null(await runner.PollAsync(Services));
-    }
-
-    [Fact]
-    public async Task MultipleChecks_AllFail_FirstFailureRecorded()
-    {
-        var workflow = await StartWorkflowAsync(MultiCheckStage());
-
-        var (task, r1) = await PollWorkAnyAsync();
-        await ReportAsync(r1, task.WorkId, "completed");
-
-        var (checks, r2) = await PollWorkAnyAsync();
-        await ReportChecksAsync(r2, checks,
-            ("typecheck", "fail", "type errors"),
-            ("lint", "fail", "lint errors"),
-            ("test", "fail", "test failures"));
-
-        var status = await GetQuerier().GetStatusAsync(_workflowId!);
-        Assert.NotNull(status);
-        Assert.Equal("failed", status.Status);
-        Assert.NotNull(status.Failure);
-        Assert.Equal("typecheck", status.Failure.CheckName);
-    }
-
-    [Fact]
-    public async Task MultipleChecks_MixedResults_RecordsEachReportedCheck()
-    {
-        await StartWorkflowAsync(MultiCheckStage());
-
-        var (task, r1) = await PollWorkAnyAsync();
-        await ReportAsync(r1, task.WorkId, "completed");
-
-        var (checks, r2) = await PollWorkAnyAsync();
-        await ReportChecksAsync(r2, checks,
-            ("typecheck", "pass", null),
-            ("lint", "fail", "lint errors"),
-            ("test", "fail", "test failures"));
-
-        var run = await LoadRunAsync(_workflowId!);
-        var stage = run.Stages.Single();
-        var typecheck = stage.Checks.Single(c => c.Name == "typecheck");
-        var lint = stage.Checks.Single(c => c.Name == "lint");
-        var test = stage.Checks.Single(c => c.Name == "test");
-
-        Assert.Equal(WorkflowRunStatus.Failed, run.Status);
-        Assert.Equal(StageCheckStatus.Passed, typecheck.Status);
-        Assert.Equal(StageCheckStatus.Failed, lint.Status);
-        Assert.Equal("lint errors", lint.Message);
-        Assert.Equal(StageCheckStatus.Failed, test.Status);
-        Assert.Equal("test failures", test.Message);
-        Assert.Equal("lint", run.Failure?.CheckName);
-    }
-
-    [Fact]
-    public async Task MultipleChecks_FailedCheckWithRetry_RetryActionTargetsCorrectCheck()
-    {
-        var workflow = await StartWorkflowAsync(MultiCheckStage(
-            checks: [
-                new("typecheck", "TypeCheck", "spec/typecheck"),
-                new("lint", "Lint", "spec/lint")
-            ]));
-
-        var (task, r1) = await PollWorkAnyAsync();
-        await ReportAsync(r1, task.WorkId, "completed");
-
-        var (checks, r2) = await PollWorkAnyAsync();
-        await ReportChecksFailAsync(r2, checks, "lint", "unused imports", "typecheck");
-
-        var status = await GetQuerier().GetStatusAsync(_workflowId!);
-        Assert.NotNull(status);
-
-        var retryAction = status.AvailableActions.Find(a => a.Name == "retry");
-        Assert.NotNull(retryAction);
-        Assert.Equal("lint", retryAction.Target);
-
-        var rerunAction = status.AvailableActions.Find(a => a.Name == "rerun");
-        Assert.NotNull(rerunAction);
-        Assert.Equal("build", rerunAction.Target);
-    }
-
-    [Fact]
-    public async Task NoChecks_WorkflowCompletesAfterTasks()
-    {
-        var workflow = await StartWorkflowAsync(MultiCheckStage(
-            checks: []));
-
-        var (task, r1) = await PollWorkAnyAsync();
-        await ReportAsync(r1, task.WorkId, "completed");
-
-        var runner = Grains.GetGrain<IRunnerGrain>(r1);
         Assert.Null(await runner.PollAsync(Services));
     }
 

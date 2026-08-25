@@ -273,6 +273,11 @@ internal sealed record WorkflowGrainArrangement(
     public Task<ReportAck> ReportChecksPassAsync(WorkItem check, string checkName) =>
         ReportCheckResultsAsync(check, (checkName, CheckResultStatus.Passed, null));
 
+    public Task<ReportAck> ReportChecksPassAsync(WorkItem check, params string[] checkNames) =>
+        ReportCheckResultsAsync(
+            check,
+            checkNames.Select(name => (name, CheckResultStatus.Passed, (string?)null)).ToArray());
+
     /// <summary>
     /// Reports the claimed task with structured output and runtime follow-up
     /// tasks (the recovery-injection path).
