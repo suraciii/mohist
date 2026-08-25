@@ -1,8 +1,11 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
+using Mohist.Server.Infrastructure.Data.Db;
+using Mohist.Server.Infrastructure.Data.Workflow;
 using Mohist.Server.Infrastructure.Events;
 using Mohist.Server.Runner.Grains;
 using Mohist.Server.Runner.Services;
+using Mohist.Server.TestSupport;
 using Mohist.Server.Workflow.Domain.Run;
 using Mohist.Server.Workflow.Grains;
 using Mohist.Workflow.Definition;
@@ -10,8 +13,11 @@ using Xunit;
 
 namespace Mohist.Server.SpecTests.Specs.Workflow.Grain;
 
-public partial class WorkflowArtifactBindingSpecs
+[Collection("WorkflowGrain")]
+public sealed class WorkflowArtifactReportArbitrationSpecs : WorkflowGrainSpecs
 {
+    public WorkflowArtifactReportArbitrationSpecs(WorkflowGrainFixture fixture) : base(fixture) { }
+
     [Fact]
     public async Task ConcurrentSuccessAndFailure_SelectsExactlyOneTerminalResult()
     {
@@ -98,7 +104,7 @@ public partial class WorkflowArtifactBindingSpecs
                 Mohist.Server.Workflow.Domain.Run.TaskReportStatus.Succeeded,
                 Output: null,
                 Artifacts: null,
-                ArtifactUploadIds: new[] { uploadId },
+                ArtifactUploadIds: new System.Collections.Generic.List<string> { uploadId },
                 TaskRunId: work.TaskRunId));
 
         Assert.Equal(ReportAck.Stale, ack);
@@ -187,5 +193,36 @@ public partial class WorkflowArtifactBindingSpecs
             .Where(row => row.WorkflowRunId == work.WorkflowRunId)
             .ToListAsync());
         Assert.NotNull(await db.WorkflowArtifactPendingUploads.FindAsync(uploadId));
+    }
+
+
+    private async Task<string> SeedPendingUploadAsync(string workflowRunId, string workId, string taskRunId, string path)
+    {
+        await using var db = CreateDb();
+        var uploadId = $"artup_{Guid.NewGuid():N}";
+        db.WorkflowArtifactPendingUploads.Add(new WorkflowArtifactPendingUploadRow
+        {
+            UploadId = uploadId,
+            WorkflowRunId = workflowRunId,
+            WorkId = workId,
+            TaskRunId = taskRunId,
+            Path = path,
+            ContentType = "text/plain",
+            ContentHash = $"sha256:{Guid.NewGuid():N}",
+            Size = 42,
+            StoragePath = $"workflows/{workflowRunId}/tasks/{taskRunId}/artifacts/{uploadId}/content",
+            CreatedAt = TestTime.UtcNow,
+            ExpiresAt = TestTime.UtcNow.AddDays(1),
+        });
+        await db.SaveChangesAsync();
+        return uploadId;
+    }
+
+    private MohistDbContext CreateDb()
+    {
+        var options = new DbContextOptionsBuilder<MohistDbContext>()
+            .UseSqlite(_fixture.ConnectionString)
+            .Options;
+        return new MohistDbContext(options);
     }
 }
