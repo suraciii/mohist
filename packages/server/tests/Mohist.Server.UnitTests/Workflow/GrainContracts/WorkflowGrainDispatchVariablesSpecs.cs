@@ -472,6 +472,96 @@ public sealed class WorkflowGrainDispatchVariablesSpecs
         await store.PatchVariablesAsync(arrangement.ProjectId, issueNumber, patch);
     }
 
+    [Fact]
+    public async Task RuntimeTaskWithPlaceholder_RetryAfterVariableChange_UsesNewValue()
+    {
+        var arrangement = await ArrangeAsync(
+            "wr-dvs-placeholder-retry",
+            SingleStage(
+                tasks: [new("load-tasks", "Load tasks", "spec/load")],
+                checks: [new("check-1", "Check 1", "spec/check")]));
+        await PatchIssueVariablesAsync(arrangement, new VariableBundle(
+            Vars: JsonSerializer.SerializeToElement(new { agent = new { type = "opencode", model = "model-a" } })));
+
+        var loadItem = (await arrangement.AssignAndClaimAsync())!;
+        var loadDispatch = await ToDispatchAsync(arrangement, loadItem);
+        await arrangement.Grain.AddTasksAsync(
+            new AddTasksBatchRequest([
+                new AddTasksBatchItem("T-001", "Implement feature", "mohist/opencode", JsonSerializer.Deserialize<JsonElement>("""
+                    {"options":"${{ vars.agent }}"}
+                    """))
+            ]));
+        await arrangement.ReportCompletedAsync(loadItem);
+
+        var dynamicItem = (await arrangement.AssignAndClaimAsync())!;
+        var dynamicTask = await ToDispatchAsync(arrangement, dynamicItem);
+        Assert.StartsWith("T-001.1", dynamicTask.WorkId);
+        Assert.Contains("${{ vars.agent }}", dynamicTask.With);
+        Assert.DoesNotContain("model-a", dynamicTask.With);
+        Assert.NotNull(dynamicTask.Variables);
+        using (var firstVars = JsonDocument.Parse(dynamicTask.Variables!))
+            Assert.Equal("model-a", firstVars.RootElement.GetProperty("vars").GetProperty("agent").GetProperty("model").GetString());
+
+        await arrangement.ReportFailedAsync(dynamicItem, "expected flaky");
+        await PatchIssueVariablesAsync(arrangement, new VariableBundle(
+            Stages: new Dictionary<string, StageVariables>
+            {
+                ["build"] = new(JsonSerializer.SerializeToElement(new { agent = new { type = "opencode", model = "model-b" } }))
+            }));
+        await arrangement.Grain.RetryAsync();
+
+        var retriedItem = (await arrangement.AssignAndClaimAsync())!;
+        var retriedTask = await ToDispatchAsync(arrangement, retriedItem);
+        Assert.StartsWith("T-001.2", retriedTask.WorkId);
+        Assert.Contains("${{ vars.agent }}", retriedTask.With);
+        Assert.DoesNotContain("model-a", retriedTask.With);
+        Assert.DoesNotContain("model-b", retriedTask.With);
+        Assert.NotNull(retriedTask.Variables);
+        using (var retryVars = JsonDocument.Parse(retriedTask.Variables!))
+            Assert.Equal("model-b", retryVars.RootElement.GetProperty("vars").GetProperty("agent").GetProperty("model").GetString());
+
+        await arrangement.ReportCompletedAsync(retriedItem);
+        var checkItem = (await arrangement.AssignAndClaimAsync())!;
+        await arrangement.ReportChecksPassAsync(checkItem, "check-1");
+    }
+
+    [Fact]
+    public async Task RuntimeTaskWithBakedLiteral_Retry_UsesBakedValue()
+    {
+        var arrangement = await ArrangeAsync(
+            "wr-dvs-baked-retry",
+            SingleStage(
+                tasks: [new("load-tasks", "Load tasks", "spec/load")],
+                checks: [new("check-1", "Check 1", "spec/check")]));
+
+        var loadItem = (await arrangement.AssignAndClaimAsync())!;
+        var loadDispatch = await ToDispatchAsync(arrangement, loadItem);
+        await arrangement.Grain.AddTasksAsync(
+            new AddTasksBatchRequest([
+                new AddTasksBatchItem("T-001", "Implement feature", "mohist/opencode", JsonSerializer.Deserialize<JsonElement>("""
+                    {"options":{"type":"opencode","model":"model-a"}}
+                    """))
+            ]));
+        await arrangement.ReportCompletedAsync(loadItem);
+
+        var dynamicItem = (await arrangement.AssignAndClaimAsync())!;
+        var dynamicTask = await ToDispatchAsync(arrangement, dynamicItem);
+        Assert.StartsWith("T-001.1", dynamicTask.WorkId);
+        Assert.Contains("model-a", dynamicTask.With);
+        await arrangement.ReportFailedAsync(dynamicItem, "expected flaky");
+        await arrangement.Grain.RetryAsync();
+
+        var retriedItem = (await arrangement.AssignAndClaimAsync())!;
+        var retriedTask = await ToDispatchAsync(arrangement, retriedItem);
+        Assert.StartsWith("T-001.2", retriedTask.WorkId);
+        Assert.Contains("model-a", retriedTask.With);
+        Assert.DoesNotContain("model-b", retriedTask.With);
+        await arrangement.ReportCompletedAsync(retriedItem);
+
+        var checkItem = (await arrangement.AssignAndClaimAsync())!;
+        await arrangement.ReportChecksPassAsync(checkItem, "check-1");
+    }
+
     private static WorkflowDefinition SingleStage(
         List<TaskDefinition>? tasks = null,
         List<CheckDefinition>? checks = null,
