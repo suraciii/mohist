@@ -358,7 +358,12 @@ internal sealed class TestGrainStorage<TState>(string key, ConcurrentDictionary<
 
     public Task ReadStateAsync()
     {
-        State = store.TryGetValue(key, out var value) ? value : default!;
+        // A missing record still materializes a default instance, matching
+        // the runtime storage provider: grains may dereference State after
+        // reading an absent record.
+        State = store.TryGetValue(key, out var value)
+            ? value
+            : (TState?)Activator.CreateInstance(typeof(TState)) ?? default!;
         return Task.CompletedTask;
     }
 

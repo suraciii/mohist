@@ -1,40 +1,36 @@
+using System.Collections.Concurrent;
 using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Time.Testing;
 using Mohist.Server.Infrastructure;
 using Mohist.Server.Infrastructure.Data.AgentJobs;
 using Mohist.Server.Infrastructure.Data.Sessions;
-using Mohist.Server.Infrastructure.Events;
-using Mohist.Server.SpecTests.Support;
+using Mohist.Server.Runner.Grains;
 using Mohist.Server.TestSupport;
-using Mohist.Server.Workflow.Domain.Run;
+using Mohist.Workflow.Definition;
 using Mohist.Server.Workflow.Grains;
 using Mohist.Server.Workflow.Services;
-using Mohist.Workflow.Definition;
-using Orleans;
-using Orleans.Core.Internal;
-using Orleans.TestingHost;
 using Xunit;
 
-namespace Mohist.Server.SpecTests.Specs.Workflow.Grain;
-
-[CollectionDefinition("WorkflowAgentHandoff", DisableParallelization = true)]
-public sealed class WorkflowAgentHandoffGrainCollection : ICollectionFixture<WorkflowAgentHandoffGrainFixture>;
+namespace Mohist.Server.UnitTests.Workflow.GrainContracts;
 
 /// <summary>
-/// The handoff fence is intentionally exercised without a Runner. These
-/// specs prove that durable preflight and acceptance do not accidentally
-/// materialize a participant a Runner could claim.
+/// The Workflow Agent handoff fence without a cluster: durable preflight
+/// freezing, fingerprint conflict rejection, acceptance receipts, and the
+/// guarantee that prepared or accepted handoffs never materialize an
+/// AgentJob or AgentSession. Activation loss is replayed by constructing a
+/// fresh grain over the same persistent storage (#681).
 /// </summary>
-[Collection("WorkflowAgentHandoff")]
-public sealed class WorkflowAgentHandoffGrainSpecs
+[Collection("MohistDb")]
+public sealed class WorkflowAgentHandoffSpecs
 {
-    private readonly WorkflowAgentHandoffGrainFixture _fixture;
+    private static readonly FakeTimeProvider TimeProvider =
+        new(new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero));
+    private readonly MohistDbFixture _fixture;
+    private readonly WorkflowAgentHandoffPreflightProbe _preflight = new();
 
-    public WorkflowAgentHandoffGrainSpecs(WorkflowAgentHandoffGrainFixture fixture)
+    public WorkflowAgentHandoffSpecs(MohistDbFixture fixture)
     {
         _fixture = fixture;
-        _fixture.Preflight.Reset();
     }
 
     [Fact]
@@ -43,14 +39,11 @@ public sealed class WorkflowAgentHandoffGrainSpecs
         var projectId = $"workflow-handoff-replay-{Guid.NewGuid():N}";
         var agentId = $"agent_replay_{Guid.NewGuid():N}";
         var canonicalAgentId = $"canonical-agent-{Guid.NewGuid():N}";
-        _fixture.Preflight.Set(
-            projectId,
-            agentId,
-            Definition(AgentConfigSchema.PiRuntime),
-            canonicalAgentId);
+        var store = new ConcurrentDictionary<string, WorkflowAgentHandoffState>();
+        _preflight.Set(projectId, agentId, Definition(AgentConfigSchema.PiRuntime), canonicalAgentId);
         var command = Command(projectId, agentId, "keep the original definition");
-        var handoff = Handoff(command);
 
+        var handoff = await ActivateAsync(Key(command), store);
         var prepared = await handoff.PrepareAsync(command);
 
         Assert.Equal(WorkflowAgentHandoffDisposition.Prepared, prepared.Disposition);
@@ -58,8 +51,9 @@ public sealed class WorkflowAgentHandoffGrainSpecs
         Assert.False(prepared.AlreadyPersisted);
         await AssertNoParticipantsAsync(projectId, prepared.Invocation!);
 
-        await handoff.AsReference<IGrainManagementExtension>().DeactivateOnIdle();
-        _fixture.Preflight.Set(projectId, agentId, Definition(AgentConfigSchema.OpenCodeRuntime));
+        // Activation loss: a fresh grain instance over the same storage.
+        handoff = await ActivateAsync(Key(command), store);
+        _preflight.Set(projectId, agentId, Definition(AgentConfigSchema.OpenCodeRuntime));
 
         var replay = await handoff.PrepareAsync(command);
         var plan = await handoff.GetPlanAsync();
@@ -71,7 +65,7 @@ public sealed class WorkflowAgentHandoffGrainSpecs
         Assert.Equal(AgentConfigSchema.PiRuntime, plan!.ExecutionDefinition!.Runtime);
         Assert.Equal(canonicalAgentId, plan.AgentId);
         AssertCompletionSnapshot(command.Completion!, plan.Command.Completion!);
-        Assert.Equal(1, _fixture.Preflight.ResolveCount(projectId, agentId));
+        Assert.Equal(1, _preflight.ResolveCount(projectId, agentId));
         await AssertNoParticipantsAsync(projectId, prepared.Invocation);
     }
 
@@ -80,9 +74,9 @@ public sealed class WorkflowAgentHandoffGrainSpecs
     {
         var projectId = $"workflow-handoff-conflict-{Guid.NewGuid():N}";
         var agentId = $"agent_conflict_{Guid.NewGuid():N}";
-        _fixture.Preflight.Set(projectId, agentId, Definition(AgentConfigSchema.PiRuntime));
+        _preflight.Set(projectId, agentId, Definition(AgentConfigSchema.PiRuntime));
         var first = Command(projectId, agentId, "first rendered prompt");
-        var handoff = Handoff(first);
+        var handoff = await ActivateAsync(Key(first), new());
 
         var prepared = await handoff.PrepareAsync(first);
         var conflict = first with { Prompt = "different rendered prompt" };
@@ -96,7 +90,7 @@ public sealed class WorkflowAgentHandoffGrainSpecs
         Assert.NotNull(plan);
         Assert.Equal(first.Prompt, plan!.Command.Prompt);
         Assert.Equal(prepared.Invocation, plan.Invocation);
-        Assert.Equal(1, _fixture.Preflight.ResolveCount(projectId, agentId));
+        Assert.Equal(1, _preflight.ResolveCount(projectId, agentId));
         await AssertNoParticipantsAsync(projectId, prepared.Invocation!);
     }
 
@@ -105,9 +99,9 @@ public sealed class WorkflowAgentHandoffGrainSpecs
     {
         var projectId = $"workflow-handoff-completion-{Guid.NewGuid():N}";
         var agentId = $"agent_completion_{Guid.NewGuid():N}";
-        _fixture.Preflight.Set(projectId, agentId, Definition(AgentConfigSchema.PiRuntime));
+        _preflight.Set(projectId, agentId, Definition(AgentConfigSchema.PiRuntime));
         var command = Command(projectId, agentId, "freeze completion effects");
-        var handoff = Handoff(command);
+        var handoff = await ActivateAsync(Key(command), new());
 
         var prepared = await handoff.PrepareAsync(command);
         var reordered = command with
@@ -141,7 +135,7 @@ public sealed class WorkflowAgentHandoffGrainSpecs
         Assert.Equal(WorkflowAgentHandoffCodec.Fingerprint(command), error.ExistingFingerprint);
         Assert.NotNull(plan);
         AssertCompletionSnapshot(command.Completion!, plan!.Command.Completion!);
-        Assert.Equal(1, _fixture.Preflight.ResolveCount(projectId, agentId));
+        Assert.Equal(1, _preflight.ResolveCount(projectId, agentId));
         await AssertNoParticipantsAsync(projectId, prepared.Invocation!);
     }
 
@@ -150,12 +144,12 @@ public sealed class WorkflowAgentHandoffGrainSpecs
     {
         var projectId = $"workflow-handoff-invalid-completion-{Guid.NewGuid():N}";
         var agentId = $"agent_invalid_completion_{Guid.NewGuid():N}";
-        _fixture.Preflight.Set(projectId, agentId, Definition(AgentConfigSchema.PiRuntime));
+        _preflight.Set(projectId, agentId, Definition(AgentConfigSchema.PiRuntime));
         var command = Command(projectId, agentId, "do not resolve incomplete completion") with
         {
             Completion = Command(projectId, agentId, "unused").Completion! with { Stage = "" },
         };
-        var handoff = Handoff(command);
+        var handoff = await ActivateAsync(Key(command), new());
 
         var rejected = await handoff.PrepareAsync(command);
         var plan = await handoff.GetPlanAsync();
@@ -167,7 +161,7 @@ public sealed class WorkflowAgentHandoffGrainSpecs
         Assert.Null(plan!.Invocation);
         Assert.Null(plan.ExecutionDefinition);
         Assert.Null(plan.AgentId);
-        Assert.Equal(0, _fixture.Preflight.ResolveCount(projectId, agentId));
+        Assert.Equal(0, _preflight.ResolveCount(projectId, agentId));
         Assert.Empty(await ListEligibleAgentJobsAsync(projectId));
     }
 
@@ -177,10 +171,12 @@ public sealed class WorkflowAgentHandoffGrainSpecs
         var projectId = $"workflow-handoff-rejection-{Guid.NewGuid():N}";
         var agentId = $"agent_missing_{Guid.NewGuid():N}";
         var command = Command(projectId, agentId, "must not start");
-        var handoff = Handoff(command);
+        var store = new ConcurrentDictionary<string, WorkflowAgentHandoffState>();
+        var handoff = await ActivateAsync(Key(command), store);
 
         var rejected = await handoff.PrepareAsync(command);
-        _fixture.Preflight.Set(projectId, agentId, Definition(AgentConfigSchema.PiRuntime));
+        _preflight.Set(projectId, agentId, Definition(AgentConfigSchema.PiRuntime));
+        handoff = await ActivateAsync(Key(command), store);
         var replay = await handoff.PrepareAsync(command);
         var plan = await handoff.GetPlanAsync();
 
@@ -193,7 +189,7 @@ public sealed class WorkflowAgentHandoffGrainSpecs
         Assert.NotNull(plan);
         Assert.Null(plan!.Invocation);
         Assert.Null(plan.ExecutionDefinition);
-        Assert.Equal(1, _fixture.Preflight.ResolveCount(projectId, agentId));
+        Assert.Equal(1, _preflight.ResolveCount(projectId, agentId));
         Assert.Empty(await ListEligibleAgentJobsAsync(projectId));
     }
 
@@ -203,11 +199,12 @@ public sealed class WorkflowAgentHandoffGrainSpecs
         var projectId = $"workflow-handoff-rejection-replay-{Guid.NewGuid():N}";
         var agentId = $"agent_missing_replay_{Guid.NewGuid():N}";
         var command = Command(projectId, agentId, "persist the definitive rejection");
-        var handoff = Handoff(command);
+        var store = new ConcurrentDictionary<string, WorkflowAgentHandoffState>();
+        var handoff = await ActivateAsync(Key(command), store);
 
         var rejected = await handoff.PrepareAsync(command);
-        await handoff.AsReference<IGrainManagementExtension>().DeactivateOnIdle();
-        _fixture.Preflight.Set(projectId, agentId, Definition(AgentConfigSchema.PiRuntime));
+        handoff = await ActivateAsync(Key(command), store);
+        _preflight.Set(projectId, agentId, Definition(AgentConfigSchema.PiRuntime));
 
         var replay = await handoff.PrepareAsync(command);
         var plan = await handoff.GetPlanAsync();
@@ -217,7 +214,7 @@ public sealed class WorkflowAgentHandoffGrainSpecs
         Assert.Equal(WorkflowAgentHandoffDisposition.Rejected, replay.Disposition);
         Assert.True(replay.AlreadyPersisted);
         Assert.Equal(rejected.Rejection, replay.Rejection);
-        Assert.Equal(1, _fixture.Preflight.ResolveCount(projectId, agentId));
+        Assert.Equal(1, _preflight.ResolveCount(projectId, agentId));
         Assert.NotNull(plan);
         Assert.Equal(WorkflowAgentHandoffDisposition.Rejected, plan!.Disposition);
         Assert.Null(plan.Invocation);
@@ -229,9 +226,9 @@ public sealed class WorkflowAgentHandoffGrainSpecs
     {
         var projectId = $"workflow-handoff-accept-{Guid.NewGuid():N}";
         var agentId = $"agent_accept_{Guid.NewGuid():N}";
-        _fixture.Preflight.Set(projectId, agentId, Definition(AgentConfigSchema.PiRuntime));
+        _preflight.Set(projectId, agentId, Definition(AgentConfigSchema.PiRuntime));
         var command = Command(projectId, agentId, "await workflow acceptance");
-        var handoff = Handoff(command);
+        var handoff = await ActivateAsync(Key(command), new());
         var prepared = await handoff.PrepareAsync(command);
 
         var accepted = await handoff.AcceptAsync(new WorkflowAgentHandoffAcceptance(
@@ -257,9 +254,10 @@ public sealed class WorkflowAgentHandoffGrainSpecs
     {
         var projectId = $"workflow-handoff-accept-replay-{Guid.NewGuid():N}";
         var agentId = $"agent_accept_replay_{Guid.NewGuid():N}";
-        _fixture.Preflight.Set(projectId, agentId, Definition(AgentConfigSchema.PiRuntime));
+        _preflight.Set(projectId, agentId, Definition(AgentConfigSchema.PiRuntime));
         var command = Command(projectId, agentId, "replay the acceptance receipt");
-        var handoff = Handoff(command);
+        var store = new ConcurrentDictionary<string, WorkflowAgentHandoffState>();
+        var handoff = await ActivateAsync(Key(command), store);
         var prepared = await handoff.PrepareAsync(command);
         var acceptance = new WorkflowAgentHandoffAcceptance(
             command.CommandId,
@@ -267,7 +265,7 @@ public sealed class WorkflowAgentHandoffGrainSpecs
 
         var accepted = await handoff.AcceptAsync(acceptance);
         var acceptedPlan = await handoff.GetPlanAsync();
-        await handoff.AsReference<IGrainManagementExtension>().DeactivateOnIdle();
+        handoff = await ActivateAsync(Key(command), store);
 
         var replay = await handoff.AcceptAsync(acceptance);
         var replayPlan = await handoff.GetPlanAsync();
@@ -287,9 +285,9 @@ public sealed class WorkflowAgentHandoffGrainSpecs
     {
         var projectId = $"workflow-handoff-accept-conflict-{Guid.NewGuid():N}";
         var agentId = $"agent_accept_conflict_{Guid.NewGuid():N}";
-        _fixture.Preflight.Set(projectId, agentId, Definition(AgentConfigSchema.PiRuntime));
+        _preflight.Set(projectId, agentId, Definition(AgentConfigSchema.PiRuntime));
         var command = Command(projectId, agentId, "accept the original prompt");
-        var handoff = Handoff(command);
+        var handoff = await ActivateAsync(Key(command), new());
         var prepared = await handoff.PrepareAsync(command);
         var accepted = await handoff.AcceptAsync(new WorkflowAgentHandoffAcceptance(
             command.CommandId,
@@ -316,29 +314,45 @@ public sealed class WorkflowAgentHandoffGrainSpecs
     {
         var projectId = $"workflow-handoff-key-{Guid.NewGuid():N}";
         var agentId = $"agent_key_{Guid.NewGuid():N}";
-        _fixture.Preflight.Set(projectId, agentId, Definition(AgentConfigSchema.PiRuntime));
+        _preflight.Set(projectId, agentId, Definition(AgentConfigSchema.PiRuntime));
         var command = Command(projectId, agentId, "do not persist under another command");
         var wrongKey = WorkflowAgentHandoffCodec.KeyFor(
             projectId,
             command.WorkflowRunId,
             command.TaskRunId,
             $"other-{command.CommandId}");
-        var handoff = _fixture.Grains.GetGrain<IWorkflowAgentHandoffGrain>(wrongKey);
+        var handoff = await ActivateAsync(wrongKey, new());
 
         var error = await Assert.ThrowsAsync<InvalidOperationException>(
             () => handoff.PrepareAsync(command));
 
         Assert.Contains("grain key does not match", error.Message, StringComparison.Ordinal);
-        Assert.Equal(0, _fixture.Preflight.ResolveCount(projectId, agentId));
+        Assert.Equal(0, _preflight.ResolveCount(projectId, agentId));
     }
 
-    private IWorkflowAgentHandoffGrain Handoff(WorkflowAgentHandoffCommand command) =>
-        _fixture.Grains.GetGrain<IWorkflowAgentHandoffGrain>(
-            WorkflowAgentHandoffCodec.KeyFor(
-                command.ProjectId,
-                command.WorkflowRunId,
-                command.TaskRunId,
-                command.CommandId));
+    /// <summary>
+    /// Constructs an activated handoff grain over <paramref name="store"/>.
+    /// The persisted state is read before OnActivateAsync, mirroring how the
+    /// runtime hydrates [PersistentState] before grain activation.
+    /// </summary>
+    private async Task<WorkflowAgentHandoffGrain> ActivateAsync(
+        string key,
+        ConcurrentDictionary<string, WorkflowAgentHandoffState> store)
+    {
+        var state = new TestGrainStorage<WorkflowAgentHandoffState>(key, store);
+        await state.ReadStateAsync();
+        var grain = new WorkflowAgentHandoffGrain(state, _preflight, TimeProvider);
+        WorkflowGrainContractSupport.AttachTestContext(grain, key);
+        await grain.OnActivateAsync(CancellationToken.None);
+        return grain;
+    }
+
+    private static string Key(WorkflowAgentHandoffCommand command) =>
+        WorkflowAgentHandoffCodec.KeyFor(
+            command.ProjectId,
+            command.WorkflowRunId,
+            command.TaskRunId,
+            command.CommandId);
 
     private static WorkflowAgentHandoffCommand Command(
         string projectId,
@@ -398,7 +412,7 @@ public sealed class WorkflowAgentHandoffGrainSpecs
 
     private async Task AssertNoParticipantsAsync(string projectId, WorkflowAgentInvocation invocation)
     {
-        await using var scope = _fixture.Cluster.GetSiloServiceProvider(null).CreateAsyncScope();
+        await using var scope = _fixture.Services.CreateAsyncScope();
         var jobs = scope.ServiceProvider.GetRequiredService<IAgentJobStore>();
         var sessions = scope.ServiceProvider.GetRequiredService<IAgentSessionStore>();
 
@@ -409,100 +423,45 @@ public sealed class WorkflowAgentHandoffGrainSpecs
 
     private async Task<IReadOnlyList<AgentJobLedgerRecord>> ListEligibleAgentJobsAsync(string projectId)
     {
-        await using var scope = _fixture.Cluster.GetSiloServiceProvider(null).CreateAsyncScope();
+        await using var scope = _fixture.Services.CreateAsyncScope();
         var jobs = scope.ServiceProvider.GetRequiredService<IAgentJobStore>();
         return await jobs.ListEligiblePendingAsync(projectId, 10);
     }
-}
 
-public sealed class WorkflowAgentHandoffGrainFixture : IAsyncLifetime
-{
-    private readonly RecordingEventStore _eventStore = new();
-    private readonly InMemoryEventBus _eventBus;
-    private TestSqliteDatabase _database = null!;
-
-    public WorkflowAgentHandoffGrainFixture()
+    /// <summary>In-memory stand-in for the production agent identity preflight.</summary>
+    public sealed class WorkflowAgentHandoffPreflightProbe : IWorkflowAgentHandoffPreflight
     {
-        _eventBus = new InMemoryEventBus(
-            _eventStore,
-            TimeProvider,
-            NullLogger<InMemoryEventBus>.Instance);
-    }
+        private readonly object _gate = new();
+        private readonly Dictionary<(string ProjectId, string AgentRef), AgentExecutionIdentitySnapshot> _definitions = [];
+        private readonly Dictionary<(string ProjectId, string AgentRef), int> _resolveCounts = [];
 
-    public InProcessTestCluster Cluster { get; private set; } = null!;
-    public IGrainFactory Grains => Cluster.Client;
-    public FakeTimeProvider TimeProvider { get; } = new(
-        new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero));
-    public WorkflowAgentHandoffPreflightProbe Preflight { get; } = new();
-
-    public async ValueTask InitializeAsync()
-    {
-        _database = TestSqliteDatabase.CreateMigrated();
-        var builder = new InProcessTestClusterBuilder().UseLogicalPorts();
-        builder.Options.InitialSilosCount = 1;
-        builder.ConfigureSilo((_, siloBuilder) =>
+        public void Set(
+            string projectId,
+            string agentRef,
+            AgentExecutionDefinition definition,
+            string? canonicalAgentId = null)
         {
-            GrainTestConfig.ConfigureSilo(
-                siloBuilder,
-                _database.ConnectionString,
-                _eventBus,
-                _eventStore,
-                TimeProvider);
-            siloBuilder.Services.AddSingleton<IWorkflowAgentHandoffPreflight>(Preflight);
-        });
-        Cluster = builder.Build();
-        await Cluster.DeployAsync();
-    }
-
-    public ValueTask DisposeAsync()
-    {
-        Cluster?.Dispose();
-        _database?.Dispose();
-        return ValueTask.CompletedTask;
-    }
-}
-
-public sealed class WorkflowAgentHandoffPreflightProbe : IWorkflowAgentHandoffPreflight
-{
-    private readonly object _gate = new();
-    private readonly Dictionary<(string ProjectId, string AgentRef), AgentExecutionIdentitySnapshot> _definitions = [];
-    private readonly Dictionary<(string ProjectId, string AgentRef), int> _resolveCounts = [];
-
-    public void Reset()
-    {
-        lock (_gate)
-        {
-            _definitions.Clear();
-            _resolveCounts.Clear();
+            lock (_gate)
+                _definitions[(projectId, agentRef)] = new(
+                    canonicalAgentId ?? agentRef,
+                    definition);
         }
-    }
 
-    public void Set(
-        string projectId,
-        string agentRef,
-        AgentExecutionDefinition definition,
-        string? canonicalAgentId = null)
-    {
-        lock (_gate)
-            _definitions[(projectId, agentRef)] = new(
-                canonicalAgentId ?? agentRef,
-                definition);
-    }
-
-    public int ResolveCount(string projectId, string agentRef)
-    {
-        lock (_gate)
-            return _resolveCounts.GetValueOrDefault((projectId, agentRef));
-    }
-
-    public Task<AgentExecutionIdentitySnapshot?> ResolveAgentAsync(string projectId, string agentRef)
-    {
-        lock (_gate)
+        public int ResolveCount(string projectId, string agentRef)
         {
-            var key = (projectId, agentRef);
-            _resolveCounts[key] = _resolveCounts.GetValueOrDefault(key) + 1;
-            return Task.FromResult<AgentExecutionIdentitySnapshot?>(
-                _definitions.GetValueOrDefault(key));
+            lock (_gate)
+                return _resolveCounts.GetValueOrDefault((projectId, agentRef));
+        }
+
+        public Task<AgentExecutionIdentitySnapshot?> ResolveAgentAsync(string projectId, string agentRef)
+        {
+            lock (_gate)
+            {
+                var key = (projectId, agentRef);
+                _resolveCounts[key] = _resolveCounts.GetValueOrDefault(key) + 1;
+                return Task.FromResult<AgentExecutionIdentitySnapshot?>(
+                    _definitions.GetValueOrDefault(key));
+            }
         }
     }
 }
