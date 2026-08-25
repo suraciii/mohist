@@ -1,4 +1,8 @@
+using System.Reflection;
+using System.Threading.Tasks;
+using Mohist.Server.Contracts;
 using Mohist.Server.Runner.Grains;
+using Mohist.Server.Sessions.Grains;
 using Mohist.Server.Infrastructure.Data.Workflow;
 using Mohist.Server.Workflow.Domain;
 using Mohist.Server.Workflow.Domain.Run;
@@ -16,18 +20,27 @@ namespace Mohist.Server.UnitTests.Workflow.GrainContracts;
 internal sealed class WorkflowGrainTestProfileCoordinatorFactory : IGrainFactory
 {
     private readonly IWorkflowProfileReferenceCoordinatorGrain _stub;
+    private readonly Func<string, IRunnerUpdateOperationGrain>? _operations;
 
     public WorkflowGrainTestProfileCoordinatorFactory(
         IWorkflowRunStore runs,
-        WorkflowDefinitionResolver resolver)
+        WorkflowDefinitionResolver resolver,
+        Func<string, IRunnerUpdateOperationGrain>? operations = null)
     {
         _stub = new WorkflowGrainTestProfileCoordinator(runs, resolver);
+        _operations = operations;
     }
 
     TGrainInterface IGrainFactory.GetGrain<TGrainInterface>(string primaryKey, string? grainClassNamePrefix)
     {
         if (typeof(TGrainInterface) == typeof(IWorkflowProfileReferenceCoordinatorGrain))
             return (TGrainInterface)(object)_stub;
+        if (typeof(TGrainInterface) == typeof(IRunnerUpdateOperationGrain) && _operations is not null)
+            return (TGrainInterface)(object)_operations(primaryKey);
+        // Direct arrangements never create agent sessions; the absent-session
+        // contract is GetAsync() == null, which callers treat as a no-op.
+        if (typeof(TGrainInterface) == typeof(IAgentSessionGrain))
+            return (TGrainInterface)(object)AbsentAgentSessionGrain.Create();
         throw new NotSupportedException(
             $"{nameof(WorkflowGrainTestProfileCoordinatorFactory)} does not support {typeof(TGrainInterface).Name}");
     }
@@ -167,4 +180,26 @@ internal sealed class WorkflowGrainTestProfileCoordinator(
         WorkflowProfileCommandPayload.UpdateProfile payload,
         string commandId,
         long? expectedRevision) => throw new NotSupportedException();
+}
+
+
+/// <summary>
+/// Session grain stand-in representing "no session exists": the workflow's
+/// interruption path treats a missing session as an accepted no-op. Every
+/// other member is a programming error in the arrangement.
+/// </summary>
+internal class AbsentAgentSessionGrain : DispatchProxy
+{
+    public static IAgentSessionGrain Create() =>
+        Create<IAgentSessionGrain, AbsentAgentSessionGrain>();
+
+    protected override object? Invoke(MethodInfo? targetMethod, object?[]? args)
+    {
+        if (targetMethod?.Name == nameof(IAgentSessionGrain.GetAsync))
+            return Task.FromResult<AgentSessionInfo?>(null);
+        if (targetMethod?.Name == nameof(IAgentSessionGrain.ApplyInterruptionAsync))
+            return Task.CompletedTask;
+        throw new NotSupportedException(
+            $"{nameof(AbsentAgentSessionGrain)} does not support {targetMethod?.Name}");
+    }
 }
