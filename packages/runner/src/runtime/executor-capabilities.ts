@@ -536,13 +536,18 @@ function buildAgentTurnCapability(
         }
       }
 
-      self.runtimeTurnRegistry?.register(workKey(work), {
-        agentSessionId: selectedBinding.agentSessionId,
-        agentTurnId: reporter?.getAgentTurnId() ?? work.initialTurnId ?? null,
-        runtime: 'opencode',
-        runtimeSessionId: selectedBinding.runtimeSessionId,
-        workDir: selectedBinding.workDir,
-      })
+      // Worktree cleanup runs the same Agent capability again with a
+      // synthetic Session turn. Keep the work-level binding on the original
+      // execution turn so terminal recovery remains attributable to it.
+      if (cleanupAttempt === undefined) {
+        self.runtimeTurnRegistry?.register(workKey(work), {
+          agentSessionId: selectedBinding.agentSessionId,
+          agentTurnId: reporter?.getAgentTurnId() ?? work.initialTurnId ?? null,
+          runtime: 'opencode',
+          runtimeSessionId: selectedBinding.runtimeSessionId,
+          workDir: selectedBinding.workDir,
+        })
+      }
 
       const observer = createWorkflowObserver(reporter)
       let result: RuntimeResult<RuntimeTurnResult>

@@ -276,13 +276,17 @@ export async function piAction(
     })
   }
 
-  context.runtimeTurnRegistry?.register(context.runtimeTurnKey ?? '', {
-    agentSessionId: agentSessionId ?? '',
-    agentTurnId: reporter?.getAgentTurnId() ?? null,
-    runtime: 'pi',
-    runtimeSessionId,
-    workDir: context.workDir,
-  })
+  // Cleanup gets its own synthetic Session turn, but the work-level
+  // recovery binding must remain on the original execution turn.
+  if (context.cleanupAttempt === undefined || context.cleanupAttempt === null) {
+    context.runtimeTurnRegistry?.register(context.runtimeTurnKey ?? '', {
+      agentSessionId: agentSessionId ?? '',
+      agentTurnId: reporter?.getAgentTurnId() ?? null,
+      runtime: 'pi',
+      runtimeSessionId,
+      workDir: context.workDir,
+    })
+  }
 
   const request: PiTurnRequest = {
     target: { runtime: 'pi', runtimeSessionId, workDir: context.workDir },
