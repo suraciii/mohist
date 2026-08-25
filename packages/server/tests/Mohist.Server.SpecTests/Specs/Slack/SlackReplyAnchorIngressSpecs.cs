@@ -254,6 +254,75 @@ public sealed class SlackReplyAnchorIngressSpecs : IAsyncLifetime
     }
 
     [Fact]
+    public async Task Direct_message_followup_anchors_reply_to_its_own_triggering_message()
+    {
+        var connection = await CreateConnectionAsync();
+        var runnerId = await RegisterRunnerAsync(connection.ProjectId);
+        const string conversationId = "D-REPLY-FOLLOWUP";
+        const string initialTs = "1710000000.000400";
+        const string followupTs = "1710000000.000410";
+
+        var acceptedInitial = await PostDirectMessageAsync(connection, conversationId, initialTs, "start the work");
+        var sessionId = acceptedInitial.GetProperty("sessionId").GetString()!;
+        var initial = await _fixture.Grains.GetGrain<IAgentSessionGrain>(sessionId).GetInitialLaunchAsync()
+            ?? throw new InvalidOperationException("DM ingress did not create the initial Session input.");
+        var initialDispatch = await PollInitialDispatchAsync(runnerId, initial.Turn!.JobId!);
+        await BindRuntimeSessionAsync(connection, runnerId, sessionId, initialDispatch);
+        await _fixture.Grains.GetGrain<IAgentSessionGrain>(sessionId).MarkTurnTerminalAsync(
+            acceptedInitial.GetProperty("turnId").GetString()!, AgentTurnStatus.Completed, null);
+
+        var tracker = _fixture.Services.GetRequiredService<RunnerConnectionTracker>();
+        var runnerHub = _fixture.Services.GetRequiredService<IRunnerControlTransport>() as RecordingRunnerControlTransport
+            ?? throw new InvalidOperationException("Recording runner hub context was not registered.");
+        runnerHub.Clear();
+        tracker.Register(runnerId, "runner-reply-anchor");
+        try
+        {
+            var accepted = await PostDirectMessageAsync(connection, conversationId, followupTs, "continue with the next step");
+
+            Assert.True(accepted.GetProperty("followup").GetBoolean());
+            Assert.Equal(sessionId, accepted.GetProperty("sessionId").GetString());
+            var delivery = Assert.Single(
+                runnerHub.SentMessages,
+                message => message.ConnectionId == runnerId && message.Method == "session.followup");
+            var payload = JsonSerializer.SerializeToElement(delivery.Arguments.Single(), JSON.Options);
+            var operationId = payload.GetProperty("operationId").GetString()!;
+            Assert.Equal("slack", payload.GetProperty("executionSource").GetString());
+
+            // The DM follow-up anchors to its own triggering message so the
+            // terminal reply replaces the progress projection in place.
+            AssertReplyAnchor(
+                payload.GetProperty("slackExecutionContext"),
+                connection,
+                conversationId,
+                threadRootMessageId: followupTs,
+                triggeringMessageId: followupTs,
+                sessionId,
+                dispatchRef: operationId);
+
+            var grain = _fixture.Grains.GetGrain<IAgentSessionGrain>(sessionId);
+            var anchor = ValidationRequest(
+                connection, conversationId, followupTs, followupTs, sessionId, operationId);
+            Assert.Equal(new SlackReplyAnchorValidationResult(true, true), await grain.ValidateSlackReplyAnchorAsync(anchor));
+
+            // The session-initial root must no longer validate a follow-up
+            // reply: anchoring to a stale prior thread is the defect.
+            Assert.False((await grain.ValidateSlackReplyAnchorAsync(
+                anchor with { ThreadRootMessageId = initialTs })).Valid);
+
+            using var validReply = await PostAnchoredReplyAsync(connection, anchor, "follow-up answer");
+            Assert.True(validReply.IsSuccessStatusCode, await validReply.Content.ReadAsStringAsync());
+            using var staleRootReply = await PostAnchoredReplyAsync(
+                connection, anchor with { ThreadRootMessageId = initialTs }, "stale-thread answer");
+            Assert.Equal(System.Net.HttpStatusCode.Conflict, staleRootReply.StatusCode);
+        }
+        finally
+        {
+            tracker.Unregister(runnerId);
+        }
+    }
+
+    [Fact]
     public async Task Legacy_initial_root_fallback_validates_an_active_followup_anchor()
     {
         var connection = await CreateConnectionAsync();
