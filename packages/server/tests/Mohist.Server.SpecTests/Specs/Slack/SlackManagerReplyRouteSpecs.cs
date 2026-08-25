@@ -113,7 +113,8 @@ public sealed class SlackManagerReplyRouteSpecs
         using (var mismatch = BuildRequest(grant.ReplyCredential, new
         {
             conversationId = conversation,
-            threadTs = "1710000000.000099",
+            threadTs = triggeringMessage,
+            triggeringMessageId = "1710000000.000099",
             text = "should be rejected",
         }))
         using (var mismatchResponse = await _fixture.Client.SendAsync(mismatch))
@@ -125,6 +126,7 @@ public sealed class SlackManagerReplyRouteSpecs
         {
             conversationId = conversation,
             threadTs = triggeringMessage,
+            triggeringMessageId = triggeringMessage,
             text = "the authoritative answer",
         });
         using var firstResponse = await _fixture.Client.SendAsync(first);

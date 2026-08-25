@@ -273,7 +273,8 @@ public sealed class SlackStatusProjectionSpecs
 
         var rows = (await store.ListManagerAsync(enrollmentId)).Entries;
         var reply = Assert.Single(rows, row => row.Kind == SlackOutboxKinds.TerminalResult);
-        Assert.Equal("first answer", SlackDeliveryPayload.Parse(reply.PayloadJson).Text);
+        var replyPayload = SlackDeliveryPayload.Parse(reply.PayloadJson);
+        Assert.Equal("first answer", replyPayload.Text);
         Assert.DoesNotContain(rows, row => row.Kind == SlackOutboxKinds.ReplaceableProgress);
         Assert.Single(rows, row => row.DispatchRef == SlackStatusProjection.DispatchRef(source, "terminal-add"));
         Assert.Equal("warning", SlackDeliveryPayload.Parse(

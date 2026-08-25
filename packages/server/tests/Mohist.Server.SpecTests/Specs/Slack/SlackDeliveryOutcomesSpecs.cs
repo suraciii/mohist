@@ -232,6 +232,373 @@ public sealed class SlackDeliveryOutcomesSpecs
     }
 
     [Fact]
+    public async Task Agent_reply_dispatch_identity_separates_turns_and_keeps_retries_idempotent()
+    {
+        var connection = await CreateConnectionAsync();
+        await CreateDmMappingAsync(connection, "D-reply-turns");
+        await using var scope = _fixture.Services.CreateAsyncScope();
+        var outbox = scope.ServiceProvider.GetRequiredService<SlackOutboxStore>();
+
+        var first = await outbox.EnqueueAgentReplyAsync(
+            connection.ProjectId,
+            "D-reply-turns",
+            null,
+            "ACK",
+            replyDispatchRef: "agent-session-followup:session-1:turn-1");
+        var retry = await outbox.EnqueueAgentReplyAsync(
+            connection.ProjectId,
+            "D-reply-turns",
+            null,
+            "ACK",
+            replyDispatchRef: "agent-session-followup:session-1:turn-1");
+        var providerIdentity = new SlackProviderMessageIdentity("D-reply-turns", "1710000000.000500");
+        await outbox.MarkDeliveredAsync(connection.ProjectId, first.DeliveryId!, providerIdentity);
+        var deliveredRetry = await outbox.EnqueueAgentReplyAsync(
+            connection.ProjectId,
+            "D-reply-turns",
+            null,
+            "ACK",
+            replyDispatchRef: "agent-session-followup:session-1:turn-1");
+        var deliveredDistinct = await outbox.EnqueueAgentReplyAsync(
+            connection.ProjectId,
+            "D-reply-turns",
+            null,
+            "more detail",
+            replyDispatchRef: "agent-session-followup:session-1:turn-1");
+        var latestRetry = await outbox.EnqueueAgentReplyAsync(
+            connection.ProjectId,
+            "D-reply-turns",
+            null,
+            "more detail",
+            replyDispatchRef: "agent-session-followup:session-1:turn-1");
+        var secondTurn = await outbox.EnqueueAgentReplyAsync(
+            connection.ProjectId,
+            "D-reply-turns",
+            null,
+            "531",
+            replyDispatchRef: "agent-session-followup:session-1:turn-2");
+
+        Assert.Equal(first.DeliveryId, retry.DeliveryId);
+        Assert.Equal(first.DeliveryId, deliveredRetry.DeliveryId);
+        Assert.Equal(first.DeliveryId, deliveredDistinct.DeliveryId);
+        Assert.Equal(first.DeliveryId, latestRetry.DeliveryId);
+        Assert.NotEqual(first.DeliveryId, secondTurn.DeliveryId);
+        Assert.False(secondTurn.MergedIntoExisting);
+
+        var replies = (await outbox.ListAsync(connection.ProjectId, connection.Id)).Entries
+            .Where(row => row.Kind == SlackOutboxKinds.TerminalResult)
+            .ToArray();
+        Assert.Equal(2, replies.Length);
+        var firstReply = Assert.Single(
+            replies,
+            row => row.DispatchRef == "slack-reply:agent-session-followup:session-1:turn-1:terminal");
+        var secondReply = Assert.Single(
+            replies,
+            row => row.DispatchRef == "slack-reply:agent-session-followup:session-1:turn-2:terminal");
+        Assert.Equal(SlackOutboxStates.Pending, firstReply.State);
+        var firstPayload = SlackDeliveryPayload.Parse(firstReply.PayloadJson);
+        Assert.Equal("ACK\n\nmore detail", firstPayload.Text);
+        Assert.Equal(["ACK", "more detail"], firstPayload.ReplyParts);
+        Assert.Equal(firstPayload.Text, firstPayload.FallbackText);
+        Assert.Equal(SlackDeliveryOperations.ChatUpdate, firstPayload.Operation);
+        Assert.Equal(providerIdentity, firstPayload.ProviderMessageIdentity);
+        Assert.Equal("531", SlackDeliveryPayload.Parse(secondReply.PayloadJson).Text);
+    }
+
+    [Fact]
+    public async Task Anchored_retry_recognizes_the_latest_part_of_a_pre_reply_parts_payload()
+    {
+        var connection = await CreateConnectionAsync();
+        await CreateDmMappingAsync(connection, "D-reply-legacy-parts");
+        await using var scope = _fixture.Services.CreateAsyncScope();
+        var outbox = scope.ServiceProvider.GetRequiredService<SlackOutboxStore>();
+        const string dispatchRef = "agent-session-followup:legacy-parts:turn-1";
+
+        await outbox.EnqueueAgentReplyAsync(
+            connection.ProjectId, "D-reply-legacy-parts", null, "part one", replyDispatchRef: dispatchRef);
+        await outbox.EnqueueAgentReplyAsync(
+            connection.ProjectId, "D-reply-legacy-parts", null, "part two", replyDispatchRef: dispatchRef);
+
+        var db = scope.ServiceProvider.GetRequiredService<MohistDbContext>();
+        var row = await db.SlackOutboxRows.SingleAsync(candidate =>
+            candidate.ProjectId == connection.ProjectId && candidate.ConversationId == "D-reply-legacy-parts");
+        row.PayloadJson = JsonSerializer.Serialize(SlackDeliveryPayload.Parse(row.PayloadJson) with { ReplyParts = null });
+        await db.SaveChangesAsync();
+
+        var retry = await outbox.EnqueueAgentReplyAsync(
+            connection.ProjectId, "D-reply-legacy-parts", null, "part two", replyDispatchRef: dispatchRef);
+
+        Assert.True(retry.Accepted);
+        var persisted = (await outbox.ListAsync(connection.ProjectId, connection.Id)).Entries.Single();
+        Assert.Equal("part one\n\npart two", SlackDeliveryPayload.Parse(persisted.PayloadJson).Text);
+    }
+
+    [Fact]
+    public async Task Authoritative_reply_parts_do_not_treat_a_paragraph_suffix_as_a_retry()
+    {
+        var connection = await CreateConnectionAsync();
+        await CreateDmMappingAsync(connection, "D-reply-authoritative-parts");
+        await using var scope = _fixture.Services.CreateAsyncScope();
+        var outbox = scope.ServiceProvider.GetRequiredService<SlackOutboxStore>();
+        const string dispatchRef = "agent-session-followup:authoritative-parts:turn-1";
+
+        await outbox.EnqueueAgentReplyAsync(
+            connection.ProjectId,
+            "D-reply-authoritative-parts",
+            null,
+            "summary\n\nnext",
+            replyDispatchRef: dispatchRef);
+        await outbox.EnqueueAgentReplyAsync(
+            connection.ProjectId,
+            "D-reply-authoritative-parts",
+            null,
+            "next",
+            replyDispatchRef: dispatchRef);
+
+        var row = (await outbox.ListAsync(connection.ProjectId, connection.Id)).Entries.Single();
+        var payload = SlackDeliveryPayload.Parse(row.PayloadJson);
+        Assert.Equal("summary\n\nnext\n\nnext", payload.Text);
+        Assert.Equal(["summary\n\nnext", "next"], payload.ReplyParts);
+    }
+
+    [Fact]
+    public async Task Explicit_reply_reuses_identical_in_flight_retry_and_rejects_different_content()
+    {
+        var connection = await CreateConnectionAsync();
+        await CreateDmMappingAsync(connection, "D-reply-in-flight");
+        await using var scope = _fixture.Services.CreateAsyncScope();
+        var outbox = scope.ServiceProvider.GetRequiredService<SlackOutboxStore>();
+        const string replyDispatchRef = "agent-session-followup:session-1:turn-in-flight";
+
+        var first = await outbox.EnqueueAgentReplyAsync(
+            connection.ProjectId,
+            "D-reply-in-flight",
+            null,
+            "original",
+            replyDispatchRef: replyDispatchRef);
+        var claimed = await outbox.ClaimAsync(connection.ProjectId, connection.Id, "adapter-in-flight");
+        Assert.Equal(first.DeliveryId, claimed?.Id);
+
+        var claimedRetry = await outbox.EnqueueAgentReplyAsync(
+            connection.ProjectId,
+            "D-reply-in-flight",
+            null,
+            "original",
+            replyDispatchRef: replyDispatchRef);
+        var claimedAddition = await outbox.EnqueueAgentReplyAsync(
+            connection.ProjectId,
+            "D-reply-in-flight",
+            null,
+            "claimed addition",
+            replyDispatchRef: replyDispatchRef);
+        Assert.True(claimedRetry.Accepted);
+        Assert.False(claimedAddition.Accepted);
+        Assert.True(claimedAddition.ConflictingDuplicate);
+        var claimedRow = (await outbox.ListAsync(connection.ProjectId, connection.Id)).Entries.Single();
+        Assert.Equal(SlackOutboxStates.Claimed, claimedRow.State);
+        Assert.Equal("original", SlackDeliveryPayload.Parse(claimedRow.PayloadJson).Text);
+
+        await outbox.MarkDeliveryUncertainAsync(
+            connection.ProjectId, claimedRow.Id, "provider response lost", "adapter-in-flight");
+        var uncertainRetry = await outbox.EnqueueAgentReplyAsync(
+            connection.ProjectId,
+            "D-reply-in-flight",
+            null,
+            "original",
+            replyDispatchRef: replyDispatchRef);
+        var uncertainAddition = await outbox.EnqueueAgentReplyAsync(
+            connection.ProjectId,
+            "D-reply-in-flight",
+            null,
+            "uncertain addition",
+            replyDispatchRef: replyDispatchRef);
+        Assert.True(uncertainRetry.Accepted);
+        Assert.False(uncertainAddition.Accepted);
+        Assert.True(uncertainAddition.ConflictingDuplicate);
+        var uncertainRow = (await outbox.ListAsync(connection.ProjectId, connection.Id)).Entries.Single();
+        Assert.Equal(SlackOutboxStates.DeliveryUncertain, uncertainRow.State);
+        Assert.Equal("original", SlackDeliveryPayload.Parse(uncertainRow.PayloadJson).Text);
+    }
+
+    [Fact]
+    public async Task Anchored_agent_reply_promotes_only_the_requested_connection_progress()
+    {
+        var first = await CreateConnectionAsync();
+        var second = await CreateConnectionAsync(first.ProjectId, "agent-2");
+        await CreateThreadMappingAsync(first, "C-shared-progress", "1710000000.000025");
+        await CreateThreadMappingAsync(second, "C-shared-progress", "1710000000.000025");
+        await using var scope = _fixture.Services.CreateAsyncScope();
+        var projection = scope.ServiceProvider.GetRequiredService<SlackStatusProjection>();
+        var outbox = scope.ServiceProvider.GetRequiredService<SlackOutboxStore>();
+        var source = new SlackMessageIdentity(first.WorkspaceTeamId, "C-shared-progress", "1710000000.000026");
+        var firstProgress = await projection.EnqueueWorkingAsync(
+            first.ProjectId, first.Id, source, "1710000000.000025", "first:progress");
+        var secondProgress = await projection.EnqueueWorkingAsync(
+            second.ProjectId, second.Id, source, "1710000000.000025", "second:progress");
+
+        var reply = await outbox.EnqueueAgentReplyAsync(
+            first.ProjectId,
+            "C-shared-progress",
+            "1710000000.000025",
+            "second answer",
+            connectionId: second.Id,
+            replyDispatchRef: "second:turn");
+
+        Assert.True(reply.Accepted);
+        Assert.Equal(second.Id, reply.ConnectionId);
+        Assert.Equal(secondProgress.Id, reply.DeliveryId);
+        var firstRows = (await outbox.ListAsync(first.ProjectId, first.Id)).Entries;
+        Assert.Contains(firstRows, row => row.Id == firstProgress.Id
+            && row.Kind == SlackOutboxKinds.ReplaceableProgress);
+        var secondRows = (await outbox.ListAsync(second.ProjectId, second.Id)).Entries;
+        Assert.Contains(secondRows, row => row.Id == secondProgress.Id
+            && row.Kind == SlackOutboxKinds.TerminalResult);
+    }
+
+    [Fact]
+    public async Task Anchored_agent_reply_promotes_only_the_triggering_turn_progress()
+    {
+        var connection = await CreateConnectionAsync();
+        await CreateDmMappingAsync(connection, "D-shared-turns");
+        await using var scope = _fixture.Services.CreateAsyncScope();
+        var projection = scope.ServiceProvider.GetRequiredService<SlackStatusProjection>();
+        var outbox = scope.ServiceProvider.GetRequiredService<SlackOutboxStore>();
+        var firstSource = new SlackMessageIdentity(
+            connection.WorkspaceTeamId, "D-shared-turns", "1710000000.000031");
+        var secondSource = new SlackMessageIdentity(
+            connection.WorkspaceTeamId, "D-shared-turns", "1710000000.000032");
+        var firstProgress = await projection.EnqueueWorkingAsync(
+            connection.ProjectId, connection.Id, firstSource, null, "first-turn:progress");
+        var secondProgress = await projection.EnqueueWorkingAsync(
+            connection.ProjectId, connection.Id, secondSource, null, "second-turn:progress");
+
+        var reply = await outbox.EnqueueAgentReplyAsync(
+            connection.ProjectId,
+            "D-shared-turns",
+            firstSource.MessageTs,
+            "second turn answer",
+            connectionId: connection.Id,
+            triggeringMessageId: secondSource.MessageTs,
+            replyDispatchRef: "second-turn:reply");
+
+        Assert.True(reply.Accepted);
+        Assert.Equal(secondProgress.Id, reply.DeliveryId);
+        var rows = (await outbox.ListAsync(connection.ProjectId, connection.Id)).Entries;
+        Assert.Contains(rows, row => row.Id == firstProgress.Id
+            && row.Kind == SlackOutboxKinds.ReplaceableProgress);
+        Assert.Contains(rows, row => row.Id == secondProgress.Id
+            && row.Kind == SlackOutboxKinds.TerminalResult);
+    }
+
+    [Fact]
+    public async Task Anchored_agent_replies_scope_terminal_and_attachment_routing_to_the_requested_connection()
+    {
+        var first = await CreateConnectionAsync();
+        var second = await CreateConnectionAsync(first.ProjectId, "agent-2");
+        await CreateThreadMappingAsync(first, "C-shared-terminal", "1710000000.000027");
+        await CreateThreadMappingAsync(second, "C-shared-terminal", "1710000000.000027");
+        await using var scope = _fixture.Services.CreateAsyncScope();
+        var outbox = scope.ServiceProvider.GetRequiredService<SlackOutboxStore>();
+
+        var firstReply = await outbox.EnqueueAgentReplyAsync(
+            first.ProjectId,
+            "C-shared-terminal",
+            "1710000000.000027",
+            "first answer",
+            connectionId: first.Id,
+            replyDispatchRef: "shared:turn");
+        var secondReply = await outbox.EnqueueAgentReplyAsync(
+            second.ProjectId,
+            "C-shared-terminal",
+            "1710000000.000027",
+            "second answer",
+            connectionId: second.Id,
+            replyDispatchRef: "shared:turn");
+        var secondImage = await outbox.EnqueueAgentReplyAsync(
+            second.ProjectId,
+            "C-shared-terminal",
+            "1710000000.000027",
+            "second image",
+            connectionId: second.Id,
+            replyDispatchRef: "shared:image-turn",
+            imageUrl: "https://example.com/second.png");
+
+        Assert.Equal(first.Id, firstReply.ConnectionId);
+        Assert.Equal(second.Id, secondReply.ConnectionId);
+        Assert.NotEqual(firstReply.DeliveryId, secondReply.DeliveryId);
+        Assert.Equal(second.Id, secondImage.ConnectionId);
+        Assert.All(
+            (await outbox.ListAsync(second.ProjectId, second.Id)).Entries,
+            row => Assert.Equal(second.Id, row.ConnectionId));
+    }
+
+    [Fact]
+    public async Task Anchored_agent_reply_rejects_a_connection_without_the_conversation_mapping()
+    {
+        var mapped = await CreateConnectionAsync();
+        var unmapped = await CreateConnectionAsync(mapped.ProjectId, "agent-2");
+        await CreateThreadMappingAsync(mapped, "C-mapped-only", "1710000000.000028");
+        await using var scope = _fixture.Services.CreateAsyncScope();
+        var outbox = scope.ServiceProvider.GetRequiredService<SlackOutboxStore>();
+
+        var reply = await outbox.EnqueueAgentReplyAsync(
+            unmapped.ProjectId,
+            "C-mapped-only",
+            "1710000000.000028",
+            "wrong owner",
+            connectionId: unmapped.Id,
+            replyDispatchRef: "unmapped:turn");
+
+        Assert.False(reply.Accepted);
+        Assert.Empty((await outbox.ListAsync(unmapped.ProjectId, unmapped.Id)).Entries);
+        Assert.Empty((await outbox.ListAsync(mapped.ProjectId, mapped.Id)).Entries);
+    }
+
+    [Fact]
+    public async Task Agent_reply_route_requires_the_complete_anchor_only_for_anchored_dispatches()
+    {
+        var connection = await CreateConnectionAsync();
+        await CreateDmMappingAsync(connection, "D-route-anchor");
+
+        using var missingConnection = await _fixture.Client.PostAsJsonAsync(
+            $"/api/projects/{connection.ProjectId}/slack-connections/reply",
+            new
+            {
+                conversationId = "D-route-anchor",
+                triggeringMessageId = "1710000000.000040",
+                dispatchRef = "turn-1",
+                text = "answer",
+            });
+        using var missingTrigger = await _fixture.Client.PostAsJsonAsync(
+            $"/api/projects/{connection.ProjectId}/slack-connections/reply",
+            new
+            {
+                conversationId = "D-route-anchor",
+                connectionId = connection.Id,
+                dispatchRef = "turn-1",
+                text = "answer",
+            });
+        using var legacy = await _fixture.Client.PostAsJsonAsync(
+            $"/api/projects/{connection.ProjectId}/slack-connections/reply",
+            new { conversationId = "D-route-anchor", text = "legacy answer" });
+        using var anchored = await _fixture.Client.PostAsJsonAsync(
+            $"/api/projects/{connection.ProjectId}/slack-connections/reply",
+            new
+            {
+                conversationId = "D-route-anchor",
+                connectionId = connection.Id,
+                triggeringMessageId = "1710000000.000040",
+                dispatchRef = "turn-1",
+                text = "anchored answer",
+            });
+
+        Assert.Equal(HttpStatusCode.BadRequest, missingConnection.StatusCode);
+        Assert.Equal(HttpStatusCode.BadRequest, missingTrigger.StatusCode);
+        Assert.True(legacy.IsSuccessStatusCode, await legacy.Content.ReadAsStringAsync());
+        Assert.Equal(HttpStatusCode.BadRequest, anchored.StatusCode);
+    }
+
+    [Fact]
     public async Task Agent_reply_promotion_carries_liveness_status_ref_so_finalization_locates_the_reaction_target()
     {
         var connection = await CreateConnectionAsync();
@@ -252,6 +619,8 @@ public sealed class SlackDeliveryOutcomesSpecs
         // authoritative progress-row metadata, not from a potentially-wrong delivery source.
         Assert.Equal(SlackStatusProjection.DispatchRef(source, "status"),
             SlackDeliveryPayload.Parse(promoted.PayloadJson).StatusDispatchRef);
+        Assert.Equal(progressDispatchRef,
+            SlackDeliveryPayload.Parse(promoted.PayloadJson).ProgressDispatchRef);
 
         // Simulate the terminal handler's source differing from the ingress source
         // (e.g. delivery.MessageTs null -> synthetic ts). FinalizeLivenessAsync must
@@ -453,25 +822,55 @@ public sealed class SlackDeliveryOutcomesSpecs
         await db.SaveChangesAsync();
     }
 
-    private async Task<AgentConnection> CreateConnectionAsync()
+    private async Task CreateThreadMappingAsync(
+        AgentConnection connection,
+        string conversationId,
+        string threadTs)
     {
-        var id = $"connection_{Guid.NewGuid():N}";
-        var projectId = $"project_{Guid.NewGuid():N}";
         var now = _fixture.TimeProvider.GetUtcNow();
         await using var scope = _fixture.Services.CreateAsyncScope();
         var db = scope.ServiceProvider.GetRequiredService<MohistDbContext>();
-        db.Projects.Add(new ProjectRow
+        db.SlackThreadSessionMappings.Add(new SlackThreadSessionMappingRow
         {
-            Id = projectId,
-            Name = projectId,
+            Id = $"thread_{Guid.NewGuid():N}",
+            ProjectId = connection.ProjectId,
+            ConnectionId = connection.Id,
+            WorkspaceTeamId = connection.WorkspaceTeamId,
+            ConversationId = conversationId,
+            ThreadTs = threadTs,
+            SlackUserId = "U_OWNER",
+            SessionId = $"session_{Guid.NewGuid():N}",
+            RootMessageTs = threadTs,
             CreatedAt = now,
             UpdatedAt = now,
         });
+        await db.SaveChangesAsync();
+    }
+
+    private async Task<AgentConnection> CreateConnectionAsync(
+        string? projectId = null,
+        string agentId = "agent-1")
+    {
+        var id = $"connection_{Guid.NewGuid():N}";
+        projectId ??= $"project_{Guid.NewGuid():N}";
+        var now = _fixture.TimeProvider.GetUtcNow();
+        await using var scope = _fixture.Services.CreateAsyncScope();
+        var db = scope.ServiceProvider.GetRequiredService<MohistDbContext>();
+        if (!await db.Projects.AnyAsync(project => project.Id == projectId))
+        {
+            db.Projects.Add(new ProjectRow
+            {
+                Id = projectId,
+                Name = projectId,
+                CreatedAt = now,
+                UpdatedAt = now,
+            });
+        }
         db.AgentConnections.Add(new AgentConnectionRow
         {
             Id = id,
             ProjectId = projectId,
-            AgentId = "agent-1",
+            AgentId = agentId,
             ProviderKind = ConnectionProviderKind.Slack,
             WorkspaceTeamId = "T123",
             AppId = "A123",

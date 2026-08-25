@@ -28,8 +28,8 @@ public static class AgentOriginMarkers
 public static class SlackCollaborationSkillCatalog
 {
     public const string Name = "mohist-slack-collaboration";
-    public const string Version = "1.0.0";
-    public const string ContentHash = "dedf18a796543ade06a9e0ece00c086577153e1e633f868c099b01cf910d641b";
+    public const string Version = "1.0.4";
+    public const string ContentHash = "78cd2efe963d7abd299257821510a16ec0b322b8510f6773f435112ed81e3382";
 
     private const string AssetSuffix = ".Agent.Services.Assets.mohist-slack-collaboration.skill.md";
     private static readonly UTF8Encoding Utf8 = new(encoderShouldEmitUTF8Identifier: false, throwOnInvalidBytes: true);
@@ -88,6 +88,22 @@ public sealed record SlackReplyAnchor(
     // reply routing cannot silently fall back to a Connection.
     [property: Id(8)] string? ProjectId = null,
     [property: Id(9)] string? OwnerKind = null);
+
+[GenerateSerializer]
+public sealed record SlackReplyAnchorValidationRequest(
+    [property: Id(0)] string ProjectId,
+    [property: Id(1)] string WorkspaceId,
+    [property: Id(2)] string ConversationId,
+    [property: Id(3)] string ThreadRootMessageId,
+    [property: Id(4)] string TriggeringMessageId,
+    [property: Id(5)] string ConnectionId,
+    [property: Id(6)] string SessionId,
+    [property: Id(7)] string DispatchRef);
+
+[GenerateSerializer]
+public sealed record SlackReplyAnchorValidationResult(
+    [property: Id(0)] bool Valid,
+    [property: Id(1)] bool TurnActive);
 
 [GenerateSerializer]
 public sealed record SlackCollaborationSkill(

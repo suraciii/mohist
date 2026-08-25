@@ -47,7 +47,9 @@ public sealed record SlackDeliveryPayload(
     [property: JsonPropertyName("fileName")] string? FileName = null,
     [property: JsonPropertyName("fileContentBase64")] string? FileContentBase64 = null,
     [property: JsonPropertyName("segments")] IReadOnlyList<string>? Segments = null,
-    [property: JsonPropertyName("responseKind")] string? ResponseKind = null)
+    [property: JsonPropertyName("responseKind")] string? ResponseKind = null,
+    [property: JsonPropertyName("progressDispatchRef")] string? ProgressDispatchRef = null,
+    [property: JsonPropertyName("replyParts")] IReadOnlyList<string>? ReplyParts = null)
 {
     public static SlackDeliveryPayload Parse(string payloadJson)
     {
@@ -95,8 +97,8 @@ public sealed record SlackOutboxList(IReadOnlyList<SlackOutboxEntry> Entries);
 /// liveness projections; when a replaceable progress message exists it is
 /// promoted in place (one input = one final answer). Repeated identical sends
 /// reuse that intent, while a different payload is rejected as an idempotency
-/// conflict. <see cref="Accepted"/> is false only when no live Connection owns
-/// the conversation.
+/// conflict. <see cref="Accepted"/> is false when no live Connection owns the
+/// conversation or when a different payload conflicts with an immutable retry.
 /// </summary>
 public sealed record SlackAgentReplyResult(
     bool Accepted,

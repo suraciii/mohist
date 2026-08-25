@@ -14,6 +14,7 @@ using Mohist.Server.Infrastructure.Data.Sessions;
 using Mohist.Server.Infrastructure.Data.Slack;
 using Mohist.Server.Infrastructure.Security.Secrets;
 using Mohist.Server.Infrastructure.Slack;
+using Mohist.Server.Runner.Services;
 using Mohist.Server.Slack.Domain;
 using Mohist.Server.SpecTests.Support;
 using Mohist.Server.TestSupport;
@@ -123,7 +124,7 @@ public sealed class SlackDmSessionMappingIngressSpecs
     }
 
     [Fact]
-    public async Task Ingress_followup_path_records_kinds_when_session_is_bound()
+    public async Task Ingress_followup_dispatches_for_legacy_idle_session_without_bound_root()
     {
         var connection = await CreateConnectionAsync();
         var sessionId = $"session-followup-{connection.Id}";
@@ -134,7 +135,7 @@ public sealed class SlackDmSessionMappingIngressSpecs
             var mapping = scope.ServiceProvider.GetRequiredService<SlackDmSessionMappingStore>();
             var now = _fixture.TimeProvider.GetUtcNow();
             var sessionState = """
-                {"id":"__SESSION__","metadata":{"labels":{"mohist.io/project-id":"__PROJECT__","mohist.io/source-kind":"agent-connection","mohist.io/connection-id":"__CONNECTION__","mohist.io/slack-user-id":"U_OWNER","mohist.io/slack-conversation-id":"D-DM-FOLLOWUP","mohist.io/agent-id":"agent-1","mohist.io/agent-name":"Mohist Agent"}},"runtime":{"runnerId":"r1","workDir":null,"runtime":"opencode"},"settings":{"model":"gpt-4o"},"status":{"agentRuntimeSessionId":"runtime-followup","activity":"active","createdAt":"__NOW__","lastDataAt":"__NOW__","inputs":[{"id":"initial-input","sequence":1,"text":"initial","source":"agent-connection","acceptance":"accepted","recordedAt":"__NOW__","jobId":"__JOB__","provenance":{"providerKind":"slack","workspaceId":"T123","conversationId":"D-DM-FOLLOWUP","threadId":null,"memberId":"U_OWNER","messageId":"initial-message","connectionId":"__CONNECTION__","boundThreadRootMessageId":"initial-message"}}],"turns":[{"id":"initial-turn","sequence":1,"inputIds":["initial-input"],"status":"completed","jobId":"__JOB__","recordedAt":"__NOW__","updatedAt":"__NOW__"}]}}
+                {"id":"__SESSION__","metadata":{"labels":{"mohist.io/project-id":"__PROJECT__","mohist.io/source-kind":"agent-connection","mohist.io/connection-id":"__CONNECTION__","mohist.io/slack-user-id":"U_OWNER","mohist.io/slack-conversation-id":"D-DM-FOLLOWUP","mohist.io/agent-id":"agent-1","mohist.io/agent-name":"Mohist Agent"}},"runtime":{"runnerId":"r1","workDir":null,"runtime":"opencode"},"settings":{"model":"gpt-4o"},"status":{"agentRuntimeSessionId":"runtime-followup","activity":"idle","createdAt":"__NOW__","lastDataAt":"__NOW__","inputs":[{"id":"initial-input","sequence":1,"text":"initial","source":"agent-connection","acceptance":"accepted","recordedAt":"__NOW__","jobId":"__JOB__","provenance":{"providerKind":"slack","workspaceId":"T123","conversationId":"D-DM-FOLLOWUP","threadId":null,"memberId":"U_OWNER","messageId":"initial-message","connectionId":"__CONNECTION__"}}],"turns":[{"id":"initial-turn","sequence":1,"inputIds":["initial-input"],"status":"completed","jobId":"__JOB__","recordedAt":"__NOW__","updatedAt":"__NOW__"}]}}
                 """;
             sessionState = sessionState
                 .Replace("__SESSION__", sessionId)
@@ -173,6 +174,21 @@ public sealed class SlackDmSessionMappingIngressSpecs
                 "D-DM-FOLLOWUP", sessionId);
         }
 
+        using (var register = await _fixture.Client.PostAsJsonAsync("/api/runner/r1/register", new
+        {
+            capabilities = new[] { "spec/*" },
+            hostname = "r1-host",
+            projectId = connection.ProjectId,
+            runtimeCatalogs = CapabilityCatalogTestHelpers.Create(),
+        }))
+        {
+            register.EnsureSuccessStatusCode();
+        }
+        var runnerHub = _fixture.Services.GetRequiredService<IRunnerControlTransport>() as RecordingRunnerControlTransport
+            ?? throw new InvalidOperationException("Recording runner hub context was not registered.");
+        runnerHub.Clear();
+        _fixture.Services.GetRequiredService<RunnerConnectionTracker>().Register("r1", "r1-connection");
+
         using var followup = await _fixture.Client.PostAsJsonAsync(Path(connection, "/ingress"), new
         {
             isDirectMessage = true,
@@ -193,6 +209,8 @@ public sealed class SlackDmSessionMappingIngressSpecs
         Assert.True(data.TryGetProperty("inputId", out _),
             "follow-up path must surface the SessionInput id");
         Assert.True(data.GetProperty("followup").GetBoolean());
+        Assert.Single(runnerHub.SentMessages,
+            message => message.ConnectionId == "r1" && message.Method == "session.followup");
         var followupTurnId = data.GetProperty("turnId").GetString()!;
 
         await using (var projectionScope = _fixture.Services.CreateAsyncScope())

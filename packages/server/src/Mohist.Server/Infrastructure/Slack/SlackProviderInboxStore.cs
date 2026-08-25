@@ -188,6 +188,41 @@ public sealed class SlackProviderInboxStore : IScopedService, IAgentConnectionPr
             .FirstOrDefaultAsync(ct);
     }
 
+    public async Task<SlackProviderInboxReplyAnchor?> FindReplyAnchorAsync(
+        string projectId,
+        string connectionId,
+        string conversationId,
+        string triggeringMessageId,
+        CancellationToken ct = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(projectId);
+        ArgumentException.ThrowIfNullOrWhiteSpace(connectionId);
+        ArgumentException.ThrowIfNullOrWhiteSpace(conversationId);
+        ArgumentException.ThrowIfNullOrWhiteSpace(triggeringMessageId);
+
+        await using var db = await _dbFactory.CreateDbContextAsync(ct);
+        var candidates = await db.SlackProviderInboxRows.AsNoTracking()
+            .Where(row => row.ProjectId == projectId
+                && row.ConnectionId == connectionId
+                && row.ConversationId == conversationId)
+            .Select(row => new
+            {
+                row.WorkspaceTeamId,
+                row.ConversationId,
+                row.SlackMessageIdentity,
+                row.RouteSessionId,
+            })
+            .ToListAsync(ct);
+        var match = candidates.SingleOrDefault(row =>
+            string.Equals(
+                row.SlackMessageIdentity,
+                new SlackMessageIdentity(row.WorkspaceTeamId, row.ConversationId, triggeringMessageId).AsKey(),
+                StringComparison.Ordinal));
+        return string.IsNullOrWhiteSpace(match?.RouteSessionId)
+            ? null
+            : new SlackProviderInboxReplyAnchor(match.WorkspaceTeamId, match.RouteSessionId);
+    }
+
     /// <summary>
     /// Looks up the Session route for one exact Slack message identity.
     /// Manager ingress uses the result to distinguish its pre-dispatch
