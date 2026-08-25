@@ -23,12 +23,17 @@ public class SlackLeaseRoutesCollection : ICollectionFixture<SlackAdapterLeaseRo
 [CollectionDefinition("SlackControlPlaneRoutes")]
 public class SlackControlPlaneRoutesCollection : ICollectionFixture<SlackControlPlaneRoutesFixture>;
 
-// These specs mutate the one process-wide SlackApiTestScript owned by the
-// assembly fixture. Collection membership serializes its consumers so a
-// responder/reset cannot steal another class's expected API calls, while
-// unrelated collections remain free to use the other spec worker threads.
-[CollectionDefinition("SharedSlackApi")]
-public class SharedSlackApiCollection;
+// Slack ingress and interaction specs drive routes that validate the one
+// runtime lease per workspace target key, and the lease store is shared by
+// every host. Two tests acquiring a lease for the same workspace concurrently
+// supersede each other's lease and fail with 409 lease_stale_or_expired.
+// These specs also share the process-wide SlackApiTestScript owned by the
+// assembly fixture. One collection serializes both resources while unrelated
+// collections remain free to use the other spec worker threads.
+[CollectionDefinition("SlackApiSurface")]
+public class SlackApiSurfaceCollection
+    : ICollectionFixture<IsolatedMohistIntegrationFixture>,
+      ICollectionFixture<MohistIntegrationFixture>;
 
 // Full-stack HTTP/Orleans specs receive the assembly fixture directly. Their
 // default per-class collections remain available for parallel scheduling.

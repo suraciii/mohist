@@ -28,7 +28,7 @@ using Xunit;
 
 namespace Mohist.Server.SpecTests.Specs.Slack;
 
-[Collection("SlackTurnControlInteraction")]
+[Collection("SlackApiSurface")]
 public sealed class SlackRetryInteractionSpecs : IAsyncLifetime
 {
     private readonly IsolatedMohistIntegrationFixture _fixture;

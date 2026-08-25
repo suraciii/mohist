@@ -30,7 +30,7 @@ namespace Mohist.Server.SpecTests.Specs.Slack;
 /// <c>SlackDmSessionMappingStoreTests</c> (provider-side round-trip) and the
 /// spec-level <c>SlackDmSessionMappingMigrationSpecs</c> (schema surface).
 /// </summary>
-[Collection("SessionControlIntegration")]
+[Collection("SlackApiSurface")]
 public sealed class SlackDmSessionMappingIngressSpecs
 {
     private readonly MohistIntegrationFixture _fixture;

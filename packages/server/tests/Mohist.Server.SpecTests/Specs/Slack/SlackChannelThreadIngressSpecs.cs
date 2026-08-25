@@ -25,6 +25,7 @@ using Xunit;
 
 namespace Mohist.Server.SpecTests.Specs.Slack;
 
+[Collection("SlackApiSurface")]
 public sealed partial class SlackChannelThreadIngressSpecs
 {
     private readonly MohistIntegrationFixture _fixture;

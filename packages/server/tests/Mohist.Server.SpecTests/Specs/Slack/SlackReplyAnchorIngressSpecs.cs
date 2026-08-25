@@ -24,7 +24,7 @@ using Xunit;
 
 namespace Mohist.Server.SpecTests.Specs.Slack;
 
-[Collection("SessionControlIntegration")]
+[Collection("SlackApiSurface")]
 public sealed class SlackReplyAnchorIngressSpecs : IAsyncLifetime
 {
     private readonly MohistIntegrationFixture _fixture;
