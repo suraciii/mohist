@@ -81,6 +81,39 @@ public sealed class WorkflowGrainAgentResultSettlementSpecs
     }
 
     [Fact]
+    public async Task UnboundUnknownRunnerResult_IsObservedWithTheUnboundAgentResultReason()
+    {
+        var a = await ArrangeAsync("wr-settle-unknown-unbound");
+        var service = a.CreateReportService();
+        var result = new WorkResult(
+            "unknown",
+            "Agent cleanup was not confirmed",
+            Output: JsonSerializer.SerializeToElement(new[] { "invalid output must not fail the task" }),
+            ArtifactUploadIds: ["missing-upload"],
+            AddTasks: [new RuntimeTaskInput("follow-up", "Must not be projected", "spec/task")]);
+
+        // A binding-less runner observation is acknowledged into settlement
+        // arbitration instead of being rejected as stale, so the Runner can
+        // retire its journal entry and the workflow surfaces a visible
+        // unresolved state.
+        var (ack, status) = await service.ReportAsync(
+            a.WorkerId, a.RunId, a.Work.Id!, a.TaskRunId, result);
+        Assert.Equal("accepted", ack);
+        Assert.Equal("Running", status);
+
+        var unresolved = await a.LoadRunAsync();
+        var unsettledTask = Assert.Single(unresolved.CurrentStage().Tasks);
+        var settlement = Assert.IsType<AgentResultSettlement>(unsettledTask.AgentResultSettlement);
+        Assert.Equal(AgentResultSettlementState.Unknown, settlement.State);
+        Assert.Equal("unbound-agent-result", settlement.ReasonCode);
+        Assert.Equal(TaskRunStatus.Running, unsettledTask.Status);
+        Assert.Single(unresolved.CurrentStage().Tasks);
+        Assert.Null(unsettledTask.Output);
+        Assert.DoesNotContain(await a.Events.ListAsync(a.RunId), entry =>
+            entry.Envelope.Type == EventCatalog.ReverseDns.TaskFailed);
+    }
+
+    [Fact]
     public async Task UnknownRunnerResultUsesTheBoundObservationWithoutOutputArtifactOrFollowUpSideEffects()
     {
         var a = await ArrangeAsync("wr-settle-unknown-bound");
@@ -93,11 +126,6 @@ public sealed class WorkflowGrainAgentResultSettlementSpecs
             Output: JsonSerializer.SerializeToElement(new[] { "invalid output must not fail the task" }),
             ArtifactUploadIds: ["missing-upload"],
             AddTasks: [new RuntimeTaskInput("follow-up", "Must not be projected", "spec/task")]);
-
-        var incomplete = await service.ReportAsync(
-            a.WorkerId, a.RunId, a.Work.Id!, a.TaskRunId, result);
-        Assert.Equal("stale", incomplete.Ack);
-        Assert.Null(incomplete.WorkflowStatus);
 
         var mismatched = await service.ReportAsync(
             a.WorkerId, a.RunId, a.Work.Id!, a.TaskRunId, result,
@@ -133,7 +161,7 @@ public sealed class WorkflowGrainAgentResultSettlementSpecs
     }
 
     [Fact]
-    public async Task RecoveredStartedFenceObservation_RequiresTheOriginalAttemptAndDoesNotWriteATerminalResult()
+    public async Task RecoveredStartedFenceObservation_IsObservedOnTheOriginalAttemptWithoutATerminalResult()
     {
         var a = await ArrangeAsync("wr-settle-started-fence");
         var service = a.CreateReportService();
@@ -143,8 +171,8 @@ public sealed class WorkflowGrainAgentResultSettlementSpecs
 
         var accepted = await service.ReportAsync(
             a.WorkerId, a.RunId, a.Work.Id!, a.TaskRunId, observation);
-        Assert.Equal("stale", accepted.Ack);
-        Assert.Null(accepted.WorkflowStatus);
+        Assert.Equal("accepted", accepted.Ack);
+        Assert.Equal("Running", accepted.WorkflowStatus);
 
         var stale = await service.ReportAsync(
             a.WorkerId, a.RunId, a.Work.Id!, "other-task-attempt", observation);
@@ -153,7 +181,7 @@ public sealed class WorkflowGrainAgentResultSettlementSpecs
         var unresolved = await a.LoadRunAsync();
         var task = Assert.Single(unresolved.CurrentStage().Tasks);
         Assert.Equal(TaskRunStatus.Running, task.Status);
-        Assert.Equal(AgentResultSettlementState.AwaitingResult, task.AgentResultSettlement!.State);
+        Assert.Equal(AgentResultSettlementState.Unknown, task.AgentResultSettlement!.State);
         Assert.Equal(a.TaskRunId, task.AgentResultSettlement.TaskRunId);
         Assert.Equal(a.Work.Id, task.AgentResultSettlement.WorkId);
         Assert.Equal(a.WorkerId, task.AgentResultSettlement.RunnerId);
