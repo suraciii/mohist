@@ -2,11 +2,6 @@ import type { DispatchWorkItem, RunnerOptions, WorkItemResult } from '../core/ty
 import type { ServerConnection } from '../server/connection.js'
 import { WorkExecutor } from './executor.js'
 import { TaskLogCollector } from './task-log.js'
-import type {
-  TerminalTaskLogDeliveryIdentity,
-  TerminalTaskLogDeliveryRecord,
-  TerminalTaskLogDeliveryStore,
-} from './terminal-task-log-delivery.js'
 import { runnerLogger } from '../system/logger.js'
 import type { ManagerExecutionBoundary } from './manager-execution-boundary.js'
 
@@ -40,118 +35,37 @@ const TASK_LOG_FLUSH_LINE_THRESHOLD = 200
 
 export interface HostTaskLogDeps {
   readonly connection: ServerConnection
-  readonly terminalTaskLogDelivery: TerminalTaskLogDeliveryStore
   readonly options: RunnerOptions
 }
 
-function terminalTaskLogIdentity(work: DispatchWorkItem): TerminalTaskLogDeliveryIdentity {
-  const ownerKind = work.ownerKind === 'agent-job' ? 'agent-job' : 'workflow'
-  const ownerId = ownerKind === 'agent-job' ? (work.agentJobId ?? '') : work.workflowRunId
-  if (!ownerId) throw new Error(`terminal task-log work ${work.workId} has no owner identity`)
-  return { ownerKind, ownerId, workId: work.workId }
-}
-
-async function persistTerminalTaskLog(
+async function uploadTerminalTaskLog(
   deps: HostTaskLogDeps,
-  work: DispatchWorkItem,
+  ownerId: string,
+  ownerKind: 'workflow' | 'agent-job',
+  workId: string,
   batch: import('./task-log.js').TaskLogBatch,
-): Promise<TerminalTaskLogDeliveryRecord> {
-  return await deps.terminalTaskLogDelivery.putPending({
-    identity: terminalTaskLogIdentity(work),
-    batch,
-  })
-}
-
-export async function retryPendingTerminalTaskLogs(
-  deps: HostTaskLogDeps,
-  inFlightDeliveries: Set<string>,
   signal: AbortSignal,
 ): Promise<void> {
-  if (signal.aborted || !deps.terminalTaskLogDelivery.ready()) return
-  let pending: TerminalTaskLogDeliveryRecord[]
-  try {
-    pending = await deps.terminalTaskLogDelivery.listPending()
-  } catch (error) {
-    log.error('failed to read pending terminal task-log deliveries', { exception: error })
-    return
-  }
-  await Promise.all(pending.map((record) => deliverTerminalTaskLog(deps, inFlightDeliveries, record, signal)))
-}
-
-async function deliverTerminalTaskLog(
-  deps: HostTaskLogDeps,
-  inFlightDeliveries: Set<string>,
-  record: TerminalTaskLogDeliveryRecord,
-  signal: AbortSignal,
-): Promise<void> {
-  if (record.state !== 'pending' || signal.aborted) return
-  const key = `${record.identity.ownerKind}:${record.identity.ownerId}:${record.identity.workId}`
-  if (inFlightDeliveries.has(key)) return
-  inFlightDeliveries.add(key)
   const controller = new AbortController()
-  const timeout = setTimeout(() => controller.abort(), TASK_LOG_UPLOAD_TIMEOUT_MS)
-  timeout.unref?.()
-  let uploadDeadline: ReturnType<typeof setTimeout> | null = null
-  const abortUpload = () => controller.abort()
-  signal.addEventListener('abort', abortUpload, { once: true })
+  const abort = () => controller.abort(signal.reason)
+  signal.addEventListener('abort', abort, { once: true })
+  let timeout: ReturnType<typeof setTimeout> | null = null
   try {
-    let result: Awaited<ReturnType<ServerConnection['uploadTaskLog']>>
-    try {
-      result = await Promise.race([
-        deps.connection.uploadTaskLog(
-          record.identity.ownerId,
-          record.identity.workId,
-          record.batch,
-          controller.signal,
-          record.identity.ownerKind,
-          true,
-        ),
-        new Promise<never>((_resolve, reject) => {
-          uploadDeadline = setTimeout(
-            () => reject(new Error(`task-log terminal upload timed out after ${TASK_LOG_UPLOAD_TIMEOUT_MS}ms`)),
-            TASK_LOG_UPLOAD_TIMEOUT_MS,
-          )
-        }),
-      ])
-    } catch (error) {
-      const failure = terminalDeliveryFailure(error)
-      if (failure) {
-        try {
-          await deps.terminalTaskLogDelivery.markFailed(record.identity, failure)
-        } catch (persistError) {
-          log.error('failed to persist terminal task-log failure', {
-            work: record.identity.workId,
-            exception: persistError,
-          })
-        }
-        log.error('terminal task-log delivery reached a terminal error', { work: record.identity.workId, failure })
-      } else {
-        log.warn('terminal task-log delivery will recover', { work: record.identity.workId, exception: error })
-      }
-      return
-    }
-
-    if (result.status !== 'changed' && result.status !== 'duplicate') {
-      log.error('terminal task-log delivery returned an invalid acknowledgement', {
-        work: record.identity.workId,
-        status: result.status,
-      })
-      return
-    }
-
-    try {
-      await deps.terminalTaskLogDelivery.acknowledge(record.identity)
-    } catch (error) {
-      log.error('terminal task-log acknowledgement could not be persisted', {
-        work: record.identity.workId,
-        exception: error,
-      })
-    }
+    await Promise.race([
+      deps.connection.uploadTaskLog(ownerId, workId, batch, controller.signal, ownerKind, true),
+      new Promise<never>((_resolve, reject) => {
+        timeout = setTimeout(() => {
+          controller.abort()
+          reject(new Error(`task-log terminal upload timed out after ${TASK_LOG_UPLOAD_TIMEOUT_MS}ms`))
+        }, TASK_LOG_UPLOAD_TIMEOUT_MS)
+        timeout.unref?.()
+      }),
+    ])
+  } catch (error) {
+    log.warn('terminal task-log delivery abandoned', { work: workId, exception: error })
   } finally {
-    clearTimeout(timeout)
-    if (uploadDeadline) clearTimeout(uploadDeadline)
-    signal.removeEventListener('abort', abortUpload)
-    inFlightDeliveries.delete(key)
+    if (timeout) clearTimeout(timeout)
+    signal.removeEventListener('abort', abort)
   }
 }
 
@@ -170,7 +84,6 @@ async function deliverTerminalTaskLog(
 export async function executeWork(
   deps: HostTaskLogDeps,
   workExecutor: WorkExecutor | null,
-  inFlightDeliveries: Set<string>,
   work: DispatchWorkItem,
   signal: AbortSignal,
   managerExecution: ManagerExecutionBoundary | null = null,
@@ -183,8 +96,7 @@ export async function executeWork(
   const ownerId = ownerKind === 'agent-job' ? (work.agentJobId ?? '') : work.workflowRunId
 
   /**
-   * Incremental delivery is best effort. Terminal delivery uses the
-   * durable outbox below and is never sent through this helper.
+   * Incremental and terminal delivery are best-effort evidence channels.
    */
   const uploadTaskLogBatch = async (
     batch: import('./task-log.js').TaskLogBatch,
@@ -258,55 +170,26 @@ export async function executeWork(
   // firing and leaves the trigger with no append notifications.
   const collector = new TaskLogCollector()
   const flushTrigger = startIncrementalFlushForCollector(collector)
-  let terminalPersistenceAttempted = false
   try {
     const execution = await workExecutor.executeWithLog(work, signal, collector, managerExecution)
     // Detach the listener before stopping the timer so a stale
     // tick can never re-fire against a collector that the executor
     // has handed back to us for terminal flushing.
     execution.collector.setAppendListener(null)
-    terminalPersistenceAttempted = true
-    const persisted = await persistTerminalTaskLog(deps, work, execution.collector.snapshot())
     // Stop the trigger before the terminal flush and wait for any
     // in-flight incremental upload to settle so terminal
     // reconciliation cannot overlap it.
     await flushTrigger.stop()
     if (signal.aborted) return execution.result
-    await deliverTerminalTaskLog(deps, inFlightDeliveries, persisted, signal)
+    void uploadTerminalTaskLog(deps, ownerId, ownerKind, work.workId, execution.collector.snapshot(), signal)
     return execution.result
   } catch (error) {
-    if (!terminalPersistenceAttempted) {
-      terminalPersistenceAttempted = true
-      try {
-        const persisted = await persistTerminalTaskLog(deps, work, collector.snapshot())
-        if (!signal.aborted) await deliverTerminalTaskLog(deps, inFlightDeliveries, persisted, signal)
-      } catch (persistError) {
-        log.error('terminal task-log snapshot could not be persisted', { work: work.workId, exception: persistError })
-      }
-    }
+    if (!signal.aborted) void uploadTerminalTaskLog(deps, ownerId, ownerKind, work.workId, collector.snapshot(), signal)
     throw error
   } finally {
     collector.setAppendListener(null)
     await flushTrigger.stop()
   }
-}
-
-function terminalDeliveryFailure(
-  error: unknown,
-): { kind: 'conflict' | 'not-found' | 'local'; status?: number; code?: string; message: string } | null {
-  const candidate = error as { status?: unknown; code?: unknown; message?: unknown } | null
-  const status = typeof candidate?.status === 'number' ? candidate.status : undefined
-  const code = typeof candidate?.code === 'string' ? candidate.code : undefined
-  const message = typeof candidate?.message === 'string' ? candidate.message : String(error)
-  if (status === 409 || code === 'terminal_snapshot_conflict')
-    return { kind: 'conflict', ...(status === undefined ? {} : { status }), ...(code ? { code } : {}), message }
-  if (status === 404 || code === 'not_found')
-    return { kind: 'not-found', ...(status === undefined ? {} : { status }), ...(code ? { code } : {}), message }
-  if (status !== undefined && status >= 400 && status < 500)
-    return { kind: 'local', status, ...(code ? { code } : {}), message }
-  if (code === 'terminal_ack_missing')
-    return { kind: 'local', ...(status === undefined ? {} : { status }), code, message }
-  return null
 }
 
 /**

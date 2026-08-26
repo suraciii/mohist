@@ -19,7 +19,7 @@ import { SkillResolver } from '../runtime/skill-resolver.js'
 import { buildExecutionEnvelope } from '../runtime/execution-envelope.js'
 import type { AgentExecutionDefinition } from '../core/types.js'
 import { WorkflowAgentSessionReporter } from './workflow-agent-session-reporter.js'
-import type { AgentSessionRuntimeEventOutbox } from '../server/runtime-event-outbox.js'
+import type { AgentSessionRuntimeEventQueue } from '../server/runtime-event-queue.js'
 import {
   CLEANUP_TERMINAL_FACT_DELIVERY_TIMEOUT_CODE,
   cleanupDeliveryWaitFailureMessage,
@@ -49,7 +49,7 @@ interface ActionInvocationContext {
   skillResolver?: SkillResolver
   agentDefinition?: AgentExecutionDefinition | null
   serverConnection?: ServerConnection | null
-  runtimeEventOutbox?: AgentSessionRuntimeEventOutbox | null
+  runtimeEventQueue?: AgentSessionRuntimeEventQueue | null
   runtimeEventRecordId?: () => string
   cleanupAttempt?: number | null
   cleanupTerminalFactDeliveryBudgetMs?: number
@@ -124,7 +124,7 @@ export async function piAction(
   if (canBind) {
     try {
       await waitForCleanupPredecessorDelivery(
-        context.runtimeEventOutbox,
+        context.runtimeEventQueue,
         {
           projectId: context.projectId,
           workflowRunId: context.workflowRunId,
@@ -574,10 +574,10 @@ function createWorkflowReporter(
   agentSessionId: string | null,
   runtimeSessionId: string | null,
 ): WorkflowAgentSessionReporter | null {
-  if (!context.projectId || !context.runtimeEventOutbox || !context.runtimeEventRecordId) return null
+  if (!context.projectId || !context.runtimeEventQueue || !context.runtimeEventRecordId) return null
   if (!context.taskRunId || !context.runnerId || !agentSessionId || !runtimeSessionId) return null
   return new WorkflowAgentSessionReporter({
-    outbox: context.runtimeEventOutbox,
+    outbox: context.runtimeEventQueue,
     projectId: context.projectId,
     workflowRunId: context.workflowRunId,
     sessionName,

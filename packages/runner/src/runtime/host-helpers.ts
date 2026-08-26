@@ -12,7 +12,6 @@ import type { PiRuntime } from './pi/index.js'
 import type { FollowupTarget, FollowupTargetResolution, SessionTarget } from '../server/session-target.js'
 import type { ServerConnection } from '../server/connection.js'
 import type { HostTaskLogDeps } from './host-task-log.js'
-import type { TerminalTaskLogDeliveryStore } from './terminal-task-log-delivery.js'
 import type { AwaitingAckEntry, InFlightEntry } from './host-state.js'
 import { workKey } from './work-key.js'
 
@@ -88,9 +87,8 @@ export function syncOpenCodeWorkOwners(
 
 export function isOpenCodeReadyForClaim(
   runtime: OpenCodeRuntime | null,
-  runtimeEventOutbox: { ready(): boolean },
 ): boolean {
-  return runtime !== null && runtime.ready() && runtimeEventOutbox.ready()
+  return runtime !== null && runtime.ready()
 }
 
 export function runtimeReadinessWitnesses(
@@ -174,10 +172,9 @@ export function currentCatalogRevision(
 
 export function createHostTaskLogDeps(
   connection: ServerConnection,
-  terminalTaskLogDelivery: TerminalTaskLogDeliveryStore,
   options: RunnerOptions,
 ): HostTaskLogDeps {
-  return { connection, terminalTaskLogDelivery, options }
+  return { connection, options }
 }
 
 export function runtimeKindForWork(work: DispatchWorkItem): RuntimeKind | null {

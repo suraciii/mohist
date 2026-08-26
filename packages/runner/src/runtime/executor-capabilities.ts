@@ -9,7 +9,7 @@ import { errorMessage } from '../core/errors.js'
 import { delayWithSignal } from '../actions/github-pr-checks-wait.js'
 import { renderWithSkippedFields } from '../core/template.js'
 import type { ServerConnection } from '../server/connection.js'
-import type { AgentSessionRuntimeEventOutbox } from '../server/runtime-event-outbox.js'
+import type { AgentSessionRuntimeEventQueue } from '../server/runtime-event-queue.js'
 import type { OpenCodeRuntime, RuntimeResult, RuntimeTurnResult } from './opencode/index.js'
 import type { PiRuntime } from './pi/index.js'
 import type { TaskLogger } from './task-log.js'
@@ -36,7 +36,7 @@ export interface ExecutorCapabilityDeps {
   readonly skillResolver: SkillResolver
   readonly piRuntime: PiRuntime | null
   readonly openCodeRuntime: OpenCodeRuntime | null
-  readonly agentSessionRuntimeEventOutbox: AgentSessionRuntimeEventOutbox | null
+  readonly agentSessionRuntimeEventQueue: AgentSessionRuntimeEventQueue | null
   readonly runtimeEventRecordId: () => string
   readonly cleanupTerminalFactDeliveryBudgetMs?: number
   readonly workflowSessionSettleBudgetMs?: number
@@ -133,7 +133,7 @@ function buildAgentTurnCapability(
       if (self.connection && work.projectId) {
         try {
           await waitForCleanupPredecessorDelivery(
-            self.agentSessionRuntimeEventOutbox,
+            self.agentSessionRuntimeEventQueue,
             {
               projectId: work.projectId,
               workflowRunId: work.workflowRunId,
@@ -201,7 +201,7 @@ function buildAgentTurnCapability(
               self.connection.runnerId,
               opened.sessionId,
               opened.runtimeSessionId ?? null,
-              self.agentSessionRuntimeEventOutbox,
+              self.agentSessionRuntimeEventQueue,
               self.runtimeEventRecordId,
               cleanupAttempt,
             )
@@ -267,7 +267,7 @@ function buildAgentTurnCapability(
         binding.runnerId,
         binding.agentSessionId,
         binding.runtimeSessionId,
-        self.agentSessionRuntimeEventOutbox,
+        self.agentSessionRuntimeEventQueue,
         self.runtimeEventRecordId,
         cleanupAttempt,
       )
@@ -346,7 +346,7 @@ function buildAgentTurnCapability(
             self.connection.runnerId,
             binding.agentSessionId,
             created.value.runtimeSessionId,
-            self.agentSessionRuntimeEventOutbox,
+            self.agentSessionRuntimeEventQueue,
             self.runtimeEventRecordId,
             cleanupAttempt,
           )
@@ -380,7 +380,7 @@ function buildAgentTurnCapability(
           binding.runnerId,
           binding.agentSessionId,
           binding.runtimeSessionId,
-          self.agentSessionRuntimeEventOutbox,
+          self.agentSessionRuntimeEventQueue,
           self.runtimeEventRecordId,
           cleanupAttempt,
         )
@@ -457,7 +457,7 @@ function buildAgentTurnCapability(
           binding.runnerId,
           binding.agentSessionId,
           binding.runtimeSessionId,
-          self.agentSessionRuntimeEventOutbox,
+          self.agentSessionRuntimeEventQueue,
           self.runtimeEventRecordId,
           cleanupAttempt,
         )
@@ -503,7 +503,7 @@ function buildAgentTurnCapability(
         selectedBinding.runnerId,
         selectedBinding.agentSessionId,
         selectedBinding.runtimeSessionId,
-        self.agentSessionRuntimeEventOutbox,
+        self.agentSessionRuntimeEventQueue,
         self.runtimeEventRecordId,
         cleanupAttempt,
       )
@@ -609,7 +609,7 @@ async function runPiAgentTurn(
     skillResolver: deps.skillResolver,
     agentDefinition: work.agentDefinition,
     serverConnection: deps.connection,
-    runtimeEventOutbox: deps.agentSessionRuntimeEventOutbox,
+    runtimeEventQueue: deps.agentSessionRuntimeEventQueue,
     runtimeEventRecordId: deps.runtimeEventRecordId,
     runnerId: deps.connection.runnerId,
     cleanupAttempt,
@@ -767,7 +767,7 @@ function createWorkflowReporter(
   runnerId: string,
   agentSessionId: string,
   runtimeSessionId: string | null,
-  outbox: AgentSessionRuntimeEventOutbox | null,
+  outbox: AgentSessionRuntimeEventQueue | null,
   runtimeEventRecordId: () => string,
   cleanupAttempt?: number,
 ): WorkflowAgentSessionReporter | null {

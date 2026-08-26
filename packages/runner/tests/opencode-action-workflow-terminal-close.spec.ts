@@ -7,7 +7,7 @@ import type { RuntimeEventSubscription, RuntimeGlobalEvent } from "../src/runtim
 import type { OpencodeClient } from "@opencode-ai/sdk/v2"
 import type { ActionTestContext as ActionContext } from "./support/action-test-context.js"
 import { makeRecordingOutbox } from "./support/outbox-test-helpers.js"
-import type { RuntimeEventRecord } from "../src/server/runtime-event-outbox.js"
+import type { RuntimeEventRecord } from "../src/server/runtime-event-queue.js"
 import { callAction } from "./support/call-action.js"
 
 class FakeSubscription implements RuntimeEventSubscription {
@@ -116,7 +116,7 @@ describe("opencodeAction — Workflow AgentSession terminal-state close", () => 
     const context = baseContext({
       openCodeRuntime: runtime,
       serverConnection: handles.connection,
-      agentSessionRuntimeEventOutbox: handles.outbox,
+      agentSessionRuntimeEventQueue: handles.outbox,
     })
 
     const result = await callAction(opencodeAction, context)
@@ -143,7 +143,7 @@ describe("opencodeAction — Workflow AgentSession terminal-state close", () => 
       const result = await callAction(opencodeAction, baseContext({
         openCodeRuntime: runtime,
         serverConnection: handles.connection,
-        agentSessionRuntimeEventOutbox: handles.outbox,
+        agentSessionRuntimeEventQueue: handles.outbox,
       }))
       expect(result.error).toBeDefined()
       const closed = handles.eventsByType("session.activity")[0]
@@ -165,7 +165,7 @@ describe("opencodeAction — Workflow AgentSession terminal-state close", () => 
       const context = baseContext({
         openCodeRuntime: runtime,
         serverConnection: handles.connection,
-        agentSessionRuntimeEventOutbox: handles.outbox,
+        agentSessionRuntimeEventQueue: handles.outbox,
         signal: abortController.signal,
       })
       const result = await callAction(opencodeAction, context)
@@ -198,7 +198,7 @@ describe("opencodeAction — Workflow AgentSession terminal-state close", () => 
       const result = await callAction(opencodeAction, baseContext({
         openCodeRuntime: runtime,
         serverConnection: handles.connection,
-        agentSessionRuntimeEventOutbox: handles.outbox,
+        agentSessionRuntimeEventQueue: handles.outbox,
       }))
 
       expect(result.error?.code).toBe("turn-failed")
@@ -234,7 +234,7 @@ describe("opencodeAction — Workflow AgentSession terminal-state close", () => 
     const result = await callAction(opencodeAction, baseContext({
       openCodeRuntime: runtime,
       serverConnection: handles.connection,
-      agentSessionRuntimeEventOutbox: handles.outbox,
+      agentSessionRuntimeEventQueue: handles.outbox,
     }))
 
     expect(result.error?.message).toBe("Insufficient balance")
@@ -260,7 +260,7 @@ describe("opencodeAction — Workflow AgentSession terminal-state close", () => 
     const context = baseContext({
       openCodeRuntime: runtime,
       serverConnection: handles.connection,
-      agentSessionRuntimeEventOutbox: handles.outbox,
+      agentSessionRuntimeEventQueue: handles.outbox,
     })
 
     const result = await callAction(opencodeAction, context)
@@ -289,7 +289,7 @@ describe("opencodeAction — Workflow AgentSession terminal-state close", () => 
       const result = await callAction(opencodeAction, baseContext({
         openCodeRuntime: runtime,
         serverConnection: handles.connection,
-        agentSessionRuntimeEventOutbox: failingOutbox,
+        agentSessionRuntimeEventQueue: failingOutbox,
       }))
       expect(result.error).toBeUndefined()
       expect(result.turnFact?.finalAssistantText).toBe("final answer")
@@ -322,7 +322,7 @@ describe("opencodeAction — Workflow AgentSession terminal-state close", () => 
       const context = baseContext({
         openCodeRuntime: runtime,
         serverConnection: handles.connection,
-        agentSessionRuntimeEventOutbox: failingOutbox,
+        agentSessionRuntimeEventQueue: failingOutbox,
         with: { prompt: "opencode will fail", session: "plan" } as never,
       })
       const result = await callAction(opencodeAction, context)
@@ -355,14 +355,14 @@ describe("opencodeAction — Workflow AgentSession terminal-state close", () => 
     await callAction(opencodeAction, baseContext({
       openCodeRuntime: runtime,
       serverConnection: handles.connection,
-      agentSessionRuntimeEventOutbox: handles.outbox,
+      agentSessionRuntimeEventQueue: handles.outbox,
       workId: "work-a",
       with: { prompt: "first prompt", session: "plan" } as never,
     }))
     await callAction(opencodeAction, baseContext({
       openCodeRuntime: runtime,
       serverConnection: handles.connection,
-      agentSessionRuntimeEventOutbox: handles.outbox,
+      agentSessionRuntimeEventQueue: handles.outbox,
       workId: "work-b",
       with: { prompt: "second prompt", session: "plan" } as never,
     }))

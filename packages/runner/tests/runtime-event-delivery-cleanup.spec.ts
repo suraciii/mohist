@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import type { ServerConnection } from '../src/server/connection.js'
-import { createServerRuntimeEventDelivery } from '../src/server/runtime-event-delivery.js'
-import type { RuntimeEventRecord } from '../src/server/runtime-event-outbox.js'
+import { createServerRuntimeEventDelivery } from '../src/server/runtime-event-queue-delivery.js'
+import type { RuntimeEventRecord } from '../src/server/runtime-event-queue.js'
 
 describe('createServerRuntimeEventDelivery - workflow cleanup', () => {
   it('uses the Server-owned cleanup admission route with stable identity', async () => {

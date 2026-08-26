@@ -27,7 +27,7 @@ describe('follow-up terminal failure categories', () => {
     }
     const receive = createFollowupHandler({
       followupTargetResolver: () => ({ runtimeSessionId: 'runtime-1', workDir: '/work', projectId: 'project-1' }),
-      agentSessionRuntimeEventOutbox: outbox as never,
+      agentSessionRuntimeEventQueue: outbox as never,
       openCodeRuntime: {
         ready: () => true,
         followup: vi.fn(async () => ({
@@ -80,7 +80,7 @@ describe('follow-up terminal failure categories', () => {
     }
     const receive = createFollowupHandler({
       followupTargetResolver: () => ({ runtimeSessionId: 'runtime-1', workDir: '/work', projectId: 'project-1' }),
-      agentSessionRuntimeEventOutbox: outbox as never,
+      agentSessionRuntimeEventQueue: outbox as never,
       openCodeRuntime: {
         ready: () => true,
         followup: vi.fn(async () => ({
@@ -120,7 +120,7 @@ describe('follow-up terminal failure categories', () => {
       }
       const receive = createFollowupHandler({
         followupTargetResolver: () => ({ runtimeSessionId: 'runtime-1', workDir: '/work', projectId: 'project-1' }),
-        agentSessionRuntimeEventOutbox: outbox as never,
+        agentSessionRuntimeEventQueue: outbox as never,
         piRuntime: {
           ready: () => true,
           followup: vi.fn(async () => ({
@@ -154,7 +154,7 @@ describe('follow-up terminal failure categories', () => {
     }
     const receive = createFollowupHandler({
       followupTargetResolver: () => ({ runtimeSessionId: 'runtime-1', workDir: '/work', projectId: 'project-1' }),
-      agentSessionRuntimeEventOutbox: outbox as never,
+      agentSessionRuntimeEventQueue: outbox as never,
       openCodeRuntime: {
         ready: () => true,
         followup: vi.fn(async (_request: unknown, observer: { onEvent?: (event: unknown) => void } | undefined) => {
@@ -189,7 +189,7 @@ describe('follow-up terminal failure categories', () => {
       }
       const receive = createFollowupHandler({
         followupTargetResolver: () => ({ runtimeSessionId: 'runtime-1', workDir: '/work', projectId: 'project-1' }),
-        agentSessionRuntimeEventOutbox: outbox as never,
+        agentSessionRuntimeEventQueue: outbox as never,
         openCodeRuntime: { ready: () => true, followup } as never,
       })
 
@@ -215,7 +215,7 @@ describe('follow-up terminal failure categories', () => {
         workDir: '/work',
         projectId: '__mohist_slack_manager__',
       }),
-      agentSessionRuntimeEventOutbox: outbox as never,
+      agentSessionRuntimeEventQueue: outbox as never,
       piRuntime: {
         ready: () => true,
         followup: vi.fn(async () => ({
@@ -251,7 +251,7 @@ describe('follow-up attachment delivery', () => {
     const enqueue = vi.fn()
     const receive = createFollowupHandler({
       followupTargetResolver: resolver,
-      agentSessionRuntimeEventOutbox: { ready: () => true, enqueueBeforeExecution: enqueue } as never,
+      agentSessionRuntimeEventQueue: { ready: () => true, enqueueBeforeExecution: enqueue } as never,
       openCodeRuntime: (() => ({ ready: () => true })) as never,
       strictExecutionSourceValidation: true,
     })
@@ -299,7 +299,7 @@ describe('follow-up attachment delivery', () => {
         workDir: '/work',
         projectId: '__mohist_slack_manager__',
       }),
-      agentSessionRuntimeEventOutbox: outbox as never,
+      agentSessionRuntimeEventQueue: outbox as never,
       piRuntime: runtime as never,
       runnerRoot: '/tmp/runner',
       createManagerExecutionBoundary: vi.fn(async () => boundary as never) as never,
@@ -340,7 +340,7 @@ describe('follow-up attachment delivery', () => {
         workDir: '/work',
         projectId: '__mohist_slack_manager__',
       }),
-      agentSessionRuntimeEventOutbox: outbox as never,
+      agentSessionRuntimeEventQueue: outbox as never,
       piRuntime: runtime as never,
       runnerRoot: '/tmp/runner',
       createManagerExecutionBoundary: vi.fn(async () => boundary as never) as never,
@@ -385,7 +385,7 @@ describe('follow-up attachment delivery', () => {
         workDir: '/work',
         projectId: '__mohist_slack_manager__',
       }),
-      agentSessionRuntimeEventOutbox: outbox as never,
+      agentSessionRuntimeEventQueue: outbox as never,
       piRuntime: runtime as never,
       runnerRoot: '/tmp/runner',
       createManagerExecutionBoundary: vi.fn(async () => boundary as never) as never,
@@ -451,7 +451,7 @@ describe('follow-up attachment delivery', () => {
         workDir,
         projectId: 'project-1',
       }),
-      agentSessionRuntimeEventOutbox: outbox as never,
+      agentSessionRuntimeEventQueue: outbox as never,
       openCodeRuntime: runtime as never,
       connection: serverConnection as never,
       runnerId: 'runner-1',

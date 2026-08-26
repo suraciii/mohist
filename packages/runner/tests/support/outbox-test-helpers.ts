@@ -10,14 +10,13 @@
 import { vi } from "vitest"
 import type { ServerConnection, AgentSessionRuntimeEventReceipt } from "../../src/server/connection.js"
 import type {
-  AgentSessionRuntimeEventOutbox,
+  AgentSessionRuntimeEventQueue,
   RuntimeEventRecord,
-  RuntimeEventOutboxFileSystem,
-} from "../../src/server/runtime-event-outbox.js"
+} from "../../src/server/runtime-event-queue.js"
 
 export interface OutboxHandles {
-  /** Outbox-shaped object accepted by `ActionContext.agentSessionRuntimeEventOutbox`. */
-  outbox: AgentSessionRuntimeEventOutbox
+  /** Outbox-shaped object accepted by `ActionContext.agentSessionRuntimeEventQueue`. */
+  outbox: AgentSessionRuntimeEventQueue
   /** Local capture of every record enqueued in production order. */
   records: RuntimeEventRecord[]
   /** Convenience: `records` filtered to a particular event type. */
@@ -31,23 +30,17 @@ export interface OutboxHandles {
   setEventRejection(types: ReadonlySet<string>): void
 }
 
-interface FakeOutboxOptions {
-  fileSystem?: RuntimeEventOutboxFileSystem
-}
-
-export function makeRecordingOutbox(options: FakeOutboxOptions = {}): OutboxHandles {
+export function makeRecordingOutbox(): OutboxHandles {
   const records: RuntimeEventRecord[] = []
   let inputAccepted = true
   let rejectTypes: ReadonlySet<string> = new Set()
-  const fileSystem = options.fileSystem
-  const outbox: AgentSessionRuntimeEventOutbox = {
+  const outbox: AgentSessionRuntimeEventQueue = {
     ready: () => true,
     async load() {},
     async recover() {},
     async enqueueBeforeExecution(record) {
       const internal: RuntimeEventRecord = { ...record }
       records.push(internal)
-      if (fileSystem) await fileSystem.writeAtomicText("outbox", JSON.stringify({ version: 1, entries: records }))
     },
     async awaitInputReceipt(recordId) {
       if (!inputAccepted) throw new Error("session.input was not acknowledged")
@@ -62,14 +55,12 @@ export function makeRecordingOutbox(options: FakeOutboxOptions = {}): OutboxHand
     async enqueueProducedFact(record) {
       const internal: RuntimeEventRecord = { ...record }
       records.push(internal)
-      if (fileSystem) await fileSystem.writeAtomicText("outbox", JSON.stringify({ version: 1, entries: records }))
     },
     async enqueueProducedFactBatch(batch) {
       for (const record of batch) {
         const internal: RuntimeEventRecord = { ...record }
         records.push(internal)
       }
-      if (fileSystem) await fileSystem.writeAtomicText("outbox", JSON.stringify({ version: 1, entries: records }))
     },
     async kick() {},
     async stop() {},

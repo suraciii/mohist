@@ -6,7 +6,6 @@ import type { ActionDefinition } from '../src/actions/manifest.js'
 import { deferred } from './support/deferred.js'
 import type { GitRunner } from '../src/runtime/git-probe.js'
 import { UnexpectedConsoleRecorder } from './support/unexpected-console.js'
-import { FakeTerminalTaskLogDeliveryStore } from './support/terminal-task-log-delivery.js'
 import {
   installFakeOpenCodeRuntimeFactory,
   installReadyOpenCodeRuntimeFactory,
@@ -249,7 +248,7 @@ function hostOptions(): ConstructorParameters<typeof RunnerHost>[0] {
 }
 
 function hostWithFakeTerminalDelivery(): RunnerHost {
-  return new RunnerHost(hostOptions(), undefined, { terminalTaskLogDelivery: new FakeTerminalTaskLogDeliveryStore() })
+  return new RunnerHost(hostOptions())
 }
 
 function workflowVariables(): Record<string, unknown> {
@@ -446,8 +445,6 @@ describe('RunnerHost wires the OpenCodeRuntime lifecycle', () => {
         pollIntervalMs: QUIET_INTERVAL_MS,
         heartbeatIntervalMs: POLL_INTERVAL_MS,
       },
-      undefined,
-      { terminalTaskLogDelivery: new FakeTerminalTaskLogDeliveryStore() },
     )
     const run = host.run(controller.signal)
     try {

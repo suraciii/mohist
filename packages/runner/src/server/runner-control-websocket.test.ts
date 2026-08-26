@@ -102,7 +102,7 @@ function fixture(
       socketFactory: factory,
       random: options.random ?? (() => 0.5),
       onReconnected: options.onReconnected,
-      agentSessionRuntimeEventOutbox: options.outbox as never,
+      agentSessionRuntimeEventQueue: options.outbox as never,
     },
     {
       gitHash: 'manifest-hash',

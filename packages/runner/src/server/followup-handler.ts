@@ -1,6 +1,6 @@
 // The follow-up handler routes both input and operation-correlated
 // terminal outcomes through the host-owned
-// `AgentSessionRuntimeEventOutbox`.
+// `AgentSessionRuntimeEventQueue`.
 //
 // Behaviour:
 //   - drops silently on null / missing payload, missing/empty input, no
@@ -35,7 +35,7 @@ import {
   type ReceiveFollowupPayload,
   type SessionTarget,
 } from './session-target.js'
-import type { AgentSessionRuntimeEventOutbox, RuntimeEventRecord } from './runtime-event-outbox.js'
+import type { AgentSessionRuntimeEventQueue, RuntimeEventRecord } from './runtime-event-queue.js'
 import {
   callFollowup,
   ensureCommandRuntimeReady,
@@ -69,7 +69,7 @@ const log = runnerLogger.child('session')
 
 export interface FollowupHandlerDeps {
   followupTargetResolver?: FollowupTargetResolver | null
-  agentSessionRuntimeEventOutbox?: AgentSessionRuntimeEventOutbox | null
+  agentSessionRuntimeEventQueue?: AgentSessionRuntimeEventQueue | null
   openCodeRuntime?: CommandRuntimeAccessors['openCode']
   piRuntime?: CommandRuntimeAccessors['pi']
   connection?: ServerConnection | null
@@ -129,7 +129,7 @@ async function handleFollowup(
   const descriptors = parseAttachmentDescriptors(payload.attachments)
   if (text.trim().length === 0 && descriptors.length === 0) return unavailable()
   const resolver = deps.followupTargetResolver ?? null
-  const outbox = deps.agentSessionRuntimeEventOutbox ?? null
+  const outbox = deps.agentSessionRuntimeEventQueue ?? null
   if (!resolver || !outbox) return unavailable()
   if (!outbox.ready()) return unavailable()
 
@@ -535,7 +535,7 @@ function isManagerSlackContext(value: unknown): boolean {
 }
 
 function buildFollowupObserver(
-  outbox: AgentSessionRuntimeEventOutbox,
+  outbox: AgentSessionRuntimeEventQueue,
   sessionTarget: SessionTarget,
   target: FollowupTarget,
   operationId: string | undefined,
@@ -635,7 +635,7 @@ function readRuntimeErrorCategory(
 }
 
 async function enqueueFollowupInput(
-  outbox: AgentSessionRuntimeEventOutbox,
+  outbox: AgentSessionRuntimeEventQueue,
   sessionTarget: SessionTarget,
   target: FollowupTarget,
   payload: ReceiveFollowupPayload,
@@ -677,7 +677,7 @@ async function enqueueFollowupInput(
 }
 
 function recordFollowupActivity(
-  outbox: AgentSessionRuntimeEventOutbox,
+  outbox: AgentSessionRuntimeEventQueue,
   sessionTarget: SessionTarget,
   target: FollowupTarget,
   operationId: string | undefined,

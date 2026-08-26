@@ -1,9 +1,9 @@
 import type { RuntimeTurnEvent } from '../runtime/opencode/index.js'
 import {
   AlreadyConsumedRuntimeEventError,
-  type AgentSessionRuntimeEventOutbox,
+  type AgentSessionRuntimeEventQueue,
   type RuntimeEventRecord,
-} from '../server/runtime-event-outbox.js'
+} from '../server/runtime-event-queue.js'
 import { runnerLogger } from '../system/logger.js'
 
 const log = runnerLogger.child('session')
@@ -21,7 +21,7 @@ const STREAMING_DELTA_TYPES = new Set(['reasoning.delta', 'message.delta'])
 const MAX_STREAMING_DELTAS_PER_BATCH = 256
 
 export interface WorkflowAgentSessionReporterOptions {
-  readonly outbox: AgentSessionRuntimeEventOutbox
+  readonly outbox: AgentSessionRuntimeEventQueue
   readonly workflowRunId: string
   readonly projectId: string
   readonly sessionName: string
@@ -37,22 +37,13 @@ export interface WorkflowAgentSessionReporterOptions {
 
 /**
  * Turn-scoped Workflow AgentSession reporter (issue 461). The reporter
- * no longer performs HTTP: durable delivery is delegated to the host-owned
- * `AgentSessionRuntimeEventOutbox`. The reporter's responsibility is
- * sequence preservation (input → activity → close), registering
- * ordered produced-fact promises synchronously, and waiting for every
- * local promise to settle before the Workflow result returns.
- *
- * `enqueueBeforeExecution` rolls back an uncommitted input on snapshot
- * failure (orchestrated by the outbox), and the reporter surfaces that
- * rejection by returning an explicit error from `awaitInput()` so the
- * Action can return execution-unavailable without invoking OpenCode.
- * Failed post-start fact enqueues settle their returned promise with a
- * rejection, but the reporter never replaces the runtime result with
- * an outbox error.
+ * publishes through the host-owned volatile queue. The reporter preserves
+ * per-session order (input → activity → close) while the process lives.
+ * Produced evidence may be lost on process death, and delivery failures
+ * never replace the runtime result.
  */
 export class WorkflowAgentSessionReporter {
-  private readonly outbox: AgentSessionRuntimeEventOutbox
+  private readonly outbox: AgentSessionRuntimeEventQueue
   private readonly projectId: string
   private readonly workflowRunId: string
   private readonly sessionName: string
@@ -137,7 +128,7 @@ export class WorkflowAgentSessionReporter {
     const promise = (pending ? Promise.resolve() : this.outbox.enqueueBeforeExecution(record))
       .then(async () => {
         const awaitReceipt = this.outbox.awaitInputReceipt
-        if (!awaitReceipt) throw new Error('Workflow AgentSession outbox does not support Server input receipts')
+        if (!awaitReceipt) throw new Error('Workflow AgentSession queue does not support Server input receipts')
         const receipt = await awaitReceipt.call(this.outbox, inputDeliveryId)
         if (
           receipt.inputDeliveryId !== inputDeliveryId ||
@@ -237,7 +228,7 @@ export class WorkflowAgentSessionReporter {
     if (this.closed) return
     if (this.inputRejected) return
     if (this.cleanupOperationId !== null && !this.inputAccepted) return
-    // Flush buffered deltas before the activity fact so the outbox preserves turn order.
+    // Flush buffered deltas before the activity fact so the queue preserves turn order.
     this.flushDeltaBuffer()
     const records: RuntimeEventRecord[] = []
     if (payload.status !== 'completed')
@@ -427,7 +418,7 @@ export class WorkflowAgentSessionReporter {
     const promise = (pending ? Promise.resolve() : this.outbox.enqueueBeforeExecution(start))
       .then(async () => {
         const awaitReceipt = this.outbox.awaitInputReceipt
-        if (!awaitReceipt) throw new Error('Workflow AgentSession outbox does not support Server input receipts')
+        if (!awaitReceipt) throw new Error('Workflow AgentSession queue does not support Server input receipts')
         const receipt = await awaitReceipt.call(this.outbox, operationId)
         if (
           receipt.inputDeliveryId !== inputDeliveryId ||

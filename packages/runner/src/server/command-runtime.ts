@@ -37,7 +37,7 @@ import type {
 } from '../runtime/pi/index.js'
 import { parseModelIdentifier } from '../runtime/opencode/index.js'
 import type { RuntimeSessionBinding } from './session-target.js'
-import type { AgentSessionRuntimeEventOutbox, RuntimeEventRecord } from './runtime-event-outbox.js'
+import type { AgentSessionRuntimeEventQueue, RuntimeEventRecord } from './runtime-event-queue.js'
 import type {
   SessionCommand,
   SessionCommandError,
@@ -211,7 +211,7 @@ export async function callSessionCommand(
 
 export function createSessionCommandRouter(
   accessors: CommandRuntimeAccessors,
-  outbox: AgentSessionRuntimeEventOutbox,
+  outbox: AgentSessionRuntimeEventQueue,
 ): (request: SessionCommandRequest) => Promise<SessionCommandResult> {
   return async (request) => {
     const handle = resolveCommandRuntime({ runtime: request.runtime }, accessors)

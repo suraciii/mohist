@@ -783,25 +783,5 @@ describe('RunnerHost', () => {
     }
   })
 
-  it('ClaimReadiness_RequiresHealthyRuntimeEventOutbox', () => {
-    const host = new RunnerHost({
-      serverUrl: 'https://runner.test',
-      runnerId: 'runner-test',
-      runnerRoot: '/virtual/mohist-runner-test',
-      pollIntervalMs: 1,
-      heartbeatIntervalMs: 60_000,
-      dispatchLivenessProbeIntervalMs: 60_000,
-    }) as unknown as {
-      openCodeRuntime: { ready(): boolean } | null
-      agentSessionRuntimeEventOutbox: { ready(): boolean }
-      isOpenCodeReadyForClaim(): boolean
-    }
-    host.openCodeRuntime = { ready: () => true }
-    host.agentSessionRuntimeEventOutbox = { ready: () => false }
 
-    expect(host.isOpenCodeReadyForClaim()).toBe(false)
-
-    host.agentSessionRuntimeEventOutbox = { ready: () => true }
-    expect(host.isOpenCodeReadyForClaim()).toBe(true)
-  })
 })

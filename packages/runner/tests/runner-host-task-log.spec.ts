@@ -5,7 +5,6 @@ import type { SessionTarget } from '../src/server/session-target.js'
 import type { GitRunner } from '../src/runtime/git-probe.js'
 import { deferred, type Deferred } from './support/deferred.js'
 import { capturedLogs } from './support/logger-test.js'
-import { FakeTerminalTaskLogDeliveryStore } from './support/terminal-task-log-delivery.js'
 import { installReadyOpenCodeRuntimeFactory } from './support/opencode-runtime-factory.js'
 import { createDefaultRunnerTestResources, withTestRunnerResources } from './support/test-resources.js'
 import { taskLogWork as workWith } from './support/runner-host-task-log-fixture.js'
@@ -332,7 +331,7 @@ describe('RunnerHost flushes task logs before reporting work', () => {
     await expect(run).resolves.toBeUndefined()
   })
 
-  it('FlushesCapturedLogViaUploadTaskLogBeforeReport', async () => {
+  it('UploadsCapturedTerminalLogWithoutControllingReport', async () => {
     const uploadStarted = deferred<void>()
     const reportStarted = deferred<void>()
     getConnectionId.mockReturnValue('conn-1')
@@ -369,17 +368,12 @@ describe('RunnerHost flushes task logs before reporting work', () => {
     expect(uploadCall[0]).toBe('wf-336')
     expect(uploadCall[1]).toBe('work-336')
     expect(report).toHaveBeenCalledTimes(1)
-    // The flush call must precede the report call so the verdict
-    // round-trip never carries a flushed log (design D6).
-    const uploadIdx = uploadTaskLog.mock.invocationCallOrder[0]!
-    const reportIdx = report.mock.invocationCallOrder[0]!
-    expect(uploadIdx).toBeLessThan(reportIdx)
     const rebaseEntries = uploadCall[2].entries.filter((e) => e.source === 'action:rebase')
     expect(rebaseEntries.length).toBeGreaterThanOrEqual(2)
     expect(rebaseEntries.map((e) => e.text)).toContain('rebasing commit a1b2c3')
   })
 
-  it('FailedTerminalUploadIsDurable_ReportStillSucceeds', async () => {
+  it('FailedTerminalUploadIsDropped_ReportStillSucceeds', async () => {
     vi.clearAllMocks()
     const reportStarted = deferred<void>()
     getConnectionId.mockReturnValue('conn-1')
@@ -419,12 +413,12 @@ describe('RunnerHost flushes task logs before reporting work', () => {
     expect(report).toHaveBeenCalledTimes(1)
     expect(capturedLogs()).toEqual(
       expect.arrayContaining([
-        expect.objectContaining({ level: 'WARN', message: 'terminal task-log delivery will recover' }),
+        expect.objectContaining({ level: 'WARN', message: 'terminal task-log delivery abandoned' }),
       ]),
     )
   })
 
-  it('PendingTerminalUploadIsTimedOut_ReportStillSucceeds', async () => {
+  it('PendingTerminalUploadDoesNotDelayReport', async () => {
     vi.clearAllMocks()
     const uploadStarted = deferred<void>()
     const pendingUpload = deferred<void>()
@@ -455,18 +449,12 @@ describe('RunnerHost flushes task logs before reporting work', () => {
     const host = buildHost()
     const run = host.run(controller.signal)
     await uploadStarted.promise
-    await vi.advanceTimersByTimeAsync(250)
     await reportStarted.promise
     controller.abort()
     await expect(run).resolves.toBeUndefined()
 
     expect(uploadTaskLog).toHaveBeenCalled()
     expect(report).toHaveBeenCalledTimes(1)
-    expect(capturedLogs()).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({ level: 'WARN', message: 'terminal task-log delivery will recover' }),
-      ]),
-    )
   })
 
   it('ReportCarriesTheVerdict_WhenLogUploadSucceeds', async () => {
@@ -515,118 +503,8 @@ describe('RunnerHost flushes task logs before reporting work', () => {
     expect(reportCall[1].message).toBe('boom')
   })
 
-  it('PersistsTerminalSnapshotBeforeUploadAndRemovesItOnlyAfterAck', async () => {
-    vi.clearAllMocks()
-    const store = new FakeTerminalTaskLogDeliveryStore()
-    const uploadStarted = deferred<void>()
-    const reportStarted = deferred<void>()
-    connect.mockResolvedValue(undefined)
-    heartbeat.mockResolvedValue(undefined)
-    disconnect.mockResolvedValue(undefined)
-    uploadTaskLog.mockImplementation(
-      async (
-        _ownerId: string,
-        workId: string,
-        batch: { entries: Array<{ text: string }> },
-        _signal: AbortSignal,
-        _ownerKind: string,
-        terminal: boolean,
-      ) => {
-        expect(terminal).toBe(true)
-        expect(workId).toBe('work-durable')
-        expect(store.records.size).toBe(1)
-        expect(batch.entries.length).toBeGreaterThan(0)
-        uploadStarted.resolve()
-        return { status: 'changed', accepted: batch.entries.length, truncated: false }
-      },
-    )
-    report.mockImplementation(async () => {
-      reportStarted.resolve()
-      return {}
-    })
-    startControl.mockResolvedValue(undefined)
-    stopControl.mockResolvedValue(undefined)
-    poll
-      .mockResolvedValueOnce([workWith({ workflowRunId: 'wf-durable', workId: 'work-durable' })])
-      .mockImplementation(async () => [])
 
-    const controller = new AbortController()
-    const host = new RunnerHost(
-      {
-        serverUrl: 'http://localhost:3456',
-        runnerId: 'runner-test',
-        runnerRoot: '/tmp/mohist-runner-host-task-log-durable',
-        pollIntervalMs: 1,
-        heartbeatIntervalMs: 60_000,
-        dispatchLivenessProbeIntervalMs: 60_000,
-      },
-      undefined,
-      { terminalTaskLogDelivery: store },
-    )
-    const run = host.run(controller.signal)
-    await uploadStarted.promise
-    await reportStarted.promise
-    expect(store.records.size).toBe(0)
-    controller.abort()
-    await expect(run).resolves.toBeUndefined()
-  })
 
-  it('ConflictIsTerminalForOneWorkAndDoesNotBlockAnotherPendingDelivery', async () => {
-    vi.clearAllMocks()
-    const store = new FakeTerminalTaskLogDeliveryStore()
-    await store.load()
-    const batch = {
-      entries: [{ seq: 1, timestamp: new Date('2026-08-11T00:00:00.000Z'), source: 'action', text: 'terminal' }],
-      truncated: false,
-    }
-    await store.putPending({
-      identity: { ownerKind: 'workflow', ownerId: 'wf-conflict', workId: 'work-conflict' },
-      batch,
-    })
-    await store.putPending({ identity: { ownerKind: 'workflow', ownerId: 'wf-other', workId: 'work-other' }, batch })
-    const allUploads = deferred<void>()
-    let calls = 0
-    uploadTaskLog.mockImplementation(async (_ownerId: string, workId: string) => {
-      calls += 1
-      if (calls === 2) allUploads.resolve()
-      if (workId === 'work-conflict') {
-        const error = new Error('sealed content differs') as Error & { status: number; code: string }
-        error.status = 409
-        error.code = 'terminal_snapshot_conflict'
-        throw error
-      }
-      return { status: 'duplicate', accepted: 1, truncated: false }
-    })
-    connect.mockResolvedValue(undefined)
-    heartbeat.mockResolvedValue(undefined)
-    disconnect.mockResolvedValue(undefined)
-    startControl.mockResolvedValue(undefined)
-    stopControl.mockResolvedValue(undefined)
-    poll.mockResolvedValue([])
-
-    const controller = new AbortController()
-    const host = new RunnerHost(
-      {
-        serverUrl: 'http://localhost:3456',
-        runnerId: 'runner-test',
-        runnerRoot: '/tmp/mohist-runner-host-task-log-conflict',
-        pollIntervalMs: 1,
-        heartbeatIntervalMs: 60_000,
-        dispatchLivenessProbeIntervalMs: 60_000,
-      },
-      undefined,
-      { terminalTaskLogDelivery: store },
-    )
-    const run = host.run(controller.signal)
-    await allUploads.promise
-    await Promise.resolve()
-    await Promise.resolve()
-    expect(calls).toBe(2)
-    expect(store.records.get('workflow:wf-conflict:work-conflict')?.state).toBe('failed')
-    expect(store.records.has('workflow:wf-other:work-other')).toBe(false)
-    controller.abort()
-    await expect(run).resolves.toBeUndefined()
-  })
 })
 
 describe('TaskLogCollector incremental flush through RunnerHost', () => {

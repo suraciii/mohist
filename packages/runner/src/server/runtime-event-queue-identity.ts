@@ -1,4 +1,4 @@
-import type { CleanupPredecessorDeliveryTarget, RuntimeEventRecord } from './runtime-event-outbox-ports.js'
+import type { RuntimeEventRecord } from './runtime-event-queue.js'
 
 interface SequenceKey {
   readonly family: 'workflow-session' | 'workflow-cleanup' | 'session-followup' | 'generic-followup'
@@ -29,36 +29,6 @@ export function runtimeEventDeliveryKey(record: RuntimeEventRecord): string {
 
 export function workflowSessionSchedulingKey(projectId: string, workflowRunId: string, sessionName: string): string {
   return JSON.stringify({ family: 'workflow-session', projectId, workflowRunId, sessionName })
-}
-
-export function cleanupPredecessorDeliveryKey(target: CleanupPredecessorDeliveryTarget): string {
-  return target.precedingCleanupOperationId === null
-    ? workflowSessionSchedulingKey(target.projectId, target.workflowRunId, target.sessionName)
-    : `cleanup-operation:${target.precedingCleanupOperationId}`
-}
-
-export function isCleanupPredecessorRecord(
-  record: RuntimeEventRecord,
-  target: CleanupPredecessorDeliveryTarget,
-): boolean {
-  const operationId = target.precedingCleanupOperationId
-  if (operationId === null) {
-    return (
-      record.producerFamily === 'workflow-session' &&
-      record.target.kind === 'workflow' &&
-      record.target.projectId === target.projectId &&
-      record.target.workflowRunId === target.workflowRunId &&
-      record.target.sessionName === target.sessionName
-    )
-  }
-  if (record.producerFamily === 'workflow-cleanup' && record.target.kind === 'workflow' && record.id === operationId) {
-    return (
-      record.target.projectId === target.projectId &&
-      record.target.workflowRunId === target.workflowRunId &&
-      record.target.sessionName === target.sessionName
-    )
-  }
-  return record.producerFamily === 'session-followup' && record.event.payload.cleanupOperationId === operationId
 }
 
 export function runtimeEventSchedulingKey(record: RuntimeEventRecord): string {
