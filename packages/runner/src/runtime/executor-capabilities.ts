@@ -524,14 +524,25 @@ function buildAgentTurnCapability(
       }
 
       enqueueTerminalClose(reporter, result, selectedBinding.runtimeSessionId)
-      await reporter?.settle()
+      try {
+        await reporter?.settle()
+      } catch (error) {
+        return boundRuntimeActionFailure(
+          selectedBinding,
+          reporter,
+          'session-reporting-failed',
+          `Workflow AgentSession terminal reporting failed: ${errorMessage(error)}`,
+        )
+      }
 
       if (!result.ok) {
         const diagnostics = result.diagnostics ?? result.error.diagnostics ?? []
         const code = diagnostics.some((diagnostic) => diagnostic.code === NON_RECOVERABLE_PROVIDER_ERROR_CODE)
           ? NON_RECOVERABLE_PROVIDER_ERROR_CODE
           : opencodeFailureCode(result.error.kind)
-        return runtimeActionFailure(
+        return boundRuntimeActionFailure(
+          selectedBinding,
+          reporter,
           code,
           result.error.message,
           hasUnconfirmedCleanup(diagnostics) ? 'unknown' : undefined,
@@ -668,6 +679,28 @@ function runtimeActionFailure(code: string, message: string, outcome?: 'unknown'
     exitCode: 1,
     outcome,
     turnFact: { finalAssistantText: null },
+  })
+}
+
+function boundRuntimeActionFailure(
+  binding: { agentSessionId: string; runtimeSessionId: string | null },
+  reporter: WorkflowAgentSessionReporter | null,
+  code: string,
+  message: string,
+  outcome?: 'unknown',
+): ActionResult {
+  return actionFail(code, message, {
+    exitCode: 1,
+    outcome,
+    turnFact: {
+      finalAssistantText: null,
+      agentBinding: {
+        agentSessionId: binding.agentSessionId,
+        agentTurnId: reporter?.getAgentTurnId() ?? null,
+        runtime: 'opencode',
+        runtimeSessionId: binding.runtimeSessionId,
+      },
+    },
   })
 }
 

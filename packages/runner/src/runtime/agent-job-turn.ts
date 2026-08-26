@@ -154,17 +154,23 @@ export async function executeOpenCodeTurn(
         : `AgentJob turn threw: ${managerExecution ? managerExecution.mask(message) : message}`,
     )
     await eventSink.drain()
-    return await evaluateInitialReplyGuard({
-      runtime: runtimeHandle,
-      runtimeSessionId: attachedRuntimeSessionId ?? selected,
-      workDir,
-      payload,
-      signal,
-      observation,
-      eventSink,
-      managerExecution,
-      originalResult,
-    })
+    return withAgentBinding(
+      await evaluateInitialReplyGuard({
+        runtime: runtimeHandle,
+        runtimeSessionId: attachedRuntimeSessionId ?? selected,
+        workDir,
+        payload,
+        signal,
+        observation,
+        eventSink,
+        managerExecution,
+        originalResult,
+      }),
+      work,
+      binding,
+      'opencode',
+      attachedRuntimeSessionId ?? selected,
+    )
   }
   await eventSink.drain()
   const originalResult = managerExecution?.hasExpired()
@@ -186,6 +192,7 @@ export async function executeOpenCodeTurn(
       managerExecution,
       originalResult,
     }),
+    work,
     binding,
     'opencode',
     result.ok ? result.value.facts.runtimeSessionId : (attachedRuntimeSessionId ?? selected),
@@ -297,17 +304,23 @@ export async function executePiTurn(
         : `AgentJob turn threw: ${managerExecution ? managerExecution.mask(message) : message}`,
     )
     await eventSink.drain()
-    return await evaluateInitialReplyGuard({
-      runtime: runtimeHandle,
+    return withAgentBinding(
+      await evaluateInitialReplyGuard({
+        runtime: runtimeHandle,
+        runtimeSessionId,
+        workDir,
+        payload,
+        signal,
+        observation,
+        eventSink,
+        managerExecution,
+        originalResult,
+      }),
+      work,
+      binding,
+      'pi',
       runtimeSessionId,
-      workDir,
-      payload,
-      signal,
-      observation,
-      eventSink,
-      managerExecution,
-      originalResult,
-    })
+    )
   }
   await eventSink.drain()
   const originalResult = managerExecution?.hasExpired()
@@ -329,6 +342,7 @@ export async function executePiTurn(
       managerExecution,
       originalResult,
     }),
+    work,
     binding,
     'pi',
     result.ok ? result.value.facts.runtimeSessionId : runtimeSessionId,
@@ -337,6 +351,7 @@ export async function executePiTurn(
 
 function withAgentBinding(
   result: WorkItemResult,
+  work: DispatchWorkItem,
   binding: BindingResolution,
   runtime: 'opencode' | 'pi',
   runtimeSessionId: string | null,
@@ -346,7 +361,7 @@ function withAgentBinding(
     ...result,
     agentBinding: {
       agentSessionId: binding.agentSessionId,
-      agentTurnId: null,
+      agentTurnId: work.initialTurnId ?? null,
       runtime,
       runtimeSessionId,
     },

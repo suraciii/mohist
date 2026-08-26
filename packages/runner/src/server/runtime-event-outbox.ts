@@ -37,13 +37,11 @@
 
 import { errorMessage } from '../core/errors.js'
 import { runnerLogger } from '../system/logger.js'
-import { RuntimeEventDeliveryError, type AgentSessionRuntimeEventReceipt } from './connection.js'
+import type { AgentSessionRuntimeEventReceipt } from './connection.js'
 import {
-  bindingReconcileDeliveryKey,
   collectGroups,
   defaultDelivery,
   isConfirmedConsumedRecord,
-  isDeterministicBindingRefusal,
   matchingReceipt,
   requiresInputReceipt,
   selectDeliveryGroups,
@@ -82,7 +80,6 @@ import {
 } from './runtime-event-outbox-ports.js'
 
 export { CleanupPredecessorDeliveryWaitTimeoutError } from './runtime-event-outbox-delivery-wait.js'
-export { isDeterministicBindingRefusal } from './runtime-event-outbox-delivery.js'
 export type { InternalRecord } from './runtime-event-outbox-delivery.js'
 export { nextTemporaryFilePath } from './runtime-event-outbox-ports.js'
 export {
@@ -136,7 +133,6 @@ const DEFAULT_DELIVERY_BATCH_SIZE = 64
 // final assistant message; non-delta facts are never dropped). This is
 // the last line of defense against a runaway turn exhausting runner memory.
 const DEFAULT_MAX_RETENTION_ENTRIES = 5_000
-const DETERMINISTIC_BINDING_REFUSAL_THRESHOLD = 3
 // Event types that are pure streaming increments — losing a bounded
 // number of them does not corrupt the transcript, which is rebuilt from
 // later deltas and the final message. These are eligible for batch
@@ -182,7 +178,6 @@ class AgentSessionRuntimeEventOutboxImpl implements AgentSessionRuntimeEventOutb
   private readonly now: () => Date
   private readonly timer: RuntimeEventOutboxTimer
   private readonly records = new Map<string, InternalRecord>()
-  private readonly deterministicBindingRefusalCounts = new Map<string, number>()
   private readonly emptyReceiptConfirmationCounts = new Map<string, number>()
   private readonly inputReceiptTerminalErrors = new Map<string, Error>()
   private readonly inputReceiptWaiters = new Map<
@@ -564,10 +559,7 @@ class AgentSessionRuntimeEventOutboxImpl implements AgentSessionRuntimeEventOutb
     signal.removeEventListener('abort', abortFromStop)
 
     if (outcome.kind === 'timed-out') {
-      // A timeout is retryable and interrupts any deterministic refusal or
-      // already-consumed confirmation run.
-      const bindingKey = bindingReconcileDeliveryKey(batch)
-      if (bindingKey !== null) this.deterministicBindingRefusalCounts.delete(bindingKey)
+      // A timeout is retryable and interrupts an already-consumed confirmation run.
       this.resetEmptyReceiptConfirmations(batch)
       // Abort is advisory: the original request may still commit and reply later.
       this.rejectTimedOutInputReceipts(batch, timeoutError)
@@ -612,63 +604,15 @@ class AgentSessionRuntimeEventOutboxImpl implements AgentSessionRuntimeEventOutb
   private async settleDeliveryLease(lease: DeliveryLease, outcome: DeliveryCompletion): Promise<boolean> {
     if (this.stopped || this.activeDeliveryGroups.get(lease.label) !== lease) return false
     try {
-      const bindingKey = bindingReconcileDeliveryKey(lease.batch)
       if (outcome.kind === 'failure') {
         this.resetEmptyReceiptConfirmations(lease.batch)
-        if (bindingKey !== null && isDeterministicBindingRefusal(outcome.error)) {
-          const refusalCount = (this.deterministicBindingRefusalCounts.get(bindingKey) ?? 0) + 1
-          this.deterministicBindingRefusalCounts.set(bindingKey, refusalCount)
-          if (refusalCount >= DETERMINISTIC_BINDING_REFUSAL_THRESHOLD) {
-            return await this.settleDeterministicBindingRefusal(lease.batch, bindingKey, outcome.error, refusalCount)
-          }
-        } else if (bindingKey !== null) {
-          this.deterministicBindingRefusalCounts.delete(bindingKey)
-        }
         for (const record of lease.batch) this.rejectInputReceipt(record.id, outcome.error)
         return false
       }
-      if (bindingKey !== null) this.deterministicBindingRefusalCounts.delete(bindingKey)
       return await this.settleDeliveryReceipts(lease.batch, outcome.perRecord)
     } finally {
       this.releaseDeliveryLease(lease)
     }
-  }
-
-  private async settleDeterministicBindingRefusal(
-    _batch: readonly InternalRecord[],
-    deliveryKey: string,
-    error: RuntimeEventDeliveryError,
-    refusalCount: number,
-  ): Promise<boolean> {
-    const removed = [...this.records.values()].filter((record) => runtimeEventDeliveryKey(record) === deliveryKey)
-    if (removed.length === 0) return false
-    for (const record of removed) this.records.delete(record.id)
-    try {
-      await this.enqueueSnapshotWrite((writeError) => {
-        for (const record of removed) this.records.set(record.id, record)
-        this.updateRetentionCapState()
-        this.healthy = false
-        this.lastLoadError = writeError instanceof Error ? writeError : new Error(errorMessage(writeError))
-        this.scheduleLocalRetry()
-      })
-    } catch {
-      // A failed removal must start a fresh consecutive refusal window. The
-      // durable record is restored by the write failure callback and remains
-      // retryable rather than being immediately terminal on the next attempt.
-      this.deterministicBindingRefusalCounts.delete(deliveryKey)
-      return false
-    }
-    this.updateRetentionCapState()
-    this.resolveCleanupPredecessorWaiters(removed)
-    log.error('runtime-event binding refusal reached terminal settlement', {
-      deliveryKey,
-      status: error.status,
-      code: error.code,
-      refusalCount,
-      removedRecords: removed.length,
-      session: 'outbox',
-    })
-    return true
   }
 
   private async settleDeliveryReceipts(

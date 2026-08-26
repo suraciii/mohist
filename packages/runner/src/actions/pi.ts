@@ -321,7 +321,7 @@ export async function piAction(
       terminalReportingFailed
         ? `${message}; Session terminal reporting failed and terminal state was not accepted`
         : message,
-      { exitCode: 1, turnFact: { finalAssistantText: null } },
+      { exitCode: 1, turnFact: boundTurnFact(null, agentSessionId, reporter, runtimeSessionId) },
     )
   }
 
@@ -355,36 +355,45 @@ export async function piAction(
     if (result.ok)
       return fail('session-reporting-failed', 'Workflow AgentSession did not accept the final Pi turn facts', {
         exitCode: 1,
-        turnFact: { finalAssistantText: null },
+        turnFact: boundTurnFact(null, agentSessionId, reporter, runtimeSessionId),
       })
     return fail(
       runtimeCode ?? 'turn-failed',
       `${result.error.message}; Session terminal reporting failed and terminal state was not accepted`,
-      { exitCode: 1, turnFact: { finalAssistantText: null } },
+      { exitCode: 1, turnFact: boundTurnFact(null, agentSessionId, reporter, runtimeSessionId) },
     )
   }
   if (!result.ok)
     return fail(runtimeCode ?? 'turn-failed', result.error.message, {
       exitCode: 1,
       outcome: unknownOutcome ? 'unknown' : undefined,
-      turnFact: { finalAssistantText: null },
+      turnFact: boundTurnFact(null, agentSessionId, reporter, runtimeSessionId),
     })
   return succeed(null, {
     exitCode: 0,
-    turnFact: {
-      finalAssistantText: finalText,
-      ...(agentSessionId
-        ? {
-            agentBinding: {
-              agentSessionId,
-              agentTurnId: reporter?.getAgentTurnId() ?? null,
-              runtime: 'pi' as const,
-              runtimeSessionId,
-            },
-          }
-        : {}),
-    },
+    turnFact: boundTurnFact(finalText, agentSessionId, reporter, runtimeSessionId),
   })
+}
+
+function boundTurnFact(
+  finalAssistantText: string | null,
+  agentSessionId: string | null,
+  reporter: WorkflowAgentSessionReporter | null,
+  runtimeSessionId: string,
+) {
+  return {
+    finalAssistantText,
+    ...(agentSessionId
+      ? {
+          agentBinding: {
+            agentSessionId,
+            agentTurnId: reporter?.getAgentTurnId() ?? null,
+            runtime: 'pi' as const,
+            runtimeSessionId,
+          },
+        }
+      : {}),
+  }
 }
 
 function buildPromptLoaderContext(

@@ -439,6 +439,81 @@ describe('RunnerHost', () => {
     }
   })
 
+  it('AwaitingAck_RetriesTheSameRuntimeBackedBindingWithoutReexecution_ForSuccessAndFailure', async () => {
+    const retried = deferred<void>()
+    const works = [
+      {
+        workflowRunId: 'wr-binding-success',
+        workId: 'work-binding-success',
+        workType: 'task',
+        uses: 'test/block',
+        ownerKind: 'workflow',
+        variables: { workspace: { path: '/virtual/mohist-runner-test' } },
+      },
+      {
+        workflowRunId: 'wr-binding-failure',
+        workId: 'work-binding-failure',
+        workType: 'task',
+        uses: 'test/block',
+        ownerKind: 'workflow',
+        variables: { workspace: { path: '/virtual/mohist-runner-test' } },
+      },
+    ]
+    poll.mockResolvedValueOnce(works).mockResolvedValue([])
+    const executions = new Map<string, number>()
+    const executeWithLog = vi
+      .spyOn(WorkExecutor.prototype, 'executeWithLog')
+      .mockImplementation(async (work, _signal, collector) => {
+        executions.set(work.workId, (executions.get(work.workId) ?? 0) + 1)
+        const failure = work.workId.endsWith('failure')
+        return {
+          result: {
+            status: failure ? 'failed' : 'completed',
+            ...(failure ? { error: { code: 'turn-failed', message: 'runtime failed' }, exitCode: 1 } : { exitCode: 0 }),
+            agentBinding: {
+              agentSessionId: `session-${work.workId}`,
+              agentTurnId: `turn-${work.workId}`,
+              runtime: 'opencode',
+              runtimeSessionId: `runtime-${work.workId}`,
+            },
+          },
+          collector: collector!,
+        }
+      })
+    const attempts = new Map<string, number>()
+    report.mockImplementation(async (work: { workId: string }) => {
+      const attempt = (attempts.get(work.workId) ?? 0) + 1
+      attempts.set(work.workId, attempt)
+      if (attempt === 1) return { verdict: 'outstanding' as const }
+      if ([...attempts.values()].filter((value) => value >= 2).length === works.length) retried.resolve()
+      return { verdict: 'accepted' as const }
+    })
+    const controller = new AbortController()
+    const run = newRunnerHost().run(controller.signal)
+    try {
+      while ([...attempts.values()].filter((value) => value >= 1).length < works.length) await vi.runOnlyPendingTimersAsync()
+      await vi.advanceTimersByTimeAsync(AWAITING_ACK_RETRY_INTERVAL_MS)
+      await retried.promise
+
+      for (const work of works) {
+        const calls = report.mock.calls.filter((call) => call[0]?.workId === work.workId)
+        expect(calls).toHaveLength(2)
+        expect(calls[0]?.[3]).toEqual(calls[1]?.[3])
+        expect(calls[0]?.[3]).toEqual({
+          agentSessionId: `session-${work.workId}`,
+          agentTurnId: `turn-${work.workId}`,
+          runtime: 'opencode',
+          runtimeSessionId: `runtime-${work.workId}`,
+        })
+        expect(executions.get(work.workId)).toBe(1)
+      }
+    } finally {
+      controller.abort()
+      await run.catch(() => undefined)
+      executeWithLog.mockRestore()
+    }
+  })
+
   it('AwaitingAck_RetriesReportUntilAcked', async () => {
     const firstReport = deferred<void>()
     const secondReport = deferred<void>()

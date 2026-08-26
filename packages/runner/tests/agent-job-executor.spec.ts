@@ -190,6 +190,35 @@ describe('AgentJobExecutor drives OpenCodeRuntime directly', () => {
     expect(runtime.runTurnCalls).toHaveLength(0)
   })
 
+  vitestIt.each([
+    ['success', null],
+    [
+      'failure',
+      {
+        ok: false as const,
+        error: { kind: 'turn-failed' as const, message: 'runtime failed', diagnostics: [] },
+        diagnostics: [],
+      },
+    ],
+  ])('preserves the actual Agent execution binding on %s', async (_case, failure) => {
+    const runtime = makeFakeRuntime()
+    if (failure) runtime.setTurnResult(failure)
+    const connection = makeFakeConnection()
+    connection.setAgentSession({ runtimeSessionId: 'ses-bound' })
+    const executor = new AgentJobExecutor(connection.connection, makeAccessors(runtime.runtime))
+    const work = buildAgentJobWork({ initialTurnId: 'turn-real' })
+
+    const result = await executor.execute(work, new AbortController().signal)
+
+    expect(runtime.runTurnCalls).toHaveLength(1)
+    expect(result.agentBinding).toEqual({
+      agentSessionId: 'session-1',
+      agentTurnId: 'turn-real',
+      runtime: 'opencode',
+      runtimeSessionId: 'ses_default',
+    })
+  })
+
   it('calls OpenCodeRuntime.runTurn with a flat Agent-owned request', async () => {
     const runtime = makeFakeRuntime()
     const connection = makeFakeConnection()
