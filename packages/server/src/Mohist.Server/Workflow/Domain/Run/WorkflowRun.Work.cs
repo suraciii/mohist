@@ -24,7 +24,7 @@ public sealed record WorkflowChecksWork(
     string Stage,
     List<CheckItem> Items) : WorkflowWork(Stage);
 
-public sealed record WorkflowActiveWork(WorkItem Item, string? TaskRunId)
+public sealed record WorkflowActiveWork(WorkItem Item, string? TaskRunId, string? ProcessGeneration)
 {
     public string WorkId => Item.Id ?? string.Empty;
     public bool IsTask => Item.IsTask;
@@ -835,7 +835,7 @@ public static partial class WorkflowRunExtensions
             stage.Id, workId, task.Title, task.Uses,
             task.WithInput, task.Artifacts, task.SetVars, task.Recovery, task.RecoveryRemaining,
             task.ExpectInput);
-        return new WorkflowActiveWork(item, task.Id);
+        return new WorkflowActiveWork(item, task.Id, task.ProcessGeneration);
     }
 
     private static WorkflowActiveWork? ActiveChecks(StageRun stage)
@@ -850,7 +850,8 @@ public static partial class WorkflowRunExtensions
 
         return new WorkflowActiveWork(
             WorkItem.Checks(stage.Id, stage.ChecksWorkId, checks),
-            TaskRunId: null);
+            TaskRunId: null,
+            ProcessGeneration: stage.ChecksProcessGeneration);
     }
 
     private static TaskRun? NextUnclaimedTask(StageRun stage) =>

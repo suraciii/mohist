@@ -31,16 +31,17 @@ public sealed partial class AgentJobGrain
             && !string.IsNullOrWhiteSpace(runnerId);
     }
 
-    public Task<ClaimResult?> ClaimNextAsync(string runnerId) =>
-        ClaimNextAsync(runnerId, null);
+    public Task<ClaimResult?> ClaimNextAsync(string runnerId, string processGeneration) =>
+        ClaimNextAsync(runnerId, processGeneration, null);
 
     public async Task<ClaimResult?> ClaimNextAsync(
         string runnerId,
+        string processGeneration,
         CapabilityClaimExpectation? expectation = null)
     {
         await HydrateAsync();
 
-        if (string.IsNullOrWhiteSpace(runnerId))
+        if (string.IsNullOrWhiteSpace(runnerId) || string.IsNullOrWhiteSpace(processGeneration))
             return null;
 
         // Validate the assignment under the row's revision. A concurrent
@@ -73,10 +74,11 @@ public sealed partial class AgentJobGrain
             : pendingDispatch with { CapabilityClaim = expectation };
 
         var record = expectation is null
-            ? await _jobStore.ClaimAsync(Key, runnerId, _timeProvider.GetUtcNow())
+            ? await _jobStore.ClaimAsync(Key, runnerId, processGeneration, _timeProvider.GetUtcNow())
             : await _jobStore.ClaimAsync(
                 Key,
                 runnerId,
+                processGeneration,
                 _timeProvider.GetUtcNow(),
                 expectation.WorkId,
                 JsonSerializer.Serialize(claimDispatch, JSON.Options));

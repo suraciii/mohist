@@ -61,12 +61,9 @@ public static partial class RunnerRoutes
             {
                 var report = await grains.GetGrain<IAgentJobGrain>(req.AgentJobId ?? string.Empty)
                     .ReportResultAsync(runnerId, req.WorkId, result);
-                var acknowledged = report.Accepted || string.Equals(report.Reason, "stale", StringComparison.Ordinal);
-                if (acknowledged)
-                    managerCredentials.RevokeWork(req.AgentJobId ?? string.Empty, req.WorkId);
-                return Results.Ok(new RunnerReportResponse(
-                    req.AgentJobId ?? string.Empty, null, acknowledged,
-                    report.Reason, ownerKind, req.AgentJobId));
+                var agentJobVerdict = report.Accepted ? "accepted" : "refused";
+                managerCredentials.RevokeWork(req.AgentJobId ?? string.Empty, req.WorkId);
+                return Results.Ok(new RunnerReportResponse(agentJobVerdict));
             }
 
             var (ack, workflowStatus) = await workflowReport.ReportAsync(
@@ -80,9 +77,10 @@ public static partial class RunnerRoutes
                 req.AgentTurnId,
                 req.Runtime,
                 req.RuntimeSessionId);
-            var tracked = string.Equals(ack, ReportAck.Accepted.ToString().ToLowerInvariant(), StringComparison.Ordinal);
-            return Results.Ok(new RunnerReportResponse(
-                req.WorkflowRunId ?? string.Empty, workflowStatus, tracked, ack, ownerKind, req.WorkflowRunId ?? string.Empty));
+            var verdict = string.Equals(ack, ReportAck.Accepted.ToString().ToLowerInvariant(), StringComparison.Ordinal)
+                ? "accepted"
+                : "refused";
+            return Results.Ok(new RunnerReportResponse(verdict));
         });
     }
 }

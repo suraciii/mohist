@@ -120,6 +120,7 @@ export function runtimeReadinessWitnesses(
 }
 
 export interface RunnerPollReport {
+  processGeneration: string
   inFlight: string[]
   awaitingAck: string[]
   runtimeReadiness: RuntimeReadinessWitness[]
@@ -129,6 +130,7 @@ export interface RunnerPollReport {
 }
 
 export function buildRunnerPollReport(input: {
+  processGeneration: string
   durableStarted: readonly string[]
   inFlight: Iterable<string>
   awaitingAck: Iterable<string>
@@ -138,6 +140,7 @@ export function buildRunnerPollReport(input: {
   deploymentEpoch: string | null
 }): RunnerPollReport {
   return {
+    processGeneration: input.processGeneration,
     inFlight: [...new Set([...input.inFlight, ...input.durableStarted])],
     awaitingAck: [...input.awaitingAck],
     runtimeReadiness: input.runtimeReadiness,

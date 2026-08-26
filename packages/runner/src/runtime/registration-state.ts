@@ -11,6 +11,7 @@ export function buildRegistrationState(
   piRuntime: RegistrationPiCatalogSource | null,
   actionsCatalog: RunnerRegistration['actionCatalog'],
   getConnectionId: () => string | null,
+  processGeneration: string,
 ): RunnerRegistration {
   const piCatalog = piRuntime?.catalog()
   const piModels = piCatalog?.models.map((model) => `${model.provider}/${model.id}`) ?? []
@@ -24,6 +25,7 @@ export function buildRegistrationState(
     : null
   const managerCapabilitiesAvailable = process.platform === 'linux' && piCatalog !== null
   return {
+    processGeneration,
     capabilities: [
       'execution-source-v1',
       ...(managerCapabilitiesAvailable

@@ -10,14 +10,14 @@ namespace Mohist.Server.Runner.Grains;
 
 public interface IRunnerGrain : IGrainWithStringKey
 {
-    Task RegisterAsync(RunnerInfo info);
+    Task RegisterAsync(RunnerInfo info, string processGeneration = "direct-call-generation");
     Task UnregisterAsync();
     /// <summary>Refreshes presence for control-plane heartbeat callers.</summary>
     Task HeartbeatAsync();
     /// <summary>Refreshes runner information and presence under the lifecycle gate.</summary>
     Task HeartbeatRepairAsync(RunnerInfo info);
     /// <summary>Atomically admits one poll round and captures its capacity.</summary>
-    Task<RunnerPollAdmission> TryBeginPollAsync();
+    Task<RunnerPollAdmission> TryBeginPollAsync(string processGeneration = "direct-call-generation");
     /// <summary>
     /// Releases the matching poll round admitted by <see cref="TryBeginPollAsync"/>.
     /// A release from an older round cannot release a newer admission.
@@ -52,10 +52,11 @@ public interface IRunnerGrain : IGrainWithStringKey
     /// this operation is the authoritative availability boundary for fresh
     /// workflow claims.
     /// </summary>
-    Task<WorkItem?> TryClaimWorkflowAsync(string workflowRunId, string? projectId, bool assignWorker);
+    Task<WorkItem?> TryClaimWorkflowAsync(string workflowRunId, string? projectId, bool assignWorker, string processGeneration = "direct-call-generation");
     /// <summary>Claims one AgentJob from its owner ledger during a poll.</summary>
     Task<ClaimResult?> TryClaimAgentJobAsync(string agentJobId, string? projectId,
-        CapabilityClaimExpectation? expectation = null);
+        CapabilityClaimExpectation? expectation = null,
+        string processGeneration = "direct-call-generation");
     /// <summary>
     /// Marks the runner present. Poll and control-plane heartbeat both refresh
     /// presence; the former also participates in dispatch reconciliation.
@@ -315,7 +316,8 @@ public sealed record RunnerPollRequest(
     [property: Id(3)] string? ConnectionId = null,
     [property: Id(4)] string? ConnectionGeneration = null,
     [property: Id(5)] bool? AdmissionReady = null,
-    [property: Id(6)] string? DeploymentEpoch = null)
+    [property: Id(6)] string? DeploymentEpoch = null,
+    [property: Id(7)] string? ProcessGeneration = null)
 {
     public RunnerPollRequest() : this([], []) { }
 }

@@ -14,7 +14,7 @@ export async function reportWork(
   result: WorkItemResult,
   signal: AbortSignal,
   binding?: AgentReportBinding,
-): Promise<Record<string, unknown>> {
+): Promise<{ verdict: 'accepted' | 'refused' | 'outstanding' | null }> {
   const ownerKind = work.ownerKind?.trim().toLowerCase()
   const body: Record<string, unknown> = {
     workId: work.workId,
@@ -48,8 +48,14 @@ export async function reportWork(
   })
   if (!response.ok) throw new Error(`report failed: ${response.status} ${await response.text()}`)
   try {
-    return (await response.json()) as Record<string, unknown>
+    const body = (await response.json()) as { verdict?: unknown }
+    return {
+      verdict:
+        body.verdict === 'accepted' || body.verdict === 'refused' || body.verdict === 'outstanding'
+          ? body.verdict
+          : null,
+    }
   } catch {
-    return {}
+    return { verdict: null }
   }
 }

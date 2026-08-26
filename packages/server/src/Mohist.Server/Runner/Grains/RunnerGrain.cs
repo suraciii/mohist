@@ -122,7 +122,8 @@ public partial class RunnerGrain : Grain, IRunnerGrain, IRemindable
         }
         var state = _state.State ??= new RunnerState();
         _info = state.LastKnownInfo;
-        _draining = !string.IsNullOrWhiteSpace(state.UpdateInterruptFence?.PendingId);
+        _draining = !string.IsNullOrWhiteSpace(state.UpdateInterruptFence?.PendingId)
+            || !string.IsNullOrWhiteSpace(state.PendingProcessGeneration);
         if (_info is not null && state.LastKnownActionCatalogJson is not null)
         {
             var catalog = JSON.Deserialize<ActionCatalog>(state.LastKnownActionCatalogJson);
@@ -146,12 +147,39 @@ public partial class RunnerGrain : Grain, IRunnerGrain, IRemindable
         return Task.CompletedTask;
     }
 
-    public async Task RegisterAsync(RunnerInfo info)
+    public async Task RegisterAsync(RunnerInfo info, string processGeneration)
     {
+        if (string.IsNullOrWhiteSpace(processGeneration))
+            throw new ArgumentException("process generation is required", nameof(processGeneration));
+        processGeneration = processGeneration.Trim();
         await _lifecycleGate.WaitAsync();
         try
         {
             _pollAdmissionToken = null;
+            var state = _state.State ??= new RunnerState();
+            var closingGeneration = state.ClosingProcessGeneration;
+            if (string.IsNullOrWhiteSpace(closingGeneration)
+                && !string.IsNullOrWhiteSpace(state.CurrentProcessGeneration)
+                && !string.Equals(state.CurrentProcessGeneration, processGeneration, StringComparison.Ordinal))
+            {
+                closingGeneration = state.CurrentProcessGeneration;
+                state.ClosingProcessGeneration = closingGeneration;
+                state.PendingProcessGeneration = processGeneration;
+                _draining = true;
+                await PersistAsync();
+            }
+            else if (!string.IsNullOrWhiteSpace(state.PendingProcessGeneration)
+                && !string.Equals(state.PendingProcessGeneration, processGeneration, StringComparison.Ordinal))
+            {
+                throw new InvalidOperationException("another process-generation replacement is pending");
+            }
+
+            if (!string.IsNullOrWhiteSpace(closingGeneration))
+                await CloseoutLostAsync(closingGeneration, failFast: true);
+
+            state.CurrentProcessGeneration = processGeneration;
+            state.PendingProcessGeneration = null;
+            state.ClosingProcessGeneration = null;
             SetRunnerInfo(InfoForRegister(info));
             _status = RunnerStatus.Online;
             // Registration is the update handoff completion boundary. Persist
@@ -197,7 +225,7 @@ public partial class RunnerGrain : Grain, IRunnerGrain, IRemindable
             _lifecycleGate.Release();
         }
 
-        await CloseoutLostAsync();
+        await CloseoutLostAsync(_state.State?.CurrentProcessGeneration, failFast: false);
     }
 
     public Task HeartbeatAsync() => TouchPresenceAsync();
@@ -253,12 +281,14 @@ public partial class RunnerGrain : Grain, IRunnerGrain, IRemindable
         await UpsertRegistryAsync();
     }
 
-    public async Task<RunnerPollAdmission> TryBeginPollAsync()
+    public async Task<RunnerPollAdmission> TryBeginPollAsync(string processGeneration)
     {
         await _lifecycleGate.WaitAsync();
         try
         {
-            if (_draining || _pollAdmissionToken is not null)
+            if (_draining || _pollAdmissionToken is not null
+                || string.IsNullOrWhiteSpace(processGeneration)
+                || !string.Equals(_state.State?.CurrentProcessGeneration, processGeneration.Trim(), StringComparison.Ordinal))
                 return new RunnerPollAdmission(false, 0);
 
             var admissionToken = Guid.NewGuid();
@@ -439,7 +469,8 @@ public partial class RunnerGrain : Grain, IRunnerGrain, IRemindable
     public async Task<WorkItem?> TryClaimWorkflowAsync(
         string workflowRunId,
         string? projectId,
-        bool assignWorker)
+        bool assignWorker,
+        string processGeneration)
     {
         await _lifecycleGate.WaitAsync();
         try
@@ -447,6 +478,7 @@ public partial class RunnerGrain : Grain, IRunnerGrain, IRemindable
             if (_draining
                 || _status != RunnerStatus.Online
                 || _info is null
+                || !string.Equals(_state.State?.CurrentProcessGeneration, processGeneration, StringComparison.Ordinal)
                 || !string.Equals(_info.ProjectId, projectId, StringComparison.Ordinal))
             {
                 return null;
@@ -469,7 +501,7 @@ public partial class RunnerGrain : Grain, IRunnerGrain, IRemindable
                     return null;
             }
 
-            return await workflow.ClaimNextAsync(RunnerId);
+            return await workflow.ClaimNextAsync(RunnerId, processGeneration);
         }
         finally
         {
@@ -480,7 +512,8 @@ public partial class RunnerGrain : Grain, IRunnerGrain, IRemindable
     public async Task<ClaimResult?> TryClaimAgentJobAsync(
         string agentJobId,
         string? projectId,
-        CapabilityClaimExpectation? expectation = null)
+        CapabilityClaimExpectation? expectation = null,
+        string processGeneration = "direct-call-generation")
     {
         await _lifecycleGate.WaitAsync();
         try
@@ -488,6 +521,7 @@ public partial class RunnerGrain : Grain, IRunnerGrain, IRemindable
             if (_draining
                 || _status != RunnerStatus.Online
                 || _info is null
+                || !string.Equals(_state.State?.CurrentProcessGeneration, processGeneration, StringComparison.Ordinal)
                 || !string.Equals(_info.ProjectId, projectId, StringComparison.Ordinal))
             {
                 return null;
@@ -508,8 +542,8 @@ public partial class RunnerGrain : Grain, IRunnerGrain, IRemindable
 
             var job = GrainFactory.GetGrain<IAgentJobGrain>(agentJobId);
             return expectation is null
-                ? await job.ClaimNextAsync(RunnerId)
-                : await job.ClaimNextAsync(RunnerId, expectation);
+                ? await job.ClaimNextAsync(RunnerId, processGeneration)
+                : await job.ClaimNextAsync(RunnerId, processGeneration, expectation);
         }
         catch (AgentJobLedgerConflictException)
         {
@@ -685,10 +719,10 @@ public partial class RunnerGrain : Grain, IRunnerGrain, IRemindable
             _lifecycleGate.Release();
         }
 
-        await CloseoutLostAsync();
+        await CloseoutLostAsync(_state.State?.CurrentProcessGeneration, failFast: false);
     }
 
-    private async Task CloseoutLostAsync()
+    private async Task CloseoutLostAsync(string? processGeneration, bool failFast)
     {
         var workerId = RunnerId;
 
@@ -696,32 +730,37 @@ public partial class RunnerGrain : Grain, IRunnerGrain, IRemindable
         {
             try
             {
-                var workflow = GrainFactory.GetGrain<IWorkflowGrain>(workflowRunId);
-                var observation = await workflow.ObserveAgentRunnerDisconnectedAsync(workerId);
-                if (observation == ReportAck.Stale)
-                    await workflow.InterruptActiveWorkAsync(workerId, "runner-lost");
+                var run = await _workflowRuns.LoadAsync(workflowRunId);
+                var active = run?.CurrentActiveWorkFor(workerId);
+                if (active is null
+                    || !string.Equals(active.ProcessGeneration, processGeneration, StringComparison.Ordinal))
+                    continue;
+                await GrainFactory.GetGrain<IWorkflowGrain>(workflowRunId)
+                    .FailActiveWorkAsync(workerId, "runner-lost");
             }
             catch (Exception ex)
             {
+                if (failFast) throw;
                 _log.LogWarning(ex,
                     "runner {runner} failed to close active workflow work for run {run}",
                     RunnerId, workflowRunId);
             }
         }
 
-        var recoveryDeadlineAt = _timeProvider.GetUtcNow()
-            + _agentJobOptions.RunnerLossRecoveryTimeout;
         foreach (var record in await _agentJobStore.ListRunningForRunnerAsync(workerId))
         {
             try
             {
+                if (!string.Equals(record.ClaimedProcessGeneration, processGeneration, StringComparison.Ordinal))
+                    continue;
                 await GrainFactory.GetGrain<IAgentJobGrain>(record.JobKey)
-                    .MarkUnknownAsync(AgentJobFailureReasons.RunnerLost, recoveryDeadlineAt);
+                    .FailAsync(AgentJobFailureReasons.RunnerLost);
             }
             catch (Exception ex)
             {
+                if (failFast) throw;
                 _log.LogWarning(ex,
-                    "runner {runner} failed to enter AgentJob {job} recovery projection",
+                    "runner {runner} failed to close AgentJob {job}",
                     RunnerId,
                     record.JobKey);
             }

@@ -55,7 +55,9 @@ public interface IAgentJobStore
     /// when the row is missing, no longer Pending, or assigned to a
     /// different runner.
     /// </summary>
-    Task<AgentJobLedgerRecord> ClaimAsync(string key, string runnerId, DateTimeOffset runningSince, CancellationToken ct = default);
+    Task<AgentJobLedgerRecord> ClaimAsync(string key, string runnerId, DateTimeOffset runningSince, CancellationToken ct = default) =>
+        ClaimAsync(key, runnerId, "direct-call-generation", runningSince, ct);
+    Task<AgentJobLedgerRecord> ClaimAsync(string key, string runnerId, string processGeneration, DateTimeOffset runningSince, CancellationToken ct = default);
 
     /// <summary>
     /// Atomically transitions a pending AgentJob while fencing the frozen
@@ -66,6 +68,15 @@ public interface IAgentJobStore
     Task<AgentJobLedgerRecord> ClaimAsync(
         string key,
         string runnerId,
+        DateTimeOffset runningSince,
+        string expectedWorkId,
+        string dispatchJson,
+        CancellationToken ct = default) =>
+        ClaimAsync(key, runnerId, "direct-call-generation", runningSince, expectedWorkId, dispatchJson, ct);
+    Task<AgentJobLedgerRecord> ClaimAsync(
+        string key,
+        string runnerId,
+        string processGeneration,
         DateTimeOffset runningSince,
         string expectedWorkId,
         string dispatchJson,
@@ -263,7 +274,15 @@ public class AgentJobStore : IAgentJobStore
         string runnerId,
         DateTimeOffset runningSince,
         CancellationToken ct = default) =>
-        ClaimAsyncCore(key, runnerId, runningSince, null, null, ct);
+        ClaimAsync(key, runnerId, "direct-call-generation", runningSince, ct);
+
+    public Task<AgentJobLedgerRecord> ClaimAsync(
+        string key,
+        string runnerId,
+        string processGeneration,
+        DateTimeOffset runningSince,
+        CancellationToken ct = default) =>
+        ClaimAsyncCore(key, runnerId, processGeneration, runningSince, null, null, ct);
 
     public Task<AgentJobLedgerRecord> ClaimAsync(
         string key,
@@ -272,11 +291,22 @@ public class AgentJobStore : IAgentJobStore
         string expectedWorkId,
         string dispatchJson,
         CancellationToken ct = default) =>
-        ClaimAsyncCore(key, runnerId, runningSince, expectedWorkId, dispatchJson, ct);
+        ClaimAsync(key, runnerId, "direct-call-generation", runningSince, expectedWorkId, dispatchJson, ct);
+
+    public Task<AgentJobLedgerRecord> ClaimAsync(
+        string key,
+        string runnerId,
+        string processGeneration,
+        DateTimeOffset runningSince,
+        string expectedWorkId,
+        string dispatchJson,
+        CancellationToken ct = default) =>
+        ClaimAsyncCore(key, runnerId, processGeneration, runningSince, expectedWorkId, dispatchJson, ct);
 
     private async Task<AgentJobLedgerRecord> ClaimAsyncCore(
         string key,
         string runnerId,
+        string processGeneration,
         DateTimeOffset runningSince,
         string? expectedWorkId,
         string? dispatchJson,
@@ -345,6 +375,7 @@ public class AgentJobStore : IAgentJobStore
                         '$.revision', {nextRevision}),
                     '$.readySince'),
                 "Revision" = {nextRevision},
+                "ClaimedProcessGeneration" = {processGeneration},
                 "RunningSince" = {runningSinceText},
                 "ReadySince" = NULL
             WHERE "JobKey" = {key}
@@ -584,6 +615,7 @@ public class AgentJobStore : IAgentJobStore
                 State = row.State,
                 Revision = row.Revision,
                 AssignedRunnerId = row.AssignedRunnerId,
+                ClaimedProcessGeneration = row.ClaimedProcessGeneration,
                 WorkId = row.WorkId,
                 ReadySince = row.ReadySince,
                 RunningSince = row.RunningSince,
@@ -605,6 +637,7 @@ public class AgentJobStore : IAgentJobStore
                 State = row.State,
                 Revision = row.Revision,
                 AssignedRunnerId = row.AssignedRunnerId,
+                ClaimedProcessGeneration = row.ClaimedProcessGeneration,
                 WorkId = row.WorkId,
                 ReadySince = row.ReadySince,
                 RunningSince = row.RunningSince,
@@ -625,6 +658,7 @@ public class AgentJobStore : IAgentJobStore
         State = record.StateJson,
         Revision = record.Revision,
         AssignedRunnerId = record.AssignedRunnerId,
+        ClaimedProcessGeneration = record.ClaimedProcessGeneration,
         WorkId = record.WorkId,
         ReadySince = FormatTimestamp(record.ReadySince),
         RunningSince = FormatTimestamp(record.RunningSince),
@@ -660,7 +694,8 @@ public class AgentJobStore : IAgentJobStore
         row.InitialTurnId,
         row.PinnedRunnerId,
         row.LaunchVisibility,
-        null);
+        null,
+        row.ClaimedProcessGeneration);
 
     private static AgentJobLedgerRecord ToRecord(LedgerQueryRow row) => new(
         row.JobKey,
@@ -681,7 +716,8 @@ public class AgentJobStore : IAgentJobStore
         row.InitialTurnId,
         row.PinnedRunnerId,
         row.LaunchVisibility,
-        null);
+        null,
+        row.ClaimedProcessGeneration);
 
     private static Task StageTerminalLogOwnershipAsync(
         MohistDbContext db,
@@ -697,6 +733,7 @@ public class AgentJobStore : IAgentJobStore
         public string State { get; init; } = string.Empty;
         public long Revision { get; init; }
         public string? AssignedRunnerId { get; init; }
+        public string? ClaimedProcessGeneration { get; init; }
         public string? WorkId { get; init; }
         public string? ReadySince { get; init; }
         public string? RunningSince { get; init; }
@@ -717,6 +754,7 @@ public class AgentJobStore : IAgentJobStore
     {
         existing.State = record.StateJson;
         existing.AssignedRunnerId = record.AssignedRunnerId;
+        existing.ClaimedProcessGeneration = record.ClaimedProcessGeneration;
         existing.WorkId = record.WorkId;
         existing.ReadySince = FormatTimestamp(record.ReadySince);
         existing.RunningSince = FormatTimestamp(record.RunningSince);

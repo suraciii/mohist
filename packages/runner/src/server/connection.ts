@@ -112,13 +112,14 @@ export class ServerConnection {
   async poll(
     signal: AbortSignal,
     report: {
+      processGeneration: string
       inFlight: string[]
       awaitingAck: string[]
       runtimeReadiness?: RuntimeReadinessWitness[]
       connectionId?: string | null
       admissionReady?: boolean
       deploymentEpoch?: string | null
-    } = { inFlight: [], awaitingAck: [], admissionReady: false },
+    } = { processGeneration: '', inFlight: [], awaitingAck: [], admissionReady: false },
   ): Promise<DispatchWorkItem[]> {
     const polled = await this.pollWithGrants(signal, report)
     this.lastPolledDispatches = polled
@@ -140,13 +141,14 @@ export class ServerConnection {
   async pollWithGrants(
     signal: AbortSignal,
     report: {
+      processGeneration: string
       inFlight: string[]
       awaitingAck: string[]
       runtimeReadiness?: RuntimeReadinessWitness[]
       connectionId?: string | null
       admissionReady?: boolean
       deploymentEpoch?: string | null
-    } = { inFlight: [], awaitingAck: [], admissionReady: false },
+    } = { processGeneration: '', inFlight: [], awaitingAck: [], admissionReady: false },
   ): Promise<PolledDispatch[]> {
     const response = await this.fetchWithAuth(this.url('poll'), {
       method: 'POST',

@@ -37,11 +37,20 @@ public interface IAgentJobGrain : IGrainWithStringKey, IRemindable
     /// capability revision is persisted before the claim becomes visible.
     /// </summary>
     Task<ClaimResult?> ClaimNextAsync(string runnerId) =>
+        ClaimNextAsync(runnerId, "direct-call-generation");
+
+    Task<ClaimResult?> ClaimNextAsync(string runnerId, string processGeneration) =>
         Task.FromResult<ClaimResult?>(null);
 
     Task<ClaimResult?> ClaimNextAsync(
         string runnerId,
-        CapabilityClaimExpectation expectation) => ClaimNextAsync(runnerId);
+        CapabilityClaimExpectation expectation) =>
+        ClaimNextAsync(runnerId, "direct-call-generation", expectation);
+
+    Task<ClaimResult?> ClaimNextAsync(
+        string runnerId,
+        string processGeneration,
+        CapabilityClaimExpectation expectation) => ClaimNextAsync(runnerId, processGeneration);
 
     Task<bool> RecordRuntimeSessionBindingAsync(string runnerId, string workId, string sessionId, string runtimeSessionId) =>
         Task.FromResult(false);

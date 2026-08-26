@@ -181,6 +181,7 @@ export class RunnerHost {
   private readonly hostShutdown: ReturnType<typeof createHostShutdown>
   private readonly waitForConnectionRetry: (delayMs: number, signal: AbortSignal) => Promise<void>
   private readonly skillResolver = new SkillResolver()
+  private readonly processGeneration = randomUUID()
 
   // Lets an out-of-loop reconnect callback bound its immediate heartbeat.
   private activeSignal: AbortSignal | null = null
@@ -889,6 +890,7 @@ export class RunnerHost {
 
   private pollReport(): ReturnType<typeof buildRunnerPollReport> {
     return buildRunnerPollReport({
+      processGeneration: this.processGeneration,
       durableStarted: this.workResultJournal.ready()
         ? this.workResultJournal.started().map((entry) => workKey(entry.work))
         : [],
@@ -947,8 +949,12 @@ export class RunnerHost {
 
   private registrationState(): RunnerRegistration {
     return gateManagerCapabilities(
-      buildRegistrationState(this.options, this.piRuntime, this.actions.catalog(), () =>
-        this.control.getConnectionId(),
+      buildRegistrationState(
+        this.options,
+        this.piRuntime,
+        this.actions.catalog(),
+        () => this.control.getConnectionId(),
+        this.processGeneration,
       ),
       this.openCodeRuntime?.ready() === true,
     )

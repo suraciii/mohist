@@ -490,10 +490,11 @@ public partial class WorkflowGrain : Grain, IWorkflowGrain, IWorkflowGrainContex
         return new WorkflowAssignmentResult(WorkflowAssignmentStatus.Assigned, workerId);
     }
 
-    public async Task<WorkItem?> ClaimNextAsync(string workerId)
+    public async Task<WorkItem?> ClaimNextAsync(string workerId, string processGeneration = "direct-call-generation")
     {
         RejectIfRunReloadRequired();
-        if (_run is null || _run.Status is not (WorkflowRunStatus.Ready or WorkflowRunStatus.Running))
+        if (string.IsNullOrWhiteSpace(processGeneration)
+            || _run is null || _run.Status is not (WorkflowRunStatus.Ready or WorkflowRunStatus.Running))
             return null;
 
         if (!_run.IsAssignedTo(workerId))
@@ -513,7 +514,7 @@ public partial class WorkflowGrain : Grain, IWorkflowGrain, IWorkflowGrainContex
             return null;
 
         var resolvedWorkId = await _workLifecycle.ClaimWorkAsync(
-            _run!, workId, workerId, events => CommitAsync(events));
+            _run!, workId, workerId, processGeneration, events => CommitAsync(events));
 
         if (resolvedWorkId is null)
             return null;

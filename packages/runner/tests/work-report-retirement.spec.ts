@@ -44,10 +44,10 @@ function makeContext(journal: WorkResultJournal, report: (...args: unknown[]) =>
   } as unknown as HostExecutionContext
 }
 
-describe('work report stale retirement', () => {
-  it('retires a promoted journal entry when the server answers with definitive stale', async () => {
+describe('work report verdict retirement', () => {
+  it('retires a promoted journal entry when the server refuses it', async () => {
     const journal = await journalWithCompletedResult()
-    const report = vi.fn(async () => ({ tracked: false, reason: 'stale' }))
+    const report = vi.fn(async () => ({ verdict: 'refused' }))
     const ctx = makeContext(journal, report)
 
     await promoteAndReportDurableJournalResults(ctx)
@@ -61,13 +61,13 @@ describe('work report stale retirement', () => {
     expect(report).toHaveBeenCalledTimes(1)
   })
 
-  it('retires an awaiting-ack entry on stale instead of scheduling another retry', async () => {
+  it('retires an awaiting-ack entry on refused instead of scheduling another retry', async () => {
     const journal = await journalWithCompletedResult()
     let attempts = 0
     const report = vi.fn(async () => {
       attempts += 1
       if (attempts === 1) throw new Error('transient transport failure')
-      return { tracked: false, reason: 'stale' }
+      return { verdict: 'refused' }
     })
     const ctx = makeContext(journal, report)
 

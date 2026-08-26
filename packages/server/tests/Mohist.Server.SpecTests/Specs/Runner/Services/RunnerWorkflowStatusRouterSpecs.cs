@@ -183,7 +183,7 @@ public class RunnerWorkflowStatusRouterSpecs
         public Task<bool> HasIncompleteTaskByIdAsync(string id) => Task.FromResult(false);
         public Task<Mohist.Server.Workflow.Grains.WorkflowAssignmentResult> AssignWorkerAsync(string workerId) =>
             Task.FromResult(new Mohist.Server.Workflow.Grains.WorkflowAssignmentResult(WorkflowAssignmentStatus.Assigned));
-        public Task<WorkItem?> ClaimNextAsync(string workerId) =>
+        public Task<WorkItem?> ClaimNextAsync(string workerId, string processGeneration) =>
             Task.FromResult<WorkItem?>(null);
         public Task<WorkDispatch?> StoreActiveWorkDispatchAsync(string workerId, string workId, WorkDispatch dispatch) =>
             Task.FromResult<WorkDispatch?>(dispatch);

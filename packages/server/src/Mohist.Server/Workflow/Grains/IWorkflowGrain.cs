@@ -25,7 +25,7 @@ public interface IWorkflowGrain : IGrainWithStringKey, IRemindable
     Task<bool> HasIncompleteTaskWithUsesAsync(string uses);
     Task<bool> HasIncompleteTaskByIdAsync(string id);
     Task<WorkflowAssignmentResult> AssignWorkerAsync(string workerId);
-    Task<WorkItem?> ClaimNextAsync(string workerId);
+    Task<WorkItem?> ClaimNextAsync(string workerId, string processGeneration = "direct-call-generation");
     Task<WorkDispatch?> StoreActiveWorkDispatchAsync(string workerId, string workId, WorkDispatch dispatch);
     Task<ReportAck> FailActiveWorkAsync(string workerId, string message);
     Task<ReportAck> InterruptActiveWorkAsync(string workerId, string reason);
