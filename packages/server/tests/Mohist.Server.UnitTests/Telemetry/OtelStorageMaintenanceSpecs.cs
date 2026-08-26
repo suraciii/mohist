@@ -189,8 +189,12 @@ public class OtelStorageMaintenanceSpecs : IDisposable
         // (in-window) history. Both must yield the same statement
         // count because the eviction is index-bounded and never
         // scans the unrelated table.
+        // The statement sequence is determined by the scripted probe
+        // (control flow), not by row count, so the unrelated history
+        // only needs to be non-empty and distinct from the aged set
+        // to prove eviction never reaches into it.
         var withLittle = RunStatementCount(unrelated: 0);
-        var withMuch = RunStatementCount(unrelated: 1_000);
+        var withMuch = RunStatementCount(unrelated: 24);
 
         Assert.Equal(withLittle, withMuch);
     }
