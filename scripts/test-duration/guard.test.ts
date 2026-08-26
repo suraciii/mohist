@@ -692,7 +692,7 @@ test('planTracks isolates the bounded Spec duration phase before remaining fan-o
     deadlineMs: 1000,
     enforce: false,
   }
-  const planned = planTracks([cli, unit, runner, web, spec], '/evidence', ['cli', 'server-spec'], 'runner')
+  const planned = planTracks([spec, unit, runner, web, cli], '/evidence', ['cli', 'server-spec'], 'runner')
   const byId = new Map(planned.map((plan) => [plan.lane.id, plan.lane]))
 
   assert.deepEqual(byId.get('cli')?.dependsOn, undefined)
@@ -707,6 +707,10 @@ test('planTracks isolates the bounded Spec duration phase before remaining fan-o
   assert.ok(byId.get('server-spec')?.resources?.includes('server-spec'))
 
   const partial = planTracks([unit, spec], '/evidence', ['cli', 'server-spec'], 'runner')
+  assert.deepEqual(
+    partial.map((plan) => plan.lane.id),
+    ['server-unit', 'server-spec'],
+  )
   const partialById = new Map(partial.map((plan) => [plan.lane.id, plan.lane]))
   assert.deepEqual(partialById.get('server-spec')?.dependsOn, undefined)
   assert.ok(partialById.get('server-spec')?.resources?.includes('duration-measurement'))
@@ -716,8 +720,10 @@ test('planTracks isolates the bounded Spec duration phase before remaining fan-o
     ...plan,
     lane: { ...plan.lane, dependsOn: ['existing-precondition'] },
   }))
+  const zeroMatchSnapshot = JSON.stringify(zeroMatchInput)
   const zeroMatch = applyDurationMeasurementPhase(zeroMatchInput, ['cli', 'server-spec'], 'runner')
-  assert.equal(JSON.stringify(zeroMatch), JSON.stringify(zeroMatchInput))
+  assert.equal(JSON.stringify(zeroMatch), zeroMatchSnapshot)
+  assert.equal(JSON.stringify(zeroMatchInput), zeroMatchSnapshot)
 })
 
 test('applyDurationMeasurementPhase preserves existing multi-lane coverage terminal semantics at its unit seam', () => {
@@ -771,9 +777,11 @@ test('applyDurationMeasurementPhase fails closed for a malformed multi-lane grou
     { ...template, lane: { ...template.lane, id: 'measurement-b' } },
   ]
 
+  const inputSnapshot = JSON.stringify(input)
   const planned = applyDurationMeasurementPhase(input, ['measurement'])
 
-  assert.equal(JSON.stringify(planned), JSON.stringify(input))
+  assert.equal(JSON.stringify(planned), inputSnapshot)
+  assert.equal(JSON.stringify(input), inputSnapshot)
 })
 
 test('parseArgs: focused without any argument leaves the request unresolved', () => {
