@@ -359,14 +359,38 @@ public sealed class SlackReplyAnchorIngressSpecs : IAsyncLifetime
             connection, conversationId, rootTs, followupTs, sessionId, followup.OperationId)));
     }
 
+    [Fact]
+    public async Task RegisterRunnerAsync_preserves_peer_runner_registration()
+    {
+        var connection = await CreateConnectionAsync();
+        var peerRunnerId = $"slack-reply-anchor-peer-{Guid.NewGuid():N}";
+        await RegisterRunnerViaApiAsync(peerRunnerId, connection.ProjectId);
+        try
+        {
+            await RegisterRunnerAsync(connection.ProjectId);
+
+            var registry = _fixture.Grains.GetGrain<IRunnerRegistryGrain>(RunnerRegistryKeys.Global);
+            Assert.Contains(peerRunnerId, await registry.ListRunnerIdsAsync());
+            Assert.Equal(
+                RunnerStatus.Online,
+                (await _fixture.Grains.GetGrain<IRunnerGrain>(peerRunnerId).GetRuntimeStateAsync()).Status);
+        }
+        finally
+        {
+            await _fixture.Grains.GetGrain<IRunnerGrain>(peerRunnerId).UnregisterAsync();
+        }
+    }
+
     private async Task<string> RegisterRunnerAsync(string projectId)
     {
         var runnerId = $"slack-reply-anchor-{Guid.NewGuid():N}";
-        var registry = _fixture.Grains.GetGrain<IRunnerRegistryGrain>(RunnerRegistryKeys.Global);
-        foreach (var staleId in await registry.ListRunnerIdsAsync())
-            await _fixture.Grains.GetGrain<IRunnerGrain>(staleId).UnregisterAsync();
-        Assert.Empty(await registry.ListRunnerIdsAsync());
+        await RegisterRunnerViaApiAsync(runnerId, projectId);
+        _runnerIds.Add(runnerId);
+        return runnerId;
+    }
 
+    private async Task RegisterRunnerViaApiAsync(string runnerId, string projectId)
+    {
         using var register = await _fixture.Client.PostAsJsonAsync($"/api/runner/{runnerId}/register", new
         {
             processGeneration = TestRunnerGenerationExtensions.ProcessGeneration,
@@ -378,14 +402,12 @@ public sealed class SlackReplyAnchorIngressSpecs : IAsyncLifetime
         register.EnsureSuccessStatusCode();
         using var slots = await _fixture.Client.PatchAsJsonAsync($"/api/runner/{runnerId}", new { slots = 1 });
         slots.EnsureSuccessStatusCode();
-        _runnerIds.Add(runnerId);
         await TestWait.ForAsync(
             () => _fixture.Grains.GetGrain<IRunnerGrain>(runnerId).GetRuntimeStateAsync(),
             state => state.Status == RunnerStatus.Online,
             TimeSpan.FromSeconds(5),
             TimeSpan.FromMilliseconds(25),
             $"Runner '{runnerId}' to reach Online");
-        return runnerId;
     }
 
     private async Task<JsonElement> PollInitialDispatchAsync(string runnerId, string jobKey)
