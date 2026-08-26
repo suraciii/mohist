@@ -253,7 +253,36 @@ describe('AgentJobExecutor drives OpenCodeRuntime directly', () => {
         diagnostic: () => ({ message: 'rebuilding' }),
       } as Partial<OpenCodeRuntime>,
     ],
-  ])('omits a binding when %s before physical execution is established', async (_case, runtimeOverride) => {
+  ])('preserves a persisted OpenCode binding when %s', async (_case, runtimeOverride) => {
+    const connection = makeFakeConnection()
+    connection.setAgentSession({ runtimeSessionId: 'ses-bound' })
+    const runtime = runtimeOverride ? ({ ...makeFakeRuntime().runtime, ...runtimeOverride } as OpenCodeRuntime) : null
+    const executor = new AgentJobExecutor(connection.connection, makeAccessors(runtime))
+
+    const result = await executor.execute(
+      buildAgentJobWork({ initialTurnId: 'turn-real' }),
+      new AbortController().signal,
+    )
+
+    expect(result.status).toBe('failed')
+    expect(result.agentBinding).toEqual({
+      agentSessionId: 'session-1',
+      agentTurnId: 'turn-real',
+      runtime: 'opencode',
+      runtimeSessionId: 'ses-bound',
+    })
+  })
+
+  vitestIt.each([
+    ['runtime unavailable', null],
+    [
+      'runtime not ready',
+      {
+        ready: () => false,
+        diagnostic: () => ({ message: 'rebuilding' }),
+      } as Partial<OpenCodeRuntime>,
+    ],
+  ])('omits an OpenCode binding when %s without persisted physical facts', async (_case, runtimeOverride) => {
     const connection = makeFakeConnection()
     const runtime = runtimeOverride ? ({ ...makeFakeRuntime().runtime, ...runtimeOverride } as OpenCodeRuntime) : null
     const executor = new AgentJobExecutor(connection.connection, makeAccessors(runtime))

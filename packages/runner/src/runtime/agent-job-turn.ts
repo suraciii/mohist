@@ -55,7 +55,7 @@ export async function executeOpenCodeTurn(
   attachments: readonly DeliveredAttachment[],
   managerExecution: ManagerExecutionBoundary | null = deps.managerExecution ?? null,
 ): Promise<WorkItemResult> {
-  let executionBinding: AgentExecutionBinding | null = null
+  let executionBinding: AgentExecutionBinding | null = knownBinding(work, binding, 'opencode')
   const boundResult = (result: WorkItemResult) => withAgentBinding(result, executionBinding)
   const runtime = resolveAccessor(deps.runtimes.openCode)
   if (!runtime) {
@@ -78,7 +78,6 @@ export async function executeOpenCodeTurn(
     )
   }
 
-  executionBinding = knownBinding(work, binding, 'opencode')
   const selected = binding.runtimeSessionId
 
   const fileParts = attachments
@@ -238,6 +237,7 @@ export async function executePiTurn(
       ),
     )
   }
+  executionBinding = knownBinding(work, binding, 'pi')
   const runtime = resolveAccessor(deps.runtimes.pi)
   if (!runtime) {
     return boundResult(
@@ -263,7 +263,6 @@ export async function executePiTurn(
   const eventSink = createAgentSessionEventSink(deps.connection, work, signal, binding.agentSessionId, observation)
   const runtimeHandle: CommandRuntimeHandle = { kind: 'pi', runtime }
   let runtimeSessionId = binding.runtimeSessionId
-  executionBinding = knownBinding(work, binding, 'pi')
   if (!runtimeSessionId) {
     try {
       const created = await runtime.createSession({
