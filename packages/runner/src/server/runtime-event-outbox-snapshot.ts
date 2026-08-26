@@ -34,6 +34,7 @@ export function parseSnapshot(raw: string): SnapshotShape | null {
     }
     const entries: InternalRecord[] = []
     for (const item of value['entries']) {
+      if (isPlainObject(item) && item['producerFamily'] === 'binding-reconcile') continue
       const parsed = parseInternalRecord(item)
       if (!parsed) return null
       entries.push(parsed)
@@ -63,8 +64,7 @@ function parseInternalRecord(value: unknown): InternalRecord | null {
     (family !== 'workflow-session' &&
       family !== 'workflow-cleanup' &&
       family !== 'session-followup' &&
-      family !== 'generic-followup' &&
-      family !== 'binding-reconcile') ||
+      family !== 'generic-followup') ||
     typeof runtimeSessionId !== 'string' ||
     (runtime !== undefined && runtime !== null && typeof runtime !== 'string') ||
     (sessionTurnId !== undefined && sessionTurnId !== null && typeof sessionTurnId !== 'string') ||

@@ -80,9 +80,6 @@ export function createServerRuntimeEventDelivery(options: RuntimeEventDeliveryOp
           signal,
         )
       }
-      if (record.producerFamily === 'binding-reconcile' && record.target.kind === 'session') {
-        return await connection.reconcileAgentSessionRuntimeEvents(record.target.sessionId, envelope(record), signal)
-      }
       if (record.producerFamily === 'session-followup' && record.target.kind === 'session') {
         return await connection.reconcileAgentSessionRuntimeEvents(record.target.sessionId, envelope(record), signal)
       }
@@ -132,14 +129,6 @@ export function createServerRuntimeEventDelivery(options: RuntimeEventDeliveryOp
           head.target.projectId,
           head.target.sessionId,
           batchEnvelope(genericRecords),
-          signal,
-        )
-        return accepted.map<AgentSessionRuntimeEventReceipt[]>((a) => [{ type: a.type ?? '' }])
-      }
-      if (head.producerFamily === 'binding-reconcile' && head.target.kind === 'session') {
-        const accepted = await connection.reconcileAgentSessionRuntimeEvents(
-          head.target.sessionId,
-          batchEnvelope(records),
           signal,
         )
         return accepted.map<AgentSessionRuntimeEventReceipt[]>((a) => [{ type: a.type ?? '' }])

@@ -1,5 +1,5 @@
 import { errorMessage } from '../core/errors.js'
-import type { JsonObject, DispatchWorkItem, WorkItemResult } from '../core/types.js'
+import type { AgentExecutionBinding, JsonObject, DispatchWorkItem, WorkItemResult } from '../core/types.js'
 import type {
   RuntimeResult,
   RuntimeTurnEvent,
@@ -11,9 +11,6 @@ import type {
 import type { PiRuntimeEvent, PiResult, PiTurnObserver, PiTurnRequest, PiTurnResult } from './pi/index.js'
 import { callFollowup, resolveAccessor, type CommandRuntimeHandle } from '../server/command-runtime.js'
 import type { ServerConnection } from '../server/connection.js'
-import { resolveOrRecoverBinding, type BindingRecoveryCoordinator, type RuntimeBinding } from './binding-recovery.js'
-import type { RuntimeTurnRegistry } from './runtime-turn-registry.js'
-import { workKey } from './work-result-journal.js'
 import { boundedWait } from './bounded-wait.js'
 import type { ResolvedSkill } from './skill-resolver.js'
 import { runnerLogger } from '../system/logger.js'
@@ -26,6 +23,7 @@ import type {
   BindingResolution,
   ParsedModel,
 } from './agent-job-executor.js'
+import { knownBinding } from './agent-job-executor.js'
 import { mapOpenCodeErrorKind, mapPiErrorKind } from './error-kind-mapping.js'
 
 const log = runnerLogger.child('job')
@@ -37,9 +35,7 @@ const MODEL_UNAVAILABLE_CODES = new Set(['model-unavailable', 'model-not-found',
 export interface AgentJobTurnDeps {
   readonly connection: ServerConnection
   readonly runtimes: AgentJobRuntimeAccessors
-  readonly bindingRecoveryCoordinator: BindingRecoveryCoordinator | null
   readonly options: AgentJobExecutorOptions
-  readonly runtimeTurnRegistry?: RuntimeTurnRegistry | null
   readonly managerExecution?: ManagerExecutionBoundary | null
 }
 
@@ -59,63 +55,30 @@ export async function executeOpenCodeTurn(
   attachments: readonly DeliveredAttachment[],
   managerExecution: ManagerExecutionBoundary | null = deps.managerExecution ?? null,
 ): Promise<WorkItemResult> {
+  let executionBinding: AgentExecutionBinding | null = knownBinding(work, binding, 'opencode')
+  const boundResult = (result: WorkItemResult) => withAgentBinding(result, executionBinding)
   const runtime = resolveAccessor(deps.runtimes.openCode)
   if (!runtime) {
-    return failureResult(
-      'runtime-unavailable',
-      'AgentJob requires the OpenCode runtime; the runner has not yet established the runtime or it is rebuilding',
-      'opencode',
+    return boundResult(
+      failureResult(
+        'runtime-unavailable',
+        'AgentJob requires the OpenCode runtime; the runner has not yet established the runtime or it is rebuilding',
+        'opencode',
+      ),
     )
   }
   if (!runtime.ready()) {
     const diagnostic = runtime.diagnostic()
-    return failureResult(
-      'runtime-unavailable',
-      `AgentJob requires the OpenCode runtime to be ready: ${diagnostic?.message ?? 'no readiness diagnostic'}`,
-      'opencode',
+    return boundResult(
+      failureResult(
+        'runtime-unavailable',
+        `AgentJob requires the OpenCode runtime to be ready: ${diagnostic?.message ?? 'no readiness diagnostic'}`,
+        'opencode',
+      ),
     )
   }
 
-  let selected = binding.runtimeSessionId
-  if (binding.agentSessionId && work.projectId && selected && typeof runtime.resolveSession === 'function') {
-    const expected: RuntimeBinding = {
-      runnerId: binding.runnerId,
-      runtime: 'opencode',
-      runtimeSessionId: selected,
-      workDir,
-    }
-    const recovery = await resolveOrRecoverBinding({
-      runnerId: deps.connection.runnerId,
-      expected,
-      runtime: { kind: 'opencode', runtime },
-      probe: async (candidate) => {
-        const result = await runtime.resolveSession({
-          target: { runtime: 'opencode', runtimeSessionId: candidate.runtimeSessionId, workDir: candidate.workDir },
-        })
-        return result.ok
-          ? { ok: true, activeTurn: result.value.activeTurn }
-          : { ok: false, kind: result.error.kind, message: result.error.message }
-      },
-      replace: async (current, replacement) => {
-        await deps.connection.recoverMissingAgentSession(
-          work.projectId!,
-          binding.agentSessionId!,
-          {
-            expectedRunnerId: current.runnerId,
-            expectedRuntime: current.runtime,
-            expectedRuntimeSessionId: current.runtimeSessionId,
-            replacementRuntimeSessionId: replacement.runtimeSessionId,
-          },
-          signal,
-        )
-      },
-      model: model.kind === 'ok' ? { providerID: model.value.providerID, modelID: model.value.modelID } : null,
-      recoveryKey: expected.runtimeSessionId!,
-      coordinator: deps.bindingRecoveryCoordinator ?? undefined,
-    })
-    if (!recovery.ok) return failureResult(recovery.kind, recovery.message, 'opencode')
-    selected = recovery.binding.runtimeSessionId
-  }
+  const selected = binding.runtimeSessionId
 
   const fileParts = attachments
     .filter(
@@ -144,7 +107,6 @@ export async function executeOpenCodeTurn(
   const observation = new ReplyActionObservationTracker()
   const eventSink = createAgentSessionEventSink(deps.connection, work, signal, binding.agentSessionId, observation)
   const runtimeHandle: CommandRuntimeHandle = { kind: 'opencode', runtime }
-  const turnKey = workKey(work)
   // Issue-512 T-001: when the coordinator durably recorded the
   // initial input on the AgentSession before dispatch, the runner
   // must NOT re-publish a `session.input` runtime event. The
@@ -157,10 +119,7 @@ export async function executeOpenCodeTurn(
   const observer: RuntimeTurnObserver = {
     onSessionReady: async (session) => {
       attachedRuntimeSessionId = session.runtimeSessionId
-      deps.runtimeTurnRegistry?.update(turnKey, {
-        runtimeSessionId: session.runtimeSessionId,
-        workDir: session.workDir,
-      })
+      executionBinding = physicalBinding(work, binding.agentSessionId, 'opencode', session.runtimeSessionId)
       await eventSink.attachSession(session.runtimeSessionId, session.workDir, modelInput)
       if (!skipInitialInput && !attachedInputPublished) {
         attachedInputPublished = true
@@ -170,19 +129,14 @@ export async function executeOpenCodeTurn(
     onEvent: (event) => {
       eventSink.observeEvent(
         managerExecution
-          ? { ...event, payload: managerExecution.redact(event.payload) as Record<string, unknown> }
+          ? {
+              ...event,
+              payload: managerExecution.redact(event.payload) as Record<string, unknown>,
+            }
           : event,
       )
     },
   }
-
-  deps.runtimeTurnRegistry?.register(turnKey, {
-    agentSessionId: binding.agentSessionId ?? '',
-    agentTurnId: work.initialTurnId ?? null,
-    runtime: 'opencode',
-    runtimeSessionId: selected,
-    workDir,
-  })
 
   let result: RuntimeResult<RuntimeTurnResult>
   try {
@@ -208,19 +162,24 @@ export async function executeOpenCodeTurn(
         : `AgentJob turn threw: ${managerExecution ? managerExecution.mask(message) : message}`,
     )
     await eventSink.drain()
-    return await evaluateInitialReplyGuard({
-      runtime: runtimeHandle,
-      runtimeSessionId: attachedRuntimeSessionId ?? selected,
-      workDir,
-      payload,
-      signal,
-      observation,
-      eventSink,
-      managerExecution,
-      originalResult,
-    })
+    return boundResult(
+      await evaluateInitialReplyGuard({
+        runtime: runtimeHandle,
+        runtimeSessionId: attachedRuntimeSessionId ?? selected,
+        workDir,
+        payload,
+        signal,
+        observation,
+        eventSink,
+        managerExecution,
+        originalResult,
+      }),
+    )
   }
   await eventSink.drain()
+  if (result.ok) {
+    executionBinding = physicalBinding(work, binding.agentSessionId, 'opencode', result.value.facts.runtimeSessionId)
+  }
   const originalResult = managerExecution?.hasExpired()
     ? failureResult(
         'manager-credential-expired',
@@ -228,17 +187,19 @@ export async function executeOpenCodeTurn(
         'opencode',
       )
     : redactManagerResult(projectTurnToWorkItemResult(result, 'opencode', modelInput, variant), managerExecution)
-  return await evaluateInitialReplyGuard({
-    runtime: runtimeHandle,
-    runtimeSessionId: result.ok ? result.value.facts.runtimeSessionId : (attachedRuntimeSessionId ?? selected),
-    workDir,
-    payload,
-    signal,
-    observation,
-    eventSink,
-    managerExecution,
-    originalResult,
-  })
+  return boundResult(
+    await evaluateInitialReplyGuard({
+      runtime: runtimeHandle,
+      runtimeSessionId: result.ok ? result.value.facts.runtimeSessionId : (attachedRuntimeSessionId ?? selected),
+      workDir,
+      payload,
+      signal,
+      observation,
+      eventSink,
+      managerExecution,
+      originalResult,
+    }),
+  )
 }
 
 export async function executePiTurn(
@@ -256,34 +217,45 @@ export async function executePiTurn(
   skills: readonly ResolvedSkill[],
   managerExecution: ManagerExecutionBoundary | null = deps.managerExecution ?? null,
 ): Promise<WorkItemResult> {
+  let executionBinding: AgentExecutionBinding | null = null
+  const boundResult = (result: WorkItemResult) => withAgentBinding(result, executionBinding)
   if (variant) {
-    return failureResult(
-      'incompatible-execution-configuration',
-      'AgentJob Pi variant is unsupported; configure reasoningEffort for the Pi thinking level',
-      'pi',
+    return boundResult(
+      failureResult(
+        'incompatible-execution-configuration',
+        'AgentJob Pi variant is unsupported; configure reasoningEffort for the Pi thinking level',
+        'pi',
+      ),
     )
   }
   if (reasoningEffort && model.kind !== 'ok') {
-    return failureResult(
-      'incompatible-execution-configuration',
-      'AgentJob reasoningEffort requires an explicit provider/model selection',
-      'pi',
+    return boundResult(
+      failureResult(
+        'incompatible-execution-configuration',
+        'AgentJob reasoningEffort requires an explicit provider/model selection',
+        'pi',
+      ),
     )
   }
+  executionBinding = knownBinding(work, binding, 'pi')
   const runtime = resolveAccessor(deps.runtimes.pi)
   if (!runtime) {
-    return failureResult(
-      'runtime-unavailable',
-      'AgentJob requires the Pi runtime; the runner has not yet established the runtime or it is rebuilding',
-      'pi',
+    return boundResult(
+      failureResult(
+        'runtime-unavailable',
+        'AgentJob requires the Pi runtime; the runner has not yet established the runtime or it is rebuilding',
+        'pi',
+      ),
     )
   }
   if (!runtime.ready()) {
     const diagnostic = runtime.diagnostic()
-    return failureResult(
-      'runtime-unavailable',
-      `AgentJob requires the Pi runtime to be ready: ${diagnostic?.message ?? 'no readiness diagnostic'}`,
-      'pi',
+    return boundResult(
+      failureResult(
+        'runtime-unavailable',
+        `AgentJob requires the Pi runtime to be ready: ${diagnostic?.message ?? 'no readiness diagnostic'}`,
+        'pi',
+      ),
     )
   }
 
@@ -291,53 +263,35 @@ export async function executePiTurn(
   const eventSink = createAgentSessionEventSink(deps.connection, work, signal, binding.agentSessionId, observation)
   const runtimeHandle: CommandRuntimeHandle = { kind: 'pi', runtime }
   let runtimeSessionId = binding.runtimeSessionId
-  if (binding.agentSessionId && work.projectId && runtimeSessionId && typeof runtime.resolveSession === 'function') {
-    const expected: RuntimeBinding = { runnerId: binding.runnerId, runtime: 'pi', runtimeSessionId, workDir }
-    const recovery = await resolveOrRecoverBinding({
-      runnerId: deps.connection.runnerId,
-      expected,
-      runtime: { kind: 'pi', runtime },
-      probe: async (candidate) => {
-        const result = await runtime.resolveSession({
-          target: { runtime: 'pi', runtimeSessionId: candidate.runtimeSessionId, workDir: candidate.workDir },
-        })
-        return result.ok
-          ? { ok: true, activeTurn: result.value.activeTurn }
-          : { ok: false, kind: result.error.kind, message: result.error.message }
-      },
-      replace: async (current, replacement) => {
-        await deps.connection.recoverMissingAgentSession(
-          work.projectId!,
-          binding.agentSessionId!,
-          {
-            expectedRunnerId: current.runnerId,
-            expectedRuntime: current.runtime,
-            expectedRuntimeSessionId: current.runtimeSessionId,
-            replacementRuntimeSessionId: replacement.runtimeSessionId,
-          },
-          signal,
-        )
-      },
-      recoveryKey: expected.runtimeSessionId!,
-      coordinator: deps.bindingRecoveryCoordinator ?? undefined,
-    })
-    if (!recovery.ok) return failureResult(recovery.kind, recovery.message, 'pi')
-    runtimeSessionId = recovery.binding.runtimeSessionId
-  }
   if (!runtimeSessionId) {
-    const created = await runtime.createSession({
-      target: { runtime: 'pi', runtimeSessionId: null, workDir },
-      managerExecution,
-    })
-    if (!created.ok) {
-      const code = mapPiErrorKind(created.error.kind)
-      return failureResult(code, created.error.message, 'pi', created.error.diagnostics)
+    try {
+      const created = await runtime.createSession({
+        target: { runtime: 'pi', runtimeSessionId: null, workDir },
+        managerExecution,
+      })
+      if (!created.ok) {
+        const code = mapPiErrorKind(created.error.kind)
+        return boundResult(failureResult(code, created.error.message, 'pi', created.error.diagnostics))
+      }
+      runtimeSessionId = created.value.runtimeSessionId
+      executionBinding = physicalBinding(work, binding.agentSessionId, 'pi', runtimeSessionId)
+    } catch (error) {
+      return boundResult(failureResult('turn-failed', `Pi session creation threw: ${errorMessage(error)}`, 'pi'))
     }
-    runtimeSessionId = created.value.runtimeSessionId
   }
-  await eventSink.attachSession(runtimeSessionId, workDir, modelInput)
-  if (!work.initialInputId || !work.initialTurnId) {
-    await eventSink.publishSessionInput(composed, runtimeSessionId)
+  try {
+    await eventSink.attachSession(runtimeSessionId, workDir, modelInput)
+    if (!work.initialInputId || !work.initialTurnId) {
+      await eventSink.publishSessionInput(composed, runtimeSessionId)
+    }
+  } catch (error) {
+    return boundResult(
+      failureResult(
+        'session-binding-failed',
+        `Failed to persist the AgentSession binding: ${errorMessage(error)}`,
+        'pi',
+      ),
+    )
   }
 
   const request: PiTurnRequest = {
@@ -356,19 +310,14 @@ export async function executePiTurn(
     onEvent: (event) => {
       eventSink.observePiEvent(
         managerExecution
-          ? { ...event, payload: managerExecution.redact(event.payload) as Record<string, unknown> }
+          ? {
+              ...event,
+              payload: managerExecution.redact(event.payload) as Record<string, unknown>,
+            }
           : event,
       )
     },
   }
-
-  deps.runtimeTurnRegistry?.register(workKey(work), {
-    agentSessionId: binding.agentSessionId ?? '',
-    agentTurnId: work.initialTurnId ?? null,
-    runtime: 'pi',
-    runtimeSessionId,
-    workDir,
-  })
 
   let result: PiResult<PiTurnResult>
   try {
@@ -384,19 +333,24 @@ export async function executePiTurn(
         : `AgentJob turn threw: ${managerExecution ? managerExecution.mask(message) : message}`,
     )
     await eventSink.drain()
-    return await evaluateInitialReplyGuard({
-      runtime: runtimeHandle,
-      runtimeSessionId,
-      workDir,
-      payload,
-      signal,
-      observation,
-      eventSink,
-      managerExecution,
-      originalResult,
-    })
+    return boundResult(
+      await evaluateInitialReplyGuard({
+        runtime: runtimeHandle,
+        runtimeSessionId,
+        workDir,
+        payload,
+        signal,
+        observation,
+        eventSink,
+        managerExecution,
+        originalResult,
+      }),
+    )
   }
   await eventSink.drain()
+  if (result.ok) {
+    executionBinding = physicalBinding(work, binding.agentSessionId, 'pi', result.value.facts.runtimeSessionId)
+  }
   const originalResult = managerExecution?.hasExpired()
     ? failureResult(
         'manager-credential-expired',
@@ -404,17 +358,38 @@ export async function executePiTurn(
         'pi',
       )
     : redactManagerResult(projectPiTurnToWorkItemResult(result, 'pi', modelInput, variant), managerExecution)
-  return await evaluateInitialReplyGuard({
-    runtime: runtimeHandle,
-    runtimeSessionId: result.ok ? result.value.facts.runtimeSessionId : runtimeSessionId,
-    workDir,
-    payload,
-    signal,
-    observation,
-    eventSink,
-    managerExecution,
-    originalResult,
-  })
+  return boundResult(
+    await evaluateInitialReplyGuard({
+      runtime: runtimeHandle,
+      runtimeSessionId: result.ok ? result.value.facts.runtimeSessionId : runtimeSessionId,
+      workDir,
+      payload,
+      signal,
+      observation,
+      eventSink,
+      managerExecution,
+      originalResult,
+    }),
+  )
+}
+
+function physicalBinding(
+  work: DispatchWorkItem,
+  agentSessionId: string | null,
+  runtime: AgentExecutionBinding['runtime'],
+  runtimeSessionId: string | null,
+): AgentExecutionBinding | null {
+  if (!agentSessionId || !work.initialTurnId || !runtimeSessionId) return null
+  return {
+    agentSessionId,
+    agentTurnId: work.initialTurnId,
+    runtime,
+    runtimeSessionId,
+  }
+}
+
+function withAgentBinding(result: WorkItemResult, binding: AgentExecutionBinding | null): WorkItemResult {
+  return binding ? { ...result, agentBinding: binding } : result
 }
 
 function redactManagerResult(result: WorkItemResult, boundary: ManagerExecutionBoundary | null): WorkItemResult {
@@ -450,7 +425,10 @@ async function evaluateInitialReplyGuard(args: {
               onEvent: (event: RuntimeTurnEvent) =>
                 args.eventSink.observeEvent(
                   args.managerExecution
-                    ? { ...event, payload: args.managerExecution.redact(event.payload) as Record<string, unknown> }
+                    ? {
+                        ...event,
+                        payload: args.managerExecution.redact(event.payload) as Record<string, unknown>,
+                      }
                     : event,
                 ),
             }
@@ -458,7 +436,10 @@ async function evaluateInitialReplyGuard(args: {
               onEvent: (event: PiRuntimeEvent) =>
                 args.eventSink.observePiEvent(
                   args.managerExecution
-                    ? { ...event, payload: args.managerExecution.redact(event.payload) as Record<string, unknown> }
+                    ? {
+                        ...event,
+                        payload: args.managerExecution.redact(event.payload) as Record<string, unknown>,
+                      }
                     : event,
                 ),
             }

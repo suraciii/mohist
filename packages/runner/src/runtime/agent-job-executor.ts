@@ -1,12 +1,10 @@
 import { errorMessage } from '../core/errors.js'
-import type { JsonObject, DispatchWorkItem, WorkItemResult } from '../core/types.js'
+import type { AgentExecutionBinding, JsonObject, DispatchWorkItem, WorkItemResult } from '../core/types.js'
 import { isObject } from '../core/json.js'
 import { parseModelIdentifier, type OpenCodeRuntime } from './opencode/index.js'
 import type { PiRuntime } from './pi/index.js'
 import type { RuntimeAccessor } from '../server/command-runtime.js'
 import type { ServerConnection } from '../server/connection.js'
-import type { BindingRecoveryCoordinator } from './binding-recovery.js'
-import type { RuntimeTurnRegistry } from './runtime-turn-registry.js'
 import { SkillResolver } from './skill-resolver.js'
 import { buildExecutionEnvelope } from './execution-envelope.js'
 import { inlineSlackCollaborationSkill, readExecutionSourceContext } from './slack-execution-context.js'
@@ -76,12 +74,10 @@ export class AgentJobExecutor {
   constructor(
     private readonly connection: ServerConnection,
     private readonly runtimes: AgentJobRuntimeAccessors,
-    private readonly bindingRecoveryCoordinator: BindingRecoveryCoordinator | null = null,
     private readonly defaultWorkDir: string = process.cwd(),
     private readonly skillResolver: SkillResolver = new SkillResolver(),
     private readonly namedWorkspaceManager: NamedWorkspaceManager | null = null,
     private readonly options: AgentJobExecutorOptions = {},
-    private readonly runtimeTurnRegistry: RuntimeTurnRegistry | null = null,
   ) {}
 
   async execute(
@@ -208,15 +204,32 @@ export class AgentJobExecutor {
     }
     let turnDeps = this.turnDeps(managerExecution)
     if (managerExecution) {
-      const isolated = await managerExecution.openCodeRuntime(workDir, signal)
-      if (!isolated) {
-        return failureResult(
-          'runtime-unavailable',
-          'Manager OpenCode execution could not establish an isolated server process',
-          'opencode',
+      try {
+        const isolated = await managerExecution.openCodeRuntime(workDir, signal)
+        if (!isolated) {
+          return withKnownBinding(
+            failureResult(
+              'runtime-unavailable',
+              'Manager OpenCode execution could not establish an isolated server process',
+              'opencode',
+            ),
+            knownBinding(work, binding, 'opencode'),
+          )
+        }
+        turnDeps = {
+          ...turnDeps,
+          runtimes: { ...turnDeps.runtimes, openCode: isolated },
+        }
+      } catch (error) {
+        return withKnownBinding(
+          failureResult(
+            'runtime-unavailable',
+            `Manager OpenCode execution setup failed: ${errorMessage(error)}`,
+            'opencode',
+          ),
+          knownBinding(work, binding, 'opencode'),
         )
       }
-      turnDeps = { ...turnDeps, runtimes: { ...turnDeps.runtimes, openCode: isolated } }
     }
     return executeOpenCodeTurn(
       turnDeps,
@@ -240,9 +253,7 @@ export class AgentJobExecutor {
     return {
       connection: this.connection,
       runtimes: this.runtimes,
-      bindingRecoveryCoordinator: this.bindingRecoveryCoordinator,
       options: this.options,
-      runtimeTurnRegistry: this.runtimeTurnRegistry,
       managerExecution,
     }
   }
@@ -277,6 +288,25 @@ export type BindingResolution = {
   runtimeSessionId: string | null
 }
 
+export function knownBinding(
+  work: DispatchWorkItem,
+  binding: BindingResolution,
+  runtime: AgentExecutionBinding['runtime'],
+  runtimeSessionId: string | null = binding.runtimeSessionId,
+): AgentExecutionBinding | null {
+  if (!binding.agentSessionId || !work.initialTurnId || binding.runtime !== runtime || !runtimeSessionId) return null
+  return {
+    agentSessionId: binding.agentSessionId,
+    agentTurnId: work.initialTurnId,
+    runtime,
+    runtimeSessionId,
+  }
+}
+
+function withKnownBinding(result: WorkItemResult, binding: AgentExecutionBinding | null): WorkItemResult {
+  return binding ? { ...result, agentBinding: binding } : result
+}
+
 async function resolveBinding(
   work: DispatchWorkItem,
   connection: ServerConnection,
@@ -284,7 +314,12 @@ async function resolveBinding(
 ): Promise<BindingResolution> {
   const agentSessionId = work.agentSessionId ?? null
   if (!agentSessionId || !work.projectId) {
-    return { agentSessionId: null, runnerId: connection.runnerId, runtime: null, runtimeSessionId: null }
+    return {
+      agentSessionId: null,
+      runnerId: connection.runnerId,
+      runtime: null,
+      runtimeSessionId: null,
+    }
   }
   const opened = await connection.getAgentSession(work.projectId, agentSessionId, signal)
   return {
@@ -338,7 +373,10 @@ async function resolveWorkspaceBinding(
       }
     } catch (error) {
       if (error instanceof WorkspaceHomeClaimedError) throw error
-      return { kind: 'materialization-failed', message: error instanceof Error ? error.message : String(error) }
+      return {
+        kind: 'materialization-failed',
+        message: error instanceof Error ? error.message : String(error),
+      }
     }
   }
 

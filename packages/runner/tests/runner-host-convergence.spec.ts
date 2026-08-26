@@ -278,7 +278,9 @@ describe('RunnerHost converges active workflow runs', () => {
           capturedWorkflowStatusChanged: null,
         }
         await convergenceTestStorage.run(state, async () => {
-          vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval'] })
+          vi.useFakeTimers({
+            toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval'],
+          })
           try {
             await body()
           } finally {
@@ -339,7 +341,7 @@ describe('RunnerHost converges active workflow runs', () => {
     const run = host.run(controller.signal)
 
     expect(await waitForActiveStartup(events)).toEqual(['wr-1'])
-    expect(listAgentSessionsForReconcile).toHaveBeenCalledOnce()
+    expect(listAgentSessionsForReconcile).not.toHaveBeenCalled()
     controller.abort()
     await expect(run).resolves.toBeUndefined()
   })

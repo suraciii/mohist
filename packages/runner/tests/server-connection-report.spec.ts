@@ -33,7 +33,12 @@ describe('ServerConnection.report', () => {
   it('forwardsCleanupAttemptsToServerWhenResultIncludesThem', async () => {
     fetchMock.mockResolvedValueOnce(mockResponse({ status: 200, body: '{}' }))
     const connection = new ServerConnection(options())
-    const work = { workflowRunId: 'wf-1', workId: 'work-1', taskRunId: 'task-1.1', workType: 'task' }
+    const work = {
+      workflowRunId: 'wf-1',
+      workId: 'work-1',
+      taskRunId: 'task-1.1',
+      workType: 'task',
+    }
     await connection.report(
       work,
       { status: 'failed', message: 'dirty', output: '{}', cleanupAttempts: 3 },
@@ -44,37 +49,6 @@ describe('ServerConnection.report', () => {
     const body = JSON.parse(init.body as string)
     expect(body.taskRunId).toBe('task-1.1')
     expect(body.cleanupAttempts).toBe(3)
-  })
-
-  it('preservesRunnerRestartedUnknownStatusAndOriginalWorkflowIdentity', async () => {
-    fetchMock.mockResolvedValueOnce(mockResponse({ status: 200, body: JSON.stringify({ tracked: true }) }))
-    const connection = new ServerConnection(options())
-    await connection.report(
-      {
-        workflowRunId: 'wf-restart',
-        workId: 'work-restart',
-        taskRunId: 'task-restart',
-        workType: 'task',
-        uses: 'mohist/opencode',
-        ownerKind: 'workflow',
-        projectId: 'project-1',
-      },
-      {
-        status: 'unknown',
-        message: 'runner-restarted',
-        error: { code: 'runner-restarted', message: 'runner-restarted' },
-      },
-      new AbortController().signal,
-    )
-    const body = JSON.parse((fetchMock.mock.calls[0][1] as RequestInit).body as string)
-    expect(body).toMatchObject({
-      workflowRunId: 'wf-restart',
-      workId: 'work-restart',
-      taskRunId: 'task-restart',
-      ownerKind: 'workflow',
-      status: 'unknown',
-      error: { code: 'runner-restarted' },
-    })
   })
 
   it('sendsNullCleanupAttemptsWhenResultOmitsThem', async () => {
@@ -122,8 +96,18 @@ describe('ServerConnection.poll recovery state', () => {
         status: 200,
         body: JSON.stringify({
           dispatches: [
-            { workflowRunId: 'wf-1', workId: 'work-1', workType: 'task', recoveryRemaining: null },
-            { workflowRunId: 'wf-1', workId: 'work-2', workType: 'task', recoveryRemaining: 1 },
+            {
+              workflowRunId: 'wf-1',
+              workId: 'work-1',
+              workType: 'task',
+              recoveryRemaining: null,
+            },
+            {
+              workflowRunId: 'wf-1',
+              workId: 'work-2',
+              workType: 'task',
+              recoveryRemaining: 1,
+            },
             { workflowRunId: 'wf-1', workId: 'work-3', workType: 'task' },
           ],
         }),
@@ -157,7 +141,12 @@ describe('ServerConnection.poll recovery state', () => {
               workType: 'task',
               parentIssueContext: { title: 'Parent', body: 'Parent body' },
             },
-            { workflowRunId: 'wf-1', workId: 'plan-2', workType: 'task', parentIssueContext: null },
+            {
+              workflowRunId: 'wf-1',
+              workId: 'plan-2',
+              workType: 'task',
+              parentIssueContext: null,
+            },
             { workflowRunId: 'wf-1', workId: 'plan-3', workType: 'task' },
           ],
         }),
@@ -172,7 +161,10 @@ describe('ServerConnection.poll recovery state', () => {
       admissionReady: false,
     })
 
-    expect(works[0]?.parentIssueContext).toEqual({ title: 'Parent', body: 'Parent body' })
+    expect(works[0]?.parentIssueContext).toEqual({
+      title: 'Parent',
+      body: 'Parent body',
+    })
     expect(works[1]?.parentIssueContext).toBeNull()
     expect(Object.prototype.hasOwnProperty.call(works[1], 'parentIssueContext')).toBe(true)
     expect(Object.prototype.hasOwnProperty.call(works[2], 'parentIssueContext')).toBe(false)
@@ -194,7 +186,12 @@ describe('ServerConnection.poll recovery state', () => {
               uses: 'mohist/opencode',
               with: JSON.stringify({ prompt: 'do work' }),
               expect: JSON.stringify({
-                markers: [{ path: '_output', oneOf: ['<promise>PASS</promise>', '<promise>FAIL</promise>'] }],
+                markers: [
+                  {
+                    path: '_output',
+                    oneOf: ['<promise>PASS</promise>', '<promise>FAIL</promise>'],
+                  },
+                ],
               }),
             },
             {
@@ -220,7 +217,12 @@ describe('ServerConnection.poll recovery state', () => {
     // Expect is decoded as a structured object (NOT stringified) so
     // the executor's completion evaluator can read it.
     expect(works[0]?.expect).toEqual({
-      markers: [{ path: '_output', oneOf: ['<promise>PASS</promise>', '<promise>FAIL</promise>'] }],
+      markers: [
+        {
+          path: '_output',
+          oneOf: ['<promise>PASS</promise>', '<promise>FAIL</promise>'],
+        },
+      ],
     })
     // Action Input (`with`) is decoded independently and DOES NOT
     // contain the completion contract.
@@ -244,10 +246,19 @@ describe('ServerConnection.poll recovery state', () => {
               workId: 'opencode-raw',
               workType: 'task',
               uses: 'mohist/opencode',
-              with: JSON.stringify({ prompt: 'child prompt: ${{ vars.agent }}', mode: '${{ vars.mode }}' }),
-              expect: JSON.stringify({ markers: [{ path: '_output', contains: '${{ vars.marker }}' }] }),
+              with: JSON.stringify({
+                prompt: 'child prompt: ${{ vars.agent }}',
+                mode: '${{ vars.mode }}',
+              }),
+              expect: JSON.stringify({
+                markers: [{ path: '_output', contains: '${{ vars.marker }}' }],
+              }),
               variables: JSON.stringify({
-                vars: { agent: { model: 'model-a' }, mode: 'fast', marker: 'PASS' },
+                vars: {
+                  agent: { model: 'model-a' },
+                  mode: 'fast',
+                  marker: 'PASS',
+                },
               }),
             },
           ],
@@ -264,9 +275,16 @@ describe('ServerConnection.poll recovery state', () => {
     })
     const work = works[0]!
 
-    expect(work.with).toEqual({ prompt: 'child prompt: ${{ vars.agent }}', mode: '${{ vars.mode }}' })
-    expect(work.expect).toEqual({ markers: [{ path: '_output', contains: '${{ vars.marker }}' }] })
-    expect(work.variables).toEqual({ vars: { agent: { model: 'model-a' }, mode: 'fast', marker: 'PASS' } })
+    expect(work.with).toEqual({
+      prompt: 'child prompt: ${{ vars.agent }}',
+      mode: '${{ vars.mode }}',
+    })
+    expect(work.expect).toEqual({
+      markers: [{ path: '_output', contains: '${{ vars.marker }}' }],
+    })
+    expect(work.variables).toEqual({
+      vars: { agent: { model: 'model-a' }, mode: 'fast', marker: 'PASS' },
+    })
     expect(JSON.stringify(work.with)).toContain('${{ vars.agent }}')
     expect(JSON.stringify(work.expect)).toContain('${{ vars.marker }}')
   })
@@ -284,7 +302,13 @@ describe('ServerConnection update interruption handoff', () => {
               runnerId: 'runner-1',
               createdAt: '2026-08-15T00:00:00Z',
               affectedWorks: [
-                { ownerKind: 'workflow', ownerId: 'wf-1', workId: 'work-1', taskRunId: 'task-1', workType: 'task' },
+                {
+                  ownerKind: 'workflow',
+                  ownerId: 'wf-1',
+                  workId: 'work-1',
+                  taskRunId: 'task-1',
+                  workType: 'task',
+                },
               ],
             },
           },
@@ -297,66 +321,15 @@ describe('ServerConnection update interruption handoff', () => {
       runnerId: 'runner-1',
       createdAt: '2026-08-15T00:00:00Z',
       affectedWorks: [
-        { ownerKind: 'workflow', ownerId: 'wf-1', workId: 'work-1', taskRunId: 'task-1', workType: 'task' },
+        {
+          ownerKind: 'workflow',
+          ownerId: 'wf-1',
+          workId: 'work-1',
+          taskRunId: 'task-1',
+          workType: 'task',
+        },
       ],
     })
-  })
-
-  it('sendsTheExactReceiptAndTreatsAcknowledgeAsTerminal', async () => {
-    const receipt = {
-      workflowRunId: 'wf-1',
-      taskRunId: 'task-1',
-      workId: 'work-1',
-      runnerId: 'runner-1',
-      agentSessionId: 'session-1',
-      agentTurnId: 'turn-1',
-      runtime: 'pi',
-      runtimeSessionId: '/workspace/session.jsonl',
-      recoveryGeneration: 0,
-      receiptId: 'receipt-1',
-      payload: { type: 'update-interrupted', updateOperationId: 'runner-update:1', stopConfirmed: true },
-    } as const
-    fetchMock.mockResolvedValueOnce(
-      mockResponse({
-        status: 200,
-        body: JSON.stringify({ appliedReceiptId: 'receipt-1', status: 'accepted' }),
-      }),
-    )
-    const connection = new ServerConnection(options())
-    await expect(connection.sendRecoveryReceipt(receipt, new AbortController().signal)).resolves.toEqual({
-      appliedReceiptId: 'receipt-1',
-      status: 'accepted',
-    })
-    const init = fetchMock.mock.calls[0][1] as RequestInit
-    expect(JSON.parse(init.body as string)).toEqual(receipt)
-  })
-
-  it('keepsRetryableReceiptResponsesAsDeliveryFailures', async () => {
-    fetchMock.mockResolvedValueOnce(
-      mockResponse({
-        status: 409,
-        body: JSON.stringify({ appliedReceiptId: 'receipt-1', status: 'retryable', reason: 'replacement-pending' }),
-      }),
-    )
-    const connection = new ServerConnection(options())
-    await expect(
-      connection.sendRecoveryReceipt(
-        {
-          workflowRunId: 'wf-1',
-          taskRunId: 'task-1',
-          workId: 'work-1',
-          runnerId: 'runner-1',
-          agentSessionId: 'session-1',
-          agentTurnId: 'turn-1',
-          runtime: 'pi',
-          runtimeSessionId: '/workspace/session.jsonl',
-          recoveryGeneration: 0,
-          receiptId: 'receipt-1',
-          payload: { type: 'update-interrupted', updateOperationId: 'runner-update:1', stopConfirmed: true },
-        },
-        new AbortController().signal,
-      ),
-    ).rejects.toMatchObject({ retryable: true })
   })
 })
 

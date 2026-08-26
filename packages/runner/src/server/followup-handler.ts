@@ -44,7 +44,6 @@ import {
 } from './command-runtime.js'
 import type { PiRuntimeEvent, PiTurnObserver } from '../runtime/pi/index.js'
 import type { RuntimeTurnEvent, RuntimeTurnObserver } from '../runtime/opencode/index.js'
-import { resolveOrRecoverBinding, type BindingRecoveryCoordinator } from '../runtime/binding-recovery.js'
 import type { FollowupOperationJournalStore } from '../runtime/followup-operation-journal.js'
 import type { ServerConnection } from './connection.js'
 import { SkillResolver } from '../runtime/skill-resolver.js'
@@ -81,7 +80,6 @@ export interface FollowupHandlerDeps {
   createManagerExecutionBoundary?: typeof ManagerExecutionBoundary.create
   followupOperationJournal?: FollowupOperationJournalStore | null
   randomId?: () => string
-  bindingRecoveryCoordinator?: BindingRecoveryCoordinator | null
   skillResolver?: SkillResolver
   strictExecutionSourceValidation?: boolean
 }
@@ -169,7 +167,9 @@ async function handleFollowup(
       managerExecution = await (deps.createManagerExecutionBoundary ?? ManagerExecutionBoundary.create)(
         payload.managerExecutionGrant!,
         deps.runnerRoot,
-        { workDir: target.workDir },
+        {
+          workDir: target.workDir,
+        },
       )
       if (binding.runtime.toLowerCase() === 'opencode') {
         const isolated = await managerExecution.openCodeRuntime(target.workDir, new AbortController().signal)
@@ -181,7 +181,9 @@ async function handleFollowup(
       }
     } catch (error) {
       await managerExecution?.dispose().catch(() => undefined)
-      log.error('Manager follow-up boundary could not be established', { exception: error })
+      log.error('Manager follow-up boundary could not be established', {
+        exception: error,
+      })
       return unavailable()
     }
   }
@@ -194,70 +196,8 @@ async function handleFollowup(
     return unavailable()
   }
 
-  let selectedTarget = target
+  const selectedTarget = target
   const connection = deps.connection ?? null
-  const runnerId = deps.runnerId ?? null
-  if (connection && runnerId) {
-    const expected = {
-      runnerId: binding.runnerId,
-      runtime: handle.kind,
-      runtimeSessionId: target.runtimeSessionId,
-      workDir: target.workDir,
-    } as const
-    const recovery = await resolveOrRecoverBinding({
-      runnerId,
-      expected,
-      runtime: handle,
-      probe: async (candidate) => {
-        const result =
-          handle.kind === 'opencode'
-            ? await handle.runtime.resolveSession({
-                target: {
-                  runtime: 'opencode',
-                  runtimeSessionId: candidate.runtimeSessionId,
-                  workDir: candidate.workDir,
-                },
-              })
-            : await handle.runtime.resolveSession({
-                target: { runtime: 'pi', runtimeSessionId: candidate.runtimeSessionId, workDir: candidate.workDir },
-              })
-        return result.ok
-          ? { ok: true, activeTurn: result.value.activeTurn }
-          : { ok: false, kind: result.error.kind, message: result.error.message }
-      },
-      replace: async (current, replacement) => {
-        const body = {
-          expectedRunnerId: current.runnerId,
-          expectedRuntime: current.runtime,
-          expectedRuntimeSessionId: current.runtimeSessionId,
-          replacementRuntimeSessionId: replacement.runtimeSessionId,
-        }
-        if (sessionTarget.kind === 'workflow') {
-          await connection.recoverMissingWorkflowAgentSession(
-            sessionTarget.projectId,
-            sessionTarget.workflowRunId,
-            sessionTarget.sessionName,
-            body,
-            new AbortController().signal,
-          )
-        } else {
-          await connection.recoverMissingAgentSession(
-            sessionTarget.projectId,
-            sessionTarget.sessionId,
-            body,
-            new AbortController().signal,
-          )
-        }
-      },
-      recoveryKey: expected.runtimeSessionId!,
-      coordinator: deps.bindingRecoveryCoordinator ?? undefined,
-    })
-    if (!recovery.ok) {
-      await managerExecution?.dispose().catch(() => undefined)
-      return unavailable()
-    }
-    selectedTarget = { ...target, runtimeSessionId: recovery.binding.runtimeSessionId! }
-  }
 
   const definition = sessionTarget.kind === 'generic' ? target.definition : undefined
   const resolvedSkills = await (deps.skillResolver ?? new SkillResolver()).resolve(
@@ -285,7 +225,10 @@ async function handleFollowup(
         return unavailable()
       }
     } catch (error) {
-      log.error('followup operation journal claim failed', { exception: error, session: sessionTarget.kind })
+      log.error('followup operation journal claim failed', {
+        exception: error,
+        session: sessionTarget.kind,
+      })
       await managerExecution?.dispose().catch(() => undefined)
       return unavailable()
     }
@@ -324,7 +267,10 @@ async function handleFollowup(
     if (operationId && operationKey && deps.followupOperationJournal) {
       await deps.followupOperationJournal.release(operationKey, operationId).catch(() => undefined)
     }
-    log.error('followup durable input enqueue failed', { exception: error, session: sessionTarget.kind })
+    log.error('followup durable input enqueue failed', {
+      exception: error,
+      session: sessionTarget.kind,
+    })
     await managerExecution?.dispose().catch(() => undefined)
     return unavailable()
   }
@@ -390,7 +336,10 @@ async function handleFollowup(
             readRuntimeErrorCategory(handle.kind, result),
           )
           if (readErrorKind(result) === 'unavailable-runtime') {
-            log.error('followup runtime unavailable', { reason: message, session: selectedTarget.runtimeSessionId })
+            log.error('followup runtime unavailable', {
+              reason: message,
+              session: selectedTarget.runtimeSessionId,
+            })
           }
           return
         }
@@ -418,7 +367,10 @@ async function handleFollowup(
               managerExecution,
             })
           } catch (error) {
-            log.error('followup reply guard failed', { exception: error, session: selectedTarget.runtimeSessionId })
+            log.error('followup reply guard failed', {
+              exception: error,
+              session: selectedTarget.runtimeSessionId,
+            })
           }
         }
         recordFollowupActivity(
@@ -436,7 +388,10 @@ async function handleFollowup(
       (error) => {
         if (terminalFinalized) return
         terminalFinalized = true
-        log.error('followup runtime.followup rejected', { exception: error, session: selectedTarget.runtimeSessionId })
+        log.error('followup runtime.followup rejected', {
+          exception: error,
+          session: selectedTarget.runtimeSessionId,
+        })
         recordFollowupActivity(
           outbox,
           sessionTarget,
@@ -469,7 +424,10 @@ async function handleFollowup(
       }
     })
   } catch (error) {
-    log.error('followup runtime.followup threw', { exception: error, session: selectedTarget.runtimeSessionId })
+    log.error('followup runtime.followup threw', {
+      exception: error,
+      session: selectedTarget.runtimeSessionId,
+    })
     recordFollowupActivity(
       outbox,
       sessionTarget,
@@ -498,7 +456,9 @@ async function revokeFinishedManagerExecution(
   try {
     await deps.onManagerExecutionFinished?.(executionId ?? '')
   } catch (error) {
-    log.error('failed to revoke Manager execution after duplicate delivery', { exception: error })
+    log.error('failed to revoke Manager execution after duplicate delivery', {
+      exception: error,
+    })
   }
 }
 
@@ -567,7 +527,10 @@ function isManagerSlackContext(value: unknown): boolean {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return false
   const anchor = (value as { readonly replyAnchor?: unknown }).replyAnchor
   if (!anchor || typeof anchor !== 'object' || Array.isArray(anchor)) return false
-  const candidate = anchor as { readonly projectId?: unknown; readonly ownerKind?: unknown }
+  const candidate = anchor as {
+    readonly projectId?: unknown
+    readonly ownerKind?: unknown
+  }
   return candidate.projectId === '__mohist_slack_manager__' && candidate.ownerKind === 'manager'
 }
 
@@ -771,7 +734,10 @@ function recordFollowupActivity(
     acknowledgementPolicy: 'successful-response',
   }
   outbox.enqueueProducedFact(record).catch((outboxError) => {
-    log.error('failed to persist followup terminal', { session: target.runtimeSessionId, exception: outboxError })
+    log.error('failed to persist followup terminal', {
+      session: target.runtimeSessionId,
+      exception: outboxError,
+    })
   })
 }
 

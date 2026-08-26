@@ -27,6 +27,33 @@ public partial class DispatchServiceReconciliationSpecs : Mohist.Server.SpecTest
     private static string WorkKey(string workflowRunId, string workId) =>
         $"{WorkDispatchOwnerKinds.Workflow}:{workflowRunId}:{workId}";
 
+    private async Task AssertBlockedAttemptsPreserveBindingsAsync(
+        IReadOnlyList<string> workflowIds,
+        IReadOnlyList<AgentExecutionBinding> expectedBindings)
+    {
+        Assert.Equal(workflowIds.Count, expectedBindings.Count);
+        for (var index = 0; index < workflowIds.Count; index++)
+        {
+            var run = await LoadRunAsync(workflowIds[index]);
+            var attempt = Assert.Single(run.CurrentStage().Tasks);
+            Assert.Equal(TaskRunStatus.Running, attempt.Status);
+            Assert.Null(run.Assignment);
+            Assert.Null(run.AssignedTo);
+
+            var binding = expectedBindings[index];
+            var settlement = Assert.IsType<AgentResultSettlement>(attempt.AgentResultSettlement);
+            Assert.Equal(AgentResultSettlementState.Blocked, settlement.State);
+            Assert.Equal(binding.TaskRunId, settlement.TaskRunId);
+            Assert.Equal(binding.WorkId, settlement.WorkId);
+            Assert.Equal(binding.RunnerId, settlement.RunnerId);
+            Assert.Equal(binding.AgentSessionId, settlement.AgentSessionId);
+            Assert.Equal(binding.AgentTurnId, settlement.AgentTurnId);
+            Assert.Equal(binding.Runtime, settlement.Runtime);
+            Assert.Equal(binding.RuntimeSessionId, settlement.RuntimeSessionId);
+            Assert.Equal(binding.WorkId, attempt.WorkId);
+        }
+    }
+
     [Fact]
     public async Task RuntimeReadinessFence_RejectsFreshClaimsButRedeliversHeldWork()
     {
@@ -497,7 +524,7 @@ public partial class DispatchServiceReconciliationSpecs : Mohist.Server.SpecTest
         {
             var workflow = Grains.GetGrain<IWorkflowGrain>(work.WorkflowRunId);
             var binding = new AgentExecutionBinding(
-                work.TaskRunId!,
+                Assert.IsType<string>(work.TaskRunId),
                 work.WorkId,
                 runnerId,
                 $"session-{work.WorkflowRunId}",
@@ -509,8 +536,9 @@ public partial class DispatchServiceReconciliationSpecs : Mohist.Server.SpecTest
                 new AgentExecutionObservation(binding, AgentExecutionObservationKind.Disconnected, "runner-disconnected")));
             bindings.Add(binding);
             var unknown = await LoadRunAsync(work.WorkflowRunId);
-            deadlines.Add(Assert.IsType<DateTimeOffset>(
-                Assert.Single(unknown.CurrentStage().Tasks).AgentResultSettlement!.DeadlineAt));
+            var settlement = Assert.IsType<AgentResultSettlement>(
+                Assert.Single(unknown.CurrentStage().Tasks).AgentResultSettlement);
+            deadlines.Add(Assert.IsType<DateTimeOffset>(settlement.DeadlineAt));
         }
 
         // Both attempts currently occupy the Runner's two slots.
@@ -525,6 +553,8 @@ public partial class DispatchServiceReconciliationSpecs : Mohist.Server.SpecTest
         _fixture.TimeProvider.Advance(deadlines.Max() - _fixture.TimeProvider.GetUtcNow());
         foreach (var workflow in workflows)
             await workflow.ReceiveReminder(WorkflowGrain.AgentResultSettlementReminderName, default);
+
+        await AssertBlockedAttemptsPreserveBindingsAsync(workflowIds, bindings);
 
         // No active-work rows, no used slots, empty Runner active-work status.
         using (var scope = _fixture.Cluster.GetSiloServiceProvider(null).CreateScope())
@@ -545,23 +575,7 @@ public partial class DispatchServiceReconciliationSpecs : Mohist.Server.SpecTest
             (await Dispatch.PollAsync(runnerId, new RunnerPollRequest([], [], ProcessGeneration: TestRunnerGenerationExtensions.ProcessGeneration))).Dispatches);
         Assert.Equal(freshWorkflowId, dispatch.WorkflowRunId);
 
-        // Both released attempts stay addressable by their original identity.
-        foreach (var index in new[] { 0, 1 })
-        {
-            var released = await LoadRunAsync(workflowIds[index]);
-            var attempt = Assert.Single(released.CurrentStage().Tasks);
-            Assert.Equal(AgentResultSettlementState.Blocked, attempt.AgentResultSettlement!.State);
-            Assert.Null(released.Assignment);
-            Assert.Null(released.AssignedTo);
-            Assert.Equal(TaskRunStatus.Running, attempt.Status);
-            Assert.Equal(bindings[index].WorkId, attempt.WorkId);
-            Assert.Equal(bindings[index].TaskRunId, attempt.AgentResultSettlement.TaskRunId);
-            Assert.Equal(bindings[index].RunnerId, attempt.AgentResultSettlement.RunnerId);
-            Assert.Equal(bindings[index].AgentSessionId, attempt.AgentResultSettlement.AgentSessionId);
-            Assert.Equal(bindings[index].AgentTurnId, attempt.AgentResultSettlement.AgentTurnId);
-            Assert.Equal(bindings[index].Runtime, attempt.AgentResultSettlement.Runtime);
-            Assert.Equal(bindings[index].RuntimeSessionId, attempt.AgentResultSettlement.RuntimeSessionId);
-        }
+        await AssertBlockedAttemptsPreserveBindingsAsync(workflowIds, bindings);
     }
 
     [Fact]

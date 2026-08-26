@@ -215,6 +215,7 @@ interface FakeConnectionHandles {
   }>
   eventCalls: Array<{ projectId: string; sessionId: string; body: Record<string, unknown> }>
   setAgentSession: (session: { runtimeSessionId: string | null } | null) => void
+  setAttachWriter: (writer: (body: Record<string, unknown>) => Promise<void>) => void
   setEventWriter: (writer: (body: Record<string, unknown>) => Promise<void>) => void
 }
 
@@ -222,6 +223,7 @@ function makeFakeConnection(): FakeConnectionHandles {
   const attachCalls: FakeConnectionHandles['attachCalls'] = []
   const eventCalls: FakeConnectionHandles['eventCalls'] = []
   let agentSession: { runtimeSessionId: string | null } | null = null
+  let attachWriter: (body: Record<string, unknown>) => Promise<void> = async () => {}
   let eventWriter: (body: Record<string, unknown>) => Promise<void> = async () => {}
   const connection = {
     async openAgentSession() {},
@@ -232,10 +234,13 @@ function makeFakeConnection(): FakeConnectionHandles {
       _signal: AbortSignal,
     ) {
       attachCalls.push({ projectId, sessionId, body })
+      await attachWriter(body)
     },
     async getAgentSession(_projectId: string, sessionId: string, _signal: AbortSignal) {
       if (agentSession === null) return null
       return {
+        sessionId,
+        runtime: 'pi',
         runtimeSessionId: agentSession.runtimeSessionId,
         workDir: '/tmp/ws',
       } as never
@@ -251,6 +256,9 @@ function makeFakeConnection(): FakeConnectionHandles {
     eventCalls,
     setAgentSession(session) {
       agentSession = session
+    },
+    setAttachWriter(writer) {
+      attachWriter = writer
     },
     setEventWriter(writer) {
       eventWriter = writer
@@ -402,25 +410,60 @@ describe('AgentJobExecutor selects the runtime from the dispatch', () => {
     expect(pi.runTurnCalls).toHaveLength(0)
   })
 
-  it('fails with runtime-unavailable when the selected pi runtime is not ready', async () => {
+  it.each([
+    ['missing', null],
+    ['not ready', false],
+  ])('preserves a persisted Pi binding when the runtime is %s', async (_case, ready) => {
     const openCode = makeFakeOpenCodeRuntime()
     const pi = makeFakePiRuntime()
-    pi.setReady(false)
+    if (ready === false) pi.setReady(false)
     const connection = makeFakeConnection()
+    connection.setAgentSession({ runtimeSessionId: '/virtual/sessions/persisted.jsonl' })
     const executor = new AgentJobExecutor(connection.connection, {
       openCode: openCode.runtime,
-      pi: pi.runtime,
+      pi: ready === null ? null : pi.runtime,
     })
 
     const work = buildAgentJobWork({
+      initialTurnId: 'turn-persisted',
       with: { prompt: 'pi unavailable', runtime: 'pi' },
     })
     const result = await executor.execute(work, new AbortController().signal)
 
     expect(result.status).toBe('failed')
     expect(result.error?.code).toBe('runtime-unavailable')
-    expect(result.message).toMatch(/Pi runtime/)
-    // Critical: NO silent fallback to OpenCode.
+    expect(result.agentBinding).toEqual({
+      agentSessionId: 'session-1',
+      agentTurnId: 'turn-persisted',
+      runtime: 'pi',
+      runtimeSessionId: '/virtual/sessions/persisted.jsonl',
+    })
+    expect(openCode.runTurnCalls).toHaveLength(0)
+    expect(pi.runTurnCalls).toHaveLength(0)
+  })
+
+  it.each([
+    ['missing', null],
+    ['not ready', false],
+  ])('omits a Pi binding when the runtime is %s without persisted physical facts', async (_case, ready) => {
+    const openCode = makeFakeOpenCodeRuntime()
+    const pi = makeFakePiRuntime()
+    if (ready === false) pi.setReady(false)
+    const connection = makeFakeConnection()
+    const executor = new AgentJobExecutor(connection.connection, {
+      openCode: openCode.runtime,
+      pi: ready === null ? null : pi.runtime,
+    })
+
+    const work = buildAgentJobWork({
+      initialTurnId: 'turn-logical-only',
+      with: { prompt: 'pi unavailable', runtime: 'pi' },
+    })
+    const result = await executor.execute(work, new AbortController().signal)
+
+    expect(result.status).toBe('failed')
+    expect(result.error?.code).toBe('runtime-unavailable')
+    expect(result.agentBinding).toBeUndefined()
     expect(openCode.runTurnCalls).toHaveLength(0)
     expect(pi.runTurnCalls).toHaveLength(0)
   })
@@ -491,6 +534,7 @@ describe('AgentJobExecutor drives PiRuntime end-to-end', () => {
     const executor = new AgentJobExecutor(connection.connection, makeAccessorsFromFake(pi, 'pi'))
 
     const work = buildAgentJobWork({
+      initialTurnId: 'turn-created-success',
       with: { prompt: 'execute on pi', runtime: 'pi', model: 'openai/gpt-5.5', reasoningEffort: 'high' },
     })
     const result = await executor.execute(work, new AbortController().signal)
@@ -504,6 +548,40 @@ describe('AgentJobExecutor drives PiRuntime end-to-end', () => {
     expect(request.options?.model).toBe('openai/gpt-5.5')
     expect(request.options?.variant).toBeNull()
     expect(request.options?.reasoningEffort).toBe('high')
+    expect(result.agentBinding).toEqual({
+      agentSessionId: 'session-1',
+      agentTurnId: 'turn-created-success',
+      runtime: 'pi',
+      runtimeSessionId: '/virtual/sessions/agent.jsonl',
+    })
+  })
+
+  it('preserves the created Pi binding when attach fails', async () => {
+    const pi = makeFakePiRuntime()
+    const connection = makeFakeConnection()
+    connection.setAgentSession({ runtimeSessionId: null })
+    connection.setAttachWriter(async () => {
+      throw new Error('attach endpoint offline')
+    })
+    const executor = new AgentJobExecutor(connection.connection, makeAccessorsFromFake(pi, 'pi'))
+
+    const result = await executor.execute(
+      buildAgentJobWork({
+        initialTurnId: 'turn-created-attach-failure',
+        with: { prompt: 'attach Pi session', runtime: 'pi' },
+      }),
+      new AbortController().signal,
+    )
+
+    expect(result.status).toBe('failed')
+    expect(result.error?.code).toBe('session-binding-failed')
+    expect(pi.runTurnCalls).toHaveLength(0)
+    expect(result.agentBinding).toEqual({
+      agentSessionId: 'session-1',
+      agentTurnId: 'turn-created-attach-failure',
+      runtime: 'pi',
+      runtimeSessionId: '/virtual/sessions/agent.jsonl',
+    })
   })
 
   it('rejects a Pi runtime-specific variant instead of treating it as reasoning effort', async () => {
@@ -600,6 +678,7 @@ describe('AgentJobExecutor drives PiRuntime end-to-end', () => {
     const executor = new AgentJobExecutor(connection.connection, makeAccessorsFromFake(pi, 'pi'))
 
     const work = buildAgentJobWork({
+      initialTurnId: 'turn-final-projection',
       with: { prompt: 'label me', runtime: 'pi', model: 'openai/gpt-5.5' },
     })
     const result = await executor.execute(work, new AbortController().signal)
@@ -610,6 +689,12 @@ describe('AgentJobExecutor drives PiRuntime end-to-end', () => {
     expect(parsed.status).toBe('success')
     expect(parsed.runtimeSessionId).toBe('/virtual/sessions/labeled.jsonl')
     expect(parsed.model).toBe('openai/gpt-5.5')
+    expect(result.agentBinding).toEqual({
+      agentSessionId: 'session-1',
+      agentTurnId: 'turn-final-projection',
+      runtime: 'pi',
+      runtimeSessionId: '/virtual/sessions/labeled.jsonl',
+    })
   })
 
   it('projects Pi turn facts through the existing AgentSession observer channel', async () => {
@@ -667,6 +752,7 @@ describe('AgentJobExecutor drives PiRuntime end-to-end', () => {
     const executor = new AgentJobExecutor(connection.connection, makeAccessorsFromFake(pi, 'pi'))
 
     const work = buildAgentJobWork({
+      initialTurnId: 'turn-created-failure',
       with: { prompt: 'no creds', runtime: 'pi', model: 'openai/gpt-uncredentialed' },
     })
     const result = await executor.execute(work, new AbortController().signal)
@@ -684,6 +770,12 @@ describe('AgentJobExecutor drives PiRuntime end-to-end', () => {
     )
     // The terminal output keeps the runtime label so callers know which backend rejected the model.
     expect(parsed.kind).toBe('pi')
+    expect(result.agentBinding).toEqual({
+      agentSessionId: 'session-1',
+      agentTurnId: 'turn-created-failure',
+      runtime: 'pi',
+      runtimeSessionId: '/virtual/sessions/agent.jsonl',
+    })
   })
 
   it('surfaces missing-session with the reset hint', async () => {

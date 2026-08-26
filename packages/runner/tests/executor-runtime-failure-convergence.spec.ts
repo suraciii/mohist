@@ -104,10 +104,8 @@ function createExecutor(
       return () => `runtime-failure-${++n}`
     })(),
     piRuntime as never,
-    null,
     undefined,
     null,
-    undefined,
     undefined,
     25,
   )
@@ -140,6 +138,7 @@ describe('WorkExecutor runtime failure convergence', () => {
 
     expect(result.status).toBe('failed')
     expect(result.error?.code).toBe('runtime-unavailable')
+    expect(result.agentBinding).toBeUndefined()
     expect(open).toHaveBeenCalledTimes(1)
     expect(outbox.eventTypeList()).toEqual([])
   })
@@ -151,6 +150,12 @@ describe('WorkExecutor runtime failure convergence', () => {
 
     expect(result.status).toBe('failed')
     expect(result.error?.code).toBe('runtime-unavailable')
+    expect(result.agentBinding).toEqual({
+      agentSessionId: 'agent-session-1',
+      agentTurnId: null,
+      runtime: 'opencode',
+      runtimeSessionId: 'runtime-1',
+    })
     expect(outbox.eventTypeList()).toEqual(['turn.failed', 'session.activity'])
     expect(outbox.eventsByType('session.activity')[0]?.event.payload).toMatchObject({
       activity: 'idle',
@@ -166,6 +171,12 @@ describe('WorkExecutor runtime failure convergence', () => {
 
     expect(result.status).toBe('failed')
     expect(result.error?.message).toContain('pending apply_patch failed')
+    expect(result.agentBinding).toEqual({
+      agentSessionId: 'agent-session-1',
+      agentTurnId: expect.any(String),
+      runtime: 'opencode',
+      runtimeSessionId: 'runtime-1',
+    })
     expect(outbox.eventTypeList()).toEqual(['session.input', 'turn.failed', 'session.activity'])
     expect(outbox.eventsByType('session.activity')[0]?.event.payload).toMatchObject({
       activity: 'idle',
@@ -386,31 +397,6 @@ describe('WorkExecutor runtime failure convergence', () => {
     })
     expect(runTurn.mock.calls.map((call) => call[0].target.runtimeSessionId)).toEqual(['runtime-new'])
     expect(outbox.eventsByType('session.input')[0]?.runtimeSessionId).toBe('runtime-new')
-  })
-
-  it('fails closed when the bound workflow Runtime Session still has an active turn', async () => {
-    const resolveSession = vi.fn(async () => ({ ok: true as const, value: { activeTurn: true }, diagnostics: [] }))
-    const runTurn = vi.fn()
-    const { executor, outbox } = createExecutor(
-      fakeRuntime({ resolveSession, runTurn }),
-      fakeConnection({
-        openWorkflowAgentSession: async () => ({
-          runtimeSessionId: 'runtime-old',
-          workDir,
-          status: 'idle',
-          needsFreshRuntimeSession: false,
-        }),
-      }),
-    )
-
-    const result = await executor.execute(work(), new AbortController().signal)
-
-    expect(result.status).toBe('failed')
-    expect(result.error?.code).toBe('session-binding-failed')
-    expect(result.error?.message).toContain('active turn')
-    expect(resolveSession).toHaveBeenCalledTimes(1)
-    expect(runTurn).not.toHaveBeenCalled()
-    expect(outbox.eventTypeList()).toEqual([])
   })
 
   it('fails closed from the server activity state before creating a replacement session', async () => {

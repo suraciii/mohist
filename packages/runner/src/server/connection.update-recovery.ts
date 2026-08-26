@@ -1,8 +1,4 @@
-import type {
-  PendingUpdateOperation,
-  RecoveryReceiptAcknowledgement,
-  RuntimeRecoveryReceipt,
-} from '../runtime/recovery-receipt.js'
+import type { PendingUpdateOperation } from '../runtime/update-operation.js'
 
 type Fetcher = (input: string, init: RequestInit) => Promise<Response>
 
@@ -11,46 +7,14 @@ export async function fetchPendingUpdateOperation(
   url: (path: string) => string,
   signal: AbortSignal,
 ): Promise<PendingUpdateOperation | null> {
-  const response = await fetcher(url('update-operation/pending'), { method: 'GET', signal })
+  const response = await fetcher(url('update-operation/pending'), {
+    method: 'GET',
+    signal,
+  })
   if (!response.ok) throw new Error(`pending update operation failed: ${response.status} ${await response.text()}`)
   const payload = (await response.json()) as unknown
   const operation = readRecord(payload)?.operation ?? readRecord(readRecord(payload)?.data)?.operation
   return operation && isRecord(operation) ? parsePendingUpdateOperation(operation) : null
-}
-
-export async function sendRecoveryReceipt(
-  fetcher: Fetcher,
-  url: (path: string) => string,
-  receipt: RuntimeRecoveryReceipt,
-  signal: AbortSignal,
-): Promise<RecoveryReceiptAcknowledgement> {
-  const response = await fetcher(url('recovery-receipt'), {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify(receipt),
-    signal,
-  })
-  const text = await response.text()
-  let payload: unknown = null
-  if (text) {
-    try {
-      payload = JSON.parse(text)
-    } catch {
-      payload = null
-    }
-  }
-  if (!response.ok && response.status !== 409) {
-    throw new Error(`recovery receipt failed: ${response.status} ${text}`)
-  }
-  const acknowledgement = parseRecoveryReceiptAcknowledgement(payload)
-  if (response.status === 409 || acknowledgement.status === 'retryable') {
-    const error = new Error(
-      `recovery receipt is retryable: ${acknowledgement.reason ?? 'server not ready'}`,
-    ) as Error & { retryable?: boolean }
-    error.retryable = true
-    throw error
-  }
-  return acknowledgement
 }
 
 export interface RecoveryStopFailure {
@@ -105,16 +69,6 @@ function parsePendingUpdateOperation(value: Record<string, unknown>): PendingUpd
         ...(typeof item.status === 'string' ? { status: item.status } : {}),
       }
     }),
-  }
-}
-
-function parseRecoveryReceiptAcknowledgement(value: unknown): RecoveryReceiptAcknowledgement {
-  if (!isRecord(value) || typeof value.appliedReceiptId !== 'string' || typeof value.status !== 'string')
-    throw new Error('recovery receipt returned a malformed acknowledgement')
-  return {
-    appliedReceiptId: value.appliedReceiptId,
-    status: value.status,
-    ...(typeof value.reason === 'string' ? { reason: value.reason } : {}),
   }
 }
 

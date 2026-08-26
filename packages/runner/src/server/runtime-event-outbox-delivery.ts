@@ -1,38 +1,10 @@
-import { RuntimeEventDeliveryError, type AgentSessionRuntimeEventReceipt } from './connection.js'
-import { runtimeEventDeliveryKey, runtimeEventSchedulingKey } from './runtime-event-outbox-identity.js'
+import type { AgentSessionRuntimeEventReceipt } from './connection.js'
+import { runtimeEventSchedulingKey } from './runtime-event-outbox-identity.js'
 import type { RuntimeEventAcknowledgementPolicy, RuntimeEventRecord } from './runtime-event-outbox-ports.js'
 
 export interface InternalRecord extends RuntimeEventRecord {
   readonly sequence: number
   readonly enqueuedAt: string
-}
-
-const DETERMINISTIC_BINDING_REFUSAL_409_CODES = new Set([
-  'conflict',
-  'agent_session_changed',
-  'workflow_agent_session_changed',
-  'workflow_runtime_binding_rejected',
-  'workflow_cleanup_binding_rejected',
-])
-const DETERMINISTIC_BINDING_REFUSAL_400_CODES = new Set([
-  'validation',
-  'runtime_session_id_required',
-  'session_runtime_identity_required',
-  'session_runtime_task_identity_invalid',
-  'workflow_runtime_binding_required',
-])
-
-export function isDeterministicBindingRefusal(error: unknown): error is RuntimeEventDeliveryError {
-  if (!(error instanceof RuntimeEventDeliveryError)) return false
-  if (error.status === 409) return DETERMINISTIC_BINDING_REFUSAL_409_CODES.has(error.code ?? '')
-  if (error.status === 400) return DETERMINISTIC_BINDING_REFUSAL_400_CODES.has(error.code ?? '')
-  return false
-}
-
-export function bindingReconcileDeliveryKey(batch: readonly InternalRecord[]): string | null {
-  const first = batch[0]
-  if (!first || first.producerFamily !== 'binding-reconcile') return null
-  return runtimeEventDeliveryKey(first)
 }
 
 interface GroupSnapshot {

@@ -7,16 +7,14 @@ import type {
 } from '../core/types.js'
 import type { ManagerExecutionGrantResponse } from '../core/types.js'
 import { ManagerExecutionBoundary, type ManagerExecutionBoundaryOptions } from './manager-execution-boundary.js'
-import type { RuntimeResult, RuntimeTurnResult, OpenCodeRuntime } from './opencode/index.js'
-import type { PiResult, PiRuntime, PiTurnResult } from './pi/index.js'
-import type { RecoverableRuntime, RuntimeTurnRecoveryResult } from './binding-recovery.js'
-import { projectPiTurnToWorkItemResult, projectTurnToWorkItemResult } from './agent-job-turn.js'
+import type { OpenCodeRuntime } from './opencode/index.js'
+import type { PiRuntime } from './pi/index.js'
 import type { FollowupTarget, FollowupTargetResolution, SessionTarget } from '../server/session-target.js'
 import type { ServerConnection } from '../server/connection.js'
 import type { HostTaskLogDeps } from './host-task-log.js'
 import type { TerminalTaskLogDeliveryStore } from './terminal-task-log-delivery.js'
 import type { AwaitingAckEntry, InFlightEntry } from './host-state.js'
-import { workKey } from './work-result-journal.js'
+import { workKey } from './work-key.js'
 
 export type RuntimeKind = 'opencode' | 'pi'
 
@@ -64,11 +62,6 @@ export function gateManagerCapabilities(state: RunnerRegistration, openCodeReady
 
 export function usesOpenCode(work: DispatchWorkItem): boolean {
   return runtimeKindForWork(work) === 'opencode'
-}
-
-export function isAgentRecoveryDispatch(work: DispatchWorkItem): boolean {
-  const recovery = work.agentRecovery
-  return Boolean(recovery && recovery.runtime.trim() && recovery.runtimeSessionId.trim())
 }
 
 export function openCodeOwners(
@@ -131,7 +124,6 @@ export interface RunnerPollReport {
 
 export function buildRunnerPollReport(input: {
   processGeneration: string
-  durableStarted: readonly string[]
   inFlight: Iterable<string>
   awaitingAck: Iterable<string>
   runtimeReadiness: RuntimeReadinessWitness[]
@@ -141,7 +133,7 @@ export function buildRunnerPollReport(input: {
 }): RunnerPollReport {
   return {
     processGeneration: input.processGeneration,
-    inFlight: [...new Set([...input.inFlight, ...input.durableStarted])],
+    inFlight: [...input.inFlight],
     awaitingAck: [...input.awaitingAck],
     runtimeReadiness: input.runtimeReadiness,
     connectionId: input.connectionId,
@@ -194,59 +186,6 @@ export function runtimeKindForWork(work: DispatchWorkItem): RuntimeKind | null {
   if (candidate === 'opencode' || candidate === 'mohist/opencode') return 'opencode'
   if (candidate === 'pi' || candidate === 'mohist/pi') return 'pi'
   return null
-}
-
-export function runtimeForKind(
-  kind: RuntimeKind,
-  openCodeRuntime: OpenCodeRuntime | null,
-  piRuntime: PiRuntime | null,
-): RecoverableRuntime | null {
-  if (kind === 'opencode') return openCodeRuntime ? { kind, runtime: openCodeRuntime } : null
-  return piRuntime ? { kind, runtime: piRuntime } : null
-}
-
-export function projectReattachedRuntimeResult(
-  work: DispatchWorkItem,
-  runtimeKind: RuntimeKind,
-  adopted: RuntimeTurnRecoveryResult,
-): WorkItemResult {
-  const model = stringProperty(work.with, 'model') ?? work.agentDefinition?.model ?? null
-  const variant = stringProperty(work.with, 'variant') ?? work.agentDefinition?.variant ?? null
-  if (work.ownerKind === 'agent-job') {
-    return runtimeKind === 'opencode'
-      ? projectTurnToWorkItemResult(adopted as RuntimeResult<RuntimeTurnResult>, runtimeKind, model, variant)
-      : projectPiTurnToWorkItemResult(adopted as PiResult<PiTurnResult>, runtimeKind, model, variant)
-  }
-  if (!adopted.ok) {
-    return {
-      status: 'failed',
-      message: adopted.error.message,
-      error: { code: adopted.error.kind, message: adopted.error.message },
-      exitCode: 1,
-    }
-  }
-  return {
-    status: 'completed',
-    message: 'Agent turn completed after runner restart',
-    output: {
-      kind: runtimeKind,
-      status: 'success',
-      runtimeSessionId: adopted.value.facts.runtimeSessionId,
-      model,
-      variant,
-      text: adopted.value.facts.finalAssistantText,
-      diagnostics: adopted.value.diagnostics.map((diagnostic) => ({
-        code: diagnostic.code,
-        message: diagnostic.message,
-      })),
-    },
-    exitCode: 0,
-  }
-}
-
-function stringProperty(value: Record<string, unknown> | null | undefined, key: string): string | null {
-  const candidate = value?.[key]
-  return typeof candidate === 'string' ? candidate : null
 }
 
 export async function delay(ms: number, signal: AbortSignal): Promise<void> {

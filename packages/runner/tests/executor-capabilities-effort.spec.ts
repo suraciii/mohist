@@ -36,7 +36,10 @@ function makeWork(overrides: Partial<DispatchWorkItem> = {}): DispatchWorkItem {
 
 function makeDeps(openCodeRuntime: unknown): Parameters<typeof buildActionHost>[0] {
   const skillResolver = {
-    resolve: vi.fn(async () => ({ ok: true as const, skills: [] as { name: string; instructions: string }[] })),
+    resolve: vi.fn(async () => ({
+      ok: true as const,
+      skills: [] as { name: string; instructions: string }[],
+    })),
   } as unknown as SkillResolver
   return {
     connection: { runnerId: 'runner-effort' } as unknown as ServerConnection,
@@ -45,7 +48,6 @@ function makeDeps(openCodeRuntime: unknown): Parameters<typeof buildActionHost>[
     openCodeRuntime: openCodeRuntime as OpenCodeRuntime,
     agentSessionRuntimeEventOutbox: null,
     runtimeEventRecordId: () => `rec-${Math.random()}`,
-    bindingRecoveryCoordinator: null,
   }
 }
 
@@ -97,15 +99,25 @@ describe('buildActionHost agent-turn capability forwards the frozen effort', () 
     }
     const host = hostFor(makeWork({ agentDefinition: definition }), runtime)
 
-    const result = await host.agent!.turn({ prompt: 'do', options: { reasoningEffort: 'low' } })
+    const result = await host.agent!.turn({
+      prompt: 'do',
+      options: { reasoningEffort: 'low' },
+    })
 
     expect(result.error).toBeUndefined()
     expect(runTurn).toHaveBeenCalledTimes(1)
     const request = (runTurn.mock.calls[0] as unknown as [unknown] | undefined)?.[0] as {
-      options?: { model?: unknown; variant?: string | null; reasoningEffort?: string | null }
+      options?: {
+        model?: unknown
+        variant?: string | null
+        reasoningEffort?: string | null
+      }
     }
     // The frozen definition wins over the caller option, exactly like variant.
-    expect(request.options?.model).toEqual({ providerID: 'openai', modelID: 'gpt-5.5' })
+    expect(request.options?.model).toEqual({
+      providerID: 'openai',
+      modelID: 'gpt-5.5',
+    })
     expect(request.options?.variant).toBe('balanced')
     expect(request.options?.reasoningEffort).toBe('high')
   })
@@ -114,7 +126,10 @@ describe('buildActionHost agent-turn capability forwards the frozen effort', () 
     const { runtime, runTurn } = fakeOpenCodeRuntime()
     const host = hostFor(makeWork(), runtime)
 
-    const result = await host.agent!.turn({ prompt: 'do', options: { reasoningEffort: 'low' } })
+    const result = await host.agent!.turn({
+      prompt: 'do',
+      options: { reasoningEffort: 'low' },
+    })
 
     expect(result.error).toBeUndefined()
     const request = (runTurn.mock.calls[0] as unknown as [unknown] | undefined)?.[0] as {

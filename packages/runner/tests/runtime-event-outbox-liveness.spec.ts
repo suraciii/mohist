@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { RuntimeEventDeliveryError, type AgentSessionRuntimeEventReceipt } from '../src/server/connection.js'
+import type { AgentSessionRuntimeEventReceipt } from '../src/server/connection.js'
 import { RUNTIME_EVENT_OUTBOX_FILE, type RuntimeEventRecord } from '../src/server/runtime-event-outbox.js'
 import {
   RecordingFileSystem,
@@ -33,9 +33,6 @@ describe('AgentSessionRuntimeEventOutbox delivery liveness', () => {
           if (!first) return []
           const key = first.runtimeSessionId
           attempts.set(key, (attempts.get(key) ?? 0) + 1)
-          if (first.producerFamily === 'binding-reconcile') {
-            throw new RuntimeEventDeliveryError('runtime events', 409, 'conflict', '')
-          }
           if (first.id === 'historical-input') return records.map(() => [])
           if (first.id === 'live-input') {
             return records.map((record) => [
@@ -63,19 +60,8 @@ describe('AgentSessionRuntimeEventOutbox delivery liveness', () => {
       id: 'live-input',
       target: { kind: 'workflow', projectId: 'proj-1', workflowRunId: 'live-run', sessionName: 'build' },
     })
-    const refused = (id: string): RuntimeEventRecord => ({
-      id,
-      producerFamily: 'binding-reconcile',
-      target: { kind: 'session', sessionId: 'historical-session' },
-      runtimeSessionId: 'historical-runtime',
-      work: null,
-      event: { type: 'session.activity', payload: { activity: 'idle' } },
-      acknowledgementPolicy: 'successful-response',
-    })
 
     await outbox.enqueueProducedFactBatch([
-      refused('refused-1'),
-      refused('refused-2'),
       historicalInput,
       liveInput,
       followupTerminal({
@@ -99,7 +85,6 @@ describe('AgentSessionRuntimeEventOutbox delivery liveness', () => {
       agentTurnId: 'live-turn',
     })
     expect(outbox.snapshot().map((record) => record.id)).toEqual(['retryable-live-neighbor'])
-    expect(attempts.get('historical-runtime')).toBe(3)
     await expect(awaitReceipt.call(outbox, historicalInput.id)).rejects.toMatchObject({
       classification: 'already-consumed',
       recordId: 'historical-input',

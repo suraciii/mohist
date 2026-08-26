@@ -120,19 +120,6 @@ export interface AgentSessionStartup {
   agentName?: string | null
 }
 
-/**
- * Server-recorded runtime binding attached to an unresolved-agent
- * redelivery. Its presence marks the dispatch as a recovery probe: the
- * runner must reconcile the recorded execution, never submit a new
- * prompt. Mirrors `WorkDispatch.AgentRecovery` on the server.
- */
-export interface AgentRecoveryBinding {
-  runtime: string
-  runtimeSessionId: string
-  agentSessionId?: string | null
-  agentTurnId?: string | null
-}
-
 export interface ManagerExecutionGrantResponse {
   managementCredential: string
   replyCredential: string
@@ -201,12 +188,6 @@ export type WorkDispatchResponse = {
    * `WorkDispatch.InitialTurnId` on the server.
    */
   initialTurnId?: string | null
-  /**
-   * Server-recorded runtime binding for unresolved-agent redelivery.
-   * Present only on recovery dispatches; marks the work as a
-   * reconciliation probe. Mirrors `WorkDispatch.AgentRecovery`.
-   */
-  agentRecovery?: AgentRecoveryBinding | null
   /**
    * Content-derived revision of the runner catalog the server froze the
    * dispatch snapshot against. The runner rejects a work whose revision
@@ -315,7 +296,6 @@ export interface DispatchWorkItem {
    * `WorkDispatch.InitialTurnId` on the server.
    */
   initialTurnId?: string | null
-  agentRecovery?: AgentRecoveryBinding | null
   /**
    * Frozen capability revision the snapshot was admitted against.
    * The runner rejects the work when this differs from its current
@@ -341,8 +321,17 @@ export interface AddTaskInput {
   expect?: JsonObject | null
 }
 
+export interface AgentExecutionBinding {
+  agentSessionId: string
+  agentTurnId: string | null
+  runtime: 'opencode' | 'pi'
+  runtimeSessionId: string | null
+}
+
 export interface WorkItemResult {
   status: string
+  /** Runner-private execution identity forwarded beside the terminal report. */
+  agentBinding?: AgentExecutionBinding
   message?: string | null
   error?: ActionError | null
   /**
@@ -391,7 +380,10 @@ export type ActionResult = ({ output: JsonObject | null; error?: never } | { out
    * Actions populate `finalAssistantText`; the executor uses it as the
    * text corpus for `_output` markers.
    */
-  turnFact?: { finalAssistantText?: string | null } | null
+  turnFact?: {
+    finalAssistantText?: string | null
+    agentBinding?: AgentExecutionBinding
+  } | null
 }
 
 export interface RunnerOptions {

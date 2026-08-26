@@ -5,7 +5,6 @@ import type { RunnerControlWebSocketClient } from '../server/runner-control-webs
 import type { WorkspaceRegistry, NamedWorkspaceRegistry } from './workspace-registry.js'
 import { createNamedWorkspaceCleanupLoop, type NamedWorkspaceReclaimProbe } from './named-workspace-cleanup.js'
 import type { ConvergenceBackstop } from './cleanup-convergence.js'
-import type { BindingConvergence } from './binding-convergence.js'
 import type { CleanupLoop } from './cleanup-loop.js'
 import type { OpenCodeRuntime } from './opencode/index.js'
 import { formatDirectoryReclaimSummary } from './opencode/reclaim-summary.js'
@@ -25,7 +24,6 @@ export interface HostCleanupDeps {
   readonly namedCleanupLoop: ReturnType<typeof createNamedWorkspaceCleanupLoop>
   readonly cleanupLoop: CleanupLoop
   readonly convergence: ConvergenceBackstop
-  readonly bindingConvergence: BindingConvergence
   readonly openCodeRuntime: () => OpenCodeRuntime | null
 }
 
@@ -38,20 +36,9 @@ export function createHostCleanup(deps: HostCleanupDeps) {
       await deps.convergence.runOnce(signal)
     } catch (error) {
       // Convergence is best-effort; the next tick or reconnect retries.
-      cleanupLog.error('workspace cleanup convergence pass failed', { exception: error })
-    }
-  }
-
-  async function runBindingConvergenceOnce(signal: AbortSignal): Promise<void> {
-    if (
-      typeof (deps.connection as { listAgentSessionsForReconcile?: unknown }).listAgentSessionsForReconcile !==
-      'function'
-    )
-      return
-    try {
-      await deps.bindingConvergence.runOnce(signal)
-    } catch (error) {
-      log.error('agent-session binding convergence pass failed', { exception: error, session: 'binding' })
+      cleanupLog.error('workspace cleanup convergence pass failed', {
+        exception: error,
+      })
     }
   }
 
@@ -74,7 +61,9 @@ export function createHostCleanup(deps: HostCleanupDeps) {
       const legacyAgentWorkspaces = join(deps.runnerRoot, 'agent-workspaces')
       if (exists(legacyAgentWorkspaces)) {
         await deleteDirectory(legacyAgentWorkspaces)
-        cleanupLog.info('removed retired agent-workspaces directory', { path: legacyAgentWorkspaces })
+        cleanupLog.info('removed retired agent-workspaces directory', {
+          path: legacyAgentWorkspaces,
+        })
       }
       const runtime = deps.openCodeRuntime()
       let blockedPaths = new Set<string>()
@@ -86,11 +75,15 @@ export function createHostCleanup(deps: HostCleanupDeps) {
             return entry?.phase === 'eligible' || entry?.phase === 'stuck'
           })
         } catch (error) {
-          cleanupLog.error('workspace cleanup runtime reclamation failed', { exception: error })
+          cleanupLog.error('workspace cleanup runtime reclamation failed', {
+            exception: error,
+          })
           return
         }
         if (reclaim.candidates > 0)
-          cleanupLog.info('workspace reclaim completed', { reason: formatDirectoryReclaimSummary(reclaim) })
+          cleanupLog.info('workspace reclaim completed', {
+            reason: formatDirectoryReclaimSummary(reclaim),
+          })
         blockedPaths = new Set(reclaim.blockedDirectories)
       }
       const policy = await deps.connection.fetchConfig(signal)
@@ -109,7 +102,9 @@ export function createHostCleanup(deps: HostCleanupDeps) {
           })
         }
       } catch (error) {
-        cleanupLog.warn('named workspace reclaim probe failed', { exception: error })
+        cleanupLog.warn('named workspace reclaim probe failed', {
+          exception: error,
+        })
       }
       if (deps.namedWorkspaceRegistry.list().some((entry) => entry.phase === 'eligible')) {
         const namedResult = await deps.namedCleanupLoop.runOnce(policy, signal, blockedPaths)
@@ -148,13 +143,18 @@ export function createHostCleanup(deps: HostCleanupDeps) {
     const alive = await deps.control.probeLiveness(signal).catch(() => false)
     if (signal.aborted) return
     if (alive) return
-    log.warn('dispatch liveness probe failed; forcing reconnect', { reason: 'liveness' })
+    log.warn('dispatch liveness probe failed; forcing reconnect', {
+      reason: 'liveness',
+    })
     try {
       await deps.control.forceReconnect(signal)
     } catch (error) {
-      log.error('forceReconnect failed', { exception: error, reason: 'reconnect' })
+      log.error('forceReconnect failed', {
+        exception: error,
+        reason: 'reconnect',
+      })
     }
   }
 
-  return { runConvergenceOnce, runBindingConvergenceOnce, runCleanupOnce, runSelfCheck }
+  return { runConvergenceOnce, runCleanupOnce, runSelfCheck }
 }

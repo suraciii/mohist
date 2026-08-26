@@ -8,5 +8,4 @@ import type { ShutdownInFlightEntry } from './host-update-shutdown.js'
  */
 export interface RunnerHostShutdown {
   shutdownInFlight(): Promise<void>
-  persistInterrupted(entry: ShutdownInFlightEntry, operationId: string, deliveryBudgetMs?: number): Promise<boolean>
 }

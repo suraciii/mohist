@@ -9,17 +9,12 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   AlreadyConsumedRuntimeEventError,
-  isDeterministicBindingRefusal,
   nextTemporaryFilePath,
   RUNTIME_EVENT_OUTBOX_FILE,
   runtimeEventDeliveryKey,
   type RuntimeEventRecord,
 } from '../src/server/runtime-event-outbox.js'
-import {
-  RuntimeEventDeliveryError,
-  type AgentSessionRuntimeEventReceipt,
-  type ServerConnection,
-} from '../src/server/connection.js'
+import type { AgentSessionRuntimeEventReceipt, ServerConnection } from '../src/server/connection.js'
 import { createServerRuntimeEventDelivery } from '../src/server/runtime-event-delivery.js'
 import { withTestRunnerResources } from './support/test-resources.js'
 import { capturedLogs } from './support/logger-test.js'
@@ -193,6 +188,53 @@ describe('AgentSessionRuntimeEventOutbox — durable storage', () => {
     expect(second.outbox.snapshot()).toEqual([])
   })
 
+  it('restart drops legacy binding reconciliation records without replaying them', async () => {
+    const fileSystem = new RecordingFileSystem()
+    fileSystem.textStore.set(
+      RUNTIME_EVENT_OUTBOX_FILE,
+      JSON.stringify({
+        version: 1,
+        entries: [
+          {
+            id: 'legacy-reconcile',
+            producerFamily: 'binding-reconcile',
+            target: { kind: 'session', sessionId: 'session-1' },
+            runtimeSessionId: 'runtime-old',
+            runtime: null,
+            sessionTurnId: null,
+            work: null,
+            event: { type: 'session.activity', payload: { activity: 'idle' } },
+            acknowledgementPolicy: 'successful-response',
+            sequence: 1,
+            enqueuedAt: '2026-01-01T00:00:00.000Z',
+          },
+          {
+            ...inputRecord({ id: 'current-input' }),
+            sequence: 2,
+            enqueuedAt: '2026-01-01T00:00:01.000Z',
+          },
+        ],
+      }),
+    )
+    const delivered: string[] = []
+    const { outbox } = makeOutbox({
+      fileSystem,
+      deliver: {
+        async send(record) {
+          delivered.push(record.id)
+          return []
+        },
+      },
+    })
+
+    await outbox.load()
+    await outbox.kick()
+
+    expect(outbox.ready()).toBe(true)
+    expect(outbox.snapshot().map((record) => record.id)).toEqual(['current-input'])
+    expect(delivered).toEqual(['current-input'])
+  })
+
   it('serialization refuses malformed snapshot JSON and never replaces it with empty state', async () => {
     const fileSystem = new RecordingFileSystem()
     fileSystem.textStore.set(RUNTIME_EVENT_OUTBOX_FILE, '{ not json')
@@ -286,41 +328,6 @@ describe('AgentSessionRuntimeEventOutbox — acknowledgement policies', () => {
 
     await expect(awaitReceipt.call(outbox, 'delivery-1')).rejects.toThrow(/matching Server receipt/)
     expect(outbox.snapshot().map((record) => record.id)).toEqual(['delivery-1'])
-  })
-
-  it('classifies only the explicit deterministic binding refusal allowlist', async () => {
-    const deterministic = [
-      [409, 'conflict'],
-      [409, 'agent_session_changed'],
-      [409, 'workflow_agent_session_changed'],
-      [409, 'workflow_runtime_binding_rejected'],
-      [409, 'workflow_cleanup_binding_rejected'],
-      [400, 'validation'],
-      [400, 'runtime_session_id_required'],
-      [400, 'session_runtime_identity_required'],
-      [400, 'session_runtime_task_identity_invalid'],
-      [400, 'workflow_runtime_binding_required'],
-    ] as const
-    const retryable = [
-      [400, 'unknown'],
-      [401, 'unauthorized'],
-      [403, 'forbidden'],
-      [404, 'not_found'],
-      [408, 'timeout'],
-      [409, 'unknown'],
-      [429, 'rate_limited'],
-      [500, 'internal_error'],
-    ] as const
-
-    for (const [status, code] of deterministic)
-      expect(isDeterministicBindingRefusal(new RuntimeEventDeliveryError('runtime events', status, code, ''))).toBe(
-        true,
-      )
-
-    for (const [status, code] of retryable)
-      expect(isDeterministicBindingRefusal(new RuntimeEventDeliveryError('runtime events', status, code, ''))).toBe(
-        false,
-      )
   })
 
   it('matching-receipt removes the head only when the response carries the submitted type', async () => {
@@ -597,149 +604,6 @@ describe('AgentSessionRuntimeEventOutbox — managed-sequence FIFO', () => {
     await outbox.kick()
     expect(seen).toEqual(['ses_stale'])
     expect(outbox.snapshot()).toHaveLength(1)
-  })
-
-  it('settles every pending record for one binding after exactly three refusals and logs once after persistence', async () => {
-    await withTestRunnerResources(async () => {
-      const attempts = new Map<string, number>()
-      const { outbox, fileSystem } = makeOutbox({
-        boundedConcurrency: 1,
-        deliver: {
-          send: async () => [],
-          sendBatch: async (records) => {
-            const key = records[0]?.runtimeSessionId ?? 'unknown'
-            attempts.set(key, (attempts.get(key) ?? 0) + 1)
-            if (key === 'runtime-refused') throw new RuntimeEventDeliveryError('runtime events', 409, 'conflict', '')
-            throw new Error('transient other binding failure')
-          },
-        },
-      })
-      await outbox.load()
-      const record = (id: string, runtimeSessionId = 'runtime-refused'): RuntimeEventRecord => ({
-        id,
-        producerFamily: 'binding-reconcile',
-        target: { kind: 'session', sessionId: 'session-refused' },
-        runtimeSessionId,
-        work: null,
-        event: { type: 'session.activity', payload: { activity: 'idle' } },
-        acknowledgementPolicy: 'successful-response',
-      })
-      await outbox.enqueueProducedFactBatch([
-        record('refused-1'),
-        record('refused-2'),
-        record('other', 'runtime-other'),
-      ])
-
-      for (let i = 0; i < 8 && outbox.snapshot().some((entry) => entry.runtimeSessionId === 'runtime-refused'); i += 1)
-        await outbox.kick()
-
-      expect(attempts.get('runtime-refused')).toBe(3)
-      expect(outbox.snapshot().map((entry) => entry.id)).toEqual(['other'])
-      const persisted = JSON.parse(fileSystem.body(RUNTIME_EVENT_OUTBOX_FILE) ?? '{}') as {
-        entries: Array<{ id: string }>
-      }
-      expect(persisted.entries.map((entry) => entry.id)).toEqual(['other'])
-      expect(capturedLogs().filter((entry) => entry.message.includes('terminal settlement'))).toHaveLength(1)
-    })
-  })
-
-  it('keeps refusal counters isolated and resets them after a successful response or transient failure', async () => {
-    const attempts = new Map<string, number>()
-    const { outbox } = makeOutbox({
-      boundedConcurrency: 1,
-      deliver: {
-        send: async (record) => {
-          const key = record.runtimeSessionId
-          const count = (attempts.get(key) ?? 0) + 1
-          attempts.set(key, count)
-          if (key === 'runtime-a' && count === 2) throw new Error('transient')
-          if (key === 'runtime-a' && count < 5)
-            throw new RuntimeEventDeliveryError('runtime events', 409, 'conflict', '')
-          if (key === 'runtime-b' && count <= 3)
-            throw new RuntimeEventDeliveryError('runtime events', 409, 'conflict', '')
-          return [{ type: record.event.type }]
-        },
-      },
-    })
-    await outbox.load()
-    const record = (id: string, runtimeSessionId: string): RuntimeEventRecord => ({
-      id,
-      producerFamily: 'binding-reconcile',
-      target: { kind: 'session', sessionId: id },
-      runtimeSessionId,
-      work: null,
-      event: { type: 'session.activity', payload: {} },
-      acknowledgementPolicy: 'successful-response',
-    })
-    await outbox.enqueueProducedFactBatch([record('a', 'runtime-a'), record('b', 'runtime-b')])
-    for (let i = 0; i < 10 && outbox.snapshot().length > 0; i += 1) await outbox.kick()
-    expect(outbox.snapshot()).toHaveLength(0)
-    expect(attempts.get('runtime-b')).toBe(3)
-    expect(attempts.get('runtime-a')).toBe(5)
-  })
-
-  it('restores refused records when terminal settlement persistence fails', async () => {
-    await withTestRunnerResources(async () => {
-      const fileSystem = new RecordingFileSystem()
-      const { outbox } = makeOutbox({
-        fileSystem,
-        deliver: {
-          send: async () => {
-            throw new RuntimeEventDeliveryError('runtime events', 409, 'conflict', '')
-          },
-        },
-      })
-      await outbox.load()
-      await outbox.enqueueProducedFact({
-        id: 'persist-failure',
-        producerFamily: 'binding-reconcile',
-        target: { kind: 'session', sessionId: 'session-1' },
-        runtimeSessionId: 'runtime-1',
-        work: null,
-        event: { type: 'session.activity', payload: {} },
-        acknowledgementPolicy: 'successful-response',
-      })
-      fileSystem.failNextWrite = () => new Error('disk full')
-      await outbox.kick()
-      await outbox.kick()
-      await outbox.kick()
-
-      expect(outbox.snapshot()).toHaveLength(1)
-      expect(capturedLogs().filter((entry) => entry.message.includes('terminal settlement'))).toHaveLength(0)
-    })
-  })
-
-  it('delivers queued reconciliation facts separately for each runtime binding', async () => {
-    const batches: string[][] = []
-    const { outbox } = makeOutbox({
-      deliver: {
-        async send() {
-          throw new Error('single-record delivery should not be used')
-        },
-        async sendBatch(records) {
-          batches.push(records.map((record) => record.runtimeSessionId))
-          const runtimeSessionId = records[0]?.runtimeSessionId
-          return runtimeSessionId === 'runtime-current' ? records.map((record) => [{ type: record.event.type }]) : []
-        },
-      },
-    })
-    await outbox.load()
-    const reconciliationRecord = (id: string, runtimeSessionId: string): RuntimeEventRecord => ({
-      id,
-      producerFamily: 'binding-reconcile',
-      target: { kind: 'session', sessionId: 'session-1' },
-      runtimeSessionId,
-      work: null,
-      event: { type: 'session.activity', payload: { activity: 'idle' } },
-      acknowledgementPolicy: 'successful-response',
-    })
-
-    await outbox.enqueueProducedFact(reconciliationRecord('old', 'runtime-old'))
-    await outbox.enqueueProducedFact(reconciliationRecord('current', 'runtime-current'))
-    await outbox.kick()
-
-    expect(batches).toEqual([['runtime-old'], ['runtime-current']])
-    expect(outbox.snapshot()).toHaveLength(0)
   })
 
   it('partitions persisted Workflow facts by the complete immutable execution identity', async () => {
