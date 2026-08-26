@@ -401,7 +401,13 @@ public sealed class DispatchService : IScopedService
         if (run is null)
             return (WorkflowOwnerKey(workflowRunId), null, ReserveSlot: true);
         if (run.HasUnresolvedAgentResult())
-            return await RenderUnresolvedAgentRecoveryAsync(run, workflowRunId, runnerId, reportedWorkKeys, ct);
+            return await RenderUnresolvedAgentRecoveryAsync(
+                run,
+                workflowRunId,
+                runnerId,
+                processGeneration,
+                reportedWorkKeys,
+                ct);
 
         var activeWork = run.CurrentActiveWorkFor(runnerId);
         if (activeWork is null)
@@ -463,6 +469,7 @@ public sealed class DispatchService : IScopedService
         WorkflowRun run,
         string workflowRunId,
         string runnerId,
+        string processGeneration,
         IReadOnlySet<string> reportedWorkKeys,
         CancellationToken ct)
     {
@@ -480,6 +487,7 @@ public sealed class DispatchService : IScopedService
             return (null, null, ReserveSlot: false);
         var activeWork = run.CurrentActiveWorkFor(runnerId);
         if (activeWork is not { IsTask: true }
+            || !string.Equals(activeWork.ProcessGeneration, processGeneration, StringComparison.Ordinal)
             || !string.Equals(activeWork.TaskRunId, settlementTask.Task.Id, StringComparison.Ordinal)
             || !string.Equals(settlement.RunnerId, runnerId, StringComparison.Ordinal))
         {

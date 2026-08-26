@@ -267,6 +267,64 @@ public partial class DispatchServiceReconciliationSpecs : Mohist.Server.SpecTest
     }
 
     [Fact]
+    public async Task Redelivery_UnresolvedAgentWork_RequiresMatchingProcessGenerationWithoutReservingCapacity()
+    {
+        await ClearBacklogAsync();
+        var prefix = $"recovery-generation-{Guid.NewGuid():N}";
+        var projectId = $"{prefix}-project";
+        var runnerId = $"{prefix}-runner";
+        const string owningGeneration = "runner-process-generation-g1";
+        const string replacementGeneration = "runner-process-generation-g2";
+        var runner = Grains.GetGrain<IRunnerGrain>(runnerId);
+        var runnerInfo = new RunnerInfo(runnerId, ["spec/*"], "test-host", projectId);
+        await runner.RegisterAsync(runnerInfo, owningGeneration);
+        await runner.UpdateAsync(1);
+
+        var recoveryWorkflowId = $"{prefix}-recovery";
+        var recoveryWorkflow = Grains.GetGrain<IWorkflowGrain>(recoveryWorkflowId);
+        await SeedWorkflowTemplateAsync(
+            recoveryWorkflowId,
+            SingleStage(tasks: [new TaskDefinition("agent", "Agent", "mohist/pi")], checks: []),
+            projectId);
+        await recoveryWorkflow.StartAsync(TestInput(projectId));
+        var first = Assert.Single((await Dispatch.PollAsync(
+            runnerId,
+            new RunnerPollRequest([], [], ProcessGeneration: owningGeneration))).Dispatches);
+        Assert.Equal(WorkReportVerdict.Accepted, await recoveryWorkflow.BindAgentExecutionAsync(new AgentExecutionBinding(
+            first.TaskRunId!,
+            first.WorkId,
+            runnerId,
+            "session-generation",
+            "turn-generation",
+            "pi",
+            "/pi/sessions/spec-generation")));
+        Assert.Equal(WorkReportVerdict.Accepted, await recoveryWorkflow.ObserveAgentRunnerDisconnectedAsync(runnerId));
+
+        var owningPoll = await Dispatch.PollAsync(
+            runnerId,
+            new RunnerPollRequest([], [], ProcessGeneration: owningGeneration));
+        var recovery = Assert.Single(owningPoll.Dispatches);
+        Assert.Equal(recoveryWorkflowId, recovery.WorkflowRunId);
+        Assert.Equal(first.WorkId, recovery.WorkId);
+        Assert.NotNull(recovery.AgentRecovery);
+
+        await runner.RegisterAsync(runnerInfo, replacementGeneration);
+
+        var freshWorkflowId = $"{prefix}-fresh";
+        var freshWorkflow = Grains.GetGrain<IWorkflowGrain>(freshWorkflowId);
+        await SeedWorkflowTemplateAsync(freshWorkflowId, SingleStage(checks: []), projectId);
+        await freshWorkflow.StartAsync(TestInput(projectId));
+
+        var recoveryKey = WorkKey(recoveryWorkflowId, first.WorkId);
+        var replacementPoll = await Dispatch.PollAsync(
+            runnerId,
+            new RunnerPollRequest([recoveryKey], [], ProcessGeneration: replacementGeneration));
+        var fresh = Assert.Single(replacementPoll.Dispatches);
+        Assert.Equal(freshWorkflowId, fresh.WorkflowRunId);
+        Assert.Null(fresh.AgentRecovery);
+    }
+
+    [Fact]
     public async Task Redelivery_UnresolvedAgentWork_RequiresFullRuntimeBinding()
     {
         var workflow = await StartWorkflowAsync(SingleStage(
