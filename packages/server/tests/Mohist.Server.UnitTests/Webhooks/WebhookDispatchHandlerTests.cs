@@ -1,3 +1,4 @@
+using Mohist.Server.UnitTests.Support;
 using System.Net;
 using System.Security.Cryptography;
 using System.Text;
@@ -226,8 +227,7 @@ public sealed class WebhookDispatchHandlerTests
             var connection = new SqliteConnection("Data Source=:memory:");
             await connection.OpenAsync();
             var options = new DbContextOptionsBuilder<MohistDbContext>().UseSqlite(connection).Options;
-            await using var context = new MohistDbContext(options);
-            await context.Database.EnsureCreatedAsync();
+            SqliteSchemaTemplate.CopyModelSchemaTo(connection);
             return new TestDatabase(connection, options);
         }
 

@@ -1,3 +1,4 @@
+using Mohist.Server.UnitTests.Support;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Time.Testing;
@@ -33,10 +34,7 @@ public sealed class GitHubWriteBackFailureStoreTests
         var options = new DbContextOptionsBuilder<MohistDbContext>()
             .UseSqlite(connection)
             .Options;
-        using (var db = new MohistDbContext(options))
-        {
-            db.Database.EnsureCreated();
-        }
+        SqliteSchemaTemplate.CopyModelSchemaTo(connection);
         return new TestDatabase(connection, options);
     }
 
