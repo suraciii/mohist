@@ -191,7 +191,7 @@ public sealed partial class WorkflowGrainStateSaveFailureSpecs
         await setup.OnActivateAsync(CancellationToken.None);
         await setup.EnsureStartedAsync(context);
         await setup.AssignWorkerAsync(workerId);
-        var workItem = await setup.ClaimNextAsync(workerId);
+        var workItem = await setup.ClaimNextAsync(workerId, "test-generation");
         Assert.NotNull(workItem);
         var workId = workItem!.Id!;
 
@@ -347,7 +347,7 @@ public sealed partial class WorkflowGrainStateSaveFailureSpecs
     {
         await grain.EnsureStartedAsync(new WorkflowIssueContext(projectId, 1, null));
         await grain.AssignWorkerAsync(workerId);
-        var work = await grain.ClaimNextAsync(workerId);
+        var work = await grain.ClaimNextAsync(workerId, "test-generation");
         Assert.NotNull(work);
         var run = await store.LoadAsync(workflowRunId);
         var task = Assert.Single(

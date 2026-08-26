@@ -218,7 +218,7 @@ public abstract class GenericAgentSessionTranscriptAxisTestSupport : IAsyncLifet
 
         var claim = await _fixture.Grains
             .GetGrain<IAgentJobGrain>(agentJobId)
-            .ClaimNextAsync(runnerId);
+            .ClaimNextAsync(runnerId, "test-generation");
         var claimed = Assert.IsType<ClaimResult>(claim);
         Assert.Equal(agentJobId, claimed.AgentJobId);
         Assert.Equal(expectedSessionId, claimed.Dispatch.AgentSessionId);

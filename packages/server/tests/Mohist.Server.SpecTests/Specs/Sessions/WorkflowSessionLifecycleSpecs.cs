@@ -243,7 +243,7 @@ public sealed class WorkflowSessionLifecycleSpecs
         var assignment = await workflow.AssignWorkerAsync(_runnerId);
         Assert.Equal(WorkflowAssignmentStatus.Assigned, assignment.Status);
 
-        var work = await workflow.ClaimNextAsync(_runnerId)
+        var work = await workflow.ClaimNextAsync(_runnerId, "test-generation")
             ?? throw new InvalidOperationException("The Agent workflow did not expose claimable work.");
         var workId = work.Id
             ?? throw new InvalidOperationException("Claimed workflow work did not have a work id.");

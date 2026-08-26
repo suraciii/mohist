@@ -26,7 +26,7 @@ public sealed partial class WorkflowGrainStateSaveFailureSpecs
         await setup.OnActivateAsync(CancellationToken.None);
         await setup.EnsureStartedAsync(new WorkflowIssueContext(projectId, 1, null));
         await setup.AssignWorkerAsync(workerId);
-        var work = Assert.IsType<WorkItem>(await setup.ClaimNextAsync(workerId));
+        var work = Assert.IsType<WorkItem>(await setup.ClaimNextAsync(workerId, "test-generation"));
         var taskRunId = Assert.Single((await store.LoadAsync(workflowRunId))!.CurrentStage().Tasks).Id;
         var dbFactory = scope.ServiceProvider.GetRequiredService<IDbContextFactory<MohistDbContext>>();
         await using (var db = await dbFactory.CreateDbContextAsync())

@@ -39,7 +39,8 @@ public sealed class WorkflowRecoveryContinuationSpecs
         Assert.Equal(ReportAck.Accepted, acknowledgement);
 
         var continuation = Assert.IsType<WorkItem>(await workflow.ClaimNextAsync(
-            OrleansL0WorkflowGrainFixture.RecoveryRunnerId));
+            OrleansL0WorkflowGrainFixture.RecoveryRunnerId,
+            "test-generation"));
         Assert.NotEqual(freshWorkId, continuation.Id);
         Assert.Equal(1, continuation.RecoveryRemaining);
         Assert.Equal("${{ vars.agent }}", continuation.With!["options"]!.Value.GetString());

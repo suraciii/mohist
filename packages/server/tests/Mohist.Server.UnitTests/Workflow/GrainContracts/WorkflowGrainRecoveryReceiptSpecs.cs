@@ -325,7 +325,7 @@ public sealed class WorkflowGrainRecoveryReceiptSpecs
         var replacementDispatch = await arrangement.AssignAndClaimAsync();
         Assert.NotNull(replacementDispatch);
         Assert.Equal(replacement.WorkId, replacementDispatch!.Id);
-        Assert.Null(await arrangement.Grain.ClaimNextAsync(arrangement.WorkerId));
+        Assert.Null(await arrangement.Grain.ClaimNextAsync(arrangement.WorkerId, "test-generation"));
 
         var newBinding = new AgentExecutionBinding(
             replacement.Id,
@@ -577,7 +577,7 @@ public sealed class WorkflowGrainRecoveryReceiptSpecs
             TimeProvider);
 
         await arrangement.Grain.AssignWorkerAsync(arrangement.WorkerId);
-        var work = await arrangement.Grain.ClaimNextAsync(arrangement.WorkerId);
+        var work = await arrangement.Grain.ClaimNextAsync(arrangement.WorkerId, "test-generation");
         Assert.NotNull(work);
 
         var run = await RequireRunAsync(arrangement);

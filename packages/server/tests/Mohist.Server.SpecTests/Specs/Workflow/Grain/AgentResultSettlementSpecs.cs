@@ -52,7 +52,7 @@ public sealed partial class AgentResultSettlementSpecs : WorkflowGrainSpecs
         Assert.True(unresolved.HasUnresolvedAgentResult());
         Assert.Null(unresolved.NextWork());
         Assert.Null(unresolved.CurrentPendingWork());
-        Assert.Null(await workflow.ClaimNextAsync(runnerId));
+        Assert.Null(await workflow.ClaimNextAsync(runnerId, "test-generation"));
         var recovery = Assert.Single((await Services.GetRequiredService<DispatchService>()
             .PollAsync(runnerId, new RunnerPollRequest([], []))).Dispatches);
         Assert.Equal(work.WorkId, recovery.WorkId);

@@ -38,7 +38,7 @@ public sealed class WorkflowGrainStageAdvanceSpecs
 
         await ReportPlanAsync(arrangement);
 
-        Assert.Null(await arrangement.Grain.ClaimNextAsync(arrangement.WorkerId));
+        Assert.Null(await arrangement.Grain.ClaimNextAsync(arrangement.WorkerId, "test-generation"));
         Assert.Equal("AwaitingApproval", await arrangement.Grain.GetRunStatusAsync());
     }
 
@@ -104,7 +104,7 @@ public sealed class WorkflowGrainStageAdvanceSpecs
             "wr-advance-empty-complete",
             new WorkflowDefinition([new StageDefinition("build", [], [])]));
 
-        Assert.Null(await arrangement.Grain.ClaimNextAsync(arrangement.WorkerId));
+        Assert.Null(await arrangement.Grain.ClaimNextAsync(arrangement.WorkerId, "test-generation"));
         Assert.Equal("Completed", await arrangement.Grain.GetRunStatusAsync());
     }
 

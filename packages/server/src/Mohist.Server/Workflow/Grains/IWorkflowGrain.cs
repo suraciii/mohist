@@ -25,9 +25,11 @@ public interface IWorkflowGrain : IGrainWithStringKey, IRemindable
     Task<bool> HasIncompleteTaskWithUsesAsync(string uses);
     Task<bool> HasIncompleteTaskByIdAsync(string id);
     Task<WorkflowAssignmentResult> AssignWorkerAsync(string workerId);
-    Task<WorkItem?> ClaimNextAsync(string workerId, string processGeneration = "direct-call-generation");
+    Task<WorkItem?> ClaimNextAsync(string workerId, string processGeneration);
     Task<WorkDispatch?> StoreActiveWorkDispatchAsync(string workerId, string workId, WorkDispatch dispatch);
     Task<ReportAck> FailActiveWorkAsync(string workerId, string message);
+    Task<ReportAck> FailActiveWorkAsync(string workerId, string workId, string processGeneration, string message) =>
+        FailActiveWorkAsync(workerId, message);
     Task<ReportAck> InterruptActiveWorkAsync(string workerId, string reason);
     Task<ReportAck> AbandonActiveWorkAsync(string workerId, string workId, string reason);
     Task<ReportAck> BindAgentExecutionAsync(AgentExecutionBinding binding);

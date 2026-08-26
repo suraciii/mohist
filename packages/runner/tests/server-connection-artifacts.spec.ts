@@ -122,7 +122,7 @@ describe("ServerConnection.uploadArtifact", () => {
 
 describe("ServerConnection.report", () => {
   it("includesArtifactUploadIdsInRequestBody", async () => {
-    fetchMock.mockResolvedValueOnce(mockResponse({ status: 200, body: JSON.stringify({ workflowRunId: "wf-1" }) }))
+    fetchMock.mockResolvedValueOnce(mockResponse({ status: 200, body: JSON.stringify({ verdict: "accepted" }) }))
     const connection = new ServerConnection(options())
 
     const result = await connection.report(
@@ -136,7 +136,7 @@ describe("ServerConnection.report", () => {
       new AbortController().signal,
     )
 
-    expect(result).toMatchObject({ workflowRunId: "wf-1" })
+    expect(result).toMatchObject({ verdict: "accepted" })
     const [, init] = fetchMock.mock.calls[0] as [string, RequestInit]
     expect(init.method).toBe("POST")
     expect(JSON.parse(init.body as string)).toEqual(expect.objectContaining({
@@ -252,7 +252,7 @@ describe("ServerConnection.poll", () => {
     )
     const connection = new ServerConnection(options())
 
-    const item = (await connection.poll(new AbortController().signal))[0]
+    const item = (await connection.poll(new AbortController().signal, { processGeneration: 'test-generation', inFlight: [], awaitingAck: [], admissionReady: false }))[0]
 
     expect(item).not.toBeNull()
     expect(item!.ownerKind).toBe("agent-job")
@@ -283,7 +283,7 @@ describe("ServerConnection.poll", () => {
     )
     const connection = new ServerConnection(options())
 
-    const item = (await connection.poll(new AbortController().signal))[0]
+    const item = (await connection.poll(new AbortController().signal, { processGeneration: 'test-generation', inFlight: [], awaitingAck: [], admissionReady: false }))[0]
 
     expect(item).not.toBeNull()
     expect(item!.ownerKind).toBe("agent-job")
@@ -313,7 +313,7 @@ describe("ServerConnection.poll", () => {
     )
     const connection = new ServerConnection(options())
 
-    const item = (await connection.poll(new AbortController().signal))[0]
+    const item = (await connection.poll(new AbortController().signal, { processGeneration: 'test-generation', inFlight: [], awaitingAck: [], admissionReady: false }))[0]
 
     expect(item).not.toBeNull()
     expect(item!.ownerKind).toBe("workflow")
@@ -344,7 +344,7 @@ describe("ServerConnection.poll", () => {
     )
     const connection = new ServerConnection(options())
 
-    const item = (await connection.poll(new AbortController().signal))[0]
+    const item = (await connection.poll(new AbortController().signal, { processGeneration: 'test-generation', inFlight: [], awaitingAck: [], admissionReady: false }))[0]
 
     expect(item).not.toBeNull()
     expect(item!.ownerKind).toBe("agent-job")
@@ -361,6 +361,7 @@ describe("ServerConnection.buildGitHash", () => {
 
     await connection.connect(
       {
+        processGeneration: "test-generation",
         capabilities: ["spec/*"],
         actionCatalog: { actions: [], tombstones: [] },
         projectId: "project-1",
@@ -384,7 +385,7 @@ describe("ServerConnection.buildGitHash", () => {
     const connection = new ServerConnection(options(), hash)
 
     await connection.heartbeat(
-      { capabilities: ["spec/*"], actionCatalog: { actions: [], tombstones: [] }, projectId: "project-1", coderModels: ["openai/gpt-4"] },
+      { processGeneration: "test-generation", capabilities: ["spec/*"], actionCatalog: { actions: [], tombstones: [] }, projectId: "project-1", coderModels: ["openai/gpt-4"] },
       new AbortController().signal,
     )
 
@@ -399,7 +400,7 @@ describe("ServerConnection.buildGitHash", () => {
     const connection = new ServerConnection(options(), null)
 
     await connection.heartbeat(
-      { capabilities: ["spec/*"], actionCatalog: { actions: [], tombstones: [] }, projectId: "project-1" },
+      { processGeneration: "test-generation", capabilities: ["spec/*"], actionCatalog: { actions: [], tombstones: [] }, projectId: "project-1" },
       new AbortController().signal,
     )
 

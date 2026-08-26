@@ -60,7 +60,7 @@ public sealed class OrleansL0WorkflowGrainFixture : WorkflowGrainFixture
             warmupRunnerId,
             warmupWorkId,
             RecoveryReport(warmupWorkId));
-        if (warmupAck != ReportAck.Accepted || await warmupWorkflow.ClaimNextAsync(warmupRunnerId) is null)
+        if (warmupAck != ReportAck.Accepted || await warmupWorkflow.ClaimNextAsync(warmupRunnerId, "test-generation") is null)
             throw new InvalidOperationException("Recovery continuation warmup failed");
 
         RecoveryFreshWorkId = await PrepareRecoveryWorkflowAsync(
@@ -137,7 +137,7 @@ public sealed class OrleansL0WorkflowGrainFixture : WorkflowGrainFixture
         var assignment = await workflow.AssignWorkerAsync(runnerId);
         if (assignment.Status != WorkflowAssignmentStatus.Assigned)
             throw new InvalidOperationException($"Recovery workflow assignment failed: {assignment.Reason}");
-        var fresh = await workflow.ClaimNextAsync(runnerId)
+        var fresh = await workflow.ClaimNextAsync(runnerId, "test-generation")
             ?? throw new InvalidOperationException("Recovery workflow did not expose its first claim");
         return fresh.Id
             ?? throw new InvalidOperationException("Recovery workflow claim did not carry a work id");

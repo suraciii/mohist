@@ -13,12 +13,12 @@ A Runner restart can currently redeliver work claimed by the previous process, l
 
 ## Capabilities
 
-- `runner-process-generation`: Runner process identity, generation-bound claims, pre-poll closeout of older-generation Running work, and prevention of cross-generation execution redelivery for Workflow and AgentJob owners.
+- `runner-process-generation`: Runner process identity, generation-bound claims, immediate ordinary failure of older-generation Running work before replacement polling, and prevention of cross-generation execution redelivery for Workflow and AgentJob owners.
 - `runner-report-verdicts`: Explicit accepted/refused/outstanding report arbitration, including deterministic duplicate and late-report handling and retry responsibility.
 
 ## Impact
 
 - **Runner protocol:** Registration and poll request contracts under `packages/server/src/Mohist.Server/Api` and `packages/runner/src/server` gain the required process generation; report responses and Runner report handling adopt the explicit verdict contract.
 - **Server lifecycle and dispatch:** `RunnerGrain`, `DispatchService`, claim APIs, registration ordering, presence closeout, and dispatch reconciliation under `packages/server/src/Mohist.Server/Runner` must enforce the current generation before admitting or rendering work.
-- **Owner ledgers:** Workflow assignment/active-work state and AgentJob ledger records must persist the claiming process generation and support idempotent `runner-lost` closeout without changing their existing failure states or recovery policy.
+- **Owner ledgers:** Workflow assignment/active-work state and AgentJob ledger records must persist the claiming process generation and support idempotent `runner-lost` closeout through their ordinary Failed states. Generation replacement does not enter interruption or Unknown recovery.
 - **Tests and operations:** Server SpecTests and Runner tests must cover restart during execution, closeout before the first new-generation poll, no cross-generation redelivery, stable late/duplicate report verdicts, and unchanged same-generation dispatch behavior. No new external dependency is required, but Runner and Server protocol changes must ship together.

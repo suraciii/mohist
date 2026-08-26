@@ -37,18 +37,23 @@ public static partial class RunnerRoutes
             if (req is null)
                 return ApiResults.BadRequest("request body is required");
 
-            var ownerKind = string.IsNullOrWhiteSpace(req.OwnerKind)
-                ? WorkDispatchOwnerKinds.Workflow
-                : req.OwnerKind.Trim().ToLowerInvariant();
+            if (string.IsNullOrWhiteSpace(req.OwnerKind))
+                return ApiResults.BadRequest("ownerKind is required");
+
+            var ownerKind = req.OwnerKind.Trim().ToLowerInvariant();
             if (string.Equals(ownerKind, WorkDispatchOwnerKinds.AgentJob, StringComparison.Ordinal))
             {
                 if (string.IsNullOrWhiteSpace(req.AgentJobId))
                     return ApiResults.BadRequest("agentJobId is required when ownerKind is 'agent-job'");
+                if (!string.IsNullOrWhiteSpace(req.WorkflowRunId))
+                    return ApiResults.BadRequest("workflowRunId is not allowed when ownerKind is 'agent-job'");
             }
             else if (string.Equals(ownerKind, WorkDispatchOwnerKinds.Workflow, StringComparison.Ordinal))
             {
                 if (string.IsNullOrWhiteSpace(req.WorkflowRunId))
                     return ApiResults.BadRequest("workflowRunId is required when ownerKind is 'workflow'");
+                if (!string.IsNullOrWhiteSpace(req.AgentJobId))
+                    return ApiResults.BadRequest("agentJobId is not allowed when ownerKind is 'workflow'");
             }
             else
             {

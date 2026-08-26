@@ -44,7 +44,7 @@ public sealed class WorkflowGrainPauseResumeSpecs
 
         // The completed current task settles, but the paused run hands out no
         // further work.
-        Assert.Null(await arrangement.Grain.ClaimNextAsync(arrangement.WorkerId));
+        Assert.Null(await arrangement.Grain.ClaimNextAsync(arrangement.WorkerId, "test-generation"));
         Assert.Equal("Paused", await arrangement.Grain.GetRunStatusAsync());
     }
 
@@ -81,7 +81,7 @@ public sealed class WorkflowGrainPauseResumeSpecs
         var acknowledgement = await arrangement.ReportFollowUpAsync(task!, "follow-up");
         Assert.Equal(ReportAck.Accepted, acknowledgement);
         Assert.Equal("Paused", await arrangement.Grain.GetRunStatusAsync());
-        Assert.Null(await arrangement.Grain.ClaimNextAsync(arrangement.WorkerId));
+        Assert.Null(await arrangement.Grain.ClaimNextAsync(arrangement.WorkerId, "test-generation"));
 
         await arrangement.Grain.ResumeAsync();
 
@@ -165,7 +165,7 @@ public sealed class WorkflowGrainPauseResumeSpecs
 
         await arrangement.Grain.StopAsync("user-stop");
 
-        Assert.Null(await arrangement.Grain.ClaimNextAsync(arrangement.WorkerId));
+        Assert.Null(await arrangement.Grain.ClaimNextAsync(arrangement.WorkerId, "test-generation"));
     }
 
     [Fact]
@@ -213,7 +213,7 @@ public sealed class WorkflowGrainPauseResumeSpecs
         public async Task<WorkItem?> AssignAndClaimAsync()
         {
             await Grain.AssignWorkerAsync(WorkerId);
-            return await Grain.ClaimNextAsync(WorkerId);
+            return await Grain.ClaimNextAsync(WorkerId, "test-generation");
         }
 
         public async Task<ReportAck> AbandonActiveWorkAsync(WorkItem item, string reason) =>

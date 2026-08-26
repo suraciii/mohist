@@ -244,18 +244,38 @@ public partial class WorkflowGrain
         if (activeWork is null) return ReportAck.Stale;
         if (activeWork.IsTask && _run.CurrentStage().RunningTask?.AgentResultSettlement is not null)
             return ReportAck.Stale;
+        return await FailActiveWorkCoreAsync(activeWork, message);
+    }
 
+    public async Task<ReportAck> FailActiveWorkAsync(
+        string workerId,
+        string workId,
+        string processGeneration,
+        string message)
+    {
+        RejectIfRunReloadRequired();
+        if (_run is null || !_run.IsAssignedTo(workerId)) return ReportAck.Stale;
+        var activeWork = _run.CurrentActiveWorkFor(workerId);
+        if (activeWork is null
+            || !string.Equals(activeWork.WorkId, workId, StringComparison.Ordinal)
+            || !string.Equals(activeWork.ProcessGeneration, processGeneration, StringComparison.Ordinal))
+            return ReportAck.Stale;
+        return await FailActiveWorkCoreAsync(activeWork, message);
+    }
+
+    private async Task<ReportAck> FailActiveWorkCoreAsync(WorkflowActiveWork activeWork, string message)
+    {
         var now = Now();
         IReadOnlyList<WorkflowEvent> events;
         string? terminalWorkId = null;
         if (activeWork.IsTask)
         {
             terminalWorkId = activeWork.WorkId;
-            events = _run.FailTask(new TaskResult("failed", message), now);
+            events = _run!.FailTask(new TaskResult("failed", message), now);
         }
         else if (activeWork.IsChecks)
         {
-            events = _run.FailRunningChecks(message, now);
+            events = _run!.FailRunningChecks(message, now);
         }
         else
         {
@@ -263,7 +283,6 @@ public partial class WorkflowGrain
         }
 
         if (events.Count == 0) return ReportAck.Stale;
-
         await CommitAsync(events);
         if (terminalWorkId is not null)
             await DeleteSnapshotBestEffortAsync(terminalWorkId);

@@ -420,7 +420,7 @@ public sealed class WorkflowGrainArtifactBindingSpecs
             tasks ?? [new("task-1", "Task 1", "spec/task", Artifacts: declaredArtifacts)]);
         var arrangement = await WorkflowGrainArrangement.CreateAsync(_fixture, runId, definition, TimeProvider);
         await arrangement.Grain.AssignWorkerAsync(arrangement.WorkerId);
-        var work = await arrangement.Grain.ClaimNextAsync(arrangement.WorkerId);
+        var work = await arrangement.Grain.ClaimNextAsync(arrangement.WorkerId, "test-generation");
         Assert.NotNull(work);
         var resolvedTaskRunId = taskRunId ?? await RunningTaskRunIdAsync(arrangement);
         var uploadId = seedUpload

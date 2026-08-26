@@ -662,7 +662,7 @@ public partial class DispatchServiceReconciliationSpecs : Mohist.Server.SpecTest
 
         var assignment = await workflow.AssignWorkerAsync(runnerId);
         Assert.Equal(WorkflowAssignmentStatus.Assigned, assignment.Status);
-        var claimed = await workflow.ClaimNextAsync(runnerId);
+        var claimed = await workflow.ClaimNextAsync(runnerId, "test-generation");
         Assert.NotNull(claimed);
 
         var response = await Dispatch.PollAsync(runnerId, new RunnerPollRequest([], []));
@@ -696,7 +696,7 @@ public partial class DispatchServiceReconciliationSpecs : Mohist.Server.SpecTest
 
         var assignment = await workflow.AssignWorkerAsync(runnerId);
         Assert.Equal(WorkflowAssignmentStatus.Assigned, assignment.Status);
-        var claimed = await workflow.ClaimNextAsync(runnerId);
+        var claimed = await workflow.ClaimNextAsync(runnerId, "test-generation");
         Assert.NotNull(claimed);
 
         var response = await Dispatch.PollAsync(runnerId, new RunnerPollRequest([], []));
@@ -732,7 +732,7 @@ public partial class DispatchServiceReconciliationSpecs : Mohist.Server.SpecTest
 
         var assignment = await workflow.AssignWorkerAsync(runnerId);
         Assert.Equal(WorkflowAssignmentStatus.Assigned, assignment.Status);
-        var claimed = await workflow.ClaimNextAsync(runnerId);
+        var claimed = await workflow.ClaimNextAsync(runnerId, "test-generation");
         Assert.NotNull(claimed);
 
         var response = await Dispatch.PollAsync(runnerId, new RunnerPollRequest([], []));

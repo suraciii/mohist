@@ -10,19 +10,21 @@ namespace Mohist.Server.Runner.Grains;
 
 public interface IRunnerGrain : IGrainWithStringKey
 {
-    Task RegisterAsync(RunnerInfo info, string processGeneration = "direct-call-generation");
+    Task RegisterAsync(RunnerInfo info, string processGeneration);
     Task UnregisterAsync();
     /// <summary>Refreshes presence for control-plane heartbeat callers.</summary>
     Task HeartbeatAsync();
     /// <summary>Refreshes runner information and presence under the lifecycle gate.</summary>
     Task HeartbeatRepairAsync(RunnerInfo info);
     /// <summary>Atomically admits one poll round and captures its capacity.</summary>
-    Task<RunnerPollAdmission> TryBeginPollAsync(string processGeneration = "direct-call-generation");
+    Task<RunnerPollAdmission> TryBeginPollAsync(string processGeneration);
     /// <summary>
     /// Releases the matching poll round admitted by <see cref="TryBeginPollAsync"/>.
     /// A release from an older round cannot release a newer admission.
     /// </summary>
     Task EndPollAsync(Guid admissionToken);
+    /// <summary>Confirms that the admitted poll still owns the current process generation.</summary>
+    Task<bool> ValidatePollAsync(Guid admissionToken, string processGeneration);
     /// <summary>
     /// Records an ephemeral readiness observation for the current runner
     /// connection. The snapshot is only an admission fence; it never settles
@@ -52,11 +54,11 @@ public interface IRunnerGrain : IGrainWithStringKey
     /// this operation is the authoritative availability boundary for fresh
     /// workflow claims.
     /// </summary>
-    Task<WorkItem?> TryClaimWorkflowAsync(string workflowRunId, string? projectId, bool assignWorker, string processGeneration = "direct-call-generation");
+    Task<WorkItem?> TryClaimWorkflowAsync(string workflowRunId, string? projectId, bool assignWorker, string processGeneration);
     /// <summary>Claims one AgentJob from its owner ledger during a poll.</summary>
     Task<ClaimResult?> TryClaimAgentJobAsync(string agentJobId, string? projectId,
-        CapabilityClaimExpectation? expectation = null,
-        string processGeneration = "direct-call-generation");
+        CapabilityClaimExpectation? expectation,
+        string processGeneration);
     /// <summary>
     /// Marks the runner present. Poll and control-plane heartbeat both refresh
     /// presence; the former also participates in dispatch reconciliation.

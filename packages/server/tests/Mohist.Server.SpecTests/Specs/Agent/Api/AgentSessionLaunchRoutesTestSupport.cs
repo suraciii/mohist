@@ -91,7 +91,7 @@ public abstract class AgentSessionLaunchRoutesTestSupport
         var job = _fixture.Grains.GetGrain<IAgentJobGrain>(agentJobId);
         var assignment = await job.GetRuntimeSnapshotAsync();
         Assert.Equal(runnerId, assignment.RunnerId);
-        var claim = Assert.IsType<ClaimResult>(await job.ClaimNextAsync(runnerId));
+        var claim = Assert.IsType<ClaimResult>(await job.ClaimNextAsync(runnerId, "test-generation"));
         AssertPreparedAgentJobClaim(claim, agentJobId, runnerId, expectedSessionId);
         return new ClaimedDispatch(
             claim.Dispatch.WorkflowRunId,

@@ -490,7 +490,7 @@ public partial class WorkflowGrain : Grain, IWorkflowGrain, IWorkflowGrainContex
         return new WorkflowAssignmentResult(WorkflowAssignmentStatus.Assigned, workerId);
     }
 
-    public async Task<WorkItem?> ClaimNextAsync(string workerId, string processGeneration = "direct-call-generation")
+    public async Task<WorkItem?> ClaimNextAsync(string workerId, string processGeneration = "test-generation")
     {
         RejectIfRunReloadRequired();
         if (string.IsNullOrWhiteSpace(processGeneration)

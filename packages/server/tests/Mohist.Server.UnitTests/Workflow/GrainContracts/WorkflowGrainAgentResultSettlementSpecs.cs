@@ -303,7 +303,7 @@ public sealed class WorkflowGrainAgentResultSettlementSpecs
         var arrangement = await WorkflowGrainArrangement.CreateAsync(
             _fixture, runId, definition, TimeProvider, workerId: $"runner-{runId}");
         await arrangement.Grain.AssignWorkerAsync(arrangement.WorkerId);
-        var plan = await arrangement.Grain.ClaimNextAsync(arrangement.WorkerId);
+        var plan = await arrangement.Grain.ClaimNextAsync(arrangement.WorkerId, "test-generation");
         Assert.NotNull(plan);
         var planTaskRunId = await arrangement.RunningTaskRunIdAsync();
 
@@ -312,7 +312,7 @@ public sealed class WorkflowGrainAgentResultSettlementSpecs
             plan!.Id!,
             new TaskReport(plan.Id!, TaskReportStatus.Succeeded, Output: null, Artifacts: null, TaskRunId: planTaskRunId)));
 
-        var build = await arrangement.Grain.ClaimNextAsync(arrangement.WorkerId);
+        var build = await arrangement.Grain.ClaimNextAsync(arrangement.WorkerId, "test-generation");
         Assert.NotNull(build);
         var buildTask = Assert.Single((await arrangement.Store.LoadAsync(runId))!.CurrentStage().Tasks);
         Assert.NotEqual(planTaskRunId, buildTask.Id);
@@ -617,7 +617,7 @@ public sealed class WorkflowGrainAgentResultSettlementSpecs
         var arrangement = await WorkflowGrainArrangement.CreateAsync(
             _fixture, runId, definition, TimeProvider, workerId: $"runner-{runId}");
         await arrangement.Grain.AssignWorkerAsync(arrangement.WorkerId);
-        var work = await arrangement.Grain.ClaimNextAsync(arrangement.WorkerId);
+        var work = await arrangement.Grain.ClaimNextAsync(arrangement.WorkerId, "test-generation");
         Assert.NotNull(work);
         var taskRunId = await arrangement.RunningTaskRunIdAsync();
         return new SettlementArrangement(arrangement, work!, taskRunId, _fixture.Services);

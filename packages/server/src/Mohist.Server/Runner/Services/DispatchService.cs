@@ -58,7 +58,10 @@ public sealed class DispatchService : IScopedService
 
         try
         {
-            return await PollCoreAsync(runner, runnerId, req, processGeneration, admission.Slots, ct).WaitAsync(ct);
+            var response = await PollCoreAsync(runner, runnerId, req, processGeneration, admission.Slots, ct).WaitAsync(ct);
+            return await runner.ValidatePollAsync(admission.AdmissionToken, processGeneration)
+                ? response
+                : new RunnerPollResponse([]);
         }
         finally
         {
@@ -401,9 +404,10 @@ public sealed class DispatchService : IScopedService
             return await RenderUnresolvedAgentRecoveryAsync(run, workflowRunId, runnerId, reportedWorkKeys, ct);
 
         var activeWork = run.CurrentActiveWorkFor(runnerId);
-        if (activeWork is null
-            || !string.Equals(activeWork.ProcessGeneration, processGeneration, StringComparison.Ordinal))
-            return (WorkflowOwnerKey(workflowRunId), null, ReserveSlot: true);
+        if (activeWork is null)
+            return (null, null, ReserveSlot: false);
+        if (!string.Equals(activeWork.ProcessGeneration, processGeneration, StringComparison.Ordinal))
+            return (null, null, ReserveSlot: false);
 
         var workId = activeWork.WorkId;
         var workKey = WorkflowWorkKey(workflowRunId, workId);

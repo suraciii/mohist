@@ -145,7 +145,7 @@ public partial class AgentSessionInputAttachmentAcceptanceSpecs
         var assignment = await job.GetRuntimeSnapshotAsync();
         Assert.Equal(runnerId, assignment.RunnerId);
 
-        var claim = Assert.IsType<ClaimResult>(await job.ClaimNextAsync(runnerId));
+        var claim = Assert.IsType<ClaimResult>(await job.ClaimNextAsync(runnerId, "test-generation"));
         Assert.Equal(agentJobId, claim.AgentJobId);
         Assert.Equal(expectedSessionId, claim.Dispatch.AgentSessionId);
         return claim;

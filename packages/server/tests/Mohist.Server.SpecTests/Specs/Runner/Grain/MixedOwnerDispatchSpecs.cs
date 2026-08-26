@@ -232,7 +232,7 @@ public sealed class MixedOwnerDispatchSpecs : Mohist.Server.SpecTests.Specs.Work
         await SeedWorkflowTemplateAsync(workflowId, SingleStage(checks: []), projectId);
         await workflow.StartAsync(TestInput(projectId));
         await workflow.AssignWorkerAsync(runnerId);
-        Assert.NotNull(await workflow.ClaimNextAsync(runnerId));
+        Assert.NotNull(await workflow.ClaimNextAsync(runnerId, "test-generation"));
 
         var response = await Dispatch.PollAsync(runnerId, new RunnerPollRequest([], []));
 
@@ -262,7 +262,7 @@ public sealed class MixedOwnerDispatchSpecs : Mohist.Server.SpecTests.Specs.Work
         await SeedWorkflowTemplateAsync(workflowId, SingleStage(checks: []), projectId);
         await workflow.StartAsync(TestInput(projectId));
         await workflow.AssignWorkerAsync(runnerId);
-        Assert.NotNull(await workflow.ClaimNextAsync(runnerId));
+        Assert.NotNull(await workflow.ClaimNextAsync(runnerId, "test-generation"));
         await Dispatch.PollAsync(runnerId, new RunnerPollRequest([], []));
 
         _fixture.TimeProvider.Advance(TimeSpan.FromMinutes(11));

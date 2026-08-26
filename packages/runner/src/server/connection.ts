@@ -119,7 +119,7 @@ export class ServerConnection {
       connectionId?: string | null
       admissionReady?: boolean
       deploymentEpoch?: string | null
-    } = { processGeneration: '', inFlight: [], awaitingAck: [], admissionReady: false },
+    },
   ): Promise<DispatchWorkItem[]> {
     const polled = await this.pollWithGrants(signal, report)
     this.lastPolledDispatches = polled
@@ -148,7 +148,7 @@ export class ServerConnection {
       connectionId?: string | null
       admissionReady?: boolean
       deploymentEpoch?: string | null
-    } = { processGeneration: '', inFlight: [], awaitingAck: [], admissionReady: false },
+    },
   ): Promise<PolledDispatch[]> {
     const response = await this.fetchWithAuth(this.url('poll'), {
       method: 'POST',

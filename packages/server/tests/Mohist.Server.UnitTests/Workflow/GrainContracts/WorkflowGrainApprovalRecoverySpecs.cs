@@ -37,7 +37,7 @@ public sealed class WorkflowGrainApprovalRecoverySpecs
 
         await ReportPlanAsync(arrangement);
 
-        Assert.Null(await arrangement.Grain.ClaimNextAsync(arrangement.WorkerId));
+        Assert.Null(await arrangement.Grain.ClaimNextAsync(arrangement.WorkerId, "test-generation"));
         Assert.Equal("AwaitingApproval", await arrangement.Grain.GetRunStatusAsync());
     }
 

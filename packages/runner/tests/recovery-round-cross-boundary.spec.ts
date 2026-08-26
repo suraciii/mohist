@@ -100,7 +100,7 @@ describe("recovery round across poll -> execute -> report", () => {
     })
 
     // 1. Poll receives the fresh dispatch and preserves explicit null state.
-    const polled = await connection.poll(new AbortController().signal)
+    const polled = await connection.poll(new AbortController().signal, { processGeneration: 'test-generation', inFlight: [], awaitingAck: [], admissionReady: false })
     const fresh = polled[0]!
     expect(Object.prototype.hasOwnProperty.call(fresh, "recoveryRemaining")).toBe(true)
     expect(fresh.recoveryRemaining).toBeNull()
@@ -137,7 +137,7 @@ describe("recovery round across poll -> execute -> report", () => {
       JSON.stringify({ dispatches: [dispatch(workDir, "review.2", 1, "model-b")] }),
       { status: 200, headers: { "content-type": "application/json" } },
     ))
-    const redispatched = (await connection.poll(new AbortController().signal))[0]!
+    const redispatched = (await connection.poll(new AbortController().signal, { processGeneration: 'test-generation', inFlight: [], awaitingAck: [], admissionReady: false }))[0]!
     expect(redispatched.recoveryRemaining).toBe(1)
 
     const nextExecutor = executor(workDir) as WorkExecutor & { invokedOptions: JsonObject[] }

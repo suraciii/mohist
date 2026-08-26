@@ -234,7 +234,7 @@ internal sealed record WorkflowGrainArrangement(
     public async Task<WorkItem?> AssignAndClaimAsync()
     {
         await Grain.AssignWorkerAsync(WorkerId);
-        return await Grain.ClaimNextAsync(WorkerId);
+        return await Grain.ClaimNextAsync(WorkerId, "test-generation");
     }
 
     public async Task<string> RunningTaskRunIdAsync() => await ResolveRunningTaskRunIdAsync();

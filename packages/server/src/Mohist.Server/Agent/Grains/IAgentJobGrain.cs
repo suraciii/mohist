@@ -36,16 +36,8 @@ public interface IAgentJobGrain : IGrainWithStringKey, IRemindable
     /// expectation is checked against the immutable pending tuple and its
     /// capability revision is persisted before the claim becomes visible.
     /// </summary>
-    Task<ClaimResult?> ClaimNextAsync(string runnerId) =>
-        ClaimNextAsync(runnerId, "direct-call-generation");
-
     Task<ClaimResult?> ClaimNextAsync(string runnerId, string processGeneration) =>
         Task.FromResult<ClaimResult?>(null);
-
-    Task<ClaimResult?> ClaimNextAsync(
-        string runnerId,
-        CapabilityClaimExpectation expectation) =>
-        ClaimNextAsync(runnerId, "direct-call-generation", expectation);
 
     Task<ClaimResult?> ClaimNextAsync(
         string runnerId,

@@ -476,7 +476,7 @@ export interface RuntimeCatalogEntry {
 }
 
 export interface RunnerRegistration {
-  processGeneration?: string
+  processGeneration: string
   capabilities: string[]
   actionCatalog: ActionCatalog
   projectId?: string

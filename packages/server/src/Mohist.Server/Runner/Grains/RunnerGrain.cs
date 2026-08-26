@@ -139,12 +139,13 @@ public partial class RunnerGrain : Grain, IRunnerGrain, IRemindable
         return Task.CompletedTask;
     }
 
-    public Task ReceiveReminder(string reminderName, TickStatus status)
+    public async Task ReceiveReminder(string reminderName, TickStatus status)
     {
-        // Presence reminder is a no-op tick carrier; the actual check runs on
-        // the register/poll grain timer. The reminder exists only so
-        // presence-expiry survives silo restart (a grain timer does not).
-        return Task.CompletedTask;
+        if (!string.Equals(reminderName, PresenceReminderName, StringComparison.Ordinal))
+            return;
+
+        await CheckPresenceAsync();
+        await ReconcileClosingGenerationAsync();
     }
 
     public async Task RegisterAsync(RunnerInfo info, string processGeneration)
@@ -216,6 +217,7 @@ public partial class RunnerGrain : Grain, IRunnerGrain, IRemindable
             _pollAdmissionToken = null;
             _status = RunnerStatus.Offline;
             SetRunnerInfo(null);
+            BeginDurableCloseout();
             await PersistAsync();
             var registry = GrainFactory.GetGrain<IRunnerRegistryGrain>(RunnerRegistryKeys.Global);
             await registry.UnregisterAsync(RunnerId);
@@ -225,7 +227,7 @@ public partial class RunnerGrain : Grain, IRunnerGrain, IRemindable
             _lifecycleGate.Release();
         }
 
-        await CloseoutLostAsync(_state.State?.CurrentProcessGeneration, failFast: false);
+        await ReconcileClosingGenerationAsync();
     }
 
     public Task HeartbeatAsync() => TouchPresenceAsync();
@@ -313,7 +315,22 @@ public partial class RunnerGrain : Grain, IRunnerGrain, IRemindable
         {
             _lifecycleGate.Release();
         }
+    }
 
+    public async Task<bool> ValidatePollAsync(Guid admissionToken, string processGeneration)
+    {
+        await _lifecycleGate.WaitAsync();
+        try
+        {
+            return !_draining
+                && admissionToken != Guid.Empty
+                && _pollAdmissionToken == admissionToken
+                && string.Equals(_state.State?.CurrentProcessGeneration, processGeneration, StringComparison.Ordinal);
+        }
+        finally
+        {
+            _lifecycleGate.Release();
+        }
     }
 
     public async Task<RunnerRuntimeReadinessSnapshot> ObserveRuntimeReadinessAsync(
@@ -512,8 +529,8 @@ public partial class RunnerGrain : Grain, IRunnerGrain, IRemindable
     public async Task<ClaimResult?> TryClaimAgentJobAsync(
         string agentJobId,
         string? projectId,
-        CapabilityClaimExpectation? expectation = null,
-        string processGeneration = "direct-call-generation")
+        CapabilityClaimExpectation? expectation,
+        string processGeneration)
     {
         await _lifecycleGate.WaitAsync();
         try
@@ -711,6 +728,8 @@ public partial class RunnerGrain : Grain, IRunnerGrain, IRemindable
 
             _pollAdmissionToken = null;
             _status = RunnerStatus.Offline;
+            BeginDurableCloseout();
+            await PersistAsync();
             var registry = GrainFactory.GetGrain<IRunnerRegistryGrain>(RunnerRegistryKeys.Global);
             await registry.UnregisterAsync(RunnerId);
         }
@@ -719,7 +738,39 @@ public partial class RunnerGrain : Grain, IRunnerGrain, IRemindable
             _lifecycleGate.Release();
         }
 
-        await CloseoutLostAsync(_state.State?.CurrentProcessGeneration, failFast: false);
+        await ReconcileClosingGenerationAsync();
+    }
+
+    private void BeginDurableCloseout()
+    {
+        var state = _state.State ??= new RunnerState();
+        if (string.IsNullOrWhiteSpace(state.ClosingProcessGeneration))
+            state.ClosingProcessGeneration = state.CurrentProcessGeneration;
+        _draining = !string.IsNullOrWhiteSpace(state.ClosingProcessGeneration);
+    }
+
+    private async Task ReconcileClosingGenerationAsync()
+    {
+        var state = _state.State ??= new RunnerState();
+        var closingGeneration = state.ClosingProcessGeneration;
+        if (string.IsNullOrWhiteSpace(closingGeneration))
+            return;
+
+        try
+        {
+            await CloseoutLostAsync(closingGeneration, failFast: true);
+            state.ClosingProcessGeneration = null;
+            _draining = !string.IsNullOrWhiteSpace(state.PendingProcessGeneration)
+                || !string.IsNullOrWhiteSpace(state.UpdateInterruptFence?.PendingId);
+            await PersistAsync();
+        }
+        catch (Exception ex)
+        {
+            _log.LogWarning(ex,
+                "Runner {RunnerId} will retry closeout for process generation {ProcessGeneration}",
+                RunnerId,
+                closingGeneration);
+        }
     }
 
     private async Task CloseoutLostAsync(string? processGeneration, bool failFast)
@@ -736,7 +787,7 @@ public partial class RunnerGrain : Grain, IRunnerGrain, IRemindable
                     || !string.Equals(active.ProcessGeneration, processGeneration, StringComparison.Ordinal))
                     continue;
                 await GrainFactory.GetGrain<IWorkflowGrain>(workflowRunId)
-                    .FailActiveWorkAsync(workerId, "runner-lost");
+                    .FailActiveWorkAsync(workerId, active.WorkId, processGeneration!, "runner-lost");
             }
             catch (Exception ex)
             {

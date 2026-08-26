@@ -55,8 +55,6 @@ public interface IAgentJobStore
     /// when the row is missing, no longer Pending, or assigned to a
     /// different runner.
     /// </summary>
-    Task<AgentJobLedgerRecord> ClaimAsync(string key, string runnerId, DateTimeOffset runningSince, CancellationToken ct = default) =>
-        ClaimAsync(key, runnerId, "direct-call-generation", runningSince, ct);
     Task<AgentJobLedgerRecord> ClaimAsync(string key, string runnerId, string processGeneration, DateTimeOffset runningSince, CancellationToken ct = default);
 
     /// <summary>
@@ -65,14 +63,6 @@ public interface IAgentJobStore
     /// the same ledger transaction as Pending -> Running; the caller owns
     /// the execution-tuple predicate before calling.
     /// </summary>
-    Task<AgentJobLedgerRecord> ClaimAsync(
-        string key,
-        string runnerId,
-        DateTimeOffset runningSince,
-        string expectedWorkId,
-        string dispatchJson,
-        CancellationToken ct = default) =>
-        ClaimAsync(key, runnerId, "direct-call-generation", runningSince, expectedWorkId, dispatchJson, ct);
     Task<AgentJobLedgerRecord> ClaimAsync(
         string key,
         string runnerId,
@@ -272,26 +262,10 @@ public class AgentJobStore : IAgentJobStore
     public Task<AgentJobLedgerRecord> ClaimAsync(
         string key,
         string runnerId,
-        DateTimeOffset runningSince,
-        CancellationToken ct = default) =>
-        ClaimAsync(key, runnerId, "direct-call-generation", runningSince, ct);
-
-    public Task<AgentJobLedgerRecord> ClaimAsync(
-        string key,
-        string runnerId,
         string processGeneration,
         DateTimeOffset runningSince,
         CancellationToken ct = default) =>
         ClaimAsyncCore(key, runnerId, processGeneration, runningSince, null, null, ct);
-
-    public Task<AgentJobLedgerRecord> ClaimAsync(
-        string key,
-        string runnerId,
-        DateTimeOffset runningSince,
-        string expectedWorkId,
-        string dispatchJson,
-        CancellationToken ct = default) =>
-        ClaimAsync(key, runnerId, "direct-call-generation", runningSince, expectedWorkId, dispatchJson, ct);
 
     public Task<AgentJobLedgerRecord> ClaimAsync(
         string key,

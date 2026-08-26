@@ -1615,7 +1615,10 @@ public sealed partial class AgentJobGrain : Grain, IAgentJobGrain
                     State.TerminalLogOwnership.OwnerKind,
                     State.TerminalLogOwnership.OwnerId,
                     State.TerminalLogOwnership.WorkId,
-                    State.TerminalLogOwnership.RunnerId));
+                    State.TerminalLogOwnership.RunnerId),
+            ClaimedProcessGeneration: State.Status is AgentJobStatus.Running or AgentJobStatus.Unknown
+                ? _ledger?.ClaimedProcessGeneration
+                : null);
 
         if (_ledger is null)
         {

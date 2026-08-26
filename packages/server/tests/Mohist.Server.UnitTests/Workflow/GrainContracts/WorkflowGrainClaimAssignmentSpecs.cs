@@ -39,7 +39,7 @@ public sealed class WorkflowGrainClaimAssignmentSpecs
             "wr-claim-transitions", SingleStage());
 
         await grain.AssignWorkerAsync(workerId);
-        var claimed = await grain.ClaimNextAsync(workerId);
+        var claimed = await grain.ClaimNextAsync(workerId, "test-generation");
 
         Assert.NotNull(claimed);
         Assert.Equal(WorkItemTypes.Task, claimed!.WorkType);
@@ -56,10 +56,10 @@ public sealed class WorkflowGrainClaimAssignmentSpecs
         var (grain, _, _, runId, workerId, _) = await ArrangeAsync("wr-claim-reentry", SingleStage());
 
         await grain.AssignWorkerAsync(workerId);
-        var claimed = await grain.ClaimNextAsync(workerId);
+        var claimed = await grain.ClaimNextAsync(workerId, "test-generation");
         Assert.NotNull(claimed);
 
-        Assert.Null(await grain.ClaimNextAsync(workerId));
+        Assert.Null(await grain.ClaimNextAsync(workerId, "test-generation"));
     }
 
     [Fact]
@@ -68,7 +68,7 @@ public sealed class WorkflowGrainClaimAssignmentSpecs
         var (grain, _, _, runId, workerId, _) = await ArrangeAsync("wr-claim-ownership", SingleStage());
 
         await grain.AssignWorkerAsync(workerId);
-        var claimed = await grain.ClaimNextAsync(workerId);
+        var claimed = await grain.ClaimNextAsync(workerId, "test-generation");
         Assert.NotNull(claimed);
 
         var duplicate = await grain.AssignWorkerAsync("different-runner");
@@ -83,7 +83,7 @@ public sealed class WorkflowGrainClaimAssignmentSpecs
         var (grain, _, _, runId, workerId, _) = await ArrangeAsync("wr-claim-overwrite", SingleStage());
 
         await grain.AssignWorkerAsync(workerId);
-        var claimed = await grain.ClaimNextAsync(workerId);
+        var claimed = await grain.ClaimNextAsync(workerId, "test-generation");
         Assert.NotNull(claimed);
 
         var firstAttempt = await grain.AssignWorkerAsync("other-runner");
@@ -102,7 +102,7 @@ public sealed class WorkflowGrainClaimAssignmentSpecs
         var (grain, _, _, runId, workerId, _) = await ArrangeAsync("wr-claim-same-owner", SingleStage());
 
         await grain.AssignWorkerAsync(workerId);
-        var claimed = await grain.ClaimNextAsync(workerId);
+        var claimed = await grain.ClaimNextAsync(workerId, "test-generation");
         Assert.NotNull(claimed);
 
         var firstAttempt = await grain.AssignWorkerAsync(workerId);
@@ -113,7 +113,7 @@ public sealed class WorkflowGrainClaimAssignmentSpecs
         Assert.Equal(claimed!.Id, await grain.GetCurrentWorkIdAsync());
         // The re-offered poll observes the same running task, not a second
         // dispatchable item.
-        Assert.Null(await grain.ClaimNextAsync(workerId));
+        Assert.Null(await grain.ClaimNextAsync(workerId, "test-generation"));
     }
 
     [Fact]
@@ -123,7 +123,7 @@ public sealed class WorkflowGrainClaimAssignmentSpecs
             "wr-claim-report", SingleStage());
 
         await grain.AssignWorkerAsync(workerId);
-        var claimed = await grain.ClaimNextAsync(workerId);
+        var claimed = await grain.ClaimNextAsync(workerId, "test-generation");
 
         var running = await RequireRunAsync(store, runId);
         var runningTask = running.CurrentStage().RunningTask;
@@ -148,7 +148,7 @@ public sealed class WorkflowGrainClaimAssignmentSpecs
         var (grain, store, _, runId, workerId, _) = await ArrangeAsync("wr-claim-started-record", SingleStage());
 
         await grain.AssignWorkerAsync(workerId);
-        var claimed = await grain.ClaimNextAsync(workerId);
+        var claimed = await grain.ClaimNextAsync(workerId, "test-generation");
 
         var persisted = await RequireRunAsync(store, runId);
         Assert.Equal(TaskRunStatus.Running, persisted.CurrentStage().RunningTask!.Status);
@@ -167,7 +167,7 @@ public sealed class WorkflowGrainClaimAssignmentSpecs
         var request = await grain.AssignWorkerAsync(workerId);
         Assert.Equal(WorkflowAssignmentStatus.Rejected, request.Status);
         Assert.Equal("not-runnable", request.Reason);
-        Assert.Null(await grain.ClaimNextAsync(workerId));
+        Assert.Null(await grain.ClaimNextAsync(workerId, "test-generation"));
     }
 
     [Fact]
