@@ -119,15 +119,17 @@ describe('in-memory runtime event queue', () => {
     const queue = createAgentSessionRuntimeEventQueue({
       queueCapacity: 2,
       warn: (_message, fields) => warnings.push(fields),
-      deliver: { async send() { return [] } },
+      deliver: {
+        async send() {
+          return []
+        },
+      },
     })
 
     await queue.enqueueProducedFactBatch([event('A1', 'A'), event('A2', 'A'), event('A3', 'A')])
 
     expect(queue.snapshot().map((record) => record.id)).toEqual(['A1', 'A2'])
-    expect(warnings).toEqual([
-      expect.objectContaining({ recordId: 'A3', capacity: 2, policy: 'drop-newest' }),
-    ])
+    expect(warnings).toEqual([expect.objectContaining({ recordId: 'A3', capacity: 2, policy: 'drop-newest' })])
     await queue.stop()
   })
 
@@ -196,23 +198,85 @@ describe('in-memory runtime event queue', () => {
     await queue.stop()
   })
 
+  it('coalesces duplicate input receipt waiters before delivery', async () => {
+    let release!: (receipts: AgentSessionRuntimeEventReceipt[]) => void
+    const delivery = new Promise<AgentSessionRuntimeEventReceipt[]>((resolve) => {
+      release = resolve
+    })
+    const queue = createAgentSessionRuntimeEventQueue({
+      deliver: {
+        async send() {
+          return await delivery
+        },
+      },
+    })
+
+    await queue.enqueueBeforeExecution(input('shared-receipt', 'A'))
+    const first = queue.awaitInputReceipt!('shared-receipt')
+    const second = queue.awaitInputReceipt!('shared-receipt')
+    release([{ type: 'session.input' }])
+
+    await expect(Promise.all([first, second])).resolves.toEqual([{ type: 'session.input' }, { type: 'session.input' }])
+    await expect(queue.awaitInputReceipt!('shared-receipt')).rejects.toBeInstanceOf(AlreadyConsumedRuntimeEventError)
+    await queue.stop()
+  })
+
+  it('rejects duplicate waiters together on permanent refusal and removes their state', async () => {
+    const queue = createAgentSessionRuntimeEventQueue({
+      warn: () => undefined,
+      deliver: {
+        async send() {
+          throw new RuntimeEventDeliveryError('runtime event', 409, 'conflict', '')
+        },
+      },
+    })
+
+    await queue.enqueueBeforeExecution(input('refused-input', 'A'))
+    const first = queue.awaitInputReceipt!('refused-input')
+    const second = queue.awaitInputReceipt!('refused-input')
+
+    await expect(first).rejects.toBeInstanceOf(AlreadyConsumedRuntimeEventError)
+    await expect(second).rejects.toBeInstanceOf(AlreadyConsumedRuntimeEventError)
+    await expect(queue.awaitInputReceipt!('refused-input')).rejects.toBeInstanceOf(AlreadyConsumedRuntimeEventError)
+    await queue.stop()
+  })
+
+  it('rejects every coalesced waiter on shutdown and removes their state', async () => {
+    const queue = createAgentSessionRuntimeEventQueue({
+      retryDelayMs: 60_000,
+      deliver: {
+        async send() {
+          throw new Error('retry later')
+        },
+      },
+    })
+
+    await queue.enqueueBeforeExecution(input('stopped-input', 'A'))
+    const first = queue.awaitInputReceipt!('stopped-input')
+    const second = queue.awaitInputReceipt!('stopped-input')
+    await flush()
+    await queue.stop()
+
+    await expect(first).rejects.toThrow('runtime-event queue stopped')
+    await expect(second).rejects.toThrow('runtime-event queue stopped')
+    await expect(queue.awaitInputReceipt!('stopped-input')).rejects.toThrow('runtime-event queue is stopped')
+  })
+
   it('retires a successful input receipt when no waiter exists instead of retaining it', async () => {
     const queue = createAgentSessionRuntimeEventQueue({
-      deliver: { async send() { return [{ type: 'session.input' }] } },
+      deliver: {
+        async send() {
+          return [{ type: 'session.input' }]
+        },
+      },
     })
 
     await queue.enqueueProducedFact(input('orphan-receipt', 'A'))
     await queue.kick()
     expect(queue.snapshot()).toEqual([])
 
-    let settled = false
-    const lateWaiter = queue.awaitInputReceipt!('orphan-receipt').finally(() => {
-      settled = true
-    })
-    await flush()
-    expect(settled).toBe(false)
+    await expect(queue.awaitInputReceipt!('orphan-receipt')).rejects.toBeInstanceOf(AlreadyConsumedRuntimeEventError)
     await queue.stop()
-    await expect(lateWaiter).rejects.toThrow('runtime-event queue stopped')
   })
 
   it('reports a receipt-bearing input dropped at capacity without retaining it', async () => {
@@ -220,13 +284,18 @@ describe('in-memory runtime event queue', () => {
       queueCapacity: 1,
       retryDelayMs: 60_000,
       warn: () => undefined,
-      deliver: { async send() { throw new Error('hold the full record') } },
+      deliver: {
+        async send() {
+          throw new Error('hold the full record')
+        },
+      },
     })
 
     await queue.enqueueProducedFact(event('full', 'A'))
     await expect(queue.enqueueBeforeExecution(input('dropped-input', 'B'))).rejects.toBeInstanceOf(
       AlreadyConsumedRuntimeEventError,
     )
+    await expect(queue.awaitInputReceipt!('dropped-input')).rejects.toBeInstanceOf(AlreadyConsumedRuntimeEventError)
     expect(queue.snapshot().map((record) => record.id)).toEqual(['full'])
     await queue.stop()
   })

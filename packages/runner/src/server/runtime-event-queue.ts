@@ -110,6 +110,12 @@ interface DeliveryGroup {
   retryAt: number
 }
 
+interface InputReceiptWaiter {
+  readonly promise: Promise<AgentSessionRuntimeEventReceipt>
+  resolve(receipt: AgentSessionRuntimeEventReceipt): void
+  reject(error: unknown): void
+}
+
 type DeliveryVerdict =
   | { readonly kind: 'accepted'; readonly receipt: AgentSessionRuntimeEventReceipt | null }
   | { readonly kind: 'refused' }
@@ -130,10 +136,7 @@ class InMemoryRuntimeEventQueue implements AgentSessionRuntimeEventQueue {
   private readonly warn: (message: string, fields: Record<string, unknown>) => void
   private readonly groups = new Map<string, DeliveryGroup>()
   private readonly readyGroups: string[] = []
-  private readonly inputWaiters = new Map<
-    string,
-    { resolve(receipt: AgentSessionRuntimeEventReceipt): void; reject(error: unknown): void }
-  >()
+  private readonly inputWaiters = new Map<string, InputReceiptWaiter>()
   private sequence = 0
   private size = 0
   private draining: Promise<void> | null = null
@@ -175,10 +178,19 @@ class InMemoryRuntimeEventQueue implements AgentSessionRuntimeEventQueue {
 
   async awaitInputReceipt(recordId: string): Promise<AgentSessionRuntimeEventReceipt> {
     if (this.stopped) throw new Error('runtime-event queue is stopped')
-    return await new Promise<AgentSessionRuntimeEventReceipt>((resolve, reject) => {
-      this.inputWaiters.set(recordId, { resolve, reject })
-      void this.kick()
+    const existing = this.inputWaiters.get(recordId)
+    if (existing) return await existing.promise
+    if (!this.has(recordId)) throw new AlreadyConsumedRuntimeEventError(recordId)
+
+    let resolve!: (receipt: AgentSessionRuntimeEventReceipt) => void
+    let reject!: (error: unknown) => void
+    const promise = new Promise<AgentSessionRuntimeEventReceipt>((resolvePromise, rejectPromise) => {
+      resolve = resolvePromise
+      reject = rejectPromise
     })
+    this.inputWaiters.set(recordId, { promise, resolve, reject })
+    void this.kick()
+    return await promise
   }
 
   async enqueueProducedFact(record: RuntimeEventRecord): Promise<void> {
@@ -205,8 +217,9 @@ class InMemoryRuntimeEventQueue implements AgentSessionRuntimeEventQueue {
     this.stopController.abort()
     if (this.retry) clearTimeout(this.retry)
     this.retry = null
-    for (const waiter of this.inputWaiters.values()) waiter.reject(new Error('runtime-event queue stopped'))
+    const waiters = [...this.inputWaiters.values()]
     this.inputWaiters.clear()
+    for (const waiter of waiters) waiter.reject(new Error('runtime-event queue stopped'))
   }
 
   private enqueue(record: RuntimeEventRecord, kick = true): boolean {
