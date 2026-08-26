@@ -10,6 +10,7 @@ using Mohist.Server.Workflow.Domain.Run;
 using Mohist.Server.Workflow.Grains;
 using Mohist.Workflow.Definition;
 using Xunit;
+using Mohist.Server.Runner.Grains;
 
 namespace Mohist.Server.UnitTests.Workflow.GrainContracts;
 
@@ -135,7 +136,7 @@ public sealed class WorkflowGrainClaimAssignmentSpecs
             workerId,
             claimed.Id!,
             new TaskReport(claimed.Id!, TaskReportStatus.Succeeded, Output: null, Artifacts: null, TaskRunId: runningTask.Id));
-        Assert.Equal(ReportAck.Accepted, acknowledgement);
+        Assert.Equal(WorkReportVerdict.Accepted, acknowledgement);
 
         var completed = await RequireRunAsync(store, runId);
         Assert.Null(completed.CurrentStage().RunningTask);

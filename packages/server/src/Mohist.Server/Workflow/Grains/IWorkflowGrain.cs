@@ -27,32 +27,32 @@ public interface IWorkflowGrain : IGrainWithStringKey, IRemindable
     Task<WorkflowAssignmentResult> AssignWorkerAsync(string workerId);
     Task<WorkItem?> ClaimNextAsync(string workerId, string processGeneration);
     Task<WorkDispatch?> StoreActiveWorkDispatchAsync(string workerId, string workId, WorkDispatch dispatch);
-    Task<ReportAck> FailActiveWorkAsync(string workerId, string message);
-    Task<ReportAck> FailActiveWorkAsync(string workerId, string workId, string processGeneration, string message) =>
+    Task<WorkReportVerdict> FailActiveWorkAsync(string workerId, string message);
+    Task<WorkReportVerdict> FailActiveWorkAsync(string workerId, string workId, string processGeneration, string message) =>
         FailActiveWorkAsync(workerId, message);
-    Task<ReportAck> InterruptActiveWorkAsync(string workerId, string reason);
-    Task<ReportAck> AbandonActiveWorkAsync(string workerId, string workId, string reason);
-    Task<ReportAck> BindAgentExecutionAsync(AgentExecutionBinding binding);
+    Task<WorkReportVerdict> InterruptActiveWorkAsync(string workerId, string reason);
+    Task<WorkReportVerdict> AbandonActiveWorkAsync(string workerId, string workId, string reason);
+    Task<WorkReportVerdict> BindAgentExecutionAsync(AgentExecutionBinding binding);
     Task<AgentExecutionBinding?> GetBoundAgentExecutionAsync(string taskRunId, string workId, string runnerId);
-    Task<ReportAck> MarkUpdateInterruptedAsync(
+    Task<WorkReportVerdict> MarkUpdateInterruptedAsync(
         string taskRunId,
         string workId,
         string runnerId,
         string updateOperationId,
         DateTimeOffset? interruptedAt = null,
-        TimeSpan? settlementTimeout = null) => Task.FromResult(ReportAck.Stale);
-    Task<ReportAck> MarkUpdateStopFailureAsync(
+        TimeSpan? settlementTimeout = null) => Task.FromResult(WorkReportVerdict.Refused);
+    Task<WorkReportVerdict> MarkUpdateStopFailureAsync(
         string taskRunId,
         string workId,
         string runnerId,
         string updateOperationId,
-        string failure) => Task.FromResult(ReportAck.Stale);
+        string failure) => Task.FromResult(WorkReportVerdict.Refused);
     Task<bool> CanStartAgentCleanupAsync(AgentExecutionBinding binding);
-    Task<ReportAck> ObserveAgentExecutionAsync(AgentExecutionObservation observation);
-    Task<ReportAck> ObserveAgentResultUnknownAsync(string workerId, string taskRunId, string workId, string reasonCode, string? message = null);
-    Task<ReportAck> ObserveAgentRunnerDisconnectedAsync(string workerId);
-    Task<ReportAck> RejectActiveWorkDispatchAsync(string workerId, string workId, ExecutionError error);
-    Task<ReportAck> ReceiveTaskReportAsync(
+    Task<WorkReportVerdict> ObserveAgentExecutionAsync(AgentExecutionObservation observation);
+    Task<WorkReportVerdict> ObserveAgentResultUnknownAsync(string workerId, string taskRunId, string workId, string reasonCode, string? message = null);
+    Task<WorkReportVerdict> ObserveAgentRunnerDisconnectedAsync(string workerId);
+    Task<WorkReportVerdict> RejectActiveWorkDispatchAsync(string workerId, string workId, ExecutionError error);
+    Task<WorkReportVerdict> ReceiveTaskReportAsync(
         string workerId,
         string workId,
         TaskReport report,
@@ -62,7 +62,7 @@ public interface IWorkflowGrain : IGrainWithStringKey, IRemindable
             receipt?.ReceiptId ?? string.Empty,
             RuntimeRecoveryReceiptAckStatuses.Stale,
             "unsupported"));
-    Task<ReportAck> ReceiveCheckReportAsync(string workerId, string workId, CheckReport report);
+    Task<WorkReportVerdict> ReceiveCheckReportAsync(string workerId, string workId, CheckReport report);
 
     Task ReleaseStageLocksAsync(string stage, string reason);
     Task<string?> GetRunStatusAsync();
@@ -151,18 +151,6 @@ public enum WorkflowAssignmentStatus
 {
     Assigned,
     Rejected
-}
-
-/// <summary>
-/// Report delivery ack. <see cref="Stale"/> is still a successful ack for
-/// late, duplicate, or no-longer-current work; the worker retires awaitingAck
-/// on both values.
-/// </summary>
-[GenerateSerializer]
-public enum ReportAck
-{
-    Accepted,
-    Stale
 }
 
 [GenerateSerializer]

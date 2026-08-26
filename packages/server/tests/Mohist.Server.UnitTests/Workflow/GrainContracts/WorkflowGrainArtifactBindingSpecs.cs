@@ -167,7 +167,7 @@ public sealed class WorkflowGrainArtifactBindingSpecs
             a.TaskRunId,
             new WorkResult("completed", ArtifactUploadIds: [uploadId]));
 
-        Assert.Equal("stale", report.Ack);
+        Assert.Equal("refused", report.Ack);
         await using var db = CreateDb();
         Assert.Empty(await ArtifactsOf(db, a.RunId));
         Assert.NotNull(await db.WorkflowArtifactPendingUploads.FindAsync(uploadId));

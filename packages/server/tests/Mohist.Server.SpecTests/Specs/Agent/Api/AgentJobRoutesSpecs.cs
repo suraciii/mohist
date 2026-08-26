@@ -15,6 +15,7 @@ using Mohist.Server.TestSupport;
 using Orleans;
 using Orleans.Runtime;
 using Xunit;
+using Mohist.Server.Workflow.Grains;
 
 namespace Mohist.Server.SpecTests.Specs.Agent.Api;
 
@@ -196,7 +197,7 @@ internal sealed class TerminalAgentJobGrain : IAgentJobGrain
     }
 
     public Task<bool> IsWorkRunnableAsync(string runnerId, string workId) => Task.FromResult(false);
-    public Task<AgentJobReportResult> ReportResultAsync(string runnerId, string workId, WorkResult result) => Task.FromResult(new AgentJobReportResult(false, "already-terminal"));
+    public Task<AgentJobReportResult> ReportResultAsync(string runnerId, string workId, WorkResult result) => Task.FromResult(new AgentJobReportResult(WorkReportVerdict.Refused, "already-terminal"));
     public Task<AgentJobStatus> GetStatusAsync() => Task.FromResult(_result.Status);
     public Task<string?> GetCurrentWorkIdAsync() => Task.FromResult<string?>(null);
     public Task<ClaimResult?> ClaimNextAsync(string runnerId) => Task.FromResult<ClaimResult?>(null);
@@ -224,7 +225,7 @@ internal sealed class PendingAgentJobGrain : IAgentJobGrain
     private string? _failureReason;
 
     public Task<bool> IsWorkRunnableAsync(string runnerId, string workId) => Task.FromResult(false);
-    public Task<AgentJobReportResult> ReportResultAsync(string runnerId, string workId, WorkResult result) => Task.FromResult(new AgentJobReportResult(false, "not-running"));
+    public Task<AgentJobReportResult> ReportResultAsync(string runnerId, string workId, WorkResult result) => Task.FromResult(new AgentJobReportResult(WorkReportVerdict.Refused, "not-running"));
     public Task<AgentJobStatus> GetStatusAsync() => Task.FromResult(_failureReason is null ? AgentJobStatus.Pending : AgentJobStatus.Failed);
     public Task<string?> GetCurrentWorkIdAsync() => Task.FromResult<string?>(null);
     public Task<ClaimResult?> ClaimNextAsync(string runnerId) => Task.FromResult<ClaimResult?>(null);

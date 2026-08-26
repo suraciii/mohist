@@ -6,9 +6,6 @@ public static partial class WorkflowRunExtensions
 {
     extension(WorkflowRun run)
     {
-        public IReadOnlyList<WorkflowEvent> StartTask(string workId, string workerId, DateTimeOffset now) =>
-            run.StartTask(workId, workerId, "direct-call-generation", now);
-
         public IReadOnlyList<WorkflowEvent> StartTask(string workId, string workerId, string processGeneration, DateTimeOffset now)
         {
             if (run.Status is not (WorkflowRunStatus.Ready or WorkflowRunStatus.Running))

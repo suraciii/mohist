@@ -49,8 +49,8 @@ public sealed partial class AgentResultSettlementSpecs
             WorkflowStageLockKeys.ForProjectResource(projectId, resource));
 
         Assert.Equal(_workflowId, (await lockGrain.GetStateAsync())?.Owner?.WorkflowRunId);
-        Assert.Equal(ReportAck.Accepted, await workflow.BindAgentExecutionAsync(binding));
-        Assert.Equal(ReportAck.Accepted, await workflow.ObserveAgentExecutionAsync(
+        Assert.Equal(WorkReportVerdict.Accepted, await workflow.BindAgentExecutionAsync(binding));
+        Assert.Equal(WorkReportVerdict.Accepted, await workflow.ObserveAgentExecutionAsync(
             new AgentExecutionObservation(
                 binding,
                 AgentExecutionObservationKind.Disconnected,

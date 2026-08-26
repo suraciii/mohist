@@ -9,6 +9,7 @@ using Mohist.Server.Workflow.Services;
 using Mohist.Server.Workflow.Grains;
 using Mohist.Workflow.Definition;
 using Xunit;
+using Mohist.Server.Runner.Grains;
 
 namespace Mohist.Server.UnitTests.Workflow.GrainContracts;
 
@@ -79,7 +80,7 @@ public sealed class WorkflowGrainPauseResumeSpecs
         await arrangement.Grain.PauseAsync("user requested");
 
         var acknowledgement = await arrangement.ReportFollowUpAsync(task!, "follow-up");
-        Assert.Equal(ReportAck.Accepted, acknowledgement);
+        Assert.Equal(WorkReportVerdict.Accepted, acknowledgement);
         Assert.Equal("Paused", await arrangement.Grain.GetRunStatusAsync());
         Assert.Null(await arrangement.Grain.ClaimNextAsync(arrangement.WorkerId, "test-generation"));
 
@@ -98,11 +99,11 @@ public sealed class WorkflowGrainPauseResumeSpecs
         await arrangement.Grain.PauseAsync("user requested");
 
         var acknowledgement = await arrangement.AbandonActiveWorkAsync(task!, "session-stop");
-        Assert.Equal(ReportAck.Accepted, acknowledgement);
+        Assert.Equal(WorkReportVerdict.Accepted, acknowledgement);
         Assert.Equal("Paused", await arrangement.Grain.GetRunStatusAsync());
         Assert.Null(await arrangement.Grain.GetCurrentWorkIdAsync());
         Assert.Equal(
-            ReportAck.Stale,
+            WorkReportVerdict.Refused,
             await arrangement.AbandonActiveWorkAsync(task!, "duplicate-session-stop"));
 
         await arrangement.Grain.ResumeAsync();
@@ -119,7 +120,7 @@ public sealed class WorkflowGrainPauseResumeSpecs
         var task = await arrangement.AssignAndClaimAsync();
 
         var acknowledgement = await arrangement.AbandonActiveWorkAsync(task!, "session-stop");
-        Assert.Equal(ReportAck.Accepted, acknowledgement);
+        Assert.Equal(WorkReportVerdict.Accepted, acknowledgement);
         Assert.Equal("Failed", await arrangement.Grain.GetRunStatusAsync());
         Assert.Null(await arrangement.Grain.GetCurrentWorkIdAsync());
 
@@ -216,14 +217,14 @@ public sealed class WorkflowGrainPauseResumeSpecs
             return await Grain.ClaimNextAsync(WorkerId, "test-generation");
         }
 
-        public async Task<ReportAck> AbandonActiveWorkAsync(WorkItem item, string reason) =>
+        public async Task<WorkReportVerdict> AbandonActiveWorkAsync(WorkItem item, string reason) =>
             await Grain.AbandonActiveWorkAsync(WorkerId, item.Id!, reason);
 
         /// <summary>
         /// Reports the claimed task complete, resolving the persisted task-run
         /// id the report must carry.
         /// </summary>
-        public async Task<ReportAck> ReportCompletedAsync(WorkItem item)
+        public async Task<WorkReportVerdict> ReportCompletedAsync(WorkItem item)
         {
             var run = await Store.LoadAsync(RunId) ?? throw new InvalidOperationException("run missing");
             var runningTask = run.CurrentStage().RunningTask
@@ -234,7 +235,7 @@ public sealed class WorkflowGrainPauseResumeSpecs
                 new TaskReport(item.Id!, TaskReportStatus.Succeeded, Output: null, Artifacts: null, TaskRunId: runningTask.Id));
         }
 
-        public async Task<ReportAck> ReportFollowUpAsync(WorkItem item, string followUpTaskId)
+        public async Task<WorkReportVerdict> ReportFollowUpAsync(WorkItem item, string followUpTaskId)
         {
             var run = await Store.LoadAsync(RunId) ?? throw new InvalidOperationException("run missing");
             var runningTask = run.CurrentStage().RunningTask
@@ -270,7 +271,7 @@ public sealed class WorkflowGrainPauseResumeSpecs
         return new Arrangement(grain, store, runId, "worker-1");
     }
 
-    private static async Task<ReportAck> ReportCompletedAsync(Arrangement arrangement, WorkItem item) =>
+    private static async Task<WorkReportVerdict> ReportCompletedAsync(Arrangement arrangement, WorkItem item) =>
         await arrangement.ReportCompletedAsync(item);
 
     private static async Task ReportChecksPassAsync(Arrangement arrangement, WorkItem check) =>

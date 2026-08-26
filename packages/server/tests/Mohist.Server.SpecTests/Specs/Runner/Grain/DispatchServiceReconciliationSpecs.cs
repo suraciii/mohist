@@ -131,7 +131,7 @@ public partial class DispatchServiceReconciliationSpecs : Mohist.Server.SpecTest
             "reconnect-turn",
             "opencode",
             "reconnect-runtime-session");
-        Assert.Equal(ReportAck.Accepted, await workflow.BindAgentExecutionAsync(binding));
+        Assert.Equal(WorkReportVerdict.Accepted, await workflow.BindAgentExecutionAsync(binding));
 
         var operation = await Grains.GetGrain<IRunnerUpdateOperationGrain>(runnerId).StartOrGetAsync(
             new RunnerUpdateOperation(
@@ -151,7 +151,7 @@ public partial class DispatchServiceReconciliationSpecs : Mohist.Server.SpecTest
             originalDispatch.WorkId,
             original.Id,
             RunnerUpdateWorkStatus.Marked);
-        Assert.Equal(ReportAck.Accepted, await workflow.MarkUpdateInterruptedAsync(
+        Assert.Equal(WorkReportVerdict.Accepted, await workflow.MarkUpdateInterruptedAsync(
             original.Id,
             originalDispatch.WorkId,
             runnerId,
@@ -217,10 +217,10 @@ public partial class DispatchServiceReconciliationSpecs : Mohist.Server.SpecTest
         var work = Assert.Single((await Dispatch.PollAsync(runnerId, new RunnerPollRequest([], []))).Dispatches);
         var key = WorkKey(_workflowId!, work.WorkId);
 
-        Assert.Equal(ReportAck.Accepted, await workflow.ObserveAgentRunnerDisconnectedAsync(runnerId));
+        Assert.Equal(WorkReportVerdict.Accepted, await workflow.ObserveAgentRunnerDisconnectedAsync(runnerId));
         Assert.Empty((await Dispatch.PollAsync(runnerId, new RunnerPollRequest([key], []))).Dispatches);
 
-        Assert.Equal(ReportAck.Accepted, await workflow.ReceiveTaskReportAsync(
+        Assert.Equal(WorkReportVerdict.Accepted, await workflow.ReceiveTaskReportAsync(
             runnerId,
             work.WorkId,
             new TaskReport(
@@ -242,7 +242,7 @@ public partial class DispatchServiceReconciliationSpecs : Mohist.Server.SpecTest
             checks: []));
         var runnerId = _runnerId!;
         var first = Assert.Single((await Dispatch.PollAsync(runnerId, new RunnerPollRequest([], []))).Dispatches);
-        Assert.Equal(ReportAck.Accepted, await workflow.BindAgentExecutionAsync(new AgentExecutionBinding(
+        Assert.Equal(WorkReportVerdict.Accepted, await workflow.BindAgentExecutionAsync(new AgentExecutionBinding(
             first.TaskRunId!,
             first.WorkId,
             runnerId,
@@ -251,7 +251,7 @@ public partial class DispatchServiceReconciliationSpecs : Mohist.Server.SpecTest
             "pi",
             "/pi/sessions/spec-1")));
 
-        Assert.Equal(ReportAck.Accepted, await workflow.ObserveAgentRunnerDisconnectedAsync(runnerId));
+        Assert.Equal(WorkReportVerdict.Accepted, await workflow.ObserveAgentRunnerDisconnectedAsync(runnerId));
 
         var redelivery = Assert.Single((await Dispatch.PollAsync(runnerId, new RunnerPollRequest([], []))).Dispatches);
         Assert.Equal(first.WorkflowRunId, redelivery.WorkflowRunId);
@@ -277,7 +277,7 @@ public partial class DispatchServiceReconciliationSpecs : Mohist.Server.SpecTest
 
         // An unknown observation without a bound execution leaves the
         // settlement without runtime facts; redelivery stays closed.
-        Assert.Equal(ReportAck.Accepted, await workflow.ObserveAgentResultUnknownAsync(
+        Assert.Equal(WorkReportVerdict.Accepted, await workflow.ObserveAgentResultUnknownAsync(
             runnerId,
             work.TaskRunId!,
             work.WorkId,
@@ -304,7 +304,7 @@ public partial class DispatchServiceReconciliationSpecs : Mohist.Server.SpecTest
             checks: []));
         var runnerId = _runnerId!;
         var first = Assert.Single((await Dispatch.PollAsync(runnerId, new RunnerPollRequest([], []))).Dispatches);
-        Assert.Equal(ReportAck.Accepted, await workflow.BindAgentExecutionAsync(new AgentExecutionBinding(
+        Assert.Equal(WorkReportVerdict.Accepted, await workflow.BindAgentExecutionAsync(new AgentExecutionBinding(
             first.TaskRunId!,
             first.WorkId,
             runnerId,
@@ -313,7 +313,7 @@ public partial class DispatchServiceReconciliationSpecs : Mohist.Server.SpecTest
             "pi",
             "/pi/sessions/spec-blocked")));
 
-        Assert.Equal(ReportAck.Accepted, await workflow.ObserveAgentRunnerDisconnectedAsync(runnerId));
+        Assert.Equal(WorkReportVerdict.Accepted, await workflow.ObserveAgentRunnerDisconnectedAsync(runnerId));
         var unsettled = await LoadRunAsync(_workflowId!);
         var deadline = Assert.Single(unsettled.CurrentStage().Tasks).AgentResultSettlement!.DeadlineAt!.Value;
         _fixture.TimeProvider.Advance(deadline - _fixture.TimeProvider.GetUtcNow());
@@ -330,7 +330,7 @@ public partial class DispatchServiceReconciliationSpecs : Mohist.Server.SpecTest
         Assert.Null(blocked.Assignment);
         Assert.Equal(first.WorkId, Assert.Single(blocked.CurrentStage().Tasks).WorkId);
 
-        Assert.Equal(ReportAck.Accepted, await workflow.ReceiveTaskReportAsync(
+        Assert.Equal(WorkReportVerdict.Accepted, await workflow.ReceiveTaskReportAsync(
             runnerId,
             first.WorkId,
             new TaskReport(
@@ -361,7 +361,7 @@ public partial class DispatchServiceReconciliationSpecs : Mohist.Server.SpecTest
             projectId);
         await recoveryWorkflow.StartAsync(TestInput(projectId));
         var work = Assert.Single((await Dispatch.PollAsync(runnerId, new RunnerPollRequest([], []))).Dispatches);
-        Assert.Equal(ReportAck.Accepted, await recoveryWorkflow.BindAgentExecutionAsync(new AgentExecutionBinding(
+        Assert.Equal(WorkReportVerdict.Accepted, await recoveryWorkflow.BindAgentExecutionAsync(new AgentExecutionBinding(
             work.TaskRunId!,
             work.WorkId,
             runnerId,
@@ -369,7 +369,7 @@ public partial class DispatchServiceReconciliationSpecs : Mohist.Server.SpecTest
             "turn-slots",
             "pi",
             "/pi/sessions/spec-slots")));
-        Assert.Equal(ReportAck.Accepted, await recoveryWorkflow.ObserveAgentRunnerDisconnectedAsync(runnerId));
+        Assert.Equal(WorkReportVerdict.Accepted, await recoveryWorkflow.ObserveAgentRunnerDisconnectedAsync(runnerId));
 
         var freshWorkflow = Grains.GetGrain<IWorkflowGrain>($"{projectId}-fresh");
         await SeedWorkflowTemplateAsync($"{projectId}-fresh", SingleStage(checks: []), projectId);
@@ -446,8 +446,8 @@ public partial class DispatchServiceReconciliationSpecs : Mohist.Server.SpecTest
                 $"turn-{work.WorkflowRunId}",
                 "pi",
                 $"/pi/sessions/{work.WorkflowRunId}");
-            Assert.Equal(ReportAck.Accepted, await workflow.BindAgentExecutionAsync(binding));
-            Assert.Equal(ReportAck.Accepted, await workflow.ObserveAgentExecutionAsync(
+            Assert.Equal(WorkReportVerdict.Accepted, await workflow.BindAgentExecutionAsync(binding));
+            Assert.Equal(WorkReportVerdict.Accepted, await workflow.ObserveAgentExecutionAsync(
                 new AgentExecutionObservation(binding, AgentExecutionObservationKind.Disconnected, "runner-disconnected")));
             bindings.Add(binding);
             var unknown = await LoadRunAsync(work.WorkflowRunId);
@@ -606,7 +606,7 @@ public partial class DispatchServiceReconciliationSpecs : Mohist.Server.SpecTest
             runnerId,
             new RunnerPollRequest([key], []))).Dispatches);
 
-        Assert.Equal(ReportAck.Accepted, await workflow.ReceiveTaskReportAsync(
+        Assert.Equal(WorkReportVerdict.Accepted, await workflow.ReceiveTaskReportAsync(
             runnerId,
             first.WorkId,
             new TaskReport(

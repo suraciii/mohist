@@ -1,4 +1,5 @@
 using System.Text.Json;
+using Mohist.Server.Infrastructure.Data.AgentJobs;
 using Mohist.Server.Agent.Grains;
 using Mohist.Server.Infrastructure;
 using Mohist.Server.Runner.Grains;
@@ -11,6 +12,14 @@ namespace Mohist.Server.Api;
 
 public static partial class RunnerRoutes
 {
+    private static string VerdictValue(WorkReportVerdict verdict) => verdict switch
+    {
+        WorkReportVerdict.Accepted => "accepted",
+        WorkReportVerdict.Refused => "refused",
+        WorkReportVerdict.Outstanding => "outstanding",
+        _ => throw new ArgumentOutOfRangeException(nameof(verdict), verdict, null),
+    };
+
     private static void MapReportRoute(RouteGroupBuilder group)
     {
         // Reports go directly to the owning grain. Only an accepted durable
@@ -64,11 +73,19 @@ public static partial class RunnerRoutes
 
             if (string.Equals(ownerKind, WorkDispatchOwnerKinds.AgentJob, StringComparison.Ordinal))
             {
-                var report = await grains.GetGrain<IAgentJobGrain>(req.AgentJobId ?? string.Empty)
-                    .ReportResultAsync(runnerId, req.WorkId, result);
-                var agentJobVerdict = report.Accepted ? "accepted" : "refused";
-                managerCredentials.RevokeWork(req.AgentJobId ?? string.Empty, req.WorkId);
-                return Results.Ok(new RunnerReportResponse(agentJobVerdict));
+                AgentJobReportResult report;
+                try
+                {
+                    report = await grains.GetGrain<IAgentJobGrain>(req.AgentJobId ?? string.Empty)
+                        .ReportResultAsync(runnerId, req.WorkId, result);
+                }
+                catch (AgentJobLedgerConflictException)
+                {
+                    report = new AgentJobReportResult(WorkReportVerdict.Outstanding, "ledger-conflict");
+                }
+                if (report.Verdict is WorkReportVerdict.Accepted or WorkReportVerdict.Refused)
+                    managerCredentials.RevokeWork(req.AgentJobId ?? string.Empty, req.WorkId);
+                return Results.Ok(new RunnerReportResponse(VerdictValue(report.Verdict)));
             }
 
             var (ack, workflowStatus) = await workflowReport.ReportAsync(
@@ -82,10 +99,7 @@ public static partial class RunnerRoutes
                 req.AgentTurnId,
                 req.Runtime,
                 req.RuntimeSessionId);
-            var verdict = string.Equals(ack, ReportAck.Accepted.ToString().ToLowerInvariant(), StringComparison.Ordinal)
-                ? "accepted"
-                : "refused";
-            return Results.Ok(new RunnerReportResponse(verdict));
+            return Results.Ok(new RunnerReportResponse(ack));
         });
     }
 }

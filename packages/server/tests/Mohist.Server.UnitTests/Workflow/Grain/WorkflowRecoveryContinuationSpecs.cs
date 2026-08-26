@@ -2,6 +2,7 @@ using Mohist.Server.UnitTests.Support;
 using Mohist.Server.Workflow.Domain.Run;
 using Mohist.Server.Workflow.Grains;
 using Xunit;
+using Mohist.Server.Runner.Grains;
 
 namespace Mohist.Server.UnitTests.Workflow.Grain;
 
@@ -36,7 +37,7 @@ public sealed class WorkflowRecoveryContinuationSpecs
                     OrleansL0WorkflowGrainFixture.RecoveryFollowUp()
                 }));
 
-        Assert.Equal(ReportAck.Accepted, acknowledgement);
+        Assert.Equal(WorkReportVerdict.Accepted, acknowledgement);
 
         var continuation = Assert.IsType<WorkItem>(await workflow.ClaimNextAsync(
             OrleansL0WorkflowGrainFixture.RecoveryRunnerId,

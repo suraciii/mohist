@@ -12,6 +12,7 @@ using Mohist.Server.Sessions.Grains;
 using Mohist.Server.TestSupport;
 using Mohist.Server.Workflow.Domain.Run;
 using Xunit;
+using Mohist.Server.Workflow.Grains;
 
 namespace Mohist.Server.SpecTests.Specs.Runner.Api;
 

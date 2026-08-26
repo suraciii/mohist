@@ -82,7 +82,7 @@ public static class DispatchTestExtensions
                     $"test-turn:{workId}",
                     "opencode",
                     $"test-runtime-session:{workId}");
-                if (await workflow.BindAgentExecutionAsync(candidate) == ReportAck.Accepted)
+                if (await workflow.BindAgentExecutionAsync(candidate) == WorkReportVerdict.Accepted)
                     binding = candidate;
             }
         }

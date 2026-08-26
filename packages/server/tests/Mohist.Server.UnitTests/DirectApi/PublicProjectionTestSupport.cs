@@ -15,6 +15,7 @@ using Mohist.Server.Sessions.Domain;
 using Mohist.Server.TestSupport;
 using Mohist.Server.UnitTests.Support;
 using Mohist.Server.Infrastructure.Events;
+using Mohist.Server.Workflow.Grains;
 
 namespace Mohist.Server.UnitTests.DirectApi;
 

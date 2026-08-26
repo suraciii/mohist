@@ -76,7 +76,7 @@ public sealed partial class WorkflowGrainStateSaveFailureSpecs
 
         var replay = CreateGrain(scope.ServiceProvider, failingStore, workflowRunId);
         await replay.OnActivateAsync(CancellationToken.None);
-        Assert.Equal(ReportAck.Accepted,
+        Assert.Equal(WorkReportVerdict.Accepted,
             await replay.ReceiveTaskReportAsync(workerId, work.Id!, report));
 
         Assert.Equal(TaskRunStatus.Completed,

@@ -12,6 +12,7 @@ using Mohist.Server.Workflow.Grains;
 using Mohist.Server.Workflow.Services;
 using Mohist.Workflow.Definition;
 using Xunit;
+using Mohist.Server.Runner.Grains;
 
 namespace Mohist.Server.UnitTests.Workflow.GrainContracts;
 
@@ -295,7 +296,7 @@ public sealed class WorkflowGrainRetrySpecs
                 Detail: "stale report",
                 TaskRunId: await PersistedTaskRunIdAsync(arrangement, "first.1")));
 
-        Assert.Equal(ReportAck.Stale, ack);
+        Assert.Equal(WorkReportVerdict.Refused, ack);
         var run = await RequireRunAsync(arrangement);
         Assert.Equal(TaskRunStatus.Completed, run.CurrentStage().Tasks.Single(task => task.Id == "first.1").Status);
         Assert.Equal(TaskRunStatus.Running, run.CurrentStage().Tasks.Single(task => task.Id == "second.1").Status);

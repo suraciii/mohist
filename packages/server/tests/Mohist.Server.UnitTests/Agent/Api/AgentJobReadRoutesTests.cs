@@ -18,6 +18,7 @@ using Mohist.Server.UnitTests.Support;
 using Orleans;
 using Orleans.Runtime;
 using Xunit;
+using Mohist.Server.Workflow.Grains;
 
 namespace Mohist.Server.UnitTests.Agent.Api;
 
@@ -427,7 +428,7 @@ internal sealed class ReadAgentJobGrain : IAgentJobGrain
 
     public Task<bool> IsWorkRunnableAsync(string runnerId, string workId) => Task.FromResult(false);
     public Task<AgentJobReportResult> ReportResultAsync(string runnerId, string workId, WorkResult result) =>
-        Task.FromResult(new AgentJobReportResult(false, "not-under-test"));
+        Task.FromResult(new AgentJobReportResult(WorkReportVerdict.Refused, "not-under-test"));
     public Task<AgentJobStatus> GetStatusAsync() => Task.FromResult(_status);
     public Task<string?> GetCurrentWorkIdAsync() => Task.FromResult<string?>(null);
     public Task<ClaimResult?> ClaimNextAsync(string runnerId) => Task.FromResult<ClaimResult?>(null);

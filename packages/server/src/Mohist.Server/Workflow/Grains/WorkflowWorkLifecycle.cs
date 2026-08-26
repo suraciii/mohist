@@ -212,6 +212,9 @@ internal sealed class WorkflowWorkLifecycle
         var currentStage = run.CurrentStage();
         currentStage.ChecksWorkId = checksWorkId;
         currentStage.ChecksProcessGeneration = processGeneration;
+        currentStage.TerminalChecksWorkId = null;
+        currentStage.TerminalChecksWorkerId = null;
+        currentStage.TerminalChecksResultFingerprint = null;
         var now = _owner.Now();
         foreach (var item in items)
         {

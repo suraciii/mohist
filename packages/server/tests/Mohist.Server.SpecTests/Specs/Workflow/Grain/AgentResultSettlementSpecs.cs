@@ -44,8 +44,8 @@ public sealed partial class AgentResultSettlementSpecs : WorkflowGrainSpecs
         var snapshots = Services.GetRequiredService<IDispatchSnapshotStore>();
         Assert.NotNull(await snapshots.LoadJsonAsync(_workflowId!, work.WorkId));
 
-        Assert.Equal(ReportAck.Accepted, await workflow.BindAgentExecutionAsync(binding));
-        Assert.Equal(ReportAck.Accepted, await workflow.ObserveAgentExecutionAsync(observation));
+        Assert.Equal(WorkReportVerdict.Accepted, await workflow.BindAgentExecutionAsync(binding));
+        Assert.Equal(WorkReportVerdict.Accepted, await workflow.ObserveAgentExecutionAsync(observation));
         Assert.Null(await snapshots.LoadJsonAsync(_workflowId!, work.WorkId));
 
         var unresolved = await LoadRunAsync(_workflowId!);
@@ -109,8 +109,8 @@ public sealed partial class AgentResultSettlementSpecs : WorkflowGrainSpecs
         var dispatch = Services.GetRequiredService<DispatchService>();
         var querier = Services.GetRequiredService<WorkflowRunQuerier>();
 
-        Assert.Equal(ReportAck.Accepted, await workflow.BindAgentExecutionAsync(binding));
-        Assert.Equal(ReportAck.Accepted, await workflow.ObserveAgentExecutionAsync(observation));
+        Assert.Equal(WorkReportVerdict.Accepted, await workflow.BindAgentExecutionAsync(binding));
+        Assert.Equal(WorkReportVerdict.Accepted, await workflow.ObserveAgentExecutionAsync(observation));
 
         // Pre-deadline Unknown lease: the run is in the runner's activeWorks,
         // counts against capacity, and is part of the desired redelivery set.
@@ -171,7 +171,7 @@ public sealed partial class AgentResultSettlementSpecs : WorkflowGrainSpecs
         // A matching late authoritative report still settles the attempt
         // through the workflow report path without reintroducing it into
         // activeWorks or capacity.
-        Assert.Equal(ReportAck.Accepted, await workflow.ReceiveTaskReportAsync(
+        Assert.Equal(WorkReportVerdict.Accepted, await workflow.ReceiveTaskReportAsync(
             runnerId,
             work.WorkId,
             new TaskReport(
@@ -216,8 +216,8 @@ public sealed partial class AgentResultSettlementSpecs : WorkflowGrainSpecs
         var dispatch = Services.GetRequiredService<DispatchService>();
         var querier = Services.GetRequiredService<WorkflowRunQuerier>();
 
-        Assert.Equal(ReportAck.Accepted, await workflow.BindAgentExecutionAsync(binding));
-        Assert.Equal(ReportAck.Accepted, await workflow.ObserveAgentExecutionAsync(observation));
+        Assert.Equal(WorkReportVerdict.Accepted, await workflow.BindAgentExecutionAsync(binding));
+        Assert.Equal(WorkReportVerdict.Accepted, await workflow.ObserveAgentExecutionAsync(observation));
 
         var unknown = await LoadRunAsync(_workflowId!);
         var deadline = Assert.IsType<DateTimeOffset>(
@@ -295,7 +295,7 @@ public sealed partial class AgentResultSettlementSpecs : WorkflowGrainSpecs
         // A subsequent matching late authoritative report still settles the
         // attempt, proving only an authoritative success/failure can clear
         // the Blocked state through ReceiveTaskReportAsync.
-        Assert.Equal(ReportAck.Accepted, await workflow.ReceiveTaskReportAsync(
+        Assert.Equal(WorkReportVerdict.Accepted, await workflow.ReceiveTaskReportAsync(
             runnerId,
             work.WorkId,
             new TaskReport(

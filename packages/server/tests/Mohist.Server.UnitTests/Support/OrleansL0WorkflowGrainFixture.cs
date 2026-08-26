@@ -60,7 +60,7 @@ public sealed class OrleansL0WorkflowGrainFixture : WorkflowGrainFixture
             warmupRunnerId,
             warmupWorkId,
             RecoveryReport(warmupWorkId));
-        if (warmupAck != ReportAck.Accepted || await warmupWorkflow.ClaimNextAsync(warmupRunnerId, "test-generation") is null)
+        if (warmupAck != WorkReportVerdict.Accepted || await warmupWorkflow.ClaimNextAsync(warmupRunnerId, "test-generation") is null)
             throw new InvalidOperationException("Recovery continuation warmup failed");
 
         RecoveryFreshWorkId = await PrepareRecoveryWorkflowAsync(

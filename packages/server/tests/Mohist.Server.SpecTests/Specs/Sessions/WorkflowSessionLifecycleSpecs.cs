@@ -13,6 +13,7 @@ using Mohist.Server.Workflow.Domain.Run;
 using Mohist.Server.Workflow.Grains;
 using Mohist.Workflow.Definition;
 using Xunit;
+using Mohist.Server.Runner.Grains;
 
 namespace Mohist.Server.SpecTests.Specs.Sessions;
 
@@ -110,7 +111,7 @@ public sealed class WorkflowSessionLifecycleSpecs
         Assert.Equal(active.Work.Id, await active.Workflow.GetCurrentWorkIdAsync());
         Assert.NotNull(await active.Workflow.GetActiveWorkAsync(active.Work.Id!));
         Assert.Equal(
-            ReportAck.Accepted,
+            WorkReportVerdict.Accepted,
             await active.Workflow.ReceiveTaskReportAsync(active.RunnerId, active.Work.Id!, new TaskReport(
                 active.Work.Id!,
                 TaskReportStatus.Failed,
@@ -120,7 +121,7 @@ public sealed class WorkflowSessionLifecycleSpecs
                 TaskRunId: active.TaskRunId)));
         Assert.Null(await active.Workflow.GetCurrentWorkIdAsync());
         Assert.Equal(
-            ReportAck.Stale,
+            WorkReportVerdict.Refused,
             await active.Workflow.ReceiveTaskReportAsync(active.RunnerId, active.Work.Id!, new TaskReport(
                 active.Work.Id!,
                 TaskReportStatus.Failed,
@@ -158,7 +159,7 @@ public sealed class WorkflowSessionLifecycleSpecs
         Assert.NotNull(await active.Workflow.GetActiveWorkAsync(active.Work.Id!));
 
         Assert.Equal(
-            ReportAck.Accepted,
+            WorkReportVerdict.Accepted,
             await active.Workflow.ReceiveTaskReportAsync(active.RunnerId, active.Work.Id!, new TaskReport(
                 active.Work.Id!,
                 TaskReportStatus.Succeeded,

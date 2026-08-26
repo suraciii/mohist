@@ -107,7 +107,7 @@ public class RunnerOutstandingWorkSpecs : WorkflowGrainSpecs
             $"turn-{uses}",
             uses == "mohist/pi" ? "pi" : "opencode",
             $"runtime-{uses}");
-        Assert.Equal(ReportAck.Accepted, await workflow.BindAgentExecutionAsync(binding));
+        Assert.Equal(WorkReportVerdict.Accepted, await workflow.BindAgentExecutionAsync(binding));
 
         var runner = Grains.GetGrain<IRunnerGrain>(runnerId);
         await runner.UnregisterAsync();
@@ -225,7 +225,7 @@ public class RunnerOutstandingWorkSpecs : WorkflowGrainSpecs
         var taskRunId = interrupted.Stages.Single().Tasks.Single().Id;
         var deadline = interrupted.Stages.Single().Tasks.Single().Interruption!.RecoveryDeadlineAt;
 
-        Assert.Equal(ReportAck.Accepted, await workflow.ReceiveTaskReportAsync(
+        Assert.Equal(WorkReportVerdict.Accepted, await workflow.ReceiveTaskReportAsync(
             runnerId,
             work.WorkId,
             new TaskReport(

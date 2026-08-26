@@ -244,7 +244,7 @@ public sealed partial class WorkflowGrainStateSaveFailureSpecs
         Assert.NotNull(settlement.DeadlineAt);
         Assert.Equal(1, calls.EnsureAttempts);
 
-        Assert.Equal(ReportAck.Accepted, await failing.ObserveAgentExecutionAsync(observation));
+        Assert.Equal(WorkReportVerdict.Accepted, await failing.ObserveAgentExecutionAsync(observation));
         var retried = await store.LoadAsync(workflowRunId);
         var retriedSettlement = Assert.IsType<AgentResultSettlement>(
             Assert.Single(retried!.CurrentStage().Tasks).AgentResultSettlement);
@@ -362,7 +362,7 @@ public sealed partial class WorkflowGrainStateSaveFailureSpecs
             "agent-turn",
             "opencode",
             "runtime-session");
-        Assert.Equal(ReportAck.Accepted, await grain.BindAgentExecutionAsync(binding));
+        Assert.Equal(WorkReportVerdict.Accepted, await grain.BindAgentExecutionAsync(binding));
         return binding;
     }
 

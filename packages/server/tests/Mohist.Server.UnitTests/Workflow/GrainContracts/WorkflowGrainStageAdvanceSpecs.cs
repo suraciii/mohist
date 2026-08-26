@@ -8,6 +8,7 @@ using Mohist.Server.Workflow.Domain.Run;
 using Mohist.Server.Workflow.Grains;
 using Mohist.Workflow.Definition;
 using Xunit;
+using Mohist.Server.Runner.Grains;
 
 namespace Mohist.Server.UnitTests.Workflow.GrainContracts;
 
@@ -138,7 +139,7 @@ public sealed class WorkflowGrainStageAdvanceSpecs
         var claimed = (await arrangement.AssignAndClaimAsync())!;
 
         var stale = await arrangement.ReportUnknownWorkAsync("unknown-work");
-        Assert.Equal(ReportAck.Stale, stale);
+        Assert.Equal(WorkReportVerdict.Refused, stale);
         Assert.Equal(claimed.Id, await arrangement.Grain.GetCurrentWorkIdAsync());
 
         await arrangement.ReportCompletedAsync(claimed);

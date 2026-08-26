@@ -348,7 +348,7 @@ public sealed class RunnerPollRecoveryStateApiSpecs
                 "opencode",
                 "route-receipt-runtime-session");
             var workflow = _fixture.Grains.GetGrain<IWorkflowGrain>(workflowRunId);
-            Assert.Equal(ReportAck.Accepted, await workflow.BindAgentExecutionAsync(binding));
+            Assert.Equal(WorkReportVerdict.Accepted, await workflow.BindAgentExecutionAsync(binding));
 
             var result = new WorkResult("completed", "route receipt");
             var receipt = new RuntimeRecoveryReceipt(

@@ -10,6 +10,7 @@ using Mohist.Server.Workflow.Grains;
 using Mohist.Server.Workflow.Services;
 using Mohist.Workflow.Definition;
 using Xunit;
+using Mohist.Server.Runner.Grains;
 
 namespace Mohist.Server.UnitTests.Workflow.GrainContracts;
 
@@ -196,7 +197,7 @@ public sealed class WorkflowGrainApprovalRecoverySpecs
                 new RuntimeTaskInput("recover:fix-ci", "Fix CI verification", "spec/fix"),
                 new RuntimeTaskInput("verify", "Verify", "spec/verify", Recovery: recovery, RecoveryRemaining: 0),
             ]);
-        Assert.Equal(ReportAck.Accepted, report);
+        Assert.Equal(WorkReportVerdict.Accepted, report);
 
         var fix = (await arrangement.AssignAndClaimAsync())!;
         Assert.Equal("recover:fix-ci.1", fix.Id);

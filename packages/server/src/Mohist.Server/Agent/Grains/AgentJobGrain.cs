@@ -17,6 +17,7 @@ using Mohist.Server.Sessions.Grains;
 using Mohist.Server.Sessions.Services;
 using Mohist.Server.Slack.Services;
 using Mohist.Server.Workspace.Grains;
+using Mohist.Server.Workflow.Grains;
 using Orleans.Runtime;
 
 namespace Mohist.Server.Agent.Grains;
@@ -460,25 +461,27 @@ public sealed partial class AgentJobGrain : Grain, IAgentJobGrain
     {
         await HydrateAsync();
 
-        // A late report cannot win the recovery-deadline race merely because
-        // the durable reminder has not executed yet. Terminalize the
-        // recovering job first, then return Stale so the reporter retires its
-        // journal entry.
+        var fingerprint = RuntimeRecoveryReceiptFingerprint.For(result);
         if (await FailRecoveringJobIfDueAsync())
-            return new AgentJobReportResult(false, "stale");
+            return new AgentJobReportResult(WorkReportVerdict.Refused, "stale");
 
         if (IsTerminal)
         {
+            var exactReplay = string.Equals(State.AcceptedReportRunnerId, runnerId, StringComparison.Ordinal)
+                && string.Equals(State.AcceptedReportWorkId, workId, StringComparison.Ordinal)
+                && string.Equals(State.AcceptedReportFingerprint, fingerprint, StringComparison.Ordinal);
             _log.LogDebug(
-                "AgentJob {Id} rejecting report from {Runner} for {Work}: already in terminal {Status}",
-                Key, runnerId, workId, State.Status);
+                "AgentJob {Id} arbitrated terminal report from {Runner} for {Work}: {Verdict}",
+                Key, runnerId, workId, exactReplay ? WorkReportVerdict.Accepted : WorkReportVerdict.Refused);
             if (State.PendingSessionClose is not null)
                 await DeliverTerminalToSessionAsync(State.PendingSessionClose);
             if (State.PendingTerminalDeliveryEvent is not null)
                 await EmitTerminalDeliveryEventAsync(State.PendingTerminalDeliveryEvent);
             if (State.PendingSubagentTerminalEvent is not null)
                 await EmitSubagentTerminalEventAsync(State.PendingSubagentTerminalEvent);
-            return new AgentJobReportResult(false, "stale");
+            return new AgentJobReportResult(
+                exactReplay ? WorkReportVerdict.Accepted : WorkReportVerdict.Refused,
+                exactReplay ? null : "stale");
         }
 
         if (State.Status is not (AgentJobStatus.Running or AgentJobStatus.Unknown))
@@ -486,7 +489,7 @@ public sealed partial class AgentJobGrain : Grain, IAgentJobGrain
             _log.LogWarning(
                 "AgentJob {Id} rejecting report from {Runner} for {Work}: unexpected status {Status}",
                 Key, runnerId, workId, State.Status);
-            return new AgentJobReportResult(false, "not-running");
+            return new AgentJobReportResult(WorkReportVerdict.Refused, "not-running");
         }
 
         if (!string.Equals(State.RunnerId, runnerId, StringComparison.Ordinal)
@@ -495,7 +498,7 @@ public sealed partial class AgentJobGrain : Grain, IAgentJobGrain
             _log.LogWarning(
                 "AgentJob {Id} rejecting report from {Runner} for {Work}: expected {ExpectedRunner}/{ExpectedWork}",
                 Key, runnerId, workId, State.RunnerId, State.WorkId);
-            return new AgentJobReportResult(false, "runner-or-work-mismatch");
+            return new AgentJobReportResult(WorkReportVerdict.Refused, "runner-or-work-mismatch");
         }
         if (IsManagerCredentialExpired(result)) return await ReportManagerCredentialExpiredAsync(result);
         if (string.Equals(result.Status, "unknown", StringComparison.OrdinalIgnoreCase)) return await ReportUnknownResultAsync(result);
@@ -514,6 +517,9 @@ public sealed partial class AgentJobGrain : Grain, IAgentJobGrain
                 ?? FailureCategoryFromErrorCode(result.ErrorCode)
                 ?? FailureCategoryFromStatus(result.Status);
 
+        State.AcceptedReportRunnerId = runnerId;
+        State.AcceptedReportWorkId = workId;
+        State.AcceptedReportFingerprint = fingerprint;
         await EnterTerminalStateAsync(
             isSuccess ? AgentJobStatus.Completed : AgentJobStatus.Failed,
             isSuccess ? (int?)0 : (result.ExitCode ?? 1),
@@ -527,7 +533,7 @@ public sealed partial class AgentJobGrain : Grain, IAgentJobGrain
             result.ArtifactUploadIds,
             result.ExitCode);
 
-        return new AgentJobReportResult(true);
+        return new AgentJobReportResult(WorkReportVerdict.Accepted);
     }
 
     public async Task FailAsync(string reason, string? agentId = null)

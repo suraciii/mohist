@@ -5,7 +5,6 @@ using Microsoft.Extensions.Time.Testing;
 using Mohist.Server.Infrastructure;
 using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Infrastructure.Data.Workflow;
-using Mohist.Server.Runner.Grains;
 using Mohist.Server.Runner.Services;
 using Mohist.Server.UnitTests.Support;
 using Mohist.Server.TestSupport;
@@ -56,7 +55,7 @@ public sealed class WorkflowItemTranslatorLivePromptSpecs : IAsyncLifetime
             [],
             DateTimeOffset.UnixEpoch);
         run.AssignTo("runner-1", DateTimeOffset.UnixEpoch);
-        run.StartTask(item.Id!, "runner-1", DateTimeOffset.UnixEpoch);
+        run.StartTask(item.Id!, "runner-1", "test-process-generation", DateTimeOffset.UnixEpoch);
         var first = await _translator.TranslateToDispatchAsync(item, runId, run, "runner-1");
 
         await SetPromptAsync(projectId, "updated body");

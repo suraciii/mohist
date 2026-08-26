@@ -1,7 +1,6 @@
 using System.Text.Json;
 using Mohist.Workflow.Definition;
 using Mohist.Server.Workflow.Domain;
-using Mohist.Server.Runner.Grains;
 using Mohist.Server.Workflow.Services;
 
 namespace Mohist.Server.Workflow.Domain.Run;
@@ -271,9 +270,20 @@ public static partial class WorkflowRunExtensions
                 .Where(stage => string.Equals(stage.ChecksWorkId, workId, StringComparison.Ordinal))
                 .Take(2)
                 .ToList();
-            return checkMatches.Count == 1
-                ? ActiveChecks(checkMatches[0])?.Item
-                : null;
+            if (checkMatches.Count == 1)
+                return ActiveChecks(checkMatches[0])?.Item;
+
+            var terminalCheckMatches = run.Stages
+                .Where(stage => string.Equals(stage.TerminalChecksWorkId, workId, StringComparison.Ordinal))
+                .Take(2)
+                .ToList();
+            if (terminalCheckMatches.Count != 1)
+                return null;
+            var terminalStage = terminalCheckMatches[0];
+            var checks = terminalStage.Checks
+                .Select(check => new CheckItem(check.Name, check.Title, check.Uses, check.WithInput))
+                .ToList();
+            return WorkItem.Checks(terminalStage.Id, workId, checks);
         }
 
         /// <summary>

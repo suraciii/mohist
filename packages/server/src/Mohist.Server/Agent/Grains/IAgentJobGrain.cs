@@ -4,6 +4,7 @@ using Mohist.Server.Contracts;
 using Mohist.Server.Infrastructure;
 using Mohist.Server.Runner.Grains;
 using Mohist.Server.Sessions.Domain;
+using Mohist.Server.Workflow.Grains;
 using Orleans.Concurrency;
 
 namespace Mohist.Server.Agent.Grains;
@@ -256,8 +257,11 @@ public sealed record PendingSubagentTerminalEvent(
 
 [GenerateSerializer]
 public sealed record AgentJobReportResult(
-    [property: Id(0)] bool Accepted,
-    [property: Id(1)] string? Reason = null);
+    [property: Id(0)] WorkReportVerdict Verdict,
+    [property: Id(1)] string? Reason = null)
+{
+    public bool Accepted => Verdict == WorkReportVerdict.Accepted;
+}
 
 [GenerateSerializer]
 public sealed record AgentJobRuntimeSnapshot(

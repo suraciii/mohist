@@ -124,13 +124,19 @@ public class AgentJobGrainSpecs : AgentJobGrainTestSupport
             AgentJobId: jobKey,
             OwnerKind: WorkDispatchOwnerKinds.AgentJob);
 
-        var report = await job.ReportResultAsync(
-            runnerId,
-            workId,
-            new WorkResult("completed", "ok", Output: JSON.DeserializeElement("{}"), ExitCode: 0, ArtifactUploadIds: ["artifact-1"]));
-        Assert.True(report.Accepted);
+        var result = new WorkResult("completed", "ok", Output: JSON.DeserializeElement("{}"), ExitCode: 0, ArtifactUploadIds: ["artifact-1"]);
+        var report = await job.ReportResultAsync(runnerId, workId, result);
+        Assert.Equal(WorkReportVerdict.Accepted, report.Verdict);
 
         await WaitForStatusAsync(job, AgentJobStatus.Completed, TimeSpan.FromSeconds(5));
+
+        var exactReplay = await job.ReportResultAsync(runnerId, workId, result);
+        Assert.Equal(WorkReportVerdict.Accepted, exactReplay.Verdict);
+        var conflictingReplay = await job.ReportResultAsync(
+            runnerId,
+            workId,
+            result with { Message = "conflicting result" });
+        Assert.Equal(WorkReportVerdict.Refused, conflictingReplay.Verdict);
 
         var terminal = await job.GetTerminalResultAsync();
         Assert.Equal(AgentJobStatus.Completed, terminal.Status);

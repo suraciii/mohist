@@ -107,6 +107,9 @@ public sealed class AgentJobState
     /// interim Unknown projection retryable.
     /// </summary>
     [Id(48)] public string? RecoveryFailureCategory { get; set; }
+    [Id(49)] public string? AcceptedReportRunnerId { get; set; }
+    [Id(50)] public string? AcceptedReportWorkId { get; set; }
+    [Id(51)] public string? AcceptedReportFingerprint { get; set; }
 }
 
 

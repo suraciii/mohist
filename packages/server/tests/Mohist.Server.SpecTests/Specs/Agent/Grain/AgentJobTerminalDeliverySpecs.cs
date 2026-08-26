@@ -3,7 +3,6 @@ using Microsoft.EntityFrameworkCore;
 using Mohist.Server.Agent.Grains;
 using Mohist.Server.Infrastructure;
 using Mohist.Server.Infrastructure.Events;
-using Mohist.Server.Runner.Grains;
 using Mohist.Server.Sessions.Domain;
 using Mohist.Server.Sessions.Grains;
 using Mohist.Server.Sessions.Services;
@@ -11,6 +10,8 @@ using Mohist.Server.SpecTests.Support;
 using Mohist.Server.TestSupport;
 using Orleans;
 using Xunit;
+using Mohist.Server.Runner.Grains;
+using Mohist.Server.Workflow.Grains;
 
 namespace Mohist.Server.SpecTests.Specs.Agent.Grain;
 

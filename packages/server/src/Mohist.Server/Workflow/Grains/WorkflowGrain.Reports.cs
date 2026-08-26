@@ -8,16 +8,16 @@ namespace Mohist.Server.Workflow.Grains;
 
 public partial class WorkflowGrain
 {
-    public async Task<ReportAck> BindAgentExecutionAsync(AgentExecutionBinding binding)
+    public async Task<WorkReportVerdict> BindAgentExecutionAsync(AgentExecutionBinding binding)
     {
         RejectIfRunReloadRequired();
-        if (_run is null) return ReportAck.Stale;
+        if (_run is null) return WorkReportVerdict.Refused;
 
         var update = _run.BindAgentExecution(binding);
-        if (update == AgentExecutionUpdate.Rejected) return ReportAck.Stale;
+        if (update == AgentExecutionUpdate.Rejected) return WorkReportVerdict.Refused;
         if (update == AgentExecutionUpdate.Updated)
             await CommitAsync([]);
-        return ReportAck.Accepted;
+        return WorkReportVerdict.Accepted;
     }
 
     public Task<AgentExecutionBinding?> GetBoundAgentExecutionAsync(
@@ -29,7 +29,7 @@ public partial class WorkflowGrain
         return Task.FromResult(_run?.FindBoundAgentExecution(taskRunId, workId, runnerId));
     }
 
-    public async Task<ReportAck> MarkUpdateInterruptedAsync(
+    public async Task<WorkReportVerdict> MarkUpdateInterruptedAsync(
         string taskRunId,
         string workId,
         string runnerId,
@@ -39,7 +39,7 @@ public partial class WorkflowGrain
     {
         RejectIfRunReloadRequired();
         if (_run is null)
-            return ReportAck.Stale;
+            return WorkReportVerdict.Refused;
 
         var interruptedAtValue = interruptedAt ?? Now();
         var existingTask = _run.FindTaskForRecoveryReceipt(taskRunId, workId);
@@ -52,7 +52,7 @@ public partial class WorkflowGrain
             interruptedAtValue,
             settlementTimeout ?? _agentResultSettlementTimeout);
         if (update == AgentExecutionUpdate.Rejected)
-            return ReportAck.Stale;
+            return WorkReportVerdict.Refused;
         if (update == AgentExecutionUpdate.Updated)
         {
             var stage = _run.Stages.Single(stage => stage.Tasks.Any(task =>
@@ -96,10 +96,10 @@ public partial class WorkflowGrain
         // not, the existing settlement reminder converts the fenced work to
         // the explicit agent-result-unconfirmed blocked state.
         await ReconcileAgentResultSettlementAsync();
-        return ReportAck.Accepted;
+        return WorkReportVerdict.Accepted;
     }
 
-    public async Task<ReportAck> MarkUpdateStopFailureAsync(
+    public async Task<WorkReportVerdict> MarkUpdateStopFailureAsync(
         string taskRunId,
         string workId,
         string runnerId,
@@ -108,7 +108,7 @@ public partial class WorkflowGrain
     {
         RejectIfRunReloadRequired();
         if (_run is null || string.IsNullOrWhiteSpace(failure))
-            return ReportAck.Stale;
+            return WorkReportVerdict.Refused;
 
         var task = _run.FindTaskForRecoveryReceipt(taskRunId, workId);
         var settlement = task?.AgentResultSettlement;
@@ -122,7 +122,7 @@ public partial class WorkflowGrain
             || !string.Equals(settlement.UpdateOperationId, updateOperationId, StringComparison.Ordinal)
             || task.AgentInterruption is null)
         {
-            return ReportAck.Stale;
+            return WorkReportVerdict.Refused;
         }
 
         var transition = task.AgentInterruption with { StopFailure = failure, RecordedAt = Now() };
@@ -133,7 +133,7 @@ public partial class WorkflowGrain
             new AgentTaskInterruptionLifecycleChanged(stage.Id, task.Id, transition)
         ]);
         await DeliverPendingSessionInterruptionAsync();
-        return ReportAck.Accepted;
+        return WorkReportVerdict.Accepted;
     }
 
     public Task<bool> CanStartAgentCleanupAsync(AgentExecutionBinding binding)
@@ -142,10 +142,10 @@ public partial class WorkflowGrain
         return Task.FromResult(_run?.CanStartAgentCleanup(binding) == true);
     }
 
-    public async Task<ReportAck> ObserveAgentExecutionAsync(AgentExecutionObservation observation)
+    public async Task<WorkReportVerdict> ObserveAgentExecutionAsync(AgentExecutionObservation observation)
     {
         RejectIfRunReloadRequired();
-        if (_run is null) return ReportAck.Stale;
+        if (_run is null) return WorkReportVerdict.Refused;
 
         // Reconcile a due settlement before applying a late observation. The
         // deadline owns the race, so an observation cannot update a result
@@ -155,7 +155,7 @@ public partial class WorkflowGrain
         var existing = _run.FindAgentResultSettlementTask(observation.Binding);
         var wasAwaitingResult = existing?.Task.AgentResultSettlement?.State == AgentResultSettlementState.AwaitingResult;
         var update = _run.ObserveAgentExecution(observation, Now(), _agentResultSettlementTimeout);
-        if (update == AgentExecutionUpdate.Rejected) return ReportAck.Stale;
+        if (update == AgentExecutionUpdate.Rejected) return WorkReportVerdict.Refused;
         if (update == AgentExecutionUpdate.Updated)
         {
             var settlement = _run.FindAgentResultSettlementTask(observation.Binding)?.Task.AgentResultSettlement;
@@ -171,10 +171,10 @@ public partial class WorkflowGrain
         }
 
         await ReconcileAgentResultSettlementAsync();
-        return ReportAck.Accepted;
+        return WorkReportVerdict.Accepted;
     }
 
-    public async Task<ReportAck> ObserveAgentResultUnknownAsync(
+    public async Task<WorkReportVerdict> ObserveAgentResultUnknownAsync(
         string workerId,
         string taskRunId,
         string workId,
@@ -182,7 +182,7 @@ public partial class WorkflowGrain
         string? message = null)
     {
         RejectIfRunReloadRequired();
-        if (_run is null) return ReportAck.Stale;
+        if (_run is null) return WorkReportVerdict.Refused;
 
         await ReconcileAgentResultSettlementIfDueAsync();
 
@@ -192,7 +192,7 @@ public partial class WorkflowGrain
         var update = attempt is not null
             ? _run.ObserveAgentResultUnknown(taskRunId, workId, workerId, reasonCode, message, observedAt, _agentResultSettlementTimeout)
             : AgentExecutionUpdate.Rejected;
-        if (update == AgentExecutionUpdate.Rejected) return ReportAck.Stale;
+        if (update == AgentExecutionUpdate.Rejected) return WorkReportVerdict.Refused;
         if (update == AgentExecutionUpdate.Updated)
         {
             await CommitAsync(wasAwaitingResult && attempt is not null
@@ -206,13 +206,13 @@ public partial class WorkflowGrain
         }
 
         await ReconcileAgentResultSettlementAsync();
-        return ReportAck.Accepted;
+        return WorkReportVerdict.Accepted;
     }
 
-    public async Task<ReportAck> ObserveAgentRunnerDisconnectedAsync(string workerId)
+    public async Task<WorkReportVerdict> ObserveAgentRunnerDisconnectedAsync(string workerId)
     {
         RejectIfRunReloadRequired();
-        if (_run is null) return ReportAck.Stale;
+        if (_run is null) return WorkReportVerdict.Refused;
 
         await ReconcileAgentResultSettlementIfDueAsync();
 
@@ -223,7 +223,7 @@ public partial class WorkflowGrain
             : _run.Stages.SelectMany(stage => stage.Tasks).SingleOrDefault(candidate => candidate.Id == taskRunId);
         var wasAwaitingResult = task?.AgentResultSettlement?.State == AgentResultSettlementState.AwaitingResult;
         var update = _run.ObserveAgentRunnerDisconnected(workerId, Now(), _agentResultSettlementTimeout);
-        if (update == AgentExecutionUpdate.Rejected) return ReportAck.Stale;
+        if (update == AgentExecutionUpdate.Rejected) return WorkReportVerdict.Refused;
         if (update == AgentExecutionUpdate.Updated)
         {
             var deadline = task?.AgentResultSettlement?.DeadlineAt;
@@ -233,37 +233,37 @@ public partial class WorkflowGrain
         }
 
         await ReconcileAgentResultSettlementAsync();
-        return ReportAck.Accepted;
+        return WorkReportVerdict.Accepted;
     }
 
-    public async Task<ReportAck> FailActiveWorkAsync(string workerId, string message)
+    public async Task<WorkReportVerdict> FailActiveWorkAsync(string workerId, string message)
     {
         RejectIfRunReloadRequired();
-        if (_run is null || !_run.IsAssignedTo(workerId)) return ReportAck.Stale;
+        if (_run is null || !_run.IsAssignedTo(workerId)) return WorkReportVerdict.Refused;
         var activeWork = _run.CurrentActiveWorkFor(workerId);
-        if (activeWork is null) return ReportAck.Stale;
+        if (activeWork is null) return WorkReportVerdict.Refused;
         if (activeWork.IsTask && _run.CurrentStage().RunningTask?.AgentResultSettlement is not null)
-            return ReportAck.Stale;
+            return WorkReportVerdict.Refused;
         return await FailActiveWorkCoreAsync(activeWork, message);
     }
 
-    public async Task<ReportAck> FailActiveWorkAsync(
+    public async Task<WorkReportVerdict> FailActiveWorkAsync(
         string workerId,
         string workId,
         string processGeneration,
         string message)
     {
         RejectIfRunReloadRequired();
-        if (_run is null || !_run.IsAssignedTo(workerId)) return ReportAck.Stale;
+        if (_run is null || !_run.IsAssignedTo(workerId)) return WorkReportVerdict.Refused;
         var activeWork = _run.CurrentActiveWorkFor(workerId);
         if (activeWork is null
             || !string.Equals(activeWork.WorkId, workId, StringComparison.Ordinal)
             || !string.Equals(activeWork.ProcessGeneration, processGeneration, StringComparison.Ordinal))
-            return ReportAck.Stale;
+            return WorkReportVerdict.Refused;
         return await FailActiveWorkCoreAsync(activeWork, message);
     }
 
-    private async Task<ReportAck> FailActiveWorkCoreAsync(WorkflowActiveWork activeWork, string message)
+    private async Task<WorkReportVerdict> FailActiveWorkCoreAsync(WorkflowActiveWork activeWork, string message)
     {
         var now = Now();
         IReadOnlyList<WorkflowEvent> events;
@@ -279,25 +279,25 @@ public partial class WorkflowGrain
         }
         else
         {
-            return ReportAck.Stale;
+            return WorkReportVerdict.Refused;
         }
 
-        if (events.Count == 0) return ReportAck.Stale;
+        if (events.Count == 0) return WorkReportVerdict.Refused;
         await CommitAsync(events);
         if (terminalWorkId is not null)
             await DeleteSnapshotBestEffortAsync(terminalWorkId);
-        return ReportAck.Accepted;
+        return WorkReportVerdict.Accepted;
     }
 
-    public async Task<ReportAck> AbandonActiveWorkAsync(string workerId, string workId, string reason)
+    public async Task<WorkReportVerdict> AbandonActiveWorkAsync(string workerId, string workId, string reason)
     {
         RejectIfRunReloadRequired();
-        if (_run is null || !_run.IsAssignedTo(workerId)) return ReportAck.Stale;
+        if (_run is null || !_run.IsAssignedTo(workerId)) return WorkReportVerdict.Refused;
 
         var activeWork = _run.FindActiveWork(workId, workerId);
-        if (activeWork is null) return ReportAck.Stale;
+        if (activeWork is null) return WorkReportVerdict.Refused;
         if (activeWork.IsTask && _run.CurrentStage().RunningTask?.AgentResultSettlement is not null)
-            return ReportAck.Stale;
+            return WorkReportVerdict.Refused;
 
         await _stageLockCoordinator.ReleaseCurrentStageLocksAsync(reason);
 
@@ -307,7 +307,7 @@ public partial class WorkflowGrain
             if (activeWork.IsTask)
             {
                 if (!_run.RequeueTaskAfterPausedStop(workId, workerId))
-                    return ReportAck.Stale;
+                    return WorkReportVerdict.Refused;
             }
             else if (activeWork.IsChecks)
             {
@@ -315,7 +315,7 @@ public partial class WorkflowGrain
             }
             else
             {
-                return ReportAck.Stale;
+                return WorkReportVerdict.Refused;
             }
 
             events = [];
@@ -333,7 +333,7 @@ public partial class WorkflowGrain
             }
             else
             {
-                return ReportAck.Stale;
+                return WorkReportVerdict.Refused;
             }
         }
         else if (activeWork.IsTask)
@@ -346,34 +346,34 @@ public partial class WorkflowGrain
         }
         else
         {
-            return ReportAck.Stale;
+            return WorkReportVerdict.Refused;
         }
 
         await CommitAsync(events);
         if (activeWork.IsTask)
             await DeleteSnapshotBestEffortAsync(workId);
-        return ReportAck.Accepted;
+        return WorkReportVerdict.Accepted;
     }
 
-    public async Task<ReportAck> RejectActiveWorkDispatchAsync(string workerId, string workId, ExecutionError error)
+    public async Task<WorkReportVerdict> RejectActiveWorkDispatchAsync(string workerId, string workId, ExecutionError error)
     {
         RejectIfRunReloadRequired();
-        if (_run is null || !_run.IsAssignedTo(workerId)) return ReportAck.Stale;
+        if (_run is null || !_run.IsAssignedTo(workerId)) return WorkReportVerdict.Refused;
         var activeWork = _run.FindReportableWork(workId, workerId);
-        if (activeWork is null || !activeWork.IsTask) return ReportAck.Stale;
+        if (activeWork is null || !activeWork.IsTask) return WorkReportVerdict.Refused;
 
         var task = _run.CurrentStage().RunningTask;
         if (task is not null) task.Error = error;
 
         var events = _run.FailTask(new TaskResult("failed", error.Message, error), Now());
-        if (events.Count == 0) return ReportAck.Stale;
+        if (events.Count == 0) return WorkReportVerdict.Refused;
 
         _log.LogWarning(
             "run {run} rejected dispatch for work {work}: {code} {reason}",
             GrainKey, workId, error.Code, error.Message);
         await CommitAsync(events);
         await DeleteSnapshotBestEffortAsync(workId);
-        return ReportAck.Accepted;
+        return WorkReportVerdict.Accepted;
     }
 
     public async Task<RuntimeRecoveryReceiptAcknowledgement> ReceiveRecoveryReceiptAsync(RuntimeRecoveryReceipt receipt)
@@ -627,29 +627,29 @@ public partial class WorkflowGrain
             RuntimeRecoveryReceiptAckStatuses.Accepted);
     }
 
-    public async Task<ReportAck> ReceiveTaskReportAsync(
+    public async Task<WorkReportVerdict> ReceiveTaskReportAsync(
         string workerId,
         string workId,
         TaskReport report,
         AgentExecutionBinding? agentBinding = null)
     {
         RejectIfRunReloadRequired();
-        if (_run is null) return ReportAck.Stale;
+        if (_run is null) return WorkReportVerdict.Refused;
 
         // A due runner-loss deadline is terminal for ordinary workflow work.
         // Reconcile it in the report turn so a late generation cannot win a
         // race against a reminder that has not executed yet.
         await ReconcileRunnerLossRecoveryAsync();
 
-        if (!string.Equals(report.WorkId, workId, StringComparison.Ordinal)) return ReportAck.Stale;
-        if (string.IsNullOrWhiteSpace(report.TaskRunId)) return ReportAck.Stale;
+        if (!string.Equals(report.WorkId, workId, StringComparison.Ordinal)) return WorkReportVerdict.Refused;
+        if (string.IsNullOrWhiteSpace(report.TaskRunId)) return WorkReportVerdict.Refused;
         if (agentBinding is not null)
         {
             if (!string.Equals(agentBinding.RunnerId, workerId, StringComparison.Ordinal)
                 || !string.Equals(agentBinding.WorkId, workId, StringComparison.Ordinal)
                 || !string.Equals(agentBinding.TaskRunId, report.TaskRunId, StringComparison.Ordinal))
             {
-                return ReportAck.Stale;
+                return WorkReportVerdict.Refused;
             }
 
             // A Workflow Agent result must prove the complete execution
@@ -658,7 +658,7 @@ public partial class WorkflowGrain
             var bound = _run.FindBoundAgentExecution(agentBinding.TaskRunId, workId, workerId)
                 ?? _run.FindTerminalBoundAgentExecution(agentBinding.TaskRunId, workId, workerId);
             if (bound is null || !MatchesExecutionBinding(bound, agentBinding))
-                return ReportAck.Stale;
+                return WorkReportVerdict.Refused;
         }
 
         var activeWork = _run.FindReportableWork(report.TaskRunId, workId, workerId);
@@ -666,7 +666,7 @@ public partial class WorkflowGrain
         {
             var terminalWork = _run.FindTerminalReportAttempt(report.TaskRunId, workId, workerId);
             if (terminalWork?.TaskRunId is null)
-                return ReportAck.Stale;
+                return WorkReportVerdict.Refused;
 
             var terminalTask = _run.Stages
                 .Where(stage => string.Equals(stage.Id, terminalWork.Item.Stage, StringComparison.Ordinal))
@@ -676,15 +676,15 @@ public partial class WorkflowGrain
                 && report.TerminalResultFingerprint is not null
                 && string.Equals(terminalTask.TerminalResultFingerprint, report.TerminalResultFingerprint, StringComparison.Ordinal)
                 && (agentBinding is null || terminalTask.TerminalExecutionBinding is not null)
-                ? ReportAck.Accepted
-                : ReportAck.Stale;
+                ? WorkReportVerdict.Accepted
+                : WorkReportVerdict.Refused;
         }
 
         var task = _run.Stages
             .Where(stage => string.Equals(stage.Id, activeWork.Item.Stage, StringComparison.Ordinal))
             .SelectMany(stage => stage.Tasks)
             .SingleOrDefault(candidate => string.Equals(candidate.Id, activeWork.TaskRunId, StringComparison.Ordinal));
-        if (task is null) return ReportAck.Stale;
+        if (task is null) return WorkReportVerdict.Refused;
         var hadAgentResultSettlement = task.AgentResultSettlement is not null;
         var hadRunnerLossInterruption = task.Interruption is not null;
         var recoveringTransition = task.AgentInterruption is { State: AgentWorkInterruptionStates.Recovering }
@@ -772,7 +772,7 @@ public partial class WorkflowGrain
             await DeleteSnapshotBestEffortAsync(activeWork.WorkId);
         if (hadRunnerLossInterruption)
             await ReconcileRunnerLossRecoveryAsync(removeReminderWhenClear: true);
-        return ReportAck.Accepted;
+        return WorkReportVerdict.Accepted;
     }
 
     private async Task<TaskReport> BindTaskReportArtifactsAsync(
@@ -819,22 +819,40 @@ public partial class WorkflowGrain
         };
     }
 
-    public async Task<ReportAck> ReceiveCheckReportAsync(string workerId, string workId, CheckReport report)
+    public async Task<WorkReportVerdict> ReceiveCheckReportAsync(string workerId, string workId, CheckReport report)
     {
         RejectIfRunReloadRequired();
-        if (_run is null) return ReportAck.Stale;
+        if (_run is null) return WorkReportVerdict.Refused;
 
         await ReconcileRunnerLossRecoveryAsync();
 
-        if (!_run.IsAssignedTo(workerId)) return ReportAck.Stale;
+        var terminalStage = _run.Stages.SingleOrDefault(stage =>
+            string.Equals(stage.TerminalChecksWorkId, workId, StringComparison.Ordinal));
+        if (terminalStage is not null)
+        {
+            return string.Equals(terminalStage.TerminalChecksWorkerId, workerId, StringComparison.Ordinal)
+                && !string.IsNullOrWhiteSpace(report.TerminalResultFingerprint)
+                && string.Equals(
+                    terminalStage.TerminalChecksResultFingerprint,
+                    report.TerminalResultFingerprint,
+                    StringComparison.Ordinal)
+                ? WorkReportVerdict.Accepted
+                : WorkReportVerdict.Refused;
+        }
+
+        if (!_run.IsAssignedTo(workerId)) return WorkReportVerdict.Refused;
         var activeWork = _run.FindActiveWork(workId, workerId);
         if (activeWork is null || !activeWork.IsChecks)
-            return ReportAck.Stale;
+            return WorkReportVerdict.Refused;
 
         _log.LogInformation("run {run} received check report for stage {Stage}: {Count} results",
             GrainKey, report.Stage, report.Results.Count);
 
-        var hadRunnerLossInterruption = _run.CurrentStage().Interruption is not null;
+        var currentStage = _run.CurrentStage();
+        var hadRunnerLossInterruption = currentStage.Interruption is not null;
+        currentStage.TerminalChecksWorkId = workId;
+        currentStage.TerminalChecksWorkerId = workerId;
+        currentStage.TerminalChecksResultFingerprint = report.TerminalResultFingerprint;
         _run.ClearWorkInterruption(workId, workerId);
         var events = await _workLifecycle.ApplyCheckReportAsync(_run, report);
         _workLifecycle.RequeueRunningChecks(_run);
@@ -842,7 +860,7 @@ public partial class WorkflowGrain
         await CommitAsync(events);
         if (hadRunnerLossInterruption)
             await ReconcileRunnerLossRecoveryAsync(removeReminderWhenClear: true);
-        return ReportAck.Accepted;
+        return WorkReportVerdict.Accepted;
     }
 
     private void QueueSessionInterruptionDelivery(
