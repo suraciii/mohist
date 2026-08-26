@@ -29,7 +29,7 @@ The design is constrained to deterministic canonical planning. It must preserve 
 
 Before constructing `measurementGroups`, filter `durationMeasurementTracks` to IDs with at least one matching `planned` lane. Preserve the original order and retain the existing duplicate-ID fail-closed check. If the filtered sequence is empty, return a shallow copy of the original plan. Iterate the filtered sequence for all later coverage, terminal, Resource, and dependency calculations.
 
-This keeps scope semantics at the point where selected lanes and canonical policy meet. The existing group mapping then remains authoritative: a single-lane group receives `duration-measurement`, later groups depend on the preceding terminal, and non-measurement lanes depend on the final terminal or selected isolation Track.
+This keeps scope semantics at the point where selected lanes and canonical policy meet. The early return preserves each selected lane's existing Resources and dependencies; it does not strip base Track claims. The existing group mapping then remains authoritative: a single-lane group receives `duration-measurement`, later groups depend on the preceding terminal, and non-measurement lanes depend on the final terminal or selected isolation Track.
 
 **Alternative considered:** Filter the configuration in each caller before invoking `planTracks`. Rejected because application, repository, focused, and future callers would each need to reproduce the same intersection rule, increasing drift and making the planner's contract incomplete.
 

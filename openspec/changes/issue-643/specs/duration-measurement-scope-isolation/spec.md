@@ -32,7 +32,7 @@ When the configured duration isolation Track is selected, it MUST wait for the f
 
 #### Scenario: Focused scope does not inherit an absent isolation Track
 - **WHEN** a focused scope selects only `server-unit` while the configured measurement Tracks are `[cli, server-spec]` and the configured isolation Track is `runner`
-- **THEN** the planner MUST leave `server-unit` without a measurement Resource or measurement dependency and MUST NOT add `runner`, `cli`, or `server-spec`
+- **THEN** the planner MUST preserve all existing `server-unit` Resources and dependencies, MUST NOT add a `duration-measurement` Resource or dependency for the measurement phase, and MUST NOT add `runner`, `cli`, or `server-spec`
 
 ### Requirement: Preserve zero-match plans unchanged
 

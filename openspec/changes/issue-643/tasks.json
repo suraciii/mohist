@@ -10,7 +10,7 @@
       "acceptanceCriteria": [
         "A partial scope with configured measurement Tracks [cli, server-spec] and only server-spec selected retains server-spec duration-measurement isolation and does not add cli.",
         "A full scope preserves cli before server-spec, their existing Resource claims and terminal dependencies, and the configured runner isolation boundary for remaining Vitest lanes.",
-        "A zero-match or focused scope remains unchanged and receives no absent Track, Resource, or dependency.",
+        "A zero-match or focused scope preserves all pre-existing lane Resources and dependencies, receives no absent Track, and gains no Resource or dependency from the measurement phase.",
         "A valid multi-lane measurement Track continues to use its coverage terminal, while a missing coverage terminal returns the selected plan without newly added measurement constraints.",
         "The implementation does not modify test-duration configuration, scheduler behavior, Track commands, populations, budgets, deadlines, Resource limits, worker capacity, or CI topology.",
         "scripts/test-duration/guard.test.ts contains deterministic assertions for the required selection and multi-lane matrix, and the focused planner tests pass.",
