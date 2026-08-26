@@ -308,5 +308,60 @@ public sealed partial class AgentResultSettlementSpecs : WorkflowGrainSpecs
         Assert.Equal(TaskRunStatus.Completed, Assert.Single(completed.CurrentStage().Tasks).Status);
     }
 
+    [Fact]
+    public async Task UnboundAgentFailure_IsObservedAsUnknownAndSettlesToBlocked()
+    {
+        // A runner-side failure before any runtime turn started (e.g. the
+        // session-binding fail-closed) carries no execution binding. The
+        // report service must route it into the unknown observation so the
+        // settlement arbiter owns it — an acknowledged report also lets the
+        // Runner retire its journal entry instead of retrying a rejection
+        // forever while the workflow silently waits for a result.
+        var workflow = await StartWorkflowAsync(SingleStage(
+            tasks: [new TaskDefinition("agent", "Agent", "mohist/opencode")],
+            checks: []));
+        var (work, runnerId) = await PollWorkAnyAsync();
+        var run = await LoadRunAsync(_workflowId!);
+        var task = Assert.Single(run.CurrentStage().Tasks);
+        var reportService = Services.GetRequiredService<WorkflowReportService>();
+
+        var succeededAck = await reportService.ReportAsync(
+            runnerId,
+            _workflowId!,
+            work.WorkId,
+            task.Id,
+            new WorkResult("succeeded", "must never be accepted without a binding"),
+            CancellationToken.None);
+        Assert.Equal("stale", succeededAck.Ack);
+
+        var failure = await reportService.ReportAsync(
+            runnerId,
+            _workflowId!,
+            work.WorkId,
+            task.Id,
+            new WorkResult(
+                "failed",
+                "Workflow AgentSession is active; the previous Runtime Session has not reached a terminal state, so retry is fail-closed",
+                Error: new ExecutionError("session-binding-failed", "session binding failed")),
+            CancellationToken.None);
+        Assert.Equal("accepted", failure.Ack);
+
+        var observed = await LoadRunAsync(_workflowId!);
+        var observedTask = Assert.Single(observed.CurrentStage().Tasks);
+        Assert.Equal(TaskRunStatus.Running, observedTask.Status);
+        Assert.Equal(
+            AgentResultSettlementState.Unknown,
+            observedTask.AgentResultSettlement!.State);
+        Assert.Equal("session-binding-failed", observedTask.AgentResultSettlement.ReasonCode);
+
+        var deadline = observedTask.AgentResultSettlement.DeadlineAt!.Value;
+        _fixture.TimeProvider.Advance(deadline - _fixture.TimeProvider.GetUtcNow());
+        await workflow.ReceiveReminder(WorkflowGrain.AgentResultSettlementReminderName, default);
+
+        var blocked = await LoadRunAsync(_workflowId!);
+        var blockedTask = Assert.Single(blocked.CurrentStage().Tasks);
+        Assert.Equal(AgentResultSettlementState.Blocked, blockedTask.AgentResultSettlement!.State);
+    }
+
 
 }

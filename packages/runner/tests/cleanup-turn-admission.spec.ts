@@ -91,6 +91,7 @@ function opencodeDeps(
     bindingRecoveryCoordinator: null,
     runtimeTurnRegistry,
     cleanupTerminalFactDeliveryBudgetMs: budgetMs,
+    workflowSessionSettleBudgetMs: 25,
   }
 }
 

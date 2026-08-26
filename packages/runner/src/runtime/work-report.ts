@@ -5,6 +5,19 @@ import type { RuntimeRecoveryReceipt } from './recovery-receipt.js'
 export const RUNNER_RESTARTED_REASON = 'runner-restarted'
 
 /**
+ * The server rejected the report as definitively superseded: the work
+ * identity it describes no longer exists in a reportable state and can
+ * never accept this result. Retrying cannot change the answer, so the
+ * journal entry retires instead of retrying forever.
+ */
+export class WorkReportStaleError extends Error {
+  constructor() {
+    super('work report was not durably acknowledged: stale')
+    this.name = 'WorkReportStaleError'
+  }
+}
+
+/**
  * A started journal entry has no authoritative result after the physical
  * execution disappears. This is the only runner-generated terminal fact for
  * that case; runtime observations are deliberately not promoted into a
@@ -80,6 +93,8 @@ export async function reportAndRequireDurableAck(
       ? await connection.report(work, result, controller.signal, binding)
       : await connection.report(work, result, controller.signal)
     if (acknowledgement.tracked !== true) {
+      if (typeof acknowledgement.reason === 'string' && acknowledgement.reason.trim().toLowerCase() === 'stale')
+        throw new WorkReportStaleError()
       const reason = typeof acknowledgement.reason === 'string' ? `: ${acknowledgement.reason}` : ''
       throw new Error(`work report was not durably acknowledged${reason}`)
     }

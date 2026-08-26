@@ -1,6 +1,6 @@
 import { createTerminalRecoveryReceipt, type RuntimeRecoveryBinding } from './recovery-receipt.js'
 import { executeWork } from './host-task-log.js'
-import { reportAndRequireDurableAck } from './work-report.js'
+import { reportAndRequireDurableAck, WorkReportStaleError } from './work-report.js'
 import { isShutdownFailureResult, isSyntheticStopResult } from './host-update-shutdown.js'
 import { workKey } from './work-result-journal.js'
 import { AWAITING_ACK_RETRY_INTERVAL_MS } from './host-timing.js'
@@ -147,6 +147,10 @@ export async function promoteAndReportDurableJournalResults(context: HostExecuti
     try {
       await reportOnce(context, key)
     } catch (error) {
+      if (error instanceof WorkReportStaleError) {
+        await retireStaleReport(context, key)
+        continue
+      }
       scheduleReportRetry(context, key)
       log.warn('first work report failed; will retry', { work: held.work.workId, exception: error })
     }
@@ -182,6 +186,21 @@ export async function reportOnce(
   context.syncOpenCodeWorkOwners()
 }
 
+/**
+ * A stale rejection is definitive for this work identity: the server can
+ * never accept the result, so retrying would only spin the journal.
+ * Retire the entry and keep the durable acknowledgement aligned with the
+ * server's answer.
+ */
+export async function retireStaleReport(context: HostExecutionContext, key: string): Promise<void> {
+  const held = context.awaitingAck.get(key)
+  if (!held) return
+  await context.workResultJournal.acknowledge(held.work)
+  context.awaitingAck.delete(key)
+  context.syncOpenCodeWorkOwners()
+  log.warn('work report retired after a definitive stale rejection', { work: held.work.workId })
+}
+
 export function scheduleReportRetry(context: HostExecutionContext, key: string): void {
   const held = context.awaitingAck.get(key)
   if (held) held.entry.retryAt = Date.now() + AWAITING_ACK_RETRY_INTERVAL_MS
@@ -199,6 +218,10 @@ export async function retryDueReports(context: HostExecutionContext): Promise<vo
       try {
         await reportOnce(context, key)
       } catch (error) {
+        if (error instanceof WorkReportStaleError) {
+          await retireStaleReport(context, key)
+          return
+        }
         scheduleReportRetry(context, key)
         log.warn('work report retry failed', {
           work: held.work.workId,

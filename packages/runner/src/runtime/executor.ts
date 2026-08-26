@@ -69,6 +69,7 @@ export class WorkExecutor {
     private readonly namedWorkspaceManager: NamedWorkspaceManager | null = null,
     private readonly runtimeTurnRegistry: RuntimeTurnRegistry | null = null,
     private readonly cleanupTerminalFactDeliveryBudgetMs?: number,
+    private readonly workflowSessionSettleBudgetMs?: number,
   ) {}
 
   updateOpenCodeRuntime(runtime: OpenCodeRuntime | null) {
@@ -318,6 +319,7 @@ export class WorkExecutor {
       bindingRecoveryCoordinator: this.bindingRecoveryCoordinator,
       runtimeTurnRegistry: this.runtimeTurnRegistry,
       cleanupTerminalFactDeliveryBudgetMs: this.cleanupTerminalFactDeliveryBudgetMs,
+      workflowSessionSettleBudgetMs: this.workflowSessionSettleBudgetMs,
     }
   }
 

@@ -12,7 +12,9 @@ public static class WorkflowStatusMapper
     public const string AgentResultUnconfirmedReason = "agent-result-unconfirmed";
     public const string AgentResultSettlementNextAction =
         "Restore the original Runner and allow the result to replay, inspect the bound AgentSession and AgentTurn, or explicitly stop the workflow after confirming the physical target is no longer active.";
-    public static readonly IReadOnlyList<string> AgentResultSettlementRecoveryActions = ["stop"];
+    // A collection expression would synthesize a compiler list type that
+    // Orleans cannot copy across grain boundaries; use a copier-safe array.
+    public static readonly IReadOnlyList<string> AgentResultSettlementRecoveryActions = new[] { "stop" };
 
     public static string WireStatus(WorkflowRunStatus status) => status switch
     {
