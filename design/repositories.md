@@ -115,8 +115,7 @@ is supplied only to operations that need source control context.
 
 The Workspace lifecycle and reclamation grant come from the Workspace view, not
 Repository existence or WorkflowRun status. Runner-side registry and deletion
-fences are defined in [`runner.md`](runner.md#local-workspace-lifecycle) and the
-reclamation rules remain authoritative in
+fence rules are authoritative in
 [`workspace.md`](workspace.md#runner-side-directory-reclamation).
 
 ## Failure Semantics
