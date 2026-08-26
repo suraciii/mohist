@@ -152,7 +152,8 @@ public sealed class RunnerPollRecoveryStateApiSpecs
                 "persist terminal report",
                 WorkspacePath: "/tmp/agent-job-outstanding",
                 ProjectId: projectId,
-                AgentId: "agent-test"));
+                AgentId: "agent-test",
+                PinnedRunnerId: runnerId));
             var dispatch = await PollAsync(runnerId);
             var workId = dispatch.GetProperty("workId").GetString()!;
             var payload = new
