@@ -33,7 +33,7 @@ namespace Mohist.Server.SpecTests.Specs.Agent.Services;
 /// Retry-path launcher specs split from <see cref="AgentLauncherSpecs"/> to
 /// keep both files within the file-size ratchet.
 /// </summary>
-[Collection("LaunchIntegration")]
+[Collection("LaunchIntegrationB")]
 public class AgentLauncherRetrySpecs : AgentLauncherSupportSpecs
 {
     protected MohistIntegrationFixture _fixture => Fixture;
