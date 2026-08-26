@@ -1,7 +1,7 @@
 import type { DispatchWorkItem } from '../core/types.js'
 import type { ServerConnection } from '../server/connection.js'
 import { runnerLogger } from '../system/logger.js'
-import { reportAndRequireDurableAck } from './work-report.js'
+import { reportAndRequireDurableAck, WorkReportStaleError } from './work-report.js'
 import { WorkResultJournal, workKey } from './work-result-journal.js'
 
 const log = runnerLogger.child('recovered-started-work')
@@ -103,10 +103,25 @@ export class RecoveredStartedWork {
     const entry = this.entries.get(key)
     if (!entry) return
     entry.attempts += 1
-    await reportAndRequireDurableAck(this.connection, entry.work, {
-      status: 'unknown',
-      message: RECOVERED_STARTED_RESULT_MESSAGE,
-    })
+    try {
+      await reportAndRequireDurableAck(this.connection, entry.work, {
+        status: 'unknown',
+        message: RECOVERED_STARTED_RESULT_MESSAGE,
+      })
+    } catch (error) {
+      if (error instanceof WorkReportStaleError) {
+        // The server can never accept this observation; retire it instead
+        // of retrying the same rejection forever.
+        await this.journal.acknowledgeUnconfirmed(entry.work)
+        this.entries.delete(key)
+        this.observed.add(key)
+        log.warn('recovered started work observation retired after a definitive stale rejection', {
+          work: entry.work.workId,
+        })
+        return
+      }
+      throw error
+    }
     await this.journal.acknowledgeUnconfirmed(entry.work)
     this.entries.delete(key)
     this.observed.add(key)
