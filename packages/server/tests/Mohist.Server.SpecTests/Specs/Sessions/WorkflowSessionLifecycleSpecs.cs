@@ -14,7 +14,7 @@ using Mohist.Server.Workflow.Grains;
 using Mohist.Workflow.Definition;
 using Xunit;
 
-namespace Mohist.Server.SpecTests.Specs.Workflow.Grain;
+namespace Mohist.Server.SpecTests.Specs.Sessions;
 
 [Collection("SessionControlIntegration")]
 public sealed class WorkflowSessionLifecycleSpecs
