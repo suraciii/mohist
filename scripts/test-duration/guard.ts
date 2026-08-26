@@ -422,7 +422,7 @@ export function isLaneSuccessful(run: TrackRun): boolean {
   )
 }
 
-interface PlannedLane {
+export interface PlannedLane {
   readonly lane: LaneSpec
   readonly policyTrack?: TrackConfig
   readonly executionTrack?: TrackConfig
@@ -457,7 +457,7 @@ function withLaneConstraints(
   }
 }
 
-function applyDurationMeasurementPhase(
+export function applyDurationMeasurementPhase(
   planned: readonly PlannedLane[],
   durationMeasurementTracks: readonly string[],
   durationIsolationTrack?: string,
@@ -465,12 +465,17 @@ function applyDurationMeasurementPhase(
   if (durationMeasurementTracks.length === 0) return [...planned]
   if (new Set(durationMeasurementTracks).size !== durationMeasurementTracks.length) return [...planned]
 
+  const selectedMeasurementTracks = durationMeasurementTracks.filter((trackId) =>
+    planned.some((plan) => plan.policyTrack?.id === trackId),
+  )
+  if (selectedMeasurementTracks.length === 0) return [...planned]
+
   const measurementGroups: Array<{
     readonly trackId: string
     readonly executionLaneIds: readonly string[]
     readonly terminalLaneIds: readonly string[]
   }> = []
-  for (const trackId of durationMeasurementTracks) {
+  for (const trackId of selectedMeasurementTracks) {
     const matching = planned.filter((plan) => plan.policyTrack?.id === trackId)
     if (matching.length === 0) return [...planned]
     const coverage = planned.find((plan) => plan.lane.id === `${trackId}-coverage`)
