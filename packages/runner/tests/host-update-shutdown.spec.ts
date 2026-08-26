@@ -36,20 +36,22 @@ function operation(affectedWorkId: string): PendingUpdateOperation {
     operationId: 'operation-1',
     runnerId: 'runner-1',
     createdAt: '2026-01-01T00:00:00.000Z',
-    affectedWorks: [
-      { ownerKind: 'workflow', ownerId: 'workflow-1', workId: affectedWorkId, workType: 'task' },
-    ],
+    affectedWorks: [{ ownerKind: 'workflow', ownerId: 'workflow-1', workId: affectedWorkId, workType: 'task' }],
   }
 }
 
-function makeHost(args: {
-  entries?: InFlightEntry[]
-  fetch?: (signal: AbortSignal) => Promise<PendingUpdateOperation | null>
-  report?: ServerConnection['reportRecoveryStopFailure']
-  handoffBudgetMs?: number
-  stopBudgetMs?: number
-} = {}) {
-  const inFlight = new Map((args.entries ?? [entry('work-1')]).map((value) => [`workflow:workflow-1:${value.work.workId}`, value]))
+function makeHost(
+  args: {
+    entries?: InFlightEntry[]
+    fetch?: (signal: AbortSignal) => Promise<PendingUpdateOperation | null>
+    report?: ServerConnection['reportRecoveryStopFailure']
+    handoffBudgetMs?: number
+    stopBudgetMs?: number
+  } = {},
+) {
+  const inFlight = new Map(
+    (args.entries ?? [entry('work-1')]).map((value) => [`workflow:workflow-1:${value.work.workId}`, value]),
+  )
   const reportRecoveryStopFailure = args.report ?? vi.fn(async () => undefined)
   const shutdown = createHostShutdown({
     options,

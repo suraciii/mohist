@@ -1,9 +1,9 @@
-import { join } from "node:path"
-import { describe, expect, it as vitestIt, vi } from "vitest"
-import { AgentJobExecutor } from "./agent-job-executor.js"
-import type { DispatchWorkItem } from "../core/types.js"
-import { MemoryFileSystem } from "../../tests/support/memory-filesystem.js"
-import { withTestRunnerResources } from "../../tests/support/test-resources.js"
+import { join } from 'node:path'
+import { describe, expect, it as vitestIt, vi } from 'vitest'
+import { AgentJobExecutor } from './agent-job-executor.js'
+import type { DispatchWorkItem } from '../core/types.js'
+import { MemoryFileSystem } from '../../tests/support/memory-filesystem.js'
+import { withTestRunnerResources } from '../../tests/support/test-resources.js'
 
 function it(name: string, body: (fileSystem: MemoryFileSystem) => Promise<void>): void {
   vitestIt(name, async () => {
@@ -11,21 +11,21 @@ function it(name: string, body: (fileSystem: MemoryFileSystem) => Promise<void>)
     try {
       await withTestRunnerResources(async () => await body(fileSystem), { fileSystem })
     } finally {
-      await fileSystem.deleteDirectory("/")
-      if (fileSystem.exists("/")) throw new Error("agent job test filesystem was not cleaned up")
+      await fileSystem.deleteDirectory('/')
+      if (fileSystem.exists('/')) throw new Error('agent job test filesystem was not cleaned up')
     }
   })
 }
 
-describe("AgentJobExecutor attachment delivery", () => {
-  it("delivers an attachment-only input to the runtime as a readable workspace file", async (fileSystem) => {
-    const workDir = "/virtual/mohist-agent-job-attachment"
+describe('AgentJobExecutor attachment delivery', () => {
+  it('delivers an attachment-only input to the runtime as a readable workspace file', async (fileSystem) => {
+    const workDir = '/virtual/mohist-agent-job-attachment'
     const runTurn = vi.fn(async (request: { prompt: string; fileParts?: readonly unknown[] }) => ({
       ok: true as const,
       value: {
         facts: {
-          finalAssistantText: "received",
-          runtimeSessionId: "runtime-1",
+          finalAssistantText: 'received',
+          runtimeSessionId: 'runtime-1',
           workDir,
         },
         diagnostics: [],
@@ -33,11 +33,11 @@ describe("AgentJobExecutor attachment delivery", () => {
       diagnostics: [],
     }))
     const connection = {
-      runnerId: "runner-1",
-      getAgentSession: vi.fn(async () => ({ runtime: "opencode", runtimeSessionId: null, workDir })),
+      runnerId: 'runner-1',
+      getAgentSession: vi.fn(async () => ({ runtime: 'opencode', runtimeSessionId: null, workDir })),
       openAgentInputAttachment: vi.fn(async () => ({
-        bytes: new TextEncoder().encode("attachment contents"),
-        contentType: "text/plain",
+        bytes: new TextEncoder().encode('attachment contents'),
+        contentType: 'text/plain',
         contentDisposition: null,
       })),
       openAgentSession: vi.fn(async () => null),
@@ -50,18 +50,18 @@ describe("AgentJobExecutor attachment delivery", () => {
       runTurn,
     }
     const work: DispatchWorkItem = {
-      workflowRunId: "",
-      workId: "work-1",
-      workType: "agent-job",
-      ownerKind: "agent-job",
-      projectId: "project-1",
-      agentJobId: "job-1",
-      agentSessionId: "session-1",
-      initialInputId: "input-1",
-      initialTurnId: "turn-1",
+      workflowRunId: '',
+      workId: 'work-1',
+      workType: 'agent-job',
+      ownerKind: 'agent-job',
+      projectId: 'project-1',
+      agentJobId: 'job-1',
+      agentSessionId: 'session-1',
+      initialInputId: 'input-1',
+      initialTurnId: 'turn-1',
       variables: { workspace: { path: workDir } },
       with: {
-        attachments: [{ id: "attachment-1", name: "notes.txt", contentType: "text/plain", size: 19 }],
+        attachments: [{ id: 'attachment-1', name: 'notes.txt', contentType: 'text/plain', size: 19 }],
       },
     }
 
@@ -71,32 +71,33 @@ describe("AgentJobExecutor attachment delivery", () => {
       workDir,
     ).execute(work, new AbortController().signal)
 
-    expect(result.status).toBe("completed")
+    expect(result.status).toBe('completed')
     expect(connection.openAgentInputAttachment).toHaveBeenCalledWith(
-      "project-1",
-      "session-1",
-      "input-1",
-      "attachment-1",
+      'project-1',
+      'session-1',
+      'input-1',
+      'attachment-1',
       expect.any(AbortSignal),
     )
     expect(runTurn).toHaveBeenCalledOnce()
     const request = runTurn.mock.calls[0]?.[0]
-    expect(request.prompt).toContain("[mohist-attachments]")
-    expect(request.prompt).toContain("notes.txt")
-    expect(request.prompt).not.toContain("Please read")
+    expect(request.prompt).toContain('[mohist-attachments]')
+    expect(request.prompt).toContain('notes.txt')
+    expect(request.prompt).not.toContain('Please read')
     expect(request.fileParts).toBeUndefined()
-    expect(await fileSystem.readText(join(workDir, ".mohist/attachments/input-1/attachment-1/notes.txt")))
-      .toBe("attachment contents")
+    expect(await fileSystem.readText(join(workDir, '.mohist/attachments/input-1/attachment-1/notes.txt'))).toBe(
+      'attachment contents',
+    )
   })
 
-  it("passes delivered images to the OpenCode runtime as native file parts", async (fileSystem) => {
-    const workDir = "/virtual/mohist-agent-job-image"
+  it('passes delivered images to the OpenCode runtime as native file parts', async (fileSystem) => {
+    const workDir = '/virtual/mohist-agent-job-image'
     const runTurn = vi.fn(async (request: { prompt: string; fileParts?: readonly unknown[] }) => ({
       ok: true as const,
       value: {
         facts: {
-          finalAssistantText: "received",
-          runtimeSessionId: "runtime-1",
+          finalAssistantText: 'received',
+          runtimeSessionId: 'runtime-1',
           workDir,
         },
         diagnostics: [],
@@ -104,11 +105,11 @@ describe("AgentJobExecutor attachment delivery", () => {
       diagnostics: [],
     }))
     const connection = {
-      runnerId: "runner-1",
-      getAgentSession: vi.fn(async () => ({ runtime: "opencode", runtimeSessionId: null, workDir })),
+      runnerId: 'runner-1',
+      getAgentSession: vi.fn(async () => ({ runtime: 'opencode', runtimeSessionId: null, workDir })),
       openAgentInputAttachment: vi.fn(async () => ({
         bytes: new Uint8Array([1, 2, 3]),
-        contentType: "image/png",
+        contentType: 'image/png',
         contentDisposition: null,
       })),
       openAgentSession: vi.fn(async () => null),
@@ -121,19 +122,19 @@ describe("AgentJobExecutor attachment delivery", () => {
       runTurn,
     }
     const work: DispatchWorkItem = {
-      workflowRunId: "",
-      workId: "work-1",
-      workType: "agent-job",
-      ownerKind: "agent-job",
-      projectId: "project-1",
-      agentJobId: "job-1",
-      agentSessionId: "session-1",
-      initialInputId: "input-1",
-      initialTurnId: "turn-1",
+      workflowRunId: '',
+      workId: 'work-1',
+      workType: 'agent-job',
+      ownerKind: 'agent-job',
+      projectId: 'project-1',
+      agentJobId: 'job-1',
+      agentSessionId: 'session-1',
+      initialInputId: 'input-1',
+      initialTurnId: 'turn-1',
       variables: { workspace: { path: workDir } },
       with: {
-        prompt: "inspect the image",
-        attachments: [{ id: "attachment-1", name: "diagram.png", contentType: "image/png", size: 3 }],
+        prompt: 'inspect the image',
+        attachments: [{ id: 'attachment-1', name: 'diagram.png', contentType: 'image/png', size: 3 }],
       },
     }
 
@@ -143,11 +144,13 @@ describe("AgentJobExecutor attachment delivery", () => {
       workDir,
     ).execute(work, new AbortController().signal)
 
-    expect(result.status).toBe("completed")
-    expect(runTurn.mock.calls[0]?.[0].fileParts).toEqual([{
-      mime: "image/png",
-      filename: "diagram.png",
-      url: "data:image/png;base64,AQID",
-    }])
+    expect(result.status).toBe('completed')
+    expect(runTurn.mock.calls[0]?.[0].fileParts).toEqual([
+      {
+        mime: 'image/png',
+        filename: 'diagram.png',
+        url: 'data:image/png;base64,AQID',
+      },
+    ])
   })
 })

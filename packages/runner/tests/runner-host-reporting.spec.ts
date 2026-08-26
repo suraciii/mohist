@@ -491,7 +491,8 @@ describe('RunnerHost', () => {
     const controller = new AbortController()
     const run = newRunnerHost().run(controller.signal)
     try {
-      while ([...attempts.values()].filter((value) => value >= 1).length < works.length) await vi.runOnlyPendingTimersAsync()
+      while ([...attempts.values()].filter((value) => value >= 1).length < works.length)
+        await vi.runOnlyPendingTimersAsync()
       await vi.advanceTimersByTimeAsync(AWAITING_ACK_RETRY_INTERVAL_MS)
       await retried.promise
 
