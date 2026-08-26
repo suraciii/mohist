@@ -9,7 +9,7 @@ using Mohist.Server.TestSupport;
 using Xunit;
 namespace Mohist.Server.SpecTests.Specs.Agent.Api;
 
-[Collection("RunnerMutationIntegration")]
+[Collection("RunnerMutationIntegrationB")]
 public class AgentSessionLaunchValidationRoutesSpecs : AgentSessionLaunchRoutesTestSupport
 {
     public AgentSessionLaunchValidationRoutesSpecs(MohistIntegrationFixture fixture) : base(fixture)

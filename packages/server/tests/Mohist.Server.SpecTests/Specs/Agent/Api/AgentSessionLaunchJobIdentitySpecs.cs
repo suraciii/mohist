@@ -19,7 +19,7 @@ namespace Mohist.Server.SpecTests.Specs.Agent.Api;
 /// <see cref="AgentSessionLaunchValidationRoutesSpecs"/>; this file owns
 /// the identity + exactly-once invariants.
 /// </summary>
-[Collection("RunnerMutationIntegration")]
+[Collection("RunnerMutationIntegrationB")]
 public class AgentSessionLaunchJobIdentitySpecs : AgentSessionLaunchRoutesTestSupport
 {
     public AgentSessionLaunchJobIdentitySpecs(MohistIntegrationFixture fixture) : base(fixture)
