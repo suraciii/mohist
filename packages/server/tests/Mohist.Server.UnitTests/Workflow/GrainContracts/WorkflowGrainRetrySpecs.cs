@@ -511,6 +511,22 @@ public sealed class WorkflowGrainRetrySpecs
     }
 
     [Fact]
+    public async Task StagePasses_UserRerunsStage_StageStartsFromFirstTask()
+    {
+        var arrangement = await ArrangeAsync("wr-rerun-completed-stage");
+
+        await CompleteFirstTaskAsync(arrangement);
+        var checks = (await arrangement.AssignAndClaimAsync())!;
+        await arrangement.ReportCheckResultsAsync(checks, ("check-1", CheckResultStatus.Passed, null));
+
+        await arrangement.Grain.RerunAsync();
+
+        var task2 = await arrangement.AssignAndClaimAsync();
+        Assert.NotNull(task2);
+        Assert.StartsWith("task-1.", task2!.Id);
+    }
+
+    [Fact]
     public async Task TaskFails_UserViewsWorkflowStatus_RetryActionIsAvailable()
     {
         var arrangement = await ArrangeAsync("wr-retry-action-task");
