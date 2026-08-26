@@ -22,9 +22,56 @@ env:
   DOTNET_GENERATE_ASPNET_CERTIFICATE: "false"
 
 jobs:
+  # Path filtering keeps runner time proportional to what a PR actually
+  # touches. Non-PR events (push, dispatch) always run every scope; the
+  # dependency map below mirrors the real build graph, including the
+  # Server <-> CLI project-reference coupling.
+  changes:
+    name: Changes
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    outputs:
+      global: ${{ steps.filter.outputs.global }}
+      server: ${{ steps.filter.outputs.server }}
+      cli: ${{ steps.filter.outputs.cli }}
+      web: ${{ steps.filter.outputs.web }}
+      runner: ${{ steps.filter.outputs.runner }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Detect changed scopes
+        uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            global:
+              - '.github/workflows/**'
+              - 'scripts/**'
+              - 'eng/**'
+              - 'Directory.Build.props'
+              - 'global.json'
+              - 'package.json'
+              - 'package-lock.json'
+              - 'test-duration.config.jsonc'
+              - 'Mohist.sln'
+              - 'Mohist.Server.Tests.slnf'
+            server:
+              - 'packages/server/**'
+              - 'packages/cli/**'
+            cli:
+              - 'packages/cli/**'
+              - 'packages/server/src/Mohist.Workflow.Definition/**'
+            web:
+              - 'packages/web/**'
+            runner:
+              - 'packages/runner/**'
+
   server:
     name: Server
     runs-on: ubuntu-latest
+    needs: [changes]
+    if: github.event_name != 'pull_request' || needs.changes.outputs.global == 'true' || needs.changes.outputs.server == 'true'
     # Outer failsafe: must exceed the suite deadline (420 s) plus checkout,
     # toolchain setup, and evidence capture.
     timeout-minutes: 12
@@ -82,6 +129,8 @@ jobs:
           retention-days: 7
 
   web:
+    needs: [changes]
+    if: github.event_name != 'pull_request' || needs.changes.outputs.global == 'true' || needs.changes.outputs.web == 'true'
     name: Web
     runs-on: ubuntu-latest
     timeout-minutes: 8
@@ -123,6 +172,8 @@ jobs:
           retention-days: 7
 
   cli:
+    needs: [changes]
+    if: github.event_name != 'pull_request' || needs.changes.outputs.global == 'true' || needs.changes.outputs.cli == 'true'
     name: CLI
     runs-on: ubuntu-latest
     timeout-minutes: 8
@@ -180,6 +231,8 @@ jobs:
           retention-days: 7
 
   runner:
+    needs: [changes]
+    if: github.event_name != 'pull_request' || needs.changes.outputs.global == 'true' || needs.changes.outputs.runner == 'true'
     name: Runner
     runs-on: ubuntu-latest
     timeout-minutes: 8
@@ -275,7 +328,7 @@ jobs:
   gate:
     name: Gate
     if: always()
-    needs: [server, web, cli, runner, repository]
+    needs: [changes, server, web, cli, runner, repository]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
@@ -298,6 +351,13 @@ jobs:
           pattern: scope-*
           path: artifacts
           merge-multiple: true
-
       - name: Aggregate evidence
-        run: node --import tsx scripts/test-duration/gate.ts --evidence-root "$GITHUB_WORKSPACE/artifacts"
+        env:
+          # The authoritative skip manifest is the jobs' own outcomes — no
+          # separate bookkeeping to keep in sync.
+          SKIPPED_SCOPES: >-
+            ${{ needs.server.result == 'skipped' && 'server' || '' }}
+            ${{ needs.cli.result == 'skipped' && 'cli' || '' }}
+            ${{ needs.web.result == 'skipped' && 'web' || '' }}
+            ${{ needs.runner.result == 'skipped' && 'runner' || '' }}
+        run: node --import tsx scripts/test-duration/gate.ts --evidence-root "$GITHUB_WORKSPACE/artifacts" --skipped-scopes "$SKIPPED_SCOPES"

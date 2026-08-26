@@ -11,20 +11,25 @@ const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..')
 
 export interface GateArgs {
   readonly evidenceRoot?: string
+  readonly skippedScopes: readonly string[]
   readonly help: boolean
 }
 
 export function parseArgs(argv: readonly string[]): GateArgs {
   let evidenceRoot: string | undefined
   let help = false
+  let skippedScopes: readonly string[] = []
   for (let index = 0; index < argv.length; index++) {
     const arg = argv[index]
     if (arg === '--help' || arg === '-h') help = true
     else if (arg === '--evidence-root') evidenceRoot = argv[++index] ?? ''
     else if (arg.startsWith('--evidence-root=')) evidenceRoot = arg.slice('--evidence-root='.length)
-    else throw new Error(`unknown gate argument: ${arg}`)
+    else if (arg === '--skipped-scopes') skippedScopes = (argv[++index] ?? '').split(/\s+/).filter(Boolean)
+    else if (arg.startsWith('--skipped-scopes=')) {
+      skippedScopes = arg.slice('--skipped-scopes='.length).split(/\s+/).filter(Boolean)
+    } else throw new Error(`unknown gate argument: ${arg}`)
   }
-  return { evidenceRoot, help }
+  return { evidenceRoot, skippedScopes, help }
 }
 
 function readJson(path: string): unknown {
@@ -145,12 +150,22 @@ function validateRepositoryEvidence(
   return errors
 }
 
-export function validateEvidence(config: SuiteConfig, evidenceRoot: string, expectedSourceRevision?: string): string[] {
+export function validateEvidence(
+  config: SuiteConfig,
+  evidenceRoot: string,
+  expectedSourceRevision?: string,
+  skippedScopes: readonly string[] = [],
+): string[] {
   const errors: string[] = []
   if (!isAbsolute(evidenceRoot)) return ['--evidence-root must be an absolute path']
   if (!existsSync(evidenceRoot)) return [`evidence root does not exist: ${evidenceRoot}`]
   const applications = config.plan!.applications
   const repositoryScope = config.plan!.repositoryScope
+  const unknownSkips = skippedScopes.filter((scope) => !applications.includes(scope))
+  if (unknownSkips.length > 0) errors.push(`skipped scopes are not applications: ${unknownSkips.join(' ')}`)
+  // A scope absent from the evidence root is only legitimate when CI
+  // deliberately skipped it because no tracked path changed.
+  const requiredApplications = applications.filter((application) => !skippedScopes.includes(application))
   const expectedPlanIdentity = planIdentity(config)
   const sourceRevisions = new Set<string>()
   const expectedScopes = [...applications, repositoryScope]
@@ -158,7 +173,7 @@ export function validateEvidence(config: SuiteConfig, evidenceRoot: string, expe
   for (const entry of readdirSync(evidenceRoot, { withFileTypes: true })) {
     if (entry.isDirectory() && !expectedSet.has(entry.name)) errors.push(`unexpected evidence scope: ${entry.name}`)
   }
-  for (const application of applications) {
+  for (const application of requiredApplications) {
     const root = join(evidenceRoot, application)
     const metadata = object(readJson(join(root, 'application.json')))
     if (metadata?.application !== application)
@@ -220,11 +235,11 @@ export function main(argv: readonly string[] = process.argv.slice(2)): number {
     return 2
   }
   if (args.help) {
-    console.log('usage: gate --evidence-root <absolute-path>')
+    console.log('usage: gate --evidence-root <absolute-path> [--skipped-scopes <scope...>]')
     return 0
   }
   if (!args.evidenceRoot) {
-    process.stderr.write('usage: gate --evidence-root <absolute-path>\n')
+    process.stderr.write('usage: gate --evidence-root <absolute-path> [--skipped-scopes <scope...>]\n')
     return 2
   }
   let sourceRevision: string
@@ -234,13 +249,14 @@ export function main(argv: readonly string[] = process.argv.slice(2)): number {
     process.stderr.write(`could not read source revision: ${(error as Error).message}\n`)
     return 1
   }
-  const errors = validateEvidence(config, resolve(args.evidenceRoot), sourceRevision)
+  const errors = validateEvidence(config, resolve(args.evidenceRoot), sourceRevision, args.skippedScopes)
   if (errors.length > 0) {
     console.error(`Gate: FAIL (${errors.length} errors)`)
     for (const error of errors) console.error(`  - ${error}`)
     return 1
   }
-  console.log(`Gate: PASS (${config.plan!.applications.length + 1} scopes)`)
+  const skippedNote = args.skippedScopes.length > 0 ? `, skipped: ${args.skippedScopes.join(' ')}` : ''
+  console.log(`Gate: PASS (${config.plan!.applications.length + 1 - args.skippedScopes.length} scopes${skippedNote})`)
   return 0
 }
 
