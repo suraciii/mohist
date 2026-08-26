@@ -30,60 +30,16 @@ count(Running work assigned to Runner) <= slots, checked at claim time
 
 ## Runner Aggregate and Presence
 
-Fields are grouped by update lifecycle, never by who reports them. Persistent
-fields change only through the control plane, a few individual fields at a
-time, and are never invalidated. Snapshot fields are replaced as a whole on
-register, successful poll, or unregister, and the next successful poll
-invalidates them.
+Presence facts follow one lifecycle rule: persistent fields (`slots`) change
+only through the control plane and are never invalidated by traffic; snapshot
+fields (`lastSeen`, RunnerInfo) are replaced as a whole on register, poll, or
+heartbeat-repair, and cleared on unregister.
 
-```text literal
-Runner
-  runnerId                       identity
-  slots                          persistent; owned by the control plane
-  lastSeen                       snapshot; established at register, renewed by successful poll
-  info: RunnerInfo|null          populated by register, refreshed by heartbeat-repair,
-                                  cleared by unregister
-
-RunnerInfo
-  state: online|offline          established by register, maintained by poll freshness
-  hostname, buildGitHash
-  capabilities, coderModels, coderModelVariants
-```
-
-A Runner holds no work records. The two work types remain authoritative in
-their owners' stores: Workflow work in the run row model and AgentJob work in
-the AgentJob dispatch projection. Both can be queried directly as
-`Pending/Running WHERE AssignedRunnerId=R`. The slot invariant
-(`count(running) <= slots`) is checked against the store during claim and is
-not maintained here. Work records fail the ownership test on the Runner: the
-slot invariant is not owned by the Runner itself, the running-work set can be
-derived by querying both owner stores, and no Runner behavior accepts a work
-record.
-
-### Behaviors
-
-```text literal
-Register(info)          state=online, lastSeen=now, populate info, write registry
-Unregister()            state=offline, clear info;
-                        close out by reporting FAILED("runner-lost") to owners
-TouchPresence()         successful poll or heartbeat: lastSeen=now; restore online registry state
-HeartbeatRepair(info)   refresh info and presence atomically; keep the same gate
-Update(slots)           write-through
-```
-
-Each behavior touches one lifecycle group.
-
-### Runtime Read
-
-`GetRuntimeStateAsync()` returns `RunnerRuntimeState` containing status,
-lastSeen, and activeWorks.
-
-activeWorks is a direct union of reads from the two owner stores:
-
-- Workflow: `Running assigned to me`, with the current task and checks for each
-  run.
-- AgentJob: `Pending/Running assigned to me` from the AgentJob dispatch
-  projection.
+A Runner holds no work records. Work records fail the ownership test: the
+slot invariant is not owned by the Runner, the running-work set can be derived
+by querying both owner stores (`Pending/Running WHERE AssignedRunnerId=R`),
+and no Runner behavior accepts a work record. Runtime state reads are derived
+the same way — assembled from the owner stores, never stored.
 
 ## Dispatch Protocol: Claim / Pull / Report
 
@@ -132,85 +88,49 @@ in [`runner-transport.md`](runner-transport.md).
 
 ### Poll Computation
 
+Each poll recomputes everything from persisted state; DispatchService keeps
+no cursor, cache, or ledger. A poll carries the Runner's reported set
+(`inFlight` union `awaitingAck`) and its readiness witness, and doubles as
+the presence heartbeat.
+
 ```text diagram
-Runner process                  DispatchService                    store / grains
-    | POST poll {inFlight, awaitingAck, readiness}                       |
-    |---------------------------->|                                      |
-    |                             | 0 BeginPoll: capture slots + gate     |
-    |                             | 1 TouchPresence (poll = heartbeat)    |
-    |                             | 2 desired = Running assigned to me    |
-    |                             |   from both owner types               |
-    |                             | 3 redelivery = desired - reported     |
-    |                             |   rebuild each from owner state       |
-    |                             | 4 spare = slots - active work count   |
-    |                             |   while spare > 0:                    |
-    |                             |     Pending assigned to me, then      |
-    |                             |     claimable Pending                 |
-    |                             |     each ORDER BY ReadySince ASC      |
-    |                             |     ClaimNext ----------------------->| Pending -> Running
-    |                             |       ok: build dispatch; spare--     | (+ stage lock)
-    |                             |       null: try next candidate        |
-    | { dispatches[] }            |                                      |
-    |<----------------------------|                                      |
-    |                             | EndPoll: release gate                 |
-    | inFlight.add(dispatches)    |                                      |
-    | execute concurrently        |                                      |
+dispatch order per poll:
+  1. redelivery = Running assigned to me - reported    (repay debts first)
+  2. mine       = Pending assigned to me,  ReadySince ASC
+  3. claimable  = unassigned Pending,      ReadySince ASC
+
+invariant: a newly delivered dispatch joins the reported
+set synchronously, before the next poll — it can never
+be mistaken for lost work
 ```
 
-Ordering is redelivery first, then Pending assigned to this Runner, then
-claimable Pending. Repay existing obligations before expanding.
-
 For `reported - desired`, where the owner has already moved beyond the work,
-take no action. The process executes it to completion, receives `Stale` for the
-report as its acknowledgement, and discards the result.
-
-Race avoidance: the process adds received dispatches to inFlight synchronously
-before the next poll. A newly delivered dispatch can never be mistaken for lost
-work.
+take no action: the process executes it to completion, receives `refused` for
+the report as its acknowledgement, and discards the result.
 
 ### Runtime Readiness Witness
 
 Presence alone cannot prove that the runtime a pending work item needs is
-ready before the Server claims the item. The Runner therefore sends a runtime
-readiness witness in every poll. A witness is an ephemeral observation bound
-to the Runner connection and contains:
-
-- `runtime`: the canonical runtime id, for example `pi` or `opencode`;
-- `ready`: whether this runtime can accept new work now;
-- `generation`: a monotonically increasing runtime instance fence owned by
-  the Runner.
-
-The poll boundary binds the witness to the current control connection. Runner
-sends its public connection ID with the poll; after matching the current lease,
-Server injects the corresponding process-local `connectionGeneration`. The
-witness itself does not carry or own that Server fence.
+ready before the Server claims the item. Every poll therefore carries one
+readiness witness per runtime: `ready` (can it accept new work now) plus a
+Runner-owned generation that fences the observation to the current runtime
+instance.
 
 The Server treats a missing, malformed, stale, or `ready=false` witness as
 unknown for new claims. It never treats a runtime catalog as a readiness
 witness. The witness is not durable work state and cannot settle, replay, or
 replace a work result.
 
-For each pending candidate, DispatchService resolves the candidate's runtime
-without mutating its owner, applies the witness predicate, and only then calls
-the owner claim operation. Workflow runtime resolution is a read-only
-projection of the pending `WorkItem`; it must not call `ClaimNextAsync`
-merely to discover `uses`. AgentJob runtime resolution uses its persisted
-dispatch snapshot. If either projection is unavailable, the candidate remains
-pending for a later poll.
-
 Redelivery is separate from admission. Work already reported as `inFlight` or
 `awaitingAck` remains owned by that Runner and may be delayed while its
-runtime recovers. The Runner continues to poll, report, and acknowledge that
-held work; it must not acquire new work and hide it in an unbounded deferred
-queue.
+runtime recovers; the Runner must not acquire new work and hide it in an
+unbounded deferred queue.
 
 A witness is a claim-time admission fence, not a guarantee that an external
-runtime cannot fail immediately after the poll. If readiness changes after a
-successful claim, the claimed work follows the existing in-flight and
-result-uncertain protocol. A later connection or runtime generation cannot
-reuse an older witness. The Server must not infer readiness from a successful
-HTTP poll, presence, heartbeat, model catalog, runtime session file, or
-reconnect; these facts have different owners and lifecycles.
+runtime cannot fail immediately after the poll. The Server must not infer
+readiness from a successful HTTP poll, presence, heartbeat, model catalog,
+runtime session file, or reconnect; these facts have different owners and
+lifecycles.
 
 ### Claim
 
@@ -259,27 +179,17 @@ implicit bias.
 ### Capacity
 
 `slots` limits all work executing concurrently on a Runner, Workflow and
-AgentJob combined. There is one final capacity decision: every new claim
-rechecks the Runner's live registration and capacity under the Runner lifecycle
-gate. `BeginPoll` prevents overlapping polls, but its capacity snapshot is only
-advisory. Lowering capacity constrains subsequent claims without cancelling
-running work. Unregister ordered before a claim rejects the claim; unregister
-ordered after a claim closes it out. The process enforces no capacity rule.
+AgentJob combined. Claim is the only final capacity decision: every new claim
+rechecks the Runner's live registration and capacity. Everything earlier —
+poll admission, the AgentJob precheck — is advisory. Lowering capacity
+constrains subsequent claims without cancelling running work; the Runner
+process enforces no capacity rule of its own.
 
-Poll admission is an ephemeral, token-fenced lease. `BeginPoll` returns an
-opaque token; only `EndPoll` carrying that exact token can release the round.
-Dispatch always releases the token in `finally`, including request cancellation
-and core failures. A canceled poll stops creating further offers. A durable
-claim that completed before cancellation remains Running and is redelivered by
-the next poll under the ordinary at-least-once contract.
-
-The AgentJob admission capacity check is a precheck. Runner selection filters
-out live Runners already at capacity; when all are full, it rejects
-synchronously so the caller sees backpressure immediately. Passing the
-precheck does not promise capacity; claim is the final decision. Another work
-item may consume capacity between precheck and claim, in which case the job
-remains Pending for the next poll. No synchronous capacity promise could be
-kept because every decision has a window before actual execution. The two-step
+The AgentJob precheck exists to give the caller synchronous backpressure when
+every live Runner is full. Passing it promises nothing: another work item may
+consume capacity between precheck and claim, in which case the job remains
+Pending for the next poll. No synchronous capacity promise could be kept
+because every decision has a window before actual execution; the two-step
 design narrows the promise to one the system can uphold.
 
 ### Report
@@ -324,6 +234,9 @@ closeout. See [Restart and Crash Semantics](#restart-and-crash-semantics).
 The owner cannot distinguish who produced a report: the execution process,
 whether normally or after a timeout, or RunnerGrain closeout.
 
+A stop does not cancel in-flight execution; its eventual report receives
+`refused`.
+
 ## Supervision and Runner-Lost Closeout
 
 Each failure condition has exactly one owner:
@@ -345,46 +258,14 @@ Each failure condition has exactly one owner:
   dispatch timeouts, are decided by owner reminders and are unrelated to
   dispatch.
 
-Register establishes initial presence and persists the last registration
-profile. HTTP heartbeat refreshes presence even when the Runner process cannot
-complete a poll; a payload heartbeat also refreshes the persisted info under
-the same lifecycle gate. After activation loss, the first successful poll uses
-the persisted profile to restore presence and registry state.
-Explicit unregister clears the profile. The registry is written only when
-state or info changes, never on each poll.
+Presence has three refresh paths — register, poll, heartbeat — so a Runner
+stays visible while its process lives, even when it cannot complete a poll.
+Explicit unregister clears presence and closes out assigned work.
 
 `runner-lost` is a failure reason, not an owner state. The owner marks affected
 work failed: WorkflowRun enters its existing `Failed` state and projects the
 Issue as `blocked`; AgentJob symmetrically enters its existing `Failed` state.
 There is no `Interrupted` state.
-
-### Failure Handling
-
-- Poll transport fails: retry in the same Runner process and retain the
-  reported set.
-- Dispatch response is lost: the next poll computes `desired - reported` and
-  redelivers.
-- Process restarts: the old generation's Running work is settled
-  `FAILED("runner-restarted")` at register and is never redelivered to the
-  new process.
-- Ordinary dispatch construction failure after claim: the work remains
-  Running and retries every poll.
-- A persisted WorkItem references a retired Action: reject that work by
-  `workerId + workId`; the owner marks it FAILED.
-- Runner rendering or manifest validation fails: the attempt fails as
-  `invalid-input`; do not redeliver.
-- Report transport fails: retry awaitingAck; the report remains reported and
-  is never redelivered.
-- Duplicate or late report: the owner idempotently answers `refused`.
-- Work hangs: the process timeout produces FAILED.
-- Runner is lost: closeout reports `FAILED("runner-lost")` and the owner
-  enters Failed.
-- Runner returns after closeout: its report receives `refused`; the work is
-  no longer desired and drains naturally.
-- A run or job is stopped while work executes: do not cancel; the report
-  receives `refused`.
-- An AgentJob has no available Runner for too long: the owner ReadySince
-  timeout produces `FAILED(RunnerUnavailable)`.
 
 ## Restart and Crash Semantics
 
@@ -475,80 +356,11 @@ then completes exactly once at the child `close` boundary after both streams
 have drained. Timeout and parent abort use the same tree ownership; no command
 may intentionally daemonize descendants through this primitive.
 
-Work lost with a Runner is reported to its owner as
-`FAILED("runner-lost")`. The owner decides what follows. There is no
-`Interrupted` state.
-
 When a Runtime Session quarantines or a Runner shuts down, the Runner drains
-in-flight work before it releases ownership. Two env-var budgets bound the
-drain: `QUARANTINE_DRAIN_TIMEOUT_MS` (default 60s) and
-`RUNTIME_SHUTDOWN_TIMEOUT_MS` (default 30s). Results produced during drain are reported before ownership is released. A
-result not reported before process death is lost with the process; closeout
-settles its work.
-
-## Local Workspace Lifecycle
-
-The Server owns the logical Workspace and its lifecycle. The Runner owns only
-its local materialization and is the only component that touches that
-filesystem. This split keeps loss of a reconstructible directory from deleting
-the durable environment identity or changing which Sessions belong to it. The
-identity, Origin, Home, and reclamation rules are authoritative in
-[`workspace.md`](workspace.md).
-
-Dispatches that still use the per-WorkflowRun fallback materialize a standalone
-partial clone. The clone retains the commit graph and every remote branch ref,
-omits tags, and defers blob transfer until checkout so recovery can still find
-an existing run branch without transferring unrelated file contents. Clone and
-checkout use the same bounded network-command contract. Preparation happens at
-a private `.preparing` path that is removed after any failure and becomes the
-published Workspace only by atomic rename. Each WorkflowRun has its own clone;
-the fallback does not use a shared cache, Git alternates, or an operator
-checkout.
-
-The Runner records each materialization in a reconstructible
-`NamedWorkspaceRegistry`, keyed by `(ProjectId, WorkspaceName)`. The registry is
-a local maintenance index, not a second Workspace store. Every entry has one
-phase. `active` means the Runner has not received a current Server grant for
-reclamation. `eligible` means the Server reports the Workspace archived or
-active with no active bound Session, so disk policy may delete the
-materialization. `stuck` means deletion safety checks rejected
-deterministically; the Runner retains the directory and index entry and does
-not retry automatic deletion.
-
-The Runner periodically asks the Server whether each `active` entry is
-reclaimable. Transport failure or an unknown answer keeps it `active`. An
-archived Workspace is reclaimable. An active Workspace is reclaimable only
-while it has no active bound Session; deletion removes only the local directory,
-and later use rematerializes the same logical Workspace. The Runner never
-derives this grant from WorkflowRun status.
-
-One Workspace has two independently reclaimable local resources:
-
-- the materialized directory is reclaimed by retention and storage budget;
-- a Runtime directory resource is in-process state retained by an external
-  Runtime and released as soon as that Runtime's own safety conditions permit.
-
-The resources share only directory identity. Releasing the Runtime directory
-resource does not delete the worktree, and deleting the worktree does not
-replace Runtime release. Both use the Runner's existing Workspace maintenance
-cycle, once every two minutes by default, without a per-Workspace timer or new
-user configuration. Each pass is single-flight: if one pass is still running,
-the next does not overlap. Periodic maintenance releases Runtime resources
-before applying disk policy. Runtime release does not depend on retention,
-storage budget, or successful Server configuration reads.
-
-Disk deletion has an additional concurrency constraint. Successful periodic
-Runtime reclamation proves only that the resource was released at that moment;
-it does not authorize a later disk deletion because a new operation may reuse
-the directory in between. Every automatic or manual deletion must reacquire the
-directory's Runtime removal fence. Within one exclusive boundary it performs
-any required Runtime release, directory deletion, and registry removal. Even
-when the Runtime has no record for the directory, a temporary fence blocks new
-operations during deletion, but it must not create a Runtime resource merely
-to check. If the Runtime reports the directory busy, cannot decide, or cannot
-release it, deletion fails explicitly or is deferred. See the OpenCode-specific
-conditions in
-[`runtimes/opencode.md`](runtimes/opencode.md#directory-instance-reclamation).
+in-flight work within bounded time before it releases ownership. Results
+produced during drain are reported before ownership is released; a result not
+reported before process death is lost with the process, and closeout settles
+its work.
 
 ## Persisted State
 
@@ -616,29 +428,3 @@ leaves a corrupt journal permanently unavailable. Under the certainty
 vocabulary these are fabricate and estimate defects
 ([`conventions.md`](conventions.md#facts-claims-and-settlement)).
 
-The per-WorkflowRun Workspace manager and `workspaces.json` registry remain an
-implementation gap for dispatches that still lack a named Workspace. New code
-must not extend that fallback. Removing it does not require a compatibility
-model because Runner materializations are reconstructible.
-
-## Decision Record: One Ledger, No Reconciliation
-
-AgentJob work was previously delivered over a push channel. AgentJobGrain
-pushed DispatchSnapshot across grains into staging in the Runner aggregate,
-which persisted a second work record. Periodic reconciliation then compared
-the staged record with its owner. That form violated the opening invariant of
-no duplicate copy. Reconciliation was not a design feature; it was the carrying
-cost of redundant state, together with cross-grain callback cycles, races
-between assignment and poll, and ledger hydration on activation.
-
-The unified design makes AgentJob, like WorkflowRun, its own dispatch ledger.
-Dispatch fields (`Status`, `AssignedRunnerId`, `ReadySince`, and
-`DispatchSnapshot`) are persisted in a queryable projection. DispatchService
-computes desired work identically for both owner types, and the owner completes
-claim atomically. The Runner aggregate returns to presence, slots, and closeout
-without work records. The cross-grain cycle of assignment callbacks and
-runnable reverse lookups disappears, and capacity decisions converge at claim.
-The old push channel's Runner-side staging, reconciliation loop, and dispatch
-retry state machine (`DispatchAttempts`, retry bound, and acceptance fence) are
-deleted together. The owner handles the case of an AgentJob with no available
-Runner through its own ReadySince timeout.
