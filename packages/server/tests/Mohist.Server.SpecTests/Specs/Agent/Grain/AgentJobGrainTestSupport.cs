@@ -230,5 +230,6 @@ public abstract class AgentJobGrainTestSupport
             RuntimeReadiness: runtimes
                 .Select(runtime => new RuntimeReadinessWitness(runtime, Ready: true, Generation: 1))
                 .ToList(),
-            ConnectionGeneration: CapabilityFenceConnection);
+            ConnectionGeneration: CapabilityFenceConnection,
+            ProcessGeneration: TestRunnerGenerationExtensions.ProcessGeneration);
 }

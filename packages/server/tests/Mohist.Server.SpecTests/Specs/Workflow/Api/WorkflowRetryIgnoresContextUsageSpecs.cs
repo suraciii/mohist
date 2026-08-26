@@ -195,6 +195,7 @@ public class WorkflowRetryIgnoresContextUsageSpecs
 
         await _client.PostOkAsync($"/api/runner/{runnerId}/report", new
         {
+            ownerKind = WorkDispatchOwnerKinds.Workflow,
             workflowRunId = dispatchedWorkflowRunId,
             workId = data.GetProperty("workId").GetString(),
             taskRunId = data.GetProperty("taskRunId").GetString(),
@@ -309,6 +310,7 @@ public class WorkflowRetryIgnoresContextUsageSpecs
     {
         await _client.PostOkAsync($"/api/runner/{runnerId}/report", new
         {
+            ownerKind = WorkDispatchOwnerKinds.Workflow,
             workflowRunId,
             workId = work.WorkId,
             taskRunId = work.TaskRunId,
