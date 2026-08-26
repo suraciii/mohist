@@ -78,6 +78,7 @@ public sealed partial class AgentJobGrain
         State.AcceptedReportAgentTurnId = result.AgentTurnId;
         State.AcceptedReportRuntime = result.Runtime;
         State.AcceptedReportRuntimeSessionId = result.RuntimeSessionId;
+        _reportPersistenceFailures.BeforePersist(Key, workId);
         await EnterTerminalStateAsync(
             isSuccess ? AgentJobStatus.Completed : AgentJobStatus.Failed,
             isSuccess ? (int?)0 : (result.ExitCode ?? 1),

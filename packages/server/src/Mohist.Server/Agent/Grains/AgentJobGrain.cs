@@ -66,6 +66,7 @@ public sealed partial class AgentJobGrain : Grain, IAgentJobGrain
     private readonly IGrainFactory _grains;
     private readonly IAgentJobDispatchObserver _dispatchObserver;
     private readonly ManagerExecutionCapabilityIssuer _managerCredentials;
+    private readonly IAgentJobReportPersistenceFailureInjector _reportPersistenceFailures;
     private readonly TaskCompletionSource<AgentJobTerminalResult> _terminalCompletion =
         new(TaskCreationOptions.RunContinuationsAsynchronously);
     private IDisposable? _jobTimeoutTimer;
@@ -82,7 +83,8 @@ public sealed partial class AgentJobGrain : Grain, IAgentJobGrain
         EventDispatchSignal dispatchSignal,
         IGrainFactory grains,
         IAgentJobDispatchObserver dispatchObserver,
-        ManagerExecutionCapabilityIssuer managerCredentials)
+        ManagerExecutionCapabilityIssuer managerCredentials,
+        IAgentJobReportPersistenceFailureInjector? reportPersistenceFailures = null)
     {
         _log = log;
         _options = options.Value;
@@ -93,6 +95,7 @@ public sealed partial class AgentJobGrain : Grain, IAgentJobGrain
         _grains = grains;
         _dispatchObserver = dispatchObserver;
         _managerCredentials = managerCredentials;
+        _reportPersistenceFailures = reportPersistenceFailures ?? NoopAgentJobReportPersistenceFailureInjector.Instance;
         _runnerLossRecoveryTimeout = ValidateRunnerLossRecoveryTimeout(_options.RunnerLossRecoveryTimeout);
     }
 

@@ -92,6 +92,10 @@ public static class MohistServiceRegistration
         services.TryAddSingleton<IBackgroundTaskLauncher, BackgroundTaskLauncher>();
         services.TryAddSingleton<IRunnerUpdateOperationWriteFailureInjector>(
             NoopRunnerUpdateOperationWriteFailureInjector.Instance);
+        services.TryAddSingleton<IWorkflowReportPersistenceFailureInjector>(
+            NoopWorkflowReportPersistenceFailureInjector.Instance);
+        services.TryAddSingleton<IAgentJobReportPersistenceFailureInjector>(
+            NoopAgentJobReportPersistenceFailureInjector.Instance);
 
         services.AddRouting(options =>
         {

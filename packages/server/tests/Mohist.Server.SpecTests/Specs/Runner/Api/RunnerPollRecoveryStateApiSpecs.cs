@@ -5,6 +5,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Infrastructure.Data.Workflow;
+using Mohist.Server.Agent.Grains;
 using Mohist.Server.Runner.Grains;
 using Mohist.Server.SpecTests.Support;
 using Mohist.Server.TestSupport;
@@ -87,6 +88,91 @@ public sealed class RunnerPollRecoveryStateApiSpecs
             Assert.NotEqual(freshTaskRunId, continuation.GetProperty("taskRunId").GetString());
             Assert.True(continuation.TryGetProperty("recoveryRemaining", out var continuationState));
             Assert.Equal(1, continuationState.GetInt32());
+        }
+        finally
+        {
+            await runner.UnregisterAsync();
+        }
+    }
+
+    [Fact]
+    public async Task Report_WorkflowPersistenceConflictReturnsOutstandingAndReplaySettles()
+    {
+        var projectId = $"workflow-outstanding-{Guid.NewGuid():N}";
+        var workflowRunId = $"workflow-outstanding-run-{Guid.NewGuid():N}";
+        var runnerId = $"workflow-outstanding-runner-{Guid.NewGuid():N}";
+        var runner = _fixture.Grains.GetGrain<IRunnerGrain>(runnerId);
+
+        try
+        {
+            await SeedWorkflowAsync(projectId, workflowRunId, new RecoveryDefinition(1, []), uses: "spec/task");
+            await runner.RegisterAsync(new RunnerInfo(runnerId, ["spec/*"], "test-host", projectId));
+            var dispatch = await PollAsync(runnerId);
+            var workId = dispatch.GetProperty("workId").GetString()!;
+            var taskRunId = dispatch.GetProperty("taskRunId").GetString()!;
+            var payload = new
+            {
+                ownerKind = WorkDispatchOwnerKinds.Workflow,
+                workflowRunId,
+                workId,
+                taskRunId,
+                status = "completed",
+            };
+
+            _fixture.ReportPersistenceFailures.FailNextWorkflowReport(workflowRunId, workId);
+            using var outstanding = await _fixture.Client.PostAsJsonAsync($"/api/runner/{runnerId}/report", payload);
+            Assert.Equal(HttpStatusCode.OK, outstanding.StatusCode);
+            Assert.Equal("outstanding", (await outstanding.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("verdict").GetString());
+            Assert.Equal("Running", await _fixture.Grains.GetGrain<IWorkflowGrain>(workflowRunId).GetRunStatusAsync());
+
+            using var accepted = await _fixture.Client.PostAsJsonAsync($"/api/runner/{runnerId}/report", payload);
+            Assert.Equal("accepted", (await accepted.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("verdict").GetString());
+            using var replay = await _fixture.Client.PostAsJsonAsync($"/api/runner/{runnerId}/report", payload);
+            Assert.Equal("accepted", (await replay.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("verdict").GetString());
+        }
+        finally
+        {
+            await runner.UnregisterAsync();
+        }
+    }
+
+    [Fact]
+    public async Task Report_AgentJobLedgerConflictReturnsOutstandingAndReplaySettles()
+    {
+        var projectId = $"agent-job-outstanding-{Guid.NewGuid():N}";
+        var runnerId = $"agent-job-outstanding-runner-{Guid.NewGuid():N}";
+        var jobId = $"agent-job-outstanding-{Guid.NewGuid():N}";
+        var runner = _fixture.Grains.GetGrain<IRunnerGrain>(runnerId);
+        var job = _fixture.Grains.GetGrain<IAgentJobGrain>(jobId);
+
+        try
+        {
+            await runner.RegisterAsync(new RunnerInfo(runnerId, ["spec/*"], "test-host", projectId));
+            await job.SubmitAsync(new AgentJobInput(
+                "persist terminal report",
+                WorkspacePath: "/tmp/agent-job-outstanding",
+                ProjectId: projectId,
+                AgentId: "agent-test"));
+            var dispatch = await PollAsync(runnerId);
+            var workId = dispatch.GetProperty("workId").GetString()!;
+            var payload = new
+            {
+                ownerKind = WorkDispatchOwnerKinds.AgentJob,
+                agentJobId = jobId,
+                workId,
+                status = "completed",
+            };
+
+            _fixture.ReportPersistenceFailures.FailNextAgentJobReport(jobId, workId);
+            using var outstanding = await _fixture.Client.PostAsJsonAsync($"/api/runner/{runnerId}/report", payload);
+            Assert.Equal(HttpStatusCode.OK, outstanding.StatusCode);
+            Assert.Equal("outstanding", (await outstanding.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("verdict").GetString());
+            Assert.Equal(AgentJobStatus.Running, await job.GetStatusAsync());
+
+            using var accepted = await _fixture.Client.PostAsJsonAsync($"/api/runner/{runnerId}/report", payload);
+            Assert.Equal("accepted", (await accepted.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("verdict").GetString());
+            using var replay = await _fixture.Client.PostAsJsonAsync($"/api/runner/{runnerId}/report", payload);
+            Assert.Equal("accepted", (await replay.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("verdict").GetString());
         }
         finally
         {

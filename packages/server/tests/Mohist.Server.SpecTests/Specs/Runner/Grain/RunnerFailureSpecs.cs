@@ -40,6 +40,29 @@ public class RunnerFailureSpecs : WorkflowGrainSpecs
     }
 
     [Fact]
+    public async Task Heartbeat_RefreshesPresenceWhilePollIsGated_AndPreventsRunnerCloseout()
+    {
+        var workflow = await StartWorkflowAsync(SingleStage(checks: []));
+        var (work, runnerId) = await PollWorkAnyAsync();
+        var runner = Grains.GetGrain<IRunnerGrain>(runnerId);
+
+        await runner.BeginDrainAsync();
+        var before = await runner.GetRuntimeStateAsync();
+        _fixture.TimeProvider.Advance(TimeSpan.FromMinutes(1));
+        await runner.HeartbeatAsync();
+
+        var afterHeartbeat = await runner.GetRuntimeStateAsync();
+        Assert.Equal(RunnerStatus.Online, afterHeartbeat.Status);
+        Assert.Equal(before.LastHeartbeatAt.AddMinutes(1), afterHeartbeat.LastHeartbeatAt);
+
+        _fixture.TimeProvider.Advance(TimeSpan.FromMinutes(1.5));
+        var afterOriginalPresenceInterval = await runner.GetRuntimeStateAsync();
+        Assert.Equal(RunnerStatus.Online, afterOriginalPresenceInterval.Status);
+        Assert.Equal(work.WorkId, await workflow.GetCurrentWorkIdAsync());
+        Assert.Equal("Running", await workflow.GetRunStatusAsync());
+    }
+
+    [Fact]
     public async Task Heartbeat_WithOnlineRunner_PreservesRunningTask()
     {
         var workflow = await StartWorkflowAsync(SingleStage(checks: []));

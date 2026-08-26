@@ -710,7 +710,15 @@ public partial class WorkflowGrain
         }
         else
         {
-            await CommitAsync(events);
+            _reportPersistenceWorkId = activeWork.WorkId;
+            try
+            {
+                await CommitAsync(events);
+            }
+            finally
+            {
+                _reportPersistenceWorkId = null;
+            }
         }
         await DeliverPendingSessionInterruptionAsync();
         if (recoveringTransition is not null)
