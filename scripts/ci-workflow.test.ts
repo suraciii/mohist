@@ -42,7 +42,50 @@ test('CI workflow needs reference existing canonical producer jobs', () => {
   }
 
   const config = parseSuiteConfig(readFileSync(resolve(repositoryRoot, 'test-duration.config.jsonc'), 'utf8'))
-  const expected = [...config.plan!.applications, config.plan!.repositoryScope].sort()
+  const expected = [...config.plan!.applications, config.plan!.repositoryScope, 'changes'].sort()
   assert.deepEqual(parseInlineNeeds(jobs.get('gate') ?? '').sort(), expected)
   assert.match(jobs.get('repository') ?? '', /npm run test:slack:race/)
+})
+
+// Path filtering policy: the changes job owns the scope map, application
+// jobs are conditioned on their lane, and shared build inputs force every
+// scope. The Server <-> CLI project-reference coupling means each of those
+// two lanes must list both package roots.
+test('CI workflow path filters match the real dependency graph', () => {
+  const workflow = readFileSync(resolve(repositoryRoot, '.github/workflows/ci.yml'), 'utf8')
+  const jobs = parseJobs(workflow)
+  const changes = jobs.get('changes') ?? ''
+  assert.match(changes, /dorny\/paths-filter@v3/, 'changes job must use paths-filter')
+
+  const config = parseSuiteConfig(readFileSync(resolve(repositoryRoot, 'test-duration.config.jsonc'), 'utf8'))
+  for (const application of config.plan!.applications) {
+    const jobSource = jobs.get(application) ?? ''
+    assert.match(jobSource, /needs: \[changes\]/, `${application} must depend on the changes job`)
+    assert.match(
+      jobSource,
+      new RegExp(`needs\\.changes\\.outputs\\.${application} == 'true'`),
+      `${application} must be gated on its own change lane`,
+    )
+    assert.match(changes, new RegExp(`^            ${application}:$`, 'm'), `missing filter lane for ${application}`)
+  }
+
+  // Shared build inputs must wake every scope.
+  const globalLane = changes.match(/^            global:\n((?:              - .*\n)+)/m)
+  assert.notEqual(globalLane, null, 'global trigger lane is required')
+  for (const pattern of ['.github/workflows/**', 'scripts/**', 'Directory.Build.props', 'package-lock.json']) {
+    assert.ok(globalLane![1]!.includes(`'${pattern}'`), `global triggers must include ${pattern}`)
+  }
+  // Build-graph couplings discovered from ProjectReferences.
+  const laneBlock = (lane: string): string => {
+    const match = changes.match(new RegExp(`^            ${lane}:\\n((?:              - .*\\n)+)`, 'm'))
+    return match?.[1] ?? ''
+  }
+  assert.ok(laneBlock('server').includes("'packages/cli/**'"), 'server lane must include packages/cli')
+  assert.ok(
+    laneBlock('cli').includes("'packages/server/src/Mohist.Workflow.Definition/**'"),
+    'cli lane must include Mohist.Workflow.Definition',
+  )
+
+  const gate = jobs.get('gate') ?? ''
+  assert.match(gate, /--skipped-scopes/, 'gate must receive the skipped-scope manifest')
 })

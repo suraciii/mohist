@@ -72,10 +72,27 @@ function writeScope(root: string, scope: string, trackId: string): void {
 test('Gate parses only its evidence root and help', () => {
   assert.deepEqual(parseArgs(['--evidence-root', '/tmp/evidence']), {
     evidenceRoot: '/tmp/evidence',
+    skippedScopes: [],
     help: false,
   })
-  assert.deepEqual(parseArgs(['--help']), { evidenceRoot: undefined, help: true })
+  assert.deepEqual(parseArgs(['--help']), { evidenceRoot: undefined, skippedScopes: [], help: true })
+  assert.deepEqual(parseArgs(['--skipped-scopes', 'web runner']), {
+    evidenceRoot: undefined,
+    skippedScopes: ['web', 'runner'],
+    help: false,
+  })
   assert.throws(() => parseArgs(['--track', 'server-unit']), /unknown gate argument/)
+})
+
+// A scope CI deliberately skipped (no tracked path changed) is exempt from
+// the evidence requirement, but an unknown skip name is still a config error.
+test('Gate exempts declared skipped scopes and rejects unknown ones', () => {
+  const root = mkdtempSync(join(tmpdir(), 'mohist-gate-'))
+  writeScope(root, 'server', 'server-unit')
+  writeScope(root, 'repository', '')
+  assert.deepEqual(validateEvidence(config(), root, undefined, ['web']), [])
+  const errors = validateEvidence(config(), root, undefined, ['docs'])
+  assert.ok(errors.some((error) => error.includes('skipped scopes are not applications: docs')))
 })
 
 test('Gate accepts complete application and Repository evidence', () => {
