@@ -67,12 +67,12 @@ Do not let agents guess rules. Do not let the current code decide for the target
 - Prefer domain nouns and product nouns. Use technical nouns only in implementation design, and
   define terms a new reader may not know.
 - Use canonical names. Keep casing, singular/plural, and field paths consistent.
-- Every plain-text fence must choose exactly one semantic marker: `text diagram` or `text literal`.
-- Use `text diagram` only when an ASCII diagram makes a boundary, ownership relation, dependency,
-  sequence, hierarchy, or state transition easier to understand. Do not draw when prose is already clear.
+- Draw diagrams in Mermaid when a boundary, ownership relation, dependency, sequence, hierarchy, or
+  state transition is easier to understand as a picture. Do not draw when prose is already clear.
+  Prefer `flowchart` and `sequenceDiagram`.
 - Use `text literal` for command output, syntax, protocols, pseudocode, data shapes, and other
-  preformatted text that is not a diagram. Bare `text` fences are invalid.
-- Use only ASCII characters in diagrams. Do not add PlantUML, Mermaid, Unicode line art, or Unicode arrows.
+  preformatted text that is not a diagram. Bare `text` fences are invalid. The `text diagram` marker
+  is legacy: migrate a diagram to Mermaid when you touch its document.
 - Do not use raw HTML. Markdown is the only document markup.
 - Draw only real concepts. Give every arrow a meaning.
 - Write key rules in prose. Do not make a diagram the only source of truth.

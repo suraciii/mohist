@@ -7,11 +7,11 @@ current store contents.
 
 Every fact has exactly one owner:
 
-```text diagram
-What work was dispatched to whom -> WorkflowRun / AgentJob
-                                    (each is its own queryable dispatch ledger)
-What is executing right now      -> Runner process memory, reported on each poll
-Whether a Runner is alive        -> RunnerGrain.lastSeen
+```mermaid
+flowchart LR
+    Q1["What work was dispatched to whom"] --> O1["WorkflowRun / AgentJob<br/>each its own queryable dispatch ledger"]
+    Q2["What is executing right now"] --> O2["Runner process memory<br/>reported on each poll"]
+    Q3["Whether a Runner is alive"] --> O3["RunnerGrain.lastSeen"]
 ```
 
 There is no second copy. No component stages dispatch or work state owned by
@@ -43,35 +43,17 @@ the same way — assembled from the owner stores, never stored.
 
 ## Dispatch Protocol: Claim / Pull / Report
 
-```text diagram
-WorkflowGrain / WorkflowRun       workflow work dispatch ledger
-  owns Assignment and lifecycle: Pending / Running / terminal
-  ClaimNext: atomic Pending -> Running plus stage lock
-  consumes reports idempotently: report for terminal work -> Stale
-  has no timer and no Runner concept
-
-AgentJobGrain / AgentJob          AgentJob work dispatch ledger
-  owns work state and the sole DispatchSnapshot
-  admission: eligibility precheck selects a Runner, then one transaction writes
-    AssignedRunnerId + ReadySince + DispatchSnapshot; no other component call
-  ClaimNext: atomic Pending -> Running; idempotent
-  consumes reports idempotently: report for terminal work -> Stale
-  reminder does one thing:
-    Pending with an old ReadySince -> Failed(RunnerUnavailable)
-
-RunnerGrain
-  owns presence, slots, and closeout
-  holds no work records
-
-DispatchService                  stateless; not a grain
-  each poll: desired - reported -> dispatches
-  reads everything from persisted state; no cursor, cache, or ledger
-
-Runner process                   physical process
-  one process-level critical loop owns polling and report retry
-  executes work concurrently with progress-aware timeout
-  each poll reports the full inFlight + awaitingAck set
-  retries due reports at a fixed interval until acknowledged
+```mermaid
+flowchart TD
+    subgraph Server
+        WG["WorkflowRun / AgentJob<br/>each its own dispatch ledger<br/>owns assignment and lifecycle: Pending / Running / terminal<br/>ClaimNext: atomic Pending → Running<br/>consumes reports idempotently; no timer, no Runner concept"]
+        RG["RunnerGrain<br/>owns presence, slots, and closeout<br/>holds no work records"]
+        DS["DispatchService — stateless, not a grain<br/>each poll: desired − reported → dispatches<br/>no cursor, cache, or ledger"]
+    end
+    RP["Runner process<br/>one critical loop owns polling and report retry<br/>each poll reports the full inFlight ∪ awaitingAck set"]
+    RP -->|poll / report| DS
+    DS -->|ClaimNext| WG
+    DS -->|TouchPresence| RG
 ```
 
 ### Transport
@@ -93,16 +75,15 @@ no cursor, cache, or ledger. A poll carries the Runner's reported set
 (`inFlight` union `awaitingAck`) and its readiness witness, and doubles as
 the presence heartbeat.
 
-```text diagram
-dispatch order per poll:
-  1. redelivery = Running assigned to me - reported    (repay debts first)
-  2. mine       = Pending assigned to me,  ReadySince ASC
-  3. claimable  = unassigned Pending,      ReadySince ASC
-
-invariant: a newly delivered dispatch joins the reported
-set synchronously, before the next poll — it can never
-be mistaken for lost work
+```mermaid
+flowchart TD
+    P["poll(inFlight ∪ awaitingAck, readiness)"] --> R1["1. redelivery<br/>Running assigned to me − reported<br/>repay debts first"]
+    R1 --> R2["2. mine<br/>Pending assigned to me, ReadySince ASC"]
+    R2 --> R3["3. claimable<br/>unassigned Pending, ReadySince ASC"]
 ```
+
+A newly delivered dispatch joins the reported set synchronously, before the
+next poll, so it can never be mistaken for lost work.
 
 For `reported - desired`, where the owner has already moved beyond the work,
 take no action: the process executes it to completion, receives `refused` for
@@ -138,8 +119,11 @@ lifecycles.
 lock, marks it Running under the Runner identity, and persists it in one atomic
 write. There is no offer phase and no Runner-side preregistration.
 
-```text diagram
-PENDING --ClaimNext--> RUNNING --report(success|fail)--> COMPLETED|FAILED
+```mermaid
+flowchart LR
+    P[PENDING] -->|ClaimNext| R[RUNNING]
+    R -->|"report(success)"| C[COMPLETED]
+    R -->|"report(fail)"| F[FAILED]
 ```
 
 A failed claim, from stage-lock contention or changed state, returns null and
@@ -166,9 +150,11 @@ Stamp `ReadySince` whenever work enters or re-enters Ready. Within a candidate
 tier, mix Workflow and AgentJob work by `ORDER BY ReadySince ASC`. This produces
 round-robin service with no scheduler state:
 
-```text diagram
-work completes -> owner advances -> next work becomes Pending -> ReadySince := now
-the just-served item moves to the tail; the longest-waiting item is at the head
+```mermaid
+flowchart TD
+    Q["Ready queue, ORDER BY ReadySince ASC"] --> S["head: longest-waiting item is served"]
+    S --> N["owner advances; next work becomes Pending,<br/>ReadySince := now, joins the tail"]
+    N --> Q
 ```
 
 The policy extension point defaults to strict FIFO. If interactive AgentJobs
@@ -196,9 +182,16 @@ design narrows the promise to one the system can uphold.
 
 Reports go directly to the owning grain through a stateless translation path:
 
-```text diagram
-Runner -> API route -> stateless translation -> owner grain -> verdict
+```mermaid
+flowchart LR
+    R["Runner"] -->|"report (owner, work, attempt)"| T["API route<br/>stateless translation"]
+    T --> G["owner grain<br/>settle by identity"]
+    G -->|"accepted → retire"| R
+    G -->|"refused → retire"| R
+    G -.->|"outstanding / no answer →<br/>retry from memory, fixed cadence"| R
 ```
+
+Process death ends retry; closeout settles the work.
 
 A report is a Runner's assertion of an execution fact — a claim in the sense
 of [`conventions.md`](conventions.md#facts-claims-and-settlement). Settlement
@@ -215,16 +208,6 @@ outstanding   the owner cannot decide now; the Runner retries
 The owner must always produce a verdict. It must not express arbitration
 results as transport errors, and the Runner must not interpret status codes:
 `accepted` and `refused` retire a report; anything else keeps it.
-
-```text diagram
-Runner --- report --> owner grain -- settle by identity --> accepted: retire
-                                                         |-> refused: retire
-                                                         |
-Runner <--- retry, fixed cadence, from memory ----------- +-> outstanding or
-             while the process lives                        no answer
-
-process death: retry ends; closeout settles the work
-```
 
 While its process lives, the Runner retries every unacknowledged report from
 memory at a fixed interval and continues to include it in poll reports. A
@@ -304,15 +287,19 @@ generation is never redelivered for execution to another. This is
 presence-expiry closeout moved to the earliest provable moment; `runner-lost`
 remains the backstop for a process that never returns.
 
-```text diagram
-gen1   claim X -> execute -> (process dies)
-
-gen2   register(gen2)
-         Server, before serving gen2's first poll:
-           X, Running and claimed by gen1 -> FAILED(runner-restarted)
-         workflow recovery -> retry -> new attempt X'
-       poll -> claim X' -> execute
-         the retrying agent reads the Workspace scene and continues
+```mermaid
+sequenceDiagram
+    participant G1 as Runner gen1
+    participant S as Server
+    participant G2 as Runner gen2
+    G1->>S: claim X
+    G1->>G1: execute X
+    G1--xS: (process dies)
+    G2->>S: register(gen2)
+    Note over S: before gen2's first poll:<br/>X, Running under gen1, becomes FAILED(runner-restarted)
+    S->>S: workflow recovery → retry → new attempt X'
+    G2->>S: poll, claim X', execute
+    Note over G2: the retrying agent reads<br/>the Workspace scene and continues
 ```
 
 The Runner scopes every execution to a per-work process group. On startup,
