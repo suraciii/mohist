@@ -450,6 +450,7 @@ public sealed class SlackDmNewTaskIngressSpecs : IAsyncLifetime
 
         using var register = await _fixture.Client.PostAsJsonAsync($"/api/runner/{runnerId}/register", new
         {
+            processGeneration = TestRunnerGenerationExtensions.ProcessGeneration,
             capabilities = new[] { "spec/*" },
             hostname = $"{runnerId}-host",
             projectId,

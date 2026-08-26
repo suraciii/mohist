@@ -195,6 +195,7 @@ public abstract class GenericAgentSessionTranscriptAxisTestSupport : IAsyncLifet
     {
         await _fixture.Client.PostOkAsync($"/api/runner/{_runnerId}/register", new
         {
+            processGeneration = TestRunnerGenerationExtensions.ProcessGeneration,
             capabilities = new[] { "spec/*" },
             hostname = $"{_runnerId}-host",
             projectId,

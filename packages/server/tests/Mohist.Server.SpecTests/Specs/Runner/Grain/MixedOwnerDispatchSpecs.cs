@@ -49,7 +49,7 @@ public sealed class MixedOwnerDispatchSpecs : Mohist.Server.SpecTests.Specs.Work
 
         }
 
-        var response = await Dispatch.PollAsync(runnerId, new RunnerPollRequest([], []));
+        var response = await Dispatch.PollAsync(runnerId, new RunnerPollRequest([], [], ProcessGeneration: TestRunnerGenerationExtensions.ProcessGeneration));
 
         var dispatch = Assert.Single(response.Dispatches);
         Assert.Equal(WorkDispatchOwnerKinds.AgentJob, dispatch.OwnerKind);
@@ -140,10 +140,10 @@ public sealed class MixedOwnerDispatchSpecs : Mohist.Server.SpecTests.Specs.Work
             ProjectId: projectId,
             AgentId: "agent-test"));
 
-        var first = Assert.Single((await Dispatch.PollAsync(runnerId, new RunnerPollRequest([], []))).Dispatches);
+        var first = Assert.Single((await Dispatch.PollAsync(runnerId, new RunnerPollRequest([], [], ProcessGeneration: TestRunnerGenerationExtensions.ProcessGeneration))).Dispatches);
         await TestLifecycle.Deactivate(job);
 
-        var redelivery = Assert.Single((await Dispatch.PollAsync(runnerId, new RunnerPollRequest([], []))).Dispatches);
+        var redelivery = Assert.Single((await Dispatch.PollAsync(runnerId, new RunnerPollRequest([], [], ProcessGeneration: TestRunnerGenerationExtensions.ProcessGeneration))).Dispatches);
 
         Assert.Equal(first.AgentJobId, redelivery.AgentJobId);
         Assert.Equal(first.WorkId, redelivery.WorkId);
@@ -166,13 +166,13 @@ public sealed class MixedOwnerDispatchSpecs : Mohist.Server.SpecTests.Specs.Work
             ProjectId: projectId,
             AgentId: "agent-test"));
 
-        var first = Assert.Single((await Dispatch.PollAsync(runnerId, new RunnerPollRequest([], []))).Dispatches);
+        var first = Assert.Single((await Dispatch.PollAsync(runnerId, new RunnerPollRequest([], [], ProcessGeneration: TestRunnerGenerationExtensions.ProcessGeneration))).Dispatches);
         var workflowId = $"mixed-recovery-workflow-{Guid.NewGuid():N}";
         var workflow = Grains.GetGrain<IWorkflowGrain>(workflowId);
         await SeedWorkflowTemplateAsync(workflowId, SingleStage(checks: []), projectId);
         await workflow.StartAsync(TestInput(projectId));
 
-        var response = await Dispatch.PollAsync(runnerId, new RunnerPollRequest([], []));
+        var response = await Dispatch.PollAsync(runnerId, new RunnerPollRequest([], [], ProcessGeneration: TestRunnerGenerationExtensions.ProcessGeneration));
 
         Assert.Equal(2, response.Dispatches.Count);
         Assert.Equal(first.AgentJobId, response.Dispatches[0].AgentJobId);
@@ -203,7 +203,7 @@ public sealed class MixedOwnerDispatchSpecs : Mohist.Server.SpecTests.Specs.Work
             ProjectId: projectId,
             AgentId: "agent-test"));
 
-        var response = await Dispatch.PollAsync(runnerId, new RunnerPollRequest([], []));
+        var response = await Dispatch.PollAsync(runnerId, new RunnerPollRequest([], [], ProcessGeneration: TestRunnerGenerationExtensions.ProcessGeneration));
 
         Assert.Equal(2, response.Dispatches.Count);
         Assert.Equal(workflowId, response.Dispatches[0].WorkflowRunId);
@@ -234,7 +234,7 @@ public sealed class MixedOwnerDispatchSpecs : Mohist.Server.SpecTests.Specs.Work
         await workflow.AssignWorkerAsync(runnerId);
         Assert.NotNull(await workflow.ClaimNextAsync(runnerId, "test-generation"));
 
-        var response = await Dispatch.PollAsync(runnerId, new RunnerPollRequest([], []));
+        var response = await Dispatch.PollAsync(runnerId, new RunnerPollRequest([], [], ProcessGeneration: TestRunnerGenerationExtensions.ProcessGeneration));
 
         Assert.Single(response.Dispatches);
         Assert.Equal(workflowId, response.Dispatches[0].WorkflowRunId);
@@ -263,7 +263,7 @@ public sealed class MixedOwnerDispatchSpecs : Mohist.Server.SpecTests.Specs.Work
         await workflow.StartAsync(TestInput(projectId));
         await workflow.AssignWorkerAsync(runnerId);
         Assert.NotNull(await workflow.ClaimNextAsync(runnerId, "test-generation"));
-        await Dispatch.PollAsync(runnerId, new RunnerPollRequest([], []));
+        await Dispatch.PollAsync(runnerId, new RunnerPollRequest([], [], ProcessGeneration: TestRunnerGenerationExtensions.ProcessGeneration));
 
         _fixture.TimeProvider.Advance(TimeSpan.FromMinutes(11));
         var now = _fixture.TimeProvider.GetUtcNow().UtcDateTime;

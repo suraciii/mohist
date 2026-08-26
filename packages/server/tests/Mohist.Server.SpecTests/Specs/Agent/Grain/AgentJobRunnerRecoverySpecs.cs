@@ -48,7 +48,7 @@ public sealed class AgentJobRunnerRecoverySpecs : AgentJobGrainTestSupport
             .GetRequiredService<IServiceScopeFactory>()
             .CreateScope();
         var dispatch = scope.ServiceProvider.GetRequiredService<DispatchService>();
-        Assert.Empty((await dispatch.PollAsync(runnerId, new RunnerPollRequest([], []))).Dispatches);
+        Assert.Empty((await dispatch.PollAsync(runnerId, new RunnerPollRequest([], [], ProcessGeneration: TestRunnerGenerationExtensions.ProcessGeneration))).Dispatches);
 
         await runner.RegisterAsync(new RunnerInfo(
             runnerId,
@@ -57,13 +57,13 @@ public sealed class AgentJobRunnerRecoverySpecs : AgentJobGrainTestSupport
             projectId));
 
         var redelivery = Assert.Single(
-            (await dispatch.PollAsync(runnerId, new RunnerPollRequest([], []))).Dispatches);
+            (await dispatch.PollAsync(runnerId, new RunnerPollRequest([], [], ProcessGeneration: TestRunnerGenerationExtensions.ProcessGeneration))).Dispatches);
         Assert.Equal(jobKey, redelivery.AgentJobId);
         Assert.Equal(originalWorkId, redelivery.WorkId);
         Assert.Equal(WorkDispatchOwnerKinds.AgentJob, redelivery.OwnerKind);
 
         var repeated = Assert.Single(
-            (await dispatch.PollAsync(runnerId, new RunnerPollRequest([], []))).Dispatches);
+            (await dispatch.PollAsync(runnerId, new RunnerPollRequest([], [], ProcessGeneration: TestRunnerGenerationExtensions.ProcessGeneration))).Dispatches);
         Assert.Equal(redelivery.AgentJobId, repeated.AgentJobId);
         Assert.Equal(redelivery.WorkId, repeated.WorkId);
         Assert.Equal(redelivery.OwnerKind, repeated.OwnerKind);
@@ -72,7 +72,7 @@ public sealed class AgentJobRunnerRecoverySpecs : AgentJobGrainTestSupport
 
         var workKey = $"{WorkDispatchOwnerKinds.AgentJob}:{jobKey}:{originalWorkId}";
         Assert.Empty(
-            (await dispatch.PollAsync(runnerId, new RunnerPollRequest([workKey], []))).Dispatches);
+            (await dispatch.PollAsync(runnerId, new RunnerPollRequest([workKey], [], ProcessGeneration: TestRunnerGenerationExtensions.ProcessGeneration))).Dispatches);
 
         var firstReport = await job.ReportResultAsync(
             runnerId,
@@ -87,7 +87,7 @@ public sealed class AgentJobRunnerRecoverySpecs : AgentJobGrainTestSupport
         Assert.False(duplicateReport.Accepted);
         Assert.Equal("refused", duplicateReport.Reason);
         Assert.Equal(AgentJobStatus.Completed, (await job.GetTerminalResultAsync()).Status);
-        Assert.Empty((await dispatch.PollAsync(runnerId, new RunnerPollRequest([], []))).Dispatches);
+        Assert.Empty((await dispatch.PollAsync(runnerId, new RunnerPollRequest([], [], ProcessGeneration: TestRunnerGenerationExtensions.ProcessGeneration))).Dispatches);
         await runner.UnregisterAsync();
     }
 
@@ -164,7 +164,7 @@ public sealed class AgentJobRunnerRecoverySpecs : AgentJobGrainTestSupport
             .GetRequiredService<IServiceScopeFactory>()
             .CreateScope();
         var dispatch = scope.ServiceProvider.GetRequiredService<DispatchService>();
-        Assert.Empty((await dispatch.PollAsync(otherRunnerId, new RunnerPollRequest([], []))).Dispatches);
+        Assert.Empty((await dispatch.PollAsync(otherRunnerId, new RunnerPollRequest([], [], ProcessGeneration: TestRunnerGenerationExtensions.ProcessGeneration))).Dispatches);
 
         var after = await job.GetRuntimeSnapshotAsync();
         Assert.Equal(runnerId, after.RunnerId);
@@ -442,7 +442,7 @@ public sealed class AgentJobRunnerRecoverySpecs : AgentJobGrainTestSupport
         var dispatch = scope.ServiceProvider.GetRequiredService<DispatchService>();
         var redeliveries = (await dispatch.PollAsync(
             runnerId,
-            new RunnerPollRequest([], []))).Dispatches;
+            new RunnerPollRequest([], [], ProcessGeneration: TestRunnerGenerationExtensions.ProcessGeneration))).Dispatches;
         Assert.Equal(2, redeliveries.Count);
         Assert.Contains(redeliveries, work => work.AgentJobId == firstJob.GetPrimaryKeyString()
             && work.WorkId == firstWorkId);

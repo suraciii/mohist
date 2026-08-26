@@ -37,6 +37,7 @@ public class RunnerCleanupPolicyAndStatusApiSpecs : IAsyncLifetime
         var runnerId = $"runner-cleanup-policy-{Guid.NewGuid():N}";
         using var response = await _fixture.Client.PostAsJsonAsync($"/api/runner/{runnerId}/register", new
         {
+            processGeneration = TestRunnerGenerationExtensions.ProcessGeneration,
             capabilities = new[] { "spec/*" },
             hostname = "cleanup-policy-host",
             projectId,

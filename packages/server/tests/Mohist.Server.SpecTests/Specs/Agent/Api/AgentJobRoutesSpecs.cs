@@ -571,6 +571,7 @@ public class AgentJobDispatchRouteSpecs : AgentSessionLaunchRoutesTestSupport
     {
         await _fixture.Client.PostOkAsync($"/api/runner/{runnerId}/register", new
         {
+            processGeneration = TestRunnerGenerationExtensions.ProcessGeneration,
             capabilities = new[] { "spec/*" },
             hostname = $"{runnerId}-host",
             projectId,

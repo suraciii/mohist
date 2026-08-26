@@ -126,7 +126,7 @@ public sealed class AgentJobManagerRunnerLossRecoverySpecs : AgentJobGrainTestSu
             .CreateScope();
         var dispatch = scope.ServiceProvider.GetRequiredService<DispatchService>();
         Assert.Empty(
-            (await dispatch.PollAsync(runnerId, new RunnerPollRequest([], []))).Dispatches);
+            (await dispatch.PollAsync(runnerId, new RunnerPollRequest([], [], ProcessGeneration: TestRunnerGenerationExtensions.ProcessGeneration))).Dispatches);
     }
 
     private static AgentSlackExecutionContext ManagerContext(string sessionId, string jobKey) =>

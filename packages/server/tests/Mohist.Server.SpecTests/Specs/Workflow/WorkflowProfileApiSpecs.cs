@@ -89,6 +89,7 @@ public class WorkflowProfileApiSpecs
         {
             using var register = await _client.PostAsJsonAsync($"/api/runner/{runnerId}/register", new
             {
+                processGeneration = TestRunnerGenerationExtensions.ProcessGeneration,
                 capabilities = new[] { "spec/*" },
                 hostname = "workflow-profile-catalog-spec",
                 actionCatalog = catalog,
@@ -123,6 +124,7 @@ public class WorkflowProfileApiSpecs
         {
             using var register = await _client.PostAsJsonAsync($"/api/runner/{runnerId}/register", new
             {
+                processGeneration = TestRunnerGenerationExtensions.ProcessGeneration,
                 capabilities = new[] { "spec/*" },
                 hostname = "workflow-profile-override-spec",
                 actionCatalog = catalog,
@@ -272,6 +274,7 @@ public class WorkflowProfileApiSpecs
         {
             using var register = await _client.PostAsJsonAsync($"/api/runner/{runnerId}/register", new
             {
+                processGeneration = TestRunnerGenerationExtensions.ProcessGeneration,
                 capabilities = new[] { "spec/*" },
                 hostname = "workflow-profile-put-validation-spec",
                 actionCatalog = catalog,
@@ -337,6 +340,7 @@ public class WorkflowProfileApiSpecs
         {
             using var register = await _client.PostAsJsonAsync($"/api/runner/{runnerId}/register", new
             {
+                processGeneration = TestRunnerGenerationExtensions.ProcessGeneration,
                 capabilities = new[] { "spec/*" },
                 hostname = "workflow-profile-approval-spec",
                 actionCatalog = catalog,

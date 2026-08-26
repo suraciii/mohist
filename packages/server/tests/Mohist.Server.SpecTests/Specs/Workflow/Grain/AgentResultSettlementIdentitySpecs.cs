@@ -173,7 +173,7 @@ public sealed partial class AgentResultSettlementSpecs
         Assert.Equal(0, await querier.CountRunningAssignedToAsync(runnerId));
         Assert.DoesNotContain((await runner.GetRuntimeStateAsync()).ActiveWorks, item =>
             string.Equals(item.OwnerId, _workflowId, StringComparison.Ordinal));
-        Assert.Empty((await dispatch.PollAsync(runnerId, new RunnerPollRequest([], []))).Dispatches);
+        Assert.Empty((await dispatch.PollAsync(runnerId, new RunnerPollRequest([], [], ProcessGeneration: TestRunnerGenerationExtensions.ProcessGeneration))).Dispatches);
 
         // A matching late authoritative report still settles the attempt.
         Assert.Equal(WorkReportVerdict.Accepted, await workflow.ReceiveTaskReportAsync(

@@ -131,7 +131,12 @@ describe('ServerConnection.poll recovery state', () => {
     )
 
     const connection = new ServerConnection(options())
-    const works = await connection.poll(new AbortController().signal, { processGeneration: 'test-generation', inFlight: [], awaitingAck: [], admissionReady: false })
+    const works = await connection.poll(new AbortController().signal, {
+      processGeneration: 'test-generation',
+      inFlight: [],
+      awaitingAck: [],
+      admissionReady: false,
+    })
 
     expect(works[0]?.recoveryRemaining).toBeNull()
     expect(Object.prototype.hasOwnProperty.call(works[0], 'recoveryRemaining')).toBe(true)
@@ -160,7 +165,12 @@ describe('ServerConnection.poll recovery state', () => {
     )
 
     const connection = new ServerConnection(options())
-    const works = await connection.poll(new AbortController().signal, { processGeneration: 'test-generation', inFlight: [], awaitingAck: [], admissionReady: false })
+    const works = await connection.poll(new AbortController().signal, {
+      processGeneration: 'test-generation',
+      inFlight: [],
+      awaitingAck: [],
+      admissionReady: false,
+    })
 
     expect(works[0]?.parentIssueContext).toEqual({ title: 'Parent', body: 'Parent body' })
     expect(works[1]?.parentIssueContext).toBeNull()
@@ -200,7 +210,12 @@ describe('ServerConnection.poll recovery state', () => {
     )
 
     const connection = new ServerConnection(options())
-    const works = await connection.poll(new AbortController().signal, { processGeneration: 'test-generation', inFlight: [], awaitingAck: [], admissionReady: false })
+    const works = await connection.poll(new AbortController().signal, {
+      processGeneration: 'test-generation',
+      inFlight: [],
+      awaitingAck: [],
+      admissionReady: false,
+    })
 
     // Expect is decoded as a structured object (NOT stringified) so
     // the executor's completion evaluator can read it.
@@ -241,7 +256,12 @@ describe('ServerConnection.poll recovery state', () => {
     )
 
     const connection = new ServerConnection(options())
-    const works = await connection.poll(new AbortController().signal, { processGeneration: 'test-generation', inFlight: [], awaitingAck: [], admissionReady: false })
+    const works = await connection.poll(new AbortController().signal, {
+      processGeneration: 'test-generation',
+      inFlight: [],
+      awaitingAck: [],
+      admissionReady: false,
+    })
     const work = works[0]!
 
     expect(work.with).toEqual({ prompt: 'child prompt: ${{ vars.agent }}', mode: '${{ vars.mode }}' })

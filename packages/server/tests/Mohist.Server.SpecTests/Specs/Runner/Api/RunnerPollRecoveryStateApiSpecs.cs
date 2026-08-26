@@ -453,7 +453,7 @@ public sealed class RunnerPollRecoveryStateApiSpecs
 
     private async Task<JsonElement> PollAsync(string runnerId)
     {
-        using var response = await _fixture.Client.PostAsync($"/api/runner/{runnerId}/poll", null);
+        using var response = await _fixture.Client.PostRunnerPollAsync(runnerId);
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         return await response.ReadFirstDispatchElementAsync()
             ?? throw new InvalidOperationException("Expected a dispatch from /poll");

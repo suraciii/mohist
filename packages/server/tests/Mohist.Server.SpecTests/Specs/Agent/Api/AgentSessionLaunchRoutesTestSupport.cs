@@ -162,7 +162,7 @@ public abstract class AgentSessionLaunchRoutesTestSupport
     {
         for (var i = 0; i < 30; i++)
         {
-            using var poll = await _fixture.Client.PostAsync($"/api/runner/{runnerId}/poll", content: null);
+            using var poll = await _fixture.Client.PostRunnerPollAsync(runnerId);
             var dispatches = await poll.ReadDispatchElementsAsync();
             if (dispatches.Count == 0) return;
             foreach (var data in dispatches)

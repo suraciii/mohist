@@ -124,7 +124,7 @@ public class RunnerOutstandingWorkSpecs : WorkflowGrainSpecs
 
         await runner.RegisterAsync(new RunnerInfo(runnerId, ["spec/*"], "test-host", TestProjectId(work.WorkflowRunId)));
         var dispatch = Services.GetRequiredService<Mohist.Server.Runner.Services.DispatchService>();
-        var redelivery = Assert.Single((await dispatch.PollAsync(runnerId, new RunnerPollRequest([], []))).Dispatches);
+        var redelivery = Assert.Single((await dispatch.PollAsync(runnerId, new RunnerPollRequest([], [], ProcessGeneration: TestRunnerGenerationExtensions.ProcessGeneration))).Dispatches);
         Assert.Equal(work.WorkId, redelivery.WorkId);
         Assert.Equal(work.TaskRunId, redelivery.TaskRunId);
         Assert.Equal(binding.Runtime, redelivery.AgentRecovery?.Runtime);

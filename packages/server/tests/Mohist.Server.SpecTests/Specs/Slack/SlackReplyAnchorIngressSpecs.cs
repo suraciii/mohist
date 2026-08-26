@@ -369,6 +369,7 @@ public sealed class SlackReplyAnchorIngressSpecs : IAsyncLifetime
 
         using var register = await _fixture.Client.PostAsJsonAsync($"/api/runner/{runnerId}/register", new
         {
+            processGeneration = TestRunnerGenerationExtensions.ProcessGeneration,
             capabilities = new[] { "spec/*" },
             hostname = $"{runnerId}-host",
             projectId,
@@ -391,7 +392,7 @@ public sealed class SlackReplyAnchorIngressSpecs : IAsyncLifetime
     {
         var job = _fixture.Grains.GetGrain<IAgentJobGrain>(jobKey);
         await AgentJobConvergence.WaitForAssignmentPreparedAsync(job);
-        using var poll = await _fixture.Client.PostAsync($"/api/runner/{runnerId}/poll", null);
+        using var poll = await _fixture.Client.PostRunnerPollAsync(runnerId);
         var dispatch = Assert.Single(await poll.ReadDispatchElementsAsync());
         var assignment = await AgentJobConvergence.WaitForRunnerAcceptedAsync(job);
         Assert.Equal(runnerId, assignment.RunnerId);

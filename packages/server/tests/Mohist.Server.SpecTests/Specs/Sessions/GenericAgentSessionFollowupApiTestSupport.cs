@@ -158,6 +158,7 @@ public abstract class GenericAgentSessionFollowupApiTestSupport : IAsyncLifetime
         var runnerId = _runnerId;
         await _fixture.Client.PostOkAsync($"/api/runner/{runnerId}/register", new
         {
+            processGeneration = TestRunnerGenerationExtensions.ProcessGeneration,
             capabilities = new[] { "spec/*" },
             hostname = $"{runnerId}-host",
             projectId = project.Id,

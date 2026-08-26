@@ -196,7 +196,7 @@ public sealed class AgentSessionLaunchDefaultExecutionConfigSpecs : AgentSession
     {
         for (var i = 0; i < 50; i++)
         {
-            using var poll = await _fixture.Client.PostAsync($"/api/runner/{runnerId}/poll", content: null);
+            using var poll = await _fixture.Client.PostRunnerPollAsync(runnerId);
             var dispatches = await poll.ReadDispatchElementsAsync();
             foreach (var data in dispatches)
             {

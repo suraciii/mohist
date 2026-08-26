@@ -114,6 +114,7 @@ public sealed class RunnerControlWebSocketApiSpecs(MohistIntegrationFixture fixt
         var runnerId = $"ws-identity-{Guid.NewGuid():N}";
         await fixture.Client.PostOkAsync($"/api/runner/{runnerId}/register", new
         {
+            processGeneration = TestRunnerGenerationExtensions.ProcessGeneration,
             capabilities = new[] { "spec/*" },
             hostname = $"host-{Guid.NewGuid():N}",
         });

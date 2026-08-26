@@ -144,7 +144,7 @@ public class AgentJobDispatchEnvelopeSpecs : AgentJobGrainTestSupport
                 [],
                 [],
                 RuntimeReadiness: [new RuntimeReadinessWitness("pi", Ready: true, Generation: 1)],
-                ConnectionGeneration: "connection-1"));
+                ConnectionGeneration: "connection-1", ProcessGeneration: TestRunnerGenerationExtensions.ProcessGeneration));
 
         var polled = await Grains.GetGrain<IRunnerGrain>(runnerId).PollAsync(_fixture.Cluster.GetSiloServiceProvider(null));
 
