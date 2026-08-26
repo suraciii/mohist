@@ -25,7 +25,14 @@ export { RuntimeEventDeliveryError } from './connection-errors.js'
 import {
   getWorkspaceReclaimability as getWorkspaceReclaimabilityViaTransport,
   reportWorkspaceMaterialized as reportWorkspaceMaterializedViaTransport,
+  type WorkspaceMaterializedReport,
+  type WorkspaceReclaimability,
   type WorkspaceReportTransport,
+} from './connection-workspaces.js'
+export {
+  parseWorkspaceReclaimability,
+  type WorkspaceMaterializedReport,
+  type WorkspaceReclaimability,
 } from './connection-workspaces.js'
 import { currentRunnerTransport } from '../system/filesystem.js'
 import type {
@@ -717,13 +724,7 @@ export class ServerConnection {
     workspaceName: string,
     signal: AbortSignal,
   ): Promise<WorkspaceReclaimability> {
-    return await getWorkspaceReclaimabilityViaTransport(
-      this.transport(),
-      (payload) => parseWorkspaceReclaimability(readObject(payload, ['data'])),
-      projectId,
-      workspaceName,
-      signal,
-    )
+    return await getWorkspaceReclaimabilityViaTransport(this.transport(), projectId, workspaceName, signal)
   }
 
   async openAgentSession(
@@ -977,38 +978,4 @@ function readNumber(value: unknown, path: string[]): number | null {
 function readBoolean(value: unknown, path: string[]): boolean | null {
   const found = getSegments(value, path)
   return typeof found === 'boolean' ? found : null
-}
-
-/**
- * Answer shape for
- * `POST /api/runner/{runnerId}/workspaces/{projectId}/{workspaceName}/materialized`.
- * `runnerId` is the workspace home runner recorded by the server (this runner on success).
- */
-export interface WorkspaceMaterializedReport {
-  readonly runnerId: string
-  readonly path: string
-}
-
-/**
- * Answer shape for
- * `GET /api/runner/{runnerId}/workspaces/{projectId}/{workspaceName}/reclaimable`.
- * `status` is the Workspace lifecycle status; `activeBoundSessions` counts
- * sessions bound to and actively using the workspace.
- */
-export interface WorkspaceReclaimability {
-  readonly status: 'active' | 'archived'
-  readonly activeBoundSessions: number
-}
-
-export function parseWorkspaceReclaimability(payload: unknown): WorkspaceReclaimability {
-  if (!isObjectRecord(payload)) throw new Error('workspace reclaimability returned a malformed response')
-  const status = readString(payload, ['status'])
-  if (status !== 'active' && status !== 'archived') {
-    throw new Error('workspace reclaimability returned an unknown status')
-  }
-  const count = readNumber(payload, ['activeBoundSessions'])
-  if (count === null || !Number.isInteger(count) || count < 0) {
-    throw new Error('workspace reclaimability returned an invalid session count')
-  }
-  return { status, activeBoundSessions: count }
 }
