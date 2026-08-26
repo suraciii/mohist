@@ -287,14 +287,29 @@ design narrows the promise to one the system can uphold.
 Reports go directly to the owning grain through a stateless translation path:
 
 ```text diagram
-Runner -> API route -> stateless translation -> owner grain -> Accepted | Stale
-                                                                  both acknowledge
+Runner -> API route -> stateless translation -> owner grain -> verdict
 ```
 
-At-least-once delivery moves completed work to `awaitingAck`, retries the
-original result at a fixed interval, and continues to include it in poll
-reports. It can never be mistaken for lost work. Both `Accepted` and `Stale`
-stop retry.
+A report is a Runner's assertion of an execution fact — a claim in the sense
+of [`conventions.md`](conventions.md#facts-claims-and-settlement). Settlement
+is idempotent by report identity (owner, work, attempt) and answers one of
+three verdicts:
+
+```text literal
+accepted      the fact is recorded; a duplicate report gets the same verdict
+refused       the report can never be recorded; its work no longer exists in
+              a reportable state (late, superseded, or terminal elsewhere)
+outstanding   the owner cannot decide now; the Runner retries
+```
+
+The owner must always produce a verdict. It must not express arbitration
+results as transport errors, and the Runner must not interpret status codes:
+`accepted` and `refused` retire a report; anything else keeps it.
+
+While its process lives, the Runner retries every unacknowledged report from
+memory at a fixed interval and continues to include it in poll reports. A
+report lost to process death is never replayed; its work is settled by
+closeout. See [Restart and Crash Semantics](#restart-and-crash-semantics).
 
 The owner cannot distinguish who produced a report: the execution process,
 whether normally or after a timeout, or RunnerGrain closeout.
@@ -312,6 +327,9 @@ Each failure condition has exactly one owner:
 - Runner disappears: RunnerGrain lets poll freshness expire, marks the Runner
   offline, queries both owner types for `Running assigned=me`, and reports
   `FAILED("runner-lost")` for each.
+- Runner restarts: register establishes a new process generation; the old
+  generation's Running work is settled `FAILED("runner-restarted")`. See
+  [Restart and Crash Semantics](#restart-and-crash-semantics).
 - No Server-side timer times out work. Reported in-flight work is alive; only
   the process judges progress. Owner timers, including AgentJob execution and
   dispatch timeouts, are decided by owner reminders and are unrelated to
@@ -336,7 +354,9 @@ There is no `Interrupted` state.
   reported set.
 - Dispatch response is lost: the next poll computes `desired - reported` and
   redelivers.
-- Process restarts: an empty report causes full redelivery.
+- Process restarts: the old generation's Running work is settled
+  `FAILED("runner-restarted")` at register and is never redelivered to the
+  new process.
 - Ordinary dispatch construction failure after claim: the work remains
   Running and retries every poll.
 - A persisted WorkItem references a retired Action: reject that work by
@@ -345,16 +365,72 @@ There is no `Interrupted` state.
   `invalid-input`; do not redeliver.
 - Report transport fails: retry awaitingAck; the report remains reported and
   is never redelivered.
-- Duplicate or late report: the owner idempotently returns Stale.
+- Duplicate or late report: the owner idempotently answers `refused`.
 - Work hangs: the process timeout produces FAILED.
 - Runner is lost: closeout reports `FAILED("runner-lost")` and the owner
   enters Failed.
-- Runner returns after closeout: its report receives Stale; the work is no
-  longer desired and drains naturally.
+- Runner returns after closeout: its report receives `refused`; the work is
+  no longer desired and drains naturally.
 - A run or job is stopped while work executes: do not cancel; the report
-  receives Stale.
+  receives `refused`.
 - An AgentJob has no available Runner for too long: the owner ReadySince
   timeout produces `FAILED(RunnerUnavailable)`.
+
+## Restart and Crash Semantics
+
+The recovery goal is flow progress, not result preservation. A Runner crash
+loses whatever the process alone remembered; the Workflow's existing failure
+semantics — recovery handlers, budgets, retry, blocked, manual decision —
+decide what follows. A crash is one failure code among others, not a special
+event with its own machinery.
+
+Three forces shape this boundary:
+
+- A fact needs at least one durable witness. Dispatch facts live in the
+  Server's persisted ledgers. Execution facts are witnessed by the Runner
+  alone, and the Runner is volatile by choice: making it durable would create
+  a second authority whose consistency with the Server must then be maintained
+  forever.
+- Blind re-execution after a restart must remain impossible. An Agent turn is
+  not idempotent: it spends quota, is nondeterministic, and its side effects
+  (commits, pushes) stay in the Workspace. This is the one guarantee the crash
+  path must keep.
+- Recovery accuracy already exists one layer up. The Workspace on disk, the
+  Runtime's session files, and the Server's binding and workflow state all
+  survive a Runner crash. A retry attempt's agent reads that scene and
+  continues; this recovers more truth, more cheaply, than any Runner-side
+  reconstruction.
+
+**Process Generation**. An opaque nonce created at every Runner process start,
+sent at register and in every poll. Equality, not ordering, is the contract:
+two processes under one Runner identity must never share a generation. The
+Server records the claiming generation with every claim.
+
+Register establishes a new generation. Before the new process's first poll is
+served, the Server settles every Running work item assigned to this Runner
+under an older generation as `FAILED("runner-restarted")`. Work claimed by one
+generation is never redelivered for execution to another. This is
+presence-expiry closeout moved to the earliest provable moment; `runner-lost`
+remains the backstop for a process that never returns.
+
+The Runner scopes every execution to a per-work process group. On startup,
+before claiming work, the Runner terminates stale groups left by earlier
+processes under the same Runner root. A crashed process cannot kill its own
+tree, so the sweep makes the old execution dead instead of assuming it.
+
+Rejected alternatives that may return:
+
+- Result preservation through Runtime session adoption: asking the Runtime for
+  a finished turn's outcome. It covers only Runtime-backed Agent turns, cannot
+  answer whether the Server already recorded a report, and rebuilds execution
+  identity from foreign file formats. Inferring unrecorded state is a defect
+  ([`conventions.md`](conventions.md#facts-claims-and-settlement)).
+- A durable report journal on the Runner: preserves completed results across a
+  crash, but turns the Runner into a second durable authority; every crash
+  path becomes a consistency problem between two authorities.
+- Waiting for predecessor delivery before admitting a follow-up turn: the
+  Server must decide admission from recorded state alone; it must not wait
+  for facts held only by the Runner.
 
 ## Process Contract
 
@@ -385,8 +461,9 @@ Work lost with a Runner is reported to its owner as
 When a Runtime Session quarantines or a Runner shuts down, the Runner drains
 in-flight work before it releases ownership. Two env-var budgets bound the
 drain: `QUARANTINE_DRAIN_TIMEOUT_MS` (default 60s) and
-`RUNTIME_SHUTDOWN_TIMEOUT_MS` (default 30s). Results produced during drain
-are journaled so a restart can settle them exactly once.
+`RUNTIME_SHUTDOWN_TIMEOUT_MS` (default 30s). Results produced during drain are reported before ownership is released. A
+result not reported before process death is lost with the process; closeout
+settles its work.
 
 ## Local Workspace Lifecycle
 
@@ -454,51 +531,37 @@ conditions in
 
 ## Persisted State
 
-The Runner persists operational state under `<runnerRoot>/.mohist/runner-state/`.
-Each file is written atomically with a temporary file plus rename and loaded at
-startup. Corruption semantics differ based on whether lost state can be
-reconstructed:
+The Runner holds no durable state. Everything it needs is configuration (its
+identity), rebuildable (Workspace materializations), or volatile (in-flight
+work, unacknowledged reports). Cross-process consistency comes from report
+settlement and poll recomputation, not shared files. The Server never reads
+or writes Runner-local files.
 
-- `runtime-events.json`: the Runtime event outbox — Session events pending
-  delivery to the Server, with a snapshot written for each new fact. If the
-  file is unreadable, the Runner marks the outbox unhealthy and reloads at a
-  local retry cadence; it never overwrites the unreadable file. When
-  retention is exceeded, the Runner discards reconstructible streaming
-  increments first.
-- `followup-operations.json`: the Follow-up operation idempotency log,
-  operationId -> claimed / submitted, written on each transition. A wrong
-  version or shape makes the log unavailable and rejects new operations
-  (fail closed); a missing file means a fresh start.
-- `session-commands.json`: the Session command idempotency log, operationId
-  -> started / completed plus result, with the same write behavior.
-  Corruption fails closed; a missing file means a fresh start.
-- `cancel-operations.json`: the stop operation idempotency log, operationId
-  -> claimed / completed plus verdict, with the same write behavior. If the
-  file is unreadable, the Runner quarantines it aside and restarts empty;
-  stop verdicts re-settle by identity, so the next redelivery rebuilds the
-  lost record.
-- `named-workspaces.json`: the current named Workspace materialization
-  index — Project, Workspace name, path, phase, and materialization times.
-  If the file is unreadable or corrupt, the Runner starts with an empty
-  index and rebuilds on later materialization; the Server remains the
-  logical authority.
-- `workspaces.json`: the legacy per-WorkflowRun materialization index used
-  only by the fallback execution path. It has the same fail-open behavior;
-  remove it with the fallback rather than treating it as a second identity
-  model.
+A fact must have at least one durable witness, and the Runner is not one.
+Facts the Runner witnesses are either reported — and the Server becomes the
+durable witness — or lost with the process, with closeout settling the work.
+A Runner-side journal would only buy result preservation across a crash, a
+capability this design deliberately declines (see
+[Restart and Crash Semantics](#restart-and-crash-semantics)).
 
-Idempotency logs fail closed because losing them can repeat effects. The stop
-journal is the exception: its effect is checkable by identity, so corruption
-quarantines the file and the journal restarts empty instead of failing
-closed. The registries fail open because they can be reconstructed from disk.
-These files are Runner-private. The Server never reads or writes them
-directly; cross-process consistency comes from event delivery and poll
-recomputation, not shared files.
+A Runner may keep rebuildable on-disk caches, such as the Workspace
+materialization indexes, as long as they are never authoritative and fail
+open: a corrupt or missing cache is rebuilt from the filesystem and from
+Server answers.
+
+Gap: current code persists eight files under
+`<runnerRoot>/.mohist/runner-state/` — a work-result journal with
+started-fence replay, a runtime-event outbox, a terminal task-log delivery
+store, three operation idempotency logs, and two workspace registries — plus
+binding convergence, recovery receipts, and cleanup-turn admission waits
+built on top of them. These mechanisms implement the rejected
+result-preservation alternative and are to be removed. Only the rebuildable
+workspace indexes survive.
 
 ### Stop Operations Stay Available and Settle by Identity
 
-Stop is the one Runner operation that must remain available while the event
-outbox snapshot is being recovered; its journal never gates on outbox health.
+Stop must remain available independent of any other Runner state or delivery
+health.
 
 Stop settlement has exactly one witness for the effect: the Runtime that owns
 the target Turn. A stop verdict records only what that witness confirms:
@@ -519,11 +582,11 @@ the target Turn. A stop verdict records only what that witness confirms:
   the claim outstanding and is never recorded as a verdict. Once a verdict
   is recorded, every later redelivery returns it unchanged.
 
-Session commands such as Compact and Reset fail closed on an uncertain start
-instead: after a Runner restart the Runtime cannot answer whether the effect
-occurred, so the original operation stays unavailable and Server retries it
-under the same identity. Stop differs because its intent is checkable —
-whether the target Turn still exists — while a Compact or Reset effect is not.
+Session commands such as Compact and Reset must be idempotent under their
+`operationId`: after a Runner restart the Runtime cannot answer whether the
+effect occurred, so the Server retries the unsettled operation under the same
+identity. Stop differs because its intent is checkable — whether the target
+Turn still exists — while a Compact or Reset effect is not.
 
 Gap: the current handler accepts one runtime's abort acknowledgment as a
 confirmed stop, maps target-resolution failures and absent live targets to
