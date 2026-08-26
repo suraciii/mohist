@@ -38,7 +38,9 @@ and decides from recorded facts alone.
   of facts alone.
 - **Witness**: The party present when a fact became true; only the witness records it.
 - **Claim**: Anything that crosses an edge asserting a fact but is not one yet. Claims are settled,
-  never trusted.
+  never trusted. In the Runner protocol, an unqualified "claim" names work acquisition, which
+  `ClaimNext` settles synchronously; a Runner's fact assertion travels as a report, a claim settled
+  asynchronously (see [`runner-restart.md`](runner-restart.md)).
 - **Settlement**: The edge action that turns a claim into a fact or an explicit unknown.
 - **Unknown**: A first-class value, not a failure. What settlement cannot establish stays an
   explicit unknown.
