@@ -96,31 +96,19 @@ public sealed class AgentJobManagerRunnerLossRecoverySpecs : AgentJobGrainTestSu
             executionId,
             origin,
             new DateTimeOffset(2026, 1, 1, 0, 2, 0, TimeSpan.Zero));
-        Assert.False(validateAfter.Allowed);
+        Assert.True(validateAfter.Allowed);
 
         var snapshot = await job.GetRuntimeSnapshotAsync();
-        Assert.Equal(AgentJobStatus.Unknown, snapshot.Status);
-        Assert.True(snapshot.IsRecovering);
+        Assert.Equal(AgentJobStatus.Failed, snapshot.Status);
+        Assert.False(snapshot.IsRecovering);
         Assert.Equal(AgentJobFailureReasons.RunnerLost, snapshot.FailureReason);
 
-        var recoveryTurnId = $"manager-recovery-turn:{jobKey}";
         var turns = await SessionTurnsAsync(sessionId);
         var initialTurn = Assert.Single(turns, turn => turn.Id == initialTurnId);
-        Assert.Equal(AgentTurnStatus.Unknown, initialTurn.Status);
-        var recoveryTurn = Assert.Single(turns, turn => turn.Id == recoveryTurnId);
-        Assert.Null(recoveryTurn.WorkflowExecution);
+        Assert.Equal(AgentTurnStatus.Failed, initialTurn.Status);
 
-        // Repeated server-side loss transitions stay idempotent: the
-        // recovery turn exists exactly once.
-        await job.MarkUnknownAsync(
-            AgentJobFailureReasons.RunnerLost,
-            new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero).AddMinutes(30));
-        Assert.Single(
-            await SessionTurnsAsync(sessionId),
-            turn => turn.Id == recoveryTurnId);
-
-        // The uncertain Manager dispatch is never replayed to a replacement
-        // Runner; recovery continues through the recorded recovery turn.
+        // The failed Manager dispatch is never replayed to a replacement
+        // Runner.
         using var scope = _fixture.Cluster.GetSiloServiceProvider(null)
             .GetRequiredService<IServiceScopeFactory>()
             .CreateScope();

@@ -574,7 +574,7 @@ public partial class DispatchServiceReconciliationSpecs : Mohist.Server.SpecTest
     }
 
     [Fact]
-    public async Task Reconnect_RedeliversInterruptedWorkflowUnderOriginalIdentity()
+    public async Task Reconnect_DoesNotRedeliverWorkClosedWithTheLostGeneration()
     {
         var workflow = await StartWorkflowAsync(SingleStage(checks: []));
         var runnerId = _runnerId!;
@@ -583,30 +583,16 @@ public partial class DispatchServiceReconciliationSpecs : Mohist.Server.SpecTest
             (await Dispatch.PollAsync(runnerId, new RunnerPollRequest([], [], ProcessGeneration: TestRunnerGenerationExtensions.ProcessGeneration))).Dispatches);
 
         await runner.UnregisterAsync();
-        Assert.Empty((await Dispatch.PollAsync(runnerId, new RunnerPollRequest([], [], ProcessGeneration: TestRunnerGenerationExtensions.ProcessGeneration))).Dispatches);
+        await runner.RegisterAsync(
+            new RunnerInfo(runnerId, ["spec/*"], "test-host", TestProjectId(_workflowId!)),
+            "replacement-generation");
 
-        await runner.RegisterAsync(new RunnerInfo(
-            runnerId,
-            ["spec/*"],
-            "test-host",
-            TestProjectId(_workflowId!)));
-
-        var redelivery = Assert.Single(
-            (await Dispatch.PollAsync(runnerId, new RunnerPollRequest([], [], ProcessGeneration: TestRunnerGenerationExtensions.ProcessGeneration))).Dispatches);
-        Assert.Equal(first, redelivery);
-        Assert.Equal(first.WorkId, redelivery.WorkId);
-        Assert.Equal(first.TaskRunId, redelivery.TaskRunId);
-
-        var repeated = Assert.Single(
-            (await Dispatch.PollAsync(runnerId, new RunnerPollRequest([], [], ProcessGeneration: TestRunnerGenerationExtensions.ProcessGeneration))).Dispatches);
-        Assert.Equal(first, repeated);
-
-        var key = WorkKey(_workflowId!, first.WorkId);
         Assert.Empty((await Dispatch.PollAsync(
             runnerId,
-            new RunnerPollRequest([key], [], ProcessGeneration: TestRunnerGenerationExtensions.ProcessGeneration))).Dispatches);
+            new RunnerPollRequest([], [], ProcessGeneration: "replacement-generation"))).Dispatches);
+        Assert.Equal("Failed", await workflow.GetRunStatusAsync());
 
-        Assert.Equal(WorkReportVerdict.Accepted, await workflow.ReceiveTaskReportAsync(
+        Assert.Equal(WorkReportVerdict.Refused, await workflow.ReceiveTaskReportAsync(
             runnerId,
             first.WorkId,
             new TaskReport(
@@ -615,7 +601,7 @@ public partial class DispatchServiceReconciliationSpecs : Mohist.Server.SpecTest
                 Output: null,
                 Artifacts: null,
                 TaskRunId: first.TaskRunId)));
-        Assert.Empty((await Dispatch.PollAsync(runnerId, new RunnerPollRequest([], [], ProcessGeneration: TestRunnerGenerationExtensions.ProcessGeneration))).Dispatches);
+        Assert.Empty((await Dispatch.PollAsync(runnerId, new RunnerPollRequest([], [], ProcessGeneration: "replacement-generation"))).Dispatches);
     }
 
     [Fact]

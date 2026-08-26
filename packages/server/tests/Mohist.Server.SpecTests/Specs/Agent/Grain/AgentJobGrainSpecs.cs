@@ -711,7 +711,7 @@ public class AgentJobGrainSpecs : AgentJobGrainTestSupport
     }
 
     [Fact]
-    public async Task ReportTimeout_WhenRunnerIsAway_PreservesRecoveringProjection()
+    public async Task ReportTimeout_WhenRunnerIsAway_PreservesRunnerLostTerminalFailure()
     {
         var (runnerId, projectId) = await RegisterAgentJobRunnerAsync(
             $"agent-job-timeout-away-{Guid.NewGuid():N}");
@@ -723,18 +723,17 @@ public class AgentJobGrainSpecs : AgentJobGrainTestSupport
 
         await runner.UnregisterAsync();
         var afterCloseout = await job.GetRuntimeSnapshotAsync();
-        Assert.Equal(AgentJobStatus.Unknown, afterCloseout.Status);
+        Assert.Equal(AgentJobStatus.Failed, afterCloseout.Status);
         Assert.Equal(AgentJobFailureReasons.RunnerLost, afterCloseout.FailureReason);
-        Assert.True(afterCloseout.IsRecovering);
+        Assert.False(afterCloseout.IsRecovering);
 
         _fixture.TimeProvider.Advance(TimeSpan.FromSeconds(11));
         await job.CheckTimeoutsAsync();
 
         var afterTimeout = await job.GetRuntimeSnapshotAsync();
-        Assert.Equal(AgentJobStatus.Unknown, afterTimeout.Status);
+        Assert.Equal(AgentJobStatus.Failed, afterTimeout.Status);
         Assert.Equal(AgentJobFailureReasons.RunnerLost, afterTimeout.FailureReason);
-        Assert.Equal(afterCloseout.RecoveryDeadlineAt, afterTimeout.RecoveryDeadlineAt);
-        Assert.True(afterTimeout.IsRecovering);
+        Assert.False(afterTimeout.IsRecovering);
     }
 
     [Fact]
