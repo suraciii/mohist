@@ -8,12 +8,13 @@ using Mohist.Server.Infrastructure.Orleans;
 using Mohist.Server.Issue.Grains;
 using Mohist.Server.Sessions.Domain;
 using Mohist.Server.Sessions.Grains;
+using Mohist.Server.SpecTests.Specs.Workflow;
 using Mohist.Server.SpecTests.Support;
 using Mohist.Server.TestSupport;
 using Mohist.Server.Sessions.Services;
 using Xunit;
 
-namespace Mohist.Server.SpecTests.Specs.Workflow.Grain;
+namespace Mohist.Server.SpecTests.Specs.Sessions;
 
 // Issue-458 T-002: two back-to-back OpenCode turns reuse
 // the same logical AgentSession. Each turn records its own input,
