@@ -29,7 +29,6 @@ const forbiddenDiagramLanguages = new Set([
   'graphviz',
   'gv',
   'kroki',
-  'mermaid',
   'nomnoml',
   'nwdiag',
   'packetdiag',
@@ -48,9 +47,7 @@ const forbiddenDiagramLanguages = new Set([
 const nonLatinLetter = /(?=\p{Letter})[^\p{Script=Latin}]/gu
 const nonAsciiCharacter = /[^\x00-\x7f]/u
 const absoluteUrl = /^[a-z][a-z\d+.-]*:/iu
-const markdownParser = unified()
-  .use(remarkParse)
-  .use(remarkLintNoUndefinedReferences, { allowShortcutLink: true })
+const markdownParser = unified().use(remarkParse).use(remarkLintNoUndefinedReferences, { allowShortcutLink: true })
 
 type MarkdownPosition = {
   start: { line: number; column: number }
@@ -123,7 +120,9 @@ function findDocumentationFiles(root: string): DocumentationCheckResult {
     if (existsSync(filePath) && lstatSync(filePath).isFile()) {
       files.push(filePath)
     } else {
-      violations.push(violation(filePath, undefined, 'required-document-exists', 'required documentation file does not exist'))
+      violations.push(
+        violation(filePath, undefined, 'required-document-exists', 'required documentation file does not exist'),
+      )
     }
   }
 
@@ -132,7 +131,9 @@ function findDocumentationFiles(root: string): DocumentationCheckResult {
     if (existsSync(directoryPath) && lstatSync(directoryPath).isDirectory()) {
       files.push(...collectMarkdownFiles(directoryPath))
     } else {
-      violations.push(violation(directoryPath, undefined, 'documentation-root-exists', 'documentation directory does not exist'))
+      violations.push(
+        violation(directoryPath, undefined, 'documentation-root-exists', 'documentation directory does not exist'),
+      )
     }
   }
 
@@ -176,14 +177,16 @@ function proseCharacterViolations(filePath: string, tree: MarkdownNode): Documen
     }
 
     for (const value of proseValues) {
-      violations.push(...scanCharacters(
-        filePath,
-        node,
-        value,
-        nonLatinLetter,
-        'latin-script-prose-only',
-        (character) => `non-Latin letter is not allowed in prose: ${character}`,
-      ))
+      violations.push(
+        ...scanCharacters(
+          filePath,
+          node,
+          value,
+          nonLatinLetter,
+          'latin-script-prose-only',
+          (character) => `non-Latin letter is not allowed in prose: ${character}`,
+        ),
+      )
     }
   })
   return violations
@@ -193,12 +196,9 @@ function rawHtmlViolations(filePath: string, tree: MarkdownNode): DocumentationV
   const violations: DocumentationViolation[] = []
   walk(tree, (node) => {
     if (node.type !== 'html') return
-    violations.push(violation(
-      filePath,
-      node,
-      'raw-html-not-allowed',
-      'raw HTML is not allowed in active documentation',
-    ))
+    violations.push(
+      violation(filePath, node, 'raw-html-not-allowed', 'raw HTML is not allowed in active documentation'),
+    )
   })
   return violations
 }
@@ -214,17 +214,17 @@ function diagramFenceViolations(filePath: string, tree: MarkdownNode): Documenta
   const violations: DocumentationViolation[] = []
   walk(tree, (node) => {
     if (node.type !== 'code') return
-    const normalizedLanguage = node.lang === null || node.lang === undefined
-      ? ''
-      : normalizeFenceLanguage(node.lang)
+    const normalizedLanguage = node.lang === null || node.lang === undefined ? '' : normalizeFenceLanguage(node.lang)
 
     if (forbiddenDiagramLanguages.has(normalizedLanguage)) {
-      violations.push(violation(
-        filePath,
-        node,
-        'ascii-diagram-only',
-        `fenced ${node.lang} diagram must be replaced with a fenced \`text diagram\` ASCII diagram`,
-      ))
+      violations.push(
+        violation(
+          filePath,
+          node,
+          'ascii-diagram-only',
+          `fenced ${node.lang} diagram must be replaced with a fenced mermaid diagram`,
+        ),
+      )
       return
     }
 
@@ -232,24 +232,28 @@ function diagramFenceViolations(filePath: string, tree: MarkdownNode): Documenta
 
     const fenceKind = node.meta?.trim()
     if (fenceKind !== 'diagram' && fenceKind !== 'literal') {
-      violations.push(violation(
-        filePath,
-        node,
-        'text-fence-kind-required',
-        'fenced text block must declare exactly `text diagram` or `text literal`',
-      ))
+      violations.push(
+        violation(
+          filePath,
+          node,
+          'text-fence-kind-required',
+          'fenced text block must declare exactly `text diagram` or `text literal`',
+        ),
+      )
       return
     }
     if (fenceKind === 'literal') return
 
     const match = nonAsciiCharacter.exec(node.value ?? '')
     if (match === null) return
-    violations.push(violation(
-      filePath,
-      node,
-      'ascii-diagram-only',
-      `fenced text diagram contains a non-ASCII character: ${match[0]}`,
-    ))
+    violations.push(
+      violation(
+        filePath,
+        node,
+        'ascii-diagram-only',
+        `fenced text diagram contains a non-ASCII character: ${match[0]}`,
+      ),
+    )
   })
   return violations
 }
@@ -265,8 +269,9 @@ function headingFragments(tree: MarkdownNode): Set<string> {
 
 function isWithinRepository(root: string, targetPath: string): boolean {
   const relativePath = relative(root, targetPath)
-  return relativePath === ''
-    || (relativePath !== '..' && !relativePath.startsWith(`..${sep}`) && !isAbsolute(relativePath))
+  return (
+    relativePath === '' || (relativePath !== '..' && !relativePath.startsWith(`..${sep}`) && !isAbsolute(relativePath))
+  )
 }
 
 function decodeUrlPart(value: string): string | undefined {
@@ -287,7 +292,8 @@ function splitRelativeUrl(url: string): { path: string; fragment: string | undef
   const encodedPath = queryIndex === -1 ? beforeFragment : beforeFragment.slice(0, queryIndex)
   const path = decodeUrlPart(encodedPath)
   const fragment = encodedFragment === undefined ? undefined : decodeUrlPart(encodedFragment)
-  if (path === undefined || fragment === undefined && encodedFragment !== undefined) return { path: '', fragment: undefined }
+  if (path === undefined || (fragment === undefined && encodedFragment !== undefined))
+    return { path: '', fragment: undefined }
   return { path, fragment }
 }
 
@@ -334,21 +340,29 @@ function linkViolations(
     const decoded = splitRelativeUrl(url)
     if (decoded === undefined) continue
     if (decoded.path === '' && url.includes('%') && decodeUrlPart(url.split(/[?#]/u)[0]) === undefined) {
-      violations.push(violation(filePath, node, 'valid-relative-link', `relative link has invalid percent encoding: ${url}`))
+      violations.push(
+        violation(filePath, node, 'valid-relative-link', `relative link has invalid percent encoding: ${url}`),
+      )
       continue
     }
     if (url.includes('#') && decoded.fragment === undefined) {
-      violations.push(violation(filePath, node, 'valid-relative-link', `relative link has invalid fragment encoding: ${url}`))
+      violations.push(
+        violation(filePath, node, 'valid-relative-link', `relative link has invalid fragment encoding: ${url}`),
+      )
       continue
     }
 
     const targetPath = decoded.path === '' ? filePath : resolve(dirname(filePath), decoded.path)
     if (!isWithinRepository(root, targetPath)) {
-      violations.push(violation(filePath, node, 'relative-link-target-exists', `relative link leaves the repository: ${url}`))
+      violations.push(
+        violation(filePath, node, 'relative-link-target-exists', `relative link leaves the repository: ${url}`),
+      )
       continue
     }
     if (!existsSync(targetPath)) {
-      violations.push(violation(filePath, node, 'relative-link-target-exists', `relative link target does not exist: ${url}`))
+      violations.push(
+        violation(filePath, node, 'relative-link-target-exists', `relative link target does not exist: ${url}`),
+      )
       continue
     }
     if (decoded.fragment === undefined || decoded.fragment === '') continue
@@ -356,12 +370,14 @@ function linkViolations(
     const markdownPath = markdownTargetPath(targetPath)
     if (markdownPath === undefined) {
       if (lstatSync(targetPath).isDirectory()) {
-        violations.push(violation(
-          filePath,
-          node,
-          'markdown-heading-fragment-exists',
-          `directory link fragment has no README.md target: ${url}`,
-        ))
+        violations.push(
+          violation(
+            filePath,
+            node,
+            'markdown-heading-fragment-exists',
+            `directory link fragment has no README.md target: ${url}`,
+          ),
+        )
       }
       continue
     }
@@ -373,23 +389,21 @@ function linkViolations(
       headingCache.set(markdownPath, headings)
     }
     if (!headings.has(decoded.fragment)) {
-      violations.push(violation(
-        filePath,
-        node,
-        'markdown-heading-fragment-exists',
-        `Markdown heading fragment does not exist: ${url}`,
-      ))
+      violations.push(
+        violation(
+          filePath,
+          node,
+          'markdown-heading-fragment-exists',
+          `Markdown heading fragment does not exist: ${url}`,
+        ),
+      )
     }
   }
 
   return violations
 }
 
-function undefinedReferenceViolations(
-  filePath: string,
-  source: string,
-  tree: MarkdownNode,
-): DocumentationViolation[] {
+function undefinedReferenceViolations(filePath: string, source: string, tree: MarkdownNode): DocumentationViolation[] {
   const file = new VFile({ path: filePath, value: source })
   markdownParser.runSync(tree as Root, file)
   return file.messages.map((message) => ({
@@ -404,10 +418,7 @@ function undefinedReferenceViolations(
 function compareViolations(left: DocumentationViolation, right: DocumentationViolation): number {
   const fileOrder = left.filePath < right.filePath ? -1 : left.filePath > right.filePath ? 1 : 0
   const ruleOrder = left.rule < right.rule ? -1 : left.rule > right.rule ? 1 : 0
-  return fileOrder
-    || left.line - right.line
-    || left.column - right.column
-    || ruleOrder
+  return fileOrder || left.line - right.line || left.column - right.column || ruleOrder
 }
 
 export function checkDocumentation(rootPath: string): DocumentationCheckResult {
@@ -445,7 +456,9 @@ function main(): void {
   }
 
   for (const item of result.violations) console.error(formatDocumentationViolation(repositoryRoot, item))
-  console.error(`docs:check: found ${result.violations.length} violation(s) in ${result.files.length} active Markdown files`)
+  console.error(
+    `docs:check: found ${result.violations.length} violation(s) in ${result.files.length} active Markdown files`,
+  )
   process.exitCode = 1
 }
 
