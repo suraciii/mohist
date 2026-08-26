@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import { mock, test } from 'node:test'
 
 import {
+  applyDurationMeasurementPhase,
   cleanupDeadlineAt,
   commandFor,
   createTimeout,
@@ -657,6 +658,7 @@ test('planTracks isolates the bounded Spec duration phase before remaining fan-o
     id: 'server-unit',
     kind: 'dotnet-apphost',
     apphost: 'bin/unit',
+    resources: ['existing-resource'],
     report: 'reports/unit.trx',
     reportFormat: 'trx',
     deadlineMs: 1000,
@@ -704,9 +706,68 @@ test('planTracks isolates the bounded Spec duration phase before remaining fan-o
   assert.ok(byId.get('server-spec')?.resources?.includes('duration-measurement'))
   assert.ok(byId.get('server-spec')?.resources?.includes('server-spec'))
 
-  const focused = planTracks([unit], '/evidence', ['cli', 'server-spec'], 'runner')
-  assert.deepEqual(focused[0].lane.dependsOn, undefined)
-  assert.ok(!focused[0].lane.resources?.includes('duration-measurement'))
+  const focusedInput = planTracks([unit], '/evidence', ['cli', 'server-spec'], 'runner').map((plan) => ({
+    ...plan,
+    lane: { ...plan.lane, dependsOn: ['existing-precondition'] },
+  }))
+  const focused = applyDurationMeasurementPhase(focusedInput, ['cli', 'server-spec'], 'runner')
+  assert.equal(JSON.stringify(focused), JSON.stringify(focusedInput))
+})
+
+test('applyDurationMeasurementPhase preserves existing multi-lane coverage terminal semantics at its unit seam', () => {
+  const measurement: TrackConfig = {
+    id: 'measurement',
+    kind: 'dotnet-apphost',
+    apphost: 'bin/measurement',
+    report: 'reports/measurement.trx',
+    reportFormat: 'trx',
+    deadlineMs: 1000,
+    enforce: false,
+  }
+  const downstream: TrackConfig = {
+    id: 'downstream',
+    kind: 'dotnet-apphost',
+    apphost: 'bin/downstream',
+    report: 'reports/downstream.trx',
+    reportFormat: 'trx',
+    deadlineMs: 1000,
+    enforce: false,
+  }
+  const [template] = planTracks([measurement], '/evidence')
+  const executionA = { ...template, lane: { ...template.lane, id: 'measurement-a' } }
+  const executionB = { ...template, lane: { ...template.lane, id: 'measurement-b' } }
+  const coverage = {
+    ...template,
+    lane: { ...template.lane, id: 'measurement-coverage' },
+    policyTrack: undefined,
+    executionTrack: undefined,
+    reportPath: undefined,
+  }
+  const [downstreamPlan] = planTracks([downstream], '/evidence')
+  const planned = applyDurationMeasurementPhase([executionA, executionB, coverage, downstreamPlan], ['measurement'])
+
+  assert.deepEqual(planned.at(-1)?.lane.dependsOn, ['measurement-coverage'])
+})
+
+test('applyDurationMeasurementPhase fails closed for a malformed multi-lane group at its unit seam', () => {
+  const measurement: TrackConfig = {
+    id: 'measurement',
+    kind: 'dotnet-apphost',
+    apphost: 'bin/measurement',
+    report: 'reports/measurement.trx',
+    reportFormat: 'trx',
+    deadlineMs: 1000,
+    enforce: false,
+  }
+  const [template] = planTracks([measurement], '/evidence')
+  const input = [
+    { ...template, lane: { ...template.lane, id: 'measurement-a' } },
+    { ...template, lane: { ...template.lane, id: 'measurement-b' } },
+  ]
+
+  const planned = applyDurationMeasurementPhase(input, ['measurement'])
+
+  assert.equal(JSON.stringify(planned), JSON.stringify(input))
 })
 
 test('parseArgs: focused without any argument leaves the request unresolved', () => {

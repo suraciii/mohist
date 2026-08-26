@@ -39,8 +39,8 @@ When the configured duration isolation Track is selected, it MUST wait for the f
 If no configured duration-measurement Track is present in the selected scope, the planner MUST return the selected plan with its existing lanes, Resources, and dependencies unchanged.
 
 #### Scenario: No configured measurement Track is selected
-- **WHEN** the configured measurement sequence is `[cli, server-spec]` and the selected scope contains only `server-unit`
-- **THEN** the planned `server-unit` lane MUST retain its original Resources and dependencies, and no measurement phase MUST be added
+- **WHEN** the configured measurement sequence is `[cli, server-spec]`, the selected scope contains only `server-unit`, and its input lane already has Resources and a `dependsOn` entry
+- **THEN** the planner output MUST be byte-for-byte equivalent to the input lane plan, including its existing Resources and dependencies, and no measurement phase MUST be added
 
 ### Requirement: Fail closed for malformed multi-lane measurement groups
 

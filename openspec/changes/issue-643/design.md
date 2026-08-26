@@ -41,22 +41,24 @@ The implementation changes only the input sequence to the existing `measurementG
 
 **Alternative considered:** Rebuild the full dependency graph or add a scheduler concept for measurement phases. Rejected because the current graph already expresses ordered groups, terminal joins, Resource claims, and isolation fan-out; changing it would expand the failure surface without solving the missing intersection.
 
-### 3. Preserve fail-closed handling for malformed multi-lane groups
+### 3. Keep existing multi-lane behavior at a narrow unit seam
 
-After normalization, a selected Track with multiple matching execution lanes still requires `<track-id>-coverage`. If that terminal is absent, `applyDurationMeasurementPhase` returns the selected plan before adding any new phase constraints. A malformed Track is not silently dropped from the selected scope and does not receive partial isolation.
+This change does not alter multi-lane expansion or validation. Canonical configuration rejects duplicate Track IDs and `planTracks` creates one lane per selected Track, so a valid multi-lane group is not naturally constructible through the public canonical planner. Export the existing pure `applyDurationMeasurementPhase` helper and its `PlannedLane` shape as a narrow internal unit seam. Tests can construct synthetic lanes to preserve the existing coverage-terminal and fail-closed behavior without adding a production expansion path or a new planner capability.
 
-**Alternative considered:** Throw a planning error or skip only the malformed Track. Rejected because both options change current failure behavior and could make a focused scope fail for an invalid shape outside the active canonical scope, or silently produce incomplete duration evidence.
+**Alternative considered:** Construct multi-lane cases through duplicate canonical `TrackConfig` IDs. Rejected because `validateConfig` rejects duplicate IDs and the public planner does not represent lane expansion that way.
+
+**Alternative considered:** Add a new production lane-expansion or coverage configuration path. Rejected because the Issue only fixes ordered configured/selected intersection and explicitly excludes new planner capabilities.
 
 ### 4. Verify the matrix at the planner boundary
 
-Extend `scripts/test-duration/guard.test.ts` around the existing `planTracks` coverage. Tests will assert lane IDs, `dependsOn`, and `resources` for:
+Extend `scripts/test-duration/guard.test.ts` around the existing planner coverage. Tests will assert lane IDs, `dependsOn`, and `resources` for:
 
 - `[cli, server-spec]` configured with only `server-spec` selected;
 - both measurement Tracks selected in configured order;
-- no configured measurement Track selected;
+- no configured measurement Track selected, using an input lane that already has Resources and `dependsOn` and comparing serialized output;
 - a focused scope with no measurement or isolation Track;
-- a valid multi-lane group with a coverage terminal; and
-- a malformed multi-lane group without a coverage terminal.
+- a synthetic valid multi-lane group with a coverage terminal at the narrow phase-helper seam; and
+- a synthetic malformed multi-lane group without a coverage terminal at the same seam.
 
 The emitted `plan.json` continues to serialize the resulting `planned` lanes, so no separate evidence schema or writer is needed. Existing canonical duration tests remain the integration check that the configured budgets and deadlines are unchanged.
 

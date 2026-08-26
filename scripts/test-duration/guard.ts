@@ -422,7 +422,7 @@ export function isLaneSuccessful(run: TrackRun): boolean {
   )
 }
 
-interface PlannedLane {
+export interface PlannedLane {
   readonly lane: LaneSpec
   readonly policyTrack?: TrackConfig
   readonly executionTrack?: TrackConfig
@@ -457,7 +457,7 @@ function withLaneConstraints(
   }
 }
 
-function applyDurationMeasurementPhase(
+export function applyDurationMeasurementPhase(
   planned: readonly PlannedLane[],
   durationMeasurementTracks: readonly string[],
   durationIsolationTrack?: string,
