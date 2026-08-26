@@ -21,7 +21,7 @@
       "type": "WRITE",
       "output": "Scope-aware applyDurationMeasurementPhase implementation and passing planner regression coverage in scripts/test-duration/guard.ts and scripts/test-duration/guard.test.ts.",
       "dependsOn": [],
-      "passes": false,
+      "passes": true,
       "notes": "Keep the change inside the shared planner boundary. Preserve the existing fail-closed behavior for duplicate configuration IDs and malformed multi-lane groups; do not add a new abstraction or configuration path."
     }
   ]
