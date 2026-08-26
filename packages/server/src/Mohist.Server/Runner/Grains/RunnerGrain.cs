@@ -123,7 +123,10 @@ public partial class RunnerGrain : Grain, IRunnerGrain, IRemindable
         var state = _state.State ??= new RunnerState();
         _info = state.LastKnownInfo;
         _draining = !string.IsNullOrWhiteSpace(state.UpdateInterruptFence?.PendingId)
-            || !string.IsNullOrWhiteSpace(state.PendingProcessGeneration);
+            || !string.IsNullOrWhiteSpace(state.PendingProcessGeneration)
+            || !string.IsNullOrWhiteSpace(state.ClosingProcessGeneration);
+        if (!string.IsNullOrWhiteSpace(state.ClosingProcessGeneration))
+            await ReconcileClosingGenerationAsync();
         if (_info is not null && state.LastKnownActionCatalogJson is not null)
         {
             var catalog = JSON.Deserialize<ActionCatalog>(state.LastKnownActionCatalogJson);
@@ -150,9 +153,8 @@ public partial class RunnerGrain : Grain, IRunnerGrain, IRemindable
 
     public async Task RegisterAsync(RunnerInfo info, string processGeneration)
     {
-        if (string.IsNullOrWhiteSpace(processGeneration))
+        if (string.IsNullOrEmpty(processGeneration))
             throw new ArgumentException("process generation is required", nameof(processGeneration));
-        processGeneration = processGeneration.Trim();
         await _lifecycleGate.WaitAsync();
         try
         {
@@ -172,7 +174,9 @@ public partial class RunnerGrain : Grain, IRunnerGrain, IRemindable
             else if (!string.IsNullOrWhiteSpace(state.PendingProcessGeneration)
                 && !string.Equals(state.PendingProcessGeneration, processGeneration, StringComparison.Ordinal))
             {
-                throw new InvalidOperationException("another process-generation replacement is pending");
+                state.PendingProcessGeneration = processGeneration;
+                _draining = true;
+                await PersistAsync();
             }
 
             if (!string.IsNullOrWhiteSpace(closingGeneration))
@@ -289,8 +293,8 @@ public partial class RunnerGrain : Grain, IRunnerGrain, IRemindable
         try
         {
             if (_draining || _pollAdmissionToken is not null
-                || string.IsNullOrWhiteSpace(processGeneration)
-                || !string.Equals(_state.State?.CurrentProcessGeneration, processGeneration.Trim(), StringComparison.Ordinal))
+                || string.IsNullOrEmpty(processGeneration)
+                || !string.Equals(_state.State?.CurrentProcessGeneration, processGeneration, StringComparison.Ordinal))
                 return new RunnerPollAdmission(false, 0);
 
             var admissionToken = Guid.NewGuid();
@@ -802,10 +806,11 @@ public partial class RunnerGrain : Grain, IRunnerGrain, IRemindable
         {
             try
             {
-                if (!string.Equals(record.ClaimedProcessGeneration, processGeneration, StringComparison.Ordinal))
+                if (string.IsNullOrEmpty(record.WorkId)
+                    || !string.Equals(record.ClaimedProcessGeneration, processGeneration, StringComparison.Ordinal))
                     continue;
                 await GrainFactory.GetGrain<IAgentJobGrain>(record.JobKey)
-                    .FailAsync(AgentJobFailureReasons.RunnerLost);
+                    .FailRunnerLostAsync(workerId, record.WorkId, processGeneration!);
             }
             catch (Exception ex)
             {

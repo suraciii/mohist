@@ -488,6 +488,18 @@ public sealed partial class WorkflowGrainStateSaveFailureSpecs
             return _inner.SaveAsync(run, events, ct);
         }
 
+        public Task SaveWithArtifactsAsync(
+            WorkflowRun run,
+            IReadOnlyList<WorkflowEvent> events,
+            WorkflowArtifactBindingIntent artifacts,
+            CancellationToken ct = default)
+        {
+            EventSaveAttempts++;
+            if (Interlocked.CompareExchange(ref _remainingFailures, 0, 1) == 1)
+                throw new InvalidOperationException("simulated artifact settlement save failure");
+            return _inner.SaveWithArtifactsAsync(run, events, artifacts, ct);
+        }
+
         public Task DeleteAsync(string workflowRunId, CancellationToken ct = default) =>
             _inner.DeleteAsync(workflowRunId, ct);
     }

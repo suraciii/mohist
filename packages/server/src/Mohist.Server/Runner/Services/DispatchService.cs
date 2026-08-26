@@ -51,7 +51,7 @@ public sealed class DispatchService : IScopedService
     {
         ct.ThrowIfCancellationRequested();
         var runner = _grains.GetGrain<IRunnerGrain>(runnerId);
-        var processGeneration = req.ProcessGeneration?.Trim() ?? string.Empty;
+        var processGeneration = req.ProcessGeneration ?? string.Empty;
         var admission = await runner.TryBeginPollAsync(processGeneration);
         if (!admission.Admitted)
             return new RunnerPollResponse([]);

@@ -388,7 +388,11 @@ public record WorkResult(
     int? ExitCode = null,
     string[]? ArtifactUploadIds = null,
     [property: Id(5)] List<RuntimeTaskInput>? AddTasks = null,
-    [property: Id(6)] ExecutionError? Error = null)
+    [property: Id(6)] ExecutionError? Error = null,
+    [property: Id(7)] string? AgentSessionId = null,
+    [property: Id(8)] string? AgentTurnId = null,
+    [property: Id(9)] string? Runtime = null,
+    [property: Id(10)] string? RuntimeSessionId = null)
 {
     /// <summary>
     /// Flattened <c>Error.Code</c> for cross-domain readers:

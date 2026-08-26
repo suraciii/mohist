@@ -109,7 +109,9 @@ public abstract class AgentJobGrainTestSupport
             .CreateScope()
             .ServiceProvider
             .GetRequiredService<DispatchService>();
-        return dispatch.PollAsync(runnerId, request ?? new RunnerPollRequest([], []));
+        return dispatch.PollAsync(
+            runnerId,
+            request ?? new RunnerPollRequest([], [], ProcessGeneration: TestRunnerGenerationExtensions.ProcessGeneration));
     }
 
     protected static async Task<T> WaitForAsync<T>(

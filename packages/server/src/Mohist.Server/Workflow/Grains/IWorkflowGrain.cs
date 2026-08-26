@@ -27,9 +27,7 @@ public interface IWorkflowGrain : IGrainWithStringKey, IRemindable
     Task<WorkflowAssignmentResult> AssignWorkerAsync(string workerId);
     Task<WorkItem?> ClaimNextAsync(string workerId, string processGeneration);
     Task<WorkDispatch?> StoreActiveWorkDispatchAsync(string workerId, string workId, WorkDispatch dispatch);
-    Task<WorkReportVerdict> FailActiveWorkAsync(string workerId, string message);
-    Task<WorkReportVerdict> FailActiveWorkAsync(string workerId, string workId, string processGeneration, string message) =>
-        FailActiveWorkAsync(workerId, message);
+    Task<WorkReportVerdict> FailActiveWorkAsync(string workerId, string workId, string processGeneration, string message);
     Task<WorkReportVerdict> InterruptActiveWorkAsync(string workerId, string reason);
     Task<WorkReportVerdict> AbandonActiveWorkAsync(string workerId, string workId, string reason);
     Task<WorkReportVerdict> BindAgentExecutionAsync(AgentExecutionBinding binding);

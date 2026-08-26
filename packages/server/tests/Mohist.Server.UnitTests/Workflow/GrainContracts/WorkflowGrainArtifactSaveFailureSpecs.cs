@@ -64,12 +64,10 @@ public sealed partial class WorkflowGrainStateSaveFailureSpecs
 
         await using (var db = await dbFactory.CreateDbContextAsync())
         {
-            var artifact = Assert.Single(await db.WorkflowArtifacts
+            Assert.Empty(await db.WorkflowArtifacts
                 .Where(row => row.WorkflowRunId == workflowRunId)
                 .ToListAsync());
-            Assert.Equal(uploadId, artifact.SourceUploadId);
-            Assert.Equal(taskRunId, artifact.TaskRunId);
-            Assert.Null(await db.WorkflowArtifactPendingUploads.FindAsync(uploadId));
+            Assert.NotNull(await db.WorkflowArtifactPendingUploads.FindAsync(uploadId));
         }
         Assert.Equal(TaskRunStatus.Running,
             Assert.Single((await store.LoadAsync(workflowRunId))!.CurrentStage().Tasks).Status);

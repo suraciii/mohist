@@ -257,7 +257,7 @@ public sealed partial class AgentResultSettlementSpecs : WorkflowGrainSpecs
             binding.Runtime,
             binding.RuntimeSessionId);
 
-        Assert.Equal("stale", report.Ack);
+        Assert.Equal("refused", report.Ack);
         Assert.Equal("Running", report.WorkflowStatus);
 
         var after = await LoadRunAsync(_workflowId!);
@@ -332,7 +332,7 @@ public sealed partial class AgentResultSettlementSpecs : WorkflowGrainSpecs
             task.Id,
             new WorkResult("succeeded", "must never be accepted without a binding"),
             CancellationToken.None);
-        Assert.Equal("stale", succeededAck.Ack);
+        Assert.Equal("refused", succeededAck.Ack);
 
         var failure = await reportService.ReportAsync(
             runnerId,

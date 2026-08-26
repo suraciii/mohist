@@ -1,4 +1,5 @@
 using Mohist.Server.Contracts;
+using Mohist.Server.Infrastructure.Data.Workflow;
 using Mohist.Server.Workflow.Domain.Run;
 using Mohist.Server.Runner.Grains;
 using Mohist.Server.Runner.Services;
@@ -234,17 +235,6 @@ public partial class WorkflowGrain
 
         await ReconcileAgentResultSettlementAsync();
         return WorkReportVerdict.Accepted;
-    }
-
-    public async Task<WorkReportVerdict> FailActiveWorkAsync(string workerId, string message)
-    {
-        RejectIfRunReloadRequired();
-        if (_run is null || !_run.IsAssignedTo(workerId)) return WorkReportVerdict.Refused;
-        var activeWork = _run.CurrentActiveWorkFor(workerId);
-        if (activeWork is null) return WorkReportVerdict.Refused;
-        if (activeWork.IsTask && _run.CurrentStage().RunningTask?.AgentResultSettlement is not null)
-            return WorkReportVerdict.Refused;
-        return await FailActiveWorkCoreAsync(activeWork, message);
     }
 
     public async Task<WorkReportVerdict> FailActiveWorkAsync(
@@ -563,7 +553,7 @@ public partial class WorkflowGrain
                 Detail: $"Recovery follow-up rejected: {ex.Message}");
         }
 
-        effectiveReport = await BindTaskReportArtifactsAsync(activeWork, effectiveReport);
+        effectiveReport = await ValidateTaskReportArtifactsAsync(activeWork, effectiveReport);
         var events = (await _workLifecycle.ApplyTaskReportAsync(
             _run,
             effectiveReport,
@@ -726,7 +716,8 @@ public partial class WorkflowGrain
             }
         }
 
-        effectiveReport = await BindTaskReportArtifactsAsync(activeWork, effectiveReport);
+        var artifactUploadIds = effectiveReport.ArtifactUploadIds?.ToArray();
+        effectiveReport = await ValidateTaskReportArtifactsAsync(activeWork, effectiveReport);
         _run.ClearWorkInterruption(activeWork.WorkId, workerId);
 
         var events = (await _workLifecycle.ApplyTaskReportAsync(
@@ -749,7 +740,20 @@ public partial class WorkflowGrain
                 recovered));
         }
 
-        await CommitAsync(events);
+        if (artifactUploadIds is { Length: > 0 } && effectiveReport.Artifacts is { Count: > 0 })
+        {
+            await CommitWithArtifactsAsync(events, new WorkflowArtifactBindingIntent(
+                activeWork.WorkId,
+                activeWork.TaskRunId,
+                artifactUploadIds,
+                Now(),
+                GetProjectId(),
+                GetIssueNumber()));
+        }
+        else
+        {
+            await CommitAsync(events);
+        }
         await DeliverPendingSessionInterruptionAsync();
         if (recoveringTransition is not null)
         {
@@ -775,7 +779,7 @@ public partial class WorkflowGrain
         return WorkReportVerdict.Accepted;
     }
 
-    private async Task<TaskReport> BindTaskReportArtifactsAsync(
+    private async Task<TaskReport> ValidateTaskReportArtifactsAsync(
         WorkflowActiveWork activeWork,
         TaskReport report)
     {
@@ -785,7 +789,7 @@ public partial class WorkflowGrain
         var variables = await _variableResolver.ResolveEffectiveVariableBundleAsync(
             GrainKey,
             activeWork.Item.Stage);
-        var bindResult = await _artifactBindService.BindAsync(
+        var bindResult = await _artifactBindService.ValidateAsync(
             GrainKey,
             activeWork.WorkId,
             activeWork.TaskRunId!,

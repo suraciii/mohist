@@ -392,7 +392,7 @@ public class AgentJobTerminalDeliverySpecs : AgentJobGrainTestSupport
             new WorkResult(Status: "failed", Message: "redelivered", Output: JSON.DeserializeElement("{}"), ExitCode: 1));
         Assert.False(redeliver.Accepted,
             "Already-terminal AgentJob rejects report replay but still owns the original delivery");
-        Assert.Equal("stale", redeliver.Reason);
+        Assert.Equal("refused", redeliver.Reason);
 
         var parts = await ListSessionClosedPartsAsync(sessionId);
         var activityParts = parts

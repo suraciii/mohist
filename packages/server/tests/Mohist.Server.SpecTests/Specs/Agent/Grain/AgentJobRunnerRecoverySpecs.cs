@@ -85,7 +85,7 @@ public sealed class AgentJobRunnerRecoverySpecs : AgentJobGrainTestSupport
 
         Assert.True(firstReport.Accepted);
         Assert.False(duplicateReport.Accepted);
-        Assert.Equal("stale", duplicateReport.Reason);
+        Assert.Equal("refused", duplicateReport.Reason);
         Assert.Equal(AgentJobStatus.Completed, (await job.GetTerminalResultAsync()).Status);
         Assert.Empty((await dispatch.PollAsync(runnerId, new RunnerPollRequest([], []))).Dispatches);
         await runner.UnregisterAsync();
@@ -195,7 +195,7 @@ public sealed class AgentJobRunnerRecoverySpecs : AgentJobGrainTestSupport
             workId,
             new WorkResult("completed", "late previous-generation result"));
         Assert.False(late.Accepted);
-        Assert.Equal("stale", late.Reason);
+        Assert.Equal("refused", late.Reason);
 
         var terminal = await job.GetTerminalResultAsync();
         Assert.Equal(AgentJobStatus.Failed, terminal.Status);
@@ -207,7 +207,7 @@ public sealed class AgentJobRunnerRecoverySpecs : AgentJobGrainTestSupport
             workId,
             new WorkResult("completed", "duplicate late result"));
         Assert.False(duplicate.Accepted);
-        Assert.Equal("stale", duplicate.Reason);
+        Assert.Equal("refused", duplicate.Reason);
         Assert.Equal(AgentJobStatus.Failed, (await job.GetTerminalResultAsync()).Status);
     }
 

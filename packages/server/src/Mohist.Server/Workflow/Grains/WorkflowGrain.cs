@@ -490,7 +490,7 @@ public partial class WorkflowGrain : Grain, IWorkflowGrain, IWorkflowGrainContex
         return new WorkflowAssignmentResult(WorkflowAssignmentStatus.Assigned, workerId);
     }
 
-    public async Task<WorkItem?> ClaimNextAsync(string workerId, string processGeneration = "test-generation")
+    public async Task<WorkItem?> ClaimNextAsync(string workerId, string processGeneration)
     {
         RejectIfRunReloadRequired();
         if (string.IsNullOrWhiteSpace(processGeneration)
@@ -691,6 +691,25 @@ public partial class WorkflowGrain : Grain, IWorkflowGrain, IWorkflowGrainContex
 
     internal int? GetIssueNumber() =>
         _run?.Metadata?.IssueNumber is > 0 ? _run.Metadata.IssueNumber : null;
+
+    internal async Task CommitWithArtifactsAsync(
+        IReadOnlyList<WorkflowEvent> events,
+        WorkflowArtifactBindingIntent artifacts)
+    {
+        if (_run is null) return;
+        try
+        {
+            _runDirty = true;
+            await _runStore.SaveWithArtifactsAsync(_run, events, artifacts);
+            _runDirty = false;
+        }
+        catch
+        {
+            MarkRunReloadRequired();
+            DeactivateOnIdle();
+            throw;
+        }
+    }
 
     private async Task BindInitialRunAsync(
         string projectId,

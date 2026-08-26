@@ -46,6 +46,10 @@ public static partial class RunnerRoutes
             if (req is null)
                 return ApiResults.BadRequest("request body is required");
 
+            if (string.IsNullOrWhiteSpace(req.WorkId))
+                return ApiResults.BadRequest("workId is required");
+            if (!IsTerminalReportStatus(req.Status))
+                return ApiResults.BadRequest("status is invalid");
             if (string.IsNullOrWhiteSpace(req.OwnerKind))
                 return ApiResults.BadRequest("ownerKind is required");
 
@@ -69,7 +73,18 @@ public static partial class RunnerRoutes
                 return ApiResults.BadRequest($"ownerKind '{req.OwnerKind}' is not supported");
             }
 
-            var result = new WorkResult(req.Status, req.Message, req.Output, req.ExitCode, req.ArtifactUploadIds, req.AddTasks, req.Error);
+            var result = new WorkResult(
+                req.Status,
+                req.Message,
+                req.Output,
+                req.ExitCode,
+                req.ArtifactUploadIds,
+                req.AddTasks,
+                req.Error,
+                req.AgentSessionId,
+                req.AgentTurnId,
+                req.Runtime,
+                req.RuntimeSessionId);
 
             if (string.Equals(ownerKind, WorkDispatchOwnerKinds.AgentJob, StringComparison.Ordinal))
             {
@@ -102,4 +117,13 @@ public static partial class RunnerRoutes
             return Results.Ok(new RunnerReportResponse(ack));
         });
     }
+
+    private static bool IsTerminalReportStatus(string? status) => status is not null && (
+        status.Equals("completed", StringComparison.OrdinalIgnoreCase)
+        || status.Equals("success", StringComparison.OrdinalIgnoreCase)
+        || status.Equals("pass", StringComparison.OrdinalIgnoreCase)
+        || status.Equals("ok", StringComparison.OrdinalIgnoreCase)
+        || status.Equals("failed", StringComparison.OrdinalIgnoreCase)
+        || status.Equals("timeout", StringComparison.OrdinalIgnoreCase)
+        || status.Equals("unknown", StringComparison.OrdinalIgnoreCase));
 }

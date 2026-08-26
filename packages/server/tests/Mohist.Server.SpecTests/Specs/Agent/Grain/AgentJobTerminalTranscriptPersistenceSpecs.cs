@@ -55,7 +55,7 @@ public class AgentJobTerminalTranscriptPersistenceSpecs : AgentJobGrainTestSuppo
             new WorkResult(Status: "failed", Message: "transient", Output: JSON.DeserializeElement("{}"), ExitCode: 1));
 
         Assert.False(replay.Accepted);
-        Assert.Equal("stale", replay.Reason);
+        Assert.Equal("refused", replay.Reason);
         Assert.False((await job.GetRuntimeSnapshotAsync()).HasPendingSessionClose);
 
         var persisted = Assert.Single(

@@ -51,7 +51,7 @@ public sealed partial class AgentResultSettlementSpecs
         var eventCount = (await EventStore.ListAsync(_workflowId!)).Count;
 
         var wrongBinding = binding with { AgentTurnId = "wrong-turn" };
-        Assert.Equal("stale", (await service.ReportAsync(
+        Assert.Equal("refused", (await service.ReportAsync(
             runnerId,
             _workflowId!,
             work.WorkId,
@@ -63,7 +63,7 @@ public sealed partial class AgentResultSettlementSpecs
             wrongBinding.Runtime,
             wrongBinding.RuntimeSessionId)).Ack);
 
-        Assert.Equal("stale", (await service.ReportAsync(
+        Assert.Equal("refused", (await service.ReportAsync(
             runnerId,
             _workflowId!,
             work.WorkId,

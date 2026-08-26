@@ -267,7 +267,7 @@ public class RunnerOutstandingWorkSpecs : WorkflowGrainSpecs
             taskRunId,
             new WorkResult("completed", "late previous-generation result"));
 
-        Assert.Equal("stale", late.Ack);
+        Assert.Equal("refused", late.Ack);
         var eventTypes = (await EventStore.ListAsync(work.WorkflowRunId))
             .Select(entry => entry.Envelope.Type)
             .ToArray();
@@ -280,7 +280,7 @@ public class RunnerOutstandingWorkSpecs : WorkflowGrainSpecs
             work.WorkId,
             taskRunId,
             new WorkResult("completed", "duplicate late result"));
-        Assert.Equal("stale", duplicate.Ack);
+        Assert.Equal("refused", duplicate.Ack);
 
         var failed = await LoadRunAsync(work.WorkflowRunId);
         Assert.Equal(TaskRunStatus.Failed, failed.Stages.Single().Tasks.Single().Status);

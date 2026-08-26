@@ -18,6 +18,7 @@ using Mohist.Server.TestSupport;
 using Mohist.Server.SpecTests.Specs.Workflow;
 using Orleans;
 using Orleans.Runtime;
+using Orleans.Core.Internal;
 using Xunit;
 
 namespace Mohist.Server.SpecTests.Specs.Agent.Grain;
@@ -130,6 +131,8 @@ public class AgentJobGrainSpecs : AgentJobGrainTestSupport
 
         await WaitForStatusAsync(job, AgentJobStatus.Completed, TimeSpan.FromSeconds(5));
 
+        await job.AsReference<IGrainManagementExtension>().DeactivateOnIdle();
+        job = JobGrain(jobKey);
         var exactReplay = await job.ReportResultAsync(runnerId, workId, result);
         Assert.Equal(WorkReportVerdict.Accepted, exactReplay.Verdict);
         var conflictingReplay = await job.ReportResultAsync(
@@ -494,7 +497,7 @@ public class AgentJobGrainSpecs : AgentJobGrainTestSupport
             workId,
             new WorkResult("failed", "second result"));
         Assert.False(replay.Accepted);
-        Assert.Equal("stale", replay.Reason);
+        Assert.Equal("refused", replay.Reason);
 
         var stillTerminal = await job.GetTerminalResultAsync();
         Assert.Equal(AgentJobStatus.Completed, stillTerminal.Status);

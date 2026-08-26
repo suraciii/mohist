@@ -204,6 +204,17 @@ internal static partial class WorkflowGrainContractSupport
             return _inner.SaveAsync(run, events, ct);
         }
 
+        public Task SaveWithArtifactsAsync(
+            WorkflowRun run,
+            IReadOnlyList<WorkflowEvent> events,
+            WorkflowArtifactBindingIntent artifacts,
+            CancellationToken ct = default)
+        {
+            if (events.Any(_failBatchWhen))
+                throw new InvalidOperationException("simulated event save failure");
+            return _inner.SaveWithArtifactsAsync(run, events, artifacts, ct);
+        }
+
         public Task DeleteAsync(string workflowRunId, CancellationToken ct = default) =>
             _inner.DeleteAsync(workflowRunId, ct);
     }

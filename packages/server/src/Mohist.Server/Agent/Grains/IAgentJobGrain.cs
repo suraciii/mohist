@@ -90,6 +90,10 @@ public interface IAgentJobGrain : IGrainWithStringKey, IRemindable
     /// status and no longer recognises the runner/work pair).
     /// </summary>
     Task FailAsync(string reason, string? agentId = null);
+    Task<WorkReportVerdict> FailRunnerLostAsync(
+        string runnerId,
+        string workId,
+        string processGeneration);
 
     /// <summary>
     /// Idempotent manual-launch preparation entry point. The coordinator
