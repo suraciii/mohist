@@ -395,18 +395,18 @@ describe('RunnerHost', () => {
     let affectedHasStarted = false
     const unaffectedReported = deferred<void>()
     const affectedAbortCount = vi.fn()
-    resources.piRuntimeFactory = () => ({
-      start: async () => ({ ok: true, value: { ready: true, diagnostic: null, catalog: { models: [] } }, diagnostics: [] }),
-      ready: () => true,
-      diagnostic: () => null,
-      catalog: () => ({ models: [] }),
-      shutdown: async () => {},
-      createSession: async ({ target }: { target: { workDir: string } }) => ({
-        ok: true,
-        value: { runtimeSessionId: `pi-${target.workDir.split('/').at(-1)}`, workDir: target.workDir },
-        diagnostics: [],
-      }),
-      runTurn: async (request: { prompt: string; target: { runtimeSessionId: string } }, signal: AbortSignal) => {
+    const ownerSnapshots: string[][] = []
+    const baseOpenCodeFactory = resources.openCodeRuntimeFactory!
+    resources.openCodeRuntimeFactory = (deps) => {
+      const runtime = baseOpenCodeFactory(deps)
+      const setWorkOwners = runtime.setWorkOwners.bind(runtime)
+      runtime.setWorkOwners = (owners) => {
+        ownerSnapshots.push([...owners])
+        setWorkOwners(owners)
+      }
+      runtime.runTurn = async (request, signal, observer) => {
+        const runtimeSessionId = request.target.runtimeSessionId ?? `oc-${request.prompt.replace(/\s+/g, '-')}`
+        await observer?.onSessionReady?.({ runtimeSessionId, workDir: request.target.workDir })
         if (request.prompt.includes('blocked execution')) {
           affectedHasStarted = true
           affectedStarted.resolve()
@@ -430,15 +430,16 @@ describe('RunnerHost', () => {
           value: {
             facts: {
               finalAssistantText: 'unaffected completed',
-              runtimeSessionId: request.target.runtimeSessionId,
-              workDir: '/virtual/mohist-runner-test',
+              runtimeSessionId,
+              workDir: request.target.workDir,
             },
             diagnostics: [],
           },
           diagnostics: [],
         }
-      },
-    } as never)
+      }
+      return runtime
+    }
     const controller = new AbortController()
     const affected = {
       workflowRunId: '',
@@ -446,14 +447,14 @@ describe('RunnerHost', () => {
       workType: 'task',
       ownerKind: 'agent-job',
       agentJobId: 'job-affected',
-      with: { prompt: 'blocked execution', runtime: 'pi' },
+      with: { prompt: 'blocked execution', runtime: 'opencode' },
       variables: { workspace: { path: '/virtual/mohist-runner-test' } },
     }
     const unaffected = {
       ...affected,
       workId: 'work-unaffected',
       agentJobId: 'job-unaffected',
-      with: { prompt: 'quick execution', runtime: 'pi' },
+      with: { prompt: 'quick execution', runtime: 'opencode' },
     }
     report.mockImplementation(async (reportedWork: { workId: string }) => {
       if (reportedWork.workId === unaffected.workId) unaffectedReported.resolve()
@@ -502,6 +503,16 @@ describe('RunnerHost', () => {
       await expect(run).resolves.toBeUndefined()
 
       expect(affectedAbortCount).toHaveBeenCalledTimes(1)
+      const affectedOwner = 'agent-job:job-affected:work-affected'
+      const affectedPresence = ownerSnapshots.map((owners) => owners.includes(affectedOwner))
+      expect(affectedPresence).toContain(true)
+      expect(
+        affectedPresence.reduce(
+          (removals, present, index) => removals + (index > 0 && affectedPresence[index - 1] && !present ? 1 : 0),
+          0,
+        ),
+      ).toBe(1)
+      expect(affectedPresence.at(-1)).toBe(false)
       expect(reportRecoveryStopFailure).toHaveBeenCalledTimes(1)
       expect(reportRecoveryStopFailure).toHaveBeenCalledWith(
         expect.objectContaining({ operationId: 'update-1', workId: affected.workId }),

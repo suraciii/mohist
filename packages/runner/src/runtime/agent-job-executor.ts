@@ -1,5 +1,5 @@
 import { errorMessage } from '../core/errors.js'
-import type { JsonObject, DispatchWorkItem, WorkItemResult } from '../core/types.js'
+import type { AgentExecutionBinding, JsonObject, DispatchWorkItem, WorkItemResult } from '../core/types.js'
 import { isObject } from '../core/json.js'
 import { parseModelIdentifier, type OpenCodeRuntime } from './opencode/index.js'
 import type { PiRuntime } from './pi/index.js'
@@ -204,17 +204,31 @@ export class AgentJobExecutor {
     }
     let turnDeps = this.turnDeps(managerExecution)
     if (managerExecution) {
-      const isolated = await managerExecution.openCodeRuntime(workDir, signal)
-      if (!isolated) {
-        return failureResult(
-          'runtime-unavailable',
-          'Manager OpenCode execution could not establish an isolated server process',
-          'opencode',
+      try {
+        const isolated = await managerExecution.openCodeRuntime(workDir, signal)
+        if (!isolated) {
+          return withKnownBinding(
+            failureResult(
+              'runtime-unavailable',
+              'Manager OpenCode execution could not establish an isolated server process',
+              'opencode',
+            ),
+            knownBinding(work, binding, 'opencode'),
+          )
+        }
+        turnDeps = {
+          ...turnDeps,
+          runtimes: { ...turnDeps.runtimes, openCode: isolated },
+        }
+      } catch (error) {
+        return withKnownBinding(
+          failureResult(
+            'runtime-unavailable',
+            `Manager OpenCode execution setup failed: ${errorMessage(error)}`,
+            'opencode',
+          ),
+          knownBinding(work, binding, 'opencode'),
         )
-      }
-      turnDeps = {
-        ...turnDeps,
-        runtimes: { ...turnDeps.runtimes, openCode: isolated },
       }
     }
     return executeOpenCodeTurn(
@@ -272,6 +286,25 @@ export type BindingResolution = {
   runnerId: string
   runtime: string | null
   runtimeSessionId: string | null
+}
+
+export function knownBinding(
+  work: DispatchWorkItem,
+  binding: BindingResolution,
+  runtime: AgentExecutionBinding['runtime'],
+  runtimeSessionId: string | null = binding.runtimeSessionId,
+): AgentExecutionBinding | null {
+  if (!binding.agentSessionId || !work.initialTurnId || binding.runtime !== runtime || !runtimeSessionId) return null
+  return {
+    agentSessionId: binding.agentSessionId,
+    agentTurnId: work.initialTurnId,
+    runtime,
+    runtimeSessionId,
+  }
+}
+
+function withKnownBinding(result: WorkItemResult, binding: AgentExecutionBinding | null): WorkItemResult {
+  return binding ? { ...result, agentBinding: binding } : result
 }
 
 async function resolveBinding(

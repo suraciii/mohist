@@ -10,7 +10,6 @@ import type { WorkExecutor } from './executor.js'
 import type { TerminalTaskLogDeliveryStore } from './terminal-task-log-delivery.js'
 import type { HostTaskLogDeps } from './host-task-log.js'
 import type { ManagerExecutionBoundary } from './manager-execution-boundary.js'
-import type { RunnerHostShutdown } from './host-shutdown-types.js'
 
 const log = runnerLogger.child('host')
 
@@ -24,7 +23,6 @@ export interface HostExecutionContext {
   readonly syncOpenCodeWorkOwners: () => void
   readonly inFlight: Map<string, InFlightEntry>
   readonly awaitingAck: Map<string, { work: DispatchWorkItem; entry: AwaitingAckEntry }>
-  readonly hostShutdown: RunnerHostShutdown
   readonly currentCatalogRevision: (runtime: string) => string | null
   readonly managerExecutionFor: (key: string) => ManagerExecutionBoundary | null
   readonly releaseManagerExecution: (key: string) => Promise<void>

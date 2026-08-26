@@ -236,6 +236,8 @@ function makeFakeConnection(): FakeConnectionHandles {
     async getAgentSession(_projectId: string, sessionId: string, _signal: AbortSignal) {
       if (agentSession === null) return null
       return {
+        sessionId,
+        runtime: 'pi',
         runtimeSessionId: agentSession.runtimeSessionId,
         workDir: '/tmp/ws',
       } as never

@@ -132,6 +132,8 @@ function makeFakeConnection(): FakeConnectionHandles {
     async getAgentSession(_projectId: string, sessionId: string, _signal: AbortSignal) {
       if (agentSession === null) return null
       return {
+        sessionId,
+        runtime: 'opencode',
         runtimeSessionId: agentSession.runtimeSessionId,
         workDir: '/tmp/ws',
       } as never
@@ -228,7 +230,10 @@ describe('AgentJobExecutor drives OpenCodeRuntime directly', () => {
     connection.setAgentSession({ runtimeSessionId: 'ses-bound' })
     const executor = new AgentJobExecutor(connection.connection, makeAccessors(runtime.runtime))
 
-    const result = await executor.execute(buildAgentJobWork({ initialTurnId: 'turn-real' }), new AbortController().signal)
+    const result = await executor.execute(
+      buildAgentJobWork({ initialTurnId: 'turn-real' }),
+      new AbortController().signal,
+    )
 
     expect(result.status).toBe('failed')
     expect(result.agentBinding).toEqual({
@@ -248,15 +253,43 @@ describe('AgentJobExecutor drives OpenCodeRuntime directly', () => {
         diagnostic: () => ({ message: 'rebuilding' }),
       } as Partial<OpenCodeRuntime>,
     ],
-  ])('preserves the known binding when %s', async (_case, runtimeOverride) => {
+  ])('omits a binding when %s before physical execution is established', async (_case, runtimeOverride) => {
     const connection = makeFakeConnection()
-    connection.setAgentSession({ runtimeSessionId: 'ses-bound' })
     const runtime = runtimeOverride ? ({ ...makeFakeRuntime().runtime, ...runtimeOverride } as OpenCodeRuntime) : null
     const executor = new AgentJobExecutor(connection.connection, makeAccessors(runtime))
 
-    const result = await executor.execute(buildAgentJobWork({ initialTurnId: 'turn-real' }), new AbortController().signal)
+    const result = await executor.execute(
+      buildAgentJobWork({ initialTurnId: 'turn-real' }),
+      new AbortController().signal,
+    )
 
     expect(result.status).toBe('failed')
+    expect(result.agentBinding).toBeUndefined()
+  })
+
+  vitestIt.each([
+    ['returns null', async () => null],
+    [
+      'throws',
+      async () => {
+        throw new Error('isolated setup failed')
+      },
+    ],
+  ])('preserves the resolved physical binding when Manager runtime setup %s', async (_case, openCodeRuntime) => {
+    const connection = makeFakeConnection()
+    connection.setAgentSession({ runtimeSessionId: 'ses-bound' })
+    const executor = new AgentJobExecutor(connection.connection, makeAccessors(makeFakeRuntime().runtime))
+    const managerExecution = {
+      openCodeRuntime,
+    } as never
+
+    const result = await executor.execute(
+      buildAgentJobWork({ initialTurnId: 'turn-real' }),
+      new AbortController().signal,
+      managerExecution,
+    )
+
+    expect(result).toMatchObject({ status: 'failed', error: { code: 'runtime-unavailable' } })
     expect(result.agentBinding).toEqual({
       agentSessionId: 'session-1',
       agentTurnId: 'turn-real',
@@ -594,10 +627,16 @@ describe('AgentJobExecutor reports the runtime session binding', () => {
     } as unknown as ServerConnection
     const executor = new AgentJobExecutor(connection, makeAccessors(runtime.runtime))
 
-    const work = buildAgentJobWork()
+    const work = buildAgentJobWork({ initialTurnId: 'turn-real' })
     const result = await executor.execute(work, new AbortController().signal)
     expect(result.status).toBe('failed')
     expect(result.message).toBe('attach endpoint offline')
+    expect(result.agentBinding).toEqual({
+      agentSessionId: 'session-1',
+      agentTurnId: 'turn-real',
+      runtime: 'opencode',
+      runtimeSessionId: 'ses_default',
+    })
     const diagnostics = (result.output as Record<string, unknown>).diagnostics as Array<{
       code: string
       message: string
@@ -697,11 +736,7 @@ describe('AgentJobExecutor parses the dispatch payload', () => {
     await withDefaultRunnerTestResources(async () => {
       const runtime = makeFakeRuntime()
       const connection = makeFakeConnection()
-      const executor = new AgentJobExecutor(
-        connection.connection,
-        makeAccessors(runtime.runtime),
-        '/virtual/runner',
-      )
+      const executor = new AgentJobExecutor(connection.connection, makeAccessors(runtime.runtime), '/virtual/runner')
 
       const work = buildAgentJobWork({ variables: { workspace } })
       const result = await executor.execute(work, new AbortController().signal)

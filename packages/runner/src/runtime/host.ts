@@ -331,7 +331,6 @@ export class RunnerHost {
       syncOpenCodeWorkOwners: () => this.syncOpenCodeWorkOwners(),
       inFlight: this.inFlight,
       awaitingAck: this.awaitingAck,
-      hostShutdown: this.hostShutdown,
       currentCatalogRevision: (runtime) => currentCatalogRevision(this.registrationState().runtimeCatalogs, runtime),
       managerExecutionFor: (key) => this.managerExecutions.get(key) ?? null,
       releaseManagerExecution: async (key) => {

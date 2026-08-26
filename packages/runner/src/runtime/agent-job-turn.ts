@@ -1,5 +1,5 @@
 import { errorMessage } from '../core/errors.js'
-import type { JsonObject, DispatchWorkItem, WorkItemResult } from '../core/types.js'
+import type { AgentExecutionBinding, JsonObject, DispatchWorkItem, WorkItemResult } from '../core/types.js'
 import type {
   RuntimeResult,
   RuntimeTurnEvent,
@@ -23,6 +23,7 @@ import type {
   BindingResolution,
   ParsedModel,
 } from './agent-job-executor.js'
+import { knownBinding } from './agent-job-executor.js'
 import { mapOpenCodeErrorKind, mapPiErrorKind } from './error-kind-mapping.js'
 
 const log = runnerLogger.child('job')
@@ -54,8 +55,8 @@ export async function executeOpenCodeTurn(
   attachments: readonly DeliveredAttachment[],
   managerExecution: ManagerExecutionBoundary | null = deps.managerExecution ?? null,
 ): Promise<WorkItemResult> {
-  const boundResult = (result: WorkItemResult, runtimeSessionId = binding.runtimeSessionId) =>
-    withAgentBinding(result, work, binding, 'opencode', runtimeSessionId)
+  let executionBinding: AgentExecutionBinding | null = null
+  const boundResult = (result: WorkItemResult) => withAgentBinding(result, executionBinding)
   const runtime = resolveAccessor(deps.runtimes.openCode)
   if (!runtime) {
     return boundResult(
@@ -77,6 +78,7 @@ export async function executeOpenCodeTurn(
     )
   }
 
+  executionBinding = knownBinding(work, binding, 'opencode')
   const selected = binding.runtimeSessionId
 
   const fileParts = attachments
@@ -118,6 +120,7 @@ export async function executeOpenCodeTurn(
   const observer: RuntimeTurnObserver = {
     onSessionReady: async (session) => {
       attachedRuntimeSessionId = session.runtimeSessionId
+      executionBinding = physicalBinding(work, binding.agentSessionId, 'opencode', session.runtimeSessionId)
       await eventSink.attachSession(session.runtimeSessionId, session.workDir, modelInput)
       if (!skipInitialInput && !attachedInputPublished) {
         attachedInputPublished = true
@@ -172,10 +175,12 @@ export async function executeOpenCodeTurn(
         managerExecution,
         originalResult,
       }),
-      attachedRuntimeSessionId ?? selected,
     )
   }
   await eventSink.drain()
+  if (result.ok) {
+    executionBinding = physicalBinding(work, binding.agentSessionId, 'opencode', result.value.facts.runtimeSessionId)
+  }
   const originalResult = managerExecution?.hasExpired()
     ? failureResult(
         'manager-credential-expired',
@@ -195,7 +200,6 @@ export async function executeOpenCodeTurn(
       managerExecution,
       originalResult,
     }),
-    result.ok ? result.value.facts.runtimeSessionId : (attachedRuntimeSessionId ?? selected),
   )
 }
 
@@ -214,8 +218,8 @@ export async function executePiTurn(
   skills: readonly ResolvedSkill[],
   managerExecution: ManagerExecutionBoundary | null = deps.managerExecution ?? null,
 ): Promise<WorkItemResult> {
-  const boundResult = (result: WorkItemResult, runtimeSessionId = binding.runtimeSessionId) =>
-    withAgentBinding(result, work, binding, 'pi', runtimeSessionId)
+  let executionBinding: AgentExecutionBinding | null = null
+  const boundResult = (result: WorkItemResult) => withAgentBinding(result, executionBinding)
   if (variant) {
     return boundResult(
       failureResult(
@@ -259,6 +263,7 @@ export async function executePiTurn(
   const eventSink = createAgentSessionEventSink(deps.connection, work, signal, binding.agentSessionId, observation)
   const runtimeHandle: CommandRuntimeHandle = { kind: 'pi', runtime }
   let runtimeSessionId = binding.runtimeSessionId
+  executionBinding = knownBinding(work, binding, 'pi')
   if (!runtimeSessionId) {
     try {
       const created = await runtime.createSession({
@@ -267,11 +272,12 @@ export async function executePiTurn(
       })
       if (!created.ok) {
         const code = mapPiErrorKind(created.error.kind)
-        return boundResult(failureResult(code, created.error.message, 'pi', created.error.diagnostics), null)
+        return boundResult(failureResult(code, created.error.message, 'pi', created.error.diagnostics))
       }
       runtimeSessionId = created.value.runtimeSessionId
+      executionBinding = physicalBinding(work, binding.agentSessionId, 'pi', runtimeSessionId)
     } catch (error) {
-      return boundResult(failureResult('turn-failed', `Pi session creation threw: ${errorMessage(error)}`, 'pi'), null)
+      return boundResult(failureResult('turn-failed', `Pi session creation threw: ${errorMessage(error)}`, 'pi'))
     }
   }
   try {
@@ -281,8 +287,11 @@ export async function executePiTurn(
     }
   } catch (error) {
     return boundResult(
-      failureResult('session-binding-failed', `Failed to persist the AgentSession binding: ${errorMessage(error)}`, 'pi'),
-      runtimeSessionId,
+      failureResult(
+        'session-binding-failed',
+        `Failed to persist the AgentSession binding: ${errorMessage(error)}`,
+        'pi',
+      ),
     )
   }
 
@@ -337,10 +346,12 @@ export async function executePiTurn(
         managerExecution,
         originalResult,
       }),
-      runtimeSessionId,
     )
   }
   await eventSink.drain()
+  if (result.ok) {
+    executionBinding = physicalBinding(work, binding.agentSessionId, 'pi', result.value.facts.runtimeSessionId)
+  }
   const originalResult = managerExecution?.hasExpired()
     ? failureResult(
         'manager-credential-expired',
@@ -360,27 +371,26 @@ export async function executePiTurn(
       managerExecution,
       originalResult,
     }),
-    result.ok ? result.value.facts.runtimeSessionId : runtimeSessionId,
   )
 }
 
-function withAgentBinding(
-  result: WorkItemResult,
+function physicalBinding(
   work: DispatchWorkItem,
-  binding: BindingResolution,
-  runtime: 'opencode' | 'pi',
+  agentSessionId: string | null,
+  runtime: AgentExecutionBinding['runtime'],
   runtimeSessionId: string | null,
-): WorkItemResult {
-  if (!binding.agentSessionId) return result
+): AgentExecutionBinding | null {
+  if (!agentSessionId || !work.initialTurnId || !runtimeSessionId) return null
   return {
-    ...result,
-    agentBinding: {
-      agentSessionId: binding.agentSessionId,
-      agentTurnId: work.initialTurnId ?? null,
-      runtime,
-      runtimeSessionId,
-    },
+    agentSessionId,
+    agentTurnId: work.initialTurnId,
+    runtime,
+    runtimeSessionId,
   }
+}
+
+function withAgentBinding(result: WorkItemResult, binding: AgentExecutionBinding | null): WorkItemResult {
+  return binding ? { ...result, agentBinding: binding } : result
 }
 
 function redactManagerResult(result: WorkItemResult, boundary: ManagerExecutionBoundary | null): WorkItemResult {
