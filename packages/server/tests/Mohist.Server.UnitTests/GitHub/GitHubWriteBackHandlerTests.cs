@@ -1,3 +1,4 @@
+using Mohist.Server.UnitTests.Support;
 using System.Net;
 using System.Text.Json;
 using Microsoft.Data.Sqlite;
@@ -113,9 +114,9 @@ public sealed class GitHubWriteBackHandlerTests
             Options = new DbContextOptionsBuilder<MohistDbContext>()
                 .UseSqlite(Keeper)
                 .Options;
+            SqliteSchemaTemplate.CopyModelSchemaTo(Keeper);
             using (var db = new MohistDbContext(Options))
             {
-                db.Database.EnsureCreated();
                 db.GitHubConnections.Add(new GitHubConnectionRow
                 {
                     Id = "conn-1",

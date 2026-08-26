@@ -161,14 +161,12 @@ public sealed class MohistDbFixture : IAsyncLifetime
 
         _services = services.BuildServiceProvider();
 
-        // This fixture is an L0 service boundary. Build the current model once
-        // in its isolated in-memory database; migration-chain behavior belongs
-        // to the application-level Spec portfolio.
-        using var schema = new MohistDbContext(
-            new DbContextOptionsBuilder<MohistDbContext>()
-                .UseSqlite(_keeper)
-                .Options);
-        schema.Database.EnsureCreated();
+        // This fixture is an L0 service boundary. Clone the process-wide
+        // current-model schema (built once by EnsureCreated in
+        // MigratedSqliteTemplate) instead of paying ~60ms of DDL per class;
+        // migration-chain behavior belongs to the application-level Spec
+        // portfolio.
+        MigratedSqliteTemplate.CopyModelSchemaTo(_keeper);
         return ValueTask.CompletedTask;
     }
 
