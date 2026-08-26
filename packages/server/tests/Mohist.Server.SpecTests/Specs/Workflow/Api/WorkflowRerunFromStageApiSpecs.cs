@@ -19,7 +19,7 @@ using Mohist.Server.Workflow.Grains;
 using Mohist.Server.Workflow.Services;
 using Xunit;
 
-namespace Mohist.Server.SpecTests.Specs.Workflow.Grain;
+namespace Mohist.Server.SpecTests.Specs.Workflow.Api;
 
 [Collection("WorkflowRuntimeIntegration")]
 public class WorkflowRerunFromStageApiSpecs : IAsyncLifetime

@@ -20,7 +20,7 @@ using Mohist.Server.Workflow.Services;
 using Mohist.Workflow.Definition;
 using Xunit;
 
-namespace Mohist.Server.SpecTests.Specs.Workflow.Grain;
+namespace Mohist.Server.SpecTests.Specs.Workflow.Api;
 
 /// <summary>
 /// Retry must proceed regardless of session context usage. Capacity is
