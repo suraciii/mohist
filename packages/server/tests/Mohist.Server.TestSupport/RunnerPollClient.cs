@@ -1,6 +1,7 @@
 using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
+using Mohist.Server.Runner.Grains;
 
 namespace Mohist.Server.TestSupport;
 
@@ -16,6 +17,23 @@ namespace Mohist.Server.TestSupport;
 public static class RunnerPollClient
 {
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
+
+    /// <summary>
+    /// Posts a poll request using the canonical process identity for the
+    /// simulated runner process. Callers that model a process replacement can
+    /// pass a request with its own explicit generation.
+    /// </summary>
+    public static Task<HttpResponseMessage> PostRunnerPollAsync(
+        this HttpClient client,
+        string runnerId,
+        RunnerPollRequest? request = null)
+    {
+        request ??= new RunnerPollRequest(
+            [],
+            [],
+            ProcessGeneration: TestRunnerGenerationExtensions.ProcessGeneration);
+        return client.PostAsJsonAsync($"/api/runner/{runnerId}/poll", request, JsonOptions);
+    }
 
     /// <summary>
     /// Reads a 200 poll body, unwraps <c>dispatches</c>, and returns the first

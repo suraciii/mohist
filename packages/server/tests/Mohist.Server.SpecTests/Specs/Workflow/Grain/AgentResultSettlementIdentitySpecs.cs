@@ -36,7 +36,7 @@ public sealed partial class AgentResultSettlementSpecs
             Output: System.Text.Json.JsonSerializer.SerializeToElement(new { ok = true }),
             ExitCode: 0);
 
-        Assert.Equal(ReportAck.Accepted, await workflow.BindAgentExecutionAsync(binding));
+        Assert.Equal(WorkReportVerdict.Accepted, await workflow.BindAgentExecutionAsync(binding));
         Assert.Equal("accepted", (await service.ReportAsync(
             runnerId,
             _workflowId!,
@@ -51,7 +51,7 @@ public sealed partial class AgentResultSettlementSpecs
         var eventCount = (await EventStore.ListAsync(_workflowId!)).Count;
 
         var wrongBinding = binding with { AgentTurnId = "wrong-turn" };
-        Assert.Equal("stale", (await service.ReportAsync(
+        Assert.Equal("refused", (await service.ReportAsync(
             runnerId,
             _workflowId!,
             work.WorkId,
@@ -63,7 +63,7 @@ public sealed partial class AgentResultSettlementSpecs
             wrongBinding.Runtime,
             wrongBinding.RuntimeSessionId)).Ack);
 
-        Assert.Equal("stale", (await service.ReportAsync(
+        Assert.Equal("refused", (await service.ReportAsync(
             runnerId,
             _workflowId!,
             work.WorkId,
@@ -105,8 +105,8 @@ public sealed partial class AgentResultSettlementSpecs
         var observation = new AgentExecutionObservation(
             binding, AgentExecutionObservationKind.StopUnconfirmed, "stop-unconfirmed");
 
-        Assert.Equal(ReportAck.Accepted, await workflow.BindAgentExecutionAsync(binding));
-        Assert.Equal(ReportAck.Accepted, await workflow.ObserveAgentExecutionAsync(observation));
+        Assert.Equal(WorkReportVerdict.Accepted, await workflow.BindAgentExecutionAsync(binding));
+        Assert.Equal(WorkReportVerdict.Accepted, await workflow.ObserveAgentExecutionAsync(observation));
 
         var unknown = await LoadRunAsync(_workflowId!);
         var deadline = Assert.IsType<DateTimeOffset>(
@@ -120,7 +120,7 @@ public sealed partial class AgentResultSettlementSpecs
         var beforeEventCount = (await EventStore.ListAsync(_workflowId!)).Count;
 
         // Mismatched taskRunId -> stale.
-        Assert.Equal(ReportAck.Stale, await workflow.ReceiveTaskReportAsync(
+        Assert.Equal(WorkReportVerdict.Refused, await workflow.ReceiveTaskReportAsync(
             runnerId,
             work.WorkId,
             new TaskReport(
@@ -130,7 +130,7 @@ public sealed partial class AgentResultSettlementSpecs
                 Artifacts: null,
                 TaskRunId: "other-task.1")));
         // Mismatched workId -> stale.
-        Assert.Equal(ReportAck.Stale, await workflow.ReceiveTaskReportAsync(
+        Assert.Equal(WorkReportVerdict.Refused, await workflow.ReceiveTaskReportAsync(
             runnerId,
             "other-work",
             new TaskReport(
@@ -140,7 +140,7 @@ public sealed partial class AgentResultSettlementSpecs
                 Artifacts: null,
                 TaskRunId: task.Id)));
         // Mismatched runnerId -> stale (ForeignRunner fence).
-        Assert.Equal(ReportAck.Stale, await workflow.ReceiveTaskReportAsync(
+        Assert.Equal(WorkReportVerdict.Refused, await workflow.ReceiveTaskReportAsync(
             "other-runner",
             work.WorkId,
             new TaskReport(
@@ -173,10 +173,10 @@ public sealed partial class AgentResultSettlementSpecs
         Assert.Equal(0, await querier.CountRunningAssignedToAsync(runnerId));
         Assert.DoesNotContain((await runner.GetRuntimeStateAsync()).ActiveWorks, item =>
             string.Equals(item.OwnerId, _workflowId, StringComparison.Ordinal));
-        Assert.Empty((await dispatch.PollAsync(runnerId, new RunnerPollRequest([], []))).Dispatches);
+        Assert.Empty((await dispatch.PollAsync(runnerId, new RunnerPollRequest([], [], ProcessGeneration: TestRunnerGenerationExtensions.ProcessGeneration))).Dispatches);
 
         // A matching late authoritative report still settles the attempt.
-        Assert.Equal(ReportAck.Accepted, await workflow.ReceiveTaskReportAsync(
+        Assert.Equal(WorkReportVerdict.Accepted, await workflow.ReceiveTaskReportAsync(
             runnerId,
             work.WorkId,
             new TaskReport(

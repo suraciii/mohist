@@ -24,6 +24,7 @@ public class RunnerSlotsApiSpecs
     {
         var response = await _fixture.Client.PostAsJsonAsync($"/api/runner/{runnerId}/register", new
         {
+            processGeneration = TestRunnerGenerationExtensions.ProcessGeneration,
             capabilities = new[] { "spec/*" },
             hostname = "slots-api-host",
         });

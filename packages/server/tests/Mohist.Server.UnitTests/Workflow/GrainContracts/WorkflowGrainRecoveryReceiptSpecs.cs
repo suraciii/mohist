@@ -64,7 +64,7 @@ public sealed class WorkflowGrainRecoveryReceiptSpecs
     public async Task RecoveryReceipt_AtDeadlineCommitsBlockedBoundaryBeforeApplyingResult()
     {
         var (arrangement, _, _, binding) = await ArrangeWithBoundAgentAsync("wr-receipt-deadline");
-        Assert.Equal(ReportAck.Accepted, await arrangement.Grain.ObserveAgentExecutionAsync(
+        Assert.Equal(WorkReportVerdict.Accepted, await arrangement.Grain.ObserveAgentExecutionAsync(
             new AgentExecutionObservation(binding, AgentExecutionObservationKind.Disconnected, "runner-disconnected")));
 
         var unknown = await RequireRunAsync(arrangement);
@@ -149,7 +149,7 @@ public sealed class WorkflowGrainRecoveryReceiptSpecs
             work.Id!,
             original.Id,
             RunnerUpdateWorkStatus.Marked);
-        Assert.Equal(ReportAck.Accepted, await arrangement.Grain.MarkUpdateInterruptedAsync(
+        Assert.Equal(WorkReportVerdict.Accepted, await arrangement.Grain.MarkUpdateInterruptedAsync(
             original.Id,
             work.Id!,
             arrangement.WorkerId,
@@ -201,7 +201,7 @@ public sealed class WorkflowGrainRecoveryReceiptSpecs
             original.Id,
             RunnerUpdateWorkStatus.Marked);
         Assert.Equal(
-            ReportAck.Accepted,
+            WorkReportVerdict.Accepted,
             await arrangement.Grain.MarkUpdateInterruptedAsync(original.Id, work.Id!, arrangement.WorkerId, operation.OperationId));
 
         var interrupted = await arrangement.Grain.ReceiveRecoveryReceiptAsync(
@@ -222,7 +222,7 @@ public sealed class WorkflowGrainRecoveryReceiptSpecs
             "replacement-receipt-turn-2",
             "opencode",
             "replacement-receipt-runtime-session-2");
-        Assert.Equal(ReportAck.Accepted, await arrangement.Grain.BindAgentExecutionAsync(replacementBinding));
+        Assert.Equal(WorkReportVerdict.Accepted, await arrangement.Grain.BindAgentExecutionAsync(replacementBinding));
 
         var terminal = TerminalReceipt(
             replacementBinding,
@@ -279,7 +279,7 @@ public sealed class WorkflowGrainRecoveryReceiptSpecs
             original.Id,
             RunnerUpdateWorkStatus.Marked);
         Assert.Equal(
-            ReportAck.Accepted,
+            WorkReportVerdict.Accepted,
             await arrangement.Grain.MarkUpdateInterruptedAsync(original.Id, work.Id!, arrangement.WorkerId, operation.OperationId));
 
         var mismatch = await arrangement.Grain.ReceiveRecoveryReceiptAsync(
@@ -325,7 +325,7 @@ public sealed class WorkflowGrainRecoveryReceiptSpecs
         var replacementDispatch = await arrangement.AssignAndClaimAsync();
         Assert.NotNull(replacementDispatch);
         Assert.Equal(replacement.WorkId, replacementDispatch!.Id);
-        Assert.Null(await arrangement.Grain.ClaimNextAsync(arrangement.WorkerId));
+        Assert.Null(await arrangement.Grain.ClaimNextAsync(arrangement.WorkerId, "test-generation"));
 
         var newBinding = new AgentExecutionBinding(
             replacement.Id,
@@ -335,18 +335,18 @@ public sealed class WorkflowGrainRecoveryReceiptSpecs
             "replacement-turn",
             "opencode",
             "replacement-runtime-session");
-        Assert.Equal(ReportAck.Accepted, await arrangement.Grain.BindAgentExecutionAsync(newBinding));
+        Assert.Equal(WorkReportVerdict.Accepted, await arrangement.Grain.BindAgentExecutionAsync(newBinding));
         var replacementBound = await RequireRunAsync(arrangement);
         Assert.Equal("replacement-turn",
             Assert.Single(replacementBound.CurrentStage().Tasks, task => task.Id == replacement.Id).AgentResultSettlement!.AgentTurnId);
 
         // Old-turn reports and runtime observations cannot settle or mutate the
         // replacement once the original attempt is history.
-        Assert.Equal(ReportAck.Stale, await arrangement.Grain.ReceiveTaskReportAsync(
+        Assert.Equal(WorkReportVerdict.Refused, await arrangement.Grain.ReceiveTaskReportAsync(
             arrangement.WorkerId,
             work.Id!,
             new TaskReport(work.Id!, TaskReportStatus.Succeeded, null, null, TaskRunId: original.Id)));
-        Assert.Equal(ReportAck.Stale, await arrangement.Grain.ObserveAgentExecutionAsync(
+        Assert.Equal(WorkReportVerdict.Refused, await arrangement.Grain.ObserveAgentExecutionAsync(
             new AgentExecutionObservation(binding, AgentExecutionObservationKind.Completed, "late-old-turn")));
         Assert.Equal(RuntimeRecoveryReceiptAckStatuses.Stale,
             (await arrangement.Grain.ReceiveRecoveryReceiptAsync(TerminalReceipt(
@@ -355,7 +355,7 @@ public sealed class WorkflowGrainRecoveryReceiptSpecs
                 new WorkResult("completed", "late old result"),
                 "late-old-result"))).Status);
 
-        Assert.Equal(ReportAck.Accepted, await arrangement.Grain.ReceiveTaskReportAsync(
+        Assert.Equal(WorkReportVerdict.Accepted, await arrangement.Grain.ReceiveTaskReportAsync(
             arrangement.WorkerId,
             replacement.WorkId!,
             new TaskReport(
@@ -397,7 +397,7 @@ public sealed class WorkflowGrainRecoveryReceiptSpecs
             work.Id!,
             original.Id,
             RunnerUpdateWorkStatus.Marked);
-        Assert.Equal(ReportAck.Accepted, await arrangement.Grain.MarkUpdateInterruptedAsync(
+        Assert.Equal(WorkReportVerdict.Accepted, await arrangement.Grain.MarkUpdateInterruptedAsync(
             original.Id,
             work.Id!,
             arrangement.WorkerId,
@@ -452,7 +452,7 @@ public sealed class WorkflowGrainRecoveryReceiptSpecs
             work.Id!,
             original.Id,
             RunnerUpdateWorkStatus.Marked);
-        Assert.Equal(ReportAck.Accepted, await arrangement.Grain.MarkUpdateInterruptedAsync(
+        Assert.Equal(WorkReportVerdict.Accepted, await arrangement.Grain.MarkUpdateInterruptedAsync(
             original.Id,
             work.Id!,
             arrangement.WorkerId,
@@ -511,7 +511,7 @@ public sealed class WorkflowGrainRecoveryReceiptSpecs
             work.Id!,
             original.Id,
             RunnerUpdateWorkStatus.Marked);
-        Assert.Equal(ReportAck.Accepted, await arrangement.Grain.MarkUpdateInterruptedAsync(
+        Assert.Equal(WorkReportVerdict.Accepted, await arrangement.Grain.MarkUpdateInterruptedAsync(
             original.Id,
             work.Id!,
             arrangement.WorkerId,
@@ -531,7 +531,7 @@ public sealed class WorkflowGrainRecoveryReceiptSpecs
             "replay-replacement-turn-2",
             "opencode",
             "replay-replacement-runtime-session-2");
-        Assert.Equal(ReportAck.Accepted, await arrangement.Grain.BindAgentExecutionAsync(replacementBinding));
+        Assert.Equal(WorkReportVerdict.Accepted, await arrangement.Grain.BindAgentExecutionAsync(replacementBinding));
 
         var terminal = TerminalReceipt(
             replacementBinding,
@@ -577,7 +577,7 @@ public sealed class WorkflowGrainRecoveryReceiptSpecs
             TimeProvider);
 
         await arrangement.Grain.AssignWorkerAsync(arrangement.WorkerId);
-        var work = await arrangement.Grain.ClaimNextAsync(arrangement.WorkerId);
+        var work = await arrangement.Grain.ClaimNextAsync(arrangement.WorkerId, "test-generation");
         Assert.NotNull(work);
 
         var run = await RequireRunAsync(arrangement);
@@ -590,7 +590,7 @@ public sealed class WorkflowGrainRecoveryReceiptSpecs
             $"{runId}-turn",
             "opencode",
             $"{runId}-runtime-session");
-        Assert.Equal(ReportAck.Accepted, await arrangement.Grain.BindAgentExecutionAsync(binding));
+        Assert.Equal(WorkReportVerdict.Accepted, await arrangement.Grain.BindAgentExecutionAsync(binding));
         // The reconciliation path persists a delivery snapshot when work is
         // dispatched; mirror that fact so receipt validation sees the same
         // durable state a cluster poll would have produced.

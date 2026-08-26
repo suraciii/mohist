@@ -65,6 +65,7 @@ public class ApiContractSpecs
         var runnerId = $"model-runner-{Guid.NewGuid():N}";
         await _fixture.Client.PostOkAsync($"/api/runner/{runnerId}/register", new
         {
+            processGeneration = TestRunnerGenerationExtensions.ProcessGeneration,
             capabilities = Array.Empty<string>(),
             hostname = "test-host",
             projectId,
@@ -105,6 +106,7 @@ public class ApiContractSpecs
         {
             await _fixture.Client.PostOkAsync($"/api/runner/{runnerId}/register", new
             {
+                processGeneration = TestRunnerGenerationExtensions.ProcessGeneration,
                 capabilities = Array.Empty<string>(),
                 hostname = "test-host",
                 projectId,
@@ -194,6 +196,7 @@ public class ApiContractSpecs
         var runnerId = $"global-model-runner-{Guid.NewGuid():N}";
         await _fixture.Client.PostOkAsync($"/api/runner/{runnerId}/register", new
         {
+            processGeneration = TestRunnerGenerationExtensions.ProcessGeneration,
             capabilities = Array.Empty<string>(),
             hostname = "test-host",
             coderModels = new[] { "openai/gpt-5.5" },
@@ -223,6 +226,7 @@ public class ApiContractSpecs
         var runnerId = $"status-variant-runner-{Guid.NewGuid():N}";
         await _fixture.Client.PostOkAsync($"/api/runner/{runnerId}/register", new
         {
+            processGeneration = TestRunnerGenerationExtensions.ProcessGeneration,
             capabilities = Array.Empty<string>(),
             hostname = "status-host",
             projectId,
@@ -272,6 +276,7 @@ public class ApiContractSpecs
         var runnerId = $"rebase-test-{Guid.NewGuid():N}";
         await _fixture.Client.PostOkAsync($"/api/runner/{runnerId}/register", new
         {
+            processGeneration = TestRunnerGenerationExtensions.ProcessGeneration,
             capabilities = new[] { "mohist/rebase", "spec/task", "spec/check" },
             hostname = "test-host",
             projectId,

@@ -18,6 +18,7 @@ using Mohist.Server.TestSupport;
 using Mohist.Server.SpecTests.Specs.Workflow;
 using Orleans;
 using Orleans.Runtime;
+using Orleans.Core.Internal;
 using Xunit;
 
 namespace Mohist.Server.SpecTests.Specs.Agent.Grain;
@@ -124,13 +125,21 @@ public class AgentJobGrainSpecs : AgentJobGrainTestSupport
             AgentJobId: jobKey,
             OwnerKind: WorkDispatchOwnerKinds.AgentJob);
 
-        var report = await job.ReportResultAsync(
-            runnerId,
-            workId,
-            new WorkResult("completed", "ok", Output: JSON.DeserializeElement("{}"), ExitCode: 0, ArtifactUploadIds: ["artifact-1"]));
-        Assert.True(report.Accepted);
+        var result = new WorkResult("completed", "ok", Output: JSON.DeserializeElement("{}"), ExitCode: 0, ArtifactUploadIds: ["artifact-1"]);
+        var report = await job.ReportResultAsync(runnerId, workId, result);
+        Assert.Equal(WorkReportVerdict.Accepted, report.Verdict);
 
         await WaitForStatusAsync(job, AgentJobStatus.Completed, TimeSpan.FromSeconds(5));
+
+        await job.AsReference<IGrainManagementExtension>().DeactivateOnIdle();
+        job = JobGrain(jobKey);
+        var exactReplay = await job.ReportResultAsync(runnerId, workId, result);
+        Assert.Equal(WorkReportVerdict.Accepted, exactReplay.Verdict);
+        var conflictingReplay = await job.ReportResultAsync(
+            runnerId,
+            workId,
+            result with { Message = "conflicting result" });
+        Assert.Equal(WorkReportVerdict.Refused, conflictingReplay.Verdict);
 
         var terminal = await job.GetTerminalResultAsync();
         Assert.Equal(AgentJobStatus.Completed, terminal.Status);
@@ -488,7 +497,7 @@ public class AgentJobGrainSpecs : AgentJobGrainTestSupport
             workId,
             new WorkResult("failed", "second result"));
         Assert.False(replay.Accepted);
-        Assert.Equal("stale", replay.Reason);
+        Assert.Equal("refused", replay.Reason);
 
         var stillTerminal = await job.GetTerminalResultAsync();
         Assert.Equal(AgentJobStatus.Completed, stillTerminal.Status);
@@ -702,7 +711,7 @@ public class AgentJobGrainSpecs : AgentJobGrainTestSupport
     }
 
     [Fact]
-    public async Task ReportTimeout_WhenRunnerIsAway_PreservesRecoveringProjection()
+    public async Task ReportTimeout_WhenRunnerIsAway_PreservesRunnerLostTerminalFailure()
     {
         var (runnerId, projectId) = await RegisterAgentJobRunnerAsync(
             $"agent-job-timeout-away-{Guid.NewGuid():N}");
@@ -714,18 +723,17 @@ public class AgentJobGrainSpecs : AgentJobGrainTestSupport
 
         await runner.UnregisterAsync();
         var afterCloseout = await job.GetRuntimeSnapshotAsync();
-        Assert.Equal(AgentJobStatus.Unknown, afterCloseout.Status);
+        Assert.Equal(AgentJobStatus.Failed, afterCloseout.Status);
         Assert.Equal(AgentJobFailureReasons.RunnerLost, afterCloseout.FailureReason);
-        Assert.True(afterCloseout.IsRecovering);
+        Assert.False(afterCloseout.IsRecovering);
 
         _fixture.TimeProvider.Advance(TimeSpan.FromSeconds(11));
         await job.CheckTimeoutsAsync();
 
         var afterTimeout = await job.GetRuntimeSnapshotAsync();
-        Assert.Equal(AgentJobStatus.Unknown, afterTimeout.Status);
+        Assert.Equal(AgentJobStatus.Failed, afterTimeout.Status);
         Assert.Equal(AgentJobFailureReasons.RunnerLost, afterTimeout.FailureReason);
-        Assert.Equal(afterCloseout.RecoveryDeadlineAt, afterTimeout.RecoveryDeadlineAt);
-        Assert.True(afterTimeout.IsRecovering);
+        Assert.False(afterTimeout.IsRecovering);
     }
 
     [Fact]

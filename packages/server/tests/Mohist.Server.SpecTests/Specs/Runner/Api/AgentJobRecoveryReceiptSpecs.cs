@@ -12,6 +12,7 @@ using Mohist.Server.Sessions.Grains;
 using Mohist.Server.TestSupport;
 using Mohist.Server.Workflow.Domain.Run;
 using Xunit;
+using Mohist.Server.Workflow.Grains;
 
 namespace Mohist.Server.SpecTests.Specs.Runner.Api;
 
@@ -119,7 +120,7 @@ public sealed class AgentJobRecoveryReceiptSpecs : IAsyncLifetime
         Assert.NotNull(replacement);
         var dispatch = _fixture.Services
             .GetRequiredService<Mohist.Server.Runner.Services.DispatchService>();
-        var poll = await dispatch.PollAsync(setup.RunnerId, new RunnerPollRequest([], []));
+        var poll = await dispatch.PollAsync(setup.RunnerId, new RunnerPollRequest([], [], ProcessGeneration: TestRunnerGenerationExtensions.ProcessGeneration));
 
         var redelivery = Assert.Single(poll.Dispatches);
         Assert.Equal(replacement!.WorkId, redelivery.WorkId);

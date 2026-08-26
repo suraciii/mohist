@@ -1,5 +1,6 @@
 using Mohist.Server.Infrastructure.Data.Workflow;
 using Mohist.Server.Infrastructure.Hosting;
+using Microsoft.EntityFrameworkCore;
 using Mohist.Server.Runner.Grains;
 using Mohist.Server.Workflow.Domain.Run;
 using Mohist.Server.Workflow.Grains;
@@ -37,11 +38,11 @@ public sealed class WorkflowReportService : IScopedService
     {
         var run = await _workflowRuns.LoadAsync(workflowRunId, ct);
         if (run is null)
-            return ("missing-workflow", null);
+            return ("refused", null);
 
         var item = run.FindReportShape(taskRunId, workId);
         if (item is null)
-            return (ReportAck.Stale.ToString().ToLowerInvariant(), null);
+            return ("refused", null);
 
         var isAgentTask = item.IsTask && IsAgentTask(item.Uses);
         var agentBinding = isAgentTask
@@ -65,7 +66,7 @@ public sealed class WorkflowReportService : IScopedService
             // lets the Runner retire the report instead of retrying a
             // rejection the server will never change.
             if (string.Equals(result.Status, "succeeded", StringComparison.OrdinalIgnoreCase))
-                return (ReportAck.Stale.ToString().ToLowerInvariant(), null);
+                return ("refused", null);
 
             var observationWorkflow = _grains.GetGrain<IWorkflowGrain>(workflowRunId);
             var unboundAck = await observationWorkflow.ObserveAgentResultUnknownAsync(
@@ -76,7 +77,7 @@ public sealed class WorkflowReportService : IScopedService
                 string.IsNullOrWhiteSpace(result.Message)
                     ? "The Runner reported an Agent result without a runtime execution binding."
                     : result.Message);
-            return (unboundAck.ToString().ToLowerInvariant(), await observationWorkflow.GetRunStatusAsync());
+            return (VerdictValue(unboundAck), await observationWorkflow.GetRunStatusAsync());
         }
 
         var workflow = _grains.GetGrain<IWorkflowGrain>(workflowRunId);
@@ -105,26 +106,36 @@ public sealed class WorkflowReportService : IScopedService
                     workId,
                     unknown.ReasonCode,
                     unknown.Message);
-            if (unknownAck == ReportAck.Stale)
-                return (ReportAck.Stale.ToString().ToLowerInvariant(), await workflow.GetRunStatusAsync());
+            if (unknownAck == WorkReportVerdict.Refused)
+                return ("refused", await workflow.GetRunStatusAsync());
 
-            return (unknownAck.ToString().ToLowerInvariant(), await workflow.GetRunStatusAsync());
+            return (VerdictValue(unknownAck), await workflow.GetRunStatusAsync());
         }
 
-        ReportAck ack = report switch
+        WorkReportVerdict ack;
+        try
         {
-            WorkflowItemTranslator.InboundReport.Task task when item.IsTask && taskRunId is not null =>
-                await workflow.ReceiveTaskReportAsync(
-                    runnerId,
-                    workId,
-                    task.Value with { TaskRunId = taskRunId },
-                    agentBinding),
-            WorkflowItemTranslator.InboundReport.Checks checks when item.IsChecks =>
-                await workflow.ReceiveCheckReportAsync(runnerId, workId, checks.Value),
-            _ => ReportAck.Stale,
-        };
-        return (ack.ToString().ToLowerInvariant(), await workflow.GetRunStatusAsync());
+            ack = report switch
+            {
+                WorkflowItemTranslator.InboundReport.Task task when item.IsTask && taskRunId is not null =>
+                    await workflow.ReceiveTaskReportAsync(
+                        runnerId,
+                        workId,
+                        task.Value with { TaskRunId = taskRunId },
+                        agentBinding),
+                WorkflowItemTranslator.InboundReport.Checks checks when item.IsChecks =>
+                    await workflow.ReceiveCheckReportAsync(runnerId, workId, checks.Value),
+                _ => WorkReportVerdict.Refused,
+            };
+        }
+        catch (DbUpdateConcurrencyException)
+        {
+            ack = WorkReportVerdict.Outstanding;
+        }
+        return (VerdictValue(ack), await workflow.GetRunStatusAsync());
     }
+
+    private static string VerdictValue(WorkReportVerdict verdict) => verdict.ToString().ToLowerInvariant();
 
     private static bool IsAgentTask(string? uses) =>
         string.Equals(uses, "mohist/agent", StringComparison.Ordinal)

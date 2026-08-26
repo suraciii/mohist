@@ -17,6 +17,7 @@ using Mohist.Server.Agent.Grains;
 using Mohist.Server.Auth.Identity;
 using Mohist.Server.Infrastructure.Config;
 using Mohist.Server.Infrastructure.Data.Db;
+using Mohist.Server.Infrastructure.Data.AgentJobs;
 using Mohist.Server.Infrastructure.Events;
 using Mohist.Server.Infrastructure.Hosting;
 using Mohist.Server.Infrastructure.PublicApi;
@@ -29,6 +30,7 @@ using Mohist.Server.Sessions.Services;
 using Mohist.Server.Slack.Services;
 using Mohist.Server.SystemInfo;
 using Mohist.Server.Workflow.Storage;
+using Mohist.Server.Workflow.Grains;
 using Mohist.Server.Workflow.Services.Prompts;
 using OpenTelemetry;
 using OpenTelemetry.Exporter;
@@ -58,6 +60,8 @@ public class MohistIntegrationFixture : IAsyncLifetime
     public FakeRunnerWorkspaceClient RunnerWorkspace => _factory.Services.GetRequiredService<FakeRunnerWorkspaceClient>();
     public AgentJobDispatchProbe AgentJobDispatches => _factory.Services.GetRequiredService<AgentJobDispatchProbe>();
     public AgentLaunchParticipantProbe LaunchFaults => _factory.Services.GetRequiredService<AgentLaunchParticipantProbe>();
+    public ReportPersistenceFailureProbe ReportPersistenceFailures =>
+        _factory.Services.GetRequiredService<ReportPersistenceFailureProbe>();
     public AgentSessionPersistenceTestProbe Persistence => _factory.Persistence;
     public FakeTimeProvider TimeProvider { get; } = new(TestTime.UtcNow);
 
@@ -314,6 +318,14 @@ public class MohistWebApplicationFactory : WebApplicationFactory<Program>
 
         builder.ConfigureTestServices(services =>
         {
+            services.RemoveAll<IWorkflowReportPersistenceFailureInjector>();
+            services.RemoveAll<IAgentJobReportPersistenceFailureInjector>();
+            services.AddSingleton<ReportPersistenceFailureProbe>();
+            services.AddSingleton<IWorkflowReportPersistenceFailureInjector>(provider =>
+                provider.GetRequiredService<ReportPersistenceFailureProbe>());
+            services.AddSingleton<IAgentJobReportPersistenceFailureInjector>(provider =>
+                provider.GetRequiredService<ReportPersistenceFailureProbe>());
+
             // Selection recovery/expiry Specs invoke ProcessPendingAsync on
             // demand. The shared assembly fixture must not run the autonomous
             // loop against the common integration database while unrelated

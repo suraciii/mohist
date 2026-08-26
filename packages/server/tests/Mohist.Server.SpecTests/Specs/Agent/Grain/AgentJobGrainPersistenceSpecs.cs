@@ -175,7 +175,7 @@ public sealed class AgentJobGrainPersistenceSpecs
             .CreateScope()
             .ServiceProvider
             .GetRequiredService<Mohist.Server.Runner.Services.DispatchService>();
-        await dispatch.PollAsync(runnerId, new RunnerPollRequest([], []));
+        await dispatch.PollAsync(runnerId, new RunnerPollRequest([], [], ProcessGeneration: TestRunnerGenerationExtensions.ProcessGeneration));
         await _fixture.DispatchObserver.WaitForRunnerAcceptedAsync();
         Assert.Equal(AgentJobStatus.Running, await job.GetStatusAsync());
     }

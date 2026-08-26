@@ -36,7 +36,7 @@ public class RerunFromStageTests
             if (i == stageIdx)
                 break;
 
-            run.StartTask(stage.Tasks.Single().Id, "worker-1", DateTimeOffset.UnixEpoch);
+            run.StartTask(stage.Tasks.Single().Id, "worker-1", "test-process-generation", DateTimeOffset.UnixEpoch);
             run.CompleteTask(DateTimeOffset.UnixEpoch);
             run.PassCheck(new CheckResult(stage.Checks.Single().Name, CheckResultStatus.Passed), DateTimeOffset.UnixEpoch);
         }
@@ -54,7 +54,7 @@ public class RerunFromStageTests
             [new("plan-ok", "Plan OK", "spec/check")],
             DateTimeOffset.UnixEpoch);
         run.AssignTo("worker-1", TestTime.UtcNow);
-        run.StartTask("draft.1", "worker-1", DateTimeOffset.UnixEpoch);
+        run.StartTask("draft.1", "worker-1", "test-process-generation", DateTimeOffset.UnixEpoch);
         run.CompleteTask(DateTimeOffset.UnixEpoch);
         run.PassCheck(new CheckResult("plan-ok", CheckResultStatus.Passed), DateTimeOffset.UnixEpoch);
 
@@ -65,7 +65,7 @@ public class RerunFromStageTests
             [new("compile", "Compile", "spec/task")],
             [new("build-ok", "Build OK", "spec/check")],
             DateTimeOffset.UnixEpoch);
-        run.StartTask("compile.1", "worker-1", DateTimeOffset.UnixEpoch);
+        run.StartTask("compile.1", "worker-1", "test-process-generation", DateTimeOffset.UnixEpoch);
         run.CompleteTask(DateTimeOffset.UnixEpoch);
         run.PassCheck(new CheckResult("build-ok", CheckResultStatus.Passed), DateTimeOffset.UnixEpoch);
 
@@ -76,7 +76,7 @@ public class RerunFromStageTests
             [new("merge", "Merge", "spec/task")],
             [new("merge-ok", "Merge OK", "spec/check")],
             DateTimeOffset.UnixEpoch);
-        run.StartTask("merge.1", "worker-1", DateTimeOffset.UnixEpoch);
+        run.StartTask("merge.1", "worker-1", "test-process-generation", DateTimeOffset.UnixEpoch);
         run.CompleteTask(DateTimeOffset.UnixEpoch);
         run.PassCheck(new CheckResult("merge-ok", CheckResultStatus.Passed), DateTimeOffset.UnixEpoch);
 

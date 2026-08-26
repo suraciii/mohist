@@ -1,4 +1,5 @@
 using Mohist.Server.Workflow.Domain.Run;
+using Mohist.Server.Runner.Grains;
 
 namespace Mohist.Server.Workflow.Grains;
 
@@ -8,11 +9,11 @@ public partial class WorkflowGrain
 
     private static readonly TimeSpan RunnerLossRecoveryReminderPeriod = TimeSpan.FromDays(1);
 
-    public async Task<ReportAck> InterruptActiveWorkAsync(string workerId, string reason)
+    public async Task<WorkReportVerdict> InterruptActiveWorkAsync(string workerId, string reason)
     {
         RejectIfRunReloadRequired();
         if (_run is null || string.IsNullOrWhiteSpace(workerId))
-            return ReportAck.Stale;
+            return WorkReportVerdict.Refused;
 
         var reasonCode = string.IsNullOrWhiteSpace(reason) ? "runner-lost" : reason.Trim();
         var now = Now();
@@ -23,13 +24,13 @@ public partial class WorkflowGrain
             now,
             now + _runnerLossRecoveryTimeout);
         if (update == WorkInterruptionUpdate.Rejected)
-            return ReportAck.Stale;
+            return WorkReportVerdict.Refused;
 
         if (update == WorkInterruptionUpdate.Updated)
             await CommitAsync([]);
 
         await ReconcileRunnerLossRecoveryAsync();
-        return ReportAck.Accepted;
+        return WorkReportVerdict.Accepted;
     }
 
     private async Task ReconcileRunnerLossRecoveryAsync(bool removeReminderWhenClear = false)

@@ -6,6 +6,7 @@ using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Infrastructure.Data.Runner;
 using Mohist.Server.Runner.Domain;
 using Mohist.Server.Workflow.Domain.Run;
+using Mohist.Workflow.Definition;
 using Orleans;
 
 namespace Mohist.Server.Infrastructure.Data.Workflow;
@@ -14,6 +15,11 @@ public interface IWorkflowRunStore
 {
     Task SaveAsync(WorkflowRun run, CancellationToken ct = default);
     Task SaveAsync(WorkflowRun run, IReadOnlyList<WorkflowEvent> events, CancellationToken ct = default);
+    Task SaveWithArtifactsAsync(
+        WorkflowRun run,
+        IReadOnlyList<WorkflowEvent> events,
+        WorkflowArtifactBindingIntent artifacts,
+        CancellationToken ct = default);
     Task<WorkflowRun?> LoadAsync(string workflowRunId, CancellationToken ct = default);
     Task DeleteAsync(string workflowRunId, CancellationToken ct = default);
 }
@@ -52,6 +58,75 @@ public class WorkflowRunStore : IWorkflowRunStore
 
     public async Task SaveAsync(WorkflowRun run, IReadOnlyList<WorkflowEvent> events, CancellationToken ct = default) =>
         await SaveEventsAsync(run, events, ct);
+
+    public async Task SaveWithArtifactsAsync(
+        WorkflowRun run,
+        IReadOnlyList<WorkflowEvent> events,
+        WorkflowArtifactBindingIntent artifacts,
+        CancellationToken ct = default)
+    {
+        var source = WorkflowEventSource(run.Id);
+        await using var db = await _dbFactory.CreateDbContextAsync(ct);
+        await using var transaction = await db.Database.BeginTransactionAsync(ct);
+
+        var requestedUploadIds = artifacts.UploadIds.Distinct(StringComparer.Ordinal).ToArray();
+        var existingArtifacts = await db.WorkflowArtifacts
+            .Where(artifact => artifact.SourceUploadId != null
+                && requestedUploadIds.Contains(artifact.SourceUploadId))
+            .ToListAsync(ct);
+        if (existingArtifacts.Any(artifact =>
+            !string.Equals(artifact.WorkflowRunId, run.Id, StringComparison.Ordinal)
+            || !string.Equals(artifact.TaskRunId, artifacts.TaskRunId, StringComparison.Ordinal)))
+        {
+            throw new DbUpdateConcurrencyException("Artifact upload binding changed during report settlement");
+        }
+
+        var existingIds = existingArtifacts.Select(artifact => artifact.SourceUploadId!).ToHashSet(StringComparer.Ordinal);
+        var pendingIds = requestedUploadIds.Where(id => !existingIds.Contains(id)).ToArray();
+        var pendingUploads = await db.WorkflowArtifactPendingUploads
+            .Where(p => p.WorkflowRunId == run.Id
+                && p.WorkId == artifacts.WorkId
+                && p.TaskRunId == artifacts.TaskRunId
+                && pendingIds.Contains(p.UploadId))
+            .ToListAsync(ct);
+        if (pendingUploads.Count != pendingIds.Length)
+            throw new DbUpdateConcurrencyException("Artifact upload binding changed during report settlement");
+
+        var now = artifacts.RecordedAt;
+        foreach (var pending in pendingUploads)
+        {
+            db.WorkflowArtifacts.Add(new WorkflowArtifactRow
+            {
+                ArtifactId = $"art_{Guid.NewGuid():N}",
+                WorkflowRunId = run.Id,
+                TaskRunId = artifacts.TaskRunId,
+                SourceUploadId = pending.UploadId,
+                Path = pending.Path,
+                RecordedAt = now,
+                ArtifactStoragePath = pending.StoragePath,
+                Kind = string.IsNullOrWhiteSpace(pending.Kind) ? "file" : pending.Kind,
+                ContentType = pending.ContentType,
+                ContentHash = pending.ContentHash,
+                Size = pending.Size,
+                ProjectId = artifacts.ProjectId,
+                IssueNumber = artifacts.IssueNumber,
+                DisplayName = DeriveArtifactDisplayName(pending.Path),
+            });
+        }
+        db.WorkflowArtifactPendingUploads.RemoveRange(pendingUploads);
+
+        var epicNumber = WorkflowRunLineage.EpicAffiliationOf(run);
+        await StageRunAsync(db, run, epicNumber, ct);
+        foreach (var evt in events)
+        {
+            if (evt is null) continue;
+            await _eventStore.AppendAsync(db, ToCloudEvent(evt, source, run), ct);
+        }
+
+        await db.SaveChangesAsync(ct);
+        await transaction.CommitAsync(ct);
+        PokeDispatcherBestEffort();
+    }
 
     private async Task SaveEventsAsync(
         WorkflowRun run,
@@ -94,6 +169,14 @@ public class WorkflowRunStore : IWorkflowRunStore
     /// is stamped when the unwrapped <see cref="WorkflowEvent"/> variant exposes
     /// a <c>Stage</c> member — see <c>WorkflowRunLineage.StageOf</c>.
     /// </summary>
+    private static string? DeriveArtifactDisplayName(string path)
+    {
+        if (string.IsNullOrWhiteSpace(path)) return null;
+        var name = path.Replace('\\', '/').Trim('/');
+        var lastSlash = name.LastIndexOf('/');
+        return lastSlash >= 0 ? name[(lastSlash + 1)..] : name;
+    }
+
     private static CloudEvent ToCloudEvent(WorkflowEvent evt, string source, WorkflowRun run)
     {
         var type = WorkflowEventSerializer.BusType(evt);

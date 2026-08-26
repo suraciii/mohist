@@ -10,6 +10,17 @@ namespace Mohist.Server.Workflow.Services.Artifacts;
 
 public interface IWorkflowArtifactBindService
 {
+    Task<WorkflowArtifactBindResult> ValidateAsync(
+        string workflowRunId,
+        string workId,
+        string taskRunId,
+        string[] artifactUploadIds,
+        TaskArtifactCapture? declaredArtifacts,
+        JsonElement? variables = null,
+        string? projectId = null,
+        int? issueNumber = null,
+        CancellationToken cancellationToken = default);
+
     Task<WorkflowArtifactBindResult> BindAsync(
         string workflowRunId,
         string workId,
@@ -45,7 +56,7 @@ public sealed class WorkflowArtifactBindService : IWorkflowArtifactBindService
         _time = time;
     }
 
-    public async Task<WorkflowArtifactBindResult> BindAsync(
+    public Task<WorkflowArtifactBindResult> ValidateAsync(
         string workflowRunId,
         string workId,
         string taskRunId,
@@ -54,7 +65,46 @@ public sealed class WorkflowArtifactBindService : IWorkflowArtifactBindService
         JsonElement? variables = null,
         string? projectId = null,
         int? issueNumber = null,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default) =>
+        BindCoreAsync(
+            workflowRunId,
+            workId,
+            taskRunId,
+            artifactUploadIds,
+            projectId,
+            issueNumber,
+            persist: false,
+            cancellationToken);
+
+    public Task<WorkflowArtifactBindResult> BindAsync(
+        string workflowRunId,
+        string workId,
+        string taskRunId,
+        string[] artifactUploadIds,
+        TaskArtifactCapture? declaredArtifacts,
+        JsonElement? variables = null,
+        string? projectId = null,
+        int? issueNumber = null,
+        CancellationToken cancellationToken = default) =>
+        BindCoreAsync(
+            workflowRunId,
+            workId,
+            taskRunId,
+            artifactUploadIds,
+            projectId,
+            issueNumber,
+            persist: true,
+            cancellationToken);
+
+    private async Task<WorkflowArtifactBindResult> BindCoreAsync(
+        string workflowRunId,
+        string workId,
+        string taskRunId,
+        string[] artifactUploadIds,
+        string? projectId,
+        int? issueNumber,
+        bool persist,
+        CancellationToken cancellationToken)
     {
         if (artifactUploadIds is null || artifactUploadIds.Length == 0)
             return new WorkflowArtifactBindResult([]);
@@ -142,13 +192,14 @@ public sealed class WorkflowArtifactBindService : IWorkflowArtifactBindService
                 now));
         }
 
-        await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
-
-        db.WorkflowArtifacts.AddRange(artifactRows);
-        db.WorkflowArtifactPendingUploads.RemoveRange(pendingUploads);
-
-        await db.SaveChangesAsync(cancellationToken);
-        await transaction.CommitAsync(cancellationToken);
+        if (persist)
+        {
+            await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
+            db.WorkflowArtifacts.AddRange(artifactRows);
+            db.WorkflowArtifactPendingUploads.RemoveRange(pendingUploads);
+            await db.SaveChangesAsync(cancellationToken);
+            await transaction.CommitAsync(cancellationToken);
+        }
 
         _log.LogInformation(
             "Bound {Count} artifact(s) for workflow run {WorkflowRunId}, task run {TaskRunId}",

@@ -5,6 +5,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Infrastructure.Data.Workflow;
+using Mohist.Server.Agent.Grains;
 using Mohist.Server.Runner.Grains;
 using Mohist.Server.SpecTests.Support;
 using Mohist.Server.TestSupport;
@@ -51,6 +52,7 @@ public sealed class RunnerPollRecoveryStateApiSpecs
 
             using var report = await _fixture.Client.PostAsJsonAsync($"/api/runner/{runnerId}/report", new
             {
+                ownerKind = WorkDispatchOwnerKinds.Workflow,
                 workflowRunId,
                 workId = freshWorkId,
                 taskRunId = freshTaskRunId,
@@ -78,9 +80,7 @@ public sealed class RunnerPollRecoveryStateApiSpecs
             });
             Assert.Equal(HttpStatusCode.OK, report.StatusCode);
             var reportBody = await report.Content.ReadFromJsonAsync<JsonElement>();
-            Assert.True(reportBody.GetProperty("tracked").GetBoolean());
-            Assert.Equal("accepted", reportBody.GetProperty("reason").GetString());
-            Assert.Equal(workflowRunId, reportBody.GetProperty("workflowRunId").GetString());
+            Assert.Equal("accepted", reportBody.GetProperty("verdict").GetString());
 
             var continuation = await PollAsync(runnerId);
             Assert.Equal(workflowRunId, continuation.GetProperty("workflowRunId").GetString());
@@ -96,10 +96,97 @@ public sealed class RunnerPollRecoveryStateApiSpecs
     }
 
     [Fact]
+    public async Task Report_WorkflowPersistenceConflictReturnsOutstandingAndReplaySettles()
+    {
+        var projectId = $"workflow-outstanding-{Guid.NewGuid():N}";
+        var workflowRunId = $"workflow-outstanding-run-{Guid.NewGuid():N}";
+        var runnerId = $"workflow-outstanding-runner-{Guid.NewGuid():N}";
+        var runner = _fixture.Grains.GetGrain<IRunnerGrain>(runnerId);
+
+        try
+        {
+            await SeedWorkflowAsync(projectId, workflowRunId, new RecoveryDefinition(1, []), uses: "spec/task");
+            await runner.RegisterAsync(new RunnerInfo(runnerId, ["spec/*"], "test-host", projectId));
+            var dispatch = await PollAsync(runnerId);
+            var workId = dispatch.GetProperty("workId").GetString()!;
+            var taskRunId = dispatch.GetProperty("taskRunId").GetString()!;
+            var payload = new
+            {
+                ownerKind = WorkDispatchOwnerKinds.Workflow,
+                workflowRunId,
+                workId,
+                taskRunId,
+                status = "completed",
+            };
+
+            _fixture.ReportPersistenceFailures.FailNextWorkflowReport(workflowRunId, workId);
+            using var outstanding = await _fixture.Client.PostAsJsonAsync($"/api/runner/{runnerId}/report", payload);
+            Assert.Equal(HttpStatusCode.OK, outstanding.StatusCode);
+            Assert.Equal("outstanding", (await outstanding.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("verdict").GetString());
+            Assert.Equal("Running", await _fixture.Grains.GetGrain<IWorkflowGrain>(workflowRunId).GetRunStatusAsync());
+
+            using var accepted = await _fixture.Client.PostAsJsonAsync($"/api/runner/{runnerId}/report", payload);
+            Assert.Equal("accepted", (await accepted.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("verdict").GetString());
+            using var replay = await _fixture.Client.PostAsJsonAsync($"/api/runner/{runnerId}/report", payload);
+            Assert.Equal("accepted", (await replay.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("verdict").GetString());
+        }
+        finally
+        {
+            await runner.UnregisterAsync();
+        }
+    }
+
+    [Fact]
+    public async Task Report_AgentJobLedgerConflictReturnsOutstandingAndReplaySettles()
+    {
+        var projectId = $"agent-job-outstanding-{Guid.NewGuid():N}";
+        var runnerId = $"agent-job-outstanding-runner-{Guid.NewGuid():N}";
+        var jobId = $"agent-job-outstanding-{Guid.NewGuid():N}";
+        var runner = _fixture.Grains.GetGrain<IRunnerGrain>(runnerId);
+        var job = _fixture.Grains.GetGrain<IAgentJobGrain>(jobId);
+
+        try
+        {
+            await runner.RegisterAsync(new RunnerInfo(runnerId, ["spec/*"], "test-host", projectId));
+            await job.SubmitAsync(new AgentJobInput(
+                "persist terminal report",
+                WorkspacePath: "/tmp/agent-job-outstanding",
+                ProjectId: projectId,
+                AgentId: "agent-test",
+                PinnedRunnerId: runnerId));
+            var dispatch = await PollAsync(runnerId);
+            var workId = dispatch.GetProperty("workId").GetString()!;
+            var payload = new
+            {
+                ownerKind = WorkDispatchOwnerKinds.AgentJob,
+                agentJobId = jobId,
+                workId,
+                status = "completed",
+            };
+
+            _fixture.ReportPersistenceFailures.FailNextAgentJobReport(jobId, workId);
+            using var outstanding = await _fixture.Client.PostAsJsonAsync($"/api/runner/{runnerId}/report", payload);
+            Assert.Equal(HttpStatusCode.OK, outstanding.StatusCode);
+            Assert.Equal("outstanding", (await outstanding.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("verdict").GetString());
+            Assert.Equal(AgentJobStatus.Running, await job.GetStatusAsync());
+
+            using var accepted = await _fixture.Client.PostAsJsonAsync($"/api/runner/{runnerId}/report", payload);
+            Assert.Equal("accepted", (await accepted.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("verdict").GetString());
+            using var replay = await _fixture.Client.PostAsJsonAsync($"/api/runner/{runnerId}/report", payload);
+            Assert.Equal("accepted", (await replay.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("verdict").GetString());
+        }
+        finally
+        {
+            await runner.UnregisterAsync();
+        }
+    }
+
+    [Fact]
     public async Task Report_StaleWorkflowResultIsNotTracked()
     {
         using var report = await _fixture.Client.PostAsJsonAsync($"/api/runner/stale-{Guid.NewGuid():N}/report", new
         {
+            ownerKind = WorkDispatchOwnerKinds.Workflow,
             workflowRunId = $"missing-report-{Guid.NewGuid():N}",
             workId = "task-1",
             status = "completed",
@@ -107,8 +194,7 @@ public sealed class RunnerPollRecoveryStateApiSpecs
 
         Assert.Equal(HttpStatusCode.OK, report.StatusCode);
         var body = await report.Content.ReadFromJsonAsync<JsonElement>();
-        Assert.False(body.GetProperty("tracked").GetBoolean());
-        Assert.Equal("missing-workflow", body.GetProperty("reason").GetString());
+        Assert.Equal("refused", body.GetProperty("verdict").GetString());
     }
 
     [Fact]
@@ -136,6 +222,7 @@ public sealed class RunnerPollRecoveryStateApiSpecs
 
             using var firstReport = await _fixture.Client.PostAsJsonAsync($"/api/runner/{runnerId}/report", new
             {
+                ownerKind = WorkDispatchOwnerKinds.Workflow,
                 workflowRunId,
                 workId,
                 taskRunId,
@@ -143,11 +230,11 @@ public sealed class RunnerPollRecoveryStateApiSpecs
             });
             Assert.Equal(HttpStatusCode.OK, firstReport.StatusCode);
             var firstBody = await firstReport.Content.ReadFromJsonAsync<JsonElement>();
-            Assert.True(firstBody.GetProperty("tracked").GetBoolean());
-            Assert.Equal("accepted", firstBody.GetProperty("reason").GetString());
+            Assert.Equal("accepted", firstBody.GetProperty("verdict").GetString());
 
             using var staleReport = await _fixture.Client.PostAsJsonAsync($"/api/runner/{runnerId}/report", new
             {
+                ownerKind = WorkDispatchOwnerKinds.Workflow,
                 workflowRunId,
                 workId,
                 taskRunId,
@@ -156,8 +243,7 @@ public sealed class RunnerPollRecoveryStateApiSpecs
             });
             Assert.Equal(HttpStatusCode.OK, staleReport.StatusCode);
             var staleBody = await staleReport.Content.ReadFromJsonAsync<JsonElement>();
-            Assert.False(staleBody.GetProperty("tracked").GetBoolean());
-            Assert.Equal("stale", staleBody.GetProperty("reason").GetString());
+            Assert.Equal("refused", staleBody.GetProperty("verdict").GetString());
         }
         finally
         {
@@ -170,6 +256,7 @@ public sealed class RunnerPollRecoveryStateApiSpecs
     {
         using var report = await _fixture.Client.PostAsJsonAsync($"/api/runner/report-output-{Guid.NewGuid():N}/report", new
         {
+            ownerKind = WorkDispatchOwnerKinds.Workflow,
             workflowRunId = $"missing-report-output-{Guid.NewGuid():N}",
             workId = "task-1",
             status = "completed",
@@ -234,6 +321,7 @@ public sealed class RunnerPollRecoveryStateApiSpecs
             // leaving it running or throwing a non-2xx that the runner resends.
             using var report = await _fixture.Client.PostAsJsonAsync($"/api/runner/{runnerId}/report", new
             {
+                ownerKind = WorkDispatchOwnerKinds.Workflow,
                 workflowRunId,
                 workId = fresh.GetProperty("workId").GetString(),
                 taskRunId = fresh.GetProperty("taskRunId").GetString(),
@@ -259,8 +347,7 @@ public sealed class RunnerPollRecoveryStateApiSpecs
 
             Assert.Equal(HttpStatusCode.OK, report.StatusCode);
             var reportBody = await report.Content.ReadFromJsonAsync<JsonElement>();
-            Assert.True(reportBody.GetProperty("tracked").GetBoolean());
-            Assert.Equal("accepted", reportBody.GetProperty("reason").GetString());
+            Assert.Equal("accepted", reportBody.GetProperty("verdict").GetString());
 
             var workflow = _fixture.Grains.GetGrain<IWorkflowGrain>(workflowRunId);
             Assert.Equal("Failed", await workflow.GetRunStatusAsync());
@@ -348,7 +435,7 @@ public sealed class RunnerPollRecoveryStateApiSpecs
                 "opencode",
                 "route-receipt-runtime-session");
             var workflow = _fixture.Grains.GetGrain<IWorkflowGrain>(workflowRunId);
-            Assert.Equal(ReportAck.Accepted, await workflow.BindAgentExecutionAsync(binding));
+            Assert.Equal(WorkReportVerdict.Accepted, await workflow.BindAgentExecutionAsync(binding));
 
             var result = new WorkResult("completed", "route receipt");
             var receipt = new RuntimeRecoveryReceipt(
@@ -453,7 +540,7 @@ public sealed class RunnerPollRecoveryStateApiSpecs
 
     private async Task<JsonElement> PollAsync(string runnerId)
     {
-        using var response = await _fixture.Client.PostAsync($"/api/runner/{runnerId}/poll", null);
+        using var response = await _fixture.Client.PostRunnerPollAsync(runnerId);
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         return await response.ReadFirstDispatchElementAsync()
             ?? throw new InvalidOperationException("Expected a dispatch from /poll");

@@ -1,4 +1,5 @@
 using System.Text.Json;
+using Mohist.Server.Infrastructure.Data.AgentJobs;
 using Mohist.Server.Agent.Grains;
 using Mohist.Server.Infrastructure;
 using Mohist.Server.Runner.Grains;
@@ -11,6 +12,14 @@ namespace Mohist.Server.Api;
 
 public static partial class RunnerRoutes
 {
+    private static string VerdictValue(WorkReportVerdict verdict) => verdict switch
+    {
+        WorkReportVerdict.Accepted => "accepted",
+        WorkReportVerdict.Refused => "refused",
+        WorkReportVerdict.Outstanding => "outstanding",
+        _ => throw new ArgumentOutOfRangeException(nameof(verdict), verdict, null),
+    };
+
     private static void MapReportRoute(RouteGroupBuilder group)
     {
         // Reports go directly to the owning grain. Only an accepted durable
@@ -37,36 +46,61 @@ public static partial class RunnerRoutes
             if (req is null)
                 return ApiResults.BadRequest("request body is required");
 
-            var ownerKind = string.IsNullOrWhiteSpace(req.OwnerKind)
-                ? WorkDispatchOwnerKinds.Workflow
-                : req.OwnerKind.Trim().ToLowerInvariant();
+            if (string.IsNullOrWhiteSpace(req.WorkId))
+                return ApiResults.BadRequest("workId is required");
+            if (!IsTerminalReportStatus(req.Status))
+                return ApiResults.BadRequest("status is invalid");
+            if (string.IsNullOrWhiteSpace(req.OwnerKind))
+                return ApiResults.BadRequest("ownerKind is required");
+
+            var ownerKind = req.OwnerKind.Trim().ToLowerInvariant();
             if (string.Equals(ownerKind, WorkDispatchOwnerKinds.AgentJob, StringComparison.Ordinal))
             {
                 if (string.IsNullOrWhiteSpace(req.AgentJobId))
                     return ApiResults.BadRequest("agentJobId is required when ownerKind is 'agent-job'");
+                if (!string.IsNullOrWhiteSpace(req.WorkflowRunId))
+                    return ApiResults.BadRequest("workflowRunId is not allowed when ownerKind is 'agent-job'");
             }
             else if (string.Equals(ownerKind, WorkDispatchOwnerKinds.Workflow, StringComparison.Ordinal))
             {
                 if (string.IsNullOrWhiteSpace(req.WorkflowRunId))
                     return ApiResults.BadRequest("workflowRunId is required when ownerKind is 'workflow'");
+                if (!string.IsNullOrWhiteSpace(req.AgentJobId))
+                    return ApiResults.BadRequest("agentJobId is not allowed when ownerKind is 'workflow'");
             }
             else
             {
                 return ApiResults.BadRequest($"ownerKind '{req.OwnerKind}' is not supported");
             }
 
-            var result = new WorkResult(req.Status, req.Message, req.Output, req.ExitCode, req.ArtifactUploadIds, req.AddTasks, req.Error);
+            var result = new WorkResult(
+                req.Status,
+                req.Message,
+                req.Output,
+                req.ExitCode,
+                req.ArtifactUploadIds,
+                req.AddTasks,
+                req.Error,
+                req.AgentSessionId,
+                req.AgentTurnId,
+                req.Runtime,
+                req.RuntimeSessionId);
 
             if (string.Equals(ownerKind, WorkDispatchOwnerKinds.AgentJob, StringComparison.Ordinal))
             {
-                var report = await grains.GetGrain<IAgentJobGrain>(req.AgentJobId ?? string.Empty)
-                    .ReportResultAsync(runnerId, req.WorkId, result);
-                var acknowledged = report.Accepted || string.Equals(report.Reason, "stale", StringComparison.Ordinal);
-                if (acknowledged)
+                AgentJobReportResult report;
+                try
+                {
+                    report = await grains.GetGrain<IAgentJobGrain>(req.AgentJobId ?? string.Empty)
+                        .ReportResultAsync(runnerId, req.WorkId, result);
+                }
+                catch (AgentJobLedgerConflictException)
+                {
+                    report = new AgentJobReportResult(WorkReportVerdict.Outstanding, "ledger-conflict");
+                }
+                if (report.Verdict is WorkReportVerdict.Accepted or WorkReportVerdict.Refused)
                     managerCredentials.RevokeWork(req.AgentJobId ?? string.Empty, req.WorkId);
-                return Results.Ok(new RunnerReportResponse(
-                    req.AgentJobId ?? string.Empty, null, acknowledged,
-                    report.Reason, ownerKind, req.AgentJobId));
+                return Results.Ok(new RunnerReportResponse(VerdictValue(report.Verdict)));
             }
 
             var (ack, workflowStatus) = await workflowReport.ReportAsync(
@@ -80,9 +114,16 @@ public static partial class RunnerRoutes
                 req.AgentTurnId,
                 req.Runtime,
                 req.RuntimeSessionId);
-            var tracked = string.Equals(ack, ReportAck.Accepted.ToString().ToLowerInvariant(), StringComparison.Ordinal);
-            return Results.Ok(new RunnerReportResponse(
-                req.WorkflowRunId ?? string.Empty, workflowStatus, tracked, ack, ownerKind, req.WorkflowRunId ?? string.Empty));
+            return Results.Ok(new RunnerReportResponse(ack));
         });
     }
+
+    private static bool IsTerminalReportStatus(string? status) => status is not null && (
+        status.Equals("completed", StringComparison.OrdinalIgnoreCase)
+        || status.Equals("success", StringComparison.OrdinalIgnoreCase)
+        || status.Equals("pass", StringComparison.OrdinalIgnoreCase)
+        || status.Equals("ok", StringComparison.OrdinalIgnoreCase)
+        || status.Equals("failed", StringComparison.OrdinalIgnoreCase)
+        || status.Equals("timeout", StringComparison.OrdinalIgnoreCase)
+        || status.Equals("unknown", StringComparison.OrdinalIgnoreCase));
 }

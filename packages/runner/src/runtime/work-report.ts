@@ -4,25 +4,6 @@ import type { RuntimeRecoveryReceipt } from './recovery-receipt.js'
 
 export const RUNNER_RESTARTED_REASON = 'runner-restarted'
 
-/**
- * The server rejected the report as definitively superseded: the work
- * identity it describes no longer exists in a reportable state and can
- * never accept this result. Retrying cannot change the answer, so the
- * journal entry retires instead of retrying forever.
- */
-export class WorkReportStaleError extends Error {
-  constructor() {
-    super('work report was not durably acknowledged: stale')
-    this.name = 'WorkReportStaleError'
-  }
-}
-
-/**
- * A started journal entry has no authoritative result after the physical
- * execution disappears. This is the only runner-generated terminal fact for
- * that case; runtime observations are deliberately not promoted into a
- * successful result.
- */
 export interface WorkInterruptionFact {
   readonly reason: typeof RUNNER_RESTARTED_REASON
   readonly ownerKind: string
@@ -57,8 +38,6 @@ export function runnerRestartedResult(work: DispatchWorkItem): {
   const error = { code: RUNNER_RESTARTED_REASON, message }
   return {
     result: {
-      // Agent-task unknown is consumed by the server's existing settlement
-      // arbitration. Ordinary work receives a definite failed outcome.
       status: isWorkflowAgentWork(work) ? 'unknown' : 'failed',
       message,
       error,
@@ -68,17 +47,8 @@ export function runnerRestartedResult(work: DispatchWorkItem): {
   }
 }
 
-/**
- * Timeout for one report HTTP attempt. A report that does not complete within
- * this window is aborted and retried by the runner reconciliation loop.
- */
 const REPORT_TIMEOUT_MS = 10_000
 
-/**
- * Reports a settled work item and accepts only a server response that
- * explicitly confirms durable tracking. Untracked observations remain
- * retryable at the caller so a transient or stale response cannot lose work.
- */
 export async function reportAndRequireDurableAck(
   connection: Pick<ServerConnection, 'report'>,
   work: DispatchWorkItem,
@@ -92,12 +62,8 @@ export async function reportAndRequireDurableAck(
     const acknowledgement = binding
       ? await connection.report(work, result, controller.signal, binding)
       : await connection.report(work, result, controller.signal)
-    if (acknowledgement.tracked !== true) {
-      if (typeof acknowledgement.reason === 'string' && acknowledgement.reason.trim().toLowerCase() === 'stale')
-        throw new WorkReportStaleError()
-      const reason = typeof acknowledgement.reason === 'string' ? `: ${acknowledgement.reason}` : ''
-      throw new Error(`work report was not durably acknowledged${reason}`)
-    }
+    if (acknowledgement.verdict !== 'accepted' && acknowledgement.verdict !== 'refused')
+      throw new Error('work report remains outstanding')
   } finally {
     clearTimeout(timeout)
   }

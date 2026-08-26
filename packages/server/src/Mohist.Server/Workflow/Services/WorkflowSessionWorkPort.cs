@@ -3,6 +3,7 @@ using Mohist.Server.Sessions.Domain;
 using Mohist.Server.Sessions.Services;
 using Mohist.Server.Workflow.Domain.Run;
 using Mohist.Server.Workflow.Grains;
+using Mohist.Server.Runner.Grains;
 
 namespace Mohist.Server.Workflow.Services;
 
@@ -23,7 +24,7 @@ public sealed class WorkflowSessionWorkPort(IGrainFactory grains) : ISessionWork
                 binding.AgentTurnId,
                 binding.Runtime,
                 binding.RuntimeSessionId));
-        return ack == ReportAck.Accepted;
+        return ack == WorkReportVerdict.Accepted;
     }
 
     public async Task<bool> CanStartAgentCleanupAsync(

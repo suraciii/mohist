@@ -387,7 +387,7 @@ public class AgentJobStoreSpecs : IAsyncLifetime
         await _store.InsertLedgerAsync(NewPendingRecord(key, "runner-a", _time.GetUtcNow()));
         var runningSince = _time.GetUtcNow();
 
-        var claimed = await _store.ClaimAsync(key, "runner-a", runningSince);
+        var claimed = await _store.ClaimAsync(key, "runner-a", "test-generation", runningSince);
 
         Assert.Equal(AgentJobStatus.Running, JsonSerializer.Deserialize<AgentJobState>(claimed.StateJson, JSON.Options)!.Status);
         Assert.Equal("runner-a", claimed.AssignedRunnerId);
@@ -406,13 +406,13 @@ public class AgentJobStoreSpecs : IAsyncLifetime
         var inserted = await _store.InsertLedgerAsync(NewPendingRecord(key, "runner-a", _time.GetUtcNow()));
 
         await Assert.ThrowsAsync<AgentJobLedgerConflictException>(
-            () => _store.ClaimAsync(key, "runner-other", _time.GetUtcNow()));
+            () => _store.ClaimAsync(key, "runner-other", "test-generation", _time.GetUtcNow()));
         await Assert.ThrowsAsync<AgentJobLedgerConflictException>(
-            () => _store.ClaimAsync($"missing-{Guid.NewGuid():N}", "runner-a", _time.GetUtcNow()));
+            () => _store.ClaimAsync($"missing-{Guid.NewGuid():N}", "runner-a", "test-generation", _time.GetUtcNow()));
 
-        await _store.ClaimAsync(key, "runner-a", _time.GetUtcNow());
+        await _store.ClaimAsync(key, "runner-a", "test-generation", _time.GetUtcNow());
         await Assert.ThrowsAsync<AgentJobLedgerConflictException>(
-            () => _store.ClaimAsync(key, "runner-a", _time.GetUtcNow()));
+            () => _store.ClaimAsync(key, "runner-a", "test-generation", _time.GetUtcNow()));
     }
 
     [Fact]
@@ -455,6 +455,7 @@ public class AgentJobStoreSpecs : IAsyncLifetime
         await Assert.ThrowsAsync<AgentJobLedgerConflictException>(() => _store.ClaimAsync(
             key,
             "runner-a",
+            "test-generation",
             _time.GetUtcNow(),
             $"{workId}-replaced",
             JSON.Serialize(dispatch with { CapabilityClaim = expectation })));
@@ -472,6 +473,7 @@ public class AgentJobStoreSpecs : IAsyncLifetime
         var claimed = await _store.ClaimAsync(
             key,
             "runner-a",
+            "test-generation",
             _time.GetUtcNow(),
             workId,
             JSON.Serialize(dispatch with { CapabilityClaim = expectation }));
@@ -522,7 +524,7 @@ public class AgentJobStoreSpecs : IAsyncLifetime
         var runningKey = $"ledger-run-{Guid.NewGuid():N}";
         await _store.InsertLedgerAsync(NewPendingRecord(pendingKey, "runner-a", _time.GetUtcNow()));
         await _store.InsertLedgerAsync(NewPendingRecord(runningKey, "runner-a", _time.GetUtcNow()));
-        await _store.ClaimAsync(runningKey, "runner-a", _time.GetUtcNow());
+        await _store.ClaimAsync(runningKey, "runner-a", "test-generation", _time.GetUtcNow());
 
         var pending = await _store.ListAssignedPendingForRunnerAsync("runner-a", limit: 10);
         var running = await _store.ListRunningForRunnerAsync("runner-a");

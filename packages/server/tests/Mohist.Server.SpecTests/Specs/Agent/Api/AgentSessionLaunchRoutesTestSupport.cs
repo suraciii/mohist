@@ -8,7 +8,6 @@ using Mohist.Server.Agent.Grains;
 using Mohist.Server.Api;
 using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Infrastructure.Orleans;
-using Mohist.Server.Runner.Grains;
 using Mohist.Server.Sessions.Grains;
 using Mohist.Server.Sessions.Services;
 using Mohist.Server.SpecTests.Support;
@@ -17,6 +16,8 @@ using Mohist.Server.Workspace.Grains;
 using Orleans;
 using Xunit;
 using Xunit.Sdk;
+using Mohist.Server.Runner.Grains;
+using Mohist.Server.Workflow.Grains;
 namespace Mohist.Server.SpecTests.Specs.Agent.Api;
 
 public abstract class AgentSessionLaunchRoutesTestSupport
@@ -91,7 +92,7 @@ public abstract class AgentSessionLaunchRoutesTestSupport
         var job = _fixture.Grains.GetGrain<IAgentJobGrain>(agentJobId);
         var assignment = await job.GetRuntimeSnapshotAsync();
         Assert.Equal(runnerId, assignment.RunnerId);
-        var claim = Assert.IsType<ClaimResult>(await job.ClaimNextAsync(runnerId));
+        var claim = Assert.IsType<ClaimResult>(await job.ClaimNextAsync(runnerId, "test-generation"));
         AssertPreparedAgentJobClaim(claim, agentJobId, runnerId, expectedSessionId);
         return new ClaimedDispatch(
             claim.Dispatch.WorkflowRunId,
@@ -161,7 +162,7 @@ public abstract class AgentSessionLaunchRoutesTestSupport
     {
         for (var i = 0; i < 30; i++)
         {
-            using var poll = await _fixture.Client.PostAsync($"/api/runner/{runnerId}/poll", content: null);
+            using var poll = await _fixture.Client.PostRunnerPollAsync(runnerId);
             var dispatches = await poll.ReadDispatchElementsAsync();
             if (dispatches.Count == 0) return;
             foreach (var data in dispatches)

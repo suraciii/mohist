@@ -26,7 +26,7 @@ public sealed partial class WorkflowGrainStateSaveFailureSpecs
         await setup.OnActivateAsync(CancellationToken.None);
         await setup.EnsureStartedAsync(new WorkflowIssueContext(projectId, 1, null));
         await setup.AssignWorkerAsync(workerId);
-        var work = Assert.IsType<WorkItem>(await setup.ClaimNextAsync(workerId));
+        var work = Assert.IsType<WorkItem>(await setup.ClaimNextAsync(workerId, "test-generation"));
         var taskRunId = Assert.Single((await store.LoadAsync(workflowRunId))!.CurrentStage().Tasks).Id;
         var dbFactory = scope.ServiceProvider.GetRequiredService<IDbContextFactory<MohistDbContext>>();
         await using (var db = await dbFactory.CreateDbContextAsync())
@@ -64,19 +64,17 @@ public sealed partial class WorkflowGrainStateSaveFailureSpecs
 
         await using (var db = await dbFactory.CreateDbContextAsync())
         {
-            var artifact = Assert.Single(await db.WorkflowArtifacts
+            Assert.Empty(await db.WorkflowArtifacts
                 .Where(row => row.WorkflowRunId == workflowRunId)
                 .ToListAsync());
-            Assert.Equal(uploadId, artifact.SourceUploadId);
-            Assert.Equal(taskRunId, artifact.TaskRunId);
-            Assert.Null(await db.WorkflowArtifactPendingUploads.FindAsync(uploadId));
+            Assert.NotNull(await db.WorkflowArtifactPendingUploads.FindAsync(uploadId));
         }
         Assert.Equal(TaskRunStatus.Running,
             Assert.Single((await store.LoadAsync(workflowRunId))!.CurrentStage().Tasks).Status);
 
         var replay = CreateGrain(scope.ServiceProvider, failingStore, workflowRunId);
         await replay.OnActivateAsync(CancellationToken.None);
-        Assert.Equal(ReportAck.Accepted,
+        Assert.Equal(WorkReportVerdict.Accepted,
             await replay.ReceiveTaskReportAsync(workerId, work.Id!, report));
 
         Assert.Equal(TaskRunStatus.Completed,

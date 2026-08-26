@@ -6,7 +6,7 @@ public static partial class WorkflowRunExtensions
 {
     extension(WorkflowRun run)
     {
-        public IReadOnlyList<WorkflowEvent> StartTask(string workId, string workerId, DateTimeOffset now)
+        public IReadOnlyList<WorkflowEvent> StartTask(string workId, string workerId, string processGeneration, DateTimeOffset now)
         {
             if (run.Status is not (WorkflowRunStatus.Ready or WorkflowRunStatus.Running))
                 throw new InvalidOperationException($"WorkflowRun is {run.Status}, start task requires Ready or Running");
@@ -20,6 +20,7 @@ public static partial class WorkflowRunExtensions
             task.StartedAt = now;
             task.WorkId = workId;
             task.WorkerId = workerId;
+            task.ProcessGeneration = processGeneration;
             if (RequiresAgentResultSettlement(task.Uses))
             {
                 task.AgentResultSettlement ??= new AgentResultSettlement

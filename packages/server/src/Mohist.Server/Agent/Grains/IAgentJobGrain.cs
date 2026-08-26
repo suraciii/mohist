@@ -4,6 +4,7 @@ using Mohist.Server.Contracts;
 using Mohist.Server.Infrastructure;
 using Mohist.Server.Runner.Grains;
 using Mohist.Server.Sessions.Domain;
+using Mohist.Server.Workflow.Grains;
 using Orleans.Concurrency;
 
 namespace Mohist.Server.Agent.Grains;
@@ -36,12 +37,13 @@ public interface IAgentJobGrain : IGrainWithStringKey, IRemindable
     /// expectation is checked against the immutable pending tuple and its
     /// capability revision is persisted before the claim becomes visible.
     /// </summary>
-    Task<ClaimResult?> ClaimNextAsync(string runnerId) =>
+    Task<ClaimResult?> ClaimNextAsync(string runnerId, string processGeneration) =>
         Task.FromResult<ClaimResult?>(null);
 
     Task<ClaimResult?> ClaimNextAsync(
         string runnerId,
-        CapabilityClaimExpectation expectation) => ClaimNextAsync(runnerId);
+        string processGeneration,
+        CapabilityClaimExpectation expectation) => ClaimNextAsync(runnerId, processGeneration);
 
     Task<bool> RecordRuntimeSessionBindingAsync(string runnerId, string workId, string sessionId, string runtimeSessionId) =>
         Task.FromResult(false);
@@ -88,6 +90,10 @@ public interface IAgentJobGrain : IGrainWithStringKey, IRemindable
     /// status and no longer recognises the runner/work pair).
     /// </summary>
     Task FailAsync(string reason, string? agentId = null);
+    Task<WorkReportVerdict> FailRunnerLostAsync(
+        string runnerId,
+        string workId,
+        string processGeneration);
 
     /// <summary>
     /// Idempotent manual-launch preparation entry point. The coordinator
@@ -255,8 +261,11 @@ public sealed record PendingSubagentTerminalEvent(
 
 [GenerateSerializer]
 public sealed record AgentJobReportResult(
-    [property: Id(0)] bool Accepted,
-    [property: Id(1)] string? Reason = null);
+    [property: Id(0)] WorkReportVerdict Verdict,
+    [property: Id(1)] string? Reason = null)
+{
+    public bool Accepted => Verdict == WorkReportVerdict.Accepted;
+}
 
 [GenerateSerializer]
 public sealed record AgentJobRuntimeSnapshot(

@@ -5,6 +5,7 @@ using Mohist.Server.Sessions.Services;
 using Mohist.Server.TestSupport;
 using Orleans.Core.Internal;
 using Xunit;
+using Mohist.Server.Workflow.Grains;
 
 namespace Mohist.Server.SpecTests.Specs.Sessions;
 

@@ -186,6 +186,7 @@ internal sealed class WorkflowWorkLifecycle
         WorkflowRun run,
         string logicalTaskId,
         string workerId,
+        string processGeneration,
         string? allocatedWorkId = null)
     {
         var current = run.CurrentStage();
@@ -198,18 +199,22 @@ internal sealed class WorkflowWorkLifecycle
 
         var workId = allocatedWorkId ?? logicalTaskId;
         var now = _owner.Now();
-        var events = run.StartTask(workId, workerId, now);
+        var events = run.StartTask(workId, workerId, processGeneration, now);
         await _owner.SaveAsyncWithEvents(events);
 
         _owner.CacheAssignedWorkerId(workerId);
         return workId;
     }
 
-    public string MarkChecksRunning(WorkflowRun run, string stage, IReadOnlyList<CheckItem> items)
+    public string MarkChecksRunning(WorkflowRun run, string stage, string processGeneration, IReadOnlyList<CheckItem> items)
     {
         var checksWorkId = WorkflowRunExtensions.ChecksWorkIdFor(stage);
         var currentStage = run.CurrentStage();
         currentStage.ChecksWorkId = checksWorkId;
+        currentStage.ChecksProcessGeneration = processGeneration;
+        currentStage.TerminalChecksWorkId = null;
+        currentStage.TerminalChecksWorkerId = null;
+        currentStage.TerminalChecksResultFingerprint = null;
         var now = _owner.Now();
         foreach (var item in items)
         {
@@ -258,6 +263,7 @@ internal sealed class WorkflowWorkLifecycle
         WorkflowRun run,
         string workId,
         string workerId,
+        string processGeneration,
         Func<IReadOnlyList<WorkflowEvent>, Task> commitAsync)
     {
         var currentStage = run.CurrentStage();
@@ -279,6 +285,7 @@ internal sealed class WorkflowWorkLifecycle
                 run,
                 task.Id,
                 workerId,
+                processGeneration,
                 task.WorkId ?? workId);
             return claimedWorkId;
         }
@@ -297,7 +304,7 @@ internal sealed class WorkflowWorkLifecycle
                 .ToList();
             if (items.Count == 0) return null;
 
-            var checksWorkId = MarkChecksRunning(run, currentStage.Id, items);
+            var checksWorkId = MarkChecksRunning(run, currentStage.Id, processGeneration, items);
             // Checks claims emit no events, but the Running state must persist.
             await commitAsync([]);
             return checksWorkId;

@@ -9,6 +9,7 @@ using Mohist.Server.Workflow.Grains;
 using Mohist.Server.Workflow.Services;
 using Mohist.Workflow.Definition;
 using Xunit;
+using Mohist.Server.Runner.Grains;
 
 namespace Mohist.Server.UnitTests.Workflow.GrainContracts;
 
@@ -137,7 +138,7 @@ public sealed class WorkflowGrainActivationRecoverySpecs
 
         public Task<WorkItem?> AssignAndClaimAsync() => Arrangement.AssignAndClaimAsync();
 
-        public Task<ReportAck> ReportCompletedAsync(WorkItem item) =>
+        public Task<WorkReportVerdict> ReportCompletedAsync(WorkItem item) =>
             Arrangement.ReportCompletedAsync(item);
 
         /// <summary>Builds a fresh activated grain over the same persisted run.</summary>

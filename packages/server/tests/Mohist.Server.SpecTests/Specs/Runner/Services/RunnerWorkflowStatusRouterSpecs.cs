@@ -183,37 +183,40 @@ public class RunnerWorkflowStatusRouterSpecs
         public Task<bool> HasIncompleteTaskByIdAsync(string id) => Task.FromResult(false);
         public Task<Mohist.Server.Workflow.Grains.WorkflowAssignmentResult> AssignWorkerAsync(string workerId) =>
             Task.FromResult(new Mohist.Server.Workflow.Grains.WorkflowAssignmentResult(WorkflowAssignmentStatus.Assigned));
-        public Task<WorkItem?> ClaimNextAsync(string workerId) =>
+        public Task<WorkItem?> ClaimNextAsync(string workerId, string processGeneration) =>
             Task.FromResult<WorkItem?>(null);
         public Task<WorkDispatch?> StoreActiveWorkDispatchAsync(string workerId, string workId, WorkDispatch dispatch) =>
             Task.FromResult<WorkDispatch?>(dispatch);
-        public Task<Mohist.Server.Workflow.Grains.ReportAck> FailActiveWorkAsync(string workerId, string message)
-            => Task.FromResult(Mohist.Server.Workflow.Grains.ReportAck.Stale);
-        public Task<Mohist.Server.Workflow.Grains.ReportAck> InterruptActiveWorkAsync(string workerId, string reason)
-            => Task.FromResult(Mohist.Server.Workflow.Grains.ReportAck.Stale);
-        public Task<Mohist.Server.Workflow.Grains.ReportAck> AbandonActiveWorkAsync(string workerId, string workId, string reason)
-            => Task.FromResult(Mohist.Server.Workflow.Grains.ReportAck.Stale);
-        public Task<Mohist.Server.Workflow.Grains.ReportAck> BindAgentExecutionAsync(AgentExecutionBinding binding)
-            => Task.FromResult(Mohist.Server.Workflow.Grains.ReportAck.Stale);
+        public Task<Mohist.Server.Runner.Grains.WorkReportVerdict> FailActiveWorkAsync(
+            string workerId,
+            string workId,
+            string processGeneration,
+            string message) => Task.FromResult(Mohist.Server.Runner.Grains.WorkReportVerdict.Refused);
+        public Task<Mohist.Server.Runner.Grains.WorkReportVerdict> InterruptActiveWorkAsync(string workerId, string reason)
+            => Task.FromResult(Mohist.Server.Runner.Grains.WorkReportVerdict.Refused);
+        public Task<Mohist.Server.Runner.Grains.WorkReportVerdict> AbandonActiveWorkAsync(string workerId, string workId, string reason)
+            => Task.FromResult(Mohist.Server.Runner.Grains.WorkReportVerdict.Refused);
+        public Task<Mohist.Server.Runner.Grains.WorkReportVerdict> BindAgentExecutionAsync(AgentExecutionBinding binding)
+            => Task.FromResult(Mohist.Server.Runner.Grains.WorkReportVerdict.Refused);
         public Task<AgentExecutionBinding?> GetBoundAgentExecutionAsync(string taskRunId, string workId, string runnerId)
             => Task.FromResult<AgentExecutionBinding?>(null);
         public Task<bool> CanStartAgentCleanupAsync(AgentExecutionBinding binding) => Task.FromResult(false);
-        public Task<Mohist.Server.Workflow.Grains.ReportAck> ObserveAgentExecutionAsync(AgentExecutionObservation observation)
-            => Task.FromResult(Mohist.Server.Workflow.Grains.ReportAck.Stale);
-        public Task<Mohist.Server.Workflow.Grains.ReportAck> ObserveAgentResultUnknownAsync(string workerId, string taskRunId, string workId, string reasonCode, string? message = null)
-            => Task.FromResult(Mohist.Server.Workflow.Grains.ReportAck.Stale);
-        public Task<Mohist.Server.Workflow.Grains.ReportAck> ObserveAgentRunnerDisconnectedAsync(string workerId)
-            => Task.FromResult(Mohist.Server.Workflow.Grains.ReportAck.Stale);
-        public Task<Mohist.Server.Workflow.Grains.ReportAck> RejectActiveWorkDispatchAsync(string workerId, string workId, ExecutionError error)
-            => Task.FromResult(Mohist.Server.Workflow.Grains.ReportAck.Stale);
-        public Task<Mohist.Server.Workflow.Grains.ReportAck> ReceiveTaskReportAsync(
+        public Task<Mohist.Server.Runner.Grains.WorkReportVerdict> ObserveAgentExecutionAsync(AgentExecutionObservation observation)
+            => Task.FromResult(Mohist.Server.Runner.Grains.WorkReportVerdict.Refused);
+        public Task<Mohist.Server.Runner.Grains.WorkReportVerdict> ObserveAgentResultUnknownAsync(string workerId, string taskRunId, string workId, string reasonCode, string? message = null)
+            => Task.FromResult(Mohist.Server.Runner.Grains.WorkReportVerdict.Refused);
+        public Task<Mohist.Server.Runner.Grains.WorkReportVerdict> ObserveAgentRunnerDisconnectedAsync(string workerId)
+            => Task.FromResult(Mohist.Server.Runner.Grains.WorkReportVerdict.Refused);
+        public Task<Mohist.Server.Runner.Grains.WorkReportVerdict> RejectActiveWorkDispatchAsync(string workerId, string workId, ExecutionError error)
+            => Task.FromResult(Mohist.Server.Runner.Grains.WorkReportVerdict.Refused);
+        public Task<Mohist.Server.Runner.Grains.WorkReportVerdict> ReceiveTaskReportAsync(
             string workerId,
             string workId,
             TaskReport report,
             AgentExecutionBinding? agentBinding = null)
-            => Task.FromResult(Mohist.Server.Workflow.Grains.ReportAck.Stale);
-        public Task<Mohist.Server.Workflow.Grains.ReportAck> ReceiveCheckReportAsync(string workerId, string workId, CheckReport report)
-            => Task.FromResult(Mohist.Server.Workflow.Grains.ReportAck.Stale);
+            => Task.FromResult(Mohist.Server.Runner.Grains.WorkReportVerdict.Refused);
+        public Task<Mohist.Server.Runner.Grains.WorkReportVerdict> ReceiveCheckReportAsync(string workerId, string workId, CheckReport report)
+            => Task.FromResult(Mohist.Server.Runner.Grains.WorkReportVerdict.Refused);
         public Task ReleaseStageLocksAsync(string stage, string reason) => Task.CompletedTask;
         public Task<bool> IsStoppedOrTerminalAsync() => Task.FromResult(true);
         public Task<string?> GetCurrentWorkIdAsync() => Task.FromResult<string?>(null);
