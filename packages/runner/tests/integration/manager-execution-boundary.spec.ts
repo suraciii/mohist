@@ -1,8 +1,8 @@
 import { spawn } from 'node:child_process'
 import { chmod, mkdir, mkdtemp, writeFile } from 'node:fs/promises'
-import { existsSync, readFileSync, readdirSync } from 'node:fs'
+import { existsSync, readFileSync, readdirSync, watch } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 import { createConnection } from 'node:net'
 import { createServer as createHttpServer, type Server as HttpServer } from 'node:http'
 import { describe, expect, it } from 'vitest'
@@ -35,6 +35,29 @@ interface StubMo {
   readonly marker: string
   readonly frozenWorkDir: string
   invocations(): StubInvocation[]
+}
+
+async function waitForInvocation(stub: StubMo): Promise<StubInvocation> {
+  const existing = stub.invocations()[0]
+  if (existing) return existing
+
+  const signal = AbortSignal.timeout(10_000)
+  return await new Promise<StubInvocation>((resolve, reject) => {
+    const watcher = watch(dirname(stub.marker), { signal }, () => {
+      const invocation = stub.invocations()[0]
+      if (!invocation) return
+      watcher.close()
+      resolve(invocation)
+    })
+    watcher.on('error', reject)
+    signal.addEventListener('abort', () => reject(new Error('stub invocation marker was not observed')), { once: true })
+
+    const invocation = stub.invocations()[0]
+    if (invocation) {
+      watcher.close()
+      resolve(invocation)
+    }
+  })
 }
 
 async function writeStubMo(root: string, holdSignal: boolean, proxyUrl: string | null = null): Promise<StubMo> {
@@ -364,9 +387,9 @@ describe.sequential('ManagerExecutionBoundary', () => {
     const pending = requestLauncher(broker, ['slack', 'status'], boundary.environment().MOHIST_MANAGER_LAUNCHER!).catch(
       () => null,
     )
-    await new Promise((resolve) => setTimeout(resolve, 120))
+    const invocation = await waitForInvocation(stub)
     expect(stub.invocations()).toHaveLength(1)
-    const childPid = stub.invocations()[0].pid
+    const childPid = invocation.pid
     const inspectedEnvironment = readFileSync(`/proc/${childPid}/environ`, 'utf8')
     expect(inspectedEnvironment).not.toContain(grant.managementCredential)
     expect(inspectedEnvironment).not.toContain(grant.replyCredential)
