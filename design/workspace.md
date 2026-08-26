@@ -59,6 +59,10 @@ Origin = { kind: issue, issueNumber }
 - RepositoryNames are access grants and default checkout targets, not evidence
   of materialized checkouts. Workflow preparation owns the clean Issue checkout;
   an interactive Agent organizes its own checkout layout.
+- The Server owns the logical Workspace and its lifecycle; the Runner owns
+  only the local materialization and is the only component that touches that
+  filesystem. Losing the directory never deletes the durable identity; later
+  use rematerializes the same logical Workspace.
 
 ## Semantics
 
@@ -179,6 +183,11 @@ assignment remains pinned to its original Runner, so the cross-Runner Workflow
 rematerialization target above is not implemented. The Slack adapter also does
 not yet propagate a provider channel-archive event to the Server's archive
 boundary.
+
+The per-WorkflowRun Workspace manager and its Runner-side registry remain an
+implementation gap for dispatches that still lack a named Workspace. New code
+must not extend that fallback; removing it needs no compatibility model
+because Runner materializations are reconstructible.
 
 Open questions concern compound-Issue repository attachment, Runtime Binding
 after rematerialization, and whether Workflow OpenSpec artifacts belong at the
