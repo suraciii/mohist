@@ -1,105 +1,103 @@
-# Self-Review: Issue 643 Plan Artifacts
-
-## Must-Fix Findings
-
-### MF-1 — Focused-scope Resource wording contradicts the existing plan contract
-
-The spec's focused-scope scenario requires `server-unit` to have no
-`duration-measurement` Resource (`specs/duration-measurement-scope-isolation/spec.md:33-35`),
-and T-001 repeats that a zero-match or focused scope receives no Resource
-(`tasks.json:13`). This is inconsistent with both the Issue 643 acceptance
-contract and the current code:
-
-- The issue requires focused selection to receive no unrelated Track or
-  dependency, while the zero-match criterion requires the selected plan's
-  existing Resources and dependencies to remain unchanged.
-- `planTracks` always starts with `laneResources(track)`
-  (`scripts/test-duration/guard.ts:434-440`), so it preserves Resources already
-  declared by the selected Track.
-- The canonical `server-unit` Track already declares
-  `duration-measurement` in `test-duration.config.jsonc:83`. A focused
-  `server-unit` plan therefore legitimately retains that pre-existing Resource.
-
-Following the current wording could make the implementation remove an existing
-Resource, violating the zero-match unchanged-plan requirement and changing
-current Track policy outside this Issue. The spec and task acceptance must
-distinguish a pre-existing Track Resource from a Resource newly added by the
-duration-measurement phase, and require only that no absent Track or new phase
-constraint is introduced.
+# Self-Review: Issue 643 Plan Artifacts (Round 2)
 
 ## Verdict
 
-FAIL — MF-1 makes the focused and zero-match contract incorrect relative to the
-Issue and current planner behavior. The plan is not ready to build until the
-Resource wording is reconciled.
+PASS - the previous must-fix finding is fixed properly, the correction
+introduced no must-fix regression, and the plan is ready to build.
+
+## Previous Finding Disposition
+
+### MF-1 - FIXED PROPERLY
+
+The prior review identified a contradiction between the focused-scope scenario
+and the current lane Resource model. The disposition is now consistent across
+the plan artifacts:
+
+- `specs/duration-measurement-scope-isolation/spec.md:33-35` requires the
+  focused plan to preserve all existing `server-unit` Resources and
+  dependencies, while prohibiting only a Resource or dependency newly added by
+  the measurement phase and any absent Track.
+- `design.md:30-32` states that the zero-match early return preserves base Track
+  claims and does not strip existing Resources or dependencies.
+- `tasks.json:13` requires zero-match and focused scopes to preserve pre-existing
+  lane state while gaining no phase-added Resource or dependency.
+
+This matches the Issue's focused-scope criterion (no unrelated Track or
+dependency) and its zero-match criterion (planned tasks, Resources, and
+dependencies remain unchanged). It also matches the current implementation
+boundary: `planTracks` begins with `laneResources(track)`, and the canonical
+`server-unit` Track already declares `duration-measurement`. The fix changes no
+implementation or canonical configuration promise.
+
+## Regression Check
+
+Checked, no issue. The correction is a wording and contract clarification only:
+
+- Partial-match behavior still filters the configured sequence in order and
+  retains the selected `server-spec` measurement Resource and terminal barrier.
+- Full-portfolio ordering and the selected `runner` isolation boundary remain
+  unchanged.
+- Zero-match behavior still returns the selected plan unchanged.
+- Valid and malformed multi-lane coverage-terminal requirements remain intact.
+- The no-policy-change requirement still excludes configuration, scheduler,
+  populations, budgets, deadlines, Resource limits, worker capacity, and CI
+  topology changes.
+
+No new must-fix problem was found, and no previous observation was promoted to
+that bar. The prior observations remain valid as non-blocking implementation
+notes: the multi-lane branch needs an explicit synthetic test fixture, the
+Issue's 300-second wording should be reconciled with the repository's distinct
+full-suite and Track deadlines during implementation evidence, and a focused
+planner test command would improve execution ergonomics.
 
 ## Review Dimensions
 
-### Issue Basis — checked, no issue
+### Issue Basis - checked, no issue
 
-The current Issue 643 record was read before reviewing the artifacts. Its
-governing criteria are the ordered configured/selected intersection, partial
-match isolation, zero-match unchanged plans, full-order and isolation-track
-preservation, focused-scope locality, malformed multi-lane fail-closed behavior,
-and unchanged canonical budgets, population, deadline, and CI topology.
+The current Issue 643 body and comments were re-read before reviewing the
+disposition. The plan still targets the ordered configured/selected
+intersection, partial-match isolation, unchanged zero-match plans, full-order
+and isolation-track preservation, focused-scope locality, malformed multi-lane
+fail-closed behavior, and unchanged canonical policy.
 
-### Coverage — finding recorded
+### Coverage - checked, no issue
 
-The proposal, capability spec, design, and T-001 cover the Issue's main planner
-and test matrix. MF-1 is a coverage/contract defect because the focused-scope
-requirement adds a Resource-removal rule that the Issue does not require and
-that conflicts with the zero-match unchanged-plan rule.
+The proposal identifies the single capability. The spec covers every Issue
+criterion, including the corrected distinction between pre-existing and
+phase-added Resources. The design and T-001 map the same matrix to the shared
+planner and deterministic tests.
 
-### Correctness — finding recorded
+### Correctness - checked, no issue
 
-The ordered-intersection implementation described in `design.md` correctly
-addresses the reported missing-earlier-Track failure and preserves the existing
-graph construction. It cannot satisfy the current focused-scope wording
-without either removing a pre-existing Resource or failing the spec assertion;
-MF-1 therefore remains a correctness blocker.
+Filtering the configured measurement sequence before the existing group graph
+preserves the missing-earlier-Track repair. Returning the original selected plan
+for zero matches preserves base Resources and dependencies, while selected
+measurement groups still receive the existing barriers. The MF-1 correction
+removes the only contradictory focused-scope outcome.
 
-### Consistency With the Current Codebase — finding recorded
+### Consistency With the Current Codebase - checked, no issue
 
-The proposed implementation boundary in `applyDurationMeasurementPhase` is
-consistent with the current planner, scheduler, canonical configuration, and
-Resource model. The focused-scope Resource statement in the spec/tasks is the
-only identified contradiction with those existing conventions and code paths.
+The plan remains aligned with `applyDurationMeasurementPhase`, `planTracks`,
+`laneResources`, the scheduler Resource contract, the canonical configuration,
+and existing planner tests. No new API, configuration path, or abstraction is
+required.
 
-### Task Breakdown — checked, no issue
+### Task Breakdown - checked, no issue
 
-The single T-001 vertical slice is appropriately scoped: planner normalization,
-constraint preservation, and their deterministic tests are tightly coupled. Its
-dependency graph is a valid one-node DAG, and the task includes acceptance
-criteria for every required scenario. T-001 must inherit the corrected
-focused-scope Resource wording before execution.
+T-001 remains one complete vertical slice containing planner normalization and
+all required regression coverage. Its one-node dependency graph is valid, its
+acceptance criteria now match the corrected spec, and no standalone test task
+or missing implementation module remains.
 
 ## Verification Performed
 
 - Read the current Issue 643 body and comments with `mo issue view`.
-- Read `proposal.md`, `design.md`, `tasks.json`, and the capability spec.
-- Read the current planner, planner tests, canonical configuration, configuration
-  validation, scheduler regression, and Server CI scope.
-- Confirmed the worktree was clean before creating this review artifact.
-- No implementation tests were run because this review is limited to plan
-  artifacts and must not modify implementation files.
+- Re-read the previous self-review and verified MF-1 against all modified plan
+  artifacts and the current planner/configuration code.
+- Confirmed `tasks.json` remains valid with a one-node acyclic dependency graph.
+- Confirmed no plan artifact other than this self-review was modified during
+  this review.
+- No implementation tests were run because this is a plan re-review and the
+  implementation is not part of the review scope.
 
-## Observations
-
-- The design/tasks require valid and malformed multi-lane matrix tests, but the
-  current `planTracks` path creates one lane per validated Track and no other
-  production code constructs `-coverage` lanes. The implementation task should
-  make its synthetic planner fixture explicit so these tests do not become
-  superficial coverage of an unreachable shape. This is an observation because
-  the existing pure planner branch can still be exercised without changing the
-  Issue's scope.
-- The Issue refers to a 300-second suite deadline, while the checked-in
-  top-level `test-duration.config.jsonc` uses a 420-second full-suite deadline
-  and the `server-spec` Track uses a 300-second Track deadline. The plan correctly
-  forbids configuration changes; implementation evidence should identify which
-  existing Server budget/deadline is being preserved.
-- The tasks require `npm run test:fast` and `npm run verify`, but do not name a
-  focused command for the planner matrix. The existing package scripts expose
-  `test:archscripts`; this is an execution convenience rather than a plan
-  completeness blocker.
-
-<promise>FAIL</promise>
+<promise>PASS</promise>
