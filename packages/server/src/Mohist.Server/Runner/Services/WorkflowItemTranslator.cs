@@ -669,10 +669,13 @@ public sealed class WorkflowItemTranslator : IScopedService
     private static InboundReport TranslateChecksResult(WorkItem item, WorkResult result)
     {
         if (!HasValidCheckResultRows(item.Items, result.Output))
-            return MalformedCheckOutput(item);
+            return MalformedCheckOutput(item, result);
 
         var results = WorkflowDispatchHelpers.ParseCheckResults(result.Output);
-        return new InboundReport.Checks(new CheckReport(item.Stage, results));
+        return new InboundReport.Checks(new CheckReport(
+            item.Stage,
+            results,
+            RuntimeRecoveryReceiptFingerprint.For(result)));
     }
 
     private static bool HasValidCheckResultRows(IReadOnlyList<CheckItem>? checks, JsonElement? output)
@@ -722,14 +725,17 @@ public sealed class WorkflowItemTranslator : IScopedService
         return reportedNames.SetEquals(expectedNames);
     }
 
-    private static InboundReport MalformedCheckOutput(WorkItem item)
+    private static InboundReport MalformedCheckOutput(WorkItem item, WorkResult result)
     {
         const string message = "Runner reported an invalid check output shape. Check output must be a JSON array of named rows with object-or-null Action output.";
         var error = new ExecutionError("unexpected-error", message);
         var failed = (item.Items ?? [])
             .Select(check => new CheckResult(check.Name, CheckResultStatus.Failed, message, Error: error))
             .ToList();
-        return new InboundReport.Checks(new CheckReport(item.Stage, failed));
+        return new InboundReport.Checks(new CheckReport(
+            item.Stage,
+            failed,
+            RuntimeRecoveryReceiptFingerprint.For(result)));
     }
 
     /// <summary>

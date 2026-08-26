@@ -391,7 +391,7 @@ public class RunnerConfigApiSpecs : IAsyncLifetime
         var runnerId = await _fixture.RegisterRunnerAsync();
 
         // Idle path: /poll returns 204 with no body.
-        using (var poll = await _fixture.Client.PostAsync($"/api/runner/{runnerId}/poll", content: null))
+        using (var poll = await _fixture.Client.PostRunnerPollAsync(runnerId))
         {
             Assert.Equal(HttpStatusCode.NoContent, poll.StatusCode);
         }
@@ -434,7 +434,7 @@ public class RunnerConfigApiSpecs : IAsyncLifetime
             });
         await _fixture.WaitForAgentJobAssignmentPreparedAsync(jobKey);
 
-        using var response = await _fixture.Client.PostAsync($"/api/runner/{runnerId}/poll", content: null);
+        using var response = await _fixture.Client.PostRunnerPollAsync(runnerId);
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         var body = await response.ReadFirstDispatchElementAsync()
             ?? throw new InvalidOperationException("Expected a dispatch from /poll");
@@ -535,6 +535,7 @@ public class RunnerConfigFixture : IAsyncLifetime
         var runnerId = $"runner-config-{Guid.NewGuid():N}";
         using var response = await Client.PostAsJsonAsync($"/api/runner/{runnerId}/register", new
         {
+            processGeneration = TestRunnerGenerationExtensions.ProcessGeneration,
             capabilities = new[] { "spec/*" },
             hostname = "config-host",
             projectId,

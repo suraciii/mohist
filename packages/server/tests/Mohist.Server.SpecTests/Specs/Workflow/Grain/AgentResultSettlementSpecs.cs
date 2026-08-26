@@ -44,17 +44,17 @@ public sealed partial class AgentResultSettlementSpecs : WorkflowGrainSpecs
         var snapshots = Services.GetRequiredService<IDispatchSnapshotStore>();
         Assert.NotNull(await snapshots.LoadJsonAsync(_workflowId!, work.WorkId));
 
-        Assert.Equal(ReportAck.Accepted, await workflow.BindAgentExecutionAsync(binding));
-        Assert.Equal(ReportAck.Accepted, await workflow.ObserveAgentExecutionAsync(observation));
+        Assert.Equal(WorkReportVerdict.Accepted, await workflow.BindAgentExecutionAsync(binding));
+        Assert.Equal(WorkReportVerdict.Accepted, await workflow.ObserveAgentExecutionAsync(observation));
         Assert.Null(await snapshots.LoadJsonAsync(_workflowId!, work.WorkId));
 
         var unresolved = await LoadRunAsync(_workflowId!);
         Assert.True(unresolved.HasUnresolvedAgentResult());
         Assert.Null(unresolved.NextWork());
         Assert.Null(unresolved.CurrentPendingWork());
-        Assert.Null(await workflow.ClaimNextAsync(runnerId));
+        Assert.Null(await workflow.ClaimNextAsync(runnerId, "test-generation"));
         var recovery = Assert.Single((await Services.GetRequiredService<DispatchService>()
-            .PollAsync(runnerId, new RunnerPollRequest([], []))).Dispatches);
+            .PollAsync(runnerId, new RunnerPollRequest([], [], ProcessGeneration: TestRunnerGenerationExtensions.ProcessGeneration))).Dispatches);
         Assert.Equal(work.WorkId, recovery.WorkId);
         Assert.NotNull(recovery.AgentRecovery);
 
@@ -67,10 +67,10 @@ public sealed partial class AgentResultSettlementSpecs : WorkflowGrainSpecs
         var dispatch = Services.GetRequiredService<DispatchService>();
         Assert.Empty((await dispatch.PollAsync(
             runnerId,
-            new RunnerPollRequest([workKey], []))).Dispatches);
+            new RunnerPollRequest([workKey], [], ProcessGeneration: TestRunnerGenerationExtensions.ProcessGeneration))).Dispatches);
         Assert.Empty((await dispatch.PollAsync(
             runnerId,
-            new RunnerPollRequest([], [workKey]))).Dispatches);
+            new RunnerPollRequest([], [workKey], ProcessGeneration: TestRunnerGenerationExtensions.ProcessGeneration))).Dispatches);
 
         await Assert.ThrowsAsync<InvalidOperationException>(() => workflow.RetryAsync());
         await Assert.ThrowsAsync<InvalidOperationException>(() => workflow.RerunAsync());
@@ -109,8 +109,8 @@ public sealed partial class AgentResultSettlementSpecs : WorkflowGrainSpecs
         var dispatch = Services.GetRequiredService<DispatchService>();
         var querier = Services.GetRequiredService<WorkflowRunQuerier>();
 
-        Assert.Equal(ReportAck.Accepted, await workflow.BindAgentExecutionAsync(binding));
-        Assert.Equal(ReportAck.Accepted, await workflow.ObserveAgentExecutionAsync(observation));
+        Assert.Equal(WorkReportVerdict.Accepted, await workflow.BindAgentExecutionAsync(binding));
+        Assert.Equal(WorkReportVerdict.Accepted, await workflow.ObserveAgentExecutionAsync(observation));
 
         // Pre-deadline Unknown lease: the run is in the runner's activeWorks,
         // counts against capacity, and is part of the desired redelivery set.
@@ -118,7 +118,7 @@ public sealed partial class AgentResultSettlementSpecs : WorkflowGrainSpecs
         var preDeadlineOwner = Assert.Single(preDeadlineRuntime.ActiveWorks, item =>
             string.Equals(item.OwnerId, _workflowId, StringComparison.Ordinal));
         Assert.Equal(work.WorkId, preDeadlineOwner.WorkId);
-        var preDeadlineDesired = await dispatch.PollAsync(runnerId, new RunnerPollRequest([], []));
+        var preDeadlineDesired = await dispatch.PollAsync(runnerId, new RunnerPollRequest([], [], ProcessGeneration: TestRunnerGenerationExtensions.ProcessGeneration));
         var preDeadlineRecovery = Assert.Single(preDeadlineDesired.Dispatches);
         Assert.Equal(work.WorkId, preDeadlineRecovery.WorkId);
         Assert.Equal((IReadOnlyList<string>)[_workflowId!], await querier.FindRunningAssignedToAsync(runnerId));
@@ -148,7 +148,7 @@ public sealed partial class AgentResultSettlementSpecs : WorkflowGrainSpecs
             Assert.DoesNotContain(runtime.ActiveWorks, item =>
                 string.Equals(item.OwnerId, _workflowId, StringComparison.Ordinal));
 
-            var desired = await dispatch.PollAsync(runnerId, new RunnerPollRequest([], []));
+            var desired = await dispatch.PollAsync(runnerId, new RunnerPollRequest([], [], ProcessGeneration: TestRunnerGenerationExtensions.ProcessGeneration));
             Assert.Empty(desired.Dispatches);
 
             Assert.Empty(await querier.FindRunningAssignedToAsync(runnerId));
@@ -171,7 +171,7 @@ public sealed partial class AgentResultSettlementSpecs : WorkflowGrainSpecs
         // A matching late authoritative report still settles the attempt
         // through the workflow report path without reintroducing it into
         // activeWorks or capacity.
-        Assert.Equal(ReportAck.Accepted, await workflow.ReceiveTaskReportAsync(
+        Assert.Equal(WorkReportVerdict.Accepted, await workflow.ReceiveTaskReportAsync(
             runnerId,
             work.WorkId,
             new TaskReport(
@@ -186,7 +186,7 @@ public sealed partial class AgentResultSettlementSpecs : WorkflowGrainSpecs
         Assert.Empty(await querier.FindRunningAssignedToAsync(runnerId));
         Assert.Equal(0, await querier.CountRunningAssignedToAsync(runnerId));
         Assert.Empty((await runner.GetRuntimeStateAsync()).ActiveWorks);
-        Assert.Empty((await dispatch.PollAsync(runnerId, new RunnerPollRequest([], []))).Dispatches);
+        Assert.Empty((await dispatch.PollAsync(runnerId, new RunnerPollRequest([], [], ProcessGeneration: TestRunnerGenerationExtensions.ProcessGeneration))).Dispatches);
     }
 
     [Fact]
@@ -216,8 +216,8 @@ public sealed partial class AgentResultSettlementSpecs : WorkflowGrainSpecs
         var dispatch = Services.GetRequiredService<DispatchService>();
         var querier = Services.GetRequiredService<WorkflowRunQuerier>();
 
-        Assert.Equal(ReportAck.Accepted, await workflow.BindAgentExecutionAsync(binding));
-        Assert.Equal(ReportAck.Accepted, await workflow.ObserveAgentExecutionAsync(observation));
+        Assert.Equal(WorkReportVerdict.Accepted, await workflow.BindAgentExecutionAsync(binding));
+        Assert.Equal(WorkReportVerdict.Accepted, await workflow.ObserveAgentExecutionAsync(observation));
 
         var unknown = await LoadRunAsync(_workflowId!);
         var deadline = Assert.IsType<DateTimeOffset>(
@@ -238,7 +238,7 @@ public sealed partial class AgentResultSettlementSpecs : WorkflowGrainSpecs
         Assert.Equal(0, await querier.CountRunningAssignedToAsync(runnerId));
         Assert.DoesNotContain((await runner.GetRuntimeStateAsync()).ActiveWorks, item =>
             string.Equals(item.OwnerId, _workflowId, StringComparison.Ordinal));
-        Assert.Empty((await dispatch.PollAsync(runnerId, new RunnerPollRequest([], []))).Dispatches);
+        Assert.Empty((await dispatch.PollAsync(runnerId, new RunnerPollRequest([], [], ProcessGeneration: TestRunnerGenerationExtensions.ProcessGeneration))).Dispatches);
 
         var report = await reportService.ReportAsync(
             runnerId,
@@ -257,7 +257,7 @@ public sealed partial class AgentResultSettlementSpecs : WorkflowGrainSpecs
             binding.Runtime,
             binding.RuntimeSessionId);
 
-        Assert.Equal("stale", report.Ack);
+        Assert.Equal("refused", report.Ack);
         Assert.Equal("Running", report.WorkflowStatus);
 
         var after = await LoadRunAsync(_workflowId!);
@@ -290,12 +290,12 @@ public sealed partial class AgentResultSettlementSpecs : WorkflowGrainSpecs
         Assert.Equal(0, await querier.CountRunningAssignedToAsync(runnerId));
         Assert.DoesNotContain((await runner.GetRuntimeStateAsync()).ActiveWorks, item =>
             string.Equals(item.OwnerId, _workflowId, StringComparison.Ordinal));
-        Assert.Empty((await dispatch.PollAsync(runnerId, new RunnerPollRequest([], []))).Dispatches);
+        Assert.Empty((await dispatch.PollAsync(runnerId, new RunnerPollRequest([], [], ProcessGeneration: TestRunnerGenerationExtensions.ProcessGeneration))).Dispatches);
 
         // A subsequent matching late authoritative report still settles the
         // attempt, proving only an authoritative success/failure can clear
         // the Blocked state through ReceiveTaskReportAsync.
-        Assert.Equal(ReportAck.Accepted, await workflow.ReceiveTaskReportAsync(
+        Assert.Equal(WorkReportVerdict.Accepted, await workflow.ReceiveTaskReportAsync(
             runnerId,
             work.WorkId,
             new TaskReport(
@@ -332,7 +332,7 @@ public sealed partial class AgentResultSettlementSpecs : WorkflowGrainSpecs
             task.Id,
             new WorkResult("succeeded", "must never be accepted without a binding"),
             CancellationToken.None);
-        Assert.Equal("stale", succeededAck.Ack);
+        Assert.Equal("refused", succeededAck.Ack);
 
         var failure = await reportService.ReportAsync(
             runnerId,

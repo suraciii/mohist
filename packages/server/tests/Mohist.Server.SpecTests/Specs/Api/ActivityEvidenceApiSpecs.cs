@@ -122,6 +122,7 @@ public class ActivityEvidenceApiSpecs : ProjectEventsApiTestSupport
     {
         await _client.PostOkAsync($"/api/runner/{runnerId}/register", new
         {
+            processGeneration = TestRunnerGenerationExtensions.ProcessGeneration,
             capabilities = new[] { "spec/*" },
             hostname,
             projectId,

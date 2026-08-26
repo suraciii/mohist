@@ -31,6 +31,8 @@ public class AgentJobRow
     /// that have not yet found an eligible runner.</summary>
     public string? AssignedRunnerId { get; set; }
 
+    public string? ClaimedProcessGeneration { get; set; }
+
     /// <summary>Stable work identity the runner uses to track this job.
     /// Persisted alongside the dispatch snapshot so redelivery and
     /// reconciliation can recover without the legacy Runner work record.

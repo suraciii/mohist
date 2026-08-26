@@ -254,6 +254,12 @@ public abstract class HermesIssueNotificationTestSupport
 
         public Task SaveAsync(WorkflowRun run, IReadOnlyList<WorkflowEvent> events, CancellationToken ct = default) => SaveAsync(run, ct);
 
+        public Task SaveWithArtifactsAsync(
+            WorkflowRun run,
+            IReadOnlyList<WorkflowEvent> events,
+            WorkflowArtifactBindingIntent artifacts,
+            CancellationToken ct = default) => SaveAsync(run, ct);
+
         public Task<WorkflowRun?> LoadAsync(string workflowRunId, CancellationToken ct = default)
         {
             LoadCount++;

@@ -211,7 +211,7 @@ public class AgentLauncherSpecs : AgentLauncherSupportSpecs
             Assert.Equal(AgentJobStatus.Pending, pending.Status);
             Assert.False(string.IsNullOrWhiteSpace(pending.RunnerId));
             var assignedRunnerId = pending.RunnerId!;
-            var claim = await job.ClaimNextAsync(assignedRunnerId);
+            var claim = await job.ClaimNextAsync(assignedRunnerId, "test-generation");
             Assert.NotNull(claim);
             var before = await job.GetRuntimeSnapshotAsync();
             Assert.Equal(AgentJobStatus.Running, before.Status);

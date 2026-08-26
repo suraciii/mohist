@@ -1,7 +1,6 @@
 using System.Text.Json;
 using Mohist.Server.Agent.Grains;
 using Mohist.Server.Infrastructure;
-using Mohist.Server.Runner.Grains;
 using Mohist.Server.Sessions.Domain;
 using Mohist.Server.Sessions.Grains;
 using Mohist.Server.Sessions.Services;
@@ -9,6 +8,8 @@ using Mohist.Server.TestSupport;
 using Orleans;
 using Orleans.Core.Internal;
 using Xunit;
+using Mohist.Server.Runner.Grains;
+using Mohist.Server.Workflow.Grains;
 
 namespace Mohist.Server.SpecTests.Specs.Agent.Grain;
 

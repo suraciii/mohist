@@ -92,7 +92,7 @@ function createReportingMocks(): ReportingMocks {
     heartbeat: vi.fn(async () => undefined),
     disconnect: vi.fn(async () => undefined),
     poll: vi.fn(async () => []),
-    report: vi.fn(async () => ({ tracked: true })),
+    report: vi.fn(async () => ({ verdict: 'accepted' as const })),
     sendRecoveryReceipt: vi.fn(async (receipt: { receiptId: string }) => ({
       appliedReceiptId: receipt.receiptId,
       status: 'accepted',
@@ -237,7 +237,7 @@ describe('RunnerHost', () => {
         expect(result.requeue).toBe(true)
         expect(result.error?.code).toBe('stale-capability-snapshot')
         reported.resolve()
-        return { tracked: true, reason: 'requeued' }
+        return { verdict: 'accepted' as const }
       },
     )
     const controller = new AbortController()
@@ -279,7 +279,7 @@ describe('RunnerHost', () => {
     const controller = new AbortController()
     report.mockImplementation(async (reportedWork: { workId?: string }) => {
       if (reportedWork.workId === work.workId) redriven.resolve()
-      return { tracked: true, reason: 'accepted' }
+      return { verdict: 'accepted' as const }
     })
     poll.mockResolvedValue([])
     startControl.mockResolvedValue(undefined)
@@ -473,7 +473,7 @@ describe('RunnerHost', () => {
         }),
       ])
 
-      report.mockResolvedValue({ tracked: true })
+      report.mockResolvedValue({ verdict: 'accepted' as const })
       poll.mockResolvedValue([])
       const controller = new AbortController()
       const host = newRunnerHost()
@@ -640,7 +640,7 @@ describe('RunnerHost', () => {
         throw secondFailure
       }
       thirdReport.resolve()
-      return { tracked: true }
+      return { verdict: 'accepted' as const }
     })
     startControl.mockResolvedValue(undefined)
     stopControl.mockResolvedValue(undefined)
@@ -714,10 +714,10 @@ describe('RunnerHost', () => {
       reportedStatuses.push(result.status)
       if (reportAttempt === 1) {
         firstReport.resolve()
-        return { tracked: false, reason: 'observation-not-durable' }
+        return { verdict: 'outstanding' as const }
       }
       replayedReport.resolve()
-      return { tracked: true, reason: 'accepted' }
+      return { verdict: 'accepted' as const }
     })
     startControl.mockResolvedValue(undefined)
     stopControl.mockResolvedValue(undefined)
@@ -783,7 +783,7 @@ describe('RunnerHost', () => {
     await journal.begin(work)
     report.mockImplementation(async () => {
       reported.resolve()
-      return { tracked: true, reason: 'accepted' }
+      return { verdict: 'accepted' as const }
     })
     poll.mockResolvedValueOnce([work]).mockResolvedValue([])
     const controller = new AbortController()
@@ -827,7 +827,7 @@ describe('RunnerHost', () => {
     await journal.begin(work)
     report.mockImplementation(async () => {
       reported.resolve()
-      return { tracked: true, reason: 'accepted' }
+      return { verdict: 'accepted' as const }
     })
     poll.mockResolvedValueOnce([work]).mockResolvedValue([])
     const controller = new AbortController()
@@ -866,7 +866,7 @@ describe('RunnerHost', () => {
     report.mockImplementation(async () => {
       reportStarted.resolve()
       await releaseReport.promise
-      return { tracked: true, reason: 'accepted' }
+      return { verdict: 'accepted' as const }
     })
     poll.mockResolvedValueOnce([work]).mockResolvedValueOnce([work]).mockResolvedValue([])
     const controller = new AbortController()
@@ -926,7 +926,7 @@ describe('RunnerHost', () => {
     })
     report.mockImplementation(async () => {
       reported.resolve()
-      return { tracked: true, reason: 'accepted' }
+      return { verdict: 'accepted' as const }
     })
     poll.mockResolvedValueOnce([work]).mockResolvedValue([])
     const controller = new AbortController()

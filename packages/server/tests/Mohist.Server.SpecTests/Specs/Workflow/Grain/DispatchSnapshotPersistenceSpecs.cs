@@ -37,7 +37,7 @@ public class DispatchSnapshotPersistenceSpecs : WorkflowGrainSpecs
 
         await DeactivateWorkflowAsync(_workflowId!);
 
-        var redelivery = Assert.Single((await Dispatch().PollAsync(_runnerId!, new RunnerPollRequest([], []))).Dispatches);
+        var redelivery = Assert.Single((await Dispatch().PollAsync(_runnerId!, new RunnerPollRequest([], [], ProcessGeneration: TestRunnerGenerationExtensions.ProcessGeneration))).Dispatches);
         Assert.Equal(first, redelivery);
     }
 
@@ -97,7 +97,7 @@ public class DispatchSnapshotPersistenceSpecs : WorkflowGrainSpecs
         await DeactivateWorkflowAsync(_workflowId!);
 
         var redelivery = Assert.Single((await Dispatch().PollAsync(
-            _runnerId!, new RunnerPollRequest([], []))).Dispatches);
+            _runnerId!, new RunnerPollRequest([], [], ProcessGeneration: TestRunnerGenerationExtensions.ProcessGeneration))).Dispatches);
 
         Assert.Equal(first, redelivery);
         Assert.Equal(taskStateBefore, JSON.Serialize((await LoadRunAsync(_workflowId!)).CurrentStage().Tasks.Single()));
@@ -124,7 +124,7 @@ public class DispatchSnapshotPersistenceSpecs : WorkflowGrainSpecs
         var checksWork = checksList.Work;
         await DeactivateWorkflowAsync(_workflowId!);
 
-        var redelivery = Assert.Single((await Dispatch().PollAsync(_runnerId!, new RunnerPollRequest([], []))).Dispatches);
+        var redelivery = Assert.Single((await Dispatch().PollAsync(_runnerId!, new RunnerPollRequest([], [], ProcessGeneration: TestRunnerGenerationExtensions.ProcessGeneration))).Dispatches);
         Assert.Equal(checksWork.OwnerKind, redelivery.OwnerKind);
         Assert.Equal(checksWork.WorkId, redelivery.WorkId);
         Assert.Equal(checksWork.WorkflowRunId, redelivery.WorkflowRunId);

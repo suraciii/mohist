@@ -102,7 +102,8 @@ public class RuntimeEntrySpecs
 
         try
         {
-            await _fixture.Client.PostOkAsync("/api/runner/runtime-test-runner/register", new { capabilities = Array.Empty<string>(), hostname = "test-host", projectId = project.Id });
+            await _fixture.Client.PostOkAsync("/api/runner/runtime-test-runner/register", new {
+            processGeneration = TestRunnerGenerationExtensions.ProcessGeneration, capabilities = Array.Empty<string>(), hostname = "test-host", projectId = project.Id });
 
             // Register defaults the runner to 1 slot; PATCH bumps it to 2
             // so the capacity view reflects the new value.
@@ -135,7 +136,8 @@ public class RuntimeEntrySpecs
 
         try
         {
-            await _fixture.Client.PostOkAsync($"/api/runner/{runnerId}/register", new { capabilities = Array.Empty<string>(), hostname = "test-host" });
+            await _fixture.Client.PostOkAsync($"/api/runner/{runnerId}/register", new {
+            processGeneration = TestRunnerGenerationExtensions.ProcessGeneration, capabilities = Array.Empty<string>(), hostname = "test-host" });
 
             var status = await _fixture.Client.GetDataAsync<AgentStatusDto>($"/api/projects/{project.Id}/agent/status");
 
@@ -189,7 +191,8 @@ public class RuntimeEntrySpecs
             foreach (var id in existingIds)
                 await registry.UnregisterAsync(id);
 
-            await _fixture.Client.PostOkAsync($"/api/runner/{runnerId}/register", new { capabilities = Array.Empty<string>(), hostname = "test-host", projectId = project.Id });
+            await _fixture.Client.PostOkAsync($"/api/runner/{runnerId}/register", new {
+            processGeneration = TestRunnerGenerationExtensions.ProcessGeneration, capabilities = Array.Empty<string>(), hostname = "test-host", projectId = project.Id });
             await _fixture.Client.PostOkAsync($"/api/runner/{runnerId}/unregister", null);
 
             var runnersAfterUnregister = await registry.ListRunnersAsync();
@@ -199,7 +202,7 @@ public class RuntimeEntrySpecs
             var runnersAfterHeartbeat = await registry.ListRunnersAsync();
             Assert.Empty(runnersAfterHeartbeat);
 
-            using var poll = await _fixture.Client.PostAsync($"/api/runner/{runnerId}/poll", content: null);
+            using var poll = await _fixture.Client.PostRunnerPollAsync(runnerId);
             Assert.True(poll.IsSuccessStatusCode);
 
             var runnersAfterPoll = await registry.ListRunnersAsync();
@@ -220,7 +223,8 @@ public class RuntimeEntrySpecs
 
         try
         {
-            await _fixture.Client.PostOkAsync($"/api/runner/{runnerId}/register", new { capabilities = Array.Empty<string>(), hostname = "test-host", projectId = project.Id });
+            await _fixture.Client.PostOkAsync($"/api/runner/{runnerId}/register", new {
+            processGeneration = TestRunnerGenerationExtensions.ProcessGeneration, capabilities = Array.Empty<string>(), hostname = "test-host", projectId = project.Id });
 
             using var response = await _fixture.Client.PostAsync($"/api/runner/{runnerId}/heartbeat", content: null);
 
@@ -269,7 +273,8 @@ public class RuntimeEntrySpecs
 
         try
         {
-            await _fixture.Client.PostOkAsync($"/api/runner/{runnerId}/register", new { capabilities = Array.Empty<string>(), hostname = "test-host", projectId = project.Id });
+            await _fixture.Client.PostOkAsync($"/api/runner/{runnerId}/register", new {
+            processGeneration = TestRunnerGenerationExtensions.ProcessGeneration, capabilities = Array.Empty<string>(), hostname = "test-host", projectId = project.Id });
             await _fixture.Client.PatchOkAsync($"/api/runner/{runnerId}", new { slots = 4 });
 
             var workflowA = $"wf-div-a-{Guid.NewGuid():N}";

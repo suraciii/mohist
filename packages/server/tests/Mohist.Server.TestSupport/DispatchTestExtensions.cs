@@ -29,7 +29,7 @@ public static class DispatchTestExtensions
     {
         var dispatch = ResolveScoped<DispatchService>(serviceProvider);
         var runnerId = runner.GetPrimaryKeyString();
-        var response = await dispatch.PollAsync(runnerId, new RunnerPollRequest([], []));
+        var response = await dispatch.PollAsync(runnerId, new RunnerPollRequest([], [], ProcessGeneration: TestRunnerGenerationExtensions.ProcessGeneration));
         return response.Dispatches.FirstOrDefault();
     }
 
@@ -45,7 +45,7 @@ public static class DispatchTestExtensions
     {
         var dispatch = ResolveScoped<DispatchService>(serviceProvider);
         var runnerId = runner.GetPrimaryKeyString();
-        var response = await dispatch.PollAsync(runnerId, new RunnerPollRequest([], []));
+        var response = await dispatch.PollAsync(runnerId, new RunnerPollRequest([], [], ProcessGeneration: TestRunnerGenerationExtensions.ProcessGeneration));
         return response.Dispatches;
     }
 
@@ -82,7 +82,7 @@ public static class DispatchTestExtensions
                     $"test-turn:{workId}",
                     "opencode",
                     $"test-runtime-session:{workId}");
-                if (await workflow.BindAgentExecutionAsync(candidate) == ReportAck.Accepted)
+                if (await workflow.BindAgentExecutionAsync(candidate) == WorkReportVerdict.Accepted)
                     binding = candidate;
             }
         }

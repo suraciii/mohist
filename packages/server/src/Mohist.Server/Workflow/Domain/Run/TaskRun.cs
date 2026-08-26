@@ -32,6 +32,7 @@ public sealed class TaskRun
     public DateTimeOffset? StartedAt { get; set; }
     public DateTimeOffset? FinishedAt { get; set; }
     public string? WorkerId { get; set; }
+    public string? ProcessGeneration { get; set; }
     public string? WorkId { get; set; }
     public TerminalLogOwnership? TerminalLogOwnership { get; set; }
     public AgentResultSettlement? AgentResultSettlement { get; set; }

@@ -176,6 +176,7 @@ public class IssueModelVariantApiSpecs
         var runnerId = $"runtime-model-runner-{Guid.NewGuid():N}";
         await _fixture.Client.PostOkAsync($"/api/runner/{runnerId}/register", new
         {
+            processGeneration = TestRunnerGenerationExtensions.ProcessGeneration,
             capabilities = Array.Empty<string>(),
             hostname = "runtime-model-host",
             runtimeCatalogs = new

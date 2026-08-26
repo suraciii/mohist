@@ -3,13 +3,14 @@ using Microsoft.EntityFrameworkCore;
 using Mohist.Server.Agent.Grains;
 using Mohist.Server.Infrastructure;
 using Mohist.Server.Infrastructure.Data.Sessions;
-using Mohist.Server.Runner.Grains;
 using Mohist.Server.Sessions.Domain;
 using Mohist.Server.Sessions.Grains;
 using Mohist.Server.Sessions.Services;
 using Mohist.Server.SpecTests.Support;
 using Mohist.Server.TestSupport;
 using Xunit;
+using Mohist.Server.Runner.Grains;
+using Mohist.Server.Workflow.Grains;
 
 namespace Mohist.Server.SpecTests.Specs.Agent.Grain;
 
@@ -53,8 +54,8 @@ public class AgentJobTerminalTranscriptPersistenceSpecs : AgentJobGrainTestSuppo
             workId,
             new WorkResult(Status: "failed", Message: "transient", Output: JSON.DeserializeElement("{}"), ExitCode: 1));
 
-        Assert.False(replay.Accepted);
-        Assert.Equal("stale", replay.Reason);
+        Assert.True(replay.Accepted);
+        Assert.Null(replay.Reason);
         Assert.False((await job.GetRuntimeSnapshotAsync()).HasPendingSessionClose);
 
         var persisted = Assert.Single(

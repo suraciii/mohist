@@ -181,6 +181,7 @@ public class WorkflowArtifactUploadRouteSpecs
         var projectId = $"agent-upload-project-{Guid.NewGuid():N}";
         await _fixture.Client.PostOkAsync($"/api/runner/{runnerId}/register", new
         {
+            processGeneration = TestRunnerGenerationExtensions.ProcessGeneration,
             capabilities = new[] { "spec/task" },
             hostname = "test-host",
             projectId,
@@ -259,6 +260,7 @@ public class WorkflowArtifactUploadRouteSpecs
         var runnerId = $"upload-test-{Guid.NewGuid():N}";
         await _fixture.Client.PostOkAsync($"/api/runner/{runnerId}/register", new
         {
+            processGeneration = TestRunnerGenerationExtensions.ProcessGeneration,
             capabilities = new[] { "spec/task", "spec/check" },
             hostname = "test-host",
             projectId,

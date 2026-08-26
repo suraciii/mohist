@@ -52,7 +52,7 @@ public class WorkflowRunInvariantTests
         var run = BuildRun(assign: false);
         run.AssignTo("worker-1", TestTime.UtcNow);
 
-        run.StartTask("work-1", "worker-1", DateTimeOffset.UnixEpoch);
+        run.StartTask("work-1", "worker-1", "test-process-generation", DateTimeOffset.UnixEpoch);
         var task = run.CurrentStage().Tasks[0];
 
         Assert.Equal(TaskRunStatus.Running, task.Status);
@@ -100,7 +100,7 @@ public class WorkflowRunInvariantTests
         var run = BuildRun(requiresApproval: true);
         Assert.Equal(WorkflowRunStatus.Ready, run.Status);
 
-        run.StartTask("work-1", "worker-1", DateTimeOffset.UnixEpoch);
+        run.StartTask("work-1", "worker-1", "test-process-generation", DateTimeOffset.UnixEpoch);
         var events = run.CompleteTask(DateTimeOffset.UnixEpoch);
 
         Assert.Equal(WorkflowRunStatus.AwaitingApproval, run.Status);
@@ -114,7 +114,7 @@ public class WorkflowRunInvariantTests
         var run = BuildMultiTaskRun();
         Assert.Equal(WorkflowRunStatus.Ready, run.Status);
 
-        run.StartTask("work-1", "worker-1", DateTimeOffset.UnixEpoch);
+        run.StartTask("work-1", "worker-1", "test-process-generation", DateTimeOffset.UnixEpoch);
         run.CompleteTask(DateTimeOffset.UnixEpoch);
 
         Assert.NotEqual(WorkflowRunStatus.Paused, run.Status);
@@ -126,7 +126,7 @@ public class WorkflowRunInvariantTests
     public void FailTaskIsPolicyReactionNotStatusDerivation()
     {
         var run = BuildRun();
-        run.StartTask("work-1", "worker-1", DateTimeOffset.UnixEpoch);
+        run.StartTask("work-1", "worker-1", "test-process-generation", DateTimeOffset.UnixEpoch);
         var task = run.CurrentStage().Tasks[0];
         Assert.Equal(TaskRunStatus.Running, task.Status);
         Assert.Equal(WorkflowRunStatus.Running, run.Status);
@@ -149,7 +149,7 @@ public class WorkflowRunInvariantTests
         var run = BuildMultiTaskRun();
         Assert.Equal(WorkflowRunStatus.Ready, run.Status);
 
-        run.StartTask("work-1", "worker-1", DateTimeOffset.UnixEpoch);
+        run.StartTask("work-1", "worker-1", "test-process-generation", DateTimeOffset.UnixEpoch);
         Assert.Equal(WorkflowRunStatus.Running, run.Status);
         Assert.Equal(TaskRunStatus.Running, run.CurrentStage().Tasks[0].Status);
 

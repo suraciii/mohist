@@ -6,6 +6,9 @@ public sealed class RunnerState
     [Id(0)] public RunnerInfo? LastKnownInfo { get; set; }
     [Id(1)] public string? LastKnownActionCatalogJson { get; set; }
     [Id(2)] public RunnerUpdateInterruptFence? UpdateInterruptFence { get; set; }
+    [Id(3)] public string? CurrentProcessGeneration { get; set; }
+    [Id(4)] public string? PendingProcessGeneration { get; set; }
+    [Id(5)] public string? ClosingProcessGeneration { get; set; }
 }
 
 /// <summary>

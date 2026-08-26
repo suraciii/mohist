@@ -1,7 +1,6 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using Mohist.Server.Infrastructure;
-using Mohist.Server.Runner.Grains;
 using Mohist.Workflow.Definition;
 using Mohist.Server.Workflow.Domain.Run;
 using Xunit;
@@ -38,7 +37,7 @@ public partial class ApprovalFeedbackTests
             [new("plan-ok", "Plan OK", "spec/check")],
             DateTimeOffset.UnixEpoch);
         run.AssignTo("worker-1", TestTime.UtcNow);
-        run.StartTask("draft.1", "worker-1", DateTimeOffset.UnixEpoch);
+        run.StartTask("draft.1", "worker-1", "test-process-generation", DateTimeOffset.UnixEpoch);
         run.CompleteTask(DateTimeOffset.UnixEpoch);
         run.PassCheck(new CheckResult("plan-ok", CheckResultStatus.Passed), DateTimeOffset.UnixEpoch);
         return run;
@@ -214,7 +213,7 @@ public partial class ApprovalFeedbackTests
         // the checks before asserting AwaitingApproval.
         var current = run.CurrentStage();
         var feedbackTask = current.Tasks.Last(t => t.CausedByFeedbackId is not null);
-        run.StartTask(feedbackTask.Id, "worker-1", DateTimeOffset.UnixEpoch);
+        run.StartTask(feedbackTask.Id, "worker-1", "test-process-generation", DateTimeOffset.UnixEpoch);
         run.CompleteTask(DateTimeOffset.UnixEpoch);
         run.PassCheck(new CheckResult("plan-ok", CheckResultStatus.Passed), DateTimeOffset.UnixEpoch);
 
@@ -259,7 +258,7 @@ public partial class ApprovalFeedbackTests
             [new("build-ok", "Build OK", "spec/check")],
             DateTimeOffset.UnixEpoch);
         run.AssignTo("worker-1", TestTime.UtcNow);
-        run.StartTask("compile.1", "worker-1", DateTimeOffset.UnixEpoch);
+        run.StartTask("compile.1", "worker-1", "test-process-generation", DateTimeOffset.UnixEpoch);
         run.FailTask(new TaskResult("failed", "boom"), DateTimeOffset.UnixEpoch);
 
         Assert.Equal(WorkflowRunStatus.Failed, run.Status);
@@ -354,11 +353,11 @@ public partial class ApprovalFeedbackTests
         var apply = tasks.Single(task => task.DefinitionId == "apply-feedback");
         var publish = tasks.Single(task => task.DefinitionId == "publish-feedback");
 
-        run.StartTask(apply.Id, "worker-1", DateTimeOffset.UnixEpoch);
+        run.StartTask(apply.Id, "worker-1", "test-process-generation", DateTimeOffset.UnixEpoch);
         run.CompleteTask(DateTimeOffset.UnixEpoch);
         Assert.Null(run.ResolveFeedback(feedbackId, apply.Id, JSON.DeserializeElement("\"applied\""), DateTimeOffset.UnixEpoch));
 
-        run.StartTask(publish.Id, "worker-1", DateTimeOffset.UnixEpoch);
+        run.StartTask(publish.Id, "worker-1", "test-process-generation", DateTimeOffset.UnixEpoch);
         run.CompleteTask(DateTimeOffset.UnixEpoch);
         var resolved = run.ResolveFeedback(feedbackId, publish.Id, JSON.DeserializeElement("\"published\""), DateTimeOffset.UnixEpoch);
 
@@ -458,7 +457,7 @@ public partial class ApprovalFeedbackTests
         var feedbackId = run.Feedback[0].Id;
         var current = run.CurrentStage();
         var feedbackTask = current.Tasks.Last(t => t.DefinitionId == "apply-feedback");
-        run.StartTask(feedbackTask.Id, "worker-1", DateTimeOffset.UnixEpoch);
+        run.StartTask(feedbackTask.Id, "worker-1", "test-process-generation", DateTimeOffset.UnixEpoch);
         run.CompleteTask(DateTimeOffset.UnixEpoch);
 
         var resolved = run.ResolveFeedback(feedbackId, feedbackTask.Id, JSON.DeserializeElement("\"applied retry semantics\""), DateTimeOffset.UnixEpoch);
@@ -489,7 +488,7 @@ public partial class ApprovalFeedbackTests
         run.RequestChanges("explain retry semantics", NextFeedbackId(run), DateTimeOffset.UnixEpoch, TestOperator);
         var feedbackId = run.Feedback[0].Id;
         var feedbackTask = run.CurrentStage().Tasks.Last(t => t.DefinitionId == "apply-feedback");
-        run.StartTask(feedbackTask.Id, "worker-1", DateTimeOffset.UnixEpoch);
+        run.StartTask(feedbackTask.Id, "worker-1", "test-process-generation", DateTimeOffset.UnixEpoch);
         run.CompleteTask(DateTimeOffset.UnixEpoch);
         run.ResolveFeedback(feedbackId, feedbackTask.Id, JSON.DeserializeElement("\"first summary\""), DateTimeOffset.UnixEpoch);
 

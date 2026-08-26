@@ -84,7 +84,7 @@ function createReportingMocks(): ReportingMocks {
     heartbeat: vi.fn(async () => undefined),
     disconnect: vi.fn(async () => undefined),
     poll: vi.fn(async () => []),
-    report: vi.fn(async () => ({ tracked: true })),
+    report: vi.fn(async () => ({ verdict: 'accepted' as const })),
     uploadTaskLog: vi.fn(async () => ({ status: 'changed', accepted: 0, truncated: false })),
     fetchConfig: vi.fn(async () => null),
     startControl: vi.fn(async () => undefined),
@@ -205,7 +205,7 @@ describe('RunnerHost', () => {
     const controller = new AbortController()
     report.mockImplementation(async (reportedWork: { workId?: string }) => {
       if (reportedWork.workId === work.workId) redriven.resolve()
-      return { tracked: true, reason: 'accepted' }
+      return { verdict: 'accepted' as const }
     })
     poll.mockResolvedValue([])
     startControl.mockResolvedValue(undefined)
@@ -270,7 +270,7 @@ describe('RunnerHost', () => {
         await originalAcknowledgeUnconfirmed.call(this, work)
         if (work.workId === agentWork.workId) observationAcknowledged.resolve()
       })
-    report.mockResolvedValue({ tracked: true, reason: 'accepted' })
+    report.mockResolvedValue({ verdict: 'accepted' as const })
     poll.mockResolvedValue([])
     const controller = new AbortController()
     const host = new RunnerHost({
@@ -334,7 +334,7 @@ describe('RunnerHost', () => {
         await originalAcknowledgeUnconfirmed.call(this, acknowledged)
         if (acknowledged.workId === work.workId) observationAcknowledged.resolve()
       })
-    report.mockResolvedValue({ tracked: true, reason: 'unknown' })
+    report.mockResolvedValue({ verdict: 'accepted' as const })
     poll.mockResolvedValue([])
     const controller = new AbortController()
     const host = new RunnerHost({
@@ -397,9 +397,9 @@ describe('RunnerHost', () => {
       attempts += 1
       if (attempts === 1) {
         firstObservation.resolve()
-        return { tracked: false, reason: 'observation-not-durable' }
+        return { verdict: 'outstanding' as const }
       }
-      return { tracked: true, reason: 'accepted' }
+      return { verdict: 'accepted' as const }
     })
     const originalAcknowledgeUnconfirmed = WorkResultJournal.prototype.acknowledgeUnconfirmed
     const acknowledgeUnconfirmed = vi
@@ -469,8 +469,8 @@ describe('RunnerHost', () => {
     let attempts = 0
     report.mockImplementation(async () => {
       attempts += 1
-      if (attempts === 1) return { tracked: false, reason: 'observation-not-durable' }
-      return { tracked: true, reason: 'accepted' }
+      if (attempts === 1) return { verdict: 'outstanding' as const }
+      return { verdict: 'accepted' as const }
     })
     poll.mockResolvedValueOnce([recoveryDispatch]).mockResolvedValue([])
     let executions = 0
@@ -567,7 +567,7 @@ describe('RunnerHost', () => {
     const journal = new WorkResultJournal('/virtual/mohist-runner-test')
     await journal.load()
 
-    report.mockResolvedValue({ tracked: true, reason: 'accepted' })
+    report.mockResolvedValue({ verdict: 'accepted' as const })
     poll.mockResolvedValueOnce([work]).mockResolvedValue([])
     const executeWithLog = vi.spyOn(WorkExecutor.prototype, 'executeWithLog').mockImplementation(async () => {
       throw new Error('recovery dispatch must not execute')
@@ -689,7 +689,7 @@ describe('RunnerHost', () => {
         }),
       ])
 
-      report.mockResolvedValue({ tracked: true })
+      report.mockResolvedValue({ verdict: 'accepted' as const })
       poll.mockResolvedValue([])
       const controller = new AbortController()
       const host = new RunnerHost({
@@ -775,7 +775,7 @@ describe('RunnerHost', () => {
     })
     report.mockImplementation(async (reportedWork: { workId?: string }) => {
       if (reportedWork.workId === work.workId) recoveredReport.resolve()
-      return { tracked: true, reason: 'accepted' }
+      return { verdict: 'accepted' as const }
     })
     const controller = new AbortController()
     const host = new RunnerHost({

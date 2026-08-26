@@ -26,7 +26,7 @@ public class TaskLifecycleTests
         var run = BuildRun();
         var task = run.CurrentStage().Tasks[0];
 
-        var events = run.StartTask("work-1", "worker-1", DateTimeOffset.UnixEpoch);
+        var events = run.StartTask("work-1", "worker-1", "test-process-generation", DateTimeOffset.UnixEpoch);
 
         Assert.Equal(TaskRunStatus.Running, task.Status);
         Assert.NotNull(task.StartedAt);
@@ -46,7 +46,7 @@ public class TaskLifecycleTests
     public void CompleteTask_SetsFinishedAtBeforeCompletingRunningTask()
     {
         var run = BuildRun();
-        run.StartTask("work-1", "worker-1", DateTimeOffset.UnixEpoch);
+        run.StartTask("work-1", "worker-1", "test-process-generation", DateTimeOffset.UnixEpoch);
         var task = run.CurrentStage().Tasks[0];
 
         var events = run.CompleteTask(DateTimeOffset.UnixEpoch);
@@ -77,7 +77,7 @@ public class TaskLifecycleTests
     public void TaskResult_WithWrongPersistedIdentityDoesNotFallBackToTheCurrentTask()
     {
         var run = BuildRun();
-        run.StartTask("work-1", "worker-1", DateTimeOffset.UnixEpoch);
+        run.StartTask("work-1", "worker-1", "test-process-generation", DateTimeOffset.UnixEpoch);
         var task = run.CurrentStage().Tasks[0];
 
         Assert.Empty(run.CompleteTask("other-stage", task.Id, DateTimeOffset.UnixEpoch));
@@ -110,7 +110,7 @@ public class TaskLifecycleTests
     public void FailTaskForStopped_FailsRunningTaskWithStoppedReason()
     {
         var run = BuildRun();
-        run.StartTask("work-1", "worker-1", DateTimeOffset.UnixEpoch);
+        run.StartTask("work-1", "worker-1", "test-process-generation", DateTimeOffset.UnixEpoch);
         var task = run.CurrentStage().Tasks[0];
 
         var events = run.FailTaskForStopped("stopped", DateTimeOffset.UnixEpoch);
@@ -128,7 +128,7 @@ public class TaskLifecycleTests
     public void RequeueTaskAfterPausedStop_ClearsActiveBindingAndUnlocksResumeAndRerun()
     {
         var run = BuildRun();
-        run.StartTask("work-1", "worker-1", DateTimeOffset.UnixEpoch);
+        run.StartTask("work-1", "worker-1", "test-process-generation", DateTimeOffset.UnixEpoch);
         run.Pause();
 
         Assert.True(run.RequeueTaskAfterPausedStop("work-1", "worker-1"));

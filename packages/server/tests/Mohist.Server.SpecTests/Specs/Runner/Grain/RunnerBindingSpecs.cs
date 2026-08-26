@@ -12,6 +12,21 @@ public class RunnerBindingSpecs : WorkflowGrainSpecs
     public RunnerBindingSpecs(WorkflowGrainFixture fixture) : base(fixture) { }
 
     [Fact]
+    public async Task ProcessGeneration_IsOpaqueExactIdentity()
+    {
+        var runnerId = $"opaque-generation-{Guid.NewGuid():N}";
+        var runner = Grains.GetGrain<IRunnerGrain>(runnerId);
+        await runner.RegisterAsync(
+            new RunnerInfo(runnerId, ["spec/*"], "test-host", "test-project"),
+            " generation ");
+
+        var exact = await runner.TryBeginPollAsync(" generation ");
+        Assert.True(exact.Admitted);
+        await runner.EndPollAsync(exact.AdmissionToken);
+        Assert.False((await runner.TryBeginPollAsync("generation")).Admitted);
+    }
+
+    [Fact]
     public async Task CapacityOneRunner_WithInFlightWork_DoesNotGetSecondWorkflow()
     {
         var runnerId = await RegisterRunnerAsync("shared-runner");

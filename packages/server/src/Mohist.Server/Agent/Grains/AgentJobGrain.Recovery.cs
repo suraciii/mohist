@@ -3,6 +3,7 @@ using Mohist.Server.Runner.Grains;
 using Mohist.Server.Sessions.Domain;
 using Mohist.Server.Infrastructure.Slack;
 using Mohist.Server.Sessions.Grains;
+using Mohist.Server.Workflow.Grains;
 
 namespace Mohist.Server.Agent.Grains;
 
@@ -17,13 +18,13 @@ public sealed partial class AgentJobGrain
     private async Task<AgentJobReportResult> ReportManagerCredentialExpiredAsync(WorkResult result)
     {
         if (!IsManagerInput())
-            return new AgentJobReportResult(false, "invalid-manager-expiry-report");
+            return new AgentJobReportResult(WorkReportVerdict.Refused, "invalid-manager-expiry-report");
 
         await EnterUnknownStateAsync("manager-credential-expired");
         if (State.PendingInitialTurnTerminalDelivery is { } pending)
             await DeliverInitialTurnTerminalAsync(pending);
         await EnsureManagerRecoveryAsync("manager-credential-expired");
-        return new AgentJobReportResult(true, "manager_credential_expired");
+        return new AgentJobReportResult(WorkReportVerdict.Accepted, "manager_credential_expired");
     }
 
     private async Task EnsureManagerRecoveryAsync(string reason)
@@ -100,7 +101,7 @@ public sealed partial class AgentJobGrain
                 await DeliverInitialTurnTerminalAsync(pending);
             await EnsureManagerRecoveryAsync("manager-execution-unknown");
         }
-        return new AgentJobReportResult(true, "unknown");
+        return new AgentJobReportResult(WorkReportVerdict.Accepted, "unknown");
     }
 
     private readonly TimeSpan _runnerLossRecoveryTimeout;

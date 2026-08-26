@@ -27,7 +27,8 @@ public sealed record AgentJobLedgerRecord(
     string? InitialTurnId,
     string? PinnedRunnerId = null,
     string LaunchVisibility = "visible",
-    TerminalLogOwnership? TerminalLogOwnership = null);
+    TerminalLogOwnership? TerminalLogOwnership = null,
+    string? ClaimedProcessGeneration = null);
 
 /// <summary>
 /// Sentinel for an optimistic-concurrency conflict on a save. Thrown when

@@ -11,6 +11,7 @@ using Mohist.Server.Sessions.Domain;
 using Mohist.Server.UnitTests.Support;
 using Mohist.Server.Workflow.Storage;
 using Xunit;
+using Mohist.Server.Workflow.Grains;
 
 namespace Mohist.Server.UnitTests.Issue.Services;
 

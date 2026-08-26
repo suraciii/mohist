@@ -4,6 +4,7 @@ using Mohist.Server.Infrastructure.Workspace;
 using Mohist.Server.Contracts;
 using Mohist.Server.Sessions.Services;
 using Xunit;
+using Mohist.Server.Workflow.Grains;
 
 namespace Mohist.Server.UnitTests.Runner.Contracts;
 

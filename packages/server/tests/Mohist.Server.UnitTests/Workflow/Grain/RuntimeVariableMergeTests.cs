@@ -18,7 +18,7 @@ public class RuntimeVariableMergeTests
             [new("check-1", "Check 1", "spec/check")],
             DateTimeOffset.UnixEpoch);
         run.AssignTo("runner-1", TestTime.UtcNow);
-        var events2 = run.StartTask("work-1", "runner-1", DateTimeOffset.UnixEpoch);
+        var events2 = run.StartTask("work-1", "runner-1", "test-process-generation", DateTimeOffset.UnixEpoch);
         var task = run.CurrentStage().Tasks.First(t => t.DefinitionId == "proposal");
         task.Status = TaskRunStatus.Completed;
         task.Output = JsonSerializer.Deserialize<JsonElement>("{\"openspecName\":\"issue-97\",\"changeDir\":\"openspec/changes/issue-97\"}");
@@ -46,7 +46,7 @@ public class RuntimeVariableMergeTests
             [new("check-1", "Check 1", "spec/check")],
             DateTimeOffset.UnixEpoch);
         run.AssignTo("runner-1", TestTime.UtcNow);
-        var events2 = run.StartTask("work-1", "runner-1", DateTimeOffset.UnixEpoch);
+        var events2 = run.StartTask("work-1", "runner-1", "test-process-generation", DateTimeOffset.UnixEpoch);
 
         var completed = run.CurrentStage().Tasks.First(t => t.DefinitionId == "proposal");
         completed.Status = TaskRunStatus.Completed;
@@ -74,7 +74,7 @@ public class RuntimeVariableMergeTests
             [new("check-1", "Check 1", "spec/check")],
             DateTimeOffset.UnixEpoch);
         run.AssignTo("runner-1", TestTime.UtcNow);
-        var events2 = run.StartTask("work-1", "runner-1", DateTimeOffset.UnixEpoch);
+        var events2 = run.StartTask("work-1", "runner-1", "test-process-generation", DateTimeOffset.UnixEpoch);
         var task = run.CurrentStage().Tasks.First(t => t.DefinitionId == "proposal");
         task.Status = TaskRunStatus.Completed;
         task.Output = JsonSerializer.Deserialize<JsonElement>("\"plain string\"");

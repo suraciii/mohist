@@ -26,6 +26,7 @@ public partial class WorkflowGrain : Grain, IWorkflowGrain, IWorkflowGrainContex
     private string? _cachedAssignedWorkerId;
     private bool _runDirty;
     private bool _runReloadRequired;
+    private string? _reportPersistenceWorkId;
     private readonly IWorkflowRunStore _runStore;
     private readonly IDispatchSnapshotStore _dispatchSnapshotStore;
     private readonly WorkflowDefinitionResolver _definitionResolver;
@@ -38,6 +39,7 @@ public partial class WorkflowGrain : Grain, IWorkflowGrain, IWorkflowGrainContex
     private readonly WorkflowStageInitializer _stageInitializer;
     private readonly WorkflowWorkLifecycle _workLifecycle;
     private readonly WorkflowItemTranslator? _workflowItemTranslator;
+    private readonly IWorkflowReportPersistenceFailureInjector _reportPersistenceFailures;
     private readonly TimeSpan _agentResultSettlementTimeout;
     private readonly TimeSpan _runnerLossRecoveryTimeout;
 
@@ -52,7 +54,8 @@ public partial class WorkflowGrain : Grain, IWorkflowGrain, IWorkflowGrainContex
         IOptions<WorkflowOptions> options,
         TimeProvider timeProvider,
         ILogger<WorkflowGrain> log,
-        WorkflowItemTranslator? workflowItemTranslator = null)
+        WorkflowItemTranslator? workflowItemTranslator = null,
+        IWorkflowReportPersistenceFailureInjector? reportPersistenceFailures = null)
         : base(context, runtime)
     {
         _runStore = runStore;
@@ -67,6 +70,7 @@ public partial class WorkflowGrain : Grain, IWorkflowGrain, IWorkflowGrainContex
         _stageInitializer = new WorkflowStageInitializer(this);
         _workLifecycle = new WorkflowWorkLifecycle(this);
         _workflowItemTranslator = workflowItemTranslator;
+        _reportPersistenceFailures = reportPersistenceFailures ?? NoopWorkflowReportPersistenceFailureInjector.Instance;
         _agentResultSettlementTimeout = ValidateSettlementTimeout(options.Value.AgentResultSettlementTimeout);
         _runnerLossRecoveryTimeout = ValidateRunnerLossRecoveryTimeout(options.Value.RunnerLossRecoveryTimeout);
     }
@@ -82,7 +86,8 @@ public partial class WorkflowGrain : Grain, IWorkflowGrain, IWorkflowGrainContex
         IOptions<WorkflowOptions> options,
         TimeProvider timeProvider,
         ILogger<WorkflowGrain> log,
-        WorkflowItemTranslator? workflowItemTranslator = null)
+        WorkflowItemTranslator? workflowItemTranslator = null,
+        IWorkflowReportPersistenceFailureInjector? reportPersistenceFailures = null)
     {
         _runStore = runStore;
         _dispatchSnapshotStore = dispatchSnapshotStore;
@@ -96,6 +101,7 @@ public partial class WorkflowGrain : Grain, IWorkflowGrain, IWorkflowGrainContex
         _stageInitializer = new WorkflowStageInitializer(this);
         _workLifecycle = new WorkflowWorkLifecycle(this);
         _workflowItemTranslator = workflowItemTranslator;
+        _reportPersistenceFailures = reportPersistenceFailures ?? NoopWorkflowReportPersistenceFailureInjector.Instance;
         _agentResultSettlementTimeout = ValidateSettlementTimeout(options.Value.AgentResultSettlementTimeout);
         _runnerLossRecoveryTimeout = ValidateRunnerLossRecoveryTimeout(options.Value.RunnerLossRecoveryTimeout);
     }
@@ -490,10 +496,11 @@ public partial class WorkflowGrain : Grain, IWorkflowGrain, IWorkflowGrainContex
         return new WorkflowAssignmentResult(WorkflowAssignmentStatus.Assigned, workerId);
     }
 
-    public async Task<WorkItem?> ClaimNextAsync(string workerId)
+    public async Task<WorkItem?> ClaimNextAsync(string workerId, string processGeneration)
     {
         RejectIfRunReloadRequired();
-        if (_run is null || _run.Status is not (WorkflowRunStatus.Ready or WorkflowRunStatus.Running))
+        if (string.IsNullOrWhiteSpace(processGeneration)
+            || _run is null || _run.Status is not (WorkflowRunStatus.Ready or WorkflowRunStatus.Running))
             return null;
 
         if (!_run.IsAssignedTo(workerId))
@@ -513,7 +520,7 @@ public partial class WorkflowGrain : Grain, IWorkflowGrain, IWorkflowGrainContex
             return null;
 
         var resolvedWorkId = await _workLifecycle.ClaimWorkAsync(
-            _run!, workId, workerId, events => CommitAsync(events));
+            _run!, workId, workerId, processGeneration, events => CommitAsync(events));
 
         if (resolvedWorkId is null)
             return null;
@@ -691,6 +698,25 @@ public partial class WorkflowGrain : Grain, IWorkflowGrain, IWorkflowGrainContex
     internal int? GetIssueNumber() =>
         _run?.Metadata?.IssueNumber is > 0 ? _run.Metadata.IssueNumber : null;
 
+    internal async Task CommitWithArtifactsAsync(
+        IReadOnlyList<WorkflowEvent> events,
+        WorkflowArtifactBindingIntent artifacts)
+    {
+        if (_run is null) return;
+        try
+        {
+            _runDirty = true;
+            await _runStore.SaveWithArtifactsAsync(_run, events, artifacts);
+            _runDirty = false;
+        }
+        catch
+        {
+            MarkRunReloadRequired();
+            DeactivateOnIdle();
+            throw;
+        }
+    }
+
     private async Task BindInitialRunAsync(
         string projectId,
         int? issueNumber,
@@ -777,6 +803,8 @@ public partial class WorkflowGrain : Grain, IWorkflowGrain, IWorkflowGrainContex
 
         try
         {
+            if (_reportPersistenceWorkId is not null)
+                _reportPersistenceFailures.BeforePersist(GrainKey, _reportPersistenceWorkId);
             await _runStore.SaveAsync(_run, events);
             _runDirty = false;
         }

@@ -172,6 +172,12 @@ public sealed class WorkflowRunBindingSnapshotTests
             IReadOnlyList<WorkflowEvent> events,
             CancellationToken ct = default) => SaveAsync(run, ct);
 
+        public Task SaveWithArtifactsAsync(
+            WorkflowRun run,
+            IReadOnlyList<WorkflowEvent> events,
+            WorkflowArtifactBindingIntent artifacts,
+            CancellationToken ct = default) => SaveAsync(run, ct);
+
         public Task<WorkflowRun?> LoadAsync(string workflowRunId, CancellationToken ct = default) =>
             Task.FromResult(_run?.Id == workflowRunId ? _run : null);
 

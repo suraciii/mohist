@@ -41,7 +41,7 @@ public sealed class WorkflowArtifactReportArbitrationSpecs : WorkflowGrainSpecs
                 work.TaskRunId,
                 new WorkResult("failed", "runner failed")));
 
-        Assert.Equal(["accepted", "stale"], reports.Select(report => report.Ack).Order().ToArray());
+        Assert.Equal(["accepted", "refused"], reports.Select(report => report.Ack).Order().ToArray());
         var workflow = Grains.GetGrain<IWorkflowGrain>(work.WorkflowRunId);
         Assert.Contains(await workflow.GetRunStatusAsync(), new[] { "Completed", "Failed" });
         var eventTypes = (await EventStore.ListAsync(work.WorkflowRunId))

@@ -1,7 +1,6 @@
 using System.Text.Json;
 using Mohist.Workflow.Definition;
 using Mohist.Server.Workflow.Domain;
-using Mohist.Server.Runner.Grains;
 using Mohist.Server.Workflow.Services;
 
 namespace Mohist.Server.Workflow.Domain.Run;
@@ -24,7 +23,7 @@ public sealed record WorkflowChecksWork(
     string Stage,
     List<CheckItem> Items) : WorkflowWork(Stage);
 
-public sealed record WorkflowActiveWork(WorkItem Item, string? TaskRunId)
+public sealed record WorkflowActiveWork(WorkItem Item, string? TaskRunId, string? ProcessGeneration)
 {
     public string WorkId => Item.Id ?? string.Empty;
     public bool IsTask => Item.IsTask;
@@ -271,9 +270,20 @@ public static partial class WorkflowRunExtensions
                 .Where(stage => string.Equals(stage.ChecksWorkId, workId, StringComparison.Ordinal))
                 .Take(2)
                 .ToList();
-            return checkMatches.Count == 1
-                ? ActiveChecks(checkMatches[0])?.Item
-                : null;
+            if (checkMatches.Count == 1)
+                return ActiveChecks(checkMatches[0])?.Item;
+
+            var terminalCheckMatches = run.Stages
+                .Where(stage => string.Equals(stage.TerminalChecksWorkId, workId, StringComparison.Ordinal))
+                .Take(2)
+                .ToList();
+            if (terminalCheckMatches.Count != 1)
+                return null;
+            var terminalStage = terminalCheckMatches[0];
+            var checks = terminalStage.Checks
+                .Select(check => new CheckItem(check.Name, check.Title, check.Uses, check.WithInput))
+                .ToList();
+            return WorkItem.Checks(terminalStage.Id, workId, checks);
         }
 
         /// <summary>
@@ -835,7 +845,7 @@ public static partial class WorkflowRunExtensions
             stage.Id, workId, task.Title, task.Uses,
             task.WithInput, task.Artifacts, task.SetVars, task.Recovery, task.RecoveryRemaining,
             task.ExpectInput);
-        return new WorkflowActiveWork(item, task.Id);
+        return new WorkflowActiveWork(item, task.Id, task.ProcessGeneration);
     }
 
     private static WorkflowActiveWork? ActiveChecks(StageRun stage)
@@ -850,7 +860,8 @@ public static partial class WorkflowRunExtensions
 
         return new WorkflowActiveWork(
             WorkItem.Checks(stage.Id, stage.ChecksWorkId, checks),
-            TaskRunId: null);
+            TaskRunId: null,
+            ProcessGeneration: stage.ChecksProcessGeneration);
     }
 
     private static TaskRun? NextUnclaimedTask(StageRun stage) =>

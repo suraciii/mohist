@@ -59,7 +59,7 @@ public partial class DispatchServiceReconciliationSpecs : Mohist.Server.SpecTest
                 [],
                 [new RuntimeReadinessWitness("pi", true, 1)],
                 ConnectionGeneration: "connection-stale",
-                AdmissionReady: true));
+                AdmissionReady: true, ProcessGeneration: TestRunnerGenerationExtensions.ProcessGeneration));
         Assert.Empty(staleConnection.Dispatches);
 
         var unhealthy = await Dispatch.PollAsync(
@@ -69,7 +69,7 @@ public partial class DispatchServiceReconciliationSpecs : Mohist.Server.SpecTest
                 [],
                 [new RuntimeReadinessWitness("pi", false, 1)],
                 ConnectionGeneration: "connection-current",
-                AdmissionReady: true));
+                AdmissionReady: true, ProcessGeneration: TestRunnerGenerationExtensions.ProcessGeneration));
         Assert.Empty(unhealthy.Dispatches);
 
         var first = Assert.Single((await Dispatch.PollAsync(
@@ -79,7 +79,7 @@ public partial class DispatchServiceReconciliationSpecs : Mohist.Server.SpecTest
                 [],
                 [new RuntimeReadinessWitness("pi", true, 1)],
                 ConnectionGeneration: "connection-current",
-                AdmissionReady: true))).Dispatches);
+                AdmissionReady: true, ProcessGeneration: TestRunnerGenerationExtensions.ProcessGeneration))).Dispatches);
 
         var redelivery = await Dispatch.PollAsync(
             runnerId,
@@ -88,7 +88,7 @@ public partial class DispatchServiceReconciliationSpecs : Mohist.Server.SpecTest
                 [],
                 [new RuntimeReadinessWitness("pi", false, 1)],
                 ConnectionGeneration: "connection-current",
-                AdmissionReady: true));
+                AdmissionReady: true, ProcessGeneration: TestRunnerGenerationExtensions.ProcessGeneration));
         Assert.Equal(first, Assert.Single(redelivery.Dispatches));
     }
 
@@ -121,7 +121,7 @@ public partial class DispatchServiceReconciliationSpecs : Mohist.Server.SpecTest
         var runnerId = _runnerId!;
         var originalDispatch = Assert.Single((await Dispatch.PollAsync(
             runnerId,
-            new RunnerPollRequest([], []))).Dispatches);
+            new RunnerPollRequest([], [], ProcessGeneration: TestRunnerGenerationExtensions.ProcessGeneration))).Dispatches);
         var original = Assert.Single((await LoadRunAsync(_workflowId!)).CurrentStage().Tasks);
         var binding = new AgentExecutionBinding(
             original.Id,
@@ -131,7 +131,7 @@ public partial class DispatchServiceReconciliationSpecs : Mohist.Server.SpecTest
             "reconnect-turn",
             "opencode",
             "reconnect-runtime-session");
-        Assert.Equal(ReportAck.Accepted, await workflow.BindAgentExecutionAsync(binding));
+        Assert.Equal(WorkReportVerdict.Accepted, await workflow.BindAgentExecutionAsync(binding));
 
         var operation = await Grains.GetGrain<IRunnerUpdateOperationGrain>(runnerId).StartOrGetAsync(
             new RunnerUpdateOperation(
@@ -151,12 +151,12 @@ public partial class DispatchServiceReconciliationSpecs : Mohist.Server.SpecTest
             originalDispatch.WorkId,
             original.Id,
             RunnerUpdateWorkStatus.Marked);
-        Assert.Equal(ReportAck.Accepted, await workflow.MarkUpdateInterruptedAsync(
+        Assert.Equal(WorkReportVerdict.Accepted, await workflow.MarkUpdateInterruptedAsync(
             original.Id,
             originalDispatch.WorkId,
             runnerId,
             operation.OperationId));
-        Assert.Empty((await Dispatch.PollAsync(runnerId, new RunnerPollRequest([], []))).Dispatches);
+        Assert.Empty((await Dispatch.PollAsync(runnerId, new RunnerPollRequest([], [], ProcessGeneration: TestRunnerGenerationExtensions.ProcessGeneration))).Dispatches);
 
         var receipt = new RuntimeRecoveryReceipt(
             _workflowId!,
@@ -176,7 +176,7 @@ public partial class DispatchServiceReconciliationSpecs : Mohist.Server.SpecTest
         var acknowledgement = await workflow.ReceiveRecoveryReceiptAsync(receipt);
         Assert.Equal(RuntimeRecoveryReceiptAckStatuses.Accepted, acknowledgement.Status);
 
-        var replacementPoll = await Dispatch.PollAsync(runnerId, new RunnerPollRequest([], []));
+        var replacementPoll = await Dispatch.PollAsync(runnerId, new RunnerPollRequest([], [], ProcessGeneration: TestRunnerGenerationExtensions.ProcessGeneration));
         var replacementDispatch = Assert.Single(replacementPoll.Dispatches);
         Assert.Equal(_workflowId, replacementDispatch.WorkflowRunId);
         Assert.Equal(1, replacementDispatch.RecoveryGeneration);
@@ -186,7 +186,7 @@ public partial class DispatchServiceReconciliationSpecs : Mohist.Server.SpecTest
         var replacementKey = WorkKey(_workflowId!, replacementDispatch.WorkId);
         var reportedPoll = await Dispatch.PollAsync(
             runnerId,
-            new RunnerPollRequest([replacementKey], []));
+            new RunnerPollRequest([replacementKey], [], ProcessGeneration: TestRunnerGenerationExtensions.ProcessGeneration));
         Assert.Empty(reportedPoll.Dispatches);
     }
 
@@ -195,7 +195,7 @@ public partial class DispatchServiceReconciliationSpecs : Mohist.Server.SpecTest
     {
         var workflow = await StartWorkflowAsync(SingleStage(checks: []));
         var runnerId = _runnerId!;
-        var first = Assert.Single((await Dispatch.PollAsync(runnerId, new RunnerPollRequest([], []))).Dispatches);
+        var first = Assert.Single((await Dispatch.PollAsync(runnerId, new RunnerPollRequest([], [], ProcessGeneration: TestRunnerGenerationExtensions.ProcessGeneration))).Dispatches);
 
         await using var scope = _fixture.Cluster.GetSiloServiceProvider(null).CreateAsyncScope();
         var snapshotStore = scope.ServiceProvider.GetRequiredService<IDispatchSnapshotStore>();
@@ -203,7 +203,7 @@ public partial class DispatchServiceReconciliationSpecs : Mohist.Server.SpecTest
         Assert.Equal(first, JSON.Deserialize<WorkDispatch>(storedJson!));
 
         await TestLifecycle.Deactivate(workflow);
-        var redelivery = Assert.Single((await Dispatch.PollAsync(runnerId, new RunnerPollRequest([], []))).Dispatches);
+        var redelivery = Assert.Single((await Dispatch.PollAsync(runnerId, new RunnerPollRequest([], [], ProcessGeneration: TestRunnerGenerationExtensions.ProcessGeneration))).Dispatches);
         Assert.Equal(first, redelivery);
     }
 
@@ -214,13 +214,13 @@ public partial class DispatchServiceReconciliationSpecs : Mohist.Server.SpecTest
             tasks: [new TaskDefinition("agent", "Agent", "mohist/pi")],
             checks: []));
         var runnerId = _runnerId!;
-        var work = Assert.Single((await Dispatch.PollAsync(runnerId, new RunnerPollRequest([], []))).Dispatches);
+        var work = Assert.Single((await Dispatch.PollAsync(runnerId, new RunnerPollRequest([], [], ProcessGeneration: TestRunnerGenerationExtensions.ProcessGeneration))).Dispatches);
         var key = WorkKey(_workflowId!, work.WorkId);
 
-        Assert.Equal(ReportAck.Accepted, await workflow.ObserveAgentRunnerDisconnectedAsync(runnerId));
-        Assert.Empty((await Dispatch.PollAsync(runnerId, new RunnerPollRequest([key], []))).Dispatches);
+        Assert.Equal(WorkReportVerdict.Accepted, await workflow.ObserveAgentRunnerDisconnectedAsync(runnerId));
+        Assert.Empty((await Dispatch.PollAsync(runnerId, new RunnerPollRequest([key], [], ProcessGeneration: TestRunnerGenerationExtensions.ProcessGeneration))).Dispatches);
 
-        Assert.Equal(ReportAck.Accepted, await workflow.ReceiveTaskReportAsync(
+        Assert.Equal(WorkReportVerdict.Accepted, await workflow.ReceiveTaskReportAsync(
             runnerId,
             work.WorkId,
             new TaskReport(
@@ -241,8 +241,8 @@ public partial class DispatchServiceReconciliationSpecs : Mohist.Server.SpecTest
             tasks: [new TaskDefinition("agent", "Agent", "mohist/pi")],
             checks: []));
         var runnerId = _runnerId!;
-        var first = Assert.Single((await Dispatch.PollAsync(runnerId, new RunnerPollRequest([], []))).Dispatches);
-        Assert.Equal(ReportAck.Accepted, await workflow.BindAgentExecutionAsync(new AgentExecutionBinding(
+        var first = Assert.Single((await Dispatch.PollAsync(runnerId, new RunnerPollRequest([], [], ProcessGeneration: TestRunnerGenerationExtensions.ProcessGeneration))).Dispatches);
+        Assert.Equal(WorkReportVerdict.Accepted, await workflow.BindAgentExecutionAsync(new AgentExecutionBinding(
             first.TaskRunId!,
             first.WorkId,
             runnerId,
@@ -251,9 +251,9 @@ public partial class DispatchServiceReconciliationSpecs : Mohist.Server.SpecTest
             "pi",
             "/pi/sessions/spec-1")));
 
-        Assert.Equal(ReportAck.Accepted, await workflow.ObserveAgentRunnerDisconnectedAsync(runnerId));
+        Assert.Equal(WorkReportVerdict.Accepted, await workflow.ObserveAgentRunnerDisconnectedAsync(runnerId));
 
-        var redelivery = Assert.Single((await Dispatch.PollAsync(runnerId, new RunnerPollRequest([], []))).Dispatches);
+        var redelivery = Assert.Single((await Dispatch.PollAsync(runnerId, new RunnerPollRequest([], [], ProcessGeneration: TestRunnerGenerationExtensions.ProcessGeneration))).Dispatches);
         Assert.Equal(first.WorkflowRunId, redelivery.WorkflowRunId);
         Assert.Equal(first.WorkId, redelivery.WorkId);
         Assert.Equal(first.TaskRunId, redelivery.TaskRunId);
@@ -267,23 +267,81 @@ public partial class DispatchServiceReconciliationSpecs : Mohist.Server.SpecTest
     }
 
     [Fact]
+    public async Task Redelivery_UnresolvedAgentWork_RequiresMatchingProcessGenerationWithoutReservingCapacity()
+    {
+        await ClearBacklogAsync();
+        var prefix = $"recovery-generation-{Guid.NewGuid():N}";
+        var projectId = $"{prefix}-project";
+        var runnerId = $"{prefix}-runner";
+        const string owningGeneration = "runner-process-generation-g1";
+        const string replacementGeneration = "runner-process-generation-g2";
+        var runner = Grains.GetGrain<IRunnerGrain>(runnerId);
+        var runnerInfo = new RunnerInfo(runnerId, ["spec/*"], "test-host", projectId);
+        await runner.RegisterAsync(runnerInfo, owningGeneration);
+        await runner.UpdateAsync(1);
+
+        var recoveryWorkflowId = $"{prefix}-recovery";
+        var recoveryWorkflow = Grains.GetGrain<IWorkflowGrain>(recoveryWorkflowId);
+        await SeedWorkflowTemplateAsync(
+            recoveryWorkflowId,
+            SingleStage(tasks: [new TaskDefinition("agent", "Agent", "mohist/pi")], checks: []),
+            projectId);
+        await recoveryWorkflow.StartAsync(TestInput(projectId));
+        var first = Assert.Single((await Dispatch.PollAsync(
+            runnerId,
+            new RunnerPollRequest([], [], ProcessGeneration: owningGeneration))).Dispatches);
+        Assert.Equal(WorkReportVerdict.Accepted, await recoveryWorkflow.BindAgentExecutionAsync(new AgentExecutionBinding(
+            first.TaskRunId!,
+            first.WorkId,
+            runnerId,
+            "session-generation",
+            "turn-generation",
+            "pi",
+            "/pi/sessions/spec-generation")));
+        Assert.Equal(WorkReportVerdict.Accepted, await recoveryWorkflow.ObserveAgentRunnerDisconnectedAsync(runnerId));
+
+        var owningPoll = await Dispatch.PollAsync(
+            runnerId,
+            new RunnerPollRequest([], [], ProcessGeneration: owningGeneration));
+        var recovery = Assert.Single(owningPoll.Dispatches);
+        Assert.Equal(recoveryWorkflowId, recovery.WorkflowRunId);
+        Assert.Equal(first.WorkId, recovery.WorkId);
+        Assert.NotNull(recovery.AgentRecovery);
+
+        await runner.RegisterAsync(runnerInfo, replacementGeneration);
+
+        var freshWorkflowId = $"{prefix}-fresh";
+        var freshWorkflow = Grains.GetGrain<IWorkflowGrain>(freshWorkflowId);
+        await SeedWorkflowTemplateAsync(freshWorkflowId, SingleStage(checks: []), projectId);
+        await freshWorkflow.StartAsync(TestInput(projectId));
+
+        var recoveryKey = WorkKey(recoveryWorkflowId, first.WorkId);
+        var replacementPoll = await Dispatch.PollAsync(
+            runnerId,
+            new RunnerPollRequest([recoveryKey], [], ProcessGeneration: replacementGeneration));
+        var fresh = Assert.Single(replacementPoll.Dispatches);
+        Assert.Equal(freshWorkflowId, fresh.WorkflowRunId);
+        Assert.Null(fresh.AgentRecovery);
+    }
+
+    [Fact]
     public async Task Redelivery_UnresolvedAgentWork_RequiresFullRuntimeBinding()
     {
         var workflow = await StartWorkflowAsync(SingleStage(
             tasks: [new TaskDefinition("agent", "Agent", "mohist/pi")],
             checks: []));
         var runnerId = _runnerId!;
-        var work = Assert.Single((await Dispatch.PollAsync(runnerId, new RunnerPollRequest([], []))).Dispatches);
+        var work = Assert.Single((await Dispatch.PollAsync(runnerId, new RunnerPollRequest([], [], ProcessGeneration: TestRunnerGenerationExtensions.ProcessGeneration))).Dispatches);
 
         // An unknown observation without a bound execution leaves the
         // settlement without runtime facts; redelivery stays closed.
-        Assert.Equal(ReportAck.Accepted, await workflow.ObserveAgentResultUnknownAsync(
+        Assert.Equal(WorkReportVerdict.Accepted, await workflow.ObserveAgentResultUnknownAsync(
             runnerId,
             work.TaskRunId!,
             work.WorkId,
             "runner-restarted"));
 
-        Assert.Empty((await Dispatch.PollAsync(runnerId, new RunnerPollRequest([], []))).Dispatches);
+        Assert.Empty((await Dispatch.PollAsync(runnerId, new RunnerPollRequest([], [], ProcessGeneration: TestRunnerGenerationExtensions.ProcessGeneration))).Dispatches);
         var run = await LoadRunAsync(_workflowId!);
         Assert.Equal(AgentResultSettlementState.Unknown, Assert.Single(run.CurrentStage().Tasks).AgentResultSettlement!.State);
     }
@@ -303,8 +361,8 @@ public partial class DispatchServiceReconciliationSpecs : Mohist.Server.SpecTest
             tasks: [new TaskDefinition("agent", "Agent", "mohist/pi")],
             checks: []));
         var runnerId = _runnerId!;
-        var first = Assert.Single((await Dispatch.PollAsync(runnerId, new RunnerPollRequest([], []))).Dispatches);
-        Assert.Equal(ReportAck.Accepted, await workflow.BindAgentExecutionAsync(new AgentExecutionBinding(
+        var first = Assert.Single((await Dispatch.PollAsync(runnerId, new RunnerPollRequest([], [], ProcessGeneration: TestRunnerGenerationExtensions.ProcessGeneration))).Dispatches);
+        Assert.Equal(WorkReportVerdict.Accepted, await workflow.BindAgentExecutionAsync(new AgentExecutionBinding(
             first.TaskRunId!,
             first.WorkId,
             runnerId,
@@ -313,7 +371,7 @@ public partial class DispatchServiceReconciliationSpecs : Mohist.Server.SpecTest
             "pi",
             "/pi/sessions/spec-blocked")));
 
-        Assert.Equal(ReportAck.Accepted, await workflow.ObserveAgentRunnerDisconnectedAsync(runnerId));
+        Assert.Equal(WorkReportVerdict.Accepted, await workflow.ObserveAgentRunnerDisconnectedAsync(runnerId));
         var unsettled = await LoadRunAsync(_workflowId!);
         var deadline = Assert.Single(unsettled.CurrentStage().Tasks).AgentResultSettlement!.DeadlineAt!.Value;
         _fixture.TimeProvider.Advance(deadline - _fixture.TimeProvider.GetUtcNow());
@@ -325,12 +383,12 @@ public partial class DispatchServiceReconciliationSpecs : Mohist.Server.SpecTest
         // The deadline released the attempt's active-work lease, so the Runner
         // must no longer be asked to recover it; the original attempt stays
         // addressable for a late authoritative result.
-        Assert.Empty((await Dispatch.PollAsync(runnerId, new RunnerPollRequest([], []))).Dispatches);
-        Assert.Empty((await Dispatch.PollAsync(runnerId, new RunnerPollRequest([], []))).Dispatches);
+        Assert.Empty((await Dispatch.PollAsync(runnerId, new RunnerPollRequest([], [], ProcessGeneration: TestRunnerGenerationExtensions.ProcessGeneration))).Dispatches);
+        Assert.Empty((await Dispatch.PollAsync(runnerId, new RunnerPollRequest([], [], ProcessGeneration: TestRunnerGenerationExtensions.ProcessGeneration))).Dispatches);
         Assert.Null(blocked.Assignment);
         Assert.Equal(first.WorkId, Assert.Single(blocked.CurrentStage().Tasks).WorkId);
 
-        Assert.Equal(ReportAck.Accepted, await workflow.ReceiveTaskReportAsync(
+        Assert.Equal(WorkReportVerdict.Accepted, await workflow.ReceiveTaskReportAsync(
             runnerId,
             first.WorkId,
             new TaskReport(
@@ -343,7 +401,7 @@ public partial class DispatchServiceReconciliationSpecs : Mohist.Server.SpecTest
         var recovered = await LoadRunAsync(_workflowId!);
         Assert.Equal(TaskRunStatus.Completed, Assert.Single(recovered.CurrentStage().Tasks).Status);
         Assert.False(recovered.HasUnresolvedAgentResult());
-        Assert.Empty((await Dispatch.PollAsync(runnerId, new RunnerPollRequest([], []))).Dispatches);
+        Assert.Empty((await Dispatch.PollAsync(runnerId, new RunnerPollRequest([], [], ProcessGeneration: TestRunnerGenerationExtensions.ProcessGeneration))).Dispatches);
     }
 
     [Fact]
@@ -360,8 +418,8 @@ public partial class DispatchServiceReconciliationSpecs : Mohist.Server.SpecTest
             SingleStage(tasks: [new TaskDefinition("agent", "Agent", "mohist/pi")], checks: []),
             projectId);
         await recoveryWorkflow.StartAsync(TestInput(projectId));
-        var work = Assert.Single((await Dispatch.PollAsync(runnerId, new RunnerPollRequest([], []))).Dispatches);
-        Assert.Equal(ReportAck.Accepted, await recoveryWorkflow.BindAgentExecutionAsync(new AgentExecutionBinding(
+        var work = Assert.Single((await Dispatch.PollAsync(runnerId, new RunnerPollRequest([], [], ProcessGeneration: TestRunnerGenerationExtensions.ProcessGeneration))).Dispatches);
+        Assert.Equal(WorkReportVerdict.Accepted, await recoveryWorkflow.BindAgentExecutionAsync(new AgentExecutionBinding(
             work.TaskRunId!,
             work.WorkId,
             runnerId,
@@ -369,7 +427,7 @@ public partial class DispatchServiceReconciliationSpecs : Mohist.Server.SpecTest
             "turn-slots",
             "pi",
             "/pi/sessions/spec-slots")));
-        Assert.Equal(ReportAck.Accepted, await recoveryWorkflow.ObserveAgentRunnerDisconnectedAsync(runnerId));
+        Assert.Equal(WorkReportVerdict.Accepted, await recoveryWorkflow.ObserveAgentRunnerDisconnectedAsync(runnerId));
 
         var freshWorkflow = Grains.GetGrain<IWorkflowGrain>($"{projectId}-fresh");
         await SeedWorkflowTemplateAsync($"{projectId}-fresh", SingleStage(checks: []), projectId);
@@ -377,7 +435,7 @@ public partial class DispatchServiceReconciliationSpecs : Mohist.Server.SpecTest
 
         // The runner holds no reported work, so the recovery render must not
         // consume the dispatch slot even at capacity.
-        var response = await Dispatch.PollAsync(runnerId, new RunnerPollRequest([], []));
+        var response = await Dispatch.PollAsync(runnerId, new RunnerPollRequest([], [], ProcessGeneration: TestRunnerGenerationExtensions.ProcessGeneration));
         var recovery = Assert.Single(response.Dispatches);
         Assert.Equal(work.WorkId, recovery.WorkId);
         Assert.NotNull(recovery.AgentRecovery);
@@ -402,7 +460,7 @@ public partial class DispatchServiceReconciliationSpecs : Mohist.Server.SpecTest
 
         // The run is assigned to the other runner, but the settlement was
         // recorded against the recorded runner: neither may take it over.
-        Assert.Empty((await Dispatch.PollAsync(otherRunner, new RunnerPollRequest([], []))).Dispatches);
+        Assert.Empty((await Dispatch.PollAsync(otherRunner, new RunnerPollRequest([], [], ProcessGeneration: TestRunnerGenerationExtensions.ProcessGeneration))).Dispatches);
     }
 
     [Fact]
@@ -433,7 +491,7 @@ public partial class DispatchServiceReconciliationSpecs : Mohist.Server.SpecTest
         }
 
         // Both attempts are claimed by the capacity-limited Runner in one round.
-        var dispatches = (await Dispatch.PollAsync(runnerId, new RunnerPollRequest([], []))).Dispatches;
+        var dispatches = (await Dispatch.PollAsync(runnerId, new RunnerPollRequest([], [], ProcessGeneration: TestRunnerGenerationExtensions.ProcessGeneration))).Dispatches;
         Assert.Equal(2, dispatches.Count);
         foreach (var work in dispatches)
         {
@@ -446,8 +504,8 @@ public partial class DispatchServiceReconciliationSpecs : Mohist.Server.SpecTest
                 $"turn-{work.WorkflowRunId}",
                 "pi",
                 $"/pi/sessions/{work.WorkflowRunId}");
-            Assert.Equal(ReportAck.Accepted, await workflow.BindAgentExecutionAsync(binding));
-            Assert.Equal(ReportAck.Accepted, await workflow.ObserveAgentExecutionAsync(
+            Assert.Equal(WorkReportVerdict.Accepted, await workflow.BindAgentExecutionAsync(binding));
+            Assert.Equal(WorkReportVerdict.Accepted, await workflow.ObserveAgentExecutionAsync(
                 new AgentExecutionObservation(binding, AgentExecutionObservationKind.Disconnected, "runner-disconnected")));
             bindings.Add(binding);
             var unknown = await LoadRunAsync(work.WorkflowRunId);
@@ -484,7 +542,7 @@ public partial class DispatchServiceReconciliationSpecs : Mohist.Server.SpecTest
         await SeedWorkflowTemplateAsync(freshWorkflowId, SingleStage(checks: []), projectId);
         await freshWorkflow.StartAsync(TestInput(projectId));
         var dispatch = Assert.Single(
-            (await Dispatch.PollAsync(runnerId, new RunnerPollRequest([], []))).Dispatches);
+            (await Dispatch.PollAsync(runnerId, new RunnerPollRequest([], [], ProcessGeneration: TestRunnerGenerationExtensions.ProcessGeneration))).Dispatches);
         Assert.Equal(freshWorkflowId, dispatch.WorkflowRunId);
 
         // Both released attempts stay addressable by their original identity.
@@ -534,7 +592,7 @@ public partial class DispatchServiceReconciliationSpecs : Mohist.Server.SpecTest
         // Polling the recorded Runner after release produces no recovery or
         // redelivery dispatch and does not reserve a slot — the stale snapshot
         // must not resurrect the attempt.
-        Assert.Empty((await Dispatch.PollAsync(runnerId, new RunnerPollRequest([], []))).Dispatches);
+        Assert.Empty((await Dispatch.PollAsync(runnerId, new RunnerPollRequest([], [], ProcessGeneration: TestRunnerGenerationExtensions.ProcessGeneration))).Dispatches);
 
         // The released slot can be claimed by a different eligible Workflow.
         var freshWorkflowId = $"{prefix}-fresh";
@@ -542,7 +600,7 @@ public partial class DispatchServiceReconciliationSpecs : Mohist.Server.SpecTest
         await SeedWorkflowTemplateAsync(freshWorkflowId, SingleStage(checks: []), projectId);
         await freshWorkflow.StartAsync(TestInput(projectId));
         var dispatch = Assert.Single(
-            (await Dispatch.PollAsync(runnerId, new RunnerPollRequest([], []))).Dispatches);
+            (await Dispatch.PollAsync(runnerId, new RunnerPollRequest([], [], ProcessGeneration: TestRunnerGenerationExtensions.ProcessGeneration))).Dispatches);
         Assert.Equal(freshWorkflowId, dispatch.WorkflowRunId);
 
         // The blocked run and its identity facts remain readable.
@@ -566,7 +624,7 @@ public partial class DispatchServiceReconciliationSpecs : Mohist.Server.SpecTest
         Assert.NotNull(first);
         var workId = first!.WorkId;
 
-        var resp = await Dispatch.PollAsync(runnerId, new RunnerPollRequest([], []));
+        var resp = await Dispatch.PollAsync(runnerId, new RunnerPollRequest([], [], ProcessGeneration: TestRunnerGenerationExtensions.ProcessGeneration));
 
         var redelivery = Assert.Single(resp.Dispatches);
         Assert.Equal(_workflowId, redelivery.WorkflowRunId);
@@ -574,39 +632,25 @@ public partial class DispatchServiceReconciliationSpecs : Mohist.Server.SpecTest
     }
 
     [Fact]
-    public async Task Reconnect_RedeliversInterruptedWorkflowUnderOriginalIdentity()
+    public async Task Reconnect_DoesNotRedeliverWorkClosedWithTheLostGeneration()
     {
         var workflow = await StartWorkflowAsync(SingleStage(checks: []));
         var runnerId = _runnerId!;
         var runner = Grains.GetGrain<IRunnerGrain>(runnerId);
         var first = Assert.Single(
-            (await Dispatch.PollAsync(runnerId, new RunnerPollRequest([], []))).Dispatches);
+            (await Dispatch.PollAsync(runnerId, new RunnerPollRequest([], [], ProcessGeneration: TestRunnerGenerationExtensions.ProcessGeneration))).Dispatches);
 
         await runner.UnregisterAsync();
-        Assert.Empty((await Dispatch.PollAsync(runnerId, new RunnerPollRequest([], []))).Dispatches);
+        await runner.RegisterAsync(
+            new RunnerInfo(runnerId, ["spec/*"], "test-host", TestProjectId(_workflowId!)),
+            "replacement-generation");
 
-        await runner.RegisterAsync(new RunnerInfo(
-            runnerId,
-            ["spec/*"],
-            "test-host",
-            TestProjectId(_workflowId!)));
-
-        var redelivery = Assert.Single(
-            (await Dispatch.PollAsync(runnerId, new RunnerPollRequest([], []))).Dispatches);
-        Assert.Equal(first, redelivery);
-        Assert.Equal(first.WorkId, redelivery.WorkId);
-        Assert.Equal(first.TaskRunId, redelivery.TaskRunId);
-
-        var repeated = Assert.Single(
-            (await Dispatch.PollAsync(runnerId, new RunnerPollRequest([], []))).Dispatches);
-        Assert.Equal(first, repeated);
-
-        var key = WorkKey(_workflowId!, first.WorkId);
         Assert.Empty((await Dispatch.PollAsync(
             runnerId,
-            new RunnerPollRequest([key], []))).Dispatches);
+            new RunnerPollRequest([], [], ProcessGeneration: "replacement-generation"))).Dispatches);
+        Assert.Equal("Failed", await workflow.GetRunStatusAsync());
 
-        Assert.Equal(ReportAck.Accepted, await workflow.ReceiveTaskReportAsync(
+        Assert.Equal(WorkReportVerdict.Refused, await workflow.ReceiveTaskReportAsync(
             runnerId,
             first.WorkId,
             new TaskReport(
@@ -615,7 +659,7 @@ public partial class DispatchServiceReconciliationSpecs : Mohist.Server.SpecTest
                 Output: null,
                 Artifacts: null,
                 TaskRunId: first.TaskRunId)));
-        Assert.Empty((await Dispatch.PollAsync(runnerId, new RunnerPollRequest([], []))).Dispatches);
+        Assert.Empty((await Dispatch.PollAsync(runnerId, new RunnerPollRequest([], [], ProcessGeneration: "replacement-generation"))).Dispatches);
     }
 
     [Fact]
@@ -625,7 +669,7 @@ public partial class DispatchServiceReconciliationSpecs : Mohist.Server.SpecTest
         var originalRunnerId = _runnerId!;
         var originalRunner = Grains.GetGrain<IRunnerGrain>(originalRunnerId);
         var first = Assert.Single(
-            (await Dispatch.PollAsync(originalRunnerId, new RunnerPollRequest([], []))).Dispatches);
+            (await Dispatch.PollAsync(originalRunnerId, new RunnerPollRequest([], [], ProcessGeneration: TestRunnerGenerationExtensions.ProcessGeneration))).Dispatches);
         await originalRunner.UnregisterAsync();
 
         var otherRunnerId = $"other-recovery-runner-{Guid.NewGuid():N}";
@@ -636,7 +680,7 @@ public partial class DispatchServiceReconciliationSpecs : Mohist.Server.SpecTest
             "other-host",
             TestProjectId(_workflowId!)));
 
-        Assert.Empty((await Dispatch.PollAsync(otherRunnerId, new RunnerPollRequest([], []))).Dispatches);
+        Assert.Empty((await Dispatch.PollAsync(otherRunnerId, new RunnerPollRequest([], [], ProcessGeneration: TestRunnerGenerationExtensions.ProcessGeneration))).Dispatches);
         var run = await LoadRunAsync(_workflowId!);
         Assert.Equal(originalRunnerId, run.Assignment?.WorkerId);
         Assert.Equal(first.WorkId, run.CurrentStage().Tasks.Single().WorkId);
@@ -662,10 +706,10 @@ public partial class DispatchServiceReconciliationSpecs : Mohist.Server.SpecTest
 
         var assignment = await workflow.AssignWorkerAsync(runnerId);
         Assert.Equal(WorkflowAssignmentStatus.Assigned, assignment.Status);
-        var claimed = await workflow.ClaimNextAsync(runnerId);
+        var claimed = await workflow.ClaimNextAsync(runnerId, "test-generation");
         Assert.NotNull(claimed);
 
-        var response = await Dispatch.PollAsync(runnerId, new RunnerPollRequest([], []));
+        var response = await Dispatch.PollAsync(runnerId, new RunnerPollRequest([], [], ProcessGeneration: TestRunnerGenerationExtensions.ProcessGeneration));
 
         Assert.Empty(response.Dispatches);
         var run = await LoadRunAsync(_workflowId!);
@@ -696,10 +740,10 @@ public partial class DispatchServiceReconciliationSpecs : Mohist.Server.SpecTest
 
         var assignment = await workflow.AssignWorkerAsync(runnerId);
         Assert.Equal(WorkflowAssignmentStatus.Assigned, assignment.Status);
-        var claimed = await workflow.ClaimNextAsync(runnerId);
+        var claimed = await workflow.ClaimNextAsync(runnerId, "test-generation");
         Assert.NotNull(claimed);
 
-        var response = await Dispatch.PollAsync(runnerId, new RunnerPollRequest([], []));
+        var response = await Dispatch.PollAsync(runnerId, new RunnerPollRequest([], [], ProcessGeneration: TestRunnerGenerationExtensions.ProcessGeneration));
 
         Assert.Empty(response.Dispatches);
         var run = await LoadRunAsync(_workflowId!);
@@ -732,10 +776,10 @@ public partial class DispatchServiceReconciliationSpecs : Mohist.Server.SpecTest
 
         var assignment = await workflow.AssignWorkerAsync(runnerId);
         Assert.Equal(WorkflowAssignmentStatus.Assigned, assignment.Status);
-        var claimed = await workflow.ClaimNextAsync(runnerId);
+        var claimed = await workflow.ClaimNextAsync(runnerId, "test-generation");
         Assert.NotNull(claimed);
 
-        var response = await Dispatch.PollAsync(runnerId, new RunnerPollRequest([], []));
+        var response = await Dispatch.PollAsync(runnerId, new RunnerPollRequest([], [], ProcessGeneration: TestRunnerGenerationExtensions.ProcessGeneration));
 
         Assert.Empty(response.Dispatches);
         var run = await LoadRunAsync(_workflowId!);
@@ -758,7 +802,7 @@ public partial class DispatchServiceReconciliationSpecs : Mohist.Server.SpecTest
         Assert.NotNull(first);
         var key = WorkKey(_workflowId!, first!.WorkId);
 
-        var resp = await Dispatch.PollAsync(runnerId, new RunnerPollRequest([key], []));
+        var resp = await Dispatch.PollAsync(runnerId, new RunnerPollRequest([key], [], ProcessGeneration: TestRunnerGenerationExtensions.ProcessGeneration));
 
         Assert.Empty(resp.Dispatches);
     }
@@ -774,7 +818,7 @@ public partial class DispatchServiceReconciliationSpecs : Mohist.Server.SpecTest
         Assert.NotNull(first);
         var key = WorkKey(_workflowId!, first!.WorkId);
 
-        var resp = await Dispatch.PollAsync(runnerId, new RunnerPollRequest([], [key]));
+        var resp = await Dispatch.PollAsync(runnerId, new RunnerPollRequest([], [key], ProcessGeneration: TestRunnerGenerationExtensions.ProcessGeneration));
 
         Assert.Empty(resp.Dispatches);
     }
@@ -789,7 +833,7 @@ public partial class DispatchServiceReconciliationSpecs : Mohist.Server.SpecTest
         var assignment = await workflow.AssignWorkerAsync(runnerId);
         Assert.Equal(WorkflowAssignmentStatus.Assigned, assignment.Status);
 
-        var dispatch = Assert.Single((await Dispatch.PollAsync(runnerId, new RunnerPollRequest([], []))).Dispatches);
+        var dispatch = Assert.Single((await Dispatch.PollAsync(runnerId, new RunnerPollRequest([], [], ProcessGeneration: TestRunnerGenerationExtensions.ProcessGeneration))).Dispatches);
 
         Assert.Equal(workflowIds[0], dispatch.WorkflowRunId);
     }
@@ -830,7 +874,7 @@ public partial class DispatchServiceReconciliationSpecs : Mohist.Server.SpecTest
 
         await runner.UnregisterAsync();
 
-        var resp = await Dispatch.PollAsync(runnerId, new RunnerPollRequest([], []));
+        var resp = await Dispatch.PollAsync(runnerId, new RunnerPollRequest([], [], ProcessGeneration: TestRunnerGenerationExtensions.ProcessGeneration));
 
         Assert.Empty(resp.Dispatches);
     }
@@ -845,7 +889,7 @@ public partial class DispatchServiceReconciliationSpecs : Mohist.Server.SpecTest
 
         try
         {
-            var poll = Dispatch.PollAsync(runnerId, new RunnerPollRequest([], []));
+            var poll = Dispatch.PollAsync(runnerId, new RunnerPollRequest([], [], ProcessGeneration: TestRunnerGenerationExtensions.ProcessGeneration));
             await _fixture.DispatchPollObserver.WaitForRunnerInfoAsync();
 
             await Grains.GetGrain<IRunnerGrain>(runnerId).UnregisterAsync();
@@ -875,7 +919,7 @@ public partial class DispatchServiceReconciliationSpecs : Mohist.Server.SpecTest
         {
             var poll = Dispatch.PollAsync(
                 runnerId,
-                new RunnerPollRequest([], []),
+                new RunnerPollRequest([], [], ProcessGeneration: TestRunnerGenerationExtensions.ProcessGeneration),
                 cancellation.Token);
             await _fixture.DispatchPollObserver.WaitForRunnerInfoAsync();
 
@@ -904,7 +948,7 @@ public partial class DispatchServiceReconciliationSpecs : Mohist.Server.SpecTest
 
         try
         {
-            var poll = Dispatch.PollAsync(runnerId, new RunnerPollRequest([], []));
+            var poll = Dispatch.PollAsync(runnerId, new RunnerPollRequest([], [], ProcessGeneration: TestRunnerGenerationExtensions.ProcessGeneration));
             await _fixture.DispatchPollObserver.WaitForRunnerInfoAsync();
 
             await Grains.GetGrain<IRunnerGrain>(runnerId).UpdateAsync(1);

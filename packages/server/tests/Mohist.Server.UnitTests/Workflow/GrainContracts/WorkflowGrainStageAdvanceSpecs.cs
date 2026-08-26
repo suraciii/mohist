@@ -8,6 +8,7 @@ using Mohist.Server.Workflow.Domain.Run;
 using Mohist.Server.Workflow.Grains;
 using Mohist.Workflow.Definition;
 using Xunit;
+using Mohist.Server.Runner.Grains;
 
 namespace Mohist.Server.UnitTests.Workflow.GrainContracts;
 
@@ -38,7 +39,7 @@ public sealed class WorkflowGrainStageAdvanceSpecs
 
         await ReportPlanAsync(arrangement);
 
-        Assert.Null(await arrangement.Grain.ClaimNextAsync(arrangement.WorkerId));
+        Assert.Null(await arrangement.Grain.ClaimNextAsync(arrangement.WorkerId, "test-generation"));
         Assert.Equal("AwaitingApproval", await arrangement.Grain.GetRunStatusAsync());
     }
 
@@ -104,7 +105,7 @@ public sealed class WorkflowGrainStageAdvanceSpecs
             "wr-advance-empty-complete",
             new WorkflowDefinition([new StageDefinition("build", [], [])]));
 
-        Assert.Null(await arrangement.Grain.ClaimNextAsync(arrangement.WorkerId));
+        Assert.Null(await arrangement.Grain.ClaimNextAsync(arrangement.WorkerId, "test-generation"));
         Assert.Equal("Completed", await arrangement.Grain.GetRunStatusAsync());
     }
 
@@ -138,7 +139,7 @@ public sealed class WorkflowGrainStageAdvanceSpecs
         var claimed = (await arrangement.AssignAndClaimAsync())!;
 
         var stale = await arrangement.ReportUnknownWorkAsync("unknown-work");
-        Assert.Equal(ReportAck.Stale, stale);
+        Assert.Equal(WorkReportVerdict.Refused, stale);
         Assert.Equal(claimed.Id, await arrangement.Grain.GetCurrentWorkIdAsync());
 
         await arrangement.ReportCompletedAsync(claimed);

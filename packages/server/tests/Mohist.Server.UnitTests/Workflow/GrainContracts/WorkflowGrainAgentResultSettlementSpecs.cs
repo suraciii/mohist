@@ -48,12 +48,12 @@ public sealed class WorkflowGrainAgentResultSettlementSpecs
             "transport did not confirm stop",
             "stop-1");
 
-        Assert.Equal(ReportAck.Accepted, await a.Grain.BindAgentExecutionAsync(binding));
-        Assert.Equal(ReportAck.Accepted, await a.Grain.BindAgentExecutionAsync(binding));
-        Assert.Equal(ReportAck.Stale, await a.Grain.BindAgentExecutionAsync(binding with { AgentSessionId = "other-session" }));
-        Assert.Equal(ReportAck.Accepted, await a.Grain.ObserveAgentExecutionAsync(observation));
-        Assert.Equal(ReportAck.Accepted, await a.Grain.ObserveAgentExecutionAsync(observation));
-        Assert.Equal(ReportAck.Stale, await a.Grain.ObserveAgentExecutionAsync(
+        Assert.Equal(WorkReportVerdict.Accepted, await a.Grain.BindAgentExecutionAsync(binding));
+        Assert.Equal(WorkReportVerdict.Accepted, await a.Grain.BindAgentExecutionAsync(binding));
+        Assert.Equal(WorkReportVerdict.Refused, await a.Grain.BindAgentExecutionAsync(binding with { AgentSessionId = "other-session" }));
+        Assert.Equal(WorkReportVerdict.Accepted, await a.Grain.ObserveAgentExecutionAsync(observation));
+        Assert.Equal(WorkReportVerdict.Accepted, await a.Grain.ObserveAgentExecutionAsync(observation));
+        Assert.Equal(WorkReportVerdict.Refused, await a.Grain.ObserveAgentExecutionAsync(
             observation with { Binding = binding with { AgentTurnId = "other-turn" } }));
 
         var unresolved = await a.LoadRunAsync();
@@ -67,11 +67,11 @@ public sealed class WorkflowGrainAgentResultSettlementSpecs
         Assert.True(unresolved.HasUnresolvedAgentResult());
         Assert.Equal(before + 1, (await a.Events.ListAsync(a.RunId)).Count);
 
-        Assert.Equal(ReportAck.Accepted, await a.Grain.ReceiveTaskReportAsync(
+        Assert.Equal(WorkReportVerdict.Accepted, await a.Grain.ReceiveTaskReportAsync(
             a.WorkerId,
             a.Work.Id!,
             new TaskReport(a.Work.Id!, TaskReportStatus.Succeeded, Output: null, Artifacts: null, TaskRunId: a.TaskRunId)));
-        Assert.Equal(ReportAck.Stale, await a.Grain.ObserveAgentExecutionAsync(observation));
+        Assert.Equal(WorkReportVerdict.Refused, await a.Grain.ObserveAgentExecutionAsync(observation));
 
         var completed = await a.LoadRunAsync();
         Assert.Equal(TaskRunStatus.Completed, Assert.Single(completed.CurrentStage().Tasks).Status);
@@ -118,7 +118,7 @@ public sealed class WorkflowGrainAgentResultSettlementSpecs
     {
         var a = await ArrangeAsync("wr-settle-unknown-bound");
         var binding = Binding(a, "session-result", "turn-result");
-        Assert.Equal(ReportAck.Accepted, await a.Grain.BindAgentExecutionAsync(binding));
+        Assert.Equal(WorkReportVerdict.Accepted, await a.Grain.BindAgentExecutionAsync(binding));
         var service = a.CreateReportService();
         var result = new WorkResult(
             "unknown",
@@ -134,7 +134,7 @@ public sealed class WorkflowGrainAgentResultSettlementSpecs
             binding.AgentTurnId,
             binding.Runtime,
             "other-runtime-session");
-        Assert.Equal("stale", mismatched.Ack);
+        Assert.Equal("refused", mismatched.Ack);
         Assert.Equal("Running", mismatched.WorkflowStatus);
 
         var (ack, status) = await service.ReportAsync(
@@ -176,7 +176,7 @@ public sealed class WorkflowGrainAgentResultSettlementSpecs
 
         var stale = await service.ReportAsync(
             a.WorkerId, a.RunId, a.Work.Id!, "other-task-attempt", observation);
-        Assert.Equal("stale", stale.Ack);
+        Assert.Equal("refused", stale.Ack);
 
         var unresolved = await a.LoadRunAsync();
         var task = Assert.Single(unresolved.CurrentStage().Tasks);
@@ -202,8 +202,8 @@ public sealed class WorkflowGrainAgentResultSettlementSpecs
         var original = Assert.Single((await a.LoadRunAsync()).CurrentStage().Tasks);
         var binding = Binding(a, "session-physical-observation", "turn-physical-observation");
 
-        Assert.Equal(ReportAck.Accepted, await a.Grain.BindAgentExecutionAsync(binding));
-        Assert.Equal(ReportAck.Accepted, await a.Grain.ObserveAgentExecutionAsync(
+        Assert.Equal(WorkReportVerdict.Accepted, await a.Grain.BindAgentExecutionAsync(binding));
+        Assert.Equal(WorkReportVerdict.Accepted, await a.Grain.ObserveAgentExecutionAsync(
             new AgentExecutionObservation(binding, kind, $"physical-{kind.ToString().ToLowerInvariant()}")));
 
         var unresolved = await a.LoadRunAsync();
@@ -227,7 +227,7 @@ public sealed class WorkflowGrainAgentResultSettlementSpecs
     {
         var a = await ArrangeAsync("wr-settle-recovered-completed");
         var binding = Binding(a, "session-recovered", "turn-recovered");
-        Assert.Equal(ReportAck.Accepted, await a.Grain.BindAgentExecutionAsync(binding));
+        Assert.Equal(WorkReportVerdict.Accepted, await a.Grain.BindAgentExecutionAsync(binding));
         var service = a.CreateReportService();
 
         Assert.Equal(("accepted", "Running"), await service.ReportAsync(
@@ -303,16 +303,16 @@ public sealed class WorkflowGrainAgentResultSettlementSpecs
         var arrangement = await WorkflowGrainArrangement.CreateAsync(
             _fixture, runId, definition, TimeProvider, workerId: $"runner-{runId}");
         await arrangement.Grain.AssignWorkerAsync(arrangement.WorkerId);
-        var plan = await arrangement.Grain.ClaimNextAsync(arrangement.WorkerId);
+        var plan = await arrangement.Grain.ClaimNextAsync(arrangement.WorkerId, "test-generation");
         Assert.NotNull(plan);
         var planTaskRunId = await arrangement.RunningTaskRunIdAsync();
 
-        Assert.Equal(ReportAck.Accepted, await arrangement.Grain.ReceiveTaskReportAsync(
+        Assert.Equal(WorkReportVerdict.Accepted, await arrangement.Grain.ReceiveTaskReportAsync(
             arrangement.WorkerId,
             plan!.Id!,
             new TaskReport(plan.Id!, TaskReportStatus.Succeeded, Output: null, Artifacts: null, TaskRunId: planTaskRunId)));
 
-        var build = await arrangement.Grain.ClaimNextAsync(arrangement.WorkerId);
+        var build = await arrangement.Grain.ClaimNextAsync(arrangement.WorkerId, "test-generation");
         Assert.NotNull(build);
         var buildTask = Assert.Single((await arrangement.Store.LoadAsync(runId))!.CurrentStage().Tasks);
         Assert.NotEqual(planTaskRunId, buildTask.Id);
@@ -325,7 +325,7 @@ public sealed class WorkflowGrainAgentResultSettlementSpecs
             "turn-repeat",
             "opencode",
             "runtime-repeat");
-        Assert.Equal(ReportAck.Accepted, await arrangement.Grain.BindAgentExecutionAsync(buildBinding));
+        Assert.Equal(WorkReportVerdict.Accepted, await arrangement.Grain.BindAgentExecutionAsync(buildBinding));
 
         var a = new SettlementArrangement(arrangement, build!, buildTask.Id, _fixture.Services);
         var service = a.CreateReportService();
@@ -356,8 +356,8 @@ public sealed class WorkflowGrainAgentResultSettlementSpecs
         var observation = new AgentExecutionObservation(
             binding, AgentExecutionObservationKind.StopUnconfirmed, "stop-unconfirmed");
 
-        Assert.Equal(ReportAck.Accepted, await a.Grain.BindAgentExecutionAsync(binding));
-        Assert.Equal(ReportAck.Accepted, await a.Grain.ObserveAgentExecutionAsync(observation));
+        Assert.Equal(WorkReportVerdict.Accepted, await a.Grain.BindAgentExecutionAsync(binding));
+        Assert.Equal(WorkReportVerdict.Accepted, await a.Grain.ObserveAgentExecutionAsync(observation));
 
         var unknown = await a.LoadRunAsync();
         var settlement = Assert.IsType<AgentResultSettlement>(
@@ -394,7 +394,7 @@ public sealed class WorkflowGrainAgentResultSettlementSpecs
         Assert.DoesNotContain(EventCatalog.ReverseDns.WorkflowRunFailed, eventTypes);
 
         var lateObservation = observation with { ReasonCode = "late-old-generation-observation", Message = "must not rewrite blocked settlement" };
-        Assert.Equal(ReportAck.Stale, await a.Grain.ObserveAgentExecutionAsync(lateObservation));
+        Assert.Equal(WorkReportVerdict.Refused, await a.Grain.ObserveAgentExecutionAsync(lateObservation));
         var afterLateSettlement = Assert.Single((await a.LoadRunAsync()).CurrentStage().Tasks).AgentResultSettlement;
         Assert.Equal(AgentResultSettlementState.Blocked, afterLateSettlement!.State);
         Assert.Equal("stop-unconfirmed", afterLateSettlement.ReasonCode);
@@ -405,8 +405,8 @@ public sealed class WorkflowGrainAgentResultSettlementSpecs
             Output: null,
             Artifacts: null,
             TaskRunId: blockedTask.Id);
-        Assert.Equal(ReportAck.Accepted, await a.Grain.ReceiveTaskReportAsync(a.WorkerId, a.Work.Id!, report));
-        Assert.Equal(ReportAck.Stale, await a.Grain.ReceiveTaskReportAsync(a.WorkerId, a.Work.Id!, report));
+        Assert.Equal(WorkReportVerdict.Accepted, await a.Grain.ReceiveTaskReportAsync(a.WorkerId, a.Work.Id!, report));
+        Assert.Equal(WorkReportVerdict.Refused, await a.Grain.ReceiveTaskReportAsync(a.WorkerId, a.Work.Id!, report));
 
         var completed = await a.LoadRunAsync();
         var completedTask = Assert.Single(completed.CurrentStage().Tasks);
@@ -420,8 +420,8 @@ public sealed class WorkflowGrainAgentResultSettlementSpecs
     {
         var a = await ArrangeAsync("wr-settle-projection");
         var binding = Binding(a, "session-proj-1", "turn-proj-1");
-        Assert.Equal(ReportAck.Accepted, await a.Grain.BindAgentExecutionAsync(binding));
-        Assert.Equal(ReportAck.Accepted, await a.Grain.ObserveAgentExecutionAsync(new AgentExecutionObservation(
+        Assert.Equal(WorkReportVerdict.Accepted, await a.Grain.BindAgentExecutionAsync(binding));
+        Assert.Equal(WorkReportVerdict.Accepted, await a.Grain.ObserveAgentExecutionAsync(new AgentExecutionObservation(
             binding, AgentExecutionObservationKind.StopUnconfirmed, "stop-unconfirmed", "transport did not confirm stop", "stop-op-proj")));
 
         var unknown = await a.LoadRunAsync();
@@ -519,8 +519,8 @@ public sealed class WorkflowGrainAgentResultSettlementSpecs
         var observation = new AgentExecutionObservation(
             binding, AgentExecutionObservationKind.TargetMissing, "target-missing");
 
-        Assert.Equal(ReportAck.Accepted, await a.Grain.BindAgentExecutionAsync(binding));
-        Assert.Equal(ReportAck.Accepted, await a.Grain.ObserveAgentExecutionAsync(observation));
+        Assert.Equal(WorkReportVerdict.Accepted, await a.Grain.BindAgentExecutionAsync(binding));
+        Assert.Equal(WorkReportVerdict.Accepted, await a.Grain.ObserveAgentExecutionAsync(observation));
         await a.Grain.StopAsync("operator confirmed stop");
         await a.Grain.StopAsync("cleanup replay");
 
@@ -534,7 +534,7 @@ public sealed class WorkflowGrainAgentResultSettlementSpecs
         Assert.Null(stopped.Failure);
         Assert.Null(stopped.CurrentStage().Failure);
         Assert.Null(await a.Snapshots.LoadJsonAsync(a.RunId, a.Work.Id!));
-        Assert.Equal(ReportAck.Stale, await a.Grain.ReceiveTaskReportAsync(
+        Assert.Equal(WorkReportVerdict.Refused, await a.Grain.ReceiveTaskReportAsync(
             a.WorkerId,
             a.Work.Id!,
             new TaskReport(
@@ -543,7 +543,7 @@ public sealed class WorkflowGrainAgentResultSettlementSpecs
                 Output: null,
                 Artifacts: null,
                 TaskRunId: cancelled.Id)));
-        Assert.Equal(ReportAck.Stale, await a.Grain.ObserveAgentExecutionAsync(observation));
+        Assert.Equal(WorkReportVerdict.Refused, await a.Grain.ObserveAgentExecutionAsync(observation));
         var eventTypes = (await a.Events.ListAsync(a.RunId)).Select(entry => entry.Envelope.Type).ToArray();
         Assert.Contains(EventCatalog.ReverseDns.TaskCancelled, eventTypes);
         Assert.Contains(EventCatalog.ReverseDns.WorkflowRunStopped, eventTypes);
@@ -577,8 +577,8 @@ public sealed class WorkflowGrainAgentResultSettlementSpecs
             await db.SaveChangesAsync();
         }
         var binding = Binding(a, "session-stop-artifact", "turn-stop-artifact");
-        Assert.Equal(ReportAck.Accepted, await a.Grain.BindAgentExecutionAsync(binding));
-        Assert.Equal(ReportAck.Accepted, await a.Grain.ObserveAgentExecutionAsync(
+        Assert.Equal(WorkReportVerdict.Accepted, await a.Grain.BindAgentExecutionAsync(binding));
+        Assert.Equal(WorkReportVerdict.Accepted, await a.Grain.ObserveAgentExecutionAsync(
             new AgentExecutionObservation(binding, AgentExecutionObservationKind.Disconnected, "runner-disconnected")));
         await a.Grain.StopAsync("operator stop");
 
@@ -589,7 +589,7 @@ public sealed class WorkflowGrainAgentResultSettlementSpecs
             a.TaskRunId,
             new WorkResult("completed", ArtifactUploadIds: [uploadId]));
 
-        Assert.Equal("stale", report.Ack);
+        Assert.Equal("refused", report.Ack);
         await using var assertionScope = _fixture.Services.CreateAsyncScope();
         var assertionDb = assertionScope.ServiceProvider.GetRequiredService<MohistDbContext>();
         Assert.NotNull(await assertionDb.WorkflowArtifactPendingUploads.FindAsync(uploadId));
@@ -617,7 +617,7 @@ public sealed class WorkflowGrainAgentResultSettlementSpecs
         var arrangement = await WorkflowGrainArrangement.CreateAsync(
             _fixture, runId, definition, TimeProvider, workerId: $"runner-{runId}");
         await arrangement.Grain.AssignWorkerAsync(arrangement.WorkerId);
-        var work = await arrangement.Grain.ClaimNextAsync(arrangement.WorkerId);
+        var work = await arrangement.Grain.ClaimNextAsync(arrangement.WorkerId, "test-generation");
         Assert.NotNull(work);
         var taskRunId = await arrangement.RunningTaskRunIdAsync();
         return new SettlementArrangement(arrangement, work!, taskRunId, _fixture.Services);

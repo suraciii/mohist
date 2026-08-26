@@ -130,6 +130,7 @@ public class RunnerStatusApiSpecs
         var runnerId = $"runner-terms-{Guid.NewGuid():N}";
         await _fixture.Client.PostOkAsync($"/api/runner/{runnerId}/register", new
         {
+            processGeneration = TestRunnerGenerationExtensions.ProcessGeneration,
             capabilities = new[] { "spec/*" },
             hostname = "terms-host",
             projectId,
@@ -172,6 +173,7 @@ public class RunnerStatusApiSpecs
         var hash = "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef";
         await _fixture.Client.PostOkAsync($"/api/runner/{runnerId}/register", new
         {
+            processGeneration = TestRunnerGenerationExtensions.ProcessGeneration,
             capabilities = new[] { "spec/*" },
             hostname = "detail-host",
             projectId,

@@ -2,6 +2,7 @@ using System.Text.Json;
 using Mohist.Server.Agent.Domain;
 using Mohist.Server.Agent.Services;
 using Xunit;
+using Mohist.Server.Workflow.Grains;
 
 namespace Mohist.Server.UnitTests.Agent.Services;
 

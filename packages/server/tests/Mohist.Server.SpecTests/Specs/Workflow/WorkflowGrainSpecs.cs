@@ -238,7 +238,9 @@ public abstract class WorkflowGrainSpecs
         await TestWait.ForAsync(
             async () =>
             {
-                var resp = await dispatch.PollAsync(runnerId, new RunnerPollRequest([], []));
+                var resp = await dispatch.PollAsync(
+                    runnerId,
+                    new RunnerPollRequest([], [], ProcessGeneration: TestRunnerGenerationExtensions.ProcessGeneration));
                 work = resp.Dispatches.FirstOrDefault();
                 return work;
             },

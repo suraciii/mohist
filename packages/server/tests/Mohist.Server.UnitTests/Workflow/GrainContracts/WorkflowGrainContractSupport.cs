@@ -204,6 +204,17 @@ internal static partial class WorkflowGrainContractSupport
             return _inner.SaveAsync(run, events, ct);
         }
 
+        public Task SaveWithArtifactsAsync(
+            WorkflowRun run,
+            IReadOnlyList<WorkflowEvent> events,
+            WorkflowArtifactBindingIntent artifacts,
+            CancellationToken ct = default)
+        {
+            if (events.Any(_failBatchWhen))
+                throw new InvalidOperationException("simulated event save failure");
+            return _inner.SaveWithArtifactsAsync(run, events, artifacts, ct);
+        }
+
         public Task DeleteAsync(string workflowRunId, CancellationToken ct = default) =>
             _inner.DeleteAsync(workflowRunId, ct);
     }
@@ -234,7 +245,7 @@ internal sealed record WorkflowGrainArrangement(
     public async Task<WorkItem?> AssignAndClaimAsync()
     {
         await Grain.AssignWorkerAsync(WorkerId);
-        return await Grain.ClaimNextAsync(WorkerId);
+        return await Grain.ClaimNextAsync(WorkerId, "test-generation");
     }
 
     public async Task<string> RunningTaskRunIdAsync() => await ResolveRunningTaskRunIdAsync();
@@ -248,10 +259,10 @@ internal sealed record WorkflowGrainArrangement(
     }
 
     /// <summary>Reports the claimed task complete, resolving the persisted task-run id.</summary>
-    public async Task<ReportAck> ReportCompletedAsync(WorkItem item) =>
+    public async Task<WorkReportVerdict> ReportCompletedAsync(WorkItem item) =>
         await ReportTaskAsync(item, TaskReportStatus.Succeeded);
 
-    public async Task<ReportAck> ReportFailedAsync(WorkItem item, string detail)
+    public async Task<WorkReportVerdict> ReportFailedAsync(WorkItem item, string detail)
     {
         var taskRunId = await BuildReportTaskRunIdAsync();
         return await Grain.ReceiveTaskReportAsync(
@@ -268,7 +279,7 @@ internal sealed record WorkflowGrainArrangement(
         return runningTask.Id;
     }
 
-    private async Task<ReportAck> ReportTaskAsync(WorkItem item, TaskReportStatus status)
+    private async Task<WorkReportVerdict> ReportTaskAsync(WorkItem item, TaskReportStatus status)
     {
         var taskRunId = await BuildReportTaskRunIdAsync();
         return await Grain.ReceiveTaskReportAsync(
@@ -276,14 +287,14 @@ internal sealed record WorkflowGrainArrangement(
     }
 
     /// <summary>Reports against a work id no active work carries; the grain must fence it.</summary>
-    public async Task<ReportAck> ReportUnknownWorkAsync(string workId)
+    public async Task<WorkReportVerdict> ReportUnknownWorkAsync(string workId)
     {
         var taskRunId = await BuildReportTaskRunIdAsync();
         return await Grain.ReceiveTaskReportAsync(
             WorkerId, workId, new TaskReport(workId, TaskReportStatus.Failed, Output: null, Artifacts: null, TaskRunId: taskRunId));
     }
 
-    public async Task<ReportAck> ReportCheckResultsAsync(
+    public async Task<WorkReportVerdict> ReportCheckResultsAsync(
         WorkItem check,
         params (string Name, CheckResultStatus Status, string? Message)[] results)
     {
@@ -293,10 +304,10 @@ internal sealed record WorkflowGrainArrangement(
         return await Grain.ReceiveCheckReportAsync(WorkerId, check.Id!, new CheckReport(check.Stage, payload));
     }
 
-    public Task<ReportAck> ReportChecksPassAsync(WorkItem check, string checkName) =>
+    public Task<WorkReportVerdict> ReportChecksPassAsync(WorkItem check, string checkName) =>
         ReportCheckResultsAsync(check, (checkName, CheckResultStatus.Passed, null));
 
-    public Task<ReportAck> ReportChecksPassAsync(WorkItem check, params string[] checkNames) =>
+    public Task<WorkReportVerdict> ReportChecksPassAsync(WorkItem check, params string[] checkNames) =>
         ReportCheckResultsAsync(
             check,
             checkNames.Select(name => (name, CheckResultStatus.Passed, (string?)null)).ToArray());
@@ -305,7 +316,7 @@ internal sealed record WorkflowGrainArrangement(
     /// Reports the claimed task with structured output and runtime follow-up
     /// tasks (the recovery-injection path).
     /// </summary>
-    public async Task<ReportAck> ReportTaskResultAsync(
+    public async Task<WorkReportVerdict> ReportTaskResultAsync(
         WorkItem item,
         System.Text.Json.JsonElement? output,
         IReadOnlyList<RuntimeTaskInput>? addTasks,

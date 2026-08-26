@@ -20,6 +20,7 @@ public partial class MohistDbContext
 
         modelBuilder.Entity<AgentJobRow>(entity =>
         {
+            entity.Property(e => e.ClaimedProcessGeneration).HasMaxLength(128);
             entity.Property(e => e.DirectApiProjectionJson);
             entity.Property(e => e.DirectApiProjectionRevision);
         });

@@ -176,6 +176,7 @@ public sealed class SlackDmSessionMappingIngressSpecs
 
         using (var register = await _fixture.Client.PostAsJsonAsync("/api/runner/r1/register", new
         {
+            processGeneration = TestRunnerGenerationExtensions.ProcessGeneration,
             capabilities = new[] { "spec/*" },
             hostname = "r1-host",
             projectId = connection.ProjectId,

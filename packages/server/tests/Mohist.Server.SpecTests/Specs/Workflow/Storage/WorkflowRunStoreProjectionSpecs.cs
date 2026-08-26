@@ -51,7 +51,7 @@ public partial class WorkflowRunStoreSpecs
             ],
         };
 
-        run.StartTask("work-terminal-log-ownership", "worker-1", FixedTime);
+        run.StartTask("work-terminal-log-ownership", "worker-1", "test-process-generation", FixedTime);
         run.CompleteTask(FixedTime);
         await store.SaveAsync(run);
 

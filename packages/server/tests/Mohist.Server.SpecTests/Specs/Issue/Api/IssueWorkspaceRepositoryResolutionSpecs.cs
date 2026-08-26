@@ -221,6 +221,7 @@ public class IssueWorkspaceRepositoryResolutionSpecs : IAsyncLifetime
         var runnerId = $"repo-resolution-runner-{Guid.NewGuid():N}";
         await _client.PostOkAsync($"/api/runner/{runnerId}/register", new
         {
+            processGeneration = TestRunnerGenerationExtensions.ProcessGeneration,
             capabilities = new[] { "mohist/rebase", "spec/task", "spec/check" },
             hostname = "test-host",
             projectId,

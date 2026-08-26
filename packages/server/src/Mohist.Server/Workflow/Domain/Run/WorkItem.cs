@@ -73,7 +73,8 @@ public sealed record TaskReport(
 [GenerateSerializer]
 public sealed record CheckReport(
     [property: Id(0)] string Stage,
-    [property: Id(1)] IReadOnlyList<CheckResult> Results);
+    [property: Id(1)] IReadOnlyList<CheckResult> Results,
+    [property: Id(2)] string? TerminalResultFingerprint = null);
 
 public enum TaskReportStatus
 {

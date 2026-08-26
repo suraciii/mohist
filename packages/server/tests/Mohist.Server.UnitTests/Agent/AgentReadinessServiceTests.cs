@@ -3,6 +3,7 @@ using Mohist.Server.Agent.Grains;
 using Mohist.Server.Agent.Services;
 using Mohist.Server.Infrastructure;
 using Xunit;
+using Mohist.Server.Workflow.Grains;
 
 namespace Mohist.Server.UnitTests.Agent;
 

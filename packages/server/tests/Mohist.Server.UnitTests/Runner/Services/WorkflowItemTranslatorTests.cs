@@ -90,7 +90,7 @@ public partial class WorkflowItemTranslatorSpecs : IAsyncLifetime
         run.Start(DateTimeOffset.UnixEpoch);
         run.InitializeStage(tasks, checks, DateTimeOffset.UnixEpoch);
         run.AssignTo("runner-1", DateTimeOffset.UnixEpoch);
-        run.StartTask(workId, "runner-1", DateTimeOffset.UnixEpoch);
+        run.StartTask(workId, "runner-1", "test-process-generation", DateTimeOffset.UnixEpoch);
 
         await SeedProfileAsync(projectId, workflowRunId, run);
         return run;

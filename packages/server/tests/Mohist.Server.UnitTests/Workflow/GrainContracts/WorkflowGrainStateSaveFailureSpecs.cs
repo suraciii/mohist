@@ -191,7 +191,7 @@ public sealed partial class WorkflowGrainStateSaveFailureSpecs
         await setup.OnActivateAsync(CancellationToken.None);
         await setup.EnsureStartedAsync(context);
         await setup.AssignWorkerAsync(workerId);
-        var workItem = await setup.ClaimNextAsync(workerId);
+        var workItem = await setup.ClaimNextAsync(workerId, "test-generation");
         Assert.NotNull(workItem);
         var workId = workItem!.Id!;
 
@@ -244,7 +244,7 @@ public sealed partial class WorkflowGrainStateSaveFailureSpecs
         Assert.NotNull(settlement.DeadlineAt);
         Assert.Equal(1, calls.EnsureAttempts);
 
-        Assert.Equal(ReportAck.Accepted, await failing.ObserveAgentExecutionAsync(observation));
+        Assert.Equal(WorkReportVerdict.Accepted, await failing.ObserveAgentExecutionAsync(observation));
         var retried = await store.LoadAsync(workflowRunId);
         var retriedSettlement = Assert.IsType<AgentResultSettlement>(
             Assert.Single(retried!.CurrentStage().Tasks).AgentResultSettlement);
@@ -347,7 +347,7 @@ public sealed partial class WorkflowGrainStateSaveFailureSpecs
     {
         await grain.EnsureStartedAsync(new WorkflowIssueContext(projectId, 1, null));
         await grain.AssignWorkerAsync(workerId);
-        var work = await grain.ClaimNextAsync(workerId);
+        var work = await grain.ClaimNextAsync(workerId, "test-generation");
         Assert.NotNull(work);
         var run = await store.LoadAsync(workflowRunId);
         var task = Assert.Single(
@@ -362,7 +362,7 @@ public sealed partial class WorkflowGrainStateSaveFailureSpecs
             "agent-turn",
             "opencode",
             "runtime-session");
-        Assert.Equal(ReportAck.Accepted, await grain.BindAgentExecutionAsync(binding));
+        Assert.Equal(WorkReportVerdict.Accepted, await grain.BindAgentExecutionAsync(binding));
         return binding;
     }
 
@@ -486,6 +486,18 @@ public sealed partial class WorkflowGrainStateSaveFailureSpecs
             if (Interlocked.CompareExchange(ref _remainingFailures, 0, 1) == 1)
                 throw new InvalidOperationException("simulated event save failure");
             return _inner.SaveAsync(run, events, ct);
+        }
+
+        public Task SaveWithArtifactsAsync(
+            WorkflowRun run,
+            IReadOnlyList<WorkflowEvent> events,
+            WorkflowArtifactBindingIntent artifacts,
+            CancellationToken ct = default)
+        {
+            EventSaveAttempts++;
+            if (Interlocked.CompareExchange(ref _remainingFailures, 0, 1) == 1)
+                throw new InvalidOperationException("simulated artifact settlement save failure");
+            return _inner.SaveWithArtifactsAsync(run, events, artifacts, ct);
         }
 
         public Task DeleteAsync(string workflowRunId, CancellationToken ct = default) =>

@@ -200,7 +200,7 @@ public sealed partial class WorkflowGrainStateSaveFailureSpecs
         Assert.Null(await grain.GetCurrentWorkIdAsync());
         Assert.Null(await grain.GetActiveWorkAsync(binding.WorkId));
         Assert.Null(await grain.GetAssignedWorkerIdAsync());
-        Assert.Null(await grain.ClaimNextAsync(workerId));
+        Assert.Null(await grain.ClaimNextAsync(workerId, "test-generation"));
         var released = Assert.IsType<WorkflowRun>(await store.LoadAsync(workflowRunId));
         var releasedTask = Assert.Single(released.CurrentStage().Tasks);
         Assert.Equal(TaskRunStatus.Running, releasedTask.Status);

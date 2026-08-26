@@ -15,6 +15,7 @@ using Mohist.Server.TestSupport;
 using Orleans;
 using Orleans.Runtime;
 using Xunit;
+using Mohist.Server.Workflow.Grains;
 
 namespace Mohist.Server.SpecTests.Specs.Agent.Api;
 
@@ -196,7 +197,7 @@ internal sealed class TerminalAgentJobGrain : IAgentJobGrain
     }
 
     public Task<bool> IsWorkRunnableAsync(string runnerId, string workId) => Task.FromResult(false);
-    public Task<AgentJobReportResult> ReportResultAsync(string runnerId, string workId, WorkResult result) => Task.FromResult(new AgentJobReportResult(false, "already-terminal"));
+    public Task<AgentJobReportResult> ReportResultAsync(string runnerId, string workId, WorkResult result) => Task.FromResult(new AgentJobReportResult(WorkReportVerdict.Refused, "already-terminal"));
     public Task<AgentJobStatus> GetStatusAsync() => Task.FromResult(_result.Status);
     public Task<string?> GetCurrentWorkIdAsync() => Task.FromResult<string?>(null);
     public Task<ClaimResult?> ClaimNextAsync(string runnerId) => Task.FromResult<ClaimResult?>(null);
@@ -210,6 +211,8 @@ internal sealed class TerminalAgentJobGrain : IAgentJobGrain
     public Task<AgentJobTerminalResult> WaitForTerminalAsync() => Task.FromResult(_result);
     public Task<AgentJobRuntimeSnapshot> GetRuntimeSnapshotAsync() => Task.FromResult(new AgentJobRuntimeSnapshot(_result.Status, null, null, _result.FailureReason));
     public Task FailAsync(string reason, string? agentId = null) => Task.CompletedTask;
+    public Task<WorkReportVerdict> FailRunnerLostAsync(string runnerId, string workId, string processGeneration) =>
+        Task.FromResult(WorkReportVerdict.Refused);
     public Task ReceiveReminder(string reminderName, TickStatus status) => Task.CompletedTask;
 }
 
@@ -224,7 +227,7 @@ internal sealed class PendingAgentJobGrain : IAgentJobGrain
     private string? _failureReason;
 
     public Task<bool> IsWorkRunnableAsync(string runnerId, string workId) => Task.FromResult(false);
-    public Task<AgentJobReportResult> ReportResultAsync(string runnerId, string workId, WorkResult result) => Task.FromResult(new AgentJobReportResult(false, "not-running"));
+    public Task<AgentJobReportResult> ReportResultAsync(string runnerId, string workId, WorkResult result) => Task.FromResult(new AgentJobReportResult(WorkReportVerdict.Refused, "not-running"));
     public Task<AgentJobStatus> GetStatusAsync() => Task.FromResult(_failureReason is null ? AgentJobStatus.Pending : AgentJobStatus.Failed);
     public Task<string?> GetCurrentWorkIdAsync() => Task.FromResult<string?>(null);
     public Task<ClaimResult?> ClaimNextAsync(string runnerId) => Task.FromResult<ClaimResult?>(null);
@@ -247,6 +250,8 @@ internal sealed class PendingAgentJobGrain : IAgentJobGrain
         _failureReason = reason;
         return Task.CompletedTask;
     }
+    public Task<WorkReportVerdict> FailRunnerLostAsync(string runnerId, string workId, string processGeneration) =>
+        Task.FromResult(WorkReportVerdict.Refused);
     public Task ReceiveReminder(string reminderName, TickStatus status) => Task.CompletedTask;
 }
 
@@ -514,6 +519,29 @@ public class AgentJobDispatchRouteSpecs : AgentSessionLaunchRoutesTestSupport
         }
     }
 
+    [Theory]
+    [InlineData(null, "completed")]
+    [InlineData("", "completed")]
+    [InlineData("work-1", null)]
+    [InlineData("work-1", "")]
+    [InlineData("work-1", "running")]
+    public async Task HttpReportEndpoint_MalformedAgentJobTerminalIdentity_Returns400(
+        string? workId,
+        string? status)
+    {
+        using var response = await _fixture.Client.PostAsJsonAsync(
+            $"/api/runner/malformed-{Guid.NewGuid():N}/report",
+            new
+            {
+                workId,
+                status,
+                ownerKind = WorkDispatchOwnerKinds.AgentJob,
+                agentJobId = $"missing-{Guid.NewGuid():N}",
+            });
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+    }
+
     [Fact]
     public async Task HttpReportEndpoint_AgentJobWithoutAgentJobId_Returns400()
     {
@@ -543,6 +571,7 @@ public class AgentJobDispatchRouteSpecs : AgentSessionLaunchRoutesTestSupport
     {
         await _fixture.Client.PostOkAsync($"/api/runner/{runnerId}/register", new
         {
+            processGeneration = TestRunnerGenerationExtensions.ProcessGeneration,
             capabilities = new[] { "spec/*" },
             hostname = $"{runnerId}-host",
             projectId,

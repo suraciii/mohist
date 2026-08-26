@@ -237,7 +237,7 @@ public static partial class RunnerRoutes
                         failure.WorkId,
                         runnerId,
                         failure.OperationId,
-                        failure.Message) == ReportAck.Accepted,
+                        failure.Message) == WorkReportVerdict.Accepted,
                 WorkDispatchOwnerKinds.AgentJob => await grains.GetGrain<IAgentJobGrain>(failure.OwnerId)
                     .MarkUpdateStopFailureAsync(runnerId, failure.WorkId, failure.OperationId, failure.Message),
                 _ => false,
@@ -279,7 +279,7 @@ public static partial class RunnerRoutes
                     work.WorkId,
                     operation.RunnerId,
                     operation.OperationId);
-            return ack == ReportAck.Accepted
+            return ack == WorkReportVerdict.Accepted
                 ? RunnerUpdateWorkStatus.Marked
                 : RunnerUpdateWorkStatus.AlreadyEnded;
         }

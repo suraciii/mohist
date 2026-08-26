@@ -17,6 +17,7 @@ using Mohist.Server.Sessions.Grains;
 using Mohist.Server.Sessions.Services;
 using Mohist.Server.Slack.Services;
 using Mohist.Server.Workspace.Grains;
+using Mohist.Server.Workflow.Grains;
 using Orleans.Runtime;
 
 namespace Mohist.Server.Agent.Grains;
@@ -65,6 +66,7 @@ public sealed partial class AgentJobGrain : Grain, IAgentJobGrain
     private readonly IGrainFactory _grains;
     private readonly IAgentJobDispatchObserver _dispatchObserver;
     private readonly ManagerExecutionCapabilityIssuer _managerCredentials;
+    private readonly IAgentJobReportPersistenceFailureInjector _reportPersistenceFailures;
     private readonly TaskCompletionSource<AgentJobTerminalResult> _terminalCompletion =
         new(TaskCreationOptions.RunContinuationsAsynchronously);
     private IDisposable? _jobTimeoutTimer;
@@ -81,7 +83,8 @@ public sealed partial class AgentJobGrain : Grain, IAgentJobGrain
         EventDispatchSignal dispatchSignal,
         IGrainFactory grains,
         IAgentJobDispatchObserver dispatchObserver,
-        ManagerExecutionCapabilityIssuer managerCredentials)
+        ManagerExecutionCapabilityIssuer managerCredentials,
+        IAgentJobReportPersistenceFailureInjector? reportPersistenceFailures = null)
     {
         _log = log;
         _options = options.Value;
@@ -92,6 +95,7 @@ public sealed partial class AgentJobGrain : Grain, IAgentJobGrain
         _grains = grains;
         _dispatchObserver = dispatchObserver;
         _managerCredentials = managerCredentials;
+        _reportPersistenceFailures = reportPersistenceFailures ?? NoopAgentJobReportPersistenceFailureInjector.Instance;
         _runnerLossRecoveryTimeout = ValidateRunnerLossRecoveryTimeout(_options.RunnerLossRecoveryTimeout);
     }
 
@@ -454,80 +458,6 @@ public sealed partial class AgentJobGrain : Grain, IAgentJobGrain
         State.RuntimeSessionId = runtimeSessionId;
         await PersistAsync();
         return true;
-    }
-
-    public async Task<AgentJobReportResult> ReportResultAsync(string runnerId, string workId, WorkResult result)
-    {
-        await HydrateAsync();
-
-        // A late report cannot win the recovery-deadline race merely because
-        // the durable reminder has not executed yet. Terminalize the
-        // recovering job first, then return Stale so the reporter retires its
-        // journal entry.
-        if (await FailRecoveringJobIfDueAsync())
-            return new AgentJobReportResult(false, "stale");
-
-        if (IsTerminal)
-        {
-            _log.LogDebug(
-                "AgentJob {Id} rejecting report from {Runner} for {Work}: already in terminal {Status}",
-                Key, runnerId, workId, State.Status);
-            if (State.PendingSessionClose is not null)
-                await DeliverTerminalToSessionAsync(State.PendingSessionClose);
-            if (State.PendingTerminalDeliveryEvent is not null)
-                await EmitTerminalDeliveryEventAsync(State.PendingTerminalDeliveryEvent);
-            if (State.PendingSubagentTerminalEvent is not null)
-                await EmitSubagentTerminalEventAsync(State.PendingSubagentTerminalEvent);
-            return new AgentJobReportResult(false, "stale");
-        }
-
-        if (State.Status is not (AgentJobStatus.Running or AgentJobStatus.Unknown))
-        {
-            _log.LogWarning(
-                "AgentJob {Id} rejecting report from {Runner} for {Work}: unexpected status {Status}",
-                Key, runnerId, workId, State.Status);
-            return new AgentJobReportResult(false, "not-running");
-        }
-
-        if (!string.Equals(State.RunnerId, runnerId, StringComparison.Ordinal)
-            || !string.Equals(State.WorkId, workId, StringComparison.Ordinal))
-        {
-            _log.LogWarning(
-                "AgentJob {Id} rejecting report from {Runner} for {Work}: expected {ExpectedRunner}/{ExpectedWork}",
-                Key, runnerId, workId, State.RunnerId, State.WorkId);
-            return new AgentJobReportResult(false, "runner-or-work-mismatch");
-        }
-        if (IsManagerCredentialExpired(result)) return await ReportManagerCredentialExpiredAsync(result);
-        if (string.Equals(result.Status, "unknown", StringComparison.OrdinalIgnoreCase)) return await ReportUnknownResultAsync(result);
-        var isSuccess = string.Equals(result.Status, "completed", StringComparison.OrdinalIgnoreCase)
-            || string.Equals(result.Status, "pass", StringComparison.OrdinalIgnoreCase)
-            || string.Equals(result.Status, "ok", StringComparison.OrdinalIgnoreCase)
-            || string.Equals(result.Status, "success", StringComparison.OrdinalIgnoreCase);
-
-        var failureReason = isSuccess
-            ? null
-            : (string.IsNullOrWhiteSpace(result.Message) ? result.Status : result.Message);
-
-        var failureCategory = isSuccess
-            ? null
-            : FailureCategoryFromOutput(result.Output)
-                ?? FailureCategoryFromErrorCode(result.ErrorCode)
-                ?? FailureCategoryFromStatus(result.Status);
-
-        await EnterTerminalStateAsync(
-            isSuccess ? AgentJobStatus.Completed : AgentJobStatus.Failed,
-            isSuccess ? (int?)0 : (result.ExitCode ?? 1),
-            failureReason,
-            failureCategory,
-            failureReason,
-            result.Message,
-            result.Output?.ValueKind == System.Text.Json.JsonValueKind.Object || result.Output?.ValueKind == System.Text.Json.JsonValueKind.Array
-                ? result.Output.Value.GetRawText()
-                : null,
-            result.ArtifactUploadIds,
-            result.ExitCode);
-
-        return new AgentJobReportResult(true);
     }
 
     public async Task FailAsync(string reason, string? agentId = null)
@@ -1615,7 +1545,10 @@ public sealed partial class AgentJobGrain : Grain, IAgentJobGrain
                     State.TerminalLogOwnership.OwnerKind,
                     State.TerminalLogOwnership.OwnerId,
                     State.TerminalLogOwnership.WorkId,
-                    State.TerminalLogOwnership.RunnerId));
+                    State.TerminalLogOwnership.RunnerId),
+            ClaimedProcessGeneration: State.Status is AgentJobStatus.Running or AgentJobStatus.Unknown
+                ? _ledger?.ClaimedProcessGeneration
+                : null);
 
         if (_ledger is null)
         {

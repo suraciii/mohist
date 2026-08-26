@@ -489,7 +489,7 @@ public class VerificationLaneBindingSpecs : WorkflowGrainSpecs
                 Output: null,
                 Artifacts: null,
                 TaskRunId: timedOut.Work.TaskRunId));
-        Assert.Equal(ReportAck.Stale, stale);
+        Assert.Equal(WorkReportVerdict.Refused, stale);
 
         await ReportAsync(runnerId, retry.Work.WorkId, "completed");
         for (var i = 2; i < VerificationLaneCatalog.LaneIds.Count; i++)

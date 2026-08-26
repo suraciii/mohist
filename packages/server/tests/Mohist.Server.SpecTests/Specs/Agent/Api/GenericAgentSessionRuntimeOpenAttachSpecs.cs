@@ -47,6 +47,7 @@ public class GenericAgentSessionRuntimeOpenAttachSpecs
         var runnerId = $"generic-open-pi-runner-{Guid.NewGuid():N}";
         await _fixture.Client.PostOkAsync($"/api/runner/{runnerId}/register", new
         {
+            processGeneration = TestRunnerGenerationExtensions.ProcessGeneration,
             capabilities = new[] { "spec/*" },
             hostname = $"{runnerId}-host",
             projectId = project.Id,
@@ -93,6 +94,7 @@ public class GenericAgentSessionRuntimeOpenAttachSpecs
         var runnerId = $"generic-attach-pi-runner-{Guid.NewGuid():N}";
         await _fixture.Client.PostOkAsync($"/api/runner/{runnerId}/register", new
         {
+            processGeneration = TestRunnerGenerationExtensions.ProcessGeneration,
             capabilities = new[] { "spec/*" },
             hostname = $"{runnerId}-host",
             projectId = project.Id,
@@ -149,6 +151,7 @@ public class GenericAgentSessionRuntimeOpenAttachSpecs
         var runnerId = $"generic-attach-connection-runner-{Guid.NewGuid():N}";
         await _fixture.Client.PostOkAsync($"/api/runner/{runnerId}/register", new
         {
+            processGeneration = TestRunnerGenerationExtensions.ProcessGeneration,
             capabilities = new[] { "spec/*" },
             hostname = $"{runnerId}-host",
             projectId = project.Id,
@@ -193,6 +196,7 @@ public class GenericAgentSessionRuntimeOpenAttachSpecs
         var runnerId = $"generic-open-default-runner-{Guid.NewGuid():N}";
         await _fixture.Client.PostOkAsync($"/api/runner/{runnerId}/register", new
         {
+            processGeneration = TestRunnerGenerationExtensions.ProcessGeneration,
             capabilities = new[] { "spec/*" },
             hostname = $"{runnerId}-host",
             projectId = project.Id,

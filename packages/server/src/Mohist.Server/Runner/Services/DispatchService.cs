@@ -51,13 +51,17 @@ public sealed class DispatchService : IScopedService
     {
         ct.ThrowIfCancellationRequested();
         var runner = _grains.GetGrain<IRunnerGrain>(runnerId);
-        var admission = await runner.TryBeginPollAsync();
+        var processGeneration = req.ProcessGeneration ?? string.Empty;
+        var admission = await runner.TryBeginPollAsync(processGeneration);
         if (!admission.Admitted)
             return new RunnerPollResponse([]);
 
         try
         {
-            return await PollCoreAsync(runner, runnerId, req, admission.Slots, ct).WaitAsync(ct);
+            var response = await PollCoreAsync(runner, runnerId, req, processGeneration, admission.Slots, ct).WaitAsync(ct);
+            return await runner.ValidatePollAsync(admission.AdmissionToken, processGeneration)
+                ? response
+                : new RunnerPollResponse([]);
         }
         finally
         {
@@ -69,6 +73,7 @@ public sealed class DispatchService : IScopedService
         IRunnerGrain runner,
         string runnerId,
         RunnerPollRequest req,
+        string processGeneration,
         int slots,
         CancellationToken ct)
     {
@@ -94,6 +99,7 @@ public sealed class DispatchService : IScopedService
         ct.ThrowIfCancellationRequested();
         var desiredActiveKeys = await AddMissingRedeliveriesAsync(
             runnerId,
+            processGeneration,
             info,
             reportedWorkKeys,
             dispatches,
@@ -124,6 +130,7 @@ public sealed class DispatchService : IScopedService
             info,
             info.ProjectId,
             runnerId,
+            processGeneration,
             assigned: true,
             spare,
             dispatches,
@@ -137,6 +144,7 @@ public sealed class DispatchService : IScopedService
                 info,
                 info.ProjectId,
                 runnerId,
+                processGeneration,
                 assigned: false,
                 spare,
                 dispatches,
@@ -152,6 +160,7 @@ public sealed class DispatchService : IScopedService
 
     private async Task<HashSet<string>> AddMissingRedeliveriesAsync(
         string runnerId,
+        string processGeneration,
         RunnerInfo info,
         IReadOnlySet<string> reportedWorkKeys,
         List<WorkDispatch> dispatches,
@@ -165,6 +174,7 @@ public sealed class DispatchService : IScopedService
             var (workKey, dispatch, reserveSlot) = await RenderActiveWorkflowAsync(
                 workflowRunId,
                 runnerId,
+                processGeneration,
                 reportedWorkKeys,
                 ct);
             if (workKey is null)
@@ -183,6 +193,8 @@ public sealed class DispatchService : IScopedService
         foreach (var record in agentWork)
         {
             ct.ThrowIfCancellationRequested();
+            if (!string.Equals(record.ClaimedProcessGeneration, processGeneration, StringComparison.Ordinal))
+                continue;
             var dispatch = DeserializeAgentDispatch(record);
             var isManagerExecution = dispatch is not null && ManagerExecutionBinding.TryRead(dispatch, out _);
             // An unknown Manager turn may have reached the Server before the
@@ -210,6 +222,7 @@ public sealed class DispatchService : IScopedService
         RunnerInfo info,
         string? projectId,
         string runnerId,
+        string processGeneration,
         bool assigned,
         int availableSlots,
         List<WorkDispatch> dispatches,
@@ -278,7 +291,7 @@ public sealed class DispatchService : IScopedService
                     continue;
 
                 ct.ThrowIfCancellationRequested();
-                var claim = await runner.TryClaimAgentJobAsync(candidate.OwnerId, projectId, expectation);
+                var claim = await runner.TryClaimAgentJobAsync(candidate.OwnerId, projectId, expectation, processGeneration);
                 dispatch = claim?.Dispatch;
             }
             else
@@ -294,6 +307,7 @@ public sealed class DispatchService : IScopedService
                     projectId,
                     runnerId,
                     assignWorker: !assigned,
+                    processGeneration,
                     ct);
             }
 
@@ -379,6 +393,7 @@ public sealed class DispatchService : IScopedService
     private async Task<(string? WorkKey, WorkDispatch? Dispatch, bool ReserveSlot)> RenderActiveWorkflowAsync(
         string workflowRunId,
         string runnerId,
+        string processGeneration,
         IReadOnlySet<string> reportedWorkKeys,
         CancellationToken ct)
     {
@@ -386,11 +401,19 @@ public sealed class DispatchService : IScopedService
         if (run is null)
             return (WorkflowOwnerKey(workflowRunId), null, ReserveSlot: true);
         if (run.HasUnresolvedAgentResult())
-            return await RenderUnresolvedAgentRecoveryAsync(run, workflowRunId, runnerId, reportedWorkKeys, ct);
+            return await RenderUnresolvedAgentRecoveryAsync(
+                run,
+                workflowRunId,
+                runnerId,
+                processGeneration,
+                reportedWorkKeys,
+                ct);
 
         var activeWork = run.CurrentActiveWorkFor(runnerId);
         if (activeWork is null)
-            return (WorkflowOwnerKey(workflowRunId), null, ReserveSlot: true);
+            return (null, null, ReserveSlot: false);
+        if (!string.Equals(activeWork.ProcessGeneration, processGeneration, StringComparison.Ordinal))
+            return (null, null, ReserveSlot: false);
 
         var workId = activeWork.WorkId;
         var workKey = WorkflowWorkKey(workflowRunId, workId);
@@ -446,6 +469,7 @@ public sealed class DispatchService : IScopedService
         WorkflowRun run,
         string workflowRunId,
         string runnerId,
+        string processGeneration,
         IReadOnlySet<string> reportedWorkKeys,
         CancellationToken ct)
     {
@@ -463,6 +487,7 @@ public sealed class DispatchService : IScopedService
             return (null, null, ReserveSlot: false);
         var activeWork = run.CurrentActiveWorkFor(runnerId);
         if (activeWork is not { IsTask: true }
+            || !string.Equals(activeWork.ProcessGeneration, processGeneration, StringComparison.Ordinal)
             || !string.Equals(activeWork.TaskRunId, settlementTask.Task.Id, StringComparison.Ordinal)
             || !string.Equals(settlement.RunnerId, runnerId, StringComparison.Ordinal))
         {
@@ -517,13 +542,14 @@ public sealed class DispatchService : IScopedService
         string? projectId,
         string runnerId,
         bool assignWorker,
+        string processGeneration,
         CancellationToken ct)
     {
         WorkItem? item;
         ct.ThrowIfCancellationRequested();
         try
         {
-            item = await runner.TryClaimWorkflowAsync(workflowRunId, projectId, assignWorker);
+            item = await runner.TryClaimWorkflowAsync(workflowRunId, projectId, assignWorker, processGeneration);
         }
         catch (OperationCanceledException)
         {

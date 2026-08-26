@@ -18,7 +18,7 @@ public class ApprovalDecidedByTests
             [new("plan-ok", "Plan OK", "spec/check")],
             DateTimeOffset.UnixEpoch);
         run.AssignTo("worker-1", TestTime.UtcNow);
-        run.StartTask("draft.1", "worker-1", DateTimeOffset.UnixEpoch);
+        run.StartTask("draft.1", "worker-1", "test-process-generation", DateTimeOffset.UnixEpoch);
         run.CompleteTask(DateTimeOffset.UnixEpoch);
         run.PassCheck(new CheckResult("plan-ok", CheckResultStatus.Passed), DateTimeOffset.UnixEpoch);
         return run;

@@ -158,6 +158,7 @@ public class WorkflowRetryIgnoresContextUsageSpecs
     {
         await _client.PostOkAsync($"/api/runner/{runnerId}/register", new
         {
+            processGeneration = TestRunnerGenerationExtensions.ProcessGeneration,
             capabilities = new[] { "spec/*" },
             hostname = "retry-guard-host",
             projectId,
@@ -177,7 +178,7 @@ public class WorkflowRetryIgnoresContextUsageSpecs
 
     private async Task<WorkDispatchInfo?> PollMatchingTaskAsync(string runnerId, string workflowRunId)
     {
-        var response = await _client.PostAsync($"/api/runner/{runnerId}/poll", null);
+        var response = await _client.PostRunnerPollAsync(runnerId);
         var payload = await response.ReadFirstDispatchElementAsync();
         if (payload is null) return null;
 
@@ -194,6 +195,7 @@ public class WorkflowRetryIgnoresContextUsageSpecs
 
         await _client.PostOkAsync($"/api/runner/{runnerId}/report", new
         {
+            ownerKind = WorkDispatchOwnerKinds.Workflow,
             workflowRunId = dispatchedWorkflowRunId,
             workId = data.GetProperty("workId").GetString(),
             taskRunId = data.GetProperty("taskRunId").GetString(),
@@ -308,6 +310,7 @@ public class WorkflowRetryIgnoresContextUsageSpecs
     {
         await _client.PostOkAsync($"/api/runner/{runnerId}/report", new
         {
+            ownerKind = WorkDispatchOwnerKinds.Workflow,
             workflowRunId,
             workId = work.WorkId,
             taskRunId = work.TaskRunId,

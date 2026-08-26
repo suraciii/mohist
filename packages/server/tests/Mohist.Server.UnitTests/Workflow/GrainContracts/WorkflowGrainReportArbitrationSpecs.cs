@@ -46,7 +46,7 @@ public sealed class WorkflowGrainReportArbitrationSpecs
             a.TaskRunId,
             new WorkResult("completed", ArtifactUploadIds: [uploadId]));
 
-        Assert.Equal("stale", report.Ack);
+        Assert.Equal("refused", report.Ack);
         Assert.Equal("Running", await a.Grain.GetRunStatusAsync());
         await using var scope = _fixture.Services.CreateAsyncScope();
         var db = scope.ServiceProvider.GetRequiredService<MohistDbContext>();
@@ -73,7 +73,7 @@ public sealed class WorkflowGrainReportArbitrationSpecs
                 ArtifactUploadIds: [uploadId],
                 TaskRunId: a.TaskRunId));
 
-        Assert.Equal(ReportAck.Stale, ack);
+        Assert.Equal(WorkReportVerdict.Refused, ack);
         Assert.Equal("Running", await a.Grain.GetRunStatusAsync());
         await using var scope = _fixture.Services.CreateAsyncScope();
         var db = scope.ServiceProvider.GetRequiredService<MohistDbContext>();
@@ -96,7 +96,7 @@ public sealed class WorkflowGrainReportArbitrationSpecs
             "other-task.1",
             new WorkResult("completed", ArtifactUploadIds: [uploadId]));
 
-        Assert.Equal("stale", report.Ack);
+        Assert.Equal("refused", report.Ack);
         Assert.Equal("Running", await a.Grain.GetRunStatusAsync());
         await using var scope = _fixture.Services.CreateAsyncScope();
         var db = scope.ServiceProvider.GetRequiredService<MohistDbContext>();
@@ -126,6 +126,47 @@ public sealed class WorkflowGrainReportArbitrationSpecs
     }
 
     [Fact]
+    public async Task TerminalChecks_ExactReplayIsAcceptedAndConflictingReplayIsRefused()
+    {
+        var definition = new WorkflowDefinition([
+            new StageDefinition(
+                "build",
+                [new TaskDefinition("task-1", "Task 1", "spec/task")],
+                [new CheckDefinition("check-1", "Check 1", "spec/check")]),
+        ]);
+        var arrangement = await WorkflowGrainArrangement.CreateAsync(
+            _fixture,
+            "wr-check-replay",
+            definition,
+            TimeProvider,
+            workerId: "runner-check-replay");
+        var task = Assert.IsType<WorkItem>(await arrangement.AssignAndClaimAsync());
+        await arrangement.ReportCompletedAsync(task);
+        var checks = Assert.IsType<WorkItem>(await arrangement.AssignAndClaimAsync());
+        var report = new CheckReport(
+            checks.Stage,
+            [new CheckResult("check-1", CheckResultStatus.Passed)],
+            "fingerprint-1");
+
+        Assert.Equal(
+            WorkReportVerdict.Accepted,
+            await arrangement.Grain.ReceiveCheckReportAsync(arrangement.WorkerId, checks.Id!, report));
+        var eventCount = (await arrangement.Events.ListAsync(arrangement.RunId)).Count;
+
+        Assert.Equal(
+            WorkReportVerdict.Accepted,
+            await arrangement.Grain.ReceiveCheckReportAsync(arrangement.WorkerId, checks.Id!, report));
+        Assert.Equal(eventCount, (await arrangement.Events.ListAsync(arrangement.RunId)).Count);
+        Assert.Equal(
+            WorkReportVerdict.Refused,
+            await arrangement.Grain.ReceiveCheckReportAsync(
+                arrangement.WorkerId,
+                checks.Id!,
+                report with { TerminalResultFingerprint = "fingerprint-2" }));
+        Assert.Equal(eventCount, (await arrangement.Events.ListAsync(arrangement.RunId)).Count);
+    }
+
+    [Fact]
     public async Task TerminalTask_ConflictingReportIsStaleWithoutOutputFollowUpOrArtifactSideEffects()
     {
         var a = await ArrangeAsync("wr-arb-conflict");
@@ -147,7 +188,7 @@ public sealed class WorkflowGrainReportArbitrationSpecs
                 ArtifactUploadIds: [uploadId],
                 AddTasks: [new RuntimeTaskInput("late-follow-up", "Late follow-up", "spec/task")]));
 
-        Assert.Equal("stale", late.Ack);
+        Assert.Equal("refused", late.Ack);
         var run = await a.LoadRunAsync();
         var task = Assert.Single(run.CurrentStage().Tasks);
         Assert.Equal(TaskRunStatus.Completed, task.Status);

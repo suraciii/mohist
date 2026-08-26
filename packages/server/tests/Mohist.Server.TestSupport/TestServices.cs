@@ -3,9 +3,11 @@ using Microsoft.EntityFrameworkCore;
 using Mohist.Server.Agent.Grains;
 using Mohist.Server.Infrastructure;
 using Mohist.Server.Infrastructure.Data.Db;
+using Mohist.Server.Infrastructure.Data.AgentJobs;
 using Mohist.Server.Infrastructure.Events;
 using Mohist.Server.Runner.Grains;
 using Mohist.Server.Slack.Services;
+using Mohist.Server.Workflow.Grains;
 
 namespace Mohist.Server.TestSupport;
 
@@ -21,6 +23,11 @@ public static class TestServices
         services.AddSingleton<RunnerUpdateOperationWriteFailureProbe>();
         services.AddSingleton<IRunnerUpdateOperationWriteFailureInjector>(sp =>
             sp.GetRequiredService<RunnerUpdateOperationWriteFailureProbe>());
+        services.AddSingleton<ReportPersistenceFailureProbe>();
+        services.AddSingleton<IWorkflowReportPersistenceFailureInjector>(sp =>
+            sp.GetRequiredService<ReportPersistenceFailureProbe>());
+        services.AddSingleton<IAgentJobReportPersistenceFailureInjector>(sp =>
+            sp.GetRequiredService<ReportPersistenceFailureProbe>());
         // AgentJobGrain revokes Manager execution leases in its recovery
         // transitions, so every test silo that can activate the grain needs
         // the same runtime-only singletons the production host registers.

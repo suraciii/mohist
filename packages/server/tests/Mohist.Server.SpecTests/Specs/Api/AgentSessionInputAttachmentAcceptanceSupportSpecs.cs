@@ -56,6 +56,7 @@ public partial class AgentSessionInputAttachmentAcceptanceSpecs
     {
         await _fixture.Client.PostOkAsync($"/api/runner/{runnerId}/register", new
         {
+            processGeneration = TestRunnerGenerationExtensions.ProcessGeneration,
             capabilities = new[] { "spec/*" },
             hostname = $"{runnerId}-host",
             projectId,
@@ -145,7 +146,7 @@ public partial class AgentSessionInputAttachmentAcceptanceSpecs
         var assignment = await job.GetRuntimeSnapshotAsync();
         Assert.Equal(runnerId, assignment.RunnerId);
 
-        var claim = Assert.IsType<ClaimResult>(await job.ClaimNextAsync(runnerId));
+        var claim = Assert.IsType<ClaimResult>(await job.ClaimNextAsync(runnerId, "test-generation"));
         Assert.Equal(agentJobId, claim.AgentJobId);
         Assert.Equal(expectedSessionId, claim.Dispatch.AgentSessionId);
         return claim;

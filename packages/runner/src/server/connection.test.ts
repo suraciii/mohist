@@ -35,7 +35,12 @@ describe('ServerConnection machine credential', () => {
     )
 
     const connection = new ServerConnection({ ...options, credential: 'moh_runner_abc' })
-    await connection.poll(signal)
+    await connection.poll(signal, {
+      processGeneration: 'test-generation',
+      inFlight: [],
+      awaitingAck: [],
+      admissionReady: false,
+    })
 
     const [, init] = fetchSpy.mock.calls[0]!
     const headers = new Headers(init?.headers)
@@ -50,7 +55,12 @@ describe('ServerConnection machine credential', () => {
       }),
     )
 
-    await new ServerConnection(options).poll(signal)
+    await new ServerConnection(options).poll(signal, {
+      processGeneration: 'test-generation',
+      inFlight: [],
+      awaitingAck: [],
+      admissionReady: false,
+    })
 
     const [, init] = fetchSpy.mock.calls[0]!
     const headers = new Headers(init?.headers)

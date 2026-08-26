@@ -28,6 +28,8 @@ public static partial class RunnerRoutes
 
         group.MapPost("/register", async (string runnerId, RunnerRegisterRequest req, IGrainFactory grains) =>
         {
+            if (string.IsNullOrWhiteSpace(req.ProcessGeneration))
+                return ApiResults.BadRequest("processGeneration is required");
             var runner = grains.GetGrain<IRunnerGrain>(runnerId);
             await runner.RegisterAsync(new RunnerInfo(
                 runnerId,
@@ -45,7 +47,7 @@ public static partial class RunnerRoutes
                 TreeHash: NormalizeIdentity(req.TreeHash),
                 ArtifactDigest: NormalizeIdentity(req.ArtifactDigest),
                 ReleaseId: NormalizeIdentity(req.ReleaseId),
-                Generation: req.Generation > 0 ? req.Generation : null));
+                Generation: req.Generation > 0 ? req.Generation : null), req.ProcessGeneration);
             return Results.Ok();
         });
 
@@ -93,20 +95,17 @@ public static partial class RunnerRoutes
             if (!managerEpoch.Available)
                 return Results.StatusCode(StatusCodes.Status503ServiceUnavailable);
             request.HttpContext.Response.Headers["X-Mohist-Manager-Deployment-Epoch"] = managerEpoch.Current;
-            RunnerPollRequest req = new([], []);
-            if (request.ContentLength is > 0)
+            RunnerPollRequest? req;
+            try
             {
-                try
-                {
-                    req = await request.ReadFromJsonAsync<RunnerPollRequest>(cancellationToken: ct)
-                        ?? new RunnerPollRequest([], []);
-                }
-                catch
-                {
-                    // Malformed body → treat as empty report (old/buggy client).
-                    req = new RunnerPollRequest([], []);
-                }
+                req = await request.ReadFromJsonAsync<RunnerPollRequest>(cancellationToken: ct);
             }
+            catch
+            {
+                return ApiResults.BadRequest("invalid poll body");
+            }
+            if (req is null || string.IsNullOrWhiteSpace(req.ProcessGeneration))
+                return ApiResults.BadRequest("processGeneration is required");
             var response = await dispatch.PollAsync(runnerId, connections.ApplyPollAdmission(runnerId, req), ct);
             if (response.Dispatches.Count == 0) return Results.NoContent();
 
@@ -882,6 +881,7 @@ public static partial class RunnerRoutes
 
 public record RunnerRegisterRequest(
     string[] Capabilities,
+    string? ProcessGeneration = null,
     string? ProjectId = null,
     string? Hostname = null,
     string[]? CoderModels = null,
@@ -915,13 +915,7 @@ public record RunnerHeartbeatRequest(
     string? ArtifactDigest = null,
     string? ReleaseId = null,
     long? Generation = null);
-public record RunnerReportResponse(
-    string WorkflowRunId,
-    string? WorkflowStatus,
-    bool Tracked,
-    string? Reason = null,
-    string? OwnerKind = null,
-    string? OwnerId = null);
+public record RunnerReportResponse(string Verdict);
 public record RunnerAgentSessionReconcileResponse(
     string SessionId,
     string Runtime,

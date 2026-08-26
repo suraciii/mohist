@@ -165,11 +165,11 @@ public sealed class AgentResultSettlementTests
         run.InitializeStage([first], [], Now);
         var firstTask = Assert.Single(run.CurrentStage().Tasks);
         run.AssignTo("runner-1", Now);
-        run.StartTask("repeat-plan", "runner-1", Now);
+        run.StartTask("repeat-plan", "runner-1", "test-process-generation", Now);
         run.CompleteTask(Now);
         run.InitializeStage([second], [], Now);
         var secondTask = Assert.Single(run.CurrentStage().Tasks);
-        run.StartTask("repeat-build", "runner-1", Now);
+        run.StartTask("repeat-build", "runner-1", "test-process-generation", Now);
 
         var shape = Assert.IsType<WorkItem>(run.FindReportShape(secondTask.Id, "repeat-build"));
 
@@ -518,7 +518,7 @@ public sealed class AgentResultSettlementTests
 
     private static TaskRun StartTask(WorkflowRun run, string workId)
     {
-        run.StartTask(workId, "runner-1", Now);
+        run.StartTask(workId, "runner-1", "test-process-generation", Now);
         return Assert.IsType<TaskRun>(run.CurrentStage().RunningTask);
     }
 

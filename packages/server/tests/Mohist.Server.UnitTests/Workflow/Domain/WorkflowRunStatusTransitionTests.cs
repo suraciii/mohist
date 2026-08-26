@@ -57,7 +57,7 @@ public class WorkflowRunStatusTransitionTests
     {
         var run = BuildReadyRun();
 
-        run.StartTask("work-1", WorkerId, DateTimeOffset.UnixEpoch);
+        run.StartTask("work-1", WorkerId, "test-process-generation", DateTimeOffset.UnixEpoch);
 
         Assert.Equal(WorkflowRunStatus.Running, run.Status);
         Assert.Equal(TaskRunStatus.Running, run.CurrentStage().Tasks.Single().Status);
@@ -71,7 +71,7 @@ public class WorkflowRunStatusTransitionTests
             new("compile", "Compile", "spec/task"),
             new("test", "Test", "spec/task")
         ], checks: []);
-        run.StartTask("work-1", WorkerId, DateTimeOffset.UnixEpoch);
+        run.StartTask("work-1", WorkerId, "test-process-generation", DateTimeOffset.UnixEpoch);
 
         run.CompleteTask(DateTimeOffset.UnixEpoch);
 
@@ -87,7 +87,7 @@ public class WorkflowRunStatusTransitionTests
             new("compile", "Compile", "spec/task"),
             new("test", "Test", "spec/task")
         ], checks: []);
-        run.StartTask("work-1", WorkerId, DateTimeOffset.UnixEpoch);
+        run.StartTask("work-1", WorkerId, "test-process-generation", DateTimeOffset.UnixEpoch);
         run.Assignment = null;
 
         run.CompleteTask(DateTimeOffset.UnixEpoch);
@@ -100,7 +100,7 @@ public class WorkflowRunStatusTransitionTests
     public void CompleteTask_WithNoRemainingWork_CompletesRun()
     {
         var run = BuildReadyRun(checks: []);
-        run.StartTask("work-1", WorkerId, DateTimeOffset.UnixEpoch);
+        run.StartTask("work-1", WorkerId, "test-process-generation", DateTimeOffset.UnixEpoch);
 
         run.CompleteTask(DateTimeOffset.UnixEpoch);
 
@@ -113,7 +113,7 @@ public class WorkflowRunStatusTransitionTests
         var pending = BuildPendingRun();
         var ready = BuildReadyRun();
         var running = BuildReadyRun();
-        running.StartTask("work-1", WorkerId, DateTimeOffset.UnixEpoch);
+        running.StartTask("work-1", WorkerId, "test-process-generation", DateTimeOffset.UnixEpoch);
 
         pending.Pause();
         ready.Pause();
@@ -128,7 +128,7 @@ public class WorkflowRunStatusTransitionTests
     public void Resume_WithInFlightWork_ReturnsToRunning()
     {
         var run = BuildReadyRun();
-        run.StartTask("work-1", WorkerId, DateTimeOffset.UnixEpoch);
+        run.StartTask("work-1", WorkerId, "test-process-generation", DateTimeOffset.UnixEpoch);
         run.Pause();
 
         run.Resume(DateTimeOffset.UnixEpoch);
@@ -163,7 +163,7 @@ public class WorkflowRunStatusTransitionTests
     public void FailTask_LandsOnFailed()
     {
         var run = BuildReadyRun();
-        run.StartTask("work-1", WorkerId, DateTimeOffset.UnixEpoch);
+        run.StartTask("work-1", WorkerId, "test-process-generation", DateTimeOffset.UnixEpoch);
 
         run.FailTask(new TaskResult("failed", "boom"), DateTimeOffset.UnixEpoch);
 
@@ -184,7 +184,7 @@ public class WorkflowRunStatusTransitionTests
     public void Stop_FromFailedRun_LandsOnStopped()
     {
         var run = BuildReadyRun();
-        run.StartTask("work-1", WorkerId, DateTimeOffset.UnixEpoch);
+        run.StartTask("work-1", WorkerId, "test-process-generation", DateTimeOffset.UnixEpoch);
         run.FailTask(new TaskResult("failed", "boom"), DateTimeOffset.UnixEpoch);
 
         run.Stop();
@@ -214,7 +214,7 @@ public class WorkflowRunStatusTransitionTests
     public void Stop_FromRunningStage_LeavesApprovalStatusUnchanged()
     {
         var run = BuildReadyRun();
-        run.StartTask("work-1", WorkerId, DateTimeOffset.UnixEpoch);
+        run.StartTask("work-1", WorkerId, "test-process-generation", DateTimeOffset.UnixEpoch);
         var current = run.CurrentStage();
         Assert.False(current.IsAwaitingApproval);
         Assert.Null(current.ApprovalStatus);
@@ -326,7 +326,7 @@ public class WorkflowRunStatusTransitionTests
             [new("verify", "Verify", "spec/check")],
             DateTimeOffset.UnixEpoch);
         run.AssignTo(WorkerId, TestTime.UtcNow);
-        run.StartTask("w-compile", WorkerId, DateTimeOffset.UnixEpoch);
+        run.StartTask("w-compile", WorkerId, "test-process-generation", DateTimeOffset.UnixEpoch);
         run.CompleteTask(DateTimeOffset.UnixEpoch);
         run.PassCheck(new CheckResult("verify", CheckResultStatus.Passed), DateTimeOffset.UnixEpoch);
         // Build has advanced; integrate is now current.
@@ -409,7 +409,7 @@ public class WorkflowRunStatusTransitionTests
         Assert.Equal(WorkflowRunStatus.Ready, run.Status);
 
         // Claim: StartTask is what transitions the task to Running.
-        run.StartTask("work-1", WorkerId, DateTimeOffset.UnixEpoch);
+        run.StartTask("work-1", WorkerId, "test-process-generation", DateTimeOffset.UnixEpoch);
 
         Assert.Equal(TaskRunStatus.Running, run.CurrentStage().Tasks[0].Status);
         Assert.Equal(WorkerId, run.CurrentStage().Tasks[0].WorkerId);
@@ -446,7 +446,7 @@ public class WorkflowRunStatusTransitionTests
         run.Start(DateTimeOffset.UnixEpoch);
         run.InitializeStage([new("draft", "Draft", "spec/task")], [new("plan-ok", "Plan OK", "spec/check")], DateTimeOffset.UnixEpoch);
         run.AssignTo(WorkerId, TestTime.UtcNow);
-        run.StartTask("work-1", WorkerId, DateTimeOffset.UnixEpoch);
+        run.StartTask("work-1", WorkerId, "test-process-generation", DateTimeOffset.UnixEpoch);
         run.CompleteTask(DateTimeOffset.UnixEpoch);
         run.PassCheck(new CheckResult("plan-ok", CheckResultStatus.Passed), DateTimeOffset.UnixEpoch);
         Assert.Equal(WorkflowRunStatus.AwaitingApproval, run.Status);

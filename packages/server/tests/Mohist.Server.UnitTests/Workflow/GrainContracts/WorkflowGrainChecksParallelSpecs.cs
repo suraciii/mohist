@@ -36,7 +36,7 @@ public sealed class WorkflowGrainChecksParallelSpecs
         var checks = (await arrangement.AssignAndClaimAsync())!;
         await arrangement.ReportChecksPassAsync(checks, "typecheck", "lint", "test");
 
-        Assert.Null(await arrangement.Grain.ClaimNextAsync(arrangement.WorkerId));
+        Assert.Null(await arrangement.Grain.ClaimNextAsync(arrangement.WorkerId, "test-generation"));
         Assert.Equal("Completed", await arrangement.Grain.GetRunStatusAsync());
     }
 
@@ -53,7 +53,7 @@ public sealed class WorkflowGrainChecksParallelSpecs
             ("lint", CheckResultStatus.Failed, "lint errors"),
             ("test", CheckResultStatus.Passed, null));
 
-        Assert.Null(await arrangement.Grain.ClaimNextAsync(arrangement.WorkerId));
+        Assert.Null(await arrangement.Grain.ClaimNextAsync(arrangement.WorkerId, "test-generation"));
         Assert.Equal("Failed", await arrangement.Grain.GetRunStatusAsync());
     }
 
@@ -167,7 +167,7 @@ public sealed class WorkflowGrainChecksParallelSpecs
         var task = (await arrangement.AssignAndClaimAsync())!;
         await arrangement.ReportCompletedAsync(task);
 
-        Assert.Null(await arrangement.Grain.ClaimNextAsync(arrangement.WorkerId));
+        Assert.Null(await arrangement.Grain.ClaimNextAsync(arrangement.WorkerId, "test-generation"));
     }
 
     private Task<WorkflowGrainArrangement> ArrangeAsync(string runId, WorkflowDefinition? definition = null) =>

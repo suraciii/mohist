@@ -37,7 +37,7 @@ public sealed class RunnerPollParentContextApiSpecs
             await SeedIssuesAndWorkflowAsync(projectId, workflowRunId);
             await runner.RegisterAsync(new RunnerInfo(runnerId, ["mohist/*"], "test-host", projectId));
 
-            using var response = await _fixture.Client.PostAsync($"/api/runner/{runnerId}/poll", null);
+            using var response = await _fixture.Client.PostRunnerPollAsync(runnerId);
 
             Assert.Equal(HttpStatusCode.OK, response.StatusCode);
             var dispatch = await response.ReadFirstDispatchElementAsync()

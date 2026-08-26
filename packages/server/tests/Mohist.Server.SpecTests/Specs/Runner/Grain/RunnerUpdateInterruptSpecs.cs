@@ -31,7 +31,7 @@ public sealed class RunnerUpdateInterruptSpecs : Mohist.Server.SpecTests.Specs.W
         var task = Assert.Single(run.CurrentStage().Tasks);
         var operationId = $"runner-update:{Guid.NewGuid():N}";
 
-        Assert.Equal(ReportAck.Accepted, await workflow.BindAgentExecutionAsync(
+        Assert.Equal(WorkReportVerdict.Accepted, await workflow.BindAgentExecutionAsync(
             new AgentExecutionBinding(
                 task.Id,
                 work.WorkId,
@@ -41,12 +41,12 @@ public sealed class RunnerUpdateInterruptSpecs : Mohist.Server.SpecTests.Specs.W
                 "opencode",
                 "runtime-update")));
 
-        Assert.Equal(ReportAck.Accepted, await workflow.MarkUpdateInterruptedAsync(
+        Assert.Equal(WorkReportVerdict.Accepted, await workflow.MarkUpdateInterruptedAsync(
             task.Id,
             work.WorkId,
             runnerId,
             operationId));
-        Assert.Equal(ReportAck.Accepted, await workflow.MarkUpdateInterruptedAsync(
+        Assert.Equal(WorkReportVerdict.Accepted, await workflow.MarkUpdateInterruptedAsync(
             task.Id,
             work.WorkId,
             runnerId,
@@ -57,7 +57,7 @@ public sealed class RunnerUpdateInterruptSpecs : Mohist.Server.SpecTests.Specs.W
         Assert.NotNull(settlement);
         Assert.Equal(AgentResultSettlementState.RecoverablyInterrupted, settlement!.State);
         Assert.Equal(operationId, settlement.UpdateOperationId);
-        Assert.Equal(ReportAck.Accepted, await workflow.ObserveAgentRunnerDisconnectedAsync(runnerId));
+        Assert.Equal(WorkReportVerdict.Accepted, await workflow.ObserveAgentRunnerDisconnectedAsync(runnerId));
         Assert.Equal(
             AgentResultSettlementState.RecoverablyInterrupted,
             (await LoadRunAsync(_workflowId!)).CurrentStage().Tasks.Single().AgentResultSettlement!.State);
@@ -76,7 +76,7 @@ public sealed class RunnerUpdateInterruptSpecs : Mohist.Server.SpecTests.Specs.W
         var sessionId = $"missing-session-{Guid.NewGuid():N}";
         var operationId = $"runner-update:{Guid.NewGuid():N}";
 
-        Assert.Equal(ReportAck.Accepted, await workflow.BindAgentExecutionAsync(
+        Assert.Equal(WorkReportVerdict.Accepted, await workflow.BindAgentExecutionAsync(
             new AgentExecutionBinding(
                 task.Id,
                 work.WorkId,
@@ -85,7 +85,7 @@ public sealed class RunnerUpdateInterruptSpecs : Mohist.Server.SpecTests.Specs.W
                 "turn-missing-session",
                 "opencode",
                 "runtime-missing-session")));
-        Assert.Equal(ReportAck.Accepted, await workflow.MarkUpdateInterruptedAsync(
+        Assert.Equal(WorkReportVerdict.Accepted, await workflow.MarkUpdateInterruptedAsync(
             task.Id,
             work.WorkId,
             runnerId,
@@ -126,7 +126,7 @@ public sealed class RunnerUpdateInterruptSpecs : Mohist.Server.SpecTests.Specs.W
         var run = await LoadRunAsync(_workflowId!);
         var task = Assert.Single(run.CurrentStage().Tasks);
 
-        Assert.Equal(ReportAck.Accepted, await workflow.BindAgentExecutionAsync(
+        Assert.Equal(WorkReportVerdict.Accepted, await workflow.BindAgentExecutionAsync(
             new AgentExecutionBinding(
                 task.Id,
                 work.WorkId,
@@ -135,7 +135,7 @@ public sealed class RunnerUpdateInterruptSpecs : Mohist.Server.SpecTests.Specs.W
                 "turn-deadline",
                 "opencode",
                 "runtime-deadline")));
-        Assert.Equal(ReportAck.Accepted, await workflow.MarkUpdateInterruptedAsync(
+        Assert.Equal(WorkReportVerdict.Accepted, await workflow.MarkUpdateInterruptedAsync(
             task.Id,
             work.WorkId,
             runnerId,

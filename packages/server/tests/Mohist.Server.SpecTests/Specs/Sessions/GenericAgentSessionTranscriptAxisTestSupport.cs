@@ -8,7 +8,6 @@ using Mohist.Server.Agent.Grains;
 using Mohist.Server.Api;
 using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Infrastructure.Orleans;
-using Mohist.Server.Runner.Grains;
 using Mohist.Server.Sessions.Grains;
 using Mohist.Server.Sessions.Services;
 using Mohist.Server.SpecTests.Support;
@@ -16,6 +15,8 @@ using Mohist.Server.TestSupport;
 using Mohist.Server.Workspace.Grains;
 using Orleans;
 using Xunit;
+using Mohist.Server.Runner.Grains;
+using Mohist.Server.Workflow.Grains;
 namespace Mohist.Server.SpecTests.Specs.Sessions;
 
 public abstract class GenericAgentSessionTranscriptAxisTestSupport : IAsyncLifetime
@@ -194,6 +195,7 @@ public abstract class GenericAgentSessionTranscriptAxisTestSupport : IAsyncLifet
     {
         await _fixture.Client.PostOkAsync($"/api/runner/{_runnerId}/register", new
         {
+            processGeneration = TestRunnerGenerationExtensions.ProcessGeneration,
             capabilities = new[] { "spec/*" },
             hostname = $"{_runnerId}-host",
             projectId,
@@ -218,7 +220,7 @@ public abstract class GenericAgentSessionTranscriptAxisTestSupport : IAsyncLifet
 
         var claim = await _fixture.Grains
             .GetGrain<IAgentJobGrain>(agentJobId)
-            .ClaimNextAsync(runnerId);
+            .ClaimNextAsync(runnerId, "test-generation");
         var claimed = Assert.IsType<ClaimResult>(claim);
         Assert.Equal(agentJobId, claimed.AgentJobId);
         Assert.Equal(expectedSessionId, claimed.Dispatch.AgentSessionId);

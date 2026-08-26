@@ -4,6 +4,7 @@ using Mohist.Server.Slack.Domain;
 using Mohist.Server.UnitTests.Support;
 using Mohist.Server.TestSupport;
 using Xunit;
+using Mohist.Server.Workflow.Grains;
 
 namespace Mohist.Server.UnitTests.Slack;
 

@@ -99,7 +99,7 @@ public class WorkflowRunFailureTests
         run.Start(DateTimeOffset.UnixEpoch);
         run.InitializeStage([new("compile", "Compile", "spec/task")], [], DateTimeOffset.UnixEpoch);
         run.AssignTo("worker-1", DateTimeOffset.UnixEpoch);
-        run.StartTask("worker-1", "worker-1", DateTimeOffset.UnixEpoch);
+        run.StartTask("worker-1", "worker-1", "test-process-generation", DateTimeOffset.UnixEpoch);
         run.FailTask(new TaskResult("failed", "broken"), DateTimeOffset.UnixEpoch);
         return run;
     }
