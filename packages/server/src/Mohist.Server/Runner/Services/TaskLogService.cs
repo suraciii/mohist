@@ -169,7 +169,10 @@ public sealed class TaskLogService : IScopedService
         if (string.Equals(ownerKind, TaskLogOwnershipKinds.Workflow, StringComparison.Ordinal))
         {
             if (terminal)
-                return await _workProjection.IsTerminalWorkAsync(ownerId, workId, runnerId, ct);
+            {
+                return await _workProjection.IsActiveWorkAsync(ownerId, workId, runnerId, ct)
+                    || await _workProjection.IsTerminalWorkAsync(ownerId, workId, runnerId, ct);
+            }
 
             return await _workProjection.IsActiveWorkAsync(ownerId, workId, runnerId, ct);
         }
