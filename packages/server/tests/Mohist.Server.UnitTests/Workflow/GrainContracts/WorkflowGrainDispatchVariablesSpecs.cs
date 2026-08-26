@@ -562,6 +562,104 @@ public sealed class WorkflowGrainDispatchVariablesSpecs
         await arrangement.ReportChecksPassAsync(checkItem, "check-1");
     }
 
+    [Fact]
+    public async Task Dispatch_AfterTaskOutputs_IncludesTaskOutputsInVariables()
+    {
+        var arrangement = await ArrangeAsync(
+            "wr-dvs-task-outputs",
+            SingleStage(
+                tasks: [new("proposal", "Generate proposal", "spec/task"), new("specs", "Write specs", "spec/task")],
+                checks: []));
+
+        var proposal = (await arrangement.AssignAndClaimAsync())!;
+        Assert.StartsWith("proposal.", proposal.Id);
+        await arrangement.ReportTaskResultAsync(
+            proposal,
+            output: JsonSerializer.SerializeToElement(new
+            {
+                openspecName = "issue-97",
+                changeDir = "openspec/changes/issue-97",
+            }),
+            addTasks: null);
+
+        var specsItem = (await arrangement.AssignAndClaimAsync())!;
+        Assert.StartsWith("specs.", specsItem.Id);
+        var specs = await ToDispatchAsync(arrangement, specsItem);
+        Assert.NotNull(specs.Variables);
+
+        var variables = JsonSerializer.Deserialize<JsonElement>(specs.Variables);
+        var outputs = variables.GetProperty("tasks").GetProperty("proposal").GetProperty("outputs");
+        Assert.Equal("issue-97", outputs.GetProperty("openspecName").GetString());
+        Assert.Equal("openspec/changes/issue-97", outputs.GetProperty("changeDir").GetString());
+    }
+
+    [Fact]
+    public async Task Dispatch_AfterCoreProcessOutput_ExposesTypedTaskOutputFields()
+    {
+        var arrangement = await ArrangeAsync(
+            "wr-dvs-core-process-output",
+            SingleStage(
+                tasks: [new("process", "Run process", "core/process"), new("consume", "Consume process output", "spec/task")],
+                checks: []));
+
+        var process = (await arrangement.AssignAndClaimAsync())!;
+        await arrangement.ReportTaskResultAsync(
+            process,
+            output: JsonSerializer.SerializeToElement(new { stdout = "artifact.zip", exitCode = 0 }),
+            addTasks: null);
+
+        var consumeItem = (await arrangement.AssignAndClaimAsync())!;
+        var consume = await ToDispatchAsync(arrangement, consumeItem);
+        Assert.NotNull(consume.Variables);
+        var variables = JsonSerializer.Deserialize<JsonElement>(consume.Variables);
+        var output = variables.GetProperty("tasks").GetProperty("process").GetProperty("outputs");
+        Assert.Equal("artifact.zip", output.GetProperty("stdout").GetString());
+        Assert.Equal(JsonValueKind.Number, output.GetProperty("exitCode").ValueKind);
+        Assert.Equal(0, output.GetProperty("exitCode").GetInt32());
+    }
+
+    [Fact]
+    public async Task Dispatch_RuntimeVariablesTakePrecedenceOverLowerPrecedenceSources()
+    {
+        var arrangement = await ArrangeAsync(
+            "wr-dvs-runtime-precedence",
+            SingleStage(
+                tasks: [new("proposal", "Generate proposal", "spec/task"), new("specs", "Write specs", "spec/task")],
+                checks: []));
+
+        var proposal = (await arrangement.AssignAndClaimAsync())!;
+        await arrangement.ReportTaskResultAsync(
+            proposal,
+            output: JsonSerializer.SerializeToElement(new { openspecName = "runtime-value" }),
+            addTasks: null);
+
+        var specsItem = (await arrangement.AssignAndClaimAsync())!;
+        var specs = await ToDispatchAsync(arrangement, specsItem);
+        Assert.NotNull(specs.Variables);
+        var variables = JsonSerializer.Deserialize<JsonElement>(specs.Variables);
+        var openspecName = variables.GetProperty("tasks").GetProperty("proposal").GetProperty("outputs").GetProperty("openspecName");
+        Assert.Equal("runtime-value", openspecName.GetString());
+    }
+
+    [Fact]
+    public async Task Dispatch_EmptyTaskOutput_DoesNotAlterVariables()
+    {
+        var arrangement = await ArrangeAsync(
+            "wr-dvs-empty-output",
+            SingleStage(
+                tasks: [new("proposal", "Generate proposal", "spec/task"), new("specs", "Write specs", "spec/task")],
+                checks: []));
+
+        var proposal = (await arrangement.AssignAndClaimAsync())!;
+        await arrangement.ReportCompletedAsync(proposal);
+
+        var specsItem = (await arrangement.AssignAndClaimAsync())!;
+        var specs = await ToDispatchAsync(arrangement, specsItem);
+        Assert.NotNull(specs.Variables);
+        var variables = JsonSerializer.Deserialize<JsonElement>(specs.Variables);
+        Assert.False(variables.TryGetProperty("tasks", out _));
+    }
+
     private static WorkflowDefinition SingleStage(
         List<TaskDefinition>? tasks = null,
         List<CheckDefinition>? checks = null,
