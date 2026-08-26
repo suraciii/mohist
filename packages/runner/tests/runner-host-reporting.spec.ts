@@ -1,9 +1,6 @@
 import { AsyncLocalStorage } from 'node:async_hooks'
 import { describe, expect, it as vitestIt, vi } from 'vitest'
 import { RunnerHost } from '../src/runtime/host.js'
-import { OpenCodeRuntime } from '../src/runtime/opencode/runtime.js'
-import { WorkResultJournal } from '../src/runtime/work-result-journal.js'
-import { createInterruptedRecoveryReceipt } from '../src/runtime/recovery-receipt.js'
 import { WorkExecutor } from '../src/runtime/executor.js'
 import type { SessionTarget } from '../src/server/session-target.js'
 import { deferred } from './support/deferred.js'
@@ -21,7 +18,6 @@ type ReportingMocks = Record<
   | 'disconnect'
   | 'poll'
   | 'report'
-  | 'sendRecoveryReceipt'
   | 'uploadTaskLog'
   | 'fetchConfig'
   | 'getWorkflowAgentSession'
@@ -40,7 +36,11 @@ interface ReportingTestState {
   readonly mocks: ReportingMocks
   onReconnected: ((connectionId: string) => void) | null
   followupTargetResolver:
-    | ((target: SessionTarget) => { runtimeSessionId: string; workDir: string; projectId: string } | null)
+    | ((target: SessionTarget) => {
+        runtimeSessionId: string
+        workDir: string
+        projectId: string
+      } | null)
     | null
 }
 
@@ -74,7 +74,6 @@ const heartbeat = scopedMock('heartbeat')
 const disconnect = scopedMock('disconnect')
 const poll = scopedMock('poll')
 const report = scopedMock('report')
-const sendRecoveryReceipt = scopedMock('sendRecoveryReceipt')
 const uploadTaskLog = scopedMock('uploadTaskLog')
 const fetchConfig = scopedMock('fetchConfig')
 const getWorkflowAgentSession = scopedMock('getWorkflowAgentSession')
@@ -93,11 +92,11 @@ function createReportingMocks(): ReportingMocks {
     disconnect: vi.fn(async () => undefined),
     poll: vi.fn(async () => []),
     report: vi.fn(async () => ({ verdict: 'accepted' as const })),
-    sendRecoveryReceipt: vi.fn(async (receipt: { receiptId: string }) => ({
-      appliedReceiptId: receipt.receiptId,
-      status: 'accepted',
+    uploadTaskLog: vi.fn(async () => ({
+      status: 'changed',
+      accepted: 0,
+      truncated: false,
     })),
-    uploadTaskLog: vi.fn(async () => ({ status: 'changed', accepted: 0, truncated: false })),
     fetchConfig: vi.fn(async () => null),
     getWorkflowAgentSession: vi.fn(async () => null),
     getAgentSession: vi.fn(async () => null),
@@ -108,11 +107,16 @@ function createReportingMocks(): ReportingMocks {
     blockingAction: vi.fn(async ({ signal }: { signal: AbortSignal }) => {
       const aborted = deferred<{ error: { code: string; message: string } }>()
       if (signal.aborted) {
-        aborted.resolve({ error: { code: 'action-failed', message: 'aborted' } })
+        aborted.resolve({
+          error: { code: 'action-failed', message: 'aborted' },
+        })
       } else {
         signal.addEventListener(
           'abort',
-          () => aborted.resolve({ error: { code: 'action-failed', message: 'aborted' } }),
+          () =>
+            aborted.resolve({
+              error: { code: 'action-failed', message: 'aborted' },
+            }),
           { once: true },
         )
       }
@@ -129,7 +133,6 @@ vi.mock('../src/server/connection.js', () => ({
     disconnect = disconnect
     poll = poll
     report = report
-    sendRecoveryReceipt = sendRecoveryReceipt
     uploadTaskLog = uploadTaskLog
     fetchConfig = fetchConfig
     getWorkflowAgentSession = getWorkflowAgentSession
@@ -151,9 +154,11 @@ vi.mock('../src/server/runner-control-websocket.js', () => ({
       _buildGitHash: string | null,
       options: {
         onReconnected?: (id: string) => void
-        followupTargetResolver?: (
-          target: SessionTarget,
-        ) => { runtimeSessionId: string; workDir: string; projectId: string } | null
+        followupTargetResolver?: (target: SessionTarget) => {
+          runtimeSessionId: string
+          workDir: string
+          projectId: string
+        } | null
       } = {},
     ) {
       currentReportingTestState().onReconnected = options.onReconnected ?? null
@@ -215,6 +220,62 @@ function newRunnerHost(pollIntervalMs: number = QUIET_INTERVAL_MS): RunnerHost {
 }
 
 describe('RunnerHost', () => {
+  it('Restart_IgnoresLegacyResultStateAndClaimsOnlyServerDispatchedWork', async () => {
+    const legacyPath = '/virtual/mohist-runner-test/.mohist/runner-state/work-results.json'
+    await currentReportingTestState().resources.fileSystem.writeText(
+      legacyPath,
+      JSON.stringify({
+        version: 1,
+        entries: {
+          'workflow:old-run:old-work': {
+            state: 'completed',
+            work: {
+              workflowRunId: 'old-run',
+              workId: 'old-work',
+              workType: 'task',
+            },
+            result: { status: 'completed' },
+          },
+        },
+      }),
+    )
+    const newWork = {
+      workflowRunId: 'new-run',
+      workId: 'new-work',
+      workType: 'task',
+      uses: 'test/block',
+      ownerKind: 'workflow',
+      variables: { workspace: { path: '/virtual/mohist-runner-test' } },
+    }
+    const reported = deferred<void>()
+    const executeWithLog = vi
+      .spyOn(WorkExecutor.prototype, 'executeWithLog')
+      .mockImplementation(async (_work, _signal, collector) => ({
+        result: { status: 'completed' },
+        collector: collector!,
+      }))
+    poll.mockResolvedValueOnce([newWork]).mockResolvedValue([])
+    report.mockImplementation(async (work: { workId: string }) => {
+      if (work.workId === newWork.workId) reported.resolve()
+      return { verdict: 'accepted' as const }
+    })
+    const controller = new AbortController()
+    const run = newRunnerHost(POLL_INTERVAL_MS).run(controller.signal)
+    try {
+      await reported.promise
+      expect(executeWithLog).toHaveBeenCalledTimes(1)
+      expect(executeWithLog.mock.calls[0]?.[0]).toMatchObject({
+        workId: 'new-work',
+      })
+      expect(report.mock.calls.map((call) => call[0]?.workId)).toEqual(['new-work'])
+      expect(currentReportingTestState().resources.fileSystem.exists(legacyPath)).toBe(true)
+    } finally {
+      controller.abort()
+      await run.catch(() => undefined)
+      executeWithLog.mockRestore()
+    }
+  })
+
   it('rejects a stale capability snapshot and asks the server to requeue it', async () => {
     const reported = deferred<void>()
     const work = {
@@ -257,245 +318,6 @@ describe('RunnerHost', () => {
     } finally {
       controller.abort()
       await run.catch(() => undefined)
-    }
-  })
-
-  it('Restart_RedrivesDurablyCompletedResultWithoutExecutingTheWorkAgain', async () => {
-    const redriven = deferred<void>()
-    const work = {
-      workflowRunId: 'wr-restart',
-      workId: 'work-restart',
-      taskRunId: 'task-restart',
-      workType: 'task',
-      uses: 'test/block',
-      ownerKind: 'workflow',
-      variables: { workspace: { path: '/virtual/mohist-runner-test' } },
-    }
-    const journal = new WorkResultJournal('/virtual/mohist-runner-test')
-    await journal.load()
-    await journal.begin(work)
-    await journal.complete(work, { status: 'failed', message: 'result persisted before process exit' })
-
-    const controller = new AbortController()
-    report.mockImplementation(async (reportedWork: { workId?: string }) => {
-      if (reportedWork.workId === work.workId) redriven.resolve()
-      return { verdict: 'accepted' as const }
-    })
-    poll.mockResolvedValue([])
-    startControl.mockResolvedValue(undefined)
-    stopControl.mockResolvedValue(undefined)
-    connect.mockResolvedValue(undefined)
-    heartbeat.mockResolvedValue(undefined)
-    disconnect.mockResolvedValue(undefined)
-    const host = newRunnerHost()
-
-    const run = host.run(controller.signal)
-    try {
-      await redriven.promise
-      expect(report).toHaveBeenCalledWith(
-        expect.objectContaining({ workId: work.workId }),
-        expect.objectContaining({ status: 'failed', message: 'result persisted before process exit' }),
-        expect.any(AbortSignal),
-      )
-      expect(blockingAction).not.toHaveBeenCalled()
-    } finally {
-      controller.abort()
-      await run.catch(() => undefined)
-    }
-  })
-
-  it('Restart_RedrivesDurablyInterruptedReceiptWithoutExecutingTheWorkAgain', async () => {
-    const delivered = deferred<{ receiptId: string }>()
-    const work = {
-      workflowRunId: 'wr-interrupted-restart',
-      workId: 'work-interrupted-restart',
-      taskRunId: 'task-interrupted-restart',
-      workType: 'task',
-      uses: 'mohist/pi',
-      ownerKind: 'workflow',
-      variables: { workspace: { path: '/virtual/mohist-runner-test' } },
-    }
-    const binding = {
-      agentSessionId: 'session-interrupted-restart',
-      agentTurnId: 'turn-interrupted-restart',
-      runtime: 'pi' as const,
-      runtimeSessionId: 'runtime-interrupted-restart',
-      workDir: '/virtual/mohist-runner-test',
-    }
-    const journal = new WorkResultJournal('/virtual/mohist-runner-test')
-    await journal.load()
-    await journal.begin(work)
-    const receipt = createInterruptedRecoveryReceipt(
-      work,
-      binding,
-      'runner-test',
-      'runner-update:restart',
-      'receipt-restart',
-    )
-    expect(receipt).not.toBeNull()
-    await journal.interrupt(work, receipt!)
-
-    sendRecoveryReceipt.mockImplementation(async (replayed: { receiptId: string }) => {
-      delivered.resolve(replayed)
-      return { appliedReceiptId: replayed.receiptId, status: 'accepted' }
-    })
-    poll.mockResolvedValue([])
-    const controller = new AbortController()
-    const host = newRunnerHost()
-
-    const run = host.run(controller.signal)
-    try {
-      await expect(delivered.promise).resolves.toMatchObject({ receiptId: 'receipt-restart' })
-      expect(sendRecoveryReceipt).toHaveBeenCalledWith(
-        expect.objectContaining({
-          receiptId: 'receipt-restart',
-          payload: { type: 'update-interrupted', updateOperationId: 'runner-update:restart', stopConfirmed: true },
-        }),
-        expect.any(AbortSignal),
-      )
-      expect(blockingAction).not.toHaveBeenCalled()
-      const acknowledged = new WorkResultJournal('/virtual/mohist-runner-test')
-      await acknowledged.load()
-      expect(acknowledged.interrupted()).toEqual([])
-    } finally {
-      controller.abort()
-      await run.catch(() => undefined)
-    }
-  })
-
-  it('Restart_ReportsStartedJournalFenceAndRefusesRedelivery', async () => {
-    const firstPoll = deferred<{ inFlight: string[] }>()
-    const work = {
-      workflowRunId: 'wr-started-restart',
-      workId: 'work-started-restart',
-      taskRunId: 'task-started-restart',
-      workType: 'task',
-      uses: 'test/block',
-      ownerKind: 'workflow',
-      variables: { workspace: { path: '/virtual/mohist-runner-test' } },
-    }
-    const journal = new WorkResultJournal('/virtual/mohist-runner-test')
-    await journal.load()
-    await journal.begin(work)
-
-    poll.mockImplementation(async (_signal: AbortSignal, body: { inFlight: string[] }) => {
-      firstPoll.resolve(body)
-      return [work]
-    })
-    const controller = new AbortController()
-    const host = newRunnerHost()
-    const run = host.run(controller.signal)
-
-    try {
-      await expect(firstPoll.promise).resolves.toMatchObject({
-        inFlight: expect.arrayContaining(['workflow:wr-started-restart:work-started-restart']),
-      })
-      expect(blockingAction).not.toHaveBeenCalled()
-    } finally {
-      controller.abort()
-      await run.catch(() => undefined)
-    }
-
-    const fenced = new WorkResultJournal('/virtual/mohist-runner-test')
-    await fenced.load()
-    // The redelivered started fence is reconciled without execution: the
-    // terminal record is reported and retired once the server acknowledges.
-    expect(fenced.started()).toEqual([])
-    expect(fenced.completed()).toEqual([])
-    expect(report).toHaveBeenCalledWith(
-      expect.objectContaining({ workId: work.workId }),
-      expect.objectContaining({ status: 'failed', message: 'runner-restarted' }),
-      expect.any(AbortSignal),
-    )
-    expect(blockingAction).not.toHaveBeenCalled()
-  })
-
-  it('AbortAfterReturnedResult_PersistsAndRedrivesTheReceiptWithoutReexecution', async () => {
-    const executionStarted = deferred<void>()
-    const receiptAcknowledged = deferred<void>()
-    const work = {
-      workflowRunId: 'wr-abort-receipt',
-      workId: 'work-abort-receipt',
-      taskRunId: 'task-abort-receipt',
-      workType: 'task',
-      uses: 'test/block',
-      ownerKind: 'workflow',
-      variables: { workspace: { path: '/virtual/mohist-runner-test' } },
-    }
-    let executions = 0
-    const executeWithLog = vi
-      .spyOn(WorkExecutor.prototype, 'executeWithLog')
-      .mockImplementation(async (_work, signal, collector) => {
-        executions += 1
-        executionStarted.resolve()
-        await new Promise<void>((resolve) => signal.addEventListener('abort', () => resolve(), { once: true }))
-        return {
-          result: {
-            status: 'failed',
-            message: 'runtime returned terminal failure after cancellation',
-            error: { code: 'action-failed', message: 'runtime returned terminal failure after cancellation' },
-            exitCode: 1,
-          },
-          collector: collector!,
-        }
-      })
-    poll.mockResolvedValueOnce([work]).mockResolvedValue([])
-    report.mockRejectedValueOnce(new Error('first report transport failed'))
-
-    const firstController = new AbortController()
-    const firstHost = newRunnerHost()
-    const firstRun = firstHost.run(firstController.signal)
-    const originalAcknowledge = WorkResultJournal.prototype.acknowledge
-    const acknowledge = vi.spyOn(WorkResultJournal.prototype, 'acknowledge').mockImplementation(async function (
-      this: WorkResultJournal,
-      acknowledged,
-    ) {
-      await originalAcknowledge.call(this, acknowledged)
-      if (acknowledged.workId === work.workId) receiptAcknowledged.resolve()
-    })
-    let restarted: { controller: AbortController; run: Promise<void> } | null = null
-
-    try {
-      await executionStarted.promise
-      firstController.abort()
-      await expect(firstRun).resolves.toBeUndefined()
-
-      const persisted = new WorkResultJournal('/virtual/mohist-runner-test')
-      await persisted.load()
-      expect(persisted.completed()).toEqual([
-        expect.objectContaining({
-          work: expect.objectContaining({ workflowRunId: work.workflowRunId, workId: work.workId }),
-          state: 'completed',
-          result: expect.objectContaining({
-            status: 'failed',
-            message: 'runtime returned terminal failure after cancellation',
-          }),
-        }),
-      ])
-
-      report.mockResolvedValue({ verdict: 'accepted' as const })
-      poll.mockResolvedValue([])
-      const controller = new AbortController()
-      const host = newRunnerHost()
-      restarted = { controller, run: host.run(controller.signal) }
-
-      await receiptAcknowledged.promise
-      expect(report).toHaveBeenCalledWith(
-        expect.objectContaining({ workId: work.workId }),
-        expect.objectContaining({ status: 'failed', message: 'runtime returned terminal failure after cancellation' }),
-        expect.any(AbortSignal),
-      )
-      expect(executions).toBe(1)
-      const acknowledged = new WorkResultJournal('/virtual/mohist-runner-test')
-      await acknowledged.load()
-      expect(acknowledged.completed()).toEqual([])
-    } finally {
-      firstController.abort()
-      await firstRun.catch(() => undefined)
-      restarted?.controller.abort()
-      await restarted?.run.catch(() => undefined)
-      acknowledge.mockRestore()
-      executeWithLog.mockRestore()
     }
   })
 
@@ -589,7 +411,10 @@ describe('RunnerHost', () => {
       return pollIndex <= 3 ? [same] : []
     })
     const host = newRunnerHost(POLL_INTERVAL_MS)
-    blockingAction.mockResolvedValue({ error: { code: 'action-failed', message: 'runtime turn failed' }, exitCode: 1 })
+    blockingAction.mockResolvedValue({
+      error: { code: 'action-failed', message: 'runtime turn failed' },
+      exitCode: 1,
+    })
     const run = host.run(controller.signal)
 
     try {
@@ -611,6 +436,82 @@ describe('RunnerHost', () => {
       controller.abort()
       reportRelease.resolve()
       await run.catch(() => undefined)
+    }
+  })
+
+  it('AwaitingAck_RetriesTheSameRuntimeBackedBindingWithoutReexecution_ForSuccessAndFailure', async () => {
+    const retried = deferred<void>()
+    const works = [
+      {
+        workflowRunId: 'wr-binding-success',
+        workId: 'work-binding-success',
+        workType: 'task',
+        uses: 'test/block',
+        ownerKind: 'workflow',
+        variables: { workspace: { path: '/virtual/mohist-runner-test' } },
+      },
+      {
+        workflowRunId: 'wr-binding-failure',
+        workId: 'work-binding-failure',
+        workType: 'task',
+        uses: 'test/block',
+        ownerKind: 'workflow',
+        variables: { workspace: { path: '/virtual/mohist-runner-test' } },
+      },
+    ]
+    poll.mockResolvedValueOnce(works).mockResolvedValue([])
+    const executions = new Map<string, number>()
+    const executeWithLog = vi
+      .spyOn(WorkExecutor.prototype, 'executeWithLog')
+      .mockImplementation(async (work, _signal, collector) => {
+        executions.set(work.workId, (executions.get(work.workId) ?? 0) + 1)
+        const failure = work.workId.endsWith('failure')
+        return {
+          result: {
+            status: failure ? 'failed' : 'completed',
+            ...(failure ? { error: { code: 'turn-failed', message: 'runtime failed' }, exitCode: 1 } : { exitCode: 0 }),
+            agentBinding: {
+              agentSessionId: `session-${work.workId}`,
+              agentTurnId: `turn-${work.workId}`,
+              runtime: 'opencode',
+              runtimeSessionId: `runtime-${work.workId}`,
+            },
+          },
+          collector: collector!,
+        }
+      })
+    const attempts = new Map<string, number>()
+    report.mockImplementation(async (work: { workId: string }) => {
+      const attempt = (attempts.get(work.workId) ?? 0) + 1
+      attempts.set(work.workId, attempt)
+      if (attempt === 1) return { verdict: 'outstanding' as const }
+      if ([...attempts.values()].filter((value) => value >= 2).length === works.length) retried.resolve()
+      return { verdict: 'accepted' as const }
+    })
+    const controller = new AbortController()
+    const run = newRunnerHost().run(controller.signal)
+    try {
+      while ([...attempts.values()].filter((value) => value >= 1).length < works.length)
+        await vi.runOnlyPendingTimersAsync()
+      await vi.advanceTimersByTimeAsync(AWAITING_ACK_RETRY_INTERVAL_MS)
+      await retried.promise
+
+      for (const work of works) {
+        const calls = report.mock.calls.filter((call) => call[0]?.workId === work.workId)
+        expect(calls).toHaveLength(2)
+        expect(calls[0]?.[3]).toEqual(calls[1]?.[3])
+        expect(calls[0]?.[3]).toEqual({
+          agentSessionId: `session-${work.workId}`,
+          agentTurnId: `turn-${work.workId}`,
+          runtime: 'opencode',
+          runtimeSessionId: `runtime-${work.workId}`,
+        })
+        expect(executions.get(work.workId)).toBe(1)
+      }
+    } finally {
+      controller.abort()
+      await run.catch(() => undefined)
+      executeWithLog.mockRestore()
     }
   })
 
@@ -681,12 +582,19 @@ describe('RunnerHost', () => {
           expect.objectContaining({
             level: 'WARN',
             message: 'first work report failed; will retry',
-            fields: expect.objectContaining({ work: 'work-retry', exception: firstFailure }),
+            fields: expect.objectContaining({
+              work: 'work-retry',
+              exception: firstFailure,
+            }),
           }),
           expect.objectContaining({
             level: 'WARN',
             message: 'work report retry failed',
-            fields: expect.objectContaining({ work: 'work-retry', attempt: 2, exception: secondFailure }),
+            fields: expect.objectContaining({
+              work: 'work-retry',
+              attempt: 2,
+              exception: secondFailure,
+            }),
           }),
         ]),
       )
@@ -737,7 +645,10 @@ describe('RunnerHost', () => {
         result: {
           status: 'unknown',
           message: 'Agent cleanup was not confirmed',
-          error: { code: 'timeout', message: 'Agent cleanup was not confirmed' },
+          error: {
+            code: 'timeout',
+            message: 'Agent cleanup was not confirmed',
+          },
         },
         collector: collector!,
       }))
@@ -764,195 +675,6 @@ describe('RunnerHost', () => {
       await run.catch(() => undefined)
       executeWithLog.mockRestore()
       stopLog()
-    }
-  })
-
-  it('StartedFenceWithoutExecution_ReportsRunnerRestartedAndRetiresOnAck', async () => {
-    const reported = deferred<void>()
-    const work = {
-      workflowRunId: 'wr-restarted',
-      workId: 'work-restarted',
-      taskRunId: 'task-restarted',
-      workType: 'task',
-      uses: 'test/block',
-      ownerKind: 'workflow',
-      variables: { workspace: { path: '/virtual/mohist-runner-test' } },
-    }
-    const journal = new WorkResultJournal('/virtual/mohist-runner-test')
-    await journal.load()
-    await journal.begin(work)
-    report.mockImplementation(async () => {
-      reported.resolve()
-      return { verdict: 'accepted' as const }
-    })
-    poll.mockResolvedValueOnce([work]).mockResolvedValue([])
-    const controller = new AbortController()
-    const host = newRunnerHost()
-    const run = host.run(controller.signal)
-    try {
-      await reported.promise
-      await vi.advanceTimersByTimeAsync(0)
-      expect(report).toHaveBeenCalledWith(
-        expect.objectContaining({ workId: work.workId }),
-        expect.objectContaining({
-          status: 'failed',
-          message: 'runner-restarted',
-          error: { code: 'runner-restarted', message: 'runner-restarted' },
-        }),
-        expect.any(AbortSignal),
-      )
-      expect(blockingAction).not.toHaveBeenCalled()
-      const after = new WorkResultJournal('/virtual/mohist-runner-test')
-      await after.load()
-      expect(after.completed()).toEqual([])
-    } finally {
-      controller.abort()
-      await run.catch(() => undefined)
-    }
-  })
-
-  it('StartedFenceDeadAgentJob_ReportsUnknownForSettlementArbitration', async () => {
-    const reported = deferred<void>()
-    const work = {
-      workflowRunId: 'agent-job-workflow',
-      workId: 'agent-work-restarted',
-      workType: 'agent-job',
-      ownerKind: 'agent-job',
-      agentJobId: 'job-restarted',
-      projectId: 'project-1',
-      with: { prompt: 'resume', runtime: 'opencode' },
-    }
-    const journal = new WorkResultJournal('/virtual/mohist-runner-test')
-    await journal.load()
-    await journal.begin(work)
-    report.mockImplementation(async () => {
-      reported.resolve()
-      return { verdict: 'accepted' as const }
-    })
-    poll.mockResolvedValueOnce([work]).mockResolvedValue([])
-    const controller = new AbortController()
-    const host = newRunnerHost()
-    const run = host.run(controller.signal)
-    try {
-      await reported.promise
-      await vi.advanceTimersByTimeAsync(0)
-      expect(report).toHaveBeenCalledWith(
-        expect.objectContaining({ agentJobId: work.agentJobId, workId: work.workId }),
-        expect.objectContaining({ status: 'unknown', message: 'runner-restarted' }),
-        expect.any(AbortSignal),
-      )
-      expect(blockingAction).not.toHaveBeenCalled()
-    } finally {
-      controller.abort()
-      await run.catch(() => undefined)
-    }
-  })
-
-  it('StartedFenceRepeatedDelivery_ReconcilesOnceWhileTheReceiptAwaitsAck', async () => {
-    const reportStarted = deferred<void>()
-    const releaseReport = deferred<void>()
-    const work = {
-      workflowRunId: 'wr-restarted-repeat',
-      workId: 'work-restarted-repeat',
-      taskRunId: 'task-restarted-repeat',
-      workType: 'task',
-      uses: 'test/block',
-      ownerKind: 'workflow',
-      variables: { workspace: { path: '/virtual/mohist-runner-test' } },
-    }
-    const journal = new WorkResultJournal('/virtual/mohist-runner-test')
-    await journal.load()
-    await journal.begin(work)
-    report.mockImplementation(async () => {
-      reportStarted.resolve()
-      await releaseReport.promise
-      return { verdict: 'accepted' as const }
-    })
-    poll.mockResolvedValueOnce([work]).mockResolvedValueOnce([work]).mockResolvedValue([])
-    const controller = new AbortController()
-    const host = newRunnerHost(POLL_INTERVAL_MS)
-    const run = host.run(controller.signal)
-    try {
-      await reportStarted.promise
-      await vi.advanceTimersByTimeAsync(POLL_INTERVAL_MS)
-      expect(report).toHaveBeenCalledTimes(1)
-      expect(blockingAction).not.toHaveBeenCalled()
-      releaseReport.resolve()
-      await vi.advanceTimersByTimeAsync(0)
-      controller.abort()
-      await expect(run).resolves.toBeUndefined()
-    } finally {
-      controller.abort()
-      releaseReport.resolve()
-      await run.catch(() => undefined)
-    }
-  })
-
-  it('StartedFenceWithLiveWorkflowBinding_ReattachesWithoutExecutingAgain', async () => {
-    const reported = deferred<void>()
-    const work = {
-      workflowRunId: 'wr-restarted-live',
-      workId: 'work-restarted-live',
-      taskRunId: 'task-restarted-live',
-      workType: 'task',
-      uses: 'mohist/opencode',
-      ownerKind: 'workflow',
-      projectId: 'project-1',
-      with: { prompt: 'continue' },
-      agentDefinition: { instructions: '', runtime: 'opencode', skills: [] },
-      variables: { workspace: { path: '/virtual/mohist-runner-test' } },
-    }
-    const journal = new WorkResultJournal('/virtual/mohist-runner-test')
-    await journal.load()
-    await journal.begin(work)
-    getWorkflowAgentSession.mockResolvedValue({
-      sessionId: 'session-1',
-      runtime: 'opencode',
-      runtimeSessionId: 'runtime-session-1',
-      workDir: '/virtual/work',
-    })
-    const resolveSession = vi.spyOn(OpenCodeRuntime.prototype, 'resolveSession').mockResolvedValue({
-      ok: true,
-      value: { runtimeSessionId: 'runtime-session-1', workDir: '/virtual/work', activeTurn: true },
-      diagnostics: [],
-    })
-    const reattachTurn = vi.spyOn(OpenCodeRuntime.prototype, 'reattachTurn').mockResolvedValue({
-      ok: true,
-      value: {
-        facts: { finalAssistantText: 'recovered', runtimeSessionId: 'runtime-session-1', workDir: '/virtual/work' },
-        diagnostics: [],
-      },
-      diagnostics: [],
-    })
-    report.mockImplementation(async () => {
-      reported.resolve()
-      return { verdict: 'accepted' as const }
-    })
-    poll.mockResolvedValueOnce([work]).mockResolvedValue([])
-    const controller = new AbortController()
-    const host = newRunnerHost()
-    const run = host.run(controller.signal)
-    try {
-      await reported.promise
-      expect(getWorkflowAgentSession).toHaveBeenCalledWith(
-        'project-1',
-        'wr-restarted-live',
-        'work-restarted-live',
-        expect.any(AbortSignal),
-      )
-      expect(resolveSession).toHaveBeenCalledTimes(1)
-      expect(reattachTurn).toHaveBeenCalledTimes(1)
-      expect(blockingAction).not.toHaveBeenCalled()
-      expect(report).toHaveBeenCalledWith(
-        expect.objectContaining({ workId: work.workId }),
-        expect.objectContaining({ status: 'completed', output: expect.objectContaining({ text: 'recovered' }) }),
-        expect.any(AbortSignal),
-      )
-    } finally {
-      controller.abort()
-      await run.catch(() => undefined)
-      resolveSession.mockRestore()
-      reattachTurn.mockRestore()
     }
   })
 })

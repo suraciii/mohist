@@ -22,6 +22,7 @@ type LifecycleMocks = Record<
   | 'disconnect'
   | 'poll'
   | 'report'
+  | 'reportRecoveryStopFailure'
   | 'uploadTaskLog'
   | 'fetchConfig'
   | 'workflowAgentSessionRuntimeEvents'
@@ -75,6 +76,7 @@ const heartbeat = scopedMock('heartbeat')
 const disconnect = scopedMock('disconnect')
 const poll = scopedMock('poll')
 const report = scopedMock('report')
+const reportRecoveryStopFailure = scopedMock('reportRecoveryStopFailure')
 const uploadTaskLog = scopedMock('uploadTaskLog')
 const fetchConfig = scopedMock('fetchConfig')
 const workflowAgentSessionRuntimeEvents = scopedMock('workflowAgentSessionRuntimeEvents')
@@ -94,6 +96,7 @@ vi.mock('../src/server/connection.js', () => ({
     disconnect = disconnect
     poll = poll
     report = report
+    reportRecoveryStopFailure = reportRecoveryStopFailure
     uploadTaskLog = uploadTaskLog
     fetchConfig = fetchConfig
     workflowAgentSessionRuntimeEvents = workflowAgentSessionRuntimeEvents
@@ -150,7 +153,8 @@ function createLifecycleMocks(): LifecycleMocks {
     heartbeat: vi.fn(async () => undefined),
     disconnect: vi.fn(async () => undefined),
     poll: vi.fn(async () => []),
-    report: vi.fn(async () => undefined),
+    report: vi.fn(async () => ({ verdict: 'accepted' })),
+    reportRecoveryStopFailure: vi.fn(async () => undefined),
     uploadTaskLog: vi.fn(async () => ({ status: 'changed', accepted: 0, truncated: false })),
     fetchConfig: vi.fn(async () => null),
     workflowAgentSessionRuntimeEvents: vi.fn(async () => undefined),
@@ -382,6 +386,147 @@ describe('RunnerHost', () => {
       await expect(run).resolves.toBeUndefined()
     } finally {
       controller.abort()
+      await run.catch(() => undefined)
+    }
+  })
+
+  it('RunnerHost_UpdateShutdown_AbortsAffectedWorkAndSettlesUnaffectedWork', async ({ resources }) => {
+    const affectedStarted = deferred<void>()
+    let affectedHasStarted = false
+    const unaffectedReported = deferred<void>()
+    const affectedAbortCount = vi.fn()
+    const ownerSnapshots: string[][] = []
+    const baseOpenCodeFactory = resources.openCodeRuntimeFactory!
+    resources.openCodeRuntimeFactory = (deps) => {
+      const runtime = baseOpenCodeFactory(deps)
+      const setWorkOwners = runtime.setWorkOwners.bind(runtime)
+      runtime.setWorkOwners = (owners) => {
+        ownerSnapshots.push([...owners])
+        setWorkOwners(owners)
+      }
+      runtime.runTurn = async (request, signal, observer) => {
+        const runtimeSessionId = request.target.runtimeSessionId ?? `oc-${request.prompt.replace(/\s+/g, '-')}`
+        await observer?.onSessionReady?.({ runtimeSessionId, workDir: request.target.workDir })
+        if (request.prompt.includes('blocked execution')) {
+          affectedHasStarted = true
+          affectedStarted.resolve()
+          return await new Promise((resolve) =>
+            signal.addEventListener(
+              'abort',
+              () => {
+                affectedAbortCount()
+                resolve({
+                  ok: false,
+                  error: { kind: 'interrupted', message: 'aborted', diagnostics: [] },
+                  diagnostics: [],
+                })
+              },
+              { once: true },
+            ),
+          )
+        }
+        return {
+          ok: true,
+          value: {
+            facts: {
+              finalAssistantText: 'unaffected completed',
+              runtimeSessionId,
+              workDir: request.target.workDir,
+            },
+            diagnostics: [],
+          },
+          diagnostics: [],
+        }
+      }
+      return runtime
+    }
+    const controller = new AbortController()
+    const affected = {
+      workflowRunId: '',
+      workId: 'work-affected',
+      workType: 'task',
+      ownerKind: 'agent-job',
+      agentJobId: 'job-affected',
+      with: { prompt: 'blocked execution', runtime: 'opencode' },
+      variables: { workspace: { path: '/virtual/mohist-runner-test' } },
+    }
+    const unaffected = {
+      ...affected,
+      workId: 'work-unaffected',
+      agentJobId: 'job-unaffected',
+      with: { prompt: 'quick execution', runtime: 'opencode' },
+    }
+    report.mockImplementation(async (reportedWork: { workId: string }) => {
+      if (reportedWork.workId === unaffected.workId) unaffectedReported.resolve()
+      return { verdict: 'accepted' }
+    })
+    poll.mockResolvedValueOnce([affected, unaffected]).mockResolvedValue([])
+    const host = new RunnerHost(
+      {
+        serverUrl: 'https://runner.test',
+        runnerId: 'runner-test',
+        projectId: 'project-1',
+        runnerRoot: '/virtual/mohist-runner-test',
+        pollIntervalMs: POLL_INTERVAL_MS,
+        heartbeatIntervalMs: QUIET_INTERVAL_MS,
+        dispatchLivenessProbeIntervalMs: QUIET_INTERVAL_MS,
+      },
+      undefined,
+      {
+        fetchPendingUpdateOperation: async () => ({
+          operationId: 'update-1',
+          runnerId: 'runner-test',
+          createdAt: '2026-01-01T00:00:00.000Z',
+          affectedWorks: [
+            {
+              ownerKind: 'agent-job',
+              ownerId: affected.agentJobId,
+              workId: affected.workId,
+              workType: affected.workType,
+            },
+          ],
+        }),
+        shutdownHandoffBudgetMs: 25,
+        shutdownStopBudgetMs: 25,
+      },
+    )
+
+    const run = host.run(controller.signal)
+    try {
+      await vi.advanceTimersByTimeAsync(POLL_INTERVAL_MS)
+      expect(affectedHasStarted).toBe(true)
+      await affectedStarted.promise
+      await vi.advanceTimersByTimeAsync(POLL_INTERVAL_MS)
+      await unaffectedReported.promise
+      controller.abort()
+      await vi.runAllTimersAsync()
+      await expect(run).resolves.toBeUndefined()
+
+      expect(affectedAbortCount).toHaveBeenCalledTimes(1)
+      const affectedOwner = 'agent-job:job-affected:work-affected'
+      const affectedPresence = ownerSnapshots.map((owners) => owners.includes(affectedOwner))
+      expect(affectedPresence).toContain(true)
+      expect(
+        affectedPresence.reduce(
+          (removals, present, index) => removals + (index > 0 && affectedPresence[index - 1] && !present ? 1 : 0),
+          0,
+        ),
+      ).toBe(1)
+      expect(affectedPresence.at(-1)).toBe(false)
+      expect(reportRecoveryStopFailure).toHaveBeenCalledTimes(1)
+      expect(reportRecoveryStopFailure).toHaveBeenCalledWith(
+        expect.objectContaining({ operationId: 'update-1', workId: affected.workId }),
+        expect.any(AbortSignal),
+      )
+      expect(report).toHaveBeenCalledTimes(1)
+      expect(report).toHaveBeenCalledWith(
+        expect.objectContaining({ workId: unaffected.workId }),
+        expect.anything(),
+        expect.anything(),
+      )
+    } finally {
+      controller.abort()
+      await vi.runAllTimersAsync()
       await run.catch(() => undefined)
     }
   })

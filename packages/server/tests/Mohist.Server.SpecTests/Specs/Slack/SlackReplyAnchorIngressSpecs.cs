@@ -359,14 +359,86 @@ public sealed class SlackReplyAnchorIngressSpecs : IAsyncLifetime
             connection, conversationId, rootTs, followupTs, sessionId, followup.OperationId)));
     }
 
-    private async Task<string> RegisterRunnerAsync(string projectId)
+    [Fact]
+    public async Task RegisterRunnerAsync_preserves_peer_runner_registration()
+    {
+        var connection = await CreateConnectionAsync();
+        var peerRunnerId = $"slack-reply-anchor-peer-{Guid.NewGuid():N}";
+        await RegisterRunnerViaApiAsync(peerRunnerId, connection.ProjectId);
+        try
+        {
+            await RegisterRunnerAsync(connection.ProjectId);
+
+            var registry = _fixture.Grains.GetGrain<IRunnerRegistryGrain>(RunnerRegistryKeys.Global);
+            Assert.Contains(peerRunnerId, await registry.ListRunnerIdsAsync());
+            Assert.Equal(
+                RunnerStatus.Online,
+                (await _fixture.Grains.GetGrain<IRunnerGrain>(peerRunnerId).GetRuntimeStateAsync()).Status);
+        }
+        finally
+        {
+            _fixture.Services.GetRequiredService<RunnerConnectionTracker>().Unregister(peerRunnerId);
+            await _fixture.Grains.GetGrain<IRunnerGrain>(peerRunnerId).UnregisterAsync();
+        }
+    }
+
+    [Fact]
+    public async Task RegisterRunnerAsync_cleans_partial_registration_without_removing_peer()
+    {
+        var connection = await CreateConnectionAsync();
+        var peerRunnerId = $"slack-reply-anchor-peer-{Guid.NewGuid():N}";
+        string? partialRunnerId = null;
+        await RegisterRunnerViaApiAsync(peerRunnerId, connection.ProjectId);
+        try
+        {
+            await Assert.ThrowsAsync<InvalidOperationException>(() => RegisterRunnerAsync(
+                connection.ProjectId,
+                runnerId =>
+                {
+                    partialRunnerId = runnerId;
+                    throw new InvalidOperationException("forced failure after registration");
+                }));
+
+            Assert.NotNull(partialRunnerId);
+            var runnerIds = await _fixture.Grains
+                .GetGrain<IRunnerRegistryGrain>(RunnerRegistryKeys.Global)
+                .ListRunnerIdsAsync();
+            Assert.DoesNotContain(partialRunnerId, runnerIds);
+            Assert.Contains(peerRunnerId, runnerIds);
+            Assert.Equal(
+                RunnerStatus.Online,
+                (await _fixture.Grains.GetGrain<IRunnerGrain>(peerRunnerId).GetRuntimeStateAsync()).Status);
+        }
+        finally
+        {
+            _fixture.Services.GetRequiredService<RunnerConnectionTracker>().Unregister(peerRunnerId);
+            await _fixture.Grains.GetGrain<IRunnerGrain>(peerRunnerId).UnregisterAsync();
+        }
+    }
+
+    private async Task<string> RegisterRunnerAsync(string projectId, Func<string, Task>? afterRegistration = null)
     {
         var runnerId = $"slack-reply-anchor-{Guid.NewGuid():N}";
-        var registry = _fixture.Grains.GetGrain<IRunnerRegistryGrain>(RunnerRegistryKeys.Global);
-        foreach (var staleId in await registry.ListRunnerIdsAsync())
-            await _fixture.Grains.GetGrain<IRunnerGrain>(staleId).UnregisterAsync();
-        Assert.Empty(await registry.ListRunnerIdsAsync());
+        _runnerIds.Add(runnerId);
+        try
+        {
+            await RegisterRunnerViaApiAsync(runnerId, projectId, afterRegistration);
+            return runnerId;
+        }
+        catch
+        {
+            _fixture.Services.GetRequiredService<RunnerConnectionTracker>().Unregister(runnerId);
+            await _fixture.Grains.GetGrain<IRunnerGrain>(runnerId).UnregisterAsync();
+            _runnerIds.Remove(runnerId);
+            throw;
+        }
+    }
 
+    private async Task RegisterRunnerViaApiAsync(
+        string runnerId,
+        string projectId,
+        Func<string, Task>? afterRegistration = null)
+    {
         using var register = await _fixture.Client.PostAsJsonAsync($"/api/runner/{runnerId}/register", new
         {
             processGeneration = TestRunnerGenerationExtensions.ProcessGeneration,
@@ -376,16 +448,16 @@ public sealed class SlackReplyAnchorIngressSpecs : IAsyncLifetime
             runtimeCatalogs = CapabilityCatalogTestHelpers.Create(),
         });
         register.EnsureSuccessStatusCode();
+        if (afterRegistration is not null)
+            await afterRegistration(runnerId);
         using var slots = await _fixture.Client.PatchAsJsonAsync($"/api/runner/{runnerId}", new { slots = 1 });
         slots.EnsureSuccessStatusCode();
-        _runnerIds.Add(runnerId);
         await TestWait.ForAsync(
             () => _fixture.Grains.GetGrain<IRunnerGrain>(runnerId).GetRuntimeStateAsync(),
             state => state.Status == RunnerStatus.Online,
             TimeSpan.FromSeconds(5),
             TimeSpan.FromMilliseconds(25),
             $"Runner '{runnerId}' to reach Online");
-        return runnerId;
     }
 
     private async Task<JsonElement> PollInitialDispatchAsync(string runnerId, string jobKey)

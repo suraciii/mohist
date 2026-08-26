@@ -1,5 +1,6 @@
 import { hostname } from 'node:os'
 import type {
+  AgentExecutionBinding,
   CleanupPolicy,
   DispatchWorkItem,
   JsonObject,
@@ -15,11 +16,7 @@ import type { BuildInfo } from '../runtime/build-info.js'
 import { parseObject } from '../core/json.js'
 import { getSegments } from '../core/json-path.js'
 import type { TaskLogBatch } from '../runtime/task-log.js'
-import type {
-  PendingUpdateOperation,
-  RecoveryReceiptAcknowledgement,
-  RuntimeRecoveryReceipt,
-} from '../runtime/recovery-receipt.js'
+import type { PendingUpdateOperation } from '../runtime/update-operation.js'
 import { parseDispatchWorkItem } from './connection-dispatch.js'
 import * as recoveryRequests from './connection.update-recovery.js'
 import { reportWork } from './connection-report.js'
@@ -28,7 +25,14 @@ export { RuntimeEventDeliveryError } from './connection-errors.js'
 import {
   getWorkspaceReclaimability as getWorkspaceReclaimabilityViaTransport,
   reportWorkspaceMaterialized as reportWorkspaceMaterializedViaTransport,
+  type WorkspaceMaterializedReport,
+  type WorkspaceReclaimability,
   type WorkspaceReportTransport,
+} from './connection-workspaces.js'
+export {
+  parseWorkspaceReclaimability,
+  type WorkspaceMaterializedReport,
+  type WorkspaceReclaimability,
 } from './connection-workspaces.js'
 import { currentRunnerTransport } from '../system/filesystem.js'
 import type {
@@ -159,7 +163,9 @@ export class ServerConnection {
     this.observeDeploymentEpoch(response.headers.get('x-mohist-manager-deployment-epoch'))
     if (response.status === 204) return []
     if (!response.ok) throw new Error(`poll failed: ${response.status} ${await response.text()}`)
-    const payload = (await response.json()) as { dispatches?: WorkDispatchResponse[] }
+    const payload = (await response.json()) as {
+      dispatches?: WorkDispatchResponse[]
+    }
     return (payload.dispatches ?? []).map((dispatch) => ({
       work: parseDispatchWorkItem(dispatch),
       ...(dispatch.managerExecutionGrant ? { managerExecutionGrant: dispatch.managerExecutionGrant } : {}),
@@ -171,13 +177,6 @@ export class ServerConnection {
     return recoveryRequests.fetchPendingUpdateOperation(this.fetchWithAuth.bind(this), this.url.bind(this), signal)
   }
 
-  async sendRecoveryReceipt(
-    receipt: RuntimeRecoveryReceipt,
-    signal: AbortSignal,
-  ): Promise<RecoveryReceiptAcknowledgement> {
-    return recoveryRequests.sendRecoveryReceipt(this.fetchWithAuth.bind(this), this.url.bind(this), receipt, signal)
-  }
-
   readonly reportRecoveryStopFailure = (
     failure: recoveryRequests.RecoveryStopFailure,
     signal: AbortSignal,
@@ -185,7 +184,10 @@ export class ServerConnection {
     recoveryRequests.reportRecoveryStopFailure(this.fetchWithAuth.bind(this), this.url.bind(this), failure, signal)
 
   async fetchConfig(signal: AbortSignal): Promise<CleanupPolicy | null> {
-    const response = await this.fetchWithAuth(this.url('config'), { method: 'GET', signal })
+    const response = await this.fetchWithAuth(this.url('config'), {
+      method: 'GET',
+      signal,
+    })
     if (!response.ok) throw new Error(`fetchConfig failed: ${response.status} ${await response.text()}`)
     const payload = (await response.json()) as RunnerConfigResponse
     return payload.cleanupPolicy ?? null
@@ -214,7 +216,7 @@ export class ServerConnection {
     work: DispatchWorkItem,
     result: WorkItemResult,
     signal: AbortSignal,
-    binding?: Pick<RuntimeRecoveryReceipt, 'agentSessionId' | 'agentTurnId' | 'runtime' | 'runtimeSessionId'>,
+    binding?: AgentExecutionBinding,
   ): Promise<Record<string, unknown>> {
     return await reportWork(this.fetchWithAuth.bind(this), this.url.bind(this), work, result, signal, binding)
   }
@@ -244,7 +246,9 @@ export class ServerConnection {
     form.set('size', String(upload.size))
     const view = new Uint8Array(upload.content.byteLength)
     view.set(upload.content)
-    const blob = new Blob([view], { type: upload.contentType ?? 'application/octet-stream' })
+    const blob = new Blob([view], {
+      type: upload.contentType ?? 'application/octet-stream',
+    })
     form.set('content', blob, upload.filename ?? 'artifact')
     const response = await this.fetchWithAuth(this.artifactUrl(ownerId, workId, ownerKind), {
       method: 'POST',
@@ -262,7 +266,11 @@ export class ServerConnection {
     }
     if (!response.ok) {
       const errorMessage = extractErrorMessage(payload, text) ?? `artifact upload failed: ${response.status}`
-      const error = new Error(errorMessage) as Error & { code?: string; uploadId?: string; status: number }
+      const error = new Error(errorMessage) as Error & {
+        code?: string
+        uploadId?: string
+        status: number
+      }
       error.status = response.status
       if (payload) {
         const code = readString(payload, ['code'])
@@ -332,7 +340,10 @@ export class ServerConnection {
     }
     const response = await this.fetchWithAuth(this.taskLogUrl(ownerId, workId, ownerKind), {
       method: 'POST',
-      headers: { 'content-type': 'application/json', 'x-mohist-runner-id': this.options.runnerId },
+      headers: {
+        'content-type': 'application/json',
+        'x-mohist-runner-id': this.options.runnerId,
+      },
       body: JSON.stringify(body),
       signal,
     })
@@ -347,7 +358,10 @@ export class ServerConnection {
     }
     if (!response.ok) {
       const errorMessage = extractErrorMessage(payload, text) ?? `task-log upload failed: ${response.status}`
-      const error = new Error(errorMessage) as Error & { code?: string; status: number }
+      const error = new Error(errorMessage) as Error & {
+        code?: string
+        status: number
+      }
       error.status = response.status
       const code = readString(payload ?? {}, ['code'])
       if (code) error.code = code
@@ -407,7 +421,12 @@ export class ServerConnection {
       this.url(
         `sessions/${encodeURIComponent(projectId)}/${encodeURIComponent(workflowRunId)}/${encodeURIComponent(sessionName)}/open`,
       ),
-      { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body), signal },
+      {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(body),
+        signal,
+      },
     )
     if (!response.ok) throw new Error(`session open failed: ${response.status} ${await response.text()}`)
     return response.json() as Promise<WorkflowAgentSession>
@@ -458,7 +477,12 @@ export class ServerConnection {
       this.url(
         `sessions/${encodeURIComponent(projectId)}/${encodeURIComponent(workflowRunId)}/${encodeURIComponent(sessionName)}/attach`,
       ),
-      { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body), signal },
+      {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(body),
+        signal,
+      },
     )
     if (!response.ok) throw new Error(`session attach failed: ${response.status} ${await response.text()}`)
     return response.json() as Promise<WorkflowAgentSession>
@@ -475,7 +499,12 @@ export class ServerConnection {
       this.url(
         `sessions/${encodeURIComponent(projectId)}/${encodeURIComponent(workflowRunId)}/${encodeURIComponent(sessionName)}/recover-missing`,
       ),
-      { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body), signal },
+      {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(body),
+        signal,
+      },
     )
     if (!response.ok) throw new Error(`session missing recovery failed: ${response.status} ${await response.text()}`)
     return response.json() as Promise<WorkflowAgentSession>
@@ -492,7 +521,12 @@ export class ServerConnection {
       this.url(
         `sessions/${encodeURIComponent(projectId)}/${encodeURIComponent(workflowRunId)}/${encodeURIComponent(sessionName)}/reset`,
       ),
-      { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body), signal },
+      {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(body),
+        signal,
+      },
     )
     if (!response.ok) throw new Error(`session retry reset failed: ${response.status} ${await response.text()}`)
     return response.json() as Promise<WorkflowAgentSession>
@@ -565,7 +599,12 @@ export class ServerConnection {
       this.url(
         `sessions/${encodeURIComponent(projectId)}/${encodeURIComponent(workflowRunId)}/${encodeURIComponent(sessionName)}/runtime-events`,
       ),
-      { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body), signal },
+      {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(body),
+        signal,
+      },
     )
     if (!response.ok) throw await this.runtimeEventDeliveryError('session runtime events', response)
     let payload: unknown
@@ -685,13 +724,7 @@ export class ServerConnection {
     workspaceName: string,
     signal: AbortSignal,
   ): Promise<WorkspaceReclaimability> {
-    return await getWorkspaceReclaimabilityViaTransport(
-      this.transport(),
-      (payload) => parseWorkspaceReclaimability(readObject(payload, ['data'])),
-      projectId,
-      workspaceName,
-      signal,
-    )
+    return await getWorkspaceReclaimabilityViaTransport(this.transport(), projectId, workspaceName, signal)
   }
 
   async openAgentSession(
@@ -702,7 +735,12 @@ export class ServerConnection {
   ): Promise<AgentSession> {
     const response = await this.fetchWithAuth(
       this.url(`agent-sessions/${encodeURIComponent(projectId)}/${encodeURIComponent(sessionId)}/open`),
-      { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body), signal },
+      {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(body),
+        signal,
+      },
     )
     if (!response.ok) throw new Error(`agent session open failed: ${response.status} ${await response.text()}`)
     return response.json() as Promise<AgentSession>
@@ -859,7 +897,10 @@ export class ServerConnection {
   }
 
   private transport(): WorkspaceReportTransport {
-    return { fetchWithAuth: (input, init) => this.fetchWithAuth(input, init), url: (path) => this.url(path) }
+    return {
+      fetchWithAuth: (input, init) => this.fetchWithAuth(input, init),
+      url: (path) => this.url(path),
+    }
   }
 
   private url(path: string) {
@@ -937,38 +978,4 @@ function readNumber(value: unknown, path: string[]): number | null {
 function readBoolean(value: unknown, path: string[]): boolean | null {
   const found = getSegments(value, path)
   return typeof found === 'boolean' ? found : null
-}
-
-/**
- * Answer shape for
- * `POST /api/runner/{runnerId}/workspaces/{projectId}/{workspaceName}/materialized`.
- * `runnerId` is the workspace home runner recorded by the server (this runner on success).
- */
-export interface WorkspaceMaterializedReport {
-  readonly runnerId: string
-  readonly path: string
-}
-
-/**
- * Answer shape for
- * `GET /api/runner/{runnerId}/workspaces/{projectId}/{workspaceName}/reclaimable`.
- * `status` is the Workspace lifecycle status; `activeBoundSessions` counts
- * sessions bound to and actively using the workspace.
- */
-export interface WorkspaceReclaimability {
-  readonly status: 'active' | 'archived'
-  readonly activeBoundSessions: number
-}
-
-export function parseWorkspaceReclaimability(payload: unknown): WorkspaceReclaimability {
-  if (!isObjectRecord(payload)) throw new Error('workspace reclaimability returned a malformed response')
-  const status = readString(payload, ['status'])
-  if (status !== 'active' && status !== 'archived') {
-    throw new Error('workspace reclaimability returned an unknown status')
-  }
-  const count = readNumber(payload, ['activeBoundSessions'])
-  if (count === null || !Number.isInteger(count) || count < 0) {
-    throw new Error('workspace reclaimability returned an invalid session count')
-  }
-  return { status, activeBoundSessions: count }
 }

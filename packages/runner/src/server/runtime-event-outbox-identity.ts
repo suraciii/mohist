@@ -1,12 +1,7 @@
 import type { CleanupPredecessorDeliveryTarget, RuntimeEventRecord } from './runtime-event-outbox-ports.js'
 
 interface SequenceKey {
-  readonly family:
-    | 'workflow-session'
-    | 'workflow-cleanup'
-    | 'session-followup'
-    | 'generic-followup'
-    | 'binding-reconcile'
+  readonly family: 'workflow-session' | 'workflow-cleanup' | 'session-followup' | 'generic-followup'
   readonly projectId?: string
   readonly workflowRunId?: string
   readonly sessionName?: string
@@ -130,14 +125,6 @@ function sequenceKey(record: RuntimeEventRecord): SequenceKey {
       cleanupOperationId: record.id,
     }
   }
-  if (record.producerFamily === 'binding-reconcile') {
-    if (record.target.kind !== 'session') throw new Error('binding-reconcile family requires session target')
-    return {
-      family: 'binding-reconcile',
-      sessionId: record.target.sessionId,
-      runtimeSessionId: record.runtimeSessionId,
-    }
-  }
   if (record.producerFamily === 'session-followup') {
     if (record.target.kind !== 'session') throw new Error('session-followup family requires Session target')
     if (!nonEmpty(record.sessionTurnId))
@@ -175,9 +162,6 @@ function sequenceKeyLabel(key: SequenceKey): string {
       sessionName: key.sessionName,
       cleanupOperationId: key.cleanupOperationId,
     })
-  }
-  if (key.family === 'binding-reconcile') {
-    return `binding-reconcile:${key.sessionId}:${key.runtimeSessionId}`
   }
   if (key.family === 'session-followup') {
     return `session-followup:${key.sessionId}:${key.runtimeSessionId}:${key.sessionTurnId}`

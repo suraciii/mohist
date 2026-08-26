@@ -1,11 +1,7 @@
-import type { DispatchWorkItem, WorkItemResult } from '../core/types.js'
-import type { RuntimeRecoveryReceipt } from '../runtime/recovery-receipt.js'
+import type { AgentExecutionBinding, DispatchWorkItem, WorkItemResult } from '../core/types.js'
 
 type Fetcher = (input: string, init: RequestInit) => Promise<Response>
-type AgentReportBinding = Pick<
-  RuntimeRecoveryReceipt,
-  'agentSessionId' | 'agentTurnId' | 'runtime' | 'runtimeSessionId'
->
+type AgentReportBinding = AgentExecutionBinding
 
 export async function reportWork(
   fetcher: Fetcher,

@@ -1,8 +1,8 @@
 import { spawn } from 'node:child_process'
 import { chmod, mkdir, mkdtemp, writeFile } from 'node:fs/promises'
-import { existsSync, readFileSync, readdirSync } from 'node:fs'
+import { existsSync, readFileSync, readdirSync, watch } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 import { createConnection } from 'node:net'
 import { createServer as createHttpServer, type Server as HttpServer } from 'node:http'
 import { describe, expect, it } from 'vitest'
@@ -35,6 +35,62 @@ interface StubMo {
   readonly marker: string
   readonly frozenWorkDir: string
   invocations(): StubInvocation[]
+}
+
+interface StubInvocationObserver {
+  waitFor(launcher: Promise<unknown>): Promise<StubInvocation>
+  close(): void
+}
+
+function observeInvocation(stub: StubMo): StubInvocationObserver {
+  let watcher: ReturnType<typeof watch> | undefined
+  let settled = false
+  let resolveMarker!: (invocation: StubInvocation) => void
+  let rejectMarker!: (error: Error) => void
+  const marker = new Promise<StubInvocation>((resolve, reject) => {
+    resolveMarker = resolve
+    rejectMarker = reject
+  })
+  const close = () => {
+    watcher?.close()
+    watcher = undefined
+  }
+  const observe = () => {
+    const invocation = stub.invocations()[0]
+    if (!invocation || settled) return
+    settled = true
+    close()
+    resolveMarker(invocation)
+  }
+
+  observe()
+  if (!settled) {
+    watcher = watch(dirname(stub.marker), observe)
+    watcher.once('error', (error) => {
+      if (settled) return
+      settled = true
+      close()
+      rejectMarker(error)
+    })
+    observe()
+  }
+
+  return {
+    waitFor(launcher) {
+      const launcherTerminal = launcher.then(
+        () => {
+          close()
+          throw new Error('launcher completed before the stub invocation marker was observed')
+        },
+        (error: unknown) => {
+          close()
+          throw new Error('launcher rejected before the stub invocation marker was observed', { cause: error })
+        },
+      )
+      return Promise.race([marker, launcherTerminal])
+    },
+    close,
+  }
 }
 
 async function writeStubMo(root: string, holdSignal: boolean, proxyUrl: string | null = null): Promise<StubMo> {
@@ -361,21 +417,27 @@ describe.sequential('ManagerExecutionBoundary', () => {
       terminationTimeoutMs: 150,
     })
     const broker = boundary.environment().MOHIST_MANAGER_BROKER!
-    const pending = requestLauncher(broker, ['slack', 'status'], boundary.environment().MOHIST_MANAGER_LAUNCHER!).catch(
-      () => null,
-    )
-    await new Promise((resolve) => setTimeout(resolve, 120))
-    expect(stub.invocations()).toHaveLength(1)
-    const childPid = stub.invocations()[0].pid
-    const inspectedEnvironment = readFileSync(`/proc/${childPid}/environ`, 'utf8')
-    expect(inspectedEnvironment).not.toContain(grant.managementCredential)
-    expect(inspectedEnvironment).not.toContain(grant.replyCredential)
-    const startedAt = Date.now()
-    await boundary.dispose()
-    expect(Date.now() - startedAt).toBeLessThan(10_000)
-    await pending
-    // The boundary directory is released only after the child tree is gone.
-    expect(readdirSync(join(root, 'manager-executions'))).toHaveLength(0)
+    const invocationObserver = observeInvocation(stub)
+    const launcher = requestLauncher(broker, ['slack', 'status'], boundary.environment().MOHIST_MANAGER_LAUNCHER!)
+    const pending = launcher.catch(() => null)
+    try {
+      const invocation = await invocationObserver.waitFor(launcher)
+      expect(stub.invocations()).toHaveLength(1)
+      const childPid = invocation.pid
+      const inspectedEnvironment = readFileSync(`/proc/${childPid}/environ`, 'utf8')
+      expect(inspectedEnvironment).not.toContain(grant.managementCredential)
+      expect(inspectedEnvironment).not.toContain(grant.replyCredential)
+      const startedAt = Date.now()
+      await boundary.dispose()
+      expect(Date.now() - startedAt).toBeLessThan(10_000)
+      await pending
+      // The boundary directory is released only after the child tree is gone.
+      expect(readdirSync(join(root, 'manager-executions'))).toHaveLength(0)
+    } finally {
+      invocationObserver.close()
+      await boundary.dispose()
+      await pending
+    }
   })
 
   it('redacts credentials split across stdout and stderr chunks', async () => {
