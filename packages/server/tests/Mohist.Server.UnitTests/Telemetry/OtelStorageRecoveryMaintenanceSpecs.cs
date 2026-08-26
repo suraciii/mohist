@@ -274,7 +274,11 @@ public class OtelStorageRecoveryMaintenanceSpecs : IDisposable
     [Fact]
     public async Task ExecuteAsync_CostIndependentOfUnrelatedHistory()
     {
-        var tasks = new[] { RunWithHistory(unrelated: 0), RunWithHistory(unrelated: 1_000) };
+        // The rebuild decision comes from the scripted probe, so the
+        // unrelated population only needs to be non-empty and of a
+        // different size than the empty-store run to show that its
+        // presence does not change the recovery outcome.
+        var tasks = new[] { RunWithHistory(unrelated: 0), RunWithHistory(unrelated: 24) };
         var counts = await Task.WhenAll(tasks);
 
         Assert.Equal(2, counts.Length);

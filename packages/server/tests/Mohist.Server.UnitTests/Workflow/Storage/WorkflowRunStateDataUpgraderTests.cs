@@ -179,7 +179,9 @@ public sealed class WorkflowRunStateDataUpgraderSpecs
     public async Task UpgradeAsync_UsesBatchesForMoreThanFiveHundredCandidates()
     {
         using var database = TestSqliteDatabase.CreateModelSchema();
-        var rows = Enumerable.Range(0, 1001)
+        // 501 candidates = exactly one full 500-row chunk plus a
+        // partial chunk, the minimum that still proves batching.
+        var rows = Enumerable.Range(0, 501)
             .Select(index => new WorkflowRunRow
             {
                 WorkflowRunId = $"wr_batch_{index:D4}",
@@ -193,10 +195,10 @@ public sealed class WorkflowRunStateDataUpgraderSpecs
             db,
             backup: static (_, _) => Task.FromResult("verified-test-backup"));
 
-        Assert.Equal(1001, result.CandidateCount);
-        Assert.Equal(1001, result.WrittenCount);
+        Assert.Equal(501, result.CandidateCount);
+        Assert.Equal(501, result.WrittenCount);
         Assert.Equal(2, await ETagAsync(database, "wr_batch_0000"));
-        Assert.Equal(2, await ETagAsync(database, "wr_batch_1000"));
+        Assert.Equal(2, await ETagAsync(database, "wr_batch_0500"));
     }
 
     [Fact]

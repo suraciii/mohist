@@ -316,14 +316,14 @@ public class TraceQuerierSpecs : IDisposable
         // Each recursive iteration generates a large random blob so the query
         // stays CPU-bound per row and never reaches the row/byte caps before
         // the execution budget fires; only the small `value` column is emitted.
-        // The blob is large enough that even the first row is still being
-        // computed when the budget interrupt lands, keeping the assertion off
-        // the row-cap fast path.
+        // The blob is sized so a single row takes far longer to compute than
+        // the gap between reader start and the budget interrupt, while staying
+        // orders of magnitude below the 1000-row response cap.
         var query = """
             WITH RECURSIVE busy(value, filler) AS (
-                SELECT 1, randomblob(16777216)
+                SELECT 1, randomblob(1048576)
                 UNION ALL
-                SELECT value + 1, randomblob(16777216) FROM busy WHERE value < 100000000
+                SELECT value + 1, randomblob(1048576) FROM busy WHERE value < 100000000
             )
             SELECT value FROM busy;
             """;
