@@ -191,14 +191,30 @@ export async function piAction(
   }
 
   if (runtimeSessionId === null || expectedRuntime !== 'pi') {
-    const created = await runtime.createSession({
-      target: {
-        runtime: 'pi',
-        runtimeSessionId: null,
-        workDir: context.workDir,
-      },
-    })
-    if (!created.ok) return runtimeFailure(created.error.kind, created.error.message, created.error.diagnostics)
+    let created: Awaited<ReturnType<PiRuntime['createSession']>>
+    try {
+      created = await runtime.createSession({
+        target: {
+          runtime: 'pi',
+          runtimeSessionId: null,
+          workDir: context.workDir,
+        },
+      })
+    } catch (error) {
+      return boundFailure(
+        'turn-failed',
+        `Pi session creation failed: ${actionErrorMessage(error)}`,
+        agentSessionId,
+        null,
+      )
+    }
+    if (!created.ok)
+      return boundFailure(
+        runtimeErrorCode(created.error.kind, created.error.diagnostics),
+        created.error.message,
+        agentSessionId,
+        null,
+      )
     runtimeSessionId = created.value.runtimeSessionId
     if (canBind) {
       try {
@@ -219,10 +235,11 @@ export async function piAction(
           context.signal,
         )
       } catch (error) {
-        return fail(
+        return boundFailure(
           'session-binding-failed',
           `Failed to persist the Workflow AgentSession binding: ${actionErrorMessage(error)}`,
-          { exitCode: 1, turnFact: { finalAssistantText: null } },
+          agentSessionId,
+          runtimeSessionId,
         )
       }
     }
@@ -231,10 +248,13 @@ export async function piAction(
   const events: PiRuntimeEvent[] = []
   const reporter = createWorkflowReporter(context, sessionName, agentSessionId, runtimeSessionId)
   if (context.cleanupAttempt && !reporter) {
-    return fail('session-reporting-failed', 'Workflow cleanup requires the durable AgentSession runtime-event outbox', {
-      exitCode: 1,
-      turnFact: { finalAssistantText: null },
-    })
+    return boundFailure(
+      'session-reporting-failed',
+      'Workflow cleanup requires the durable AgentSession runtime-event outbox',
+      agentSessionId,
+      runtimeSessionId,
+      reporter,
+    )
   }
   const report = async (facts: readonly PiRuntimeEvent[], signal = context.signal) => {
     if (!canBind || facts.length === 0) return
@@ -273,10 +293,13 @@ export async function piAction(
   try {
     await report([inputEvent(runtimeSessionId, executionPrompt, context)])
   } catch {
-    return fail('session-reporting-failed', 'Workflow AgentSession rejected session.input; prompt was not submitted', {
-      exitCode: 1,
-      turnFact: { finalAssistantText: null },
-    })
+    return boundFailure(
+      'session-reporting-failed',
+      'Workflow AgentSession rejected session.input; prompt was not submitted',
+      agentSessionId,
+      runtimeSessionId,
+      reporter,
+    )
   }
 
   const request: PiTurnRequest = {
@@ -372,6 +395,22 @@ export async function piAction(
   return succeed(null, {
     exitCode: 0,
     turnFact: boundTurnFact(finalText, agentSessionId, reporter, runtimeSessionId),
+  })
+}
+
+function boundFailure(
+  code: string,
+  message: string,
+  agentSessionId: string | null,
+  runtimeSessionId: string | null,
+  reporter: WorkflowAgentSessionReporter | null = null,
+): ActionResult {
+  return fail(code, message, {
+    exitCode: 1,
+    turnFact:
+      runtimeSessionId === null
+        ? { finalAssistantText: null }
+        : boundTurnFact(null, agentSessionId, reporter, runtimeSessionId),
   })
 }
 

@@ -54,10 +54,7 @@ function makeHost(args: {
   const shutdown = createHostShutdown({
     options,
     connection: { reportRecoveryStopFailure } as unknown as ServerConnection,
-    openCodeRuntime: () => null,
-    piRuntime: () => null,
     inFlight,
-    awaitingAck: new Map(),
     fetchPendingUpdateOperation: args.fetch ?? vi.fn(async () => null),
     shutdownHandoffBudgetMs: args.handoffBudgetMs ?? 100,
     shutdownStopBudgetMs: args.stopBudgetMs ?? 100,

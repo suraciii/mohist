@@ -206,8 +206,11 @@ function buildAgentTurnCapability(
               cleanupAttempt,
             )
             return await workflowActionFailure(
+              {
+                agentSessionId: opened.sessionId,
+                runtimeSessionId: opened.runtimeSessionId ?? null,
+              },
               mismatchReporter,
-              opened.runtimeSessionId ?? null,
               'session-workspace-mismatch',
               'Workflow AgentSession is bound to a different workspace; rerun the stage with a new task attempt before retrying',
             )
@@ -271,8 +274,8 @@ function buildAgentTurnCapability(
 
       if (!runtime) {
         return await workflowActionFailure(
+          binding,
           reporter,
-          binding.runtimeSessionId,
           'runtime-unavailable',
           'agent-turn requires the OpenCode runtime; the runner has not yet established the runtime or it is rebuilding',
         )
@@ -280,8 +283,8 @@ function buildAgentTurnCapability(
       if (!runtime.ready()) {
         const diagnostic = runtime.diagnostic()
         return await workflowActionFailure(
+          binding,
           reporter,
-          binding.runtimeSessionId,
           'runtime-unavailable',
           `agent-turn requires the OpenCode runtime to be ready: ${diagnostic?.message ?? 'no readiness diagnostic'}`,
         )
@@ -348,8 +351,11 @@ function buildAgentTurnCapability(
             cleanupAttempt,
           )
           return await workflowActionFailure(
+            {
+              agentSessionId: binding.agentSessionId,
+              runtimeSessionId: created.value.runtimeSessionId,
+            },
             attachReporter,
-            created.value.runtimeSessionId,
             'session-binding-failed',
             `Failed to persist the Workflow AgentSession binding: ${errorMessage(error)}`,
           )
@@ -507,8 +513,8 @@ function buildAgentTurnCapability(
           await reporter.awaitInput(prompt, selectedBinding.runtimeSessionId)
         } catch (error) {
           return await workflowActionFailure(
+            selectedBinding,
             reporter,
-            selectedBinding.runtimeSessionId,
             'execution-unavailable',
             `failed to durably enqueue the Workflow AgentSession input: ${errorMessage(error)}`,
           )
@@ -694,12 +700,16 @@ function boundRuntimeActionFailure(
     outcome,
     turnFact: {
       finalAssistantText: null,
-      agentBinding: {
-        agentSessionId: binding.agentSessionId,
-        agentTurnId: reporter?.getAgentTurnId() ?? null,
-        runtime: 'opencode',
-        runtimeSessionId: binding.runtimeSessionId,
-      },
+      ...(binding.agentSessionId
+        ? {
+            agentBinding: {
+              agentSessionId: binding.agentSessionId,
+              agentTurnId: reporter?.getAgentTurnId() ?? null,
+              runtime: 'opencode' as const,
+              runtimeSessionId: binding.runtimeSessionId,
+            },
+          }
+        : {}),
     },
   })
 }
@@ -720,14 +730,23 @@ function opencodeFailureCode(kind: string): string {
 }
 
 async function workflowActionFailure(
+  binding: { agentSessionId: string; runtimeSessionId: string | null },
   reporter: WorkflowAgentSessionReporter | null,
-  runtimeSessionId: string | null,
   code: string,
   message: string,
 ): Promise<ActionResult> {
-  enqueueTerminalClose(reporter, failedRuntimeTurn(message), runtimeSessionId)
-  await reporter?.settle()
-  return runtimeActionFailure(code, message)
+  enqueueTerminalClose(reporter, failedRuntimeTurn(message), binding.runtimeSessionId)
+  try {
+    await reporter?.settle()
+  } catch (error) {
+    return boundRuntimeActionFailure(
+      binding,
+      reporter,
+      'session-reporting-failed',
+      `${message}; Workflow AgentSession terminal reporting failed: ${errorMessage(error)}`,
+    )
+  }
+  return boundRuntimeActionFailure(binding, reporter, code, message)
 }
 
 function failedRuntimeTurn(message: string): RuntimeResult<RuntimeTurnResult> {

@@ -313,10 +313,7 @@ export class RunnerHost {
     this.hostShutdown = createHostShutdown({
       options: this.options,
       connection: this.connection,
-      openCodeRuntime: () => this.openCodeRuntime,
-      piRuntime: () => this.piRuntime,
       inFlight: this.inFlight,
-      awaitingAck: this.awaitingAck,
       fetchPendingUpdateOperation: this.fetchPendingUpdateOperation,
       shutdownHandoffBudgetMs: this.shutdownHandoffBudgetMs,
       shutdownStopBudgetMs: this.shutdownStopBudgetMs,

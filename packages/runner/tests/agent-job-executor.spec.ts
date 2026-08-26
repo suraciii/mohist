@@ -193,7 +193,7 @@ describe('AgentJobExecutor drives OpenCodeRuntime directly', () => {
   vitestIt.each([
     ['success', null],
     [
-      'failure',
+      'normalized failure',
       {
         ok: false as const,
         error: { kind: 'turn-failed' as const, message: 'runtime failed', diagnostics: [] },
@@ -216,6 +216,52 @@ describe('AgentJobExecutor drives OpenCodeRuntime directly', () => {
       agentTurnId: 'turn-real',
       runtime: 'opencode',
       runtimeSessionId: 'ses_default',
+    })
+  })
+
+  it('preserves the known binding when the runtime throws', async () => {
+    const runtime = makeFakeRuntime()
+    runtime.runtime.runTurn = vi.fn(async () => {
+      throw new Error('runtime threw')
+    })
+    const connection = makeFakeConnection()
+    connection.setAgentSession({ runtimeSessionId: 'ses-bound' })
+    const executor = new AgentJobExecutor(connection.connection, makeAccessors(runtime.runtime))
+
+    const result = await executor.execute(buildAgentJobWork({ initialTurnId: 'turn-real' }), new AbortController().signal)
+
+    expect(result.status).toBe('failed')
+    expect(result.agentBinding).toEqual({
+      agentSessionId: 'session-1',
+      agentTurnId: 'turn-real',
+      runtime: 'opencode',
+      runtimeSessionId: 'ses-bound',
+    })
+  })
+
+  vitestIt.each([
+    ['runtime unavailable', null],
+    [
+      'runtime not ready',
+      {
+        ready: () => false,
+        diagnostic: () => ({ message: 'rebuilding' }),
+      } as Partial<OpenCodeRuntime>,
+    ],
+  ])('preserves the known binding when %s', async (_case, runtimeOverride) => {
+    const connection = makeFakeConnection()
+    connection.setAgentSession({ runtimeSessionId: 'ses-bound' })
+    const runtime = runtimeOverride ? ({ ...makeFakeRuntime().runtime, ...runtimeOverride } as OpenCodeRuntime) : null
+    const executor = new AgentJobExecutor(connection.connection, makeAccessors(runtime))
+
+    const result = await executor.execute(buildAgentJobWork({ initialTurnId: 'turn-real' }), new AbortController().signal)
+
+    expect(result.status).toBe('failed')
+    expect(result.agentBinding).toEqual({
+      agentSessionId: 'session-1',
+      agentTurnId: 'turn-real',
+      runtime: 'opencode',
+      runtimeSessionId: 'ses-bound',
     })
   })
 

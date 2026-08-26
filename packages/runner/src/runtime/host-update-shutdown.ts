@@ -1,11 +1,9 @@
 import type { DispatchWorkItem, RunnerOptions } from '../core/types.js'
 import type { ServerConnection } from '../server/connection.js'
-import type { OpenCodeRuntime } from './opencode/index.js'
-import type { PiRuntime } from './pi/index.js'
 import type { PendingUpdateOperation } from './update-operation.js'
 import { runnerLogger } from '../system/logger.js'
 import { withTimeout } from './host-timing.js'
-import type { AwaitingAckEntry, InFlightEntry } from './host-state.js'
+import type { InFlightEntry } from './host-state.js'
 import type { RunnerHostShutdown } from './host-shutdown-types.js'
 
 const log = runnerLogger.child('host')
@@ -32,10 +30,7 @@ export interface ShutdownInFlightEntry {
 export interface HostShutdownContext {
   readonly options: RunnerOptions
   readonly connection: ServerConnection
-  readonly openCodeRuntime: () => OpenCodeRuntime | null
-  readonly piRuntime: () => PiRuntime | null
   readonly inFlight: Map<string, InFlightEntry>
-  readonly awaitingAck: Map<string, { work: DispatchWorkItem; entry: AwaitingAckEntry }>
   readonly fetchPendingUpdateOperation: (signal: AbortSignal) => Promise<PendingUpdateOperation | null>
   readonly shutdownHandoffBudgetMs: number
   readonly shutdownStopBudgetMs: number

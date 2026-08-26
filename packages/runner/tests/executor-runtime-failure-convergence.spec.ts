@@ -138,6 +138,7 @@ describe('WorkExecutor runtime failure convergence', () => {
 
     expect(result.status).toBe('failed')
     expect(result.error?.code).toBe('runtime-unavailable')
+    expect(result.agentBinding).toBeUndefined()
     expect(open).toHaveBeenCalledTimes(1)
     expect(outbox.eventTypeList()).toEqual([])
   })
@@ -149,6 +150,12 @@ describe('WorkExecutor runtime failure convergence', () => {
 
     expect(result.status).toBe('failed')
     expect(result.error?.code).toBe('runtime-unavailable')
+    expect(result.agentBinding).toEqual({
+      agentSessionId: 'agent-session-1',
+      agentTurnId: null,
+      runtime: 'opencode',
+      runtimeSessionId: 'runtime-1',
+    })
     expect(outbox.eventTypeList()).toEqual(['turn.failed', 'session.activity'])
     expect(outbox.eventsByType('session.activity')[0]?.event.payload).toMatchObject({
       activity: 'idle',
@@ -164,6 +171,12 @@ describe('WorkExecutor runtime failure convergence', () => {
 
     expect(result.status).toBe('failed')
     expect(result.error?.message).toContain('pending apply_patch failed')
+    expect(result.agentBinding).toEqual({
+      agentSessionId: 'agent-session-1',
+      agentTurnId: expect.any(String),
+      runtime: 'opencode',
+      runtimeSessionId: 'runtime-1',
+    })
     expect(outbox.eventTypeList()).toEqual(['session.input', 'turn.failed', 'session.activity'])
     expect(outbox.eventsByType('session.activity')[0]?.event.payload).toMatchObject({
       activity: 'idle',
