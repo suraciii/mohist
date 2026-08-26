@@ -154,8 +154,10 @@ Concept ownership and origin rules are defined in
   is monotonic and changes whenever current binding is replaced; it is part of every command/event
   fence, not a display-only revision.
 - A binding operation carries an operation fence. `ownerFence` and `claimGeneration` are
-  independent monotonic values; an unqualified `generation` in an implementation means
-  `claimGeneration`, never `ContextGeneration`. The single `FenceToken` contract below is used
+  independent monotonic values; within binding fences, an unqualified `generation` means
+  `claimGeneration`, never `ContextGeneration`. Runner-side generations are different concepts
+  with explicit names — `processGeneration` and the readiness signal's `runtimeGeneration`
+  (see [`runner.md`](runner.md)). The single `FenceToken` contract below is used
   by every phase write, candidate create/get/discard/cleanup, binding CAS, completion, Compact,
   and per-target stop. Before any external effect, Server atomically rechecks that token,
   the current owner lease, and the current binding, then passes the same token to Runtime/provider. A stale

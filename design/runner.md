@@ -72,7 +72,7 @@ in [`runner-transport.md`](runner-transport.md).
 
 Each poll recomputes everything from persisted state; DispatchService keeps
 no cursor, cache, or ledger. A poll carries the Runner's reported set
-(`inFlight` union `awaitingAck`) and its readiness witness, and doubles as
+(`inFlight` union `awaitingAck`) and its readiness signal, and doubles as
 the presence heartbeat.
 
 ```mermaid
@@ -89,17 +89,17 @@ For `reported - desired`, where the owner has already moved beyond the work,
 take no action: the process executes it to completion, receives `refused` for
 the report as its acknowledgement, and discards the result.
 
-### Runtime Readiness Witness
+### Runtime Readiness Signal
 
 Presence alone cannot prove that the runtime a pending work item needs is
 ready before the Server claims the item. Every poll therefore carries one
-readiness witness per runtime: `ready` (can it accept new work now) plus a
-Runner-owned generation that fences the observation to the current runtime
-instance.
+readiness signal per runtime: `ready` (can it accept new work now) plus a
+Runner-owned `runtimeGeneration` that fences the observation to the current
+runtime instance.
 
-The Server treats a missing, malformed, stale, or `ready=false` witness as
+The Server treats a missing, malformed, expired, or `ready=false` signal as
 unknown for new claims. It never treats a runtime catalog as a readiness
-witness. The witness is not durable work state and cannot settle, replay, or
+signal. The signal is not durable work state and cannot settle, replay, or
 replace a work result.
 
 Redelivery is separate from admission. Work already reported as `inFlight` or
@@ -107,7 +107,7 @@ Redelivery is separate from admission. Work already reported as `inFlight` or
 runtime recovers; the Runner must not acquire new work and hide it in an
 unbounded deferred queue.
 
-A witness is a claim-time admission fence, not a guarantee that an external
+A signal is a claim-time admission fence, not a guarantee that an external
 runtime cannot fail immediately after the poll. The Server must not infer
 readiness from a successful HTTP poll, presence, heartbeat, model catalog,
 runtime session file, or reconnect; these facts have different owners and
@@ -157,10 +157,8 @@ flowchart TD
     N --> Q
 ```
 
-The policy extension point defaults to strict FIFO. If interactive AgentJobs
-must take priority over background Workflows, extend it explicitly to
-`Priority DESC, ReadySince ASC`; priority must be a declared policy, not an
-implicit bias.
+The policy is strict FIFO. Any priority between work types must be a
+declared policy, not an implicit bias.
 
 ### Capacity
 
@@ -191,12 +189,13 @@ flowchart LR
     G -.->|"outstanding / no answer →<br/>retry from memory, fixed cadence"| R
 ```
 
-Process death ends retry; closeout settles the work.
+Process death ends retry; the work is closed out.
 
 A report is a Runner's assertion of an execution fact — a claim in the sense
 of [`conventions.md`](conventions.md#facts-claims-and-settlement). Settlement
-is idempotent by report identity (owner, work, attempt) and answers one of
-three verdicts:
+is idempotent by report identity (owner, work, attempt) — an attempt is one
+Running episode of a work item, from claim to its terminal report — and
+answers one of three verdicts:
 
 ```text literal
 accepted      the fact is recorded; a duplicate report gets the same verdict
@@ -211,8 +210,8 @@ results as transport errors, and the Runner must not interpret status codes:
 
 While its process lives, the Runner retries every unacknowledged report from
 memory at a fixed interval and continues to include it in poll reports. A
-report lost to process death is never replayed; its work is settled by
-closeout. See [Restart and Crash Semantics](#restart-and-crash-semantics).
+report lost to process death is never replayed; its work is closed out.
+See [Restart and Crash Semantics](#restart-and-crash-semantics).
 
 The owner cannot distinguish who produced a report: the execution process,
 whether normally or after a timeout, or RunnerGrain closeout.
@@ -233,8 +232,8 @@ Each failure condition has exactly one owner:
 - Runner disappears: RunnerGrain lets poll freshness expire, marks the Runner
   offline, queries both owner types for `Running assigned=me`, and reports
   `FAILED("runner-lost")` for each.
-- Runner restarts: register establishes a new process generation; the old
-  generation's Running work is settled `FAILED("runner-restarted")`. See
+- Runner restarts: register presents a new `processGeneration`; the old
+  generation's Running work is closed out as `FAILED("runner-lost")`. See
   [Restart and Crash Semantics](#restart-and-crash-semantics).
 - No Server-side timer times out work. Reported in-flight work is alive; only
   the process judges progress. Owner timers, including AgentJob execution and
@@ -275,17 +274,19 @@ Three forces shape this boundary:
   continues; this recovers more truth, more cheaply, than any Runner-side
   reconstruction.
 
-**Process Generation**. An opaque nonce created at every Runner process start,
+**Process Generation** (`processGeneration`). An opaque nonce created at every
+Runner process start,
 sent at register and in every poll. Equality, not ordering, is the contract:
 two processes under one Runner identity must never share a generation. The
 Server records the claiming generation with every claim.
 
 Register establishes a new generation. Before the new process's first poll is
-served, the Server settles every Running work item assigned to this Runner
-under an older generation as `FAILED("runner-restarted")`. Work claimed by one
+served, the Server closes out every Running work item assigned to this Runner
+under an older generation as `FAILED("runner-lost")`. Work claimed by one
 generation is never redelivered for execution to another. This is
-presence-expiry closeout moved to the earliest provable moment; `runner-lost`
-remains the backstop for a process that never returns.
+presence-expiry closeout moved to the earliest provable moment; presence
+expiry remains the backstop for a process that never returns. Both triggers
+produce the same ordinary failure code.
 
 ```mermaid
 sequenceDiagram
@@ -296,7 +297,7 @@ sequenceDiagram
     G1->>G1: execute X
     G1--xS: (process dies)
     G2->>S: register(gen2)
-    Note over S: before gen2's first poll:<br/>X, Running under gen1, becomes FAILED(runner-restarted)
+    Note over S: before gen2's first poll:<br/>X, Running under gen1, becomes FAILED(runner-lost)
     S->>S: workflow recovery → retry → new attempt X'
     G2->>S: poll, claim X', execute
     Note over G2: the retrying agent reads<br/>the Workspace scene and continues
@@ -306,6 +307,15 @@ The Runner scopes every execution to a per-work process group. On startup,
 before claiming work, the Runner terminates stale groups left by earlier
 processes under the same Runner root. A crashed process cannot kill its own
 tree, so the sweep makes the old execution dead instead of assuming it.
+
+Every Running work item must reach a terminal state without Runner memory:
+report verdict, generation closeout, presence-expiry closeout, or a deadline.
+Work that can be closed out by none of these is closed out at its deadline as
+failed or unknown. Silence is made decidable by leases: an expiry is a fact,
+not a guess about the peer
+([`conventions.md`](conventions.md#facts-claims-and-settlement)). An AgentJob
+that stays Pending past its `ReadySince` timeout fails with
+`RunnerUnavailable`.
 
 Rejected alternatives that may return:
 
@@ -346,8 +356,8 @@ may intentionally daemonize descendants through this primitive.
 When a Runtime Session quarantines or a Runner shuts down, the Runner drains
 in-flight work within bounded time before it releases ownership. Results
 produced during drain are reported before ownership is released; a result not
-reported before process death is lost with the process, and closeout settles
-its work.
+reported before process death is lost with the process, and its work is
+closed out.
 
 ## Persisted State
 
@@ -359,7 +369,7 @@ or writes Runner-local files.
 
 A fact must have at least one durable witness, and the Runner is not one.
 Facts the Runner witnesses are either reported — and the Server becomes the
-durable witness — or lost with the process, with closeout settling the work.
+durable witness — or lost with the process, and their work is closed out.
 A Runner-side journal would only buy result preservation across a crash, a
 capability this design deliberately declines (see
 [Restart and Crash Semantics](#restart-and-crash-semantics)).
