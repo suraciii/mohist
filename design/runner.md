@@ -380,10 +380,12 @@ open: a corrupt or missing cache is rebuilt from the filesystem and from
 Server answers.
 
 Runtime events and task-log batches are volatile evidence. The Runner retries
-them from process memory in per-session emission order, but a crash may drop
-an undelivered suffix. Evidence delivery never gates admission or work-result
-reporting, so the Server continues state arbitration from the facts it did
-receive.
+them from bounded process memory in per-session emission order, but a crash may
+drop an undelivered suffix. When the runtime-event queue reaches its explicit
+ceiling, it drops the newest evidence rather than blocking execution; permanent
+Server refusal also drops the refused evidence. These gaps are accepted because
+evidence delivery never gates admission or work-result reporting, so the Server
+continues state arbitration from the facts it did receive.
 
 Gap: result preservation, operation idempotency journals, recovery receipts,
 and non-rebuildable workspace registries remain durable Runner state. Their
