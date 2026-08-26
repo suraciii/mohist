@@ -56,11 +56,27 @@ public sealed class WorkflowReportService : IScopedService
             : null;
         if (isAgentTask && agentBinding is null)
         {
-            // Workflow Agent results are never accepted from the reusable
-            // task/work/Runner tuple. The runtime identity must come from the
-            // same executed turn, otherwise an incomplete or stale receipt is
-            // acknowledged without side effects.
-            return (ReportAck.Stale.ToString().ToLowerInvariant(), null);
+            // Workflow Agent successes are never accepted from the reusable
+            // task/work/Runner tuple: the runtime identity must come from
+            // the same executed turn. A binding-less non-success result is
+            // still a real runner observation (e.g. session binding failed
+            // before any turn started); routing it into the unknown
+            // observation keeps settlement arbitration authoritative and
+            // lets the Runner retire the report instead of retrying a
+            // rejection the server will never change.
+            if (string.Equals(result.Status, "succeeded", StringComparison.OrdinalIgnoreCase))
+                return (ReportAck.Stale.ToString().ToLowerInvariant(), null);
+
+            var observationWorkflow = _grains.GetGrain<IWorkflowGrain>(workflowRunId);
+            var unboundAck = await observationWorkflow.ObserveAgentResultUnknownAsync(
+                runnerId,
+                taskRunId ?? string.Empty,
+                workId,
+                string.IsNullOrWhiteSpace(result.ErrorCode) ? "unbound-agent-result" : result.ErrorCode!,
+                string.IsNullOrWhiteSpace(result.Message)
+                    ? "The Runner reported an Agent result without a runtime execution binding."
+                    : result.Message);
+            return (unboundAck.ToString().ToLowerInvariant(), await observationWorkflow.GetRunStatusAsync());
         }
 
         var workflow = _grains.GetGrain<IWorkflowGrain>(workflowRunId);
