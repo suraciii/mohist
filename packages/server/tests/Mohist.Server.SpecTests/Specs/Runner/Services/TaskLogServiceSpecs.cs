@@ -163,11 +163,11 @@ public class TaskLogServiceSpecs : IAsyncLifetime
     }
 
     [Fact]
-    public async Task AppendAsync_WorkflowTerminalSnapshotRequiresAuthoritativeTerminalTask()
+    public async Task AppendAsync_WorkflowTerminalSnapshotAcceptsCurrentActiveOwnerBeforeTaskSettlement()
     {
-        const string workflowRunId = "wr-active-terminal-task-log";
-        const string workId = "work-active-terminal-task-log";
-        const string runnerId = "runner-active-terminal-task-log";
+        const string workflowRunId = "wr-active-terminal-task-log-accepted";
+        const string workId = "work-active-terminal-task-log-accepted";
+        const string runnerId = "runner-active-terminal-task-log-accepted";
         await InsertActiveWorkflowRunAsync(workflowRunId, workId, runnerId);
 
         var result = await _service.AppendAsync(
@@ -175,7 +175,27 @@ public class TaskLogServiceSpecs : IAsyncLifetime
             TaskLogOwnershipKinds.Workflow,
             workflowRunId,
             workId,
-            [new TaskLogLine(1, _timeProvider.GetUtcNow(), "terminal", "too-early")],
+            [new TaskLogLine(1, _timeProvider.GetUtcNow(), "terminal", "early-but-owned")],
+            truncated: false,
+            terminal: true);
+
+        Assert.Equal(TaskLogAppendResult.Changed, result);
+    }
+
+    [Fact]
+    public async Task AppendAsync_WorkflowTerminalSnapshotRejectsForeignActiveRunner()
+    {
+        const string workflowRunId = "wr-active-terminal-task-log";
+        const string workId = "work-active-terminal-task-log";
+        const string runnerId = "runner-active-terminal-task-log";
+        await InsertActiveWorkflowRunAsync(workflowRunId, workId, runnerId);
+
+        var result = await _service.AppendAsync(
+            "runner-other",
+            TaskLogOwnershipKinds.Workflow,
+            workflowRunId,
+            workId,
+            [new TaskLogLine(1, _timeProvider.GetUtcNow(), "terminal", "foreign")],
             truncated: false,
             terminal: true);
 
