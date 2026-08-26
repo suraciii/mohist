@@ -306,6 +306,16 @@ The owner must always produce a verdict. It must not express arbitration
 results as transport errors, and the Runner must not interpret status codes:
 `accepted` and `refused` retire a report; anything else keeps it.
 
+```text diagram
+Runner --- report --> owner grain -- settle by identity --> accepted: retire
+                                                         |-> refused: retire
+                                                         |
+Runner <--- retry, fixed cadence, from memory ----------- +-> outstanding or
+             while the process lives                        no answer
+
+process death: retry ends; closeout settles the work
+```
+
 While its process lives, the Runner retries every unacknowledged report from
 memory at a fixed interval and continues to include it in poll reports. A
 report lost to process death is never replayed; its work is settled by
@@ -412,6 +422,17 @@ under an older generation as `FAILED("runner-restarted")`. Work claimed by one
 generation is never redelivered for execution to another. This is
 presence-expiry closeout moved to the earliest provable moment; `runner-lost`
 remains the backstop for a process that never returns.
+
+```text diagram
+gen1   claim X -> execute -> (process dies)
+
+gen2   register(gen2)
+         Server, before serving gen2's first poll:
+           X, Running and claimed by gen1 -> FAILED(runner-restarted)
+         workflow recovery -> retry -> new attempt X'
+       poll -> claim X' -> execute
+         the retrying agent reads the Workspace scene and continues
+```
 
 The Runner scopes every execution to a per-work process group. On startup,
 before claiming work, the Runner terminates stale groups left by earlier
