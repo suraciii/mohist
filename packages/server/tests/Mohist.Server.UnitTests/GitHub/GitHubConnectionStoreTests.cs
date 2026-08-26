@@ -1,3 +1,4 @@
+using Mohist.Server.UnitTests.Support;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Time.Testing;
@@ -56,9 +57,9 @@ public sealed class GitHubConnectionStoreTests
         var options = new DbContextOptionsBuilder<MohistDbContext>()
             .UseSqlite(connection)
             .Options;
+        SqliteSchemaTemplate.CopyModelSchemaTo(connection);
         using (var db = new MohistDbContext(options))
         {
-            db.Database.EnsureCreated();
             db.Projects.Add(new ProjectRow { Id = "proj_1", Name = "demo", RepositoriesJson = repositoriesJson });
             db.SaveChanges();
         }
