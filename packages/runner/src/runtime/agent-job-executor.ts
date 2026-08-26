@@ -5,8 +5,6 @@ import { parseModelIdentifier, type OpenCodeRuntime } from './opencode/index.js'
 import type { PiRuntime } from './pi/index.js'
 import type { RuntimeAccessor } from '../server/command-runtime.js'
 import type { ServerConnection } from '../server/connection.js'
-import type { BindingRecoveryCoordinator } from './binding-recovery.js'
-import type { RuntimeTurnRegistry } from './runtime-turn-registry.js'
 import { SkillResolver } from './skill-resolver.js'
 import { buildExecutionEnvelope } from './execution-envelope.js'
 import { inlineSlackCollaborationSkill, readExecutionSourceContext } from './slack-execution-context.js'
@@ -76,12 +74,10 @@ export class AgentJobExecutor {
   constructor(
     private readonly connection: ServerConnection,
     private readonly runtimes: AgentJobRuntimeAccessors,
-    private readonly bindingRecoveryCoordinator: BindingRecoveryCoordinator | null = null,
     private readonly defaultWorkDir: string = process.cwd(),
     private readonly skillResolver: SkillResolver = new SkillResolver(),
     private readonly namedWorkspaceManager: NamedWorkspaceManager | null = null,
     private readonly options: AgentJobExecutorOptions = {},
-    private readonly runtimeTurnRegistry: RuntimeTurnRegistry | null = null,
   ) {}
 
   async execute(
@@ -216,7 +212,10 @@ export class AgentJobExecutor {
           'opencode',
         )
       }
-      turnDeps = { ...turnDeps, runtimes: { ...turnDeps.runtimes, openCode: isolated } }
+      turnDeps = {
+        ...turnDeps,
+        runtimes: { ...turnDeps.runtimes, openCode: isolated },
+      }
     }
     return executeOpenCodeTurn(
       turnDeps,
@@ -240,9 +239,7 @@ export class AgentJobExecutor {
     return {
       connection: this.connection,
       runtimes: this.runtimes,
-      bindingRecoveryCoordinator: this.bindingRecoveryCoordinator,
       options: this.options,
-      runtimeTurnRegistry: this.runtimeTurnRegistry,
       managerExecution,
     }
   }
@@ -284,7 +281,12 @@ async function resolveBinding(
 ): Promise<BindingResolution> {
   const agentSessionId = work.agentSessionId ?? null
   if (!agentSessionId || !work.projectId) {
-    return { agentSessionId: null, runnerId: connection.runnerId, runtime: null, runtimeSessionId: null }
+    return {
+      agentSessionId: null,
+      runnerId: connection.runnerId,
+      runtime: null,
+      runtimeSessionId: null,
+    }
   }
   const opened = await connection.getAgentSession(work.projectId, agentSessionId, signal)
   return {
@@ -338,7 +340,10 @@ async function resolveWorkspaceBinding(
       }
     } catch (error) {
       if (error instanceof WorkspaceHomeClaimedError) throw error
-      return { kind: 'materialization-failed', message: error instanceof Error ? error.message : String(error) }
+      return {
+        kind: 'materialization-failed',
+        message: error instanceof Error ? error.message : String(error),
+      }
     }
   }
 

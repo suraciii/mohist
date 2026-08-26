@@ -90,7 +90,6 @@ describe("AgentJobExecutor model policy", () => {
     const executor = new AgentJobExecutor(
       makeConnection(),
       accessors(runtime.runtime),
-      null,
       "/virtual",
       undefined,
       null,
@@ -128,7 +127,6 @@ describe("AgentJobExecutor model policy", () => {
     const executor = new AgentJobExecutor(
       makeConnection(),
       accessors(runtime.runtime),
-      null,
       "/virtual",
       undefined,
       null,
@@ -158,7 +156,6 @@ describe("AgentJobExecutor model policy", () => {
     const executor = new AgentJobExecutor(
       makeConnection(),
       accessors(runtime.runtime),
-      null,
       "/virtual",
       undefined,
       null,

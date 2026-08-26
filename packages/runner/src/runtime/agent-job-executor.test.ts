@@ -68,7 +68,6 @@ describe("AgentJobExecutor attachment delivery", () => {
     const result = await new AgentJobExecutor(
       connection as never,
       { openCode: runtime as never, pi: null },
-      null,
       workDir,
     ).execute(work, new AbortController().signal)
 
@@ -141,7 +140,6 @@ describe("AgentJobExecutor attachment delivery", () => {
     const result = await new AgentJobExecutor(
       connection as never,
       { openCode: runtime as never, pi: null },
-      null,
       workDir,
     ).execute(work, new AbortController().signal)
 

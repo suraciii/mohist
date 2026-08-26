@@ -35,8 +35,6 @@ import { evaluateCompletion, promiseValue, type CompletionEvaluation } from '../
 import type { AgentJobExecutor } from './agent-job-executor.js'
 import type { ActionEffects } from '../actions/host.js'
 import { capabilitySet } from '../actions/host.js'
-import type { BindingRecoveryCoordinator } from './binding-recovery.js'
-import type { RuntimeTurnRegistry } from './runtime-turn-registry.js'
 import { SkillResolver } from './skill-resolver.js'
 import { renderWithDeferred, buildActionHost, type ExecutorCapabilityDeps } from './executor-capabilities.js'
 import type { ManagerExecutionBoundary } from './manager-execution-boundary.js'
@@ -64,10 +62,8 @@ export class WorkExecutor {
     private agentSessionRuntimeEventOutbox: AgentSessionRuntimeEventOutbox | null = null,
     private readonly runtimeEventRecordId: () => string = defaultRuntimeEventRecordId,
     private piRuntime: PiRuntime | null = null,
-    private readonly bindingRecoveryCoordinator: BindingRecoveryCoordinator | null = null,
     private readonly skillResolver: SkillResolver = new SkillResolver(),
     private readonly namedWorkspaceManager: NamedWorkspaceManager | null = null,
-    private readonly runtimeTurnRegistry: RuntimeTurnRegistry | null = null,
     private readonly cleanupTerminalFactDeliveryBudgetMs?: number,
     private readonly workflowSessionSettleBudgetMs?: number,
   ) {}
@@ -134,7 +130,10 @@ export class WorkExecutor {
             baseBranch,
             signal,
           )
-          return { kind: 'ok', workspace: { path: info.path, branch: `mohist/ws-${wsName}` } }
+          return {
+            kind: 'ok',
+            workspace: { path: info.path, branch: `mohist/ws-${wsName}` },
+          }
         }
       }
       const info = await this.workspaceManager.prepare(work, signal, log)
@@ -213,7 +212,7 @@ export class WorkExecutor {
           `Action '${definition.manifest.name}' threw before returning a result: ${errorMessage(thrown)}`,
         )
       }
-      const turnFact = (passThroughTurnFact(rawResult) ?? null) as { finalAssistantText?: string | null } | null
+      const turnFact = (passThroughTurnFact(rawResult) ?? null) as ActionResult['turnFact']
       const outcome = passThroughOutcome(rawResult)
       const normalized = normalizeActionResult(rawResult, definition.manifest, caps)
       let effects: ActionEffects = {}
@@ -237,7 +236,7 @@ export class WorkExecutor {
       const completion = actionSucceeded
         ? await evaluateCompletion(renderedExpect, workDir, turnFact?.finalAssistantText ?? null)
         : null
-      const projected = projectTaskOutput(work, validatedResult, completion, caps)
+      const projected = withAgentBinding(projectTaskOutput(work, validatedResult, completion, caps), turnFact)
       const resultForRecovery = projected
       if (isActionFailure(validatedResult)) {
         if (resultForRecovery.status === 'unknown') return resultForRecovery
@@ -316,8 +315,6 @@ export class WorkExecutor {
       openCodeRuntime: this.openCodeRuntime,
       agentSessionRuntimeEventOutbox: this.agentSessionRuntimeEventOutbox,
       runtimeEventRecordId: this.runtimeEventRecordId,
-      bindingRecoveryCoordinator: this.bindingRecoveryCoordinator,
-      runtimeTurnRegistry: this.runtimeTurnRegistry,
       cleanupTerminalFactDeliveryBudgetMs: this.cleanupTerminalFactDeliveryBudgetMs,
       workflowSessionSettleBudgetMs: this.workflowSessionSettleBudgetMs,
     }
@@ -409,7 +406,7 @@ export class WorkExecutor {
 
 export function stripRunnerPrivateFacts(result: ActionResult): {
   publicActionResult: ActionResult
-  turnFact: { finalAssistantText?: string | null } | null
+  turnFact: ActionResult['turnFact']
 } {
   if (!result || typeof result !== 'object' || !('turnFact' in result)) {
     return { publicActionResult: result, turnFact: null }
@@ -417,6 +414,10 @@ export function stripRunnerPrivateFacts(result: ActionResult): {
   const turnFact = result.turnFact ?? null
   const { turnFact: _ignored, ...rest } = result
   return { publicActionResult: rest as ActionResult, turnFact }
+}
+
+function withAgentBinding(result: WorkItemResult, turnFact: ActionResult['turnFact']): WorkItemResult {
+  return turnFact?.agentBinding ? { ...result, agentBinding: turnFact.agentBinding } : result
 }
 
 function projectTaskOutput(
@@ -454,9 +455,18 @@ function projectTaskOutput(
         exitCode: result.exitCode,
       }
     }
-    return { status: 'completed', output: projectedOutput, exitCode: result.exitCode }
+    return {
+      status: 'completed',
+      output: projectedOutput,
+      exitCode: result.exitCode,
+    }
   }
-  if (completion === null) return { status: 'completed', output: result.output, exitCode: result.exitCode }
+  if (completion === null)
+    return {
+      status: 'completed',
+      output: result.output,
+      exitCode: result.exitCode,
+    }
   if (!completion.satisfied) {
     return {
       status: failureStatus(work),
@@ -466,7 +476,11 @@ function projectTaskOutput(
       exitCode: result.exitCode,
     }
   }
-  return { status: 'completed', output: result.output, exitCode: result.exitCode }
+  return {
+    status: 'completed',
+    output: result.output,
+    exitCode: result.exitCode,
+  }
 }
 
 export interface WorkExecution {
@@ -511,7 +525,11 @@ function workspaceSetupFailure(work: DispatchWorkItem, error: unknown): WorkItem
 }
 
 function failure(work: DispatchWorkItem, message: string): WorkItemResult {
-  return { status: failureStatus(work), message, error: { code: 'runner-failed', message } }
+  return {
+    status: failureStatus(work),
+    message,
+    error: { code: 'runner-failed', message },
+  }
 }
 
 function removeDeferredFields(withInput: JsonObject | null | undefined, deferred: Set<string>): JsonObject | null {

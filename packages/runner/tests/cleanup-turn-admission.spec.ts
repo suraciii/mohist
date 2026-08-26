@@ -12,9 +12,6 @@ import type { DispatchWorkItem } from '../src/core/types.js'
 import { buildActionHost, type ExecutorCapabilityDeps } from '../src/runtime/executor-capabilities.js'
 import { type AgentSessionRuntimeEventOutbox, type RuntimeEventRecord } from '../src/server/runtime-event-outbox.js'
 import { SkillResolver } from '../src/runtime/skill-resolver.js'
-import { RuntimeTurnRegistry } from '../src/runtime/runtime-turn-registry.js'
-import { workKey } from '../src/runtime/work-result-journal.js'
-import { createTerminalRecoveryReceipt } from '../src/runtime/recovery-receipt.js'
 import { flushMicrotasks, makeOutbox, workflowFact } from './support/runtime-event-outbox-fixture.js'
 
 function deferred<T>() {
@@ -56,13 +53,21 @@ function opencodeRuntime(order?: string[]): any {
     ready: () => true,
     diagnostic: () => null,
     createSession: vi.fn(),
-    resolveSession: vi.fn(async () => ({ ok: true, value: { activeTurn: false }, diagnostics: [] })),
+    resolveSession: vi.fn(async () => ({
+      ok: true,
+      value: { activeTurn: false },
+      diagnostics: [],
+    })),
     runTurn: vi.fn(async () => {
       order?.push('run')
       return {
         ok: true as const,
         value: {
-          facts: { runtimeSessionId: 'runtime-1', workDir: '/workspace', finalAssistantText: 'done' },
+          facts: {
+            runtimeSessionId: 'runtime-1',
+            workDir: '/workspace',
+            finalAssistantText: 'done',
+          },
           diagnostics: [],
         },
         diagnostics: [],
@@ -76,7 +81,6 @@ function opencodeDeps(
   runtime: unknown,
   eventOutbox: AgentSessionRuntimeEventOutbox,
   budgetMs = 60_000,
-  runtimeTurnRegistry?: RuntimeTurnRegistry,
 ): ExecutorCapabilityDeps {
   return {
     connection: connection as never,
@@ -88,8 +92,6 @@ function opencodeDeps(
       let n = 0
       return () => `input-${++n}`
     })(),
-    bindingRecoveryCoordinator: null,
-    runtimeTurnRegistry,
     cleanupTerminalFactDeliveryBudgetMs: budgetMs,
     workflowSessionSettleBudgetMs: 25,
   }
@@ -102,10 +104,9 @@ function admissionHost(
   item = work(),
   runtime = opencodeRuntime(),
   budgetMs = 60_000,
-  runtimeTurnRegistry?: RuntimeTurnRegistry,
 ) {
   return buildActionHost(
-    opencodeDeps(openConnection(open), runtime, eventOutbox, budgetMs, runtimeTurnRegistry),
+    opencodeDeps(openConnection(open), runtime, eventOutbox, budgetMs),
     item,
     '/workspace',
     new AbortController().signal,
@@ -125,7 +126,11 @@ function piRuntime(order?: string[]): any {
       return {
         ok: true as const,
         value: {
-          facts: { finalAssistantText: 'done', runtimeSessionId: 'pi-runtime-1', workDir: '/workspace' },
+          facts: {
+            finalAssistantText: 'done',
+            runtimeSessionId: 'pi-runtime-1',
+            workDir: '/workspace',
+          },
         },
         diagnostics: [],
       }
@@ -140,7 +145,6 @@ function runPi(options: {
   runtime?: ReturnType<typeof piRuntime>
   budgetMs?: number
   sessionName?: string
-  runtimeTurnRegistry?: RuntimeTurnRegistry
 }) {
   return piAction({
     workflowRunId: 'workflow-1',
@@ -158,7 +162,6 @@ function runPi(options: {
       let n = 0
       return () => `record-${++n}`
     })(),
-    runtimeTurnRegistry: options.runtimeTurnRegistry,
     runnerId: 'runner-1',
     cleanupAttempt: options.cleanupAttempt,
     cleanupTerminalFactDeliveryBudgetMs: options.budgetMs ?? 60_000,
@@ -169,7 +172,12 @@ function runPi(options: {
 
 function originalTerminalRecord(): RuntimeEventRecord {
   return workflowFact('original-terminal', {
-    target: { kind: 'workflow', projectId: 'project-1', workflowRunId: 'workflow-1', sessionName: 'work-1' },
+    target: {
+      kind: 'workflow',
+      projectId: 'project-1',
+      workflowRunId: 'workflow-1',
+      sessionName: 'work-1',
+    },
     work: {
       workId: 'work-1',
       taskRunId: 'task-1',
@@ -189,7 +197,12 @@ function cleanupBoundary(operationId: string, runtime: 'opencode' | 'pi'): Runti
   return {
     id: operationId,
     producerFamily: 'workflow-cleanup',
-    target: { kind: 'workflow', projectId: 'project-1', workflowRunId: 'workflow-1', sessionName: 'work-1' },
+    target: {
+      kind: 'workflow',
+      projectId: 'project-1',
+      workflowRunId: 'workflow-1',
+      sessionName: 'work-1',
+    },
     runtime,
     runtimeSessionId: runtime === 'pi' ? 'pi-runtime-1' : 'runtime-1',
     work: {
@@ -226,7 +239,11 @@ function cleanupTerminalFollowup(operationId: string, runtime: 'opencode' | 'pi'
     work: null,
     event: {
       type: 'session.activity',
-      payload: { activity: 'idle', cleanupOperationId: operationId, turnId: workflowCleanupTurnId(operationId) },
+      payload: {
+        activity: 'idle',
+        cleanupOperationId: operationId,
+        turnId: workflowCleanupTurnId(operationId),
+      },
     },
     acknowledgementPolicy: 'matching-receipt',
   }
@@ -297,59 +314,6 @@ afterEach(() => {
 })
 
 describe('cleanup turn admission', () => {
-  it('preserves the original work binding and terminal receipt identity across OpenCode and Pi cleanup turns', async () => {
-    const registry = new RuntimeTurnRegistry()
-    const original = {
-      agentSessionId: 'agent-session-1',
-      agentTurnId: 'original-turn',
-      runtime: 'opencode' as const,
-      runtimeSessionId: 'runtime-1',
-      workDir: '/workspace',
-    }
-    const originalWork = work({ projectId: null })
-    const key = workKey(originalWork)
-    registry.register(key, original)
-
-    const openCodeResult = await admissionHost(
-      makeOutbox({}).outbox,
-      vi.fn(),
-      1,
-      originalWork,
-      opencodeRuntime(),
-      60_000,
-      registry,
-    ).agent!.turn({ prompt: 'cleanup', session: 'work-1' })
-    expect(openCodeResult.error).toBeUndefined()
-    expect(registry.get(key)).toEqual(original)
-
-    const piOutbox = productionOutbox(async (records) => records.map((record) => [receiptFor(record)]))
-    await piOutbox.load()
-    const piResult = await runPi({
-      outbox: piOutbox,
-      open: vi.fn(async () => ({
-        sessionId: 'agent-session-1',
-        runtimeSessionId: 'pi-runtime-1',
-        runtime: 'pi',
-        workDir: '/workspace',
-      })),
-      cleanupAttempt: 1,
-      runtime: piRuntime(),
-      runtimeTurnRegistry: registry,
-    })
-    expect(piResult.error).toBeUndefined()
-    expect(registry.get(key)).toEqual(original)
-
-    const receipt = createTerminalRecoveryReceipt(
-      originalWork,
-      registry.get(key)!,
-      'runner-1',
-      { status: 'completed', output: { ok: true } },
-      'receipt-1',
-    )
-    expect(receipt?.agentTurnId).toBe('original-turn')
-    await piOutbox.stop()
-  })
-
   it('holds OpenCode attempt 1 on the production outbox before open and cleanup submission', async () => {
     const gate = deferred<void>()
     const started = deferred<void>()
@@ -546,7 +510,9 @@ describe('cleanup turn admission', () => {
     await vi.advanceTimersByTimeAsync(25)
     const result = await resultPromise
 
-    expect(result).toMatchObject({ error: { code: 'session-delivery-wait-timeout' } })
+    expect(result).toMatchObject({
+      error: { code: 'session-delivery-wait-timeout' },
+    })
     expect(result.error?.message).toContain('project-1/workflow-1/work-1')
     expect(result.error?.message).toContain('work item work-1')
     expect(result.error?.message).toContain('25ms')
@@ -564,11 +530,18 @@ describe('cleanup turn admission', () => {
     await flushMicrotasks()
     const open = vi.fn()
 
-    const resultPromise = runPi({ outbox, open, cleanupAttempt: 1, budgetMs: 31 })
+    const resultPromise = runPi({
+      outbox,
+      open,
+      cleanupAttempt: 1,
+      budgetMs: 31,
+    })
     await vi.advanceTimersByTimeAsync(31)
     const result = await resultPromise
 
-    expect(result).toMatchObject({ error: { code: 'session-delivery-wait-timeout' } })
+    expect(result).toMatchObject({
+      error: { code: 'session-delivery-wait-timeout' },
+    })
     expect(result.error?.message).toContain('project-1/workflow-1/work-1')
     expect(result.error?.message).toContain('work item work-1')
     expect(result.error?.message).toContain('31ms')
@@ -604,7 +577,12 @@ describe('cleanup turn admission', () => {
       expect(action!.manifest.errors.map((error) => error.code)).toContain('session-delivery-wait-timeout')
       expect(
         normalizeActionResult(
-          { error: { code: 'session-delivery-wait-timeout', message: 'timed out' } },
+          {
+            error: {
+              code: 'session-delivery-wait-timeout',
+              message: 'timed out',
+            },
+          },
           action!.manifest,
           capabilitySet(action!.manifest),
         ),

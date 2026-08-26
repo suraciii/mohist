@@ -625,7 +625,6 @@ describe('AgentJobExecutor parses the dispatch payload', () => {
       const executor = new AgentJobExecutor(
         connection.connection,
         makeAccessors(runtime.runtime),
-        null,
         '/virtual/runner',
       )
 

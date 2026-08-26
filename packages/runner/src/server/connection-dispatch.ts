@@ -25,7 +25,6 @@ export function parseDispatchWorkItem(dispatch: WorkDispatchResponse): DispatchW
     recoveryGeneration: dispatch.recoveryGeneration ?? undefined,
     agentDefinition: dispatch.agentDefinition ?? undefined,
     agentSessionStartup: dispatch.agentSessionStartup ?? undefined,
-    agentRecovery: dispatch.agentRecovery ?? undefined,
   }
   if (Object.prototype.hasOwnProperty.call(dispatch, 'parentIssueContext'))
     work.parentIssueContext = dispatch.parentIssueContext

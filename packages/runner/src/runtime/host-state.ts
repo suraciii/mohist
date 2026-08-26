@@ -1,5 +1,4 @@
 import type { DispatchWorkItem, WorkItemResult } from '../core/types.js'
-import type { RuntimeRecoveryReceipt } from './recovery-receipt.js'
 
 /**
  * Shutdown bookkeeping carried on every in-flight entry while the
@@ -26,20 +25,15 @@ export interface InFlightEntry {
   /** The execution promise; resolves when the work settles (success or failure). */
   done: Promise<void>
   readonly work: DispatchWorkItem
-  /** A settled result held only in memory must not turn the loop into a busy poll. */
-  awaitingResultPersistence: boolean
   readonly controller: AbortController
   shutdown?: ShutdownWorkState
   /** The Server deployment epoch invalidated this Manager execution. */
   managerInvalidated?: boolean
-  terminalPersisted?: boolean
 }
 
 export interface AwaitingAckEntry {
   /** The result to (re-)report until the owner acks (Accepted or Stale). */
   result: WorkItemResult
-  /** A receipt-shaped terminal identity when the bound Agent turn is known. */
-  receipt?: RuntimeRecoveryReceipt
   /** Monotonic attempt count for diagnostics. */
   attempts: number
   /** Earliest wall-clock time for the next bounded report attempt. */

@@ -96,7 +96,6 @@ describe("AgentJobExecutor resolves a named workspace binding", () => {
     const executor = new AgentJobExecutor(
       connection.connection,
       makeAccessors(runtime.runtime),
-      null,
       "/virtual/runner",
       undefined,
       manager,
@@ -151,7 +150,6 @@ describe("AgentJobExecutor resolves a named workspace binding", () => {
     const executor = new AgentJobExecutor(
       connection.connection,
       makeAccessors(runtime.runtime),
-      null,
       "/virtual/runner",
       undefined,
       { materialize } as never,
@@ -177,7 +175,6 @@ describe("AgentJobExecutor resolves a named workspace binding", () => {
     const executor = new AgentJobExecutor(
       connection.connection,
       makeAccessors(runtime.runtime),
-      null,
       "/virtual/runner",
       undefined,
       { materialize } as never,

@@ -20,12 +20,9 @@ import { composeOpencodePrompt, DEFAULT_TURN_DEADLINE_MS } from '../actions/open
 import { composePiPrompt, piAction } from '../actions/pi.js'
 import { WorkflowAgentSessionReporter } from '../actions/workflow-agent-session-reporter.js'
 import { hasUnconfirmedCleanup, parseModelIdentifier } from './opencode/index.js'
-import { resolveOrRecoverBinding, type BindingRecoveryCoordinator } from './binding-recovery.js'
 import { resolveIssueFields, type IssueFields } from '../actions/issue-fields.js'
 import type { SkillResolver } from './skill-resolver.js'
 import { buildExecutionEnvelope } from './execution-envelope.js'
-import type { RuntimeTurnRegistry } from './runtime-turn-registry.js'
-import { workKey } from './work-result-journal.js'
 import {
   CLEANUP_TERMINAL_FACT_DELIVERY_TIMEOUT_CODE,
   cleanupDeliveryWaitFailureMessage,
@@ -41,8 +38,6 @@ export interface ExecutorCapabilityDeps {
   readonly openCodeRuntime: OpenCodeRuntime | null
   readonly agentSessionRuntimeEventOutbox: AgentSessionRuntimeEventOutbox | null
   readonly runtimeEventRecordId: () => string
-  readonly bindingRecoveryCoordinator: BindingRecoveryCoordinator | null
-  readonly runtimeTurnRegistry?: RuntimeTurnRegistry | null
   readonly cleanupTerminalFactDeliveryBudgetMs?: number
   readonly workflowSessionSettleBudgetMs?: number
 }
@@ -72,12 +67,14 @@ export function buildActionHost(
     piRuntime: deps.piRuntime,
     skillResolver: deps.skillResolver,
     agentDefinition: work.agentDefinition,
-    runtimeTurnRegistry: deps.runtimeTurnRegistry,
-    runtimeTurnKey: workKey(work),
     exec: async (command, args) => {
       const { runCommand } = await import('../system/process.js')
       const result = await runCommand(command, args?.map(String) ?? [], workDir, signal, undefined, undefined)
-      return { exitCode: result.exitCode, stdout: result.stdout, stderr: result.stderr }
+      return {
+        exitCode: result.exitCode,
+        stdout: result.stdout,
+        stderr: result.stderr,
+      }
     },
   }
 
@@ -258,7 +255,12 @@ function buildAgentTurnCapability(
         work.projectId ?? null,
         work.workflowRunId,
         sessionName,
-        { workId: work.workId, taskRunId: work.taskRunId ?? '', workType: work.workType, stage: work.stage ?? null },
+        {
+          workId: work.workId,
+          taskRunId: work.taskRunId ?? '',
+          workType: work.workType,
+          stage: work.stage ?? null,
+        },
         binding.runnerId,
         binding.agentSessionId,
         binding.runtimeSessionId,
@@ -289,12 +291,19 @@ function buildAgentTurnCapability(
         const modelResult = modelName ? parseModelIdentifier(modelName) : null
         const model =
           modelResult?.kind === 'ok'
-            ? { providerID: modelResult.value.providerID, modelID: modelResult.value.modelID }
+            ? {
+                providerID: modelResult.value.providerID,
+                modelID: modelResult.value.modelID,
+              }
             : null
         let created: Awaited<ReturnType<OpenCodeRuntime['createSession']>>
         try {
           created = await runtime.createSession({
-            target: { runtime: 'opencode', runtimeSessionId: null, workDir: binding.workDir },
+            target: {
+              runtime: 'opencode',
+              runtimeSessionId: null,
+              workDir: binding.workDir,
+            },
             model,
           })
         } catch (error) {
@@ -356,7 +365,12 @@ function buildAgentTurnCapability(
           work.projectId ?? null,
           work.workflowRunId,
           sessionName,
-          { workId: work.workId, taskRunId: work.taskRunId ?? '', workType: work.workType, stage: work.stage ?? null },
+          {
+            workId: work.workId,
+            taskRunId: work.taskRunId ?? '',
+            workType: work.workType,
+            stage: work.stage ?? null,
+          },
           binding.runnerId,
           binding.agentSessionId,
           binding.runtimeSessionId,
@@ -370,12 +384,19 @@ function buildAgentTurnCapability(
         const modelResult = modelName ? parseModelIdentifier(modelName) : null
         const model =
           modelResult?.kind === 'ok'
-            ? { providerID: modelResult.value.providerID, modelID: modelResult.value.modelID }
+            ? {
+                providerID: modelResult.value.providerID,
+                modelID: modelResult.value.modelID,
+              }
             : null
         let created: Awaited<ReturnType<OpenCodeRuntime['createSession']>>
         try {
           created = await runtime.createSession({
-            target: { runtime: 'opencode', runtimeSessionId: null, workDir: binding.workDir },
+            target: {
+              runtime: 'opencode',
+              runtimeSessionId: null,
+              workDir: binding.workDir,
+            },
             model,
           })
         } catch (error) {
@@ -421,7 +442,12 @@ function buildAgentTurnCapability(
           work.projectId ?? null,
           work.workflowRunId,
           sessionName,
-          { workId: work.workId, taskRunId: work.taskRunId ?? '', workType: work.workType, stage: work.stage ?? null },
+          {
+            workId: work.workId,
+            taskRunId: work.taskRunId ?? '',
+            workType: work.workType,
+            stage: work.stage ?? null,
+          },
           binding.runnerId,
           binding.agentSessionId,
           binding.runtimeSessionId,
@@ -433,73 +459,6 @@ function buildAgentTurnCapability(
 
       const deadlineMs = request.deadlineMs ?? DEFAULT_TURN_DEADLINE_MS
       const modelOptions = modelName ? parseModelIdentifier(modelName) : null
-      if (
-        !freshRuntimeSessionRequired &&
-        !freshBindingCreated &&
-        binding.runtimeSessionId &&
-        self.connection &&
-        work.projectId
-      ) {
-        const expected = binding
-        let recovery: Awaited<ReturnType<typeof resolveOrRecoverBinding>>
-        try {
-          recovery = await resolveOrRecoverBinding({
-            runnerId: self.connection.runnerId,
-            expected,
-            runtime: { kind: 'opencode', runtime },
-            probe: async (candidate) => {
-              const result = await runtime.resolveSession({
-                target: {
-                  runtime: 'opencode',
-                  runtimeSessionId: candidate.runtimeSessionId,
-                  workDir: candidate.workDir,
-                },
-              })
-              if (result.ok) return { ok: true, activeTurn: result.value.activeTurn }
-              return { ok: false, kind: result.error.kind, message: result.error.message }
-            },
-            replace: async (current, replacement) => {
-              await self.connection!.recoverMissingWorkflowAgentSession(
-                work.projectId!,
-                work.workflowRunId,
-                sessionName,
-                {
-                  expectedRunnerId: current.runnerId,
-                  expectedRuntime: current.runtime,
-                  expectedRuntimeSessionId: current.runtimeSessionId,
-                  replacementRuntimeSessionId: replacement.runtimeSessionId,
-                },
-                signal,
-              )
-            },
-            model:
-              modelOptions?.kind === 'ok'
-                ? { providerID: modelOptions.value.providerID, modelID: modelOptions.value.modelID }
-                : null,
-            rejectActiveTurn: true,
-            recoveryKey: expected.runtimeSessionId!,
-            coordinator: self.bindingRecoveryCoordinator ?? undefined,
-          })
-        } catch (error) {
-          return await workflowActionFailure(
-            reporter,
-            binding.runtimeSessionId,
-            'session-binding-failed',
-            `Workflow AgentSession binding recovery failed: ${errorMessage(error)}`,
-          )
-        }
-        if (!recovery.ok) {
-          if (recovery.kind === 'active-turn') {
-            return runtimeActionFailure('session-binding-failed', recovery.message)
-          }
-          return await workflowActionFailure(reporter, binding.runtimeSessionId, recovery.kind, recovery.message)
-        }
-        binding = {
-          ...recovery.binding,
-          agentSessionId: binding.agentSessionId,
-          runtime: 'opencode',
-        }
-      }
 
       const selectedBinding = binding
       const runtimeRequest = {
@@ -513,7 +472,10 @@ function buildAgentTurnCapability(
         options: {
           model:
             modelOptions?.kind === 'ok'
-              ? { providerID: modelOptions.value.providerID, modelID: modelOptions.value.modelID }
+              ? {
+                  providerID: modelOptions.value.providerID,
+                  modelID: modelOptions.value.modelID,
+                }
               : null,
           variant: variant ?? null,
           reasoningEffort: reasoningEffort ?? null,
@@ -526,7 +488,12 @@ function buildAgentTurnCapability(
         work.projectId ?? null,
         work.workflowRunId,
         sessionName,
-        { workId: work.workId, taskRunId: work.taskRunId ?? '', workType: work.workType, stage: work.stage ?? null },
+        {
+          workId: work.workId,
+          taskRunId: work.taskRunId ?? '',
+          workType: work.workType,
+          stage: work.stage ?? null,
+        },
         selectedBinding.runnerId,
         selectedBinding.agentSessionId,
         selectedBinding.runtimeSessionId,
@@ -546,19 +513,6 @@ function buildAgentTurnCapability(
             `failed to durably enqueue the Workflow AgentSession input: ${errorMessage(error)}`,
           )
         }
-      }
-
-      // Worktree cleanup runs the same Agent capability again with a
-      // synthetic Session turn. Keep the work-level binding on the original
-      // execution turn so terminal recovery remains attributable to it.
-      if (cleanupAttempt === undefined) {
-        self.runtimeTurnRegistry?.register(workKey(work), {
-          agentSessionId: selectedBinding.agentSessionId,
-          agentTurnId: reporter?.getAgentTurnId() ?? work.initialTurnId ?? null,
-          runtime: 'opencode',
-          runtimeSessionId: selectedBinding.runtimeSessionId,
-          workDir: selectedBinding.workDir,
-        })
       }
 
       const observer = createWorkflowObserver(reporter)
@@ -592,9 +546,23 @@ function buildAgentTurnCapability(
         model: request.options?.model ?? null,
         variant: request.options?.variant ?? null,
         text: facts.finalAssistantText,
-        diagnostics: result.value.diagnostics.map((d) => ({ code: d.code, message: d.message })),
+        diagnostics: result.value.diagnostics.map((d) => ({
+          code: d.code,
+          message: d.message,
+        })),
       }
-      return actionSucceed(output, { exitCode: 0, turnFact: { finalAssistantText: facts.finalAssistantText } })
+      return actionSucceed(output, {
+        exitCode: 0,
+        turnFact: {
+          finalAssistantText: facts.finalAssistantText,
+          agentBinding: {
+            agentSessionId: selectedBinding.agentSessionId,
+            agentTurnId: reporter?.getAgentTurnId() ?? work.initialTurnId ?? null,
+            runtime: 'opencode',
+            runtimeSessionId: facts.runtimeSessionId,
+          },
+        },
+      })
     },
   }
 }
@@ -627,12 +595,9 @@ async function runPiAgentTurn(
     runtimeEventOutbox: deps.agentSessionRuntimeEventOutbox,
     runtimeEventRecordId: deps.runtimeEventRecordId,
     runnerId: deps.connection.runnerId,
-    runtimeTurnRegistry: deps.runtimeTurnRegistry,
-    runtimeTurnKey: workKey(work),
     cleanupAttempt,
     cleanupTerminalFactDeliveryBudgetMs: deps.cleanupTerminalFactDeliveryBudgetMs,
     with: request.session ? { session: request.session } : undefined,
-    agentRecovery: work.agentRecovery ?? null,
     preparedPrompt: composePiPrompt(request.prompt, work.parentIssueContext),
     preparedOptions: request.options,
   })
@@ -699,7 +664,11 @@ async function waitForWorkflowSessionSettled(
 }
 
 function runtimeActionFailure(code: string, message: string, outcome?: 'unknown'): ActionResult {
-  return actionFail(code, message, { exitCode: 1, outcome, turnFact: { finalAssistantText: null } })
+  return actionFail(code, message, {
+    exitCode: 1,
+    outcome,
+    turnFact: { finalAssistantText: null },
+  })
 }
 
 /**
@@ -737,7 +706,12 @@ function createWorkflowReporter(
   projectId: string | null,
   workflowRunId: string,
   sessionName: string,
-  workMetadata: { workId: string; taskRunId: string; workType: string; stage: string | null },
+  workMetadata: {
+    workId: string
+    taskRunId: string
+    workType: string
+    stage: string | null
+  },
   runnerId: string,
   agentSessionId: string,
   runtimeSessionId: string | null,
@@ -779,7 +753,11 @@ function enqueueTerminalClose(
   if (reporter.inputWasRejected()) return
   if (runtimeSessionId === null) return
   if (result.ok) {
-    reporter.registerClose({ status: 'completed', exitCode: 0, runtimeSessionId })
+    reporter.registerClose({
+      status: 'completed',
+      exitCode: 0,
+      runtimeSessionId,
+    })
     return
   }
   reporter.registerClose({
