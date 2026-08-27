@@ -104,6 +104,7 @@ describe('RunnerControlDispatcher', () => {
           command: 'reset',
           expectedRuntimeSessionId: 'runtime-1',
           operationId: 'op-3',
+          processGeneration: 'test-generation',
           projectId: null,
         },
         'sessionCommand',
@@ -190,6 +191,7 @@ describe('RunnerControlDispatcher', () => {
         runnerId: 'runner-1',
         command: 'reset',
         operationId: 'op-3',
+        processGeneration: 'test-generation',
       },
     })
     h.receive({
@@ -203,6 +205,7 @@ describe('RunnerControlDispatcher', () => {
         command: 'reset',
         expectedRuntimeSessionId: null,
         operationId: 'op-4',
+        processGeneration: 'test-generation',
       },
     })
     await settle()
@@ -222,6 +225,7 @@ describe('RunnerControlDispatcher', () => {
         workDir: null,
         expectedRuntimeSessionId: null,
         projectId: null,
+        processGeneration: 'test-generation',
       }),
     )
     expect(h.handlers.sessionCommand).toHaveBeenCalledTimes(2)

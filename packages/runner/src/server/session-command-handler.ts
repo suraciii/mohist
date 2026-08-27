@@ -1,5 +1,3 @@
-import type { SessionCommandJournalStore } from '../runtime/session-command-journal.js'
-
 export type SessionCommand = 'compact' | 'reset'
 export type SessionCommandError = 'conflict' | 'missing' | 'notStarted' | 'unavailable'
 
@@ -13,6 +11,7 @@ export interface SessionCommandRequest {
   expectedRuntimeSessionId?: string | null
   operationId: string
   projectId?: string | null
+  processGeneration: string
 }
 
 export interface SessionCommandResult {
@@ -25,19 +24,8 @@ export type SessionCommandHandler = (
   request: SessionCommandRequest,
 ) => Promise<SessionCommandResult> | SessionCommandResult
 
-export type SessionCommandReconciliation =
-  | { state: 'completed'; result: SessionCommandResult }
-  | { state: 'not-started' }
-  | { state: 'indeterminate' }
-
-export type SessionCommandReconciler = (
-  request: SessionCommandRequest,
-) => Promise<SessionCommandReconciliation> | SessionCommandReconciliation
-
 export interface SessionCommandHandlerDeps {
   handler?: SessionCommandHandler | null
-  journal?: SessionCommandJournalStore | null
-  reconcileStarted?: SessionCommandReconciler | null
 }
 
 export function createSessionCommandHandler(
@@ -46,10 +34,7 @@ export function createSessionCommandHandler(
   const inFlight = new Map<string, { request: SessionCommandRequest; operation: Promise<SessionCommandResult> }>()
   return async (request: SessionCommandRequest | null | undefined) => {
     const handler = deps.handler
-    const journal = deps.journal
-    if (!isValidSessionCommandRequest(request) || !handler || !journal) {
-      return { ok: false, error: 'unavailable' } satisfies SessionCommandResult
-    }
+    if (!isValidSessionCommandRequest(request) || !handler) return unavailable()
 
     const key = JSON.stringify([request.sessionId, request.operationId])
     const existing = inFlight.get(key)
@@ -58,44 +43,16 @@ export function createSessionCommandHandler(
       return await existing.operation
     }
 
-    const operation = handleCommand(request, handler, journal, deps.reconcileStarted)
+    const operation = Promise.resolve(handler(request)).then((result) => validateResult(request, result))
     inFlight.set(key, { request, operation })
     try {
-      const result = await operation
-      return result
-    } catch (error) {
-      return { ok: false, error: 'unavailable' } satisfies SessionCommandResult
+      return await operation
+    } catch {
+      return unavailable()
     } finally {
       if (inFlight.get(key)?.operation === operation) inFlight.delete(key)
     }
   }
-}
-
-async function handleCommand(
-  request: SessionCommandRequest,
-  handler: SessionCommandHandler,
-  journal: SessionCommandJournalStore,
-  reconcileStarted?: SessionCommandReconciler | null,
-): Promise<SessionCommandResult> {
-  const existing = await journal.get(request.sessionId, request.operationId)
-  if (existing) {
-    if (!sameRequest(existing.request, request)) return unavailable()
-    if (existing.state === 'completed') return validateResult(request, existing.result!)
-
-    const reconciled = reconcileStarted ? await reconcileStarted(request) : ({ state: 'indeterminate' } as const)
-    if (reconciled.state === 'indeterminate') return unavailable()
-    if (reconciled.state === 'completed') {
-      const result = validateResult(request, reconciled.result)
-      if (result.error === 'unavailable') return result
-      await journal.complete(request, result)
-      return result
-    }
-  }
-
-  await journal.start(request)
-  const result = validateResult(request, await handler(request))
-  if (result.error !== 'unavailable') await journal.complete(request, result)
-  return result
 }
 
 export function validateResult(request: SessionCommandRequest, result: SessionCommandResult): SessionCommandResult {
@@ -144,6 +101,8 @@ export function isValidSessionCommandRequest(value: unknown): value is SessionCo
       typeof request.expectedRuntimeSessionId === 'string') &&
     typeof request.operationId === 'string' &&
     request.operationId.length > 0 &&
+    typeof request.processGeneration === 'string' &&
+    request.processGeneration.length > 0 &&
     (request.projectId === undefined || request.projectId === null || typeof request.projectId === 'string') &&
     isValidCommandBinding(request)
   )
@@ -175,7 +134,8 @@ function sameRequest(left: SessionCommandRequest, right: SessionCommandRequest):
     left.command === right.command &&
     left.expectedRuntimeSessionId === right.expectedRuntimeSessionId &&
     left.operationId === right.operationId &&
-    left.projectId === right.projectId
+    left.projectId === right.projectId &&
+    left.processGeneration === right.processGeneration
   )
 }
 

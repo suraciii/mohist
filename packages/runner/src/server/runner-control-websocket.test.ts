@@ -94,7 +94,6 @@ function fixture(
   const client = new RunnerControlWebSocketClient(
     'https://server.test/base/',
     'runner / one',
-    '/root',
     'git-hash',
     {
       credential: 'secret',
@@ -103,6 +102,7 @@ function fixture(
       random: options.random ?? (() => 0.5),
       onReconnected: options.onReconnected,
       agentSessionRuntimeEventQueue: options.outbox as never,
+      processGeneration: 'process-generation',
     },
     {
       gitHash: 'manifest-hash',
@@ -133,8 +133,10 @@ describe('RunnerControlWebSocketClient', () => {
   afterEach(() => vi.useRealTimers())
 
   it('builds the ws URL and production upgrade options exactly', () => {
-    const url = buildControlUrl('http://server.test/base/', 'runner / one', 'hash', null)
-    expect(url).toBe('ws://server.test/base/api/runner/runner%20%2F%20one/control?buildGitHash=hash')
+    const url = buildControlUrl('http://server.test/base/', 'runner / one', 'process-generation', 'hash', null)
+    expect(url).toBe(
+      'ws://server.test/base/api/runner/runner%20%2F%20one/control?processGeneration=process-generation&buildGitHash=hash',
+    )
     expect(new URL(url).searchParams.has('runnerId')).toBe(false)
     expect(runnerControlSocketOptions('id', 'token')).toMatchObject({
       headers: { 'X-Runner-Connection-Id': 'id', Authorization: 'Bearer token' },

@@ -6,7 +6,6 @@ import {
   type DispatchWorkItem,
 } from '../core/types.js'
 import { errorMessage } from '../core/errors.js'
-import { delayWithSignal } from '../actions/github-pr-checks-wait.js'
 import { renderWithSkippedFields } from '../core/template.js'
 import type { ServerConnection } from '../server/connection.js'
 import type { AgentSessionRuntimeEventQueue } from '../server/runtime-event-queue.js'
@@ -23,7 +22,6 @@ import { hasUnconfirmedCleanup, parseModelIdentifier } from './opencode/index.js
 import { resolveIssueFields, type IssueFields } from '../actions/issue-fields.js'
 import type { SkillResolver } from './skill-resolver.js'
 import { buildExecutionEnvelope } from './execution-envelope.js'
-import { cleanupPredecessorTarget } from './cleanup-turn-admission.js'
 
 export interface ExecutorCapabilityDeps {
   readonly connection: ServerConnection
@@ -32,7 +30,6 @@ export interface ExecutorCapabilityDeps {
   readonly openCodeRuntime: OpenCodeRuntime | null
   readonly agentSessionRuntimeEventQueue: AgentSessionRuntimeEventQueue | null
   readonly runtimeEventRecordId: () => string
-  readonly workflowSessionSettleBudgetMs?: number
 }
 
 export function renderWithDeferred(
@@ -114,15 +111,7 @@ function buildAgentTurnCapability(
 
       const runtime = self.openCodeRuntime
       const sessionName = request.session ?? work.workId
-      const cleanupAdmission =
-        cleanupPredecessorTarget({
-          projectId: work.projectId,
-          workflowRunId: work.workflowRunId,
-          sessionName,
-          workId: work.workId,
-          taskRunId: work.taskRunId,
-          cleanupAttempt,
-        }) !== null
+      const cleanupAdmission = typeof cleanupAttempt === 'number' && cleanupAttempt > 0
       let binding: {
         agentSessionId: string
         runtimeSessionId: string | null
@@ -180,19 +169,11 @@ function buildAgentTurnCapability(
               'Workflow AgentSession is bound to a different workspace; rerun the stage with a new task attempt before retrying',
             )
           }
-          if (opened.runtimeSessionId && isUnsettledWorkflowSessionStatus(opened.status) && !cleanupAdmission) {
-            // A same-session predecessor's closeout turn can still be
-            // streaming when this task is dispatched; that state is
-            // transient, so poll the session until it settles before
-            // failing closed.
-            const settled = await waitForWorkflowSessionSettled(openSession, signal, deps.workflowSessionSettleBudgetMs)
-            if (!settled) {
-              return runtimeActionFailure(
-                'session-binding-failed',
-                `Workflow AgentSession is ${opened.status}; the previous Runtime Session has not reached a terminal state, so retry is fail-closed`,
-              )
-            }
-            opened = await openSession()
+          if (!cleanupAdmission && opened.runtimeSessionId && isUnsettledWorkflowSessionStatus(opened.status)) {
+            return runtimeActionFailure(
+              'session-binding-failed',
+              `Workflow AgentSession is ${opened.status}; ordinary turns fail closed when the Server has not recorded predecessor settlement`,
+            )
           }
           binding = {
             agentSessionId: opened.sessionId,
@@ -607,41 +588,8 @@ function buildCheckpointCapability(work: DispatchWorkItem) {
   }
 }
 
-function isUnsettledWorkflowSessionStatus(status: string | null | undefined): status is 'active' | 'unknown' {
+function isUnsettledWorkflowSessionStatus(status: string | null | undefined): boolean {
   return status === 'active' || status === 'unknown'
-}
-
-/** Poll budget for a same-session predecessor's closeout to settle. */
-const WORKFLOW_SESSION_SETTLE_BUDGET_MS = 60_000
-const WORKFLOW_SESSION_SETTLE_INTERVAL_MS = 1_000
-
-/**
- * A dispatched follow-on task can arrive while the same session's
- * previous closeout turn is still streaming, so the open status reads
- * active for a few seconds. Poll the open projection within a bounded
- * budget; only an unsettled session after the budget fails closed.
- */
-async function waitForWorkflowSessionSettled(
-  openSession: () => Promise<{ status?: string | null }>,
-  signal?: AbortSignal,
-  budgetMs = WORKFLOW_SESSION_SETTLE_BUDGET_MS,
-): Promise<boolean> {
-  const budget = budgetMs ?? WORKFLOW_SESSION_SETTLE_BUDGET_MS
-  const deadline = Date.now() + budget
-  while (Date.now() < deadline) {
-    if (signal?.aborted) return false
-    await delayWithSignal(
-      Math.min(WORKFLOW_SESSION_SETTLE_INTERVAL_MS, deadline - Date.now()),
-      signal ?? new AbortController().signal,
-    )
-    try {
-      const reopened = await openSession()
-      if (!isUnsettledWorkflowSessionStatus(reopened.status)) return true
-    } catch {
-      return false
-    }
-  }
-  return false
 }
 
 function runtimeActionFailure(code: string, message: string, outcome?: 'unknown'): ActionResult {

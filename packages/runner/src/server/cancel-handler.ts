@@ -39,7 +39,6 @@ import {
   type CommandRuntimeAccessors,
 } from './command-runtime.js'
 import type { AgentSessionRuntimeEventQueue, RuntimeEventRecord } from './runtime-event-queue.js'
-import type { CancelOperationJournalStore } from '../runtime/cancel-operation-journal.js'
 import type { ManagerExecutionRegistry, ManagerExecutionEntry } from '../runtime/manager-execution-registry.js'
 import { runnerLogger } from '../system/logger.js'
 
@@ -52,7 +51,6 @@ export interface CancelHandlerDeps {
   agentSessionRuntimeEventQueue?: AgentSessionRuntimeEventQueue | null
   managerExecutionRegistry?: ManagerExecutionRegistry | null
   onManagerExecutionFinished?: (executionId: string) => Promise<void> | void
-  cancelOperationJournal?: CancelOperationJournalStore | null
 }
 
 export function createCancelHandler(
@@ -64,55 +62,13 @@ export function createCancelHandler(
     if (!key) return await handleCancel(payload, deps)
     const existing = inFlight.get(key)
     if (existing) return await existing
-    const operation = handleJournaledCancel(payload!, deps)
+    const operation = handleCancel(payload!, deps)
     inFlight.set(key, operation)
     try {
       return await operation
     } finally {
       if (inFlight.get(key) === operation) inFlight.delete(key)
     }
-  }
-}
-
-async function handleJournaledCancel(
-  payload: CancelAgentSessionPayload,
-  deps: CancelHandlerDeps,
-): Promise<CancelAgentSessionReply> {
-  const journal = deps.cancelOperationJournal ?? null
-  const sessionId = payload.sessionId ?? ''
-  const operationId = payload.operationId ?? ''
-  if (!journal || !sessionId || !operationId) return { state: 'unavailable' }
-
-  try {
-    const existing = await journal.get(sessionId, operationId)
-    if (existing) {
-      if (!samePayload(existing.request, payload)) return { state: 'unavailable' }
-      if (existing.state === 'completed') return existing.reply!
-
-      const reconciliation = await reconcileStartedStop(payload, deps)
-      if (reconciliation === 'missing') {
-        const reply = { state: 'ended' } as const
-        await journal.complete(sessionId, payload, reply)
-        return reply
-      }
-      if (reconciliation === 'idle') {
-        const reply = { state: 'idle' } as const
-        await journal.complete(sessionId, payload, reply)
-        return reply
-      }
-      if (reconciliation === 'indeterminate') {
-        return { state: 'unavailable' }
-      }
-    } else {
-      await journal.start(sessionId, payload)
-    }
-    const reply = await handleCancel(payload, deps)
-    if (reply.state === 'stop-requested' || reply.state === 'unavailable') return reply
-    await journal.complete(sessionId, payload, reply)
-    return reply
-  } catch (error) {
-    log.error('cancel operation journal failed', { exception: error, session: 'cancel' })
-    return { state: 'unavailable' }
   }
 }
 
@@ -331,15 +287,6 @@ async function finishManagerExecution(entry: ManagerExecutionEntry, deps: Cancel
 
 function operationKey(payload: CancelAgentSessionPayload | null | undefined): string | null {
   return payload?.sessionId && payload.operationId ? `${payload.sessionId}:${payload.operationId}` : null
-}
-
-function samePayload(left: CancelAgentSessionPayload, right: CancelAgentSessionPayload): boolean {
-  return (
-    left.sessionId === right.sessionId &&
-    left.operationId === right.operationId &&
-    left.turnId === right.turnId &&
-    JSON.stringify(left.target) === JSON.stringify(right.target)
-  )
 }
 
 function sessionTargetToRuntimeTarget(target: SessionTarget): RuntimeEventRecord['target'] {
