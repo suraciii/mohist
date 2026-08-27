@@ -58,7 +58,7 @@ class FakeServerConnection implements Pick<ServerConnection, 'uploadArtifact' | 
       uploadId: `artup_${this.nextUploadId}`,
       workflowRunId: ownerId,
       workId,
-      taskRunId: 'task-run-1',
+      actionAttemptId: 'task-run-1',
       path: upload.path,
       contentType: upload.contentType ?? null,
       contentHash: upload.contentHash ?? null,

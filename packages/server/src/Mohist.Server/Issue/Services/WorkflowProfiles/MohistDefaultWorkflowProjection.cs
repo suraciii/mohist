@@ -84,12 +84,6 @@ public static class MohistDefaultWorkflowProjection
             return WorkflowAttention.ReviewRequired(workflow.WorkflowRunId, $"Awaiting approval for {workflow.CurrentStage ?? "workflow"}");
         if (workflow?.Status == "failed")
             return WorkflowAttention.Blocked(workflow.WorkflowRunId, workflow.Failure?.Message ?? "Workflow failed");
-        if (workflow?.Status == "blocked")
-            return WorkflowAttention.AgentResultUnconfirmed(
-                workflow.WorkflowRunId,
-                workflow.AgentResultAttention?.Message ?? "Agent result unconfirmed",
-                workflow.AgentResultAttention?.ReasonCode,
-                workflow.AgentResultAttention?.DeadlineAt);
         return null;
     }
 

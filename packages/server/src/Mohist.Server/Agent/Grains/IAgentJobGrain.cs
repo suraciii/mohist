@@ -213,7 +213,25 @@ public sealed record PrepareManualLaunchCommand(
     /// Non-secret control-plane origin marker copied from the launch origin.
     /// </summary>
     [property: Id(25)] string? OriginMarker = null,
-    [property: Id(26)] string[]? Skills = null);
+    [property: Id(26)] string[]? Skills = null,
+    [property: Id(27)] WorkflowAgentJobOrigin? WorkflowOrigin = null,
+    [property: Id(28)] long? TimeoutMilliseconds = null);
+
+[GenerateSerializer]
+public sealed record WorkflowAgentJobOrigin(
+    [property: Id(0)] string InvocationId,
+    [property: Id(1)] string CommandId,
+    [property: Id(2)] string WorkflowRunId,
+    [property: Id(3)] string ActionAttemptId,
+    [property: Id(4)] string WorkId,
+    [property: Id(5)] string Stage,
+    [property: Id(6)] string RequestFingerprint,
+    [property: Id(7)] string? ExpectJson = null,
+    [property: Id(8)] string? ArtifactsJson = null,
+    [property: Id(9)] string? SetVarsJson = null,
+    [property: Id(10)] string? RecoveryJson = null,
+    [property: Id(11)] int? RecoveryRemaining = null,
+    [property: Id(12)] string? VariablesJson = null);
 
 [GenerateSerializer]
 public sealed record AgentJobSpawnOrigin(
@@ -236,6 +254,24 @@ public sealed record PendingTerminalDeliveryEvent(
     [property: Id(8)] int? ExitCode,
     [property: Id(9)] DateTimeOffset RecordedAt,
     [property: Id(10)] string? Output = null);
+
+[GenerateSerializer]
+public sealed record PendingWorkflowAgentTerminalEvent(
+    [property: Id(0)] string EventId,
+    [property: Id(1)] WorkflowAgentJobOrigin Origin,
+    [property: Id(2)] AgentJobStatus Status,
+    [property: Id(3)] string? Message,
+    [property: Id(4)] string? Output,
+    [property: Id(5)] string[]? ArtifactUploadIds,
+    [property: Id(6)] string? FailureReason,
+    [property: Id(7)] string? FailureCategory,
+    [property: Id(8)] int? ExitCode,
+    [property: Id(9)] string? ResultFingerprint,
+    [property: Id(10)] string? AgentSessionId,
+    [property: Id(11)] string? InitialInputId,
+    [property: Id(12)] string? InitialTurnId,
+    [property: Id(13)] DateTimeOffset RecordedAt,
+    [property: Id(14)] string? AddTasksJson = null);
 
 [GenerateSerializer]
 public sealed record PendingSubagentTerminalEvent(
@@ -296,7 +332,8 @@ public sealed record AgentJobRuntimeSnapshot(
     /// Read projection computed from the persisted deadline and the grain's
     /// injected clock. The wire status remains <see cref="AgentJobStatus.Unknown"/>.
     /// </summary>
-    [property: Id(13)] bool IsRecovering = false);
+    [property: Id(13)] bool IsRecovering = false,
+    [property: Id(14)] WorkflowAgentJobOrigin? WorkflowOrigin = null);
 
 /// <summary>
 /// Durable payload persisted on the AgentJob grain for a pending
@@ -679,7 +716,9 @@ public sealed record AgentJobInput(
     /// Non-secret control-plane origin marker. It is carried beside the
     /// execution source and Slack context, never in the prompt or Skill.
     /// </summary>
-    [property: Id(27)] string? OriginMarker = null);
+    [property: Id(27)] string? OriginMarker = null,
+    [property: Id(28)] WorkflowAgentJobOrigin? WorkflowOrigin = null,
+    [property: Id(29)] long? TimeoutMilliseconds = null);
 
 [GenerateSerializer]
 public sealed record AgentJobTerminalResult(

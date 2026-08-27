@@ -51,89 +51,6 @@ public sealed class RunnerPollRecoveryStateApiSpecs
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
     }
 
-    [Fact]
-    public async Task BoundUnknownReport_WithholdsSameGenerationDispatchAndFreshWork()
-    {
-        var projectId = $"bound-unknown-{Guid.NewGuid():N}";
-        var workflowRunId = $"bound-unknown-run-{Guid.NewGuid():N}";
-        var freshWorkflowRunId = $"bound-unknown-fresh-{Guid.NewGuid():N}";
-        var runnerId = $"bound-unknown-runner-{Guid.NewGuid():N}";
-        var runner = _fixture.Grains.GetGrain<IRunnerGrain>(runnerId);
-
-        try
-        {
-            await SeedWorkflowAsync(
-                projectId,
-                workflowRunId,
-                new RecoveryDefinition(1, []),
-                uses: "mohist/opencode");
-            await runner.RegisterAsync(new RunnerInfo(runnerId, ["spec/*"], "test-host", projectId));
-            await runner.UpdateAsync(1);
-
-            var first = await PollAsync(runnerId);
-            var workId = Assert.IsType<string>(first.GetProperty("workId").GetString());
-            var taskRunId = Assert.IsType<string>(first.GetProperty("taskRunId").GetString());
-            var workflow = _fixture.Grains.GetGrain<IWorkflowGrain>(workflowRunId);
-            var binding = new AgentExecutionBinding(
-                taskRunId,
-                workId,
-                runnerId,
-                "agent-session-bound-unknown",
-                "agent-turn-bound-unknown",
-                "opencode",
-                "runtime-session-bound-unknown");
-            Assert.Equal(WorkReportVerdict.Accepted, await workflow.BindAgentExecutionAsync(binding));
-
-            var freshWorkflow = _fixture.Grains.GetGrain<IWorkflowGrain>(freshWorkflowRunId);
-            await freshWorkflow.StartAsync(new WorkflowStartInput(Metadata: new(
-                Name: null,
-                CreatedAt: DateTimeOffset.UnixEpoch,
-                ProjectId: projectId,
-                IssueNumber: 2)));
-
-            using var report = await _fixture.Client.PostAsJsonAsync($"/api/runner/{runnerId}/report", new
-            {
-                ownerKind = WorkDispatchOwnerKinds.Workflow,
-                workflowRunId,
-                workId,
-                taskRunId,
-                status = "unknown",
-                message = "The current Runner could not confirm the Agent result.",
-                agentSessionId = binding.AgentSessionId,
-                agentTurnId = binding.AgentTurnId,
-                runtime = binding.Runtime,
-                runtimeSessionId = binding.RuntimeSessionId,
-            });
-            Assert.Equal(HttpStatusCode.OK, report.StatusCode);
-            Assert.Equal(
-                "accepted",
-                (await report.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("verdict").GetString());
-
-            using var nextPoll = await _fixture.Client.PostRunnerPollAsync(
-                runnerId,
-                new RunnerPollRequest(
-                    [],
-                    [],
-                    ProcessGeneration: TestRunnerGenerationExtensions.ProcessGeneration));
-            Assert.Equal(HttpStatusCode.NoContent, nextPoll.StatusCode);
-            Assert.Empty(await nextPoll.ReadDispatchElementsAsync());
-
-            var unresolved = await _fixture.Services
-                .GetRequiredService<WorkflowRunQuerier>()
-                .LoadAsync(workflowRunId);
-            var task = Assert.Single(unresolved!.CurrentStage().Tasks);
-            Assert.Equal(AgentResultSettlementState.Unknown, task.AgentResultSettlement!.State);
-            Assert.Equal("Pending", await freshWorkflow.GetRunStatusAsync());
-
-            var active = Assert.Single((await runner.GetRuntimeStateAsync()).ActiveWorks);
-            Assert.Equal(workflowRunId, active.OwnerId);
-            Assert.Equal(workId, active.WorkId);
-        }
-        finally
-        {
-            await runner.UnregisterAsync();
-        }
-    }
 
     [Fact]
     public async Task ReportAndPoll_ExposeAcceptedContinuationIdentity()
@@ -153,9 +70,9 @@ public sealed class RunnerPollRecoveryStateApiSpecs
 
             var fresh = await PollAsync(runnerId);
             var freshWorkId = fresh.GetProperty("workId").GetString();
-            var freshTaskRunId = fresh.GetProperty("taskRunId").GetString();
+            var freshActionAttemptId = fresh.GetProperty("actionAttemptId").GetString();
             Assert.False(string.IsNullOrWhiteSpace(freshWorkId));
-            Assert.False(string.IsNullOrWhiteSpace(freshTaskRunId));
+            Assert.False(string.IsNullOrWhiteSpace(freshActionAttemptId));
             Assert.True(fresh.TryGetProperty("recoveryRemaining", out var freshState));
             Assert.Equal(JsonValueKind.Null, freshState.ValueKind);
 
@@ -164,7 +81,7 @@ public sealed class RunnerPollRecoveryStateApiSpecs
                 ownerKind = WorkDispatchOwnerKinds.Workflow,
                 workflowRunId,
                 workId = freshWorkId,
-                taskRunId = freshTaskRunId,
+                actionAttemptId = freshActionAttemptId,
                 status = "completed",
                 addTasks = new[]
                 {
@@ -194,7 +111,7 @@ public sealed class RunnerPollRecoveryStateApiSpecs
             var continuation = await PollAsync(runnerId);
             Assert.Equal(workflowRunId, continuation.GetProperty("workflowRunId").GetString());
             Assert.NotEqual(freshWorkId, continuation.GetProperty("workId").GetString());
-            Assert.NotEqual(freshTaskRunId, continuation.GetProperty("taskRunId").GetString());
+            Assert.NotEqual(freshActionAttemptId, continuation.GetProperty("actionAttemptId").GetString());
             Assert.True(continuation.TryGetProperty("recoveryRemaining", out var continuationState));
             Assert.Equal(1, continuationState.GetInt32());
         }
@@ -218,13 +135,13 @@ public sealed class RunnerPollRecoveryStateApiSpecs
             await runner.RegisterAsync(new RunnerInfo(runnerId, ["spec/*"], "test-host", projectId));
             var dispatch = await PollAsync(runnerId);
             var workId = dispatch.GetProperty("workId").GetString()!;
-            var taskRunId = dispatch.GetProperty("taskRunId").GetString()!;
+            var actionAttemptId = dispatch.GetProperty("actionAttemptId").GetString()!;
             var payload = new
             {
                 ownerKind = WorkDispatchOwnerKinds.Workflow,
                 workflowRunId,
                 workId,
-                taskRunId,
+                actionAttemptId,
                 status = "completed",
             };
 
@@ -338,16 +255,16 @@ public sealed class RunnerPollRecoveryStateApiSpecs
 
             var fresh = await PollAsync(runnerId);
             var workId = fresh.GetProperty("workId").GetString();
-            var taskRunId = fresh.GetProperty("taskRunId").GetString();
+            var actionAttemptId = fresh.GetProperty("actionAttemptId").GetString();
             Assert.False(string.IsNullOrWhiteSpace(workId));
-            Assert.False(string.IsNullOrWhiteSpace(taskRunId));
+            Assert.False(string.IsNullOrWhiteSpace(actionAttemptId));
 
             using var firstReport = await _fixture.Client.PostAsJsonAsync($"/api/runner/{runnerId}/report", new
             {
                 ownerKind = WorkDispatchOwnerKinds.Workflow,
                 workflowRunId,
                 workId,
-                taskRunId,
+                actionAttemptId,
                 status = "completed",
             });
             Assert.Equal(HttpStatusCode.OK, firstReport.StatusCode);
@@ -359,7 +276,7 @@ public sealed class RunnerPollRecoveryStateApiSpecs
                 ownerKind = WorkDispatchOwnerKinds.Workflow,
                 workflowRunId,
                 workId,
-                taskRunId,
+                actionAttemptId,
                 status = "failed",
                 message = "conflicting late result",
             });
@@ -446,7 +363,7 @@ public sealed class RunnerPollRecoveryStateApiSpecs
                 ownerKind = WorkDispatchOwnerKinds.Workflow,
                 workflowRunId,
                 workId = fresh.GetProperty("workId").GetString(),
-                taskRunId = fresh.GetProperty("taskRunId").GetString(),
+                actionAttemptId = fresh.GetProperty("actionAttemptId").GetString(),
                 status = "completed",
                 addTasks = new[]
                 {

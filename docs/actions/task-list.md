@@ -40,8 +40,8 @@ only this file is read by the engine.
 - `path` is the required Workspace-relative path to the task list file.
   Absolute paths and traversal outside the Workspace are rejected.
 - `task` is required and supplies defaults for every generated task.
-  `task.uses` is required and is resolved by the Profile before the Action
-  runs.
+  `task.uses` is a required literal Action name; a generated task cannot
+  choose its own execution.
 - `buildPrompt` is internal prompt text sourced from the current Project's
   `build-task` Prompt. It is not exposed in the public Action catalog.
 
@@ -68,9 +68,10 @@ The output field `loaded` is the number of tasks added to this run.
   with:
     path: PLANS/tasks.json
     task:
-      uses: ${{ profile.agentAction }}
+      uses: mohist/agent
       with:
-        options: ${{ vars.agent }}
+        name: mohist/builder
+        session: build
 ```
 
 Every generated task inherits the materialized `task.uses` and receives a

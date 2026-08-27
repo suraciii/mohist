@@ -1228,7 +1228,7 @@ public class IssueMetricsQuerier : IScopedService
         return (isFirstTimeRight, stageRework);
     }
 
-    private static bool IsRecoveryTask(TaskRun task) =>
+    private static bool IsRecoveryTask(WorkflowActionAttempt task) =>
         task.DefinitionId.StartsWith("recover:", StringComparison.Ordinal)
         || task.Id.StartsWith("recover:", StringComparison.Ordinal);
 

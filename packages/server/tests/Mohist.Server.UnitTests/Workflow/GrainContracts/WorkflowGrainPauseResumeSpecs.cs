@@ -232,7 +232,7 @@ public sealed class WorkflowGrainPauseResumeSpecs
             return await Grain.ReceiveTaskReportAsync(
                 WorkerId,
                 item.Id!,
-                new TaskReport(item.Id!, TaskReportStatus.Succeeded, Output: null, Artifacts: null, TaskRunId: runningTask.Id));
+                new TaskReport(item.Id!, TaskReportStatus.Succeeded, Output: null, Artifacts: null, ActionAttemptId: runningTask.Id));
         }
 
         public async Task<WorkReportVerdict> ReportFollowUpAsync(WorkItem item, string followUpTaskId)
@@ -249,7 +249,7 @@ public sealed class WorkflowGrainPauseResumeSpecs
                     Output: null,
                     Artifacts: null,
                     AddTasks: [new RuntimeTaskInput(followUpTaskId, "Follow up", "spec/task")],
-                    TaskRunId: runningTask.Id));
+                    ActionAttemptId: runningTask.Id));
         }
     }
 

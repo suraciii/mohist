@@ -151,7 +151,7 @@ public static class WorkflowArtifactUploadRoutes
         uploadId = info.UploadId,
         workflowRunId = info.WorkflowRunId,
         workId = info.WorkId,
-        taskRunId = info.TaskRunId,
+        actionAttemptId = info.ActionAttemptId,
         path = info.Path,
         kind = info.Kind,
         contentType = info.ContentType,

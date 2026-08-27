@@ -96,27 +96,6 @@ public class VirtualAgentActionValidationSpecs : IAsyncLifetime
         Assert.Equal("stages[0].checks[0]", error.Path);
     }
 
-    [Fact]
-    public async Task CreateProfile_InlineAction_StillValidatesCatalogInputs()
-    {
-        var catalog = new ActionCatalog(
-            [new ActionCatalogEntry("mohist/opencode", [new ActionCatalogInput("prompt", ["string"], true)], [], [])],
-            []);
-        var result = await SaveAsync("proj-inline", catalog, """
-            stages:
-              - stage: build
-                tasks:
-                  - id: build
-                    uses: mohist/opencode
-                    with:
-                      prompt: Compile the project.
-                      agent: legacy
-                checks: []
-            """);
-
-        var error = Assert.Single(result.ValidationResult.ActionErrors);
-        Assert.Equal("stages[0].tasks[0].with.agent", error.Path);
-    }
 
     private async Task<WorkflowProfileSaveResult> SaveAsync(string projectId, ActionCatalog catalog, string yaml)
     {

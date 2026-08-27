@@ -8,9 +8,9 @@ namespace Mohist.Server.UnitTests.Workflow.Grain;
 public class TaskOutputCaptureTests
 {
     [Fact]
-    public void TaskRun_Output_StoresActionOutputAsJsonElement()
+    public void WorkflowActionAttempt_Output_StoresActionOutputAsJsonElement()
     {
-        var task = MakeTaskRun("proposal.1", "proposal");
+        var task = MakeWorkflowActionAttempt("proposal.1", "proposal");
 
         task.Output = JsonSerializer.Deserialize<JsonElement>("{\"prNumber\":42,\"prUrl\":\"https://github.com/test\"}");
 
@@ -21,18 +21,18 @@ public class TaskOutputCaptureTests
     }
 
     [Fact]
-    public void TaskRun_Output_NullWhenNoOutput()
+    public void WorkflowActionAttempt_Output_NullWhenNoOutput()
     {
-        var task = MakeTaskRun("proposal.1", "proposal");
+        var task = MakeWorkflowActionAttempt("proposal.1", "proposal");
 
         Assert.False(task.Output.HasValue);
         Assert.Equal(default, task.Output);
     }
 
     [Fact]
-    public void TaskRun_Output_HandlesNonObjectOutput()
+    public void WorkflowActionAttempt_Output_HandlesNonObjectOutput()
     {
-        var task = MakeTaskRun("proposal.1", "proposal");
+        var task = MakeWorkflowActionAttempt("proposal.1", "proposal");
 
         task.Output = JsonSerializer.Deserialize<JsonElement>("\"plain text output\"");
 
@@ -42,9 +42,9 @@ public class TaskOutputCaptureTests
     }
 
     [Fact]
-    public void TaskRun_Output_OverwritesOnRetry()
+    public void WorkflowActionAttempt_Output_OverwritesOnRetry()
     {
-        var task = MakeTaskRun("proposal.1", "proposal");
+        var task = MakeWorkflowActionAttempt("proposal.1", "proposal");
 
         task.Output = JsonSerializer.Deserialize<JsonElement>("{\"name\":\"first\"}");
         Assert.Equal("first", task.Output!.Value.GetProperty("name").GetString());
@@ -54,9 +54,9 @@ public class TaskOutputCaptureTests
     }
 
     [Fact]
-    public void TaskRun_Output_ArrayOutput()
+    public void WorkflowActionAttempt_Output_ArrayOutput()
     {
-        var task = MakeTaskRun("proposal.1", "proposal");
+        var task = MakeWorkflowActionAttempt("proposal.1", "proposal");
 
         task.Output = JsonSerializer.Deserialize<JsonElement>("[{\"name\":\"item1\"},{\"name\":\"item2\"}]");
 
@@ -65,15 +65,15 @@ public class TaskOutputCaptureTests
         Assert.Equal(2, task.Output.Value.GetArrayLength());
     }
 
-    private static TaskRun MakeTaskRun(string id, string definitionId)
+    private static WorkflowActionAttempt MakeWorkflowActionAttempt(string id, string definitionId)
     {
-        return new TaskRun
+        return new WorkflowActionAttempt
         {
             Id = id,
             DefinitionId = definitionId,
             Attempt = 1,
             Title = "Task",
-            Status = TaskRunStatus.Running
+            Status = WorkflowActionAttemptStatus.Running
         };
     }
 }

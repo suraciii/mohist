@@ -73,12 +73,12 @@ public static class RetainedLegacyAggregate
         var fixCiTask = new TaskDefinition(
             Id: "recover:fix-ci",
             Title: "Fix CI verification",
-            Uses: "mohist/opencode",
+            Uses: "mohist/agent",
             With: new Dictionary<string, JsonElement?>
             {
+                ["name"] = CloneElement("mohist/builder"),
                 ["session"] = CloneElement("build"),
                 ["prompt"] = CloneElement("${{ prompts.fix-ci }}"),
-                ["options"] = CloneElement("${{ vars.agent }}"),
             },
             Expect: new Dictionary<string, JsonElement?>
             {

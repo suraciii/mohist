@@ -97,7 +97,7 @@ public class WorkflowActivityQuerier : IScopedService
             if (status is null || pending is null || pending.WorkId != workId) continue;
 
             var currentStage = status.Stages.FirstOrDefault(s => s.Stage == pending.Stage);
-            var completed = currentStage?.Tasks.Count(t => string.Equals(t.Status, TaskRunStatus.Completed.ToString(), StringComparison.Ordinal)) ?? 0;
+            var completed = currentStage?.Tasks.Count(t => string.Equals(t.Status, WorkflowActionAttemptStatus.Completed.ToString(), StringComparison.Ordinal)) ?? 0;
             var total = currentStage?.Tasks.Count ?? 0;
 
             result.Add(new ActiveAgentDto(

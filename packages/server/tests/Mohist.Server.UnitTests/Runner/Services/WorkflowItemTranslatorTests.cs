@@ -207,7 +207,7 @@ public partial class WorkflowItemTranslatorSpecs : IAsyncLifetime
 
         Assert.Equal(runId, dispatch.WorkflowRunId);
         Assert.Equal("script.1", dispatch.WorkId);
-        Assert.Equal(persistedTask.Id, dispatch.TaskRunId);
+        Assert.Equal(persistedTask.Id, dispatch.ActionAttemptId);
         Assert.Equal("Historical script", dispatch.Title);
         Assert.Equal("core/script", dispatch.Uses);
         Assert.Equal(WorkDispatchOwnerKinds.Workflow, dispatch.OwnerKind);
@@ -262,7 +262,7 @@ public partial class WorkflowItemTranslatorSpecs : IAsyncLifetime
     }
 
     [Fact]
-    public async Task TranslateToDispatch_LegacyInlineAgentInput_ThrowsDispatchRejection()
+    public async Task TranslateToDispatch_LegacyAgentActionInput_ThrowsDispatchRejection()
     {
         var runId = $"wr-{Guid.NewGuid():N}";
         var projectId = "proj-translate-legacy-agent";
@@ -277,8 +277,8 @@ public partial class WorkflowItemTranslatorSpecs : IAsyncLifetime
         var error = await Assert.ThrowsAsync<WorkflowDispatchRejectedException>(
             () => _translator.TranslateToDispatchAsync(item, runId, run, "runner-1"));
 
-        Assert.Contains("with.agent", error.Message, StringComparison.Ordinal);
-        Assert.Contains("options", error.Message, StringComparison.Ordinal);
+        Assert.Equal("removed_agent_action", error.Error.Code);
+        Assert.Contains("mohist/agent", error.Error.Message, StringComparison.Ordinal);
     }
 
     // =========================================================================
@@ -325,30 +325,6 @@ public partial class WorkflowItemTranslatorSpecs : IAsyncLifetime
         Assert.True(task.Value.Status is TaskReportStatus.Succeeded or TaskReportStatus.Failed);
     }
 
-    [Theory]
-    [InlineData("mohist/agent")]
-    [InlineData("mohist/opencode")]
-    [InlineData("mohist/pi")]
-    public async Task TranslateResult_UnknownAgentTaskPreservesAnObservationInsteadOfAThirdTaskReportStatus(string uses)
-    {
-        var runId = $"wr-result-unknown-{Guid.NewGuid():N}";
-        var projectId = "proj-result-unknown";
-        await SeedRunningWorkflowAsync(runId, projectId);
-        var item = WorkItem.Task("build", "task-1.1", "Agent", uses, null);
-        var result = new WorkResult(
-            "unknown",
-            "Agent cleanup was not confirmed",
-            Output: JSON.DeserializeElement("[\"must not be validated or stored\"]"),
-            ArtifactUploadIds: ["must-not-bind"]);
-
-        var report = _translator.TranslateResult(item, result, runId);
-
-        var unknown = Assert.IsType<WorkflowItemTranslator.InboundReport.Unknown>(report);
-        Assert.Equal("agent-result-unconfirmed", unknown.ReasonCode);
-        Assert.Equal("Agent cleanup was not confirmed", unknown.Message);
-        Assert.Equal(TaskReportStatus.Failed, unknown.Fallback.Status);
-        Assert.Equal(2, System.Enum.GetValues<TaskReportStatus>().Length);
-    }
 
     [Fact]
     public async Task TranslateResult_SucceededTaskMissingDeclaredArtifacts_SucceedsWithoutArtifacts()
@@ -382,7 +358,7 @@ public partial class WorkflowItemTranslatorSpecs : IAsyncLifetime
                 UploadId = uploadId,
                 WorkflowRunId = runId,
                 WorkId = "task-1.1",
-                TaskRunId = "task-1.1",
+                ActionAttemptId = "task-1.1",
                 Path = "review.md",
                 Kind = "file",
                 Size = 5,

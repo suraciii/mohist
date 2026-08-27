@@ -84,7 +84,7 @@ public sealed class WorkflowRunStatusCacheSpecs : WorkflowDefinitionResolverTest
             {
                 ArtifactId = "artifact-cache-spec",
                 WorkflowRunId = runId,
-                TaskRunId = taskId,
+                ActionAttemptId = taskId,
                 Path = "review.md",
                 Kind = "file",
                 DisplayName = "review.md",
@@ -164,7 +164,7 @@ public sealed class WorkflowRunStatusCacheSpecs : WorkflowDefinitionResolverTest
             {
                 ArtifactId = "artifact-readonly-spec",
                 WorkflowRunId = runId,
-                TaskRunId = taskId,
+                ActionAttemptId = taskId,
                 Path = "readonly.md",
                 Kind = "file",
                 DisplayName = "readonly.md",

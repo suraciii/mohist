@@ -152,7 +152,7 @@ function buildAgentTurnCapability(
               sessionName,
               {
                 workId: work.workId,
-                taskRunId: work.taskRunId ?? '',
+                actionAttemptId: work.actionAttemptId ?? '',
                 workType: work.workType,
                 stage: work.stage ?? null,
               },
@@ -210,7 +210,7 @@ function buildAgentTurnCapability(
         sessionName,
         {
           workId: work.workId,
-          taskRunId: work.taskRunId ?? '',
+          actionAttemptId: work.actionAttemptId ?? '',
           workType: work.workType,
           stage: work.stage ?? null,
         },
@@ -289,7 +289,7 @@ function buildAgentTurnCapability(
             sessionName,
             {
               workId: work.workId,
-              taskRunId: work.taskRunId ?? '',
+              actionAttemptId: work.actionAttemptId ?? '',
               workType: work.workType,
               stage: work.stage ?? null,
             },
@@ -323,7 +323,7 @@ function buildAgentTurnCapability(
           sessionName,
           {
             workId: work.workId,
-            taskRunId: work.taskRunId ?? '',
+            actionAttemptId: work.actionAttemptId ?? '',
             workType: work.workType,
             stage: work.stage ?? null,
           },
@@ -400,7 +400,7 @@ function buildAgentTurnCapability(
           sessionName,
           {
             workId: work.workId,
-            taskRunId: work.taskRunId ?? '',
+            actionAttemptId: work.actionAttemptId ?? '',
             workType: work.workType,
             stage: work.stage ?? null,
           },
@@ -446,7 +446,7 @@ function buildAgentTurnCapability(
         sessionName,
         {
           workId: work.workId,
-          taskRunId: work.taskRunId ?? '',
+          actionAttemptId: work.actionAttemptId ?? '',
           workType: work.workType,
           stage: work.stage ?? null,
         },
@@ -553,7 +553,7 @@ async function runPiAgentTurn(
   return await piAction({
     workflowRunId: work.workflowRunId,
     workId: work.workId,
-    taskRunId: work.taskRunId ?? null,
+    actionAttemptId: work.actionAttemptId ?? null,
     workType: work.workType,
     stage: work.stage,
     title: work.title,
@@ -687,7 +687,7 @@ function createWorkflowReporter(
   sessionName: string,
   workMetadata: {
     workId: string
-    taskRunId: string
+    actionAttemptId: string
     workType: string
     stage: string | null
   },

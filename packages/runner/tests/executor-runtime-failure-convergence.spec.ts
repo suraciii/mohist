@@ -254,7 +254,7 @@ describe('WorkExecutor runtime failure convergence', () => {
     const result = await executor.execute(
       {
         ...work(),
-        taskRunId: 'task-run-1',
+        actionAttemptId: 'task-run-1',
         uses: 'mohist/pi',
         with: { prompt: 'invoke Pi' },
       },
@@ -265,7 +265,7 @@ describe('WorkExecutor runtime failure convergence', () => {
     expect(result.error?.code).toBe('timeout')
     expect(outbox.eventTypeList()).toEqual(['session.input', 'turn.failed', 'session.activity'])
     expect(outbox.eventsByType('session.input')[0]?.work).toMatchObject({
-      taskRunId: 'task-run-1',
+      actionAttemptId: 'task-run-1',
       agentSessionId: 'agent-session-1',
     })
     expect(outbox.eventsByType('turn.failed')[0]?.event.payload).toMatchObject({ status: 'unknown' })

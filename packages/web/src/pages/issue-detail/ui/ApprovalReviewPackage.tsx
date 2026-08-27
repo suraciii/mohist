@@ -132,7 +132,7 @@ export function SendBackFeedbackForm({
 }
 
 type ArtifactValue = Pick<WorkflowArtifact, 'artifactId' | 'path' | 'kind' | 'recordedAt'> &
-  Partial<Pick<WorkflowArtifact, 'workflowRunId' | 'taskRunId' | 'contentType' | 'size' | 'displayName'>>
+  Partial<Pick<WorkflowArtifact, 'workflowRunId' | 'actionAttemptId' | 'contentType' | 'size' | 'displayName'>>
 
 function artifactError(error: unknown): string {
   return error instanceof Error ? error.message : 'Failed to load artifact content.'

@@ -9,13 +9,6 @@ namespace Mohist.Server.Workflow.Services;
 
 public static class WorkflowStatusMapper
 {
-    public const string AgentResultUnconfirmedReason = "agent-result-unconfirmed";
-    public const string AgentResultSettlementNextAction =
-        "Restore the original Runner and allow the result to replay, inspect the bound AgentSession and AgentTurn, or explicitly stop the workflow after confirming the physical target is no longer active.";
-    // A collection expression would synthesize a compiler list type that
-    // Orleans cannot copy across grain boundaries; use a copier-safe array.
-    public static readonly IReadOnlyList<string> AgentResultSettlementRecoveryActions = new[] { "stop" };
-
     public static string WireStatus(WorkflowRunStatus status) => status switch
     {
         WorkflowRunStatus.Created => "created",
@@ -40,15 +33,15 @@ public static class WorkflowStatusMapper
         _ => throw new SwitchExpressionException($"No wire mapping for StageRunStatus value {status}"),
     };
 
-    public static string WireStatus(TaskRunStatus status) => status switch
+    public static string WireStatus(WorkflowActionAttemptStatus status) => status switch
     {
-        TaskRunStatus.Pending => "pending",
-        TaskRunStatus.Running => "running",
-        TaskRunStatus.Completed => "completed",
-        TaskRunStatus.Failed => "failed",
-        TaskRunStatus.Cancelled => "cancelled",
-        TaskRunStatus.Interrupted => "interrupted",
-        _ => throw new SwitchExpressionException($"No wire mapping for TaskRunStatus value {status}"),
+        WorkflowActionAttemptStatus.Pending => "pending",
+        WorkflowActionAttemptStatus.Running => "running",
+        WorkflowActionAttemptStatus.Completed => "completed",
+        WorkflowActionAttemptStatus.Failed => "failed",
+        WorkflowActionAttemptStatus.Cancelled => "cancelled",
+        WorkflowActionAttemptStatus.Interrupted => "interrupted",
+        _ => throw new SwitchExpressionException($"No wire mapping for WorkflowActionAttemptStatus value {status}"),
     };
 
     public static string WireStatus(StageCheckStatus status) => status switch
@@ -65,7 +58,6 @@ public static class WorkflowStatusMapper
     {
         if (run is null) return null;
 
-        var blocked = FindBlockedSettlement(run);
         var interruption = FindCurrentInterruption(run);
 
         var stages = run.Stages.Select((s, i) =>
@@ -83,7 +75,7 @@ public static class WorkflowStatusMapper
 
             return new StageStatusView(
                 s.Id,
-                DeriveStageStatus(s, blocked, stageInterruption),
+                DeriveStageStatus(s, stageInterruption),
                 i,
                 MapTasks(s, definition),
                 MapChecks(s, definition),
@@ -109,14 +101,9 @@ public static class WorkflowStatusMapper
             : null;
 
         var actions = BuildAvailableActions(run, effectiveFailure);
-        if (blocked is not null)
-            actions.Add(new AvailableActionView("stop", "Stop workflow", null));
-
         return new WorkflowStatusView(
             run.Id,
-            blocked is not null
-                ? "blocked"
-                : interruption is not null ? "recoverable-interrupted" : WireStatus(run.Status),
+            interruption is not null ? "recoverable-interrupted" : WireStatus(run.Status),
             run.CurrentStageId,
             stages,
             pending,
@@ -124,48 +111,21 @@ public static class WorkflowStatusMapper
             actions,
             run.AssignedTo,
             run.Metadata is null ? null : new MetadataView(run.Metadata.Name, run.Metadata.Labels, run.Metadata.Annotations, run.Metadata.CreatedAt),
-            MapAgentResultAttention(blocked),
             MapInterruption(interruption),
             MapVerificationLanes(run));
     }
 
-    /// <summary>
-    /// The run's blocked wire status is derived from the settlement, never
-    /// stored on the run: a blocked settlement is nonterminal attention, and
-    /// the run's persisted status keeps its own lifecycle value.
-    /// </summary>
-    private static WorkflowAgentResultSettlementTask? FindBlockedSettlement(WorkflowRun run)
-    {
-        foreach (var stage in run.Stages)
-        foreach (var task in stage.Tasks)
-        {
-            if (task.Status == TaskRunStatus.Running
-                && task.AgentResultSettlement?.State == AgentResultSettlementState.Blocked)
-            {
-                return new WorkflowAgentResultSettlementTask(stage.Id, task);
-            }
-        }
-
-        return null;
-    }
-
-    private static string DeriveTaskStatus(TaskRun task) =>
-        task.Status == TaskRunStatus.Running
-        && task.AgentResultSettlement?.State == AgentResultSettlementState.Blocked
-            ? "blocked"
-            : task.Status == TaskRunStatus.Running && task.Interruption is not null
-                ? "recoverable-interrupted"
-                : WireStatus(task.Status);
+    private static string DeriveTaskStatus(WorkflowActionAttempt task) =>
+        task.Status == WorkflowActionAttemptStatus.Running && task.Interruption is not null
+            ? "recoverable-interrupted"
+            : WireStatus(task.Status);
 
     private static string DeriveStageStatus(
         StageRun stage,
-        WorkflowAgentResultSettlementTask? blocked,
         WorkInterruption? interruption) =>
-        blocked is not null && blocked.Stage == stage.Id
-            ? "blocked"
-            : stage.Status == StageRunStatus.Running && interruption is not null
-                ? "recoverable-interrupted"
-                : WireStatus(stage.Status);
+        stage.Status == StageRunStatus.Running && interruption is not null
+            ? "recoverable-interrupted"
+            : WireStatus(stage.Status);
 
     private static WorkInterruption? FindCurrentInterruption(WorkflowRun run)
     {
@@ -178,7 +138,7 @@ public static class WorkflowStatusMapper
 
     private static WorkInterruption? FindStageInterruption(StageRun stage) =>
         stage.Interruption
-        ?? stage.Tasks.FirstOrDefault(task => task.Status == TaskRunStatus.Running)?.Interruption;
+        ?? stage.Tasks.FirstOrDefault(task => task.Status == WorkflowActionAttemptStatus.Running)?.Interruption;
 
     private static WorkInterruptionView? MapInterruption(WorkInterruption? interruption) =>
         interruption is null
@@ -189,61 +149,6 @@ public static class WorkflowStatusMapper
                 interruption.OwnerId,
                 interruption.RecordedAt,
                 interruption.RecoveryDeadlineAt);
-
-    private static AgentResultAttentionView? MapAgentResultAttention(WorkflowAgentResultSettlementTask? blocked)
-    {
-        if (blocked is null) return null;
-        var settlement = blocked.Task.AgentResultSettlement!;
-        return new AgentResultAttentionView(
-            "blocked",
-            AgentResultUnconfirmedReason,
-            settlement.Message ?? "Agent result was not confirmed before its deadline.",
-            settlement.DeadlineAt ?? throw new InvalidOperationException("Blocked Agent result settlement requires a deadline."),
-            settlement.TaskRunId,
-            settlement.WorkId,
-            settlement.RunnerId,
-            settlement.AgentSessionId,
-            settlement.AgentTurnId,
-            AgentResultSettlementNextAction,
-            AgentResultSettlementRecoveryActions,
-            ReasonCode: settlement.ReasonCode);
-    }
-
-    private static AgentResultSettlementView? MapAgentResultSettlement(TaskRun task)
-    {
-        var settlement = task.AgentResultSettlement;
-        if (settlement is null) return null;
-
-        var blocked = settlement.State == AgentResultSettlementState.Blocked;
-        var interruption = MapInterruption(task.Interruption);
-        return new AgentResultSettlementView(
-            State: settlement.State switch
-            {
-                AgentResultSettlementState.AwaitingResult => "awaiting-result",
-                AgentResultSettlementState.Unknown => "unknown",
-                AgentResultSettlementState.Blocked => "blocked",
-                _ => throw new SwitchExpressionException($"No settlement view mapping for {settlement.State}"),
-            },
-            Reason: blocked ? AgentResultUnconfirmedReason : settlement.ReasonCode,
-            ReasonCode: settlement.ReasonCode,
-            Message: settlement.Message,
-            FirstUnknownAt: settlement.FirstUnknownAt,
-            DeadlineAt: settlement.DeadlineAt,
-            TaskRunId: settlement.TaskRunId,
-            WorkId: settlement.WorkId,
-            RunnerId: settlement.RunnerId,
-            AgentSessionId: settlement.AgentSessionId,
-            AgentTurnId: settlement.AgentTurnId,
-            Runtime: settlement.Runtime,
-            RuntimeSessionId: settlement.RuntimeSessionId,
-            StopOperationId: settlement.StopOperationId,
-            NextAction: settlement.State is AgentResultSettlementState.Unknown or AgentResultSettlementState.Blocked
-                ? AgentResultSettlementNextAction
-                : null,
-            RecoveryActions: settlement.State is AgentResultSettlementState.Unknown or AgentResultSettlementState.Blocked
-                ? AgentResultSettlementRecoveryActions
-                : null);
-    }
 
     /// <summary>
     /// Build the verification-lane projection. Returns <c>null</c> for
@@ -271,7 +176,7 @@ public static class WorkflowStatusMapper
                     attempt.Order,
                     attempt.ConfiguredBudgetMs,
                     attempt.Outcome.WireValue(),
-                    attempt.TaskRunId,
+                    attempt.ActionAttemptId,
                     attempt.WorkId,
                     attempt.Detail,
                     attempt.Error,
@@ -290,7 +195,7 @@ public static class WorkflowStatusMapper
                     order,
                     configuredBudgets.TryGetValue(laneId, out var budget) ? budget : 0,
                     Outcome: VerificationLaneOutcome.Pending.WireValue(),
-                    TaskRunId: string.Empty));
+                    ActionAttemptId: string.Empty));
                 firstNonPassing ??= laneId;
             }
         }
@@ -317,7 +222,7 @@ public static class WorkflowStatusMapper
             foreach (var task in build.Tasks)
             {
                 if (VerificationLaneCatalog.IsKnownLane(task.Id))
-                    budgets.TryAdd(task.Id, TaskRunExtensions.TryGetConfiguredBudgetMs(task.With));
+                    budgets.TryAdd(task.Id, WorkflowActionAttemptExtensions.TryGetConfiguredBudgetMs(task.With));
             }
             return budgets;
         }
@@ -327,7 +232,7 @@ public static class WorkflowStatusMapper
         }
     }
 
-    public static TaskLaneView? MapTaskLane(TaskRun task)
+    public static TaskLaneView? MapTaskLane(WorkflowActionAttempt task)
     {
         if (task.Lane is null) return null;
         return new TaskLaneView(
@@ -335,7 +240,7 @@ public static class WorkflowStatusMapper
             task.Lane.Order,
             task.Lane.ConfiguredBudgetMs,
             task.Lane.Outcome.WireValue(),
-            task.Lane.TaskRunId,
+            task.Lane.ActionAttemptId,
             task.Lane.WorkId,
             task.Lane.Detail,
             task.Lane.Error,
@@ -377,7 +282,7 @@ public static class WorkflowStatusMapper
                     DeriveTaskStatus(t),
                     t.RequiredFiles,
                     t.Classification,
-                    TaskRunExtensions.ExtractSessionName(t.WithInput),
+                    WorkflowActionAttemptExtensions.ExtractSessionName(t.WithInput),
                     StartedAt: t.StartedAt,
                     CompletedAt: t.FinishedAt,
                     DurationMs: t.StartedAt is not null && t.FinishedAt is not null
@@ -385,9 +290,10 @@ public static class WorkflowStatusMapper
                         : null,
                     Output: MapTaskOutput(t.Output),
                     Error: t.Error,
-                    AgentResultSettlement: MapAgentResultSettlement(t),
                     Interruption: MapInterruption(t.Interruption),
-                    Lane: MapTaskLane(t)))
+                    Lane: MapTaskLane(t),
+                    AgentJobId: t.AgentJobId,
+                    AgentSessionId: t.AgentSessionId))
                 .ToList();
 
         var stageDefinition = definition?.Stages.FirstOrDefault(d => d.Stage == stage.Id);
@@ -398,9 +304,9 @@ public static class WorkflowStatusMapper
                 t.Title ?? t.Id,
                 t.Uses,
                 "pending",
-                TaskRunExtensions.ExtractRequiredFiles(t.Expect),
-                TaskRunExtensions.DeriveClassification(t.Uses, null),
-                TaskRunExtensions.ExtractSessionName(t.With),
+                WorkflowActionAttemptExtensions.ExtractRequiredFiles(t.Expect),
+                WorkflowActionAttemptExtensions.DeriveClassification(t.Uses, null),
+                WorkflowActionAttemptExtensions.ExtractSessionName(t.With),
                 Interruption: null))
             .ToList();
     }

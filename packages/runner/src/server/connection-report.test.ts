@@ -27,7 +27,7 @@ it('sends the complete runtime binding in a workflow Agent report', async () => 
     const work: DispatchWorkItem = {
       workflowRunId: 'workflow-1',
       workId: 'work-1',
-      taskRunId: 'task-1',
+      actionAttemptId: 'task-1',
       workType: 'task',
       ownerKind: 'workflow',
     }
@@ -44,7 +44,7 @@ it('sends the complete runtime binding in a workflow Agent report', async () => 
     expect(url).toBe('https://runner.test/api/runner/runner-1/report')
     expect(JSON.parse(String((init as RequestInit).body))).toMatchObject({
       workId: 'work-1',
-      taskRunId: 'task-1',
+      actionAttemptId: 'task-1',
       agentSessionId: 'session-1',
       agentTurnId: 'turn-1',
       runtime: 'opencode',

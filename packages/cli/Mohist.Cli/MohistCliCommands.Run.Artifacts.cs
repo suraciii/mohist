@@ -6,7 +6,7 @@ namespace Mohist.Cli;
 internal static partial class RunCommands
 {
     internal static readonly ResourceDescriptor ArtifactListDescriptor = new(ResourceCardinality.Collection,
-        ["artifactId", "path", "kind", "contentType", "size", "taskRunId", "recordedAt"]);
+        ["artifactId", "path", "kind", "contentType", "size", "actionAttemptId", "recordedAt"]);
 
     internal static Command BuildArtifact(MohistCliApi api)
     {
@@ -50,7 +50,7 @@ internal static partial class RunCommands
             Fit(item["path"]?.GetValue<string>() ?? "", widths[1]),
             Fit(item["kind"]?.GetValue<string>() ?? "", widths[2]),
             Fit(item["size"]?.ToString() ?? "", widths[3]),
-            Fit(item["taskRunId"]?.GetValue<string>() ?? "", widths[4]),
+            Fit(item["actionAttemptId"]?.GetValue<string>() ?? "", widths[4]),
             Fit(item["recordedAt"]?.GetValue<string>() ?? "", widths[5]),
         }).ToList();
         AuthCommands.WriteTable(output, headers, widths, cells);

@@ -217,7 +217,7 @@ public class ArchitectureRules
         {
             ["Issue"] = ["IssueWorkflowStartHandler.cs", "IssueWorkflowCompletionHandler.cs", "IssueEpicChangedHandler.cs", "IssueCompositeHandlers.cs"],
             ["Epic"] = ["EpicHandlers.cs"],
-            ["Workflow"] = ["WorkflowStageLockReleaseHandler.cs"],
+            ["Workflow"] = ["WorkflowStageLockReleaseHandler.cs", "AgentJobWorkflowTerminalHandler.cs"],
             ["Runner"] = ["RunnerWorkflowTerminalStatusHandler.cs"],
             ["Agent"] = ["RoutingDispatchHandler.cs", "MentionDispatchHandler.cs", "RoutedAgentLaunchContextResolver.cs", "ResponsePromptRenderer.cs", "MentionTokenParser.cs", "AgentJobSubagentTerminalHandler.cs"],
             ["Inbox"] = ["InboxProjectionHandler.cs"],
@@ -508,6 +508,10 @@ public class ArchitectureRules
         ("Issue", "Epic"),
         ("Issue", "Workflow"),
         ("Issue", "Project"),
+        // Workflow invokes Agent only through the decided AgentJob launch/result
+        // Published Language for mohist/agent tasks. Mechanical Actions remain
+        // Workflow-owned and no Agent domain type enters WorkflowRun state.
+        ("Workflow", "Agent"),
         // Runner's lifecycle gate owns the shared capacity decision for a
         // poll. It invokes the AgentJob owner's atomic claim only after that
         // decision; the AgentJob ledger remains the sole source of work state.

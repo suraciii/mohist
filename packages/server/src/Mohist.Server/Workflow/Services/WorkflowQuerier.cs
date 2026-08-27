@@ -79,10 +79,7 @@ public class WorkflowQuerier : IScopedService, IWorkflowStatusReader
         var run = _runDeserializer.Deserialize(state);
         return run is null
             ? null
-            : new WorkflowRunBindingView(
-                run.WorkflowProfileId,
-                run.AgentAction,
-                WorkflowProfileAgentRuntimeProjection.Project(run.AgentAction));
+            : new WorkflowRunBindingView(run.WorkflowProfileId);
     }
 
     private async Task<WorkflowRun?> LoadAndCacheAsync(
@@ -105,8 +102,8 @@ public class WorkflowQuerier : IScopedService, IWorkflowStatusReader
         var artifacts = await _artifactQuerier.ListAsync(workflowRunId);
         if (artifacts.Count == 0) return;
 
-        var byTaskRun = artifacts
-            .GroupBy(a => a.TaskRunId)
+        var byWorkflowActionAttempt = artifacts
+            .GroupBy(a => a.ActionAttemptId)
             .ToDictionary(g => g.Key, g => g.ToList(), StringComparer.Ordinal);
 
         foreach (var stage in view.Stages)
@@ -114,7 +111,7 @@ public class WorkflowQuerier : IScopedService, IWorkflowStatusReader
             for (var i = 0; i < stage.Tasks.Count; i++)
             {
                 var task = stage.Tasks[i];
-                if (!byTaskRun.TryGetValue(task.Id, out var taskArtifacts)) continue;
+                if (!byWorkflowActionAttempt.TryGetValue(task.Id, out var taskArtifacts)) continue;
 
                 var summaries = taskArtifacts
                     .Select(a => new ArtifactSummaryView(
@@ -140,7 +137,6 @@ public class WorkflowQuerier : IScopedService, IWorkflowStatusReader
                     DurationMs: task.DurationMs,
                     Output: task.Output,
                     Error: task.Error,
-                    AgentResultSettlement: task.AgentResultSettlement,
                     Interruption: task.Interruption,
                     Lane: task.Lane);
             }
@@ -239,7 +235,4 @@ public class WorkflowQuerier : IScopedService, IWorkflowStatusReader
 
 }
 
-public sealed record WorkflowRunBindingView(
-    string? WorkflowProfileId,
-    string? AgentAction,
-    string? AgentRuntime);
+public sealed record WorkflowRunBindingView(string? WorkflowProfileId);

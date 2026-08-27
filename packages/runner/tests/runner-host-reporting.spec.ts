@@ -281,7 +281,7 @@ describe('RunnerHost', () => {
     const work = {
       workflowRunId: 'wr-stale-capability',
       workId: 'work-stale-capability',
-      taskRunId: 'task-stale-capability',
+      actionAttemptId: 'task-stale-capability',
       workType: 'task',
       uses: 'mohist/opencode',
       ownerKind: 'workflow',

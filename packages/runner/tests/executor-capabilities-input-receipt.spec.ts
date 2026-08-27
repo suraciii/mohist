@@ -22,7 +22,7 @@ function makeWork(overrides: Partial<DispatchWorkItem> = {}): DispatchWorkItem {
   return {
     workflowRunId: 'wf-receipt-1',
     workId: 'work-receipt-1',
-    taskRunId: 'task-receipt-1',
+    actionAttemptId: 'task-receipt-1',
     workType: 'task',
     stage: 'build',
     title: 'Receipt-bound turn',

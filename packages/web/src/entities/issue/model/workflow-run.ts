@@ -37,8 +37,6 @@ export interface WorkflowRunDetail {
     title: string
   } | null
   workflowProfileId: string | null
-  agentAction: string | null
-  agentRuntime: string | null
 }
 
 export function isTerminalWorkflowRunStatus(status: WorkflowRunStatus | string | null | undefined): boolean {

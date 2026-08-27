@@ -3,7 +3,7 @@ namespace Mohist.Server.Workflow.Domain.Artifacts;
 /// <summary>
 /// Immutable workflow artifact fact: a single recorded output produced by
 /// one workflow task run. The producer identity is
-/// <see cref="WorkflowRunId"/> + <see cref="TaskRunId"/>; the stable
+/// <see cref="WorkflowRunId"/> + <see cref="ActionAttemptId"/>; the stable
 /// business identity under that producer is <see cref="Path"/>. A later
 /// task run that records the same path produces a separate, immutable
 /// <see cref="WorkflowArtifact"/>; the earlier record is not mutated.
@@ -25,7 +25,7 @@ namespace Mohist.Server.Workflow.Domain.Artifacts;
 /// </remarks>
 public sealed record WorkflowArtifact(
     string WorkflowRunId,
-    string TaskRunId,
+    string ActionAttemptId,
     string Path,
     DateTimeOffset RecordedAt)
 {
@@ -34,5 +34,5 @@ public sealed record WorkflowArtifact(
     /// artifacts with the same key are considered the same recording;
     /// the task run ids are unique inside a workflow run.
     /// </summary>
-    public string ProducerKey => $"{WorkflowRunId}:{TaskRunId}";
+    public string ProducerKey => $"{WorkflowRunId}:{ActionAttemptId}";
 }

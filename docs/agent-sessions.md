@@ -488,19 +488,19 @@ Mohist Agent again.
 
 ## Current Scope
 
-The unified AgentJob path is the target product model. Direct Agent launch from
-Web, CLI, connections, events, and mentions already creates AgentJob. Workflow
-still uses the legacy `mohist/opencode`, `mohist/pi`, and `mohist/agent` Action
-paths; those paths must be replaced by Agent names in Profiles and removed,
-not retained as compatibility modes. A Mohist Agent selects OpenCode or Pi
+The unified AgentJob path is implemented for every entry point. Direct Agent
+launch from Web, CLI, connections, events, mentions, and Workflow tasks all
+create AgentJob. A Workflow task names a Mohist Agent through `mohist/agent`;
+the launch boundary resolves the named Agent and creates a real AgentJob and
+AgentSession. A Mohist Agent selects OpenCode or Pi
 through its configuration, and the accepted snapshot fixes that backend to the
 AgentJob. Max concurrent runs applies to launches and follow-ups. See
 [Agent Event Routing](event-routing.md) for Mohist Agent event responses.
 
 ## Implementation Gaps
 
-Automatic confirmed-missing recovery is implemented for a new legacy Workflow input
-when the Session is safely idle. The owning Runner creates empty Runtime context
+Automatic confirmed-missing recovery is implemented for a new Workflow-origin
+input when the Session is safely idle. The owning Runner creates empty Runtime context
 and replaces the missing binding without changing the AgentSession or replaying
 prior input. Ambiguous or unsafe absence still blocks because it cannot prove
 that an old effect did not occur.

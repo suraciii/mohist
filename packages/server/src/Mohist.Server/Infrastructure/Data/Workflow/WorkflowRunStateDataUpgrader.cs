@@ -190,7 +190,7 @@ public static class WorkflowRunStateDataUpgrader
         var legacyProfileId = ReadLegacyAnnotationProfileId(root);
         var changed = root.TryGetProperty("claim", out _)
             || (root.TryGetProperty("assignment", out var assignment) && assignment.ValueKind == JsonValueKind.Object && assignment.TryGetProperty("runnerId", out _))
-            || ContainsLegacyTaskRunnerId(root)
+            || ContainsLegacyWorkflowActionAttemptnerId(root)
             || legacyRecovery.Count > 0
             || (!root.TryGetProperty("workflowProfileId", out _) && !string.IsNullOrWhiteSpace(legacyProfileId));
         if (!changed)
@@ -611,7 +611,7 @@ public static class WorkflowRunStateDataUpgrader
         return false;
     }
 
-    private static bool ContainsLegacyTaskRunnerId(JsonElement root)
+    private static bool ContainsLegacyWorkflowActionAttemptnerId(JsonElement root)
     {
         if (!root.TryGetProperty("stages", out var stages) || stages.ValueKind != JsonValueKind.Array)
             return false;

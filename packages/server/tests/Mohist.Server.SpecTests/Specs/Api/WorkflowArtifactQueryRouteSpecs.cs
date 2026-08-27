@@ -72,7 +72,7 @@ public class WorkflowArtifactQueryRouteSpecs
             {
                 ArtifactId = $"art_proposal_{Guid.NewGuid():N}",
                 WorkflowRunId = workflowRunId,
-                TaskRunId = "proposal.1",
+                ActionAttemptId = "proposal.1",
                 Path = "openspec/changes/issue-55/proposal.md",
                 RecordedAt = baseTime,
                 ArtifactStoragePath = $"{workflowRunId}/tasks/proposal.1/artifacts/art_proposal/content",
@@ -85,7 +85,7 @@ public class WorkflowArtifactQueryRouteSpecs
             {
                 ArtifactId = $"art_specs_{Guid.NewGuid():N}",
                 WorkflowRunId = workflowRunId,
-                TaskRunId = "design.1",
+                ActionAttemptId = "design.1",
                 Path = "specs/",
                 RecordedAt = baseTime.AddMinutes(2),
                 ArtifactStoragePath = $"{workflowRunId}/tasks/design.1/artifacts/art_specs/files",
@@ -170,7 +170,7 @@ public class WorkflowArtifactQueryRouteSpecs
 
         Assert.True(data.TryGetProperty("artifactId", out _));
         Assert.True(data.TryGetProperty("workflowRunId", out _));
-        Assert.True(data.TryGetProperty("taskRunId", out _));
+        Assert.True(data.TryGetProperty("actionAttemptId", out _));
         Assert.True(data.TryGetProperty("path", out _));
         Assert.True(data.TryGetProperty("kind", out _));
     }

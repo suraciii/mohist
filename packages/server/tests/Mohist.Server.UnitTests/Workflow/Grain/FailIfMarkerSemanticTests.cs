@@ -47,7 +47,7 @@ public class FailIfMarkerSemanticTests
     [Fact]
     public void ExtractRequiredFiles_WithExpectMarkersFailIf_ReturnsFailIfAndOneOf()
     {
-        // The TaskRun-level required-file extraction should surface the
+        // The WorkflowActionAttempt-level required-file extraction should surface the
         // failIf marker as a required file entry carrying oneOf and
         // failIf metadata so downstream views can show "this marker, if
         // matched, fails the task".
@@ -64,7 +64,7 @@ public class FailIfMarkerSemanticTests
                 """),
         };
 
-        var result = TaskRunExtensions.ExtractRequiredFiles(expect);
+        var result = WorkflowActionAttemptExtensions.ExtractRequiredFiles(expect);
 
         var entry = Assert.Single(result);
         Assert.Equal("review.md", entry.Path);
@@ -98,7 +98,7 @@ public class FailIfMarkerSemanticTests
                 """),
         };
 
-        var result = TaskRunExtensions.ExtractRequiredFiles(expect);
+        var result = WorkflowActionAttemptExtensions.ExtractRequiredFiles(expect);
 
         var entry = Assert.Single(result);
         Assert.Equal("review.md", entry.Path);

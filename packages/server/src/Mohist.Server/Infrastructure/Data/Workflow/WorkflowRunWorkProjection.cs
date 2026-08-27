@@ -27,13 +27,9 @@ public static class WorkflowRunWorkProjectionBuilder
         var active = string.IsNullOrWhiteSpace(assignedWorkerId)
             ? null
             : run.CurrentActiveWorkFor(assignedWorkerId);
-        // Unknown work still owns its active lease until the persisted
-        // deadline. Only the blocked settlement has crossed that boundary.
-        if (run.HasBlockedAgentResult())
-            active = null;
         var activeWorkId = active is null
             ? null
-            : EffectiveWorkId(active.WorkId, active.TaskRunId);
+            : EffectiveWorkId(active.WorkId, active.ActionAttemptId);
 
         return new WorkflowRunWorkProjectionData(
             run.Id,

@@ -41,7 +41,7 @@ interface ActionInvocationContext {
   issueNumber?: number | null
   epicNumber?: number | null
   parentIssueContext?: ParentIssueContext | null
-  taskRunId?: string | null
+  actionAttemptId?: string | null
   runnerId?: string | null
   piRuntime?: PiRuntime | null
   skillResolver?: SkillResolver
@@ -548,7 +548,7 @@ function createWorkflowReporter(
   inputReceiptBudgetMs?: number,
 ): WorkflowAgentSessionReporter | null {
   if (!context.projectId || !context.runtimeEventQueue || !context.runtimeEventRecordId) return null
-  if (!context.taskRunId || !context.runnerId || !agentSessionId || !runtimeSessionId) return null
+  if (!context.actionAttemptId || !context.runnerId || !agentSessionId || !runtimeSessionId) return null
   return new WorkflowAgentSessionReporter({
     outbox: context.runtimeEventQueue,
     projectId: context.projectId,
@@ -556,7 +556,7 @@ function createWorkflowReporter(
     sessionName,
     workMetadata: {
       workId: context.workId,
-      taskRunId: context.taskRunId,
+      actionAttemptId: context.actionAttemptId,
       workType: context.workType,
       stage: context.stage ?? null,
       runnerId: context.runnerId,

@@ -7,7 +7,7 @@ namespace Mohist.Server.Workflow.Services.Artifacts;
 public sealed record WorkflowArtifactInfo(
     string ArtifactId,
     string WorkflowRunId,
-    string TaskRunId,
+    string ActionAttemptId,
     string Path,
     string Kind,
     string? ContentType,
@@ -40,8 +40,8 @@ public interface IWorkflowArtifactQuerier
     Task<IReadOnlyList<WorkflowArtifactInfo>> ListHistoryAsync(
         string workflowRunId, string path, CancellationToken ct = default);
 
-    Task<IReadOnlyList<WorkflowArtifactInfo>> ListByTaskRunAsync(
-        string workflowRunId, string taskRunId, CancellationToken ct = default);
+    Task<IReadOnlyList<WorkflowArtifactInfo>> ListByWorkflowActionAttemptAsync(
+        string workflowRunId, string actionAttemptId, CancellationToken ct = default);
 
     Task<IReadOnlyList<WorkflowArtifactInfo>> ListAsync(
         string workflowRunId, CancellationToken ct = default);
@@ -72,7 +72,7 @@ public sealed class WorkflowArtifactQuerier : IWorkflowArtifactQuerier
             .GroupBy(a => a.Path)
             .Select(g => g
                 .OrderByDescending(a => a.RecordedAt)
-                .ThenByDescending(a => a.TaskRunId, StringComparer.Ordinal)
+                .ThenByDescending(a => a.ActionAttemptId, StringComparer.Ordinal)
                 .ThenByDescending(a => a.ArtifactId, StringComparer.Ordinal)
                 .First())
             .OrderBy(a => a.Path)
@@ -97,7 +97,7 @@ public sealed class WorkflowArtifactQuerier : IWorkflowArtifactQuerier
             ? null
             : rows
                 .OrderByDescending(a => a.RecordedAt)
-                .ThenByDescending(a => a.TaskRunId, StringComparer.Ordinal)
+                .ThenByDescending(a => a.ActionAttemptId, StringComparer.Ordinal)
                 .ThenByDescending(a => a.ArtifactId, StringComparer.Ordinal)
                 .First();
         return latest is null
@@ -116,25 +116,25 @@ public sealed class WorkflowArtifactQuerier : IWorkflowArtifactQuerier
 
         return rows
             .OrderBy(a => a.RecordedAt)
-            .ThenBy(a => a.TaskRunId, StringComparer.Ordinal)
+            .ThenBy(a => a.ActionAttemptId, StringComparer.Ordinal)
             .ThenBy(a => a.ArtifactId, StringComparer.Ordinal)
             .Select(MapInfo)
             .ToList();
     }
 
-    public async Task<IReadOnlyList<WorkflowArtifactInfo>> ListByTaskRunAsync(
-        string workflowRunId, string taskRunId, CancellationToken ct = default)
+    public async Task<IReadOnlyList<WorkflowArtifactInfo>> ListByWorkflowActionAttemptAsync(
+        string workflowRunId, string actionAttemptId, CancellationToken ct = default)
     {
         await using var db = await _dbFactory.CreateDbContextAsync(ct);
         var rows = await db.WorkflowArtifacts
             .AsNoTracking()
-            .Where(a => a.WorkflowRunId == workflowRunId && a.TaskRunId == taskRunId)
+            .Where(a => a.WorkflowRunId == workflowRunId && a.ActionAttemptId == actionAttemptId)
             .ToListAsync(ct);
 
         return rows
             .OrderBy(a => a.Path)
             .ThenBy(a => a.RecordedAt)
-            .ThenBy(a => a.TaskRunId, StringComparer.Ordinal)
+            .ThenBy(a => a.ActionAttemptId, StringComparer.Ordinal)
             .ThenBy(a => a.ArtifactId, StringComparer.Ordinal)
             .Select(MapInfo)
             .ToList();
@@ -166,7 +166,7 @@ public sealed class WorkflowArtifactQuerier : IWorkflowArtifactQuerier
     private static WorkflowArtifactInfo MapInfo(WorkflowArtifactRow row) => new(
         row.ArtifactId,
         row.WorkflowRunId,
-        row.TaskRunId,
+        row.ActionAttemptId,
         row.Path,
         row.Kind,
         row.ContentType,

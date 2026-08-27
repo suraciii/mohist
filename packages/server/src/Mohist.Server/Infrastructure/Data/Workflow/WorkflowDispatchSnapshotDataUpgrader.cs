@@ -178,7 +178,7 @@ public static class WorkflowDispatchSnapshotDataUpgrader
                     ?? throw new InvalidOperationException("deserialized to null");
                 foreach (var task in run.Stages.SelectMany(stage => stage.Tasks))
                 {
-                    if (task.Status != TaskRunStatus.Running)
+                    if (task.Status != WorkflowActionAttemptStatus.Running)
                         continue;
                     var workId = task.WorkId ?? task.Id;
                     if (!string.IsNullOrWhiteSpace(workId))
@@ -359,7 +359,7 @@ public static class WorkflowDispatchSnapshotDataUpgrader
         if (snapshot.HasValue)
         {
             state.Changed = true;
-            if (string.Equals(status, nameof(TaskRunStatus.Running), StringComparison.OrdinalIgnoreCase)
+            if (string.Equals(status, nameof(WorkflowActionAttemptStatus.Running), StringComparison.OrdinalIgnoreCase)
                 && snapshot.Value.ValueKind != JsonValueKind.Null)
             {
                 var key = !string.IsNullOrWhiteSpace(workId) ? workId : id;

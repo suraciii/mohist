@@ -14,7 +14,7 @@ export async function reportWork(
   const ownerKind = work.ownerKind?.trim().toLowerCase()
   const body: Record<string, unknown> = {
     workId: work.workId,
-    taskRunId: work.taskRunId ?? null,
+    actionAttemptId: work.actionAttemptId ?? null,
     projectId: work.projectId,
     status: result.status,
     message: result.message,

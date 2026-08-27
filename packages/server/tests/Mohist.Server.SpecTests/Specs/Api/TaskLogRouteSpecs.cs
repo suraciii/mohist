@@ -104,7 +104,7 @@ public class TaskLogRouteSpecs
                     Status = StageRunStatus.Running,
                     Tasks =
                     [
-                        new TaskRun
+                        new WorkflowActionAttempt
                         {
                             Id = taskId,
                             DefinitionId = taskId,
@@ -113,7 +113,7 @@ public class TaskLogRouteSpecs
                             Uses = "core/script",
                             WorkId = workId,
                             WorkerId = RunnerId,
-                            Status = TaskRunStatus.Running,
+                            Status = WorkflowActionAttemptStatus.Running,
                             Classification = TaskClassification.Orchestration,
                         }
                     ],

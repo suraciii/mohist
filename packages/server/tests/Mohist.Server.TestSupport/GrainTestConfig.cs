@@ -265,6 +265,12 @@ public static class GrainTestConfig
         siloBuilder.Services.AddScoped<Mohist.Server.Agent.Services.AgentJobQuerier>();
         siloBuilder.Services.AddScoped<Mohist.Server.Infrastructure.Data.Project.ProjectDefaultExecutionConfigReader>();
         siloBuilder.Services.AddScoped<Mohist.Server.Agent.Services.AgentReadinessService>();
+        siloBuilder.Services.AddScoped<Mohist.Server.Agent.Services.AgentExecutionSnapshotResolver>();
+        siloBuilder.Services.AddScoped<Mohist.Server.Infrastructure.IAgentExecutionSnapshotResolver>(services =>
+            services.GetRequiredService<Mohist.Server.Agent.Services.AgentExecutionSnapshotResolver>());
+        siloBuilder.Services.AddScoped<Mohist.Server.Infrastructure.IAgentExecutionIdentitySnapshotResolver>(services =>
+            services.GetRequiredService<Mohist.Server.Agent.Services.AgentExecutionSnapshotResolver>());
+        siloBuilder.Services.AddSingleton<IWorkflowAgentHandoffPreflight, WorkflowAgentHandoffPreflight>();
         siloBuilder.Services.AddScoped<WorkflowRunQuerier>();
         siloBuilder.Services.AddScoped<RunnerDefinitionStore>();
         siloBuilder.Services.AddSingleton<ProjectQuerier>();
@@ -290,9 +296,11 @@ public static class GrainTestConfig
         siloBuilder.Services.AddSingleton(eventStore);
         siloBuilder.Services.AddSingleton<IDeadLetterStore, NoopDeadLetterStore>();
         siloBuilder.Services.AddSingleton<WorkflowStageLockReleaseHandler>();
+        siloBuilder.Services.AddSingleton<AgentJobWorkflowTerminalHandler>();
         siloBuilder.Services.AddSingleton<IEnumerable<Subscription>>(services =>
         {
             var handler = services.GetRequiredService<WorkflowStageLockReleaseHandler>();
+            var agentTerminal = services.GetRequiredService<AgentJobWorkflowTerminalHandler>();
             return
             [
                 new Subscription(
@@ -301,6 +309,12 @@ public static class GrainTestConfig
                     (instance, envelope, ct) =>
                         ((WorkflowStageLockReleaseHandler)instance).HandleAsync(envelope, ct),
                     "Mohist.Server.Events.Subscriptions.WorkflowStageLockReleaseHandler"),
+                new Subscription(
+                    EventCatalog.ReverseDns.AgentJobWorkflowTerminal,
+                    agentTerminal,
+                    (instance, envelope, ct) =>
+                        ((AgentJobWorkflowTerminalHandler)instance).HandleAsync(envelope, ct),
+                    "Mohist.Server.Workflow.Subscriptions.AgentJobWorkflowTerminalHandler"),
             ];
         });
         siloBuilder.Services.AddSingleton<EventDispatchSignal>();

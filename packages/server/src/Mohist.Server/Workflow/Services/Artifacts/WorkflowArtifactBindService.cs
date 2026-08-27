@@ -13,7 +13,7 @@ public interface IWorkflowArtifactBindService
     Task<WorkflowArtifactBindResult> ValidateAsync(
         string workflowRunId,
         string workId,
-        string taskRunId,
+        string actionAttemptId,
         string[] artifactUploadIds,
         TaskArtifactCapture? declaredArtifacts,
         JsonElement? variables = null,
@@ -24,7 +24,7 @@ public interface IWorkflowArtifactBindService
     Task<WorkflowArtifactBindResult> BindAsync(
         string workflowRunId,
         string workId,
-        string taskRunId,
+        string actionAttemptId,
         string[] artifactUploadIds,
         TaskArtifactCapture? declaredArtifacts,
         JsonElement? variables = null,
@@ -59,7 +59,7 @@ public sealed class WorkflowArtifactBindService : IWorkflowArtifactBindService
     public Task<WorkflowArtifactBindResult> ValidateAsync(
         string workflowRunId,
         string workId,
-        string taskRunId,
+        string actionAttemptId,
         string[] artifactUploadIds,
         TaskArtifactCapture? declaredArtifacts,
         JsonElement? variables = null,
@@ -69,7 +69,7 @@ public sealed class WorkflowArtifactBindService : IWorkflowArtifactBindService
         BindCoreAsync(
             workflowRunId,
             workId,
-            taskRunId,
+            actionAttemptId,
             artifactUploadIds,
             projectId,
             issueNumber,
@@ -79,7 +79,7 @@ public sealed class WorkflowArtifactBindService : IWorkflowArtifactBindService
     public Task<WorkflowArtifactBindResult> BindAsync(
         string workflowRunId,
         string workId,
-        string taskRunId,
+        string actionAttemptId,
         string[] artifactUploadIds,
         TaskArtifactCapture? declaredArtifacts,
         JsonElement? variables = null,
@@ -89,7 +89,7 @@ public sealed class WorkflowArtifactBindService : IWorkflowArtifactBindService
         BindCoreAsync(
             workflowRunId,
             workId,
-            taskRunId,
+            actionAttemptId,
             artifactUploadIds,
             projectId,
             issueNumber,
@@ -99,7 +99,7 @@ public sealed class WorkflowArtifactBindService : IWorkflowArtifactBindService
     private async Task<WorkflowArtifactBindResult> BindCoreAsync(
         string workflowRunId,
         string workId,
-        string taskRunId,
+        string actionAttemptId,
         string[] artifactUploadIds,
         string? projectId,
         int? issueNumber,
@@ -123,7 +123,7 @@ public sealed class WorkflowArtifactBindService : IWorkflowArtifactBindService
             StringComparer.Ordinal);
         var replayMismatch = existingArtifacts.FirstOrDefault(artifact =>
             !string.Equals(artifact.WorkflowRunId, workflowRunId, StringComparison.Ordinal)
-            || !string.Equals(artifact.TaskRunId, taskRunId, StringComparison.Ordinal));
+            || !string.Equals(artifact.ActionAttemptId, actionAttemptId, StringComparison.Ordinal));
         if (replayMismatch is not null)
         {
             return new WorkflowArtifactBindResult(
@@ -139,7 +139,7 @@ public sealed class WorkflowArtifactBindService : IWorkflowArtifactBindService
             .Where(p =>
                 p.WorkflowRunId == workflowRunId
                 && p.WorkId == workId
-                && p.TaskRunId == taskRunId
+                && p.ActionAttemptId == actionAttemptId
                 && pendingIds.Contains(p.UploadId))
             .ToListAsync(cancellationToken);
 
@@ -158,7 +158,7 @@ public sealed class WorkflowArtifactBindService : IWorkflowArtifactBindService
         var recordedEventsByUploadId = existingArtifacts.ToDictionary(
             artifact => artifact.SourceUploadId!,
             artifact => new WorkflowArtifactRecorded(
-                workflowRunId, taskRunId, artifact.Path, artifact.RecordedAt),
+                workflowRunId, actionAttemptId, artifact.Path, artifact.RecordedAt),
             StringComparer.Ordinal);
         var artifactRows = new List<WorkflowArtifactRow>(pendingUploads.Count);
 
@@ -170,7 +170,7 @@ public sealed class WorkflowArtifactBindService : IWorkflowArtifactBindService
             {
                 ArtifactId = artifactId,
                 WorkflowRunId = workflowRunId,
-                TaskRunId = taskRunId,
+                ActionAttemptId = actionAttemptId,
                 SourceUploadId = pending.UploadId,
                 Path = pending.Path,
                 RecordedAt = now,
@@ -187,7 +187,7 @@ public sealed class WorkflowArtifactBindService : IWorkflowArtifactBindService
             artifactRows.Add(row);
             recordedEventsByUploadId.Add(pending.UploadId, new WorkflowArtifactRecorded(
                 workflowRunId,
-                taskRunId,
+                actionAttemptId,
                 pending.Path,
                 now));
         }
@@ -202,8 +202,8 @@ public sealed class WorkflowArtifactBindService : IWorkflowArtifactBindService
         }
 
         _log.LogInformation(
-            "Bound {Count} artifact(s) for workflow run {WorkflowRunId}, task run {TaskRunId}",
-            artifactRows.Count, workflowRunId, taskRunId);
+            "Bound {Count} artifact(s) for workflow run {WorkflowRunId}, task run {ActionAttemptId}",
+            artifactRows.Count, workflowRunId, actionAttemptId);
 
         return new WorkflowArtifactBindResult(
             requestedUploadIds.Select(uploadId => recordedEventsByUploadId[uploadId]).ToList());

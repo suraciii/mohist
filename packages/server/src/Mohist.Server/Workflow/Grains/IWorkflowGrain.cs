@@ -5,7 +5,7 @@ using Mohist.Server.Workflow.Domain.Run;
 
 namespace Mohist.Server.Workflow.Grains;
 
-public interface IWorkflowGrain : IGrainWithStringKey, IRemindable
+public interface IWorkflowGrain : IGrainWithStringKey
 {
     Task StartAsync(WorkflowStartInput? input = null);
     Task EnsureStartedAsync(WorkflowIssueContext context);
@@ -30,18 +30,14 @@ public interface IWorkflowGrain : IGrainWithStringKey, IRemindable
     Task<WorkReportVerdict> FailActiveWorkAsync(string workerId, string workId, string processGeneration, string message);
     Task<WorkReportVerdict> InterruptActiveWorkAsync(string workerId, string reason);
     Task<WorkReportVerdict> AbandonActiveWorkAsync(string workerId, string workId, string reason);
-    Task<WorkReportVerdict> BindAgentExecutionAsync(AgentExecutionBinding binding);
-    Task<bool> CanStartAgentCleanupAsync(AgentExecutionBinding binding);
-    Task<WorkReportVerdict> ObserveAgentExecutionAsync(AgentExecutionObservation observation);
-    Task<WorkReportVerdict> ObserveAgentResultUnknownAsync(string workerId, string taskRunId, string workId, string reasonCode, string? message = null);
-    Task<WorkReportVerdict> ObserveAgentRunnerDisconnectedAsync(string workerId);
     Task<WorkReportVerdict> RejectActiveWorkDispatchAsync(string workerId, string workId, ExecutionError error);
     Task<WorkReportVerdict> ReceiveTaskReportAsync(
         string workerId,
         string workId,
-        TaskReport report,
-        AgentExecutionBinding? agentBinding = null);
+        TaskReport report);
     Task<WorkReportVerdict> ReceiveCheckReportAsync(string workerId, string workId, CheckReport report);
+    Task<WorkReportVerdict> ReceiveAgentJobTerminalAsync(WorkflowAgentJobTerminalDelivery delivery) =>
+        Task.FromResult(WorkReportVerdict.Refused);
 
     Task ReleaseStageLocksAsync(string stage, string reason);
     Task<string?> GetRunStatusAsync();
@@ -52,6 +48,29 @@ public interface IWorkflowGrain : IGrainWithStringKey, IRemindable
     Task<WorkflowFeedbackRecord?> GetFeedbackAsync(string feedbackId);
     Task<IReadOnlyList<WorkflowFeedbackRecord>> ListFeedbackAsync();
 }
+
+[GenerateSerializer]
+public sealed record WorkflowAgentJobTerminalDelivery(
+    [property: Id(0)] string DeliveryId,
+    [property: Id(1)] string JobKey,
+    [property: Id(2)] string InvocationId,
+    [property: Id(3)] string CommandId,
+    [property: Id(4)] string ActionAttemptId,
+    [property: Id(5)] string WorkId,
+    [property: Id(6)] string Stage,
+    [property: Id(7)] string RequestFingerprint,
+    [property: Id(8)] string Status,
+    [property: Id(9)] string? Message,
+    [property: Id(10)] string? Output,
+    [property: Id(11)] string[]? ArtifactUploadIds,
+    [property: Id(12)] string? FailureReason,
+    [property: Id(13)] string? FailureCategory,
+    [property: Id(14)] int? ExitCode,
+    [property: Id(15)] string? ResultFingerprint,
+    [property: Id(16)] string? AgentSessionId,
+    [property: Id(17)] string? InitialInputId,
+    [property: Id(18)] string? InitialTurnId,
+    [property: Id(19)] List<RuntimeTaskInput>? AddTasks = null);
 
 [GenerateSerializer]
 public sealed record WorkflowStartInput(
@@ -81,20 +100,6 @@ public sealed record WorkflowIssueContext(
 public sealed record WorkflowStartSnapshot(
     [property: Id(0)] WorkflowRepositoryContext? Repository,
     [property: Id(1)] WorkspaceIdentity? Workspace);
-
-[GenerateSerializer]
-public sealed record RuntimeTaskInput(
-    [property: Id(0)] string Id,
-    [property: Id(1)] string Title,
-    [property: Id(2)] string? Uses = null,
-    [property: Id(3)] JsonElement? With = null,
-    [property: Id(4)] string? Stage = null,
-    [property: Id(5)] bool InvalidateChecks = false,
-    [property: Id(6)] RecoveryDefinition? Recovery = null,
-    [property: Id(7)] TaskArtifactCapture? Artifacts = null,
-    [property: Id(8)] Dictionary<string, string>? SetVars = null,
-    [property: Id(9)] int? RecoveryRemaining = null,
-    [property: Id(10)] JsonElement? Expect = null);
 
 [GenerateSerializer]
 public sealed record RuntimeTaskAddedResult(
@@ -148,7 +153,7 @@ public sealed record WorkflowControlResult(
 /// <summary>
 /// Read-only snapshot of the active workflow work item. The upload
 /// endpoint uses this to derive the server-side task run binding
-/// context (<see cref="TaskRunId"/>) for a pending artifact upload
+/// context (<see cref="ActionAttemptId"/>) for a pending artifact upload
 /// without trusting worker-supplied identifiers.
 /// </summary>
 [GenerateSerializer]
@@ -156,10 +161,11 @@ public sealed record WorkflowActiveWorkView(
     [property: Id(0)] string WorkId,
     [property: Id(1)] string WorkType,
     [property: Id(2)] string Stage,
-    [property: Id(3)] string TaskRunId,
+    [property: Id(3)] string ActionAttemptId,
     [property: Id(4)] string? Title,
     [property: Id(5)] string? ProjectId = null,
-    [property: Id(6)] int? IssueNumber = null);
+    [property: Id(6)] int? IssueNumber = null,
+    [property: Id(7)] string? OwnerWorkflowRunId = null);
 
 [GenerateSerializer]
 public sealed record WorkflowFeedbackRecord(

@@ -10,7 +10,7 @@ describe('createServerRuntimeEventDelivery - workflow cleanup', () => {
         expect(body).toEqual({
           cleanupOperationId: 'workflow-cleanup:wf-1:task-1.1:work-1:1',
           prompt: 'clean the worktree',
-          taskRunId: 'task-1.1',
+          actionAttemptId: 'task-1.1',
           workId: 'work-1',
           agentSessionId: 'agent-session-1',
           runtime: 'pi',
@@ -38,7 +38,7 @@ describe('createServerRuntimeEventDelivery - workflow cleanup', () => {
       runtimeSessionId: 'runtime-1',
       work: {
         workId: 'work-1',
-        taskRunId: 'task-1.1',
+        actionAttemptId: 'task-1.1',
         runnerId: 'runner-1',
         agentSessionId: 'agent-session-1',
         inputDeliveryId: 'workflow-cleanup-input:workflow-cleanup:wf-1:task-1.1:work-1:1',
@@ -81,7 +81,7 @@ describe('createServerRuntimeEventDelivery - workflow cleanup', () => {
       runtimeSessionId: 'runtime-1',
       work: {
         workId: 'work-1',
-        taskRunId: 'task-1.1',
+        actionAttemptId: 'task-1.1',
         runnerId: 'runner-1',
         agentSessionId: 'agent-session-1',
         inputDeliveryId: 'workflow-cleanup-input:workflow-cleanup:wf-1:task-1.1:work-1:1',

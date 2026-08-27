@@ -1,6 +1,5 @@
-using Mohist.Server.Workflow.Services;
 using Mohist.Server.Runner.Grains;
-using Mohist.Workflow.Definition;
+using Mohist.Server.Workflow.Services;
 using Xunit;
 
 namespace Mohist.Server.UnitTests.Workflow.Services;
@@ -8,109 +7,78 @@ namespace Mohist.Server.UnitTests.Workflow.Services;
 public sealed class WorkflowProfileYamlParserTests
 {
     [Fact]
-    public void Parse_MaterializesAgentActionBeforeDefinitionParsing()
+    public void Parse_AcceptsConcreteMohistAgentBinding()
     {
-        var profile = WorkflowProfileYamlParser.Parse(BoundProfileYaml, "fallback", agentActionOverride: "mohist/pi");
+        var profile = WorkflowProfileYamlParser.Parse("""
+            stages:
+              - stage: build
+                tasks:
+                  - id: task
+                    uses: mohist/agent
+                    with:
+                      name: mohist/builder
+                      session: build
+                      prompt: Build the change.
+            """, "profile", Catalog());
 
-        Assert.Equal("mohist/pi", profile.AgentAction);
-        Assert.Equal("mohist/pi", profile.Definition.Stages[0].Tasks[0].Uses);
-        Assert.Equal("mohist/pi", profile.Definition.Approval!.Feedback!.Tasks![0].Uses);
+        var task = profile.Definition.Stages[0].Tasks[0];
+        Assert.Equal("mohist/agent", task.Uses);
+        Assert.Equal("mohist/builder", task.With!["name"]!.Value.GetString());
     }
 
     [Fact]
-    public void Parse_RejectsProfileExpressionOutsideCompleteUsesValue()
+    public void Parse_RejectsRemovedAgentActionMetadata()
     {
         var exception = Assert.Throws<WorkflowDefinitionValidationException>(() =>
             WorkflowProfileYamlParser.Parse("""
                 agentAction: mohist/opencode
                 stages:
                   - stage: build
-                    tasks:
-                      - id: task
-                        uses: core/script
-                        with:
-                          run: "${{ profile.agentAction }} --version"
-                """, "profile"));
-
-        Assert.Contains(exception.Errors, error =>
-            error.Path == "stages[0].tasks[0].with.run"
-            && error.Message.Contains("complete value of uses", StringComparison.Ordinal));
-    }
-
-    [Fact]
-    public void Parse_RejectsReferenceWithoutAgentAction()
-    {
-        var exception = Assert.Throws<WorkflowDefinitionValidationException>(() =>
-            WorkflowProfileYamlParser.Parse("""
-                stages:
-                  - stage: build
-                    tasks:
-                      - id: task
-                        uses: ${{ profile.agentAction }}
-                """, "profile"));
-
-        Assert.Contains(exception.Errors, error =>
-            error.Path == "stages[0].tasks[0].uses"
-            && error.Message.Contains("requires a non-empty agentAction", StringComparison.Ordinal));
-    }
-
-    [Fact]
-    public void Parse_RejectsUnusedAgentAction()
-    {
-        var exception = Assert.Throws<WorkflowDefinitionValidationException>(() =>
-            WorkflowProfileYamlParser.Parse("""
-                agentAction: mohist/opencode
-                stages:
-                  - stage: build
-                    tasks:
-                      - id: task
-                        uses: core/script
-                """, "profile"));
+                """, "profile", Catalog()));
 
         Assert.Contains(exception.Errors, error => error.Path == "agentAction");
     }
 
-    [Fact]
-    public void Parse_RequiresSelectedActionToDeclareAgentTurn()
+    [Theory]
+    [InlineData("mohist/opencode")]
+    [InlineData("mohist/pi")]
+    public void Parse_RejectsRemovedRuntimeActionsInTasks(string uses)
     {
-        var catalog = new ActionCatalog(
-            [new ActionCatalogEntry("mohist/opencode", [], [], [], Capabilities: [])],
-            []);
-
-        var exception = Assert.Throws<WorkflowDefinitionValidationException>(() =>
-            WorkflowProfileYamlParser.Parse(BoundProfileYaml, "profile", catalog));
-
-        Assert.Contains(exception.Errors, error =>
-            error.Path == "agentAction"
-            && error.Message.Contains("agent-turn", StringComparison.Ordinal));
-    }
-
-    [Fact]
-    public void Parse_RejectsLiteralAgentActionMixedWithBinding()
-    {
-        var catalog = new ActionCatalog(
-            [
-                new ActionCatalogEntry("mohist/opencode", [], [], [], Capabilities: ["agent-turn"]),
-                new ActionCatalogEntry("mohist/pi", [], [], [], Capabilities: ["agent-turn"]),
-            ],
-            []);
-        var yaml = """
-            agentAction: mohist/opencode
+        var yaml = $$"""
             stages:
               - stage: build
                 tasks:
-                  - id: selected
-                    uses: ${{ profile.agentAction }}
-                  - id: literal
-                    uses: mohist/pi
+                  - id: task
+                    uses: {{uses}}
+                    with:
+                      prompt: Build.
             """;
 
         var exception = Assert.Throws<WorkflowDefinitionValidationException>(() =>
-            WorkflowProfileYamlParser.Parse(yaml, "profile", catalog));
+            WorkflowProfileYamlParser.Parse(yaml, "profile", Catalog()));
 
         Assert.Contains(exception.Errors, error =>
-            error.Path == "stages[0].tasks[1].uses"
-            && error.Message.Contains("cannot be mixed", StringComparison.Ordinal));
+            error.Path == "stages[0].tasks[0]"
+            && error.Message.Contains("was removed", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void Parse_RejectsOptionsOnMohistAgent()
+    {
+        var exception = Assert.Throws<WorkflowDefinitionValidationException>(() =>
+            WorkflowProfileYamlParser.Parse("""
+                stages:
+                  - stage: build
+                    tasks:
+                      - id: task
+                        uses: mohist/agent
+                        with:
+                          name: mohist/builder
+                          prompt: Build.
+                          options: { model: x }
+                """, "profile", Catalog()));
+
+        Assert.Contains(exception.Errors, error => error.Path == "stages[0].tasks[0].with.options");
     }
 
     [Fact]
@@ -124,84 +92,18 @@ public sealed class WorkflowProfileYamlParserTests
                       - id: script
                         uses: core/script
                         with:
-                          run: "echo ok"
-                          shell: bash
-                          timeout: 1000
-                          resourceProfile:
-                            limits:
-                              cpu: 1
-                """, "profile", CurrentCoreScriptCatalog()));
+                          run: echo ok
+                          resourceProfile: { limits: { cpu: 1 } }
+                """, "profile", Catalog()));
 
-        var error = Assert.Single(exception.Errors);
-        Assert.Equal("stages[0].tasks[0].with.resourceProfile", error.Path);
-        Assert.Equal(ValidationSource.Action, error.Source);
-        Assert.Contains("unknown input", error.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains(exception.Errors, error => error.Path == "stages[0].tasks[0].with.resourceProfile");
     }
 
-    [Fact]
-    public void Parse_CurrentCoreScriptCatalogExposesOnlySupportedInputs()
-    {
-        var catalog = CurrentCoreScriptCatalog();
-
-        Assert.Equal(
-            ["run", "shell", "timeout"],
-            catalog.Actions.Single(action => action.Name == "core/script").Inputs.Select(input => input.Name));
-        Assert.DoesNotContain(
-            "resourceProfile",
-            catalog.Actions.Single(action => action.Name == "core/script").Inputs.Select(input => input.Name));
-
-        var profile = WorkflowProfileYamlParser.Parse("""
-            stages:
-              - stage: build
-                tasks:
-                  - id: script
-                    uses: core/script
-                    with:
-                      run: "echo ok"
-                      shell: bash
-                      timeout: 1000
-            """, "profile", catalog);
-
-        Assert.Equal("core/script", profile.Definition.Stages[0].Tasks[0].Uses);
-    }
-
-    [Fact]
-    public void Parse_RejectsOverrideForProfileWithoutBinding()
-    {
-        var exception = Assert.Throws<WorkflowDefinitionValidationException>(() =>
-            WorkflowProfileYamlParser.Parse("""
-                stages:
-                  - stage: build
-                """, "profile", agentActionOverride: "mohist/pi"));
-
-        Assert.Contains(exception.Errors, error => error.Path == "agentAction");
-    }
-
-    private static ActionCatalog CurrentCoreScriptCatalog() =>
-        new(
-            [new ActionCatalogEntry(
-                "core/script",
-                [
-                    new ActionCatalogInput("run", ["string"], Required: true),
-                    new ActionCatalogInput("shell", ["string"], Required: false),
-                    new ActionCatalogInput("timeout", ["number"], Required: false),
-                ],
-                [],
-                [])],
-            []);
-
-    private const string BoundProfileYaml = """
-        agentAction: mohist/opencode
-        approval:
-          feedback:
-            tasks:
-              - id: feedback
-                uses: ${{ profile.agentAction }}
-        stages:
-          - stage: build
-            requiresApproval: true
-            tasks:
-              - id: task
-                uses: ${{ profile.agentAction }}
-        """;
+    private static ActionCatalog Catalog() => new(
+        [new ActionCatalogEntry(
+            "core/script",
+            [new ActionCatalogInput("run", ["string"], Required: true)],
+            [],
+            [])],
+        []);
 }

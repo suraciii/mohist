@@ -14,11 +14,11 @@ public sealed class WorkflowRunBindingParticipantTests
     {
         var store = new FakeWorkflowRunStore();
         var participant = new WorkflowRunBindingParticipant(store);
-        var requested = CreateStart("mohist/pi");
+        var requested = CreateStart("mohist/github-pr");
 
         var applied = await participant.BindAsync(requested, "start-1", expectedRevision: null);
         var replayed = await participant.BindAsync(requested, "start-1", expectedRevision: null);
-        var conflicted = await participant.BindAsync(CreateStart("mohist/opencode"), "start-2", expectedRevision: null);
+        var conflicted = await participant.BindAsync(CreateStart("mohist/local"), "start-2", expectedRevision: null);
 
         Assert.Equal(WorkflowRunBindingOutcome.Applied, applied.Outcome);
         Assert.Equal(WorkflowRunBindingOutcome.AlreadyApplied, replayed.Outcome);
@@ -28,21 +28,19 @@ public sealed class WorkflowRunBindingParticipantTests
         var stored = Assert.IsType<WorkflowRun>(await store.LoadAsync(requested.WorkflowRunId));
         Assert.Equal(WorkflowRunStatus.Created, stored.Status);
         Assert.Equal("mohist/github-pr", stored.WorkflowProfileId);
-        Assert.Equal("mohist/pi", stored.AgentAction);
         Assert.Equal("build", Assert.Single(stored.Stages).Id);
         Assert.Equal("issue/42", stored.Workspace?.Branch);
         Assert.Equal("project-1", stored.Metadata.ProjectId);
         Assert.Equal(42, stored.Metadata.IssueNumber);
     }
 
-    private static BoundWorkflowStart CreateStart(string agentAction) => new(
+    private static BoundWorkflowStart CreateStart(string profileId) => new(
         WorkflowRunId: "run-1",
         ProjectId: "project-1",
         IssueNumber: 42,
         EpicNumber: null,
-        ExplicitProfileId: "mohist/github-pr",
-        ProfileId: "mohist/github-pr",
-        AgentAction: agentAction,
+        ExplicitProfileId: profileId,
+        ProfileId: profileId,
         Stages: [new BoundStageStructure("build", RequiresApproval: false)],
         Metadata: new WorkflowRunMetadata(
             "Issue 42",

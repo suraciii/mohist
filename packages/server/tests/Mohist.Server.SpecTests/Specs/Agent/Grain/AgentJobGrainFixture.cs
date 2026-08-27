@@ -39,7 +39,6 @@ public sealed class AgentJobGrainFixture : IAsyncLifetime
     public AgentLaunchParticipantProbe LaunchFaults { get; } = new();
     public ControllableAgentSessionTranscriptPersistence SessionPersistence { get; } = new();
     public RecordingSessionStopDelivery StopDelivery { get; } = new();
-    public RecordingSessionWorkPort WorkPort { get; } = new();
     public AgentSessionPersistenceTestProbe Persistence { get; }
     public AgentSessionStatePersistenceFailureProbe SessionStatePersistence { get; } = new();
 
@@ -82,8 +81,6 @@ public sealed class AgentJobGrainFixture : IAsyncLifetime
                     services.GetRequiredService<AgentSessionStatePersistenceFailureProbe>()));
             siloBuilder.Services.RemoveAll<ISessionStopDelivery>();
             siloBuilder.Services.AddSingleton<ISessionStopDelivery>(StopDelivery);
-            siloBuilder.Services.RemoveAll<ISessionWorkPort>();
-            siloBuilder.Services.AddSingleton<ISessionWorkPort>(WorkPort);
             siloBuilder.Services.RemoveAll<IAgentLaunchParticipantProbe>();
             siloBuilder.Services.AddSingleton<IAgentLaunchParticipantProbe>(LaunchFaults);
             siloBuilder.Services.AddSingleton<IAgentJobDispatchObserver>(DispatchObserver);
@@ -142,54 +139,7 @@ public sealed class AgentJobGrainFixture : IAsyncLifetime
         }
     }
 
-    public sealed class RecordingSessionWorkPort : ISessionWorkPort
-    {
-        private readonly object _gate = new();
-        private readonly List<SessionWorkObservationRequest> _requests = [];
 
-        public IReadOnlyList<SessionWorkObservationRequest> Requests
-        {
-            get
-            {
-                lock (_gate)
-                    return _requests.ToArray();
-            }
-        }
-
-        public void Reset()
-        {
-            lock (_gate)
-                _requests.Clear();
-        }
-
-        public Task<bool> BindAgentExecutionAsync(
-            SessionWorkflowExecutionBinding binding,
-            CancellationToken cancellationToken = default) => Task.FromResult(true);
-
-        public Task<bool> CanStartAgentCleanupAsync(
-            SessionWorkflowExecutionBinding binding,
-            CancellationToken cancellationToken = default) => Task.FromResult(true);
-
-        public Task ObserveAgentExecutionAsync(
-            SessionWorkflowExecutionBinding binding,
-            SessionWorkflowObservationKind kind,
-            string reasonCode,
-            string? message = null,
-            string? stopOperationId = null,
-            CancellationToken cancellationToken = default)
-        {
-            lock (_gate)
-                _requests.Add(new SessionWorkObservationRequest(binding, kind, reasonCode, message, stopOperationId));
-            return Task.CompletedTask;
-        }
-    }
-
-    public sealed record SessionWorkObservationRequest(
-        SessionWorkflowExecutionBinding Binding,
-        SessionWorkflowObservationKind Kind,
-        string ReasonCode,
-        string? Message,
-        string? StopOperationId);
 
     public ValueTask DisposeAsync()
     {

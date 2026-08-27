@@ -211,7 +211,7 @@ public class WorkflowArtifactUploadRouteSpecs
         Assert.StartsWith("artup_", uploadId);
         Assert.Equal(jobId, data.GetProperty("workflowRunId").GetString());
         Assert.Equal(workId, data.GetProperty("workId").GetString());
-        Assert.Equal(workId, data.GetProperty("taskRunId").GetString());
+        Assert.Equal(workId, data.GetProperty("actionAttemptId").GetString());
 
         await using var scope = _fixture.Services.CreateAsyncScope();
         var db = scope.ServiceProvider.GetRequiredService<MohistDbContext>();

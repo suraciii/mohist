@@ -115,6 +115,7 @@ public sealed partial class AgentJobGrain : Grain, IAgentJobGrain
             if (State.PendingSessionClose is not null
                 || State.PendingFailureEvent is not null
                 || State.PendingTerminalDeliveryEvent is not null
+                || State.PendingWorkflowTerminalEvent is not null
                 || State.PendingSubagentTerminalEvent is not null)
             {
                 await EnsureRecoveryReminderAsync();
@@ -124,6 +125,8 @@ public sealed partial class AgentJobGrain : Grain, IAgentJobGrain
                     await EmitFailureEventAsync(State.PendingFailureEvent);
                 if (State.PendingTerminalDeliveryEvent is not null)
                     await EmitTerminalDeliveryEventAsync(State.PendingTerminalDeliveryEvent);
+                if (State.PendingWorkflowTerminalEvent is not null)
+                    await EmitWorkflowTerminalEventAsync(State.PendingWorkflowTerminalEvent);
                 if (State.PendingSubagentTerminalEvent is not null)
                     await EmitSubagentTerminalEventAsync(State.PendingSubagentTerminalEvent);
             }
@@ -239,9 +242,10 @@ public sealed partial class AgentJobGrain : Grain, IAgentJobGrain
             InitialInputId: State.Input?.InitialInputId,
             InitialTurnId: State.Input?.InitialTurnId,
             RecoveryDeadlineAt: State.RecoveryDeadlineAt,
-            IsRecovering: IsRecovering));
+            IsRecovering: IsRecovering,
+            WorkflowOrigin: State.Input?.WorkflowOrigin));
 
-     public Task<AgentJobTerminalResult> GetTerminalResultAsync()
+    public Task<AgentJobTerminalResult> GetTerminalResultAsync()
     {
         if (State.TerminalResult is not null)
             return Task.FromResult(State.TerminalResult);
@@ -751,7 +755,9 @@ public sealed partial class AgentJobGrain : Grain, IAgentJobGrain
             SpawnOrigin: command.SpawnOrigin,
             WorkspaceRepositories: command.WorkspaceRepositories,
             OriginMarker: command.OriginMarker,
-            Skills: command.Skills);
+            Skills: command.Skills,
+            WorkflowOrigin: command.WorkflowOrigin,
+            TimeoutMilliseconds: command.TimeoutMilliseconds);
 
     private static bool PlansEquivalent(PrepareManualLaunchCommand left, PrepareManualLaunchCommand right) =>
         string.Equals(left.Prompt, right.Prompt, StringComparison.Ordinal)
@@ -772,6 +778,8 @@ public sealed partial class AgentJobGrain : Grain, IAgentJobGrain
         && string.Equals(left.WorkflowRunId ?? string.Empty, right.WorkflowRunId ?? string.Empty, StringComparison.Ordinal)
         && Equals(left.ConnectionOrigin, right.ConnectionOrigin)
         && string.Equals(left.OriginMarker, right.OriginMarker, StringComparison.Ordinal)
+        && Equals(left.WorkflowOrigin, right.WorkflowOrigin)
+        && left.TimeoutMilliseconds == right.TimeoutMilliseconds
         && JsonEquals(left.AgentConfig, right.AgentConfig)
         && AttachmentDescriptorsEquivalent(left.Attachments, right.Attachments);
 
@@ -826,6 +834,8 @@ public sealed partial class AgentJobGrain : Grain, IAgentJobGrain
         && string.Equals(left.ReasoningEffort, right.ReasoningEffort, StringComparison.Ordinal)
         && string.Equals(left.ExecutionSource, right.ExecutionSource, StringComparison.Ordinal)
         && string.Equals(left.OriginMarker, right.OriginMarker, StringComparison.Ordinal)
+        && Equals(left.WorkflowOrigin, right.WorkflowOrigin)
+        && left.TimeoutMilliseconds == right.TimeoutMilliseconds
         && JsonEquals(left.AgentConfig, right.AgentConfig)
         && AttachmentDescriptorsEquivalent(left.Attachments, right.Attachments)
         && Equals(left.StartupContext, right.StartupContext)
@@ -850,6 +860,8 @@ public sealed partial class AgentJobGrain : Grain, IAgentJobGrain
         if (!string.Equals(left.ReasoningEffort, right.ReasoningEffort, StringComparison.Ordinal)) fields.Add(nameof(AgentJobInput.ReasoningEffort));
         if (!string.Equals(left.ExecutionSource, right.ExecutionSource, StringComparison.Ordinal)) fields.Add(nameof(AgentJobInput.ExecutionSource));
         if (!string.Equals(left.OriginMarker, right.OriginMarker, StringComparison.Ordinal)) fields.Add(nameof(AgentJobInput.OriginMarker));
+        if (!Equals(left.WorkflowOrigin, right.WorkflowOrigin)) fields.Add(nameof(AgentJobInput.WorkflowOrigin));
+        if (left.TimeoutMilliseconds != right.TimeoutMilliseconds) fields.Add(nameof(AgentJobInput.TimeoutMilliseconds));
         if (!JsonEquals(left.AgentConfig, right.AgentConfig)) fields.Add(nameof(AgentJobInput.AgentConfig));
         if (!AttachmentDescriptorsEquivalent(left.Attachments, right.Attachments)) fields.Add(nameof(AgentJobInput.Attachments));
         if (!Equals(left.AllowedSubagents, right.AllowedSubagents)) fields.Add(nameof(AgentJobInput.AllowedSubagents));
@@ -915,15 +927,21 @@ public sealed partial class AgentJobGrain : Grain, IAgentJobGrain
         }
     }
 
+    private TimeSpan EffectiveJobTimeout() =>
+        State.Input?.TimeoutMilliseconds is > 0
+            ? TimeSpan.FromMilliseconds(State.Input.TimeoutMilliseconds.Value)
+            : _options.JobTimeout;
+
     private void ArmJobTimeout()
     {
-        if (_options.JobTimeout <= TimeSpan.Zero)
+        var timeout = EffectiveJobTimeout();
+        if (timeout <= TimeSpan.Zero)
             return;
 
-        var dueTime = _options.JobTimeout;
+        var dueTime = timeout;
         if (State.RunningSince is { } runningSince)
         {
-            var remaining = runningSince + _options.JobTimeout - _timeProvider.GetUtcNow();
+            var remaining = runningSince + timeout - _timeProvider.GetUtcNow();
             dueTime = remaining > TimeSpan.Zero ? remaining : TimeSpan.Zero;
         }
 
@@ -947,8 +965,8 @@ public sealed partial class AgentJobGrain : Grain, IAgentJobGrain
     {
         return State.RunnerId is not null
             && State.RunningSince is not null
-            && _options.JobTimeout > TimeSpan.Zero
-            && _timeProvider.GetUtcNow() >= State.RunningSince.Value + _options.JobTimeout;
+            && EffectiveJobTimeout() > TimeSpan.Zero
+            && _timeProvider.GetUtcNow() >= State.RunningSince.Value + EffectiveJobTimeout();
     }
 
     internal async Task EnterTerminalStateAsync(
@@ -960,7 +978,8 @@ public sealed partial class AgentJobGrain : Grain, IAgentJobGrain
         string? message,
         string? output,
         string[]? artifactUploadIds,
-        int? terminalExitCode)
+        int? terminalExitCode,
+        string? addTasksJson = null)
     {
         var pending = BuildPendingSessionClose(terminalStatus, exitCode, failureReason, failureCategory, pendingReason);
 
@@ -970,6 +989,7 @@ public sealed partial class AgentJobGrain : Grain, IAgentJobGrain
             if (State.PendingSessionClose is not null
                 || State.PendingFailureEvent is not null
                 || State.PendingTerminalDeliveryEvent is not null
+                || State.PendingWorkflowTerminalEvent is not null
                 || State.PendingSubagentTerminalEvent is not null)
                 await EnsureRecoveryReminderAsync();
             await PersistAsync();
@@ -980,6 +1000,8 @@ public sealed partial class AgentJobGrain : Grain, IAgentJobGrain
                 await EmitFailureEventAsync(State.PendingFailureEvent);
             if (State.PendingTerminalDeliveryEvent is not null)
                 await EmitTerminalDeliveryEventAsync(State.PendingTerminalDeliveryEvent);
+            if (State.PendingWorkflowTerminalEvent is not null)
+                await EmitWorkflowTerminalEventAsync(State.PendingWorkflowTerminalEvent);
             if (State.PendingSubagentTerminalEvent is not null)
                 await EmitSubagentTerminalEventAsync(State.PendingSubagentTerminalEvent);
             return;
@@ -1020,6 +1042,15 @@ public sealed partial class AgentJobGrain : Grain, IAgentJobGrain
             failureCategory,
             artifactUploadIds,
             terminalExitCode ?? exitCode);
+        StageWorkflowTerminalEvent(
+            terminalStatus,
+            message,
+            output,
+            failureReason,
+            failureCategory,
+            artifactUploadIds,
+            terminalExitCode ?? exitCode,
+            addTasksJson);
         StageSubagentTerminalEvent(terminalStatus);
 
         if (terminalStatus == AgentJobStatus.Failed)
@@ -1056,6 +1087,8 @@ public sealed partial class AgentJobGrain : Grain, IAgentJobGrain
             await EmitFailureEventAsync(State.PendingFailureEvent);
         if (State.PendingTerminalDeliveryEvent is not null)
             await EmitTerminalDeliveryEventAsync(State.PendingTerminalDeliveryEvent);
+        if (State.PendingWorkflowTerminalEvent is not null)
+            await EmitWorkflowTerminalEventAsync(State.PendingWorkflowTerminalEvent);
         if (State.PendingSubagentTerminalEvent is not null)
             await EmitSubagentTerminalEventAsync(State.PendingSubagentTerminalEvent);
     }
@@ -1148,64 +1181,6 @@ public sealed partial class AgentJobGrain : Grain, IAgentJobGrain
                 ProjectId: projectId,
                 AgentId: agentId),
             extensions);
-    }
-
-    private void StageTerminalDeliveryEvent(
-        AgentJobStatus status,
-        string? message,
-        string? output,
-        string? failureReason,
-        string? failureCategory,
-        string[]? artifactUploadIds,
-        int? exitCode)
-    {
-        var origin = State.ManualPlan?.ConnectionOrigin;
-        if (origin is null)
-            return;
-
-        // A failed interim Unknown append leaves its obligation in state. The
-        // recovery deadline is authoritative, so the final terminal payload
-        // must replace that stale obligation rather than being suppressed by
-        // it. A non-Unknown obligation is already the final payload and must
-        // remain stable across terminal-entry replays.
-        if (State.PendingTerminalDeliveryEvent is { } pending
-            && (status == AgentJobStatus.Unknown || pending.Status != AgentJobStatus.Unknown))
-            return;
-
-        // The interim Unknown delivery and the final reconciled delivery must
-        // stay distinct persisted events: the event store deduplicates by
-        // (source, event id), and a reconciliation that resolves to Failed has
-        // to reach Slack as its own payload.
-        var eventId = status == AgentJobStatus.Unknown
-            ? AgentJobSessionDeliveryIds.UnknownTerminalDeliveryEventId(Key)
-            : AgentJobSessionDeliveryIds.TerminalDeliveryEventId(Key);
-        State.PendingTerminalDeliveryEvent = new PendingTerminalDeliveryEvent(
-            eventId,
-            origin,
-            status,
-            message,
-            failureReason,
-            failureCategory,
-            artifactUploadIds?.Length ?? 0,
-            exitCode,
-            _timeProvider.GetUtcNow(),
-            output);
-    }
-
-    private async Task EmitTerminalDeliveryEventAsync(PendingTerminalDeliveryEvent pending)
-    {
-        try
-        {
-            var envelope = BuildTerminalDeliveryEnvelope(pending);
-            await _eventStore.AppendAsync(envelope, CancellationToken.None);
-            _dispatchSignal.Wake();
-            State.PendingTerminalDeliveryEvent = null;
-            await PersistAsync();
-        }
-        catch (Exception ex)
-        {
-            _log.LogWarning(ex, "AgentJob {Id} terminal delivery event is retained for retry", Key);
-        }
     }
 
     private void StageSubagentTerminalEvent(AgentJobStatus status)

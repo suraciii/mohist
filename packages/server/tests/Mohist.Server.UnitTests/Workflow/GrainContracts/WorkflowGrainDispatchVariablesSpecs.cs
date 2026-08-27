@@ -92,7 +92,7 @@ public sealed class WorkflowGrainDispatchVariablesSpecs
         });
 
         await arrangement.Grain.AddTasksAsync(new AddTasksBatchRequest([
-            new AddTasksBatchItem("T-001", "Implement feature", "mohist/opencode", withJson, expectJson),
+            new AddTasksBatchItem("T-001", "Implement feature", "spec/task", withJson, expectJson),
         ]));
 
         await arrangement.ReportCompletedAsync(load);
@@ -101,7 +101,7 @@ public sealed class WorkflowGrainDispatchVariablesSpecs
         var dispatch = await ToDispatchAsync(arrangement, claimed);
 
         Assert.StartsWith("T-001.", dispatch.WorkId);
-        Assert.Equal("mohist/opencode", dispatch.Uses);
+        Assert.Equal("spec/task", dispatch.Uses);
         Assert.NotNull(dispatch.With);
         Assert.Contains("Add the feature flag service.", dispatch.With);
         Assert.Contains("service is registered", dispatch.With);
@@ -109,163 +109,6 @@ public sealed class WorkflowGrainDispatchVariablesSpecs
         Assert.Contains("contains", dispatch.Expect!);
         Assert.Contains("src/FeatureFlags.cs", dispatch.Expect!);
         Assert.DoesNotContain("expect", dispatch.With!);
-    }
-
-    [Fact]
-    public async Task StageWithDynamicAgentVariables_LoadedDynamicTasksInheritStageAgent()
-    {
-        var arrangement = await ArrangeAsync(
-            "wr-dl-dynamic-stage-agent",
-            SingleStage([new("load-tasks", "Load tasks", "spec/load")], []));
-        await PatchIssueVariablesAsync(arrangement, new VariableBundle(
-            Vars: JsonSerializer.SerializeToElement(new { agent = new { model = "kimi-for-coding/k2p6" } }),
-            Stages: new Dictionary<string, StageVariables>
-            {
-                ["build"] = new(JsonSerializer.SerializeToElement(new { agent = new { model = "openai/gpt-5.4" } })),
-            }));
-
-        var load = (await arrangement.AssignAndClaimAsync())!;
-
-        await arrangement.Grain.AddTasksAsync(new AddTasksBatchRequest([
-            new AddTasksBatchItem(
-                "T-001",
-                "Implement feature",
-                "mohist/opencode",
-                JsonSerializer.Deserialize<JsonElement>("""{"prompt":"Implement feature","options":"${{ vars.agent }}"}""")),
-        ]));
-
-        await arrangement.ReportCompletedAsync(load);
-
-        var claimed = (await arrangement.AssignAndClaimAsync())!;
-        var dispatch = await ToDispatchAsync(arrangement, claimed);
-
-        Assert.StartsWith("T-001.", dispatch.WorkId);
-        Assert.Contains("${{ vars.agent }}", dispatch.With);
-        Assert.DoesNotContain("openai/gpt-5.4", dispatch.With);
-        Assert.DoesNotContain("kimi-for-coding/k2p6", dispatch.With);
-        Assert.NotNull(dispatch.Variables);
-        using var varsDoc = JsonDocument.Parse(dispatch.Variables!);
-        var agent = varsDoc.RootElement.GetProperty("vars").GetProperty("agent");
-        Assert.Equal("openai/gpt-5.4", agent.GetProperty("model").GetString());
-    }
-
-    [Fact]
-    public async Task StageWithAgentVariables_TaskWithoutAgentInheritsStageAgentAtDispatch()
-    {
-        var arrangement = await ArrangeAsync(
-            "wr-dl-inherit-stage-agent",
-            SingleStage([new(
-                "T-001",
-                "Implement feature",
-                "mohist/opencode",
-                new Dictionary<string, JsonElement?>
-                {
-                    ["prompt"] = JsonSerializer.SerializeToElement("Implement feature"),
-                    ["options"] = JsonSerializer.SerializeToElement("${{ vars.agent }}"),
-                })],
-                []));
-        await PatchIssueVariablesAsync(arrangement, new VariableBundle(
-            Vars: JsonSerializer.SerializeToElement(new { agent = new { model = "kimi-for-coding/k2p6" } }),
-            Stages: new Dictionary<string, StageVariables>
-            {
-                ["build"] = new(JsonSerializer.SerializeToElement(new { agent = new { model = "openai/gpt-5.4" } })),
-            }));
-
-        var claimed = (await arrangement.AssignAndClaimAsync())!;
-        var dispatch = await ToDispatchAsync(arrangement, claimed);
-
-        Assert.StartsWith("T-001.", dispatch.WorkId);
-        Assert.Contains("Implement feature", dispatch.With);
-        Assert.Contains("${{ vars.agent }}", dispatch.With);
-        Assert.DoesNotContain("openai/gpt-5.4", dispatch.With);
-        Assert.DoesNotContain("kimi-for-coding/k2p6", dispatch.With);
-        Assert.NotNull(dispatch.Variables);
-        using var varsDoc = JsonDocument.Parse(dispatch.Variables!);
-        var agent = varsDoc.RootElement.GetProperty("vars").GetProperty("agent");
-        Assert.Equal("openai/gpt-5.4", agent.GetProperty("model").GetString());
-    }
-
-    [Fact]
-    public async Task StageWithAgentVariables_TaskAgentTemplatePreservedAndSnapshotCarriesStageAgent()
-    {
-        var arrangement = await ArrangeAsync(
-            "wr-dl-template-preserved",
-            new WorkflowDefinition(
-            [
-                new StageDefinition(
-                    "check",
-                    [new TaskDefinition(
-                        "ai-review",
-                        "AI review",
-                        "mohist/opencode",
-                        new Dictionary<string, JsonElement?>
-                        {
-                            ["session"] = JsonSerializer.SerializeToElement("check"),
-                            ["prompt"] = JsonSerializer.SerializeToElement("${{ prompts.review }}"),
-                            ["options"] = JsonSerializer.SerializeToElement("${{ vars.agent }}"),
-                        })],
-                    []),
-            ]));
-        await PatchIssueVariablesAsync(arrangement, new VariableBundle(
-            Stages: new Dictionary<string, StageVariables>
-            {
-                ["check"] = new(JsonSerializer.SerializeToElement(new { agent = new { type = "opencode", model = "openai/gpt-5.5" } })),
-            }));
-
-        var claimed = (await arrangement.AssignAndClaimAsync())!;
-        var dispatch = await ToDispatchAsync(arrangement, claimed);
-
-        Assert.StartsWith("ai-review.", dispatch.WorkId);
-        using var with = JsonDocument.Parse(dispatch.With!);
-        Assert.Equal("${{ vars.agent }}", with.RootElement.GetProperty("options").GetString());
-        Assert.Equal("${{ prompts.review }}", with.RootElement.GetProperty("prompt").GetString());
-        Assert.DoesNotContain("kimi-for-coding/k2p6", dispatch.With);
-        Assert.DoesNotContain("openai/gpt-5.5", dispatch.With);
-        Assert.NotNull(dispatch.Variables);
-        using var varsDoc = JsonDocument.Parse(dispatch.Variables!);
-        var agent = varsDoc.RootElement.GetProperty("vars").GetProperty("agent");
-        Assert.Equal("opencode", agent.GetProperty("type").GetString());
-        Assert.Equal("openai/gpt-5.5", agent.GetProperty("model").GetString());
-    }
-
-    [Fact]
-    public async Task StageAgentVariableUpdate_DispatchedTaskInheritsLatestIssueAgentModel()
-    {
-        // After T-003 the runtime reads the issue layer directly. Patching
-        // the issue layer (the T1 snapshot) is what surfaces in dispatch.
-        var arrangement = await ArrangeAsync(
-            "wr-dl-latest-agent",
-            SingleStage([new(
-                "T-001",
-                "Implement feature",
-                "mohist/opencode",
-                new Dictionary<string, JsonElement?>
-                {
-                    ["prompt"] = JsonSerializer.SerializeToElement("Implement feature"),
-                    ["options"] = JsonSerializer.SerializeToElement("${{ vars.agent }}"),
-                })],
-                []));
-
-        await PatchIssueVariablesAsync(arrangement, new VariableBundle(
-            Stages: new Dictionary<string, StageVariables>
-            {
-                ["build"] = new(JsonSerializer.SerializeToElement(new
-                {
-                    agent = new { type = "opencode", model = "minimax-coding-plan/MiniMax-M3" },
-                })),
-            }));
-
-        var claimed = (await arrangement.AssignAndClaimAsync())!;
-        var dispatch = await ToDispatchAsync(arrangement, claimed);
-
-        Assert.StartsWith("T-001.", dispatch.WorkId);
-        Assert.Contains("${{ vars.agent }}", dispatch.With);
-        Assert.DoesNotContain("minimax-coding-plan/MiniMax-M3", dispatch.With);
-        Assert.DoesNotContain("old-coding/legacy", dispatch.With);
-        Assert.NotNull(dispatch.Variables);
-        using var varsDoc = JsonDocument.Parse(dispatch.Variables!);
-        var agent = varsDoc.RootElement.GetProperty("vars").GetProperty("agent");
-        Assert.Equal("minimax-coding-plan/MiniMax-M3", agent.GetProperty("model").GetString());
     }
 
     [Fact]
@@ -470,96 +313,6 @@ public sealed class WorkflowGrainDispatchVariablesSpecs
         var factory = new PooledDbContextFactory<MohistDbContext>(options);
         var store = new IssueVariableStore(factory);
         await store.PatchVariablesAsync(arrangement.ProjectId, issueNumber, patch);
-    }
-
-    [Fact]
-    public async Task RuntimeTaskWithPlaceholder_RetryAfterVariableChange_UsesNewValue()
-    {
-        var arrangement = await ArrangeAsync(
-            "wr-dvs-placeholder-retry",
-            SingleStage(
-                tasks: [new("load-tasks", "Load tasks", "spec/load")],
-                checks: [new("check-1", "Check 1", "spec/check")]));
-        await PatchIssueVariablesAsync(arrangement, new VariableBundle(
-            Vars: JsonSerializer.SerializeToElement(new { agent = new { type = "opencode", model = "model-a" } })));
-
-        var loadItem = (await arrangement.AssignAndClaimAsync())!;
-        var loadDispatch = await ToDispatchAsync(arrangement, loadItem);
-        await arrangement.Grain.AddTasksAsync(
-            new AddTasksBatchRequest([
-                new AddTasksBatchItem("T-001", "Implement feature", "mohist/opencode", JsonSerializer.Deserialize<JsonElement>("""
-                    {"options":"${{ vars.agent }}"}
-                    """))
-            ]));
-        await arrangement.ReportCompletedAsync(loadItem);
-
-        var dynamicItem = (await arrangement.AssignAndClaimAsync())!;
-        var dynamicTask = await ToDispatchAsync(arrangement, dynamicItem);
-        Assert.StartsWith("T-001.1", dynamicTask.WorkId);
-        Assert.Contains("${{ vars.agent }}", dynamicTask.With);
-        Assert.DoesNotContain("model-a", dynamicTask.With);
-        Assert.NotNull(dynamicTask.Variables);
-        using (var firstVars = JsonDocument.Parse(dynamicTask.Variables!))
-            Assert.Equal("model-a", firstVars.RootElement.GetProperty("vars").GetProperty("agent").GetProperty("model").GetString());
-
-        await arrangement.ReportFailedAsync(dynamicItem, "expected flaky");
-        await PatchIssueVariablesAsync(arrangement, new VariableBundle(
-            Stages: new Dictionary<string, StageVariables>
-            {
-                ["build"] = new(JsonSerializer.SerializeToElement(new { agent = new { type = "opencode", model = "model-b" } }))
-            }));
-        await arrangement.Grain.RetryAsync();
-
-        var retriedItem = (await arrangement.AssignAndClaimAsync())!;
-        var retriedTask = await ToDispatchAsync(arrangement, retriedItem);
-        Assert.StartsWith("T-001.2", retriedTask.WorkId);
-        Assert.Contains("${{ vars.agent }}", retriedTask.With);
-        Assert.DoesNotContain("model-a", retriedTask.With);
-        Assert.DoesNotContain("model-b", retriedTask.With);
-        Assert.NotNull(retriedTask.Variables);
-        using (var retryVars = JsonDocument.Parse(retriedTask.Variables!))
-            Assert.Equal("model-b", retryVars.RootElement.GetProperty("vars").GetProperty("agent").GetProperty("model").GetString());
-
-        await arrangement.ReportCompletedAsync(retriedItem);
-        var checkItem = (await arrangement.AssignAndClaimAsync())!;
-        await arrangement.ReportChecksPassAsync(checkItem, "check-1");
-    }
-
-    [Fact]
-    public async Task RuntimeTaskWithBakedLiteral_Retry_UsesBakedValue()
-    {
-        var arrangement = await ArrangeAsync(
-            "wr-dvs-baked-retry",
-            SingleStage(
-                tasks: [new("load-tasks", "Load tasks", "spec/load")],
-                checks: [new("check-1", "Check 1", "spec/check")]));
-
-        var loadItem = (await arrangement.AssignAndClaimAsync())!;
-        var loadDispatch = await ToDispatchAsync(arrangement, loadItem);
-        await arrangement.Grain.AddTasksAsync(
-            new AddTasksBatchRequest([
-                new AddTasksBatchItem("T-001", "Implement feature", "mohist/opencode", JsonSerializer.Deserialize<JsonElement>("""
-                    {"options":{"type":"opencode","model":"model-a"}}
-                    """))
-            ]));
-        await arrangement.ReportCompletedAsync(loadItem);
-
-        var dynamicItem = (await arrangement.AssignAndClaimAsync())!;
-        var dynamicTask = await ToDispatchAsync(arrangement, dynamicItem);
-        Assert.StartsWith("T-001.1", dynamicTask.WorkId);
-        Assert.Contains("model-a", dynamicTask.With);
-        await arrangement.ReportFailedAsync(dynamicItem, "expected flaky");
-        await arrangement.Grain.RetryAsync();
-
-        var retriedItem = (await arrangement.AssignAndClaimAsync())!;
-        var retriedTask = await ToDispatchAsync(arrangement, retriedItem);
-        Assert.StartsWith("T-001.2", retriedTask.WorkId);
-        Assert.Contains("model-a", retriedTask.With);
-        Assert.DoesNotContain("model-b", retriedTask.With);
-        await arrangement.ReportCompletedAsync(retriedItem);
-
-        var checkItem = (await arrangement.AssignAndClaimAsync())!;
-        await arrangement.ReportChecksPassAsync(checkItem, "check-1");
     }
 
     [Fact]

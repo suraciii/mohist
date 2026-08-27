@@ -4,7 +4,7 @@ public sealed record WorkflowArtifactDto
 {
     public string artifactId { get; set; } = string.Empty;
     public string workflowRunId { get; set; } = string.Empty;
-    public string taskRunId { get; set; } = string.Empty;
+    public string actionAttemptId { get; set; } = string.Empty;
     public string path { get; set; } = string.Empty;
     public string kind { get; set; } = "file";
     public string? contentType { get; set; }

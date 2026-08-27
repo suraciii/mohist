@@ -115,11 +115,12 @@ public class MohistWorkflowDefinitionTests
         var task = Assert.Single(definition.Approval!.Feedback!.Tasks!);
         Assert.Equal("apply-feedback", task.Id);
         Assert.Equal("Apply approval feedback", task.Title);
-        Assert.Equal("mohist/opencode", task.Uses);
+        Assert.Equal("mohist/agent", task.Uses);
+        Assert.Equal("mohist/builder", task.With!["name"]!.Value.GetString());
         Assert.NotNull(task.With);
         Assert.Equal("${{ stage.name }}", task.With!["session"]?.GetString());
         Assert.Equal("${{ prompts.apply-feedback }}", task.With["prompt"]?.GetString());
-        Assert.Equal("${{ vars.agent }}", task.With["options"]?.GetString());
+        Assert.False(task.With!.ContainsKey("options"));
     }
 
     [Fact]
@@ -173,9 +174,10 @@ public class MohistWorkflowDefinitionTests
             Assert.True(handler.RetrySelf);
             var fixCi = Assert.Single(handler.Tasks);
             Assert.Equal("recover:fix-ci", fixCi.Id);
-            Assert.Equal("mohist/opencode", fixCi.Uses);
+            Assert.Equal("mohist/agent", fixCi.Uses);
+        Assert.Equal("mohist/builder", fixCi.With!["name"]!.Value.GetString());
             Assert.Equal("${{ prompts.fix-ci }}", fixCi.With!["prompt"]!.Value.GetString());
-            Assert.Equal("${{ vars.agent }}", fixCi.With!["options"]!.Value.GetString());
+            Assert.False(fixCi.With!.ContainsKey("options"));
             Assert.Equal("build", fixCi.With!["session"]!.Value.GetString());
             Assert.Null(fixCi.Expect);
         }
@@ -200,9 +202,10 @@ public class MohistWorkflowDefinitionTests
         var fixCi = Assert.Single(handler.Tasks);
         Assert.Equal("recover:fix-ci", fixCi.Id);
         Assert.Equal("Fix CI verification", fixCi.Title);
-        Assert.Equal("mohist/opencode", fixCi.Uses);
+        Assert.Equal("mohist/agent", fixCi.Uses);
+        Assert.Equal("mohist/builder", fixCi.With!["name"]!.Value.GetString());
         Assert.Equal("${{ prompts.fix-ci }}", fixCi.With!["prompt"]!.Value.GetString());
-        Assert.Equal("${{ vars.agent }}", fixCi.With!["options"]!.Value.GetString());
+        Assert.False(fixCi.With!.ContainsKey("options"));
         Assert.Equal("build", fixCi.With!["session"]!.Value.GetString());
 
         // The local profile's recovery declaration keeps the existing

@@ -31,8 +31,9 @@ across Runtime loss.
 
 - Mohist Agent is owned by the Agent context, which decides identity, Instructions, execution
   configuration, Skills, archival, and readiness.
-- Workflow owns orchestration state. An executable Workflow task names a Mohist Agent, supplies
-  input and Workflow attribution, and consumes the resulting AgentJob result.
+- Workflow owns orchestration state. A `mohist/agent` task names a Mohist Agent, supplies input and
+  Workflow attribution, and consumes the resulting AgentJob result. Mechanical Actions remain
+  Workflow-owned orchestration and do not create AgentJob.
 - AgentJob is owned by the Agent context and is the sole top-level execution owner. It decides the
   lifecycle, result, retry, and recovery of one Agent work item regardless of launch origin.
 - AgentSession is owned by the Session context, which decides Input order, Turns, Transcript,
@@ -44,13 +45,17 @@ across Runtime loss.
 
 There is one work-owner path:
 
-```mermaid
-flowchart TD
-    O["Workflow task / Web / CLI / Connection / event / mention"] --> J["Agent AgentJob"]
-    J --> S["AgentSession"]
-    J --> A["resolved Action"]
-    A --> RA["Runtime adapter"]
-    RA --> RS["Runtime Session"]
+```text diagram
+Workflow mohist/agent task / Web / CLI / Connection / event / mention
+                         |
+                         v
+                 Agent AgentJob
+                  |           |
+                  v           v
+          AgentSession    resolved Action
+                              |
+                              v
+                     Runtime adapter --> Runtime Session
 ```
 
 Every origin enters through the canonical AgentJob launch boundary. The Agent context validates
@@ -69,9 +74,9 @@ write, or external effect. Responses and events expose only the public projectio
 [`agent-api.md`](agent-api.md); canonical internal models, physical Binding, workspace paths,
 prompt or memory content, and Runner control remain private.
 
-There is no Inline Agent or Agent Definition Reference path. A Workflow worker is a real Mohist
-Agent, and its task creates an ordinary AgentJob and AgentSession through the same launch boundary
-as every other entry point.
+There is no Inline Agent or Agent Definition Reference path. A Workflow Agent worker is a real
+Mohist Agent, and its `mohist/agent` task creates an ordinary AgentJob and AgentSession through the
+same launch boundary as every other Agent entry point. Mechanical Actions are not Agent workers.
 
 ## Work lifecycle and Session
 
@@ -536,19 +541,13 @@ reconstruct or display the materialization path.
 ## Status
 
 Stable AgentSession identity, Input and Turn records, Activity and unknown handling, launch and
-Follow-up paths, and current Runtime Binding are implemented. The unified AgentJob path is the
-target model, not the current implementation: Workflow still owns TaskRun and runtime-specific
-Action paths, and `mohist/agent` still snapshots an Agent definition without creating AgentJob.
-Those paths must be deleted rather than retained as compatibility modes.
+Follow-up paths, current Runtime Binding, and the unified Workflow AgentJob path are implemented.
+A `mohist/agent` Workflow Action now freezes one handoff, materializes an AgentJob and AgentSession
+through a durable activation cursor, and finalizes its typed terminal delivery idempotently in
+Workflow. Mechanical Actions remain Workflow-owned orchestration attempts. Built-in Profiles use
+built-in `mohist/` Agents, with Project Agents taking precedence.
 
 The remaining convergence gaps are:
-
-- Workflow tasks do not yet launch a real Mohist Agent through the canonical AgentJob boundary;
-  built-in Profiles still select Runtime-specific Actions instead of built-in or Project Agent names.
-  The binding DSL is decided in
-  [`decisions/workflow-agent-binding.md`](decisions/workflow-agent-binding.md).
-- TaskRun still owns execution lifecycle, retry, recovery, and result for Workflow work. WorkflowRun
-  must retain only orchestration state and AgentJob references after TaskRun is removed.
 - Launch acceptance does not yet converge through one durable path from caller identity to every
   accepted or rejected Job/Session/Input/Turn result.
 - Canonical internal projections are not yet the only state consumed by trusted clients. The

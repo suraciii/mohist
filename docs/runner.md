@@ -200,8 +200,9 @@ owner's responsibility; a host may use systemd, a container limit, or an
 equivalent supervisor without changing workflow semantics.
 
 Runner does not select a global Runtime backend through `type`. A Workflow
-task's `uses` value selects an execution-backend Action such as
-`mohist/opencode` or `mohist/pi`. Action Input supplies model options. See
+Agent task names a Mohist Agent through `mohist/agent`; the Agent definition
+selects the execution-backend Action (`mohist/opencode` or `mohist/pi`), which
+is an internal Agent-to-Runner contract. Agent Input supplies model options. See
 [Action Contracts](actions/README.md).
 
 Runtime replacement and shutdown are bounded by two host-local settings, both

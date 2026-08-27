@@ -75,7 +75,7 @@ public sealed record SystemUpdateRecoveryWorkOutcome(
     string OwnerKind,
     string OwnerId,
     string WorkId,
-    string? TaskRunId,
+    string? ActionAttemptId,
     string WorkType,
     string Status,
     string State);

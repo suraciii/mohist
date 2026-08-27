@@ -98,10 +98,11 @@ public partial class ApprovalFeedbackTests
 
         var feedbackTask = current.Tasks.Last();
         Assert.Equal("apply-feedback", feedbackTask.DefinitionId);
-        Assert.Equal("mohist/opencode", feedbackTask.Uses);
+        Assert.Equal("mohist/agent", feedbackTask.Uses);
+        Assert.Equal("mohist/builder", feedbackTask.WithInput!["name"]?.GetString());
         Assert.NotNull(feedbackTask.CausedByFeedbackId);
         Assert.Equal(run.Feedback[0].Id, feedbackTask.CausedByFeedbackId);
-        Assert.Equal(TaskRunStatus.Pending, feedbackTask.Status);
+        Assert.Equal(WorkflowActionAttemptStatus.Pending, feedbackTask.Status);
 
         Assert.All(current.Checks, c =>
         {
@@ -287,14 +288,12 @@ public partial class ApprovalFeedbackTests
 
         var feedbackTask = current.Tasks.Last();
         Assert.Equal("apply-feedback", feedbackTask.DefinitionId);
-        Assert.Equal("mohist/opencode", feedbackTask.Uses);
+        Assert.Equal("mohist/agent", feedbackTask.Uses);
         Assert.Equal("Apply approval feedback", feedbackTask.Title);
         Assert.NotNull(feedbackTask.WithInput);
+        Assert.Equal("mohist/builder", feedbackTask.WithInput!["name"]?.GetString());
         Assert.Equal("plan", feedbackTask.WithInput!["session"]?.GetString());
-        // The default feedback task binds options explicitly so approval
-        // feedback honors the issue-level model selection (proposal:
-        // "approval feedback task ... 显式绑定 options: ${{ vars.agent }}").
-        Assert.Equal("${{ vars.agent }}", feedbackTask.WithInput!["options"]?.GetString());
+        Assert.False(feedbackTask.WithInput.ContainsKey("options"));
     }
 
     [Fact]
@@ -304,10 +303,11 @@ public partial class ApprovalFeedbackTests
 
         Assert.Equal("apply-feedback", task.Id);
         Assert.Equal("Apply approval feedback", task.Title);
-        Assert.Equal("mohist/opencode", task.Uses);
+        Assert.Equal("mohist/agent", task.Uses);
         Assert.NotNull(task.With);
+        Assert.Equal("mohist/builder", task.With!["name"]?.GetString());
         Assert.Equal("check", task.With!["session"]?.GetString());
-        Assert.Equal("${{ vars.agent }}", task.With!["options"]?.GetString());
+        Assert.False(task.With.ContainsKey("options"));
     }
 
     [Fact]
@@ -372,9 +372,10 @@ public partial class ApprovalFeedbackTests
         var config = new TaskDefinition(
             Id: "apply-feedback",
             Title: "Apply approval feedback",
-            Uses: "mohist/opencode",
+            Uses: "mohist/agent",
             With: new Dictionary<string, System.Text.Json.JsonElement?>
             {
+                ["name"] = JsonSerializer.SerializeToElement("mohist/builder"),
                 ["prompt"] = JsonSerializer.SerializeToElement("${{ prompts.apply-feedback }}"),
             });
 
@@ -392,9 +393,10 @@ public partial class ApprovalFeedbackTests
         var config = new TaskDefinition(
             Id: "apply-feedback",
             Title: "Apply approval feedback",
-            Uses: "mohist/opencode",
+            Uses: "mohist/agent",
             With: new Dictionary<string, System.Text.Json.JsonElement?>
             {
+                ["name"] = JsonSerializer.SerializeToElement("mohist/builder"),
                 ["session"] = JsonSerializer.SerializeToElement("custom-session"),
                 ["prompt"] = JsonSerializer.SerializeToElement("${{ prompts.apply-feedback }}"),
             });

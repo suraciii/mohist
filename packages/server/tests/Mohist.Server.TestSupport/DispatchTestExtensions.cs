@@ -67,47 +67,15 @@ public static class DispatchTestExtensions
     {
         var workflow = grains.GetGrain<IWorkflowGrain>(workflowRunId);
         var active = await workflow.GetActiveWorkAsync(workId);
-        var taskRunId = active?.WorkType == WorkItemTypes.Task ? active.TaskRunId : null;
-        AgentExecutionBinding? binding = null;
-        if (taskRunId is not null)
-        {
-            var carriesBinding = result.AgentSessionId is not null
-                || result.AgentTurnId is not null
-                || result.Runtime is not null
-                || result.RuntimeSessionId is not null;
-            var candidate = carriesBinding
-                ? new AgentExecutionBinding(
-                    taskRunId,
-                    workId,
-                    runnerId,
-                    result.AgentSessionId!,
-                    result.AgentTurnId!,
-                    result.Runtime!,
-                    result.RuntimeSessionId!)
-                : new AgentExecutionBinding(
-                    taskRunId,
-                    workId,
-                    runnerId,
-                    $"test-session:{workId}",
-                    $"test-turn:{workId}",
-                    "opencode",
-                    $"test-runtime-session:{workId}");
-            if (await workflow.BindAgentExecutionAsync(candidate) == WorkReportVerdict.Accepted)
-                binding = candidate;
-        }
-
+        var actionAttemptId = active?.WorkType == WorkItemTypes.Task ? active.ActionAttemptId : null;
         var report = ResolveScoped<WorkflowReportService>(serviceProvider);
         await report.ReportAsync(
             runnerId,
             workflowRunId,
             workId,
-            taskRunId,
+            actionAttemptId,
             result,
-            CancellationToken.None,
-            binding?.AgentSessionId,
-            binding?.AgentTurnId,
-            binding?.Runtime,
-            binding?.RuntimeSessionId);
+            CancellationToken.None);
     }
 
     /// <summary>

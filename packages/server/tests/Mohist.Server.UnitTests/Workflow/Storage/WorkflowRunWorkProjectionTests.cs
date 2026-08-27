@@ -140,7 +140,7 @@ public sealed class WorkflowRunWorkProjectionTests
                         Status = StageRunStatus.Completed,
                         Tasks =
                         [
-                            new TaskRun
+                            new WorkflowActionAttempt
                             {
                                 Id = "task-previous",
                                 DefinitionId = "task-previous",
@@ -149,10 +149,10 @@ public sealed class WorkflowRunWorkProjectionTests
                                 Uses = "core/script",
                                 WorkId = "work-previous",
                                 WorkerId = "runner-terminal",
-                                Status = TaskRunStatus.Completed,
+                                Status = WorkflowActionAttemptStatus.Completed,
                                 Classification = TaskClassification.Orchestration,
                             },
-                            new TaskRun
+                            new WorkflowActionAttempt
                             {
                                 Id = "task-terminal",
                                 DefinitionId = "task-terminal",
@@ -161,7 +161,7 @@ public sealed class WorkflowRunWorkProjectionTests
                                 Uses = "core/script",
                                 WorkId = "work-terminal",
                                 WorkerId = "runner-terminal",
-                                Status = TaskRunStatus.Completed,
+                                Status = WorkflowActionAttemptStatus.Completed,
                                 Classification = TaskClassification.Orchestration,
                             },
                         ],
@@ -185,7 +185,7 @@ public sealed class WorkflowRunWorkProjectionTests
                         Status = StageRunStatus.Running,
                         Tasks =
                         [
-                            new TaskRun
+                            new WorkflowActionAttempt
                             {
                                 Id = "task-stopped-previous",
                                 DefinitionId = "task-stopped-previous",
@@ -194,10 +194,10 @@ public sealed class WorkflowRunWorkProjectionTests
                                 Uses = "core/script",
                                 WorkId = "work-stopped-previous",
                                 WorkerId = "runner-stopped",
-                                Status = TaskRunStatus.Running,
+                                Status = WorkflowActionAttemptStatus.Running,
                                 Classification = TaskClassification.Orchestration,
                             },
-                            new TaskRun
+                            new WorkflowActionAttempt
                             {
                                 Id = "task-interrupted",
                                 DefinitionId = "task-interrupted",
@@ -206,7 +206,7 @@ public sealed class WorkflowRunWorkProjectionTests
                                 Uses = "core/script",
                                 WorkId = "work-interrupted",
                                 WorkerId = "runner-stopped",
-                                Status = TaskRunStatus.Running,
+                                Status = WorkflowActionAttemptStatus.Running,
                                 Classification = TaskClassification.Orchestration,
                             },
                         ],
@@ -233,13 +233,13 @@ public sealed class WorkflowRunWorkProjectionTests
         Assert.True(await projection.IsTerminalWorkAsync("wr_stopped_projection", "work-interrupted", "runner-stopped"));
         Assert.False(await projection.IsTerminalWorkAsync("wr_stopped_projection", "work-stopped-previous", "runner-stopped"));
 
-        stoppedRun.Stages[0].Tasks[0].Status = TaskRunStatus.Running;
+        stoppedRun.Stages[0].Tasks[0].Status = WorkflowActionAttemptStatus.Running;
         await UpdateStateAsync(options, stoppedRun);
         Assert.True(await projection.IsTerminalWorkAsync("wr_stopped_projection", "work-interrupted", "runner-stopped"));
         Assert.False(await projection.IsTerminalWorkAsync("wr_stopped_projection", "work-stopped-previous", "runner-stopped"));
 
-        stoppedRun.Stages[0].Tasks[0].Status = TaskRunStatus.Completed;
-        stoppedRun.Stages[0].Tasks[1].Status = TaskRunStatus.Completed;
+        stoppedRun.Stages[0].Tasks[0].Status = WorkflowActionAttemptStatus.Completed;
+        stoppedRun.Stages[0].Tasks[1].Status = WorkflowActionAttemptStatus.Completed;
         await UpdateStateAsync(options, stoppedRun);
         Assert.True(await projection.IsTerminalWorkAsync("wr_stopped_projection", "work-interrupted", "runner-stopped"));
         Assert.False(await projection.IsTerminalWorkAsync("wr_stopped_projection", "work-stopped-previous", "runner-stopped"));

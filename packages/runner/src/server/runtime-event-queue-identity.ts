@@ -15,7 +15,7 @@ interface SequenceKey {
 export interface WorkflowRuntimeEventExecutionIdentity {
   readonly runnerId: string
   readonly agentSessionId: string
-  readonly taskRunId: string
+  readonly actionAttemptId: string
   readonly workId: string
   readonly inputDeliveryId: string
   readonly agentTurnId: string | null
@@ -55,7 +55,7 @@ export function workflowExecutionIdentity(record: RuntimeEventRecord): WorkflowR
   if (
     !work ||
     !nonEmpty(work.workId) ||
-    !nonEmpty(work.taskRunId) ||
+    !nonEmpty(work.actionAttemptId) ||
     !nonEmpty(work.runnerId) ||
     !nonEmpty(work.agentSessionId) ||
     !nonEmpty(work.inputDeliveryId) ||
@@ -69,7 +69,7 @@ export function workflowExecutionIdentity(record: RuntimeEventRecord): WorkflowR
   return {
     runnerId: work.runnerId,
     agentSessionId: work.agentSessionId,
-    taskRunId: work.taskRunId,
+    actionAttemptId: work.actionAttemptId,
     workId: work.workId,
     inputDeliveryId: work.inputDeliveryId,
     agentTurnId: work.agentTurnId ?? null,

@@ -36,11 +36,11 @@ const fixCiRecoveryLocal = `        recovery:
             - tasks:
                 - id: recover:fix-ci
                   title: Fix CI verification
-                  uses: mohist/opencode
+                  uses: mohist/agent
                   with:
+                    name: mohist/builder
                     session: build
                     prompt: \${{ prompts.fix-ci }}
-                    options: \${{ vars.agent }}
                   expect:
                     markers:
                       - path: _output
@@ -55,11 +55,11 @@ const fixCiRecoveryGithubPr = `        recovery:
             - tasks:
                 - id: recover:fix-ci
                   title: Fix CI verification
-                  uses: \${{ profile.agentAction }}
+                  uses: mohist/agent
                   with:
+                    name: mohist/builder
                     session: build
                     prompt: \${{ prompts.fix-ci }}
-                    options: \${{ vars.agent }}
               retrySelf: true`
 
 function laneTasks(recovery: string): string {
@@ -436,13 +436,13 @@ for (const [profileId, path] of Object.entries(profileFiles)) {
         expect(block).toContain('id: recover:fix-ci')
         expect(block).toContain('session: build')
         expect(block).toContain('prompt: ${{ prompts.fix-ci }}')
-        expect(block).toContain('options: ${{ vars.agent }}')
+        expect(block).toContain('name: mohist/builder')
         if (profileId === 'mohist/local') {
-          expect(block).toContain('uses: mohist/opencode')
+          expect(block).toContain('uses: mohist/agent')
           expect(block).toContain('<promise>done</promise>')
           expect(block).toContain('<promise>unfinished</promise>')
         } else {
-          expect(block).toContain('uses: ${{ profile.agentAction }}')
+          expect(block).toContain('uses: mohist/agent')
           expect(block).not.toContain('<promise>')
         }
         // The recovery declaration must be exactly the profile's block, unchanged.

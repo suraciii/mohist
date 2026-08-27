@@ -109,13 +109,9 @@ public static partial class RunnerRoutes
                 runnerId,
                 req.WorkflowRunId ?? string.Empty,
                 req.WorkId,
-                req.TaskRunId,
+                req.ActionAttemptId,
                 result,
-                ct,
-                req.AgentSessionId,
-                req.AgentTurnId,
-                req.Runtime,
-                req.RuntimeSessionId);
+                ct);
             return Results.Ok(new RunnerReportResponse(ack));
         });
     }

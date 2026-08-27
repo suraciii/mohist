@@ -29,14 +29,14 @@ public sealed class VerificationLaneNextWorkTests
             Status = StageRunStatus.Running,
             Initialized = true,
         };
-        plan.Tasks.Add(new TaskRun
+        plan.Tasks.Add(new WorkflowActionAttempt
         {
             Id = "plan-task.1",
             DefinitionId = "plan-task",
             Attempt = 1,
             Title = "Plan task",
             Uses = "mohist/opencode",
-            Status = TaskRunStatus.Pending,
+            Status = WorkflowActionAttemptStatus.Pending,
         });
         run.Stages.Insert(0, plan);
         run.CurrentStageId = "plan";
@@ -74,7 +74,7 @@ public sealed class VerificationLaneNextWorkTests
         var stage = run.Stages[0];
 
         // Mark lane 1 (verify-install) as completed-pass so lane 2 becomes claimable.
-        stage.Tasks[0].Status = TaskRunStatus.Completed;
+        stage.Tasks[0].Status = WorkflowActionAttemptStatus.Completed;
         stage.Tasks[0].Lane = stage.Tasks[0].Lane! with { Outcome = VerificationLaneOutcome.Pass };
 
         Assert.True(VerificationLaneGate.IsLaneEnabledRun(run));
@@ -99,7 +99,7 @@ public sealed class VerificationLaneNextWorkTests
         var stage = run.Stages[0];
         for (var i = 0; i < VerificationLaneCatalog.LaneIds.Count - 1; i++)
         {
-            stage.Tasks[i].Status = TaskRunStatus.Completed;
+            stage.Tasks[i].Status = WorkflowActionAttemptStatus.Completed;
             stage.Tasks[i].Lane = stage.Tasks[i].Lane! with { Outcome = VerificationLaneOutcome.Pass };
         }
 
@@ -116,7 +116,7 @@ public sealed class VerificationLaneNextWorkTests
         var stage = run.Stages[0];
         foreach (var task in stage.Tasks)
         {
-            task.Status = TaskRunStatus.Completed;
+            task.Status = WorkflowActionAttemptStatus.Completed;
             task.Lane = task.Lane! with { Outcome = VerificationLaneOutcome.Pass };
         }
         stage.Tasks[0].Lane = null;
@@ -134,10 +134,10 @@ public sealed class VerificationLaneNextWorkTests
         var stage = run.Stages[0];
         foreach (var task in stage.Tasks)
         {
-            task.Status = TaskRunStatus.Completed;
+            task.Status = WorkflowActionAttemptStatus.Completed;
             task.Lane = task.Lane! with { Outcome = VerificationLaneOutcome.Pass };
         }
-        stage.Tasks[2].Status = TaskRunStatus.Failed;
+        stage.Tasks[2].Status = WorkflowActionAttemptStatus.Failed;
         stage.Tasks[2].Lane = stage.Tasks[2].Lane! with
         {
             Outcome = VerificationLaneOutcome.Fail,
@@ -155,7 +155,7 @@ public sealed class VerificationLaneNextWorkTests
     {
         var run = CreateLaneEnabledRun();
         var stage = run.Stages[0];
-        stage.Tasks[0].Status = TaskRunStatus.Failed;
+        stage.Tasks[0].Status = WorkflowActionAttemptStatus.Failed;
         stage.Tasks[0].Lane = stage.Tasks[0].Lane! with
         {
             Outcome = VerificationLaneOutcome.Timeout,
@@ -241,13 +241,13 @@ public sealed class VerificationLaneNextWorkTests
         };
         foreach (var task in definition.Stages[0].Tasks)
         {
-            var taskRun = new TaskRun
+            var taskRun = new WorkflowActionAttempt
             {
                 Id = task.Id + ".1",
                 DefinitionId = task.Id,
                 Attempt = 1,
                 Title = task.Title ?? task.Id,
-                Status = TaskRunStatus.Pending,
+                Status = WorkflowActionAttemptStatus.Pending,
                 Uses = task.Uses,
                 WithInput = task.With,
                 Classification = TaskClassification.Orchestration,
@@ -259,7 +259,7 @@ public sealed class VerificationLaneNextWorkTests
                     Order: VerificationLaneCatalog.OrderOf(task.Id),
                     ConfiguredBudgetMs: 120000,
                     Outcome: VerificationLaneOutcome.Pending,
-                    TaskRunId: taskRun.Id);
+                    ActionAttemptId: taskRun.Id);
             }
             stageRun.Tasks.Add(taskRun);
         }
@@ -271,14 +271,14 @@ public sealed class VerificationLaneNextWorkTests
 
     private static void AddPendingDownstreamTask(StageRun stage)
     {
-        stage.Tasks.Add(new TaskRun
+        stage.Tasks.Add(new WorkflowActionAttempt
         {
             Id = "push.1",
             DefinitionId = "push",
             Attempt = 1,
             Title = "Push",
             Uses = "mohist/push",
-            Status = TaskRunStatus.Pending,
+            Status = WorkflowActionAttemptStatus.Pending,
         });
     }
 }

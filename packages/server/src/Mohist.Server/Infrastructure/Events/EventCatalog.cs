@@ -50,6 +50,7 @@ public static class EventCatalog
         ReverseDns.RunnerDisconnected,
         ReverseDns.AgentJobFailed,
         ReverseDns.AgentJobTerminalDelivery,
+        ReverseDns.AgentJobWorkflowTerminal,
         ReverseDns.AgentJobSubagentTerminal,
         ReverseDns.AgentSessionFollowupDelivery,
         ReverseDns.IssueCompleted,
@@ -211,6 +212,7 @@ public static class EventCatalog
 
         public const string AgentJobFailed = "com.mohist.agent.job.failed";
         public const string AgentJobTerminalDelivery = "com.mohist.agent.job.terminal-delivery";
+        public const string AgentJobWorkflowTerminal = "com.mohist.agent.job.workflow-terminal";
         public const string AgentJobSubagentTerminal = "com.mohist.agent.job.subagent-terminal";
         public const string AgentSessionFollowupDelivery = "com.mohist.agent.session.followup-delivery";
 

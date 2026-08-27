@@ -20,7 +20,7 @@ using Orleans.Runtime;
 
 namespace Mohist.Server.Workflow.Grains;
 
-public partial class WorkflowGrain : Grain, IWorkflowGrain, IWorkflowGrainContext, IRemindable
+public partial class WorkflowGrain : Grain, IWorkflowGrain, IWorkflowGrainContext
 {
     private WorkflowRun? _run;
     private string? _cachedAssignedWorkerId;
@@ -40,7 +40,7 @@ public partial class WorkflowGrain : Grain, IWorkflowGrain, IWorkflowGrainContex
     private readonly WorkflowWorkLifecycle _workLifecycle;
     private readonly WorkflowItemTranslator? _workflowItemTranslator;
     private readonly IWorkflowReportPersistenceFailureInjector _reportPersistenceFailures;
-    private readonly TimeSpan _agentResultSettlementTimeout;
+    private readonly WorkflowRunVariablesStore? _runVariablesStore;
     private readonly TimeSpan _runnerLossRecoveryTimeout;
 
     internal WorkflowGrain(
@@ -55,7 +55,8 @@ public partial class WorkflowGrain : Grain, IWorkflowGrain, IWorkflowGrainContex
         TimeProvider timeProvider,
         ILogger<WorkflowGrain> log,
         WorkflowItemTranslator? workflowItemTranslator = null,
-        IWorkflowReportPersistenceFailureInjector? reportPersistenceFailures = null)
+        IWorkflowReportPersistenceFailureInjector? reportPersistenceFailures = null,
+        WorkflowRunVariablesStore? runVariablesStore = null)
         : base(context, runtime)
     {
         _runStore = runStore;
@@ -71,7 +72,7 @@ public partial class WorkflowGrain : Grain, IWorkflowGrain, IWorkflowGrainContex
         _workLifecycle = new WorkflowWorkLifecycle(this);
         _workflowItemTranslator = workflowItemTranslator;
         _reportPersistenceFailures = reportPersistenceFailures ?? NoopWorkflowReportPersistenceFailureInjector.Instance;
-        _agentResultSettlementTimeout = ValidateSettlementTimeout(options.Value.AgentResultSettlementTimeout);
+        _runVariablesStore = runVariablesStore;
         _runnerLossRecoveryTimeout = ValidateRunnerLossRecoveryTimeout(options.Value.RunnerLossRecoveryTimeout);
     }
 
@@ -87,7 +88,8 @@ public partial class WorkflowGrain : Grain, IWorkflowGrain, IWorkflowGrainContex
         TimeProvider timeProvider,
         ILogger<WorkflowGrain> log,
         WorkflowItemTranslator? workflowItemTranslator = null,
-        IWorkflowReportPersistenceFailureInjector? reportPersistenceFailures = null)
+        IWorkflowReportPersistenceFailureInjector? reportPersistenceFailures = null,
+        WorkflowRunVariablesStore? runVariablesStore = null)
     {
         _runStore = runStore;
         _dispatchSnapshotStore = dispatchSnapshotStore;
@@ -102,7 +104,7 @@ public partial class WorkflowGrain : Grain, IWorkflowGrain, IWorkflowGrainContex
         _workLifecycle = new WorkflowWorkLifecycle(this);
         _workflowItemTranslator = workflowItemTranslator;
         _reportPersistenceFailures = reportPersistenceFailures ?? NoopWorkflowReportPersistenceFailureInjector.Instance;
-        _agentResultSettlementTimeout = ValidateSettlementTimeout(options.Value.AgentResultSettlementTimeout);
+        _runVariablesStore = runVariablesStore;
         _runnerLossRecoveryTimeout = ValidateRunnerLossRecoveryTimeout(options.Value.RunnerLossRecoveryTimeout);
     }
 
@@ -129,8 +131,8 @@ public partial class WorkflowGrain : Grain, IWorkflowGrain, IWorkflowGrainContex
 
         await ClearStoppedRunStaleApprovalGateAsync(ct);
 
-        await ReconcileAgentResultSettlementAsync();
         await ReconcileRunnerLossRecoveryAsync();
+        await ReconcileWorkflowAgentHandoffsAsync();
 
         _cachedAssignedWorkerId = _run?.Assignment?.WorkerId;
     }
@@ -293,27 +295,8 @@ public partial class WorkflowGrain : Grain, IWorkflowGrain, IWorkflowGrainContex
     {
         EnsureRun();
 
-        if (_run.Status == WorkflowRunStatus.Stopped
-            && _run.FindCancelledAgentResultSettlementTask() is not null)
-        {
-            await ReconcileAgentResultSettlementCleanupAsync();
-            return;
-        }
-
         if (_run.Status is not (WorkflowRunStatus.Created or WorkflowRunStatus.Pending or WorkflowRunStatus.Ready or WorkflowRunStatus.Running or WorkflowRunStatus.AwaitingApproval or WorkflowRunStatus.Paused or WorkflowRunStatus.Failed))
             throw new InvalidOperationException($"Cannot stop workflow in {_run.Status} state");
-
-        var cancelled = _run.CancelUnresolvedAgentTaskForStop(Now());
-        if (cancelled.Count > 0)
-        {
-            var cancellationStopEvents = _run.Stop();
-            var cancellationEvents = cancelled.Concat(cancellationStopEvents).ToArray();
-
-            _log.LogInformation("Workflow {Id} stopped with unresolved Agent execution: {Reason}", GrainKey, reason);
-            await CommitAsync(cancellationEvents);
-            await ReconcileAgentResultSettlementCleanupAsync();
-            return;
-        }
 
         var stopEvents = _run.Stop();
 
@@ -355,7 +338,6 @@ public partial class WorkflowGrain : Grain, IWorkflowGrain, IWorkflowGrainContex
     public async Task RetryAsync()
     {
         EnsureRun();
-        ThrowIfAgentResultUnresolved();
         var retriedStageId = _run.CurrentStageId;
         await ReleaseCurrentStageLocksAsync("retried");
         var events = _run.Retry(Now());
@@ -378,7 +360,6 @@ public partial class WorkflowGrain : Grain, IWorkflowGrain, IWorkflowGrainContex
     public async Task RerunAsync()
     {
         EnsureRun();
-        ThrowIfAgentResultUnresolved();
         var rerunStageId = _run.CurrentStageId;
         await ReleaseCurrentStageLocksAsync("rerun");
         var events = _run.Rerun(Now());
@@ -398,10 +379,6 @@ public partial class WorkflowGrain : Grain, IWorkflowGrain, IWorkflowGrainContex
     public async Task<WorkflowControlResult> RerunFromStageAsync(string stageId)
     {
         EnsureRun();
-        if (_run.HasUnresolvedAgentResult())
-            return WorkflowControlResult.Rejected(
-                "agent_result_unresolved",
-                "Cannot rerun while an Agent result remains unresolved.");
         IReadOnlyList<WorkflowEvent> events;
         try
         {
@@ -438,7 +415,6 @@ public partial class WorkflowGrain : Grain, IWorkflowGrain, IWorkflowGrainContex
     public async Task<RuntimeTaskAddedResult> AddTaskAsync(RuntimeTaskInput task)
     {
         EnsureRun();
-        ThrowIfAgentResultUnresolved();
         if (string.IsNullOrWhiteSpace(task.Id))
             throw new InvalidOperationException("Runtime task requires id");
         if (string.IsNullOrWhiteSpace(task.Title))
@@ -509,14 +485,20 @@ public partial class WorkflowGrain : Grain, IWorkflowGrain, IWorkflowGrainContex
         if (work is null)
             return null;
 
+        var stage = _run.CurrentStageId;
+        if (stage is not null && !await AcquireStageLocksIfNeededAsync(stage))
+            return null;
+        if (work is WorkflowTaskWork agentWork
+            && string.Equals(agentWork.Uses, "mohist/agent", StringComparison.Ordinal))
+        {
+            await TryLaunchAgentTaskAsync(agentWork);
+            return null;
+        }
+
         var item = _workLifecycle.BuildClaimableWorkItem(_run!, work);
         if (item?.Id is null)
             return null;
         var workId = item.Id;
-
-        var stage = _run.CurrentStageId;
-        if (stage is not null && !await AcquireStageLocksIfNeededAsync(stage))
-            return null;
 
         var resolvedWorkId = await _workLifecycle.ClaimWorkAsync(
             _run!, workId, workerId, processGeneration, events => CommitAsync(events));
@@ -531,7 +513,6 @@ public partial class WorkflowGrain : Grain, IWorkflowGrain, IWorkflowGrainContex
     {
         RejectIfRunReloadRequired();
         if (_run is null || !_run.IsAssignedTo(workerId)) return null;
-        if (_run.HasUnresolvedAgentResult()) return null;
         var active = _run.FindActiveWork(workId, workerId);
         if (active is null || !active.IsTask) return null;
         if (!string.Equals(dispatch.WorkflowRunId, GrainKey, StringComparison.Ordinal)
@@ -551,7 +532,6 @@ public partial class WorkflowGrain : Grain, IWorkflowGrain, IWorkflowGrainContex
     public async Task<AddTasksBatchResult> AddTasksAsync(AddTasksBatchRequest request)
     {
         EnsureRun();
-        ThrowIfAgentResultUnresolved();
         if (request.Tasks is null || request.Tasks.Count == 0)
             throw new InvalidOperationException("AddTasksBatchRequest requires at least one task");
 
@@ -605,11 +585,6 @@ public partial class WorkflowGrain : Grain, IWorkflowGrain, IWorkflowGrainContex
     public Task<string?> GetCurrentWorkIdAsync()
     {
         RejectIfRunReloadRequired();
-        // A blocked Agent settlement has already crossed the release boundary:
-        // the attempt stops being active work even though its task stays
-        // Running for late-result arbitration.
-        if (_run is null || _run.HasBlockedAgentResult())
-            return Task.FromResult<string?>(null);
         var stage = _run?.CurrentStage();
         if (stage is null) return Task.FromResult<string?>(null);
         return Task.FromResult(stage.RunningTask?.WorkId ?? stage.ChecksWorkId);
@@ -659,12 +634,6 @@ public partial class WorkflowGrain : Grain, IWorkflowGrain, IWorkflowGrainContex
     {
         if (_runReloadRequired)
             throw new InvalidOperationException($"Workflow '{GrainKey}' must reload after a failed save");
-    }
-
-    private void ThrowIfAgentResultUnresolved()
-    {
-        if (_run?.HasUnresolvedAgentResult() == true)
-            throw new InvalidOperationException("agent_result_unresolved");
     }
 
     private async Task CommitAsync(
@@ -850,13 +819,6 @@ public partial class WorkflowGrain : Grain, IWorkflowGrain, IWorkflowGrainContex
     }
 
     private DateTimeOffset Now() => _timeProvider.GetUtcNow();
-
-    private static TimeSpan ValidateSettlementTimeout(TimeSpan timeout)
-    {
-        if (timeout <= TimeSpan.Zero)
-            throw new InvalidOperationException("Workflow AgentResultSettlementTimeout must be positive.");
-        return timeout;
-    }
 
     private static TimeSpan ValidateRunnerLossRecoveryTimeout(TimeSpan timeout)
     {

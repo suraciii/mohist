@@ -23,7 +23,7 @@ public sealed class WorkflowRunBindingSnapshotTests
     {
         var store = new FakeWorkflowRunStore();
         var participant = new WorkflowRunBindingParticipant(store);
-        var requested = CreateStart("mohist/pi", definitionJson: "{\"stages\":[]}");
+        var requested = CreateStart("{\"stages\":[]}");
 
         var applied = await participant.BindAsync(requested, "start-1", expectedRevision: null);
 
@@ -37,7 +37,7 @@ public sealed class WorkflowRunBindingSnapshotTests
     {
         var store = new FakeWorkflowRunStore();
         var participant = new WorkflowRunBindingParticipant(store);
-        var requested = CreateStart("mohist/pi", definitionJson: null);
+        var requested = CreateStart(null);
 
         var applied = await participant.BindAsync(requested, "start-1", expectedRevision: null);
 
@@ -51,7 +51,7 @@ public sealed class WorkflowRunBindingSnapshotTests
     {
         var store = new FakeWorkflowRunStore();
         var participant = new WorkflowRunBindingParticipant(store);
-        var requested = CreateStart("mohist/pi", definitionJson: "{\"stages\":[]}");
+        var requested = CreateStart("{\"stages\":[]}");
 
         var first = await participant.BindAsync(requested, "start-1", expectedRevision: null);
         var replay = await participant.BindAsync(requested, "start-1", expectedRevision: null);
@@ -66,8 +66,8 @@ public sealed class WorkflowRunBindingSnapshotTests
     {
         var store = new FakeWorkflowRunStore();
         var participant = new WorkflowRunBindingParticipant(store);
-        var original = CreateStart("mohist/pi", definitionJson: "{\"stages\":[]}");
-        var edited = CreateStart("mohist/pi", definitionJson: "{\"stages\":[\"build\"]}");
+        var original = CreateStart("{\"stages\":[]}");
+        var edited = CreateStart("{\"stages\":[\"build\"]}");
 
         var first = await participant.BindAsync(original, "start-1", expectedRevision: null);
         var conflict = await participant.BindAsync(edited, "start-2", expectedRevision: null);
@@ -88,7 +88,7 @@ public sealed class WorkflowRunBindingSnapshotTests
         var store = new FakeWorkflowRunStore();
         var participant = new WorkflowRunBindingParticipant(store);
         var aggregateJson = BuildAggregateDefinitionJson();
-        var requested = CreateStart("mohist/pi", definitionJson: aggregateJson);
+        var requested = CreateStart(aggregateJson);
 
         await participant.BindAsync(requested, "start-1", expectedRevision: null);
 
@@ -106,7 +106,7 @@ public sealed class WorkflowRunBindingSnapshotTests
         var store = new FakeWorkflowRunStore();
         var participant = new WorkflowRunBindingParticipant(store);
         var sixLaneJson = BuildSixLaneDefinitionJson();
-        var requested = CreateStart("mohist/pi", definitionJson: sixLaneJson);
+        var requested = CreateStart(sixLaneJson);
 
         await participant.BindAsync(requested, "start-1", expectedRevision: null);
 
@@ -114,14 +114,13 @@ public sealed class WorkflowRunBindingSnapshotTests
         Assert.True(VerificationLaneGate.IsLaneEnabledRun(stored));
     }
 
-    private static BoundWorkflowStart CreateStart(string agentAction, string? definitionJson) => new(
+    private static BoundWorkflowStart CreateStart(string? definitionJson) => new(
         WorkflowRunId: "run-1",
         ProjectId: "project-1",
         IssueNumber: 42,
         EpicNumber: null,
         ExplicitProfileId: "mohist/github-pr",
         ProfileId: "mohist/github-pr",
-        AgentAction: agentAction,
         Stages: [new BoundStageStructure("build", RequiresApproval: false)],
         Metadata: new WorkflowRunMetadata(
             "Issue 42",

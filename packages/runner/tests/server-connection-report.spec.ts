@@ -36,7 +36,7 @@ describe('ServerConnection.report', () => {
     const work = {
       workflowRunId: 'wf-1',
       workId: 'work-1',
-      taskRunId: 'task-1.1',
+      actionAttemptId: 'task-1.1',
       workType: 'task',
     }
     await connection.report(
@@ -47,7 +47,7 @@ describe('ServerConnection.report', () => {
     expect(fetchMock).toHaveBeenCalledTimes(1)
     const init = fetchMock.mock.calls[0][1] as RequestInit
     const body = JSON.parse(init.body as string)
-    expect(body.taskRunId).toBe('task-1.1')
+    expect(body.actionAttemptId).toBe('task-1.1')
     expect(body.cleanupAttempts).toBe(3)
   })
 

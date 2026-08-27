@@ -10,7 +10,7 @@ namespace Mohist.Server.Workflow.Domain.Run;
 
 /// <summary>
 /// The lifecycle status of a <see cref="WorkflowRun"/> aggregate.
-/// This state machine is independent from <see cref="TaskRunStatus"/> —
+/// This state machine is independent from <see cref="WorkflowActionAttemptStatus"/> —
 /// the two describe different aggregates and do not derive each other.
 /// <c>Paused</c>, <c>Stopped</c>, and <c>AwaitingApproval</c> only result
 /// from workflow-level commands, never from a task status transition.
@@ -68,7 +68,6 @@ public sealed class WorkflowRun
     public WorkflowRunStatus Status { get; set; }
     public string? ExplicitWorkflowProfileId { get; set; }
     public string? WorkflowProfileId { get; set; }
-    public string? AgentAction { get; set; }
     /// <summary>
     /// The active worker assignment for this run. At most one worker may own a
     /// run at a time; running tasks derive their worker id from this assignment

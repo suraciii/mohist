@@ -22,7 +22,7 @@ public sealed record VerificationLaneAttempt(
     [property: Id(1)] int Order,
     [property: Id(2)] int ConfiguredBudgetMs,
     [property: Id(3)] VerificationLaneOutcome Outcome,
-    [property: Id(4)] string TaskRunId,
+    [property: Id(4)] string ActionAttemptId,
     [property: Id(5)] string? WorkId = null,
     [property: Id(6)] ExecutionError? Error = null,
     [property: Id(7)] string? Detail = null,

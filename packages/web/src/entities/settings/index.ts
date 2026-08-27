@@ -1,8 +1,6 @@
 export {
-  getWorkflowProfileAgentRuntime,
   resolveEffectiveDefaultWorkflowProfile,
   selectAgentTurnActions,
-  setWorkflowProfileAgentActionMutationOptions,
   useActionCatalog,
   useAgentRuntime,
   useAllWorkflowProfiles,
@@ -21,7 +19,6 @@ export {
   useSetLogLevel,
   useSetProjectDefaultWorkflowProfile,
   useSetStageModels,
-  useSetWorkflowProfileAgentAction,
   useStageModels,
   useSystemInfo,
   useSystemUpdate,
@@ -41,7 +38,6 @@ export {
   getModels,
   getActionCatalog,
   isAgentRuntime,
-  patchWorkflowProfileAgentAction,
   SUPPORTED_RUNTIME_KEYS,
 } from './api/client'
 export type { ProjectDefaultWorkflowProfile } from './api/client'

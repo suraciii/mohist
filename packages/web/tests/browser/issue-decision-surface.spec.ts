@@ -178,7 +178,7 @@ async function mockIssueDetailApi(
         .map(([candidatePath, artifactContent]) => ({
           artifactId: `artifact-${candidatePath}`,
           workflowRunId: issue.workflowRunId,
-          taskRunId: 'task-1',
+          actionAttemptId: 'task-1',
           path: candidatePath,
           kind: 'file',
           contentType: candidatePath.endsWith('.md') ? 'text/markdown' : 'application/json',

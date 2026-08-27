@@ -47,7 +47,7 @@ function workflowInput(id: string): RuntimeEventRecord {
     sessionTurnId: null,
     work: {
       workId: 'work-1',
-      taskRunId: 'task-1',
+      actionAttemptId: 'task-1',
       runnerId: 'runner-1',
       agentSessionId: 'agent-session-1',
       workType: 'task',

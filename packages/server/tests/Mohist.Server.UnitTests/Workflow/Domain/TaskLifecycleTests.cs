@@ -28,7 +28,7 @@ public class TaskLifecycleTests
 
         var events = run.StartTask("work-1", "worker-1", "test-process-generation", DateTimeOffset.UnixEpoch);
 
-        Assert.Equal(TaskRunStatus.Running, task.Status);
+        Assert.Equal(WorkflowActionAttemptStatus.Running, task.Status);
         Assert.NotNull(task.StartedAt);
         Assert.Null(task.FinishedAt);
         Assert.Equal("work-1", task.WorkId);
@@ -51,7 +51,7 @@ public class TaskLifecycleTests
 
         var events = run.CompleteTask(DateTimeOffset.UnixEpoch);
 
-        Assert.Equal(TaskRunStatus.Completed, task.Status);
+        Assert.Equal(WorkflowActionAttemptStatus.Completed, task.Status);
         Assert.NotNull(task.StartedAt);
         Assert.NotNull(task.FinishedAt);
         Assert.Equal(
@@ -69,7 +69,7 @@ public class TaskLifecycleTests
         var events = run.CompleteTask(DateTimeOffset.UnixEpoch);
 
         Assert.Empty(events);
-        Assert.Equal(TaskRunStatus.Pending, task.Status);
+        Assert.Equal(WorkflowActionAttemptStatus.Pending, task.Status);
         Assert.Null(task.FinishedAt);
     }
 
@@ -82,13 +82,13 @@ public class TaskLifecycleTests
 
         Assert.Empty(run.CompleteTask("other-stage", task.Id, DateTimeOffset.UnixEpoch));
         Assert.Empty(run.FailTask("build", "other-task", new TaskResult("failed", "wrong"), DateTimeOffset.UnixEpoch));
-        Assert.Equal(TaskRunStatus.Running, task.Status);
+        Assert.Equal(WorkflowActionAttemptStatus.Running, task.Status);
         Assert.Null(task.FinishedAt);
         Assert.Null(run.Failure);
 
         var events = run.CompleteTask("build", task.Id, DateTimeOffset.UnixEpoch);
 
-        Assert.Equal(TaskRunStatus.Completed, task.Status);
+        Assert.Equal(WorkflowActionAttemptStatus.Completed, task.Status);
         Assert.IsType<TaskCompleted>(WorkflowEventSerializer.Unwrap(events[0]));
     }
 
@@ -101,7 +101,7 @@ public class TaskLifecycleTests
         var events = run.FailTask(new TaskResult("failed", "boom"), DateTimeOffset.UnixEpoch);
 
         Assert.Empty(events);
-        Assert.Equal(TaskRunStatus.Pending, task.Status);
+        Assert.Equal(WorkflowActionAttemptStatus.Pending, task.Status);
         Assert.Null(task.FinishedAt);
         Assert.Null(run.Failure);
     }
@@ -115,7 +115,7 @@ public class TaskLifecycleTests
 
         var events = run.FailTaskForStopped("stopped", DateTimeOffset.UnixEpoch);
 
-        Assert.Equal(TaskRunStatus.Failed, task.Status);
+        Assert.Equal(WorkflowActionAttemptStatus.Failed, task.Status);
         Assert.NotNull(task.FinishedAt);
         Assert.Equal(
             new TerminalLogOwnership(TerminalLogOwnerKinds.Workflow, run.Id, "work-1", "worker-1"),
@@ -135,7 +135,7 @@ public class TaskLifecycleTests
 
         var task = run.CurrentStage().Tasks[0];
         Assert.Equal(WorkflowRunStatus.Paused, run.Status);
-        Assert.Equal(TaskRunStatus.Pending, task.Status);
+        Assert.Equal(WorkflowActionAttemptStatus.Pending, task.Status);
         Assert.Null(task.WorkId);
         Assert.Null(task.WorkerId);
         Assert.Null(run.CurrentActiveWorkFor("worker-1"));

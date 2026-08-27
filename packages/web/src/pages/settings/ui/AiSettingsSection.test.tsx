@@ -50,16 +50,6 @@ describe('AiSettingsSection', () => {
     })
   })
 
-  it('keeps a configured model read-only when the selected profile has no runtime', async () => {
-    arrangeLoaded({ profileRuntime: null, defaultModel: 'vendor/custom-model' })
-    renderSection()
-
-    const modelButton = await screen.findByRole('button', { name: /Default Coder Agent Model/i })
-    expect(modelButton).toBeDisabled()
-    expect(modelButton).toHaveTextContent('custom-model')
-    expect(screen.queryByRole('button', { name: /Stage Model Overrides/i })).not.toBeInTheDocument()
-  })
-
   it('exposes and updates the Stage Model Overrides disclosure state', async () => {
     arrangeLoaded()
     const user = userEvent.setup()
@@ -376,53 +366,5 @@ describe('AiSettingsSection inline variant chips', () => {
     const buildStage = (body.stages as Record<string, unknown>)?.build as Record<string, unknown>
     const agent = buildStage?.vars as Record<string, unknown>
     expect(agent?.agent).toEqual({ model: 'anthropic/claude-3', variant: 'high', reasoningEffort: null })
-  })
-})
-
-describe('AiSettingsSection reasoning effort', () => {
-  it('renders Pi reasoning efforts and writes the canonical default-model key', async () => {
-    arrangeLoaded({
-      profileRuntime: 'pi',
-      defaultModel: 'anthropic/claude-3',
-      defaultVariant: 'balanced',
-      modelVariants: { 'anthropic/claude-3': ['balanced'] },
-      reasoningEfforts: { 'anthropic/claude-3': ['low', 'medium', 'high'] },
-    })
-    const user = userEvent.setup()
-    renderSection()
-
-    await user.click(await screen.findByRole('button', { name: /Default Coder Agent Model/i }))
-    expect(
-      screen.queryByTestId('settings-default-model-row-anthropic/claude-3-variant-balanced'),
-    ).not.toBeInTheDocument()
-    await user.click(await screen.findByTestId('settings-default-model-row-anthropic/claude-3-variant-high'))
-
-    await waitFor(() => expect(patchCaptures).toHaveLength(1))
-    const agent = (patchCaptures[0].vars as Record<string, unknown>).agent
-    expect(agent).toEqual({ model: 'anthropic/claude-3', variant: 'balanced', reasoningEffort: 'high' })
-  })
-
-  it('writes a Pi stage effort independently from variant', async () => {
-    arrangeLoaded({
-      profileRuntime: 'pi',
-      stageModels: { build: 'anthropic/claude-3' },
-      stageModelVariants: { build: 'balanced' },
-      modelVariants: { 'anthropic/claude-3': ['balanced'] },
-      reasoningEfforts: { 'anthropic/claude-3': ['low', 'high'] },
-    })
-    const user = userEvent.setup()
-    renderSection()
-
-    await user.click(await screen.findByRole('button', { name: /Stage Model Overrides/i }))
-    await user.click(document.getElementById('settings-stage-model-build')!)
-    await user.click(await screen.findByTestId('settings-stage-model-build-row-anthropic/claude-3-variant-high'))
-
-    await waitFor(() => expect(patchCaptures).toHaveLength(1))
-    const build = (patchCaptures[0].stages as Record<string, unknown>).build as Record<string, unknown>
-    expect((build.vars as Record<string, unknown>).agent).toEqual({
-      model: 'anthropic/claude-3',
-      variant: 'balanced',
-      reasoningEffort: 'high',
-    })
   })
 })

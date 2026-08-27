@@ -202,7 +202,6 @@ export function TaskItem({
   const isRecoverableInterrupted = task.status === 'recoverable-interrupted'
   const isFailed = task.status === 'failed'
   const isBlocked = task.status === 'blocked'
-  const settlement = task.agentResultSettlement
   const taskOutput = task.output
   const hasOutput = taskOutput != null
   const hasRequiredFiles = (task.requiredFiles?.length ?? 0) > 0
@@ -212,7 +211,6 @@ export function TaskItem({
   const taskReason =
     task.error?.message ??
     (typeof task.reason === 'string' ? task.reason : null) ??
-    settlement?.message ??
     task.interruption?.reasonCode ??
     null
   const deliveryFailure = isFailed && isDeliveryTask ? getDeliveryFailureGuidance(task.error?.code) : null
@@ -253,9 +251,9 @@ export function TaskItem({
   const originTitle = formatOriginTitle(task.origin)
   const sessionName = task.sessionName?.trim()
   const workflowSessions = workflowSessionsHook?.(workflowRunId).sessions ?? []
-  const sessionId = sessionName
-    ? workflowSessions.find((session) => session.sessionName === sessionName)?.id
-    : undefined
+  const sessionId =
+    task.agentSessionId ??
+    (sessionName ? workflowSessions.find((session) => session.sessionName === sessionName)?.id : undefined)
   const detailsId = `task-details-${issueNumber}-${encodeURIComponent(task.taskId)}`
 
   const primaryContent = (
@@ -324,6 +322,7 @@ export function TaskItem({
             </span>
           )}
           {sessionName && <TaskSessionChip sessionName={sessionName} sessionId={sessionId} />}
+          {task.agentJobId && <span className="break-all font-mono text-[11px]">Job: {task.agentJobId}</span>}
           {task.attempts > 1 && <span>{task.attempts} attempts</span>}
           <TaskLifecycleTime task={task} />
         </div>
@@ -347,19 +346,6 @@ export function TaskItem({
                 <div className="font-semibold">Recoverable interruption</div>
                 <div>Reason: {task.interruption.reasonCode}</div>
                 <div>Recovery deadline: {task.interruption.recoveryDeadlineAt}</div>
-              </div>
-            )}
-            {isBlocked && settlement && (
-              <div
-                className="space-y-1 rounded border border-warning-border bg-warning-subtle px-2 py-1.5 text-xs text-warning"
-                data-testid="workflow-task-blocked-attention"
-              >
-                <div className="font-semibold">Agent result unconfirmed</div>
-                {settlement.deadlineAt && <div>Deadline: {settlement.deadlineAt}</div>}
-                {settlement.workId && <div>Work: {settlement.workId}</div>}
-                {settlement.agentSessionId && <div>Session: {settlement.agentSessionId}</div>}
-                {settlement.agentTurnId && <div>Turn: {settlement.agentTurnId}</div>}
-                {settlement.nextAction && <div>{settlement.nextAction}</div>}
               </div>
             )}
             {hasArtifacts && (

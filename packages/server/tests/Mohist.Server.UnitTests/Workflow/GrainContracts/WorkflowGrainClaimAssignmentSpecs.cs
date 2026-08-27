@@ -46,7 +46,7 @@ public sealed class WorkflowGrainClaimAssignmentSpecs
         Assert.Equal(WorkItemTypes.Task, claimed!.WorkType);
         var run = await RequireRunAsync(store, runId);
         var task = run.Stages.Single().Tasks.Single();
-        Assert.Equal(TaskRunStatus.Running, task.Status);
+        Assert.Equal(WorkflowActionAttemptStatus.Running, task.Status);
         Assert.Equal(workerId, task.WorkerId);
         Assert.Equal(claimed.Id, task.WorkId);
     }
@@ -129,18 +129,18 @@ public sealed class WorkflowGrainClaimAssignmentSpecs
         var running = await RequireRunAsync(store, runId);
         var runningTask = running.CurrentStage().RunningTask;
         Assert.NotNull(runningTask);
-        Assert.Equal(TaskRunStatus.Running, runningTask!.Status);
+        Assert.Equal(WorkflowActionAttemptStatus.Running, runningTask!.Status);
         Assert.Equal(claimed!.Id, runningTask.WorkId);
 
         var acknowledgement = await grain.ReceiveTaskReportAsync(
             workerId,
             claimed.Id!,
-            new TaskReport(claimed.Id!, TaskReportStatus.Succeeded, Output: null, Artifacts: null, TaskRunId: runningTask.Id));
+            new TaskReport(claimed.Id!, TaskReportStatus.Succeeded, Output: null, Artifacts: null, ActionAttemptId: runningTask.Id));
         Assert.Equal(WorkReportVerdict.Accepted, acknowledgement);
 
         var completed = await RequireRunAsync(store, runId);
         Assert.Null(completed.CurrentStage().RunningTask);
-        Assert.Equal(TaskRunStatus.Completed, completed.CurrentStage().Tasks.Single().Status);
+        Assert.Equal(WorkflowActionAttemptStatus.Completed, completed.CurrentStage().Tasks.Single().Status);
     }
 
     [Fact]
@@ -152,7 +152,7 @@ public sealed class WorkflowGrainClaimAssignmentSpecs
         var claimed = await grain.ClaimNextAsync(workerId, "test-generation");
 
         var persisted = await RequireRunAsync(store, runId);
-        Assert.Equal(TaskRunStatus.Running, persisted.CurrentStage().RunningTask!.Status);
+        Assert.Equal(WorkflowActionAttemptStatus.Running, persisted.CurrentStage().RunningTask!.Status);
         Assert.Equal(claimed!.Id, await grain.GetCurrentWorkIdAsync());
         Assert.Equal(workerId, await grain.GetAssignedWorkerIdAsync());
     }
