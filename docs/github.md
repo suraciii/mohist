@@ -195,11 +195,12 @@ boundaries and protocol details.
 
 The target model above replaces the earlier one-way intake design. Implemented
 today: repository connection with signed ingress, feed-by-label intake, close
-withdrawal, Pull Request review Approval, and best-effort progress write-back.
-The mirror's repository, number, URL, and deliberately provisional `healthy`
-sync state are visible as first-class Issue fields in CLI and Web. This
-placeholder does not report write-back failures; real sync health belongs to
-the later recovery slice. Not yet implemented: automatic mirroring of Mohist
-Issues, the `/mohist` command entry, two-way title and body sync, real
-sync-health reporting, and reconcile-based recovery. Feed-by-label intake and its connection
+withdrawal, Pull Request review Approval, best-effort progress write-back,
+Issues that explicitly run without a Workflow across Server, CLI, and Web, and
+first-class mirror link visibility in CLI and Web. The link currently exposes a
+deliberately provisional `healthy` sync state and does not report write-back
+failures; real sync health belongs to the later recovery slice. Not yet
+implemented: automatic mirroring of Mohist Issues, GitHub-driven lifecycle for
+no-Workflow Issues, the `/mohist` command entry, two-way title and body sync,
+and reconcile-based recovery. Feed-by-label intake and its connection
 options are removed when the command entry lands.

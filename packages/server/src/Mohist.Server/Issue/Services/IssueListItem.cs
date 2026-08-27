@@ -34,6 +34,7 @@ public sealed class IssueListItem
     public WorkflowStageProgress? WorkflowStageProgress { get; set; }
     [JsonIgnore(Condition = JsonIgnoreCondition.Never)]
     public string? WorkflowProfileId { get; set; }
+    public bool NoWorkflow { get; set; }
     public int[] PrerequisiteNumbers { get; set; } = [];
     [JsonPropertyName("prereq")]
     public IssuePrerequisiteSummary[] Prereq { get; set; } = [];
@@ -76,6 +77,7 @@ public sealed class IssueListItem
         WorkflowStatus = issue.WorkflowStatus,
         WorkflowStageProgress = issue.WorkflowStageProgress,
         WorkflowProfileId = issue.WorkflowProfileId,
+        NoWorkflow = issue.NoWorkflow,
         PrerequisiteNumbers = issue.PrerequisiteNumbers,
         Prereq = issue.Prereq,
         IsDraft = issue.IsDraft,

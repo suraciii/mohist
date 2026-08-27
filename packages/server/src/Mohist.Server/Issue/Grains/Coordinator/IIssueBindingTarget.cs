@@ -21,6 +21,7 @@ public interface IIssueBindingTarget : IGrainWithStringKey
         bool isDraft,
         string[]? attachmentIds,
         string? workflowProfileId,
+        bool noWorkflow,
         int[]? prerequisiteNumbers,
         int? parentIssueNumber,
         string commandId,

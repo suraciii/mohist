@@ -202,6 +202,12 @@ public class IssueGrain : Grain, IIssueGrain, Coordinator.IIssueBindingTarget
             await StartCompositeAsync();
             return string.Empty;
         }
+        if (_issue.NoWorkflow)
+        {
+            _issue.StartWithoutWorkflow(undeliveredPrerequisites, _timeProvider.GetUtcNow().UtcDateTime);
+            await SaveIssueAsync();
+            return string.Empty;
+        }
         var resolution = RequireResolvedRepository(await ResolveIssueRepositoryAtStartAsync(_issue!));
         var repo = resolution.Repository!;
         var wrId = $"wr_{Guid.NewGuid():N}";
@@ -761,6 +767,7 @@ public class IssueGrain : Grain, IIssueGrain, Coordinator.IIssueBindingTarget
         bool isDraft,
         string[]? attachmentIds,
         string? workflowProfileId,
+        bool noWorkflow,
         int[]? prerequisiteNumbers,
         int? parentIssueNumber,
         string commandId,
@@ -815,6 +822,7 @@ public class IssueGrain : Grain, IIssueGrain, Coordinator.IIssueBindingTarget
             risk,
             isDraft,
             workflowProfileId,
+            noWorkflow,
             commandId,
             expectedRevision);
 
@@ -887,7 +895,11 @@ public class IssueGrain : Grain, IIssueGrain, Coordinator.IIssueBindingTarget
         var hasIsDraft = present.Contains(nameof(command.IsDraft));
         var hasAttachments = present.Contains(nameof(command.AttachmentIds));
         var hasWorkflowProfile = present.Contains(nameof(command.WorkflowProfileId));
+        var hasNoWorkflow = present.Contains(nameof(command.NoWorkflow));
         var hasParent = present.Contains(nameof(command.ParentIssueNumber));
+
+        if (hasWorkflowProfile && hasNoWorkflow && command.NoWorkflow == true && !string.IsNullOrWhiteSpace(command.WorkflowProfileId))
+            throw new ArgumentException("No Workflow and an explicit Workflow Profile are mutually exclusive");
 
         if (hasWorkflowProfile
             && !string.IsNullOrWhiteSpace(command.WorkflowProfileId)
@@ -946,9 +958,11 @@ public class IssueGrain : Grain, IIssueGrain, Coordinator.IIssueBindingTarget
         if (hasIsDraft && command.IsDraft.HasValue)
             _issue.SetDraft(command.IsDraft.Value);
 
-        if (hasWorkflowProfile)
+        if (hasWorkflowProfile || hasNoWorkflow)
         {
-            _issue.ReplaceWorkflowProfile(command.WorkflowProfileId);
+            _issue.ReplaceWorkflowProfile(
+                hasWorkflowProfile ? command.WorkflowProfileId : _issue.WorkflowProfileId,
+                hasNoWorkflow ? command.NoWorkflow == true : _issue.NoWorkflow);
         }
 
         if (hasParent)
@@ -1016,6 +1030,7 @@ public class IssueGrain : Grain, IIssueGrain, Coordinator.IIssueBindingTarget
         var hasIsDraft = present.Contains(nameof(UpdateIssueData.IsDraft));
         var hasAttachments = present.Contains(nameof(UpdateIssueData.AttachmentIds));
         var hasWorkflowProfile = present.Contains(nameof(UpdateIssueData.WorkflowProfileId));
+        var hasNoWorkflow = present.Contains(nameof(UpdateIssueData.NoWorkflow));
         var hasParent = present.Contains(nameof(UpdateIssueData.ParentIssueNumber));
 
         var title = hasTitle ? data.Title : null;
@@ -1027,6 +1042,9 @@ public class IssueGrain : Grain, IIssueGrain, Coordinator.IIssueBindingTarget
         {
             await _attachmentService.ValidateIssueBindAsync(_issue!.ProjectId, _issue.Number, data.AttachmentIds);
         }
+
+        if (hasWorkflowProfile && hasNoWorkflow && data.NoWorkflow == true && !string.IsNullOrWhiteSpace(data.WorkflowProfileId))
+            throw new ArgumentException("No Workflow and an explicit Workflow Profile are mutually exclusive");
 
         if (hasWorkflowProfile
             && !string.IsNullOrWhiteSpace(data.WorkflowProfileId)
@@ -1060,15 +1078,11 @@ public class IssueGrain : Grain, IIssueGrain, Coordinator.IIssueBindingTarget
         if (hasIsDraft && data.IsDraft.HasValue)
             _issue.SetDraft(data.IsDraft.Value);
 
-        if (hasWorkflowProfile)
+        if (hasWorkflowProfile || hasNoWorkflow)
         {
-            // Three-state: absent = leave alone (handled by hasWorkflowProfile
-            // guard above), present-and-null = clear to inherit-default,
-            // present-and-value = replace with the supplied id. The route
-            // handler has already validated that any non-null value refers to
-            // a known profile; the aggregate's ReplaceWorkflowProfile
-            // normalizes whitespace to null.
-            _issue.ReplaceWorkflowProfile(data.WorkflowProfileId);
+            _issue.ReplaceWorkflowProfile(
+                hasWorkflowProfile ? data.WorkflowProfileId : _issue.WorkflowProfileId,
+                hasNoWorkflow ? data.NoWorkflow == true : _issue.NoWorkflow);
         }
 
         if (hasParent)
@@ -1151,7 +1165,8 @@ public class IssueGrain : Grain, IIssueGrain, Coordinator.IIssueBindingTarget
             resolvedRef,
             risk,
             isDraft,
-            workflowProfileId);
+            workflowProfileId,
+            noWorkflow: false);
 
         // Stage the in-memory aggregate so LoadIssueSummaryAsync can resolve
         // the project id from _issue.ProjectId during prerequisite existence
@@ -1483,5 +1498,6 @@ public record UpdateIssueData(
     [property: Id(6)] IReadOnlySet<string>? PresentFields = null,
     [property: Id(7)] string? WorkflowProfileId = null,
     [property: Id(8)] int? ParentIssueNumber = null,
-    [property: Id(9)] string? Risk = null
+    [property: Id(9)] string? Risk = null,
+    [property: Id(10)] bool? NoWorkflow = null
 );

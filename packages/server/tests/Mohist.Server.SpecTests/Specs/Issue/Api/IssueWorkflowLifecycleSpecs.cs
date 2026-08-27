@@ -78,6 +78,59 @@ public class IssueWorkflowLifecycleSpecs
     }
 
     [Fact]
+    public async Task NoWorkflowIssue_StartDoneCloseAndReopen_NeverCreatesWorkflowRun()
+    {
+        var project = await _client.CreateProjectWithDefaultRepositoryAsync<ProjectDto>("/api/projects", $"no-workflow-{Guid.NewGuid():N}");
+        var created = await _client.PostDataAsync<IssueDto>($"/api/projects/{project.Id}/issues", new
+        {
+            title = "External delivery",
+            isDraft = false,
+            noWorkflow = true,
+        });
+
+        var beforeStart = await GetIssueInfoAsync(project.Id, created.Number);
+        Assert.True(beforeStart!.NoWorkflow);
+        Assert.Equal("none", beforeStart.WorkflowProfileMode);
+        Assert.Null(beforeStart.WorkflowProfileId);
+
+        using var start = await _client.PostAsync($"/api/projects/{project.Id}/issues/{created.Number}/start", null);
+        start.EnsureSuccessStatusCode();
+        var started = await GetIssueInfoAsync(project.Id, created.Number);
+        Assert.NotNull(started);
+        Assert.Equal("in_progress", started!.Status);
+        Assert.True(started.NoWorkflow);
+        Assert.Null(started.WorkflowRunId);
+
+        await using (var scope = _services.CreateAsyncScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<MohistDbContext>();
+            var matchingRuns = (await db.WorkflowRuns.ToListAsync()).Where(row =>
+                row.State.Contains($"\"projectId\":\"{project.Id}\"", StringComparison.Ordinal)
+                && row.State.Contains($"\"issueNumber\":{created.Number}", StringComparison.Ordinal)).ToList();
+            Assert.True(matchingRuns.Count == 0, string.Join("\n", matchingRuns.Select(row => row.State)));
+            Assert.Empty(await db.Workspaces.Where(row => row.ProjectId == project.Id && row.Name == $"issue-{created.Number}").ToListAsync());
+        }
+
+        using var done = await _client.PostAsync($"/api/projects/{project.Id}/issues/{created.Number}/done", null);
+        done.EnsureSuccessStatusCode();
+        Assert.Equal("done", (await GetIssueInfoAsync(project.Id, created.Number))!.Status);
+
+        var cancelled = await _client.PostDataAsync<IssueDto>($"/api/projects/{project.Id}/issues", new
+        {
+            title = "External cancellation",
+            isDraft = false,
+            noWorkflow = true,
+        });
+        await _client.PostOkAsync($"/api/projects/{project.Id}/issues/{cancelled.Number}/start");
+        await _client.PostOkAsync($"/api/projects/{project.Id}/issues/{cancelled.Number}/close");
+        Assert.Equal("cancelled", (await GetIssueInfoAsync(project.Id, cancelled.Number))!.Status);
+        await _client.PostOkAsync($"/api/projects/{project.Id}/issues/{cancelled.Number}/reopen");
+        var reopened = await GetIssueInfoAsync(project.Id, cancelled.Number);
+        Assert.Equal("backlog", reopened!.Status);
+        Assert.True(reopened.NoWorkflow);
+    }
+
+    [Fact]
     public async Task StartIssue_WithIncompletePrerequisite_IsRejectedByWorkflowGate()
     {
         // Contract: POST /api/projects/{ref}/issues/{n}/start on an

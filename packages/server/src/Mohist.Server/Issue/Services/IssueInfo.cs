@@ -39,6 +39,7 @@ public class IssueInfo
     [JsonIgnore(Condition = JsonIgnoreCondition.Never)]
     public string? WorkflowProfileId { get; set; } = IssueWorkflowProfiles.LocalId;
     public string? WorkflowProfileMode { get; set; }
+    public bool NoWorkflow { get; set; }
     public WorkflowAttention? Attention { get; set; }
     public string? WorkflowStage { get; set; }
     public string? WorkflowStatus { get; set; }
