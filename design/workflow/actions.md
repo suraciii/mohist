@@ -358,16 +358,17 @@ the base branch, workflow branch, remote, and other context through `${{ reposit
 - `create-github-pr` only creates or updates a draft PR and outputs a stable PR identity. It performs
   no Git operation and does not decide which commit should be published.
 - `mark-github-pr-ready` marks a draft PR ready and is idempotent if it is already ready.
-- `enable-github-pr-auto-merge` registers the merge method on a PR and lets GitHub perform the
-  merge once every prerequisite is satisfied. It is idempotent when auto-merge is already enabled.
+- `enable-github-pr-auto-merge` registers the merge method on a PR, then waits until
+  GitHub performs the merge, reusing the same bounded polling and classification as
+  `mohist/github-pr-checks`. It is idempotent when auto-merge is already enabled.
+  Failed checks return `error.code: pr-checks-failed` and merge conflicts return
+  `conflict`; the Profile declares recovery explicitly.
 
 Publishing, PR metadata, and merge registration are three independent tasks with independent failure
 boundaries. A push failure retries only push; a PR operation failure retries only that PR operation.
 
-Waiting for the merge result is a Stage-level check, not an internal precondition of the
-registration Action: the Profile places `mohist/github-pr-status` with `expect: merged` after
-`enable-github-pr-auto-merge`. A merge prerequisite that never becomes satisfied, such as a failed
-required check, leaves the wait unsatisfied and surfaces as a blocked Run.
+The `mohist/github-pr-status` Stage Check with `expect: merged` is one-shot post-hoc
+verification: by the time it runs, the registration Action has already completed the wait.
 
 `mohist/github-pr-checks` exposes check polling and classification as an explicit task in
 the Stage graph. A typical Profile places this delivery CI check after `mark-pr-ready` in the check

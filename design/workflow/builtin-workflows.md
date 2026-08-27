@@ -117,7 +117,7 @@ authority.
 Build publishes verified output because a later Stage may rebuild its Workspace
 on another Runner. Check publishes the reviewed result, marks the Pull Request
 ready, and verifies external checks. Integrate enables auto-merge on the same
-Pull Request and waits until GitHub reports it merged.
+Pull Request; the registration Action waits until GitHub performs the merge.
 
 Approval feedback is ordered work: the Agent applies feedback, pushes current
 HEAD, and then reruns Stage Checks. The Pull Request and recoverable branch
@@ -126,11 +126,13 @@ contain feedback output before the next Approval.
 ### Recovery and Invariants
 
 Auto-merge moves merge arbitration to GitHub. The synchronous merge's
-base-movement and protection-race recovery branches no longer exist; the only
-merge-time failure the Workflow owns is a Pull Request check failing after
-Approval, which leaves the merge wait unsatisfied and surfaces as a blocked
-Run. Enabling auto-merge on a Repository that disallows it is an ordinary Task
-failure.
+base-movement and protection-race recovery branches no longer exist. The
+merge-time failures the Workflow still owns are classified by the registration
+Action's wait: a required check failing after Approval returns
+`pr-checks-failed` and takes the same declared fix-and-push recovery the Check
+Stage uses; a merge conflict returns `conflict` and follows the rebase
+recovery. Enabling auto-merge on a Repository that disallows it is an ordinary
+Task failure.
 
 - Pull Request checks appear at two explicit boundaries. The first runs after
   Check work so a failed external check becomes visible repair work before

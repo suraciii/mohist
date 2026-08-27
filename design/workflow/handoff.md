@@ -1,5 +1,5 @@
 ---
-status: proposed
+status: wip
 ---
 
 # Plan Handoff
@@ -25,7 +25,7 @@ an `archive-change` Task that committed plan material into the Repository.
       "title": "Extract the notification-channel abstraction",
       "goal": "What to implement and why, in a few sentences.",
       "acceptance": ["verifiable criterion"],
-      "refs": ["PLANS/issue-5-DESIGN.md#abstraction"]
+      "refs": ["PLANS/issue-448-DESIGN.md#abstraction"]
     }
   ]
 }
@@ -98,14 +98,18 @@ feedback loop.
 
 ## Integrate: Auto-merge
 
-Integrate enables GitHub auto-merge on the approved Pull Request and waits
-for `MERGED` via the existing `github-pr-status` Stage Check. Merge timing and
+Integrate enables GitHub auto-merge on the approved Pull Request. The
+registration Action then waits until GitHub performs the merge, reusing the
+existing bounded check-polling machinery; this mirrors the previous merge
+Action, which already waited for checks internally. Merge timing and
 merge-time prerequisites are arbitrated by GitHub, which removes the
-`base-moved`, `protection-conflict`, and post-approval `pr-checks-failed`
-recovery branches that the synchronous merge required. A Pull Request check
-that fails after approval leaves the wait unsatisfied and surfaces as a
-blocked Run for intervention. Enabling auto-merge on a Repository that
-disallows it is an ordinary Task failure.
+`base-moved` and `protection-conflict` recovery branches that the synchronous
+merge required. A required check that fails after Approval is classified
+`pr-checks-failed` and repaired through the same declared recovery the Check
+Stage uses; a merge conflict is classified `conflict` and follows the rebase
+recovery. Enabling auto-merge on a Repository that disallows it is an ordinary
+Task failure (`auto-merge-unavailable`). The one-shot `github-pr-status`
+Stage Check with `expect: merged` remains as post-hoc verification.
 
 `mohist/merge-github-pr` is removed with this change; no consumer remains.
 
@@ -133,3 +137,10 @@ its own Stage.
   automation — stays outside the engine. This may be revisited after the
   simplified Workflow has production mileage.
 - Restoring `PLANS/` material beyond the handoff file on Workspace rebuild.
+
+## Companion Requirement
+
+Plan and review evidence lives only as uploaded run artifacts. The Web
+artifact surface already exists; a CLI read path (`mo run artifact list/get`)
+is a companion requirement, because delegated approvers work through the CLI
+and previously read plan files from the Workflow branch.

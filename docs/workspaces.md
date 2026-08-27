@@ -109,6 +109,10 @@ branch is the recovery point for Repository work. Plan and review material
 under `PLANS/` is uploaded as run artifacts, which are the recovery point and
 the audit record for work outside the Repository.
 
+Repository-modifying Tasks, such as Git Actions and verify scripts, run with
+`working-directory: REPOS/<repository-name>`; Agents anchor at the Workspace
+root and see `REPOS/` and `PLANS/` side by side.
+
 ## Lifecycle Endpoints
 
 - Completing or cancelling an Issue archives its Workflow Workspace.

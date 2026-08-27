@@ -109,11 +109,12 @@ Business error codes:
 
 ## `mohist/enable-github-pr-auto-merge`
 
-Enables auto-merge on the specified GitHub Pull Request. GitHub then performs
-the merge itself once every merge prerequisite is satisfied; the Workflow does
-not execute the merge and therefore has no merge-moment races to recover from.
-The operation is idempotent when auto-merge is already enabled. Pair it with
-`mohist/github-pr-status` using `expect: merged` to wait for the result.
+Enables auto-merge on the specified GitHub Pull Request, then waits until
+GitHub performs the merge. GitHub arbitrates merge timing and merge-time
+prerequisites, so the Workflow has no merge-moment races to recover from. The
+Action is idempotent when auto-merge is already enabled: it proceeds directly
+to the wait. Pair it with `mohist/github-pr-status` using `expect: merged` as
+post-hoc verification.
 
 ```yaml
 - id: enable-auto-merge
@@ -144,12 +145,16 @@ Outputs:
 - `prUrl`: Pull Request URL.
 - `method`: merge method that was registered.
 - `enabled`: whether auto-merge was enabled by this call.
+- `mergeCommitSha`: SHA of the merge commit once merged.
 - `output`: aggregated `gh` output.
 - `steps`: `gh` command results for each step.
 
 Business error codes:
 
 - `auto-merge-unavailable`: the Repository does not allow auto-merge.
+- `pr-checks-failed`: a required Pull Request check failed after auto-merge
+  was enabled.
+- `merge-conflict`: the Pull Request has unresolved merge conflicts.
 - `retry-safe`: the operation can be retried safely.
 - `config-error`: GitHub configuration is missing or invalid.
 - `protection-conflict`: branch protection rejected the operation.

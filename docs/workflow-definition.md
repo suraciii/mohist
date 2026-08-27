@@ -80,6 +80,13 @@ default values, output fields, and error codes. Mohist validates `with` against
 that declaration. It rejects unknown fields, missing required fields, and
 invalid types instead of ignoring them.
 
+One `with` key is engine-reserved and valid for every Task:
+`working-directory` sets the Workspace-relative directory the Action runs in
+and is resolved before manifest validation. Repository-modifying Tasks in a
+Workflow Workspace use `working-directory: REPOS/${{ repository.name }}` to
+address the checkout; see [Workspace](workspaces.md#layout). A path that
+escapes the Workspace fails the Task.
+
 `uses` normally contains a literal concrete Action name. A Profile that declares
 `agentAction` may instead use the complete scalar `${{ profile.agentAction }}`.
 Mohist replaces it with the effective Project binding before Definition and
@@ -310,8 +317,24 @@ stages:
           prNumber: ${{ vars.github.pr.number }}
           method: squash
         recovery:
-          budget: 3
+          budget: 2
           handlers:
+            - when: error.code=pr-checks-failed
+              tasks:
+                - id: recover:fix-pr-checks
+                  uses: mohist/opencode
+                  with:
+                    session: integrate
+                    prompt: ${{ prompts.fix-pr-checks }}
+                    options: ${{ vars.agent }}
+                - id: recover:push
+                  uses: mohist/push
+                  with:
+                    source: ${{ workspace.branch }}
+                    target: ${{ workspace.branch }}
+                    remote: origin
+                    force: true
+              retrySelf: true
             - when: error.code=retry-safe
               retrySelf: true
     checks:
