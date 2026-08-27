@@ -40,7 +40,7 @@ type HandlerMocks = Record<
 
 interface CapturedControlOptions {
   followupTargetResolver: unknown
-  agentSessionRuntimeEventOutbox: unknown
+  agentSessionRuntimeEventQueue: unknown
   openCodeRuntime: unknown
 }
 
@@ -150,13 +150,13 @@ vi.mock('../src/server/runner-control-handlers.js', () => ({
   createRunnerControlHandlers: (deps: {
     followup: {
       followupTargetResolver?: unknown
-      agentSessionRuntimeEventOutbox?: unknown
+      agentSessionRuntimeEventQueue?: unknown
       openCodeRuntime?: unknown
     }
   }) => {
     currentHandlerTestState().capturedControlOptions = {
       followupTargetResolver: deps.followup.followupTargetResolver ?? null,
-      agentSessionRuntimeEventOutbox: deps.followup.agentSessionRuntimeEventOutbox ?? null,
+      agentSessionRuntimeEventQueue: deps.followup.agentSessionRuntimeEventQueue ?? null,
       openCodeRuntime: deps.followup.openCodeRuntime ?? null,
     }
     return {}
@@ -321,6 +321,6 @@ describe('RunnerHost wires OpenCodeRuntime into control followup/cancel handlers
 
     expect(state.capturedControlOptions).not.toBeNull()
     expect(typeof state.capturedControlOptions?.followupTargetResolver).toBe('function')
-    expect(state.capturedControlOptions?.agentSessionRuntimeEventOutbox).not.toBeNull()
+    expect(state.capturedControlOptions?.agentSessionRuntimeEventQueue).not.toBeNull()
   })
 })

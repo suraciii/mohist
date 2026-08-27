@@ -3,7 +3,7 @@ import type { CancelOperationJournalStore } from '../runtime/cancel-operation-jo
 import type { FollowupOperationJournalStore } from '../runtime/followup-operation-journal.js'
 import type { SessionCommandJournalStore } from '../runtime/session-command-journal.js'
 import { runnerLogger } from '../system/logger.js'
-import type { AgentSessionRuntimeEventOutbox } from './runtime-event-outbox.js'
+import type { AgentSessionRuntimeEventQueue } from './runtime-event-queue.js'
 import { RunnerControlDispatcher, type RunnerControlHandlers } from './runner-control-dispatcher.js'
 import {
   createRunnerControlSocket,
@@ -25,7 +25,7 @@ export interface RunnerControlWebSocketClientOptions {
   socketFactory?: RunnerControlSocketFactory
   random?: () => number
   onReconnected?: (connectionId: string) => void
-  agentSessionRuntimeEventOutbox?: AgentSessionRuntimeEventOutbox | null
+  agentSessionRuntimeEventQueue?: AgentSessionRuntimeEventQueue | null
   sessionCommandJournal?: SessionCommandJournalStore | null
   followupOperationJournal?: FollowupOperationJournalStore | null
   cancelOperationJournal?: CancelOperationJournalStore | null
@@ -57,7 +57,7 @@ export class RunnerControlWebSocketClient {
   private readonly url: string
   private readonly factory: RunnerControlSocketFactory
   private readonly random: () => number
-  private readonly outbox: AgentSessionRuntimeEventOutbox | null
+  private readonly eventQueue: AgentSessionRuntimeEventQueue | null
   private readonly journals: Array<{ load(): Promise<void> }>
   private running = false
   private candidate: Connection | null = null
@@ -89,7 +89,7 @@ export class RunnerControlWebSocketClient {
     this.url = buildControlUrl(serverUrl, runnerId, buildGitHash, buildInfo)
     this.factory = options.socketFactory ?? createRunnerControlSocket
     this.random = options.random ?? Math.random
-    this.outbox = options.agentSessionRuntimeEventOutbox ?? null
+    this.eventQueue = options.agentSessionRuntimeEventQueue ?? null
     this.journals = []
     if (options.sessionCommandJournal) this.journals.push(options.sessionCommandJournal)
     if (options.followupOperationJournal) this.journals.push(options.followupOperationJournal)
@@ -127,7 +127,7 @@ export class RunnerControlWebSocketClient {
       this.startupReject = reject
     })
     try {
-      if (this.outbox) await Promise.race([this.outbox.recover(), opened])
+      if (this.eventQueue) await Promise.race([this.eventQueue.recover(), opened])
       if (!this.ownsLifecycle(generation)) return await opened
       for (const journal of this.journals) {
         try {
@@ -147,7 +147,7 @@ export class RunnerControlWebSocketClient {
 
   async stop(): Promise<void> {
     const shutdown = this.shutdownConnection()
-    if (this.outbox) await this.outbox.stop()
+    if (this.eventQueue) await this.eventQueue.stop()
     await shutdown
   }
 
@@ -263,9 +263,9 @@ export class RunnerControlWebSocketClient {
 
   private async finishReconnect(connection: Connection): Promise<void> {
     try {
-      await this.outbox?.recover()
+      await this.eventQueue?.recover()
     } catch (error) {
-      log.error('runtime event outbox recovery failed', { exception: error })
+      log.error('runtime event queue retry failed', { exception: error })
     }
     this.resolveOpenWaiters(connection)
   }

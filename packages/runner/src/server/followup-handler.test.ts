@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto'
 import { join } from 'node:path'
 import { describe, expect, it as vitestIt, vi } from 'vitest'
 import { createFollowupHandler } from './followup-handler.js'
+import { createAgentSessionRuntimeEventQueue } from './runtime-event-queue.js'
 import { MemoryFileSystem } from '../../tests/support/memory-filesystem.js'
 import { withTestRunnerResources } from '../../tests/support/test-resources.js'
 
@@ -18,18 +19,60 @@ function it(name: string, body: (fileSystem: MemoryFileSystem) => Promise<void>)
 }
 
 describe('follow-up terminal failure categories', () => {
+  it('proceeds after authoritative admission when ordinary evidence capacity is saturated', async () => {
+    const runtimeFollowup = vi.fn(async () => ({
+      ok: true as const,
+      value: { facts: { runtimeSessionId: 'runtime-1', workDir: '/work', finalAssistantText: 'done' } },
+      diagnostics: [],
+    }))
+    const queue = createAgentSessionRuntimeEventQueue({
+      queueCapacity: 1,
+      admissionCapacity: 1,
+      retryDelayMs: 60_000,
+      warn: () => undefined,
+      deliver: {
+        async send(record) {
+          if (record.id === 'ordinary-evidence') throw new Error('hold ordinary evidence')
+          return [{ type: record.event.type }]
+        },
+      },
+    })
+    await queue.enqueueProducedFact({
+      id: 'ordinary-evidence',
+      producerFamily: 'session-followup',
+      target: { kind: 'session', sessionId: 'other-session' },
+      runtimeSessionId: 'other-runtime',
+      sessionTurnId: 'other-turn',
+      work: null,
+      event: { type: 'message.delta', payload: {} },
+      acknowledgementPolicy: 'successful-response',
+    })
+    const receive = createFollowupHandler({
+      followupTargetResolver: () => ({ runtimeSessionId: 'runtime-1', workDir: '/work', projectId: 'project-1' }),
+      agentSessionRuntimeEventQueue: queue,
+      openCodeRuntime: { ready: () => true, followup: runtimeFollowup } as never,
+    })
+
+    expect(await receive(genericFollowupPayload('opencode'))).toEqual({ accepted: true })
+    expect(runtimeFollowup).toHaveBeenCalledOnce()
+    expect(queue.snapshot().map((record) => record.id)).toContain('ordinary-evidence')
+    await queue.stop()
+  })
+
   it('records an OpenCode runtime error kind as failureCategory without changing the terminal shape', async () => {
     const records: any[] = []
     const outbox = {
       ready: () => true,
+      awaitInputReceipt: vi.fn(async () => ({ type: 'session.input' })),
       enqueueBeforeExecution: vi.fn(async (record: unknown) => records.push(record)),
       enqueueProducedFact: vi.fn(async (record: unknown) => records.push(record)),
     }
     const receive = createFollowupHandler({
       followupTargetResolver: () => ({ runtimeSessionId: 'runtime-1', workDir: '/work', projectId: 'project-1' }),
-      agentSessionRuntimeEventOutbox: outbox as never,
+      agentSessionRuntimeEventQueue: outbox as never,
       openCodeRuntime: {
         ready: () => true,
+        awaitInputReceipt: vi.fn(async () => ({ type: 'session.input' })),
         followup: vi.fn(async () => ({
           ok: false as const,
           error: { kind: 'unavailable-runtime' as const, message: 'runtime unavailable', diagnostics: [] },
@@ -75,14 +118,16 @@ describe('follow-up terminal failure categories', () => {
     const records: any[] = []
     const outbox = {
       ready: () => true,
+      awaitInputReceipt: vi.fn(async () => ({ type: 'session.input' })),
       enqueueBeforeExecution: vi.fn(async (record: unknown) => records.push(record)),
       enqueueProducedFact: vi.fn(async (record: unknown) => records.push(record)),
     }
     const receive = createFollowupHandler({
       followupTargetResolver: () => ({ runtimeSessionId: 'runtime-1', workDir: '/work', projectId: 'project-1' }),
-      agentSessionRuntimeEventOutbox: outbox as never,
+      agentSessionRuntimeEventQueue: outbox as never,
       openCodeRuntime: {
         ready: () => true,
+        awaitInputReceipt: vi.fn(async () => ({ type: 'session.input' })),
         followup: vi.fn(async () => ({
           ok: false as const,
           error: {
@@ -115,14 +160,16 @@ describe('follow-up terminal failure categories', () => {
       const records: any[] = []
       const outbox = {
         ready: () => true,
+        awaitInputReceipt: vi.fn(async () => ({ type: 'session.input' })),
         enqueueBeforeExecution: vi.fn(async (record: unknown) => records.push(record)),
         enqueueProducedFact: vi.fn(async (record: unknown) => records.push(record)),
       }
       const receive = createFollowupHandler({
         followupTargetResolver: () => ({ runtimeSessionId: 'runtime-1', workDir: '/work', projectId: 'project-1' }),
-        agentSessionRuntimeEventOutbox: outbox as never,
+        agentSessionRuntimeEventQueue: outbox as never,
         piRuntime: {
           ready: () => true,
+          awaitInputReceipt: vi.fn(async () => ({ type: 'session.input' })),
           followup: vi.fn(async () => ({
             ok: false as const,
             error: { kind, message: `${kind} message`, diagnostics: [] },
@@ -146,6 +193,7 @@ describe('follow-up terminal failure categories', () => {
     const records: any[] = []
     const outbox = {
       ready: () => true,
+      awaitInputReceipt: vi.fn(async () => ({ type: 'session.input' })),
       enqueueBeforeExecution: vi.fn(async (record: unknown) => records.push(record)),
       enqueueProducedFact: vi
         .fn()
@@ -154,9 +202,10 @@ describe('follow-up terminal failure categories', () => {
     }
     const receive = createFollowupHandler({
       followupTargetResolver: () => ({ runtimeSessionId: 'runtime-1', workDir: '/work', projectId: 'project-1' }),
-      agentSessionRuntimeEventOutbox: outbox as never,
+      agentSessionRuntimeEventQueue: outbox as never,
       openCodeRuntime: {
         ready: () => true,
+        awaitInputReceipt: vi.fn(async () => ({ type: 'session.input' })),
         followup: vi.fn(async (_request: unknown, observer: { onEvent?: (event: unknown) => void } | undefined) => {
           observer?.onEvent?.({ type: 'session.status', runtimeSessionId: 'runtime-1', workDir: '/work', payload: {} })
           return { ok: true as const, value: { facts: {} }, diagnostics: [] }
@@ -184,12 +233,13 @@ describe('follow-up terminal failure categories', () => {
       const records: any[] = []
       const outbox = {
         ready: () => true,
+        awaitInputReceipt: vi.fn(async () => ({ type: 'session.input' })),
         enqueueBeforeExecution: vi.fn(async (record: unknown) => records.push(record)),
         enqueueProducedFact: vi.fn(async (record: unknown) => records.push(record)),
       }
       const receive = createFollowupHandler({
         followupTargetResolver: () => ({ runtimeSessionId: 'runtime-1', workDir: '/work', projectId: 'project-1' }),
-        agentSessionRuntimeEventOutbox: outbox as never,
+        agentSessionRuntimeEventQueue: outbox as never,
         openCodeRuntime: { ready: () => true, followup } as never,
       })
 
@@ -206,6 +256,7 @@ describe('follow-up terminal failure categories', () => {
     const records: any[] = []
     const outbox = {
       ready: () => true,
+      awaitInputReceipt: vi.fn(async () => ({ type: 'session.input' })),
       enqueueBeforeExecution: vi.fn(async (record: unknown) => records.push(record)),
       enqueueProducedFact: vi.fn(async (record: unknown) => records.push(record)),
     }
@@ -215,9 +266,10 @@ describe('follow-up terminal failure categories', () => {
         workDir: '/work',
         projectId: '__mohist_slack_manager__',
       }),
-      agentSessionRuntimeEventOutbox: outbox as never,
+      agentSessionRuntimeEventQueue: outbox as never,
       piRuntime: {
         ready: () => true,
+        awaitInputReceipt: vi.fn(async () => ({ type: 'session.input' })),
         followup: vi.fn(async () => ({
           ok: false as const,
           error: { kind: 'deadline-exceeded' as const, message: 'deadline', diagnostics: [] },
@@ -251,7 +303,11 @@ describe('follow-up attachment delivery', () => {
     const enqueue = vi.fn()
     const receive = createFollowupHandler({
       followupTargetResolver: resolver,
-      agentSessionRuntimeEventOutbox: { ready: () => true, enqueueBeforeExecution: enqueue } as never,
+      agentSessionRuntimeEventQueue: {
+        ready: () => true,
+        enqueueBeforeExecution: enqueue,
+        awaitInputReceipt: vi.fn(async () => ({ type: 'session.input' })),
+      } as never,
       openCodeRuntime: (() => ({ ready: () => true })) as never,
       strictExecutionSourceValidation: true,
     })
@@ -283,6 +339,7 @@ describe('follow-up attachment delivery', () => {
     }
     const outbox = {
       ready: () => true,
+      awaitInputReceipt: vi.fn(async () => ({ type: 'session.input' })),
       enqueueBeforeExecution: vi.fn(),
       enqueueProducedFact: vi.fn(),
     }
@@ -299,7 +356,7 @@ describe('follow-up attachment delivery', () => {
         workDir: '/work',
         projectId: '__mohist_slack_manager__',
       }),
-      agentSessionRuntimeEventOutbox: outbox as never,
+      agentSessionRuntimeEventQueue: outbox as never,
       piRuntime: runtime as never,
       runnerRoot: '/tmp/runner',
       createManagerExecutionBoundary: vi.fn(async () => boundary as never) as never,
@@ -331,6 +388,7 @@ describe('follow-up attachment delivery', () => {
     }
     const outbox = {
       ready: () => true,
+      awaitInputReceipt: vi.fn(async () => ({ type: 'session.input' })),
       enqueueBeforeExecution: vi.fn(async (record: unknown) => records.push(record)),
       enqueueProducedFact: vi.fn(async (record: unknown) => records.push(record)),
     }
@@ -340,7 +398,7 @@ describe('follow-up attachment delivery', () => {
         workDir: '/work',
         projectId: '__mohist_slack_manager__',
       }),
-      agentSessionRuntimeEventOutbox: outbox as never,
+      agentSessionRuntimeEventQueue: outbox as never,
       piRuntime: runtime as never,
       runnerRoot: '/tmp/runner',
       createManagerExecutionBoundary: vi.fn(async () => boundary as never) as never,
@@ -376,6 +434,7 @@ describe('follow-up attachment delivery', () => {
     }
     const outbox = {
       ready: () => true,
+      awaitInputReceipt: vi.fn(async () => ({ type: 'session.input' })),
       enqueueBeforeExecution: vi.fn(async (record: unknown) => records.push(record)),
       enqueueProducedFact: vi.fn(async (record: unknown) => records.push(record)),
     }
@@ -385,7 +444,7 @@ describe('follow-up attachment delivery', () => {
         workDir: '/work',
         projectId: '__mohist_slack_manager__',
       }),
-      agentSessionRuntimeEventOutbox: outbox as never,
+      agentSessionRuntimeEventQueue: outbox as never,
       piRuntime: runtime as never,
       runnerRoot: '/tmp/runner',
       createManagerExecutionBoundary: vi.fn(async () => boundary as never) as never,
@@ -419,6 +478,7 @@ describe('follow-up attachment delivery', () => {
     const records: unknown[] = []
     const outbox = {
       ready: () => true,
+      awaitInputReceipt: vi.fn(async () => ({ type: 'session.input' })),
       enqueueBeforeExecution: vi.fn(async (record: unknown) => {
         records.push(record)
       }),
@@ -451,7 +511,7 @@ describe('follow-up attachment delivery', () => {
         workDir,
         projectId: 'project-1',
       }),
-      agentSessionRuntimeEventOutbox: outbox as never,
+      agentSessionRuntimeEventQueue: outbox as never,
       openCodeRuntime: runtime as never,
       connection: serverConnection as never,
       runnerId: 'runner-1',

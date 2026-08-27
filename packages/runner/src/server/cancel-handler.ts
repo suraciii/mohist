@@ -1,6 +1,5 @@
-// The cancel handler does NOT consult outbox health — it is the one
-// control WebSocket operation that must remain available while the durable
-// snapshot is being recovered. It captures the runtime via the host-owned
+// The cancel handler does NOT consult event queue health — it is the one
+// control WebSocket operation that must remain available while the event queue is unavailable. It captures the runtime via the host-owned
 // invocation-time accessor at command time (a runtime initialized or
 // replaced after control WebSocket client construction is therefore visible) and
 // resolves the binding through the binding-only `followupTargetResolver`.
@@ -14,14 +13,14 @@
 //
 // When a Cancel is confirmed, the handler
 // enqueues a binding-guarded `session.activity` fact through the host
-// runtime-event outbox so the grain's `ApplyRuntimeEventToDomain` →
+// runtime-event queue so the grain's `ApplyRuntimeEventToDomain` →
 // `ParseActivity` path settles activity: confirmed → `idle`, unconfirmed
 // → `unknown` (an unconfirmed stop must never be reported as `idle`).
 // The grain's `AppendEventsAsync(..., requireCurrentRuntimeBinding: true)`
 // discards the fact if the binding has been superseded by a concurrent
-// Reset / recovery. The outbox is best-effort: if it is null or unhealthy
+// Reset / recovery. The queue is best-effort: if it is null or unavailable
 // the cancel reply still flows to the caller, because cancel must remain
-// available while the durable snapshot is being recovered.
+// available independently of evidence delivery.
 
 import {
   sessionTargetFromWireTarget,
@@ -39,7 +38,7 @@ import {
   type CancelCallTarget,
   type CommandRuntimeAccessors,
 } from './command-runtime.js'
-import type { AgentSessionRuntimeEventOutbox, RuntimeEventRecord } from './runtime-event-outbox.js'
+import type { AgentSessionRuntimeEventQueue, RuntimeEventRecord } from './runtime-event-queue.js'
 import type { CancelOperationJournalStore } from '../runtime/cancel-operation-journal.js'
 import type { ManagerExecutionRegistry, ManagerExecutionEntry } from '../runtime/manager-execution-registry.js'
 import { runnerLogger } from '../system/logger.js'
@@ -50,7 +49,7 @@ export interface CancelHandlerDeps {
   followupTargetResolver?: FollowupTargetResolver | null
   openCodeRuntime?: CommandRuntimeAccessors['openCode']
   piRuntime?: CommandRuntimeAccessors['pi']
-  agentSessionRuntimeEventOutbox?: AgentSessionRuntimeEventOutbox | null
+  agentSessionRuntimeEventQueue?: AgentSessionRuntimeEventQueue | null
   managerExecutionRegistry?: ManagerExecutionRegistry | null
   onManagerExecutionFinished?: (executionId: string) => Promise<void> | void
   cancelOperationJournal?: CancelOperationJournalStore | null
@@ -247,7 +246,7 @@ async function handleCancel(
     const confirmed = facts.stopConfirmed === true
     try {
       await recordCancelActivity(
-        deps.agentSessionRuntimeEventOutbox ?? null,
+        deps.agentSessionRuntimeEventQueue ?? null,
         sessionTarget,
         binding.runtimeSessionId,
         payload.turnId,
@@ -255,7 +254,7 @@ async function handleCancel(
         { ...facts, stopConfirmed: confirmed },
       )
     } catch (outboxError) {
-      log.error('failed to persist cancel activity', { session: binding.runtimeSessionId, exception: outboxError })
+      log.error('failed to enqueue cancel activity', { session: binding.runtimeSessionId, exception: outboxError })
       return { state: 'stop-requested' }
     }
     const reply =
@@ -285,7 +284,7 @@ async function settleWithoutLiveTarget(
 }
 
 async function recordCancelActivity(
-  outbox: AgentSessionRuntimeEventOutbox | null,
+  outbox: AgentSessionRuntimeEventQueue | null,
   sessionTarget: SessionTarget,
   runtimeSessionId: string,
   turnId: string | undefined,

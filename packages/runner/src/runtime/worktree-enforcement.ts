@@ -15,7 +15,6 @@ import {
 } from './worktree-cleanup.js'
 import { git } from './git-probe.js'
 import type { TaskLogger } from './task-log.js'
-import { CLEANUP_TERMINAL_FACT_DELIVERY_TIMEOUT_CODE } from './cleanup-turn-admission.js'
 
 export const CLEANUP_SOURCE = 'cleanup'
 
@@ -409,16 +408,6 @@ export async function runAgentCleanupAttempt(
     )
   }
   if (isActionFailure(cleanupResult)) {
-    if (cleanupResult.error.code === CLEANUP_TERMINAL_FACT_DELIVERY_TIMEOUT_CODE) {
-      const message = cleanupResult.error.message.slice(0, 4000)
-      return {
-        ...mergeCleanupCount(baseResult, attempt - 1),
-        status: 'failed',
-        message,
-        error: { code: CLEANUP_TERMINAL_FACT_DELIVERY_TIMEOUT_CODE, message },
-        cleanupAttempts: attempt,
-      }
-    }
     return dirtyWorktreeFailure(
       mergeCleanupCount(baseResult, attempt - 1),
       snapshot,

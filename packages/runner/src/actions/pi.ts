@@ -19,13 +19,7 @@ import { SkillResolver } from '../runtime/skill-resolver.js'
 import { buildExecutionEnvelope } from '../runtime/execution-envelope.js'
 import type { AgentExecutionDefinition } from '../core/types.js'
 import { WorkflowAgentSessionReporter } from './workflow-agent-session-reporter.js'
-import type { AgentSessionRuntimeEventOutbox } from '../server/runtime-event-outbox.js'
-import {
-  CLEANUP_TERMINAL_FACT_DELIVERY_TIMEOUT_CODE,
-  cleanupDeliveryWaitFailureMessage,
-  isCleanupDeliveryWaitTimeout,
-  waitForCleanupPredecessorDelivery,
-} from '../runtime/cleanup-turn-admission.js'
+import type { AgentSessionRuntimeEventQueue } from '../server/runtime-event-queue.js'
 
 export const PI_USES = 'mohist/pi'
 export const PI_TURN_DURATION_MS = 60 * 60 * 1000
@@ -49,10 +43,9 @@ interface ActionInvocationContext {
   skillResolver?: SkillResolver
   agentDefinition?: AgentExecutionDefinition | null
   serverConnection?: ServerConnection | null
-  runtimeEventOutbox?: AgentSessionRuntimeEventOutbox | null
+  runtimeEventQueue?: AgentSessionRuntimeEventQueue | null
   runtimeEventRecordId?: () => string
   cleanupAttempt?: number | null
-  cleanupTerminalFactDeliveryBudgetMs?: number
   preparedPrompt?: string
   preparedOptions?: PiOptions
   log?: TaskLogger | null
@@ -121,36 +114,6 @@ export async function piAction(
 
   const sessionName = sessionNameFromContext(context)
   const canBind = !!context.serverConnection && !!context.projectId
-  if (canBind) {
-    try {
-      await waitForCleanupPredecessorDelivery(
-        context.runtimeEventOutbox,
-        {
-          projectId: context.projectId,
-          workflowRunId: context.workflowRunId,
-          sessionName,
-          workId: context.workId,
-          taskRunId: context.taskRunId,
-          cleanupAttempt: context.cleanupAttempt,
-        },
-        context.signal,
-        context.cleanupTerminalFactDeliveryBudgetMs,
-      )
-    } catch (error) {
-      if (isCleanupDeliveryWaitTimeout(error)) {
-        return fail(
-          CLEANUP_TERMINAL_FACT_DELIVERY_TIMEOUT_CODE,
-          cleanupDeliveryWaitFailureMessage(error, { workId: context.workId }),
-          { exitCode: 1, turnFact: { finalAssistantText: null } },
-        )
-      }
-      return fail(
-        'session-binding-failed',
-        `Failed to wait for Workflow cleanup predecessor delivery: ${actionErrorMessage(error)}`,
-        { exitCode: 1, turnFact: { finalAssistantText: null } },
-      )
-    }
-  }
   let runtimeSessionId: string | null = null
   let expectedRuntime: string | null = null
   let expectedRuntimeSessionId: string | null = null
@@ -237,7 +200,7 @@ export async function piAction(
       } catch (error) {
         return boundFailure(
           'session-binding-failed',
-          `Failed to persist the Workflow AgentSession binding: ${actionErrorMessage(error)}`,
+          `Failed to record the Workflow AgentSession binding: ${actionErrorMessage(error)}`,
           agentSessionId,
           runtimeSessionId,
         )
@@ -250,7 +213,7 @@ export async function piAction(
   if (context.cleanupAttempt && !reporter) {
     return boundFailure(
       'session-reporting-failed',
-      'Workflow cleanup requires the durable AgentSession runtime-event outbox',
+      'Workflow cleanup requires the AgentSession runtime-event queue',
       agentSessionId,
       runtimeSessionId,
       reporter,
@@ -574,10 +537,10 @@ function createWorkflowReporter(
   agentSessionId: string | null,
   runtimeSessionId: string | null,
 ): WorkflowAgentSessionReporter | null {
-  if (!context.projectId || !context.runtimeEventOutbox || !context.runtimeEventRecordId) return null
+  if (!context.projectId || !context.runtimeEventQueue || !context.runtimeEventRecordId) return null
   if (!context.taskRunId || !context.runnerId || !agentSessionId || !runtimeSessionId) return null
   return new WorkflowAgentSessionReporter({
-    outbox: context.runtimeEventOutbox,
+    outbox: context.runtimeEventQueue,
     projectId: context.projectId,
     workflowRunId: context.workflowRunId,
     sessionName,

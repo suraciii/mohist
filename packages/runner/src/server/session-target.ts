@@ -66,7 +66,7 @@ export interface FollowupTarget {
  * persisted binding, or `null` when no usable binding is registered.
  *
  * The resolver is BINDING-ONLY. It never reads runtime
- * or outbox readiness. Admission is owned by each caller (claim,
+ * or runtime-event queue readiness. Admission is owned by each caller (claim,
  * follow-up, cancel) so the resolver observes neither a stale runtime
  * nor a second runtime during replacement.
  *
@@ -121,9 +121,9 @@ export interface ReceiveFollowupPayload {
    * Issue-522 T-001: stable SessionInput id minted by the Server
    * and recorded on the AgentSession grain before the Runner is
    * invoked. When present the Runner uses it as the canonical id on
-   * the durable `session.input` record so the Server does not have
+   * the volatile `session.input` delivery so the Server does not have
    * to mint a duplicate. Absent on legacy callers that did not yet
-   * support the durable Turn identity; the Runner falls back to its
+   * support the stable Turn identity; the Runner falls back to its
    * own random id and the Server's existing acceptance path.
    */
   inputId?: string

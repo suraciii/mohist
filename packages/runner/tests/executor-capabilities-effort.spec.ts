@@ -46,7 +46,7 @@ function makeDeps(openCodeRuntime: unknown): Parameters<typeof buildActionHost>[
     skillResolver,
     piRuntime: null as unknown as PiRuntime,
     openCodeRuntime: openCodeRuntime as OpenCodeRuntime,
-    agentSessionRuntimeEventOutbox: null,
+    agentSessionRuntimeEventQueue: null,
     runtimeEventRecordId: () => `rec-${Math.random()}`,
   }
 }

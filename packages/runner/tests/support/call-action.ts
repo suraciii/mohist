@@ -89,7 +89,7 @@ function createReporter(
   runtimeSessionId: string | null,
 ): WorkflowAgentSessionReporter | null {
   if (!context.projectId) return null
-  const outbox = context.agentSessionRuntimeEventOutbox ?? null
+  const outbox = context.agentSessionRuntimeEventQueue ?? null
   if (!outbox) return null
   if (!runtimeSessionId) return null
   return new WorkflowAgentSessionReporter({

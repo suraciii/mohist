@@ -9,7 +9,7 @@ import { WorkspaceManager, WorkspaceNetworkTimeoutError } from './workspace.js'
 import type { NamedWorkspaceManager } from './workspace-entity.js'
 import type { ActionRegistry } from '../actions/registry.js'
 import type { ServerConnection } from '../server/connection.js'
-import type { AgentSessionRuntimeEventOutbox } from '../server/runtime-event-outbox.js'
+import type { AgentSessionRuntimeEventQueue } from '../server/runtime-event-queue.js'
 import type { OpenCodeRuntime } from './opencode/index.js'
 import type { PiRuntime } from './pi/index.js'
 import { captureAndUploadArtifactsForWork } from './artifact-side-effects.js'
@@ -59,12 +59,11 @@ export class WorkExecutor {
     private readonly now: () => Date = () => new Date(),
     private openCodeRuntime: OpenCodeRuntime | null = null,
     private readonly agentJobExecutor: AgentJobExecutor | null = null,
-    private agentSessionRuntimeEventOutbox: AgentSessionRuntimeEventOutbox | null = null,
+    private agentSessionRuntimeEventQueue: AgentSessionRuntimeEventQueue | null = null,
     private readonly runtimeEventRecordId: () => string = defaultRuntimeEventRecordId,
     private piRuntime: PiRuntime | null = null,
     private readonly skillResolver: SkillResolver = new SkillResolver(),
     private readonly namedWorkspaceManager: NamedWorkspaceManager | null = null,
-    private readonly cleanupTerminalFactDeliveryBudgetMs?: number,
     private readonly workflowSessionSettleBudgetMs?: number,
   ) {}
 
@@ -72,8 +71,8 @@ export class WorkExecutor {
     this.openCodeRuntime = runtime
   }
 
-  updateRuntimeEventOutbox(outbox: AgentSessionRuntimeEventOutbox | null) {
-    this.agentSessionRuntimeEventOutbox = outbox
+  updateRuntimeEventQueue(outbox: AgentSessionRuntimeEventQueue | null) {
+    this.agentSessionRuntimeEventQueue = outbox
   }
 
   async execute(
@@ -313,9 +312,8 @@ export class WorkExecutor {
       skillResolver: this.skillResolver,
       piRuntime: this.piRuntime,
       openCodeRuntime: this.openCodeRuntime,
-      agentSessionRuntimeEventOutbox: this.agentSessionRuntimeEventOutbox,
+      agentSessionRuntimeEventQueue: this.agentSessionRuntimeEventQueue,
       runtimeEventRecordId: this.runtimeEventRecordId,
-      cleanupTerminalFactDeliveryBudgetMs: this.cleanupTerminalFactDeliveryBudgetMs,
       workflowSessionSettleBudgetMs: this.workflowSessionSettleBudgetMs,
     }
   }

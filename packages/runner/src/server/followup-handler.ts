@@ -1,6 +1,6 @@
 // The follow-up handler routes both input and operation-correlated
 // terminal outcomes through the host-owned
-// `AgentSessionRuntimeEventOutbox`.
+// `AgentSessionRuntimeEventQueue`.
 //
 // Behaviour:
 //   - drops silently on null / missing payload, missing/empty input, no
@@ -9,7 +9,7 @@
 //     late binding), so a runtime built or replaced after
 //     control WebSocket client construction is visible to later commands
 //   - admits a follow-up command only when (a) the binding resolves and
-//     (b) the captured runtime is ready and (c) the outbox is healthy;
+//     (b) the captured runtime is ready and (c) the volatile queue is healthy;
 //     otherwise returns `{ accepted: false, error: "unavailable" }`
 //     without enqueuing input or invoking the runtime
 //   - dispatches to the binding's runtime:
@@ -17,14 +17,14 @@
 //     and Pi backends; an unknown or not-ready runtime reports
 //     `unavailable` and the command is not silently dropped
 //   - enqueues a `session.input` record through `enqueueBeforeExecution`
-//     before invoking `runtime.followup`; a local persistence failure
-//     returns `unavailable` without invoking the runtime, so command
-//     delivery can be retried
+//     and waits for its authoritative Server receipt before invoking
+//     `runtime.followup`; queue admission or receipt failure returns
+//     `unavailable` without invoking the runtime
 //   - invokes `runtime.followup` exactly once; the resolve/reject
 //     handler enqueues the corresponding session.activity record
-//   - server upload failure does NOT change the accepted result and
-//     does NOT re-invoke the prompt — the durable record is now under
-//     the outbox's retry/recovery policy
+//   - later evidence delivery failure does NOT change the accepted result
+//     and does NOT re-invoke the prompt; the volatile queue retries it only
+//     while this process remains alive
 
 import { errorMessage } from '../core/errors.js'
 import {
@@ -35,7 +35,7 @@ import {
   type ReceiveFollowupPayload,
   type SessionTarget,
 } from './session-target.js'
-import type { AgentSessionRuntimeEventOutbox, RuntimeEventRecord } from './runtime-event-outbox.js'
+import type { AgentSessionRuntimeEventQueue, RuntimeEventRecord } from './runtime-event-queue.js'
 import {
   callFollowup,
   ensureCommandRuntimeReady,
@@ -69,7 +69,7 @@ const log = runnerLogger.child('session')
 
 export interface FollowupHandlerDeps {
   followupTargetResolver?: FollowupTargetResolver | null
-  agentSessionRuntimeEventOutbox?: AgentSessionRuntimeEventOutbox | null
+  agentSessionRuntimeEventQueue?: AgentSessionRuntimeEventQueue | null
   openCodeRuntime?: CommandRuntimeAccessors['openCode']
   piRuntime?: CommandRuntimeAccessors['pi']
   connection?: ServerConnection | null
@@ -129,7 +129,7 @@ async function handleFollowup(
   const descriptors = parseAttachmentDescriptors(payload.attachments)
   if (text.trim().length === 0 && descriptors.length === 0) return unavailable()
   const resolver = deps.followupTargetResolver ?? null
-  const outbox = deps.agentSessionRuntimeEventOutbox ?? null
+  const outbox = deps.agentSessionRuntimeEventQueue ?? null
   if (!resolver || !outbox) return unavailable()
   if (!outbox.ready()) return unavailable()
 
@@ -267,7 +267,7 @@ async function handleFollowup(
     if (operationId && operationKey && deps.followupOperationJournal) {
       await deps.followupOperationJournal.release(operationKey, operationId).catch(() => undefined)
     }
-    log.error('followup durable input enqueue failed', {
+    log.error('followup input admission failed', {
       exception: error,
       session: sessionTarget.kind,
     })
@@ -535,7 +535,7 @@ function isManagerSlackContext(value: unknown): boolean {
 }
 
 function buildFollowupObserver(
-  outbox: AgentSessionRuntimeEventOutbox,
+  outbox: AgentSessionRuntimeEventQueue,
   sessionTarget: SessionTarget,
   target: FollowupTarget,
   operationId: string | undefined,
@@ -586,7 +586,7 @@ function buildFollowupObserver(
       pending.push(enqueue)
       enqueue.catch((outboxError) => {
         observerError ??= outboxError
-        log.error('failed to persist followup runtime event', {
+        log.error('failed to enqueue followup runtime event', {
           session: target.runtimeSessionId,
           exception: outboxError,
         })
@@ -635,7 +635,7 @@ function readRuntimeErrorCategory(
 }
 
 async function enqueueFollowupInput(
-  outbox: AgentSessionRuntimeEventOutbox,
+  outbox: AgentSessionRuntimeEventQueue,
   sessionTarget: SessionTarget,
   target: FollowupTarget,
   payload: ReceiveFollowupPayload,
@@ -644,7 +644,7 @@ async function enqueueFollowupInput(
 ): Promise<void> {
   // Issue-522 T-001 D1: when the server mints a stable inputId and
   // turnId on the AgentSession grain before dispatching the follow-up,
-  // use them as the durable record id and the canonical correlation
+  // use them as the runtime-event record id and canonical correlation
   // key. The Runner still emits the `session.input` event so the
   // Server can promote the Queued Turn to Executing (D8), but the
   // Server does NOT create a duplicate SessionInput/AgentTurn — the
@@ -674,10 +674,13 @@ async function enqueueFollowupInput(
     acknowledgementPolicy: 'matching-receipt',
   }
   await outbox.enqueueBeforeExecution(record)
+  const awaitReceipt = outbox.awaitInputReceipt
+  if (!awaitReceipt) throw new Error('runtime-event queue cannot await input receipt')
+  await awaitReceipt.call(outbox, record.id)
 }
 
 function recordFollowupActivity(
-  outbox: AgentSessionRuntimeEventOutbox,
+  outbox: AgentSessionRuntimeEventQueue,
   sessionTarget: SessionTarget,
   target: FollowupTarget,
   operationId: string | undefined,
@@ -734,7 +737,7 @@ function recordFollowupActivity(
     acknowledgementPolicy: 'successful-response',
   }
   outbox.enqueueProducedFact(record).catch((outboxError) => {
-    log.error('failed to persist followup terminal', {
+    log.error('failed to enqueue followup terminal evidence', {
       session: target.runtimeSessionId,
       exception: outboxError,
     })

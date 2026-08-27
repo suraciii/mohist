@@ -1,11 +1,11 @@
-// Real delivery adapter for `AgentSessionRuntimeEventOutbox`. It maps a
+// Real delivery adapter for `AgentSessionRuntimeEventQueue`. It maps a
 // `RuntimeEventRecord` to the corresponding `ServerConnection` method
 // based on the record's `producerFamily` + `target.kind`. Both the
 // Workflow and generic endpoints already return
 // `AgentSessionRuntimeEventReceipt[]`.
 
 import type { ServerConnection, AgentSessionRuntimeEventReceipt } from './connection.js'
-import { runtimeEventDeliveryKey, type RuntimeEventDelivery, type RuntimeEventRecord } from './runtime-event-outbox.js'
+import { runtimeEventDeliveryKey, type RuntimeEventDelivery, type RuntimeEventRecord } from './runtime-event-queue.js'
 
 export interface RuntimeEventDeliveryOptions {
   readonly connection: ServerConnection
@@ -104,7 +104,7 @@ export function createServerRuntimeEventDelivery(options: RuntimeEventDeliveryOp
           signal,
         )
         // The server returns one receipt per submitted event, in order.
-        // Preserve that order so the outbox can settle each record against
+        // Preserve that order so the queue can settle each record against
         // its own acknowledgement policy by position.
         return accepted.map<AgentSessionRuntimeEventReceipt[]>((a) => [
           {
