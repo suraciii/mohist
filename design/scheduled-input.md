@@ -20,18 +20,11 @@ Delivery reuses ordinary follow-up admission because scheduling changes when an 
 not what an Input means. This preserves one permission boundary, queue policy, binding policy,
 transcript, and Runner protocol:
 
-```text diagram
-caller creates schedule
-          |
-          v
-SessionSchedule (durable intent)
-          |
-          | due wake-up (replaceable)
-          v
-AcceptFollowup + stable delivery key
-          |
-          v
-SessionInput / AgentTurn
+```mermaid
+flowchart TD
+    C["caller creates schedule"] --> SS["SessionSchedule (durable intent)"]
+    SS -->|"due wake-up (replaceable)"| AF["AcceptFollowup + stable delivery key"]
+    AF --> IT["SessionInput / AgentTurn"]
 ```
 
 The tree relationship and the schedule also have different lifecycles. Detach changes a
@@ -57,10 +50,13 @@ SessionSchedule
   CancelledAt?
 ```
 
-```text diagram
-scheduled ---------> pending-delivery ---------> delivered
-    |                       |
-    +-----------------------+-------------------> cancelled
+```mermaid
+stateDiagram-v2
+    state "pending-delivery" as pending
+    scheduled --> pending
+    pending --> delivered
+    scheduled --> cancelled
+    pending --> cancelled
 ```
 
 `delivered` and `cancelled` are terminal. `scheduled` means the due time has not arrived or a

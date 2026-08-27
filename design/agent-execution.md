@@ -44,17 +44,13 @@ across Runtime loss.
 
 There is one work-owner path:
 
-```text diagram
-Workflow task / Web / CLI / Connection / event / mention
-                         |
-                         v
-                 Agent AgentJob
-                  |           |
-                  v           v
-          AgentSession    resolved Action
-                              |
-                              v
-                     Runtime adapter --> Runtime Session
+```mermaid
+flowchart TD
+    O["Workflow task / Web / CLI / Connection / event / mention"] --> J["Agent AgentJob"]
+    J --> S["AgentSession"]
+    J --> A["resolved Action"]
+    A --> RA["Runtime adapter"]
+    RA --> RS["Runtime Session"]
 ```
 
 Every origin enters through the canonical AgentJob launch boundary. The Agent context validates
@@ -110,13 +106,11 @@ materialization are authoritative in [`workspaces.md`](workspaces.md#binding-and
 AgentJob and AgentSession have separate write authorities, so launch is not one cross-aggregate
 transaction. The durable protocol instead makes every partial state queryable:
 
-```text diagram
-caller launchRequestId
-          |
-          v
-AgentJob prepare -- durable accept request --> AgentSession
-       ^                                        |
-       +-------- durable accept result ---------+
+```mermaid
+flowchart LR
+    C["caller launchRequestId"] --> P["AgentJob prepare"]
+    P -->|"durable accept request"| S["AgentSession"]
+    S -->|"durable accept result"| P
 ```
 
 - The caller supplies a stable `launchRequestId`. After authentication and authorization, Server
@@ -136,14 +130,15 @@ The launch projection and null rules are authoritative in
 
 ### AgentSession invariants
 
-```text diagram
-AgentSession (stable logical identity)
-  | owns in order
-  +--> SessionInput -- belongs to exactly one --> AgentTurn
-  +--> Transcript facts
-  +--> current ContextGeneration
-  +--> CurrentBinding --> one physical Runtime Session
-  +--> at most one ActiveOperation
+```mermaid
+flowchart TD
+    S["AgentSession (stable logical identity)"] -->|"owns in order"| SI["SessionInput"]
+    SI -->|"belongs to exactly one"| AT["AgentTurn"]
+    S --> TF["Transcript facts"]
+    S --> CG["current ContextGeneration"]
+    S --> CB["CurrentBinding"]
+    CB --> RS["one physical Runtime Session"]
+    S --> AO["at most one ActiveOperation"]
 ```
 
 The invariants are:
@@ -226,13 +221,19 @@ AgentSession has only these Activity states:
 - `unknown`: Input acceptance, a Turn result, a Runtime effect, Binding, or an operation cannot be
   confirmed.
 
-```text diagram
-idle -- accepted Input ----------------------------> active
-active -- all current work settles definitively ---> idle
-active -- final result still expected -------------> active (outcome_pending)
-active -- acceptance or effect becomes uncertain --> unknown
-unknown -- authoritative reconciliation -----------> active | idle | unknown
-unknown -- explicit force-reset --------------------> unknown old facts + new current context
+```mermaid
+stateDiagram-v2
+    idle --> active : accepted Input
+    active --> idle : all current work settles definitively
+    active --> active : final result still expected (outcome_pending)
+    active --> unknown : acceptance or effect becomes uncertain
+    unknown --> active : authoritative reconciliation
+    unknown --> idle : authoritative reconciliation
+    unknown --> unknown : reconciliation may leave it unknown
+    note right of unknown
+        explicit force-reset: unknown old facts
+        plus a new current context
+    end
 ```
 
 Activity is derived from the current `ContextGeneration`. Unresolved facts from older generations
@@ -398,15 +399,14 @@ current Runtime Session is missing and the current generation is otherwise safe:
 `idle`, admission is `ready`, no Turn is running or `outcome_pending`, and no Input, dispatch,
 Runtime effect, or operation is `unknown`.
 
-```text diagram
-CurrentBinding
-  | resolve on the same Runner
-  +-- ready --------------------------> reuse CurrentBinding
-  +-- definitely missing + safe -----> create candidate with stable key
-  |                                      |
-  |                                      +-- complete candidate --> fenced CAS
-  |                                      +-- uncertain ----------> keep old Binding, block
-  +-- absent evidence or uncertain ---> keep old Binding, block
+```mermaid
+flowchart TD
+    CB["CurrentBinding"] -->|"resolve on the same Runner"| R{"evidence"}
+    R -->|"ready"| RE["reuse CurrentBinding"]
+    R -->|"definitely missing + safe"| CC["create candidate with stable key"]
+    CC -->|"complete candidate"| CAS["fenced CAS"]
+    CC -->|"uncertain"| KB["keep old Binding, block"]
+    R -->|"absent evidence or uncertain"| KB
 ```
 
 When recovery is unsafe, Mohist retains the original Binding and Turn, sets

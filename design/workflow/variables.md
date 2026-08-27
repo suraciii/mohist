@@ -31,20 +31,18 @@ Project, Issue, and WorkflowRun Variables use the same shape:
 WorkflowProfile can reference a Variable, but it does not own, declare, or restrict Variable keys. A
 Variable affects execution only when a Profile, task, check, recovery, or Prompt references it.
 
-```text diagram
-Workflow merge:
-  Project.vars -> Issue.vars -> Run.vars -> Effective Workflow Variables
-
-Stage merge:
-  Effective Workflow Variables
-    -> Project.stages[current].vars
-    -> Issue.stages[current].vars
-    -> Run.stages[current].vars
-    -> Effective Stage Variables
+```mermaid
+flowchart LR
+    subgraph WM["Workflow merge"]
+        PV["Project.vars"] --> IV["Issue.vars"] --> RV["Run.vars"] --> EW["Effective Workflow Variables"]
+    end
+    subgraph SM["Stage merge"]
+        EW2["Effective Workflow Variables"] --> PS["Project.stages[current].vars"] --> IS["Issue.stages[current].vars"] --> RS["Run.stages[current].vars"] --> ES["Effective Stage Variables"]
+    end
+```
 
 Later sources override earlier sources.
 Both Effective Variable results are read-only, derived, and not stored.
-```
 
 - **Effective Workflow Variables:** The Stage-independent result after merging `vars` in Project,
   Issue, and Run order.
@@ -78,15 +76,10 @@ resolve(currentStage, project, issue, run):
 
 The complete priority order, from lowest to highest, is:
 
-```text diagram
-project.vars
--> issue.vars
--> run.vars
--> Effective Workflow Variables
--> project.stages[current].vars
--> issue.stages[current].vars
--> run.stages[current].vars
--> Effective Stage Variables
+```mermaid
+flowchart LR
+    PV["project.vars"] --> IV["issue.vars"] --> RV["run.vars"] --> EW["Effective Workflow Variables"]
+    EW --> PS["project.stages[current].vars"] --> IS["issue.stages[current].vars"] --> RS["run.stages[current].vars"] --> ES["Effective Stage Variables"]
 ```
 
 Variables for the current Stage are more specific than Workflow Variables from any scope. Therefore, they

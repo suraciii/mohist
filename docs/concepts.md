@@ -204,34 +204,31 @@ and are fixed for the unit of work when it starts. See [Skills](skills.md).
 
 ## How the Concepts Fit Together
 
-```text diagram
-[Slack] -- Agent Connection --> [Mohist Agent]
-                                      |
-                                      | AgentJob + AgentSession
-                                      v
-                                  [Project]
+```mermaid
+flowchart TD
+    Slack["Slack"] -->|"Agent Connection"| MA["Mohist Agent"]
+    MA -->|"AgentJob + AgentSession"| P["Project"]
+    EA["External Agent in IDE / host"] -->|"Mohist Skill + mo"| P
+    WC["Web UI / CLI"] -->|"direct Agent or domain use"| P
+```
 
-[External Agent in IDE / host] -- Mohist Skill + mo --> [Project]
-[Web UI / CLI] -- direct Agent or domain use ------------> [Project]
+Inside one Project, Epics supply Issues and each Issue moves through its
+Workflow, whose stage tasks run as Mohist Agents:
 
-[Project]
-   |
-   +--> [Epic] -- groups --> [Issue]
-   |
-   +-----------------------> [Issue]
-                                 |
-                                 | Workflow (mohist/local)
-                                 v
-                  Plan -> Build -> Check -> Integrate -> Done
-                    |       |        |
-                    +-------+--------+--> Mohist Agent -> AgentJob + AgentSession
-                                 |
-                                 | merges code
-                                 v
-                         [User repository]
-                                 |
-                                 v
-                        [Product advances]
+```mermaid
+flowchart TD
+    P["Project"] --> E["Epic"]
+    E -->|"groups"| I["Issue"]
+    P --> I
+    I --> W
+    subgraph W["Workflow (mohist/local)"]
+        direction LR
+        Plan --> Build --> Check --> Integrate --> Done
+    end
+    W -->|"stage tasks"| MA["Mohist Agent"]
+    MA --> JS["AgentJob + AgentSession"]
+    W -->|"merges code"| R["User repository"]
+    R --> PA["Product advances"]
 ```
 
 Keep one mental model: **You usually stay in an existing workspace. A Mohist

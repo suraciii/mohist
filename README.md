@@ -36,18 +36,16 @@ take over manually. It is not another daily workspace.
 
 The arrows show how a work request reaches the execution environment.
 
-```text diagram
-[Slack] -- Agent Connection --> [Mohist Agent] ---------+
-[IDE / Agent host] --> [External Agent] -- Skill + mo --+--> [Mohist Server]
-[Web UI / CLI] -- direct use ---------------------------+
-                                                            |
-                                                            | dispatch
-                                                            v
-                                                         [Runner]
-                                                            |
-                                                            | executes in
-                                                            v
-                                                 [Workspace / repository]
+```mermaid
+flowchart TD
+    Slack["Slack"] -->|"Agent Connection"| MA["Mohist Agent"]
+    IDE["IDE / Agent host"] --> EA["External Agent"]
+    EA -->|"Skill + mo"| Server["Mohist Server"]
+    WebCLI["Web UI / CLI"]
+    MA --> Server
+    WebCLI -->|"direct use"| Server
+    Server -->|"dispatch"| Runner["Runner"]
+    Runner -->|"executes in"| WS["Workspace / repository"]
 ```
 
 ## Workflow
@@ -56,8 +54,9 @@ A Workflow Profile defines how an Issue enters the production line. Its stages,
 tasks, checks, and approval points are configurable. The default Profile is
 `mohist/local`:
 
-```text diagram
-Draft --mark ready--> Backlog --start--> Plan -> Build -> Check -> Integrate -> Done
+```mermaid
+flowchart LR
+    Draft -->|"mark ready"| Backlog -->|"start"| Plan --> Build --> Check --> Integrate --> Done
 ```
 
 Draft and Backlog belong to the Issue lifecycle rather than the Profile. This

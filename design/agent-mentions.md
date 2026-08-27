@@ -47,17 +47,12 @@ does not trigger.
 
 ### Detection and Launch
 
-```text diagram
-Issue comment commit
-        |
-        v
-durable comment-added event
-        |
-        +-- Agent-authored --> stop
-        |
-        +-- owner-authored --> resolve distinct @names
-                                  |
-                                  +--> ordinary Agent launch
+```mermaid
+flowchart TD
+    C["Issue comment commit"] --> E["durable comment-added event"]
+    E -->|"Agent-authored"| S["stop"]
+    E -->|"owner-authored"| R["resolve distinct @names"]
+    R --> L["ordinary Agent launch"]
 ```
 
 - Launch uses the shared launcher's manual, Workspace-optional path instead of

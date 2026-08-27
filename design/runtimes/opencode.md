@@ -78,12 +78,15 @@ promise; the Runtime itself produces execution facts, not that Workflow output.
 
 ## Capability Boundary
 
-```text diagram
-Workflow Action ----+
-AgentJob executor ---+--> OpenCodeRuntime --> official SDK --> shared Server
-Session commands ----+                                      |
-                                                            +--> directory Instances
-                                                            +--> physical Sessions
+```mermaid
+flowchart LR
+    WA["Workflow Action"] --> OR["OpenCodeRuntime"]
+    AJ["AgentJob executor"] --> OR
+    SC["Session commands"] --> OR
+    OR --> SDK["official SDK"]
+    SDK --> SS["shared Server"]
+    SS --> DI["directory Instances"]
+    SS --> PS["physical Sessions"]
 ```
 
 `OpenCodeRuntime` owns Server and Client lifecycle, readiness, physical Session
@@ -165,18 +168,14 @@ could create an Instance in the name of cleanup.
 Reclamation and ordinary Runtime operations share one exclusive boundary per
 directory:
 
-```text diagram
-local operation admitted?                 yes -> defer
-        | no
-        v
-status missing, malformed, busy, retry,
-or unknown?                               yes -> defer
-        | no; empty or all idle
-        v
-dispose confirmed exactly true?           no  -> retain and retry later
-        | yes
-        v
-forget directory for this Server generation
+```mermaid
+flowchart TD
+    A{"local operation admitted?"} -->|"yes"| D1["defer"]
+    A -->|"no"| B{"status missing, malformed, busy, retry, or unknown?"}
+    B -->|"yes"| D2["defer"]
+    B -->|"no: empty or all idle"| C{"dispose confirmed exactly true?"}
+    C -->|"no"| D3["retain and retry later"]
+    C -->|"yes"| F["forget directory for this Server generation"]
 ```
 
 The boundary remains held through confirmed disposal, so a Prompt, Follow-up,
@@ -251,18 +250,14 @@ work is executing.
 
 The safety order is identity before effect:
 
-```text diagram
-resolve current binding
-        |
-        +-- present ----------+
-        +-- definitely missing -> create candidate -> binding CAS
-        +-- unknown/incompatible --------------------> stop
-                              |
-                              v
-                    persist Input identity
-                              |
-                              v
-                         submit Prompt
+```mermaid
+flowchart TD
+    R["resolve current binding"] -->|"present"| P["persist Input identity"]
+    R -->|"definitely missing"| CC["create candidate"]
+    CC --> CAS["binding CAS"]
+    CAS --> P
+    R -->|"unknown / incompatible"| S["stop"]
+    P --> SP["submit Prompt"]
 ```
 
 A new physical Session is created before its binding is persisted, and the first

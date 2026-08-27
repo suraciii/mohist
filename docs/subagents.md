@@ -11,24 +11,23 @@ when a user starts it directly and a Subagent when another session spawns it.
 The parent-child relationship belongs to AgentSessions. This is like a process
 tree: programs have no parent-child relation, but processes do.
 
-```text diagram
-Control plane: flat Agent resources, with no parent-child relation
-
-  [lead]   [terra]   [luna]   [e2e]   [reviewer]
-     |
-     | mo agent launch (the user starts the tree root)
-     v
-Execution plane: a recorded session tree that grows during work
-
-  S1: lead
-     +-- spawn --> S2: terra
-     +-- spawn --> S3: luna
-     |                 +-- spawn --> S5: e2e
-     +-- spawn --> S4: reviewer
-
-  Child sessions inherit the parent working directory.
-  For file isolation, the Agent can use git inside that directory.
+```mermaid
+flowchart TD
+    subgraph CP["Control plane: flat Agent resources, with no parent-child relation"]
+        direction LR
+        lead["lead"] --- terra["terra"] --- luna["luna"] --- e2e["e2e"] --- reviewer["reviewer"]
+    end
+    lead -.->|"mo agent launch: the user starts the tree root"| S1
+    subgraph EP["Execution plane: a recorded session tree that grows during work"]
+        S1["S1: lead"] -->|"spawn"| S2["S2: terra"]
+        S1 -->|"spawn"| S3["S3: luna"]
+        S1 -->|"spawn"| S4["S4: reviewer"]
+        S3 -->|"spawn"| S5["S5: e2e"]
+    end
 ```
+
+Child sessions inherit the parent working directory. For file isolation, the
+Agent can use git inside that directory.
 
 ## Division of Work with a Workflow
 
