@@ -1,4 +1,5 @@
 import { isAbsolute, relative, resolve } from 'node:path'
+import { repositoryWorkspacePath } from './workspace-identity.js'
 
 // Wire shape for workspace-scoped control WebSocket queries. `workspacePath` is the
 // on-disk worktree the runner materialized; `branch` is the head ref the
@@ -35,7 +36,10 @@ export function resolveWorkspaceQuery(query: WorkspaceQuery | null | undefined):
   const identityFields = [query.workflowRunId, query.gitUrl]
   const hasIdentity = identityFields.some((value) => value !== undefined && value !== null)
   if (hasIdentity && (!query.workflowRunId || !query.gitUrl)) return null
-  const resolved = { workDir: query.workspacePath, baseBranch: query.baseBranch, head }
+  const workDir = query.repositoryName
+    ? repositoryWorkspacePath(query.workspacePath, query.repositoryName)
+    : query.workspacePath
+  const resolved = { workDir, baseBranch: query.baseBranch, head }
   return hasIdentity ? { ...resolved, identity: query } : resolved
 }
 

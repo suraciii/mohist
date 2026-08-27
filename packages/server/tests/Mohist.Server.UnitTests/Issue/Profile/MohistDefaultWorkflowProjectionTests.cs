@@ -193,7 +193,7 @@ public class MohistDefaultWorkflowProjectionTests
     {
         var projection = MohistDefaultWorkflowProjection.ProjectWorkflowState(508, "Title", IssueStatus.Backlog, workflow: null);
 
-        Assert.Equal("openspec/changes/issue-508", projection.ChangeDir);
+        Assert.Equal("PLANS", projection.ChangeDir);
     }
 
     [Fact]

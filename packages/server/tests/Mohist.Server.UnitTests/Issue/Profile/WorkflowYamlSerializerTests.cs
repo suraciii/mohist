@@ -54,34 +54,13 @@ public class WorkflowYamlSerializerTests
 
         Assert.Equal(WorkflowProfileCatalog.Definition.Stages.Select(s => s.Stage), reparsed.Stages.Select(s => s.Stage));
         Assert.Contains("options: ${{ vars.agent }}", yaml);
-        Assert.Contains("prompt: ${{ prompts.proposal }}", yaml);
+        Assert.Contains("prompt: ${{ prompts.plan }}", yaml);
         Assert.DoesNotContain("repairTask:", yaml);
-        Assert.DoesNotContain("repairLimit:", yaml);
-        Assert.Contains("id: recover:fix-review-findings", yaml);
-        Assert.Contains("prompt: ${{ prompts.auto-fix }}", yaml);
-        Assert.Contains("retrySelf: true", yaml);
-        Assert.DoesNotContain("verifyTask:", yaml);
-        Assert.Equal("mohist/openspec-tasks", reparsed.Stages[1].Tasks[1].Uses);
-        // Review failure is modeled on the ai-review task itself
-        // (failIf + with.recovery + retrySelf), not on a review-passed
-        // check. The check stage no longer carries review-passed.
+        Assert.DoesNotContain("prompts.auto-fix", yaml);
         var checkStage = reparsed.Stages[2];
-        Assert.DoesNotContain(checkStage.Checks, c => c.Id == "review-passed");
         var aiReview = checkStage.Tasks.Single(t => t.Id == "ai-review");
-        Assert.NotNull(aiReview.Recovery);
-        var recovery = aiReview.Recovery!;
-        Assert.Equal(2, recovery.Budget);
-        var handler = Assert.Single(recovery.Handlers);
-        Assert.True(handler.RetrySelf);
-        var fixReviewFindings = Assert.Single(handler.Tasks);
-        Assert.Equal("recover:fix-review-findings", fixReviewFindings.Id);
-
-        // The top-level recoveries section names the rebase-conflicts
-        // template that the API rebase route resolves by name.
-        Assert.NotNull(reparsed.Recoveries);
-        Assert.True(reparsed.Recoveries!.TryGetValue("rebase-conflicts", out var template));
-        Assert.Equal(2, template!.Budget);
-        Assert.Equal("mohist/opencode", Assert.Single(template.Handlers).Tasks[0].Uses);
+        Assert.Null(aiReview.Recovery);
+        Assert.Contains("PLANS/REVIEW.md", JsonSerializer.Serialize(aiReview.Artifacts));
     }
 
     [Fact]

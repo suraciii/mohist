@@ -1,483 +1,400 @@
 approval:
   feedback:
     tasks:
-      - id: apply-feedback
-        title: Apply approval feedback
-        uses: mohist/opencode
-        with:
-          session: ${{ stage.name }}
-          prompt: ${{ prompts.apply-feedback }}
-          options: ${{ vars.agent }}
-
+    - id: apply-feedback
+      title: Apply approval feedback
+      uses: mohist/opencode
+      with:
+        session: ${{ stage.name }}
+        prompt: ${{ prompts.apply-feedback }}
+        options: ${{ vars.agent }}
 recoveries:
   rebase-conflicts:
     budget: 2
     handlers:
-      - when: error.code=conflict
-        tasks:
-          - id: recover:resolve-rebase-conflicts
-            title: Resolve rebase conflicts
-            uses: mohist/opencode
-            with:
-              session: check
-              prompt: ${{ prompts.resolve-rebase-conflicts }}
-              options: ${{ vars.agent }}
-        retrySelf: false
-
-stages:
-  - stage: plan
-    requiresApproval: true
-    tasks:
-      - id: workspace-prepare
-        title: Prepare workspace
-        uses: mohist/workspace-prepare
-        with:
-          expectedBranch: ${{ workspace.branch }}
-      - id: proposal
-        title: Generate proposal
-        uses: mohist/opencode
-        with:
-          session: plan
-          prompt: ${{ prompts.proposal }}
-          options: ${{ vars.agent }}
-        expect:
-          files:
-            - path: openspec/changes/issue-${{ issue.number }}/proposal.md
-        artifacts:
-          files:
-            - path: openspec/changes/issue-${{ issue.number }}/proposal.md
-      - id: specs
-        title: Write specs
-        uses: mohist/opencode
-        with:
-          session: plan
-          prompt: ${{ prompts.specs }}
-          options: ${{ vars.agent }}
-        artifacts:
-          files:
-            - path: openspec/changes/issue-${{ issue.number }}/specs
-      - id: design
-        title: Create design
-        uses: mohist/opencode
-        with:
-          session: plan
-          prompt: ${{ prompts.design }}
-          options: ${{ vars.agent }}
-        expect:
-          files:
-            - path: openspec/changes/issue-${{ issue.number }}/design.md
-        artifacts:
-          files:
-            - path: openspec/changes/issue-${{ issue.number }}/design.md
-      - id: tasks
-        title: Generate tasks
-        uses: mohist/opencode
-        with:
-          session: plan
-          prompt: ${{ prompts.tasks }}
-          options: ${{ vars.agent }}
-        expect:
-          files:
-            - path: openspec/changes/issue-${{ issue.number }}/tasks.json
-        artifacts:
-          files:
-            - path: openspec/changes/issue-${{ issue.number }}/tasks.json
-      - id: self-review
-        title: Self review
-        uses: mohist/opencode
-        with:
-          session: plan
-          prompt: ${{ prompts.self-review }}
-          options: ${{ vars.agent }}
-        expect:
-          markers:
-            - path: openspec/changes/issue-${{ issue.number }}/self-review.md
-              oneOf:
-                - <promise>PASS</promise>
-                - <promise>FAIL</promise>
-              failIf: <promise>FAIL</promise>
-        recovery:
-          budget: 1
-          handlers:
-            - when: output.promise=FAIL
-              tasks:
-                - id: recover:fix-plan-review
-                  title: Fix plan review findings
-                  uses: mohist/opencode
-                  with:
-                    session: plan
-                    prompt: ${{ prompts.fix-plan-review }}
-                    options: ${{ vars.agent }}
-              retrySelf: true
-        artifacts:
-          files:
-            - path: openspec/changes/issue-${{ issue.number }}/self-review.md
-    checks:
-      - id: plan-artifacts
-        title: Plan artifacts complete
-        uses: mohist/openspec-artifacts
-        with:
-          changeDir: openspec/changes/issue-${{ issue.number }}
-      - id: health
-        title: Health
-        uses: core/script
-        with:
-          run: git diff --check
-          timeout: 300000
-
-  - stage: build
-    tasks:
-      - id: workspace-prepare
-        title: Prepare workspace
-        uses: mohist/workspace-prepare
-        with:
-          expectedBranch: ${{ workspace.branch }}
-      - id: load-tasks
-        title: Load tasks from plan
-        uses: mohist/openspec-tasks
-        with:
-          path: openspec/changes/issue-${{ issue.number }}/tasks.json
-          task:
-            uses: mohist/opencode
-            with:
-              options: ${{ vars.agent }}
-              prompt:
-                uses: mohist/openspec-task-prompt
-                with:
-                  file: openspec/changes/issue-${{ issue.number }}/tasks.json
-                  items: tasks
-                  base: ${{ prompts.build }}
-      - id: build-health
-        title: Health
-        uses: core/script
-        with:
-          run: git diff --check
-          timeout: 300000
-        recovery:
-          budget: 1
-          handlers:
-            - when: error.code=script-failed
-              tasks:
-                - id: recover:fix-build-health
-                  title: Fix build health
-                  uses: mohist/opencode
-                  with:
-                    session: build
-                    prompt: |
-                      Fix the build-stage health failure reported by `git diff --check`.
-                      Keep changes focused on whitespace and patch formatting issues.
-                    options: ${{ vars.agent }}
-              retrySelf: true
-      - id: verify-install
-        title: Install dependencies
-        uses: core/script
-        with:
-          run: npm ci
-          timeout: 900000
-        recovery:
-          budget: 2
-          handlers:
-            - tasks:
-                - id: recover:fix-ci
-                  title: Fix CI verification
-                  uses: mohist/opencode
-                  with:
-                    session: build
-                    prompt: ${{ prompts.fix-ci }}
-                    options: ${{ vars.agent }}
-                  expect:
-                    markers:
-                      - path: _output
-                        oneOf:
-                          - <promise>done</promise>
-                          - <promise>unfinished</promise>
-              retrySelf: true
-      - id: verify-dotnet
-        title: Verify .NET tests
-        uses: core/script
-        with:
-          run: |
-            export DOTNET_ROOT=/home/szf/.dotnet
-            dotnet test Mohist.sln --nologo -m:1 -p:UseSharedCompilation=false
-          timeout: 1200000
-        recovery:
-          budget: 2
-          handlers:
-            - tasks:
-                - id: recover:fix-ci
-                  title: Fix CI verification
-                  uses: mohist/opencode
-                  with:
-                    session: build
-                    prompt: ${{ prompts.fix-ci }}
-                    options: ${{ vars.agent }}
-                  expect:
-                    markers:
-                      - path: _output
-                        oneOf:
-                          - <promise>done</promise>
-                          - <promise>unfinished</promise>
-              retrySelf: true
-      - id: verify-web-typecheck
-        title: Verify web typecheck
-        uses: core/script
-        with:
-          run: npm run typecheck -w packages/web
-          timeout: 600000
-        recovery:
-          budget: 2
-          handlers:
-            - tasks:
-                - id: recover:fix-ci
-                  title: Fix CI verification
-                  uses: mohist/opencode
-                  with:
-                    session: build
-                    prompt: ${{ prompts.fix-ci }}
-                    options: ${{ vars.agent }}
-                  expect:
-                    markers:
-                      - path: _output
-                        oneOf:
-                          - <promise>done</promise>
-                          - <promise>unfinished</promise>
-              retrySelf: true
-      - id: verify-web-tests
-        title: Verify web tests
-        uses: core/script
-        with:
-          run: npm run test:run -w packages/web
-          timeout: 900000
-        recovery:
-          budget: 2
-          handlers:
-            - tasks:
-                - id: recover:fix-ci
-                  title: Fix CI verification
-                  uses: mohist/opencode
-                  with:
-                    session: build
-                    prompt: ${{ prompts.fix-ci }}
-                    options: ${{ vars.agent }}
-                  expect:
-                    markers:
-                      - path: _output
-                        oneOf:
-                          - <promise>done</promise>
-                          - <promise>unfinished</promise>
-              retrySelf: true
-      - id: verify-runner-typecheck
-        title: Verify runner typecheck
-        uses: core/script
-        with:
-          run: npm run typecheck -w packages/runner
-          timeout: 600000
-        recovery:
-          budget: 2
-          handlers:
-            - tasks:
-                - id: recover:fix-ci
-                  title: Fix CI verification
-                  uses: mohist/opencode
-                  with:
-                    session: build
-                    prompt: ${{ prompts.fix-ci }}
-                    options: ${{ vars.agent }}
-                  expect:
-                    markers:
-                      - path: _output
-                        oneOf:
-                          - <promise>done</promise>
-                          - <promise>unfinished</promise>
-              retrySelf: true
-      - id: verify-runner-tests
-        title: Verify runner tests
-        uses: core/script
-        with:
-          run: npm run test:run -w packages/runner -- --no-file-parallelism
-          timeout: 900000
-        recovery:
-          budget: 2
-          handlers:
-            - tasks:
-                - id: recover:fix-ci
-                  title: Fix CI verification
-                  uses: mohist/opencode
-                  with:
-                    session: build
-                    prompt: ${{ prompts.fix-ci }}
-                    options: ${{ vars.agent }}
-                  expect:
-                    markers:
-                      - path: _output
-                        oneOf:
-                          - <promise>done</promise>
-                          - <promise>unfinished</promise>
-              retrySelf: true
-    checks: []
-
-
-
-  - stage: check
-    requiresApproval: true
-    tasks:
-      - id: workspace-prepare
-        title: Prepare workspace
-        uses: mohist/workspace-prepare
-        with:
-          expectedBranch: ${{ workspace.branch }}
-      - id: ai-review
-        title: AI review
+    - when: error.code=conflict
+      tasks:
+      - id: recover:resolve-rebase-conflicts
+        title: Resolve rebase conflicts
         uses: mohist/opencode
         with:
           session: check
-          prompt: ${{ prompts.review }}
+          prompt: ${{ prompts.resolve-rebase-conflicts }}
           options: ${{ vars.agent }}
-        expect:
-          markers:
-            - path: openspec/changes/issue-${{ issue.number }}/review.md
+      retrySelf: false
+stages:
+- stage: plan
+  requiresApproval: true
+  tasks:
+  - id: workspace-prepare
+    title: Prepare workspace
+    uses: mohist/workspace-prepare
+    with:
+      expectedBranch: ${{ workspace.branch }}
+      working-directory: REPOS/${{ repository.name }}
+  - id: plan
+    title: Plan the change
+    uses: mohist/opencode
+    with:
+      session: plan
+      prompt: ${{ prompts.plan }}
+      options: ${{ vars.agent }}
+    expect:
+      files:
+      - path: PLANS/PLAN.md
+      - path: PLANS/DESIGN.md
+      - path: PLANS/tasks.json
+    artifacts:
+      files:
+      - path: PLANS/PLAN.md
+      - path: PLANS/DESIGN.md
+      - path: PLANS/tasks.json
+  checks:
+  - id: health
+    title: Health
+    uses: core/script
+    with:
+      run: git diff --check
+      timeout: 300000
+      working-directory: REPOS/${{ repository.name }}
+- stage: build
+  tasks:
+  - id: workspace-prepare
+    title: Prepare workspace
+    uses: mohist/workspace-prepare
+    with:
+      expectedBranch: ${{ workspace.branch }}
+      working-directory: REPOS/${{ repository.name }}
+  - id: load-tasks
+    title: Load tasks from plan
+    uses: mohist/task-list
+    with:
+      path: PLANS/tasks.json
+      task:
+        uses: mohist/opencode
+        with:
+          options: ${{ vars.agent }}
+  - id: build-health
+    title: Health
+    uses: core/script
+    with:
+      run: git diff --check
+      timeout: 300000
+      working-directory: REPOS/${{ repository.name }}
+    recovery:
+      budget: 1
+      handlers:
+      - when: error.code=script-failed
+        tasks:
+        - id: recover:fix-build-health
+          title: Fix build health
+          uses: mohist/opencode
+          with:
+            session: build
+            prompt: 'Fix the build-stage health failure reported by `git diff --check`.
+
+              Keep changes focused on whitespace and patch formatting issues.
+
+              '
+            options: ${{ vars.agent }}
+        retrySelf: true
+  - id: verify-install
+    title: Install dependencies
+    uses: core/script
+    with:
+      run: npm ci
+      timeout: 900000
+      working-directory: REPOS/${{ repository.name }}
+    recovery:
+      budget: 2
+      handlers:
+      - tasks:
+        - id: recover:fix-ci
+          title: Fix CI verification
+          uses: mohist/opencode
+          with:
+            session: build
+            prompt: ${{ prompts.fix-ci }}
+            options: ${{ vars.agent }}
+          expect:
+            markers:
+            - path: _output
               oneOf:
-                - <promise>PASS</promise>
-                - <promise>FAIL</promise>
-              failIf: <promise>FAIL</promise>
-        recovery:
-          budget: 2
-          handlers:
-            - when: output.promise=FAIL
-              tasks:
-                - id: recover:fix-review-findings
-                  title: Fix review findings
-                  uses: mohist/opencode
-                  with:
-                    session: check
-                    prompt: ${{ prompts.auto-fix }}
-                    options: ${{ vars.agent }}
-              retrySelf: true
-        artifacts:
-          files:
-            - path: openspec/changes/issue-${{ issue.number }}/review.md
-      - id: check-health
-        title: Health
-        uses: core/script
-        with:
-          run: git diff --check
-          timeout: 300000
-        recovery:
-          budget: 1
-          handlers:
-            - when: error.code=script-failed
-              tasks:
-                - id: recover:fix-check-health
-                  title: Fix check health
-                  uses: mohist/opencode
-                  with:
-                    session: check
-                    prompt: |
-                      Fix the check-stage health failure reported by `git diff --check`.
-                      Keep changes focused on whitespace and patch formatting issues.
-                    options: ${{ vars.agent }}
-              retrySelf: true
-      - id: merge-ready
-        title: Merge ready
-        uses: mohist/merge-ready
-        with:
-          baseBranch: ${{ repository.baseBranch }}
-          source: ${{ workspace.branch }}
-          remote: origin
-        recovery:
-          budget: 1
-          handlers:
-            - when: canMerge=false
-              tasks:
-                - id: recover:rebase-onto-base
-                  title: Rebase onto base branch
-                  uses: mohist/rebase
-                  with:
-                    baseBranch: ${{ repository.baseBranch }}
-                    remote: origin
-                  recovery:
-                    budget: 2
-                    handlers:
-                      - when: error.code=conflict
-                        tasks:
-                          - id: recover:resolve-rebase-conflicts
-                            title: Resolve rebase conflicts
-                            uses: mohist/opencode
-                            with:
-                              session: check
-                              prompt: ${{ prompts.resolve-rebase-conflicts }}
-                              options: ${{ vars.agent }}
-              retrySelf: true
-    checks: []
+              - <promise>done</promise>
+              - <promise>unfinished</promise>
+        retrySelf: true
+  - id: verify-dotnet
+    title: Verify .NET tests
+    uses: core/script
+    with:
+      run: 'export DOTNET_ROOT=/home/szf/.dotnet
 
+        dotnet test Mohist.sln --nologo -m:1 -p:UseSharedCompilation=false
 
+        '
+      timeout: 1200000
+      working-directory: REPOS/${{ repository.name }}
+    recovery:
+      budget: 2
+      handlers:
+      - tasks:
+        - id: recover:fix-ci
+          title: Fix CI verification
+          uses: mohist/opencode
+          with:
+            session: build
+            prompt: ${{ prompts.fix-ci }}
+            options: ${{ vars.agent }}
+          expect:
+            markers:
+            - path: _output
+              oneOf:
+              - <promise>done</promise>
+              - <promise>unfinished</promise>
+        retrySelf: true
+  - id: verify-web-typecheck
+    title: Verify web typecheck
+    uses: core/script
+    with:
+      run: npm run typecheck -w packages/web
+      timeout: 600000
+      working-directory: REPOS/${{ repository.name }}
+    recovery:
+      budget: 2
+      handlers:
+      - tasks:
+        - id: recover:fix-ci
+          title: Fix CI verification
+          uses: mohist/opencode
+          with:
+            session: build
+            prompt: ${{ prompts.fix-ci }}
+            options: ${{ vars.agent }}
+          expect:
+            markers:
+            - path: _output
+              oneOf:
+              - <promise>done</promise>
+              - <promise>unfinished</promise>
+        retrySelf: true
+  - id: verify-web-tests
+    title: Verify web tests
+    uses: core/script
+    with:
+      run: npm run test:run -w packages/web
+      timeout: 900000
+      working-directory: REPOS/${{ repository.name }}
+    recovery:
+      budget: 2
+      handlers:
+      - tasks:
+        - id: recover:fix-ci
+          title: Fix CI verification
+          uses: mohist/opencode
+          with:
+            session: build
+            prompt: ${{ prompts.fix-ci }}
+            options: ${{ vars.agent }}
+          expect:
+            markers:
+            - path: _output
+              oneOf:
+              - <promise>done</promise>
+              - <promise>unfinished</promise>
+        retrySelf: true
+  - id: verify-runner-typecheck
+    title: Verify runner typecheck
+    uses: core/script
+    with:
+      run: npm run typecheck -w packages/runner
+      timeout: 600000
+      working-directory: REPOS/${{ repository.name }}
+    recovery:
+      budget: 2
+      handlers:
+      - tasks:
+        - id: recover:fix-ci
+          title: Fix CI verification
+          uses: mohist/opencode
+          with:
+            session: build
+            prompt: ${{ prompts.fix-ci }}
+            options: ${{ vars.agent }}
+          expect:
+            markers:
+            - path: _output
+              oneOf:
+              - <promise>done</promise>
+              - <promise>unfinished</promise>
+        retrySelf: true
+  - id: verify-runner-tests
+    title: Verify runner tests
+    uses: core/script
+    with:
+      run: npm run test:run -w packages/runner -- --no-file-parallelism
+      timeout: 900000
+      working-directory: REPOS/${{ repository.name }}
+    recovery:
+      budget: 2
+      handlers:
+      - tasks:
+        - id: recover:fix-ci
+          title: Fix CI verification
+          uses: mohist/opencode
+          with:
+            session: build
+            prompt: ${{ prompts.fix-ci }}
+            options: ${{ vars.agent }}
+          expect:
+            markers:
+            - path: _output
+              oneOf:
+              - <promise>done</promise>
+              - <promise>unfinished</promise>
+        retrySelf: true
+  checks: []
+- stage: check
+  requiresApproval: true
+  tasks:
+  - id: workspace-prepare
+    title: Prepare workspace
+    uses: mohist/workspace-prepare
+    with:
+      expectedBranch: ${{ workspace.branch }}
+      working-directory: REPOS/${{ repository.name }}
+  - id: ai-review
+    title: AI review
+    uses: mohist/opencode
+    with:
+      session: check
+      prompt: ${{ prompts.review }}
+      options: ${{ vars.agent }}
+    expect:
+      files:
+      - path: PLANS/REVIEW.md
+    artifacts:
+      files:
+      - path: PLANS/REVIEW.md
+  - id: check-health
+    title: Health
+    uses: core/script
+    with:
+      run: git diff --check
+      timeout: 300000
+      working-directory: REPOS/${{ repository.name }}
+    recovery:
+      budget: 1
+      handlers:
+      - when: error.code=script-failed
+        tasks:
+        - id: recover:fix-check-health
+          title: Fix check health
+          uses: mohist/opencode
+          with:
+            session: check
+            prompt: 'Fix the check-stage health failure reported by `git diff --check`.
 
-  - stage: integrate
-    lockBehavior: sequential
-    resources:
-      - project-integration
-    tasks:
-      - id: workspace-prepare
-        title: Prepare workspace
-        uses: mohist/workspace-prepare
-        with:
-          expectedBranch: ${{ workspace.branch }}
-      - id: integrate:archive-change
-        title: Archive change
-        uses: mohist/archive-change
-        with:
-          changeDir: openspec/changes/issue-${{ issue.number }}
-        recovery:
-          budget: 3
-          handlers:
-            - when: error.code=retry-safe
-              retrySelf: true
-      - id: integrate:rebase
-        title: Rebase and squash branch
-        uses: mohist/rebase
-        with:
-          baseBranch: ${{ repository.baseBranch }}
-          remote: origin
-          squash: true
-          messageFrom: issue.title
-        recovery:
-          budget: 2
-          handlers:
+              Keep changes focused on whitespace and patch formatting issues.
+
+              '
+            options: ${{ vars.agent }}
+        retrySelf: true
+  - id: merge-ready
+    title: Merge ready
+    uses: mohist/merge-ready
+    with:
+      baseBranch: ${{ repository.baseBranch }}
+      source: ${{ workspace.branch }}
+      remote: origin
+      working-directory: REPOS/${{ repository.name }}
+    recovery:
+      budget: 1
+      handlers:
+      - when: canMerge=false
+        tasks:
+        - id: recover:rebase-onto-base
+          title: Rebase onto base branch
+          uses: mohist/rebase
+          with:
+            baseBranch: ${{ repository.baseBranch }}
+            remote: origin
+            working-directory: REPOS/${{ repository.name }}
+          recovery:
+            budget: 2
+            handlers:
             - when: error.code=conflict
               tasks:
-                - id: recover:resolve-rebase-conflicts
-                  title: Resolve rebase conflicts
-                  uses: mohist/opencode
-                  with:
-                    session: integrate
-                    prompt: ${{ prompts.resolve-rebase-conflicts }}
-                    options: ${{ vars.agent }}
-      - id: integrate:push
-        title: Push changes
-        uses: mohist/push
-        with:
-          source: ${{ workspace.branch }}
-          target: ${{ repository.baseBranch }}
-          remote: origin
-      - id: integrate:health
-        title: Health
-        uses: core/script
-        with:
-          run: git diff --check
-          timeout: 300000
-        recovery:
-          budget: 1
-          handlers:
-            - when: error.code=script-failed
-              tasks:
-                - id: recover:fix-integrate-health
-                  title: Fix integrate health
-                  uses: mohist/opencode
-                  with:
-                    session: integrate
-                    prompt: |
-                      Fix the integrate-stage health failure reported by `git diff --check`.
-                      Keep changes focused on whitespace and patch formatting issues.
-                    options: ${{ vars.agent }}
-              retrySelf: true
-    checks: []
+              - id: recover:resolve-rebase-conflicts
+                title: Resolve rebase conflicts
+                uses: mohist/opencode
+                with:
+                  session: check
+                  prompt: ${{ prompts.resolve-rebase-conflicts }}
+                  options: ${{ vars.agent }}
+        retrySelf: true
+  checks: []
+- stage: integrate
+  lockBehavior: sequential
+  resources:
+  - project-integration
+  tasks:
+  - id: workspace-prepare
+    title: Prepare workspace
+    uses: mohist/workspace-prepare
+    with:
+      expectedBranch: ${{ workspace.branch }}
+      working-directory: REPOS/${{ repository.name }}
+  - id: integrate:rebase
+    title: Rebase and squash branch
+    uses: mohist/rebase
+    with:
+      baseBranch: ${{ repository.baseBranch }}
+      remote: origin
+      squash: true
+      messageFrom: issue.title
+      working-directory: REPOS/${{ repository.name }}
+    recovery:
+      budget: 2
+      handlers:
+      - when: error.code=conflict
+        tasks:
+        - id: recover:resolve-rebase-conflicts
+          title: Resolve rebase conflicts
+          uses: mohist/opencode
+          with:
+            session: integrate
+            prompt: ${{ prompts.resolve-rebase-conflicts }}
+            options: ${{ vars.agent }}
+  - id: integrate:push
+    title: Push changes
+    uses: mohist/push
+    with:
+      source: ${{ workspace.branch }}
+      target: ${{ repository.baseBranch }}
+      remote: origin
+      working-directory: REPOS/${{ repository.name }}
+  - id: integrate:health
+    title: Health
+    uses: core/script
+    with:
+      run: git diff --check
+      timeout: 300000
+      working-directory: REPOS/${{ repository.name }}
+    recovery:
+      budget: 1
+      handlers:
+      - when: error.code=script-failed
+        tasks:
+        - id: recover:fix-integrate-health
+          title: Fix integrate health
+          uses: mohist/opencode
+          with:
+            session: integrate
+            prompt: 'Fix the integrate-stage health failure reported by `git diff --check`.
+
+              Keep changes focused on whitespace and patch formatting issues.
+
+              '
+            options: ${{ vars.agent }}
+        retrySelf: true
+  checks: []

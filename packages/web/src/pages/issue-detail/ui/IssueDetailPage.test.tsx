@@ -257,6 +257,70 @@ describe('IssueDetailPage runtime decision surface', () => {
     expect(workflowFrame.querySelector('[data-testid="request-changes-button"]')).toBeNull()
   })
 
+  it('ignores approval artifact summaries from a replaced workflow run', async () => {
+    mockIssue(
+      makeIssue({
+        status: 'in_progress',
+        workflowStage: 'check',
+        workflowRunId: 'wr-new',
+        health: 'paused',
+        approvalState: { status: 'awaiting', stage: 'check', requestedAt: '2026-01-01T00:00:00Z' },
+        recovery: {
+          currentWorkItem: null,
+          latestAttemptState: null,
+          workflowSummaryState: 'awaiting-approval',
+          allowedActions: ['approve', 'reject'],
+        },
+      }),
+    )
+    mockWorkflowTimeline({
+      workflowRunId: 'wr-old',
+      status: 'running',
+      currentStage: 'check',
+      pendingWork: null,
+      stages: [
+        {
+          stage: 'check',
+          status: 'awaiting-approval',
+          order: 2,
+          startedAt: null,
+          completedAt: null,
+          durationMs: null,
+          checks: [],
+          approval: null,
+          tasks: [
+            {
+              id: 'review',
+              title: 'Review',
+              uses: 'mohist/opencode',
+              status: 'completed',
+              startedAt: null,
+              completedAt: null,
+              durationMs: null,
+              attempts: 1,
+              message: null,
+              artifactSummaries: [
+                {
+                  artifactId: 'old-review',
+                  path: 'PLANS/REVIEW.md',
+                  kind: 'file',
+                  recordedAt: '2026-01-01T00:00:00Z',
+                },
+              ],
+            },
+          ],
+        },
+      ],
+      availableActions: [],
+    })
+
+    renderPage()
+
+    expect(await screen.findByTestId('approval-review-evidence')).toBeTruthy()
+    expect(await screen.findByText('Artifact is missing from this workflow run.')).toBeTruthy()
+    expect(screen.queryByText('# old-review')).toBeNull()
+  })
+
   it('renders one Stop control on the page and it belongs to the runtime decision surface', async () => {
     mockIssue(
       makeIssue({

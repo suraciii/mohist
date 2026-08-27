@@ -49,7 +49,7 @@ public sealed class WorkflowProfileAgentRuntimeProjectionTests
     {
         var definition = DefinitionWithTask(new TaskDefinition(
             "load",
-            Uses: "mohist/openspec-tasks",
+            Uses: "mohist/task-list",
             With: With("""
                 {"uses":"mohist/pi"}
                 """)));
@@ -60,7 +60,7 @@ public sealed class WorkflowProfileAgentRuntimeProjectionTests
     [Fact]
     public void Project_DoesNotInferRuntimeForOpenSpecTaskWithoutNestedUses()
     {
-        var definition = DefinitionWithTask(new TaskDefinition("load", Uses: "mohist/openspec-tasks"));
+        var definition = DefinitionWithTask(new TaskDefinition("load", Uses: "mohist/task-list"));
 
         Assert.Null(WorkflowProfileAgentRuntimeProjection.Project(definition));
     }
@@ -94,7 +94,7 @@ public sealed class WorkflowProfileAgentRuntimeProjectionTests
     {
         var definition = DefinitionWithTask(new TaskDefinition(
             "load",
-            Uses: "mohist/openspec-tasks",
+            Uses: "mohist/task-list",
             With: With("""
                 {"uses":"${{ vars.agent }}"}
                 """)));

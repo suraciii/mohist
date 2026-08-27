@@ -41,6 +41,37 @@ export function workspaceBindingIdentity(
   }
 }
 
+const WINDOWS_DEVICE_NAME = /^(con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\..*)?$/i
+
+export function isSafeRepositoryName(repositoryName: string): boolean {
+  return (
+    !!repositoryName &&
+    repositoryName !== '.' &&
+    repositoryName !== '..' &&
+    !/[<>:"/\\|?*]/.test(repositoryName) &&
+    !/\p{Cc}/u.test(repositoryName) &&
+    !/[. ]$/.test(repositoryName) &&
+    !WINDOWS_DEVICE_NAME.test(repositoryName)
+  )
+}
+
+export function repositoryWorkspacePath(workspacePath: string, repositoryName: string) {
+  if (!isSafeRepositoryName(repositoryName)) {
+    throw new WorkspaceIdentityMismatchError(`Invalid repository name '${repositoryName}'`)
+  }
+  const reposRoot = resolve(join(workspacePath, 'REPOS'))
+  const repositoryPath = resolve(join(reposRoot, repositoryName))
+  if (
+    repositoryPath === reposRoot ||
+    !repositoryPath.startsWith(`${reposRoot}${process.platform === 'win32' ? '\\' : '/'}`)
+  ) {
+    throw new WorkspaceIdentityMismatchError(
+      `Repository name '${repositoryName}' escapes the Workspace REPOS directory`,
+    )
+  }
+  return repositoryPath
+}
+
 export function markerPath(workspacePath: string) {
   return join(workspacePath, '.mohist', 'workspace.json')
 }

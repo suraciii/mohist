@@ -1,11 +1,10 @@
 import { describe, expect, it } from 'vitest'
 import { http, HttpResponse } from 'msw'
 import { server, useMswServer } from '../../../../tests/support/msw'
+import { issueArtifactKeys } from './query-keys'
 import { issueEventsQueryOptions, issueWorkflowTaskLogQueryOptions, workspaceStatusQueryOptions } from './queries'
 
-const EVENTS_DTO = [
-  { id: 'evt-1', type: 'issue.updated', time: '2026-07-03T08:00:00.000Z' },
-]
+const EVENTS_DTO = [{ id: 'evt-1', type: 'issue.updated', time: '2026-07-03T08:00:00.000Z' }]
 
 function recordIssueEventsRequests() {
   const urls: string[] = []
@@ -91,6 +90,14 @@ describe('workspaceStatusQueryOptions', () => {
     expect(options.refetchInterval({ state: { data: { reason: 'git_error', ahead: 0, behind: 0 } } })).toBe(5_000)
     expect(options.refetchInterval({ state: { data: { exists: true } } })).toBe(5_000)
     expect(options.refetchInterval({ state: { data: { exists: true, ahead: 1, behind: 2 } } })).toBe(30_000)
+  })
+})
+
+describe('issueArtifactKeys', () => {
+  it('includes workflowRunId in content identity so replacement runs cannot reuse stale content', () => {
+    expect(issueArtifactKeys.content('proj-1', 161, 'artifact-1', 'wr-1', { artifactKind: 'file' })).not.toEqual(
+      issueArtifactKeys.content('proj-1', 161, 'artifact-1', 'wr-2', { artifactKind: 'file' }),
+    )
   })
 })
 

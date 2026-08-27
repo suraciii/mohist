@@ -7,7 +7,7 @@ internal static class WorkflowProfileAgentRuntimeProjection
 {
     private const string OpenCodeUses = "mohist/opencode";
     private const string PiUses = "mohist/pi";
-    private const string OpenSpecTasksUses = "mohist/openspec-tasks";
+    private const string TaskListUses = "mohist/task-list";
 
     public static string? Project(string? agentAction) => agentAction switch
     {
@@ -55,9 +55,9 @@ internal static class WorkflowProfileAgentRuntimeProjection
 
         void ScanTask(TaskDefinition task)
         {
-            if (string.Equals(task.Uses, OpenSpecTasksUses, StringComparison.Ordinal))
+            if (string.Equals(task.Uses, TaskListUses, StringComparison.Ordinal))
             {
-                if (!TryGetOpenSpecTasksUses(task.With, out var nestedUses, out var nestedUnresolved))
+                if (!TryGetTaskListUses(task.With, out var nestedUses, out var nestedUnresolved))
                     unresolved = true;
                 else if (nestedUnresolved)
                     unresolved = true;
@@ -91,7 +91,7 @@ internal static class WorkflowProfileAgentRuntimeProjection
         return !unresolved && runtimes.Count == 1 ? runtimes.Single() : null;
     }
 
-    private static bool TryGetOpenSpecTasksUses(
+    private static bool TryGetTaskListUses(
         Dictionary<string, JsonElement?>? with,
         out string? uses,
         out bool unresolved)

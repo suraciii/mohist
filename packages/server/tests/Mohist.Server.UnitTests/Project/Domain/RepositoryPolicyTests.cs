@@ -624,4 +624,35 @@ public class RepositoryPolicyTests
         var error = Assert.Single(build.Errors);
         Assert.Equal("repository_alias_conflict", error.Code);
     }
+
+    [Theory]
+    [InlineData(".")]
+    [InlineData("..")]
+    [InlineData("a/b")]
+    [InlineData("a\\b")]
+    [InlineData("CON")]
+    [InlineData("con.txt")]
+    [InlineData("PRN.md")]
+    [InlineData("AUX")]
+    [InlineData("NUL.log")]
+    [InlineData("COM1")]
+    [InlineData("com9.ext")]
+    [InlineData("LPT1")]
+    [InlineData("lpt9.txt")]
+    [InlineData("repo.")]
+    [InlineData("repo ")]
+    [InlineData("repo:name")]
+    [InlineData("repo<name")]
+    [InlineData("repo>name")]
+    [InlineData("repo\"name")]
+    [InlineData("repo|name")]
+    [InlineData("repo?name")]
+    [InlineData("repo*name")]
+    [InlineData("repo\u001f")]
+    [InlineData("repo\u0085")]
+    public void Validate_RejectsRepositoryNamesThatAreNotSafePathSegments(string name)
+    {
+        var errors = RepositoryPolicy.Validate([new RepositoryPolicy.NormalizedRepository(name, "https://example.test/repo.git", "main", true)]);
+        Assert.Contains(errors, error => error.Code == "repositories[0].name" && error.Message.Contains("safe single path segment"));
+    }
 }

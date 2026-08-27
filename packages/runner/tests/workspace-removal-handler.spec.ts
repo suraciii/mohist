@@ -1,3 +1,4 @@
+import { join } from 'node:path'
 import { describe, expect, it as vitestIt, vi } from 'vitest'
 import {
   createWorkspaceRemovalHandler,
@@ -5,6 +6,9 @@ import {
 } from '../src/server/workspace-removal-handler.js'
 import type { WorkspaceRemovalFence, WorkspaceRemovalFenceResult } from '../src/runtime/workspace-removal-fence.js'
 import type { WorkspaceRegistry } from '../src/runtime/workspace-registry.js'
+import { issueWorkspacePath } from '../src/runtime/workspace.js'
+import { MemoryDirectoryHandleFileSystem } from './support/memory-filesystem.js'
+import { withTestRunnerResources } from './support/test-resources.js'
 
 const removalTestRuntime = vi.hoisted(() => {
   type State = {
@@ -200,6 +204,49 @@ describe('RemoveWorkspace removal fence', () => {
     await expect(handler(query)).resolves.toMatchObject({ removed: true, status: 'removed' })
     expect(registry.remove).toHaveBeenCalledOnce()
     expect(deleteDirectory).toHaveBeenCalledOnce()
+  })
+
+  vitestIt('deletes through the held parent after the public workspace path is replaced', async () => {
+    await withRemovalMocks(async () => {
+      const fileSystem = new MemoryDirectoryHandleFileSystem()
+      const runnerRoot = '/managed-runner'
+      const path = issueWorkspacePath(runnerRoot, 'wr-held-delete')
+      const heldWorkspaces = join(runnerRoot, 'workspaces-held')
+      const outside = '/outside-workspaces'
+      await fileSystem.ensureDir(join(path, 'REPOS', 'main', '.git'))
+      await fileSystem.ensureDir(outside)
+      await fileSystem.writeText(
+        join(path, '.mohist', 'workspace.json'),
+        JSON.stringify({ workflowRunId: 'wr-held-delete', runBranch: 'mohist/run-wr-held-delete' }),
+      )
+      let swapped = false
+      validateWorkspaceIdentity.mockImplementation(async () => {
+        if (swapped) return
+        swapped = true
+        await fileSystem.rename(join(runnerRoot, 'workspaces'), heldWorkspaces)
+        await fileSystem.symlink(outside, join(runnerRoot, 'workspaces'))
+      })
+      deleteDirectory.mockImplementation(async (operationPath: string) => {
+        await fileSystem.deleteDirectory(operationPath)
+      })
+      const result = await withTestRunnerResources(
+        async () => {
+          const handler = createWorkspaceRemovalHandler({ runnerRoot })
+          return await handler({
+            workflowRunId: 'wr-held-delete',
+            repositoryName: 'main',
+            gitUrl: 'https://repo.test/mohist.git',
+            workspacePath: path,
+            branch: 'mohist/run-wr-held-delete',
+            baseBranch: 'main',
+          })
+        },
+        { fileSystem, controlExistsChecker: (candidate) => fileSystem.exists(candidate) },
+      )
+      expect(result).toMatchObject({ removed: true, status: 'removed' })
+      expect(fileSystem.exists(join(outside, 'wr-held-delete'))).toBe(false)
+      expect(fileSystem.exists(join(heldWorkspaces, 'wr-held-delete'))).toBe(false)
+    })
   })
 
   it('preserves identity failure semantics inside the fence', async () => {

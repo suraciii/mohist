@@ -22,9 +22,10 @@ only this file is read by the engine.
     }
   ]
 }
+```
 
-- `id` (required) and `title` are structural. `id` identifies the generated
-  task.
+- `id`, `title`, and `goal` are required non-empty JSON strings. `id` and
+  `title` are structural; `id` identifies the generated task.
 - Array order is the execution order. There is no dependency graph, priority,
   or per-task execution configuration; the Profile fixes the execution Action
   for every generated task.
@@ -37,12 +38,12 @@ only this file is read by the engine.
 ### Inputs
 
 - `path` is the required Workspace-relative path to the task list file.
+  Absolute paths and traversal outside the Workspace are rejected.
 - `task` is required and supplies defaults for every generated task.
   `task.uses` is required and is resolved by the Profile before the Action
   runs.
-- `items` is the optional top-level path to the task list. It defaults to
-  `tasks`.
-- `buildPrompt` is optional text used to build each task prompt.
+- `buildPrompt` is internal prompt text sourced from the current Project's
+  `build-task` Prompt. It is not exposed in the public Action catalog.
 
 The file is Workspace-local. When the Workspace directory was rebuilt the
 file is gone with it, and the recovery is the existing
@@ -70,8 +71,9 @@ The output field `loaded` is the number of tasks added to this run.
       uses: ${{ profile.agentAction }}
       with:
         options: ${{ vars.agent }}
-        prompt: ${{ prompts.build-task }}
 ```
 
-Every generated task inherits the materialized `task.uses` and receives its
-entry's `goal`, `acceptance`, and `refs` in its prompt.
+Every generated task inherits the materialized `task.uses` and receives a
+validated snapshot of its entry's `goal`, `acceptance`, and `refs` in its
+prompt. Later mutation or deletion of `PLANS/tasks.json` cannot change tasks
+already added to the Workflow run.

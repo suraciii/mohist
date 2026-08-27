@@ -2,7 +2,16 @@ import { useState, useCallback, useMemo } from 'react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { Button } from '@/shared/ui/components/button'
 import { Textarea } from '@/shared/ui/components/textarea'
-import { issueDetailKeys, issueListKeys, IssueStatus, WorkflowStage, approveIssue, getFileContent, invalidateApprovalWait, useRequestChangesIssue } from '../../../entities/issue'
+import {
+  issueDetailKeys,
+  issueListKeys,
+  IssueStatus,
+  WorkflowStage,
+  approveIssue,
+  getFileContent,
+  invalidateApprovalWait,
+  useRequestChangesIssue,
+} from '../../../entities/issue'
 import type { Issue, StageTaskState, StageCheckState, StageStateRead } from '../../../entities/issue'
 import { useProject } from '../../../entities/project'
 import { ReviewSummary, parseReviewOutput } from './ReviewSummary'
@@ -17,10 +26,7 @@ import { WORKFLOW_STAGES } from './StageBar'
 import { isScriptHealthCheck } from '../model/runtime-query-helpers'
 import type { TaskLogDataHook, WorkflowRunSessionsHook } from './TaskLogPanel'
 
-export type RequestChangesHook = () => Pick<
-  ReturnType<typeof useRequestChangesIssue>,
-  'mutate' | 'isPending' | 'error'
->
+export type RequestChangesHook = () => Pick<ReturnType<typeof useRequestChangesIssue>, 'mutate' | 'isPending' | 'error'>
 
 export interface StepListDependencies {
   approveIssue: typeof approveIssue
@@ -110,11 +116,7 @@ export function InlineApprovalControls({
   return (
     <div className="rounded-lg border border-warning-border bg-warning-subtle p-4 space-y-3">
       {reportModalOpen && (
-        <FullReportModal
-          review={review}
-          classified={classified}
-          onClose={() => setReportModalOpen(false)}
-        />
+        <FullReportModal review={review} classified={classified} onClose={() => setReportModalOpen(false)} />
       )}
 
       <h3 className="text-sm font-semibold text-warning">Approval Required</h3>
@@ -126,24 +128,14 @@ export function InlineApprovalControls({
             : `Review the ${stage} stage output and approve to continue, or request changes with feedback.`}
       </p>
 
-      {hasApprovalOutput && (
-        <ReviewSummary output={approvalOutput} />
-      )}
+      {hasApprovalOutput && <ReviewSummary output={approvalOutput} />}
 
       {hasApprovalOutput && (
         <div className="flex gap-4 text-xs">
-          <Button
-            variant="link"
-            onClick={() => setReportModalOpen(true)}
-            className="h-auto p-0 text-xs"
-          >
+          <Button variant="link" onClick={() => setReportModalOpen(true)} className="h-auto p-0 text-xs">
             View Full Report
           </Button>
-          <Button
-            variant="link"
-            onClick={handleViewChanges}
-            className="h-auto p-0 text-xs"
-          >
+          <Button variant="link" onClick={handleViewChanges} className="h-auto p-0 text-xs">
             View Changes
           </Button>
         </div>
@@ -156,9 +148,7 @@ export function InlineApprovalControls({
             disabled={approveMutation.isPending}
             data-testid="approve-button"
             className={`flex-1 ${
-              hasApprovalOutput && classified === 'PASS'
-                ? 'bg-success hover:bg-success/90 text-success-foreground'
-                : ''
+              hasApprovalOutput && classified === 'PASS' ? 'bg-success hover:bg-success/90 text-success-foreground' : ''
             }`}
           >
             {approveMutation.isPending ? 'Approving...' : getApproveLabel()}
@@ -177,14 +167,8 @@ export function InlineApprovalControls({
         </div>
 
         {feedbackOpen && (
-          <div
-            className="space-y-2 rounded-md border border-border bg-card p-3"
-            data-testid="request-changes-form"
-          >
-            <label
-              htmlFor="request-changes-body"
-              className="text-xs font-medium text-card-foreground"
-            >
+          <div className="space-y-2 rounded-md border border-border bg-card p-3" data-testid="request-changes-form">
+            <label htmlFor="request-changes-body" className="text-xs font-medium text-card-foreground">
               What changes should the agent make?
             </label>
             <Textarea
@@ -247,11 +231,11 @@ export function StepList({
   const checkResults: StageCheckState[] = stageState?.checks ?? []
 
   const scriptHealthChecks = checkResults.filter(isScriptHealthCheck)
-  const failedScriptHealthChecks = scriptHealthChecks.filter(c => c.status === 'failed' || c.status === 'error')
-  const displayedWorkflowStage = issue.status === IssueStatus.Done
-    && (!issue.workflowStage || !WORKFLOW_STAGES.includes(issue.workflowStage))
-    ? WorkflowStage.Integrate
-    : issue.workflowStage
+  const failedScriptHealthChecks = scriptHealthChecks.filter((c) => c.status === 'failed' || c.status === 'error')
+  const displayedWorkflowStage =
+    issue.status === IssueStatus.Done && (!issue.workflowStage || !WORKFLOW_STAGES.includes(issue.workflowStage))
+      ? WorkflowStage.Integrate
+      : issue.workflowStage
 
   const isAwaitingApproval =
     failedScriptHealthChecks.length === 0 &&
@@ -308,11 +292,9 @@ export function StepList({
         <div className="space-y-3" data-testid="step-list-approval-evidence">
           {checkResults.length === 0 && (
             <div className="rounded-md border border-warning-border bg-warning-subtle px-3 py-2 text-xs text-warning">
-              Approval is awaiting, but this stage has no recorded check results. This usually means the issue was recovered after an incomplete run; rerun the stage if you need fresh verification before approving.
+              Approval is awaiting, but this stage has no recorded check results. This usually means the issue was
+              recovered after an incomplete run; rerun the stage if you need fresh verification before approving.
             </div>
-          )}
-          {issue.approvalState?.output != null && (
-            <ReviewSummary output={issue.approvalState.output} />
           )}
         </div>
       )}
@@ -330,15 +312,20 @@ export function StepList({
 
       {!readOnly && !isAwaitingApproval && stage === WorkflowStage.Check && failedScriptHealthChecks.length > 0 && (
         <div className="rounded-md border border-danger-border bg-danger-subtle px-3 py-2 text-xs text-danger">
-          <span className="font-semibold">Full verification failed:</span> Check approval is blocked until the health check passes. Fix the failures and rerun Check.
+          <span className="font-semibold">Full verification failed:</span> Check approval is blocked until the health
+          check passes. Fix the failures and rerun Check.
         </div>
       )}
 
-      {!readOnly && !isAwaitingApproval && stage === WorkflowStage.Check && scriptHealthChecks.length > 0 && scriptHealthChecks.every(c => c.status === 'pending') && (
-        <div className="rounded-md border border-warning-border bg-warning-subtle px-3 py-2 text-xs text-warning">
-          Full verification has not run yet. Approval will be available once verification completes.
-        </div>
-      )}
+      {!readOnly &&
+        !isAwaitingApproval &&
+        stage === WorkflowStage.Check &&
+        scriptHealthChecks.length > 0 &&
+        scriptHealthChecks.every((c) => c.status === 'pending') && (
+          <div className="rounded-md border border-warning-border bg-warning-subtle px-3 py-2 text-xs text-warning">
+            Full verification has not run yet. Approval will be available once verification completes.
+          </div>
+        )}
     </div>
   )
 }

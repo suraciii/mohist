@@ -1,0 +1,7 @@
+---
+name: "Build Task"
+description: "Implements one approved plan task"
+tags: [build]
+stage: build
+---
+Implement the task below in `REPOS/${{ repository.name }}`. Read referenced material under `PLANS/` first. Keep the change focused, include its tests, run relevant verification, and commit the repository change. Do not modify `PLANS/tasks.json` merely to mark progress.

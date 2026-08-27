@@ -23,26 +23,14 @@ public class BuiltInPromptStructureTests
     public void IssueQueryBuiltIns_UseCurrentIssueViewCommand()
     {
         var templates = new FilePromptLoader().LoadAllTemplates();
-        var queryPromptKeys = new[]
-        {
-            "apply-feedback",
-            "build",
-            "design",
-            "proposal",
-            "review",
-            "self-review",
-            "specs",
-            "tasks",
-        };
-
-        Assert.Equal(8, queryPromptKeys.Length);
-        Assert.All(templates.Values, template => Assert.DoesNotContain("mo issue show", template.Body));
+        var queryPromptKeys = new[] { "apply-feedback", "plan", "review" };
         foreach (var key in queryPromptKeys)
         {
             Assert.True(templates.TryGetValue(key, out var template), $"Missing builtin prompt: {key}");
-            Assert.DoesNotContain("mo issue show", template!.Body);
-            Assert.Contains("mo issue view ${{ issue.number }} --project ${{ issue.projectId }}", template.Body);
+            Assert.Contains("mo issue view ${{ issue.number }} --project ${{ issue.projectId }}", template!.Body);
         }
+        Assert.Contains("build-task", templates.Keys);
+        Assert.DoesNotContain("self-review", templates.Keys);
     }
 
     [Fact]

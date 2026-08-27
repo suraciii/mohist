@@ -127,7 +127,7 @@ public partial class ActionContractValidatorTests
     private static TaskDefinition OpenSpecTask(string taskJson) =>
         new(
             "load-tasks",
-            Uses: "mohist/openspec-tasks",
+            Uses: "mohist/task-list",
             With: With(
                 ("path", JsonString("openspec/changes/example/tasks.json")),
                 ("task", JsonObject(taskJson))));
@@ -136,7 +136,7 @@ public partial class ActionContractValidatorTests
         new(
             [
                 CreateAction(
-                    "mohist/openspec-tasks",
+                    "mohist/task-list",
                     StringInput("path", required: true),
                     UnionInput("task", ["object"], required: true)),
                 .. generatedActions,
