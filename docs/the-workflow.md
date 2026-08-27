@@ -88,8 +88,9 @@ work; built-in Profiles include this loop. See
 ## Check
 
 Check prevents Build's claim of completion from being its only evidence. It
-runs the complete verification, reviews the diff in a separate Agent session,
-and records the findings in `PLANS/REVIEW.md`. The review is
+runs an independent verification pass: a separate Agent session reviews the
+diff and records the findings in `PLANS/REVIEW.md`, and external checks are
+confirmed where they exist. The review is
 evidence, not a verdict: the approve or reject decision belongs to the
 approver. A problem returns to Build before the shared base branch
 is involved.

@@ -34,8 +34,9 @@ mo issue create "..." --workflow-profile mohist/github-pr
 - Every side effect is an explicit Task. Explicit work can be retried, audited,
   and recovered with the same Action contract; an implicit Stage hook cannot.
 - A Workspace is rebuildable. The remote Workflow branch is the recovery point
-  for Repository work; uploaded artifacts are the recovery point for plan
-  material. Publishing both is visible in the Definition.
+  for Repository work; plan material is Workspace-local, and its loss is an
+  accepted loss recovered by rerunning from Plan. Publishing the branch is
+  visible in the Definition.
 - OpenSpec is not the Workflow's protocol. The only machine-readable plan
   artifact the Workflow consumes is the task list; all other planning material
   is the Agent's free organization. See [`plan-artifacts.md`](plan-artifacts.md).
@@ -114,8 +115,8 @@ the same external review object. Issue title and body remain the source for Pull
 Request metadata; copying them into Workflow metadata would create another
 authority.
 
-Build publishes verified output because a later Stage may rebuild its Workspace
-on another Runner. Check publishes the reviewed result, marks the Pull Request
+Build publishes verified output because the Workspace is rebuildable and a
+later Stage may start from a fresh one. Check publishes the reviewed result, marks the Pull Request
 ready, and verifies external checks. Integrate enables auto-merge on the same
 Pull Request; the registration Action waits until GitHub performs the merge.
 

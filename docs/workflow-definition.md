@@ -330,6 +330,7 @@ stages:
                 - id: recover:push
                   uses: mohist/push
                   with:
+                    working-directory: REPOS/${{ repository.name }}
                     source: ${{ workspace.branch }}
                     target: ${{ workspace.branch }}
                     remote: origin

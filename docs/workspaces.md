@@ -106,8 +106,9 @@ issue-<number>/
 Only `REPOS/` participates in Git; everything else is Workspace-local work
 material and never appears in a commit, branch, or Pull Request. The Workflow
 branch is the recovery point for Repository work. Plan and review material
-under `PLANS/` is uploaded as run artifacts, which are the recovery point and
-the audit record for work outside the Repository.
+under `PLANS/` is uploaded as run artifacts for evidence and audit; it has no
+per-file recovery point, and a lost Workspace directory is recovered by
+rerunning from the plan Stage, which regenerates it.
 
 Repository-modifying Tasks, such as Git Actions and verify scripts, run with
 `working-directory: REPOS/<repository-name>`; Agents anchor at the Workspace
