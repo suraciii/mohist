@@ -88,6 +88,9 @@ public class AgentJobTerminalDeliverySpecs : AgentJobGrainTestSupport
             $"agent-job-success-pending-{Guid.NewGuid():N}");
         var jobKey = $"agent-job-success-pending-{Guid.NewGuid():N}";
         var sessionId = $"session-success-pending-{Guid.NewGuid():N}";
+        var turnId = $"turn-success-pending-{Guid.NewGuid():N}";
+        const string runtime = "opencode";
+        var runtimeSessionId = $"runtime-success-pending-{Guid.NewGuid():N}";
         await OpenSessionAsync(sessionId, projectId);
 
         var job = JobGrain(jobKey);
@@ -95,17 +98,29 @@ public class AgentJobTerminalDeliverySpecs : AgentJobGrainTestSupport
             Prompt: "do the thing",
             WorkspacePath: "/tmp/agent-job-success-pending",
             ProjectId: projectId,
+            Runtime: runtime,
             AgentSessionId: sessionId,
-            AgentId: "agent-test"));
+            AgentId: "agent-test",
+            InitialTurnId: turnId));
 
         await WaitForStatusAsync(job, AgentJobStatus.Running, TimeSpan.FromSeconds(5));
         var workId = (await job.GetRuntimeSnapshotAsync()).CurrentWorkId!;
         var runner = Grains.GetGrain<IRunnerGrain>(runnerId);
+        Assert.True(await job.RecordRuntimeSessionBindingAsync(runnerId, workId, sessionId, runtimeSessionId));
+        await AttachRuntimeSessionAsync(sessionId, runtimeSessionId, runtime);
 
         await job.ReportResultAsync(
             runnerId,
             workId,
-            new WorkResult(Status: "completed", Message: "ok", Output: JSON.DeserializeElement("{}"), ExitCode: 0));
+            new WorkResult(
+                Status: "completed",
+                Message: "ok",
+                Output: JSON.DeserializeElement("{}"),
+                ExitCode: 0,
+                AgentSessionId: sessionId,
+                AgentTurnId: turnId,
+                Runtime: runtime,
+                RuntimeSessionId: runtimeSessionId));
         await WaitForStatusAsync(job, AgentJobStatus.Completed, TimeSpan.FromSeconds(5));
 
         var closed = await GetSingleClosedAsync(sessionId);
@@ -360,6 +375,9 @@ public class AgentJobTerminalDeliverySpecs : AgentJobGrainTestSupport
         var (runnerId, projectId) = await RegisterAgentJobRunnerAsync(
             $"agent-job-dup-{Guid.NewGuid():N}");
         var sessionId = $"session-dup-{Guid.NewGuid():N}";
+        var turnId = $"turn-dup-{Guid.NewGuid():N}";
+        const string runtime = "opencode";
+        var runtimeSessionId = $"runtime-dup-{Guid.NewGuid():N}";
         await OpenSessionAsync(sessionId, projectId);
 
         var job = JobGrain($"agent-job-dup-{Guid.NewGuid():N}");
@@ -367,15 +385,27 @@ public class AgentJobTerminalDeliverySpecs : AgentJobGrainTestSupport
             Prompt: "do",
             WorkspacePath: "/tmp/agent-job-dup",
             ProjectId: projectId,
+            Runtime: runtime,
             AgentSessionId: sessionId,
-            AgentId: "agent-test"));
+            AgentId: "agent-test",
+            InitialTurnId: turnId));
 
         await WaitForStatusAsync(job, AgentJobStatus.Running, TimeSpan.FromSeconds(5));
         var workId = (await job.GetRuntimeSnapshotAsync()).CurrentWorkId!;
+        Assert.True(await job.RecordRuntimeSessionBindingAsync(runnerId, workId, sessionId, runtimeSessionId));
+        await AttachRuntimeSessionAsync(sessionId, runtimeSessionId, runtime);
         await job.ReportResultAsync(
             runnerId,
             workId,
-            new WorkResult(Status: "completed", Message: "first result", Output: JSON.DeserializeElement("{}"), ExitCode: 0));
+            new WorkResult(
+                Status: "completed",
+                Message: "first result",
+                Output: JSON.DeserializeElement("{}"),
+                ExitCode: 0,
+                AgentSessionId: sessionId,
+                AgentTurnId: turnId,
+                Runtime: runtime,
+                RuntimeSessionId: runtimeSessionId));
         await WaitForStatusAsync(job, AgentJobStatus.Completed, TimeSpan.FromSeconds(5));
 
         var firstClosed = await GetSingleClosedAsync(sessionId);
@@ -430,6 +460,15 @@ public class AgentJobTerminalDeliverySpecs : AgentJobGrainTestSupport
     // AgentJob always clears its pending payload on the first attempt and the
     // "pending payload survives a failed first delivery" scenario no longer
     // exists. Recovery is now purely timer-driven inside the AgentSession.
+
+    private async Task AttachRuntimeSessionAsync(string sessionId, string runtimeSessionId, string runtime)
+    {
+        var session = Grains.GetGrain<IAgentSessionGrain>(sessionId);
+        await session.AttachPhysicalSessionAsync(new AttachPhysicalSessionCommand(
+            AgentSessionId: runtimeSessionId,
+            WorkDir: "/tmp/agent-job-fixture",
+            Runtime: runtime));
+    }
 
     private async Task OpenSessionAsync(string sessionId, string projectId)
     {

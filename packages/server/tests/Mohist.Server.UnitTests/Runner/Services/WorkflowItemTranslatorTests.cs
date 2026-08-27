@@ -527,35 +527,58 @@ public partial class WorkflowItemTranslatorSpecs : IAsyncLifetime
         Assert.Contains(TaskReportStatus.Failed, values);
     }
 
-    [Fact]
-    public async Task TranslateResult_AllStatusAliases_CollapseToSucceeded()
+    [Theory]
+    [InlineData("completed", TaskReportStatus.Succeeded)]
+    [InlineData("failed", TaskReportStatus.Failed)]
+    [InlineData("timeout", TaskReportStatus.Failed)]
+    public async Task TranslateResult_TaskStatusVocabularyMapsCanonicalTerminalStatuses(
+        string status,
+        TaskReportStatus expected)
     {
         var runId = $"wr-{Guid.NewGuid():N}";
-        var projectId = "proj-status-alias";
-        await SeedRunningWorkflowAsync(runId, projectId);
+        await SeedRunningWorkflowAsync(runId, "proj-task-status");
         var item = WorkItem.Task("build", "task-1.1", "Task 1", "spec/task", null);
 
-        foreach (var alias in new[] { "completed", "pass", "PASS", "Completed" })
-        {
-            var report = _translator.TranslateResult(item, new WorkResult(alias), runId);
-            var task = Assert.IsType<WorkflowItemTranslator.InboundReport.Task>(report);
-            Assert.Equal(TaskReportStatus.Succeeded, task.Value.Status);
-        }
-    }
-
-    [Fact]
-    public async Task TranslateResult_AllFailureAliases_CollapseToFailed_WithMessageAsDetail()
-    {
-        var runId = $"wr-{Guid.NewGuid():N}";
-        var projectId = "proj-fail-alias";
-        await SeedRunningWorkflowAsync(runId, projectId);
-        var item = WorkItem.Task("build", "task-1.1", "Task 1", "spec/task", null);
-
-        var report = _translator.TranslateResult(item, new WorkResult("failed", "work-timeout"), runId);
+        var report = _translator.TranslateResult(item, new WorkResult(status, "detail"), runId);
         var task = Assert.IsType<WorkflowItemTranslator.InboundReport.Task>(report);
 
-        Assert.Equal(TaskReportStatus.Failed, task.Value.Status);
-        Assert.Equal("work-timeout", task.Value.Detail);
+        Assert.Equal(expected, task.Value.Status);
+    }
+
+    [Theory]
+    [InlineData("pass")]
+    [InlineData("fail")]
+    [InlineData("success")]
+    [InlineData("ok")]
+    [InlineData("succeeded")]
+    [InlineData("arbitrary")]
+    public async Task TranslateResult_TaskRejectsShapeInvalidAndAliasStatuses(string status)
+    {
+        var runId = $"wr-{Guid.NewGuid():N}";
+        await SeedRunningWorkflowAsync(runId, "proj-task-invalid-status");
+        var item = WorkItem.Task("build", "task-1.1", "Task 1", "spec/task", null);
+
+        Assert.Throws<ArgumentException>(() =>
+            _translator.TranslateResult(item, new WorkResult(status), runId));
+    }
+
+    [Theory]
+    [InlineData("completed")]
+    [InlineData("failed")]
+    [InlineData("timeout")]
+    [InlineData("unknown")]
+    [InlineData("success")]
+    [InlineData("ok")]
+    [InlineData("succeeded")]
+    public async Task TranslateResult_ChecksRejectsWorkAndAliasStatuses(string status)
+    {
+        var runId = $"wr-{Guid.NewGuid():N}";
+        await SeedRunningWorkflowAsync(runId, "proj-check-invalid-status");
+        var item = WorkItem.Checks("build", "checks-build",
+            [new CheckItem("check-1", "Check 1", "spec/check")]);
+
+        Assert.Throws<ArgumentException>(() =>
+            _translator.TranslateResult(item, new WorkResult(status), runId));
     }
 
     private static Dictionary<string, JsonElement?> With(string json) =>

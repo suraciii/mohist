@@ -73,6 +73,10 @@ public class AgentJobWriteThroughMirrorSpecs : AgentJobGrainTestSupport
         var (runnerId, projectId) = await RegisterAgentJobRunnerAsync($"mirror-terminal-runner-{Guid.NewGuid():N}");
         await InstallCapabilityFenceAsync(runnerId, projectId, "opencode");
         var jobKey = $"mirror-terminal-{Guid.NewGuid():N}";
+        var sessionId = $"session-{Guid.NewGuid():N}";
+        var turnId = $"turn-{Guid.NewGuid():N}";
+        const string runtime = "opencode";
+        var runtimeSessionId = $"runtime-{Guid.NewGuid():N}";
         var job = JobGrain(jobKey);
 
         await job.SubmitAsync(new AgentJobInput(
@@ -80,7 +84,10 @@ public class AgentJobWriteThroughMirrorSpecs : AgentJobGrainTestSupport
             Model: "openai/gpt-5.5",
             WorkspacePath: "/tmp/mirror-terminal",
             ProjectId: projectId,
+            Runtime: runtime,
             AgentId: "agent-terminal",
+            AgentSessionId: sessionId,
+            InitialTurnId: turnId,
             Variant: "balanced",
             ReasoningEffort: "high"));
 
@@ -90,6 +97,7 @@ public class AgentJobWriteThroughMirrorSpecs : AgentJobGrainTestSupport
             TimeSpan.FromSeconds(5),
             CapabilityFencePollRequest("opencode"));
         var workId = (await job.GetRuntimeSnapshotAsync()).CurrentWorkId!;
+        Assert.True(await job.RecordRuntimeSessionBindingAsync(runnerId, workId, sessionId, runtimeSessionId));
 
         await job.ReportResultAsync(runnerId, workId,
             new WorkResult(
@@ -97,7 +105,11 @@ public class AgentJobWriteThroughMirrorSpecs : AgentJobGrainTestSupport
                 "ok",
                 Output: JSON.DeserializeElement("{\"answer\":\"done\"}"),
                 ExitCode: 0,
-                ArtifactUploadIds: ["artifact-completed"]));
+                ArtifactUploadIds: ["artifact-completed"],
+                AgentSessionId: sessionId,
+                AgentTurnId: turnId,
+                Runtime: runtime,
+                RuntimeSessionId: runtimeSessionId));
 
         await WaitForStatusAsync(job, AgentJobStatus.Completed, TimeSpan.FromSeconds(5));
 

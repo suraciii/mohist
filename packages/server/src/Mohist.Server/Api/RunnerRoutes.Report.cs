@@ -48,14 +48,14 @@ public static partial class RunnerRoutes
 
             if (string.IsNullOrWhiteSpace(req.WorkId))
                 return ApiResults.BadRequest("workId is required");
-            if (!IsTerminalReportStatus(req.Status))
-                return ApiResults.BadRequest("status is invalid");
             if (string.IsNullOrWhiteSpace(req.OwnerKind))
                 return ApiResults.BadRequest("ownerKind is required");
 
             var ownerKind = req.OwnerKind.Trim().ToLowerInvariant();
             if (string.Equals(ownerKind, WorkDispatchOwnerKinds.AgentJob, StringComparison.Ordinal))
             {
+                if (!WorkReportStatus.IsWork(req.Status))
+                    return ApiResults.BadRequest("status is invalid");
                 if (string.IsNullOrWhiteSpace(req.AgentJobId))
                     return ApiResults.BadRequest("agentJobId is required when ownerKind is 'agent-job'");
                 if (!string.IsNullOrWhiteSpace(req.WorkflowRunId))
@@ -63,6 +63,8 @@ public static partial class RunnerRoutes
             }
             else if (string.Equals(ownerKind, WorkDispatchOwnerKinds.Workflow, StringComparison.Ordinal))
             {
+                if (!WorkReportStatus.IsWorkflowEnvelope(req.Status))
+                    return ApiResults.BadRequest("status is invalid");
                 if (string.IsNullOrWhiteSpace(req.WorkflowRunId))
                     return ApiResults.BadRequest("workflowRunId is required when ownerKind is 'workflow'");
                 if (!string.IsNullOrWhiteSpace(req.AgentJobId))
@@ -118,12 +120,4 @@ public static partial class RunnerRoutes
         });
     }
 
-    private static bool IsTerminalReportStatus(string? status) => status is not null && (
-        status.Equals("completed", StringComparison.OrdinalIgnoreCase)
-        || status.Equals("success", StringComparison.OrdinalIgnoreCase)
-        || status.Equals("pass", StringComparison.OrdinalIgnoreCase)
-        || status.Equals("ok", StringComparison.OrdinalIgnoreCase)
-        || status.Equals("failed", StringComparison.OrdinalIgnoreCase)
-        || status.Equals("timeout", StringComparison.OrdinalIgnoreCase)
-        || status.Equals("unknown", StringComparison.OrdinalIgnoreCase));
 }

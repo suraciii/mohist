@@ -339,11 +339,21 @@ public class AgentJobDispatchRouteSpecs : AgentSessionLaunchRoutesTestSupport
                 });
 
             var claim = await ClaimPreparedAgentJobAsync(jobKey, runnerId, projectId, expectedSessionId: null);
+            var binding = await BindClaimedAgentJobAsync(claim);
             var jobGrain = _fixture.Grains.GetGrain<IAgentJobGrain>(jobKey);
             await jobGrain.ReportResultAsync(
                 runnerId,
                 claim.WorkId,
-                new WorkResult("completed", "ok", JSON.DeserializeElement("{\"hello\":\"world\"}"), 0, ["artifact-a"]));
+                new WorkResult(
+                    "completed",
+                    "ok",
+                    JSON.DeserializeElement("{\"hello\":\"world\"}"),
+                    0,
+                    ["artifact-a"],
+                    AgentSessionId: binding.AgentSessionId,
+                    AgentTurnId: binding.AgentTurnId,
+                    Runtime: binding.Runtime,
+                    RuntimeSessionId: binding.RuntimeSessionId));
 
             using var response = await responseTask;
             Assert.Equal(HttpStatusCode.OK, response.StatusCode);
@@ -436,6 +446,7 @@ public class AgentJobDispatchRouteSpecs : AgentSessionLaunchRoutesTestSupport
                 });
 
             var claim = await ClaimPreparedAgentJobAsync(jobKey, runnerId, projectId, expectedSessionId: null);
+            var binding = await BindClaimedAgentJobAsync(claim);
 
             var reportResponse = await _fixture.Client.PostAsJsonAsync(
                 $"/api/runner/{runnerId}/report",
@@ -449,6 +460,10 @@ public class AgentJobDispatchRouteSpecs : AgentSessionLaunchRoutesTestSupport
                     output = new { hello = "http" },
                     exitCode = 0,
                     artifactUploadIds = new[] { "artifact-http" },
+                    agentSessionId = binding.AgentSessionId,
+                    agentTurnId = binding.AgentTurnId,
+                    runtime = binding.Runtime,
+                    runtimeSessionId = binding.RuntimeSessionId,
                 });
             Assert.Equal(HttpStatusCode.OK, reportResponse.StatusCode);
 
@@ -504,10 +519,26 @@ public class AgentJobDispatchRouteSpecs : AgentSessionLaunchRoutesTestSupport
             Assert.Equal(WorkDispatchOwnerKinds.AgentJob, dispatch.OwnerKind);
             Assert.Equal(jobKey, dispatch.AgentJobId);
 
+            var claim = new ClaimResult(jobKey, runnerId, workId, new WorkDispatch(
+                WorkflowRunId: string.Empty,
+                WorkId: workId,
+                OwnerKind: dispatch.OwnerKind!,
+                AgentJobId: dispatch.AgentJobId,
+                ProjectId: dispatch.ProjectId,
+                AgentSessionId: dispatch.AgentSessionId,
+                InitialTurnId: dispatch.AgentTurnId,
+                AgentDefinition: dispatch.AgentDefinition));
+            var binding = await BindClaimedAgentJobAsync(claim);
             await _fixture.Grains.GetGrain<IAgentJobGrain>(jobKey).ReportResultAsync(
                 runnerId,
                 workId,
-                new WorkResult(Status: "completed", Message: "ok"));
+                new WorkResult(
+                    Status: "completed",
+                    Message: "ok",
+                    AgentSessionId: binding.AgentSessionId,
+                    AgentTurnId: binding.AgentTurnId,
+                    Runtime: binding.Runtime,
+                    RuntimeSessionId: binding.RuntimeSessionId));
 
             using var response = await responseTask;
             Assert.Equal(HttpStatusCode.OK, response.StatusCode);

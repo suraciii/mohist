@@ -43,6 +43,9 @@ public sealed class WorkflowReportService : IScopedService
         var item = run.FindReportShape(taskRunId, workId);
         if (item is null)
             return ("refused", null);
+        if ((item.IsTask && !WorkReportStatus.IsWork(result.Status))
+            || (item.IsChecks && !WorkReportStatus.IsChecks(result.Status)))
+            return ("refused", null);
 
         var isAgentTask = item.IsTask && IsAgentTask(item.Uses);
         var agentBinding = isAgentTask
@@ -65,7 +68,7 @@ public sealed class WorkflowReportService : IScopedService
             // observation keeps settlement arbitration authoritative and
             // lets the Runner retire the report instead of retrying a
             // rejection the server will never change.
-            if (string.Equals(result.Status, "succeeded", StringComparison.OrdinalIgnoreCase))
+            if (WorkReportStatus.IsCompleted(result.Status))
                 return ("refused", null);
 
             var observationWorkflow = _grains.GetGrain<IWorkflowGrain>(workflowRunId);

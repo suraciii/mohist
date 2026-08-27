@@ -89,16 +89,7 @@ public sealed partial class SlackChannelThreadIngressSpecs
                 Assert.Equal(runnerId, assignment.RunnerId);
                 var claim = await runner.TryClaimAgentJobAsync(jobKey, connection.ProjectId);
                 Assert.NotNull(claim);
-                var report = await job.ReportResultAsync(
-                    runnerId,
-                    claim.WorkId,
-                    new WorkResult(
-                        Status: "completed",
-                        Message: "test cleanup",
-                        Output: JSON.DeserializeElement("{}"),
-                        ArtifactUploadIds: null,
-                        ExitCode: 0));
-                Assert.True(report.Accepted, "AgentJob rejected completed cleanup report");
+                await job.FailAsync("test-cleanup", "agent-test");
             }
 
             await runner.UnregisterAsync();

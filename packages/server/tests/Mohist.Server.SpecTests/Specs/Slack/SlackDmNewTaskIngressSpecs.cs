@@ -107,10 +107,22 @@ public sealed class SlackDmNewTaskIngressSpecs : IAsyncLifetime
         Assert.True(second.GetProperty("newTask").GetBoolean());
         Assert.Equal(AgentJobStatus.Running, await firstJob.GetStatusAsync());
 
+        var runtimeSessionId = $"runtime-{Guid.NewGuid():N}";
+        var sessionId = firstDispatch.Dispatch.AgentSessionId!;
+        var turnId = firstDispatch.Dispatch.InitialTurnId!;
+        var runtime = firstDispatch.Dispatch.AgentDefinition!.Runtime;
+        Assert.True(await firstJob.RecordRuntimeSessionBindingAsync(
+            firstDispatch.RunnerId, firstDispatch.WorkId, sessionId, runtimeSessionId));
         var report = await firstJob.ReportResultAsync(
             firstDispatch.RunnerId,
             firstDispatch.WorkId,
-            new WorkResult("completed", "prior work completed"));
+            new WorkResult(
+                "completed",
+                "prior work completed",
+                AgentSessionId: sessionId,
+                AgentTurnId: turnId,
+                Runtime: runtime,
+                RuntimeSessionId: runtimeSessionId));
 
         Assert.True(report.Accepted);
         Assert.Equal(AgentJobStatus.Completed, (await firstJob.GetTerminalResultAsync()).Status);
@@ -461,7 +473,7 @@ public sealed class SlackDmNewTaskIngressSpecs : IAsyncLifetime
         slots.EnsureSuccessStatusCode();
     }
 
-    private async Task<(string RunnerId, string WorkId)> AcceptLaunchAsync(
+    private async Task<ClaimResult> AcceptLaunchAsync(
         string jobKey,
         string runnerId,
         string projectId)
@@ -485,7 +497,7 @@ public sealed class SlackDmNewTaskIngressSpecs : IAsyncLifetime
         Assert.Equal(jobKey, claim.AgentJobId);
         Assert.Equal(runnerId, claim.RunnerId);
         Assert.Equal(assignment.CurrentWorkId, claim.WorkId);
-        return (claim.RunnerId, claim.WorkId);
+        return claim;
     }
 
     private async Task AssertReceivedProjectionAsync(AgentConnection connection, string conversationId, string messageTs)

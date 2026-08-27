@@ -77,7 +77,10 @@ public abstract class AgentSessionLaunchRoutesTestSupport
     {
         Assert.Equal(agentJobId, claim.AgentJobId);
         Assert.Equal(runnerId, claim.RunnerId);
-        Assert.Equal(expectedSessionId, claim.Dispatch.AgentSessionId);
+        if (expectedSessionId is null)
+            Assert.False(string.IsNullOrWhiteSpace(claim.Dispatch.AgentSessionId));
+        else
+            Assert.Equal(expectedSessionId, claim.Dispatch.AgentSessionId);
         Assert.Equal(WorkDispatchOwnerKinds.AgentJob, claim.Dispatch.OwnerKind);
     }
 
@@ -100,6 +103,8 @@ public abstract class AgentSessionLaunchRoutesTestSupport
             claim.AgentJobId,
             claim.Dispatch.ProjectId,
             claim.Dispatch.AgentSessionId,
+            claim.Dispatch.InitialTurnId,
+            claim.Dispatch.AgentDefinition,
             claim.Dispatch.OwnerKind);
     }
 
@@ -124,18 +129,32 @@ public abstract class AgentSessionLaunchRoutesTestSupport
         string agentJobId,
         string workId)
     {
-        var report = await _fixture.Grains
-            .GetGrain<IAgentJobGrain>(agentJobId)
-            .ReportResultAsync(
-                runnerId,
-                workId,
-                new WorkResult(
-                    Status: "completed",
-                    Message: "test cleanup",
-                    Output: JSON.DeserializeElement("{}"),
-                    ArtifactUploadIds: null,
-                    ExitCode: 0));
-        Assert.True(report.Accepted, "AgentJob rejected completed cleanup report");
+        var job = _fixture.Grains.GetGrain<IAgentJobGrain>(agentJobId);
+        var snapshot = await job.GetRuntimeSnapshotAsync();
+        if (snapshot.Status is AgentJobStatus.Running or AgentJobStatus.Unknown)
+            await job.FailAsync("test-cleanup", "agent-test");
+    }
+
+    protected async Task<AgentJobPhysicalBinding> BindClaimedAgentJobAsync(ClaimResult claim)
+    {
+        Assert.False(string.IsNullOrWhiteSpace(claim.Dispatch.AgentSessionId));
+        Assert.False(string.IsNullOrWhiteSpace(claim.Dispatch.InitialTurnId));
+        Assert.False(string.IsNullOrWhiteSpace(claim.Dispatch.AgentDefinition?.Runtime));
+        var sessionId = claim.Dispatch.AgentSessionId!;
+        var turnId = claim.Dispatch.InitialTurnId!;
+        var runtime = claim.Dispatch.AgentDefinition!.Runtime!;
+        var runtimeSessionId = $"runtime-{Guid.NewGuid():N}";
+        var job = _fixture.Grains.GetGrain<IAgentJobGrain>(claim.AgentJobId);
+        Assert.True(await job.RecordRuntimeSessionBindingAsync(
+            claim.RunnerId,
+            claim.WorkId,
+            sessionId,
+            runtimeSessionId));
+        return new AgentJobPhysicalBinding(
+            sessionId,
+            turnId,
+            runtime,
+            runtimeSessionId);
     }
 
     protected async Task CleanupLaunchedAgentJobAsync(string? runnerId, string? agentJobId)
@@ -191,12 +210,20 @@ public abstract class AgentSessionLaunchRoutesTestSupport
         await CompleteClaimedAgentJobAsync(runnerId, agentJobId!, workId!);
     }
 
+    protected sealed record AgentJobPhysicalBinding(
+        string AgentSessionId,
+        string AgentTurnId,
+        string Runtime,
+        string RuntimeSessionId);
+
     protected sealed record ClaimedDispatch(
         string WorkflowRunId,
         string WorkId,
         string? AgentJobId,
         string? ProjectId,
         string? AgentSessionId,
+        string? AgentTurnId,
+        AgentExecutionDefinition? AgentDefinition,
         string? OwnerKind);
 
     protected async Task<string> CreateProjectAsync(string prefix)

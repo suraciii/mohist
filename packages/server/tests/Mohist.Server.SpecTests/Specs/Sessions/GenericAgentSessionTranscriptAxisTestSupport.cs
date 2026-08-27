@@ -115,6 +115,9 @@ public abstract class GenericAgentSessionTranscriptAxisTestSupport : IAsyncLifet
     {
         Assert.False(string.IsNullOrWhiteSpace(claimedWork.AgentJobId));
         var jobGrain = _fixture.Grains.GetGrain<IAgentJobGrain>(claimedWork.AgentJobId!);
+        var runtimeSessionId = claimedWork.AgentSessionId!;
+        Assert.True(await jobGrain.RecordRuntimeSessionBindingAsync(
+            runnerId, claimedWork.WorkId, claimedWork.AgentSessionId!, runtimeSessionId));
         var report = await jobGrain.ReportResultAsync(
             runnerId,
             claimedWork.WorkId,
@@ -123,7 +126,11 @@ public abstract class GenericAgentSessionTranscriptAxisTestSupport : IAsyncLifet
                 Message: "ok",
                 Output: JSON.DeserializeElement("{}"),
                 ArtifactUploadIds: null,
-                ExitCode: 0));
+                ExitCode: 0,
+                AgentSessionId: claimedWork.AgentSessionId,
+                AgentTurnId: claimedWork.AgentTurnId,
+                Runtime: claimedWork.Runtime,
+                RuntimeSessionId: runtimeSessionId));
         Assert.True(report.Accepted, "AgentJob rejected completed report");
     }
 
@@ -233,6 +240,8 @@ public abstract class GenericAgentSessionTranscriptAxisTestSupport : IAsyncLifet
             AgentJobId: claimed.AgentJobId,
             ProjectId: claimed.Dispatch.ProjectId,
             AgentSessionId: claimed.Dispatch.AgentSessionId,
+            AgentTurnId: claimed.Dispatch.InitialTurnId,
+            Runtime: claimed.Dispatch.AgentDefinition?.Runtime,
             OwnerKind: claimed.Dispatch.OwnerKind);
     }
 
@@ -277,6 +286,8 @@ public abstract class GenericAgentSessionTranscriptAxisTestSupport : IAsyncLifet
         string? AgentJobId,
         string? ProjectId,
         string? AgentSessionId,
+        string? AgentTurnId,
+        string? Runtime,
         string? OwnerKind);
 
     protected sealed record FakeAgentRunResult(
