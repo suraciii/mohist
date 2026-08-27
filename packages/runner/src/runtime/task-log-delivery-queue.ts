@@ -62,7 +62,7 @@ class InMemoryTaskLogDeliveryQueue implements TaskLogDeliveryQueue {
   private readonly draining = new Map<string, Promise<void>>()
   private readonly activeControllers = new Set<AbortController>()
   private readonly activeUploads = new Set<Promise<boolean>>()
-  private readonly leasedWorks = new Set<string>()
+  private readonly leasedGroups = new Set<string>()
   private size = 0
   private stopped = false
 
@@ -122,7 +122,7 @@ class InMemoryTaskLogDeliveryQueue implements TaskLogDeliveryQueue {
   }
 
   private kick(groupKey: string): void {
-    if (this.stopped || this.draining.has(groupKey) || this.leasedWorks.has(groupKey)) return
+    if (this.stopped || this.draining.has(groupKey) || this.leasedGroups.has(groupKey)) return
     const drain = this.drain(groupKey).finally(() => {
       this.draining.delete(groupKey)
       if (!this.stopped && (this.groups.get(groupKey)?.length ?? 0) > 0) this.kick(groupKey)
@@ -196,7 +196,7 @@ class InMemoryTaskLogDeliveryQueue implements TaskLogDeliveryQueue {
       return result
     }
 
-    this.leasedWorks.add(groupKey)
+    this.leasedGroups.add(groupKey)
     void upload.then((succeeded) => this.completeLateUpload(groupKey, entry, upload, succeeded))
     return result
   }
@@ -208,7 +208,7 @@ class InMemoryTaskLogDeliveryQueue implements TaskLogDeliveryQueue {
     succeeded: boolean,
   ): void {
     this.activeUploads.delete(upload)
-    this.leasedWorks.delete(groupKey)
+    this.leasedGroups.delete(groupKey)
     if (this.stopped) return
     const group = this.groups.get(groupKey)
     if (!group || group[0] !== entry) return
