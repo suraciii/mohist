@@ -7,7 +7,7 @@ internal static class GithubCommands
 {
     private static readonly ResourceDescriptor ConnectDescriptor = new(
         ResourceCardinality.Single,
-        ["id", "projectId", "owner", "repo", "repositoryName", "feedMode", "approvers", "status", "webhookSecret", "ingressUrl"]);
+        ["id", "projectId", "owner", "repo", "repositoryName", "approvers", "status", "webhookSecret", "ingressUrl"]);
 
     public static Command Build(MohistCliApi api)
     {
@@ -21,12 +21,10 @@ internal static class GithubCommands
     {
         var command = new Command("connect", "Connect a GitHub repository to the project and print the webhook configuration for GitHub.");
         var ownerRepo = new Argument<string>("owner/repo") { Description = "GitHub repository coordinates, e.g. octocat/hello-world." };
-        var feedMode = new Option<string?>("--feed-mode") { Description = "Feed mode: start (default, intake starts the issue) or backlog (intake only)." };
-        var approver = new Option<string[]?>("--approver") { Description = "GitHub login whose PR review counts as approval (repeatable)." };
+        var approver = new Option<string[]>("--approver") { Description = "GitHub login whose PR review counts as approval (repeatable)." };
         var project = MohistCliCommands.ProjectRefOption();
         var output = MohistCliCommands.OutputOption(ConnectDescriptor);
         command.Arguments.Add(ownerRepo);
-        command.Options.Add(feedMode);
         command.Options.Add(approver);
         command.Options.Add(project);
         command.Options.Add(output);
@@ -47,7 +45,7 @@ internal static class GithubCommands
             }
 
             var (data, exit) = await api.ConnectGitHubRepositoryAsync(
-                resolution.ProjectId, owner, repo, ctx.GetValue(feedMode), ctx.GetValue(approver)).ConfigureAwait(false);
+                resolution.ProjectId, owner, repo, ctx.GetValue(approver)).ConfigureAwait(false);
             if (exit != 0 || data is null) return exit;
             if (selection.Kind == JsonSelectionKind.Selected)
                 return await new CliResultWriter(api.Invocation).WriteSuccessAsync(
@@ -111,19 +109,18 @@ internal static class GithubCommands
         var owner = data["owner"]?.GetValue<string>() ?? string.Empty;
         var repo = data["repo"]?.GetValue<string>() ?? string.Empty;
         var repositoryName = data["repositoryName"]?.GetValue<string>() ?? string.Empty;
-        var feedMode = data["feedMode"]?.GetValue<string>() ?? string.Empty;
         var secret = data["webhookSecret"]?.GetValue<string>() ?? string.Empty;
         var ingressUrl = data["ingressUrl"]?.GetValue<string>() ?? string.Empty;
         var id = data["id"]?.GetValue<string>() ?? string.Empty;
 
-        await api.Output.WriteLineAsync($"GitHub connection {id} created: {owner}/{repo} → repository {repositoryName} (feed mode: {feedMode})").ConfigureAwait(false);
+        await api.Output.WriteLineAsync($"GitHub connection {id} created: {owner}/{repo} → repository {repositoryName}").ConfigureAwait(false);
         await api.Output.WriteLineAsync().ConfigureAwait(false);
         await api.Output.WriteLineAsync("In GitHub, add a webhook to the repository:").ConfigureAwait(false);
         await api.Output.WriteLineAsync("  Settings → Webhooks → Add webhook").ConfigureAwait(false);
         await api.Output.WriteLineAsync($"  Payload URL:  {ingressUrl}").ConfigureAwait(false);
         await api.Output.WriteLineAsync("  Content type: application/json").ConfigureAwait(false);
         await api.Output.WriteLineAsync($"  Secret:       {secret}").ConfigureAwait(false);
-        await api.Output.WriteLineAsync("  Events:       issues, pull_request_review, check_suite").ConfigureAwait(false);
+        await api.Output.WriteLineAsync("  Events:       issues, issue_comment, pull_request_review, check_suite").ConfigureAwait(false);
         await api.Output.WriteLineAsync().ConfigureAwait(false);
         await api.Output.WriteLineAsync("GitHub identity (GitHub App or fine-grained PAT) is not configured yet;").ConfigureAwait(false);
         await api.Output.WriteLineAsync("write-backs and delivery tokens will need it in a later release.").ConfigureAwait(false);

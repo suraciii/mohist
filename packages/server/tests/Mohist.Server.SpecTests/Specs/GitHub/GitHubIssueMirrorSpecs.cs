@@ -17,13 +17,13 @@ using DomainIssue = Mohist.Server.Issue.Domain.Issue;
 
 namespace Mohist.Server.SpecTests.Specs.GitHub;
 
-[Collection("GitHubFeed")]
+[Collection("GitHubCommand")]
 public sealed class GitHubIssueMirrorSpecs
 {
     private const string RepositoryName = "hello-world";
-    private readonly GitHubFeedFixture _fixture;
+    private readonly GitHubCommandFixture _fixture;
 
-    public GitHubIssueMirrorSpecs(GitHubFeedFixture fixture)
+    public GitHubIssueMirrorSpecs(GitHubCommandFixture fixture)
     {
         _fixture = fixture;
         fixture.Comments.Comments.Clear();

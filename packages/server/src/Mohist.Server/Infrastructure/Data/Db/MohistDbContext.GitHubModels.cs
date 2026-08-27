@@ -29,12 +29,6 @@ public partial class MohistDbContext
                 entity.Property(e => e.RepositoryName)
                     .HasMaxLength(256)
                     .IsRequired();
-                entity.Property(e => e.IntakeLabel)
-                    .HasMaxLength(256)
-                    .IsRequired();
-                entity.Property(e => e.FeedMode)
-                    .HasMaxLength(32)
-                    .IsRequired();
                 entity.Property(e => e.ApproversJson)
                     .HasColumnType("JSON")
                     .IsRequired();

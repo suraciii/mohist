@@ -6,14 +6,14 @@ using Xunit;
 
 namespace Mohist.Server.SpecTests.Specs.GitHub;
 
-[Collection("GitHubFeed")]
+[Collection("GitHubCommand")]
 public sealed class GitHubConnectionUpdateSpecs
 {
     private const string RepoName = "hello-world";
 
-    private readonly GitHubFeedFixture _fixture;
+    private readonly GitHubCommandFixture _fixture;
 
-    public GitHubConnectionUpdateSpecs(GitHubFeedFixture fixture)
+    public GitHubConnectionUpdateSpecs(GitHubCommandFixture fixture)
     {
         _fixture = fixture;
         fixture.Comments.Comments.Clear();

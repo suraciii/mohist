@@ -18,8 +18,6 @@ public sealed class GitHubCommentPortTests
         Owner = "octo",
         Repo = "hello",
         RepositoryName = "hello-world",
-        IntakeLabel = "mohist",
-        FeedMode = GitHubFeedMode.Start,
         Approvers = [],
         Status = GitHubConnectionStatus.Active,
         IdentityKind = GitHubIdentityKind.Pat,

@@ -121,26 +121,26 @@ public sealed class RecordingGitHubCommentPort : IGitHubCommentPort, IGitHubIssu
 }
 
 /// <summary>
-/// Integration fixture for the GitHub feed/close translators. Hosts the
+/// Integration fixture for the GitHub command/close translators. Hosts the
 /// same production stack as <see cref="MohistIntegrationFixture"/> but
 /// swaps <see cref="IGitHubCommentPort"/> for the recording fake, so no
-/// spec can reach the real GitHub API. Own collection (<c>GitHubFeed</c>)
+/// spec can reach the real GitHub API. Own collection (<c>GitHubCommand</c>)
 /// keeps the fake out of the shared <c>IntegrationRunner</c> collection.
 /// </summary>
-public sealed class GitHubFeedFixture : IAsyncLifetime
+public sealed class GitHubCommandFixture : IAsyncLifetime
 {
-    private readonly GitHubFeedWebApplicationFactory _factory;
+    private readonly GitHubCommandWebApplicationFactory _factory;
     private readonly string _connectionString;
     private SqliteConnection _keeper = null!;
 
-    public GitHubFeedFixture()
+    public GitHubCommandFixture()
     {
-        _connectionString = $"Data Source=github-feed-{Guid.NewGuid():N};Mode=Memory;Cache=Shared";
-        _factory = new GitHubFeedWebApplicationFactory(
+        _connectionString = $"Data Source=github-command-{Guid.NewGuid():N};Mode=Memory;Cache=Shared";
+        _factory = new GitHubCommandWebApplicationFactory(
             _connectionString,
-            "/mohist-tests/github-feed/runner",
-            "/mohist-tests/github-feed/system-update.json",
-            "/mohist-tests/github-feed/logs",
+            "/mohist-tests/github-command/runner",
+            "/mohist-tests/github-command/system-update.json",
+            "/mohist-tests/github-command/logs",
             TimeProvider);
     }
 
@@ -168,11 +168,11 @@ public sealed class GitHubFeedFixture : IAsyncLifetime
             await _keeper.DisposeAsync();
     }
 
-    private sealed class GitHubFeedWebApplicationFactory : MohistWebApplicationFactory
+    private sealed class GitHubCommandWebApplicationFactory : MohistWebApplicationFactory
     {
         public RecordingGitHubCommentPort Comments { get; } = new();
 
-        public GitHubFeedWebApplicationFactory(
+        public GitHubCommandWebApplicationFactory(
             string connectionString,
             string runnerRoot,
             string systemUpdateStatePath,

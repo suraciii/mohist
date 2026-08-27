@@ -4636,11 +4636,6 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
                     b.Property<DateTimeOffset>("CreatedAt")
                         .HasColumnType("TEXT");
 
-                    b.Property<string>("FeedMode")
-                        .IsRequired()
-                        .HasMaxLength(32)
-                        .HasColumnType("TEXT");
-
                     b.Property<string>("IdentityKind")
                         .IsRequired()
                         .HasMaxLength(32)
@@ -4652,11 +4647,6 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
 
                     b.Property<bool>("NeedsAttention")
                         .HasColumnType("INTEGER");
-
-                    b.Property<string>("IntakeLabel")
-                        .IsRequired()
-                        .HasMaxLength(256)
-                        .HasColumnType("TEXT");
 
                     b.Property<string>("Owner")
                         .IsRequired()

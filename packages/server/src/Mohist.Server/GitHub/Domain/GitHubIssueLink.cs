@@ -36,7 +36,8 @@ public sealed class GitHubIssueLink
 /// </summary>
 public static class GitHubCommentKinds
 {
-    public const string FeedRejected = "feed-rejected";
+    public static string CommandReply(string commentId) => $"command-reply:{commentId}";
+
     public const string MirrorCreated = "writeback-mirror-created";
     public const string WorkStarted = "writeback-work-started";
     public const string ApprovalRequested = "writeback-approval-requested";
@@ -48,8 +49,7 @@ public static class GitHubCommentKinds
 
 /// <summary>
 /// The mutually-exclusive <c>mohist:</c> state label family projected onto
-/// fed GitHub issues. The intake label must not use this prefix (enforced
-/// by <see cref="GitHubConnection.Validate"/>).
+/// linked GitHub issues.
 /// </summary>
 public static class GitHubStateLabels
 {

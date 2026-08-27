@@ -916,7 +916,6 @@ internal sealed partial class MohistCliApi
         string projectId,
         string owner,
         string repo,
-        string? feedMode,
         IReadOnlyList<string>? approvers)
     {
         try
@@ -927,7 +926,6 @@ internal sealed partial class MohistCliApi
                 {
                     owner,
                     repo,
-                    feedMode,
                     approvers = approvers is { Count: > 0 } ? approvers : null,
                 }).ConfigureAwait(false);
             if (data is JsonObject obj)

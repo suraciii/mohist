@@ -7,8 +7,6 @@ public sealed class GitHubConnection
     public string Owner { get; set; } = string.Empty;
     public string Repo { get; set; } = string.Empty;
     public string RepositoryName { get; set; } = string.Empty;
-    public string IntakeLabel { get; set; } = GitHubIntakeLabel.Default;
-    public string FeedMode { get; set; } = GitHubFeedMode.Start;
     public IReadOnlyList<string> Approvers { get; set; } = [];
     public string Status { get; set; } = GitHubConnectionStatus.Active;
     public string IdentityKind { get; set; } = GitHubIdentityKind.App;
@@ -30,12 +28,6 @@ public sealed class GitHubConnection
             throw new GitHubConnectionValidationException("owner is required", "owner_required");
         if (string.IsNullOrWhiteSpace(Repo))
             throw new GitHubConnectionValidationException("repo is required", "repo_required");
-        if (string.IsNullOrWhiteSpace(IntakeLabel))
-            throw new GitHubConnectionValidationException("intakeLabel is required", "intake_label_required");
-        if (IntakeLabel.StartsWith("mohist:", StringComparison.Ordinal))
-            throw new GitHubConnectionValidationException("intakeLabel must not start with 'mohist:' (reserved for the write-back label family)", "intake_label_prefix_reserved");
-        if (FeedMode is not (GitHubFeedMode.Start or GitHubFeedMode.Backlog))
-            throw new GitHubConnectionValidationException("feedMode must be one of start, backlog", "invalid_feed_mode");
         if (Status is not (GitHubConnectionStatus.Active or GitHubConnectionStatus.Disabled))
             throw new GitHubConnectionValidationException("status must be one of active, disabled", "invalid_status");
         if (IdentityKind is not (GitHubIdentityKind.App or GitHubIdentityKind.Pat))
@@ -51,21 +43,10 @@ public static class GitHubConnectionStatus
     public const string Disabled = "disabled";
 }
 
-public static class GitHubFeedMode
-{
-    public const string Start = "start";
-    public const string Backlog = "backlog";
-}
-
 public static class GitHubIdentityKind
 {
     public const string App = "app";
     public const string Pat = "pat";
-}
-
-public static class GitHubIntakeLabel
-{
-    public const string Default = "mohist";
 }
 
 public sealed class GitHubConnectionValidationException(string message, string code) : Exception(message)

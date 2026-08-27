@@ -18,15 +18,15 @@ using DomainIssue = Mohist.Server.Issue.Domain.Issue;
 
 namespace Mohist.Server.SpecTests.Specs.GitHub;
 
-[Collection("GitHubFeed")]
+[Collection("GitHubCommand")]
 public sealed class GitHubWriteBackSpecs
 {
     private const string RepoName = "hello-world";
     private const int GithubIssueNumber = 42;
 
-    private readonly GitHubFeedFixture _fixture;
+    private readonly GitHubCommandFixture _fixture;
 
-    public GitHubWriteBackSpecs(GitHubFeedFixture fixture)
+    public GitHubWriteBackSpecs(GitHubCommandFixture fixture)
     {
         _fixture = fixture;
         fixture.Comments.Comments.Clear();
@@ -59,7 +59,7 @@ public sealed class GitHubWriteBackSpecs
         // Link must exist before the issue events become dispatchable:
         // SaveAsync fires a fire-and-forget dispatch poke, and the
         // write-back handler drops the event for good when no link exists
-        // yet (best-effort contract). The feed handler orders the same way.
+        // yet (best-effort contract). The mirror link may not exist yet.
         await using (var scope = _fixture.Services.CreateAsyncScope())
         {
             var links = scope.ServiceProvider.GetRequiredService<GitHubIssueLinkStore>();
