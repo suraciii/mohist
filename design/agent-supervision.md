@@ -1,7 +1,3 @@
----
-status: converged
----
-
 # Agent Supervision Preset
 
 The supervision preset turns "the owner delegates production-line operation to an Agent" into

@@ -78,3 +78,7 @@ packages/cli/tests/*/detailed/
 # ZCode client session workspace
 .zcode/
 .herdr-worktrees/
+
+# Agent runtime state
+.pi/
+.pages/

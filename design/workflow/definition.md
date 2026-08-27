@@ -1,7 +1,3 @@
----
-status: legacy
----
-
 # Workflow Definition
 
 > The `uses`/`with` Action syntax is the current implementation. The target model

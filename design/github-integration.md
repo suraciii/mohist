@@ -1,7 +1,3 @@
----
-status: wip
----
-
 # GitHub Integration
 
 GitHub integration makes a connected GitHub repository the public mirror of a

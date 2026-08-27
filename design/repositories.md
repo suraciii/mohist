@@ -1,7 +1,3 @@
----
-status: wip
----
-
 # Repository Execution
 
 A Repository is a named execution resource owned by a Project Space. An Issue
@@ -38,7 +34,7 @@ WorkflowRun
 - A Workspace is a first-class execution-environment resource under a Project,
   with its own identity, origin, and lifecycle. Its Repository references are
   access grants, not copies of Repository definitions. See
-  [`workspace.md`](workspace.md).
+  [`workspace.md`](workspaces.md).
 - A normalized Git remote is a temporary validation value, not a domain field.
   The system does not persist `RemoteFingerprint` or
   `RemoteIdentityVersion`.
@@ -99,7 +95,7 @@ Project Repository and `WorkspaceName` selects the Project Workspace. Dispatch
 resolves the Repository live through the chain above and passes the Workspace
 name independently. Workspace identity, Origin, materialization, affinity, and
 loss behavior are defined only in
-[`workspace.md`](workspace.md).
+[`workspace.md`](workspaces.md).
 
 Repository preparation still protects one local invariant: the materialized
 checkout must belong to the resolved `GitUrl`. If the Runner cannot confirm the
@@ -116,7 +112,7 @@ is supplied only to operations that need source control context.
 The Workspace lifecycle and reclamation grant come from the Workspace view, not
 Repository existence or WorkflowRun status. Runner-side registry and deletion
 fence rules are authoritative in
-[`workspace.md`](workspace.md#runner-side-directory-reclamation).
+[`workspace.md`](workspaces.md#runner-side-directory-reclamation).
 
 ## Failure Semantics
 

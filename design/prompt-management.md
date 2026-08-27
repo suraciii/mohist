@@ -1,7 +1,3 @@
----
-status: wip
----
-
 # Prompt Management
 
 A Prompt is a Project-scoped resource in Project Space. WorkflowProfile, Issue, and WorkflowRun do not

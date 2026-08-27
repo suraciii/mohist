@@ -1,7 +1,3 @@
----
-status: shipped
----
-
 # Authentication and Identity
 
 Authentication in Mohist must preserve two properties that are easy to lose in

@@ -1,7 +1,3 @@
----
-status: implemented
----
-
 # Workflow Variables
 
 Workflow Variables are resources that are independent of WorkflowProfile. Project, Issue, and

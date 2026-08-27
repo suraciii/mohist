@@ -1,7 +1,3 @@
----
-status: implemented
----
-
 # Slack
 
 The Slack integration connects an already configured Mohist Agent to a Slack

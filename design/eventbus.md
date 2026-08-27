@@ -1,7 +1,3 @@
----
-status: draft
----
-
 # Event Bus
 
 ## Purpose

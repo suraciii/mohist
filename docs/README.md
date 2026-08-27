@@ -85,6 +85,6 @@ If you are new to Mohist, read the [repository README](../README.md) first.
 
 ## Writing Contract
 
-Read and follow [_agents.md](_agents.md) before you edit `docs/`.
+Read and follow [AGENTS.md](AGENTS.md) before you edit `docs/`.
 
 Open an Issue when you find an outdated statement.

@@ -1,7 +1,3 @@
----
-status: stable
----
-
 # Outbound Webhook
 
 An outbound webhook is an event subscription within a Project. It selects

@@ -1,7 +1,3 @@
----
-status: converged
----
-
 # Event Protocol
 
 This document defines Mohist's event envelope and its live delivery protocol.

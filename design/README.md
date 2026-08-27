@@ -4,20 +4,20 @@
 the contracts that implementations must preserve. It covers domain decomposition, workflow
 mechanics, and cross-module design conventions. It is not a tour of the current code. User-facing
 documents live in
-[`../docs/`](../docs/).
+[`../docs/`](../docs/). Repository engineering practices (testing, context management) live in
+[`../eng/`](../eng/).
 
-The design-spec writing rules live in [`agents.md`](agents.md). Read them before writing or
+The design-spec writing rules live in [`AGENTS.md`](AGENTS.md). Read them before writing or
 changing a document in `design/`.
 
 ## Foundational
 
-- [agents.md](agents.md) — Design-document writing rules for agents; read before writing a spec in design/.
+- [AGENTS.md](AGENTS.md) — Design-document writing rules for agents; read before writing a spec in design/.
 - [../CONTEXT.md](../CONTEXT.md) — Cross-context unified language; single entry point for term definitions.
 - [architecture.md](architecture.md) — Runtime boundaries, control-plane/execution-plane responsibilities, placement rules.
 - [domain-analysis.md](domain-analysis.md) — Domain analysis and context mapping: subdomain split, bounded-context relations, dependency invariants.
 - [conventions.md](conventions.md) — Naming, layering, variable conventions, certainty vocabulary (facts, claims, settlement).
 - [cli.md](cli.md) — Command language for humans and agents: domain ownership, progressive help / Skill context, field-selection output, error and reliability contract.
-- [testing.md](testing.md) — Executable Product and Design Specs; ownership-based L0 and L1 placement; hermetic Resources, shift-left feedback, local validation commands, application-owned CI evidence, duration budgets, and the final Gate. Gate run-directory, DAG, and lane internals live in [`../scripts/test-duration/README.md`](../scripts/test-duration/README.md).
 - [observability.md](observability.md) — Observability signal split, resource budget, degradation rules, high-frequency path cost constraints.
 - [eventbus.md](eventbus.md) — Event bus: CloudEvent subscription contract + single dispatcher reliable at-least-once notification.
 - [event-protocol.md](event-protocol.md) — Event protocol: three-axis envelope model, business lineage stamping matrix, match expressions (CEL subset), conformance.
@@ -27,7 +27,7 @@ changing a document in `design/`.
 - [agent-execution.md](agent-execution.md) — Mohist Agent, AgentJob, Action, SessionInput, AgentTurn, AgentSession, Runtime Session: unified execution ownership, activity and transcript DSL.
 - [agent-api.md](agent-api.md) - Versioned direct API for PAT-authenticated external callers: public state, retry identity, event resume, and disclosure boundaries.
 - [subagents.md](subagents.md) — Subagents and session trees: child launch under flat Agent, capability snapshot, parent-child link, terminal callback, cascade stop, and detach.
-- [scheduled-input.md](scheduled-input.md) — Scheduled input (**WIP**): durable intent, recovery wake-ups, and ordinary follow-up delivery are implemented; due delivery still waits for another path to restore a definitely missing Runtime binding instead of initiating confirmed-missing recovery.
+- [scheduled-input.md](scheduled-input.md) — Scheduled input: durable intent, recovery wake-ups, and ordinary follow-up delivery are implemented; due delivery still waits for another path to restore a definitely missing Runtime binding instead of initiating confirmed-missing recovery.
 - [slack.md](slack.md) — Slack integration component boundary: why the adapter is standalone and stateless, Session boundary trade-offs, reliability contract, implementation order; product behavior in `docs/slack.md`.
 - [event-routing.md](event-routing.md) — Agent event routing: project-scoped ordered routing table, expression matching + first-match/continue agent launch, replacing subscription priority arbitration.
 - [agent-supervision.md](agent-supervision.md) — Agent supervision presets: one command installs a supervisor agent and approval/failure routing rules; escalation via all-notifications-on + `[supervisor]` comment discipline, no escalate command or system-level rate limiting.
@@ -54,14 +54,14 @@ changing a document in `design/`.
 ## Supporting topics
 
 - [auth.md](auth.md) — Auth and identity: single admin plus service/agent principals, file and signed credentials, device authorization login, Runner machine credentials, Scope enforcement, and attribution.
-- [repositories.md](repositories.md) — Repository execution: Project resource authority, Issue binding, live dispatch resolution (**WIP**).
-- [workspace.md](workspace.md) — Workspace (**WIP**): first-class persistent execution environment under a Project, with Origin resolution, named Runner materialization, binding affinity, archival, and reclamation; Workflow cross-Runner rematerialization and Slack channel-archive propagation remain gaps.
+- [repositories.md](repositories.md) — Repository execution: Project resource authority, Issue binding, live dispatch resolution.
+- [workspace.md](workspaces.md) — Workspace: first-class persistent execution environment under a Project, with Origin resolution, named Runner materialization, binding affinity, archival, and reclamation; Workflow cross-Runner rematerialization and Slack channel-archive propagation remain gaps.
 - [hermes-webhook.md](hermes-webhook.md) — Hermes notification gateway: event types, payload, signature, delivery reliability.
 - [outbound-webhook.md](outbound-webhook.md) — Outbound webhook: implemented v1 general HTTP delivery with CloudEvents, event selection, configurable authentication, 2xx success, and failure inspection; retries, redelivery, attempt history, and Web management remain later capabilities.
 - [github-integration.md](github-integration.md) — GitHub integration: signed ingress, feed/close translation, and write-back are implemented; PR branch correlation, App identity, and failure inspection remain gaps; product behavior in [`docs/github.md`](../docs/github.md).
 - [issue-breakdown.md](issue-breakdown.md) — Composite Issue / sub-issue design: implemented parent-child model, status aggregation, composite advancement, and isolation constraints from Epic; multi-repo resources in `docs/repositories.md`.
 - [issue-templates.md](issue-templates.md) — Body structure and design rationale of the three issue templates (Feature / Bug / Refactor).
-- [prompt-management.md](prompt-management.md) — Project-scoped Prompt (**WIP**), builtin fallback, Workflow key reference.
+- [prompt-management.md](prompt-management.md) — Project-scoped Prompt, builtin fallback, Workflow key reference.
 - [runner.md](runner.md) — Runner and scheduling: each owner is its own dispatch ledger (no second copy, no reconcile), pull-only claim / poll / report, report verdicts, restart as ordinary failure with generation closeout, stop settles by identity.
 - [runner-transport.md](runner-transport.md) — SignalR-to-WebSocket Runner control migration: preserved HTTP dispatch, JSON-RPC 2.0 methods, and cutover order.
 - [task-log.md](task-log.md) — Task execution log collection pipeline, report channel, storage ownership, settlement-recorded terminal ownership.

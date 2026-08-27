@@ -1,7 +1,3 @@
----
-status: implemented
----
-
 # Subagent and Session Tree Design
 
 A session tree is an optional parent-child relationship between AgentSessions. It lets a running
@@ -701,7 +697,7 @@ ordinary Session API, but the tree link neither owns the schedule nor changes it
   carries references only.
 - Do not accept `--work-dir`, `workspacePath`, a named Workspace override, or any filesystem path
   input. The child directory comes only from the inherited parent Workspace
-  ([`workspace.md`](workspace.md)).
+  ([`workspace.md`](workspaces.md)).
 - Do not let the Runner infer parent/child identity by scanning working directory, environment
   variables, or Runtime Session, or choose a Runner for the child that differs from the parent
   binding.
