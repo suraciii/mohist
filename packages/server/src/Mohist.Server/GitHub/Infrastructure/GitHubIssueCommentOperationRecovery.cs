@@ -55,6 +55,9 @@ public sealed class GitHubIssueCommentOperationRecoveryService : IScopedService
         foreach (var operation in pending)
         {
             ct.ThrowIfCancellationRequested();
+            if (await IsConnectionDisabledAsync(operation.LinkId, ct))
+                continue;
+
             var claimed = await _links.TryClaimCommentOperationAsync(operation.Id, LeaseDuration, ct);
             if (claimed is null)
                 continue;
@@ -76,12 +79,27 @@ public sealed class GitHubIssueCommentOperationRecoveryService : IScopedService
         return processed;
     }
 
+    private async Task<bool> IsConnectionDisabledAsync(
+        string linkId,
+        CancellationToken ct)
+    {
+        var link = await _links.GetByIdAsync(linkId, ct);
+        if (link is null)
+            return false;
+        var connection = await _connections.GetByRepositoryAsync(link.ProjectId, link.RepositoryName, ct);
+        return connection?.Status == GitHubConnectionStatus.Disabled;
+    }
+
     private async Task RecoverAsync(
         GitHubIssueCommentOperation operation,
         CancellationToken ct)
     {
         var link = await _links.GetByIdAsync(operation.LinkId, ct)
             ?? throw new GitHubSynchronizationException("github_link_missing", "GitHub link disappeared while recovering an operation");
+        if (operation.GithubIssueNumber <= 0
+            || link.GithubIssueNumber != operation.GithubIssueNumber)
+            return;
+
         var connection = await _connections.GetByRepositoryAsync(link.ProjectId, link.RepositoryName, ct)
             ?? throw new GitHubSynchronizationException("github_connection_missing", "GitHub connection disappeared while recovering an operation");
         if (connection.Status != GitHubConnectionStatus.Active)
@@ -142,7 +160,11 @@ public sealed class GitHubIssueCommentOperationRecoveryService : IScopedService
 
         if (distinctMatches.Length == 1)
         {
-            await _links.MarkCommentPostedAsync(link.Id, operation.CommentKey, ct);
+            await _links.MarkCommentPostedAsync(
+                link.Id,
+                operation.CommentKey,
+                operation.GithubIssueNumber,
+                ct);
             return;
         }
 
@@ -151,7 +173,11 @@ public sealed class GitHubIssueCommentOperationRecoveryService : IScopedService
             link.GithubIssueNumber,
             GitHubMirrorMarker.Append(operation.Body, operation.Marker),
             ct);
-        await _links.MarkCommentPostedAsync(link.Id, operation.CommentKey, ct);
+        await _links.MarkCommentPostedAsync(
+            link.Id,
+            operation.CommentKey,
+            operation.GithubIssueNumber,
+            ct);
     }
 
     private async Task RecoverCloseAsync(
@@ -192,7 +218,11 @@ public sealed class GitHubIssueCommentOperationRecoveryService : IScopedService
         {
             if (string.Equals(snapshot.StateReason, operation.StateReason, StringComparison.OrdinalIgnoreCase))
             {
-                await _links.MarkCommentPostedAsync(link.Id, operation.CommentKey, ct);
+                await _links.MarkCommentPostedAsync(
+                    link.Id,
+                    operation.CommentKey,
+                    operation.GithubIssueNumber,
+                    ct);
                 return;
             }
 
@@ -210,7 +240,11 @@ public sealed class GitHubIssueCommentOperationRecoveryService : IScopedService
             link.GithubIssueNumber,
             operation.StateReason,
             ct);
-        await _links.MarkCommentPostedAsync(link.Id, operation.CommentKey, ct);
+        await _links.MarkCommentPostedAsync(
+            link.Id,
+            operation.CommentKey,
+            operation.GithubIssueNumber,
+            ct);
     }
 
     private async Task HandleFailureAsync(
@@ -223,6 +257,12 @@ public sealed class GitHubIssueCommentOperationRecoveryService : IScopedService
             : exception.Message[..1000];
         if (string.IsNullOrWhiteSpace(detail))
             detail = exception.GetType().Name;
+
+        if (exception is GitHubSynchronizationException { Code: "github_connection_disabled" })
+        {
+            await _links.ReleaseCommentOperationLeaseAsync(operation.Id, ct);
+            return;
+        }
 
         if (!GitHubRemoteOutcome.IsUnknown(exception))
             await _links.ReleaseCommentReservationAsync(operation.LinkId, operation.CommentKey, ct);
@@ -243,7 +283,10 @@ public sealed class GitHubIssueCommentOperationRecoveryService : IScopedService
                     : exception.GetType().Name,
                 detail,
                 _timeProvider.GetUtcNow()),
-            ct);
+            expectedGithubIssueNumber: operation.GithubIssueNumber > 0
+                ? operation.GithubIssueNumber
+                : null,
+            ct: ct);
         _log.LogWarning(
             exception,
             "GitHub operation {OperationId} recovery failed; reservation remains recoverable",
@@ -266,7 +309,10 @@ public sealed class GitHubIssueCommentOperationRecoveryService : IScopedService
                 "ambiguous",
                 detail,
                 _timeProvider.GetUtcNow()),
-            ct);
+            expectedGithubIssueNumber: operation.GithubIssueNumber > 0
+                ? operation.GithubIssueNumber
+                : null,
+            ct: ct);
         _log.LogError(
             "GitHub operation {OperationId} is ambiguous and will not be posted again: {Detail}",
             operation.Id,

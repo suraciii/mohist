@@ -37,11 +37,15 @@ public sealed class RecordingGitHubCommentPort : IGitHubCommentPort, IGitHubIssu
     public Exception? FindFailure { get; set; }
     public Exception? ConfirmationFailure { get; set; }
     public bool PostThenThrow { get; set; }
+    public TaskCompletionSource? PostEntered { get; set; }
+    public TaskCompletionSource? ReleasePost { get; set; }
     public Exception? UpdateFailure { get; set; }
     public Queue<Exception> UpdateFailures { get; } = new();
     public Exception? LabelFailure { get; set; }
     public Exception? CloseFailure { get; set; }
     public bool CloseThenThrow { get; set; }
+    public TaskCompletionSource? CloseEntered { get; set; }
+    public TaskCompletionSource? ReleaseClose { get; set; }
     public bool CreateThenThrow { get; set; }
     public int NextGithubIssueNumber { get; set; } = 900;
     public int? CreateIssueNumberOverride { get; set; }
@@ -116,7 +120,7 @@ public sealed class RecordingGitHubCommentPort : IGitHubCommentPort, IGitHubIssu
         return Task.CompletedTask;
     }
 
-    public Task PostCommentAsync(
+    public async Task PostCommentAsync(
         GitHubConnection connection,
         int githubIssueNumber,
         string body,
@@ -124,12 +128,14 @@ public sealed class RecordingGitHubCommentPort : IGitHubCommentPort, IGitHubIssu
     {
         if (ConfirmationFailure is not null) throw ConfirmationFailure;
         Comments.Add(new PostedComment(connection.Id, githubIssueNumber, body));
+        PostEntered?.TrySetResult();
+        if (ReleasePost is not null)
+            await ReleasePost.Task.WaitAsync(ct);
         if (PostThenThrow)
         {
             PostThenThrow = false;
             throw new TimeoutException("simulated unknown reply outcome");
         }
-        return Task.CompletedTask;
     }
 
     public Task<IReadOnlyList<string>> FindCommentIdsByMarkerAsync(
@@ -156,7 +162,7 @@ public sealed class RecordingGitHubCommentPort : IGitHubCommentPort, IGitHubIssu
         return Task.CompletedTask;
     }
 
-    public Task CloseIssueAsync(
+    public async Task CloseIssueAsync(
         GitHubConnection connection,
         int githubIssueNumber,
         string stateReason,
@@ -164,6 +170,9 @@ public sealed class RecordingGitHubCommentPort : IGitHubCommentPort, IGitHubIssu
     {
         if (CloseFailure is not null) throw CloseFailure;
         Closes.Add(new IssueClose(connection.Id, githubIssueNumber, stateReason));
+        CloseEntered?.TrySetResult();
+        if (ReleaseClose is not null)
+            await ReleaseClose.Task.WaitAsync(ct);
         var prior = Issues.TryGetValue(githubIssueNumber, out var existing)
             ? existing
             : new GitHubIssueSnapshot(githubIssueNumber, "Existing GitHub issue", "Existing body", "open", null);
@@ -173,7 +182,6 @@ public sealed class RecordingGitHubCommentPort : IGitHubCommentPort, IGitHubIssu
             CloseThenThrow = false;
             throw new TimeoutException("simulated unknown close outcome");
         }
-        return Task.CompletedTask;
     }
 
     public Task<string?> FindDeliveryPullRequestUrlAsync(

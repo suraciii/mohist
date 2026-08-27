@@ -464,7 +464,7 @@ public sealed class GitHubIssueSynchronizationService : IScopedService
                 link.GithubIssueNumber,
                 GitHubMirrorMarker.Append(body, marker),
                 ct);
-            await _links.MarkCommentPostedAsync(link.Id, commentKey, ct);
+            await _links.MarkCommentPostedAsync(link.Id, commentKey, link.GithubIssueNumber, ct);
         }
         catch (Exception ex) when (!ct.IsCancellationRequested)
         {
@@ -514,7 +514,7 @@ public sealed class GitHubIssueSynchronizationService : IScopedService
         try
         {
             await _commentPort.CloseIssueAsync(connection, link.GithubIssueNumber, stateReason, ct);
-            await _links.MarkCommentPostedAsync(link.Id, closeKey, ct);
+            await _links.MarkCommentPostedAsync(link.Id, closeKey, link.GithubIssueNumber, ct);
         }
         catch (Exception ex) when (!ct.IsCancellationRequested)
         {
@@ -556,7 +556,13 @@ public sealed class GitHubIssueSynchronizationService : IScopedService
                 ErrorDetail = detail,
                 CreatedAt = occurredAt,
             }, ct);
-            await _links.MarkErrorAsync(link.Id, new GitHubSyncError(operation, code, detail, occurredAt), ct);
+            await _links.MarkErrorAsync(
+                link.Id,
+                new GitHubSyncError(operation, code, detail, occurredAt),
+                expectedGithubIssueNumber: link.GithubIssueNumber > 0
+                    ? link.GithubIssueNumber
+                    : null,
+                ct: ct);
             if (ex is HttpRequestException { StatusCode: HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden })
                 await _connections.MarkNeedsAttentionAsync(connection.ProjectId, connection.Id, true, ct);
         }

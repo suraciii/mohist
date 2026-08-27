@@ -191,7 +191,7 @@ public sealed class GitHubWriteBackHandler : ICloudEventHandler
                     link.GithubIssueNumber,
                     GitHubMirrorMarker.Append(body, marker),
                     ct);
-            await links.MarkCommentPostedAsync(link.Id, commentKey, ct);
+            await links.MarkCommentPostedAsync(link.Id, commentKey, link.GithubIssueNumber, ct);
         }
         catch (Exception ex) when (!ct.IsCancellationRequested)
         {
@@ -225,7 +225,7 @@ public sealed class GitHubWriteBackHandler : ICloudEventHandler
         {
             await sp.GetRequiredService<IGitHubCommentPort>()
                 .CloseIssueAsync(connection, link.GithubIssueNumber, stateReason, ct);
-            await links.MarkCommentPostedAsync(link.Id, closeKey, ct);
+            await links.MarkCommentPostedAsync(link.Id, closeKey, link.GithubIssueNumber, ct);
         }
         catch (Exception ex) when (!ct.IsCancellationRequested)
         {
@@ -270,7 +270,10 @@ public sealed class GitHubWriteBackHandler : ICloudEventHandler
             await sp.GetRequiredService<GitHubIssueLinkStore>().MarkErrorAsync(
                 link.Id,
                 new GitHubSyncError(failure.Operation, failure.ErrorCode, failure.ErrorDetail, failure.CreatedAt),
-                ct);
+                expectedGithubIssueNumber: link.GithubIssueNumber > 0
+                    ? link.GithubIssueNumber
+                    : null,
+                ct: ct);
             if (IsCredentialFailure(ex))
             {
                 await sp.GetRequiredService<GitHubConnectionStore>()

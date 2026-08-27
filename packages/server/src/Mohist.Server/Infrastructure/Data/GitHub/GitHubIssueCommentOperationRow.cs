@@ -11,6 +11,7 @@ public sealed class GitHubIssueCommentOperationRow
 {
     public required string Id { get; set; }
     public required string LinkId { get; set; }
+    public int GithubIssueNumber { get; set; }
     public required string CommentKey { get; set; }
     public string? Kind { get; set; }
     public string? Body { get; set; }

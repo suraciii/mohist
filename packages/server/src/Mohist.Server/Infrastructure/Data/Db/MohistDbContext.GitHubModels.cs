@@ -155,6 +155,8 @@ public partial class MohistDbContext
                 entity.Property(e => e.LinkId)
                     .HasMaxLength(256)
                     .IsRequired();
+                entity.Property(e => e.GithubIssueNumber)
+                    .IsRequired();
                 entity.Property(e => e.CommentKey)
                     .HasMaxLength(128)
                     .IsRequired();

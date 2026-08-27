@@ -111,6 +111,7 @@ public sealed class GitHubMirrorMigrationTests
         Assert.Contains("LeaseUntil", operationColumns);
         Assert.Contains("LastError", operationColumns);
         Assert.Contains("FailedAt", operationColumns);
+        Assert.Contains("GithubIssueNumber", operationColumns);
 
         var connectionIndexes = await ReadIndexesAsync(connection, "GitHubConnections");
         Assert.Equal(1, connectionIndexes.Count(index =>

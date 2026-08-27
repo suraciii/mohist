@@ -41,6 +41,11 @@ public sealed class GitHubIssueCommentOperation
 {
     public string Id { get; init; } = string.Empty;
     public string LinkId { get; init; } = string.Empty;
+    /// <summary>
+    /// GitHub issue identity held when this operation was reserved. A
+    /// recovery completion must not mutate a later mirror generation.
+    /// </summary>
+    public int GithubIssueNumber { get; init; }
     public string CommentKey { get; init; } = string.Empty;
     public string Kind { get; init; } = GitHubCommentOperationKind.Comment;
     public string? Body { get; init; }

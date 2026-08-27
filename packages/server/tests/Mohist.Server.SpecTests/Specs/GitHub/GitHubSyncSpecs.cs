@@ -38,11 +38,15 @@ public sealed class GitHubSyncSpecs
         fixture.Comments.FindFailure = null;
         fixture.Comments.ConfirmationFailure = null;
         fixture.Comments.PostThenThrow = false;
+        fixture.Comments.PostEntered = null;
+        fixture.Comments.ReleasePost = null;
         fixture.Comments.UpdateFailure = null;
         fixture.Comments.UpdateFailures.Clear();
         fixture.Comments.LabelFailure = null;
         fixture.Comments.CloseFailure = null;
         fixture.Comments.CloseThenThrow = false;
+        fixture.Comments.CloseEntered = null;
+        fixture.Comments.ReleaseClose = null;
         fixture.Comments.CreateThenThrow = false;
         fixture.Comments.MarkerMatchCount = 0;
         fixture.Comments.CreateIssueNumberOverride = null;
@@ -321,6 +325,156 @@ public sealed class GitHubSyncSpecs
     }
 
     [Fact]
+    public async Task DisabledConnectionRetainsUnknownCommentUntilEnabled()
+    {
+        var (projectId, issueNumber, connectionId) = await CreateMirroredIssueAsync();
+        var link = (await LoadLinkAsync(projectId, issueNumber))!;
+        const string commentKey = "disabled-comment";
+        await ReserveAndDeferOperationAsync(
+            link,
+            commentKey,
+            GitHubCommentOperationKind.Comment,
+            "comment retained while disabled",
+            stateReason: null);
+
+        using (var disabled = await _fixture.Client.PostAsync(
+            $"/api/projects/{projectId}/github-connections/{connectionId}/disable", JsonContent.Create(new { })))
+            disabled.EnsureSuccessStatusCode();
+
+        _fixture.TimeProvider.Advance(TimeSpan.FromSeconds(5));
+        var worker = _fixture.Services.GetRequiredService<GitHubIssueCommentOperationRecoveryWorker>();
+        Assert.Equal(0, await worker.ProcessPendingAsync());
+        Assert.Equal(
+            GitHubCommentOperationStatus.Reserved,
+            await LoadOperationStatusAsync(link.Id, commentKey));
+
+        using (var enabled = await _fixture.Client.PostAsync(
+            $"/api/projects/{projectId}/github-connections/{connectionId}/enable", JsonContent.Create(new { })))
+            enabled.EnsureSuccessStatusCode();
+
+        Assert.True(await worker.ProcessPendingAsync() >= 1);
+        var recovered = await LoadLinkAsync(projectId, issueNumber);
+        Assert.True(recovered!.HasPostedComment(commentKey));
+        Assert.Equal(
+            GitHubCommentOperationStatus.Posted,
+            await LoadOperationStatusAsync(link.Id, commentKey));
+    }
+
+    [Fact]
+    public async Task DisabledConnectionRetainsUnknownCloseUntilEnabled()
+    {
+        var (projectId, issueNumber, connectionId) = await CreateMirroredIssueAsync();
+        var link = (await LoadLinkAsync(projectId, issueNumber))!;
+        const string closeKey = GitHubCommentKinds.ClosedCompleted;
+        await ReserveAndDeferOperationAsync(
+            link,
+            closeKey,
+            GitHubCommentOperationKind.Close,
+            body: null,
+            stateReason: "completed");
+
+        using (var disabled = await _fixture.Client.PostAsync(
+            $"/api/projects/{projectId}/github-connections/{connectionId}/disable", JsonContent.Create(new { })))
+            disabled.EnsureSuccessStatusCode();
+
+        _fixture.TimeProvider.Advance(TimeSpan.FromSeconds(5));
+        var worker = _fixture.Services.GetRequiredService<GitHubIssueCommentOperationRecoveryWorker>();
+        Assert.Equal(0, await worker.ProcessPendingAsync());
+        Assert.Equal(
+            GitHubCommentOperationStatus.Reserved,
+            await LoadOperationStatusAsync(link.Id, closeKey));
+
+        using (var enabled = await _fixture.Client.PostAsync(
+            $"/api/projects/{projectId}/github-connections/{connectionId}/enable", JsonContent.Create(new { })))
+            enabled.EnsureSuccessStatusCode();
+
+        Assert.True(await worker.ProcessPendingAsync() >= 1);
+        var recovered = await LoadLinkAsync(projectId, issueNumber);
+        Assert.True(recovered!.HasPostedComment(closeKey));
+        Assert.Equal(
+            GitHubCommentOperationStatus.Posted,
+            await LoadOperationStatusAsync(link.Id, closeKey));
+    }
+
+    [Fact]
+    public async Task RecoveryCommentCompletionAfterMirrorResetDoesNotRecordStaleBookkeeping()
+    {
+        var (projectId, issueNumber, _) = await CreateMirroredIssueAsync();
+        var link = (await LoadLinkAsync(projectId, issueNumber))!;
+        const string commentKey = "stale-comment";
+        await ReserveAndDeferOperationAsync(
+            link,
+            commentKey,
+            GitHubCommentOperationKind.Comment,
+            "stale comment",
+            stateReason: null);
+
+        _fixture.TimeProvider.Advance(TimeSpan.FromSeconds(5));
+        var entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        _fixture.Comments.PostEntered = entered;
+        _fixture.Comments.ReleasePost = release;
+        var worker = _fixture.Services.GetRequiredService<GitHubIssueCommentOperationRecoveryWorker>();
+        var recovery = worker.ProcessPendingAsync();
+        await entered.Task.WaitAsync(TestContext.Current.CancellationToken);
+        var newGithubIssueNumber = link.GithubIssueNumber + 1000;
+        try
+        {
+            await ResetMirrorAsync(link.Id, link.GithubIssueNumber);
+            await SetMirrorAsync(link.Id, newGithubIssueNumber);
+        }
+        finally
+        {
+            release.TrySetResult();
+        }
+        await recovery;
+
+        var current = await LoadLinkAsync(projectId, issueNumber);
+        Assert.Equal(newGithubIssueNumber, current!.GithubIssueNumber);
+        Assert.False(current.HasPostedComment(commentKey));
+        Assert.Null(await LoadOperationStatusAsync(link.Id, commentKey));
+    }
+
+    [Fact]
+    public async Task RecoveryCloseCompletionAfterMirrorResetDoesNotRecordStaleBookkeeping()
+    {
+        var (projectId, issueNumber, _) = await CreateMirroredIssueAsync();
+        var link = (await LoadLinkAsync(projectId, issueNumber))!;
+        const string closeKey = "stale-close";
+        await ReserveAndDeferOperationAsync(
+            link,
+            closeKey,
+            GitHubCommentOperationKind.Close,
+            body: null,
+            stateReason: "completed");
+
+        _fixture.TimeProvider.Advance(TimeSpan.FromSeconds(5));
+        var entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        _fixture.Comments.CloseEntered = entered;
+        _fixture.Comments.ReleaseClose = release;
+        var worker = _fixture.Services.GetRequiredService<GitHubIssueCommentOperationRecoveryWorker>();
+        var recovery = worker.ProcessPendingAsync();
+        await entered.Task.WaitAsync(TestContext.Current.CancellationToken);
+        var newGithubIssueNumber = link.GithubIssueNumber + 1000;
+        try
+        {
+            await ResetMirrorAsync(link.Id, link.GithubIssueNumber);
+            await SetMirrorAsync(link.Id, newGithubIssueNumber);
+        }
+        finally
+        {
+            release.TrySetResult();
+        }
+        await recovery;
+
+        var current = await LoadLinkAsync(projectId, issueNumber);
+        Assert.Equal(newGithubIssueNumber, current!.GithubIssueNumber);
+        Assert.False(current.HasPostedComment(closeKey));
+        Assert.Null(await LoadOperationStatusAsync(link.Id, closeKey));
+    }
+
+    [Fact]
     public async Task MultipleCommentMarkerMatches_FailClosedWithoutAnotherPost()
     {
         var (projectId, issueNumber, _) = await CreateMirroredIssueAsync();
@@ -594,6 +748,41 @@ public sealed class GitHubSyncSpecs
             .Where(operation => operation.LinkId == link.Id)
             .ExecuteDeleteAsync();
         await db.SaveChangesAsync();
+    }
+
+    private async Task ReserveAndDeferOperationAsync(
+        GitHubIssueLink link,
+        string commentKey,
+        string kind,
+        string? body,
+        string? stateReason)
+    {
+        await using var scope = _fixture.Services.CreateAsyncScope();
+        var links = scope.ServiceProvider.GetRequiredService<GitHubIssueLinkStore>();
+        Assert.True(await links.TryReserveCommentAsync(
+            link.Id,
+            commentKey,
+            kind,
+            body,
+            stateReason));
+        Assert.NotNull(await links.DeferCommentOperationAsync(
+            link.Id,
+            commentKey,
+            "simulated unknown outcome"));
+    }
+
+    private async Task ResetMirrorAsync(string linkId, int githubIssueNumber)
+    {
+        await using var scope = _fixture.Services.CreateAsyncScope();
+        var links = scope.ServiceProvider.GetRequiredService<GitHubIssueLinkStore>();
+        Assert.NotNull(await links.ResetMirrorAsync(linkId, githubIssueNumber));
+    }
+
+    private async Task SetMirrorAsync(string linkId, int githubIssueNumber)
+    {
+        await using var scope = _fixture.Services.CreateAsyncScope();
+        var links = scope.ServiceProvider.GetRequiredService<GitHubIssueLinkStore>();
+        Assert.NotNull(await links.SetMirrorAsync(linkId, githubIssueNumber));
     }
 
     private async Task<GitHubIssueLink?> LoadLinkAsync(string projectId, int issueNumber) =>

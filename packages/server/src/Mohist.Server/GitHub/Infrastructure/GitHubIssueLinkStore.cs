@@ -221,16 +221,30 @@ public sealed class GitHubIssueLinkStore : IScopedService
         return ToDomain(row);
     }
 
+    public Task<GitHubIssueLink?> MarkErrorAsync(
+        string id,
+        GitHubSyncError error,
+        CancellationToken ct = default) =>
+        MarkErrorAsync(id, error, expectedGithubIssueNumber: null, ct: ct);
+
     public async Task<GitHubIssueLink?> MarkErrorAsync(
         string id,
         GitHubSyncError error,
+        int? expectedGithubIssueNumber,
         CancellationToken ct = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(id);
         ArgumentNullException.ThrowIfNull(error);
+        if (expectedGithubIssueNumber is <= 0)
+            throw new ArgumentOutOfRangeException(nameof(expectedGithubIssueNumber));
+
         await using var db = await _dbFactory.CreateDbContextAsync(ct);
+        await using var transaction = await db.Database.BeginTransactionAsync(ct);
         var row = await db.GitHubIssueLinks.FirstOrDefaultAsync(r => r.Id == id, ct);
-        if (row is null) return null;
+        if (row is null
+            || (expectedGithubIssueNumber is { } expected
+                && row.GithubIssueNumber != expected))
+            return null;
         row.SyncStatus = GitHubSyncStatus.Error;
         row.LastErrorOperation = error.Operation;
         row.LastErrorCode = error.Code;
@@ -238,6 +252,7 @@ public sealed class GitHubIssueLinkStore : IScopedService
         row.LastErrorAt = error.OccurredAt;
         row.UpdatedAt = _timeProvider.GetUtcNow();
         await db.SaveChangesAsync(ct);
+        await transaction.CommitAsync(ct);
         return ToDomain(row);
     }
 
@@ -463,6 +478,7 @@ public sealed class GitHubIssueLinkStore : IScopedService
         {
             Id = $"ghcomment_{Guid.NewGuid():N}",
             LinkId = id,
+            GithubIssueNumber = link.GithubIssueNumber,
             CommentKey = commentKey,
             Kind = kind,
             Body = body,
@@ -600,13 +616,29 @@ public sealed class GitHubIssueLinkStore : IScopedService
         return ToDomain(row);
     }
 
-    public async Task MarkCommentPostedAsync(string id, string commentKey, CancellationToken ct = default)
+    public Task MarkCommentPostedAsync(
+        string id,
+        string commentKey,
+        CancellationToken ct = default) =>
+        MarkCommentPostedAsync(id, commentKey, expectedGithubIssueNumber: null, ct: ct);
+
+    public async Task MarkCommentPostedAsync(
+        string id,
+        string commentKey,
+        int? expectedGithubIssueNumber,
+        CancellationToken ct = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(id);
         ArgumentException.ThrowIfNullOrWhiteSpace(commentKey);
+        if (expectedGithubIssueNumber is <= 0)
+            throw new ArgumentOutOfRangeException(nameof(expectedGithubIssueNumber));
+
         await using var db = await _dbFactory.CreateDbContextAsync(ct);
+        await using var transaction = await db.Database.BeginTransactionAsync(ct);
         var row = await db.GitHubIssueLinks.FirstOrDefaultAsync(r => r.Id == id, ct);
-        if (row is null)
+        if (row is null
+            || (expectedGithubIssueNumber is { } expected
+                && row.GithubIssueNumber != expected))
             return;
 
         var now = _timeProvider.GetUtcNow();
@@ -618,6 +650,7 @@ public sealed class GitHubIssueLinkStore : IScopedService
             {
                 Id = $"ghcomment_{Guid.NewGuid():N}",
                 LinkId = id,
+                GithubIssueNumber = row.GithubIssueNumber,
                 CommentKey = commentKey,
                 Kind = GitHubCommentOperationKind.Comment,
                 Status = GitHubCommentOperationStatus.Posted,
@@ -630,6 +663,11 @@ public sealed class GitHubIssueLinkStore : IScopedService
         {
             // A recovery worker found conflicting remote evidence. A stale
             // in-flight owner must not overwrite that fail-closed decision.
+            return;
+        }
+        else if (expectedGithubIssueNumber is { } operationExpected
+            && operation.GithubIssueNumber != operationExpected)
+        {
             return;
         }
         else if (operation.Status != GitHubCommentOperationStatus.Posted)
@@ -648,6 +686,26 @@ public sealed class GitHubIssueLinkStore : IScopedService
             row.UpdatedAt = now;
         }
         await db.SaveChangesAsync(ct);
+        await transaction.CommitAsync(ct);
+    }
+
+    /// <summary>
+    /// Clears an in-flight lease without releasing the operation. This is the
+    /// disabled-connection boundary: enable can resume the same reservation,
+    /// while a disabled connection cannot cause a retry or deletion.
+    /// </summary>
+    public async Task ReleaseCommentOperationLeaseAsync(
+        string id,
+        CancellationToken ct = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(id);
+        await using var db = await _dbFactory.CreateDbContextAsync(ct);
+        await db.GitHubIssueCommentOperations
+            .Where(operation => operation.Id == id
+                && operation.Status == GitHubCommentOperationStatus.Reserved)
+            .ExecuteUpdateAsync(setters => setters
+                .SetProperty(operation => operation.LeaseUntil, (DateTimeOffset?)null)
+                .SetProperty(operation => operation.UpdatedAt, _timeProvider.GetUtcNow()), ct);
     }
 
     public async Task ReleaseCommentReservationAsync(string id, string commentKey, CancellationToken ct = default)
@@ -684,6 +742,7 @@ public sealed class GitHubIssueLinkStore : IScopedService
     {
         Id = row.Id,
         LinkId = row.LinkId,
+        GithubIssueNumber = row.GithubIssueNumber,
         CommentKey = row.CommentKey,
         Kind = string.IsNullOrWhiteSpace(row.Kind) ? GitHubCommentOperationKind.Comment : row.Kind,
         Body = row.Body,
