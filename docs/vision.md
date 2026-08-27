@@ -116,9 +116,7 @@ Each linked product spec defines one direction in full:
   Issues deliver across repositories. See [Planning with Epics](epics.md) and
   [Composite Issues and Sub-issues](sub-issues.md).
 - **Mobile supervision**: View production-line state and receive anomaly
-  notifications on a phone. See
-  [Mobile PWA and Push](../design/decisions/mobile-pwa.md) and
-  [Hermes Notifications](hermes-notifications.md).
+  notifications on a phone. See [Hermes Notifications](hermes-notifications.md).
 
 ---
 

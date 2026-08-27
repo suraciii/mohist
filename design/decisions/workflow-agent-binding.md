@@ -1,6 +1,8 @@
 # Workflow Agent Binding DSL
 
-## Background
+Status: accepted
+
+## Problem
 
 The unified execution model ([`../agent-execution.md`](../agent-execution.md),
 [`../domain-analysis.md`](../domain-analysis.md)) makes AgentJob the sole
@@ -19,7 +21,7 @@ all.
 ### 1. Agent Work Is an Ordinary Action
 
 An executable Workflow task uses the existing `mohist/agent` Action. The task
-structure is unchanged — every task is `uses` plus `with`:
+structure is unchanged: every task is `uses` plus `with`.
 
 ```yaml
 - id: plan
@@ -35,7 +37,7 @@ Reasons:
 - Zero new syntax. The parser, validator, and examples already exist.
 - `uses` still names a concrete implementation: `mohist/agent` is the Agent
   launcher, not a dynamic dispatcher. Mechanical Actions (`mohist/push`,
-  `core/script`, …) keep `uses` unchanged.
+  `core/script`, and others) keep `uses` unchanged.
 - The layering matches Agent Connection: the Agent definition holds capability
   (Instructions, Skills, Runtime, Model); the Profile holds the invocation
   (name, input, session).
@@ -63,12 +65,28 @@ archived, or not-ready Agent fails launch explicitly.
 `with.options` is removed. Runtime, Model, Reasoning Effort, and Variant belong
 to the Agent definition, and the `agentRuntime` Profile projection is deleted
 with them.
+
 ### 3. Runtime-Specific Actions Leave the Profile
 
 `mohist/opencode` and `mohist/pi` are removed from the Profile `uses` surface.
 They become the Agent-to-Runner execution contract selected by the Agent
 definition. Recovery-handler Agent tasks use the same `mohist/agent` syntax as
 ordinary tasks; there is no special case.
+
+## Alternatives considered
+
+**Introduce a runtime-neutral generic Agent Action.** An earlier decision
+rejected this because `uses` must name a concrete implementation. The unified
+execution model removes the tension: Runtime selection lives in the Agent
+definition, so the binding Action has no Runtime dimension and `mohist/agent`
+is itself concrete.
+
+**Keep `with.options` for Runtime, Model, Reasoning Effort, and Variant.**
+Rejected: those belong to the Agent definition; keeping them in the Profile
+duplicates capability in the invocation layer.
+
+**Special-case recovery-handler Agent tasks.** Rejected: recovery handlers use
+the same `mohist/agent` syntax as ordinary tasks.
 
 ## Consequences
 

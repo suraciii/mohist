@@ -74,7 +74,9 @@ changing a document in `design/`.
 
 - [decisions/issue-owns-epic-membership.md](decisions/issue-owns-epic-membership.md) — Issue holds the current Epic membership; Project-scoped number identity and cross-aggregate recovery flow.
 - [decisions/epic-status-revival.md](decisions/epic-status-revival.md) — Epic `done` auto-revival and `closed` link rejection.
-- [decisions/mobile-pwa.md](decisions/mobile-pwa.md) — Mobile Web UI as an installable PWA: decision record for a proposal that is not implemented.
+- [decisions/composite-issues.md](decisions/composite-issues.md) — Composite Issues: explicit owner-chosen decomposition, independent of the Epic axis.
+- [decisions/slack-adapter-go.md](decisions/slack-adapter-go.md) — The Slack adapter is a static Go binary; the accepted deltas from the Node implementation.
 - [decisions/one-ledger-no-reconciliation.md](decisions/one-ledger-no-reconciliation.md) — Why AgentJob dispatch has no staged copy or reconciliation loop.
 - [decisions/squashed-baseline.md](decisions/squashed-baseline.md) — Point-in-time record of the accepted schema deltas at the current migration squash baseline.
 - [decisions/workflow-run-profile-naming.md](decisions/workflow-run-profile-naming.md) — Why Run Variables retain the historical WorkflowRunProfile persistence name.
+- [decisions/workflow-agent-binding.md](decisions/workflow-agent-binding.md) — Workflow tasks bind Agents through the ordinary `mohist/agent` Action.
