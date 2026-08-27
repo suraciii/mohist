@@ -146,7 +146,7 @@ public sealed class RunnerUpdateInterruptSpecs : Mohist.Server.SpecTests.Specs.W
         var deadline = Assert.IsType<DateTimeOffset>(settlement.DeadlineAt);
         Assert.True(marked.HasUnresolvedAgentResult());
 
-        _fixture.TimeProvider.Advance(deadline - _fixture.TimeProvider.GetUtcNow());
+        await AdvanceToAgentSettlementDeadlineAsync(deadline);
         await workflow.ReceiveReminder(WorkflowGrain.AgentResultSettlementReminderName, default);
 
         var blocked = await LoadRunAsync(_workflowId!);

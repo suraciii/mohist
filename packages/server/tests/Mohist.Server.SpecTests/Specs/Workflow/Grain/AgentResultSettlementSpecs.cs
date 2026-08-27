@@ -127,7 +127,7 @@ public sealed partial class AgentResultSettlementSpecs : WorkflowGrainSpecs
         var unknown = await LoadRunAsync(_workflowId!);
         var deadline = Assert.IsType<DateTimeOffset>(
             Assert.Single(unknown.CurrentStage().Tasks).AgentResultSettlement!.DeadlineAt);
-        _fixture.TimeProvider.Advance(deadline - _fixture.TimeProvider.GetUtcNow());
+        await AdvanceToAgentSettlementDeadlineAsync(deadline);
         await workflow.ReceiveReminder(WorkflowGrain.AgentResultSettlementReminderName, default);
 
         var blocked = await LoadRunAsync(_workflowId!);
@@ -222,7 +222,7 @@ public sealed partial class AgentResultSettlementSpecs : WorkflowGrainSpecs
         var unknown = await LoadRunAsync(_workflowId!);
         var deadline = Assert.IsType<DateTimeOffset>(
             Assert.Single(unknown.CurrentStage().Tasks).AgentResultSettlement!.DeadlineAt);
-        _fixture.TimeProvider.Advance(deadline - _fixture.TimeProvider.GetUtcNow());
+        await AdvanceToAgentSettlementDeadlineAsync(deadline);
         await workflow.ReceiveReminder(WorkflowGrain.AgentResultSettlementReminderName, default);
 
         var blocked = await LoadRunAsync(_workflowId!);
@@ -355,7 +355,8 @@ public sealed partial class AgentResultSettlementSpecs : WorkflowGrainSpecs
         Assert.Equal("session-binding-failed", observedTask.AgentResultSettlement.ReasonCode);
 
         var deadline = observedTask.AgentResultSettlement.DeadlineAt!.Value;
-        _fixture.TimeProvider.Advance(deadline - _fixture.TimeProvider.GetUtcNow());
+        await AdvanceToAgentSettlementDeadlineAsync(deadline);
+        Assert.Equal(RunnerStatus.Online, (await Grains.GetGrain<IRunnerGrain>(_runnerId!).GetRuntimeStateAsync()).Status);
         await workflow.ReceiveReminder(WorkflowGrain.AgentResultSettlementReminderName, default);
 
         var blocked = await LoadRunAsync(_workflowId!);

@@ -401,7 +401,7 @@ public partial class DispatchServiceReconciliationSpecs : Mohist.Server.SpecTest
         Assert.Equal(WorkReportVerdict.Accepted, await workflow.ObserveAgentRunnerDisconnectedAsync(runnerId));
         var unsettled = await LoadRunAsync(_workflowId!);
         var deadline = Assert.Single(unsettled.CurrentStage().Tasks).AgentResultSettlement!.DeadlineAt!.Value;
-        _fixture.TimeProvider.Advance(deadline - _fixture.TimeProvider.GetUtcNow());
+        await AdvanceToAgentSettlementDeadlineAsync(deadline);
         await workflow.ReceiveReminder(WorkflowGrain.AgentResultSettlementReminderName, default);
 
         var blocked = await LoadRunAsync(_workflowId!);
