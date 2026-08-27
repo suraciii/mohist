@@ -170,10 +170,6 @@ them.
   They do not carry Status lines and do not follow the section skeleton.
 - Many `design/` documents predate the no-history rule and carry
   `## Decision History` sections. The history belongs to decision records.
-- `design/slack-go-port.md` is a converged port plan, and
-  `eng/mohist/browser-acceptance.md` is a planned-work document that predates
-  the writing rules. Their durable facts belong to their owning documents;
-  the rest belongs to Issues.
 - `npm run docs:check` does not yet gate the Status line or the
   `## Alternatives considered` section of decision records.
 - `npm run docs:check` covers `docs/` and `design/` only. It must extend to
