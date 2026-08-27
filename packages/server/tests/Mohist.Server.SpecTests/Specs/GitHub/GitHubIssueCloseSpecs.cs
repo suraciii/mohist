@@ -56,8 +56,9 @@ public sealed class GitHubIssueCloseSpecs
         return (project.Id, created.GetProperty("id").GetString()!, created.GetProperty("webhookSecret").GetString()!);
     }
 
-    private async Task DeliverClosedAsync(string connectionId, string secret, string deliveryId, string stateReason = "not_planned")
+    private async Task DeliverClosedAsync(string connectionId, string secret, string deliveryId, string? stateReason = "not_planned")
     {
+        var stateReasonProperty = stateReason is null ? string.Empty : $"\"state_reason\": \"{stateReason}\",";
         var payload = $$"""
             {
               "action": "closed",
@@ -66,7 +67,7 @@ public sealed class GitHubIssueCloseSpecs
                 "number": {{GithubIssueNumber}},
                 "title": "Close me",
                 "state": "closed",
-                "state_reason": "{{stateReason}}",
+                {{stateReasonProperty}}
                 "labels": [ { "name": "mohist" } ]
               },
               "repository": {
@@ -312,6 +313,22 @@ public sealed class GitHubIssueCloseSpecs
         await PumpAsync();
 
         Assert.Equal(IssueStatus.Cancelled, (await LoadIssueAsync(projectId, issueNumber))!.Status);
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("unknown")]
+    [InlineData("completed ")]
+    public async Task ClosedEvent_OnNoWorkflowWithUnknownStateReason_IsNoOp(string? stateReason)
+    {
+        var (projectId, connectionId, secret) = await ConnectNewAsync();
+        var issueNumber = await CreateNoWorkflowIssueAsync(projectId);
+
+        await DeliverClosedAsync(connectionId, secret, $"close-delivery-no-workflow-invalid-{Guid.NewGuid():N}", stateReason);
+        await PumpAsync();
+
+        Assert.Equal(IssueStatus.Backlog, (await LoadIssueAsync(projectId, issueNumber))!.Status);
     }
 
     [Fact]

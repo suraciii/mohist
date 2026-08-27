@@ -4,10 +4,12 @@ namespace Mohist.Server.Infrastructure.Data.GitHub;
 /// GitHub link idempotency record: maps one GitHub issue
 /// <c>(ProjectId, RepositoryName, GithubIssueNumber)</c> to the Mohist issue
 /// number associated with it. The unique index on the triple is the persisted
-/// gate that makes mirror and command redelivery converge on one link.
-/// <c>PostedCommentsJson</c> holds the write-back bookkeeping (comment
-/// kinds already posted) that the minimal comment port needs to stay
-/// idempotent across redeliveries.
+/// gate that makes mirror and command redelivery converge on one link, even
+/// across duplicate events and dispatcher redelivery.
+/// <c>PostedCommentsJson</c> holds the write-back bookkeeping (delivered
+/// comment kinds plus durable <c>pending-comment:</c> reservations) that the
+/// minimal comment port needs to stay idempotent across redeliveries and
+/// unknown provider outcomes.
 /// </summary>
 public sealed class GitHubIssueLinkRow
 {

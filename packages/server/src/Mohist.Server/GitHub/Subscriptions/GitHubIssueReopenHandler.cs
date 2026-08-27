@@ -77,25 +77,18 @@ public sealed class GitHubIssueReopenHandler : ICloudEventHandler
             return;
 
         var coordinator = _grains.GetGrain<IIssueRepositoryCoordinatorGrain>(projectId);
-        try
+        var result = await coordinator.ReopenAsync(
+            new RepositoryCommandPayload.Reopen(
+                ProjectId: projectId,
+                IssueNumber: link.IssueNumber,
+                RepositoryName: link.RepositoryName),
+            commandId: $"github-reopen:{connectionId}:{payload.IssueNumber}:{evt.Id}",
+            expectedRevision: null);
+        if (!result.IsApplied)
         {
-            var result = await coordinator.ReopenAsync(
-                new RepositoryCommandPayload.Reopen(
-                    ProjectId: projectId,
-                    IssueNumber: link.IssueNumber,
-                    RepositoryName: link.RepositoryName),
-                commandId: $"github-reopen:{connectionId}:{payload.IssueNumber}:{evt.Id}",
-                expectedRevision: null);
-            if (!result.IsApplied)
-            {
-                _log.LogDebug(
-                    "GitHub reopen for Mohist issue #{IssueNumber} was rejected ({Code}): {Message}",
-                    link.IssueNumber, result.Code, result.Message);
-            }
-        }
-        catch (Exception ex) when (!ct.IsCancellationRequested)
-        {
-            _log.LogWarning(ex, "GitHub reopen failed for Mohist issue #{IssueNumber}", link.IssueNumber);
+            _log.LogDebug(
+                "GitHub reopen for Mohist issue #{IssueNumber} was rejected ({Code}): {Message}",
+                link.IssueNumber, result.Code, result.Message);
         }
     }
 
@@ -105,7 +98,12 @@ public sealed class GitHubIssueReopenHandler : ICloudEventHandler
         GitHubIssueLink link,
         CancellationToken ct)
     {
-        if (link.HasPostedComment(GitHubCommentKinds.ReopenedDoneFollowUp))
+        var links = sp.GetRequiredService<GitHubIssueLinkStore>();
+        var reservation = await links.ReserveCommentAsync(
+            link.Id,
+            GitHubCommentKinds.ReopenedDoneFollowUp,
+            ct);
+        if (!reservation.ShouldDeliver)
             return;
 
         await sp.GetRequiredService<IGitHubCommentPort>().PostCommentAsync(
@@ -113,7 +111,7 @@ public sealed class GitHubIssueReopenHandler : ICloudEventHandler
             link.GithubIssueNumber,
             GitHubWriteBackComments.ReopenedDoneFollowUp(link.IssueNumber),
             ct);
-        await sp.GetRequiredService<GitHubIssueLinkStore>().MarkCommentPostedAsync(
+        await links.MarkCommentPostedAsync(
             link.Id,
             GitHubCommentKinds.ReopenedDoneFollowUp,
             ct);

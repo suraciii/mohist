@@ -1,5 +1,6 @@
 using Mohist.Server.Workflow.Domain.Run;
 using Mohist.Server.Workflow.Grains;
+using Mohist.Workflow.Definition;
 using Xunit;
 using Mohist.Server.TestSupport;
 using Mohist.Server.SpecTests.Specs.Workflow;
@@ -110,6 +111,45 @@ public class WorkflowGrainConcurrencySpecs : WorkflowGrainSpecs
     }
 
     [Fact]
+    public async Task ConcurrentWithdrawalAndApproval_ConvergesAtOneSerializedBoundary()
+    {
+        var workflow = await StartWorkflowAsync(new WorkflowDefinition(
+        [
+            new StageDefinition(
+                "check",
+                [new TaskDefinition("check-work", "Check", "spec/task")],
+                [],
+                RequiresApproval: true),
+            new StageDefinition("integrate", [], [])
+        ]));
+        var dispatch = await PollWorkAnyAsync();
+        await ReportAsync(_runnerId!, dispatch.Work.WorkId, "pass");
+
+        var before = await LoadRunAsync(_workflowId!);
+        Assert.Equal(WorkflowRunStatus.AwaitingApproval, before.Status);
+        Assert.Equal("check", before.CurrentStageId);
+
+        var withdrawal = CaptureWithdrawalAsync(workflow);
+        var approval = CaptureApprovalAsync(workflow);
+        await Task.WhenAll(withdrawal, approval);
+
+        var settled = await LoadRunAsync(_workflowId!);
+        var withdrawalOutcome = await withdrawal;
+        var approvalError = await approval;
+        if (settled.Status == WorkflowRunStatus.Stopped)
+        {
+            Assert.Equal(WorkflowWithdrawalDisposition.Applied, withdrawalOutcome.Result?.Disposition);
+            Assert.NotNull(approvalError);
+        }
+        else
+        {
+            Assert.Equal("integrate", settled.CurrentStageId);
+            Assert.Equal(WorkflowWithdrawalDisposition.Echo, withdrawalOutcome.Result?.Disposition);
+            Assert.Null(approvalError);
+        }
+    }
+
+    [Fact]
     public async Task ConcurrentAssignWorker_FromPending_ExactlyOneWorkerAssigned_PersistedAgreesWithInMemory()
     {
         await StartWorkflowWithoutRunnerAsync(SingleStage(checks: []));
@@ -199,6 +239,31 @@ public class WorkflowGrainConcurrencySpecs : WorkflowGrainSpecs
         Assert.True(
             status is "Pending" or "Ready" or "Running" or "Paused" or "AwaitingApproval",
             $"Pause+Resume race from Pending produced unexpected status: {status}");
+    }
+
+    private static async Task<(WorkflowWithdrawalResult? Result, Exception? Error)> CaptureWithdrawalAsync(IWorkflowGrain workflow)
+    {
+        try
+        {
+            return (await workflow.WithdrawIfBeforeIntegrateAsync("github-close"), null);
+        }
+        catch (Exception ex)
+        {
+            return (null, ex);
+        }
+    }
+
+    private static async Task<Exception?> CaptureApprovalAsync(IWorkflowGrain workflow)
+    {
+        try
+        {
+            await workflow.ApproveAsync("github:alice");
+            return null;
+        }
+        catch (Exception ex)
+        {
+            return ex;
+        }
     }
 
     private static async Task<Exception?> CatchAsync(Task task)

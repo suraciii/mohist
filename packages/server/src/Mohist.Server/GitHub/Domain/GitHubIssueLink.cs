@@ -32,8 +32,9 @@ public sealed class GitHubIssueLink
 /// <summary>
 /// Comment kinds the comment port may post; the posted set lives on
 /// <see cref="GitHubIssueLink.PostedComments"/> so redelivery never posts a
-/// node comment twice. Write-back close markers live in the same set so
-/// close is as idempotent as comments.
+/// node comment twice. The store also keeps in-flight reservation markers
+/// beside delivered keys while a provider call is unresolved. Write-back
+/// close markers live in the same set so close is as idempotent as comments.
 /// </summary>
 public static class GitHubCommentKinds
 {
@@ -66,6 +67,20 @@ public static class GitHubCommentKinds
     public const string ClosedCompleted = "writeback-closed-completed";
     public const string ClosedNotPlanned = "writeback-closed-not-planned";
     public const string ReopenedDoneFollowUp = "writeback-reopened-done-follow-up";
+}
+
+public enum GitHubCommentDeliveryDisposition
+{
+    Reserved,
+    InProgress,
+    Delivered,
+}
+
+public sealed record GitHubCommentDeliveryReservation(
+    GitHubCommentDeliveryDisposition Disposition,
+    string CommentKey)
+{
+    public bool ShouldDeliver => Disposition == GitHubCommentDeliveryDisposition.Reserved;
 }
 
 /// <summary>

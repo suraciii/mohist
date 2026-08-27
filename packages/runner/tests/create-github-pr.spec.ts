@@ -8,6 +8,7 @@ import { withTestRunnerResources } from './support/test-resources.js'
 import { MemoryFileSystem } from './support/memory-filesystem.js'
 import { NETWORK_COMMAND_TIMEOUT_MS } from '../src/actions/git.js'
 import { createGitHubPrAction } from '../src/actions/github-pr.js'
+import { omitGitHubClosingReferences } from '../src/actions/github-pr-issue-fields.js'
 
 type CommandResult = { exitCode: number; stdout: string; stderr: string; status?: 'timeout'; timeoutMs?: number }
 type GitResponse = {
@@ -266,6 +267,48 @@ describe('mohist/create-github-pr action', () => {
     expect(body).toBeDefined()
     expect(body).not.toMatch(/\b(?:close[sd]?|fix(?:es|ed)?|resolve[sd]?)\s+(?:#|[A-Za-z0-9_.-]+\/)/i)
     expect(body).not.toContain('https://github.com/acme/widgets/issues/13')
+  })
+
+  it('sanitizes every GitHub closing keyword on both create and edit paths', async (resources) => {
+    const keywords = ['close', 'closes', 'closed', 'fix', 'fixes', 'fixed', 'resolve', 'resolves', 'resolved']
+    const sourceBody = keywords
+      .flatMap((keyword, index) => [
+        `${keyword} #${index + 1}`,
+        `${keyword} acme/widgets#${index + 100}`,
+        `${keyword} https://github.com/acme/widgets/issues/${index + 200}`,
+      ])
+      .join('\n')
+    let listCalls = 0
+    let createdBody: string | undefined
+    let editedBody: string | undefined
+    installGh(resources, (cmd, args) => {
+      if (cmd === 'gh' && args[0] === '--version') return ghOk('ok\n')
+      if (cmd === 'gh' && args.join(' ') === 'auth status') return ghOk('ok\n')
+      if (cmd === 'gh' && args[0] === 'pr' && args[1] === 'list') {
+        listCalls += 1
+        return listCalls === 1
+          ? ghOk('[]\n')
+          : ghOk(JSON.stringify([{ number: 42, url: 'https://github.com/acme/repo/pull/42', isDraft: true }]))
+      }
+      if (cmd === 'gh' && args[0] === 'pr' && args[1] === 'create') {
+        createdBody = args[args.indexOf('--body') + 1]
+        return ghOk('https://github.com/acme/repo/pull/42\n')
+      }
+      if (cmd === 'gh' && args[0] === 'pr' && args[1] === 'edit') {
+        editedBody = args[args.indexOf('--body') + 1]
+        return ghOk('ok\n')
+      }
+      return ghFail(`unexpected gh call: ${[cmd, ...args].join(' ')}`)
+    })
+
+    const input = context({ title: 'Issue title', body: sourceBody })
+    const created = await callAction(createGitHubPrAction, input)
+    const edited = await callAction(createGitHubPrAction, input)
+
+    expect(created.error).toBeUndefined()
+    expect(edited.error).toBeUndefined()
+    expect(createdBody).toBe(omitGitHubClosingReferences(sourceBody))
+    expect(editedBody).toBe(omitGitHubClosingReferences(sourceBody))
   })
 
   it('uses the explicitly declared repository despite different Variables', async (resources) => {

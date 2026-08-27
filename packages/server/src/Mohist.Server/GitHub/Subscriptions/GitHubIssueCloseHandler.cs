@@ -78,36 +78,43 @@ public sealed class GitHubIssueCloseHandler : ICloudEventHandler
         {
             if (issue.NoWorkflow)
             {
-                if (string.Equals(payload.StateReason, "completed", StringComparison.OrdinalIgnoreCase))
-                    await grain.MarkDoneAsync();
-                else
-                    await grain.CancelAsync();
+                switch (payload.StateReason)
+                {
+                    case "completed":
+                        await grain.MarkDoneAsync();
+                        break;
+                    case "not_planned":
+                        await grain.CancelAsync();
+                        break;
+                    default:
+                        _log.LogWarning(
+                            "GitHub close ignored for no-workflow issue #{IssueNumber}: unsupported state_reason {StateReason}",
+                            link.IssueNumber,
+                            payload.StateReason ?? "<missing>");
+                        break;
+                }
                 return;
             }
 
-            var workflowStatus = await grain.GetWorkflowStatusAsync();
-            if (IsAtOrPastIntegrate(workflowStatus))
-                return;
-
             if (issue.WorkflowRunId is { } workflowRunId)
             {
+                WorkflowWithdrawalResult withdrawal;
                 try
                 {
-                    await _grains.GetGrain<IWorkflowGrain>(workflowRunId).StopAsync("github-close");
+                    withdrawal = await _grains.GetGrain<IWorkflowGrain>(workflowRunId)
+                        .WithdrawIfBeforeIntegrateAsync("github-close");
                 }
                 catch (InvalidOperationException ex)
                 {
                     _log.LogDebug(
-                        "GitHub close workflow stop no-op for issue #{IssueNumber}: {Message}",
+                        "GitHub close workflow withdrawal no-op for issue #{IssueNumber}: {Message}",
                         link.IssueNumber, ex.Message);
+                    return;
                 }
-            }
 
-            // Re-read after stopping. The run may have crossed into Integrate
-            // while StopAsync was in flight; a stale pre-stop snapshot must
-            // not turn a delivery echo into cancellation.
-            if (IsAtOrPastIntegrate(await grain.GetWorkflowStatusAsync()))
-                return;
+                if (!withdrawal.IsApplied)
+                    return;
+            }
 
             await grain.CancelAsync();
         }
@@ -117,20 +124,5 @@ public sealed class GitHubIssueCloseHandler : ICloudEventHandler
                 "GitHub close no-op: issue #{IssueNumber} cannot transition ({Message})",
                 link.IssueNumber, ex.Message);
         }
-    }
-
-    private static bool IsAtOrPastIntegrate(IssueWorkflowStatus? status)
-    {
-        var workflow = status?.Workflow;
-        if (workflow is null)
-            return false;
-        if (string.Equals(workflow.Status, "completed", StringComparison.OrdinalIgnoreCase))
-            return true;
-
-        var integrate = workflow.Stages.FirstOrDefault(stage =>
-            string.Equals(stage.Stage, "integrate", StringComparison.OrdinalIgnoreCase));
-        var current = workflow.Stages.FirstOrDefault(stage =>
-            string.Equals(stage.Stage, workflow.CurrentStage, StringComparison.OrdinalIgnoreCase));
-        return integrate is not null && current is not null && current.Order >= integrate.Order;
     }
 }
