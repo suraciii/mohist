@@ -50,7 +50,6 @@ public static partial class RunnerRoutes
             AgentDefinition: work.AgentDefinition,
             AgentSessionStartup: work.AgentSessionStartup,
             TaskRunId: work.TaskRunId,
-            RecoveryGeneration: work.RecoveryGeneration,
             AgentRecovery: work.AgentRecovery,
             ManagerExecutionGrant: managerCredentials?.IssueFor(work),
             OriginMarker: work.OriginMarker);

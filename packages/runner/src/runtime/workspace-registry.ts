@@ -14,7 +14,7 @@ import { currentRunnerFileSystem } from '../system/filesystem.js'
 //
 // Persistence layout (per D1 of the workspace-cleanup design):
 //
-//   <runnerRoot>/.mohist/runner-state/workspaces.json
+//   <runnerRoot>/.mohist/workspaces.json
 //
 // Keyed by `workflowRunId` (the stable run identity used by both the
 // marker and the workflow grain). Mutations are write-through: every
@@ -62,7 +62,7 @@ export interface RegisterInput {
 
 export interface WorkspaceRegistryOptions {
   // Override the registry file path (used by tests). Defaults to
-  // `<runnerRoot>/.mohist/runner-state/workspaces.json`.
+  // `<runnerRoot>/.mohist/workspaces.json`.
   filePath?: string
   // The runner instance owning this registry. Persisted bindings from a
   // different instance are stale and must not be reused.
@@ -71,7 +71,7 @@ export interface WorkspaceRegistryOptions {
   now?: () => Date
 }
 
-export const DEFAULT_WORKSPACE_REGISTRY_FILE = '.mohist/runner-state/workspaces.json'
+export const DEFAULT_WORKSPACE_REGISTRY_FILE = '.mohist/workspaces.json'
 
 export class WorkspaceRegistry {
   private readonly runnerRoot: string
@@ -432,7 +432,7 @@ function parseWorkspaceBinding(value: unknown): WorkspaceBindingIdentity | null 
 //
 // Persistence layout:
 //
-//   <runnerRoot>/.mohist/runner-state/named-workspaces.json
+//   <runnerRoot>/.mohist/named-workspaces.json
 //
 // Keyed by `ws:<projectId>:<workspaceName>` (the stable entity key used
 // by the cleanup guards' disk-identity comparison).
@@ -462,7 +462,7 @@ export interface NamedWorkspaceRegistryOptions {
   now?: () => Date
 }
 
-export const DEFAULT_NAMED_WORKSPACE_REGISTRY_FILE = '.mohist/runner-state/named-workspaces.json'
+export const DEFAULT_NAMED_WORKSPACE_REGISTRY_FILE = '.mohist/named-workspaces.json'
 
 export function namedWorkspaceRegistryKey(projectId: string, workspaceName: string): string {
   return `ws:${projectId}:${workspaceName}`

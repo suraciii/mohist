@@ -41,8 +41,6 @@ public sealed partial class AgentSessionGrain
             usage.CachedWriteTokens,
             s.BindingEpoch,
             s.ActivitySummary.LastTerminalStatus ?? eventSummary.LastTerminalStatus,
-            AgentWorkInterruptionProjection.Latest(s.Status.InterruptionHistory),
-            s.Status.InterruptionHistory,
             eventSummary.AppliedReasoningEffort);
     }
 

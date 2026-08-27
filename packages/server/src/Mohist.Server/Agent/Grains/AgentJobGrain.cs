@@ -103,8 +103,6 @@ public sealed partial class AgentJobGrain : Grain, IAgentJobGrain
     {
         await HydrateAsync();
 
-        if (State.PendingSessionInterruptionDeliveries is { Count: > 0 })
-            await DeliverPendingSessionInterruptionAsync();
 
         if (IsTerminal && State.TerminalResult is not null)
             _terminalCompletion.TrySetResult(State.TerminalResult);
@@ -170,29 +168,6 @@ public sealed partial class AgentJobGrain : Grain, IAgentJobGrain
             return;
         }
 
-        if (State.Status == AgentJobStatus.RecoverablyInterrupted)
-        {
-            if (EnsureUpdateInterruptionDeadline())
-                await PersistAsync();
-            if (UpdateInterruptionDeadlineExceeded())
-            {
-                await EnterRecoveryTerminalStateAsync("agent-result-unconfirmed");
-                return;
-            }
-
-            await DeliverPendingSessionInterruptionAsync();
-            if (State.PendingUpdateInterruptionEvent is { } pending)
-                await EmitUpdateInterruptionEventAsync(pending);
-            // Keep the reminder armed until the receipt deadline even after
-            // the interruption event has been durably delivered.
-            if (State.PendingUpdateInterruptionEvent is null
-                && State.UpdateInterruptionDeadlineAt is null
-                && State.PendingSessionInterruptionDeliveries is not { Count: > 0 })
-                await UnregisterSelfAsync(RecoveryReminderName);
-
-            return;
-        }
-
         if (State.Status == AgentJobStatus.Pending)
             await EvaluatePendingAsync();
     }
@@ -212,8 +187,7 @@ public sealed partial class AgentJobGrain : Grain, IAgentJobGrain
         $"AgentJob '{Key}' state accessed before hydration");
     private bool IsTerminal => State.Status is AgentJobStatus.Completed
         or AgentJobStatus.Failed
-        or AgentJobStatus.Cancelled
-        or AgentJobStatus.Interrupted;
+        or AgentJobStatus.Cancelled;
 
     private bool IsDispatchable => State.Status is AgentJobStatus.Pending;
 
@@ -265,165 +239,9 @@ public sealed partial class AgentJobGrain : Grain, IAgentJobGrain
             InitialInputId: State.Input?.InitialInputId,
             InitialTurnId: State.Input?.InitialTurnId,
             RecoveryDeadlineAt: State.RecoveryDeadlineAt,
-            IsRecovering: IsRecovering,
-            RecoveryGeneration: State.RecoveryGeneration,
-            OriginalWorkId: State.RecoveryAttempts.FirstOrDefault()?.WorkId,
-            UpdateInterruptionDeadlineAt: State.UpdateInterruptionDeadlineAt,
-            Interruption: State.Interruption,
-            InterruptionHistory: State.InterruptionHistory));
+            IsRecovering: IsRecovering));
 
-    private async Task AllocateRecoveryAttemptAsync(string interruptedWorkId)
-    {
-        State.RecoveryAttempts ??= [];
-        var input = State.Input
-            ?? throw new InvalidOperationException($"AgentJob '{Key}' has no input for recovery.");
-        var runnerId = State.RunnerId;
-        var runtimeSessionId = State.RuntimeSessionId;
-        var generation = State.RecoveryGeneration + 1;
-        var workId = RecoveryWorkId(interruptedWorkId, generation);
-        var inputId = $"recovery-input:{Key}:{generation}";
-        var turnId = $"recovery-turn:{workId}";
-        var now = _timeProvider.GetUtcNow();
-
-        // A normal Session-backed launch gets a fresh durable input/turn
-        // envelope. The prompt and execution configuration remain the
-        // original immutable AgentJob snapshot; only coordinator identities
-        // advance with the recovery generation.
-        if (!string.IsNullOrWhiteSpace(input.AgentSessionId)
-            && (!string.IsNullOrWhiteSpace(input.Prompt)
-                || input.Attachments is { Count: > 0 }))
-        {
-            var session = _grains.GetGrain<IAgentSessionGrain>(input.AgentSessionId);
-            if (!string.IsNullOrWhiteSpace(input.InitialTurnId))
-            {
-                // The Session coordinator will not queue a second turn
-                // while the old job turn is active. Cancelled here describes
-                // the physical turn's cooperative stop; it is not a failed
-                // or completed AgentJob verdict. The receipt and owner ledger
-                // remain the interruption authority.
-                await session.MarkTurnTerminalAsync(
-                    input.InitialTurnId,
-                    AgentTurnStatus.Cancelled,
-                    new AgentTurnResult(
-                        Message: "update-interrupted",
-                        FailureReason: "update-interrupted",
-                        FailureCategory: "update-interruption"));
-            }
-            await session.RecordFollowupTurnAsync(new RecordFollowupTurnCommand(
-                inputId,
-                turnId,
-                input.Prompt,
-                "agent-job-recovery",
-                input.Attachments));
-        }
-
-        RecordInterruptedAttempt(interruptedWorkId, now);
-        State.RecoveryAttempts.Add(new AgentJobRecoveryAttempt(
-            generation,
-            workId,
-            null,
-            input.AgentSessionId,
-            inputId,
-            turnId,
-            input.Runtime,
-            null,
-            AgentJobStatus.Pending,
-            now));
-
-        State.RecoveryGeneration = generation;
-        State.Input = input with { InitialInputId = inputId, InitialTurnId = turnId };
-        State.Status = AgentJobStatus.Pending;
-        State.RunnerId = null;
-        State.WorkId = null;
-        State.RunnerAccepted = false;
-        State.RuntimeSessionId = null;
-        State.RunningSince = null;
-        State.ReadySince = null;
-        State.WaitingReason = null;
-        State.InterruptedWorkId = interruptedWorkId;
-        State.TerminalResult = null;
-        State.TerminalAt = null;
-        DisposeJobTimeoutTimer();
-        await EnsureRecoveryReminderAsync();
-    }
-
-    private async Task ApplyRecoveryTerminalResultAsync(WorkResult result)
-    {
-        var isSuccess = string.Equals(result.Status, "completed", StringComparison.OrdinalIgnoreCase)
-            || string.Equals(result.Status, "pass", StringComparison.OrdinalIgnoreCase)
-            || string.Equals(result.Status, "ok", StringComparison.OrdinalIgnoreCase)
-            || string.Equals(result.Status, "success", StringComparison.OrdinalIgnoreCase);
-        var failureReason = isSuccess
-            ? null
-            : (string.IsNullOrWhiteSpace(result.Message) ? result.Status : result.Message);
-        var failureCategory = isSuccess
-            ? null
-            : FailureCategoryFromOutput(result.Output)
-                ?? FailureCategoryFromErrorCode(result.ErrorCode)
-                ?? FailureCategoryFromStatus(result.Status);
-
-        await EnterTerminalStateAsync(
-            isSuccess ? AgentJobStatus.Completed : AgentJobStatus.Failed,
-            isSuccess ? 0 : (result.ExitCode ?? 1),
-            failureReason,
-            failureCategory,
-            failureReason,
-            result.Message,
-            result.Output?.ValueKind == JsonValueKind.Object || result.Output?.ValueKind == JsonValueKind.Array
-                ? result.Output.Value.GetRawText()
-                : null,
-            result.ArtifactUploadIds,
-            result.ExitCode);
-        if (State.Interruption is { } interruption)
-        {
-            var recovered = interruption with
-            {
-                State = AgentWorkInterruptionStates.Recovered,
-                RecordedAt = _timeProvider.GetUtcNow(),
-            };
-            State.InterruptionHistory = AgentWorkInterruptionProjection.Apply(
-                State.InterruptionHistory,
-                recovered).ToList();
-            State.Interruption = recovered;
-            await PersistAsync();
-            await ApplySessionInterruptionAsync(State.Input?.AgentSessionId, recovered);
-        }
-    }
-
-    private async Task EnterRecoveryTerminalStateAsync(string reason)
-    {
-        if (IsTerminal)
-            return;
-
-        RecordInterruptedAttempt(State.InterruptedWorkId, _timeProvider.GetUtcNow());
-        var terminalResult = AgentJobRecoveryPolicy.EnterTerminal(State, reason, _timeProvider.GetUtcNow());
-        DisposeJobTimeoutTimer();
-        await EnsureRecoveryReminderAsync();
-        await PersistAsync();
-        await TryReleaseConcurrencyPermitAsync();
-        _terminalCompletion.TrySetResult(terminalResult);
-    }
-
-    private async Task SettleUpdateOperationWorkAsync(RuntimeRecoveryReceipt receipt)
-    {
-        if (receipt.Payload?.UpdateOperationId is not { } operationId)
-            return;
-
-        await GrainFactory
-            .GetGrain<IRunnerUpdateOperationGrain>(receipt.RunnerId)
-            .MarkWorkAsync(
-                operationId,
-                WorkDispatchOwnerKinds.AgentJob,
-                Key,
-                receipt.WorkId,
-                taskRunId: null,
-                RunnerUpdateWorkStatus.Settled);
-    }
-
-    private static string RecoveryWorkId(string interruptedWorkId, int generation) =>
-        $"{interruptedWorkId}.recovery.{generation}";
-
-    public Task<AgentJobTerminalResult> GetTerminalResultAsync()
+     public Task<AgentJobTerminalResult> GetTerminalResultAsync()
     {
         if (State.TerminalResult is not null)
             return Task.FromResult(State.TerminalResult);
@@ -1278,38 +1096,6 @@ public sealed partial class AgentJobGrain : Grain, IAgentJobGrain
             new AgentTurnResult(message, output, failureReason, failureCategory, exitCode));
     }
 
-    private async Task EmitUpdateInterruptionEventAsync(PendingUpdateInterruptionEvent obligation)
-    {
-        try
-        {
-            await _eventStore.AppendAsync(BuildUpdateInterruptionEnvelope(obligation), CancellationToken.None);
-            _dispatchSignal.Wake();
-        }
-        catch (Exception ex)
-        {
-            _log.LogWarning(ex,
-                "AgentJob {Id} could not append update interruption event (eventId={EventId}); reminder will retry",
-                Key,
-                obligation.EventId);
-            await EnsureRecoveryReminderAsync();
-            return;
-        }
-
-        State.PendingUpdateInterruptionEvent = null;
-        await PersistAsync();
-        _log.LogInformation(
-            "AgentJob {Id} emitted {Type} event (eventId={EventId}, operationId={OperationId})",
-            Key,
-            EventCatalog.ReverseDns.AgentJobUpdateInterrupted,
-            obligation.EventId,
-            obligation.UpdateOperationId);
-    }
-
-    internal CloudEvent BuildUpdateInterruptionEnvelope(PendingUpdateInterruptionEvent obligation)
-    {
-        var extensions = AgentJobLineage.BuildExtensions(State.Input, State.RoutedPlan);
-        return AgentJobLineage.BuildUpdateInterruptionEnvelope(Key, obligation, extensions);
-    }
     private async Task EmitFailureEventAsync(PendingFailureEvent obligation)
     {
         var envelope = BuildFailureEnvelope(obligation);
@@ -1588,34 +1374,10 @@ public sealed partial class AgentJobGrain : Grain, IAgentJobGrain
     }
 
     /// <summary>
-    /// The dispatch snapshot is owned by the row. Subsequent saves
-    /// (terminal transition, session close, etc.) must not clobber it
-    /// with null. A recovery generation is different: while its fresh
-    /// identity is still waiting for a Runner, retaining the old snapshot
-    /// would leave a misleading copy of the fenced dispatch in the owner
-    /// ledger. The replacement admission writes a new snapshot atomically.
+    /// The dispatch snapshot is owned by the row. Subsequent saves must not
+    /// clobber it with null.
     /// </summary>
-    private string? ResolveDispatchJsonForPersist() =>
-        State.Status == AgentJobStatus.Pending
-            && State.RecoveryGeneration > 0
-            && State.RunnerId is null
-            ? null
-            : _ledger?.DispatchJson;
-
-    private void UpdateRecoveryAttempt(string workId, string? runnerId, AgentJobStatus status)
-    {
-        var index = State.RecoveryAttempts.FindIndex(attempt =>
-            attempt.RecoveryGeneration == State.RecoveryGeneration
-            && string.Equals(attempt.WorkId, workId, StringComparison.Ordinal));
-        if (index < 0)
-            return;
-
-        State.RecoveryAttempts[index] = State.RecoveryAttempts[index] with
-        {
-            RunnerId = runnerId,
-            Status = status,
-        };
-    }
+    private string? ResolveDispatchJsonForPersist() => _ledger?.DispatchJson;
 
     private static string StableWorkId(string key)
     {

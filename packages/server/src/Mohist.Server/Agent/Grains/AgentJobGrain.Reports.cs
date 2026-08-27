@@ -9,7 +9,7 @@ public sealed partial class AgentJobGrain
     {
         await HydrateAsync();
 
-        var fingerprint = RuntimeRecoveryReceiptFingerprint.For(result);
+        var fingerprint = WorkResultFingerprint.For(result);
         if (await FailRecoveringJobIfDueAsync())
             return new AgentJobReportResult(WorkReportVerdict.Refused, "refused");
 

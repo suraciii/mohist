@@ -127,10 +127,7 @@ public sealed class WorkflowGrainArtifactBindingSpecs
     {
         var a = await ArrangeWithUploadAsync("wr-art-concurrent-replay");
         var taskRunId = a.TaskRunId;
-        var service = WorkflowGrainContractSupport.CreateReportService(
-            a.Services,
-            a.Grain,
-            a.Operations is null ? null : runnerId => a.Operations.For(runnerId));
+        var service = WorkflowGrainContractSupport.CreateReportService(a.Services, a.Grain);
         var result = new WorkResult("completed", ArtifactUploadIds: [a.UploadId!]);
 
         var reports = await Task.WhenAll(
@@ -155,10 +152,7 @@ public sealed class WorkflowGrainArtifactBindingSpecs
         var a = await ArrangeWithUploadAsync("wr-art-late-report");
         await a.Arrangement.ReportTaskResultAsync(a.Work, output: null, addTasks: null);
         var uploadId = await SeedPendingUploadAsync(a.RunId, a.Work.Id!, "task-1.1", "late.txt");
-        var service = WorkflowGrainContractSupport.CreateReportService(
-            a.Services,
-            a.Grain,
-            a.Operations is null ? null : runnerId => a.Operations.For(runnerId));
+        var service = WorkflowGrainContractSupport.CreateReportService(a.Services, a.Grain);
 
         var report = await service.ReportAsync(
             a.WorkerId,
@@ -437,7 +431,6 @@ public sealed class WorkflowGrainArtifactBindingSpecs
         string? UploadId,
         IServiceProvider Services)
     {
-        public RunnerUpdateOperationGrainRegistry? Operations => Arrangement.Operations;
         public WorkflowGrain Grain => Arrangement.Grain;
         public IEventStore Events => Arrangement.Events;
         public WorkflowQuerier Querier => Arrangement.Querier;

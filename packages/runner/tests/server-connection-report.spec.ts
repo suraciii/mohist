@@ -290,49 +290,6 @@ describe('ServerConnection.poll recovery state', () => {
   })
 })
 
-describe('ServerConnection update interruption handoff', () => {
-  it('readsTheWrappedPendingOperationAndAffectedWorkInventory', async () => {
-    fetchMock.mockResolvedValueOnce(
-      mockResponse({
-        status: 200,
-        body: JSON.stringify({
-          data: {
-            operation: {
-              operationId: 'runner-update:1',
-              runnerId: 'runner-1',
-              createdAt: '2026-08-15T00:00:00Z',
-              affectedWorks: [
-                {
-                  ownerKind: 'workflow',
-                  ownerId: 'wf-1',
-                  workId: 'work-1',
-                  taskRunId: 'task-1',
-                  workType: 'task',
-                },
-              ],
-            },
-          },
-        }),
-      }),
-    )
-    const connection = new ServerConnection(options())
-    await expect(connection.fetchPendingUpdateOperation(new AbortController().signal)).resolves.toEqual({
-      operationId: 'runner-update:1',
-      runnerId: 'runner-1',
-      createdAt: '2026-08-15T00:00:00Z',
-      affectedWorks: [
-        {
-          ownerKind: 'workflow',
-          ownerId: 'wf-1',
-          workId: 'work-1',
-          taskRunId: 'task-1',
-          workType: 'task',
-        },
-      ],
-    })
-  })
-})
-
 describe('ServerConnection.patchRunVars', () => {
   it('patchesWorkflowRunProfileVariablesWithVariableBundleShape', async () => {
     fetchMock.mockResolvedValueOnce(mockResponse({ status: 200, body: '{}' }))

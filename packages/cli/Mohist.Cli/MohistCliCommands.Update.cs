@@ -172,8 +172,6 @@ internal partial class SourceCodeUpdater
         Func<string?>? getUserHome = null,
         TimeSpan? runnerIdentityTimeout = null,
         TimeSpan? runnerIdentityPollInterval = null,
-        TimeSpan? runnerRecoveryTimeout = null,
-        TimeSpan? runnerRecoveryPollInterval = null,
         Func<string?>? getLocalHostname = null,
         string? unitDir = null,
         TimeProvider? timeProvider = null,
@@ -217,9 +215,7 @@ internal partial class SourceCodeUpdater
             getLocalHostname: getLocalHostname ?? (() => Environment.MachineName),
             runnerIdentityTimeout: runnerIdentityTimeout,
             runnerIdentityPollInterval: runnerIdentityPollInterval,
-            timeProvider: timeProvider,
-            runnerRecoveryTimeout: runnerRecoveryTimeout,
-            runnerRecoveryPollInterval: runnerRecoveryPollInterval);
+            timeProvider: timeProvider);
         var outcomeReporter = new UpdateOutcomeReporter(httpClient, output);
         return new SourceCodeUpdater(
             output,

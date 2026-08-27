@@ -71,10 +71,20 @@ public static class DispatchTestExtensions
         AgentExecutionBinding? binding = null;
         if (taskRunId is not null)
         {
-            binding = await workflow.GetBoundAgentExecutionAsync(taskRunId, workId, runnerId);
-            if (binding is null)
-            {
-                var candidate = new AgentExecutionBinding(
+            var carriesBinding = result.AgentSessionId is not null
+                || result.AgentTurnId is not null
+                || result.Runtime is not null
+                || result.RuntimeSessionId is not null;
+            var candidate = carriesBinding
+                ? new AgentExecutionBinding(
+                    taskRunId,
+                    workId,
+                    runnerId,
+                    result.AgentSessionId!,
+                    result.AgentTurnId!,
+                    result.Runtime!,
+                    result.RuntimeSessionId!)
+                : new AgentExecutionBinding(
                     taskRunId,
                     workId,
                     runnerId,
@@ -82,9 +92,8 @@ public static class DispatchTestExtensions
                     $"test-turn:{workId}",
                     "opencode",
                     $"test-runtime-session:{workId}");
-                if (await workflow.BindAgentExecutionAsync(candidate) == WorkReportVerdict.Accepted)
-                    binding = candidate;
-            }
+            if (await workflow.BindAgentExecutionAsync(candidate) == WorkReportVerdict.Accepted)
+                binding = candidate;
         }
 
         var report = ResolveScoped<WorkflowReportService>(serviceProvider);

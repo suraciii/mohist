@@ -45,6 +45,5 @@ public static class AgentJobConvergence
         status is AgentJobStatus.Completed
             or AgentJobStatus.Failed
             or AgentJobStatus.Cancelled
-            or AgentJobStatus.Unknown
-            or AgentJobStatus.Interrupted;
+            or AgentJobStatus.Unknown;
 }
