@@ -32,6 +32,34 @@ function input(id: string, sessionId: string): RuntimeEventRecord {
   }
 }
 
+function workflowInput(id: string): RuntimeEventRecord {
+  return {
+    id,
+    producerFamily: 'workflow-session',
+    target: {
+      kind: 'workflow',
+      projectId: 'project-1',
+      workflowRunId: 'workflow-1',
+      sessionName: 'plan',
+    },
+    runtimeSessionId: 'runtime-1',
+    runtime: 'opencode',
+    sessionTurnId: null,
+    work: {
+      workId: 'work-1',
+      taskRunId: 'task-1',
+      runnerId: 'runner-1',
+      agentSessionId: 'agent-session-1',
+      workType: 'task',
+      stage: 'build',
+      inputDeliveryId: id,
+      agentTurnId: null,
+    },
+    event: { type: 'session.input', payload: { text: 'continue' } },
+    acknowledgementPolicy: 'matching-receipt',
+  }
+}
+
 async function flush(): Promise<void> {
   for (let index = 0; index < 8; index += 1) await Promise.resolve()
 }
@@ -248,6 +276,76 @@ describe('in-memory runtime event queue', () => {
 
     mode = 'accepted'
     await vi.advanceTimersByTimeAsync(100)
+    expect(queue.snapshot()).toEqual([])
+    await queue.stop()
+  })
+
+  const workflowInputIdentityCases: readonly (readonly [string, AgentSessionRuntimeEventReceipt])[] = [
+    [
+      'wrong inputDeliveryId',
+      {
+        type: 'session.input',
+        inputDeliveryId: 'input-other',
+        agentSessionId: 'agent-session-1',
+        agentTurnId: 'turn-valid',
+      },
+    ],
+    [
+      'wrong agentSessionId',
+      {
+        type: 'session.input',
+        inputDeliveryId: 'workflow-input',
+        agentSessionId: 'agent-session-other',
+        agentTurnId: 'turn-valid',
+      },
+    ],
+    [
+      'missing agentTurnId',
+      {
+        type: 'session.input',
+        inputDeliveryId: 'workflow-input',
+        agentSessionId: 'agent-session-1',
+      },
+    ],
+    [
+      'empty agentTurnId',
+      {
+        type: 'session.input',
+        inputDeliveryId: 'workflow-input',
+        agentSessionId: 'agent-session-1',
+        agentTurnId: '',
+      },
+    ],
+  ]
+
+  it.each(workflowInputIdentityCases)('keeps a %s receipt retryable until a valid receipt', async (_case, mismatch) => {
+    vi.useFakeTimers()
+    const validReceipt: AgentSessionRuntimeEventReceipt = {
+      type: 'session.input',
+      inputDeliveryId: 'workflow-input',
+      agentSessionId: 'agent-session-1',
+      agentTurnId: 'turn-valid',
+    }
+    let attempts = 0
+    const queue = createAgentSessionRuntimeEventQueue({
+      retryDelayMs: 100,
+      deliver: {
+        async send() {
+          attempts += 1
+          return [attempts === 1 ? mismatch : validReceipt]
+        },
+      },
+    })
+    const record = workflowInput('workflow-input')
+
+    await queue.enqueueBeforeExecution(record)
+    const receipt = queue.awaitInputReceipt!('workflow-input')
+    await queue.kick()
+
+    expect(queue.snapshot()).toEqual([record])
+    await vi.advanceTimersByTimeAsync(100)
+    await expect(receipt).resolves.toEqual(validReceipt)
+    expect(attempts).toBe(2)
     expect(queue.snapshot()).toEqual([])
     await queue.stop()
   })

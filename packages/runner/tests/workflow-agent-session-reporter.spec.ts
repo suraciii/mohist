@@ -3,6 +3,7 @@ import { WorkflowAgentSessionReporter } from '../src/actions/workflow-agent-sess
 import {
   AlreadyConsumedRuntimeEventError,
   type AgentSessionRuntimeEventQueue,
+  type RuntimeEventInputReceiptWaitOptions,
   type RuntimeEventRecord,
 } from '../src/server/runtime-event-queue.js'
 
@@ -16,8 +17,11 @@ describe('WorkflowAgentSessionReporter - queue-driven failure semantics', () => 
     failEnqueueProducedFact = false,
     receiptError: Error | null = null,
     cleanupAttempt?: number,
+    inputReceiptBudgetMs?: number,
+    signal?: AbortSignal,
   ) {
     const records: RuntimeEventRecord[] = []
+    const receiptWaits: Array<{ recordId: string; options?: RuntimeEventInputReceiptWaitOptions }> = []
     const beforeExecutionCalls: RuntimeEventRecord[] = []
     const producedFactCalls: RuntimeEventRecord[] = []
     const producedFactSingleCalls: RuntimeEventRecord[] = []
@@ -31,12 +35,14 @@ describe('WorkflowAgentSessionReporter - queue-driven failure semantics', () => 
         if (failEnqueueBeforeExecution) throw new Error('input snapshot failed')
         records.push(record as RuntimeEventRecord)
       },
-      async awaitInputReceipt(recordId) {
+      async awaitInputReceipt(recordId, options) {
+        receiptWaits.push({ recordId, options })
         if (receiptError) throw receiptError
+        const cleanupStart = recordId.startsWith('workflow-cleanup:') && !recordId.endsWith(':runtime-input')
         return {
-          type: 'session.input',
-          inputDeliveryId: recordId,
-          agentTurnId: `turn-${recordId}`,
+          type: cleanupStart ? 'session.cleanup' : 'session.input',
+          inputDeliveryId: cleanupStart ? `workflow-cleanup-input:${recordId}` : recordId,
+          agentTurnId: cleanupStart ? `workflow-cleanup-turn:${recordId}` : `turn-${recordId}`,
           agentSessionId: 'agent-session-1',
         }
       },
@@ -80,6 +86,8 @@ describe('WorkflowAgentSessionReporter - queue-driven failure semantics', () => 
         let counter = 0
         return () => `id_${++counter}`
       })(),
+      inputReceiptBudgetMs,
+      signal,
       cleanupAttempt,
     })
     return {
@@ -90,6 +98,7 @@ describe('WorkflowAgentSessionReporter - queue-driven failure semantics', () => 
       producedFactCalls,
       producedFactSingleCalls,
       producedFactBatchCalls,
+      receiptWaits,
     }
   }
 
@@ -178,6 +187,17 @@ describe('WorkflowAgentSessionReporter - queue-driven failure semantics', () => 
     } finally {
       errorSpy.mockRestore()
     }
+  })
+
+  it('does not pass the ordinary receipt budget or signal to cleanup waits', async () => {
+    const signal = new AbortController().signal
+    const { reporter, receiptWaits, records } = buildReporter(false, false, null, 1, 1234, signal)
+
+    await reporter.awaitInput('clean', 'ses_1')
+
+    expect(receiptWaits).toHaveLength(2)
+    expect(receiptWaits.map((wait) => wait.options)).toEqual([undefined, undefined])
+    expect(records.map((record) => record.event.type)).toEqual(['session.cleanup', 'session.input'])
   })
 
   it('stamps every later runtime event with the acknowledged Workflow turn', async () => {
