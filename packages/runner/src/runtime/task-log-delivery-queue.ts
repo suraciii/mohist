@@ -88,14 +88,15 @@ class InMemoryTaskLogDeliveryQueue implements TaskLogDeliveryQueue {
       return false
     }
 
-    let group = this.groups.get(record.workId)
+    const groupKey = taskLogDeliveryGroupKey(record)
+    let group = this.groups.get(groupKey)
     if (!group) {
       group = []
-      this.groups.set(record.workId, group)
+      this.groups.set(groupKey, group)
     }
     group.push({ record, attempts: 0, retry: null, wakeRetry: null })
     this.size += 1
-    this.kick(record.workId)
+    this.kick(groupKey)
     return true
   }
 
@@ -120,25 +121,25 @@ class InMemoryTaskLogDeliveryQueue implements TaskLogDeliveryQueue {
     await Promise.allSettled(this.draining.values())
   }
 
-  private kick(workId: string): void {
-    if (this.stopped || this.draining.has(workId) || this.leasedWorks.has(workId)) return
-    const drain = this.drain(workId).finally(() => {
-      this.draining.delete(workId)
-      if (!this.stopped && (this.groups.get(workId)?.length ?? 0) > 0) this.kick(workId)
+  private kick(groupKey: string): void {
+    if (this.stopped || this.draining.has(groupKey) || this.leasedWorks.has(groupKey)) return
+    const drain = this.drain(groupKey).finally(() => {
+      this.draining.delete(groupKey)
+      if (!this.stopped && (this.groups.get(groupKey)?.length ?? 0) > 0) this.kick(groupKey)
     })
-    this.draining.set(workId, drain)
+    this.draining.set(groupKey, drain)
   }
 
-  private async drain(workId: string): Promise<void> {
+  private async drain(groupKey: string): Promise<void> {
     while (!this.stopped) {
-      const group = this.groups.get(workId)
+      const group = this.groups.get(groupKey)
       const entry = group?.[0]
       if (!group || !entry) return
       entry.attempts += 1
-      const result = await this.deliver(workId, entry)
+      const result = await this.deliver(groupKey, entry)
       if (result === 'timed-out') return
       if (result === 'succeeded') {
-        this.retire(workId, entry)
+        this.retire(groupKey, entry)
         continue
       }
       if (this.stopped) return
@@ -147,7 +148,7 @@ class InMemoryTaskLogDeliveryQueue implements TaskLogDeliveryQueue {
           ...fields(entry.record),
           attempts: entry.attempts,
         })
-        this.retire(workId, entry)
+        this.retire(groupKey, entry)
         continue
       }
       await new Promise<void>((resolve) => {
@@ -163,7 +164,7 @@ class InMemoryTaskLogDeliveryQueue implements TaskLogDeliveryQueue {
     }
   }
 
-  private async deliver(workId: string, entry: PendingDelivery): Promise<DeliveryResult> {
+  private async deliver(groupKey: string, entry: PendingDelivery): Promise<DeliveryResult> {
     const record = entry.record
     const controller = new AbortController()
     this.activeControllers.add(controller)
@@ -195,25 +196,25 @@ class InMemoryTaskLogDeliveryQueue implements TaskLogDeliveryQueue {
       return result
     }
 
-    this.leasedWorks.add(workId)
-    void upload.then((succeeded) => this.completeLateUpload(workId, entry, upload, succeeded))
+    this.leasedWorks.add(groupKey)
+    void upload.then((succeeded) => this.completeLateUpload(groupKey, entry, upload, succeeded))
     return result
   }
 
   private completeLateUpload(
-    workId: string,
+    groupKey: string,
     entry: PendingDelivery,
     upload: Promise<boolean>,
     succeeded: boolean,
   ): void {
     this.activeUploads.delete(upload)
-    this.leasedWorks.delete(workId)
+    this.leasedWorks.delete(groupKey)
     if (this.stopped) return
-    const group = this.groups.get(workId)
+    const group = this.groups.get(groupKey)
     if (!group || group[0] !== entry) return
     if (succeeded) {
-      this.retire(workId, entry)
-      this.kick(workId)
+      this.retire(groupKey, entry)
+      this.kick(groupKey)
       return
     }
     if (entry.attempts >= this.maxAttempts) {
@@ -221,24 +222,30 @@ class InMemoryTaskLogDeliveryQueue implements TaskLogDeliveryQueue {
         ...fields(entry.record),
         attempts: entry.attempts,
       })
-      this.retire(workId, entry)
-      this.kick(workId)
+      this.retire(groupKey, entry)
+      this.kick(groupKey)
       return
     }
     entry.retry = setTimeout(() => {
       entry.retry = null
-      this.kick(workId)
+      this.kick(groupKey)
     }, this.retryDelayMs)
     entry.retry.unref?.()
   }
 
-  private retire(workId: string, entry: PendingDelivery): void {
-    const group = this.groups.get(workId)
+  private retire(groupKey: string, entry: PendingDelivery): void {
+    const group = this.groups.get(groupKey)
     if (!group || group[0] !== entry) return
     group.shift()
     this.size -= 1
-    if (group.length === 0) this.groups.delete(workId)
+    if (group.length === 0) this.groups.delete(groupKey)
   }
+}
+
+export function taskLogDeliveryGroupKey(
+  record: Pick<TaskLogDeliveryRecord, 'ownerKind' | 'ownerId' | 'workId'>,
+): string {
+  return JSON.stringify([record.ownerKind, record.ownerId, record.workId])
 }
 
 function fields(record: TaskLogDeliveryRecord): Record<string, unknown> {

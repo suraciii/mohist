@@ -1,10 +1,21 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { createTaskLogDeliveryQueue, type TaskLogDeliveryRecord } from './task-log-delivery-queue.js'
+import {
+  createTaskLogDeliveryQueue,
+  taskLogDeliveryGroupKey,
+  type TaskLogDeliveryRecord,
+} from './task-log-delivery-queue.js'
 
-function record(id: string, sequence: number, terminal = false): TaskLogDeliveryRecord {
-  return {
+function record(
+  id: string,
+  sequence: number,
+  terminal = false,
+  owner: Pick<TaskLogDeliveryRecord, 'ownerId' | 'ownerKind'> = {
     ownerId: 'workflow-1',
     ownerKind: 'workflow',
+  },
+): TaskLogDeliveryRecord {
+  return {
+    ...owner,
     workId: id,
     batch: {
       entries: [
@@ -74,6 +85,51 @@ describe('volatile task-log delivery queue', () => {
     expect(delivered).toEqual([1, 1, 2])
     expect(queue.snapshot()).toEqual([])
     await queue.stop()
+  })
+
+  it('isolates owner-local work ids while preserving FIFO within each owner and work', async () => {
+    vi.useFakeTimers()
+    const delivered: string[] = []
+    let completeOwnerA!: (value: { status: 'changed'; accepted: number; truncated: boolean }) => void
+    const stalledOwnerA = new Promise<{ status: 'changed'; accepted: number; truncated: boolean }>((resolve) => {
+      completeOwnerA = resolve
+    })
+    const queue = createTaskLogDeliveryQueue({
+      connection: {
+        uploadTaskLog: vi.fn(async (ownerId, _workId, batch) => {
+          delivered.push(`${ownerId}:${batch.entries[0]!.seq}`)
+          if (ownerId === 'workflow-a' && batch.entries[0]!.seq === 1) return await stalledOwnerA
+          return { status: 'changed' as const, accepted: 1, truncated: false }
+        }),
+      },
+    })
+
+    queue.enqueue(record('shared-work', 1, false, { ownerKind: 'workflow', ownerId: 'workflow-a' }))
+    queue.enqueue(record('shared-work', 2, true, { ownerKind: 'workflow', ownerId: 'workflow-a' }))
+    queue.enqueue(record('shared-work', 1, false, { ownerKind: 'workflow', ownerId: 'workflow-b' }))
+    queue.enqueue(record('shared-work', 2, true, { ownerKind: 'workflow', ownerId: 'workflow-b' }))
+
+    await flush()
+    await flush()
+    expect(delivered).toEqual(['workflow-a:1', 'workflow-b:1', 'workflow-b:2'])
+    expect(queue.snapshot()).toHaveLength(2)
+    await vi.advanceTimersByTimeAsync(1_000)
+    expect(delivered).toEqual(['workflow-a:1', 'workflow-b:1', 'workflow-b:2'])
+
+    completeOwnerA({ status: 'changed', accepted: 1, truncated: false })
+    await flush()
+    expect(delivered).toEqual(['workflow-a:1', 'workflow-b:1', 'workflow-b:2', 'workflow-a:2'])
+    expect(queue.snapshot()).toEqual([])
+    await queue.stop()
+  })
+
+  it('uses collision-safe composite group identities', () => {
+    expect(taskLogDeliveryGroupKey({ ownerKind: 'workflow', ownerId: 'a:b', workId: 'c' })).not.toBe(
+      taskLogDeliveryGroupKey({ ownerKind: 'workflow', ownerId: 'a', workId: 'b:c' }),
+    )
+    expect(taskLogDeliveryGroupKey({ ownerKind: 'workflow', ownerId: 'same', workId: 'work' })).not.toBe(
+      taskLogDeliveryGroupKey({ ownerKind: 'agent-job', ownerId: 'same', workId: 'work' }),
+    )
   })
 
   it('keeps one per-work lease after timeout and accepts a late ignored-abort completion', async () => {
