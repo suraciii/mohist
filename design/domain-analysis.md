@@ -13,7 +13,7 @@ launch it but owns no execution job, Runtime selection, or Runner contract.
 
 ### Supporting
 
-- Issue: what work is, how organized, what progress. Ubiquitous language: issue, epic, sub-issue,
+- Issue: what work is, how organized, what progress. Ubiquitous language: issue, epic, child issue,
   parent issue, status, prerequisite, priority, risk, draft, done.
 - Project Space: Project-scoped named configuration. Ubiquitous language: project, repository (named
   resource, default, git URL, base branch), variable, prompt.
@@ -48,7 +48,7 @@ Epic is Issue granularity (organizing facet), not a separate subdomain.
 Issue and Epic are two aggregates in the same bounded context. Issue holds its current `EpicNumber?`.
 Epic holds the goal and advancement policy, but it does not hold a second authoritative membership set.
 Epic membership, progress, and candidate Issues are query results from the current Issue state.
-Sub-issue/parent is also Issue-internal organization (work decomposition axis, orthogonal to Epic's goal/feeding axis); Workflow never sees it. See [`issue-breakdown.md`](issue-breakdown.md).
+Child/parent is also Issue-internal organization (work decomposition axis, orthogonal to Epic's goal/feeding axis); Workflow never sees it. See [`composite-issues.md`](composite-issues.md).
 Prompt belongs to Project Space (Project is the only configurable scope). Builtin `.prompt` is
 loader fallback, not another Prompt resource.
 

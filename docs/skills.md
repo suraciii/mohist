@@ -236,7 +236,7 @@ output of `mo skill view mohist-explore` as a structural example.
 Distributing a custom Skill currently requires manual copying into the
 External Agent directory.
 
-## Status
+## Implementation Gaps
 
 `mo skill install` and `mo skill view` serve External Agents. Mohist snapshots
 an Agent's configured Skills with its execution definition, and Runner injects

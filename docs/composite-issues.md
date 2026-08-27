@@ -1,4 +1,4 @@
-# Composite Issues and Sub-issues
+# Composite Issues and Child Issues
 
 Some requirements are too large for one Issue. A common case spans multiple
 repositories, where each repository change must complete its own Workflow. A
@@ -153,11 +153,11 @@ integration validation. When needed, create an integration-validation child as
 the final child and make it depend on all other children. Coordinated release
 of multi-repository changes is a Non-goal. See [Repositories](repositories.md).
 
-## Status
+## Implementation Gaps
 
 Parent-child relationships, composite advancement, derived parent state, Epic
 isolation, and read-only parent context during a child Plan are implemented.
 Cross-repository integration remains an explicit
 final-child workflow when a requirement needs it; Mohist does not infer or hide
 that acceptance boundary. See
-[`design/issue-breakdown.md`](../design/issue-breakdown.md) for the design.
+[`design/composite-issues.md`](../design/composite-issues.md) for the design.

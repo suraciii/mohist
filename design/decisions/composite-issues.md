@@ -16,7 +16,7 @@ owner. Decomposition is never automatic. A child Issue divides one unit of work:
 a partial result has no product value, and startable children advance
 concurrently. The Epic axis is unchanged: Epic organizes a product goal and
 controls work in progress serially. The model, invariants, and lifecycle rules
-live in [`../issue-breakdown.md`](../issue-breakdown.md).
+live in [`../composite-issues.md`](../composite-issues.md).
 
 ## Alternatives considered
 
@@ -36,4 +36,4 @@ Epic axis.
 - Epic behavior does not change; Epic treats a parent as an ordinary Issue.
 - Parent state derives from child state and is never maintained manually.
 - The full model, ownership rules, and lifecycle constraints are specified in
-  [`../issue-breakdown.md`](../issue-breakdown.md), not duplicated here.
+  [`../composite-issues.md`](../composite-issues.md), not duplicated here.

@@ -1,6 +1,6 @@
 # Composite Issues and Child Issues
 
-Product specs: [`docs/sub-issues.md`](../docs/sub-issues.md) and
+Product specs: [`docs/composite-issues.md`](../docs/composite-issues.md) and
 [`docs/repositories.md`](../docs/repositories.md). This document records the
 domain design, rationale, and constraints. Decision rationale:
 [`decisions/composite-issues.md`](decisions/composite-issues.md).

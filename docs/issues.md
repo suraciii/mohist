@@ -48,7 +48,7 @@ body, priority, and labels.
   starts. See [Repositories](repositories.md).
 - When one requirement spans multiple repositories, split it into child Issues.
   The parent tracks the complete requirement, and each child runs its own
-  Workflow. See [Composite Issues and Sub-issues](sub-issues.md).
+  Workflow. See [Composite Issues and Child Issues](composite-issues.md).
 
 ### Write an Effective Issue Body
 

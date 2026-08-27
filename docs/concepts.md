@@ -56,9 +56,9 @@ An Issue is one unit of work that can enter the production line.
   artifacts
 
 If one requirement crosses multiple repositories, split one Issue into
-**sub-issues**. The parent Issue tracks the complete requirement, and each
-sub-issue moves through its own Workflow. See
-[Composite Issues and Sub-issues](sub-issues.md).
+**child Issues**. The parent Issue tracks the complete requirement, and each
+child Issue moves through its own Workflow. See
+[Composite Issues and Child Issues](composite-issues.md).
 
 See [Issue Management](issues.md).
 

@@ -146,7 +146,7 @@ use `mo routing rule edit` to assign one rule to it. Observe two constraints:
   the Issue before acting, not only comments by that Agent. Otherwise neither
   side can see a loop between repeated rejection and repeated repair.
 
-## Status
+## Implementation Gaps
 
 `mo agent install supervisor`, Issue watch and mute, Agent-response-failed
 notifications, Approval actor records, routing tables, Agent launch, and

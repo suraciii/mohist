@@ -114,7 +114,7 @@ Each linked product spec defines one direction in full:
   when necessary. See [Web UI Guide](web-ui.md).
 - **Larger production plans**: Epics advance automatically, and composite
   Issues deliver across repositories. See [Planning with Epics](epics.md) and
-  [Composite Issues and Sub-issues](sub-issues.md).
+  [Composite Issues and Child Issues](composite-issues.md).
 - **Mobile supervision**: View production-line state and receive anomaly
   notifications on a phone. See [Hermes Notifications](hermes-notifications.md).
 

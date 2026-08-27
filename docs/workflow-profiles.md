@@ -288,7 +288,10 @@ Run and rejects an edit that removes the binding or is incompatible with one of
 those Actions. An edit must also retain every Stage used by an active Run. The
 active Run keeps its original Stage order and Approval points, so an edit must
 retain valid Approval feedback while that Run can still request it. Added or
-reordered Stages apply only to future Runs.
+reordered Stages apply only to future Runs. A retry rebuilds the declared Task
+before it reads current Variables and Prompts; it never treats one attempt's
+resolved input as future configuration. See
+[Workflow Recovery Design](../design/workflow/recovery.md).
 
 Before saving, run `mo workflow validate --file <path>` to check the Definition
 structure, field types, and template expressions locally. Use `--file -` to
@@ -301,7 +304,7 @@ required. It may contain `/`. Pass the complete ID as one CLI argument. Built-in
 Profiles use `mohist/<name>`. Custom Profiles must use an ID that describes
 their purpose and remains stable.
 
-## Current Status and Remaining Gaps
+## Implementation Gaps
 
 - Project-scoped Profile collections, Project defaults, explicit Issue
   selection, and clearing back to the default are implemented. Server accepts a
@@ -313,13 +316,6 @@ their purpose and remains stable.
   Profile collection. The Web Issue selector also remains locked during an
   active Run even though a Server-side selection would affect only the next
   Run.
-- Profile changes take effect at future Stage and Task boundaries so a
-  configuration fix can help later work without changing an attempt that is
-  already running. A retry rebuilds the declared Task before it reads current
-  Variables and Prompts; it never treats one attempt's resolved input as future
-  configuration. This boundary preserves both live fixes and accepted-attempt
-  stability. See
-  [Workflow Recovery Design](../design/workflow/recovery.md).
 - Some built-in Tasks still use legacy Action Input. The target interfaces are
   defined by the Action documentation.
 - Profile Agent Action binding, Run-bound materialization, and the
