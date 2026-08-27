@@ -12,6 +12,8 @@ public interface IIssueGrain : IGrainWithStringKey
     Task MarkDoneAsync();
     Task CancelAsync();
     Task UpdateAsync(string title, string? body);
+    Task UpdateFromGitHubAsync(string title, string? body, string source)
+        => throw new NotSupportedException();
     Task UpdateFullAsync(UpdateIssueData data);
     Task CloseCompositeAsync();
     Task ReopenCompositeAsync();

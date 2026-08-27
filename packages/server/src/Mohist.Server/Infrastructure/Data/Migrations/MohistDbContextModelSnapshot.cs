@@ -4710,6 +4710,13 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
                     b.Property<int>("IssueNumber")
                         .HasColumnType("INTEGER");
 
+                    b.Property<bool>("MirrorCreateAttempted")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("MirrorMarker")
+                        .HasMaxLength(256)
+                        .HasColumnType("TEXT");
+
                     b.Property<string>("PostedCommentsJson")
                         .IsRequired()
                         .HasColumnType("JSON");
@@ -4733,10 +4740,12 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
 
                     b.HasKey("Id");
 
-                    b.HasIndex("ProjectId", "IssueNumber");
+                    b.HasIndex("ProjectId", "IssueNumber")
+                        .IsUnique();
 
                     b.HasIndex("ProjectId", "RepositoryName", "GithubIssueNumber")
-                        .IsUnique();
+                        .IsUnique()
+                        .HasFilter("\"GithubIssueNumber\" > 0");
 
                     b.ToTable("GitHubIssueLinks", (string)null);
                 });

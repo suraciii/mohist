@@ -1062,7 +1062,8 @@ public partial class IssueGrain : Grain, IIssueGrain, Coordinator.IIssueBindingT
             labelsForUpdate,
             priority,
             hasRisk ? data.Risk : null,
-            hasRisk);
+            hasRisk,
+            updateBody: hasBody);
 
         if (hasIsDraft && data.IsDraft.HasValue)
             _issue.SetDraft(data.IsDraft.Value);
@@ -1468,7 +1469,6 @@ public partial class IssueGrain : Grain, IIssueGrain, Coordinator.IIssueBindingT
             comment.IssueNumber,
             comment.CreatedAt.ToString("o"));
     }
-
 }
 
 [GenerateSerializer]

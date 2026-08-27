@@ -2,6 +2,7 @@ namespace Mohist.Server.Issue.Domain.Events;
 
 public union IssueEvent(
     IssueCreated,
+    IssueContentChanged,
     IssueLabelsChanged,
     IssuePriorityChanged,
     IssueDraftChanged,
@@ -26,6 +27,11 @@ public sealed record IssueCreated(
     IReadOnlyDictionary<string, string> Labels,
     string? Risk,
     string? RepositoryRef);
+
+public sealed record IssueContentChanged(
+    string Title,
+    string? Body,
+    string? Source = null);
 
 public sealed record IssueRepositoryChanged(
     string? OldRepositoryRef,

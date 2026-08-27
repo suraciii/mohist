@@ -223,17 +223,17 @@ public sealed class IssueListProjectionCostSpecs
     }
 
     [Fact]
-    public async Task GitHubProjection_DuplicateLinks_SelectsOldestDeterministically()
+    public async Task GitHubProjection_OneLinkPerIssueProjectsTheBoundMirror()
     {
         var project = new ProjectInfo
         {
-            Id = $"proj-github-duplicates-{Guid.NewGuid():N}",
-            Name = "GitHub duplicate links",
+            Id = $"proj-github-single-{Guid.NewGuid():N}",
+            Name = "GitHub single link",
         };
 
         using var scope = _fixture.Services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<MohistDbContext>();
-        var issue = NewIssue(project.Id, 1, "Duplicate link issue");
+        var issue = NewIssue(project.Id, 1, "Linked issue");
         db.Issues.Add(new IssueRow
         {
             ProjectId = project.Id,
@@ -241,12 +241,8 @@ public sealed class IssueListProjectionCostSpecs
             State = IssueStore.Serialize(issue),
         });
         var uniqueOwner = $"owner-{Guid.NewGuid():N}";
-        db.GitHubConnections.AddRange(
-            NewConnection(project.Id, "main", uniqueOwner, "mohist", "connection-main"),
-            NewConnection(project.Id, "docs", uniqueOwner, "mohist-docs", "connection-docs"));
-        db.GitHubIssueLinks.AddRange(
-            NewLink(project.Id, "main", 771, issue.Number, "link-oldest", TestTime.UtcNow),
-            NewLink(project.Id, "docs", 772, issue.Number, "link-newer", TestTime.UtcNow.AddMinutes(1)));
+        db.GitHubConnections.Add(NewConnection(project.Id, "main", uniqueOwner, "mohist", "connection-main"));
+        db.GitHubIssueLinks.Add(NewLink(project.Id, "main", 771, issue.Number, "link-bound", TestTime.UtcNow));
         await db.SaveChangesAsync();
 
         var loader = scope.ServiceProvider.GetRequiredService<IssueReadModelLoader>();

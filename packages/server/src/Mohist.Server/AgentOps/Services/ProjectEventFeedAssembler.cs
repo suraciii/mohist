@@ -433,7 +433,7 @@ public sealed class ProjectEventFilter
         "com.mohist.issue.created", "com.mohist.issue.work-started", "com.mohist.issue.completed",
         "com.mohist.issue.cancelled", "com.mohist.issue.reopened", "com.mohist.issue.archived",
         "com.mohist.issue.unarchived", "com.mohist.issue.labels-changed", "com.mohist.issue.priority-changed",
-        "com.mohist.issue.draft-changed", "com.mohist.issue.prerequisite-added",
+        "com.mohist.issue.draft-changed", "com.mohist.issue.content-changed", "com.mohist.issue.prerequisite-added",
         "com.mohist.issue.prerequisite-removed", "com.mohist.issue.workflow-profile-changed",
         "com.mohist.issue.repository-changed",
         "com.mohist.issue.composite-started", "com.mohist.issue.composite-status-changed",

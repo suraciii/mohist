@@ -92,7 +92,7 @@ public sealed class GitHubIssueFeedHandler : ICloudEventHandler
         {
             var counter = _grains.GetGrain<IIssueCounterGrain>(GrainKey.IssueCounter(projectId));
             var allocated = await counter.NextAsync();
-            link = await links.CreateAsync(projectId, connection.RepositoryName, payload.IssueNumber, allocated, ct);
+            link = await links.CreateAsync(projectId, connection.RepositoryName, payload.IssueNumber, allocated, ct: ct);
             owned = link.IssueNumber == allocated;
             issueNumber = link.IssueNumber;
         }
@@ -140,11 +140,6 @@ public sealed class GitHubIssueFeedHandler : ICloudEventHandler
         GitHubIssueEventPayload payload,
         CancellationToken ct)
     {
-        var labels = new Dictionary<string, string>(StringComparer.Ordinal)
-        {
-            [GitHubIssueSource.LabelKey] = GitHubIssueSource.LabelValue(
-                connection.Owner, connection.Repo, payload.IssueNumber),
-        };
         var priority = GitHubIssueFeedTranslation.MapPriority(payload.Labels) ?? IssuePriority.Default.Value;
         var grain = _grains.GetGrain<IIssueGrain>(GrainKey.Issue(new IssueKey(projectId, issueNumber)));
         await grain.CreateAsync(
@@ -152,7 +147,7 @@ public sealed class GitHubIssueFeedHandler : ICloudEventHandler
             issueNumber,
             payload.Title,
             payload.Body,
-            labels,
+            labels: null,
             priority,
             repositoryRef: connection.RepositoryName,
             isDraft: false);

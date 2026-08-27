@@ -99,6 +99,41 @@ public sealed class GitHubIssueLinkStoreTests
     }
 
     [Fact]
+    public async Task CreatePending_RoundTripsMarkerAndAttemptState()
+    {
+        var database = NewDatabase();
+        var store = NewStore(database);
+
+        var pending = await store.CreatePendingAsync("proj_1", "hello-world", 7);
+
+        Assert.True(pending.IsPending);
+        Assert.False(pending.MirrorCreateAttempted);
+        Assert.Equal(GitHubMirrorMarker.For(pending.Id), pending.MirrorMarker);
+        Assert.Equal(pending.Id, (await store.GetByIssueAsync("proj_1", 7))!.Id);
+
+        var marked = await store.MarkMirrorCreateAttemptedAsync(pending.Id);
+        Assert.True(marked!.MirrorCreateAttempted);
+        Assert.True(marked.IsPending);
+    }
+
+    [Fact]
+    public async Task SetMirror_DuplicateGithubIssueLeavesSecondPending()
+    {
+        var database = NewDatabase();
+        var store = NewStore(database);
+        var first = await store.CreatePendingAsync("proj_1", "hello-world", 7);
+        var second = await store.CreatePendingAsync("proj_1", "hello-world", 8);
+
+        await store.SetMirrorAsync(first.Id, 42);
+
+        await Assert.ThrowsAsync<DbUpdateException>(() => store.SetMirrorAsync(second.Id, 42));
+
+        var stillPending = await store.GetByIssueAsync("proj_1", 8);
+        Assert.NotNull(stillPending);
+        Assert.True(stillPending!.IsPending);
+    }
+
+    [Fact]
     public async Task MarkCommentPosted_RecordsKeyOnce()
     {
         var database = NewDatabase();

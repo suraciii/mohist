@@ -256,6 +256,7 @@ public static class MohistServiceRegistration
             client.Timeout = TimeSpan.FromSeconds(15);
             client.DefaultRequestHeaders.UserAgent.ParseAdd("mohist");
         });
+        services.AddScoped<IGitHubIssuePort>(sp => (IGitHubIssuePort)sp.GetRequiredService<IGitHubCommentPort>());
 
         services.AddCloudEventBus();
         services.AddCloudEventHandlersFromAssembly(typeof(MohistServiceRegistration).Assembly);

@@ -13,6 +13,7 @@ internal static class IssueEventSerializer
     private static readonly IReadOnlyDictionary<Type, string> BusTypes = new Dictionary<Type, string>
     {
         [typeof(IssueCreated)] = EventCatalog.ReverseDns.IssueCreated,
+        [typeof(IssueContentChanged)] = EventCatalog.ReverseDns.IssueContentChanged,
         [typeof(IssueLabelsChanged)] = EventCatalog.ReverseDns.IssueLabelsChanged,
         [typeof(IssuePriorityChanged)] = EventCatalog.ReverseDns.IssuePriorityChanged,
         [typeof(IssueDraftChanged)] = EventCatalog.ReverseDns.IssueDraftChanged,
@@ -46,6 +47,7 @@ internal static class IssueEventSerializer
     public static string BusType(IssueEvent payload) => Unwrap(payload) switch
     {
         IssueCreated => "com.mohist.issue.created",
+        IssueContentChanged => EventCatalog.ReverseDns.IssueContentChanged,
         IssueLabelsChanged => "com.mohist.issue.labels-changed",
         IssuePriorityChanged => "com.mohist.issue.priority-changed",
         IssueDraftChanged => "com.mohist.issue.draft-changed",
@@ -75,6 +77,7 @@ internal static class IssueEventSerializer
     public static object Unwrap(IssueEvent payload) => payload switch
     {
         IssueCreated x => x,
+        IssueContentChanged x => x,
         IssueLabelsChanged x => x,
         IssuePriorityChanged x => x,
         IssueDraftChanged x => x,

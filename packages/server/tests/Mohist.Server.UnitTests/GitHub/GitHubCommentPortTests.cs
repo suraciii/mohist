@@ -32,7 +32,44 @@ public sealed class GitHubCommentPortTests
         var secrets = new FakeSecretStore();
         secrets.Set(GitHubConnectionStore.ApiSecretAddress("project-1", "conn-1"), "pat-1"u8.ToArray());
         var http = new HttpClient(handler) { BaseAddress = new Uri("https://api.github.com") };
-        return new GitHubCommentPort(http, null!, secrets, NullLogger<GitHubCommentPort>.Instance);
+        return new GitHubCommentPort(http, secrets, NullLogger<GitHubCommentPort>.Instance);
+    }
+
+    [Fact]
+    public async Task FindIssueByMarkerAsync_RequestsAllIssueStatesAndReturnsMarkerMatch()
+    {
+        const string marker = "<!-- mohist:mirror:link-1 -->";
+        var handler = new FakeHttpMessageHandler($$"""
+            [
+              { "number": 817, "body": "body\n\n{{marker}}" }
+            ]
+            """);
+        var port = CreatePort(handler);
+
+        var number = await port.FindIssueByMarkerAsync(Connection(), marker, CancellationToken.None);
+
+        Assert.Equal(817, number);
+        var request = Assert.Single(handler.Requests);
+        Assert.Equal(HttpMethod.Get, request.Method);
+        Assert.Equal("/repos/octo/hello/issues?state=all&per_page=100&page=1", request.PathAndQuery);
+    }
+
+    [Fact]
+    public async Task FindIssueByMarkerAsync_ReportsAmbiguousMarker()
+    {
+        const string marker = "<!-- mohist:mirror:link-1 -->";
+        var handler = new FakeHttpMessageHandler($$"""
+            [
+              { "number": 817, "body": "{{marker}}" },
+              { "number": 818, "body": "{{marker}}" }
+            ]
+            """);
+        var port = CreatePort(handler);
+
+        var error = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            port.FindIssueByMarkerAsync(Connection(), marker, CancellationToken.None));
+
+        Assert.Contains("multiple", error.Message, StringComparison.Ordinal);
     }
 
     [Fact]

@@ -281,6 +281,7 @@ public class IssueReadModelLoader : IScopedService
         foreach (var issue in issues)
         {
             if (!linksByIssue.TryGetValue((issue.ProjectId, issue.Number), out var link)
+                || link.GithubIssueNumber <= 0
                 || !connections.TryGetValue((issue.ProjectId, link.RepositoryName), out var connection))
                 continue;
 

@@ -101,6 +101,17 @@ public class IssuePatchRawMergeDomainTests
     }
 
     [Fact]
+    public void Update_ExplicitNullBody_ClearsBodyAndEmitsContentEvent()
+    {
+        var issue = NewIssue(title: "Title", body: "Original body", labels: new Dictionary<string, string>(StringComparer.Ordinal));
+
+        issue.Update(title: null, body: null, labels: null, priority: null, updateBody: true);
+
+        Assert.Null(issue.Body);
+        Assert.Contains(issue.PendingEvents, evt => evt is IssueContentChanged changed && changed.Body is null);
+    }
+
+    [Fact]
     public void Update_OnlyLabels_LeavesOtherFieldsUnchanged()
     {
         var issue = NewIssue(
