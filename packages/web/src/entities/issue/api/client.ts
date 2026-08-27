@@ -97,6 +97,21 @@ export function updateIssue(number: number, data: UpdateIssueOptions, projectId?
   })
 }
 
+export function syncGitHubIssue(number: number, projectId?: string | null) {
+  return request<Issue>(projectApiPath(projectId, `/issues/${number}/github/sync`), { method: 'POST' })
+}
+
+export function linkGitHubIssue(number: number, repository: string, githubNumber: number, projectId?: string | null) {
+  return request<Issue>(projectApiPath(projectId, `/issues/${number}/github/link`), {
+    method: 'POST',
+    body: JSON.stringify({ repository, number: githubNumber }),
+  })
+}
+
+export function unlinkGitHubIssue(number: number, projectId?: string | null) {
+  return request<Issue>(projectApiPath(projectId, `/issues/${number}/github/unlink`), { method: 'POST' })
+}
+
 export function startIssue(number: number, projectId?: string | null) {
   return request<{ issue: Issue; message: string }>(projectApiPath(projectId, `/issues/${number}/start`), {
     method: 'POST',

@@ -39,6 +39,8 @@ public sealed class GitHubIssueCloseSpecs
         fixture.Comments.Closes.Clear();
         fixture.Comments.ConfirmationFailure = null;
         fixture.Comments.PostThenThrow = false;
+        fixture.Comments.CloseFailure = null;
+        fixture.Comments.CloseThenThrow = false;
     }
 
     private HttpClient Client => _fixture.Client;

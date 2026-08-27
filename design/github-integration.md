@@ -161,19 +161,21 @@ mirroring with durable Pending intent, invisible marker reconciliation, and
 two-way title/body sync with equality echo suppression, #773 `/mohist start`
 command intake with GitHub permission gating, p0-p4 priority mapping,
 idempotent link creation, durable command replies, refusal replies, and
-reliable command reply recovery, and #774 linked lifecycle translation with the
-Integrate delivery-echo guard. Signed ingress and normalization, close
-withdrawal, Pull Request review Approval, and best-effort write-back with
-durable failure records are included. No-Workflow closes honor GitHub's
-`completed` versus `not_planned` reason, cancelled Issues reopen to backlog, and
-completed Issues remain terminal with one follow-up suggestion. The built-in
-GitHub PR path omits closing keywords from PR bodies; terminal write-back still
-closes mirrors. New feed-created Issues no longer emit the `github-issue` origin
-label; historical feed-created links may retain it as data. Connection creation
-configures a fine-grained PAT with Issues read/write when supplied; GitHub App
-identity remains unimplemented. Connection configuration contains only
-Repository binding, identity, and Approvers. The later sync-health and
-operator-recovery slice remains open.
+reliable command reply recovery, #774 linked lifecycle translation with the
+Integrate delivery-echo guard, and #775 reconcile-based recovery. Signed
+ingress and normalization, close withdrawal, Pull Request review Approval,
+and best-effort write-back with durable failure records are included. No-Workflow
+closes honor GitHub's `completed` versus `not_planned` reason, cancelled Issues
+reopen to backlog, and completed Issues remain terminal with one follow-up
+suggestion. The built-in GitHub PR path omits closing keywords from PR bodies;
+terminal write-back still closes mirrors. GitHub links persist healthy/error sync
+health and the last error; issue-scoped `sync`, `link`, and `unlink` operations
+reconcile or pair mirrors, and connection disable/enable pauses translation and
+reprojects existing links. New feed-created Issues no longer emit the
+`github-issue` origin label; historical feed-created links may retain it as
+data. Connection creation configures a fine-grained PAT with Issues read/write
+when supplied; GitHub App identity remains unimplemented. Connection
+configuration contains only Repository binding, identity, and Approvers.
 
 Open questions:
 

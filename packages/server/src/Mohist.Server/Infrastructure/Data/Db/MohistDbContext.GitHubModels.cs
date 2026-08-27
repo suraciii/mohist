@@ -44,6 +44,8 @@ public partial class MohistDbContext
                     .HasMaxLength(256);
                 entity.Property(e => e.NeedsAttention)
                     .IsRequired();
+                entity.Property(e => e.NeedsReprojection)
+                    .IsRequired();
                 entity.Property(e => e.CreatedAt)
                     .IsRequired();
                 entity.Property(e => e.UpdatedAt)
@@ -73,6 +75,15 @@ public partial class MohistDbContext
                     .IsRequired();
                 entity.Property(e => e.CommandRequested)
                     .IsRequired();
+                entity.Property(e => e.SyncStatus)
+                    .HasMaxLength(32)
+                    .IsRequired();
+                entity.Property(e => e.LastErrorOperation)
+                    .HasMaxLength(64);
+                entity.Property(e => e.LastErrorCode)
+                    .HasMaxLength(64);
+                entity.Property(e => e.LastErrorDetail);
+                entity.Property(e => e.LastErrorAt);
                 entity.HasIndex(e => new { e.ProjectId, e.RepositoryName, e.GithubIssueNumber })
                     .IsUnique()
                     .HasFilter("\"GithubIssueNumber\" > 0");
@@ -132,6 +143,46 @@ public partial class MohistDbContext
                 entity.HasIndex(e => new { e.ConnectionId, e.GithubIssueNumber, e.GithubCommentId, e.OperationKey })
                     .IsUnique()
                     .HasDatabaseName("UX_GitHubCommandReplies_Connection_Issue_Comment_Operation");
+            });
+
+            modelBuilder.Entity<GitHubIssueCommentOperationRow>(entity =>
+            {
+                entity.ToTable("GitHubIssueCommentOperations");
+                entity.HasKey(e => e.Id);
+                entity.Property(e => e.Id)
+                    .HasMaxLength(256)
+                    .IsRequired();
+                entity.Property(e => e.LinkId)
+                    .HasMaxLength(256)
+                    .IsRequired();
+                entity.Property(e => e.GithubIssueNumber)
+                    .IsRequired();
+                entity.Property(e => e.CommentKey)
+                    .HasMaxLength(128)
+                    .IsRequired();
+                entity.Property(e => e.Kind)
+                    .HasMaxLength(32);
+                entity.Property(e => e.Body);
+                entity.Property(e => e.StateReason)
+                    .HasMaxLength(32);
+                entity.Property(e => e.Marker)
+                    .HasMaxLength(512);
+                entity.Property(e => e.Status)
+                    .HasMaxLength(32)
+                    .IsRequired();
+                entity.Property(e => e.AttemptCount)
+                    .IsRequired();
+                entity.Property(e => e.NextAttemptAt);
+                entity.Property(e => e.LeaseUntil);
+                entity.Property(e => e.LastError);
+                entity.Property(e => e.FailedAt);
+                entity.HasIndex(e => new { e.LinkId, e.CommentKey })
+                    .IsUnique();
+                entity.HasIndex(e => e.LinkId);
+                entity.Property(e => e.CreatedAt)
+                    .IsRequired();
+                entity.Property(e => e.UpdatedAt)
+                    .IsRequired();
             });
 
             modelBuilder.Entity<GitHubWriteBackFailureRow>(entity =>

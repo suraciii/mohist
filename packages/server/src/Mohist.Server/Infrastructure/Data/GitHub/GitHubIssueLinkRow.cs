@@ -20,6 +20,11 @@ public sealed class GitHubIssueLinkRow
     public string? MirrorMarker { get; set; }
     public bool MirrorCreateAttempted { get; set; }
     public bool CommandRequested { get; set; }
+    public string SyncStatus { get; set; } = "healthy";
+    public string? LastErrorOperation { get; set; }
+    public string? LastErrorCode { get; set; }
+    public string? LastErrorDetail { get; set; }
+    public DateTimeOffset? LastErrorAt { get; set; }
     public string PostedCommentsJson { get; set; } = "[]";
     public string? StateLabel { get; set; }
     public DateTimeOffset CreatedAt { get; set; }

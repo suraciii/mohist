@@ -547,6 +547,19 @@ internal static class CommandPresentations
                     CommandCapability.Work, "Subscribe to Issue updates",
                     Boundary: "Watches belong to the Issue; --agent / --runner / --session are alternate observers of the same Issue.",
                     SeeAlso: "mo session for Session-scoped observers."));
+                CommandPresentationCatalog.Attach(Find(group, "github"), new CommandPresentation(
+                    CommandCapability.Work, "Manage an Issue's GitHub mirror",
+                    Boundary: "GitHub mirror operations are scoped to one Mohist Issue; sync reconciles the current link, link pairs existing Issues, and unlink preserves both sides."));
+                var github = Find(group, "github");
+                if (github is not null)
+                {
+                    CommandPresentationCatalog.Attach(Find(github, "sync"), new CommandPresentation(
+                        CommandCapability.Work, "Reconcile an Issue's GitHub mirror"));
+                    CommandPresentationCatalog.Attach(Find(github, "link"), new CommandPresentation(
+                        CommandCapability.Work, "Pair an existing GitHub Issue with a Mohist Issue"));
+                    CommandPresentationCatalog.Attach(Find(github, "unlink"), new CommandPresentation(
+                        CommandCapability.Work, "Stop synchronizing an Issue's GitHub mirror"));
+                }
                 CommandPresentationCatalog.Attach(Find(group, "prereq"), new CommandPresentation(
                     CommandCapability.Work, "Manage Issue prerequisites"));
                 CommandPresentationCatalog.Attach(Find(group, "workflow"), new CommandPresentation(

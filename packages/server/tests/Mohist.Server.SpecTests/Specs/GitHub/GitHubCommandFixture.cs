@@ -36,10 +36,22 @@ public sealed class RecordingGitHubCommentPort : IGitHubCommentPort, IGitHubIssu
     public Exception? CreateFailure { get; set; }
     public Exception? FindFailure { get; set; }
     public Exception? ConfirmationFailure { get; set; }
+    public Exception? PostFailure { get; set; }
     public bool PostThenThrow { get; set; }
+    public TaskCompletionSource? PostEntered { get; set; }
+    public TaskCompletionSource? ReleasePost { get; set; }
+    public Exception? UpdateFailure { get; set; }
+    public Queue<Exception> UpdateFailures { get; } = new();
+    public Exception? LabelFailure { get; set; }
+    public Exception? CloseFailure { get; set; }
+    public bool CloseThenThrow { get; set; }
+    public TaskCompletionSource? CloseEntered { get; set; }
+    public TaskCompletionSource? ReleaseClose { get; set; }
     public bool CreateThenThrow { get; set; }
     public int NextGithubIssueNumber { get; set; } = 900;
+    public int? CreateIssueNumberOverride { get; set; }
     public List<IssueClose> Closes { get; } = [];
+    public Dictionary<int, GitHubIssueSnapshot> Issues { get; } = new();
     public string? DeliveryPrUrl { get; set; }
 
     public Task<int> CreateIssueAsync(
@@ -50,8 +62,10 @@ public sealed class RecordingGitHubCommentPort : IGitHubCommentPort, IGitHubIssu
         CancellationToken ct = default)
     {
         if (CreateFailure is not null) throw CreateFailure;
-        var number = NextGithubIssueNumber++;
-        CreatedIssues.Add(new CreatedIssue(connection.Id, number, title, GitHubMirrorMarker.Append(body, marker), marker));
+        var number = CreateIssueNumberOverride ?? NextGithubIssueNumber++;
+        var mirroredBody = GitHubMirrorMarker.Append(body, marker);
+        CreatedIssues.Add(new CreatedIssue(connection.Id, number, title, mirroredBody, marker));
+        Issues[number] = new GitHubIssueSnapshot(number, title, mirroredBody, "open", null);
         if (CreateThenThrow)
             throw new TimeoutException("simulated unknown create outcome");
         return Task.FromResult(number);
@@ -73,6 +87,16 @@ public sealed class RecordingGitHubCommentPort : IGitHubCommentPort, IGitHubIssu
         return Task.FromResult<int?>(null);
     }
 
+    public Task<GitHubIssueSnapshot?> GetIssueAsync(
+        GitHubConnection connection,
+        int githubIssueNumber,
+        CancellationToken ct = default)
+    {
+        return Task.FromResult<GitHubIssueSnapshot?>(Issues.TryGetValue(githubIssueNumber, out var issue)
+            ? issue
+            : new GitHubIssueSnapshot(githubIssueNumber, "Existing GitHub issue", "Existing body", "open", null));
+    }
+
     public Task UpdateIssueAsync(
         GitHubConnection connection,
         int githubIssueNumber,
@@ -81,11 +105,23 @@ public sealed class RecordingGitHubCommentPort : IGitHubCommentPort, IGitHubIssu
         string marker,
         CancellationToken ct = default)
     {
-        UpdatedIssues.Add(new UpdatedIssue(connection.Id, githubIssueNumber, title, GitHubMirrorMarker.Append(body, marker), marker));
+        if (UpdateFailures.Count > 0) throw UpdateFailures.Dequeue();
+        if (UpdateFailure is not null) throw UpdateFailure;
+        var mirroredBody = GitHubMirrorMarker.Append(body, marker);
+        UpdatedIssues.Add(new UpdatedIssue(connection.Id, githubIssueNumber, title, mirroredBody, marker));
+        var prior = Issues.TryGetValue(githubIssueNumber, out var existing)
+            ? existing
+            : null;
+        Issues[githubIssueNumber] = new GitHubIssueSnapshot(
+            githubIssueNumber,
+            title,
+            mirroredBody,
+            prior?.State ?? "open",
+            prior?.StateReason);
         return Task.CompletedTask;
     }
 
-    public Task PostCommentAsync(
+    public async Task PostCommentAsync(
         GitHubConnection connection,
         int githubIssueNumber,
         string body,
@@ -93,12 +129,20 @@ public sealed class RecordingGitHubCommentPort : IGitHubCommentPort, IGitHubIssu
     {
         if (ConfirmationFailure is not null) throw ConfirmationFailure;
         Comments.Add(new PostedComment(connection.Id, githubIssueNumber, body));
+        PostEntered?.TrySetResult();
+        if (ReleasePost is not null)
+            await ReleasePost.Task.WaitAsync(ct);
+        if (PostFailure is not null)
+        {
+            var failure = PostFailure;
+            PostFailure = null;
+            throw failure;
+        }
         if (PostThenThrow)
         {
             PostThenThrow = false;
             throw new TimeoutException("simulated unknown reply outcome");
         }
-        return Task.CompletedTask;
     }
 
     public Task<IReadOnlyList<string>> FindCommentIdsByMarkerAsync(
@@ -120,18 +164,31 @@ public sealed class RecordingGitHubCommentPort : IGitHubCommentPort, IGitHubIssu
         string stateLabel,
         CancellationToken ct = default)
     {
+        if (LabelFailure is not null) throw LabelFailure;
         StateLabels.Add(new StateLabelChange(connection.Id, githubIssueNumber, stateLabel));
         return Task.CompletedTask;
     }
 
-    public Task CloseIssueAsync(
+    public async Task CloseIssueAsync(
         GitHubConnection connection,
         int githubIssueNumber,
         string stateReason,
         CancellationToken ct = default)
     {
+        if (CloseFailure is not null) throw CloseFailure;
         Closes.Add(new IssueClose(connection.Id, githubIssueNumber, stateReason));
-        return Task.CompletedTask;
+        CloseEntered?.TrySetResult();
+        if (ReleaseClose is not null)
+            await ReleaseClose.Task.WaitAsync(ct);
+        var prior = Issues.TryGetValue(githubIssueNumber, out var existing)
+            ? existing
+            : new GitHubIssueSnapshot(githubIssueNumber, "Existing GitHub issue", "Existing body", "open", null);
+        Issues[githubIssueNumber] = prior with { State = "closed", StateReason = stateReason };
+        if (CloseThenThrow)
+        {
+            CloseThenThrow = false;
+            throw new TimeoutException("simulated unknown close outcome");
+        }
     }
 
     public Task<string?> FindDeliveryPullRequestUrlAsync(

@@ -19,6 +19,9 @@ public sealed class GitHubMirrorMigrationTests
         var migration = Assert.Single(migrationType.GetCustomAttributes<MigrationAttribute>());
         Assert.Equal("20260915000000_AddGitHubMirrorIntent", migration.Id);
         Assert.Single(migrationType.GetCustomAttributes<DbContextAttribute>());
+        var recoveryMigration = Assert.Single(
+            typeof(AddGitHubOperationRecovery).GetCustomAttributes<MigrationAttribute>());
+        Assert.Equal("20260918000000_AddGitHubOperationRecovery", recoveryMigration.Id);
 
         await using var connection = new SqliteConnection("Data Source=:memory:");
         await connection.OpenAsync();
@@ -62,6 +65,12 @@ public sealed class GitHubMirrorMigrationTests
                 index.Properties.Select(property => property.Name)
                     .SequenceEqual([nameof(GitHubConnectionRow.ProjectId), nameof(GitHubConnectionRow.RepositoryName)]));
             Assert.False(repositoryIndex.IsUnique);
+
+            var commentOperations = db.Model.FindEntityType(typeof(GitHubIssueCommentOperationRow));
+            Assert.NotNull(commentOperations);
+            Assert.True(Assert.Single(commentOperations!.GetIndexes(), index =>
+                index.Properties.Select(property => property.Name)
+                    .SequenceEqual([nameof(GitHubIssueCommentOperationRow.LinkId), nameof(GitHubIssueCommentOperationRow.CommentKey)])).IsUnique);
         }
 
         var connectionColumns = await ReadColumnsAsync(connection, "GitHubConnections");
@@ -71,6 +80,11 @@ public sealed class GitHubMirrorMigrationTests
         var linkColumns = await ReadColumnsAsync(connection, "GitHubIssueLinks");
         Assert.Contains("MirrorMarker", linkColumns);
         Assert.Contains("MirrorCreateAttempted", linkColumns);
+        Assert.Contains("SyncStatus", linkColumns);
+        Assert.Contains("LastErrorOperation", linkColumns);
+        Assert.Contains("LastErrorCode", linkColumns);
+        Assert.Contains("LastErrorDetail", linkColumns);
+        Assert.Contains("LastErrorAt", linkColumns);
 
         var linkIndexes = await ReadIndexesAsync(connection, "GitHubIssueLinks");
         Assert.Equal(1, linkIndexes.Count(index =>
@@ -81,6 +95,23 @@ public sealed class GitHubMirrorMigrationTests
             index.Name == "IX_GitHubIssueLinks_ProjectId_IssueNumber").Unique);
         Assert.True(linkIndexes.Single(index =>
             index.Name == "IX_GitHubIssueLinks_ProjectId_RepositoryName_GithubIssueNumber").Unique);
+
+        var commentOperationIndexes = await ReadIndexesAsync(connection, "GitHubIssueCommentOperations");
+        Assert.True(commentOperationIndexes.Single(index =>
+            index.Name == "IX_GitHubIssueCommentOperations_LinkId_CommentKey").Unique);
+
+        Assert.Contains("NeedsReprojection", await ReadColumnsAsync(connection, "GitHubConnections"));
+        var operationColumns = await ReadColumnsAsync(connection, "GitHubIssueCommentOperations");
+        Assert.Contains("Kind", operationColumns);
+        Assert.Contains("Body", operationColumns);
+        Assert.Contains("StateReason", operationColumns);
+        Assert.Contains("Marker", operationColumns);
+        Assert.Contains("AttemptCount", operationColumns);
+        Assert.Contains("NextAttemptAt", operationColumns);
+        Assert.Contains("LeaseUntil", operationColumns);
+        Assert.Contains("LastError", operationColumns);
+        Assert.Contains("FailedAt", operationColumns);
+        Assert.Contains("GithubIssueNumber", operationColumns);
 
         var connectionIndexes = await ReadIndexesAsync(connection, "GitHubConnections");
         Assert.Equal(1, connectionIndexes.Count(index =>

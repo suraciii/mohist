@@ -12,6 +12,9 @@ import {
   getParentIssueCandidates,
   getWorkflowRunDetail,
   requestChangesIssue,
+  syncGitHubIssue,
+  linkGitHubIssue,
+  unlinkGitHubIssue,
   updateIssue,
 } from './client'
 
@@ -290,6 +293,57 @@ describe('getLabels', () => {
     const keys = await getLabels('proj-empty')
 
     expect(keys).toEqual([])
+  })
+})
+
+describe('GitHub issue mirror clients', () => {
+  it('posts the sync request for one issue', async () => {
+    const requests: Request[] = []
+    server.use(
+      http.post('*/api/projects/:projectId/issues/:number/github/sync', ({ request }) => {
+        requests.push(request)
+        return successResponse(issueResponse({}))
+      }),
+    )
+
+    await syncGitHubIssue(42, 'proj-1')
+
+    expect(requests).toHaveLength(1)
+    expect(requestPath(requests[0])).toBe('/api/projects/proj-1/issues/42/github/sync')
+    expect(requests[0].method).toBe('POST')
+  })
+
+  it('posts the existing GitHub coordinates for link', async () => {
+    const requests: Request[] = []
+    server.use(
+      http.post('*/api/projects/:projectId/issues/:number/github/link', async ({ request }) => {
+        requests.push(request)
+        return successResponse(issueResponse({}))
+      }),
+    )
+
+    await linkGitHubIssue(42, 'octocat/hello-world', 817, 'proj-1')
+
+    expect(requests).toHaveLength(1)
+    expect(requestPath(requests[0])).toBe('/api/projects/proj-1/issues/42/github/link')
+    expect(requests[0].method).toBe('POST')
+    await expect(requests[0].json()).resolves.toEqual({ repository: 'octocat/hello-world', number: 817 })
+  })
+
+  it('posts the unlink request for one issue', async () => {
+    const requests: Request[] = []
+    server.use(
+      http.post('*/api/projects/:projectId/issues/:number/github/unlink', ({ request }) => {
+        requests.push(request)
+        return successResponse(issueResponse({}))
+      }),
+    )
+
+    await unlinkGitHubIssue(42, 'proj-1')
+
+    expect(requests).toHaveLength(1)
+    expect(requestPath(requests[0])).toBe('/api/projects/proj-1/issues/42/github/unlink')
+    expect(requests[0].method).toBe('POST')
   })
 })
 

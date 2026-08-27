@@ -28,6 +28,7 @@ internal static partial class IssueCommands
         issue.Subcommands.Add(BuildComment(api));
         issue.Subcommands.Add(BuildTemplate(api));
         issue.Subcommands.Add(BuildWatch(api));
+        issue.Subcommands.Add(BuildGitHub(api));
         issue.Subcommands.Add(VariableCommands.BuildVariableGroup(api, VariableScopeKind.Issue));
 
         return issue;

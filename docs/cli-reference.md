@@ -260,7 +260,9 @@ and sync health as first-class fields; callers never derive them from labels.
 `issue github link <number> <owner/repo#number>` pairs two existing Issues with
 the Mohist side as content source, `issue github unlink <number>` stops
 synchronization, and `issue github sync <number>` reconciles a link: creating a
-missing mirror, pushing current state, and clearing a sync error.
+missing mirror, pushing current state, and clearing a sync error. An error
+summary is shown on `issue view`; retrying that same command is the recovery
+step.
 
 `issue list` supports filters for `--stage`, `--priority`, `--label`, `--repo`,
 `--parent`, and `--epic`. With `--json` field selection, one call can compare

@@ -227,6 +227,109 @@ public sealed class CliGithubCommandSpecs
     }
 
     [Fact]
+    public async Task IssueGitHubSync_PostsSyncRequestAndPrintsIssue()
+    {
+        var (handler, http, output, error, fs, executor) = CliTestFactory.Create();
+        handler.SetResponder((_, _) => Task.FromResult(RecordingHttpHandler.Json(new
+        {
+            success = true,
+            data = new
+            {
+                number = 42,
+                title = "Issue",
+                github = new
+                {
+                    repository = "octocat/hello-world",
+                    number = 817,
+                    url = "https://github.com/octocat/hello-world/issues/817",
+                    syncStatus = "healthy",
+                },
+            },
+        })));
+
+        var exit = await MohistCliCommands.RunAsync(
+            http, ["issue", "github", "sync", "42", "--project", "proj_test", "--json", "number,github"],
+            output, error, fs, executor);
+
+        Assert.Equal(0, exit);
+        var request = Assert.Single(handler.Requests);
+        Assert.Equal(HttpMethod.Post, request.Method);
+        Assert.Equal("/api/projects/proj_test/issues/42/github/sync", request.RequestUri?.PathAndQuery);
+        Assert.Contains("\"number\": 42", output.ToString(), StringComparison.Ordinal);
+        Assert.Empty(error.ToString());
+    }
+
+    [Fact]
+    public async Task IssueGitHubLink_ParsesCoordinatesAndPostsPairing()
+    {
+        var (handler, http, output, error, fs, executor) = CliTestFactory.Create();
+        handler.SetResponder((_, _) => Task.FromResult(RecordingHttpHandler.Json(new
+        {
+            success = true,
+            data = new
+            {
+                number = 42,
+                title = "Issue",
+                github = new
+                {
+                    repository = "octocat/hello-world",
+                    number = 817,
+                    url = "https://github.com/octocat/hello-world/issues/817",
+                    syncStatus = "healthy",
+                },
+            },
+        })));
+
+        var exit = await MohistCliCommands.RunAsync(
+            http, ["issue", "github", "link", "42", "octocat/hello-world#817", "--project", "proj_test", "--json", "number,github"],
+            output, error, fs, executor);
+
+        Assert.Equal(0, exit);
+        var request = Assert.Single(handler.Requests);
+        Assert.Equal(HttpMethod.Post, request.Method);
+        Assert.Equal("/api/projects/proj_test/issues/42/github/link", request.RequestUri?.PathAndQuery);
+        var body = JsonNode.Parse(request.Body!)!.AsObject();
+        Assert.Equal("octocat/hello-world", body["repository"]!.GetValue<string>());
+        Assert.Equal(817, body["number"]!.GetValue<int>());
+        Assert.Empty(error.ToString());
+    }
+
+    [Fact]
+    public async Task IssueGitHubUnlink_PostsUnlinkRequest()
+    {
+        var (handler, http, output, error, fs, executor) = CliTestFactory.Create();
+        handler.SetResponder((_, _) => Task.FromResult(RecordingHttpHandler.Json(new
+        {
+            success = true,
+            data = new { number = 42, title = "Issue", github = (object?)null },
+        })));
+
+        var exit = await MohistCliCommands.RunAsync(
+            http, ["issue", "github", "unlink", "42", "--project", "proj_test", "--json", "number"],
+            output, error, fs, executor);
+
+        Assert.Equal(0, exit);
+        var request = Assert.Single(handler.Requests);
+        Assert.Equal(HttpMethod.Post, request.Method);
+        Assert.Equal("/api/projects/proj_test/issues/42/github/unlink", request.RequestUri?.PathAndQuery);
+        Assert.Empty(error.ToString());
+    }
+
+    [Fact]
+    public async Task IssueGitHubLink_MalformedCoordinatesFailsWithoutRequest()
+    {
+        var (handler, http, output, error, fs, executor) = CliTestFactory.Create();
+
+        var exit = await MohistCliCommands.RunAsync(
+            http, ["issue", "github", "link", "42", "octocat/hello-world", "--project", "proj_test"],
+            output, error, fs, executor);
+
+        Assert.NotEqual(0, exit);
+        Assert.Empty(handler.Requests);
+        Assert.Contains("owner/repo#number", error.ToString(), StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task UpdateApprovers_WithoutOptions_FailsWithoutRequest()
     {
         var (handler, http, output, error, fs, executor) = CliTestFactory.Create();

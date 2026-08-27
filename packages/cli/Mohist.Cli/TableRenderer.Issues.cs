@@ -72,7 +72,18 @@ internal sealed partial class TableRenderer
         {
             _out.WriteLine($"github:   {FormatGitHub(github)}");
             _out.WriteLine($"githubUrl: {StringOf(github, "url")}");
-            _out.WriteLine($"githubSync: {StringOf(github, "syncStatus")}");
+            var githubSync = StringOf(github, "syncStatus");
+            _out.WriteLine($"githubSync: {githubSync}");
+            var githubConnection = StringOf(github, "connectionStatus");
+            if (!string.IsNullOrEmpty(githubConnection) && !string.Equals(githubConnection, "connected", StringComparison.Ordinal))
+                _out.WriteLine($"githubConnection: {githubConnection}");
+            if (string.Equals(githubSync, "error", StringComparison.Ordinal))
+            {
+                var lastError = github["lastError"] as JsonObject;
+                if (lastError is not null)
+                    _out.WriteLine($"githubError: {StringOf(lastError, "detail")}");
+                _out.WriteLine($"githubNext: mo issue github sync {number}");
+            }
         }
         _out.WriteLine($"project:  {project}");
         _out.WriteLine($"updated:  {Truncate(updatedAt, TitleSoftCap)}");
@@ -119,8 +130,11 @@ internal sealed partial class TableRenderer
         if (value is not JsonObject github) return "";
         var repository = StringOf(github, "repository");
         var number = NumberOf(github, "number");
-        return string.IsNullOrEmpty(repository) || string.IsNullOrEmpty(number)
-            ? ""
+        if (string.IsNullOrEmpty(repository) || string.IsNullOrEmpty(number))
+            return "";
+        var connectionStatus = StringOf(github, "connectionStatus");
+        return string.Equals(connectionStatus, "paused", StringComparison.Ordinal)
+            ? $"{repository}#{number} (paused)"
             : $"{repository}#{number}";
     }
 

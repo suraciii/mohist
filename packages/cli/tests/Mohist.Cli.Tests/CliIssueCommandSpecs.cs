@@ -177,6 +177,39 @@ public class CliIssueCommandSpecs
     }
 
     [Fact]
+    public async Task IssueView_Table_RendersPausedGitHubConnectionWithoutChangingSyncHealth()
+    {
+        var (http, _, output, error, fileSystem, executor) = SetupEnv((_, _) =>
+            Task.FromResult(RecordingHttpHandler.Json(new
+            {
+                success = true,
+                data = new
+                {
+                    number = 7,
+                    title = "Linked issue",
+                    status = "backlog",
+                    priority = "p2",
+                    github = new
+                    {
+                        repository = "suraciii/mohist",
+                        number = 771,
+                        url = "https://github.com/suraciii/mohist/issues/771",
+                        syncStatus = "healthy",
+                        connectionStatus = "paused",
+                    },
+                },
+            })));
+
+        var exitCode = await MohistCliCommands.RunAsync(
+            http, ["issue", "view", "7"], output, error, fileSystem, executor);
+
+        Assert.Equal(0, exitCode);
+        Assert.Contains("githubSync: healthy", output.ToString(), StringComparison.Ordinal);
+        Assert.Contains("githubConnection: paused", output.ToString(), StringComparison.Ordinal);
+        Assert.Empty(error.ToString());
+    }
+
+    [Fact]
     public async Task IssueView_Json_PreservesNestedGitHubMirror()
     {
         var (http, _, output, error, fileSystem, executor) = SetupEnv((_, _) =>

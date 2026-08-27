@@ -27,9 +27,16 @@ public sealed class GitHubConnectionStoreTests
     {
         private readonly Dictionary<SecretStoreAddress, byte[]> _secrets = [];
 
+        public Func<SecretStoreAddress, Exception?>? StoreFailure { get; set; }
+        public bool StoreBeforeFailure { get; set; }
+
         public Task StoreAsync(SecretStoreAddress address, byte[] plaintext, CancellationToken ct = default)
         {
-            _secrets[address] = plaintext;
+            var failure = StoreFailure?.Invoke(address);
+            if (failure is null || StoreBeforeFailure)
+                _secrets[address] = plaintext;
+            if (failure is not null)
+                throw failure;
             return Task.CompletedTask;
         }
 
@@ -129,6 +136,54 @@ public sealed class GitHubConnectionStoreTests
             GitHubConnectionStore.ApiSecretAddress("proj_1", connection.Id));
         Assert.Equal("github-pat", System.Text.Encoding.UTF8.GetString(stored!));
         Assert.Equal(GitHubIdentityKind.Pat, connection.IdentityKind);
+    }
+
+    [Fact]
+    public async Task CreateAsync_WebhookSecretFailure_CompensatesBothSecretsAndRow()
+    {
+        var database = NewDatabase(RepositoriesJson("https://github.com/octocat/hello-world.git"));
+        var secrets = new FakeSecretStore
+        {
+            StoreBeforeFailure = true,
+            StoreFailure = address => address.Kind == SecretKind.WebhookSecret
+                ? new InvalidOperationException("webhook secret store failed")
+                : null,
+        };
+        var store = NewStore(database, secrets);
+        var connection = Connection();
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            store.CreateAsync(connection, pat: "github-pat"));
+
+        Assert.Empty(await store.ListAsync("proj_1"));
+        Assert.Null(await secrets.LoadAsync(
+            GitHubConnectionStore.ApiSecretAddress("proj_1", connection.Id)));
+        Assert.Null(await secrets.LoadAsync(
+            GitHubConnectionStore.WebhookSecretAddress("proj_1", connection.Id)));
+    }
+
+    [Fact]
+    public async Task CreateAsync_PatFailureAfterPartialWrite_CompensatesSecretAndRow()
+    {
+        var database = NewDatabase(RepositoriesJson("https://github.com/octocat/hello-world.git"));
+        var secrets = new FakeSecretStore
+        {
+            StoreBeforeFailure = true,
+            StoreFailure = address => address.Kind == SecretKind.AppToken
+                ? new InvalidOperationException("pat store failed")
+                : null,
+        };
+        var store = NewStore(database, secrets);
+        var connection = Connection();
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            store.CreateAsync(connection, pat: "github-pat"));
+
+        Assert.Empty(await store.ListAsync("proj_1"));
+        Assert.Null(await secrets.LoadAsync(
+            GitHubConnectionStore.ApiSecretAddress("proj_1", connection.Id)));
+        Assert.Null(await secrets.LoadAsync(
+            GitHubConnectionStore.WebhookSecretAddress("proj_1", connection.Id)));
     }
 
     [Fact]
@@ -253,6 +308,24 @@ public sealed class GitHubConnectionStoreTests
         Assert.Equal(
             GitHubConnectionStatus.Disabled,
             (await store.GetAsync("proj_1", connection.Id))!.Status);
+    }
+
+    [Fact]
+    public async Task SetStatusWithTransitionAsync_OnlyOneConcurrentEnableWins()
+    {
+        var database = NewDatabase(RepositoriesJson("https://github.com/octocat/hello-world.git"));
+        var secrets = new FakeSecretStore();
+        var store = NewStore(database, secrets);
+        var connection = Connection();
+        await store.CreateAsync(connection, pat: "github-pat");
+        await store.SetStatusAsync("proj_1", connection.Id, GitHubConnectionStatus.Disabled);
+
+        var results = await Task.WhenAll(
+            store.SetStatusWithTransitionAsync("proj_1", connection.Id, GitHubConnectionStatus.Active),
+            store.SetStatusWithTransitionAsync("proj_1", connection.Id, GitHubConnectionStatus.Active));
+
+        Assert.Single(results, result => result!.Changed);
+        Assert.All(results, result => Assert.Equal(GitHubConnectionStatus.Active, result!.Connection.Status));
     }
 
     [Fact]

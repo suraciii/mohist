@@ -1,5 +1,6 @@
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
+using Mohist.Server.GitHub.Domain;
 using Mohist.Server.Infrastructure;
 using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Infrastructure.Data.Workflow;
@@ -276,7 +277,11 @@ public class IssueReadModelLoader : IScopedService
             .OrderBy(row => row.CreatedAt)
             .ThenBy(row => row.Id, StringComparer.Ordinal)
             .GroupBy(row => (row.ProjectId, row.RepositoryName))
-            .ToDictionary(group => group.Key, group => (group.First().Owner, group.First().Repo));
+            .ToDictionary(group => group.Key, group =>
+            {
+                var row = group.First();
+                return (row.Owner, row.Repo, ConnectionStatus: row.Status == GitHubConnectionStatus.Disabled ? "paused" : "connected");
+            });
 
         foreach (var issue in issues)
         {
@@ -286,11 +291,23 @@ public class IssueReadModelLoader : IScopedService
                 continue;
 
             var repository = $"{connection.Owner}/{connection.Repo}";
+            var lastError = link.LastErrorOperation is not null
+                && link.LastErrorCode is not null
+                && link.LastErrorDetail is not null
+                && link.LastErrorAt is not null
+                ? new GitHubSyncErrorSummary(
+                    link.LastErrorOperation,
+                    link.LastErrorCode,
+                    link.LastErrorDetail,
+                    link.LastErrorAt.Value.ToString("o"))
+                : null;
             issue.Github = new GitHubIssueSummary(
                 repository,
                 link.GithubIssueNumber,
                 $"https://github.com/{repository}/issues/{link.GithubIssueNumber}",
-                "healthy");
+                link.SyncStatus is GitHubSyncStatus.Error ? GitHubSyncStatus.Error : GitHubSyncStatus.Healthy,
+                lastError,
+                connection.ConnectionStatus);
         }
     }
 

@@ -9,16 +9,11 @@ using Mohist.Server.Infrastructure.Data.Db;
 namespace Mohist.Server.Infrastructure.Data.Migrations;
 
 [DbContext(typeof(MohistDbContext))]
-[Migration("20260915100000_RemoveGitHubFeedOptions")]
-partial class RemoveGitHubFeedOptions
+[Migration("20260917000000_AddGitHubCommentOperations")]
+partial class AddGitHubCommentOperations
 {
     protected override void BuildTargetModel(ModelBuilder modelBuilder)
     {
         MohistDbContextModelSnapshot.BuildModelCore(modelBuilder);
-        // This migration predates NeedsReprojection. SQLite rebuilds the
-        // connection table for DropColumn, so its historical target must not
-        // select the later column before the recovery migration adds it.
-        modelBuilder.Entity("Mohist.Server.Infrastructure.Data.GitHub.GitHubConnectionRow")
-            .Ignore("NeedsReprojection");
     }
 }

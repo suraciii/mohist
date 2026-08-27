@@ -15,6 +15,7 @@ export {
   useWorkflowTimeline,
   useWorkflowYaml,
   useWorkspaceStatus,
+  useSyncGitHubIssue,
   useIssueWorkflowProfileYaml,
   useUpdateIssueWorkflowProfileYaml,
   useUpdateIssueWorkflowProfile,
@@ -69,6 +70,7 @@ export {
   resumeIssue,
   retryIssue,
   startIssue,
+  syncGitHubIssue,
   stopIssue,
   updateIssue,
 } from './api/client'

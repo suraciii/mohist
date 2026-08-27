@@ -32,4 +32,8 @@ public static class GitHubWriteBackOperation
     public const string Label = "label";
     public const string Close = "close";
     public const string DeliveryPullRequest = "delivery-pull-request";
+    public const string Create = "create";
+    public const string Content = "content";
+    public const string Reconcile = "reconcile";
+    public const string Link = "link";
 }

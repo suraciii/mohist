@@ -53,6 +53,19 @@ public sealed class GitHubCommentPortTests
     }
 
     [Fact]
+    public async Task CreateIssueAsync_MalformedSuccessResponseIsUnknownOutcome()
+    {
+        var handler = new FakeHttpMessageHandler("{ \"title\": \"created\" }");
+        var port = CreatePort(handler);
+
+        var error = await Assert.ThrowsAsync<GitHubRemoteOutcomeUnknownException>(() =>
+            port.CreateIssueAsync(Connection(), "title", "body", "<!-- marker -->", CancellationToken.None));
+
+        Assert.Contains("unusable response", error.Message, StringComparison.Ordinal);
+        Assert.Single(handler.Requests);
+    }
+
+    [Fact]
     public async Task FindIssueByMarkerAsync_ReportsAmbiguousMarker()
     {
         const string marker = "<!-- mohist:mirror:link-1 -->";
