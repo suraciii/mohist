@@ -12,7 +12,16 @@ public sealed class GitHubIssueCommentOperationRow
     public required string Id { get; set; }
     public required string LinkId { get; set; }
     public required string CommentKey { get; set; }
+    public string? Kind { get; set; }
+    public string? Body { get; set; }
+    public string? StateReason { get; set; }
+    public string? Marker { get; set; }
     public required string Status { get; set; }
+    public int AttemptCount { get; set; }
+    public DateTimeOffset? NextAttemptAt { get; set; }
+    public DateTimeOffset? LeaseUntil { get; set; }
+    public string? LastError { get; set; }
+    public DateTimeOffset? FailedAt { get; set; }
     public required DateTimeOffset CreatedAt { get; set; }
     public required DateTimeOffset UpdatedAt { get; set; }
 }

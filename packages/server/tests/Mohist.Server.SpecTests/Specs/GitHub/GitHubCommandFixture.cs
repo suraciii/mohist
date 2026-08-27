@@ -39,8 +39,12 @@ public sealed class RecordingGitHubCommentPort : IGitHubCommentPort, IGitHubIssu
     public bool PostThenThrow { get; set; }
     public Exception? UpdateFailure { get; set; }
     public Queue<Exception> UpdateFailures { get; } = new();
+    public Exception? LabelFailure { get; set; }
+    public Exception? CloseFailure { get; set; }
+    public bool CloseThenThrow { get; set; }
     public bool CreateThenThrow { get; set; }
     public int NextGithubIssueNumber { get; set; } = 900;
+    public int? CreateIssueNumberOverride { get; set; }
     public List<IssueClose> Closes { get; } = [];
     public Dictionary<int, GitHubIssueSnapshot> Issues { get; } = new();
     public string? DeliveryPrUrl { get; set; }
@@ -53,8 +57,10 @@ public sealed class RecordingGitHubCommentPort : IGitHubCommentPort, IGitHubIssu
         CancellationToken ct = default)
     {
         if (CreateFailure is not null) throw CreateFailure;
-        var number = NextGithubIssueNumber++;
-        CreatedIssues.Add(new CreatedIssue(connection.Id, number, title, GitHubMirrorMarker.Append(body, marker), marker));
+        var number = CreateIssueNumberOverride ?? NextGithubIssueNumber++;
+        var mirroredBody = GitHubMirrorMarker.Append(body, marker);
+        CreatedIssues.Add(new CreatedIssue(connection.Id, number, title, mirroredBody, marker));
+        Issues[number] = new GitHubIssueSnapshot(number, title, mirroredBody, "open", null);
         if (CreateThenThrow)
             throw new TimeoutException("simulated unknown create outcome");
         return Task.FromResult(number);
@@ -83,7 +89,7 @@ public sealed class RecordingGitHubCommentPort : IGitHubCommentPort, IGitHubIssu
     {
         return Task.FromResult<GitHubIssueSnapshot?>(Issues.TryGetValue(githubIssueNumber, out var issue)
             ? issue
-            : new GitHubIssueSnapshot(githubIssueNumber, "Existing GitHub issue", "Existing body"));
+            : new GitHubIssueSnapshot(githubIssueNumber, "Existing GitHub issue", "Existing body", "open", null));
     }
 
     public Task UpdateIssueAsync(
@@ -98,7 +104,15 @@ public sealed class RecordingGitHubCommentPort : IGitHubCommentPort, IGitHubIssu
         if (UpdateFailure is not null) throw UpdateFailure;
         var mirroredBody = GitHubMirrorMarker.Append(body, marker);
         UpdatedIssues.Add(new UpdatedIssue(connection.Id, githubIssueNumber, title, mirroredBody, marker));
-        Issues[githubIssueNumber] = new GitHubIssueSnapshot(githubIssueNumber, title, mirroredBody);
+        var prior = Issues.TryGetValue(githubIssueNumber, out var existing)
+            ? existing
+            : null;
+        Issues[githubIssueNumber] = new GitHubIssueSnapshot(
+            githubIssueNumber,
+            title,
+            mirroredBody,
+            prior?.State ?? "open",
+            prior?.StateReason);
         return Task.CompletedTask;
     }
 
@@ -137,6 +151,7 @@ public sealed class RecordingGitHubCommentPort : IGitHubCommentPort, IGitHubIssu
         string stateLabel,
         CancellationToken ct = default)
     {
+        if (LabelFailure is not null) throw LabelFailure;
         StateLabels.Add(new StateLabelChange(connection.Id, githubIssueNumber, stateLabel));
         return Task.CompletedTask;
     }
@@ -147,7 +162,17 @@ public sealed class RecordingGitHubCommentPort : IGitHubCommentPort, IGitHubIssu
         string stateReason,
         CancellationToken ct = default)
     {
+        if (CloseFailure is not null) throw CloseFailure;
         Closes.Add(new IssueClose(connection.Id, githubIssueNumber, stateReason));
+        var prior = Issues.TryGetValue(githubIssueNumber, out var existing)
+            ? existing
+            : new GitHubIssueSnapshot(githubIssueNumber, "Existing GitHub issue", "Existing body", "open", null);
+        Issues[githubIssueNumber] = prior with { State = "closed", StateReason = stateReason };
+        if (CloseThenThrow)
+        {
+            CloseThenThrow = false;
+            throw new TimeoutException("simulated unknown close outcome");
+        }
         return Task.CompletedTask;
     }
 

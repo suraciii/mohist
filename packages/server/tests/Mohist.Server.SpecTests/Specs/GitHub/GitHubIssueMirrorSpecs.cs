@@ -34,8 +34,12 @@ public sealed class GitHubIssueMirrorSpecs
         fixture.Comments.FindFailure = null;
         fixture.Comments.ConfirmationFailure = null;
         fixture.Comments.UpdateFailure = null;
+        fixture.Comments.LabelFailure = null;
+        fixture.Comments.CloseFailure = null;
+        fixture.Comments.CloseThenThrow = false;
         fixture.Comments.CreateThenThrow = false;
         fixture.Comments.MarkerMatchCount = 0;
+        fixture.Comments.CreateIssueNumberOverride = null;
     }
 
     [Fact]

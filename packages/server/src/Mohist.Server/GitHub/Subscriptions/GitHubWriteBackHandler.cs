@@ -174,17 +174,30 @@ public sealed class GitHubWriteBackHandler : ICloudEventHandler
         CancellationToken ct)
     {
         var links = sp.GetRequiredService<GitHubIssueLinkStore>();
-        if (!await links.TryReserveCommentAsync(link.Id, commentKey, ct))
+        var marker = GitHubCommentOperationMarker.For(link.Id, commentKey);
+        if (!await links.TryReserveCommentAsync(
+            link.Id,
+            commentKey,
+            GitHubCommentOperationKind.Comment,
+            body,
+            stateReason: null,
+            ct: ct))
             return;
         try
         {
             await sp.GetRequiredService<IGitHubCommentPort>()
-                .PostCommentAsync(connection, link.GithubIssueNumber, body, ct);
+                .PostCommentAsync(
+                    connection,
+                    link.GithubIssueNumber,
+                    GitHubMirrorMarker.Append(body, marker),
+                    ct);
             await links.MarkCommentPostedAsync(link.Id, commentKey, ct);
         }
         catch (Exception ex) when (!ct.IsCancellationRequested)
         {
-            if (!GitHubRemoteOutcome.IsUnknown(ex))
+            if (GitHubRemoteOutcome.IsUnknown(ex))
+                await links.DeferCommentOperationAsync(link.Id, commentKey, ex.Message, ct);
+            else
                 await links.ReleaseCommentReservationAsync(link.Id, commentKey, ct);
             await RecordFailureAsync(sp, connection, link, eventType, GitHubWriteBackOperation.Comment, ex, ct);
         }
@@ -200,7 +213,13 @@ public sealed class GitHubWriteBackHandler : ICloudEventHandler
         CancellationToken ct)
     {
         var links = sp.GetRequiredService<GitHubIssueLinkStore>();
-        if (!await links.TryReserveCommentAsync(link.Id, closeKey, ct))
+        if (!await links.TryReserveCommentAsync(
+            link.Id,
+            closeKey,
+            GitHubCommentOperationKind.Close,
+            body: null,
+            stateReason: stateReason,
+            ct: ct))
             return;
         try
         {
@@ -210,7 +229,9 @@ public sealed class GitHubWriteBackHandler : ICloudEventHandler
         }
         catch (Exception ex) when (!ct.IsCancellationRequested)
         {
-            if (!GitHubRemoteOutcome.IsUnknown(ex))
+            if (GitHubRemoteOutcome.IsUnknown(ex))
+                await links.DeferCommentOperationAsync(link.Id, closeKey, ex.Message, ct);
+            else
                 await links.ReleaseCommentReservationAsync(link.Id, closeKey, ct);
             await RecordFailureAsync(sp, connection, link, eventType, GitHubWriteBackOperation.Close, ex, ct);
         }

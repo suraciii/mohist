@@ -2,7 +2,12 @@ using Mohist.Server.GitHub.Domain;
 
 namespace Mohist.Server.GitHub.Ports;
 
-public sealed record GitHubIssueSnapshot(int Number, string Title, string? Body);
+public sealed record GitHubIssueSnapshot(
+    int Number,
+    string Title,
+    string? Body,
+    string? State = null,
+    string? StateReason = null);
 
 // The content mirror uses the same GitHub REST adapter as progress write-back.
 // This alias keeps the content seam explicit without introducing another port.

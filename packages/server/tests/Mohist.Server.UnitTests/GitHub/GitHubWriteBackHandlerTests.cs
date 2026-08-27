@@ -355,7 +355,10 @@ public sealed class GitHubWriteBackHandlerTests
         await handler.HandleAsync(evt, CancellationToken.None);
 
         var comment = Assert.Single(harness.Port.Comments);
-        Assert.Equal(GitHubWriteBackComments.Completed(7, "https://github.com/octo/hello/pull/123"), comment.Body);
+        Assert.StartsWith(
+            GitHubWriteBackComments.Completed(7, "https://github.com/octo/hello/pull/123") + "\n\n<!-- mohist:writeback:",
+            comment.Body,
+            StringComparison.Ordinal);
         Assert.Contains("https://github.com/octo/hello/pull/123", comment.Body);
         var link = await harness.LinkAsync();
         Assert.Contains(GitHubCommentKinds.Completed, link.PostedComments);
@@ -370,7 +373,10 @@ public sealed class GitHubWriteBackHandlerTests
         await handler.HandleAsync(Event(EventCatalog.ReverseDns.IssueCompleted), CancellationToken.None);
 
         var comment = Assert.Single(harness.Port.Comments);
-        Assert.Equal(GitHubWriteBackComments.Completed(7), comment.Body);
+        Assert.StartsWith(
+            GitHubWriteBackComments.Completed(7) + "\n\n<!-- mohist:writeback:",
+            comment.Body,
+            StringComparison.Ordinal);
         Assert.DoesNotContain("交付 PR", comment.Body);
         Assert.Single(harness.Port.Closes);
     }
@@ -385,7 +391,10 @@ public sealed class GitHubWriteBackHandlerTests
         await handler.HandleAsync(Event(EventCatalog.ReverseDns.IssueCompleted), CancellationToken.None);
 
         var comment = Assert.Single(harness.Port.Comments);
-        Assert.Equal(GitHubWriteBackComments.Completed(7), comment.Body);
+        Assert.StartsWith(
+            GitHubWriteBackComments.Completed(7) + "\n\n<!-- mohist:writeback:",
+            comment.Body,
+            StringComparison.Ordinal);
         Assert.Single(harness.Port.Closes);
         var failure = Assert.Single(await harness.FailuresAsync());
         Assert.Equal(GitHubWriteBackOperation.DeliveryPullRequest, failure.Operation);
@@ -404,7 +413,10 @@ public sealed class GitHubWriteBackHandlerTests
         await handler.HandleAsync(evt, CancellationToken.None);
 
         var comment = Assert.Single(harness.Port.Comments);
-        Assert.Equal(GitHubWriteBackComments.Cancelled(7, "需求方撤回"), comment.Body);
+        Assert.StartsWith(
+            GitHubWriteBackComments.Cancelled(7, "需求方撤回") + "\n\n<!-- mohist:writeback:",
+            comment.Body,
+            StringComparison.Ordinal);
         Assert.Contains("需求方撤回", comment.Body);
         Assert.Single(harness.Port.Closes);
     }
@@ -418,7 +430,10 @@ public sealed class GitHubWriteBackHandlerTests
         await handler.HandleAsync(Event(EventCatalog.ReverseDns.IssueCancelled), CancellationToken.None);
 
         var comment = Assert.Single(harness.Port.Comments);
-        Assert.Equal(GitHubWriteBackComments.Cancelled(7), comment.Body);
+        Assert.StartsWith(
+            GitHubWriteBackComments.Cancelled(7) + "\n\n<!-- mohist:writeback:",
+            comment.Body,
+            StringComparison.Ordinal);
         Assert.DoesNotContain("原因", comment.Body);
     }
 

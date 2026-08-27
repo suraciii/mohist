@@ -132,6 +132,35 @@ public sealed class GitHubIssueLinkStoreTests
     }
 
     [Fact]
+    public async Task ManualLinkClaim_CannotWinAgainstConcurrentMirrorReservation()
+    {
+        var database = NewDatabase();
+        var store = NewStore(database);
+        var pending = await store.CreatePendingAsync("proj_1", "hello-world", 7);
+
+        var manualTask = store.TryClaimPendingForManualLinkAsync(pending.Id, 42);
+        var mirrorTask = store.TryReserveMirrorCreateAsync(pending.Id);
+        await Task.WhenAll(manualTask, mirrorTask);
+
+        var manual = await manualTask;
+        var mirror = await mirrorTask;
+        Assert.False(manual!.Won && mirror!.Acquired);
+        var loaded = await store.GetByIdAsync(pending.Id);
+        Assert.NotNull(loaded);
+        if (manual!.Won)
+        {
+            Assert.Equal(42, loaded!.GithubIssueNumber);
+            Assert.True(loaded.MirrorCreateAttempted);
+        }
+        else
+        {
+            Assert.True(mirror!.Acquired);
+            Assert.True(loaded!.IsPending);
+            Assert.True(loaded.MirrorCreateAttempted);
+        }
+    }
+
+    [Fact]
     public async Task ClaimAsync_ConcurrentTargetClaimsHaveOneMohistWinner()
     {
         var database = NewDatabase();

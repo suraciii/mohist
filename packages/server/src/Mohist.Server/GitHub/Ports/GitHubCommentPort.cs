@@ -46,9 +46,20 @@ public sealed class GitHubCommentPort : IGitHubCommentPort, IGitHubIssuePort
             ["body"] = GitHubMirrorMarker.Append(body, marker),
         });
         var response = await SendAsync(connection, url, HttpMethod.Post, content, ct);
-        var node = JsonNode.Parse(response);
-        return node?["number"]?.GetValue<int>()
-            ?? throw new InvalidOperationException("GitHub create issue response did not contain a number");
+        try
+        {
+            var node = JsonNode.Parse(response);
+            var number = node?["number"]?.GetValue<int>();
+            if (number is not > 0)
+                throw new InvalidOperationException("GitHub create issue response did not contain a valid number");
+            return number.Value;
+        }
+        catch (Exception ex) when (ex is JsonException or InvalidOperationException)
+        {
+            throw new GitHubRemoteOutcomeUnknownException(
+                "GitHub create issue returned a successful but unusable response",
+                ex);
+        }
     }
 
     public async Task<int?> FindIssueByMarkerAsync(
@@ -111,7 +122,12 @@ public sealed class GitHubCommentPort : IGitHubCommentPort, IGitHubIssuePort
         var title = node?["title"]?.GetValue<string>();
         if (number is not > 0 || title is null)
             throw new InvalidOperationException("GitHub issue response did not contain number and title");
-        return new GitHubIssueSnapshot(number.Value, title, node?["body"]?.GetValue<string>());
+        return new GitHubIssueSnapshot(
+            number.Value,
+            title,
+            node?["body"]?.GetValue<string>(),
+            node?["state"]?.GetValue<string>(),
+            node?["state_reason"]?.GetValue<string>());
     }
 
     public async Task UpdateIssueAsync(

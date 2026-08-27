@@ -96,13 +96,7 @@ public sealed class GitHubIssueSynchronizationService : IScopedService
                     link = await _links.EnsureMirrorMarkerAsync(link.Id, ct) ?? link;
                     if (pushContent)
                     {
-                        await _issuePort.UpdateIssueAsync(
-                            connection,
-                            link.GithubIssueNumber,
-                            issue.Title,
-                            issue.Body ?? string.Empty,
-                            link.MirrorMarker ?? GitHubMirrorMarker.For(link.Id),
-                            ct);
+                        await UpdateMirrorContentAsync(connection, link, issue, ct);
                     }
 
                     await PostConfirmationAsync(connection, link, ct);
@@ -110,9 +104,8 @@ public sealed class GitHubIssueSynchronizationService : IScopedService
                     link = await _links.ClearErrorAsync(link.Id, ct) ?? link;
                     return link;
                 }
-                catch (HttpRequestException ex) when (
-                    ex.StatusCode == HttpStatusCode.NotFound
-                    && attempt == 0
+                catch (GitHubMirrorNotFoundException) when (
+                    attempt == 0
                     && !ct.IsCancellationRequested)
                 {
                     var staleNumber = link?.GithubIssueNumber ?? 0;
@@ -175,21 +168,35 @@ public sealed class GitHubIssueSynchronizationService : IScopedService
         if (snapshot is null)
             throw new GitHubSynchronizationException("github_issue_not_found", $"GitHub issue #{githubIssueNumber} not found");
 
+        GitHubIssueLinkClaim claim;
         if (current is { IsPending: true })
         {
-            if (current.MirrorCreateAttempted)
-                throw new GitHubSynchronizationException("github_mirror_unknown", "The existing mirror creation intent is unresolved; reconcile it before linking another GitHub issue");
-            await _links.DeleteAsync(current.Id, ct);
+            var pendingClaim = await _links.TryClaimPendingForManualLinkAsync(current.Id, githubIssueNumber, ct);
+            if (pendingClaim is null || !pendingClaim.Won || pendingClaim.Link is null)
+            {
+                var latest = await _links.GetByIdAsync(current.Id, ct);
+                var code = latest?.MirrorCreateAttempted == true
+                    ? "github_mirror_unknown"
+                    : "github_issue_already_linked";
+                throw new GitHubSynchronizationException(
+                    code,
+                    code == "github_mirror_unknown"
+                        ? "The existing mirror creation intent is unresolved; reconcile it before linking another GitHub issue"
+                        : $"GitHub issue #{githubIssueNumber} is already linked");
+            }
+            claim = pendingClaim;
         }
-
-        var claim = await _links.ClaimAsync(
-            projectId,
-            connection.RepositoryName,
-            githubIssueNumber,
-            issueNumber,
-            ct);
-        if (!claim.Won || claim.Link is null)
-            throw new GitHubSynchronizationException("github_issue_already_linked", $"GitHub issue #{githubIssueNumber} is already linked");
+        else
+        {
+            claim = await _links.ClaimAsync(
+                projectId,
+                connection.RepositoryName,
+                githubIssueNumber,
+                issueNumber,
+                ct);
+            if (!claim.Won || claim.Link is null)
+                throw new GitHubSynchronizationException("github_issue_already_linked", $"GitHub issue #{githubIssueNumber} is already linked");
+        }
 
         var link = claim.Link;
         link = await _links.EnsureMirrorMarkerAsync(link.Id, ct) ?? link;
@@ -221,20 +228,55 @@ public sealed class GitHubIssueSynchronizationService : IScopedService
         return true;
     }
 
-    public async Task ReprojectConnectionAsync(GitHubConnection connection, CancellationToken ct = default)
+    public async Task<bool> ReprojectConnectionAsync(GitHubConnection connection, CancellationToken ct = default)
     {
         var links = await _links.ListByConnectionAsync(connection.ProjectId, connection.RepositoryName, ct);
+        var succeeded = true;
         foreach (var link in links)
         {
-            if (ct.IsCancellationRequested) break;
+            if (ct.IsCancellationRequested)
+                break;
             try
             {
                 await SyncAsync(connection.ProjectId, link.IssueNumber, pushContent: true, "mo.mohist.github.enable", ct);
             }
             catch (GitHubSynchronizationException ex)
             {
+                succeeded = false;
                 _log.LogWarning(ex, "GitHub re-projection failed for Mohist issue #{IssueNumber}", link.IssueNumber);
             }
+        }
+
+        if (succeeded && !ct.IsCancellationRequested)
+            await _connections.ClearReprojectionPendingAsync(connection.ProjectId, connection.Id, ct);
+        return succeeded;
+    }
+
+    private async Task UpdateMirrorContentAsync(
+        GitHubConnection connection,
+        GitHubIssueLink link,
+        DomainIssue issue,
+        CancellationToken ct)
+    {
+        try
+        {
+            await _issuePort.UpdateIssueAsync(
+                connection,
+                link.GithubIssueNumber,
+                issue.Title,
+                issue.Body ?? string.Empty,
+                link.MirrorMarker ?? GitHubMirrorMarker.For(link.Id),
+                ct);
+        }
+        catch (HttpRequestException ex) when (
+            ex.StatusCode == HttpStatusCode.NotFound
+            && !ct.IsCancellationRequested)
+        {
+            // Only the exact mirror content endpoint is allowed to trigger
+            // mirror identity recovery. Comment, label, close, and PR
+            // endpoints may also return 404 but do not prove the mirror is
+            // gone.
+            throw new GitHubMirrorNotFoundException(link.GithubIssueNumber, ex);
         }
     }
 
@@ -286,8 +328,11 @@ public sealed class GitHubIssueSynchronizationService : IScopedService
 
         if (created <= 0)
         {
-            await _links.ResetMirrorCreateAttemptAsync(link.Id, ct);
-            throw new GitHubSynchronizationException("github_mirror_number_invalid", "GitHub create issue returned an invalid issue number");
+            // A successful HTTP response with no usable identity is still an
+            // unknown remote outcome. Releasing the reservation would permit
+            // a duplicate POST when GitHub actually created the Issue.
+            throw new GitHubRemoteOutcomeUnknownException(
+                "GitHub create issue response did not contain a valid issue number");
         }
         return await _links.SetMirrorAsync(link.Id, created, ct);
     }
@@ -395,7 +440,14 @@ public sealed class GitHubIssueSynchronizationService : IScopedService
         string body,
         CancellationToken ct)
     {
-        if (!await _links.TryReserveCommentAsync(link.Id, commentKey, ct))
+        var marker = GitHubCommentOperationMarker.For(link.Id, commentKey);
+        if (!await _links.TryReserveCommentAsync(
+            link.Id,
+            commentKey,
+            GitHubCommentOperationKind.Comment,
+            body,
+            stateReason: null,
+            ct))
         {
             var current = await _links.GetByIdAsync(link.Id, ct);
             if (current?.HasPostedComment(commentKey) == true)
@@ -407,12 +459,18 @@ public sealed class GitHubIssueSynchronizationService : IScopedService
 
         try
         {
-            await _commentPort.PostCommentAsync(connection, link.GithubIssueNumber, body, ct);
+            await _commentPort.PostCommentAsync(
+                connection,
+                link.GithubIssueNumber,
+                GitHubMirrorMarker.Append(body, marker),
+                ct);
             await _links.MarkCommentPostedAsync(link.Id, commentKey, ct);
         }
         catch (Exception ex) when (!ct.IsCancellationRequested)
         {
-            if (!GitHubRemoteOutcome.IsUnknown(ex))
+            if (GitHubRemoteOutcome.IsUnknown(ex))
+                await _links.DeferCommentOperationAsync(link.Id, commentKey, ex.Message, ct);
+            else
                 await _links.ReleaseCommentReservationAsync(link.Id, commentKey, ct);
             throw;
         }
@@ -437,7 +495,13 @@ public sealed class GitHubIssueSynchronizationService : IScopedService
         string closeKey,
         CancellationToken ct)
     {
-        if (!await _links.TryReserveCommentAsync(link.Id, closeKey, ct))
+        if (!await _links.TryReserveCommentAsync(
+            link.Id,
+            closeKey,
+            GitHubCommentOperationKind.Close,
+            body: null,
+            stateReason: stateReason,
+            ct: ct))
         {
             var current = await _links.GetByIdAsync(link.Id, ct);
             if (current?.HasPostedComment(closeKey) == true)
@@ -454,7 +518,9 @@ public sealed class GitHubIssueSynchronizationService : IScopedService
         }
         catch (Exception ex) when (!ct.IsCancellationRequested)
         {
-            if (!GitHubRemoteOutcome.IsUnknown(ex))
+            if (GitHubRemoteOutcome.IsUnknown(ex))
+                await _links.DeferCommentOperationAsync(link.Id, closeKey, ex.Message, ct);
+            else
                 await _links.ReleaseCommentReservationAsync(link.Id, closeKey, ct);
             throw;
         }
@@ -501,8 +567,16 @@ public sealed class GitHubIssueSynchronizationService : IScopedService
     }
 }
 
-public sealed class GitHubSynchronizationException(string code, string message, Exception? inner = null)
+public class GitHubSynchronizationException(string code, string message, Exception? inner = null)
     : Exception(message, inner)
 {
     public string Code { get; } = code;
 }
+
+public sealed class GitHubMirrorNotFoundException(
+    int githubIssueNumber,
+    Exception inner)
+    : GitHubSynchronizationException(
+        "github_mirror_not_found",
+        $"GitHub mirror issue #{githubIssueNumber} was not found",
+        inner);

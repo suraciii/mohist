@@ -37,16 +37,45 @@ public sealed record GitHubIssueLinkClaim(bool Won, GitHubIssueLink? Link);
 
 public sealed record GitHubMirrorCreateReservation(GitHubIssueLink Link, bool Acquired);
 
+public sealed class GitHubIssueCommentOperation
+{
+    public string Id { get; init; } = string.Empty;
+    public string LinkId { get; init; } = string.Empty;
+    public string CommentKey { get; init; } = string.Empty;
+    public string Kind { get; init; } = GitHubCommentOperationKind.Comment;
+    public string? Body { get; init; }
+    public string? StateReason { get; init; }
+    public string? Marker { get; init; }
+    public string Status { get; init; } = GitHubCommentOperationStatus.Reserved;
+    public int AttemptCount { get; init; }
+    public DateTimeOffset? NextAttemptAt { get; init; }
+    public DateTimeOffset? LeaseUntil { get; init; }
+    public string? LastError { get; init; }
+    public DateTimeOffset? FailedAt { get; init; }
+    public DateTimeOffset CreatedAt { get; init; }
+    public DateTimeOffset UpdatedAt { get; init; }
+
+    public bool IsPending => Status == GitHubCommentOperationStatus.Reserved;
+}
+
+public static class GitHubCommentOperationKind
+{
+    public const string Comment = "comment";
+    public const string Close = "close";
+}
+
 public static class GitHubCommentOperationStatus
 {
     public const string Reserved = "reserved";
     public const string Posted = "posted";
+    public const string Ambiguous = "ambiguous";
 }
 
 public static class GitHubRemoteOutcome
 {
     public static bool IsUnknown(Exception exception) => exception switch
     {
+        GitHubRemoteOutcomeUnknownException => true,
         TimeoutException => true,
         TaskCanceledException => true,
         HttpRequestException { StatusCode: null } => true,
@@ -55,6 +84,14 @@ public static class GitHubRemoteOutcome
         _ => false,
     };
 }
+
+/// <summary>
+/// The provider accepted an outbound request but returned a response that
+/// cannot prove its result. Retrying the request could create a duplicate, so
+/// callers must reconcile the remote resource before posting again.
+/// </summary>
+public sealed class GitHubRemoteOutcomeUnknownException(string message, Exception? inner = null)
+    : Exception(message, inner);
 
 public static class GitHubSyncStatus
 {
@@ -129,6 +166,12 @@ public static class GitHubStateLabels
 /// makes an unknown create result safely reconcilable without matching on
 /// mutable user content. The marker is removed before content enters Mohist.
 /// </summary>
+public static class GitHubCommentOperationMarker
+{
+    public static string For(string linkId, string commentKey) =>
+        $"<!-- mohist:writeback:{linkId}:{commentKey} -->";
+}
+
 public static class GitHubMirrorMarker
 {
     public static string For(string linkId) => $"<!-- mohist:mirror:{linkId} -->";

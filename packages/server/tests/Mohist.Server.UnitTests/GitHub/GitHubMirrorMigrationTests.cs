@@ -19,6 +19,9 @@ public sealed class GitHubMirrorMigrationTests
         var migration = Assert.Single(migrationType.GetCustomAttributes<MigrationAttribute>());
         Assert.Equal("20260915000000_AddGitHubMirrorIntent", migration.Id);
         Assert.Single(migrationType.GetCustomAttributes<DbContextAttribute>());
+        var recoveryMigration = Assert.Single(
+            typeof(AddGitHubOperationRecovery).GetCustomAttributes<MigrationAttribute>());
+        Assert.Equal("20260918000000_AddGitHubOperationRecovery", recoveryMigration.Id);
 
         await using var connection = new SqliteConnection("Data Source=:memory:");
         await connection.OpenAsync();
@@ -96,6 +99,18 @@ public sealed class GitHubMirrorMigrationTests
         var commentOperationIndexes = await ReadIndexesAsync(connection, "GitHubIssueCommentOperations");
         Assert.True(commentOperationIndexes.Single(index =>
             index.Name == "IX_GitHubIssueCommentOperations_LinkId_CommentKey").Unique);
+
+        Assert.Contains("NeedsReprojection", await ReadColumnsAsync(connection, "GitHubConnections"));
+        var operationColumns = await ReadColumnsAsync(connection, "GitHubIssueCommentOperations");
+        Assert.Contains("Kind", operationColumns);
+        Assert.Contains("Body", operationColumns);
+        Assert.Contains("StateReason", operationColumns);
+        Assert.Contains("Marker", operationColumns);
+        Assert.Contains("AttemptCount", operationColumns);
+        Assert.Contains("NextAttemptAt", operationColumns);
+        Assert.Contains("LeaseUntil", operationColumns);
+        Assert.Contains("LastError", operationColumns);
+        Assert.Contains("FailedAt", operationColumns);
 
         var connectionIndexes = await ReadIndexesAsync(connection, "GitHubConnections");
         Assert.Equal(1, connectionIndexes.Count(index =>

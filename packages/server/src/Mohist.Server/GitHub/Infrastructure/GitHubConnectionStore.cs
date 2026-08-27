@@ -110,33 +110,76 @@ public sealed class GitHubConnectionStore : IScopedService
 
         var now = _timeProvider.GetUtcNow();
         connection.Status = GitHubConnectionStatus.Active;
+        connection.NeedsReprojection = false;
         connection.CreatedAt = now;
         connection.UpdatedAt = now;
         var apiSecretAddress = ApiSecretAddress(connection.ProjectId, connection.Id);
-        await _secretStore.StoreAsync(
-            apiSecretAddress,
-            Encoding.UTF8.GetBytes(pat),
-            ct);
-        db.GitHubConnections.Add(ToRow(connection));
+        var webhookSecretAddress = WebhookSecretAddress(connection.ProjectId, connection.Id);
+        var webhookSecret = Convert.ToHexString(RandomNumberGenerator.GetBytes(32)).ToLowerInvariant();
+
+        // Both secrets are written before the connection row. Any failure in
+        // either secret write or in the row insert compensates every resource,
+        // so an active connection can never outlive one of its credentials.
         try
         {
+            await _secretStore.StoreAsync(
+                apiSecretAddress,
+                Encoding.UTF8.GetBytes(pat),
+                ct);
+            await _secretStore.StoreAsync(
+                webhookSecretAddress,
+                Encoding.UTF8.GetBytes(webhookSecret),
+                ct);
+
+            db.GitHubConnections.Add(ToRow(connection));
             await db.SaveChangesAsync(ct);
         }
         catch (DbUpdateException ex) when (IsOwnerRepoConflict(ex))
         {
-            await _secretStore.DeleteAsync(apiSecretAddress, CancellationToken.None);
+            await CompensateCreateAsync(connection, apiSecretAddress, webhookSecretAddress);
             throw new GitHubConnectionConflictException(
                 $"GitHub repository '{connection.Owner}/{connection.Repo}' is already connected to a project", "github_repository_already_connected");
         }
         catch
         {
-            await _secretStore.DeleteAsync(apiSecretAddress, CancellationToken.None);
+            await CompensateCreateAsync(connection, apiSecretAddress, webhookSecretAddress);
             throw;
         }
 
-        var secret = Convert.ToHexString(RandomNumberGenerator.GetBytes(32)).ToLowerInvariant();
-        await _secretStore.StoreAsync(WebhookSecretAddress(connection.ProjectId, connection.Id), Encoding.UTF8.GetBytes(secret), ct);
-        return secret;
+        return webhookSecret;
+    }
+
+    private async Task CompensateCreateAsync(
+        GitHubConnection connection,
+        SecretStoreAddress apiSecretAddress,
+        SecretStoreAddress webhookSecretAddress)
+    {
+        try
+        {
+            await _secretStore.DeleteAsync(webhookSecretAddress, CancellationToken.None);
+        }
+        catch
+        {
+            // Compensation is best effort; the original create failure is the
+            // actionable result and must not be hidden by cleanup failures.
+        }
+        try
+        {
+            await _secretStore.DeleteAsync(apiSecretAddress, CancellationToken.None);
+        }
+        catch
+        {
+        }
+        try
+        {
+            await using var db = await _dbFactory.CreateDbContextAsync(CancellationToken.None);
+            await db.GitHubConnections
+                .Where(row => row.ProjectId == connection.ProjectId && row.Id == connection.Id)
+                .ExecuteDeleteAsync(CancellationToken.None);
+        }
+        catch
+        {
+        }
     }
 
     public async Task<GitHubConnection?> SetStatusAsync(string projectId, string id, string status, CancellationToken ct = default) =>
@@ -169,14 +212,54 @@ public sealed class GitHubConnectionStore : IScopedService
         var expected = status == GitHubConnectionStatus.Active
             ? GitHubConnectionStatus.Disabled
             : GitHubConnectionStatus.Active;
-        var changed = await db.GitHubConnections
-            .Where(row => row.ProjectId == projectId && row.Id == id && row.Status == expected)
-            .ExecuteUpdateAsync(setters => setters
+        var candidates = db.GitHubConnections
+            .Where(row => row.ProjectId == projectId && row.Id == id && row.Status == expected);
+        var changed = status == GitHubConnectionStatus.Active
+            ? await candidates.ExecuteUpdateAsync(setters => setters
+                .SetProperty(row => row.Status, status)
+                .SetProperty(row => row.NeedsReprojection, true)
+                .SetProperty(row => row.UpdatedAt, now), ct)
+            : await candidates.ExecuteUpdateAsync(setters => setters
                 .SetProperty(row => row.Status, status)
                 .SetProperty(row => row.UpdatedAt, now), ct);
         var row = await db.GitHubConnections.AsNoTracking()
             .FirstOrDefaultAsync(candidate => candidate.ProjectId == projectId && candidate.Id == id, ct);
         return row is null ? null : new GitHubConnectionStatusChange(ToDomain(row), changed == 1);
+    }
+
+    public async Task<IReadOnlyList<GitHubConnection>> ListPendingReprojectionsAsync(
+        CancellationToken ct = default)
+    {
+        await using var db = await _dbFactory.CreateDbContextAsync(ct);
+        var rows = await db.GitHubConnections.AsNoTracking()
+            .Where(row => row.Status == GitHubConnectionStatus.Active && row.NeedsReprojection)
+            .ToListAsync(ct);
+        return rows
+            .OrderBy(row => row.UpdatedAt)
+            .Select(ToDomain)
+            .ToList();
+    }
+
+    public async Task<GitHubConnection?> ClearReprojectionPendingAsync(
+        string projectId,
+        string id,
+        CancellationToken ct = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(projectId);
+        ArgumentException.ThrowIfNullOrWhiteSpace(id);
+        await using var db = await _dbFactory.CreateDbContextAsync(ct);
+        var now = _timeProvider.GetUtcNow();
+        await db.GitHubConnections
+            .Where(row => row.ProjectId == projectId
+                && row.Id == id
+                && row.Status == GitHubConnectionStatus.Active
+                && row.NeedsReprojection)
+            .ExecuteUpdateAsync(setters => setters
+                .SetProperty(row => row.NeedsReprojection, false)
+                .SetProperty(row => row.UpdatedAt, now), ct);
+        var row = await db.GitHubConnections.AsNoTracking()
+            .FirstOrDefaultAsync(candidate => candidate.ProjectId == projectId && candidate.Id == id, ct);
+        return row is null ? null : ToDomain(row);
     }
 
     public async Task<GitHubConnection?> UpdateApproversAsync(string projectId, string id, IReadOnlyList<string>? approvers, CancellationToken ct = default)
@@ -263,6 +346,7 @@ public sealed class GitHubConnectionStore : IScopedService
         IdentityKind = row.IdentityKind,
         InstallationId = row.InstallationId,
         NeedsAttention = row.NeedsAttention,
+        NeedsReprojection = row.NeedsReprojection,
         CreatedAt = row.CreatedAt,
         UpdatedAt = row.UpdatedAt,
     };
@@ -279,6 +363,7 @@ public sealed class GitHubConnectionStore : IScopedService
         IdentityKind = connection.IdentityKind,
         InstallationId = connection.InstallationId,
         NeedsAttention = connection.NeedsAttention,
+        NeedsReprojection = connection.NeedsReprojection,
         CreatedAt = connection.CreatedAt,
         UpdatedAt = connection.UpdatedAt,
     };

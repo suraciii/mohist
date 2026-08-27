@@ -4642,6 +4642,9 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
                     b.Property<bool>("NeedsAttention")
                         .HasColumnType("INTEGER");
 
+                    b.Property<bool>("NeedsReprojection")
+                        .HasColumnType("INTEGER");
+
                     b.Property<string>("Owner")
                         .IsRequired()
                         .HasMaxLength(256)
@@ -4839,6 +4842,36 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
                     b.Property<string>("CommentKey")
                         .IsRequired()
                         .HasMaxLength(128)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Kind")
+                        .HasMaxLength(32)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Body")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("StateReason")
+                        .HasMaxLength(32)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Marker")
+                        .HasMaxLength(512)
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("AttemptCount")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<DateTimeOffset?>("NextAttemptAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTimeOffset?>("LeaseUntil")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("LastError")
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTimeOffset?>("FailedAt")
                         .HasColumnType("TEXT");
 
                     b.Property<DateTimeOffset>("CreatedAt")

@@ -40,8 +40,12 @@ public sealed class GitHubSyncSpecs
         fixture.Comments.PostThenThrow = false;
         fixture.Comments.UpdateFailure = null;
         fixture.Comments.UpdateFailures.Clear();
+        fixture.Comments.LabelFailure = null;
+        fixture.Comments.CloseFailure = null;
+        fixture.Comments.CloseThenThrow = false;
         fixture.Comments.CreateThenThrow = false;
         fixture.Comments.MarkerMatchCount = 0;
+        fixture.Comments.CreateIssueNumberOverride = null;
         fixture.Comments.Issues.Clear();
     }
 
@@ -147,6 +151,32 @@ public sealed class GitHubSyncSpecs
     }
 
     [Fact]
+    public async Task InvalidCreateIdentity_LeavesIntentUnresolvedWithoutSecondPost()
+    {
+        var owner = $"octocat-{Guid.NewGuid():N}";
+        var project = await _fixture.Client.CreateProjectWithDefaultRepositoryAsync<ProjectInfo>(
+            "/api/projects", $"github-sync-invalid-create-{Guid.NewGuid():N}", repoName: RepositoryName,
+            gitUrl: $"https://github.com/{owner}/{RepositoryName}.git");
+        await _fixture.Client.PostDataAsync<JsonElement>(
+            $"/api/projects/{project.Id}/github-connections",
+            new { owner, repo = RepositoryName, pat = "github-pat" });
+        _fixture.Comments.CreateIssueNumberOverride = 0;
+        var issueNumber = await CreateIssueInProjectAsync(project.Id, isDraft: false);
+        await PumpAsync();
+
+        var pending = await LoadLinkAsync(project.Id, issueNumber);
+        Assert.True(pending!.IsPending);
+        Assert.True(pending.MirrorCreateAttempted);
+        Assert.Single(_fixture.Comments.CreatedIssues);
+
+        _fixture.Comments.CreateIssueNumberOverride = null;
+        using var response = await _fixture.Client.PostAsJsonAsync(
+            $"/api/projects/{project.Id}/issues/{issueNumber}/github/sync", new { });
+        Assert.Equal(System.Net.HttpStatusCode.Conflict, response.StatusCode);
+        Assert.Single(_fixture.Comments.CreatedIssues);
+    }
+
+    [Fact]
     public async Task SyncReprojectsCurrentDoneStateBeforeClearingError()
     {
         var (projectId, issueNumber, _) = await CreateMirroredIssueAsync();
@@ -210,6 +240,188 @@ public sealed class GitHubSyncSpecs
     }
 
     [Fact]
+    public async Task Label404_DoesNotRecreateTheMirror()
+    {
+        var (projectId, issueNumber, _) = await CreateMirroredIssueAsync();
+        var grain = _fixture.Grains.GetGrain<IIssueGrain>(GrainKey.Issue(new IssueKey(projectId, issueNumber)));
+        await grain.UpdateFullAsync(new UpdateIssueData(
+            NoWorkflow: true,
+            PresentFields: new HashSet<string>([nameof(UpdateIssueData.NoWorkflow)], StringComparer.Ordinal)));
+        await grain.StartWorkAsync();
+        await PumpAsync();
+        var original = await LoadLinkAsync(projectId, issueNumber);
+        Assert.NotNull(original);
+        await ClearProjectionBookkeepingAsync(projectId, issueNumber);
+
+        _fixture.Comments.LabelFailure = new HttpRequestException(
+            "label endpoint returned not found",
+            null,
+            System.Net.HttpStatusCode.NotFound);
+        using var response = await _fixture.Client.PostAsJsonAsync(
+            $"/api/projects/{projectId}/issues/{issueNumber}/github/sync", new { });
+        Assert.Equal(System.Net.HttpStatusCode.Conflict, response.StatusCode);
+
+        var current = await LoadLinkAsync(projectId, issueNumber);
+        Assert.Equal(original!.GithubIssueNumber, current!.GithubIssueNumber);
+        Assert.Single(_fixture.Comments.CreatedIssues);
+    }
+
+    [Fact]
+    public async Task Close404_DoesNotRecreateTheMirror()
+    {
+        var (projectId, issueNumber, _) = await CreateMirroredIssueAsync();
+        var grain = _fixture.Grains.GetGrain<IIssueGrain>(GrainKey.Issue(new IssueKey(projectId, issueNumber)));
+        await grain.UpdateFullAsync(new UpdateIssueData(
+            NoWorkflow: true,
+            PresentFields: new HashSet<string>([nameof(UpdateIssueData.NoWorkflow)], StringComparer.Ordinal)));
+        await grain.StartWorkAsync();
+        await PumpAsync();
+        await grain.MarkDoneAsync();
+        await PumpAsync();
+        var original = await LoadLinkAsync(projectId, issueNumber);
+        Assert.NotNull(original);
+        await ClearProjectionBookkeepingAsync(projectId, issueNumber);
+
+        _fixture.Comments.CloseFailure = new HttpRequestException(
+            "close endpoint returned not found",
+            null,
+            System.Net.HttpStatusCode.NotFound);
+        using var response = await _fixture.Client.PostAsJsonAsync(
+            $"/api/projects/{projectId}/issues/{issueNumber}/github/sync", new { });
+        Assert.Equal(System.Net.HttpStatusCode.Conflict, response.StatusCode);
+
+        var current = await LoadLinkAsync(projectId, issueNumber);
+        Assert.Equal(original!.GithubIssueNumber, current!.GithubIssueNumber);
+        Assert.Single(_fixture.Comments.CreatedIssues);
+    }
+
+    [Fact]
+    public async Task UnknownCommentOutcome_IsReconciledByHostedRecoveryWithoutDuplicate()
+    {
+        var (projectId, issueNumber, _) = await CreateMirroredIssueAsync();
+        await ClearProjectionBookkeepingAsync(projectId, issueNumber);
+        _fixture.Comments.Comments.Clear();
+        _fixture.Comments.PostThenThrow = true;
+
+        await DispatchContentChangeAsync(projectId, issueNumber);
+
+        var link = await LoadLinkAsync(projectId, issueNumber);
+        Assert.NotNull(link);
+        Assert.False(link!.HasPostedComment(GitHubCommentKinds.MirrorCreated));
+        Assert.Single(_fixture.Comments.Comments);
+
+        _fixture.TimeProvider.Advance(TimeSpan.FromSeconds(5));
+        var worker = _fixture.Services.GetRequiredService<GitHubIssueCommentOperationRecoveryWorker>();
+        Assert.Equal(1, await worker.ProcessPendingAsync());
+
+        link = await LoadLinkAsync(projectId, issueNumber);
+        Assert.True(link!.HasPostedComment(GitHubCommentKinds.MirrorCreated));
+        Assert.Single(_fixture.Comments.Comments);
+    }
+
+    [Fact]
+    public async Task MultipleCommentMarkerMatches_FailClosedWithoutAnotherPost()
+    {
+        var (projectId, issueNumber, _) = await CreateMirroredIssueAsync();
+        await ClearProjectionBookkeepingAsync(projectId, issueNumber);
+        _fixture.Comments.Comments.Clear();
+        _fixture.Comments.PostThenThrow = true;
+
+        await DispatchContentChangeAsync(projectId, issueNumber);
+
+        var link = await LoadLinkAsync(projectId, issueNumber);
+        Assert.NotNull(link);
+        var marker = GitHubCommentOperationMarker.For(link!.Id, GitHubCommentKinds.MirrorCreated);
+        _fixture.Comments.Comments.Add(new RecordingGitHubCommentPort.PostedComment(
+            "unused",
+            link.GithubIssueNumber,
+            GitHubMirrorMarker.Append("duplicate", marker)));
+        // Use the same connection identity as the real comment so the marker
+        // query sees both remote matches.
+        var connection = (await _fixture.Services.GetRequiredService<GitHubConnectionStore>()
+            .GetByRepositoryAsync(projectId, link.RepositoryName))!;
+        _fixture.Comments.Comments[^1] = new RecordingGitHubCommentPort.PostedComment(
+            connection.Id,
+            link.GithubIssueNumber,
+            GitHubMirrorMarker.Append("duplicate", marker));
+
+        _fixture.TimeProvider.Advance(TimeSpan.FromSeconds(5));
+        var worker = _fixture.Services.GetRequiredService<GitHubIssueCommentOperationRecoveryWorker>();
+        Assert.Equal(1, await worker.ProcessPendingAsync());
+
+        link = await LoadLinkAsync(projectId, issueNumber);
+        Assert.Equal(GitHubCommentOperationStatus.Ambiguous, await LoadOperationStatusAsync(link!.Id, GitHubCommentKinds.MirrorCreated));
+        Assert.Equal(GitHubSyncStatus.Error, link.SyncStatus);
+        Assert.Equal(2, _fixture.Comments.Comments.Count);
+    }
+
+    [Fact]
+    public async Task UnknownCloseOutcome_IsReconciledFromRemoteStateWithoutDuplicateClose()
+    {
+        var (projectId, issueNumber, _) = await CreateMirroredIssueAsync();
+        var grain = _fixture.Grains.GetGrain<IIssueGrain>(GrainKey.Issue(new IssueKey(projectId, issueNumber)));
+        await grain.UpdateFullAsync(new UpdateIssueData(
+            NoWorkflow: true,
+            PresentFields: new HashSet<string>([nameof(UpdateIssueData.NoWorkflow)], StringComparer.Ordinal)));
+        await grain.StartWorkAsync();
+        await PumpAsync();
+        await grain.MarkDoneAsync();
+        await PumpAsync();
+
+        var link = await LoadLinkAsync(projectId, issueNumber);
+        Assert.NotNull(link);
+        await ClearProjectionBookkeepingAsync(projectId, issueNumber);
+        _fixture.Comments.Comments.Clear();
+        _fixture.Comments.Closes.Clear();
+        _fixture.Comments.Issues[link!.GithubIssueNumber] =
+            _fixture.Comments.Issues[link.GithubIssueNumber] with { State = "open", StateReason = null };
+        _fixture.Comments.CloseThenThrow = true;
+
+        using var response = await _fixture.Client.PostAsJsonAsync(
+            $"/api/projects/{projectId}/issues/{issueNumber}/github/sync", new { });
+        Assert.Equal(System.Net.HttpStatusCode.Conflict, response.StatusCode);
+        Assert.Single(_fixture.Comments.Closes);
+
+        _fixture.TimeProvider.Advance(TimeSpan.FromSeconds(5));
+        var worker = _fixture.Services.GetRequiredService<GitHubIssueCommentOperationRecoveryWorker>();
+        Assert.Equal(1, await worker.ProcessPendingAsync());
+
+        Assert.Single(_fixture.Comments.Closes);
+        link = await LoadLinkAsync(projectId, issueNumber);
+        Assert.True(link!.HasPostedComment(GitHubCommentKinds.ClosedCompleted));
+    }
+
+    [Fact]
+    public async Task EnableFailure_LeavesDurableReprojectionForHostedRecovery()
+    {
+        var (projectId, issueNumber, connectionId) = await CreateMirroredIssueAsync();
+        using (var disabled = await _fixture.Client.PostAsync(
+            $"/api/projects/{projectId}/github-connections/{connectionId}/disable", JsonContent.Create(new { })))
+            disabled.EnsureSuccessStatusCode();
+
+        _fixture.Comments.UpdatedIssues.Clear();
+        _fixture.Comments.UpdateFailure = new InvalidOperationException("temporary update failure");
+        using (var enabled = await _fixture.Client.PostAsync(
+            $"/api/projects/{projectId}/github-connections/{connectionId}/enable", JsonContent.Create(new { })))
+            enabled.EnsureSuccessStatusCode();
+
+        var connection = await _fixture.Services.GetRequiredService<GitHubConnectionStore>()
+            .GetByIdAsync(connectionId);
+        Assert.True(connection!.NeedsReprojection);
+
+        _fixture.Comments.UpdateFailure = null;
+        var worker = _fixture.Services.GetRequiredService<GitHubConnectionReprojectionWorker>();
+        Assert.Equal(1, await worker.ProcessPendingAsync());
+
+        connection = await _fixture.Services.GetRequiredService<GitHubConnectionStore>()
+            .GetByIdAsync(connectionId);
+        Assert.False(connection!.NeedsReprojection);
+        var link = await LoadLinkAsync(projectId, issueNumber);
+        Assert.Contains(_fixture.Comments.UpdatedIssues,
+            update => update.GithubIssueNumber == link!.GithubIssueNumber);
+    }
+
+    [Fact]
     public async Task LinkOverwritesGitHubFromMohistAndUnlinkPreservesBothSides()
     {
         var owner = $"octocat-{Guid.NewGuid():N}";
@@ -240,6 +452,44 @@ public sealed class GitHubSyncSpecs
         Assert.Null(await LoadLinkAsync(project.Id, issueNumber));
         Assert.Equal("Ready issue", _fixture.Comments.Issues[githubIssueNumber].Title);
         Assert.Contains("Ready issue body", _fixture.Comments.Issues[githubIssueNumber].Body, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task ManualLinkCannotDeleteReservedMirrorIntent()
+    {
+        var owner = $"octocat-{Guid.NewGuid():N}";
+        var project = await _fixture.Client.CreateProjectWithDefaultRepositoryAsync<ProjectInfo>(
+            "/api/projects", $"github-link-race-{Guid.NewGuid():N}", repoName: RepositoryName,
+            gitUrl: $"https://github.com/{owner}/{RepositoryName}.git");
+        var connection = await _fixture.Client.PostDataAsync<JsonElement>(
+            $"/api/projects/{project.Id}/github-connections",
+            new { owner, repo = RepositoryName, pat = "github-pat" });
+        _fixture.Comments.CreateFailure = new InvalidOperationException("hold mirror creation");
+        var issueNumber = await CreateIssueInProjectAsync(project.Id, isDraft: false);
+        await PumpAsync();
+        _fixture.Comments.CreateFailure = null;
+
+        var link = await LoadLinkAsync(project.Id, issueNumber);
+        Assert.NotNull(link);
+        var githubIssueNumber = 818;
+        _fixture.Comments.Issues[githubIssueNumber] = new GitHubIssueSnapshot(
+            githubIssueNumber, "manual", "manual body", "open", null);
+        await using (var scope = _fixture.Services.CreateAsyncScope())
+        {
+            var links = scope.ServiceProvider.GetRequiredService<GitHubIssueLinkStore>();
+            await links.TryReserveMirrorCreateAsync(link!.Id);
+        }
+
+        using var response = await _fixture.Client.PostAsJsonAsync(
+            $"/api/projects/{project.Id}/issues/{issueNumber}/github/link",
+            new { repository = $"{owner}/{RepositoryName}", number = githubIssueNumber });
+        Assert.Equal(System.Net.HttpStatusCode.Conflict, response.StatusCode);
+
+        var current = await LoadLinkAsync(project.Id, issueNumber);
+        Assert.True(current!.IsPending);
+        Assert.True(current.MirrorCreateAttempted);
+        Assert.DoesNotContain(_fixture.Comments.CreatedIssues,
+            created => created.ConnectionId == connection.GetProperty("id").GetString());
     }
 
     [Fact]
@@ -344,6 +594,17 @@ public sealed class GitHubSyncSpecs
 
     private async Task<GitHubIssueLink?> LoadLinkAsync(string projectId, int issueNumber) =>
         await _fixture.Services.GetRequiredService<GitHubIssueLinkStore>().GetByIssueAsync(projectId, issueNumber);
+
+    private async Task<string?> LoadOperationStatusAsync(string linkId, string commentKey)
+    {
+        await using var scope = _fixture.Services.CreateAsyncScope();
+        var factory = scope.ServiceProvider.GetRequiredService<IDbContextFactory<MohistDbContext>>();
+        await using var db = await factory.CreateDbContextAsync();
+        return await db.GitHubIssueCommentOperations
+            .Where(operation => operation.LinkId == linkId && operation.CommentKey == commentKey)
+            .Select(operation => operation.Status)
+            .SingleOrDefaultAsync();
+    }
 
     private async Task<DomainIssue?> LoadIssueAsync(string projectId, int issueNumber) =>
         await _fixture.Services.GetRequiredService<IIssueStore>()

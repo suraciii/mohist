@@ -21,6 +21,12 @@ public sealed class GitHubConnection
     /// after fixing the credential.
     /// </summary>
     public bool NeedsAttention { get; set; }
+
+    /// <summary>
+    /// Set when an Active transition still has linked Issues to re-project.
+    /// The hosted reconciler clears it only after every link converges.
+    /// </summary>
+    public bool NeedsReprojection { get; set; }
     public DateTimeOffset CreatedAt { get; set; }
     public DateTimeOffset UpdatedAt { get; set; }
 

@@ -44,6 +44,8 @@ public partial class MohistDbContext
                     .HasMaxLength(256);
                 entity.Property(e => e.NeedsAttention)
                     .IsRequired();
+                entity.Property(e => e.NeedsReprojection)
+                    .IsRequired();
                 entity.Property(e => e.CreatedAt)
                     .IsRequired();
                 entity.Property(e => e.UpdatedAt)
@@ -156,9 +158,22 @@ public partial class MohistDbContext
                 entity.Property(e => e.CommentKey)
                     .HasMaxLength(128)
                     .IsRequired();
+                entity.Property(e => e.Kind)
+                    .HasMaxLength(32);
+                entity.Property(e => e.Body);
+                entity.Property(e => e.StateReason)
+                    .HasMaxLength(32);
+                entity.Property(e => e.Marker)
+                    .HasMaxLength(512);
                 entity.Property(e => e.Status)
                     .HasMaxLength(32)
                     .IsRequired();
+                entity.Property(e => e.AttemptCount)
+                    .IsRequired();
+                entity.Property(e => e.NextAttemptAt);
+                entity.Property(e => e.LeaseUntil);
+                entity.Property(e => e.LastError);
+                entity.Property(e => e.FailedAt);
                 entity.HasIndex(e => new { e.LinkId, e.CommentKey })
                     .IsUnique();
                 entity.HasIndex(e => e.LinkId);
