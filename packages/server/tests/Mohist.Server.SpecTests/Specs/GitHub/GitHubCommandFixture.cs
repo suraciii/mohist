@@ -5,6 +5,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Time.Testing;
 using Mohist.Server.GitHub.Domain;
+using Mohist.Server.GitHub.Infrastructure;
 using Mohist.Server.GitHub.Ports;
 using Mohist.Server.SpecTests.Support;
 using Mohist.Server.TestSupport;
@@ -207,6 +208,11 @@ public sealed class GitHubCommandFixture : IAsyncLifetime
 
             builder.ConfigureTestServices(services =>
             {
+                // These specs advance a fake clock and invoke the delivery
+                // pass explicitly. Do not let the autonomous hosted loop
+                // consume a due row before the assertion does.
+                services.Configure<GitHubCommandReplyDeliveryOptions>(options =>
+                    options.HostedWorkerEnabled = false);
                 services.RemoveAll<IGitHubCommentPort>();
                 services.RemoveAll<IGitHubIssuePort>();
                 services.AddSingleton<IGitHubCommentPort>(Comments);

@@ -256,6 +256,7 @@ public static class MohistServiceRegistration
         });
         services.AddScoped<IGitHubIssuePort>(sp => (IGitHubIssuePort)sp.GetRequiredService<IGitHubCommentPort>());
         services.AddSingleton<GitHubCommandReplyDeliverySignal>();
+        services.AddOptions<GitHubCommandReplyDeliveryOptions>();
         services.AddSingleton<GitHubCommandReplyDeliveryWorker>();
         services.AddHostedService(sp => sp.GetRequiredService<GitHubCommandReplyDeliveryWorker>());
 
