@@ -329,23 +329,27 @@ OpenCode implementation.
 capability. A parameterized Profile still materializes one of these concrete names before Action
 validation and dispatch; there is no generic Agent-turn Action in the registry.
 
-### `mohist/openspec-tasks`
+### `mohist/task-list`
 
-`mohist/openspec-tasks` appends planned Build tasks through its `add-tasks` capability. Its
+`mohist/task-list` appends planned Build tasks through its `add-tasks` capability. Its
 `task.uses` input is a required default for every appended task. A Profile may set this value to
 `${{ profile.agentAction }}` because Profile materialization runs before deferred Action Input is
 captured.
 
-The source `tasks.json` may describe task identity, title, prompt context, and completion
-expectations, but it cannot provide `uses`. Allowing a source task to replace `task.uses` would
+The source handoff file may describe task identity, title, goal, acceptance criteria, and plan
+references, but it cannot provide `uses`. Allowing a source task to replace `task.uses` would
 bypass Profile validation and could mix Agent Runtimes inside a Run. The Action rejects such input
 with `invalid-input`; it does not fall back to `mohist/opencode`.
 
+When the Workspace directory was rebuilt and the handoff file is missing locally, the Action
+restores it from the Run's uploaded artifact record before loading. See
+[`handoff.md`](handoff.md) for the contract and the recovery boundary.
+
 ### Git and GitHub PR Actions
 
-`mohist/push`, `create-github-pr`, `mark-github-pr-ready`, `merge-github-pr`, and `mohist/rebase`
-are ordinary Workflow Actions with one input channel. A Profile explicitly passes the base branch,
-workflow branch, remote, and other context through `${{ repository.* }}` and
+`mohist/push`, `create-github-pr`, `mark-github-pr-ready`, `enable-github-pr-auto-merge`, and
+`mohist/rebase` are ordinary Workflow Actions with one input channel. A Profile explicitly passes
+the base branch, workflow branch, remote, and other context through `${{ repository.* }}` and
 `${{ workspace.* }}`. An Action does not look up Run Variables itself.
 
 - `push` is solely responsible for publishing the current workspace's committed HEAD to the remote
@@ -354,23 +358,22 @@ workflow branch, remote, and other context through `${{ repository.* }}` and
 - `create-github-pr` only creates or updates a draft PR and outputs a stable PR identity. It performs
   no Git operation and does not decide which commit should be published.
 - `mark-github-pr-ready` marks a draft PR ready and is idempotent if it is already ready.
-- `merge-github-pr` squash-merges a PR and must wait for PR checks before the merge.
+- `enable-github-pr-auto-merge` registers the merge method on a PR and lets GitHub perform the
+  merge once every prerequisite is satisfied. It is idempotent when auto-merge is already enabled.
 
-Publishing, PR metadata, and merging are three independent tasks with independent failure
-boundaries. A push failure retries only push; a PR operation failure retries only that PR operation;
-merge recovery handles only its own failure.
+Publishing, PR metadata, and merge registration are three independent tasks with independent failure
+boundaries. A push failure retries only push; a PR operation failure retries only that PR operation.
 
-Waiting for PR checks is an internal precondition of the merge Action, not a Stage-level check. It
-polls `gh pr view --json statusCheckRollup`. If checks are empty, it waits within a 120-second grace
-window. Failed checks return `error.code: pr-checks-failed`. The Action performs no implicit repair;
-the Profile must declare explicit recovery.
+Waiting for the merge result is a Stage-level check, not an internal precondition of the
+registration Action: the Profile places `mohist/github-pr-status` with `expect: merged` after
+`enable-github-pr-auto-merge`. A merge prerequisite that never becomes satisfied, such as a failed
+required check, leaves the wait unsatisfied and surfaces as a blocked Run.
 
-`mohist/github-pr-checks` exposes the same polling and classification logic as an explicit task in
+`mohist/github-pr-checks` exposes check polling and classification as an explicit task in
 the Stage graph. A typical Profile places this delivery CI check after `mark-pr-ready` in the check
-Stage. It reuses the merge Action's polling pure function and `pr-checks-failed` error code, so its
-recovery handler is symmetric with merge-pr: the same `recover:fix-pr-checks` + `recover:push` +
-`retrySelf`. It is read-only: it does not modify the PR, push, or perform implicit repair. The
-Profile declares recovery explicitly.
+Stage. Failed checks return `error.code: pr-checks-failed`, and the Profile declares the
+`recover:fix-pr-checks` + `recover:push` + `retrySelf` recovery explicitly. It is read-only: it
+does not modify the PR, push, or perform implicit repair.
 
 See [`builtin-workflows.md`](builtin-workflows.md) for the complete task graph.
 
@@ -381,4 +384,4 @@ when Runner registers with Server; catalog validation during Profile save with a
 `actionValidation` response marker; declarative capability injection for `agent-turn`,
 `add-tasks`, and `write-vars`; structured output end to end; `setVars` projection; capability
 projection in the Server catalog; capability validation for `agentAction`; and the required
-non-overridable `task.uses` contract for `mohist/openspec-tasks`.
+non-overridable `task.uses` contract for `mohist/task-list`.

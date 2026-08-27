@@ -14,11 +14,11 @@ status, and materialization routing facts. Directory contents and Git layout
 not Workspace entity schema.
 
 A Workspace is the home of the work, while repositories are its materials.
-Repository checkouts live under the Workspace (by convention, in `repos/`), and
-work products such as plans and research belong at the Workspace level. This
-meaning is carried by prompt conventions rather than platform schema. It gives
-cross-repository work a place for artifacts that do not belong to any one
-repository.
+Repository checkouts live under the Workspace, and work products such as plans
+and research belong at the Workspace level. For Workflow Workspaces this layout
+is a platform contract owned by Workflow preparation (see Initialization); for
+interactive Workspaces it remains a prompt convention. It gives cross-repository
+work a place for artifacts that do not belong to any one repository.
 
 Reference analogy, for explanation only and not as a terminology source:
 Runner ~= Node, WorkflowRun ~= Pod, AgentSession ~= Container, and Workspace ~=
@@ -128,9 +128,15 @@ user and must be unique within the Project.
 
 ### Initialization
 
-- Workflow path: clean initialization. Prepare performs a fresh clone from the
-  Repository resource. Workspaces for parallel Issues use separate directories
-  with no shared checkout or dependency cache.
+- Workflow path: clean initialization. Prepare materializes a fixed root
+  layout and performs a fresh clone from the Repository resource into it:
+  `.mohist/` for platform marker and identity files, `REPOS/<repository-name>/`
+  for the checkout, and `PLANS/`, `RESEARCH/`, `.scratch/` for Workspace-local
+  work material. Only `REPOS/` participates in Git; plan and review material
+  under `PLANS/` never enters a commit, branch, or Pull Request, and its
+  durable record is the uploaded run artifact (see
+  [`workflow/handoff.md`](workflow/handoff.md)). Workspaces for parallel
+  Issues use separate directories with no shared checkout or dependency cache.
 - Interactive path: an empty directory plus Repository access. The Agent
   organizes it according to convention; the platform creates no internal
   layout in advance.
@@ -189,7 +195,8 @@ implementation gap for dispatches that still lack a named Workspace. New code
 must not extend that fallback; removing it needs no compatibility model
 because Runner materializations are reconstructible.
 
-Open questions concern compound-Issue repository attachment, Runtime Binding
-after rematerialization, and whether Workflow OpenSpec artifacts belong at the
-Workspace root. Git worktrees remain a Git implementation detail; a spawned
-Session always inherits its parent Workspace.
+Open questions concern compound-Issue repository attachment and Runtime
+Binding after rematerialization. The earlier question about Workflow plan
+artifacts is resolved: they belong at the Workspace root under `PLANS/`, never
+inside the Repository checkout. Git worktrees remain a Git implementation
+detail; a spawned Session always inherits its parent Workspace.

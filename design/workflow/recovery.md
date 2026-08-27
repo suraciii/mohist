@@ -144,7 +144,7 @@ recovery task. A handler must not branch on the message.
   "status": "completed",
   "addTasks": [
     { "id": "recover:rebase", "uses": "mohist/rebase", "with": {...} },
-    { "id": "merge-pr", "uses": "mohist/merge-github-pr", "with": {"options": "${{ vars.agent }}"}, "recovery": {"budget": 2, ...}, "recoveryRemaining": 1 }
+    { "id": "load-tasks", "uses": "mohist/task-list", "with": {"path": "PLANS/issue-5.handoff.json"}, "recovery": {"budget": 2, ...}, "recoveryRemaining": 1 }
   ]
 }
 ```

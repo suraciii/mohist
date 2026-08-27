@@ -43,7 +43,6 @@ User Project
 - Workspace prep/clean belongs in Runner, not in Server.
 - User-project shell, process, and agent execution belong in Runner, not in Server.
 - Git side effects belong in Runner, not in Server.
-- OpenSpec side effects belong in Runner, not in Server.
 - Mohist daemon self-management process execution (inspect, update, install, restart, and determine
   the status of Mohist and its managed services) belongs in Server; Runner is for user-project
   workspace, git, shell, and agent execution.
@@ -74,7 +73,7 @@ User Project
 - Skill install belongs in the CLI, not in Server.
 - Product design belongs in `docs/`, not in `design/`.
 - The domain model belongs in code, not in `design/`.
-- Architecture rules belong in `design/architecture.md`, not in OpenSpec.
+- Architecture rules belong in `design/architecture.md`.
 - Builtin workflow content belongs in `*.workflow.yaml`, not in `design/`.
 
 ## Facts and decisions
@@ -261,9 +260,8 @@ Agent/Session ownership invariants: [`agent-execution.md`](agent-execution.md).
   runtime secrets and the Mohist App credential are addressed by their owning aggregate (AgentApp / Enrollment),
   not by Agent Connection, so removing a Connection does not delete a separately-retained Slack App's secrets.
   Production code reaches Slack create/delete only through a narrow app-management port.
-- All shell/agent/git/OpenSpec execution goes to Runner.
+- All shell/agent/git execution goes to Runner.
 - Single state authority. `mohist-slack` is a stateless managed adapter process; anything that must
   survive a restart lives in Server.
 - Single control-plane daemon today. Actor model for state, not distribution.
 - Durable dispatcher notifies. Never executes tasks or calls runner.
-- OpenSpec is not architecture authority.

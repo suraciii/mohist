@@ -155,10 +155,7 @@ The Run Variables resource still lets other callers modify `stages` explicitly.
   output projection fails, Run Variables remain unchanged and the task fails.
 
 Profile-owned template declarations receive Effective Variables only through an explicit
-`${{ vars.* }}` reference. A manifest-owned engine input is separate: Runner derives that declared
-Action input from the immutable dispatch snapshot under
-[`task-dispatch.md`](task-dispatch.md#engine-sourced-action-inputs), without adding a profile
-reference. Template evaluation occurs at the Runner execution entry point before it calls the
+`${{ vars.* }}` reference. Template evaluation occurs at the Runner execution entry point before it calls the
 Action. The Action sees only input that Runner has rendered and validated; it cannot read the
 Variables resource again.
 
