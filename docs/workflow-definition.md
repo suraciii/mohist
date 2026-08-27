@@ -59,9 +59,9 @@ the decision is submitted.
 ## Task
 
 ```yaml
-- id: merge-pr                   # Required. The Task identifier within the Stage.
-  title: Merge GitHub PR         # Optional. A user-facing name.
-  uses: mohist/merge-github-pr   # Required. Selects an Action.
+- id: enable-auto-merge                   # Required. The Task identifier within the Stage.
+  title: Enable auto-merge         # Optional. A user-facing name.
+  uses: mohist/enable-github-pr-auto-merge   # Required. Selects an Action.
   with:                          # Optional. Action Input. Supports template expressions.
     repositoryUrl: ${{ repository.gitUrl }}
     prNumber: ${{ vars.github.pr.number }}
@@ -79,6 +79,13 @@ inputs and outputs. Each Action declares its input names, required fields,
 default values, output fields, and error codes. Mohist validates `with` against
 that declaration. It rejects unknown fields, missing required fields, and
 invalid types instead of ignoring them.
+
+One `with` key is engine-reserved and valid for every Task:
+`working-directory` sets the Workspace-relative directory the Action runs in
+and is resolved before manifest validation. Repository-modifying Tasks in a
+Workflow Workspace use `working-directory: REPOS/${{ repository.name }}` to
+address the checkout; see [Workspace](workspaces.md#layout). A path that
+escapes the Workspace fails the Task.
 
 `uses` normally contains a literal concrete Action name. A Profile that declares
 `agentAction` may instead use the complete scalar `${{ profile.agentAction }}`.
@@ -203,7 +210,7 @@ list below.
 - When an expression occupies the complete value, the replacement retains its
   original type, including object, array, or number.
 - An expression can be embedded in a string, for example
-  `openspec/changes/issue-${{ issue.number }}`. Mohist converts the value to
+  `PLANS/tasks.json`. Mohist converts the value to
   text. The Task fails when the expression cannot resolve or its value is an
   object or array.
 - Write `\${{` when the literal text `${{` is required.
@@ -211,9 +218,10 @@ list below.
   does not also become a top-level name. Mohist also does not copy `workflow`,
   `stage`, `work`, `issue`, `repository`, `workspace`, `tasks`, `prompts`, or
   `failure` into `vars`.
-- `workspace` describes only Workspace facts. It does not provide OpenSpec path
-  conventions. A Profile or Prompt must write a path such as
-  `openspec/changes/issue-${{ issue.number }}` explicitly.
+- `workspace` describes only Workspace facts, such as `workspace.path` and
+  `workspace.branch`. It does not provide plan-artifact path conventions. A
+  Profile or Prompt must write a path such as
+  `PLANS/PLAN.md` explicitly.
 
 ## Validate a Definition
 
@@ -302,8 +310,8 @@ stages:
     resources:
       - project-integration
     tasks:
-      - id: merge-pr
-        uses: mohist/merge-github-pr
+      - id: enable-auto-merge
+        uses: mohist/enable-github-pr-auto-merge
         with:
           repositoryUrl: ${{ repository.gitUrl }}
           prNumber: ${{ vars.github.pr.number }}
@@ -311,33 +319,24 @@ stages:
         recovery:
           budget: 2
           handlers:
-            - when: error.code=base-moved
+            - when: error.code=pr-checks-failed
               tasks:
-                - id: recover:rebase
-                  uses: mohist/rebase
+                - id: recover:fix-pr-checks
+                  uses: mohist/opencode
                   with:
-                    baseBranch: ${{ repository.baseBranch }}
-                    remote: origin
-                  recovery:
-                    budget: 2
-                    handlers:
-                      - when: error.code=conflict
-                        tasks:
-                          - id: recover:resolve-conflicts
-                            uses: mohist/opencode
-                            with:
-                              session: integrate
-                              prompt: ${{ prompts.resolve-rebase-conflicts }}
-                              options: ${{ vars.agent }}
+                    session: integrate
+                    prompt: ${{ prompts.fix-pr-checks }}
+                    options: ${{ vars.agent }}
                 - id: recover:push
                   uses: mohist/push
                   with:
+                    working-directory: REPOS/${{ repository.name }}
                     source: ${{ workspace.branch }}
                     target: ${{ workspace.branch }}
                     remote: origin
                     force: true
               retrySelf: true
-            - when: error.code=protection-conflict
+            - when: error.code=retry-safe
               retrySelf: true
     checks:
       - id: merge-verified

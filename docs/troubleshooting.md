@@ -51,9 +51,9 @@ repair loop exhausts that budget, retry starts a new budget.
 
 ## Common Failure Modes
 
-### 1. Plan Does Not Produce `proposal.md`
+### 1. Plan Does Not Produce `PLAN.md`
 
-**Symptom:** Plan is blocked and `proposal.md` does not exist.
+**Symptom:** Plan is blocked and `PLANS/PLAN.md` does not exist.
 
 Possible causes:
 
@@ -92,23 +92,22 @@ mo session list --issue <n>
 
 Resolve:
 
-- Edit `tasks.json` and remove a blocked task.
+- Edit the task list in `PLANS/tasks.json` and remove a blocked task.
 - Reject the Plan so the Agent plans again.
 - Split the Issue into smaller child Issues.
 
-### 3. Check Review Fails
+### 3. Check Review Reports Findings
 
-**Symptom:** The Check Agent returns a failing review verdict.
+**Symptom:** The Check review evidence reports must-fix findings.
 
-**Meaning:** The Agent found a problem while reviewing its output.
-
-This is expected quality control. When the Profile configures convergence, the
-Workflow creates a repair Build automatically.
+**Meaning:** A separate Agent session found a problem while reviewing the
+diff. The review is evidence, not a verdict: the Workflow does not repair
+findings on its own.
 
 Choose one action:
 
-- Wait for convergence to repair the problem and inspect its panel.
-- Reject so the Agent builds again.
+- Reject with feedback so the Agent repairs the findings and the stage checks
+  run again.
 - Approve the current output when the finding is not material.
 
 ### 4. Integrate Has a Merge Conflict

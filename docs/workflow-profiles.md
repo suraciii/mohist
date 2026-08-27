@@ -77,45 +77,34 @@ stages:
   - stage: plan
     requiresApproval: true
     tasks:
-      - id: proposal
-        title: Generate proposal
+      - id: plan
+        title: Plan the change
         uses: mohist/opencode
         with:
           session: plan
-          prompt: ${{ prompts.proposal }}
+          prompt: ${{ prompts.plan }}
           options: ${{ vars.agent }}
         expect:
           files:
-            - path: openspec/changes/issue-${{ issue.number }}/proposal.md
-      - id: specs
-        # ...
-      - id: design
-        # ...
-      - id: tasks
-        # ...
-      - id: self-review
-        # ...
-    checks:
-      - id: plan-artifacts
-        with:
-          changeDir: openspec/changes/issue-${{ issue.number }}
+            - path: PLANS/PLAN.md
+            - path: PLANS/tasks.json
 
   - stage: build
     requiresApproval: false
     tasks:
-      # Execute tasks.json.
+      # Expand the task list and verify each increment.
 
   - stage: check
     requiresApproval: true
     tasks:
       - id: review
-        # The Inline Agent reviews its own output.
+        # A separate Agent session records review evidence for the approver.
 
   - stage: integrate
     requiresApproval: false
     tasks:
-      - id: merge
-        # Merge into the base branch.
+      - id: enable-auto-merge
+        # Enable auto-merge and wait for the merge.
 ```
 
 ## Key Fields
@@ -204,19 +193,20 @@ approval points as `mohist/local`, but it delivers the result differently:
 
 - Project settings can run all inline Agent tasks through the Profile's default
   `mohist/opencode` Action or another compatible Action such as `mohist/pi`.
-  Approval feedback, recovery, and OpenSpec-generated Build tasks use the same
+  Approval feedback, recovery, and generated Build tasks use the same
   Run-bound Action.
 
 - The remote Workflow branch preserves completed work between Stages. A Runner
   workspace can be rebuilt and is not responsible for preserving completed
-  work.
-- After Plan self-review passes, Mohist publishes the current work and then
-  creates or reuses a draft pull request.
+  work. Plan and review material under `PLANS/` is preserved as uploaded run
+  artifacts.
+- After Plan completes, Mohist publishes the Workflow branch and then creates
+  or reuses a draft pull request.
 - After Build validation passes, Mohist publishes the current work.
-- After Check fixes are complete, Mohist publishes the current work and then
-  marks the pull request ready.
-- After Integrate publishes the archived work, Mohist waits for pull request
-  checks and performs a squash merge.
+- After Check review work is complete, Mohist publishes the current work and
+  then marks the pull request ready.
+- After Check approval, Integrate enables auto-merge on the pull request and
+  waits until GitHub reports it merged.
 - Mohist rebases automatically when the base branch advances and applies the
   declared Profile recovery when pull request checks fail.
 - When automatic recovery is exhausted, Mohist leaves the Run in `failed` and
