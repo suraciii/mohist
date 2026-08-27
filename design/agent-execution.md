@@ -545,6 +545,8 @@ The remaining convergence gaps are:
 
 - Workflow tasks do not yet launch a real Mohist Agent through the canonical AgentJob boundary;
   built-in Profiles still select Runtime-specific Actions instead of built-in or Project Agent names.
+  The binding DSL is decided in
+  [`decisions/workflow-agent-binding.md`](decisions/workflow-agent-binding.md).
 - TaskRun still owns execution lifecycle, retry, recovery, and result for Workflow work. WorkflowRun
   must retain only orchestration state and AgentJob references after TaskRun is removed.
 - Launch acceptance does not yet converge through one durable path from caller identity to every

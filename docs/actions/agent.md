@@ -1,20 +1,21 @@
 # `mohist/agent` Action
 
-> **Status: legacy implementation.** This Action resolves an Agent definition without creating an
-> AgentJob. The target model ([`../../design/agent-execution.md`](../../design/agent-execution.md))
-> makes every Workflow task launch a real Mohist Agent through the canonical AgentJob boundary;
-> `mohist/agent` will be removed when the Profile Agent-binding DSL is designed.
+> **Status: decided target.** The syntax is unchanged; the semantics change to a real Agent launch
+> per [`../../design/decisions/workflow-agent-binding.md`](../../design/decisions/workflow-agent-binding.md).
+> The snapshot-only behavior below describes the current implementation and is removed with the
+> TaskRun migration.
 
-`mohist/agent` lets a Workflow task execute with a predefined Mohist Agent from
-the Project. The task receives a snapshot of that Agent's instructions and
-execution configuration, then runs through the same execution-backend mechanism.
-It supports tasks only, not Workflow checks.
+`mohist/agent` launches a predefined Mohist Agent from the Project for one
+Workflow task. It enters the canonical AgentJob launch boundary: the task
+creates a real AgentJob and AgentSession, and AgentJob owns execution, retry,
+recovery, and result. A missing, archived, or not-ready Agent fails launch
+explicitly. It supports tasks only, not Workflow checks.
 
-This is an **Agent definition reference, not a work delegation**. It does not
-start an AgentJob. TaskRun still decides whether the work succeeds or fails,
-and the AgentSession still has a Workflow origin. See
-[Agents and AgentSessions](../agent-sessions.md) for the overall relationship
-between Agent, AgentJob, and AgentSession.
+`with` admits `name`, `session`, `prompt`, and `timeout` (optional
+per-execution deadline, unchanged).
+
+See [Agents and AgentSessions](../agent-sessions.md) for the overall
+relationship between Agent, AgentJob, and AgentSession.
 
 ## Basic Usage
 
@@ -30,9 +31,9 @@ The Agent selected by `name` provides identity instructions, execution backend
 (OpenCode or Pi), model, optional Reasoning Effort, true model variant, and
 Skills. `prompt` is the input for this task. Use this Action when the same role
 must be reused by multiple tasks or Profiles, or when routing rules and `@`
-mentions must use the same Agent identity. Continue to use
-[`mohist/opencode`](opencode.md) or [`mohist/pi`](pi.md) inline for one-time
-tasks.
+mentions must use the same Agent identity. Runtime-specific Actions
+(`mohist/opencode`, `mohist/pi`) are no longer selectable from a Profile; the
+Agent definition owns the backend choice.
 
 ## Action Inputs
 
@@ -60,12 +61,11 @@ name first and fall back to ID when no name matches.
 
 ## Resolution and Snapshot
 
-- Each dispatch resolves `name` to a snapshot of the current definition. The
-  instructions, execution backend, model, Reasoning Effort, true model
-  variant, and ordered Skills remain fixed for that attempt.
-- Editing the Agent does not affect an attempt that was already dispatched. A
-  retry resolves the definition again, so a repaired definition takes effect
-  immediately on retry.
+- Each AgentJob launch resolves `name` to a snapshot of the current definition.
+  The instructions, execution backend, model, Reasoning Effort, true model
+  variant, and ordered Skills remain fixed for that AgentJob.
+- Editing the Agent does not affect an accepted AgentJob. A Workflow retry is a
+  new launch, so a repaired definition takes effect on the new AgentJob.
 - An ordinary client may provide a prompt and context. It cannot use task input
   or context to select a different Runtime, model, Reasoning Effort, Variant, or
   set of Skills.
@@ -79,7 +79,8 @@ name first and fall back to ID when no name matches.
 ## Failure Semantics
 
 The Action defines one business error code: `agent_not_found` when `name` does
-not exist at dispatch time, or the Agent is archived.
+not exist at launch time, or the Agent is archived. A `needs-setup` Agent fails
+launch explicitly with its readiness gaps.
 
 Execution errors such as backend unavailability and timeout are the same as for
 the selected backend Action. Recovery `when` matching applies in the same way.

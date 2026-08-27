@@ -2,7 +2,7 @@
 
 > **Status: legacy implementation.** This document describes dispatch of Workflow-owned Actions.
 > The target model ([`../agent-execution.md`](../agent-execution.md)) dispatches AgentJobs instead;
-> rewrite is pending the Profile Agent-binding DSL decision.
+> binding decided in [`../decisions/workflow-agent-binding.md`](../decisions/workflow-agent-binding.md).
 
 This document is the sole authority for when task input templates are evaluated. `tasks[*].with`
 and task-level `expect` are part of the Workflow declaration. Server sends them in their original

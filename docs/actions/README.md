@@ -3,7 +3,9 @@
 > **Status: legacy implementation.** The Action/TaskRun model below is the current Workflow
 > implementation. The target model ([`../../design/agent-execution.md`](../../design/agent-execution.md))
 > removes Workflow-owned Actions and TaskRun: an executable Workflow task names a Mohist Agent and
-> AgentJob owns all execution. These documents remain until the Profile Agent-binding DSL is designed.
+> AgentJob owns all execution. The binding is decided in
+> [`../../design/decisions/workflow-agent-binding.md`](../../design/decisions/workflow-agent-binding.md);
+> the legacy paths remain until the implementation migration lands.
 
 An Action is an execution interface selected by a Workflow task through
 `uses`. Each Action defines its own `with` inputs, outputs, and failure
