@@ -65,6 +65,56 @@ public sealed class GitHubConnectionUpdateSpecs
     }
 
     [Fact]
+    public async Task Enable_WhenPatWasDeleted_ReturnsStableConflictAndRemainsDisabled()
+    {
+        var (projectId, connectionId, _) = await ConnectAsync([]);
+        var connectionPath = $"/api/projects/{projectId}/github-connections/{connectionId}";
+
+        using (var disable = await Client.PostAsync($"{connectionPath}/disable", content: null))
+            disable.EnsureSuccessStatusCode();
+        await using (var scope = _fixture.Services.CreateAsyncScope())
+        {
+            var secrets = scope.ServiceProvider.GetRequiredService<ISecretStore>();
+            await secrets.DeleteAsync(GitHubConnectionStore.ApiSecretAddress(projectId, connectionId));
+        }
+
+        using var response = await Client.PostAsync($"{connectionPath}/enable", content: null);
+        Assert.Equal(HttpStatusCode.Conflict, response.StatusCode);
+        var body = JsonSerializer.Deserialize<JsonElement>(await response.Content.ReadAsStringAsync());
+        Assert.Equal("pat_required", body.GetProperty("code").GetString());
+
+        using var current = await Client.GetAsync(connectionPath);
+        var currentBody = JsonSerializer.Deserialize<JsonElement>(await current.Content.ReadAsStringAsync());
+        Assert.Equal("disabled", currentBody.GetProperty("data").GetProperty("status").GetString());
+    }
+
+    [Fact]
+    public async Task Enable_WhenPatIsBlank_ReturnsStableConflictAndRemainsDisabled()
+    {
+        var (projectId, connectionId, _) = await ConnectAsync([]);
+        var connectionPath = $"/api/projects/{projectId}/github-connections/{connectionId}";
+
+        using (var disable = await Client.PostAsync($"{connectionPath}/disable", content: null))
+            disable.EnsureSuccessStatusCode();
+        await using (var scope = _fixture.Services.CreateAsyncScope())
+        {
+            var secrets = scope.ServiceProvider.GetRequiredService<ISecretStore>();
+            await secrets.StoreAsync(
+                GitHubConnectionStore.ApiSecretAddress(projectId, connectionId),
+                Encoding.UTF8.GetBytes(" \t\r\n"));
+        }
+
+        using var response = await Client.PostAsync($"{connectionPath}/enable", content: null);
+        Assert.Equal(HttpStatusCode.Conflict, response.StatusCode);
+        var body = JsonSerializer.Deserialize<JsonElement>(await response.Content.ReadAsStringAsync());
+        Assert.Equal("pat_required", body.GetProperty("code").GetString());
+
+        using var current = await Client.GetAsync(connectionPath);
+        var currentBody = JsonSerializer.Deserialize<JsonElement>(await current.Content.ReadAsStringAsync());
+        Assert.Equal("disabled", currentBody.GetProperty("data").GetProperty("status").GetString());
+    }
+
+    [Fact]
     public async Task UpdateApprovers_ReturnsUpdatedConnection()
     {
         var (projectId, connectionId, owner) = await ConnectAsync(["alice"]);

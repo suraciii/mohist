@@ -214,6 +214,48 @@ public sealed class GitHubConnectionStoreTests
     }
 
     [Fact]
+    public async Task SetStatusAsync_EnableRejectsDeletedPatAndLeavesConnectionDisabled()
+    {
+        var database = NewDatabase(RepositoriesJson("https://github.com/octocat/hello-world.git"));
+        var secrets = new FakeSecretStore();
+        var store = NewStore(database, secrets);
+        var connection = Connection();
+        await store.CreateAsync(connection, pat: "github-pat");
+        await store.SetStatusAsync("proj_1", connection.Id, GitHubConnectionStatus.Disabled);
+        await secrets.DeleteAsync(GitHubConnectionStore.ApiSecretAddress("proj_1", connection.Id));
+
+        var ex = await Assert.ThrowsAsync<GitHubConnectionValidationException>(() =>
+            store.SetStatusAsync("proj_1", connection.Id, GitHubConnectionStatus.Active));
+
+        Assert.Equal("pat_required", ex.Code);
+        Assert.Equal(
+            GitHubConnectionStatus.Disabled,
+            (await store.GetAsync("proj_1", connection.Id))!.Status);
+    }
+
+    [Fact]
+    public async Task SetStatusAsync_EnableRejectsBlankPatAndLeavesConnectionDisabled()
+    {
+        var database = NewDatabase(RepositoriesJson("https://github.com/octocat/hello-world.git"));
+        var secrets = new FakeSecretStore();
+        var store = NewStore(database, secrets);
+        var connection = Connection();
+        await store.CreateAsync(connection, pat: "github-pat");
+        await store.SetStatusAsync("proj_1", connection.Id, GitHubConnectionStatus.Disabled);
+        await secrets.StoreAsync(
+            GitHubConnectionStore.ApiSecretAddress("proj_1", connection.Id),
+            System.Text.Encoding.UTF8.GetBytes(" \t\r\n"));
+
+        var ex = await Assert.ThrowsAsync<GitHubConnectionValidationException>(() =>
+            store.SetStatusAsync("proj_1", connection.Id, GitHubConnectionStatus.Active));
+
+        Assert.Equal("pat_required", ex.Code);
+        Assert.Equal(
+            GitHubConnectionStatus.Disabled,
+            (await store.GetAsync("proj_1", connection.Id))!.Status);
+    }
+
+    [Fact]
     public async Task UpdateApproversAsync_ReplacesList_TrimsAndDeduplicates()
     {
         var database = NewDatabase(RepositoriesJson("https://github.com/octocat/hello-world.git"));

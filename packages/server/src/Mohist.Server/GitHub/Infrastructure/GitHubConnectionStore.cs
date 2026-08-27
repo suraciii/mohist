@@ -147,6 +147,14 @@ public sealed class GitHubConnectionStore : IScopedService
         var row = await db.GitHubConnections.FirstOrDefaultAsync(r => r.ProjectId == projectId && r.Id == id, ct);
         if (row is null) return null;
         if (row.Status == status) return ToDomain(row);
+        if (status == GitHubConnectionStatus.Active)
+        {
+            var pat = await _secretStore.LoadAsync(ApiSecretAddress(row.ProjectId, row.Id), ct);
+            if (pat is null || string.IsNullOrWhiteSpace(Encoding.UTF8.GetString(pat)))
+                throw new GitHubConnectionValidationException(
+                    "pat is required for an active GitHub connection",
+                    "pat_required");
+        }
         row.Status = status;
         row.UpdatedAt = _timeProvider.GetUtcNow();
         await db.SaveChangesAsync(ct);
