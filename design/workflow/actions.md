@@ -293,7 +293,10 @@ that the executor finds after Action completion, such as a dirty workspace. `err
 a machine protocol and must not be used in `when`.
 
 There is no global Action error enum, and the engine does not understand error-specific meaning.
-Each Action manifest is the authoritative catalog of its error codes. See
+Each Action manifest is the authoritative catalog of its error codes. A Runtime or resolver may
+use a different diagnostic vocabulary, but the Action boundary must map that vocabulary to a
+declared lowercase kebab-case Action code before normalization. An undeclared non-platform code
+always becomes `unexpected-error`; the validator and normalizer have no per-Action exceptions. See
 [`recovery.md`](recovery.md) for recovery design.
 
 ### Checks
