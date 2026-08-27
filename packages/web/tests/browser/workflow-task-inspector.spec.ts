@@ -84,7 +84,7 @@ function makeTimeline() {
                 ? [
                     {
                       artifactId: 'artifact-long',
-                      path: 'openspec/changes/issue-454/a-very-long-artifact-summary-path-for-phone-layout.md',
+                      path: 'RESEARCH/a-very-long-artifact-summary-path-for-phone-layout.md',
                       kind: 'file',
                       size: 128,
                       recordedAt: completedAt,

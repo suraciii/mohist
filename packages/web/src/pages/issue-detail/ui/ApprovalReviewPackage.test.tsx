@@ -43,7 +43,7 @@ const artifactListHook = () => ({
     {
       artifactId: 'PLANS/PLAN.md',
       workflowRunId: 'run-1',
-      taskRunId: 'proposal.1',
+      taskRunId: 'plan.1',
       path: 'PLANS/PLAN.md',
       kind: 'file' as const,
       recordedAt: '2026-01-01T00:00:00Z',

@@ -19,12 +19,12 @@ const OTHER_PROJECT_ID = 'other-project'
 
 const BASE_TEMPLATES = [
   {
-    key: 'proposal',
-    displayName: 'Generate Proposal',
-    description: 'Creates the OpenSpec proposal.md for an issue',
-    tags: ['plan', 'openspec'],
+    key: 'plan',
+    displayName: 'Plan Change',
+    description: 'Plans the issue and writes plan artifacts',
+    tags: ['plan'],
     stage: 'plan',
-    body: 'system proposal body',
+    body: 'system plan body',
     source: 'system' as const,
   },
   {
@@ -111,10 +111,8 @@ describe('useProjectTemplates hook', () => {
     await flush()
     expect(result.current.data).toHaveLength(3)
 
-    const byKey = Object.fromEntries(
-      result.current.data!.map((t: { key: string; source: string }) => [t.key, t]),
-    )
-    expect(byKey.proposal!.source).toBe('project-override')
+    const byKey = Object.fromEntries(result.current.data!.map((t: { key: string; source: string }) => [t.key, t]))
+    expect(byKey.plan!.source).toBe('project-override')
     expect(byKey.build!.source).toBe('system')
     expect(byKey['deploy-checklist']!.source).toBe('project-new')
   })

@@ -11,7 +11,7 @@ describe('ArtifactTextContent', () => {
   })
 
   it('uses MarkdownReader for markdown content', () => {
-    render(<ArtifactTextContent content="# Proposal" contentType="text/markdown" />)
-    expect(screen.getByRole('heading', { name: 'Proposal' })).toBeInTheDocument()
+    render(<ArtifactTextContent content="# Plan" contentType="text/markdown" />)
+    expect(screen.getByRole('heading', { name: 'Plan' })).toBeInTheDocument()
   })
 })

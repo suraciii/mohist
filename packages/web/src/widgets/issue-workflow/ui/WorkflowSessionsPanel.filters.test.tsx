@@ -55,8 +55,20 @@ describe('WorkflowSessionsPanel filters', () => {
     setWorkflowRunSessions({
       isLoading: false,
       sessions: [
-        session({ id: 's-plan', sessionName: 'proposal-draft', stage: 'plan', status: 'completed', createdAt: '2026-06-12T10:01:00.000Z' }),
-        session({ id: 's-build', sessionName: 'compile-assets', stage: 'build', status: 'failed', createdAt: '2026-06-12T10:03:00.000Z' }),
+        session({
+          id: 's-plan',
+          sessionName: 'plan-draft',
+          stage: 'plan',
+          status: 'completed',
+          createdAt: '2026-06-12T10:01:00.000Z',
+        }),
+        session({
+          id: 's-build',
+          sessionName: 'compile-assets',
+          stage: 'build',
+          status: 'failed',
+          createdAt: '2026-06-12T10:03:00.000Z',
+        }),
       ],
     })
 
@@ -88,9 +100,27 @@ describe('WorkflowSessionsPanel filters', () => {
         // Issue 484: status values map onto activities — a finished plan/build
         // session is `idle`, a live session is `active`, and an unconfirmable
         // failure surfaces as `unknown`.
-        session({ id: 's-plan', sessionName: 'proposal-draft', stage: 'plan', activity: 'idle', createdAt: '2026-06-12T10:01:00.000Z' }),
-        session({ id: 's-build', sessionName: 'compile-assets', stage: 'build', activity: 'unknown', createdAt: '2026-06-12T10:03:00.000Z' }),
-        session({ id: 's-check', sessionName: 'review-repair', stage: 'check', activity: 'active', createdAt: '2026-06-12T10:02:00.000Z' }),
+        session({
+          id: 's-plan',
+          sessionName: 'plan-draft',
+          stage: 'plan',
+          activity: 'idle',
+          createdAt: '2026-06-12T10:01:00.000Z',
+        }),
+        session({
+          id: 's-build',
+          sessionName: 'compile-assets',
+          stage: 'build',
+          activity: 'unknown',
+          createdAt: '2026-06-12T10:03:00.000Z',
+        }),
+        session({
+          id: 's-check',
+          sessionName: 'review-repair',
+          stage: 'check',
+          activity: 'active',
+          createdAt: '2026-06-12T10:02:00.000Z',
+        }),
       ],
     })
 
@@ -100,7 +130,7 @@ describe('WorkflowSessionsPanel filters', () => {
     await user.click(await screen.findByRole('option', { name: 'unknown' }))
 
     expect(within(statusFilter).getByText('unknown')).toBeInTheDocument()
-    expect(screen.queryByText('proposal-draft')).not.toBeInTheDocument()
+    expect(screen.queryByText('plan-draft')).not.toBeInTheDocument()
     expect(screen.queryByText('review-repair')).not.toBeInTheDocument()
     expect(screen.getByText('compile-assets')).toBeInTheDocument()
     expect(screen.getByTestId('workflow-sessions-filter-notice')).toHaveTextContent('Showing 1 of 3 sessions')
@@ -111,8 +141,20 @@ describe('WorkflowSessionsPanel filters', () => {
     setWorkflowRunSessions({
       isLoading: false,
       sessions: [
-        session({ id: 's-plan', sessionName: 'proposal-draft', stage: 'plan', status: 'completed', createdAt: '2026-06-12T10:01:00.000Z' }),
-        session({ id: 's-build', sessionName: 'compile-assets', stage: 'build', status: 'completed', createdAt: '2026-06-12T10:03:00.000Z' }),
+        session({
+          id: 's-plan',
+          sessionName: 'plan-draft',
+          stage: 'plan',
+          status: 'completed',
+          createdAt: '2026-06-12T10:01:00.000Z',
+        }),
+        session({
+          id: 's-build',
+          sessionName: 'compile-assets',
+          stage: 'build',
+          status: 'completed',
+          createdAt: '2026-06-12T10:03:00.000Z',
+        }),
       ],
     })
 
@@ -122,7 +164,7 @@ describe('WorkflowSessionsPanel filters', () => {
     await user.click(await screen.findByRole('option', { name: 'Build' }))
 
     expect(within(stageFilter).getByText('Build')).toBeInTheDocument()
-    expect(screen.queryByText('proposal-draft')).not.toBeInTheDocument()
+    expect(screen.queryByText('plan-draft')).not.toBeInTheDocument()
     expect(screen.getByText('compile-assets')).toBeInTheDocument()
   })
 
@@ -131,9 +173,27 @@ describe('WorkflowSessionsPanel filters', () => {
     setWorkflowRunSessions({
       isLoading: false,
       sessions: [
-        session({ id: 's-plan', sessionName: 'proposal-draft', stage: 'plan', usage: { totalTokens: 1_000 }, createdAt: '2026-06-12T10:00:00.000Z' }),
-        session({ id: 's-build', sessionName: 'compile-assets', stage: 'build', usage: { totalTokens: 5_000 }, createdAt: '2026-06-12T10:01:00.000Z' }),
-        session({ id: 's-check', sessionName: 'review-repair', stage: 'check', usage: { totalTokens: 2_500 }, createdAt: '2026-06-12T10:02:00.000Z' }),
+        session({
+          id: 's-plan',
+          sessionName: 'plan-draft',
+          stage: 'plan',
+          usage: { totalTokens: 1_000 },
+          createdAt: '2026-06-12T10:00:00.000Z',
+        }),
+        session({
+          id: 's-build',
+          sessionName: 'compile-assets',
+          stage: 'build',
+          usage: { totalTokens: 5_000 },
+          createdAt: '2026-06-12T10:01:00.000Z',
+        }),
+        session({
+          id: 's-check',
+          sessionName: 'review-repair',
+          stage: 'check',
+          usage: { totalTokens: 2_500 },
+          createdAt: '2026-06-12T10:02:00.000Z',
+        }),
       ],
     })
 
@@ -154,7 +214,7 @@ describe('WorkflowSessionsPanel filters', () => {
     setWorkflowRunSessions({
       isLoading: false,
       sessions: [
-        session({ id: 's-plan', sessionName: 'proposal-draft', stage: 'plan' }),
+        session({ id: 's-plan', sessionName: 'plan-draft', stage: 'plan' }),
         session({ id: 's-build', sessionName: 'compile-assets', stage: 'build' }),
       ],
     })
@@ -172,7 +232,7 @@ describe('WorkflowSessionsPanel filters', () => {
     setWorkflowRunSessions({
       isLoading: false,
       sessions: [
-        session({ id: 's-plan', sessionName: 'proposal-draft', stage: 'plan' }),
+        session({ id: 's-plan', sessionName: 'plan-draft', stage: 'plan' }),
         session({ id: 's-build', sessionName: 'compile-assets', stage: 'build' }),
       ],
     })
@@ -193,8 +253,20 @@ describe('WorkflowSessionsPanel filters', () => {
       isLoading: false,
       sessions: [
         // Issue 484: mix activities so selecting one narrows the list.
-        session({ id: 's-plan', sessionName: 'proposal-draft', stage: 'plan', activity: 'idle', createdAt: '2026-06-12T10:01:00.000Z' }),
-        session({ id: 's-build', sessionName: 'compile-assets', stage: 'build', activity: 'unknown', createdAt: '2026-06-12T10:03:00.000Z' }),
+        session({
+          id: 's-plan',
+          sessionName: 'plan-draft',
+          stage: 'plan',
+          activity: 'idle',
+          createdAt: '2026-06-12T10:01:00.000Z',
+        }),
+        session({
+          id: 's-build',
+          sessionName: 'compile-assets',
+          stage: 'build',
+          activity: 'unknown',
+          createdAt: '2026-06-12T10:03:00.000Z',
+        }),
       ],
     })
 
@@ -209,7 +281,7 @@ describe('WorkflowSessionsPanel filters', () => {
     await user.click(await screen.findByRole('option', { name: 'All statuses' }))
     expect(within(renderedStatusFilter).getByText('All statuses')).toBeInTheDocument()
     expect(screen.queryByTestId('workflow-sessions-filter-notice')).not.toBeInTheDocument()
-    expect(screen.getByText('proposal-draft')).toBeInTheDocument()
+    expect(screen.getByText('plan-draft')).toBeInTheDocument()
     expect(screen.getByText('compile-assets')).toBeInTheDocument()
   })
 })

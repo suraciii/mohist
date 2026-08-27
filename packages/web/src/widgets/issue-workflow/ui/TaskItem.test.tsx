@@ -163,11 +163,11 @@ describe('TaskItem', () => {
         sessionName: 'build-session',
         reason: 'Task produced review evidence',
         output: { result: 'complete' },
-        requiredFiles: [{ path: 'openspec/changes/issue-454/design.md', source: 'task-expect', canFetchContent: true }],
+        requiredFiles: [{ path: 'PLANS/DESIGN.md', source: 'task-expect', canFetchContent: true }],
         artifactSummaries: [
           {
             artifactId: 'artifact-1',
-            path: 'openspec/changes/issue-454/proposal.md',
+            path: 'PLANS/PLAN.md',
             kind: 'file',
             size: 42,
             recordedAt: '2026-01-01T00:01:00.000Z',
@@ -177,7 +177,7 @@ describe('TaskItem', () => {
     )
 
     const disclosure = screen.getByRole('button', { name: title })
-    const artifact = screen.getByRole('button', { name: 'openspec/changes/issue-454/proposal.md' })
+    const artifact = screen.getByRole('button', { name: 'PLANS/PLAN.md' })
     const session = screen.getByRole('link', { name: /build-session/ })
     expect(disclosure).toHaveAttribute('aria-expanded', 'false')
     expect(screen.getByText(title)).toHaveClass('whitespace-normal', 'break-words')
@@ -195,7 +195,7 @@ describe('TaskItem', () => {
     expect(screen.getByTestId('workflow-task-details')).toBeVisible()
     expect(screen.getByText('Task produced review evidence')).toBeVisible()
     expect(screen.getByText(/"result": "complete"/)).toBeVisible()
-    expect(screen.getByText('openspec/changes/issue-454/design.md')).toBeVisible()
+    expect(screen.getByText('PLANS/DESIGN.md')).toBeVisible()
     expect(screen.getByText('canonical log line')).toBeVisible()
 
     fireEvent.click(disclosure)
