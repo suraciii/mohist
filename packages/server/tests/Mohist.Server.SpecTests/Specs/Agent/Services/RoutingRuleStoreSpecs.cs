@@ -149,6 +149,67 @@ public sealed class RoutingRuleStoreSpecs : IClassFixture<MohistDbFixture>
         Assert.Equal(created.Position, unchanged.Position);
     }
 
+    [Fact]
+    public async Task UpdateAppliesOnlyFieldsPresentInCanonicalVocabulary()
+    {
+        await SeedAgentAsync("project-patch-presence", "agent-presence", AgentStatus.Active);
+        await SeedAgentAsync("project-patch-presence", "agent-presence-two", AgentStatus.Active);
+        using var scope = _fixture.Services.CreateScope();
+        var store = scope.ServiceProvider.GetRequiredService<RoutingRuleStore>();
+
+        var created = await store.CreateAsync(NewRule("presence", "project-patch-presence", "agent-presence"));
+        var updated = (await store.UpdateAsync(
+            created.ProjectId, created.Id,
+            "renamed", "event.type == \"y\"", "agent-presence-two", "replaced prompt", true,
+            new HashSet<string> { "name", "match", "agentId", "responsePrompt", "continue" }))!;
+
+        Assert.Multiple(
+            () => Assert.Equal("renamed", updated.Name),
+            () => Assert.Equal("event.type == \"y\"", updated.Match),
+            () => Assert.Equal("agent-presence-two", updated.AgentId),
+            () => Assert.Equal("replaced prompt", updated.ResponsePrompt),
+            () => Assert.True(updated.Continue));
+    }
+
+    [Fact]
+    public async Task UpdateWithEmptyPresencePreservesEveryStoredField()
+    {
+        await SeedAgentAsync("project-patch-omission", "agent-omission", AgentStatus.Active);
+        using var scope = _fixture.Services.CreateScope();
+        var store = scope.ServiceProvider.GetRequiredService<RoutingRuleStore>();
+
+        var created = await store.CreateAsync(NewRule("omission", "project-patch-omission", "agent-omission"));
+        var updated = (await store.UpdateAsync(
+            created.ProjectId, created.Id,
+            "ignored", "ignored", "ignored", "ignored", true,
+            new HashSet<string>()))!;
+
+        Assert.Multiple(
+            () => Assert.Equal(created.Name, updated.Name),
+            () => Assert.Equal(created.Match, updated.Match),
+            () => Assert.Equal(created.AgentId, updated.AgentId),
+            () => Assert.Equal(created.ResponsePrompt, updated.ResponsePrompt),
+            () => Assert.Equal(created.Continue, updated.Continue),
+            () => Assert.Equal(created.UpdatedAt, updated.UpdatedAt));
+    }
+
+    [Fact]
+    public async Task UpdatePresentNullFieldStaysPresentAndHitsFieldValidation()
+    {
+        await SeedAgentAsync("project-patch-null", "agent-null", AgentStatus.Active);
+        using var scope = _fixture.Services.CreateScope();
+        var store = scope.ServiceProvider.GetRequiredService<RoutingRuleStore>();
+
+        var created = await store.CreateAsync(NewRule("null-presence", "project-patch-null", "agent-null"));
+        await Assert.ThrowsAsync<RoutingRuleValidationException>(() => store.UpdateAsync(
+            created.ProjectId, created.Id,
+            null, null, null, null, null,
+            new HashSet<string> { "name" }));
+
+        var unchanged = await store.GetAsync(created.ProjectId, created.Id);
+        Assert.Equal(created.Name, unchanged!.Name);
+    }
+
     private async Task SeedAgentAsync(string projectId, string agentId, string status)
     {
         using var scope = _fixture.Services.CreateScope();

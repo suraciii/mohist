@@ -125,11 +125,11 @@ public sealed record RoutingRuleUpdateRequest(
         var fields = new HashSet<string>(StringComparer.Ordinal);
         if (raw.ValueKind == JsonValueKind.Object)
         {
-            if (raw.TryGetProperty("name", out _)) fields.Add(nameof(Name));
-            if (raw.TryGetProperty("match", out _)) fields.Add(nameof(Match));
-            if (raw.TryGetProperty("agentId", out _)) fields.Add(nameof(AgentId));
-            if (raw.TryGetProperty("responsePrompt", out _)) fields.Add(nameof(ResponsePrompt));
-            if (raw.TryGetProperty("continue", out _)) fields.Add(nameof(Continue));
+            if (raw.TryGetProperty(RoutingRulePatchFields.Name, out _)) fields.Add(RoutingRulePatchFields.Name);
+            if (raw.TryGetProperty(RoutingRulePatchFields.Match, out _)) fields.Add(RoutingRulePatchFields.Match);
+            if (raw.TryGetProperty(RoutingRulePatchFields.AgentId, out _)) fields.Add(RoutingRulePatchFields.AgentId);
+            if (raw.TryGetProperty(RoutingRulePatchFields.ResponsePrompt, out _)) fields.Add(RoutingRulePatchFields.ResponsePrompt);
+            if (raw.TryGetProperty(RoutingRulePatchFields.Continue, out _)) fields.Add(RoutingRulePatchFields.Continue);
         }
         return new RoutingRuleUpdateRequest(
             GetString(raw, "name"), GetString(raw, "match"), GetString(raw, "agentId"),
