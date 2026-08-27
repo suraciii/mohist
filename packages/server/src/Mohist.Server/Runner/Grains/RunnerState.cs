@@ -9,6 +9,11 @@ public sealed class RunnerState
     [Id(3)] public string? CurrentProcessGeneration { get; set; }
     [Id(4)] public string? PendingProcessGeneration { get; set; }
     [Id(5)] public string? ClosingProcessGeneration { get; set; }
+    /// <summary>
+    /// Absolute UTC expiry of the current two-minute presence lease. Missing
+    /// legacy state is offline until real runner traffic renews presence.
+    /// </summary>
+    [Id(6)] public DateTimeOffset? PresenceLeaseExpiresAt { get; set; }
 }
 
 /// <summary>

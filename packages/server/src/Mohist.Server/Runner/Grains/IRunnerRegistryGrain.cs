@@ -1,3 +1,5 @@
+using Orleans.Concurrency;
+
 namespace Mohist.Server.Runner.Grains;
 
 public interface IRunnerRegistryGrain : IGrainWithStringKey
@@ -29,6 +31,7 @@ public interface IRunnerRegistryGrain : IGrainWithStringKey
     /// the projectId parameter is retained for call-site compatibility but no
     /// longer filters the result set.
     /// </summary>
+    [AlwaysInterleave]
     Task<IReadOnlyList<RunnerInfo>> ListEligibleRunnersAsync(string projectId);
 }
 

@@ -64,6 +64,12 @@ public interface IRunnerGrain : IGrainWithStringKey
     /// presence; the former also participates in dispatch reconciliation.
     /// </summary>
     Task TouchPresenceAsync();
+    /// <summary>
+    /// Reads the durable presence lease without renewing it. Registry
+    /// eligibility fails closed when the lease is absent, expired, or the
+    /// runner authority is unavailable.
+    /// </summary>
+    Task<bool> IsPresenceLeaseActiveAsync();
 
     [AlwaysInterleave]
     Task<RunnerRuntimeState> GetRuntimeStateAsync();
