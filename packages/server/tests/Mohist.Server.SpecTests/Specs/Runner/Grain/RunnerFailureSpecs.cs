@@ -1,6 +1,10 @@
+using Microsoft.Extensions.DependencyInjection;
 using Mohist.Server.Runner.Grains;
 using Mohist.Server.Workflow.Domain.Run;
 using Mohist.Server.SpecTests.Specs.Workflow;
+using Mohist.Server.TestSupport;
+using Orleans;
+using Orleans.Storage;
 using Xunit;
 
 namespace Mohist.Server.SpecTests.Specs.Runner.Grain;
@@ -72,5 +76,122 @@ public class RunnerFailureSpecs : WorkflowGrainSpecs
 
         Assert.Equal("Running", await workflow.GetRunStatusAsync());
         Assert.Equal(work.WorkId, await workflow.GetCurrentWorkIdAsync());
+    }
+
+    [Fact]
+    public async Task PresenceLease_PersistsAbsoluteExpiry_AndReactivationKeepsRemainingTime()
+    {
+        var runnerId = $"runner-lease-reactivation-{Guid.NewGuid():N}";
+        var runner = Grains.GetGrain<IRunnerGrain>(runnerId);
+        var storage = _fixture.Cluster.GetSiloServiceProvider(null).GetRequiredService<IGrainStorage>();
+        var registeredAt = _fixture.TimeProvider.GetUtcNow();
+
+        await runner.RegisterAsync(new RunnerInfo(runnerId, ["spec/*"], "lease-host", "test-project"));
+        var stored = new GrainState<RunnerState>();
+        await storage.ReadStateAsync("runner", runner.GetGrainId(), stored);
+        Assert.Equal(registeredAt.AddMinutes(2), stored.State.PresenceLeaseExpiresAt);
+
+        _fixture.TimeProvider.Advance(TimeSpan.FromMinutes(1));
+        await TestLifecycle.DeactivateAndWait(runner, Grains);
+        var reactivated = Grains.GetGrain<IRunnerGrain>(runnerId);
+        Assert.True(await reactivated.IsPresenceLeaseActiveAsync());
+
+        stored = new GrainState<RunnerState>();
+        await storage.ReadStateAsync("runner", reactivated.GetGrainId(), stored);
+        Assert.Equal(registeredAt.AddMinutes(2), stored.State.PresenceLeaseExpiresAt);
+
+        _fixture.TimeProvider.Advance(TimeSpan.FromMinutes(1));
+        Assert.False(await reactivated.IsPresenceLeaseActiveAsync());
+    }
+
+    [Fact]
+    public async Task ExpiredRegistryIndex_IsExcludedFromEligibilityBeforeCleanup()
+    {
+        var runnerId = $"runner-expired-index-{Guid.NewGuid():N}";
+        var runner = Grains.GetGrain<IRunnerGrain>(runnerId);
+        var registry = Grains.GetGrain<IRunnerRegistryGrain>(RunnerRegistryKeys.Global);
+        await runner.RegisterAsync(new RunnerInfo(runnerId, ["spec/*"], "expired-host", "test-project"));
+
+        _fixture.TimeProvider.Advance(TimeSpan.FromMinutes(2).Add(TimeSpan.FromSeconds(1)));
+        // Reinsert the stale index row after the low-latency timeout path may
+        // have removed it; eligibility must still consult Runner authority.
+        await registry.RegisterAsync(new RunnerInfo(runnerId, ["spec/*"], "expired-host", "test-project"));
+
+        Assert.Contains(await registry.ListAllAsync(), item => item.RunnerId == runnerId);
+        Assert.DoesNotContain(
+            await registry.ListEligibleRunnersAsync("test-project"),
+            item => item.RunnerId == runnerId);
+    }
+
+    [Fact]
+    public async Task RunnerLoss_FirstOwnerFailure_RetainsGenerationAndReminderRetryCompletes()
+    {
+        var workflow = await StartWorkflowAsync(SingleStage(checks: []));
+        var runnerId = _runnerId!;
+        var (work, _) = await PollWorkAnyAsync();
+        var runner = Grains.GetGrain<IRunnerGrain>(runnerId);
+        var storage = _fixture.Cluster.GetSiloServiceProvider(null).GetRequiredService<IGrainStorage>();
+        var failures = _fixture.Cluster.GetSiloServiceProvider(null).GetRequiredService<ReportPersistenceFailureProbe>();
+        failures.FailNextWorkflowReport(work.WorkflowRunId, work.WorkId);
+
+        await runner.UnregisterAsync();
+
+        var afterFailure = new GrainState<RunnerState>();
+        await storage.ReadStateAsync("runner", runner.GetGrainId(), afterFailure);
+        Assert.Equal(TestRunnerGenerationExtensions.ProcessGeneration, afterFailure.State.ClosingProcessGeneration);
+        Assert.Equal("Running", await workflow.GetRunStatusAsync());
+
+        await runner.AsReference<IRemindable>().ReceiveReminder("presence", default);
+
+        var afterRetry = new GrainState<RunnerState>();
+        await storage.ReadStateAsync("runner", runner.GetGrainId(), afterRetry);
+        Assert.Null(afterRetry.State.ClosingProcessGeneration);
+        Assert.Equal("Failed", await workflow.GetRunStatusAsync());
+        var run = await LoadRunAsync(work.WorkflowRunId);
+        Assert.Equal("runner-lost", run.Failure?.Message);
+    }
+
+    [Fact]
+    public async Task RunnerLoss_FirstOwnerFailure_RedrivesAfterRunnerReactivation()
+    {
+        var workflow = await StartWorkflowAsync(SingleStage(checks: []));
+        var runnerId = _runnerId!;
+        var (work, _) = await PollWorkAnyAsync();
+        var runner = Grains.GetGrain<IRunnerGrain>(runnerId);
+        var storage = _fixture.Cluster.GetSiloServiceProvider(null).GetRequiredService<IGrainStorage>();
+        _fixture.Cluster.GetSiloServiceProvider(null)
+            .GetRequiredService<ReportPersistenceFailureProbe>()
+            .FailNextWorkflowReport(work.WorkflowRunId, work.WorkId);
+
+        await runner.UnregisterAsync();
+        await TestLifecycle.DeactivateAndWait(runner, Grains);
+        var reactivated = Grains.GetGrain<IRunnerGrain>(runnerId);
+        _ = await reactivated.GetRuntimeStateAsync();
+
+        var state = new GrainState<RunnerState>();
+        await storage.ReadStateAsync("runner", reactivated.GetGrainId(), state);
+        Assert.Null(state.State.ClosingProcessGeneration);
+        Assert.Equal("Failed", await workflow.GetRunStatusAsync());
+    }
+
+    [Fact]
+    public async Task LegacyRunnerStateWithoutLease_RemainsOfflineAndIneligible()
+    {
+        var runnerId = $"runner-legacy-lease-{Guid.NewGuid():N}";
+        var runner = Grains.GetGrain<IRunnerGrain>(runnerId);
+        var storage = _fixture.Cluster.GetSiloServiceProvider(null).GetRequiredService<IGrainStorage>();
+        await storage.WriteStateAsync("runner", runner.GetGrainId(), new GrainState<RunnerState>
+        {
+            State = new RunnerState
+            {
+                LastKnownInfo = new RunnerInfo(runnerId, ["spec/*"], "legacy-host", "test-project"),
+            },
+        });
+
+        Assert.False(await runner.IsPresenceLeaseActiveAsync());
+        Assert.DoesNotContain(
+            await Grains.GetGrain<IRunnerRegistryGrain>(RunnerRegistryKeys.Global)
+                .ListEligibleRunnersAsync("test-project"),
+            item => item.RunnerId == runnerId);
     }
 }

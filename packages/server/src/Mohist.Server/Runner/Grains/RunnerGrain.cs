@@ -133,6 +133,36 @@ public partial class RunnerGrain : Grain, IRunnerGrain, IRemindable
             if (catalog is not null)
                 _info = _info with { ActionCatalog = catalog };
         }
+
+        var now = _timeProvider.GetUtcNow();
+        if (state.PresenceLeaseExpiresAt is { } expiry)
+        {
+            _lastPresenceAt = expiry - PresenceTimeout;
+            if (expiry > now && _info is not null)
+            {
+                _status = RunnerStatus.Online;
+                EnsurePresenceTimer();
+                await EnsurePresenceReminderAsync();
+                await UpsertRegistryAsync();
+            }
+            else if (expiry <= now)
+            {
+                _status = RunnerStatus.Online;
+                await HandleTimeoutAsync();
+            }
+            else
+            {
+                _status = RunnerStatus.Offline;
+                state.PresenceLeaseExpiresAt = null;
+                await PersistAsync();
+            }
+        }
+
+        if (!string.IsNullOrWhiteSpace(state.ClosingProcessGeneration))
+        {
+            await EnsurePresenceReminderAsync();
+            await ReconcileClosingGenerationAsync();
+        }
     }
 
     public override Task OnDeactivateAsync(DeactivationReason reason, CancellationToken ct)
@@ -180,20 +210,26 @@ public partial class RunnerGrain : Grain, IRunnerGrain, IRemindable
             }
 
             if (!string.IsNullOrWhiteSpace(closingGeneration))
-                await CloseoutLostAsync(closingGeneration, failFast: true);
+            {
+                await ReconcileClosingGenerationAsync();
+                if (!string.IsNullOrWhiteSpace(state.ClosingProcessGeneration))
+                    return;
+            }
 
             state.CurrentProcessGeneration = processGeneration;
             state.PendingProcessGeneration = null;
             state.ClosingProcessGeneration = null;
             SetRunnerInfo(InfoForRegister(info));
             _status = RunnerStatus.Online;
+            var now = _timeProvider.GetUtcNow();
+            state.PresenceLeaseExpiresAt = now + PresenceTimeout;
             // Registration is the update handoff completion boundary. Persist
             // it before reopening admission so an activation cannot silently
             // erase a confirmed fence while the old process is still active.
             var updateInterruptFence = UpdateInterruptFence();
             _readinessConnectionGeneration = null;
             _runtimeReadiness.Clear();
-            _lastPresenceAt = _timeProvider.GetUtcNow();
+            _lastPresenceAt = now;
             _pendingBuildGitHash = null;
             _pendingRuntimeIdentity = null;
             _slots = await _definitions.GetOrInitAsync(RunnerId);
@@ -202,8 +238,9 @@ public partial class RunnerGrain : Grain, IRunnerGrain, IRemindable
                 pendingId: null,
                 lastCancelledId: null);
             _draining = false;
-            await UpsertRegistryAsync();
+            await EnsurePresenceReminderAsync();
             EnsurePresenceTimer();
+            await UpsertRegistryAsync();
             _log.LogInformation("Runner {Id} registered from {Host} as global resource with {Slots} persisted execution slots", info.RunnerId, info.Hostname, _slots);
         }
         finally
@@ -221,8 +258,11 @@ public partial class RunnerGrain : Grain, IRunnerGrain, IRemindable
             _pollAdmissionToken = null;
             _status = RunnerStatus.Offline;
             SetRunnerInfo(null);
+            var state = _state.State ??= new RunnerState();
+            state.PresenceLeaseExpiresAt = null;
             BeginDurableCloseout();
             await PersistAsync();
+            await EnsurePresenceReminderAsync();
             var registry = GrainFactory.GetGrain<IRunnerRegistryGrain>(RunnerRegistryKeys.Global);
             await registry.UnregisterAsync(RunnerId);
         }
@@ -272,19 +312,19 @@ public partial class RunnerGrain : Grain, IRunnerGrain, IRemindable
 
     private async Task TouchPresenceUnderGateAsync(bool refreshRegistry = false)
     {
-        _lastPresenceAt = _timeProvider.GetUtcNow();
-        EnsurePresenceTimer();
-        if (_status == RunnerStatus.Online)
-        {
-            if (refreshRegistry)
-                await UpsertRegistryAsync();
-            return;
-        }
         if (_info is null)
             return;
 
+        var now = _timeProvider.GetUtcNow();
+        _lastPresenceAt = now;
+        (_state.State ??= new RunnerState()).PresenceLeaseExpiresAt = now + PresenceTimeout;
+        var wasOnline = _status == RunnerStatus.Online;
+        await PersistAsync();
+        EnsurePresenceTimer();
         _status = RunnerStatus.Online;
-        await UpsertRegistryAsync();
+        await EnsurePresenceReminderAsync();
+        if (refreshRegistry || !wasOnline)
+            await UpsertRegistryAsync();
     }
 
     public async Task<RunnerPollAdmission> TryBeginPollAsync(string processGeneration)
@@ -709,118 +749,52 @@ public partial class RunnerGrain : Grain, IRunnerGrain, IRemindable
 
     private async Task CheckPresenceAsync()
     {
-        if (_status == RunnerStatus.Offline) return;
+        if (_status == RunnerStatus.Offline)
+            return;
 
-        var elapsed = _timeProvider.GetUtcNow() - _lastPresenceAt;
-        if (elapsed > PresenceTimeout)
+        var expiry = _state.State?.PresenceLeaseExpiresAt;
+        if (expiry is null || expiry <= _timeProvider.GetUtcNow())
         {
-            _log.LogWarning("Runner {Id} poll presence timeout ({Elapsed}s)", RunnerId, elapsed.TotalSeconds);
+            _log.LogWarning("Runner {Id} presence lease expired", RunnerId);
             await HandleTimeoutAsync();
         }
     }
 
     private async Task HandleTimeoutAsync()
     {
+        var converged = false;
         await _lifecycleGate.WaitAsync();
         try
         {
-            if (_status == RunnerStatus.Offline
-                || _timeProvider.GetUtcNow() - _lastPresenceAt <= PresenceTimeout)
-            {
+            var state = _state.State ??= new RunnerState();
+            if (state.PresenceLeaseExpiresAt is not { } expiry
+                || expiry > _timeProvider.GetUtcNow())
                 return;
-            }
 
             _pollAdmissionToken = null;
             _status = RunnerStatus.Offline;
+            state.PresenceLeaseExpiresAt = null;
             BeginDurableCloseout();
             await PersistAsync();
+            await EnsurePresenceReminderAsync();
             var registry = GrainFactory.GetGrain<IRunnerRegistryGrain>(RunnerRegistryKeys.Global);
-            await registry.UnregisterAsync(RunnerId);
+            try
+            {
+                await registry.UnregisterAsync(RunnerId);
+            }
+            catch (Exception ex)
+            {
+                _log.LogWarning(ex, "Runner {RunnerId} registry removal failed during timeout convergence", RunnerId);
+            }
+            converged = true;
         }
         finally
         {
             _lifecycleGate.Release();
         }
 
-        await ReconcileClosingGenerationAsync();
-    }
-
-    private void BeginDurableCloseout()
-    {
-        var state = _state.State ??= new RunnerState();
-        if (string.IsNullOrWhiteSpace(state.ClosingProcessGeneration))
-            state.ClosingProcessGeneration = state.CurrentProcessGeneration;
-        _draining = !string.IsNullOrWhiteSpace(state.ClosingProcessGeneration);
-    }
-
-    private async Task ReconcileClosingGenerationAsync()
-    {
-        var state = _state.State ??= new RunnerState();
-        var closingGeneration = state.ClosingProcessGeneration;
-        if (string.IsNullOrWhiteSpace(closingGeneration))
-            return;
-
-        try
-        {
-            await CloseoutLostAsync(closingGeneration, failFast: true);
-            state.ClosingProcessGeneration = null;
-            _draining = !string.IsNullOrWhiteSpace(state.PendingProcessGeneration)
-                || !string.IsNullOrWhiteSpace(state.UpdateInterruptFence?.PendingId);
-            await PersistAsync();
-        }
-        catch (Exception ex)
-        {
-            _log.LogWarning(ex,
-                "Runner {RunnerId} will retry closeout for process generation {ProcessGeneration}",
-                RunnerId,
-                closingGeneration);
-        }
-    }
-
-    private async Task CloseoutLostAsync(string? processGeneration, bool failFast)
-    {
-        var workerId = RunnerId;
-
-        foreach (var workflowRunId in await _workflowRuns.FindRunningAssignedToAsync(workerId))
-        {
-            try
-            {
-                var run = await _workflowRuns.LoadAsync(workflowRunId);
-                var active = run?.CurrentActiveWorkFor(workerId);
-                if (active is null
-                    || !string.Equals(active.ProcessGeneration, processGeneration, StringComparison.Ordinal))
-                    continue;
-                await GrainFactory.GetGrain<IWorkflowGrain>(workflowRunId)
-                    .FailActiveWorkAsync(workerId, active.WorkId, processGeneration!, "runner-lost");
-            }
-            catch (Exception ex)
-            {
-                if (failFast) throw;
-                _log.LogWarning(ex,
-                    "runner {runner} failed to close active workflow work for run {run}",
-                    RunnerId, workflowRunId);
-            }
-        }
-
-        foreach (var record in await _agentJobStore.ListRunningForRunnerAsync(workerId))
-        {
-            try
-            {
-                if (string.IsNullOrEmpty(record.WorkId)
-                    || !string.Equals(record.ClaimedProcessGeneration, processGeneration, StringComparison.Ordinal))
-                    continue;
-                await GrainFactory.GetGrain<IAgentJobGrain>(record.JobKey)
-                    .FailRunnerLostAsync(workerId, record.WorkId, processGeneration!);
-            }
-            catch (Exception ex)
-            {
-                if (failFast) throw;
-                _log.LogWarning(ex,
-                    "runner {runner} failed to close AgentJob {job}",
-                    RunnerId,
-                    record.JobKey);
-            }
-        }
+        if (converged)
+            await ReconcileClosingGenerationAsync();
     }
 
     private static void ValidateRunnerLossRecoveryTimeout(TimeSpan timeout)
