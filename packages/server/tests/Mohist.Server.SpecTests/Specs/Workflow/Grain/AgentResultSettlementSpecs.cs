@@ -25,7 +25,7 @@ public sealed partial class AgentResultSettlementSpecs : WorkflowGrainSpecs
     }
 
     [Fact]
-    public async Task UnknownSettlement_DeletesItsSnapshotAndFencesDispatchAndControl()
+    public async Task UnknownSettlement_DeletesItsSnapshotAndWithholdsDispatchAndControl()
     {
         var workflow = await StartWorkflowAsync(SingleStage(
             tasks:
@@ -53,18 +53,22 @@ public sealed partial class AgentResultSettlementSpecs : WorkflowGrainSpecs
         Assert.Null(unresolved.NextWork());
         Assert.Null(unresolved.CurrentPendingWork());
         Assert.Null(await workflow.ClaimNextAsync(runnerId, "test-generation"));
-        var recovery = Assert.Single((await Services.GetRequiredService<DispatchService>()
-            .PollAsync(runnerId, new RunnerPollRequest([], [], ProcessGeneration: TestRunnerGenerationExtensions.ProcessGeneration))).Dispatches);
-        Assert.Equal(work.WorkId, recovery.WorkId);
-        Assert.NotNull(recovery.AgentRecovery);
+        var dispatch = Services.GetRequiredService<DispatchService>();
+        Assert.Empty((await dispatch.PollAsync(
+            runnerId,
+            new RunnerPollRequest([], [], ProcessGeneration: TestRunnerGenerationExtensions.ProcessGeneration))).Dispatches);
 
         var pendingWorkflowId = $"{_workflowId}-pending";
         var projectId = TestProjectId(_workflowId!);
         var pendingWorkflow = Grains.GetGrain<IWorkflowGrain>(pendingWorkflowId);
         await SeedWorkflowTemplateAsync(pendingWorkflowId, SingleStage(checks: []), projectId);
         await pendingWorkflow.StartAsync(TestInput(projectId));
+        Assert.Empty((await dispatch.PollAsync(
+            runnerId,
+            new RunnerPollRequest([], [], ProcessGeneration: TestRunnerGenerationExtensions.ProcessGeneration))).Dispatches);
+        Assert.Equal("Pending", await pendingWorkflow.GetRunStatusAsync());
+
         var workKey = $"{WorkDispatchOwnerKinds.Workflow}:{_workflowId}:{work.WorkId}";
-        var dispatch = Services.GetRequiredService<DispatchService>();
         Assert.Empty((await dispatch.PollAsync(
             runnerId,
             new RunnerPollRequest([workKey], [], ProcessGeneration: TestRunnerGenerationExtensions.ProcessGeneration))).Dispatches);
@@ -87,8 +91,8 @@ public sealed partial class AgentResultSettlementSpecs : WorkflowGrainSpecs
     public async Task BlockedSettlement_ReleasesRunnerActiveWorksAndCapacityAtOneExactlyOnceBoundary()
     {
         // Issue-628 T-005: a durably Blocked Agent settlement must drop the
-        // attempt from Runner activeWorks + capacity + AddMissingRedeliveriesAsync
-        // desired set at the SAME post-commit boundary, and the release must
+        // attempt from Runner activeWorks + capacity + dispatch reconciliation
+        // at the SAME post-commit boundary, and the release must
         // remain durable across repeated reminder/poll/status reads while the
         // configured slot totals stay unchanged. The pre-deadline Unknown
         // lease still occupies the runner and counts against used capacity.
@@ -113,14 +117,13 @@ public sealed partial class AgentResultSettlementSpecs : WorkflowGrainSpecs
         Assert.Equal(WorkReportVerdict.Accepted, await workflow.ObserveAgentExecutionAsync(observation));
 
         // Pre-deadline Unknown lease: the run is in the runner's activeWorks,
-        // counts against capacity, and is part of the desired redelivery set.
+        // counts against capacity, and is withheld from execution dispatch.
         var preDeadlineRuntime = await runner.GetRuntimeStateAsync();
         var preDeadlineOwner = Assert.Single(preDeadlineRuntime.ActiveWorks, item =>
             string.Equals(item.OwnerId, _workflowId, StringComparison.Ordinal));
         Assert.Equal(work.WorkId, preDeadlineOwner.WorkId);
         var preDeadlineDesired = await dispatch.PollAsync(runnerId, new RunnerPollRequest([], [], ProcessGeneration: TestRunnerGenerationExtensions.ProcessGeneration));
-        var preDeadlineRecovery = Assert.Single(preDeadlineDesired.Dispatches);
-        Assert.Equal(work.WorkId, preDeadlineRecovery.WorkId);
+        Assert.Empty(preDeadlineDesired.Dispatches);
         Assert.Equal((IReadOnlyList<string>)[_workflowId!], await querier.FindRunningAssignedToAsync(runnerId));
         Assert.Equal(1, await querier.CountRunningAssignedToAsync(runnerId));
 
@@ -198,7 +201,7 @@ public sealed partial class AgentResultSettlementSpecs : WorkflowGrainSpecs
         // return stale WITHOUT forwarding the translator's failed fallback
         // to ReceiveTaskReportAsync. The blocked settlement, task/workflow
         // state, event stream, activeWorks, capacity, and the
-        // missing-redelivery desired set must remain unchanged; no
+        // dispatch projection must remain unchanged; no
         // TaskFailed event is emitted.
         var workflow = await StartWorkflowAsync(SingleStage(
             tasks: [new TaskDefinition("agent", "Agent", "mohist/opencode")],
@@ -233,7 +236,7 @@ public sealed partial class AgentResultSettlementSpecs : WorkflowGrainSpecs
         var beforeEventCount = (await EventStore.ListAsync(_workflowId!)).Count;
 
         // Pre-condition: the durable Blocked projection has already released
-        // the run from activeWorks / capacity / desired set.
+        // the run from activeWorks and capacity without emitting a dispatch.
         Assert.Empty(await querier.FindRunningAssignedToAsync(runnerId));
         Assert.Equal(0, await querier.CountRunningAssignedToAsync(runnerId));
         Assert.DoesNotContain((await runner.GetRuntimeStateAsync()).ActiveWorks, item =>
@@ -315,8 +318,8 @@ public sealed partial class AgentResultSettlementSpecs : WorkflowGrainSpecs
         // session-binding fail-closed) carries no execution binding. The
         // report service must route it into the unknown observation so the
         // settlement arbiter owns it — an acknowledged report also lets the
-        // Runner retire its journal entry instead of retrying a rejection
-        // forever while the workflow silently waits for a result.
+        // Runner retire its volatile report retry instead of repeating a
+        // rejection forever while the workflow silently waits for a result.
         var workflow = await StartWorkflowAsync(SingleStage(
             tasks: [new TaskDefinition("agent", "Agent", "mohist/opencode")],
             checks: []));

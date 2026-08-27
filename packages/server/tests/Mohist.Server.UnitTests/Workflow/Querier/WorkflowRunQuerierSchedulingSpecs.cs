@@ -497,7 +497,7 @@ public class WorkflowRunQuerierSchedulingSpecs
     {
         // Issue-628 T-005: the durable Agent-blocked attention projection is
         // the sole exactly-once release boundary for Runner control-plane
-        // capacity. The desired redelivery set must exclude any row whose
+        // capacity. The active reconciliation set must exclude any row whose
         // <c>AttentionStatus</c> is <c>blocked</c> while preserving the
         // assigned worker match for non-blocked rows. Blocked rows here keep
         // their active-work projection set on purpose: with the merged

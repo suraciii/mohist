@@ -196,7 +196,7 @@ export type WorkDispatchResponse = {
    */
   capabilityRevision?: string | null
   /** One-shot plaintext grant. It is consumed into the Runner wrapper and
-   * is never copied onto DispatchWorkItem or a journal record. */
+   * is never copied onto DispatchWorkItem or a work report. */
   managerExecutionGrant?: ManagerExecutionGrantResponse | null
   /** Non-secret control-plane origin marker, kept outside Runtime input. */
   originMarker?: string | null
