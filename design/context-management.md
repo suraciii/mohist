@@ -2,37 +2,40 @@
 
 This document specifies how the Mohist repository manages context: what the
 repository stores, what it must not store, and where each kind of information
-lives. It governs every file whose purpose is to inform future readers —
-humans and agents — rather than to execute.
+lives. It governs every file whose purpose is to inform future readers, humans
+and agents, rather than to execute.
 
-## Design drivers
+## Design Drivers
 
-The repository is the primary context source for every agent session and
-every contributor. Two failure modes follow from that role:
+Context management serves the agent. The repository is the primary context
+source for every agent session, and the goal of this system is that an agent
+loads exactly the context its work needs: every necessary fact at a known
+location, and no stale or irrelevant material in the way. Human developers
+need largely the same effective context, so what serves the agent serves both.
+
+Two failure modes work against this goal:
 
 - **Missing durable context.** Rules, terms, and decisions that exist only in
   chat history, closed Issues, or merged pull requests are re-derived
-  inconsistently, or lost.
+  inconsistently, or lost. The agent cannot load a fact it needs.
 - **Accumulated transient context.** Plans, research dumps, and progress logs
   describe a moment. When the moment passes, nothing maintains or deletes
-  them, and they mislead later readers with stale facts that still look
-  authoritative.
+  them. The agent loads stale facts that still look authoritative.
 
-Both failures cost the same resource: the reader's trust that what the
-repository says is true.
+Both failures reduce the same measure: the share of the loaded context that is
+true, current, and relevant.
 
 ## Principles
 
 **The repository holds durable context only.** Durable context stays true
 indefinitely and changes only when the product or the design changes: the
-product specification, the design specification, the glossary, standing
-rules, and decision records.
+product specification, the design specification, the glossary, standing rules,
+and decision records.
 
-**Transient context never enters the repository.** Transient context
-describes momentary state: plans, research notes, progress logs, review
-drafts, probe output, one-off measurements, and runtime state. Its home is
-the Mohist Issue and the parent workspace, which maintain and retire it as
-work proceeds.
+**Transient context never enters the repository.** Transient context describes
+momentary state: plans, research notes, progress logs, review drafts, probe
+output, one-off measurements, and runtime state. Its home is the Mohist Issue
+and the parent workspace, which maintain and retire it as work proceeds.
 
 **The specification is the delta.** A change to the product or the design is
 expressed by editing the specification itself. The pull request diff is the
@@ -45,56 +48,49 @@ format.
 One fact has one home. Other documents link to the home; they never restate
 the fact.
 
-```text diagram
-AGENTS.md                 Global standing rules; routes, never explains
-CONTEXT.md                Glossary: the single entry point for terms
-docs/                     Product specification (user-facing)
-  AGENTS.md               Product-spec writing rules
-design/                   Design specification (developer-facing)
-  AGENTS.md               Design-spec writing rules
-  decisions/              Decision records, each with a Status line
-packages/<pkg>/AGENTS.md  Package-scoped standing rules, when they exist
-code comments             Narrow-scope technical detail: why, never what
-```
-
 - **Root `AGENTS.md`** holds only rules that apply across the whole
   repository. Each rule links to the document that owns the detail.
-- **Scoped rule files are named `AGENTS.md`.** Agent tooling loads
-  `AGENTS.md` files automatically when work enters their tree; a rules file
-  that loads itself cannot be forgotten. Names such as `_agents.md` or
-  `agents.md` hide the same content from that mechanism and must not be
-  used.
+- **`CONTEXT.md`** is the single entry point for term definitions.
+- **`docs/`** holds the product specification: what the product must satisfy.
+- **`design/`** holds the design specification: why the boundaries exist and
+  which contracts implementations must preserve.
+- **Scoped rule files are named `AGENTS.md`.** Agent tooling loads `AGENTS.md`
+  files automatically when work enters their tree; a rules file that loads
+  itself cannot be forgotten. Names such as `_agents.md` or `agents.md` hide
+  the same content from that mechanism and must not be used.
 - **`design/decisions/`** holds durable decision records; see
   [Decision records](#decision-records).
+- **Code comments** hold narrow-scope technical detail. They explain why,
+  never what.
 
 ## Decision records
 
 A decision record is the only place that keeps why a boundary exists: the
-problem, the rejected alternatives, and the accepted trade-off.
-Specifications and `AGENTS.md` state the target state and never narrate
-history; a reader who needs the rationale follows the link to the record.
+problem, the rejected alternatives, and the accepted trade-off. Specifications
+and `AGENTS.md` state the target state and never narrate history; a reader who
+needs the rationale follows the link to the record.
 
 Each record carries, in order:
 
-- a Status line: `Status: accepted`, or `Status: superseded by <link>` to
-  the record that replaced it;
-- `## Problem` — the force that required a decision;
-- `## Decision` — the chosen rule, in present tense;
-- `## Alternatives considered` — every serious alternative and why it lost.
-  Mandatory: a decision recorded without what it beat invites re-litigation;
-- `## Consequences` — what the trade-off cost and bought.
+- a Status line: `Status: accepted`, or `Status: superseded by <link>` to the
+  record that replaced it;
+- `## Problem`: the force that required a decision;
+- `## Decision`: the chosen rule, in present tense;
+- `## Alternatives considered`: every serious alternative and why it lost.
+  This section is mandatory. A decision that does not record what it beat
+  will be disputed again;
+- `## Consequences`: what the trade-off cost and bought.
 
 Rules:
 
-- When a new record supersedes an existing one, the same change marks the
-  old record's Status line. A superseded record stays readable; the Status
-  line is the only structural edit it receives.
-- Factual references (paths, symbols, defaults) are updated in place when
-  the implementation moves; the decision itself is never rewritten.
-- Keep a record while it can still guide a future change: it owns a
-  boundary, prevents a recurring mistake, or states the condition for
-  reintroducing what was removed. Age and length are never reasons to
-  delete one.
+- When a new record supersedes an existing one, the same change marks the old
+  record's Status line. A superseded record stays readable; the Status line is
+  the only structural edit it receives.
+- Factual references (paths, symbols, defaults) are updated in place when the
+  implementation moves. The decision itself is never rewritten.
+- Keep a record while it can still guide a future change: it owns a boundary,
+  prevents a recurring mistake, or states the condition for reintroducing what
+  was removed. Age and length are never reasons to delete one.
 
 ## Transient context
 
@@ -113,8 +109,15 @@ remain true after the current work item closes.
 
 ## Verification
 
-`npm run docs:check` gates documentation mechanics: English prose, link
-targets, and diagram formats. It must also gate that every decision record
-carries a Status line and an `## Alternatives considered` section.
-Reviewers enforce the placement and durability rules in this document; no
-gate can judge them.
+`npm run docs:check` gates documentation mechanics: Latin-script prose, link
+targets, and diagram fences. It must also gate that every decision record
+carries a Status line and an `## Alternatives considered` section. Reviewers
+enforce the placement and durability rules in this document; no gate can judge
+them.
+
+## Status
+
+- The existing records in `design/decisions/` predate the authoring contract.
+  They do not carry Status lines and do not follow the section skeleton.
+- `npm run docs:check` does not yet gate the Status line or the
+  `## Alternatives considered` section of decision records.
