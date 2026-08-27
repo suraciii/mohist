@@ -168,6 +168,16 @@ public sealed class GitHubWriteBackHandlerTests
             return handler;
         }
 
+        public async Task MarkLinkPendingAsync()
+        {
+            await using var db = new MohistDbContext(Options);
+            var row = await db.GitHubIssueLinks.SingleAsync(r => r.Id == "link-1");
+            row.GithubIssueNumber = 0;
+            row.MirrorMarker = GitHubMirrorMarker.For(row.Id);
+            row.MirrorCreateAttempted = true;
+            await db.SaveChangesAsync();
+        }
+
         public async Task<GitHubIssueLink> LinkAsync()
         {
             await using var db = new MohistDbContext(Options);
@@ -445,6 +455,21 @@ public sealed class GitHubWriteBackHandlerTests
         Assert.Empty(harness.Port.Comments);
         Assert.Empty(harness.Port.StateLabels);
         Assert.Empty(harness.Port.Closes);
+    }
+
+    [Fact]
+    public async Task PendingLink_SkipsWriteBackWithoutCallingGitHub()
+    {
+        var harness = new Harness();
+        await harness.MarkLinkPendingAsync();
+        var handler = await harness.NewHandlerAsync();
+
+        await handler.HandleAsync(Event(EventCatalog.ReverseDns.IssueCompleted), CancellationToken.None);
+
+        Assert.Empty(harness.Port.Comments);
+        Assert.Empty(harness.Port.StateLabels);
+        Assert.Empty(harness.Port.Closes);
+        Assert.Empty(await harness.FailuresAsync());
     }
 
     [Fact]

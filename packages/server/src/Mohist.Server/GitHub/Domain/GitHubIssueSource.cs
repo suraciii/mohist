@@ -1,10 +1,9 @@
 namespace Mohist.Server.GitHub.Domain;
 
 /// <summary>
-/// The Mohist-side label that makes a fed issue's origin traceable: the
-/// value encodes the GitHub coordinates (<c>owner/repo#number</c>) the
-/// issue was fed from. The reverse mapping (GitHub → Mohist issue number)
-/// lives on <see cref="GitHubIssueLink"/>.
+/// Legacy feed-origin label constants retained for historical issue data. New
+/// GitHub-fed issues use the persisted link as their origin identity and never
+/// emit this product label.
 /// </summary>
 public static class GitHubIssueSource
 {

@@ -70,10 +70,12 @@ public sealed partial class Issue
         string? priority,
         string? risk = null,
         bool updateRisk = false,
-        DateTime? now = null)
+        DateTime? now = null,
+        bool updateBody = false)
     {
         var changed = false;
         var labelsChanged = false;
+        var contentChanged = false;
         if (title != null)
         {
             var nextTitle = RequireTitle(title);
@@ -81,13 +83,17 @@ public sealed partial class Issue
             {
                 _title = nextTitle;
                 changed = true;
+                contentChanged = true;
             }
         }
-        if (body != null && !string.Equals(_body, body, StringComparison.Ordinal))
+        if ((body != null || updateBody) && !string.Equals(_body, body, StringComparison.Ordinal))
         {
             _body = body;
             changed = true;
+            contentChanged = true;
         }
+        if (contentChanged)
+            RecordEvent(new IssueContentChanged(_title, _body));
         if (labels != null)
         {
             labelsChanged = !LabelsMatch(labels);
@@ -115,6 +121,18 @@ public sealed partial class Issue
             }
         }
         if (changed && !labelsChanged) Touch(now);
+    }
+
+    public void ReplaceContent(string title, string? body, string? source = null, DateTime? now = null)
+    {
+        var nextTitle = RequireTitle(title);
+        if (string.Equals(_title, nextTitle, StringComparison.Ordinal)
+            && string.Equals(_body, body, StringComparison.Ordinal))
+            return;
+        _title = nextTitle;
+        _body = body;
+        Touch(now);
+        RecordEvent(new IssueContentChanged(_title, _body, source));
     }
 
     /// <summary>

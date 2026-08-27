@@ -17,6 +17,8 @@ public sealed class GitHubIssueLinkRow
     public string RepositoryName { get; set; } = string.Empty;
     public int GithubIssueNumber { get; set; }
     public int IssueNumber { get; set; }
+    public string? MirrorMarker { get; set; }
+    public bool MirrorCreateAttempted { get; set; }
     public string PostedCommentsJson { get; set; } = "[]";
     public string? StateLabel { get; set; }
     public DateTimeOffset CreatedAt { get; set; }
