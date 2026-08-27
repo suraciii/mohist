@@ -550,7 +550,7 @@ public partial class DispatchServiceReconciliationSpecs : Mohist.Server.SpecTest
         }
 
         // Reach both persisted deadlines at the same durable boundary.
-        _fixture.TimeProvider.Advance(deadlines.Max() - _fixture.TimeProvider.GetUtcNow());
+        await AdvanceToAgentSettlementDeadlineAsync(deadlines.Max(), runnerId);
         foreach (var workflow in workflows)
             await workflow.ReceiveReminder(WorkflowGrain.AgentResultSettlementReminderName, default);
 
