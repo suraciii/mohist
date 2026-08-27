@@ -107,12 +107,12 @@ internal sealed record RunnerInterruptResult(
     string? RunnerId,
     string? Status,
     string? UpdateInterruptId,
-    IReadOnlyList<string> InterruptedWorkIds,
-    int InterruptedWorkCount,
+    IReadOnlyList<string> ActiveWorkIds,
+    int ActiveWorkCount,
     string? Error)
 {
     public bool Succeeded => Error is null
-        && string.Equals(Status, "interrupted", StringComparison.Ordinal)
+        && string.Equals(Status, "draining", StringComparison.Ordinal)
         && !string.IsNullOrWhiteSpace(RunnerId);
 
     public static RunnerInterruptResult Failed(string error) =>
@@ -506,8 +506,8 @@ internal sealed class RunnerRefreshVerifier
         var status = ReadString(data, "status");
         if (!string.Equals(runnerId, expectedRunnerId, StringComparison.Ordinal))
             return RunnerInterruptResult.Failed("response runnerId does not match the identified runner");
-        if (!string.Equals(status, "interrupted", StringComparison.Ordinal))
-            return RunnerInterruptResult.Failed($"response status was '{status ?? "<missing>"}', expected 'interrupted'");
+        if (!string.Equals(status, "draining", StringComparison.Ordinal))
+            return RunnerInterruptResult.Failed($"response status was '{status ?? "<missing>"}', expected 'draining'");
 
         var updateInterruptId = ReadString(data, "updateInterruptId");
         if (updateInterruptId is not null
@@ -517,28 +517,28 @@ internal sealed class RunnerRefreshVerifier
                 "response updateInterruptId does not match the requested update interrupt");
         }
 
-        if (!data.TryGetProperty("interruptedWorkIds", out var workIdsElement)
+        if (!data.TryGetProperty("activeWorkIds", out var workIdsElement)
             || workIdsElement.ValueKind != JsonValueKind.Array)
         {
-            return RunnerInterruptResult.Failed("response is missing interruptedWorkIds");
+            return RunnerInterruptResult.Failed("response is missing activeWorkIds");
         }
 
         var workIds = new List<string>();
         foreach (var item in workIdsElement.EnumerateArray())
         {
             if (item.ValueKind != JsonValueKind.String || string.IsNullOrWhiteSpace(item.GetString()))
-                return RunnerInterruptResult.Failed("response contains an invalid interruptedWorkIds entry");
+                return RunnerInterruptResult.Failed("response contains an invalid activeWorkIds entry");
             workIds.Add(item.GetString()!);
         }
 
-        if (!data.TryGetProperty("interruptedWorkCount", out var countElement)
+        if (!data.TryGetProperty("activeWorkCount", out var countElement)
             || !countElement.TryGetInt32(out var count)
             || count < 0)
         {
-            return RunnerInterruptResult.Failed("response is missing a valid interruptedWorkCount");
+            return RunnerInterruptResult.Failed("response is missing a valid activeWorkCount");
         }
         if (count != workIds.Count)
-            return RunnerInterruptResult.Failed("interruptedWorkCount does not match interruptedWorkIds");
+            return RunnerInterruptResult.Failed("activeWorkCount does not match activeWorkIds");
 
         return new RunnerInterruptResult(runnerId, status, updateInterruptId, workIds, count, null);
 

@@ -22,7 +22,7 @@ public class UpdateRunnerSpecs
     private static HttpResponseMessage InterruptResponse(
         HttpRequestMessage request,
         string runnerId,
-        string[] interruptedWorkIds)
+        string[] activeWorkIds)
     {
         var updateInterruptId = ReadUpdateInterruptId(request);
         return RecordingHttpHandler.Json(new
@@ -31,10 +31,10 @@ public class UpdateRunnerSpecs
             data = new
             {
                 runnerId,
-                status = "interrupted",
+                status = "draining",
                 updateInterruptId,
-                interruptedWorkIds,
-                interruptedWorkCount = interruptedWorkIds.Length,
+                activeWorkIds,
+                activeWorkCount = activeWorkIds.Length,
             },
         });
     }
@@ -65,9 +65,9 @@ public class UpdateRunnerSpecs
                     data = new
                     {
                         runnerId = "runner-1",
-                        status = "interrupted",
-                        interruptedWorkIds = Array.Empty<string>(),
-                        interruptedWorkCount = 0,
+                        status = "draining",
+                        activeWorkIds = Array.Empty<string>(),
+                        activeWorkCount = 0,
                     },
                 }));
             }
@@ -117,9 +117,9 @@ public class UpdateRunnerSpecs
                     data = new
                     {
                         runnerId = "runner-1",
-                        status = "interrupted",
-                        interruptedWorkIds = new[] { "job-1", "job-2" },
-                        interruptedWorkCount = 2,
+                        status = "draining",
+                        activeWorkIds = new[] { "job-1", "job-2" },
+                        activeWorkCount = 2,
                         operationId = "runner-update:runner",
                         affectedWorks = new[]
                         {
@@ -150,7 +150,7 @@ public class UpdateRunnerSpecs
             },
             handler.Requests.Select(request => Uri.UnescapeDataString(request.RequestUri!.AbsolutePath)));
         Assert.Contains(nameof(FakeServiceInstaller.RestartRunnerAsync), installer.Calls);
-        Assert.Contains("status=interrupted runnerId=runner-1 interruptedWorkCount=2", f.Stdout.ToString());
+        Assert.Contains("status=draining runnerId=runner-1 activeWorkCount=2", f.Stdout.ToString());
         Assert.DoesNotContain("activeWorks", string.Join('\n', handler.Requests.Select(request => request.RequestUri!.PathAndQuery)));
     }
 
