@@ -453,11 +453,10 @@ public partial class RunnerGrain : Grain, IRunnerGrain, IRemindable
         }
     }
 
-    public async Task<RunnerRuntimeState?> BeginUpdateInterruptAsync(string? updateInterruptId = null)
+    public async Task<RunnerUpdateInterruptBeginResult?> BeginUpdateInterruptAsync(string updateInterruptId)
     {
-        var requestedId = NormalizeUpdateInterruptId(updateInterruptId);
-        if (!string.IsNullOrEmpty(updateInterruptId) && requestedId is null)
-            throw new ArgumentException("update interrupt id must be a UUID", nameof(updateInterruptId));
+        var requestedId = NormalizeUpdateInterruptId(updateInterruptId)
+            ?? throw new ArgumentException("update interrupt id must be a UUID", nameof(updateInterruptId));
 
         await _lifecycleGate.WaitAsync();
         try
@@ -466,24 +465,34 @@ public partial class RunnerGrain : Grain, IRunnerGrain, IRemindable
                 return null;
 
             var fence = UpdateInterruptFence();
-            if (string.IsNullOrWhiteSpace(fence.PendingId))
+            if (!string.IsNullOrWhiteSpace(fence.PendingId))
             {
-                // A delayed duplicate begin must not recreate a fence that a
-                // matching rollback has already durably released.
-                if (requestedId is not null
-                    && string.Equals(fence.LastCancelledId, requestedId, StringComparison.Ordinal))
-                {
-                    return await BuildRuntimeStateAsync();
-                }
-
-                await PersistUpdateInterruptFenceAsync(
-                    fence,
-                    requestedId ?? Guid.NewGuid().ToString("N"),
-                    lastCancelledId: null);
+                var status = string.Equals(fence.PendingId, requestedId, StringComparison.Ordinal)
+                    ? RunnerUpdateInterruptBeginStatus.Draining
+                    : RunnerUpdateInterruptBeginStatus.Superseded;
+                return new RunnerUpdateInterruptBeginResult(
+                    fence.PendingId,
+                    status,
+                    await BuildRuntimeStateAsync());
             }
 
+            if (string.Equals(fence.LastCancelledId, requestedId, StringComparison.Ordinal))
+            {
+                return new RunnerUpdateInterruptBeginResult(
+                    requestedId,
+                    RunnerUpdateInterruptBeginStatus.AlreadyCancelled,
+                    await BuildRuntimeStateAsync());
+            }
+
+            await PersistUpdateInterruptFenceAsync(
+                fence,
+                pendingId: requestedId,
+                lastCancelledId: null);
             _draining = true;
-            return await BuildRuntimeStateAsync();
+            return new RunnerUpdateInterruptBeginResult(
+                requestedId,
+                RunnerUpdateInterruptBeginStatus.Draining,
+                await BuildRuntimeStateAsync());
         }
         finally
         {

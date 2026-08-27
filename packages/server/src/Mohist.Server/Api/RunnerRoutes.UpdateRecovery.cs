@@ -13,37 +13,45 @@ public static partial class RunnerRoutes
             RunnerUpdateInterruptRequest? request,
             IGrainFactory grains) =>
         {
-            RunnerRuntimeState? runtime;
+            RunnerUpdateInterruptBeginResult? result;
             try
             {
-                runtime = await grains.GetGrain<IRunnerGrain>(runnerId)
-                    .BeginUpdateInterruptAsync(request?.UpdateInterruptId);
+                result = await grains.GetGrain<IRunnerGrain>(runnerId)
+                    .BeginUpdateInterruptAsync(request?.UpdateInterruptId ?? string.Empty);
             }
             catch (ArgumentException ex)
             {
                 return ApiResults.BadRequest(ex.Message);
             }
 
-            if (runtime is null)
+            if (result is null)
                 return ApiResults.NotFound($"Runner '{runnerId}' not found");
 
-            var workIds = runtime.ActiveWorks
+            var workIds = result.Runtime.ActiveWorks
                 .Select(work => work.WorkId)
                 .Distinct(StringComparer.Ordinal)
                 .ToArray();
             return ApiResults.Ok(new RunnerUpdateInterruptResponse(
                 runnerId,
-                "draining",
-                runtime.UpdateInterruptId,
+                BeginStatusValue(result.Status),
+                result.UpdateInterruptId,
                 workIds,
                 workIds.Length));
         });
     }
+
+    private static string BeginStatusValue(RunnerUpdateInterruptBeginStatus status) => status switch
+    {
+        RunnerUpdateInterruptBeginStatus.Draining => "draining",
+        RunnerUpdateInterruptBeginStatus.Superseded => "superseded",
+        RunnerUpdateInterruptBeginStatus.AlreadyCancelled => "already-cancelled",
+        _ => throw new ArgumentOutOfRangeException(nameof(status), status, null),
+    };
 }
 
 public record RunnerUpdateInterruptResponse(
     string RunnerId,
     string Status,
-    string? UpdateInterruptId,
+    string UpdateInterruptId,
     IReadOnlyList<string> ActiveWorkIds,
     int ActiveWorkCount);

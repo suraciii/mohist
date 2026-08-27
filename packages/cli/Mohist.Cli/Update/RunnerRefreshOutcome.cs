@@ -113,7 +113,8 @@ internal sealed record RunnerInterruptResult(
 {
     public bool Succeeded => Error is null
         && string.Equals(Status, "draining", StringComparison.Ordinal)
-        && !string.IsNullOrWhiteSpace(RunnerId);
+        && !string.IsNullOrWhiteSpace(RunnerId)
+        && !string.IsNullOrWhiteSpace(UpdateInterruptId);
 
     public static RunnerInterruptResult Failed(string error) =>
         new(null, null, null, Array.Empty<string>(), 0, error);
@@ -510,8 +511,9 @@ internal sealed class RunnerRefreshVerifier
             return RunnerInterruptResult.Failed($"response status was '{status ?? "<missing>"}', expected 'draining'");
 
         var updateInterruptId = ReadString(data, "updateInterruptId");
-        if (updateInterruptId is not null
-            && !string.Equals(updateInterruptId, expectedUpdateInterruptId, StringComparison.Ordinal))
+        if (string.IsNullOrWhiteSpace(updateInterruptId))
+            return RunnerInterruptResult.Failed("response is missing a non-empty updateInterruptId");
+        if (!string.Equals(updateInterruptId, expectedUpdateInterruptId, StringComparison.Ordinal))
         {
             return RunnerInterruptResult.Failed(
                 "response updateInterruptId does not match the requested update interrupt");
