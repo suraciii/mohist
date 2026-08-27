@@ -64,7 +64,7 @@ public sealed class AgentJobRunnerRecoverySpecs : AgentJobGrainTestSupport
             workId,
             new WorkResult("completed", "late result from the replaced process"));
         Assert.False(late.Accepted);
-        Assert.Equal("refused", late.Reason);
+        Assert.Equal("execution-binding-required", late.Reason);
         Assert.Equal(AgentJobStatus.Failed, await job.GetStatusAsync());
     }
 }

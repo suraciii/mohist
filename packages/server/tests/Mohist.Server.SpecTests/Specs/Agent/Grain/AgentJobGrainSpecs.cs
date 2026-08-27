@@ -114,18 +114,37 @@ public class AgentJobGrainSpecs : AgentJobGrainTestSupport
         var jobKey = $"agent-job-success-{Guid.NewGuid():N}";
         var job = JobGrain(jobKey);
 
-        await job.SubmitAsync(MakeInput("do the thing", projectId, "/tmp/agent-job-success"));
+        var sessionId = $"session-{Guid.NewGuid():N}";
+        var turnId = $"turn-{Guid.NewGuid():N}";
+        const string runtime = "opencode";
+        var runtimeSessionId = $"runtime-{Guid.NewGuid():N}";
+        await job.SubmitAsync(MakeInput("do the thing", projectId, "/tmp/agent-job-success") with
+        {
+            AgentSessionId = sessionId,
+            InitialTurnId = turnId,
+            Runtime = runtime,
+        });
 
         await WaitForStatusAsync(job, AgentJobStatus.Running, TimeSpan.FromSeconds(5));
         var snapshot = await job.GetRuntimeSnapshotAsync();
         var workId = snapshot.CurrentWorkId!;
+        Assert.True(await job.RecordRuntimeSessionBindingAsync(runnerId, workId, sessionId, runtimeSessionId));
         var dispatch = new WorkDispatch(
             WorkflowRunId: string.Empty,
             WorkId: workId,
             AgentJobId: jobKey,
             OwnerKind: WorkDispatchOwnerKinds.AgentJob);
 
-        var result = new WorkResult("completed", "ok", Output: JSON.DeserializeElement("{}"), ExitCode: 0, ArtifactUploadIds: ["artifact-1"]);
+        var result = new WorkResult(
+            "completed",
+            "ok",
+            Output: JSON.DeserializeElement("{}"),
+            ExitCode: 0,
+            ArtifactUploadIds: ["artifact-1"],
+            AgentSessionId: sessionId,
+            AgentTurnId: turnId,
+            Runtime: runtime,
+            RuntimeSessionId: runtimeSessionId);
         var report = await job.ReportResultAsync(runnerId, workId, result);
         Assert.Equal(WorkReportVerdict.Accepted, report.Verdict);
 
@@ -155,6 +174,56 @@ public class AgentJobGrainSpecs : AgentJobGrainTestSupport
             && row.OwnerId == jobKey
             && row.WorkId == workId);
         Assert.Equal(runnerId, ownership.RunnerId);
+    }
+
+    [Fact]
+    public async Task ReportResultAsync_UnboundCompleted_IsRefusedWithoutMutation()
+    {
+        var (runnerId, projectId) = await RegisterAgentJobRunnerAsync($"agent-job-unbound-success-{Guid.NewGuid():N}");
+        var job = JobGrain($"agent-job-unbound-success-{Guid.NewGuid():N}");
+        await job.SubmitAsync(MakeInput("must remain running", projectId));
+        await WaitForStatusAsync(job, AgentJobStatus.Running, TimeSpan.FromSeconds(5));
+        var before = await job.GetRuntimeSnapshotAsync();
+
+        var report = await job.ReportResultAsync(
+            runnerId,
+            before.CurrentWorkId!,
+            new WorkResult("completed", "unbound success"));
+
+        Assert.Equal(WorkReportVerdict.Refused, report.Verdict);
+        Assert.Equal("execution-binding-required", report.Reason);
+        var after = await job.GetRuntimeSnapshotAsync();
+        Assert.Equal(AgentJobStatus.Running, after.Status);
+        Assert.Equal(before.CurrentWorkId, after.CurrentWorkId);
+        Assert.Equal(AgentJobStatus.Running, (await job.GetTerminalResultAsync()).Status);
+    }
+
+    [Theory]
+    [InlineData("pass")]
+    [InlineData("fail")]
+    [InlineData("success")]
+    [InlineData("ok")]
+    [InlineData("succeeded")]
+    [InlineData("arbitrary")]
+    public async Task ReportResultAsync_InvalidStatus_IsRefusedWithoutMutation(string status)
+    {
+        var (runnerId, projectId) = await RegisterAgentJobRunnerAsync($"agent-job-invalid-status-{Guid.NewGuid():N}");
+        var job = JobGrain($"agent-job-invalid-status-{Guid.NewGuid():N}");
+        await job.SubmitAsync(MakeInput("must remain running", projectId));
+        await WaitForStatusAsync(job, AgentJobStatus.Running, TimeSpan.FromSeconds(5));
+        var before = await job.GetRuntimeSnapshotAsync();
+
+        var report = await job.ReportResultAsync(
+            runnerId,
+            before.CurrentWorkId!,
+            new WorkResult(status, "invalid status"));
+
+        Assert.Equal(WorkReportVerdict.Refused, report.Verdict);
+        Assert.Equal("status-invalid", report.Reason);
+        var after = await job.GetRuntimeSnapshotAsync();
+        Assert.Equal(AgentJobStatus.Running, after.Status);
+        Assert.Equal(before.CurrentWorkId, after.CurrentWorkId);
+        Assert.Equal(AgentJobStatus.Running, (await job.GetTerminalResultAsync()).Status);
     }
 
     [Fact]
@@ -227,17 +296,33 @@ public class AgentJobGrainSpecs : AgentJobGrainTestSupport
         var jobKey = $"agent-job-terminal-{Guid.NewGuid():N}";
         var job = JobGrain(jobKey);
 
-        await job.SubmitAsync(MakeInput("first", projectId, "/tmp/agent-job-terminal"));
+        var sessionId = $"session-{Guid.NewGuid():N}";
+        var turnId = $"turn-{Guid.NewGuid():N}";
+        const string runtime = "opencode";
+        var runtimeSessionId = $"runtime-{Guid.NewGuid():N}";
+        await job.SubmitAsync(MakeInput("first", projectId, "/tmp/agent-job-terminal") with
+        {
+            AgentSessionId = sessionId,
+            InitialTurnId = turnId,
+            Runtime = runtime,
+        });
 
         await WaitForStatusAsync(job, AgentJobStatus.Running, TimeSpan.FromSeconds(5));
         var workId = (await job.GetRuntimeSnapshotAsync()).CurrentWorkId!;
+        Assert.True(await job.RecordRuntimeSessionBindingAsync(runnerId, workId, sessionId, runtimeSessionId));
         var dispatch = new WorkDispatch(
             WorkflowRunId: string.Empty,
             WorkId: workId,
             AgentJobId: jobKey,
             OwnerKind: WorkDispatchOwnerKinds.AgentJob);
 
-        await job.ReportResultAsync(runnerId, workId, new WorkResult("completed", "first result"));
+        await job.ReportResultAsync(runnerId, workId, new WorkResult(
+            "completed",
+            "first result",
+            AgentSessionId: sessionId,
+            AgentTurnId: turnId,
+            Runtime: runtime,
+            RuntimeSessionId: runtimeSessionId));
         await WaitForStatusAsync(job, AgentJobStatus.Completed, TimeSpan.FromSeconds(5));
 
         var firstTerminal = await job.GetTerminalResultAsync();

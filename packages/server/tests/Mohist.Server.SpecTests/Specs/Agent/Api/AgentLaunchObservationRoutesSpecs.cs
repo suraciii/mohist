@@ -109,6 +109,7 @@ public class AgentLaunchObservationRoutesSpecs : AgentSessionLaunchRoutesTestSup
 
             var jobGrain = _fixture.Grains.GetGrain<IAgentJobGrain>(jobId);
             var claim = await ClaimPreparedAgentJobAsync(jobId, runnerId, projectId, sessionId);
+            var binding = await BindClaimedAgentJobAsync(claim);
             var persistence = _fixture.Persistence.Checkpoint(sessionId);
             var report = await jobGrain.ReportResultAsync(
                 runnerId,
@@ -118,7 +119,11 @@ public class AgentLaunchObservationRoutesSpecs : AgentSessionLaunchRoutesTestSup
                     Message: "all done",
                     Output: JSON.DeserializeElement("{}"),
                     ArtifactUploadIds: null,
-                    ExitCode: 0));
+                    ExitCode: 0,
+                    AgentSessionId: binding.AgentSessionId,
+                    AgentTurnId: binding.AgentTurnId,
+                    Runtime: binding.Runtime,
+                    RuntimeSessionId: binding.RuntimeSessionId));
             Assert.True(report.Accepted, "AgentJob rejected completed report");
 
             var observation = await ReadObservationAsync(projectId, jobId);

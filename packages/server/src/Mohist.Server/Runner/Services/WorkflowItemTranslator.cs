@@ -601,9 +601,17 @@ public sealed class WorkflowItemTranslator : IScopedService
         string workflowRunId)
     {
         if (item.IsTask)
+        {
+            if (!WorkReportStatus.IsWork(result.Status))
+                throw new ArgumentException("Status is invalid for task work.", nameof(result));
             return TranslateTaskResult(item, result, workflowRunId);
+        }
         if (item.IsChecks)
+        {
+            if (!WorkReportStatus.IsChecks(result.Status))
+                throw new ArgumentException("Status is invalid for checks work.", nameof(result));
             return TranslateChecksResult(item, result);
+        }
         throw new InvalidOperationException(
             $"Unsupported work item variant '{item.WorkType}' for workflow '{workflowRunId}'");
     }
@@ -696,8 +704,9 @@ public sealed class WorkflowItemTranslator : IScopedService
             if (!expectedNames.Contains(nameValue) || !reportedNames.Add(nameValue))
                 return false;
 
-            if (row.TryGetProperty("status", out var status)
-                && status.ValueKind != JsonValueKind.String)
+            if (!row.TryGetProperty("status", out var status)
+                || status.ValueKind != JsonValueKind.String
+                || !WorkReportStatus.IsChecks(status.GetString()))
                 return false;
 
             if (row.TryGetProperty("message", out var message)
@@ -755,10 +764,9 @@ public sealed class WorkflowItemTranslator : IScopedService
     }
 
     private static TaskReportStatus ResolveTaskReportStatus(WorkResult result) =>
-        string.Equals(result.Status, "completed", StringComparison.OrdinalIgnoreCase)
-            || string.Equals(result.Status, "pass", StringComparison.OrdinalIgnoreCase)
-                ? TaskReportStatus.Succeeded
-                : TaskReportStatus.Failed;
+        WorkReportStatus.IsCompleted(result.Status)
+            ? TaskReportStatus.Succeeded
+            : TaskReportStatus.Failed;
 
     private static string? NormalizeDetail(WorkResult result, TaskReportStatus status)
     {

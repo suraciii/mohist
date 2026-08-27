@@ -569,10 +569,13 @@ public class AgentTurnLifecycleT001Specs : AgentJobGrainTestSupport
             Runtime: "opencode",
             WorkDir: "/tmp/turn-522"));
 
+        const string runtime = "opencode";
+        var runtimeSessionId = $"runtime-{Guid.NewGuid():N}";
         await job.SubmitAsync(new AgentJobInput(
             Prompt: "do the thing",
             WorkspacePath: "/tmp/turn-522",
             ProjectId: projectId,
+            Runtime: runtime,
             AgentSessionId: sessionId,
             AgentId: "agent-test",
             InitialInputId: inputId,
@@ -586,6 +589,7 @@ public class AgentTurnLifecycleT001Specs : AgentJobGrainTestSupport
         Assert.Equal(jobKey, turn.JobId);
 
         var workId = (await job.GetRuntimeSnapshotAsync()).CurrentWorkId!;
+        Assert.True(await job.RecordRuntimeSessionBindingAsync(runnerId, workId, sessionId, runtimeSessionId));
         await job.ReportResultAsync(
             runnerId,
             workId: workId,
@@ -593,7 +597,11 @@ public class AgentTurnLifecycleT001Specs : AgentJobGrainTestSupport
                 Status: "completed",
                 Message: "rich verdict",
                 Output: JSON.DeserializeElement("{\"ok\":true}"),
-                ExitCode: 0));
+                ExitCode: 0,
+                AgentSessionId: sessionId,
+                AgentTurnId: turnId,
+                Runtime: runtime,
+                RuntimeSessionId: runtimeSessionId));
         await WaitForStatusAsync(job, AgentJobStatus.Completed, TimeSpan.FromSeconds(5));
 
         var after = await session.ListTurnsAsync();

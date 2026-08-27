@@ -26,6 +26,31 @@ public sealed class RunnerPollRecoveryStateApiSpecs
         _fixture = fixture;
     }
 
+    [Theory]
+    [InlineData(WorkDispatchOwnerKinds.Workflow, "success")]
+    [InlineData(WorkDispatchOwnerKinds.Workflow, "ok")]
+    [InlineData(WorkDispatchOwnerKinds.Workflow, "succeeded")]
+    [InlineData(WorkDispatchOwnerKinds.Workflow, "arbitrary")]
+    [InlineData(WorkDispatchOwnerKinds.AgentJob, "pass")]
+    [InlineData(WorkDispatchOwnerKinds.AgentJob, "fail")]
+    [InlineData(WorkDispatchOwnerKinds.AgentJob, "success")]
+    [InlineData(WorkDispatchOwnerKinds.AgentJob, "ok")]
+    public async Task ReportRoute_RejectsAliasesAndOwnerInvalidStatuses(string ownerKind, string status)
+    {
+        using var response = await _fixture.Client.PostAsJsonAsync(
+            $"/api/runner/status-validation-{Guid.NewGuid():N}/report",
+            new
+            {
+                ownerKind,
+                workflowRunId = ownerKind == WorkDispatchOwnerKinds.Workflow ? $"wr-{Guid.NewGuid():N}" : null,
+                agentJobId = ownerKind == WorkDispatchOwnerKinds.AgentJob ? $"job-{Guid.NewGuid():N}" : null,
+                workId = "work-1",
+                status,
+            });
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+    }
+
     [Fact]
     public async Task ReportAndPoll_ExposeAcceptedContinuationIdentity()
     {
@@ -147,21 +172,34 @@ public sealed class RunnerPollRecoveryStateApiSpecs
 
         try
         {
+            var agentSessionId = $"session-{Guid.NewGuid():N}";
+            var agentTurnId = $"turn-{Guid.NewGuid():N}";
+            const string runtime = "opencode";
+            var runtimeSessionId = $"runtime-{Guid.NewGuid():N}";
             await runner.RegisterAsync(new RunnerInfo(runnerId, ["spec/*"], "test-host", projectId));
             await job.SubmitAsync(new AgentJobInput(
                 "persist terminal report",
                 WorkspacePath: "/tmp/agent-job-outstanding",
                 ProjectId: projectId,
+                Runtime: runtime,
                 AgentId: "agent-test",
+                AgentSessionId: agentSessionId,
+                InitialTurnId: agentTurnId,
                 PinnedRunnerId: runnerId));
             var dispatch = await PollAsync(runnerId);
             var workId = dispatch.GetProperty("workId").GetString()!;
+            Assert.True(await job.RecordRuntimeSessionBindingAsync(
+                runnerId, workId, agentSessionId, runtimeSessionId));
             var payload = new
             {
                 ownerKind = WorkDispatchOwnerKinds.AgentJob,
                 agentJobId = jobId,
                 workId,
                 status = "completed",
+                agentSessionId,
+                agentTurnId,
+                runtime,
+                runtimeSessionId,
             };
 
             _fixture.ReportPersistenceFailures.FailNextAgentJobReport(jobId, workId);

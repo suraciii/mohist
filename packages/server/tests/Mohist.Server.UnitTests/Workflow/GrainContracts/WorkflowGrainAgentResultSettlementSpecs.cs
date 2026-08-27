@@ -114,6 +114,36 @@ public sealed class WorkflowGrainAgentResultSettlementSpecs
     }
 
     [Fact]
+    public async Task UnboundCompletedRunnerResult_IsRefusedWithoutSettlementOrSideEffects()
+    {
+        var a = await ArrangeAsync("wr-settle-completed-unbound");
+        var service = a.CreateReportService();
+        var before = (await a.Events.ListAsync(a.RunId)).Count;
+        var result = new WorkResult(
+            "completed",
+            "must not be accepted",
+            Output: JsonSerializer.SerializeToElement(new { value = "must-not-project" }),
+            ArtifactUploadIds: ["missing-upload"],
+            AddTasks: [new RuntimeTaskInput("follow-up", "Must not be projected", "spec/task")]);
+
+        var (ack, status) = await service.ReportAsync(
+            a.WorkerId, a.RunId, a.Work.Id!, a.TaskRunId, result);
+
+        Assert.Equal("refused", ack);
+        Assert.Null(status);
+        var run = await a.LoadRunAsync();
+        var task = Assert.Single(run.CurrentStage().Tasks);
+        Assert.Equal(TaskRunStatus.Running, task.Status);
+        Assert.Equal(WorkflowRunStatus.Running, run.Status);
+        var settlement = Assert.IsType<AgentResultSettlement>(task.AgentResultSettlement);
+        Assert.Equal(AgentResultSettlementState.AwaitingResult, settlement.State);
+        Assert.Null(settlement.ReasonCode);
+        Assert.Null(task.Output);
+        Assert.Single(run.CurrentStage().Tasks);
+        Assert.Equal(before, (await a.Events.ListAsync(a.RunId)).Count);
+    }
+
+    [Fact]
     public async Task UnknownRunnerResultUsesTheBoundObservationWithoutOutputArtifactOrFollowUpSideEffects()
     {
         var a = await ArrangeAsync("wr-settle-unknown-bound");
