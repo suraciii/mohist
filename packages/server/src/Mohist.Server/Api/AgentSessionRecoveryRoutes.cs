@@ -78,16 +78,32 @@ public static class AgentSessionRecoveryRoutes
         {
             if (await grain.GetCompletedRecoveryAsync(SessionCommandKind.Compact, idempotencyKey) is { } completed)
                 return ApiResults.Ok(completed);
-            request = await grain.PrepareSessionCommandAsync(SessionCommandKind.Compact, idempotencyKey);
-            var commandResult = await commands.DispatchAsync(request, ct);
+            var processGeneration = await commands.GetCurrentProcessGenerationAsync((await grain.GetAsync())!.RunnerId!, ct);
+            request = await grain.PrepareSessionCommandAsync(SessionCommandKind.Compact, processGeneration, idempotencyKey);
+            if (await grain.AdmitSessionCommandEffectAsync(request.OperationId, processGeneration)
+                is not SessionCommandAdmissionOutcome.AdmittedNow)
+                return CommandEffectAlreadyAdmitted(request);
+            SessionCommandResult commandResult;
+            try
+            {
+                commandResult = await commands.DispatchAsync(request, ct);
+            }
+            catch
+            {
+                await grain.AbandonResetAsync(request.OperationId);
+                throw;
+            }
             if (MapCommandResult(request, commandResult) is { } commandFailure)
             {
-                if (IsDefinitiveNoEffect(commandResult))
-                    await grain.AbandonResetAsync(request.OperationId);
+                await grain.AbandonResetAsync(request.OperationId);
                 return commandFailure;
             }
 
-            var result = await grain.CompleteCompactAsync(new CompleteCompactAgentSessionCommand(request.OperationId));
+            if (!await commands.IsCurrentProcessGenerationAsync(request.RunnerId, request.ProcessGeneration, ct))
+                return CommandEffectAlreadyAdmitted(request);
+            var result = await grain.CompleteCompactAsync(new CompleteCompactAgentSessionCommand(
+                request.OperationId,
+                OwnerProcessGeneration: request.ProcessGeneration));
             return ApiResults.Ok(result);
         }
         catch (RuntimeSessionMissingException ex)
@@ -121,19 +137,34 @@ public static class AgentSessionRecoveryRoutes
         {
             if (await grain.GetCompletedRecoveryAsync(SessionCommandKind.Reset, idempotencyKey) is { } completed)
                 return ApiResults.Ok(completed);
-            request = await grain.BeginResetAsync(idempotencyKey);
-            var commandResult = await commands.DispatchAsync(request, ct);
+            var processGeneration = await commands.GetCurrentProcessGenerationAsync((await grain.GetAsync())!.RunnerId!, ct);
+            request = await grain.BeginResetAsync(processGeneration, idempotencyKey);
+            if (await grain.AdmitSessionCommandEffectAsync(request.OperationId, processGeneration)
+                is not SessionCommandAdmissionOutcome.AdmittedNow)
+                return CommandEffectAlreadyAdmitted(request);
+            SessionCommandResult commandResult;
+            try
+            {
+                commandResult = await commands.DispatchAsync(request, ct);
+            }
+            catch
+            {
+                await grain.AbandonResetAsync(request.OperationId);
+                throw;
+            }
             if (MapCommandResult(request, commandResult) is { } commandFailure)
             {
-                if (IsDefinitiveNoEffect(commandResult))
-                    await grain.AbandonResetAsync(request.OperationId);
+                await grain.AbandonResetAsync(request.OperationId);
                 return commandFailure;
             }
 
+            if (!await commands.IsCurrentProcessGenerationAsync(request.RunnerId, request.ProcessGeneration, ct))
+                return CommandEffectAlreadyAdmitted(request);
             var result = await grain.CompleteResetAsync(new CompleteResetAgentSessionCommand(
                 request.OperationId,
                 commandResult.RuntimeSessionId!,
-                request.Runtime));
+                request.Runtime,
+                request.ProcessGeneration));
             return ApiResults.Ok(result);
         }
         catch (RuntimeSessionMissingException ex)
@@ -164,6 +195,13 @@ public static class AgentSessionRecoveryRoutes
             throw;
         }
     }
+
+    private static IResult CommandEffectAlreadyAdmitted(SessionCommandRequest request) =>
+        ApiResults.Fail(
+            "Runner command outcome is unavailable after its effect was admitted",
+            503,
+            "runner_unavailable",
+            new { sessionId = request.SessionId, runnerId = request.RunnerId });
 
     private static IResult? MapCommandResult(
         SessionCommandRequest request,
@@ -208,11 +246,6 @@ public static class AgentSessionRecoveryRoutes
             _ => InvalidRunnerResult(request.SessionId),
         };
     }
-
-    private static bool IsDefinitiveNoEffect(SessionCommandResult result) =>
-        !result.Ok
-        && result.RuntimeSessionId is null
-        && result.Error is SessionCommandError.Conflict or SessionCommandError.Missing or SessionCommandError.NotStarted;
 
     private static IResult RuntimeSessionMissingResult(RuntimeSessionMissingException ex) =>
         ApiResults.Conflict(

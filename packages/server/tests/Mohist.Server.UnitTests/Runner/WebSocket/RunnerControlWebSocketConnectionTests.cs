@@ -400,7 +400,7 @@ public sealed class RunnerControlWebSocketConnectionTests
         {
             Socket = new FakeWebSocket(blockSends, blockClose, ignoreSendCancellation);
             Connection = new RunnerControlWebSocketConnection(
-                "runner-1", Guid.NewGuid(), Socket, time ?? new FakeTimeProvider(), NullLogger.Instance);
+                "runner-1", Guid.NewGuid(), "test-generation", Socket, time ?? new FakeTimeProvider(), NullLogger.Instance);
             if (start)
                 _run = Connection.RunAsync(_stop.Token);
         }

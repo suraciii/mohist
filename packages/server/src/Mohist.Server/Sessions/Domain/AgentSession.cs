@@ -340,6 +340,12 @@ public sealed record AgentSessionStatusSnapshot(
     AgentUsageSummary? UsageSummary = null,
     IReadOnlyList<ContextUsageHistoryEntry>? ContextUsageHistory = null,
     AgentSessionResetReservation? PendingReset = null,
+    /// <summary>
+    /// Durable admission facts retained for exact caller-key replay. This list is
+    /// intentionally unbounded: pruning any entry would permit an old admitted
+    /// identity to dispatch again and would weaken the indefinite replay contract.
+    /// </summary>
+    IReadOnlyList<AgentSessionCommandAdmissionTombstone>? SessionCommandAdmissionFacts = null,
     AgentSessionFollowupLease? PendingFollowup = null,
     IReadOnlyList<AgentSessionFollowupLease>? PendingFollowups = null,
     IReadOnlyList<AgentSessionTranscriptEvidence>? PendingTranscriptEvidence = null,
@@ -421,7 +427,16 @@ public sealed record AgentSessionResetReservation(
     AgentSessionRecoveryOutcome? Outcome = null,
     string? IdempotencyKey = null,
     IReadOnlyList<string>? AdditionalIdempotencyKeys = null,
-    long ExpectedBindingEpoch = 0);
+    long ExpectedBindingEpoch = 0,
+    bool EffectAdmitted = false,
+    string? OwnerProcessGeneration = null);
+
+public sealed record AgentSessionCommandAdmissionTombstone(
+    string Command,
+    string OperationId,
+    string IdempotencyKey,
+    string OwnerProcessGeneration,
+    AgentSessionRecoveryOutcome? Outcome = null);
 
 public sealed record AgentSessionRecoveryOutcome(
     string Id,

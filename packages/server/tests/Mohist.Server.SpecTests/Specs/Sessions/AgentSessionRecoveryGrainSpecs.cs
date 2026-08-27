@@ -135,8 +135,8 @@ public sealed class AgentSessionRecoveryGrainSpecs : IClassFixture<AgentSessionG
     {
         var (grain, sessionId) = await CreateAttachedSessionAsync("runtime-before-reset");
 
-        var first = await grain.BeginResetAsync();
-        var duplicate = await grain.BeginResetAsync();
+        var first = await grain.BeginResetAsync("test-generation");
+        var duplicate = await grain.BeginResetAsync("test-generation");
 
         Assert.Equal(first.OperationId, duplicate.OperationId);
         Assert.Equal("runtime-before-reset", first.ExpectedRuntimeSessionId);
@@ -145,11 +145,12 @@ public sealed class AgentSessionRecoveryGrainSpecs : IClassFixture<AgentSessionG
         var result = await grain.CompleteResetAsync(new CompleteResetAgentSessionCommand(
             first.OperationId!,
             "runtime-after-reset",
-            "opencode"));
+            "opencode",
+            "test-generation"));
 
         Assert.Equal(sessionId, result.Id);
         var duplicateCompletion = await grain.CompleteResetAsync(
-            new CompleteResetAgentSessionCommand(first.OperationId!, "unused-replacement", "opencode"));
+            new CompleteResetAgentSessionCommand(first.OperationId!, "unused-replacement", "opencode", "test-generation"));
         Assert.Equal(result, duplicateCompletion);
         Assert.Equal("runtime-after-reset", (await grain.GetAsync())?.AgentSessionId);
     }
@@ -159,13 +160,13 @@ public sealed class AgentSessionRecoveryGrainSpecs : IClassFixture<AgentSessionG
     {
         var (grain, sessionId) = await CreateAttachedSessionAsync("runtime-before-recovery");
 
-        var compact = await grain.PrepareSessionCommandAsync(SessionCommandKind.Compact);
-        var exception = await Assert.ThrowsAsync<RecoveryOperationInProgressException>(() => grain.BeginResetAsync());
+        var compact = await grain.PrepareSessionCommandAsync(SessionCommandKind.Compact, "test-generation");
+        var exception = await Assert.ThrowsAsync<RecoveryOperationInProgressException>(() => grain.BeginResetAsync("test-generation"));
 
         Assert.Equal(sessionId, exception.SessionId);
         Assert.Equal("compact", exception.Operation);
         await grain.AbandonResetAsync(compact.OperationId!);
-        var reset = await grain.BeginResetAsync();
+        var reset = await grain.BeginResetAsync("test-generation");
         Assert.Equal("runtime-before-recovery", reset.ExpectedRuntimeSessionId);
     }
 
@@ -174,30 +175,36 @@ public sealed class AgentSessionRecoveryGrainSpecs : IClassFixture<AgentSessionG
     {
         var (grain, sessionId) = await CreateAttachedSessionAsync("runtime-before-compact");
 
-        var compact = await grain.PrepareSessionCommandAsync(SessionCommandKind.Compact);
-        var duplicate = await grain.PrepareSessionCommandAsync(SessionCommandKind.Compact);
+        var compact = await grain.PrepareSessionCommandAsync(SessionCommandKind.Compact, "test-generation");
+        var duplicate = await grain.PrepareSessionCommandAsync(SessionCommandKind.Compact, "test-generation");
 
         Assert.Equal(sessionId, compact.SessionId);
         Assert.Equal(compact.OperationId, duplicate.OperationId);
 
-        await grain.CompleteCompactAsync(new CompleteCompactAgentSessionCommand(compact.OperationId, Summary: "summary"));
+        await grain.CompleteCompactAsync(new CompleteCompactAgentSessionCommand(compact.OperationId, "test-generation", Summary: "summary"));
         Assert.Equal(1, _fixture.StateStore.Events.Count(e => e.Value is AgentSessionContextCompacted));
     }
 
     [Fact]
-    public async Task Compact_ReservationSurvivesReactivationAndCompletesOnlyOnce()
+    public async Task Compact_AdmittedEffectSurvivesReactivationAndCannotBeAdmittedAgain()
     {
         var (grain, sessionId) = await CreateAttachedSessionAsync("runtime-before-compact");
-        var reserved = await grain.PrepareSessionCommandAsync(SessionCommandKind.Compact);
+        var reserved = await grain.PrepareSessionCommandAsync(SessionCommandKind.Compact, "test-generation", "reactivation-operation");
+        Assert.Equal(
+            SessionCommandAdmissionOutcome.AdmittedNow,
+            await grain.AdmitSessionCommandEffectAsync(reserved.OperationId, "test-generation"));
 
         var management = grain.AsReference<IGrainManagementExtension>();
         await management.DeactivateOnIdle();
 
         var reactivated = _fixture.Grains.GetGrain<IAgentSessionGrain>(sessionId);
-        var retry = await reactivated.PrepareSessionCommandAsync(SessionCommandKind.Compact);
+        var retry = await reactivated.PrepareSessionCommandAsync(SessionCommandKind.Compact, "test-generation", "reactivation-operation");
         Assert.Equal(reserved.OperationId, retry.OperationId);
+        Assert.Equal(
+            SessionCommandAdmissionOutcome.AlreadyAdmitted,
+            await reactivated.AdmitSessionCommandEffectAsync(retry.OperationId, "test-generation"));
 
-        await reactivated.CompleteCompactAsync(new CompleteCompactAgentSessionCommand(retry.OperationId, Summary: "summary"));
+        await reactivated.CompleteCompactAsync(new CompleteCompactAgentSessionCommand(retry.OperationId, "test-generation", Summary: "summary"));
         Assert.Single(_fixture.StateStore.Events, e => e.Value is AgentSessionContextCompacted);
     }
 
@@ -205,11 +212,11 @@ public sealed class AgentSessionRecoveryGrainSpecs : IClassFixture<AgentSessionG
     public async Task CompletedCompact_DoesNotBlockTheNextReset()
     {
         var (grain, _) = await CreateAttachedSessionAsync("runtime-completed-compact");
-        var compact = await grain.PrepareSessionCommandAsync(SessionCommandKind.Compact);
-        await grain.CompleteCompactAsync(new CompleteCompactAgentSessionCommand(compact.OperationId, Summary: "summary"));
+        var compact = await grain.PrepareSessionCommandAsync(SessionCommandKind.Compact, "test-generation");
+        await grain.CompleteCompactAsync(new CompleteCompactAgentSessionCommand(compact.OperationId, "test-generation", Summary: "summary"));
         _fixture.TimeProvider.Advance(TimeSpan.FromMinutes(6));
 
-        var reset = await grain.BeginResetAsync();
+        var reset = await grain.BeginResetAsync("test-generation");
 
         Assert.NotEqual(compact.OperationId, reset.OperationId);
         Assert.Equal("runtime-completed-compact", reset.ExpectedRuntimeSessionId);
@@ -219,11 +226,12 @@ public sealed class AgentSessionRecoveryGrainSpecs : IClassFixture<AgentSessionG
     public async Task Compact_PostCommitFailure_ReactivationReturnsPersistedCompletionWithoutAnotherCompaction()
     {
         var (grain, sessionId) = await CreateAttachedSessionAsync("runtime-post-commit");
-        var request = await grain.PrepareSessionCommandAsync(SessionCommandKind.Compact, "post-commit-key");
+        var request = await grain.PrepareSessionCommandAsync(SessionCommandKind.Compact, "test-generation", "post-commit-key");
+        await grain.AdmitSessionCommandEffectAsync(request.OperationId, "test-generation");
         _fixture.StateStore.CommitThenThrowNextSave(sessionId);
 
         await Assert.ThrowsAsync<InvalidOperationException>(() => grain.CompleteCompactAsync(
-            new CompleteCompactAgentSessionCommand(request.OperationId, Summary: "summary")));
+            new CompleteCompactAgentSessionCommand(request.OperationId, "test-generation", Summary: "summary")));
 
         var management = grain.AsReference<IGrainManagementExtension>();
         await management.DeactivateOnIdle();
@@ -236,7 +244,7 @@ public sealed class AgentSessionRecoveryGrainSpecs : IClassFixture<AgentSessionG
         Assert.Single(_fixture.StateStore.Events, e => e.Value is AgentSessionContextCompacted);
 
         var replay = await reactivated.CompleteCompactAsync(
-            new CompleteCompactAgentSessionCommand(request.OperationId, Summary: "different summary"));
+            new CompleteCompactAgentSessionCommand(request.OperationId, "test-generation", Summary: "different summary"));
         Assert.Equal(completed, replay);
         Assert.Single(_fixture.StateStore.Events, e => e.Value is AgentSessionContextCompacted);
     }
@@ -245,45 +253,90 @@ public sealed class AgentSessionRecoveryGrainSpecs : IClassFixture<AgentSessionG
     public async Task CompletedCompact_ReplaysOnlyItsIdempotencyKeyAndStartsANewOperationForAnotherKey()
     {
         var (grain, _) = await CreateAttachedSessionAsync("runtime-recovery-key");
-        var first = await grain.PrepareSessionCommandAsync(SessionCommandKind.Compact, "compact-1");
-        await grain.CompleteCompactAsync(new CompleteCompactAgentSessionCommand(first.OperationId, Summary: "first"));
+        var first = await grain.PrepareSessionCommandAsync(SessionCommandKind.Compact, "test-generation", "compact-1");
+        await grain.AdmitSessionCommandEffectAsync(first.OperationId, "test-generation");
+        await grain.CompleteCompactAsync(new CompleteCompactAgentSessionCommand(first.OperationId, "test-generation", Summary: "first"));
 
         Assert.NotNull(await grain.GetCompletedRecoveryAsync(SessionCommandKind.Compact, "compact-1"));
-        var second = await grain.PrepareSessionCommandAsync(SessionCommandKind.Compact, "compact-2");
-        await grain.CompleteCompactAsync(new CompleteCompactAgentSessionCommand(second.OperationId, Summary: "second"));
+        var second = await grain.PrepareSessionCommandAsync(SessionCommandKind.Compact, "test-generation", "compact-2");
+        await grain.AdmitSessionCommandEffectAsync(second.OperationId, "test-generation");
+        await grain.CompleteCompactAsync(new CompleteCompactAgentSessionCommand(second.OperationId, "test-generation", Summary: "second"));
 
         Assert.NotEqual(first.OperationId, second.OperationId);
         Assert.Equal(2, _fixture.StateStore.Events.Count(e => e.Value is AgentSessionContextCompacted));
     }
 
     [Fact]
-    public async Task PendingReset_AcceptsAnotherIdempotencyKeyAndReplaysCompletionForBothKeys()
+    public async Task CompletedCommands_RetainEachAdmittedOutcomeForExactReplay()
     {
-        var (grain, _) = await CreateAttachedSessionAsync("runtime-pending-reset-key");
-        var first = await grain.BeginResetAsync("reset-1");
-
-        var joined = await grain.BeginResetAsync("reset-2");
-        Assert.Equal(first.OperationId, joined.OperationId);
-
-        await grain.CompleteResetAsync(new CompleteResetAgentSessionCommand(
+        var (grain, _) = await CreateAttachedSessionAsync("runtime-admission-history");
+        var first = await grain.PrepareSessionCommandAsync(SessionCommandKind.Compact, "test-generation", "compact-a");
+        await grain.AdmitSessionCommandEffectAsync(first.OperationId, "test-generation");
+        var firstOutcome = await grain.CompleteCompactAsync(new CompleteCompactAgentSessionCommand(
             first.OperationId,
-            "runtime-pending-reset-key-replacement",
-            "opencode"));
+            "test-generation",
+            Summary: "first"));
 
-        Assert.NotNull(await grain.GetCompletedRecoveryAsync(SessionCommandKind.Reset, "reset-1"));
-        Assert.NotNull(await grain.GetCompletedRecoveryAsync(SessionCommandKind.Reset, "reset-2"));
+        var second = await grain.PrepareSessionCommandAsync(SessionCommandKind.Compact, "test-generation", "compact-b");
+        await grain.AdmitSessionCommandEffectAsync(second.OperationId, "test-generation");
+        await grain.CompleteCompactAsync(new CompleteCompactAgentSessionCommand(
+            second.OperationId,
+            "test-generation",
+            Summary: "second"));
+
+        Assert.Equal(firstOutcome, await grain.GetCompletedRecoveryAsync(SessionCommandKind.Compact, "compact-a"));
+        Assert.Equal(first.OperationId, (await grain.PrepareSessionCommandAsync(
+            SessionCommandKind.Compact,
+            "test-generation",
+            "compact-a")).OperationId);
+    }
+
+    [Fact]
+    public async Task ChangedProcessGenerationClearsStalePendingButFencesOldCompletion()
+    {
+        var (grain, _) = await CreateAttachedSessionAsync("runtime-generation-replacement");
+        var old = await grain.PrepareSessionCommandAsync(SessionCommandKind.Compact, "generation-a", "old-key");
+        await grain.AdmitSessionCommandEffectAsync(old.OperationId, "generation-a");
+
+        var replacement = await grain.PrepareSessionCommandAsync(
+            SessionCommandKind.Compact,
+            "generation-b",
+            "new-key");
+
+        Assert.NotEqual(old.OperationId, replacement.OperationId);
+        await Assert.ThrowsAsync<StaleRuntimeSessionBindingException>(() => grain.CompleteCompactAsync(
+            new CompleteCompactAgentSessionCommand(old.OperationId, "generation-a", Summary: "old")));
+        Assert.Null(await grain.GetCompletedRecoveryAsync(SessionCommandKind.Compact, "old-key"));
+        Assert.Equal(old.OperationId, (await grain.PrepareSessionCommandAsync(
+            SessionCommandKind.Compact,
+            "generation-b",
+            "old-key")).OperationId);
+    }
+
+    [Fact]
+    public async Task PendingReset_RejectsDifferentIdempotencyKeyWithoutChangingReservation()
+    {
+        var (grain, sessionId) = await CreateAttachedSessionAsync("runtime-pending-reset-key");
+        var first = await grain.BeginResetAsync("test-generation", "reset-1");
+
+        await Assert.ThrowsAsync<RecoveryOperationInProgressException>(() => grain.BeginResetAsync("test-generation", "reset-2"));
+
+        var state = Assert.IsType<AgentSession>(await _fixture.StateStore.LoadAsync(sessionId));
+        Assert.Equal(first.OperationId, state.Status.PendingReset?.OperationId);
+        Assert.Equal("reset-1", state.Status.PendingReset?.IdempotencyKey);
+        Assert.Null(state.Status.PendingReset?.AdditionalIdempotencyKeys);
     }
 
     [Fact]
     public async Task DefaultKey_GeneratesUniqueIdempotencyKeyForEachOmittedCall()
     {
         var (grain, sessionId) = await CreateAttachedSessionAsync("runtime-default-key");
-        var first = await grain.PrepareSessionCommandAsync(SessionCommandKind.Compact);
+        var first = await grain.PrepareSessionCommandAsync(SessionCommandKind.Compact, "test-generation");
         var firstKey = (await _fixture.StateStore.LoadAsync(sessionId))!
             .Status.PendingReset!.IdempotencyKey;
 
-        await grain.CompleteCompactAsync(new CompleteCompactAgentSessionCommand(first.OperationId, Summary: "first"));
-        var second = await grain.PrepareSessionCommandAsync(SessionCommandKind.Compact);
+        await grain.CompleteCompactAsync(new CompleteCompactAgentSessionCommand(first.OperationId, "test-generation", Summary: "first"));
+        var second = await grain.PrepareSessionCommandAsync(SessionCommandKind.Compact, "test-generation");
         var secondKey = (await _fixture.StateStore.LoadAsync(sessionId))!
             .Status.PendingReset!.IdempotencyKey;
 
@@ -298,12 +351,12 @@ public sealed class AgentSessionRecoveryGrainSpecs : IClassFixture<AgentSessionG
     public async Task DefaultKey_AfterCompletedRecovery_StartsNewOperationInsteadOfReplaying()
     {
         var (grain, _) = await CreateAttachedSessionAsync("runtime-default-no-replay");
-        var first = await grain.PrepareSessionCommandAsync(SessionCommandKind.Compact);
-        await grain.CompleteCompactAsync(new CompleteCompactAgentSessionCommand(first.OperationId, Summary: "first"));
+        var first = await grain.PrepareSessionCommandAsync(SessionCommandKind.Compact, "test-generation");
+        await grain.CompleteCompactAsync(new CompleteCompactAgentSessionCommand(first.OperationId, "test-generation", Summary: "first"));
 
         Assert.Null(await grain.GetCompletedRecoveryAsync(SessionCommandKind.Compact));
 
-        var second = await grain.PrepareSessionCommandAsync(SessionCommandKind.Compact);
+        var second = await grain.PrepareSessionCommandAsync(SessionCommandKind.Compact, "test-generation");
         Assert.NotEqual(first.OperationId, second.OperationId);
     }
 
@@ -312,17 +365,19 @@ public sealed class AgentSessionRecoveryGrainSpecs : IClassFixture<AgentSessionG
     {
         var (grain, _) = await CreateAttachedSessionAsync("runtime-default-reset-effect");
         var eventCountBefore = _fixture.StateStore.Events.Count;
-        var first = await grain.BeginResetAsync();
+        var first = await grain.BeginResetAsync("test-generation");
         await grain.CompleteResetAsync(new CompleteResetAgentSessionCommand(
             first.OperationId!,
             "runtime-default-reset-effect-replacement-1",
-            "opencode"));
+            "opencode",
+            "test-generation"));
 
-        var second = await grain.BeginResetAsync();
+        var second = await grain.BeginResetAsync("test-generation");
         await grain.CompleteResetAsync(new CompleteResetAgentSessionCommand(
             second.OperationId!,
             "runtime-default-reset-effect-replacement-2",
-            "opencode"));
+            "opencode",
+            "test-generation"));
 
         var recoveryEvents = _fixture.StateStore.Events.Skip(eventCountBefore).ToArray();
         Assert.NotEqual(first.OperationId, second.OperationId);
@@ -333,17 +388,18 @@ public sealed class AgentSessionRecoveryGrainSpecs : IClassFixture<AgentSessionG
     public async Task ExplicitLegacyKey_IsTreatedAsOrdinaryCallerSuppliedKey()
     {
         var (grain, sessionId) = await CreateAttachedSessionAsync("runtime-explicit-legacy");
-        var first = await grain.PrepareSessionCommandAsync(SessionCommandKind.Compact, "legacy");
+        var first = await grain.PrepareSessionCommandAsync(SessionCommandKind.Compact, "test-generation", "legacy");
+        await grain.AdmitSessionCommandEffectAsync(first.OperationId, "test-generation");
         var firstKey = (await _fixture.StateStore.LoadAsync(sessionId))!
             .Status.PendingReset!.IdempotencyKey;
         Assert.Equal("legacy", firstKey);
 
-        await grain.CompleteCompactAsync(new CompleteCompactAgentSessionCommand(first.OperationId, Summary: "first"));
+        await grain.CompleteCompactAsync(new CompleteCompactAgentSessionCommand(first.OperationId, "test-generation", Summary: "first"));
 
         Assert.NotNull(await grain.GetCompletedRecoveryAsync(SessionCommandKind.Compact, "legacy"));
         Assert.Null(await grain.GetCompletedRecoveryAsync(SessionCommandKind.Compact));
 
-        var second = await grain.PrepareSessionCommandAsync(SessionCommandKind.Compact);
+        var second = await grain.PrepareSessionCommandAsync(SessionCommandKind.Compact, "test-generation");
         var secondKey = (await _fixture.StateStore.LoadAsync(sessionId))!
             .Status.PendingReset!.IdempotencyKey;
         Assert.NotEqual("legacy", secondKey);

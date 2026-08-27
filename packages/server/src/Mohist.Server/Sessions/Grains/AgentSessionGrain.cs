@@ -333,31 +333,38 @@ public sealed partial class AgentSessionGrain : Grain, IAgentSessionGrain, IRemi
         return BuildRecoveryResult(session, usedBefore, size, "reset", wasCompacted: false);
     }
 
-    public async Task<SessionCommandRequest> PrepareSessionCommandAsync(SessionCommandKind command, string? idempotencyKey = null)
+    public async Task<SessionCommandRequest> PrepareSessionCommandAsync(
+        SessionCommandKind command,
+        string ownerProcessGeneration,
+        string? idempotencyKey = null)
     {
         if (command is not (SessionCommandKind.Compact or SessionCommandKind.Reset))
             throw new ArgumentOutOfRangeException(nameof(command), command, "Unsupported session command");
 
-        return await BeginSessionCommandAsync(command, idempotencyKey);
+        return await BeginSessionCommandAsync(command, ownerProcessGeneration, idempotencyKey);
     }
 
-    public Task<SessionCommandRequest> BeginResetAsync(string? idempotencyKey = null) =>
-        BeginSessionCommandAsync(SessionCommandKind.Reset, idempotencyKey);
+    public Task<SessionCommandRequest> BeginResetAsync(string ownerProcessGeneration, string? idempotencyKey = null) =>
+        BeginSessionCommandAsync(SessionCommandKind.Reset, ownerProcessGeneration, idempotencyKey);
 
     public async Task<AgentSessionRecoveryResult?> GetCompletedRecoveryAsync(SessionCommandKind command, string? idempotencyKey = null)
     {
+        if (string.IsNullOrWhiteSpace(idempotencyKey)) return null;
         var session = await GetRequiredAsync();
-        var reservation = session.Status.PendingReset;
-        return reservation is not null
-            && string.Equals(reservation.Command, CommandName(command), StringComparison.Ordinal)
-            && MatchesRecoveryIdempotencyKey(reservation, RecoveryIdempotencyKey(idempotencyKey))
-            && reservation.Outcome is not null
-            ? ToRecoveryResult(reservation.Outcome)
-            : null;
+        var commandName = CommandName(command);
+        var admission = session.Status.SessionCommandAdmissionFacts?.LastOrDefault(candidate =>
+            string.Equals(candidate.Command, commandName, StringComparison.Ordinal)
+            && string.Equals(candidate.IdempotencyKey, idempotencyKey, StringComparison.Ordinal));
+        return admission?.Outcome is { } outcome ? ToRecoveryResult(outcome) : null;
     }
 
-    private async Task<SessionCommandRequest> BeginSessionCommandAsync(SessionCommandKind command, string? idempotencyKey)
+    private async Task<SessionCommandRequest> BeginSessionCommandAsync(
+        SessionCommandKind command,
+        string ownerProcessGeneration,
+        string? idempotencyKey)
     {
+        if (string.IsNullOrEmpty(ownerProcessGeneration))
+            throw new ArgumentException("owner process generation is required", nameof(ownerProcessGeneration));
         var session = await GetRequiredAsync();
         await ExpireAcceptedFollowupsAsync(session);
         EnsureSessionIdleForRecovery(session);
@@ -366,35 +373,35 @@ public sealed partial class AgentSessionGrain : Grain, IAgentSessionGrain, IRemi
         var key = RecoveryIdempotencyKey(idempotencyKey);
         var commandName = CommandName(command);
 
+        var admittedReplay = session.Status.SessionCommandAdmissionFacts?.LastOrDefault(candidate =>
+            string.Equals(candidate.Command, commandName, StringComparison.Ordinal)
+            && string.Equals(candidate.IdempotencyKey, key, StringComparison.Ordinal));
+        if (admittedReplay is not null)
+            return BuildSessionCommandRequest(session, command, admittedReplay);
+
         if (session.Status.PendingReset is { } pending)
         {
             var sameCommand = string.Equals(pending.Command, commandName, StringComparison.Ordinal);
             if (pending.Outcome is null)
             {
-                if (!sameCommand)
-                    throw new RecoveryOperationInProgressException(session.Id, pending.Command);
-
-                if (!MatchesRecoveryIdempotencyKey(pending, key))
+                if (string.Equals(pending.OwnerProcessGeneration, ownerProcessGeneration, StringComparison.Ordinal))
                 {
-                    pending = pending with
-                    {
-                        AdditionalIdempotencyKeys = (pending.AdditionalIdempotencyKeys ?? [])
-                            .Append(key)
-                            .Distinct(StringComparer.Ordinal)
-                            .ToArray()
-                    };
-                    session.Status = session.Status with { PendingReset = pending };
-                    await CommitAsync(session, []);
+                    if (!sameCommand
+                        || (idempotencyKey is not null && !MatchesRecoveryIdempotencyKey(pending, key)))
+                        throw new RecoveryOperationInProgressException(session.Id, pending.Command);
+                    return BuildSessionCommandRequest(session, command, pending);
                 }
 
-                return BuildSessionCommandRequest(session, command, pending);
+                session.Status = session.Status with { PendingReset = null };
+                await CommitAsync(session, []);
             }
-
-            if (sameCommand && MatchesRecoveryIdempotencyKey(pending, key))
-                return BuildSessionCommandRequest(session, command, pending);
-
-            session.Status = session.Status with { PendingReset = null };
-            await CommitAsync(session, []);
+            else
+            {
+                if (sameCommand && MatchesRecoveryIdempotencyKey(pending, key))
+                    return BuildSessionCommandRequest(session, command, pending);
+                session.Status = session.Status with { PendingReset = null };
+                await CommitAsync(session, []);
+            }
         }
 
         if (command == SessionCommandKind.Compact)
@@ -403,9 +410,7 @@ public sealed partial class AgentSessionGrain : Grain, IAgentSessionGrain, IRemi
         if (string.IsNullOrWhiteSpace(session.Runtime.RunnerId))
             throw new RuntimeSessionMissingException(session.Id, session.Status.AgentRuntimeSessionId, session.Runtime.Runtime);
 
-        var runtime = command == SessionCommandKind.Reset && !IsRuntimeRegistered(session.Runtime.Runtime ?? string.Empty)
-            ? session.Runtime.Runtime!
-            : session.Runtime.Runtime!;
+        var runtime = session.Runtime.Runtime!;
         if (command == SessionCommandKind.Reset && !IsRuntimeRegistered(runtime))
             runtime = OpenCodeRuntime;
         var reservation = new AgentSessionResetReservation(
@@ -415,7 +420,8 @@ public sealed partial class AgentSessionGrain : Grain, IAgentSessionGrain, IRemi
             Now(),
             commandName,
             IdempotencyKey: key,
-            ExpectedBindingEpoch: session.BindingEpoch);
+            ExpectedBindingEpoch: session.BindingEpoch,
+            OwnerProcessGeneration: ownerProcessGeneration);
         session.Status = session.Status with { PendingReset = reservation };
         await CommitAsync(session, []);
         return BuildSessionCommandRequest(session, command, reservation);
@@ -425,7 +431,11 @@ public sealed partial class AgentSessionGrain : Grain, IAgentSessionGrain, IRemi
     {
         var session = await GetRequiredAsync();
         await ExpireAcceptedFollowupsAsync(session);
-        var reservation = RequireReservation(session, command.OperationId, SessionCommandKind.Compact);
+        var reservation = RequireReservation(
+            session,
+            command.OperationId,
+            SessionCommandKind.Compact,
+            command.OwnerProcessGeneration);
         if (reservation.Outcome is not null)
             return ToRecoveryResult(reservation.Outcome);
         EnsureRuntimeSessionPresent(session);
@@ -441,7 +451,12 @@ public sealed partial class AgentSessionGrain : Grain, IAgentSessionGrain, IRemi
         var events = session.RecordCompaction(usedBefore, usedBefore, size, "summary", summary, now);
         var transcriptEntries = BuildCompactionTranscriptEntries(session, usedBefore, usedBefore, size, summary, now);
         var result = BuildRecoveryResult(session, usedBefore, size, "compact", wasCompacted: true);
-        session.Status = session.Status with { PendingReset = reservation with { Outcome = ToRecoveryOutcome(result) } };
+        var outcome = ToRecoveryOutcome(result);
+        session.Status = session.Status with
+        {
+            PendingReset = reservation with { Outcome = outcome },
+            SessionCommandAdmissionFacts = CompleteSessionCommandAdmission(session, reservation.OperationId, outcome),
+        };
         await PersistRecoveryAsync(session, events, transcriptEntries, reservation.OperationId);
         return result;
     }
@@ -450,7 +465,11 @@ public sealed partial class AgentSessionGrain : Grain, IAgentSessionGrain, IRemi
     {
         var session = await GetRequiredAsync();
         await ExpireAcceptedFollowupsAsync(session);
-        var reservation = RequireReservation(session, command.OperationId, SessionCommandKind.Reset);
+        var reservation = RequireReservation(
+            session,
+            command.OperationId,
+            SessionCommandKind.Reset,
+            command.OwnerProcessGeneration);
         if (reservation.Outcome is not null)
             return ToRecoveryResult(reservation.Outcome);
         if (!string.Equals(reservation.Runtime, command.ReplacementRuntime, StringComparison.OrdinalIgnoreCase))
@@ -469,7 +488,12 @@ public sealed partial class AgentSessionGrain : Grain, IAgentSessionGrain, IRemi
             now,
             reservation.ExpectedBindingEpoch);
         var result = BuildRecoveryResult(session, usedBefore, size, "reset", wasCompacted: false);
-        session.Status = session.Status with { PendingReset = reservation with { Outcome = ToRecoveryOutcome(result) } };
+        var outcome = ToRecoveryOutcome(result);
+        session.Status = session.Status with
+        {
+            PendingReset = reservation with { Outcome = outcome },
+            SessionCommandAdmissionFacts = CompleteSessionCommandAdmission(session, reservation.OperationId, outcome),
+        };
         await PersistRecoveryAsync(session, events, BuildContextResetTranscriptEntries(session, "reset", now), reservation.OperationId);
         return result;
     }
@@ -1298,22 +1322,6 @@ public sealed partial class AgentSessionGrain : Grain, IAgentSessionGrain, IRemi
             session.Id);
     }
 
-    private static SessionCommandRequest BuildSessionCommandRequest(
-        AgentSession session,
-        SessionCommandKind command,
-        AgentSessionResetReservation? reservation = null) =>
-        new(
-            SessionId: session.Id,
-            Runtime: reservation?.Runtime ?? session.Runtime.Runtime!,
-            RuntimeSessionId: session.Status.AgentRuntimeSessionId,
-            RunnerId: session.Runtime.RunnerId,
-            WorkDir: session.Runtime.WorkDir,
-            Command: command,
-            ExpectedRuntimeSessionId: command == SessionCommandKind.Reset ? reservation?.ExpectedRuntimeSessionId : null,
-            OperationId: reservation?.OperationId
-                ?? throw new InvalidOperationException("Session command requires a persisted operation id."),
-            ProjectId: session.Metadata?.Label(AgentSessionQueryMetadataKeys.ProjectId));
-
     private async Task ReleaseFollowupConcurrencyPermitAsync(
         AgentSession session,
         string? token,
@@ -1355,33 +1363,6 @@ public sealed partial class AgentSessionGrain : Grain, IAgentSessionGrain, IRemi
         };
     }
 
-    private static AgentSessionRecoveryOutcome ToRecoveryOutcome(AgentSessionRecoveryResult result) => new(
-        result.Id,
-        result.Status,
-        result.ContextWindowSize,
-        result.ContextWindowUsed,
-        result.ContextUsagePercent,
-        result.ContextWindowUsedBefore,
-        result.Operation,
-        result.WasCompacted);
-
-    private static AgentSessionRecoveryResult ToRecoveryResult(AgentSessionRecoveryOutcome outcome) => new(
-        outcome.Id,
-        outcome.Status,
-        outcome.ContextWindowSize,
-        outcome.ContextWindowUsed,
-        outcome.ContextUsagePercent,
-        outcome.ContextWindowUsedBefore,
-        outcome.Operation,
-        outcome.WasCompacted);
-
-    private static string RecoveryIdempotencyKey(string? value) =>
-        string.IsNullOrWhiteSpace(value) ? Guid.NewGuid().ToString("N") : value;
-
-    private static bool MatchesRecoveryIdempotencyKey(AgentSessionResetReservation reservation, string key) =>
-        string.Equals(reservation.IdempotencyKey, key, StringComparison.Ordinal)
-        || reservation.AdditionalIdempotencyKeys?.Contains(key, StringComparer.Ordinal) == true;
-
     private async Task ExpireAcceptedFollowupsAsync(AgentSession session)
     {
         var pending = GetPendingFollowups(session);
@@ -1405,26 +1386,6 @@ public sealed partial class AgentSessionGrain : Grain, IAgentSessionGrain, IRemi
                 lease.ConcurrencyGeneration,
                 lease.ConcurrencyWaiterId);
     }
-
-    private static AgentSessionResetReservation RequireReservation(
-        AgentSession session,
-        string operationId,
-        SessionCommandKind command)
-    {
-        var reservation = session.Status.PendingReset;
-        if (reservation is null || !string.Equals(reservation.OperationId, operationId, StringComparison.Ordinal))
-            throw new StaleRuntimeSessionBindingException(session.Id, operationId, reservation?.OperationId);
-        if (!string.Equals(reservation.Command, CommandName(command), StringComparison.Ordinal))
-            throw new RecoveryOperationInProgressException(session.Id, reservation.Command);
-        return reservation;
-    }
-
-    private static string CommandName(SessionCommandKind command) => command switch
-    {
-        SessionCommandKind.Compact => "compact",
-        SessionCommandKind.Reset => "reset",
-        _ => throw new ArgumentOutOfRangeException(nameof(command), command, "Unsupported session command"),
-    };
 
     private static void EnsureBindingChangeAllowed(AgentSession session, long? expectedEpoch)
     {

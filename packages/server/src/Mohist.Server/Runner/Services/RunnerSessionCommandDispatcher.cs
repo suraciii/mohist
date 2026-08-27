@@ -4,16 +4,25 @@ namespace Mohist.Server.Runner.Services;
 
 public sealed class RunnerSessionCommandDispatcher : ISessionCommandDispatcher
 {
-    private readonly IRunnerControlTransport _control;
+    private readonly IRunnerSessionCommandTransport _control;
     private readonly ILogger<RunnerSessionCommandDispatcher> _log;
 
     public RunnerSessionCommandDispatcher(
-        IRunnerControlTransport control,
+        IRunnerSessionCommandTransport control,
         ILogger<RunnerSessionCommandDispatcher> log)
     {
         _control = control;
         _log = log;
     }
+
+    public Task<string> GetCurrentProcessGenerationAsync(string runnerId, CancellationToken ct = default) =>
+        _control.GetCurrentProcessGenerationAsync(runnerId, ct);
+
+    public Task<bool> IsCurrentProcessGenerationAsync(
+        string runnerId,
+        string processGeneration,
+        CancellationToken ct = default) =>
+        _control.IsCurrentProcessGenerationAsync(runnerId, processGeneration, ct);
 
     public async Task<SessionCommandResult> DispatchAsync(
         SessionCommandRequest request,
@@ -23,9 +32,10 @@ public sealed class RunnerSessionCommandDispatcher : ISessionCommandDispatcher
         {
             return await _control.SendRequestAsync<SessionCommandRequest, SessionCommandResult>(
                 request.RunnerId,
+                request.ProcessGeneration,
                 "session.command",
                 request,
-                ct: ct);
+                ct);
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
