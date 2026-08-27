@@ -290,10 +290,11 @@ produce the same ordinary failure code.
 
 A managed Runner update uses the same boundary. Update interrupt closes claim
 admission and records only the reversible drain fence. It does not settle work,
-prove that execution stopped, or authorize replacement execution. Once the
-replacement process registers, generation closeout fails the old work before
-new claims resume; Workflow and AgentJob then use their ordinary failure and
-retry semantics.
+prove that execution stopped, or authorize replacement execution. Its response
+is `draining` and lists `activeWorkIds`; it never labels that work interrupted.
+Once the replacement process registers, generation closeout fails the old work
+before new claims resume; Workflow and AgentJob then use their ordinary failure
+and retry semantics.
 
 ```mermaid
 sequenceDiagram

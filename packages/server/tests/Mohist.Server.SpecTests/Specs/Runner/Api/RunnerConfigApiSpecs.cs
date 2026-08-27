@@ -69,8 +69,10 @@ public class RunnerConfigApiSpecs : IAsyncLifetime
             new { updateInterruptId });
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         var data = (await response.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("data");
+        Assert.Equal("draining", data.GetProperty("status").GetString());
         Assert.Equal(updateInterruptId, data.GetProperty("updateInterruptId").GetString());
-        Assert.Contains(claim!.WorkId, data.GetProperty("interruptedWorkIds").EnumerateArray().Select(item => item.GetString()));
+        Assert.Contains(claim!.WorkId, data.GetProperty("activeWorkIds").EnumerateArray().Select(item => item.GetString()));
+        Assert.Equal(1, data.GetProperty("activeWorkCount").GetInt32());
         Assert.Equal(AgentJobStatus.Running, await job.GetStatusAsync());
         Assert.True((await runner.GetRuntimeStateAsync()).Draining);
     }
