@@ -62,6 +62,12 @@ public sealed class GitHubMirrorMigrationTests
                 index.Properties.Select(property => property.Name)
                     .SequenceEqual([nameof(GitHubConnectionRow.ProjectId), nameof(GitHubConnectionRow.RepositoryName)]));
             Assert.False(repositoryIndex.IsUnique);
+
+            var commentOperations = db.Model.FindEntityType(typeof(GitHubIssueCommentOperationRow));
+            Assert.NotNull(commentOperations);
+            Assert.True(Assert.Single(commentOperations!.GetIndexes(), index =>
+                index.Properties.Select(property => property.Name)
+                    .SequenceEqual([nameof(GitHubIssueCommentOperationRow.LinkId), nameof(GitHubIssueCommentOperationRow.CommentKey)])).IsUnique);
         }
 
         var connectionColumns = await ReadColumnsAsync(connection, "GitHubConnections");
@@ -86,6 +92,10 @@ public sealed class GitHubMirrorMigrationTests
             index.Name == "IX_GitHubIssueLinks_ProjectId_IssueNumber").Unique);
         Assert.True(linkIndexes.Single(index =>
             index.Name == "IX_GitHubIssueLinks_ProjectId_RepositoryName_GithubIssueNumber").Unique);
+
+        var commentOperationIndexes = await ReadIndexesAsync(connection, "GitHubIssueCommentOperations");
+        Assert.True(commentOperationIndexes.Single(index =>
+            index.Name == "IX_GitHubIssueCommentOperations_LinkId_CommentKey").Unique);
 
         var connectionIndexes = await ReadIndexesAsync(connection, "GitHubConnections");
         Assert.Equal(1, connectionIndexes.Count(index =>

@@ -446,11 +446,12 @@ export function IssueCard({ issue, agentStatus, showArchiveButton }: Props) {
             {issue.github && (
               <span
                 data-testid="issue-card-github"
-                title={issue.github.url}
+                title={issue.github.connectionStatus === 'paused' ? 'GitHub synchronization is paused' : issue.github.url}
                 className="inline-flex items-center gap-1 rounded-full bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground"
               >
                 <GitBranchIcon className="size-3" />
                 {issue.github.repository}#{issue.github.number}
+                {issue.github.connectionStatus === 'paused' && <span data-testid="issue-card-github-paused">Paused</span>}
               </span>
             )}
             {parentProgress && <ParentProgressBadge done={parentProgress.done} total={parentProgress.total} />}

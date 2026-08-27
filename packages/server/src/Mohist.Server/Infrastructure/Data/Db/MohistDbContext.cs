@@ -79,6 +79,7 @@ public partial class MohistDbContext : DbContext
     public DbSet<WorkspaceEventRow> WorkspaceEvents { get; set; } = null!;
     public DbSet<GitHubConnectionRow> GitHubConnections { get; set; } = null!;
     public DbSet<GitHubIssueLinkRow> GitHubIssueLinks { get; set; } = null!;
+    public DbSet<GitHubIssueCommentOperationRow> GitHubIssueCommentOperations { get; set; } = null!;
     public DbSet<GitHubWriteBackFailureRow> GitHubWriteBackFailures { get; set; } = null!;
     public DbSet<IssueWorkflowProfile> IssueWorkflowProfiles { get; set; } = null!;
     public DbSet<WorkflowRunRow> WorkflowRuns { get; set; } = null!;

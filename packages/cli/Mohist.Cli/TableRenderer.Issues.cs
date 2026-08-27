@@ -74,6 +74,9 @@ internal sealed partial class TableRenderer
             _out.WriteLine($"githubUrl: {StringOf(github, "url")}");
             var githubSync = StringOf(github, "syncStatus");
             _out.WriteLine($"githubSync: {githubSync}");
+            var githubConnection = StringOf(github, "connectionStatus");
+            if (!string.IsNullOrEmpty(githubConnection) && !string.Equals(githubConnection, "connected", StringComparison.Ordinal))
+                _out.WriteLine($"githubConnection: {githubConnection}");
             if (string.Equals(githubSync, "error", StringComparison.Ordinal))
             {
                 var lastError = github["lastError"] as JsonObject;
@@ -127,8 +130,11 @@ internal sealed partial class TableRenderer
         if (value is not JsonObject github) return "";
         var repository = StringOf(github, "repository");
         var number = NumberOf(github, "number");
-        return string.IsNullOrEmpty(repository) || string.IsNullOrEmpty(number)
-            ? ""
+        if (string.IsNullOrEmpty(repository) || string.IsNullOrEmpty(number))
+            return "";
+        var connectionStatus = StringOf(github, "connectionStatus");
+        return string.Equals(connectionStatus, "paused", StringComparison.Ordinal)
+            ? $"{repository}#{number} (paused)"
             : $"{repository}#{number}";
     }
 

@@ -36,6 +36,7 @@ public sealed class GitHubSyncSpecs
         fixture.Comments.FindFailure = null;
         fixture.Comments.ConfirmationFailure = null;
         fixture.Comments.UpdateFailure = null;
+        fixture.Comments.UpdateFailures.Clear();
         fixture.Comments.CreateThenThrow = false;
         fixture.Comments.MarkerMatchCount = 0;
         fixture.Comments.Issues.Clear();
@@ -65,6 +66,26 @@ public sealed class GitHubSyncSpecs
         var link = await LoadLinkAsync(project.Id, issueNumber);
         Assert.NotNull(link);
         Assert.False(link!.IsPending);
+    }
+
+    [Fact]
+    public async Task SyncRecreatesMirrorWhenRemoteMirrorReturnsNotFound()
+    {
+        var (projectId, issueNumber, _) = await CreateMirroredIssueAsync();
+        var original = await LoadLinkAsync(projectId, issueNumber);
+        Assert.NotNull(original);
+        var originalNumber = original!.GithubIssueNumber;
+        _fixture.Comments.UpdateFailures.Enqueue(new HttpRequestException("mirror deleted", null, System.Net.HttpStatusCode.NotFound));
+
+        using var response = await _fixture.Client.PostAsJsonAsync(
+            $"/api/projects/{projectId}/issues/{issueNumber}/github/sync", new { });
+        response.EnsureSuccessStatusCode();
+
+        var recreated = await LoadLinkAsync(projectId, issueNumber);
+        Assert.NotNull(recreated);
+        Assert.NotEqual(originalNumber, recreated!.GithubIssueNumber);
+        Assert.False(recreated.IsPending);
+        Assert.Contains(_fixture.Comments.CreatedIssues, created => created.GithubIssueNumber == recreated.GithubIssueNumber);
     }
 
     [Fact]
@@ -133,6 +154,9 @@ public sealed class GitHubSyncSpecs
         using var disabled = await _fixture.Client.PostAsync(
             $"/api/projects/{projectId}/github-connections/{connectionId}/disable", JsonContent.Create(new { }));
         disabled.EnsureSuccessStatusCode();
+        var pausedRead = await _fixture.Client.GetFromJsonAsync<JsonElement>(
+            $"/api/projects/{projectId}/issues/{issueNumber}");
+        Assert.Equal("paused", pausedRead.GetProperty("data").GetProperty("github").GetProperty("connectionStatus").GetString());
         await DispatchGitHubEditAsync(connectionId, link!.GithubIssueNumber, "Ignored while disabled", "Ignored body");
         var pausedIssue = await LoadIssueAsync(projectId, issueNumber);
         Assert.Equal("Ready issue", pausedIssue!.Title);

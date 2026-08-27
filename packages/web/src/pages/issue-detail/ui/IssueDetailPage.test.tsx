@@ -108,6 +108,25 @@ describe('IssueDetailPage GitHub mirror', () => {
     expect(link).toHaveAttribute('title', 'GitHub sync: healthy')
   })
 
+  it('renders a paused state without changing healthy sync status', async () => {
+    mockIssue(
+      makeIssue({
+        github: {
+          repository: 'suraciii/mohist',
+          number: 771,
+          url: 'https://github.com/suraciii/mohist/issues/771',
+          syncStatus: 'healthy',
+          connectionStatus: 'paused',
+        },
+      }),
+    )
+
+    renderPage()
+
+    expect(await waitFor(() => screen.getByTestId('github-connection-status'))).toHaveTextContent('Paused')
+    expect(screen.getByTestId('github-issue-link')).toHaveAttribute('title', 'GitHub sync: healthy')
+  })
+
   it('renders no GitHub link for an unlinked issue', async () => {
     mockIssue(makeIssue())
     renderPage()

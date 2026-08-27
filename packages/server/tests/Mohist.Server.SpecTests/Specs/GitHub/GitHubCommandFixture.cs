@@ -38,6 +38,7 @@ public sealed class RecordingGitHubCommentPort : IGitHubCommentPort, IGitHubIssu
     public Exception? ConfirmationFailure { get; set; }
     public bool PostThenThrow { get; set; }
     public Exception? UpdateFailure { get; set; }
+    public Queue<Exception> UpdateFailures { get; } = new();
     public bool CreateThenThrow { get; set; }
     public int NextGithubIssueNumber { get; set; } = 900;
     public List<IssueClose> Closes { get; } = [];
@@ -93,6 +94,7 @@ public sealed class RecordingGitHubCommentPort : IGitHubCommentPort, IGitHubIssu
         string marker,
         CancellationToken ct = default)
     {
+        if (UpdateFailures.Count > 0) throw UpdateFailures.Dequeue();
         if (UpdateFailure is not null) throw UpdateFailure;
         var mirroredBody = GitHubMirrorMarker.Append(body, marker);
         UpdatedIssues.Add(new UpdatedIssue(connection.Id, githubIssueNumber, title, mirroredBody, marker));

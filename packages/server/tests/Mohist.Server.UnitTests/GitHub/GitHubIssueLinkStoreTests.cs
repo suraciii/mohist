@@ -117,6 +117,55 @@ public sealed class GitHubIssueLinkStoreTests
     }
 
     [Fact]
+    public async Task TryReserveMirrorCreateAsync_OnlyOneConcurrentCallerAcquiresReservation()
+    {
+        var database = NewDatabase();
+        var store = NewStore(database);
+        var pending = await store.CreatePendingAsync("proj_1", "hello-world", 7);
+
+        var reservations = await Task.WhenAll(
+            store.TryReserveMirrorCreateAsync(pending.Id),
+            store.TryReserveMirrorCreateAsync(pending.Id));
+
+        Assert.Single(reservations, reservation => reservation!.Acquired);
+        Assert.All(reservations, reservation => Assert.True(reservation!.Link.MirrorCreateAttempted));
+    }
+
+    [Fact]
+    public async Task ClaimAsync_ConcurrentTargetClaimsHaveOneMohistWinner()
+    {
+        var database = NewDatabase();
+        var store = NewStore(database);
+
+        var claims = await Task.WhenAll(
+            store.ClaimAsync("proj_1", "hello-world", 42, 7),
+            store.ClaimAsync("proj_1", "hello-world", 42, 8));
+
+        var winner = Assert.Single(claims, claim => claim.Won);
+        var loser = Assert.Single(claims, claim => !claim.Won);
+        Assert.NotNull(winner.Link);
+        Assert.Null(loser.Link);
+        await using var db = new MohistDbContext(database.Options);
+        Assert.Single(await db.GitHubIssueLinks.Where(row => row.GithubIssueNumber == 42).ToListAsync());
+    }
+
+    [Fact]
+    public async Task TryReserveCommentAsync_OnlyOneConcurrentCallerAcquiresReservation()
+    {
+        var database = NewDatabase();
+        var store = NewStore(database);
+        var link = await store.CreateAsync("proj_1", "hello-world", 42, 7);
+
+        var reservations = await Task.WhenAll(
+            store.TryReserveCommentAsync(link.Id, GitHubCommentKinds.WorkStarted),
+            store.TryReserveCommentAsync(link.Id, GitHubCommentKinds.WorkStarted));
+
+        Assert.Single(reservations, acquired => acquired);
+        await store.MarkCommentPostedAsync(link.Id, GitHubCommentKinds.WorkStarted);
+        Assert.False(await store.TryReserveCommentAsync(link.Id, GitHubCommentKinds.WorkStarted));
+    }
+
+    [Fact]
     public async Task SyncHealth_RoundTripsErrorAndClearsIt()
     {
         var database = NewDatabase();
@@ -134,6 +183,23 @@ public sealed class GitHubIssueLinkStoreTests
         var recovered = await store.ClearErrorAsync(link.Id);
         Assert.Equal(GitHubSyncStatus.Healthy, recovered!.SyncStatus);
         Assert.Null(recovered.LastError);
+    }
+
+    [Fact]
+    public async Task ResetMirror_ClearsExternalIdentityAndOutboundBookkeeping()
+    {
+        var database = NewDatabase();
+        var store = NewStore(database);
+        var link = await store.CreateAsync("proj_1", "hello-world", 42, 7);
+        await store.MarkCommentPostedAsync(link.Id, GitHubCommentKinds.WorkStarted);
+        await store.SetStateLabelAsync(link.Id, GitHubStateLabels.InProgress);
+
+        var reset = await store.ResetMirrorAsync(link.Id, 42);
+
+        Assert.True(reset!.IsPending);
+        Assert.False(reset.MirrorCreateAttempted);
+        Assert.Empty(reset.PostedComments);
+        Assert.Null(reset.StateLabel);
     }
 
     [Fact]

@@ -70,28 +70,50 @@ public sealed class GitHubIssueSynchronizationService : IScopedService
         var link = await _links.GetByIssueAsync(projectId, issueNumber, ct);
         if (link is null)
             link = await _links.CreatePendingAsync(projectId, connection.RepositoryName, issueNumber, ct);
+        var linkId = link.Id;
 
         try
         {
-            link = await EnsureMirrorAsync(connection, issue, link, eventType, ct);
-            if (link is null || link.IsPending)
-                throw new GitHubSynchronizationException("github_mirror_pending", "GitHub mirror is still awaiting reconciliation");
-
-            link = await _links.EnsureMirrorMarkerAsync(link.Id, ct) ?? link;
-            if (pushContent)
+            for (var attempt = 0; attempt < 2; attempt++)
             {
-                await _issuePort.UpdateIssueAsync(
-                    connection,
-                    link.GithubIssueNumber,
-                    issue.Title,
-                    issue.Body ?? string.Empty,
-                    link.MirrorMarker ?? GitHubMirrorMarker.For(link.Id),
-                    ct);
+                try
+                {
+                    link = await EnsureMirrorAsync(connection, issue, link, eventType, ct);
+                    if (link is null || link.IsPending)
+                        throw new GitHubSynchronizationException("github_mirror_pending", "GitHub mirror is still awaiting reconciliation");
+
+                    link = await _links.EnsureMirrorMarkerAsync(link.Id, ct) ?? link;
+                    if (pushContent)
+                    {
+                        await _issuePort.UpdateIssueAsync(
+                            connection,
+                            link.GithubIssueNumber,
+                            issue.Title,
+                            issue.Body ?? string.Empty,
+                            link.MirrorMarker ?? GitHubMirrorMarker.For(link.Id),
+                            ct);
+                    }
+
+                    await PostConfirmationAsync(connection, link, ct);
+                    link = await _links.ClearErrorAsync(link.Id, ct) ?? link;
+                    return link;
+                }
+                catch (HttpRequestException ex) when (
+                    ex.StatusCode == HttpStatusCode.NotFound
+                    && attempt == 0
+                    && !ct.IsCancellationRequested)
+                {
+                    var staleNumber = link?.GithubIssueNumber ?? 0;
+                    if (staleNumber <= 0)
+                        throw;
+                    var current = await _links.GetByIdAsync(linkId, ct);
+                    if (current is null || current.GithubIssueNumber != staleNumber)
+                        throw;
+                    link = await _links.ResetMirrorAsync(linkId, staleNumber, ct) ?? current;
+                }
             }
 
-            await PostConfirmationAsync(connection, link, ct);
-            link = await _links.ClearErrorAsync(link.Id, ct) ?? link;
-            return link;
+            throw new GitHubSynchronizationException("github_sync_failed", "GitHub synchronization did not converge after recreating a missing mirror");
         }
         catch (GitHubSynchronizationException ex) when (!ct.IsCancellationRequested)
         {
@@ -148,7 +170,11 @@ public sealed class GitHubIssueSynchronizationService : IScopedService
             await _links.DeleteAsync(current.Id, ct);
         }
 
-        var link = await _links.CreateAsync(projectId, connection.RepositoryName, githubIssueNumber, issueNumber, ct);
+        var claim = await _links.ClaimAsync(projectId, connection.RepositoryName, githubIssueNumber, issueNumber, ct);
+        if (!claim.Won || claim.Link is null)
+            throw new GitHubSynchronizationException("github_issue_already_linked", $"GitHub issue #{githubIssueNumber} is already linked");
+
+        var link = claim.Link;
         link = await _links.EnsureMirrorMarkerAsync(link.Id, ct) ?? link;
         try
         {
@@ -217,8 +243,16 @@ public sealed class GitHubIssueSynchronizationService : IScopedService
         if (link.MirrorCreateAttempted)
             throw new GitHubSynchronizationException("github_mirror_unknown", "GitHub mirror creation remains unresolved; inspect GitHub and retry reconciliation");
 
-        link = await _links.MarkMirrorCreateAttemptedAsync(link.Id, ct) ?? link;
-        if (!link.IsPending) return link;
+        var reservation = await _links.TryReserveMirrorCreateAsync(link.Id, ct);
+        if (reservation is null)
+            throw new GitHubSynchronizationException("github_mirror_missing", "GitHub mirror link disappeared during reconciliation");
+        if (!reservation.Acquired)
+        {
+            if (!reservation.Link.IsPending)
+                return reservation.Link;
+            throw new GitHubSynchronizationException("github_mirror_unknown", "GitHub mirror creation is reserved by another synchronization attempt");
+        }
+
         var created = await _issuePort.CreateIssueAsync(connection, issue.Title, issue.Body ?? string.Empty, marker, ct);
         if (created <= 0)
             throw new GitHubSynchronizationException("github_mirror_number_invalid", "GitHub create issue returned an invalid issue number");
@@ -230,13 +264,22 @@ public sealed class GitHubIssueSynchronizationService : IScopedService
         GitHubIssueLink link,
         CancellationToken ct)
     {
-        if (link.HasPostedComment(GitHubCommentKinds.MirrorCreated)) return;
-        await _commentPort.PostCommentAsync(
-            connection,
-            link.GithubIssueNumber,
-            $"Mohist issue #{link.IssueNumber} · linked from Mohist",
-            ct);
-        await _links.MarkCommentPostedAsync(link.Id, GitHubCommentKinds.MirrorCreated, ct);
+        if (!await _links.TryReserveCommentAsync(link.Id, GitHubCommentKinds.MirrorCreated, ct)) return;
+        try
+        {
+            await _commentPort.PostCommentAsync(
+                connection,
+                link.GithubIssueNumber,
+                $"Mohist issue #{link.IssueNumber} · linked from Mohist",
+                ct);
+            await _links.MarkCommentPostedAsync(link.Id, GitHubCommentKinds.MirrorCreated, ct);
+        }
+        catch (Exception ex) when (!ct.IsCancellationRequested)
+        {
+            if (!GitHubRemoteOutcome.IsUnknown(ex))
+                await _links.ReleaseCommentReservationAsync(link.Id, GitHubCommentKinds.MirrorCreated, ct);
+            throw;
+        }
     }
 
     private async Task RecordFailureAsync(

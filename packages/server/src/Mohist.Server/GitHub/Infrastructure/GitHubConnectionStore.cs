@@ -139,26 +139,44 @@ public sealed class GitHubConnectionStore : IScopedService
         return secret;
     }
 
-    public async Task<GitHubConnection?> SetStatusAsync(string projectId, string id, string status, CancellationToken ct = default)
+    public async Task<GitHubConnection?> SetStatusAsync(string projectId, string id, string status, CancellationToken ct = default) =>
+        (await SetStatusWithTransitionAsync(projectId, id, status, ct))?.Connection;
+
+    public async Task<GitHubConnectionStatusChange?> SetStatusWithTransitionAsync(
+        string projectId,
+        string id,
+        string status,
+        CancellationToken ct = default)
     {
         if (status is not (GitHubConnectionStatus.Active or GitHubConnectionStatus.Disabled))
             throw new GitHubConnectionValidationException("status must be one of active, disabled", "invalid_status");
         await using var db = await _dbFactory.CreateDbContextAsync(ct);
-        var row = await db.GitHubConnections.FirstOrDefaultAsync(r => r.ProjectId == projectId && r.Id == id, ct);
-        if (row is null) return null;
-        if (row.Status == status) return ToDomain(row);
+        var existing = await db.GitHubConnections.AsNoTracking()
+            .FirstOrDefaultAsync(r => r.ProjectId == projectId && r.Id == id, ct);
+        if (existing is null) return null;
+        if (existing.Status == status)
+            return new GitHubConnectionStatusChange(ToDomain(existing), false);
         if (status == GitHubConnectionStatus.Active)
         {
-            var pat = await _secretStore.LoadAsync(ApiSecretAddress(row.ProjectId, row.Id), ct);
+            var pat = await _secretStore.LoadAsync(ApiSecretAddress(existing.ProjectId, existing.Id), ct);
             if (pat is null || string.IsNullOrWhiteSpace(Encoding.UTF8.GetString(pat)))
                 throw new GitHubConnectionValidationException(
                     "pat is required for an active GitHub connection",
                     "pat_required");
         }
-        row.Status = status;
-        row.UpdatedAt = _timeProvider.GetUtcNow();
-        await db.SaveChangesAsync(ct);
-        return ToDomain(row);
+
+        var now = _timeProvider.GetUtcNow();
+        var expected = status == GitHubConnectionStatus.Active
+            ? GitHubConnectionStatus.Disabled
+            : GitHubConnectionStatus.Active;
+        var changed = await db.GitHubConnections
+            .Where(row => row.ProjectId == projectId && row.Id == id && row.Status == expected)
+            .ExecuteUpdateAsync(setters => setters
+                .SetProperty(row => row.Status, status)
+                .SetProperty(row => row.UpdatedAt, now), ct);
+        var row = await db.GitHubConnections.AsNoTracking()
+            .FirstOrDefaultAsync(candidate => candidate.ProjectId == projectId && candidate.Id == id, ct);
+        return row is null ? null : new GitHubConnectionStatusChange(ToDomain(row), changed == 1);
     }
 
     public async Task<GitHubConnection?> UpdateApproversAsync(string projectId, string id, IReadOnlyList<string>? approvers, CancellationToken ct = default)

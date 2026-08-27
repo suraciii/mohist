@@ -124,6 +124,7 @@ export interface GitHubIssueSummary {
   number: number
   url: string
   syncStatus: 'healthy' | 'error' | string
+  connectionStatus?: 'connected' | 'paused' | string
   lastError?: {
     operation: string
     code: string

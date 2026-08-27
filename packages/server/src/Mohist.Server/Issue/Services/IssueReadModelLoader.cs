@@ -277,7 +277,11 @@ public class IssueReadModelLoader : IScopedService
             .OrderBy(row => row.CreatedAt)
             .ThenBy(row => row.Id, StringComparer.Ordinal)
             .GroupBy(row => (row.ProjectId, row.RepositoryName))
-            .ToDictionary(group => group.Key, group => (group.First().Owner, group.First().Repo));
+            .ToDictionary(group => group.Key, group =>
+            {
+                var row = group.First();
+                return (row.Owner, row.Repo, ConnectionStatus: row.Status == GitHubConnectionStatus.Disabled ? "paused" : "connected");
+            });
 
         foreach (var issue in issues)
         {
@@ -302,7 +306,8 @@ public class IssueReadModelLoader : IScopedService
                 link.GithubIssueNumber,
                 $"https://github.com/{repository}/issues/{link.GithubIssueNumber}",
                 link.SyncStatus is GitHubSyncStatus.Error ? GitHubSyncStatus.Error : GitHubSyncStatus.Healthy,
-                lastError);
+                lastError,
+                connection.ConnectionStatus);
         }
     }
 

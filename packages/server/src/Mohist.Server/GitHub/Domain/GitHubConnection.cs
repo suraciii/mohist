@@ -39,6 +39,8 @@ public sealed class GitHubConnection
     }
 }
 
+public sealed record GitHubConnectionStatusChange(GitHubConnection Connection, bool Changed);
+
 public static class GitHubConnectionStatus
 {
     public const string Active = "active";

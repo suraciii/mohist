@@ -173,17 +173,19 @@ public sealed class GitHubWriteBackHandler : ICloudEventHandler
         string eventType,
         CancellationToken ct)
     {
-        if (link.HasPostedComment(commentKey))
+        var links = sp.GetRequiredService<GitHubIssueLinkStore>();
+        if (!await links.TryReserveCommentAsync(link.Id, commentKey, ct))
             return;
         try
         {
             await sp.GetRequiredService<IGitHubCommentPort>()
                 .PostCommentAsync(connection, link.GithubIssueNumber, body, ct);
-            await sp.GetRequiredService<GitHubIssueLinkStore>()
-                .MarkCommentPostedAsync(link.Id, commentKey, ct);
+            await links.MarkCommentPostedAsync(link.Id, commentKey, ct);
         }
         catch (Exception ex) when (!ct.IsCancellationRequested)
         {
+            if (!GitHubRemoteOutcome.IsUnknown(ex))
+                await links.ReleaseCommentReservationAsync(link.Id, commentKey, ct);
             await RecordFailureAsync(sp, connection, link, eventType, GitHubWriteBackOperation.Comment, ex, ct);
         }
     }
@@ -197,17 +199,19 @@ public sealed class GitHubWriteBackHandler : ICloudEventHandler
         string eventType,
         CancellationToken ct)
     {
-        if (link.HasPostedComment(closeKey))
+        var links = sp.GetRequiredService<GitHubIssueLinkStore>();
+        if (!await links.TryReserveCommentAsync(link.Id, closeKey, ct))
             return;
         try
         {
             await sp.GetRequiredService<IGitHubCommentPort>()
                 .CloseIssueAsync(connection, link.GithubIssueNumber, stateReason, ct);
-            await sp.GetRequiredService<GitHubIssueLinkStore>()
-                .MarkCommentPostedAsync(link.Id, closeKey, ct);
+            await links.MarkCommentPostedAsync(link.Id, closeKey, ct);
         }
         catch (Exception ex) when (!ct.IsCancellationRequested)
         {
+            if (!GitHubRemoteOutcome.IsUnknown(ex))
+                await links.ReleaseCommentReservationAsync(link.Id, closeKey, ct);
             await RecordFailureAsync(sp, connection, link, eventType, GitHubWriteBackOperation.Close, ex, ct);
         }
     }

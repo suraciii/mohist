@@ -1,3 +1,5 @@
+using System.Net;
+
 namespace Mohist.Server.GitHub.Domain;
 
 public sealed class GitHubIssueLink
@@ -29,6 +31,28 @@ public sealed class GitHubIssueLink
     public bool IsPending => GithubIssueNumber <= 0;
 
     public bool HasPostedComment(string key) => PostedComments.Contains(key);
+}
+
+public sealed record GitHubIssueLinkClaim(bool Won, GitHubIssueLink? Link);
+
+public sealed record GitHubMirrorCreateReservation(GitHubIssueLink Link, bool Acquired);
+
+public static class GitHubCommentOperationStatus
+{
+    public const string Reserved = "reserved";
+    public const string Posted = "posted";
+}
+
+public static class GitHubRemoteOutcome
+{
+    public static bool IsUnknown(Exception exception) => exception switch
+    {
+        TaskCanceledException => true,
+        HttpRequestException { StatusCode: null } => true,
+        HttpRequestException { StatusCode: HttpStatusCode.RequestTimeout or HttpStatusCode.TooManyRequests } => true,
+        HttpRequestException { StatusCode: >= HttpStatusCode.InternalServerError } => true,
+        _ => false,
+    };
 }
 
 public static class GitHubSyncStatus

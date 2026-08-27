@@ -89,16 +89,12 @@ public static class GitHubConnectionRoutes
         var project = context.GetResolvedProject();
         try
         {
-            var before = await store.GetAsync(project.Id, connectionId, ct);
-            var updated = await store.SetStatusAsync(project.Id, connectionId, status, ct);
-            if (updated is null)
+            var transition = await store.SetStatusWithTransitionAsync(project.Id, connectionId, status, ct);
+            if (transition is null)
                 return ApiResults.NotFound($"GitHub connection '{connectionId}' not found");
-            if (status == GitHubConnectionStatus.Active
-                && before?.Status == GitHubConnectionStatus.Disabled)
-            {
-                await synchronization.ReprojectConnectionAsync(updated, ct);
-            }
-            return ApiResults.Ok(ToDto(updated));
+            if (status == GitHubConnectionStatus.Active && transition.Changed)
+                await synchronization.ReprojectConnectionAsync(transition.Connection, ct);
+            return ApiResults.Ok(ToDto(transition.Connection));
         }
         catch (Exception ex)
         {

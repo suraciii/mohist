@@ -389,6 +389,15 @@ export function IssueDetailPage({ components, mutationDependencies }: IssueDetai
                       <ExternalLinkIcon className="size-2.5" />
                     </a>
                   )}
+                  {issue.github?.connectionStatus === 'paused' && (
+                    <span
+                      data-testid="github-connection-status"
+                      className="inline-flex items-center rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-semibold text-amber-800"
+                      title="GitHub synchronization is paused because the connection is disabled"
+                    >
+                      Paused
+                    </span>
+                  )}
                   {issue.github?.syncStatus === 'error' && (
                     <Button
                       type="button"

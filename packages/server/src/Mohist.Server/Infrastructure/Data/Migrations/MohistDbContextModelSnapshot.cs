@@ -4830,6 +4830,42 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
 
                     b.ToTable("GitHubCommandReplies", (string)null);
                 });
+            modelBuilder.Entity("Mohist.Server.Infrastructure.Data.GitHub.GitHubIssueCommentOperationRow", b =>
+                {
+                    b.Property<string>("Id")
+                        .HasMaxLength(256)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("CommentKey")
+                        .IsRequired()
+                        .HasMaxLength(128)
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("LinkId")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("LinkId");
+
+                    b.HasIndex("LinkId", "CommentKey")
+                        .IsUnique();
+
+                    b.ToTable("GitHubIssueCommentOperations", (string)null);
+                });
             modelBuilder.Entity("Mohist.Server.Infrastructure.Data.GitHub.GitHubWriteBackFailureRow", b =>
                 {
                     b.Property<string>("Id")

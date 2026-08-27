@@ -256,6 +256,24 @@ public sealed class GitHubConnectionStoreTests
     }
 
     [Fact]
+    public async Task SetStatusWithTransitionAsync_OnlyOneConcurrentEnableWins()
+    {
+        var database = NewDatabase(RepositoriesJson("https://github.com/octocat/hello-world.git"));
+        var secrets = new FakeSecretStore();
+        var store = NewStore(database, secrets);
+        var connection = Connection();
+        await store.CreateAsync(connection, pat: "github-pat");
+        await store.SetStatusAsync("proj_1", connection.Id, GitHubConnectionStatus.Disabled);
+
+        var results = await Task.WhenAll(
+            store.SetStatusWithTransitionAsync("proj_1", connection.Id, GitHubConnectionStatus.Active),
+            store.SetStatusWithTransitionAsync("proj_1", connection.Id, GitHubConnectionStatus.Active));
+
+        Assert.Single(results, result => result!.Changed);
+        Assert.All(results, result => Assert.Equal(GitHubConnectionStatus.Active, result!.Connection.Status));
+    }
+
+    [Fact]
     public async Task UpdateApproversAsync_ReplacesList_TrimsAndDeduplicates()
     {
         var database = NewDatabase(RepositoriesJson("https://github.com/octocat/hello-world.git"));
