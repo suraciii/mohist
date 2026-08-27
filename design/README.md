@@ -12,8 +12,6 @@ changing a document in `design/`.
 ## Foundational
 
 - [AGENTS.md](AGENTS.md) — Design-document writing rules for agents; read before writing a spec in design/.
-- [context-management.md](context-management.md) — Repository context rules: the repository holds durable
-  context only; where each kind of context lives; transient artifacts belong to the Issue and the workspace.
 - [../CONTEXT.md](../CONTEXT.md) — Cross-context unified language; single entry point for term definitions.
 - [architecture.md](architecture.md) — Runtime boundaries, control-plane/execution-plane responsibilities, placement rules.
 - [domain-analysis.md](domain-analysis.md) — Domain analysis and context mapping: subdomain split, bounded-context relations, dependency invariants.

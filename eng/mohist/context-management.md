@@ -5,6 +5,10 @@ repository stores, what it must not store, and where each kind of information
 lives. It governs every file whose purpose is to inform future readers, humans
 and agents, rather than to execute.
 
+This is an engineering practice of this repository, not a product
+specification. `docs/` and `design/` specify the Mohist product; `eng/`
+specifies how the repository itself is built, tested, and documented.
+
 ## Design Drivers
 
 Context management serves the agent. The repository is the primary context
@@ -54,6 +58,8 @@ the fact.
 - **`docs/`** holds the product specification: what the product must satisfy.
 - **`design/`** holds the design specification: why the boundaries exist and
   which contracts implementations must preserve.
+- **`eng/`** holds repository engineering practices, such as this document.
+  They govern the repository, not the product.
 - **Scoped rule files are named `AGENTS.md`.** Agent tooling loads `AGENTS.md`
   files automatically when work enters their tree; a rules file that loads
   itself cannot be forgotten. Names such as `_agents.md` or `agents.md` hide
@@ -107,6 +113,37 @@ facts into their owning document and remove the artifact. When it is unclear
 whether content is durable, apply the test: a fact is durable when it must
 remain true after the current work item closes.
 
+## Writing rules
+
+These rules govern every specification document, in `docs/`, `design/`, and
+`eng/` alike.
+
+- Write active prose in English. Use short sentences, active voice, American
+  spelling, and stable terms. Use ASD-STE100 writing rules as a target; do not
+  claim compliance. Keep domain identifiers, field names, API names, commands,
+  serialized values, and code symbols in their exact spelling. Use `must`,
+  `may`, and `must not` for requirements, options, and prohibitions.
+- Keep terms consistent with [`CONTEXT.md`](../../CONTEXT.md). Define a term
+  once and link to it.
+- State normative rules in prose, and use numbered steps for a linear
+  procedure.
+- Commands and examples must run or parse as written, each one independently.
+  The documentation gate cannot prove that a command has the documented
+  effect; verify examples against the owning implementation.
+- Draw diagrams in Mermaid when a boundary, ownership relation, dependency,
+  sequence, hierarchy, or state transition is easier to understand as a
+  picture. Prefer `flowchart` and `sequenceDiagram`. Give every arrow a
+  meaning, and draw only real concepts. Do not draw when prose is already
+  clear. Write key rules in prose, so a diagram is never the only source of
+  truth.
+- The `text diagram` fence is legacy. Migrate it to Mermaid when you touch its
+  document. Use `text literal` for command output, syntax, protocols,
+  pseudocode, and data shapes. A bare `text` fence is invalid.
+- Do not use raw HTML, including HTML comments. Markdown is the only document
+  markup.
+- Do not use tables. Give the same information as short prose or one concrete
+  example.
+
 ## Verification
 
 `npm run docs:check` gates documentation mechanics: Latin-script prose, link
@@ -121,3 +158,5 @@ them.
   They do not carry Status lines and do not follow the section skeleton.
 - `npm run docs:check` does not yet gate the Status line or the
   `## Alternatives considered` section of decision records.
+- `npm run docs:check` covers `docs/` and `design/` only. It must extend to
+  `eng/`; the existing `eng/` documents predate the writing rules.
