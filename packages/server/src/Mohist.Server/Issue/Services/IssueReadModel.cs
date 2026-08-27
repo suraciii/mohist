@@ -53,6 +53,7 @@ public class IssueReadModel
     public string? RepositoryName { get; set; }
     public RepositoryInfo? Repository { get; set; }
     public IssueRepositoryProblem? RepositoryProblem { get; set; }
+    public GitHubIssueSummary? Github { get; set; }
     [JsonPropertyName("epic")]
     public IssuePrimaryEpic? Epic { get; set; }
     public IssueParentRef? ParentIssueRef { get; set; }
@@ -62,6 +63,12 @@ public class IssueReadModel
     public IssueWatchEntryDto[] Watching { get; set; } = [];
     public IssueWatchEntryDto[] Muted { get; set; } = [];
 }
+
+public sealed record GitHubIssueSummary(
+    string Repository,
+    int Number,
+    string Url,
+    string SyncStatus);
 
 public sealed record IssueWatchEntryDto(
     string AgentId,

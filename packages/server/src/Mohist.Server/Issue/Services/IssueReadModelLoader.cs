@@ -58,6 +58,7 @@ public class IssueReadModelLoader : IScopedService
 
         ApplyWorkflowProjections(list, await LoadWorkflowStatesAsync(db, list));
         ApplyFeedbackProjections(list, await LoadFeedbackAsync(db, list));
+        await ApplyGitHubProjectionsAsync(db, list);
 
         return list;
     }
@@ -71,6 +72,7 @@ public class IssueReadModelLoader : IScopedService
         if (list.Count == 0) return list;
 
         ApplyWorkflowProjections(list, await LoadWorkflowStatesAsync(db, list));
+        await ApplyGitHubProjectionsAsync(db, list);
         return list;
     }
 
@@ -131,6 +133,7 @@ public class IssueReadModelLoader : IScopedService
     {
         ApplyWorkflowProjections([model], await LoadWorkflowStatesAsync(db, [model]));
         ApplyFeedbackProjections([model], await LoadFeedbackAsync(db, [model]));
+        await ApplyGitHubProjectionsAsync(db, [model]);
     }
 
     /// <summary>
@@ -236,6 +239,55 @@ public class IssueReadModelLoader : IScopedService
         Repository = issue.Repository,
         RepositoryProblem = issue.RepositoryProblem,
     };
+
+    private static async Task ApplyGitHubProjectionsAsync(
+        MohistDbContext db,
+        IReadOnlyCollection<IssueReadModel> issues)
+    {
+        if (issues.Count == 0) return;
+
+        var projectIds = issues.Select(issue => issue.ProjectId).Distinct(StringComparer.Ordinal).ToArray();
+        var issueNumbers = issues.Select(issue => issue.Number).Distinct().ToArray();
+        var links = await db.GitHubIssueLinks.AsNoTracking()
+            .Where(row => projectIds.Contains(row.ProjectId) && issueNumbers.Contains(row.IssueNumber))
+            .ToListAsync();
+        if (links.Count == 0) return;
+
+        // Older databases did not enforce the target one-link-per-Issue
+        // invariant. Reads remain deterministic while the later mirror slice
+        // converges those records instead of making a summary endpoint fail.
+        var linksByIssue = links
+            .OrderBy(link => link.CreatedAt)
+            .ThenBy(link => link.Id, StringComparer.Ordinal)
+            .GroupBy(link => (link.ProjectId, link.IssueNumber))
+            .ToDictionary(group => group.Key, group => group.First());
+        var repositoryNames = linksByIssue.Values
+            .Select(link => link.RepositoryName)
+            .Distinct(StringComparer.Ordinal)
+            .ToArray();
+        var connectionRows = await db.GitHubConnections.AsNoTracking()
+            .Where(row => projectIds.Contains(row.ProjectId) && repositoryNames.Contains(row.RepositoryName))
+            .ToListAsync();
+        var connections = connectionRows
+            .OrderBy(row => row.CreatedAt)
+            .ThenBy(row => row.Id, StringComparer.Ordinal)
+            .GroupBy(row => (row.ProjectId, row.RepositoryName))
+            .ToDictionary(group => group.Key, group => (group.First().Owner, group.First().Repo));
+
+        foreach (var issue in issues)
+        {
+            if (!linksByIssue.TryGetValue((issue.ProjectId, issue.Number), out var link)
+                || !connections.TryGetValue((issue.ProjectId, link.RepositoryName), out var connection))
+                continue;
+
+            var repository = $"{connection.Owner}/{connection.Repo}";
+            issue.Github = new GitHubIssueSummary(
+                repository,
+                link.GithubIssueNumber,
+                $"https://github.com/{repository}/issues/{link.GithubIssueNumber}",
+                "healthy");
+        }
+    }
 
     private async Task<Dictionary<string, WorkflowStatusView>> LoadWorkflowStatesAsync(
         MohistDbContext db,

@@ -119,6 +119,13 @@ export interface WorkflowStageProgress {
   currentTaskTitle?: string | null
 }
 
+export interface GitHubIssueSummary {
+  repository: string
+  number: number
+  url: string
+  syncStatus: string
+}
+
 export interface Issue {
   number: number
   title: string
@@ -161,6 +168,7 @@ export interface Issue {
   childIssuesSummary?: ChildIssuesSummary | null
   children?: IssueChildRef[]
   repositoryName?: string | null
+  github?: GitHubIssueSummary | null
   recovery?: RecoveryProjection | null
   convergence?: WorkflowConvergenceState | null
   attention?: WorkflowAttention | null
@@ -202,6 +210,7 @@ export interface IssueListItem
   canBeParent?: boolean
   repository?: Issue['repository']
   repositoryName?: string | null
+  github?: GitHubIssueSummary | null
   epic?: Issue['epic']
   parentIssueRef?: IssueParentRef | null
   childIssuesSummary?: ChildIssuesSummary | null

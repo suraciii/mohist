@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState, type ComponentType } from 'react'
 import { Link, useParams, useNavigate } from 'react-router-dom'
-import { ArrowLeftIcon, PencilIcon } from 'lucide-react'
+import { ArrowLeftIcon, ExternalLinkIcon, GitBranchIcon, PencilIcon } from 'lucide-react'
 import { IssueStatus, partitionIssueBody, useLiveTask } from '../../../entities/issue'
 import { issueAttachmentContentPath } from '../../../entities/issue'
 import { useIssue, useIssueDiff, useIssueCommits, useWorkflowTimeline } from '../../../entities/issue'
@@ -365,6 +365,20 @@ export function IssueDetailPage({ components, mutationDependencies }: IssueDetai
                   <PriorityChip priority={issue.priority} />
                   {issue.isDraft && <DraftPill />}
                   {isArchived && <ArchivedPill archivedAt={issue.archivedAt} />}
+                  {issue.github && (
+                    <a
+                      href={issue.github.url}
+                      target="_blank"
+                      rel="noreferrer"
+                      data-testid="github-issue-link"
+                      className="inline-flex items-center gap-1 rounded-full border border-border px-2 py-0.5 text-[10px] font-semibold text-muted-foreground hover:text-foreground"
+                      title={`GitHub sync: ${issue.github.syncStatus}`}
+                    >
+                      <GitBranchIcon className="size-3" />
+                      {issue.github.repository}#{issue.github.number}
+                      <ExternalLinkIcon className="size-2.5" />
+                    </a>
+                  )}
                   {isCompositeParent && (
                     <span
                       data-testid="composite-parent-badge"

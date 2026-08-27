@@ -7,8 +7,8 @@ internal sealed partial class TableRenderer
     private void RenderIssueList(JsonNode? data)
     {
         var rows = AsArray(data);
-        var headers = new[] { "number", "title", "repository", "stage", "status", "priority", "state", "labels" };
-        var widths = new[] { 7, TitleSoftCap, 20, 16, 12, 9, TitleSoftCap, TitleSoftCap };
+        var headers = new[] { "number", "title", "repository", "github", "stage", "status", "priority", "state", "labels" };
+        var widths = new[] { 7, TitleSoftCap, 20, 24, 16, 12, 9, TitleSoftCap, TitleSoftCap };
 
         var cells = new List<string[]>();
         foreach (var row in rows)
@@ -16,6 +16,7 @@ internal sealed partial class TableRenderer
             var number = NumberOf(row, "number");
             var title = StringOf(row, "title");
             var repository = StringOf(row, "repositoryName");
+            var github = FormatGitHub(row?["github"]);
             var stage = StringOf(row, "workflowStage");
             var status = StringOf(row, "status");
             var priority = StringOf(row, "priority");
@@ -26,6 +27,7 @@ internal sealed partial class TableRenderer
                 number,
                 Truncate(title, TitleSoftCap),
                 Truncate(repository, 20),
+                Truncate(github, 24),
                 Truncate(stage, 16),
                 Truncate(status, 12),
                 Truncate(priority, 9),
@@ -65,6 +67,13 @@ internal sealed partial class TableRenderer
         _out.WriteLine($"status:   {status}");
         _out.WriteLine($"priority: {priority}");
         _out.WriteLine($"repository: {repository}");
+        var github = data["github"] as JsonObject;
+        if (github is not null)
+        {
+            _out.WriteLine($"github:   {FormatGitHub(github)}");
+            _out.WriteLine($"githubUrl: {StringOf(github, "url")}");
+            _out.WriteLine($"githubSync: {StringOf(github, "syncStatus")}");
+        }
         _out.WriteLine($"project:  {project}");
         _out.WriteLine($"updated:  {Truncate(updatedAt, TitleSoftCap)}");
         if (!string.IsNullOrEmpty(workflowRunId))
@@ -100,6 +109,16 @@ internal sealed partial class TableRenderer
         }
         _out.WriteLine($"state:    {FormatIssueState(data)}");
         RenderWatchEntries(data);
+    }
+
+    private static string FormatGitHub(JsonNode? value)
+    {
+        if (value is not JsonObject github) return "";
+        var repository = StringOf(github, "repository");
+        var number = NumberOf(github, "number");
+        return string.IsNullOrEmpty(repository) || string.IsNullOrEmpty(number)
+            ? ""
+            : $"{repository}#{number}";
     }
 
     private void RenderWatchEntries(JsonNode? data)
