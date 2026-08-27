@@ -290,7 +290,7 @@ describe.sequential('ManagerExecutionBoundary', () => {
     }
   })
 
-  it('admits only catalog commands with a matching kind, frozen cwd, and masked output', async () => {
+  it('admits a catalog management command in the frozen cwd with masked output', async () => {
     const root = await mkdtemp(join(tmpdir(), 'mohist-manager-boundary-'))
     const stub = await writeStubMo(root, false)
     const boundary = await ManagerExecutionBoundary.create(grant, root, {
@@ -299,12 +299,12 @@ describe.sequential('ManagerExecutionBoundary', () => {
       requestLimits: { reply: 5, management: 64 },
     })
     try {
-      const broker = boundary.environment().MOHIST_MANAGER_BROKER!
-
-      // A management read from the catalog runs the child with only the
-      // non-secret credential proxy locator, in the frozen working directory.
-      const status = await requestLauncher(broker, ['slack', 'status'], boundary.environment().MOHIST_MANAGER_LAUNCHER!)
-      expect(status?.exitCode).toBe(0)
+      const status = await requestLauncher(
+        boundary.environment().MOHIST_MANAGER_BROKER!,
+        ['slack', 'status'],
+        boundary.environment().MOHIST_MANAGER_LAUNCHER!,
+      )
+      expect(status.exitCode).toBe(0)
       const invocations = stub.invocations()
       expect(invocations).toHaveLength(1)
       expect(invocations[0].args).toEqual(['slack', 'status'])
@@ -313,62 +313,110 @@ describe.sequential('ManagerExecutionBoundary', () => {
       expect(invocations[0].replyToken).toBe(false)
       expect(invocations[0].credentialBroker).toBe(true)
       // The child has no bearer to echo or expose.
-      expect(status?.stdout).toContain('none')
+      expect(status.stdout).toContain('none')
       expect(JSON.stringify(status)).not.toContain(grant.managementCredential)
+    } finally {
+      await boundary.dispose()
+    }
+  })
 
-      // The reply command is only valid under the reply kind.
-      const mismatch = await requestBroker(broker, 'reply', ['slack', 'status'])
+  it('rejects a catalog command declared under the wrong request kind', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'mohist-manager-boundary-'))
+    const stub = await writeStubMo(root, false)
+    const boundary = await ManagerExecutionBoundary.create(grant, root, {
+      moExecutable: stub.executable,
+      workDir: stub.frozenWorkDir,
+    })
+    try {
+      const mismatch = await requestBroker(boundary.environment().MOHIST_MANAGER_BROKER!, 'reply', ['slack', 'status'])
       expect(mismatch?.exitCode).toBeUndefined()
-      expect(stub.invocations()).toHaveLength(1)
+      expect(stub.invocations()).toHaveLength(0)
+    } finally {
+      await boundary.dispose()
+    }
+  })
 
+  it('refuses commands outside the Manager capability catalog without launching the CLI', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'mohist-manager-boundary-'))
+    const stub = await writeStubMo(root, false)
+    const boundary = await ManagerExecutionBoundary.create(grant, root, {
+      moExecutable: stub.executable,
+      workDir: stub.frozenWorkDir,
+    })
+    try {
       // A forged reply target cannot escape the reply lease. The
       // capability-surface test covers the remaining invalid command shapes
       // without starting another process for each one.
       const refused = await requestLauncher(
-        broker,
+        boundary.environment().MOHIST_MANAGER_BROKER!,
         ['slack', 'message', 'drop'],
         boundary.environment().MOHIST_MANAGER_LAUNCHER!,
       )
       expect(refused.exitCode).toBe(126)
-      expect(stub.invocations()).toHaveLength(1)
+      expect(stub.invocations()).toHaveLength(0)
+    } finally {
+      await boundary.dispose()
+    }
+  })
 
-      // Usage and help requests mirror the CLI manager-mode admission and
-      // run read-only under the management kind. The unit mirror test covers
-      // the accepted flag variants; this verifies the broker path once.
+  it('admits help only under the management request kind', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'mohist-manager-boundary-'))
+    const stub = await writeStubMo(root, false)
+    const boundary = await ManagerExecutionBoundary.create(grant, root, {
+      moExecutable: stub.executable,
+      workDir: stub.frozenWorkDir,
+    })
+    try {
+      const broker = boundary.environment().MOHIST_MANAGER_BROKER!
+      // The unit mirror test covers the accepted flag variants; this verifies
+      // the broker path once.
       const usage = await requestLauncher(broker, ['--help'], boundary.environment().MOHIST_MANAGER_LAUNCHER!)
-      expect(usage?.exitCode).toBe(0)
+      expect(usage.exitCode).toBe(0)
       const usageInvocations = stub.invocations()
-      expect(usageInvocations).toHaveLength(2)
-      expect(usageInvocations[1].managementToken).toBe(false)
-      expect(usageInvocations[1].credentialBroker).toBe(true)
+      expect(usageInvocations).toHaveLength(1)
+      expect(usageInvocations[0].managementToken).toBe(false)
+      expect(usageInvocations[0].credentialBroker).toBe(true)
+
       const usageReplyKind = await requestBroker(broker, 'reply', ['--help'])
       expect(usageReplyKind?.exitCode).toBeUndefined()
-      expect(stub.invocations()).toHaveLength(2)
+      expect(stub.invocations()).toHaveLength(1)
+    } finally {
+      await boundary.dispose()
+    }
+  })
 
+  it('admits a reply command without exposing the reply bearer', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'mohist-manager-boundary-'))
+    const stub = await writeStubMo(root, false)
+    const boundary = await ManagerExecutionBoundary.create(grant, root, {
+      moExecutable: stub.executable,
+      workDir: stub.frozenWorkDir,
+    })
+    try {
       const validReply = await requestLauncher(
-        broker,
+        boundary.environment().MOHIST_MANAGER_BROKER!,
         ['slack', 'message', 'send', 'hello'],
         boundary.environment().MOHIST_MANAGER_LAUNCHER!,
       )
-      expect(validReply?.exitCode).toBe(0)
+      expect(validReply.exitCode).toBe(0)
       const replyInvocations = stub.invocations()
-      expect(replyInvocations).toHaveLength(3)
-      expect(replyInvocations[2].replyToken).toBe(false)
-      expect(replyInvocations[2].managementToken).toBe(false)
-      expect(replyInvocations[2].credentialBroker).toBe(true)
+      expect(replyInvocations).toHaveLength(1)
+      expect(replyInvocations[0].replyToken).toBe(false)
+      expect(replyInvocations[0].managementToken).toBe(false)
+      expect(replyInvocations[0].credentialBroker).toBe(true)
       expect(JSON.stringify(validReply)).not.toContain(grant.replyCredential)
     } finally {
       await boundary.dispose()
     }
   })
 
-  it('enforces the per-kind request budget', async () => {
+  it('enforces the management request budget', async () => {
     const root = await mkdtemp(join(tmpdir(), 'mohist-manager-boundary-'))
     const stub = await writeStubMo(root, false)
     const boundary = await ManagerExecutionBoundary.create(grant, root, {
       moExecutable: stub.executable,
       workDir: stub.frozenWorkDir,
-      requestLimits: { reply: 1, management: 2 },
+      requestLimits: { reply: 5, management: 2 },
     })
     try {
       const broker = boundary.environment().MOHIST_MANAGER_BROKER!
@@ -385,7 +433,21 @@ describe.sequential('ManagerExecutionBoundary', () => {
       )
       expect(exhausted.exitCode).toBe(126)
       expect(stub.invocations()).toHaveLength(2)
+    } finally {
+      await boundary.dispose()
+    }
+  })
 
+  it('enforces the reply request budget', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'mohist-manager-boundary-'))
+    const stub = await writeStubMo(root, false)
+    const boundary = await ManagerExecutionBoundary.create(grant, root, {
+      moExecutable: stub.executable,
+      workDir: stub.frozenWorkDir,
+      requestLimits: { reply: 1, management: 64 },
+    })
+    try {
+      const broker = boundary.environment().MOHIST_MANAGER_BROKER!
       expect(
         (
           await requestLauncher(
@@ -395,13 +457,13 @@ describe.sequential('ManagerExecutionBoundary', () => {
           )
         ).exitCode,
       ).toBe(0)
-      const replyExhausted = await requestLauncher(
+      const exhausted = await requestLauncher(
         broker,
         ['slack', 'message', 'send', 'again'],
         boundary.environment().MOHIST_MANAGER_LAUNCHER!,
       )
-      expect(replyExhausted.exitCode).toBe(126)
-      expect(stub.invocations()).toHaveLength(3)
+      expect(exhausted.exitCode).toBe(126)
+      expect(stub.invocations()).toHaveLength(1)
     } finally {
       await boundary.dispose()
     }
