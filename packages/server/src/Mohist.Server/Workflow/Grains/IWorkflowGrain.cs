@@ -14,6 +14,7 @@ public interface IWorkflowGrain : IGrainWithStringKey
     Task ResumeAsync();
     Task PauseAsync(string? reason = null);
     Task StopAsync(string? reason = null);
+    Task<WorkflowWithdrawalResult> WithdrawIfBeforeIntegrateAsync(string? reason = null);
 
     Task ApproveAsync(string? decidedBy = null, string? displayName = null);
     Task<string> RequestChangesAsync(string body, string? decidedBy = null, string? displayName = null);
@@ -135,6 +136,20 @@ public enum WorkflowAssignmentStatus
 {
     Assigned,
     Rejected
+}
+
+public enum WorkflowWithdrawalDisposition
+{
+    Applied,
+    Echo,
+}
+
+[GenerateSerializer]
+public sealed record WorkflowWithdrawalResult(
+    [property: Id(0)] WorkflowWithdrawalDisposition Disposition,
+    [property: Id(1)] string? Reason = null)
+{
+    public bool IsApplied => Disposition == WorkflowWithdrawalDisposition.Applied;
 }
 
 [GenerateSerializer]

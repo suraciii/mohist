@@ -310,6 +310,45 @@ public partial class WorkflowGrain : Grain, IWorkflowGrain, IWorkflowGrainContex
             await DeleteSnapshotBestEffortAsync(abandonedWorkId);
     }
 
+    /// <summary>
+    /// Atomically arbitrates a GitHub close against the workflow's Integrate
+    /// boundary. Orleans serializes this command with approvals and task
+    /// reports, so the boundary decision and stop cannot be separated by a
+    /// stale read from the caller.
+    /// </summary>
+    public async Task<WorkflowWithdrawalResult> WithdrawIfBeforeIntegrateAsync(string? reason = null)
+    {
+        EnsureRun();
+        if (!IsBeforeIntegrate(_run))
+        {
+            _log.LogDebug("Workflow {Id} ignored withdrawal at or past Integrate", GrainKey);
+            return new WorkflowWithdrawalResult(WorkflowWithdrawalDisposition.Echo, "integrate_boundary_reached");
+        }
+
+        // A prior stop is already the requested withdrawal. Returning Applied
+        // lets the Issue command converge if the original cross-aggregate
+        // cancellation was interrupted after the workflow commit.
+        if (_run.Status == WorkflowRunStatus.Stopped)
+            return new WorkflowWithdrawalResult(WorkflowWithdrawalDisposition.Applied, "already_stopped");
+
+        await StopAsync(reason ?? "github-close");
+        return new WorkflowWithdrawalResult(WorkflowWithdrawalDisposition.Applied);
+    }
+
+    private static bool IsBeforeIntegrate(WorkflowRun run)
+    {
+        if (run.Status == WorkflowRunStatus.Completed)
+            return false;
+
+        var integrateIndex = run.Stages.FindIndex(stage =>
+            string.Equals(stage.Id, "integrate", StringComparison.OrdinalIgnoreCase));
+        var currentIndex = run.CurrentStageId is null
+            ? -1
+            : run.Stages.FindIndex(stage =>
+                string.Equals(stage.Id, run.CurrentStageId, StringComparison.OrdinalIgnoreCase));
+        return integrateIndex >= 0 && currentIndex >= 0 && currentIndex < integrateIndex;
+    }
+
     public async Task ApproveAsync(string? decidedBy = null, string? displayName = null)
     {
         EnsureRun();

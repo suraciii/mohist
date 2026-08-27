@@ -32,8 +32,9 @@ public sealed class GitHubIssueLink
 /// <summary>
 /// Comment kinds the comment port may post; the posted set lives on
 /// <see cref="GitHubIssueLink.PostedComments"/> so redelivery never posts a
-/// node comment twice. Write-back close markers live in the same set so
-/// close is as idempotent as comments.
+/// node comment twice. Write-back close markers live in the same set so close
+/// is as idempotent as comments. Command replies use their dedicated durable
+/// reply ledger and marker-based delivery worker.
 /// </summary>
 public static class GitHubCommentKinds
 {
@@ -65,6 +66,7 @@ public static class GitHubCommentKinds
     public const string Cancelled = "writeback-cancelled";
     public const string ClosedCompleted = "writeback-closed-completed";
     public const string ClosedNotPlanned = "writeback-closed-not-planned";
+    public const string ReopenedDoneFollowUp = "writeback-reopened-done-follow-up";
 }
 
 /// <summary>

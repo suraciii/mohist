@@ -1,5 +1,6 @@
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 using Mohist.Server.GitHub.Domain;
 using Mohist.Server.GitHub.Ports;
 using Mohist.Server.Infrastructure.Hosting;
@@ -179,6 +180,15 @@ public sealed class GitHubCommandReplyDeliveryService : IScopedService
 }
 
 /// <summary>
+/// Controls whether the autonomous command reply delivery loop is started.
+/// Manual ProcessPendingAsync calls remain available when the loop is disabled.
+/// </summary>
+public sealed class GitHubCommandReplyDeliveryOptions
+{
+    public bool HostedWorkerEnabled { get; set; } = true;
+}
+
+/// <summary>
 /// Hosted retry/reconciliation consumer for command reply reservations.
 /// It is independent of webhook redelivery and also sweeps pending rows after
 /// process restart.
@@ -189,15 +199,18 @@ public sealed class GitHubCommandReplyDeliveryWorker : BackgroundService
 
     private readonly IServiceScopeFactory _scopeFactory;
     private readonly GitHubCommandReplyDeliverySignal _signal;
+    private readonly IOptions<GitHubCommandReplyDeliveryOptions> _options;
     private readonly ILogger<GitHubCommandReplyDeliveryWorker> _log;
 
     public GitHubCommandReplyDeliveryWorker(
         IServiceScopeFactory scopeFactory,
         GitHubCommandReplyDeliverySignal signal,
+        IOptions<GitHubCommandReplyDeliveryOptions> options,
         ILogger<GitHubCommandReplyDeliveryWorker> log)
     {
         _scopeFactory = scopeFactory;
         _signal = signal;
+        _options = options;
         _log = log;
     }
 
@@ -224,6 +237,13 @@ public sealed class GitHubCommandReplyDeliveryWorker : BackgroundService
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
+        // Integration specs invoke ProcessPendingAsync explicitly against a
+        // fake clock. Keeping the autonomous loop off in that host prevents
+        // it from consuming the same due row while a spec is asserting the
+        // deterministic manual pass; production keeps the default enabled.
+        if (!_options.Value.HostedWorkerEnabled)
+            return;
+
         while (!stoppingToken.IsCancellationRequested)
         {
             await ProcessPendingAsync(stoppingToken).ConfigureAwait(false);
