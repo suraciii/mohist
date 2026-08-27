@@ -486,31 +486,6 @@ describe('OpenCodeRuntime.resolveSession', () => {
     expect(result.value.activeTurn).toBe(true)
   })
 
-  it('reattaches to an active session and reads its terminal result without prompting', async () => {
-    const { deps, client } = buildDeps({ resolveSession: { runtimeSessionId: 'ses_existing', activeTurn: true } })
-    let statusReads = 0
-    client.sessionStatus.mockImplementation(async () => {
-      statusReads += 1
-      return { data: { ses_existing: { type: statusReads === 1 ? 'streaming' : 'idle' } } }
-    })
-    client.sessionMessages.mockResolvedValue({
-      data: [{ type: 'assistant', content: [{ type: 'text', text: 'adopted answer' }] }],
-      cursor: {},
-    })
-    const runtime = new OpenCodeRuntime(deps)
-    await runtime.start()
-
-    const result = await runtime.reattachTurn(
-      {
-        target: { runtime: 'opencode', runtimeSessionId: 'ses_existing', workDir: '/tmp/work' },
-      },
-      new AbortController().signal,
-    )
-
-    expect(result).toMatchObject({ ok: true, value: { facts: { finalAssistantText: 'adopted answer' } } })
-    expect(client.sessionMessages).toHaveBeenCalledTimes(1)
-  })
-
   it('classifies a confirmed missing session.get (404) as missing-session', async () => {
     const sessionGet = vi.fn(async () => {
       throw Object.assign(new Error('not found'), { status: 404 })

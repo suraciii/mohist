@@ -26,10 +26,12 @@ interface SettleGuardDeps {
  * 1. In-memory agent state — a terminal assistant message produced after
  *    this turn started. The streak (rather than a wall-clock comparison)
  *    keeps the guard independent of the injected clock's now().
- * 2. The persisted session file — the ground truth reattach trusts. Agent
- *    state can diverge from it (overflow recovery removes the last
+ * 2. The persisted session file of the turn this process still owns.
+ *    Agent state can diverge from it (overflow recovery removes the last
  *    assistant message from memory while the file keeps it, and the
- *    follow-up continue can hang before any event reaches memory).
+ *    follow-up continue can hang before any event reaches memory). The
+ *    file is evidence only for this process's own turn — never an
+ *    authority for work left by an earlier Runner process.
  */
 export function startSettleGuard(deps: SettleGuardDeps): () => void {
   let settleTimer: unknown = null
@@ -76,9 +78,11 @@ function lastMessageTerminal(messages: readonly { role?: string; stopReason?: st
   return item?.stopReason === 'stop' || item?.stopReason === 'error' || item?.stopReason === 'aborted'
 }
 
-// The persisted session file is the ground truth reattach trusts; agent state
-// can diverge from it (overflow recovery removes the last assistant message
-// from memory while the file keeps it). Reads the tail of the jsonl file and
+// For the turn this process still owns, the persisted jsonl file can hold
+// terminal facts that diverged from agent memory (overflow recovery removes
+// the last assistant message from memory while the file keeps it). It never
+// speaks for work left by an earlier Runner process. Reads the tail of the
+// jsonl file and
 // reports the stopReason of the last message entry when it is a terminal
 // assistant message.
 function readTerminalFromFile(filePath: string): string | null {
