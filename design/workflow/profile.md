@@ -68,10 +68,10 @@ agentAction: mohist/opencode
 stages:
   - stage: plan
     tasks:
-      - id: proposal
+      - id: plan
         uses: ${{ profile.agentAction }}
         with:
-          prompt: ${{ prompts.proposal }}
+          prompt: ${{ prompts.plan }}
           options: ${{ vars.agent }}
 ```
 

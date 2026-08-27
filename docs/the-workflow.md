@@ -44,8 +44,8 @@ Plan produces:
 
 - `PLANS/PLAN.md`: the interpretation, scope, motivation, and
   proposed approach. This is the primary approval document.
-- `PLANS/DESIGN.md`, when the change involves design choices:
-  the technical design, including the selected option and its rationale.
+- `PLANS/DESIGN.md`: technical decisions and rationale. The file always
+  exists; when no separate design is needed, it states that conclusion and why.
 - `PLANS/tasks.json`: the machine-readable task list,
   an ordered list whose entries each carry a goal, acceptance criteria,
   and references to plan material.
@@ -63,11 +63,13 @@ decision:
 
 ```bash
 mo run approve --issue <number>   # Approve the plan and enter Build.
-mo run reject --issue <number> --message "Describe the required changes"  # Reject and run Plan again.
+mo run reject --issue <number> --message "Describe the required changes"  # Run Plan feedback work, then review again.
 ```
 
-The approver may be any authorized actor. See
-[Core Concepts: Approval](concepts.md#approval).
+Rejection dispatches the Profile's configured approval feedback Tasks in the
+Plan Session, reruns Plan Checks, and returns to the same approval point. It
+does not rerun the whole Plan Stage. The approver may be any authorized actor.
+See [Core Concepts: Approval](concepts.md#approval).
 
 ## Build
 
@@ -80,9 +82,9 @@ isolated on the Issue branch until Integrate.
 
 ### After Build
 
-By default, the Workflow enters Check automatically. A Workflow Profile can
-require approval after Build and can turn a rejected approval into follow-up
-work; built-in Profiles include this loop. See
+The built-in Profiles enter Check automatically and have no Build approval
+point. A custom Workflow Profile can require approval after Build and use the
+same configured approval feedback mechanism. See
 [Workflow Definition Reference](workflow-definition.md) for the exact fields.
 
 ## Check
@@ -102,10 +104,13 @@ decision:
 
 ```bash
 mo run approve --issue <number>   # Enter Integrate.
-mo run reject --issue <number> --message "Describe the required changes"  # Return to Build.
+mo run reject --issue <number> --message "Describe the required changes"  # Run Check feedback work, then review again.
 ```
 
-For a manual decision, read the review report and the diff.
+Rejection dispatches configured feedback work in the Check Session, reruns
+Check Stage Checks, and returns to the same approval point. It does not rerun
+Build or the Check Stage. For a manual decision, read the review report and the
+diff.
 
 ## Integrate
 
@@ -145,9 +150,9 @@ mo issue archive <number>
 ```text diagram
 Draft --mark ready--> Backlog --start--> Plan
 Plan --approve--> Build --automatic--> Check
-Plan --reject--> Plan
+Plan --reject--> Plan feedback + checks --approval--> Plan
 Check --approve--> Integrate --automatic--> Done
-Check --reject--> Build
+Check --reject--> Check feedback + checks --approval--> Check
 
 Done --archive--> Archived
 

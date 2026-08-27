@@ -14,7 +14,7 @@ Workflow is one Prompt consumer. A Standalone Agent uses the same Project Prompt
 
 ## Resolution
 
-WorkflowProfile stores only a Prompt key reference, such as `${{ prompts.proposal }}`. It does not store
+WorkflowProfile stores only a Prompt key reference, such as `${{ prompts.plan }}`. It does not store
 the Prompt body. At dispatch, the Server loads the body by Project and key into the immutable attempt
 snapshot. At the execution entry point, the Runner evaluates the body template before it calls the Action:
 

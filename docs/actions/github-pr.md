@@ -116,6 +116,11 @@ Action is idempotent when auto-merge is already enabled: it proceeds directly
 to the wait. Pair it with `mohist/github-pr-status` using `expect: merged` as
 post-hoc verification.
 
+Each attempt has one fixed 30-minute absolute deadline. CLI prechecks, Pull
+Request reads, squash-subject selection, registration, ambiguous-registration
+reconciliation, transient-read delays, and merge polling all consume the same
+remaining budget. The deadline never resets inside an attempt.
+
 ```yaml
 - id: enable-auto-merge
   uses: mohist/enable-github-pr-auto-merge
@@ -123,7 +128,6 @@ post-hoc verification.
     repositoryUrl: ${{ repository.gitUrl }}
     prNumber: ${{ vars.github.pr.number }}
     method: squash
-    subjectFrom: issue.title
 ```
 
 Inputs:
@@ -133,9 +137,9 @@ Inputs:
 - `method` (optional, text, default `squash`): merge method. Only `squash` is
   supported.
 - `prNumber` (required, numeric): Pull Request number.
-- `subject` (optional, text): explicit squash-commit subject.
-- `subjectFrom` (optional, text, default `issue.title`): Issue field used as
-  the squash-commit subject.
+- `subject` (optional, text): explicit squash-commit subject. When omitted,
+  the Action uses the title returned by its bounded Pull Request read. It does
+  not perform a separate Issue-field lookup.
 
 Outputs:
 
@@ -155,7 +159,10 @@ Business error codes:
 - `pr-checks-failed`: a required Pull Request check failed after auto-merge
   was enabled.
 - `conflict`: the Pull Request has unresolved merge conflicts.
-- `retry-safe`: the operation can be retried safely.
+- `retry-safe`: the current attempt failed without proving an unsafe replay;
+  the Task fails and may be retried explicitly. This code does not request or
+  authorize automatic recovery. Host cancellation remains cancellation rather
+  than this business error.
 - `config-error`: GitHub configuration is missing or invalid.
 - `pr-state-conflict`: the Pull Request is in a conflicting state.
 - `enable-failed`: enabling auto-merge failed.

@@ -16,10 +16,10 @@ relationship among Agent, AgentJob, and AgentSession.
 The minimal configuration contains only a prompt:
 
 ```yaml
-- id: proposal
+- id: plan
   uses: mohist/pi
   with:
-    prompt: ${{ prompts.proposal }}
+    prompt: ${{ prompts.plan }}
 ```
 
 Model options use the same binding pattern as `mohist/opencode`. Set an `agent`
@@ -35,11 +35,11 @@ vars:
 stages:
   - stage: plan
     tasks:
-      - id: proposal
+      - id: plan
         uses: mohist/pi
         with:
           session: plan
-          prompt: ${{ prompts.proposal }}
+          prompt: ${{ prompts.plan }}
           options: ${{ vars.agent }}
 ```
 

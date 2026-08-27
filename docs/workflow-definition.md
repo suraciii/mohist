@@ -88,10 +88,12 @@ invalid types instead of ignoring them.
 
 One `with` key is engine-reserved and valid for every Task:
 `working-directory` sets the Workspace-relative directory the Action runs in
-and is resolved before manifest validation. Repository-modifying Tasks in a
-Workflow Workspace use `working-directory: REPOS/${{ repository.name }}` to
-address the checkout; see [Workspace](workspaces.md#layout). A path that
-escapes the Workspace fails the Task.
+and is resolved before manifest validation. Repository-only Tasks in a Workflow
+Workspace use `working-directory: REPOS/${{ repository.name }}` to address the
+checkout; see [Workspace](workspaces.md#layout). Runner derives that same
+Repository independently for branch stability and clean-worktree enforcement,
+including when an Agent executes from the Workspace root. A path that escapes
+the Workspace fails the Task.
 
 `uses` normally contains a literal concrete Action name. A Profile that declares
 `agentAction` may instead use the complete scalar `${{ profile.agentAction }}`.
@@ -267,27 +269,26 @@ stages:
   - stage: plan
     requiresApproval: true
     tasks:
-      - id: proposal
+      - id: plan
         uses: mohist/opencode
         with:
           session: plan
-          prompt: ${{ prompts.proposal }}
+          prompt: ${{ prompts.plan }}
           options: ${{ vars.agent }}
         expect:
           files:
-            - path: docs/proposal.md
-          markers:
-            - path: _output
-              oneOf:
-                - <promise>done</promise>
-                - <promise>unfinished</promise>
-              failIf: <promise>unfinished</promise>
+            - path: PLANS/PLAN.md
+            - path: PLANS/DESIGN.md
+            - path: PLANS/tasks.json
         artifacts:
           files:
-            - path: docs/proposal.md
+            - path: PLANS/PLAN.md
+            - path: PLANS/DESIGN.md
+            - path: PLANS/tasks.json
       - id: publish-plan
         uses: mohist/push
         with:
+          working-directory: REPOS/${{ repository.name }}
           source: HEAD
           target: ${{ workspace.branch }}
           remote: origin
@@ -301,6 +302,7 @@ stages:
           draft: true
           titleFrom: issue.title
           bodyFrom: issue.body
+          working-directory: REPOS/${{ repository.name }}
         setVars:
           github.pr.number: output.prNumber
           github.pr.url: output.prUrl
@@ -310,6 +312,7 @@ stages:
         with:
           run: git diff --check
           timeout: 300000
+          working-directory: REPOS/${{ repository.name }}
 
   - stage: integrate
     lockBehavior: sequential
@@ -341,8 +344,6 @@ stages:
                     target: ${{ workspace.branch }}
                     remote: origin
                     force: true
-              retrySelf: true
-            - when: error.code=retry-safe
               retrySelf: true
     checks:
       - id: merge-verified
