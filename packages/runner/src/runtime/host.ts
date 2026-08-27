@@ -23,6 +23,7 @@ import { AgentJobExecutor } from './agent-job-executor.js'
 import { TaskLogCollector } from './task-log.js'
 import { createHostCleanup } from './host-cleanup.js'
 import { executeWork } from './host-task-log.js'
+import { createHostTaskLogDeliveryQueue, type TaskLogDeliveryQueue } from './task-log-delivery-queue.js'
 import {
   AWAITING_ACK_RETRY_INTERVAL_MS,
   POLL_TIMEOUT_MS,
@@ -110,6 +111,7 @@ export class RunnerHost {
   private readonly namedWorkspaceManager: NamedWorkspaceManager
   private readonly namedWorkspaceReclaimProbe: NamedWorkspaceReclaimProbe
   private readonly agentSessionRuntimeEventQueue: AgentSessionRuntimeEventQueue
+  private readonly taskLogDeliveryQueue: TaskLogDeliveryQueue
   private readonly convergence: ConvergenceBackstop
   private readonly cleanupLoop: CleanupLoop
   private readonly namedCleanupLoop: ReturnType<typeof createNamedWorkspaceCleanupLoop>
@@ -188,6 +190,7 @@ export class RunnerHost {
         connection: this.connection,
       }),
     })
+    this.taskLogDeliveryQueue = createHostTaskLogDeliveryQueue(this.connection, options)
     this.convergence = new ConvergenceBackstop(
       this.workspaceRegistry,
       new ServerConnectionConvergenceAdapter(this.connection),
@@ -316,7 +319,7 @@ export class RunnerHost {
     return {
       options: this.options,
       connection: this.connection,
-      taskLogDeps: () => createHostTaskLogDeps(this.connection, this.options),
+      taskLogDeps: () => createHostTaskLogDeps(this.connection, this.options, this.taskLogDeliveryQueue),
       workExecutorRef: () => this.workExecutor,
       syncOpenCodeWorkOwners: () => this.syncOpenCodeWorkOwners(),
       inFlight: this.inFlight,
@@ -356,15 +359,13 @@ export class RunnerHost {
           exception: error,
         })
       }
-      // Load the AgentSession runtime-event outbox BEFORE accepting
-      // control WebSocket commands or claiming work. An unreadable snapshot is
-      // never replaced with empty state — the outbox loads itself once
-      // a successful read happens and stays unhealthy otherwise.
+      // Initialize the process-memory runtime-event queue before accepting
+      // control commands or claiming work.
       await this.loadAgentSessionRuntimeEventQueue(signal)
       await this.initializeSharedConnection(signal)
       await this.connectRunner(signal)
       // Kick a non-blocking drain: an unavailable server does not gate
-      // startup; records stay durable and re-drain on reconnect.
+      // startup; queued evidence retries while this process remains alive.
       if (this.agentSessionRuntimeEventQueue.ready()) {
         void this.agentSessionRuntimeEventQueue.kick().catch(() => undefined)
       }
@@ -391,6 +392,7 @@ export class RunnerHost {
         clearInterval(convergenceTimer)
         clearInterval(cleanupTimer)
         await this.shutdownSharedConnection()
+        await this.taskLogDeliveryQueue.stop()
         await this.shutdownConnection()
       }
     } finally {
@@ -502,22 +504,19 @@ export class RunnerHost {
   }
 
   private async loadAgentSessionRuntimeEventQueue(signal: AbortSignal): Promise<void> {
-    const outbox = this.agentSessionRuntimeEventQueue
+    const queue = this.agentSessionRuntimeEventQueue
     try {
-      await outbox.load()
+      await queue.load()
     } catch (error) {
-      // Loading itself is best effort — `outbox.ready()` reflects the
-      // actual durable state and gates the follow-up handler and claim
-      // loop.
-      log.error('agent-session runtime event outbox failed to load', {
+      log.error('agent-session runtime event queue failed to initialize', {
         exception: error,
-        session: 'outbox',
+        session: 'runtime-event-queue',
       })
     }
     if (signal.aborted) return
-    if (!outbox.ready()) {
-      log.warn('agent-session runtime event outbox unhealthy at startup; runner admission gated until it recovers', {
-        session: 'outbox',
+    if (!queue.ready()) {
+      log.warn('agent-session runtime event queue unavailable; runner admission is gated', {
+        session: 'runtime-event-queue',
       })
     }
   }

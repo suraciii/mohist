@@ -12,6 +12,7 @@ import type { PiRuntime } from './pi/index.js'
 import type { FollowupTarget, FollowupTargetResolution, SessionTarget } from '../server/session-target.js'
 import type { ServerConnection } from '../server/connection.js'
 import type { HostTaskLogDeps } from './host-task-log.js'
+import type { TaskLogDeliveryQueue } from './task-log-delivery-queue.js'
 import type { AwaitingAckEntry, InFlightEntry } from './host-state.js'
 import { workKey } from './work-key.js'
 
@@ -168,8 +169,12 @@ export function currentCatalogRevision(
   return null
 }
 
-export function createHostTaskLogDeps(connection: ServerConnection, options: RunnerOptions): HostTaskLogDeps {
-  return { connection, options }
+export function createHostTaskLogDeps(
+  connection: ServerConnection,
+  options: RunnerOptions,
+  taskLogDeliveryQueue: TaskLogDeliveryQueue,
+): HostTaskLogDeps {
+  return { connection, options, taskLogDeliveryQueue }
 }
 
 export function runtimeKindForWork(work: DispatchWorkItem): RuntimeKind | null {

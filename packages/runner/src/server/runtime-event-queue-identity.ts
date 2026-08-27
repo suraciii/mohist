@@ -32,6 +32,10 @@ export function workflowSessionSchedulingKey(projectId: string, workflowRunId: s
 }
 
 export function runtimeEventSchedulingKey(record: RuntimeEventRecord): string {
+  if (record.producerFamily === 'session-followup') {
+    if (record.target.kind !== 'session') throw new Error('session-followup scheduling requires Session target')
+    return `session-followup:${record.target.sessionId}`
+  }
   if (record.producerFamily !== 'workflow-session' && record.producerFamily !== 'workflow-cleanup')
     return runtimeEventDeliveryKey(record)
   if (record.target.kind !== 'workflow') throw new Error('workflow scheduling family requires workflow target')

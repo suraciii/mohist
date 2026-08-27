@@ -54,6 +54,7 @@ export interface AgentSessionRuntimeEventQueueOptions {
   readonly deliveryTimeoutMs?: number
   readonly deliveryBatchSize?: number
   readonly queueCapacity?: number
+  readonly admissionCapacity?: number
   readonly warn?: (message: string, fields: Record<string, unknown>) => void
 }
 
@@ -80,6 +81,7 @@ export class AlreadyConsumedRuntimeEventError extends Error {
 
 const log = runnerLogger.child('runtime-event-queue')
 export const DEFAULT_RUNTIME_EVENT_QUEUE_CAPACITY = 1_024
+export const DEFAULT_RUNTIME_EVENT_ADMISSION_CAPACITY = 64
 export const DEFAULT_RUNTIME_EVENT_DELIVERY_TIMEOUT_MS = 10_000
 const DEFAULT_RETRY_DELAY_MS = 2_000
 const DEFAULT_DELIVERY_BATCH_SIZE = 64
@@ -102,6 +104,7 @@ const PERMANENT_400_CODES = new Set([
 interface QueuedRecord {
   readonly record: RuntimeEventRecord
   readonly sequence: number
+  readonly admission: boolean
 }
 
 interface DeliveryGroup {
@@ -133,12 +136,14 @@ class InMemoryRuntimeEventQueue implements AgentSessionRuntimeEventQueue {
   private readonly deliveryTimeoutMs: number
   private readonly deliveryBatchSize: number
   private readonly queueCapacity: number
+  private readonly admissionCapacity: number
   private readonly warn: (message: string, fields: Record<string, unknown>) => void
   private readonly groups = new Map<string, DeliveryGroup>()
   private readonly readyGroups: string[] = []
   private readonly inputWaiters = new Map<string, InputReceiptWaiter>()
   private sequence = 0
-  private size = 0
+  private evidenceSize = 0
+  private admissionSize = 0
   private draining: Promise<void> | null = null
   private retry: ReturnType<typeof setTimeout> | null = null
   private stopped = false
@@ -150,6 +155,7 @@ class InMemoryRuntimeEventQueue implements AgentSessionRuntimeEventQueue {
     this.deliveryTimeoutMs = Math.max(1, options.deliveryTimeoutMs ?? DEFAULT_RUNTIME_EVENT_DELIVERY_TIMEOUT_MS)
     this.deliveryBatchSize = Math.max(1, options.deliveryBatchSize ?? DEFAULT_DELIVERY_BATCH_SIZE)
     this.queueCapacity = Math.max(1, options.queueCapacity ?? DEFAULT_RUNTIME_EVENT_QUEUE_CAPACITY)
+    this.admissionCapacity = Math.max(1, options.admissionCapacity ?? DEFAULT_RUNTIME_EVENT_ADMISSION_CAPACITY)
     this.warn = options.warn ?? ((message, fields) => log.warn(message, fields))
   }
 
@@ -173,7 +179,7 @@ class InMemoryRuntimeEventQueue implements AgentSessionRuntimeEventQueue {
   async enqueueBeforeExecution(record: RuntimeEventRecord): Promise<void> {
     // Receipt-bearing inputs register their waiter before starting delivery, so
     // a fast successful response is consumed directly rather than retained.
-    if (!this.enqueue(record, false)) throw new AlreadyConsumedRuntimeEventError(record.id)
+    if (!this.enqueue(record, false, true)) throw new AlreadyConsumedRuntimeEventError(record.id)
   }
 
   async awaitInputReceipt(recordId: string): Promise<AgentSessionRuntimeEventReceipt> {
@@ -222,16 +228,24 @@ class InMemoryRuntimeEventQueue implements AgentSessionRuntimeEventQueue {
     for (const waiter of waiters) waiter.reject(new Error('runtime-event queue stopped'))
   }
 
-  private enqueue(record: RuntimeEventRecord, kick = true): boolean {
+  private enqueue(record: RuntimeEventRecord, kick = true, admission = false): boolean {
     if (this.stopped) throw new Error('runtime-event queue is stopped')
     if (this.has(record.id)) return true
-    if (this.size >= this.queueCapacity) {
-      this.warn('runtime-event evidence dropped because the volatile queue is full', {
-        recordId: record.id,
-        eventType: record.event.type,
-        capacity: this.queueCapacity,
-        policy: 'drop-newest',
-      })
+    const size = admission ? this.admissionSize : this.evidenceSize
+    const capacity = admission ? this.admissionCapacity : this.queueCapacity
+    if (size >= capacity) {
+      this.warn(
+        admission
+          ? 'runtime-event admission rejected because the reserved volatile lane is full'
+          : 'runtime-event evidence dropped because the volatile queue is full',
+        {
+          recordId: record.id,
+          eventType: record.event.type,
+          capacity,
+          lane: admission ? 'admission' : 'evidence',
+          policy: 'drop-newest',
+        },
+      )
       return false
     }
     const key = runtimeEventSchedulingKey(record)
@@ -241,8 +255,9 @@ class InMemoryRuntimeEventQueue implements AgentSessionRuntimeEventQueue {
       this.groups.set(key, group)
       this.readyGroups.push(key)
     }
-    group.records.push({ record, sequence: this.sequence++ })
-    this.size += 1
+    group.records.push({ record, sequence: this.sequence++, admission })
+    if (admission) this.admissionSize += 1
+    else this.evidenceSize += 1
     if (kick) void this.kick()
     return true
   }
@@ -338,7 +353,8 @@ class InMemoryRuntimeEventQueue implements AgentSessionRuntimeEventQueue {
   ): void {
     if (group.records[0] !== entry) return
     group.records.shift()
-    this.size -= 1
+    if (entry.admission) this.admissionSize -= 1
+    else this.evidenceSize -= 1
     if (!requiresInputReceipt(entry.record)) return
     const waiter = this.inputWaiters.get(entry.record.id)
     if (waiter) {
@@ -351,7 +367,7 @@ class InMemoryRuntimeEventQueue implements AgentSessionRuntimeEventQueue {
   }
 
   private scheduleRetry(): void {
-    if (this.stopped || this.size === 0 || this.retry) return
+    if (this.stopped || this.evidenceSize + this.admissionSize === 0 || this.retry) return
     const retryAt = Math.min(...[...this.groups.values()].map((group) => group.retryAt || Date.now()))
     const delay = Math.max(0, retryAt - Date.now())
     this.retry = setTimeout(() => {

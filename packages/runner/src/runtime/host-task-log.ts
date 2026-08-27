@@ -4,6 +4,7 @@ import { WorkExecutor } from './executor.js'
 import { TaskLogCollector } from './task-log.js'
 import { runnerLogger } from '../system/logger.js'
 import type { ManagerExecutionBoundary } from './manager-execution-boundary.js'
+import type { TaskLogDeliveryQueue } from './task-log-delivery-queue.js'
 
 const log = runnerLogger.child('host')
 
@@ -36,37 +37,7 @@ const TASK_LOG_FLUSH_LINE_THRESHOLD = 200
 export interface HostTaskLogDeps {
   readonly connection: ServerConnection
   readonly options: RunnerOptions
-}
-
-async function uploadTerminalTaskLog(
-  deps: HostTaskLogDeps,
-  ownerId: string,
-  ownerKind: 'workflow' | 'agent-job',
-  workId: string,
-  batch: import('./task-log.js').TaskLogBatch,
-  signal: AbortSignal,
-): Promise<void> {
-  const controller = new AbortController()
-  const abort = () => controller.abort(signal.reason)
-  signal.addEventListener('abort', abort, { once: true })
-  let timeout: ReturnType<typeof setTimeout> | null = null
-  try {
-    await Promise.race([
-      deps.connection.uploadTaskLog(ownerId, workId, batch, controller.signal, ownerKind, true),
-      new Promise<never>((_resolve, reject) => {
-        timeout = setTimeout(() => {
-          controller.abort()
-          reject(new Error(`task-log terminal upload timed out after ${TASK_LOG_UPLOAD_TIMEOUT_MS}ms`))
-        }, TASK_LOG_UPLOAD_TIMEOUT_MS)
-        timeout.unref?.()
-      }),
-    ])
-  } catch (error) {
-    log.warn('terminal task-log delivery abandoned', { work: workId, exception: error })
-  } finally {
-    if (timeout) clearTimeout(timeout)
-    signal.removeEventListener('abort', abort)
-  }
+  readonly taskLogDeliveryQueue: TaskLogDeliveryQueue
 }
 
 /**
@@ -96,34 +67,6 @@ export async function executeWork(
   const ownerId = ownerKind === 'agent-job' ? (work.agentJobId ?? '') : work.workflowRunId
 
   /**
-   * Incremental and terminal delivery are best-effort evidence channels.
-   */
-  const uploadTaskLogBatch = async (
-    batch: import('./task-log.js').TaskLogBatch,
-    timeoutMs: number,
-    label: 'incremental',
-  ) => {
-    const uploadController = new AbortController()
-    let timeout: ReturnType<typeof setTimeout> | null = null
-    try {
-      await Promise.race([
-        deps.connection.uploadTaskLog(ownerId, work.workId, batch, uploadController.signal, ownerKind, false),
-        new Promise<never>((_resolve, reject) => {
-          timeout = setTimeout(() => {
-            uploadController.abort()
-            reject(new Error(`task-log ${label} upload timed out after ${timeoutMs}ms`))
-          }, timeoutMs)
-          timeout.unref?.()
-        }),
-      ])
-    } catch (flushError) {
-      log.error('task-log upload failed', { work: work.workId, path: label, exception: flushError })
-    } finally {
-      if (timeout) clearTimeout(timeout)
-    }
-  }
-
-  /**
    * Incremental batch primitive. Drains the collector (entries with
    * `seq > watermark`), and when there is something new, uploads it
    * under the larger incremental-timeout constant. An empty drain
@@ -133,11 +76,14 @@ export async function executeWork(
     if (!collector) return
     const batch = collector.drain()
     if (batch === null) return
-    await uploadTaskLogBatch(
+    deps.taskLogDeliveryQueue.enqueue({
+      ownerId,
+      ownerKind,
+      workId: work.workId,
       batch,
-      deps.options.taskLogIncrementalUploadTimeoutMs ?? TASK_LOG_INCREMENTAL_UPLOAD_TIMEOUT_MS,
-      'incremental',
-    )
+      terminal: false,
+      timeoutMs: deps.options.taskLogIncrementalUploadTimeoutMs ?? TASK_LOG_INCREMENTAL_UPLOAD_TIMEOUT_MS,
+    })
   }
 
   const startIncrementalFlushForCollector = (collector: import('./task-log.js').TaskLogCollector) => {
@@ -181,10 +127,26 @@ export async function executeWork(
     // reconciliation cannot overlap it.
     await flushTrigger.stop()
     if (signal.aborted) return execution.result
-    void uploadTerminalTaskLog(deps, ownerId, ownerKind, work.workId, execution.collector.snapshot(), signal)
+    deps.taskLogDeliveryQueue.enqueue({
+      ownerId,
+      ownerKind,
+      workId: work.workId,
+      batch: execution.collector.snapshot(),
+      terminal: true,
+      timeoutMs: TASK_LOG_UPLOAD_TIMEOUT_MS,
+    })
     return execution.result
   } catch (error) {
-    if (!signal.aborted) void uploadTerminalTaskLog(deps, ownerId, ownerKind, work.workId, collector.snapshot(), signal)
+    if (!signal.aborted) {
+      deps.taskLogDeliveryQueue.enqueue({
+        ownerId,
+        ownerKind,
+        workId: work.workId,
+        batch: collector.snapshot(),
+        terminal: true,
+        timeoutMs: TASK_LOG_UPLOAD_TIMEOUT_MS,
+      })
+    }
     throw error
   } finally {
     collector.setAppendListener(null)

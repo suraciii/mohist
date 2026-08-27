@@ -6,13 +6,13 @@ import {
   type RuntimeEventRecord,
 } from '../src/server/runtime-event-queue.js'
 
-function event(id: string, sessionId: string, type = id): RuntimeEventRecord {
+function event(id: string, sessionId: string, type = id, turnId = `turn-${sessionId}`): RuntimeEventRecord {
   return {
     id,
     producerFamily: 'session-followup',
     target: { kind: 'session', sessionId },
     runtimeSessionId: `runtime-${sessionId}`,
-    sessionTurnId: `turn-${sessionId}`,
+    sessionTurnId: turnId,
     work: null,
     event: { type, payload: {} },
     acknowledgementPolicy: 'successful-response',
@@ -59,6 +59,35 @@ describe('in-memory runtime event queue', () => {
 
     expect(delivered).toEqual(['A1', 'B1', 'A2'])
     expect(queue.snapshot()).toEqual([])
+    await queue.stop()
+  })
+
+  it('does not let a later Session turn overtake a retrying earlier turn', async () => {
+    vi.useFakeTimers()
+    const delivered: string[] = []
+    let failFirst = true
+    const queue = createAgentSessionRuntimeEventQueue({
+      retryDelayMs: 100,
+      deliveryBatchSize: 1,
+      deliver: {
+        async send(record) {
+          delivered.push(record.id)
+          if (record.id === 'turn-1' && failFirst) throw new Error('retry turn 1')
+          return []
+        },
+      },
+    })
+
+    await queue.enqueueProducedFactBatch([
+      event('turn-1', 'session-1', 'message.delta', 'turn-1'),
+      event('turn-2', 'session-1', 'message.delta', 'turn-2'),
+    ])
+    await queue.kick()
+    expect(delivered).toEqual(['turn-1'])
+
+    failFirst = false
+    await vi.advanceTimersByTimeAsync(100)
+    expect(delivered).toEqual(['turn-1', 'turn-1', 'turn-2'])
     await queue.stop()
   })
 
@@ -280,24 +309,48 @@ describe('in-memory runtime event queue', () => {
     await queue.stop()
   })
 
-  it('reports a receipt-bearing input dropped at capacity without retaining it', async () => {
+  it('admits a receipt-bearing input when the ordinary evidence lane is full', async () => {
+    vi.useFakeTimers()
     const queue = createAgentSessionRuntimeEventQueue({
       queueCapacity: 1,
-      retryDelayMs: 60_000,
+      admissionCapacity: 1,
+      retryDelayMs: 100,
       warn: () => undefined,
       deliver: {
-        async send() {
-          throw new Error('hold the full record')
+        async send(record) {
+          if (record.id === 'full') throw new Error('hold ordinary evidence')
+          return [{ type: 'session.input' }]
         },
       },
     })
 
     await queue.enqueueProducedFact(event('full', 'A'))
-    await expect(queue.enqueueBeforeExecution(input('dropped-input', 'B'))).rejects.toBeInstanceOf(
+    await queue.enqueueBeforeExecution(input('admitted-input', 'B'))
+    const receipt = queue.awaitInputReceipt!('admitted-input')
+    await queue.kick()
+    await expect(receipt).resolves.toEqual({ type: 'session.input' })
+    expect(queue.snapshot().map((record) => record.id)).toEqual(['full'])
+    await queue.stop()
+  })
+
+  it('rejects a second receipt-bearing input when the bounded admission lane is full', async () => {
+    const queue = createAgentSessionRuntimeEventQueue({
+      queueCapacity: 1,
+      admissionCapacity: 1,
+      retryDelayMs: 60_000,
+      warn: () => undefined,
+      deliver: {
+        async send() {
+          throw new Error('hold admission')
+        },
+      },
+    })
+
+    await queue.enqueueBeforeExecution(input('first-input', 'A'))
+    await expect(queue.enqueueBeforeExecution(input('second-input', 'B'))).rejects.toBeInstanceOf(
       AlreadyConsumedRuntimeEventError,
     )
-    await expect(queue.awaitInputReceipt!('dropped-input')).rejects.toBeInstanceOf(AlreadyConsumedRuntimeEventError)
-    expect(queue.snapshot().map((record) => record.id)).toEqual(['full'])
+    expect(queue.snapshot().map((record) => record.id)).toEqual(['first-input'])
     await queue.stop()
   })
 })

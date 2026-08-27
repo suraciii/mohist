@@ -373,7 +373,7 @@ describe('RunnerHost flushes task logs before reporting work', () => {
     expect(rebaseEntries.map((e) => e.text)).toContain('rebasing commit a1b2c3')
   })
 
-  it('FailedTerminalUploadIsDropped_ReportStillSucceeds', async () => {
+  it('FailedTerminalUploadIsQueuedWithoutBlockingReport', async () => {
     vi.clearAllMocks()
     const reportStarted = deferred<void>()
     getConnectionId.mockReturnValue('conn-1')
@@ -413,7 +413,10 @@ describe('RunnerHost flushes task logs before reporting work', () => {
     expect(report).toHaveBeenCalledTimes(1)
     expect(capturedLogs()).toEqual(
       expect.arrayContaining([
-        expect.objectContaining({ level: 'WARN', message: 'terminal task-log delivery abandoned' }),
+        expect.objectContaining({
+          level: 'WARN',
+          message: 'task-log evidence dropped when the volatile queue stopped',
+        }),
       ]),
     )
   })

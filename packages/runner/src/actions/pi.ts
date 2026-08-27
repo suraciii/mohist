@@ -200,7 +200,7 @@ export async function piAction(
       } catch (error) {
         return boundFailure(
           'session-binding-failed',
-          `Failed to persist the Workflow AgentSession binding: ${actionErrorMessage(error)}`,
+          `Failed to record the Workflow AgentSession binding: ${actionErrorMessage(error)}`,
           agentSessionId,
           runtimeSessionId,
         )
@@ -213,7 +213,7 @@ export async function piAction(
   if (context.cleanupAttempt && !reporter) {
     return boundFailure(
       'session-reporting-failed',
-      'Workflow cleanup requires the durable AgentSession runtime-event outbox',
+      'Workflow cleanup requires the AgentSession runtime-event queue',
       agentSessionId,
       runtimeSessionId,
       reporter,
