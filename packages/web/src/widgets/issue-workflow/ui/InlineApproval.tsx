@@ -122,9 +122,9 @@ export function InlineApprovalControls({
       <h3 className="text-sm font-semibold text-warning">Approval Required</h3>
       <p className="text-xs text-warning">
         {stage === WorkflowStage.Plan
-          ? 'Review the design proposal and approve to continue the workflow.'
+          ? 'Review the plan artifacts and approve to continue the workflow.'
           : stage === WorkflowStage.Check
-            ? 'Review the check results and approve to continue the workflow.'
+            ? 'Review the review evidence and approve to continue the workflow.'
             : `Review the ${stage} stage output and approve to continue, or request changes with feedback.`}
       </p>
 

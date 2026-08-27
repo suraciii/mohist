@@ -148,7 +148,7 @@ stopped at an approval point and waits for an approve or reject decision:
 
 ```bash
 mo run approve --issue 42     # Approve and enter the next Stage.
-mo run reject --issue 42 --message "Missing error handling in proposal"  # Reject and repeat the current Stage.
+mo run reject --issue 42 --message "Missing error handling in the plan"  # Run feedback work, then review again.
 ```
 
 Approval and comment ownership comes from the authenticated identity. Mohist
@@ -159,7 +159,7 @@ automation. See [Core Concepts: Approval](concepts.md#approval). For longer cont
 comment first and make the short rejection message refer to it:
 
 ```bash
-mo issue comment create 42 --display-name "Ada" --body "Reject because: missing error handling in proposal"
+mo issue comment create 42 --display-name "Ada" --body "Reject because: missing error handling in the plan"
 mo run reject --issue 42 -m "See comment: missing error handling"
 ```
 

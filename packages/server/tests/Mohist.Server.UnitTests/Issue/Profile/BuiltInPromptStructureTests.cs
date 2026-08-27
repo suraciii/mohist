@@ -34,6 +34,25 @@ public class BuiltInPromptStructureTests
     }
 
     [Fact]
+    public void ApplyFeedbackPrompt_UsesCanonicalRunFeedbackViewCommand()
+    {
+        var body = new FilePromptLoader().LoadAllTemplates()["apply-feedback"].Body;
+
+        Assert.Contains(
+            "mo run feedback view --issue ${{ issue.number }} --feedback ${{ work.approvalFeedback.id }} --project ${{ issue.projectId }} --json body",
+            body);
+    }
+
+    [Fact]
+    public void ApplyFeedbackPrompt_DoesNotUseObsoleteIssueFeedbackCommand()
+    {
+        var body = new FilePromptLoader().LoadAllTemplates()["apply-feedback"].Body;
+
+        Assert.DoesNotContain("mo issue feedback show", body);
+        Assert.DoesNotContain("--output json", body);
+    }
+
+    [Fact]
     public void FixPrChecksPrompt_UsesProjectPrContextAndFailureError()
     {
         var body = new FilePromptLoader().LoadAllTemplates()["fix-pr-checks"].Body;

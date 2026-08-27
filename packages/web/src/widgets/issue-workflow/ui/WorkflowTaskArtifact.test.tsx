@@ -14,17 +14,17 @@ let fileContentRequests: Array<{ issueNumber: number; path: string | null; proje
 
 const timelineHook: WorkflowTimelineHook = () => ({ data: timelineData })
 
-const fileContentFn = async (
-  issueNumber: number,
-  path: string,
-  projectId?: string | null,
-) => {
+const fileContentFn = async (issueNumber: number, path: string, projectId?: string | null) => {
   fileContentRequests.push({ issueNumber, path, projectId: projectId ?? '' })
   if (fileContentError) throw new Error(fileContentError)
   return fileContent ?? { base: '', head: '' }
 }
 
-const taskLogHook: TaskLogDataHook = () => ({ data: { lines: [], nextCursor: null, truncated: false }, isLoading: false, isError: false })
+const taskLogHook: TaskLogDataHook = () => ({
+  data: { lines: [], nextCursor: null, truncated: false },
+  isLoading: false,
+  isError: false,
+})
 const workflowSessionsHook: WorkflowRunSessionsHook = () => ({ sessions: [], isLoading: false })
 
 function WorkflowView({ issue }: { issue: Issue }) {
@@ -96,8 +96,8 @@ function makeTimelineWithRequiredFiles(): WorkflowTimeline {
             attempts: 1,
             message: null,
             requiredFiles: [
-              { path: 'proposal.md', source: 'task-expect', canFetchContent: true },
-              { path: 'design.md', source: 'task-expect', canFetchContent: true },
+              { path: 'PLANS/PLAN.md', source: 'task-expect', canFetchContent: true },
+              { path: 'PLANS/DESIGN.md', source: 'task-expect', canFetchContent: true },
             ],
             classification: 'UserFacing',
           },
@@ -136,8 +136,8 @@ function makeTimelineWithMarkerRequiredFiles(): WorkflowTimeline {
             attempts: 1,
             message: 'all checks passed',
             requiredFiles: [
-              { path: 'review.md', source: 'task-expect', canFetchContent: true, markers: ['PASS', 'FAIL'] },
-              { path: 'self-review.md', source: 'task-expect', canFetchContent: false },
+              { path: 'PLANS/REVIEW.md', source: 'task-expect', canFetchContent: true, markers: ['PASS', 'FAIL'] },
+              { path: 'PLANS/tasks.json', source: 'task-expect', canFetchContent: false },
             ],
             classification: 'UserFacing',
           },
@@ -224,10 +224,13 @@ describe('Task artifact rendering', () => {
 
       await expandTask('Implement WorkflowView')
 
-      await waitFor(() => {
-        expect(screen.getByText('proposal.md')).toBeInTheDocument()
-        expect(screen.getByText('design.md')).toBeInTheDocument()
-      }, { timeout: 2000 })
+      await waitFor(
+        () => {
+          expect(screen.getByText('PLANS/PLAN.md')).toBeInTheDocument()
+          expect(screen.getByText('PLANS/DESIGN.md')).toBeInTheDocument()
+        },
+        { timeout: 2000 },
+      )
     })
 
     it('marks required file entries with task-expect source indicator', async () => {
@@ -241,13 +244,16 @@ describe('Task artifact rendering', () => {
 
       await expandTask('Implement WorkflowView')
 
-      await waitFor(() => {
-        const proposalEntry = screen.getByText('proposal.md').closest('[class*="text-xs"]')
-        expect(proposalEntry?.textContent).toContain('expect')
-      }, { timeout: 2000 })
+      await waitFor(
+        () => {
+          const planEntry = screen.getByText('PLANS/PLAN.md').closest('[class*="text-xs"]')
+          expect(planEntry?.textContent).toContain('expect')
+        },
+        { timeout: 2000 },
+      )
     })
 
-    it('renders review.md required file entry when markers are declared', async () => {
+    it('renders PLANS/REVIEW.md required file entry when markers are declared', async () => {
       timelineData = makeTimelineWithMarkerRequiredFiles()
 
       render(<WorkflowView issue={makeIssue()} />)
@@ -258,26 +264,32 @@ describe('Task artifact rendering', () => {
 
       await expandTask('Run health checks')
 
+      await waitFor(
+        () => {
+          expect(screen.getByText('PLANS/REVIEW.md')).toBeInTheDocument()
+        },
+        { timeout: 2000 },
+      )
+    })
+
+    it('shows the task-list entry with disabled button indicator when canFetchContent is false', async () => {
+      timelineData = makeTimelineWithMarkerRequiredFiles()
+
+      render(<WorkflowView issue={makeIssue()} />)
+
       await waitFor(() => {
-        expect(screen.getByText('review.md')).toBeInTheDocument()
-      }, { timeout: 2000 })
+        expect(screen.getByText('Run health checks')).toBeInTheDocument()
+      })
+
+      await expandTask('Run health checks')
+
+      await waitFor(
+        () => {
+          expect(screen.getByText('PLANS/tasks.json')).toBeInTheDocument()
+        },
+        { timeout: 2000 },
+      )
     })
-
-  it('shows self-review.md entry with disabled button indicator when canFetchContent is false', async () => {
-    timelineData = makeTimelineWithMarkerRequiredFiles()
-
-    render(<WorkflowView issue={makeIssue()} />)
-
-    await waitFor(() => {
-      expect(screen.getByText('Run health checks')).toBeInTheDocument()
-    })
-
-    await expandTask('Run health checks')
-
-    await waitFor(() => {
-      expect(screen.getByText('self-review.md')).toBeInTheDocument()
-    }, { timeout: 2000 })
-  })
   })
 
   describe('tasks without required files remain compact', () => {
@@ -304,7 +316,7 @@ describe('Task artifact rendering', () => {
       let foundArtifactList = false
       for (const row of taskRows) {
         const artifactContent = row.querySelector('[class*="bg-muted"]')
-        if (artifactContent && artifactContent.textContent?.includes('proposal.md')) {
+        if (artifactContent && artifactContent.textContent?.includes('PLANS/PLAN.md')) {
           foundArtifactList = true
         }
       }
@@ -316,7 +328,7 @@ describe('Task artifact rendering', () => {
 describe('On-demand required file viewer', () => {
   it('calls file-content API and renders viewer panel when required file is selected', async () => {
     timelineData = makeTimelineWithRequiredFiles()
-    fileContent = { base: '# Design Proposal\n\nContent here', head: '' }
+    fileContent = { base: '# Plan\n\nContent here', head: '' }
 
     render(<WorkflowView issue={makeIssue()} />)
 
@@ -326,11 +338,11 @@ describe('On-demand required file viewer', () => {
 
     await expandTask('Implement WorkflowView')
 
-    fireEvent.click(screen.getByText('proposal.md'))
+    fireEvent.click(screen.getByText('PLANS/PLAN.md'))
 
-    await waitFor(() => expect(fileContentRequests).toEqual([
-      { issueNumber: 1, path: 'proposal.md', projectId: 'test-project' },
-    ]))
+    await waitFor(() =>
+      expect(fileContentRequests).toEqual([{ issueNumber: 1, path: 'PLANS/PLAN.md', projectId: 'test-project' }]),
+    )
   })
 
   it('shows unavailable state when file-content API fails', async () => {
@@ -345,11 +357,14 @@ describe('On-demand required file viewer', () => {
 
     await expandTask('Implement WorkflowView')
 
-    fireEvent.click(screen.getByText('proposal.md'))
+    fireEvent.click(screen.getByText('PLANS/PLAN.md'))
 
-    await waitFor(() => {
-      expect(screen.getByText('File content unavailable')).toBeInTheDocument()
-    }, { timeout: 2000 })
+    await waitFor(
+      () => {
+        expect(screen.getByText('File content unavailable')).toBeInTheDocument()
+      },
+      { timeout: 2000 },
+    )
   })
 
   it('does not call file-content API when canFetchContent is false', async () => {
@@ -363,14 +378,14 @@ describe('On-demand required file viewer', () => {
 
     await expandTask('Run health checks')
 
-    fireEvent.click(screen.getByText('self-review.md'))
+    fireEvent.click(screen.getByText('PLANS/tasks.json'))
 
     expect(fileContentRequests).toHaveLength(0)
   })
 
   it('closes and reopens viewer without refetching when content is already loaded', async () => {
     timelineData = makeTimelineWithRequiredFiles()
-    fileContent = { base: '# Design', head: '' }
+    fileContent = { base: '# Plan', head: '' }
 
     render(<WorkflowView issue={makeIssue()} />)
 
@@ -380,24 +395,30 @@ describe('On-demand required file viewer', () => {
 
     await expandTask('Implement WorkflowView')
 
-    fireEvent.click(screen.getByText('proposal.md'))
+    fireEvent.click(screen.getByText('PLANS/PLAN.md'))
+
+    await waitFor(
+      () => {
+        expect(screen.getByText('# Plan')).toBeInTheDocument()
+      },
+      { timeout: 2000 },
+    )
+
+    fireEvent.click(screen.getByText('PLANS/PLAN.md'))
 
     await waitFor(() => {
-      expect(screen.getByText('# Design')).toBeInTheDocument()
-    }, { timeout: 2000 })
-
-    fireEvent.click(screen.getByText('proposal.md'))
-
-    await waitFor(() => {
-      expect(screen.queryByText('# Design')).not.toBeInTheDocument()
+      expect(screen.queryByText('# Plan')).not.toBeInTheDocument()
     })
 
-    fireEvent.click(screen.getByText('proposal.md'))
+    fireEvent.click(screen.getByText('PLANS/PLAN.md'))
 
-    await waitFor(() => {
-      expect(screen.getByText('# Design')).toBeInTheDocument()
-      expect(fileContentRequests).toHaveLength(1)
-    }, { timeout: 2000 })
+    await waitFor(
+      () => {
+        expect(screen.getByText('# Plan')).toBeInTheDocument()
+        expect(fileContentRequests).toHaveLength(1)
+      },
+      { timeout: 2000 },
+    )
   })
 })
 

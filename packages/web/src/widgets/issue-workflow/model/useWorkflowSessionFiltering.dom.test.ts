@@ -11,7 +11,9 @@ import {
 
 const NOW = new Date('2026-06-15T12:00:00.000Z').getTime()
 
-function session(overrides: Partial<WorkflowRunSession> & { usage?: Partial<NonNullable<WorkflowRunSession['usage']>> }): WorkflowRunSession {
+function session(
+  overrides: Partial<WorkflowRunSession> & { usage?: Partial<NonNullable<WorkflowRunSession['usage']>> },
+): WorkflowRunSession {
   const { usage: usageOverride, ...rest } = overrides
   return {
     id: rest.id ?? 'session-1',
@@ -95,54 +97,71 @@ describe('computeSessionDurationMs', () => {
   // from the session start (startedAt, falling back to createdAt) to the current
   // time. completedAt is no longer used as a measurement boundary.
   it('measures sessions from start to current time (idle activity)', () => {
-    const ms = computeSessionDurationMs({
-      activity: 'idle',
-      createdAt: '2026-06-15T10:00:00.000Z',
-      startedAt: '2026-06-15T10:01:00.000Z',
-      completedAt: '2026-06-15T10:06:00.000Z',
-    }, NOW)
+    const ms = computeSessionDurationMs(
+      {
+        activity: 'idle',
+        createdAt: '2026-06-15T10:00:00.000Z',
+        startedAt: '2026-06-15T10:01:00.000Z',
+        completedAt: '2026-06-15T10:06:00.000Z',
+      },
+      NOW,
+    )
     // NOW (12:00) - startedAt (10:01) = 119 min
     expect(ms).toBe(119 * 60_000)
   })
 
   it('falls back to createdAt when startedAt is null', () => {
-    const ms = computeSessionDurationMs({
-      activity: 'idle',
-      createdAt: '2026-06-15T10:00:00.000Z',
-      startedAt: null,
-      completedAt: '2026-06-15T10:10:00.000Z',
-    }, NOW)
+    const ms = computeSessionDurationMs(
+      {
+        activity: 'idle',
+        createdAt: '2026-06-15T10:00:00.000Z',
+        startedAt: null,
+        completedAt: '2026-06-15T10:10:00.000Z',
+      },
+      NOW,
+    )
     // NOW (12:00) - createdAt (10:00) = 120 min
     expect(ms).toBe(120 * 60_000)
   })
 
   it('measures active sessions from start to current time identically', () => {
-    const ms = computeSessionDurationMs({
-      activity: 'active',
-      createdAt: '2026-06-15T10:00:00.000Z',
-      startedAt: '2026-06-15T11:30:00.000Z',
-      completedAt: null,
-    }, NOW)
+    const ms = computeSessionDurationMs(
+      {
+        activity: 'active',
+        createdAt: '2026-06-15T10:00:00.000Z',
+        startedAt: '2026-06-15T11:30:00.000Z',
+        completedAt: null,
+      },
+      NOW,
+    )
     expect(ms).toBe(30 * 60_000)
   })
 
   it('treats unknown activity the same as idle/active (never terminal)', () => {
-    const ms = computeSessionDurationMs({
-      activity: 'unknown',
-      createdAt: '2026-06-15T10:00:00.000Z',
-      startedAt: '2026-06-15T11:30:00.000Z',
-      completedAt: null,
-    }, NOW)
+    const ms = computeSessionDurationMs(
+      {
+        activity: 'unknown',
+        createdAt: '2026-06-15T10:00:00.000Z',
+        startedAt: '2026-06-15T11:30:00.000Z',
+        completedAt: null,
+      },
+      NOW,
+    )
     expect(ms).toBe(30 * 60_000)
   })
 
   it('returns zero when timestamps cannot be parsed', () => {
-    expect(computeSessionDurationMs({
-      activity: 'idle',
-      createdAt: 'not-a-date',
-      startedAt: null,
-      completedAt: null,
-    }, NOW)).toBe(0)
+    expect(
+      computeSessionDurationMs(
+        {
+          activity: 'idle',
+          createdAt: 'not-a-date',
+          startedAt: null,
+          completedAt: null,
+        },
+        NOW,
+      ),
+    ).toBe(0)
   })
 })
 
@@ -184,7 +203,7 @@ describe('useWorkflowSessionFiltering', () => {
       }),
       session({
         id: 's-plan-running',
-        sessionName: 'proposal-draft-1',
+        sessionName: 'plan-draft-1',
         stage: 'plan',
         // Issue 484: a live execution is `active` (not the legacy `running`).
         activity: 'active',
@@ -207,9 +226,7 @@ describe('useWorkflowSessionFiltering', () => {
   }
 
   it('returns sessions sorted by createdAt ascending by default', () => {
-    const { result } = renderHook(() =>
-      useWorkflowSessionFiltering(buildSessions(), { nowMs: NOW }),
-    )
+    const { result } = renderHook(() => useWorkflowSessionFiltering(buildSessions(), { nowMs: NOW }))
 
     expect(result.current.sessions.map((s) => s.id)).toEqual([
       's-check-1',
@@ -225,27 +242,19 @@ describe('useWorkflowSessionFiltering', () => {
     // activity catalogue always carries the full idle/active/unknown set so the
     // filter UI stays stable across data refreshes.
     const onlyIdle = buildSessions().filter((s) => s.activity === 'idle' || s.activity === 'unknown')
-    const { result } = renderHook(() =>
-      useWorkflowSessionFiltering(onlyIdle, { nowMs: NOW }),
-    )
+    const { result } = renderHook(() => useWorkflowSessionFiltering(onlyIdle, { nowMs: NOW }))
 
-    expect(result.current.availableStatuses).toEqual(
-      expect.arrayContaining(['idle', 'active', 'unknown']),
-    )
+    expect(result.current.availableStatuses).toEqual(expect.arrayContaining(['idle', 'active', 'unknown']))
   })
 
   it('lists pipeline stages in pipeline order whenever any session maps to them', () => {
-    const { result } = renderHook(() =>
-      useWorkflowSessionFiltering(buildSessions(), { nowMs: NOW }),
-    )
+    const { result } = renderHook(() => useWorkflowSessionFiltering(buildSessions(), { nowMs: NOW }))
 
     expect(result.current.availableStages).toEqual(['plan', 'build', 'check', 'integrate'])
   })
 
   it('filters sessions by activity (unknown hides non-unknown sessions)', () => {
-    const { result } = renderHook(() =>
-      useWorkflowSessionFiltering(buildSessions(), { nowMs: NOW }),
-    )
+    const { result } = renderHook(() => useWorkflowSessionFiltering(buildSessions(), { nowMs: NOW }))
 
     act(() => {
       result.current.setStatusFilter('unknown')
@@ -255,9 +264,7 @@ describe('useWorkflowSessionFiltering', () => {
   })
 
   it('filters sessions by stage (build hides non-build sessions)', () => {
-    const { result } = renderHook(() =>
-      useWorkflowSessionFiltering(buildSessions(), { nowMs: NOW }),
-    )
+    const { result } = renderHook(() => useWorkflowSessionFiltering(buildSessions(), { nowMs: NOW }))
 
     act(() => {
       result.current.setStageFilter('build')
@@ -267,9 +274,7 @@ describe('useWorkflowSessionFiltering', () => {
   })
 
   it('combines status and stage filters with AND', () => {
-    const { result } = renderHook(() =>
-      useWorkflowSessionFiltering(buildSessions(), { nowMs: NOW }),
-    )
+    const { result } = renderHook(() => useWorkflowSessionFiltering(buildSessions(), { nowMs: NOW }))
 
     act(() => {
       result.current.setStatusFilter('idle')
@@ -294,9 +299,7 @@ describe('useWorkflowSessionFiltering', () => {
   })
 
   it('clearing the status filter keeps the stage filter active and vice versa', () => {
-    const { result } = renderHook(() =>
-      useWorkflowSessionFiltering(buildSessions(), { nowMs: NOW }),
-    )
+    const { result } = renderHook(() => useWorkflowSessionFiltering(buildSessions(), { nowMs: NOW }))
 
     act(() => {
       result.current.setStatusFilter('idle')
@@ -326,9 +329,7 @@ describe('useWorkflowSessionFiltering', () => {
   })
 
   it('resetFilters clears both filters at once but keeps the sort selection', () => {
-    const { result } = renderHook(() =>
-      useWorkflowSessionFiltering(buildSessions(), { nowMs: NOW }),
-    )
+    const { result } = renderHook(() => useWorkflowSessionFiltering(buildSessions(), { nowMs: NOW }))
 
     act(() => {
       result.current.setStatusFilter('completed')
@@ -346,9 +347,7 @@ describe('useWorkflowSessionFiltering', () => {
   })
 
   it('sorts by tokens using the totalTokens fallback (inputTokens + outputTokens)', () => {
-    const { result } = renderHook(() =>
-      useWorkflowSessionFiltering(buildSessions(), { nowMs: NOW }),
-    )
+    const { result } = renderHook(() => useWorkflowSessionFiltering(buildSessions(), { nowMs: NOW }))
 
     act(() => {
       result.current.setSortKey('tokens')
@@ -356,16 +355,14 @@ describe('useWorkflowSessionFiltering', () => {
 
     expect(result.current.sessions.map((s) => s.id)).toEqual([
       's-integrate-completed', // 25_000
-      's-check-1',             // 10_000
-      's-build-failed',        // 4_000
-      's-plan-running',        // 700 + 300 = 1000
+      's-check-1', // 10_000
+      's-build-failed', // 4_000
+      's-plan-running', // 700 + 300 = 1000
     ])
   })
 
   it('sorts by duration measured from each session start to the current time (sessions are never terminal)', () => {
-    const { result } = renderHook(() =>
-      useWorkflowSessionFiltering(buildSessions(), { nowMs: NOW }),
-    )
+    const { result } = renderHook(() => useWorkflowSessionFiltering(buildSessions(), { nowMs: NOW }))
 
     act(() => {
       result.current.setSortKey('duration')
@@ -387,9 +384,7 @@ describe('useWorkflowSessionFiltering', () => {
   })
 
   it('applies the sort only to the filtered subset', () => {
-    const { result } = renderHook(() =>
-      useWorkflowSessionFiltering(buildSessions(), { nowMs: NOW }),
-    )
+    const { result } = renderHook(() => useWorkflowSessionFiltering(buildSessions(), { nowMs: NOW }))
 
     act(() => {
       result.current.setStatusFilter('idle')
@@ -397,16 +392,11 @@ describe('useWorkflowSessionFiltering', () => {
     })
 
     // Only idle sessions, sorted by tokens desc.
-    expect(result.current.sessions.map((s) => s.id)).toEqual([
-      's-integrate-completed',
-      's-check-1',
-    ])
+    expect(result.current.sessions.map((s) => s.id)).toEqual(['s-integrate-completed', 's-check-1'])
   })
 
   it('tracks the total session count even when filters hide entries', () => {
-    const { result } = renderHook(() =>
-      useWorkflowSessionFiltering(buildSessions(), { nowMs: NOW }),
-    )
+    const { result } = renderHook(() => useWorkflowSessionFiltering(buildSessions(), { nowMs: NOW }))
 
     expect(result.current.totalCount).toBe(4)
 

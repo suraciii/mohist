@@ -31,7 +31,7 @@ const artifactsHook: LatestArtifactsHook = () => ({
 })
 
 const contentHook: ArtifactContentHook = (_issueNumber, _artifactId, options, enabled = true) => ({
-  data: enabled ? (options?.file ? artifactFileContent : artifactContent) ?? undefined : undefined,
+  data: enabled ? ((options?.file ? artifactFileContent : artifactContent) ?? undefined) : undefined,
   isLoading: false,
   error: null,
 })
@@ -41,13 +41,7 @@ const timelineHook: WorkflowTimelineHook = () => ({ data: timelineData })
 function LatestArtifactsPanel(
   props: Omit<ComponentProps<typeof DefaultLatestArtifactsPanel>, 'artifactsHook' | 'contentHook'>,
 ) {
-  return (
-    <DefaultLatestArtifactsPanel
-      {...props}
-      artifactsHook={artifactsHook}
-      contentHook={contentHook}
-    />
-  )
+  return <DefaultLatestArtifactsPanel {...props} artifactsHook={artifactsHook} contentHook={contentHook} />
 }
 
 function WorkflowView(props: Omit<ComponentProps<typeof DefaultWorkflowView>, 'timelineHook'>) {
@@ -58,7 +52,11 @@ function WorkflowView(props: Omit<ComponentProps<typeof DefaultWorkflowView>, 't
       dependencies={{
         ...props.dependencies,
         artifactContentHook: contentHook,
-        taskLogHook: (() => ({ data: { lines: [], nextCursor: null, truncated: false }, isLoading: false, isError: false })) as TaskLogDataHook,
+        taskLogHook: (() => ({
+          data: { lines: [], nextCursor: null, truncated: false },
+          isLoading: false,
+          isError: false,
+        })) as TaskLogDataHook,
         workflowSessionsHook: (() => ({ sessions: [], isLoading: false })) as WorkflowRunSessionsHook,
       }}
     />
@@ -96,7 +94,7 @@ function makeIssue(overrides: Partial<Issue> = {}): Issue {
 }
 
 function makeFileArtifact(overrides: Partial<WorkflowArtifact> = {}): WorkflowArtifact {
-  const path = overrides.path ?? 'review.md'
+  const path = overrides.path ?? 'PLANS/REVIEW.md'
   return {
     artifactId: 'art-1',
     workflowRunId: 'workflow-run-1',
@@ -112,7 +110,7 @@ function makeFileArtifact(overrides: Partial<WorkflowArtifact> = {}): WorkflowAr
 }
 
 function makeDirectoryArtifact(overrides: Partial<WorkflowArtifact> = {}): WorkflowArtifact {
-  const path = overrides.path ?? 'specs/'
+  const path = overrides.path ?? 'RESEARCH/'
   return {
     artifactId: 'art-dir-1',
     workflowRunId: 'workflow-run-1',
@@ -182,8 +180,8 @@ function makeTimelineWithTaskArtifacts(): WorkflowTimeline {
               makeFileArtifact({
                 artifactId: 'art-review-2',
                 taskRunId: 'ai-review.2',
-                path: 'review.md',
-                displayName: 'review.md',
+                path: 'PLANS/REVIEW.md',
+                displayName: 'PLANS/REVIEW.md',
               }),
             ],
           },
@@ -237,40 +235,42 @@ describe('LatestArtifactsPanel', () => {
 
   it('renders latest artifacts grouped by path', async () => {
     artifactsData = [
-        makeFileArtifact({ artifactId: 'art-proposal', path: 'proposal.md', taskRunId: 'plan.1' }),
-        makeFileArtifact({ artifactId: 'art-review-2', path: 'review.md', taskRunId: 'ai-review.2' }),
+      makeFileArtifact({ artifactId: 'art-plan', path: 'PLANS/PLAN.md', taskRunId: 'plan.1' }),
+      makeFileArtifact({ artifactId: 'art-review-2', path: 'PLANS/REVIEW.md', taskRunId: 'ai-review.2' }),
     ]
 
     render(<LatestArtifactsPanel issueNumber={1} workflowRunId="workflow-run-1" />)
 
     await waitFor(() => {
-      expect(screen.getByText('proposal.md')).toBeInTheDocument()
-      expect(screen.getByText('review.md')).toBeInTheDocument()
+      expect(screen.getByText('PLANS/PLAN.md')).toBeInTheDocument()
+      expect(screen.getByText('PLANS/REVIEW.md')).toBeInTheDocument()
     })
   })
 
   it('renders directory artifact as one collection', async () => {
-    artifactsData = [makeDirectoryArtifact({ artifactId: 'art-specs', path: 'specs/' })]
+    artifactsData = [makeDirectoryArtifact({ artifactId: 'art-research', path: 'RESEARCH/' })]
 
     render(<LatestArtifactsPanel issueNumber={1} workflowRunId="workflow-run-1" />)
 
     await waitFor(() => {
-      expect(screen.getByText('specs/')).toBeInTheDocument()
+      expect(screen.getByText('RESEARCH/')).toBeInTheDocument()
       expect(screen.getByText('0 files')).toBeInTheDocument()
     })
   })
 
   it('opens recorded artifact content when latest artifact is clicked', async () => {
-    artifactsData = [makeFileArtifact({ artifactId: 'art-review-2', path: 'review.md', taskRunId: 'ai-review.2' })]
+    artifactsData = [
+      makeFileArtifact({ artifactId: 'art-review-2', path: 'PLANS/REVIEW.md', taskRunId: 'ai-review.2' }),
+    ]
     artifactContent = { kind: 'text', content: '# Title\n\nPASS', contentType: 'text/markdown' }
 
     render(<LatestArtifactsPanel issueNumber={1} workflowRunId="workflow-run-1" />)
 
     await waitFor(() => {
-      expect(screen.getByText('review.md')).toBeInTheDocument()
+      expect(screen.getByText('PLANS/REVIEW.md')).toBeInTheDocument()
     })
 
-    fireEvent.click(screen.getByText('review.md'))
+    fireEvent.click(screen.getByText('PLANS/REVIEW.md'))
 
     await waitFor(() => {
       expect(screen.getByText('123 B')).toBeInTheDocument()
@@ -284,7 +284,9 @@ describe('LatestArtifactsPanel', () => {
   })
 
   it('renders non-Markdown text artifact inside a <pre> block', async () => {
-    artifactsData = [makeFileArtifact({ artifactId: 'art-log', path: 'output.log', taskRunId: 'plan.1', contentType: 'text/plain' })]
+    artifactsData = [
+      makeFileArtifact({ artifactId: 'art-log', path: 'output.log', taskRunId: 'plan.1', contentType: 'text/plain' }),
+    ]
     artifactContent = { kind: 'text', content: 'plain line 1\nplain line 2', contentType: 'text/plain' }
 
     render(<LatestArtifactsPanel issueNumber={1} workflowRunId="workflow-run-1" />)
@@ -296,31 +298,35 @@ describe('LatestArtifactsPanel', () => {
     fireEvent.click(screen.getByText('output.log'))
 
     await waitFor(() => {
-      expect(screen.getByText((_, el) => el?.tagName === 'PRE' && /plain line 1\nplain line 2/.test(el.textContent ?? ''))).toBeInTheDocument()
+      expect(
+        screen.getByText((_, el) => el?.tagName === 'PRE' && /plain line 1\nplain line 2/.test(el.textContent ?? '')),
+      ).toBeInTheDocument()
     })
 
-    const pre = screen.getByText((_, el) => el?.tagName === 'PRE' && /plain line 1\nplain line 2/.test(el.textContent ?? '')).closest('pre')
+    const pre = screen
+      .getByText((_, el) => el?.tagName === 'PRE' && /plain line 1\nplain line 2/.test(el.textContent ?? ''))
+      .closest('pre')
     expect(pre).not.toBeNull()
     expect(pre?.className).toContain('whitespace-pre-wrap')
     expect(screen.queryByTestId('markdown-reader')).not.toBeInTheDocument()
   })
 
-  it('renders directory entries and opens contained Markdown file content through MarkdownReader', async () => {
-    artifactsData = [makeDirectoryArtifact({ artifactId: 'art-specs', path: 'specs/' })]
+  it('renders research directory entries and opens contained Markdown file content through MarkdownReader', async () => {
+    artifactsData = [makeDirectoryArtifact({ artifactId: 'art-research', path: 'RESEARCH/' })]
     artifactContent = {
       kind: 'directory',
       entries: [{ relativePath: 'workflow.md', size: 100, contentType: 'text/markdown' }],
       totalSize: 100,
     }
-    artifactFileContent = { kind: 'text', content: '# Spec\n\nSpec body', contentType: 'text/markdown' }
+    artifactFileContent = { kind: 'text', content: '# Research\n\nResearch notes', contentType: 'text/markdown' }
 
     render(<LatestArtifactsPanel issueNumber={1} workflowRunId="workflow-run-1" />)
 
     await waitFor(() => {
-      expect(screen.getByText('specs/')).toBeInTheDocument()
+      expect(screen.getByText('RESEARCH/')).toBeInTheDocument()
     })
 
-    fireEvent.click(screen.getByText('specs/'))
+    fireEvent.click(screen.getByText('RESEARCH/'))
 
     await waitFor(() => {
       expect(screen.getByText('workflow.md')).toBeInTheDocument()
@@ -330,9 +336,9 @@ describe('LatestArtifactsPanel', () => {
 
     await waitFor(() => {
       expect(screen.getByTestId('markdown-reader')).toBeInTheDocument()
-      expect(screen.getByRole('heading', { level: 2, name: 'Spec' })).toBeInTheDocument()
-      expect(screen.getByText('Spec body')).toBeInTheDocument()
-      expect(screen.queryByText('# Spec')).not.toBeInTheDocument()
+      expect(screen.getByRole('heading', { level: 2, name: 'Research' })).toBeInTheDocument()
+      expect(screen.getByText('Research notes')).toBeInTheDocument()
+      expect(screen.queryByText('# Research')).not.toBeInTheDocument()
     })
   })
 })
@@ -350,7 +356,7 @@ describe('Task artifact history rendering', () => {
     await expandTaskByTitle('AI review')
 
     await waitFor(() => {
-      expect(screen.getAllByText('review.md').length).toBeGreaterThanOrEqual(1)
+      expect(screen.getAllByText('PLANS/REVIEW.md').length).toBeGreaterThanOrEqual(1)
     })
   })
 
@@ -366,7 +372,7 @@ describe('Task artifact history rendering', () => {
     await expandTaskByTitle('AI review')
 
     await waitFor(() => {
-      const chips = screen.getAllByText('review.md')
+      const chips = screen.getAllByText('PLANS/REVIEW.md')
       expect(chips.length).toBeGreaterThanOrEqual(2)
     })
   })

@@ -131,6 +131,7 @@ async function mockIssueDetailApi(
     const path = url.pathname.replace(/^\/api/, '')
     const method = route.request().method()
 
+    if (method === 'GET' && path === '/auth/session') return route.fulfill({ json: response(null) })
     if (method === 'POST' && path === `/projects/${project.id}/issues/${issue.number}/approve`) {
       return route.fulfill({ json: response({ issue, context: null, message: 'Approved' }) })
     }
@@ -191,7 +192,7 @@ async function mockIssueDetailApi(
     }
     const artifactContentPrefix = `/projects/${project.id}/issues/${issue.number}/workflow/artifacts/`
     if (method === 'GET' && path.startsWith(artifactContentPrefix) && path.endsWith('/content')) {
-      const artifactId = path.slice(artifactContentPrefix.length, -'/content'.length)
+      const artifactId = decodeURIComponent(path.slice(artifactContentPrefix.length, -'/content'.length))
       const artifactPath = artifactId.replace(/^artifact-/, '')
       const artifactContent = approvalEvidence?.artifacts?.[artifactPath]
       if (artifactContent === undefined) {
@@ -586,14 +587,14 @@ test.describe('Issue decision surface browser layout', () => {
     const longToken = 'x'.repeat(600)
     await mockIssueDetailApi(page, issue, [], {
       artifacts: {
-        'proposal.md': '# Plan evidence\n\nReview this proposal inline.',
-        'tasks.json': `{ "token": "${longToken}" }`,
+        'PLANS/PLAN.md': '# Plan evidence\n\nReview this plan inline.',
+        'PLANS/tasks.json': `{ "token": "${longToken}" }`,
       },
     })
     await page.goto(`/${project.name}/issues/${issue.number}`)
 
-    await expect(page.getByTestId('approval-artifact-proposal.md')).toContainText('Plan evidence')
-    await expect(page.getByTestId('approval-artifact-tasks.json').locator('pre')).toContainText(longToken)
+    await expect(page.getByTestId('approval-artifact-PLANS/PLAN.md')).toContainText('Plan evidence')
+    await expect(page.getByTestId('approval-artifact-PLANS/tasks.json').locator('pre')).toContainText(longToken)
     expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390)
 
     const approve = page.getByTestId('approval-mobile-approve')
@@ -644,7 +645,7 @@ test.describe('Issue decision surface browser layout', () => {
       },
     })
     await mockIssueDetailApi(page, issue, [], {
-      artifacts: { 'review.md': '# Check review\n\nThe implementation is ready.' },
+      artifacts: { 'PLANS/REVIEW.md': '# Check review\n\nThe implementation is ready.' },
       diff: {
         available: true,
         head: 'feature/approval-review',
@@ -656,7 +657,7 @@ test.describe('Issue decision surface browser layout', () => {
     })
     await page.goto(`/${project.name}/issues/${issue.number}`)
 
-    await expect(page.getByTestId('approval-artifact-review.md')).toContainText('Check review')
+    await expect(page.getByTestId('approval-artifact-PLANS/REVIEW.md')).toContainText('Check review')
     const diff = page.getByTestId('approval-diff-summary')
     await expect(diff).toContainText('feature/approval-review compared with main')
     await expect(diff).toContainText('3 files changed')
@@ -685,7 +686,9 @@ test.describe('Issue decision surface browser layout', () => {
         allowedActions: ['approve', 'reject'],
       },
     })
-    await mockIssueDetailApi(page, issue, sessions, { artifacts: { 'proposal.md': '# Plan', 'tasks.json': '{}' } })
+    await mockIssueDetailApi(page, issue, sessions, {
+      artifacts: { 'PLANS/PLAN.md': '# Plan', 'PLANS/tasks.json': '{}' },
+    })
     await page.goto(`/${project.name}/issues/${issue.number}`)
 
     await page.getByRole('button', { name: 'More actions' }).click()
