@@ -43,6 +43,8 @@ public static partial class RunnerRoutes
             work.OwnerKind,
             work.AgentJobId,
             AgentSessionId: work.AgentSessionId,
+            InitialInputId: work.InitialInputId,
+            InitialTurnId: work.InitialTurnId,
             Recovery: work.Recovery,
             RecoveryRemaining: work.RecoveryRemaining,
             Expect: work.Expect,

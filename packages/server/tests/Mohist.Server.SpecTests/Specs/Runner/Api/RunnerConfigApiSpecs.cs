@@ -339,6 +339,13 @@ public class RunnerConfigApiSpecs : IAsyncLifetime
             body.TryGetProperty("cleanupPolicy", out _),
             "/poll dispatch body must not contain a cleanupPolicy property after issue-359 T-002 — the field's home is /config");
 
+        var sessionId = body.GetProperty("agentSessionId").GetString()!;
+        var turnId = body.GetProperty("initialTurnId").GetString()!;
+        var runtime = body.GetProperty("agentDefinition").GetProperty("runtime").GetString()!;
+        var runtimeSessionId = $"runtime-{Guid.NewGuid():N}";
+        var job = _fixture.Grains.GetGrain<IAgentJobGrain>(jobKey);
+        Assert.True(await job.RecordRuntimeSessionBindingAsync(runnerId, workId, sessionId, runtimeSessionId));
+
         using var report = await _fixture.Client.PostAsJsonAsync($"/api/runner/{runnerId}/report", new
         {
             workId,
@@ -346,6 +353,10 @@ public class RunnerConfigApiSpecs : IAsyncLifetime
             ownerKind = WorkDispatchOwnerKinds.AgentJob,
             agentJobId = jobKey,
             message = "ok",
+            agentSessionId = sessionId,
+            agentTurnId = turnId,
+            runtime,
+            runtimeSessionId,
         });
         Assert.Equal(HttpStatusCode.OK, report.StatusCode);
         _fixture.WakeAgentJobValidationAwaiter();

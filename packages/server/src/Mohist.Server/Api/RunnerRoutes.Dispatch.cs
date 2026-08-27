@@ -25,10 +25,11 @@ public record WorkDispatchResponse(
     /// AgentSession id for the dispatch envelope. Set for agent-job
     /// dispatches whose launch minted a generic (non-workflow)
     /// AgentSession; the runner uses it verbatim as the session
-    /// identity for runtime events. Null for workflow dispatches and
-    /// AgentJob validation dispatches.
+    /// identity for runtime events. Null for workflow dispatches.
     /// </summary>
     string? AgentSessionId = null,
+    string? InitialInputId = null,
+    string? InitialTurnId = null,
     string? Recovery = null,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.Never)] int? RecoveryRemaining = null,
     string? Expect = null,

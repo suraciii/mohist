@@ -118,6 +118,8 @@ public static class AgentJobController
             WorkspacePath: body.Workspace?.Path,
             ProjectId: body.Workspace?.ProjectId,
             AgentId: body.AgentId!.Trim(),
+            AgentSessionId: $"agent-session-{Guid.NewGuid():N}",
+            InitialTurnId: Guid.NewGuid().ToString("N"),
             ExecutionSource: AgentExecutionSources.NonSlack);
 
         var waiter = grain.WaitForTerminalAsync();

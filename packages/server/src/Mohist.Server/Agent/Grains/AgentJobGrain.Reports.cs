@@ -9,12 +9,14 @@ public sealed partial class AgentJobGrain
     {
         await HydrateAsync();
 
-        var fingerprint = WorkResultFingerprint.For(result);
-        if (await FailRecoveringJobIfDueAsync())
-            return new AgentJobReportResult(WorkReportVerdict.Refused, "refused");
+        if (!WorkReportStatus.IsWork(result.Status))
+            return new AgentJobReportResult(WorkReportVerdict.Refused, "status-invalid");
 
+        var fingerprint = WorkResultFingerprint.For(result);
         if (IsTerminal)
         {
+            if (WorkReportStatus.IsCompleted(result.Status) && !HasCompleteExecutionBinding(result))
+                return new AgentJobReportResult(WorkReportVerdict.Refused, "execution-binding-required");
             var exactReplay = string.Equals(State.AcceptedReportRunnerId, runnerId, StringComparison.Ordinal)
                 && string.Equals(State.AcceptedReportWorkId, workId, StringComparison.Ordinal)
                 && string.Equals(State.AcceptedReportFingerprint, fingerprint, StringComparison.Ordinal)
@@ -52,14 +54,15 @@ public sealed partial class AgentJobGrain
                 Key, runnerId, workId, State.RunnerId, State.WorkId);
             return new AgentJobReportResult(WorkReportVerdict.Refused, "runner-or-work-mismatch");
         }
+        if (WorkReportStatus.IsCompleted(result.Status) && !HasCompleteExecutionBinding(result))
+            return new AgentJobReportResult(WorkReportVerdict.Refused, "execution-binding-required");
         if (!MatchesCurrentExecutionBinding(result))
             return new AgentJobReportResult(WorkReportVerdict.Refused, "execution-binding-mismatch");
+        if (await FailRecoveringJobIfDueAsync())
+            return new AgentJobReportResult(WorkReportVerdict.Refused, "refused");
         if (IsManagerCredentialExpired(result)) return await ReportManagerCredentialExpiredAsync(result);
-        if (string.Equals(result.Status, "unknown", StringComparison.OrdinalIgnoreCase)) return await ReportUnknownResultAsync(result);
-        var isSuccess = string.Equals(result.Status, "completed", StringComparison.OrdinalIgnoreCase)
-            || string.Equals(result.Status, "pass", StringComparison.OrdinalIgnoreCase)
-            || string.Equals(result.Status, "ok", StringComparison.OrdinalIgnoreCase)
-            || string.Equals(result.Status, "success", StringComparison.OrdinalIgnoreCase);
+        if (WorkReportStatus.IsUnknown(result.Status)) return await ReportUnknownResultAsync(result);
+        var isSuccess = WorkReportStatus.IsCompleted(result.Status);
 
         var failureReason = isSuccess
             ? null
@@ -104,15 +107,19 @@ public sealed partial class AgentJobGrain
         if (!carriesBinding)
             return true;
 
-        return !string.IsNullOrEmpty(result.AgentSessionId)
-            && !string.IsNullOrEmpty(result.AgentTurnId)
-            && !string.IsNullOrEmpty(result.Runtime)
-            && !string.IsNullOrEmpty(result.RuntimeSessionId)
+        var expectedRuntime = ExecutionDefinitionFrom(State.Input)?.Runtime;
+        return HasCompleteExecutionBinding(result)
             && string.Equals(State.Input?.AgentSessionId, result.AgentSessionId, StringComparison.Ordinal)
             && string.Equals(State.Input?.InitialTurnId, result.AgentTurnId, StringComparison.Ordinal)
-            && string.Equals(State.Input?.Runtime, result.Runtime, StringComparison.Ordinal)
+            && string.Equals(expectedRuntime, result.Runtime, StringComparison.Ordinal)
             && string.Equals(State.RuntimeSessionId, result.RuntimeSessionId, StringComparison.Ordinal);
     }
+
+    private static bool HasCompleteExecutionBinding(WorkResult result) =>
+        !string.IsNullOrWhiteSpace(result.AgentSessionId)
+        && !string.IsNullOrWhiteSpace(result.AgentTurnId)
+        && !string.IsNullOrWhiteSpace(result.Runtime)
+        && !string.IsNullOrWhiteSpace(result.RuntimeSessionId);
 
     public async Task<WorkReportVerdict> FailRunnerLostAsync(
         string runnerId,

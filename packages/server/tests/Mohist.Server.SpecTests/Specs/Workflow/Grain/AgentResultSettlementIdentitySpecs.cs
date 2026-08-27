@@ -31,7 +31,7 @@ public sealed partial class AgentResultSettlementSpecs
             "runtime-terminal-replay");
         var service = Services.GetRequiredService<WorkflowReportService>();
         var result = new WorkResult(
-            "PASS",
+            "completed",
             "authoritative result",
             Output: System.Text.Json.JsonSerializer.SerializeToElement(new { ok = true }),
             ExitCode: 0);
