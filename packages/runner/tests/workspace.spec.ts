@@ -56,11 +56,11 @@ describe('WorkspaceManager.prepare', () => {
       '--no-checkout',
       '--no-tags',
       'https://example.test/mohist.git',
-      managedPath(`${expectedPath}.preparing`),
+      managedPath(join(`${expectedPath}.preparing`, 'REPOS', 'master')),
     ])
     expect(gitRunner.commandArgs()).toContainEqual([
       '-C',
-      managedPath(`${expectedPath}.preparing`),
+      managedPath(join(`${expectedPath}.preparing`, 'REPOS', 'master')),
       'checkout',
       '-B',
       'mohist/run-wr-1',
@@ -88,7 +88,7 @@ describe('WorkspaceManager.prepare', () => {
     const workspacePath = issueWorkspacePath(runnerRoot, 'wr-restore')
     expect(gitRunner.commandArgs()).toContainEqual([
       '-C',
-      managedPath(`${workspacePath}.preparing`),
+      managedPath(join(`${workspacePath}.preparing`, 'REPOS', 'master')),
       'checkout',
       '-B',
       'mohist/run-wr-restore',
@@ -103,7 +103,7 @@ describe('WorkspaceManager.prepare', () => {
       await new WorkspaceManager(runnerRoot).prepare(work('wr-child-path'), new AbortController().signal)
 
       const clone = gitRunner.commandArgs().find((args) => args[0] === 'clone')
-      expect(clone?.at(-1)).toMatch(/\/memory-handle-\d+\/wr-child-path\.preparing$/)
+      expect(clone?.at(-1)).toMatch(/\/memory-handle-\d+\/master$/)
     })
   })
 
@@ -123,7 +123,12 @@ describe('WorkspaceManager.prepare', () => {
     expect(gitRunner.commandArgs()).not.toContainEqual(['clone', 'https://example.test/mohist.git', first.path])
     // Healthy re-entry takes the shared-health fast path: no checkout, no reset,
     // no abort — the already-attached clean workspace is left untouched.
-    expect(gitRunner.commandArgs()).not.toContainEqual(['-C', managedPath(first.path), 'checkout', 'mohist/run-wr-1'])
+    expect(gitRunner.commandArgs()).not.toContainEqual([
+      '-C',
+      managedPath(join(first.path, 'REPOS', 'master')),
+      'checkout',
+      'mohist/run-wr-1',
+    ])
     expect(gitRunner.commandArgs().some((args) => args.includes('-B'))).toBe(false)
     expect(gitRunner.commandArgs().some((args) => args.includes('reset'))).toBe(false)
     expect(gitRunner.commandArgs().some((args) => args.includes('--abort'))).toBe(false)
@@ -148,7 +153,7 @@ describe('WorkspaceManager.prepare', () => {
       '--no-checkout',
       '--no-tags',
       'https://example.test/mohist.git',
-      managedPath(`${second.path}.preparing`),
+      managedPath(join(`${second.path}.preparing`, 'REPOS', 'master')),
     ])
   })
 
@@ -214,7 +219,7 @@ describe('WorkspaceManager.prepare', () => {
       name: 'WorkspaceNetworkTimeoutError',
       step: {
         name: 'git-clone',
-        command: `clone --filter=blob:none --no-checkout --no-tags https://example.test/mohist.git ${issueWorkspacePath(runnerRoot, 'wr-timeout')}`,
+        command: `clone --filter=blob:none --no-checkout --no-tags https://example.test/mohist.git ${join(issueWorkspacePath(runnerRoot, 'wr-timeout'), 'REPOS', 'master')}`,
         exitCode: 124,
         status: 'timeout',
         timeoutMs: NETWORK_COMMAND_TIMEOUT_MS,
@@ -226,11 +231,11 @@ describe('WorkspaceManager.prepare', () => {
       '--no-checkout',
       '--no-tags',
       'https://example.test/mohist.git',
-      managedPath(`${issueWorkspacePath(runnerRoot, 'wr-timeout')}.preparing`),
+      managedPath(join(`${issueWorkspacePath(runnerRoot, 'wr-timeout')}.preparing`, 'REPOS', 'master')),
     ])
     const workspacePath = issueWorkspacePath(runnerRoot, 'wr-timeout')
     const clone = gitRunner.calls.find((call) => call.args[0] === 'clone')
-    expect(clone?.args.at(-1)).toBe(managedPath(`${workspacePath}.preparing`))
+    expect(clone?.args.at(-1)).toBe(managedPath(join(`${workspacePath}.preparing`, 'REPOS', 'master')))
     expect(clone?.timeoutMs).toBe(NETWORK_COMMAND_TIMEOUT_MS)
     expect(fileSystem.exists(workspacePath)).toBe(false)
     expect(fileSystem.exists(`${workspacePath}.preparing`)).toBe(false)
@@ -293,7 +298,7 @@ describe('WorkspaceManager.prepare', () => {
       '--no-checkout',
       '--no-tags',
       'https://example.test/mohist.git',
-      managedPath(`${result.path}.preparing`),
+      managedPath(join(`${result.path}.preparing`, 'REPOS', 'master')),
     ])
   })
 
@@ -334,7 +339,53 @@ describe('WorkspaceManager.prepare', () => {
       expect(fileSystem.exists(join(outside, basename(publicPath)))).toBe(false)
       expect(fileSystem.exists(join(heldWorkspaces, basename(publicPath)))).toBe(true)
       const clone = gitRunner.commandArgs().find((args) => args[0] === 'clone')
-      expect(clone?.at(-1)).toMatch(/\/memory-handle-\d+\/wr-parent-swap\.preparing$/)
+      expect(clone?.at(-1)).toMatch(/\/memory-handle-\d+\/master$/)
+    })
+  })
+
+  it('ReposReplacement_CloneRemainsInsideVerifiedDirectory', async () => {
+    await withWorkspaceFileSystem(new MemoryDirectoryHandleFileSystem(), async () => {
+      const root = await createTestTempDir('mohist-workspace-')
+      const runnerRoot = join(root, 'runner')
+      const publicPath = issueWorkspacePath(runnerRoot, 'wr-repos-swap')
+      const preparing = `${publicPath}.preparing`
+      const repos = join(preparing, 'REPOS')
+      const heldRepos = join(preparing, 'REPOS-held')
+      const outside = join(root, 'outside')
+      await fileSystem.ensureDir(outside)
+      gitRunner.beforeClone = async () => {
+        await fileSystem.rename(repos, heldRepos)
+        await fileSystem.symlink(outside, repos)
+      }
+
+      await expect(
+        new WorkspaceManager(runnerRoot).prepare(work('wr-repos-swap'), new AbortController().signal),
+      ).rejects.toMatchObject({ kind: 'workspace-identity-mismatch' })
+
+      expect(fileSystem.exists(join(outside, 'master'))).toBe(false)
+      const clone = gitRunner.commandArgs().find((args) => args[0] === 'clone')
+      expect(clone?.at(-1)).toMatch(/\/memory-handle-\d+\/master$/)
+    })
+  })
+
+  it('RepositoryReplacement_IsRejectedBeforeOriginOrHealthGit', async () => {
+    await withWorkspaceFileSystem(new MemoryDirectoryHandleFileSystem(), async () => {
+      const root = await createTestTempDir('mohist-workspace-')
+      const runnerRoot = join(root, 'runner')
+      const manager = new WorkspaceManager(runnerRoot)
+      const item = work('wr-repository-swap')
+      const workspace = await manager.prepare(item, new AbortController().signal)
+      const repository = join(workspace.path, 'REPOS', 'master')
+      const outside = join(root, 'outside')
+      await fileSystem.ensureDir(outside)
+      await fileSystem.deleteDirectory(repository)
+      await fileSystem.symlink(outside, repository)
+      gitRunner.calls.length = 0
+
+      await expect(manager.verify(item, new AbortController().signal)).rejects.toMatchObject({
+        kind: 'workspace-identity-mismatch',
+      })
+      expect(gitRunner.commandArgs()).toEqual([])
     })
   })
 
@@ -466,7 +517,7 @@ describe('WorkspaceManager.prepare', () => {
 
     expect(failure).toMatchObject({
       kind: 'workspace-identity-mismatch',
-      workspacePath: stablePath,
+      workspacePath: join(stablePath, 'REPOS', 'master'),
       originDiagnostic: {
         kind: 'value-mismatch',
         exitCode: 0,
@@ -476,7 +527,7 @@ describe('WorkspaceManager.prepare', () => {
     expect(failure.message).not.toMatch(/\/proc\/\d+\/fd\/\d+/)
     expect(gitRunner.commandArgs()).toContainEqual([
       '-C',
-      managedPath(`${stablePath}.preparing`),
+      managedPath(join(`${stablePath}.preparing`, 'REPOS', 'master')),
       'remote',
       'get-url',
       'origin',
@@ -511,7 +562,9 @@ describe('WorkspaceManager.prepare', () => {
     expect(failure.message).toContain(first.path)
     expect(failure.message).not.toContain('secret')
     expect(failure.message).not.toMatch(/\/proc\/\d+\/fd\/\d+/)
-    expect(gitRunner.commandArgs()).toEqual([['-C', managedPath(first.path), 'remote', 'get-url', 'origin']])
+    expect(gitRunner.commandArgs()).toEqual([
+      ['-C', managedPath(join(first.path, 'REPOS', 'master')), 'remote', 'get-url', 'origin'],
+    ])
   })
 
   it.runIf(process.platform === 'linux')(
@@ -538,7 +591,9 @@ describe('WorkspaceManager.prepare', () => {
       })
       expect(failure.message).toContain(prepared.path)
       expect(failure.message).not.toMatch(/\/proc\/\d+\/fd\/\d+/)
-      expect(gitRunner.commandArgs()).toEqual([['-C', managedPath(prepared.path), 'remote', 'get-url', 'origin']])
+      expect(gitRunner.commandArgs()).toEqual([
+        ['-C', managedPath(join(prepared.path, 'REPOS', 'master')), 'remote', 'get-url', 'origin'],
+      ])
     },
   )
 
@@ -582,7 +637,12 @@ describe('WorkspaceManager.prepare recovery', () => {
     expect(failure.message).toContain('observedRef=detached-head-sha')
     // Residual rebase was aborted before the failing checkout; no replacement
     // workspace or force-created branch was produced.
-    expect(gitRunner.commandArgs()).toContainEqual(['-C', managedPath(workspace.path), 'rebase', '--abort'])
+    expect(gitRunner.commandArgs()).toContainEqual([
+      '-C',
+      managedPath(join(workspace.path, 'REPOS', 'master')),
+      'rebase',
+      '--abort',
+    ])
     expect(gitRunner.commandArgs().some((args) => args[0] === 'clone')).toBe(false)
     expect(gitRunner.commandArgs().some((args) => args.includes('-B'))).toBe(false)
 
@@ -608,15 +668,20 @@ describe('WorkspaceManager.prepare recovery', () => {
     // checkout, no force-create, no clone, no abort, no reset.
     expect(gitRunner.commandArgs()).toContainEqual([
       '-C',
-      managedPath(workspace.path),
+      managedPath(join(workspace.path, 'REPOS', 'master')),
       'rev-parse',
       '--abbrev-ref',
       'HEAD',
     ])
-    expect(gitRunner.commandArgs()).toContainEqual(['-C', managedPath(workspace.path), 'status', '--porcelain'])
+    expect(gitRunner.commandArgs()).toContainEqual([
+      '-C',
+      managedPath(join(workspace.path, 'REPOS', 'master')),
+      'status',
+      '--porcelain',
+    ])
     expect(gitRunner.commandArgs()).not.toContainEqual([
       '-C',
-      managedPath(workspace.path),
+      managedPath(join(workspace.path, 'REPOS', 'master')),
       'checkout',
       'mohist/run-wr-clean',
     ])
@@ -641,7 +706,7 @@ describe('WorkspaceManager health contract', () => {
     expect(repaired).toMatchObject({ path: workspace.path, branch: 'mohist/run-wr-detached' })
     expect(gitRunner.commandArgs()).toContainEqual([
       '-C',
-      managedPath(workspace.path),
+      managedPath(join(workspace.path, 'REPOS', 'master')),
       'checkout',
       'mohist/run-wr-detached',
     ])
@@ -689,10 +754,15 @@ describe('WorkspaceManager health contract', () => {
     const repaired = await manager.prepare(item, new AbortController().signal)
 
     expect(repaired).toMatchObject({ path: workspace.path, branch: 'mohist/run-wr-rebase' })
-    expect(gitRunner.commandArgs()).toContainEqual(['-C', managedPath(workspace.path), 'rebase', '--abort'])
     expect(gitRunner.commandArgs()).toContainEqual([
       '-C',
-      managedPath(workspace.path),
+      managedPath(join(workspace.path, 'REPOS', 'master')),
+      'rebase',
+      '--abort',
+    ])
+    expect(gitRunner.commandArgs()).toContainEqual([
+      '-C',
+      managedPath(join(workspace.path, 'REPOS', 'master')),
       'checkout',
       'mohist/run-wr-rebase',
     ])
@@ -783,7 +853,12 @@ describe('WorkspaceManager health contract', () => {
     const verified = await manager.verify(item, new AbortController().signal)
 
     expect(verified).toMatchObject({ path: workspace.path, branch: 'mohist/run-wr-verify-residual' })
-    expect(gitRunner.commandArgs()).toContainEqual(['-C', managedPath(workspace.path), 'merge', '--abort'])
+    expect(gitRunner.commandArgs()).toContainEqual([
+      '-C',
+      managedPath(join(workspace.path, 'REPOS', 'master')),
+      'merge',
+      '--abort',
+    ])
     expect(gitRunner.residualMarkers(workspace.path)).toEqual([])
   })
 

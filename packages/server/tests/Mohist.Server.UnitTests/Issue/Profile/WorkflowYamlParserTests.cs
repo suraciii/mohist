@@ -145,7 +145,7 @@ public class WorkflowYamlParserTests
                 title: Generate proposal
                 uses: mohist/opencode
                 with:
-                  prompt: ${{ prompts.proposal }}
+                  prompt: ${{ prompts.plan }}
                 expect:
                   files:
                     - path: openspec/changes/issue-${{ issue.number }}/proposal.md

@@ -89,16 +89,6 @@ export type RunnerCommandRunner = (
   timeoutMs?: number
 }>
 
-export interface RunnerArchiveFileSystem {
-  exists(path: string): Promise<boolean>
-  hasFiles(path: string): Promise<boolean>
-  ensureDirectory(path: string): Promise<void>
-  moveDirectory(source: string, destination: string): Promise<void>
-  readText(path: string): Promise<string>
-  writeAtomic(path: string, content: string): Promise<void>
-  remove(path: string): Promise<void>
-}
-
 export interface RunnerFileSystem {
   readonly supportsDirectoryHandles?: boolean
   readonly openDirectory?: (path: string, flags: number) => Promise<RunnerDirectoryHandle>
@@ -242,7 +232,14 @@ export interface RunnerResourceContext {
   readonly githubPrGitRunner?: RunnerGitRunner
   readonly githubPrGhRunner?: RunnerCommandRunner
   readonly githubPrStatusGhRunner?: RunnerCommandRunner
-  readonly githubPrChecksTiming?: { pollIntervalMs?: number; noChecksGraceMs?: number; unavailableRetryLimit?: number }
+  readonly githubPrChecksTiming?: {
+    pollIntervalMs?: number
+    noChecksGraceMs?: number
+    unavailableRetryLimit?: number
+    autoMergeWaitMs?: number
+    now?: () => number
+    delay?: (ms: number, signal: AbortSignal) => Promise<void>
+  }
   readonly githubPrTransientRetry?: { limit?: number; backoffMs?: number }
   readonly transport?: { fetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response> }
   readonly gitRunner?: RunnerGitRunner
@@ -264,8 +261,6 @@ export interface RunnerResourceContext {
   readonly controlExistsChecker?: (path: string) => boolean
   readonly processSpawner?: RunnerProcessSpawner
   readonly processKiller?: RunnerProcessKiller
-  readonly openSpecGitRunner?: RunnerGitRunner
-  readonly archiveFileSystem?: RunnerArchiveFileSystem
   readonly workspacePrepareGitRunner?: RunnerGitRunner
   readonly workspacePrepareExistsChecker?: (path: string) => boolean
   readonly rebaseGitRunner?: RunnerGitRunner

@@ -259,10 +259,18 @@ Ask the External Agent to summarize the Plan artifacts, risks, and
 recommendation. You can also open the Web UI Issue details to inspect the latest
 artifacts:
 
-- `PLAN.md`: The Inline Agent's understanding of the requirement and its
+- `PLANS/PLAN.md`: The Inline Agent's understanding of the requirement and its
   proposed approach
-- `DESIGN.md`: Design decisions, when the change involves design choices
-- `tasks.json`: The ordered task list that the Build stage will execute
+- `PLANS/DESIGN.md`: Design decisions; the file always exists and states when no
+  separate design is needed
+- `PLANS/tasks.json`: The ordered task list that the Build stage will execute
+
+A delegated approver can read the same recorded evidence through the CLI:
+
+```bash
+mo run artifact list --issue 1
+mo run artifact get --issue 1 <artifact-id>
+```
 
 Approve the output when it is sound. Reject it with a reason when it needs a
 change; the Inline Agent will plan again. This step handles a Workflow approval

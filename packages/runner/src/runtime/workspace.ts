@@ -17,6 +17,7 @@ import {
 import {
   issueWorkspacePath,
   markerPath,
+  repositoryWorkspacePath,
   workspaceBindingIdentity,
   workspaceIdentity,
   type IssueWorkspaceMarker,
@@ -36,11 +37,12 @@ import {
 import {
   assertNotSymlink,
   defaultRunnerRoot,
-  ensureMarkerExcluded,
   numberAt,
   pathExists,
   validateWorkspaceIdentity,
   validateWorkspaceOrigin,
+  withManagedRepositoryHandle,
+  withManagedReposHandle,
   withManagedWorkspaceHandle,
   workspacePrepSink,
 } from './workspace-managed.js'
@@ -59,13 +61,10 @@ export {
   withManagedWorkspaceHandle,
 } from './workspace-managed.js'
 
-// The workflow workspace is just a clone of the project repo checked out
-// on a per-run branch. Preparing it is two steps: (1) have a clone at the
-// workspace path, (2) be on the run branch. The run branch is the
-// identity — its presence at a path means "this run is already set up
-// here", so re-entering a run is cheap (just switch to its branch) and a
-// new run at a reused path is a pristine re-clone. No marker file, no
-// shared bare cache, no alternates.
+// A Workflow Workspace owns local work material at its root and keeps the
+// repository checkout under REPOS/<repository.name>. The root is the stable
+// Session/artifact boundary; Git health and branch operations address only the
+// nested checkout.
 
 export interface WorkspaceInfo {
   path: string
@@ -85,12 +84,13 @@ export class WorkspaceManager {
   // latest base.
   async prepare(work: DispatchWorkItem, signal: AbortSignal, log: TaskLogger | null = null): Promise<WorkspaceInfo> {
     const variables = work.variables ?? {}
+    const repositoryName = stringAt(variables, ['repository', 'name'])
     const gitUrl = stringAt(variables, ['repository', 'gitUrl'])
     const baseBranch = stringAt(variables, ['repository', 'baseBranch'])
     const issueNumber = numberAt(variables, ['issue', 'number'])
-    if (!gitUrl || !baseBranch || issueNumber === undefined) {
+    if (!repositoryName || !gitUrl || !baseBranch || issueNumber === undefined) {
       throw new Error(
-        `Workspace requires repository.gitUrl, repository.baseBranch, and issue.number. Got gitUrl=${gitUrl ?? 'null'}, baseBranch=${baseBranch ?? 'null'}, issueNumber=${issueNumber ?? 'undefined'}`,
+        `Workspace requires repository.name, repository.gitUrl, repository.baseBranch, and issue.number. Got repositoryName=${repositoryName ?? 'null'}, gitUrl=${gitUrl ?? 'null'}, baseBranch=${baseBranch ?? 'null'}, issueNumber=${issueNumber ?? 'undefined'}`,
       )
     }
 
@@ -100,25 +100,38 @@ export class WorkspaceManager {
     this.assertExistingBinding(binding)
     const runBranch = expected.runBranch
     const workspacePath = issueWorkspacePath(this.runnerRoot, runId)
+    const repositoryPath = repositoryWorkspacePath(workspacePath, repositoryName)
     const workspaceExistedBeforePreparation = pathExists(workspacePath)
     if (!workspaceExistedBeforePreparation) {
       await this.verifyBaseBranch(gitUrl, baseBranch, signal, log)
     }
     await withManagedWorkspaceHandle(this.runnerRoot, workspacePath, false, async (managedWorkspacePath) => {
       if (await pathExists(managedWorkspacePath)) {
-        await validateWorkspaceIdentity(managedWorkspacePath, expected, gitUrl, signal, log, undefined, workspacePath)
-        if (!(await this.hasRunBranch(managedWorkspacePath, runBranch, signal, log))) {
-          throw new WorkspaceIdentityMismatchError(
-            `Workflow workspace ${workspacePath} has no branch ${runBranch}; refusing to mutate an existing workspace.`,
-            workspacePath,
-            expected,
-          )
-        }
-        await this.reenterRunBranch(managedWorkspacePath, workspacePath, runBranch, signal, log)
+        await validateWorkspaceIdentity(
+          managedWorkspacePath,
+          expected,
+          gitUrl,
+          signal,
+          log,
+          undefined,
+          workspacePath,
+          repositoryName,
+        )
+        await withManagedRepositoryHandle(managedWorkspacePath, repositoryName, async (managedRepositoryPath) => {
+          if (!(await this.hasRunBranch(managedRepositoryPath, runBranch, signal, log))) {
+            throw new WorkspaceIdentityMismatchError(
+              `Workflow workspace ${workspacePath} has no branch ${runBranch}; refusing to mutate an existing workspace.`,
+              workspacePath,
+              expected,
+            )
+          }
+          await this.reenterRunBranch(managedRepositoryPath, repositoryPath, runBranch, signal, log)
+        })
       } else {
         await this.bootstrap(
           managedWorkspacePath,
           workspacePath,
+          repositoryName,
           gitUrl,
           baseBranch,
           expected,
@@ -145,9 +158,10 @@ export class WorkspaceManager {
     const variables = work.variables ?? {}
     const issueNumber = numberAt(variables, ['issue', 'number'])
     const runId = work.workflowRunId
+    const repositoryName = stringAt(variables, ['repository', 'name'])
     const gitUrl = stringAt(variables, ['repository', 'gitUrl'])
     const baseBranch = stringAt(variables, ['repository', 'baseBranch'])
-    if (!gitUrl || !baseBranch || issueNumber === undefined) {
+    if (!repositoryName || !gitUrl || !baseBranch || issueNumber === undefined) {
       throw new WorkspaceIdentityMismatchError('Issue workspace identity is incomplete')
     }
     const expected = workspaceIdentity(runId)
@@ -155,8 +169,18 @@ export class WorkspaceManager {
     this.assertExistingBinding(binding)
     const runBranch = expected.runBranch
     const workspacePath = issueWorkspacePath(this.runnerRoot, runId)
+    const repositoryPath = repositoryWorkspacePath(workspacePath, repositoryName)
     await withManagedWorkspaceHandle(this.runnerRoot, workspacePath, true, async (managedWorkspacePath) => {
-      await validateWorkspaceIdentity(managedWorkspacePath, expected, gitUrl, signal, log, undefined, workspacePath)
+      await validateWorkspaceIdentity(
+        managedWorkspacePath,
+        expected,
+        gitUrl,
+        signal,
+        log,
+        undefined,
+        workspacePath,
+        repositoryName,
+      )
 
       if (!exists(managedWorkspacePath)) {
         throw new WorkspaceMissingError(
@@ -173,7 +197,12 @@ export class WorkspaceManager {
       // first" (the #166 fatality). The shared health evaluator then
       // requires the complete invariant: exact expected branch, clean
       // worktree, and no residual marker.
-      await this.assertHealthyWorkspace(managedWorkspacePath, workspacePath, runBranch, signal, log)
+      await withManagedRepositoryHandle(
+        managedWorkspacePath,
+        repositoryName,
+        async (managedRepositoryPath) =>
+          await this.assertHealthyWorkspace(managedRepositoryPath, repositoryPath, runBranch, signal, log),
+      )
     })
 
     if (this.registry) {
@@ -189,6 +218,7 @@ export class WorkspaceManager {
   private async bootstrap(
     operationPath: string,
     displayPath: string,
+    repositoryName: string,
     gitUrl: string,
     baseBranch: string,
     expected: IssueWorkspaceMarker,
@@ -201,19 +231,38 @@ export class WorkspaceManager {
     try {
       await assertNotSymlink(managedPreparationPath, displayPath)
       if (verifyBaseBranch) await this.verifyBaseBranch(gitUrl, baseBranch, signal, log)
-      await this.cloneFresh(managedPreparationPath, displayPath, gitUrl, signal, log)
-      await validateWorkspaceOrigin(managedPreparationPath, gitUrl, signal, log, displayPath)
-      await this.restoreOrCreateRunBranch(
+      await Promise.all([
+        ensureDir(join(managedPreparationPath, '.mohist')),
+        ensureDir(join(managedPreparationPath, 'REPOS')),
+        ensureDir(join(managedPreparationPath, 'PLANS')),
+        ensureDir(join(managedPreparationPath, 'RESEARCH')),
+        ensureDir(join(managedPreparationPath, '.scratch')),
+      ])
+      const repositoryDisplayPath = repositoryWorkspacePath(displayPath, repositoryName)
+      await withManagedReposHandle(managedPreparationPath, async (managedReposPath) => {
+        const repositoryPath = join(managedReposPath, repositoryName)
+        await this.cloneFresh(repositoryPath, repositoryDisplayPath, gitUrl, signal, log)
+        await validateWorkspaceOrigin(repositoryPath, gitUrl, signal, log, repositoryDisplayPath)
+        await this.restoreOrCreateRunBranch(
+          repositoryPath,
+          repositoryDisplayPath,
+          baseBranch,
+          expected.runBranch,
+          signal,
+          log,
+        )
+      })
+      await writeText(markerPath(managedPreparationPath), JSON.stringify(expected, null, 2))
+      await validateWorkspaceIdentity(
         managedPreparationPath,
-        displayPath,
-        baseBranch,
-        expected.runBranch,
+        expected,
+        gitUrl,
         signal,
         log,
+        undefined,
+        displayPath,
+        repositoryName,
       )
-      await ensureMarkerExcluded(managedPreparationPath)
-      await writeText(markerPath(managedPreparationPath), JSON.stringify(expected, null, 2))
-      await validateWorkspaceIdentity(managedPreparationPath, expected, gitUrl, signal, log, undefined, displayPath)
       // Commit the prepared clone through the verified directory handle. The
       // stable path is display-only here; using it as the rename target would
       // follow a parent symlink installed after handle acquisition.

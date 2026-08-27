@@ -115,7 +115,7 @@ public class WorkflowTemplateSelectionSpecs : WorkflowDefinitionResolverTestFact
         Assert.NotNull(result.Structure);
         Assert.Equal("mohist/github-pr", result.Id);
         var integrate = Assert.Single(result.Structure.Stages, s => s.Stage == "integrate");
-        Assert.Contains(integrate.Tasks, t => t.Id == "merge-pr");
+        Assert.Contains(integrate.Tasks, t => t.Id == "enable-auto-merge");
         Assert.DoesNotContain(integrate.Tasks, t => t.Id == "integrate:rebase");
     }
 
@@ -168,7 +168,7 @@ public class WorkflowTemplateSelectionSpecs : WorkflowDefinitionResolverTestFact
         Assert.Equal("mohist/local", result.Id);
         var integrate = Assert.Single(result.Structure.Stages, s => s.Stage == "integrate");
         Assert.Contains(integrate.Tasks, t => t.Id == "integrate:rebase");
-        Assert.DoesNotContain(integrate.Tasks, t => t.Id == "merge-pr");
+        Assert.DoesNotContain(integrate.Tasks, t => t.Id == "enable-auto-merge");
     }
 
     [Fact]
@@ -186,8 +186,8 @@ public class WorkflowTemplateSelectionSpecs : WorkflowDefinitionResolverTestFact
         Assert.NotNull(result.Structure);
         Assert.Equal("mohist/github-pr", result.Id);
         var integrate = Assert.Single(result.Structure.Stages, s => s.Stage == "integrate");
-        var mergePr = Assert.Single(integrate.Tasks, t => t.Id == "merge-pr");
-        Assert.Equal("mohist/merge-github-pr", mergePr.Uses);
+        var mergePr = Assert.Single(integrate.Tasks, t => t.Id == "enable-auto-merge");
+        Assert.Equal("mohist/enable-github-pr-auto-merge", mergePr.Uses);
         Assert.DoesNotContain(integrate.Tasks, t => t.Id == "integrate:rebase");
     }
 
@@ -225,8 +225,8 @@ public class WorkflowTemplateSelectionSpecs : WorkflowDefinitionResolverTestFact
         Assert.NotNull(result.Structure);
         Assert.Equal("mohist/github-pr", result.Id);
         var integrate = Assert.Single(result.Structure.Stages, s => s.Stage == "integrate");
-        var mergePr = Assert.Single(integrate.Tasks, t => t.Id == "merge-pr");
-        Assert.Equal("mohist/merge-github-pr", mergePr.Uses);
+        var mergePr = Assert.Single(integrate.Tasks, t => t.Id == "enable-auto-merge");
+        Assert.Equal("mohist/enable-github-pr-auto-merge", mergePr.Uses);
         Assert.DoesNotContain(integrate.Tasks, t => t.Id == "integrate:rebase");
     }
 

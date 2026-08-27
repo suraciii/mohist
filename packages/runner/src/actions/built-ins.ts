@@ -3,10 +3,10 @@ import type { ActionDefinition } from './manifest.js'
 import type { ActionHost } from './host.js'
 import { opencodeAction } from './opencode.js'
 import { piAction } from './pi.js'
-import { createGitHubPrAction, markGitHubPrReadyAction, mergeGitHubPrAction } from './github-pr.js'
+import { createGitHubPrAction, markGitHubPrReadyAction, enableGitHubPrAutoMergeAction } from './github-pr.js'
 import { githubPrChecksAction } from './github-pr-checks-action.js'
 import { githubPrStatusAction } from './github-pr-status.js'
-import { archiveChangeAction, openspecArtifactsAction, openspecTasksAction } from './openspec.js'
+import { taskListAction } from './task-list.js'
 import { rebaseAction, rebaseStatusAction } from './rebase.js'
 import { mergeReadyAction } from './merge-ready.js'
 import { pushAction } from './push.js'
@@ -154,79 +154,23 @@ export const builtInActions: ReadonlyArray<ActionDefinition> = [
   }),
   defineAction({
     manifest: {
-      name: 'mohist/openspec-tasks',
-      description: 'Load tasks.json into the workflow as executable tasks',
+      name: 'mohist/task-list',
+      description: 'Load a plan task list into the workflow as executable tasks',
       inputs: {
-        path: { types: ['string'], required: true, description: 'Path to tasks.json' },
+        path: { types: ['string'], required: true, description: 'Workspace-relative path to tasks.json' },
         task: {
           types: ['object'],
           required: true,
           description: 'Task template applied to each entry',
           render: 'deferred',
         },
-        items: { types: ['string'], default: 'tasks', description: 'Top-level items path inside the JSON document' },
-        buildPrompt: { types: ['string'], engineSource: 'prompts.build' },
+        buildPrompt: { types: ['string'], engineSource: 'prompts.build-task' },
       },
       outputs: [{ name: 'loaded', description: 'Count of tasks loaded into the run' }],
-      errors: [
-        { code: 'missing-source', description: 'tasks.json file is missing' },
-        { code: 'server-unavailable', description: 'Server connection is unavailable' },
-      ],
+      errors: [{ code: 'missing-source', description: 'Task list file is missing' }],
       capabilities: ['add-tasks'],
     },
-    run: openspecTasksAction,
-  }),
-  defineAction({
-    manifest: {
-      name: 'mohist/openspec-artifacts',
-      description: 'Verify the required OpenSpec change artifacts exist',
-      inputs: {
-        changeDir: { types: ['string'], required: true, description: 'Path to the OpenSpec change directory' },
-      },
-      outputs: [
-        { name: 'kind', description: 'Output kind discriminator' },
-        { name: 'changeDir', description: 'Resolved change directory' },
-        { name: 'present', description: 'Whether all required artifacts are present' },
-        { name: 'missing', description: 'List of missing artifact paths' },
-      ],
-      errors: [{ code: 'artifacts-missing', description: 'Required OpenSpec artifacts are absent' }],
-    },
-    run: openspecArtifactsAction,
-  }),
-  defineAction({
-    manifest: {
-      name: 'mohist/archive-change',
-      description: 'Archive an OpenSpec change directory and commit the move',
-      inputs: {
-        changeDir: { types: ['string'], required: true, description: 'Path to the OpenSpec change directory' },
-        archiveHint: {
-          types: ['string'],
-          engineSource: 'vars.archive',
-          description:
-            'Persisted archive destination (relative) from a prior run; when present and the destination still exists, the archive is treated as already complete',
-        },
-      },
-      outputs: [
-        { name: 'kind', description: 'Output kind discriminator' },
-        { name: 'source', description: 'Source change directory' },
-        { name: 'destination', description: 'Archive destination directory' },
-        { name: 'destinationRel', description: 'Archive destination relative to the workspace root' },
-        { name: 'changed', description: 'Whether the archive step modified the repository' },
-        { name: 'noChange', description: 'Whether the archive step produced no changes' },
-        { name: 'commitMessage', description: 'Commit message when the archive step changed the repository' },
-        { name: 'commitSha', description: 'Commit sha when the archive step changed the repository' },
-        { name: 'commitOutput', description: 'Raw git commit output' },
-        { name: 'changedFiles', description: 'Files changed by the archive commit' },
-      ],
-      errors: [
-        { code: 'retry-safe', description: 'Archive step is safe to retry' },
-        { code: 'partial-archive', description: 'Source and archive both contain files; refusing to overwrite' },
-        { code: 'missing-source', description: 'Source change directory is missing' },
-        { code: 'config-error', description: 'Archive configuration is invalid' },
-      ],
-      capabilities: ['write-vars'],
-    },
-    run: archiveChangeAction,
+    run: taskListAction,
   }),
   defineAction({
     manifest: {
@@ -442,46 +386,30 @@ export const builtInActions: ReadonlyArray<ActionDefinition> = [
   }),
   defineAction({
     manifest: {
-      name: 'mohist/merge-github-pr',
-      description: 'Merge a GitHub pull request via squash',
+      name: 'mohist/enable-github-pr-auto-merge',
+      description: 'Enable auto-merge and wait for a GitHub pull request to merge',
       inputs: {
-        repositoryUrl: {
-          types: ['string'],
-          required: true,
-          description: 'Git repository URL used to select the GitHub repository',
-        },
-        method: { types: ['string'], default: 'squash', description: "Merge method (only 'squash' is supported)" },
+        repositoryUrl: { types: ['string'], required: true, description: 'Git repository URL' },
+        method: { types: ['string'], default: 'squash', description: 'Merge method' },
         prNumber: { types: ['number'], required: true, description: 'Pull request number' },
         subject: { types: ['string'], description: 'Literal squash commit subject' },
-        subjectFrom: {
-          types: ['string'],
-          default: 'issue.title',
-          description: 'Issue field source for the squash subject',
-        },
+        subjectFrom: { types: ['string'], default: 'issue.title', description: 'Issue field source for subject' },
       },
-      outputs: [
-        { name: 'kind', description: 'Output kind discriminator' },
-        { name: 'status', description: 'Merge status discriminator' },
-        { name: 'prNumber', description: 'Pull request number' },
-        { name: 'prUrl', description: 'Pull request URL' },
-        { name: 'mergeCommitSha', description: 'Squash merge commit sha' },
-        { name: 'method', description: 'Merge method used' },
-        { name: 'output', description: 'Aggregated gh output' },
-        { name: 'steps', description: 'Per-step gh command results' },
-      ],
+      outputs: ['kind', 'status', 'prNumber', 'prUrl', 'method', 'enabled', 'mergeCommitSha', 'output', 'steps'].map(
+        (name) => ({ name, description: name }),
+      ),
       errors: [
-        { code: 'base-moved', description: 'Base branch moved and the PR is out-of-date' },
-        { code: 'retry-safe', description: 'Merge operation is safe to retry' },
-        { code: 'config-error', description: 'GitHub configuration is missing or invalid' },
-        { code: 'protection-conflict', description: 'Branch protection rejected the merge' },
-        { code: 'pr-state-conflict', description: 'Existing PR is in a conflicting state' },
-        { code: 'pr-checks-unavailable', description: 'PR checks state could not be retrieved' },
-        { code: 'pr-checks-failed', description: 'Required PR checks did not pass' },
-        { code: 'merge-failed', description: 'Failed to merge the PR' },
+        { code: 'auto-merge-unavailable', description: 'Repository does not allow auto-merge' },
+        { code: 'pr-checks-failed', description: 'Required PR checks failed' },
+        { code: 'conflict', description: 'PR has merge conflicts' },
+        { code: 'pr-state-conflict', description: 'PR state prevents merging' },
+        { code: 'retry-safe', description: 'Operation is safe to retry' },
+        { code: 'config-error', description: 'GitHub configuration is invalid' },
+        { code: 'enable-failed', description: 'Failed to enable auto-merge' },
       ],
       capabilities: ['issue-fields'],
     },
-    run: mergeGitHubPrAction,
+    run: enableGitHubPrAutoMergeAction,
   }),
   defineAction({
     manifest: {

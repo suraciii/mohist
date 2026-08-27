@@ -1,511 +1,416 @@
 agentAction: mohist/opencode
-
 approval:
   feedback:
     tasks:
-      - id: apply-feedback
-        title: Apply approval feedback
-        uses: ${{ profile.agentAction }}
-        with:
-          session: ${{ stage.name }}
-          prompt: ${{ prompts.apply-feedback }}
-          options: ${{ vars.agent }}
-      - id: publish-feedback
-        title: Publish feedback
-        uses: mohist/push
-        with:
-          source: HEAD
-          target: ${{ workspace.branch }}
-          remote: origin
-          force: true
-
+    - id: apply-feedback
+      title: Apply approval feedback
+      uses: ${{ profile.agentAction }}
+      with:
+        session: ${{ stage.name }}
+        prompt: ${{ prompts.apply-feedback }}
+        options: ${{ vars.agent }}
+    - id: publish-feedback
+      title: Publish feedback
+      uses: mohist/push
+      with:
+        source: HEAD
+        target: ${{ workspace.branch }}
+        remote: origin
+        force: true
+        working-directory: REPOS/${{ repository.name }}
 recoveries:
   rebase-conflicts:
     budget: 2
     handlers:
-      - when: error.code=conflict
-        tasks:
-          - id: recover:resolve-rebase-conflicts
-            title: Resolve rebase conflicts
-            uses: ${{ profile.agentAction }}
-            with:
-              session: check
-              prompt: ${{ prompts.resolve-rebase-conflicts }}
-              options: ${{ vars.agent }}
-        retrySelf: false
-
-stages:
-  - stage: plan
-    requiresApproval: true
-    tasks:
-      - id: workspace-prepare
-        title: Prepare workspace
-        uses: mohist/workspace-prepare
-        with:
-          expectedBranch: ${{ workspace.branch }}
-      - id: proposal
-        title: Generate proposal
-        uses: ${{ profile.agentAction }}
-        with:
-          session: plan
-          prompt: ${{ prompts.proposal }}
-          options: ${{ vars.agent }}
-        expect:
-          files:
-            - path: openspec/changes/issue-${{ issue.number }}/proposal.md
-        artifacts:
-          files:
-            - path: openspec/changes/issue-${{ issue.number }}/proposal.md
-
-      - id: specs
-        title: Write specs
-        uses: ${{ profile.agentAction }}
-        with:
-          session: plan
-          prompt: ${{ prompts.specs }}
-          options: ${{ vars.agent }}
-        artifacts:
-          files:
-            - path: openspec/changes/issue-${{ issue.number }}/specs
-
-      - id: design
-        title: Create design
-        uses: ${{ profile.agentAction }}
-        with:
-          session: plan
-          prompt: ${{ prompts.design }}
-          options: ${{ vars.agent }}
-        expect:
-          files:
-            - path: openspec/changes/issue-${{ issue.number }}/design.md
-        artifacts:
-          files:
-            - path: openspec/changes/issue-${{ issue.number }}/design.md
-
-      - id: tasks
-        title: Generate tasks
-        uses: ${{ profile.agentAction }}
-        with:
-          session: plan
-          prompt: ${{ prompts.tasks }}
-          options: ${{ vars.agent }}
-        expect:
-          files:
-            - path: openspec/changes/issue-${{ issue.number }}/tasks.json
-        artifacts:
-          files:
-            - path: openspec/changes/issue-${{ issue.number }}/tasks.json
-
-      - id: self-review
-        title: Self review
-        uses: ${{ profile.agentAction }}
-        with:
-          session: plan
-          prompt: ${{ prompts.self-review }}
-          options: ${{ vars.agent }}
-        expect:
-          markers:
-            - path: openspec/changes/issue-${{ issue.number }}/self-review.md
-              oneOf:
-                - <promise>PASS</promise>
-                - <promise>FAIL</promise>
-              failIf: <promise>FAIL</promise>
-        recovery:
-          budget: 2
-          handlers:
-            - when: output.promise=FAIL
-              tasks:
-                - id: recover:fix-plan-review
-                  title: Fix plan review findings
-                  uses: ${{ profile.agentAction }}
-                  with:
-                    session: plan
-                    prompt: ${{ prompts.fix-plan-review }}
-                    options: ${{ vars.agent }}
-              retrySelf: true
-        artifacts:
-          files:
-            - path: openspec/changes/issue-${{ issue.number }}/self-review.md
-
-      - id: push
-        title: Push
-        uses: mohist/push
-        with:
-          source: HEAD
-          target: ${{ workspace.branch }}
-          remote: origin
-          force: true
-
-      - id: open-draft-pr
-        title: Open draft GitHub PR
-        uses: mohist/create-github-pr
-        with:
-          repositoryUrl: ${{ repository.gitUrl }}
-          source: ${{ workspace.branch }}
-          target: ${{ repository.baseBranch }}
-          draft: true
-          titleFrom: issue.title
-          bodyFrom: issue.body
-        setVars:
-          github.pr.number: output.prNumber
-          github.pr.url: output.prUrl
-
-    checks:
-      - id: plan-artifacts
-        title: Plan artifacts complete
-        uses: mohist/openspec-artifacts
-        with:
-          changeDir: openspec/changes/issue-${{ issue.number }}
-
-  - stage: build
-    tasks:
-      - id: workspace-prepare
-        title: Prepare workspace
-        uses: mohist/workspace-prepare
-        with:
-          expectedBranch: ${{ workspace.branch }}
-      - id: load-tasks
-        title: Load tasks from plan
-        uses: mohist/openspec-tasks
-        with:
-          path: openspec/changes/issue-${{ issue.number }}/tasks.json
-          task:
-            uses: ${{ profile.agentAction }}
-            with:
-              options: ${{ vars.agent }}
-              prompt:
-                uses: mohist/openspec-task-prompt
-                with:
-                  file: openspec/changes/issue-${{ issue.number }}/tasks.json
-                  items: tasks
-                  base: ${{ prompts.build }}
-      - id: verify-install
-        title: Install dependencies
-        uses: core/script
-        with:
-          run: npm ci
-          timeout: 900000
-        recovery:
-          budget: 2
-          handlers:
-            - tasks:
-                - id: recover:fix-ci
-                  title: Fix CI verification
-                  uses: ${{ profile.agentAction }}
-                  with:
-                    session: build
-                    prompt: ${{ prompts.fix-ci }}
-                    options: ${{ vars.agent }}
-              retrySelf: true
-      - id: verify-dotnet
-        title: Verify .NET tests
-        uses: core/script
-        with:
-          run: |
-            export DOTNET_ROOT=/home/szf/.dotnet
-            dotnet test Mohist.sln --nologo -m:1 -p:UseSharedCompilation=false
-          timeout: 1200000
-        recovery:
-          budget: 2
-          handlers:
-            - tasks:
-                - id: recover:fix-ci
-                  title: Fix CI verification
-                  uses: ${{ profile.agentAction }}
-                  with:
-                    session: build
-                    prompt: ${{ prompts.fix-ci }}
-                    options: ${{ vars.agent }}
-              retrySelf: true
-      - id: verify-web-typecheck
-        title: Verify web typecheck
-        uses: core/script
-        with:
-          run: npm run typecheck -w packages/web
-          timeout: 600000
-        recovery:
-          budget: 2
-          handlers:
-            - tasks:
-                - id: recover:fix-ci
-                  title: Fix CI verification
-                  uses: ${{ profile.agentAction }}
-                  with:
-                    session: build
-                    prompt: ${{ prompts.fix-ci }}
-                    options: ${{ vars.agent }}
-              retrySelf: true
-      - id: verify-web-tests
-        title: Verify web tests
-        uses: core/script
-        with:
-          run: npm run test:run -w packages/web
-          timeout: 900000
-        recovery:
-          budget: 2
-          handlers:
-            - tasks:
-                - id: recover:fix-ci
-                  title: Fix CI verification
-                  uses: ${{ profile.agentAction }}
-                  with:
-                    session: build
-                    prompt: ${{ prompts.fix-ci }}
-                    options: ${{ vars.agent }}
-              retrySelf: true
-      - id: verify-runner-typecheck
-        title: Verify runner typecheck
-        uses: core/script
-        with:
-          run: npm run typecheck -w packages/runner
-          timeout: 600000
-        recovery:
-          budget: 2
-          handlers:
-            - tasks:
-                - id: recover:fix-ci
-                  title: Fix CI verification
-                  uses: ${{ profile.agentAction }}
-                  with:
-                    session: build
-                    prompt: ${{ prompts.fix-ci }}
-                    options: ${{ vars.agent }}
-              retrySelf: true
-      - id: verify-runner-tests
-        title: Verify runner tests
-        uses: core/script
-        with:
-          run: npm run test:run -w packages/runner -- --no-file-parallelism
-          timeout: 900000
-        recovery:
-          budget: 2
-          handlers:
-            - tasks:
-                - id: recover:fix-ci
-                  title: Fix CI verification
-                  uses: ${{ profile.agentAction }}
-                  with:
-                    session: build
-                    prompt: ${{ prompts.fix-ci }}
-                    options: ${{ vars.agent }}
-              retrySelf: true
-      - id: push
-        title: Push
-        uses: mohist/push
-        with:
-          source: HEAD
-          target: ${{ workspace.branch }}
-          remote: origin
-          force: true
-    checks: []
-
-  - stage: check
-    requiresApproval: true
-    tasks:
-      - id: workspace-prepare
-        title: Prepare workspace
-        uses: mohist/workspace-prepare
-        with:
-          expectedBranch: ${{ workspace.branch }}
-      - id: ai-review
-        title: AI review
+    - when: error.code=conflict
+      tasks:
+      - id: recover:resolve-rebase-conflicts
+        title: Resolve rebase conflicts
         uses: ${{ profile.agentAction }}
         with:
           session: check
-          prompt: ${{ prompts.review }}
+          prompt: ${{ prompts.resolve-rebase-conflicts }}
           options: ${{ vars.agent }}
-        expect:
-          markers:
-            - path: openspec/changes/issue-${{ issue.number }}/review.md
-              oneOf:
-                - <promise>PASS</promise>
-                - <promise>FAIL</promise>
-              failIf: <promise>FAIL</promise>
-        recovery:
-          budget: 2
-          handlers:
-            - when: output.promise=FAIL
-              tasks:
-                - id: recover:fix-review-findings
-                  title: Fix review findings
-                  uses: ${{ profile.agentAction }}
-                  with:
-                    session: check
-                    prompt: ${{ prompts.auto-fix }}
-                    options: ${{ vars.agent }}
-              retrySelf: true
-        artifacts:
-          files:
-            - path: openspec/changes/issue-${{ issue.number }}/review.md
-
-      - id: rebase
-        title: Rebase onto repository base
-        uses: mohist/rebase
+      retrySelf: false
+stages:
+- stage: plan
+  requiresApproval: true
+  tasks:
+  - id: workspace-prepare
+    title: Prepare workspace
+    uses: mohist/workspace-prepare
+    with:
+      expectedBranch: ${{ workspace.branch }}
+      working-directory: REPOS/${{ repository.name }}
+  - id: plan
+    title: Plan the change
+    uses: ${{ profile.agentAction }}
+    with:
+      session: plan
+      prompt: ${{ prompts.plan }}
+      options: ${{ vars.agent }}
+    expect:
+      files:
+      - path: PLANS/PLAN.md
+      - path: PLANS/DESIGN.md
+      - path: PLANS/tasks.json
+    artifacts:
+      files:
+      - path: PLANS/PLAN.md
+      - path: PLANS/DESIGN.md
+      - path: PLANS/tasks.json
+  - id: push
+    title: Push
+    uses: mohist/push
+    with:
+      source: HEAD
+      target: ${{ workspace.branch }}
+      remote: origin
+      force: true
+      working-directory: REPOS/${{ repository.name }}
+  - id: open-draft-pr
+    title: Open draft GitHub PR
+    uses: mohist/create-github-pr
+    with:
+      repositoryUrl: ${{ repository.gitUrl }}
+      source: ${{ workspace.branch }}
+      target: ${{ repository.baseBranch }}
+      draft: true
+      titleFrom: issue.title
+      bodyFrom: issue.body
+      working-directory: REPOS/${{ repository.name }}
+    setVars:
+      github.pr.number: output.prNumber
+      github.pr.url: output.prUrl
+  checks: []
+- stage: build
+  tasks:
+  - id: workspace-prepare
+    title: Prepare workspace
+    uses: mohist/workspace-prepare
+    with:
+      expectedBranch: ${{ workspace.branch }}
+      working-directory: REPOS/${{ repository.name }}
+  - id: load-tasks
+    title: Load tasks from plan
+    uses: mohist/task-list
+    with:
+      path: PLANS/tasks.json
+      task:
+        uses: ${{ profile.agentAction }}
         with:
-          baseBranch: ${{ repository.baseBranch }}
-          remote: origin
-          squash: false
-        recovery:
-          budget: 2
-          handlers:
+          options: ${{ vars.agent }}
+  - id: verify-install
+    title: Install dependencies
+    uses: core/script
+    with:
+      run: npm ci
+      timeout: 900000
+      working-directory: REPOS/${{ repository.name }}
+    recovery:
+      budget: 2
+      handlers:
+      - tasks:
+        - id: recover:fix-ci
+          title: Fix CI verification
+          uses: ${{ profile.agentAction }}
+          with:
+            session: build
+            prompt: ${{ prompts.fix-ci }}
+            options: ${{ vars.agent }}
+        retrySelf: true
+  - id: verify-dotnet
+    title: Verify .NET tests
+    uses: core/script
+    with:
+      run: 'export DOTNET_ROOT=/home/szf/.dotnet
+
+        dotnet test Mohist.sln --nologo -m:1 -p:UseSharedCompilation=false
+
+        '
+      timeout: 1200000
+      working-directory: REPOS/${{ repository.name }}
+    recovery:
+      budget: 2
+      handlers:
+      - tasks:
+        - id: recover:fix-ci
+          title: Fix CI verification
+          uses: ${{ profile.agentAction }}
+          with:
+            session: build
+            prompt: ${{ prompts.fix-ci }}
+            options: ${{ vars.agent }}
+        retrySelf: true
+  - id: verify-web-typecheck
+    title: Verify web typecheck
+    uses: core/script
+    with:
+      run: npm run typecheck -w packages/web
+      timeout: 600000
+      working-directory: REPOS/${{ repository.name }}
+    recovery:
+      budget: 2
+      handlers:
+      - tasks:
+        - id: recover:fix-ci
+          title: Fix CI verification
+          uses: ${{ profile.agentAction }}
+          with:
+            session: build
+            prompt: ${{ prompts.fix-ci }}
+            options: ${{ vars.agent }}
+        retrySelf: true
+  - id: verify-web-tests
+    title: Verify web tests
+    uses: core/script
+    with:
+      run: npm run test:run -w packages/web
+      timeout: 900000
+      working-directory: REPOS/${{ repository.name }}
+    recovery:
+      budget: 2
+      handlers:
+      - tasks:
+        - id: recover:fix-ci
+          title: Fix CI verification
+          uses: ${{ profile.agentAction }}
+          with:
+            session: build
+            prompt: ${{ prompts.fix-ci }}
+            options: ${{ vars.agent }}
+        retrySelf: true
+  - id: verify-runner-typecheck
+    title: Verify runner typecheck
+    uses: core/script
+    with:
+      run: npm run typecheck -w packages/runner
+      timeout: 600000
+      working-directory: REPOS/${{ repository.name }}
+    recovery:
+      budget: 2
+      handlers:
+      - tasks:
+        - id: recover:fix-ci
+          title: Fix CI verification
+          uses: ${{ profile.agentAction }}
+          with:
+            session: build
+            prompt: ${{ prompts.fix-ci }}
+            options: ${{ vars.agent }}
+        retrySelf: true
+  - id: verify-runner-tests
+    title: Verify runner tests
+    uses: core/script
+    with:
+      run: npm run test:run -w packages/runner -- --no-file-parallelism
+      timeout: 900000
+      working-directory: REPOS/${{ repository.name }}
+    recovery:
+      budget: 2
+      handlers:
+      - tasks:
+        - id: recover:fix-ci
+          title: Fix CI verification
+          uses: ${{ profile.agentAction }}
+          with:
+            session: build
+            prompt: ${{ prompts.fix-ci }}
+            options: ${{ vars.agent }}
+        retrySelf: true
+  - id: push
+    title: Push
+    uses: mohist/push
+    with:
+      source: HEAD
+      target: ${{ workspace.branch }}
+      remote: origin
+      force: true
+      working-directory: REPOS/${{ repository.name }}
+  checks: []
+- stage: check
+  requiresApproval: true
+  tasks:
+  - id: workspace-prepare
+    title: Prepare workspace
+    uses: mohist/workspace-prepare
+    with:
+      expectedBranch: ${{ workspace.branch }}
+      working-directory: REPOS/${{ repository.name }}
+  - id: ai-review
+    title: AI review
+    uses: ${{ profile.agentAction }}
+    with:
+      session: check
+      prompt: ${{ prompts.review }}
+      options: ${{ vars.agent }}
+    expect:
+      files:
+      - path: PLANS/REVIEW.md
+    artifacts:
+      files:
+      - path: PLANS/REVIEW.md
+  - id: rebase
+    title: Rebase onto repository base
+    uses: mohist/rebase
+    with:
+      baseBranch: ${{ repository.baseBranch }}
+      remote: origin
+      squash: false
+      working-directory: REPOS/${{ repository.name }}
+    recovery:
+      budget: 2
+      handlers:
+      - when: error.code=conflict
+        tasks:
+        - id: recover:resolve-rebase-conflicts
+          title: Resolve rebase conflicts
+          uses: ${{ profile.agentAction }}
+          with:
+            session: check
+            prompt: ${{ prompts.resolve-rebase-conflicts }}
+            options: ${{ vars.agent }}
+  - id: push
+    title: Push
+    uses: mohist/push
+    with:
+      source: HEAD
+      target: ${{ workspace.branch }}
+      remote: origin
+      force: true
+      working-directory: REPOS/${{ repository.name }}
+  - id: mark-pr-ready
+    title: Mark GitHub PR ready
+    uses: mohist/mark-github-pr-ready
+    with:
+      repositoryUrl: ${{ repository.gitUrl }}
+      prNumber: ${{ vars.github.pr.number }}
+      working-directory: REPOS/${{ repository.name }}
+  - id: verify-pr-checks
+    title: Verify GitHub PR checks
+    uses: mohist/github-pr-checks
+    with:
+      repositoryUrl: ${{ repository.gitUrl }}
+      prNumber: ${{ vars.github.pr.number }}
+      working-directory: REPOS/${{ repository.name }}
+    recovery:
+      budget: 2
+      handlers:
+      - when: error.code=pr-checks-failed
+        tasks:
+        - id: recover:fix-pr-checks
+          title: Fix failing GitHub PR checks
+          uses: ${{ profile.agentAction }}
+          with:
+            session: check
+            prompt: ${{ prompts.fix-pr-checks }}
+            options: ${{ vars.agent }}
+        - id: recover:push
+          title: Push
+          uses: mohist/push
+          with:
+            source: HEAD
+            target: ${{ workspace.branch }}
+            remote: origin
+            force: true
+            working-directory: REPOS/${{ repository.name }}
+        retrySelf: true
+  checks:
+  - id: github-pr-status
+    title: GitHub PR status
+    uses: mohist/github-pr-status
+    with:
+      repositoryUrl: ${{ repository.gitUrl }}
+      prNumber: ${{ vars.github.pr.number }}
+      working-directory: REPOS/${{ repository.name }}
+- stage: integrate
+  lockBehavior: sequential
+  resources:
+  - project-integration
+  tasks:
+  - id: workspace-prepare
+    title: Prepare workspace
+    uses: mohist/workspace-prepare
+    with:
+      expectedBranch: ${{ workspace.branch }}
+      working-directory: REPOS/${{ repository.name }}
+  - id: push
+    title: Push
+    uses: mohist/push
+    with:
+      source: HEAD
+      target: ${{ workspace.branch }}
+      remote: origin
+      force: true
+      working-directory: REPOS/${{ repository.name }}
+  - id: enable-auto-merge
+    title: Enable auto-merge
+    uses: mohist/enable-github-pr-auto-merge
+    with:
+      repositoryUrl: ${{ repository.gitUrl }}
+      prNumber: ${{ vars.github.pr.number }}
+      method: squash
+      working-directory: REPOS/${{ repository.name }}
+    recovery:
+      budget: 2
+      handlers:
+      - when: error.code=conflict
+        tasks:
+        - id: recover:rebase
+          title: Rebase after base moved
+          uses: mohist/rebase
+          with:
+            baseBranch: ${{ repository.baseBranch }}
+            remote: origin
+            squash: false
+            working-directory: REPOS/${{ repository.name }}
+          recovery:
+            budget: 2
+            handlers:
             - when: error.code=conflict
               tasks:
-                - id: recover:resolve-rebase-conflicts
-                  title: Resolve rebase conflicts
-                  uses: ${{ profile.agentAction }}
-                  with:
-                    session: check
-                    prompt: ${{ prompts.resolve-rebase-conflicts }}
-                    options: ${{ vars.agent }}
-
-      - id: push
-        title: Push
-        uses: mohist/push
-        with:
-          source: HEAD
-          target: ${{ workspace.branch }}
-          remote: origin
-          force: true
-
-      - id: mark-pr-ready
-        title: Mark GitHub PR ready
-        uses: mohist/mark-github-pr-ready
-        with:
-          repositoryUrl: ${{ repository.gitUrl }}
-          prNumber: ${{ vars.github.pr.number }}
-
-      - id: verify-pr-checks
-        title: Verify GitHub PR checks
-        uses: mohist/github-pr-checks
-        with:
-          repositoryUrl: ${{ repository.gitUrl }}
-          prNumber: ${{ vars.github.pr.number }}
-        recovery:
-          budget: 2
-          handlers:
-            - when: error.code=pr-checks-failed
-              tasks:
-                - id: recover:fix-pr-checks
-                  title: Fix failing GitHub PR checks
-                  uses: ${{ profile.agentAction }}
-                  with:
-                    session: check
-                    prompt: ${{ prompts.fix-pr-checks }}
-                    options: ${{ vars.agent }}
-                - id: recover:push
-                  title: Push
-                  uses: mohist/push
-                  with:
-                    source: HEAD
-                    target: ${{ workspace.branch }}
-                    remote: origin
-                    force: true
-              retrySelf: true
-
-    checks:
-      - id: github-pr-status
-        title: GitHub PR status
-        uses: mohist/github-pr-status
-        with:
-          repositoryUrl: ${{ repository.gitUrl }}
-          prNumber: ${{ vars.github.pr.number }}
-
-  - stage: integrate
-    lockBehavior: sequential
-    resources:
-      - project-integration
-    tasks:
-      - id: workspace-prepare
-        title: Prepare workspace
-        uses: mohist/workspace-prepare
-        with:
-          expectedBranch: ${{ workspace.branch }}
-      - id: archive-change
-        title: Archive change
-        uses: mohist/archive-change
-        with:
-          changeDir: openspec/changes/issue-${{ issue.number }}
-        recovery:
-          budget: 3
-          handlers:
-            - when: error.code=retry-safe
-              retrySelf: true
-
-      - id: push
-        title: Push
-        uses: mohist/push
-        with:
-          source: HEAD
-          target: ${{ workspace.branch }}
-          remote: origin
-          force: true
-
-      - id: merge-pr
-        title: Merge GitHub PR
-        uses: mohist/merge-github-pr
-        with:
-          repositoryUrl: ${{ repository.gitUrl }}
-          prNumber: ${{ vars.github.pr.number }}
-          method: squash
-        recovery:
-          budget: 2
-          handlers:
-            - when: error.code=base-moved
-              tasks:
-                - id: recover:rebase
-                  title: Rebase after base moved
-                  uses: mohist/rebase
-                  with:
-                    baseBranch: ${{ repository.baseBranch }}
-                    remote: origin
-                    squash: false
-                  recovery:
-                    budget: 2
-                    handlers:
-                      - when: error.code=conflict
-                        tasks:
-                          - id: recover:resolve-rebase-conflicts
-                            title: Resolve rebase conflicts
-                            uses: ${{ profile.agentAction }}
-                            with:
-                              session: integrate
-                              prompt: ${{ prompts.resolve-rebase-conflicts }}
-                              options: ${{ vars.agent }}
-                - id: recover:push
-                  title: Push
-                  uses: mohist/push
-                  with:
-                    source: HEAD
-                    target: ${{ workspace.branch }}
-                    remote: origin
-                    force: true
-              retrySelf: true
-            - when: error.code=pr-checks-failed
-              tasks:
-                - id: recover:fix-pr-checks
-                  title: Fix failing GitHub PR checks
-                  uses: ${{ profile.agentAction }}
-                  with:
-                    session: integrate
-                    prompt: ${{ prompts.fix-pr-checks }}
-                    options: ${{ vars.agent }}
-                - id: recover:push
-                  title: Push
-                  uses: mohist/push
-                  with:
-                    source: HEAD
-                    target: ${{ workspace.branch }}
-                    remote: origin
-                    force: true
-              retrySelf: true
-            - when: error.code=protection-conflict
-              retrySelf: true
-
-    checks:
-      - id: merge-verified
-        title: Merge verified
-        uses: mohist/github-pr-status
-        with:
-          repositoryUrl: ${{ repository.gitUrl }}
-          prNumber: ${{ vars.github.pr.number }}
-          expect: merged
+              - id: recover:resolve-rebase-conflicts
+                title: Resolve rebase conflicts
+                uses: ${{ profile.agentAction }}
+                with:
+                  session: integrate
+                  prompt: ${{ prompts.resolve-rebase-conflicts }}
+                  options: ${{ vars.agent }}
+        - id: recover:push
+          title: Push
+          uses: mohist/push
+          with:
+            source: HEAD
+            target: ${{ workspace.branch }}
+            remote: origin
+            force: true
+            working-directory: REPOS/${{ repository.name }}
+        retrySelf: true
+      - when: error.code=pr-checks-failed
+        tasks:
+        - id: recover:fix-pr-checks
+          title: Fix failing GitHub PR checks
+          uses: ${{ profile.agentAction }}
+          with:
+            session: integrate
+            prompt: ${{ prompts.fix-pr-checks }}
+            options: ${{ vars.agent }}
+        - id: recover:push
+          title: Push
+          uses: mohist/push
+          with:
+            source: HEAD
+            target: ${{ workspace.branch }}
+            remote: origin
+            force: true
+            working-directory: REPOS/${{ repository.name }}
+        retrySelf: true
+  checks:
+  - id: merge-verified
+    title: Merge verified
+    uses: mohist/github-pr-status
+    with:
+      repositoryUrl: ${{ repository.gitUrl }}
+      prNumber: ${{ vars.github.pr.number }}
+      expect: merged
+      working-directory: REPOS/${{ repository.name }}

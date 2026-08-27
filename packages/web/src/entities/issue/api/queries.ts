@@ -130,10 +130,11 @@ export function useIssueWorkflowArtifactContent(
   artifactId: string | null,
   options: IssueWorkflowArtifactContentOptions = {},
   enabled: boolean = true,
+  workflowRunId?: string | null,
 ) {
   const { projectId } = useProject()
   return useQuery({
-    queryKey: issueArtifactKeys.content(projectId, issueNumber, artifactId!, options),
+    queryKey: issueArtifactKeys.content(projectId, issueNumber, artifactId!, workflowRunId, options),
     queryFn: ({ signal }: QueryFunctionContext) =>
       getIssueWorkflowArtifactContent(issueNumber, artifactId!, options, projectId, signal),
     enabled: enabled && issueNumber > 0 && !!artifactId && !!projectId,

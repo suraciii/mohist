@@ -205,7 +205,7 @@ public class IssueCreationSpecs
         var status = await grain.GetWorkflowStatusAsync();
 
         Assert.NotNull(status);
-        Assert.Equal($"openspec/changes/issue-{created.Number}", status.ChangeDir);
+        Assert.Equal("PLANS", status.ChangeDir);
     }
 
     [Fact]

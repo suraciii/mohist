@@ -8,7 +8,7 @@ internal static class ActionContractValidator
 {
     public const string AgentTurnCapability = "agent-turn";
     private const string EngineReservedKey = "working-directory";
-    private const string OpenSpecTasksUses = "mohist/openspec-tasks";
+    private const string TaskListUses = "mohist/task-list";
 
     private static readonly string[] CanonicalKindOrder = ["string", "number", "boolean", "object", "array"];
 
@@ -129,7 +129,7 @@ internal static class ActionContractValidator
         static IEnumerable<(string Path, string Uses)> TaskUses(TaskDefinition task, string path)
         {
             yield return (path, task.Uses);
-            if (TryReadOpenSpecGeneratedTask(task, out var generatedTask))
+            if (TryReadTaskListGeneratedTask(task, out var generatedTask))
                 yield return ($"{path}.with.task", generatedTask.Uses);
             if (task.Recovery?.Handlers is not { Count: > 0 } handlers) yield break;
             for (var handlerIndex = 0; handlerIndex < handlers.Count; handlerIndex++)
@@ -183,9 +183,9 @@ internal static class ActionContractValidator
         {
             ValidateWith(errors, task.Id, "Task", taskPath, task.With, action);
 
-            if (string.Equals(task.Uses, OpenSpecTasksUses, StringComparison.Ordinal))
+            if (string.Equals(task.Uses, TaskListUses, StringComparison.Ordinal))
             {
-                ValidateOpenSpecGeneratedTask(errors, task, taskPath, actionsByName, tombstonesByName);
+                ValidateTaskListGeneratedTask(errors, task, taskPath, actionsByName, tombstonesByName);
             }
         }
 
@@ -214,19 +214,19 @@ internal static class ActionContractValidator
         }
     }
 
-    private static void ValidateOpenSpecGeneratedTask(
+    private static void ValidateTaskListGeneratedTask(
         List<ValidationError> errors,
         TaskDefinition loaderTask,
         string loaderTaskPath,
         IReadOnlyDictionary<string, ActionCatalogEntry> actionsByName,
         IReadOnlyDictionary<string, ActionCatalogTombstone> tombstonesByName)
     {
-        if (!TryReadOpenSpecGeneratedTask(loaderTask, out var generatedTask)) return;
+        if (!TryReadTaskListGeneratedTask(loaderTask, out var generatedTask)) return;
         if (string.IsNullOrWhiteSpace(generatedTask.Uses))
         {
             errors.Add(new ValidationError(
                 $"{loaderTaskPath}.with.task.uses",
-                "OpenSpec generated task requires a non-empty Action 'uses' value",
+                "Task-list generated task requires a non-empty Action 'uses' value",
                 ValidationSource.Action));
             return;
         }
@@ -239,12 +239,12 @@ internal static class ActionContractValidator
             tombstonesByName);
     }
 
-    private static bool TryReadOpenSpecGeneratedTask(
+    private static bool TryReadTaskListGeneratedTask(
         TaskDefinition loaderTask,
         out TaskDefinition generatedTask)
     {
         generatedTask = null!;
-        if (!string.Equals(loaderTask.Uses, OpenSpecTasksUses, StringComparison.Ordinal)
+        if (!string.Equals(loaderTask.Uses, TaskListUses, StringComparison.Ordinal)
             || loaderTask.With is null
             || !loaderTask.With.TryGetValue("task", out var taskTemplate)
             || !taskTemplate.HasValue

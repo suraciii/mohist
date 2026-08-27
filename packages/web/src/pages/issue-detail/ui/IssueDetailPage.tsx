@@ -241,13 +241,15 @@ export function IssueDetailPage({ components, mutationDependencies }: IssueDetai
     getStopConsequenceCopy,
   })
   const approvalArtifactSummaries = useMemo(() => {
-    if (!workflowTimeline || !decision?.approvalStage) return undefined
+    const issueWorkflowRunId = issue?.workflowRunId ?? null
+    if (!workflowTimeline || workflowTimeline.workflowRunId !== issueWorkflowRunId || !decision?.approvalStage)
+      return undefined
     return (
       workflowTimeline.stages
         .find((stage) => stage.stage === decision.approvalStage)
         ?.tasks.flatMap((task) => task.artifactSummaries ?? []) ?? []
     )
-  }, [decision?.approvalStage, workflowTimeline])
+  }, [decision?.approvalStage, issue?.workflowRunId, workflowTimeline])
 
   if (isError) {
     const isNotFound = error instanceof ApiError && error.status === 404
