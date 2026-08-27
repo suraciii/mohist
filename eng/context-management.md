@@ -9,10 +9,6 @@ This is an engineering practice of this repository, not a product
 specification. `docs/` and `design/` specify the Mohist product; `eng/`
 specifies how the repository itself is built, tested, and documented.
 
-This is an engineering practice of this repository, not a product
-specification. `docs/` and `design/` specify the Mohist product; `eng/`
-specifies how the repository itself is built, tested, and documented.
-
 ## Design Drivers
 
 Context management serves the agent. The repository is the primary context
