@@ -74,7 +74,7 @@ Backlog identifies work that may start. Each Workflow stage then has one
 purpose:
 
 - **Plan**: A configured Mohist Agent understands the requirement and produces
-  the proposal, design, specs, and tasks.
+  `PLANS/PLAN.md`, `PLANS/DESIGN.md`, and the executable task list.
 - **Build**: A configured Mohist Agent writes code and runs tests according to the tasks.
 - **Check**: A configured Mohist Agent reviews its output.
 - **Integrate**: Mohist merges the branch into the base branch.

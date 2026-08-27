@@ -91,6 +91,7 @@ stages:
         expect:
           files:
             - path: PLANS/PLAN.md
+            - path: PLANS/DESIGN.md
             - path: PLANS/tasks.json
 
   - stage: build
@@ -138,11 +139,11 @@ agentAction: mohist/opencode
 stages:
   - stage: plan
     tasks:
-      - id: proposal
+      - id: plan
         uses: ${{ profile.agentAction }}
         with:
           session: plan
-          prompt: ${{ prompts.proposal }}
+          prompt: ${{ prompts.plan }}
           options: ${{ vars.agent }}
 ```
 
@@ -185,8 +186,8 @@ A Variable affects execution only when the Profile binds it to Action Input,
 
 ### Prompt References
 
-A Profile references a Project Prompt by key, such as
-`${{ prompts.proposal }}`. Prompt bodies are configured only on the Project.
+A Profile references a Project Prompt by key, such as `${{ prompts.plan }}`.
+Prompt bodies are configured only on the Project.
 Issues must not override them. Mohist uses the built-in Prompt when the Project
 does not configure a built-in key.
 
@@ -230,8 +231,8 @@ repository.
 ### Require Approval after Build
 
 Set Build's `requiresApproval` value to `true`. Add
-`approval.feedback.tasks` when rejected approvals should create follow-up work;
-built-in Profiles include this loop.
+`approval.feedback.tasks` when rejected approvals should create follow-up work.
+The built-in Profiles leave Build unapproved and advance directly to Check.
 
 ### Remove Check
 
@@ -260,11 +261,11 @@ To send rejected Deploy approvals back to an agent, declare non-empty top-level
 A fixed value used by only one Task can be written directly in its Action Input:
 
 ```yaml
-- id: proposal
+- id: plan
   uses: mohist/opencode
   with:
     session: plan
-    prompt: ${{ prompts.proposal }}
+    prompt: ${{ prompts.plan }}
     options:
       model: model-a
       variant: variant-a
