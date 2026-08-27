@@ -3,6 +3,7 @@ import { NETWORK_COMMAND_TIMEOUT_MS } from '../src/actions/git.js'
 import type { ActionResult, JsonObject, DispatchWorkItem } from '../src/core/types.js'
 import type { ActionHost } from '../src/actions/host.js'
 import { WorkExecutor } from '../src/runtime/executor.js'
+import { buildCleanupPrompt } from '../src/runtime/worktree-cleanup.js'
 import { AgentJobExecutor } from '../src/runtime/agent-job-executor.js'
 import { WorkspaceManager, WorkspaceNetworkTimeoutError } from '../src/runtime/workspace.js'
 import type { ServerConnection } from '../src/server/connection.js'
@@ -106,10 +107,28 @@ describe('execution host boundary', () => {
   })
 })
 
+describe('cleanup prompt Repository boundary', () => {
+  it('shell-quotes the Repository path in every instructed Git command', () => {
+    const prompt = buildCleanupPrompt({
+      basePrompt: undefined,
+      title: 'Cleanup path',
+      workId: 'cleanup-path.1',
+      attempt: 1,
+      repositoryWorkDir: "/workspace/owner's repo",
+      snapshot: { staged: ['src/file.ts'], unstaged: [], untracked: [], isClean: false },
+    })
+
+    expect(prompt).toContain(`git -C '/workspace/owner'\"'\"'s repo' add`)
+    expect(prompt).toContain(`git -C '/workspace/owner'\"'\"'s repo' status --porcelain`)
+    expect(prompt).toContain('All paths below are relative to the task Repository')
+  })
+})
+
 describe('branch-integrity task boundaries', () => {
   const EXPECTED_BRANCH = 'mohist/run-wr-branch-boundary'
   const OTHER_BRANCH = 'feature/other'
-  const WORKDIR = '/virtual/executor-workspace-boundary-branch'
+  const WORKSPACE_ROOT = '/virtual/executor-workspace-boundary'
+  const REPOSITORY_WORKDIR = `${WORKSPACE_ROOT}/REPOS/mohist`
 
   function boundaryRegistry(
     handler: (inputs: JsonObject, host: ActionHost) => Promise<ActionResult>,
@@ -127,7 +146,7 @@ describe('branch-integrity task boundaries', () => {
   function boundaryExecutor(registry: ActionRegistry, branch: string | null): WorkExecutor {
     return new WorkExecutor(
       registry,
-      verifyOnlyWorkspaceManager({ path: WORKDIR, branch }),
+      verifyOnlyWorkspaceManager({ path: WORKSPACE_ROOT, branch }),
       connection() as never,
       '/runner',
     )
@@ -142,7 +161,10 @@ describe('branch-integrity task boundaries', () => {
       title: 'Branch boundary',
       uses: 'core/script',
       with: { run: 'echo ok' },
-      variables: { workspace: { path: WORKDIR, branch: EXPECTED_BRANCH } },
+      variables: {
+        workspace: { path: WORKSPACE_ROOT, branch: EXPECTED_BRANCH },
+        repository: { name: 'mohist' },
+      },
       ...overrides,
     }
   }
@@ -154,9 +176,123 @@ describe('branch-integrity task boundaries', () => {
     })
   }
 
+  it('runs a Workspace-root agent while applying Git guards to the nested Repository', async () => {
+    const fake = new StatefulFakeWorktree()
+    fake.configure(WORKSPACE_ROOT, { branch: OTHER_BRANCH, branches: [OTHER_BRANCH] })
+    fake.configure(REPOSITORY_WORKDIR, { branch: EXPECTED_BRANCH, branches: [EXPECTED_BRANCH] })
+    let observedWorkDir: string | null = null
+    const executor = boundaryExecutor(
+      boundaryRegistry(async (_inputs, host) => {
+        observedWorkDir = host.workDir
+        return { output: { ran: true } }
+      }),
+      EXPECTED_BRANCH,
+    )
+
+    await withBoundaryResources(fake, async () => {
+      const result = await executor.execute(boundaryWork(), new AbortController().signal)
+      expect(result.status).toBe('completed')
+      expect(observedWorkDir).toBe(WORKSPACE_ROOT)
+      expect(fake.calls.some((call) => call.workDir === REPOSITORY_WORKDIR)).toBe(true)
+      expect(fake.calls.some((call) => call.workDir === WORKSPACE_ROOT)).toBe(false)
+    })
+  })
+
+  it('does not let an unrelated Workspace-root Git checkout satisfy the Repository branch guard', async () => {
+    const fake = new StatefulFakeWorktree()
+    fake.configure(WORKSPACE_ROOT, { branch: EXPECTED_BRANCH, branches: [EXPECTED_BRANCH] })
+    fake.configure(REPOSITORY_WORKDIR, { branch: OTHER_BRANCH, branches: [EXPECTED_BRANCH, OTHER_BRANCH] })
+    let invoked = false
+    const executor = boundaryExecutor(
+      boundaryRegistry(async () => {
+        invoked = true
+        return { output: { ran: true } }
+      }),
+      EXPECTED_BRANCH,
+    )
+
+    await withBoundaryResources(fake, async () => {
+      const result = await executor.execute(boundaryWork(), new AbortController().signal)
+      expect(result.status).toBe('failed')
+      expect(result.error?.code).toBe('branch-invariant-violation')
+      expect(result.message).toContain(`observedBranch=${OTHER_BRANCH}`)
+      expect(invoked).toBe(false)
+      expect(fake.calls.some((call) => call.workDir === WORKSPACE_ROOT)).toBe(false)
+    })
+  })
+
+  it('probes the nested Repository for dirtiness but runs agent cleanup from the Workspace root', async () => {
+    const fake = new StatefulFakeWorktree()
+    fake.configure(WORKSPACE_ROOT, {
+      branch: OTHER_BRANCH,
+      branches: [OTHER_BRANCH],
+      porcelain: '?? PLANS/notes.md\n',
+    })
+    fake.configure(REPOSITORY_WORKDIR, { branch: EXPECTED_BRANCH, branches: [EXPECTED_BRANCH] })
+    let dirty = true
+    let workspaceRootProbeCount = 0
+    const observedWorkDirs: string[] = []
+    const observedPrompts: string[] = []
+    const gitRunner = async (...args: Parameters<typeof fake.gitRunner>) => {
+      const [workDir, command] = args
+      const joined = command.join(' ')
+      if (workDir === WORKSPACE_ROOT) workspaceRootProbeCount += 1
+      if (workDir === REPOSITORY_WORKDIR && joined === 'diff --cached --name-only') {
+        return {
+          success: true,
+          stdout: dirty ? 'src/changed.ts\n' : '',
+          stderr: '',
+          exitCode: 0,
+          combinedOutput: dirty ? 'src/changed.ts' : '',
+        }
+      }
+      return await fake.gitRunner(...args)
+    }
+    const registry = defineTestActions({
+      'mohist/opencode': {
+        capabilities: ['agent-turn'],
+        inputs: { prompt: { types: ['string'] } },
+        run: async (inputs, host) => {
+          observedWorkDirs.push(host.workDir)
+          observedPrompts.push(String(inputs.prompt ?? ''))
+          if (observedWorkDirs.length > 1) dirty = false
+          return { output: null }
+        },
+      },
+    })
+    const executor = new WorkExecutor(
+      registry,
+      verifyOnlyWorkspaceManager({ path: WORKSPACE_ROOT, branch: EXPECTED_BRANCH }),
+      connection() as never,
+      '/runner',
+      undefined,
+      fakeRuntime() as never,
+    )
+    const work = boundaryWork({
+      uses: 'mohist/opencode',
+      with: { prompt: 'Implement the task' },
+    })
+
+    await withTestRunnerResources(
+      async () => {
+        const result = await executor.execute(work, new AbortController().signal)
+        expect(result.status).toBe('completed')
+        expect(result.cleanupAttempts).toBe(1)
+        expect(observedWorkDirs).toEqual([WORKSPACE_ROOT, WORKSPACE_ROOT])
+        expect(workspaceRootProbeCount).toBe(0)
+        expect(fake.calls.some((call) => call.workDir === WORKSPACE_ROOT)).toBe(false)
+        expect(observedPrompts[1]).toContain(`git -C '${REPOSITORY_WORKDIR}' add`)
+        expect(observedPrompts[1]).toContain(`git -C '${REPOSITORY_WORKDIR}' status --porcelain`)
+        expect(observedPrompts[1]).toContain('src/changed.ts')
+        expect(observedPrompts[1]).not.toContain('PLANS/notes.md')
+      },
+      { gitRunner, workspacePrepareExistsChecker: fake.existsChecker },
+    )
+  })
+
   it('fails before invoking the action when the task starts detached', async () => {
     const fake = new StatefulFakeWorktree()
-    fake.configure(WORKDIR, { branch: null, commit: 'detached-start-sha', branches: [EXPECTED_BRANCH] })
+    fake.configure(REPOSITORY_WORKDIR, { branch: null, commit: 'detached-start-sha', branches: [EXPECTED_BRANCH] })
     let invoked = false
     const executor = boundaryExecutor(
       boundaryRegistry(async () => {
@@ -179,12 +315,12 @@ describe('branch-integrity task boundaries', () => {
 
   it('converts a successful action that leaves the workspace detached into a branch-integrity failure at the end boundary', async () => {
     const fake = new StatefulFakeWorktree()
-    fake.configure(WORKDIR, { branch: EXPECTED_BRANCH, branches: [EXPECTED_BRANCH] })
+    fake.configure(REPOSITORY_WORKDIR, { branch: EXPECTED_BRANCH, branches: [EXPECTED_BRANCH] })
     let invoked = false
     const executor = boundaryExecutor(
       boundaryRegistry(async () => {
         invoked = true
-        fake.configure(WORKDIR, { branch: null, commit: 'detached-end-sha', branches: [EXPECTED_BRANCH] })
+        fake.configure(REPOSITORY_WORKDIR, { branch: null, commit: 'detached-end-sha', branches: [EXPECTED_BRANCH] })
         return { output: { ran: true } }
       }),
       EXPECTED_BRANCH,
@@ -203,10 +339,10 @@ describe('branch-integrity task boundaries', () => {
 
   it('converts a successful action that leaves the workspace on the wrong branch into a branch-integrity failure', async () => {
     const fake = new StatefulFakeWorktree()
-    fake.configure(WORKDIR, { branch: EXPECTED_BRANCH, branches: [EXPECTED_BRANCH, OTHER_BRANCH] })
+    fake.configure(REPOSITORY_WORKDIR, { branch: EXPECTED_BRANCH, branches: [EXPECTED_BRANCH, OTHER_BRANCH] })
     const executor = boundaryExecutor(
       boundaryRegistry(async () => {
-        fake.configure(WORKDIR, { branch: OTHER_BRANCH, branches: [EXPECTED_BRANCH, OTHER_BRANCH] })
+        fake.configure(REPOSITORY_WORKDIR, { branch: OTHER_BRANCH, branches: [EXPECTED_BRANCH, OTHER_BRANCH] })
         return { output: { ran: true } }
       }),
       EXPECTED_BRANCH,
@@ -222,7 +358,7 @@ describe('branch-integrity task boundaries', () => {
 
   it('fails before invoking the action when the branch probe fails at the start boundary', async () => {
     const fake = new StatefulFakeWorktree()
-    fake.configure(WORKDIR, { branch: EXPECTED_BRANCH, branches: [EXPECTED_BRANCH] })
+    fake.configure(REPOSITORY_WORKDIR, { branch: EXPECTED_BRANCH, branches: [EXPECTED_BRANCH] })
     fake.fail((args) => args.join(' ') === 'rev-parse --abbrev-ref HEAD', 'fatal: unable to read HEAD')
     let invoked = false
     const executor = boundaryExecutor(
@@ -245,7 +381,7 @@ describe('branch-integrity task boundaries', () => {
 
   it('does not schedule recovery for an action-level branch-invariant violation', async () => {
     const fake = new StatefulFakeWorktree()
-    fake.configure(WORKDIR, { branch: EXPECTED_BRANCH, branches: [EXPECTED_BRANCH] })
+    fake.configure(REPOSITORY_WORKDIR, { branch: EXPECTED_BRANCH, branches: [EXPECTED_BRANCH] })
     const executor = boundaryExecutor(
       boundaryRegistry(
         async () => ({
@@ -284,10 +420,14 @@ describe('branch-integrity task boundaries', () => {
 
   it('does not schedule recovery for an end-boundary branch-invariant violation', async () => {
     const fake = new StatefulFakeWorktree()
-    fake.configure(WORKDIR, { branch: EXPECTED_BRANCH, branches: [EXPECTED_BRANCH] })
+    fake.configure(REPOSITORY_WORKDIR, { branch: EXPECTED_BRANCH, branches: [EXPECTED_BRANCH] })
     const executor = boundaryExecutor(
       boundaryRegistry(async () => {
-        fake.configure(WORKDIR, { branch: null, commit: 'detached-end-recovery-sha', branches: [EXPECTED_BRANCH] })
+        fake.configure(REPOSITORY_WORKDIR, {
+          branch: null,
+          commit: 'detached-end-recovery-sha',
+          branches: [EXPECTED_BRANCH],
+        })
         return { output: { ran: true } }
       }),
       EXPECTED_BRANCH,
@@ -316,7 +456,7 @@ describe('branch-integrity task boundaries', () => {
 
   it('keeps ordinary conflict failures eligible for their configured recovery path', async () => {
     const fake = new StatefulFakeWorktree()
-    fake.configure(WORKDIR, { branch: EXPECTED_BRANCH, branches: [EXPECTED_BRANCH] })
+    fake.configure(REPOSITORY_WORKDIR, { branch: EXPECTED_BRANCH, branches: [EXPECTED_BRANCH] })
     const executor = boundaryExecutor(
       boundaryRegistry(async () => ({ error: { code: 'conflict', message: 'rebase conflict' } }), ['conflict']),
       EXPECTED_BRANCH,
@@ -343,7 +483,7 @@ describe('branch-integrity task boundaries', () => {
 
   it('preserves existing behavior for actions without an expected workspace branch', async () => {
     const fake = new StatefulFakeWorktree()
-    fake.configure(WORKDIR, { branch: EXPECTED_BRANCH, branches: [EXPECTED_BRANCH] })
+    fake.configure(REPOSITORY_WORKDIR, { branch: EXPECTED_BRANCH, branches: [EXPECTED_BRANCH] })
     let invoked = false
     const executor = boundaryExecutor(
       boundaryRegistry(async () => {

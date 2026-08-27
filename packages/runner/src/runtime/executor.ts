@@ -7,6 +7,7 @@ import { renderTemplate, unresolvedReferences } from '../core/template.js'
 import { ensureDir } from '../system/process.js'
 import { WorkspaceManager, WorkspaceNetworkTimeoutError } from './workspace.js'
 import { openWorkspaceDirectoryHandle } from './workspace-managed.js'
+import { repositoryWorkspacePath } from './workspace-identity.js'
 import type { NamedWorkspaceManager } from './workspace-entity.js'
 import type { ActionRegistry } from '../actions/registry.js'
 import type { ServerConnection } from '../server/connection.js'
@@ -195,11 +196,12 @@ export class WorkExecutor {
       const validatedWith = validation.input
       const renderedExpect = work.expect != null ? renderTemplate(work.expect, variables) : null
       const workspaceRoot = this.workspaceRoot(variables)
-      const workDirHandle = await this.resolveWorkDir(renderedWith, workspaceRoot)
+      const directories = await this.resolveExecutionDirectories(renderedWith, variables, workspaceRoot)
       try {
-        const workDir = workDirHandle.path
+        const workDir = directories.action.path
+        const repositoryWorkDir = directories.repository?.path ?? workDir
         const expectedBranch = expectedWorkspaceBranch(variables)
-        const startCheck = await checkBranchStability(work, workDir, expectedBranch, 'start', signal, log)
+        const startCheck = await checkBranchStability(work, repositoryWorkDir, expectedBranch, 'start', signal, log)
         if (startCheck.kind === 'violation') {
           return startCheck.result
         }
@@ -252,7 +254,7 @@ export class WorkExecutor {
           if (recoveryResult) return recoveryResult
           return resultForRecovery
         }
-        const endCheck = await checkBranchStability(work, workDir, expectedBranch, 'end', signal, log)
+        const endCheck = await checkBranchStability(work, repositoryWorkDir, expectedBranch, 'end', signal, log)
         if (endCheck.kind === 'violation') {
           // End-boundary branch-integrity failures bypass tryRecovery too;
           // the end probe must run before artifact/worktree settlement can
@@ -279,6 +281,7 @@ export class WorkExecutor {
         const worktreeResult = await enforceCleanWorktree(
           work,
           workDir,
+          repositoryWorkDir,
           artifactResult,
           renderedWith,
           variables,
@@ -305,7 +308,8 @@ export class WorkExecutor {
           ? { ...withVarsResult, addTasks: effects.addTasks }
           : withVarsResult
       } finally {
-        await workDirHandle.close()
+        await directories.repository?.close()
+        await directories.action.close()
       }
     } catch (error) {
       return failure(work, errorMessage(error))
@@ -393,6 +397,25 @@ export class WorkExecutor {
     const root = resolve(workspaceRoot)
     resolveWorkspacePath(root, requested ?? '')
     return await openWorkspaceDirectoryHandle(root, requested)
+  }
+
+  private async resolveExecutionDirectories(
+    withInput: JsonObject | null,
+    variables: JsonObject,
+    workspaceRoot: string,
+  ) {
+    const action = await this.resolveWorkDir(withInput, workspaceRoot)
+    try {
+      const repositoryName = stringAt(variables, ['repository', 'name'])
+      if (!repositoryName) return { action, repository: null }
+      const root = resolve(workspaceRoot)
+      const repositoryPath = repositoryWorkspacePath(root, repositoryName)
+      const repository = await openWorkspaceDirectoryHandle(root, repositoryPath)
+      return { action, repository }
+    } catch (error) {
+      await action.close()
+      throw error
+    }
   }
 
   private captureDeclaredOutputs(

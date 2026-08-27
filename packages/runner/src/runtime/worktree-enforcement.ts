@@ -317,7 +317,8 @@ export function mergeCleanupCount(result: WorkItemResult, attempts: number): Wor
  */
 export async function enforceCleanWorktree(
   work: DispatchWorkItem,
-  workDir: string,
+  actionWorkDir: string,
+  repositoryWorkDir: string,
   result: WorkItemResult,
   renderedWith: JsonObject | null,
   variables: JsonObject,
@@ -331,7 +332,7 @@ export async function enforceCleanWorktree(
     const agentBacked = isAgentBackedTask(work)
     const maxCleanupAttempts = resolveMaxCleanupAttempts(variables)
 
-    let snapshot = await readWorktreeSnapshot(workDir, signal, log)
+    let snapshot = await readWorktreeSnapshot(repositoryWorkDir, signal, log)
     while (!snapshot.isClean) {
       if (!agentBacked) {
         return dirtyWorktreeFailure(result, snapshot, attempts)
@@ -339,14 +340,15 @@ export async function enforceCleanWorktree(
       if (attempts >= maxCleanupAttempts) {
         return dirtyWorktreeFailure(result, snapshot, attempts)
       }
-      const lockRecovery = await recoverStaleIndexLock(workDir, variables, signal, log)
+      const lockRecovery = await recoverStaleIndexLock(repositoryWorkDir, variables, signal, log)
       if (lockRecovery.status === 'blocked') {
         return gitIndexLockFailure(result, snapshot, attempts, lockRecovery)
       }
       attempts += 1
       const cleanupResult = await runAgentCleanupAttempt(
         work,
-        workDir,
+        actionWorkDir,
+        repositoryWorkDir,
         renderedWith,
         variables,
         snapshot,
@@ -359,7 +361,7 @@ export async function enforceCleanWorktree(
       if (cleanupResult !== 'ok') {
         return cleanupResult
       }
-      snapshot = await readWorktreeSnapshot(workDir, signal, log)
+      snapshot = await readWorktreeSnapshot(repositoryWorkDir, signal, log)
     }
 
     if (attempts === 0) return result
@@ -382,7 +384,8 @@ export async function enforceCleanWorktree(
 
 export async function runAgentCleanupAttempt(
   work: DispatchWorkItem,
-  workDir: string,
+  actionWorkDir: string,
+  repositoryWorkDir: string,
   renderedWith: JsonObject | null,
   variables: JsonObject,
   snapshot: WorktreeSnapshot,
@@ -392,8 +395,8 @@ export async function runAgentCleanupAttempt(
   contextParts: ContextParts,
   baseResult: WorkItemResult = { status: 'completed' },
 ): Promise<WorkItemResult | 'ok'> {
-  const cleanupWith = buildCleanupWith(work, renderedWith, snapshot, attempt)
-  const host = contextParts.buildHost(work, signal, workDir, attempt)
+  const cleanupWith = buildCleanupWith(work, renderedWith, snapshot, attempt, repositoryWorkDir)
+  const host = contextParts.buildHost(work, signal, actionWorkDir, attempt)
 
   let cleanupResult: ActionResult
   try {
