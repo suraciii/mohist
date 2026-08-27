@@ -29,6 +29,9 @@ contracts. Direct use of a runtime-specific Action is an Inline Agent execution,
   lifecycle (App create/install approval, manifest, Socket readiness, operation fence, unknown
   outcome). Ubiquitous language: Slack workspace, Mohist App, Agent App, enrollment, App lifecycle,
   authorization, manifest drift, Socket readiness.
+- GitHub integration: repository-level mirroring of Issues, command intake from GitHub comments,
+  progress projection, and external identity. Ubiquitous language: GitHub connection, GitHub mirror,
+  link, `/mohist` command, write-back.
 
 Epic is Issue granularity (organizing facet), not a separate subdomain.
 Issue and Epic are two aggregates in the same bounded context. Issue holds its current `EpicNumber?`.

@@ -4,250 +4,168 @@ status: wip
 
 # GitHub Integration
 
-GitHub integration lets GitHub act as a demand intake, progress board, and
-Approval source. This document defines component boundaries: inbound receipt
-and signature verification, event normalization, feed, close, and Approval
-translators, the write-back adapter, and credentials. See
-[`docs/github.md`](../docs/github.md) for product behavior. The PR delivery
-Action family is defined in [`workflow/actions.md`](workflow/actions.md) and
+GitHub integration makes a connected GitHub repository the public mirror of a
+Project's Issues and the imperative entry point for handing work to Mohist.
+This document defines component boundaries and the decisions that keep the
+integration reliable. See [`docs/github.md`](../docs/github.md) for product
+behavior. The PR delivery Action family is defined in
+[`workflow/actions.md`](workflow/actions.md) and
 [`docs/actions/github-pr.md`](../docs/actions/github-pr.md) and is not repeated
 here.
-
-This is not bidirectional synchronization; edits made on GitHub are not read
-back. It is not GitHub Projects integration and does not replace the Runner's
-`gh` delivery Action family.
 
 ## Model
 
 ### GitHubConnection
 
-This Project-scoped resource belongs to an independent GitHub integration
-supporting context, with the same placement rule as Slack integration; see
-[`domain-analysis.md`](domain-analysis.md). It declares which GitHub repository
-connects to which Project under which policy and owns no execution state.
+A Project-scoped resource in the GitHub integration supporting context, placed
+like Slack integration; see [`domain-analysis.md`](domain-analysis.md). It
+declares which GitHub repository mirrors which Project Repository under which
+policy and owns no execution state.
 
-A GitHubConnection declares:
+A connection declares the GitHub coordinates (`Owner`, `Repo`, plus the
+repository's stable node id so a rename or transfer can be detected), the bound
+Repository resource name, an optional Approvers list for review Approval, and
+`Active` or `Disabled` status. `(Owner, Repo)` is unique across the Server, and
+a Repository has at most one connection, so an Issue's target repository
+unambiguously determines its mirror location.
 
-- `Id` and `ProjectId`: identity and owning Project.
-- `Owner` and `Repo`: GitHub repository coordinates. `(Owner, Repo)` is unique
-  across the Server, so one GitHub repository connects to one Project.
-- `RepositoryName`: the bound Repository resource name. Connect matches a
-  registered repository by Git URL, and writes validate its existence.
-- `IntakeLabel`: the feed label, default `mohist`. It cannot start with
-  `mohist:`, which is reserved for write-back labels.
-- `FeedMode`: `start`, the default, starts fed work; `backlog` only adds it to
-  the backlog.
-- `Approvers`: a GitHub login list. An empty list disables review Approval.
-- `Status`: `Active` or `Disabled`.
-- `IdentityKind`: `app`, the default GitHub App identity, or `pat`, a fallback
-  fine-grained PAT used only for write-back.
-- `InstallationId`: required for `IdentityKind=app` and parsed from the GitHub
-  installation URL during connect.
-
-Credentials do not enter the connection table. They are encrypted in
+Credentials stay out of the connection record and follow the existing
 [`ISecretStore`](../packages/server/src/Mohist.Server/Infrastructure/Security/Secrets/ISecretStore.cs)
-following the namespace precedent in
-[`outbound-webhook.md`](outbound-webhook.md): an inbound signature secret and a
-fallback write-back PAT with Issues read and write only and no code permission
-per connection, plus one deployment-level GitHub App private key shared by
-every `app` connection.
-
-Credential boundaries always hold:
-
-- The only long-lived GitHub secrets on Server are the signature secret, App
-  private key, and fallback write-back PAT without code access.
-- Server holds no long-lived GitHub access token. When needed, it signs a
-  ten-minute JWT with the private key, exchanges it for a one-hour installation
-  access token, restricts `repositories` to the target repository, caches it in
-  memory until near expiry, and never writes it to disk.
-- Direct Server calls to the GitHub API are limited to Issue comment, label, and
-  close write-back and perform no Git content operation.
-- Server issues an installation token for push and PR delivery to the Runner on
-  demand; see Delivery-token Issuance. Runner does not retain it long term.
-  [`RepositoryPolicy`](../packages/server/src/Mohist.Server/Project/Domain/RepositoryPolicy.cs)
-  still prohibits credentials in gitUrl.
+boundaries: an inbound signature secret per connection, one deployment-level
+GitHub App private key, and an optional fallback PAT with Issues read and write
+only. The Server holds no long-lived GitHub access token; installation tokens
+are exchanged on demand, restricted to the target repository, cached in memory,
+and never written to disk. Direct Server calls to the GitHub API are limited to
+Issue and comment operations; git content operations remain Runner-side through
+delivery-token issuance.
 
 ### GitHubIssueLink
 
-This Server infrastructure integration record is analogous to a Slack
-conversation mapping, not an aggregate fact. It maps
-`(ProjectId, RepositoryName, GithubIssueNumber)` to `IssueNumber` and stores
-write-back state required for idempotency, including the current state label
-and the set of emitted milestone comments. It is immutable after creation and
-is the feed idempotency key.
+A Server infrastructure integration record — analogous to a Slack conversation
+mapping, not an aggregate fact — mapping a Mohist Issue to its GitHub mirror
+one-to-one. It stores the GitHub Issue's stable node id alongside its current
+coordinates, carries the bookkeeping that makes every outbound operation
+idempotent (emitted milestone comments, current state label), and reports sync
+health: healthy, or the last synchronization error.
 
-A PR-to-Issue association has no independent record. It is parsed from the
-`pull_request` branch under the named Workspace convention
-`mohist/ws-issue-N`. An unparseable branch causes the event to be ignored.
+The link is the idempotency key for every inbound and outbound path. It is
+created exactly once per pair — at mirror creation, at `/mohist start`, or at
+manual `link` — and survives disable/enable cycles of its connection.
 
-## Semantics
+## The Direction Contract
 
-### Inbound Receipt and Normalization
+The two directions are asymmetric by design:
 
-`POST /api/github-connections/{connectionId}/ingress` does not require an
-operator token. It verifies `X-Hub-Signature-256` over the raw request body with
-HMAC-SHA256, using the same algorithm as
-[`hermes-webhook.md`](hermes-webhook.md) and the `:webhook` secret. Failure
-returns 401 and writes no event. Success normalizes the event into `IEventStore`,
-returns 200, and leaves all later processing asynchronous.
+- **Mohist to GitHub is passive projection.** Issue domain events drive
+  mirroring without any user request.
+- **GitHub to Mohist is imperative.** The only entry that creates Mohist state
+  from GitHub is a command comment. Everything else inbound either maintains an
+  existing link (edit sync, lifecycle events) or feeds event routing.
 
-Normalization rules:
+## Inbound
 
-- `type` is `com.mohist.github.<entity>.<action>`. The v1 set is
-  `issues.labeled`, `issues.closed`, `issues.reopened`,
-  `pull-request.reviewed`, and `check-suite.completed`, registered in
-  [`EventCatalog`](../packages/server/src/Mohist.Server/Infrastructure/Events/EventCatalog.cs).
-- `source` is
-  `/mohist/projects/{projectId}/github-connections/{connectionId}`.
-- Lineage always stamps `projectid`. `githubrepo` and `githubissue` carry GitHub
-  coordinates. When a GitHubIssueLink exists, it also stamps `issue` and the
-  Issue's Epic at that moment, snapshotted from the link record. Reading a
-  mapping in this integration context does not violate the no-cross-aggregate
-  stamping rule in [`event-protocol.md`](event-protocol.md).
-- Payload preserves the GitHub event body unchanged. Routing never reads `data`;
-  consumers use it only as evidence.
+`POST /api/github-connections/{connectionId}/ingress` verifies
+`X-Hub-Signature-256` over the raw body, normalizes the event into
+`IEventStore`, and returns; all processing is asynchronous and every consumer
+is idempotent, because GitHub delivery is at least once and may be out of
+order. The normalized event set grows to cover the command entry and content
+sync: issue comments, issue edits, closure and reopening, Pull Request reviews,
+and check results. Payloads are preserved unchanged as evidence; lineage stamps
+follow the existing rules.
 
-GitHub delivery is at least once and may be out of order, so every consumer is
-idempotent.
+### Command Translator
 
-### Feed Translator
+A durable handler subscribes to issue-comment events. A comment whose body
+starts with `/mohist` from an author GitHub reports as owner, member, or
+collaborator is a command; everything else is ignored. The translator shares
+its verb vocabulary with `mo` — a GitHub-side verb names the same domain
+action as the CLI verb, with comment replies in place of flags and JSON.
 
-A durable handler subscribes to `com.mohist.github.issues.labeled`. It skips
-the event when the label is not the connection's `IntakeLabel` and when a
-GitHubIssueLink already exists, which makes feeding idempotent. Otherwise it
-creates an Issue with the GitHub title and body as a snapshot, the connection's
-`RepositoryName` as target repository, a `p0`-`p4` priority from the event
-labels, and the GitHub coordinates as origin, then writes the GitHubIssueLink.
-With `FeedMode = start` it starts the Issue. When a prerequisite or repository
-availability rejects the start, the Issue stays in the backlog and the handler
-writes one explanatory comment.
+`start` creates the Mohist Issue from the GitHub title and body (the creating
+side owns initial content), maps `p0`–`p4` labels to priority, writes the link,
+and starts the Workflow with the Project's default Profile. The unique
+constraint on the link makes a repeated command a no-op that replies with the
+existing Issue. Refusals — an unavailable Repository, an unknown verb — are
+answered with one reply comment. The translator is deterministic
+configuration-driven code; no Agent or prompt participates in parsing or
+permission.
 
-### Close Translator
+### Edit Translator
 
-A handler subscribes to `com.mohist.github.issues.closed`. When a link exists
-and the Issue is nonterminal, it cancels the Issue.
+Issue-edited events on a linked pair synchronize title and body into Mohist.
+The guard is content equality: an inbound edit matching the current Mohist
+value is the echo of Mohist's own outbound write and is dropped. A real edit
+updates the Issue record and is attributed to `github:<login>` in the timeline.
+It does not retroactively change the input of a Workflow already running — the
+new content takes effect at the next planning or review point.
 
-The feedback loop is inherently safe. Mohist makes the Issue terminal before
-write-back closes the GitHub Issue. The returned closed event is a no-op at the
-terminal check, without identifying who closed it.
+### Lifecycle Translator
 
-### Approval Translator
+Close and reopen events apply the product rules in
+[`docs/github.md`](../docs/github.md#linked-pairs), with two reliability
+guards:
 
-A handler subscribes to `com.mohist.github.pull-request.reviewed`. It parses
-the Issue number from the branch name `mohist/ws-issue-N` and ignores an
-unparseable branch. It ignores a reviewer whose login is not in the
-connection's `Approvers` list and an Issue that is not at the Check approval
-point. An `APPROVED` review approves with `decidedBy = "github:" + login`; a
-`CHANGES_REQUESTED` review rejects with the same `decidedBy` and the review
-body as message; a `COMMENTED` review is ignored.
+- **Terminal check.** Mohist makes an Issue terminal before write-back closes
+  the mirror, so the returned closed event is a no-op without identifying the
+  actor.
+- **Integrate guard.** A close event arriving while the Issue's Run is at or
+  past the Integrate stage is a delivery echo — most importantly the automatic
+  close triggered by merging a linked Pull Request — and is ignored. Withdrawal
+  by closing is only possible before delivery begins.
 
-The Approvers list is deterministic configuration read directly by the
-translator. No Agent or prompt decides Approval.
+## Outbound: the Mirror Adapter
 
-### Write-back Adapter
+Handlers subscribe to Issue and Workflow events and maintain the mirror through
+the connection identity:
 
-Handlers subscribe to Issue and Workflow events for start, approval point,
-blocked, complete, and cancel. For an Issue with a GitHubIssueLink, the adapter
-calls GitHub REST using the connection identity: an App installation token or
-fallback `:api` PAT.
+- **Mirror creation.** A non-Draft Issue whose target repository is connected
+  gets its GitHub mirror created under a per-Issue idempotency key. If the
+  create result is unknown (timeout, 5xx), reconciliation looks the result up
+  instead of posting again — a mirror is never duplicated.
+- **Content sync.** Title and body edits project outward, subject to the same
+  content-equality rule that suppresses the returning echo.
+- **Progress projection.** The mutually exclusive `mohist:*` state labels and
+  the four milestone comment classes (confirmation, Approval point, completion
+  with delivery summary and PR link, cancellation with reason), gated by the
+  link's bookkeeping so redelivery never repeats a milestone.
+- **Finalization.** Completion closes the mirror as completed; cancellation
+  closes it as not planned.
 
-- **Mutually exclusive state labels**: Remove other `mohist:*` labels and add
-  the current-state label.
-- **Four milestone comment classes**: Feed confirmation, approval point,
-  completion with delivery summary and PR link, and cancellation with reason.
-  The link record's emitted set prevents a duplicate for the same milestone and
-  Issue.
-- **Finalization**: completed closes as completed; cancelled closes as not
-  planned.
+Two content rules protect the loop. Mohist never places GitHub closing keywords
+in Pull Request bodies, so delivery cannot close the mirror early. And the
+mirror body carries no tracking footer: the backlink to Mohist lives in the
+confirmation comment, keeping body equality a usable echo check.
 
-Reliability is best effort. A non-2xx response, network failure, or timeout
-writes a log and durable failure record shaped like outbound-webhook failures.
-It does not retry, block the production line, or roll back state. An
-authentication failure, 401 or 403, also marks the connection as needing
-attention for Web and CLI.
+## Failure Model
 
-### Delivery-token Issuance
+Mirroring is reliable by reconciliation, not by queueing:
 
-Runner requests a token when delivery needs a GitHub identity through
-`POST /api/github-connections/{connectionId}/delivery-token`. It requires the
-`runner` scope under the authentication model in [`auth.md`](auth.md):
-
-```text literal
-input: { permissions: ["contents:write", "pull-requests:write"] }
-server:
-  if connection is not Active or IdentityKind != app:
-    return 409 (fallback delivery uses the Runner's own login)
-  sign JWT with App private key
-  exchange for installation token restricted to this repository
-    and the requested permissions
-  audit runnerId, connectionId, permissions, and time
-output: { token, expires_at, bot_login }
-```
-
-V1 does not validate that the Runner's current work is bound to the repository.
-The token is repository-scoped and expires after one hour, limiting exposure to
-that repository.
-
-Runner injects the token into the execution environment as `GH_TOKEN`, Git
-credentials, and a Git author identity matching `bot_login`. Otherwise the Bot
-would open the PR while commits were attributed to a user. The token lives only
-in the process environment and is never written to Runner disk.
-
-## Examples
-
-Feed through completion with `FeedMode = start` and `alice` in Approvers:
-
-1. A user adds `mohist` to `owner/repo#7`. The feed translator creates Issue
-   42, writes the link, and starts it.
-2. Write-back comments that it was accepted as Mohist Issue #42 and adds
-   `mohist:in-progress`.
-3. At the Check approval point, the label becomes
-   `mohist:awaiting-approval` and a comment requests a decision.
-4. `alice` requests changes on the PR. The Approval translator rejects, sending
-   work back to Build.
-5. After repair, the Run reaches Check again. `alice` approves, Integrate
-   completes, and Issue 42 becomes Done. Write-back changes the label to
-   `mohist:done`, comments with delivery summary and PR link, and closes
-   `owner/repo#7`.
-6. The returned GitHub closed event arrives after Issue 42 is terminal and is a
-   no-op.
-
-Routing subscriptions use the same semantics as Mohist domain events, without
-a special case:
-
-```text literal
-event.type == "com.mohist.github.check-suite.completed" && event.issue == "42"
-```
+- A failed outbound operation records the error on the link and surfaces it in
+  CLI and Web. It never blocks the Workflow and never rolls back Issue state.
+- `mo issue github sync` is the single repair verb: it creates a missing
+  mirror, pushes current Mohist state, and clears the error. It is safe to run
+  at any time because every outbound operation is idempotent.
+- State-label projection is self-healing: each Workflow milestone replaces the
+  whole label set from current state.
+- Disabling a connection pauses all inbound translation and outbound mirroring;
+  enabling re-projects every linked Issue once. There is no connection
+  deletion, so a link never outlives its credentials.
 
 ## Status
 
-Repository Connection, signed ingress, feed and withdrawal, Pull Request review
-Approval, and idempotent progress write-back are implemented. Server remains
-the Mohist state authority, while GitHub provides external identity and a
-projection of progress.
-
-The Web and CLI do not yet expose persisted write-back failures. Write-back
-also uses a PAT rather than GitHub App installation identity and short-lived,
-Repository-scoped tokens.
-
-PR review correlation and delivery-PR lookup still recognize the retired
-`mo/issue-N` branch form, while named Issue Workspaces create
-`mohist/ws-issue-N`. Until those readers converge on the Workspace convention,
-review Approval and completion comments cannot reliably associate a PR created
-by the built-in GitHub Profile.
+Implemented today: signed ingress and normalization, feed-by-label intake with
+its close withdrawal, Pull Request review Approval, and best-effort write-back
+with durable failure records. The target model replaces label intake with the
+`/mohist` command entry and adds automatic mirroring, two-way content sync,
+link visibility in the Issue read models, and reconcile-based recovery.
+Feed-by-label intake, its connection options, and the `github-issue` origin
+label are removed when the command entry lands.
 
 Open questions:
 
-- With out-of-order events, `closed` can arrive before `labeled` while no link
-  exists, and the later `labeled` event can feed a closed GitHub Issue. V1
-  accepts this edge. Observe it before deciding whether feed must first confirm
-  that the GitHub Issue is still open.
-- `check-suite.completed` enters the event set for routing consumption. Workflow
-  PR-check waiting still polls.
-- Reuse of the mention channel in
-  [`agent-mentions.md`](agent-mentions.md) for an Agent invoked by a GitHub
-  comment mention waits for concrete demand.
-- App installation tokens creating PRs in repositories under personal accounts
-  may have compatibility limits. Some reports say PR creation requires a
-  collaborator role that a GitHub App cannot hold, despite long-running
-  practices such as Dependabot.
+- With out-of-order delivery, a close can arrive before the command that
+  created the link; the command path re-checks GitHub state before starting, but
+  the acceptable stale window is unobserved in practice.
+- App installation tokens creating Pull Requests in repositories under personal
+  accounts may have compatibility limits despite long-running practices such as
+  Dependabot.

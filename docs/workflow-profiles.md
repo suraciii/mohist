@@ -13,7 +13,9 @@ Profile. A Profile only consumes them through `${{ vars.* }}` and
 
 You may explicitly select a Profile from the same Project when you create or
 update an Issue. Without an explicit selection, the Issue inherits the Project
-default. Clearing an explicit selection also restores this inheritance.
+default. Clearing an explicit selection also restores this inheritance. The
+third selection is no Workflow: `mo issue create --no-workflow` produces an
+Issue that runs no production line; see [Issue Management](issues.md).
 
 Mohist determines the Profile for a Workflow when that Workflow starts.
 Changing the Issue selection or the Project default later affects only the next
