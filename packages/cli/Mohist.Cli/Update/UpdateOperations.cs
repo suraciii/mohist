@@ -203,14 +203,6 @@ internal sealed partial class UpdateOperations
                 return outcome.ExitCode;
             }
 
-            var recovery = await runnerRefreshVerifier.WaitForRecoveryAsync(interruption, cancellationToken);
-            recovery.WriteSummary(_out, _err);
-            if (recovery.HasAffectedWork && !recovery.FullyRecovered)
-            {
-                _err.WriteLine("Runner update recovery: status=unresolved; affected work was not acknowledged before the bounded wait expired.");
-                return recovery.ExitCode;
-            }
-
             _out.WriteLine("Runner updated successfully.");
             return 0;
         }

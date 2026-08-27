@@ -67,7 +67,6 @@ public static class WorkflowStatusMapper
 
         var blocked = FindBlockedSettlement(run);
         var interruption = FindCurrentInterruption(run);
-        var agentInterruption = FindInterruption(run);
 
         var stages = run.Stages.Select((s, i) =>
         {
@@ -127,7 +126,6 @@ public static class WorkflowStatusMapper
             run.Metadata is null ? null : new MetadataView(run.Metadata.Name, run.Metadata.Labels, run.Metadata.Annotations, run.Metadata.CreatedAt),
             MapAgentResultAttention(blocked),
             MapInterruption(interruption),
-            MapInterruptionAttention(agentInterruption),
             MapVerificationLanes(run));
     }
 
@@ -196,7 +194,6 @@ public static class WorkflowStatusMapper
     {
         if (blocked is null) return null;
         var settlement = blocked.Task.AgentResultSettlement!;
-        var interruption = MapInterruption(blocked.Task.AgentInterruption);
         return new AgentResultAttentionView(
             "blocked",
             AgentResultUnconfirmedReason,
@@ -207,9 +204,6 @@ public static class WorkflowStatusMapper
             settlement.RunnerId,
             settlement.AgentSessionId,
             settlement.AgentTurnId,
-            settlement.UpdateOperationId,
-            interruption?.ExpectedRecoveryPath,
-            interruption?.StopFailure,
             AgentResultSettlementNextAction,
             AgentResultSettlementRecoveryActions,
             ReasonCode: settlement.ReasonCode);
@@ -228,7 +222,6 @@ public static class WorkflowStatusMapper
                 AgentResultSettlementState.AwaitingResult => "awaiting-result",
                 AgentResultSettlementState.Unknown => "unknown",
                 AgentResultSettlementState.Blocked => "blocked",
-                AgentResultSettlementState.RecoverablyInterrupted => "interrupted",
                 _ => throw new SwitchExpressionException($"No settlement view mapping for {settlement.State}"),
             },
             Reason: blocked ? AgentResultUnconfirmedReason : settlement.ReasonCode,
@@ -244,10 +237,6 @@ public static class WorkflowStatusMapper
             Runtime: settlement.Runtime,
             RuntimeSessionId: settlement.RuntimeSessionId,
             StopOperationId: settlement.StopOperationId,
-            UpdateOperationId: settlement.UpdateOperationId,
-            ExpectedRecoveryPath: MapInterruption(task.AgentInterruption)?.ExpectedRecoveryPath,
-            StopFailure: MapInterruption(task.AgentInterruption)?.StopFailure,
-            Interruption: MapInterruption(task.AgentInterruption),
             NextAction: settlement.State is AgentResultSettlementState.Unknown or AgentResultSettlementState.Blocked
                 ? AgentResultSettlementNextAction
                 : null,
@@ -255,53 +244,6 @@ public static class WorkflowStatusMapper
                 ? AgentResultSettlementRecoveryActions
                 : null);
     }
-
-    private static WorkflowAgentResultSettlementTask? FindInterruption(WorkflowRun run)
-    {
-        var candidates = run.Stages
-            .SelectMany(stage => stage.Tasks.Select(task => new WorkflowAgentResultSettlementTask(stage.Id, task)))
-            .Where(candidate => candidate.Task.AgentInterruption is not null)
-            .OrderByDescending(candidate => candidate.Task.AgentInterruption!.RecoveryGeneration)
-            .ThenByDescending(candidate => AgentWorkInterruptionProjection.Rank(candidate.Task.AgentInterruption!.State));
-        return candidates.FirstOrDefault();
-    }
-
-    private static AgentInterruptionAttentionView? MapInterruptionAttention(
-        WorkflowAgentResultSettlementTask? interruption)
-    {
-        var visibility = interruption is null ? null : MapInterruption(interruption.Task.AgentInterruption);
-        if (visibility is null) return null;
-        return new AgentInterruptionAttentionView(
-            visibility.State,
-            visibility.State == AgentWorkInterruptionStates.Recovered
-                ? "The replacement Agent execution recovered after the Runner update."
-                : "Agent work was interrupted by a Runner update and is following the recorded recovery path.",
-            visibility.UpdateOperationId,
-            visibility.WorkId,
-            visibility.TaskRunId,
-            visibility.RecoveryGeneration,
-            interruption!.Task.AgentResultSettlement?.AgentSessionId,
-            visibility.OriginalTurnId,
-            visibility.ReplacementTurnId,
-            visibility.ExpectedRecoveryPath,
-            visibility.StopFailure);
-    }
-
-    private static AgentWorkInterruptionView? MapInterruption(
-        AgentWorkInterruptionTransition? transition) =>
-        transition is null
-            ? null
-            : new AgentWorkInterruptionView(
-                transition.State,
-                transition.UpdateOperationId,
-                transition.WorkId,
-                transition.TaskRunId,
-                transition.RecoveryGeneration,
-                transition.OriginalTurnId,
-                transition.ReplacementTurnId,
-                AgentWorkInterruptionProjection.SanitizeStopFailure(transition.StopFailure),
-                transition.ExpectedRecoveryPath,
-                transition.RecordedAt);
 
     /// <summary>
     /// Build the verification-lane projection. Returns <c>null</c> for

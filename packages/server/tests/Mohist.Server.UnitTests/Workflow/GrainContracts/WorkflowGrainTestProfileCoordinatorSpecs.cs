@@ -1,7 +1,6 @@
 using System.Reflection;
 using System.Threading.Tasks;
 using Mohist.Server.Contracts;
-using Mohist.Server.Runner.Grains;
 using Mohist.Server.Sessions.Grains;
 using Mohist.Server.Infrastructure.Data.Workflow;
 using Mohist.Server.Workflow.Domain;
@@ -20,23 +19,18 @@ namespace Mohist.Server.UnitTests.Workflow.GrainContracts;
 internal sealed class WorkflowGrainTestProfileCoordinatorFactory : IGrainFactory
 {
     private readonly IWorkflowProfileReferenceCoordinatorGrain _stub;
-    private readonly Func<string, IRunnerUpdateOperationGrain>? _operations;
 
     public WorkflowGrainTestProfileCoordinatorFactory(
         IWorkflowRunStore runs,
-        WorkflowDefinitionResolver resolver,
-        Func<string, IRunnerUpdateOperationGrain>? operations = null)
+        WorkflowDefinitionResolver resolver)
     {
         _stub = new WorkflowGrainTestProfileCoordinator(runs, resolver);
-        _operations = operations;
     }
 
     TGrainInterface IGrainFactory.GetGrain<TGrainInterface>(string primaryKey, string? grainClassNamePrefix)
     {
         if (typeof(TGrainInterface) == typeof(IWorkflowProfileReferenceCoordinatorGrain))
             return (TGrainInterface)(object)_stub;
-        if (typeof(TGrainInterface) == typeof(IRunnerUpdateOperationGrain) && _operations is not null)
-            return (TGrainInterface)(object)_operations(primaryKey);
         // Direct arrangements never create agent sessions; the absent-session
         // contract is GetAsync() == null, which callers treat as a no-op.
         if (typeof(TGrainInterface) == typeof(IAgentSessionGrain))
@@ -197,8 +191,6 @@ internal class AbsentAgentSessionGrain : DispatchProxy
     {
         if (targetMethod?.Name == nameof(IAgentSessionGrain.GetAsync))
             return Task.FromResult<AgentSessionInfo?>(null);
-        if (targetMethod?.Name == nameof(IAgentSessionGrain.ApplyInterruptionAsync))
-            return Task.CompletedTask;
         throw new NotSupportedException(
             $"{nameof(AbsentAgentSessionGrain)} does not support {targetMethod?.Name}");
     }

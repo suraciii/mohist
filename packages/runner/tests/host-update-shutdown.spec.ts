@@ -1,146 +1,53 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import type { RunnerOptions } from '../src/core/types.js'
-import type { ServerConnection } from '../src/server/connection.js'
 import { createHostShutdown } from '../src/runtime/host-update-shutdown.js'
 import type { InFlightEntry } from '../src/runtime/host-state.js'
-import type { PendingUpdateOperation } from '../src/runtime/update-operation.js'
 
-const options = {
-  runnerId: 'runner-1',
-  serverUrl: 'http://server',
-  runnerRoot: '/runner',
-  pollIntervalMs: 1,
-  heartbeatIntervalMs: 1,
-  dispatchLivenessProbeIntervalMs: 1,
-} satisfies RunnerOptions
-
-function work(workId: string) {
+function entry(workId: string, done: Promise<void> = new Promise<void>(() => undefined)): InFlightEntry {
   return {
-    workflowRunId: 'workflow-1',
-    workId,
-    workType: 'task',
-    ownerKind: 'workflow',
-  }
-}
-
-function entry(workId: string): InFlightEntry {
-  return {
-    work: work(workId),
+    work: {
+      workflowRunId: 'workflow-1',
+      workId,
+      workType: 'task',
+      ownerKind: 'workflow',
+    },
     controller: new AbortController(),
-    done: new Promise<void>(() => undefined),
+    done,
   }
 }
 
-function operation(affectedWorkId: string): PendingUpdateOperation {
+function makeHost(entries: InFlightEntry[], stopBudgetMs = 100) {
+  const inFlight = new Map(entries.map((value) => [`workflow:workflow-1:${value.work.workId}`, value]))
   return {
-    operationId: 'operation-1',
-    runnerId: 'runner-1',
-    createdAt: '2026-01-01T00:00:00.000Z',
-    affectedWorks: [{ ownerKind: 'workflow', ownerId: 'workflow-1', workId: affectedWorkId, workType: 'task' }],
-  }
-}
-
-function makeHost(
-  args: {
-    entries?: InFlightEntry[]
-    fetch?: (signal: AbortSignal) => Promise<PendingUpdateOperation | null>
-    report?: ServerConnection['reportRecoveryStopFailure']
-    handoffBudgetMs?: number
-    stopBudgetMs?: number
-  } = {},
-) {
-  const inFlight = new Map(
-    (args.entries ?? [entry('work-1')]).map((value) => [`workflow:workflow-1:${value.work.workId}`, value]),
-  )
-  const reportRecoveryStopFailure = args.report ?? vi.fn(async () => undefined)
-  const shutdown = createHostShutdown({
-    options,
-    connection: { reportRecoveryStopFailure } as unknown as ServerConnection,
     inFlight,
-    fetchPendingUpdateOperation: args.fetch ?? vi.fn(async () => null),
-    shutdownHandoffBudgetMs: args.handoffBudgetMs ?? 100,
-    shutdownStopBudgetMs: args.stopBudgetMs ?? 100,
-  })
-  return { shutdown, inFlight, reportRecoveryStopFailure }
+    shutdown: createHostShutdown({ inFlight, shutdownStopBudgetMs: stopBudgetMs }),
+  }
 }
 
 describe('createHostShutdown', () => {
   beforeEach(() => vi.useFakeTimers())
 
-  it('hands matched update work to recovery, reports stop failure, and finally removes it', async () => {
+  it('aborts in-flight work and removes it after the bounded shutdown wait', async () => {
     const running = entry('work-1')
-    const { shutdown, inFlight, reportRecoveryStopFailure } = makeHost({
-      entries: [running],
-      fetch: vi.fn(async () => operation('work-1')),
-    })
+    const { shutdown, inFlight } = makeHost([running])
 
     const stopping = shutdown.shutdownInFlight()
     await vi.runAllTimersAsync()
     await stopping
 
     expect(running.controller.signal.aborted).toBe(true)
-    expect(running.shutdown).toEqual({
-      requested: true,
-      stopConfirmed: false,
-      operationId: 'operation-1',
-      stopFailure: 'The Runner could not confirm the stop before shutdown; the recorded recovery path remains active.',
-    })
-    expect(reportRecoveryStopFailure).toHaveBeenCalledWith(
-      expect.objectContaining({ operationId: 'operation-1', workId: 'work-1' }),
-      expect.any(AbortSignal),
-    )
+    expect(running.shutdown).toEqual({ requested: true, stopConfirmed: false, operationId: null })
     expect(inFlight.size).toBe(0)
   })
 
-  it.each([
-    ['ordinary shutdown', null],
-    ['unaffected update work', operation('other-work')],
-  ])('%s aborts and removes work without a recovery stop-failure report', async (_name, pending) => {
-    const running = entry('work-1')
-    const { shutdown, inFlight, reportRecoveryStopFailure } = makeHost({
-      entries: [running],
-      fetch: vi.fn(async () => pending),
-    })
+  it('waits for work that settles inside the shutdown budget', async () => {
+    let settle!: () => void
+    const running = entry('work-1', new Promise<void>((resolve) => (settle = resolve)))
+    const { shutdown, inFlight } = makeHost([running])
 
     const stopping = shutdown.shutdownInFlight()
-    await vi.runAllTimersAsync()
+    settle()
     await stopping
 
-    expect(running.shutdown?.operationId).toBeNull()
-    expect(reportRecoveryStopFailure).not.toHaveBeenCalled()
-    expect(inFlight.size).toBe(0)
-  })
-
-  it('bounds pending-operation lookup retries and still removes in-flight work after budget exhaustion', async () => {
-    const fetch = vi.fn(async () => {
-      throw new Error('transient lookup failure')
-    })
-    const { shutdown, inFlight, reportRecoveryStopFailure } = makeHost({
-      fetch,
-      handoffBudgetMs: 10,
-      stopBudgetMs: 10,
-    })
-
-    const stopping = shutdown.shutdownInFlight()
-    await vi.runAllTimersAsync()
-    await stopping
-
-    expect(fetch).toHaveBeenCalledTimes(2)
-    expect(reportRecoveryStopFailure).not.toHaveBeenCalled()
-    expect(inFlight.size).toBe(0)
-  })
-
-  it('swallows a bounded stop-failure report failure and finally removes the work', async () => {
-    const { shutdown, inFlight } = makeHost({
-      fetch: vi.fn(async () => operation('work-1')),
-      report: vi.fn(async () => {
-        throw new Error('report unavailable')
-      }),
-    })
-
-    const stopping = shutdown.shutdownInFlight()
-    await vi.runAllTimersAsync()
-    await expect(stopping).resolves.toBeUndefined()
     expect(inFlight.size).toBe(0)
   })
 })

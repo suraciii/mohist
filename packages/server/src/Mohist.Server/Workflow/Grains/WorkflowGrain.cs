@@ -129,7 +129,6 @@ public partial class WorkflowGrain : Grain, IWorkflowGrain, IWorkflowGrainContex
 
         await ClearStoppedRunStaleApprovalGateAsync(ct);
 
-        await DeliverPendingSessionInterruptionAsync();
         await ReconcileAgentResultSettlementAsync();
         await ReconcileRunnerLossRecoveryAsync();
 

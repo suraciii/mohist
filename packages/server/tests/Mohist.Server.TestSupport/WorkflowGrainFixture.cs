@@ -26,8 +26,6 @@ public class WorkflowGrainFixture : IAsyncLifetime
     public FakeTimeProvider TimeProvider { get; } = new(TestTime.UtcNow);
     public AgentSessionPersistenceTestProbe Persistence { get; }
     public ControllableDispatchPollObserver DispatchPollObserver { get; } = new();
-    public RunnerUpdateOperationWriteFailureProbe OperationWriteFailures =>
-        Cluster.GetSiloServiceProvider(null).GetRequiredService<RunnerUpdateOperationWriteFailureProbe>();
 
     private readonly RecordingEventStore _sharedEventStore = new();
     private readonly InMemoryEventBus _sharedEventBus;

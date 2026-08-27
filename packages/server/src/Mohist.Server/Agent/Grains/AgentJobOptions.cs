@@ -33,7 +33,6 @@ public sealed class AgentJobOptions
     /// Runner never delivers a confirmed receipt. Expiry is explicit
     /// Interrupted terminal state, never a synthesized task verdict.
     /// </summary>
-    public TimeSpan UpdateInterruptionTimeout { get; set; } = TimeSpan.FromMinutes(5);
 
 
     public AgentJobBackoffSchedule ResolveBackoffSchedule()

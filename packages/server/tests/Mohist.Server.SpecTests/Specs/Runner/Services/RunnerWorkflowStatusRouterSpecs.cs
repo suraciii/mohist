@@ -198,8 +198,6 @@ public class RunnerWorkflowStatusRouterSpecs
             => Task.FromResult(Mohist.Server.Runner.Grains.WorkReportVerdict.Refused);
         public Task<Mohist.Server.Runner.Grains.WorkReportVerdict> BindAgentExecutionAsync(AgentExecutionBinding binding)
             => Task.FromResult(Mohist.Server.Runner.Grains.WorkReportVerdict.Refused);
-        public Task<AgentExecutionBinding?> GetBoundAgentExecutionAsync(string taskRunId, string workId, string runnerId)
-            => Task.FromResult<AgentExecutionBinding?>(null);
         public Task<bool> CanStartAgentCleanupAsync(AgentExecutionBinding binding) => Task.FromResult(false);
         public Task<Mohist.Server.Runner.Grains.WorkReportVerdict> ObserveAgentExecutionAsync(AgentExecutionObservation observation)
             => Task.FromResult(Mohist.Server.Runner.Grains.WorkReportVerdict.Refused);

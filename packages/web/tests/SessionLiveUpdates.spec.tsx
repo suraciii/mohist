@@ -22,17 +22,20 @@ describe('Live tool updates merge in place', () => {
   it('merges start and update events for same toolCallId into one tool card', async () => {
     const initialTurns = [makeTurn()]
 
-    const { result } = renderHookWithQueryClient(() => useSessionTranscript({
-      issueNumber: 123,
-      sessionId: 'session-123',
-      runtimeSessionId: 'runtime-123',
-      initialTurns,
-      isRunning: true,
-    }))
+    const { result } = renderHookWithQueryClient(() =>
+      useSessionTranscript({
+        issueNumber: 123,
+        sessionId: 'session-123',
+        runtimeSessionId: 'runtime-123',
+        initialTurns,
+        isRunning: true,
+      }),
+    )
 
     act(() => {
       dispatchAgentEvent('coder_tool_call', {
-        issueNumber: 123,        projectId: 'project-1',
+        issueNumber: 123,
+        projectId: 'project-1',
         executionId: 'exec-123',
         runtimeSessionId: 'runtime-123',
         sessionId: 'session-123',
@@ -45,20 +48,19 @@ describe('Live tool updates merge in place', () => {
     })
 
     await waitFor(() => {
-      const toolParts = result.current.turns.at(-1)?.assistant.filter(
-        (part): part is ToolPart => part.type === 'tool',
-      )
+      const toolParts = result.current.turns.at(-1)?.assistant.filter((part): part is ToolPart => part.type === 'tool')
       expect(toolParts).toHaveLength(1)
       expect(toolParts?.[0].tool.toolCallId).toBe('tc-merge-test')
     })
 
-    const firstToolId = result.current.turns.at(-1)?.assistant.find(
-      (part): part is ToolPart => part.type === 'tool',
-    )?.id
+    const firstToolId = result.current.turns
+      .at(-1)
+      ?.assistant.find((part): part is ToolPart => part.type === 'tool')?.id
 
     act(() => {
       dispatchAgentEvent('coder_tool_call', {
-        issueNumber: 123,        projectId: 'project-1',
+        issueNumber: 123,
+        projectId: 'project-1',
         executionId: 'exec-123',
         runtimeSessionId: 'runtime-123',
         sessionId: 'session-123',
@@ -70,9 +72,7 @@ describe('Live tool updates merge in place', () => {
     })
 
     await waitFor(() => {
-      const toolParts = result.current.turns.at(-1)?.assistant.filter(
-        (part): part is ToolPart => part.type === 'tool',
-      )
+      const toolParts = result.current.turns.at(-1)?.assistant.filter((part): part is ToolPart => part.type === 'tool')
       expect(toolParts).toHaveLength(1)
       expect(toolParts?.[0].id).toBe(firstToolId)
       expect(toolParts?.[0].tool.status).toBe('completed')
@@ -83,17 +83,20 @@ describe('Live tool updates merge in place', () => {
   it('updates existing tool card on terminal events without creating duplicate', async () => {
     const initialTurns = [makeTurn()]
 
-    const { result } = renderHookWithQueryClient(() => useSessionTranscript({
-      issueNumber: 123,
-      sessionId: 'session-123',
-      runtimeSessionId: 'runtime-123',
-      initialTurns,
-      isRunning: true,
-    }))
+    const { result } = renderHookWithQueryClient(() =>
+      useSessionTranscript({
+        issueNumber: 123,
+        sessionId: 'session-123',
+        runtimeSessionId: 'runtime-123',
+        initialTurns,
+        isRunning: true,
+      }),
+    )
 
     act(() => {
       dispatchAgentEvent('coder_tool_call', {
-        issueNumber: 123,        projectId: 'project-1',
+        issueNumber: 123,
+        projectId: 'project-1',
         executionId: 'exec-123',
         runtimeSessionId: 'runtime-123',
         sessionId: 'session-123',
@@ -105,16 +108,15 @@ describe('Live tool updates merge in place', () => {
     })
 
     await waitFor(() => {
-      const toolParts = result.current.turns.at(-1)?.assistant.filter(
-        (part): part is ToolPart => part.type === 'tool',
-      )
+      const toolParts = result.current.turns.at(-1)?.assistant.filter((part): part is ToolPart => part.type === 'tool')
       expect(toolParts).toHaveLength(1)
       expect(toolParts?.[0].tool.status).toBe('running')
     })
 
     act(() => {
       dispatchAgentEvent('coder_tool_call', {
-        issueNumber: 123,        projectId: 'project-1',
+        issueNumber: 123,
+        projectId: 'project-1',
         executionId: 'exec-123',
         runtimeSessionId: 'runtime-123',
         sessionId: 'session-123',
@@ -126,9 +128,7 @@ describe('Live tool updates merge in place', () => {
     })
 
     await waitFor(() => {
-      const toolParts = result.current.turns.at(-1)?.assistant.filter(
-        (part): part is ToolPart => part.type === 'tool',
-      )
+      const toolParts = result.current.turns.at(-1)?.assistant.filter((part): part is ToolPart => part.type === 'tool')
       expect(toolParts).toHaveLength(1)
       expect(toolParts?.[0].tool.status).toBe('completed')
       expect(toolParts?.[0].tool.output).toBe('All tests passed')
@@ -145,13 +145,15 @@ describe('Terminal session events trigger refetch', () => {
     // that flag is reserved for recovery/liveness convergence.
     const initialTurns = [makeTurn()]
 
-    const { result } = renderHookWithQueryClient(() => useSessionTranscript({
-      issueNumber: 123,
-      sessionId: 'session-123',
-      runtimeSessionId: 'runtime-123',
-      initialTurns,
-      isRunning: true,
-    }))
+    const { result } = renderHookWithQueryClient(() =>
+      useSessionTranscript({
+        issueNumber: 123,
+        sessionId: 'session-123',
+        runtimeSessionId: 'runtime-123',
+        initialTurns,
+        isRunning: true,
+      }),
+    )
 
     expect(result.current.isFinalizing).toBe(false)
     expect(result.current.turns.at(-1)?.completedAt).toBeNull()
@@ -172,56 +174,20 @@ describe('Terminal session events trigger refetch', () => {
     expect(result.current.isFinalizing).toBe(false)
   })
 
-  // issue-484: the two tests below depended on the deprecated session.closed
-  // event to mark the session finalizing and append a failed/cancelled error
-  // part to the transcript. Under the activity model session.closed is no
-  // longer subscribed (D6): sessions never enter a terminal status, and the
-  // failure/cancellation surface is now expressed via coder_recovery_status,
-  // session.liveness (recovery error parts) and SessionErrorsEvidence /
-  // failureReason in the header — none of which are driven by session.closed.
-  // The liveness-driven recovery-error path is covered by 'liveness status
-  // running or failed triggers refetch and explainable transcript parts'; the
-  // recovery-status refetch path is covered by 'recovery status with recovered
-  // or failed triggers refetch'. These two session.closed scenarios are
-  // intentionally deleted as they no longer represent product behaviour.
-
-  it('recovery status with recovered or failed triggers refetch', async () => {
-    const initialTurns = [makeTurn()]
-
-    const { result } = renderHookWithQueryClient(() => useSessionTranscript({
-      issueNumber: 123,
-      sessionId: 'session-123',
-      runtimeSessionId: 'runtime-123',
-      initialTurns,
-      isRunning: true,
-    }))
-
-    act(() => {
-      dispatchAgentEvent('coder_recovery_status', {
-        issueNumber: 123,        projectId: 'project-1',
-        executionId: 'exec-123',
-        sessionId: 'session-123',
-        runtimeSessionId: 'runtime-123',
-        status: 'recovered',
-        attempt: 1,
-      })
-    })
-
-    await waitFor(() => {
-      expect(result.current.isFinalizing).toBe(true)
-    })
-  })
-
+  // Sessions do not enter a terminal status. Liveness events and persisted
+  // failure evidence provide the explainable error surface.
   it('liveness status running or failed triggers refetch and explainable transcript parts', async () => {
     const initialTurns = [makeTurn()]
 
-    const { result } = renderHookWithQueryClient(() => useSessionTranscript({
-      issueNumber: 123,
-      sessionId: 'session-123',
-      runtimeSessionId: 'runtime-123',
-      initialTurns,
-      isRunning: true,
-    }))
+    const { result } = renderHookWithQueryClient(() =>
+      useSessionTranscript({
+        issueNumber: 123,
+        sessionId: 'session-123',
+        runtimeSessionId: 'runtime-123',
+        initialTurns,
+        isRunning: true,
+      }),
+    )
 
     act(() => {
       dispatchAgentEvent('session.liveness', {
@@ -239,9 +205,9 @@ describe('Terminal session events trigger refetch', () => {
 
     await waitFor(() => {
       expect(result.current.isFinalizing).toBe(true)
-      const errorParts = result.current.turns.at(-1)?.assistant.filter(
-        (part): part is ErrorPart => part.type === 'error' && part.kind === 'recovery',
-      )
+      const errorParts = result.current.turns
+        .at(-1)
+        ?.assistant.filter((part): part is ErrorPart => part.type === 'error' && part.kind === 'recovery')
       expect(errorParts?.some((part) => part.message.includes('Liveness failed: probe_timeout'))).toBe(true)
     })
   })
@@ -251,17 +217,20 @@ describe('Running session shows only real active tools', () => {
   it('does not create orphan unknown tool cards during streaming', async () => {
     const initialTurns = [makeTurn()]
 
-    const { result } = renderHookWithQueryClient(() => useSessionTranscript({
-      issueNumber: 123,
-      sessionId: 'session-123',
-      runtimeSessionId: 'runtime-123',
-      initialTurns,
-      isRunning: true,
-    }))
+    const { result } = renderHookWithQueryClient(() =>
+      useSessionTranscript({
+        issueNumber: 123,
+        sessionId: 'session-123',
+        runtimeSessionId: 'runtime-123',
+        initialTurns,
+        isRunning: true,
+      }),
+    )
 
     act(() => {
       dispatchAgentEvent('coder_tool_call', {
-        issueNumber: 123,        projectId: 'project-1',
+        issueNumber: 123,
+        projectId: 'project-1',
         executionId: 'exec-123',
         runtimeSessionId: 'runtime-123',
         sessionId: 'session-123',
@@ -273,16 +242,15 @@ describe('Running session shows only real active tools', () => {
     })
 
     await waitFor(() => {
-      const toolParts = result.current.turns.at(-1)?.assistant.filter(
-        (part): part is ToolPart => part.type === 'tool',
-      )
+      const toolParts = result.current.turns.at(-1)?.assistant.filter((part): part is ToolPart => part.type === 'tool')
       expect(toolParts).toHaveLength(1)
       expect(toolParts?.[0].tool.normalizedName).toBe('read')
     })
 
     act(() => {
       dispatchAgentEvent('coder_tool_call', {
-        issueNumber: 123,        projectId: 'project-1',
+        issueNumber: 123,
+        projectId: 'project-1',
         executionId: 'exec-123',
         runtimeSessionId: 'runtime-123',
         sessionId: 'session-123',
@@ -294,36 +262,35 @@ describe('Running session shows only real active tools', () => {
     })
 
     await waitFor(() => {
-      const toolParts = result.current.turns.at(-1)?.assistant.filter(
-        (part): part is ToolPart => part.type === 'tool',
-      )
+      const toolParts = result.current.turns.at(-1)?.assistant.filter((part): part is ToolPart => part.type === 'tool')
       expect(toolParts).toHaveLength(1)
       expect(toolParts?.[0].tool.status).toBe('completed')
     })
 
-    const allToolParts = result.current.turns.flatMap(t => t.assistant).filter(
-      (part): part is ToolPart => part.type === 'tool',
-    )
-    const orphanUnknown = allToolParts.filter(
-      p => p.tool.normalizedName === 'unknown' && p.tool.status === 'running',
-    )
+    const allToolParts = result.current.turns
+      .flatMap((t) => t.assistant)
+      .filter((part): part is ToolPart => part.type === 'tool')
+    const orphanUnknown = allToolParts.filter((p) => p.tool.normalizedName === 'unknown' && p.tool.status === 'running')
     expect(orphanUnknown).toHaveLength(0)
   })
 
   it('maps started status to running display status', async () => {
     const initialTurns = [makeTurn()]
 
-    const { result } = renderHookWithQueryClient(() => useSessionTranscript({
-      issueNumber: 123,
-      sessionId: 'session-123',
-      runtimeSessionId: 'runtime-123',
-      initialTurns,
-      isRunning: true,
-    }))
+    const { result } = renderHookWithQueryClient(() =>
+      useSessionTranscript({
+        issueNumber: 123,
+        sessionId: 'session-123',
+        runtimeSessionId: 'runtime-123',
+        initialTurns,
+        isRunning: true,
+      }),
+    )
 
     act(() => {
       dispatchAgentEvent('coder_tool_call', {
-        issueNumber: 123,        projectId: 'project-1',
+        issueNumber: 123,
+        projectId: 'project-1',
         executionId: 'exec-123',
         runtimeSessionId: 'runtime-123',
         sessionId: 'session-123',
@@ -335,9 +302,7 @@ describe('Running session shows only real active tools', () => {
     })
 
     await waitFor(() => {
-      const toolParts = result.current.turns.at(-1)?.assistant.filter(
-        (part): part is ToolPart => part.type === 'tool',
-      )
+      const toolParts = result.current.turns.at(-1)?.assistant.filter((part): part is ToolPart => part.type === 'tool')
       expect(toolParts).toHaveLength(1)
       expect(toolParts?.[0].tool.status).toBe('running')
     })
@@ -346,17 +311,20 @@ describe('Running session shows only real active tools', () => {
   it('maps failed status correctly for tool calls', async () => {
     const initialTurns = [makeTurn()]
 
-    const { result } = renderHookWithQueryClient(() => useSessionTranscript({
-      issueNumber: 123,
-      sessionId: 'session-123',
-      runtimeSessionId: 'runtime-123',
-      initialTurns,
-      isRunning: true,
-    }))
+    const { result } = renderHookWithQueryClient(() =>
+      useSessionTranscript({
+        issueNumber: 123,
+        sessionId: 'session-123',
+        runtimeSessionId: 'runtime-123',
+        initialTurns,
+        isRunning: true,
+      }),
+    )
 
     act(() => {
       dispatchAgentEvent('coder_tool_call', {
-        issueNumber: 123,        projectId: 'project-1',
+        issueNumber: 123,
+        projectId: 'project-1',
         executionId: 'exec-123',
         runtimeSessionId: 'runtime-123',
         sessionId: 'session-123',
@@ -368,9 +336,7 @@ describe('Running session shows only real active tools', () => {
     })
 
     await waitFor(() => {
-      const toolParts = result.current.turns.at(-1)?.assistant.filter(
-        (part): part is ToolPart => part.type === 'tool',
-      )
+      const toolParts = result.current.turns.at(-1)?.assistant.filter((part): part is ToolPart => part.type === 'tool')
       expect(toolParts).toHaveLength(1)
       expect(toolParts?.[0].tool.status).toBe('failed')
       expect(toolParts?.[0].tool.error).toBe('File not found')
@@ -382,19 +348,22 @@ describe('Live convergence with refetch', () => {
   it('marks isFinalizing after terminal tool event', async () => {
     const initialTurns = [makeTurn()]
 
-    const { result } = renderHookWithQueryClient(() => useSessionTranscript({
-      issueNumber: 123,
-      sessionId: 'session-123',
-      runtimeSessionId: 'runtime-123',
-      initialTurns,
-      isRunning: true,
-    }))
+    const { result } = renderHookWithQueryClient(() =>
+      useSessionTranscript({
+        issueNumber: 123,
+        sessionId: 'session-123',
+        runtimeSessionId: 'runtime-123',
+        initialTurns,
+        isRunning: true,
+      }),
+    )
 
     expect(result.current.isFinalizing).toBe(false)
 
     act(() => {
       dispatchAgentEvent('coder_tool_call', {
-        issueNumber: 123,        projectId: 'project-1',
+        issueNumber: 123,
+        projectId: 'project-1',
         executionId: 'exec-123',
         runtimeSessionId: 'runtime-123',
         sessionId: 'session-123',
@@ -410,7 +379,8 @@ describe('Live convergence with refetch', () => {
 
     act(() => {
       dispatchAgentEvent('coder_tool_call', {
-        issueNumber: 123,        projectId: 'project-1',
+        issueNumber: 123,
+        projectId: 'project-1',
         executionId: 'exec-123',
         runtimeSessionId: 'runtime-123',
         sessionId: 'session-123',
@@ -429,17 +399,20 @@ describe('Live convergence with refetch', () => {
   it('preserves text chunk appends before and after tool events', async () => {
     const initialTurns = [makeTurn()]
 
-    const { result } = renderHookWithQueryClient(() => useSessionTranscript({
-      issueNumber: 123,
-      sessionId: 'session-123',
-      runtimeSessionId: 'runtime-123',
-      initialTurns,
-      isRunning: true,
-    }))
+    const { result } = renderHookWithQueryClient(() =>
+      useSessionTranscript({
+        issueNumber: 123,
+        sessionId: 'session-123',
+        runtimeSessionId: 'runtime-123',
+        initialTurns,
+        isRunning: true,
+      }),
+    )
 
     act(() => {
       dispatchAgentEvent('coder_text_chunk', {
-        issueNumber: 123,        projectId: 'project-1',
+        issueNumber: 123,
+        projectId: 'project-1',
         executionId: 'exec-123',
         runtimeSessionId: 'runtime-123',
         text: 'Starting task...',
@@ -448,15 +421,14 @@ describe('Live convergence with refetch', () => {
     })
 
     await waitFor(() => {
-      const textPart = result.current.turns.at(-1)?.assistant.find(
-        (p): p is TextPart => p.type === 'text',
-      )
+      const textPart = result.current.turns.at(-1)?.assistant.find((p): p is TextPart => p.type === 'text')
       expect(textPart?.text).toBe('Starting task...')
     })
 
     act(() => {
       dispatchAgentEvent('coder_tool_call', {
-        issueNumber: 123,        projectId: 'project-1',
+        issueNumber: 123,
+        projectId: 'project-1',
         executionId: 'exec-123',
         runtimeSessionId: 'runtime-123',
         sessionId: 'session-123',
@@ -469,7 +441,8 @@ describe('Live convergence with refetch', () => {
 
     act(() => {
       dispatchAgentEvent('coder_text_chunk', {
-        issueNumber: 123,        projectId: 'project-1',
+        issueNumber: 123,
+        projectId: 'project-1',
         executionId: 'exec-123',
         runtimeSessionId: 'runtime-123',
         text: 'Reading file...',
@@ -478,9 +451,7 @@ describe('Live convergence with refetch', () => {
     })
 
     await waitFor(() => {
-      const textPart = result.current.turns.at(-1)?.assistant.find(
-        (p): p is TextPart => p.type === 'text',
-      )
+      const textPart = result.current.turns.at(-1)?.assistant.find((p): p is TextPart => p.type === 'text')
       expect(textPart?.text).toBe('Starting task...Reading file...')
     })
   })
@@ -490,17 +461,20 @@ describe('Correlation-based tool merging', () => {
   it('merges update-only events with pending tools by normalized name plus target', async () => {
     const initialTurns = [makeTurn()]
 
-    const { result } = renderHookWithQueryClient(() => useSessionTranscript({
-      issueNumber: 123,
-      sessionId: 'session-123',
-      runtimeSessionId: 'runtime-123',
-      initialTurns,
-      isRunning: true,
-    }))
+    const { result } = renderHookWithQueryClient(() =>
+      useSessionTranscript({
+        issueNumber: 123,
+        sessionId: 'session-123',
+        runtimeSessionId: 'runtime-123',
+        initialTurns,
+        isRunning: true,
+      }),
+    )
 
     act(() => {
       dispatchAgentEvent('coder_tool_call', {
-        issueNumber: 123,        projectId: 'project-1',
+        issueNumber: 123,
+        projectId: 'project-1',
         executionId: 'exec-123',
         runtimeSessionId: 'runtime-123',
         sessionId: 'session-123',
@@ -513,15 +487,14 @@ describe('Correlation-based tool merging', () => {
     })
 
     await waitFor(() => {
-      const toolParts = result.current.turns.at(-1)?.assistant.filter(
-        (part): part is ToolPart => part.type === 'tool',
-      )
+      const toolParts = result.current.turns.at(-1)?.assistant.filter((part): part is ToolPart => part.type === 'tool')
       expect(toolParts).toHaveLength(1)
     })
 
     act(() => {
       dispatchAgentEvent('coder_tool_call', {
-        issueNumber: 123,        projectId: 'project-1',
+        issueNumber: 123,
+        projectId: 'project-1',
         executionId: 'exec-123',
         runtimeSessionId: 'runtime-123',
         sessionId: 'session-123',
@@ -533,9 +506,7 @@ describe('Correlation-based tool merging', () => {
     })
 
     await waitFor(() => {
-      const toolParts = result.current.turns.at(-1)?.assistant.filter(
-        (part): part is ToolPart => part.type === 'tool',
-      )
+      const toolParts = result.current.turns.at(-1)?.assistant.filter((part): part is ToolPart => part.type === 'tool')
       expect(toolParts).toHaveLength(1)
       expect(toolParts?.[0].tool.output).toBe('file content')
     })
@@ -546,13 +517,15 @@ describe('Thinking state for live sessions', () => {
   it('sets isThinking true when session is running with no visible assistant content', async () => {
     const initialTurns = [makeTurn()]
 
-    const { result } = renderHookWithQueryClient(() => useSessionTranscript({
-      issueNumber: 123,
-      sessionId: 'session-123',
-      runtimeSessionId: 'runtime-123',
-      initialTurns,
-      isRunning: true,
-    }))
+    const { result } = renderHookWithQueryClient(() =>
+      useSessionTranscript({
+        issueNumber: 123,
+        sessionId: 'session-123',
+        runtimeSessionId: 'runtime-123',
+        initialTurns,
+        isRunning: true,
+      }),
+    )
 
     await waitFor(() => {
       expect(result.current.isThinking).toBe(true)
@@ -562,13 +535,15 @@ describe('Thinking state for live sessions', () => {
   it('sets isThinking false when text chunk arrives', async () => {
     const initialTurns = [makeTurn()]
 
-    const { result } = renderHookWithQueryClient(() => useSessionTranscript({
-      issueNumber: 123,
-      sessionId: 'session-123',
-      runtimeSessionId: 'runtime-123',
-      initialTurns,
-      isRunning: true,
-    }))
+    const { result } = renderHookWithQueryClient(() =>
+      useSessionTranscript({
+        issueNumber: 123,
+        sessionId: 'session-123',
+        runtimeSessionId: 'runtime-123',
+        initialTurns,
+        isRunning: true,
+      }),
+    )
 
     await waitFor(() => {
       expect(result.current.isThinking).toBe(true)
@@ -576,7 +551,8 @@ describe('Thinking state for live sessions', () => {
 
     act(() => {
       dispatchAgentEvent('coder_text_chunk', {
-        issueNumber: 123,        projectId: 'project-1',
+        issueNumber: 123,
+        projectId: 'project-1',
         executionId: 'exec-123',
         runtimeSessionId: 'runtime-123',
         text: 'Hello world',
@@ -592,13 +568,15 @@ describe('Thinking state for live sessions', () => {
   it('sets isThinking false when tool call starts', async () => {
     const initialTurns = [makeTurn()]
 
-    const { result } = renderHookWithQueryClient(() => useSessionTranscript({
-      issueNumber: 123,
-      sessionId: 'session-123',
-      runtimeSessionId: 'runtime-123',
-      initialTurns,
-      isRunning: true,
-    }))
+    const { result } = renderHookWithQueryClient(() =>
+      useSessionTranscript({
+        issueNumber: 123,
+        sessionId: 'session-123',
+        runtimeSessionId: 'runtime-123',
+        initialTurns,
+        isRunning: true,
+      }),
+    )
 
     await waitFor(() => {
       expect(result.current.isThinking).toBe(true)
@@ -606,7 +584,8 @@ describe('Thinking state for live sessions', () => {
 
     act(() => {
       dispatchAgentEvent('coder_tool_call', {
-        issueNumber: 123,        projectId: 'project-1',
+        issueNumber: 123,
+        projectId: 'project-1',
         executionId: 'exec-123',
         runtimeSessionId: 'runtime-123',
         sessionId: 'session-123',
@@ -624,13 +603,15 @@ describe('Thinking state for live sessions', () => {
 
   it('resets isThinking when initialTurns change', async () => {
     const initialTurns = [makeTurn()]
-    const { result } = renderHookWithQueryClient(() => useSessionTranscript({
-      issueNumber: 123,
-      sessionId: 'session-123',
-      runtimeSessionId: 'runtime-123',
-      initialTurns,
-      isRunning: false,
-    }))
+    const { result } = renderHookWithQueryClient(() =>
+      useSessionTranscript({
+        issueNumber: 123,
+        sessionId: 'session-123',
+        runtimeSessionId: 'runtime-123',
+        initialTurns,
+        isRunning: false,
+      }),
+    )
 
     expect(result.current.isThinking).toBe(false)
   })
@@ -643,13 +624,15 @@ describe('Scroll follow behavior', () => {
 
     const initialTurns = [makeTurn()]
 
-    renderHookWithQueryClient(() => useSessionTranscript({
-      issueNumber: 123,
-      sessionId: 'session-123',
-      runtimeSessionId: 'runtime-123',
-      initialTurns,
-      isRunning: true,
-    }))
+    renderHookWithQueryClient(() =>
+      useSessionTranscript({
+        issueNumber: 123,
+        sessionId: 'session-123',
+        runtimeSessionId: 'runtime-123',
+        initialTurns,
+        isRunning: true,
+      }),
+    )
 
     await waitFor(() => {
       expect(scrollToMock).not.toHaveBeenCalled()
@@ -659,20 +642,23 @@ describe('Scroll follow behavior', () => {
   it('newContentAvailable is set when not near bottom and new content arrives', async () => {
     const initialTurns = [makeTurn()]
 
-    const { result } = renderHookWithQueryClient(() => useSessionTranscript({
-      issueNumber: 123,
-      sessionId: 'session-123',
-      runtimeSessionId: 'runtime-123',
-      initialTurns,
-      isRunning: true,
-    }))
+    const { result } = renderHookWithQueryClient(() =>
+      useSessionTranscript({
+        issueNumber: 123,
+        sessionId: 'session-123',
+        runtimeSessionId: 'runtime-123',
+        initialTurns,
+        isRunning: true,
+      }),
+    )
 
     act(() => result.current.setIsNearBottom(false))
     await waitFor(() => expect(result.current.isNearBottom).toBe(false))
 
     act(() => {
       dispatchAgentEvent('coder_text_chunk', {
-        issueNumber: 123,        projectId: 'project-1',
+        issueNumber: 123,
+        projectId: 'project-1',
         executionId: 'exec-123',
         runtimeSessionId: 'runtime-123',
         text: 'New content',
@@ -688,20 +674,23 @@ describe('Scroll follow behavior', () => {
   it('acknowledgeNewContent clears newContentAvailable', async () => {
     const initialTurns = [makeTurn()]
 
-    const { result } = renderHookWithQueryClient(() => useSessionTranscript({
-      issueNumber: 123,
-      sessionId: 'session-123',
-      runtimeSessionId: 'runtime-123',
-      initialTurns,
-      isRunning: true,
-    }))
+    const { result } = renderHookWithQueryClient(() =>
+      useSessionTranscript({
+        issueNumber: 123,
+        sessionId: 'session-123',
+        runtimeSessionId: 'runtime-123',
+        initialTurns,
+        isRunning: true,
+      }),
+    )
 
     act(() => result.current.setIsNearBottom(false))
     await waitFor(() => expect(result.current.isNearBottom).toBe(false))
 
     act(() => {
       dispatchAgentEvent('coder_text_chunk', {
-        issueNumber: 123,        projectId: 'project-1',
+        issueNumber: 123,
+        projectId: 'project-1',
         executionId: 'exec-123',
         runtimeSessionId: 'runtime-123',
         text: 'New content',
@@ -725,17 +714,20 @@ describe('Live update convergence', () => {
   it('tool start and completion update same tool part without duplication', async () => {
     const initialTurns = [makeTurn()]
 
-    const { result } = renderHookWithQueryClient(() => useSessionTranscript({
-      issueNumber: 123,
-      sessionId: 'session-123',
-      runtimeSessionId: 'runtime-123',
-      initialTurns,
-      isRunning: true,
-    }))
+    const { result } = renderHookWithQueryClient(() =>
+      useSessionTranscript({
+        issueNumber: 123,
+        sessionId: 'session-123',
+        runtimeSessionId: 'runtime-123',
+        initialTurns,
+        isRunning: true,
+      }),
+    )
 
     act(() => {
       dispatchAgentEvent('coder_tool_call', {
-        issueNumber: 123,        projectId: 'project-1',
+        issueNumber: 123,
+        projectId: 'project-1',
         executionId: 'exec-123',
         runtimeSessionId: 'runtime-123',
         sessionId: 'session-123',
@@ -747,20 +739,19 @@ describe('Live update convergence', () => {
     })
 
     await waitFor(() => {
-      const toolParts = result.current.turns.at(-1)?.assistant.filter(
-        (part): part is ToolPart => part.type === 'tool',
-      )
+      const toolParts = result.current.turns.at(-1)?.assistant.filter((part): part is ToolPart => part.type === 'tool')
       expect(toolParts).toHaveLength(1)
       expect(toolParts?.[0].tool.status).toBe('running')
     })
 
-    const firstToolId = result.current.turns.at(-1)?.assistant.find(
-      (part): part is ToolPart => part.type === 'tool',
-    )?.id
+    const firstToolId = result.current.turns
+      .at(-1)
+      ?.assistant.find((part): part is ToolPart => part.type === 'tool')?.id
 
     act(() => {
       dispatchAgentEvent('coder_tool_call', {
-        issueNumber: 123,        projectId: 'project-1',
+        issueNumber: 123,
+        projectId: 'project-1',
         executionId: 'exec-123',
         runtimeSessionId: 'runtime-123',
         sessionId: 'session-123',
@@ -772,9 +763,7 @@ describe('Live update convergence', () => {
     })
 
     await waitFor(() => {
-      const toolParts = result.current.turns.at(-1)?.assistant.filter(
-        (part): part is ToolPart => part.type === 'tool',
-      )
+      const toolParts = result.current.turns.at(-1)?.assistant.filter((part): part is ToolPart => part.type === 'tool')
       expect(toolParts).toHaveLength(1)
       expect(toolParts?.[0].id).toBe(firstToolId)
       expect(toolParts?.[0].tool.status).toBe('completed')
@@ -785,17 +774,20 @@ describe('Live update convergence', () => {
   it('preserves turn order after multiple live events', async () => {
     const initialTurns = [makeTurn()]
 
-    const { result } = renderHookWithQueryClient(() => useSessionTranscript({
-      issueNumber: 123,
-      sessionId: 'session-123',
-      runtimeSessionId: 'runtime-123',
-      initialTurns,
-      isRunning: true,
-    }))
+    const { result } = renderHookWithQueryClient(() =>
+      useSessionTranscript({
+        issueNumber: 123,
+        sessionId: 'session-123',
+        runtimeSessionId: 'runtime-123',
+        initialTurns,
+        isRunning: true,
+      }),
+    )
 
     act(() => {
       dispatchAgentEvent('coder_text_chunk', {
-        issueNumber: 123,        projectId: 'project-1',
+        issueNumber: 123,
+        projectId: 'project-1',
         executionId: 'exec-123',
         runtimeSessionId: 'runtime-123',
         text: 'First text',
@@ -805,7 +797,8 @@ describe('Live update convergence', () => {
 
     act(() => {
       dispatchAgentEvent('coder_tool_call', {
-        issueNumber: 123,        projectId: 'project-1',
+        issueNumber: 123,
+        projectId: 'project-1',
         executionId: 'exec-123',
         runtimeSessionId: 'runtime-123',
         sessionId: 'session-123',
@@ -818,7 +811,8 @@ describe('Live update convergence', () => {
 
     act(() => {
       dispatchAgentEvent('coder_text_chunk', {
-        issueNumber: 123,        projectId: 'project-1',
+        issueNumber: 123,
+        projectId: 'project-1',
         executionId: 'exec-123',
         runtimeSessionId: 'runtime-123',
         text: 'Second text',
@@ -827,16 +821,12 @@ describe('Live update convergence', () => {
     })
 
     await waitFor(() => {
-      const textParts = result.current.turns.at(-1)?.assistant.filter(
-        (p): p is TextPart => p.type === 'text',
-      )
+      const textParts = result.current.turns.at(-1)?.assistant.filter((p): p is TextPart => p.type === 'text')
       expect(textParts).toHaveLength(1)
       expect(textParts?.[0].text).toBe('First textSecond text')
     })
 
-    const toolParts = result.current.turns.at(-1)?.assistant.filter(
-      (part): part is ToolPart => part.type === 'tool',
-    )
+    const toolParts = result.current.turns.at(-1)?.assistant.filter((part): part is ToolPart => part.type === 'tool')
     expect(toolParts).toHaveLength(1)
     expect(toolParts?.[0].tool.toolCallId).toBe('tc-order-1')
   })

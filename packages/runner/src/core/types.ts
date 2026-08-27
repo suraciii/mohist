@@ -170,7 +170,6 @@ export type WorkDispatchResponse = {
   agentSessionId?: string | null
   recovery?: string | null
   recoveryRemaining?: number | null
-  recoveryGeneration?: number | null
   agentDefinition?: AgentExecutionDefinition | null
   agentSessionStartup?: AgentSessionStartup | null
   /**
@@ -277,8 +276,6 @@ export interface DispatchWorkItem {
   agentSessionId?: string | null
   recovery?: JsonObject | null
   recoveryRemaining?: number | null
-  /** Explicit dispatch generation for replacement identity fencing. */
-  recoveryGeneration?: number | null
   agentDefinition?: AgentExecutionDefinition | null
   agentSessionStartup?: AgentSessionStartup | null
   /**

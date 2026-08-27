@@ -58,12 +58,14 @@ export function createHostCleanup(deps: HostCleanupDeps) {
       // whole `<runnerRoot>/agent-workspaces/` tree is retired disk
       // data (no registry, no migration to Workspace entities) and is
       // removed here as ordinary disk-policy cleanup.
-      const legacyAgentWorkspaces = join(deps.runnerRoot, 'agent-workspaces')
-      if (exists(legacyAgentWorkspaces)) {
-        await deleteDirectory(legacyAgentWorkspaces)
-        cleanupLog.info('removed retired agent-workspaces directory', {
-          path: legacyAgentWorkspaces,
-        })
+      const retiredDirectories = [
+        join(deps.runnerRoot, 'agent-workspaces'),
+        join(deps.runnerRoot, '.mohist', 'runner-state'),
+      ]
+      for (const path of retiredDirectories) {
+        if (!exists(path)) continue
+        await deleteDirectory(path)
+        cleanupLog.info('removed retired Runner directory', { path })
       }
       const runtime = deps.openCodeRuntime()
       let blockedPaths = new Set<string>()

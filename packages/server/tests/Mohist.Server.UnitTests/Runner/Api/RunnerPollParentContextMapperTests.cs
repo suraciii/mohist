@@ -35,19 +35,7 @@ public sealed class RunnerPollParentContextMapperTests
         Assert.Equal("Parent body", context.GetProperty("body").GetString());
     }
 
-    [Fact]
-    public async Task RecoveryGenerationIsPreservedAtTheHttpBoundary()
-    {
-        var response = await RunnerRoutes.ToWorkDispatchResponseAsync(
-            Dispatch(recoveryGeneration: 1),
-            (_, _) => Task.FromResult<ParentIssueContext?>(null));
-
-        Assert.Equal(1, response.RecoveryGeneration);
-        using var json = JsonDocument.Parse(JSON.Serialize(response));
-        Assert.Equal(1, json.RootElement.GetProperty("recoveryGeneration").GetInt32());
-    }
-
-    [Fact]
+     [Fact]
     public async Task OrdinaryPlanIssueMapsNoParentContext()
     {
         var calls = 0;
@@ -107,8 +95,7 @@ public sealed class RunnerPollParentContextMapperTests
         string stage = "plan",
         string uses = "mohist/opencode",
         string ownerKind = WorkDispatchOwnerKinds.Workflow,
-        bool includeIssue = true,
-        int recoveryGeneration = 0) =>
+        bool includeIssue = true) =>
         new(
             "wr-parent-context",
             "plan.1",
@@ -117,8 +104,7 @@ public sealed class RunnerPollParentContextMapperTests
             WorkType: workType,
             Stage: stage,
             Issue: includeIssue ? new WorkIssueRef("proj-child", 42) : null,
-            OwnerKind: ownerKind,
-            RecoveryGeneration: recoveryGeneration);
+            OwnerKind: ownerKind);
 
     private static Task<ParentIssueContext?> UnexpectedResolution(string projectId, int issueNumber) =>
         throw new Xunit.Sdk.XunitException($"Unexpected parent resolution for {projectId}#{issueNumber}");

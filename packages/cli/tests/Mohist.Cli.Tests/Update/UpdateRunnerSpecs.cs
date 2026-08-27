@@ -109,27 +109,6 @@ public class UpdateRunnerSpecs
                 });
             }
 
-            if (request.Method == HttpMethod.Get
-                && Uri.UnescapeDataString(path) == "/api/runner/runner-1/update-operation/runner-update:runner/recovery-status")
-            {
-                return Task.FromResult(RecordingHttpHandler.Json(new
-                {
-                    success = true,
-                    data = new
-                    {
-                        operationId = "runner-update:runner",
-                        runnerId = "runner-1",
-                        operationStatus = "settled",
-                        complete = true,
-                        affectedWorks = new[]
-                        {
-                            new { ownerKind = "agent-job", ownerId = "job-1", workId = "job-1", taskRunId = (string?)null, workType = "agent-job", status = "receipt-acked", acknowledged = true },
-                            new { ownerKind = "agent-job", ownerId = "job-2", workId = "job-2", taskRunId = (string?)null, workType = "agent-job", status = "replacement-settled", acknowledged = true },
-                        },
-                    },
-                }));
-            }
-
             if (request.Method == HttpMethod.Post && path == "/api/runner/runner-1/update-interrupt")
             {
                 return Task.FromResult(RecordingHttpHandler.Json(new
@@ -168,7 +147,6 @@ public class UpdateRunnerSpecs
                 "/api/runner/identity",
                 "/api/runner/runner-1/update-interrupt",
                 "/api/runner/identity",
-                "/api/runner/runner-1/update-operation/runner-update:runner/recovery-status",
             },
             handler.Requests.Select(request => Uri.UnescapeDataString(request.RequestUri!.AbsolutePath)));
         Assert.Contains(nameof(FakeServiceInstaller.RestartRunnerAsync), installer.Calls);
@@ -233,97 +211,7 @@ public class UpdateRunnerSpecs
         Assert.Contains("Runner update interrupt rollback: status=cancelled runnerId=runner-1.", f.Stdout.ToString());
     }
 
-    [Fact]
-    public async Task UpdateRunner_WhenAffectedWorkRemainsUnresolved_ExitsNonSuccessfullyAfterBoundedWait()
-    {
-        var f = new UpdateTestFactory();
-        var installer = new FakeServiceInstaller { RunnerInstalled = true };
-        var hash = "abcdef1234567890abcdef1234567890abcdef12";
-        f.Commands.SetResultFor("git", args => args.SequenceEqual(["rev-parse", "HEAD"]), 0, hash + "\n", "");
-        var time = new FakeTimeProvider(new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero));
-        var handler = new RecordingHttpHandler((request, _) =>
-        {
-            var path = Uri.UnescapeDataString(request.RequestUri!.AbsolutePath);
-            if (request.Method == HttpMethod.Get && path == "/api/runner/identity")
-            {
-                return Task.FromResult(RecordingHttpHandler.Json(new
-                {
-                    success = true,
-                    data = new
-                    {
-                        runnerId = "runner-1",
-                        hostname = "test-host",
-                        buildGitHash = hash,
-                        status = "online",
-                        connectionState = "connected",
-                    },
-                }));
-            }
-
-            if (request.Method == HttpMethod.Post && path == "/api/runner/runner-1/update-interrupt")
-            {
-                return Task.FromResult(RecordingHttpHandler.Json(new
-                {
-                    success = true,
-                    data = new
-                    {
-                        runnerId = "runner-1",
-                        status = "interrupted",
-                        interruptedWorkIds = new[] { "job-1" },
-                        interruptedWorkCount = 1,
-                        operationId = "runner-update:unresolved",
-                        affectedWorks = new[]
-                        {
-                            new { ownerKind = "agent-job", ownerId = "job-1", workId = "job-1", taskRunId = (string?)null, workType = "agent-job" },
-                        },
-                    },
-                }));
-            }
-
-            if (request.Method == HttpMethod.Get
-                && path == "/api/runner/runner-1/update-operation/runner-update:unresolved/recovery-status")
-            {
-                return Task.FromResult(RecordingHttpHandler.Json(new
-                {
-                    success = true,
-                    data = new
-                    {
-                        operationId = "runner-update:unresolved",
-                        runnerId = "runner-1",
-                        operationStatus = "pending",
-                        complete = false,
-                        affectedWorks = new[]
-                        {
-                            new { ownerKind = "agent-job", ownerId = "job-1", workId = "job-1", taskRunId = (string?)null, workType = "agent-job", status = "unresolved", acknowledged = false },
-                        },
-                    },
-                }));
-            }
-
-            return Task.FromResult(RecordingHttpHandler.JsonError("unexpected request", statusCode: HttpStatusCode.NotFound));
-        });
-        var updater = f.BuildUpdater(
-            handler,
-            unitDir: UpdateTestFactory.UnitDir,
-            getLocalHostname: () => "test-host",
-            timeProvider: time,
-            runnerRecoveryTimeout: TimeSpan.FromSeconds(1),
-            runnerRecoveryPollInterval: TimeSpan.FromMilliseconds(100),
-            serviceInstaller: installer);
-
-        var update = updater.UpdateRunnerAsync("/repo", dryRun: false);
-        await handler.WaitForRequestCountAsync(4);
-        time.Advance(TimeSpan.FromSeconds(1));
-        var exitCode = await update;
-
-        Assert.Equal(1, exitCode);
-        Assert.Contains("workId=job-1", f.Stderr.ToString());
-        Assert.Contains("status=unresolved", f.Stderr.ToString());
-        Assert.DoesNotContain("Runner updated successfully.", f.Stdout.ToString());
-        Assert.Contains(nameof(FakeServiceInstaller.RestartRunnerAsync), installer.Calls);
-    }
-
-    [Fact]
+     [Fact]
     public async Task UpdateRunner_WhenInterruptIsNotConfirmed_FailsWithoutRestart()
     {
         var f = new UpdateTestFactory();

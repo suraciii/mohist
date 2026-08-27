@@ -638,15 +638,11 @@ public sealed class WorkflowGrainAgentResultSettlementSpecs
         public IEventStore Events => Arrangement.Events;
         public IDispatchSnapshotStore Snapshots => Arrangement.Snapshots;
         public IWorkflowRunStore Store => Arrangement.Store;
-        public RunnerUpdateOperationGrainRegistry? Operations => Arrangement.Operations;
         public string RunId => Arrangement.RunId;
         public string WorkerId => Arrangement.WorkerId;
 
         public WorkflowReportService CreateReportService() =>
-            WorkflowGrainContractSupport.CreateReportService(
-                Services,
-                Grain,
-                Operations is null ? null : runnerId => Operations.For(runnerId));
+            WorkflowGrainContractSupport.CreateReportService(Services, Grain);
 
         public async Task<WorkflowRun> LoadRunAsync() =>
             await Store.LoadAsync(RunId) ?? throw new InvalidOperationException("run missing");

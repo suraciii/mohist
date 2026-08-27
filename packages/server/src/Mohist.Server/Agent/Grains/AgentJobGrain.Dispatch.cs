@@ -109,7 +109,6 @@ public sealed partial class AgentJobGrain
             AgentDefinition: ExecutionDefinitionFrom(input),
             PinnedRunnerId: input.PinnedRunnerId,
             AgentSessionStartup: input.AgentSessionStartup,
-            RecoveryGeneration: State.RecoveryGeneration,
             OriginMarker: input.OriginMarker);
     }
 }

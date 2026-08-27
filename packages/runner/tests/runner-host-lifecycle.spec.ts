@@ -22,7 +22,6 @@ type LifecycleMocks = Record<
   | 'disconnect'
   | 'poll'
   | 'report'
-  | 'reportRecoveryStopFailure'
   | 'uploadTaskLog'
   | 'fetchConfig'
   | 'workflowAgentSessionRuntimeEvents'
@@ -76,7 +75,6 @@ const heartbeat = scopedMock('heartbeat')
 const disconnect = scopedMock('disconnect')
 const poll = scopedMock('poll')
 const report = scopedMock('report')
-const reportRecoveryStopFailure = scopedMock('reportRecoveryStopFailure')
 const uploadTaskLog = scopedMock('uploadTaskLog')
 const fetchConfig = scopedMock('fetchConfig')
 const workflowAgentSessionRuntimeEvents = scopedMock('workflowAgentSessionRuntimeEvents')
@@ -96,7 +94,6 @@ vi.mock('../src/server/connection.js', () => ({
     disconnect = disconnect
     poll = poll
     report = report
-    reportRecoveryStopFailure = reportRecoveryStopFailure
     uploadTaskLog = uploadTaskLog
     fetchConfig = fetchConfig
     workflowAgentSessionRuntimeEvents = workflowAgentSessionRuntimeEvents
@@ -154,7 +151,6 @@ function createLifecycleMocks(): LifecycleMocks {
     disconnect: vi.fn(async () => undefined),
     poll: vi.fn(async () => []),
     report: vi.fn(async () => ({ verdict: 'accepted' })),
-    reportRecoveryStopFailure: vi.fn(async () => undefined),
     uploadTaskLog: vi.fn(async () => ({ status: 'changed', accepted: 0, truncated: false })),
     fetchConfig: vi.fn(async () => null),
     workflowAgentSessionRuntimeEvents: vi.fn(async () => undefined),
@@ -390,7 +386,7 @@ describe('RunnerHost', () => {
     }
   })
 
-  it('RunnerHost_UpdateShutdown_AbortsAffectedWorkAndSettlesUnaffectedWork', async ({ resources }) => {
+  it('RunnerHost_ShutdownAbortsBlockedWorkAndSettlesCompletedWork', async ({ resources }) => {
     const affectedStarted = deferred<void>()
     let affectedHasStarted = false
     const unaffectedReported = deferred<void>()
@@ -472,23 +468,7 @@ describe('RunnerHost', () => {
         dispatchLivenessProbeIntervalMs: QUIET_INTERVAL_MS,
       },
       undefined,
-      {
-        fetchPendingUpdateOperation: async () => ({
-          operationId: 'update-1',
-          runnerId: 'runner-test',
-          createdAt: '2026-01-01T00:00:00.000Z',
-          affectedWorks: [
-            {
-              ownerKind: 'agent-job',
-              ownerId: affected.agentJobId,
-              workId: affected.workId,
-              workType: affected.workType,
-            },
-          ],
-        }),
-        shutdownHandoffBudgetMs: 25,
-        shutdownStopBudgetMs: 25,
-      },
+      { shutdownStopBudgetMs: 25 },
     )
 
     const run = host.run(controller.signal)
@@ -513,11 +493,6 @@ describe('RunnerHost', () => {
         ),
       ).toBe(1)
       expect(affectedPresence.at(-1)).toBe(false)
-      expect(reportRecoveryStopFailure).toHaveBeenCalledTimes(1)
-      expect(reportRecoveryStopFailure).toHaveBeenCalledWith(
-        expect.objectContaining({ operationId: 'update-1', workId: affected.workId }),
-        expect.any(AbortSignal),
-      )
       expect(report).toHaveBeenCalledTimes(1)
       expect(report).toHaveBeenCalledWith(
         expect.objectContaining({ workId: unaffected.workId }),

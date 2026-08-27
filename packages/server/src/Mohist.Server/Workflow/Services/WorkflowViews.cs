@@ -24,7 +24,6 @@ public sealed record WorkflowStatusView(
     MetadataView? Metadata = null,
     AgentResultAttentionView? AgentResultAttention = null,
     WorkInterruptionView? Interruption = null,
-    AgentInterruptionAttentionView? InterruptionAttention = null,
     VerificationLanesView? VerificationLanes = null);
 
 /// <summary>
@@ -57,44 +56,9 @@ public sealed record AgentResultAttentionView(
     string? RunnerId = null,
     string? AgentSessionId = null,
     string? AgentTurnId = null,
-    string? UpdateOperationId = null,
-    string? ExpectedRecoveryPath = null,
-    string? StopFailure = null,
     string? NextAction = null,
     IReadOnlyList<string>? RecoveryActions = null,
     string? ReasonCode = null);
-
-/// <summary>
-/// The durable result-settlement state for an Agent task attempt. This is
-/// present while the task is awaiting a result, unknown, or blocked; the
-/// aggregate clears it only after an authoritative result wins.
-/// </summary>
-[GenerateSerializer]
-public sealed record AgentInterruptionAttentionView(
-    string State,
-    string Message,
-    string UpdateOperationId,
-    string WorkId,
-    string? TaskRunId,
-    int RecoveryGeneration,
-    string? AgentSessionId,
-    string? AgentTurnId,
-    string? ReplacementTurnId,
-    string ExpectedRecoveryPath,
-    string? StopFailure = null);
-
-[GenerateSerializer]
-public sealed record AgentWorkInterruptionView(
-    string State,
-    string UpdateOperationId,
-    string WorkId,
-    string? TaskRunId,
-    int RecoveryGeneration,
-    string? OriginalTurnId,
-    string? ReplacementTurnId,
-    string? StopFailure,
-    string ExpectedRecoveryPath,
-    DateTimeOffset RecordedAt);
 
 [GenerateSerializer]
 public sealed record AgentResultSettlementView(
@@ -111,10 +75,6 @@ public sealed record AgentResultSettlementView(
     string? Runtime = null,
     string? RuntimeSessionId = null,
     string? StopOperationId = null,
-    string? UpdateOperationId = null,
-    string? ExpectedRecoveryPath = null,
-    string? StopFailure = null,
-    AgentWorkInterruptionView? Interruption = null,
     string? NextAction = null,
     IReadOnlyList<string>? RecoveryActions = null,
     string? ReasonCode = null);
@@ -206,7 +166,6 @@ public sealed record TaskStatusView(
     ExecutionError? Error = null,
     AgentResultSettlementView? AgentResultSettlement = null,
     WorkInterruptionView? Interruption = null,
-    AgentWorkInterruptionView? AgentInterruption = null,
     TaskLaneView? Lane = null);
 
 [GenerateSerializer]

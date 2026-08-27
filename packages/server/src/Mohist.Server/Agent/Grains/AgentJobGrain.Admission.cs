@@ -278,9 +278,7 @@ public sealed partial class AgentJobGrain
         // call RunnerGrain.AssignAgentJobAsync and does not transition
         // the job to Running; the next poll claim does that.
         var now = _timeProvider.GetUtcNow();
-        var workId = State.RecoveryGeneration > 0 && !string.IsNullOrWhiteSpace(State.InterruptedWorkId)
-            ? RecoveryWorkId(State.InterruptedWorkId!, State.RecoveryGeneration)
-            : StableWorkId(Key);
+        var workId = StableWorkId(Key);
         var dispatch = await BuildDispatchAsync(workId);
 
         State.RunnerId = runnerId;
@@ -288,7 +286,6 @@ public sealed partial class AgentJobGrain
         State.ReadySince = now;
         State.RunnerAccepted = false;
         State.RunningSince = null;
-        UpdateRecoveryAttempt(workId, runnerId, AgentJobStatus.Pending);
 
         var record = new AgentJobLedgerRecord(
             JobKey: Key,

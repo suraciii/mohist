@@ -6,7 +6,6 @@ import type {
   WorkflowAgentResultAttention,
   WorkflowAgentResultSettlement,
   WorkInterruption,
-  WorkflowAgentInterruption,
 } from './stage-state'
 import type { WorkflowTaskRequiredFile, WorkflowArtifactSummary } from './artifact'
 
@@ -36,7 +35,6 @@ export interface WorkflowTimelineTask {
   error?: import('./stage-state').WorkflowExecutionError | null
   agentResultSettlement?: WorkflowAgentResultSettlement | null
   interruption?: WorkInterruption | null
-  agentInterruption?: WorkflowAgentInterruption | null
 }
 
 export interface WorkflowTimelineCheck {
@@ -80,5 +78,4 @@ export interface WorkflowTimeline {
   availableActions: WorkflowTimelineAction[]
   interruption?: WorkInterruption | null
   agentResultAttention?: WorkflowAgentResultAttention | null
-  interruptionAttention?: WorkflowAgentInterruption | null
 }

@@ -203,7 +203,6 @@ public sealed class WorkflowItemTranslator : IScopedService
             ?? throw new InvalidOperationException(
                 $"Task work item '{workId}' for workflow '{workflowRunId}' has no running task attempt");
         var taskRunId = task.Id;
-        var recoveryGeneration = task.RecoveryGeneration;
         var attempt = WorkflowDispatchHelpers.TaskAttempt(workId);
 
         var payload = await BuildPayloadAsync(item.Stage, workId, "task", item.Title ?? string.Empty, attempt, workflowRunId, run);
@@ -251,8 +250,7 @@ public sealed class WorkflowItemTranslator : IScopedService
             EpicNumber: ReadEpicNumber(run),
             Expect: expectStr,
             AgentDefinition: agentDefinition,
-            TaskRunId: taskRunId,
-            RecoveryGeneration: recoveryGeneration);
+            TaskRunId: taskRunId);
     }
 
     private async Task<WorkDispatch> BuildChecksDispatchAsync(
@@ -649,7 +647,7 @@ public sealed class WorkflowItemTranslator : IScopedService
                 ArtifactUploadIds: result.ArtifactUploadIds is { Length: > 0 }
                     ? result.ArtifactUploadIds.ToArray()
                     : null,
-                TerminalResultFingerprint: Mohist.Server.Runner.Grains.RuntimeRecoveryReceiptFingerprint.For(result)));
+                TerminalResultFingerprint: Mohist.Server.Runner.Grains.WorkResultFingerprint.For(result)));
         }
 
         return new InboundReport.Task(new TaskReport(
@@ -663,7 +661,7 @@ public sealed class WorkflowItemTranslator : IScopedService
             ArtifactUploadIds: result.ArtifactUploadIds is { Length: > 0 }
                 ? result.ArtifactUploadIds.ToArray()
                 : null,
-            TerminalResultFingerprint: Mohist.Server.Runner.Grains.RuntimeRecoveryReceiptFingerprint.For(result)));
+            TerminalResultFingerprint: Mohist.Server.Runner.Grains.WorkResultFingerprint.For(result)));
     }
 
     private static InboundReport TranslateChecksResult(WorkItem item, WorkResult result)
@@ -675,7 +673,7 @@ public sealed class WorkflowItemTranslator : IScopedService
         return new InboundReport.Checks(new CheckReport(
             item.Stage,
             results,
-            RuntimeRecoveryReceiptFingerprint.For(result)));
+            WorkResultFingerprint.For(result)));
     }
 
     private static bool HasValidCheckResultRows(IReadOnlyList<CheckItem>? checks, JsonElement? output)
@@ -735,7 +733,7 @@ public sealed class WorkflowItemTranslator : IScopedService
         return new InboundReport.Checks(new CheckReport(
             item.Stage,
             failed,
-            RuntimeRecoveryReceiptFingerprint.For(result)));
+            WorkResultFingerprint.For(result)));
     }
 
     /// <summary>

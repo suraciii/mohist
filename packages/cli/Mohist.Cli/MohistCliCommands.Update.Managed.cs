@@ -106,26 +106,12 @@ internal partial class SourceCodeUpdater
                 return await FinalizeManagedFailureAsync(context, 1, postOutcome);
             }
 
-
-        if (IncludesManagedScope(scope, "runner") && interruption is not null)
-        {
-            var recovery = await _runnerRefreshVerifier.WaitForRecoveryAsync(
-                interruption,
-                cancellationToken);
-            context.RunnerRecovery = recovery;
-            recovery.WriteSummary(_out, _err);
-            if (recovery.HasAffectedWork && !recovery.FullyRecovered)
+            if (IncludesManagedScope(scope, "runner") && interruption is not null)
             {
-                context.UnavailableCapability = "Runner work recovery unresolved";
-                context.Outcome = UpdateOutcome.Failed;
-                context.LastExitCode = recovery.ExitCode;
-                context.RecordStage("Verifying workflow runtime", "failed: runner work recovery unresolved");
-                return await FinalizeManagedFailureAsync(context, recovery.ExitCode, postOutcome);
+                context.RecordStage(
+                    "Verifying workflow runtime",
+                    "replacement Runner registered; old-generation work follows normal failure recovery");
             }
-            context.RecordStage(
-                "Verifying workflow runtime",
-                recovery.HasAffectedWork ? "all interrupted work recovered" : "no interrupted work required recovery");
-        }
 
             var committed = await _operations.CommitManagedUpdateAsync(prepared.Session, cancellationToken);
             if (committed != 0)

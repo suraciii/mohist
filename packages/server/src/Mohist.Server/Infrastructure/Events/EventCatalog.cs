@@ -31,7 +31,6 @@ public static class EventCatalog
         ReverseDns.TaskFailed,
         ReverseDns.TaskInterrupted,
         ReverseDns.TaskCancelled,
-        ReverseDns.AgentTaskUpdateInterrupted,
         ReverseDns.AgentTaskInterruptionLifecycleChanged,
         ReverseDns.AgentTaskResultUnconfirmed,
         ReverseDns.TaskBlocked,
@@ -52,7 +51,6 @@ public static class EventCatalog
         ReverseDns.AgentSessionInterruptionLifecycleChanged,
         ReverseDns.RunnerDisconnected,
         ReverseDns.AgentJobFailed,
-        ReverseDns.AgentJobUpdateInterrupted,
         ReverseDns.AgentJobTerminalDelivery,
         ReverseDns.AgentJobSubagentTerminal,
         ReverseDns.AgentSessionFollowupDelivery,
@@ -125,7 +123,6 @@ public static class EventCatalog
         "coder_session_failed",
         "coder_session_cancelled",
         "coder_session_status_changed",
-        "coder_recovery_status",
         "plan_session_update",
         "plan_round_start",
         "plan_round_complete",
@@ -194,7 +191,6 @@ public static class EventCatalog
         public const string TaskFailed = "com.mohist.workflow.task.failed";
         public const string TaskInterrupted = "com.mohist.workflow.task.interrupted";
         public const string TaskCancelled = "com.mohist.workflow.task.cancelled";
-        public const string AgentTaskUpdateInterrupted = "com.mohist.workflow.agent.task.update-interrupted";
         public const string AgentTaskInterruptionLifecycleChanged = "com.mohist.workflow.agent.task.interruption-lifecycle-changed";
         public const string AgentTaskResultUnconfirmed = "com.mohist.workflow.agent-result-unconfirmed";
         public const string TaskBlocked = "com.mohist.workflow.task.blocked";
@@ -218,7 +214,6 @@ public static class EventCatalog
         public const string RunnerDisconnected = "com.mohist.runner.disconnected";
 
         public const string AgentJobFailed = "com.mohist.agent.job.failed";
-        public const string AgentJobUpdateInterrupted = "com.mohist.agent.job.update-interrupted";
         public const string AgentJobTerminalDelivery = "com.mohist.agent.job.terminal-delivery";
         public const string AgentJobSubagentTerminal = "com.mohist.agent.job.subagent-terminal";
         public const string AgentSessionFollowupDelivery = "com.mohist.agent.session.followup-delivery";

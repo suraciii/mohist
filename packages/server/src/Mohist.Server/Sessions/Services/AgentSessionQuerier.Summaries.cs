@@ -57,8 +57,6 @@ public partial class AgentSessionQuerier
                     PayloadJson: e.PayloadJson)));
 
         var activity = ResolveAgentSessionActivity(record);
-        var interruption = AgentSessionObservationMapper.Current(session.Status);
-
         var usage = AgentSessionJsonHelper.Usage(session);
 
         return new GenericAgentSessionSummaryDto(
@@ -71,8 +69,8 @@ public partial class AgentSessionQuerier
             session.Status.CreatedAt.ToString("o"),
             AgentSessionJsonHelper.LastActivityAt(session).ToString("o"),
             summary.ResolvedModel,
-            interruption is null ? summary.FailureCategory : null,
-            interruption is null ? summary.FailureReason : null,
+            summary.FailureCategory,
+            summary.FailureReason,
             summary.ToolCallCount,
             summary.ToolErrorCount,
             BuildGenericSessionSummaryContextRefs(record),
@@ -81,8 +79,6 @@ public partial class AgentSessionQuerier
             CurrentTurnId(session),
             AgentSessionObservationMapper.Inputs(session.Status),
             AgentSessionObservationMapper.Turns(session.Status),
-            Interruption: interruption,
-            InterruptionHistory: AgentSessionObservationMapper.History(session.Status),
             Origin: record.Label(GenericAgentSessionMetadata.Origin),
             TargetId: record.Label(GenericAgentSessionMetadata.TargetId),
             AppliedReasoningEffort: summary.AppliedReasoningEffort);
@@ -113,7 +109,6 @@ public partial class AgentSessionQuerier
         var transcriptSummary = await ResolveTranscriptSummaryAsync(db, session.Id, session, ct);
 
         var activity = ResolveAgentSessionActivity(record);
-        var interruption = AgentSessionObservationMapper.Current(session.Status);
         var usage = AgentSessionJsonHelper.Usage(session);
 
         return new UnifiedSessionSummaryDto(
@@ -126,8 +121,8 @@ public partial class AgentSessionQuerier
             LastActivityAt: AgentSessionJsonHelper.LastActivityAt(session).ToString("o"),
             Model: session.Settings.Model,
             ResolvedModel: transcriptSummary.ResolvedModel,
-            FailureCategory: interruption is null ? transcriptSummary.FailureCategory : null,
-            FailureReason: interruption is null ? transcriptSummary.FailureReason : null,
+            FailureCategory: transcriptSummary.FailureCategory,
+            FailureReason: transcriptSummary.FailureReason,
             ToolCallCount: transcriptSummary.ToolCallCount,
             ToolErrorCount: transcriptSummary.ToolErrorCount,
             AgentId: isAgentSession ? record.Label(GenericAgentSessionMetadata.AgentId) : null,
@@ -141,8 +136,6 @@ public partial class AgentSessionQuerier
             Inputs: AgentSessionObservationMapper.Inputs(session.Status),
             Turns: AgentSessionObservationMapper.Turns(session.Status),
             RecoveryHistory: transcriptSummary.RecoveryHistory,
-            Interruption: interruption,
-            InterruptionHistory: AgentSessionObservationMapper.History(session.Status),
             Origin: record.Label(GenericAgentSessionMetadata.Origin),
             TargetId: record.Label(GenericAgentSessionMetadata.TargetId),
             AppliedReasoningEffort: transcriptSummary.AppliedReasoningEffort);

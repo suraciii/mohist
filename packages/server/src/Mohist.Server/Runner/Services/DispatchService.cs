@@ -480,10 +480,7 @@ public sealed class DispatchService : IScopedService
         // A blocked settlement has already crossed the durable release
         // boundary; nothing should be redelivered or recovered for it.
         var settlement = settlementTask.Task.AgentResultSettlement!;
-        // Update-interrupted work waits for a recovery receipt and a fresh
-        // replacement dispatch; it never reconciles through redelivery.
-        if (settlement.State != AgentResultSettlementState.Unknown
-            || !string.IsNullOrWhiteSpace(settlement.UpdateOperationId))
+        if (settlement.State != AgentResultSettlementState.Unknown)
             return (null, null, ReserveSlot: false);
         var activeWork = run.CurrentActiveWorkFor(runnerId);
         if (activeWork is not { IsTask: true }

@@ -36,15 +36,6 @@ internal enum UpdateOutcome
 
 internal sealed record CliOutcomeLogEntry(DateTimeOffset At, string Stage, string Message);
 
-internal sealed record CliRecoveryWorkOutcome(
-    string OwnerKind,
-    string OwnerId,
-    string WorkId,
-    string? TaskRunId,
-    string WorkType,
-    string Status,
-    string State);
-
 internal sealed record CliOutcomeRequest(
     string? JobId,
     string? Status,
@@ -52,8 +43,7 @@ internal sealed record CliOutcomeRequest(
     string? Outcome,
     string? UnavailableCapability,
     IReadOnlyList<CliOutcomeLogEntry>? Logs,
-    string? SourceHead,
-    IReadOnlyList<CliRecoveryWorkOutcome>? Recovery = null);
+    string? SourceHead);
 
 internal static class CliOutcomeJson
 {
@@ -110,7 +100,6 @@ internal sealed class UpdateContext
     public RuntimeTargetSet? ExpectedTargets { get; set; }
     public ManagedUpdateSession? ManagedSession { get; set; }
     public RunnerInterruptResult? RunnerInterrupt { get; set; }
-    public RunnerRecoveryReport? RunnerRecovery { get; set; }
 
     public void RecordWarning(string warning)
     {

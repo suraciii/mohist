@@ -29,11 +29,9 @@ public partial class WorkflowGrain
 
         if (string.Equals(reminderName, AgentSessionInterruptionReminderName, StringComparison.Ordinal))
         {
-            await DeliverPendingSessionInterruptionAsync();
             return;
         }
 
-        await DeliverPendingSessionInterruptionAsync();
         await ReconcileAgentResultSettlementAsync();
     }
 
@@ -70,7 +68,7 @@ public partial class WorkflowGrain
             return;
         }
 
-        if (settlement.State is AgentResultSettlementState.RecoverablyInterrupted or AgentResultSettlementState.Unknown)
+        if (settlement.State == AgentResultSettlementState.Unknown)
         {
             if (EnsureSettlementDeadline(settlement))
                 await CommitAsync([]);

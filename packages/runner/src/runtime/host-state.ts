@@ -9,7 +9,6 @@ export interface ShutdownWorkState {
   requested: boolean
   stopConfirmed: boolean
   operationId: string | null
-  stopFailure?: string | null
 }
 
 /**

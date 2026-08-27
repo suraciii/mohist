@@ -8,12 +8,7 @@ import type {
   SessionRecoveryObservation,
   SessionTurn,
 } from '../../../entities/coder-session'
-import type {
-  TimelineFact,
-  TimelineFactKind,
-  TimelineFileChange,
-  TimelineToolStatus,
-} from '../../../entities/session'
+import type { TimelineFact, TimelineFactKind, TimelineFileChange, TimelineToolStatus } from '../../../entities/session'
 
 export interface SessionTimelineSummaryInput {
   activity?: AgentSessionActivity | null
@@ -43,14 +38,22 @@ export interface SessionTimelineCurrentActivity {
   sourceId?: string
 }
 
-const TERMINAL_TURN_STATES = new Set(['completed', 'succeeded', 'success', 'done', 'failed', 'cancelled', 'canceled', 'stopped', 'timeout'])
+const TERMINAL_TURN_STATES = new Set([
+  'completed',
+  'succeeded',
+  'success',
+  'done',
+  'failed',
+  'cancelled',
+  'canceled',
+  'stopped',
+  'timeout',
+])
 const QUEUED_TURN_STATES = new Set(['queued', 'pending', 'waiting'])
 const ACTIVE_TURN_STATES = new Set(['executing', 'running', 'active', 'in_progress'])
 
 function record(value: unknown): Record<string, unknown> | null {
-  return value && typeof value === 'object' && !Array.isArray(value)
-    ? value as Record<string, unknown>
-    : null
+  return value && typeof value === 'object' && !Array.isArray(value) ? (value as Record<string, unknown>) : null
 }
 
 function stringValue(value: unknown): string | undefined {
@@ -109,15 +112,18 @@ function fileChanges(value: unknown): TimelineFileChange[] | undefined {
     const path = stringValue(item?.path)
     if (!path) return []
     const operation = item?.operation
-    return [{
-      path,
-      operation: operation === 'created' || operation === 'modified' || operation === 'deleted' || operation === 'moved'
-        ? operation
-        : undefined,
-      additions: numberValue(item?.additions),
-      deletions: numberValue(item?.deletions),
-      oldPath: stringValue(item?.oldPath),
-    }]
+    return [
+      {
+        path,
+        operation:
+          operation === 'created' || operation === 'modified' || operation === 'deleted' || operation === 'moved'
+            ? operation
+            : undefined,
+        additions: numberValue(item?.additions),
+        deletions: numberValue(item?.deletions),
+        oldPath: stringValue(item?.oldPath),
+      },
+    ]
   })
   return changes.length > 0 ? changes : undefined
 }
@@ -141,11 +147,10 @@ function liveTool(detail: Record<string, unknown>, sourceId: string): TimelineFa
   const nestedTool = record(detail.toolCall)
   const input = detail.rawInput ?? detail.input ?? nestedTool?.input ?? nestedTool?.rawInput
   const output = detail.rawOutput ?? detail.output ?? nestedTool?.output ?? nestedTool?.rawOutput
-  const name = stringValue(detail.toolName) ?? stringValue(nestedTool?.toolName) ?? stringValue(nestedTool?.name) ?? 'tool'
-  const callId = stringValue(detail.toolCallId)
-    ?? stringValue(nestedTool?.toolCallId)
-    ?? stringValue(detail.executionId)
-    ?? sourceId
+  const name =
+    stringValue(detail.toolName) ?? stringValue(nestedTool?.toolName) ?? stringValue(nestedTool?.name) ?? 'tool'
+  const callId =
+    stringValue(detail.toolCallId) ?? stringValue(nestedTool?.toolCallId) ?? stringValue(detail.executionId) ?? sourceId
   const exitCode = numberValue(detail.exitCode) ?? numberValue(record(detail.result)?.exitCode)
   return {
     callId,
@@ -196,7 +201,12 @@ function liveFact(detail: AgentTranscriptDetail, fallback: string, index: number
       correlationId: stringValue(source.messageId) ?? turnId ?? stringValue(source.executionId),
     })
   }
-  if (eventName === 'tool_call.started' || eventName === 'tool_call.updated' || eventName === 'tool_call.completed' || eventName === 'coder_tool_call') {
+  if (
+    eventName === 'tool_call.started' ||
+    eventName === 'tool_call.updated' ||
+    eventName === 'tool_call.completed' ||
+    eventName === 'coder_tool_call'
+  ) {
     const tool = liveTool(source, sourceId)
     return fact(sourceId, 'live', 'tool', occurredAt, order, detail, {
       tool,
@@ -204,7 +214,14 @@ function liveFact(detail: AgentTranscriptDetail, fallback: string, index: number
       groupKey: stringValue(source.groupKey),
     })
   }
-  if (eventName === 'compaction' || eventName === 'compaction_event' || eventName === 'com.mohist.agent-session.context-compacted' || eventName === 'session.context_compacted' || eventName === 'context_reset' || eventName === 'session.context_reset') {
+  if (
+    eventName === 'compaction' ||
+    eventName === 'compaction_event' ||
+    eventName === 'com.mohist.agent-session.context-compacted' ||
+    eventName === 'session.context_compacted' ||
+    eventName === 'context_reset' ||
+    eventName === 'session.context_reset'
+  ) {
     const kind = eventName.includes('reset') ? 'reset' : 'compaction'
     return fact(sourceId, 'live', 'boundary', occurredAt, order, detail, {
       boundary: {
@@ -214,14 +231,7 @@ function liveFact(detail: AgentTranscriptDetail, fallback: string, index: number
       },
     })
   }
-  if (eventName === 'coder_recovery_status') {
-    const status = stringValue(source.status) ?? 'unknown'
-    const label = stringValue(source.reason) ?? `恢复：${status}`
-    return fact(sourceId, 'live', 'status', occurredAt, order, detail, {
-      text: label,
-      status: { label, state: status, turnId },
-    })
-  }
+
   if (eventName === 'session.activity') {
     const activity = stringValue(source.activity) ?? 'unknown'
     const label = activity === 'active' ? '执行中' : activity === 'idle' ? '空闲' : '状态未知'
@@ -230,12 +240,20 @@ function liveFact(detail: AgentTranscriptDetail, fallback: string, index: number
       status: { label, state: activity, turnId },
     })
   }
-  if (eventName === 'provider.retry' || eventName === 'session.liveness' || eventName === 'usage.updated' || eventName === 'model.resolved' || eventName === 'context_health_update' || eventName === 'com.mohist.agent-session.context-health-updated') {
-    const label = stringValue(source.message)
-      ?? stringValue(source.failureReason)
-      ?? stringValue(source.resolvedModel)
-      ?? stringValue(source.healthStatus)
-      ?? eventName
+  if (
+    eventName === 'provider.retry' ||
+    eventName === 'session.liveness' ||
+    eventName === 'usage.updated' ||
+    eventName === 'model.resolved' ||
+    eventName === 'context_health_update' ||
+    eventName === 'com.mohist.agent-session.context-health-updated'
+  ) {
+    const label =
+      stringValue(source.message) ??
+      stringValue(source.failureReason) ??
+      stringValue(source.resolvedModel) ??
+      stringValue(source.healthStatus) ??
+      eventName
     return fact(sourceId, 'live', 'status', occurredAt, order, detail, {
       text: label,
       status: { label, state: eventName, turnId },
@@ -246,7 +264,12 @@ function liveFact(detail: AgentTranscriptDetail, fallback: string, index: number
   })
 }
 
-function partFact(part: SessionPart, turn: SessionTurn, turnSequence: number | undefined, partIndex: number): TimelineFact {
+function partFact(
+  part: SessionPart,
+  turn: SessionTurn,
+  turnSequence: number | undefined,
+  partIndex: number,
+): TimelineFact {
   const source = record(part) ?? {}
   const occurredAt = dateValue(source.startedAt, dateValue(source.at, turn.startedAt))
   const order = timestampOrder(occurredAt, turnSequence, partIndex + 1)
@@ -305,7 +328,7 @@ function turnInputFacts(
   agentTurns: readonly AgentTurnObservation[],
   fallback: string,
 ): TimelineFact[] {
-  const turnsById = new Map(turns.map(turn => [turn.id, turn]))
+  const turnsById = new Map(turns.map((turn) => [turn.id, turn]))
   const observationsByInput = new Map<string, AgentTurnObservation>()
   for (const turn of agentTurns) {
     for (const inputId of turn.inputIds) observationsByInput.set(inputId, turn)
@@ -316,11 +339,19 @@ function turnInputFacts(
     const relatedInputIndex = observation?.inputIds.indexOf(input.id) ?? 0
     const text = transcriptTurn && relatedInputIndex === 0 ? transcriptTurn.user.text : '消息'
     const occurredAt = transcriptTurn?.user.sentAt ?? fallback
-    return fact(`input:${input.id}`, 'input', 'input', occurredAt, timestampOrder(occurredAt, input.sequence, 0), input, {
-      text,
-      input: { text, acceptance: observation ? input.acceptance : 'unknown', turnId: observation?.id },
-      correlationId: observation?.id,
-    })
+    return fact(
+      `input:${input.id}`,
+      'input',
+      'input',
+      occurredAt,
+      timestampOrder(occurredAt, input.sequence, 0),
+      input,
+      {
+        text,
+        input: { text, acceptance: observation ? input.acceptance : 'unknown', turnId: observation?.id },
+        correlationId: observation?.id,
+      },
+    )
   })
 }
 
@@ -330,17 +361,27 @@ function unmatchedTurnInputFacts(
   inputIds: Set<string>,
   fallback: string,
 ): TimelineFact[] {
-  const turnsById = new Map(agentTurns.map(turn => [turn.id, turn]))
+  const turnsById = new Map(agentTurns.map((turn) => [turn.id, turn]))
   return turns.flatMap((turn, index) => {
     const observation = turnsById.get(turn.id)
-    const hasMatchedInput = observation?.inputIds.some(inputId => inputIds.has(inputId)) ?? false
+    const hasMatchedInput = observation?.inputIds.some((inputId) => inputIds.has(inputId)) ?? false
     if (hasMatchedInput) return []
     const occurredAt = turn.user.sentAt || turn.startedAt || fallback
-    return [fact(`turn:${turn.id}:input`, 'transcript', 'input', occurredAt, timestampOrder(occurredAt, observation?.sequence, index), turn, {
-      text: turn.user.text,
-      input: { text: turn.user.text, acceptance: 'unknown', turnId: observation?.id },
-      correlationId: observation?.id,
-    })]
+    return [
+      fact(
+        `turn:${turn.id}:input`,
+        'transcript',
+        'input',
+        occurredAt,
+        timestampOrder(occurredAt, observation?.sequence, index),
+        turn,
+        {
+          text: turn.user.text,
+          input: { text: turn.user.text, acceptance: 'unknown', turnId: observation?.id },
+          correlationId: observation?.id,
+        },
+      ),
+    ]
   })
 }
 
@@ -349,45 +390,61 @@ function turnStateFacts(
   turns: readonly SessionTurn[],
   fallback: string,
 ): TimelineFact[] {
-  const turnsById = new Map(turns.map(turn => [turn.id, turn]))
+  const turnsById = new Map(turns.map((turn) => [turn.id, turn]))
   return agentTurns.flatMap((turn, index) => {
     const state = normalizeStatus(turn.status)
     const transcriptTurn = turnsById.get(turn.id)
     const occurredAt = transcriptTurn?.completedAt ?? transcriptTurn?.startedAt ?? fallback
     const order = timestampOrder(occurredAt, turn.sequence, index)
     if (QUEUED_TURN_STATES.has(state)) {
-      return [fact(`turn:${turn.id}:state`, 'turn', 'status', occurredAt, order, turn, {
-        text: '排队中',
-        status: { label: '排队中', state: 'queued', turnId: turn.id },
-      })]
+      return [
+        fact(`turn:${turn.id}:state`, 'turn', 'status', occurredAt, order, turn, {
+          text: '排队中',
+          status: { label: '排队中', state: 'queued', turnId: turn.id },
+        }),
+      ]
     }
     if (ACTIVE_TURN_STATES.has(state)) {
-      return [fact(`turn:${turn.id}:state`, 'turn', 'status', occurredAt, order, turn, {
-        text: '执行中',
-        status: { label: '执行中', state: 'executing', turnId: turn.id },
-      })]
+      return [
+        fact(`turn:${turn.id}:state`, 'turn', 'status', occurredAt, order, turn, {
+          text: '执行中',
+          status: { label: '执行中', state: 'executing', turnId: turn.id },
+        }),
+      ]
     }
     const result = turn.result
     const resultText = stringValue(result?.message) ?? stringValue(result?.output) ?? stringValue(result?.failureReason)
-    if (state === 'failed' || state === 'cancelled' || state === 'canceled' || state === 'stopped' || state === 'timeout') {
+    if (
+      state === 'failed' ||
+      state === 'cancelled' ||
+      state === 'canceled' ||
+      state === 'stopped' ||
+      state === 'timeout'
+    ) {
       const label = resultText ?? (state === 'failed' ? '执行失败' : state === 'timeout' ? '执行超时' : '执行已取消')
-      return [fact(`turn:${turn.id}:result`, 'turn', 'error', occurredAt, order, turn, {
-        text: label,
-        error: { message: label, kind: state },
-        status: { label, state, turnId: turn.id },
-      })]
+      return [
+        fact(`turn:${turn.id}:result`, 'turn', 'error', occurredAt, order, turn, {
+          text: label,
+          error: { message: label, kind: state },
+          status: { label, state, turnId: turn.id },
+        }),
+      ]
     }
     if (TERMINAL_TURN_STATES.has(state)) {
       const label = resultText ? `已完成：${resultText}` : '已完成'
-      return [fact(`turn:${turn.id}:result`, 'turn', 'status', occurredAt, order, turn, {
-        text: label,
-        status: { label, state: 'completed', turnId: turn.id },
-      })]
+      return [
+        fact(`turn:${turn.id}:result`, 'turn', 'status', occurredAt, order, turn, {
+          text: label,
+          status: { label, state: 'completed', turnId: turn.id },
+        }),
+      ]
     }
-    return [fact(`turn:${turn.id}:state`, 'turn', 'status', occurredAt, order, turn, {
-      text: turn.status,
-      status: { label: turn.status, state, turnId: turn.id },
-    })]
+    return [
+      fact(`turn:${turn.id}:state`, 'turn', 'status', occurredAt, order, turn, {
+        text: turn.status,
+        status: { label: turn.status, state, turnId: turn.id },
+      }),
+    ]
   })
 }
 
@@ -395,19 +452,38 @@ function recoveryFacts(history: readonly SessionRecoveryObservation[], fallback:
   return history.map((entry, index) => {
     const occurredAt = entry.recordedAt || fallback
     const kind = entry.type === 'reset' ? 'reset' : 'compaction'
-    return fact(`recovery:${entry.type}:${entry.recordedAt}:${index}`, 'recovery', 'boundary', occurredAt, timestampOrder(occurredAt, undefined, index), entry, {
-      boundary: { kind, reason: entry.reason ?? entry.strategy ?? undefined, summary: entry.summary ?? undefined },
-    })
+    return fact(
+      `recovery:${entry.type}:${entry.recordedAt}:${index}`,
+      'recovery',
+      'boundary',
+      occurredAt,
+      timestampOrder(occurredAt, undefined, index),
+      entry,
+      {
+        boundary: { kind, reason: entry.reason ?? entry.strategy ?? undefined, summary: entry.summary ?? undefined },
+      },
+    )
   })
 }
 
-function summaryActivityFact(activity: AgentSessionActivity | null | undefined, occurredAt: string): TimelineFact | null {
+function summaryActivityFact(
+  activity: AgentSessionActivity | null | undefined,
+  occurredAt: string,
+): TimelineFact | null {
   if (!activity) return null
   const label = activity === 'active' ? '执行中' : activity === 'idle' ? '空闲' : '状态未知'
-  return fact('summary:activity', 'summary', 'status', occurredAt, timestampOrder(occurredAt, undefined, 0), { activity }, {
-    text: label,
-    status: { label, state: activity },
-  })
+  return fact(
+    'summary:activity',
+    'summary',
+    'status',
+    occurredAt,
+    timestampOrder(occurredAt, undefined, 0),
+    { activity },
+    {
+      text: label,
+      status: { label, state: activity },
+    },
+  )
 }
 
 function compareFacts(left: TimelineFact, right: TimelineFact): number {
@@ -437,15 +513,26 @@ export function buildTimelineFacts(input: SessionTimelineFactInput): TimelineFac
   const inputs = input.inputs ?? summary?.inputs ?? []
   const agentTurns = input.agentTurns ?? summary?.turns ?? []
   const recoveryHistory = input.recoveryHistory ?? summary?.recoveryHistory ?? []
-  const fallback = input.lastActivityAt ?? summary?.lastActivityAt ?? turns.at(-1)?.completedAt ?? turns.at(-1)?.startedAt ?? '1970-01-01T00:00:00.000Z'
+  const fallback =
+    input.lastActivityAt ??
+    summary?.lastActivityAt ??
+    turns.at(-1)?.completedAt ??
+    turns.at(-1)?.startedAt ??
+    '1970-01-01T00:00:00.000Z'
   const facts: TimelineFact[] = []
 
   const inputFacts = turnInputFacts(turns, inputs, agentTurns, fallback)
   facts.push(...inputFacts)
-  facts.push(...unmatchedTurnInputFacts(turns, agentTurns, new Set(inputs.map(inputEntry => inputEntry.id)), fallback))
+  facts.push(
+    ...unmatchedTurnInputFacts(turns, agentTurns, new Set(inputs.map((inputEntry) => inputEntry.id)), fallback),
+  )
   for (const [turnIndex, turn] of turns.entries()) {
-    const observation = agentTurns.find(candidate => candidate.id === turn.id)
-    facts.push(...turn.assistant.map((part, partIndex) => partFact(part, turn, observation?.sequence, turnIndex * 100 + partIndex)))
+    const observation = agentTurns.find((candidate) => candidate.id === turn.id)
+    facts.push(
+      ...turn.assistant.map((part, partIndex) =>
+        partFact(part, turn, observation?.sequence, turnIndex * 100 + partIndex),
+      ),
+    )
   }
   facts.push(...turnStateFacts(agentTurns, turns, fallback))
   facts.push(...recoveryFacts(recoveryHistory, fallback))
@@ -481,26 +568,35 @@ export function deriveCurrentActivity(
   const agentTurns = input.agentTurns ?? summary?.turns ?? []
   const currentTurnId = summary?.currentTurnId
   const turn = currentTurnId
-    ? agentTurns.find(candidate => candidate.id === currentTurnId)
-    : [...agentTurns].reverse().find(candidate => stateForTurn(candidate.status) !== undefined)
+    ? agentTurns.find((candidate) => candidate.id === currentTurnId)
+    : [...agentTurns].reverse().find((candidate) => stateForTurn(candidate.status) !== undefined)
   const turnState = stateForTurn(turn?.status)
   if (turnState === 'queued') return { state: 'queued', label: '排队中', sourceId: `turn:${turn?.id}:state` }
 
-  const activityFacts = facts.filter(factItem => factItem.kind === 'status' && (record(factItem.raw)?.activity === 'active' || record(factItem.raw)?.activity === 'idle' || record(factItem.raw)?.activity === 'unknown'))
+  const activityFacts = facts.filter(
+    (factItem) =>
+      factItem.kind === 'status' &&
+      (record(factItem.raw)?.activity === 'active' ||
+        record(factItem.raw)?.activity === 'idle' ||
+        record(factItem.raw)?.activity === 'unknown'),
+  )
   const latestActivity = activityFacts.at(-1)
-  const rawActivity = stringValue(record(latestActivity?.raw)?.activity) ?? input.activity ?? summary?.activity ?? 'unknown'
+  const rawActivity =
+    stringValue(record(latestActivity?.raw)?.activity) ?? input.activity ?? summary?.activity ?? 'unknown'
   if (rawActivity === 'idle') return { state: 'idle', label: '空闲', sourceId: latestActivity?.sourceId }
   if (rawActivity === 'unknown') return { state: 'unknown', label: '状态未知', sourceId: latestActivity?.sourceId }
 
-  const factsBySourceId = new Map(facts.map(factItem => [factItem.sourceId, factItem]))
-  const activeItem = [...items].reverse().find(item => {
+  const factsBySourceId = new Map(facts.map((factItem) => [factItem.sourceId, factItem]))
+  const activeItem = [...items].reverse().find((item) => {
     if (item.isTerminal || item.renderClass === 'status' || item.renderClass === 'suppressed') return false
-    return item.sourceIds.some(sourceId => {
+    return item.sourceIds.some((sourceId) => {
       const sourceFact = factsBySourceId.get(sourceId)
       return sourceFact !== undefined && factIsUnfinished(sourceFact)
     })
   })
-  if (activeItem) return { state: 'active', label: activeItem.summary, itemId: activeItem.id, sourceId: activeItem.sourceIds[0] }
-  if (turnState === 'active' || rawActivity === 'active') return { state: 'active', label: '执行中', sourceId: turn ? `turn:${turn.id}:state` : latestActivity?.sourceId }
+  if (activeItem)
+    return { state: 'active', label: activeItem.summary, itemId: activeItem.id, sourceId: activeItem.sourceIds[0] }
+  if (turnState === 'active' || rawActivity === 'active')
+    return { state: 'active', label: '执行中', sourceId: turn ? `turn:${turn.id}:state` : latestActivity?.sourceId }
   return { state: 'unknown', label: '状态未知', sourceId: latestActivity?.sourceId }
 }

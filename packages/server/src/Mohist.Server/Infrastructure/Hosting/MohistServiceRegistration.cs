@@ -90,8 +90,6 @@ public static class MohistServiceRegistration
         services.AddScoped<IWorkflowStatusReader>(sp =>
             sp.GetRequiredService<WorkflowQuerier>());
         services.TryAddSingleton<IBackgroundTaskLauncher, BackgroundTaskLauncher>();
-        services.TryAddSingleton<IRunnerUpdateOperationWriteFailureInjector>(
-            NoopRunnerUpdateOperationWriteFailureInjector.Instance);
         services.TryAddSingleton<IWorkflowReportPersistenceFailureInjector>(
             NoopWorkflowReportPersistenceFailureInjector.Instance);
         services.TryAddSingleton<IAgentJobReportPersistenceFailureInjector>(

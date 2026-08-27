@@ -579,18 +579,17 @@ describe('RunnerHost idle-system cleanup', () => {
     await expect(run).resolves.toBeUndefined()
   })
 
-  it('SweepsRetiredAgentWorkspacesDirectoryOnCleanupTick_AndIsIdempotentAcrossTicks', async () => {
+  it('SweepsRetiredRunnerDirectoriesOnCleanupTick_AndIsIdempotentAcrossTicks', async () => {
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval'] })
     const hostEvents = configureHost()
     const cleanupEvents = observeCleanupTicks()
     testState().stubFetchConfigBehavior = async () => ({ retentionDays: 7 })
 
-    // The retired managed-worktree tree is pre-existing data under
-    // the runner root — the cleanup tick must sweep it whole.
-    const legacyWorkspaces = join(testRoot(), 'agent-workspaces')
-    await testState().resources.fileSystem.ensureDir(legacyWorkspaces)
-    await testState().resources.fileSystem.writeText(join(legacyWorkspaces, 'stale-worktree'), 'retired')
-    await testState().resources.fileSystem.writeText(join(legacyWorkspaces, 'manifest.json'), '{}')
+    const retiredDirectories = [join(testRoot(), 'agent-workspaces'), join(testRoot(), '.mohist', 'runner-state')]
+    for (const path of retiredDirectories) {
+      await testState().resources.fileSystem.ensureDir(path)
+      await testState().resources.fileSystem.writeText(join(path, 'retired.json'), '{}')
+    }
 
     const controller = new AbortController()
     const host = new RunnerHost(defaultOptions())
@@ -599,15 +598,17 @@ describe('RunnerHost idle-system cleanup', () => {
     await waitForHostStartup(hostEvents)
     await advanceCleanupTick(cleanupEvents)
 
-    // First tick: the whole directory is gone as disk-policy cleanup.
-    await expect(testState().resources.fileSystem.stat(legacyWorkspaces)).rejects.toMatchObject({ code: 'ENOENT' })
-    expect(capturedLogs().filter((record) => record.message === 'removed retired agent-workspaces directory')).toEqual([
-      expect.objectContaining({ level: 'INFO', fields: { path: legacyWorkspaces } }),
-    ])
+    for (const path of retiredDirectories) {
+      await expect(testState().resources.fileSystem.stat(path)).rejects.toMatchObject({ code: 'ENOENT' })
+    }
+    expect(capturedLogs().filter((record) => record.message === 'removed retired Runner directory')).toEqual(
+      retiredDirectories.map((path) => expect.objectContaining({ level: 'INFO', fields: { path } })),
+    )
 
-    // Second tick: nothing left to sweep — no error, directory stays gone.
     await advanceCleanupTick(cleanupEvents)
-    await expect(testState().resources.fileSystem.stat(legacyWorkspaces)).rejects.toMatchObject({ code: 'ENOENT' })
+    for (const path of retiredDirectories) {
+      await expect(testState().resources.fileSystem.stat(path)).rejects.toMatchObject({ code: 'ENOENT' })
+    }
 
     controller.abort()
     await expect(run).resolves.toBeUndefined()

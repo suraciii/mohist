@@ -38,19 +38,6 @@ public sealed class TaskRun
     public AgentResultSettlement? AgentResultSettlement { get; set; }
     public WorkInterruption? Interruption { get; set; }
 
-    /// <summary>
-    /// Additive update-interruption visibility for this attempt. The old
-    /// attempt keeps <c>interrupted</c> while its replacement advances
-    /// independently through recovering and recovered.
-    /// </summary>
-    public AgentWorkInterruptionTransition? AgentInterruption { get; set; }
-    /// <summary>
-    /// Recovery generation for a replacement attempt. The original attempt is
-    /// generation zero; interrupted history remains immutable while the next
-    /// attempt receives the incremented generation.
-    /// </summary>
-    public int RecoveryGeneration { get; set; }
-
     public IReadOnlyList<WorkflowTaskRequiredFile>? RequiredFiles { get; init; }
     public TaskArtifactCapture? Artifacts { get; init; }
     public Dictionary<string, string>? SetVars { get; init; }
@@ -241,70 +228,6 @@ public static class TaskRunExtensions
         {
             if (input.Recovery is null)
                 throw new InvalidOperationException("A continuation task requires a recovery declaration");
-        }
-
-        internal static TaskRun MakeRecoveryAttempt(
-            TaskRun interrupted,
-            IEnumerable<TaskRun> existing,
-            int stageAttempt,
-            int recoveryGeneration,
-            string workId,
-            string agentTurnId,
-            IEnumerable<TaskRun> occupiedTaskRuns,
-            DateTimeOffset now)
-        {
-            if (interrupted.AgentResultSettlement is not { } originalSettlement)
-                throw new InvalidOperationException("A recovery attempt requires an Agent result settlement");
-            if (recoveryGeneration <= originalSettlement.RecoveryGeneration)
-                throw new InvalidOperationException("A recovery attempt must advance the recovery generation");
-            if (string.IsNullOrWhiteSpace(workId) || string.IsNullOrWhiteSpace(agentTurnId))
-                throw new ArgumentException("A recovery attempt requires new work and turn identities");
-
-            var task = MakeTask(
-                existing,
-                interrupted.ToDefinition(),
-                stageAttempt,
-                recoveryRemaining: interrupted.RecoveryRemaining,
-                occupiedTaskRuns,
-                interrupted.CausedByFeedbackId,
-                interrupted.CausedByFailedTaskId);
-            task.WorkId = workId;
-            task.RecoveryGeneration = recoveryGeneration;
-            task.AgentResultSettlement = new AgentResultSettlement
-            {
-                State = AgentResultSettlementState.AwaitingResult,
-                TaskRunId = task.Id,
-                WorkId = workId,
-                RunnerId = originalSettlement.RunnerId,
-                RecoveryGeneration = recoveryGeneration,
-                UpdateOperationId = originalSettlement.UpdateOperationId,
-                // The session will confirm the physical turn when the
-                // replacement dispatch is accepted. Keep a durable logical
-                // turn allocation now so the replacement is distinct even
-                // before the Runner binds it.
-                AgentTurnId = agentTurnId,
-                Runtime = originalSettlement.Runtime
-            };
-            task.AgentInterruption = (interrupted.AgentInterruption ?? new AgentWorkInterruptionTransition(
-                AgentWorkInterruptionStates.Interrupted,
-                originalSettlement.UpdateOperationId ?? string.Empty,
-                originalSettlement.WorkId,
-                originalSettlement.TaskRunId,
-                originalSettlement.RecoveryGeneration,
-                originalSettlement.AgentTurnId,
-                null,
-                null,
-                "The replacement Runner dispatch will resume this work.",
-                now)) with
-            {
-                State = AgentWorkInterruptionStates.Recovering,
-                WorkId = workId,
-                TaskRunId = task.Id,
-                RecoveryGeneration = recoveryGeneration,
-                ReplacementTurnId = agentTurnId,
-                RecordedAt = now,
-            };
-            return task;
         }
 
         private static TaskRun MakeTask(

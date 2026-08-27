@@ -93,7 +93,6 @@ export const LEGACY_AGENT_DETAIL_EVENT_TYPES = [
   'coder_session_failed',
   'coder_session_cancelled',
   'coder_session_status_changed',
-  'coder_recovery_status',
   'plan_round_start',
   'plan_session_update',
   'plan_round_complete',

@@ -71,12 +71,6 @@ public interface IAgentSessionGrain : IGrainWithStringKey
 
     Task MarkTurnExecutingAsync(string turnId);
 
-    /// <summary>
-    /// Applies a durable update-interruption visibility transition. Replays
-    /// are idempotent by work identity and recovery generation.
-    /// </summary>
-    Task ApplyInterruptionAsync(AgentWorkInterruptionTransition transition);
-
     Task MarkTurnTerminalAsync(string turnId, AgentTurnStatus status, AgentTurnResult? result);
 
     Task<AgentTurnStopResult> StopQueuedTurnAsync(string turnId);
@@ -436,8 +430,6 @@ public sealed record AgentSessionInfo(
     [property: Id(23)] long? CachedWriteTokens,
     [property: Id(24)] long BindingEpoch = 0,
     [property: Id(25)] string? LastTerminalStatus = null,
-    [property: Id(26)] AgentWorkInterruptionTransition? Interruption = null,
-    [property: Id(27)] IReadOnlyList<AgentWorkInterruptionTransition>? InterruptionHistory = null,
     /// <summary>
     /// Reasoning effort applied to the last execution, resolved from the
     /// session activity evidence. Null when unset or not yet recorded.

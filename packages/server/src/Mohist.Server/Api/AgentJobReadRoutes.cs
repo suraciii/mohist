@@ -149,7 +149,7 @@ public static class AgentJobReadRoutes
 
         var status = await grain.GetStatusAsync();
         var isRecovering = status == AgentJobStatus.Unknown && snapshot.IsRecovering;
-        var isTerminal = status is AgentJobStatus.Completed or AgentJobStatus.Failed or AgentJobStatus.Cancelled or AgentJobStatus.Interrupted;
+        var isTerminal = status is AgentJobStatus.Completed or AgentJobStatus.Failed or AgentJobStatus.Cancelled;
         // Unknown is nonterminal; surface it without
         // the terminal-result fields. Callers consume it as a
         // nonterminal, non-dispatchable state — neither successful
@@ -183,9 +183,7 @@ public static class AgentJobReadRoutes
             FailureReason: failureReason,
             ExitCode: exitCode,
             ExecutionDefinition: snapshot.ExecutionDefinition,
-            RecoveryDeadlineAt: isRecovering ? snapshot.RecoveryDeadlineAt : null,
-            Interruption: AgentWorkInterruptionDto.From(snapshot.Interruption),
-            InterruptionHistory: snapshot.InterruptionHistory?.Select(AgentWorkInterruptionDto.From).Where(item => item is not null).Cast<AgentWorkInterruptionDto>().ToArray()));
+            RecoveryDeadlineAt: isRecovering ? snapshot.RecoveryDeadlineAt : null));
     }
 
     private static string ToStatusString(AgentJobStatus status, bool isRecovering = false) =>
@@ -199,8 +197,6 @@ public static class AgentJobReadRoutes
         AgentJobStatus.Failed => "failed",
         AgentJobStatus.Cancelled => "cancelled",
         AgentJobStatus.Unknown => "unknown",
-        AgentJobStatus.RecoverablyInterrupted => "recoverably-interrupted",
-        AgentJobStatus.Interrupted => "interrupted",
         _ => "unknown",
     };
 }
@@ -252,35 +248,5 @@ public sealed record AgentJobViewDto(
     string? FailureReason,
     int? ExitCode,
     AgentExecutionDefinition? ExecutionDefinition,
-    DateTimeOffset? RecoveryDeadlineAt = null,
-    AgentWorkInterruptionDto? Interruption = null,
-    IReadOnlyList<AgentWorkInterruptionDto>? InterruptionHistory = null);
-
-public sealed record AgentWorkInterruptionDto(
-    string State,
-    string UpdateOperationId,
-    string WorkId,
-    string? TaskRunId,
-    int RecoveryGeneration,
-    string? OriginalTurnId,
-    string? ReplacementTurnId,
-    string? StopFailure,
-    string ExpectedRecoveryPath,
-    string RecordedAt)
-{
-    public static AgentWorkInterruptionDto? From(AgentWorkInterruptionTransition? transition) =>
-        transition is null
-            ? null
-            : new(
-                transition.State,
-                transition.UpdateOperationId,
-                transition.WorkId,
-                transition.TaskRunId,
-                transition.RecoveryGeneration,
-                transition.OriginalTurnId,
-                transition.ReplacementTurnId,
-                AgentWorkInterruptionProjection.SanitizeStopFailure(transition.StopFailure),
-                transition.ExpectedRecoveryPath,
-                transition.RecordedAt.ToString("o"));
-}
+    DateTimeOffset? RecoveryDeadlineAt = null);
 

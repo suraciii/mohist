@@ -144,8 +144,7 @@ internal static partial class WorkflowGrainContractSupport
             arrangement.Services,
             arrangement.Store,
             arrangement.RunId,
-            timeProvider,
-            arrangement.Operations is null ? null : arrangement.Operations.For);
+            timeProvider);
         await grain.OnActivateAsync(CancellationToken.None);
         return grain;
     }
@@ -154,13 +153,12 @@ internal static partial class WorkflowGrainContractSupport
         IServiceProvider services,
         IWorkflowRunStore store,
         string workflowRunId,
-        TimeProvider timeProvider,
-        Func<string, IRunnerUpdateOperationGrain>? operations = null)
+        TimeProvider timeProvider)
     {
         var resolver = services.GetRequiredService<WorkflowDefinitionResolver>();
         var identity = GrainTestContext.Create(
             workflowRunId,
-            new WorkflowGrainTestProfileCoordinatorFactory(store, resolver, operations));
+            new WorkflowGrainTestProfileCoordinatorFactory(store, resolver));
         return new WorkflowGrain(
             identity.Context,
             identity.Runtime,
@@ -234,7 +232,6 @@ internal sealed record WorkflowGrainArrangement(
     string RunId,
     string WorkerId,
     string ProjectId,
-    RunnerUpdateOperationGrainRegistry? Operations = null,
     int IssueNumber = 1,
     IServiceProvider? Services = null)
 {
@@ -349,17 +346,11 @@ internal sealed record WorkflowGrainArrangement(
         var store = scope.ServiceProvider.GetRequiredService<IWorkflowRunStore>();
         var querier = scope.ServiceProvider.GetRequiredService<WorkflowQuerier>();
         var translator = scope.ServiceProvider.GetRequiredService<WorkflowItemTranslator>();
-        // Always available: recovery-receipt handling consults the runner
-        // update operation state even when no fence exists.
-        var operations = new RunnerUpdateOperationGrainRegistry(
-            new ConcurrentDictionary<string, RunnerUpdateOperationState>(),
-            new RunnerUpdateOperationWriteFailureProbe());
         var grain = WorkflowGrainContractSupport.CreateGrain(
             scope.ServiceProvider,
             store,
             runId,
-            timeProvider,
-            operations is null ? null : operations.For);
+            timeProvider);
         await grain.OnActivateAsync(CancellationToken.None);
         await grain.EnsureStartedAsync(new WorkflowIssueContext(projectId, issueNumber, null));
         return new WorkflowGrainArrangement(
@@ -372,7 +363,6 @@ internal sealed record WorkflowGrainArrangement(
             runId,
             workerId,
             projectId!,
-            operations,
             issueNumber,
             scope.ServiceProvider);
     }
@@ -416,53 +406,22 @@ internal sealed class TestGrainStorage<TState>(string key, ConcurrentDictionary<
     }
 }
 
-/// <summary>
-/// Registry of directly-constructed <see cref="RunnerUpdateOperationGrain"/>
-/// instances keyed by runner id. The same instance serves both the workflow
-/// grain's internal factory lookups and direct test assertions, so operation
-/// state written by one side is visible to the other.
-/// </summary>
-internal sealed class RunnerUpdateOperationGrainRegistry(
-    ConcurrentDictionary<string, RunnerUpdateOperationState> backing,
-    RunnerUpdateOperationWriteFailureProbe probe)
-{
-    private readonly ConcurrentDictionary<string, IRunnerUpdateOperationGrain> _grains = new();
-
-    public RunnerUpdateOperationWriteFailureProbe Probe { get; } = probe;
-
-    private RunnerUpdateOperationWriteFailureProbe ProbeField { get; init; } = probe;
-
-    public IRunnerUpdateOperationGrain For(string runnerId) =>
-        _grains.GetOrAdd(runnerId, key =>
-        {
-            var grain = new RunnerUpdateOperationGrain(
-                new TestGrainStorage<RunnerUpdateOperationState>($"runner-update:{key}", backing),
-                ProbeField);
-            WorkflowGrainContractSupport.AttachTestContext(grain, key);
-            return grain;
-        });
-}
-
 internal static partial class WorkflowGrainContractSupport
 {
     /// <summary>
     /// Builds the stateless report service against a factory that resolves
-    /// the given workflow grain instance (plus optional operation grains),
-    /// mirroring how the silo wires it in production.
+    /// the given workflow grain instance, mirroring production wiring.
     /// </summary>
     internal static WorkflowReportService CreateReportService(
         IServiceProvider services,
         WorkflowGrain workflowGrain,
-        Func<string, IRunnerUpdateOperationGrain>? operations = null,
         string workflowRunId = "*")
     {
         var factory = new TestDispatchGrainFactory()
             .WithFallback((interfaceType, key) =>
             {
-                if (interfaceType == typeof(IWorkflowGrain))
-                    return workflowGrain;
-                return operations is not null && interfaceType == typeof(IRunnerUpdateOperationGrain)
-                    ? operations(key)
+                return interfaceType == typeof(IWorkflowGrain)
+                    ? workflowGrain
                     : null;
             });
         return ActivatorUtilities.CreateInstance<WorkflowReportService>(

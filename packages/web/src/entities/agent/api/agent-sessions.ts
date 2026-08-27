@@ -6,7 +6,6 @@ import type {
   AgentSessionTranscriptResponse,
   AgentSessionUsage,
   AgentTurnObservation,
-  AgentWorkInterruption,
   SessionFollowupResult,
   SessionInputObservation,
 } from '../../coder-session/@x/agent-session'
@@ -57,8 +56,6 @@ export interface GenericAgentSessionSummaryDto {
   currentTurnId?: string | null
   inputs?: SessionInputObservation[] | null
   turns?: AgentTurnObservation[] | null
-  interruption?: AgentWorkInterruption | null
-  interruptionHistory?: AgentWorkInterruption[] | null
   origin?: string | null
   targetId?: string | null
 }

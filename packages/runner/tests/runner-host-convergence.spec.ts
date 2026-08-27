@@ -323,7 +323,7 @@ describe('RunnerHost converges active workflow runs', () => {
         },
       },
     }
-    await currentConvergenceTestState().resources.fileSystem.ensureDir(join(testRoot(), '.mohist/runner-state'))
+    await currentConvergenceTestState().resources.fileSystem.ensureDir(join(testRoot(), '.mohist'))
     await currentConvergenceTestState().resources.fileSystem.writeText(filePath, JSON.stringify(file))
   }
 
@@ -372,7 +372,7 @@ describe('RunnerHost converges active workflow runs', () => {
     const wsPathB = join(testRoot(), 'mohist-local/workspaces/issue-2')
     // Seed one active + one eligible directly via the file.
     const filePath = defaultWorkspaceRegistryFilePath(testRoot())
-    await currentConvergenceTestState().resources.fileSystem.ensureDir(join(testRoot(), '.mohist/runner-state'))
+    await currentConvergenceTestState().resources.fileSystem.ensureDir(join(testRoot(), '.mohist'))
     await currentConvergenceTestState().resources.fileSystem.writeText(
       filePath,
       JSON.stringify({
@@ -432,7 +432,7 @@ describe('RunnerHost converges active workflow runs', () => {
     // eligible (server reports it terminal). wr-2 stays active so the
     // reconnect convergence has something to query and pick up.
     const filePath = defaultWorkspaceRegistryFilePath(testRoot())
-    await currentConvergenceTestState().resources.fileSystem.ensureDir(join(testRoot(), '.mohist/runner-state'))
+    await currentConvergenceTestState().resources.fileSystem.ensureDir(join(testRoot(), '.mohist'))
     await currentConvergenceTestState().resources.fileSystem.writeText(
       filePath,
       JSON.stringify({

@@ -16,9 +16,7 @@ import type { BuildInfo } from '../runtime/build-info.js'
 import { parseObject } from '../core/json.js'
 import { getSegments } from '../core/json-path.js'
 import type { TaskLogBatch } from '../runtime/task-log.js'
-import type { PendingUpdateOperation } from '../runtime/update-operation.js'
 import { parseDispatchWorkItem } from './connection-dispatch.js'
-import * as recoveryRequests from './connection.update-recovery.js'
 import { reportWork } from './connection-report.js'
 import { extractErrorMessage, RuntimeEventDeliveryError } from './connection-errors.js'
 export { RuntimeEventDeliveryError } from './connection-errors.js'
@@ -172,16 +170,6 @@ export class ServerConnection {
       ...(dispatch.originMarker != null ? { originMarker: dispatch.originMarker } : {}),
     }))
   }
-
-  async fetchPendingUpdateOperation(signal: AbortSignal): Promise<PendingUpdateOperation | null> {
-    return recoveryRequests.fetchPendingUpdateOperation(this.fetchWithAuth.bind(this), this.url.bind(this), signal)
-  }
-
-  readonly reportRecoveryStopFailure = (
-    failure: recoveryRequests.RecoveryStopFailure,
-    signal: AbortSignal,
-  ): Promise<void> =>
-    recoveryRequests.reportRecoveryStopFailure(this.fetchWithAuth.bind(this), this.url.bind(this), failure, signal)
 
   async fetchConfig(signal: AbortSignal): Promise<CleanupPolicy | null> {
     const response = await this.fetchWithAuth(this.url('config'), {

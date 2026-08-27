@@ -432,9 +432,9 @@ describe('WorkspaceManager.prepare', () => {
     const root = await createTestTempDir('mohist-workspace-')
     const runnerRoot = join(root, 'runner')
     const registry = new WorkspaceRegistry(runnerRoot, { runnerId: 'runner-1' })
-    await fileSystem.ensureDir(join(runnerRoot, '.mohist', 'runner-state'))
+    await fileSystem.ensureDir(join(runnerRoot, '.mohist'))
     await fileSystem.writeText(
-      join(runnerRoot, '.mohist', 'runner-state', 'workspaces.json'),
+      join(runnerRoot, '.mohist', 'workspaces.json'),
       JSON.stringify(
         {
           version: 3,

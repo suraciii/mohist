@@ -81,7 +81,7 @@ public sealed class AgentLaunchObservationAssembler
 
         var status = await jobGrain.GetStatusAsync();
         AgentJobTerminalResult? terminal = null;
-        if (status is AgentJobStatus.Completed or AgentJobStatus.Failed or AgentJobStatus.Cancelled or AgentJobStatus.Interrupted)
+        if (status is AgentJobStatus.Completed or AgentJobStatus.Failed or AgentJobStatus.Cancelled)
         {
             terminal = await jobGrain.GetTerminalResultAsync();
         }
@@ -127,7 +127,7 @@ public sealed class AgentLaunchObservationAssembler
         IReadOnlyList<string>? jobArtifactUploadIds = null;
         string? jobFailureReason = null;
         int? jobExitCode = null;
-        if (status is AgentJobStatus.Completed or AgentJobStatus.Failed or AgentJobStatus.Cancelled or AgentJobStatus.Interrupted)
+        if (status is AgentJobStatus.Completed or AgentJobStatus.Failed or AgentJobStatus.Cancelled)
         {
             jobMessage = terminal?.Message;
             jobOutput = terminal?.Output;
@@ -200,8 +200,6 @@ public sealed class AgentLaunchObservationAssembler
         AgentJobStatus.Failed => "failed",
         AgentJobStatus.Cancelled => "cancelled",
         AgentJobStatus.Unknown => "unknown",
-        AgentJobStatus.RecoverablyInterrupted => "recoverably-interrupted",
-        AgentJobStatus.Interrupted => "interrupted",
         _ => "unknown",
     };
 

@@ -250,16 +250,12 @@ public sealed class WorkflowGrainReportArbitrationSpecs
         public WorkflowGrain Grain => Arrangement.Grain;
         public IEventStore Events => Arrangement.Events;
         public IWorkflowRunStore Store => Arrangement.Store;
-        public RunnerUpdateOperationGrainRegistry? Operations => Arrangement.Operations;
         public string RunId => Arrangement.RunId;
         public string WorkerId => Arrangement.WorkerId;
         public string? WorkId => Work.Id;
 
         public WorkflowReportService CreateReportService() =>
-            WorkflowGrainContractSupport.CreateReportService(
-                Arrangement.Services,
-                Grain,
-                Operations is null ? null : runnerId => Operations.For(runnerId));
+            WorkflowGrainContractSupport.CreateReportService(Arrangement.Services, Grain);
 
         public async Task<WorkflowRun> LoadRunAsync() =>
             await Store.LoadAsync(RunId) ?? throw new InvalidOperationException("run missing");

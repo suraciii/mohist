@@ -590,37 +590,6 @@ export function useSessionTranscript({
     )
 
     unsubs.push(
-      onAgentEvent('coder_recovery_status', (detail) => {
-        if (!acceptLiveDetail('coder_recovery_status', detail)) return
-
-        hasLiveTailRef.current = true
-        const now = new Date().toISOString()
-        const errorMessages: Record<string, string> = {
-          detected: 'Recovery detected',
-          recovering: 'Recovery in progress',
-          recovered: 'Recovery succeeded',
-          failed: 'Recovery failed',
-        }
-
-        setTurns((prev) => {
-          const next = ensureLiveTurn(prev, now)
-          const lastTurn = next[next.length - 1]
-          const newPart = createErrorPart(errorMessages[detail.status] ?? detail.status, 'recovery', now)
-          next[next.length - 1] = {
-            ...lastTurn,
-            assistant: [...lastTurn.assistant, newPart],
-          }
-          return next
-        })
-        markNewContentRef.current()
-
-        if (detail.status === 'recovered' || detail.status === 'failed') {
-          invalidateAndRefetch()
-        }
-      }),
-    )
-
-    unsubs.push(
       onAgentEvent('session.liveness', (detail) => {
         if (!acceptLiveDetail('session.liveness', detail)) return
 
