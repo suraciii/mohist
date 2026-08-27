@@ -319,54 +319,6 @@ internal sealed class WorkflowWorkLifecycle
     /// returned work id is already persisted on the replacement so a poll can
     /// offer exactly that identity after the commit.
     /// </summary>
-    public WorkflowRecoveryAttempt AllocateRecoveryAttempt(
-        WorkflowRun run,
-        TaskRun interrupted,
-        int recoveryGeneration,
-        DateTimeOffset now)
-    {
-        var stage = run.Stages.Single(candidate => candidate.Tasks.Contains(interrupted));
-        var workId = AllocateRecoveryWorkId(run, interrupted.WorkId!, recoveryGeneration);
-        var turnId = $"recovery-turn:{workId}";
-        var replacement = TaskRun.MakeRecoveryAttempt(
-            interrupted,
-            stage.Tasks,
-            stage.Attempt,
-            recoveryGeneration,
-            workId,
-            turnId,
-            run.Stages.SelectMany(candidate => candidate.Tasks),
-            now);
-
-        interrupted.Status = TaskRunStatus.Interrupted;
-        interrupted.FinishedAt = now;
-        var index = stage.Tasks.IndexOf(interrupted);
-        stage.Tasks.Insert(index + 1, replacement);
-        stage.Status = StageRunStatus.Running;
-        run.Status = WorkflowRunStatus.Ready;
-        run.ReadySince = now;
-        return new WorkflowRecoveryAttempt(stage.Id, interrupted.Id, replacement.Id, workId, turnId, recoveryGeneration);
-    }
-
-    private static string AllocateRecoveryWorkId(WorkflowRun run, string originalWorkId, int recoveryGeneration)
-    {
-        var candidate = $"{originalWorkId}.recovery.{recoveryGeneration}";
-        var occupied = run.Stages
-            .SelectMany(stage => stage.Tasks)
-            .SelectMany(task => new[] { task.Id, task.WorkId })
-            .Where(value => !string.IsNullOrWhiteSpace(value))
-            .ToHashSet(StringComparer.Ordinal);
-        if (occupied.Add(candidate))
-            return candidate;
-
-        for (var suffix = 2; ; suffix++)
-        {
-            var disambiguated = $"{candidate}.run{suffix}";
-            if (occupied.Add(disambiguated))
-                return disambiguated;
-        }
-    }
-
     public void RequeueRunningChecks(WorkflowRun run)
     {
         var currentStage = run.CurrentStage();
@@ -379,11 +331,3 @@ internal sealed class WorkflowWorkLifecycle
         }
     }
 }
-
-internal sealed record WorkflowRecoveryAttempt(
-    string StageId,
-    string InterruptedTaskRunId,
-    string ReplacementTaskRunId,
-    string WorkId,
-    string AgentTurnId,
-    int RecoveryGeneration);

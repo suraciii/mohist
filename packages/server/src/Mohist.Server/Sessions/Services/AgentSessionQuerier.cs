@@ -829,9 +829,7 @@ public partial class AgentSessionQuerier : IScopedService
             new AgentSessionMetadataCounts(partCount, toolCount),
             CurrentTurnId(domainSession),
             AgentSessionObservationMapper.Inputs(domainSession.Status),
-            AgentSessionObservationMapper.Turns(domainSession.Status),
-            AgentSessionObservationMapper.Current(domainSession.Status),
-            AgentSessionObservationMapper.History(domainSession.Status));
+            AgentSessionObservationMapper.Turns(domainSession.Status));
     }
 
     private static string? CurrentTurnId(AgentSession session) =>
@@ -952,9 +950,7 @@ public partial class AgentSessionQuerier : IScopedService
         s.Status.CreatedAt.ToString("o"), s.Status.BoundAt?.ToString("o"), s.Status.LastDataAt?.ToString("o"),
         null, null, null,
         new AgentEventSummaryDto(null, null, null, null, null, null),
-        AgentSessionDtoMapper.ToUsageDto(s),
-        AgentSessionObservationMapper.Current(s.Status),
-        AgentSessionObservationMapper.History(s.Status));
+        AgentSessionDtoMapper.ToUsageDto(s));
     }
 
     private AgentSessionSummaryDto ToSummaryDto(AgentSessionRecord record)
@@ -971,9 +967,7 @@ public partial class AgentSessionQuerier : IScopedService
             s.Status.LastDataAt?.ToString("o"), null, null, null,
             new AgentEventSummaryDto(null, null, null, null, null, null),
             AgentSessionDtoMapper.ToUsageDto(s),
-            record.Label(AgentSessionQueryMetadataKeys.WorkflowRunId),
-            AgentSessionObservationMapper.Current(s.Status),
-            AgentSessionObservationMapper.History(s.Status));
+            record.Label(AgentSessionQueryMetadataKeys.WorkflowRunId));
     }
 
     private static async Task<AgentSessionTranscriptData> LoadTranscriptAsync(

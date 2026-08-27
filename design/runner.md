@@ -288,6 +288,13 @@ presence-expiry closeout moved to the earliest provable moment; presence
 expiry remains the backstop for a process that never returns. Both triggers
 produce the same ordinary failure code.
 
+A managed Runner update uses the same boundary. Update interrupt closes claim
+admission and records only the reversible drain fence. It does not settle work,
+prove that execution stopped, or authorize replacement execution. Once the
+replacement process registers, generation closeout fails the old work before
+new claims resume; Workflow and AgentJob then use their ordinary failure and
+retry semantics.
+
 ```mermaid
 sequenceDiagram
     participant G1 as Runner gen1
@@ -375,10 +382,11 @@ A Runner-side journal would only buy result preservation across a crash, a
 capability this design deliberately declines (see
 [Restart and Crash Semantics](#restart-and-crash-semantics)).
 
-A Runner may keep rebuildable on-disk caches, such as the Workspace
-materialization indexes, as long as they are never authoritative and fail
-open: a corrupt or missing cache is rebuilt from the filesystem and from
-Server answers.
+A Runner may keep the rebuildable Workspace materialization indexes at
+`<runnerRoot>/.mohist/workspaces.json` and
+`<runnerRoot>/.mohist/named-workspaces.json`. They are never authoritative and
+fail open: a corrupt or missing index is rebuilt from the filesystem and from
+Server answers. There is no general Runner state directory.
 
 Runtime events and task-log batches are volatile evidence. The Runner retries
 them from bounded process memory in per-session emission order, but a crash may
@@ -388,11 +396,11 @@ Server refusal also drops the refused evidence. These gaps are accepted because
 evidence delivery never gates admission or work-result reporting, so the Server
 continues state arbitration from the facts it did receive.
 
-The Runner does not persist operation journals, recovery receipts, or
+The Runner does not persist operation journals, execution receipts, or
 terminal task-log delivery stores. Runtime events and task-log batches are
 bounded volatile queues: a live process retries them, but a process restart may
-lose undelivered evidence. Rebuildable workspace indexes may remain on disk and
-are never authoritative.
+lose undelivered evidence. Only the two rebuildable Workspace indexes remain on
+disk, and they are never authoritative.
 
 ### Stop Operations Stay Available and Settle by Identity
 

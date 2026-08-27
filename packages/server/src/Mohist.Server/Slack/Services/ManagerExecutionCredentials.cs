@@ -824,7 +824,7 @@ public sealed record ManagerExecutionBinding(string ExecutionId, ManagerExecutio
                 anchor.SessionId,
                 anchor.DispatchRef);
             binding = new ManagerExecutionBinding(
-                $"manager:{work.AgentJobId}:{work.WorkId}:{work.RecoveryGeneration}",
+                $"manager:{work.AgentJobId}:{work.WorkId}",
                 origin);
             return true;
         }

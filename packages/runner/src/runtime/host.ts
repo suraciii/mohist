@@ -37,11 +37,9 @@ import {
   isShutdownFailureResult,
   isSyntheticStopResult,
   positiveBudget,
-  SHUTDOWN_HANDOFF_BUDGET_MS,
 } from './host-update-shutdown.js'
 import { getOpenCodeRuntimeFactory, type OpenCodeRuntime } from './opencode/index.js'
 import { getPiRuntimeFactory, parseProviderErrorPolicy, type PiRuntime } from './pi/index.js'
-import type { PendingUpdateOperation } from './update-operation.js'
 import { workKey } from './work-key.js'
 import { loadBuildInfo } from './build-info.js'
 export { getRunnerBuildGitHash } from './build-info.js'
@@ -94,8 +92,6 @@ export interface ReportResult {
 
 export interface RunnerHostDependencies {
   waitForConnectionRetry?: (delayMs: number, signal: AbortSignal) => Promise<void>
-  fetchPendingUpdateOperation?: (signal: AbortSignal) => Promise<PendingUpdateOperation | null>
-  shutdownHandoffBudgetMs?: number
   shutdownStopBudgetMs?: number
 }
 
@@ -131,8 +127,6 @@ export class RunnerHost {
   private piRuntimeGeneration = 0
   private providerPolicyDiagnostic: string | null = null
   private lastProviderPolicyDiagnosticLogged: string | null = null
-  private readonly fetchPendingUpdateOperation: (signal: AbortSignal) => Promise<PendingUpdateOperation | null>
-  private readonly shutdownHandoffBudgetMs: number
   private readonly shutdownStopBudgetMs: number
   private readonly hostShutdown: ReturnType<typeof createHostShutdown>
   private readonly waitForConnectionRetry: (delayMs: number, signal: AbortSignal) => Promise<void>
@@ -203,18 +197,7 @@ export class RunnerHost {
     )
     this.workspace = new WorkspaceManager(options.runnerRoot, this.workspaceRegistry, options.runnerId)
     this.waitForConnectionRetry = dependencies.waitForConnectionRetry ?? hostDelay
-    this.shutdownHandoffBudgetMs = positiveBudget(dependencies.shutdownHandoffBudgetMs, SHUTDOWN_HANDOFF_BUDGET_MS)
     this.shutdownStopBudgetMs = positiveBudget(dependencies.shutdownStopBudgetMs, 2_000)
-    this.fetchPendingUpdateOperation =
-      dependencies.fetchPendingUpdateOperation ??
-      (async (signal) => {
-        const connection = this.connection as ServerConnection & {
-          fetchPendingUpdateOperation?: (requestSignal: AbortSignal) => Promise<PendingUpdateOperation | null>
-        }
-        return typeof connection.fetchPendingUpdateOperation === 'function'
-          ? await connection.fetchPendingUpdateOperation(signal)
-          : null
-      })
     this.control = new RunnerControlWebSocketClient(
       options.serverUrl,
       options.runnerId,
@@ -286,11 +269,7 @@ export class RunnerHost {
       openCodeRuntime: () => this.openCodeRuntime,
     })
     this.hostShutdown = createHostShutdown({
-      options: this.options,
-      connection: this.connection,
       inFlight: this.inFlight,
-      fetchPendingUpdateOperation: this.fetchPendingUpdateOperation,
-      shutdownHandoffBudgetMs: this.shutdownHandoffBudgetMs,
       shutdownStopBudgetMs: this.shutdownStopBudgetMs,
     })
   }

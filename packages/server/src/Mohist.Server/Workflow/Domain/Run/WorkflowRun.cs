@@ -116,24 +116,7 @@ public sealed class WorkflowRun
     internal void AssignRepositoryContext(WorkflowRepositoryContext? repository) =>
         Repository = repository;
     public List<ApprovalFeedback> Feedback { get; set; } = new();
-    /// <summary>
-    /// Durable acknowledgement ledger for runtime recovery receipts. The
-    /// ledger remains on the run after the task settlement is cleared so an
-    /// exact replay can return the original acknowledgement without applying
-    /// the task result again.
-    /// </summary>
-    public List<AppliedRuntimeRecoveryReceipt> AppliedRecoveryReceipts { get; set; } = new();
-    /// <summary>
-    /// Cross-grain Session visibility deliveries are persisted with the
-    /// owner transition and removed only after the Session acknowledges the
-    /// idempotent transition. This closes the owner-commit/Session-write gap.
-    /// </summary>
-    public List<PendingAgentSessionInterruption> PendingSessionInterruptionDeliveries { get; set; } = new();
 
     public bool IsAssigned => Assignment is not null;
     public string? AssignedTo => Assignment?.WorkerId;
 }
-
-public sealed record PendingAgentSessionInterruption(
-    string SessionId,
-    AgentWorkInterruptionTransition Transition);

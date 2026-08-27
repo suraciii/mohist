@@ -20,9 +20,6 @@ public static class TestServices
         services.AddSingleton<IBackgroundTaskLauncher, BackgroundTaskLauncher>();
         services.AddSingleton<IEventPushQueue>(NullEventPushQueue.Instance);
         services.AddSingleton<IAgentJobDispatchObserver>(NoopAgentJobDispatchObserver.Instance);
-        services.AddSingleton<RunnerUpdateOperationWriteFailureProbe>();
-        services.AddSingleton<IRunnerUpdateOperationWriteFailureInjector>(sp =>
-            sp.GetRequiredService<RunnerUpdateOperationWriteFailureProbe>());
         services.AddSingleton<ReportPersistenceFailureProbe>();
         services.AddSingleton<IWorkflowReportPersistenceFailureInjector>(sp =>
             sp.GetRequiredService<ReportPersistenceFailureProbe>());

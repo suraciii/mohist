@@ -55,13 +55,15 @@ function makeTurn(overrides: Partial<SessionTurn> = {}): SessionTurn {
 }
 
 function renderLiveTranscript(initialTurns: SessionTurn[] = [makeTurn()]) {
-  return renderHookWithQueryClient(() => useSessionTranscript({
-    issueNumber: 123,
-    sessionId: 'session-123',
-    runtimeSessionId: 'runtime-123',
-    initialTurns,
-    isRunning: true,
-  }))
+  return renderHookWithQueryClient(() =>
+    useSessionTranscript({
+      issueNumber: 123,
+      sessionId: 'session-123',
+      runtimeSessionId: 'runtime-123',
+      initialTurns,
+      isRunning: true,
+    }),
+  )
 }
 
 describe('useSessionTranscript live parity and convergence', () => {
@@ -70,7 +72,8 @@ describe('useSessionTranscript live parity and convergence', () => {
 
     act(() => {
       dispatchAgentEvent('coder_tool_call', {
-        issueNumber: 123,        projectId: 'project-1',
+        issueNumber: 123,
+        projectId: 'project-1',
         executionId: 'exec-123',
         runtimeSessionId: 'runtime-123',
         sessionId: 'session-123',
@@ -95,7 +98,8 @@ describe('useSessionTranscript live parity and convergence', () => {
 
     act(() => {
       dispatchAgentEvent('coder_tool_call', {
-        issueNumber: 123,        projectId: 'project-1',
+        issueNumber: 123,
+        projectId: 'project-1',
         executionId: 'exec-123',
         runtimeSessionId: 'runtime-123',
         sessionId: 'session-123',
@@ -109,7 +113,11 @@ describe('useSessionTranscript live parity and convergence', () => {
     await waitFor(() => {
       const toolPart = result.current.turns.at(-1)?.assistant.find((part): part is ToolPart => part.type === 'tool')
       expect(toolPart?.tool.normalizedName).toBe('websearch')
-      expect(toolPart?.tool.details).toMatchObject({ family: 'interaction', url: 'https://example.com', query: 'semantic titles' })
+      expect(toolPart?.tool.details).toMatchObject({
+        family: 'interaction',
+        url: 'https://example.com',
+        query: 'semantic titles',
+      })
     })
   })
 
@@ -118,7 +126,8 @@ describe('useSessionTranscript live parity and convergence', () => {
 
     act(() => {
       dispatchAgentEvent('coder_tool_call', {
-        issueNumber: 123,        projectId: 'project-1',
+        issueNumber: 123,
+        projectId: 'project-1',
         executionId: 'exec-123',
         runtimeSessionId: 'runtime-123',
         sessionId: 'session-123',
@@ -142,7 +151,8 @@ describe('useSessionTranscript live parity and convergence', () => {
 
     act(() => {
       dispatchAgentEvent('coder_tool_call', {
-        issueNumber: 123,        projectId: 'project-1',
+        issueNumber: 123,
+        projectId: 'project-1',
         executionId: 'exec-123',
         runtimeSessionId: 'runtime-123',
         sessionId: 'session-123',
@@ -157,7 +167,11 @@ describe('useSessionTranscript live parity and convergence', () => {
       const toolPart = result.current.turns.at(-1)?.assistant.find((part): part is ToolPart => part.type === 'tool')
       expect(toolPart?.tool.normalizedName).toBe('todowrite')
       expect(toolPart?.hidden).toBeUndefined()
-      expect(toolPart?.tool.details).toMatchObject({ family: 'planning', totalCount: 1, statusCounts: { in_progress: 1 } })
+      expect(toolPart?.tool.details).toMatchObject({
+        family: 'planning',
+        totalCount: 1,
+        statusCounts: { in_progress: 1 },
+      })
     })
   })
 
@@ -168,7 +182,8 @@ describe('useSessionTranscript live parity and convergence', () => {
 
     act(() => {
       dispatchAgentEvent('coder_tool_call', {
-        issueNumber: 123,        projectId: 'project-1',
+        issueNumber: 123,
+        projectId: 'project-1',
         executionId: 'exec-123',
         runtimeSessionId: 'runtime-123',
         sessionId: 'session-123',
@@ -184,7 +199,8 @@ describe('useSessionTranscript live parity and convergence', () => {
 
     act(() => {
       dispatchAgentEvent('coder_tool_call', {
-        issueNumber: 123,        projectId: 'project-1',
+        issueNumber: 123,
+        projectId: 'project-1',
         executionId: 'exec-123',
         runtimeSessionId: 'runtime-123',
         sessionId: 'session-123',
@@ -209,21 +225,14 @@ describe('useSessionTranscript live parity and convergence', () => {
     expect(result.current.isFinalizing).toBe(false)
     expect(result.current.turns.at(-1)?.completedAt).toBeNull()
     act(() => {
-      dispatchAgentEvent('session.activity', { sessionId: 'session-123', runtimeSessionId: 'runtime-123', activity: 'idle' })
+      dispatchAgentEvent('session.activity', {
+        sessionId: 'session-123',
+        runtimeSessionId: 'runtime-123',
+        activity: 'idle',
+      })
     })
     await waitFor(() => expect(result.current.turns.at(-1)?.completedAt).not.toBeNull())
     expect(result.current.isFinalizing).toBe(false)
-  })
-
-  it('appends one recovery part for a single live recovery event', async () => {
-    const { result } = renderLiveTranscript()
-    act(() => {
-      dispatchAgentEvent('coder_recovery_status', { issueNumber: 123, projectId: 'project-1', executionId: 'exec-123', sessionId: 'session-123', runtimeSessionId: 'runtime-123', status: 'recovering', attempt: 1 })
-    })
-    await waitFor(() => {
-      const recoveryParts = result.current.turns.at(-1)?.assistant.filter((part) => part.type === 'error' && part.kind === 'recovery')
-      expect(recoveryParts).toHaveLength(1)
-    })
   })
 
   it('appends liveness probe and recovery parts for live liveness events', async () => {
@@ -249,7 +258,9 @@ describe('useSessionTranscript live parity and convergence', () => {
       })
     })
     await waitFor(() => {
-      const recoveryParts = result.current.turns.at(-1)?.assistant.filter((part): part is ErrorPart => part.type === 'error' && part.kind === 'recovery')
+      const recoveryParts = result.current.turns
+        .at(-1)
+        ?.assistant.filter((part): part is ErrorPart => part.type === 'error' && part.kind === 'recovery')
       expect(recoveryParts).toHaveLength(2)
       expect(recoveryParts?.[0].message).toContain('Liveness probe sent')
       expect(recoveryParts?.[1].message).toContain('Liveness recovered')
@@ -259,16 +270,38 @@ describe('useSessionTranscript live parity and convergence', () => {
   it('tool start and completion update same tool part without duplication', async () => {
     const { result } = renderLiveTranscript()
     act(() => {
-      dispatchAgentEvent('coder_tool_call', { issueNumber: 123, projectId: 'project-1', executionId: 'exec-123', runtimeSessionId: 'runtime-123', sessionId: 'session-123', toolCallId: 'tc-converge', toolName: 'read', state: 'started', rawInput: { file_path: 'src/index.ts' } })
+      dispatchAgentEvent('coder_tool_call', {
+        issueNumber: 123,
+        projectId: 'project-1',
+        executionId: 'exec-123',
+        runtimeSessionId: 'runtime-123',
+        sessionId: 'session-123',
+        toolCallId: 'tc-converge',
+        toolName: 'read',
+        state: 'started',
+        rawInput: { file_path: 'src/index.ts' },
+      })
     })
     await waitFor(() => {
       const toolParts = result.current.turns.at(-1)?.assistant.filter((part): part is ToolPart => part.type === 'tool')
       expect(toolParts).toHaveLength(1)
       expect(toolParts?.[0].tool.status).toBe('running')
     })
-    const firstToolId = result.current.turns.at(-1)?.assistant.find((part): part is ToolPart => part.type === 'tool')?.id
+    const firstToolId = result.current.turns
+      .at(-1)
+      ?.assistant.find((part): part is ToolPart => part.type === 'tool')?.id
     act(() => {
-      dispatchAgentEvent('coder_tool_call', { issueNumber: 123, projectId: 'project-1', executionId: 'exec-123', runtimeSessionId: 'runtime-123', sessionId: 'session-123', toolCallId: 'tc-converge', toolName: 'read', state: 'completed', rawOutput: 'file content' })
+      dispatchAgentEvent('coder_tool_call', {
+        issueNumber: 123,
+        projectId: 'project-1',
+        executionId: 'exec-123',
+        runtimeSessionId: 'runtime-123',
+        sessionId: 'session-123',
+        toolCallId: 'tc-converge',
+        toolName: 'read',
+        state: 'completed',
+        rawOutput: 'file content',
+      })
     })
     await waitFor(() => {
       const toolParts = result.current.turns.at(-1)?.assistant.filter((part): part is ToolPart => part.type === 'tool')
@@ -282,14 +315,35 @@ describe('useSessionTranscript live parity and convergence', () => {
   it('merges update-only events with pending tools by normalized name plus target', async () => {
     const { result } = renderLiveTranscript()
     act(() => {
-      dispatchAgentEvent('coder_tool_call', { issueNumber: 123, projectId: 'project-1', executionId: 'exec-123', runtimeSessionId: 'runtime-123', sessionId: 'session-123', toolCallId: 'tc-pending', toolName: 'read', state: 'started', title: 'src/app.ts', rawInput: { file_path: 'src/app.ts' } })
+      dispatchAgentEvent('coder_tool_call', {
+        issueNumber: 123,
+        projectId: 'project-1',
+        executionId: 'exec-123',
+        runtimeSessionId: 'runtime-123',
+        sessionId: 'session-123',
+        toolCallId: 'tc-pending',
+        toolName: 'read',
+        state: 'started',
+        title: 'src/app.ts',
+        rawInput: { file_path: 'src/app.ts' },
+      })
     })
     await waitFor(() => {
       const toolParts = result.current.turns.at(-1)?.assistant.filter((part): part is ToolPart => part.type === 'tool')
       expect(toolParts).toHaveLength(1)
     })
     act(() => {
-      dispatchAgentEvent('coder_tool_call', { issueNumber: 123, projectId: 'project-1', executionId: 'exec-123', runtimeSessionId: 'runtime-123', sessionId: 'session-123', toolCallId: 'tc-update', toolName: 'read', state: 'completed', rawOutput: 'file content' })
+      dispatchAgentEvent('coder_tool_call', {
+        issueNumber: 123,
+        projectId: 'project-1',
+        executionId: 'exec-123',
+        runtimeSessionId: 'runtime-123',
+        sessionId: 'session-123',
+        toolCallId: 'tc-update',
+        toolName: 'read',
+        state: 'completed',
+        rawOutput: 'file content',
+      })
     })
     await waitFor(() => {
       const toolParts = result.current.turns.at(-1)?.assistant.filter((part): part is ToolPart => part.type === 'tool')
@@ -301,10 +355,30 @@ describe('useSessionTranscript live parity and convergence', () => {
   it('updates existing tool card on terminal events without creating duplicate', async () => {
     const { result } = renderLiveTranscript()
     act(() => {
-      dispatchAgentEvent('coder_tool_call', { issueNumber: 123, projectId: 'project-1', executionId: 'exec-123', runtimeSessionId: 'runtime-123', sessionId: 'session-123', toolCallId: 'tc-terminal', toolName: 'bash', state: 'started', title: 'Run tests' })
+      dispatchAgentEvent('coder_tool_call', {
+        issueNumber: 123,
+        projectId: 'project-1',
+        executionId: 'exec-123',
+        runtimeSessionId: 'runtime-123',
+        sessionId: 'session-123',
+        toolCallId: 'tc-terminal',
+        toolName: 'bash',
+        state: 'started',
+        title: 'Run tests',
+      })
     })
     act(() => {
-      dispatchAgentEvent('coder_tool_call', { issueNumber: 123, projectId: 'project-1', executionId: 'exec-123', runtimeSessionId: 'runtime-123', sessionId: 'session-123', toolCallId: 'tc-terminal', toolName: 'bash', state: 'completed', rawOutput: 'All tests passed' })
+      dispatchAgentEvent('coder_tool_call', {
+        issueNumber: 123,
+        projectId: 'project-1',
+        executionId: 'exec-123',
+        runtimeSessionId: 'runtime-123',
+        sessionId: 'session-123',
+        toolCallId: 'tc-terminal',
+        toolName: 'bash',
+        state: 'completed',
+        rawOutput: 'All tests passed',
+      })
     })
     await waitFor(() => {
       const toolParts = result.current.turns.at(-1)?.assistant.filter((part): part is ToolPart => part.type === 'tool')
@@ -317,7 +391,8 @@ describe('useSessionTranscript live parity and convergence', () => {
     const { result } = renderLiveTranscript()
     act(() => {
       dispatchAgentEvent('coder_tool_call', {
-        issueNumber: 123,        projectId: 'project-1',
+        issueNumber: 123,
+        projectId: 'project-1',
         executionId: 'exec-123',
         runtimeSessionId: 'runtime-123',
         sessionId: 'session-123',
@@ -339,7 +414,17 @@ describe('useSessionTranscript live parity and convergence', () => {
   it('replaces generic fallback titles with later semantic event titles', async () => {
     const { result } = renderLiveTranscript()
     act(() => {
-      dispatchAgentEvent('coder_tool_call', { issueNumber: 123, projectId: 'project-1', executionId: 'exec-123', runtimeSessionId: 'runtime-123', sessionId: 'session-123', toolCallId: 'tc-late-title', toolName: 'read', state: 'started', rawInput: {} })
+      dispatchAgentEvent('coder_tool_call', {
+        issueNumber: 123,
+        projectId: 'project-1',
+        executionId: 'exec-123',
+        runtimeSessionId: 'runtime-123',
+        sessionId: 'session-123',
+        toolCallId: 'tc-late-title',
+        toolName: 'read',
+        state: 'started',
+        rawInput: {},
+      })
     })
     await waitFor(() => {
       const toolPart = result.current.turns.at(-1)?.assistant.find((part): part is ToolPart => part.type === 'tool')
@@ -347,7 +432,18 @@ describe('useSessionTranscript live parity and convergence', () => {
     })
 
     act(() => {
-      dispatchAgentEvent('coder_tool_call', { issueNumber: 123, projectId: 'project-1', executionId: 'exec-123', runtimeSessionId: 'runtime-123', sessionId: 'session-123', toolCallId: 'tc-late-title', toolName: 'read', state: 'completed', title: 'Read src/app.ts', rawOutput: 'file content' })
+      dispatchAgentEvent('coder_tool_call', {
+        issueNumber: 123,
+        projectId: 'project-1',
+        executionId: 'exec-123',
+        runtimeSessionId: 'runtime-123',
+        sessionId: 'session-123',
+        toolCallId: 'tc-late-title',
+        toolName: 'read',
+        state: 'completed',
+        title: 'Read src/app.ts',
+        rawOutput: 'file content',
+      })
     })
 
     await waitFor(() => {
@@ -360,7 +456,17 @@ describe('useSessionTranscript live parity and convergence', () => {
   it('maps failed status correctly for tool calls', async () => {
     const { result } = renderLiveTranscript()
     act(() => {
-      dispatchAgentEvent('coder_tool_call', { issueNumber: 123, projectId: 'project-1', executionId: 'exec-123', runtimeSessionId: 'runtime-123', sessionId: 'session-123', toolCallId: 'tc-failed', toolName: 'edit', state: 'failed', rawOutput: 'File not found' })
+      dispatchAgentEvent('coder_tool_call', {
+        issueNumber: 123,
+        projectId: 'project-1',
+        executionId: 'exec-123',
+        runtimeSessionId: 'runtime-123',
+        sessionId: 'session-123',
+        toolCallId: 'tc-failed',
+        toolName: 'edit',
+        state: 'failed',
+        rawOutput: 'File not found',
+      })
     })
     await waitFor(() => {
       const toolPart = result.current.turns.at(-1)?.assistant.find((part): part is ToolPart => part.type === 'tool')
@@ -373,7 +479,14 @@ describe('useSessionTranscript live parity and convergence', () => {
     const { result } = renderLiveTranscript()
     await waitFor(() => expect(result.current.isThinking).toBe(true))
     act(() => {
-      dispatchAgentEvent('coder_text_chunk', { issueNumber: 123, projectId: 'project-1', executionId: 'exec-123', runtimeSessionId: 'runtime-123', text: 'Hello world', sessionId: 'session-123' })
+      dispatchAgentEvent('coder_text_chunk', {
+        issueNumber: 123,
+        projectId: 'project-1',
+        executionId: 'exec-123',
+        runtimeSessionId: 'runtime-123',
+        text: 'Hello world',
+        sessionId: 'session-123',
+      })
     })
     await waitFor(() => expect(result.current.isThinking).toBe(false))
   })
@@ -383,7 +496,14 @@ describe('useSessionTranscript live parity and convergence', () => {
     act(() => result.current.setIsNearBottom(false))
     await waitFor(() => expect(result.current.isNearBottom).toBe(false))
     act(() => {
-      dispatchAgentEvent('coder_text_chunk', { issueNumber: 123, projectId: 'project-1', executionId: 'exec-123', runtimeSessionId: 'runtime-123', text: 'New content', sessionId: 'session-123' })
+      dispatchAgentEvent('coder_text_chunk', {
+        issueNumber: 123,
+        projectId: 'project-1',
+        executionId: 'exec-123',
+        runtimeSessionId: 'runtime-123',
+        text: 'New content',
+        sessionId: 'session-123',
+      })
     })
     await waitFor(() => expect(result.current.newContentAvailable).toBe(true))
     act(() => result.current.acknowledgeNewContent())
@@ -400,10 +520,44 @@ describe('useSessionTranscript live parity and convergence', () => {
   it('preserves text append before and after tool events through reconciliation', async () => {
     const { result } = renderLiveTranscript()
     act(() => {
-      dispatchAgentEvent('coder_text_chunk', { issueNumber: 123, projectId: 'project-1', executionId: 'exec-123', runtimeSessionId: 'runtime-123', text: 'Reading files...', sessionId: 'session-123' })
-      dispatchAgentEvent('coder_tool_call', { issueNumber: 123, projectId: 'project-1', executionId: 'exec-123', runtimeSessionId: 'runtime-123', sessionId: 'session-123', toolCallId: 'tc-file', toolName: 'read', state: 'started', rawInput: { file_path: 'test.txt' } })
-      dispatchAgentEvent('coder_text_chunk', { issueNumber: 123, projectId: 'project-1', executionId: 'exec-123', runtimeSessionId: 'runtime-123', text: 'Done reading.', sessionId: 'session-123' })
-      dispatchAgentEvent('coder_tool_call', { issueNumber: 123, projectId: 'project-1', executionId: 'exec-123', runtimeSessionId: 'runtime-123', sessionId: 'session-123', toolCallId: 'tc-file', toolName: 'read', state: 'completed', rawOutput: 'file content' })
+      dispatchAgentEvent('coder_text_chunk', {
+        issueNumber: 123,
+        projectId: 'project-1',
+        executionId: 'exec-123',
+        runtimeSessionId: 'runtime-123',
+        text: 'Reading files...',
+        sessionId: 'session-123',
+      })
+      dispatchAgentEvent('coder_tool_call', {
+        issueNumber: 123,
+        projectId: 'project-1',
+        executionId: 'exec-123',
+        runtimeSessionId: 'runtime-123',
+        sessionId: 'session-123',
+        toolCallId: 'tc-file',
+        toolName: 'read',
+        state: 'started',
+        rawInput: { file_path: 'test.txt' },
+      })
+      dispatchAgentEvent('coder_text_chunk', {
+        issueNumber: 123,
+        projectId: 'project-1',
+        executionId: 'exec-123',
+        runtimeSessionId: 'runtime-123',
+        text: 'Done reading.',
+        sessionId: 'session-123',
+      })
+      dispatchAgentEvent('coder_tool_call', {
+        issueNumber: 123,
+        projectId: 'project-1',
+        executionId: 'exec-123',
+        runtimeSessionId: 'runtime-123',
+        sessionId: 'session-123',
+        toolCallId: 'tc-file',
+        toolName: 'read',
+        state: 'completed',
+        rawOutput: 'file content',
+      })
     })
     await waitFor(() => {
       const textPart = result.current.turns.at(-1)?.assistant.find((p): p is TextPart => p.type === 'text')
@@ -420,10 +574,19 @@ describe('useSessionTranscript live parity and convergence', () => {
     // appends a recovery-kind error part carrying the failure reason.
     const { result } = renderLiveTranscript()
     act(() => {
-      dispatchAgentEvent('session.liveness', { sessionId: 'session-123', runtimeSessionId: 'runtime-123', status: 'failed', failureReason: 'Out of memory', lastDataAt: '2024-01-01T00:00:02.000Z', lastActivityType: 'agent_thought_chunk' })
+      dispatchAgentEvent('session.liveness', {
+        sessionId: 'session-123',
+        runtimeSessionId: 'runtime-123',
+        status: 'failed',
+        failureReason: 'Out of memory',
+        lastDataAt: '2024-01-01T00:00:02.000Z',
+        lastActivityType: 'agent_thought_chunk',
+      })
     })
     await waitFor(() => {
-      const errorParts = result.current.turns.at(-1)?.assistant.filter((part): part is ErrorPart => part.type === 'error' && part.kind === 'recovery')
+      const errorParts = result.current.turns
+        .at(-1)
+        ?.assistant.filter((part): part is ErrorPart => part.type === 'error' && part.kind === 'recovery')
       expect(errorParts).toHaveLength(1)
       expect(errorParts?.[0].message).toContain('Out of memory')
     })

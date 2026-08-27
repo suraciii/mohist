@@ -56,40 +56,7 @@ public sealed class AgentJobState
     /// recovery decision after activation or a silo restart.
     /// </summary>
     [Id(34)] public DateTimeOffset? RecoveryDeadlineAt { get; set; }
-    [Id(35)] public PendingUpdateInterruptionEvent? PendingUpdateInterruptionEvent { get; set; }
-    [Id(36)] public string? UpdateOperationId { get; set; }
-    /// <summary>
-    /// Monotonic replacement generation. Generation zero is the original
-    /// dispatch; every accepted update interruption allocates the next value.
-    /// </summary>
-    [Id(37)] public int RecoveryGeneration { get; set; }
-    /// <summary>
-    /// The work identity currently fenced by the latest update operation.
-    /// It remains recorded while a replacement is pending so reconciliation
-    /// can never mistake the old execution for the new one.
-    /// </summary>
-    [Id(38)] public string? InterruptedWorkId { get; set; }
-    [Id(39)] public List<AgentJobRecoveryAttempt> RecoveryAttempts { get; set; } = [];
-    /// <summary>
-    /// Durable receipt acknowledgement ledger. It is checked before current
-    /// lifecycle state so exact replay returns the original acknowledgement
-    /// even after a replacement or recovery-terminal transition.
-    /// </summary>
-    [Id(40)] public List<AppliedRuntimeRecoveryReceipt> AppliedRecoveryReceipts { get; set; } = [];
-    [Id(41)] public string? RecoveryTerminalReason { get; set; }
-    /// <summary>
-    /// Bounded arbitration deadline after which a RecoverablyInterrupted job
-    /// without a confirmed receipt transitions to a terminal Interrupted state.
-    /// </summary>
-    [Id(42)] public DateTimeOffset? UpdateInterruptionDeadlineAt { get; set; }
-    [Id(43)] public AgentWorkInterruptionTransition? Interruption { get; set; }
-    [Id(44)] public List<AgentWorkInterruptionTransition> InterruptionHistory { get; set; } = [];
-    /// <summary>
-    /// Cross-grain Session visibility deliveries are persisted with the
-    /// owner transition and removed only after the Session acknowledges the
-    /// idempotent transition. This closes the owner-commit/Session-write gap.
-    /// </summary>
-    [Id(45)] public List<PendingAgentSessionInterruption> PendingSessionInterruptionDeliveries { get; set; } = [];
+    // Ids 35-45 are retired with update recovery convergence.
     /// <summary>
     /// Durable at-most-once marker for the non-replaying follow-up created
     /// after a Manager execution credential expires.
@@ -118,11 +85,6 @@ public sealed class AgentJobState
 
 
 [GenerateSerializer]
-public sealed record PendingAgentSessionInterruption(
-    [property: Id(0)] string SessionId,
-    [property: Id(1)] AgentWorkInterruptionTransition Transition);
-
-[GenerateSerializer]
 public sealed record ManagerExpiryRecoveryTransition(
     [property: Id(0)] string InputId,
     [property: Id(1)] string TurnId,
@@ -136,19 +98,6 @@ public sealed record ManagerRecoveryTransition(
     [property: Id(2)] string Reason,
     [property: Id(3)] DateTimeOffset RecordedAt);
 
-
-[GenerateSerializer]
-public sealed record AgentJobRecoveryAttempt(
-    [property: Id(0)] int RecoveryGeneration,
-    [property: Id(1)] string WorkId,
-    [property: Id(2)] string? RunnerId,
-    [property: Id(3)] string? AgentSessionId,
-    [property: Id(4)] string? InputId,
-    [property: Id(5)] string? TurnId,
-    [property: Id(6)] string? Runtime,
-    [property: Id(7)] string? RuntimeSessionId,
-    [property: Id(8)] AgentJobStatus Status,
-    [property: Id(9)] DateTimeOffset RecordedAt);
 
 
 [GenerateSerializer]

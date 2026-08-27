@@ -33,8 +33,7 @@ public sealed class ManagerExecutionPollGrantTests
             OwnerKind: WorkDispatchOwnerKinds.AgentJob,
             AgentJobId: "job-1",
             ProjectId: SlackDeliveryOwnerIds.ManagerProjectId,
-            AgentSessionId: "session-1",
-            RecoveryGeneration: 0);
+            AgentSessionId: "session-1");
         var issuer = new ManagerExecutionCapabilityIssuer(
             new ManagerExecutionLeaseStore(),
             new ManagerDeploymentEpoch());
