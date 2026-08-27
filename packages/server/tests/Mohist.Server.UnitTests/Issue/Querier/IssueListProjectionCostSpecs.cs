@@ -6,6 +6,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Infrastructure.Data.Events;
 using Mohist.Server.Infrastructure.Data.Issue;
+using Mohist.Server.Infrastructure.Data.GitHub;
 using Mohist.Server.Infrastructure.Config;
 using Mohist.Server.Issue.Domain;
 using Mohist.Server.Issue.Services;
@@ -53,6 +54,32 @@ public sealed class IssueListProjectionCostSpecs
             Number = issue.Number,
             State = IssueStore.Serialize(issue),
         });
+        db.GitHubConnections.Add(new GitHubConnectionRow
+        {
+            Id = $"connection-{project.Id}",
+            ProjectId = project.Id,
+            Owner = "suraciii",
+            Repo = "mohist",
+            RepositoryName = "main",
+            IntakeLabel = "mohist",
+            FeedMode = "backlog",
+            ApproversJson = "[]",
+            Status = "active",
+            IdentityKind = "pat",
+            NeedsAttention = false,
+            CreatedAt = TestTime.UtcNow,
+            UpdatedAt = TestTime.UtcNow,
+        });
+        db.GitHubIssueLinks.Add(new GitHubIssueLinkRow
+        {
+            Id = $"link-{project.Id}",
+            ProjectId = project.Id,
+            RepositoryName = "main",
+            GithubIssueNumber = 771,
+            IssueNumber = issue.Number,
+            CreatedAt = TestTime.UtcNow,
+            UpdatedAt = TestTime.UtcNow,
+        });
         await db.SaveChangesAsync();
 
         var counter = new SqlCommandCounter();
@@ -78,6 +105,12 @@ public sealed class IssueListProjectionCostSpecs
             all: null);
         var baselineCommandCount = counter.Count;
         Assert.Single(baseline);
+        Assert.Equal(
+            new GitHubIssueSummary("suraciii/mohist", 771, "https://github.com/suraciii/mohist/issues/771", "healthy"),
+            baseline[0].Github);
+        Assert.Equal(2, counter.CommandTexts.Count(command =>
+            command.Contains("GitHubIssueLinks", StringComparison.OrdinalIgnoreCase)
+            || command.Contains("GitHubConnections", StringComparison.OrdinalIgnoreCase)));
         Assert.DoesNotContain(baseline[0].GetType().GetProperties(), property =>
             string.Equals(property.Name, "Body", StringComparison.OrdinalIgnoreCase));
         Assert.DoesNotContain(counter.CommandTexts, ContainsDetailTable);

@@ -85,6 +85,35 @@ afterEach(() => {
   cleanup()
 })
 
+describe('IssueDetailPage GitHub mirror', () => {
+  it('renders the linked GitHub issue beside the identity badges', async () => {
+    mockIssue(
+      makeIssue({
+        github: {
+          repository: 'suraciii/mohist',
+          number: 771,
+          url: 'https://github.com/suraciii/mohist/issues/771',
+          syncStatus: 'healthy',
+        },
+      }),
+    )
+
+    renderPage()
+
+    const link = await waitFor(() => screen.getByTestId('github-issue-link'))
+    expect(link).toHaveTextContent('suraciii/mohist#771')
+    expect(link).toHaveAttribute('href', 'https://github.com/suraciii/mohist/issues/771')
+    expect(link).toHaveAttribute('title', 'GitHub sync: healthy')
+  })
+
+  it('renders no GitHub link for an unlinked issue', async () => {
+    mockIssue(makeIssue())
+    renderPage()
+    await waitFor(() => expect(screen.getByTestId('issue-detail-header')).toBeTruthy())
+    expect(screen.queryByTestId('github-issue-link')).not.toBeInTheDocument()
+  })
+})
+
 describe('IssueDetailPage epic numbered display', () => {
   it('renders #N as the primary epic identifier on the issue detail page when number is present', async () => {
     mockIssue(

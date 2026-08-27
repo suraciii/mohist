@@ -58,6 +58,7 @@ public class IssueReadModelLoader : IScopedService
 
         ApplyWorkflowProjections(list, await LoadWorkflowStatesAsync(db, list));
         ApplyFeedbackProjections(list, await LoadFeedbackAsync(db, list));
+        await ApplyGitHubProjectionsAsync(db, list);
 
         return list;
     }
@@ -71,6 +72,7 @@ public class IssueReadModelLoader : IScopedService
         if (list.Count == 0) return list;
 
         ApplyWorkflowProjections(list, await LoadWorkflowStatesAsync(db, list));
+        await ApplyGitHubProjectionsAsync(db, list);
         return list;
     }
 
@@ -131,6 +133,7 @@ public class IssueReadModelLoader : IScopedService
     {
         ApplyWorkflowProjections([model], await LoadWorkflowStatesAsync(db, [model]));
         ApplyFeedbackProjections([model], await LoadFeedbackAsync(db, [model]));
+        await ApplyGitHubProjectionsAsync(db, [model]);
     }
 
     /// <summary>
@@ -236,6 +239,42 @@ public class IssueReadModelLoader : IScopedService
         Repository = issue.Repository,
         RepositoryProblem = issue.RepositoryProblem,
     };
+
+    private static async Task ApplyGitHubProjectionsAsync(
+        MohistDbContext db,
+        IReadOnlyCollection<IssueReadModel> issues)
+    {
+        if (issues.Count == 0) return;
+
+        var projectIds = issues.Select(issue => issue.ProjectId).Distinct(StringComparer.Ordinal).ToArray();
+        var issueNumbers = issues.Select(issue => issue.Number).Distinct().ToArray();
+        var links = await db.GitHubIssueLinks.AsNoTracking()
+            .Where(row => projectIds.Contains(row.ProjectId) && issueNumbers.Contains(row.IssueNumber))
+            .ToListAsync();
+        if (links.Count == 0) return;
+
+        var repositoryNames = links.Select(link => link.RepositoryName).Distinct(StringComparer.Ordinal).ToArray();
+        var connections = await db.GitHubConnections.AsNoTracking()
+            .Where(row => projectIds.Contains(row.ProjectId) && repositoryNames.Contains(row.RepositoryName))
+            .ToDictionaryAsync(
+                row => (row.ProjectId, row.RepositoryName),
+                row => (row.Owner, row.Repo));
+        var linksByIssue = links.ToDictionary(link => (link.ProjectId, link.IssueNumber));
+
+        foreach (var issue in issues)
+        {
+            if (!linksByIssue.TryGetValue((issue.ProjectId, issue.Number), out var link)
+                || !connections.TryGetValue((issue.ProjectId, link.RepositoryName), out var connection))
+                continue;
+
+            var repository = $"{connection.Owner}/{connection.Repo}";
+            issue.Github = new GitHubIssueSummary(
+                repository,
+                link.GithubIssueNumber,
+                $"https://github.com/{repository}/issues/{link.GithubIssueNumber}",
+                "healthy");
+        }
+    }
 
     private async Task<Dictionary<string, WorkflowStatusView>> LoadWorkflowStatesAsync(
         MohistDbContext db,

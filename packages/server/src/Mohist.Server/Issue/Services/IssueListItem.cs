@@ -44,6 +44,7 @@ public sealed class IssueListItem
     public string? RepositoryName { get; set; }
     public RepositoryInfo? Repository { get; set; }
     public IssueRepositoryProblem? RepositoryProblem { get; set; }
+    public GitHubIssueSummary? Github { get; set; }
     [JsonPropertyName("epic")]
     public IssuePrimaryEpic? Epic { get; set; }
     public IssueParentRef? ParentIssueRef { get; set; }
@@ -84,6 +85,7 @@ public sealed class IssueListItem
         RepositoryName = issue.RepositoryName,
         Repository = issue.Repository,
         RepositoryProblem = issue.RepositoryProblem,
+        Github = issue.Github,
         Epic = issue.Epic,
         ParentIssueRef = issue.ParentIssueRef,
         ChildIssuesSummary = issue.ChildIssuesSummary,

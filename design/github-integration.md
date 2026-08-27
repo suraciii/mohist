@@ -157,8 +157,11 @@ Implemented today: signed ingress and normalization, feed-by-label intake with
 its close withdrawal, Pull Request review Approval, and best-effort write-back
 with durable failure records. The target model replaces label intake with the
 `/mohist` command entry and adds automatic mirroring, two-way content sync,
-link visibility in the Issue read models, and reconcile-based recovery.
-Feed-by-label intake, its connection options, and the `github-issue` origin
+automatic mirroring and two-way content sync. Link visibility is implemented:
+the detail and bounded list read models batch-project repository, number, URL,
+and provisional healthy sync state for CLI and Web. Real sync-health reporting
+and reconcile-based recovery remain gaps. Feed-by-label intake, its connection
+options, and the `github-issue` origin
 label are removed when the command entry lands.
 
 Open questions:

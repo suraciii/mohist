@@ -144,6 +144,39 @@ public class CliIssueCommandSpecs
     }
 
     [Fact]
+    public async Task IssueView_Table_RendersGitHubMirror()
+    {
+        var (http, _, output, error, fileSystem, executor) = SetupEnv((_, _) =>
+            Task.FromResult(RecordingHttpHandler.Json(new
+            {
+                success = true,
+                data = new
+                {
+                    number = 7,
+                    title = "Linked issue",
+                    status = "backlog",
+                    priority = "p2",
+                    github = new
+                    {
+                        repository = "suraciii/mohist",
+                        number = 771,
+                        url = "https://github.com/suraciii/mohist/issues/771",
+                        syncStatus = "healthy",
+                    },
+                },
+            })));
+
+        var exitCode = await MohistCliCommands.RunAsync(
+            http, ["issue", "view", "7"], output, error, fileSystem, executor);
+
+        Assert.Equal(0, exitCode);
+        Assert.Contains("github:   suraciii/mohist#771", output.ToString(), StringComparison.Ordinal);
+        Assert.Contains("githubUrl: https://github.com/suraciii/mohist/issues/771", output.ToString(), StringComparison.Ordinal);
+        Assert.Contains("githubSync: healthy", output.ToString(), StringComparison.Ordinal);
+        Assert.Empty(error.ToString());
+    }
+
+    [Fact]
     public async Task IssueEvents_Json_PreservesRoutedSessionClosedOutcome()
     {
         var (http, handler, output, error, fileSystem, executor) = SetupEnv((_, _) =>

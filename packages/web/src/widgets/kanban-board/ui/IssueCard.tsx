@@ -1,12 +1,25 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { Link } from 'react-router-dom'
 import { toast } from 'sonner'
-import { ArchiveIcon, AlertTriangleIcon } from 'lucide-react'
+import { ArchiveIcon, AlertTriangleIcon, GitBranchIcon } from 'lucide-react'
 import { Button } from '@/shared/ui/components/button'
 import type { AgentStatus } from '../../../entities/agent'
-import { issueListKeys, IssueStatus, WorkflowStage, IssueHealth, type Issue, type WorkflowStageProgress } from '../../../entities/issue'
+import {
+  issueListKeys,
+  IssueStatus,
+  WorkflowStage,
+  IssueHealth,
+  type Issue,
+  type WorkflowStageProgress,
+} from '../../../entities/issue'
 import { archiveIssue, rerunIssue } from '../../../entities/issue'
-import { getPriorityStripColor, getLabelStyle, formatPriority, getPriorityStyle, sortLabels } from '../../../shared/lib/label-colors'
+import {
+  getPriorityStripColor,
+  getLabelStyle,
+  formatPriority,
+  getPriorityStyle,
+  sortLabels,
+} from '../../../shared/lib/label-colors'
 import { formatRelativeTime } from '../../../shared/lib/relative-time'
 import { useProject, useProjectPath } from '../../../entities/project'
 import { getStageColors } from '../model/stage-colors'
@@ -206,11 +219,7 @@ function WorkflowStagePill({ issue }: { issue: Issue }) {
   const stage = issue.workflowStage
   if (!stage || !WORKFLOW_STAGE_LABELS[stage]) return null
 
-  const colors = getStageColors(
-    issue.status === IssueStatus.Done
-      ? IssueStatus.Done
-      : IssueStatus.InProgress,
-  )
+  const colors = getStageColors(issue.status === IssueStatus.Done ? IssueStatus.Done : IssueStatus.InProgress)
 
   return (
     <span
@@ -218,10 +227,7 @@ function WorkflowStagePill({ issue }: { issue: Issue }) {
       className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-semibold"
       style={{ backgroundColor: `${colors.accent}1a`, color: colors.accent }}
     >
-      <span
-        className="inline-block h-1.5 w-1.5 rounded-full"
-        style={{ backgroundColor: colors.accent }}
-      />
+      <span className="inline-block h-1.5 w-1.5 rounded-full" style={{ backgroundColor: colors.accent }} />
       {WORKFLOW_STAGE_LABELS[stage]}
     </span>
   )
@@ -241,11 +247,7 @@ function PriorityChip({ priority }: { priority: string | null | undefined }) {
   )
 }
 
-function WorkflowStageProgressIndicator({
-  progress,
-}: {
-  progress?: WorkflowStageProgress | null
-}) {
+function WorkflowStageProgressIndicator({ progress }: { progress?: WorkflowStageProgress | null }) {
   if (!progress || progress.total === 0) return null
 
   const label = `${progress.completed}/${progress.total}`
@@ -282,9 +284,7 @@ function ParentProgressBadge({ done, total }: { done: number; total: number }) {
       data-total={total}
       data-completed={allDone ? 'true' : 'false'}
       className={`inline-flex items-center rounded-md px-1.5 py-0.5 text-[10px] font-semibold tabular-nums ${
-        allDone
-          ? 'bg-emerald-100 text-emerald-800'
-          : 'bg-violet-100 text-violet-800'
+        allDone ? 'bg-emerald-100 text-emerald-800' : 'bg-violet-100 text-violet-800'
       }`}
       title={`${done} of ${total} children done`}
     >
@@ -312,9 +312,7 @@ export function IssueCard({ issue, agentStatus, showArchiveButton }: Props) {
   const queryClient = useQueryClient()
   const { projectId } = useProject()
   const toProjectPath = useProjectPath()
-  const isAgentRunning = agentStatus.activeAgents?.some(
-    (a) => a.issueNumber === issue.number,
-  ) ?? false
+  const isAgentRunning = agentStatus.activeAgents?.some((a) => a.issueNumber === issue.number) ?? false
   const indicator = getStatusIndicator(issue, isAgentRunning)
   const isCancelled = issue.status === IssueStatus.Cancelled
   const isAwaitingApproval = issue.approvalState?.status === 'awaiting'
@@ -348,17 +346,11 @@ export function IssueCard({ issue, agentStatus, showArchiveButton }: Props) {
   const relativeTime = formatRelativeTime(issue.updatedAt || issue.createdAt)
   const showWorkflowStagePill = !!issue.workflowStage
   const isIntegrateWithFailure =
-    issue.workflowStage === WorkflowStage.Integrate &&
-    !isDone &&
-    issue.health === IssueHealth.Blocked
+    issue.workflowStage === WorkflowStage.Integrate && !isDone && issue.health === IssueHealth.Blocked
   const isDraft = issue.isDraft
   const workflowProfileId = issue.workflowProfileId ?? SYSTEM_DEFAULT_WORKFLOW_PROFILE_ID
   const waitingFor = !isDraft && issue.blocker?.kind === 'waiting-for' ? issue.blocker.issue : null
-  const cardDeEmphasis = isDone
-    ? 'opacity-70'
-    : isDraft
-      ? 'opacity-60 border-dashed bg-muted/30'
-      : ''
+  const cardDeEmphasis = isDone ? 'opacity-70' : isDraft ? 'opacity-60 border-dashed bg-muted/30' : ''
   const stageLabel = getStageLabel(issue)
   const progressLabel = getProgressLabel(issue.workflowStageProgress)
   const repositoryName = getIssueRepositoryName(issue)
@@ -376,9 +368,7 @@ export function IssueCard({ issue, agentStatus, showArchiveButton }: Props) {
     >
       {isCancelled && (
         <div className="absolute inset-0 bg-muted-foreground/40 z-10 flex items-center justify-center pointer-events-none">
-          <span className="text-xs font-bold text-foreground/80 tracking-wider uppercase">
-            Cancelled
-          </span>
+          <span className="text-xs font-bold text-foreground/80 tracking-wider uppercase">Cancelled</span>
         </div>
       )}
 
@@ -450,15 +440,20 @@ export function IssueCard({ issue, agentStatus, showArchiveButton }: Props) {
           {issue.title}
         </h3>
 
-        {(repositoryName || hasParentMetadata) && (
-          <div
-            data-testid="issue-card-metadata-row"
-            className="mt-2 flex items-center gap-1 flex-wrap"
-          >
+        {(repositoryName || issue.github || hasParentMetadata) && (
+          <div data-testid="issue-card-metadata-row" className="mt-2 flex items-center gap-1 flex-wrap">
             {repositoryName && <RepositoryChip name={repositoryName} />}
-            {parentProgress && (
-              <ParentProgressBadge done={parentProgress.done} total={parentProgress.total} />
+            {issue.github && (
+              <span
+                data-testid="issue-card-github"
+                title={issue.github.url}
+                className="inline-flex items-center gap-1 rounded-full bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground"
+              >
+                <GitBranchIcon className="size-3" />
+                {issue.github.repository}#{issue.github.number}
+              </span>
             )}
+            {parentProgress && <ParentProgressBadge done={parentProgress.done} total={parentProgress.total} />}
             <BlockedChildrenIndicator count={blockedChildCount} />
           </div>
         )}
@@ -480,41 +475,35 @@ export function IssueCard({ issue, agentStatus, showArchiveButton }: Props) {
               )
             })}
             {sortedLabels.length > 4 && (
-              <span className="text-[10px] text-muted-foreground">
-                +{sortedLabels.length - 4}
-              </span>
+              <span className="text-[10px] text-muted-foreground">+{sortedLabels.length - 4}</span>
             )}
           </div>
         )}
 
         <div className="mt-2 flex items-center justify-between gap-2">
-          {relativeTime && (
-            <span className="text-[10px] text-muted-foreground">
-              {relativeTime}
-            </span>
-          )}
+          {relativeTime && <span className="text-[10px] text-muted-foreground">{relativeTime}</span>}
           {!isCancelled &&
-              !isDone &&
-              !isDraft &&
-              !isAwaitingApproval &&
-              issue.workflowStage &&
-              agentStatus.runnerAvailable !== false &&
-              !isAgentRunning && (
-            <Button
-              variant="ghost"
-              size="sm"
-              data-testid="rerun-button"
-              className="h-5 text-[10px] px-1.5 text-muted-foreground hover:bg-muted/50 disabled:opacity-50"
-              onClick={(e) => {
-                e.preventDefault()
-                e.stopPropagation()
-                rerunMutation.mutate()
-              }}
-              disabled={rerunMutation.isPending}
-            >
-              {rerunMutation.isPending ? 'Working...' : 'Rerun'}
-            </Button>
-          )}
+            !isDone &&
+            !isDraft &&
+            !isAwaitingApproval &&
+            issue.workflowStage &&
+            agentStatus.runnerAvailable !== false &&
+            !isAgentRunning && (
+              <Button
+                variant="ghost"
+                size="sm"
+                data-testid="rerun-button"
+                className="h-5 text-[10px] px-1.5 text-muted-foreground hover:bg-muted/50 disabled:opacity-50"
+                onClick={(e) => {
+                  e.preventDefault()
+                  e.stopPropagation()
+                  rerunMutation.mutate()
+                }}
+                disabled={rerunMutation.isPending}
+              >
+                {rerunMutation.isPending ? 'Working...' : 'Rerun'}
+              </Button>
+            )}
         </div>
 
         {issue.blockedReason && indicator === 'blocked' && (
@@ -529,9 +518,7 @@ export function IssueCard({ issue, agentStatus, showArchiveButton }: Props) {
               }}
               title={issue.blockedReason}
             >
-              {issue.blockedReason.length > 60
-                ? issue.blockedReason.slice(0, 60) + '...'
-                : issue.blockedReason}
+              {issue.blockedReason.length > 60 ? issue.blockedReason.slice(0, 60) + '...' : issue.blockedReason}
             </p>
           </div>
         )}
@@ -547,7 +534,11 @@ export function IssueCard({ issue, agentStatus, showArchiveButton }: Props) {
                 WebkitBoxOrient: 'vertical',
                 overflow: 'hidden',
               }}
-              title={waitingFor.title ? `Waiting for #${waitingFor.number} ${waitingFor.title}` : `Waiting for #${waitingFor.number}`}
+              title={
+                waitingFor.title
+                  ? `Waiting for #${waitingFor.number} ${waitingFor.title}`
+                  : `Waiting for #${waitingFor.number}`
+              }
             >
               {`Waiting for #${waitingFor.number}`}
             </p>
