@@ -39,7 +39,6 @@ public sealed partial class AgentSessionGrain : Grain, IAgentSessionGrain, IRemi
     private readonly IEventStore _eventStore;
     private readonly EventDispatchSignal _dispatchSignal;
     private readonly IFollowupDispatchScheduler? _followupDispatchScheduler;
-    private readonly ISessionWorkPort? _sessionWorkPort;
     private readonly ISessionStopDelivery? _sessionStopDelivery;
     private readonly ILogger<AgentSessionGrain> _log;
     private readonly TranscriptAccumulator _transcript = new();
@@ -66,7 +65,6 @@ public sealed partial class AgentSessionGrain : Grain, IAgentSessionGrain, IRemi
         IEventStore eventStore,
         EventDispatchSignal dispatchSignal,
         IFollowupDispatchScheduler? followupDispatchScheduler = null,
-        ISessionWorkPort? sessionWorkPort = null,
         ISessionStopDelivery? sessionStopDelivery = null)
     {
         _stateStore = stateStore;
@@ -80,7 +78,6 @@ public sealed partial class AgentSessionGrain : Grain, IAgentSessionGrain, IRemi
         _eventStore = eventStore;
         _dispatchSignal = dispatchSignal;
         _followupDispatchScheduler = followupDispatchScheduler;
-        _sessionWorkPort = sessionWorkPort;
         _sessionStopDelivery = sessionStopDelivery;
         _log = log;
     }
@@ -1028,22 +1025,12 @@ public sealed partial class AgentSessionGrain : Grain, IAgentSessionGrain, IRemi
         SessionWorkflowObservationKind Kind,
         string ReasonCode);
 
-    private Task ObserveWorkflowExecutionAsync(
+    private static Task ObserveWorkflowExecutionAsync(
         AgentTurnRecord? turn,
         SessionWorkflowObservationKind kind,
         string reasonCode,
         string? message = null,
-        string? stopOperationId = null)
-    {
-        if (_sessionWorkPort is null || turn?.WorkflowExecution is null)
-            return Task.CompletedTask;
-        return _sessionWorkPort.ObserveAgentExecutionAsync(
-            turn.WorkflowExecution,
-            kind,
-            reasonCode,
-            message,
-            stopOperationId);
-    }
+        string? stopOperationId = null) => Task.CompletedTask;
 
     private static SessionWorkflowObservationKind ObservationKind(AgentTurnStatus status) => status switch
     {
@@ -1650,26 +1637,6 @@ public sealed partial class AgentSessionGrain : Grain, IAgentSessionGrain, IRemi
             command.RuntimeSessionId,
             requireCurrentRuntimeBinding: true,
             sessionLevelActivityOnly: sessionLevelActivityOnly);
-        if (command.WorkflowExecution is { } binding)
-        {
-            var observations = BuildWorkflowRuntimeObservations(command.RuntimeEvents);
-            if (observations.Count == 0)
-                return events;
-            if (!await FlushAsync(CancellationToken.None))
-                throw new InvalidOperationException($"Agent session {SessionId} could not persist Workflow runtime observation.");
-            if (_sessionWorkPort is not null)
-            {
-                foreach (var observation in observations)
-                {
-                    await _sessionWorkPort.ObserveAgentExecutionAsync(
-                        binding,
-                        observation.Kind,
-                        observation.ReasonCode,
-                        observation.Message,
-                        observation.StopOperationId);
-                }
-            }
-        }
         return events;
     }
 
@@ -1773,101 +1740,6 @@ public sealed partial class AgentSessionGrain : Grain, IAgentSessionGrain, IRemi
         string? Message,
         string? StopOperationId);
 
-    public async Task<WorkflowAgentSessionInputReceipt> AcceptWorkflowInputAsync(
-        AcceptWorkflowAgentSessionInputCommand command)
-    {
-        ArgumentNullException.ThrowIfNull(command);
-        if (string.IsNullOrWhiteSpace(command.InputDeliveryId)
-            || string.IsNullOrWhiteSpace(command.Prompt)
-            || string.IsNullOrWhiteSpace(command.WorkflowRunId)
-            || string.IsNullOrWhiteSpace(command.TaskRunId)
-            || string.IsNullOrWhiteSpace(command.WorkId)
-            || string.IsNullOrWhiteSpace(command.RunnerId)
-            || string.IsNullOrWhiteSpace(command.Runtime)
-            || string.IsNullOrWhiteSpace(command.RuntimeSessionId))
-        {
-            throw new ArgumentException("Workflow input requires a complete execution identity.", nameof(command));
-        }
-
-        var session = await GetRequiredAsync();
-        ValidateWorkflowInputTarget(session, command);
-
-        var existingInput = (session.Status.Inputs ?? []).SingleOrDefault(input =>
-            string.Equals(input.Id, command.InputDeliveryId, StringComparison.Ordinal));
-        var existingTurn = (session.Status.Turns ?? []).SingleOrDefault(turn =>
-            turn.InputIds.Contains(command.InputDeliveryId, StringComparer.Ordinal));
-
-        SessionWorkflowExecutionBinding binding;
-        if (existingInput is not null || existingTurn is not null)
-        {
-            if (existingInput is null || existingTurn?.WorkflowExecution is null
-                || !string.Equals(existingInput.Text, command.Prompt, StringComparison.Ordinal)
-                || !string.Equals(existingInput.Source, "workflow", StringComparison.Ordinal))
-            {
-                throw new InvalidOperationException(
-                    $"Workflow input delivery '{command.InputDeliveryId}' conflicts with persisted AgentSession state.");
-            }
-            binding = existingTurn.WorkflowExecution;
-            var expected = binding with { AgentTurnId = existingTurn.Id };
-            if (!Equals(binding, expected)
-                || !WorkflowInputBindingMatches(binding, command, SessionId))
-            {
-                throw new InvalidOperationException(
-                    $"Workflow input delivery '{command.InputDeliveryId}' conflicts with the frozen execution binding.");
-            }
-        }
-        else
-        {
-            var turnId = $"turn_{Guid.NewGuid():N}";
-            binding = new SessionWorkflowExecutionBinding(
-                command.InputDeliveryId,
-                command.WorkflowRunId,
-                command.TaskRunId,
-                command.WorkId,
-                command.RunnerId,
-                SessionId,
-                turnId,
-                command.Runtime,
-                command.RuntimeSessionId);
-
-            _ = session.RecordFollowupTurn(
-                command.InputDeliveryId,
-                turnId,
-                command.Prompt,
-                "workflow",
-                Now());
-            var turns = (session.Status.Turns ?? []).ToList();
-            var turnIndex = turns.FindIndex(turn => string.Equals(turn.Id, turnId, StringComparison.Ordinal));
-            if (turnIndex < 0)
-                throw new InvalidOperationException("Workflow input did not create an Agent turn.");
-            turns[turnIndex] = turns[turnIndex] with { WorkflowExecution = binding };
-            session.Status = session.Status with { Turns = turns };
-            _session = session;
-
-            // The binding is the recovery source of truth. Persist it before
-            // transcript projection or the cross-grain Workflow call.
-            await _stateStore.SaveAsync(SessionId, session);
-
-            var entries = await AppendEventsAsync(
-                [new AgentSessionRuntimeEventInput(RuntimeEventTypes.SessionInput, command.PayloadJson)],
-                command.RuntimeSessionId,
-                requireCurrentRuntimeBinding: true);
-            if (entries.Count != 1)
-                throw new InvalidOperationException("Workflow input was not accepted by the AgentSession transcript.");
-            _ = await FlushAsync(CancellationToken.None);
-        }
-
-        if (_sessionWorkPort is null)
-            throw new InvalidOperationException("Workflow input binding port is unavailable.");
-
-        var accepted = await _sessionWorkPort.BindAgentExecutionAsync(binding);
-        return new WorkflowAgentSessionInputReceipt(
-            command.InputDeliveryId,
-            binding.AgentTurnId,
-            accepted,
-            binding.AgentSessionId);
-    }
-
     public Task<IReadOnlyList<AgentSessionRuntimeEventInfo>> AppendSystemEventsAsync(AppendAgentSessionSystemEventsCommand command)
     {
         if (command.RuntimeEvents.Any(e => !string.Equals(e.Type, RuntimeEventTypes.SessionActivity, StringComparison.Ordinal)))
@@ -1881,7 +1753,7 @@ public sealed partial class AgentSessionGrain : Grain, IAgentSessionGrain, IRemi
         string sessionId) =>
         string.Equals(binding.InputDeliveryId, command.InputDeliveryId, StringComparison.Ordinal)
         && string.Equals(binding.WorkflowRunId, command.WorkflowRunId, StringComparison.Ordinal)
-        && string.Equals(binding.TaskRunId, command.TaskRunId, StringComparison.Ordinal)
+        && string.Equals(binding.ActionAttemptId, command.ActionAttemptId, StringComparison.Ordinal)
         && string.Equals(binding.WorkId, command.WorkId, StringComparison.Ordinal)
         && string.Equals(binding.RunnerId, command.RunnerId, StringComparison.Ordinal)
         && string.Equals(binding.AgentSessionId, sessionId, StringComparison.Ordinal)

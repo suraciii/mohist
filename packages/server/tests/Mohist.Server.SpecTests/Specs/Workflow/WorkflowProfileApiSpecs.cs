@@ -48,29 +48,6 @@ public class WorkflowProfileApiSpecs
     }
 
     [Fact]
-    public async Task ListAndGet_ExposeAgentRuntime()
-    {
-        var project = await CreateProjectAsync();
-
-        var profiles = await _client.GetDataAsync<JsonElement>($"/api/projects/{project.Id}/workflow-profiles");
-        var builtin = profiles.EnumerateArray()
-            .Single(profile => profile.GetProperty("profileId").GetString() == "mohist/local");
-        var detail = await _client.GetDataAsync<JsonElement>(
-            $"/api/projects/{project.Id}/workflow-profiles/mohist%2Flocal");
-
-        Assert.Equal(WorkflowProfileCatalog.Profile.Name, builtin.GetProperty("name").GetString());
-        Assert.Equal(WorkflowProfileCatalog.Profile.Description, builtin.GetProperty("description").GetString());
-        Assert.Equal("opencode", builtin.GetProperty("agentRuntime").GetString());
-        Assert.Equal("opencode", detail.GetProperty("agentRuntime").GetString());
-        Assert.Equal("mohist/local", detail.GetProperty("profileId").GetString());
-        Assert.False(string.IsNullOrWhiteSpace(detail.GetProperty("definitionSource").GetString()));
-        var stage = detail.GetProperty("stages").EnumerateArray()
-            .Single(candidate => candidate.GetProperty("stage").GetString() == "plan");
-        Assert.Equal("plan", stage.GetProperty("stage").GetString());
-        Assert.NotEmpty(stage.GetProperty("tasks").EnumerateArray());
-    }
-
-    [Fact]
     public async Task ActionCatalog_ExposesRunnerReportedAgentCapabilities()
     {
         var project = await CreateProjectAsync();
@@ -101,99 +78,6 @@ public class WorkflowProfileApiSpecs
             var action = Assert.Single(actual.GetProperty("actions").EnumerateArray());
             Assert.Equal("mohist/pi", action.GetProperty("name").GetString());
             Assert.Equal(["agent-turn"], action.GetProperty("capabilities").EnumerateArray().Select(item => item.GetString()));
-        }
-        finally
-        {
-            await _client.PostAsJsonAsync($"/api/runner/{runnerId}/unregister", new { });
-        }
-    }
-
-    [Fact]
-    public async Task PatchAgentAction_ValidatesPersistsAndProjectsRuntime()
-    {
-        var project = await CreateProjectAsync();
-        var runnerId = $"workflow-profile-override-{Guid.NewGuid():N}";
-        var catalog = new ActionCatalog(
-            [
-                new ActionCatalogEntry("mohist/opencode", [], [], [], Capabilities: ["agent-turn"]),
-                new ActionCatalogEntry("mohist/pi", [], [], [], Capabilities: ["agent-turn"]),
-            ],
-            []);
-
-        try
-        {
-            using var register = await _client.PostAsJsonAsync($"/api/runner/{runnerId}/register", new
-            {
-                processGeneration = TestRunnerGenerationExtensions.ProcessGeneration,
-                capabilities = new[] { "spec/*" },
-                hostname = "workflow-profile-override-spec",
-                actionCatalog = catalog,
-            });
-            register.EnsureSuccessStatusCode();
-
-            using var create = await _client.PostAsJsonAsync($"/api/projects/{project.Id}/workflow-profiles", new
-            {
-                profileId = "delivery",
-                name = "Delivery",
-                definitionSource = """
-                    agentAction: mohist/opencode
-                    stages:
-                      - stage: build
-                        tasks:
-                          - id: implement
-                            uses: ${{ profile.agentAction }}
-                        checks: []
-                    """,
-            });
-            Assert.Equal(HttpStatusCode.Created, create.StatusCode);
-
-            using var patch = await _client.PatchAsJsonAsync(
-                $"/api/projects/{project.Id}/workflow-profiles/delivery",
-                new { agentAction = "mohist/pi" });
-            patch.EnsureSuccessStatusCode();
-
-            var detail = await _client.GetDataAsync<JsonElement>(
-                $"/api/projects/{project.Id}/workflow-profiles/delivery");
-            Assert.Equal("mohist/pi", detail.GetProperty("agentAction").GetString());
-            Assert.Equal("pi", detail.GetProperty("agentRuntime").GetString());
-
-            var runId = $"profile-selection-{Guid.NewGuid():N}";
-            var bound = await _grains.GetGrain<IWorkflowProfileReferenceCoordinatorGrain>(project.Id)
-                .BindWorkflowRunAsync(
-                    new WorkflowProfileCommandPayload.BindWorkflowRun(
-                        project.Id,
-                        runId,
-                        IssueNumber: 42,
-                        EpicNumber: null,
-                        ExplicitProfileId: "delivery",
-                        Metadata: new WorkflowRunMetadata(
-                            "Custom profile run",
-                            new DateTimeOffset(2026, 8, 14, 0, 0, 0, TimeSpan.Zero),
-                            ProjectId: project.Id,
-                            IssueNumber: 42)),
-                    $"profile-selection:{runId}",
-                    expectedRevision: null);
-            Assert.True(bound.IsApplied);
-            Assert.Equal("delivery", bound.Binding?.ProfileId);
-            Assert.Equal("mohist/pi", bound.Binding?.AgentAction);
-
-            var conflict = await _grains.GetGrain<IWorkflowProfileReferenceCoordinatorGrain>(project.Id)
-                .BindWorkflowRunAsync(
-                    new WorkflowProfileCommandPayload.BindWorkflowRun(
-                        project.Id,
-                        runId,
-                        IssueNumber: 42,
-                        EpicNumber: null,
-                        ExplicitProfileId: "delivery",
-                        Metadata: new WorkflowRunMetadata(
-                            "Custom profile run",
-                            new DateTimeOffset(2026, 8, 14, 0, 1, 0, TimeSpan.Zero),
-                            ProjectId: project.Id,
-                            IssueNumber: 42),
-                        Workspace: new WorkspaceIdentity("/different/worktree", "different-branch")),
-                    $"profile-selection-conflict:{runId}",
-                    expectedRevision: null);
-            Assert.Equal(WorkflowProfileReferenceResultCode.ConflictingRequest, conflict.Code);
         }
         finally
         {
@@ -259,72 +143,6 @@ public class WorkflowProfileApiSpecs
         var stored = await _client.GetDataAsync<JsonElement>(
             $"/api/projects/{project.Id}/workflow-profiles/editable-valid");
         Assert.Contains("stage: deliver", stored.GetProperty("definitionSource").GetString());
-    }
-
-    [Fact]
-    public async Task PutInvalidAgentAction_ReturnsSerializedActionErrorsAndPreservesStoredProfile()
-    {
-        var project = await CreateProjectAsync();
-        var runnerId = $"workflow-profile-put-validation-{Guid.NewGuid():N}";
-        var catalog = new ActionCatalog(
-            [new ActionCatalogEntry("mohist/opencode", [], [], [], Capabilities: ["agent-turn"])],
-            []);
-
-        try
-        {
-            using var register = await _client.PostAsJsonAsync($"/api/runner/{runnerId}/register", new
-            {
-                processGeneration = TestRunnerGenerationExtensions.ProcessGeneration,
-                capabilities = new[] { "spec/*" },
-                hostname = "workflow-profile-put-validation-spec",
-                actionCatalog = catalog,
-            });
-            register.EnsureSuccessStatusCode();
-
-            using var create = await _client.PostAsJsonAsync($"/api/projects/{project.Id}/workflow-profiles", new
-            {
-                profileId = "editable-agent",
-                name = "Editable Agent",
-                definitionSource = """
-                    agentAction: mohist/opencode
-                    stages:
-                      - stage: build
-                        tasks:
-                          - id: implement
-                            uses: ${{ profile.agentAction }}
-                    """,
-            });
-            Assert.Equal(HttpStatusCode.Created, create.StatusCode);
-
-            using var response = await _client.PutAsJsonAsync(
-                $"/api/projects/{project.Id}/workflow-profiles/editable-agent",
-                new
-                {
-                    name = "Editable Agent",
-                    definitionSource = """
-                        agentAction: mohist/ghost
-                        stages:
-                          - stage: build
-                            tasks:
-                              - id: implement
-                                uses: ${{ profile.agentAction }}
-                        """,
-                });
-
-            Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
-            var json = await response.Content.ReadFromJsonAsync<JsonElement>();
-            var errors = json.GetProperty("details").GetProperty("actionErrors").EnumerateArray().ToArray();
-            Assert.Contains(errors, error =>
-                error.GetProperty("source").GetString() == "action"
-                && error.GetProperty("message").GetString()!.Contains("mohist/ghost", StringComparison.Ordinal));
-            var stored = await _client.GetDataAsync<JsonElement>(
-                $"/api/projects/{project.Id}/workflow-profiles/editable-agent");
-            Assert.Equal("mohist/opencode", stored.GetProperty("agentAction").GetString());
-        }
-        finally
-        {
-            await _client.PostAsJsonAsync($"/api/runner/{runnerId}/unregister", new { });
-        }
     }
 
     [Fact]
@@ -401,18 +219,23 @@ public class WorkflowProfileApiSpecs
     }
 
     private static string ApprovalProfile(bool requiresApproval) => """
-        agentAction: mohist/opencode
         approval:
           feedback:
             tasks:
               - id: apply-feedback
-                uses: ${{ profile.agentAction }}
+                uses: mohist/agent
+                with:
+                  name: mohist/builder
+                  prompt: Apply feedback.
         stages:
           - stage: build
             requiresApproval: REQUIRES_APPROVAL
             tasks:
               - id: implement
-                uses: ${{ profile.agentAction }}
+                uses: mohist/agent
+                with:
+                  name: mohist/builder
+                  prompt: Implement.
             checks: []
         """.Replace(
             "REQUIRES_APPROVAL",

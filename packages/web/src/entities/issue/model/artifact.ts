@@ -10,7 +10,7 @@ export interface WorkflowArtifactSummary {
 export interface WorkflowArtifact {
   artifactId: string
   workflowRunId: string
-  taskRunId: string
+  actionAttemptId: string
   path: string
   kind: 'file' | 'directory'
   contentType?: string | null

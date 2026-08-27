@@ -74,7 +74,7 @@ public class CliRunArtifactSpecs
         {
             "/api/workflow-runs/wr_1" => RecordingHttpHandler.Json(new { success=true,data=new { issueRef=new { projectId="proj_abc",number=42 } } }),
             "/api/projects/proj_abc/issues/42" => RecordingHttpHandler.Json(new { success=true,data=new { workflowRunId="wr_1" } }),
-            "/api/projects/proj_abc/issues/42/workflow/artifacts" => RecordingHttpHandler.Json(new { success=true,data=new[]{new { artifactId="art-1",path="PLANS/PLAN.md",kind="file",contentType="text/markdown",size=12,taskRunId="plan.1",recordedAt="2026-01-01T00:00:00Z" } } }),
+            "/api/projects/proj_abc/issues/42/workflow/artifacts" => RecordingHttpHandler.Json(new { success=true,data=new[]{new { artifactId="art-1",path="PLANS/PLAN.md",kind="file",contentType="text/markdown",size=12,actionAttemptId="plan.1",recordedAt="2026-01-01T00:00:00Z" } } }),
             _ => null!,
         });
 }

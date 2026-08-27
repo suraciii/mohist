@@ -19,12 +19,14 @@ public sealed class CliWorkflowValidateSpecs
     private const string ValidProfile = """
         id: delivery/review
         name: Delivery Review
-        agentAction: mohist/pi
         stages:
           - stage: implement
             tasks:
               - id: implement
-                uses: ${{ profile.agentAction }}
+                uses: mohist/agent
+                with:
+                  name: mohist/builder
+                  prompt: Build.
         """;
 
     [Fact]
@@ -118,16 +120,13 @@ public sealed class CliWorkflowValidateSpecs
     }
 
     [Fact]
-    public async Task Validate_ProfileExpressionOutsideCompleteUsesValue_Fails()
+    public async Task Validate_RemovedAgentActionMetadata_Fails()
     {
         var (handler, http, output, error, fileSystem, executor) = CliTestFactory.CreateSync();
         fileSystem.AddFile("/invalid-profile.yaml", """
             agentAction: mohist/pi
             stages:
               - stage: implement
-                tasks:
-                  - id: implement
-                    uses: prefix-${{ profile.agentAction }}
             """);
 
         var exitCode = await MohistCliCommands.RunAsync(
@@ -139,8 +138,7 @@ public sealed class CliWorkflowValidateSpecs
             executor);
 
         Assert.NotEqual(0, exitCode);
-        Assert.Contains("stages[0].tasks[0].uses", error.ToString());
-        Assert.Contains("complete value of uses", error.ToString());
+        Assert.Contains("agentAction: unknown field 'agentAction'", error.ToString());
         Assert.Empty(output.ToString());
         Assert.Empty(handler.Requests);
     }

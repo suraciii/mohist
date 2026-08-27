@@ -36,6 +36,6 @@ public record WorkDispatchResponse(
     ParentIssueContextResponse? ParentIssueContext = null,
     AgentExecutionDefinition? AgentDefinition = null,
     AgentSessionStartup? AgentSessionStartup = null,
-    string? TaskRunId = null,
+    string? ActionAttemptId = null,
     ManagerExecutionGrant? ManagerExecutionGrant = null,
     string? OriginMarker = null);

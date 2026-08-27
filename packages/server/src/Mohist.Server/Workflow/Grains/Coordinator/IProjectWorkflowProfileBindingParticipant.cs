@@ -17,11 +17,6 @@ public interface IProjectWorkflowProfileBindingParticipant : IGrainWithStringKey
         string commandId,
         long? expectedRevision);
 
-    Task<ProjectWorkflowProfileBindingOutcome> SetAgentActionOverrideAsync(
-        WorkflowProfileCommandPayload.SetAgentActionOverride payload,
-        string commandId,
-        long? expectedRevision);
-
     Task<long> GetWorkflowProfileBindingRevisionAsync();
 }
 

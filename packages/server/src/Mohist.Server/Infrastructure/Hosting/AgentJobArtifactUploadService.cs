@@ -50,14 +50,16 @@ public sealed class AgentJobArtifactUploadService : IScopedService
                 || !string.Equals(snapshot.CurrentWorkId, workId, StringComparison.Ordinal))
                 return null;
 
+            var origin = snapshot.WorkflowOrigin;
             return new WorkflowActiveWorkView(
                 WorkId: workId,
                 WorkType: "agent-job",
-                Stage: "agent",
-                TaskRunId: workId,
+                Stage: origin?.Stage ?? "agent",
+                ActionAttemptId: origin?.ActionAttemptId ?? workId,
                 Title: "Agent Job",
-                ProjectId: null,
-                IssueNumber: null);
+                ProjectId: snapshot.ProjectId,
+                IssueNumber: null,
+                OwnerWorkflowRunId: origin?.WorkflowRunId);
         }
     }
 }

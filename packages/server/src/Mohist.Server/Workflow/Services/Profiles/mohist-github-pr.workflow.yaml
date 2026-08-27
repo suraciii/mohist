@@ -1,14 +1,13 @@
-agentAction: mohist/opencode
 approval:
   feedback:
     tasks:
     - id: apply-feedback
       title: Apply approval feedback
-      uses: ${{ profile.agentAction }}
+      uses: mohist/agent
       with:
+        name: mohist/builder
         session: ${{ stage.name }}
         prompt: ${{ prompts.apply-feedback }}
-        options: ${{ vars.agent }}
     - id: publish-feedback
       title: Publish feedback
       uses: mohist/push
@@ -26,11 +25,11 @@ recoveries:
       tasks:
       - id: recover:resolve-rebase-conflicts
         title: Resolve rebase conflicts
-        uses: ${{ profile.agentAction }}
+        uses: mohist/agent
         with:
+          name: mohist/builder
           session: check
           prompt: ${{ prompts.resolve-rebase-conflicts }}
-          options: ${{ vars.agent }}
       retrySelf: false
 stages:
 - stage: plan
@@ -44,11 +43,11 @@ stages:
       working-directory: REPOS/${{ repository.name }}
   - id: plan
     title: Plan the change
-    uses: ${{ profile.agentAction }}
+    uses: mohist/agent
     with:
+      name: mohist/planner
       session: plan
       prompt: ${{ prompts.plan }}
-      options: ${{ vars.agent }}
     expect:
       files:
       - path: PLANS/PLAN.md
@@ -97,9 +96,9 @@ stages:
     with:
       path: PLANS/tasks.json
       task:
-        uses: ${{ profile.agentAction }}
+        uses: mohist/agent
         with:
-          options: ${{ vars.agent }}
+          name: mohist/builder
   - id: verify-install
     title: Install dependencies
     uses: core/script
@@ -113,11 +112,11 @@ stages:
       - tasks:
         - id: recover:fix-ci
           title: Fix CI verification
-          uses: ${{ profile.agentAction }}
+          uses: mohist/agent
           with:
+            name: mohist/builder
             session: build
             prompt: ${{ prompts.fix-ci }}
-            options: ${{ vars.agent }}
         retrySelf: true
   - id: verify-dotnet
     title: Verify .NET tests
@@ -136,11 +135,11 @@ stages:
       - tasks:
         - id: recover:fix-ci
           title: Fix CI verification
-          uses: ${{ profile.agentAction }}
+          uses: mohist/agent
           with:
+            name: mohist/builder
             session: build
             prompt: ${{ prompts.fix-ci }}
-            options: ${{ vars.agent }}
         retrySelf: true
   - id: verify-web-typecheck
     title: Verify web typecheck
@@ -155,11 +154,11 @@ stages:
       - tasks:
         - id: recover:fix-ci
           title: Fix CI verification
-          uses: ${{ profile.agentAction }}
+          uses: mohist/agent
           with:
+            name: mohist/builder
             session: build
             prompt: ${{ prompts.fix-ci }}
-            options: ${{ vars.agent }}
         retrySelf: true
   - id: verify-web-tests
     title: Verify web tests
@@ -174,11 +173,11 @@ stages:
       - tasks:
         - id: recover:fix-ci
           title: Fix CI verification
-          uses: ${{ profile.agentAction }}
+          uses: mohist/agent
           with:
+            name: mohist/builder
             session: build
             prompt: ${{ prompts.fix-ci }}
-            options: ${{ vars.agent }}
         retrySelf: true
   - id: verify-runner-typecheck
     title: Verify runner typecheck
@@ -193,11 +192,11 @@ stages:
       - tasks:
         - id: recover:fix-ci
           title: Fix CI verification
-          uses: ${{ profile.agentAction }}
+          uses: mohist/agent
           with:
+            name: mohist/builder
             session: build
             prompt: ${{ prompts.fix-ci }}
-            options: ${{ vars.agent }}
         retrySelf: true
   - id: verify-runner-tests
     title: Verify runner tests
@@ -212,11 +211,11 @@ stages:
       - tasks:
         - id: recover:fix-ci
           title: Fix CI verification
-          uses: ${{ profile.agentAction }}
+          uses: mohist/agent
           with:
+            name: mohist/builder
             session: build
             prompt: ${{ prompts.fix-ci }}
-            options: ${{ vars.agent }}
         retrySelf: true
   - id: push
     title: Push
@@ -239,11 +238,11 @@ stages:
       working-directory: REPOS/${{ repository.name }}
   - id: ai-review
     title: AI review
-    uses: ${{ profile.agentAction }}
+    uses: mohist/agent
     with:
+      name: mohist/reviewer
       session: check
       prompt: ${{ prompts.review }}
-      options: ${{ vars.agent }}
     expect:
       files:
       - path: PLANS/REVIEW.md
@@ -265,11 +264,11 @@ stages:
         tasks:
         - id: recover:resolve-rebase-conflicts
           title: Resolve rebase conflicts
-          uses: ${{ profile.agentAction }}
+          uses: mohist/agent
           with:
+            name: mohist/reviewer
             session: check
             prompt: ${{ prompts.resolve-rebase-conflicts }}
-            options: ${{ vars.agent }}
   - id: push
     title: Push
     uses: mohist/push
@@ -300,11 +299,11 @@ stages:
         tasks:
         - id: recover:fix-pr-checks
           title: Fix failing GitHub PR checks
-          uses: ${{ profile.agentAction }}
+          uses: mohist/agent
           with:
+            name: mohist/reviewer
             session: check
             prompt: ${{ prompts.fix-pr-checks }}
-            options: ${{ vars.agent }}
         - id: recover:push
           title: Push
           uses: mohist/push
@@ -371,11 +370,11 @@ stages:
               tasks:
               - id: recover:resolve-rebase-conflicts
                 title: Resolve rebase conflicts
-                uses: ${{ profile.agentAction }}
+                uses: mohist/agent
                 with:
+                  name: mohist/builder
                   session: integrate
                   prompt: ${{ prompts.resolve-rebase-conflicts }}
-                  options: ${{ vars.agent }}
         - id: recover:push
           title: Push
           uses: mohist/push
@@ -390,11 +389,11 @@ stages:
         tasks:
         - id: recover:fix-pr-checks
           title: Fix failing GitHub PR checks
-          uses: ${{ profile.agentAction }}
+          uses: mohist/agent
           with:
+            name: mohist/builder
             session: integrate
             prompt: ${{ prompts.fix-pr-checks }}
-            options: ${{ vars.agent }}
         - id: recover:push
           title: Push
           uses: mohist/push

@@ -58,7 +58,7 @@ public class WorkflowArtifactStorageContractTests
         Assert.Equal("file", metadata!.Kind);
         Assert.Equal("openspec/changes/issue-55/review.md", metadata.Path);
         Assert.Equal("wr_1", metadata.WorkflowRunId);
-        Assert.Equal("ai-review.1", metadata.TaskRunId);
+        Assert.Equal("ai-review.1", metadata.ActionAttemptId);
         Assert.Equal("art_1", metadata.ArtifactId);
         Assert.Equal(SampleRecordedAt, metadata.RecordedAt);
     }

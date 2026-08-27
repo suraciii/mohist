@@ -12,7 +12,7 @@ namespace Mohist.Server.Infrastructure.Data.Workflow;
 /// <remarks>
 /// <para>
 /// Idempotency is keyed by
-/// <c>(WorkflowRunId, WorkId, TaskRunId, Path)</c>. Same key + same
+/// <c>(WorkflowRunId, WorkId, ActionAttemptId, Path)</c>. Same key + same
 /// content hash returns the existing pending upload. Same key +
 /// different content hash is rejected as a conflicting retry.
 /// </para>
@@ -43,7 +43,7 @@ public class WorkflowArtifactPendingUploadRow
     /// </summary>
     [Required]
     [MaxLength(128)]
-    public string TaskRunId { get; set; } = string.Empty;
+    public string ActionAttemptId { get; set; } = string.Empty;
 
     [Required]
     [MaxLength(1024)]

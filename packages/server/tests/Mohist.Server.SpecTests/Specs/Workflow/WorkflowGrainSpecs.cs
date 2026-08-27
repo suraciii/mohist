@@ -252,6 +252,7 @@ public abstract class WorkflowGrainSpecs
         await TestWait.ForAsync(
             async () =>
             {
+                await ActivatePendingWorkflowAgentAsync();
                 var resp = await dispatch.PollAsync(
                     runnerId,
                     new RunnerPollRequest([], [], ProcessGeneration: TestRunnerGenerationExtensions.ProcessGeneration));
@@ -263,6 +264,23 @@ public abstract class WorkflowGrainSpecs
             TimeSpan.FromMilliseconds(20),
             $"Runner '{runnerId}' to receive work for workflow '{_workflowId}'");
         return (work!, runnerId);
+    }
+
+    private async Task ActivatePendingWorkflowAgentAsync()
+    {
+        if (string.IsNullOrWhiteSpace(_workflowId)) return;
+        var run = await LoadRunAsync(_workflowId);
+        foreach (var attempt in run.Stages.SelectMany(stage => stage.Tasks))
+        {
+            if (attempt.Status != WorkflowActionAttemptStatus.Running
+                || !string.Equals(attempt.Uses, "mohist/agent", StringComparison.Ordinal)
+                || string.IsNullOrWhiteSpace(attempt.WorkId)
+                || string.IsNullOrWhiteSpace(attempt.AgentLaunchFingerprint))
+                continue;
+            var key = WorkflowAgentHandoffCodec.KeyFor(
+                run.Metadata.ProjectId!, run.Id, attempt.Id, attempt.WorkId);
+            await Grains.GetGrain<IWorkflowAgentHandoffGrain>(key).ActivateAsync();
+        }
     }
 
     private async Task EnsureRunnerForCurrentWorkflowAsync(string runnerId)
@@ -302,6 +320,29 @@ public abstract class WorkflowGrainSpecs
 
     protected async Task ReportAsync(string runnerId, WorkDispatch work, WorkResult result)
     {
+        if (string.Equals(work.OwnerKind, WorkDispatchOwnerKinds.AgentJob, StringComparison.Ordinal))
+        {
+            var job = Grains.GetGrain<Mohist.Server.Agent.Grains.IAgentJobGrain>(work.AgentJobId!);
+            var runtimeSessionId = $"runtime-{work.WorkId}";
+            Assert.True(await job.RecordRuntimeSessionBindingAsync(
+                runnerId,
+                work.WorkId,
+                work.AgentSessionId!,
+                runtimeSessionId));
+            var boundResult = result with
+            {
+                AgentSessionId = work.AgentSessionId,
+                AgentTurnId = work.InitialTurnId,
+                Runtime = work.AgentDefinition?.Runtime,
+                RuntimeSessionId = runtimeSessionId,
+            };
+            var verdict = await job.ReportResultAsync(runnerId, work.WorkId, boundResult);
+            Assert.True(verdict.Accepted, verdict.Reason);
+            await _fixture.Cluster.GetSiloServiceProvider(null)
+                .GetRequiredService<IEventDispatcher>()
+                .DrainAsync();
+            return;
+        }
         await ReportAsync(runnerId, work.WorkflowRunId, work.WorkId, result);
     }
 

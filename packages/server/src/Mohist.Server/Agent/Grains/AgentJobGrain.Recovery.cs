@@ -112,9 +112,10 @@ public sealed partial class AgentJobGrain
             return;
 
         var runnerLost = await IsRunnerAwayAsync();
+        var effectiveTimeout = EffectiveJobTimeout();
         var reason = runnerLost
             ? AgentJobFailureReasons.RunnerLost
-            : $"{AgentJobFailureReasons.ReportTimeout}: report timeout after {_options.JobTimeout}";
+            : $"{AgentJobFailureReasons.ReportTimeout}: report timeout after {effectiveTimeout}";
         // A report timeout is initially Unknown because the Runner may still
         // produce authoritative evidence. If it never does, the same bounded
         // reconciliation window used for Runner loss turns the durable
@@ -126,7 +127,7 @@ public sealed partial class AgentJobGrain
 
         _log.LogWarning(
             "AgentJob {Id} report timeout after {Timeout}; transitioning to unknown with reason {Reason}",
-            Key, _options.JobTimeout, reason);
+            Key, effectiveTimeout, reason);
         await EnterUnknownStateAsync(reason, recoveryDeadlineAt, failureCategory);
         if (IsManagerInput())
         {

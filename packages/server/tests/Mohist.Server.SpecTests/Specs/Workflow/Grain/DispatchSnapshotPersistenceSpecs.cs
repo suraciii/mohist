@@ -82,7 +82,7 @@ public class DispatchSnapshotPersistenceSpecs : WorkflowGrainSpecs
 
         Assert.Equal(_workflowId, first.WorkflowRunId);
         Assert.Equal("script.1", first.WorkId);
-        Assert.Equal(taskBefore.Id, first.TaskRunId);
+        Assert.Equal(taskBefore.Id, first.ActionAttemptId);
         Assert.Equal("Historical script", first.Title);
         Assert.Equal("core/script", first.Uses);
         Assert.Equal(JSON.Serialize(rawWith), first.With);

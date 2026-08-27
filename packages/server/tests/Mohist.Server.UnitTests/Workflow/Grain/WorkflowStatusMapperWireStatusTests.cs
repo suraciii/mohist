@@ -17,9 +17,9 @@ public class WorkflowStatusMapperWireStatusTests
             .Cast<StageRunStatus>()
             .Select(s => new object[] { s, ExpectedWireFor(s.ToString()) });
 
-    public static IEnumerable<object[]> TaskRunStatusCases() =>
-        Enum.GetValues<TaskRunStatus>()
-            .Cast<TaskRunStatus>()
+    public static IEnumerable<object[]> WorkflowActionAttemptStatusCases() =>
+        Enum.GetValues<WorkflowActionAttemptStatus>()
+            .Cast<WorkflowActionAttemptStatus>()
             .Select(s => new object[] { s, ExpectedWireFor(s.ToString()) });
 
     public static IEnumerable<object[]> StageCheckStatusCases() =>
@@ -42,8 +42,8 @@ public class WorkflowStatusMapperWireStatusTests
     }
 
     [Theory]
-    [MemberData(nameof(TaskRunStatusCases))]
-    public void WireStatus_TaskRunStatus_EmitsExpectedWireValue(TaskRunStatus status, string expected)
+    [MemberData(nameof(WorkflowActionAttemptStatusCases))]
+    public void WireStatus_WorkflowActionAttemptStatus_EmitsExpectedWireValue(WorkflowActionAttemptStatus status, string expected)
     {
         Assert.Equal(expected, WorkflowStatusMapper.WireStatus(status));
     }
@@ -75,7 +75,7 @@ public class WorkflowStatusMapperWireStatusTests
             WorkflowStatusMapper.WireStatus(WorkflowRunStatus.AwaitingApproval),
             WorkflowStatusMapper.WireStatus(StageRunStatus.AwaitingApproval),
             WorkflowStatusMapper.WireStatus(StageCheckStatus.Passed),
-            WorkflowStatusMapper.WireStatus(TaskRunStatus.Completed),
+            WorkflowStatusMapper.WireStatus(WorkflowActionAttemptStatus.Completed),
         };
         foreach (var value in samples)
         {
@@ -113,12 +113,12 @@ public class WorkflowStatusMapperWireStatusTests
     }
 
     [Fact]
-    public void WireStatus_TaskRunStatus_CoversEveryEnumValue()
+    public void WireStatus_WorkflowActionAttemptStatus_CoversEveryEnumValue()
     {
-        var mapped = Enum.GetValues<TaskRunStatus>()
+        var mapped = Enum.GetValues<WorkflowActionAttemptStatus>()
             .Select(WorkflowStatusMapper.WireStatus)
             .ToHashSet(StringComparer.Ordinal);
-        var expected = Enum.GetValues<TaskRunStatus>()
+        var expected = Enum.GetValues<WorkflowActionAttemptStatus>()
             .Select(s => ExpectedWireFor(s.ToString()))
             .ToHashSet(StringComparer.Ordinal);
 
@@ -145,7 +145,7 @@ public class WorkflowStatusMapperWireStatusTests
         {
             ("WorkflowRunStatus", Enum.GetValues<WorkflowRunStatus>().Length),
             ("StageRunStatus", Enum.GetValues<StageRunStatus>().Length),
-            ("TaskRunStatus", Enum.GetValues<TaskRunStatus>().Length),
+            ("WorkflowActionAttemptStatus", Enum.GetValues<WorkflowActionAttemptStatus>().Length),
             ("StageCheckStatus", Enum.GetValues<StageCheckStatus>().Length),
         };
         var mappedCounts = new[]
@@ -154,7 +154,7 @@ public class WorkflowStatusMapperWireStatusTests
                 .Select(s => WorkflowStatusMapper.WireStatus(s)).Distinct(StringComparer.Ordinal).Count()),
             ("StageRunStatus", Enum.GetValues<StageRunStatus>()
                 .Select(s => WorkflowStatusMapper.WireStatus(s)).Distinct(StringComparer.Ordinal).Count()),
-            ("TaskRunStatus", Enum.GetValues<TaskRunStatus>()
+            ("WorkflowActionAttemptStatus", Enum.GetValues<WorkflowActionAttemptStatus>()
                 .Select(s => WorkflowStatusMapper.WireStatus(s)).Distinct(StringComparer.Ordinal).Count()),
             ("StageCheckStatus", Enum.GetValues<StageCheckStatus>()
                 .Select(s => WorkflowStatusMapper.WireStatus(s)).Distinct(StringComparer.Ordinal).Count()),
@@ -272,7 +272,7 @@ public class WorkflowStatusMapperBuildPendingWorkTests
     [Fact]
     public void BuildPendingWork_ForReadyRun_WithDispatchableTask_ReturnsTask()
     {
-        var run = CreateRunWithTask(WorkflowRunStatus.Ready, TaskRunStatus.Pending);
+        var run = CreateRunWithTask(WorkflowRunStatus.Ready, WorkflowActionAttemptStatus.Pending);
 
         var pending = WorkflowStatusMapper.BuildPendingWork(run);
 
@@ -284,7 +284,7 @@ public class WorkflowStatusMapperBuildPendingWorkTests
     [Fact]
     public void BuildPendingWork_ForRunningRun_WithDispatchableTask_ReturnsTask()
     {
-        var run = CreateRunWithTask(WorkflowRunStatus.Running, TaskRunStatus.Pending);
+        var run = CreateRunWithTask(WorkflowRunStatus.Running, WorkflowActionAttemptStatus.Pending);
 
         var pending = WorkflowStatusMapper.BuildPendingWork(run);
 
@@ -296,7 +296,7 @@ public class WorkflowStatusMapperBuildPendingWorkTests
     [Fact]
     public void BuildPendingWork_ForReadyRun_WithNoCurrentStageId_ReturnsNull()
     {
-        var run = CreateRunWithTask(WorkflowRunStatus.Ready, TaskRunStatus.Pending);
+        var run = CreateRunWithTask(WorkflowRunStatus.Ready, WorkflowActionAttemptStatus.Pending);
         run.CurrentStageId = null;
 
         var pending = WorkflowStatusMapper.BuildPendingWork(run);
@@ -307,7 +307,7 @@ public class WorkflowStatusMapperBuildPendingWorkTests
     [Fact]
     public void BuildPendingWork_ForReadyRun_WithAllTasksCompleted_ReturnsNull()
     {
-        var run = CreateRunWithTask(WorkflowRunStatus.Ready, TaskRunStatus.Completed);
+        var run = CreateRunWithTask(WorkflowRunStatus.Ready, WorkflowActionAttemptStatus.Completed);
 
         var pending = WorkflowStatusMapper.BuildPendingWork(run);
 
@@ -317,7 +317,7 @@ public class WorkflowStatusMapperBuildPendingWorkTests
     [Fact]
     public void BuildPendingWork_ForRunningRun_WithAllTasksCompleted_ReturnsNull()
     {
-        var run = CreateRunWithTask(WorkflowRunStatus.Running, TaskRunStatus.Completed);
+        var run = CreateRunWithTask(WorkflowRunStatus.Running, WorkflowActionAttemptStatus.Completed);
 
         var pending = WorkflowStatusMapper.BuildPendingWork(run);
 
@@ -327,7 +327,7 @@ public class WorkflowStatusMapperBuildPendingWorkTests
     [Fact]
     public void BuildPendingWork_ForCreatedRun_ReturnsNull()
     {
-        var run = CreateRunWithTask(WorkflowRunStatus.Created, TaskRunStatus.Pending);
+        var run = CreateRunWithTask(WorkflowRunStatus.Created, WorkflowActionAttemptStatus.Pending);
 
         var pending = WorkflowStatusMapper.BuildPendingWork(run);
 
@@ -337,7 +337,7 @@ public class WorkflowStatusMapperBuildPendingWorkTests
     [Fact]
     public void BuildPendingWork_ForPendingRun_ReturnsNull()
     {
-        var run = CreateRunWithTask(WorkflowRunStatus.Pending, TaskRunStatus.Pending);
+        var run = CreateRunWithTask(WorkflowRunStatus.Pending, WorkflowActionAttemptStatus.Pending);
 
         var pending = WorkflowStatusMapper.BuildPendingWork(run);
 
@@ -347,7 +347,7 @@ public class WorkflowStatusMapperBuildPendingWorkTests
     [Fact]
     public void BuildPendingWork_ForPausedRun_ReturnsNull()
     {
-        var run = CreateRunWithTask(WorkflowRunStatus.Paused, TaskRunStatus.Pending);
+        var run = CreateRunWithTask(WorkflowRunStatus.Paused, WorkflowActionAttemptStatus.Pending);
 
         var pending = WorkflowStatusMapper.BuildPendingWork(run);
 
@@ -357,7 +357,7 @@ public class WorkflowStatusMapperBuildPendingWorkTests
     [Fact]
     public void BuildPendingWork_ForAwaitingApprovalRun_ReturnsNull()
     {
-        var run = CreateRunWithTask(WorkflowRunStatus.AwaitingApproval, TaskRunStatus.Pending);
+        var run = CreateRunWithTask(WorkflowRunStatus.AwaitingApproval, WorkflowActionAttemptStatus.Pending);
 
         var pending = WorkflowStatusMapper.BuildPendingWork(run);
 
@@ -367,7 +367,7 @@ public class WorkflowStatusMapperBuildPendingWorkTests
     [Fact]
     public void BuildPendingWork_ForCompletedRun_ReturnsNull()
     {
-        var run = CreateRunWithTask(WorkflowRunStatus.Completed, TaskRunStatus.Pending);
+        var run = CreateRunWithTask(WorkflowRunStatus.Completed, WorkflowActionAttemptStatus.Pending);
 
         var pending = WorkflowStatusMapper.BuildPendingWork(run);
 
@@ -377,7 +377,7 @@ public class WorkflowStatusMapperBuildPendingWorkTests
     [Fact]
     public void BuildPendingWork_ForReadyRun_WithUnpassedChecks_ReturnsChecksPending()
     {
-        var run = CreateRunWithTask(WorkflowRunStatus.Ready, TaskRunStatus.Completed);
+        var run = CreateRunWithTask(WorkflowRunStatus.Ready, WorkflowActionAttemptStatus.Completed);
         run.Stages[0].Checks =
         [
             new StageCheck
@@ -395,7 +395,7 @@ public class WorkflowStatusMapperBuildPendingWorkTests
         Assert.Equal("checks", pending!.WorkType);
     }
 
-    private static WorkflowRun CreateRunWithTask(WorkflowRunStatus runStatus, TaskRunStatus taskStatus) =>
+    private static WorkflowRun CreateRunWithTask(WorkflowRunStatus runStatus, WorkflowActionAttemptStatus taskStatus) =>
         new()
         {
             Id = "wf-pending",
@@ -412,7 +412,7 @@ public class WorkflowStatusMapperBuildPendingWorkTests
                     Status = StageRunStatus.Running,
                     Tasks =
                     [
-                        new TaskRun
+                        new WorkflowActionAttempt
                         {
                             Id = "build.1",
                             DefinitionId = "build",

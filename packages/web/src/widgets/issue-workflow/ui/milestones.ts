@@ -24,17 +24,17 @@ interface AgentTaskIdentity {
 }
 
 /**
- * Returns true when the task is an inline-agent task for the web
- * milestone classifier. Agent-job tasks are not routed through this
- * classifier.
+ * Returns true when the task is a unified AgentJob task (`mohist/agent`)
+ * for the web milestone classifier. Agent tasks only produce milestones
+ * when they carry a non-empty Workflow session name.
  */
-export function isInlineAgentTask(input: AgentTaskIdentity | null | undefined): boolean {
+export function isAgentActionTask(input: AgentTaskIdentity | null | undefined): boolean {
   if (!input) return false
   const uses = input.origin?.uses
   const sessionName = input.sessionName
   if (typeof sessionName !== 'string') return false
   if (sessionName.trim().length === 0) return false
-  return uses === 'mohist/opencode' || uses === 'mohist/pi'
+  return uses === 'mohist/agent'
 }
 
 function readResolvedModel(session: WorkflowRunSession): string | null {
@@ -76,10 +76,7 @@ export function deriveMilestones(session: WorkflowRunSession | null | undefined)
   return out
 }
 
-function compareTimelineRows(
-  a: { row: TimelineRow; index: number },
-  b: { row: TimelineRow; index: number },
-): number {
+function compareTimelineRows(a: { row: TimelineRow; index: number }, b: { row: TimelineRow; index: number }): number {
   if (a.row.timestamp < b.row.timestamp) return -1
   if (a.row.timestamp > b.row.timestamp) return 1
 

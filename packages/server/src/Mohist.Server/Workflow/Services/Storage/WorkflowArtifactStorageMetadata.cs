@@ -5,7 +5,7 @@ namespace Mohist.Server.Workflow.Storage;
 /// <summary>
 /// Metadata persisted alongside every recorded artifact in
 /// <c>metadata.json</c>. Captures the durable business identity
-/// (<see cref="WorkflowRunId"/>, <see cref="TaskRunId"/>, source
+/// (<see cref="WorkflowRunId"/>, <see cref="ActionAttemptId"/>, source
 /// <see cref="Path"/>, <see cref="RecordedAt"/>) plus the transport
 /// fields (size, content type, content hash, kind). The original source
 /// path is preserved verbatim for display and history queries; it is
@@ -16,8 +16,8 @@ public sealed class WorkflowArtifactStorageMetadata
     [JsonPropertyName("workflowRunId")]
     public string WorkflowRunId { get; set; } = string.Empty;
 
-    [JsonPropertyName("taskRunId")]
-    public string TaskRunId { get; set; } = string.Empty;
+    [JsonPropertyName("actionAttemptId")]
+    public string ActionAttemptId { get; set; } = string.Empty;
 
     [JsonPropertyName("artifactId")]
     public string ArtifactId { get; set; } = string.Empty;

@@ -47,7 +47,7 @@ public class WorkflowProfileCollectionSpecs : IAsyncLifetime
               - stage: build
                 tasks:
                   - id: t
-                    uses: mohist/opencode
+                    uses: test/action
                     with: {}
                 checks: []
             """)
@@ -78,31 +78,6 @@ public class WorkflowProfileCollectionSpecs : IAsyncLifetime
     }
 
     [Fact]
-    public async Task ListAndGet_ComputesAgentRuntimeFromTheDefinition()
-    {
-        var (projectId, _, _) = await SeedProjectAsync();
-        await _provider.CreateAsync(projectId, BuildCustom("delivery/pi", yaml: """
-            id: delivery/pi
-            stages:
-              - stage: build
-                tasks:
-                  - id: run
-                    uses: mohist/pi
-                    with: {}
-                checks: []
-            """));
-
-        var entries = await _provider.ListAsync(projectId);
-        var custom = Assert.Single(entries, e => e.ProfileId == "delivery/pi");
-        var builtin = Assert.Single(entries, e => e.ProfileId == WorkflowProfileCatalog.LocalId);
-        var detail = await _provider.GetAsync(projectId, "delivery/pi");
-
-        Assert.Equal("pi", custom.AgentRuntime);
-        Assert.Equal("opencode", builtin.AgentRuntime);
-        Assert.Equal("pi", detail?.AgentRuntime);
-    }
-
-    [Fact]
     public async Task BuiltInProfile_ReturnsAuthoritativeTemplateSource()
     {
         var (projectId, _, _) = await SeedProjectAsync();
@@ -110,8 +85,9 @@ public class WorkflowProfileCollectionSpecs : IAsyncLifetime
         var source = await _provider.GetDefinitionSourceAsync(projectId, WorkflowProfileCatalog.GithubPrId);
 
         Assert.NotNull(source);
-        Assert.Contains("agentAction: mohist/opencode", source);
-        Assert.Contains("uses: ${{ profile.agentAction }}", source);
+        Assert.DoesNotContain("agentAction:", source);
+        Assert.Contains("uses: mohist/agent", source);
+        Assert.Contains("name: mohist/planner", source);
         Assert.Contains("stages:", source);
     }
 
@@ -170,7 +146,7 @@ public class WorkflowProfileCollectionSpecs : IAsyncLifetime
             stages:
               - tasks:
                   - id: bad
-                    uses: mohist/opencode
+                    uses: test/action
                     with: {}
                 checks: []
             """;
@@ -223,7 +199,7 @@ public class WorkflowProfileCollectionSpecs : IAsyncLifetime
               - stage: build
                 tasks:
                   - id: t
-                    uses: mohist/opencode
+                    uses: test/action
                     with: {}
                 checks: []
             """;
@@ -281,7 +257,7 @@ public class WorkflowProfileCollectionSpecs : IAsyncLifetime
               - stage: build
                 tasks:
                   - id: t
-                    uses: mohist/opencode
+                    uses: test/action
                     with: {}
                 checks: []
             """;
@@ -293,7 +269,7 @@ public class WorkflowProfileCollectionSpecs : IAsyncLifetime
               - stage: build
                 tasks:
                   - id: t2
-                    uses: mohist/opencode
+                    uses: test/action
                     with: {}
                 checks: []
             """;
@@ -526,7 +502,7 @@ public class WorkflowProfileCollectionSpecs : IAsyncLifetime
     }
 
     private static ActionCatalog SimpleCatalog() =>
-        new([new ActionCatalogEntry("mohist/opencode", [], [], [])], []);
+        new([new ActionCatalogEntry("test/action", [], [], [])], []);
 
     private sealed class FakeTimeProvider : TimeProvider
     {

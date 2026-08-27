@@ -5,7 +5,6 @@ import type { ActionResult, AddTaskInput, JsonObject } from '../core/types.js'
 import type { ActionHost } from './host.js'
 import { isObject, objectInput, stringInput } from '../core/json.js'
 import { fail, succeed } from './action-result.js'
-import { TASK_LIST_PROMPT_LOADER_NAME } from './task-list-prompt.js'
 
 const FIELDS = new Set(['id', 'title', 'goal', 'acceptance', 'refs'])
 
@@ -54,16 +53,34 @@ export async function taskListAction(inputs: JsonObject, host: ActionHost): Prom
       uses,
       with: {
         ...defaultWith,
-        prompt: {
-          uses: TASK_LIST_PROMPT_LOADER_NAME,
-          with: { task: { id, title, goal, acceptance, refs }, ...(base ? { base } : {}) },
-        },
+        prompt: buildTaskPrompt({ id, title, goal, acceptance, refs }, base),
       },
       expect: null,
     })
   }
   if (!tasks.length) return succeed({ loaded: 0 })
   return { output: { loaded: tasks.length }, effects: { addTasks: tasks } } as unknown as ActionResult
+}
+
+function buildTaskPrompt(
+  task: { id: string; title: string; goal: string; acceptance: string[]; refs: string[] },
+  base: string | null | undefined,
+): string {
+  return [
+    base,
+    `<task id="${task.id}">`,
+    `<title>${task.title}</title>`,
+    `<goal>${task.goal}</goal>`,
+    '<acceptance>',
+    ...task.acceptance.map((item) => `- ${item}`),
+    '</acceptance>',
+    '<refs>',
+    ...task.refs.map((item) => `- ${item}`),
+    '</refs>',
+    '</task>',
+  ]
+    .filter(Boolean)
+    .join('\n')
 }
 
 function authoredString(value: JsonObject, key: string): string | null {

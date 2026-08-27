@@ -4,10 +4,10 @@ using Xunit;
 
 namespace Mohist.Server.UnitTests.Workflow;
 
-public sealed class TaskRunPersistenceTests
+public sealed class WorkflowActionAttemptPersistenceTests
 {
     [Fact]
-    public void Deserialize_OldTaskRunWithoutTerminalReplayFields_LeavesThemUnset()
+    public void Deserialize_OldWorkflowActionAttemptWithoutTerminalFingerprint_LeavesItUnset()
     {
         const string oldState = """
         {
@@ -22,14 +22,13 @@ public sealed class TaskRunPersistenceTests
         }
         """;
 
-        var task = JsonSerializer.Deserialize<TaskRun>(oldState, new JsonSerializerOptions
+        var task = JsonSerializer.Deserialize<WorkflowActionAttempt>(oldState, new JsonSerializerOptions
         {
             PropertyNameCaseInsensitive = true,
         });
 
         Assert.NotNull(task);
         Assert.Null(task.TerminalResultFingerprint);
-        Assert.Null(task.TerminalExecutionBinding);
-        Assert.Equal(TaskRunStatus.Pending, task.Status);
+        Assert.Equal(WorkflowActionAttemptStatus.Pending, task.Status);
     }
 }

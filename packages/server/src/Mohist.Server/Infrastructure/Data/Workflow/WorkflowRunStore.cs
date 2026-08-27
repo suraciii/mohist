@@ -76,7 +76,7 @@ public class WorkflowRunStore : IWorkflowRunStore
             .ToListAsync(ct);
         if (existingArtifacts.Any(artifact =>
             !string.Equals(artifact.WorkflowRunId, run.Id, StringComparison.Ordinal)
-            || !string.Equals(artifact.TaskRunId, artifacts.TaskRunId, StringComparison.Ordinal)))
+            || !string.Equals(artifact.ActionAttemptId, artifacts.ActionAttemptId, StringComparison.Ordinal)))
         {
             throw new DbUpdateConcurrencyException("Artifact upload binding changed during report settlement");
         }
@@ -86,7 +86,7 @@ public class WorkflowRunStore : IWorkflowRunStore
         var pendingUploads = await db.WorkflowArtifactPendingUploads
             .Where(p => p.WorkflowRunId == run.Id
                 && p.WorkId == artifacts.WorkId
-                && p.TaskRunId == artifacts.TaskRunId
+                && p.ActionAttemptId == artifacts.ActionAttemptId
                 && pendingIds.Contains(p.UploadId))
             .ToListAsync(ct);
         if (pendingUploads.Count != pendingIds.Length)
@@ -99,7 +99,7 @@ public class WorkflowRunStore : IWorkflowRunStore
             {
                 ArtifactId = $"art_{Guid.NewGuid():N}",
                 WorkflowRunId = run.Id,
-                TaskRunId = artifacts.TaskRunId,
+                ActionAttemptId = artifacts.ActionAttemptId,
                 SourceUploadId = pending.UploadId,
                 Path = pending.Path,
                 RecordedAt = now,
@@ -240,7 +240,7 @@ public class WorkflowRunStore : IWorkflowRunStore
                 EpicNumber = epicNumber,
                 ActiveWorkId = projection.ActiveWorkId,
                 ActiveWorkerId = projection.ActiveWorkerId,
-                AttentionStatus = run.HasBlockedAgentResult() ? "blocked" : null,
+                AttentionStatus = null,
                 WorkflowProfileIdKey = run.Status.IsTerminal()
                     ? null
                     : WorkflowProfileBindingKey.For(run.WorkflowProfileId),
@@ -256,7 +256,7 @@ public class WorkflowRunStore : IWorkflowRunStore
         entity.State = JSON.Serialize(run);
         entity.ActiveWorkId = projection.ActiveWorkId;
         entity.ActiveWorkerId = projection.ActiveWorkerId;
-        entity.AttentionStatus = run.HasBlockedAgentResult() ? "blocked" : null;
+        entity.AttentionStatus = null;
         entity.WorkflowProfileIdKey = run.Status.IsTerminal()
             ? null
             : WorkflowProfileBindingKey.For(run.WorkflowProfileId);

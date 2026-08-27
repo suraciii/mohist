@@ -58,7 +58,7 @@ function timelineFor(phase: Phase) {
           message: 'Runner disconnected before the Agent result was accepted.',
           firstUnknownAt: '2026-08-14T10:56:58Z',
           deadlineAt: '2026-08-14T11:01:58Z',
-          taskRunId: 'build.1',
+          actionAttemptId: 'build.1',
           workId: 'build.1',
           runnerId: 'runner-pluto',
           agentSessionId: 'session-1',

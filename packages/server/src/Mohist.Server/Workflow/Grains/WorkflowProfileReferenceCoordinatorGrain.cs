@@ -187,46 +187,6 @@ public sealed class WorkflowProfileReferenceCoordinatorGrain : Grain, IWorkflowP
             Binding: outcome.Binding);
     }
 
-    public async Task<WorkflowProfileReferenceResult> SetAgentActionOverrideAsync(
-        WorkflowProfileCommandPayload.SetAgentActionOverride payload,
-        string commandId,
-        long? expectedRevision)
-    {
-        ArgumentNullException.ThrowIfNull(payload);
-        if (_state.State.Pending is { } existing)
-        {
-            var payloadJson = WorkflowProfileCommandPayloadCodec.Serialize(payload);
-            if (string.Equals(existing.CommandId, commandId, StringComparison.Ordinal))
-            {
-                if (existing.Kind != payload.Kind
-                    || !string.Equals(existing.PayloadJson, payloadJson, StringComparison.Ordinal))
-                    throw new InvalidOperationException($"Command '{commandId}' was reused with a different canonical payload");
-                return await ReplayPendingAsync(existing)
-                    ?? throw new InvalidOperationException(
-                        $"Pending command '{commandId}' did not produce an Agent Action override result");
-            }
-            _ = await ReplayPendingAsync(existing);
-        }
-        await _provider.ValidateAgentActionOverrideAsync(
-            payload.ProjectId,
-            payload.ProfileId,
-            payload.AgentAction);
-
-        var pending = await AcquireFenceAsync(
-            WorkflowProfileCommandPayloadKinds.SetAgentActionOverride,
-            payload.ProfileId,
-            commandId,
-            expectedRevision,
-            payload);
-        var participant = _grains.GetGrain<IProjectWorkflowProfileBindingParticipant>(payload.ProjectId);
-        var outcome = await participant.SetAgentActionOverrideAsync(payload, commandId, pending.CapturedRevision);
-        await ClearFenceAsync(commandId);
-        return new WorkflowProfileReferenceResult(
-            MapProjectOutcome(outcome),
-            payload.ProfileId,
-            pending.CapturedRevision);
-    }
-
     public async Task<WorkflowProfileSaveResult> UpdateProfileAsync(
         WorkflowProfileCommandPayload.UpdateProfile payload,
         string commandId,
@@ -432,15 +392,6 @@ public sealed class WorkflowProfileReferenceCoordinatorGrain : Grain, IWorkflowP
                         Binding: outcome.Binding);
                     break;
                 }
-                case WorkflowProfileCommandPayloadKinds.SetAgentActionOverride:
-                {
-                    var p = (WorkflowProfileCommandPayload.SetAgentActionOverride)payload;
-                    var participant = _grains.GetGrain<IProjectWorkflowProfileBindingParticipant>(p.ProjectId);
-                    var outcome = await participant.SetAgentActionOverrideAsync(p, pending.CommandId, pending.ExpectedRevision);
-                    result = new WorkflowProfileReferenceResult(
-                        MapProjectOutcome(outcome), p.ProfileId, pending.ExpectedRevision);
-                    break;
-                }
                 case WorkflowProfileCommandPayloadKinds.UpdateProfile:
                 {
                     var p = (WorkflowProfileCommandPayload.UpdateProfile)payload;
@@ -543,10 +494,7 @@ public sealed class WorkflowProfileReferenceCoordinatorGrain : Grain, IWorkflowP
 
         var entry = await _provider.GetAsync(request.ProjectId, selected);
         if (entry is null) return null;
-        var definition = await _provider.GetDefinitionAsync(
-            request.ProjectId,
-            selected,
-            entry.AgentAction);
+        var definition = await _provider.GetDefinitionAsync(request.ProjectId, selected);
         if (definition is null || definition.Stages.Count == 0)
             return null;
         var metadata = request.Metadata with
@@ -562,7 +510,6 @@ public sealed class WorkflowProfileReferenceCoordinatorGrain : Grain, IWorkflowP
             request.EpicNumber,
             request.ExplicitProfileId,
             selected,
-            entry.AgentAction,
             definition.Stages.Select(stage => new BoundStageStructure(stage.Stage, stage.RequiresApproval)).ToList(),
             metadata,
             request.Workspace,

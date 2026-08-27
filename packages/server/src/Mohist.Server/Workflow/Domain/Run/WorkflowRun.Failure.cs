@@ -40,7 +40,7 @@ public static partial class WorkflowRunExtensions
                 if (taskId is null && failure.Stage is not null)
                 {
                     var failedStage = run.Stages.FirstOrDefault(s => s.Id == failure.Stage);
-                    taskId = failedStage?.Tasks.LastOrDefault(t => t.Status == TaskRunStatus.Failed)?.Id;
+                    taskId = failedStage?.Tasks.LastOrDefault(t => t.Status == WorkflowActionAttemptStatus.Failed)?.Id;
                 }
 
                 return taskId is not null
@@ -151,7 +151,7 @@ public static partial class WorkflowRunExtensions
             for (var i = targetIdx; i < run.Stages.Count; i++)
             {
                 var stage = run.Stages[i];
-                if (stage.Tasks.Any(t => t.Status == TaskRunStatus.Running))
+                if (stage.Tasks.Any(t => t.Status == WorkflowActionAttemptStatus.Running))
                     throw new WorkflowControlRejectionException(
                         "active_work_in_range",
                         $"Cannot rerun from stage '{stageId}' because there is active work in the invalidation range. Stop or cancel the active work first, then retry.");

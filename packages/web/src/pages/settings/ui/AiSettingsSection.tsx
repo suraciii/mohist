@@ -1,18 +1,15 @@
 import { useEffect, useMemo, useState } from 'react'
 import { ChevronRightIcon } from 'lucide-react'
 import {
+  AGENT_RUNTIME_OPENCODE,
   AGENT_RUNTIME_PI,
-  getWorkflowProfileAgentRuntime,
-  resolveEffectiveDefaultWorkflowProfile,
   useAvailableModelIds,
   useOpencodeModel,
-  useProjectDefaultWorkflowProfile,
   useSetStageModels,
   useStageModels,
   useUpdateOpencodeModel,
-  useWorkflowProfiles,
 } from '../../../entities/settings'
-import type { Model } from '../../../entities/settings'
+import type { AgentRuntime, Model } from '../../../entities/settings'
 import { ModelSelect } from '../../../shared/ui/ModelSelect'
 import { resolveVariantAgainstModel } from '../../../shared/ui/model-variants'
 import { Button } from '@/shared/ui/components/button'
@@ -47,18 +44,12 @@ export const AI_SETTINGS_DESCRIPTORS: SettingsSearchEntry[] = [
   ),
 ]
 
+function defaultAgentRuntime(): AgentRuntime {
+  return AGENT_RUNTIME_OPENCODE
+}
+
 export function AiSettingsSection() {
-  const { data: workflowProfiles, isLoading: profilesLoading, error: profilesError } = useWorkflowProfiles()
-  const {
-    data: projectWorkflowProfile,
-    isLoading: defaultProfileLoading,
-    error: defaultProfileError,
-  } = useProjectDefaultWorkflowProfile()
-  const { effectiveTemplateId } = resolveEffectiveDefaultWorkflowProfile(projectWorkflowProfile, workflowProfiles)
-  const selectedRuntime =
-    profilesLoading || defaultProfileLoading
-      ? null
-      : getWorkflowProfileAgentRuntime(workflowProfiles, effectiveTemplateId)
+  const selectedRuntime = defaultAgentRuntime()
   const {
     data: availableModelIds,
     isLoading: modelsLoading,
@@ -241,17 +232,17 @@ export function AiSettingsSection() {
     setStageModels.mutate({ stage, model: stageModel, variant, reasoningEffort })
   }
 
-  if (profilesLoading || defaultProfileLoading || modelsLoading) {
+  if (modelsLoading) {
     return <SectionState variant="loading" title={sectionLabel} skeletonRows={2} />
   }
 
-  const error = profilesError ?? defaultProfileError ?? modelsError
+  const error = modelsError
   if (error) {
     return (
       <SectionState
         variant="error"
         title={sectionLabel}
-        message={`Failed to load workflow profile models: ${(error as Error).message}`}
+        message={`Failed to load Agent models: ${(error as Error).message}`}
       />
     )
   }
@@ -270,9 +261,7 @@ export function AiSettingsSection() {
                   <span className="text-xs text-muted-foreground">{coderModels.length} models available</span>
                 )}
               </div>
-              <p className="text-xs text-muted-foreground">
-                Passed to the selected workflow profile runtime when tasks run.
-              </p>
+              <p className="text-xs text-muted-foreground">Used when an Agent does not declare its own model.</p>
               <ModelSelect
                 id="settings-default-model"
                 value={storedDefaultModel}

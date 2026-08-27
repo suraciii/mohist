@@ -28,104 +28,34 @@ public sealed class WorkflowReportService : IScopedService
         string runnerId,
         string workflowRunId,
         string workId,
-        string? taskRunId,
+        string? actionAttemptId,
         WorkResult result,
-        CancellationToken ct = default,
-        string? agentSessionId = null,
-        string? agentTurnId = null,
-        string? runtime = null,
-        string? runtimeSessionId = null)
+        CancellationToken ct = default)
     {
         var run = await _workflowRuns.LoadAsync(workflowRunId, ct);
         if (run is null)
             return ("refused", null);
 
-        var item = run.FindReportShape(taskRunId, workId);
+        var item = run.FindReportShape(actionAttemptId, workId);
         if (item is null)
             return ("refused", null);
         if ((item.IsTask && !WorkReportStatus.IsWork(result.Status))
             || (item.IsChecks && !WorkReportStatus.IsChecks(result.Status)))
             return ("refused", null);
 
-        var isAgentTask = item.IsTask && IsAgentTask(item.Uses);
-        var agentBinding = isAgentTask
-            ? TryCreateAgentBinding(
-                taskRunId,
-                workId,
-                runnerId,
-                agentSessionId,
-                agentTurnId,
-                runtime,
-                runtimeSessionId)
-            : null;
-        if (isAgentTask && agentBinding is null)
-        {
-            // Workflow Agent successes are never accepted from the reusable
-            // task/work/Runner tuple: the runtime identity must come from
-            // the same executed turn. A binding-less non-success result is
-            // still a real runner observation (e.g. session binding failed
-            // before any turn started); routing it into the unknown
-            // observation keeps settlement arbitration authoritative and
-            // lets the Runner retire the report instead of retrying a
-            // rejection the server will never change.
-            if (WorkReportStatus.IsCompleted(result.Status))
-                return ("refused", null);
-
-            var observationWorkflow = _grains.GetGrain<IWorkflowGrain>(workflowRunId);
-            var unboundAck = await observationWorkflow.ObserveAgentResultUnknownAsync(
-                runnerId,
-                taskRunId ?? string.Empty,
-                workId,
-                string.IsNullOrWhiteSpace(result.ErrorCode) ? "unbound-agent-result" : result.ErrorCode!,
-                string.IsNullOrWhiteSpace(result.Message)
-                    ? "The Runner reported an Agent result without a runtime execution binding."
-                    : result.Message);
-            return (VerdictValue(unboundAck), await observationWorkflow.GetRunStatusAsync());
-        }
-
         var workflow = _grains.GetGrain<IWorkflowGrain>(workflowRunId);
         var report = _translator.TranslateResult(item, result, workflowRunId);
-        if (report is WorkflowItemTranslator.InboundReport.Task terminalTask
-            && agentBinding is not null)
-        {
-            report = new WorkflowItemTranslator.InboundReport.Task(
-                terminalTask.Value with { TerminalExecutionBinding = agentBinding });
-        }
-
-        if (report is WorkflowItemTranslator.InboundReport.Unknown unknown && item.IsTask)
-        {
-            // T-005: Unknown is an observation, never an inferred task failure. Agent
-            // observations use the same complete execution binding as terminal
-            // reports; non-Agent work retains the existing tuple path.
-            var unknownAck = isAgentTask
-                ? await workflow.ObserveAgentExecutionAsync(new AgentExecutionObservation(
-                    agentBinding!,
-                    AgentExecutionObservationKind.Unknown,
-                    unknown.ReasonCode,
-                    unknown.Message))
-                : await workflow.ObserveAgentResultUnknownAsync(
-                    runnerId,
-                    taskRunId ?? string.Empty,
-                    workId,
-                    unknown.ReasonCode,
-                    unknown.Message);
-            if (unknownAck == WorkReportVerdict.Refused)
-                return ("refused", await workflow.GetRunStatusAsync());
-
-            return (VerdictValue(unknownAck), await workflow.GetRunStatusAsync());
-        }
 
         WorkReportVerdict ack;
         try
         {
             ack = report switch
             {
-                WorkflowItemTranslator.InboundReport.Task task when item.IsTask && taskRunId is not null =>
+                WorkflowItemTranslator.InboundReport.Task task when item.IsTask && actionAttemptId is not null =>
                     await workflow.ReceiveTaskReportAsync(
                         runnerId,
                         workId,
-                        task.Value with { TaskRunId = taskRunId },
-                        agentBinding),
+                        task.Value with { ActionAttemptId = actionAttemptId }),
                 WorkflowItemTranslator.InboundReport.Checks checks when item.IsChecks =>
                     await workflow.ReceiveCheckReportAsync(runnerId, workId, checks.Value),
                 _ => WorkReportVerdict.Refused,
@@ -140,33 +70,4 @@ public sealed class WorkflowReportService : IScopedService
 
     private static string VerdictValue(WorkReportVerdict verdict) => verdict.ToString().ToLowerInvariant();
 
-    private static bool IsAgentTask(string? uses) =>
-        string.Equals(uses, "mohist/agent", StringComparison.Ordinal)
-        || string.Equals(uses, "mohist/opencode", StringComparison.Ordinal)
-        || string.Equals(uses, "mohist/pi", StringComparison.Ordinal);
-
-    private static AgentExecutionBinding? TryCreateAgentBinding(
-        string? taskRunId,
-        string workId,
-        string runnerId,
-        string? agentSessionId,
-        string? agentTurnId,
-        string? runtime,
-        string? runtimeSessionId) =>
-        string.IsNullOrWhiteSpace(taskRunId)
-        || string.IsNullOrWhiteSpace(workId)
-        || string.IsNullOrWhiteSpace(runnerId)
-        || string.IsNullOrWhiteSpace(agentSessionId)
-        || string.IsNullOrWhiteSpace(agentTurnId)
-        || string.IsNullOrWhiteSpace(runtime)
-        || string.IsNullOrWhiteSpace(runtimeSessionId)
-            ? null
-            : new AgentExecutionBinding(
-                taskRunId,
-                workId,
-                runnerId,
-                agentSessionId,
-                agentTurnId,
-                runtime,
-                runtimeSessionId);
 }

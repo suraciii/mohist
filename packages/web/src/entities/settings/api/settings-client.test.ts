@@ -7,7 +7,6 @@ import {
   getActionCatalog,
   getAgentRuntime,
   getLogLevel,
-  patchWorkflowProfileAgentAction,
   setLogLevel,
   updateAgentRuntime,
 } from './client'
@@ -318,43 +317,6 @@ describe('settings client workflow Profile Agent Actions', () => {
         path: '/api/projects/proj-1/actions',
         method: 'GET',
         contentType: 'application/json',
-      },
-    ])
-  })
-
-  it('PATCHes the selected Agent Action on the Profile resource', async () => {
-    const requests: CapturedRequest[] = []
-    server.use(
-      http.patch('*/api/projects/:projectId/workflow-profiles/*', async ({ request }) => {
-        await captureRequest(request, requests)
-        return HttpResponse.json({
-          success: true,
-          data: {
-            projectId: 'proj-1',
-            profileId: 'mohist/github-pr',
-            name: 'GitHub PR',
-            description: '',
-            sourceProvenance: 'BuiltIn',
-            isBuiltIn: true,
-            definitionSource: null,
-            agentAction: 'mohist/pi',
-            agentRuntime: 'pi',
-          },
-        })
-      }),
-    )
-
-    const result = await patchWorkflowProfileAgentAction('proj-1', 'mohist/github-pr', 'mohist/pi')
-
-    expect(result).toEqual(
-      expect.objectContaining({ id: 'mohist/github-pr', agentAction: 'mohist/pi', agentRuntime: 'pi' }),
-    )
-    expect(requests).toEqual([
-      {
-        path: '/api/projects/proj-1/workflow-profiles/mohist/github-pr',
-        method: 'PATCH',
-        contentType: 'application/json',
-        body: { agentAction: 'mohist/pi' },
       },
     ])
   })

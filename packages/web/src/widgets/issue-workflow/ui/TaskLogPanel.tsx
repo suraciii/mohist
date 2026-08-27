@@ -14,7 +14,7 @@ import { useLiveEvents, type TaskLogDeltaEnvelopeWire } from '../../../shared/ap
 import type { StageTaskStatus } from '../../../entities/issue'
 import {
   deriveMilestones,
-  isInlineAgentTask,
+  isAgentActionTask,
   isTaskLogMilestone,
   mergeTimelineRows,
   serializeMilestoneForExport,
@@ -174,7 +174,7 @@ export function TaskLogPanel({
   const lines = data?.lines ?? []
   const truncated = data?.truncated ?? false
 
-  const isAgentTask = isInlineAgentTask({
+  const isAgentTask = isAgentActionTask({
     origin: origin ?? null,
     sessionName: sessionName ?? null,
     classification: classification ?? null,

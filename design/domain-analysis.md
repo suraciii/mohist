@@ -7,9 +7,10 @@ Where does a change belong? First: problem space (subdomains). Then: solution sp
 ### Core: Workflow
 
 Autonomous work pipeline. Advance, schedule, approve, repair, resume. Interpret AgentJob results
-and decide the next state. Workflow owns Project-scoped WorkflowProfile and WorkflowRun. Every
-executable Workflow task names a Mohist Agent and supplies its input; Workflow decides when to
-launch it but owns no execution job, Runtime selection, or Runner contract.
+and decide the next state. Workflow owns Project-scoped WorkflowProfile and WorkflowRun. An
+Agent-backed task uses `mohist/agent`; Workflow supplies its input and decides when to launch it but
+owns no Agent execution job, Runtime selection, or Agent Runner contract. Mechanical Actions remain
+Workflow orchestration.
 
 ### Supporting
 
@@ -21,8 +22,9 @@ launch it but owns no execution job, Runtime selection, or Runner contract.
   is independent of any AgentSession or WorkflowRun: an Issue gets a dedicated Workspace, an
   interaction context (Slack channel, Web conversation) reuses a shared one, and explicit creation
   starts a new one. Ubiquitous language: workspace, origin, materialization, archive.
-- Agent: reusable named intelligence, every execution job, Runner dispatch, and external connections.
-  A Workflow task, Web, CLI, Agent Connection, event route, or mention starts the same Mohist Agent
+- Agent: reusable named intelligence, every Agent execution job, Runner dispatch, and external
+  connections. A `mohist/agent` Workflow task, Web, CLI, Agent Connection, event route, or mention
+  starts the same Mohist Agent
   launch path. Ubiquitous language: Mohist Agent, Agent Readiness, Agent Availability, AgentJob,
   Agent Connection, execution snapshot, provider identity, access policy, WorkResult.
 - Session: logical execution conversation, input delivery, turn execution, compression, query,
@@ -207,9 +209,10 @@ direction. A participant does not call the coordinator back in that synchronous 
   containing `ProjectId`, `IssueNumber`, and `EpicNumber?`. These scalars are association information in
   the Published Language. They do not give Workflow a behavioral dependency on Issue. An Issue-side
   handler consumes Workflow result events.
-- AgentJob is the sole top-level execution owner. Every executable Workflow task and every direct Agent
-  launch creates an AgentJob through the same launch boundary. TaskRun, Inline Agent, and Agent Definition
-  Reference are not domain concepts. The unified lifecycle and Session invariants are listed once in
+- AgentJob is the sole top-level Agent execution owner. Every `mohist/agent` Workflow task and every
+  direct Agent launch creates an AgentJob through the same launch boundary. Mechanical Action attempts
+  remain Workflow orchestration and create no AgentJob. TaskRun, Inline Agent, and Agent Definition
+  Reference are not domain concepts. The unified Agent lifecycle and Session invariants are listed once in
   [`agent-execution.md`](agent-execution.md).
 - Agent consumes Runner scheduling facts and Session association through narrow published contracts.
   Session has no reverse dependency on Agent behavior.
@@ -247,8 +250,8 @@ direction. A participant does not call the coordinator back in that synchronous 
 
 ## Judgment rules
 
-- If it defines stages, task ordering, checks, state advance, approval, or when an Agent should launch,
-  it goes in Workflow.
+- If it defines stages, task ordering, checks, mechanical Action attempts, state advance, approval,
+  or when an Agent should launch, it goes in Workflow.
 - If it defines work unit properties, lifecycle, deps, or organization, it goes in Issue.
 - If it defines repo binding, isolation, execution config, or the prompt library, it goes in
   Project Space.

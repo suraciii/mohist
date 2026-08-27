@@ -58,7 +58,6 @@ public sealed class WorkflowRunBindingParticipant : Grain, IWorkflowRunBindingPa
             payload.Stages.Select(stage => new StageStructure(stage.Stage, stage.RequiresApproval)).ToList());
         var run = WorkflowRun.Create(payload.WorkflowRunId, structure, payload.Metadata.CreatedAt, payload.Metadata);
         run.ExplicitWorkflowProfileId = payload.ExplicitProfileId;
-        run.AgentAction = payload.AgentAction;
         run.Workspace = payload.Workspace;
         run.BoundWorkflowDefinitionJson = payload.DefinitionJson;
         await _runs.SaveAsync(run);
@@ -85,7 +84,6 @@ public sealed class WorkflowRunBindingParticipant : Grain, IWorkflowRunBindingPa
         && existing.EpicNumber == requested.EpicNumber
         && string.Equals(existing.ExplicitProfileId, requested.ExplicitProfileId, StringComparison.Ordinal)
         && string.Equals(existing.ProfileId, requested.ProfileId, StringComparison.Ordinal)
-        && string.Equals(existing.AgentAction, requested.AgentAction, StringComparison.Ordinal)
         && existing.Stages.SequenceEqual(requested.Stages)
         && MetadataMatches(existing.Metadata, requested.Metadata)
         && Equals(existing.Workspace, requested.Workspace)
@@ -116,7 +114,6 @@ public sealed class WorkflowRunBindingParticipant : Grain, IWorkflowRunBindingPa
         run.Metadata.EpicNumber,
         run.ExplicitWorkflowProfileId,
         run.WorkflowProfileId ?? string.Empty,
-        run.AgentAction,
         run.Stages.Select(stage => new BoundStageStructure(stage.Id, stage.RequiresApproval)).ToList(),
         run.Metadata,
         run.Workspace,

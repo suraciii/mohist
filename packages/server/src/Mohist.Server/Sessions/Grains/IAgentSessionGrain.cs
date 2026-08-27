@@ -12,8 +12,6 @@ public interface IAgentSessionGrain : IGrainWithStringKey
     Task<AgentSessionInfo> RecoverMissingRuntimeSessionAsync(RecoverMissingRuntimeSessionCommand command);
     Task<AgentSessionInfo> ReconcileMissingBindingAsync(ReconcileMissingBindingCommand command);
     Task<IReadOnlyList<AgentSessionRuntimeEventInfo>> AppendRuntimeEventsAsync(AppendAgentSessionRuntimeEventsCommand command);
-    Task<WorkflowAgentSessionInputReceipt> AcceptWorkflowInputAsync(AcceptWorkflowAgentSessionInputCommand command);
-    Task<WorkflowAgentSessionCleanupReceipt> AcceptWorkflowCleanupAsync(AcceptWorkflowAgentSessionCleanupCommand command);
     Task<IReadOnlyList<AgentSessionRuntimeEventInfo>> AppendSystemEventsAsync(AppendAgentSessionSystemEventsCommand command);
 
     /// <summary>
@@ -230,7 +228,7 @@ public sealed record AcceptWorkflowAgentSessionInputCommand(
     [property: Id(0)] string InputDeliveryId,
     [property: Id(1)] string Prompt,
     [property: Id(2)] string WorkflowRunId,
-    [property: Id(3)] string TaskRunId,
+    [property: Id(3)] string ActionAttemptId,
     [property: Id(4)] string WorkId,
     [property: Id(5)] string RunnerId,
     [property: Id(6)] string Runtime,
@@ -254,7 +252,7 @@ public sealed record AcceptWorkflowAgentSessionCleanupCommand(
     [property: Id(0)] string CleanupOperationId,
     [property: Id(1)] string Prompt,
     [property: Id(2)] string WorkflowRunId,
-    [property: Id(3)] string TaskRunId,
+    [property: Id(3)] string ActionAttemptId,
     [property: Id(4)] string WorkId,
     [property: Id(5)] string RunnerId,
     [property: Id(6)] string AgentSessionId,

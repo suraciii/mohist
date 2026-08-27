@@ -38,12 +38,6 @@ public interface IWorkflowProfileProvider
     /// </summary>
     Task<WorkflowDefinition?> GetDefinitionAsync(string projectId, string profileId, CancellationToken ct = default);
 
-    Task<WorkflowDefinition?> GetDefinitionAsync(
-        string projectId,
-        string profileId,
-        string? boundAgentAction,
-        CancellationToken ct = default);
-
     /// <summary>
     /// Returns the YAML source for a Profile. Custom Profiles return their
     /// persisted source; built-ins return their authoritative canonical source.
@@ -108,14 +102,6 @@ public interface IWorkflowProfileProvider
     /// </summary>
     Task<IReadOnlySet<string>> GetDisabledProfileIdsAsync(string projectId, CancellationToken ct = default);
 
-    Task<string?> GetAgentActionOverrideAsync(string projectId, string profileId, CancellationToken ct = default);
-
-    Task ValidateAgentActionOverrideAsync(
-        string projectId,
-        string profileId,
-        string? agentAction,
-        CancellationToken ct = default);
-
     /// <summary>
     /// Toggles a built-in Profile's enabled state for the Project. The
     /// write rejects disabling the last enabled built-in Profile so the
@@ -141,18 +127,9 @@ public sealed record WorkflowProfileCollectionEntry(
     [property: Id(5)] bool IsBuiltIn,
     [property: Id(6)] string? DefinitionSource)
 {
-    [Id(7)]
-    [JsonIgnore(Condition = JsonIgnoreCondition.Never)]
-    public string? AgentRuntime { get; init; }
-
-    [Id(8)]
-    [JsonIgnore(Condition = JsonIgnoreCondition.Never)]
-    public string? AgentAction { get; init; }
-
     public static WorkflowProfileCollectionEntry BuiltIn(
         string profileId,
-        string projectId = "",
-        string? agentActionOverride = null)
+        string projectId = "")
     {
         var profile = WorkflowProfileCatalog.GetProfile(profileId)
             ?? throw new InvalidOperationException($"Unknown built-in Profile '{profileId}'");
@@ -164,12 +141,7 @@ public sealed record WorkflowProfileCollectionEntry(
             Description: profile.Description,
             SourceProvenance: WorkflowProfileSourceProvenance.BuiltIn,
             IsBuiltIn: true,
-            DefinitionSource: WorkflowProfileCatalog.GetDefinitionSource(profile.Id))
-        {
-            AgentAction = agentActionOverride ?? profile.AgentAction,
-            AgentRuntime = WorkflowProfileAgentRuntimeProjection.Project(agentActionOverride ?? profile.AgentAction)
-                ?? WorkflowProfileAgentRuntimeProjection.Project(profile.Definition),
-        };
+            DefinitionSource: WorkflowProfileCatalog.GetDefinitionSource(profile.Id));
     }
 }
 

@@ -3681,12 +3681,6 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
                         .HasMaxLength(256)
                         .HasColumnType("TEXT");
 
-                    b.Property<string>("AgentActionOverrides")
-                        .IsRequired()
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("TEXT")
-                        .HasDefaultValue("{}");
-
                     b.Property<string>("DefaultTemplateId")
                         .HasMaxLength(256)
                         .HasColumnType("TEXT");
@@ -3842,7 +3836,7 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
                         .HasMaxLength(1024)
                         .HasColumnType("TEXT");
 
-                    b.Property<string>("TaskRunId")
+                    b.Property<string>("ActionAttemptId")
                         .IsRequired()
                         .HasMaxLength(128)
                         .HasColumnType("TEXT");
@@ -3862,7 +3856,7 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
                     b.HasIndex("ExpiresAt")
                         .HasDatabaseName("IX_WorkflowArtifactPendingUploads_ExpiresAt");
 
-                    b.HasIndex("WorkflowRunId", "WorkId", "TaskRunId", "Path")
+                    b.HasIndex("WorkflowRunId", "WorkId", "ActionAttemptId", "Path")
                         .IsUnique()
                         .HasDatabaseName("UX_WorkflowArtifactPendingUploads_IdempotencyKey");
 
@@ -3921,7 +3915,7 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
                         .HasMaxLength(64)
                         .HasColumnType("TEXT");
 
-                    b.Property<string>("TaskRunId")
+                    b.Property<string>("ActionAttemptId")
                         .IsRequired()
                         .HasMaxLength(128)
                         .HasColumnType("TEXT");
@@ -3944,8 +3938,8 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
                     b.HasIndex("WorkflowRunId", "Path", "RecordedAt")
                         .HasDatabaseName("IX_WorkflowArtifacts_WorkflowRunId_Path_RecordedAt");
 
-                    b.HasIndex("WorkflowRunId", "TaskRunId", "RecordedAt")
-                        .HasDatabaseName("IX_WorkflowArtifacts_WorkflowRunId_TaskRunId_RecordedAt");
+                    b.HasIndex("WorkflowRunId", "ActionAttemptId", "RecordedAt")
+                        .HasDatabaseName("IX_WorkflowArtifacts_WorkflowRunId_ActionAttemptId_RecordedAt");
 
                     b.ToTable("WorkflowArtifacts", (string)null);
                 });

@@ -36,7 +36,7 @@ public abstract class AgentSessionTestSupport
         _client = fixture.Client;
     }
 
-    protected async Task<(ProjectDto Project, IssueDto Issue, WorkDispatch Work, CreatedSession Session)> CreateStartedAgentSessionAsync(string name, bool start = true, string? title = null, string? sessionName = null, bool workflow = true)
+    protected async Task<(ProjectDto Project, IssueDto Issue, WorkDispatch Work, CreatedSession Session)> CreateStartedAgentSessionAsync(string name, bool start = true, string? title = null, string? sessionName = null, bool workflow = false)
     {
         var projectName = $"asg-{Guid.NewGuid():N}";
         var project = await _client.CreateProjectWithDefaultRepositoryAsync<ProjectDto>("/api/projects", projectName);
@@ -72,10 +72,10 @@ var issue = await _client.PostDataAsync<IssueDto>($"/api/projects/{project.Id}/i
     }
 
     protected string RunnerAgentSessionAttachPath(CreatedSession session) =>
-        $"{RunnerSessionPath(session)}/attach";
+        RunnerGenericAgentSessionAttachPath(session);
 
     protected string RunnerAgentSessionRuntimeEventsPath(CreatedSession session) =>
-        $"{RunnerSessionPath(session)}/runtime-events";
+        RunnerSessionRuntimeEventsPath(session);
 
     protected string RunnerSessionRuntimeEventsPath(CreatedSession session) =>
         $"/api/runner/{_runnerId}/agent-sessions/{session.Id}/runtime-events";

@@ -1,9 +1,8 @@
-# Workflow Definition
+---
+status: implemented
+---
 
-> The `uses`/`with` Action syntax is the current implementation. The target model
-> ([`../agent-execution.md`](../agent-execution.md)) replaces executable-task Actions with Mohist
-> Agent names, decided in
-> [`../decisions/workflow-agent-binding.md`](../decisions/workflow-agent-binding.md).
+# Workflow Definition
 
 A Workflow Definition is the core content of a Workflow Profile: a YAML document that declares
 stages, tasks, checks, approval points, and recovery rules. It is one of the product's command
@@ -46,12 +45,10 @@ Check(Id, Uses, Title?, With?)
   YAML; see [`recovery.md`](recovery.md).
 - Variable values and Prompt bodies: these are separate resources, and the model only holds
   `${{ }}` references.
-- Profile metadata, including ID, name, applicable scenario, and optional `agentAction`: the
-  Profile resource owns this metadata. The Definition top level contains only `approval`,
-  `stages`, and `recoveries`.
-- `${{ profile.agentAction }}` is Profile source syntax, not a dynamic Definition expression. The
-  Profile layer replaces each complete `uses` value before it calls the Definition parser. The
-  semantic model and every runtime consumer therefore contain only concrete Action names.
+- Profile metadata, including ID, name, and applicable scenario: the Profile resource owns this
+  metadata. The Definition top level contains only `approval`, `stages`, and `recoveries`.
+- `uses` is always a literal concrete Action name. There is no dynamic or template-driven `uses`
+  value, so the semantic model and every runtime consumer contain only concrete Action names.
 
 ### Placement
 
@@ -69,8 +66,8 @@ is validation. The compiler lowers a validated definition to the semantic model;
 consume the compiled model and never revalidate.
 
 There is one Definition entry point: `Parse(yaml) -> Definition | Error[]`. Profile source first
-passes through the Profile parser and its restricted Agent Action materializer, then this entry
-point receives ordinary Definition YAML.
+passes through the Profile parser, which strips Profile metadata, then this entry point receives
+ordinary Definition YAML.
 
 - An unknown key is an error, not something to ignore or downgrade to a warning. The Agent's
   generate-validate-repair loop depends on this signal.
@@ -109,18 +106,18 @@ stages[1].tasks[0].recovery.handlers[0]: handler must declare tasks or retrySelf
 - `with` is omitted or a JSON object; the Definition validator does not interpret internal keys and
   only recursively validates template expressions in values.
 
-Profile validation additionally requires `${{ profile.agentAction }}` to occupy an entire `uses`
-scalar, a matching non-empty `agentAction` default, and one bound inline Agent Action across Stage,
-Approval, recovery, and deferred task-default paths. These are Profile composition rules and do not
-add a dynamic `uses` form to `TaskDefinition`.
+Profile validation requires every Agent task to use the literal `mohist/agent` Action with its
+`name` and `prompt` inputs, across Stage, Approval, recovery, and deferred task-default paths.
+Runtime Actions such as `mohist/opencode` and `mohist/pi` are rejected in Profile `uses`. These are
+Profile composition rules and do not add a dynamic `uses` form to `TaskDefinition`.
 
 ### Validation Entry Points
 
 The same implementation is exposed through three entry points, with only one copy of the rules
 above:
 
-- Profile save API: materializes Profile bindings, rejects an invalid Definition, and returns the
-  combined Profile, Definition, and Action-contract error list.
+- Profile save API: rejects an invalid Definition and returns the combined Profile, Definition, and
+  Action-contract error list.
 - `mo workflow validate --file <path>`: validates locally without resolving a Project or contacting
   Server; `--file -` reads from stdin.
 - CI: built-in Profiles and complete examples from `docs/workflow-definition.md` are golden cases
@@ -128,9 +125,8 @@ above:
   contain `<...>` placeholders are excluded.
 
 The Profile save entry point combines three non-overlapping decisions. The Profile compiler owns
-Profile metadata and Agent Action binding syntax. The validator in this document owns Definition
-structure, field types, and the runtime template language. The Action catalog owns whether a
-concrete `uses` exists, whether a selected Profile Agent Action declares `agent-turn`, and which
+Profile metadata. The validator in this document owns Definition structure, field types, and the
+runtime template language. The Action catalog owns whether a concrete `uses` exists and which
 `with` keys, required fields, and types it accepts. All errors use the same YAML path convention
 and identify their source, but none repeats another layer's rules. The pure local command runs
 Profile composition and Definition validation. The save entry point also validates the materialized
@@ -140,11 +136,8 @@ semantic model against the Action catalog.
 
 `WorkflowDefinition` is not a complete execution plan, and `WorkflowRun` does not store a
 Definition snapshot. Run creation materializes the StageRun and approval facts required to advance
-the lifecycle and stores the concrete Agent Action selected for the Profile. When each Stage
-initializes, it rereads the current Definition of the selected Profile and materializes Agent
-references with the Run-bound Action. Later edits do not retroactively rewrite an initialized Stage
-or switch the Run's Agent Action. Profile save rejects an edit that cannot be materialized and
-Action-contract validated with every distinct Action bound to an active Run. During a run, recovery,
+the lifecycle. When each Stage initializes, it rereads the current Definition of the selected
+Profile. Later edits do not retroactively rewrite an initialized Stage. During a run, recovery,
 retry, approval feedback, and control commands such as `mo issue rebase`, which inserts
 `uses: mohist/rebase`, may all create new `TaskRun` instances. They use the same dispatch, report,
 and Variables resolution semantics.

@@ -230,7 +230,7 @@ public class TaskLogServiceSpecs : IAsyncLifetime
                             Status = StageRunStatus.Completed,
                             Tasks =
                             [
-                                new TaskRun
+                                new WorkflowActionAttempt
                                 {
                                     Id = "task-retry-1",
                                     DefinitionId = "task-build",
@@ -238,9 +238,9 @@ public class TaskLogServiceSpecs : IAsyncLifetime
                                     Title = "First attempt",
                                     WorkId = "work-retry-1",
                                     WorkerId = runnerId,
-                                    Status = TaskRunStatus.Failed,
+                                    Status = WorkflowActionAttemptStatus.Failed,
                                 },
-                                new TaskRun
+                                new WorkflowActionAttempt
                                 {
                                     Id = "task-retry-2",
                                     DefinitionId = "task-build",
@@ -248,7 +248,7 @@ public class TaskLogServiceSpecs : IAsyncLifetime
                                     Title = "Retry attempt",
                                     WorkId = requestedWorkId,
                                     WorkerId = runnerId,
-                                    Status = TaskRunStatus.Completed,
+                                    Status = WorkflowActionAttemptStatus.Completed,
                                 },
                             ],
                         },
@@ -299,7 +299,7 @@ public class TaskLogServiceSpecs : IAsyncLifetime
                             Status = StageRunStatus.Running,
                             Tasks =
                             [
-                                new TaskRun
+                                new WorkflowActionAttempt
                                 {
                                     Id = "task-interrupted-1",
                                     DefinitionId = "task-1",
@@ -307,9 +307,9 @@ public class TaskLogServiceSpecs : IAsyncLifetime
                                     Title = "Interrupted first",
                                     WorkId = recordedWorkId,
                                     WorkerId = runnerId,
-                                    Status = TaskRunStatus.Cancelled,
+                                    Status = WorkflowActionAttemptStatus.Cancelled,
                                 },
-                                new TaskRun
+                                new WorkflowActionAttempt
                                 {
                                     Id = "task-interrupted-2",
                                     DefinitionId = "task-2",
@@ -317,7 +317,7 @@ public class TaskLogServiceSpecs : IAsyncLifetime
                                     Title = "Interrupted second",
                                     WorkId = unrecordedWorkId,
                                     WorkerId = runnerId,
-                                    Status = TaskRunStatus.Running,
+                                    Status = WorkflowActionAttemptStatus.Running,
                                 },
                             ],
                         },
@@ -385,7 +385,7 @@ public class TaskLogServiceSpecs : IAsyncLifetime
                         Status = StageRunStatus.Completed,
                         Tasks =
                         [
-                            new TaskRun
+                            new WorkflowActionAttempt
                             {
                                 Id = "task-previous",
                                 DefinitionId = "task-previous",
@@ -394,10 +394,10 @@ public class TaskLogServiceSpecs : IAsyncLifetime
                                 Uses = "core/script",
                                 WorkId = "work-previous",
                                 WorkerId = runnerId,
-                                Status = TaskRunStatus.Completed,
+                                Status = WorkflowActionAttemptStatus.Completed,
                                 Classification = TaskClassification.Orchestration,
                             },
-                            new TaskRun
+                            new WorkflowActionAttempt
                             {
                                 Id = "task-terminal",
                                 DefinitionId = "task-terminal",
@@ -406,7 +406,7 @@ public class TaskLogServiceSpecs : IAsyncLifetime
                                 Uses = "core/script",
                                 WorkId = workId,
                                 WorkerId = runnerId,
-                                Status = TaskRunStatus.Completed,
+                                Status = WorkflowActionAttemptStatus.Completed,
                                 TerminalLogOwnership = new TerminalLogOwnership(
                                     TerminalLogOwnerKinds.Workflow,
                                     workflowRunId,
@@ -452,7 +452,7 @@ public class TaskLogServiceSpecs : IAsyncLifetime
                         Status = StageRunStatus.Running,
                         Tasks =
                         [
-                            new TaskRun
+                            new WorkflowActionAttempt
                             {
                                 Id = "task-active",
                                 DefinitionId = "task-active",
@@ -461,7 +461,7 @@ public class TaskLogServiceSpecs : IAsyncLifetime
                                 Uses = "core/script",
                                 WorkId = workId,
                                 WorkerId = runnerId,
-                                Status = TaskRunStatus.Running,
+                                Status = WorkflowActionAttemptStatus.Running,
                                 Classification = TaskClassification.Orchestration,
                             },
                         ],

@@ -42,14 +42,15 @@ public class IssueRebaseRecoveryTests
         var task = Assert.Single(handler.Tasks);
         Assert.Equal("recover:resolve-rebase-conflicts", task.Id);
         Assert.Equal("Resolve rebase conflicts", task.Title);
-        Assert.Equal("mohist/opencode", task.Uses);
+        Assert.Equal("mohist/agent", task.Uses);
+        Assert.Equal("mohist/builder", task.With!["name"]!.Value.GetString());
 
         // The rebase recovery must reuse the builtin prompt by named
         // reference (resolved by the runner at dispatch), not handroll an
         // inline prompt that drifts from the workflow-profile version.
         Assert.NotNull(task.With);
         Assert.Equal("${{ prompts.resolve-rebase-conflicts }}", task.With!["prompt"]!.Value.GetString());
-        Assert.Equal("${{ vars.agent }}", task.With!["options"]!.Value.GetString());
+        Assert.False(task.With!.ContainsKey("options"));
         Assert.Equal("check", task.With!["session"]!.Value.GetString());
     }
 
@@ -67,7 +68,8 @@ public class IssueRebaseRecoveryTests
         Assert.False(handler.RetrySelf);
         var task = Assert.Single(handler.Tasks);
         Assert.Equal("recover:resolve-rebase-conflicts", task.Id);
-        Assert.Equal("mohist/opencode", task.Uses);
+        Assert.Equal("mohist/agent", task.Uses);
+        Assert.Equal("mohist/builder", task.With!["name"]!.Value.GetString());
         Assert.Equal("${{ prompts.resolve-rebase-conflicts }}", task.With!["prompt"]!.Value.GetString());
     }
 

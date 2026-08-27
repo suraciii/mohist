@@ -234,7 +234,7 @@ describe('historical core/script execution compatibility', () => {
     const original = historicalWork(workDir, {
       with: rawWith,
       workId: 'script.2',
-      taskRunId: 'task-run-2',
+      actionAttemptId: 'task-run-2',
       artifacts: { files: [{ path: 'report.txt' }] },
       setVars: { result: 'value' },
       expect: { completion: '${{ vars.marker }}' },

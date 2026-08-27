@@ -184,7 +184,6 @@ public static class MohistServiceRegistration
         services.AddScoped<IStateStore<AgentSession>>(sp => sp.GetRequiredService<IAgentSessionStore>());
         services.AddScoped<IAgentSessionTranscriptStore, AgentSessionTranscriptStore>();
         services.AddScoped<IFollowupDeliveryDispatcher, RunnerFollowupDeliveryDispatcher>();
-        services.AddScoped<ISessionWorkPort, Mohist.Server.Workflow.Services.WorkflowSessionWorkPort>();
         services.AddScoped<ISessionStopDelivery, RunnerSessionStopDelivery>();
         services.AddSingleton<IFollowupDispatchScheduler>(sp => sp.GetRequiredService<Mohist.Server.Api.FollowupDispatchScheduler>());
         services.AddScoped<IAgentJobStore, AgentJobStore>();

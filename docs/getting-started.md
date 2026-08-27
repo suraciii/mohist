@@ -1,10 +1,5 @@
 # Getting Started
 
-> **Status note**: The current implementation configures Workflow execution through
-> Runtime-specific Actions. The target model
-> ([`../design/agent-execution.md`](../design/agent-execution.md)) has every Workflow task launch a
-> configured Mohist Agent instead; this guide will be simplified when that lands.
-
 Goal: Start Mohist from zero in 30 minutes. Use a Mohist Agent, a third-party
 External Agent, or `mo` to move one real Issue through the complete Workflow and
 see its code merged. The Web UI is the fallback operations and visualization
@@ -20,7 +15,8 @@ or a configured Pi Runtime.
 For OpenCode, follow the [official opencode documentation](https://opencode.ai)
 when the CLI is not installed. Pi runs through the Runner's in-process Pi SDK
 and uses the Runner user's Pi configuration. Mohist does not include an AI
-model. A Workflow Profile selects the concrete Inline Agent Action.
+model. Workflow Agent tasks run named Mohist Agents; each Agent definition
+selects its backend.
 
 ## 1. Get the Source and Install Dependencies
 
@@ -129,12 +125,12 @@ The rest of this guide uses a third-party External Agent or `mo`. You do not
 need to create a Mohist Agent first. If you do not use an External Agent, run
 the `mo` commands in this guide directly.
 
-## 6. Configure the Inline Agent Action and Model
+## 6. Configure the Agent Model
 
-The selected Workflow Profile determines the Inline Agent Action. The
-`mohist/github-pr` Profile defaults to `mohist/opencode`; Project Workflow
-settings can bind it to another compatible Action such as `mohist/pi` without
-copying the Profile. A WorkflowRun fixes this choice when it starts.
+Workflow Agent tasks run named Mohist Agents (`mohist/planner`,
+`mohist/builder`, `mohist/reviewer` by default). The Agent definition owns the
+execution backend (OpenCode or Pi), model, optional Reasoning Effort, and
+variant; a Workflow task cannot override them.
 
 When using OpenCode, confirm that its CLI works:
 
@@ -143,13 +139,10 @@ When using OpenCode, confirm that its CLI works:
 opencode --help
 ```
 
-Without an explicit model, the selected Action uses its Runtime default. The
-model selector requests the catalog for the effective Profile Action before a
-Run starts, and for the Run-bound Action while that Run is active. To select a
-model explicitly, set it directly in the task `options`, or configure it in
-Workflow Variables and pass it with `options: ${{ vars.agent }}`. See the
-[`mohist/opencode` Action](actions/opencode.md) and
-[`mohist/pi` Action](actions/pi.md) for Runtime-specific configuration.
+Without an explicit model, the Agent uses its runtime default. To select a
+model, configure it on the Agent or in Project Agent settings. See
+[Agents and AgentSessions](agent-sessions.md) and
+[Workflow Profiles](workflow-profiles.md#agent-tasks).
 
 ## 7. Create Your First Project
 

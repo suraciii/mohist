@@ -13,18 +13,14 @@ internal sealed partial class TableRenderer
             return;
         }
 
-        var headers = new[] { "profile", "name", "runtime", "agent action", "source" };
-        var widths = new[] { IdSoftCap, TitleSoftCap, 12, IdSoftCap, 12 };
+        var headers = new[] { "profile", "name", "source" };
+        var widths = new[] { IdSoftCap, TitleSoftCap, 12 };
         var cells = rows.Select(row =>
         {
-            var agentAction = StringOf(row, "agentAction");
-            var agentRuntime = StringOf(row, "agentRuntime");
             return new[]
             {
                 Truncate(StringOf(row, "profileId"), IdSoftCap),
                 Truncate(StringOf(row, "name"), TitleSoftCap),
-                Truncate(string.IsNullOrEmpty(agentRuntime) ? "(none)" : agentRuntime, 12),
-                Truncate(string.IsNullOrEmpty(agentAction) ? "(none)" : agentAction, IdSoftCap),
                 Truncate(StringOf(row, "sourceProvenance"), 12),
             };
         }).ToList();
@@ -40,15 +36,11 @@ internal sealed partial class TableRenderer
             return;
         }
 
-        var agentAction = StringOf(data, "agentAction");
-        var agentRuntime = StringOf(data, "agentRuntime");
         _out.WriteLine($"profile:       {StringOf(data, "profileId")}");
         _out.WriteLine($"name:          {StringOf(data, "name")}");
         _out.WriteLine($"description:   {Truncate(StringOf(data, "description"), BodySoftCap)}");
         _out.WriteLine($"source:        {StringOf(data, "sourceProvenance")}");
         _out.WriteLine($"built in:      {(BoolOf(data, "isBuiltIn") ? "yes" : "no")}");
-        _out.WriteLine($"agent action:  {(string.IsNullOrEmpty(agentAction) ? "(none)" : agentAction)}");
-        _out.WriteLine($"agent runtime: {(string.IsNullOrEmpty(agentRuntime) ? "(none)" : agentRuntime)}");
     }
 
     private void RenderProjectTemplateList(JsonNode? data)

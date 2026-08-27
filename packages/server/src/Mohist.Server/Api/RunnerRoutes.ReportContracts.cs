@@ -1,5 +1,6 @@
 using Mohist.Server.Workflow.Domain.Run;
 using Mohist.Server.Workflow.Grains;
+using Mohist.Server.Runner.Grains;
 
 namespace Mohist.Server.Api;
 
@@ -7,7 +8,7 @@ public record RunnerReportRequest(
     string WorkId,
     string Status,
     string? WorkflowRunId = null,
-    string? TaskRunId = null,
+    string? ActionAttemptId = null,
     string? ProjectId = null,
     string? Message = null,
     System.Text.Json.JsonElement? Output = null,

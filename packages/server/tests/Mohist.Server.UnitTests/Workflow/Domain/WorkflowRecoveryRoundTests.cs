@@ -59,14 +59,14 @@ public sealed class WorkflowRecoveryRoundTests
     {
         var run = BuildRun();
         var stage = run.CurrentStage();
-        var first = new TaskRun
+        var first = new WorkflowActionAttempt
         {
             Id = "review.1",
             DefinitionId = "review",
             Attempt = 1,
             Title = "Review",
             Uses = "test/review",
-            Status = TaskRunStatus.Failed,
+            Status = WorkflowActionAttemptStatus.Failed,
             Recovery = Recovery,
             RecoveryRemaining = 0,
         };
@@ -78,7 +78,7 @@ public sealed class WorkflowRecoveryRoundTests
 
         run.Retry(Now);
 
-        Assert.Equal(TaskRunStatus.Failed, first.Status);
+        Assert.Equal(WorkflowActionAttemptStatus.Failed, first.Status);
         Assert.Equal(0, first.RecoveryRemaining);
         var retried = Assert.Single(run.CurrentStage().Tasks.Skip(1));
         Assert.Equal(2, retried.Recovery!.Budget);
@@ -92,7 +92,7 @@ public sealed class WorkflowRecoveryRoundTests
         var run = BuildRun();
         var definition = Assert.Single(run.CurrentStage().Tasks).ToDefinition();
 
-        var continuation = TaskRun.MakeContinuationTask(
+        var continuation = WorkflowActionAttempt.MakeContinuationTask(
             run.CurrentStage().Tasks,
             definition,
             run.CurrentStage().Attempt,
@@ -102,7 +102,7 @@ public sealed class WorkflowRecoveryRoundTests
         Assert.Equal(1, continuation.RecoveryRemaining);
         Assert.Equal(2, continuation.Recovery!.Budget);
         Assert.Throws<InvalidOperationException>(() =>
-            TaskRun.MakeContinuationTask(
+            WorkflowActionAttempt.MakeContinuationTask(
                 run.CurrentStage().Tasks,
                 new TaskDefinition("orphan", "Orphan", "test/orphan"),
                 run.CurrentStage().Attempt,
@@ -119,7 +119,7 @@ public sealed class WorkflowRecoveryRoundTests
         var run = BuildRun();
         var definition = Assert.Single(run.CurrentStage().Tasks).ToDefinition();
 
-        var continuation = TaskRun.MakeContinuationTask(
+        var continuation = WorkflowActionAttempt.MakeContinuationTask(
             run.CurrentStage().Tasks,
             definition,
             run.CurrentStage().Attempt,
@@ -192,14 +192,14 @@ public sealed class WorkflowRecoveryRoundTests
         stage.Tasks =
         [
             stage.Tasks[0],
-            new TaskRun
+            new WorkflowActionAttempt
             {
                 Id = "review.2",
                 DefinitionId = "review",
                 Attempt = 2,
                 Title = "Review",
                 Uses = "test/review",
-                Status = TaskRunStatus.Pending,
+                Status = WorkflowActionAttemptStatus.Pending,
                 Recovery = Recovery,
                 RecoveryRemaining = 1,
             }

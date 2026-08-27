@@ -60,14 +60,14 @@ public class WorkflowArtifactQuerySpecs
         return workflowRunId;
     }
 
-    private static WorkflowArtifactRow Row(string workflowRunId, string taskRunId, string path, string kind, DateTimeOffset recordedAt) => new()
+    private static WorkflowArtifactRow Row(string workflowRunId, string actionAttemptId, string path, string kind, DateTimeOffset recordedAt) => new()
     {
-        ArtifactId = $"art_{taskRunId}_{Guid.NewGuid():N}",
+        ArtifactId = $"art_{actionAttemptId}_{Guid.NewGuid():N}",
         WorkflowRunId = workflowRunId,
-        TaskRunId = taskRunId,
+        ActionAttemptId = actionAttemptId,
         Path = path,
         RecordedAt = recordedAt,
-        ArtifactStoragePath = $"{workflowRunId}/tasks/{taskRunId}/artifacts/{taskRunId}/content",
+        ArtifactStoragePath = $"{workflowRunId}/tasks/{actionAttemptId}/artifacts/{actionAttemptId}/content",
         Kind = kind,
         ContentType = "text/markdown",
         Size = 100,
@@ -84,7 +84,7 @@ public class WorkflowArtifactQuerySpecs
 
         Assert.Equal(3, latest.Count);
         var review = Assert.Single(latest, a => a.Path == "review.md");
-        Assert.Equal("ai-review.2", review.TaskRunId);
+        Assert.Equal("ai-review.2", review.ActionAttemptId);
         Assert.Equal("file", review.Kind);
     }
 
@@ -97,8 +97,8 @@ public class WorkflowArtifactQuerySpecs
         var history = await querier.ListHistoryAsync(workflowRunId, "review.md");
 
         Assert.Equal(2, history.Count);
-        Assert.Equal("ai-review.1", history[0].TaskRunId);
-        Assert.Equal("ai-review.2", history[1].TaskRunId);
+        Assert.Equal("ai-review.1", history[0].ActionAttemptId);
+        Assert.Equal("ai-review.2", history[1].ActionAttemptId);
     }
 
     [Fact]
@@ -111,19 +111,19 @@ public class WorkflowArtifactQuerySpecs
 
         var single = Assert.Single(latest);
         Assert.Equal("review.md", single.Path);
-        Assert.Equal("ai-review.2", single.TaskRunId);
+        Assert.Equal("ai-review.2", single.ActionAttemptId);
     }
 
     [Fact]
-    public async Task ListByTaskRunAsync_ReturnsArtifactsProducedByThatTask()
+    public async Task ListByWorkflowActionAttemptAsync_ReturnsArtifactsProducedByThatTask()
     {
         var workflowRunId = await SeedArtifactsAsync();
         var querier = CreateQuerier();
 
-        var produced = await querier.ListByTaskRunAsync(workflowRunId, "ai-review.1");
+        var produced = await querier.ListByWorkflowActionAttemptAsync(workflowRunId, "ai-review.1");
 
         var single = Assert.Single(produced);
-        Assert.Equal("ai-review.1", single.TaskRunId);
+        Assert.Equal("ai-review.1", single.ActionAttemptId);
         Assert.Equal("review.md", single.Path);
     }
 

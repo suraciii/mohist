@@ -366,7 +366,7 @@ public partial class WorkflowRunStoreSpecs
 
     private static WorkflowRun CreateLegacyExhaustedRecoveryRun()
     {
-        var failedTask = LegacyAttempt(3, 0, TaskRunStatus.Failed);
+        var failedTask = LegacyAttempt(3, 0, WorkflowActionAttemptStatus.Failed);
         var failure = new FailureDetails(FailureReason.TaskFailed, "check", failedTask.Id, Message: "recovery exhausted");
         return new WorkflowRun
         {
@@ -387,8 +387,8 @@ public partial class WorkflowRunStoreSpecs
                     Failure = failure,
                     Tasks =
                     [
-                        LegacyAttempt(1, 2, TaskRunStatus.Completed),
-                        LegacyAttempt(2, 1, TaskRunStatus.Completed),
+                        LegacyAttempt(1, 2, WorkflowActionAttemptStatus.Completed),
+                        LegacyAttempt(2, 1, WorkflowActionAttemptStatus.Completed),
                         failedTask,
                     ],
                     Checks = [],
@@ -399,7 +399,7 @@ public partial class WorkflowRunStoreSpecs
 
     private static WorkflowRun CreateLegacySameDefinitionAcrossStagesRun()
     {
-        var failedTask = LegacyAttempt(1, 5, TaskRunStatus.Failed);
+        var failedTask = LegacyAttempt(1, 5, WorkflowActionAttemptStatus.Failed);
         var failure = new FailureDetails(FailureReason.TaskFailed, "check", failedTask.Id, Message: "recovery exhausted");
         return new WorkflowRun
         {
@@ -417,7 +417,7 @@ public partial class WorkflowRunStoreSpecs
                     RequiresApproval = false,
                     Initialized = true,
                     Status = StageRunStatus.Completed,
-                    Tasks = [LegacyAttempt(1, 2, TaskRunStatus.Completed)],
+                    Tasks = [LegacyAttempt(1, 2, WorkflowActionAttemptStatus.Completed)],
                     Checks = [],
                 },
                 new StageRun
@@ -435,7 +435,7 @@ public partial class WorkflowRunStoreSpecs
         };
     }
 
-    private static TaskRun LegacyAttempt(int attempt, int budget, TaskRunStatus status) => new()
+    private static WorkflowActionAttempt LegacyAttempt(int attempt, int budget, WorkflowActionAttemptStatus status) => new()
     {
         Id = $"review.{attempt}",
         DefinitionId = "review",

@@ -20,7 +20,7 @@ public class RuntimeVariableMergeTests
         run.AssignTo("runner-1", TestTime.UtcNow);
         var events2 = run.StartTask("work-1", "runner-1", "test-process-generation", DateTimeOffset.UnixEpoch);
         var task = run.CurrentStage().Tasks.First(t => t.DefinitionId == "proposal");
-        task.Status = TaskRunStatus.Completed;
+        task.Status = WorkflowActionAttemptStatus.Completed;
         task.Output = JsonSerializer.Deserialize<JsonElement>("{\"openspecName\":\"issue-97\",\"changeDir\":\"openspec/changes/issue-97\"}");
 
         var payload = new Dictionary<string, JsonElement?>(StringComparer.Ordinal);
@@ -49,11 +49,11 @@ public class RuntimeVariableMergeTests
         var events2 = run.StartTask("work-1", "runner-1", "test-process-generation", DateTimeOffset.UnixEpoch);
 
         var completed = run.CurrentStage().Tasks.First(t => t.DefinitionId == "proposal");
-        completed.Status = TaskRunStatus.Completed;
+        completed.Status = WorkflowActionAttemptStatus.Completed;
         completed.Output = JsonSerializer.Deserialize<JsonElement>("{\"name\":\"done\"}");
 
         var pending = run.CurrentStage().Tasks.First(t => t.DefinitionId == "review");
-        pending.Status = TaskRunStatus.Pending;
+        pending.Status = WorkflowActionAttemptStatus.Pending;
 
         var payload = new Dictionary<string, JsonElement?>(StringComparer.Ordinal);
         WorkflowDispatchHelpers.MergeTaskOutputsIntoPayload(payload, run);
@@ -76,7 +76,7 @@ public class RuntimeVariableMergeTests
         run.AssignTo("runner-1", TestTime.UtcNow);
         var events2 = run.StartTask("work-1", "runner-1", "test-process-generation", DateTimeOffset.UnixEpoch);
         var task = run.CurrentStage().Tasks.First(t => t.DefinitionId == "proposal");
-        task.Status = TaskRunStatus.Completed;
+        task.Status = WorkflowActionAttemptStatus.Completed;
         task.Output = JsonSerializer.Deserialize<JsonElement>("\"plain string\"");
 
         var payload = new Dictionary<string, JsonElement?>(StringComparer.Ordinal);

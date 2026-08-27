@@ -1,3 +1,4 @@
+using System.Text.Json;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.EntityFrameworkCore;
 using Mohist.Server.Agent.Domain;
@@ -29,7 +30,48 @@ public sealed class WorkflowAgentHandoffPreflightSpecs
             $"handoff-preflight-project-{Guid.NewGuid():N}",
             $"agent_missing_{Guid.NewGuid():N}");
 
-        Assert.Null(result);
+        Assert.Null(result.Agent);
+        Assert.Equal("agent_not_found", result.ErrorCode);
+    }
+
+    [Fact]
+    public async Task ResolveAgentAsync_NeedsSetupAgent_ReturnsReadinessFailure()
+    {
+        var projectId = $"handoff-preflight-project-{Guid.NewGuid():N}";
+        var agentId = $"handoff-preflight-agent-{Guid.NewGuid():N}";
+        var agentName = $"handoff-preflight-name-{Guid.NewGuid():N}";
+        await using var scope = _fixture.Services.CreateAsyncScope();
+        var dbFactory = scope.ServiceProvider.GetRequiredService<IDbContextFactory<MohistDbContext>>();
+        await using var db = await dbFactory.CreateDbContextAsync();
+        var agent = new Mohist.Server.Agent.Domain.Agent
+        {
+            Id = agentId,
+            ProjectId = projectId,
+            Name = agentName,
+            Description = "handoff preflight needs setup",
+            Instructions = "follow the task",
+            Skills = [],
+            AgentConfig = JsonSerializer.SerializeToElement(new { runtime = "opencode" }),
+            Status = AgentStatus.Active,
+            CreatedAt = DateTimeOffset.UnixEpoch,
+            UpdatedAt = DateTimeOffset.UnixEpoch,
+        };
+        db.Agents.Add(new AgentRow
+        {
+            Id = GrainKey.Agent(projectId, agentId),
+            ProjectId = projectId,
+            Name = agentName,
+            Status = AgentStatus.Active,
+            State = AgentStore.Serialize(agent),
+        });
+        await db.SaveChangesAsync();
+
+        var preflight = scope.ServiceProvider.GetRequiredService<IWorkflowAgentHandoffPreflight>();
+        var result = await preflight.ResolveAgentAsync(projectId, agentName);
+
+        Assert.Null(result.Agent);
+        Assert.Equal("agent_not_ready", result.ErrorCode);
+        Assert.Contains("not ready", result.ErrorMessage, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
@@ -49,6 +91,7 @@ public sealed class WorkflowAgentHandoffPreflightSpecs
             Description = "handoff preflight spec",
             Instructions = "follow the task",
             Skills = [],
+            AgentConfig = JsonSerializer.SerializeToElement(new { runtime = "opencode", model = "openai/gpt-5.4" }),
             Status = AgentStatus.Active,
             CreatedAt = DateTimeOffset.UnixEpoch,
             UpdatedAt = DateTimeOffset.UnixEpoch,
@@ -66,8 +109,8 @@ public sealed class WorkflowAgentHandoffPreflightSpecs
         var preflight = scope.ServiceProvider.GetRequiredService<IWorkflowAgentHandoffPreflight>();
         var result = await preflight.ResolveAgentAsync(projectId, agentName);
 
-        Assert.NotNull(result);
-        Assert.Equal(agentId, result!.AgentId);
-        Assert.Equal("opencode", result.ExecutionDefinition.Runtime);
+        Assert.NotNull(result.Agent);
+        Assert.Equal(agentId, result.Agent!.AgentId);
+        Assert.Equal("opencode", result.Agent.ExecutionDefinition.Runtime);
     }
 }

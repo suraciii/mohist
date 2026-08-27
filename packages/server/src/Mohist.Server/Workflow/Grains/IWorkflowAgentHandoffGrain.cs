@@ -6,6 +6,7 @@ using Mohist.Server.Infrastructure;
 using Mohist.Server.Workflow.Domain.Run;
 using Mohist.Workflow.Definition;
 using Orleans;
+using Orleans.Concurrency;
 
 namespace Mohist.Server.Workflow.Grains;
 
@@ -18,6 +19,8 @@ public interface IWorkflowAgentHandoffGrain : IGrainWithStringKey
 {
     Task<WorkflowAgentHandoffResult> PrepareAsync(WorkflowAgentHandoffCommand command);
     Task<WorkflowAgentHandoffResult> AcceptAsync(WorkflowAgentHandoffAcceptance acceptance);
+    Task<WorkflowAgentHandoffResult> ActivateAsync();
+    [OneWay] Task TriggerActivationAsync();
     Task<WorkflowAgentHandoffPlan?> GetPlanAsync();
 }
 
@@ -31,12 +34,13 @@ public sealed record WorkflowAgentHandoffCommand(
     [property: Id(0)] string CommandId,
     [property: Id(1)] string ProjectId,
     [property: Id(2)] string WorkflowRunId,
-    [property: Id(3)] string TaskRunId,
+    [property: Id(3)] string ActionAttemptId,
     [property: Id(4)] string AgentRef,
     [property: Id(5)] string Prompt,
     [property: Id(6)] string? Session = null,
     [property: Id(7)] long? TimeoutMilliseconds = null,
-    [property: Id(8)] WorkflowAgentHandoffCompletionSnapshot? Completion = null);
+    [property: Id(8)] WorkflowAgentHandoffCompletionSnapshot? Completion = null,
+    [property: Id(9)] string? ReuseSessionId = null);
 
 /// <summary>
 /// Frozen Workflow-owned completion input. It remains declarative until the
@@ -51,7 +55,10 @@ public sealed record WorkflowAgentHandoffCompletionSnapshot(
     [property: Id(4)] TaskArtifactCapture? Artifacts = null,
     [property: Id(5)] Dictionary<string, string>? SetVars = null,
     [property: Id(6)] RecoveryDefinition? Recovery = null,
-    [property: Id(7)] int? RecoveryRemaining = null);
+    [property: Id(7)] int? RecoveryRemaining = null,
+    [property: Id(8)] int? IssueNumber = null,
+    [property: Id(9)] int? EpicNumber = null,
+    [property: Id(10)] string? VariablesJson = null);
 
 /// <summary>
 /// The rendered workspace variant uses a name for issue-backed runs and the
@@ -60,7 +67,8 @@ public sealed record WorkflowAgentHandoffCompletionSnapshot(
 [GenerateSerializer]
 public sealed record WorkflowAgentHandoffWorkspace(
     [property: Id(0)] string? Name = null,
-    [property: Id(1)] WorkspaceIdentity? Identity = null);
+    [property: Id(1)] WorkspaceIdentity? Identity = null,
+    [property: Id(2)] IReadOnlyList<WorkspaceRepositorySnapshot>? Repositories = null);
 
 /// <summary>
 /// Immutable linkage reserved for a handoff. This is intentionally not an
@@ -73,7 +81,7 @@ public sealed record WorkflowAgentInvocation(
     [property: Id(1)] string CommandId,
     [property: Id(2)] string ProjectId,
     [property: Id(3)] string WorkflowRunId,
-    [property: Id(4)] string TaskRunId,
+    [property: Id(4)] string ActionAttemptId,
     [property: Id(5)] string JobKey,
     [property: Id(6)] string SessionId,
     [property: Id(7)] string InputId,
@@ -84,6 +92,15 @@ public enum WorkflowAgentHandoffDisposition
     Prepared,
     Accepted,
     Rejected,
+}
+
+public enum WorkflowAgentActivationStep
+{
+    None,
+    PrepareJob,
+    EnsureSession,
+    SubmitJob,
+    Completed,
 }
 
 [GenerateSerializer]
@@ -106,7 +123,9 @@ public sealed record WorkflowAgentHandoffPlan(
     [property: Id(5)] DateTimeOffset PreparedAt,
     [property: Id(6)] WorkflowAgentHandoffRejection? Rejection = null,
     [property: Id(7)] DateTimeOffset? AcceptedAt = null,
-    [property: Id(8)] string? AgentId = null);
+    [property: Id(8)] string? AgentId = null,
+    [property: Id(9)] WorkflowAgentActivationStep ActivationStep = WorkflowAgentActivationStep.None,
+    [property: Id(10)] string? ActivationError = null);
 
 [GenerateSerializer]
 public sealed record WorkflowAgentHandoffAcceptance(
@@ -149,13 +168,13 @@ public static class WorkflowAgentHandoffCodec
     public static string KeyFor(
         string projectId,
         string workflowRunId,
-        string taskRunId,
+        string actionAttemptId,
         string commandId)
     {
         var identity = string.Join('\u001f',
             Require(projectId, nameof(projectId)),
             Require(workflowRunId, nameof(workflowRunId)),
-            Require(taskRunId, nameof(taskRunId)),
+            Require(actionAttemptId, nameof(actionAttemptId)),
             Require(commandId, nameof(commandId)));
         return $"workflow-agent-handoff/{StableToken(identity)}";
     }
@@ -167,11 +186,12 @@ public static class WorkflowAgentHandoffCodec
             command.CommandId ?? string.Empty,
             command.ProjectId ?? string.Empty,
             command.WorkflowRunId ?? string.Empty,
-            command.TaskRunId ?? string.Empty,
+            command.ActionAttemptId ?? string.Empty,
             command.AgentRef ?? string.Empty,
             command.Prompt ?? string.Empty,
             command.Session ?? string.Empty,
             command.TimeoutMilliseconds?.ToString(System.Globalization.CultureInfo.InvariantCulture) ?? string.Empty,
+            command.ReuseSessionId ?? string.Empty,
             CanonicalCompletion(command.Completion));
         return Hash(canonical);
     }
@@ -182,16 +202,26 @@ public static class WorkflowAgentHandoffCodec
         var token = StableToken(string.Join('\u001f',
             command.ProjectId,
             command.WorkflowRunId,
-            command.TaskRunId,
+            command.ActionAttemptId,
             command.CommandId));
+        // A non-empty session name is the logical AgentSession identity of the
+        // whole WorkflowRun: every attempt with the same name derives the same
+        // session id, while a different name or run stays isolated. Unnamed
+        // tasks keep one distinct session per attempt.
+        var sessionToken = string.IsNullOrWhiteSpace(command.Session)
+            ? token
+            : StableToken(string.Join('\u001f',
+                command.ProjectId,
+                command.WorkflowRunId,
+                command.Session));
         return new WorkflowAgentInvocation(
             InvocationId: $"workflow-agent-invocation-{token}",
             CommandId: command.CommandId,
             ProjectId: command.ProjectId,
             WorkflowRunId: command.WorkflowRunId,
-            TaskRunId: command.TaskRunId,
+            ActionAttemptId: command.ActionAttemptId,
             JobKey: $"agent-job-workflow-{token}",
-            SessionId: $"agent-session-workflow-{token}",
+            SessionId: command.ReuseSessionId ?? $"agent-session-workflow-{sessionToken}",
             InputId: $"workflow-agent-input-{token}",
             TurnId: $"workflow-agent-turn-{token}");
     }

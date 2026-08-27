@@ -35,7 +35,7 @@ public class WorkflowArtifactDomainTests
         // serialize → deserialize cycle through the workflow event
         // transport.
         Assert.Equal("wr_1", data.GetProperty("workflowRunId").GetString());
-        Assert.Equal("ai-review.1", data.GetProperty("taskRunId").GetString());
+        Assert.Equal("ai-review.1", data.GetProperty("actionAttemptId").GetString());
         Assert.Equal("review.md", data.GetProperty("path").GetString());
         Assert.Equal(recordedAt, data.GetProperty("recordedAt").GetDateTimeOffset());
     }

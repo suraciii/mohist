@@ -49,7 +49,8 @@ public class FeedbackDispatchSpecs : WorkflowGrainSpecs
         await RegisterRunnerForProjectAsync(TestProjectId(_workflowId!), _runnerId);
 
         var (feedbackTask, _) = await PollWorkAnyAsync();
-        Assert.StartsWith("apply-feedback.", feedbackTask.WorkId);
+        Assert.Equal(WorkDispatchOwnerKinds.AgentJob, feedbackTask.OwnerKind);
+        Assert.StartsWith("apply-feedback.", feedbackTask.ActionAttemptId);
 
         using var doc = JsonDocument.Parse(feedbackTask.Variables!);
         Assert.True(

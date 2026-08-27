@@ -16,7 +16,7 @@ namespace Mohist.Server.Api;
 /// <summary>
 /// Canonical follow-up endpoint for AgentSessions from either source.
 /// Follow-up joins the active turn or starts a user-initiated turn when the
-/// session is idle; neither case creates a TaskRun or AgentJob. The issue-scoped
+/// session is idle; neither case creates a WorkflowActionAttempt or AgentJob. The issue-scoped
 /// <c>POST /api/projects/{projectRef}/issues/{number}/sessions/{name}/followup</c>
 /// route (<see cref="IssueRoutes.MapIssueSessions"/>) is a Workflow lookup
 /// alias that resolves to the same stable AgentSession id and returns the same

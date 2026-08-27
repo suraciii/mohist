@@ -1,6 +1,7 @@
 using System.Text.Json;
 using Mohist.Workflow.Definition;
 using Mohist.Server.Workflow.Grains;
+using Mohist.Server.Runner.Grains;
 
 namespace Mohist.Server.Workflow.Domain.Run;
 
@@ -66,9 +67,8 @@ public sealed record TaskReport(
     [property: Id(5)] IReadOnlyList<RuntimeTaskInput>? AddTasks = null,
     [property: Id(6)] ExecutionError? Error = null,
     [property: Id(7)] IReadOnlyList<string>? ArtifactUploadIds = null,
-    [property: Id(8)] string? TaskRunId = null,
-    [property: Id(9)] string? TerminalResultFingerprint = null,
-    [property: Id(10)] AgentExecutionBinding? TerminalExecutionBinding = null);
+    [property: Id(8)] string? ActionAttemptId = null,
+    [property: Id(9)] string? TerminalResultFingerprint = null);
 
 [GenerateSerializer]
 public sealed record CheckReport(

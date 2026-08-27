@@ -66,36 +66,6 @@ public sealed class ProjectWorkflowProfileBindingParticipantProxy : Grain, IProj
         return ProjectWorkflowProfileBindingOutcome.Applied;
     }
 
-    public async Task<ProjectWorkflowProfileBindingOutcome> SetAgentActionOverrideAsync(
-        WorkflowProfileCommandPayload.SetAgentActionOverride payload,
-        string commandId,
-        long? expectedRevision)
-    {
-        var profile = await _profileProvider.GetAsync(payload.ProjectId, payload.ProfileId);
-        if (profile is null)
-            return ProjectWorkflowProfileBindingOutcome.ProfileUnknown;
-
-        await using var db = await _dbFactory.CreateDbContextAsync();
-        var row = await db.ProjectWorkflowProfiles
-            .FirstOrDefaultAsync(item => item.ProjectId == payload.ProjectId);
-        if (row is null)
-            return ProjectWorkflowProfileBindingOutcome.ProjectNotFound;
-
-        var canonicalProfileId = profile.ProfileId;
-        var overrides = new Dictionary<string, string>(row.AgentActionOverrides, StringComparer.Ordinal);
-        var existing = overrides.GetValueOrDefault(canonicalProfileId);
-        if (string.Equals(existing, payload.AgentAction, StringComparison.Ordinal))
-            return ProjectWorkflowProfileBindingOutcome.AlreadyApplied;
-        if (payload.AgentAction is null)
-            overrides.Remove(canonicalProfileId);
-        else
-            overrides[canonicalProfileId] = payload.AgentAction;
-        row.AgentActionOverrides = overrides;
-        row.UpdatedAt = _timeProvider.GetUtcNow();
-        await db.SaveChangesAsync();
-        return ProjectWorkflowProfileBindingOutcome.Applied;
-    }
-
     public async Task<long> GetWorkflowProfileBindingRevisionAsync()
     {
         await using var db = await _dbFactory.CreateDbContextAsync();

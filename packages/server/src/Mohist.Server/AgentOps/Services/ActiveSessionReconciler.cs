@@ -136,7 +136,7 @@ internal static class ActiveSessionReconciler
 
         var runningTask = run.Stages
             .SelectMany(stage => stage.Tasks)
-            .FirstOrDefault(task => task.Status == TaskRunStatus.Running);
+            .FirstOrDefault(task => task.Status == WorkflowActionAttemptStatus.Running);
 
         return runningTask is null
             || string.Equals(runningTask.Id, session.Label(AgentSessionQueryMetadataKeys.WorkId), StringComparison.Ordinal);

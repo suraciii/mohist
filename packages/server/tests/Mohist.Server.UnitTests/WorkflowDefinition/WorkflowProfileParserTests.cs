@@ -5,48 +5,39 @@ namespace Mohist.Workflow.Definition.Tests;
 public sealed class WorkflowProfileParserTests
 {
     [Fact]
-    public void Parse_MaterializesCompleteUsesExpressions()
+    public void Parse_PreservesConcreteAgentAction()
     {
         var result = WorkflowProfileParser.Parse("""
             id: delivery/review
             name: Delivery Review
-            agentAction: mohist/pi
-            approval:
-              feedback:
-                tasks:
-                  - id: address-feedback
-                    uses: ${{ profile.agentAction }}
             stages:
               - stage: implement
-                requiresApproval: true
                 tasks:
                   - id: implement
-                    uses: ${{ profile.agentAction }}
+                    uses: mohist/agent
+                    with:
+                      name: mohist/builder
+                      prompt: Build the change.
             """, "fallback");
 
         Assert.True(result.IsValid, FormatErrors(result.Errors));
         Assert.Equal("delivery/review", result.Profile!.Id);
-        Assert.Equal("mohist/pi", result.Profile.AgentAction);
-        Assert.Equal("mohist/pi", result.Profile.Definition.Stages[0].Tasks[0].Uses);
-        Assert.Equal("mohist/pi", result.Profile.Definition.Approval!.Feedback!.Tasks![0].Uses);
+        var task = result.Profile.Definition.Stages[0].Tasks[0];
+        Assert.Equal("mohist/agent", task.Uses);
+        Assert.Equal("mohist/builder", task.With!["name"]!.Value.GetString());
     }
 
     [Fact]
-    public void Parse_RejectsProfileExpressionOutsideCompleteUsesValue()
+    public void Parse_RejectsRemovedProfileAgentActionMetadata()
     {
         var result = WorkflowProfileParser.Parse("""
             agentAction: mohist/pi
             stages:
               - stage: implement
-                tasks:
-                  - id: implement
-                    uses: prefix-${{ profile.agentAction }}
             """, "profile");
 
         Assert.False(result.IsValid);
-        Assert.Contains(result.Errors, error =>
-            error.Path == "stages[0].tasks[0].uses"
-            && error.Message.Contains("complete value of uses", StringComparison.Ordinal));
+        Assert.Contains(result.Errors, error => error.Path == "agentAction");
     }
 
     [Fact]

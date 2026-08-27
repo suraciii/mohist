@@ -578,8 +578,8 @@ internal sealed class OutcomeCapturingHttpHandler : HttpMessageHandler
         public string? OwnerId { get; set; }
         [System.Text.Json.Serialization.JsonPropertyName("workId")]
         public string? WorkId { get; set; }
-        [System.Text.Json.Serialization.JsonPropertyName("taskRunId")]
-        public string? TaskRunId { get; set; }
+        [System.Text.Json.Serialization.JsonPropertyName("actionAttemptId")]
+        public string? ActionAttemptId { get; set; }
         [System.Text.Json.Serialization.JsonPropertyName("workType")]
         public string? WorkType { get; set; }
         [System.Text.Json.Serialization.JsonPropertyName("status")]

@@ -9,7 +9,7 @@ public static partial class WorkflowRunExtensions
 {
     public const string DefaultFeedbackTaskId = "apply-feedback";
     public const string DefaultFeedbackTaskTitle = "Apply approval feedback";
-    public const string DefaultFeedbackTaskUses = "mohist/opencode";
+    public const string DefaultFeedbackTaskUses = "mohist/agent";
     public const int FeedbackSummaryMaxLength = 100;
     private const string Ellipsis = "\u2026";
 
@@ -55,9 +55,9 @@ public static partial class WorkflowRunExtensions
         {
             var withInput = new Dictionary<string, JsonElement?>
             {
+                ["name"] = JSON.SerializeToElement("mohist/builder"),
                 ["session"] = JSON.SerializeToElement(stage),
                 ["prompt"] = JSON.SerializeToElement($"${{{{ prompts.{DefaultFeedbackTaskId} }}}}"),
-                ["options"] = JSON.SerializeToElement("${{ vars.agent }}"),
             };
             return new TaskDefinition(
                 Id: DefaultFeedbackTaskId,
@@ -76,8 +76,7 @@ public static partial class WorkflowRunExtensions
 
         private static TaskDefinition NormalizeFeedbackTask(TaskDefinition config, string stage)
         {
-            if (!string.Equals(config.Uses, "mohist/opencode", StringComparison.Ordinal)
-                && !string.Equals(config.Uses, "mohist/acp-agent", StringComparison.Ordinal))
+            if (!string.Equals(config.Uses, "mohist/agent", StringComparison.Ordinal))
                 return config;
             var with = config.With;
             if (with is null || !with.ContainsKey("session"))
@@ -211,7 +210,7 @@ public static partial class WorkflowRunExtensions
             var feedbackTasks = run.CurrentStage().Tasks
                 .Where(task => task.CausedByFeedbackId == feedbackId)
                 .ToList();
-            if (feedbackTasks.Count == 0 || feedbackTasks.Any(task => task.Status != TaskRunStatus.Completed))
+            if (feedbackTasks.Count == 0 || feedbackTasks.Any(task => task.Status != WorkflowActionAttemptStatus.Completed))
                 return null;
 
             var summary = ResolveFeedbackSummary(feedbackTasks, output);
@@ -239,7 +238,7 @@ public static partial class WorkflowRunExtensions
     /// the inbound report) is reserved for historical compat and never
     /// JSON-serializes an arbitrary object into summary text.
     /// </summary>
-    private static string? ResolveFeedbackSummary(IReadOnlyList<TaskRun> feedbackTasks, JsonElement? reportOutput)
+    private static string? ResolveFeedbackSummary(IReadOnlyList<WorkflowActionAttempt> feedbackTasks, JsonElement? reportOutput)
     {
         foreach (var task in feedbackTasks)
         {

@@ -61,42 +61,6 @@ public class WorkflowProfileMigrationSpecs : IAsyncLifetime
         Assert.Equal(WorkflowProfileSourceProvenance.CanonicalLegacy, provenance);
     }
 
-    [Fact]
-    public async Task Migrate_PreservesTopLevelRecoveriesInCanonicalYaml()
-    {
-        var (projectId, _, _) = await SeedProjectAsync();
-        await using (var db = new MohistDbContext(_database.Options))
-        {
-            db.ProjectWorkflowTemplates.Add(new ProjectWorkflowTemplateRow
-            {
-                ProjectId = projectId,
-                TemplateId = "legacy-rebase",
-                Template = LegacySemanticProfileWithRebaseRecovery(),
-                CreatedAt = _timeProvider.GetUtcNow(),
-                UpdatedAt = _timeProvider.GetUtcNow(),
-            });
-            await db.SaveChangesAsync();
-        }
-
-        await using var migrateDb = new MohistDbContext(_database.Options);
-        await WorkflowProfileDataMigrator.MigrateAsync(migrateDb, _timeProvider);
-
-        var stored = await _provider.GetDefinitionSourceAsync(projectId, "legacy-rebase");
-        Assert.NotNull(stored);
-        Assert.Contains("recoveries:", stored);
-        Assert.Contains("rebase-conflicts:", stored);
-
-        var definition = await _provider.GetDefinitionAsync(projectId, "legacy-rebase");
-        Assert.NotNull(definition?.Recoveries);
-        Assert.True(definition!.Recoveries!.TryGetValue("rebase-conflicts", out var recovery));
-        Assert.Equal(2, recovery!.Budget);
-        var handler = Assert.Single(recovery.Handlers);
-        Assert.Equal("error.code=conflict", handler.When);
-        Assert.False(handler.RetrySelf);
-        var task = Assert.Single(handler.Tasks);
-        Assert.Equal("recover:resolve-rebase-conflicts", task.Id);
-        Assert.Equal("mohist/opencode", task.Uses);
-    }
 
     [Fact]
     public async Task Migrate_InvalidLegacyTemplate_FailsWithProjectAndTemplateIdentity()

@@ -15,7 +15,7 @@ namespace Mohist.Server.Sessions.Services;
 /// </summary>
 /// <remarks>
 /// <see cref="AgentSession"/> is a peer-level aggregate root, NOT a child of <see cref="Mohist.Server.Workflow.Domain.Run.WorkflowRun"/>.
-/// The association between a session and a workflow run is by reference only — a <see cref="Mohist.Server.Workflow.Domain.Run.TaskRun"/>
+/// The association between a session and a workflow run is by reference only — a <see cref="Mohist.Server.Workflow.Domain.Run.WorkflowActionAttempt"/>
 /// refers to a session and the run is the aggregate root that contains that task.
 /// No ownership relationship exists.
 /// </remarks>

@@ -79,31 +79,6 @@ export interface WorkInterruption {
   recoveryDeadlineAt: string
 }
 
-export interface WorkflowAgentResultSettlement {
-  state: 'awaiting-result' | 'interrupted' | 'unknown' | 'blocked'
-  reason?: string | null
-  reasonCode?: string | null
-  message?: string | null
-  firstUnknownAt?: string | null
-  deadlineAt?: string | null
-  taskRunId: string
-  workId: string
-  runnerId?: string | null
-  agentSessionId?: string | null
-  agentTurnId?: string | null
-  runtime?: string | null
-  runtimeSessionId?: string | null
-  stopOperationId?: string | null
-  nextAction?: string | null
-  recoveryActions?: string[] | null
-}
-
-export interface WorkflowAgentResultAttention extends WorkflowAgentResultSettlement {
-  state: 'blocked'
-  reason: 'agent-result-unconfirmed'
-  deadlineAt: string
-}
-
 export interface StageTaskState {
   taskId: string
   title: string
@@ -125,8 +100,9 @@ export interface StageTaskState {
   causedBy?: StageTaskCause
   requiredFiles?: WorkflowTaskRequiredFile[]
   classification?: 'UserFacing' | 'Orchestration'
-  agentResultSettlement?: WorkflowAgentResultSettlement | null
   interruption?: WorkInterruption | null
+  agentJobId?: string | null
+  agentSessionId?: string | null
 }
 
 export interface StageCheckState {

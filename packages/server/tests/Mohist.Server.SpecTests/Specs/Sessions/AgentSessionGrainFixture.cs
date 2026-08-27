@@ -30,7 +30,6 @@ public sealed class AgentSessionGrainFixture : IAsyncLifetime
     public FakeAgentSessionTranscriptStore TranscriptStore { get; } = new();
     public RecordingTranscriptEventPublisher TranscriptPublisher { get; } = new();
     public RecordingFollowupDispatchScheduler FollowupDispatch { get; } = new();
-    public RecordingSessionWorkPort SessionWork { get; } = new();
     public AgentSessionPersistenceTestProbe Persistence { get; }
     public TestLogger<AgentSessionGrain> Logger { get; } = new();
     public FakeTimeProvider TimeProvider { get; } = new(TestTime.UtcNow);
@@ -44,7 +43,6 @@ public sealed class AgentSessionGrainFixture : IAsyncLifetime
         TranscriptStore.Reset();
         TranscriptPublisher.Clear();
         FollowupDispatch.Reset();
-        SessionWork.Reset();
         Logger.Entries.Clear();
     }
 
@@ -75,7 +73,6 @@ public sealed class AgentSessionGrainFixture : IAsyncLifetime
             siloBuilder.Services.AddSingleton<IAgentSessionTranscriptStore>(TranscriptStore);
             siloBuilder.Services.AddSingleton<ITranscriptEventPublisher>(TranscriptPublisher);
             siloBuilder.Services.AddSingleton<IFollowupDispatchScheduler>(FollowupDispatch);
-            siloBuilder.Services.AddSingleton<ISessionWorkPort>(SessionWork);
             siloBuilder.Services.AddSingleton<IAgentSessionPersistenceObserver>(Persistence);
              siloBuilder.Services.AddSingleton<TimeProvider>(TimeProvider);
              siloBuilder.Services.AddSingleton<RunnerConnectionTracker>();
@@ -111,59 +108,7 @@ public sealed class AgentSessionGrainFixture : IAsyncLifetime
         }
     }
 
-    public sealed class RecordingSessionWorkPort : ISessionWorkPort
-    {
-        public List<SessionWorkflowExecutionBinding> ExecutionBindings { get; } = [];
-        public List<SessionWorkflowExecutionBinding> CleanupAuthorizations { get; } = [];
-        public List<SessionWorkflowExecutionObservation> Observations { get; } = [];
-        public bool BindingAccepted { get; set; } = true;
-        public bool CleanupAuthorized { get; set; } = true;
 
-        public void Reset()
-        {
-            ExecutionBindings.Clear();
-            CleanupAuthorizations.Clear();
-            Observations.Clear();
-            BindingAccepted = true;
-            CleanupAuthorized = true;
-        }
-
-        public Task<bool> BindAgentExecutionAsync(
-            SessionWorkflowExecutionBinding binding,
-            CancellationToken cancellationToken = default)
-        {
-            ExecutionBindings.Add(binding);
-            return Task.FromResult(BindingAccepted);
-        }
-
-        public Task<bool> CanStartAgentCleanupAsync(
-            SessionWorkflowExecutionBinding binding,
-            CancellationToken cancellationToken = default)
-        {
-            CleanupAuthorizations.Add(binding);
-            return Task.FromResult(CleanupAuthorized);
-        }
-
-        public Task ObserveAgentExecutionAsync(
-            SessionWorkflowExecutionBinding binding,
-            SessionWorkflowObservationKind kind,
-            string reasonCode,
-            string? message = null,
-            string? stopOperationId = null,
-            CancellationToken cancellationToken = default)
-        {
-            Observations.Add(new SessionWorkflowExecutionObservation(
-                binding, kind, reasonCode, message, stopOperationId));
-            return Task.CompletedTask;
-        }
-    }
-
-    public sealed record SessionWorkflowExecutionObservation(
-        SessionWorkflowExecutionBinding Binding,
-        SessionWorkflowObservationKind Kind,
-        string ReasonCode,
-        string? Message,
-        string? StopOperationId);
 }
 
     public sealed class FakeAgentSessionStore : IAgentSessionStore

@@ -23,7 +23,7 @@ internal sealed class WorkflowArtifactPendingUploadRepository
             .FirstOrDefaultAsync(p =>
                 p.WorkflowRunId == key.WorkflowRunId
                 && p.WorkId == key.WorkId
-                && p.TaskRunId == key.TaskRunId
+                && p.ActionAttemptId == key.ActionAttemptId
                 && p.Path == key.Path,
                 cancellationToken)
             .ConfigureAwait(false);
@@ -49,7 +49,7 @@ internal sealed class WorkflowArtifactPendingUploadRepository
                 .FirstOrDefaultAsync(p =>
                     p.WorkflowRunId == pending.WorkflowRunId
                     && p.WorkId == pending.WorkId
-                    && p.TaskRunId == pending.TaskRunId
+                    && p.ActionAttemptId == pending.ActionAttemptId
                     && p.Path == pending.Path,
                     cancellationToken)
                 .ConfigureAwait(false);
@@ -67,7 +67,7 @@ internal sealed class WorkflowArtifactPendingUploadRepository
 internal sealed record WorkflowArtifactPendingUploadKey(
     string WorkflowRunId,
     string WorkId,
-    string TaskRunId,
+    string ActionAttemptId,
     string Path);
 
 internal sealed record PendingArtifactUploadCommitResult(

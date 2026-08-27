@@ -655,7 +655,7 @@ public sealed record AgentTurnRecord(
 public sealed record SessionWorkflowExecutionBinding(
     [property: Id(0)] string InputDeliveryId,
     [property: Id(1)] string WorkflowRunId,
-    [property: Id(2)] string TaskRunId,
+    [property: Id(2)] string ActionAttemptId,
     [property: Id(3)] string WorkId,
     [property: Id(4)] string RunnerId,
     [property: Id(5)] string AgentSessionId,

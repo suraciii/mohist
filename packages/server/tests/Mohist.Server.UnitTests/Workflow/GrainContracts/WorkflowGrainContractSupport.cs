@@ -245,9 +245,9 @@ internal sealed record WorkflowGrainArrangement(
         return await Grain.ClaimNextAsync(WorkerId, "test-generation");
     }
 
-    public async Task<string> RunningTaskRunIdAsync() => await ResolveRunningTaskRunIdAsync();
+    public async Task<string> RunningActionAttemptIdAsync() => await ResolveRunningActionAttemptIdAsync();
 
-    private async Task<string> ResolveRunningTaskRunIdAsync()
+    private async Task<string> ResolveRunningActionAttemptIdAsync()
     {
         var run = await Store.LoadAsync(RunId) ?? throw new InvalidOperationException("run missing");
         var runningTask = run.CurrentStage().RunningTask
@@ -261,14 +261,14 @@ internal sealed record WorkflowGrainArrangement(
 
     public async Task<WorkReportVerdict> ReportFailedAsync(WorkItem item, string detail)
     {
-        var taskRunId = await BuildReportTaskRunIdAsync();
+        var actionAttemptId = await BuildReportActionAttemptIdAsync();
         return await Grain.ReceiveTaskReportAsync(
             WorkerId,
             item.Id!,
-            new TaskReport(item.Id!, TaskReportStatus.Failed, Output: null, Artifacts: null, Detail: detail, TaskRunId: taskRunId));
+            new TaskReport(item.Id!, TaskReportStatus.Failed, Output: null, Artifacts: null, Detail: detail, ActionAttemptId: actionAttemptId));
     }
 
-    private async Task<string> BuildReportTaskRunIdAsync()
+    private async Task<string> BuildReportActionAttemptIdAsync()
     {
         var run = await Store.LoadAsync(RunId) ?? throw new InvalidOperationException("run missing");
         var runningTask = run.CurrentStage().RunningTask
@@ -278,17 +278,17 @@ internal sealed record WorkflowGrainArrangement(
 
     private async Task<WorkReportVerdict> ReportTaskAsync(WorkItem item, TaskReportStatus status)
     {
-        var taskRunId = await BuildReportTaskRunIdAsync();
+        var actionAttemptId = await BuildReportActionAttemptIdAsync();
         return await Grain.ReceiveTaskReportAsync(
-            WorkerId, item.Id!, new TaskReport(item.Id!, status, Output: null, Artifacts: null, TaskRunId: taskRunId));
+            WorkerId, item.Id!, new TaskReport(item.Id!, status, Output: null, Artifacts: null, ActionAttemptId: actionAttemptId));
     }
 
     /// <summary>Reports against a work id no active work carries; the grain must fence it.</summary>
     public async Task<WorkReportVerdict> ReportUnknownWorkAsync(string workId)
     {
-        var taskRunId = await BuildReportTaskRunIdAsync();
+        var actionAttemptId = await BuildReportActionAttemptIdAsync();
         return await Grain.ReceiveTaskReportAsync(
-            WorkerId, workId, new TaskReport(workId, TaskReportStatus.Failed, Output: null, Artifacts: null, TaskRunId: taskRunId));
+            WorkerId, workId, new TaskReport(workId, TaskReportStatus.Failed, Output: null, Artifacts: null, ActionAttemptId: actionAttemptId));
     }
 
     public async Task<WorkReportVerdict> ReportCheckResultsAsync(
@@ -321,11 +321,11 @@ internal sealed record WorkflowGrainArrangement(
         IReadOnlyList<string>? artifactUploadIds = null,
         string? detail = null)
     {
-        var taskRunId = await BuildReportTaskRunIdAsync();
+        var actionAttemptId = await BuildReportActionAttemptIdAsync();
         return await Grain.ReceiveTaskReportAsync(
             WorkerId,
             item.Id!,
-            new TaskReport(item.Id!, status, Output: output, Artifacts: null, Detail: detail, AddTasks: addTasks, ArtifactUploadIds: artifactUploadIds, TaskRunId: taskRunId));
+            new TaskReport(item.Id!, status, Output: output, Artifacts: null, Detail: detail, AddTasks: addTasks, ArtifactUploadIds: artifactUploadIds, ActionAttemptId: actionAttemptId));
     }
 
     public static async Task<WorkflowGrainArrangement> CreateAsync(

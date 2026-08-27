@@ -1506,7 +1506,7 @@ protected override void OnModelCreating(ModelBuilder modelBuilder)
             entity.HasKey(e => e.ArtifactId);
             entity.Property(e => e.ArtifactId).HasMaxLength(64).IsRequired();
             entity.Property(e => e.WorkflowRunId).HasMaxLength(50).IsRequired();
-            entity.Property(e => e.TaskRunId).HasMaxLength(128).IsRequired();
+            entity.Property(e => e.ActionAttemptId).HasMaxLength(128).IsRequired();
             entity.Property(e => e.SourceUploadId).HasMaxLength(64);
             entity.Property(e => e.Path).HasMaxLength(1024).IsRequired();
             entity.Property(e => e.RecordedAt).IsRequired();
@@ -1522,8 +1522,8 @@ protected override void OnModelCreating(ModelBuilder modelBuilder)
             entity.HasIndex(e => new { e.WorkflowRunId, e.Path, e.RecordedAt })
                 .HasDatabaseName("IX_WorkflowArtifacts_WorkflowRunId_Path_RecordedAt");
             // Task-run filter and history ordering.
-            entity.HasIndex(e => new { e.WorkflowRunId, e.TaskRunId, e.RecordedAt })
-                .HasDatabaseName("IX_WorkflowArtifacts_WorkflowRunId_TaskRunId_RecordedAt");
+            entity.HasIndex(e => new { e.WorkflowRunId, e.ActionAttemptId, e.RecordedAt })
+                .HasDatabaseName("IX_WorkflowArtifacts_WorkflowRunId_ActionAttemptId_RecordedAt");
             entity.HasIndex(e => e.SourceUploadId)
                 .IsUnique()
                 .HasFilter("\"SourceUploadId\" IS NOT NULL")
@@ -1540,7 +1540,7 @@ protected override void OnModelCreating(ModelBuilder modelBuilder)
             entity.Property(e => e.UploadId).HasMaxLength(64).IsRequired();
             entity.Property(e => e.WorkflowRunId).HasMaxLength(50).IsRequired();
             entity.Property(e => e.WorkId).HasMaxLength(128).IsRequired();
-            entity.Property(e => e.TaskRunId).HasMaxLength(128).IsRequired();
+            entity.Property(e => e.ActionAttemptId).HasMaxLength(128).IsRequired();
             entity.Property(e => e.Path).HasMaxLength(1024).IsRequired();
             entity.Property(e => e.Kind).HasMaxLength(16).IsRequired().HasDefaultValue("file");
             entity.Property(e => e.FileCount);
@@ -1553,7 +1553,7 @@ protected override void OnModelCreating(ModelBuilder modelBuilder)
             // Idempotency: same workflow run, work item, task run, and
             // path resolves to a single pending upload. Conflicts on
             // content hash reject the retry without mutating the row.
-            entity.HasIndex(e => new { e.WorkflowRunId, e.WorkId, e.TaskRunId, e.Path })
+            entity.HasIndex(e => new { e.WorkflowRunId, e.WorkId, e.ActionAttemptId, e.Path })
                 .IsUnique()
                 .HasDatabaseName("UX_WorkflowArtifactPendingUploads_IdempotencyKey");
             // TTL cleanup walks by expiry.

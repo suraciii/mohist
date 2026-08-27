@@ -1,15 +1,16 @@
 # `mohist/agent` Action
 
-> **Status: decided target.** The syntax is unchanged; the semantics change to a real Agent launch
-> per [`../../design/decisions/workflow-agent-binding.md`](../../design/decisions/workflow-agent-binding.md).
-> The snapshot-only behavior below describes the current implementation and is removed with the
-> TaskRun migration.
-
 `mohist/agent` launches a predefined Mohist Agent from the Project for one
 Workflow task. It enters the canonical AgentJob launch boundary: the task
 creates a real AgentJob and AgentSession, and AgentJob owns execution, retry,
 recovery, and result. A missing, archived, or not-ready Agent fails launch
 explicitly. It supports tasks only, not Workflow checks.
+
+This is the only Agent task binding in a Workflow Profile. Runtime Actions such
+as `mohist/opencode` and `mohist/pi` are internal Agent-to-Runner contracts
+selected by the Agent definition; a Profile `uses` cannot reference them. See
+[`../../design/decisions/workflow-agent-binding.md`](../../design/decisions/workflow-agent-binding.md)
+for the binding decision.
 
 `with` admits `name`, `session`, `prompt`, and `timeout` (optional
 per-execution deadline, unchanged).
@@ -42,9 +43,11 @@ Agent definition owns the backend choice.
 - `prompt` (required): task input for the Agent. Template expressions are
   supported.
 - `session` (optional): logical Session name within the WorkflowRun. The
-  current Work ID is used when omitted.
-- `timeout` (optional): deadline for this execution. Defaults to the backend
-  Action's deadline.
+  current Work ID is used when omitted. The same name continues the logical
+  Session only when the Agent and Workspace identities also match; the same
+  name with a different Agent fails the launch.
+- `timeout` (optional): deadline for this execution in milliseconds. When
+  omitted, the Agent uses its configured default deadline.
 
 The Agent configuration selects the execution backend, model, optional
 Reasoning Effort, true model variant, and Skills. Reasoning Effort is one of
@@ -78,12 +81,17 @@ name first and fall back to ID when no name matches.
 
 ## Failure Semantics
 
-The Action defines one business error code: `agent_not_found` when `name` does
-not exist at launch time, or the Agent is archived. A `needs-setup` Agent fails
-launch explicitly with its readiness gaps.
+The Action defines two business error codes:
 
-Execution errors such as backend unavailability and timeout are the same as for
-the selected backend Action. Recovery `when` matching applies in the same way.
+- `agent_not_found`: `name` does not resolve to an existing Agent at launch
+  time, or the Agent is archived.
+- `agent_not_ready`: the Agent exists but has unresolved readiness gaps. The
+  error message lists the gaps.
+
+A `session` name that is already bound to a different Agent in the same Run
+fails launch with `workflow_session_agent_conflict`. Execution errors such as
+backend unavailability and timeout are the same as for the backend Action the
+Agent selects. Recovery `when` matching applies in the same way.
 
 `mohist/agent` can be used only for a task and is rejected when used for a
 check. If the referenced Agent does not exist or is archived, dispatch fails

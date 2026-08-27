@@ -3,6 +3,9 @@ namespace Mohist.Server.Agent.Services;
 public static class BuiltInAgentCatalog
 {
     public const string MohistSlackName = "mohist-slack";
+    public const string MohistPlannerName = "mohist/planner";
+    public const string MohistBuilderName = "mohist/builder";
+    public const string MohistReviewerName = "mohist/reviewer";
     public const string MohistSlackProjectId = "__mohist_slack_manager__";
 
     public static IReadOnlyList<BuiltInAgentDefinition> Definitions { get; } =
@@ -11,6 +14,30 @@ public static class BuiltInAgentCatalog
             MohistSlackName,
             "Mohist's Slack workspace manager.",
             BuiltInAgentAssets.MohistSlackInstructions,
+            Runtime: "opencode",
+            Model: null,
+            Variant: null,
+            Skills: []),
+        new(
+            MohistPlannerName,
+            "Mohist's built-in Workflow planning Agent.",
+            BuiltInAgentAssets.MohistPlannerInstructions,
+            Runtime: "opencode",
+            Model: null,
+            Variant: null,
+            Skills: []),
+        new(
+            MohistBuilderName,
+            "Mohist's built-in Workflow implementation Agent.",
+            BuiltInAgentAssets.MohistBuilderInstructions,
+            Runtime: "opencode",
+            Model: null,
+            Variant: null,
+            Skills: []),
+        new(
+            MohistReviewerName,
+            "Mohist's built-in Workflow review Agent.",
+            BuiltInAgentAssets.MohistReviewerInstructions,
             Runtime: "opencode",
             Model: null,
             Variant: null,
@@ -24,13 +51,13 @@ public static class BuiltInAgentCatalog
         Definitions.FirstOrDefault(definition =>
             string.Equals(definition.Name, name?.Trim(), StringComparison.OrdinalIgnoreCase));
 
-    public static AgentInfo Resolve(string name)
+    public static AgentInfo Resolve(string name, string? projectId = null)
     {
         var definition = Find(name)
             ?? throw new KeyNotFoundException($"Built-in Agent '{name}' was not found.");
         return new AgentInfo(
             Id: $"builtin:{definition.Name}",
-            ProjectId: MohistSlackProjectId,
+            ProjectId: projectId ?? MohistSlackProjectId,
             Name: definition.Name,
             Description: definition.Description,
             Instructions: definition.Instructions,
@@ -68,9 +95,10 @@ public sealed record BuiltInAgentDefinition(
 
 internal static class BuiltInAgentAssets
 {
-    private const string AssetSuffix = ".Agent.Services.Assets.mohist-slack.instructions.md";
-
-    public static string MohistSlackInstructions { get; } = Read(AssetSuffix);
+    public static string MohistSlackInstructions { get; } = Read(".Agent.Services.Assets.mohist-slack.instructions.md");
+    public static string MohistPlannerInstructions { get; } = Read(".Agent.Services.Assets.mohist-planner.instructions.md");
+    public static string MohistBuilderInstructions { get; } = Read(".Agent.Services.Assets.mohist-builder.instructions.md");
+    public static string MohistReviewerInstructions { get; } = Read(".Agent.Services.Assets.mohist-reviewer.instructions.md");
 
     private static string Read(string suffix)
     {

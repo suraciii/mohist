@@ -1,8 +1,7 @@
 # Task Dispatch
 
-> **Status: legacy implementation.** This document describes dispatch of Workflow-owned Actions.
-> The target model ([`../agent-execution.md`](../agent-execution.md)) dispatches AgentJobs instead;
-> binding decided in [`../decisions/workflow-agent-binding.md`](../decisions/workflow-agent-binding.md).
+> Mechanical Actions dispatch as Workflow-owned work. `mohist/agent` tasks enter the durable
+> AgentJob launch boundary described in [`../agent-execution.md`](../agent-execution.md).
 
 This document is the sole authority for when task input templates are evaluated. `tasks[*].with`
 and task-level `expect` are part of the Workflow declaration. Server sends them in their original
@@ -10,9 +9,8 @@ form with the dispatch and does not expand templates in advance. Runner expands 
 the execution entry point before invoking an Action. The Prompt body, Effective Stage Variables,
 runtime context, and failure context are part of the immutable snapshot for an attempt.
 
-`${{ profile.agentAction }}` is outside this runtime rendering boundary. The Profile provider
-resolves it to a concrete `uses` before Definition validation and stores the effective Action when
-the WorkflowRun starts. Runner never receives a Profile template expression.
+Runner never receives a Profile template expression: `uses` is a literal concrete Action name
+before dispatch.
 
 ## Rendering Boundary
 
@@ -40,9 +38,7 @@ does **not** happen during Server dispatch:
 Once dispatched, an attempt's context snapshot remains unchanged throughout that attempt. Later
 changes to Variables, Prompts, Profile Definition, or a Stage overlay affect only tasks not yet
 dispatched and later attempts, including retry, recovery continuation, and rerun-from-stage. They
-do not change an already dispatched attempt. The Profile's Project-scoped Agent Action override is
-the exception: a WorkflowRun fixes that binding when it starts, so an override change affects only
-new Runs. Later tasks and Stages in the active Run continue to use its bound concrete Action.
+do not change an already dispatched attempt.
 
 ## Template Expression Rules
 
@@ -70,8 +66,7 @@ Action input channel.
 
 `render: deferred` is declared on an input field in an Action manifest. Runner preserves a
 deferred field unchanged, including internal runtime `${{ ... }}`, through manifest validation and
-the Action call. Profile materialization happens earlier and still replaces
-`${{ profile.agentAction }}` in a deferred task default. Fields not declared deferred are
+the Action call. Fields not declared deferred are
 recursively expanded under the rules above, including nested objects and arrays. An Action can
 read retained internal templates only from a deferred field. No input channel exposes raw `with`,
 raw `expect`, a Variables resource, or the complete dispatch context.

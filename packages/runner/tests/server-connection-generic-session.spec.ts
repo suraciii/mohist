@@ -171,7 +171,7 @@ describe('ServerConnection.workflowAgentSessionCleanupTurn', () => {
   const body = {
     cleanupOperationId: 'cleanup-1',
     prompt: 'clean the worktree',
-    taskRunId: 'task-1.1',
+    actionAttemptId: 'task-1.1',
     workId: 'work-1',
     agentSessionId: 'agent-session-1',
     runtime: 'pi',

@@ -26,12 +26,12 @@ public readonly record struct WorkflowArtifactStoragePath
 
     public static WorkflowArtifactStoragePath ForArtifact(
         string workflowRunId,
-        string taskRunId,
+        string actionAttemptId,
         string artifactId,
         WorkflowArtifactStorageKind kind)
     {
         ValidateId(workflowRunId, nameof(workflowRunId));
-        ValidateId(taskRunId, nameof(taskRunId));
+        ValidateId(actionAttemptId, nameof(actionAttemptId));
         ValidateId(artifactId, nameof(artifactId));
 
         var relative = string.Join('/', new[]
@@ -39,7 +39,7 @@ public readonly record struct WorkflowArtifactStoragePath
             WorkflowArtifactStorageLayout.WorkflowSegment,
             workflowRunId,
             "tasks",
-            taskRunId,
+            actionAttemptId,
             "artifacts",
             artifactId,
         });
@@ -147,5 +147,5 @@ public readonly record struct WorkflowArtifactContainedPath
 
 public sealed record WorkflowArtifactStorageIdentity(
     string WorkflowRunId,
-    string TaskRunId,
+    string ActionAttemptId,
     string ArtifactId);

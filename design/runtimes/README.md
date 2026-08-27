@@ -20,8 +20,6 @@ Related boundaries:
 
 - [`../workflow/actions.md`](../workflow/actions.md) defines common Workflow
   Action dispatch and input/output contracts.
-- [`../workflow/profile.md`](../workflow/profile.md#agent-runtime-projection)
-  defines the read-side Runtime projection used by Workflow model selectors.
 - [`../../docs/actions/`](../../docs/actions/README.md) defines user-facing
   product contracts for each Action.
 

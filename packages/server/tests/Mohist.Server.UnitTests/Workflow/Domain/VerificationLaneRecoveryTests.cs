@@ -20,7 +20,7 @@ public sealed class VerificationLaneRecoveryTests
         var run = CreateRun(definition);
         var stage = run.CurrentStage();
         var failed = stage.Tasks[1];
-        failed.Status = TaskRunStatus.Failed;
+        failed.Status = WorkflowActionAttemptStatus.Failed;
         failed.WorkId = failed.Id;
         failed.WorkerId = "runner-1";
         failed.Lane = failed.Lane! with
@@ -60,7 +60,7 @@ public sealed class VerificationLaneRecoveryTests
         var helper = Assert.Single(stage.Tasks, task => task.DefinitionId == "recover:fix-ci");
         Assert.Null(helper.Lane);
         var retry = Assert.Single(stage.Tasks, task => task.DefinitionId == VerificationLaneCatalog.VerifyDotnet && task.Id != failed.Id);
-        Assert.Equal(TaskRunStatus.Pending, retry.Status);
+        Assert.Equal(WorkflowActionAttemptStatus.Pending, retry.Status);
         Assert.Equal(failed.Id, helper.CausedByFailedTaskId);
         Assert.Equal(failed.Id, retry.CausedByFailedTaskId);
         Assert.Equal(failed.Lane.ConfiguredBudgetMs, retry.Lane!.ConfiguredBudgetMs);
@@ -97,7 +97,7 @@ public sealed class VerificationLaneRecoveryTests
         var lane = authoritative[VerificationLaneCatalog.VerifyDotnet];
         Assert.Equal(VerificationLaneOutcome.Timeout, lane.Outcome);
         Assert.Equal("original timeout", lane.Detail);
-        Assert.Equal(retry.Id, lane.TaskRunId);
+        Assert.Equal(retry.Id, lane.ActionAttemptId);
         Assert.Equal(1, VerificationLaneGate.FirstNonPassingLaneIndex(run));
         Assert.False(VerificationLaneGate.CanAdvanceBuildStage(run));
     }
@@ -128,7 +128,7 @@ public sealed class VerificationLaneRecoveryTests
                 []),
         });
 
-    private static TaskRun LaneTask(string id, int attempt, VerificationLaneOutcome outcome) =>
+    private static WorkflowActionAttempt LaneTask(string id, int attempt, VerificationLaneOutcome outcome) =>
         new()
         {
             Id = $"{id}.{attempt}",
@@ -140,7 +140,7 @@ public sealed class VerificationLaneRecoveryTests
             {
                 ["timeout"] = JsonSerializer.SerializeToElement(120000),
             },
-            Status = TaskRunStatus.Pending,
+            Status = WorkflowActionAttemptStatus.Pending,
             Lane = new VerificationLaneAttempt(
                 id,
                 VerificationLaneCatalog.OrderOf(id),

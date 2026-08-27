@@ -3,11 +3,11 @@ approval:
     tasks:
     - id: apply-feedback
       title: Apply approval feedback
-      uses: mohist/opencode
+      uses: mohist/agent
       with:
+        name: mohist/builder
         session: ${{ stage.name }}
         prompt: ${{ prompts.apply-feedback }}
-        options: ${{ vars.agent }}
 recoveries:
   rebase-conflicts:
     budget: 2
@@ -16,11 +16,11 @@ recoveries:
       tasks:
       - id: recover:resolve-rebase-conflicts
         title: Resolve rebase conflicts
-        uses: mohist/opencode
+        uses: mohist/agent
         with:
+          name: mohist/builder
           session: check
           prompt: ${{ prompts.resolve-rebase-conflicts }}
-          options: ${{ vars.agent }}
       retrySelf: false
 stages:
 - stage: plan
@@ -34,11 +34,11 @@ stages:
       working-directory: REPOS/${{ repository.name }}
   - id: plan
     title: Plan the change
-    uses: mohist/opencode
+    uses: mohist/agent
     with:
+      name: mohist/planner
       session: plan
       prompt: ${{ prompts.plan }}
-      options: ${{ vars.agent }}
     expect:
       files:
       - path: PLANS/PLAN.md
@@ -71,9 +71,9 @@ stages:
     with:
       path: PLANS/tasks.json
       task:
-        uses: mohist/opencode
+        uses: mohist/agent
         with:
-          options: ${{ vars.agent }}
+          name: mohist/builder
   - id: build-health
     title: Health
     uses: core/script
@@ -88,15 +88,15 @@ stages:
         tasks:
         - id: recover:fix-build-health
           title: Fix build health
-          uses: mohist/opencode
+          uses: mohist/agent
           with:
+            name: mohist/builder
             session: build
             prompt: 'Fix the build-stage health failure reported by `git diff --check`.
 
               Keep changes focused on whitespace and patch formatting issues.
 
               '
-            options: ${{ vars.agent }}
         retrySelf: true
   - id: verify-install
     title: Install dependencies
@@ -111,11 +111,11 @@ stages:
       - tasks:
         - id: recover:fix-ci
           title: Fix CI verification
-          uses: mohist/opencode
+          uses: mohist/agent
           with:
+            name: mohist/builder
             session: build
             prompt: ${{ prompts.fix-ci }}
-            options: ${{ vars.agent }}
           expect:
             markers:
             - path: _output
@@ -140,11 +140,11 @@ stages:
       - tasks:
         - id: recover:fix-ci
           title: Fix CI verification
-          uses: mohist/opencode
+          uses: mohist/agent
           with:
+            name: mohist/builder
             session: build
             prompt: ${{ prompts.fix-ci }}
-            options: ${{ vars.agent }}
           expect:
             markers:
             - path: _output
@@ -165,11 +165,11 @@ stages:
       - tasks:
         - id: recover:fix-ci
           title: Fix CI verification
-          uses: mohist/opencode
+          uses: mohist/agent
           with:
+            name: mohist/builder
             session: build
             prompt: ${{ prompts.fix-ci }}
-            options: ${{ vars.agent }}
           expect:
             markers:
             - path: _output
@@ -190,11 +190,11 @@ stages:
       - tasks:
         - id: recover:fix-ci
           title: Fix CI verification
-          uses: mohist/opencode
+          uses: mohist/agent
           with:
+            name: mohist/builder
             session: build
             prompt: ${{ prompts.fix-ci }}
-            options: ${{ vars.agent }}
           expect:
             markers:
             - path: _output
@@ -215,11 +215,11 @@ stages:
       - tasks:
         - id: recover:fix-ci
           title: Fix CI verification
-          uses: mohist/opencode
+          uses: mohist/agent
           with:
+            name: mohist/builder
             session: build
             prompt: ${{ prompts.fix-ci }}
-            options: ${{ vars.agent }}
           expect:
             markers:
             - path: _output
@@ -240,11 +240,11 @@ stages:
       - tasks:
         - id: recover:fix-ci
           title: Fix CI verification
-          uses: mohist/opencode
+          uses: mohist/agent
           with:
+            name: mohist/builder
             session: build
             prompt: ${{ prompts.fix-ci }}
-            options: ${{ vars.agent }}
           expect:
             markers:
             - path: _output
@@ -264,11 +264,11 @@ stages:
       working-directory: REPOS/${{ repository.name }}
   - id: ai-review
     title: AI review
-    uses: mohist/opencode
+    uses: mohist/agent
     with:
+      name: mohist/reviewer
       session: check
       prompt: ${{ prompts.review }}
-      options: ${{ vars.agent }}
     expect:
       files:
       - path: PLANS/REVIEW.md
@@ -289,15 +289,15 @@ stages:
         tasks:
         - id: recover:fix-check-health
           title: Fix check health
-          uses: mohist/opencode
+          uses: mohist/agent
           with:
+            name: mohist/reviewer
             session: check
             prompt: 'Fix the check-stage health failure reported by `git diff --check`.
 
               Keep changes focused on whitespace and patch formatting issues.
 
               '
-            options: ${{ vars.agent }}
         retrySelf: true
   - id: merge-ready
     title: Merge ready
@@ -326,11 +326,11 @@ stages:
               tasks:
               - id: recover:resolve-rebase-conflicts
                 title: Resolve rebase conflicts
-                uses: mohist/opencode
+                uses: mohist/agent
                 with:
+                  name: mohist/reviewer
                   session: check
                   prompt: ${{ prompts.resolve-rebase-conflicts }}
-                  options: ${{ vars.agent }}
         retrySelf: true
   checks: []
 - stage: integrate
@@ -360,11 +360,11 @@ stages:
         tasks:
         - id: recover:resolve-rebase-conflicts
           title: Resolve rebase conflicts
-          uses: mohist/opencode
+          uses: mohist/agent
           with:
+            name: mohist/builder
             session: integrate
             prompt: ${{ prompts.resolve-rebase-conflicts }}
-            options: ${{ vars.agent }}
   - id: integrate:push
     title: Push changes
     uses: mohist/push
@@ -387,14 +387,14 @@ stages:
         tasks:
         - id: recover:fix-integrate-health
           title: Fix integrate health
-          uses: mohist/opencode
+          uses: mohist/agent
           with:
+            name: mohist/builder
             session: integrate
             prompt: 'Fix the integrate-stage health failure reported by `git diff --check`.
 
               Keep changes focused on whitespace and patch formatting issues.
 
               '
-            options: ${{ vars.agent }}
         retrySelf: true
   checks: []

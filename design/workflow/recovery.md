@@ -1,9 +1,7 @@
 # Task Recovery
 
-> **Status: legacy implementation.** Task-level recovery is defined against Workflow-owned Actions.
-> The target model ([`../agent-execution.md`](../agent-execution.md)) moves execution retry and
-> recovery into AgentJob; binding decided in
-> [`../decisions/workflow-agent-binding.md`](../decisions/workflow-agent-binding.md).
+> Workflow recovery policy decides which follow-up Action to schedule. AgentJob owns physical Agent
+> execution recovery; a recovery `mohist/agent` Action creates a new AgentJob.
 
 After task execution, the Runner executor matches `when` expressions against the
 `{ output, error }` result context, builds recovery tasks, and returns them through `addTasks` for
@@ -193,11 +191,11 @@ recoveries:
         tasks:
           - id: recover:resolve-rebase-conflicts
             title: Resolve rebase conflicts
-            uses: mohist/opencode
+            uses: mohist/agent
             with:
+              name: mohist/builder
               session: check
               prompt: ${{ prompts.resolve-rebase-conflicts }}
-              options: ${{ vars.agent }}
         retrySelf: false
 ```
 

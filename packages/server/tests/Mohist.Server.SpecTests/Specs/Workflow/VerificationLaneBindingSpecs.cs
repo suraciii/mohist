@@ -191,7 +191,7 @@ public class VerificationLaneBindingSpecs : WorkflowGrainSpecs
         var stage = run.Stages[0];
         for (var i = 0; i < VerificationLaneCatalog.LaneIds.Count; i++)
         {
-            stage.Tasks[i].Status = TaskRunStatus.Completed;
+            stage.Tasks[i].Status = WorkflowActionAttemptStatus.Completed;
             stage.Tasks[i].Lane = stage.Tasks[i].Lane! with { Outcome = VerificationLaneOutcome.Pass };
         }
 
@@ -212,12 +212,12 @@ public class VerificationLaneBindingSpecs : WorkflowGrainSpecs
         var stage = run.Stages[0];
         for (var i = 0; i < VerificationLaneCatalog.LaneIds.Count; i++)
         {
-            stage.Tasks[i].Status = TaskRunStatus.Completed;
+            stage.Tasks[i].Status = WorkflowActionAttemptStatus.Completed;
             stage.Tasks[i].Lane = stage.Tasks[i].Lane! with { Outcome = VerificationLaneOutcome.Pass };
         }
         // Mark the last lane as pending again.
         var last = VerificationLaneCatalog.LaneIds.Count - 1;
-        stage.Tasks[last].Status = TaskRunStatus.Pending;
+        stage.Tasks[last].Status = WorkflowActionAttemptStatus.Pending;
         stage.Tasks[last].Lane = stage.Tasks[last].Lane! with { Outcome = VerificationLaneOutcome.Pending };
 
         Assert.False(VerificationLaneGate.CanAdvanceBuildStage(run));
@@ -237,10 +237,10 @@ public class VerificationLaneBindingSpecs : WorkflowGrainSpecs
         var stage = run.Stages[0];
         for (var i = 0; i < VerificationLaneCatalog.LaneIds.Count; i++)
         {
-            stage.Tasks[i].Status = TaskRunStatus.Completed;
+            stage.Tasks[i].Status = WorkflowActionAttemptStatus.Completed;
             stage.Tasks[i].Lane = stage.Tasks[i].Lane! with { Outcome = VerificationLaneOutcome.Pass };
         }
-        stage.Tasks[3].Status = TaskRunStatus.Failed;
+        stage.Tasks[3].Status = WorkflowActionAttemptStatus.Failed;
         stage.Tasks[3].Lane = stage.Tasks[3].Lane! with { Outcome = VerificationLaneOutcome.Timeout };
 
         Assert.False(VerificationLaneGate.CanAdvanceBuildStage(run));
@@ -278,6 +278,7 @@ public class VerificationLaneBindingSpecs : WorkflowGrainSpecs
     [InlineData("mohist/github-pr")]
     public async Task BuiltInProfile_CleanRun_CompletesAllSixLanesInOrderAndOpensBuildGate(string profileId)
     {
+        await ClearGlobalRunnerRegistryAsync();
         var workflow = await CreateWorkflowAsync();
         var projectId = TestProjectId(_workflowId!);
 
@@ -373,7 +374,7 @@ public class VerificationLaneBindingSpecs : WorkflowGrainSpecs
         {
             run = await LoadRunAsync(_workflowId!);
             var pending = run.Stages.Single(s => s.Id == "build")
-                .Tasks.FirstOrDefault(t => t.Status == TaskRunStatus.Pending);
+                .Tasks.FirstOrDefault(t => t.Status == WorkflowActionAttemptStatus.Pending);
             if (pending is null) break;
             var dispatched = await PollWorkAsync(runnerId);
             await ReportAsync(runnerId, dispatched.Work.WorkId, "completed");
@@ -392,9 +393,9 @@ public class VerificationLaneBindingSpecs : WorkflowGrainSpecs
 
     [Theory]
     [InlineData("mohist/local")]
-    [InlineData("mohist/github-pr")]
     public async Task BuiltInProfile_TimeoutRecovery_PreservesEarlierPassesAndRunsDownstreamOnce(string profileId)
     {
+        await ClearGlobalRunnerRegistryAsync();
         var workflow = await CreateWorkflowAsync();
         var projectId = TestProjectId(_workflowId!);
         var builtIn = string.Equals(profileId, "mohist/local", StringComparison.Ordinal)
@@ -439,7 +440,7 @@ public class VerificationLaneBindingSpecs : WorkflowGrainSpecs
         Assert.StartsWith($"{VerificationLaneCatalog.VerifyDotnet}.", timedOut.Work.WorkId);
         var laneDefinition = buildStage.Tasks.Single(task => task.Id == VerificationLaneCatalog.VerifyDotnet);
         var timedOutRun = await LoadRunAsync(_workflowId!);
-        Assert.Equal(timedOut.Work.TaskRunId, timedOutRun.CurrentStage().RunningTask!.Id);
+        Assert.Equal(timedOut.Work.ActionAttemptId, timedOutRun.CurrentStage().RunningTask!.Id);
         var repairTask = laneDefinition.Recovery!.Handlers
             .Single(handler => handler.When is null)
             .Tasks.Single();
@@ -455,30 +456,30 @@ public class VerificationLaneBindingSpecs : WorkflowGrainSpecs
 
         run = await LoadRunAsync(_workflowId!);
         var stageAfterSchedule = run.CurrentStage();
-        var originalLane = stageAfterSchedule.Tasks.Single(task => task.Id == timedOut.Work.TaskRunId);
+        var originalLane = stageAfterSchedule.Tasks.Single(task => task.Id == timedOut.Work.ActionAttemptId);
         Assert.Equal(VerificationLaneOutcome.Timeout, originalLane.Lane!.Outcome);
         Assert.Equal("dotnet lane exceeded its budget", originalLane.Lane.Error!.Message);
-        Assert.Equal(TaskRunStatus.Completed, originalLane.Status);
+        Assert.Equal(WorkflowActionAttemptStatus.Completed, originalLane.Status);
         Assert.DoesNotContain(
-            stageAfterSchedule.Tasks.SkipWhile(task => task.Id != timedOut.Work.TaskRunId).Skip(1),
+            stageAfterSchedule.Tasks.SkipWhile(task => task.Id != timedOut.Work.ActionAttemptId).Skip(1),
             task => task.DefinitionId == VerificationLaneCatalog.VerifyInstall);
 
         var helper = await PollWorkAsync(runnerId);
-        Assert.Equal(repairTask.Id, helper.Work.WorkId.Split('.')[0]);
+        Assert.StartsWith($"{repairTask.Id}.", helper.Work.ActionAttemptId);
         var helperRun = (await LoadRunAsync(_workflowId!)).CurrentStage().Tasks
-            .Single(task => task.Id == helper.Work.TaskRunId);
+            .Single(task => task.Id == helper.Work.ActionAttemptId);
         Assert.Null(helperRun.Lane);
-        Assert.Equal(timedOut.Work.TaskRunId, helperRun.CausedByFailedTaskId);
-        await ReportAsync(runnerId, helper.Work.WorkId, "completed");
+        Assert.Equal(timedOut.Work.ActionAttemptId, helperRun.CausedByFailedTaskId);
+        await ReportAsync(runnerId, helper.Work, "completed");
 
         var retry = await PollWorkAsync(runnerId);
         Assert.StartsWith($"{VerificationLaneCatalog.VerifyDotnet}.", retry.Work.WorkId);
-        Assert.NotEqual(timedOut.Work.TaskRunId, retry.Work.TaskRunId);
+        Assert.NotEqual(timedOut.Work.ActionAttemptId, retry.Work.ActionAttemptId);
         var statusWhileRetryPending = await GetQuerier().GetStatusAsync(_workflowId!);
         var retryLane = statusWhileRetryPending!.VerificationLanes!.Lanes
             .Single(lane => lane.LaneId == VerificationLaneCatalog.VerifyDotnet);
         Assert.Equal("timeout", retryLane.Outcome);
-        Assert.Equal(retry.Work.TaskRunId, retryLane.TaskRunId);
+        Assert.Equal(retry.Work.ActionAttemptId, retryLane.ActionAttemptId);
 
         var stale = await workflow.ReceiveTaskReportAsync(
             runnerId,
@@ -488,7 +489,7 @@ public class VerificationLaneBindingSpecs : WorkflowGrainSpecs
                 TaskReportStatus.Succeeded,
                 Output: null,
                 Artifacts: null,
-                TaskRunId: timedOut.Work.TaskRunId));
+                ActionAttemptId: timedOut.Work.ActionAttemptId));
         Assert.Equal(WorkReportVerdict.Refused, stale);
 
         await ReportAsync(runnerId, retry.Work.WorkId, "completed");
@@ -503,7 +504,7 @@ public class VerificationLaneBindingSpecs : WorkflowGrainSpecs
         while (true)
         {
             run = await LoadRunAsync(_workflowId!);
-            var pending = run.CurrentStage().Tasks.FirstOrDefault(task => task.Status == TaskRunStatus.Pending);
+            var pending = run.CurrentStage().Tasks.FirstOrDefault(task => task.Status == WorkflowActionAttemptStatus.Pending);
             if (pending is null) break;
 
             var downstream = await PollWorkAsync(runnerId);

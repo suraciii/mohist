@@ -14,7 +14,7 @@ import type {
   WorkflowProfileInfo,
 } from '../model/types'
 import { isActiveUpdateStatus, isSupersededStatus, isTerminalUpdateStatus } from '../model/updateOutcome'
-import { includesWorkflowProfileId, workflowProfileIdEquals } from '../model/workflowProfileIds'
+import { includesWorkflowProfileId } from '../model/workflowProfileIds'
 import { useProject } from '../../project/@x/project-context'
 import type { OpencodeModelVariants, ProjectDefaultWorkflowProfile } from './client'
 import { DEFAULT_AGENT_RUNTIME, isAgentRuntime, type AgentRuntime } from './client'
@@ -37,7 +37,6 @@ import {
   getWorkflowProfile,
   getWorkflowProfiles,
   getModels,
-  patchWorkflowProfileAgentAction,
   setLogLevel,
   setModel,
   setOpencodeModel,
@@ -365,14 +364,6 @@ export function useAllWorkflowProfiles() {
   return useWorkflowProfiles()
 }
 
-export function getWorkflowProfileAgentRuntime(
-  profiles: WorkflowProfileInfo[] | undefined,
-  profileId: string | null | undefined,
-): AgentRuntime | null {
-  if (!profileId) return null
-  return profiles?.find((profile) => workflowProfileIdEquals(profile.id, profileId))?.agentRuntime ?? null
-}
-
 export type WorkflowProfileFetcher = typeof getWorkflowProfile
 
 export function useWorkflowProfile(id: string | null, fetcher: WorkflowProfileFetcher = getWorkflowProfile) {
@@ -395,33 +386,6 @@ export function useActionCatalog() {
     queryFn: () => getActionCatalog(projectId!),
     enabled: !!projectId,
   })
-}
-
-export function setWorkflowProfileAgentActionMutationOptions(
-  projectId: string | null | undefined,
-  queryClient: InvalidationClient,
-) {
-  return {
-    mutationFn: ({ profileId, agentAction }: { profileId: string; agentAction: string | null }) =>
-      patchWorkflowProfileAgentAction(projectId!, profileId, agentAction),
-    onSuccess: (_profile: WorkflowProfileInfo, { profileId }: { profileId: string; agentAction: string | null }) => {
-      queryClient.invalidateQueries({ queryKey: ['workflow-profiles', projectId] })
-      queryClient.invalidateQueries({ queryKey: ['workflow-profile', projectId, profileId] })
-      queryClient.invalidateQueries({ queryKey: ['opencode-model-ids'] })
-      toast.success('Agent Action updated')
-    },
-    onError: (err: Error) => {
-      toast.error(err.message || 'Failed to update Agent Action')
-    },
-  }
-}
-
-export function useSetWorkflowProfileAgentAction() {
-  const queryClient = useQueryClient()
-  const { projectId } = useProject()
-  return useMutation<WorkflowProfileInfo, Error, { profileId: string; agentAction: string | null }>(
-    setWorkflowProfileAgentActionMutationOptions(projectId, queryClient),
-  )
 }
 
 export function projectDefaultWorkflowProfileQueryOptions(projectId: string | null | undefined) {

@@ -64,7 +64,7 @@ public class CliSessionCommandSpecs
         Assert.DoesNotContain("--text-stdin", stdout, StringComparison.Ordinal);
         Assert.Contains("joins an active turn", stdout, StringComparison.Ordinal);
         Assert.Contains("user-initiated turn when idle", stdout, StringComparison.Ordinal);
-        Assert.Contains("without creating a TaskRun or AgentJob", stdout, StringComparison.Ordinal);
+        Assert.Contains("without creating a WorkflowActionAttempt or AgentJob", stdout, StringComparison.Ordinal);
     }
 
     [Fact]

@@ -16,9 +16,6 @@ internal sealed class WorkflowReadModel
         if (string.IsNullOrWhiteSpace(workId)) return null;
         var run = _owner.RunOrNull;
         if (run is null) return null;
-        // A blocked Agent settlement has released its active-work lease; the
-        // attempt must not be presented as active work after the deadline.
-        if (run.HasBlockedAgentResult()) return null;
 
         var currentStage = run.CurrentStage();
         if (currentStage is null) return null;
@@ -34,7 +31,7 @@ internal sealed class WorkflowReadModel
             WorkId: workId,
             WorkType: activeTask is not null ? "task" : "checks",
             Stage: stage,
-            TaskRunId: activeTask?.Id ?? WorkflowRunExtensions.ChecksWorkIdFor(stage),
+            ActionAttemptId: activeTask?.Id ?? WorkflowRunExtensions.ChecksWorkIdFor(stage),
             Title: activeTask?.Title ?? "Stage checks",
             ProjectId: string.IsNullOrWhiteSpace(projectId) ? null : projectId,
             IssueNumber: _owner.GetIssueNumber());

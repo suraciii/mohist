@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import type { WorkflowRunSession } from '../../../entities/coder-session/model/types'
 import {
   deriveMilestones,
-  isInlineAgentTask,
+  isAgentActionTask,
   isTaskLogMilestone,
   mergeTimelineRows,
   serializeMilestoneForExport,
@@ -36,54 +36,81 @@ function sessionFixture(overrides: Partial<WorkflowRunSession> = {}): WorkflowRu
   }
 }
 
-describe('isInlineAgentTask', () => {
-  it('returns true when origin.uses is "mohist/opencode" and sessionName is non-empty', () => {
-    expect(isInlineAgentTask({ origin: { uses: 'mohist/opencode' }, sessionName: 'plan-1', classification: 'UserFacing' })).toBe(true)
+describe('isAgentActionTask', () => {
+  it('returns true when origin.uses is "mohist/agent" and sessionName is non-empty', () => {
+    expect(
+      isAgentActionTask({ origin: { uses: 'mohist/agent' }, sessionName: 'plan-1', classification: 'UserFacing' }),
+    ).toBe(true)
   })
 
-  it('returns true for the Pi Workflow Action when sessionName is non-empty', () => {
-    expect(isInlineAgentTask({ origin: { uses: 'mohist/pi' }, sessionName: 'plan-1', classification: 'UserFacing' })).toBe(true)
+  it('returns false for removed runtime Actions (mohist/opencode, mohist/pi) even when sessionName is non-empty', () => {
+    expect(
+      isAgentActionTask({ origin: { uses: 'mohist/opencode' }, sessionName: 'plan-1', classification: 'UserFacing' }),
+    ).toBe(false)
+    expect(
+      isAgentActionTask({ origin: { uses: 'mohist/pi' }, sessionName: 'plan-1', classification: 'UserFacing' }),
+    ).toBe(false)
   })
 
   it('does not require classification for eligibility; classification is retained context only', () => {
-    expect(isInlineAgentTask({ origin: { uses: 'mohist/opencode' }, sessionName: 'plan-1', classification: undefined })).toBe(true)
-    expect(isInlineAgentTask({ origin: { uses: 'mohist/opencode' }, sessionName: 'plan-1', classification: null })).toBe(true)
-    expect(isInlineAgentTask({ origin: { uses: 'mohist/opencode' }, sessionName: 'plan-1', classification: '' })).toBe(true)
+    expect(
+      isAgentActionTask({ origin: { uses: 'mohist/agent' }, sessionName: 'plan-1', classification: undefined }),
+    ).toBe(true)
+    expect(isAgentActionTask({ origin: { uses: 'mohist/agent' }, sessionName: 'plan-1', classification: null })).toBe(
+      true,
+    )
+    expect(isAgentActionTask({ origin: { uses: 'mohist/agent' }, sessionName: 'plan-1', classification: '' })).toBe(
+      true,
+    )
   })
 
   it('returns false for ops uses (mohist/rebase, core/process) even when sessionName is present', () => {
-    expect(isInlineAgentTask({ origin: { uses: 'mohist/rebase' }, sessionName: 'plan-1', classification: 'UserFacing' })).toBe(false)
-    expect(isInlineAgentTask({ origin: { uses: 'core/process' }, sessionName: 'plan-1', classification: 'UserFacing' })).toBe(false)
+    expect(
+      isAgentActionTask({ origin: { uses: 'mohist/rebase' }, sessionName: 'plan-1', classification: 'UserFacing' }),
+    ).toBe(false)
+    expect(
+      isAgentActionTask({ origin: { uses: 'core/process' }, sessionName: 'plan-1', classification: 'UserFacing' }),
+    ).toBe(false)
   })
 
   it('returns false when origin.uses is the agent action but sessionName is empty', () => {
-    expect(isInlineAgentTask({ origin: { uses: 'mohist/opencode' }, sessionName: '', classification: 'UserFacing' })).toBe(false)
-    expect(isInlineAgentTask({ origin: { uses: 'mohist/opencode' }, sessionName: '   ', classification: 'UserFacing' })).toBe(false)
+    expect(isAgentActionTask({ origin: { uses: 'mohist/agent' }, sessionName: '', classification: 'UserFacing' })).toBe(
+      false,
+    )
+    expect(
+      isAgentActionTask({ origin: { uses: 'mohist/agent' }, sessionName: '   ', classification: 'UserFacing' }),
+    ).toBe(false)
   })
 
   it('returns false when sessionName is missing entirely even with the agent uses', () => {
-    expect(isInlineAgentTask({ origin: { uses: 'mohist/opencode' }, sessionName: null, classification: 'UserFacing' })).toBe(false)
-    expect(isInlineAgentTask({ origin: { uses: 'mohist/opencode' }, classification: 'UserFacing' })).toBe(false)
+    expect(
+      isAgentActionTask({ origin: { uses: 'mohist/agent' }, sessionName: null, classification: 'UserFacing' }),
+    ).toBe(false)
+    expect(isAgentActionTask({ origin: { uses: 'mohist/agent' }, classification: 'UserFacing' })).toBe(false)
   })
 
   it('returns false when origin.uses is non-string or missing', () => {
-    expect(isInlineAgentTask({ origin: null, sessionName: 'plan-1', classification: 'UserFacing' })).toBe(false)
-    expect(isInlineAgentTask({ origin: {}, sessionName: 'plan-1', classification: 'UserFacing' })).toBe(false)
-    expect(isInlineAgentTask({ origin: { uses: undefined }, sessionName: 'plan-1', classification: 'UserFacing' })).toBe(false)
+    expect(isAgentActionTask({ origin: null, sessionName: 'plan-1', classification: 'UserFacing' })).toBe(false)
+    expect(isAgentActionTask({ origin: {}, sessionName: 'plan-1', classification: 'UserFacing' })).toBe(false)
+    expect(
+      isAgentActionTask({ origin: { uses: undefined }, sessionName: 'plan-1', classification: 'UserFacing' }),
+    ).toBe(false)
   })
 
   it('returns false for empty/null/undefined input', () => {
-    expect(isInlineAgentTask(null)).toBe(false)
-    expect(isInlineAgentTask(undefined)).toBe(false)
+    expect(isAgentActionTask(null)).toBe(false)
+    expect(isAgentActionTask(undefined)).toBe(false)
   })
 
   it('never reads workType (workType is not a task-level field)', () => {
     const inputs: unknown[] = [
-      { origin: { uses: 'mohist/opencode' }, sessionName: 'plan-1', classification: 'UserFacing', workType: 'ops' },
+      { origin: { uses: 'mohist/agent' }, sessionName: 'plan-1', classification: 'UserFacing', workType: 'ops' },
       { origin: { uses: 'mohist/rebase' }, sessionName: 'plan-1', classification: 'UserFacing', workType: 'agent' },
     ]
     for (const input of inputs) {
-      expect(isInlineAgentTask(input as never)).toBe(['mohist/opencode', 'mohist/pi'].includes((input as { origin?: { uses?: string } }).origin?.uses ?? ''))
+      expect(isAgentActionTask(input as never)).toBe(
+        (input as { origin?: { uses?: string } }).origin?.uses === 'mohist/agent',
+      )
     }
   })
 })
@@ -95,10 +122,12 @@ describe('deriveMilestones', () => {
   })
 
   it('emits the model-bound milestone from eventSummary.resolvedModel with startedAt timestamp', () => {
-    const out = deriveMilestones(sessionFixture({
-      startedAt: '2026-06-15T10:01:00.000Z',
-      eventSummary: { resolvedModel: 'minimax/MiniMax-M3' },
-    }))
+    const out = deriveMilestones(
+      sessionFixture({
+        startedAt: '2026-06-15T10:01:00.000Z',
+        eventSummary: { resolvedModel: 'minimax/MiniMax-M3' },
+      }),
+    )
     expect(out).toHaveLength(1)
     expect(out[0]).toEqual({
       kind: 'model-bound',
@@ -109,20 +138,28 @@ describe('deriveMilestones', () => {
   })
 
   it('falls back to createdAt when startedAt is null but resolvedModel is set', () => {
-    const out = deriveMilestones(sessionFixture({
-      startedAt: null,
-      createdAt: '2026-06-15T10:00:00.000Z',
-      eventSummary: { resolvedModel: 'mohist/coder-agent' },
-    }))
-    expect(out[0]).toMatchObject({ kind: 'model-bound', timestamp: '2026-06-15T10:00:00.000Z', detail: 'mohist/coder-agent' })
+    const out = deriveMilestones(
+      sessionFixture({
+        startedAt: null,
+        createdAt: '2026-06-15T10:00:00.000Z',
+        eventSummary: { resolvedModel: 'mohist/coder-agent' },
+      }),
+    )
+    expect(out[0]).toMatchObject({
+      kind: 'model-bound',
+      timestamp: '2026-06-15T10:00:00.000Z',
+      detail: 'mohist/coder-agent',
+    })
   })
 
   it('falls back to session.model when resolvedModel is missing', () => {
-    const out = deriveMilestones(sessionFixture({
-      model: 'minimax/MiniMax-M3',
-      startedAt: '2026-06-15T10:01:00.000Z',
-      eventSummary: {},
-    }))
+    const out = deriveMilestones(
+      sessionFixture({
+        model: 'minimax/MiniMax-M3',
+        startedAt: '2026-06-15T10:01:00.000Z',
+        eventSummary: {},
+      }),
+    )
     expect(out[0]).toMatchObject({ detail: 'minimax/MiniMax-M3' })
   })
 
@@ -131,12 +168,16 @@ describe('deriveMilestones', () => {
     // emitted, and only when activity has dropped back from `active`. The
     // timestamp comes from lastDataAt (falling back to createdAt), and the
     // detail is the activity value.
-    expect(deriveMilestones(sessionFixture({
-      model: null,
-      eventSummary: {},
-      activity: 'idle',
-      lastDataAt: '2026-06-15T10:02:00.000Z',
-    }))).toEqual([
+    expect(
+      deriveMilestones(
+        sessionFixture({
+          model: null,
+          eventSummary: {},
+          activity: 'idle',
+          lastDataAt: '2026-06-15T10:02:00.000Z',
+        }),
+      ),
+    ).toEqual([
       {
         kind: 'session-ended',
         timestamp: '2026-06-15T10:02:00.000Z',
@@ -147,17 +188,23 @@ describe('deriveMilestones', () => {
   })
 
   it('omits the model-bound milestone when resolvedModel is an empty/whitespace string and no model fallback exists', () => {
-    expect(deriveMilestones(sessionFixture({
-      model: null,
-      eventSummary: { resolvedModel: '   ' },
-    }))).toEqual([])
+    expect(
+      deriveMilestones(
+        sessionFixture({
+          model: null,
+          eventSummary: { resolvedModel: '   ' },
+        }),
+      ),
+    ).toEqual([])
   })
 
   it('emits the session-ended milestone for an idle session, using lastDataAt as the timestamp and the activity as the detail', () => {
-    const out = deriveMilestones(sessionFixture({
-      activity: 'idle',
-      lastDataAt: '2026-06-15T10:02:00.000Z',
-    }))
+    const out = deriveMilestones(
+      sessionFixture({
+        activity: 'idle',
+        lastDataAt: '2026-06-15T10:02:00.000Z',
+      }),
+    )
     expect(out).toHaveLength(1)
     expect(out[0]).toEqual({
       kind: 'session-ended',
@@ -168,11 +215,13 @@ describe('deriveMilestones', () => {
   })
 
   it('falls back to createdAt for the session-ended timestamp when lastDataAt is missing', () => {
-    const out = deriveMilestones(sessionFixture({
-      activity: 'idle',
-      createdAt: '2026-06-15T10:00:00.000Z',
-      lastDataAt: null,
-    }))
+    const out = deriveMilestones(
+      sessionFixture({
+        activity: 'idle',
+        createdAt: '2026-06-15T10:00:00.000Z',
+        lastDataAt: null,
+      }),
+    )
     expect(out[0]).toMatchObject({ kind: 'session-ended', timestamp: '2026-06-15T10:00:00.000Z' })
   })
 
@@ -181,11 +230,13 @@ describe('deriveMilestones', () => {
     // (a session whose state can't be resolved) rather than by a terminal
     // `status: 'failed'`. The milestone detail carries only the activity
     // value; failureReason is no longer appended to the milestone detail.
-    const out = deriveMilestones(sessionFixture({
-      activity: 'unknown',
-      lastDataAt: '2026-06-15T10:02:00.000Z',
-      failureReason: 'something blew up\nwith a newline',
-    }))
+    const out = deriveMilestones(
+      sessionFixture({
+        activity: 'unknown',
+        lastDataAt: '2026-06-15T10:02:00.000Z',
+        failureReason: 'something blew up\nwith a newline',
+      }),
+    )
     expect(out[0]).toEqual({
       kind: 'session-ended',
       timestamp: '2026-06-15T10:02:00.000Z',
@@ -199,11 +250,13 @@ describe('deriveMilestones', () => {
     // Issue 484: `idle` (execution ended cleanly) is not a failure; only the
     // unconfirmable `unknown` activity triggers the failed styling. The legacy
     // failureReason-text gating no longer applies.
-    const out = deriveMilestones(sessionFixture({
-      activity: 'idle',
-      lastDataAt: '2026-06-15T10:02:00.000Z',
-      failureReason: '',
-    }))
+    const out = deriveMilestones(
+      sessionFixture({
+        activity: 'idle',
+        lastDataAt: '2026-06-15T10:02:00.000Z',
+        failureReason: '',
+      }),
+    )
     expect(out[0]).not.toHaveProperty('failed', true)
     expect(out[0].detail).toBe('idle')
   })
@@ -211,31 +264,39 @@ describe('deriveMilestones', () => {
   it('returns both milestones when a session that was active has returned to idle', () => {
     // Issue 484: model-bound is anchored on startedAt; session-ended ("Session
     // idle") fires once activity drops back from `active` to `idle`.
-    const out = deriveMilestones(sessionFixture({
-      startedAt: '2026-06-15T10:01:00.000Z',
-      activity: 'idle',
-      lastDataAt: '2026-06-15T10:02:00.000Z',
-      eventSummary: { resolvedModel: 'minimax/MiniMax-M3' },
-    }))
+    const out = deriveMilestones(
+      sessionFixture({
+        startedAt: '2026-06-15T10:01:00.000Z',
+        activity: 'idle',
+        lastDataAt: '2026-06-15T10:02:00.000Z',
+        eventSummary: { resolvedModel: 'minimax/MiniMax-M3' },
+      }),
+    )
     expect(out.map((m) => m.kind)).toEqual(['model-bound', 'session-ended'])
   })
 
   it('returns [] when neither anchor is present', () => {
-    expect(deriveMilestones(sessionFixture({
-      startedAt: null,
-      completedAt: null,
-      model: null,
-      eventSummary: {},
-    }))).toEqual([])
+    expect(
+      deriveMilestones(
+        sessionFixture({
+          startedAt: null,
+          completedAt: null,
+          model: null,
+          eventSummary: {},
+        }),
+      ),
+    ).toEqual([])
   })
 
   it('omits the session-ended milestone when completedAt is missing (only the model-bound remains)', () => {
-    const out = deriveMilestones(sessionFixture({
-      startedAt: '2026-06-15T10:01:00.000Z',
-      completedAt: null,
-      model: 'minimax/MiniMax-M3',
-      eventSummary: { resolvedModel: 'minimax/MiniMax-M3' },
-    }))
+    const out = deriveMilestones(
+      sessionFixture({
+        startedAt: '2026-06-15T10:01:00.000Z',
+        completedAt: null,
+        model: 'minimax/MiniMax-M3',
+        eventSummary: { resolvedModel: 'minimax/MiniMax-M3' },
+      }),
+    )
     expect(out.map((m) => m.kind)).toEqual(['model-bound'])
   })
 })
@@ -247,9 +308,7 @@ describe('mergeTimelineRows', () => {
         { seq: 1, timestamp: '2026-06-15T10:00:00.000Z', source: 'action:rebase', text: 'before' },
         { seq: 2, timestamp: '2026-06-15T10:02:00.000Z', source: 'action:rebase', text: 'after' },
       ],
-      [
-        { kind: 'model-bound' as const, timestamp: '2026-06-15T10:01:00.000Z', label: 'Model bound', detail: 'foo' },
-      ],
+      [{ kind: 'model-bound' as const, timestamp: '2026-06-15T10:01:00.000Z', label: 'Model bound', detail: 'foo' }],
     )
     expect(rows.map((row) => (isTaskLogMilestone(row) ? row.kind : row.text))).toEqual([
       'before',
@@ -265,7 +324,12 @@ describe('mergeTimelineRows', () => {
         { seq: 2, timestamp: '2026-06-15T10:00:00.000Z', source: 'action:rebase', text: 'seq-2-early-clock' },
       ],
       [
-        { kind: 'session-ended' as const, timestamp: '2026-06-15T10:04:00.000Z', label: 'Session ended', detail: 'completed' },
+        {
+          kind: 'session-ended' as const,
+          timestamp: '2026-06-15T10:04:00.000Z',
+          label: 'Session ended',
+          detail: 'completed',
+        },
       ],
     )
     const rendered = rows.map((row) => (isTaskLogMilestone(row) ? row.kind : row.text))
@@ -293,7 +357,12 @@ describe('mergeTimelineRows', () => {
         { seq: 1, timestamp: '2026-06-15T10:01:00.000Z', source: 'action:rebase', text: 'a' },
       ],
       [
-        { kind: 'session-ended' as const, timestamp: '2026-06-15T10:01:00.000Z', label: 'Session ended', detail: 'completed' },
+        {
+          kind: 'session-ended' as const,
+          timestamp: '2026-06-15T10:01:00.000Z',
+          label: 'Session ended',
+          detail: 'completed',
+        },
       ],
     )
     expect(rows[0]).toMatchObject({ seq: 1 })
@@ -311,12 +380,14 @@ describe('isTaskLogMilestone', () => {
 
 describe('serializeMilestoneForExport', () => {
   it('formats as "<timestamp> [session] <label>: <detail>"', () => {
-    expect(serializeMilestoneForExport({
-      kind: 'session-ended',
-      timestamp: '2026-06-15T10:02:00.000Z',
-      label: 'Session ended',
-      detail: 'failed\nboom',
-      failed: true,
-    })).toBe('2026-06-15T10:02:00.000Z [session] Session ended: failed\nboom')
+    expect(
+      serializeMilestoneForExport({
+        kind: 'session-ended',
+        timestamp: '2026-06-15T10:02:00.000Z',
+        label: 'Session ended',
+        detail: 'failed\nboom',
+        failed: true,
+      }),
+    ).toBe('2026-06-15T10:02:00.000Z [session] Session ended: failed\nboom')
   })
 })

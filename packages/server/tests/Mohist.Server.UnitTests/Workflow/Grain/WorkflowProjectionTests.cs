@@ -54,13 +54,13 @@ public class WorkflowProjectionTests
                     Status = StageRunStatus.Running,
                     Tasks =
                     [
-                        new TaskRun
+                        new WorkflowActionAttempt
                         {
                             Id = "proposal.1",
                             DefinitionId = "proposal",
                             Attempt = 1,
                             Title = "Generate proposal",
-                            Status = TaskRunStatus.Completed,
+                            Status = WorkflowActionAttemptStatus.Completed,
                             Uses = "mohist/opencode",
                             WithInput = JsonSerializer.Deserialize<Dictionary<string, JsonElement?>>("""
                                 {"session": "plan"}
@@ -68,7 +68,7 @@ public class WorkflowProjectionTests
                             ExpectInput = JsonSerializer.Deserialize<Dictionary<string, JsonElement?>>("""
                                 {"files": [{"path": "proposal.md"}, {"path": "design.md"}, {"path": "tasks.json"}]}
                                 """),
-                            RequiredFiles = TaskRunExtensions.ExtractRequiredFiles(
+                            RequiredFiles = WorkflowActionAttemptExtensions.ExtractRequiredFiles(
                                 JsonSerializer.Deserialize<Dictionary<string, JsonElement?>>("""
                                     {"files": [{"path": "proposal.md"}, {"path": "design.md"}, {"path": "tasks.json"}]}
                                     """)),
@@ -108,13 +108,13 @@ public class WorkflowProjectionTests
                     Status = StageRunStatus.Running,
                     Tasks =
                     [
-                        new TaskRun
+                        new WorkflowActionAttempt
                         {
                             Id = "build.1",
                             DefinitionId = "build",
                             Attempt = 1,
                             Title = "Build",
-                            Status = TaskRunStatus.Running,
+                            Status = WorkflowActionAttemptStatus.Running,
                             Uses = "core/script",
                             RequiredFiles = null,
                             Classification = TaskClassification.Orchestration
@@ -142,13 +142,13 @@ public class WorkflowProjectionTests
             Status = StageRunStatus.Running,
             Tasks =
             [
-                new TaskRun
+                new WorkflowActionAttempt
                 {
                     Id = "proposal.1",
                     DefinitionId = "proposal",
                     Attempt = 1,
                     Title = "Generate proposal",
-                    Status = TaskRunStatus.Completed,
+                    Status = WorkflowActionAttemptStatus.Completed,
                     Uses = "mohist/opencode",
                     RequiredFiles =
                     [
@@ -185,13 +185,13 @@ public class WorkflowProjectionTests
     }
 
     [Fact]
-    public void TaskRunExtensions_ExtractRequiredFiles_PreservesMarkers()
+    public void WorkflowActionAttemptExtensions_ExtractRequiredFiles_PreservesMarkers()
     {
         var expect = JsonSerializer.Deserialize<Dictionary<string, JsonElement?>>("""
             {"files": [{"path": "design.md", "markers": ["<promise>PASS</promise>", "<promise>REVIEW</promise>"]}]}
             """);
 
-        var result = TaskRunExtensions.ExtractRequiredFiles(expect);
+        var result = WorkflowActionAttemptExtensions.ExtractRequiredFiles(expect);
 
         Assert.Single(result);
         var markers = result[0].Markers;
@@ -371,13 +371,13 @@ public class WorkflowProjectionTests
                     Status = StageRunStatus.Running,
                     Tasks =
                     [
-                        new TaskRun
+                        new WorkflowActionAttempt
                         {
                             Id = "proposal.1",
                             DefinitionId = "proposal",
                             Attempt = 1,
                             Title = "Generate proposal",
-                            Status = TaskRunStatus.Completed,
+                            Status = WorkflowActionAttemptStatus.Completed,
                             Uses = "mohist/opencode",
                             WithInput = JsonSerializer.Deserialize<Dictionary<string, JsonElement?>>("""
                                 {"session": "plan"}
@@ -385,19 +385,19 @@ public class WorkflowProjectionTests
                             ExpectInput = JsonSerializer.Deserialize<Dictionary<string, JsonElement?>>("""
                                 {"files": [{"path": "proposal.md"}]}
                                 """),
-                            RequiredFiles = TaskRunExtensions.ExtractRequiredFiles(
+                            RequiredFiles = WorkflowActionAttemptExtensions.ExtractRequiredFiles(
                                 JsonSerializer.Deserialize<Dictionary<string, JsonElement?>>("""
                                     {"files": [{"path": "proposal.md"}]}
                                     """)),
                             Classification = TaskClassification.UserFacing
                         },
-                        new TaskRun
+                        new WorkflowActionAttempt
                         {
                             Id = "sync.1",
                             DefinitionId = "sync",
                             Attempt = 1,
                             Title = "Sync spec",
-                            Status = TaskRunStatus.Running,
+                            Status = WorkflowActionAttemptStatus.Running,
                             Uses = "mohist/opencode",
                             RequiredFiles = null,
                             Classification = TaskClassification.UserFacing
@@ -519,13 +519,13 @@ public class WorkflowProjectionTests
             Status = StageRunStatus.Completed,
             Tasks =
             [
-                new TaskRun
+                new WorkflowActionAttempt
                 {
                     Id = "build.1",
                     DefinitionId = "build",
                     Attempt = 1,
                     Title = "Build step",
-                    Status = TaskRunStatus.Completed,
+                    Status = WorkflowActionAttemptStatus.Completed,
                     Uses = "core/script",
                     RequiredFiles = null,
                     Classification = TaskClassification.Orchestration

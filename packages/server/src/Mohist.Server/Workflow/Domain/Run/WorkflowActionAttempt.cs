@@ -9,17 +9,17 @@ using Mohist.Server.Runner.Domain;
 namespace Mohist.Server.Workflow.Domain.Run;
 
 /// <summary>
-/// The lifecycle status of a <see cref="TaskRun"/> aggregate.
+/// The lifecycle status of a <see cref="WorkflowActionAttempt"/> aggregate.
 /// This state machine is independent from <see cref="WorkflowRunStatus"/> —
 /// the two describe different aggregates and do not derive each other.
 /// A task transition between <c>Pending</c>, <c>Running</c>, and <c>Completed</c>
 /// does not recompute the workflow status. The two facts may diverge
-/// (e.g. a <c>WorkflowRun</c> may be <c>Running</c> while no <c>TaskRun</c>
+/// (e.g. a <c>WorkflowRun</c> may be <c>Running</c> while no <c>WorkflowActionAttempt</c>
 /// is <c>Running</c>).
 /// </summary>
-public enum TaskRunStatus { Pending, Running, Completed, Failed, Cancelled, Interrupted }
+public enum WorkflowActionAttemptStatus { Pending, Running, Completed, Failed, Cancelled, Interrupted }
 
-public sealed class TaskRun
+public sealed class WorkflowActionAttempt
 {
     public required string Id { get; init; }
     public required string DefinitionId { get; init; }
@@ -28,15 +28,18 @@ public sealed class TaskRun
     public string? Uses { get; init; }
     public Dictionary<string, JsonElement?>? WithInput { get; init; }
     public Dictionary<string, JsonElement?>? ExpectInput { get; init; }
-    public TaskRunStatus Status { get; set; }
+    public WorkflowActionAttemptStatus Status { get; set; }
     public DateTimeOffset? StartedAt { get; set; }
     public DateTimeOffset? FinishedAt { get; set; }
     public string? WorkerId { get; set; }
     public string? ProcessGeneration { get; set; }
     public string? WorkId { get; set; }
     public TerminalLogOwnership? TerminalLogOwnership { get; set; }
-    public AgentResultSettlement? AgentResultSettlement { get; set; }
     public WorkInterruption? Interruption { get; set; }
+    public string? AgentInvocationId { get; set; }
+    public string? AgentJobId { get; set; }
+    public string? AgentSessionId { get; set; }
+    public string? AgentLaunchFingerprint { get; set; }
 
     public IReadOnlyList<WorkflowTaskRequiredFile>? RequiredFiles { get; init; }
     public TaskArtifactCapture? Artifacts { get; init; }
@@ -58,14 +61,6 @@ public sealed class TaskRun
     public string? TerminalResultFingerprint { get; set; }
 
     /// <summary>
-    /// Frozen physical execution identity for an accepted terminal Agent
-    /// result. AgentResultSettlement is cleared after terminal reconciliation,
-    /// so replay validation must use this immutable attempt identity instead of
-    /// reopening the deadline-owned settlement state.
-    /// </summary>
-    public AgentExecutionBinding? TerminalExecutionBinding { get; set; }
-
-    /// <summary>
     /// Additive verification metadata populated only for tasks whose
     /// <see cref="DefinitionId"/> matches a built-in lane id from
     /// <c>VerificationLaneCatalog</c>. The presence of this value
@@ -79,7 +74,7 @@ public sealed class TaskRun
     public VerificationLaneAttempt? Lane { get; set; }
 }
 
-public static class TaskRunExtensions
+public static class WorkflowActionAttemptExtensions
 {
     private const string FilesKey = "files";
     private const string MarkersKey = "markers";
@@ -185,13 +180,13 @@ public static class TaskRunExtensions
         return TaskClassification.UserFacing;
     }
 
-    extension(TaskRun)
+    extension(WorkflowActionAttempt)
     {
-        internal static TaskRun MakeTask(
-            IEnumerable<TaskRun> existing,
+        internal static WorkflowActionAttempt MakeTask(
+            IEnumerable<WorkflowActionAttempt> existing,
             TaskDefinition input,
             int stageAttempt,
-            IEnumerable<TaskRun> occupiedTaskRuns,
+            IEnumerable<WorkflowActionAttempt> occupiedWorkflowActionAttempts,
             string? causedByFeedbackId = null,
             string? causedByFailedTaskId = null)
             => MakeTask(
@@ -199,16 +194,16 @@ public static class TaskRunExtensions
                 input,
                 stageAttempt,
                 recoveryRemaining: null,
-                occupiedTaskRuns,
+                occupiedWorkflowActionAttempts,
                 causedByFeedbackId,
                 causedByFailedTaskId);
 
-        internal static TaskRun MakeContinuationTask(
-            IEnumerable<TaskRun> existing,
+        internal static WorkflowActionAttempt MakeContinuationTask(
+            IEnumerable<WorkflowActionAttempt> existing,
             TaskDefinition input,
             int stageAttempt,
             int recoveryRemaining,
-            IEnumerable<TaskRun> occupiedTaskRuns,
+            IEnumerable<WorkflowActionAttempt> occupiedWorkflowActionAttempts,
             string? causedByFeedbackId = null,
             string? causedByFailedTaskId = null)
         {
@@ -219,7 +214,7 @@ public static class TaskRunExtensions
                 input,
                 stageAttempt,
                 recoveryRemaining,
-                occupiedTaskRuns,
+                occupiedWorkflowActionAttempts,
                 causedByFeedbackId,
                 causedByFailedTaskId);
         }
@@ -230,12 +225,12 @@ public static class TaskRunExtensions
                 throw new InvalidOperationException("A continuation task requires a recovery declaration");
         }
 
-        private static TaskRun MakeTask(
-            IEnumerable<TaskRun> existing,
+        private static WorkflowActionAttempt MakeTask(
+            IEnumerable<WorkflowActionAttempt> existing,
             TaskDefinition input,
             int stageAttempt,
             int? recoveryRemaining,
-            IEnumerable<TaskRun> occupiedTaskRuns,
+            IEnumerable<WorkflowActionAttempt> occupiedWorkflowActionAttempts,
             string? causedByFeedbackId,
             string? causedByFailedTaskId)
         {
@@ -246,8 +241,8 @@ public static class TaskRunExtensions
                               .Max() + 1;
             var requiredFiles = ExtractRequiredFiles(input.Expect);
             var classification = DeriveClassification(input.Uses, requiredFiles);
-            var id = TaskRunId(input.Id, stageAttempt, attempt, occupiedTaskRuns);
-            var task = new TaskRun
+            var id = ActionAttemptId(input.Id, stageAttempt, attempt, occupiedWorkflowActionAttempts);
+            var task = new WorkflowActionAttempt
             {
                 Id = id,
                 DefinitionId = input.Id,
@@ -256,7 +251,7 @@ public static class TaskRunExtensions
                 Uses = input.Uses,
                 WithInput = input.With,
                 ExpectInput = input.Expect,
-                Status = TaskRunStatus.Pending,
+                Status = WorkflowActionAttemptStatus.Pending,
                 RequiredFiles = requiredFiles.Count > 0 ? requiredFiles : null,
                 Artifacts = input.Artifacts,
                 SetVars = input.SetVars,
@@ -279,7 +274,7 @@ public static class TaskRunExtensions
                     Order: VerificationLaneCatalog.OrderOf(input.Id),
                     ConfiguredBudgetMs: TryGetConfiguredBudgetMs(input.With),
                     Outcome: VerificationLaneOutcome.Pending,
-                    TaskRunId: id);
+                    ActionAttemptId: id);
             }
 
             return task;
@@ -310,16 +305,16 @@ public static class TaskRunExtensions
             return parsed > 0 ? parsed : 0;
         }
 
-        private static string TaskRunId(
+        private static string ActionAttemptId(
             string definitionId,
             int stageAttempt,
             int taskAttempt,
-            IEnumerable<TaskRun> occupiedTaskRuns)
+            IEnumerable<WorkflowActionAttempt> occupiedWorkflowActionAttempts)
         {
             var candidate = stageAttempt == 1
                 ? $"{definitionId}.{taskAttempt}"
                 : $"{definitionId}.s{stageAttempt}.{taskAttempt}";
-            var occupied = occupiedTaskRuns.Select(task => task.Id).ToHashSet(StringComparer.Ordinal);
+            var occupied = occupiedWorkflowActionAttempts.Select(task => task.Id).ToHashSet(StringComparer.Ordinal);
             if (occupied.Add(candidate)) return candidate;
 
             for (var runAttempt = 2; ; runAttempt++)
@@ -330,7 +325,7 @@ public static class TaskRunExtensions
         }
     }
 
-    public static TaskDefinition ToDefinition(this TaskRun task) => new(
+    public static TaskDefinition ToDefinition(this WorkflowActionAttempt task) => new(
         task.DefinitionId,
         task.Title,
         task.Uses ?? string.Empty,

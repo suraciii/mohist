@@ -18,11 +18,11 @@ internal sealed class WorkflowWorkLifecycle
     /// artifact before the producing task closes.
     /// </summary>
     public async Task<IReadOnlyList<WorkflowEvent>> ApplyTaskReportAsync(
-        WorkflowRun run, TaskReport report, string stageId, string taskRunId)
+        WorkflowRun run, TaskReport report, string stageId, string actionAttemptId)
     {
         var now = _owner.Now();
         var reportStage = run.Stages.SingleOrDefault(stage => stage.Id == stageId);
-        var currentTask = reportStage?.Tasks.SingleOrDefault(task => task.Id == taskRunId);
+        var currentTask = reportStage?.Tasks.SingleOrDefault(task => task.Id == actionAttemptId);
         var events = new List<WorkflowEvent>();
 
         var taskAttempts = report.Status == TaskReportStatus.Succeeded
@@ -33,7 +33,7 @@ internal sealed class WorkflowWorkLifecycle
         {
             foreach (var a in report.Artifacts)
             {
-                events.Add(new WorkflowArtifactRecorded(_owner.GrainKey, taskRunId, a.Path, now));
+                events.Add(new WorkflowArtifactRecorded(_owner.GrainKey, actionAttemptId, a.Path, now));
             }
         }
 
@@ -48,23 +48,14 @@ internal sealed class WorkflowWorkLifecycle
 
         if (report.Status == TaskReportStatus.Succeeded)
         {
-            if (currentTask is not null
-                && report.TerminalExecutionBinding is not null
-                && IsAgentTask(currentTask.Uses)
-                && currentTask.AgentResultSettlement is null
-                && currentTask.TerminalResultFingerprint is null)
-            {
-                return [];
-            }
             if (currentTask is not null)
             {
                 currentTask.TerminalResultFingerprint = report.TerminalResultFingerprint;
-                currentTask.TerminalExecutionBinding = report.TerminalExecutionBinding;
                 currentTask.Output = report.Output;
                 currentTask.Error = report.Error;
             }
             var hasFollowUpTasks = taskAttempts.Count > 0;
-            events.AddRange(run.CompleteTask(stageId, taskRunId, now, advance: !hasFollowUpTasks));
+            events.AddRange(run.CompleteTask(stageId, actionAttemptId, now, advance: !hasFollowUpTasks));
 
             if (currentTask?.CausedByFeedbackId is { } feedbackId)
             {
@@ -89,29 +80,20 @@ internal sealed class WorkflowWorkLifecycle
                 events.AddRange(followUpEvents);
                 _owner.Log.LogInformation(
                     "Workflow {Id} task {TaskId} produced {Count} follow-up tasks",
-                    _owner.GrainKey, taskRunId, taskAttempts.Count);
+                    _owner.GrainKey, actionAttemptId, taskAttempts.Count);
             }
         }
         else
         {
-            if (currentTask is not null
-                && report.TerminalExecutionBinding is not null
-                && IsAgentTask(currentTask.Uses)
-                && currentTask.AgentResultSettlement is null
-                && currentTask.TerminalResultFingerprint is null)
-            {
-                return [];
-            }
             if (currentTask is not null)
             {
                 currentTask.TerminalResultFingerprint = report.TerminalResultFingerprint;
-                currentTask.TerminalExecutionBinding = report.TerminalExecutionBinding;
                 currentTask.Output = report.Output;
                 currentTask.Error = report.Error;
             }
             var detail = report.Detail ?? (report.Output.HasValue ? report.Output.Value.GetRawText() : null);
             var taskResult = new TaskResult("failed", detail, report.Error);
-            events.AddRange(run.FailTask(stageId, taskRunId, taskResult, now));
+            events.AddRange(run.FailTask(stageId, actionAttemptId, taskResult, now));
         }
 
         // ApplyLaneOutcome already ran before the task transition; it must not
@@ -126,15 +108,10 @@ internal sealed class WorkflowWorkLifecycle
     /// <c>recover:fix-ci</c> helper is not a lane, so its report leaves the
     /// lane metadata untouched (it can never promote a lane to <c>pass</c>).
     /// The lane carries its stable identity, order, configured budget,
-    /// attempt identity (<see cref="TaskRun.Id"/> / <see cref="TaskRun.WorkId"/>),
+    /// attempt identity (<see cref="WorkflowActionAttempt.Id"/> / <see cref="WorkflowActionAttempt.WorkId"/>),
     /// and the failure or timeout diagnostics when applicable.
     /// </summary>
-    private static bool IsAgentTask(string? uses) =>
-        string.Equals(uses, "mohist/agent", StringComparison.Ordinal)
-        || string.Equals(uses, "mohist/opencode", StringComparison.Ordinal)
-        || string.Equals(uses, "mohist/pi", StringComparison.Ordinal);
-
-    private static void ApplyLaneOutcome(TaskRun? task, TaskReport report, DateTimeOffset now)
+    private static void ApplyLaneOutcome(WorkflowActionAttempt? task, TaskReport report, DateTimeOffset now)
     {
         if (task?.Lane is null) return;
 
@@ -182,7 +159,7 @@ internal sealed class WorkflowWorkLifecycle
         return [];
     }
 
-    public async Task<string?> MarkTaskRunningAsync(
+    public async Task<string?> MarkWorkflowActionAttemptRunningAsync(
         WorkflowRun run,
         string logicalTaskId,
         string workerId,
@@ -191,7 +168,7 @@ internal sealed class WorkflowWorkLifecycle
     {
         var current = run.CurrentStage();
         var currentTask = current.Tasks.FirstOrDefault(t => string.Equals(t.Id, logicalTaskId, StringComparison.Ordinal));
-        if (currentTask?.Status == TaskRunStatus.Running)
+        if (currentTask?.Status == WorkflowActionAttemptStatus.Running)
         {
             _owner.CacheAssignedWorkerId(workerId);
             return currentTask.WorkId ?? logicalTaskId;
@@ -270,18 +247,18 @@ internal sealed class WorkflowWorkLifecycle
 
         var task = currentStage.Tasks.FirstOrDefault(t =>
             string.Equals(t.Id, workId, StringComparison.Ordinal)
-            || (t.Status == TaskRunStatus.Pending
+            || (t.Status == WorkflowActionAttemptStatus.Pending
                 && string.Equals(t.WorkId, workId, StringComparison.Ordinal)));
         if (task is not null)
         {
-            if (task.Status == TaskRunStatus.Running)
+            if (task.Status == WorkflowActionAttemptStatus.Running)
             {
                 _owner.CacheAssignedWorkerId(workerId);
                 return task.WorkId ?? task.Id;
             }
-            if (task.Status != TaskRunStatus.Pending) return null;
+            if (task.Status != WorkflowActionAttemptStatus.Pending) return null;
 
-            var claimedWorkId = await MarkTaskRunningAsync(
+            var claimedWorkId = await MarkWorkflowActionAttemptRunningAsync(
                 run,
                 task.Id,
                 workerId,
@@ -313,12 +290,6 @@ internal sealed class WorkflowWorkLifecycle
         return null;
     }
 
-    /// <summary>
-    /// Converts a fenced Agent attempt into one new pending attempt. The old
-    /// TaskRun remains in the stage as immutable interruption history; the
-    /// returned work id is already persisted on the replacement so a poll can
-    /// offer exactly that identity after the commit.
-    /// </summary>
     public void RequeueRunningChecks(WorkflowRun run)
     {
         var currentStage = run.CurrentStage();

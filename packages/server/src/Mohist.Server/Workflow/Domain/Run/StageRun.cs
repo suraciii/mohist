@@ -16,7 +16,7 @@ public sealed class StageRun
     public required bool RequiresApproval { get; init; }
     public StageRunStatus Status { get; set; }
     public bool Initialized { get; set; }
-    public List<TaskRun> Tasks { get; set; } = new();
+    public List<WorkflowActionAttempt> Tasks { get; set; } = new();
     public List<StageCheck> Checks { get; set; } = new();
     public string? ChecksWorkId { get; set; }
     public string? ChecksProcessGeneration { get; set; }

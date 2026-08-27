@@ -61,19 +61,18 @@ public static partial class WorkflowRunExtensions
             if (run.CurrentStageId is null) return false;
             var current = run.Stages.FirstOrDefault(s => string.Equals(s.Id, run.CurrentStageId, StringComparison.Ordinal));
             if (current is null) return false;
-            return current.Tasks.Any(t => t.Status == TaskRunStatus.Running)
+            return current.Tasks.Any(t => t.Status == WorkflowActionAttemptStatus.Running)
                 || !string.IsNullOrWhiteSpace(current.ChecksWorkId)
                 || current.Checks.Any(c => c.Status == StageCheckStatus.Running);
         }
 
         public bool HasDispatchableWork()
         {
-            if (run.HasUnresolvedAgentResult()) return false;
             if (run.CurrentStageId is null) return false;
             var current = run.Stages.FirstOrDefault(s => string.Equals(s.Id, run.CurrentStageId, StringComparison.Ordinal));
             if (current is null || !current.Initialized) return false;
 
-            return current.Tasks.Any(t => t.Status == TaskRunStatus.Pending)
+            return current.Tasks.Any(t => t.Status == WorkflowActionAttemptStatus.Pending)
                 || current.Checks.Any(c => c.Status == StageCheckStatus.Pending);
         }
 

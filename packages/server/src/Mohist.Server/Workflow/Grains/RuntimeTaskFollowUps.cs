@@ -1,5 +1,6 @@
 using Mohist.Workflow.Definition;
 using Mohist.Server.Workflow.Domain.Run;
+using Mohist.Server.Runner.Grains;
 using Mohist.Server.Workflow.Services;
 
 namespace Mohist.Server.Workflow.Grains;
@@ -27,7 +28,7 @@ internal static class RuntimeTaskFollowUps
                 if (task.RecoveryRemaining is null)
                     throw new InvalidOperationException(
                         $"Recovery follow-up task '{task.Id}' must carry an explicit numeric recoveryRemaining");
-                TaskRun.ValidateContinuation(definition, task.RecoveryRemaining.Value);
+                WorkflowActionAttempt.ValidateContinuation(definition, task.RecoveryRemaining.Value);
             }
             else if (task.RecoveryRemaining is not null)
             {

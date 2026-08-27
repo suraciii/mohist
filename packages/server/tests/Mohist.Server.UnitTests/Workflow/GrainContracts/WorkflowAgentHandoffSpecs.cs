@@ -319,7 +319,7 @@ public sealed class WorkflowAgentHandoffSpecs
         var wrongKey = WorkflowAgentHandoffCodec.KeyFor(
             projectId,
             command.WorkflowRunId,
-            command.TaskRunId,
+            command.ActionAttemptId,
             $"other-{command.CommandId}");
         var handoff = await ActivateAsync(wrongKey, new());
 
@@ -328,6 +328,17 @@ public sealed class WorkflowAgentHandoffSpecs
 
         Assert.Contains("grain key does not match", error.Message, StringComparison.Ordinal);
         Assert.Equal(0, _preflight.ResolveCount(projectId, agentId));
+    }
+
+    [Fact]
+    public void InvocationFor_NamedSession_ParticipatesInSessionIdentity()
+    {
+        var command = Command("project-1", "mohist/builder", "build");
+        var first = WorkflowAgentHandoffCodec.InvocationFor(command with { Session = "delivery" });
+        var second = WorkflowAgentHandoffCodec.InvocationFor(command with { Session = "review" });
+
+        Assert.NotEqual(first.SessionId, second.SessionId);
+        Assert.Equal(first.JobKey, second.JobKey);
     }
 
     /// <summary>
@@ -351,7 +362,7 @@ public sealed class WorkflowAgentHandoffSpecs
         WorkflowAgentHandoffCodec.KeyFor(
             command.ProjectId,
             command.WorkflowRunId,
-            command.TaskRunId,
+            command.ActionAttemptId,
             command.CommandId);
 
     private static WorkflowAgentHandoffCommand Command(
@@ -364,7 +375,7 @@ public sealed class WorkflowAgentHandoffSpecs
             CommandId: commandId,
             ProjectId: projectId,
             WorkflowRunId: $"workflow-run-{Guid.NewGuid():N}",
-            TaskRunId: $"task-run-{Guid.NewGuid():N}",
+            ActionAttemptId: $"task-run-{Guid.NewGuid():N}",
             AgentRef: agentId,
             Prompt: prompt,
             Session: "workflow-session",
@@ -453,14 +464,16 @@ public sealed class WorkflowAgentHandoffSpecs
                 return _resolveCounts.GetValueOrDefault((projectId, agentRef));
         }
 
-        public Task<AgentExecutionIdentitySnapshot?> ResolveAgentAsync(string projectId, string agentRef)
+        public Task<WorkflowAgentPreflightResult> ResolveAgentAsync(string projectId, string agentRef)
         {
             lock (_gate)
             {
                 var key = (projectId, agentRef);
                 _resolveCounts[key] = _resolveCounts.GetValueOrDefault(key) + 1;
-                return Task.FromResult<AgentExecutionIdentitySnapshot?>(
-                    _definitions.GetValueOrDefault(key));
+                var agent = _definitions.GetValueOrDefault(key);
+                return Task.FromResult(agent is null
+                    ? new WorkflowAgentPreflightResult(null, "agent_not_found", "Agent not found.")
+                    : new WorkflowAgentPreflightResult(agent));
             }
         }
     }

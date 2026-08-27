@@ -80,6 +80,7 @@ public sealed partial class AgentJobGrain
         await PersistAsync();
         if (State.PendingFailureEvent is not null
             || State.PendingTerminalDeliveryEvent is not null
+            || State.PendingWorkflowTerminalEvent is not null
             || State.PendingSubagentTerminalEvent is not null)
             return;
         try

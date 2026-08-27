@@ -5,7 +5,7 @@ export function parseDispatchWorkItem(dispatch: WorkDispatchResponse): DispatchW
   const work: DispatchWorkItem = {
     workflowRunId: dispatch.workflowRunId,
     workId: dispatch.workId,
-    taskRunId: dispatch.taskRunId ?? undefined,
+    actionAttemptId: dispatch.actionAttemptId ?? undefined,
     workType: dispatch.workType,
     stage: dispatch.stage,
     title: dispatch.title,

@@ -80,7 +80,7 @@ public sealed class VerificationLaneStatusProjectionTests
         foreach (var stage in run.Stages)
         foreach (var task in stage.Tasks)
         {
-            task.Status = TaskRunStatus.Completed;
+            task.Status = WorkflowActionAttemptStatus.Completed;
             if (task.Lane is not null)
                 task.Lane = task.Lane with { Outcome = VerificationLaneOutcome.Pass };
         }
@@ -100,14 +100,14 @@ public sealed class VerificationLaneStatusProjectionTests
         var buildStage = run.Stages[0];
 
         // First lane passes
-        buildStage.Tasks[0].Status = TaskRunStatus.Completed;
+        buildStage.Tasks[0].Status = WorkflowActionAttemptStatus.Completed;
         buildStage.Tasks[0].Lane = buildStage.Tasks[0].Lane! with
         {
             Outcome = VerificationLaneOutcome.Pass,
         };
 
         // Second lane fails
-        buildStage.Tasks[1].Status = TaskRunStatus.Failed;
+        buildStage.Tasks[1].Status = WorkflowActionAttemptStatus.Failed;
         buildStage.Tasks[1].Lane = buildStage.Tasks[1].Lane! with
         {
             Outcome = VerificationLaneOutcome.Fail,
@@ -117,7 +117,7 @@ public sealed class VerificationLaneStatusProjectionTests
         };
 
         // Third lane times out
-        buildStage.Tasks[2].Status = TaskRunStatus.Failed;
+        buildStage.Tasks[2].Status = WorkflowActionAttemptStatus.Failed;
         buildStage.Tasks[2].Lane = buildStage.Tasks[2].Lane! with
         {
             Outcome = VerificationLaneOutcome.Timeout,
@@ -154,14 +154,14 @@ public sealed class VerificationLaneStatusProjectionTests
             Detail = "command exceeded its budget",
         };
 
-        var retry = new TaskRun
+        var retry = new WorkflowActionAttempt
         {
             Id = $"{VerificationLaneCatalog.VerifyDotnet}.2",
             DefinitionId = VerificationLaneCatalog.VerifyDotnet,
             Attempt = 2,
             Title = VerificationLaneCatalog.VerifyDotnet,
             Uses = "core/script",
-            Status = TaskRunStatus.Pending,
+            Status = WorkflowActionAttemptStatus.Pending,
             Lane = new VerificationLaneAttempt(
                 VerificationLaneCatalog.VerifyDotnet,
                 1,
@@ -179,7 +179,7 @@ public sealed class VerificationLaneStatusProjectionTests
         Assert.Equal("timeout", lane.Outcome);
         Assert.Equal("original timeout", lane.Error!.Message);
         Assert.Equal("command exceeded its budget", lane.Detail);
-        Assert.Equal($"{VerificationLaneCatalog.VerifyDotnet}.2", lane.TaskRunId);
+        Assert.Equal($"{VerificationLaneCatalog.VerifyDotnet}.2", lane.ActionAttemptId);
         Assert.Equal(VerificationLaneCatalog.VerifyDotnet, view.VerificationLanes.FirstNonPassingLane);
     }
 
@@ -216,11 +216,11 @@ public sealed class VerificationLaneStatusProjectionTests
         var run = CreateLaneEnabledRun();
         var stage = run.Stages[0];
 
-        stage.Tasks[0].Status = TaskRunStatus.Completed;
+        stage.Tasks[0].Status = WorkflowActionAttemptStatus.Completed;
         stage.Tasks[0].Lane = stage.Tasks[0].Lane! with { Outcome = VerificationLaneOutcome.Pass };
-        stage.Tasks[1].Status = TaskRunStatus.Completed;
+        stage.Tasks[1].Status = WorkflowActionAttemptStatus.Completed;
         stage.Tasks[1].Lane = stage.Tasks[1].Lane! with { Outcome = VerificationLaneOutcome.Pass };
-        stage.Tasks[2].Status = TaskRunStatus.Completed;
+        stage.Tasks[2].Status = WorkflowActionAttemptStatus.Completed;
         stage.Tasks[2].Lane = stage.Tasks[2].Lane! with { Outcome = VerificationLaneOutcome.Pass };
 
         var view = WorkflowStatusMapper.BuildStatusView(run, definition: null);
@@ -234,9 +234,9 @@ public sealed class VerificationLaneStatusProjectionTests
         var run = CreateLaneEnabledRun();
         var buildStage = run.Stages[0];
 
-        buildStage.Tasks[0].Status = TaskRunStatus.Completed;
+        buildStage.Tasks[0].Status = WorkflowActionAttemptStatus.Completed;
         buildStage.Tasks[0].Lane = buildStage.Tasks[0].Lane! with { Outcome = VerificationLaneOutcome.Pass };
-        buildStage.Tasks[1].Status = TaskRunStatus.Failed;
+        buildStage.Tasks[1].Status = WorkflowActionAttemptStatus.Failed;
         buildStage.Tasks[1].Lane = buildStage.Tasks[1].Lane! with
         {
             Outcome = VerificationLaneOutcome.Fail,
@@ -245,7 +245,7 @@ public sealed class VerificationLaneStatusProjectionTests
             WorkId = "verify-dotnet.1",
             FinishedAt = CreatedAt.AddSeconds(10),
         };
-        buildStage.Tasks[2].Status = TaskRunStatus.Failed;
+        buildStage.Tasks[2].Status = WorkflowActionAttemptStatus.Failed;
         buildStage.Tasks[2].Lane = buildStage.Tasks[2].Lane! with
         {
             Outcome = VerificationLaneOutcome.Timeout,
@@ -301,13 +301,13 @@ public sealed class VerificationLaneStatusProjectionTests
             };
             foreach (var taskDef in stageDef.Tasks)
             {
-                var task = new TaskRun
+                var task = new WorkflowActionAttempt
                 {
                     Id = taskDef.Id + ".1",
                     DefinitionId = taskDef.Id,
                     Attempt = 1,
                     Title = taskDef.Title ?? taskDef.Id,
-                    Status = TaskRunStatus.Pending,
+                    Status = WorkflowActionAttemptStatus.Pending,
                     Uses = taskDef.Uses,
                     WithInput = taskDef.With,
                     Classification = TaskClassification.Orchestration,
@@ -319,7 +319,7 @@ public sealed class VerificationLaneStatusProjectionTests
                         Order: VerificationLaneCatalog.OrderOf(taskDef.Id),
                         ConfiguredBudgetMs: 120000,
                         Outcome: VerificationLaneOutcome.Pending,
-                        TaskRunId: task.Id);
+                        ActionAttemptId: task.Id);
                 }
                 stage.Tasks.Add(task);
             }

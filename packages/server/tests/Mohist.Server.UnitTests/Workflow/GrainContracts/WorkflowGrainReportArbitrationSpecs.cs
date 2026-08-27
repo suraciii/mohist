@@ -43,7 +43,7 @@ public sealed class WorkflowGrainReportArbitrationSpecs
             $"other-{a.WorkerId}",
             a.RunId,
             a.Work.Id!,
-            a.TaskRunId,
+            a.ActionAttemptId,
             new WorkResult("completed", ArtifactUploadIds: [uploadId]));
 
         Assert.Equal("refused", report.Ack);
@@ -71,7 +71,7 @@ public sealed class WorkflowGrainReportArbitrationSpecs
                 Output: null,
                 Artifacts: null,
                 ArtifactUploadIds: [uploadId],
-                TaskRunId: a.TaskRunId));
+                ActionAttemptId: a.ActionAttemptId));
 
         Assert.Equal(WorkReportVerdict.Refused, ack);
         Assert.Equal("Running", await a.Grain.GetRunStatusAsync());
@@ -84,10 +84,10 @@ public sealed class WorkflowGrainReportArbitrationSpecs
     }
 
     [Fact]
-    public async Task MismatchedTaskRunId_IsStaleBeforeSideEffects()
+    public async Task MismatchedActionAttemptId_IsStaleBeforeSideEffects()
     {
         var a = await ArrangeAsync("wr-arb-taskrunid");
-        var uploadId = await SeedPendingUploadAsync(a.RunId, a.WorkId!, a.TaskRunId, "wrong-attempt.txt");
+        var uploadId = await SeedPendingUploadAsync(a.RunId, a.WorkId!, a.ActionAttemptId, "wrong-attempt.txt");
 
         var report = await a.CreateReportService().ReportAsync(
             a.WorkerId,
@@ -115,11 +115,11 @@ public sealed class WorkflowGrainReportArbitrationSpecs
             "same result",
             ExitCode: 0);
 
-        var first = await a.CreateReportService().ReportAsync(a.WorkerId, a.RunId, a.Work.Id!, a.TaskRunId, result);
+        var first = await a.CreateReportService().ReportAsync(a.WorkerId, a.RunId, a.Work.Id!, a.ActionAttemptId, result);
         Assert.Equal("accepted", first.Ack);
         var eventCount = (await a.Events.ListAsync(a.RunId)).Count;
 
-        var replay = await a.CreateReportService().ReportAsync(a.WorkerId, a.RunId, a.Work.Id!, a.TaskRunId, result);
+        var replay = await a.CreateReportService().ReportAsync(a.WorkerId, a.RunId, a.Work.Id!, a.ActionAttemptId, result);
         Assert.Equal("accepted", replay.Ack);
         Assert.Equal(eventCount, (await a.Events.ListAsync(a.RunId)).Count);
         Assert.Equal("Completed", await a.Grain.GetRunStatusAsync());
@@ -171,16 +171,16 @@ public sealed class WorkflowGrainReportArbitrationSpecs
     {
         var a = await ArrangeAsync("wr-arb-conflict");
         var first = await a.CreateReportService().ReportAsync(
-            a.WorkerId, a.RunId, a.Work.Id!, a.TaskRunId, new WorkResult("completed"));
+            a.WorkerId, a.RunId, a.Work.Id!, a.ActionAttemptId, new WorkResult("completed"));
         Assert.Equal("accepted", first.Ack);
         var eventCount = (await a.Events.ListAsync(a.RunId)).Count;
 
-        var uploadId = await SeedPendingUploadAsync(a.RunId, a.WorkId!, a.TaskRunId, "late.txt");
+        var uploadId = await SeedPendingUploadAsync(a.RunId, a.WorkId!, a.ActionAttemptId, "late.txt");
         var late = await a.CreateReportService().ReportAsync(
             a.WorkerId,
             a.RunId,
             a.Work.Id!,
-            a.TaskRunId,
+            a.ActionAttemptId,
             new WorkResult(
                 "failed",
                 "conflicting late result",
@@ -191,7 +191,7 @@ public sealed class WorkflowGrainReportArbitrationSpecs
         Assert.Equal("refused", late.Ack);
         var run = await a.LoadRunAsync();
         var task = Assert.Single(run.CurrentStage().Tasks);
-        Assert.Equal(TaskRunStatus.Completed, task.Status);
+        Assert.Equal(WorkflowActionAttemptStatus.Completed, task.Status);
         Assert.Null(task.Output);
         Assert.Equal(eventCount, (await a.Events.ListAsync(a.RunId)).Count);
         await using var scope = _fixture.Services.CreateAsyncScope();
@@ -209,9 +209,9 @@ public sealed class WorkflowGrainReportArbitrationSpecs
             _fixture, runId, definition, TimeProvider, workerId: $"runner-{runId}");
         var work = await arrangement.AssignAndClaimAsync();
         Assert.NotNull(work);
-        var taskRunId = (await arrangement.Store.LoadAsync(runId))!.CurrentStage().RunningTask?.Id
+        var actionAttemptId = (await arrangement.Store.LoadAsync(runId))!.CurrentStage().RunningTask?.Id
             ?? throw new InvalidOperationException("no running task");
-        return new ArbitrationArrangement(arrangement, work!, taskRunId);
+        return new ArbitrationArrangement(arrangement, work!, actionAttemptId);
     }
 
     private static WorkflowDefinition SingleStage(List<TaskDefinition> tasks) => new(
@@ -219,7 +219,7 @@ public sealed class WorkflowGrainReportArbitrationSpecs
         new StageDefinition("build", tasks, []),
     ]);
 
-    private async Task<string> SeedPendingUploadAsync(string workflowRunId, string workId, string taskRunId, string path)
+    private async Task<string> SeedPendingUploadAsync(string workflowRunId, string workId, string actionAttemptId, string path)
     {
         await using var scope = _fixture.Services.CreateAsyncScope();
         var db = scope.ServiceProvider.GetRequiredService<MohistDbContext>();
@@ -229,12 +229,12 @@ public sealed class WorkflowGrainReportArbitrationSpecs
             UploadId = uploadId,
             WorkflowRunId = workflowRunId,
             WorkId = workId,
-            TaskRunId = taskRunId,
+            ActionAttemptId = actionAttemptId,
             Path = path,
             ContentType = "text/plain",
             ContentHash = $"sha256:{Guid.NewGuid():N}",
             Size = 42,
-            StoragePath = $"workflows/{workflowRunId}/tasks/{taskRunId}/artifacts/{uploadId}/content",
+            StoragePath = $"workflows/{workflowRunId}/tasks/{actionAttemptId}/artifacts/{uploadId}/content",
             CreatedAt = TimeProvider.GetUtcNow(),
             ExpiresAt = TimeProvider.GetUtcNow().AddDays(1),
         });
@@ -245,7 +245,7 @@ public sealed class WorkflowGrainReportArbitrationSpecs
     private sealed record ArbitrationArrangement(
         WorkflowGrainArrangement Arrangement,
         WorkItem Work,
-        string TaskRunId)
+        string ActionAttemptId)
     {
         public WorkflowGrain Grain => Arrangement.Grain;
         public IEventStore Events => Arrangement.Events;

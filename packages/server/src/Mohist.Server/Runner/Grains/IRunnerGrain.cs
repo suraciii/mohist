@@ -272,7 +272,7 @@ public record WorkDispatch(
     /// carries this together with <see cref="WorkId"/> so the Server can bind
     /// the Turn without trusting mutable Session labels.
     /// </summary>
-    [property: Id(26)] string? TaskRunId = null,
+    [property: Id(26)] string? ActionAttemptId = null,
     [property: Id(27)] CapabilityClaimExpectation? CapabilityClaim = null,
     /// <summary>
     /// Non-secret control-plane origin marker. It is intentionally separate
@@ -436,5 +436,5 @@ public sealed record RunnerActiveWorkItem(
     [property: Id(5)] string? Title,
     [property: Id(6)] WorkIssueRef? Issue = null,
     [property: Id(7)] DateTimeOffset? TakenAt = null,
-    [property: Id(8)] string? TaskRunId = null,
+    [property: Id(8)] string? ActionAttemptId = null,
     [property: Id(9)] bool IsAgentWork = false);

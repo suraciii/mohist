@@ -12,7 +12,7 @@ public static partial class IssueRoutes
 {
     /// <summary>
     /// Cursor-paginated query for an issue's task execution logs.
-    /// The endpoint accepts the timeline task id (<c>TaskRun.Id</c>)
+    /// The endpoint accepts the timeline task id (<c>WorkflowActionAttempt.Id</c>)
     /// for consistency with how the web addresses tasks everywhere
     /// else (retry, artifacts-by-task); <see cref="TaskLogService"/>
     /// resolves it to a work id and queries the store. No grain

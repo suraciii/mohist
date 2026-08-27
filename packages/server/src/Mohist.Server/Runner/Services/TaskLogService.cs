@@ -124,7 +124,7 @@ public sealed class TaskLogService : IScopedService
 
     /// <summary>
     /// Cursor-paginated query over a work item's captured lines,
-    /// resolved from a timeline task id (<c>TaskRun.Id</c>) to a
+    /// resolved from a timeline task id (<c>WorkflowActionAttempt.Id</c>) to a
     /// <c>WorkId</c> via the persisted workflow-run work projection
     /// (no grain call). Returns <c>null</c> when the run, task, or work id
     /// cannot be located — the API surfaces that as an empty page

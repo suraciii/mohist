@@ -41,11 +41,6 @@ public interface IWorkflowProfileReferenceCoordinatorGrain : IGrainWithStringKey
         string commandId,
         long? expectedRevision);
 
-    Task<WorkflowProfileReferenceResult> SetAgentActionOverrideAsync(
-        WorkflowProfileCommandPayload.SetAgentActionOverride payload,
-        string commandId,
-        long? expectedRevision);
-
     Task<WorkflowProfileSaveResult> UpdateProfileAsync(
         WorkflowProfileCommandPayload.UpdateProfile payload,
         string commandId,
@@ -127,7 +122,6 @@ public static class WorkflowProfileCommandPayloadKinds
 {
     public const string SetProjectDefault = "setProjectDefault";
     public const string BindWorkflowRun = "bindWorkflowRun";
-    public const string SetAgentActionOverride = "setAgentActionOverride";
     public const string UpdateProfile = "updateProfile";
     public const string DeleteProfile = "deleteProfile";
 }
@@ -161,15 +155,6 @@ public abstract record WorkflowProfileCommandPayload
     }
 
     [GenerateSerializer]
-    public sealed record SetAgentActionOverride(
-        string ProjectId,
-        string ProfileId,
-        string? AgentAction) : WorkflowProfileCommandPayload
-    {
-        public override string Kind => WorkflowProfileCommandPayloadKinds.SetAgentActionOverride;
-    }
-
-    [GenerateSerializer]
     public sealed record UpdateProfile(
         string ProjectId,
         string ProfileId,
@@ -197,7 +182,6 @@ public sealed record BoundWorkflowStart(
     [property: Id(3)] int? EpicNumber,
     [property: Id(4)] string? ExplicitProfileId,
     [property: Id(5)] string ProfileId,
-    [property: Id(6)] string? AgentAction,
     [property: Id(7)] List<BoundStageStructure> Stages,
     [property: Id(8)] WorkflowRunMetadata Metadata,
     [property: Id(9)] WorkspaceIdentity? Workspace,
@@ -236,9 +220,6 @@ internal static class WorkflowProfileCommandPayloadCodec
                     dataElement.GetRawText(), JSON.Options)!,
             WorkflowProfileCommandPayloadKinds.BindWorkflowRun =>
                 JsonSerializer.Deserialize<WorkflowProfileCommandPayload.BindWorkflowRun>(
-                    dataElement.GetRawText(), JSON.Options)!,
-            WorkflowProfileCommandPayloadKinds.SetAgentActionOverride =>
-                JsonSerializer.Deserialize<WorkflowProfileCommandPayload.SetAgentActionOverride>(
                     dataElement.GetRawText(), JSON.Options)!,
             WorkflowProfileCommandPayloadKinds.UpdateProfile =>
                 JsonSerializer.Deserialize<WorkflowProfileCommandPayload.UpdateProfile>(

@@ -65,33 +65,6 @@ public sealed class WorkflowProfileReferenceCoordinatorTests
         Assert.Equal(pendingPayload.Kind, state.State.Pending?.Kind);
     }
 
-    [Fact]
-    public async Task AgentActionOverride_ReplayReturnsParticipantRejection()
-    {
-        const string commandId = "override-command";
-        var payload = new WorkflowProfileCommandPayload.SetAgentActionOverride(
-            "project-1", "custom/profile", "mohist/pi");
-        var state = new FakePersistentState(new WorkflowProfileCoordinatorState(
-            new PendingWorkflowProfileCommand(
-                commandId,
-                payload.Kind,
-                payload.ProfileId,
-                ExpectedRevision: 4,
-                WorkflowProfileCommandPayloadCodec.Serialize(payload))));
-        var coordinator = new WorkflowProfileReferenceCoordinatorGrain(
-            state,
-            new ParticipantGrainFactory(new RejectingProjectParticipant()),
-            NullLogger<WorkflowProfileReferenceCoordinatorGrain>.Instance,
-            provider: null!);
-
-        var result = await coordinator.SetAgentActionOverrideAsync(payload, commandId, expectedRevision: null);
-
-        Assert.Equal(WorkflowProfileReferenceResultCode.ProfileUnknown, result.Code);
-        Assert.Equal(4, result.AppliedRevision);
-        Assert.Null(state.State.Pending);
-        Assert.Equal(1, state.WriteCount);
-    }
-
     private static WorkflowProfileCommandPayload.BindWorkflowRun StartPayload(
         DateTimeOffset createdAt,
         Dictionary<string, string> labels) =>
@@ -146,11 +119,6 @@ public sealed class WorkflowProfileReferenceCoordinatorTests
             WorkflowProfileCommandPayload.SetProjectDefault payload,
             string commandId,
             long? expectedRevision) => throw new NotSupportedException();
-
-        public Task<ProjectWorkflowProfileBindingOutcome> SetAgentActionOverrideAsync(
-            WorkflowProfileCommandPayload.SetAgentActionOverride payload,
-            string commandId,
-            long? expectedRevision) => Task.FromResult(ProjectWorkflowProfileBindingOutcome.ProfileUnknown);
 
         public Task<long> GetWorkflowProfileBindingRevisionAsync() => Task.FromResult(0L);
     }

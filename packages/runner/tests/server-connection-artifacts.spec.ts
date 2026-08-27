@@ -36,7 +36,7 @@ describe('ServerConnection.uploadArtifact', () => {
         uploadId: 'artup_abc',
         workflowRunId: 'wf-1',
         workId: 'work-1',
-        taskRunId: 'task-1.1',
+        actionAttemptId: 'task-1.1',
         path: 'review.md',
         contentType: 'text/markdown',
         contentHash: 'sha256:deadbeef',
@@ -63,7 +63,7 @@ describe('ServerConnection.uploadArtifact', () => {
     )
 
     expect(result.uploadId).toBe('artup_abc')
-    expect(result.taskRunId).toBe('task-1.1')
+    expect(result.actionAttemptId).toBe('task-1.1')
     expect(result.idempotent).toBe(false)
 
     expect(fetchMock).toHaveBeenCalledTimes(1)
@@ -163,7 +163,7 @@ describe('ServerConnection.report', () => {
       {
         workflowRunId: 'wf-1',
         workId: 'work-1',
-        taskRunId: 'task-1.1',
+        actionAttemptId: 'task-1.1',
         workType: 'task',
       },
       { status: 'completed', artifactUploadIds: ['artup_a', 'artup_b'] },
@@ -177,7 +177,7 @@ describe('ServerConnection.report', () => {
       expect.objectContaining({
         workflowRunId: 'wf-1',
         workId: 'work-1',
-        taskRunId: 'task-1.1',
+        actionAttemptId: 'task-1.1',
         status: 'completed',
         artifactUploadIds: ['artup_a', 'artup_b'],
       }),

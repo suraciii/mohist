@@ -82,13 +82,13 @@ public partial class WorkflowRunControlApiSpecs
     }
 
     [Fact]
-    public async Task TasksBatch_PostWithExpect_PropagatesExpectIntoMaterializedTaskRun()
+    public async Task TasksBatch_PostWithExpect_PropagatesExpectIntoMaterializedWorkflowActionAttempt()
     {
         // Spec scenario "A dynamically generated task uses the canonical
         // declaration": the runner posts a generated task with both `with`
         // and `expect` to /api/workflow-runs/{wrId}/tasks/batch; the HTTP
         // DTO MUST carry `expect` through to AddTasksBatchItem.Expect and
-        // the materialized TaskRun MUST observe ExpectInput.
+        // the materialized WorkflowActionAttempt MUST observe ExpectInput.
         var (_, _, _, wrId) = await SeedActiveWorkflowAsync();
 
         var body = new
@@ -116,7 +116,7 @@ public partial class WorkflowRunControlApiSpecs
         var response = await _client.PostAsJsonAsync($"/api/workflow-runs/{wrId}/tasks/batch", body);
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
 
-        // The materialized TaskRun must carry the `expect` declaration so
+        // The materialized WorkflowActionAttempt must carry the `expect` declaration so
         // the executor's completion evaluator can read it from the dispatch
         // envelope (workflow-task-contract spec).
         var run = await LoadRunAsync(wrId);

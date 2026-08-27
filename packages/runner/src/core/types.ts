@@ -137,7 +137,7 @@ export interface PolledDispatch {
 export type WorkDispatchResponse = {
   workflowRunId: string
   workId: string
-  taskRunId?: string | null
+  actionAttemptId?: string | null
   uses?: string | null
   with?: string | null
   /**
@@ -243,7 +243,7 @@ export interface RunnerConfigResponse {
 export interface DispatchWorkItem {
   workflowRunId: string
   workId: string
-  taskRunId?: string | null
+  actionAttemptId?: string | null
   workType: string
   stage?: string | null
   title?: string | null
@@ -370,7 +370,7 @@ export type ActionResult = ({ output: JsonObject | null; error?: never } | { out
   outcome?: 'unknown'
   /**
    * Runner-private Action-result facts that must never be serialized
-   * into `WorkItemResult.output`, `TaskRun.Output`, recovery matching,
+   * into `WorkItemResult.output`, `WorkflowActionAttempt.Output`, recovery matching,
    * `setVars` projections, captured outputs, or artifacts. The boundary
    * between `ActionResult` (internal) and `WorkItemResult` (wire) is
    * where the fact is dropped. Only `mohist/opencode`-style agent

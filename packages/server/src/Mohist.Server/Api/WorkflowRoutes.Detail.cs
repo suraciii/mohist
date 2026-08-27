@@ -44,9 +44,7 @@ public static partial class WorkflowRoutes
             var detail = new WorkflowRunDetailDto(
                 status,
                 issueRef,
-                binding?.WorkflowProfileId,
-                binding?.AgentAction,
-                binding?.AgentRuntime);
+                binding?.WorkflowProfileId);
 
             return ApiResults.Ok(detail);
         });

@@ -681,8 +681,8 @@ public partial class RunnerGrain : Grain, IRunnerGrain, IRemindable
                     Title: task.Title,
                     Issue: issue,
                     TakenAt: task.StartedAt,
-                    TaskRunId: task.Id,
-                    IsAgentWork: task.AgentResultSettlement is not null));
+                    ActionAttemptId: task.Id,
+                    IsAgentWork: false));
                 continue;
             }
             if (!string.IsNullOrWhiteSpace(stage.ChecksWorkId))

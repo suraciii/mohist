@@ -28,7 +28,7 @@ internal sealed class StubWorkContextResolver : IWorkflowArtifactUploadWorkConte
 {
     private readonly Dictionary<(string WorkflowRunId, string WorkId), WorkflowActiveWorkView> _views = new();
 
-    public void Register(string workflowRunId, string workId, string taskRunId,
+    public void Register(string workflowRunId, string workId, string actionAttemptId,
         string? stage = "build", string workType = "task", string? title = null,
         string? projectId = null, int? issueNumber = null)
     {
@@ -36,7 +36,7 @@ internal sealed class StubWorkContextResolver : IWorkflowArtifactUploadWorkConte
             WorkId: workId,
             WorkType: workType,
             Stage: stage ?? "build",
-            TaskRunId: taskRunId,
+            ActionAttemptId: actionAttemptId,
             Title: title,
             ProjectId: projectId,
             IssueNumber: issueNumber);

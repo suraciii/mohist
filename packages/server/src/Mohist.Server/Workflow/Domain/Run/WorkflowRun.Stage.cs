@@ -17,9 +17,9 @@ public static partial class WorkflowRunExtensions
             var current = run.CurrentStage();
             if (current.Initialized) return [];
 
-            var newTasks = new List<TaskRun>();
+            var newTasks = new List<WorkflowActionAttempt>();
             foreach (var t in tasks)
-                newTasks.Add(TaskRun.MakeTask(
+                newTasks.Add(WorkflowActionAttempt.MakeTask(
                     newTasks,
                     t,
                     current.Attempt,
@@ -82,8 +82,8 @@ public static partial class WorkflowRunExtensions
 
     extension(StageRun stage)
     {
-        public TaskRun? RunningTask =>
-            stage.Tasks.FirstOrDefault(t => t.Status == TaskRunStatus.Running);
+        public WorkflowActionAttempt? RunningTask =>
+            stage.Tasks.FirstOrDefault(t => t.Status == WorkflowActionAttemptStatus.Running);
 
         internal bool IsAwaitingApproval =>
             stage.Status == StageRunStatus.AwaitingApproval
@@ -100,10 +100,10 @@ public static partial class WorkflowRunExtensions
             || (stage.Initialized
                 && stage.Tasks.Any(t =>
                     t.CausedByFeedbackId is not null
-                    && t.Status is not (TaskRunStatus.Completed or TaskRunStatus.Failed or TaskRunStatus.Cancelled or TaskRunStatus.Interrupted)));
+                    && t.Status is not (WorkflowActionAttemptStatus.Completed or WorkflowActionAttemptStatus.Failed or WorkflowActionAttemptStatus.Cancelled or WorkflowActionAttemptStatus.Interrupted)));
 
-        private TaskRun? CurrentTask()
-            => stage.Tasks.FirstOrDefault(t => t.Status is not (TaskRunStatus.Completed or TaskRunStatus.Failed or TaskRunStatus.Cancelled or TaskRunStatus.Interrupted));
+        private WorkflowActionAttempt? CurrentTask()
+            => stage.Tasks.FirstOrDefault(t => t.Status is not (WorkflowActionAttemptStatus.Completed or WorkflowActionAttemptStatus.Failed or WorkflowActionAttemptStatus.Cancelled or WorkflowActionAttemptStatus.Interrupted));
 
         private StageCheck FindCheck(string name)
             => stage.Checks.FirstOrDefault(c => c.Name == name)
@@ -112,7 +112,7 @@ public static partial class WorkflowRunExtensions
         public bool HasNoPendingTasksAndPassedChecks()
         {
             if (!stage.Initialized) return false;
-            var hasPendingTask = stage.Tasks.Any(t => t.Status is not (TaskRunStatus.Completed or TaskRunStatus.Failed or TaskRunStatus.Cancelled or TaskRunStatus.Interrupted));
+            var hasPendingTask = stage.Tasks.Any(t => t.Status is not (WorkflowActionAttemptStatus.Completed or WorkflowActionAttemptStatus.Failed or WorkflowActionAttemptStatus.Cancelled or WorkflowActionAttemptStatus.Interrupted));
             if (hasPendingTask) return false;
             return stage.Checks.All(c => c.Status == StageCheckStatus.Passed);
         }
@@ -165,12 +165,12 @@ public static partial class WorkflowRunExtensions
             stage.Status = StageRunStatus.Running;
         }
 
-        private void RetryFailedTask(WorkflowRun run, string taskRunId)
+        private void RetryFailedTask(WorkflowRun run, string actionAttemptId)
         {
-            var failedTask = stage.Tasks.LastOrDefault(t => t.Id == taskRunId && t.Status == TaskRunStatus.Failed)
-                ?? throw new InvalidOperationException($"Failed task {taskRunId} not found or not in failed state");
+            var failedTask = stage.Tasks.LastOrDefault(t => t.Id == actionAttemptId && t.Status == WorkflowActionAttemptStatus.Failed)
+                ?? throw new InvalidOperationException($"Failed task {actionAttemptId} not found or not in failed state");
 
-            var newTask = TaskRun.MakeTask(
+            var newTask = WorkflowActionAttempt.MakeTask(
                 stage.Tasks,
                 failedTask.ToDefinition(),
                 stage.Attempt,

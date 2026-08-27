@@ -1,11 +1,5 @@
 # Workflow Definition Reference
 
-> **Status: legacy implementation.** The `uses`/`with` Action syntax below is the current
-> implementation. The target model ([`../design/agent-execution.md`](../design/agent-execution.md))
-> replaces executable-task Actions with Mohist Agent names, decided in
-> [`../design/decisions/workflow-agent-binding.md`](../design/decisions/workflow-agent-binding.md);
-> the syntax below remains the current implementation until the migration lands.
-
 A Workflow Profile Definition is a YAML document. It declares the Stages that
 an Issue follows, the initial Tasks, Checks, approval points, and the rules that
 produce follow-up Tasks. This document is the complete syntax reference for a
@@ -16,8 +10,8 @@ During a run, retry, recovery, approval feedback, and control commands such as
 `mo issue rebase` can produce additional Tasks. These Tasks belong to the
 current WorkflowRun and do not rewrite the Definition.
 
-A complete Profile source may also contain `id`, `name`, `description`, and
-`agentAction` metadata. Those fields belong to the Profile and are removed
+A complete Profile source may also contain `id`, `name`, and `description`
+metadata. Those fields belong to the Profile and are removed
 before Mohist parses the Definition described here.
 
 ## Top-Level Structure
@@ -95,11 +89,8 @@ Repository independently for branch stability and clean-worktree enforcement,
 including when an Agent executes from the Workspace root. A path that escapes
 the Workspace fails the Task.
 
-`uses` normally contains a literal concrete Action name. A Profile that declares
-`agentAction` may instead use the complete scalar `${{ profile.agentAction }}`.
-Mohist replaces it with the effective Project binding before Definition and
-Action-contract validation. It is not a runtime expression, cannot be embedded
-in another string, and never reaches a TaskRun or Runner.
+`uses` always contains a literal concrete Action name; there is no dynamic or
+template-driven `uses` value.
 
 ### `expect`: Completion Requirements
 
@@ -181,10 +172,6 @@ Workflow does not enter the next Stage.
 Fields under `with` and `expect` can use `${{ }}` expressions. The available
 namespaces are listed below. A root reference not listed here is invalid.
 
-`${{ profile.agentAction }}` is the one compile-time Profile expression. It is
-valid only as a complete `uses` value and is not part of the runtime namespace
-list below.
-
 - `workflow.runId`: the current Run identifier.
 - `stage.name`: the current Stage name.
 - `work.*`: current work information, such as `work.id`, `work.type`,
@@ -233,9 +220,8 @@ list below.
 
 ## Validate a Definition
 
-When you save a Profile, Mohist first validates and materializes the optional
-Agent Action binding, then validates the Definition structure, field types,
-template expressions, and concrete Action contracts. It returns all problems
+When you save a Profile, Mohist validates the Definition structure, field
+types, template expressions, and concrete Action contracts. It returns all problems
 in one response. You can validate Profile composition and Definition syntax
 locally without a running Server:
 
@@ -245,9 +231,9 @@ mo workflow validate --file -
 ```
 
 The local command cannot check current Action availability. The save operation
-uses Action contracts from the current Runner to determine whether the effective
-`agentAction` declares `agent-turn`, whether each concrete `uses` is available,
-and whether `with` satisfies the selected Action's input contract.
+uses Action contracts from the current Runner to determine whether each
+concrete `uses` is available and whether `with` satisfies the selected Action's
+input contract.
 
 ## Complete Example
 
@@ -259,22 +245,22 @@ approval:
   feedback:
     tasks:
       - id: apply-feedback
-        uses: mohist/opencode
+        uses: mohist/agent
         with:
+          name: mohist/builder
           session: ${{ stage.name }}
           prompt: ${{ prompts.apply-feedback }}
-          options: ${{ vars.agent }}
 
 stages:
   - stage: plan
     requiresApproval: true
     tasks:
-      - id: plan
-        uses: mohist/opencode
+      - id: proposal
+        uses: mohist/agent
         with:
+          name: mohist/planner
           session: plan
-          prompt: ${{ prompts.plan }}
-          options: ${{ vars.agent }}
+          prompt: ${{ prompts.proposal }}
         expect:
           files:
             - path: PLANS/PLAN.md
@@ -331,11 +317,11 @@ stages:
             - when: error.code=pr-checks-failed
               tasks:
                 - id: recover:fix-pr-checks
-                  uses: mohist/opencode
+                  uses: mohist/agent
                   with:
+                    name: mohist/builder
                     session: integrate
                     prompt: ${{ prompts.fix-pr-checks }}
-                    options: ${{ vars.agent }}
                 - id: recover:push
                   uses: mohist/push
                   with:

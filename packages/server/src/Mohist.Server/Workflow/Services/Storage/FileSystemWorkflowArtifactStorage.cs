@@ -65,10 +65,10 @@ public sealed class FileSystemWorkflowArtifactStorage : IWorkflowArtifactStorage
 
     public string GenerateStoragePath(
         string workflowRunId,
-        string taskRunId,
+        string actionAttemptId,
         string artifactId,
         WorkflowArtifactStorageKind kind) =>
-        WorkflowArtifactStoragePath.ForArtifact(workflowRunId, taskRunId, artifactId, kind).Value;
+        WorkflowArtifactStoragePath.ForArtifact(workflowRunId, actionAttemptId, artifactId, kind).Value;
 
     public async Task<WorkflowArtifactStorageWriteResult> WriteFileAsync(
         string storagePath,
@@ -536,7 +536,7 @@ public sealed class FileSystemWorkflowArtifactStorage : IWorkflowArtifactStorage
             return;
 
         metadata.WorkflowRunId = identity.WorkflowRunId;
-        metadata.TaskRunId = identity.TaskRunId;
+        metadata.ActionAttemptId = identity.ActionAttemptId;
         metadata.ArtifactId = identity.ArtifactId;
     }
 }

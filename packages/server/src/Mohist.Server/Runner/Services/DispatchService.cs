@@ -400,11 +400,6 @@ public sealed class DispatchService : IScopedService
         var run = await _workflowRuns.LoadAsync(workflowRunId, ct);
         if (run is null)
             return (WorkflowOwnerKey(workflowRunId), null, ReserveSlot: true);
-        // The owner deadline is the release authority for a blocked Agent
-        // settlement. A stale active-work projection must not reclaim capacity.
-        if (run.HasBlockedAgentResult())
-            return (null, null, ReserveSlot: false);
-
         var activeWork = run.CurrentActiveWorkFor(runnerId);
         if (activeWork is null)
             return (null, null, ReserveSlot: false);
@@ -413,11 +408,6 @@ public sealed class DispatchService : IScopedService
 
         var workId = activeWork.WorkId;
         var workKey = WorkflowWorkKey(workflowRunId, workId);
-        // An accepted unknown Agent result is owner settlement state, not a
-        // lost dispatch. Reserve the original work until the owner deadline,
-        // but never emit a dispatch that could start a second execution.
-        if (run.HasUnresolvedAgentResult())
-            return (workKey, null, ReserveSlot: true);
         if (reportedWorkKeys.Contains(workKey))
             return (workKey, null, ReserveSlot: true);
 

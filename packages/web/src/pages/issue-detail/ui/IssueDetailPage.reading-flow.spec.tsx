@@ -369,7 +369,7 @@ describe('IssueDetailPage Artifacts ownership', () => {
   const artifact = {
     artifactId: 'artifact-review',
     workflowRunId: 'wr-1',
-    taskRunId: 'build.1',
+    actionAttemptId: 'build.1',
     path: 'PLANS/REVIEW.md',
     displayName: 'REVIEW.md',
     kind: 'file',

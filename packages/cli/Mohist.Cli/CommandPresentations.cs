@@ -688,7 +688,7 @@ internal static class CommandPresentations
                 CommandPresentationCatalog.Attach(Find(group, "transcript"), new CommandPresentation(
                     CommandCapability.Automation, "Print the Session transcript"));
                 CommandPresentationCatalog.Attach(Find(group, "followup"), new CommandPresentation(
-                    CommandCapability.Automation, "Send follow-up text to an AgentSession. It joins an active turn or starts a user-initiated turn when idle without creating a TaskRun or AgentJob."));
+                    CommandCapability.Automation, "Send follow-up text to an AgentSession. It joins an active turn or starts a user-initiated turn when idle without creating a WorkflowActionAttempt or AgentJob."));
                 CommandPresentationCatalog.Attach(Find(group, "compact"), new CommandPresentation(
                     CommandCapability.Automation, "Compact the session in place"));
                 CommandPresentationCatalog.Attach(Find(group, "reset"), new CommandPresentation(

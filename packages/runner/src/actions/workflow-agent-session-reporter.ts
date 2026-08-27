@@ -11,7 +11,7 @@ const log = runnerLogger.child('session')
 
 export interface WorkflowAgentSessionWorkMetadata {
   readonly workId: string
-  readonly taskRunId: string
+  readonly actionAttemptId: string
   readonly runnerId: string
   readonly agentSessionId: string
   readonly workType: string
@@ -86,7 +86,7 @@ export class WorkflowAgentSessionReporter {
         ? null
         : workflowCleanupOperationId(
             this.workflowRunId,
-            this.workMetadata.taskRunId,
+            this.workMetadata.actionAttemptId,
             this.workMetadata.workId,
             this.cleanupAttempt,
           )
@@ -113,7 +113,7 @@ export class WorkflowAgentSessionReporter {
           record.target.sessionName === this.sessionName &&
           record.runtimeSessionId === runtimeSessionId &&
           record.work?.workId === this.workMetadata.workId &&
-          record.work?.taskRunId === this.workMetadata.taskRunId &&
+          record.work?.actionAttemptId === this.workMetadata.actionAttemptId &&
           record.event.type === 'session.input',
       )
     if (pending && pending.event.payload.text !== prompt)
@@ -356,7 +356,7 @@ export class WorkflowAgentSessionReporter {
       runtime: this.runtime,
       work: {
         workId: this.workMetadata.workId,
-        taskRunId: this.workMetadata.taskRunId,
+        actionAttemptId: this.workMetadata.actionAttemptId,
         runnerId: this.workMetadata.runnerId,
         agentSessionId: this.workMetadata.agentSessionId,
         workType: this.workMetadata.workType,
@@ -412,7 +412,7 @@ export class WorkflowAgentSessionReporter {
       runtime: this.runtime,
       work: {
         workId: this.workMetadata.workId,
-        taskRunId: this.workMetadata.taskRunId,
+        actionAttemptId: this.workMetadata.actionAttemptId,
         runnerId: this.workMetadata.runnerId,
         agentSessionId: this.workMetadata.agentSessionId,
         workType: this.workMetadata.workType,
@@ -487,11 +487,11 @@ export class WorkflowAgentSessionReporter {
 
 export function workflowCleanupOperationId(
   workflowRunId: string,
-  taskRunId: string,
+  actionAttemptId: string,
   workId: string,
   cleanupAttempt: number,
 ): string {
-  return `workflow-cleanup:${workflowRunId}:${taskRunId}:${workId}:${cleanupAttempt}`
+  return `workflow-cleanup:${workflowRunId}:${actionAttemptId}:${workId}:${cleanupAttempt}`
 }
 
 export function workflowCleanupInputDeliveryId(operationId: string): string {

@@ -1,7 +1,7 @@
 # `mohist/pi` Action
 
-> **Status: legacy implementation.** See [Action Contracts](README.md) for the target model that
-> replaces Workflow-owned Actions with Agent launches.
+> `mohist/pi` is an Agent-to-Runner runtime contract. Workflow Profiles use
+> [`mohist/agent`](agent.md), not this Action directly.
 
 `mohist/pi` delegates one unit of work to Pi and reports the execution facts.
 It is a peer of [`mohist/opencode`](opencode.md): a Workflow selects one backend

@@ -125,7 +125,6 @@ internal sealed class WorkflowGrainTestProfileCoordinator(
             payload.EpicNumber,
             payload.ExplicitProfileId,
             profile.Id,
-            profile.AgentAction,
             profile.Definition.Stages
                 .Select(stage => new BoundStageStructure(stage.Stage, stage.RequiresApproval))
                 .ToList(),
@@ -136,7 +135,6 @@ internal sealed class WorkflowGrainTestProfileCoordinator(
             bound.Stages.Select(stage => new StageStructure(stage.Stage, stage.RequiresApproval)).ToList());
         var run = WorkflowRun.Create(payload.WorkflowRunId, structure, payload.Metadata.CreatedAt, payload.Metadata);
         run.ExplicitWorkflowProfileId = payload.ExplicitProfileId;
-        run.AgentAction = bound.AgentAction;
         run.Workspace = payload.Workspace;
         await runs.SaveAsync(run);
 
@@ -154,7 +152,6 @@ internal sealed class WorkflowGrainTestProfileCoordinator(
         run.Metadata.EpicNumber,
         run.ExplicitWorkflowProfileId,
         run.WorkflowProfileId ?? string.Empty,
-        run.AgentAction,
         run.Stages.Select(stage => new BoundStageStructure(stage.Id, stage.RequiresApproval)).ToList(),
         run.Metadata,
         run.Workspace);
@@ -164,11 +161,6 @@ internal sealed class WorkflowGrainTestProfileCoordinator(
         string commandId,
         long? expectedRevision) =>
         throw new NotSupportedException();
-
-    public Task<WorkflowProfileReferenceResult> SetAgentActionOverrideAsync(
-        WorkflowProfileCommandPayload.SetAgentActionOverride payload,
-        string commandId,
-        long? expectedRevision) => throw new NotSupportedException();
 
     public Task<WorkflowProfileSaveResult> UpdateProfileAsync(
         WorkflowProfileCommandPayload.UpdateProfile payload,

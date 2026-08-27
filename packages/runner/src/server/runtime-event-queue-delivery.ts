@@ -28,7 +28,7 @@ export function createServerRuntimeEventDelivery(options: RuntimeEventDeliveryOp
       prompt.length === 0 ||
       typeof operationId !== 'string' ||
       operationId !== record.id ||
-      !work.taskRunId ||
+      !work.actionAttemptId ||
       !work.workId ||
       !work.agentSessionId ||
       !record.runtime ||
@@ -43,7 +43,7 @@ export function createServerRuntimeEventDelivery(options: RuntimeEventDeliveryOp
       {
         cleanupOperationId: operationId,
         prompt,
-        taskRunId: work.taskRunId,
+        actionAttemptId: work.actionAttemptId,
         workId: work.workId,
         agentSessionId: work.agentSessionId,
         runtime: record.runtime,
@@ -152,7 +152,7 @@ function envelope(record: RuntimeEventRecord) {
     workId: work?.workId ?? null,
     workType: work?.workType ?? null,
     stage: work?.stage ?? null,
-    taskRunId: work?.taskRunId ?? null,
+    actionAttemptId: work?.actionAttemptId ?? null,
     inputDeliveryId: work?.inputDeliveryId ?? null,
     agentSessionId: work?.agentSessionId ?? null,
     agentTurnId: work?.agentTurnId ?? null,
@@ -176,7 +176,7 @@ function batchEnvelope(records: readonly RuntimeEventRecord[]) {
     workId: work?.workId ?? null,
     workType: work?.workType ?? null,
     stage: work?.stage ?? null,
-    taskRunId: work?.taskRunId ?? null,
+    actionAttemptId: work?.actionAttemptId ?? null,
     inputDeliveryId: work?.inputDeliveryId ?? null,
     agentSessionId: work?.agentSessionId ?? null,
     agentTurnId: work?.agentTurnId ?? null,

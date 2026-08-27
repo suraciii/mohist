@@ -31,7 +31,7 @@ public sealed class WorkflowRecoveryContinuationSpecs
                 Output: null,
                 Artifacts: null,
                 Detail: null,
-                TaskRunId: freshWorkId,
+                ActionAttemptId: freshWorkId,
                 AddTasks: new List<RuntimeTaskInput>
                 {
                     OrleansL0WorkflowGrainFixture.RecoveryFollowUp()

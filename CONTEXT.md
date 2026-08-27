@@ -117,8 +117,8 @@ lifecycle.
 
 **Mohist Agent**:
 A predefined, reusable Agent resource within a Project that has a stable
-identity and can start independently or as a Workflow worker. Workflow tasks,
-the Web UI, CLI, Agent Connections, event routing, and comment mentions all use
+identity and can start independently or as a Workflow worker. `mohist/agent`
+Workflow tasks, the Web UI, CLI, Agent Connections, event routing, and comment mentions all use
 the same Agent launch boundary.
 
 **Agent Readiness**:
@@ -128,8 +128,8 @@ complete, with value `ready`, `needs-setup`, or `unknown`; it is not the
 an entry point cannot infer `ready` or failed from `unknown`.
 
 **AgentJob**:
-The sole top-level execution unit, created whenever a Workflow task or another
-entry point starts a Mohist Agent. It owns scheduling, result, retry, and
+The sole top-level Agent execution unit, created whenever a `mohist/agent`
+Workflow task or another entry point starts a Mohist Agent. It owns scheduling, result, retry, and
 recovery and is associated with the first AgentTurn in an AgentSession. It is
 neither the continuing conversation nor the arbiter of subsequent Follow-up
 work.

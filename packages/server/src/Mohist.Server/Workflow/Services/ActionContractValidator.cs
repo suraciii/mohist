@@ -84,46 +84,6 @@ internal static class ActionContractValidator
             .ToArray();
     }
 
-    public static IReadOnlyList<ValidationError> ValidateAgentAction(
-        WorkflowDefinition? definition,
-        string agentAction,
-        ActionCatalog catalog)
-    {
-        var errors = new List<ValidationError>();
-        var selected = catalog.Actions.FirstOrDefault(action =>
-            string.Equals(action.Name, agentAction, StringComparison.Ordinal));
-        var tombstone = catalog.Tombstones.FirstOrDefault(action =>
-            string.Equals(action.Name, agentAction, StringComparison.Ordinal));
-
-        if (tombstone is not null)
-            errors.Add(new ValidationError("agentAction", $"Agent Action '{agentAction}' was removed: {tombstone.Guidance}", ValidationSource.Action));
-        else if (selected is null)
-            errors.Add(new ValidationError("agentAction", $"Agent Action '{agentAction}' is not available in the current Runner catalog", ValidationSource.Action));
-        else if (selected.Capabilities?.Contains(AgentTurnCapability, StringComparer.Ordinal) != true)
-            errors.Add(new ValidationError("agentAction", $"Action '{agentAction}' does not declare the '{AgentTurnCapability}' capability", ValidationSource.Action));
-
-        if (definition is not null)
-        {
-            foreach (var (path, uses) in EnumerateUses(definition))
-            {
-                var action = catalog.Actions.FirstOrDefault(entry => string.Equals(entry.Name, uses, StringComparison.Ordinal));
-                if (action?.Capabilities?.Contains(AgentTurnCapability, StringComparer.Ordinal) == true
-                    && !string.Equals(uses, agentAction, StringComparison.Ordinal))
-                {
-                    errors.Add(new ValidationError(
-                        $"{path}.uses",
-                        $"Agent Action binding '{agentAction}' cannot be mixed with literal Agent Action '{uses}'",
-                        ValidationSource.Action));
-                }
-            }
-        }
-
-        return errors
-            .OrderBy(error => error.Path, StringComparer.Ordinal)
-            .ThenBy(error => error.Message, StringComparer.Ordinal)
-            .ToArray();
-    }
-
     private static IEnumerable<(string Path, string Uses)> EnumerateUses(WorkflowDefinition definition)
     {
         static IEnumerable<(string Path, string Uses)> TaskUses(TaskDefinition task, string path)

@@ -269,7 +269,7 @@ public sealed class MixedOwnerDispatchSpecs : Mohist.Server.SpecTests.Specs.Work
                 TaskReportStatus.Succeeded,
                 Output: null,
                 Artifacts: null,
-                TaskRunId: workflowWork.TaskRunId)));
+                ActionAttemptId: workflowWork.ActionAttemptId)));
         var lateAgentReport = await job.ReportResultAsync(
             runnerId,
             agentWork.WorkId,

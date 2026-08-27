@@ -18,7 +18,7 @@ public class TaskRequiredFilesTests
                 """),
         };
 
-        var result = TaskRunExtensions.ExtractRequiredFiles(expect);
+        var result = WorkflowActionAttemptExtensions.ExtractRequiredFiles(expect);
 
         Assert.Single(result);
         Assert.Equal("proposal.md", result[0].Path);
@@ -41,7 +41,7 @@ public class TaskRequiredFilesTests
                 """),
         };
 
-        var result = TaskRunExtensions.ExtractRequiredFiles(expect);
+        var result = WorkflowActionAttemptExtensions.ExtractRequiredFiles(expect);
 
         Assert.Equal(3, result.Count);
         Assert.Equal("proposal.md", result[0].Path);
@@ -57,7 +57,7 @@ public class TaskRequiredFilesTests
             ["session"] = JsonSerializer.Deserialize<JsonElement>("\"plan\""),
         };
 
-        var result = TaskRunExtensions.ExtractRequiredFiles(expect);
+        var result = WorkflowActionAttemptExtensions.ExtractRequiredFiles(expect);
 
         Assert.Empty(result);
     }
@@ -65,7 +65,7 @@ public class TaskRequiredFilesTests
     [Fact]
     public void ExtractRequiredFiles_WithNullInput_ReturnsEmpty()
     {
-        var result = TaskRunExtensions.ExtractRequiredFiles(null);
+        var result = WorkflowActionAttemptExtensions.ExtractRequiredFiles(null);
         Assert.Empty(result);
     }
 
@@ -79,7 +79,7 @@ public class TaskRequiredFilesTests
                 """),
         };
 
-        var result = TaskRunExtensions.ExtractRequiredFiles(expect);
+        var result = WorkflowActionAttemptExtensions.ExtractRequiredFiles(expect);
 
         Assert.Single(result);
         Assert.Equal("valid.md", result[0].Path);
@@ -101,7 +101,7 @@ public class TaskRequiredFilesTests
                 """),
         };
 
-        var result = TaskRunExtensions.ExtractRequiredFiles(expect);
+        var result = WorkflowActionAttemptExtensions.ExtractRequiredFiles(expect);
 
         Assert.Single(result);
         Assert.Equal("review.md", result[0].Path);
@@ -112,22 +112,22 @@ public class TaskRequiredFilesTests
     [Fact]
     public void DeriveClassification_ForCoreAndMohistInternal_UsesOrchestration()
     {
-        var classification = TaskRunExtensions.DeriveClassification("core/script", null);
+        var classification = WorkflowActionAttemptExtensions.DeriveClassification("core/script", null);
         Assert.Equal(TaskClassification.Orchestration, classification);
     }
 
     [Fact]
     public void DeriveClassification_ForAgentTask_UsesUserFacing()
     {
-        var classification = TaskRunExtensions.DeriveClassification("mohist/opencode", null);
+        var classification = WorkflowActionAttemptExtensions.DeriveClassification("mohist/opencode", null);
         Assert.Equal(TaskClassification.UserFacing, classification);
 
-        classification = TaskRunExtensions.DeriveClassification("anthropic/claude", null);
+        classification = WorkflowActionAttemptExtensions.DeriveClassification("anthropic/claude", null);
         Assert.Equal(TaskClassification.UserFacing, classification);
     }
 
     [Fact]
-    public void TaskRun_WithRequiredFiles_ContainsMetadata()
+    public void WorkflowActionAttempt_WithRequiredFiles_ContainsMetadata()
     {
         var withDict = JsonSerializer.Deserialize<Dictionary<string, JsonElement?>>("""
             {"session": "plan"}
@@ -135,9 +135,9 @@ public class TaskRequiredFilesTests
         var expectDict = JsonSerializer.Deserialize<Dictionary<string, JsonElement?>>("""
             {"files": [{"path": "proposal.md"}]}
             """)!;
-        var requiredFiles = TaskRunExtensions.ExtractRequiredFiles(expectDict);
+        var requiredFiles = WorkflowActionAttemptExtensions.ExtractRequiredFiles(expectDict);
 
-        var taskRun = new TaskRun
+        var taskRun = new WorkflowActionAttempt
         {
             Id = "proposal.1",
             DefinitionId = "proposal",
@@ -146,9 +146,9 @@ public class TaskRequiredFilesTests
             Uses = "mohist/opencode",
             WithInput = withDict,
             ExpectInput = expectDict,
-            Status = TaskRunStatus.Pending,
+            Status = WorkflowActionAttemptStatus.Pending,
             RequiredFiles = requiredFiles,
-            Classification = TaskRunExtensions.DeriveClassification("mohist/opencode", requiredFiles)
+            Classification = WorkflowActionAttemptExtensions.DeriveClassification("mohist/opencode", requiredFiles)
         };
 
         Assert.NotNull(taskRun.RequiredFiles);
@@ -158,7 +158,7 @@ public class TaskRequiredFilesTests
     }
 
     [Fact]
-    public void TaskRun_StatusCanBeUpdated_WithoutRemovingRequiredFiles()
+    public void WorkflowActionAttempt_StatusCanBeUpdated_WithoutRemovingRequiredFiles()
     {
         var withDict = JsonSerializer.Deserialize<Dictionary<string, JsonElement?>>("""
             {"session": "plan"}
@@ -166,8 +166,8 @@ public class TaskRequiredFilesTests
         var expectDict = JsonSerializer.Deserialize<Dictionary<string, JsonElement?>>("""
             {"files": [{"path": "design.md"}]}
             """)!;
-        var requiredFiles = TaskRunExtensions.ExtractRequiredFiles(expectDict);
-        var taskRun = new TaskRun
+        var requiredFiles = WorkflowActionAttemptExtensions.ExtractRequiredFiles(expectDict);
+        var taskRun = new WorkflowActionAttempt
         {
             Id = "design.1",
             DefinitionId = "design",
@@ -176,21 +176,21 @@ public class TaskRequiredFilesTests
             Uses = "mohist/opencode",
             WithInput = withDict,
             ExpectInput = expectDict,
-            Status = TaskRunStatus.Pending,
+            Status = WorkflowActionAttemptStatus.Pending,
             RequiredFiles = requiredFiles
         };
 
         Assert.NotNull(taskRun.RequiredFiles);
         Assert.Single(taskRun.RequiredFiles);
 
-        taskRun.Status = TaskRunStatus.Completed;
-        Assert.Equal(TaskRunStatus.Completed, taskRun.Status);
+        taskRun.Status = WorkflowActionAttemptStatus.Completed;
+        Assert.Equal(WorkflowActionAttemptStatus.Completed, taskRun.Status);
         Assert.NotNull(taskRun.RequiredFiles);
         Assert.Equal("design.md", taskRun.RequiredFiles[0].Path);
     }
 
     [Fact]
-    public void TaskRun_NoFileContentStored()
+    public void WorkflowActionAttempt_NoFileContentStored()
     {
         var withDict = JsonSerializer.Deserialize<Dictionary<string, JsonElement?>>("""
             {"session": "plan"}
@@ -198,8 +198,8 @@ public class TaskRequiredFilesTests
         var expectDict = JsonSerializer.Deserialize<Dictionary<string, JsonElement?>>("""
             {"files": [{"path": "proposal.md"}]}
             """)!;
-        var requiredFiles = TaskRunExtensions.ExtractRequiredFiles(expectDict);
-        var taskRun = new TaskRun
+        var requiredFiles = WorkflowActionAttemptExtensions.ExtractRequiredFiles(expectDict);
+        var taskRun = new WorkflowActionAttempt
         {
             Id = "proposal.1",
             DefinitionId = "proposal",
@@ -208,7 +208,7 @@ public class TaskRequiredFilesTests
             Uses = "mohist/opencode",
             WithInput = withDict,
             ExpectInput = expectDict,
-            Status = TaskRunStatus.Pending,
+            Status = WorkflowActionAttemptStatus.Pending,
             RequiredFiles = requiredFiles
         };
 

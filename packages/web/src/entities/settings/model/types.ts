@@ -106,7 +106,7 @@ export interface SystemUpdateRecoveryWork {
   ownerKind: string
   ownerId: string
   workId: string
-  taskRunId?: string | null
+  actionAttemptId?: string | null
   workType: string
   status: string
   state: string
@@ -135,8 +135,6 @@ export interface WorkflowProfileInfo {
   description: string
   isDefault: boolean
   isBuiltIn?: boolean
-  agentAction?: string | null
-  agentRuntime?: AgentRuntime | null
 }
 
 export interface WorkflowProfileStageSummary {
@@ -157,8 +155,6 @@ export interface WorkflowProfileDetail {
   definitionSource?: string | null
   yaml: string
   stages: WorkflowProfileStageSummary[]
-  agentAction?: string | null
-  agentRuntime?: AgentRuntime | null
 }
 
 export interface ActionCatalogEntry {

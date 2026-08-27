@@ -22,7 +22,7 @@ type ActionContext = {
   writeVars: (vars: JsonObject) => Promise<void>
   projectId?: string | null
   parentIssueContext?: ParentIssueContext | null
-  taskRunId?: string | null
+  actionAttemptId?: string | null
   runnerId?: string | null
   runtimeEventQueue?: AgentSessionRuntimeEventQueue | null
   runtimeEventRecordId?: () => string
@@ -386,7 +386,7 @@ describe('mohist/pi Action', () => {
     const execution = piAction(
       context({
         with: { prompt: 'recover Pi input', timeout: 1_000 },
-        taskRunId: 'task-pi',
+        actionAttemptId: 'task-pi',
         runnerId: 'runner-pi',
         runtimeEventQueue: queue,
         runtimeEventRecordId: () => 'pi-recovery-input',
@@ -444,7 +444,7 @@ describe('mohist/pi Action', () => {
     const result = await piAction(
       context({
         with: { prompt: 'wait for Pi input', timeout: 250 },
-        taskRunId: 'task-1',
+        actionAttemptId: 'task-1',
         runnerId: 'runner-1',
         runtimeEventQueue: outbox,
         runtimeEventRecordId: () => 'input-1',
@@ -493,7 +493,7 @@ describe('mohist/pi Action', () => {
     const result = await piAction(
       context({
         with: { prompt: 'cancel Pi input', timeout: 1_000 },
-        taskRunId: 'task-1',
+        actionAttemptId: 'task-1',
         runnerId: 'runner-1',
         runtimeEventQueue: outbox,
         runtimeEventRecordId: () => 'input-1',
@@ -550,7 +550,7 @@ describe('mohist/pi Action', () => {
       context({
         signal: controller.signal,
         with: { prompt: 'run Pi', timeout: 12_345 },
-        taskRunId: 'task-1',
+        actionAttemptId: 'task-1',
         runnerId: 'runner-1',
         runtimeEventQueue: outbox,
         runtimeEventRecordId: () => 'input-1',

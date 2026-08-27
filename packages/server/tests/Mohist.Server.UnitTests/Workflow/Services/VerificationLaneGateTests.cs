@@ -253,13 +253,13 @@ public sealed class VerificationLaneGateTests
             };
             foreach (var task in stage.Tasks)
             {
-                runStage.Tasks.Add(new TaskRun
+                runStage.Tasks.Add(new WorkflowActionAttempt
                 {
                     Id = task.Id + ".1",
                     DefinitionId = task.Id,
                     Attempt = 1,
                     Title = task.Title ?? task.Id,
-                    Status = TaskRunStatus.Pending,
+                    Status = WorkflowActionAttemptStatus.Pending,
                     Uses = task.Uses,
                     WithInput = task.With,
                     Classification = TaskClassification.Orchestration,
@@ -306,7 +306,7 @@ public sealed class VerificationLaneGateTests
                 Order: i,
                 ConfiguredBudgetMs: BudgetMs,
                 Outcome: outcomes[i],
-                TaskRunId: task.Id);
+                ActionAttemptId: task.Id);
         }
 
         return run;

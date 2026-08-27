@@ -100,7 +100,7 @@ public sealed class WorkflowGrainStageInitSpecs
             buildStage.Initialized,
             "Rerun must re-initialize the stage in the same commit as the new StageStarted");
         Assert.NotEmpty(buildStage.Tasks);
-        Assert.Equal(TaskRunStatus.Pending, buildStage.Tasks[0].Status);
+        Assert.Equal(WorkflowActionAttemptStatus.Pending, buildStage.Tasks[0].Status);
     }
 
     [Fact]

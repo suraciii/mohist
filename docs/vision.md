@@ -44,7 +44,7 @@ and take over manually.
   carries requirements, discussion, and history from Draft to Done. Readiness
   stays outside execution so incomplete requirements do not consume capacity.
   [The Workflow](the-workflow.md) defines the default line.
-- **Agents are workers**: Every executable Workflow task starts a configured
+- **Agents are workers**: Every Agent-backed Workflow task starts a configured
   Mohist Agent through the same AgentJob boundary used by the Web UI, CLI, an
   Agent Connection, an event, or a comment mention. An AgentSession records the
   session persistently so that it can recover from interruption. An External

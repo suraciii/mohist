@@ -10,7 +10,7 @@ public class WorkflowRunFailureTests
     [Fact]
     public void RetryTarget_ResolvesLegacyContextExhaustionToFailedTask()
     {
-        var run = FailedTaskRun();
+        var run = FailedWorkflowActionAttempt();
         var task = run.CurrentStage().Tasks.Single();
         run.Failure = run.CurrentStage().Failure = new FailureDetails(
             FailureReason.ContextExhaustion,
@@ -28,15 +28,15 @@ public class WorkflowRunFailureTests
     [Fact]
     public void Retry_UsesResolvedLegacyTaskTarget()
     {
-        var run = FailedTaskRun();
+        var run = FailedWorkflowActionAttempt();
         var stage = run.CurrentStage();
         stage.Failure = run.Failure = new FailureDetails(FailureReason.ContextExhaustion, stage.Id);
 
         run.Retry(DateTimeOffset.UnixEpoch);
 
         Assert.Equal(2, stage.Tasks.Count);
-        Assert.Equal(TaskRunStatus.Failed, stage.Tasks[0].Status);
-        Assert.Equal(TaskRunStatus.Pending, stage.Tasks[1].Status);
+        Assert.Equal(WorkflowActionAttemptStatus.Failed, stage.Tasks[0].Status);
+        Assert.Equal(WorkflowActionAttemptStatus.Pending, stage.Tasks[1].Status);
         Assert.Equal(WorkflowRunStatus.Ready, run.Status);
     }
 
@@ -78,7 +78,7 @@ public class WorkflowRunFailureTests
     [Fact]
     public void FailureWithoutRetryTarget_HidesRetryAndDoesNotMutateOnRetry()
     {
-        var run = FailedTaskRun();
+        var run = FailedWorkflowActionAttempt();
         var stage = run.CurrentStage();
         stage.Failure = run.Failure = new FailureDetails(FailureReason.ApprovalRejected, stage.Id);
         var beforeStatus = run.Status;
@@ -90,7 +90,7 @@ public class WorkflowRunFailureTests
         Assert.Equal(beforeTaskStatus, stage.Tasks.Single().Status);
     }
 
-    private static WorkflowRun FailedTaskRun()
+    private static WorkflowRun FailedWorkflowActionAttempt()
     {
         var run = WorkflowRun.Create(
             "wr-task",

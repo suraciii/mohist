@@ -18,7 +18,7 @@ import {
 } from '../../../entities/issue'
 import type { Issue, LabelMap } from '../../../entities/issue'
 import {
-  getWorkflowProfileAgentRuntime,
+  AGENT_RUNTIME_OPENCODE,
   useAvailableModelIds,
   useEffectiveDefaultWorkflowProfile,
   useWorkflowProfiles,
@@ -223,7 +223,7 @@ function CreateIssueDialogContent({ open, onClose }: Props) {
     : workflowTouched
       ? (workflowProfileId ?? '')
       : (recommendedWorkflowProfileId ?? defaultProfileId ?? '')
-  const selectedWorkflowRuntime = getWorkflowProfileAgentRuntime(workflowProfiles, workflowSelectValue || null)
+  const selectedAgentRuntime = AGENT_RUNTIME_OPENCODE
 
   const mutation = useMutation({
     mutationFn: () => {
@@ -492,11 +492,11 @@ function CreateIssueDialogContent({ open, onClose }: Props) {
             </select>
           </div>
 
-          {(selectedWorkflowRuntime !== null || model) && (
+          {(selectedAgentRuntime !== null || model) && (
             <div>
               <label className="block text-xs font-medium text-foreground mb-1">Coder Model</label>
               <ModelPresetSelect
-                runtime={selectedWorkflowRuntime}
+                runtime={selectedAgentRuntime}
                 value={model}
                 variant={modelVariant}
                 onChange={setModel}

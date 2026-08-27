@@ -43,7 +43,7 @@ export interface RuntimeEventWorkMetadata {
   readonly workId: string
   readonly workType: string
   readonly stage: string | null
-  readonly taskRunId?: string | null
+  readonly actionAttemptId?: string | null
   readonly runnerId?: string | null
   readonly agentSessionId?: string | null
   readonly inputDeliveryId?: string | null

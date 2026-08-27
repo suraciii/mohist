@@ -32,8 +32,8 @@ public static partial class WorkflowRunExtensions
             if (active.IsTask)
             {
                 var task = run.CurrentStage().Tasks.SingleOrDefault(candidate =>
-                    string.Equals(candidate.Id, active.TaskRunId, StringComparison.Ordinal));
-                if (task is null || task.AgentResultSettlement is not null)
+                    string.Equals(candidate.Id, active.ActionAttemptId, StringComparison.Ordinal));
+                if (task is null)
                     return WorkInterruptionUpdate.Rejected;
                 if (task.Interruption is not null)
                     return WorkInterruptionUpdate.Unchanged;
@@ -58,10 +58,10 @@ public static partial class WorkflowRunExtensions
                 return false;
 
             var current = run.CurrentStage();
-            if (active.IsTask && active.TaskRunId is { } taskRunId)
+            if (active.IsTask && active.ActionAttemptId is { } actionAttemptId)
             {
                 var task = current.Tasks.SingleOrDefault(candidate =>
-                    string.Equals(candidate.Id, taskRunId, StringComparison.Ordinal));
+                    string.Equals(candidate.Id, actionAttemptId, StringComparison.Ordinal));
                 if (task?.Interruption is null)
                     return false;
 

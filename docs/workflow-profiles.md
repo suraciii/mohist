@@ -1,9 +1,5 @@
 # Workflow Profile
 
-> **Status: legacy implementation.** Task `uses` Actions are the current implementation. The target
-> model ([`../design/agent-execution.md`](../design/agent-execution.md)) has each executable task name
-> a Mohist Agent; see [Agents and AgentSessions](agent-sessions.md#one-invocation-path).
-
 A Workflow Profile defines how an Issue moves from Draft to Done, including its
 Stages, Tasks, Checks, recovery rules, and approval points. A Profile is a
 Project resource. A Project may own multiple Profiles and select one as its
@@ -39,18 +35,17 @@ Mohist provides these built-in Profiles:
 
 Profiles under `mohist/*` are updated with Mohist releases. Their source must not
 be edited or deleted. An update affects an active Workflow at the same point as
-any other Profile edit described above. A Project may configure a binding that
-the built-in source explicitly exposes, such as the GitHub PR Profile's Agent
-Action, without copying or editing that source. Create a new Project Profile
-when you need to change the Stage graph or other built-in behavior.
+any other Profile edit described above. Built-in Profiles run named built-in
+Agents such as `mohist/planner`, `mohist/builder`, and `mohist/reviewer`, so a
+new Project works without manual Agent creation. A Project Agent with the same
+name overrides the built-in definition; create a new Project Profile when you
+need to change the Stage graph or other built-in behavior.
 
 ## Profile Contents
 
 A Profile contains:
 
 - A name and a description of its intended use.
-- An optional default Agent Action when the Profile exposes an Agent Action
-  binding.
 - Stages and the Tasks in each Stage.
 - Stage Checks and Task completion expectations.
 - Approval points.
@@ -71,11 +66,11 @@ approval:
   feedback:
     tasks:
       - id: apply-feedback
-        uses: mohist/opencode
+        uses: mohist/agent
         with:
+          name: mohist/builder
           session: ${{ stage.name }}
           prompt: ${{ prompts.apply-feedback }}
-          options: ${{ vars.agent }}
 
 stages:
   - stage: plan
@@ -83,11 +78,11 @@ stages:
     tasks:
       - id: plan
         title: Plan the change
-        uses: mohist/opencode
+        uses: mohist/agent
         with:
+          name: mohist/planner
           session: plan
           prompt: ${{ prompts.plan }}
-          options: ${{ vars.agent }}
         expect:
           files:
             - path: PLANS/PLAN.md
@@ -125,56 +120,39 @@ The built-in Profiles use the execution Stages `plan`, `build`, `check`, and
 configurable Stage with Tasks. By default, the Workflow waits for approval
 after Plan and Check and advances automatically after Build and Integrate.
 
-### Agent Action Binding
+### Agent Tasks
 
-The `mohist/github-pr` Profile exposes one Agent Action binding for all of its
-inline Agent work. Its source declares the default and uses the restricted
-Profile expression wherever an Agent Action is required:
+Every Agent-backed task uses the `mohist/agent` Action with a named Agent:
 
 ```yaml
-id: mohist/github-pr
-name: GitHub PR
-agentAction: mohist/opencode
-
-stages:
-  - stage: plan
-    tasks:
-      - id: plan
-        uses: ${{ profile.agentAction }}
-        with:
-          session: plan
-          prompt: ${{ prompts.plan }}
-          options: ${{ vars.agent }}
+- id: proposal
+  uses: mohist/agent
+  with:
+    name: mohist/planner
+    session: plan
+    prompt: ${{ prompts.proposal }}
 ```
 
-Project settings may select another compatible concrete Action, such as
-`mohist/pi`, for this Profile. The selected Action must provide the `agent-turn`
-capability and accept every Agent task input in the materialized Profile. Mohist
-validates the whole Profile before saving the change. If no current Action
-catalog is available, the change is rejected instead of saving an unvalidated
-Action choice.
+`name` resolves to a Project Agent, falling back to the built-in Agents for
+`mohist/*` names. The Agent definition owns the execution backend (OpenCode or
+Pi), model, optional Reasoning Effort, true model variant, and Skills; the task
+cannot override them. The task creates a real AgentJob and AgentSession, and
+AgentJob owns execution and result. A missing, archived, or not-ready Agent
+fails the launch explicitly. See the
+[`mohist/agent` Action](actions/agent.md) for the complete input contract.
 
-The binding is not a Variable. `${{ profile.agentAction }}` is valid only as a
-complete `uses` value and cannot be used in `with`, `expect`, or a string. A
-WorkflowRun fixes the effective Action when it starts. Changing the Project
-binding later affects only new Runs; later Stages of the active Run continue to
-use the Action already bound to that Run.
+The optional `session` name continues one logical Session across tasks in the
+same Run when the Agent and Workspace identities also match. Approval feedback,
+recovery tasks, and generated Build tasks use the same `mohist/agent` binding.
 
 A completed or stopped Run is an immutable execution record. It cannot be
 retried, rerun, or resumed in place. Starting the Issue again creates a new Run
-and binds the Profile and Agent Action that are effective for that new start.
-
-While a bound Run is active, the Issue model selector uses that Run's Runtime
-for both Workflow-wide and Stage-specific model controls. After the Run becomes
-terminal, it uses the Runtime projected from the Profile selected for the next
-Run. Changing the binding does not rewrite or clear `vars.agent`; a configured
-model that is absent from the selected Runtime remains visible until it is
-changed or cleared explicitly.
+with the Profile that is effective for that new start.
 
 ### Variable References
 
-A Profile can read Variables through expressions such as `${{ vars.agent }}`.
-It does not declare their values.
+A Profile can read Variables through expressions such as
+`${{ vars.github.pr.number }}`. It does not declare their values.
 
 Mohist merges Variables in this order: Project -> Issue -> Run. A later scope
 overrides an earlier scope with the same key. Project and Issue Variables can
@@ -196,10 +174,9 @@ does not configure a built-in key.
 `mohist/github-pr` uses the same Plan -> Build -> Check -> Integrate path and
 approval points as `mohist/local`, but it delivers the result differently:
 
-- Project settings can run all inline Agent tasks through the Profile's default
-  `mohist/opencode` Action or another compatible Action such as `mohist/pi`.
-  Approval feedback, recovery, and generated Build tasks use the same
-  Run-bound Action.
+- All Agent tasks run named Mohist Agents through `mohist/agent`; the Agent
+  definition owns the backend and model. Approval feedback, recovery, and
+  generated Build tasks follow the same rule.
 
 - The remote Workflow branch preserves completed work between Stages. A Runner
   workspace can be rebuilt and is not responsible for preserving completed
@@ -256,42 +233,36 @@ To send rejected Deploy approvals back to an agent, declare non-empty top-level
         run: ./scripts/deploy.sh
 ```
 
-### Pin a Model for One Task
+### Configure the Agent for a Task
 
-A fixed value used by only one Task can be written directly in its Action Input:
+Every Agent-backed task names its Agent in the task input. To use a different
+role, edit the Profile to reference another Agent, or create a Project Agent
+that overrides the built-in definition of the same name:
 
 ```yaml
-- id: plan
-  uses: mohist/opencode
+- id: proposal
+  uses: mohist/agent
   with:
+    name: mohist/planner
     session: plan
-    prompt: ${{ prompts.plan }}
-    options:
-      model: model-a
-      variant: variant-a
+    prompt: ${{ prompts.proposal }}
 ```
 
-When the Project or Issue must control the value, use
-`options: ${{ vars.agent }}` instead and provide the value through the separate
-Variables settings.
+The model, Reasoning Effort, variant, and Skills are Agent configuration, not
+Workflow configuration. Change them on the Agent or in Project Agent settings;
+a Workflow Variable cannot override them for one task.
 
 ## Manage Profiles
 
 In Settings > Workflows, manage the current Project's Profile collection, edit
-a custom Profile Definition, configure bindings exposed by a Profile, and
-select the Project default. The Issue details page selects or changes a Profile.
-It does not edit the Profile Definition or its Project binding.
+a custom Profile Definition, and select the Project default. The Issue details
+page selects or changes a Profile. It does not edit the Profile Definition.
 
 Editing a Definition affects later Stages in active Workflows that use the
-Profile. Mohist validates the edit with every Agent Action bound to an active
-Run and rejects an edit that removes the binding or is incompatible with one of
-those Actions. An edit must also retain every Stage used by an active Run. The
-active Run keeps its original Stage order and Approval points, so an edit must
-retain valid Approval feedback while that Run can still request it. Added or
-reordered Stages apply only to future Runs. A retry rebuilds the declared Task
-before it reads current Variables and Prompts; it never treats one attempt's
-resolved input as future configuration. See
-[Workflow Recovery Design](../design/workflow/recovery.md).
+Profile. An edit must retain every Stage used by an active Run. The active Run
+keeps its original Stage order and Approval points, so an edit must retain
+valid Approval feedback while that Run can still request it. Added or
+reordered Stages apply only to future Runs.
 
 Before saving, run `mo workflow validate --file <path>` to check the Definition
 structure, field types, and template expressions locally. Use `--file -` to
@@ -316,7 +287,13 @@ their purpose and remains stable.
   Profile collection. The Web Issue selector also remains locked during an
   active Run even though a Server-side selection would affect only the next
   Run.
-- Some built-in Tasks still use legacy Action Input. The target interfaces are
-  defined by the Action documentation.
-- Profile Agent Action binding, Run-bound materialization, and the
-  configurable `mohist/github-pr` Profile are implemented.
+- Profile changes take effect at future Stage and Task boundaries so a
+  configuration fix can help later work without changing an attempt that is
+  already running. A retry rebuilds the declared Task before it reads current
+  Variables and Prompts; it never treats one attempt's resolved input as future
+  configuration. This boundary preserves both live fixes and accepted-attempt
+  stability. See
+  [Workflow Recovery Design](../design/workflow/recovery.md).
+- Agent tasks run through the unified AgentJob model: `mohist/agent` creates a
+  real AgentJob and AgentSession, and AgentJob owns execution, retry, and
+  result.

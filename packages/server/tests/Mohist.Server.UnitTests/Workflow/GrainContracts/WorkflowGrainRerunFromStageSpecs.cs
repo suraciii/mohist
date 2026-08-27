@@ -49,7 +49,7 @@ public sealed class WorkflowGrainRerunFromStageSpecs
         Assert.True(planStage.Initialized,
             "Target stage must be initialized in the same commit as StageStarted");
         Assert.NotEmpty(planStage.Tasks);
-        Assert.Equal(TaskRunStatus.Pending, planStage.Tasks[0].Status);
+        Assert.Equal(WorkflowActionAttemptStatus.Pending, planStage.Tasks[0].Status);
     }
 
     [Fact]

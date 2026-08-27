@@ -36,7 +36,7 @@ public sealed class WorkflowArtifactUploadServiceTests
                 WorkId: workId,
                 WorkType: "spec/task",
                 Stage: "review",
-                TaskRunId: $"task-{workId}",
+                ActionAttemptId: $"task-{workId}",
                 Title: "title",
                 ProjectId: "proj-artifact",
                 IssueNumber: 1));
@@ -48,10 +48,10 @@ public sealed class WorkflowArtifactUploadServiceTests
 
         public string GenerateStoragePath(
             string workflowRunId,
-            string taskRunId,
+            string actionAttemptId,
             string artifactId,
             WorkflowArtifactStorageKind kind)
-            => $"fake://{workflowRunId}/{taskRunId}/{artifactId}";
+            => $"fake://{workflowRunId}/{actionAttemptId}/{artifactId}";
 
         public async Task<WorkflowArtifactStorageWriteResult> WriteFileAsync(
             string storagePath,

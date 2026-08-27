@@ -16,7 +16,7 @@ public static partial class IssueRoutes
             int number,
             string? path,
             bool? history,
-            string? taskRunId,
+            string? actionAttemptId,
             IGrainFactory grains,
             IssueQuerier issuesQuery,
             IWorkflowArtifactQuerier artifactsQuery) =>
@@ -30,9 +30,9 @@ public static partial class IssueRoutes
             var ct = ctx.RequestAborted;
 
             IReadOnlyList<WorkflowArtifactInfo> artifacts;
-            if (!string.IsNullOrWhiteSpace(taskRunId))
+            if (!string.IsNullOrWhiteSpace(actionAttemptId))
             {
-                artifacts = await artifactsQuery.ListByTaskRunAsync(wrId, taskRunId, ct);
+                artifacts = await artifactsQuery.ListByWorkflowActionAttemptAsync(wrId, actionAttemptId, ct);
             }
             else if (!string.IsNullOrWhiteSpace(path) && history == true)
             {
@@ -150,7 +150,7 @@ public static partial class IssueRoutes
     {
         artifactId = info.ArtifactId,
         workflowRunId = info.WorkflowRunId,
-        taskRunId = info.TaskRunId,
+        actionAttemptId = info.ActionAttemptId,
         path = info.Path,
         kind = info.Kind,
         contentType = info.ContentType,

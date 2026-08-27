@@ -164,7 +164,7 @@ public class WorkflowVariableSpecs : WorkflowGrainSpecs
     }
 
     [Fact]
-    public async Task MohistWorkflowDispatchesAgentWorkWithoutExecutingAgent()
+    public async Task MohistWorkflowDispatchesAgentWorkAsAgentJob()
     {
         await StartWorkflowAsync(Mohist.Server.Workflow.Services.WorkflowProfileCatalog.Definition);
 
@@ -176,15 +176,14 @@ public class WorkflowVariableSpecs : WorkflowGrainSpecs
 
         var (plan, _) = await PollWorkAnyAsync();
 
-        Assert.Equal("task", plan.WorkType);
+        Assert.Equal("agent-job", plan.WorkType);
+        Assert.Equal(WorkDispatchOwnerKinds.AgentJob, plan.OwnerKind);
         Assert.Equal("plan", plan.Stage);
-        Assert.Equal("mohist/opencode", plan.Uses);
-        Assert.Contains("plan", plan.WorkId);
+        Assert.Null(plan.Uses);
+        Assert.NotNull(plan.AgentJobId);
+        Assert.NotNull(plan.AgentSessionId);
+        Assert.StartsWith("plan.", plan.ActionAttemptId);
         Assert.Contains("\"prompt\"", plan.With);
-        Assert.DoesNotContain("\"stage\":", plan.With);
-        Assert.DoesNotContain("\"task\":", plan.With);
-        Assert.DoesNotContain("changeDir", plan.With);
-        Assert.DoesNotContain("\"expect\"", plan.With);
         Assert.Contains("PLANS/PLAN.md", plan.Expect!);
         Assert.Contains("PLANS/DESIGN.md", plan.Expect!);
         Assert.Contains("PLANS/tasks.json", plan.Expect!);
@@ -195,35 +194,35 @@ public class WorkflowVariableSpecs : WorkflowGrainSpecs
         [
             new StageDefinition("plan",
                 [
-                    new("proposal", "Generate proposal", "mohist/opencode",
+                    new("proposal", "Generate proposal", "spec/task",
                         With("""
                         { "session": "plan", "prompt": "${{ prompts.plan }}", "options": "${{ vars.agent }}" }
                         """),
                         Expect("""
                          { "files": [ { "path": "openspec/changes/issue-${{ issue.number }}/proposal.md" } ] }
                         """)),
-                    new("specs", "Write specs", "mohist/opencode",
+                    new("specs", "Write specs", "spec/task",
                         With("""
                         { "session": "plan", "prompt": "${{ prompts.specs }}", "options": "${{ vars.agent }}" }
                         """),
                         Expect("""
                          { "files": [ { "path": "openspec/changes/issue-${{ issue.number }}/specs" } ] }
                         """)),
-                    new("design", "Create design", "mohist/opencode",
+                    new("design", "Create design", "spec/task",
                         With("""
                         { "session": "plan", "prompt": "${{ prompts.design }}", "options": "${{ vars.agent }}" }
                         """),
                         Expect("""
                          { "files": [ { "path": "openspec/changes/issue-${{ issue.number }}/design.md" } ] }
                         """)),
-                    new("tasks", "Generate tasks", "mohist/opencode",
+                    new("tasks", "Generate tasks", "spec/task",
                         With("""
                         { "session": "plan", "prompt": "${{ prompts.tasks }}", "options": "${{ vars.agent }}" }
                         """),
                         Expect("""
                          { "files": [ { "path": "openspec/changes/issue-${{ issue.number }}/tasks.json" } ] }
                         """)),
-                    new("self-review", "Self review", "mohist/opencode",
+                    new("self-review", "Self review", "spec/task",
                         With("""
                         { "session": "plan", "prompt": "${{ prompts.self-review }}", "options": "${{ vars.agent }}" }
                         """),

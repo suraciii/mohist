@@ -81,8 +81,9 @@ export function workflowTimelineToStageStateMap(
         origin: task.uses ? { source: 'runtime', uses: task.uses } : null,
         requiredFiles: task.requiredFiles,
         classification: task.classification,
-        agentResultSettlement: task.agentResultSettlement,
         interruption: task.interruption,
+        agentJobId: task.agentJobId,
+        agentSessionId: task.agentSessionId,
       })),
       checks: stage.checks.map((check) => ({
         checkName: check.name,

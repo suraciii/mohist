@@ -32,13 +32,13 @@ public sealed class WorkflowArtifactReportArbitrationSpecs : WorkflowGrainSpecs
                 runnerId,
                 work.WorkflowRunId,
                 work.WorkId,
-                work.TaskRunId,
+                work.ActionAttemptId,
                 new WorkResult("completed")),
             service.ReportAsync(
                 runnerId,
                 work.WorkflowRunId,
                 work.WorkId,
-                work.TaskRunId,
+                work.ActionAttemptId,
                 new WorkResult("failed", "runner failed")));
 
         Assert.Equal(["accepted", "refused"], reports.Select(report => report.Ack).Order().ToArray());

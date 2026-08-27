@@ -6,7 +6,9 @@ using Mohist.Server.Infrastructure.Hosting;
 using Mohist.Server.Infrastructure.Serialization;
 using Mohist.Server.Runner.Grains;
 using Mohist.Server.Workflow.Domain.Run;
+using Mohist.Server.Workflow.Grains;
 using Mohist.Server.Workflow.Services;
+using Mohist.Server.Workflow.Services.Prompts;
 using Mohist.Server.Workflow.Services.Artifacts;
 
 namespace Mohist.Server.Runner.Services;
@@ -131,14 +133,21 @@ public sealed class WorkflowItemTranslator : IScopedService
 
         if (string.Equals(item.Uses, "mohist/agent", StringComparison.Ordinal))
         {
-            var effective = await _variableResolver.ResolveEffectiveVariableBundleAsync(run.Id, item.Stage);
-            var agentOptions = ReadAgentOptions(effective.Vars);
-            var resolved = await ResolveAgentTaskAsync(item, run, item.Id ?? "unknown", agentOptions);
-            return new AgentExecutionCapabilityTuple(
-                resolved.Definition.Runtime,
-                resolved.Definition.Model ?? ReadOptionString(agentOptions, "model"),
-                resolved.Definition.ReasoningEffort ?? ReadOptionString(agentOptions, "reasoningEffort"),
-                resolved.Definition.Variant ?? ReadOptionString(agentOptions, "variant"));
+            if (item.With is null
+                || !item.With.TryGetValue("name", out var name)
+                || !name.HasValue
+                || name.Value.ValueKind != JsonValueKind.String
+                || _agentSnapshots is null
+                || string.IsNullOrWhiteSpace(run.Metadata.ProjectId))
+                return null;
+            var definition = await _agentSnapshots.ResolveAsync(run.Metadata.ProjectId, name.Value.GetString()!);
+            return definition is null
+                ? null
+                : new AgentExecutionCapabilityTuple(
+                    definition.Runtime,
+                    definition.Model,
+                    definition.ReasoningEffort,
+                    definition.Variant);
         }
 
         var runtime = RuntimeForUses(item.Uses);
@@ -187,6 +196,126 @@ public sealed class WorkflowItemTranslator : IScopedService
             : null;
     }
 
+    public async Task<WorkflowAgentHandoffCommand> BuildAgentHandoffCommandAsync(
+        WorkItem item,
+        string workflowRunId,
+        WorkflowRun run)
+    {
+        if (!item.IsTask || !string.Equals(item.Uses, "mohist/agent", StringComparison.Ordinal))
+            throw new InvalidOperationException("Workflow Agent handoff requires a mohist/agent task.");
+        var workId = item.Id ?? throw new InvalidOperationException("Workflow Agent task is missing work id.");
+        var attempt = run.Stages.SelectMany(stage => stage.Tasks)
+            .Single(candidate => string.Equals(candidate.WorkId, workId, StringComparison.Ordinal)
+                || string.Equals(candidate.Id, workId, StringComparison.Ordinal));
+        var with = item.With ?? throw new WorkflowDispatchRejectedException(
+            $"Workflow task '{workId}' has invalid mohist/agent input.",
+            new ExecutionError("invalid_agent_input", "mohist/agent requires name and prompt."));
+        if (!with.TryGetValue("name", out var nameElement)
+            || !nameElement.HasValue
+            || nameElement.Value.ValueKind != JsonValueKind.String
+            || string.IsNullOrWhiteSpace(nameElement.Value.GetString())
+            || !with.TryGetValue("prompt", out var promptElement)
+            || !promptElement.HasValue
+            || promptElement.Value.ValueKind != JsonValueKind.String)
+        {
+            throw new WorkflowDispatchRejectedException(
+                $"Workflow task '{workId}' has invalid mohist/agent input.",
+                new ExecutionError("invalid_agent_input", "mohist/agent requires literal name and string prompt."));
+        }
+
+        var payload = await BuildPayloadAsync(
+            item.Stage,
+            workId,
+            "task",
+            item.Title ?? string.Empty,
+            WorkflowDispatchHelpers.TaskAttempt(workId),
+            workflowRunId,
+            run);
+        var prompts = await _promptResolver.LoadPromptsAsync(workflowRunId);
+        if (prompts.Count > 0)
+            payload["prompts"] = JSON.SerializeToElement(prompts.ToDictionary(prompt => prompt.Key, prompt => prompt.Body, StringComparer.Ordinal));
+        var variables = JSON.SerializeToElement(payload);
+        var engine = new PromptTemplateEngine();
+        var renderedPrompt = engine.Render(promptElement.Value.GetString()!, variables);
+        if (renderedPrompt.Errors.Count > 0)
+            throw new WorkflowDispatchRejectedException(
+                $"Workflow task '{workId}' prompt could not be rendered.",
+                new ExecutionError("invalid_agent_input", string.Join("; ", renderedPrompt.Errors.Select(error => error.Message))));
+
+        string? session = null;
+        if (with.TryGetValue("session", out var sessionElement)
+            && sessionElement.HasValue
+            && sessionElement.Value.ValueKind == JsonValueKind.String)
+        {
+            var renderedSession = engine.Render(sessionElement.Value.GetString()!, variables);
+            if (renderedSession.Errors.Count > 0)
+                throw new WorkflowDispatchRejectedException(
+                    $"Workflow task '{workId}' session could not be rendered.",
+                    new ExecutionError("invalid_agent_input", string.Join("; ", renderedSession.Errors.Select(error => error.Message))));
+            session = renderedSession.Rendered;
+        }
+        long? timeout = null;
+        if (with.TryGetValue("timeout", out var timeoutElement)
+            && timeoutElement.HasValue
+            && timeoutElement.Value.ValueKind == JsonValueKind.Number
+            && timeoutElement.Value.TryGetInt64(out var timeoutValue))
+            timeout = timeoutValue;
+
+        var repositorySnapshot = run.Repository is { } repository
+            ? new[] { new WorkspaceRepositorySnapshot(repository.Name, repository.GitUrl, repository.BaseBranch) }
+            : null;
+        var workspace = run.Workspace is { } identity
+            ? ReadIssueNumber(run) is { } issueNumber
+                ? new WorkflowAgentHandoffWorkspace(Name: $"issue-{issueNumber}", Repositories: repositorySnapshot)
+                : new WorkflowAgentHandoffWorkspace(Identity: identity, Repositories: repositorySnapshot)
+            : null;
+        string? reuseSessionId = null;
+        if (!string.IsNullOrWhiteSpace(session))
+        {
+            var previous = run.Stages.SelectMany(stage => stage.Tasks)
+                .FirstOrDefault(candidate => candidate.Id != attempt.Id
+                    && !string.IsNullOrWhiteSpace(candidate.AgentSessionId)
+                    && string.Equals(WorkflowActionAttemptExtensions.ExtractSessionName(candidate.WithInput), session, StringComparison.Ordinal));
+            if (previous is not null)
+            {
+                var previousName = previous.WithInput is not null
+                    && previous.WithInput.TryGetValue("name", out var previousNameValue)
+                    && previousNameValue.HasValue
+                    && previousNameValue.Value.ValueKind == JsonValueKind.String
+                        ? previousNameValue.Value.GetString()
+                        : null;
+                if (!string.Equals(previousName, nameElement.Value.GetString(), StringComparison.OrdinalIgnoreCase))
+                    throw new WorkflowDispatchRejectedException(
+                        $"Workflow session '{session}' is already bound to Agent '{previousName}'.",
+                        new ExecutionError("workflow_session_agent_conflict", "A named Workflow Session cannot switch Agents."));
+                reuseSessionId = previous.AgentSessionId;
+            }
+        }
+        return new WorkflowAgentHandoffCommand(
+            CommandId: workId,
+            ProjectId: run.Metadata.ProjectId
+                ?? throw new InvalidOperationException("Workflow Agent task requires Project identity."),
+            WorkflowRunId: workflowRunId,
+            ActionAttemptId: attempt.Id,
+            AgentRef: nameElement.Value.GetString()!,
+            Prompt: renderedPrompt.Rendered,
+            Session: session,
+            TimeoutMilliseconds: timeout,
+            Completion: new WorkflowAgentHandoffCompletionSnapshot(
+                WorkId: workId,
+                Stage: item.Stage,
+                Workspace: workspace,
+                ExpectJson: SerializeRaw(item.Expect),
+                Artifacts: item.Artifacts,
+                SetVars: item.SetVars,
+                Recovery: item.Recovery,
+                RecoveryRemaining: item.RecoveryRemaining,
+                IssueNumber: ReadIssueNumber(run),
+                EpicNumber: ReadEpicNumber(run),
+                VariablesJson: JSON.Serialize(payload)),
+            ReuseSessionId: reuseSessionId);
+    }
+
     private async Task<WorkDispatch> BuildTaskDispatchAsync(
         WorkItem item,
         string workflowRunId,
@@ -195,14 +324,18 @@ public sealed class WorkflowItemTranslator : IScopedService
     {
         var workId = item.Id ?? throw new InvalidOperationException(
             $"Task work item for workflow '{workflowRunId}' is missing work id");
+        if (item.Uses is "mohist/opencode" or "mohist/pi")
+            throw new WorkflowDispatchRejectedException(
+                $"Workflow task '{workId}' uses removed Agent Action '{item.Uses}'.",
+                new ExecutionError("removed_agent_action", "Use mohist/agent with a named Agent."));
         var task = run.Stages
             .SelectMany(stage => stage.Tasks)
-            .SingleOrDefault(candidate => candidate.Status == TaskRunStatus.Running
+            .SingleOrDefault(candidate => candidate.Status == WorkflowActionAttemptStatus.Running
                 && string.Equals(candidate.WorkId, workId, StringComparison.Ordinal)
                 && string.Equals(candidate.WorkerId, runnerId, StringComparison.Ordinal))
             ?? throw new InvalidOperationException(
                 $"Task work item '{workId}' for workflow '{workflowRunId}' has no running task attempt");
-        var taskRunId = task.Id;
+        var actionAttemptId = task.Id;
         var attempt = WorkflowDispatchHelpers.TaskAttempt(workId);
 
         var payload = await BuildPayloadAsync(item.Stage, workId, "task", item.Title ?? string.Empty, attempt, workflowRunId, run);
@@ -217,19 +350,12 @@ public sealed class WorkflowItemTranslator : IScopedService
         }
 
         var variables = JSON.Serialize(payload);
+        if (string.Equals(item.Uses, "mohist/agent", StringComparison.Ordinal))
+            throw new InvalidOperationException("mohist/agent tasks must enter the AgentJob launch boundary before Runner dispatch.");
         var with = item.With;
         var uses = item.Uses;
-        AgentExecutionDefinition? agentDefinition = null;
-        if (string.Equals(item.Uses, "mohist/agent", StringComparison.Ordinal))
-        {
-            var agentOptions = payload.TryGetValue("vars", out var effectiveVars)
-                ? ReadAgentOptions(effectiveVars)
-                : null;
-            (uses, with, agentDefinition) = await ResolveAgentTaskAsync(item, run, workId, agentOptions);
-        }
         var withStr = SerializeRaw(with);
         var expectStr = SerializeRaw(item.Expect);
-        ValidateLegacyAgentTaskInput(item with { Uses = uses }, workId, with, item.Expect);
 
         return new WorkDispatch(
             WorkflowRunId: workflowRunId,
@@ -249,8 +375,8 @@ public sealed class WorkflowItemTranslator : IScopedService
             RecoveryRemaining: item.RecoveryRemaining,
             EpicNumber: ReadEpicNumber(run),
             Expect: expectStr,
-            AgentDefinition: agentDefinition,
-            TaskRunId: taskRunId);
+            AgentDefinition: null,
+            ActionAttemptId: actionAttemptId);
     }
 
     private async Task<WorkDispatch> BuildChecksDispatchAsync(
@@ -381,105 +507,6 @@ public sealed class WorkflowItemTranslator : IScopedService
         return payload;
     }
 
-    private async Task<(string Uses, Dictionary<string, JsonElement?> With, AgentExecutionDefinition Definition)> ResolveAgentTaskAsync(
-        WorkItem item,
-        WorkflowRun run,
-        string workId,
-        IReadOnlyDictionary<string, JsonElement?>? agentOptions = null)
-    {
-        if (_agentSnapshots is null)
-            throw new WorkflowDispatchRejectedException(
-                $"Workflow task '{workId}' references an Agent but Agent resolution is unavailable.",
-                new ExecutionError("agent_not_found",
-                    $"Workflow task '{workId}' cannot resolve the referenced Agent because Agent resolution is unavailable."));
-
-        var with = item.With;
-        if (with is null
-            || !with.TryGetValue("name", out var nameElement)
-            || nameElement is null
-            || nameElement.Value.ValueKind != JsonValueKind.String
-            || string.IsNullOrWhiteSpace(nameElement.Value.GetString())
-            || !with.TryGetValue("prompt", out var promptElement)
-            || promptElement is null
-            || promptElement.Value.ValueKind != JsonValueKind.String)
-        {
-            throw new WorkflowDispatchRejectedException(
-                $"Workflow task '{workId}' has invalid mohist/agent input.",
-                new ExecutionError("invalid_agent_input",
-                    $"Workflow task '{workId}' declares an mohist/agent task without a non-empty 'name' or 'prompt'."));
-        }
-
-        var projectId = run.Metadata.ProjectId;
-        var snapshot = projectId is null
-            ? null
-            : await _agentSnapshots.ResolveAsync(projectId, nameElement.Value.GetString()!);
-        if (snapshot is null)
-        {
-            var requestedRef = nameElement.Value.GetString()!;
-            throw new WorkflowDispatchRejectedException(
-                $"Workflow task '{workId}' references Agent '{requestedRef}' which is not active.",
-                new ExecutionError("agent_not_found",
-                    $"Workflow task '{workId}' references Agent '{requestedRef}' which does not exist or is archived."));
-        }
-
-        var rawPrompt = promptElement.Value.GetString()!;
-        var transformed = new Dictionary<string, JsonElement?>(StringComparer.Ordinal)
-        {
-            ["prompt"] = JSON.SerializeToElement(rawPrompt),
-        };
-        CopyIfPresent(with, transformed, "session");
-        CopyIfPresent(with, transformed, "timeout");
-        if (agentOptions is { Count: > 0 })
-            transformed["options"] = JSON.SerializeToElement(agentOptions);
-
-        return (snapshot.Runtime switch
-        {
-            AgentConfigSchema.PiRuntime => "mohist/pi",
-            _ => "mohist/opencode",
-        }, transformed, snapshot);
-    }
-
-    private static void CopyIfPresent(
-        Dictionary<string, JsonElement?> source,
-        Dictionary<string, JsonElement?> target,
-        string key)
-    {
-        if (source.TryGetValue(key, out var value))
-            target[key] = value?.Clone();
-    }
-
-    private static Dictionary<string, JsonElement?>? ReadAgentOptions(JsonElement? vars)
-    {
-        if (vars is not { ValueKind: JsonValueKind.Object }
-            || !vars.Value.TryGetProperty("agent", out var agent)
-            || agent.ValueKind != JsonValueKind.Object)
-            return null;
-
-        var options = new Dictionary<string, JsonElement?>(StringComparer.Ordinal);
-        foreach (var key in new[] { "model", "variant", "reasoningEffort" })
-        {
-            if (agent.TryGetProperty(key, out var value)
-                && (value.ValueKind == JsonValueKind.String || value.ValueKind == JsonValueKind.Null))
-            {
-                options[key] = value.Clone();
-            }
-        }
-
-        return options.Count > 0 ? options : null;
-    }
-
-    private static string? ReadOptionString(
-        IReadOnlyDictionary<string, JsonElement?>? options,
-        string key)
-    {
-        if (options is null
-            || !options.TryGetValue(key, out var value)
-            || value is null
-            || value.Value.ValueKind != JsonValueKind.String)
-            return null;
-        return value.Value.GetString();
-    }
-
     private static string? RuntimeForUses(string? uses) => uses switch
     {
         "mohist/pi" => "pi",
@@ -490,88 +517,13 @@ public sealed class WorkflowItemTranslator : IScopedService
     private static string? SerializeRaw(Dictionary<string, JsonElement?>? values) =>
         values is not null && values.Count > 0 ? JSON.Serialize(values) : null;
 
-    private static void ValidateLegacyAgentTaskInput(
-        WorkItem item,
-        string workId,
-        Dictionary<string, JsonElement?>? with,
-        Dictionary<string, JsonElement?>? expect)
-    {
-        if (!IsInlineAgentUses(item.Uses))
-            return;
-
-        if (with is not null && with.TryGetValue("agent", out var legacyAgent) && legacyAgent.HasValue)
-        {
-            throw new WorkflowDispatchRejectedException(
-                $"Workflow task '{workId}' declares legacy agent configuration under 'with.agent'. " +
-                "Bind the selected Action's 'options' explicitly, e.g. 'options: ${{ vars.agent }}'.",
-                new ExecutionError("invalid_input",
-                    $"Workflow task '{workId}' declares legacy agent configuration under 'with.agent'. " +
-                    "Bind the selected Action's 'options' explicitly."));
-        }
-
-        if (with is not null && with.TryGetValue("expect", out var legacyExpect) && legacyExpect.HasValue
-            && HasWorkflowCompletionPolicy(legacyExpect.Value))
-        {
-            throw new WorkflowDispatchRejectedException(
-                $"Workflow task '{workId}' declares Workflow completion policy under 'with.expect'. " +
-                "Move 'files', 'markers', and 'failIf' to task-level 'expect'. " +
-                "'with.expect' is reserved for Action-owned input on the selected Action contract.",
-                new ExecutionError("invalid_input",
-                    $"Workflow task '{workId}' declares Workflow completion policy under 'with.expect'. " +
-                    "Move 'files', 'markers', and 'failIf' to task-level 'expect'."));
-        }
-
-        // Spec scenario "Legacy agent input is invalid": persisted or
-        // in-flight inline-agent tasks that bypassed profile ingestion
-        // MUST fail dispatch with the same actionable errors as profile
-        // loading. `kind` and `type` are legacy execution-backend
-        // discriminators the inline-agent contract does not read.
-        if (with is not null && with.ContainsKey("kind"))
-        {
-            throw new WorkflowDispatchRejectedException(
-                $"Workflow task '{workId}' declares legacy execution discriminator 'with.kind'. " +
-                "The 'mohist/opencode' Action is selected by 'uses' and does not read 'kind'. " +
-                "Remove 'with.kind'; if model configuration is intended, bind 'options: ${{ vars.agent }}'.",
-                new ExecutionError("invalid_input",
-                    $"Workflow task '{workId}' declares legacy execution discriminator 'with.kind'. " +
-                    "Remove 'with.kind'; if model configuration is intended, bind 'options: ${{ vars.agent }}'."));
-        }
-
-        if (with is not null && with.ContainsKey("type"))
-        {
-            throw new WorkflowDispatchRejectedException(
-                $"Workflow task '{workId}' declares legacy execution discriminator 'with.type'. " +
-                "The 'mohist/opencode' Action is selected by 'uses' and does not read 'type'. " +
-                "Remove 'with.type'; if model configuration is intended, bind 'options: ${{ vars.agent }}'.",
-                new ExecutionError("invalid_input",
-                    $"Workflow task '{workId}' declares legacy execution discriminator 'with.type'. " +
-                    "Remove 'with.type'; if model configuration is intended, bind 'options: ${{ vars.agent }}'."));
-        }
-
-        _ = expect;
-    }
-
-    private static bool IsInlineAgentUses(string? uses) =>
-        string.Equals(uses, "mohist/opencode", StringComparison.Ordinal)
-        || string.Equals(uses, "mohist/pi", StringComparison.Ordinal);
-
-    private static bool HasWorkflowCompletionPolicy(JsonElement expectElement)
-    {
-        if (expectElement.ValueKind != JsonValueKind.Object) return false;
-        return expectElement.TryGetProperty("files", out _)
-            || expectElement.TryGetProperty("markers", out _)
-            || (expectElement.TryGetProperty("failIf", out var failIf)
-                && failIf.ValueKind == JsonValueKind.String
-                && !string.IsNullOrWhiteSpace(failIf.GetString()));
-    }
-
     private static int? ReadIssueNumber(WorkflowRun run) =>
         run.Metadata.IssueNumber is > 0 ? run.Metadata.IssueNumber : null;
 
     private static int? ReadEpicNumber(WorkflowRun run) =>
         run.Metadata.EpicNumber is > 0 ? run.Metadata.EpicNumber : null;
 
-    private static TaskRun? FindFailedTask(WorkflowRun run, string taskId)
+    private static WorkflowActionAttempt? FindFailedTask(WorkflowRun run, string taskId)
     {
         foreach (var stage in run.Stages)
         {
@@ -579,7 +531,7 @@ public sealed class WorkflowItemTranslator : IScopedService
             if (task is not null
                 && (task.Output.HasValue
                     || task.Error is not null
-                    || task.Status == TaskRunStatus.Failed
+                    || task.Status == WorkflowActionAttemptStatus.Failed
                     || task.Lane?.Outcome is VerificationLaneOutcome.Fail or VerificationLaneOutcome.Timeout))
             {
                 return task;
@@ -591,7 +543,6 @@ public sealed class WorkflowItemTranslator : IScopedService
     public abstract record InboundReport
     {
         public sealed record Task(TaskReport Value) : InboundReport;
-        public sealed record Unknown(TaskReport Fallback, string ReasonCode, string? Message) : InboundReport;
         public sealed record Checks(CheckReport Value) : InboundReport;
     }
 
@@ -623,21 +574,6 @@ public sealed class WorkflowItemTranslator : IScopedService
     {
         var workId = item.Id ?? throw new InvalidOperationException(
             $"Task work item for workflow '{workflowRunId}' is missing work id");
-        if (string.Equals(result.Status, "unknown", StringComparison.OrdinalIgnoreCase))
-        {
-            var unknownDetail = NormalizeUnknownDetail(result);
-            return new InboundReport.Unknown(
-                new TaskReport(
-                    WorkId: workId,
-                    Status: TaskReportStatus.Failed,
-                    Output: null,
-                    Artifacts: null,
-                    Detail: unknownDetail,
-                    Error: result.Error),
-                "agent-result-unconfirmed",
-                unknownDetail);
-        }
-
         var status = ResolveTaskReportStatus(result);
         var detail = NormalizeDetail(result, status);
 
@@ -774,13 +710,6 @@ public sealed class WorkflowItemTranslator : IScopedService
         if (result.Error is not null) return result.Error.Message;
         if (!string.IsNullOrWhiteSpace(result.Message)) return result.Message;
         return result.Status;
-    }
-
-    private static string NormalizeUnknownDetail(WorkResult result)
-    {
-        if (result.Error is not null) return result.Error.Message;
-        if (!string.IsNullOrWhiteSpace(result.Message)) return result.Message;
-        return "Agent result authority is unconfirmed.";
     }
 
 }

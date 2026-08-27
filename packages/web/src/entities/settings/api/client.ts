@@ -273,8 +273,6 @@ interface WorkflowProfileCollectionEntryResponse {
   sourceProvenance: string
   isBuiltIn: boolean
   definitionSource: string | null
-  agentAction?: string | null
-  agentRuntime?: AgentRuntime | null
 }
 
 interface WorkflowProfileDetailResponse extends WorkflowProfileCollectionEntryResponse {
@@ -293,8 +291,6 @@ function mapWorkflowProfileInfo(profile: WorkflowProfileCollectionEntryResponse)
     description: profile.description,
     isDefault: profile.profileId === 'mohist/local',
     isBuiltIn: profile.isBuiltIn,
-    agentAction: profile.agentAction ?? null,
-    agentRuntime: profile.agentRuntime ?? null,
   }
 }
 
@@ -318,13 +314,6 @@ export function getWorkflowProfile(projectId: string, id: string, requester: typ
 
 export function getActionCatalog(projectId: string) {
   return request<ActionCatalog>(projectApiPath(projectId, '/actions'))
-}
-
-export function patchWorkflowProfileAgentAction(projectId: string, profileId: string, agentAction: string | null) {
-  return request<WorkflowProfileCollectionEntryResponse>(projectApiPath(projectId, `/workflow-profiles/${profileId}`), {
-    method: 'PATCH',
-    body: JSON.stringify({ agentAction }),
-  }).then(mapWorkflowProfileInfo)
 }
 
 export interface ProjectDefaultWorkflowProfile {

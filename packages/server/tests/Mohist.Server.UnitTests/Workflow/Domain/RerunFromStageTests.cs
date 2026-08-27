@@ -230,14 +230,14 @@ public class RerunFromStageTests
 
         // Add a running task to the integrate stage (which is in the target-to-end range when targeting build)
         var integrateStage = run.Stages[2];
-        var runningTask = new TaskRun
+        var runningTask = new WorkflowActionAttempt
         {
             Id = "merge-active",
             DefinitionId = "merge",
             Attempt = 1,
             Title = "Active Merge",
             Uses = "spec/task",
-            Status = TaskRunStatus.Running,
+            Status = WorkflowActionAttemptStatus.Running,
         };
         integrateStage.Tasks.Add(runningTask);
 
@@ -284,14 +284,14 @@ public class RerunFromStageTests
         // Add a pending (never-started) task to a later stage — it should not
         // block rerun since it was never dispatched.
         var integrateStage = run.Stages[2];
-        integrateStage.Tasks.Add(new TaskRun
+        integrateStage.Tasks.Add(new WorkflowActionAttempt
         {
             Id = "merge-pending",
             DefinitionId = "merge",
             Attempt = 1,
             Title = "Pending Merge",
             Uses = "spec/task",
-            Status = TaskRunStatus.Pending,
+            Status = WorkflowActionAttemptStatus.Pending,
         });
 
         var events = run.RerunFromStage("build", DateTimeOffset.UnixEpoch);
@@ -335,14 +335,14 @@ public class RerunFromStageTests
 
         // Add a running task to the target stage (build)
         var buildStage = run.Stages[1];
-        var runningTask = new TaskRun
+        var runningTask = new WorkflowActionAttempt
         {
             Id = "build-active",
             DefinitionId = "compile",
             Attempt = 1,
             Title = "Active Build",
             Uses = "spec/task",
-            Status = TaskRunStatus.Running,
+            Status = WorkflowActionAttemptStatus.Running,
         };
         buildStage.Tasks.Add(runningTask);
 

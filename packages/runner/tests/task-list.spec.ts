@@ -3,7 +3,6 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { taskListAction } from '../src/actions/task-list.js'
-import { taskListPromptLoader } from '../src/actions/task-list-prompt.js'
 import { isSafeRepositoryName } from '../src/runtime/workspace-identity.js'
 
 function host(workDir: string): any {
@@ -17,7 +16,7 @@ function write(value: unknown) {
 }
 const template = {
   path: 'PLANS/tasks.json',
-  task: { uses: 'mohist/opencode', with: { options: { model: 'x' } } },
+  task: { uses: 'mohist/agent', with: { name: 'mohist/builder' } },
   buildPrompt: 'Build',
 }
 
@@ -63,11 +62,16 @@ describe('mohist/task-list', () => {
       tasks: [task({ id: 'T-1', title: 'One', goal: 'Do it', acceptance: ['works'], refs: ['PLANS/PLAN.md'] })],
     })
     const result: any = await taskListAction(template as any, host(root))
-    expect(result.effects.addTasks[0]).toMatchObject({ id: 'T-1', title: 'One', uses: 'mohist/opencode', expect: null })
-    expect(result.effects.addTasks[0].with.prompt.with).toEqual({
-      base: 'Build',
-      task: { id: 'T-1', title: 'One', goal: 'Do it', acceptance: ['works'], refs: ['PLANS/PLAN.md'] },
+    expect(result.effects.addTasks[0]).toMatchObject({
+      id: 'T-1',
+      title: 'One',
+      uses: 'mohist/agent',
+      expect: null,
+      with: { name: 'mohist/builder' },
     })
+    expect(result.effects.addTasks[0].with.prompt).toContain('Build')
+    expect(result.effects.addTasks[0].with.prompt).toContain('<task id="T-1">')
+    expect(result.effects.addTasks[0].with.prompt).toContain('- works')
     expect(result.output.loaded).toBe(1)
   })
 
@@ -110,10 +114,9 @@ describe('mohist/task-list', () => {
       tasks: [task({ goal: 'Keep ${{ vars.secret }} literal', acceptance: ['A'], refs: ['PLANS/PLAN.md'] })],
     })
     const result: any = await taskListAction(template as any, host(root))
-    const loaderWith = result.effects.addTasks[0].with.prompt.with
+    const text = result.effects.addTasks[0].with.prompt
     writeFileSync(join(root, 'PLANS/tasks.json'), JSON.stringify({ tasks: [task({ goal: 'MUTATED' })] }))
     rmSync(join(root, 'PLANS/tasks.json'))
-    const text = await taskListPromptLoader({ workDir: root, with: loaderWith } as any)
     expect(text).toContain('${{ vars.secret }}')
     expect(text).not.toContain('MUTATED')
     expect(text).toContain('- A')

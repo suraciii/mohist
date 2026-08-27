@@ -26,14 +26,6 @@ public partial class MohistDbContext
                 .HasDefaultValue(new Dictionary<string, string>());
             entity.Property(e => e.Prompts).Metadata.SetValueComparer(DictionaryStringComparer);
 
-            entity.Property(e => e.AgentActionOverrides)
-                .HasConversion(
-                    value => JSON.Serialize(value),
-                    value => JSON.DeserializeDictionary(value))
-                .IsRequired()
-                .HasDefaultValue(new Dictionary<string, string>());
-            entity.Property(e => e.AgentActionOverrides).Metadata.SetValueComparer(DictionaryStringComparer);
-
             entity.Property(e => e.DisabledWorkflowProfileIds)
                 .HasConversion(
                     value => JSON.Serialize(value),

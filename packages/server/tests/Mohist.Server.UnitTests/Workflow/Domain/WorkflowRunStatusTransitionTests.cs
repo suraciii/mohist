@@ -60,7 +60,7 @@ public class WorkflowRunStatusTransitionTests
         run.StartTask("work-1", WorkerId, "test-process-generation", DateTimeOffset.UnixEpoch);
 
         Assert.Equal(WorkflowRunStatus.Running, run.Status);
-        Assert.Equal(TaskRunStatus.Running, run.CurrentStage().Tasks.Single().Status);
+        Assert.Equal(WorkflowActionAttemptStatus.Running, run.CurrentStage().Tasks.Single().Status);
     }
 
     [Fact]
@@ -76,7 +76,7 @@ public class WorkflowRunStatusTransitionTests
         run.CompleteTask(DateTimeOffset.UnixEpoch);
 
         Assert.Equal(WorkflowRunStatus.Ready, run.Status);
-        Assert.Equal(TaskRunStatus.Pending, run.CurrentStage().Tasks[1].Status);
+        Assert.Equal(WorkflowActionAttemptStatus.Pending, run.CurrentStage().Tasks[1].Status);
     }
 
     [Fact]
@@ -93,7 +93,7 @@ public class WorkflowRunStatusTransitionTests
         run.CompleteTask(DateTimeOffset.UnixEpoch);
 
         Assert.Equal(WorkflowRunStatus.Pending, run.Status);
-        Assert.Equal(TaskRunStatus.Pending, run.CurrentStage().Tasks[1].Status);
+        Assert.Equal(WorkflowActionAttemptStatus.Pending, run.CurrentStage().Tasks[1].Status);
     }
 
     [Fact]
@@ -387,13 +387,13 @@ public class WorkflowRunStatusTransitionTests
 
         Assert.Equal(WorkflowRunStatus.Ready, run.Status);
         var taskBefore = run.CurrentStage().Tasks[0];
-        Assert.Equal(TaskRunStatus.Pending, taskBefore.Status);
+        Assert.Equal(WorkflowActionAttemptStatus.Pending, taskBefore.Status);
 
         // Offer: NextWork returns the pending task but must not start it.
         var offered = run.NextWork();
 
         Assert.NotNull(offered);
-        Assert.Equal(TaskRunStatus.Pending, taskBefore.Status);
+        Assert.Equal(WorkflowActionAttemptStatus.Pending, taskBefore.Status);
         Assert.Null(taskBefore.WorkerId);
         Assert.Equal(WorkflowRunStatus.Ready, run.Status);
     }
@@ -411,7 +411,7 @@ public class WorkflowRunStatusTransitionTests
         // Claim: StartTask is what transitions the task to Running.
         run.StartTask("work-1", WorkerId, "test-process-generation", DateTimeOffset.UnixEpoch);
 
-        Assert.Equal(TaskRunStatus.Running, run.CurrentStage().Tasks[0].Status);
+        Assert.Equal(WorkflowActionAttemptStatus.Running, run.CurrentStage().Tasks[0].Status);
         Assert.Equal(WorkerId, run.CurrentStage().Tasks[0].WorkerId);
         Assert.Equal(WorkflowRunStatus.Running, run.Status);
     }
@@ -434,7 +434,7 @@ public class WorkflowRunStatusTransitionTests
         Assert.NotNull(second);
         Assert.Equal(first!.GetType(), second!.GetType());
         Assert.Equal(WorkflowRunStatus.Ready, run.Status);
-        Assert.Equal(TaskRunStatus.Pending, run.CurrentStage().Tasks[0].Status);
+        Assert.Equal(WorkflowActionAttemptStatus.Pending, run.CurrentStage().Tasks[0].Status);
     }
 
     private static WorkflowRun BuildAwaitingApprovalRun()
