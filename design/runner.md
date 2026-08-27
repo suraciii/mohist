@@ -437,11 +437,26 @@ Server refusal also drops the refused evidence. These gaps are accepted because
 evidence delivery never gates admission or work-result reporting, so the Server
 continues state arbitration from the facts it did receive.
 
+A bounded `session.input` receipt waiter can collect delivery attempts and the
+latest retry reason for its timeout diagnostic. That evidence belongs to one
+active waiter interval, not to the queued record. Every delivery attempt keeps
+the interval generation that admitted it and can update evidence only while
+that generation is still active. Ending a waiter removes its evidence without
+cancelling the queue record or delivery lease. A late verdict can still retain
+or retire the record under the ordinary queue rules, but it cannot create
+ownerless evidence or change a newer interval. The ownership trade-off is
+recorded in
+[`decisions/volatile-runtime-event-evidence.md`](decisions/volatile-runtime-event-evidence.md).
+
 The Runner does not persist operation journals, execution receipts, or
 terminal task-log delivery stores. Runtime events and task-log batches are
 bounded volatile queues: a live process retries them, but a process restart may
 lose undelivered evidence. Only the two rebuildable Workspace indexes remain on
 disk, and they are never authoritative.
+
+The runtime-event queue does not yet enforce waiter-interval ownership for
+receipt evidence. A late retryable delivery can recreate evidence after its
+bounded waiter ends or can write into a later waiter for the same record.
 
 ### Stop Operations Stay Available and Settle by Identity
 

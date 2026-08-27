@@ -130,6 +130,8 @@ does not add a separate timeout policy for each tool.
 
 ## Error Codes
 
-`mohist/pi` uses only the six shared business error codes in
-[Action Contracts](README.md#shared-semantics-for-agent-execution-actions). It
-has no Pi-specific business error codes.
+`mohist/pi` uses the shared business error codes in
+[Action Contracts](README.md#shared-semantics-for-agent-execution-actions).
+The Pi Runtime can also return `incompatible-runtime` and `interrupted` through
+that shared contract. Skill resolution reports source category
+`skill_not_found`; the ActionResult and recovery code is `skill-not-found`.
