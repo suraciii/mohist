@@ -1,7 +1,3 @@
----
-status: wip
----
-
 # Scheduled Input Design
 
 A scheduled input is a durable request to append an ordinary follow-up to an existing

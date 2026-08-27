@@ -103,7 +103,7 @@ that has already started. The entry point resolves a named Workspace from its Or
 that identity before acceptance; CLI, Web, and Slack have different Origin rules. The Runner may
 materialize the work directory later. A caller can select a Workspace by Name where the entry point
 allows an override, but cannot substitute a raw path or Runner default. Workspace resolution and
-materialization are authoritative in [`workspace.md`](workspace.md#binding-and-resolution).
+materialization are authoritative in [`workspace.md`](workspaces.md#binding-and-resolution).
 
 ### Launch convergence
 

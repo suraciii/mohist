@@ -1,7 +1,3 @@
----
-status: accepted 2026-07-15
----
-
 # Composite Issues and Child Issues
 
 Product specs: [`docs/sub-issues.md`](../docs/sub-issues.md) and

@@ -133,6 +133,9 @@ These rules govern every specification document, in `docs/`, `design/`, and
   `may`, and `must not` for requirements, options, and prohibitions.
 - Keep terms consistent with [`CONTEXT.md`](../CONTEXT.md). Define a term
   once and link to it.
+- A document states its current gaps in its own Status or Implementation Gaps
+  section. Documents and indexes do not carry lifecycle frontmatter, status
+  banners, or WIP annotations; status rots outside the document that owns it.
 - State normative rules in prose, and use numbered steps for a linear
   procedure.
 - Commands and examples must run or parse as written, each one independently.

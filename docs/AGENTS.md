@@ -32,6 +32,6 @@ Shared writing rules (language, diagrams, fences, tables, examples) live in
 - Check gaps before changing facts. Before you change a factual statement,
   check whether the document's Implementation Gaps section already records the
   difference. Do not change a target spec back to current behavior.
-- WIP product ideas stay in a WIP section with `status: wip-not-implemented`
-  frontmatter and future-state language. After the requirements and spec are
-  final, move the document to its product area and remove the WIP marker.
+- WIP product ideas use future-state language and record their current state
+  in an Implementation Gaps section. After the requirements and spec are
+  final, move the document to its product area.
