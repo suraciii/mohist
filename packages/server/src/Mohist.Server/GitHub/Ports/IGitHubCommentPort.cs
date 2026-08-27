@@ -17,6 +17,16 @@ public interface IGitHubCommentPort
         CancellationToken ct = default);
 
     /// <summary>
+    /// Finds a previously posted comment containing the exact marker. This
+    /// reconciles an unknown POST result before a retry can create a duplicate.
+    /// </summary>
+    Task<bool> HasCommentMarkerAsync(
+        GitHubConnection connection,
+        int githubIssueNumber,
+        string marker,
+        CancellationToken ct = default);
+
+    /// <summary>
     /// Replaces the mutually-exclusive <c>mohist:</c> state label on the
     /// issue with <paramref name="stateLabel"/>: existing <c>mohist:</c>
     /// labels are removed, all other labels are kept.

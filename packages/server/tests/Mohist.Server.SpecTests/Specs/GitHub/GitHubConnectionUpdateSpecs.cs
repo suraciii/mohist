@@ -1,5 +1,9 @@
 using System.Net;
+using System.Text;
 using System.Text.Json;
+using Microsoft.Extensions.DependencyInjection;
+using Mohist.Server.GitHub.Infrastructure;
+using Mohist.Server.Infrastructure.Security.Secrets;
 using Mohist.Server.Project.Services;
 using Mohist.Server.TestSupport;
 using Xunit;
@@ -20,6 +24,26 @@ public sealed class GitHubConnectionUpdateSpecs
     }
 
     private HttpClient Client => _fixture.Client;
+
+    [Fact]
+    public async Task Create_WithPat_StoresCredentialForProductionPort()
+    {
+        var owner = $"octocat-{Guid.NewGuid():N}";
+        var project = await Client.CreateProjectWithDefaultRepositoryAsync<ProjectInfo>(
+            "/api/projects", $"github-credential-{Guid.NewGuid():N}", repoName: RepoName, gitUrl: $"https://github.com/{owner}/{RepoName}.git");
+        var created = await Client.PostDataAsync<JsonElement>(
+            $"/api/projects/{project.Id}/github-connections",
+            new { owner, repo = RepoName, pat = "github-pat" });
+
+        await using var scope = _fixture.Services.CreateAsyncScope();
+        var secrets = scope.ServiceProvider.GetRequiredService<ISecretStore>();
+        var stored = await secrets.LoadAsync(
+            GitHubConnectionStore.ApiSecretAddress(project.Id, created.GetProperty("id").GetString()!));
+
+        Assert.Equal("github-pat", Encoding.UTF8.GetString(stored!));
+        Assert.Equal("pat", created.GetProperty("identityKind").GetString());
+        Assert.False(created.TryGetProperty("pat", out _));
+    }
 
     [Fact]
     public async Task UpdateApprovers_ReturnsUpdatedConnection()

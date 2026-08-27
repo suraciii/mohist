@@ -36,6 +36,7 @@ public sealed class GitHubConnectionTests
     public void Validate_RequiresInstallationIdForAppIdentityWhenDemanded()
     {
         var connection = Valid();
+        connection.IdentityKind = GitHubIdentityKind.App;
 
         var ex = Assert.Throws<GitHubConnectionValidationException>(() => connection.Validate());
         Assert.Equal("installation_id_required", ex.Code);

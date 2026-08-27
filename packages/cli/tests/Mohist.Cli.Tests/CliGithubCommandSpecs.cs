@@ -60,7 +60,7 @@ public sealed class CliGithubCommandSpecs
 
         var exit = await MohistCliCommands.RunAsync(
             http,
-            ["github", "connect", "octocat/hello-world", "--approver", "alice", "--project", "proj_test"],
+            ["github", "connect", "octocat/hello-world", "--approver", "alice", "--pat", "github-pat", "--project", "proj_test"],
             output,
             error,
             fs,
@@ -74,7 +74,9 @@ public sealed class CliGithubCommandSpecs
         Assert.Equal("octocat", body["owner"]!.GetValue<string>());
         Assert.Equal("hello-world", body["repo"]!.GetValue<string>());
         Assert.Equal("alice", body["approvers"]![0]!.GetValue<string>());
+        Assert.Equal("github-pat", body["pat"]!.GetValue<string>());
         var text = output.ToString();
+        Assert.DoesNotContain("github-pat", text, StringComparison.Ordinal);
         Assert.Contains("Payload URL:", text, StringComparison.Ordinal);
         Assert.Contains("/api/github-connections/ghconn_1/ingress", text, StringComparison.Ordinal);
         Assert.Contains("Secret:       top-secret-hex", text, StringComparison.Ordinal);

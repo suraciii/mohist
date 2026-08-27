@@ -9,7 +9,9 @@ public sealed class GitHubConnection
     public string RepositoryName { get; set; } = string.Empty;
     public IReadOnlyList<string> Approvers { get; set; } = [];
     public string Status { get; set; } = GitHubConnectionStatus.Active;
-    public string IdentityKind { get; set; } = GitHubIdentityKind.App;
+    // GitHub App installation-token exchange is not implemented yet. PAT is
+    // therefore the only identity created by the current connection API.
+    public string IdentityKind { get; set; } = GitHubIdentityKind.Pat;
     public string? InstallationId { get; set; }
 
     /// <summary>

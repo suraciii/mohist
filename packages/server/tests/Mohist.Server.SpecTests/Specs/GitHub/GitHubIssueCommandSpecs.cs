@@ -118,6 +118,25 @@ public sealed class GitHubIssueCommandSpecs
             .GetAsync(projectId, RepoName, GithubIssueNumber);
     }
 
+    private async Task<GitHubCommandReply?> LoadReplyAsync(string connectionId, string commentId)
+    {
+        await using var scope = _fixture.Services.CreateAsyncScope();
+        var db = scope.ServiceProvider.GetRequiredService<IDbContextFactory<MohistDbContext>>();
+        await using var context = await db.CreateDbContextAsync();
+        var row = await context.GitHubCommandReplies.AsNoTracking()
+            .SingleOrDefaultAsync(reply => reply.ConnectionId == connectionId
+                && reply.GithubCommentId == commentId);
+        return row is null
+            ? null
+            : new GitHubCommandReply
+            {
+                Id = row.Id,
+                PostedAt = row.PostedAt,
+                Marker = row.Marker,
+                Body = row.Body,
+            };
+    }
+
     private async Task<int> CountIssuesAsync(string projectId)
     {
         await using var scope = _fixture.Services.CreateAsyncScope();
@@ -151,7 +170,8 @@ public sealed class GitHubIssueCommandSpecs
             comment => comment.ConnectionId == connectionId
                 && comment.Body.Contains("已创建并启动", StringComparison.Ordinal));
         Assert.Equal(GithubIssueNumber, reply.GithubIssueNumber);
-        Assert.True(link.HasPostedComment(GitHubCommentKinds.CommandReply("1001")));
+        Assert.NotNull(await LoadReplyAsync(connectionId, "1001"));
+        Assert.NotNull((await LoadReplyAsync(connectionId, "1001"))!.PostedAt);
     }
 
     [Fact]
@@ -216,6 +236,45 @@ public sealed class GitHubIssueCommandSpecs
         Assert.Equal(0, await CountIssuesAsync(projectId));
         var reply = Assert.Single(_fixture.Comments.Comments);
         Assert.Contains("不支持命令", reply.Body, StringComparison.Ordinal);
+        Assert.Contains(
+            GitHubCommentKinds.CommandReplyMarker(connectionId, GithubIssueNumber, "1005"),
+            reply.Body,
+            StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task UnknownCommand_RedeliveryPostsOnlyOneReply()
+    {
+        var (projectId, connectionId, secret, owner) = await ConnectNewAsync();
+
+        await DeliverCommentAsync(connectionId, secret, "command-unknown-a", "/mohist stop", commentId: 1007);
+        await DeliverCommentAsync(connectionId, secret, "command-unknown-b", "/mohist stop", commentId: 1007);
+        await PumpAsync();
+        await PumpAsync();
+
+        Assert.Null(await LoadLinkAsync(projectId, owner));
+        Assert.Single(_fixture.Comments.Comments);
+    }
+
+    [Fact]
+    public async Task CommandReplyFailure_IsRetriedWithoutDuplicateComment()
+    {
+        var (projectId, connectionId, secret, owner) = await ConnectNewAsync();
+        _fixture.Comments.ConfirmationFailure = new TimeoutException("simulated reply failure");
+
+        await DeliverCommentAsync(connectionId, secret, "command-reply-failure-a", "/mohist start", commentId: 1008);
+        await PumpAsync();
+        Assert.Empty(_fixture.Comments.Comments);
+
+        _fixture.Comments.ConfirmationFailure = null;
+        await DeliverCommentAsync(connectionId, secret, "command-reply-failure-b", "/mohist start", commentId: 1008);
+        await PumpAsync();
+
+        var link = await LoadLinkAsync(projectId, owner);
+        Assert.NotNull(link);
+        Assert.Equal(IssueStatus.InProgress, (await LoadIssueAsync(projectId, link!.IssueNumber))!.Status);
+        Assert.Single(_fixture.Comments.Comments, comment =>
+            comment.Body.Contains(GitHubCommentKinds.CommandReplyMarker(connectionId, GithubIssueNumber, "1008"), StringComparison.Ordinal));
     }
 
     [Fact]
@@ -250,6 +309,19 @@ public sealed class GitHubIssueCommandSpecs
             comment => comment.ConnectionId == connectionId
                 && comment.Body.Contains("已创建，但无法启动", StringComparison.Ordinal));
         Assert.Contains("not found", reply.Body, StringComparison.OrdinalIgnoreCase);
+
+        await Client.PostOkAsync($"/api/projects/{project.Id}/repositories", new
+        {
+            name = RepoName,
+            gitUrl = $"https://github.com/{owner}/{RepoName}.git",
+            baseBranch = "main",
+        });
+        await DeliverCommentAsync(connectionId, secret, "command-no-repository-retry", "/mohist start", commentId: 1006);
+        await PumpAsync();
+
+        Assert.Equal(IssueStatus.InProgress, (await LoadIssueAsync(project.Id, link!.IssueNumber))!.Status);
+        Assert.Single(_fixture.Comments.Comments, comment =>
+            comment.Body.Contains(GitHubCommentKinds.CommandReplyMarker(connectionId, GithubIssueNumber, "1006"), StringComparison.Ordinal));
     }
 
     [Fact]

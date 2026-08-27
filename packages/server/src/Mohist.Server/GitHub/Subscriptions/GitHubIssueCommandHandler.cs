@@ -66,16 +66,17 @@ public sealed class GitHubIssueCommandHandler : ICloudEventHandler
             return;
 
         var comments = sp.GetRequiredService<IGitHubCommentPort>();
+        var replies = sp.GetRequiredService<GitHubCommandReplyStore>();
         if (command.Verb is GitHubIssueCommandVerb.Unknown)
         {
             await ReplyAsync(
+                replies,
                 comments,
+                projectId,
                 connection,
                 payload.IssueNumber,
+                payload.CommentId,
                 GitHubIssueCommandComments.UnknownVerb(command.RawVerb),
-                marker: null,
-                links: null,
-                link: null,
                 ct);
             return;
         }
@@ -84,17 +85,36 @@ public sealed class GitHubIssueCommandHandler : ICloudEventHandler
         var issueStore = sp.GetRequiredService<IIssueStore>();
         var link = await links.GetAsync(projectId, connection.RepositoryName, payload.IssueNumber, ct);
         var allocated = link?.IssueNumber ?? 0;
-        if (link is not null && await issueStore.LoadAsync(GrainKey.Issue(new IssueKey(projectId, allocated))) is not null)
+        var existingIssue = link is not null
+            ? await issueStore.LoadAsync(GrainKey.Issue(new IssueKey(projectId, link.IssueNumber)))
+            : null;
+        if (link is not null && existingIssue is not null)
         {
-            await ReplyAsync(
-                comments,
-                connection,
-                payload.IssueNumber,
-                GitHubIssueCommandComments.AlreadyLinked(projectId, link.IssueNumber),
-                GitHubCommentKinds.CommandReply(payload.CommentId),
-                links,
-                link,
-                ct);
+            var existingGrain = _grains.GetGrain<IIssueGrain>(GrainKey.Issue(new IssueKey(projectId, link.IssueNumber)));
+            if (link.CommandRequested && existingIssue.Status == IssueStatus.Backlog)
+            {
+                await StartAndReplyAsync(
+                    replies,
+                    comments,
+                    projectId,
+                    connection,
+                    payload,
+                    existingGrain,
+                    link.IssueNumber,
+                    ct);
+            }
+            else
+            {
+                await ReplyAsync(
+                    replies,
+                    comments,
+                    projectId,
+                    connection,
+                    payload.IssueNumber,
+                    payload.CommentId,
+                    GitHubIssueCommandComments.AlreadyLinked(projectId, link.IssueNumber),
+                    ct);
+            }
             return;
         }
 
@@ -102,17 +122,23 @@ public sealed class GitHubIssueCommandHandler : ICloudEventHandler
         {
             var counter = _grains.GetGrain<IIssueCounterGrain>(GrainKey.IssueCounter(projectId));
             allocated = await counter.NextAsync();
-            link = await links.CreateAsync(projectId, connection.RepositoryName, payload.IssueNumber, allocated, ct);
+            link = await links.CreateAsync(
+                projectId,
+                connection.RepositoryName,
+                payload.IssueNumber,
+                allocated,
+                commandRequested: true,
+                ct: ct);
             if (link.IssueNumber != allocated)
             {
                 await ReplyAsync(
+                    replies,
                     comments,
+                    projectId,
                     connection,
                     payload.IssueNumber,
+                    payload.CommentId,
                     GitHubIssueCommandComments.AlreadyLinked(projectId, link.IssueNumber),
-                    GitHubCommentKinds.CommandReply(payload.CommentId),
-                    links,
-                    link,
                     ct);
                 return;
             }
@@ -140,62 +166,104 @@ public sealed class GitHubIssueCommandHandler : ICloudEventHandler
             // response was lost. Continue with the existing aggregate.
         }
 
+        await StartAndReplyAsync(
+            replies,
+            comments,
+            projectId,
+            connection,
+            payload,
+            issueGrain,
+            allocated,
+            ct);
+    }
+
+    private async Task StartAndReplyAsync(
+        GitHubCommandReplyStore replies,
+        IGitHubCommentPort comments,
+        string projectId,
+        GitHubConnection connection,
+        GitHubIssueCommentEventPayload payload,
+        IIssueGrain issueGrain,
+        int issueNumber,
+        CancellationToken ct)
+    {
         try
         {
             await issueGrain.StartWorkAsync();
             await ReplyAsync(
+                replies,
                 comments,
+                projectId,
                 connection,
                 payload.IssueNumber,
-                GitHubIssueCommandComments.Started(projectId, allocated),
-                GitHubCommentKinds.CommandReply(payload.CommentId),
-                links,
-                link,
+                payload.CommentId,
+                GitHubIssueCommandComments.Started(projectId, issueNumber),
                 ct);
         }
         catch (IssueStartBlockedException ex)
         {
             await ReplyAsync(
+                replies,
                 comments,
+                projectId,
                 connection,
                 payload.IssueNumber,
+                payload.CommentId,
                 GitHubIssueCommandComments.StartFailed(ex.Message),
-                GitHubCommentKinds.CommandReply(payload.CommentId),
-                links,
-                link,
                 ct);
         }
         catch (IssueStartRepositoryUnavailableException ex)
         {
             await ReplyAsync(
+                replies,
                 comments,
+                projectId,
                 connection,
                 payload.IssueNumber,
+                payload.CommentId,
                 GitHubIssueCommandComments.StartFailed(ex.Message),
-                GitHubCommentKinds.CommandReply(payload.CommentId),
-                links,
-                link,
                 ct);
         }
     }
 
     private async Task ReplyAsync(
+        GitHubCommandReplyStore replies,
         IGitHubCommentPort comments,
+        string projectId,
         GitHubConnection connection,
         int githubIssueNumber,
+        string githubCommentId,
         string body,
-        string? marker,
-        GitHubIssueLinkStore? links,
-        GitHubIssueLink? link,
         CancellationToken ct)
     {
-        if (marker is not null && link?.HasPostedComment(marker) == true)
+        var marker = GitHubCommentKinds.CommandReplyMarker(
+            connection.Id,
+            githubIssueNumber,
+            githubCommentId);
+        var reply = await replies.GetOrCreateAsync(
+            projectId,
+            connection.Id,
+            connection.RepositoryName,
+            githubIssueNumber,
+            githubCommentId,
+            marker,
+            body,
+            ct);
+        if (reply.IsPosted)
             return;
         try
         {
-            await comments.PostCommentAsync(connection, githubIssueNumber, body, ct);
-            if (marker is not null && links is not null && link is not null)
-                await links.MarkCommentPostedAsync(link.Id, marker, ct);
+            if (await comments.HasCommentMarkerAsync(connection, githubIssueNumber, reply.Marker, ct))
+            {
+                await replies.MarkPostedAsync(reply.Id, ct);
+                return;
+            }
+            await comments.PostCommentAsync(
+                connection,
+                githubIssueNumber,
+                GitHubMirrorMarker.Append(reply.Body, reply.Marker),
+                ct);
+            await replies.MarkPostedAsync(reply.Id, ct);
         }
         catch (Exception ex) when (!ct.IsCancellationRequested)
         {

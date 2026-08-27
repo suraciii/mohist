@@ -78,7 +78,10 @@ public sealed class GitHubConnectionStore : IScopedService
         return row is null ? null : ToDomain(row);
     }
 
-    public async Task<string> CreateAsync(GitHubConnection connection, CancellationToken ct = default)
+    public async Task<string> CreateAsync(
+        GitHubConnection connection,
+        string? pat = null,
+        CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(connection);
         connection.Owner = connection.Owner.Trim().ToLowerInvariant();
@@ -114,6 +117,13 @@ public sealed class GitHubConnectionStore : IScopedService
 
         var secret = Convert.ToHexString(RandomNumberGenerator.GetBytes(32)).ToLowerInvariant();
         await _secretStore.StoreAsync(WebhookSecretAddress(connection.ProjectId, connection.Id), Encoding.UTF8.GetBytes(secret), ct);
+        if (!string.IsNullOrWhiteSpace(pat))
+        {
+            await _secretStore.StoreAsync(
+                ApiSecretAddress(connection.ProjectId, connection.Id),
+                Encoding.UTF8.GetBytes(pat),
+                ct);
+        }
         return secret;
     }
 
@@ -173,9 +183,8 @@ public sealed class GitHubConnectionStore : IScopedService
         new(projectId, $"{connectionId}:webhook", SecretKind.WebhookSecret);
 
     /// <summary>
-    /// Degraded-identity write-back PAT (Issues read/write only). Stored per
-    /// connection; consumed by the comment port and the future write-back
-    /// writer.
+    /// Fine-grained GitHub PAT (Issues read/write only). Stored per
+    /// connection and consumed by the current comment port.
     /// </summary>
     public static SecretStoreAddress ApiSecretAddress(string projectId, string connectionId) =>
         new(new SecretOwnerAddress.GitHubConnection(projectId, connectionId), SecretKind.AppToken);

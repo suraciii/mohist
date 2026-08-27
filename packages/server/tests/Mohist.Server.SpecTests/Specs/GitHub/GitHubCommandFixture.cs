@@ -93,6 +93,15 @@ public sealed class RecordingGitHubCommentPort : IGitHubCommentPort, IGitHubIssu
         return Task.CompletedTask;
     }
 
+    public Task<bool> HasCommentMarkerAsync(
+        GitHubConnection connection,
+        int githubIssueNumber,
+        string marker,
+        CancellationToken ct = default) =>
+        Task.FromResult(Comments.Any(comment => comment.ConnectionId == connection.Id
+            && comment.GithubIssueNumber == githubIssueNumber
+            && comment.Body.Contains(marker, StringComparison.Ordinal)));
+
     public Task ReplaceStateLabelAsync(
         GitHubConnection connection,
         int githubIssueNumber,

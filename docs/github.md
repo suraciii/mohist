@@ -44,16 +44,16 @@ several repositories can hold several connections. An Issue never carries
 GitHub coordinates: its mirror location is determined by its target repository.
 
 ```bash
-mo github connect owner/repo                 # matched to a registered Repository by git URL
+mo github connect owner/repo --pat <token>    # matched to a registered Repository by git URL
 mo github connect owner/repo --repo docs     # explicit when the match is ambiguous
 mo github list                               # every Repository and its connection state
 ```
 
 The guide prints the GitHub-side setup: a Repository webhook targeting the
-Mohist Server, and the identity Mohist uses on GitHub — a deployment-specific
-GitHub App (recommended, short-lived repository-scoped tokens) or a
-fine-grained PAT with Issues read and write as fallback. An optional approver
-list enables [Pull Request Review as Approval](#pull-request-review-as-approval).
+Mohist Server. The current connection API accepts a fine-grained PAT with Issues
+read and write through `--pat` and stores it as a server secret; GitHub App
+installation-token exchange is not implemented yet. An optional approver list
+enables [Pull Request Review as Approval](#pull-request-review-as-approval).
 
 Disabling a connection pauses mirroring and synchronization. Existing links
 stay visible on Issues and show the paused state. Enabling re-projects every

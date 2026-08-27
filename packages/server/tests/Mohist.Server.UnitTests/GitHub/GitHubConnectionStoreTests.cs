@@ -102,6 +102,22 @@ public sealed class GitHubConnectionStoreTests
     }
 
     [Fact]
+    public async Task CreateAsync_StoresConfiguredPatInConnectionSecret()
+    {
+        var database = NewDatabase(RepositoriesJson("https://github.com/octocat/hello-world.git"));
+        var secrets = new FakeSecretStore();
+        var store = NewStore(database, secrets);
+        var connection = Connection();
+
+        await store.CreateAsync(connection, pat: "github-pat");
+
+        var stored = await secrets.LoadAsync(
+            GitHubConnectionStore.ApiSecretAddress("proj_1", connection.Id));
+        Assert.Equal("github-pat", System.Text.Encoding.UTF8.GetString(stored!));
+        Assert.Equal(GitHubIdentityKind.Pat, connection.IdentityKind);
+    }
+
+    [Fact]
     public async Task CreateAsync_RejectsRepositoryNotRegisteredInProject()
     {
         var database = NewDatabase(RepositoriesJson("https://github.com/octocat/hello-world.git"));

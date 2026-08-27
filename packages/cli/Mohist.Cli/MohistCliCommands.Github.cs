@@ -7,7 +7,7 @@ internal static class GithubCommands
 {
     private static readonly ResourceDescriptor ConnectDescriptor = new(
         ResourceCardinality.Single,
-        ["id", "projectId", "owner", "repo", "repositoryName", "approvers", "status", "webhookSecret", "ingressUrl"]);
+        ["id", "projectId", "owner", "repo", "repositoryName", "approvers", "status", "identityKind", "webhookSecret", "ingressUrl"]);
 
     public static Command Build(MohistCliApi api)
     {
@@ -22,10 +22,12 @@ internal static class GithubCommands
         var command = new Command("connect", "Connect a GitHub repository to the project and print the webhook configuration for GitHub.");
         var ownerRepo = new Argument<string>("owner/repo") { Description = "GitHub repository coordinates, e.g. octocat/hello-world." };
         var approver = new Option<string[]>("--approver") { Description = "GitHub login whose PR review counts as approval (repeatable)." };
+        var pat = new Option<string?>("--pat") { Description = "Fine-grained GitHub PAT with Issues read/write permission (stored as a server secret)." };
         var project = MohistCliCommands.ProjectRefOption();
         var output = MohistCliCommands.OutputOption(ConnectDescriptor);
         command.Arguments.Add(ownerRepo);
         command.Options.Add(approver);
+        command.Options.Add(pat);
         command.Options.Add(project);
         command.Options.Add(output);
         command.SetAction(async ctx =>
@@ -45,7 +47,7 @@ internal static class GithubCommands
             }
 
             var (data, exit) = await api.ConnectGitHubRepositoryAsync(
-                resolution.ProjectId, owner, repo, ctx.GetValue(approver)).ConfigureAwait(false);
+                resolution.ProjectId, owner, repo, ctx.GetValue(approver), ctx.GetValue(pat)).ConfigureAwait(false);
             if (exit != 0 || data is null) return exit;
             if (selection.Kind == JsonSelectionKind.Selected)
                 return await new CliResultWriter(api.Invocation).WriteSuccessAsync(
@@ -122,8 +124,7 @@ internal static class GithubCommands
         await api.Output.WriteLineAsync($"  Secret:       {secret}").ConfigureAwait(false);
         await api.Output.WriteLineAsync("  Events:       issues, issue_comment, pull_request_review, check_suite").ConfigureAwait(false);
         await api.Output.WriteLineAsync().ConfigureAwait(false);
-        await api.Output.WriteLineAsync("GitHub identity (GitHub App or fine-grained PAT) is not configured yet;").ConfigureAwait(false);
-        await api.Output.WriteLineAsync("write-backs and delivery tokens will need it in a later release.").ConfigureAwait(false);
+        await api.Output.WriteLineAsync("GitHub identity: fine-grained PAT (Issues read/write); use --pat when connecting.").ConfigureAwait(false);
     }
 
     private static JsonSelection ResolveSelection(

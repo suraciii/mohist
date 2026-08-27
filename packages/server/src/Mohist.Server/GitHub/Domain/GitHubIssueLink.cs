@@ -10,6 +10,7 @@ public sealed class GitHubIssueLink
     public int IssueNumber { get; set; }
     public string? MirrorMarker { get; set; }
     public bool MirrorCreateAttempted { get; set; }
+    public bool CommandRequested { get; set; }
     public IReadOnlySet<string> PostedComments { get; set; } = new HashSet<string>(StringComparer.Ordinal);
 
     /// <summary>
@@ -37,6 +38,9 @@ public sealed class GitHubIssueLink
 public static class GitHubCommentKinds
 {
     public static string CommandReply(string commentId) => $"command-reply:{commentId}";
+
+    public static string CommandReplyMarker(string connectionId, int githubIssueNumber, string commentId) =>
+        $"<!-- mohist:command-reply:{connectionId}:{githubIssueNumber}:{commentId} -->";
 
     public const string MirrorCreated = "writeback-mirror-created";
     public const string WorkStarted = "writeback-work-started";

@@ -25,10 +25,11 @@ public static class GitHubConnectionRoutes
                 Owner = request.Owner ?? string.Empty,
                 Repo = request.Repo ?? string.Empty,
                 Approvers = request.Approvers ?? [],
+                IdentityKind = GitHubIdentityKind.Pat,
             };
             try
             {
-                var webhookSecret = await store.CreateAsync(connection, ct);
+                var webhookSecret = await store.CreateAsync(connection, request.Pat, ct);
                 return Results.Json(
                     new ApiResponse<GitHubConnectionDto>(true, ToDto(connection, webhookSecret)),
                     statusCode: StatusCodes.Status201Created);
@@ -121,7 +122,8 @@ public sealed record GitHubConnectionDto(
 public sealed record GitHubConnectionCreateRequest(
     string? Owner,
     string? Repo,
-    string[]? Approvers)
+    string[]? Approvers,
+    string? Pat)
 {
     [JsonExtensionData]
     public Dictionary<string, JsonElement>? AdditionalProperties { get; init; }

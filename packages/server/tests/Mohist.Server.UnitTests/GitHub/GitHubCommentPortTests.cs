@@ -71,6 +71,26 @@ public sealed class GitHubCommentPortTests
     }
 
     [Fact]
+    public async Task HasCommentMarkerAsync_UsesConfiguredPatAndFindsExistingReply()
+    {
+        const string marker = "<!-- mohist:command-reply:conn-1:42:1001 -->";
+        var handler = new FakeHttpMessageHandler($$"""
+            [
+              { "body": "reply\n\n{{marker}}" }
+            ]
+            """);
+        var port = CreatePort(handler);
+
+        var found = await port.HasCommentMarkerAsync(Connection(), 42, marker, CancellationToken.None);
+
+        Assert.True(found);
+        var request = Assert.Single(handler.Requests);
+        Assert.Equal(HttpMethod.Get, request.Method);
+        Assert.Equal("/repos/octo/hello/issues/42/comments?per_page=100&page=1", request.PathAndQuery);
+        Assert.Equal("pat-1", request.Authorization);
+    }
+
+    [Fact]
     public async Task FindDeliveryPullRequestUrlAsync_WithMatchingPull_ReturnsHtmlUrl()
     {
         var handler = new FakeHttpMessageHandler("""
@@ -111,7 +131,7 @@ public sealed class GitHubCommentPortTests
 
     private sealed class FakeHttpMessageHandler(string body, HttpStatusCode status = HttpStatusCode.OK) : HttpMessageHandler
     {
-        public sealed record Request(HttpMethod Method, string PathAndQuery);
+        public sealed record Request(HttpMethod Method, string PathAndQuery, string? Authorization);
 
         public List<Request> Requests { get; } = [];
 
@@ -119,7 +139,10 @@ public sealed class GitHubCommentPortTests
             HttpRequestMessage request,
             CancellationToken cancellationToken)
         {
-            Requests.Add(new Request(request.Method, request.RequestUri!.PathAndQuery));
+            Requests.Add(new Request(
+                request.Method,
+                request.RequestUri!.PathAndQuery,
+                request.Headers.Authorization?.Parameter));
             var response = new HttpResponseMessage(status)
             {
                 Content = new StringContent(body, Encoding.UTF8, "application/json"),

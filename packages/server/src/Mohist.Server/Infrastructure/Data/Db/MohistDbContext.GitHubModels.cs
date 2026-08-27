@@ -5,6 +5,8 @@ namespace Mohist.Server.Infrastructure.Data.Db;
 
 public partial class MohistDbContext
 {
+    public DbSet<GitHubCommandReplyRow> GitHubCommandReplies { get; set; } = null!;
+
     private static void ConfigureGitHubModels(ModelBuilder modelBuilder)
     {
             modelBuilder.Entity<GitHubConnectionRow>(entity =>
@@ -69,6 +71,8 @@ public partial class MohistDbContext
                     .HasMaxLength(256);
                 entity.Property(e => e.MirrorCreateAttempted)
                     .IsRequired();
+                entity.Property(e => e.CommandRequested)
+                    .IsRequired();
                 entity.HasIndex(e => new { e.ProjectId, e.RepositoryName, e.GithubIssueNumber })
                     .IsUnique()
                     .HasFilter("\"GithubIssueNumber\" > 0");
@@ -83,6 +87,42 @@ public partial class MohistDbContext
                     .IsRequired();
                 entity.Property(e => e.UpdatedAt)
                     .IsRequired();
+            });
+
+            modelBuilder.Entity<GitHubCommandReplyRow>(entity =>
+            {
+                entity.ToTable("GitHubCommandReplies");
+                entity.HasKey(e => e.Id);
+                entity.Property(e => e.Id)
+                    .HasMaxLength(256)
+                    .IsRequired();
+                entity.Property(e => e.ProjectId)
+                    .HasMaxLength(256)
+                    .IsRequired();
+                entity.Property(e => e.ConnectionId)
+                    .HasMaxLength(256)
+                    .IsRequired();
+                entity.Property(e => e.RepositoryName)
+                    .HasMaxLength(256)
+                    .IsRequired();
+                entity.Property(e => e.GithubIssueNumber)
+                    .IsRequired();
+                entity.Property(e => e.GithubCommentId)
+                    .HasMaxLength(256)
+                    .IsRequired();
+                entity.Property(e => e.Marker)
+                    .HasMaxLength(512)
+                    .IsRequired();
+                entity.Property(e => e.Body)
+                    .IsRequired();
+                entity.Property(e => e.PostedAt);
+                entity.Property(e => e.CreatedAt)
+                    .IsRequired();
+                entity.Property(e => e.UpdatedAt)
+                    .IsRequired();
+                entity.HasIndex(e => new { e.ConnectionId, e.GithubIssueNumber, e.GithubCommentId })
+                    .IsUnique()
+                    .HasDatabaseName("UX_GitHubCommandReplies_Connection_Issue_Comment");
             });
 
             modelBuilder.Entity<GitHubWriteBackFailureRow>(entity =>
