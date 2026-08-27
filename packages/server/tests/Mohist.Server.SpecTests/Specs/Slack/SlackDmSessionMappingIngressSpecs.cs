@@ -14,6 +14,7 @@ using Mohist.Server.Infrastructure.Data.Sessions;
 using Mohist.Server.Infrastructure.Data.Slack;
 using Mohist.Server.Infrastructure.Security.Secrets;
 using Mohist.Server.Infrastructure.Slack;
+using Mohist.Server.Runner.Grains;
 using Mohist.Server.Runner.Services;
 using Mohist.Server.Slack.Domain;
 using Mohist.Server.SpecTests.Support;
@@ -129,25 +130,28 @@ public sealed class SlackDmSessionMappingIngressSpecs
         var connection = await CreateConnectionAsync();
         var sessionId = $"session-followup-{connection.Id}";
         var jobKey = $"job-followup-{connection.Id}";
+        var runnerId = $"dm-followup-runner-{Guid.NewGuid():N}";
+        var runnerConnectionId = $"{runnerId}-connection";
         await using (var scope = _fixture.Services.CreateAsyncScope())
         {
             var db = scope.ServiceProvider.GetRequiredService<MohistDbContext>();
             var mapping = scope.ServiceProvider.GetRequiredService<SlackDmSessionMappingStore>();
             var now = _fixture.TimeProvider.GetUtcNow();
             var sessionState = """
-                {"id":"__SESSION__","metadata":{"labels":{"mohist.io/project-id":"__PROJECT__","mohist.io/source-kind":"agent-connection","mohist.io/connection-id":"__CONNECTION__","mohist.io/slack-user-id":"U_OWNER","mohist.io/slack-conversation-id":"D-DM-FOLLOWUP","mohist.io/agent-id":"agent-1","mohist.io/agent-name":"Mohist Agent"}},"runtime":{"runnerId":"r1","workDir":null,"runtime":"opencode"},"settings":{"model":"gpt-4o"},"status":{"agentRuntimeSessionId":"runtime-followup","activity":"idle","createdAt":"__NOW__","lastDataAt":"__NOW__","inputs":[{"id":"initial-input","sequence":1,"text":"initial","source":"agent-connection","acceptance":"accepted","recordedAt":"__NOW__","jobId":"__JOB__","provenance":{"providerKind":"slack","workspaceId":"T123","conversationId":"D-DM-FOLLOWUP","threadId":null,"memberId":"U_OWNER","messageId":"initial-message","connectionId":"__CONNECTION__"}}],"turns":[{"id":"initial-turn","sequence":1,"inputIds":["initial-input"],"status":"completed","jobId":"__JOB__","recordedAt":"__NOW__","updatedAt":"__NOW__"}]}}
+                {"id":"__SESSION__","metadata":{"labels":{"mohist.io/project-id":"__PROJECT__","mohist.io/source-kind":"agent-connection","mohist.io/connection-id":"__CONNECTION__","mohist.io/slack-user-id":"U_OWNER","mohist.io/slack-conversation-id":"D-DM-FOLLOWUP","mohist.io/agent-id":"agent-1","mohist.io/agent-name":"Mohist Agent"}},"runtime":{"runnerId":"__RUNNER__","workDir":null,"runtime":"opencode"},"settings":{"model":"gpt-4o"},"status":{"agentRuntimeSessionId":"runtime-followup","activity":"idle","createdAt":"__NOW__","lastDataAt":"__NOW__","inputs":[{"id":"initial-input","sequence":1,"text":"initial","source":"agent-connection","acceptance":"accepted","recordedAt":"__NOW__","jobId":"__JOB__","provenance":{"providerKind":"slack","workspaceId":"T123","conversationId":"D-DM-FOLLOWUP","threadId":null,"memberId":"U_OWNER","messageId":"initial-message","connectionId":"__CONNECTION__"}}],"turns":[{"id":"initial-turn","sequence":1,"inputIds":["initial-input"],"status":"completed","jobId":"__JOB__","recordedAt":"__NOW__","updatedAt":"__NOW__"}]}}
                 """;
             sessionState = sessionState
                 .Replace("__SESSION__", sessionId)
                 .Replace("__PROJECT__", connection.ProjectId)
                 .Replace("__CONNECTION__", connection.Id)
+                .Replace("__RUNNER__", runnerId)
                 .Replace("__JOB__", jobKey)
                 .Replace("__NOW__", now.UtcDateTime.ToString("O"));
             db.AgentSessions.Add(new AgentSessionRow
             {
                 Id = sessionId,
                 AgentSessionId = "runtime-followup",
-                RunnerId = "r1",
+                RunnerId = runnerId,
                 Status = "bound",
                 State = sessionState,
                 CreatedAt = now.UtcDateTime,
@@ -174,118 +178,127 @@ public sealed class SlackDmSessionMappingIngressSpecs
                 "D-DM-FOLLOWUP", sessionId);
         }
 
-        using (var register = await _fixture.Client.PostAsJsonAsync("/api/runner/r1/register", new
+        try
         {
-            processGeneration = TestRunnerGenerationExtensions.ProcessGeneration,
-            capabilities = new[] { "spec/*" },
-            hostname = "r1-host",
-            projectId = connection.ProjectId,
-            runtimeCatalogs = CapabilityCatalogTestHelpers.Create(),
-        }))
-        {
-            register.EnsureSuccessStatusCode();
-        }
-        var runnerHub = _fixture.Services.GetRequiredService<IRunnerControlTransport>() as RecordingRunnerControlTransport
-            ?? throw new InvalidOperationException("Recording runner hub context was not registered.");
-        runnerHub.Clear();
-        _fixture.Services.GetRequiredService<RunnerConnectionTracker>().Register("r1", "r1-connection");
+            using (var register = await _fixture.Client.PostAsJsonAsync($"/api/runner/{runnerId}/register", new
+            {
+                processGeneration = TestRunnerGenerationExtensions.ProcessGeneration,
+                capabilities = new[] { "spec/*" },
+                hostname = $"{runnerId}-host",
+                projectId = connection.ProjectId,
+                runtimeCatalogs = CapabilityCatalogTestHelpers.Create(),
+            }))
+            {
+                register.EnsureSuccessStatusCode();
+            }
+            var runnerHub = _fixture.Services.GetRequiredService<IRunnerControlTransport>() as RecordingRunnerControlTransport
+                ?? throw new InvalidOperationException("Recording runner hub context was not registered.");
+            runnerHub.Clear();
+            _fixture.Services.GetRequiredService<RunnerConnectionTracker>().Register(runnerId, runnerConnectionId);
 
-        using var followup = await _fixture.Client.PostAsJsonAsync(Path(connection, "/ingress"), new
-        {
-            isDirectMessage = true,
-            teamId = connection.WorkspaceTeamId,
-            conversationId = "D-DM-FOLLOWUP",
-            messageTs = "1710000000.000300",
-            senderSlackUserId = "U_OWNER",
-            text = "more details",
-            leaseId = _connectionLeases[connection.Id],
-            adapterId = SlackRuntimeLeaseTestSupport.AdapterId,
-        });
+            using var followup = await _fixture.Client.PostAsJsonAsync(Path(connection, "/ingress"), new
+            {
+                isDirectMessage = true,
+                teamId = connection.WorkspaceTeamId,
+                conversationId = "D-DM-FOLLOWUP",
+                messageTs = "1710000000.000300",
+                senderSlackUserId = "U_OWNER",
+                text = "more details",
+                leaseId = _connectionLeases[connection.Id],
+                adapterId = SlackRuntimeLeaseTestSupport.AdapterId,
+            });
 
-        Assert.Equal(HttpStatusCode.OK, followup.StatusCode);
-        using var document = JsonDocument.Parse(await followup.Content.ReadAsStringAsync());
-        var data = document.RootElement.GetProperty("data");
-        Assert.True(data.TryGetProperty("sessionId", out _),
-            "follow-up path must surface the same session id without launching a new AgentJob");
-        Assert.True(data.TryGetProperty("inputId", out _),
-            "follow-up path must surface the SessionInput id");
-        Assert.True(data.GetProperty("followup").GetBoolean());
-        Assert.Single(runnerHub.SentMessages,
-            message => message.ConnectionId == "r1" && message.Method == "session.followup");
-        var followupTurnId = data.GetProperty("turnId").GetString()!;
+            Assert.Equal(HttpStatusCode.OK, followup.StatusCode);
+            using var document = JsonDocument.Parse(await followup.Content.ReadAsStringAsync());
+            var data = document.RootElement.GetProperty("data");
+            Assert.True(data.TryGetProperty("sessionId", out _),
+                "follow-up path must surface the same session id without launching a new AgentJob");
+            Assert.True(data.TryGetProperty("inputId", out _),
+                "follow-up path must surface the SessionInput id");
+            Assert.True(data.GetProperty("followup").GetBoolean());
+            Assert.Single(runnerHub.SentMessages,
+                message => message.ConnectionId == runnerId && message.Method == "session.followup");
+            var followupTurnId = data.GetProperty("turnId").GetString()!;
 
-        await using (var projectionScope = _fixture.Services.CreateAsyncScope())
-        {
-            var projectionDb = projectionScope.ServiceProvider.GetRequiredService<MohistDbContext>();
-            var progress = await projectionDb.SlackOutboxRows.SingleAsync(row =>
-                row.ConnectionId == connection.Id
-                && row.ConversationId == "D-DM-FOLLOWUP"
-                && row.ThreadTs == "1710000000.000300"
-                && row.Kind == SlackOutboxKinds.ReplaceableProgress
-                && row.DispatchRef == $"agent-session-followup:{sessionId}:{followupTurnId}:progress");
-            var payload = SlackDeliveryPayload.Parse(progress.PayloadJson);
-            var source = new SlackMessageIdentity(
-                connection.WorkspaceTeamId,
-                "D-DM-FOLLOWUP",
-                "1710000000.000300");
-            Assert.Equal(SlackStatusProjection.DispatchRef(source, "status"), payload.ClientMessageId);
-            Assert.Equal(SlackStatusProjection.DispatchRef(source, "status"), payload.StatusDispatchRef);
-            Assert.DoesNotContain("xoxb-", progress.PayloadJson, StringComparison.Ordinal);
-        }
+            await using (var projectionScope = _fixture.Services.CreateAsyncScope())
+            {
+                var projectionDb = projectionScope.ServiceProvider.GetRequiredService<MohistDbContext>();
+                var progress = await projectionDb.SlackOutboxRows.SingleAsync(row =>
+                    row.ConnectionId == connection.Id
+                    && row.ConversationId == "D-DM-FOLLOWUP"
+                    && row.ThreadTs == "1710000000.000300"
+                    && row.Kind == SlackOutboxKinds.ReplaceableProgress
+                    && row.DispatchRef == $"agent-session-followup:{sessionId}:{followupTurnId}:progress");
+                var payload = SlackDeliveryPayload.Parse(progress.PayloadJson);
+                var source = new SlackMessageIdentity(
+                    connection.WorkspaceTeamId,
+                    "D-DM-FOLLOWUP",
+                    "1710000000.000300");
+                Assert.Equal(SlackStatusProjection.DispatchRef(source, "status"), payload.ClientMessageId);
+                Assert.Equal(SlackStatusProjection.DispatchRef(source, "status"), payload.StatusDispatchRef);
+                Assert.DoesNotContain("xoxb-", progress.PayloadJson, StringComparison.Ordinal);
+            }
 
-        var switched = await _fixture.Client.PostAsJsonAsync(Path(connection, "/ingress"), new
-        {
-            isDirectMessage = true,
-            teamId = connection.WorkspaceTeamId,
-            conversationId = "D-DM-FOLLOWUP",
-            messageTs = "1710000000.000400",
-            senderSlackUserId = "U_OWNER",
-            text = "new task separate work",
-            leaseId = _connectionLeases[connection.Id],
-            adapterId = SlackRuntimeLeaseTestSupport.AdapterId,
-        });
-        switched.EnsureSuccessStatusCode();
+            var switched = await _fixture.Client.PostAsJsonAsync(Path(connection, "/ingress"), new
+            {
+                isDirectMessage = true,
+                teamId = connection.WorkspaceTeamId,
+                conversationId = "D-DM-FOLLOWUP",
+                messageTs = "1710000000.000400",
+                senderSlackUserId = "U_OWNER",
+                text = "new task separate work",
+                leaseId = _connectionLeases[connection.Id],
+                adapterId = SlackRuntimeLeaseTestSupport.AdapterId,
+            });
+            switched.EnsureSuccessStatusCode();
 
-        List<string> beforeReplayProjection;
-        await using (var beforeReplayScope = _fixture.Services.CreateAsyncScope())
-        {
-            var beforeReplayDb = beforeReplayScope.ServiceProvider.GetRequiredService<MohistDbContext>();
-            beforeReplayProjection = await beforeReplayDb.SlackOutboxRows
+            List<string> beforeReplayProjection;
+            await using (var beforeReplayScope = _fixture.Services.CreateAsyncScope())
+            {
+                var beforeReplayDb = beforeReplayScope.ServiceProvider.GetRequiredService<MohistDbContext>();
+                beforeReplayProjection = await beforeReplayDb.SlackOutboxRows
+                    .Where(row => row.ConnectionId == connection.Id && row.ConversationId == "D-DM-FOLLOWUP")
+                    .OrderBy(row => row.Id)
+                    .Select(row => row.Kind + "|" + row.DispatchRef + "|" + row.ThreadTs + "|" + row.PayloadJson)
+                    .ToListAsync();
+            }
+
+            using var replay = await _fixture.Client.PostAsJsonAsync(Path(connection, "/ingress"), new
+            {
+                isDirectMessage = true,
+                teamId = connection.WorkspaceTeamId,
+                conversationId = "D-DM-FOLLOWUP",
+                messageTs = "1710000000.000300",
+                senderSlackUserId = "U_OWNER",
+                text = "more details",
+                leaseId = _connectionLeases[connection.Id],
+                adapterId = SlackRuntimeLeaseTestSupport.AdapterId,
+            });
+            replay.EnsureSuccessStatusCode();
+            using var replayDocument = JsonDocument.Parse(await replay.Content.ReadAsStringAsync());
+            var replayData = replayDocument.RootElement.GetProperty("data");
+
+            Assert.Equal(sessionId, replayData.GetProperty("sessionId").GetString());
+            await using var verifyScope = _fixture.Services.CreateAsyncScope();
+            var state = await verifyScope.ServiceProvider.GetRequiredService<MohistDbContext>().AgentSessions
+                .Where(row => row.Id == sessionId)
+                .Select(row => row.State)
+                .SingleAsync();
+            Assert.Equal(2, JsonDocument.Parse(state).RootElement.GetProperty("status").GetProperty("turns").GetArrayLength());
+            var afterReplayProjection = await verifyScope.ServiceProvider.GetRequiredService<MohistDbContext>().SlackOutboxRows
                 .Where(row => row.ConnectionId == connection.Id && row.ConversationId == "D-DM-FOLLOWUP")
                 .OrderBy(row => row.Id)
                 .Select(row => row.Kind + "|" + row.DispatchRef + "|" + row.ThreadTs + "|" + row.PayloadJson)
                 .ToListAsync();
+            Assert.Equal(beforeReplayProjection, afterReplayProjection);
+            Assert.DoesNotContain(afterReplayProjection, row => row.Contains("xoxb-", StringComparison.Ordinal));
         }
-
-        using var replay = await _fixture.Client.PostAsJsonAsync(Path(connection, "/ingress"), new
+        finally
         {
-            isDirectMessage = true,
-            teamId = connection.WorkspaceTeamId,
-            conversationId = "D-DM-FOLLOWUP",
-            messageTs = "1710000000.000300",
-            senderSlackUserId = "U_OWNER",
-            text = "more details",
-            leaseId = _connectionLeases[connection.Id],
-            adapterId = SlackRuntimeLeaseTestSupport.AdapterId,
-        });
-        replay.EnsureSuccessStatusCode();
-        using var replayDocument = JsonDocument.Parse(await replay.Content.ReadAsStringAsync());
-        var replayData = replayDocument.RootElement.GetProperty("data");
-
-        Assert.Equal(sessionId, replayData.GetProperty("sessionId").GetString());
-        await using var verifyScope = _fixture.Services.CreateAsyncScope();
-        var state = await verifyScope.ServiceProvider.GetRequiredService<MohistDbContext>().AgentSessions
-            .Where(row => row.Id == sessionId)
-            .Select(row => row.State)
-            .SingleAsync();
-        Assert.Equal(2, JsonDocument.Parse(state).RootElement.GetProperty("status").GetProperty("turns").GetArrayLength());
-        var afterReplayProjection = await verifyScope.ServiceProvider.GetRequiredService<MohistDbContext>().SlackOutboxRows
-            .Where(row => row.ConnectionId == connection.Id && row.ConversationId == "D-DM-FOLLOWUP")
-            .OrderBy(row => row.Id)
-            .Select(row => row.Kind + "|" + row.DispatchRef + "|" + row.ThreadTs + "|" + row.PayloadJson)
-            .ToListAsync();
-        Assert.Equal(beforeReplayProjection, afterReplayProjection);
-        Assert.DoesNotContain(afterReplayProjection, row => row.Contains("xoxb-", StringComparison.Ordinal));
+            _fixture.Services.GetRequiredService<RunnerConnectionTracker>()
+                .Unregister(runnerId, runnerConnectionId);
+            await _fixture.Grains.GetGrain<IRunnerGrain>(runnerId).UnregisterAsync();
+        }
     }
 
     [Fact]

@@ -171,6 +171,20 @@ public abstract class WorkflowGrainSpecs
             $"Workflow grain '{workflowId}' to deactivate");
     }
 
+    protected async Task AdvanceToAgentSettlementDeadlineAsync(DateTimeOffset deadline, string? runnerId = null)
+    {
+        runnerId ??= _runnerId ?? throw new InvalidOperationException("A runner is required to advance an Agent settlement deadline");
+        var runner = Grains.GetGrain<IRunnerGrain>(runnerId);
+        var step = TimeSpan.FromMinutes(1);
+
+        while (deadline > _fixture.TimeProvider.GetUtcNow())
+        {
+            await runner.HeartbeatAsync();
+            var remaining = deadline - _fixture.TimeProvider.GetUtcNow();
+            _fixture.TimeProvider.Advance(remaining < step ? remaining : step);
+        }
+    }
+
     protected async Task ClearBacklogAsync()
     {
         // The global runner registry is shared across every test in this
