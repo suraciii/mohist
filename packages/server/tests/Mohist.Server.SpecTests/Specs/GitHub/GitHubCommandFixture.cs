@@ -36,6 +36,7 @@ public sealed class RecordingGitHubCommentPort : IGitHubCommentPort, IGitHubIssu
     public Exception? CreateFailure { get; set; }
     public Exception? FindFailure { get; set; }
     public Exception? ConfirmationFailure { get; set; }
+    public Exception? PostFailure { get; set; }
     public bool PostThenThrow { get; set; }
     public TaskCompletionSource? PostEntered { get; set; }
     public TaskCompletionSource? ReleasePost { get; set; }
@@ -131,6 +132,12 @@ public sealed class RecordingGitHubCommentPort : IGitHubCommentPort, IGitHubIssu
         PostEntered?.TrySetResult();
         if (ReleasePost is not null)
             await ReleasePost.Task.WaitAsync(ct);
+        if (PostFailure is not null)
+        {
+            var failure = PostFailure;
+            PostFailure = null;
+            throw failure;
+        }
         if (PostThenThrow)
         {
             PostThenThrow = false;

@@ -265,7 +265,7 @@ public sealed class GitHubIssueCommentOperationRecoveryService : IScopedService
         }
 
         if (!GitHubRemoteOutcome.IsUnknown(exception))
-            await _links.ReleaseCommentReservationAsync(operation.LinkId, operation.CommentKey, ct);
+            await _links.DeleteCommentOperationAsync(operation.Id, ct);
         else
             await _links.DeferCommentOperationAsync(operation.Id, detail, ct);
 

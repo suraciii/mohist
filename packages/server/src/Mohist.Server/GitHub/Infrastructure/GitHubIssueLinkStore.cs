@@ -721,6 +721,21 @@ public sealed class GitHubIssueLinkStore : IScopedService
     }
 
     /// <summary>
+    /// Deletes exactly the reserved operation identified by its durable ID.
+    /// A request that outlives a mirror reset must not release a later
+    /// reservation that reuses the same link and comment key.
+    /// </summary>
+    public async Task DeleteCommentOperationAsync(string id, CancellationToken ct = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(id);
+        await using var db = await _dbFactory.CreateDbContextAsync(ct);
+        await db.GitHubIssueCommentOperations
+            .Where(operation => operation.Id == id
+                && operation.Status == GitHubCommentOperationStatus.Reserved)
+            .ExecuteDeleteAsync(ct);
+    }
+
+    /// <summary>
     /// Persists the state label projected onto the GitHub issue. No-op
     /// when the label is already recorded, so redelivery never re-runs the
     /// label write-back.

@@ -37,6 +37,7 @@ public sealed class GitHubSyncSpecs
         fixture.Comments.CreateFailure = null;
         fixture.Comments.FindFailure = null;
         fixture.Comments.ConfirmationFailure = null;
+        fixture.Comments.PostFailure = null;
         fixture.Comments.PostThenThrow = false;
         fixture.Comments.PostEntered = null;
         fixture.Comments.ReleasePost = null;
@@ -472,6 +473,65 @@ public sealed class GitHubSyncSpecs
         Assert.Equal(newGithubIssueNumber, current!.GithubIssueNumber);
         Assert.False(current.HasPostedComment(closeKey));
         Assert.Null(await LoadOperationStatusAsync(link.Id, closeKey));
+    }
+
+    [Fact]
+    public async Task RecoveryDefiniteFailureAfterMirrorResetDoesNotDeleteNewGenerationReservation()
+    {
+        var (projectId, issueNumber, _) = await CreateMirroredIssueAsync();
+        var link = (await LoadLinkAsync(projectId, issueNumber))!;
+        const string commentKey = "stale-definite-failure";
+        await ReserveAndDeferOperationAsync(
+            link,
+            commentKey,
+            GitHubCommentOperationKind.Comment,
+            "old generation",
+            stateReason: null);
+
+        _fixture.TimeProvider.Advance(TimeSpan.FromSeconds(5));
+        var entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        _fixture.Comments.PostEntered = entered;
+        _fixture.Comments.ReleasePost = release;
+        var worker = _fixture.Services.GetRequiredService<GitHubIssueCommentOperationRecoveryWorker>();
+        var recovery = worker.ProcessPendingAsync();
+        await entered.Task.WaitAsync(TestContext.Current.CancellationToken);
+
+        var oldGithubIssueNumber = link.GithubIssueNumber;
+        var newGithubIssueNumber = oldGithubIssueNumber + 1000;
+        try
+        {
+            await ResetMirrorAsync(link.Id, oldGithubIssueNumber);
+            await SetMirrorAsync(link.Id, newGithubIssueNumber);
+            await using var scope = _fixture.Services.CreateAsyncScope();
+            var links = scope.ServiceProvider.GetRequiredService<GitHubIssueLinkStore>();
+            Assert.True(await links.TryReserveCommentAsync(
+                link.Id,
+                commentKey,
+                GitHubCommentOperationKind.Comment,
+                "new generation",
+                stateReason: null));
+            _fixture.Comments.PostFailure = new InvalidOperationException("definite old-generation failure");
+        }
+        finally
+        {
+            release.TrySetResult();
+        }
+        await recovery;
+
+        var current = await LoadLinkAsync(projectId, issueNumber);
+        Assert.Equal(newGithubIssueNumber, current!.GithubIssueNumber);
+        await using (var scope = _fixture.Services.CreateAsyncScope())
+        {
+            var factory = scope.ServiceProvider.GetRequiredService<IDbContextFactory<MohistDbContext>>();
+            await using var db = await factory.CreateDbContextAsync();
+            var operation = await db.GitHubIssueCommentOperations.SingleOrDefaultAsync(item =>
+                item.LinkId == link.Id && item.CommentKey == commentKey);
+            Assert.NotNull(operation);
+            Assert.Equal(newGithubIssueNumber, operation!.GithubIssueNumber);
+            Assert.Equal(GitHubCommentOperationStatus.Reserved, operation.Status);
+            Assert.Equal("new generation", operation.Body);
+        }
     }
 
     [Fact]
