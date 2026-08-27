@@ -5,6 +5,7 @@ import { resolveIssueFields } from '../../src/actions/issue-fields.js'
 import { composeOpencodePrompt, DEFAULT_TURN_DEADLINE_MS } from '../../src/actions/opencode.js'
 import { parseModelIdentifier } from '../../src/runtime/opencode/index.js'
 import { WorkflowAgentSessionReporter } from '../../src/actions/workflow-agent-session-reporter.js'
+import { InputReceiptWaitCancelledError, InputReceiptWaitTimeoutError } from '../../src/server/runtime-event-queue.js'
 import { fail as actionFail, succeed as actionSucceed } from '../../src/actions/action-result.js'
 import { actionErrorMessage } from '../../src/actions/action-result.js'
 
@@ -87,6 +88,7 @@ function createReporter(
   context: ActionContext,
   sessionName: string,
   runtimeSessionId: string | null,
+  inputReceiptBudgetMs?: number,
 ): WorkflowAgentSessionReporter | null {
   if (!context.projectId) return null
   const outbox = context.agentSessionRuntimeEventQueue ?? null
@@ -107,6 +109,8 @@ function createReporter(
     },
     runtime: 'opencode',
     randomId: context.runtimeEventRecordId ?? (() => `${Date.now()}_${Math.random().toString(36).slice(2)}`),
+    inputReceiptBudgetMs,
+    signal: context.signal,
   })
 }
 
@@ -228,14 +232,25 @@ function opencodeAgent(context: ActionContext): AgentTurn | undefined {
       }
 
       const turnRequest = buildTurnRequest(binding, prompt, request.options, request.deadlineMs)
-      const reporter = createReporter(context, sessionName, binding.runtimeSessionId)
+      const reporter = createReporter(
+        context,
+        sessionName,
+        binding.runtimeSessionId,
+        request.deadlineMs ?? DEFAULT_TURN_DEADLINE_MS,
+      )
       if (reporter && binding.runtimeSessionId) {
         try {
           await reporter.awaitInput(prompt, binding.runtimeSessionId)
         } catch (error) {
+          const receiptWaitError =
+            error instanceof InputReceiptWaitTimeoutError || error instanceof InputReceiptWaitCancelledError
+              ? error
+              : null
           return actionFail(
-            'execution-unavailable',
-            `failed to durably enqueue the Workflow AgentSession input: ${actionErrorMessage(error)}`,
+            receiptWaitError ? 'session-reporting-failed' : 'execution-unavailable',
+            receiptWaitError
+              ? receiptWaitError.message
+              : `failed to enqueue the Workflow AgentSession input: ${actionErrorMessage(error)}`,
           )
         }
       }
