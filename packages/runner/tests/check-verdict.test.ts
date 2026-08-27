@@ -1,5 +1,7 @@
-import { realpath } from 'node:fs/promises'
-import { describe, expect, it, beforeEach, vi } from 'vitest'
+import { mkdtemp, realpath, rm } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { describe, expect, it, beforeEach, afterEach, vi } from 'vitest'
 import { WorkExecutor } from '../src/runtime/executor.js'
 import type { ActionRegistry, ActionDefinition } from '../src/actions/registry.js'
 import { defineAction } from '../src/actions/define-action.js'
@@ -14,9 +16,11 @@ describe('Check verdict validation', () => {
   let executor: WorkExecutor
   let mockActionRegistry: ActionRegistry
   let capturedHandler: ((inputs: unknown, host: ActionHost) => Promise<ActionResult>) | null
+  let workspacePath: string
 
-  beforeEach(() => {
-    const mockWorkspaceManager = verifyOnlyWorkspaceManager({ path: '/tmp/test-work', branch: 'main' })
+  beforeEach(async () => {
+    workspacePath = await mkdtemp(join(tmpdir(), 'mohist-check-verdict-'))
+    const mockWorkspaceManager = verifyOnlyWorkspaceManager({ path: workspacePath, branch: 'main' })
 
     const mockConnection = {} as unknown as ServerConnection
 
@@ -43,6 +47,10 @@ describe('Check verdict validation', () => {
     } as unknown as ActionRegistry
 
     executor = new WorkExecutor(mockActionRegistry, mockWorkspaceManager as any, mockConnection, mockFallbackWorkDir)
+  })
+
+  afterEach(async () => {
+    await rm(workspacePath, { recursive: true, force: true })
   })
 
   const mockAction = (result: ActionResult) => {
@@ -140,7 +148,7 @@ describe('Check verdict validation', () => {
     const result = await executor.execute(work, new AbortController().signal)
 
     expect(result.status).toBe('pass')
-    expect(workDir).toBe('/tmp/test-work/subdir')
+    expect(workDir).toBe(join(workspacePath, 'subdir'))
   })
 
   it('renders a check declaration from its dispatch snapshot before validation', async () => {
