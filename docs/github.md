@@ -197,10 +197,16 @@ The target model above replaces the earlier one-way intake design. Implemented
 today: #770 no-Workflow Issue lifecycle, #771 first-class GitHub mirror link
 visibility in CLI and Web, #772 automatic ready-only mirroring with durable
 Pending intent, marker reconciliation, and two-way title and body sync with
-echo suppression, and #773 `/mohist start` command intake with GitHub
-permission gating, idempotent link creation, p0-p4 priority mapping, refusal
-replies, and reliable command reply delivery. Repository connection with signed
-ingress, close withdrawal, Pull Request review Approval, and best-effort
-progress write-back are included. The connection surface contains only
-Repository binding, identity, and Approvers. Later sync-health and
-operator-recovery work remains open.
+echo suppression, #773 `/mohist start` command intake with GitHub permission
+gating, idempotent link creation, p0-p4 priority mapping, refusal replies, and
+reliable command reply delivery, and #774 linked Issue lifecycle translation
+with the Integrate delivery-echo guard. Repository connection with signed
+ingress, close withdrawal, Pull Request review Approval, best-effort progress
+write-back, and terminal follow-up behavior are included. No-Workflow GitHub
+closes honor `completed` versus `not_planned`, cancelled Issues reopen to
+backlog, and completed Issues remain terminal. The GitHub PR workflow omits
+closing keywords from PR bodies; terminal write-back still closes mirrors. New
+feed-created Issues no longer emit the `github-issue` origin label; historical
+feed-created links may retain that label as data. The connection surface
+contains only Repository binding, identity, and Approvers. Later sync-health and
+operator-recovery work remains open (#775).

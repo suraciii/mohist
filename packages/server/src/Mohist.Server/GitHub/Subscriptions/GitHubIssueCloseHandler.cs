@@ -8,24 +8,17 @@ using Mohist.Server.Infrastructure.Events;
 using Mohist.Server.Infrastructure.Orleans;
 using Mohist.Server.Issue.Domain;
 using Mohist.Server.Issue.Grains;
+using Mohist.Server.Workflow.Grains;
 
 namespace Mohist.Server.GitHub.Subscriptions;
 
 /// <summary>
-/// Close translator: a GitHub <c>closed</c> event withdraws the demand —
-/// the linked Mohist issue is cancelled. Terminal issues (Done/Cancelled)
-/// are a no-op, which keeps the close self-loop safe: when Mohist completes
-/// an issue, the future write-back closes the GitHub issue, and the echoed
-/// <c>closed</c> event hits the terminal check without any identity-based
-/// dedup. Events without a link (e.g. <c>closed</c> arriving before
-/// <c>labeled</c>) are accepted as a v1 no-op, per the design's ordering
-/// decision.
-/// <para>
-/// An issue whose workflow is still running cannot be cancelled (the
-/// aggregate refuses); the handler treats that as a no-op too — the demand
-/// withdrawal lands once the run settles, and the GitHub issue stays
-/// closed either way.
-/// </para>
+/// Translates a GitHub <c>closed</c> event according to the linked Issue's
+/// execution ownership. No-Workflow Issues use GitHub's <c>state_reason</c>:
+/// <c>completed</c> becomes Done and <c>not_planned</c> becomes Cancelled.
+/// Workflow Issues can be withdrawn only before the Integrate stage; the
+/// Integrate boundary and later states are delivery echoes, including the
+/// automatic close caused by merging a Pull Request.
 /// </summary>
 [Subscription(
     Type = EventCatalog.ReverseDns.GitHubIssuesClosed,
@@ -77,21 +70,67 @@ public sealed class GitHubIssueCloseHandler : ICloudEventHandler
 
         var issueStore = sp.GetRequiredService<IIssueStore>();
         var issue = await issueStore.LoadAsync(GrainKey.Issue(new IssueKey(projectId, link.IssueNumber)));
-        if (issue is null)
-            return;
-        if (issue.Status is IssueStatus.Done or IssueStatus.Cancelled)
+        if (issue is null || issue.Status is IssueStatus.Done or IssueStatus.Cancelled)
             return;
 
         var grain = _grains.GetGrain<IIssueGrain>(GrainKey.Issue(new IssueKey(projectId, link.IssueNumber)));
         try
         {
+            if (issue.NoWorkflow)
+            {
+                if (string.Equals(payload.StateReason, "completed", StringComparison.OrdinalIgnoreCase))
+                    await grain.MarkDoneAsync();
+                else
+                    await grain.CancelAsync();
+                return;
+            }
+
+            var workflowStatus = await grain.GetWorkflowStatusAsync();
+            if (IsAtOrPastIntegrate(workflowStatus))
+                return;
+
+            if (issue.WorkflowRunId is { } workflowRunId)
+            {
+                try
+                {
+                    await _grains.GetGrain<IWorkflowGrain>(workflowRunId).StopAsync("github-close");
+                }
+                catch (InvalidOperationException ex)
+                {
+                    _log.LogDebug(
+                        "GitHub close workflow stop no-op for issue #{IssueNumber}: {Message}",
+                        link.IssueNumber, ex.Message);
+                }
+            }
+
+            // Re-read after stopping. The run may have crossed into Integrate
+            // while StopAsync was in flight; a stale pre-stop snapshot must
+            // not turn a delivery echo into cancellation.
+            if (IsAtOrPastIntegrate(await grain.GetWorkflowStatusAsync()))
+                return;
+
             await grain.CancelAsync();
         }
         catch (InvalidOperationException ex)
         {
             _log.LogDebug(
-                "GitHub close no-op: issue #{IssueNumber} cannot be cancelled ({Message})",
+                "GitHub close no-op: issue #{IssueNumber} cannot transition ({Message})",
                 link.IssueNumber, ex.Message);
         }
+    }
+
+    private static bool IsAtOrPastIntegrate(IssueWorkflowStatus? status)
+    {
+        var workflow = status?.Workflow;
+        if (workflow is null)
+            return false;
+        if (string.Equals(workflow.Status, "completed", StringComparison.OrdinalIgnoreCase))
+            return true;
+
+        var integrate = workflow.Stages.FirstOrDefault(stage =>
+            string.Equals(stage.Stage, "integrate", StringComparison.OrdinalIgnoreCase));
+        var current = workflow.Stages.FirstOrDefault(stage =>
+            string.Equals(stage.Stage, workflow.CurrentStage, StringComparison.OrdinalIgnoreCase));
+        return integrate is not null && current is not null && current.Order >= integrate.Order;
     }
 }

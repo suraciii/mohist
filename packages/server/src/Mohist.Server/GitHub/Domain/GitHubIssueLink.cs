@@ -65,6 +65,7 @@ public static class GitHubCommentKinds
     public const string Cancelled = "writeback-cancelled";
     public const string ClosedCompleted = "writeback-closed-completed";
     public const string ClosedNotPlanned = "writeback-closed-not-planned";
+    public const string ReopenedDoneFollowUp = "writeback-reopened-done-follow-up";
 }
 
 /// <summary>

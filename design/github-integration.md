@@ -155,19 +155,25 @@ Mirroring is reliable by reconciliation, not by queueing:
 
 ## Status
 
-Implemented today: the #770 no-Workflow Issue lifecycle, #771 GitHub mirror
+Implemented today: #770 no-Workflow Issue lifecycle, #771 GitHub mirror
 visibility in the Issue read models, CLI, and Web, #772 automatic ready-only
 mirroring with durable Pending intent, invisible marker reconciliation, and
-two-way title/body sync with equality echo suppression, and #773 `/mohist start`
+two-way title/body sync with equality echo suppression, #773 `/mohist start`
 command intake with GitHub permission gating, p0-p4 priority mapping,
 idempotent link creation, durable command replies, refusal replies, and
-reliable command reply recovery. Signed ingress and normalization, close
+reliable command reply recovery, and #774 linked lifecycle translation with the
+Integrate delivery-echo guard. Signed ingress and normalization, close
 withdrawal, Pull Request review Approval, and best-effort write-back with
-durable failure records are included. Connection creation configures a
-fine-grained PAT with Issues read/write when supplied; GitHub App identity
-remains unimplemented. Connection configuration contains only Repository
-binding, identity, and Approvers. The later sync-health and operator-recovery
-slice remains open.
+durable failure records are included. No-Workflow closes honor GitHub's
+`completed` versus `not_planned` reason, cancelled Issues reopen to backlog, and
+completed Issues remain terminal with one follow-up suggestion. The built-in
+GitHub PR path omits closing keywords from PR bodies; terminal write-back still
+closes mirrors. New feed-created Issues no longer emit the `github-issue` origin
+label; historical feed-created links may retain it as data. Connection creation
+configures a fine-grained PAT with Issues read/write when supplied; GitHub App
+identity remains unimplemented. Connection configuration contains only
+Repository binding, identity, and Approvers. The later sync-health and
+operator-recovery slice remains open.
 
 Open questions:
 
