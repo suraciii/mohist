@@ -1,3 +1,4 @@
+using Mohist.Server.Runner.Grains;
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
@@ -47,14 +48,14 @@ public sealed class WorkflowGrainRecoveryArtifactLoopSpecs
     }
 
     [Fact]
-    public async Task RecoveryLoop_TaskRunFilterReturnsEachProducingReviewArtifact()
+    public async Task RecoveryLoop_WorkflowActionAttemptFilterReturnsEachProducingReviewArtifact()
     {
         var captured = await RunRecoveryLoopOnceAsync("wr-loop-per-attempt");
 
         var querier = CreateArtifactQuerier();
 
-        var firstRun = await querier.ListByTaskRunAsync(captured.WorkflowRunId, "ai-review.1");
-        var secondRun = await querier.ListByTaskRunAsync(captured.WorkflowRunId, "ai-review.2");
+        var firstRun = await querier.ListByWorkflowActionAttemptAsync(captured.WorkflowRunId, "ai-review.1");
+        var secondRun = await querier.ListByWorkflowActionAttemptAsync(captured.WorkflowRunId, "ai-review.2");
 
         var firstReview = Assert.Single(firstRun);
         Assert.Equal("review.md", firstReview.Path);
@@ -72,7 +73,7 @@ public sealed class WorkflowGrainRecoveryArtifactLoopSpecs
 
         var history = await CreateArtifactQuerier().ListHistoryAsync(captured.WorkflowRunId, "review.md");
 
-        Assert.Equal(["ai-review.1", "ai-review.2"], history.Select(a => a.TaskRunId).ToArray());
+        Assert.Equal(["ai-review.1", "ai-review.2"], history.Select(a => a.ActionAttemptId).ToArray());
     }
 
     [Fact]
@@ -84,12 +85,12 @@ public sealed class WorkflowGrainRecoveryArtifactLoopSpecs
 
         var review = Assert.Single(latest);
         Assert.Equal("review.md", review.Path);
-        Assert.Equal("ai-review.2", review.TaskRunId);
+        Assert.Equal("ai-review.2", review.ActionAttemptId);
         Assert.Equal("review-round-2: PASS", ReadStorageContent(review.ArtifactStoragePath));
     }
 
     [Fact]
-    public async Task RecoveryLoop_TaskRunViewsExposeBothImmutableArtifacts()
+    public async Task RecoveryLoop_WorkflowActionAttemptViewsExposeBothImmutableArtifacts()
     {
         var captured = await RunRecoveryLoopOnceAsync("wr-loop-summaries");
 
@@ -171,11 +172,11 @@ public sealed class WorkflowGrainRecoveryArtifactLoopSpecs
     }
 
     private async Task<string> SeedReviewPendingUploadAsync(
-        WorkflowGrainArrangement arrangement, string taskRunId, string content)
+        WorkflowGrainArrangement arrangement, string actionAttemptId, string content)
     {
         var uploadId = $"artup_{Guid.NewGuid():N}";
         var storagePath = _storage.GenerateStoragePath(
-            arrangement.RunId, taskRunId, uploadId, WorkflowArtifactStorageKind.File);
+            arrangement.RunId, actionAttemptId, uploadId, WorkflowArtifactStorageKind.File);
 
         var bytes = System.Text.Encoding.UTF8.GetBytes(content);
         await _storage.WriteFileAsync(
@@ -196,8 +197,8 @@ public sealed class WorkflowGrainRecoveryArtifactLoopSpecs
         {
             UploadId = uploadId,
             WorkflowRunId = arrangement.RunId,
-            WorkId = $"ai-review.{taskRunId.Split('.')[^1]}",
-            TaskRunId = taskRunId,
+            WorkId = $"ai-review.{actionAttemptId.Split('.')[^1]}",
+            ActionAttemptId = actionAttemptId,
             Path = "review.md",
             ContentType = "text/markdown",
             ContentHash = $"sha256:{Guid.NewGuid():N}",

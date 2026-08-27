@@ -21,6 +21,6 @@ namespace Mohist.Server.Workflow.Domain.Artifacts;
 /// </remarks>
 public sealed record WorkflowArtifactRecorded(
     string WorkflowRunId,
-    string TaskRunId,
+    string ActionAttemptId,
     string Path,
     DateTimeOffset RecordedAt);

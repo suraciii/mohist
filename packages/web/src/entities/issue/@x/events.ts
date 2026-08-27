@@ -60,7 +60,7 @@ export type EventMap = {
     issueNumber: number
     projectId: string
     workflowRunId: string
-    taskRunId: string
+    actionAttemptId: string
     path: string
     recordedAt: string
   }

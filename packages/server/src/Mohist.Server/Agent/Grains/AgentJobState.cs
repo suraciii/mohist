@@ -81,6 +81,7 @@ public sealed class AgentJobState
     [Id(53)] public string? AcceptedReportAgentTurnId { get; set; }
     [Id(54)] public string? AcceptedReportRuntime { get; set; }
     [Id(55)] public string? AcceptedReportRuntimeSessionId { get; set; }
+    [Id(56)] public PendingWorkflowAgentTerminalEvent? PendingWorkflowTerminalEvent { get; set; }
 }
 
 

@@ -14,10 +14,10 @@ public sealed class InMemoryWorkflowArtifactStorage : IWorkflowArtifactStorage
 
     public string GenerateStoragePath(
         string workflowRunId,
-        string taskRunId,
+        string actionAttemptId,
         string artifactId,
         WorkflowArtifactStorageKind kind) =>
-        WorkflowArtifactStoragePath.ForArtifact(workflowRunId, taskRunId, artifactId, kind).Value;
+        WorkflowArtifactStoragePath.ForArtifact(workflowRunId, actionAttemptId, artifactId, kind).Value;
 
     public async Task<WorkflowArtifactStorageWriteResult> WriteFileAsync(
         string storagePath,
@@ -220,7 +220,7 @@ public sealed class InMemoryWorkflowArtifactStorage : IWorkflowArtifactStorage
         return new WorkflowArtifactStorageMetadata
         {
             WorkflowRunId = identity?.WorkflowRunId ?? string.Empty,
-            TaskRunId = identity?.TaskRunId ?? string.Empty,
+            ActionAttemptId = identity?.ActionAttemptId ?? string.Empty,
             ArtifactId = identity?.ArtifactId ?? string.Empty,
             Path = write.SourcePath,
             Kind = kind,
@@ -235,7 +235,7 @@ public sealed class InMemoryWorkflowArtifactStorage : IWorkflowArtifactStorage
     private static WorkflowArtifactStorageMetadata CopyMetadata(WorkflowArtifactStorageMetadata source) => new()
     {
         WorkflowRunId = source.WorkflowRunId,
-        TaskRunId = source.TaskRunId,
+        ActionAttemptId = source.ActionAttemptId,
         ArtifactId = source.ArtifactId,
         Path = source.Path,
         Kind = source.Kind,

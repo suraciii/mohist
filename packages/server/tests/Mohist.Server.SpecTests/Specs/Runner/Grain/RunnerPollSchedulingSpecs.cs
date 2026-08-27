@@ -243,15 +243,15 @@ public class RunnerPollSchedulingSpecs : Mohist.Server.SpecTests.Specs.Workflow.
             Status = StageRunStatus.Running,
             Tasks =
             {
-                new TaskRun
+                new WorkflowActionAttempt
                 {
                     Id = "task-1",
                     DefinitionId = "task-1",
                     Attempt = 1,
                     Title = "Task 1",
                     Status = status == "Running"
-                        ? TaskRunStatus.Running
-                        : TaskRunStatus.Pending,
+                        ? WorkflowActionAttemptStatus.Running
+                        : WorkflowActionAttemptStatus.Pending,
                     WorkerId = runnerId,
                 },
             },
@@ -269,7 +269,7 @@ public class RunnerPollSchedulingSpecs : Mohist.Server.SpecTests.Specs.Workflow.
             State = JSON.Serialize(run),
             ActiveWorkId = activeWork ? projection.ActiveWorkId : null,
             ActiveWorkerId = activeWork ? activeWorkerId ?? projection.ActiveWorkerId : null,
-            AttentionStatus = run.HasBlockedAgentResult() ? "blocked" : null,
+            AttentionStatus = null,
         });
         await db.SaveChangesAsync();
     }

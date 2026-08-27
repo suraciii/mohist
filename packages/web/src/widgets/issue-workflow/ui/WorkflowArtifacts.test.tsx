@@ -98,7 +98,7 @@ function makeFileArtifact(overrides: Partial<WorkflowArtifact> = {}): WorkflowAr
   return {
     artifactId: 'art-1',
     workflowRunId: 'workflow-run-1',
-    taskRunId: 'ai-review.1',
+    actionAttemptId: 'ai-review.1',
     path,
     kind: 'file',
     contentType: 'text/markdown',
@@ -114,7 +114,7 @@ function makeDirectoryArtifact(overrides: Partial<WorkflowArtifact> = {}): Workf
   return {
     artifactId: 'art-dir-1',
     workflowRunId: 'workflow-run-1',
-    taskRunId: 'plan.1',
+    actionAttemptId: 'plan.1',
     path,
     kind: 'directory',
     size: 456,
@@ -150,7 +150,7 @@ function makeTimelineWithTaskArtifacts(): WorkflowTimeline {
             attempts: 1,
             message: null,
             classification: 'UserFacing',
-            artifactSummaries: [makeFileArtifact({ artifactId: 'art-review-1', taskRunId: 'ai-review.1' })],
+            artifactSummaries: [makeFileArtifact({ artifactId: 'art-review-1', actionAttemptId: 'ai-review.1' })],
           },
           {
             id: 'fix-review-findings.1',
@@ -179,7 +179,7 @@ function makeTimelineWithTaskArtifacts(): WorkflowTimeline {
             artifactSummaries: [
               makeFileArtifact({
                 artifactId: 'art-review-2',
-                taskRunId: 'ai-review.2',
+                actionAttemptId: 'ai-review.2',
                 path: 'PLANS/REVIEW.md',
                 displayName: 'PLANS/REVIEW.md',
               }),
@@ -235,8 +235,8 @@ describe('LatestArtifactsPanel', () => {
 
   it('renders latest artifacts grouped by path', async () => {
     artifactsData = [
-      makeFileArtifact({ artifactId: 'art-plan', path: 'PLANS/PLAN.md', taskRunId: 'plan.1' }),
-      makeFileArtifact({ artifactId: 'art-review-2', path: 'PLANS/REVIEW.md', taskRunId: 'ai-review.2' }),
+      makeFileArtifact({ artifactId: 'art-plan', path: 'PLANS/PLAN.md', actionAttemptId: 'plan.1' }),
+      makeFileArtifact({ artifactId: 'art-review-2', path: 'PLANS/REVIEW.md', actionAttemptId: 'ai-review.2' }),
     ]
 
     render(<LatestArtifactsPanel issueNumber={1} workflowRunId="workflow-run-1" />)
@@ -260,7 +260,7 @@ describe('LatestArtifactsPanel', () => {
 
   it('opens recorded artifact content when latest artifact is clicked', async () => {
     artifactsData = [
-      makeFileArtifact({ artifactId: 'art-review-2', path: 'PLANS/REVIEW.md', taskRunId: 'ai-review.2' }),
+      makeFileArtifact({ artifactId: 'art-review-2', path: 'PLANS/REVIEW.md', actionAttemptId: 'ai-review.2' }),
     ]
     artifactContent = { kind: 'text', content: '# Title\n\nPASS', contentType: 'text/markdown' }
 
@@ -285,7 +285,12 @@ describe('LatestArtifactsPanel', () => {
 
   it('renders non-Markdown text artifact inside a <pre> block', async () => {
     artifactsData = [
-      makeFileArtifact({ artifactId: 'art-log', path: 'output.log', taskRunId: 'plan.1', contentType: 'text/plain' }),
+      makeFileArtifact({
+        artifactId: 'art-log',
+        path: 'output.log',
+        actionAttemptId: 'plan.1',
+        contentType: 'text/plain',
+      }),
     ]
     artifactContent = { kind: 'text', content: 'plain line 1\nplain line 2', contentType: 'text/plain' }
 

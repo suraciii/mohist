@@ -2,6 +2,7 @@ using System.Net;
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
+using Mohist.Server.Api;
 using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Infrastructure.Data.Issue;
 using Mohist.Server.Infrastructure.Data.Workflow;
@@ -10,6 +11,7 @@ using Mohist.Server.Runner.Grains;
 using Mohist.Server.SpecTests.Support;
 using Mohist.Server.TestSupport;
 using Mohist.Server.Workflow.Services;
+using Mohist.Server.Workflow.Domain.Run;
 using Mohist.Workflow.Definition;
 using Mohist.Server.Workflow.Grains;
 using Xunit;
@@ -25,38 +27,31 @@ public sealed class RunnerPollParentContextApiSpecs
     public RunnerPollParentContextApiSpecs(IsolatedMohistIntegrationFixture fixture) => _fixture = fixture;
 
     [Fact]
-    public async Task PollAddsOnlyCurrentParentTitleAndBodyToEligiblePlanDispatch()
+    public async Task WorkflowAgentJobResponseAddsOnlyCurrentParentTitleAndBody()
     {
         var projectId = $"runner-parent-context-{Guid.NewGuid():N}";
         var workflowRunId = $"wr-parent-context-{Guid.NewGuid():N}";
-        var runnerId = $"runner-parent-context-{Guid.NewGuid():N}";
-        var runner = _fixture.Grains.GetGrain<IRunnerGrain>(runnerId);
+        await SeedIssuesAndWorkflowAsync(projectId, workflowRunId);
+        var issues = _fixture.Services.GetRequiredService<Mohist.Server.Issue.Services.IssueQuerier>();
+        var response = await RunnerRoutes.ToWorkDispatchResponseAsync(
+            new WorkDispatch(
+                WorkflowRunId: workflowRunId,
+                WorkId: "agent-work-1",
+                WorkType: "agent-job",
+                Stage: "plan",
+                Title: "plan.1",
+                Issue: new WorkIssueRef(projectId, 2),
+                OwnerKind: WorkDispatchOwnerKinds.AgentJob,
+                AgentJobId: "agent-job-1",
+                ProjectId: projectId,
+                ActionAttemptId: "plan.1"),
+            issues.GetParentIssueContextAsync);
 
-        try
-        {
-            await SeedIssuesAndWorkflowAsync(projectId, workflowRunId);
-            await runner.RegisterAsync(new RunnerInfo(runnerId, ["mohist/*"], "test-host", projectId));
-
-            using var response = await _fixture.Client.PostRunnerPollAsync(runnerId);
-
-            Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-            var dispatch = await response.ReadFirstDispatchElementAsync()
-                ?? throw new InvalidOperationException("Expected a dispatch from /poll");
-            var context = dispatch.GetProperty("parentIssueContext");
-            Assert.Equal(["body", "title"], context.EnumerateObject().Select(property => property.Name).Order().ToArray());
-            Assert.Equal("Current parent title", context.GetProperty("title").GetString());
-            Assert.Equal("Current parent body", context.GetProperty("body").GetString());
-            Assert.DoesNotContain("Parent-only comment", dispatch.GetRawText(), StringComparison.Ordinal);
-            Assert.DoesNotContain("parent-only.txt", dispatch.GetRawText(), StringComparison.Ordinal);
-
-            using var withJson = JsonDocument.Parse(dispatch.GetProperty("with").GetString()!);
-            Assert.Equal("Original child task prompt", withJson.RootElement.GetProperty("prompt").GetString());
-            Assert.False(withJson.RootElement.TryGetProperty("parentIssueContext", out _));
-        }
-        finally
-        {
-            await runner.UnregisterAsync();
-        }
+        var context = Assert.IsType<ParentIssueContextResponse>(response.ParentIssueContext);
+        Assert.Equal("Current parent title", context.Title);
+        Assert.Equal("Current parent body", context.Body);
+        Assert.DoesNotContain("Parent-only comment", System.Text.Json.JsonSerializer.Serialize(response), StringComparison.Ordinal);
+        Assert.DoesNotContain("parent-only.txt", System.Text.Json.JsonSerializer.Serialize(response), StringComparison.Ordinal);
     }
 
     private async Task SeedIssuesAndWorkflowAsync(string projectId, string workflowRunId)
@@ -67,9 +62,10 @@ public sealed class RunnerPollParentContextApiSpecs
                 [new TaskDefinition(
                     "plan",
                     "Plan",
-                    "mohist/opencode",
+                    "mohist/agent",
                     new Dictionary<string, JsonElement?>
                     {
+                        ["name"] = JsonSerializer.SerializeToElement("mohist/planner"),
                         ["prompt"] = JsonSerializer.SerializeToElement("Original child task prompt"),
                     })],
                 [])]);

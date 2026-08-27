@@ -94,11 +94,10 @@ Approval, and enables auto-merge during Integrate. Runner host must have an
 authenticated `gh` CLI for the target Repository, and the Repository must allow
 auto-merge.
 
-The Profile declares `agentAction: mohist/opencode` and uses
-`${{ profile.agentAction }}` for every inline Agent task. A Project may bind the
-Profile to another compatible concrete Action such as `mohist/pi`. Run creation
-fixes that Action for Plan, Build, Check, Integrate, Approval feedback, and
-recovery. The versioned Stage graph remains shared and immutable.
+Every inline Agent task uses `mohist/agent` with a named built-in Agent; the
+Agent definition selects the execution backend and model. Plan, Build, Check,
+Integrate, Approval feedback, and recovery all use the same binding. The
+versioned Stage graph remains shared and immutable.
 
 The Workflow Workspace has a fixed root layout: the Repository checkout lives
 under `REPOS/<repository-name>/` and is the only tree that enters Git; plan

@@ -19,7 +19,7 @@ namespace Mohist.Server.Workflow.Services.Artifacts;
 /// </para>
 /// <para>
 /// Idempotency key:
-/// <c>(workflowRunId, workId, taskRunId, path)</c>. Same key + same
+/// <c>(workflowRunId, workId, actionAttemptId, path)</c>. Same key + same
 /// <see cref="WorkflowArtifactUploadRequest.ContentHash"/> returns the
 /// existing pending upload (idempotent retry). Same key + different
 /// <see cref="WorkflowArtifactUploadRequest.ContentHash"/> returns a
@@ -105,7 +105,7 @@ public sealed class WorkflowArtifactUploadService : IScopedService
         var key = new WorkflowArtifactPendingUploadKey(
             context.WorkflowRunId,
             context.WorkId,
-            context.TaskRunId,
+            context.ActionAttemptId,
             request.Path);
         var existing = await _pendingUploads.FindByKeyAsync(key, cancellationToken)
             .ConfigureAwait(false);
@@ -123,7 +123,7 @@ public sealed class WorkflowArtifactUploadService : IScopedService
             UploadId = uploadId,
             WorkflowRunId = context.WorkflowRunId,
             WorkId = context.WorkId,
-            TaskRunId = context.TaskRunId,
+            ActionAttemptId = context.ActionAttemptId,
             Path = request.Path,
             Kind = kind,
             ContentType = request.ContentType,
@@ -139,7 +139,7 @@ public sealed class WorkflowArtifactUploadService : IScopedService
         {
             storagePath = _storage.GenerateStoragePath(
                 context.WorkflowRunId,
-                context.TaskRunId,
+                context.ActionAttemptId,
                 uploadId,
                 kind == "directory"
                     ? WorkflowArtifactStorageKind.Directory
@@ -242,7 +242,7 @@ public sealed class WorkflowArtifactUploadService : IScopedService
             UploadId: row.UploadId,
             WorkflowRunId: row.WorkflowRunId,
             WorkId: row.WorkId,
-            TaskRunId: row.TaskRunId,
+            ActionAttemptId: row.ActionAttemptId,
             Path: row.Path,
             Kind: row.Kind,
             ContentType: row.ContentType,
@@ -276,7 +276,7 @@ public sealed class WorkflowArtifactUploadService : IScopedService
             UploadId: existing.UploadId,
             WorkflowRunId: existing.WorkflowRunId,
             WorkId: existing.WorkId,
-            TaskRunId: existing.TaskRunId,
+            ActionAttemptId: existing.ActionAttemptId,
             Path: existing.Path,
             ExistingContentHash: existing.ContentHash,
             IncomingContentHash: incomingContentHash));
@@ -326,16 +326,16 @@ public sealed class WorkflowArtifactUploadService : IScopedService
                 $"Workflow '{request.WorkflowRunId}' has no active work item for workId '{request.WorkId}'"));
         }
 
-        if (string.IsNullOrWhiteSpace(active.TaskRunId))
+        if (string.IsNullOrWhiteSpace(active.ActionAttemptId))
         {
             return ResolvedWork.Missing(WorkflowArtifactUploadResult.Invalid(
-                $"Active work item '{request.WorkId}' has no server-derived taskRunId"));
+                $"Active work item '{request.WorkId}' has no server-derived actionAttemptId"));
         }
 
         return ResolvedWork.Present(new ResolvedWorkContext(
-            WorkflowRunId: request.WorkflowRunId,
+            WorkflowRunId: active.OwnerWorkflowRunId ?? request.WorkflowRunId,
             WorkId: request.WorkId,
-            TaskRunId: active.TaskRunId,
+            ActionAttemptId: active.ActionAttemptId,
             ProjectId: active.ProjectId,
             IssueNumber: active.IssueNumber));
     }
@@ -359,7 +359,7 @@ public sealed class WorkflowArtifactUploadService : IScopedService
     private sealed record ResolvedWorkContext(
         string WorkflowRunId,
         string WorkId,
-        string TaskRunId,
+        string ActionAttemptId,
         string? ProjectId,
         int? IssueNumber);
 }
@@ -469,7 +469,7 @@ public sealed record WorkflowArtifactPendingUploadInfo(
     string UploadId,
     string WorkflowRunId,
     string WorkId,
-    string TaskRunId,
+    string ActionAttemptId,
     string Path,
     string Kind,
     string? ContentType,
@@ -487,7 +487,7 @@ public sealed record WorkflowArtifactUploadConflict(
     string UploadId,
     string WorkflowRunId,
     string WorkId,
-    string TaskRunId,
+    string ActionAttemptId,
     string Path,
     string? ExistingContentHash,
     string? IncomingContentHash);

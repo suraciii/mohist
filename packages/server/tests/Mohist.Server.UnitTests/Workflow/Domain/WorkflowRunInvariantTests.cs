@@ -20,7 +20,7 @@ public class WorkflowRunInvariantTests
         return run;
     }
 
-    private static WorkflowRun BuildMultiTaskRun()
+    private static WorkflowRun BuildMultiWorkflowActionAttempt()
     {
         var run = WorkflowRun.Create("wr_1", new WorkflowDefinition( [
             new StageDefinition("build", [new("compile", "Compile", "spec/task"), new("test", "Test", "spec/task")], [])
@@ -55,7 +55,7 @@ public class WorkflowRunInvariantTests
         run.StartTask("work-1", "worker-1", "test-process-generation", DateTimeOffset.UnixEpoch);
         var task = run.CurrentStage().Tasks[0];
 
-        Assert.Equal(TaskRunStatus.Running, task.Status);
+        Assert.Equal(WorkflowActionAttemptStatus.Running, task.Status);
         Assert.Equal(run.Assignment!.WorkerId, task.WorkerId);
         Assert.Equal("worker-1", task.WorkerId);
     }
@@ -66,8 +66,8 @@ public class WorkflowRunInvariantTests
         var run = BuildRun();
 
         Assert.Equal(WorkflowRunStatus.Ready, run.Status);
-        Assert.All(run.CurrentStage().Tasks, t => Assert.Equal(TaskRunStatus.Pending, t.Status));
-        Assert.DoesNotContain(run.CurrentStage().Tasks, t => t.Status == TaskRunStatus.Running);
+        Assert.All(run.CurrentStage().Tasks, t => Assert.Equal(WorkflowActionAttemptStatus.Pending, t.Status));
+        Assert.DoesNotContain(run.CurrentStage().Tasks, t => t.Status == WorkflowActionAttemptStatus.Running);
     }
 
     [Fact]
@@ -111,7 +111,7 @@ public class WorkflowRunInvariantTests
     [Fact]
     public void TaskCompletionDoesNotDeriveWorkflowStatus()
     {
-        var run = BuildMultiTaskRun();
+        var run = BuildMultiWorkflowActionAttempt();
         Assert.Equal(WorkflowRunStatus.Ready, run.Status);
 
         run.StartTask("work-1", "worker-1", "test-process-generation", DateTimeOffset.UnixEpoch);
@@ -128,12 +128,12 @@ public class WorkflowRunInvariantTests
         var run = BuildRun();
         run.StartTask("work-1", "worker-1", "test-process-generation", DateTimeOffset.UnixEpoch);
         var task = run.CurrentStage().Tasks[0];
-        Assert.Equal(TaskRunStatus.Running, task.Status);
+        Assert.Equal(WorkflowActionAttemptStatus.Running, task.Status);
         Assert.Equal(WorkflowRunStatus.Running, run.Status);
 
         var events = run.FailTask(new TaskResult("failed", "task error"), DateTimeOffset.UnixEpoch);
 
-        Assert.Equal(TaskRunStatus.Failed, task.Status);
+        Assert.Equal(WorkflowActionAttemptStatus.Failed, task.Status);
         Assert.Equal(WorkflowRunStatus.Failed, run.Status);
         Assert.NotEmpty(events);
         // The workflow transition to Failed is a one-shot policy reaction
@@ -146,15 +146,15 @@ public class WorkflowRunInvariantTests
     [Fact]
     public void NonTerminalTaskTransitionDoesNotRecomputeWorkflowStatus()
     {
-        var run = BuildMultiTaskRun();
+        var run = BuildMultiWorkflowActionAttempt();
         Assert.Equal(WorkflowRunStatus.Ready, run.Status);
 
         run.StartTask("work-1", "worker-1", "test-process-generation", DateTimeOffset.UnixEpoch);
         Assert.Equal(WorkflowRunStatus.Running, run.Status);
-        Assert.Equal(TaskRunStatus.Running, run.CurrentStage().Tasks[0].Status);
+        Assert.Equal(WorkflowActionAttemptStatus.Running, run.CurrentStage().Tasks[0].Status);
 
         run.CompleteTask(DateTimeOffset.UnixEpoch);
         Assert.Equal(WorkflowRunStatus.Ready, run.Status);
-        Assert.Equal(TaskRunStatus.Completed, run.CurrentStage().Tasks[0].Status);
+        Assert.Equal(WorkflowActionAttemptStatus.Completed, run.CurrentStage().Tasks[0].Status);
     }
 }

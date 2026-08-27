@@ -7,7 +7,7 @@ import type { TaskLogger } from '../../src/runtime/task-log.js'
 export interface ActionTestContext {
   workflowRunId: string
   workId: string
-  taskRunId?: string | null
+  actionAttemptId?: string | null
   workType: string
   stage?: string | null
   title?: string | null

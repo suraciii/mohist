@@ -2,8 +2,7 @@ import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import fuzzysort from 'fuzzysort'
 import { Command as CommandRoot } from 'cmdk'
 import {
-  getWorkflowProfileAgentRuntime,
-  isAgentRuntime,
+  AGENT_RUNTIME_OPENCODE,
   useAvailableModelIds,
   useEffectiveDefaultWorkflowProfile,
   useModelVariants,
@@ -13,7 +12,6 @@ import {
 import type { AgentRuntime } from '../../../entities/settings'
 import {
   getIssueWorkflowVariables,
-  isTerminalWorkflowRunStatus,
   issueDetailKeys,
   issueListKeys,
   patchIssueWorkflowDefinitionVar,
@@ -177,48 +175,26 @@ function modelDisplayName(modelId: string): string {
   return describeModel(modelId).name
 }
 
+function defaultAgentRuntime(): AgentRuntime {
+  return AGENT_RUNTIME_OPENCODE
+}
+
 export function IssueModelSelector({
   issueNumber,
   currentModel,
   currentStageModels,
-  workflowRunId,
-  workflowProfileId,
   dependencies = defaultDependencies,
 }: Props) {
   const {
     useAvailableModelIds,
     useOpencodeModel,
-    useWorkflowProfiles,
-    useEffectiveDefaultWorkflowProfile,
-    useWorkflowRunDetail,
     getIssueWorkflowVariables,
     patchIssueWorkflowDefinitionVar,
     patchIssueWorkflowStageDefinitionVar,
   } = dependencies
   const queryClient = useQueryClient()
   const { projectId } = useProject()
-  const { data: workflowProfiles } = useWorkflowProfiles()
-  const { effectiveTemplateId } = useEffectiveDefaultWorkflowProfile()
-  const selectedProfileId = workflowProfileId ?? effectiveTemplateId
-  const profileRuntime = getWorkflowProfileAgentRuntime(workflowProfiles, selectedProfileId)
-  const {
-    data: workflowRun,
-    isLoading: isWorkflowRunLoading,
-    error: workflowRunError,
-  } = useWorkflowRunDetail(workflowRunId)
-  const hasActiveRun = !!workflowRun && !isTerminalWorkflowRunStatus(workflowRun.status.status)
-  const runProfileRuntime = getWorkflowProfileAgentRuntime(workflowProfiles, workflowRun?.workflowProfileId)
-  const selectedRuntime: AgentRuntime | null = !workflowRunId
-    ? profileRuntime
-    : isWorkflowRunLoading || workflowRunError || !workflowRun
-      ? null
-      : !hasActiveRun
-        ? profileRuntime
-        : workflowRun.agentAction != null
-          ? isAgentRuntime(workflowRun.agentRuntime)
-            ? workflowRun.agentRuntime
-            : null
-          : runProfileRuntime
+  const selectedRuntime = defaultAgentRuntime()
   const catalog = useAvailableModelIds(selectedRuntime)
   const { data: availableModels, isLoading, error } = catalog
   const { data: opencodeModelData } = useOpencodeModel()

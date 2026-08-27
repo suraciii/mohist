@@ -162,8 +162,6 @@ public static class ProjectRoutes
                 profile.SourceProvenance,
                 profile.IsBuiltIn,
                 profile.DefinitionSource,
-                profile.AgentAction,
-                profile.AgentRuntime,
                 definition.Stages
                     .Select(stage => new WorkflowProfileStageSummary(
                         stage.Stage,
@@ -171,45 +169,6 @@ public static class ProjectRoutes
                         stage.Tasks.Select(task => task.Id).ToArray(),
                         stage.Checks.Select(check => check.Id).ToArray()))
                     .ToArray()));
-        });
-
-        byRef.MapPatch("/workflow-profiles/{*profileId}", async (
-            HttpContext context,
-            string profileId,
-            WorkflowProfileAgentActionRequest request,
-            IGrainFactory grains,
-            IWorkflowProfileProvider provider) =>
-        {
-            var project = context.GetResolvedProject();
-            var id = Uri.UnescapeDataString(profileId);
-            try
-            {
-                var result = await grains.GetGrain<IWorkflowProfileReferenceCoordinatorGrain>(project.Id)
-                    .SetAgentActionOverrideAsync(
-                        new WorkflowProfileCommandPayload.SetAgentActionOverride(
-                            project.Id,
-                            id,
-                            string.IsNullOrWhiteSpace(request.AgentAction) ? null : request.AgentAction.Trim()),
-                        $"api-agent-action:{Guid.NewGuid():N}",
-                        expectedRevision: null);
-                if (!result.IsApplied)
-                    return result.Code == WorkflowProfileReferenceResultCode.ProfileUnknown
-                        ? ApiResults.NotFound(result.Message ?? $"WorkflowProfile '{id}' was not found")
-                        : ApiResults.Conflict(result.Message ?? "Unable to update Agent Action", "workflow_profile_agent_action_conflict");
-
-                var profile = await provider.GetAsync(project.Id, id);
-                return profile is null
-                    ? ApiResults.NotFound($"WorkflowProfile '{id}' was not found")
-                    : ApiResults.Ok(profile);
-            }
-            catch (WorkflowProfileNotFoundException ex)
-            {
-                return ApiResults.NotFound(ex.Message);
-            }
-            catch (WorkflowDefinitionValidationException ex)
-            {
-                return ApiResults.BadRequest(ex.Message, "workflow_profile_agent_action_validation", ex.Errors);
-            }
         });
 
         byRef.MapPut("/workflow-profiles/{*profileId}", async (
@@ -785,8 +744,6 @@ public sealed record WorkflowProfileDetailResponse(
     WorkflowProfileSourceProvenance SourceProvenance,
     bool IsBuiltIn,
     string? DefinitionSource,
-    string? AgentAction,
-    string? AgentRuntime,
     IReadOnlyList<WorkflowProfileStageSummary> Stages);
 
 public sealed record WorkflowProfileStageSummary(
@@ -837,7 +794,6 @@ public record UpdateRepositoryRequest(
     JsonElement ResolvedPath = default);
 public sealed record SetDefaultWorkflowProfileRequest(string ProfileId);
 public sealed record ToggleWorkflowProfileRequest(string ProfileId);
-public sealed record WorkflowProfileAgentActionRequest(string? AgentAction);
 
 /// <summary>
 /// Raw-JSON presence-bound body for

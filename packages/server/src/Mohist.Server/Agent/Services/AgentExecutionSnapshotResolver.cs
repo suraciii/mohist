@@ -17,7 +17,16 @@ public sealed class AgentExecutionSnapshotResolver(
     public async Task<AgentExecutionIdentitySnapshot?> ResolveWithIdentityAsync(string projectId, string agentRef)
     {
         var agent = await AgentRefResolver.ResolveAsync(agents, projectId, agentRef);
+        if (agent is null
+            && !agentRef.StartsWith("agent_", StringComparison.Ordinal)
+            && BuiltInAgentCatalog.Find(agentRef) is not null)
+        {
+            agent = BuiltInAgentCatalog.Resolve(agentRef, projectId);
+        }
         if (agent is null || agent.Status != AgentStatus.Active)
+            return null;
+        if (agent.Executability is { } executability
+            && AgentExecutabilityStates.IsBlocked(executability.State))
             return null;
 
         var config = agent.AgentConfig?.Clone();
@@ -37,13 +46,14 @@ public sealed class AgentExecutionSnapshotResolver(
             }
         }
 
+        var effective = agent.EffectiveExecutionConfig;
         return new AgentExecutionIdentitySnapshot(
             agent.Id,
             new AgentExecutionDefinition(
                 Instructions: agent.Instructions,
-                Runtime: AgentLauncher.ResolveRuntime(config),
-                Model: AgentLauncher.ResolveModelAndVariant(config).Model,
-                Variant: AgentLauncher.ResolveModelAndVariant(config).Variant,
+                Runtime: effective?.Runtime ?? AgentLauncher.ResolveRuntime(config),
+                Model: effective?.Model ?? AgentLauncher.ResolveModelAndVariant(config).Model,
+                Variant: effective?.Variant ?? AgentLauncher.ResolveModelAndVariant(config).Variant,
                 Skills: agent.Skills.ToArray(),
                 AllowedSubagents: allowedSubagents.ToArray(),
                 ReasoningEffort: AgentLauncher.ResolveReasoningEffort(config)));

@@ -19,7 +19,7 @@ public class WorkflowArtifactPersistenceSpecs
         _fixture = fixture;
     }
 
-    private (string workflowRunId, string taskRunId, string prefix) NewIds(string label) =>
+    private (string workflowRunId, string actionAttemptId, string prefix) NewIds(string label) =>
         ($"wr_{label}_{Guid.NewGuid():N}",
          $"{label}.{Guid.NewGuid():N}",
          $"{label}_{Guid.NewGuid():N}_");
@@ -36,7 +36,7 @@ public class WorkflowArtifactPersistenceSpecs
         {
             ArtifactId = $"art_{prefix}",
             WorkflowRunId = wr,
-            TaskRunId = tr,
+            ActionAttemptId = tr,
             Path = "review.md",
             RecordedAt = recordedAt,
             ArtifactStoragePath = $"{wr}/tasks/{tr}/artifacts/art_{prefix}/content",
@@ -54,7 +54,7 @@ public class WorkflowArtifactPersistenceSpecs
 
         var reloaded = await db.WorkflowArtifacts.SingleAsync(a => a.ArtifactId == row.ArtifactId);
         Assert.Equal(wr, reloaded.WorkflowRunId);
-        Assert.Equal(tr, reloaded.TaskRunId);
+        Assert.Equal(tr, reloaded.ActionAttemptId);
         Assert.Equal("review.md", reloaded.Path);
         Assert.Equal(recordedAt, reloaded.RecordedAt);
         Assert.Equal($"{wr}/tasks/{tr}/artifacts/art_{prefix}/content", reloaded.ArtifactStoragePath);
@@ -76,7 +76,7 @@ public class WorkflowArtifactPersistenceSpecs
         {
             ArtifactId = artifactId,
             WorkflowRunId = wr,
-            TaskRunId = tr,
+            ActionAttemptId = tr,
             Path = "specs/",
             RecordedAt = FixedNow,
             ArtifactStoragePath = $"{wr}/tasks/{tr}/artifacts/{artifactId}/files",
@@ -106,7 +106,7 @@ public class WorkflowArtifactPersistenceSpecs
             {
                 ArtifactId = $"art_v1_{Guid.NewGuid():N}",
                 WorkflowRunId = wr,
-                TaskRunId = "ai-review.1",
+                ActionAttemptId = "ai-review.1",
                 Path = "review.md",
                 RecordedAt = baseTime,
                 ArtifactStoragePath = "v1",
@@ -115,7 +115,7 @@ public class WorkflowArtifactPersistenceSpecs
             {
                 ArtifactId = $"art_v2_{Guid.NewGuid():N}",
                 WorkflowRunId = wr,
-                TaskRunId = "ai-review.2",
+                ActionAttemptId = "ai-review.2",
                 Path = "review.md",
                 RecordedAt = baseTime.AddMinutes(5),
                 ArtifactStoragePath = "v2",
@@ -124,7 +124,7 @@ public class WorkflowArtifactPersistenceSpecs
             {
                 ArtifactId = $"art_v3_other_{Guid.NewGuid():N}",
                 WorkflowRunId = otherWr,
-                TaskRunId = "ai-review.1",
+                ActionAttemptId = "ai-review.1",
                 Path = "review.md",
                 RecordedAt = baseTime.AddMinutes(10),
                 ArtifactStoragePath = "v3",
@@ -141,7 +141,7 @@ public class WorkflowArtifactPersistenceSpecs
             .OrderByDescending(a => a.RecordedAt)
             .First();
 
-        Assert.Equal("ai-review.2", latestForRun.TaskRunId);
+        Assert.Equal("ai-review.2", latestForRun.ActionAttemptId);
         Assert.Equal(baseTime.AddMinutes(5), latestForRun.RecordedAt);
     }
 
@@ -161,7 +161,7 @@ public class WorkflowArtifactPersistenceSpecs
             {
                 ArtifactId = v1Id,
                 WorkflowRunId = wr,
-                TaskRunId = "ai-review.1",
+                ActionAttemptId = "ai-review.1",
                 Path = "review.md",
                 RecordedAt = baseTime,
                 ArtifactStoragePath = "h1",
@@ -170,7 +170,7 @@ public class WorkflowArtifactPersistenceSpecs
             {
                 ArtifactId = v2Id,
                 WorkflowRunId = wr,
-                TaskRunId = "ai-review.2",
+                ActionAttemptId = "ai-review.2",
                 Path = "review.md",
                 RecordedAt = baseTime.AddMinutes(3),
                 ArtifactStoragePath = "h2",
@@ -179,7 +179,7 @@ public class WorkflowArtifactPersistenceSpecs
             {
                 ArtifactId = v3Id,
                 WorkflowRunId = wr,
-                TaskRunId = "ai-review.3",
+                ActionAttemptId = "ai-review.3",
                 Path = "review.md",
                 RecordedAt = baseTime.AddMinutes(6),
                 ArtifactStoragePath = "h3",
@@ -197,7 +197,7 @@ public class WorkflowArtifactPersistenceSpecs
     }
 
     [Fact]
-    public async Task WorkflowArtifactRow_TaskRunFilterReturnsProducedArtifacts()
+    public async Task WorkflowArtifactRow_WorkflowActionAttemptFilterReturnsProducedArtifacts()
     {
         var (wr, _, _) = NewIds("filter");
         var firstTask = $"ai-review.1_{Guid.NewGuid():N}";
@@ -212,7 +212,7 @@ public class WorkflowArtifactPersistenceSpecs
             {
                 ArtifactId = firstId,
                 WorkflowRunId = wr,
-                TaskRunId = firstTask,
+                ActionAttemptId = firstTask,
                 Path = "review.md",
                 RecordedAt = FixedNow,
                 ArtifactStoragePath = "a1",
@@ -221,7 +221,7 @@ public class WorkflowArtifactPersistenceSpecs
             {
                 ArtifactId = secondId,
                 WorkflowRunId = wr,
-                TaskRunId = secondTask,
+                ActionAttemptId = secondTask,
                 Path = "review.md",
                 RecordedAt = FixedNow,
                 ArtifactStoragePath = "a2",
@@ -229,7 +229,7 @@ public class WorkflowArtifactPersistenceSpecs
         await db.SaveChangesAsync();
 
         var firstRunArtifacts = await db.WorkflowArtifacts
-            .Where(a => a.WorkflowRunId == wr && a.TaskRunId == firstTask)
+            .Where(a => a.WorkflowRunId == wr && a.ActionAttemptId == firstTask)
             .ToListAsync();
 
         var single = Assert.Single(firstRunArtifacts);
@@ -251,7 +251,7 @@ public class WorkflowArtifactPersistenceSpecs
             UploadId = uploadId,
             WorkflowRunId = wr,
             WorkId = workId,
-            TaskRunId = tr,
+            ActionAttemptId = tr,
             Path = "review.md",
             ContentType = "text/markdown",
             ContentHash = "sha256:def",
@@ -265,7 +265,7 @@ public class WorkflowArtifactPersistenceSpecs
         var reloaded = await db.WorkflowArtifactPendingUploads.SingleAsync(u => u.UploadId == uploadId);
         Assert.Equal(wr, reloaded.WorkflowRunId);
         Assert.Equal(workId, reloaded.WorkId);
-        Assert.Equal(tr, reloaded.TaskRunId);
+        Assert.Equal(tr, reloaded.ActionAttemptId);
         Assert.Equal("review.md", reloaded.Path);
         Assert.Equal("sha256:def", reloaded.ContentHash);
         Assert.Equal(2048L, reloaded.Size);
@@ -285,7 +285,7 @@ public class WorkflowArtifactPersistenceSpecs
             UploadId = $"artup_dup_1_{Guid.NewGuid():N}",
             WorkflowRunId = wr,
             WorkId = workId,
-            TaskRunId = tr,
+            ActionAttemptId = tr,
             Path = "review.md",
             StoragePath = "p1",
             CreatedAt = now,
@@ -298,7 +298,7 @@ public class WorkflowArtifactPersistenceSpecs
             UploadId = $"artup_dup_2_{Guid.NewGuid():N}",
             WorkflowRunId = wr,
             WorkId = workId,
-            TaskRunId = tr,
+            ActionAttemptId = tr,
             Path = "review.md",
             StoragePath = "p2",
             CreatedAt = now,
@@ -309,7 +309,7 @@ public class WorkflowArtifactPersistenceSpecs
     }
 
     [Fact]
-    public void EfModelSnapshot_ExposesIndexesForLatestHistoryAndTaskRunQueries()
+    public void EfModelSnapshot_ExposesIndexesForLatestHistoryAndWorkflowActionAttemptQueries()
     {
         using var scope = _fixture.Services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<MohistDbContext>();
@@ -320,7 +320,7 @@ public class WorkflowArtifactPersistenceSpecs
             .ToHashSet(StringComparer.Ordinal);
 
         Assert.Contains("WorkflowRunId,Path,RecordedAt", indexNames);
-        Assert.Contains("WorkflowRunId,TaskRunId,RecordedAt", indexNames);
+        Assert.Contains("WorkflowRunId,ActionAttemptId,RecordedAt", indexNames);
         Assert.Contains("ProjectId,IssueNumber,RecordedAt", indexNames);
     }
 
@@ -336,6 +336,6 @@ public class WorkflowArtifactPersistenceSpecs
             .Select(i => string.Join(",", i.Properties.Select(p => p.Name)))
             .ToList();
 
-        Assert.Contains("WorkflowRunId,WorkId,TaskRunId,Path", uniqueIndexes);
+        Assert.Contains("WorkflowRunId,WorkId,ActionAttemptId,Path", uniqueIndexes);
     }
 }

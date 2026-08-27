@@ -9,7 +9,8 @@ These concepts explain how Mohist continuously advances work to Done.
 > can operate Mohist through a **Skill**. Within a **Project**, Mohist records a
 > product goal as an **Issue** and uses a **Workflow** to advance it to Done.
 > Multiple related Issues form an **Epic**. A **Workflow** advances an Issue by
-> launching configured **Mohist Agents** for its tasks. The same Agents can also
+> launching configured **Mohist Agents** for its Agent-backed tasks and running
+> mechanical Actions for orchestration. The same Agents can also
 > accept delegated work or respond to events outside a Workflow.
 
 ## Project
@@ -150,7 +151,8 @@ behalf of the other.
 
 An AgentSession is not an Agent or a work result. It records the messages,
 context, usage, Activity, and current Runtime Session for a conversation. An
-AgentJob owns every top-level Agent execution, including a Workflow task. The
+AgentJob owns every top-level Agent execution, including a `mohist/agent`
+Workflow task. The
 WorkflowRun keeps only orchestration state and the AgentJob reference. Subsequent
 input continues the same AgentSession but does not rewrite the AgentJob. Each
 accepted input in an AgentSession is a SessionInput. One continuous Runtime
@@ -236,8 +238,9 @@ Agent is an independently usable proxy, and an Agent Connection only brings it
 to Slack. An External Agent can also use Mohist through a Skill. A Project is
 the product and execution boundary. An Epic owns a goal and supplies work. An
 Issue is the workpiece. A Workflow is the production line. Mohist Agents are
-the workers for both Workflow tasks and direct delegation. AgentJob owns each
-execution, and AgentSession records its continuing conversation. The Web
+the workers for Agent-backed Workflow tasks and direct delegation; mechanical
+Actions remain Workflow orchestration. AgentJob owns each Agent execution, and
+AgentSession records its continuing conversation. The Web
 UI is the fallback operations and visualization plane.**
 
 ---

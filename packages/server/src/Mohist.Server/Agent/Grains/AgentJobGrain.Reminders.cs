@@ -19,11 +19,14 @@ public sealed partial class AgentJobGrain
                 await EmitFailureEventAsync(State.PendingFailureEvent);
             if (State.PendingTerminalDeliveryEvent is not null)
                 await EmitTerminalDeliveryEventAsync(State.PendingTerminalDeliveryEvent);
+            if (State.PendingWorkflowTerminalEvent is not null)
+                await EmitWorkflowTerminalEventAsync(State.PendingWorkflowTerminalEvent);
             if (State.PendingSubagentTerminalEvent is not null)
                 await EmitSubagentTerminalEventAsync(State.PendingSubagentTerminalEvent);
             if (State.PendingSessionClose is null
                 && State.PendingFailureEvent is null
                 && State.PendingTerminalDeliveryEvent is null
+                && State.PendingWorkflowTerminalEvent is null
                 && State.PendingSubagentTerminalEvent is null
 
                 && !State.ConcurrencyReleasePending)

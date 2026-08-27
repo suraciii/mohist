@@ -325,11 +325,6 @@ public sealed class WorkflowGrainProductionContractSpecs
             long? expectedRevision) =>
             throw new NotSupportedException();
 
-        public Task<WorkflowProfileReferenceResult> SetAgentActionOverrideAsync(
-            WorkflowProfileCommandPayload.SetAgentActionOverride payload,
-            string commandId,
-            long? expectedRevision) => throw new NotSupportedException();
-
         public Task<WorkflowProfileSaveResult> UpdateProfileAsync(
             WorkflowProfileCommandPayload.UpdateProfile payload,
             string commandId,

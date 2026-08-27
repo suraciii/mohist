@@ -1,11 +1,7 @@
 # Action Design
 
-> **Status: legacy implementation.** The Workflow-owned Action/TaskRun model in this document is the
-> current implementation. The target model ([`../agent-execution.md`](../agent-execution.md),
-> [`../domain-analysis.md`](../domain-analysis.md)) removes both: an executable Workflow task names a
-> Mohist Agent and AgentJob owns execution. Binding decided in
-> [`../decisions/workflow-agent-binding.md`](../decisions/workflow-agent-binding.md); rewrite follows
-> the implementation migration.
+> Mechanical Actions are Workflow-owned orchestration. The concrete `mohist/agent` Action launches
+> an AgentJob; see [`../decisions/workflow-agent-binding.md`](../decisions/workflow-agent-binding.md).
 
 An Action is the pluggable execution unit of a Workflow task. `uses` selects the Action, `with`
 provides all inputs, and the Action returns structured output or an error. For a developer,
@@ -106,7 +102,7 @@ it. The Action result itself does not carry this fact.
 Built-in Runner Actions are registered in one list. The registry is built from manifests and
 matches `uses` against `name` case-insensitively. All manifests are collected into a pure-JSON
 catalog and reported to Server when Runner registers, together with tombstones for retired Actions.
-The catalog preserves manifest capabilities so Server can validate a Profile's `agentAction`
+The catalog preserves manifest capabilities so Server can validate Profile `uses` declarations
 without inferring semantics from an Action name. Each tombstone contains a name and guidance.
 
 Loading external plugins, version segments in `uses` such as `@v1`, and composite Actions that
@@ -201,9 +197,7 @@ its output unchanged. There is no special-case list based on `uses`.
   mismatches are actionable errors. Inputs containing template expressions are checked only for
   key names; type validation waits for the Runner execution entry point. If no catalog has been
   reported, this layer is skipped and recorded without blocking a Profile that uses only literal
-  Actions. A Profile that declares `agentAction`, or a mutation of its Project override, is rejected
-  when no catalog is available because the capability and complete materialized contract cannot be
-  validated.
+  Actions.
 - **Runner execution entry point, authoritative and fail-closed:** Runner renders the original
   `with` from the attempt snapshot, enforces its local manifest, and fails the task with
   `invalid-input` instead of invoking `run` with unvalidated input. Server no longer expands
@@ -211,14 +205,12 @@ its output unchanged. There is no special-case list based on `uses`.
 - **Retired Action:** a tombstone encountered during Runner rendering fails with its guidance; a
   tombstone encountered during Profile save rejects the save.
 
-Profile save first materializes the Profile's optional Agent Action binding, then uses the Workflow
-Definition validator to produce a semantic model and the catalog to evaluate concrete `uses` and
-`with`. When `agentAction` is present, the catalog also requires that Action to declare `agent-turn`.
-For an update referenced by active bound Runs, Server repeats materialization and Action-contract validation
-once per distinct bound Action as well as for the future effective Action. The Project-scoped Profile
-reference coordinator serializes this validation and write with new Run bindings.
+Profile save uses the Workflow Definition validator to produce a semantic model and the catalog to
+evaluate concrete `uses` and `with`. Agent tasks use the server-side `mohist/agent` boundary and are
+validated as a virtual manifest; runtime Actions such as `mohist/opencode` and `mohist/pi` are
+rejected in Profile `uses` and are invoked only by the AgentJob launcher.
 The Definition validator only recursively checks runtime template expressions in `with` values. The
-catalog does not repeat Profile binding, Definition field, or template namespace validation. All
+catalog does not repeat Profile, Definition field, or template namespace validation. All
 diagnostic sources are combined into one validation exception, use the same YAML path convention,
 and carry source labels. A successful save response explicitly contains
 `actionValidation: { performed, reason? }`, telling the caller whether Action-contract validation
@@ -309,11 +301,12 @@ task or a check.
 
 ### `mohist/opencode`
 
-This Runtime-specific Action declares `agent-turn`. See
-[`../agent-execution.md`](../agent-execution.md) for invariants about its ownership relationship
-with Agent and Session, including that direct use means an Inline Agent and does not resolve an
-Agent definition. Because `uses` already selects the Runtime, inputs need no `kind` or `type`
-discriminator.
+This Runtime-specific Action declares `agent-turn`. It is an internal
+Agent-to-Runner contract: the AgentJob launcher invokes it for an Agent whose
+definition selects OpenCode, and a Workflow Profile `uses` cannot reference it
+directly. See [`../agent-execution.md`](../agent-execution.md) for the
+ownership relationship with Agent and Session. Because the launcher already
+knows the Runtime, inputs need no `kind` or `type` discriminator.
 
 Input contract:
 
@@ -328,7 +321,7 @@ type OpenCodeActionInput = {
 }
 ```
 
-`options` is normally expanded as a whole value from `${{ vars.agent }}`. See
+The AgentJob launcher supplies `options` from the Agent definition. See
 [`task-dispatch.md`](task-dispatch.md) for template evaluation timing. Keys other than `model` and
 `variant` in `options` are ignored and recorded in diagnostics without failing execution. Workflow
 provides `expect` separately as the task completion contract. Legacy `with.expect` and `with.agent`
@@ -346,21 +339,20 @@ usage, transcript, diagnostics, and expectation details stay in the models that 
 not copied into Action output. See [`../runtimes/opencode.md`](../runtimes/opencode.md) for the
 OpenCode implementation.
 
-`mohist/pi` is a peer concrete Action with the same Profile-facing input shape and `agent-turn`
-capability. A parameterized Profile still materializes one of these concrete names before Action
-validation and dispatch; there is no generic Agent-turn Action in the registry.
+`mohist/pi` is a peer internal runtime contract with the same launcher-facing input shape and
+`agent-turn` capability. There is no generic Agent-turn Action in the registry; Workflow Profiles
+bind Agent work through `mohist/agent` only.
 
 ### `mohist/task-list`
 
 `mohist/task-list` appends planned Build tasks through its `add-tasks` capability. Its
-`task.uses` input is a required default for every appended task. A Profile may set this value to
-`${{ profile.agentAction }}` because Profile materialization runs before deferred Action Input is
-captured.
+`task.uses` input is a required literal Action default for every appended task, typically
+`mohist/agent` with a fixed Agent `name`.
 
 The source task list may describe task identity, title, goal, acceptance criteria, and plan
 references, but it cannot provide `uses`. Allowing a source task to replace `task.uses` would
-bypass Profile validation and could mix Agent Runtimes inside a Run. The Action rejects such input
-with `invalid-input`; it does not fall back to `mohist/opencode`.
+bypass Profile validation and could mix execution identities inside a Run. The Action rejects such
+input with `invalid-input`.
 
 The task list is a Workspace-local file. A rebuilt Workspace directory loses it, and the
 recovery is rerunning from the plan Stage, which regenerates it. See
@@ -415,5 +407,5 @@ Implemented: manifests and `defineAction`; registry and catalog reporting, inclu
 when Runner registers with Server; catalog validation during Profile save with an
 `actionValidation` response marker; declarative capability injection for `agent-turn`,
 `add-tasks`, and `write-vars`; structured output end to end; `setVars` projection; capability
-projection in the Server catalog; capability validation for `agentAction`; and the required
-non-overridable `task.uses` contract for `mohist/task-list`.
+projection in the Server catalog; and the required non-overridable `task.uses` contract for
+`mohist/task-list`.

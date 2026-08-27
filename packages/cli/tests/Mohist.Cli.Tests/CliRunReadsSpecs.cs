@@ -350,49 +350,11 @@ public partial class CliRunReadsSpecs
         Assert.Contains("run id:", stdout, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("status:", stdout, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("current stage:", stdout, StringComparison.OrdinalIgnoreCase);
-        Assert.Contains("agent action:  mohist/pi", stdout, StringComparison.Ordinal);
-        Assert.Contains("agent runtime: pi", stdout, StringComparison.Ordinal);
         Assert.Contains("issue:", stdout, StringComparison.OrdinalIgnoreCase);
         // Stages are rendered as a sub-table; the renderer emits a "stage"
         // header inside the run detail view (RenderWorkflowRunStages).
         Assert.Contains("stage", stdout, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("approval", stdout, StringComparison.OrdinalIgnoreCase);
-    }
-
-    [Fact]
-    public async Task View_BlockedResultRendersAttentionWithoutFailure()
-    {
-        var attention = new
-        {
-            state = "blocked",
-            reason = "agent-result-unconfirmed",
-            message = "Runner disconnected before the Agent result was accepted.",
-            deadlineAt = "2026-08-14T11:01:58Z",
-            taskRunId = "build.1",
-            workId = "build.1",
-            runnerId = "runner-pluto",
-            agentSessionId = "session-1",
-            agentTurnId = "turn-1",
-            nextAction = "Restore the original Runner and allow the result to replay.",
-            recoveryActions = new[] { "stop" },
-        };
-        var (handler, http, output, error, fs, executor) = CliTestFactory.CreateSync(req =>
-        {
-            if (req.Method == HttpMethod.Get && req.RequestUri?.PathAndQuery == $"/api/workflow-runs/{WrId}")
-                return RecordingHttpHandler.Json(new { success = true, data = SampleRunDetail(WrId, "blocked", "build", attention) });
-            return null!;
-        });
-
-        var exitCode = await MohistCliCommands.RunAsync(http, ["run", "view", WrId], output, error, fs, executor);
-
-        Assert.Equal(0, exitCode);
-        var stdout = output.ToString();
-        Assert.Contains("status:        blocked", stdout);
-        Assert.Contains("agent result attention:", stdout);
-        Assert.Contains("agent-result-unconfirmed", stdout);
-        Assert.Contains("session-1", stdout);
-        Assert.Contains("turn-1", stdout);
-        Assert.DoesNotContain("failure:", stdout, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
@@ -431,7 +393,7 @@ public partial class CliRunReadsSpecs
 
         var exitCode = await MohistCliCommands.RunAsync(
             http,
-            ["run", "view", WrId, "--json", "id,status,currentStage,agentAction,agentRuntime"],
+            ["run", "view", WrId, "--json", "id,status,currentStage"],
             output,
             error,
             fs,
@@ -441,24 +403,22 @@ public partial class CliRunReadsSpecs
         Assert.Single(handler.Requests);
         var selected = Assert.IsType<JsonObject>(JsonNode.Parse(output.ToString()));
         Assert.Equal(
-            new HashSet<string> { "id", "status", "currentStage", "agentAction", "agentRuntime" },
+            new HashSet<string> { "id", "status", "currentStage" },
             selected.Select(property => property.Key).ToHashSet());
         Assert.Equal(WrId, selected["id"]?.GetValue<string>());
         Assert.Equal("running", selected["status"]?.GetValue<string>());
         Assert.Equal("build", selected["currentStage"]?.GetValue<string>());
-        Assert.Equal("mohist/pi", selected["agentAction"]?.GetValue<string>());
-        Assert.Equal("pi", selected["agentRuntime"]?.GetValue<string>());
     }
 
     [Fact]
-    public async Task View_NullAgentBinding_RemainsVisibleInTable()
+    public async Task View_ProfileBinding_RemainsVisibleInTable()
     {
         var (handler, http, output, error, fs, executor) = CliTestFactory.CreateSync(req =>
             req.Method == HttpMethod.Get && req.RequestUri?.PathAndQuery == $"/api/workflow-runs/{WrId}"
                 ? RecordingHttpHandler.Json(new
                 {
                     success = true,
-                    data = SampleRunDetail(agentAction: null, agentRuntime: null),
+                    data = SampleRunDetail(),
                 })
                 : null!);
 
@@ -467,8 +427,6 @@ public partial class CliRunReadsSpecs
 
         Assert.Equal(0, exitCode);
         Assert.Contains("profile:       mohist/github-pr", output.ToString(), StringComparison.Ordinal);
-        Assert.Contains("agent action:  (none)", output.ToString(), StringComparison.Ordinal);
-        Assert.Contains("agent runtime: (none)", output.ToString(), StringComparison.Ordinal);
     }
 
     // ────────────────────────────────────────────────────────────────────

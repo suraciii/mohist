@@ -145,6 +145,44 @@ public static class AgentJobLineage
             extensions: extensions);
     }
 
+    public static CloudEvent BuildWorkflowTerminalEnvelope(
+        string jobKey,
+        PendingWorkflowAgentTerminalEvent payload,
+        IReadOnlyDictionary<string, string> extensions)
+    {
+        var data = JsonSerializer.SerializeToElement(new
+        {
+            jobKey,
+            invocationId = payload.Origin.InvocationId,
+            commandId = payload.Origin.CommandId,
+            workflowRunId = payload.Origin.WorkflowRunId,
+            actionAttemptId = payload.Origin.ActionAttemptId,
+            workId = payload.Origin.WorkId,
+            stage = payload.Origin.Stage,
+            requestFingerprint = payload.Origin.RequestFingerprint,
+            status = payload.Status.ToString().ToLowerInvariant(),
+            message = payload.Message,
+            output = payload.Output,
+            artifactUploadIds = payload.ArtifactUploadIds,
+            failureReason = payload.FailureReason,
+            failureCategory = payload.FailureCategory,
+            exitCode = payload.ExitCode,
+            resultFingerprint = payload.ResultFingerprint,
+            agentSessionId = payload.AgentSessionId,
+            initialInputId = payload.InitialInputId,
+            initialTurnId = payload.InitialTurnId,
+            addTasksJson = payload.AddTasksJson,
+        }, JSON.Options);
+        return new CloudEvent(
+            id: payload.EventId,
+            source: new Uri(AgentJobEventPersistence.AgentJobSource(jobKey), UriKind.Relative),
+            type: EventCatalog.ReverseDns.AgentJobWorkflowTerminal,
+            time: payload.RecordedAt,
+            data: data,
+            subject: jobKey,
+            extensions: extensions);
+    }
+
     public static CloudEvent BuildSubagentTerminalEnvelope(
         string jobKey,
         PendingSubagentTerminalEvent payload)

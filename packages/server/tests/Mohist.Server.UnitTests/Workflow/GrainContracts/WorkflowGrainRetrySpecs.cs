@@ -209,10 +209,10 @@ public sealed class WorkflowGrainRetrySpecs
                 Output: JsonSerializer.SerializeToElement(new { }),
                 Artifacts: null,
                 AddTasks: [new RuntimeTaskInput("recover", "Recover", "spec/task", Recovery: recovery)],
-                TaskRunId: await arrangement.RunningTaskRunIdAsync()));
+                ActionAttemptId: await arrangement.RunningActionAttemptIdAsync()));
 
         var failed = await RequireRunAsync(arrangement);
-        Assert.Equal(TaskRunStatus.Failed, failed.CurrentStage().Tasks.Single().Status);
+        Assert.Equal(WorkflowActionAttemptStatus.Failed, failed.CurrentStage().Tasks.Single().Status);
         Assert.Equal(WorkflowRunStatus.Failed, failed.Status);
     }
 
@@ -240,8 +240,8 @@ public sealed class WorkflowGrainRetrySpecs
         var run = await RequireRunAsync(arrangement);
         var attempts = run.CurrentStage().Tasks.Where(t => t.DefinitionId == "merge-pr").ToList();
         Assert.Equal(2, attempts.Count);
-        Assert.Equal(TaskRunStatus.Completed, attempts[0].Status);
-        Assert.Equal(TaskRunStatus.Pending, attempts[1].Status);
+        Assert.Equal(WorkflowActionAttemptStatus.Completed, attempts[0].Status);
+        Assert.Equal(WorkflowActionAttemptStatus.Pending, attempts[1].Status);
         Assert.Equal(3, attempts[1].RecoveryRemaining);
         Assert.Equal(2, attempts[1].Recovery!.Budget);
         Assert.Equal(WorkflowRunStatus.Ready, run.Status);
@@ -268,7 +268,7 @@ public sealed class WorkflowGrainRetrySpecs
         var failed = await RequireRunAsync(arrangement);
         var active = Assert.Single(failed.CurrentStage().Tasks);
         Assert.Equal("merge-pr.1", active.Id);
-        Assert.Equal(TaskRunStatus.Failed, active.Status);
+        Assert.Equal(WorkflowActionAttemptStatus.Failed, active.Status);
         Assert.Equal(WorkflowRunStatus.Failed, failed.Status);
     }
 
@@ -294,12 +294,12 @@ public sealed class WorkflowGrainRetrySpecs
                 Output: null,
                 Artifacts: null,
                 Detail: "stale report",
-                TaskRunId: await PersistedTaskRunIdAsync(arrangement, "first.1")));
+                ActionAttemptId: await PersistedActionAttemptIdAsync(arrangement, "first.1")));
 
         Assert.Equal(WorkReportVerdict.Refused, ack);
         var run = await RequireRunAsync(arrangement);
-        Assert.Equal(TaskRunStatus.Completed, run.CurrentStage().Tasks.Single(task => task.Id == "first.1").Status);
-        Assert.Equal(TaskRunStatus.Running, run.CurrentStage().Tasks.Single(task => task.Id == "second.1").Status);
+        Assert.Equal(WorkflowActionAttemptStatus.Completed, run.CurrentStage().Tasks.Single(task => task.Id == "first.1").Status);
+        Assert.Equal(WorkflowActionAttemptStatus.Running, run.CurrentStage().Tasks.Single(task => task.Id == "second.1").Status);
     }
 
     [Fact]
@@ -647,7 +647,7 @@ public sealed class WorkflowGrainRetrySpecs
         await arrangement.ReportChecksPassAsync(check!, "plan-ok");
     }
 
-    private static async Task<string> PersistedTaskRunIdAsync(
+    private static async Task<string> PersistedActionAttemptIdAsync(
         WorkflowGrainArrangement arrangement,
         string workId)
     {

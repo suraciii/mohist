@@ -9,7 +9,7 @@ namespace Mohist.Server.UnitTests.Workflow.Domain;
 public class WorkflowRunRuntimeVariableTests
 {
     [Fact]
-    public void TaskRun_Output_StoresAsJsonElement()
+    public void WorkflowActionAttempt_Output_StoresAsJsonElement()
     {
         var run = WorkflowRun.Create("wr_1", SingleStage(), DateTimeOffset.UnixEpoch);
         run.Start(DateTimeOffset.UnixEpoch);
@@ -29,11 +29,11 @@ public class WorkflowRunRuntimeVariableTests
     }
 
     [Fact]
-    public void TaskRun_Output_NullByDefault()
+    public void WorkflowActionAttempt_Output_NullByDefault()
     {
         var run = WorkflowRun.Create("wr_1", SingleStage(), DateTimeOffset.UnixEpoch);
 
-        var task = new TaskRun
+        var task = new WorkflowActionAttempt
         {
             Id = "task-1.1",
             DefinitionId = "task-1",
@@ -46,7 +46,7 @@ public class WorkflowRunRuntimeVariableTests
     }
 
     [Fact]
-    public void TaskRun_Output_RetryOverwrites()
+    public void WorkflowActionAttempt_Output_RetryOverwrites()
     {
         var run = WorkflowRun.Create("wr_1", SingleStage(), DateTimeOffset.UnixEpoch);
         run.Start(DateTimeOffset.UnixEpoch);

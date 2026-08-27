@@ -5,6 +5,7 @@ using Mohist.Server.Infrastructure;
 using Mohist.Server.Infrastructure.Serialization;
 using Mohist.Server.Runner.Domain;
 using Mohist.Server.Runner.Grains;
+using Mohist.Server.Workflow.Domain.Run;
 
 namespace Mohist.Server.Agent.Grains;
 
@@ -20,7 +21,11 @@ public sealed partial class AgentJobGrain
         var executionSource = input.ExecutionSource is null && input.SlackExecutionContext is not null
             ? AgentExecutionSources.Slack
             : input.ExecutionSource;
-        var payload = new Dictionary<string, JsonElement?>(StringComparer.Ordinal);
+        var workflowOrigin = input.WorkflowOrigin;
+        var payload = !string.IsNullOrWhiteSpace(workflowOrigin?.VariablesJson)
+            ? JSON.Deserialize<Dictionary<string, JsonElement?>>(workflowOrigin.VariablesJson!)
+                ?? new Dictionary<string, JsonElement?>(StringComparer.Ordinal)
+            : new Dictionary<string, JsonElement?>(StringComparer.Ordinal);
         if (!string.IsNullOrWhiteSpace(input.WorkspaceName))
             payload["workspace"] = JSON.SerializeToElement(new
             {
@@ -91,14 +96,22 @@ public sealed partial class AgentJobGrain
         }
 
         return new WorkDispatch(
-            WorkflowRunId: string.Empty,
+            WorkflowRunId: workflowOrigin?.WorkflowRunId ?? string.Empty,
             WorkId: workId,
             Uses: null,
             With: JSON.Serialize(with),
             Variables: variablesJson,
             WorkType: "agent-job",
-            Stage: "agent",
-            Title: "Agent Job",
+            Stage: workflowOrigin?.Stage ?? "agent",
+            Title: workflowOrigin?.ActionAttemptId ?? "Agent Job",
+            Issue: input.ProjectId is not null && input.IssueNumber is > 0
+                ? new WorkIssueRef(input.ProjectId, input.IssueNumber.Value)
+                : null,
+            Artifacts: workflowOrigin?.ArtifactsJson,
+            SetVars: workflowOrigin?.SetVarsJson,
+            Recovery: workflowOrigin?.RecoveryJson,
+            RecoveryRemaining: workflowOrigin?.RecoveryRemaining,
+            Expect: workflowOrigin?.ExpectJson,
             OwnerKind: WorkDispatchOwnerKinds.AgentJob,
             AgentJobId: Key,
             ProjectId: string.IsNullOrWhiteSpace(input.ProjectId) ? null : input.ProjectId,
@@ -109,6 +122,7 @@ public sealed partial class AgentJobGrain
             AgentDefinition: ExecutionDefinitionFrom(input),
             PinnedRunnerId: input.PinnedRunnerId,
             AgentSessionStartup: input.AgentSessionStartup,
+            ActionAttemptId: workflowOrigin?.ActionAttemptId,
             OriginMarker: input.OriginMarker);
     }
 }

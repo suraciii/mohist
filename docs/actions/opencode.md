@@ -1,7 +1,7 @@
 # `mohist/opencode` Action
 
-> **Status: legacy implementation.** See [Action Contracts](README.md) for the target model that
-> replaces Workflow-owned Actions with Agent launches.
+> `mohist/opencode` is an Agent-to-Runner runtime contract. Workflow Profiles use
+> [`mohist/agent`](agent.md), not this Action directly.
 
 `mohist/opencode` delegates one unit of work to OpenCode and reports the
 execution facts. The Action itself is not an Agent and does not find or start a Mohist Agent.

@@ -413,7 +413,6 @@ public class WorkflowRunQuerierSchedulingSpecs
             var projection = WorkflowRunWorkProjectionBuilder.Build(run!);
             projectedWorkId = projection.ActiveWorkId;
             projectedWorkerId = projection.ActiveWorkerId;
-            attentionStatus = run!.HasBlockedAgentResult() ? "blocked" : null;
         }
         using var scope = _fixture.Services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<MohistDbContext>();
@@ -454,13 +453,13 @@ public class WorkflowRunQuerierSchedulingSpecs
             Status = StageRunStatus.Running,
             Tasks =
             {
-                new TaskRun
+                new WorkflowActionAttempt
                 {
                     Id = "task-1",
                     DefinitionId = "task-1",
                     Attempt = 1,
                     Title = "Build task",
-                    Status = TaskRunStatus.Pending,
+                    Status = WorkflowActionAttemptStatus.Pending,
                     Classification = TaskClassification.UserFacing,
                 },
             },
@@ -476,7 +475,7 @@ public class WorkflowRunQuerierSchedulingSpecs
             // the assigned worker; that is what materializes the active-work
             // projection the capacity queries filter.
             var task = run.Stages.Single().Tasks.Single();
-            task.Status = TaskRunStatus.Running;
+            task.Status = WorkflowActionAttemptStatus.Running;
             task.WorkId = "task-work";
             task.WorkerId = assignedWorkerId;
         }

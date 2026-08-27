@@ -118,7 +118,7 @@ public static class VerificationLaneGate
     /// claimable. Catalog lanes are limited to the first non-passing lane;
     /// downstream tasks remain blocked until every lane has a durable pass.
     /// </summary>
-    public static bool IsClaimableLaneTask(WorkflowRun run, TaskRun task)
+    public static bool IsClaimableLaneTask(WorkflowRun run, WorkflowActionAttempt task)
     {
         if (!IsLaneEnabledRun(run)) return true;
 
@@ -148,7 +148,7 @@ public static class VerificationLaneGate
         return taskIndex >= 0 && firstLaneIndex >= 0 && taskIndex < firstLaneIndex;
     }
 
-    private static bool IsLaneRecoveryHelper(WorkflowRun run, TaskRun task)
+    private static bool IsLaneRecoveryHelper(WorkflowRun run, WorkflowActionAttempt task)
     {
         if (string.IsNullOrWhiteSpace(task.CausedByFailedTaskId)) return false;
 

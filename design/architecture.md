@@ -172,7 +172,7 @@ All of these constraints apply:
 Each coordinator serializes by Project key. Today one coordinator serializes the commands that
 establish or break a non-terminal Issue's Repository binding: Issue creation, target Repository
 reassignment, reopening a cancelled Issue, and Repository deletion. Another coordinator serializes
-Workflow Profile mutation, Project default and Agent Action override writes, Profile deletion, and
+Workflow Profile mutation, Project default writes, Profile deletion, and
 WorkflowRun start binding, so a Run observes the complete configuration before or after a mutation,
 never an intermediate version. A duplicate Run start returns the identical persisted binding, while
 conflicting startup facts are rejected. A Profile deletion that races an Issue selection ends in a

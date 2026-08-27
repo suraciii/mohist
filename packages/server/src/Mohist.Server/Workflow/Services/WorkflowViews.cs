@@ -22,7 +22,6 @@ public sealed record WorkflowStatusView(
     List<AvailableActionView> AvailableActions,
     string? AssignedTo = null,
     MetadataView? Metadata = null,
-    AgentResultAttentionView? AgentResultAttention = null,
     WorkInterruptionView? Interruption = null,
     VerificationLanesView? VerificationLanes = null);
 
@@ -38,46 +37,6 @@ public sealed record WorkInterruptionView(
     string OwnerId,
     DateTimeOffset RecordedAt,
     DateTimeOffset RecoveryDeadlineAt);
-
-/// <summary>
-/// Non-failure attention for a Workflow-owned Agent task whose result could
-/// not be confirmed before its settlement deadline. Populated only while the
-/// settlement is blocked; a late authoritative result clears it by settling
-/// the task through the normal terminal path.
-/// </summary>
-[GenerateSerializer]
-public sealed record AgentResultAttentionView(
-    string State,
-    string Reason,
-    string Message,
-    DateTimeOffset DeadlineAt,
-    string TaskRunId,
-    string WorkId,
-    string? RunnerId = null,
-    string? AgentSessionId = null,
-    string? AgentTurnId = null,
-    string? NextAction = null,
-    IReadOnlyList<string>? RecoveryActions = null,
-    string? ReasonCode = null);
-
-[GenerateSerializer]
-public sealed record AgentResultSettlementView(
-    string State,
-    string? Reason,
-    string? Message,
-    DateTimeOffset? FirstUnknownAt,
-    DateTimeOffset? DeadlineAt,
-    string TaskRunId,
-    string WorkId,
-    string? RunnerId = null,
-    string? AgentSessionId = null,
-    string? AgentTurnId = null,
-    string? Runtime = null,
-    string? RuntimeSessionId = null,
-    string? StopOperationId = null,
-    string? NextAction = null,
-    IReadOnlyList<string>? RecoveryActions = null,
-    string? ReasonCode = null);
 
 [GenerateSerializer]
 public sealed record StageStatusView(
@@ -164,9 +123,10 @@ public sealed record TaskStatusView(
     long? DurationMs = null,
     JsonElement? Output = null,
     ExecutionError? Error = null,
-    AgentResultSettlementView? AgentResultSettlement = null,
     WorkInterruptionView? Interruption = null,
-    TaskLaneView? Lane = null);
+    TaskLaneView? Lane = null,
+    string? AgentJobId = null,
+    string? AgentSessionId = null);
 
 [GenerateSerializer]
 public sealed record CheckStatusView(
@@ -188,7 +148,7 @@ public sealed record PendingWorkView(
 
 /// <summary>
 /// Per-task verification-lane view derived from the additive
-/// <c>TaskRun.Lane</c> metadata. Populated only for tasks whose
+/// <c>WorkflowActionAttempt.Lane</c> metadata. Populated only for tasks whose
 /// <c>DefinitionId</c> is a recognized built-in lane id; non-lane tasks
 /// (including the <c>recover:fix-ci</c> helper) project a null
 /// <c>Lane</c> on the task view.
@@ -199,7 +159,7 @@ public sealed record TaskLaneView(
     int Order,
     int ConfiguredBudgetMs,
     string Outcome,
-    string TaskRunId,
+    string ActionAttemptId,
     string? WorkId = null,
     string? Detail = null,
     ExecutionError? Error = null,
@@ -229,7 +189,7 @@ public sealed record VerificationLaneView(
     int Order,
     int ConfiguredBudgetMs,
     string Outcome,
-    string TaskRunId,
+    string ActionAttemptId,
     string? WorkId = null,
     string? Detail = null,
     ExecutionError? Error = null,

@@ -263,7 +263,7 @@ export function getIssueWorkflowProfileYaml(number: number, projectId: string, s
 export interface IssueWorkflowArtifactListParams {
   path?: string
   history?: boolean
-  taskRunId?: string
+  actionAttemptId?: string
 }
 
 export function getIssueWorkflowArtifacts(
@@ -275,7 +275,7 @@ export function getIssueWorkflowArtifacts(
   const search = new URLSearchParams()
   if (params.path) search.set('path', params.path)
   if (params.history) search.set('history', 'true')
-  if (params.taskRunId) search.set('taskRunId', params.taskRunId)
+  if (params.actionAttemptId) search.set('actionAttemptId', params.actionAttemptId)
   const qs = search.toString()
   return request<(WorkflowArtifact | WorkflowArtifactDirectory)[]>(
     projectApiPath(projectId, `/issues/${number}/workflow/artifacts${qs ? `?${qs}` : ''}`),

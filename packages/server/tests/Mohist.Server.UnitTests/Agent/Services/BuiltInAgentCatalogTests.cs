@@ -10,6 +10,7 @@ public sealed class BuiltInAgentCatalogTests
     {
         Assert.True(BuiltInAgentCatalog.IsReservedName("MOHIST-SLACK"));
         Assert.False(BuiltInAgentCatalog.IsReservedName("release-helper"));
+        Assert.False(BuiltInAgentCatalog.IsReservedName(BuiltInAgentCatalog.MohistPlannerName));
 
         var agent = BuiltInAgentCatalog.Resolve(BuiltInAgentCatalog.MohistSlackName);
 
@@ -26,7 +27,7 @@ public sealed class BuiltInAgentCatalogTests
     }
 
     [Fact]
-    public async Task Resolver_lists_only_server_builtin_definitions()
+    public async Task Resolver_lists_all_server_builtin_definitions()
     {
         var resolver = new BuiltInAgentResolver();
 
@@ -34,9 +35,23 @@ public sealed class BuiltInAgentCatalogTests
         var listed = await resolver.ListAsync();
 
         Assert.NotNull(resolved);
-        Assert.Single(listed);
-        Assert.Equal(resolved!.Id, listed[0].Id);
-        Assert.Equal(resolved.Name, listed[0].Name);
-        Assert.Equal(resolved.Instructions, listed[0].Instructions);
+        Assert.Equal(4, listed.Count);
+        Assert.Contains(listed, agent => agent.Name == BuiltInAgentCatalog.MohistPlannerName);
+        Assert.Contains(listed, agent => agent.Name == BuiltInAgentCatalog.MohistBuilderName);
+        Assert.Contains(listed, agent => agent.Name == BuiltInAgentCatalog.MohistReviewerName);
+        Assert.All(listed, agent => Assert.False(string.IsNullOrWhiteSpace(agent.Instructions)));
+    }
+
+    [Theory]
+    [InlineData(BuiltInAgentCatalog.MohistPlannerName)]
+    [InlineData(BuiltInAgentCatalog.MohistBuilderName)]
+    [InlineData(BuiltInAgentCatalog.MohistReviewerName)]
+    public void Workflow_builtin_resolves_in_the_calling_project(string name)
+    {
+        var agent = BuiltInAgentCatalog.Resolve(name, "project-1");
+
+        Assert.Equal("project-1", agent.ProjectId);
+        Assert.Equal(name, agent.Name);
+        Assert.Equal("opencode", agent.AgentConfig?.GetProperty("runtime").GetString());
     }
 }

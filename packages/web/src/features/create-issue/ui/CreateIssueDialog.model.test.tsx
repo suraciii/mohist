@@ -257,27 +257,6 @@ describe('CreateIssueDialog model + variant chips', () => {
     })
   })
 
-  it('uses the selected profile runtime without clearing the chosen model', async () => {
-    _workflowProfilesData.push(
-      { id: 'mohist/local', displayName: 'Default', description: '', isDefault: true, agentRuntime: 'opencode' },
-      { id: 'team/pi', displayName: 'Pi', description: '', isDefault: false, agentRuntime: 'pi' },
-    )
-    _modelsData.models = ['anthropic/claude']
-    const user = userEvent.setup()
-    renderDialog()
-
-    const workflow = (await screen.findByLabelText('Workflow')) as HTMLSelectElement
-    await user.click(await modelTrigger())
-    await user.click(await waitFor(() => document.querySelector('[data-model-id="anthropic/claude"]') as HTMLElement))
-    expect(await modelTrigger()).toHaveTextContent('anthropic/claude')
-
-    fireEvent.change(workflow, { target: { value: 'team/pi' } })
-
-    expect(await modelTrigger()).toHaveTextContent('anthropic/claude')
-    const runtimes = modelsHandler.mock.calls.map(([call]) => new URL(call.request.url).searchParams.get('runtime'))
-    expect(runtimes).toEqual(expect.arrayContaining(['opencode', 'pi']))
-  })
-
   it('does not render a model selector when the selected profile has no runtime', async () => {
     _workflowProfilesData.push({
       id: 'team/unknown',

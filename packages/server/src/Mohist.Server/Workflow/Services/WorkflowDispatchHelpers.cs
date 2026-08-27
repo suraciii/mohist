@@ -1,6 +1,7 @@
 using System.Text.Json;
 using Mohist.Server.Infrastructure;
 using Mohist.Server.Infrastructure.Serialization;
+using Mohist.Server.Runner.Grains;
 using Mohist.Server.Workflow.Domain;
 using Mohist.Workflow.Definition;
 using Mohist.Server.Workflow.Domain.Run;
@@ -86,10 +87,10 @@ internal static class WorkflowDispatchHelpers
         return new WorkIssueRef(projectId, num);
     }
 
-    internal static int TaskAttempt(string taskRunId)
+    internal static int TaskAttempt(string actionAttemptId)
     {
-        var lastDot = taskRunId.LastIndexOf('.');
-        return lastDot >= 0 && int.TryParse(taskRunId[(lastDot + 1)..], out var attempt)
+        var lastDot = actionAttemptId.LastIndexOf('.');
+        return lastDot >= 0 && int.TryParse(actionAttemptId[(lastDot + 1)..], out var attempt)
             ? attempt
             : 1;
     }
@@ -157,7 +158,7 @@ internal static class WorkflowDispatchHelpers
         {
             foreach (var task in stage.Tasks)
             {
-                if (task.Status != TaskRunStatus.Completed || !task.Output.HasValue)
+                if (task.Status != WorkflowActionAttemptStatus.Completed || !task.Output.HasValue)
                     continue;
 
                 if (task.Output.Value.ValueKind != JsonValueKind.Object)

@@ -55,7 +55,7 @@ public sealed class WorkflowGrainFeedbackDispatchSpecs
         Assert.StartsWith("apply-feedback.", feedbackTask.WorkId);
         Assert.Equal("task", feedbackTask.WorkType);
         Assert.Equal("plan", feedbackTask.Stage);
-        Assert.Equal("mohist/opencode", feedbackTask.Uses);
+        Assert.Equal("spec/task", feedbackTask.Uses);
 
         var feedbackEl = ApprovalFeedbackElement(feedbackTask);
 
@@ -274,5 +274,16 @@ public sealed class WorkflowGrainFeedbackDispatchSpecs
             "build",
             [new("compile", "Compile", "spec/task")],
             [new("build-ok", "Build OK", "spec/check")]),
-    ]);
+    ],
+    Approval: new ApprovalConfig(new ApprovalFeedbackConfig([
+        new TaskDefinition(
+            "apply-feedback",
+            "Apply approval feedback",
+            "spec/task",
+            new Dictionary<string, JsonElement?>
+            {
+                ["session"] = JsonSerializer.SerializeToElement("plan"),
+                ["prompt"] = JsonSerializer.SerializeToElement("${{ prompts.apply-feedback }}"),
+            })
+    ])));
 }

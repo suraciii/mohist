@@ -1,7 +1,7 @@
 import '@testing-library/jest-dom'
 import { beforeEach, describe, expect, it } from 'vitest'
 import { act, cleanup, fireEvent, screen, waitFor } from '@testing-library/react'
-import { mocks, openAdvanced, renderSelector, resetIssueModelSelectorTestState } from './IssueModelSelectorTestSupport'
+import { mocks, renderSelector, resetIssueModelSelectorTestState } from './IssueModelSelectorTestSupport'
 
 beforeEach(() => {
   cleanup()
@@ -9,65 +9,6 @@ beforeEach(() => {
 })
 
 describe('IssueModelSelector default-model variant chips', () => {
-  it('requests the catalog for the selected Profile runtime', async () => {
-    mocks.useWorkflowProfiles.mockReturnValue({
-      data: [{ id: 'team/pi', displayName: 'Pi workflow', description: '', isDefault: false, agentRuntime: 'pi' }],
-    })
-    mocks.useEffectiveDefaultWorkflowProfile.mockReturnValue({ effectiveTemplateId: 'team/pi' })
-    mocks.useAvailableModelIds.mockImplementation((runtime: string | null) => ({
-      data: {
-        models: runtime === 'pi' ? ['pi/anthropic/claude'] : [],
-        modelVariants: {},
-      },
-      isLoading: false,
-      error: null,
-    }))
-    renderSelector()
-
-    await waitFor(() => expect(mocks.useAvailableModelIds).toHaveBeenCalledWith('pi'))
-  })
-
-  it('reuses one runtime catalog for all stage selectors', async () => {
-    const catalog = {
-      data: {
-        models: ['pi/anthropic/claude'],
-        modelVariants: { 'pi/anthropic/claude': ['low'] },
-      },
-      isLoading: false,
-      error: null,
-    }
-    mocks.useWorkflowProfiles.mockReturnValue({
-      data: [{ id: 'team/pi', displayName: 'Pi workflow', description: '', isDefault: false, agentRuntime: 'pi' }],
-    })
-    mocks.useEffectiveDefaultWorkflowProfile.mockReturnValue({ effectiveTemplateId: 'team/pi' })
-    mocks.useAvailableModelIds.mockReturnValue(catalog)
-
-    renderSelector()
-    await waitFor(() => expect(mocks.useAvailableModelIds).toHaveBeenCalledWith('pi'))
-
-    openAdvanced()
-    expect(document.getElementById('issue-stage-model-plan')).toBeInTheDocument()
-    expect(document.getElementById('issue-stage-model-build')).toBeInTheDocument()
-    expect(document.getElementById('issue-stage-model-check')).toBeInTheDocument()
-    expect(document.getElementById('issue-stage-model-integrate')).toBeInTheDocument()
-    expect(mocks.useModelVariants).not.toHaveBeenCalled()
-  })
-
-  it('keeps an existing custom model visible without exposing a selector for a null runtime', async () => {
-    mocks.useWorkflowProfiles.mockReturnValue({
-      data: [{ id: 'team/unknown', displayName: 'Unknown', description: '', isDefault: false, agentRuntime: null }],
-    })
-    mocks.useEffectiveDefaultWorkflowProfile.mockReturnValue({ effectiveTemplateId: 'team/unknown' })
-    mocks.useAvailableModelIds.mockReturnValue({ data: undefined, isLoading: false, error: null })
-
-    renderSelector({ currentModel: 'vendor/custom-model' })
-
-    await waitFor(() => expect(mocks.useAvailableModelIds).toHaveBeenCalledWith(null))
-    expect(screen.getByTestId('issue-model-read-only')).toBeInTheDocument()
-    expect(document.getElementById('issue-coder-model-read-only')).toBeDisabled()
-    expect(screen.queryByTestId('issue-coder-model-trigger')).not.toBeInTheDocument()
-  })
-
   it('does not expose a named-Agent Runtime override', async () => {
     mocks.useAvailableModelIds.mockImplementation((runtime: string) => ({
       data: {
@@ -176,87 +117,6 @@ describe('IssueModelSelector default-model variant chips', () => {
         42,
         'agent',
         { model: 'anthropic/claude', variant: 'medium' },
-        'proj_test',
-      )
-    })
-  })
-
-  it('preserves the default true variant when changing Pi reasoning effort', async () => {
-    mocks.useWorkflowProfiles.mockReturnValue({
-      data: [{ id: 'team/pi', displayName: 'Pi workflow', description: '', isDefault: false, agentRuntime: 'pi' }],
-    })
-    mocks.useEffectiveDefaultWorkflowProfile.mockReturnValue({ effectiveTemplateId: 'team/pi' })
-    mocks.useAvailableModelIds.mockReturnValue({
-      data: {
-        models: ['pi/anthropic/claude'],
-        modelVariants: { 'pi/anthropic/claude': ['balanced'] },
-        reasoningEfforts: { 'pi/anthropic/claude': ['low', 'high'] },
-      },
-      isLoading: false,
-      error: null,
-    })
-    mocks.getIssueWorkflowVariables.mockResolvedValue({
-      vars: {
-        agent: {
-          model: 'pi/anthropic/claude',
-          reasoningEffort: 'low',
-          variant: 'balanced',
-        },
-      },
-      stages: {},
-    })
-    renderSelector({ currentModel: 'pi/anthropic/claude' })
-
-    fireEvent.click(await waitFor(() => screen.getByTestId('issue-coder-model-trigger')))
-    fireEvent.click(await screen.findByTestId('issue-coder-model-variant-pi/anthropic/claude-high'))
-
-    await waitFor(() => {
-      expect(mocks.patchIssueWorkflowDefinitionVar).toHaveBeenCalledWith(
-        42,
-        'agent',
-        { model: 'pi/anthropic/claude', reasoningEffort: 'high', variant: 'balanced' },
-        'proj_test',
-      )
-    })
-  })
-
-  it('clears the default true variant when selecting Pi effort for another model', async () => {
-    mocks.useWorkflowProfiles.mockReturnValue({
-      data: [{ id: 'team/pi', displayName: 'Pi workflow', description: '', isDefault: false, agentRuntime: 'pi' }],
-    })
-    mocks.useEffectiveDefaultWorkflowProfile.mockReturnValue({ effectiveTemplateId: 'team/pi' })
-    mocks.useAvailableModelIds.mockReturnValue({
-      data: {
-        models: ['pi/anthropic/claude', 'pi/openai/gpt'],
-        modelVariants: { 'pi/anthropic/claude': ['balanced'] },
-        reasoningEfforts: {
-          'pi/anthropic/claude': ['low'],
-          'pi/openai/gpt': ['high'],
-        },
-      },
-      isLoading: false,
-      error: null,
-    })
-    mocks.getIssueWorkflowVariables.mockResolvedValue({
-      vars: {
-        agent: {
-          model: 'pi/anthropic/claude',
-          reasoningEffort: 'low',
-          variant: 'balanced',
-        },
-      },
-      stages: {},
-    })
-    renderSelector({ currentModel: 'pi/anthropic/claude' })
-
-    fireEvent.click(await waitFor(() => screen.getByTestId('issue-coder-model-trigger')))
-    fireEvent.click(await screen.findByTestId('issue-coder-model-variant-pi/openai/gpt-high'))
-
-    await waitFor(() => {
-      expect(mocks.patchIssueWorkflowDefinitionVar).toHaveBeenCalledWith(
-        42,
-        'agent',
-        { model: 'pi/openai/gpt', reasoningEffort: 'high', variant: null },
         'proj_test',
       )
     })

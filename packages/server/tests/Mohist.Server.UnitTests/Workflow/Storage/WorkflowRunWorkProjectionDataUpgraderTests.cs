@@ -92,8 +92,8 @@ public sealed class WorkflowRunWorkProjectionDataUpgraderSpecs
         Status = WorkflowRunStatus.Completed,
         Stages =
         [
-            Stage("plan", StageRunStatus.Completed, Task("plan.1", TaskRunStatus.Completed, null)),
-            Stage("build", StageRunStatus.Completed, Task("build.1", TaskRunStatus.Failed, "build-work")),
+            Stage("plan", StageRunStatus.Completed, Task("plan.1", WorkflowActionAttemptStatus.Completed, null)),
+            Stage("build", StageRunStatus.Completed, Task("build.1", WorkflowActionAttemptStatus.Failed, "build-work")),
         ],
     };
 
@@ -106,12 +106,12 @@ public sealed class WorkflowRunWorkProjectionDataUpgraderSpecs
         CurrentStageId = "build",
         Stages =
         [
-            Stage("plan", StageRunStatus.Completed, Task("plan.1", TaskRunStatus.Completed, "plan-work")),
-            Stage("build", StageRunStatus.Running, Task("build.1", TaskRunStatus.Running, "active-work", "worker-1")),
+            Stage("plan", StageRunStatus.Completed, Task("plan.1", WorkflowActionAttemptStatus.Completed, "plan-work")),
+            Stage("build", StageRunStatus.Running, Task("build.1", WorkflowActionAttemptStatus.Running, "active-work", "worker-1")),
         ],
     };
 
-    private static StageRun Stage(string id, StageRunStatus status, params TaskRun[] tasks) => new()
+    private static StageRun Stage(string id, StageRunStatus status, params WorkflowActionAttempt[] tasks) => new()
     {
         Id = id,
         Attempt = 1,
@@ -121,7 +121,7 @@ public sealed class WorkflowRunWorkProjectionDataUpgraderSpecs
         Tasks = tasks.ToList(),
     };
 
-    private static TaskRun Task(string id, TaskRunStatus status, string? workId, string? workerId = null) => new()
+    private static WorkflowActionAttempt Task(string id, WorkflowActionAttemptStatus status, string? workId, string? workerId = null) => new()
     {
         Id = id,
         DefinitionId = id,

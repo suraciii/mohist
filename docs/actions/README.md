@@ -1,11 +1,8 @@
 # Action Contracts
 
-> **Status: legacy implementation.** The Action/TaskRun model below is the current Workflow
-> implementation. The target model ([`../../design/agent-execution.md`](../../design/agent-execution.md))
-> removes Workflow-owned Actions and TaskRun: an executable Workflow task names a Mohist Agent and
-> AgentJob owns all execution. The binding is decided in
-> [`../../design/decisions/workflow-agent-binding.md`](../../design/decisions/workflow-agent-binding.md);
-> the legacy paths remain until the implementation migration lands.
+> Agent-backed tasks use `mohist/agent` and create AgentJobs. Mechanical Actions remain
+> Workflow-owned orchestration. See
+> [`../../design/decisions/workflow-agent-binding.md`](../../design/decisions/workflow-agent-binding.md).
 
 An Action is an execution interface selected by a Workflow task through
 `uses`. Each Action defines its own `with` inputs, outputs, and failure
@@ -37,14 +34,16 @@ Actions, Inline Agents, and Mohist Agents.
 
 ## Current Actions
 
-- [`mohist/opencode`](opencode.md): Executes one input through OpenCode and
-  defines model options, Workflow Session behavior, and Session operations.
-- [`mohist/pi`](pi.md): Executes one input through Pi. It is a peer of
-  `mohist/opencode` and shares its model-option shape and Session semantics,
-  but has different installation and trust boundaries.
-- [`mohist/agent`](agent.md): Executes a task from a predefined Mohist Agent
-  snapshot. It uses the same mechanism as an Inline Agent and does not create
-  an AgentJob.
+- [`mohist/agent`](agent.md): Launches a named Mohist Agent for one Workflow
+  task through the AgentJob boundary. This is the only Agent task binding a
+  Workflow Profile can use.
+- [`mohist/opencode`](opencode.md): Internal Agent-to-Runner contract that
+  executes one input through OpenCode. The Agent definition selects it; a
+  Workflow Profile `uses` cannot reference it directly.
+- [`mohist/pi`](pi.md): Internal Agent-to-Runner contract that executes one
+  input through Pi. It is a peer of `mohist/opencode`, has different
+  installation and trust boundaries, and is likewise selected only by an Agent
+  definition.
 
 **Git Actions** define explicit `with` input contracts for workspace
 preparation, rebase, rebase status, merge readiness, and push.
@@ -76,53 +75,51 @@ markers.
 
 - [`mohist/task-list`](task-list.md#mohisttask-list)
 
-Pi is an independent peer Action, not an input extension of
+Pi is an independent peer backend, not an input extension of
 `mohist/opencode`.
 
-### Workflow Model Selection
+### Model Selection
 
-For an Inline Agent, `uses` selects the execution backend:
-`mohist/opencode` runs on OpenCode, and `mohist/pi` runs on Pi.
+A Workflow task that runs an Agent does not carry model options. The named
+Agent definition owns the backend (OpenCode or Pi), model, optional Reasoning
+Effort, and true model variant; the AgentJob fixes them at launch. The Workflow
+supplies only `name`, `prompt`, `session`, and `timeout` through `mohist/agent`.
 
-Project, create-Issue, and Issue selectors without an active bound Run use the
-effective Workflow Profile to show models reported by that backend. While a
-bound Run is active, the Issue selector uses `agentRuntime` from that Run so a
-later Project binding change cannot switch its catalog. Selectors do not add
-`runtime` to `vars.agent` or change the selected Action. `vars.agent` continues
-to contain only Action options such as `model` and `variant`.
-
-When a Profile has no single Inline Agent Runtime, Mohist does not show a shared
-Workflow model selector. A task using `mohist/agent` is configured through its
-named Agent instead. If a configured model is not currently discovered, Mohist
-keeps the value visible until the user changes or clears it; it never substitutes
-a model from another backend.
+Project and Issue model selectors configure the Agent, not the Workflow: the
+available catalogs come from the runtime the Agent selects, and a configured
+model that is no longer discovered stays visible until it is changed or
+cleared. Mohist never substitutes a model from another backend.
 
 ## Shared Semantics for Agent Execution Actions
 
-`mohist/opencode` and `mohist/pi` share the following semantics. Their own
-pages describe only their differences. `mohist/agent` resolves an Agent
-definition into the same kind of execution and follows these semantics too.
+`mohist/opencode` and `mohist/pi` share the following semantics as internal
+Agent-to-Runner contracts. Their own pages describe only their differences.
+`mohist/agent` launches an AgentJob whose backend is one of these Actions, so
+the same execution semantics apply to Workflow Agent tasks.
 
 ### Workflow Session
 
 `session` identifies a logical AgentSession whose origin is a Workflow. Tasks
 with the same name in one WorkflowRun share conversation context. Different
 names are isolated. When `session` is omitted, Mohist uses the Work ID so two
-tasks do not accidentally share a conversation. Changing the execution backend
-preserves the logical identity but starts an empty physical Session. Mohist does
-not migrate the old conversation or create physical Session history.
+tasks do not accidentally share a conversation. A named Session continues only
+when the Agent and Workspace identities also match; a launch that reuses the
+name with a different Agent fails instead of silently switching identity.
+Changing the execution backend preserves the logical identity but starts an
+empty physical Session. Mohist does not migrate the old conversation or create
+physical Session history.
 
 ### Physical Session Reuse Invariants
 
 When tasks in one WorkflowRun specify the same `session` name, Mohist must keep
 using the physical Session currently bound to that AgentSession. A different
-task, task retry, or change to `options.model` or `options.variant` cannot
-replace it. Model selection affects only the current execution and takes effect
-in the existing Session.
+task, task retry, or Agent-side model change cannot replace it. Model selection
+affects only the current execution and takes effect in the existing Session.
 
 - A later task or retry that uses the same `session` name leaves the physical
   Session unchanged.
-- A change to `options.model` or `options.variant` leaves it unchanged.
+- A model or variant change in the Agent definition leaves the current binding
+  unchanged.
 - Compact leaves it unchanged.
 - Reset creates a new empty Session; the AgentSession keeps its conversation
   content.

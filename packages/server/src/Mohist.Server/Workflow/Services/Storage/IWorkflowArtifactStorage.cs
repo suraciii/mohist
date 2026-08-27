@@ -6,7 +6,7 @@ namespace Mohist.Server.Workflow.Storage;
 /// </summary>
 /// <remarks>
 /// Default file layout:
-/// <c>~/.mohist/artifacts/workflows/{workflowRunId}/tasks/{taskRunId}/artifacts/{artifactId}</c>.
+/// <c>~/.mohist/artifacts/workflows/{workflowRunId}/tasks/{actionAttemptId}/artifacts/{artifactId}</c>.
 /// </remarks>
 public interface IWorkflowArtifactStorage
 {
@@ -15,7 +15,7 @@ public interface IWorkflowArtifactStorage
     /// </summary>
     string GenerateStoragePath(
         string workflowRunId,
-        string taskRunId,
+        string actionAttemptId,
         string artifactId,
         WorkflowArtifactStorageKind kind);
 

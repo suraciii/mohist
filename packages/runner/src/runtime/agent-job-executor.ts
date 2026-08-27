@@ -1,5 +1,11 @@
 import { errorMessage } from '../core/errors.js'
-import type { AgentExecutionBinding, JsonObject, DispatchWorkItem, WorkItemResult } from '../core/types.js'
+import type {
+  ActionResult,
+  AgentExecutionBinding,
+  JsonObject,
+  DispatchWorkItem,
+  WorkItemResult,
+} from '../core/types.js'
 import { isObject } from '../core/json.js'
 import { parseModelIdentifier, type OpenCodeRuntime } from './opencode/index.js'
 import type { PiRuntime } from './pi/index.js'
@@ -24,6 +30,10 @@ import {
 import { executeOpenCodeTurn, executePiTurn, failureResult, type AgentJobTurnDeps } from './agent-job-turn.js'
 import { runnerLogger } from '../system/logger.js'
 import type { ManagerExecutionBoundary } from './manager-execution-boundary.js'
+import { renderTemplate, unresolvedReferences } from '../core/template.js'
+import { evaluateCompletion } from '../actions/expectations.js'
+import { captureAndUploadArtifactsForWork } from './artifact-side-effects.js'
+import { tryRecovery } from './recovery.js'
 
 const executionSourceLog = runnerLogger.child('execution-source')
 
@@ -186,7 +196,7 @@ export class AgentJobExecutor {
     }
 
     if (runtimeName === 'pi') {
-      return executePiTurn(
+      const result = await executePiTurn(
         this.turnDeps(managerExecution),
         work,
         signal,
@@ -201,6 +211,7 @@ export class AgentJobExecutor {
         skills,
         managerExecution,
       )
+      return this.finalizeWorkflowResult(work, workDir, result, signal)
     }
     let turnDeps = this.turnDeps(managerExecution)
     if (managerExecution) {
@@ -231,7 +242,7 @@ export class AgentJobExecutor {
         )
       }
     }
-    return executeOpenCodeTurn(
+    const result = await executeOpenCodeTurn(
       turnDeps,
       work,
       signal,
@@ -247,6 +258,67 @@ export class AgentJobExecutor {
       attachmentDelivery,
       managerExecution,
     )
+    return this.finalizeWorkflowResult(work, workDir, result, signal)
+  }
+
+  private async finalizeWorkflowResult(
+    work: DispatchWorkItem,
+    workDir: string,
+    initial: WorkItemResult,
+    signal: AbortSignal,
+  ): Promise<WorkItemResult> {
+    if (!work.workflowRunId || !work.actionAttemptId) return initial
+
+    const variables: JsonObject = structuredClone(work.variables ?? {})
+    const workspace = isObject(variables.workspace) ? { ...variables.workspace } : {}
+    variables.workspace = { ...workspace, path: workDir }
+    let result = initial
+
+    if (result.status === 'completed' && work.expect) {
+      const unresolved = unresolvedReferences(work.expect, variables)
+      if (unresolved.length > 0) {
+        result = {
+          ...result,
+          status: 'failed',
+          error: {
+            code: 'expectation-failed',
+            message: `expect references undefined variable(s): ${unresolved.join(', ')}`,
+          },
+        }
+      } else {
+        const renderedExpect = renderTemplate(work.expect, variables) as JsonObject
+        const completion = await evaluateCompletion(renderedExpect, workDir, assistantText(result.output))
+        if (!completion.satisfied) {
+          result = {
+            ...result,
+            status: 'failed',
+            message: completion.message,
+            error: { code: 'expectation-failed', message: completion.message },
+          }
+        }
+      }
+    }
+
+    const actionResult: ActionResult =
+      result.status === 'completed'
+        ? { output: isObject(result.output) ? result.output : null }
+        : { error: result.error ?? { code: 'agent-failed', message: result.message ?? 'Agent execution failed' } }
+    if (result.status === 'completed') {
+      result = await captureAndUploadArtifactsForWork(
+        this.connection,
+        work,
+        workDir,
+        workDir,
+        result,
+        actionResult,
+        variables,
+        signal,
+      )
+    }
+    if (result.status !== 'completed') {
+      return tryRecovery(work, result, variables) ?? result
+    }
+    return result
   }
 
   private turnDeps(managerExecution: ManagerExecutionBoundary | null = null): AgentJobTurnDeps {
@@ -301,6 +373,12 @@ export function knownBinding(
     runtime,
     runtimeSessionId,
   }
+}
+
+function assistantText(output: WorkItemResult['output']): string | null {
+  if (!isObject(output)) return null
+  const text = output['text']
+  return typeof text === 'string' ? text : null
 }
 
 function withKnownBinding(result: WorkItemResult, binding: AgentExecutionBinding | null): WorkItemResult {

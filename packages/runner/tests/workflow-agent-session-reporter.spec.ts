@@ -75,7 +75,7 @@ describe('WorkflowAgentSessionReporter - queue-driven failure semantics', () => 
       sessionName: 'plan',
       workMetadata: {
         workId: 'work-1',
-        taskRunId: 'task-1.1',
+        actionAttemptId: 'task-1.1',
         runnerId: 'runner-1',
         agentSessionId: 'agent-session-1',
         workType: 'task',
@@ -218,12 +218,12 @@ describe('WorkflowAgentSessionReporter - queue-driven failure semantics', () => 
     expect(input.event.type).toBe('session.input')
     expect(fact.event.type).toBe('tool_call.started')
     expect(input.work).toMatchObject({
-      taskRunId: 'task-1.1',
+      actionAttemptId: 'task-1.1',
       inputDeliveryId: input.id,
       agentTurnId: null,
     })
     expect(fact.work).toMatchObject({
-      taskRunId: 'task-1.1',
+      actionAttemptId: 'task-1.1',
       inputDeliveryId: input.id,
       agentTurnId: `turn-${input.id}`,
     })

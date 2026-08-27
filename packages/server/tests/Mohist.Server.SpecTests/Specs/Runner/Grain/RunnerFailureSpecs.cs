@@ -25,7 +25,7 @@ public class RunnerFailureSpecs : WorkflowGrainSpecs
 
         Assert.Equal("Failed", await workflow.GetRunStatusAsync());
         var run = await LoadRunAsync(work.WorkflowRunId);
-        Assert.Equal(TaskRunStatus.Failed, Assert.Single(run.Stages.Single().Tasks).Status);
+        Assert.Equal(WorkflowActionAttemptStatus.Failed, Assert.Single(run.Stages.Single().Tasks).Status);
         Assert.Equal("runner-lost", run.Failure?.Message);
     }
 
@@ -40,7 +40,7 @@ public class RunnerFailureSpecs : WorkflowGrainSpecs
 
         Assert.Equal("Completed", await workflow.GetRunStatusAsync());
         var run = await LoadRunAsync(_workflowId!);
-        Assert.Equal(TaskRunStatus.Completed, Assert.Single(run.Stages.Single().Tasks).Status);
+        Assert.Equal(WorkflowActionAttemptStatus.Completed, Assert.Single(run.Stages.Single().Tasks).Status);
     }
 
     [Fact]

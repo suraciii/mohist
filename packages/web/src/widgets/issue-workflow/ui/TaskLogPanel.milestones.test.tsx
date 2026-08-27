@@ -73,7 +73,7 @@ describe('TaskLogPanel agent-task milestone rows', () => {
     vi.restoreAllMocks()
   })
 
-  const agentOrigin = { uses: 'mohist/opencode' }
+  const agentOrigin = { uses: 'mohist/agent' }
 
   it('renders milestone rows interleaved by ISO timestamp alongside ops lines for an agent task', async () => {
     _workflowRunSessionsRef.current = [

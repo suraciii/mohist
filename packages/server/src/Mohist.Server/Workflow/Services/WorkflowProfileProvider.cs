@@ -43,22 +43,15 @@ public sealed class WorkflowProfileProvider : IWorkflowProfileProvider, IScopedS
             throw new ArgumentException("projectId is required", nameof(projectId));
 
         await using var db = await _dbFactory.CreateDbContextAsync(ct);
-        var settings = await db.ProjectWorkflowProfiles.AsNoTracking()
-            .FirstOrDefaultAsync(row => row.ProjectId == projectId, ct);
-        var overrides = settings?.AgentActionOverrides
-            ?? new Dictionary<string, string>(StringComparer.Ordinal);
         var builtins = WorkflowProfileCatalog.SystemProfileIds
-            .Select(profileId => WorkflowProfileCollectionEntry.BuiltIn(
-                profileId,
-                projectId,
-                overrides.GetValueOrDefault(profileId)))
+            .Select(profileId => WorkflowProfileCollectionEntry.BuiltIn(profileId, projectId))
             .ToList();
         var customRows = await db.WorkflowProfileRecords.AsNoTracking()
             .Where(r => r.ProjectId == projectId)
             .OrderBy(r => r.ProfileId)
             .ToListAsync(ct);
 
-        var customs = customRows.Select(row => ToEntry(row, overrides.GetValueOrDefault(row.ProfileId))).ToList();
+        var customs = customRows.Select(ToEntry).ToList();
 
         var combined = new List<WorkflowProfileCollectionEntry>(builtins.Count + customs.Count);
         combined.AddRange(builtins);
@@ -73,31 +66,16 @@ public sealed class WorkflowProfileProvider : IWorkflowProfileProvider, IScopedS
             return null;
 
         await using var db = await _dbFactory.CreateDbContextAsync(ct);
-        var overrides = await db.ProjectWorkflowProfiles.AsNoTracking()
-            .Where(row => row.ProjectId == projectId)
-            .Select(row => row.AgentActionOverrides)
-            .FirstOrDefaultAsync(ct);
-        var agentActionOverride = overrides?.GetValueOrDefault(profileId);
         if (WorkflowProfileCatalog.IsSystemProfile(profileId))
-            return WorkflowProfileCollectionEntry.BuiltIn(profileId, projectId, agentActionOverride);
+            return WorkflowProfileCollectionEntry.BuiltIn(profileId, projectId);
 
         var row = await db.WorkflowProfileRecords.AsNoTracking()
             .FirstOrDefaultAsync(r => r.ProjectId == projectId && r.ProfileId == profileId, ct);
-        return row is null ? null : ToEntry(row, agentActionOverride);
+        return row is null ? null : ToEntry(row);
     }
 
     public async Task<WorkflowDefinition?> GetDefinitionAsync(
         string projectId, string profileId, CancellationToken ct = default)
-    {
-        var agentActionOverride = await GetAgentActionOverrideAsync(projectId, profileId, ct);
-        return await GetDefinitionAsync(projectId, profileId, agentActionOverride, ct);
-    }
-
-    public async Task<WorkflowDefinition?> GetDefinitionAsync(
-        string projectId,
-        string profileId,
-        string? boundAgentAction,
-        CancellationToken ct = default)
     {
         if (string.IsNullOrWhiteSpace(profileId))
             return null;
@@ -106,12 +84,7 @@ public sealed class WorkflowProfileProvider : IWorkflowProfileProvider, IScopedS
         {
             var source = WorkflowProfileCatalog.GetProfile(profileId);
             if (source is null) return null;
-            return boundAgentAction is null || string.Equals(boundAgentAction, source.AgentAction, StringComparison.Ordinal)
-                ? source.Definition
-                : WorkflowProfileYamlParser.Parse(
-                    WorkflowProfileCatalog.GetDefinitionSource(profileId)!,
-                    profileId,
-                    agentActionOverride: boundAgentAction).Definition;
+            return source.Definition;
         }
 
         await using var db = await _dbFactory.CreateDbContextAsync(ct);
@@ -120,10 +93,7 @@ public sealed class WorkflowProfileProvider : IWorkflowProfileProvider, IScopedS
         if (row is null)
             return null;
 
-        return WorkflowProfileYamlParser.Parse(
-            row.DefinitionSource,
-            profileId,
-            agentActionOverride: boundAgentAction).Definition;
+        return WorkflowProfileYamlParser.Parse(row.DefinitionSource, profileId).Definition;
     }
 
     public async Task<string?> GetDefinitionSourceAsync(
@@ -234,42 +204,6 @@ public sealed class WorkflowProfileProvider : IWorkflowProfileProvider, IScopedS
             ?? new HashSet<string>(WorkflowProfileCatalog.IdComparer);
     }
 
-    public async Task<string?> GetAgentActionOverrideAsync(
-        string projectId,
-        string profileId,
-        CancellationToken ct = default)
-    {
-        await using var db = await _dbFactory.CreateDbContextAsync(ct);
-        var overrides = await db.ProjectWorkflowProfiles.AsNoTracking()
-            .Where(row => row.ProjectId == projectId)
-            .Select(row => row.AgentActionOverrides)
-            .FirstOrDefaultAsync(ct);
-        return overrides?.GetValueOrDefault(profileId);
-    }
-
-    public async Task ValidateAgentActionOverrideAsync(
-        string projectId,
-        string profileId,
-        string? agentAction,
-        CancellationToken ct = default)
-    {
-        var source = await GetDefinitionSourceAsync(projectId, profileId, ct)
-            ?? throw new WorkflowProfileNotFoundException(projectId, profileId);
-        var declared = WorkflowProfileYamlParser.Parse(source, profileId);
-        if (declared.AgentAction is null)
-            throw new WorkflowDefinitionValidationException(
-                [new ValidationError("agentAction", $"WorkflowProfile '{profileId}' does not expose an Agent Action binding")]);
-
-        var catalog = await _catalogSource.GetCatalogAsync()
-            ?? throw new WorkflowDefinitionValidationException(
-                [new ValidationError("agentAction", "Agent Action binding requires an available Runner Action catalog", ValidationSource.Action)]);
-        _ = WorkflowProfileYamlParser.Parse(
-            source,
-            profileId,
-            catalog,
-            agentActionOverride: agentAction ?? declared.AgentAction);
-    }
-
     public async Task SetProfileEnabledAsync(
         string projectId, string profileId, bool enabled, CancellationToken ct = default)
     {
@@ -368,14 +302,7 @@ public sealed class WorkflowProfileProvider : IWorkflowProfileProvider, IScopedS
         if (!isUpdate && existing is not null)
             throw new WorkflowProfileAlreadyExistsException(projectId, request.ProfileId);
 
-        var settings = await db.ProjectWorkflowProfiles.AsNoTracking()
-            .FirstOrDefaultAsync(row => row.ProjectId == projectId, ct);
-        var futureAction = settings?.AgentActionOverrides.GetValueOrDefault(request.ProfileId)
-            ?? sourceProfile.AgentAction;
-        var profile = WorkflowProfileYamlParser.Parse(
-            request.DefinitionSource,
-            request.ProfileId,
-            agentActionOverride: futureAction == sourceProfile.AgentAction ? null : futureAction);
+        var profile = sourceProfile;
 
         var activeRuns = isUpdate
             ? await db.WorkflowRuns.AsNoTracking()
@@ -395,10 +322,7 @@ public sealed class WorkflowProfileProvider : IWorkflowProfileProvider, IScopedS
         var definitionErrors = new List<ValidationError>();
         foreach (var run in runBindings)
         {
-            var updated = WorkflowProfileYamlParser.Parse(
-                request.DefinitionSource,
-                request.ProfileId,
-                agentActionOverride: run.AgentAction);
+            var updated = WorkflowProfileYamlParser.Parse(request.DefinitionSource, request.ProfileId);
             var updatedStages = updated.Definition.Stages
                 .ToDictionary(stage => stage.Stage, StringComparer.Ordinal);
             foreach (var stage in run.Stages)
@@ -422,24 +346,12 @@ public sealed class WorkflowProfileProvider : IWorkflowProfileProvider, IScopedS
 
         var catalog = await _catalogSource.GetCatalogAsync();
         var materializedProfiles = new[] { profile }
-            .Concat(runBindings
-                .Select(run => WorkflowProfileYamlParser.Parse(
-                    request.DefinitionSource,
-                    request.ProfileId,
-                    agentActionOverride: run.AgentAction)))
-            .GroupBy(item => item.AgentAction, StringComparer.Ordinal)
-            .Select(group => group.First())
+            .Concat(runBindings.Select(_ => WorkflowProfileYamlParser.Parse(request.DefinitionSource, request.ProfileId)))
             .ToList();
-        var requiresCatalog = materializedProfiles.Any(item => item.AgentAction is not null);
         var actionErrors = catalog is null
-            ? !requiresCatalog
-                ? Array.Empty<ValidationError>()
-                : [new ValidationError("agentAction", "Agent Action binding requires an available Runner Action catalog", ValidationSource.Action)]
+            ? Array.Empty<ValidationError>()
             : materializedProfiles
-                .SelectMany(item => ActionContractValidator.Validate(item.Definition, catalog)
-                    .Concat(item.AgentAction is null
-                        ? []
-                        : ActionContractValidator.ValidateAgentAction(item.Definition, item.AgentAction, catalog)))
+                .SelectMany(item => ActionContractValidator.Validate(item.Definition, catalog))
                 .Distinct()
                 .OrderBy(error => error.Path, StringComparer.Ordinal)
                 .ThenBy(error => error.Message, StringComparer.Ordinal)
@@ -501,50 +413,18 @@ public sealed class WorkflowProfileProvider : IWorkflowProfileProvider, IScopedS
                 Description: request.Description,
                 SourceProvenance: WorkflowProfileSourceProvenance.Verbatim,
                 IsBuiltIn: false,
-                DefinitionSource: request.DefinitionSource)
-            {
-                AgentAction = profile.AgentAction,
-                AgentRuntime = WorkflowProfileAgentRuntimeProjection.Project(profile.AgentAction)
-                    ?? WorkflowProfileAgentRuntimeProjection.Project(profile.Definition),
-            },
+                DefinitionSource: request.DefinitionSource),
             validation);
     }
 
-    private static WorkflowProfileCollectionEntry ToEntry(WorkflowProfileRecordRow row, string? agentActionOverride)
-    {
-        var profile = TryParseProfile(row.DefinitionSource, row.ProfileId, agentActionOverride);
-        return new(
-            ProjectId: row.ProjectId,
-            ProfileId: row.ProfileId,
-            Name: row.Name,
-            Description: row.Description,
-            SourceProvenance: ParseProvenance(row.SourceProvenance),
-            IsBuiltIn: false,
-            DefinitionSource: row.DefinitionSource)
-        {
-            AgentAction = profile?.AgentAction,
-            AgentRuntime = WorkflowProfileAgentRuntimeProjection.Project(profile?.AgentAction)
-                ?? WorkflowProfileAgentRuntimeProjection.Project(profile?.Definition),
-        };
-    }
-
-    private static WorkflowProfile? TryParseProfile(
-        string definitionSource,
-        string profileId,
-        string? agentActionOverride)
-    {
-        try
-        {
-            return WorkflowProfileYamlParser.Parse(
-                definitionSource,
-                profileId,
-                agentActionOverride: agentActionOverride);
-        }
-        catch (WorkflowDefinitionValidationException)
-        {
-            return null;
-        }
-    }
+    private static WorkflowProfileCollectionEntry ToEntry(WorkflowProfileRecordRow row) => new(
+        ProjectId: row.ProjectId,
+        ProfileId: row.ProfileId,
+        Name: row.Name,
+        Description: row.Description,
+        SourceProvenance: ParseProvenance(row.SourceProvenance),
+        IsBuiltIn: false,
+        DefinitionSource: row.DefinitionSource);
 
     private static WorkflowProfileSourceProvenance ParseProvenance(string value) =>
         Enum.TryParse<WorkflowProfileSourceProvenance>(value, ignoreCase: false, out var parsed)

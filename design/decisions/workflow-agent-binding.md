@@ -6,9 +6,9 @@ Status: accepted
 
 The unified execution model ([`../agent-execution.md`](../agent-execution.md),
 [`../domain-analysis.md`](../domain-analysis.md)) makes AgentJob the sole
-top-level execution owner and requires every executable Workflow task to launch
-a real Mohist Agent. The Profile DSL therefore needs one way to bind a task to
-an Agent.
+top-level Agent execution owner and requires every Agent-backed Workflow task
+to launch a real Mohist Agent. Mechanical Actions remain Workflow orchestration.
+The Profile DSL therefore needs one way to bind an Agent-backed task to an Agent.
 
 A past decision (2026-08-14) requires `uses` to name a concrete Action
 implementation and rejects a runtime-neutral generic Agent Action. The unified

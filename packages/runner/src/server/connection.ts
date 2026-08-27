@@ -276,7 +276,7 @@ export class ServerConnection {
       uploadId: readString(data, ['uploadId']) ?? '',
       workflowRunId: readString(data, ['workflowRunId']) ?? ownerId,
       workId: readString(data, ['workId']) ?? workId,
-      taskRunId: readString(data, ['taskRunId']) ?? null,
+      actionAttemptId: readString(data, ['actionAttemptId']) ?? null,
       path: readString(data, ['path']) ?? upload.path,
       contentType: readString(data, ['contentType']) ?? upload.contentType ?? null,
       contentHash: readString(data, ['contentHash']) ?? upload.contentHash ?? null,
@@ -928,7 +928,7 @@ export interface ArtifactUploadResponse {
   uploadId: string
   workflowRunId: string
   workId: string
-  taskRunId: string | null
+  actionAttemptId: string | null
   path: string
   contentType: string | null
   contentHash: string | null

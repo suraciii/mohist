@@ -33,7 +33,7 @@ public sealed class WorkflowGrainDispatchSnapshotSpecs
     }
 
     [Fact]
-    public async Task PersistedTaskRun_StateHasNoDispatchSnapshot_SnapshotInSeparateStore()
+    public async Task PersistedWorkflowActionAttempt_StateHasNoDispatchSnapshot_SnapshotInSeparateStore()
     {
         var a = await ArrangeAsync("wr-snap-separate");
         var dispatch = await a.StoreSnapshotAsync();
@@ -45,9 +45,9 @@ public sealed class WorkflowGrainDispatchSnapshotSpecs
         var task = Assert.Single(run.CurrentStage().Tasks);
         using var doc = JsonDocument.Parse(JSON.Serialize(task));
         Assert.False(doc.RootElement.TryGetProperty("dispatchSnapshot", out _),
-            "TaskRun must not embed a dispatchSnapshot after dispatch");
+            "WorkflowActionAttempt must not embed a dispatchSnapshot after dispatch");
         Assert.False(doc.RootElement.TryGetProperty("workDispatch", out _),
-            "TaskRun must not embed a WorkDispatch-like payload after dispatch");
+            "WorkflowActionAttempt must not embed a WorkDispatch-like payload after dispatch");
     }
 
     [Fact]
@@ -104,7 +104,7 @@ public sealed class WorkflowGrainDispatchSnapshotSpecs
         var secondDispatch = a.Dispatch with
         {
             WorkId = second.Id!,
-            TaskRunId = await a.RunningTaskRunIdAsync(),
+            ActionAttemptId = await a.RunningActionAttemptIdAsync(),
         };
         await a.Arrangement.Grain.StoreActiveWorkDispatchAsync(
             a.WorkerId, second.Id!, secondDispatch);
@@ -174,23 +174,23 @@ public sealed class WorkflowGrainDispatchSnapshotSpecs
 
         public async Task ReportCompletedAsync()
         {
-            var taskRunId = await RunningTaskRunIdAsync();
+            var actionAttemptId = await RunningActionAttemptIdAsync();
             await Grain.ReceiveTaskReportAsync(
                 WorkerId,
                 WorkId!,
-                new TaskReport(WorkId!, TaskReportStatus.Succeeded, Output: null, Artifacts: null, TaskRunId: taskRunId));
+                new TaskReport(WorkId!, TaskReportStatus.Succeeded, Output: null, Artifacts: null, ActionAttemptId: actionAttemptId));
         }
 
         public async Task ReportFailedAsync(string detail)
         {
-            var taskRunId = await RunningTaskRunIdAsync();
+            var actionAttemptId = await RunningActionAttemptIdAsync();
             await Grain.ReceiveTaskReportAsync(
                 WorkerId,
                 WorkId!,
-                new TaskReport(WorkId!, TaskReportStatus.Failed, Output: null, Artifacts: null, Detail: detail, TaskRunId: taskRunId));
+                new TaskReport(WorkId!, TaskReportStatus.Failed, Output: null, Artifacts: null, Detail: detail, ActionAttemptId: actionAttemptId));
         }
 
-        public async Task<string> RunningTaskRunIdAsync()
+        public async Task<string> RunningActionAttemptIdAsync()
         {
             var run = await LoadRunAsync();
             return run.CurrentStage().RunningTask?.Id

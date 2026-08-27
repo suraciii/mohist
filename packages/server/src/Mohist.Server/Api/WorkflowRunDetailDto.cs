@@ -30,8 +30,4 @@ public sealed record WorkflowRunDetailDto(
     [property: JsonIgnore(Condition = JsonIgnoreCondition.Never)]
     WorkflowRunIssueRef? IssueRef,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.Never)]
-    string? WorkflowProfileId,
-    [property: JsonIgnore(Condition = JsonIgnoreCondition.Never)]
-    string? AgentAction,
-    [property: JsonIgnore(Condition = JsonIgnoreCondition.Never)]
-    string? AgentRuntime);
+    string? WorkflowProfileId);

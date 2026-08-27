@@ -253,7 +253,7 @@ public class IssueWorkflowReadPathSpecs
                     RequiresApproval = false,
                     Status = StageRunStatus.Completed,
                     Initialized = true,
-                    Tasks = new List<TaskRun>(),
+                    Tasks = new List<WorkflowActionAttempt>(),
                     Checks = new List<StageCheck>(),
                 },
             },

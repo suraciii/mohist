@@ -57,7 +57,7 @@ public sealed class WorkflowGrainArtifactBindingSpecs
         var artifacts = await ArtifactsOf(db, a.RunId);
         Assert.Single(artifacts);
         Assert.Equal("review.md", artifacts[0].Path);
-        Assert.Equal(a.TaskRunId, artifacts[0].TaskRunId);
+        Assert.Equal(a.ActionAttemptId, artifacts[0].ActionAttemptId);
 
         var events = (await a.Arrangement.Events.ListAsync(a.RunId)).ToList();
         var artifactIndex = events.FindIndex(entry =>
@@ -126,19 +126,19 @@ public sealed class WorkflowGrainArtifactBindingSpecs
     public async Task ConcurrentReplay_SelectsOneWinnerAndBindsTheUploadOnce()
     {
         var a = await ArrangeWithUploadAsync("wr-art-concurrent-replay");
-        var taskRunId = a.TaskRunId;
+        var actionAttemptId = a.ActionAttemptId;
         var service = WorkflowGrainContractSupport.CreateReportService(a.Services, a.Grain);
         var result = new WorkResult("completed", ArtifactUploadIds: [a.UploadId!]);
 
         var reports = await Task.WhenAll(
-            service.ReportAsync(a.WorkerId, a.RunId, a.Work.Id!, taskRunId, result),
-            service.ReportAsync(a.WorkerId, a.RunId, a.Work.Id!, taskRunId, result));
+            service.ReportAsync(a.WorkerId, a.RunId, a.Work.Id!, actionAttemptId, result),
+            service.ReportAsync(a.WorkerId, a.RunId, a.Work.Id!, actionAttemptId, result));
 
         Assert.Equal(["accepted", "accepted"], reports.Select(report => report.Ack).Order().ToArray());
         await using var db = CreateDb();
         var artifact = Assert.Single(await ArtifactsOf(db, a.RunId));
         Assert.Equal(a.UploadId, artifact.SourceUploadId);
-        Assert.Equal(taskRunId, artifact.TaskRunId);
+        Assert.Equal(actionAttemptId, artifact.ActionAttemptId);
         var eventTypes = (await a.Arrangement.Events.ListAsync(a.RunId))
             .Select(entry => entry.Envelope.Type)
             .ToArray();
@@ -158,7 +158,7 @@ public sealed class WorkflowGrainArtifactBindingSpecs
             a.WorkerId,
             a.RunId,
             a.Work.Id!,
-            a.TaskRunId,
+            a.ActionAttemptId,
             new WorkResult("completed", ArtifactUploadIds: [uploadId]));
 
         Assert.Equal("refused", report.Ack);
@@ -186,7 +186,7 @@ public sealed class WorkflowGrainArtifactBindingSpecs
         await using var db = CreateDb();
         var artifact = Assert.Single(await ArtifactsOf(db, a.RunId));
         Assert.Equal(uploadId, artifact.SourceUploadId);
-        Assert.Equal("task-1.1", artifact.TaskRunId);
+        Assert.Equal("task-1.1", artifact.ActionAttemptId);
     }
 
     [Fact]
@@ -257,7 +257,7 @@ public sealed class WorkflowGrainArtifactBindingSpecs
         var artifacts = await ArtifactsOf(db, a.RunId);
         Assert.Single(artifacts);
         Assert.Equal("diagnostic.log", artifacts[0].Path);
-        Assert.Equal("task-1.1", artifacts[0].TaskRunId);
+        Assert.Equal("task-1.1", artifacts[0].ActionAttemptId);
     }
 
     [Fact]
@@ -342,14 +342,14 @@ public sealed class WorkflowGrainArtifactBindingSpecs
     }
 
     [Fact]
-    public async Task RepeatedTaskRuns_EachRetainTheirOwnArtifactSummary()
+    public async Task RepeatedWorkflowActionAttempts_EachRetainTheirOwnArtifactSummary()
     {
         var a = await ArrangeWithUploadAsync(
             "wr-art-history-first",
             tasks: [new TaskDefinition("ai-review", "AI review", "spec/task",
                 Artifacts: new TaskArtifactCapture([new TaskArtifactDeclaration("review.md")]))],
             uploadPath: "review.md",
-            taskRunId: "ai-review.1");
+            actionAttemptId: "ai-review.1");
 
         await a.Arrangement.ReportTaskResultAsync(
             a.Work, output: null, addTasks: null, artifactUploadIds: [a.UploadId!]);
@@ -365,7 +365,7 @@ public sealed class WorkflowGrainArtifactBindingSpecs
             .OrderByDescending(artifact => artifact.RecordedAt)
             .ToList();
         Assert.Single(latestArtifacts);
-        Assert.Equal("ai-review.1", latestArtifacts[0].TaskRunId);
+        Assert.Equal("ai-review.1", latestArtifacts[0].ActionAttemptId);
     }
 
     [Fact]
@@ -376,7 +376,7 @@ public sealed class WorkflowGrainArtifactBindingSpecs
             tasks: [new TaskDefinition("ai-review", "AI review", "spec/task",
                 Artifacts: new TaskArtifactCapture([new TaskArtifactDeclaration("review.md")]))],
             uploadPath: "review.md",
-            taskRunId: "ai-review.1");
+            actionAttemptId: "ai-review.1");
 
         await a.Arrangement.ReportTaskResultAsync(
             a.Work, output: null, addTasks: null, artifactUploadIds: [a.UploadId!]);
@@ -394,7 +394,7 @@ public sealed class WorkflowGrainArtifactBindingSpecs
             .OrderBy(artifact => artifact.RecordedAt)
             .ToList();
         Assert.Single(allArtifacts);
-        Assert.Equal("ai-review.1", allArtifacts[0].TaskRunId);
+        Assert.Equal("ai-review.1", allArtifacts[0].ActionAttemptId);
     }
 
     /// <summary>
@@ -408,7 +408,7 @@ public sealed class WorkflowGrainArtifactBindingSpecs
         bool seedUpload = true,
         string uploadPath = "result.txt",
         List<TaskDefinition>? tasks = null,
-        string? taskRunId = null)
+        string? actionAttemptId = null)
     {
         var definition = SingleStage(
             tasks ?? [new("task-1", "Task 1", "spec/task", Artifacts: declaredArtifacts)]);
@@ -416,17 +416,17 @@ public sealed class WorkflowGrainArtifactBindingSpecs
         await arrangement.Grain.AssignWorkerAsync(arrangement.WorkerId);
         var work = await arrangement.Grain.ClaimNextAsync(arrangement.WorkerId, "test-generation");
         Assert.NotNull(work);
-        var resolvedTaskRunId = taskRunId ?? await RunningTaskRunIdAsync(arrangement);
+        var resolvedActionAttemptId = actionAttemptId ?? await RunningActionAttemptIdAsync(arrangement);
         var uploadId = seedUpload
-            ? await SeedPendingUploadAsync(arrangement.RunId, work!.Id!, resolvedTaskRunId, uploadPath)
+            ? await SeedPendingUploadAsync(arrangement.RunId, work!.Id!, resolvedActionAttemptId, uploadPath)
             : null;
-        return new ArtifactArrangement(arrangement, work!, resolvedTaskRunId, arrangement.ProjectId, uploadId, _fixture.Services);
+        return new ArtifactArrangement(arrangement, work!, resolvedActionAttemptId, arrangement.ProjectId, uploadId, _fixture.Services);
     }
 
     private sealed record ArtifactArrangement(
         WorkflowGrainArrangement Arrangement,
         WorkItem Work,
-        string TaskRunId,
+        string ActionAttemptId,
         string ProjectId,
         string? UploadId,
         IServiceProvider Services)
@@ -443,7 +443,7 @@ public sealed class WorkflowGrainArtifactBindingSpecs
         new StageDefinition("build", tasks, []),
     ]);
 
-    private static async Task<string> RunningTaskRunIdAsync(WorkflowGrainArrangement arrangement)
+    private static async Task<string> RunningActionAttemptIdAsync(WorkflowGrainArrangement arrangement)
     {
         var run = await arrangement.Store.LoadAsync(arrangement.RunId)
             ?? throw new InvalidOperationException("run missing");
@@ -451,7 +451,7 @@ public sealed class WorkflowGrainArtifactBindingSpecs
             ?? throw new InvalidOperationException("no running task");
     }
 
-    private async Task<string> SeedPendingUploadAsync(string workflowRunId, string workId, string taskRunId, string path)
+    private async Task<string> SeedPendingUploadAsync(string workflowRunId, string workId, string actionAttemptId, string path)
     {
         await using var db = CreateDb();
         var uploadId = $"artup_{Guid.NewGuid():N}";
@@ -460,12 +460,12 @@ public sealed class WorkflowGrainArtifactBindingSpecs
             UploadId = uploadId,
             WorkflowRunId = workflowRunId,
             WorkId = workId,
-            TaskRunId = taskRunId,
+            ActionAttemptId = actionAttemptId,
             Path = path,
             ContentType = "text/plain",
             ContentHash = $"sha256:{Guid.NewGuid():N}",
             Size = 42,
-            StoragePath = $"workflows/{workflowRunId}/tasks/{taskRunId}/artifacts/{uploadId}/content",
+            StoragePath = $"workflows/{workflowRunId}/tasks/{actionAttemptId}/artifacts/{uploadId}/content",
             CreatedAt = TimeProvider.GetUtcNow(),
             ExpiresAt = TimeProvider.GetUtcNow().AddDays(1),
         });

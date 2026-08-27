@@ -4,11 +4,11 @@ namespace Mohist.Server.Workflow.Services;
 
 /// <summary>
 /// Server-owned virtual Workflow Action manifests exposed to profile
-/// validation. These Actions are not Runner-executables: the Runner
-/// receives only <c>mohist/opencode</c> or <c>mohist/pi</c> after the
-/// server resolves them at dispatch time. The catalog entries exist only
-/// so profile save and <c>mo workflow validate</c> can reason about
-/// author intent at the boundary, without querying the current Agent
+/// validation. These Actions are not Runner-executables: <c>mohist/agent</c>
+/// enters the AgentJob launch boundary on the server, which composes the
+/// Agent definition with the task input before dispatch. The catalog entry
+/// exists only so profile save and <c>mo workflow validate</c> can reason
+/// about author intent at the boundary, without querying the current Agent
 /// state or any mutable project data.
 /// </summary>
 internal static class VirtualActionManifests
@@ -28,7 +28,7 @@ internal static class VirtualActionManifests
                 Name: "prompt",
                 Types: ["string"],
                 Required: true,
-                Description: "Task prompt; supports workflow template expressions and is rendered by the Runner."),
+                Description: "Task prompt; supports workflow template expressions and is rendered at the launch boundary."),
             new ActionCatalogInput(
                 Name: "session",
                 Types: ["string"],

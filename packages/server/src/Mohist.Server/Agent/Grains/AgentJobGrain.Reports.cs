@@ -31,6 +31,8 @@ public sealed partial class AgentJobGrain
                 await DeliverTerminalToSessionAsync(State.PendingSessionClose);
             if (State.PendingTerminalDeliveryEvent is not null)
                 await EmitTerminalDeliveryEventAsync(State.PendingTerminalDeliveryEvent);
+            if (State.PendingWorkflowTerminalEvent is not null)
+                await EmitWorkflowTerminalEventAsync(State.PendingWorkflowTerminalEvent);
             if (State.PendingSubagentTerminalEvent is not null)
                 await EmitSubagentTerminalEventAsync(State.PendingSubagentTerminalEvent);
             return new AgentJobReportResult(
@@ -93,7 +95,8 @@ public sealed partial class AgentJobGrain
                 ? result.Output.Value.GetRawText()
                 : null,
             result.ArtifactUploadIds,
-            result.ExitCode);
+            result.ExitCode,
+            result.AddTasks is null ? null : Mohist.Server.Infrastructure.JSON.Serialize(result.AddTasks));
 
         return new AgentJobReportResult(WorkReportVerdict.Accepted);
     }

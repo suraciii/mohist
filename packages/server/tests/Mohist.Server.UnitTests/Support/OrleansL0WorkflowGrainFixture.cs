@@ -109,7 +109,7 @@ public sealed class OrleansL0WorkflowGrainFixture : WorkflowGrainFixture
         Artifacts: null,
         Detail: null,
         AddTasks: new List<RuntimeTaskInput> { RecoveryFollowUp() },
-        TaskRunId: workId);
+        ActionAttemptId: workId);
 
     private async Task<string> PrepareRecoveryWorkflowAsync(
         string workflowId,

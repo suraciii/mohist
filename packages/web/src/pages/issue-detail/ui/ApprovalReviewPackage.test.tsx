@@ -43,7 +43,7 @@ const artifactListHook = () => ({
     {
       artifactId: 'PLANS/PLAN.md',
       workflowRunId: 'run-1',
-      taskRunId: 'plan.1',
+      actionAttemptId: 'plan.1',
       path: 'PLANS/PLAN.md',
       kind: 'file' as const,
       recordedAt: '2026-01-01T00:00:00Z',
@@ -51,7 +51,7 @@ const artifactListHook = () => ({
     {
       artifactId: 'PLANS/tasks.json',
       workflowRunId: 'run-1',
-      taskRunId: 'tasks.1',
+      actionAttemptId: 'tasks.1',
       path: 'PLANS/tasks.json',
       kind: 'file' as const,
       recordedAt: '2026-01-01T00:00:00Z',
@@ -59,7 +59,7 @@ const artifactListHook = () => ({
     {
       artifactId: 'PLANS/REVIEW.md',
       workflowRunId: 'run-1',
-      taskRunId: 'ai-review.1',
+      actionAttemptId: 'ai-review.1',
       path: 'PLANS/REVIEW.md',
       kind: 'file' as const,
       recordedAt: '2026-01-01T00:00:00Z',
@@ -178,7 +178,7 @@ describe('ApprovalReviewPackage', () => {
             {
               artifactId: 'plan-artifact',
               workflowRunId: 'run-1',
-              taskRunId: 'plan.1',
+              actionAttemptId: 'plan.1',
               path: 'PLANS/PLAN.md',
               kind: 'file',
               recordedAt: '2026-01-01T00:00:00Z',

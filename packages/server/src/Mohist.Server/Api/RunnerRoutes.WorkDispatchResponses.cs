@@ -16,8 +16,12 @@ public static partial class RunnerRoutes
         ParentIssueContextResponse? parentIssueContext = null;
         var projectId = work.Issue?.ProjectId ?? work.ProjectId;
         var issueNumber = work.Issue?.IssueNumber;
-        if (string.Equals(work.OwnerKind, WorkDispatchOwnerKinds.Workflow, StringComparison.Ordinal)
-            && string.Equals(work.WorkType, WorkItemTypes.Task, StringComparison.Ordinal)
+        var isWorkflowTask = string.Equals(work.OwnerKind, WorkDispatchOwnerKinds.Workflow, StringComparison.Ordinal)
+            && string.Equals(work.WorkType, WorkItemTypes.Task, StringComparison.Ordinal);
+        var isWorkflowAgentJob = string.Equals(work.OwnerKind, WorkDispatchOwnerKinds.AgentJob, StringComparison.Ordinal)
+            && !string.IsNullOrWhiteSpace(work.WorkflowRunId)
+            && !string.IsNullOrWhiteSpace(work.ActionAttemptId);
+        if ((isWorkflowTask || isWorkflowAgentJob)
             && !string.IsNullOrWhiteSpace(projectId)
             && issueNumber is > 0)
         {
@@ -51,7 +55,7 @@ public static partial class RunnerRoutes
             ParentIssueContext: parentIssueContext,
             AgentDefinition: work.AgentDefinition,
             AgentSessionStartup: work.AgentSessionStartup,
-            TaskRunId: work.TaskRunId,
+            ActionAttemptId: work.ActionAttemptId,
             ManagerExecutionGrant: managerCredentials?.IssueFor(work),
             OriginMarker: work.OriginMarker);
     }

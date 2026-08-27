@@ -12,7 +12,7 @@ function workflowRecord(id: string, type = 'reasoning.delta'): RuntimeEventRecor
     runtime: 'opencode',
     work: {
       workId: 'work-1',
-      taskRunId: 'task-1.1',
+      actionAttemptId: 'task-1.1',
       runnerId: 'runner-1',
       agentSessionId: 'agent-session-1',
       inputDeliveryId: 'input-1',
@@ -106,7 +106,7 @@ describe('createServerRuntimeEventDelivery — sendBatch', () => {
       workId: null,
       workType: null,
       stage: null,
-      taskRunId: null,
+      actionAttemptId: null,
       inputDeliveryId: null,
       agentSessionId: 'session-1',
       agentTurnId: 'turn-1',
@@ -133,7 +133,10 @@ describe('createServerRuntimeEventDelivery — sendBatch', () => {
   })
 
   it.each([
-    ['task attempt', (record: RuntimeEventRecord) => ({ ...record, work: { ...record.work!, taskRunId: 'task-2.1' } })],
+    [
+      'task attempt',
+      (record: RuntimeEventRecord) => ({ ...record, work: { ...record.work!, actionAttemptId: 'task-2.1' } }),
+    ],
     ['work', (record: RuntimeEventRecord) => ({ ...record, work: { ...record.work!, workId: 'work-2' } })],
     ['Runner', (record: RuntimeEventRecord) => ({ ...record, work: { ...record.work!, runnerId: 'runner-2' } })],
     [

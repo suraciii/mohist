@@ -47,9 +47,9 @@ public class WorkflowArtifactUploadServiceSpecs
     {
         var workflowRunId = $"wr_{Guid.NewGuid():N}";
         var workId = $"task-1.1_{Guid.NewGuid():N}";
-        var taskRunId = $"task-1.1";
+        var actionAttemptId = $"task-1.1";
         var resolver = new StubWorkContextResolver();
-        resolver.Register(workflowRunId, workId, taskRunId);
+        resolver.Register(workflowRunId, workId, actionAttemptId);
 
         var service = BuildService(resolver);
         var payload = Bytes("hello world");
@@ -69,7 +69,7 @@ public class WorkflowArtifactUploadServiceSpecs
         Assert.StartsWith("artup_", result.Pending!.UploadId);
         Assert.Equal(workflowRunId, result.Pending.WorkflowRunId);
         Assert.Equal(workId, result.Pending.WorkId);
-        Assert.Equal(taskRunId, result.Pending.TaskRunId);
+        Assert.Equal(actionAttemptId, result.Pending.ActionAttemptId);
         Assert.Equal("review.md", result.Pending.Path);
         Assert.Equal("text/markdown", result.Pending.ContentType);
         Assert.Equal("sha256:abc", result.Pending.ContentHash);
@@ -83,7 +83,7 @@ public class WorkflowArtifactUploadServiceSpecs
         Assert.NotNull(row);
         Assert.Equal(workflowRunId, row!.WorkflowRunId);
         Assert.Equal(workId, row.WorkId);
-        Assert.Equal(taskRunId, row.TaskRunId);
+        Assert.Equal(actionAttemptId, row.ActionAttemptId);
         Assert.Equal("review.md", row.Path);
 
         await using var stored = _storage.OpenFileContent(row.StoragePath);
@@ -97,9 +97,9 @@ public class WorkflowArtifactUploadServiceSpecs
     {
         var workflowRunId = $"wr_{Guid.NewGuid():N}";
         var workId = $"task-1.1_{Guid.NewGuid():N}";
-        var taskRunId = $"task-1.1";
+        var actionAttemptId = $"task-1.1";
         var resolver = new StubWorkContextResolver();
-        resolver.Register(workflowRunId, workId, taskRunId);
+        resolver.Register(workflowRunId, workId, actionAttemptId);
 
         var service = BuildService(resolver);
         var payload = Bytes("first content");
@@ -143,9 +143,9 @@ public class WorkflowArtifactUploadServiceSpecs
     {
         var workflowRunId = $"wr_{Guid.NewGuid():N}";
         var workId = $"task-1.1_{Guid.NewGuid():N}";
-        var taskRunId = $"task-1.1";
+        var actionAttemptId = $"task-1.1";
         var resolver = new StubWorkContextResolver();
-        resolver.Register(workflowRunId, workId, taskRunId);
+        resolver.Register(workflowRunId, workId, actionAttemptId);
 
         var service = BuildService(resolver);
         var firstPayload = Bytes("first");
@@ -228,9 +228,9 @@ public class WorkflowArtifactUploadServiceSpecs
     {
         var workflowRunId = $"wr_{Guid.NewGuid():N}";
         var workId = $"task-1.1_{Guid.NewGuid():N}";
-        var taskRunId = $"task-1.1";
+        var actionAttemptId = $"task-1.1";
         var resolver = new StubWorkContextResolver();
-        resolver.Register(workflowRunId, workId, taskRunId);
+        resolver.Register(workflowRunId, workId, actionAttemptId);
 
         var service = BuildService(resolver);
         var sourcePath = "../../../etc/passwd-like name";
@@ -257,7 +257,7 @@ public class WorkflowArtifactUploadServiceSpecs
             .AsNoTracking()
             .FirstAsync(p => p.UploadId == result.Pending!.UploadId);
         Assert.StartsWith("workflows/", row.StoragePath);
-        Assert.Contains($"/tasks/{taskRunId}/artifacts/{row.UploadId}/content", row.StoragePath);
+        Assert.Contains($"/tasks/{actionAttemptId}/artifacts/{row.UploadId}/content", row.StoragePath);
         Assert.DoesNotContain("..", row.StoragePath);
         Assert.DoesNotContain("passwd", row.StoragePath);
         Assert.DoesNotContain("etc", row.StoragePath);
@@ -272,9 +272,9 @@ public class WorkflowArtifactUploadServiceSpecs
     {
         var workflowRunId = $"wr_{Guid.NewGuid():N}";
         var workId = $"task-1.1_{Guid.NewGuid():N}";
-        var taskRunId = $"task-1.1";
+        var actionAttemptId = $"task-1.1";
         var resolver = new StubWorkContextResolver();
-        resolver.Register(workflowRunId, workId, taskRunId);
+        resolver.Register(workflowRunId, workId, actionAttemptId);
 
 
         var service = BuildService(resolver);
@@ -300,7 +300,7 @@ public class WorkflowArtifactUploadServiceSpecs
         Assert.Empty(latest);
 
         var byTask = await db.WorkflowArtifacts
-            .Where(a => a.WorkflowRunId == workflowRunId && a.TaskRunId == taskRunId)
+            .Where(a => a.WorkflowRunId == workflowRunId && a.ActionAttemptId == actionAttemptId)
             .ToListAsync();
         Assert.Empty(byTask);
 
@@ -315,9 +315,9 @@ public class WorkflowArtifactUploadServiceSpecs
     {
         var workflowRunId = $"wr_{Guid.NewGuid():N}";
         var workId = $"task-1.1_{Guid.NewGuid():N}";
-        var taskRunId = $"task-1.1";
+        var actionAttemptId = $"task-1.1";
         var resolver = new StubWorkContextResolver();
-        resolver.Register(workflowRunId, workId, taskRunId);
+        resolver.Register(workflowRunId, workId, actionAttemptId);
 
         var service = BuildService(resolver, new ThrowOnWarningLogger<WorkflowArtifactUploadService>());
 
@@ -382,9 +382,9 @@ public class WorkflowArtifactUploadServiceSpecs
     {
         var workflowRunId = $"wr_{Guid.NewGuid():N}";
         var workId = $"task-1.1_{Guid.NewGuid():N}";
-        var taskRunId = $"task-1.1";
+        var actionAttemptId = $"task-1.1";
         var resolver = new StubWorkContextResolver();
-        resolver.Register(workflowRunId, workId, taskRunId);
+        resolver.Register(workflowRunId, workId, actionAttemptId);
 
         var service = BuildService(resolver);
         var fileA = Bytes("alpha content");
@@ -436,9 +436,9 @@ public class WorkflowArtifactUploadServiceSpecs
     {
         var workflowRunId = $"wr_{Guid.NewGuid():N}";
         var workId = $"task-1.1_{Guid.NewGuid():N}";
-        var taskRunId = $"task-1.1";
+        var actionAttemptId = $"task-1.1";
         var resolver = new StubWorkContextResolver();
-        resolver.Register(workflowRunId, workId, taskRunId);
+        resolver.Register(workflowRunId, workId, actionAttemptId);
 
         var service = BuildService(resolver);
         var fileA = Bytes("alpha content");
@@ -501,9 +501,9 @@ public class WorkflowArtifactUploadServiceSpecs
         // diagnosable 400 instead of an opaque 500.
         var workflowRunId = $"wr_{Guid.NewGuid():N}";
         var workId = $"task-1.1_{Guid.NewGuid():N}";
-        var taskRunId = "task-1.1";
+        var actionAttemptId = "task-1.1";
         var resolver = new StubWorkContextResolver();
-        resolver.Register(workflowRunId, workId, taskRunId);
+        resolver.Register(workflowRunId, workId, actionAttemptId);
         var service = BuildService(resolver);
 
         var envelopeBytes = Encoding.UTF8.GetBytes(envelopeJson);
@@ -533,9 +533,9 @@ public class WorkflowArtifactUploadServiceSpecs
     {
         var workflowRunId = $"wr_{Guid.NewGuid():N}";
         var workId = $"task-1.1_{Guid.NewGuid():N}";
-        var taskRunId = "task-1.1";
+        var actionAttemptId = "task-1.1";
         var resolver = new StubWorkContextResolver();
-        resolver.Register(workflowRunId, workId, taskRunId);
+        resolver.Register(workflowRunId, workId, actionAttemptId);
         var service = BuildService(resolver);
 
         var envelopeJson = "{\"kind\":\"directory\",\"files\":[{\"path\":\"a.md\",\"size\":1,\"data\":\"YQ==\"}]}";
@@ -590,9 +590,9 @@ public class WorkflowArtifactUploadServiceSpecs
         // the storage layout contains the contained files.
         var workflowRunId = $"wr_{Guid.NewGuid():N}";
         var workId = $"task-1.1_{Guid.NewGuid():N}";
-        var taskRunId = $"task-1.1";
+        var actionAttemptId = $"task-1.1";
         var resolver = new StubWorkContextResolver();
-        resolver.Register(workflowRunId, workId, taskRunId);
+        resolver.Register(workflowRunId, workId, actionAttemptId);
 
         var uploadService = BuildService(resolver);
         var fileA = Bytes("alpha content");
@@ -625,7 +625,7 @@ public class WorkflowArtifactUploadServiceSpecs
         var bindResult = await bindService.BindAsync(
             workflowRunId,
             workId,
-            taskRunId,
+            actionAttemptId,
             [uploaded.Pending!.UploadId],
             declaredArtifacts: null,
             projectId: "proj_bind",
@@ -641,7 +641,7 @@ public class WorkflowArtifactUploadServiceSpecs
             .SingleAsync();
         Assert.Equal("directory", bound.Kind);
         Assert.Equal("specs", bound.Path);
-        Assert.Equal(taskRunId, bound.TaskRunId);
+        Assert.Equal(actionAttemptId, bound.ActionAttemptId);
         Assert.Equal("proj_bind", bound.ProjectId);
         Assert.Equal(42, bound.IssueNumber);
         Assert.EndsWith("/files", bound.ArtifactStoragePath);
@@ -669,9 +669,9 @@ public class WorkflowArtifactUploadServiceSpecs
         // comparison key agrees on both sides.
         var workflowRunId = $"wr_{Guid.NewGuid():N}";
         var workId = $"task-1.1_{Guid.NewGuid():N}";
-        var taskRunId = $"task-1.1";
+        var actionAttemptId = $"task-1.1";
         var resolver = new StubWorkContextResolver();
-        resolver.Register(workflowRunId, workId, taskRunId);
+        resolver.Register(workflowRunId, workId, actionAttemptId);
 
         var uploadService = BuildService(resolver);
         var payload = Bytes("looks good");
@@ -703,7 +703,7 @@ public class WorkflowArtifactUploadServiceSpecs
              new("openspec/changes/issue-${{ issue.number }}/review.md"),
             });
         var bindResult = await bindService.BindAsync(
-            workflowRunId, workId, taskRunId,
+            workflowRunId, workId, actionAttemptId,
             [uploaded.Pending!.UploadId], declaredArtifacts, variables: variables);
 
         Assert.True(bindResult.IsSuccess, bindResult.Error);
@@ -716,7 +716,7 @@ public class WorkflowArtifactUploadServiceSpecs
             .Where(a => a.WorkflowRunId == workflowRunId)
             .SingleAsync();
         Assert.Equal("openspec/changes/issue-55/review.md", bound.Path);
-        Assert.Equal(taskRunId, bound.TaskRunId);
+        Assert.Equal(actionAttemptId, bound.ActionAttemptId);
         Assert.Equal("file", bound.Kind);
     }
 
@@ -730,9 +730,9 @@ public class WorkflowArtifactUploadServiceSpecs
         // prevent binding.
         var workflowRunId = $"wr_{Guid.NewGuid():N}";
         var workId = $"task-1.1_{Guid.NewGuid():N}";
-        var taskRunId = $"task-1.1";
+        var actionAttemptId = $"task-1.1";
         var resolver = new StubWorkContextResolver();
-        resolver.Register(workflowRunId, workId, taskRunId);
+        resolver.Register(workflowRunId, workId, actionAttemptId);
 
         var uploadService = BuildService(resolver);
         var payload = Bytes("looks good");
@@ -760,7 +760,7 @@ public class WorkflowArtifactUploadServiceSpecs
              new("openspec/changes/issue-${{ issue.number }}/review.md"),
             });
         var bindResult = await bindService.BindAsync(
-            workflowRunId, workId, taskRunId,
+            workflowRunId, workId, actionAttemptId,
             [uploaded.Pending!.UploadId], declaredArtifacts, variables: variables);
 
         Assert.True(bindResult.IsSuccess, bindResult.Error ?? "expected success");

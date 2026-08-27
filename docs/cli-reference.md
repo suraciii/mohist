@@ -297,10 +297,9 @@ WorkflowProfile and WorkflowRun semantics.
 
 `mo workflow create` and `mo workflow edit` accept a Workflow Definition through
 `--file <path>`. `--file -` reads from stdin.
-`mo workflow validate --file <path>` validates optional Profile metadata and the
-Workflow Definition locally. It checks the restricted Agent Action binding
-syntax but does not resolve a Project override, inspect Action availability, or
-connect to the Server.
+`mo workflow validate --file <path>` validates optional Profile metadata and
+the Workflow Definition locally. It does not inspect Agent existence, Action
+availability, or connect to the Server.
 
 ## WorkflowRun
 
@@ -335,14 +334,12 @@ it does not upload,
 restore, or select history. A Run-ID read is accepted only while the associated
 Issue is still bound to that Run.
 
-`mo run view --yaml` reads the current Definition of the Profile ID bound to the
-Run and materializes Agent references with that Run's bound concrete Action. It
-is not a historical Definition snapshot: editing other Profile structure can
-change later Stages, so this view can also change during the Run. Changing the
-Project's Profile Agent Action override does not change this view for an active
-Run. The option is mutually exclusive with `--json`. The JSON view exposes the
-nullable concrete `agentAction` bound to the Run and its derived `agentRuntime`
-so clients can select the matching model catalog without rereading Profile YAML.
+`mo run view --yaml` reads the current Definition of the Profile ID bound to
+the Run. It is not a historical Definition snapshot: editing other Profile
+structure can change later Stages, so this view can also change during the
+Run. The option is mutually exclusive with `--json`. Task views expose
+`agentJobId` and `agentSessionId` for Agent-backed tasks so clients can
+navigate to the owning AgentJob and AgentSession.
 
 Project, Issue, and WorkflowRun each own one set of Variables. All three scopes
 use the same `variable list/get/set/unset` key-value language.
