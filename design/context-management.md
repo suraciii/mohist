@@ -38,8 +38,7 @@ work proceeds.
 expressed by editing the specification itself. The pull request diff is the
 change record, and review happens on the Issue and the pull request. The
 repository must not grow an in-repo proposal, change-tracking, or planning
-format. The OpenSpec tree is retired; do not extend it and do not replace it
-with another in-repo format.
+format.
 
 ## Where context lives
 
@@ -65,11 +64,37 @@ code comments             Narrow-scope technical detail: why, never what
   that loads itself cannot be forgotten. Names such as `_agents.md` or
   `agents.md` hide the same content from that mechanism and must not be
   used.
-- **`design/decisions/`** holds durable decision records: the alternatives a
-  change rejected and the trade-off it accepted. Each record carries a
-  Status line: `Status: accepted`, or `Status: superseded by <link>`
-  pointing at the record that replaced it. A superseded record stays
-  readable; the Status line is the only edit it receives.
+- **`design/decisions/`** holds durable decision records; see
+  [Decision records](#decision-records).
+
+## Decision records
+
+A decision record is the only place that keeps why a boundary exists: the
+problem, the rejected alternatives, and the accepted trade-off.
+Specifications and `AGENTS.md` state the target state and never narrate
+history; a reader who needs the rationale follows the link to the record.
+
+Each record carries, in order:
+
+- a Status line: `Status: accepted`, or `Status: superseded by <link>` to
+  the record that replaced it;
+- `## Problem` — the force that required a decision;
+- `## Decision` — the chosen rule, in present tense;
+- `## Alternatives considered` — every serious alternative and why it lost.
+  Mandatory: a decision recorded without what it beat invites re-litigation;
+- `## Consequences` — what the trade-off cost and bought.
+
+Rules:
+
+- When a new record supersedes an existing one, the same change marks the
+  old record's Status line. A superseded record stays readable; the Status
+  line is the only structural edit it receives.
+- Factual references (paths, symbols, defaults) are updated in place when
+  the implementation moves; the decision itself is never rewritten.
+- Keep a record while it can still guide a future change: it owns a
+  boundary, prevents a recurring mistake, or states the condition for
+  reintroducing what was removed. Age and length are never reasons to
+  delete one.
 
 ## Transient context
 
@@ -89,5 +114,7 @@ remain true after the current work item closes.
 ## Verification
 
 `npm run docs:check` gates documentation mechanics: English prose, link
-targets, and diagram formats. Reviewers enforce the placement and durability
-rules in this document; no gate can judge them.
+targets, and diagram formats. It must also gate that every decision record
+carries a Status line and an `## Alternatives considered` section.
+Reviewers enforce the placement and durability rules in this document; no
+gate can judge them.
