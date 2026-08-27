@@ -168,6 +168,61 @@ public sealed class IssueListProjectionCostSpecs
     }
 
     [Fact]
+    public async Task GitHubProjection_CommandCountStaysConstantAcrossOneHundredLinkedIssues()
+    {
+        var project = new ProjectInfo
+        {
+            Id = $"proj-github-scale-{Guid.NewGuid():N}",
+            Name = "GitHub projection scale",
+        };
+
+        using var scope = _fixture.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<MohistDbContext>();
+        var owner = $"owner-{Guid.NewGuid():N}";
+        db.GitHubConnections.Add(NewConnection(project.Id, "main", owner, "mohist", "connection-scale"));
+        for (var number = 1; number <= 100; number++)
+        {
+            var issue = NewIssue(project.Id, number, $"Linked issue {number}");
+            db.Issues.Add(new IssueRow
+            {
+                ProjectId = project.Id,
+                Number = number,
+                State = IssueStore.Serialize(issue),
+            });
+            db.GitHubIssueLinks.Add(NewLink(
+                project.Id,
+                "main",
+                10_000 + number,
+                number,
+                $"link-scale-{number}",
+                TestTime.UtcNow));
+        }
+        await db.SaveChangesAsync();
+
+        var counter = new SqlCommandCounter();
+        var options = new DbContextOptionsBuilder<MohistDbContext>()
+            .UseSqlite(_fixture.ConnectionString)
+            .AddInterceptors(counter)
+            .Options;
+        var querier = new IssueQuerier(
+            new CountingDbContextFactory(options),
+            scope.ServiceProvider.GetRequiredService<ProjectQuerier>(),
+            scope.ServiceProvider.GetRequiredService<ConfigService>(),
+            scope.ServiceProvider.GetRequiredService<EffectiveWorkflowProfileResolver>(),
+            scope.ServiceProvider.GetRequiredService<IWorkflowProfileProvider>(),
+            scope.ServiceProvider.GetRequiredService<IssueReadModelLoader>());
+
+        var projected = await querier.ListWithLabelFiltersAsync(
+            project.Id, project, stage: null, labels: null, priority: null, archived: null, all: null);
+
+        Assert.Equal(100, projected.Count);
+        Assert.All(projected, issue => Assert.NotNull(issue.Github));
+        Assert.Equal(2, counter.CommandTexts.Count(command =>
+            command.Contains("GitHubIssueLinks", StringComparison.OrdinalIgnoreCase)
+            || command.Contains("GitHubConnections", StringComparison.OrdinalIgnoreCase)));
+    }
+
+    [Fact]
     public async Task GitHubProjection_DuplicateLinks_SelectsOldestDeterministically()
     {
         var project = new ProjectInfo
