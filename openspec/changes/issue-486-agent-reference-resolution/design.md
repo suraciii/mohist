@@ -4,23 +4,26 @@
 
 The CLI already exposes `AgentCommands.ResolveAgentAsync`, which resolves a project-scoped Agent reference and returns the stable Agent id plus name. It uses the id route for an Agent id and the project Agent collection for a name, and reports `Agent '<input>' not found` when no match exists.
 
-Routing-rule create and edit currently send `ctx.GetValue(agent)` as `agentId` without calling that resolver. This creates an input-boundary inconsistency: other commands accept name-or-id semantics, while routing-rule mutations implicitly require an id despite describing the option as either form.
+Routing-rule create and edit currently send `ctx.GetValue(agent)` as `agentId` without calling that resolver. Create and edit therefore do not share the name-or-id boundary used by other Agent commands.
+
+There are two independent edit-path defects in current master. The edit command sends a nullable anonymous object, so omitted options can be serialized as JSON `null`. The Server `RoutingRuleUpdateRequest` binder discovers present JSON fields using `nameof(Name)`, `nameof(Match)`, `nameof(AgentId)`, and `nameof(ResponsePrompt)`, while `RoutingRuleStore.UpdateAsync` checks lower-case parameter names for those same fields. That vocabulary/casing mismatch can ignore or invalidate supplied name, match, AgentId, and response-prompt updates. The approved create/edit end-to-end contract therefore permits this minimal Server correction; it does not require a broader backend feature.
 
 ## Goals
 
-- Reuse the existing resolver rather than create a routing-specific lookup.
-- Apply the same resolution behavior to create and edit.
+- Reuse the existing project-scoped resolver for create and edit.
 - Ensure an Agent name and its stable id produce the same outbound `agentId`.
-- Preserve the original unknown input in the existing diagnostic.
-- Keep routing rule mutation and server contracts unchanged.
+- Ensure an explicit Agent value is resolved before the PATCH is sent.
+- Preserve PATCH omission semantics: fields not supplied by the CLI are absent from JSON.
+- Make Server PATCH presence tracking and application use one canonical JSON vocabulary.
+- Keep this one standalone routing-rule Agent-reference value issue.
 
 ## Non-Goals
 
-- Changing the routing DSL or event-match expression semantics.
-- Changing routing rule ids, names, position references, ordering, archive, move, list, view, or dry-run behavior.
-- Adding a backend resolver endpoint, API field, server fallback, or name persistence.
+- Adding a backend Agent name lookup, fallback resolver, Agent routing service, or new endpoint.
+- Changing the routing DSL, event-match expression semantics, routing-engine behavior, or rule-reference format.
+- Changing routing rule ids, ordering, archive, move, list, view, dry-run, or output behavior.
 - Changing Agent identity, project resolution, or the shared resolver's matching rules.
-- Normalizing arbitrary case or whitespace beyond what the existing resolver already does.
+- Adding compatibility aliases for PascalCase or underscore JSON fields.
 
 ## Decisions
 
@@ -28,46 +31,74 @@ Routing-rule create and edit currently send `ctx.GetValue(agent)` as `agentId` w
 
 For `routing rule create`, resolve the supplied `--agent` after project resolution and before posting the rule. For `routing rule edit`, resolve a supplied `--agent` after project resolution and before patching the rule. The request body continues to contain `agentId`; only its value changes from raw input to `AgentRef.Id`.
 
-The existing resolver remains authoritative for id-vs-name detection, project scoping, archived-agent inclusion, matching, transport failures, and error text. No new helper or duplicate list traversal is added.
+The existing resolver remains authoritative for id-vs-name detection, project scoping, archived-agent inclusion, matching, transport failures, and error text. No routing-specific lookup or backend fallback is added.
 
-### 2. Preserve update omission semantics
+### 2. Encode CLI presence, not nullable defaults
 
-An edit without `--agent` continues to omit the semantic update by preserving the existing nullable option behavior. An edit with `--agent` always resolves the input and sends the resulting stable id. An unknown supplied input stops before the PATCH request and uses the resolver's diagnostic with the original input unchanged.
+Create keeps `--agent` required and always resolves it before POST, including when the input already looks like an id. Its required `name`, `match`, `agentId`, and `responsePrompt` fields remain present, with `continue` retaining the existing create behavior.
 
-Create keeps `--agent` required. It always resolves before POST, including when the input already looks like an id, so create and edit share one resolver path.
+Edit builds a `JsonObject` only for options whose parse result is present. A missing `--name`, `--match`, `--agent`, `--response-prompt`, or `--continue` is absent from JSON and leaves that field unchanged. A supplied `--agent` is resolved first, then the resolved stable id is added as `agentId`; the raw name is never sent as the id. Presence is distinct from value: if a caller sends a JSON `null` directly, the Server treats that property as present and applies its existing validation/normalization rules rather than treating it as omitted.
 
-### 3. Preserve all other routing fields
+### 3. Use one canonical Server PATCH vocabulary
 
-`name`, `match`, `responsePrompt`, `continue`, project query, position query, and output selection remain unchanged. The feature does not alter server-side validation or how the routing engine later uses the stored `agentId`.
+The routing-rule PATCH contract has exactly these editable JSON property names:
+
+- `name`
+- `match`
+- `agentId`
+- `responsePrompt`
+- `continue`
+
+`RoutingRuleUpdateRequest.Raw` reads these names, `Fields` contains these exact names, and `RoutingRuleStore.UpdateAsync` checks these same names when deciding which values to apply. C# member names are not presence tokens. A present property is applied, including a present `null` according to existing validation; an absent property preserves the stored value. The existing Server stable-Agent-id lookup and routing validation remain unchanged.
+
+This is the minimum correction needed for the CLI PATCH contract. It does not add name lookup, routing DSL behavior, or a new API field.
+
+### 4. Preserve all other routing fields
+
+`name`, `match`, `responsePrompt`, `continue`, project query, position query, and output selection remain unchanged except for the explicit edit omission and canonical presence behavior above. Rule references, ordering, archive, move, and the routing engine continue to use the existing contracts.
 
 ## Verification
 
-Future CLI tests MUST use a fake HTTP handler and assert:
+Future tests MUST use fake HTTP and a project-scoped Agent fixture, with no network, process, database, or wall-clock dependency in CLI tests. Server contract tests may use the existing in-memory test database and fake/injected time.
 
-1. create with Agent name lists/resolves the Agent and posts its stable id;
-2. create with Agent id resolves the id and posts the same stable id;
-3. edit with Agent name resolves and patches the stable id;
-4. edit with Agent id patches the same stable id as the name form;
-5. create and edit with an unknown input return non-zero, include the original input in the diagnostic, and make no mutation request; and
-6. edit without `--agent` preserves existing omission behavior.
+Focused CLI tests MUST assert:
 
-Tests must assert request order and paths, including the project-scoped Agent lookup before the routing mutation. Use no network, process, database, or wall-clock dependency. Run the focused CLI routing tests, CLI test/typecheck coverage, `npm run docs:check`, `npm run archtest`, `npm run test:fast`, and `npm run verify`.
+1. create by Agent name performs resolution before POST and sends the stable `agentId`;
+2. create by Agent id performs the same resolver boundary and sends the same stable `agentId`;
+3. edit by Agent name and edit by Agent id both resolve before PATCH and send identical stable `agentId` values;
+4. an edit with only `--name`, `--match`, `--response-prompt`, or `--continue` sends exactly the supplied canonical JSON properties and no omitted nullable properties;
+5. unknown create/edit input returns non-zero with the original input and sends no mutation; and
+6. project resolution precedes Agent resolution and mutation.
+
+Focused Server contract tests MUST assert that PATCH bodies containing each of `name`, `match`, `agentId`, and `responsePrompt` (and `continue`) apply that field, while an absent field remains unchanged. They MUST assert canonical `Fields` tokens exactly match the JSON names and cover a present `null` as present rather than omitted.
+
+Run these exact focused commands during implementation:
+
+- `dotnet test packages/cli/tests/Mohist.Cli.Tests/Mohist.Cli.Tests.csproj --filter "FullyQualifiedName~CliRoutingCommandSpecs"`
+- `dotnet test packages/server/tests/Mohist.Server.SpecTests/Mohist.Server.SpecTests.csproj --filter "FullyQualifiedName~RoutingRule"`
+- `dotnet test Mohist.sln -p:SkipWebBuild=true --filter "FullyQualifiedName~CliRoutingCommandSpecs|FullyQualifiedName~RoutingRule"`
+- `npm run docs:check`
+- `npm run archtest`
+- `npm run test:fast`
+- `npm run verify`
 
 ## Risks and Trade-offs
 
 - Resolving a name requires an additional project Agent lookup before mutation. This is required for stable identity and reuses the existing CLI contract.
-- A concurrent rename or archive between lookup and mutation remains governed by the existing Server validation; this change does not add a new consistency protocol.
-- Existing callers that passed a non-existent name will now fail before POST rather than letting the Server reject a raw `agentId`; the diagnostic is more direct and names the original input.
+- A concurrent rename or archive between lookup and mutation remains governed by existing Server validation; this change does not add a consistency protocol.
+- Existing callers that relied on omitted edit options becoming JSON `null` now receive correct omission semantics; explicit direct JSON `null` remains a present field governed by Server validation.
 
 ## Migration Plan
 
-1. Call the existing resolver from routing-rule create/edit and pass `AgentRef.Id` to the unchanged mutation body.
-2. Add focused CLI request-order and equivalence tests.
-3. Run focused CLI tests, docs and architecture checks, fast tests, and the full `npm run verify` gate.
-4. Confirm no Server, backend, routing DSL, or rule-reference files changed.
+1. Call the existing resolver from routing-rule create/edit and pass `AgentRef.Id` to the existing mutation body.
+2. Build edit JSON only from provided CLI options.
+3. Align Server PATCH `Raw`, `Fields`, and store presence checks on the five canonical JSON names.
+4. Add focused CLI and Server request/presence tests.
+5. Run the exact focused commands above and the full verification gate.
+6. Confirm no broader backend Agent lookup, routing DSL, rule-reference, or unrelated implementation files changed.
 
-Rollback is a source revert of the CLI call-site and its tests. No data migration or API migration is required.
+Rollback is a source revert of the CLI call-site, minimal Server presence correction, and focused tests. No data migration or API expansion is required.
 
 ## Open Questions
 
-None. The existing `AgentCommands.ResolveAgentAsync` is the approved resolver seam.
+None. The existing resolver and the five canonical JSON field names are the approved seams.

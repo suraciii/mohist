@@ -1,50 +1,72 @@
 {
   "project": "mohist-local",
-  "description": "Complete manifest authority for concrete Action-owned errors, preserve standard normalization, and distinguish OpenCode Action codes from established runtime diagnostic spelling.",
+  "description": "Complete manifest authority for evidenced OpenCode/Pi Action errors, preserve standard normalization, and align both concrete pages plus shared Action Contracts documentation.",
   "tasks": [
     {
       "id": "T-001",
-      "title": "Complete OpenCode Action manifest and boundary mapping",
+      "title": "Complete OpenCode and Pi manifests and boundary mappings",
       "spec": "specs/action-error-completeness/spec.md",
-      "description": "Declare every statically evidenced non-reserved omission in the OpenCode and Pi Agent Action manifests, map runtime/resolver source categories to canonical Action codes at the boundary, and leave generic manifest/result validation unchanged.",
+      "description": "Audit current production OpenCode/Pi ActionResult paths, preserve the complete existing inventories, add only evidenced omissions, and map runtime/resolver source categories to canonical Action codes before generic normalization.",
       "acceptanceCriteria": [
-        "The OpenCode manifest declares execution-unavailable, skill-not-found, provider-quota-exhausted, and unsupported-execution-configuration in lowercase kebab-case.",
-        "The Pi manifest declares skill-not-found, provider-quota-exhausted, incompatible-runtime, and interrupted in lowercase kebab-case.",
-        "Neither manifest declares source underscore categories such as execution_unavailable, skill_not_found, or unsupported_execution_configuration, or invalid-input/unexpected-error/timeout.",
-        "The established unsupported_execution_configuration runtime diagnostic and recorded category remains unchanged, while the Action boundary maps it to unsupported-execution-configuration.",
-        "The Skill resolver source category skill_not_found maps to skill-not-found for both Agent Actions; provider-quota-exhausted, incompatible-runtime, and interrupted retain canonical spelling.",
-        "Every newly declared code passes through generic normalization and recovery unchanged.",
-        "A truly undeclared ActionResult code remains normalized to unexpected-error.",
-        "No validator exception, reserved-code weakening, global Action error enum, or unrelated Action behavior change is introduced."
+        "The OpenCode manifest's complete Action-owned code set is exactly runtime-unavailable, session-workspace-mismatch, session-binding-failed, session-reporting-failed, runtime-session-missing, unavailable-runtime, incompatible-runtime, permission-required, interrupted, generation-drain-timeout, turn-failed, execution-unavailable, skill-not-found, provider-quota-exhausted, and unsupported-execution-configuration.",
+        "The Pi manifest's complete Action-owned code set is exactly runtime-unavailable, session-workspace-mismatch, session-binding-failed, session-reporting-failed, runtime-session-missing, unavailable-runtime, turn-failed, skill-not-found, provider-quota-exhausted, incompatible-runtime, and interrupted.",
+        "Neither manifest contains execution_unavailable, skill_not_found, unsupported_execution_configuration, invalid-input, unexpected-error, or timeout.",
+        "The source category unsupported_execution_configuration maps to ActionResult unsupported-execution-configuration, and skill_not_found maps to skill-not-found; provider-quota-exhausted, incompatible-runtime, and interrupted retain canonical spelling.",
+        "Declared codes pass through generic normalization and recovery unchanged, while a truly undeclared code remains normalized to unexpected-error with its human-readable message.",
+        "The exact focused Runner command `npm run test:run -w packages/runner -- tests/opencode-action-turn.spec.ts src/actions/pi.test.ts tests/action-registry.test.ts tests/define-action.test.ts` passes with strict manifest-set, mapping, normalization, reserved-code, and undeclared-fallback assertions.",
+        "No validator exception, reserved-code weakening, global Action error enum, unrelated Action behavior change, or speculative parity is introduced."
       ],
       "priority": 1,
       "mode": "AFK",
       "type": "WRITE",
-      "output": "Manifest-complete OpenCode Action error contract and explicit runtime-to-Action code mapping.",
+      "output": "Manifest-complete OpenCode/Pi Action error contracts and explicit source-to-Action mappings.",
       "dependsOn": [],
       "passes": false,
-      "notes": "Future implementation task. Spec artifact validation for this change is complete in the design-first PR."
+      "notes": "Focused command: `npm run test:run -w packages/runner -- tests/opencode-action-turn.spec.ts src/actions/pi.test.ts tests/action-registry.test.ts tests/define-action.test.ts`. Assert exact arrays/sets, no underscore or reserved entries, source diagnostic preservation, ActionResult kebab codes, declared pass-through, and undeclared normalization."
     },
     {
       "id": "T-002",
-      "title": "Align OpenCode docs and audit Pi emissions",
+      "title": "Align concrete and shared Action documentation",
       "spec": "specs/action-error-completeness/spec.md",
-      "description": "Make docs/actions/opencode.md and docs/actions/pi.md mirror their manifest-owned errors and separately explain source diagnostic spelling. Record the evidenced OpenCode/Pi emission inventory and focused tests.",
+      "description": "Make docs/actions/opencode.md and docs/actions/pi.md mirror their complete manifest-owned inventories, and make shared docs/actions/README.md authoritative for the shared intersection and reserved platform ownership.",
       "acceptanceCriteria": [
-        "docs/actions/opencode.md lists execution-unavailable, skill-not-found, provider-quota-exhausted, and unsupported-execution-configuration as Action-owned codes.",
-        "docs/actions/pi.md lists skill-not-found, provider-quota-exhausted, incompatible-runtime, and interrupted as Action-owned codes.",
-        "The OpenCode page distinguishes the ActionResult/recovery kebab code from the runtime diagnostic/recorded underscore category.",
-        "Both pages distinguish skill_not_found source resolver vocabulary from skill-not-found ActionResult vocabulary where exposed.",
-        "The implementation evidence records the producer path to canonical Action code mapping for each current omission and excludes unrelated Actions.",
-        "Focused Runner manifest/normalization/OpenCode/Pi audit tests, `npm run docs:check`, `npm run archtest`, `npm run test:fast`, and `npm run verify` pass."
+        "docs/actions/opencode.md lists exactly runtime-unavailable, session-workspace-mismatch, session-binding-failed, session-reporting-failed, runtime-session-missing, unavailable-runtime, incompatible-runtime, permission-required, interrupted, generation-drain-timeout, turn-failed, execution-unavailable, skill-not-found, provider-quota-exhausted, and unsupported-execution-configuration as Action-owned codes.",
+        "docs/actions/pi.md lists exactly runtime-unavailable, session-workspace-mismatch, session-binding-failed, session-reporting-failed, runtime-session-missing, unavailable-runtime, turn-failed, skill-not-found, provider-quota-exhausted, incompatible-runtime, and interrupted as Action-owned codes.",
+        "docs/actions/README.md enumerates exactly the shared Agent Action intersection runtime-unavailable, session-workspace-mismatch, session-binding-failed, session-reporting-failed, runtime-session-missing, unavailable-runtime, and turn-failed, and separately retains platform-owned invalid-input, unexpected-error, and timeout.",
+        "The concrete pages do not present unsupported_execution_configuration or skill_not_found as manifest-owned ActionResult codes; OpenCode explains the underscore runtime/recorded category and both pages distinguish skill_not_found source vocabulary from skill-not-found ActionResult/recovery vocabulary.",
+        "The documentation records the evidenced producer path to canonical Action code for execution-unavailable, unsupported execution configuration, Skill resolution, provider exhaustion, incompatible runtime, and interruption, and excludes unrelated Actions.",
+        "The exact command `npm run docs:check` passes, and documentation changes are limited to the three authority pages named above."
       ],
       "priority": 2,
       "mode": "AFK",
       "type": "WRITE",
-      "output": "Documentation alignment, evidence-bounded Pi audit, and deterministic verification output.",
+      "output": "Complete Action error documentation and evidence-bounded OpenCode/Pi inventory.",
       "dependsOn": ["T-001"],
       "passes": false,
-      "notes": "Future implementation task. Spec artifact validation for this change is complete in the design-first PR."
+      "notes": "Exact docs acceptance command: `npm run docs:check`. Review all three files: `docs/actions/opencode.md`, `docs/actions/pi.md`, and `docs/actions/README.md`; assert exact per-Action/shared sets and kebab-vs-underscore diagnostic distinction."
+    },
+    {
+      "id": "T-003",
+      "title": "Run Action error completeness verification",
+      "spec": "specs/action-error-completeness/spec.md",
+      "description": "Run focused Action tests, Runner typechecks, repository structural checks, fast tests, and the full verification gate after manifest, mapping, and documentation updates.",
+      "acceptanceCriteria": [
+        "The focused test command `npm run test:run -w packages/runner -- tests/opencode-action-turn.spec.ts src/actions/pi.test.ts tests/action-registry.test.ts tests/define-action.test.ts` passes.",
+        "`npm run typecheck -w packages/runner` passes.",
+        "`npm run typecheck:tests -w packages/runner` passes.",
+        "`npm run docs:check` passes.",
+        "`npm run archtest` passes.",
+        "`npm run test:fast` passes.",
+        "`npm run verify` passes.",
+        "A final diff check confirms no global validator exception, reserved platform ownership change, unrelated Action code, or documentation authority gap."
+      ],
+      "priority": 3,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Action error completeness verification evidence.",
+      "dependsOn": ["T-001", "T-002"],
+      "passes": false,
+      "notes": "Run exact commands: `npm run test:run -w packages/runner -- tests/opencode-action-turn.spec.ts src/actions/pi.test.ts tests/action-registry.test.ts tests/define-action.test.ts`; `npm run typecheck -w packages/runner`; `npm run typecheck:tests -w packages/runner`; `npm run docs:check`; `npm run archtest`; `npm run test:fast`; `npm run verify`."
     }
   ]
 }

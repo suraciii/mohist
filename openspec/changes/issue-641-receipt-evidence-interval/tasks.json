@@ -1,40 +1,44 @@
 {
   "project": "mohist-local",
-  "description": "Repair volatile Runtime Event Queue receipt evidence ownership so each bounded waiter interval starts clean and late retryable deliveries cannot recreate ownerless evidence.",
+  "description": "Repair volatile Runtime Event Queue receipt evidence ownership so each bounded waiter interval starts clean and late retryable deliveries cannot create ownerless evidence or mutate a newer interval.",
   "tasks": [
     {
       "id": "T-001",
       "title": "Make receipt evidence lifecycle interval-owned",
       "spec": "specs/receipt-evidence-interval/spec.md",
-      "description": "Adjust only the existing Runtime Event Queue bounded receipt-wait seam so evidence is created, updated, and discarded with an active bounded waiter interval. Preserve queue records, delivery leases, retry scheduling, FIFO ordering, matching identity, and definitive refusal semantics.",
+      "description": "Adjust only the existing Runtime Event Queue bounded receipt-wait seam. Give each active bounded waiter a generation/token, capture that token on each delivery attempt, admit evidence only when the token still owns the active interval, and discard evidence when the interval ends. Preserve queue records, delivery leases, retry scheduling, FIFO ordering, matching identity, and definitive refusal semantics.",
       "acceptanceCriteria": [
-        "A new bounded waiter starts with zero attempts, zero derived retries, and no prior latest reason after the previous interval ended.",
+        "A new bounded waiter starts with a new generation/token, zero attempts, zero derived retries, and no prior latest reason after the previous interval ended.",
         "Coalesced bounded waiters share one active interval and its outcome.",
-        "A late retryable delivery with no active bounded waiter retains the queue record and existing retry path without creating evidence.",
-        "A late retryable verdict from an old delivery cannot update a later interval's evidence.",
+        "A late retryable delivery with no active bounded waiter retains the queue record and existing retry path without creating ownerless evidence.",
+        "A late retryable verdict from an old attempt token cannot update a later interval's attempts, retries, or latest reason, even when the later waiter became active before the old promise resolved.",
+        "A delivery that starts with no token cannot write evidence if a bounded waiter starts before its verdict settles; only a delivery admitted under the active token may contribute.",
         "Timeout evidence still contains the interval's record id, elapsed time, budget, attempts, retries, and latest normalized reason.",
         "Matching late settlement, permanent refusal, delivery leases, retry timing, FIFO ordering, and unrelated records retain current behavior.",
-        "No persistence, Outbox, journal, snapshot, receipt store, second queue, Server/API/schema, or runtime protocol change is introduced."
+        "No persistence, Outbox, journal, snapshot, receipt store, second queue, Server/API/schema, or runtime protocol change is introduced.",
+        "The focused queue command `npm run test:run -w packages/runner -- tests/runtime-event-queue.spec.ts` passes with strict assertions for token ownership, zero evidence at new-waiter activation, old-verdict non-mutation, no ownerless evidence, and retained queue records."
       ],
       "priority": 1,
       "mode": "AFK",
       "type": "WRITE",
-      "output": "Interval-owned volatile receipt evidence in the existing Runtime Event Queue.",
+      "output": "Generation-owned volatile receipt evidence in the existing Runtime Event Queue.",
       "dependsOn": [],
       "passes": false,
-      "notes": "Future implementation task. Spec artifact validation for this change is complete in the design-first PR."
+      "notes": "Required fake-time sequence in the focused queue test: start W1 with deferred A1 under g1; advance to W1 timeout; start W2 under fresh g2 **before resolving A1**; assert W2 has zero attempts/no reason; resolve A1 retryably and assert g2 is unchanged; then admit A2 under g2 and prove only A2 evidence appears at W2 timeout. Also settle a retry with no bounded waiter and assert no evidence exists. Exact command: `npm run test:run -w packages/runner -- tests/runtime-event-queue.spec.ts`."
     },
     {
       "id": "T-002",
       "title": "Add deterministic late-delivery interval regression coverage",
       "spec": "specs/receipt-evidence-interval/spec.md",
-      "description": "Extend the existing Runner queue tests with fake-time deferred deliveries for timeout-to-late-retry-to-new-waiter, cancellation-to-late-retry-to-matching-settlement, coalesced waiters, and retained unrelated records.",
+      "description": "Extend the existing Runner queue/action tests with fake-time deferred deliveries for timeout-to-new-waiter-before-late-retry, cancellation-to-late-retry-to-matching-settlement, coalesced waiters, and retained unrelated records.",
       "acceptanceCriteria": [
         "Tests use Vitest fake timers and the injected queue clock; they contain no sleeps, polling assertions, or wall-clock deadline assertions.",
-        "Timeout-to-late-retry-to-new-waiter proves old attempts and reasons are absent from the later timeout evidence.",
-        "Cancellation-to-late-retry-to-matching-settlement proves only the waiter ends while normal record acknowledgement remains possible.",
+        "The timeout-to-new-waiter test activates the second waiter before the first deferred delivery resolves, then proves the old token cannot increment the second interval or replace its reason; the later timeout reports only the second interval's exact attempt/retry counts and reason.",
+        "A no-owner test proves a late retryable verdict while no bounded waiter is active leaves no evidence record, while the retained queue record remains eligible for its normal retry path.",
+        "Cancellation-to-late-retry-to-matching-settlement proves only the waiter ends while normal record acknowledgement remains possible and no Runtime is invoked for the cancelled task.",
         "Existing matching, permanent refusal, retry, lease, FIFO, capacity, coalescing, and unbounded-wait regressions remain green.",
-        "Focused Runner queue/action tests, `npm run docs:check`, `npm run archtest`, `npm run test:fast`, and `npm run verify` pass."
+        "The focused action/reporting command `npm run test:run -w packages/runner -- tests/workflow-agent-session-reporter.spec.ts src/actions/pi.test.ts tests/opencode-action-turn.spec.ts` passes with strict equivalent timeout/cancellation classification and no-runtime-invocation assertions.",
+        "The exact repository commands `npm run docs:check`, `npm run archtest`, `npm run test:fast`, and `npm run verify` pass."
       ],
       "priority": 2,
       "mode": "AFK",
@@ -42,7 +46,7 @@
       "output": "Deterministic evidence-interval regression coverage and verification output.",
       "dependsOn": ["T-001"],
       "passes": false,
-      "notes": "Future implementation task. Spec artifact validation for this change is complete in the design-first PR."
+      "notes": "Run exact commands: `npm run test:run -w packages/runner -- tests/workflow-agent-session-reporter.spec.ts src/actions/pi.test.ts tests/opencode-action-turn.spec.ts`; `npm run docs:check`; `npm run archtest`; `npm run test:fast`; `npm run verify`. The queue assertion must enforce new-waiter-active-before-old-verdict-completes, not the weaker sequence that resolves the old verdict first."
     }
   ]
 }

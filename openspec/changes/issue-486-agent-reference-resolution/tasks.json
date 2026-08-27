@@ -1,46 +1,68 @@
 {
   "project": "mohist-local",
-  "description": "Resolve routing-rule --agent name or id through the existing project-scoped CLI Agent resolver before create/edit mutations.",
+  "description": "Resolve routing-rule Agent name/id references end to end, preserve CLI PATCH omission, and correct only the Server PATCH presence vocabulary required by current evidence.",
   "tasks": [
     {
       "id": "T-001",
-      "title": "Resolve routing rule Agent references before mutation",
+      "title": "Resolve CLI routing-rule Agent references and encode PATCH omission",
       "spec": "specs/routing-rule-agent-reference/spec.md",
-      "description": "Reuse AgentCommands.ResolveAgentAsync after project resolution for routing-rule create and supplied edit --agent values, then send the unchanged stable agentId field to the existing endpoints.",
+      "description": "Reuse AgentCommands.ResolveAgentAsync after project resolution for routing-rule create and supplied edit --agent values. Build edit JSON only from options present in ParseResult so omitted nullable options are absent, and send the resolved stable agentId before POST/PATCH.",
       "acceptanceCriteria": [
-        "Create resolves both Agent name and Agent id through the existing resolver and sends the same stable agentId for both forms.",
-        "Edit resolves a supplied Agent name or Agent id through the same resolver and sends the stable agentId; edit without --agent preserves omission semantics.",
-        "Unknown supplied input fails with non-zero status, identifies the exact original input, and sends no routing mutation request.",
-        "Resolution occurs in the selected project and preserves existing resolver matching, transport, and error behavior.",
-        "No backend, routing DSL, rule-reference, endpoint, schema, or routing-engine changes are introduced."
+        "Create by Agent name and create by Agent id both resolve before POST and send the same stable agentId; the raw name is never sent as agentId.",
+        "Edit by Agent name and edit by Agent id both resolve before PATCH and send the same stable agentId.",
+        "An edit that supplies only --name, --match, --response-prompt, or --continue sends exactly those canonical JSON properties; omitted properties are absent, not JSON null.",
+        "An edit without --agent performs no Agent lookup solely for that omitted option and sends no agentId property.",
+        "Unknown create/edit references return non-zero, include the exact original input, and send no routing mutation request.",
+        "The CLI test command `dotnet test packages/cli/tests/Mohist.Cli.Tests/Mohist.Cli.Tests.csproj --filter \"FullyQualifiedName~CliRoutingCommandSpecs\"` passes with strict assertions for request order, paths, stable ids, exact JSON property sets, and no mutation on failure."
       ],
       "priority": 1,
       "mode": "AFK",
       "type": "WRITE",
-      "output": "CLI routing-rule Agent reference resolution using the existing resolver seam.",
+      "output": "CLI routing-rule Agent reference resolution and omission-preserving request bodies.",
       "dependsOn": [],
       "passes": false,
-      "notes": "Future implementation task. Spec artifact validation for this change is complete in the design-first PR."
+      "notes": "Focused acceptance command: `dotnet test packages/cli/tests/Mohist.Cli.Tests/Mohist.Cli.Tests.csproj --filter \"FullyQualifiedName~CliRoutingCommandSpecs\"`. Use fake HTTP and assert project-scoped Agent lookup precedes POST/PATCH, omitted options are absent from the parsed JSON object, and an unknown value produces no mutation request."
     },
     {
       "id": "T-002",
-      "title": "Add deterministic routing reference equivalence tests",
+      "title": "Correct the minimal Server routing-rule PATCH presence contract",
       "spec": "specs/routing-rule-agent-reference/spec.md",
-      "description": "Add fake-HTTP CLI coverage for create/edit name and id equivalence, project-scoped lookup order, unknown-input diagnostics, no mutation on failure, and edit omission.",
+      "description": "Align RoutingRuleUpdateRequest.Raw, Fields, and RoutingRuleStore.UpdateAsync on the exact JSON vocabulary name, match, agentId, responsePrompt, and continue. Apply present fields and preserve absent fields without adding backend Agent lookup or routing DSL behavior.",
       "acceptanceCriteria": [
-        "Create-by-name and create-by-id tests assert identical stable agentId request values and lookup-before-POST ordering.",
-        "Edit-by-name and edit-by-id tests assert identical stable agentId request values and lookup-before-PATCH ordering.",
-        "Unknown create/edit tests assert the original input in diagnostics and no mutation request.",
-        "Edit without --agent asserts no Agent lookup solely for the omitted option and preserves existing request behavior.",
-        "Focused CLI routing tests, CLI typecheck/test coverage, `npm run docs:check`, `npm run archtest`, `npm run test:fast`, and `npm run verify` pass."
+        "Server presence tokens are exactly the lower camel-case JSON names `name`, `match`, `agentId`, `responsePrompt`, and `continue`; C# member casing is not used as a presence token.",
+        "PATCH values for name, match, agentId, responsePrompt, and continue are each applied when present, while absent values remain unchanged.",
+        "A present JSON null is recorded as present and handled by existing validation/normalization rather than silently treated as omission.",
+        "The Server contract test command `dotnet test packages/server/tests/Mohist.Server.SpecTests/Mohist.Server.SpecTests.csproj --filter \"FullyQualifiedName~RoutingRule\"` passes with assertions over Raw/Fields vocabulary and persisted field application.",
+        "No backend Agent name lookup, routing fallback, routing DSL, endpoint expansion, schema expansion, or unrelated Server behavior is introduced."
       ],
       "priority": 2,
       "mode": "AFK",
       "type": "WRITE",
-      "output": "Deterministic CLI routing-rule Agent reference regression coverage and verification output.",
-      "dependsOn": ["T-001"],
+      "output": "Minimal Server routing-rule PATCH presence correction and contract coverage.",
+      "dependsOn": [],
       "passes": false,
-      "notes": "Future implementation task. Spec artifact validation for this change is complete in the design-first PR."
+      "notes": "Focused acceptance command: `dotnet test packages/server/tests/Mohist.Server.SpecTests/Mohist.Server.SpecTests.csproj --filter \"FullyQualifiedName~RoutingRule\"`. The test must prove supplied name/match/AgentId/prompt updates cannot be ignored by casing mismatch and that absent fields are preserved."
+    },
+    {
+      "id": "T-003",
+      "title": "Run end-to-end routing reference verification",
+      "spec": "specs/routing-rule-agent-reference/spec.md",
+      "description": "Run the focused CLI and Server contract suites plus repository structural and full gates after the two boundary repairs.",
+      "acceptanceCriteria": [
+        "The combined contract command `dotnet test Mohist.sln -p:SkipWebBuild=true --filter \"FullyQualifiedName~CliRoutingCommandSpecs|FullyQualifiedName~RoutingRule\"` passes.",
+        "`npm run docs:check` passes without changing product documentation files.",
+        "`npm run archtest` passes.",
+        "`npm run test:fast` passes.",
+        "`npm run verify` passes.",
+        "A final diff check confirms only this change's spec artifacts and approved implementation seams changed; no broader backend Agent lookup or routing DSL work is present."
+      ],
+      "priority": 3,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Routing-rule Agent reference contract verification evidence.",
+      "dependsOn": ["T-001", "T-002"],
+      "passes": false,
+      "notes": "Run exact commands: `dotnet test packages/cli/tests/Mohist.Cli.Tests/Mohist.Cli.Tests.csproj --filter \"FullyQualifiedName~CliRoutingCommandSpecs\"`; `dotnet test packages/server/tests/Mohist.Server.SpecTests/Mohist.Server.SpecTests.csproj --filter \"FullyQualifiedName~RoutingRule\"`; `dotnet test Mohist.sln -p:SkipWebBuild=true --filter \"FullyQualifiedName~CliRoutingCommandSpecs|FullyQualifiedName~RoutingRule\"`; `npm run docs:check`; `npm run archtest`; `npm run test:fast`; `npm run verify`."
     }
   ]
 }

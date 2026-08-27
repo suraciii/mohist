@@ -6,16 +6,18 @@ The Action manifest is the authority used by standard result normalization. The 
 
 The OpenCode runtime and cross-system execution evidence already use two vocabularies for the unsupported reasoning-effort case. The runtime diagnostic and recorded failure category remain `unsupported_execution_configuration`, while the Action contract must use the repository's canonical kebab-case error code. The Skill resolver similarly reports `skill_not_found`, while the Action contract uses canonical kebab-case. The boundary must make these mappings explicit rather than weakening manifest validation.
 
+The documentation authority spans the two concrete Action pages and the shared Action Contracts page. `docs/actions/README.md` currently enumerates platform ownership and shared Action semantics, so its shared-code section must be kept consistent with the final manifest intersection rather than treated as optional context.
+
 ## What Changes
 
-- Declare every statically evidenced Action-owned failure code reachable from the current `mohist/opencode` and `mohist/pi` production Action paths.
-- For OpenCode, cover exact `execution-unavailable`, canonical `unsupported-execution-configuration`, `skill-not-found`, and `provider-quota-exhausted` in addition to its already declared codes.
-- For Pi, cover evidenced `skill-not-found`, `provider-quota-exhausted`, `incompatible-runtime`, and `interrupted` omissions in addition to its already declared codes.
+- Declare every statically evidenced Action-owned failure code reachable from the current `mohist/opencode` and `mohist/pi` production Action paths, preserving their complete existing inventories while adding the evidenced omissions.
+- For OpenCode, add exact `execution-unavailable`, `unsupported-execution-configuration`, `skill-not-found`, and `provider-quota-exhausted` codes.
+- For Pi, add exact `skill-not-found`, `provider-quota-exhausted`, `incompatible-runtime`, and `interrupted` codes.
 - Map underscore runtime or resolver categories to canonical lowercase kebab-case Action codes at the Action boundary where the vocabularies differ.
 - Preserve declared Action-owned codes through standard result normalization and recovery matching.
-- Preserve `unexpected-error` normalization for a truly undeclared Action code.
-- Keep reserved platform codes (`invalid-input`, `unexpected-error`, and `timeout`) out of Action manifests and retain their existing validation.
-- Make `docs/actions/opencode.md` and `docs/actions/pi.md` list their final manifest-owned codes and distinguish Action results from runtime diagnostics and recorded execution evidence.
+- Require `docs/actions/opencode.md`, `docs/actions/pi.md`, and shared `docs/actions/README.md` to describe their respective manifest/platform semantics and the source diagnostic vocabulary.
+- Keep complete evidenced OpenCode/Pi inventories and distinguish kebab Action codes from underscore diagnostic or recorded-execution categories.
+- Preserve `unexpected-error` normalization for a truly undeclared Action code. Keep reserved platform codes out of Action manifests; add no global validator exception.
 
 ## Capability
 
@@ -25,6 +27,6 @@ The OpenCode runtime and cross-system execution evidence already use two vocabul
 
 - **Runner Action contract:** the `mohist/opencode` and `mohist/pi` manifests plus their runtime-to-Action projections are the implementation boundary.
 - **Result validation:** declared codes remain stable; undeclared non-platform codes still normalize to `unexpected-error`.
-- **Documentation:** `docs/actions/opencode.md` and `docs/actions/pi.md` become consistent with their manifests and record separate diagnostic categories where needed.
+- **Documentation:** the two concrete Agent Action pages mirror their full manifests, while the shared Action Contracts page remains authoritative for platform codes and shared manifest-owned semantics.
 - **Evidence boundary:** only codes reachable from the current production Action paths are included; unrelated Actions and speculative parity are excluded.
 - **Other runtimes and APIs:** no global error enum, reserved-code change, backend protocol change, or Server schema change.

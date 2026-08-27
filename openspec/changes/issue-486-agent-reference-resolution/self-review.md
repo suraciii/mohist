@@ -2,23 +2,25 @@
 
 ## Scope
 
-This change is limited to CLI routing-rule create/edit Agent-reference resolution. It reuses the existing project-scoped resolver and changes only the value sent in the existing `agentId` field. No backend, routing DSL, rule-reference, endpoint, schema, or routing-engine behavior is specified.
+This remains one standalone routing-rule Agent-reference value issue. It resolves CLI Agent names and ids consistently and includes only the minimum Server PATCH presence correction required for that value to work end to end. It does not add a backend Agent resolver, fallback routing, routing DSL, rule-reference, or routing-engine change.
 
 ## Findings
 
+- Current evidence identifies both the CLI and Server seams: nullable CLI edit fields can serialize as `null`, and Server PATCH presence tokens use mismatched property vocabulary/casing.
 - Create and edit have independent scenarios for Agent name and Agent id.
 - Both forms resolve to the same stable Agent id before mutation.
 - Unknown input preserves the original value, fails non-zero, and prevents POST/PATCH.
-- Edit omission remains distinct from supplied-reference resolution.
+- Edit omission is tested as absence from JSON and remains distinct from supplied-reference resolution.
+- Server `Raw`, `Fields`, and store checks share exactly `name`, `match`, `agentId`, `responsePrompt`, and `continue`.
 - Project resolution stays ahead of Agent resolution and routing mutation.
-- The design explicitly rejects a new routing-specific resolver or backend fallback.
-- Future tasks intentionally remain `passes: false`; no product or test files are changed in this spec-only PR.
+- Future tests intentionally remain `passes: false`; no product, test, or documentation implementation files are changed in this spec-only repair.
 
 ## Residual Risks
 
 - Name resolution adds a read before mutation and remains subject to the existing Server race behavior if the Agent changes between requests.
-- The current resolver's matching and error semantics are intentionally reused rather than redesigned.
+- A direct JSON `null` is present and follows existing Server validation; only an absent property means unchanged.
+- The minimal Server correction must not expand into backend name lookup or routing DSL work during implementation.
 
 ## Verdict
 
-No blocking finding. The artifacts are self-contained, KISS-scoped, and ready for future implementation and focused validation.
+No blocking finding. The artifacts describe one standalone value, its two evidenced boundary seams, exact canonical JSON names, focused CLI/Server contracts, and bounded implementation scope.
