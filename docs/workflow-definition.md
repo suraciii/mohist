@@ -59,9 +59,9 @@ the decision is submitted.
 ## Task
 
 ```yaml
-- id: merge-pr                   # Required. The Task identifier within the Stage.
-  title: Merge GitHub PR         # Optional. A user-facing name.
-  uses: mohist/merge-github-pr   # Required. Selects an Action.
+- id: enable-auto-merge                   # Required. The Task identifier within the Stage.
+  title: Enable auto-merge         # Optional. A user-facing name.
+  uses: mohist/enable-github-pr-auto-merge   # Required. Selects an Action.
   with:                          # Optional. Action Input. Supports template expressions.
     repositoryUrl: ${{ repository.gitUrl }}
     prNumber: ${{ vars.github.pr.number }}
@@ -203,7 +203,7 @@ list below.
 - When an expression occupies the complete value, the replacement retains its
   original type, including object, array, or number.
 - An expression can be embedded in a string, for example
-  `openspec/changes/issue-${{ issue.number }}`. Mohist converts the value to
+  `PLANS/issue-${{ issue.number }}.handoff.json`. Mohist converts the value to
   text. The Task fails when the expression cannot resolve or its value is an
   object or array.
 - Write `\${{` when the literal text `${{` is required.
@@ -211,9 +211,10 @@ list below.
   does not also become a top-level name. Mohist also does not copy `workflow`,
   `stage`, `work`, `issue`, `repository`, `workspace`, `tasks`, `prompts`, or
   `failure` into `vars`.
-- `workspace` describes only Workspace facts. It does not provide OpenSpec path
-  conventions. A Profile or Prompt must write a path such as
-  `openspec/changes/issue-${{ issue.number }}` explicitly.
+- `workspace` describes only Workspace facts, such as `workspace.path` and
+  `workspace.branch`. It does not provide plan-artifact path conventions. A
+  Profile or Prompt must write a path such as
+  `PLANS/issue-${{ issue.number }}-PLAN.md` explicitly.
 
 ## Validate a Definition
 
@@ -302,42 +303,16 @@ stages:
     resources:
       - project-integration
     tasks:
-      - id: merge-pr
-        uses: mohist/merge-github-pr
+      - id: enable-auto-merge
+        uses: mohist/enable-github-pr-auto-merge
         with:
           repositoryUrl: ${{ repository.gitUrl }}
           prNumber: ${{ vars.github.pr.number }}
           method: squash
         recovery:
-          budget: 2
+          budget: 3
           handlers:
-            - when: error.code=base-moved
-              tasks:
-                - id: recover:rebase
-                  uses: mohist/rebase
-                  with:
-                    baseBranch: ${{ repository.baseBranch }}
-                    remote: origin
-                  recovery:
-                    budget: 2
-                    handlers:
-                      - when: error.code=conflict
-                        tasks:
-                          - id: recover:resolve-conflicts
-                            uses: mohist/opencode
-                            with:
-                              session: integrate
-                              prompt: ${{ prompts.resolve-rebase-conflicts }}
-                              options: ${{ vars.agent }}
-                - id: recover:push
-                  uses: mohist/push
-                  with:
-                    source: ${{ workspace.branch }}
-                    target: ${{ workspace.branch }}
-                    remote: origin
-                    force: true
-              retrySelf: true
-            - when: error.code=protection-conflict
+            - when: error.code=retry-safe
               retrySelf: true
     checks:
       - id: merge-verified

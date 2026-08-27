@@ -53,7 +53,7 @@ ready state, checks, status validation, and squash merge.
 
 - [`mohist/create-github-pr`](github-pr.md#mohistcreate-github-pr)
 - [`mohist/mark-github-pr-ready`](github-pr.md#mohistmark-github-pr-ready)
-- [`mohist/merge-github-pr`](github-pr.md#mohistmerge-github-pr)
+- [`mohist/enable-github-pr-auto-merge`](github-pr.md#mohistenable-github-pr-auto-merge)
 - [`mohist/github-pr-checks`](github-pr.md#mohistgithub-pr-checks)
 - [`mohist/github-pr-status`](github-pr.md#mohistgithub-pr-status)
 
@@ -65,12 +65,9 @@ markers.
 - [`core/artifact-exists`](core.md#coreartifact-exists)
 - [`core/marker`](core.md#coremarker)
 
-**OpenSpec Actions** load `tasks.json`, verify OpenSpec change artifacts, and
-archive a change.
+**Handoff Actions** load the plan Stage's handoff contract into Build.
 
-- [`mohist/openspec-tasks`](openspec.md#mohistopenspec-tasks)
-- [`mohist/openspec-artifacts`](openspec.md#mohistopenspec-artifacts)
-- [`mohist/archive-change`](openspec.md#mohistarchive-change)
+- [`mohist/task-list`](task-list.md#mohisttask-list)
 
 Pi is an independent peer Action, not an input extension of
 `mohist/opencode`.
