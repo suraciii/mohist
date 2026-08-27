@@ -72,15 +72,49 @@ Focused CLI tests MUST assert:
 
 Focused Server contract tests MUST assert that PATCH bodies containing each of `name`, `match`, `agentId`, and `responsePrompt` (and `continue`) apply that field, while an absent field remains unchanged. They MUST assert canonical `Fields` tokens exactly match the JSON names and cover a present `null` as present rather than omitted.
 
-Run these exact focused commands during implementation:
+The focused C# checks use the compiled xUnit v3 apphosts, not a solution-level selector. The authoritative existing CLI class is `Mohist.Cli.Tests.CliRoutingCommandSpecs`. Server store application belongs to the existing `Mohist.Server.SpecTests.Specs.Agent.Services.RoutingRuleStoreSpecs`. The current `Mohist.Server.SpecTests.Specs.Api.RoutingTestRoutesSpecs` owns the `/routing/test` surface and does not own `RoutingRuleUpdateRequest.BindAsync`; implementation MAY add the narrowly named `Mohist.Server.SpecTests.Specs.Api.RoutingRulePatchRoutesSpecs` for the PATCH route binder/presence contract.
 
-- `dotnet test packages/cli/tests/Mohist.Cli.Tests/Mohist.Cli.Tests.csproj --filter "FullyQualifiedName~CliRoutingCommandSpecs"`
-- `dotnet test packages/server/tests/Mohist.Server.SpecTests/Mohist.Server.SpecTests.csproj --filter "FullyQualifiedName~RoutingRule"`
-- `dotnet test Mohist.sln -p:SkipWebBuild=true --filter "FullyQualifiedName~CliRoutingCommandSpecs|FullyQualifiedName~RoutingRule"`
-- `npm run docs:check`
-- `npm run archtest`
-- `npm run test:fast`
-- `npm run verify`
+Build each test project before invoking its executable apphost:
+
+```bash
+dotnet build packages/cli/tests/Mohist.Cli.Tests/Mohist.Cli.Tests.csproj --no-restore
+dotnet build packages/server/tests/Mohist.Server.SpecTests/Mohist.Server.SpecTests.csproj --no-restore -p:SkipWebBuild=true
+```
+
+Every focused invocation MUST be wrapped by the surrounding shell timeout and strict automated-output checks below. `TestCasesToRun` is the discovery total; the final assembly event must report a nonzero `TestsTotal` and zero `TestsFailed`, `TestsSkipped`, and `TestsNotRun`. Run each selected class separately so a missing intended class cannot be hidden by another class's passing tests.
+
+```bash
+set -euo pipefail
+run_focused() {
+  local apphost="$1"
+  shift
+  local output summary
+  test -x "$apphost"
+  output="$(timeout -k 10s 120s "$apphost" "$@" -automated sync -noColor -noLogo -noAutoReporters 2>&1)"
+  printf '%s\n' "$output"
+  grep -Eq '"\$type":"discovery-complete".*"TestCasesToRun":[1-9][0-9]*' <<<"$output"
+  summary="$(grep '"\$type":"test-assembly-finished"' <<<"$output" | tail -n 1)"
+  grep -Eq '"TestsFailed":0.*"TestsNotRun":0.*"TestsSkipped":0.*"TestsTotal":[1-9][0-9]*' <<<"$summary"
+}
+
+run_focused packages/cli/tests/Mohist.Cli.Tests/bin/Debug/net11.0/Mohist.Cli.Tests \
+  -class Mohist.Cli.Tests.CliRoutingCommandSpecs
+run_focused packages/server/tests/Mohist.Server.SpecTests/bin/Debug/net11.0/Mohist.Server.SpecTests \
+  -class Mohist.Server.SpecTests.Specs.Agent.Services.RoutingRuleStoreSpecs
+run_focused packages/server/tests/Mohist.Server.SpecTests/bin/Debug/net11.0/Mohist.Server.SpecTests \
+  -class Mohist.Server.SpecTests.Specs.Api.RoutingTestRoutesSpecs
+run_focused packages/server/tests/Mohist.Server.SpecTests/bin/Debug/net11.0/Mohist.Server.SpecTests \
+  -class Mohist.Server.SpecTests.Specs.Api.RoutingRulePatchRoutesSpecs
+```
+
+The implementation may use `-method` with an authoritative fully qualified method name for a narrower debugging run, but acceptance must retain the class coverage above. Keep the full repository gates:
+
+```bash
+npm run docs:check
+npm run archtest
+npm run test:fast
+npm run verify
+```
 
 ## Risks and Trade-offs
 

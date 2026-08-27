@@ -13,6 +13,8 @@ This remains one standalone routing-rule Agent-reference value issue. It resolve
 - Edit omission is tested as absence from JSON and remains distinct from supplied-reference resolution.
 - Server `Raw`, `Fields`, and store checks share exactly `name`, `match`, `agentId`, `responsePrompt`, and `continue`.
 - Project resolution stays ahead of Agent resolution and routing mutation.
+- Focused verification names the existing CLI and Server store classes, and permits only the narrowly named `Mohist.Server.SpecTests.Specs.Api.RoutingRulePatchRoutesSpecs` addition for the currently unowned PATCH binder/presence contract.
+- Every focused C# check uses a compiled apphost, an explicit shell timeout, automated/no-color output, and strict nonzero discovery plus zero failed/skipped/not-run assertions; no solution-level selector is prescribed.
 - Future tests intentionally remain `passes: false`; no product, test, or documentation implementation files are changed in this spec-only repair.
 
 ## Residual Risks

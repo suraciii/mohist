@@ -13,7 +13,7 @@
         "An edit that supplies only --name, --match, --response-prompt, or --continue sends exactly those canonical JSON properties; omitted properties are absent, not JSON null.",
         "An edit without --agent performs no Agent lookup solely for that omitted option and sends no agentId property.",
         "Unknown create/edit references return non-zero, include the exact original input, and send no routing mutation request.",
-        "The CLI test command `dotnet test packages/cli/tests/Mohist.Cli.Tests/Mohist.Cli.Tests.csproj --filter \"FullyQualifiedName~CliRoutingCommandSpecs\"` passes with strict assertions for request order, paths, stable ids, exact JSON property sets, and no mutation on failure."
+        "After `dotnet build packages/cli/tests/Mohist.Cli.Tests/Mohist.Cli.Tests.csproj --no-restore`, the CLI compiled apphost `timeout -k 10s 120s packages/cli/tests/Mohist.Cli.Tests/bin/Debug/net11.0/Mohist.Cli.Tests -class Mohist.Cli.Tests.CliRoutingCommandSpecs -automated sync -noColor -noLogo -noAutoReporters` passes with strict assertions for request order, paths, stable ids, exact JSON property sets, and no mutation on failure; its automated discovery reports TestCasesToRun > 0 and its final assembly event reports TestsTotal > 0 with TestsFailed=0, TestsSkipped=0, and TestsNotRun=0."
       ],
       "priority": 1,
       "mode": "AFK",
@@ -21,18 +21,18 @@
       "output": "CLI routing-rule Agent reference resolution and omission-preserving request bodies.",
       "dependsOn": [],
       "passes": false,
-      "notes": "Focused acceptance command: `dotnet test packages/cli/tests/Mohist.Cli.Tests/Mohist.Cli.Tests.csproj --filter \"FullyQualifiedName~CliRoutingCommandSpecs\"`. Use fake HTTP and assert project-scoped Agent lookup precedes POST/PATCH, omitted options are absent from the parsed JSON object, and an unknown value produces no mutation request."
+      "notes": "Focused acceptance: build `packages/cli/tests/Mohist.Cli.Tests/Mohist.Cli.Tests.csproj`, then run the executable apphost with `timeout -k 10s 120s`, `-class Mohist.Cli.Tests.CliRoutingCommandSpecs`, `-automated sync`, `-noColor`, `-noLogo`, and `-noAutoReporters`. Parse the automated discovery-complete event for TestCasesToRun > 0 and the test-assembly-finished event for TestsTotal > 0, TestsFailed=0, TestsSkipped=0, and TestsNotRun=0. Use fake HTTP and assert project-scoped Agent lookup precedes POST/PATCH, omitted options are absent from the parsed JSON object, and an unknown value produces no mutation request."
     },
     {
       "id": "T-002",
       "title": "Correct the minimal Server routing-rule PATCH presence contract",
       "spec": "specs/routing-rule-agent-reference/spec.md",
-      "description": "Align RoutingRuleUpdateRequest.Raw, Fields, and RoutingRuleStore.UpdateAsync on the exact JSON vocabulary name, match, agentId, responsePrompt, and continue. Apply present fields and preserve absent fields without adding backend Agent lookup or routing DSL behavior.",
+      "description": "Align RoutingRuleUpdateRequest.Raw, Fields, and RoutingRuleStore.UpdateAsync on the exact JSON vocabulary name, match, agentId, responsePrompt, and continue. Apply present fields and preserve absent fields without adding backend Agent lookup or routing DSL behavior. Keep store application in RoutingRuleStoreSpecs; because no current class owns RoutingRuleUpdateRequest.BindAsync, implementation MAY add the narrowly named Server SpecTests class RoutingRulePatchRoutesSpecs for API binder/presence coverage.",
       "acceptanceCriteria": [
         "Server presence tokens are exactly the lower camel-case JSON names `name`, `match`, `agentId`, `responsePrompt`, and `continue`; C# member casing is not used as a presence token.",
         "PATCH values for name, match, agentId, responsePrompt, and continue are each applied when present, while absent values remain unchanged.",
         "A present JSON null is recorded as present and handled by existing validation/normalization rather than silently treated as omission.",
-        "The Server contract test command `dotnet test packages/server/tests/Mohist.Server.SpecTests/Mohist.Server.SpecTests.csproj --filter \"FullyQualifiedName~RoutingRule\"` passes with assertions over Raw/Fields vocabulary and persisted field application.",
+        "After `dotnet build packages/server/tests/Mohist.Server.SpecTests/Mohist.Server.SpecTests.csproj --no-restore -p:SkipWebBuild=true`, the compiled Server apphost runs the existing classes Mohist.Server.SpecTests.Specs.Agent.Services.RoutingRuleStoreSpecs and Mohist.Server.SpecTests.Specs.Api.RoutingTestRoutesSpecs plus the intended API class Mohist.Server.SpecTests.Specs.Api.RoutingRulePatchRoutesSpecs separately with `timeout -k 10s 120s`, `-class`, `-automated sync`, `-noColor`, `-noLogo`, and `-noAutoReporters`; each run asserts Raw/Fields vocabulary and persisted field application, with discovery TestCasesToRun > 0 and final TestsTotal > 0, TestsFailed=0, TestsSkipped=0, and TestsNotRun=0.",
         "No backend Agent name lookup, routing fallback, routing DSL, endpoint expansion, schema expansion, or unrelated Server behavior is introduced."
       ],
       "priority": 2,
@@ -41,7 +41,7 @@
       "output": "Minimal Server routing-rule PATCH presence correction and contract coverage.",
       "dependsOn": [],
       "passes": false,
-      "notes": "Focused acceptance command: `dotnet test packages/server/tests/Mohist.Server.SpecTests/Mohist.Server.SpecTests.csproj --filter \"FullyQualifiedName~RoutingRule\"`. The test must prove supplied name/match/AgentId/prompt updates cannot be ignored by casing mismatch and that absent fields are preserved."
+      "notes": "Focused acceptance: build `packages/server/tests/Mohist.Server.SpecTests/Mohist.Server.SpecTests.csproj --no-restore -p:SkipWebBuild=true`, then run the executable apphost separately for `Mohist.Server.SpecTests.Specs.Agent.Services.RoutingRuleStoreSpecs`, `Mohist.Server.SpecTests.Specs.Api.RoutingTestRoutesSpecs`, and `Mohist.Server.SpecTests.Specs.Api.RoutingRulePatchRoutesSpecs` under `timeout -k 10s 120s` with `-automated sync -noColor -noLogo -noAutoReporters`. The current `RoutingTestRoutesSpecs` owns `/routing/test`, not the PATCH binder; implementation MAY add `RoutingRulePatchRoutesSpecs` as the narrowly named binder/route owner. Parse each automated discovery-complete event for TestCasesToRun > 0 and each test-assembly-finished event for TestsTotal > 0, TestsFailed=0, TestsSkipped=0, and TestsNotRun=0. The tests must prove supplied name/match/AgentId/prompt updates cannot be ignored by casing mismatch and that absent fields are preserved."
     },
     {
       "id": "T-003",
@@ -49,7 +49,7 @@
       "spec": "specs/routing-rule-agent-reference/spec.md",
       "description": "Run the focused CLI and Server contract suites plus repository structural and full gates after the two boundary repairs.",
       "acceptanceCriteria": [
-        "The combined contract command `dotnet test Mohist.sln -p:SkipWebBuild=true --filter \"FullyQualifiedName~CliRoutingCommandSpecs|FullyQualifiedName~RoutingRule\"` passes.",
+        "The focused CLI apphost and the three focused Server apphost class runs defined for T-001 and T-002 pass independently; every run executes a compiled apphost under `timeout -k 10s 120s` with automated/no-color output and rejects discovery TestCasesToRun=0, TestsTotal=0, TestsFailed>0, TestsSkipped>0, or TestsNotRun>0.",
         "`npm run docs:check` passes without changing product documentation files.",
         "`npm run archtest` passes.",
         "`npm run test:fast` passes.",
@@ -62,7 +62,7 @@
       "output": "Routing-rule Agent reference contract verification evidence.",
       "dependsOn": ["T-001", "T-002"],
       "passes": false,
-      "notes": "Run exact commands: `dotnet test packages/cli/tests/Mohist.Cli.Tests/Mohist.Cli.Tests.csproj --filter \"FullyQualifiedName~CliRoutingCommandSpecs\"`; `dotnet test packages/server/tests/Mohist.Server.SpecTests/Mohist.Server.SpecTests.csproj --filter \"FullyQualifiedName~RoutingRule\"`; `dotnet test Mohist.sln -p:SkipWebBuild=true --filter \"FullyQualifiedName~CliRoutingCommandSpecs|FullyQualifiedName~RoutingRule\"`; `npm run docs:check`; `npm run archtest`; `npm run test:fast`; `npm run verify`."
+      "notes": "Run the exact build-then-apphost shell block in design.md: build the CLI and Server test projects, then run `Mohist.Cli.Tests` with `-class Mohist.Cli.Tests.CliRoutingCommandSpecs`, `Mohist.Server.SpecTests` with `-class Mohist.Server.SpecTests.Specs.Agent.Services.RoutingRuleStoreSpecs`, `Mohist.Server.SpecTests` with `-class Mohist.Server.SpecTests.Specs.Api.RoutingTestRoutesSpecs`, and `Mohist.Server.SpecTests` with `-class Mohist.Server.SpecTests.Specs.Api.RoutingRulePatchRoutesSpecs`; every invocation uses `timeout -k 10s 120s -automated sync -noColor -noLogo -noAutoReporters` and strict discovery/execution count parsing. Keep `npm run docs:check`; `npm run archtest`; `npm run test:fast`; and `npm run verify`."
     }
   ]
 }
