@@ -1,7 +1,3 @@
----
-status: implemented
----
-
 # Plan Artifacts
 
 The default Workflow separates free-form planning from machine execution

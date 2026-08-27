@@ -1,7 +1,3 @@
----
-status: implemented
----
-
 # Workflow Profile
 
 > **Status: legacy implementation.** The `agentRuntime` projection and `uses` Action selection below
