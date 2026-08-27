@@ -84,8 +84,17 @@ public sealed partial class AgentSessionGrain
             || !string.Equals(reservation.OperationId, operationId, StringComparison.Ordinal)
             || !string.Equals(reservation.OwnerProcessGeneration, ownerProcessGeneration, StringComparison.Ordinal))
             throw new StaleRuntimeSessionBindingException(session.Id, operationId, reservation?.OperationId);
-        if (!string.Equals(reservation.Command, CommandName(command), StringComparison.Ordinal))
+        var commandName = CommandName(command);
+        if (!string.Equals(reservation.Command, commandName, StringComparison.Ordinal))
             throw new RecoveryOperationInProgressException(session.Id, reservation.Command);
+        var admission = session.Status.SessionCommandAdmissionFacts?.LastOrDefault(candidate =>
+            string.Equals(candidate.OperationId, operationId, StringComparison.Ordinal));
+        if (!reservation.EffectAdmitted
+            || admission is null
+            || !string.Equals(admission.Command, commandName, StringComparison.Ordinal)
+            || !string.Equals(admission.IdempotencyKey, reservation.IdempotencyKey, StringComparison.Ordinal)
+            || !string.Equals(admission.OwnerProcessGeneration, ownerProcessGeneration, StringComparison.Ordinal))
+            throw new StaleRuntimeSessionBindingException(session.Id, operationId, admission?.OperationId);
         return reservation;
     }
 

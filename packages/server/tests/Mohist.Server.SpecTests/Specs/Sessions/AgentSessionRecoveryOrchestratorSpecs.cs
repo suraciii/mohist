@@ -46,7 +46,7 @@ public sealed class AgentSessionRecoveryOrchestratorSpecs : IClassFixture<AgentS
     [Theory]
     [InlineData(SessionCommandKind.Compact)]
     [InlineData(SessionCommandKind.Reset)]
-    public async Task RecoveryCommand_InvalidRunnerResult_RetriesPersistedOperation(SessionCommandKind command)
+    public async Task RecoveryCommand_AdmittedInvalidResultFailsClosedWithoutRedelivery(SessionCommandKind command)
     {
         var (_, sessionId) = await CreateIdleSessionAsync($"runtime-invalid-{command.ToString().ToLowerInvariant()}");
         var dispatcher = new RecordingSessionCommandDispatcher();
@@ -61,7 +61,13 @@ public sealed class AgentSessionRecoveryOrchestratorSpecs : IClassFixture<AgentS
         Assert.Equal(502, first.Status);
         Assert.Equal("runner_invalid_response", first.Body.GetProperty("code").GetString());
         Assert.Equal(503, retry.Status);
+        Assert.Equal("runner_unavailable", retry.Body.GetProperty("code").GetString());
         Assert.Single(dispatcher.Requests);
+
+        var session = Assert.IsType<AgentSession>(await _fixture.StateStore.LoadAsync(sessionId));
+        var admission = Assert.Single(session.Status.SessionCommandAdmissionFacts!);
+        Assert.Null(admission.Outcome);
+        Assert.Null(session.Status.PendingReset);
     }
 
     [Fact]

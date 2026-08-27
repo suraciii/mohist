@@ -827,6 +827,7 @@ public sealed partial class AgentSessionFollowupGrainSpecs : IClassFixture<Agent
         var (grain, sessionId) = await CreateAttachedSessionAsync("runtime-recovery-passed");
 
         var reserve = await grain.PrepareSessionCommandAsync(SessionCommandKind.Compact, "test-generation", "recovery-done-key");
+        await grain.AdmitSessionCommandEffectAsync(reserve.OperationId, "test-generation");
         await grain.CompleteCompactAsync(new CompleteCompactAgentSessionCommand(reserve.OperationId, "test-generation", Summary: "done"));
 
         _fixture.TimeProvider.Advance(TimeSpan.FromMinutes(6));
