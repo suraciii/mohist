@@ -106,7 +106,6 @@ function createExecutor(
     piRuntime as never,
     undefined,
     null,
-    25,
   )
   return { executor, outbox }
 }
@@ -417,40 +416,27 @@ describe('WorkExecutor runtime failure convergence', () => {
 
     expect(result.status).toBe('failed')
     expect(result.error?.code).toBe('session-binding-failed')
-    expect(result.error?.message).toContain('not reached a terminal state')
+    expect(result.error?.message).toContain('ordinary turns fail closed')
     expect(createSession).not.toHaveBeenCalled()
     expect(runTurn).not.toHaveBeenCalled()
     expect(outbox.eventTypeList()).toEqual([])
   })
 
-  it('waits for a same-session predecessor closeout to settle before proceeding', async () => {
+  it('fails ordinary turns closed after one unsettled Server query without polling', async () => {
     const createSession = vi.fn()
-    const runTurn = vi.fn(async () => ({
-      ok: true as const,
-      value: { facts: { finalAssistantText: 'done', runtimeSessionId: 'runtime-1', workDir } },
-      diagnostics: [],
-    }))
-    let openCalls = 0
+    const runTurn = vi.fn()
+    const open = vi.fn(async () => ({ runtimeSessionId: 'runtime-old', workDir, status: 'active' }))
     const { executor, outbox } = createExecutor(
       fakeRuntime({ createSession, runTurn }),
-      fakeConnection({
-        openWorkflowAgentSession: async () => {
-          openCalls += 1
-          return openCalls === 1
-            ? { runtimeSessionId: 'runtime-old', workDir, status: 'active' }
-            : { runtimeSessionId: 'runtime-old', workDir, status: 'idle' }
-        },
-      }),
+      fakeConnection({ openWorkflowAgentSession: open }),
     )
 
     const result = await executor.execute(work(), new AbortController().signal)
 
-    // The predecessor's closeout settles between polls, so the turn
-    // proceeds on the settled session instead of failing closed.
-    expect(openCalls).toBeGreaterThanOrEqual(2)
+    expect(result.error?.code).toBe('session-binding-failed')
+    expect(open).toHaveBeenCalledOnce()
     expect(createSession).not.toHaveBeenCalled()
-    expect(runTurn).toHaveBeenCalled()
-    expect(result.error?.code).not.toBe('session-binding-failed')
+    expect(runTurn).not.toHaveBeenCalled()
     expect(outbox.eventTypeList()).toEqual([])
   })
 })

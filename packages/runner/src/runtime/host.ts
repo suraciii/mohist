@@ -41,9 +41,6 @@ import {
 } from './host-update-shutdown.js'
 import { getOpenCodeRuntimeFactory, type OpenCodeRuntime } from './opencode/index.js'
 import { getPiRuntimeFactory, parseProviderErrorPolicy, type PiRuntime } from './pi/index.js'
-import { SessionCommandJournal } from './session-command-journal.js'
-import { FollowupOperationJournal } from './followup-operation-journal.js'
-import { CancelOperationJournal } from './cancel-operation-journal.js'
 import type { PendingUpdateOperation } from './update-operation.js'
 import { workKey } from './work-key.js'
 import { loadBuildInfo } from './build-info.js'
@@ -134,14 +131,6 @@ export class RunnerHost {
   private piRuntimeGeneration = 0
   private providerPolicyDiagnostic: string | null = null
   private lastProviderPolicyDiagnosticLogged: string | null = null
-  /**
-   * Per-runner journal for SessionCommand dedup/recovery.
-   * Shared with the control transport so its Session command handler reuses the in-flight
-   * dedup + on-disk recovery the host owns.
-   */
-  private readonly sessionCommandJournal: SessionCommandJournal
-  private readonly followupOperationJournal: FollowupOperationJournal
-  private readonly cancelOperationJournal: CancelOperationJournal
   private readonly fetchPendingUpdateOperation: (signal: AbortSignal) => Promise<PendingUpdateOperation | null>
   private readonly shutdownHandoffBudgetMs: number
   private readonly shutdownStopBudgetMs: number
@@ -213,9 +202,6 @@ export class RunnerHost {
       () => this.openCodeRuntime,
     )
     this.workspace = new WorkspaceManager(options.runnerRoot, this.workspaceRegistry, options.runnerId)
-    this.sessionCommandJournal = new SessionCommandJournal(options.runnerRoot)
-    this.followupOperationJournal = new FollowupOperationJournal(options.runnerRoot)
-    this.cancelOperationJournal = new CancelOperationJournal(options.runnerRoot)
     this.waitForConnectionRetry = dependencies.waitForConnectionRetry ?? hostDelay
     this.shutdownHandoffBudgetMs = positiveBudget(dependencies.shutdownHandoffBudgetMs, SHUTDOWN_HANDOFF_BUDGET_MS)
     this.shutdownStopBudgetMs = positiveBudget(dependencies.shutdownStopBudgetMs, 2_000)
@@ -232,7 +218,6 @@ export class RunnerHost {
     this.control = new RunnerControlWebSocketClient(
       options.serverUrl,
       options.runnerId,
-      options.runnerRoot,
       this.buildGitHash,
       {
         onReconnected: () => this.onDispatchReconnected(),
@@ -257,7 +242,6 @@ export class RunnerHost {
             runnerRoot: options.runnerRoot,
             managerExecutionRegistry: this.managerExecutionRegistry,
             onManagerExecutionFinished: (executionId) => this.revokeManagerExecution(executionId),
-            followupOperationJournal: this.followupOperationJournal,
             skillResolver: this.skillResolver,
             strictExecutionSourceValidation: options.strictExecutionSourceValidation === true,
           },
@@ -268,7 +252,6 @@ export class RunnerHost {
             agentSessionRuntimeEventQueue: this.agentSessionRuntimeEventQueue,
             managerExecutionRegistry: this.managerExecutionRegistry,
             onManagerExecutionFinished: (executionId) => this.revokeManagerExecution(executionId),
-            cancelOperationJournal: this.cancelOperationJournal,
           },
           sessionCommand: {
             handler: createSessionCommandRouter(
@@ -278,7 +261,6 @@ export class RunnerHost {
               },
               this.agentSessionRuntimeEventQueue,
             ),
-            journal: this.sessionCommandJournal,
           },
           onWorkflowStatusChanged: async () => {
             const signal = this.activeSignal
@@ -286,9 +268,7 @@ export class RunnerHost {
           },
         }),
         agentSessionRuntimeEventQueue: this.agentSessionRuntimeEventQueue,
-        sessionCommandJournal: this.sessionCommandJournal,
-        followupOperationJournal: this.followupOperationJournal,
-        cancelOperationJournal: this.cancelOperationJournal,
+        processGeneration: this.processGeneration,
         strictExecutionSourceValidation: options.strictExecutionSourceValidation === true,
       },
       this.buildInfo,

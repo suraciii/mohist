@@ -271,6 +271,7 @@ function isSessionCommand(value: ObjectValue): value is ObjectValue & SessionCom
     !nonempty(value.runtime) ||
     !nonempty(value.runnerId) ||
     !nonempty(value.operationId) ||
+    !nonempty(value.processGeneration) ||
     (value.command !== 'compact' && value.command !== 'reset') ||
     !nullableNonemptyString(value.runtimeSessionId) ||
     !nullableNonemptyString(value.workDir) ||
@@ -311,6 +312,7 @@ function normalizeSessionCommand(params: ObjectValue): SessionCommandRequest {
     workDir: params.workDir ?? null,
     expectedRuntimeSessionId: params.expectedRuntimeSessionId ?? null,
     projectId: params.projectId ?? null,
+    processGeneration: params.processGeneration,
   } as unknown as SessionCommandRequest
 }
 

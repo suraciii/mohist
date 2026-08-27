@@ -25,6 +25,8 @@ public interface IRunnerGrain : IGrainWithStringKey
     Task EndPollAsync(Guid admissionToken);
     /// <summary>Confirms that the admitted poll still owns the current process generation.</summary>
     Task<bool> ValidatePollAsync(Guid admissionToken, string processGeneration);
+    /// <summary>Validates a caller-supplied opaque process generation against the current registration.</summary>
+    Task<bool> IsCurrentProcessGenerationAsync(string processGeneration);
     /// <summary>
     /// Records an ephemeral readiness observation for the current runner
     /// connection. The snapshot is only an admission fence; it never settles

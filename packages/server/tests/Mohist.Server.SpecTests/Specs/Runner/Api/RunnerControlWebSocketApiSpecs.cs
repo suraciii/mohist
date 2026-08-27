@@ -78,9 +78,10 @@ public sealed class RunnerControlWebSocketApiSpecs(MohistIntegrationFixture fixt
     public async Task UpgradedConnectionCarriesTypedRequestAndResponse()
     {
         var runnerId = $"ws-runner-{Guid.NewGuid():N}";
+        await RegisterGenerationAsync(runnerId);
         var client = AuthorizedWebSocketClient(Guid.NewGuid());
         using var socket = await client.ConnectAsync(
-            new Uri($"ws://localhost/api/runner/{runnerId}/control?buildGitHash=abc123&component=runner&version=1.2.3"),
+            ControlUri(runnerId, "buildGitHash=abc123&component=runner&version=1.2.3"),
             TestContext.Current.CancellationToken);
         var registry = fixture.Services.GetRequiredService<RunnerControlWebSocketRegistry>();
         await registry.WaitForConnectionAsync(runnerId, TestContext.Current.CancellationToken);
@@ -120,8 +121,9 @@ public sealed class RunnerControlWebSocketApiSpecs(MohistIntegrationFixture fixt
         });
         var client = AuthorizedWebSocketClient(Guid.NewGuid());
         using var socket = await client.ConnectAsync(
-            new Uri($"ws://localhost/api/runner/{runnerId}/control" +
-                "?buildGitHash=build-hash&component=runner&version=1.2.3" +
+            ControlUri(
+                runnerId,
+                "buildGitHash=build-hash&component=runner&version=1.2.3" +
                 "&treeHash=tree-hash&artifactDigest=artifact-digest&releaseId=release-id&generation=17"),
             TestContext.Current.CancellationToken);
         var registry = fixture.Services.GetRequiredService<RunnerControlWebSocketRegistry>();
@@ -147,9 +149,10 @@ public sealed class RunnerControlWebSocketApiSpecs(MohistIntegrationFixture fixt
     {
         var runnerId = $"ws-bound-{Guid.NewGuid():N}";
         var token = await EnrollRunnerAsync(runnerId);
+        await RegisterGenerationAsync(runnerId);
         var ownClient = RunnerWebSocketClient(token, Guid.NewGuid());
         using var own = await ownClient.ConnectAsync(
-            new Uri($"ws://localhost/api/runner/{runnerId}/control"),
+            ControlUri(runnerId),
             TestContext.Current.CancellationToken);
         var otherClient = RunnerWebSocketClient(token, Guid.NewGuid());
 
@@ -163,14 +166,18 @@ public sealed class RunnerControlWebSocketApiSpecs(MohistIntegrationFixture fixt
     public async Task DuplicateActiveConnectionIdIsRejectedBeforeUpgrade()
     {
         var connectionId = Guid.NewGuid();
+        var firstRunnerId = $"ws-duplicate-one-{Guid.NewGuid():N}";
+        var secondRunnerId = $"ws-duplicate-two-{Guid.NewGuid():N}";
+        await RegisterGenerationAsync(firstRunnerId);
+        await RegisterGenerationAsync(secondRunnerId);
         var firstClient = AuthorizedWebSocketClient(connectionId);
         using var first = await firstClient.ConnectAsync(
-            new Uri($"ws://localhost/api/runner/ws-duplicate-one-{Guid.NewGuid():N}/control"),
+            ControlUri(firstRunnerId),
             TestContext.Current.CancellationToken);
         var secondClient = AuthorizedWebSocketClient(connectionId);
 
         await Assert.ThrowsAnyAsync<Exception>(() => secondClient.ConnectAsync(
-            new Uri($"ws://localhost/api/runner/ws-duplicate-two-{Guid.NewGuid():N}/control"),
+            ControlUri(secondRunnerId),
             TestContext.Current.CancellationToken));
         await first.CloseAsync(WebSocketCloseStatus.NormalClosure, "test complete", TestContext.Current.CancellationToken);
     }
@@ -179,10 +186,11 @@ public sealed class RunnerControlWebSocketApiSpecs(MohistIntegrationFixture fixt
     public async Task ReplacementFencesOldConnectionAndStaleCloseKeepsNewLease()
     {
         var runnerId = $"ws-replace-{Guid.NewGuid():N}";
+        await RegisterGenerationAsync(runnerId);
         var firstId = Guid.NewGuid();
         var firstClient = AuthorizedWebSocketClient(firstId);
         using var first = await firstClient.ConnectAsync(
-            new Uri($"ws://localhost/api/runner/{runnerId}/control"),
+            ControlUri(runnerId),
             TestContext.Current.CancellationToken);
         var registry = fixture.Services.GetRequiredService<RunnerControlWebSocketRegistry>();
         await registry.WaitForConnectionAsync(runnerId, TestContext.Current.CancellationToken);
@@ -198,7 +206,7 @@ public sealed class RunnerControlWebSocketApiSpecs(MohistIntegrationFixture fixt
         var secondId = Guid.NewGuid();
         var secondClient = AuthorizedWebSocketClient(secondId);
         using var second = await secondClient.ConnectAsync(
-            new Uri($"ws://localhost/api/runner/{runnerId}/control"),
+            ControlUri(runnerId),
             TestContext.Current.CancellationToken);
         var replaced = await first.ReceiveAsync(firstBuffer, TestContext.Current.CancellationToken);
         Assert.Equal(WebSocketMessageType.Close, replaced.MessageType);
@@ -233,6 +241,7 @@ public sealed class RunnerControlWebSocketApiSpecs(MohistIntegrationFixture fixt
     public async Task CancelledInstallationWaiterDoesNotSupersedeInstaller()
     {
         var runnerId = $"ws-install-race-{Guid.NewGuid():N}";
+        await RegisterGenerationAsync(runnerId);
         var firstId = Guid.NewGuid();
         var secondId = Guid.NewGuid();
         var tracker = new RunnerConnectionTracker();
@@ -260,7 +269,7 @@ public sealed class RunnerControlWebSocketApiSpecs(MohistIntegrationFixture fixt
         using var secondStop = new CancellationTokenSource();
         using var firstSocket = new BlockingWebSocket();
         using var secondSocket = new BlockingWebSocket();
-        var handshake = new RunnerControlHandshake(null, null, null, null, null, null, null, null);
+        var handshake = new RunnerControlHandshake(null, null, null, null, null, null, null, null, "test-generation");
 
         var firstRun = registry.RunAsync(runnerId, firstReservation, firstSocket, handshake, firstStop.Token);
         await firstAcquired.Task.WaitAsync(TestContext.Current.CancellationToken);
@@ -286,6 +295,7 @@ public sealed class RunnerControlWebSocketApiSpecs(MohistIntegrationFixture fixt
     public async Task ActiveDisconnectNotifiesTrackedAgentSession()
     {
         var runnerId = $"ws-session-runner-{Guid.NewGuid():N}";
+        await RegisterGenerationAsync(runnerId);
         var sessionId = $"ws-session-{Guid.NewGuid():N}";
         var runtimeSessionId = $"runtime-{Guid.NewGuid():N}";
         var session = fixture.Grains.GetGrain<IAgentSessionGrain>(sessionId);
@@ -306,7 +316,7 @@ public sealed class RunnerControlWebSocketApiSpecs(MohistIntegrationFixture fixt
         tracker.RegisterSession(runnerId, sessionId);
         var client = AuthorizedWebSocketClient(Guid.NewGuid());
         using var socket = await client.ConnectAsync(
-            new Uri($"ws://localhost/api/runner/{runnerId}/control"),
+            ControlUri(runnerId),
             TestContext.Current.CancellationToken);
         var registry = fixture.Services.GetRequiredService<RunnerControlWebSocketRegistry>();
         await registry.WaitForConnectionAsync(runnerId, TestContext.Current.CancellationToken);
@@ -317,6 +327,18 @@ public sealed class RunnerControlWebSocketApiSpecs(MohistIntegrationFixture fixt
 
         Assert.Equal("unknown", (await session.GetAsync())!.Status);
     }
+
+    private static Uri ControlUri(string runnerId, string? query = null) => new(
+        $"ws://localhost/api/runner/{runnerId}/control?processGeneration={Uri.EscapeDataString(TestRunnerGenerationExtensions.ProcessGeneration)}" +
+        (query is null ? string.Empty : $"&{query}"));
+
+    private async Task RegisterGenerationAsync(string runnerId) =>
+        await fixture.Client.PostOkAsync($"/api/runner/{runnerId}/register", new
+        {
+            processGeneration = TestRunnerGenerationExtensions.ProcessGeneration,
+            capabilities = new[] { "spec/*" },
+            hostname = $"host-{Guid.NewGuid():N}",
+        });
 
     private Microsoft.AspNetCore.TestHost.WebSocketClient AuthorizedWebSocketClient(Guid? connectionId = null)
     {

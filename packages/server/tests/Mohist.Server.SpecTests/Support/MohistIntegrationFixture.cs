@@ -387,8 +387,10 @@ public class MohistWebApplicationFactory : WebApplicationFactory<Program>
             services.RemoveAll<IAgentSessionPersistenceObserver>();
             services.AddSingleton<IAgentSessionPersistenceObserver>(Persistence);
             services.RemoveAll<IRunnerControlTransport>();
+            services.RemoveAll<IRunnerSessionCommandTransport>();
             services.AddSingleton<RecordingRunnerControlTransport>();
             services.AddSingleton<IRunnerControlTransport>(provider => provider.GetRequiredService<RecordingRunnerControlTransport>());
+            services.AddSingleton<IRunnerSessionCommandTransport>(provider => provider.GetRequiredService<RecordingRunnerControlTransport>());
             services.RemoveAll<ConfigService>();
             services.RemoveAll<IConfigDocumentStore>();
             services.AddSingleton<InMemoryConfigDocumentStore>();

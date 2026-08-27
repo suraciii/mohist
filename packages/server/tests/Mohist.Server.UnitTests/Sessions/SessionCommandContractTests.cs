@@ -16,11 +16,12 @@ public class SessionCommandContractTests
             RunnerId: "runner-1",
             WorkDir: "/work/project",
             Command: SessionCommandKind.Compact,
-            OperationId: "compact-operation");
+            OperationId: "compact-operation",
+            ProcessGeneration: "test-generation");
 
         var requestJson = JSON.SerializeToElement(request);
         Assert.Equal(
-            ["command", "operationId", "runnerId", "runtime", "runtimeSessionId", "sessionId", "workDir"],
+            ["command", "operationId", "processGeneration", "runnerId", "runtime", "runtimeSessionId", "sessionId", "workDir"],
             PropertyNames(requestJson));
         Assert.Equal("compact", requestJson.GetProperty("command").GetString());
         Assert.False(requestJson.TryGetProperty("expectedRuntimeSessionId", out _));
@@ -41,11 +42,12 @@ public class SessionCommandContractTests
             WorkDir: null,
             Command: SessionCommandKind.Reset,
             ExpectedRuntimeSessionId: "runtime-1",
-            OperationId: "reset-operation");
+            OperationId: "reset-operation",
+            ProcessGeneration: "test-generation");
 
         var requestJson = JSON.SerializeToElement(request);
         Assert.Equal(
-            ["command", "expectedRuntimeSessionId", "operationId", "runnerId", "runtime", "runtimeSessionId", "sessionId", "workDir"],
+            ["command", "expectedRuntimeSessionId", "operationId", "processGeneration", "runnerId", "runtime", "runtimeSessionId", "sessionId", "workDir"],
             PropertyNames(requestJson));
         Assert.Equal("reset", requestJson.GetProperty("command").GetString());
         Assert.Equal("runtime-1", requestJson.GetProperty("expectedRuntimeSessionId").GetString());

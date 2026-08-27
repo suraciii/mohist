@@ -5,12 +5,14 @@ using Mohist.Server.Runner.Services.WebSocket;
 
 namespace Mohist.Server.SpecTests.Support;
 
-public sealed class RecordingRunnerControlTransport : IRunnerControlTransport
+public sealed class RecordingRunnerControlTransport : IRunnerControlTransport, IRunnerSessionCommandTransport
 {
     private readonly AsyncLocal<RecordingRunnerControlGlobalState?> _globalState = new();
     private readonly ConcurrentDictionary<string, RecordingRunnerControlOwnerState> _owners = new(StringComparer.Ordinal);
 
     public RecordingRunnerControlTransport() => _globalState.Value = new RecordingRunnerControlGlobalState(false);
+
+    public string ProcessGeneration { get; set; } = "test-generation";
 
     private RecordingRunnerControlGlobalState GlobalState =>
         _globalState.Value ??= new RecordingRunnerControlGlobalState(false);
@@ -48,6 +50,34 @@ public sealed class RecordingRunnerControlTransport : IRunnerControlTransport
 
     public void SetInvocationResponseFactory(string method, Func<IReadOnlyList<object?>, object?> responseFactory)
         => GlobalState.SetResponseFactory(method, responseFactory);
+
+    public Task<string> GetCurrentProcessGenerationAsync(string runnerId, CancellationToken ct = default)
+    {
+        ct.ThrowIfCancellationRequested();
+        return Task.FromResult(ProcessGeneration);
+    }
+
+    public Task<bool> IsCurrentProcessGenerationAsync(
+        string runnerId,
+        string processGeneration,
+        CancellationToken ct = default)
+    {
+        ct.ThrowIfCancellationRequested();
+        return Task.FromResult(string.Equals(ProcessGeneration, processGeneration, StringComparison.Ordinal));
+    }
+
+    public Task<TResult> SendRequestAsync<TParams, TResult>(
+        string runnerId,
+        string processGeneration,
+        string method,
+        TParams parameters,
+        CancellationToken ct = default)
+    {
+        if (!string.Equals(ProcessGeneration, processGeneration, StringComparison.Ordinal))
+            throw new RunnerControlUnavailableException(
+                $"Runner '{runnerId}' has no recording control connection for the supplied process generation");
+        return SendRequestAsync<TParams, TResult>(runnerId, method, parameters, ct: ct);
+    }
 
     public async Task<TResult> SendRequestAsync<TParams, TResult>(
         string runnerId,

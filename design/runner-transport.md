@@ -1,8 +1,9 @@
-# Runner Control Transport Migration
+# Runner Control Transport
 
-Mohist currently uses HTTP for durable Runner work and SignalR client-result
-calls for Server-to-Runner control. This change replaces only the SignalR
-control transport. It does not redesign work dispatch, Session operations,
+Mohist uses HTTP for Runner registration, work dispatch, result reporting, and
+volatile evidence delivery. The native WebSocket carries Server-to-Runner
+control. This document describes the current contract; the migration notes
+below are historical context only. It does not redesign work dispatch,
 Workspace identity, or the domain event bus.
 
 ## Migration Scope
@@ -38,8 +39,10 @@ dispatch code. It does not keep SignalR as a fallback after cutover.
 - AgentSession remains the authority for Follow-up, Stop, Compact, Reset, and
   their stable operation identities. The transport does not create a generic
   command ledger.
-- Runner keeps its existing operation journals and operation-specific recovery
-  rules. A transport retry never authorizes an unsafe effect replay.
+- Runner keeps only process-lifetime coalescing for concurrent mutating
+  controls. Server-owned operation admission and settlement decide whether a
+  retry may apply an effect; Runner does not retain operation effect memory
+  across restart.
 - Workspace queries keep their current domain inputs and results. Named
   Workspace and Repository cleanup is a separate design change.
 - Workflow terminal status remains a best-effort notification. Runner's HTTP
@@ -316,11 +319,13 @@ otherwise change what a Workspace read means.
 ### Mutating requests
 
 `session.followup`, `session.stop`, and `session.command` carry the stable
-business operation identity prepared by AgentSession. Runner checks its
-existing journal before applying an effect. Follow-up keeps its current
-deduplication by `(sessionKey, operationId)` and does not add payload storage.
-Stop and Session command retain their current request comparison and conflict
-behavior. Each operation follows its existing reconciliation rule.
+business operation identity prepared by AgentSession. Runner coalesces live
+concurrent duplicates in process memory only. Follow-up and Stop have no
+Runner journal. AgentSession records Compact and Reset effect admission on the
+Server before dispatch; a same-ID outcome-less admission is unavailable after
+restart, while a new caller identity may retry on a validated replacement
+process generation. Stop settles from the Server-recorded identity and the
+Runtime witness for the target Turn.
 
 A lost WebSocket response does not settle the business operation. AgentSession
 keeps its current pending or unknown state and decides whether to redeliver,
@@ -368,7 +373,7 @@ notification callback to one status-convergence pass.
    timeout, bounded queues, connection-ID upgrade header, and preserved Hub
    lifecycle hooks. Keep the endpoint dormant and heartbeat behavior unchanged.
 3. Implement the Runner WebSocket client and bind the typed methods to the
-   existing handlers and journals.
+   existing handlers. (Historical migration step.)
 4. In one release candidate, switch every Server control caller to the
    WebSocket registry and delete `RunnerHub`, the Runner SignalR client,
    recording SignalR test fakes, and unused SignalR package dependencies. In
@@ -404,6 +409,8 @@ RunnerHost opens the matching native client after HTTP registration and binds
 the transport-neutral handler catalog. Runner-specific SignalR endpoints,
 clients, handlers, test fakes, and dependencies are removed; `/hubs/events`
 has since been replaced by the project-scoped native event WebSocket. Existing HTTP registration,
-heartbeat, work poll and report, Runtime events, operation journals, and
-Workflow status reconciliation remain unchanged. Mixed old and new Runner
-control clients are unsupported.
+heartbeat, work poll and report, Runtime event and task-log queues, and
+Workflow status reconciliation remain unchanged. The current Runner keeps no
+operation journals; Server identity and admission state survive Runner
+restart, while Runner effect memory does not. Mixed old and new Runner control
+clients are unsupported.

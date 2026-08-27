@@ -26,7 +26,8 @@ public sealed record SessionCommandRequest(
     [property: Id(5)] SessionCommandKind Command,
     [property: Id(6)] string? ExpectedRuntimeSessionId = null,
     [property: Id(7)] string OperationId = "",
-    [property: Id(8)] string? ProjectId = null);
+    [property: Id(8)] string? ProjectId = null,
+    [property: Id(9)] string ProcessGeneration = "");
 
 public sealed record SessionCommandResult(
     bool Ok,
@@ -35,6 +36,8 @@ public sealed record SessionCommandResult(
 
 public interface ISessionCommandDispatcher
 {
+    Task<string> GetCurrentProcessGenerationAsync(string runnerId, CancellationToken ct = default);
+    Task<bool> IsCurrentProcessGenerationAsync(string runnerId, string processGeneration, CancellationToken ct = default);
     Task<SessionCommandResult> DispatchAsync(
         SessionCommandRequest request,
         CancellationToken ct = default);
