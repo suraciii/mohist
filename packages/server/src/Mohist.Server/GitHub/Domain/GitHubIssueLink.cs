@@ -47,6 +47,7 @@ public static class GitHubRemoteOutcome
 {
     public static bool IsUnknown(Exception exception) => exception switch
     {
+        TimeoutException => true,
         TaskCanceledException => true,
         HttpRequestException { StatusCode: null } => true,
         HttpRequestException { StatusCode: HttpStatusCode.RequestTimeout or HttpStatusCode.TooManyRequests } => true,

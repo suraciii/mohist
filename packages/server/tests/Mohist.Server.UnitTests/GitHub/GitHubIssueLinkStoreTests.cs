@@ -203,6 +203,22 @@ public sealed class GitHubIssueLinkStoreTests
     }
 
     [Fact]
+    public async Task ResetMirrorCreateAttemptAsync_ReleasesDefiniteFailureButKeepsPendingLink()
+    {
+        var database = NewDatabase();
+        var store = NewStore(database);
+        var link = await store.CreatePendingAsync("proj_1", "hello-world", 7);
+        await store.TryReserveMirrorCreateAsync(link.Id);
+
+        var reset = await store.ResetMirrorCreateAttemptAsync(link.Id);
+
+        Assert.True(reset!.IsPending);
+        Assert.False(reset.MirrorCreateAttempted);
+        Assert.Equal(link.MirrorMarker, reset.MirrorMarker);
+        Assert.True((await store.TryReserveMirrorCreateAsync(link.Id))!.Acquired);
+    }
+
+    [Fact]
     public async Task SetMirror_DuplicateGithubIssueLeavesSecondPending()
     {
         var database = NewDatabase();

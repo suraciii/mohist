@@ -1,13 +1,18 @@
 using System.Net;
+using System.Text.Json;
 using Microsoft.Extensions.Logging;
 using Mohist.Server.GitHub.Domain;
 using Mohist.Server.GitHub.Ports;
 using Mohist.Server.Infrastructure;
 using Mohist.Server.Infrastructure.Data.Issue;
+using Mohist.Server.Infrastructure.Data.Workflow;
+using Mohist.Server.Infrastructure.Events;
 using Mohist.Server.Infrastructure.Hosting;
 using Mohist.Server.Infrastructure.Orleans;
 using Mohist.Server.Issue.Domain;
+using Mohist.Server.Issue.Domain.Events;
 using Mohist.Server.Issue.Grains;
+using Mohist.Server.Workflow.Domain.Run;
 using DomainIssue = Mohist.Server.Issue.Domain.Issue;
 
 namespace Mohist.Server.GitHub.Infrastructure;
@@ -23,6 +28,8 @@ public sealed class GitHubIssueSynchronizationService : IScopedService
     private readonly GitHubIssueLinkStore _links;
     private readonly GitHubWriteBackFailureStore _failures;
     private readonly IIssueStore _issues;
+    private readonly IWorkflowRunStore _workflowRuns;
+    private readonly IEventStore _events;
     private readonly IGitHubIssuePort _issuePort;
     private readonly IGitHubCommentPort _commentPort;
     private readonly TimeProvider _timeProvider;
@@ -33,6 +40,8 @@ public sealed class GitHubIssueSynchronizationService : IScopedService
         GitHubIssueLinkStore links,
         GitHubWriteBackFailureStore failures,
         IIssueStore issues,
+        IWorkflowRunStore workflowRuns,
+        IEventStore events,
         IGitHubIssuePort issuePort,
         IGitHubCommentPort commentPort,
         TimeProvider timeProvider,
@@ -42,6 +51,8 @@ public sealed class GitHubIssueSynchronizationService : IScopedService
         _links = links;
         _failures = failures;
         _issues = issues;
+        _workflowRuns = workflowRuns;
+        _events = events;
         _issuePort = issuePort;
         _commentPort = commentPort;
         _timeProvider = timeProvider;
@@ -95,6 +106,7 @@ public sealed class GitHubIssueSynchronizationService : IScopedService
                     }
 
                     await PostConfirmationAsync(connection, link, ct);
+                    await ProjectCurrentStateAsync(connection, issue, link, ct);
                     link = await _links.ClearErrorAsync(link.Id, ct) ?? link;
                     return link;
                 }
@@ -170,7 +182,12 @@ public sealed class GitHubIssueSynchronizationService : IScopedService
             await _links.DeleteAsync(current.Id, ct);
         }
 
-        var claim = await _links.ClaimAsync(projectId, connection.RepositoryName, githubIssueNumber, issueNumber, ct);
+        var claim = await _links.ClaimAsync(
+            projectId,
+            connection.RepositoryName,
+            githubIssueNumber,
+            issueNumber,
+            ct);
         if (!claim.Won || claim.Link is null)
             throw new GitHubSynchronizationException("github_issue_already_linked", $"GitHub issue #{githubIssueNumber} is already linked");
 
@@ -186,6 +203,7 @@ public sealed class GitHubIssueSynchronizationService : IScopedService
                 link.MirrorMarker ?? GitHubMirrorMarker.For(link.Id),
                 ct);
             await PostConfirmationAsync(connection, link, ct);
+            await ProjectCurrentStateAsync(connection, issue, link, ct);
             return await _links.ClearErrorAsync(link.Id, ct) ?? link;
         }
         catch (Exception ex) when (!ct.IsCancellationRequested)
@@ -253,31 +271,191 @@ public sealed class GitHubIssueSynchronizationService : IScopedService
             throw new GitHubSynchronizationException("github_mirror_unknown", "GitHub mirror creation is reserved by another synchronization attempt");
         }
 
-        var created = await _issuePort.CreateIssueAsync(connection, issue.Title, issue.Body ?? string.Empty, marker, ct);
+        int created;
+        try
+        {
+            created = await _issuePort.CreateIssueAsync(connection, issue.Title, issue.Body ?? string.Empty, marker, ct);
+        }
+        catch (Exception ex) when (!ct.IsCancellationRequested && !GitHubRemoteOutcome.IsUnknown(ex))
+        {
+            // A known rejection did not create a remote issue, so release the
+            // reservation and let the next explicit sync retry the POST.
+            await _links.ResetMirrorCreateAttemptAsync(link.Id, ct);
+            throw;
+        }
+
         if (created <= 0)
+        {
+            await _links.ResetMirrorCreateAttemptAsync(link.Id, ct);
             throw new GitHubSynchronizationException("github_mirror_number_invalid", "GitHub create issue returned an invalid issue number");
+        }
         return await _links.SetMirrorAsync(link.Id, created, ct);
+    }
+
+    private async Task ProjectCurrentStateAsync(
+        GitHubConnection connection,
+        DomainIssue issue,
+        GitHubIssueLink link,
+        CancellationToken ct)
+    {
+        var workflow = issue.WorkflowRunId is { } workflowRunId
+            ? await _workflowRuns.LoadAsync(workflowRunId, ct)
+            : null;
+        var stateLabel = ResolveStateLabel(issue, workflow);
+        if (stateLabel is not null)
+            await SetStateLabelAsync(connection, link, stateLabel, ct);
+
+        if (issue.HasWorkflowStarted)
+        {
+            await PostCommentAsync(
+                connection,
+                link,
+                GitHubCommentKinds.WorkStarted,
+                GitHubWriteBackComments.WorkStarted(link.IssueNumber),
+                ct);
+        }
+
+        if (workflow?.Stages.Any(stage => stage.ApprovalStatus is not null) == true)
+        {
+            await PostCommentAsync(
+                connection,
+                link,
+                GitHubCommentKinds.ApprovalRequested,
+                GitHubWriteBackComments.ApprovalRequested(link.IssueNumber),
+                ct);
+        }
+
+        switch (issue.Status)
+        {
+            case IssueStatus.Done:
+                var pullRequestUrl = await _commentPort.FindDeliveryPullRequestUrlAsync(
+                    connection,
+                    link.IssueNumber,
+                    ct);
+                await PostCommentAsync(
+                    connection,
+                    link,
+                    GitHubCommentKinds.Completed,
+                    GitHubWriteBackComments.Completed(link.IssueNumber, pullRequestUrl),
+                    ct);
+                await CloseAsync(connection, link, "completed", GitHubCommentKinds.ClosedCompleted, ct);
+                break;
+            case IssueStatus.Cancelled:
+                var reason = await ReadCancellationReasonAsync(issue, ct);
+                await PostCommentAsync(
+                    connection,
+                    link,
+                    GitHubCommentKinds.Cancelled,
+                    GitHubWriteBackComments.Cancelled(link.IssueNumber, reason),
+                    ct);
+                await CloseAsync(connection, link, "not_planned", GitHubCommentKinds.ClosedNotPlanned, ct);
+                break;
+        }
+    }
+
+    private static string? ResolveStateLabel(DomainIssue issue, WorkflowRun? workflow) =>
+        issue.Status switch
+        {
+            IssueStatus.Done => GitHubStateLabels.Done,
+            IssueStatus.InProgress when workflow?.Status == WorkflowRunStatus.AwaitingApproval
+                => GitHubStateLabels.AwaitingApproval,
+            IssueStatus.InProgress when workflow?.Status == WorkflowRunStatus.Failed
+                => GitHubStateLabels.Blocked,
+            IssueStatus.InProgress => GitHubStateLabels.InProgress,
+            _ => null,
+        };
+
+    private async Task<string?> ReadCancellationReasonAsync(DomainIssue issue, CancellationToken ct)
+    {
+        var events = await _events.ListIssueEventsAsync(issue.ProjectId, issue.Number, limit: 200, ct);
+        foreach (var stored in events.OrderByDescending(item => item.Id))
+        {
+            if (stored.Envelope.Type != EventCatalog.ReverseDns.IssueCancelled)
+                continue;
+            return stored.Envelope.Data?.Deserialize<IssueCancelled>(CloudEvent.JsonOptions)?.Reason;
+        }
+        return null;
     }
 
     private async Task PostConfirmationAsync(
         GitHubConnection connection,
         GitHubIssueLink link,
+        CancellationToken ct) =>
+        await PostCommentAsync(
+            connection,
+            link,
+            GitHubCommentKinds.MirrorCreated,
+            $"Mohist issue #{link.IssueNumber} · linked from Mohist",
+            ct);
+
+    private async Task PostCommentAsync(
+        GitHubConnection connection,
+        GitHubIssueLink link,
+        string commentKey,
+        string body,
         CancellationToken ct)
     {
-        if (!await _links.TryReserveCommentAsync(link.Id, GitHubCommentKinds.MirrorCreated, ct)) return;
+        if (!await _links.TryReserveCommentAsync(link.Id, commentKey, ct))
+        {
+            var current = await _links.GetByIdAsync(link.Id, ct);
+            if (current?.HasPostedComment(commentKey) == true)
+                return;
+            throw new GitHubSynchronizationException(
+                "github_comment_pending",
+                $"GitHub comment operation '{commentKey}' is still reserved; reconcile it before retrying");
+        }
+
         try
         {
-            await _commentPort.PostCommentAsync(
-                connection,
-                link.GithubIssueNumber,
-                $"Mohist issue #{link.IssueNumber} · linked from Mohist",
-                ct);
-            await _links.MarkCommentPostedAsync(link.Id, GitHubCommentKinds.MirrorCreated, ct);
+            await _commentPort.PostCommentAsync(connection, link.GithubIssueNumber, body, ct);
+            await _links.MarkCommentPostedAsync(link.Id, commentKey, ct);
         }
         catch (Exception ex) when (!ct.IsCancellationRequested)
         {
             if (!GitHubRemoteOutcome.IsUnknown(ex))
-                await _links.ReleaseCommentReservationAsync(link.Id, GitHubCommentKinds.MirrorCreated, ct);
+                await _links.ReleaseCommentReservationAsync(link.Id, commentKey, ct);
+            throw;
+        }
+    }
+
+    private async Task SetStateLabelAsync(
+        GitHubConnection connection,
+        GitHubIssueLink link,
+        string stateLabel,
+        CancellationToken ct)
+    {
+        if (string.Equals(link.StateLabel, stateLabel, StringComparison.Ordinal))
+            return;
+        await _commentPort.ReplaceStateLabelAsync(connection, link.GithubIssueNumber, stateLabel, ct);
+        await _links.SetStateLabelAsync(link.Id, stateLabel, ct);
+    }
+
+    private async Task CloseAsync(
+        GitHubConnection connection,
+        GitHubIssueLink link,
+        string stateReason,
+        string closeKey,
+        CancellationToken ct)
+    {
+        if (!await _links.TryReserveCommentAsync(link.Id, closeKey, ct))
+        {
+            var current = await _links.GetByIdAsync(link.Id, ct);
+            if (current?.HasPostedComment(closeKey) == true)
+                return;
+            throw new GitHubSynchronizationException(
+                "github_close_pending",
+                $"GitHub close operation '{closeKey}' is still reserved; reconcile it before retrying");
+        }
+
+        try
+        {
+            await _commentPort.CloseIssueAsync(connection, link.GithubIssueNumber, stateReason, ct);
+            await _links.MarkCommentPostedAsync(link.Id, closeKey, ct);
+        }
+        catch (Exception ex) when (!ct.IsCancellationRequested)
+        {
+            if (!GitHubRemoteOutcome.IsUnknown(ex))
+                await _links.ReleaseCommentReservationAsync(link.Id, closeKey, ct);
             throw;
         }
     }

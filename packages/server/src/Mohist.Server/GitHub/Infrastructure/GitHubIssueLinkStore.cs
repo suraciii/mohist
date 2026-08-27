@@ -148,7 +148,13 @@ public sealed class GitHubIssueLinkStore : IScopedService
         int issueNumber,
         CancellationToken ct = default)
     {
-        var link = await CreateAsync(projectId, repositoryName, githubIssueNumber, issueNumber, ct);
+        var link = await CreateAsync(
+            projectId,
+            repositoryName,
+            githubIssueNumber,
+            issueNumber,
+            commandRequested: false,
+            ct: ct);
         var won = link.IssueNumber == issueNumber && link.GithubIssueNumber == githubIssueNumber;
         return won ? new GitHubIssueLinkClaim(true, link) : new GitHubIssueLinkClaim(false, null);
     }
@@ -292,6 +298,28 @@ public sealed class GitHubIssueLinkStore : IScopedService
     {
         var reservation = await TryReserveMirrorCreateAsync(id, ct);
         return reservation?.Link;
+    }
+
+    /// <summary>
+    /// Releases a mirror-create reservation only while the link is still
+    /// pending. A definite provider rejection can safely be retried; an
+    /// unknown outcome must keep the reservation so reconciliation, rather
+    /// than a second POST, remains the next operation.
+    /// </summary>
+    public async Task<GitHubIssueLink?> ResetMirrorCreateAttemptAsync(
+        string id,
+        CancellationToken ct = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(id);
+        await using var db = await _dbFactory.CreateDbContextAsync(ct);
+        await db.GitHubIssueLinks
+            .Where(row => row.Id == id && row.GithubIssueNumber <= 0 && row.MirrorCreateAttempted)
+            .ExecuteUpdateAsync(setters => setters
+                .SetProperty(row => row.MirrorCreateAttempted, false)
+                .SetProperty(row => row.UpdatedAt, _timeProvider.GetUtcNow()), ct);
+        var row = await db.GitHubIssueLinks.AsNoTracking()
+            .FirstOrDefaultAsync(candidate => candidate.Id == id, ct);
+        return row is null ? null : ToDomain(row);
     }
 
     public async Task<GitHubIssueLink?> ResetMirrorAsync(

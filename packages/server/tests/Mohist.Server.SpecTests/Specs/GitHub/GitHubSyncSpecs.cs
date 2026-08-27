@@ -19,22 +19,25 @@ using Xunit;
 
 namespace Mohist.Server.SpecTests.Specs.GitHub;
 
-[Collection("GitHubFeed")]
+[Collection("GitHubCommand")]
 public sealed class GitHubSyncSpecs
 {
     private const string RepositoryName = "hello-world";
-    private readonly GitHubFeedFixture _fixture;
+    private readonly GitHubCommandFixture _fixture;
 
-    public GitHubSyncSpecs(GitHubFeedFixture fixture)
+    public GitHubSyncSpecs(GitHubCommandFixture fixture)
     {
         _fixture = fixture;
         fixture.Comments.Comments.Clear();
         fixture.Comments.CreatedIssues.Clear();
         fixture.Comments.UpdatedIssues.Clear();
+        fixture.Comments.StateLabels.Clear();
+        fixture.Comments.Closes.Clear();
         fixture.Comments.MarkerMatches.Clear();
         fixture.Comments.CreateFailure = null;
         fixture.Comments.FindFailure = null;
         fixture.Comments.ConfirmationFailure = null;
+        fixture.Comments.PostThenThrow = false;
         fixture.Comments.UpdateFailure = null;
         fixture.Comments.UpdateFailures.Clear();
         fixture.Comments.CreateThenThrow = false;
@@ -53,7 +56,7 @@ public sealed class GitHubSyncSpecs
         await PumpAsync();
 
         await _fixture.Client.PostDataAsync<JsonElement>(
-            $"/api/projects/{project.Id}/github-connections", new { owner, repo = RepositoryName });
+            $"/api/projects/{project.Id}/github-connections", new { owner, repo = RepositoryName, pat = "github-pat" });
 
         using var first = await _fixture.Client.PostAsJsonAsync(
             $"/api/projects/{project.Id}/issues/{issueNumber}/github/sync", new { });
@@ -112,6 +115,101 @@ public sealed class GitHubSyncSpecs
     }
 
     [Fact]
+    public async Task DefiniteCreateFailure_ReleasesReservationForLaterSync()
+    {
+        var owner = $"octocat-{Guid.NewGuid():N}";
+        var project = await _fixture.Client.CreateProjectWithDefaultRepositoryAsync<ProjectInfo>(
+            "/api/projects", $"github-sync-create-retry-{Guid.NewGuid():N}", repoName: RepositoryName,
+            gitUrl: $"https://github.com/{owner}/{RepositoryName}.git");
+        var connection = await _fixture.Client.PostDataAsync<JsonElement>(
+            $"/api/projects/{project.Id}/github-connections",
+            new { owner, repo = RepositoryName, pat = "github-pat" });
+        _fixture.Comments.CreateFailure = new InvalidOperationException("GitHub rejected issue creation");
+        var issueNumber = await CreateIssueInProjectAsync(project.Id, isDraft: false);
+        await PumpAsync();
+
+        var failed = await LoadLinkAsync(project.Id, issueNumber);
+        Assert.NotNull(failed);
+        Assert.True(failed!.IsPending);
+        Assert.False(failed.MirrorCreateAttempted);
+        Assert.Equal(GitHubSyncStatus.Error, failed.SyncStatus);
+
+        _fixture.Comments.CreateFailure = null;
+        using var response = await _fixture.Client.PostAsJsonAsync(
+            $"/api/projects/{project.Id}/issues/{issueNumber}/github/sync", new { });
+        response.EnsureSuccessStatusCode();
+
+        var linked = await LoadLinkAsync(project.Id, issueNumber);
+        Assert.NotNull(linked);
+        Assert.False(linked!.IsPending);
+        Assert.Single(_fixture.Comments.CreatedIssues,
+            created => created.ConnectionId == connection.GetProperty("id").GetString());
+    }
+
+    [Fact]
+    public async Task SyncReprojectsCurrentDoneStateBeforeClearingError()
+    {
+        var (projectId, issueNumber, _) = await CreateMirroredIssueAsync();
+        var grain = _fixture.Grains.GetGrain<IIssueGrain>(GrainKey.Issue(new IssueKey(projectId, issueNumber)));
+        await grain.UpdateFullAsync(new UpdateIssueData(
+            NoWorkflow: true,
+            PresentFields: new HashSet<string>([nameof(UpdateIssueData.NoWorkflow)], StringComparer.Ordinal)));
+        await grain.StartWorkAsync();
+        await PumpAsync();
+        await grain.MarkDoneAsync();
+        await PumpAsync();
+
+        await ClearProjectionBookkeepingAsync(projectId, issueNumber);
+        _fixture.Comments.Comments.Clear();
+        _fixture.Comments.UpdatedIssues.Clear();
+        _fixture.Comments.StateLabels.Clear();
+        _fixture.Comments.Closes.Clear();
+
+        using var response = await _fixture.Client.PostAsJsonAsync(
+            $"/api/projects/{projectId}/issues/{issueNumber}/github/sync", new { });
+        response.EnsureSuccessStatusCode();
+
+        var link = await LoadLinkAsync(projectId, issueNumber);
+        Assert.Equal(GitHubSyncStatus.Healthy, link!.SyncStatus);
+        Assert.Contains(GitHubStateLabels.Done, _fixture.Comments.StateLabels.Select(label => label.StateLabel));
+        Assert.Contains(_fixture.Comments.Comments, comment =>
+            comment.Body.Contains("已完成该需求", StringComparison.Ordinal));
+        var close = Assert.Single(_fixture.Comments.Closes);
+        Assert.Equal("completed", close.StateReason);
+    }
+
+    [Fact]
+    public async Task SyncReprojectsCurrentCancelledStateBeforeClearingError()
+    {
+        var (projectId, issueNumber, _) = await CreateMirroredIssueAsync();
+        var grain = _fixture.Grains.GetGrain<IIssueGrain>(GrainKey.Issue(new IssueKey(projectId, issueNumber)));
+        await grain.UpdateFullAsync(new UpdateIssueData(
+            NoWorkflow: true,
+            PresentFields: new HashSet<string>([nameof(UpdateIssueData.NoWorkflow)], StringComparer.Ordinal)));
+        await grain.StartWorkAsync();
+        await PumpAsync();
+        await grain.CancelAsync();
+        await PumpAsync();
+
+        await ClearProjectionBookkeepingAsync(projectId, issueNumber);
+        _fixture.Comments.Comments.Clear();
+        _fixture.Comments.UpdatedIssues.Clear();
+        _fixture.Comments.StateLabels.Clear();
+        _fixture.Comments.Closes.Clear();
+
+        using var response = await _fixture.Client.PostAsJsonAsync(
+            $"/api/projects/{projectId}/issues/{issueNumber}/github/sync", new { });
+        response.EnsureSuccessStatusCode();
+
+        var link = await LoadLinkAsync(projectId, issueNumber);
+        Assert.Equal(GitHubSyncStatus.Healthy, link!.SyncStatus);
+        Assert.Contains(_fixture.Comments.Comments, comment =>
+            comment.Body.Contains("已取消该需求", StringComparison.Ordinal));
+        var close = Assert.Single(_fixture.Comments.Closes);
+        Assert.Equal("not_planned", close.StateReason);
+    }
+
+    [Fact]
     public async Task LinkOverwritesGitHubFromMohistAndUnlinkPreservesBothSides()
     {
         var owner = $"octocat-{Guid.NewGuid():N}";
@@ -120,7 +218,7 @@ public sealed class GitHubSyncSpecs
             gitUrl: $"https://github.com/{owner}/{RepositoryName}.git");
         var issueNumber = await CreateIssueInProjectAsync(project.Id, isDraft: true);
         await _fixture.Client.PostDataAsync<JsonElement>(
-            $"/api/projects/{project.Id}/github-connections", new { owner, repo = RepositoryName });
+            $"/api/projects/{project.Id}/github-connections", new { owner, repo = RepositoryName, pat = "github-pat" });
 
         const int githubIssueNumber = 817;
         _fixture.Comments.Issues[githubIssueNumber] = new GitHubIssueSnapshot(
@@ -177,7 +275,7 @@ public sealed class GitHubSyncSpecs
             "/api/projects", $"github-sync-{Guid.NewGuid():N}", repoName: RepositoryName,
             gitUrl: $"https://github.com/{owner}/{RepositoryName}.git");
         var connection = await _fixture.Client.PostDataAsync<JsonElement>(
-            $"/api/projects/{project.Id}/github-connections", new { owner, repo = RepositoryName });
+            $"/api/projects/{project.Id}/github-connections", new { owner, repo = RepositoryName, pat = "github-pat" });
         var issueNumber = await CreateIssueInProjectAsync(project.Id, isDraft: false);
         await PumpAsync();
         return (project.Id, issueNumber, connection.GetProperty("id").GetString()!);
@@ -227,6 +325,21 @@ public sealed class GitHubSyncSpecs
             });
         await _fixture.Services.GetRequiredService<IEventStore>().AppendAsync(evt);
         await PumpAsync();
+    }
+
+    private async Task ClearProjectionBookkeepingAsync(string projectId, int issueNumber)
+    {
+        await using var scope = _fixture.Services.CreateAsyncScope();
+        var factory = scope.ServiceProvider.GetRequiredService<IDbContextFactory<MohistDbContext>>();
+        await using var db = await factory.CreateDbContextAsync();
+        var link = await db.GitHubIssueLinks.SingleAsync(row =>
+            row.ProjectId == projectId && row.IssueNumber == issueNumber);
+        link.PostedCommentsJson = "[]";
+        link.StateLabel = null;
+        await db.GitHubIssueCommentOperations
+            .Where(operation => operation.LinkId == link.Id)
+            .ExecuteDeleteAsync();
+        await db.SaveChangesAsync();
     }
 
     private async Task<GitHubIssueLink?> LoadLinkAsync(string projectId, int issueNumber) =>
