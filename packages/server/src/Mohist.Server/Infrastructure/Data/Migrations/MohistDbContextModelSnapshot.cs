@@ -4691,6 +4691,8 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
                     b.HasIndex("Owner", "Repo")
                         .IsUnique();
 
+                    b.HasIndex("ProjectId", "RepositoryName");
+
                     b.ToTable("GitHubConnections", (string)null);
                 });
             modelBuilder.Entity("Mohist.Server.Infrastructure.Data.GitHub.GitHubIssueLinkRow", b =>
@@ -4730,6 +4732,8 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
                         .HasColumnType("TEXT");
 
                     b.HasKey("Id");
+
+                    b.HasIndex("ProjectId", "IssueNumber");
 
                     b.HasIndex("ProjectId", "RepositoryName", "GithubIssueNumber")
                         .IsUnique();

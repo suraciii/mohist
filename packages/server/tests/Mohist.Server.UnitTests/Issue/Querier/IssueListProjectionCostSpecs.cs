@@ -3,9 +3,11 @@ using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Data.Sqlite;
 using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Infrastructure.Data.Events;
 using Mohist.Server.Infrastructure.Data.Issue;
+using Mohist.Server.Infrastructure.Data.GitHub;
 using Mohist.Server.Infrastructure.Config;
 using Mohist.Server.Issue.Domain;
 using Mohist.Server.Issue.Services;
@@ -53,6 +55,32 @@ public sealed class IssueListProjectionCostSpecs
             Number = issue.Number,
             State = IssueStore.Serialize(issue),
         });
+        db.GitHubConnections.Add(new GitHubConnectionRow
+        {
+            Id = $"connection-{project.Id}",
+            ProjectId = project.Id,
+            Owner = "suraciii",
+            Repo = "mohist",
+            RepositoryName = "main",
+            IntakeLabel = "mohist",
+            FeedMode = "backlog",
+            ApproversJson = "[]",
+            Status = "active",
+            IdentityKind = "pat",
+            NeedsAttention = false,
+            CreatedAt = TestTime.UtcNow,
+            UpdatedAt = TestTime.UtcNow,
+        });
+        db.GitHubIssueLinks.Add(new GitHubIssueLinkRow
+        {
+            Id = $"link-{project.Id}",
+            ProjectId = project.Id,
+            RepositoryName = "main",
+            GithubIssueNumber = 771,
+            IssueNumber = issue.Number,
+            CreatedAt = TestTime.UtcNow,
+            UpdatedAt = TestTime.UtcNow,
+        });
         await db.SaveChangesAsync();
 
         var counter = new SqlCommandCounter();
@@ -78,6 +106,12 @@ public sealed class IssueListProjectionCostSpecs
             all: null);
         var baselineCommandCount = counter.Count;
         Assert.Single(baseline);
+        Assert.Equal(
+            new GitHubIssueSummary("suraciii/mohist", 771, "https://github.com/suraciii/mohist/issues/771", "healthy"),
+            baseline[0].Github);
+        Assert.Equal(2, counter.CommandTexts.Count(command =>
+            command.Contains("GitHubIssueLinks", StringComparison.OrdinalIgnoreCase)
+            || command.Contains("GitHubConnections", StringComparison.OrdinalIgnoreCase)));
         Assert.DoesNotContain(baseline[0].GetType().GetProperties(), property =>
             string.Equals(property.Name, "Body", StringComparison.OrdinalIgnoreCase));
         Assert.DoesNotContain(counter.CommandTexts, ContainsDetailTable);
@@ -132,6 +166,175 @@ public sealed class IssueListProjectionCostSpecs
         Assert.Equal(baselineCommandCount, counter.Count);
         Assert.DoesNotContain(counter.CommandTexts, ContainsDetailTable);
     }
+
+    [Fact]
+    public async Task GitHubProjection_CommandCountStaysConstantAcrossOneHundredLinkedIssues()
+    {
+        var project = new ProjectInfo
+        {
+            Id = $"proj-github-scale-{Guid.NewGuid():N}",
+            Name = "GitHub projection scale",
+        };
+
+        using var scope = _fixture.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<MohistDbContext>();
+        var owner = $"owner-{Guid.NewGuid():N}";
+        db.GitHubConnections.Add(NewConnection(project.Id, "main", owner, "mohist", "connection-scale"));
+        for (var number = 1; number <= 100; number++)
+        {
+            var issue = NewIssue(project.Id, number, $"Linked issue {number}");
+            db.Issues.Add(new IssueRow
+            {
+                ProjectId = project.Id,
+                Number = number,
+                State = IssueStore.Serialize(issue),
+            });
+            db.GitHubIssueLinks.Add(NewLink(
+                project.Id,
+                "main",
+                10_000 + number,
+                number,
+                $"link-scale-{number}",
+                TestTime.UtcNow));
+        }
+        await db.SaveChangesAsync();
+
+        var counter = new SqlCommandCounter();
+        var options = new DbContextOptionsBuilder<MohistDbContext>()
+            .UseSqlite(_fixture.ConnectionString)
+            .AddInterceptors(counter)
+            .Options;
+        var querier = new IssueQuerier(
+            new CountingDbContextFactory(options),
+            scope.ServiceProvider.GetRequiredService<ProjectQuerier>(),
+            scope.ServiceProvider.GetRequiredService<ConfigService>(),
+            scope.ServiceProvider.GetRequiredService<EffectiveWorkflowProfileResolver>(),
+            scope.ServiceProvider.GetRequiredService<IWorkflowProfileProvider>(),
+            scope.ServiceProvider.GetRequiredService<IssueReadModelLoader>());
+
+        var projected = await querier.ListWithLabelFiltersAsync(
+            project.Id, project, stage: null, labels: null, priority: null, archived: null, all: null);
+
+        Assert.Equal(100, projected.Count);
+        Assert.All(projected, issue => Assert.NotNull(issue.Github));
+        Assert.Equal(2, counter.CommandTexts.Count(command =>
+            command.Contains("GitHubIssueLinks", StringComparison.OrdinalIgnoreCase)
+            || command.Contains("GitHubConnections", StringComparison.OrdinalIgnoreCase)));
+    }
+
+    [Fact]
+    public async Task GitHubProjection_DuplicateLinks_SelectsOldestDeterministically()
+    {
+        var project = new ProjectInfo
+        {
+            Id = $"proj-github-duplicates-{Guid.NewGuid():N}",
+            Name = "GitHub duplicate links",
+        };
+
+        using var scope = _fixture.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<MohistDbContext>();
+        var issue = NewIssue(project.Id, 1, "Duplicate link issue");
+        db.Issues.Add(new IssueRow
+        {
+            ProjectId = project.Id,
+            Number = issue.Number,
+            State = IssueStore.Serialize(issue),
+        });
+        var uniqueOwner = $"owner-{Guid.NewGuid():N}";
+        db.GitHubConnections.AddRange(
+            NewConnection(project.Id, "main", uniqueOwner, "mohist", "connection-main"),
+            NewConnection(project.Id, "docs", uniqueOwner, "mohist-docs", "connection-docs"));
+        db.GitHubIssueLinks.AddRange(
+            NewLink(project.Id, "main", 771, issue.Number, "link-oldest", TestTime.UtcNow),
+            NewLink(project.Id, "docs", 772, issue.Number, "link-newer", TestTime.UtcNow.AddMinutes(1)));
+        await db.SaveChangesAsync();
+
+        var loader = scope.ServiceProvider.GetRequiredService<IssueReadModelLoader>();
+        var projected = await loader.LoadListProjectedAsync(db, project.Id, project);
+
+        var summary = Assert.Single(projected).Github;
+        Assert.NotNull(summary);
+        Assert.Equal($"{uniqueOwner}/mohist", summary.Repository);
+        Assert.Equal(771, summary.Number);
+    }
+
+    [Fact]
+    public async Task GitHubProjectionIndexes_SupportBatchedPredicatesAtScale()
+    {
+        using var connection = new SqliteConnection(_fixture.ConnectionString);
+        await connection.OpenAsync();
+
+        var linkPlan = await ExplainAsync(connection,
+            "SELECT * FROM GitHubIssueLinks WHERE ProjectId = $project AND IssueNumber IN (1, 500, 1000)");
+        var connectionPlan = await ExplainAsync(connection,
+            "SELECT * FROM GitHubConnections WHERE ProjectId = $project AND RepositoryName IN ('main', 'docs')");
+
+        Assert.Contains(linkPlan, detail =>
+            detail.Contains("IX_GitHubIssueLinks_ProjectId_IssueNumber", StringComparison.Ordinal));
+        Assert.Contains(connectionPlan, detail =>
+            detail.Contains("IX_GitHubConnections_ProjectId_RepositoryName", StringComparison.Ordinal));
+    }
+
+    private static async Task<IReadOnlyList<string>> ExplainAsync(SqliteConnection connection, string sql)
+    {
+        await using var command = connection.CreateCommand();
+        command.CommandText = $"EXPLAIN QUERY PLAN {sql}";
+        command.Parameters.AddWithValue("$project", $"proj-query-plan-{Guid.NewGuid():N}");
+        await using var reader = await command.ExecuteReaderAsync();
+        var details = new List<string>();
+        while (await reader.ReadAsync()) details.Add(reader.GetString(3));
+        return details;
+    }
+
+    private static DomainIssue NewIssue(string projectId, int number, string title) => new()
+    {
+        ProjectId = projectId,
+        Number = number,
+        Title = title,
+        Status = IssueStatus.Backlog,
+        Priority = "p2",
+        CreatedAt = TestTime.UtcDateTime,
+        UpdatedAt = TestTime.UtcDateTime,
+    };
+
+    private static GitHubConnectionRow NewConnection(
+        string projectId,
+        string repositoryName,
+        string owner,
+        string repo,
+        string id) => new()
+    {
+        Id = $"{id}-{projectId}",
+        ProjectId = projectId,
+        Owner = owner,
+        Repo = repo,
+        RepositoryName = repositoryName,
+        IntakeLabel = "mohist",
+        FeedMode = "backlog",
+        ApproversJson = "[]",
+        Status = "active",
+        IdentityKind = "pat",
+        NeedsAttention = false,
+        CreatedAt = TestTime.UtcNow,
+        UpdatedAt = TestTime.UtcNow,
+    };
+
+    private static GitHubIssueLinkRow NewLink(
+        string projectId,
+        string repositoryName,
+        int githubIssueNumber,
+        int issueNumber,
+        string id,
+        DateTimeOffset createdAt) => new()
+    {
+        Id = $"{id}-{projectId}",
+        ProjectId = projectId,
+        RepositoryName = repositoryName,
+        GithubIssueNumber = githubIssueNumber,
+        IssueNumber = issueNumber,
+        CreatedAt = createdAt,
+        UpdatedAt = createdAt,
+    };
 
     private static bool ContainsDetailTable(string commandText) =>
         commandText.Contains("IssueComments", StringComparison.OrdinalIgnoreCase)

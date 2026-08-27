@@ -108,7 +108,7 @@ public sealed class CliResourceOutputSpecs
 
         Assert.Equal(0, exit);
         Assert.Equal(
-            ["number", "title", "status", "stage", "priority", "risk", "labels", "prereq", "epic", "createdAt", "updatedAt"],
+            ["number", "title", "status", "stage", "priority", "risk", "labels", "prereq", "epic", "github", "createdAt", "updatedAt"],
             JsonNode.Parse(output.ToString())!.AsArray().Select(x => x!.GetValue<string>()).ToArray());
         Assert.Empty(error.ToString());
         Assert.Empty(handler.Requests);
@@ -130,7 +130,7 @@ public sealed class CliResourceOutputSpecs
                 "archivedAt", "completedAt", "approvalState", "blockedReason", "attention", "workflowRunId", "workflowStage",
                 "workflowStatus", "workflowStageProgress", "workflowProfileId", "workflowProfileMode", "prerequisiteNumbers",
                 "comments", "attachments", "prereq", "isDraft", "canStart", "canBeParent", "blocker", "repositoryName",
-                "repository", "repositoryProblem", "epic", "parentIssueRef", "childIssuesSummary", "children", "feedback",
+                "repository", "repositoryProblem", "github", "epic", "parentIssueRef", "childIssuesSummary", "children", "feedback",
                 "watching", "muted",
             ],
             JsonNode.Parse(output.ToString())!.AsArray().Select(x => x!.GetValue<string>()).ToArray());

@@ -49,6 +49,32 @@ afterEach(() => {
   vi.clearAllMocks()
 })
 
+describe('IssueCard - GitHub mirror', () => {
+  it('renders a compact marker for a linked issue', () => {
+    renderCard(
+      makeIssue({
+        github: {
+          repository: 'suraciii/mohist',
+          number: 771,
+          url: 'https://github.com/suraciii/mohist/issues/771',
+          syncStatus: 'healthy',
+        },
+      }),
+    )
+
+    expect(screen.getByTestId('issue-card-github')).toHaveTextContent('suraciii/mohist#771')
+    expect(screen.getByTestId('issue-card-github')).toHaveAttribute(
+      'title',
+      'https://github.com/suraciii/mohist/issues/771',
+    )
+  })
+
+  it('renders no marker for an unlinked issue', () => {
+    renderCard(makeIssue())
+    expect(screen.queryByTestId('issue-card-github')).not.toBeInTheDocument()
+  })
+})
+
 describe('IssueCard - draft indicator and de-emphasis', () => {
   it('renders a Draft pill on the backlog card when isDraft is true', () => {
     const draft = makeIssue({ isDraft: true, canStart: false, blocker: { kind: 'draft' } })
@@ -362,60 +388,37 @@ describe('IssueCard - stage folds into StatusPill instead of stacking', () => {
   })
 
   it.each([
-    [
-      'blocked',
-      IssueHealth.Blocked,
-      WorkflowStage.Build,
-      'Blocked · Build 2/5',
-    ] as const,
-    [
-      'approval',
-      IssueHealth.Active,
-      WorkflowStage.Plan,
-      'Approval · Plan 2/5',
-    ] as const,
-    [
-      'drift',
-      IssueHealth.Active,
-      WorkflowStage.Check,
-      'Drift · Check 2/5',
-    ] as const,
-    [
-      'waiting',
-      IssueHealth.Active,
-      WorkflowStage.Integrate,
-      'Waiting · Integrate 2/5',
-    ] as const,
-  ])(
-    'folds the stage label into the %s status pill (%s)',
-    (variant, health, stage, expected) => {
-      const issue: Issue = makeIssue({
-        health,
-        workflowStage: stage,
-        workflowStageProgress: { stage: stage, total: 5, completed: 2, running: 0, failed: 0 },
-      })
-      if (variant === 'approval') {
-        issue.approvalState = { stage: WorkflowStage.Plan, status: 'awaiting', requestedAt: '2026-01-01T00:00:00Z' }
-      } else if (variant === 'waiting') {
-        issue.blocker = { kind: 'waiting-for', issue: { number: 200, title: 'Other' } }
-      } else if (variant === 'drift') {
-        issue.drift = {
-          drifted: true,
-          decision: 'needs-attention',
-          safeWindow: null,
-          deferReason: null,
-          observedBaseSha: null,
-          currentBaseSha: null,
-          candidateHeadSha: null,
-          mergeBaseSha: null,
-          conflicts: null,
-          nextAction: null,
-        }
+    ['blocked', IssueHealth.Blocked, WorkflowStage.Build, 'Blocked · Build 2/5'] as const,
+    ['approval', IssueHealth.Active, WorkflowStage.Plan, 'Approval · Plan 2/5'] as const,
+    ['drift', IssueHealth.Active, WorkflowStage.Check, 'Drift · Check 2/5'] as const,
+    ['waiting', IssueHealth.Active, WorkflowStage.Integrate, 'Waiting · Integrate 2/5'] as const,
+  ])('folds the stage label into the %s status pill (%s)', (variant, health, stage, expected) => {
+    const issue: Issue = makeIssue({
+      health,
+      workflowStage: stage,
+      workflowStageProgress: { stage: stage, total: 5, completed: 2, running: 0, failed: 0 },
+    })
+    if (variant === 'approval') {
+      issue.approvalState = { stage: WorkflowStage.Plan, status: 'awaiting', requestedAt: '2026-01-01T00:00:00Z' }
+    } else if (variant === 'waiting') {
+      issue.blocker = { kind: 'waiting-for', issue: { number: 200, title: 'Other' } }
+    } else if (variant === 'drift') {
+      issue.drift = {
+        drifted: true,
+        decision: 'needs-attention',
+        safeWindow: null,
+        deferReason: null,
+        observedBaseSha: null,
+        currentBaseSha: null,
+        candidateHeadSha: null,
+        mergeBaseSha: null,
+        conflicts: null,
+        nextAction: null,
       }
-      renderCard(issue)
-      expect(screen.getByTestId('status-pill')).toHaveTextContent(expected)
-    },
-  )
+    }
+    renderCard(issue)
+    expect(screen.getByTestId('status-pill')).toHaveTextContent(expected)
+  })
 
   it('omits the progress numeric when stage progress is absent', () => {
     const issue = makeIssue({
@@ -578,9 +581,7 @@ describe('IssueCard - six-dimension card-density invariant', () => {
       expect((title.style as CSSStyleDeclaration).display).toBe('-webkit-box')
     }
 
-    const columnTitles = Array.from(
-      screen.getByTestId('column-mock').querySelectorAll('h3'),
-    )
+    const columnTitles = Array.from(screen.getByTestId('column-mock').querySelectorAll('h3'))
     expect(columnTitles).toHaveLength(4)
     for (const t of columnTitles) {
       expect(t.textContent).toBe(longTitle)

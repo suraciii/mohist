@@ -6,7 +6,7 @@ internal static partial class IssueCommands
 {
     private static readonly ResourceDescriptor IssueListDescriptor = new(
         ResourceCardinality.Collection,
-        ["number", "title", "status", "stage", "priority", "risk", "labels", "prereq", "epic", "createdAt", "updatedAt"]);
+        ["number", "title", "status", "stage", "priority", "risk", "labels", "prereq", "epic", "github", "createdAt", "updatedAt"]);
 
     internal static readonly ResourceDescriptor IssueDescriptor = new(
         ResourceCardinality.Single,
