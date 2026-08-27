@@ -147,8 +147,7 @@ public sealed class GitHubIssueFeedSpecs
         Assert.Equal(RepoName, issue.RepositoryRef);
         Assert.Equal(IssueStatus.InProgress, issue.Status);
         Assert.False(string.IsNullOrWhiteSpace(issue.WorkflowRunId));
-        Assert.True(issue.Labels.TryGetValue(GitHubIssueSource.LabelKey, out var source));
-        Assert.Equal($"{owner}/{RepoName}#{GithubIssueNumber}", source);
+        Assert.DoesNotContain(GitHubIssueSource.LabelKey, issue.Labels.Keys);
         var comment = Assert.Single(_fixture.Comments.Comments, c => c.ConnectionId == connectionId);
         Assert.Equal(GithubIssueNumber, comment.GithubIssueNumber);
         Assert.Equal(GitHubWriteBackComments.WorkStarted(link.IssueNumber), comment.Body);
@@ -267,9 +266,7 @@ public sealed class GitHubIssueFeedSpecs
         var issue = await LoadIssueAsync(projectId, issueNumber);
         Assert.Equal(IssueStatus.Backlog, issue!.Status);
         Assert.Null(issue.WorkflowRunId);
-        var comment = Assert.Single(_fixture.Comments.Comments, c => c.ConnectionId == connectionId);
-        Assert.Equal(GithubIssueNumber, comment.GithubIssueNumber);
-        Assert.Contains($"#{issueNumber}", comment.Body);
+        var comment = Assert.Single(_fixture.Comments.Comments, c => c.ConnectionId == connectionId && c.GithubIssueNumber == GithubIssueNumber && c.Body.Contains($"#{issueNumber}", StringComparison.Ordinal));
         var link = await LoadLinkAsync(projectId, RepoName);
         Assert.True(link!.HasPostedComment(GitHubCommentKinds.FeedRejected));
     }
@@ -304,8 +301,7 @@ public sealed class GitHubIssueFeedSpecs
         var issue = await LoadIssueAsync(project.Id, link!.IssueNumber);
         Assert.Equal(IssueStatus.Backlog, issue!.Status);
         Assert.Null(issue.WorkflowRunId);
-        var comment = Assert.Single(_fixture.Comments.Comments, c => c.ConnectionId == connectionId);
-        Assert.Contains($"#{link.IssueNumber}", comment.Body);
+        var comment = Assert.Single(_fixture.Comments.Comments, c => c.ConnectionId == connectionId && c.GithubIssueNumber == GithubIssueNumber && c.Body.Contains($"#{link.IssueNumber}", StringComparison.Ordinal));
         Assert.Contains("not found", comment.Body);
     }
 }

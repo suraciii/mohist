@@ -52,6 +52,7 @@ public static class GitHubEventNormalizer
             "issues" => action switch
             {
                 "labeled" => EventCatalog.ReverseDns.GitHubIssuesLabeled,
+                "edited" => EventCatalog.ReverseDns.GitHubIssuesEdited,
                 "closed" => EventCatalog.ReverseDns.GitHubIssuesClosed,
                 "reopened" => EventCatalog.ReverseDns.GitHubIssuesReopened,
                 _ => null,

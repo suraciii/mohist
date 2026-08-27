@@ -5,8 +5,11 @@ public sealed class GitHubIssueLink
     public string Id { get; set; } = string.Empty;
     public string ProjectId { get; set; } = string.Empty;
     public string RepositoryName { get; set; } = string.Empty;
+    /// <summary>Zero while the mirror creation intent is still pending.</summary>
     public int GithubIssueNumber { get; set; }
     public int IssueNumber { get; set; }
+    public string? MirrorMarker { get; set; }
+    public bool MirrorCreateAttempted { get; set; }
     public IReadOnlySet<string> PostedComments { get; set; } = new HashSet<string>(StringComparer.Ordinal);
 
     /// <summary>
@@ -20,6 +23,8 @@ public sealed class GitHubIssueLink
     public DateTimeOffset CreatedAt { get; set; }
     public DateTimeOffset UpdatedAt { get; set; }
 
+    public bool IsPending => GithubIssueNumber <= 0;
+
     public bool HasPostedComment(string key) => PostedComments.Contains(key);
 }
 
@@ -32,6 +37,7 @@ public sealed class GitHubIssueLink
 public static class GitHubCommentKinds
 {
     public const string FeedRejected = "feed-rejected";
+    public const string MirrorCreated = "writeback-mirror-created";
     public const string WorkStarted = "writeback-work-started";
     public const string ApprovalRequested = "writeback-approval-requested";
     public const string Completed = "writeback-completed";
@@ -51,4 +57,24 @@ public static class GitHubStateLabels
     public const string AwaitingApproval = "mohist:awaiting-approval";
     public const string Blocked = "mohist:blocked";
     public const string Done = "mohist:done";
+}
+
+/// <summary>
+/// Invisible HTML marker embedded in a Mohist-created GitHub issue body. It
+/// makes an unknown create result safely reconcilable without matching on
+/// mutable user content. The marker is removed before content enters Mohist.
+/// </summary>
+public static class GitHubMirrorMarker
+{
+    public static string For(string linkId) => $"<!-- mohist:mirror:{linkId} -->";
+
+    public static string Append(string? body, string marker) =>
+        string.IsNullOrEmpty(body) ? marker : $"{body}\n\n{marker}";
+
+    public static string? Strip(string? body, string marker)
+    {
+        if (body is null) return null;
+        var without = body.Replace(marker, string.Empty, StringComparison.Ordinal);
+        return without.TrimEnd();
+    }
 }

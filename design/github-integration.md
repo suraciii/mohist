@@ -45,8 +45,9 @@ A Server infrastructure integration record — analogous to a Slack conversation
 mapping, not an aggregate fact — mapping a Mohist Issue to its GitHub mirror
 one-to-one. It stores the GitHub Issue's stable node id alongside its current
 coordinates, carries the bookkeeping that makes every outbound operation
-idempotent (emitted milestone comments, current state label), and reports sync
-health: healthy, or the last synchronization error.
+idempotent (pending creation intent, invisible body marker, emitted milestone
+comments, current state label), and reports sync health: healthy, or the last
+synchronization error.
 
 The link is the idempotency key for every inbound and outbound path. It is
 created exactly once per pair — at mirror creation, at `/mohist start`, or at
@@ -119,9 +120,13 @@ Handlers subscribe to Issue and Workflow events and maintain the mirror through
 the connection identity:
 
 - **Mirror creation.** A non-Draft Issue whose target repository is connected
-  gets its GitHub mirror created under a per-Issue idempotency key. If the
-  create result is unknown (timeout, 5xx), reconciliation looks the result up
-  instead of posting again — a mirror is never duplicated.
+  gets a pending link persisted before the GitHub create. The mirror body
+  carries one invisible, deterministic HTML marker owned by Mohist; it has no
+  visible footer. If the create result is unknown (timeout, 5xx), bounded
+  reconciliation searches all GitHub states for that marker. Exactly one match
+  is linked, multiple matches fail closed, and no match is not posted again
+  until reconciliation has completed. The backlink to Mohist lives in the
+  confirmation comment.
 - **Content sync.** Title and body edits project outward, subject to the same
   content-equality rule that suppresses the returning echo.
 - **Progress projection.** The mutually exclusive `mohist:*` state labels and
@@ -133,8 +138,10 @@ the connection identity:
 
 Two content rules protect the loop. Mohist never places GitHub closing keywords
 in Pull Request bodies, so delivery cannot close the mirror early. And the
-mirror body carries no tracking footer: the backlink to Mohist lives in the
-confirmation comment, keeping body equality a usable echo check.
+mirror body carries no visible tracking footer: its one invisible marker is
+stripped before content enters Mohist and retained on outbound writes, while
+
+the backlink to Mohist lives in the confirmation comment.
 
 ## Failure Model
 
@@ -155,15 +162,14 @@ Mirroring is reliable by reconciliation, not by queueing:
 
 Implemented today: signed ingress and normalization, feed-by-label intake with
 its close withdrawal, Pull Request review Approval, best-effort write-back with
-durable failure records, the core no-Workflow Issue lifecycle, and the GitHub
-mirror link visibility in the Issue read models, CLI, and Web. The target model
-replaces label intake with the `/mohist` command entry and adds automatic
-mirroring, two-way content sync, GitHub-driven lifecycle for no-Workflow Issues,
-and reconcile-based recovery. The current link projection uses a deliberately
-provisional `healthy` sync state; real sync-health reporting and
-reconcile-based recovery belong to the later recovery slice. Feed-by-label
-intake, its connection options, and the `github-issue` origin
-label are removed when the command entry lands.
+durable failure records, the core no-Workflow Issue lifecycle, the GitHub
+mirror link visibility in the Issue read models, CLI, and Web, automatic
+ready-only mirroring with durable Pending intent and invisible marker
+reconciliation, and two-way title/body sync with equality echo suppression. The
+current link projection uses a deliberately provisional `healthy` sync state;
+real sync-health reporting and reconcile-based recovery belong to the later
+recovery slice. Feed-by-label intake, its connection options, and the
+`github-issue` origin label are removed when the command entry lands.
 
 Open questions:
 

@@ -16,7 +16,7 @@ namespace Mohist.Server.GitHub.Ports;
 /// writer. The caller treats failures as best-effort, so a
 /// not-yet-supported identity never blocks event processing.
 /// </summary>
-public sealed class GitHubCommentPort : IGitHubCommentPort
+public sealed class GitHubCommentPort : IGitHubCommentPort, IGitHubIssuePort
 {
     private readonly HttpClient _http;
     private readonly ISecretStore _secrets;
@@ -33,7 +33,68 @@ public sealed class GitHubCommentPort : IGitHubCommentPort
         _log = log;
     }
 
-    public Task PostCommentAsync(
+    public async Task<int> CreateIssueAsync(
+        GitHubConnection connection,
+        string title,
+        string body,
+        string marker,
+        CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(connection);
+        var url = $"/repos/{connection.Owner}/{connection.Repo}/issues";
+        var content = JsonContent.Create(new JsonObject
+        {
+            ["title"] = title,
+            ["body"] = GitHubMirrorMarker.Append(body, marker),
+        });
+        var response = await SendAsync(connection, url, HttpMethod.Post, content, ct);
+        var node = JsonNode.Parse(response);
+        return node?["number"]?.GetValue<int>()
+            ?? throw new InvalidOperationException("GitHub create issue response did not contain a number");
+    }
+
+    public async Task<int?> FindIssueByMarkerAsync(
+        GitHubConnection connection,
+        string marker,
+        CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(connection);
+        var query = Uri.EscapeDataString($"{marker} in:body is:issue");
+        var url = $"/search/issues?q={query}+repo:{connection.Owner}/{connection.Repo}&per_page=2";
+        var pat = await LoadPatAsync(connection, ct);
+        using var request = BuildRequest(url, HttpMethod.Get, content: null, pat);
+        using var response = await _http.SendAsync(request, ct);
+        if (!response.IsSuccessStatusCode)
+        {
+            await LogFailureAsync(response, url, ct);
+            response.EnsureSuccessStatusCode();
+        }
+        var node = JsonNode.Parse(await response.Content.ReadAsStringAsync(ct));
+        var items = node?["items"]?.AsArray();
+        if (items is null || items.Count == 0) return null;
+        if (items.Count != 1)
+            throw new InvalidOperationException($"GitHub mirror marker matched {items.Count} issues; reconciliation is ambiguous");
+        return items[0]?["number"]?.GetValue<int>();
+    }
+
+    public async Task UpdateIssueAsync(
+        GitHubConnection connection,
+        int githubIssueNumber,
+        string title,
+        string body,
+        string marker,
+        CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(connection);
+        var url = $"/repos/{connection.Owner}/{connection.Repo}/issues/{githubIssueNumber}";
+        await SendAsync(connection, url, HttpMethod.Patch, JsonContent.Create(new JsonObject
+        {
+            ["title"] = title,
+            ["body"] = GitHubMirrorMarker.Append(body, marker),
+        }), ct);
+    }
+
+    public async Task PostCommentAsync(
         GitHubConnection connection,
         int githubIssueNumber,
         string body,
@@ -41,7 +102,7 @@ public sealed class GitHubCommentPort : IGitHubCommentPort
     {
         ArgumentNullException.ThrowIfNull(connection);
         var url = $"/repos/{connection.Owner}/{connection.Repo}/issues/{githubIssueNumber}/comments";
-        return SendAsync(connection, url, HttpMethod.Post, JsonContent.Create(new JsonObject { ["body"] = body }), ct);
+        await SendAsync(connection, url, HttpMethod.Post, JsonContent.Create(new JsonObject { ["body"] = body }), ct);
     }
 
     public async Task ReplaceStateLabelAsync(
@@ -121,7 +182,7 @@ public sealed class GitHubCommentPort : IGitHubCommentPort
         return urlNode?.GetValue<string>();
     }
 
-    private async Task SendAsync(
+    private async Task<string> SendAsync(
         GitHubConnection connection,
         string url,
         HttpMethod method,
@@ -136,6 +197,7 @@ public sealed class GitHubCommentPort : IGitHubCommentPort
             await LogFailureAsync(response, url, ct);
             response.EnsureSuccessStatusCode();
         }
+        return await response.Content.ReadAsStringAsync(ct);
     }
 
     private async Task<byte[]> LoadPatAsync(GitHubConnection connection, CancellationToken ct)

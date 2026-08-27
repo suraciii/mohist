@@ -223,7 +223,7 @@ public class ArchitectureRules
             ["Inbox"] = ["InboxProjectionHandler.cs"],
             ["Notifications"] = ["HermesIssueNotificationHandler.cs"],
             ["Webhooks"] = ["WebhookDispatchHandler.cs"],
-            ["GitHub"] = ["GitHubIssueFeedHandler.cs", "GitHubIssueCloseHandler.cs", "GitHubPullRequestReviewHandler.cs", "GitHubWriteBackHandler.cs"],
+            ["GitHub"] = ["GitHubIssueFeedHandler.cs", "GitHubIssueCloseHandler.cs", "GitHubIssueContentSyncHandler.cs", "GitHubIssueMirrorHandler.cs", "GitHubPullRequestReviewHandler.cs", "GitHubWriteBackHandler.cs"],
         };
 
         var inventory = assigned.SelectMany(pair => pair.Value.Select(file => (file, pair.Key)))

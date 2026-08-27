@@ -17,16 +17,69 @@ namespace Mohist.Server.SpecTests.Specs.GitHub;
 /// production <see cref="GitHubCommentPort"/> (real HTTP) is never
 /// resolvable in specs (design/testing.md "No External Environment").
 /// </summary>
-public sealed class RecordingGitHubCommentPort : IGitHubCommentPort
+public sealed class RecordingGitHubCommentPort : IGitHubCommentPort, IGitHubIssuePort
 {
     public sealed record PostedComment(string ConnectionId, int GithubIssueNumber, string Body);
+    public sealed record CreatedIssue(string ConnectionId, int GithubIssueNumber, string Title, string Body, string Marker);
+    public sealed record UpdatedIssue(string ConnectionId, int GithubIssueNumber, string Title, string Body, string Marker);
     public sealed record StateLabelChange(string ConnectionId, int GithubIssueNumber, string StateLabel);
     public sealed record IssueClose(string ConnectionId, int GithubIssueNumber, string StateReason);
 
     public List<PostedComment> Comments { get; } = [];
+    public List<CreatedIssue> CreatedIssues { get; } = [];
+    public List<UpdatedIssue> UpdatedIssues { get; } = [];
     public List<StateLabelChange> StateLabels { get; } = [];
+    public Queue<int?> MarkerMatches { get; } = new();
+    public int MarkerMatchCount { get; set; }
+    public Exception? CreateFailure { get; set; }
+    public Exception? FindFailure { get; set; }
+    public bool CreateThenThrow { get; set; }
+    public int NextGithubIssueNumber { get; set; } = 900;
     public List<IssueClose> Closes { get; } = [];
     public string? DeliveryPrUrl { get; set; }
+
+    public Task<int> CreateIssueAsync(
+        GitHubConnection connection,
+        string title,
+        string body,
+        string marker,
+        CancellationToken ct = default)
+    {
+        if (CreateFailure is not null) throw CreateFailure;
+        var number = NextGithubIssueNumber++;
+        CreatedIssues.Add(new CreatedIssue(connection.Id, number, title, GitHubMirrorMarker.Append(body, marker), marker));
+        if (CreateThenThrow)
+            throw new TimeoutException("simulated unknown create outcome");
+        return Task.FromResult(number);
+    }
+
+    public Task<int?> FindIssueByMarkerAsync(
+        GitHubConnection connection,
+        string marker,
+        CancellationToken ct = default)
+    {
+        if (FindFailure is not null) throw FindFailure;
+        if (MarkerMatchCount > 1)
+        {
+            MarkerMatchCount = 0;
+            throw new InvalidOperationException("GitHub mirror marker matched multiple issues");
+        }
+        if (MarkerMatches.Count > 0)
+            return Task.FromResult(MarkerMatches.Dequeue());
+        return Task.FromResult<int?>(null);
+    }
+
+    public Task UpdateIssueAsync(
+        GitHubConnection connection,
+        int githubIssueNumber,
+        string title,
+        string body,
+        string marker,
+        CancellationToken ct = default)
+    {
+        UpdatedIssues.Add(new UpdatedIssue(connection.Id, githubIssueNumber, title, GitHubMirrorMarker.Append(body, marker), marker));
+        return Task.CompletedTask;
+    }
 
     public Task PostCommentAsync(
         GitHubConnection connection,
@@ -134,7 +187,9 @@ public sealed class GitHubFeedFixture : IAsyncLifetime
             builder.ConfigureTestServices(services =>
             {
                 services.RemoveAll<IGitHubCommentPort>();
+                services.RemoveAll<IGitHubIssuePort>();
                 services.AddSingleton<IGitHubCommentPort>(Comments);
+                services.AddSingleton<IGitHubIssuePort>(Comments);
             });
         }
     }

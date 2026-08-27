@@ -71,9 +71,15 @@ public partial class MohistDbContext
                     .IsRequired();
                 entity.Property(e => e.IssueNumber)
                     .IsRequired();
+                entity.Property(e => e.MirrorMarker)
+                    .HasMaxLength(256);
+                entity.Property(e => e.MirrorCreateAttempted)
+                    .IsRequired();
                 entity.HasIndex(e => new { e.ProjectId, e.RepositoryName, e.GithubIssueNumber })
+                    .IsUnique()
+                    .HasFilter("\"GithubIssueNumber\" > 0");
+                entity.HasIndex(e => new { e.ProjectId, e.IssueNumber })
                     .IsUnique();
-                entity.HasIndex(e => new { e.ProjectId, e.IssueNumber });
                 entity.Property(e => e.PostedCommentsJson)
                     .HasColumnType("JSON")
                     .IsRequired();

@@ -60,6 +60,7 @@ public static class EventCatalog
         ReverseDns.IssueCancelled,
         ReverseDns.IssueWorkStarted,
         ReverseDns.IssueCreated,
+        ReverseDns.IssueContentChanged,
         ReverseDns.IssueLabelsChanged,
         ReverseDns.IssuePriorityChanged,
         ReverseDns.IssueDraftChanged,
@@ -86,6 +87,7 @@ public static class EventCatalog
         ReverseDns.EpicReopened,
         ReverseDns.EpicStartAttemptFailed,
         ReverseDns.GitHubIssuesLabeled,
+        ReverseDns.GitHubIssuesEdited,
         ReverseDns.GitHubIssuesClosed,
         ReverseDns.GitHubIssuesReopened,
         ReverseDns.GitHubPullRequestReviewed,
@@ -225,6 +227,7 @@ public static class EventCatalog
         public const string IssueCancelled = "com.mohist.issue.cancelled";
         public const string IssueWorkStarted = "com.mohist.issue.work-started";
         public const string IssueCreated = "com.mohist.issue.created";
+        public const string IssueContentChanged = "com.mohist.issue.content-changed";
         public const string IssueLabelsChanged = "com.mohist.issue.labels-changed";
         public const string IssuePriorityChanged = "com.mohist.issue.priority-changed";
         public const string IssueDraftChanged = "com.mohist.issue.draft-changed";
@@ -256,6 +259,7 @@ public static class EventCatalog
         public const string InboxItemPersisted = "com.mohist.inbox.item-persisted";
 
         public const string GitHubIssuesLabeled = "com.mohist.github.issues.labeled";
+        public const string GitHubIssuesEdited = "com.mohist.github.issues.edited";
         public const string GitHubIssuesClosed = "com.mohist.github.issues.closed";
         public const string GitHubIssuesReopened = "com.mohist.github.issues.reopened";
         public const string GitHubPullRequestReviewed = "com.mohist.github.pull-request.reviewed";

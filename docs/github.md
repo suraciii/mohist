@@ -69,7 +69,7 @@ title and body.
 
 After creation, the mirror carries:
 
-- **Title and body**, kept in sync in both directions; see
+- **Title and body**, kept in sync in both directions; Mohist retains one invisible HTML marker in the raw GitHub body for unknown-create reconciliation, while the rendered body has no tracking footer; see
   [Linked Pairs](#linked-pairs).
 - **Lifecycle projection.** Completing or cancelling the Mohist Issue closes
   the mirror with the matching reason.
@@ -196,11 +196,12 @@ boundaries and protocol details.
 The target model above replaces the earlier one-way intake design. Implemented
 today: repository connection with signed ingress, feed-by-label intake, close
 withdrawal, Pull Request review Approval, best-effort progress write-back,
-Issues that explicitly run without a Workflow across Server, CLI, and Web, and
-first-class mirror link visibility in CLI and Web. The link currently exposes a
+Issues that explicitly run without a Workflow across Server, CLI, and Web,
+first-class mirror link visibility in CLI and Web, automatic ready-only
+mirroring with durable Pending intent and marker reconciliation, and two-way
+title and body sync with echo suppression. The link currently exposes a
 deliberately provisional `healthy` sync state and does not report write-back
 failures; real sync health belongs to the later recovery slice. Not yet
-implemented: automatic mirroring of Mohist Issues, GitHub-driven lifecycle for
-no-Workflow Issues, the `/mohist` command entry, two-way title and body sync,
-and reconcile-based recovery. Feed-by-label intake and its connection
-options are removed when the command entry lands.
+implemented: GitHub-driven lifecycle for no-Workflow Issues, the `/mohist`
+command entry, and reconcile-based operator recovery. Feed-by-label intake and
+its connection options are removed when the command entry lands.
