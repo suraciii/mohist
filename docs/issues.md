@@ -29,10 +29,12 @@ Draft protects incomplete requirements from consuming execution capacity. Mark
 an Issue ready only after its body and dependencies are usable.
 
 Without `--workflow-profile`, the Issue inherits the Project's default Profile.
-You may update the selection before the Workflow starts or later. An active
-Workflow continues to use the Profile selected when it started. A new
-selection applies to the next run. Clearing an explicit selection restores
-inheritance from the Project default.
+Use `--no-workflow` — mutually exclusive with `--workflow-profile` — when the
+work will be delivered outside the Mohist production line. Such an Issue runs
+no Workflow at all; see [Start an Issue](#start-an-issue). You may change the
+selection until the Issue starts. An active Workflow continues to use the
+Profile selected when it started. A new selection applies to the next run.
+Clearing an explicit selection restores inheritance from the Project default.
 
 ### Web UI Fallback
 
@@ -114,6 +116,8 @@ UI. The details page shows:
 
 - The current Stage, health, and approval state.
 - The complete body and comments.
+- The GitHub mirror — number, link, and sync health — when the target
+  repository is connected; see [GitHub](github.md).
 - The Workflow timeline.
 - The branch bar with the current branch state.
 - A diff and commit summary.
@@ -130,7 +134,12 @@ mo issue start 42
 
 An Issue can start only from `backlog`, when it is marked ready rather than
 Draft, and when its prerequisites and Repository binding permit a start.
-Starting creates or reuses the named Workspace `issue-42` and enters Plan.
+Starting an Issue with a Workflow Profile creates or reuses the named
+Workspace `issue-42` and enters Plan. Starting an Issue created with
+`--no-workflow` runs no Workflow: the Issue moves directly to in progress, and
+`mo issue done` or `mo issue close` completes its lifecycle. When its target
+repository is connected to GitHub, the linked GitHub Issue can drive the same
+lifecycle; see [GitHub](github.md#linked-pairs).
 
 ## Respond to an Approval Point
 
@@ -193,7 +202,8 @@ mo issue done 42
 ```
 
 This command applies only to an in-progress Issue without child Issues whose
-Workflow has either stopped permanently or completed. A failed Workflow can
+Workflow has either stopped permanently or completed — including an Issue that
+runs no Workflow at all. A failed Workflow can
 still be retried. First use `mo run stop --issue 42 --yes` to end it explicitly,
 then mark the Issue Done. The command does not stop the Workflow or reset its
 Session for you.

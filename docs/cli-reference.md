@@ -247,7 +247,17 @@ success, it creates and binds one WorkflowRun.
 `issue create` and `issue edit` use the same typed flags for planning metadata:
 `--priority`, `--risk low|medium|high`, `--label`, `--repo`, `--parent`, and
 `--workflow-profile`. These fields are structured data and do not need to appear
-in body frontmatter.
+in body frontmatter. The mutually exclusive `--no-workflow` selects no Workflow:
+the Issue then runs no WorkflowRun, and `issue start` moves it directly to in
+progress.
+
+When the target repository is connected to GitHub, every non-Draft Issue has a
+GitHub mirror. `issue view` and `issue list` expose its repository, number, URL,
+and sync health as first-class fields; callers never derive them from labels.
+`issue github link <number> <owner/repo#number>` pairs two existing Issues with
+the Mohist side as content source, `issue github unlink <number>` stops
+synchronization, and `issue github sync <number>` reconciles a link: creating a
+missing mirror, pushing current state, and clearing a sync error.
 
 `issue list` supports filters for `--stage`, `--priority`, `--label`, `--repo`,
 `--parent`, and `--epic`. With `--json` field selection, one call can compare
@@ -557,15 +567,28 @@ for the complete product semantics.
 
 ## GitHub
 
-`mo github connect owner/repo [--feed-mode start|backlog] [--approver <login> ...]`
-connects a GitHub repository to the current Project. It matches a registered
-repository by address, creates the connection and an inbound signing secret,
-and then prints the GitHub configuration checklist: webhook address, content
-type, secret, and event subscriptions. After configuration, GitHub actions such
-as applying a label, closing an Issue, submitting a pull request review, or
-completing a check suite enter Mohist event routing in real time. Output
-describes GitHub App or PAT identity configuration; this version does not
-require it.
+`mo github` manages the connection between a GitHub repository and a registered
+Project Repository: the mirror of Issues, the `/mohist` command entry, and
+review-based Approval.
+
+- `mo github connect owner/repo [--repo <name>] [--approver <login> ...]`
+  connects a GitHub repository to the current Project. It matches a registered
+  Repository by git URL, or uses the explicit `--repo` name when the match is
+  ambiguous, then prints the GitHub configuration checklist: webhook address,
+  content type, secret, and event subscriptions. One GitHub repository connects
+  to one Project Repository; connecting an already-connected repository
+  continues the existing connection.
+- `mo github list` shows every Repository of the current Project and its
+  connection state, including repositories without a connection.
+- `mo github view <connection>` and `mo github enable|disable <connection>`
+  inspect and control one connection. Disabling pauses mirroring and command
+  intake while keeping existing links visible; enabling re-projects every
+  linked Issue once. A connection cannot be deleted.
+- Once connected, every non-Draft Mohist Issue targeting that Repository gets a
+  GitHub mirror automatically; no per-Issue opt-in exists. A comment starting
+  with `/mohist` on a GitHub Issue is a command from the shared verb
+  vocabulary: `/mohist start` creates the linked Mohist Issue and starts its
+  Workflow.
 
 See [GitHub](github.md) for the complete product semantics.
 

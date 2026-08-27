@@ -95,6 +95,12 @@ A Profile defines stages, tasks, checks, recovery, and Approval. It does not
 store Variables or Prompt bodies. Project, Issue, and Run Variables merge by
 scope. Prompts are configured only in the Project.
 
+An Issue may also select no Workflow at all (`mo issue create --no-workflow`).
+It then runs no production line: starting moves it directly to in progress,
+and completion is recorded by `mo issue done`, `mo issue close`, or — for an
+Issue linked to GitHub — by the GitHub Issue's lifecycle; see
+[GitHub](github.md).
+
 The built-in Profiles are:
 
 - `mohist/local`: The complete five-stage process with local integration; this
