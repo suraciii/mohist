@@ -10,7 +10,7 @@ internal static partial class IssueCommands
 
     internal static readonly ResourceDescriptor IssueDescriptor = new(
         ResourceCardinality.Single,
-        ["number", "title", "status", "stage", "priority", "risk", "labels", "body", "repository", "repositoryName", "prereq", "epic", "workflowRunId", "createdAt", "updatedAt"]);
+        ["number", "title", "status", "stage", "priority", "risk", "labels", "body", "repository", "repositoryName", "prereq", "epic", "github", "workflowRunId", "createdAt", "updatedAt"]);
 
     internal static readonly ResourceDescriptor IssueViewDescriptor = new(
         ResourceCardinality.Single,

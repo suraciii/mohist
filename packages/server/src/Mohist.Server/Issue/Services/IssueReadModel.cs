@@ -1,3 +1,4 @@
+using Mohist.Server.GitHub.Domain;
 using Mohist.Server.Issue.Domain;
 using Mohist.Server.Issue.Services.WorkflowProfiles;
 using Mohist.Server.Project.Domain;
@@ -65,11 +66,20 @@ public class IssueReadModel
     public IssueWatchEntryDto[] Muted { get; set; } = [];
 }
 
+/// <summary>Mirror identity and sync health; connection status is connected or paused while sync health remains healthy or error.</summary>
 public sealed record GitHubIssueSummary(
     string Repository,
     int Number,
     string Url,
-    string SyncStatus);
+    string SyncStatus,
+    GitHubSyncErrorSummary? LastError = null,
+    string ConnectionStatus = "connected");
+
+public sealed record GitHubSyncErrorSummary(
+    string Operation,
+    string Code,
+    string Detail,
+    string OccurredAt);
 
 public sealed record IssueWatchEntryDto(
     string AgentId,

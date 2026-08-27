@@ -46,13 +46,16 @@ public sealed class GitHubWriteBackHandler : ICloudEventHandler
     };
 
     private readonly IServiceScopeFactory _scopes;
+    private readonly TimeProvider _timeProvider;
     private readonly ILogger<GitHubWriteBackHandler> _log;
 
     public GitHubWriteBackHandler(
         IServiceScopeFactory scopes,
+        TimeProvider timeProvider,
         ILogger<GitHubWriteBackHandler> log)
     {
         _scopes = scopes;
+        _timeProvider = timeProvider;
         _log = log;
     }
 
@@ -170,17 +173,32 @@ public sealed class GitHubWriteBackHandler : ICloudEventHandler
         string eventType,
         CancellationToken ct)
     {
-        if (link.HasPostedComment(commentKey))
+        var links = sp.GetRequiredService<GitHubIssueLinkStore>();
+        var marker = GitHubCommentOperationMarker.For(link.Id, commentKey);
+        if (!await links.TryReserveCommentAsync(
+            link.Id,
+            commentKey,
+            GitHubCommentOperationKind.Comment,
+            body,
+            stateReason: null,
+            ct: ct))
             return;
         try
         {
             await sp.GetRequiredService<IGitHubCommentPort>()
-                .PostCommentAsync(connection, link.GithubIssueNumber, body, ct);
-            await sp.GetRequiredService<GitHubIssueLinkStore>()
-                .MarkCommentPostedAsync(link.Id, commentKey, ct);
+                .PostCommentAsync(
+                    connection,
+                    link.GithubIssueNumber,
+                    GitHubMirrorMarker.Append(body, marker),
+                    ct);
+            await links.MarkCommentPostedAsync(link.Id, commentKey, link.GithubIssueNumber, ct);
         }
         catch (Exception ex) when (!ct.IsCancellationRequested)
         {
+            if (GitHubRemoteOutcome.IsUnknown(ex))
+                await links.DeferCommentOperationAsync(link.Id, commentKey, ex.Message, ct);
+            else
+                await links.ReleaseCommentReservationAsync(link.Id, commentKey, ct);
             await RecordFailureAsync(sp, connection, link, eventType, GitHubWriteBackOperation.Comment, ex, ct);
         }
     }
@@ -194,17 +212,27 @@ public sealed class GitHubWriteBackHandler : ICloudEventHandler
         string eventType,
         CancellationToken ct)
     {
-        if (link.HasPostedComment(closeKey))
+        var links = sp.GetRequiredService<GitHubIssueLinkStore>();
+        if (!await links.TryReserveCommentAsync(
+            link.Id,
+            closeKey,
+            GitHubCommentOperationKind.Close,
+            body: null,
+            stateReason: stateReason,
+            ct: ct))
             return;
         try
         {
             await sp.GetRequiredService<IGitHubCommentPort>()
                 .CloseIssueAsync(connection, link.GithubIssueNumber, stateReason, ct);
-            await sp.GetRequiredService<GitHubIssueLinkStore>()
-                .MarkCommentPostedAsync(link.Id, closeKey, ct);
+            await links.MarkCommentPostedAsync(link.Id, closeKey, link.GithubIssueNumber, ct);
         }
         catch (Exception ex) when (!ct.IsCancellationRequested)
         {
+            if (GitHubRemoteOutcome.IsUnknown(ex))
+                await links.DeferCommentOperationAsync(link.Id, closeKey, ex.Message, ct);
+            else
+                await links.ReleaseCommentReservationAsync(link.Id, closeKey, ct);
             await RecordFailureAsync(sp, connection, link, eventType, GitHubWriteBackOperation.Close, ex, ct);
         }
     }
@@ -237,7 +265,15 @@ public sealed class GitHubWriteBackHandler : ICloudEventHandler
                     : ex.GetType().Name,
                 ErrorDetail = ex.Message.Length <= 1000 ? ex.Message : ex.Message[..1000],
             };
+            failure.CreatedAt = _timeProvider.GetUtcNow();
             await sp.GetRequiredService<GitHubWriteBackFailureStore>().CreateAsync(failure, ct);
+            await sp.GetRequiredService<GitHubIssueLinkStore>().MarkErrorAsync(
+                link.Id,
+                new GitHubSyncError(failure.Operation, failure.ErrorCode, failure.ErrorDetail, failure.CreatedAt),
+                expectedGithubIssueNumber: link.GithubIssueNumber > 0
+                    ? link.GithubIssueNumber
+                    : null,
+                ct: ct);
             if (IsCredentialFailure(ex))
             {
                 await sp.GetRequiredService<GitHubConnectionStore>()

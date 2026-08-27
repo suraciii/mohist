@@ -21,6 +21,12 @@ public sealed class GitHubConnection
     /// after fixing the credential.
     /// </summary>
     public bool NeedsAttention { get; set; }
+
+    /// <summary>
+    /// Set when an Active transition still has linked Issues to re-project.
+    /// The hosted reconciler clears it only after every link converges.
+    /// </summary>
+    public bool NeedsReprojection { get; set; }
     public DateTimeOffset CreatedAt { get; set; }
     public DateTimeOffset UpdatedAt { get; set; }
 
@@ -38,6 +44,8 @@ public sealed class GitHubConnection
             throw new GitHubConnectionValidationException("installationId is required when identityKind is 'app'", "installation_id_required");
     }
 }
+
+public sealed record GitHubConnectionStatusChange(GitHubConnection Connection, bool Changed);
 
 public static class GitHubConnectionStatus
 {

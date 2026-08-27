@@ -259,6 +259,10 @@ public static class MohistServiceRegistration
         services.AddOptions<GitHubCommandReplyDeliveryOptions>();
         services.AddSingleton<GitHubCommandReplyDeliveryWorker>();
         services.AddHostedService(sp => sp.GetRequiredService<GitHubCommandReplyDeliveryWorker>());
+        services.AddSingleton<GitHubIssueCommentOperationRecoveryWorker>();
+        services.AddHostedService(sp => sp.GetRequiredService<GitHubIssueCommentOperationRecoveryWorker>());
+        services.AddSingleton<GitHubConnectionReprojectionWorker>();
+        services.AddHostedService(sp => sp.GetRequiredService<GitHubConnectionReprojectionWorker>());
 
         services.AddCloudEventBus();
         services.AddCloudEventHandlersFromAssembly(typeof(MohistServiceRegistration).Assembly);

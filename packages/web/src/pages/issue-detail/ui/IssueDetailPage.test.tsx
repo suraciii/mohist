@@ -5,6 +5,8 @@ import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom'
 import { ProjectProvider } from '../../../entities/project'
 import type { Project } from '../../../entities/project'
 import { IssueDetailPage, type IssueDetailPageComponents } from './IssueDetailPage'
+import { http, HttpResponse } from 'msw'
+import { server } from '../../../../tests/support/msw'
 import {
   mockIssue,
   mockIssueCommits,
@@ -106,11 +108,64 @@ describe('IssueDetailPage GitHub mirror', () => {
     expect(link).toHaveAttribute('title', 'GitHub sync: healthy')
   })
 
+  it('renders a paused state without changing healthy sync status', async () => {
+    mockIssue(
+      makeIssue({
+        github: {
+          repository: 'suraciii/mohist',
+          number: 771,
+          url: 'https://github.com/suraciii/mohist/issues/771',
+          syncStatus: 'healthy',
+          connectionStatus: 'paused',
+        },
+      }),
+    )
+
+    renderPage()
+
+    expect(await waitFor(() => screen.getByTestId('github-connection-status'))).toHaveTextContent('Paused')
+    expect(screen.getByTestId('github-issue-link')).toHaveAttribute('title', 'GitHub sync: healthy')
+  })
+
   it('renders no GitHub link for an unlinked issue', async () => {
     mockIssue(makeIssue())
     renderPage()
     await waitFor(() => expect(screen.getByTestId('issue-detail-header')).toBeTruthy())
     expect(screen.queryByTestId('github-issue-link')).not.toBeInTheDocument()
+  })
+
+  it('exposes the sync recovery action for an unhealthy mirror', async () => {
+    const requests: Request[] = []
+    server.use(
+      http.post('*/api/projects/:projectId/issues/:number/github/sync', ({ request }) => {
+        requests.push(request)
+        return HttpResponse.json({ success: true, data: makeIssue() })
+      }),
+    )
+    mockIssue(
+      makeIssue({
+        github: {
+          repository: 'suraciii/mohist',
+          number: 775,
+          url: 'https://github.com/suraciii/mohist/issues/775',
+          syncStatus: 'error',
+          lastError: {
+            operation: 'content',
+            code: '503',
+            detail: 'GitHub unavailable',
+            occurredAt: '2026-01-01T00:00:00Z',
+          },
+        },
+      }),
+    )
+
+    renderPage()
+
+    const button = await waitFor(() => screen.getByTestId('github-sync-button'))
+    expect(button).toHaveAttribute('title', 'GitHub unavailable')
+    fireEvent.click(button)
+    await waitFor(() => expect(requests).toHaveLength(1))
+    expect(requests[0].method).toBe('POST')
   })
 })
 

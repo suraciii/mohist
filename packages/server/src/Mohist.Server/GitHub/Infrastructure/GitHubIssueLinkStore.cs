@@ -10,6 +10,10 @@ namespace Mohist.Server.GitHub.Infrastructure;
 
 public sealed class GitHubIssueLinkStore : IScopedService
 {
+    private static readonly TimeSpan OperationLeaseDuration = TimeSpan.FromMinutes(2);
+    private static readonly TimeSpan RetryBaseDelay = TimeSpan.FromSeconds(5);
+    private static readonly TimeSpan RetryMaxDelay = TimeSpan.FromMinutes(5);
+
     private readonly IDbContextFactory<MohistDbContext> _dbFactory;
     private readonly TimeProvider _timeProvider;
 
@@ -45,6 +49,21 @@ public sealed class GitHubIssueLinkStore : IScopedService
     /// progress from Mohist events and needs the reverse lookup; the unique
     /// issue index guarantees at most one link per Mohist issue.
     /// </summary>
+    public async Task<IReadOnlyList<GitHubIssueLink>> ListByConnectionAsync(
+        string projectId,
+        string repositoryName,
+        CancellationToken ct = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(projectId);
+        ArgumentException.ThrowIfNullOrWhiteSpace(repositoryName);
+        await using var db = await _dbFactory.CreateDbContextAsync(ct);
+        var rows = await db.GitHubIssueLinks.AsNoTracking()
+            .Where(r => r.ProjectId == projectId && r.RepositoryName == repositoryName)
+            .OrderBy(r => r.IssueNumber)
+            .ToListAsync(ct);
+        return rows.Select(ToDomain).ToList();
+    }
+
     public async Task<GitHubIssueLink?> GetByIssueAsync(
         string projectId,
         int issueNumber,
@@ -57,6 +76,15 @@ public sealed class GitHubIssueLinkStore : IScopedService
         await using var db = await _dbFactory.CreateDbContextAsync(ct);
         var row = await db.GitHubIssueLinks.AsNoTracking()
             .FirstOrDefaultAsync(r => r.ProjectId == projectId && r.IssueNumber == issueNumber, ct);
+        return row is null ? null : ToDomain(row);
+    }
+
+    public async Task<GitHubIssueLink?> GetByIdAsync(string id, CancellationToken ct = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(id);
+        await using var db = await _dbFactory.CreateDbContextAsync(ct);
+        var row = await db.GitHubIssueLinks.AsNoTracking()
+            .FirstOrDefaultAsync(r => r.Id == id, ct);
         return row is null ? null : ToDomain(row);
     }
 
@@ -93,6 +121,7 @@ public sealed class GitHubIssueLinkStore : IScopedService
             MirrorMarker = null,
             MirrorCreateAttempted = false,
             CommandRequested = commandRequested,
+            SyncStatus = GitHubSyncStatus.Healthy,
             PostedCommentsJson = "[]",
             CreatedAt = now,
             UpdatedAt = now,
@@ -116,6 +145,24 @@ public sealed class GitHubIssueLinkStore : IScopedService
         return ToDomain(row);
     }
 
+    public async Task<GitHubIssueLinkClaim> ClaimAsync(
+        string projectId,
+        string repositoryName,
+        int githubIssueNumber,
+        int issueNumber,
+        CancellationToken ct = default)
+    {
+        var link = await CreateAsync(
+            projectId,
+            repositoryName,
+            githubIssueNumber,
+            issueNumber,
+            commandRequested: false,
+            ct: ct);
+        var won = link.IssueNumber == issueNumber && link.GithubIssueNumber == githubIssueNumber;
+        return won ? new GitHubIssueLinkClaim(true, link) : new GitHubIssueLinkClaim(false, null);
+    }
+
     public async Task<GitHubIssueLink> CreatePendingAsync(
         string projectId,
         string repositoryName,
@@ -137,6 +184,7 @@ public sealed class GitHubIssueLinkStore : IScopedService
             MirrorMarker = GitHubMirrorMarker.For(id),
             MirrorCreateAttempted = false,
             CommandRequested = false,
+            SyncStatus = GitHubSyncStatus.Healthy,
             PostedCommentsJson = "[]",
             CreatedAt = now,
             UpdatedAt = now,
@@ -152,6 +200,80 @@ public sealed class GitHubIssueLinkStore : IScopedService
             var existing = await db.GitHubIssueLinks.AsNoTracking()
                 .FirstAsync(r => r.ProjectId == projectId && r.IssueNumber == issueNumber, ct);
             return ToDomain(existing);
+        }
+        return ToDomain(row);
+    }
+
+    public async Task<GitHubIssueLink?> EnsureMirrorMarkerAsync(
+        string id,
+        CancellationToken ct = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(id);
+        await using var db = await _dbFactory.CreateDbContextAsync(ct);
+        var row = await db.GitHubIssueLinks.FirstOrDefaultAsync(r => r.Id == id, ct);
+        if (row is null) return null;
+        if (string.IsNullOrWhiteSpace(row.MirrorMarker))
+        {
+            row.MirrorMarker = GitHubMirrorMarker.For(row.Id);
+            row.UpdatedAt = _timeProvider.GetUtcNow();
+            await db.SaveChangesAsync(ct);
+        }
+        return ToDomain(row);
+    }
+
+    public Task<GitHubIssueLink?> MarkErrorAsync(
+        string id,
+        GitHubSyncError error,
+        CancellationToken ct = default) =>
+        MarkErrorAsync(id, error, expectedGithubIssueNumber: null, ct: ct);
+
+    public async Task<GitHubIssueLink?> MarkErrorAsync(
+        string id,
+        GitHubSyncError error,
+        int? expectedGithubIssueNumber,
+        CancellationToken ct = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(id);
+        ArgumentNullException.ThrowIfNull(error);
+        if (expectedGithubIssueNumber is <= 0)
+            throw new ArgumentOutOfRangeException(nameof(expectedGithubIssueNumber));
+
+        await using var db = await _dbFactory.CreateDbContextAsync(ct);
+        await using var transaction = await db.Database.BeginTransactionAsync(ct);
+        var row = await db.GitHubIssueLinks.FirstOrDefaultAsync(r => r.Id == id, ct);
+        if (row is null
+            || (expectedGithubIssueNumber is { } expected
+                && row.GithubIssueNumber != expected))
+            return null;
+        row.SyncStatus = GitHubSyncStatus.Error;
+        row.LastErrorOperation = error.Operation;
+        row.LastErrorCode = error.Code;
+        row.LastErrorDetail = error.Detail;
+        row.LastErrorAt = error.OccurredAt;
+        row.UpdatedAt = _timeProvider.GetUtcNow();
+        await db.SaveChangesAsync(ct);
+        await transaction.CommitAsync(ct);
+        return ToDomain(row);
+    }
+
+    public async Task<GitHubIssueLink?> ClearErrorAsync(
+        string id,
+        CancellationToken ct = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(id);
+        await using var db = await _dbFactory.CreateDbContextAsync(ct);
+        var row = await db.GitHubIssueLinks.FirstOrDefaultAsync(r => r.Id == id, ct);
+        if (row is null) return null;
+        if (row.SyncStatus != GitHubSyncStatus.Healthy || row.LastErrorOperation is not null
+            || row.LastErrorCode is not null || row.LastErrorDetail is not null || row.LastErrorAt is not null)
+        {
+            row.SyncStatus = GitHubSyncStatus.Healthy;
+            row.LastErrorOperation = null;
+            row.LastErrorCode = null;
+            row.LastErrorDetail = null;
+            row.LastErrorAt = null;
+            row.UpdatedAt = _timeProvider.GetUtcNow();
+            await db.SaveChangesAsync(ct);
         }
         return ToDomain(row);
     }
@@ -172,49 +294,445 @@ public sealed class GitHubIssueLinkStore : IScopedService
         return ToDomain(row);
     }
 
+    /// <summary>
+    /// Claims an existing pending mirror intent for a manual link. The
+    /// conditional update is the ownership fence: once mirror creation has
+    /// reserved the row, manual linking cannot delete or replace it.
+    /// </summary>
+    public async Task<GitHubIssueLinkClaim?> TryClaimPendingForManualLinkAsync(
+        string id,
+        int githubIssueNumber,
+        CancellationToken ct = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(id);
+        if (githubIssueNumber <= 0)
+            throw new ArgumentOutOfRangeException(nameof(githubIssueNumber));
+
+        await using var db = await _dbFactory.CreateDbContextAsync(ct);
+        var updated = 0;
+        try
+        {
+            updated = await db.GitHubIssueLinks
+                .Where(row => row.Id == id
+                    && row.GithubIssueNumber <= 0
+                    && !row.MirrorCreateAttempted)
+                .ExecuteUpdateAsync(setters => setters
+                    .SetProperty(row => row.GithubIssueNumber, githubIssueNumber)
+                    .SetProperty(row => row.MirrorCreateAttempted, true)
+                    .SetProperty(row => row.UpdatedAt, _timeProvider.GetUtcNow()), ct);
+        }
+        catch (DbUpdateException ex) when (IsUniqueViolation(ex))
+        {
+            // Another link won the GitHub issue identity race. Returning the
+            // current row below lets the caller distinguish that owner from a
+            // pending intent that was already reserved by mirror creation.
+        }
+
+        var row = await db.GitHubIssueLinks.AsNoTracking()
+            .FirstOrDefaultAsync(candidate => candidate.Id == id, ct);
+        if (row is null)
+            return null;
+        var link = ToDomain(row);
+        var won = updated == 1 || (link.IssueNumber > 0 && link.GithubIssueNumber == githubIssueNumber);
+        return new GitHubIssueLinkClaim(won, won ? link : null);
+    }
+
+    public async Task<GitHubMirrorCreateReservation?> TryReserveMirrorCreateAsync(
+        string id,
+        CancellationToken ct = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(id);
+        await using var db = await _dbFactory.CreateDbContextAsync(ct);
+        var now = _timeProvider.GetUtcNow();
+        var updated = await db.GitHubIssueLinks
+            .Where(row => row.Id == id && row.GithubIssueNumber <= 0 && !row.MirrorCreateAttempted)
+            .ExecuteUpdateAsync(setters => setters
+                .SetProperty(row => row.MirrorCreateAttempted, true)
+                .SetProperty(row => row.UpdatedAt, now), ct);
+        var row = await db.GitHubIssueLinks.AsNoTracking()
+            .FirstOrDefaultAsync(candidate => candidate.Id == id, ct);
+        return row is null ? null : new GitHubMirrorCreateReservation(ToDomain(row), updated == 1);
+    }
+
     public async Task<GitHubIssueLink?> MarkMirrorCreateAttemptedAsync(
         string id,
         CancellationToken ct = default)
     {
+        var reservation = await TryReserveMirrorCreateAsync(id, ct);
+        return reservation?.Link;
+    }
+
+    /// <summary>
+    /// Releases a mirror-create reservation only while the link is still
+    /// pending. A definite provider rejection can safely be retried; an
+    /// unknown outcome must keep the reservation so reconciliation, rather
+    /// than a second POST, remains the next operation.
+    /// </summary>
+    public async Task<GitHubIssueLink?> ResetMirrorCreateAttemptAsync(
+        string id,
+        CancellationToken ct = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(id);
         await using var db = await _dbFactory.CreateDbContextAsync(ct);
-        var row = await db.GitHubIssueLinks.FirstOrDefaultAsync(r => r.Id == id, ct);
-        if (row is null) return null;
-        if (!row.MirrorCreateAttempted)
+        await db.GitHubIssueLinks
+            .Where(row => row.Id == id && row.GithubIssueNumber <= 0 && row.MirrorCreateAttempted)
+            .ExecuteUpdateAsync(setters => setters
+                .SetProperty(row => row.MirrorCreateAttempted, false)
+                .SetProperty(row => row.UpdatedAt, _timeProvider.GetUtcNow()), ct);
+        var row = await db.GitHubIssueLinks.AsNoTracking()
+            .FirstOrDefaultAsync(candidate => candidate.Id == id, ct);
+        return row is null ? null : ToDomain(row);
+    }
+
+    public async Task<GitHubIssueLink?> ResetMirrorAsync(
+        string id,
+        int expectedGithubIssueNumber,
+        CancellationToken ct = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(id);
+        if (expectedGithubIssueNumber <= 0)
+            throw new ArgumentOutOfRangeException(nameof(expectedGithubIssueNumber));
+
+        await using var db = await _dbFactory.CreateDbContextAsync(ct);
+        await using var transaction = await db.Database.BeginTransactionAsync(ct);
+        var now = _timeProvider.GetUtcNow();
+        var updated = await db.GitHubIssueLinks
+            .Where(row => row.Id == id && row.GithubIssueNumber == expectedGithubIssueNumber)
+            .ExecuteUpdateAsync(setters => setters
+                .SetProperty(row => row.GithubIssueNumber, 0)
+                .SetProperty(row => row.MirrorCreateAttempted, false)
+                .SetProperty(row => row.PostedCommentsJson, "[]")
+                .SetProperty(row => row.StateLabel, (string?)null)
+                .SetProperty(row => row.UpdatedAt, now), ct);
+        if (updated == 1)
         {
-            row.MirrorCreateAttempted = true;
-            row.UpdatedAt = _timeProvider.GetUtcNow();
-            await db.SaveChangesAsync(ct);
+            await db.GitHubIssueCommentOperations
+                .Where(operation => operation.LinkId == id)
+                .ExecuteDeleteAsync(ct);
         }
-        return ToDomain(row);
+        await transaction.CommitAsync(ct);
+        var row = await db.GitHubIssueLinks.AsNoTracking()
+            .FirstOrDefaultAsync(candidate => candidate.Id == id, ct);
+        return row is null ? null : ToDomain(row);
     }
 
     public async Task DeleteAsync(string id, CancellationToken ct = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(id);
         await using var db = await _dbFactory.CreateDbContextAsync(ct);
+        await using var transaction = await db.Database.BeginTransactionAsync(ct);
         var row = await db.GitHubIssueLinks.FirstOrDefaultAsync(r => r.Id == id, ct);
         if (row is not null)
         {
+            await db.GitHubIssueCommentOperations
+                .Where(operation => operation.LinkId == id)
+                .ExecuteDeleteAsync(ct);
             db.GitHubIssueLinks.Remove(row);
             await db.SaveChangesAsync(ct);
         }
+        await transaction.CommitAsync(ct);
     }
 
-    public async Task MarkCommentPostedAsync(string id, string commentKey, CancellationToken ct = default)
+    public Task<bool> TryReserveCommentAsync(
+        string id,
+        string commentKey,
+        CancellationToken ct = default) =>
+        TryReserveCommentAsync(
+            id,
+            commentKey,
+            GitHubCommentOperationKind.Comment,
+            body: string.Empty,
+            stateReason: null,
+            ct);
+
+    public async Task<bool> TryReserveCommentAsync(
+        string id,
+        string commentKey,
+        string kind,
+        string? body,
+        string? stateReason,
+        CancellationToken ct = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(id);
+        ArgumentException.ThrowIfNullOrWhiteSpace(commentKey);
+        if (kind is not (GitHubCommentOperationKind.Comment or GitHubCommentOperationKind.Close))
+            throw new ArgumentException("Unknown GitHub comment operation kind.", nameof(kind));
+        if (kind == GitHubCommentOperationKind.Comment && body is null)
+            throw new ArgumentNullException(nameof(body));
+        if (kind == GitHubCommentOperationKind.Close && string.IsNullOrWhiteSpace(stateReason))
+            throw new ArgumentException("A close operation requires a state reason.", nameof(stateReason));
+
+        await using var db = await _dbFactory.CreateDbContextAsync(ct);
+        var link = await db.GitHubIssueLinks.AsNoTracking()
+            .FirstOrDefaultAsync(row => row.Id == id, ct);
+        if (link is null || link.GithubIssueNumber <= 0 || DeserializePosted(link.PostedCommentsJson).Contains(commentKey))
+            return false;
+
+        var existing = await db.GitHubIssueCommentOperations.AsNoTracking()
+            .FirstOrDefaultAsync(operation => operation.LinkId == id && operation.CommentKey == commentKey, ct);
+        if (existing is not null)
+            return false;
+
+        var now = _timeProvider.GetUtcNow();
+        db.GitHubIssueCommentOperations.Add(new GitHubIssueCommentOperationRow
+        {
+            Id = $"ghcomment_{Guid.NewGuid():N}",
+            LinkId = id,
+            GithubIssueNumber = link.GithubIssueNumber,
+            CommentKey = commentKey,
+            Kind = kind,
+            Body = body,
+            StateReason = stateReason,
+            Marker = kind == GitHubCommentOperationKind.Comment
+                ? GitHubCommentOperationMarker.For(id, commentKey)
+                : null,
+            Status = GitHubCommentOperationStatus.Reserved,
+            AttemptCount = 0,
+            NextAttemptAt = null,
+            LeaseUntil = now.Add(OperationLeaseDuration),
+            LastError = null,
+            FailedAt = null,
+            CreatedAt = now,
+            UpdatedAt = now,
+        });
+        try
+        {
+            await db.SaveChangesAsync(ct);
+            return true;
+        }
+        catch (DbUpdateException ex) when (IsCommentOperationUniqueViolation(ex))
+        {
+            return false;
+        }
+    }
+
+    public async Task<IReadOnlyList<GitHubIssueCommentOperation>> ListPendingCommentOperationsAsync(
+        int limit = 100,
+        CancellationToken ct = default)
+    {
+        if (limit <= 0)
+            throw new ArgumentOutOfRangeException(nameof(limit));
+        var now = _timeProvider.GetUtcNow();
+        await using var db = await _dbFactory.CreateDbContextAsync(ct);
+        var rows = await db.GitHubIssueCommentOperations.AsNoTracking()
+            .Where(operation => operation.Status == GitHubCommentOperationStatus.Reserved)
+            .ToListAsync(ct);
+        return rows
+            .Where(operation => (operation.NextAttemptAt is null || operation.NextAttemptAt <= now)
+                && (operation.LeaseUntil is null || operation.LeaseUntil <= now))
+            .OrderBy(operation => operation.CreatedAt)
+            .Take(limit)
+            .Select(ToDomain)
+            .ToList();
+    }
+
+    public async Task<GitHubIssueCommentOperation?> TryClaimCommentOperationAsync(
+        string id,
+        TimeSpan leaseDuration,
+        CancellationToken ct = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(id);
+        if (leaseDuration <= TimeSpan.Zero)
+            throw new ArgumentOutOfRangeException(nameof(leaseDuration));
+        var now = _timeProvider.GetUtcNow();
+        var leaseUntil = now.Add(leaseDuration);
+        await using var db = await _dbFactory.CreateDbContextAsync(ct);
+        var affected = await db.Database.ExecuteSqlInterpolatedAsync($"""
+            UPDATE "GitHubIssueCommentOperations"
+            SET "LeaseUntil" = {leaseUntil}, "UpdatedAt" = {now}
+            WHERE "Id" = {id}
+              AND "Status" = {GitHubCommentOperationStatus.Reserved}
+              AND ("NextAttemptAt" IS NULL OR "NextAttemptAt" <= {now})
+              AND ("LeaseUntil" IS NULL OR "LeaseUntil" <= {now})
+            """, ct);
+        if (affected != 1)
+            return null;
+        var row = await db.GitHubIssueCommentOperations.AsNoTracking()
+            .SingleOrDefaultAsync(operation => operation.Id == id, ct);
+        return row is null ? null : ToDomain(row);
+    }
+
+    public async Task<GitHubIssueCommentOperation?> DeferCommentOperationAsync(
+        string linkId,
+        string commentKey,
+        string error,
+        CancellationToken ct = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(linkId);
+        ArgumentException.ThrowIfNullOrWhiteSpace(commentKey);
+        await using var db = await _dbFactory.CreateDbContextAsync(ct);
+        var id = await db.GitHubIssueCommentOperations
+            .Where(operation => operation.LinkId == linkId && operation.CommentKey == commentKey)
+            .Select(operation => operation.Id)
+            .SingleOrDefaultAsync(ct);
+        return id is null ? null : await DeferCommentOperationAsync(id, error, ct);
+    }
+
+    public async Task<GitHubIssueCommentOperation?> DeferCommentOperationAsync(
+        string id,
+        string error,
+        CancellationToken ct = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(id);
+        ArgumentException.ThrowIfNullOrWhiteSpace(error);
+        await using var db = await _dbFactory.CreateDbContextAsync(ct);
+        var row = await db.GitHubIssueCommentOperations
+            .FirstOrDefaultAsync(operation => operation.Id == id, ct);
+        if (row is null || row.Status != GitHubCommentOperationStatus.Reserved)
+            return row is null ? null : ToDomain(row);
+        var now = _timeProvider.GetUtcNow();
+        row.AttemptCount++;
+        row.LastError = error;
+        row.LeaseUntil = null;
+        row.NextAttemptAt = now.Add(OperationBackoff(row.AttemptCount));
+        row.UpdatedAt = now;
+        await db.SaveChangesAsync(ct);
+        return ToDomain(row);
+    }
+
+    public async Task<GitHubIssueCommentOperation?> MarkCommentOperationAmbiguousAsync(
+        string id,
+        string error,
+        CancellationToken ct = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(id);
+        ArgumentException.ThrowIfNullOrWhiteSpace(error);
+        await using var db = await _dbFactory.CreateDbContextAsync(ct);
+        var row = await db.GitHubIssueCommentOperations
+            .FirstOrDefaultAsync(operation => operation.Id == id, ct);
+        if (row is null)
+            return null;
+        if (row.Status == GitHubCommentOperationStatus.Reserved)
+        {
+            var now = _timeProvider.GetUtcNow();
+            row.Status = GitHubCommentOperationStatus.Ambiguous;
+            row.LastError = error;
+            row.FailedAt = now;
+            row.LeaseUntil = null;
+            row.NextAttemptAt = null;
+            row.UpdatedAt = now;
+            await db.SaveChangesAsync(ct);
+        }
+        return ToDomain(row);
+    }
+
+    public Task MarkCommentPostedAsync(
+        string id,
+        string commentKey,
+        CancellationToken ct = default) =>
+        MarkCommentPostedAsync(id, commentKey, expectedGithubIssueNumber: null, ct: ct);
+
+    public async Task MarkCommentPostedAsync(
+        string id,
+        string commentKey,
+        int? expectedGithubIssueNumber,
+        CancellationToken ct = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(id);
+        ArgumentException.ThrowIfNullOrWhiteSpace(commentKey);
+        if (expectedGithubIssueNumber is <= 0)
+            throw new ArgumentOutOfRangeException(nameof(expectedGithubIssueNumber));
+
+        await using var db = await _dbFactory.CreateDbContextAsync(ct);
+        await using var transaction = await db.Database.BeginTransactionAsync(ct);
+        var row = await db.GitHubIssueLinks.FirstOrDefaultAsync(r => r.Id == id, ct);
+        if (row is null
+            || (expectedGithubIssueNumber is { } expected
+                && row.GithubIssueNumber != expected))
+            return;
+
+        var now = _timeProvider.GetUtcNow();
+        var operation = await db.GitHubIssueCommentOperations
+            .FirstOrDefaultAsync(item => item.LinkId == id && item.CommentKey == commentKey, ct);
+        if (operation is null)
+        {
+            operation = new GitHubIssueCommentOperationRow
+            {
+                Id = $"ghcomment_{Guid.NewGuid():N}",
+                LinkId = id,
+                GithubIssueNumber = row.GithubIssueNumber,
+                CommentKey = commentKey,
+                Kind = GitHubCommentOperationKind.Comment,
+                Status = GitHubCommentOperationStatus.Posted,
+                CreatedAt = now,
+                UpdatedAt = now,
+            };
+            db.GitHubIssueCommentOperations.Add(operation);
+        }
+        else if (operation.Status == GitHubCommentOperationStatus.Ambiguous)
+        {
+            // A recovery worker found conflicting remote evidence. A stale
+            // in-flight owner must not overwrite that fail-closed decision.
+            return;
+        }
+        else if (expectedGithubIssueNumber is { } operationExpected
+            && operation.GithubIssueNumber != operationExpected)
+        {
+            return;
+        }
+        else if (operation.Status != GitHubCommentOperationStatus.Posted)
+        {
+            operation.Status = GitHubCommentOperationStatus.Posted;
+            operation.LeaseUntil = null;
+            operation.NextAttemptAt = null;
+            operation.LastError = null;
+            operation.UpdatedAt = now;
+        }
+
+        var posted = DeserializePosted(row.PostedCommentsJson);
+        if (posted.Add(commentKey))
+        {
+            row.PostedCommentsJson = SerializePosted(posted);
+            row.UpdatedAt = now;
+        }
+        await db.SaveChangesAsync(ct);
+        await transaction.CommitAsync(ct);
+    }
+
+    /// <summary>
+    /// Clears an in-flight lease without releasing the operation. This is the
+    /// disabled-connection boundary: enable can resume the same reservation,
+    /// while a disabled connection cannot cause a retry or deletion.
+    /// </summary>
+    public async Task ReleaseCommentOperationLeaseAsync(
+        string id,
+        CancellationToken ct = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(id);
+        await using var db = await _dbFactory.CreateDbContextAsync(ct);
+        await db.GitHubIssueCommentOperations
+            .Where(operation => operation.Id == id
+                && operation.Status == GitHubCommentOperationStatus.Reserved)
+            .ExecuteUpdateAsync(setters => setters
+                .SetProperty(operation => operation.LeaseUntil, (DateTimeOffset?)null)
+                .SetProperty(operation => operation.UpdatedAt, _timeProvider.GetUtcNow()), ct);
+    }
+
+    public async Task ReleaseCommentReservationAsync(string id, string commentKey, CancellationToken ct = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(id);
         ArgumentException.ThrowIfNullOrWhiteSpace(commentKey);
         await using var db = await _dbFactory.CreateDbContextAsync(ct);
-        var row = await db.GitHubIssueLinks.FirstOrDefaultAsync(r => r.Id == id, ct);
-        if (row is null)
-            return;
-        var posted = DeserializePosted(row.PostedCommentsJson);
-        if (posted.Contains(commentKey))
-            return;
-        posted.Add(commentKey);
-        row.PostedCommentsJson = SerializePosted(posted);
-        row.UpdatedAt = _timeProvider.GetUtcNow();
-        await db.SaveChangesAsync(ct);
+        await db.GitHubIssueCommentOperations
+            .Where(operation => operation.LinkId == id
+                && operation.CommentKey == commentKey
+                && operation.Status == GitHubCommentOperationStatus.Reserved)
+            .ExecuteDeleteAsync(ct);
+    }
+
+    /// <summary>
+    /// Deletes exactly the reserved operation identified by its durable ID.
+    /// A request that outlives a mirror reset must not release a later
+    /// reservation that reuses the same link and comment key.
+    /// </summary>
+    public async Task DeleteCommentOperationAsync(string id, CancellationToken ct = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(id);
+        await using var db = await _dbFactory.CreateDbContextAsync(ct);
+        await db.GitHubIssueCommentOperations
+            .Where(operation => operation.Id == id
+                && operation.Status == GitHubCommentOperationStatus.Reserved)
+            .ExecuteDeleteAsync(ct);
     }
 
     /// <summary>
@@ -235,6 +753,26 @@ public sealed class GitHubIssueLinkStore : IScopedService
         await db.SaveChangesAsync(ct);
     }
 
+    private static GitHubIssueCommentOperation ToDomain(GitHubIssueCommentOperationRow row) => new()
+    {
+        Id = row.Id,
+        LinkId = row.LinkId,
+        GithubIssueNumber = row.GithubIssueNumber,
+        CommentKey = row.CommentKey,
+        Kind = string.IsNullOrWhiteSpace(row.Kind) ? GitHubCommentOperationKind.Comment : row.Kind,
+        Body = row.Body,
+        StateReason = row.StateReason,
+        Marker = row.Marker,
+        Status = row.Status,
+        AttemptCount = row.AttemptCount,
+        NextAttemptAt = row.NextAttemptAt,
+        LeaseUntil = row.LeaseUntil,
+        LastError = row.LastError,
+        FailedAt = row.FailedAt,
+        CreatedAt = row.CreatedAt,
+        UpdatedAt = row.UpdatedAt,
+    };
+
     private static GitHubIssueLink ToDomain(GitHubIssueLinkRow row) => new()
     {
         Id = row.Id,
@@ -245,6 +783,10 @@ public sealed class GitHubIssueLinkStore : IScopedService
         MirrorMarker = row.MirrorMarker,
         MirrorCreateAttempted = row.MirrorCreateAttempted,
         CommandRequested = row.CommandRequested,
+        SyncStatus = string.IsNullOrWhiteSpace(row.SyncStatus) ? GitHubSyncStatus.Healthy : row.SyncStatus,
+        LastError = row.LastErrorOperation is null || row.LastErrorCode is null || row.LastErrorDetail is null || row.LastErrorAt is null
+            ? null
+            : new GitHubSyncError(row.LastErrorOperation, row.LastErrorCode, row.LastErrorDetail, row.LastErrorAt.Value),
         PostedComments = DeserializePosted(row.PostedCommentsJson),
         StateLabel = row.StateLabel,
         CreatedAt = row.CreatedAt,
@@ -270,6 +812,13 @@ public sealed class GitHubIssueLinkStore : IScopedService
     private static string SerializePosted(IReadOnlySet<string> posted) =>
         JsonSerializer.Serialize(posted.OrderBy(k => k, StringComparer.Ordinal), JSON.Options);
 
+    private static TimeSpan OperationBackoff(int attemptCount)
+    {
+        var multiplier = Math.Pow(2, Math.Min(Math.Max(attemptCount - 1, 0), 10));
+        var ticks = Math.Min(RetryBaseDelay.Ticks * multiplier, RetryMaxDelay.Ticks);
+        return TimeSpan.FromTicks((long)ticks);
+    }
+
     private static bool IsUniqueViolation(DbUpdateException ex) =>
         ex.InnerException is Microsoft.Data.Sqlite.SqliteException sqlite
         && sqlite.SqliteErrorCode == 19
@@ -279,4 +828,9 @@ public sealed class GitHubIssueLinkStore : IScopedService
         ex.InnerException is Microsoft.Data.Sqlite.SqliteException sqlite
         && sqlite.SqliteErrorCode == 19
         && sqlite.Message.Contains("IssueNumber", StringComparison.OrdinalIgnoreCase);
+
+    private static bool IsCommentOperationUniqueViolation(DbUpdateException ex) =>
+        ex.InnerException is Microsoft.Data.Sqlite.SqliteException sqlite
+        && sqlite.SqliteErrorCode == 19
+        && sqlite.Message.Contains("GitHubIssueCommentOperations", StringComparison.OrdinalIgnoreCase);
 }

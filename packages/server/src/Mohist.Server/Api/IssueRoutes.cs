@@ -23,6 +23,7 @@ public static partial class IssueRoutes
         projectIssues.MapIssueDeliveryTimeMetrics();
         projectIssues.MapIssueStageDurationMetrics();
         projectIssues.MapIssueWatch();
+        projectIssues.MapIssueGitHub();
 
         return app;
     }

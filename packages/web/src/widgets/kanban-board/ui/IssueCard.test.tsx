@@ -69,6 +69,23 @@ describe('IssueCard - GitHub mirror', () => {
     )
   })
 
+  it('renders a paused marker without changing mirror identity', () => {
+    renderCard(
+      makeIssue({
+        github: {
+          repository: 'suraciii/mohist',
+          number: 771,
+          url: 'https://github.com/suraciii/mohist/issues/771',
+          syncStatus: 'healthy',
+          connectionStatus: 'paused',
+        },
+      }),
+    )
+
+    expect(screen.getByTestId('issue-card-github-paused')).toHaveTextContent('Paused')
+    expect(screen.getByTestId('issue-card-github')).toHaveAttribute('title', 'GitHub synchronization is paused')
+  })
+
   it('renders no marker for an unlinked issue', () => {
     renderCard(makeIssue())
     expect(screen.queryByTestId('issue-card-github')).not.toBeInTheDocument()

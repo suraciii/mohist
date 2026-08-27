@@ -4642,6 +4642,9 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
                     b.Property<bool>("NeedsAttention")
                         .HasColumnType("INTEGER");
 
+                    b.Property<bool>("NeedsReprojection")
+                        .HasColumnType("INTEGER");
+
                     b.Property<string>("Owner")
                         .IsRequired()
                         .HasMaxLength(256)
@@ -4700,6 +4703,20 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
                     b.Property<bool>("MirrorCreateAttempted")
                         .HasColumnType("INTEGER");
 
+                    b.Property<DateTimeOffset?>("LastErrorAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("LastErrorCode")
+                        .HasMaxLength(64)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("LastErrorDetail")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("LastErrorOperation")
+                        .HasMaxLength(64)
+                        .HasColumnType("TEXT");
+
                     b.Property<string>("MirrorMarker")
                         .HasMaxLength(256)
                         .HasColumnType("TEXT");
@@ -4711,6 +4728,11 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
                     b.Property<string>("StateLabel")
                         .HasColumnType("TEXT")
                         .HasMaxLength(256);
+
+                    b.Property<string>("SyncStatus")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("TEXT");
 
                     b.Property<string>("ProjectId")
                         .IsRequired()
@@ -4810,6 +4832,75 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
                         .HasDatabaseName("UX_GitHubCommandReplies_Connection_Issue_Comment_Operation");
 
                     b.ToTable("GitHubCommandReplies", (string)null);
+                });
+            modelBuilder.Entity("Mohist.Server.Infrastructure.Data.GitHub.GitHubIssueCommentOperationRow", b =>
+                {
+                    b.Property<string>("Id")
+                        .HasMaxLength(256)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("CommentKey")
+                        .IsRequired()
+                        .HasMaxLength(128)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Kind")
+                        .HasMaxLength(32)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Body")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("StateReason")
+                        .HasMaxLength(32)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Marker")
+                        .HasMaxLength(512)
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("AttemptCount")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<DateTimeOffset?>("NextAttemptAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTimeOffset?>("LeaseUntil")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("LastError")
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTimeOffset?>("FailedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("LinkId")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("GithubIssueNumber")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("LinkId");
+
+                    b.HasIndex("LinkId", "CommentKey")
+                        .IsUnique();
+
+                    b.ToTable("GitHubIssueCommentOperations", (string)null);
                 });
             modelBuilder.Entity("Mohist.Server.Infrastructure.Data.GitHub.GitHubWriteBackFailureRow", b =>
                 {

@@ -1,3 +1,5 @@
+using System.Net;
+
 namespace Mohist.Server.GitHub.Domain;
 
 public sealed class GitHubIssueLink
@@ -11,6 +13,8 @@ public sealed class GitHubIssueLink
     public string? MirrorMarker { get; set; }
     public bool MirrorCreateAttempted { get; set; }
     public bool CommandRequested { get; set; }
+    public string SyncStatus { get; set; } = GitHubSyncStatus.Healthy;
+    public GitHubSyncError? LastError { get; set; }
     public IReadOnlySet<string> PostedComments { get; set; } = new HashSet<string>(StringComparer.Ordinal);
 
     /// <summary>
@@ -28,6 +32,83 @@ public sealed class GitHubIssueLink
 
     public bool HasPostedComment(string key) => PostedComments.Contains(key);
 }
+
+public sealed record GitHubIssueLinkClaim(bool Won, GitHubIssueLink? Link);
+
+public sealed record GitHubMirrorCreateReservation(GitHubIssueLink Link, bool Acquired);
+
+public sealed class GitHubIssueCommentOperation
+{
+    public string Id { get; init; } = string.Empty;
+    public string LinkId { get; init; } = string.Empty;
+    /// <summary>
+    /// GitHub issue identity held when this operation was reserved. A
+    /// recovery completion must not mutate a later mirror generation.
+    /// </summary>
+    public int GithubIssueNumber { get; init; }
+    public string CommentKey { get; init; } = string.Empty;
+    public string Kind { get; init; } = GitHubCommentOperationKind.Comment;
+    public string? Body { get; init; }
+    public string? StateReason { get; init; }
+    public string? Marker { get; init; }
+    public string Status { get; init; } = GitHubCommentOperationStatus.Reserved;
+    public int AttemptCount { get; init; }
+    public DateTimeOffset? NextAttemptAt { get; init; }
+    public DateTimeOffset? LeaseUntil { get; init; }
+    public string? LastError { get; init; }
+    public DateTimeOffset? FailedAt { get; init; }
+    public DateTimeOffset CreatedAt { get; init; }
+    public DateTimeOffset UpdatedAt { get; init; }
+
+    public bool IsPending => Status == GitHubCommentOperationStatus.Reserved;
+}
+
+public static class GitHubCommentOperationKind
+{
+    public const string Comment = "comment";
+    public const string Close = "close";
+}
+
+public static class GitHubCommentOperationStatus
+{
+    public const string Reserved = "reserved";
+    public const string Posted = "posted";
+    public const string Ambiguous = "ambiguous";
+}
+
+public static class GitHubRemoteOutcome
+{
+    public static bool IsUnknown(Exception exception) => exception switch
+    {
+        GitHubRemoteOutcomeUnknownException => true,
+        TimeoutException => true,
+        TaskCanceledException => true,
+        HttpRequestException { StatusCode: null } => true,
+        HttpRequestException { StatusCode: HttpStatusCode.RequestTimeout or HttpStatusCode.TooManyRequests } => true,
+        HttpRequestException { StatusCode: >= HttpStatusCode.InternalServerError } => true,
+        _ => false,
+    };
+}
+
+/// <summary>
+/// The provider accepted an outbound request but returned a response that
+/// cannot prove its result. Retrying the request could create a duplicate, so
+/// callers must reconcile the remote resource before posting again.
+/// </summary>
+public sealed class GitHubRemoteOutcomeUnknownException(string message, Exception? inner = null)
+    : Exception(message, inner);
+
+public static class GitHubSyncStatus
+{
+    public const string Healthy = "healthy";
+    public const string Error = "error";
+}
+
+public sealed record GitHubSyncError(
+    string Operation,
+    string Code,
+    string Detail,
+    DateTimeOffset OccurredAt);
 
 /// <summary>
 /// Comment kinds the comment port may post; the posted set lives on
@@ -67,6 +148,10 @@ public static class GitHubCommentKinds
     public const string ClosedCompleted = "writeback-closed-completed";
     public const string ClosedNotPlanned = "writeback-closed-not-planned";
     public const string ReopenedDoneFollowUp = "writeback-reopened-done-follow-up";
+    public const string Create = "create";
+    public const string Content = "content";
+    public const string Reconcile = "reconcile";
+    public const string Link = "link";
 }
 
 /// <summary>
@@ -86,6 +171,12 @@ public static class GitHubStateLabels
 /// makes an unknown create result safely reconcilable without matching on
 /// mutable user content. The marker is removed before content enters Mohist.
 /// </summary>
+public static class GitHubCommentOperationMarker
+{
+    public static string For(string linkId, string commentKey) =>
+        $"<!-- mohist:writeback:{linkId}:{commentKey} -->";
+}
+
 public static class GitHubMirrorMarker
 {
     public static string For(string linkId) => $"<!-- mohist:mirror:{linkId} -->";
