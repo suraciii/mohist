@@ -59,6 +59,7 @@ export interface CreateIssueInput {
   priority?: string
   risk?: string | null
   workflowProfileId?: string | null
+  noWorkflow?: boolean
   projectId?: string
   repositoryName?: string
   prerequisiteNumbers?: number[]
@@ -86,6 +87,7 @@ export interface UpdateIssueOptions {
   priority?: string | null
   isDraft?: boolean
   workflowProfileId?: string | null
+  noWorkflow?: boolean
 }
 
 export function updateIssue(number: number, data: UpdateIssueOptions, projectId?: string | null) {

@@ -136,6 +136,8 @@ export interface Issue {
   workflowStageProgress?: WorkflowStageProgress | null
   workflowRunId?: string | null
   workflowProfileId?: string | null
+  workflowProfileMode?: 'inherit' | 'explicit' | 'none' | null
+  noWorkflow?: boolean
   health: IssueHealth
   projectId: string
   labels: Record<string, string>
@@ -197,6 +199,7 @@ export interface IssueListItem
   risk?: string | null
   workflowRunId?: string | null
   workflowProfileId?: string | null
+  noWorkflow?: boolean
   workflowStage?: WorkflowStage | null
   workflowStatus?: string | null
   workflowStageProgress?: WorkflowStageProgress | null

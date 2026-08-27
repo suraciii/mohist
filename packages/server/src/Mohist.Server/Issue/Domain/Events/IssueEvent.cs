@@ -53,7 +53,8 @@ public sealed record IssuePrerequisiteRemoved(
     int PrerequisiteNumber);
 
 public sealed record IssueWorkflowProfileChanged(
-    string? WorkflowProfileId);
+    string? WorkflowProfileId,
+    bool NoWorkflow = false);
 
 public sealed record IssueEpicChanged(
     int? PreviousEpicNumber,
@@ -64,12 +65,13 @@ public sealed record IssueParentChanged(
     int? ParentIssueNumber);
 
 public sealed record IssueWorkStarted(
-    string WorkflowRunId,
+    string? WorkflowRunId,
     IssueWorkStartedRepository? Repository = null,
     IssueWorkStartedWorkspace? Workspace = null,
     IssueWorkStartedContext? Context = null,
     string? WorkspaceName = null,
-    string? WorkflowProfileId = null);
+    string? WorkflowProfileId = null,
+    bool NoWorkflow = false);
 
 public sealed record IssueWorkStartedRepository(
     string Name,

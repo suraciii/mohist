@@ -19,6 +19,7 @@ public record CreateIssueRequest
     public Dictionary<string, string>? StageModels { get; init; }
     public Dictionary<string, string>? StageModelVariants { get; init; }
     public string? WorkflowProfileId { get; init; }
+    public bool? NoWorkflow { get; init; }
     public string? RepositoryName { get; init; }
     public string? Risk { get; init; }
     public bool? IsDraft { get; init; }
@@ -63,6 +64,7 @@ public record CreateIssueRequest
             StageModels = GetStringMap(raw, "stageModels"),
             StageModelVariants = GetStringMap(raw, "stageModelVariants"),
             WorkflowProfileId = GetString(raw, "workflowProfileId"),
+            NoWorkflow = GetNullableBool(raw, "noWorkflow"),
             RepositoryName = GetString(raw, "repositoryName"),
             Risk = GetString(raw, "risk"),
             IsDraft = GetNullableBool(raw, "isDraft"),
@@ -150,6 +152,7 @@ public record UpdateIssueRequest
     public bool? IsDraft { get; init; }
     public string[]? AttachmentIds { get; init; }
     public string? WorkflowProfileId { get; init; }
+    public bool? NoWorkflow { get; init; }
     public string? RepositoryName { get; init; }
     public int? ParentIssueNumber { get; init; }
 
@@ -200,6 +203,7 @@ public record UpdateIssueRequest
         if (raw.TryGetProperty("isDraft", out _)) fields.Add(nameof(IsDraft));
         if (raw.TryGetProperty("attachmentIds", out _)) fields.Add(nameof(AttachmentIds));
         if (raw.TryGetProperty("workflowProfileId", out _)) fields.Add(nameof(WorkflowProfileId));
+        if (raw.TryGetProperty("noWorkflow", out _)) fields.Add(nameof(NoWorkflow));
         if (raw.TryGetProperty("repositoryName", out _)) fields.Add(nameof(RepositoryName));
         if (raw.TryGetProperty("parentIssueNumber", out _)) fields.Add(nameof(ParentIssueNumber));
 
@@ -218,6 +222,7 @@ public record UpdateIssueRequest
             IsDraft = GetNullableBool(raw, "isDraft"),
             AttachmentIds = GetStringArray(raw, "attachmentIds"),
             WorkflowProfileId = GetString(raw, "workflowProfileId"),
+            NoWorkflow = GetNullableBool(raw, "noWorkflow"),
             RepositoryName = GetString(raw, "repositoryName"),
             ParentIssueNumber = GetNullableInt(raw, "parentIssueNumber"),
             Raw = raw,

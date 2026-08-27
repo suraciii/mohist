@@ -22,6 +22,7 @@ public sealed partial class Issue
     private IssueRepositoryRef? _repositoryRef;
     private bool _isDraft;
     private string? _workflowProfileId;
+    private bool _noWorkflow;
     private bool _hasWorkflowStarted;
     private bool _compositeReopenFence;
     private long _repositoryBindingRevision;
@@ -139,14 +140,23 @@ public sealed partial class Issue
     }
 
     /// <summary>
-    /// Issue-level workflow profile selection. <c>null</c> means "no
-    /// issue-level selection; inherit default" and is the single source of
-    /// truth for the profile id projected by every read surface.
+    /// Issue-level workflow profile selection. <c>null</c> means the Project
+    /// default is inherited unless <see cref="NoWorkflow"/> is selected.
     /// </summary>
     public string? WorkflowProfileId
     {
         get => _workflowProfileId;
         init => _workflowProfileId = NormalizeOptional(value);
+    }
+
+    /// <summary>
+    /// Explicitly selects no Workflow. This is independent from a null
+    /// Profile ID, which continues to mean inheritance.
+    /// </summary>
+    public bool NoWorkflow
+    {
+        get => _noWorkflow;
+        init => _noWorkflow = value;
     }
 
     public string? RepositoryRef

@@ -164,6 +164,7 @@ public class IssueReadModelLoader : IScopedService
     internal static IssueInfo BuildInfo(Domain.Issue issue, ProjectInfo? project, string? resolvedProfileId)
     {
         var resolution = new IssueRepositoryResolver().Resolve(project, issue.RepositoryRef);
+        if (issue.NoWorkflow) resolvedProfileId = null;
         return new()
         {
             Number = issue.Number,
@@ -188,6 +189,8 @@ public class IssueReadModelLoader : IScopedService
             CompletedAt = issue.CompletedAt?.ToString("o"),
             WorkflowRunId = issue.WorkflowRunId,
             WorkflowProfileId = resolvedProfileId,
+            WorkflowProfileMode = issue.NoWorkflow ? "none" : issue.WorkflowProfileId is null ? "inherit" : "explicit",
+            NoWorkflow = issue.NoWorkflow,
             PrerequisiteNumbers = issue.PrerequisiteNumbers,
             IsDraft = issue.IsDraft,
             CanBeParent = issue.Status == Domain.IssueStatus.Backlog
@@ -230,6 +233,7 @@ public class IssueReadModelLoader : IScopedService
         WorkflowRunId = issue.WorkflowRunId,
         WorkflowProfileId = issue.WorkflowProfileId,
         WorkflowProfileMode = issue.WorkflowProfileMode,
+        NoWorkflow = issue.NoWorkflow,
         PrerequisiteNumbers = issue.PrerequisiteNumbers,
         IsDraft = issue.IsDraft,
         CanStart = issue.CanStart,

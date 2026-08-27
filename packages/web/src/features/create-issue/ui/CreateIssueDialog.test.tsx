@@ -427,6 +427,29 @@ describe('CreateIssueDialog template selector', () => {
   })
 })
 
+describe('CreateIssueDialog no workflow', () => {
+  afterEach(() => {
+    cleanup()
+    vi.clearAllMocks()
+    _workflowProfilesData.length = 0
+    _projectWorkflowProfile.defaultTemplateId = null
+  })
+
+  it('submits noWorkflow without a profile when selected', async () => {
+    renderDialog()
+    await userEvent.setup().type(screen.getByPlaceholderText('Issue title'), 'External delivery')
+    await userEvent.setup().selectOptions(screen.getByLabelText('Workflow'), '__none__')
+    await userEvent.setup().click(screen.getByRole('button', { name: 'Create' }))
+
+    await waitFor(() => {
+      expect(createIssueHandler).toHaveBeenCalled()
+    })
+    const callBody = await createIssueHandler.mock.calls.at(-1)![0].request.clone().json()
+    expect(callBody.noWorkflow).toBe(true)
+    expect(callBody.workflowProfileId).toBeUndefined()
+  })
+})
+
 describe('CreateIssueDialog workflow profile default', () => {
   afterEach(() => {
     cleanup()
@@ -499,7 +522,7 @@ describe('CreateIssueDialog workflow profile default', () => {
     expect(screen.getByRole('button', { name: 'medium' })).toHaveAttribute('aria-pressed', 'true')
     const select = screen.getByLabelText('Workflow') as HTMLSelectElement
     await waitFor(() => expect(select.value).toBe('mohist/github-pr'))
-    expect([...select.options].map((option) => option.value)).toEqual(['mohist/github-pr'])
+    expect([...select.options].map((option) => option.value)).toEqual(['__none__', 'mohist/github-pr'])
 
     fireEvent.click(screen.getByRole('button', { name: 'Create' }))
 
