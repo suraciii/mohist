@@ -24,7 +24,9 @@ Invariants:
 ```text literal
 Every WorkflowRun / AgentJob is its own dispatch ledger.
 Running => corrected within one poll as:
-           reported | re-dispatched | rejected as invalid | closed out
+           reported | re-dispatched | owner-withheld/reserved |
+           rejected as invalid | closed out
+Unresolved Agent settlement => owner-withheld/reserved; no execution dispatch
 count(Running work assigned to Runner) <= slots, checked at claim time
 ```
 
@@ -48,7 +50,7 @@ flowchart TD
     subgraph Server
         WG["WorkflowRun / AgentJob<br/>each its own dispatch ledger<br/>owns assignment and lifecycle: Pending / Running / terminal<br/>ClaimNext: atomic Pending → Running<br/>consumes reports idempotently; no timer, no Runner concept"]
         RG["RunnerGrain<br/>owns presence, slots, and closeout<br/>holds no work records"]
-        DS["DispatchService — stateless, not a grain<br/>each poll: desired − reported → dispatches<br/>no cursor, cache, or ledger"]
+        DS["DispatchService — stateless, not a grain<br/>each poll: executable desired − reported → dispatches<br/>owner-withheld unresolved Agent work → reserved, no dispatch<br/>no cursor, cache, or ledger"]
     end
     RP["Runner process<br/>one critical loop owns polling and report retry<br/>each poll reports the full inFlight ∪ awaitingAck set"]
     RP -->|poll / report| DS
@@ -77,13 +79,24 @@ the presence heartbeat.
 
 ```mermaid
 flowchart TD
-    P["poll(inFlight ∪ awaitingAck, readiness)"] --> R1["1. redelivery<br/>Running assigned to me − reported<br/>repay debts first"]
+    P["poll(inFlight ∪ awaitingAck, readiness)"] --> W["0. owner-withheld<br/>unresolved Agent settlement<br/>reserve slot; emit no dispatch"]
+    W --> R1["1. redelivery<br/>remaining Running assigned to me − reported<br/>repay debts first"]
     R1 --> R2["2. mine<br/>Pending assigned to me, ReadySince ASC"]
     R2 --> R3["3. claimable<br/>unassigned Pending, ReadySince ASC"]
 ```
 
 A newly delivered dispatch joins the reported set synchronously, before the
 next poll, so it can never be mistaken for lost work.
+
+An Agent work item whose owner has accepted an `unknown` result is not a lost
+dispatch. Until a same-attempt terminal report settles it or the owner deadline
+releases it, the original work remains reserved against the owning Runner's
+capacity but every poll withholds it: no fresh execution dispatch is emitted,
+even when the Runner does not report the work. The owner deadline releases that
+capacity, while a genuinely late report with the same task-attempt, work,
+Runner, and execution binding remains
+authoritative through ordinary settlement. Neither path admits a replacement
+turn for the unresolved attempt.
 
 For `reported - desired`, where the owner has already moved beyond the work,
 take no action: the process executes it to completion, receives `refused` for

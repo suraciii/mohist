@@ -94,7 +94,7 @@ public sealed class WorkflowGrainAgentResultSettlementSpecs
 
         // A binding-less runner observation is acknowledged into settlement
         // arbitration instead of being rejected as stale, so the Runner can
-        // retire its journal entry and the workflow surfaces a visible
+        // retire its volatile report retry and the workflow surfaces a visible
         // unresolved state.
         var (ack, status) = await service.ReportAsync(
             a.WorkerId, a.RunId, a.Work.Id!, a.TaskRunId, result);
@@ -191,13 +191,13 @@ public sealed class WorkflowGrainAgentResultSettlementSpecs
     }
 
     [Fact]
-    public async Task RecoveredStartedFenceObservation_IsObservedOnTheOriginalAttemptWithoutATerminalResult()
+    public async Task UnknownReport_IsObservedOnTheOriginalAttemptWithoutATerminalResult()
     {
-        var a = await ArrangeAsync("wr-settle-started-fence");
+        var a = await ArrangeAsync("wr-settle-unknown-report");
         var service = a.CreateReportService();
         var observation = new WorkResult(
             "unknown",
-            "Runner restarted after a durable started fence without a completed result receipt.");
+            "The Runner could not confirm the Agent result.");
 
         var accepted = await service.ReportAsync(
             a.WorkerId, a.RunId, a.Work.Id!, a.TaskRunId, observation);
@@ -253,16 +253,16 @@ public sealed class WorkflowGrainAgentResultSettlementSpecs
     }
 
     [Fact]
-    public async Task RecoveredCompletedResultReport_SettlesBlockedAttemptWithOriginalIdentity()
+    public async Task LateCompletedResultReport_SettlesBlockedAttemptWithOriginalIdentity()
     {
-        var a = await ArrangeAsync("wr-settle-recovered-completed");
+        var a = await ArrangeAsync("wr-settle-late-completed");
         var binding = Binding(a, "session-recovered", "turn-recovered");
         Assert.Equal(WorkReportVerdict.Accepted, await a.Grain.BindAgentExecutionAsync(binding));
         var service = a.CreateReportService();
 
         Assert.Equal(("accepted", "Running"), await service.ReportAsync(
             a.WorkerId, a.RunId, a.Work.Id!, a.TaskRunId,
-            new WorkResult("unknown", "Runner restarted before a result was durably recorded"),
+            new WorkResult("unknown", "The Agent result remained unconfirmed"),
             CancellationToken.None,
             binding.AgentSessionId,
             binding.AgentTurnId,
@@ -279,13 +279,13 @@ public sealed class WorkflowGrainAgentResultSettlementSpecs
         Assert.Equal(AgentResultSettlementState.Blocked,
             Assert.Single(blocked.CurrentStage().Tasks).AgentResultSettlement!.State);
 
-        // A completed journal entry is replayed as the original WorkResult.
-        var receipt = new WorkResult(
+        // A genuinely late report settles the original attempt by identity.
+        var lateReport = new WorkResult(
             "completed",
             Output: JsonSerializer.SerializeToElement(new { answer = "recovered" }),
             ExitCode: 0);
         Assert.Equal(("accepted", "Completed"), await service.ReportAsync(
-            a.WorkerId, a.RunId, a.Work.Id!, a.TaskRunId, receipt,
+            a.WorkerId, a.RunId, a.Work.Id!, a.TaskRunId, lateReport,
             CancellationToken.None,
             binding.AgentSessionId,
             binding.AgentTurnId,
@@ -303,7 +303,7 @@ public sealed class WorkflowGrainAgentResultSettlementSpecs
 
         var eventCount = (await a.Events.ListAsync(a.RunId)).Count;
         Assert.Equal(("accepted", "Completed"), await service.ReportAsync(
-            a.WorkerId, a.RunId, a.Work.Id!, a.TaskRunId, receipt,
+            a.WorkerId, a.RunId, a.Work.Id!, a.TaskRunId, lateReport,
             CancellationToken.None,
             binding.AgentSessionId,
             binding.AgentTurnId,

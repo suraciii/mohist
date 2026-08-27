@@ -52,6 +52,90 @@ public sealed class RunnerPollRecoveryStateApiSpecs
     }
 
     [Fact]
+    public async Task BoundUnknownReport_WithholdsSameGenerationDispatchAndFreshWork()
+    {
+        var projectId = $"bound-unknown-{Guid.NewGuid():N}";
+        var workflowRunId = $"bound-unknown-run-{Guid.NewGuid():N}";
+        var freshWorkflowRunId = $"bound-unknown-fresh-{Guid.NewGuid():N}";
+        var runnerId = $"bound-unknown-runner-{Guid.NewGuid():N}";
+        var runner = _fixture.Grains.GetGrain<IRunnerGrain>(runnerId);
+
+        try
+        {
+            await SeedWorkflowAsync(
+                projectId,
+                workflowRunId,
+                new RecoveryDefinition(1, []),
+                uses: "mohist/opencode");
+            await runner.RegisterAsync(new RunnerInfo(runnerId, ["spec/*"], "test-host", projectId));
+            await runner.UpdateAsync(1);
+
+            var first = await PollAsync(runnerId);
+            var workId = Assert.IsType<string>(first.GetProperty("workId").GetString());
+            var taskRunId = Assert.IsType<string>(first.GetProperty("taskRunId").GetString());
+            var workflow = _fixture.Grains.GetGrain<IWorkflowGrain>(workflowRunId);
+            var binding = new AgentExecutionBinding(
+                taskRunId,
+                workId,
+                runnerId,
+                "agent-session-bound-unknown",
+                "agent-turn-bound-unknown",
+                "opencode",
+                "runtime-session-bound-unknown");
+            Assert.Equal(WorkReportVerdict.Accepted, await workflow.BindAgentExecutionAsync(binding));
+
+            var freshWorkflow = _fixture.Grains.GetGrain<IWorkflowGrain>(freshWorkflowRunId);
+            await freshWorkflow.StartAsync(new WorkflowStartInput(Metadata: new(
+                Name: null,
+                CreatedAt: DateTimeOffset.UnixEpoch,
+                ProjectId: projectId,
+                IssueNumber: 2)));
+
+            using var report = await _fixture.Client.PostAsJsonAsync($"/api/runner/{runnerId}/report", new
+            {
+                ownerKind = WorkDispatchOwnerKinds.Workflow,
+                workflowRunId,
+                workId,
+                taskRunId,
+                status = "unknown",
+                message = "The current Runner could not confirm the Agent result.",
+                agentSessionId = binding.AgentSessionId,
+                agentTurnId = binding.AgentTurnId,
+                runtime = binding.Runtime,
+                runtimeSessionId = binding.RuntimeSessionId,
+            });
+            Assert.Equal(HttpStatusCode.OK, report.StatusCode);
+            Assert.Equal(
+                "accepted",
+                (await report.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("verdict").GetString());
+
+            using var nextPoll = await _fixture.Client.PostRunnerPollAsync(
+                runnerId,
+                new RunnerPollRequest(
+                    [],
+                    [],
+                    ProcessGeneration: TestRunnerGenerationExtensions.ProcessGeneration));
+            Assert.Equal(HttpStatusCode.NoContent, nextPoll.StatusCode);
+            Assert.Empty(await nextPoll.ReadDispatchElementsAsync());
+
+            var unresolved = await _fixture.Services
+                .GetRequiredService<WorkflowRunQuerier>()
+                .LoadAsync(workflowRunId);
+            var task = Assert.Single(unresolved!.CurrentStage().Tasks);
+            Assert.Equal(AgentResultSettlementState.Unknown, task.AgentResultSettlement!.State);
+            Assert.Equal("Pending", await freshWorkflow.GetRunStatusAsync());
+
+            var active = Assert.Single((await runner.GetRuntimeStateAsync()).ActiveWorks);
+            Assert.Equal(workflowRunId, active.OwnerId);
+            Assert.Equal(workId, active.WorkId);
+        }
+        finally
+        {
+            await runner.UnregisterAsync();
+        }
+    }
+
+    [Fact]
     public async Task ReportAndPoll_ExposeAcceptedContinuationIdentity()
     {
         var projectId = $"runner-recovery-{Guid.NewGuid():N}";

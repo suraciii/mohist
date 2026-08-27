@@ -505,9 +505,9 @@ export class RunnerHost {
     while (!signal.aborted) {
       await retryDueReports(this.executionContext)
 
-      // Runtime readiness is sent as a claim-time witness. Polling must stay
-      // alive while a runtime is unhealthy so held work can be reconciled and
-      // terminal receipts can be redelivered after a restart.
+      // Report retry is independent from admission. Retry volatile
+      // awaitingAck results first so their owners can settle them while new
+      // claims remain gated.
       if (this.providerPolicyDiagnostic !== null) {
         if (this.providerPolicyDiagnostic !== this.lastProviderPolicyDiagnosticLogged) {
           log.warn('runner not ready; skipping poll', {

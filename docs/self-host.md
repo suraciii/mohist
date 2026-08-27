@@ -288,8 +288,9 @@ RUNTIME_SHUTDOWN_TIMEOUT_MS=30000
 ```
 
 `QUARANTINE_DRAIN_TIMEOUT_MS` bounds a quarantined OpenCode generation. Active
-turns still running when it expires fail explicitly, while completed journal
-results continue to report. `RUNTIME_SHUTDOWN_TIMEOUT_MS` is the shared
+turns still running when it expires fail explicitly, while completed results
+already held in volatile process memory keep retrying their owner reports until
+the process ends. `RUNTIME_SHUTDOWN_TIMEOUT_MS` is the shared
 deadline for OpenCode and Pi runtime teardown. After the deadline the
 Runner abandons the wait and proceeds with best-effort forced teardown. Keep
 the Runner service's own process limits configured separately; for example,

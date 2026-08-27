@@ -61,7 +61,7 @@ const DEFAULT_TERMINATION_TIMEOUT_MS = 5_000
 // (a dedicated execution UID) and is deliberately not claimed here.
 /**
  * One in-memory Manager process boundary. The grant is deliberately not part
- * of DispatchWorkItem and this class is never passed to a journal or report.
+ * of DispatchWorkItem and this class is never copied into a work report.
  */
 export class ManagerExecutionBoundary {
   readonly masker = new CredentialMasker()

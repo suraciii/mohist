@@ -22,9 +22,9 @@ public static partial class RunnerRoutes
 
     private static void MapReportRoute(RouteGroupBuilder group)
     {
-        // Reports go directly to the owning grain. Only an accepted durable
-        // transition is a terminal acknowledgement; stale reports remain in
-        // the Runner journal for retry.
+        // Reports go directly to the owning grain. Accepted and refused
+        // verdicts retire the Runner's volatile retry; an outstanding verdict
+        // remains in process memory for another attempt.
         group.MapPost("/report", async (
             string runnerId,
             HttpRequest request,
