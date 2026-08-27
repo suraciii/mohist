@@ -1,5 +1,9 @@
 # Workflow Profile
 
+> **Status: legacy implementation.** Task `uses` Actions are the current implementation. The target
+> model ([`../design/agent-execution.md`](../design/agent-execution.md)) has each executable task name
+> a Mohist Agent; see [Agents and AgentSessions](agent-sessions.md#one-invocation-path).
+
 A Workflow Profile defines how an Issue moves from Draft to Done, including its
 Stages, Tasks, Checks, recovery rules, and approval points. A Profile is a
 Project resource. A Project may own multiple Profiles and select one as its

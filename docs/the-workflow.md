@@ -20,7 +20,7 @@ clarify intent and resolve prerequisites before Mohist consumes execution
 capacity. In this state:
 
 - The Workflow has not started.
-- The Inline Agent has not started.
+- No stage Agent has started.
 - You may edit the title, body, labels, and priority.
 - You may add prerequisites, such as "wait for #N to finish before starting."
 
@@ -33,7 +33,7 @@ mo issue start <number>          # Start the Workflow and enter Plan.
 
 ## Plan
 
-The Inline Agent interprets the requirements and plans the implementation. This
+The Plan stage's Mohist Agent interprets the requirements and plans the implementation. This
 is the least expensive stage in which to find a wrong direction. During a
 manual approval, focus on the plan document and the task list.
 

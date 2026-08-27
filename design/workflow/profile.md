@@ -4,6 +4,11 @@ status: implemented
 
 # Workflow Profile
 
+> **Status: legacy implementation.** The `agentRuntime` projection and `uses` Action selection below
+> assume Workflow-owned Actions. The target model
+> ([`../agent-execution.md`](../agent-execution.md)) has each executable task name a Mohist Agent,
+> whose definition owns Runtime selection.
+
 `WorkflowProfile` is a Project-scoped resource that defines how an Issue moves from Draft to Done.
 A Project can own multiple Profiles and select one as its default Profile. An Issue can inherit the
 default Profile or explicitly select another Profile in the same Project.

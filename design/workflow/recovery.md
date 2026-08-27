@@ -1,5 +1,9 @@
 # Task Recovery
 
+> **Status: legacy implementation.** Task-level recovery is defined against Workflow-owned Actions.
+> The target model ([`../agent-execution.md`](../agent-execution.md)) moves execution retry and
+> recovery into AgentJob; rewrite is pending the Profile Agent-binding DSL decision.
+
 After task execution, the Runner executor matches `when` expressions against the
 `{ output, error }` result context, builds recovery tasks, and returns them through `addTasks` for
 mechanical insertion by the engine. Recovery is part of how a task completes, not remediation only

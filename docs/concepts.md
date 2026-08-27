@@ -8,9 +8,9 @@ These concepts explain how Mohist continuously advances work to Done.
 > expose a configured **Mohist Agent** there, or a third-party **External Agent**
 > can operate Mohist through a **Skill**. Within a **Project**, Mohist records a
 > product goal as an **Issue** and uses a **Workflow** to advance it to Done.
-> Multiple related Issues form an **Epic**. An **Inline Agent** executes a task,
-> while a **Mohist Agent** acts as a stable proxy that accepts delegated work or
-> responds to events.
+> Multiple related Issues form an **Epic**. A **Workflow** advances an Issue by
+> launching configured **Mohist Agents** for its tasks. The same Agents can also
+> accept delegated work or respond to events outside a Workflow.
 
 ## Project
 
@@ -73,10 +73,10 @@ Before the Workflow starts, Draft protects an incomplete requirement and
 Backlog identifies work that may start. Each Workflow stage then has one
 purpose:
 
-- **Plan**: An Inline Agent understands the requirement and produces the
-  proposal, design, specs, and tasks.
-- **Build**: An Inline Agent writes code and runs tests according to the tasks.
-- **Check**: An Inline Agent reviews its output.
+- **Plan**: A configured Mohist Agent understands the requirement and produces
+  the proposal, design, specs, and tasks.
+- **Build**: A configured Mohist Agent writes code and runs tests according to the tasks.
+- **Check**: A configured Mohist Agent reviews its output.
 - **Integrate**: Mohist merges the branch into the base branch.
 
 Some stages, Plan and Check by default, enter an **approval point** after
@@ -91,9 +91,10 @@ A Workflow is not hard-coded. Each Project can have multiple **Workflow
 Profiles** and select one default Profile. An Issue can inherit the default or
 select another Profile in the same Project.
 
-A Profile defines stages, tasks, checks, recovery, and Approval. It does not
-store Variables or Prompt bodies. Project, Issue, and Run Variables merge by
-scope. Prompts are configured only in the Project.
+A Profile defines stages, task ordering, the Mohist Agent used by each executable
+task, checks, recovery, and Approval. It does not copy Agent configuration,
+Variables, or Prompt bodies. Project, Issue, and Run Variables merge by scope.
+Prompts are configured only in the Project.
 
 An Issue may also select no Workflow at all (`mo issue create --no-workflow`).
 It then runs no production line: starting moves it directly to in progress,
@@ -117,18 +118,18 @@ finishes, the Epic starts the next Issue that can advance.
 
 See [Planning with Epics](epics.md) for the complete lifecycle.
 
-## External Agent, Inline Agent, Mohist Agent, and Agent Connection
+## External Agent, Mohist Agent, and Agent Connection
 
 An External Agent interacts with the user outside Mohist. For example, it can
 run in Slack, an IDE, or another Agent host. It uses the Mohist Skill and `mo`
 to query, delegate to, or operate the execution layer. It is not a Mohist
 resource, and Mohist does not schedule it.
 
-An Inline Agent is the use of Agent capability that a Workflow invokes directly
-through an Action such as `mohist/opencode`. It has no independent Agent ID. A
-Mohist Agent has a stable ID, name, Instructions, and configuration in one
-Project. It can start from the Web UI, CLI, an Agent Connection, event routing,
-or a comment mention.
+A Mohist Agent has a stable ID, name, Instructions, Skills, and execution
+configuration in one Project. A Workflow task, the Web UI, CLI, an Agent
+Connection, event routing, or a comment mention all start it through the same
+AgentJob launch boundary. Workflow tasks do not select Runtime-specific Actions
+or create anonymous Agent capability.
 
 An Agent Connection exposes one Mohist Agent in an external interaction
 location. For example, a Slack Agent Connection lets a Slack Bot represent a
@@ -148,17 +149,17 @@ and work tasks use clear, separate identities. One identity does not send on
 behalf of the other.
 
 An AgentSession is not an Agent or a work result. It records the messages,
-context, usage, Activity, and current Runtime Session for a conversation. A
-Workflow TaskRun, one task execution, owns Workflow work. An AgentJob owns the
-first execution of one Mohist Agent launch. Subsequent input continues the same
-AgentSession but does not rewrite the AgentJob. Each accepted input in an AgentSession is a
-SessionInput. One continuous Runtime processing period is an AgentTurn. One
-AgentTurn can process multiple SessionInputs in order. Messages, execution, and
-work results therefore do not share one state.
+context, usage, Activity, and current Runtime Session for a conversation. An
+AgentJob owns every top-level Agent execution, including a Workflow task. The
+WorkflowRun keeps only orchestration state and the AgentJob reference. Subsequent
+input continues the same AgentSession but does not rewrite the AgentJob. Each
+accepted input in an AgentSession is a SessionInput. One continuous Runtime
+processing period is an AgentTurn. One AgentTurn can process multiple
+SessionInputs in order. Messages, execution, and work results therefore do not
+share one state.
 
-See [Agents and AgentSessions](agent-sessions.md) for the complete relationship,
-[Slack](slack.md) for Slack behavior, and
-[`mohist/opencode` Action](actions/opencode.md) for OpenCode Action configuration.
+See [Agents and AgentSessions](agent-sessions.md) for the complete relationship
+and [Slack](slack.md) for Slack behavior.
 
 ## Approval
 
@@ -222,6 +223,8 @@ and are fixed for the unit of work when it starts. See [Skills](skills.md).
                                  | Workflow (mohist/local)
                                  v
                   Plan -> Build -> Check -> Integrate -> Done
+                    |       |        |
+                    +-------+--------+--> Mohist Agent -> AgentJob + AgentSession
                                  |
                                  | merges code
                                  v
@@ -235,8 +238,9 @@ Keep one mental model: **You usually stay in an existing workspace. A Mohist
 Agent is an independently usable proxy, and an Agent Connection only brings it
 to Slack. An External Agent can also use Mohist through a Skill. A Project is
 the product and execution boundary. An Epic owns a goal and supplies work. An
-Issue is the workpiece. A Workflow is the production line. An Inline Agent
-executes a task directly. An AgentSession records an execution session. The Web
+Issue is the workpiece. A Workflow is the production line. Mohist Agents are
+the workers for both Workflow tasks and direct delegation. AgentJob owns each
+execution, and AgentSession records its continuing conversation. The Web
 UI is the fallback operations and visualization plane.**
 
 ---

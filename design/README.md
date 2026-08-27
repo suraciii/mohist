@@ -24,7 +24,7 @@ changing a document in `design/`.
 
 ## Agent and execution
 
-- [agent-execution.md](agent-execution.md) — Action, Inline Agent, Mohist Agent, AgentJob, SessionInput, AgentTurn, AgentSession, Runtime Session: layering, lifecycle ownership, activity and transcript DSL.
+- [agent-execution.md](agent-execution.md) — Mohist Agent, AgentJob, Action, SessionInput, AgentTurn, AgentSession, Runtime Session: unified execution ownership, activity and transcript DSL.
 - [agent-api.md](agent-api.md) - Versioned direct API for PAT-authenticated external callers: public state, retry identity, event resume, and disclosure boundaries.
 - [subagents.md](subagents.md) — Subagents and session trees: child launch under flat Agent, capability snapshot, parent-child link, terminal callback, cascade stop, and detach.
 - [scheduled-input.md](scheduled-input.md) — Scheduled input (**WIP**): durable intent, recovery wake-ups, and ordinary follow-up delivery are implemented; due delivery still waits for another path to restore a definitely missing Runtime binding instead of initiating confirmed-missing recovery.

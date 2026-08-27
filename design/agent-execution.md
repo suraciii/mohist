@@ -1,7 +1,8 @@
 # Agent Execution Model
 
-This document defines why Workflow work, Agent work, logical Sessions, physical Runtime Sessions,
-and Runtime adapters have separate owners. Runtime-specific behavior belongs in
+This document defines the single Mohist Agent execution path and why Agent work, logical Sessions,
+physical Runtime Sessions, and Runtime adapters have separate owners. Workflow is an execution
+origin and orchestrator, not another work owner. Runtime-specific behavior belongs in
 [`runtimes/`](runtimes/README.md). Canonical internal read schemas and the complete fencing
 protocol belong in [`conventions.md`](conventions.md). Authentication, transport, public replay-key
 mapping, and external API projections belong in [`agent-api.md`](agent-api.md).
@@ -16,9 +17,9 @@ Three forces shape the model:
 - **Unknown external effects.** A timeout or lost response does not prove that a Runtime command
   failed. Mohist must preserve `unknown` and reconcile the original identity before retrying.
   Guessing can duplicate input or apply a destructive context operation twice.
-- **Cross-owner convergence.** TaskRun or AgentJob decides work lifecycle, while AgentSession owns
-  conversation state. They do not share a transaction. Durable request identity and durable
-  messages must converge their observations without moving either decision to the other owner.
+- **Cross-owner convergence.** AgentJob decides work lifecycle, while AgentSession owns conversation
+  state. They do not share a transaction. Durable request identity and durable messages must converge
+  their observations without moving either decision to the other owner.
 
 Exposing a physical Runtime Session as the public Session would avoid a binding layer, but every
 replacement would change user identity and leak provider lifecycle. Mohist instead exposes a
@@ -29,11 +30,11 @@ across Runtime loss.
 ## Ownership and Call Paths
 
 - Mohist Agent is owned by the Agent context, which decides identity, Instructions, execution
-  configuration, Skills, and archival.
-- TaskRun is owned by the Workflow context, which decides Workflow task lifecycle, result, retry,
-  recovery, and advancement.
-- AgentJob is owned by the Agent context, which decides the lifecycle and result of one Agent work
-  item.
+  configuration, Skills, archival, and readiness.
+- Workflow owns orchestration state. An executable Workflow task names a Mohist Agent, supplies
+  input and Workflow attribution, and consumes the resulting AgentJob result.
+- AgentJob is owned by the Agent context and is the sole top-level execution owner. It decides the
+  lifecycle, result, retry, and recovery of one Agent work item regardless of launch origin.
 - AgentSession is owned by the Session context, which decides Input order, Turns, Transcript,
   Activity, context, usage, and current Binding.
 - Runtime Session is owned by the external Runtime, which decides the physical provider Session
@@ -41,27 +42,30 @@ across Runtime loss.
 - Runtime adapter is owned by the Runner process, which decides provider protocol, process
   resources, event reconciliation, and error classification.
 
-There are two work-owner paths:
+There is one work-owner path:
 
 ```text diagram
-Workflow TaskRun -- resolved Action ----+
-                                       +--> Runtime adapter --> Runtime Session
-Agent AgentJob ---- execution snapshot -+
+Workflow task / Web / CLI / Connection / event / mention
                          |
-                         +--> AgentSession records conversation facts
+                         v
+                 Agent AgentJob
+                  |           |
+                  v           v
+          AgentSession    resolved Action
+                              |
+                              v
+                     Runtime adapter --> Runtime Session
 ```
 
-TaskRun remains the owner when a Workflow calls `mohist/opencode`, `mohist/pi`, or a resolved
-`mohist/agent` definition. Resolving a named Agent for a Workflow task snapshots its Instructions
-and execution configuration for that dispatch; it does not create AgentJob or transfer work
-lifecycle to the Agent context. Resolution occurs again for each dispatch attempt, so a retry uses
-the definition that exists for that attempt. A missing or archived Agent fails dispatch instead of
-falling back to another Runtime path.
+Every origin enters through the canonical AgentJob launch boundary. The Agent context validates
+readiness and snapshots Instructions, execution configuration, Skills, Runtime, and Workspace for
+the accepted launch. A missing, archived, or not-ready Agent fails launch instead of falling back
+to a Runtime-specific Workflow path. Retry belongs to AgentJob and preserves the accepted execution
+snapshot unless an explicit new launch is created.
 
-Web, CLI, Agent Connection, event routing, and mentions are call origins for the AgentJob path.
-They all enter through the canonical AgentJob launch boundary and cannot create a third execution
-path. A provider adapter such as Slack may translate ingress and delivery, but it cannot snapshot
-an Agent, own a Runtime Session, or decide a work result.
+A provider adapter such as Slack may translate ingress and delivery, but it cannot snapshot an
+Agent, own a Runtime Session, or decide a work result. Workflow likewise cannot select a Runtime,
+construct an Action, dispatch to Runner, or own execution retry and recovery.
 
 Direct API callers cross an additional trust and projection boundary. Bearer PAT authentication
 and Project/scope authorization finish before resource or idempotency lookup, admission, durable
@@ -69,24 +73,23 @@ write, or external effect. Responses and events expose only the public projectio
 [`agent-api.md`](agent-api.md); canonical internal models, physical Binding, workspace paths,
 prompt or memory content, and Runner control remain private.
 
-An Inline Agent is a usage mode, not another entity. It is a TaskRun that directly selects a
-Runtime-specific Action. The Workflow Action adapter and AgentJob executor may reuse the same deep
-Runtime module; they must not reuse each other's work lifecycle.
+There is no Inline Agent or Agent Definition Reference path. A Workflow worker is a real Mohist
+Agent, and its task creates an ordinary AgentJob and AgentSession through the same launch boundary
+as every other entry point.
 
 ## Work lifecycle and Session
 
-TaskRun and AgentJob own pending, running, and terminal work states; success and failure; and retry
-or recovery decisions. AgentSession owns ordered SessionInput and AgentTurn records, Transcript,
-context, usage, Activity, and current Runtime Binding.
+AgentJob owns pending, running, and terminal work states; success and failure; and retry or recovery
+decisions. AgentSession owns ordered SessionInput and AgentTurn records, Transcript, context, usage,
+Activity, and current Runtime Binding.
 
-The Workflow Action adapter reports a work result to TaskRun. The AgentJob executor reports a work
-result to AgentJob. Both report conversation facts to AgentSession. A Session event cannot advance
-a Workflow or make an AgentJob terminal. A work failure may appear in Transcript, but AgentSession
-does not arbitrate that result.
+The AgentJob executor reports the work result to AgentJob and conversation facts to AgentSession.
+Workflow consumes the AgentJob result and decides whether its stage advances, repairs, retries by
+launching new work, or stops. A Session event cannot advance a Workflow or make an AgentJob
+terminal. A work failure may appear in Transcript, but AgentSession does not arbitrate that result.
 
 A Follow-up is a Session command, not a new work dispatch. It appends a SessionInput to an existing
-AgentSession and either joins the current Turn through steer or creates a later Turn. It does not
-create a TaskRun or AgentJob. Compact, Reset, recovery, rebind, handoff, and force-reset also change
+AgentSession and either joins the current Turn through steer or creates a later Turn. It does not create an AgentJob. Compact, Reset, recovery, rebind, handoff, and force-reset also change
 only the Session.
 
 AgentJob references the first Input and Turn created by launch. A completed AgentJob means that the
@@ -337,19 +340,15 @@ stopping a later Turn never rewrites an already terminal AgentJob.
 
 ## AgentSession origins
 
-Each AgentSession has exactly one immutable origin.
+Each AgentSession has exactly one immutable Agent origin with the resolved Agent ID. One Agent can
+have many AgentJobs and AgentSessions. Later Agent edits or archival do not change the Session
+origin or its launch snapshot.
 
-### Workflow origin
-
-Address a Workflow-origin Session by `(projectId, workflowRunId, sessionName)`. Reusing the same
-name in one WorkflowRun continues the logical Session. When no explicit name exists, use the Work
-ID so unrelated tasks do not share context accidentally.
-
-### Agent launch origin
-
-Each Mohist Agent launch creates an Agent origin with the resolved Agent ID. One Agent can have many
-AgentJobs and AgentSessions. Later Agent edits or archival do not change the Session origin or its
-launch snapshot.
+A Workflow launch also records immutable Workflow attribution: `workflowRunId`, stage, task, and
+attempt. Attribution explains why the Agent started; it is not a second Session origin or another
+work owner. Reusing a configured Session name within one WorkflowRun may continue the same logical
+Session only when the Agent and Workspace identities also match. Without an explicit name, each
+AgentJob receives a distinct Session so unrelated tasks do not share context accidentally.
 
 Matching Prompt, model, Runtime, Workspace, or configuration does not merge origins. An
 origin-specific route is only a query convenience; it resolves to the canonical Session resource
@@ -438,10 +437,9 @@ original operation active or block a later safe binding operation.
 
 ### Operation boundaries
 
-Automatic replacement after confirmed missing is allowed only for an initial TaskRun or AgentJob
-Input not yet submitted, because it can continue in a known empty context without replaying an
-effect, and for an idle Follow-up, because it starts a new execution through the same acceptance
-identity. It is rejected for a Follow-up during execution, because replacement would change the
+Automatic replacement after confirmed missing is allowed only for an initial AgentJob Input not
+yet submitted, because it can continue in a known empty context without replaying an effect, and
+for an idle Follow-up, because it starts a new execution through the same acceptance identity. It is rejected for a Follow-up during execution, because replacement would change the
 physical target of that Input; for Compact, because a missing context cannot be compacted; for a
 Stop target, because a replacement is not the original execution target; and for an ordinary
 Reset, because Reset requires safe admission and `unknown` requires explicit force-reset.
@@ -510,12 +508,14 @@ original identities and a risk warning.
 
 ## Module Ownership
 
-- Workflow owns TaskRun and the Workflow Action contract. It does not interpret Transcript.
-- Agent owns Mohist Agent and AgentJob. It does not derive work results from Session Activity.
-- Session owns AgentSession identity, source, work directory, Inputs, Turns, Activity, Binding,
-  Transcript, context, and usage.
-- Runner executes resolved work and reports physical facts. It does not arbitrate logical Session
-  state.
+- Workflow owns WorkflowProfile, WorkflowRun, stage/task ordering, checks, approval, and advancement.
+  It launches Agents and consumes AgentJob results; it does not own execution work or interpret Transcript.
+- Agent owns Mohist Agent, AgentJob, Action contracts, execution snapshots, Runner dispatch, retry,
+  recovery, and result validation. It does not derive work results from Session Activity.
+- Session owns AgentSession identity, source and Workflow attribution, Inputs, Turns, Activity,
+  Binding, Transcript, context, and usage.
+- Runner executes resolved Agent work, reports capacity and physical facts, and does not arbitrate
+  AgentJob or logical Session state.
 - Runtime adapters hide provider SDK, protocol, process, cache, and error details. They do not
   define public Session identity or idempotency.
 - Web, CLI, and trusted integrations consume canonical internal Server projections. Direct API
@@ -536,17 +536,24 @@ reconstruct or display the materialization path.
 ## Status
 
 Stable AgentSession identity, Input and Turn records, Activity and unknown handling, launch and
-Follow-up paths, and current Runtime Binding are implemented. The remaining gap is convergence:
-not every ingress, aggregate boundary, and client consumes the same canonical operation and read
-model yet.
+Follow-up paths, and current Runtime Binding are implemented. The unified AgentJob path is the
+target model, not the current implementation: Workflow still owns TaskRun and runtime-specific
+Action paths, and `mohist/agent` still snapshots an Agent definition without creating AgentJob.
+Those paths must be deleted rather than retained as compatibility modes.
 
+The remaining convergence gaps are:
+
+- Workflow tasks do not yet launch a real Mohist Agent through the canonical AgentJob boundary;
+  built-in Profiles still select Runtime-specific Actions instead of built-in or Project Agent names.
+- TaskRun still owns execution lifecycle, retry, recovery, and result for Workflow work. WorkflowRun
+  must retain only orchestration state and AgentJob references after TaskRun is removed.
 - Launch acceptance does not yet converge through one durable path from caller identity to every
   accepted or rejected Job/Session/Input/Turn result.
 - Canonical internal projections are not yet the only state consumed by trusted clients. The
   direct API does not yet enforce its PAT-first admission and allowlisted public projection from
   [`agent-api.md`](agent-api.md) end to end.
-- Confirmed-missing recovery is available for safely idle Workflow input. AgentJob initial Turns
-  are already queued before that boundary, and idle Follow-up does not yet initiate it. Non-idle
+- Confirmed-missing recovery is not yet available uniformly for safely idle AgentJob Input and idle
+  Follow-up. Non-idle
   reconnect reconciliation can replace a binding without the complete proof that an old effect is
   absent. These paths do not yet share the owner lease, fence, candidate reconciliation, and cleanup
   contract.

@@ -1,5 +1,9 @@
 # WorkflowRun State Persistence
 
+> **Status: legacy implementation.** TaskRun persistence below is the current implementation. The
+> target model ([`../agent-execution.md`](../agent-execution.md)) removes TaskRun; WorkflowRun keeps
+> only orchestration state and AgentJob references.
+
 This document defines the content boundary and read/write cost rules for
 persisted WorkflowRun state. See
 [`task-dispatch.md`](task-dispatch.md) for dispatch-snapshot semantics and

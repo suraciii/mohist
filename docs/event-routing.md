@@ -1,7 +1,7 @@
 # Agent Event Routing
 
 In this document, Agent means a **Mohist Agent** with a stable ID, name, and
-Instructions. It does not mean an Inline Agent invoked directly by a Workflow.
+Instructions. Every Workflow worker is also a Mohist Agent; there is no anonymous Agent capability.
 See [Agents and AgentSessions](agent-sessions.md) for their relationship.
 
 ## Problem

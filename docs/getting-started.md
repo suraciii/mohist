@@ -1,5 +1,10 @@
 # Getting Started
 
+> **Status note**: The current implementation configures Workflow execution through
+> Runtime-specific Actions. The target model
+> ([`../design/agent-execution.md`](../design/agent-execution.md)) has every Workflow task launch a
+> configured Mohist Agent instead; this guide will be simplified when that lands.
+
 Goal: Start Mohist from zero in 30 minutes. Use a Mohist Agent, a third-party
 External Agent, or `mo` to move one real Issue through the complete Workflow and
 see its code merged. The Web UI is the fallback operations and visualization

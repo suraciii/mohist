@@ -1,8 +1,10 @@
 # `mohist/opencode` Action
 
+> **Status: legacy implementation.** See [Action Contracts](README.md) for the target model that
+> replaces Workflow-owned Actions with Agent launches.
+
 `mohist/opencode` delegates one unit of work to OpenCode and reports the
-execution facts. When a Workflow uses it directly, it forms an Inline Agent.
-The Action itself is not an Agent and does not find or start a Mohist Agent.
+execution facts. The Action itself is not an Agent and does not find or start a Mohist Agent.
 
 See [Agents and AgentSessions](../agent-sessions.md) for the overall
 relationship among Agent, AgentJob, and AgentSession.

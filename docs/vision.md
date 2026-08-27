@@ -44,12 +44,12 @@ and take over manually.
   carries requirements, discussion, and history from Draft to Done. Readiness
   stays outside execution so incomplete requirements do not consume capacity.
   [The Workflow](the-workflow.md) defines the default line.
-- **Agents are workers**: An Inline Agent executes a Workflow task directly. A
-  predefined Mohist Agent can start from the Web UI, CLI, an Agent Connection,
-  an event, or a comment mention. An AgentSession records the session
-  persistently so that it can recover from interruption. An External Agent can
-  delegate work to the production line through a Skill, but it is not a Mohist
-  Agent resource.
+- **Agents are workers**: Every executable Workflow task starts a configured
+  Mohist Agent through the same AgentJob boundary used by the Web UI, CLI, an
+  Agent Connection, an event, or a comment mention. An AgentSession records the
+  session persistently so that it can recover from interruption. An External
+  Agent can delegate work to the production line through a Skill, but it is not
+  a Mohist Agent resource.
 - **Checks and approval points provide quality control**: Automated checks
   control each stage exit. A key stage stops at an approval point and continues
   only after Approval.

@@ -460,9 +460,8 @@ remain separate surfaces with their own contracts.
 
 The external API composes existing owners rather than making route shape decide domain ownership:
 
-- A direct launch is AgentJob-owned. A Workflow `mohist/agent` Action remains TaskRun-owned and
-  does not create or own an AgentJob. They share public vocabulary, not a work lifecycle or dispatch
-  owner.
+- Every launch is AgentJob-owned, including a Workflow task launch. There is no TaskRun-owned
+  Action path; Workflow is launch attribution, not a work lifecycle or dispatch owner.
 - Capacity, admission, and retryable queued state remain canonical execution facts. This API cannot
   add another queue or reinterpret a retryable block as a terminal outcome.
 - The public result projector consumes canonical result facts but applies this document's smaller
