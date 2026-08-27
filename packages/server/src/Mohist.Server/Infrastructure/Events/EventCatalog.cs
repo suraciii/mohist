@@ -82,7 +82,7 @@ public static class EventCatalog
         ReverseDns.EpicClosed,
         ReverseDns.EpicReopened,
         ReverseDns.EpicStartAttemptFailed,
-        ReverseDns.GitHubIssuesLabeled,
+        ReverseDns.GitHubIssueCommentCreated,
         ReverseDns.GitHubIssuesEdited,
         ReverseDns.GitHubIssuesClosed,
         ReverseDns.GitHubIssuesReopened,
@@ -249,7 +249,7 @@ public static class EventCatalog
 
         public const string InboxItemPersisted = "com.mohist.inbox.item-persisted";
 
-        public const string GitHubIssuesLabeled = "com.mohist.github.issues.labeled";
+        public const string GitHubIssueCommentCreated = "com.mohist.github.issue-comment.created";
         public const string GitHubIssuesEdited = "com.mohist.github.issues.edited";
         public const string GitHubIssuesClosed = "com.mohist.github.issues.closed";
         public const string GitHubIssuesReopened = "com.mohist.github.issues.reopened";

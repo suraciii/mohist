@@ -49,9 +49,9 @@ public static class GitHubEventNormalizer
             : null;
         return eventHeader switch
         {
+            "issue_comment" when action == "created" => EventCatalog.ReverseDns.GitHubIssueCommentCreated,
             "issues" => action switch
             {
-                "labeled" => EventCatalog.ReverseDns.GitHubIssuesLabeled,
                 "edited" => EventCatalog.ReverseDns.GitHubIssuesEdited,
                 "closed" => EventCatalog.ReverseDns.GitHubIssuesClosed,
                 "reopened" => EventCatalog.ReverseDns.GitHubIssuesReopened,

@@ -44,16 +44,16 @@ several repositories can hold several connections. An Issue never carries
 GitHub coordinates: its mirror location is determined by its target repository.
 
 ```bash
-mo github connect owner/repo                 # matched to a registered Repository by git URL
-mo github connect owner/repo --repo docs     # explicit when the match is ambiguous
+mo github connect owner/repo --pat <token>    # matched to a registered Repository by git URL
+mo github connect owner/repo --repo docs --pat <token> # explicit when the match is ambiguous
 mo github list                               # every Repository and its connection state
 ```
 
 The guide prints the GitHub-side setup: a Repository webhook targeting the
-Mohist Server, and the identity Mohist uses on GitHub — a deployment-specific
-GitHub App (recommended, short-lived repository-scoped tokens) or a
-fine-grained PAT with Issues read and write as fallback. An optional approver
-list enables [Pull Request Review as Approval](#pull-request-review-as-approval).
+Mohist Server. The current connection API requires a fine-grained PAT with Issues
+read and write through `--pat` and stores it as a server secret; GitHub App
+installation-token exchange is not implemented yet. An optional approver list
+enables [Pull Request Review as Approval](#pull-request-review-as-approval).
 
 Disabling a connection pauses mirroring and synchronization. Existing links
 stay visible on Issues and show the paused state. Enabling re-projects every
@@ -194,17 +194,13 @@ boundaries and protocol details.
 ## Implementation Gaps
 
 The target model above replaces the earlier one-way intake design. Implemented
-today: repository connection with signed ingress, the pre-command
-label-based intake path, close withdrawal, Pull Request review Approval,
-best-effort progress write-back, Issues that explicitly run without a Workflow
-across Server, CLI, and Web, first-class mirror link visibility in CLI and Web,
-automatic ready-only mirroring with durable Pending intent and marker
-reconciliation, and two-way title and body sync with echo suppression. New
-issues created through that intake path no longer emit the `github-issue`
-origin label; historical links created through it may retain that label as
-data. The link currently exposes a
-deliberately provisional `healthy` sync state and does not report write-back
-failures; real sync health belongs to the later recovery slice. Not yet
-implemented: GitHub-driven lifecycle for no-Workflow Issues, the `/mohist`
-command entry, and reconcile-based operator recovery. Feed-by-label intake and
-its connection options are removed when the command entry lands.
+today: #770 no-Workflow Issue lifecycle, #771 first-class GitHub mirror link
+visibility in CLI and Web, #772 automatic ready-only mirroring with durable
+Pending intent, marker reconciliation, and two-way title and body sync with
+echo suppression, and #773 `/mohist start` command intake with GitHub
+permission gating, idempotent link creation, p0-p4 priority mapping, refusal
+replies, and reliable command reply delivery. Repository connection with signed
+ingress, close withdrawal, Pull Request review Approval, and best-effort
+progress write-back are included. The connection surface contains only
+Repository binding, identity, and Approvers. Later sync-health and
+operator-recovery work remains open.

@@ -29,7 +29,31 @@ public sealed class GitHubIngressSpecs(MohistIntegrationFixture fixture)
             "number": 42,
             "title": "Fix the bug",
             "state": "open",
-            "labels": [ { "name": "mohist" } ]
+            "labels": [ { "name": "p1" } ]
+          },
+          "repository": {
+            "name": "hello-world",
+            "full_name": "octocat/hello-world",
+            "owner": { "login": "octocat" }
+          }
+        }
+        """;
+
+    private static readonly string CommentCreatedPayload = """
+        {
+          "action": "created",
+          "issue": {
+            "number": 42,
+            "title": "Fix the bug",
+            "body": "Steps to reproduce",
+            "state": "open",
+            "labels": [ { "name": "p1" } ]
+          },
+          "comment": {
+            "id": 1001,
+            "body": "/mohist start",
+            "author_association": "MEMBER",
+            "user": { "login": "alice" }
           },
           "repository": {
             "name": "hello-world",
@@ -51,7 +75,7 @@ public sealed class GitHubIngressSpecs(MohistIntegrationFixture fixture)
             "/api/projects", $"github-ingress-{Guid.NewGuid():N}", repoName: RepoName, gitUrl: $"https://github.com/{owner}/{RepoName}.git");
         var created = await Client.PostDataAsync<JsonElement>(
             $"/api/projects/{project.Id}/github-connections",
-            new { owner, repo = RepoName });
+            new { owner, repo = RepoName, pat = "github-pat" });
         return (project, created);
     }
 
@@ -89,24 +113,24 @@ public sealed class GitHubIngressSpecs(MohistIntegrationFixture fixture)
         JsonSerializer.Deserialize<Dictionary<string, string>>(row.ExtensionsJson)![key];
 
     [Fact]
-    public async Task LabeledEvent_WithValidSignature_EntersEventStreamWithCatalogType()
+    public async Task IssueCommentCreated_WithValidSignature_EntersEventStreamWithCatalogType()
     {
         var (project, connection) = await ConnectNewAsync();
         var connectionId = connection.GetProperty("id").GetString()!;
         var secret = connection.GetProperty("webhookSecret").GetString()!;
 
         using var response = await DeliverAsync(
-            connectionId, secret, "issues", "delivery-labeled-1", LabeledPayload);
+            connectionId, secret, "issue_comment", "delivery-comment-1", CommentCreatedPayload);
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         var row = Assert.Single(await ReadIngressRowsAsync(project.Id, connectionId));
-        Assert.Equal(EventCatalog.ReverseDns.GitHubIssuesLabeled, row.Type);
-        Assert.Equal("delivery-labeled-1", row.EventId);
+        Assert.Equal(EventCatalog.ReverseDns.GitHubIssueCommentCreated, row.Type);
+        Assert.Equal("delivery-comment-1", row.EventId);
         Assert.Equal($"/mohist/projects/{project.Id}/github-connections/{connectionId}", row.Source);
         Assert.Equal(project.Id, Extension(row, EventCatalog.Lineage.ProjectId));
         Assert.Equal("octocat/hello-world", Extension(row, EventCatalog.Lineage.GitHubRepo));
         Assert.Equal("42", Extension(row, EventCatalog.Lineage.GitHubIssue));
-        Assert.Equal(LabeledPayload, row.Data.GetRawText());
+        Assert.Equal(CommentCreatedPayload, row.Data.GetRawText());
     }
 
     [Theory]
@@ -176,8 +200,9 @@ public sealed class GitHubIngressSpecs(MohistIntegrationFixture fixture)
         var connectionId = connection.GetProperty("id").GetString()!;
         var secret = connection.GetProperty("webhookSecret").GetString()!;
 
-        using var first = await DeliverAsync(connectionId, secret, "issues", "delivery-dup-1", LabeledPayload);
-        using var second = await DeliverAsync(connectionId, secret, "issues", "delivery-dup-1", LabeledPayload);
+        var closedPayload = LabeledPayload.Replace("\"labeled\"", "\"closed\"");
+        using var first = await DeliverAsync(connectionId, secret, "issues", "delivery-dup-1", closedPayload);
+        using var second = await DeliverAsync(connectionId, secret, "issues", "delivery-dup-1", closedPayload);
 
         Assert.Equal(HttpStatusCode.OK, first.StatusCode);
         Assert.Equal(HttpStatusCode.OK, second.StatusCode);

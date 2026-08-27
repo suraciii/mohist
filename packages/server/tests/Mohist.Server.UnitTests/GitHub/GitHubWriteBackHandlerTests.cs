@@ -60,6 +60,13 @@ public sealed class GitHubWriteBackHandlerTests
             return Task.CompletedTask;
         }
 
+        public Task<IReadOnlyList<string>> FindCommentIdsByMarkerAsync(
+            GitHubConnection connection,
+            int githubIssueNumber,
+            string marker,
+            CancellationToken ct = default) =>
+            Task.FromResult<IReadOnlyList<string>>([]);
+
         public Task ReplaceStateLabelAsync(
             GitHubConnection connection,
             int githubIssueNumber,
@@ -124,8 +131,6 @@ public sealed class GitHubWriteBackHandlerTests
                     Owner = "octo",
                     Repo = "hello",
                     RepositoryName = "hello-world",
-                    IntakeLabel = "mohist",
-                    FeedMode = GitHubFeedMode.Start,
                     ApproversJson = "[]",
                     Status = GitHubConnectionStatus.Active,
                     IdentityKind = GitHubIdentityKind.Pat,
@@ -208,8 +213,6 @@ public sealed class GitHubWriteBackHandlerTests
                 Owner = row.Owner,
                 Repo = row.Repo,
                 RepositoryName = row.RepositoryName,
-                IntakeLabel = row.IntakeLabel,
-                FeedMode = row.FeedMode,
                 Approvers = [],
                 Status = row.Status,
                 IdentityKind = row.IdentityKind,

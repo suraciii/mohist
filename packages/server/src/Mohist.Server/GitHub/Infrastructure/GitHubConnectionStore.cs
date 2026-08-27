@@ -78,7 +78,10 @@ public sealed class GitHubConnectionStore : IScopedService
         return row is null ? null : ToDomain(row);
     }
 
-    public async Task<string> CreateAsync(GitHubConnection connection, CancellationToken ct = default)
+    public async Task<string> CreateAsync(
+        GitHubConnection connection,
+        string? pat = null,
+        CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(connection);
         connection.Owner = connection.Owner.Trim().ToLowerInvariant();
@@ -90,6 +93,14 @@ public sealed class GitHubConnectionStore : IScopedService
         var project = await db.Projects.AsNoTracking().FirstOrDefaultAsync(p => p.Id == connection.ProjectId, ct)
             ?? throw new GitHubConnectionValidationException("project not found", "project_not_found");
         connection.RepositoryName = ResolveRepository(project.RepositoriesJson, connection.Owner, connection.Repo);
+        if (connection.IdentityKind != GitHubIdentityKind.Pat)
+            throw new GitHubConnectionValidationException(
+                "GitHub App identity is reserved for a future connection flow; provide a PAT",
+                "github_app_identity_not_supported");
+        if (string.IsNullOrWhiteSpace(pat))
+            throw new GitHubConnectionValidationException(
+                "pat is required for an active GitHub connection",
+                "pat_required");
 
         var duplicate = await db.GitHubConnections.AnyAsync(
             r => r.Owner == connection.Owner && r.Repo == connection.Repo, ct);
@@ -101,6 +112,11 @@ public sealed class GitHubConnectionStore : IScopedService
         connection.Status = GitHubConnectionStatus.Active;
         connection.CreatedAt = now;
         connection.UpdatedAt = now;
+        var apiSecretAddress = ApiSecretAddress(connection.ProjectId, connection.Id);
+        await _secretStore.StoreAsync(
+            apiSecretAddress,
+            Encoding.UTF8.GetBytes(pat),
+            ct);
         db.GitHubConnections.Add(ToRow(connection));
         try
         {
@@ -108,8 +124,14 @@ public sealed class GitHubConnectionStore : IScopedService
         }
         catch (DbUpdateException ex) when (IsOwnerRepoConflict(ex))
         {
+            await _secretStore.DeleteAsync(apiSecretAddress, CancellationToken.None);
             throw new GitHubConnectionConflictException(
                 $"GitHub repository '{connection.Owner}/{connection.Repo}' is already connected to a project", "github_repository_already_connected");
+        }
+        catch
+        {
+            await _secretStore.DeleteAsync(apiSecretAddress, CancellationToken.None);
+            throw;
         }
 
         var secret = Convert.ToHexString(RandomNumberGenerator.GetBytes(32)).ToLowerInvariant();
@@ -125,6 +147,14 @@ public sealed class GitHubConnectionStore : IScopedService
         var row = await db.GitHubConnections.FirstOrDefaultAsync(r => r.ProjectId == projectId && r.Id == id, ct);
         if (row is null) return null;
         if (row.Status == status) return ToDomain(row);
+        if (status == GitHubConnectionStatus.Active)
+        {
+            var pat = await _secretStore.LoadAsync(ApiSecretAddress(row.ProjectId, row.Id), ct);
+            if (pat is null || string.IsNullOrWhiteSpace(Encoding.UTF8.GetString(pat)))
+                throw new GitHubConnectionValidationException(
+                    "pat is required for an active GitHub connection",
+                    "pat_required");
+        }
         row.Status = status;
         row.UpdatedAt = _timeProvider.GetUtcNow();
         await db.SaveChangesAsync(ct);
@@ -173,9 +203,8 @@ public sealed class GitHubConnectionStore : IScopedService
         new(projectId, $"{connectionId}:webhook", SecretKind.WebhookSecret);
 
     /// <summary>
-    /// Degraded-identity write-back PAT (Issues read/write only). Stored per
-    /// connection; consumed by the comment port and the future write-back
-    /// writer.
+    /// Fine-grained GitHub PAT (Issues read/write only). Stored per
+    /// connection and consumed by the current comment port.
     /// </summary>
     public static SecretStoreAddress ApiSecretAddress(string projectId, string connectionId) =>
         new(new SecretOwnerAddress.GitHubConnection(projectId, connectionId), SecretKind.AppToken);
@@ -211,8 +240,6 @@ public sealed class GitHubConnectionStore : IScopedService
         Owner = row.Owner,
         Repo = row.Repo,
         RepositoryName = row.RepositoryName,
-        IntakeLabel = row.IntakeLabel,
-        FeedMode = row.FeedMode,
         Approvers = DeserializeApprovers(row.ApproversJson),
         Status = row.Status,
         IdentityKind = row.IdentityKind,
@@ -229,8 +256,6 @@ public sealed class GitHubConnectionStore : IScopedService
         Owner = connection.Owner,
         Repo = connection.Repo,
         RepositoryName = connection.RepositoryName,
-        IntakeLabel = connection.IntakeLabel,
-        FeedMode = connection.FeedMode,
         ApproversJson = SerializeApprovers(connection.Approvers),
         Status = connection.Status,
         IdentityKind = connection.IdentityKind,

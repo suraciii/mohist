@@ -42,7 +42,6 @@ public sealed class GitHubEventNormalizerTests
             eventHeader, Payload(body), "proj_1", "ghconn_1", "delivery-1", ReceivedAt);
 
     [Theory]
-    [InlineData("issues", "labeled", EventCatalog.ReverseDns.GitHubIssuesLabeled)]
     [InlineData("issues", "closed", EventCatalog.ReverseDns.GitHubIssuesClosed)]
     [InlineData("issues", "reopened", EventCatalog.ReverseDns.GitHubIssuesReopened)]
     public void IssuesEvent_MapsActionToType(string header, string action, string expectedType)
@@ -60,6 +59,29 @@ public sealed class GitHubEventNormalizerTests
         Assert.Equal("octocat/hello-world", envelope.Extensions[EventCatalog.Lineage.GitHubRepo]);
         Assert.Equal("42", envelope.Extensions[EventCatalog.Lineage.GitHubIssue]);
         Assert.DoesNotContain(EventCatalog.Lineage.Issue, envelope.Extensions.Keys);
+    }
+
+    [Fact]
+    public void IssueCommentCreatedEvent_MapsToCommentType()
+    {
+        var envelope = Normalize("issue_comment", """
+            {
+              "action": "created",
+              "issue": { "number": 42, "title": "Fix" },
+              "comment": { "id": 7, "body": "/mohist start", "author_association": "MEMBER" },
+              "repository": { "name": "hello-world", "full_name": "octocat/hello-world", "owner": { "login": "octocat" } }
+            }
+            """);
+
+        Assert.NotNull(envelope);
+        Assert.Equal(EventCatalog.ReverseDns.GitHubIssueCommentCreated, envelope.Type);
+        Assert.Equal("42", envelope.Extensions[EventCatalog.Lineage.GitHubIssue]);
+    }
+
+    [Fact]
+    public void IssuesLabeledEvent_IsNoLongerMapped()
+    {
+        Assert.Null(Normalize("issues", IssuesLabeled));
     }
 
     [Fact]
@@ -105,11 +127,11 @@ public sealed class GitHubEventNormalizerTests
     [Fact]
     public void MissingRepositoryCoordinate_OmitsGitHubRepoExtension()
     {
-        var body = """{ "action": "labeled", "issue": { "number": 42 } }""";
+        var body = """{ "action": "closed", "issue": { "number": 42 } }""";
         var envelope = Normalize("issues", body);
 
         Assert.NotNull(envelope);
-        Assert.Equal(EventCatalog.ReverseDns.GitHubIssuesLabeled, envelope.Type);
+        Assert.Equal(EventCatalog.ReverseDns.GitHubIssuesClosed, envelope.Type);
         Assert.DoesNotContain(EventCatalog.Lineage.GitHubRepo, envelope.Extensions.Keys);
         Assert.Equal("42", envelope.Extensions[EventCatalog.Lineage.GitHubIssue]);
     }
@@ -118,7 +140,7 @@ public sealed class GitHubEventNormalizerTests
     public void EmptyDeliveryId_FallsBackToGeneratedId()
     {
         var envelope = GitHubEventNormalizer.Normalize(
-            "issues", Payload(IssuesLabeled), "proj_1", "ghconn_1", string.Empty, ReceivedAt);
+            "issues", Payload(IssuesLabeled.Replace("\"labeled\"", "\"closed\"")), "proj_1", "ghconn_1", string.Empty, ReceivedAt);
 
         Assert.NotNull(envelope);
         Assert.False(string.IsNullOrWhiteSpace(envelope.Id));
@@ -128,10 +150,10 @@ public sealed class GitHubEventNormalizerTests
     [Fact]
     public void PayloadIsPreservedVerbatim()
     {
-        var envelope = Normalize("issues", IssuesLabeled);
+        var envelope = Normalize("issues", IssuesLabeled.Replace("\"labeled\"", "\"closed\""));
 
         Assert.NotNull(envelope);
         Assert.Equal("Fix the bug", envelope.Data!.Value.GetProperty("issue").GetProperty("title").GetString());
-        Assert.Equal("labeled", envelope.Data.Value.GetProperty("action").GetString());
+        Assert.Equal("closed", envelope.Data.Value.GetProperty("action").GetString());
     }
 }

@@ -17,6 +17,17 @@ public interface IGitHubCommentPort
         CancellationToken ct = default);
 
     /// <summary>
+    /// Lists the comment ids whose body contains the exact marker. This
+    /// reconciles an unknown POST result before a retry can create a duplicate;
+    /// callers must fail closed when more than one match is returned.
+    /// </summary>
+    Task<IReadOnlyList<string>> FindCommentIdsByMarkerAsync(
+        GitHubConnection connection,
+        int githubIssueNumber,
+        string marker,
+        CancellationToken ct = default);
+
+    /// <summary>
     /// Replaces the mutually-exclusive <c>mohist:</c> state label on the
     /// issue with <paramref name="stateLabel"/>: existing <c>mohist:</c>
     /// labels are removed, all other labels are kept.

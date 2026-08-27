@@ -17,13 +17,13 @@ using DomainIssue = Mohist.Server.Issue.Domain.Issue;
 
 namespace Mohist.Server.SpecTests.Specs.GitHub;
 
-[Collection("GitHubFeed")]
+[Collection("GitHubCommand")]
 public sealed class GitHubIssueMirrorSpecs
 {
     private const string RepositoryName = "hello-world";
-    private readonly GitHubFeedFixture _fixture;
+    private readonly GitHubCommandFixture _fixture;
 
-    public GitHubIssueMirrorSpecs(GitHubFeedFixture fixture)
+    public GitHubIssueMirrorSpecs(GitHubCommandFixture fixture)
     {
         _fixture = fixture;
         fixture.Comments.Comments.Clear();
@@ -266,7 +266,7 @@ public sealed class GitHubIssueMirrorSpecs
             "/api/projects", $"github-mirror-{Guid.NewGuid():N}", repoName: RepositoryName,
             gitUrl: $"https://github.com/{owner}/{RepositoryName}.git");
         var connection = await _fixture.Client.PostDataAsync<JsonElement>(
-            $"/api/projects/{project.Id}/github-connections", new { owner, repo = RepositoryName });
+            $"/api/projects/{project.Id}/github-connections", new { owner, repo = RepositoryName, pat = "github-pat" });
         var issueNumber = await CreateIssueInProjectAsync(project.Id, isDraft);
         return (project.Id, issueNumber, connection.GetProperty("id").GetString()!);
     }

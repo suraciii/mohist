@@ -66,13 +66,14 @@ public sealed class GitHubIssueEventPayloadTests
     [InlineData(new[] { "mohist", "p0" }, "p0")]
     [InlineData(new[] { "p4" }, "p4")]
     [InlineData(new[] { "P2" }, "p2")]
-    [InlineData(new[] { "mohist" }, null)]
-    [InlineData(new[] { "priority:p1" }, null)]
-    [InlineData(new[] { "p5" }, null)]
-    [InlineData(new[] { "p10" }, null)]
-    [InlineData(new string[] { }, null)]
-    public void MapPriority_MapsPLabelsOnly(string[] labels, string? expected)
+    [InlineData(new[] { "mohist" }, "p2")]
+    [InlineData(new[] { "priority:p1" }, "p2")]
+    [InlineData(new[] { "p5" }, "p2")]
+    [InlineData(new[] { "p10" }, "p2")]
+    [InlineData(new string[] { }, "p2")]
+    public void MapPriority_MapsPLabelsOnly(string[] labels, string expected)
     {
-        Assert.Equal(expected, GitHubIssueFeedTranslation.MapPriority(labels));
+        Assert.Equal(expected, GitHubIssueCommandTranslation.MapPriority(labels));
     }
+
 }

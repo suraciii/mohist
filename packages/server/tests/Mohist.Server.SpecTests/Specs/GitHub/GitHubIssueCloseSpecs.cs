@@ -17,15 +17,15 @@ using DomainIssue = Mohist.Server.Issue.Domain.Issue;
 
 namespace Mohist.Server.SpecTests.Specs.GitHub;
 
-[Collection("GitHubFeed")]
+[Collection("GitHubCommand")]
 public sealed class GitHubIssueCloseSpecs
 {
     private const string RepoName = "hello-world";
     private const int GithubIssueNumber = 42;
 
-    private readonly GitHubFeedFixture _fixture;
+    private readonly GitHubCommandFixture _fixture;
 
-    public GitHubIssueCloseSpecs(GitHubFeedFixture fixture)
+    public GitHubIssueCloseSpecs(GitHubCommandFixture fixture)
     {
         _fixture = fixture;
         fixture.Comments.Comments.Clear();
@@ -35,7 +35,7 @@ public sealed class GitHubIssueCloseSpecs
 
     private HttpClient Client => _fixture.Client;
 
-    private async Task<(string ProjectId, string ConnectionId, string Secret)> ConnectNewAsync(string? feedMode = null)
+    private async Task<(string ProjectId, string ConnectionId, string Secret)> ConnectNewAsync()
     {
         var owner = $"octocat-{Guid.NewGuid():N}";
         var project = await Client.CreateProjectWithDefaultRepositoryAsync<ProjectInfo>(
@@ -44,8 +44,8 @@ public sealed class GitHubIssueCloseSpecs
         {
             ["owner"] = owner,
             ["repo"] = RepoName,
+            ["pat"] = "github-pat",
         };
-        if (feedMode is not null) body["feedMode"] = feedMode;
         var created = await Client.PostDataAsync<JsonElement>($"/api/projects/{project.Id}/github-connections", body);
         return (project.Id, created.GetProperty("id").GetString()!, created.GetProperty("webhookSecret").GetString()!);
     }
@@ -83,43 +83,18 @@ public sealed class GitHubIssueCloseSpecs
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
     }
 
-    private async Task<int> FeedAsync(string projectId, string connectionId, string secret)
+    private async Task<int> SeedLinkedIssueAsync(string projectId)
     {
-        var payload = $$"""
-            {
-              "action": "labeled",
-              "number": {{GithubIssueNumber}},
-              "issue": {
-                "number": {{GithubIssueNumber}},
-                "title": "Close me",
-                "state": "open",
-                "labels": [ { "name": "mohist" } ]
-              },
-              "repository": {
-                "name": "hello-world",
-                "full_name": "octocat/hello-world",
-                "owner": { "login": "octocat" }
-              }
-            }
-            """;
-        var bytes = Encoding.UTF8.GetBytes(payload);
-        using var request = new HttpRequestMessage(HttpMethod.Post, $"/api/github-connections/{connectionId}/ingress")
-        {
-            Content = new ByteArrayContent(bytes),
-        };
-        request.Content.Headers.ContentType = new MediaTypeHeaderValue("application/json");
-        request.Headers.Add("X-GitHub-Event", "issues");
-        request.Headers.Add("X-GitHub-Delivery", "close-feed-delivery");
-        request.Headers.Add("X-Hub-Signature-256",
-            "sha256=" + Convert.ToHexString(HMACSHA256.HashData(Encoding.UTF8.GetBytes(secret), bytes)).ToLowerInvariant());
-        using var response = await Client.SendAsync(request);
-        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-        await PumpAsync();
+        var issueNumber = await _fixture.Grains
+            .GetGrain<IIssueCounterGrain>(GrainKey.IssueCounter(projectId))
+            .NextAsync();
+        await _fixture.Grains
+            .GetGrain<IIssueGrain>(GrainKey.Issue(new IssueKey(projectId, issueNumber)))
+            .CreateAsync(projectId, issueNumber, "Close me", null, null, "p2", RepoName, isDraft: false);
         await using var scope = _fixture.Services.CreateAsyncScope();
         var links = scope.ServiceProvider.GetRequiredService<GitHubIssueLinkStore>();
-        var link = await links.GetAsync(projectId, RepoName, GithubIssueNumber);
-        Assert.NotNull(link);
-        return link!.IssueNumber;
+        await links.CreateAsync(projectId, RepoName, GithubIssueNumber, issueNumber);
+        return issueNumber;
     }
 
     private Task PumpAsync() =>
@@ -142,8 +117,8 @@ public sealed class GitHubIssueCloseSpecs
     [Fact]
     public async Task ClosedEvent_CancelsLinkedBacklogIssue()
     {
-        var (projectId, connectionId, secret) = await ConnectNewAsync(feedMode: "backlog");
-        var issueNumber = await FeedAsync(projectId, connectionId, secret);
+        var (projectId, connectionId, secret) = await ConnectNewAsync();
+        var issueNumber = await SeedLinkedIssueAsync(projectId);
 
         await DeliverClosedAsync(connectionId, secret, "close-delivery-1");
         await PumpAsync();
@@ -156,7 +131,10 @@ public sealed class GitHubIssueCloseSpecs
     public async Task ClosedEvent_OnRunningIssue_IsNoOp()
     {
         var (projectId, connectionId, secret) = await ConnectNewAsync();
-        var issueNumber = await FeedAsync(projectId, connectionId, secret);
+        var issueNumber = await SeedLinkedIssueAsync(projectId);
+        await _fixture.Grains
+            .GetGrain<IIssueGrain>(GrainKey.Issue(new IssueKey(projectId, issueNumber)))
+            .StartWorkAsync();
 
         await DeliverClosedAsync(connectionId, secret, "close-delivery-running");
         await PumpAsync();
