@@ -100,6 +100,9 @@ need all three commands for symmetry. User shell aliases are not part of the
   symmetry.
 - Domain actions such as `start`, `approve`, and `retry` use Mohist
   state-transition language directly.
+- `cancel` retracts a declared intent before it acts, such as a scheduled
+  input. It is not an end-work verb: `stop` is the only verb that ends
+  executing work, and `Cancelled` survives only as a terminal outcome.
 
 `retry`, `rerun`, `pause`, and `stop` are not synonyms:
 

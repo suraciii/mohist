@@ -110,7 +110,7 @@ User -> Issue.MarkDone
           +-- transaction: Issue state + [IssueCompleted(completionKind=manual)]
 
 [IssueCompleted / IssueCancelled]
-  +-> Parent Issue.RecomputeComposite       (sub-Issue only)
+  +-> Parent Issue.RecomputeComposite       (child Issue only)
   +-> current Epic.Advance                  (when affiliated)
 ```
 
@@ -127,8 +127,8 @@ fact. The event's `completionKind` distinguishes `workflow` from `manual`; paren
 Inbox, and metrics continue to consume the same completion event.
 
 A duplicate command against `Done` is a no-op, so redelivery after a lost response cannot produce a
-second completion event. A parent Issue with sub-Issues cannot be completed manually; only a fresh
-snapshot of its sub-Issues determines its terminal state.
+second completion event. A parent Issue with child Issues cannot be completed manually; only a fresh
+snapshot of its child Issues determines its terminal state.
 
 ## Synchronous Direction and Asynchronous Closure
 

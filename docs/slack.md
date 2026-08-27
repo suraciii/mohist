@@ -563,7 +563,7 @@ Failure handling follows fixed boundaries:
 - **Stopping a queued Turn ends it locally as cancelled.** Stopping a first
   Turn ends its AgentJob with failure category `cancelled`.
 
-## Status
+## Implementation Gaps
 
 Multi-Bot interactive selection is delivered. Ambiguous root messages,
 explicit multi-Bot thread mentions, and unmentioned replies in multi-bound

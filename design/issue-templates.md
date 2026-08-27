@@ -111,7 +111,7 @@ changes only the meaning of the middle sections.
 > Severity, Priority, and Risk are Issue front-matter fields and must not be
 > repeated in the body. The body contains only semantics needed by the planner.
 
-## Implementation Gaps
+## Status
 
 - Custom template CRUD does not exist. `ProjectIssueTemplates` has a read side
   but no write path.

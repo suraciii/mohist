@@ -250,18 +250,16 @@ The only notification method is `workflow.status-changed`.
 
 Every method has one named `params` object:
 
-| Method | `params` DTO | Result DTO |
-| --- | --- | --- |
-| `workspace.diff` | `WorkspaceQueryParams` | `RunnerWorkspaceDiffResult?` |
-| `workspace.commits` | `WorkspaceQueryParams` | `RunnerWorkspaceCommitsResult?` |
-| `workspace.commit-diff` | `WorkspaceCommitDiffParams` | `RunnerWorkspaceCommitDiffResult?` |
-| `workspace.status` | `WorkspaceQueryParams` | `WorkspaceStatus` |
-| `workspace.file-content` | `WorkspaceFileContentParams` | `RunnerWorkspaceFileContentResult` |
-| `workspace.remove` | `WorkspaceQueryParams` | `WorkspaceRemovalResult` |
-| `session.followup` | `FollowupParams` | `RunnerFollowupDeliveryResult` |
-| `session.stop` | `SessionStopParams` | `RunnerStopReply` |
-| `session.command` | `SessionCommandRequest` | `SessionCommandResult` |
-| `workflow.status-changed` | `WorkflowRunStatusNotification` | none |
+- `workspace.diff` takes `WorkspaceQueryParams` and returns `RunnerWorkspaceDiffResult?`.
+- `workspace.commits` takes `WorkspaceQueryParams` and returns `RunnerWorkspaceCommitsResult?`.
+- `workspace.commit-diff` takes `WorkspaceCommitDiffParams` and returns `RunnerWorkspaceCommitDiffResult?`.
+- `workspace.status` takes `WorkspaceQueryParams` and returns `WorkspaceStatus`.
+- `workspace.file-content` takes `WorkspaceFileContentParams` and returns `RunnerWorkspaceFileContentResult`.
+- `workspace.remove` takes `WorkspaceQueryParams` and returns `WorkspaceRemovalResult`.
+- `session.followup` takes `FollowupParams` and returns `RunnerFollowupDeliveryResult`.
+- `session.stop` takes `SessionStopParams` and returns `RunnerStopReply`.
+- `session.command` takes `SessionCommandRequest` and returns `SessionCommandResult`.
+- `workflow.status-changed` takes `WorkflowRunStatusNotification` and returns none.
 
 JSON `null` is a valid result only for `workspace.diff`, `workspace.commits`,
 and `workspace.commit-diff`. Every other request method requires a non-null

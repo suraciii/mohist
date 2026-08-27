@@ -157,7 +157,7 @@ Mirroring is reliable by reconciliation, not by queueing:
 ## Status
 
 Implemented today: signed ingress and normalization, the pre-command
-feed-by-label intake path with its close withdrawal, Pull Request review Approval,
+label-based intake path with its close withdrawal, Pull Request review Approval,
 best-effort write-back with durable failure records, the core no-Workflow Issue
 lifecycle, the GitHub mirror link visibility in the Issue read models, CLI, and
 Web, automatic ready-only mirroring with durable Pending intent and invisible

@@ -159,7 +159,7 @@ These paths expose candidate count, processed count, and downstream call count.
 When a small response causes many database or cross-process calls, metrics and
 Traces must show that amplification directly.
 
-## Current Gaps
+## Status
 
 Metrics, the bounded route diagnostic summary, `mo otel status`, and the Server
 and Runner log line contract are implemented. One gap remains:

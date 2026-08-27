@@ -237,10 +237,10 @@ Each linked Issue still uses its own Workflow, such as the default
 `mohist/local` or a per-Issue selection. The Epic decides when to send the next
 Issue to a Workflow. It does not define the Steps inside that Workflow.
 
-## Relationship to Sub-Issues
+## Relationship to Child Issues
 
 Epics and composite Issues are independent organization axes. See
-[Composite Issues and Sub-issues](sub-issues.md). An Epic organizes multiple
+[Composite Issues and Child Issues](composite-issues.md). An Epic organizes multiple
 deliverables under a product goal. A composite Issue divides the internal work
 for one deliverable. The boundary rules are:
 
@@ -251,7 +251,7 @@ for one deliverable. The boundary rules are:
   toward Epic progress. The Epic does not inspect the composite structure, and
   these rules do not otherwise change Epic behavior.
 
-## Status
+## Implementation Gaps
 
 Epic commands use the Project-scoped Epic number, including `reopen`. Each
 Issue owns its current Epic membership, while Epic reads derive progress and

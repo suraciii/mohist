@@ -1,6 +1,8 @@
 # One Ledger, No Reconciliation
 
-## Background
+Status: accepted
+
+## Problem
 
 AgentJob work was previously delivered over a push channel. AgentJobGrain
 pushed DispatchSnapshot across grains into staging in the Runner aggregate,
@@ -22,3 +24,17 @@ channel's Runner-side staging, reconciliation loop, and dispatch retry state
 machine (`DispatchAttempts`, retry bound, and acceptance fence) are deleted
 together. The owner handles the case of an AgentJob with no available Runner
 through its own ReadySince timeout.
+
+## Alternatives considered
+
+**Keep the push channel with Runner-side staging and reconciliation.**
+Rejected: the staged copy is redundant state, and reconciliation is the
+carrying cost of keeping it, with races between assignment and poll built in.
+
+## Consequences
+
+- One work record exists per AgentJob, and claim is atomic at the owner.
+- Capacity decisions converge at claim instead of being arbitrated across a
+  staged copy and its owner.
+- The Runner aggregate carries presence, slots, and closeout only; no work
+  records, staging, or reconciliation state survive.

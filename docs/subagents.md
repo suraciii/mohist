@@ -227,7 +227,7 @@ cron, relative times such as "in 30 minutes," attachments, automatic launch of
 a new session at the due time, or schedule display in `mo session view` or
 `mo session tree`.
 
-## Status
+## Implementation Gaps
 
 Capability declaration, startup awareness, `mo agent spawn`, terminal reports,
 `mo session tree`, cascade stop, detach, and scheduled input are implemented.

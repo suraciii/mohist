@@ -11,7 +11,7 @@ import { VFile } from 'vfile'
 
 const repositoryRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const requiredDocuments = ['README.md', 'CONTEXT.md', 'CONTRIBUTING.md']
-const documentationDirectories = ['docs', 'design']
+const documentationDirectories = ['docs', 'design', 'eng']
 // These fence names identify diagrams without interpreting ordinary source-code examples.
 const forbiddenDiagramLanguages = new Set([
   'actdiag',
@@ -64,6 +64,7 @@ type MarkdownNode = {
   title?: string | null
   url?: string
   value?: string
+  depth?: number
 }
 
 export type DocumentationViolation = {
@@ -421,6 +422,43 @@ function compareViolations(left: DocumentationViolation, right: DocumentationVio
   return fileOrder || left.line - right.line || left.column - right.column || ruleOrder
 }
 
+const decisionRecordStatusLine = /^Status: (?:accepted|superseded by .+)$/m
+
+function isDecisionRecord(root: string, filePath: string): boolean {
+  const relativePath = relative(root, filePath).replaceAll('\\', '/')
+  return relativePath.startsWith('design/decisions/') && relativePath.endsWith('.md')
+}
+
+function decisionRecordViolations(filePath: string, source: string, tree: MarkdownNode): DocumentationViolation[] {
+  const violations: DocumentationViolation[] = []
+  if (!decisionRecordStatusLine.test(source)) {
+    violations.push(
+      violation(
+        filePath,
+        undefined,
+        'decision-record-status',
+        'decision record must carry a Status line: `Status: accepted` or `Status: superseded by <link>`',
+      ),
+    )
+  }
+  let hasAlternatives = false
+  walk(tree, (node) => {
+    if (node.type === 'heading' && node.depth === 2 && toString(node) === 'Alternatives considered')
+      hasAlternatives = true
+  })
+  if (!hasAlternatives) {
+    violations.push(
+      violation(
+        filePath,
+        undefined,
+        'decision-record-alternatives',
+        'decision record must carry an `## Alternatives considered` section',
+      ),
+    )
+  }
+  return violations
+}
+
 export function checkDocumentation(rootPath: string): DocumentationCheckResult {
   const root = resolve(rootPath)
   const discovered = findDocumentationFiles(root)
@@ -438,6 +476,7 @@ export function checkDocumentation(rootPath: string): DocumentationCheckResult {
     violations.push(...diagramFenceViolations(filePath, tree))
     violations.push(...undefinedReferenceViolations(filePath, source, tree))
     violations.push(...linkViolations(root, filePath, tree, headingCache))
+    if (isDecisionRecord(root, filePath)) violations.push(...decisionRecordViolations(filePath, source, tree))
   }
 
   return { files: discovered.files, violations: violations.sort(compareViolations) }

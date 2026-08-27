@@ -34,8 +34,8 @@ If you are new to Mohist, read the [repository README](../README.md) first.
   a Slack channel
 - [Issue Management](issues.md): Create, start, approve, recover, and close
   Issues
-- [Composite Issues and Sub-issues](sub-issues.md): Track a cross-repository
-  requirement in one Issue and move its sub-issues through separate Workflows
+- [Composite Issues and Child Issues](composite-issues.md): Track a cross-repository
+  requirement in one Issue and move its child Issues through separate Workflows
 - [Planning with Epics](epics.md): Organize separate Issues into a product goal
   that can advance automatically
 

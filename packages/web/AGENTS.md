@@ -4,14 +4,25 @@ Scope: `packages/web/` (React 19 + Vite + TanStack Query). Read this file before
 
 ## The one rule
 
-**Dependencies only flow downward**: `shared → entities → features → widgets → pages → app`. Higher layers may import lower layers; the reverse is forbidden. Enforced by `npm run check:fsd -w packages/web`; CI blocks violations.
+**Dependencies only flow downward**: `app → pages → widgets → features → entities → shared`. Higher layers may import lower layers; the reverse is forbidden. Enforced by `npm run check:fsd -w packages/web`; CI blocks violations.
 
 ## Rules
 
 1. **Cross-slice access goes through public exits**. The slice-root `index.ts` is its only public API; importing slice internals is forbidden. Add new exports to the slice's `index.ts`, not deeper paths in callers.
 2. **Cross-slice references in entities use the `@x` notation** (e.g. `entities/issue/@x/workflow`); do not import another entity's internals directly.
-3. **Choose the layer before placing new code**: utilities/base UI in `shared`, domain models in `entities`, user operations in `features`, composite blocks in `widgets`, routed pages in `pages`. When unsure, choose lower — upgrading is easy, downgrading is not.
-4. **Run the FSD gate before handoff**: `npm run check:fsd -w packages/web` (enforced by CI).
+3. **Slices on the same layer do not import from each other.** If two slices need the same code, move that code down to a lower layer.
+4. **Choose the layer before placing new code**. When unsure, choose lower — upgrading is easy, downgrading is not.
+5. **Run the FSD gate before handoff**: `npm run check:fsd -w packages/web` (enforced by CI).
+
+## Layers
+
+- `app`: application bootstrap, routing, global providers, global styles. It consumes route pages and the application shell through page or widget `index.ts`, never their internal `ui` or `model` files.
+- `pages`: route-level screens and interaction or state valid only within one route (e.g. Settings search belongs to `pages/settings`, not a reusable feature).
+- `widgets`: large self-contained UI blocks used by pages.
+- `features`: reusable user actions that provide product value.
+- `entities`: business entities and their stateful model/API adapters.
+- `shared`: business-agnostic API client, UI primitives, browser capability, and utilities. It owns no business logic: Theme context and keyboard-shortcut registry live here (`app` mounts ThemeProvider), static filter values shared by several domain APIs live in `shared/config`, and missing-resource presentation lives in `shared/ui`.
+- `shared/ui/components`: shadcn/ui primitives; keep generated UI kit code in `shared`, not in parallel top-level `components` folders.
 
 ## Entity Query Clients
 

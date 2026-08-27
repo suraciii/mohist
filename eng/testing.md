@@ -84,13 +84,19 @@ unrelated classes. A claim that spans peer modules must split into independent
 port contracts or move to L1 when complete application composition is part of
 the claim.
 
-| Kind | L0: component or module | L1: application |
-| --- | --- | --- |
-| Product Spec | Supported product behavior owned by one internal component or module. | Supported product behavior that requires one complete application. |
-| Design Spec | Internal contract owned by one component or module. | Internal application composition or lifecycle contract. |
+Kind and Level combine into four Spec forms:
 
-Every cell has the same hermetic boundary. Moving right adds in-process
-application scope only. It never adds an external host or service.
+- An L0 Product Spec states supported product behavior owned by one internal
+  component or module.
+- An L1 Product Spec states supported product behavior that requires one
+  complete application.
+- An L0 Design Spec states an internal contract owned by one component or
+  module.
+- An L1 Design Spec states an internal application composition or lifecycle
+  contract.
+
+Every form has the same hermetic boundary. Moving from L0 to L1 adds
+in-process application scope only. It never adds an external host or service.
 
 ### Resources
 
@@ -299,12 +305,18 @@ application and repository scopes. Test frameworks, project files, apphosts,
 track IDs, worker counts, report paths, and scheduling flags are internal gate
 details.
 
-| Command | Scope | Intended use | Final local acceptance |
-| --- | --- | --- | --- |
-| `npm run test:fast` | Every L0 and Architecture Spec plus fast static checks | Broad inner-loop feedback after a local change | No |
-| `npm run test:app -- <application>` | Every L0, L1, application-scoped Architecture Spec, and static check owned by one application | Complete feedback for one application boundary | No |
-| `npm test` | The complete hermetic Spec portfolio with test-plan validation, reports, and duration policy | Changes to shared contracts or test infrastructure | No |
-| `npm run verify` | Fresh application builds, all non-Spec repository checks, and the complete hermetic Spec portfolio | Final local handoff; CI applies the same contract through Gate | Yes |
+- `npm run test:fast` runs every L0 and Architecture Spec plus fast static
+  checks: broad inner-loop feedback after a local change.
+- `npm run test:app -- <application>` runs every L0, L1, application-scoped
+  Architecture Spec, and static check owned by one application: complete
+  feedback for one application boundary.
+- `npm test` runs the complete hermetic Spec portfolio with test-plan
+  validation, reports, and duration policy: for changes to shared contracts or
+  test infrastructure.
+- `npm run verify` runs fresh application builds, all non-Spec repository
+  checks, and the complete hermetic Spec portfolio: the final local handoff,
+  and the only command that constitutes final local acceptance. CI applies the
+  same contract through Gate.
 
 `test:fast` is broad and shallow. `test:app` is narrow and deep. `npm test`
 is broad and deep. `verify` adds the repository-wide acceptance checks. The

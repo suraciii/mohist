@@ -90,26 +90,10 @@ reads Slack tokens.
 
 ## Frontend Module Boundary
 
-The Web application uses Feature-Sliced Design with `app`, `pages`, `widgets`,
-`features`, `entities`, and `shared`. Dependencies point from higher to lower
-layers. Slices in one layer do not depend directly on each other. When entities
-have a real model relationship, declare a narrow contract through
-`entities/<entity>/@x`.
-
-- `app` owns startup, Providers, and route composition. It consumes route pages
-  and the application shell through page or widget `index.ts`, not internal
-  `ui` or `model` files.
-- `pages` owns interaction and state valid only within one route. Settings
-  search depends on Settings route, tab, and focus target, so it belongs to
-  `pages/settings` instead of a reusable Feature.
-- `shared` owns browser capability without business ownership. It provides
-  Theme context and keyboard-shortcut declarations and registry. `app` mounts
-  ThemeProvider. Pages and common components consume the shared API.
-- Static filter values used by several domain APIs belong to `shared/config`.
-  Missing-resource presentation belongs to `shared/ui`. A route page only
-  places these common capabilities at the route entry.
-- A slice exports only stable pages, components, or domain contracts. Internal
-  `ui`, `model`, and `api` paths cannot be cross-slice import targets.
+The Web application follows Feature-Sliced Design. The layering rules, slice
+export contract, and their enforcement are defined once in
+[`packages/web/AGENTS.md`](../packages/web/AGENTS.md); this document does not
+repeat them.
 
 ## Presentation Preference
 

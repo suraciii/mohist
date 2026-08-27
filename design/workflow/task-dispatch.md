@@ -150,7 +150,7 @@ this section defines its **storage lifecycle**:
   output on demand, is a rendering-content optimization and does not alter these lifecycle rules.
   See [`variables.md`](variables.md).
 
-### Status
+## Status
 
 Active attempt snapshots are stored outside WorkflowRun State. The first dispatch fixes the snapshot,
 redelivery reuses it, and terminal or superseding transitions remove it. Startup removes orphaned
@@ -169,13 +169,13 @@ If dispatch of a persisted WorkItem finds that its `uses` names a retired Action
 rejects it during dispatch. Manifest validation finds the tombstone and fails with its guidance as
 a non-retryable error.
 
-### Parent Context for a Sub-Issue Plan
+### Parent Context for a Child-Issue Plan
 
-A sub-Issue Plan task executed by an Inline Agent may receive the current parent
+A child-Issue Plan task executed by an Inline Agent may receive the current parent
 Issue title and body as optional read-only context. Other Stages, Actions,
 AgentJobs, and ordinary Issues do not receive it. Parent context is not persisted
 in WorkflowRun state, task input, Variables, or Prompts, and it creates no
-template namespace. The current sub-Issue body remains authoritative for
+template namespace. The current child-Issue body remains authoritative for
 delivery scope.
 
 Repository does not enter a WorkflowRun snapshot or Run Variables. Issue stores only the resource

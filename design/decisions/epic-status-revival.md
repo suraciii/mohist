@@ -1,17 +1,19 @@
 # Epic State Reflects Reality
 
-> The product decision in this record remains valid. The write authority and
-> transaction design for membership are superseded by
-> [`issue-owns-epic-membership.md`](issue-owns-epic-membership.md). Issue commits
-> `EpicNumber?` in its own transaction. A durable event makes Epic recompute
-> and converge state. Membership and Epic no longer share one transaction.
+Status: accepted
 
-## Background
+Partly superseded by
+[`issue-owns-epic-membership.md`](issue-owns-epic-membership.md): the write
+authority and transaction design for membership. Issue commits `EpicNumber?`
+in its own transaction, and a durable event makes Epic recompute and converge
+state. The product decision in this record stands.
+
+## Problem
 
 Epic has two terminal states: `done` for normal completion and `closed` for an
-abandoned goal. Previously, `LinkIssueAsync` treated a terminal Epic link as an
-archival link that recorded membership without changing state. Adding an open
-Issue therefore left Epic state inconsistent with reality.
+abandoned goal. Linking an Issue to a terminal Epic was treated as an archival
+link that recorded membership without changing state, so adding an open Issue
+left Epic state inconsistent with reality.
 
 ## Decision
 
@@ -44,6 +46,18 @@ states would behave identically. Reopen is the only explicit exit from
 Historical Epics that are `done` but already link an open Issue remain
 unchanged. An operator can repair them with unlink plus relink, or Reopen plus
 Start. Do not silently rewrite existing state at scale.
+
+## Alternatives considered
+
+**Keep terminal-Epic links purely archival.** Simpler, but Epic state then
+diverges from reality whenever open work joins a done Epic.
+
+**Allow revival from `closed` as well.** That makes `done` and `closed`
+behave identically and removes the meaning of the abandoned-goal state.
+
+**Rewrite inconsistent historical Epics automatically.** Rejected: silent
+bulk rewrites of existing state are not acceptable; operators repair with
+unlink plus relink, or Reopen plus Start.
 
 ## Implementation
 

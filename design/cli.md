@@ -107,7 +107,7 @@ referenced resource:
   override entry point: `agent launch --workspace`. Without that override, the entry point resolves
   the Workspace from its Origin; CLI launch uses the Project's `cli-current` Workspace. This is a
   binding decision, not permission to pass a Runner directory. Origin resolution and
-  materialization are authoritative in [`workspace.md`](workspaces.md). Issue, Slack, and Web do not
+  materialization are authoritative in [`workspaces.md`](workspaces.md). Issue, Slack, and Web do not
   duplicate Workspace commands under `issue` or `session`. The Workspace field in
   `session list --workspace` and `session view` is read-only.
 - `slack install-agent/list/view/claim-owner/edit/transfer-owner/enable/disable/remove-binding`
