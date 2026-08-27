@@ -4700,6 +4700,20 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
                     b.Property<bool>("MirrorCreateAttempted")
                         .HasColumnType("INTEGER");
 
+                    b.Property<DateTimeOffset?>("LastErrorAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("LastErrorCode")
+                        .HasMaxLength(64)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("LastErrorDetail")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("LastErrorOperation")
+                        .HasMaxLength(64)
+                        .HasColumnType("TEXT");
+
                     b.Property<string>("MirrorMarker")
                         .HasMaxLength(256)
                         .HasColumnType("TEXT");
@@ -4711,6 +4725,11 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
                     b.Property<string>("StateLabel")
                         .HasColumnType("TEXT")
                         .HasMaxLength(256);
+
+                    b.Property<string>("SyncStatus")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("TEXT");
 
                     b.Property<string>("ProjectId")
                         .IsRequired()

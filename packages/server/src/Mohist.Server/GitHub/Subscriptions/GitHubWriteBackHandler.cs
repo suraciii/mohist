@@ -46,13 +46,16 @@ public sealed class GitHubWriteBackHandler : ICloudEventHandler
     };
 
     private readonly IServiceScopeFactory _scopes;
+    private readonly TimeProvider _timeProvider;
     private readonly ILogger<GitHubWriteBackHandler> _log;
 
     public GitHubWriteBackHandler(
         IServiceScopeFactory scopes,
+        TimeProvider timeProvider,
         ILogger<GitHubWriteBackHandler> log)
     {
         _scopes = scopes;
+        _timeProvider = timeProvider;
         _log = log;
     }
 
@@ -237,7 +240,12 @@ public sealed class GitHubWriteBackHandler : ICloudEventHandler
                     : ex.GetType().Name,
                 ErrorDetail = ex.Message.Length <= 1000 ? ex.Message : ex.Message[..1000],
             };
+            failure.CreatedAt = _timeProvider.GetUtcNow();
             await sp.GetRequiredService<GitHubWriteBackFailureStore>().CreateAsync(failure, ct);
+            await sp.GetRequiredService<GitHubIssueLinkStore>().MarkErrorAsync(
+                link.Id,
+                new GitHubSyncError(failure.Operation, failure.ErrorCode, failure.ErrorDetail, failure.CreatedAt),
+                ct);
             if (IsCredentialFailure(ex))
             {
                 await sp.GetRequiredService<GitHubConnectionStore>()

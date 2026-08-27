@@ -71,6 +71,11 @@ public sealed class GitHubMirrorMigrationTests
         var linkColumns = await ReadColumnsAsync(connection, "GitHubIssueLinks");
         Assert.Contains("MirrorMarker", linkColumns);
         Assert.Contains("MirrorCreateAttempted", linkColumns);
+        Assert.Contains("SyncStatus", linkColumns);
+        Assert.Contains("LastErrorOperation", linkColumns);
+        Assert.Contains("LastErrorCode", linkColumns);
+        Assert.Contains("LastErrorDetail", linkColumns);
+        Assert.Contains("LastErrorAt", linkColumns);
 
         var linkIndexes = await ReadIndexesAsync(connection, "GitHubIssueLinks");
         Assert.Equal(1, linkIndexes.Count(index =>

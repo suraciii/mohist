@@ -33,6 +33,7 @@ public sealed class GitHubIssueMirrorSpecs
         fixture.Comments.CreateFailure = null;
         fixture.Comments.FindFailure = null;
         fixture.Comments.ConfirmationFailure = null;
+        fixture.Comments.UpdateFailure = null;
         fixture.Comments.CreateThenThrow = false;
         fixture.Comments.MarkerMatchCount = 0;
     }

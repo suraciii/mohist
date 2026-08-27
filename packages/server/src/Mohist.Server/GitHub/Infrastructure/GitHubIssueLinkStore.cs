@@ -45,6 +45,21 @@ public sealed class GitHubIssueLinkStore : IScopedService
     /// progress from Mohist events and needs the reverse lookup; the unique
     /// issue index guarantees at most one link per Mohist issue.
     /// </summary>
+    public async Task<IReadOnlyList<GitHubIssueLink>> ListByConnectionAsync(
+        string projectId,
+        string repositoryName,
+        CancellationToken ct = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(projectId);
+        ArgumentException.ThrowIfNullOrWhiteSpace(repositoryName);
+        await using var db = await _dbFactory.CreateDbContextAsync(ct);
+        var rows = await db.GitHubIssueLinks.AsNoTracking()
+            .Where(r => r.ProjectId == projectId && r.RepositoryName == repositoryName)
+            .OrderBy(r => r.IssueNumber)
+            .ToListAsync(ct);
+        return rows.Select(ToDomain).ToList();
+    }
+
     public async Task<GitHubIssueLink?> GetByIssueAsync(
         string projectId,
         int issueNumber,
@@ -93,6 +108,7 @@ public sealed class GitHubIssueLinkStore : IScopedService
             MirrorMarker = null,
             MirrorCreateAttempted = false,
             CommandRequested = commandRequested,
+            SyncStatus = GitHubSyncStatus.Healthy,
             PostedCommentsJson = "[]",
             CreatedAt = now,
             UpdatedAt = now,
@@ -137,6 +153,7 @@ public sealed class GitHubIssueLinkStore : IScopedService
             MirrorMarker = GitHubMirrorMarker.For(id),
             MirrorCreateAttempted = false,
             CommandRequested = false,
+            SyncStatus = GitHubSyncStatus.Healthy,
             PostedCommentsJson = "[]",
             CreatedAt = now,
             UpdatedAt = now,
@@ -152,6 +169,65 @@ public sealed class GitHubIssueLinkStore : IScopedService
             var existing = await db.GitHubIssueLinks.AsNoTracking()
                 .FirstAsync(r => r.ProjectId == projectId && r.IssueNumber == issueNumber, ct);
             return ToDomain(existing);
+        }
+        return ToDomain(row);
+    }
+
+    public async Task<GitHubIssueLink?> EnsureMirrorMarkerAsync(
+        string id,
+        CancellationToken ct = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(id);
+        await using var db = await _dbFactory.CreateDbContextAsync(ct);
+        var row = await db.GitHubIssueLinks.FirstOrDefaultAsync(r => r.Id == id, ct);
+        if (row is null) return null;
+        if (string.IsNullOrWhiteSpace(row.MirrorMarker))
+        {
+            row.MirrorMarker = GitHubMirrorMarker.For(row.Id);
+            row.UpdatedAt = _timeProvider.GetUtcNow();
+            await db.SaveChangesAsync(ct);
+        }
+        return ToDomain(row);
+    }
+
+    public async Task<GitHubIssueLink?> MarkErrorAsync(
+        string id,
+        GitHubSyncError error,
+        CancellationToken ct = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(id);
+        ArgumentNullException.ThrowIfNull(error);
+        await using var db = await _dbFactory.CreateDbContextAsync(ct);
+        var row = await db.GitHubIssueLinks.FirstOrDefaultAsync(r => r.Id == id, ct);
+        if (row is null) return null;
+        row.SyncStatus = GitHubSyncStatus.Error;
+        row.LastErrorOperation = error.Operation;
+        row.LastErrorCode = error.Code;
+        row.LastErrorDetail = error.Detail;
+        row.LastErrorAt = error.OccurredAt;
+        row.UpdatedAt = _timeProvider.GetUtcNow();
+        await db.SaveChangesAsync(ct);
+        return ToDomain(row);
+    }
+
+    public async Task<GitHubIssueLink?> ClearErrorAsync(
+        string id,
+        CancellationToken ct = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(id);
+        await using var db = await _dbFactory.CreateDbContextAsync(ct);
+        var row = await db.GitHubIssueLinks.FirstOrDefaultAsync(r => r.Id == id, ct);
+        if (row is null) return null;
+        if (row.SyncStatus != GitHubSyncStatus.Healthy || row.LastErrorOperation is not null
+            || row.LastErrorCode is not null || row.LastErrorDetail is not null || row.LastErrorAt is not null)
+        {
+            row.SyncStatus = GitHubSyncStatus.Healthy;
+            row.LastErrorOperation = null;
+            row.LastErrorCode = null;
+            row.LastErrorDetail = null;
+            row.LastErrorAt = null;
+            row.UpdatedAt = _timeProvider.GetUtcNow();
+            await db.SaveChangesAsync(ct);
         }
         return ToDomain(row);
     }
@@ -245,6 +321,10 @@ public sealed class GitHubIssueLinkStore : IScopedService
         MirrorMarker = row.MirrorMarker,
         MirrorCreateAttempted = row.MirrorCreateAttempted,
         CommandRequested = row.CommandRequested,
+        SyncStatus = string.IsNullOrWhiteSpace(row.SyncStatus) ? GitHubSyncStatus.Healthy : row.SyncStatus,
+        LastError = row.LastErrorOperation is null || row.LastErrorCode is null || row.LastErrorDetail is null || row.LastErrorAt is null
+            ? null
+            : new GitHubSyncError(row.LastErrorOperation, row.LastErrorCode, row.LastErrorDetail, row.LastErrorAt.Value),
         PostedComments = DeserializePosted(row.PostedCommentsJson),
         StateLabel = row.StateLabel,
         CreatedAt = row.CreatedAt,

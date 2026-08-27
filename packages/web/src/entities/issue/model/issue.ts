@@ -123,7 +123,13 @@ export interface GitHubIssueSummary {
   repository: string
   number: number
   url: string
-  syncStatus: string
+  syncStatus: 'healthy' | 'error' | string
+  lastError?: {
+    operation: string
+    code: string
+    detail: string
+    occurredAt: string
+  } | null
 }
 
 export interface Issue {

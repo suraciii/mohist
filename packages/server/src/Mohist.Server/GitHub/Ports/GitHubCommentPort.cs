@@ -98,6 +98,22 @@ public sealed class GitHubCommentPort : IGitHubCommentPort, IGitHubIssuePort
         return matches.Count == 0 ? null : matches[0];
     }
 
+    public async Task<GitHubIssueSnapshot?> GetIssueAsync(
+        GitHubConnection connection,
+        int githubIssueNumber,
+        CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(connection);
+        var url = $"/repos/{connection.Owner}/{connection.Repo}/issues/{githubIssueNumber}";
+        var response = await SendAsync(connection, url, HttpMethod.Get, content: null, ct);
+        var node = JsonNode.Parse(response);
+        var number = node?["number"]?.GetValue<int>();
+        var title = node?["title"]?.GetValue<string>();
+        if (number is not > 0 || title is null)
+            throw new InvalidOperationException("GitHub issue response did not contain number and title");
+        return new GitHubIssueSnapshot(number.Value, title, node?["body"]?.GetValue<string>());
+    }
+
     public async Task UpdateIssueAsync(
         GitHubConnection connection,
         int githubIssueNumber,

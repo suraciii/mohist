@@ -44,6 +44,7 @@ import {
   getWorkflowYaml,
   getWorkspaceStatus,
   requestChangesIssue,
+  syncGitHubIssue,
   unarchiveIssue,
   updateIssue,
   updateIssueWorkflowProfileYaml,
@@ -275,6 +276,22 @@ export function useArchivedIssues(params?: { projectId?: string }) {
       return issues.filter((i) => i.archivedAt != null)
     },
     enabled: !!params?.projectId,
+  })
+}
+
+export function useSyncGitHubIssue() {
+  const queryClient = useQueryClient()
+  const { projectId } = useProject()
+  return useMutation({
+    mutationFn: (issueNumber: number) => syncGitHubIssue(issueNumber, projectId),
+    onSuccess: (_data, issueNumber) => {
+      queryClient.invalidateQueries({ queryKey: issueListKeys.project(projectId) })
+      queryClient.invalidateQueries({ queryKey: issueDetailKeys.detail(projectId, issueNumber), exact: true })
+      toast.success('GitHub mirror synchronized')
+    },
+    onError: (err: Error) => {
+      toast.error(err.message || 'GitHub sync failed')
+    },
   })
 }
 

@@ -117,6 +117,26 @@ public sealed class GitHubIssueLinkStoreTests
     }
 
     [Fact]
+    public async Task SyncHealth_RoundTripsErrorAndClearsIt()
+    {
+        var database = NewDatabase();
+        var store = NewStore(database);
+        var link = await store.CreateAsync("proj_1", "hello-world", 42, 7);
+        var error = new GitHubSyncError("content", "503", "GitHub unavailable", Now);
+
+        var failed = await store.MarkErrorAsync(link.Id, error);
+        Assert.Equal(GitHubSyncStatus.Error, failed!.SyncStatus);
+        Assert.Equal(error, failed.LastError);
+
+        var loaded = await store.GetAsync("proj_1", "hello-world", 42);
+        Assert.Equal(error, loaded!.LastError);
+
+        var recovered = await store.ClearErrorAsync(link.Id);
+        Assert.Equal(GitHubSyncStatus.Healthy, recovered!.SyncStatus);
+        Assert.Null(recovered.LastError);
+    }
+
+    [Fact]
     public async Task SetMirror_DuplicateGithubIssueLeavesSecondPending()
     {
         var database = NewDatabase();

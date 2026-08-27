@@ -56,11 +56,11 @@ public static class GitHubConnectionRoutes
                 : ApiResults.Ok(ToDto(connection));
         });
 
-        group.MapPost("/{connectionId}/enable", (HttpContext context, string connectionId, GitHubConnectionStore store, CancellationToken ct) =>
-            SetStatusAsync(context, store, connectionId, GitHubConnectionStatus.Active, ct));
+        group.MapPost("/{connectionId}/enable", (HttpContext context, string connectionId, GitHubConnectionStore store, GitHubIssueSynchronizationService synchronization, CancellationToken ct) =>
+            SetStatusAsync(context, store, synchronization, connectionId, GitHubConnectionStatus.Active, ct));
 
-        group.MapPost("/{connectionId}/disable", (HttpContext context, string connectionId, GitHubConnectionStore store, CancellationToken ct) =>
-            SetStatusAsync(context, store, connectionId, GitHubConnectionStatus.Disabled, ct));
+        group.MapPost("/{connectionId}/disable", (HttpContext context, string connectionId, GitHubConnectionStore store, GitHubIssueSynchronizationService synchronization, CancellationToken ct) =>
+            SetStatusAsync(context, store, synchronization, connectionId, GitHubConnectionStatus.Disabled, ct));
 
         group.MapPatch("/{connectionId}", async (HttpContext context, string connectionId, GitHubConnectionUpdateRequest? request, GitHubConnectionStore store, CancellationToken ct) =>
         {
@@ -84,15 +84,21 @@ public static class GitHubConnectionRoutes
         return app;
     }
 
-    private static async Task<IResult> SetStatusAsync(HttpContext context, GitHubConnectionStore store, string connectionId, string status, CancellationToken ct)
+    private static async Task<IResult> SetStatusAsync(HttpContext context, GitHubConnectionStore store, GitHubIssueSynchronizationService synchronization, string connectionId, string status, CancellationToken ct)
     {
         var project = context.GetResolvedProject();
         try
         {
+            var before = await store.GetAsync(project.Id, connectionId, ct);
             var updated = await store.SetStatusAsync(project.Id, connectionId, status, ct);
-            return updated is null
-                ? ApiResults.NotFound($"GitHub connection '{connectionId}' not found")
-                : ApiResults.Ok(ToDto(updated));
+            if (updated is null)
+                return ApiResults.NotFound($"GitHub connection '{connectionId}' not found");
+            if (status == GitHubConnectionStatus.Active
+                && before?.Status == GitHubConnectionStatus.Disabled)
+            {
+                await synchronization.ReprojectConnectionAsync(updated, ct);
+            }
+            return ApiResults.Ok(ToDto(updated));
         }
         catch (Exception ex)
         {

@@ -1,9 +1,15 @@
 import { useEffect, useMemo, useState, type ComponentType } from 'react'
 import { Link, useParams, useNavigate } from 'react-router-dom'
-import { ArrowLeftIcon, ExternalLinkIcon, GitBranchIcon, PencilIcon } from 'lucide-react'
+import { ArrowLeftIcon, ExternalLinkIcon, GitBranchIcon, PencilIcon, RefreshCwIcon } from 'lucide-react'
 import { IssueStatus, partitionIssueBody, useLiveTask } from '../../../entities/issue'
 import { issueAttachmentContentPath } from '../../../entities/issue'
-import { useIssue, useIssueDiff, useIssueCommits, useWorkflowTimeline } from '../../../entities/issue'
+import {
+  useIssue,
+  useIssueDiff,
+  useIssueCommits,
+  useWorkflowTimeline,
+  useSyncGitHubIssue,
+} from '../../../entities/issue'
 import { useAgentStatus } from '../../../entities/agent'
 import { useWorkflowRunSessions } from '../../../entities/coder-session'
 import { EditIssueDialog } from '../../../features/edit-issue'
@@ -129,6 +135,7 @@ export function IssueDetailPage({ components, mutationDependencies }: IssueDetai
   )
 
   const { data: issue, isLoading, isError, error, refetch } = useIssue(issueNumber)
+  const syncGitHubMutation = useSyncGitHubIssue()
   const isCompositeParent = !!issue && (issue.children?.length ?? 0) > 0
   const workflowDataEnabled = !!issue && !isCompositeParent
   const { data: agentStatus } = useAgentStatus()
@@ -381,6 +388,21 @@ export function IssueDetailPage({ components, mutationDependencies }: IssueDetai
                       {issue.github.repository}#{issue.github.number}
                       <ExternalLinkIcon className="size-2.5" />
                     </a>
+                  )}
+                  {issue.github?.syncStatus === 'error' && (
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={() => syncGitHubMutation.mutate(issue.number)}
+                      disabled={syncGitHubMutation.isPending}
+                      aria-label="Synchronize GitHub mirror"
+                      title={issue.github.lastError?.detail ?? 'Synchronize GitHub mirror'}
+                      data-testid="github-sync-button"
+                    >
+                      <RefreshCwIcon className={`size-3.5 ${syncGitHubMutation.isPending ? 'animate-spin' : ''}`} />
+                      Sync mirror
+                    </Button>
                   )}
                   {isCompositeParent && (
                     <span

@@ -11,6 +11,8 @@ public sealed class GitHubIssueLink
     public string? MirrorMarker { get; set; }
     public bool MirrorCreateAttempted { get; set; }
     public bool CommandRequested { get; set; }
+    public string SyncStatus { get; set; } = GitHubSyncStatus.Healthy;
+    public GitHubSyncError? LastError { get; set; }
     public IReadOnlySet<string> PostedComments { get; set; } = new HashSet<string>(StringComparer.Ordinal);
 
     /// <summary>
@@ -28,6 +30,18 @@ public sealed class GitHubIssueLink
 
     public bool HasPostedComment(string key) => PostedComments.Contains(key);
 }
+
+public static class GitHubSyncStatus
+{
+    public const string Healthy = "healthy";
+    public const string Error = "error";
+}
+
+public sealed record GitHubSyncError(
+    string Operation,
+    string Code,
+    string Detail,
+    DateTimeOffset OccurredAt);
 
 /// <summary>
 /// Comment kinds the comment port may post; the posted set lives on
@@ -67,6 +81,10 @@ public static class GitHubCommentKinds
     public const string ClosedCompleted = "writeback-closed-completed";
     public const string ClosedNotPlanned = "writeback-closed-not-planned";
     public const string ReopenedDoneFollowUp = "writeback-reopened-done-follow-up";
+    public const string Create = "create";
+    public const string Content = "content";
+    public const string Reconcile = "reconcile";
+    public const string Link = "link";
 }
 
 /// <summary>

@@ -37,9 +37,11 @@ public sealed class RecordingGitHubCommentPort : IGitHubCommentPort, IGitHubIssu
     public Exception? FindFailure { get; set; }
     public Exception? ConfirmationFailure { get; set; }
     public bool PostThenThrow { get; set; }
+    public Exception? UpdateFailure { get; set; }
     public bool CreateThenThrow { get; set; }
     public int NextGithubIssueNumber { get; set; } = 900;
     public List<IssueClose> Closes { get; } = [];
+    public Dictionary<int, GitHubIssueSnapshot> Issues { get; } = new();
     public string? DeliveryPrUrl { get; set; }
 
     public Task<int> CreateIssueAsync(
@@ -73,6 +75,16 @@ public sealed class RecordingGitHubCommentPort : IGitHubCommentPort, IGitHubIssu
         return Task.FromResult<int?>(null);
     }
 
+    public Task<GitHubIssueSnapshot?> GetIssueAsync(
+        GitHubConnection connection,
+        int githubIssueNumber,
+        CancellationToken ct = default)
+    {
+        return Task.FromResult<GitHubIssueSnapshot?>(Issues.TryGetValue(githubIssueNumber, out var issue)
+            ? issue
+            : new GitHubIssueSnapshot(githubIssueNumber, "Existing GitHub issue", "Existing body"));
+    }
+
     public Task UpdateIssueAsync(
         GitHubConnection connection,
         int githubIssueNumber,
@@ -81,7 +93,10 @@ public sealed class RecordingGitHubCommentPort : IGitHubCommentPort, IGitHubIssu
         string marker,
         CancellationToken ct = default)
     {
-        UpdatedIssues.Add(new UpdatedIssue(connection.Id, githubIssueNumber, title, GitHubMirrorMarker.Append(body, marker), marker));
+        if (UpdateFailure is not null) throw UpdateFailure;
+        var mirroredBody = GitHubMirrorMarker.Append(body, marker);
+        UpdatedIssues.Add(new UpdatedIssue(connection.Id, githubIssueNumber, title, mirroredBody, marker));
+        Issues[githubIssueNumber] = new GitHubIssueSnapshot(githubIssueNumber, title, mirroredBody);
         return Task.CompletedTask;
     }
 

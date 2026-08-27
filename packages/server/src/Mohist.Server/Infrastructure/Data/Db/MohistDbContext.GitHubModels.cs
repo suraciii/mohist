@@ -73,6 +73,15 @@ public partial class MohistDbContext
                     .IsRequired();
                 entity.Property(e => e.CommandRequested)
                     .IsRequired();
+                entity.Property(e => e.SyncStatus)
+                    .HasMaxLength(32)
+                    .IsRequired();
+                entity.Property(e => e.LastErrorOperation)
+                    .HasMaxLength(64);
+                entity.Property(e => e.LastErrorCode)
+                    .HasMaxLength(64);
+                entity.Property(e => e.LastErrorDetail);
+                entity.Property(e => e.LastErrorAt);
                 entity.HasIndex(e => new { e.ProjectId, e.RepositoryName, e.GithubIssueNumber })
                     .IsUnique()
                     .HasFilter("\"GithubIssueNumber\" > 0");

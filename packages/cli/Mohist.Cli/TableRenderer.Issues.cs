@@ -72,7 +72,15 @@ internal sealed partial class TableRenderer
         {
             _out.WriteLine($"github:   {FormatGitHub(github)}");
             _out.WriteLine($"githubUrl: {StringOf(github, "url")}");
-            _out.WriteLine($"githubSync: {StringOf(github, "syncStatus")}");
+            var githubSync = StringOf(github, "syncStatus");
+            _out.WriteLine($"githubSync: {githubSync}");
+            if (string.Equals(githubSync, "error", StringComparison.Ordinal))
+            {
+                var lastError = github["lastError"] as JsonObject;
+                if (lastError is not null)
+                    _out.WriteLine($"githubError: {StringOf(lastError, "detail")}");
+                _out.WriteLine($"githubNext: mo issue github sync {number}");
+            }
         }
         _out.WriteLine($"project:  {project}");
         _out.WriteLine($"updated:  {Truncate(updatedAt, TitleSoftCap)}");
