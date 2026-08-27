@@ -1,0 +1,48 @@
+{
+  "project": "mohist-local",
+  "description": "Repair volatile Runtime Event Queue receipt evidence ownership so each bounded waiter interval starts clean and late retryable deliveries cannot recreate ownerless evidence.",
+  "tasks": [
+    {
+      "id": "T-001",
+      "title": "Make receipt evidence lifecycle interval-owned",
+      "spec": "specs/receipt-evidence-interval/spec.md",
+      "description": "Adjust only the existing Runtime Event Queue bounded receipt-wait seam so evidence is created, updated, and discarded with an active bounded waiter interval. Preserve queue records, delivery leases, retry scheduling, FIFO ordering, matching identity, and definitive refusal semantics.",
+      "acceptanceCriteria": [
+        "A new bounded waiter starts with zero attempts, zero derived retries, and no prior latest reason after the previous interval ended.",
+        "Coalesced bounded waiters share one active interval and its outcome.",
+        "A late retryable delivery with no active bounded waiter retains the queue record and existing retry path without creating evidence.",
+        "A late retryable verdict from an old delivery cannot update a later interval's evidence.",
+        "Timeout evidence still contains the interval's record id, elapsed time, budget, attempts, retries, and latest normalized reason.",
+        "Matching late settlement, permanent refusal, delivery leases, retry timing, FIFO ordering, and unrelated records retain current behavior.",
+        "No persistence, Outbox, journal, snapshot, receipt store, second queue, Server/API/schema, or runtime protocol change is introduced."
+      ],
+      "priority": 1,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Interval-owned volatile receipt evidence in the existing Runtime Event Queue.",
+      "dependsOn": [],
+      "passes": false,
+      "notes": "Future implementation task. Spec artifact validation for this change is complete in the design-first PR."
+    },
+    {
+      "id": "T-002",
+      "title": "Add deterministic late-delivery interval regression coverage",
+      "spec": "specs/receipt-evidence-interval/spec.md",
+      "description": "Extend the existing Runner queue tests with fake-time deferred deliveries for timeout-to-late-retry-to-new-waiter, cancellation-to-late-retry-to-matching-settlement, coalesced waiters, and retained unrelated records.",
+      "acceptanceCriteria": [
+        "Tests use Vitest fake timers and the injected queue clock; they contain no sleeps, polling assertions, or wall-clock deadline assertions.",
+        "Timeout-to-late-retry-to-new-waiter proves old attempts and reasons are absent from the later timeout evidence.",
+        "Cancellation-to-late-retry-to-matching-settlement proves only the waiter ends while normal record acknowledgement remains possible.",
+        "Existing matching, permanent refusal, retry, lease, FIFO, capacity, coalescing, and unbounded-wait regressions remain green.",
+        "Focused Runner queue/action tests, `npm run docs:check`, `npm run archtest`, `npm run test:fast`, and `npm run verify` pass."
+      ],
+      "priority": 2,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Deterministic evidence-interval regression coverage and verification output.",
+      "dependsOn": ["T-001"],
+      "passes": false,
+      "notes": "Future implementation task. Spec artifact validation for this change is complete in the design-first PR."
+    }
+  ]
+}

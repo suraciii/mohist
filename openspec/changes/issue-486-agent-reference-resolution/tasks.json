@@ -1,0 +1,46 @@
+{
+  "project": "mohist-local",
+  "description": "Resolve routing-rule --agent name or id through the existing project-scoped CLI Agent resolver before create/edit mutations.",
+  "tasks": [
+    {
+      "id": "T-001",
+      "title": "Resolve routing rule Agent references before mutation",
+      "spec": "specs/routing-rule-agent-reference/spec.md",
+      "description": "Reuse AgentCommands.ResolveAgentAsync after project resolution for routing-rule create and supplied edit --agent values, then send the unchanged stable agentId field to the existing endpoints.",
+      "acceptanceCriteria": [
+        "Create resolves both Agent name and Agent id through the existing resolver and sends the same stable agentId for both forms.",
+        "Edit resolves a supplied Agent name or Agent id through the same resolver and sends the stable agentId; edit without --agent preserves omission semantics.",
+        "Unknown supplied input fails with non-zero status, identifies the exact original input, and sends no routing mutation request.",
+        "Resolution occurs in the selected project and preserves existing resolver matching, transport, and error behavior.",
+        "No backend, routing DSL, rule-reference, endpoint, schema, or routing-engine changes are introduced."
+      ],
+      "priority": 1,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "CLI routing-rule Agent reference resolution using the existing resolver seam.",
+      "dependsOn": [],
+      "passes": false,
+      "notes": "Future implementation task. Spec artifact validation for this change is complete in the design-first PR."
+    },
+    {
+      "id": "T-002",
+      "title": "Add deterministic routing reference equivalence tests",
+      "spec": "specs/routing-rule-agent-reference/spec.md",
+      "description": "Add fake-HTTP CLI coverage for create/edit name and id equivalence, project-scoped lookup order, unknown-input diagnostics, no mutation on failure, and edit omission.",
+      "acceptanceCriteria": [
+        "Create-by-name and create-by-id tests assert identical stable agentId request values and lookup-before-POST ordering.",
+        "Edit-by-name and edit-by-id tests assert identical stable agentId request values and lookup-before-PATCH ordering.",
+        "Unknown create/edit tests assert the original input in diagnostics and no mutation request.",
+        "Edit without --agent asserts no Agent lookup solely for the omitted option and preserves existing request behavior.",
+        "Focused CLI routing tests, CLI typecheck/test coverage, `npm run docs:check`, `npm run archtest`, `npm run test:fast`, and `npm run verify` pass."
+      ],
+      "priority": 2,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Deterministic CLI routing-rule Agent reference regression coverage and verification output.",
+      "dependsOn": ["T-001"],
+      "passes": false,
+      "notes": "Future implementation task. Spec artifact validation for this change is complete in the design-first PR."
+    }
+  ]
+}

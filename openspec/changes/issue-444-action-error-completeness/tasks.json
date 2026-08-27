@@ -1,0 +1,50 @@
+{
+  "project": "mohist-local",
+  "description": "Complete manifest authority for concrete Action-owned errors, preserve standard normalization, and distinguish OpenCode Action codes from established runtime diagnostic spelling.",
+  "tasks": [
+    {
+      "id": "T-001",
+      "title": "Complete OpenCode Action manifest and boundary mapping",
+      "spec": "specs/action-error-completeness/spec.md",
+      "description": "Declare every statically evidenced non-reserved omission in the OpenCode and Pi Agent Action manifests, map runtime/resolver source categories to canonical Action codes at the boundary, and leave generic manifest/result validation unchanged.",
+      "acceptanceCriteria": [
+        "The OpenCode manifest declares execution-unavailable, skill-not-found, provider-quota-exhausted, and unsupported-execution-configuration in lowercase kebab-case.",
+        "The Pi manifest declares skill-not-found, provider-quota-exhausted, incompatible-runtime, and interrupted in lowercase kebab-case.",
+        "Neither manifest declares source underscore categories such as execution_unavailable, skill_not_found, or unsupported_execution_configuration, or invalid-input/unexpected-error/timeout.",
+        "The established unsupported_execution_configuration runtime diagnostic and recorded category remains unchanged, while the Action boundary maps it to unsupported-execution-configuration.",
+        "The Skill resolver source category skill_not_found maps to skill-not-found for both Agent Actions; provider-quota-exhausted, incompatible-runtime, and interrupted retain canonical spelling.",
+        "Every newly declared code passes through generic normalization and recovery unchanged.",
+        "A truly undeclared ActionResult code remains normalized to unexpected-error.",
+        "No validator exception, reserved-code weakening, global Action error enum, or unrelated Action behavior change is introduced."
+      ],
+      "priority": 1,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Manifest-complete OpenCode Action error contract and explicit runtime-to-Action code mapping.",
+      "dependsOn": [],
+      "passes": false,
+      "notes": "Future implementation task. Spec artifact validation for this change is complete in the design-first PR."
+    },
+    {
+      "id": "T-002",
+      "title": "Align OpenCode docs and audit Pi emissions",
+      "spec": "specs/action-error-completeness/spec.md",
+      "description": "Make docs/actions/opencode.md and docs/actions/pi.md mirror their manifest-owned errors and separately explain source diagnostic spelling. Record the evidenced OpenCode/Pi emission inventory and focused tests.",
+      "acceptanceCriteria": [
+        "docs/actions/opencode.md lists execution-unavailable, skill-not-found, provider-quota-exhausted, and unsupported-execution-configuration as Action-owned codes.",
+        "docs/actions/pi.md lists skill-not-found, provider-quota-exhausted, incompatible-runtime, and interrupted as Action-owned codes.",
+        "The OpenCode page distinguishes the ActionResult/recovery kebab code from the runtime diagnostic/recorded underscore category.",
+        "Both pages distinguish skill_not_found source resolver vocabulary from skill-not-found ActionResult vocabulary where exposed.",
+        "The implementation evidence records the producer path to canonical Action code mapping for each current omission and excludes unrelated Actions.",
+        "Focused Runner manifest/normalization/OpenCode/Pi audit tests, `npm run docs:check`, `npm run archtest`, `npm run test:fast`, and `npm run verify` pass."
+      ],
+      "priority": 2,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Documentation alignment, evidence-bounded Pi audit, and deterministic verification output.",
+      "dependsOn": ["T-001"],
+      "passes": false,
+      "notes": "Future implementation task. Spec artifact validation for this change is complete in the design-first PR."
+    }
+  ]
+}
