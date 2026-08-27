@@ -125,11 +125,11 @@ public sealed class RoutingRuleStore : IScopedService
     {
         var existing = await GetAsync(projectId, id, ct);
         if (existing is null || existing.Status == RoutingRuleStatus.Deleted) return null;
-        var newName = fields.Contains(nameof(name)) ? Normalize(name) : existing.Name;
-        var newMatch = fields.Contains(nameof(match)) ? Normalize(match) : existing.Match;
-        var newAgentId = fields.Contains(nameof(agentId)) ? Normalize(agentId) : existing.AgentId;
-        var newPrompt = fields.Contains(nameof(responsePrompt)) ? Normalize(responsePrompt) : existing.ResponsePrompt;
-        var newContinue = fields.Contains("continue") ? continueValue : existing.Continue;
+        var newName = fields.Contains(RoutingRulePatchFields.Name) ? Normalize(name) : existing.Name;
+        var newMatch = fields.Contains(RoutingRulePatchFields.Match) ? Normalize(match) : existing.Match;
+        var newAgentId = fields.Contains(RoutingRulePatchFields.AgentId) ? Normalize(agentId) : existing.AgentId;
+        var newPrompt = fields.Contains(RoutingRulePatchFields.ResponsePrompt) ? Normalize(responsePrompt) : existing.ResponsePrompt;
+        var newContinue = fields.Contains(RoutingRulePatchFields.Continue) ? continueValue : existing.Continue;
         await ValidateAsync(projectId, newName, newMatch, newAgentId, newPrompt, id, ct);
 
         await using var db = await _dbFactory.CreateDbContextAsync(ct);
@@ -296,6 +296,18 @@ public sealed class RoutingRuleStore : IScopedService
     private static bool IsIdempotencyConflict(DbUpdateException ex) => ex.InnerException is SqliteException sqlite
         && sqlite.SqliteErrorCode == 19
         && sqlite.Message.Contains("IdempotencyKey", StringComparison.OrdinalIgnoreCase);
+}
+
+// Single source of the PATCH presence vocabulary: the request binder marks a
+// field present under these JSON names and this store applies exactly those
+// marks. Member-name or casing variants are deliberately not presence tokens.
+internal static class RoutingRulePatchFields
+{
+    public const string Name = "name";
+    public const string Match = "match";
+    public const string AgentId = "agentId";
+    public const string ResponsePrompt = "responsePrompt";
+    public const string Continue = "continue";
 }
 
 public sealed class RoutingRuleValidationException(string message, string code) : Exception(message)

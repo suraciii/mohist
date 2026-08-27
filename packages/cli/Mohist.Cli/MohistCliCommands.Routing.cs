@@ -54,6 +54,8 @@ internal static class RoutingCommands
             var resolution = await api.ResolveProject(ctx.GetValue(project));
             if (resolution.Exit != 0) return resolution.Exit;
             var resolved = resolution.ProjectId;
+            var agentRef = await AgentCommands.ResolveAgentAsync(api, resolved, ctx.GetValue(agent)!);
+            if (agentRef is null) return 1;
             var (mode, exit) = api.ResolveOutputMode(ctx.GetValue(output));
             if (exit != 0) return exit;
             return await api.PrintPostWithOutputAsync(
@@ -62,7 +64,7 @@ internal static class RoutingCommands
                 {
                     name = ctx.GetValue(name),
                     match = ctx.GetValue(match),
-                    agentId = ctx.GetValue(agent),
+                    agentId = agentRef.Id,
                     responsePrompt = ctx.GetValue(prompt),
                     @continue = ctx.GetValue(cont),
                 }, mode, nameof(MohistCliApi.TableShape.RoutingRule));
@@ -119,15 +121,21 @@ internal static class RoutingCommands
             var resolution = await api.ResolveProject(ctx.GetValue(project));
             if (resolution.Exit != 0) return resolution.Exit;
             var resolved = resolution.ProjectId;
-            var (mode, exit) = api.ResolveOutputMode(ctx.GetValue(output)); if (exit != 0) return exit;
-            return await api.PrintPatchWithOutputAsync(RulePath(resolved, ctx.GetValue(target) ?? ""), new
+            string? agentId = null;
+            if (ctx.GetResult(agent) is not null)
             {
-                name = ctx.GetValue(name),
-                match = ctx.GetValue(match),
-                agentId = ctx.GetValue(agent),
-                responsePrompt = ctx.GetValue(prompt),
-                @continue = ctx.GetValue(cont),
-            }, mode, nameof(MohistCliApi.TableShape.RoutingRule));
+                var agentRef = await AgentCommands.ResolveAgentAsync(api, resolved, ctx.GetValue(agent)!);
+                if (agentRef is null) return 1;
+                agentId = agentRef.Id;
+            }
+            var (mode, exit) = api.ResolveOutputMode(ctx.GetValue(output)); if (exit != 0) return exit;
+            var body = new JsonObject();
+            if (ctx.GetResult(name) is not null) body["name"] = ctx.GetValue(name);
+            if (ctx.GetResult(match) is not null) body["match"] = ctx.GetValue(match);
+            if (agentId is not null) body["agentId"] = agentId;
+            if (ctx.GetResult(prompt) is not null) body["responsePrompt"] = ctx.GetValue(prompt);
+            if (ctx.GetResult(cont) is not null) body["continue"] = ctx.GetValue(cont);
+            return await api.PrintPatchWithOutputAsync(RulePath(resolved, ctx.GetValue(target) ?? ""), body, mode, nameof(MohistCliApi.TableShape.RoutingRule));
         });
         return command;
     }
