@@ -1,9 +1,14 @@
 # `mohist/agent` Action
 
+> **Status: legacy implementation.** This Action resolves an Agent definition without creating an
+> AgentJob. The target model ([`../../design/agent-execution.md`](../../design/agent-execution.md))
+> makes every Workflow task launch a real Mohist Agent through the canonical AgentJob boundary;
+> `mohist/agent` will be removed when the Profile Agent-binding DSL is designed.
+
 `mohist/agent` lets a Workflow task execute with a predefined Mohist Agent from
 the Project. The task receives a snapshot of that Agent's instructions and
-execution configuration, then runs through the same mechanism as an Inline
-Agent. It supports tasks only, not Workflow checks.
+execution configuration, then runs through the same execution-backend mechanism.
+It supports tasks only, not Workflow checks.
 
 This is an **Agent definition reference, not a work delegation**. It does not
 start an AgentJob. TaskRun still decides whether the work succeeds or fails,

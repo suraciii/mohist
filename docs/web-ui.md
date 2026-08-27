@@ -92,7 +92,7 @@ them. Layout does not change their meaning or the available operations.
 ### Available Buttons
 
 The buttons follow the authoritative state. Backlog offers Start. Running
-shows a running indicator and Force Stop, because an Inline Agent is executing
+shows a running indicator and Force Stop, because a Mohist Agent is executing
 and can be stopped forcibly. Awaiting Approval offers Approve and Reject.
 Blocked offers Retry, Resume, Rerun, and Stop, and the page emphasizes the
 recommended action available now. Done offers Close and Archive.

@@ -1,9 +1,11 @@
 # `mohist/pi` Action
 
+> **Status: legacy implementation.** See [Action Contracts](README.md) for the target model that
+> replaces Workflow-owned Actions with Agent launches.
+
 `mohist/pi` delegates one unit of work to Pi and reports the execution facts.
 It is a peer of [`mohist/opencode`](opencode.md): a Workflow selects one backend
-with `uses`; neither wraps the other or shares its input. When a Workflow uses
-it directly, it forms an Inline Agent. The Action itself is not an Agent and
+with `uses`; neither wraps the other or shares its input. The Action itself is not an Agent and
 does not find or start a Mohist Agent.
 
 See [Agents and AgentSessions](../agent-sessions.md) for the overall

@@ -242,7 +242,7 @@ instructions/config/skills. Detailed contracts: [`agent-api.md`](agent-api.md) a
 [`slack.md`](slack.md).
 
 External skills read projects, call `mo` CLI, and may write ordinary files. They never touch the Mohist
-database. Runner may adapt OpenCode or another runtime for Workflow TaskRun and AgentJob work.
+database. Runner may adapt OpenCode or another runtime for AgentJob work.
 Agent/Session ownership invariants: [`agent-execution.md`](agent-execution.md).
 
 ## Constraints

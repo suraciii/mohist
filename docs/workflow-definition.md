@@ -1,5 +1,10 @@
 # Workflow Definition Reference
 
+> **Status: legacy implementation.** The `uses`/`with` Action syntax below is the current
+> implementation. The target model ([`../design/agent-execution.md`](../design/agent-execution.md))
+> replaces executable-task Actions with Mohist Agent names; the Profile DSL migration is a pending
+> design decision.
+
 A Workflow Profile Definition is a YAML document. It declares the Stages that
 an Issue follows, the initial Tasks, Checks, approval points, and the rules that
 produce follow-up Tasks. This document is the complete syntax reference for a

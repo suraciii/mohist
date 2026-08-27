@@ -31,9 +31,13 @@ similarly encode a least-common-denominator lifecycle that neither OpenCode nor 
 actually has. Both options move provider uncertainty into callers.
 
 Mohist therefore removes ACP with no fallback and implements `mohist/opencode`
-directly through an independent `OpenCodeRuntime` deep module. Workflow Actions,
-AgentJob execution, and Session commands are the stable boundaries. The module
+directly through an independent `OpenCodeRuntime` deep module. AgentJob execution
+and Session commands are the stable boundaries. The module
 does not define a `mohist/agent` Action or redesign the Agent product.
+
+> **Status note**: Mentions of TaskRun and Workflow Actions below describe the current
+> implementation. In the target model ([`../agent-execution.md`](../agent-execution.md)) every
+> execution is AgentJob-owned; this adapter's Action contract becomes the Agent-to-Runner contract.
 
 Pi uses a separate in-process SDK and file-backed binding, while OpenCode uses a
 shared local Server, a reconnectable event stream, and directory Instances. Those
@@ -233,13 +237,13 @@ current model / variant on the existing physical Session before executing the
 Prompt.
 
 A worktree-cleanup Follow-up is subsequent execution of the original task. The
-executor invokes the original resolved Action again and preserves WorkflowRun,
+executor invokes the original job's Action again and preserves WorkflowRun,
 Session name, Work ID, and working directory so it reaches the same Runtime and
 physical Session. It must not hard-code cleanup to another Action. Cleanup is
 not Reset and does not replace a binding for housekeeping.
 
-At most one work-originated Prompt may run in a logical AgentSession at once,
-whether TaskRun or AgentJob owns the work. Different logical Sessions may run
+At most one work-originated Prompt may run in a logical AgentSession at once;
+the owning AgentJob serializes it. Different logical Sessions may run
 concurrently. A user Follow-up is a Session command and may be accepted while
 work is executing.
 

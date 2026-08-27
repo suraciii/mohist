@@ -57,7 +57,7 @@ advancement.
 - A child Issue without an explicit priority inherits the parent's priority.
 - You or an External Agent acting for you decide how to split the work. Mohist
   does not split it automatically.
-- When a child enters Plan, Mohist gives the Inline Agent the parent title and
+- When a child enters Plan, Mohist gives the Plan stage's Mohist Agent the parent title and
   body as background context. You do not need to copy shared context into each
   child body.
 
