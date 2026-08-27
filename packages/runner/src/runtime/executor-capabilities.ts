@@ -8,7 +8,11 @@ import {
 import { errorMessage } from '../core/errors.js'
 import { renderWithSkippedFields } from '../core/template.js'
 import type { ServerConnection } from '../server/connection.js'
-import type { AgentSessionRuntimeEventQueue } from '../server/runtime-event-queue.js'
+import {
+  InputReceiptWaitCancelledError,
+  InputReceiptWaitTimeoutError,
+  type AgentSessionRuntimeEventQueue,
+} from '../server/runtime-event-queue.js'
 import type { OpenCodeRuntime, RuntimeResult, RuntimeTurnResult } from './opencode/index.js'
 import type { PiRuntime } from './pi/index.js'
 import type { TaskLogger } from './task-log.js'
@@ -452,17 +456,25 @@ function buildAgentTurnCapability(
         self.agentSessionRuntimeEventQueue,
         self.runtimeEventRecordId,
         cleanupAttempt,
+        deadlineMs,
+        signal,
       )
 
       if (reporter && selectedBinding.runtimeSessionId) {
         try {
           await reporter.awaitInput(prompt, selectedBinding.runtimeSessionId)
         } catch (error) {
+          const receiptWaitError =
+            error instanceof InputReceiptWaitTimeoutError || error instanceof InputReceiptWaitCancelledError
+              ? error
+              : null
           return await workflowActionFailure(
             selectedBinding,
             reporter,
-            'execution-unavailable',
-            `failed to durably enqueue the Workflow AgentSession input: ${errorMessage(error)}`,
+            receiptWaitError ? 'session-reporting-failed' : 'execution-unavailable',
+            receiptWaitError
+              ? receiptWaitError.message
+              : `failed to enqueue the Workflow AgentSession input: ${errorMessage(error)}`,
           )
         }
       }
@@ -561,7 +573,10 @@ async function runPiAgentTurn(
     cleanupAttempt,
     with: request.session ? { session: request.session } : undefined,
     preparedPrompt: composePiPrompt(request.prompt, work.parentIssueContext),
-    preparedOptions: request.options,
+    preparedOptions: {
+      ...request.options,
+      timeoutMs: request.deadlineMs ?? undefined,
+    },
   })
 }
 
@@ -682,6 +697,8 @@ function createWorkflowReporter(
   outbox: AgentSessionRuntimeEventQueue | null,
   runtimeEventRecordId: () => string,
   cleanupAttempt?: number,
+  inputReceiptBudgetMs?: number,
+  signal?: AbortSignal,
 ): WorkflowAgentSessionReporter | null {
   if (!projectId) return null
   if (!outbox) return null
@@ -695,6 +712,8 @@ function createWorkflowReporter(
     workMetadata: { ...workMetadata, runnerId, agentSessionId },
     runtime: 'opencode',
     randomId: runtimeEventRecordId,
+    inputReceiptBudgetMs,
+    signal,
     cleanupAttempt,
   })
 }

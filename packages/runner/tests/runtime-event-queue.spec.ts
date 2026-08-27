@@ -400,4 +400,102 @@ describe('in-memory runtime event queue', () => {
     expect(queue.snapshot().map((record) => record.id)).toEqual(['first-input'])
     await queue.stop()
   })
+
+  it('bounds retryable input waiting, preserves records, and settles a late receipt without reviving the waiter', async () => {
+    vi.useFakeTimers()
+    let recover = false
+    const queue = createAgentSessionRuntimeEventQueue({
+      retryDelayMs: 50,
+      deliveryTimeoutMs: 25,
+      deliveryBatchSize: 1,
+      deliver: {
+        async send(record) {
+          if (record.id === 'unrelated') return []
+          if (!recover) throw new RuntimeEventDeliveryError('runtime event', 503, 'temporarily-unavailable', 'busy')
+          return [{ type: 'session.input' }]
+        },
+      },
+    })
+
+    await queue.enqueueBeforeExecution(input('bounded-input', 'A'))
+    await queue.enqueueBeforeExecution(input('unrelated', 'B'))
+    const initialRecords = queue.snapshot()
+    const controller = new AbortController()
+    const receipt = queue.awaitInputReceipt!('bounded-input', { budgetMs: 200, signal: controller.signal })
+    const receiptError = receipt.then(
+      () => null,
+      (error: unknown) => error as Error,
+    )
+    await queue.kick()
+    await vi.advanceTimersByTimeAsync(200)
+
+    const error = await receiptError
+    if (!(error instanceof Error)) throw new Error('expected bounded receipt timeout')
+    expect(error).toMatchObject({
+      classification: 'receipt-budget-exhausted',
+      recordId: 'bounded-input',
+      budgetMs: 200,
+      attempts: expect.any(Number),
+      retries: expect.any(Number),
+      lastReason: expect.stringContaining('temporarily-unavailable'),
+    })
+    expect(error.message).toMatch(
+      /session\.input acceptance exceeded its budget.*elapsed 200ms of 200ms.*delivery attempts: [2-9]; retries: [1-8]/,
+    )
+    expect(queue.snapshot()).toEqual(initialRecords)
+
+    recover = true
+    await vi.advanceTimersByTimeAsync(50)
+    expect(queue.snapshot().map((record) => record.id)).toEqual(['unrelated'])
+    await queue.stop()
+  })
+
+  it('cancels only the bounded input waiter while the volatile queue keeps retrying', async () => {
+    vi.useFakeTimers()
+    const queue = createAgentSessionRuntimeEventQueue({
+      retryDelayMs: 100,
+      deliver: {
+        async send() {
+          return []
+        },
+      },
+    })
+    await queue.enqueueBeforeExecution(input('cancelled-input', 'A'))
+    const controller = new AbortController()
+    const receipt = queue.awaitInputReceipt!('cancelled-input', { budgetMs: 1_000, signal: controller.signal })
+    await queue.kick()
+
+    controller.abort(new Error('task stopped'))
+    await expect(receipt).rejects.toMatchObject({
+      classification: 'cancelled',
+      recordId: 'cancelled-input',
+    })
+    expect(queue.snapshot().map((record) => record.id)).toEqual(['cancelled-input'])
+    await queue.stop()
+  })
+
+  it('recovers a retryable input before its budget and resolves exactly one waiter', async () => {
+    vi.useFakeTimers()
+    let attempts = 0
+    const queue = createAgentSessionRuntimeEventQueue({
+      retryDelayMs: 100,
+      deliver: {
+        async send() {
+          attempts += 1
+          return attempts === 1 ? [] : [{ type: 'session.input' }]
+        },
+      },
+    })
+    await queue.enqueueBeforeExecution(input('recovered-input', 'A'))
+    const controller = new AbortController()
+    const first = queue.awaitInputReceipt!('recovered-input', { budgetMs: 1_000, signal: controller.signal })
+    const second = queue.awaitInputReceipt!('recovered-input', { budgetMs: 1_000, signal: controller.signal })
+    await queue.kick()
+    await vi.advanceTimersByTimeAsync(100)
+
+    await expect(Promise.all([first, second])).resolves.toEqual([{ type: 'session.input' }, { type: 'session.input' }])
+    expect(attempts).toBe(2)
+    expect(queue.snapshot()).toEqual([])
+    await queue.stop()
+  })
 })
