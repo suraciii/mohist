@@ -110,11 +110,21 @@ public class RunnerFailureSpecs : WorkflowGrainSpecs
         var runnerId = $"runner-expired-index-{Guid.NewGuid():N}";
         var runner = Grains.GetGrain<IRunnerGrain>(runnerId);
         var registry = Grains.GetGrain<IRunnerRegistryGrain>(RunnerRegistryKeys.Global);
-        await runner.RegisterAsync(new RunnerInfo(runnerId, ["spec/*"], "expired-host", "test-project"));
+        var storage = _fixture.Cluster.GetSiloServiceProvider(null).GetRequiredService<IGrainStorage>();
+        await storage.WriteStateAsync("runner", runner.GetGrainId(), new GrainState<RunnerState>
+        {
+            State = new RunnerState
+            {
+                LastKnownInfo = new RunnerInfo(runnerId, ["spec/*"], "expired-host", "test-project"),
+                CurrentProcessGeneration = TestRunnerGenerationExtensions.ProcessGeneration,
+                PresenceLeaseExpiresAt = _fixture.TimeProvider.GetUtcNow().AddMinutes(-1),
+            },
+        });
 
-        _fixture.TimeProvider.Advance(TimeSpan.FromMinutes(2).Add(TimeSpan.FromSeconds(1)));
-        // Reinsert the stale index row after the low-latency timeout path may
-        // have removed it; eligibility must still consult Runner authority.
+        // Activate the expired authority first; it converges offline and does
+        // not arm the low-latency timer. Then model lagging volatile cleanup by
+        // reinserting the stale index row.
+        Assert.False(await runner.IsPresenceLeaseActiveAsync());
         await registry.RegisterAsync(new RunnerInfo(runnerId, ["spec/*"], "expired-host", "test-project"));
 
         Assert.Contains(await registry.ListAllAsync(), item => item.RunnerId == runnerId);

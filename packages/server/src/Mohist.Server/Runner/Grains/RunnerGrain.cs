@@ -213,7 +213,8 @@ public partial class RunnerGrain : Grain, IRunnerGrain, IRemindable
             {
                 await ReconcileClosingGenerationAsync();
                 if (!string.IsNullOrWhiteSpace(state.ClosingProcessGeneration))
-                    return;
+                    throw new InvalidOperationException(
+                        $"Runner {RunnerId} closeout for process generation {closingGeneration} is still pending.");
             }
 
             state.CurrentProcessGeneration = processGeneration;

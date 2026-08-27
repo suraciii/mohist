@@ -207,5 +207,4 @@ public partial class RunnerGrain
             && value > _timeProvider.GetUtcNow());
     }
 
-    
 }
