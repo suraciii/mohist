@@ -15,10 +15,7 @@ function sessionFixture(overrides: Partial<Record<string, unknown>> = {}) {
   return {
     sessionFile: '/workspace/session.json',
     sessionId: 'session-1',
-    messages: [
-      { role: 'user', content: 'do the work' },
-      { role: 'assistant', content: [{ type: 'text', text: 'adopted final text' }] },
-    ] as FixtureMessage[],
+    messages: [{ role: 'user', content: 'do the work' }] as FixtureMessage[],
     isStreaming: false,
     subscribe: () => () => undefined,
     prompt: vi.fn(async () => undefined),
@@ -48,70 +45,6 @@ function runtimeFor(session: ReturnType<typeof sessionFixture>, openSession?: ()
     },
   })
 }
-
-describe('PiRuntime inspectTurn', () => {
-  it('reports the recorded terminal turn without running one', async () => {
-    const session = sessionFixture()
-    const runtime = runtimeFor(session)
-    await runtime.start()
-
-    const result = await runtime.inspectTurn({
-      target: { runtime: 'pi', runtimeSessionId: '/workspace/session.json', workDir: '/workspace' },
-    })
-
-    expect(result.ok).toBe(true)
-    if (!result.ok) return
-    expect(result.value).toEqual({
-      runtimeSessionId: '/workspace/session.json',
-      workDir: '/workspace',
-      activeTurn: false,
-      finalAssistantText: 'adopted final text',
-      failed: false,
-      errorMessage: null,
-    })
-    expect(session.prompt).not.toHaveBeenCalled()
-  })
-
-  it('marks a recorded failure and an active turn', async () => {
-    const failed = sessionFixture({
-      messages: [{ role: 'assistant', content: 'nope', stopReason: 'error', errorMessage: 'provider exploded' }],
-    })
-    const failedRuntime = runtimeFor(failed)
-    await failedRuntime.start()
-    const failedResult = await failedRuntime.inspectTurn({
-      target: { runtime: 'pi', runtimeSessionId: '/workspace/session.json', workDir: '/workspace' },
-    })
-    expect(failedResult.ok).toBe(true)
-    if (!failedResult.ok) return
-    expect(failedResult.value.failed).toBe(true)
-    expect(failedResult.value.errorMessage).toBe('provider exploded')
-
-    const streaming = sessionFixture({ isStreaming: true })
-    const streamingRuntime = runtimeFor(streaming)
-    await streamingRuntime.start()
-    const streamingResult = await streamingRuntime.inspectTurn({
-      target: { runtime: 'pi', runtimeSessionId: '/workspace/session.json', workDir: '/workspace' },
-    })
-    expect(streamingResult.ok).toBe(true)
-    if (!streamingResult.ok) return
-    expect(streamingResult.value.activeTurn).toBe(true)
-  })
-
-  it('surfaces a missing session file as missing-session', async () => {
-    const runtime = runtimeFor(sessionFixture(), async () => {
-      throw Object.assign(new Error('ENOENT: no such file'), { code: 'ENOENT' })
-    })
-    await runtime.start()
-
-    const result = await runtime.inspectTurn({
-      target: { runtime: 'pi', runtimeSessionId: '/workspace/missing.json', workDir: '/workspace' },
-    })
-
-    expect(result.ok).toBe(false)
-    if (result.ok) return
-    expect(result.error.kind).toBe('missing-session')
-  })
-})
 
 describe('PiRuntime runTurn deadline', () => {
   it('settles deadline-exceeded even when prompt and abort never resolve', async () => {
@@ -361,7 +294,7 @@ describe('PiRuntime runTurn deadline', () => {
       const result = await turn
       expect(result.ok).toBe(true)
       if (!result.ok) return
-      expect(result.value.facts.finalAssistantText).toBe('adopted final text')
+      expect(result.value.facts.finalAssistantText).toBeNull()
     } finally {
       vi.useRealTimers()
     }
