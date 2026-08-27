@@ -4,6 +4,14 @@ import type { ActionHost } from './host.js'
 import { errorMessage } from './github-pr-parse.js'
 import { isIssueFieldSource, type IssueFields } from './issue-fields.js'
 
+const GITHUB_CLOSING_REFERENCE =
+  /\b(?:close(?:s|d)?|fix(?:es|ed)?|resolve(?:s|d)?)\s+(?:https?:\/\/github\.com\/[^\s/]+\/[^\s/]+\/issues\/\d+|(?:[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+)?#\d+)\b/gi
+
+/** Remove issue references that GitHub would interpret as automatic closing instructions. */
+export function omitGitHubClosingReferences(body: string): string {
+  return body.replace(GITHUB_CLOSING_REFERENCE, '')
+}
+
 export async function resolveCreatePrText(
   inputs: JsonObject,
   host: ActionHost,
@@ -31,6 +39,26 @@ export async function resolveCreatePrText(
     kind: 'ok',
     title: titleLiteral ?? resolveIssueFieldValue(requiredIssueFields(issueFields), titleSource),
     body: bodyLiteral ?? resolveIssueFieldValue(requiredIssueFields(issueFields), bodySource),
+  }
+}
+
+export async function resolveMergeSubject(
+  inputs: JsonObject,
+  host: ActionHost,
+): Promise<{ kind: 'ok'; subject: string } | { kind: 'failure'; message: string }> {
+  const literal = stringInput(inputs, 'subject')
+  if (literal !== undefined) return { kind: 'ok', subject: literal }
+
+  const source = stringInput(inputs, 'subjectFrom') ?? 'issue.title'
+  const sourceError = validateIssueFieldSource('subjectFrom', source)
+  if (sourceError) return { kind: 'failure', message: sourceError }
+
+  if (!host.issue) return { kind: 'failure', message: 'Issue field resolution requires the issue-fields capability' }
+  try {
+    const issueFields = await host.issue.fields()
+    return { kind: 'ok', subject: resolveIssueFieldValue(issueFields, source) }
+  } catch (error) {
+    return { kind: 'failure', message: errorMessage(error) }
   }
 }
 

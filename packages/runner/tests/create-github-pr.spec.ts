@@ -1,29 +1,41 @@
-import { describe, expect, it as vitestIt } from "vitest"
-import type { JsonObject } from "../src/core/types.js"
-import type { ActionTestContext as ActionContext } from "./support/action-test-context.js"
-import { callAction } from "./support/call-action.js"
-import { createDefaultRegistry } from "../src/actions/registry.js"
-import type { RunnerCommandRunner, RunnerFileSystem, RunnerGitRunner } from "../src/system/filesystem.js"
-import { withTestRunnerResources } from "./support/test-resources.js"
-import { MemoryFileSystem } from "./support/memory-filesystem.js"
-import { NETWORK_COMMAND_TIMEOUT_MS } from "../src/actions/git.js"
-import {
-  createGitHubPrAction,
-} from "../src/actions/github-pr.js"
+import { describe, expect, it as vitestIt } from 'vitest'
+import type { JsonObject } from '../src/core/types.js'
+import type { ActionTestContext as ActionContext } from './support/action-test-context.js'
+import { callAction } from './support/call-action.js'
+import { createDefaultRegistry } from '../src/actions/registry.js'
+import type { RunnerCommandRunner, RunnerFileSystem, RunnerGitRunner } from '../src/system/filesystem.js'
+import { withTestRunnerResources } from './support/test-resources.js'
+import { MemoryFileSystem } from './support/memory-filesystem.js'
+import { NETWORK_COMMAND_TIMEOUT_MS } from '../src/actions/git.js'
+import { createGitHubPrAction } from '../src/actions/github-pr.js'
+import { omitGitHubClosingReferences } from '../src/actions/github-pr-issue-fields.js'
 
-type CommandResult = { exitCode: number; stdout: string; stderr: string; status?: "timeout"; timeoutMs?: number }
-type GitResponse = { success: boolean; stdout: string; stderr: string; exitCode: number; combinedOutput: string; status?: "timeout"; timeoutMs?: number }
+type CommandResult = { exitCode: number; stdout: string; stderr: string; status?: 'timeout'; timeoutMs?: number }
+type GitResponse = {
+  success: boolean
+  stdout: string
+  stderr: string
+  exitCode: number
+  combinedOutput: string
+  status?: 'timeout'
+  timeoutMs?: number
+}
 type GitCall = { command: string; timeoutMs: number | undefined }
 type GhCall = { command: string; timeoutMs: number | undefined }
 
-const WORKSPACE_PATH = "/workspace"
-const PROJECT_PATH = "/project"
+const WORKSPACE_PATH = '/workspace'
+const PROJECT_PATH = '/project'
 
 type CreateGitHubPrTestResources = {
   fileSystem: RunnerFileSystem
   githubPrGitRunner?: RunnerGitRunner
   githubPrGhRunner?: RunnerCommandRunner
-  issueFieldCommandRunner?: (command: string, args: string[], cwd: string, signal: AbortSignal) => Promise<CommandResult>
+  issueFieldCommandRunner?: (
+    command: string,
+    args: string[],
+    cwd: string,
+    signal: AbortSignal,
+  ) => Promise<CommandResult>
   gitCalls: GitCall[]
   ghCalls: GhCall[]
 }
@@ -36,47 +48,53 @@ function it(name: string, body: (resources: CreateGitHubPrTestResources) => Prom
 }
 
 function ok(stdout: string): GitResponse {
-  return { success: true, stdout, stderr: "", exitCode: 0, combinedOutput: stdout.trim() }
+  return { success: true, stdout, stderr: '', exitCode: 0, combinedOutput: stdout.trim() }
 }
 
-function fail(stderr: string, stdout = ""): GitResponse {
-  return { success: false, stdout, stderr, exitCode: 1, combinedOutput: [stdout.trim(), stderr.trim()].filter(Boolean).join("\n") }
+function fail(stderr: string, stdout = ''): GitResponse {
+  return {
+    success: false,
+    stdout,
+    stderr,
+    exitCode: 1,
+    combinedOutput: [stdout.trim(), stderr.trim()].filter(Boolean).join('\n'),
+  }
 }
 
-function ghOk(stdout: string, stderr = ""): CommandResult {
+function ghOk(stdout: string, stderr = ''): CommandResult {
   return { exitCode: 0, stdout, stderr }
 }
 
-function ghFail(stderr: string, stdout = "", exitCode = 1): CommandResult {
+function ghFail(stderr: string, stdout = '', exitCode = 1): CommandResult {
   return { exitCode, stdout, stderr }
 }
 
 function context(withOverrides: JsonObject = {}, variables: JsonObject = {}): ActionContext {
   return {
-    workflowRunId: "wr-gh-pr-1",
-    workId: "open-draft-pr",
-    workType: "task",
-    stage: "plan",
-    title: "Open or reuse GitHub draft PR",
-    uses: "mohist/create-github-pr",
-     with: {
-       repositoryUrl: "https://github.com/example/repo.git",
-       source: "mohist/run-wr-gh-pr-1",
-       target: "master",
-       ...withOverrides,
-     },
+    workflowRunId: 'wr-gh-pr-1',
+    workId: 'open-draft-pr',
+    workType: 'task',
+    stage: 'plan',
+    title: 'Open or reuse GitHub draft PR',
+    uses: 'mohist/create-github-pr',
+    with: {
+      repositoryUrl: 'https://github.com/example/repo.git',
+      source: 'mohist/run-wr-gh-pr-1',
+      target: 'master',
+      ...withOverrides,
+    },
     variables: {
-      project: { id: "proj_1", path: WORKSPACE_PATH },
-      issue: { title: "Use GitHub PR workflow", body: "Open, review, and merge a GitHub PR.", number: 248 },
+      project: { id: 'proj_1', path: WORKSPACE_PATH },
+      issue: { title: 'Use GitHub PR workflow', body: 'Open, review, and merge a GitHub PR.', number: 248 },
       repository: {
-        gitUrl: "https://example.com/repo.git",
-        baseBranch: "master",
+        gitUrl: 'https://example.com/repo.git',
+        baseBranch: 'master',
       },
-      workspace: { path: WORKSPACE_PATH, branch: "mohist/run-wr-gh-pr-1" },
+      workspace: { path: WORKSPACE_PATH, branch: 'mohist/run-wr-gh-pr-1' },
       ...variables,
     },
     workDir: WORKSPACE_PATH,
-    projectId: "proj_1",
+    projectId: 'proj_1',
     issueNumber: 248,
     signal: new AbortController().signal,
     writeVars: async () => {},
@@ -86,277 +104,395 @@ function context(withOverrides: JsonObject = {}, variables: JsonObject = {}): Ac
 function withLog(ctx: ActionContext, writes: Array<{ source: string; text: string }>): ActionContext {
   return {
     ...ctx,
-    log: { write: (source: string, text: string) => { writes.push({ source, text }); return writes.length } } as never,
+    log: {
+      write: (source: string, text: string) => {
+        writes.push({ source, text })
+        return writes.length
+      },
+    } as never,
   }
 }
 
-function installGit(resources: CreateGitHubPrTestResources, respond: (workDir: string, args: string[], signal: AbortSignal) => GitResponse | Promise<GitResponse>) {
+function installGit(
+  resources: CreateGitHubPrTestResources,
+  respond: (workDir: string, args: string[], signal: AbortSignal) => GitResponse | Promise<GitResponse>,
+) {
   resources.githubPrGitRunner = async (workDir, args, signal, options) => {
-    const recorded: GitCall = { command: args.join(" "), timeoutMs: options?.timeoutMs }
+    const recorded: GitCall = { command: args.join(' '), timeoutMs: options?.timeoutMs }
     resources.gitCalls.push(recorded)
     return await respond(workDir, args, signal)
   }
 }
 
-function installGh(resources: CreateGitHubPrTestResources, respond: (command: string, args: string[], cwd: string) => CommandResult | Promise<CommandResult>) {
+function installGh(
+  resources: CreateGitHubPrTestResources,
+  respond: (command: string, args: string[], cwd: string) => CommandResult | Promise<CommandResult>,
+) {
   resources.githubPrGhRunner = async (cmd, args, cwd, _signal, _env, options) => {
-    const visibleArgs = args.at(-2) === "--repo" ? args.slice(0, -2) : args
-    const recorded: GhCall = { command: [cmd, ...visibleArgs].join(" "), timeoutMs: options?.timeoutMs }
+    const visibleArgs = args.at(-2) === '--repo' ? args.slice(0, -2) : args
+    const recorded: GhCall = { command: [cmd, ...visibleArgs].join(' '), timeoutMs: options?.timeoutMs }
     resources.ghCalls.push(recorded)
     return await respond(cmd, visibleArgs, cwd)
   }
 }
 
-function installMoIssueShow(resources: CreateGitHubPrTestResources, title = "Use GitHub PR workflow", body = "Open, review, and merge a GitHub PR.") {
+function installMoIssueShow(
+  resources: CreateGitHubPrTestResources,
+  title = 'Use GitHub PR workflow',
+  body = 'Open, review, and merge a GitHub PR.',
+) {
   const calls: string[] = []
   resources.issueFieldCommandRunner = async (cmd, args) => {
-    calls.push([cmd, ...args].join(" "))
+    calls.push([cmd, ...args].join(' '))
     return {
       exitCode: 0,
       stdout: JSON.stringify({ success: true, data: { title, body } }),
-      stderr: "",
+      stderr: '',
     }
   }
   return calls
 }
 
-describe("mohist/create-github-pr registry", () => {
-  it("registers create-github-pr and exposes it under the new id only", () => {
+describe('mohist/create-github-pr registry', () => {
+  it('registers create-github-pr and exposes it under the new id only', () => {
     const registry = createDefaultRegistry()
-    const resolved = registry.resolve("mohist/create-github-pr")
-    expect(resolved.kind).toBe("definition")
-    if (resolved.kind === "definition") {
-      expect(resolved.definition.manifest.name).toBe("mohist/create-github-pr")
-      expect(resolved.definition.manifest.inputs["repositoryUrl"]).toMatchObject({ types: ["string"], required: true })
-      expect(resolved.definition.manifest.inputs["source"]).toMatchObject({ types: ["string"], required: true })
-      expect(resolved.definition.manifest.inputs["target"]).toMatchObject({ types: ["string"], required: true })
-      expect(resolved.definition.manifest.inputs["remote"]).toBeUndefined()
+    const resolved = registry.resolve('mohist/create-github-pr')
+    expect(resolved.kind).toBe('definition')
+    if (resolved.kind === 'definition') {
+      expect(resolved.definition.manifest.name).toBe('mohist/create-github-pr')
+      expect(resolved.definition.manifest.inputs['repositoryUrl']).toMatchObject({ types: ['string'], required: true })
+      expect(resolved.definition.manifest.inputs['source']).toMatchObject({ types: ['string'], required: true })
+      expect(resolved.definition.manifest.inputs['target']).toMatchObject({ types: ['string'], required: true })
+      expect(resolved.definition.manifest.inputs['remote']).toBeUndefined()
     }
-    expect(registry.resolve("mohist/create-pull-request").kind).toBe("unknown")
-    expect(registry.resolve("mohist/publish-via-pr").kind).toBe("unknown")
+    expect(registry.resolve('mohist/create-pull-request').kind).toBe('unknown')
+    expect(registry.resolve('mohist/publish-via-pr').kind).toBe('unknown')
   })
 })
 
-describe("mohist/create-github-pr action", () => {
-  it("opens a draft PR from an already-published workflow branch", async (resources) => {
+describe('mohist/create-github-pr action', () => {
+  it('opens a draft PR from an already-published workflow branch', async (resources) => {
     const gitCalls: string[] = []
     const ghCalls: string[] = []
     const moCalls = installMoIssueShow(resources)
 
     installGit(resources, (_workDir, args) => {
-      const cmd = args.join(" ")
+      const cmd = args.join(' ')
       gitCalls.push(cmd)
       switch (cmd) {
-        case "fetch origin master":
-          return ok("From https://example.com/repo.git\n")
-        case "rev-parse origin/master":
-          return ok("base-sha-1\n")
-        case "push --force-with-lease origin mohist/run-wr-gh-pr-1":
-          return ok("To https://example.com/repo.git\n")
+        case 'fetch origin master':
+          return ok('From https://example.com/repo.git\n')
+        case 'rev-parse origin/master':
+          return ok('base-sha-1\n')
+        case 'push --force-with-lease origin mohist/run-wr-gh-pr-1':
+          return ok('To https://example.com/repo.git\n')
         default:
           return fail(`unexpected git call: ${cmd}`)
       }
     })
 
     installGh(resources, (cmd, args) => {
-      const full = [cmd, ...args].join(" ")
+      const full = [cmd, ...args].join(' ')
       ghCalls.push(full)
       switch (full) {
-        case "gh --version":
-          return ghOk("gh version 2.55.0\n")
-        case "gh auth status":
-          return ghOk("authenticated\n")
-        case "gh pr list --head mohist/run-wr-gh-pr-1 --base master --state open --json number,url,isDraft":
-          return ghOk("[]\n")
-        case "gh pr create --head mohist/run-wr-gh-pr-1 --base master --title Use GitHub PR workflow --body Open, review, and merge a GitHub PR. --draft":
-          return ghOk("https://github.com/example/repo/pull/42\n")
+        case 'gh --version':
+          return ghOk('gh version 2.55.0\n')
+        case 'gh auth status':
+          return ghOk('authenticated\n')
+        case 'gh pr list --head mohist/run-wr-gh-pr-1 --base master --state open --json number,url,isDraft':
+          return ghOk('[]\n')
+        case 'gh pr create --head mohist/run-wr-gh-pr-1 --base master --title Use GitHub PR workflow --body Open, review, and merge a GitHub PR. --draft':
+          return ghOk('https://github.com/example/repo/pull/42\n')
         default:
           return ghFail(`unexpected gh call: ${full}`)
       }
     })
 
-    const result = await callAction(createGitHubPrAction, context({
-      source: "mohist/run-wr-gh-pr-1",
-      target: "master",
-      remote: "origin",
-      titleFrom: "issue.title",
-      bodyFrom: "issue.body",
-    }))
+    const result = await callAction(
+      createGitHubPrAction,
+      context({
+        source: 'mohist/run-wr-gh-pr-1',
+        target: 'master',
+        remote: 'origin',
+        titleFrom: 'issue.title',
+        bodyFrom: 'issue.body',
+      }),
+    )
     const output = result.output as Record<string, unknown>
 
     expect(result.error).toBeUndefined()
     expect(gitCalls).toEqual([])
     expect(ghCalls).toEqual([
-      "gh --version",
-      "gh auth status",
-      "gh pr list --head mohist/run-wr-gh-pr-1 --base master --state open --json number,url,isDraft",
-      "gh pr create --head mohist/run-wr-gh-pr-1 --base master --title Use GitHub PR workflow --body Open, review, and merge a GitHub PR. --draft",
+      'gh --version',
+      'gh auth status',
+      'gh pr list --head mohist/run-wr-gh-pr-1 --base master --state open --json number,url,isDraft',
+      'gh pr create --head mohist/run-wr-gh-pr-1 --base master --title Use GitHub PR workflow --body Open, review, and merge a GitHub PR. --draft',
     ])
-    expect(moCalls).toEqual([
-      "mo issue view 248 --project proj_1 --json title,body",
-    ])
+    expect(moCalls).toEqual(['mo issue view 248 --project proj_1 --json title,body'])
     expect(output).toMatchObject({
-      kind: "create-github-pr",
-      status: "completed",
-      branch: "mohist/run-wr-gh-pr-1",
+      kind: 'create-github-pr',
+      status: 'completed',
+      branch: 'mohist/run-wr-gh-pr-1',
       prNumber: 42,
-      prUrl: "https://github.com/example/repo/pull/42",
-      operation: "created",
+      prUrl: 'https://github.com/example/repo/pull/42',
+      operation: 'created',
       draft: true,
-      output: "https://github.com/example/repo/pull/42",
+      output: 'https://github.com/example/repo/pull/42',
     })
   })
 
-  it("uses the explicitly declared repository despite different Variables", async (resources) => {
-    const prArguments: string[][] = []
-    installGit(resources, (_workDir, args) => {
-      if (args.join(" ") === "fetch origin master") return ok("")
-      if (args.join(" ") === "rev-parse origin/master") return ok("base-sha\n")
-      if (args.join(" ") === "push --force-with-lease origin mohist/run-wr-gh-pr-1") return ok("")
-      return fail(`unexpected git call: ${args.join(" ")}`)
-    })
-    installGh(resources, (_cmd, args) => {
-      if (args[0] === "--version" || args.join(" ") === "auth status") return ghOk("ok\n")
-      if (args[0] === "pr") prArguments.push(args)
-      if (args.join(" ").startsWith("pr list ")) return ghOk("[]\n")
-      if (args.join(" ").startsWith("pr create ")) return ghOk("https://github.com/acme/repo/pull/42\n")
-      return ghFail(`unexpected gh call: ${args.join(" ")}`)
+  it('omits GitHub closing references from the PR body', async (resources) => {
+    let createArgs: string[] | undefined
+    installGh(resources, (cmd, args) => {
+      const full = [cmd, ...args].join(' ')
+      if (full === 'gh --version' || full === 'gh auth status') return ghOk('ok\n')
+      if (args.join(' ').startsWith('pr list ')) return ghOk('[]\n')
+      if (args[0] === 'pr' && args[1] === 'create') {
+        createArgs = args
+        return ghOk('https://github.com/example/repo/pull/42\n')
+      }
+      return ghFail(`unexpected gh call: ${full}`)
     })
 
-    const result = await callAction(createGitHubPrAction, context({ repositoryUrl: "https://github.com/acme/repo.git", source: "mohist/run-wr-gh-pr-1", target: "master", title: "Issue title", body: "Issue body" }, { repository: { gitUrl: "https://example.com/other.git", baseBranch: "other" } }))
+    const result = await callAction(
+      createGitHubPrAction,
+      context({
+        title: 'Issue title',
+        body: 'Fixes #248\n\nCloses acme/widgets#12\n\nResolves https://github.com/acme/widgets/issues/13',
+      }),
+    )
+
+    expect(result.error).toBeUndefined()
+    const body = createArgs?.[createArgs.indexOf('--body') + 1]
+    expect(body).toBeDefined()
+    expect(body).not.toMatch(/\b(?:close[sd]?|fix(?:es|ed)?|resolve[sd]?)\s+(?:#|[A-Za-z0-9_.-]+\/)/i)
+    expect(body).not.toContain('https://github.com/acme/widgets/issues/13')
+  })
+
+  it('sanitizes every GitHub closing keyword on both create and edit paths', async (resources) => {
+    const keywords = ['close', 'closes', 'closed', 'fix', 'fixes', 'fixed', 'resolve', 'resolves', 'resolved']
+    const sourceBody = keywords
+      .flatMap((keyword, index) => [
+        `${keyword} #${index + 1}`,
+        `${keyword} acme/widgets#${index + 100}`,
+        `${keyword} https://github.com/acme/widgets/issues/${index + 200}`,
+      ])
+      .join('\n')
+    let listCalls = 0
+    let createdBody: string | undefined
+    let editedBody: string | undefined
+    installGh(resources, (cmd, args) => {
+      if (cmd === 'gh' && args[0] === '--version') return ghOk('ok\n')
+      if (cmd === 'gh' && args.join(' ') === 'auth status') return ghOk('ok\n')
+      if (cmd === 'gh' && args[0] === 'pr' && args[1] === 'list') {
+        listCalls += 1
+        return listCalls === 1
+          ? ghOk('[]\n')
+          : ghOk(JSON.stringify([{ number: 42, url: 'https://github.com/acme/repo/pull/42', isDraft: true }]))
+      }
+      if (cmd === 'gh' && args[0] === 'pr' && args[1] === 'create') {
+        createdBody = args[args.indexOf('--body') + 1]
+        return ghOk('https://github.com/acme/repo/pull/42\n')
+      }
+      if (cmd === 'gh' && args[0] === 'pr' && args[1] === 'edit') {
+        editedBody = args[args.indexOf('--body') + 1]
+        return ghOk('ok\n')
+      }
+      return ghFail(`unexpected gh call: ${[cmd, ...args].join(' ')}`)
+    })
+
+    const input = context({ title: 'Issue title', body: sourceBody })
+    const created = await callAction(createGitHubPrAction, input)
+    const edited = await callAction(createGitHubPrAction, input)
+
+    expect(created.error).toBeUndefined()
+    expect(edited.error).toBeUndefined()
+    expect(createdBody).toBe(omitGitHubClosingReferences(sourceBody))
+    expect(editedBody).toBe(omitGitHubClosingReferences(sourceBody))
+  })
+
+  it('uses the explicitly declared repository despite different Variables', async (resources) => {
+    const prArguments: string[][] = []
+    installGit(resources, (_workDir, args) => {
+      if (args.join(' ') === 'fetch origin master') return ok('')
+      if (args.join(' ') === 'rev-parse origin/master') return ok('base-sha\n')
+      if (args.join(' ') === 'push --force-with-lease origin mohist/run-wr-gh-pr-1') return ok('')
+      return fail(`unexpected git call: ${args.join(' ')}`)
+    })
+    installGh(resources, (_cmd, args) => {
+      if (args[0] === '--version' || args.join(' ') === 'auth status') return ghOk('ok\n')
+      if (args[0] === 'pr') prArguments.push(args)
+      if (args.join(' ').startsWith('pr list ')) return ghOk('[]\n')
+      if (args.join(' ').startsWith('pr create ')) return ghOk('https://github.com/acme/repo/pull/42\n')
+      return ghFail(`unexpected gh call: ${args.join(' ')}`)
+    })
+
+    const result = await callAction(
+      createGitHubPrAction,
+      context(
+        {
+          repositoryUrl: 'https://github.com/acme/repo.git',
+          source: 'mohist/run-wr-gh-pr-1',
+          target: 'master',
+          title: 'Issue title',
+          body: 'Issue body',
+        },
+        { repository: { gitUrl: 'https://example.com/other.git', baseBranch: 'other' } },
+      ),
+    )
 
     expect(result.error).toBeUndefined()
     expect(prArguments).toHaveLength(2)
-    expect(prArguments.every((args) => args[0] === "pr")).toBe(true)
+    expect(prArguments.every((args) => args[0] === 'pr')).toBe(true)
   })
 
-  it("rejects an invalid explicit repository URL", async (resources) => {
-    const result = await callAction(createGitHubPrAction, context({ repositoryUrl: "not a Git URL", source: "mohist/run-wr-gh-pr-1", target: "master", title: "Issue title", body: "Issue body" }))
+  it('rejects an invalid explicit repository URL', async (resources) => {
+    const result = await callAction(
+      createGitHubPrAction,
+      context({
+        repositoryUrl: 'not a Git URL',
+        source: 'mohist/run-wr-gh-pr-1',
+        target: 'master',
+        title: 'Issue title',
+        body: 'Issue body',
+      }),
+    )
     expect(result.error).toBeDefined()
-    expect(result.error).toMatchObject({ code: "config-error" })
-    expect(result.error?.message).toContain("valid GitHub repository URL")
+    expect(result.error).toMatchObject({ code: 'config-error' })
+    expect(result.error?.message).toContain('valid GitHub repository URL')
   })
 
-  it("forwards gh command output to the task log sink", async (resources) => {
+  it('forwards gh command output to the task log sink', async (resources) => {
     const writes: Array<{ source: string; text: string }> = []
     installMoIssueShow(resources)
     installGit(resources, (_workDir, args) => {
-      const cmd = args.join(" ")
-      if (cmd === "fetch origin master") return ok("base fetched\n")
-      if (cmd === "rev-parse origin/master") return ok("base-sha-1\n")
-      if (cmd === "push --force-with-lease origin mohist/run-wr-gh-pr-1") return ok("pushed\n")
+      const cmd = args.join(' ')
+      if (cmd === 'fetch origin master') return ok('base fetched\n')
+      if (cmd === 'rev-parse origin/master') return ok('base-sha-1\n')
+      if (cmd === 'push --force-with-lease origin mohist/run-wr-gh-pr-1') return ok('pushed\n')
       return fail(`unexpected git call: ${cmd}`)
     })
     resources.githubPrGhRunner = async (cmd, args, cwd, _signal, _env, options) => {
-      const full = [cmd, ...args].join(" ")
+      const full = [cmd, ...args].join(' ')
       options?.onLine?.(`captured ${full}`)
-      if (full === "gh --version") return ghOk("gh version 2.0.0\n")
-      if (full === "gh auth status") return ghOk("Logged in\n")
-      if (full.startsWith("gh pr list")) return ghOk("[]\n")
-      if (full.startsWith("gh pr create")) return ghOk("https://github.com/acme/repo/pull/42\n")
+      if (full === 'gh --version') return ghOk('gh version 2.0.0\n')
+      if (full === 'gh auth status') return ghOk('Logged in\n')
+      if (full.startsWith('gh pr list')) return ghOk('[]\n')
+      if (full.startsWith('gh pr create')) return ghOk('https://github.com/acme/repo/pull/42\n')
       return ghFail(`unexpected gh call in ${cwd}: ${full}`)
     }
 
-    const result = await callAction(createGitHubPrAction, withLog(context({ target: "master" }), writes))
+    const result = await callAction(createGitHubPrAction, withLog(context({ target: 'master' }), writes))
 
     expect(result.error).toBeUndefined()
-    expect(writes.some((write) => write.source === "action:create-github-pr" && write.text.includes("gh pr create"))).toBe(true)
+    expect(
+      writes.some((write) => write.source === 'action:create-github-pr' && write.text.includes('gh pr create')),
+    ).toBe(true)
   })
 
-  it("reuses an existing open PR without mutating title/body when gh pr list returns a match", async (resources) => {
+  it('reuses an existing open PR without mutating title/body when gh pr list returns a match', async (resources) => {
     const ghCalls: string[] = []
-    installMoIssueShow(resources, "Fresh issue title", "Fresh issue body")
+    installMoIssueShow(resources, 'Fresh issue title', 'Fresh issue body')
     installGit(resources, (_workDir, args) => {
-      switch (args.join(" ")) {
-        case "fetch origin master":
-          return ok("")
-        case "rev-parse origin/master":
-          return ok("base-sha-1\n")
-        case "push --force-with-lease origin mohist/run-wr-gh-pr-1":
-          return ok("")
+      switch (args.join(' ')) {
+        case 'fetch origin master':
+          return ok('')
+        case 'rev-parse origin/master':
+          return ok('base-sha-1\n')
+        case 'push --force-with-lease origin mohist/run-wr-gh-pr-1':
+          return ok('')
         default:
-          return fail(`unexpected git call: ${args.join(" ")}`)
+          return fail(`unexpected git call: ${args.join(' ')}`)
       }
     })
     installGh(resources, (cmd, args) => {
-      const full = [cmd, ...args].join(" ")
+      const full = [cmd, ...args].join(' ')
       ghCalls.push(full)
       switch (full) {
-        case "gh --version":
-        case "gh auth status":
-          return ghOk("ok\n")
-        case "gh pr list --head mohist/run-wr-gh-pr-1 --base master --state open --json number,url,isDraft":
-          return ghOk(JSON.stringify([{ number: 7, url: "https://github.com/example/repo/pull/7", isDraft: true }]))
-        case "gh pr edit 7 --title Fresh issue title --body Fresh issue body":
-          return ghOk("")
+        case 'gh --version':
+        case 'gh auth status':
+          return ghOk('ok\n')
+        case 'gh pr list --head mohist/run-wr-gh-pr-1 --base master --state open --json number,url,isDraft':
+          return ghOk(JSON.stringify([{ number: 7, url: 'https://github.com/example/repo/pull/7', isDraft: true }]))
+        case 'gh pr edit 7 --title Fresh issue title --body Fresh issue body':
+          return ghOk('')
         default:
           return ghFail(`unexpected gh call: ${full}`)
       }
     })
 
-    const result = await callAction(createGitHubPrAction, context({
-      source: "mohist/run-wr-gh-pr-1",
-      target: "master",
-      remote: "origin",
-      titleFrom: "issue.title",
-      bodyFrom: "issue.body",
-    }))
+    const result = await callAction(
+      createGitHubPrAction,
+      context({
+        source: 'mohist/run-wr-gh-pr-1',
+        target: 'master',
+        remote: 'origin',
+        titleFrom: 'issue.title',
+        bodyFrom: 'issue.body',
+      }),
+    )
     const output = result.output as Record<string, unknown>
 
     expect(result.error).toBeUndefined()
-    expect(ghCalls).toContain("gh pr edit 7 --title Fresh issue title --body Fresh issue body")
-    expect(ghCalls.some((call) => call.startsWith("gh pr create "))).toBe(false)
+    expect(ghCalls).toContain('gh pr edit 7 --title Fresh issue title --body Fresh issue body')
+    expect(ghCalls.some((call) => call.startsWith('gh pr create '))).toBe(false)
     expect(output).toMatchObject({
-      kind: "create-github-pr",
-      status: "completed",
-      operation: "reused",
+      kind: 'create-github-pr',
+      status: 'completed',
+      operation: 'reused',
       prNumber: 7,
-      prUrl: "https://github.com/example/repo/pull/7",
+      prUrl: 'https://github.com/example/repo/pull/7',
       draft: true,
     })
   })
 
-  it("binds every GitHub invocation to the workspace path even when project.path differs", async (resources) => {
+  it('binds every GitHub invocation to the workspace path even when project.path differs', async (resources) => {
     const gitCalls: Array<{ workDir: string; command: string }> = []
     const ghCalls: Array<{ cwd: string; command: string }> = []
 
     installGit(resources, (workDir, args) => {
-      const command = args.join(" ")
+      const command = args.join(' ')
       gitCalls.push({ workDir, command })
       switch (command) {
-        case "fetch origin master":
-          return ok("")
-        case "rev-parse origin/master":
-          return ok("base-sha-1\n")
-        case "push --force-with-lease origin mohist/run-wr-gh-pr-1":
-          return ok("")
+        case 'fetch origin master':
+          return ok('')
+        case 'rev-parse origin/master':
+          return ok('base-sha-1\n')
+        case 'push --force-with-lease origin mohist/run-wr-gh-pr-1':
+          return ok('')
         default:
           return fail(`unexpected git call: ${command}`)
       }
     })
     installGh(resources, (cmd, args, cwd) => {
-      const command = [cmd, ...args].join(" ")
+      const command = [cmd, ...args].join(' ')
       ghCalls.push({ cwd, command })
       switch (command) {
-        case "gh --version":
-        case "gh auth status":
-          return ghOk("ok\n")
-        case "gh pr list --head mohist/run-wr-gh-pr-1 --base master --state open --json number,url,isDraft":
-          return ghOk("[]\n")
-        case "gh pr create --head mohist/run-wr-gh-pr-1 --base master --title Issue title --body Issue body --draft":
-          return ghOk("https://github.com/example/repo/pull/42\n")
+        case 'gh --version':
+        case 'gh auth status':
+          return ghOk('ok\n')
+        case 'gh pr list --head mohist/run-wr-gh-pr-1 --base master --state open --json number,url,isDraft':
+          return ghOk('[]\n')
+        case 'gh pr create --head mohist/run-wr-gh-pr-1 --base master --title Issue title --body Issue body --draft':
+          return ghOk('https://github.com/example/repo/pull/42\n')
         default:
           return ghFail(`unexpected gh call: ${command}`)
       }
     })
 
-    const result = await callAction(createGitHubPrAction, context({
-      source: "mohist/run-wr-gh-pr-1",
-      target: "master",
-      remote: "origin",
-      title: "Issue title",
-      body: "Issue body",
-    }, { project: { id: "proj_1", path: PROJECT_PATH } }))
+    const result = await callAction(
+      createGitHubPrAction,
+      context(
+        {
+          source: 'mohist/run-wr-gh-pr-1',
+          target: 'master',
+          remote: 'origin',
+          title: 'Issue title',
+          body: 'Issue body',
+        },
+        { project: { id: 'proj_1', path: PROJECT_PATH } },
+      ),
+    )
     const output = result.output as Record<string, unknown>
 
     expect(result.error).toBeUndefined()
@@ -365,163 +501,178 @@ describe("mohist/create-github-pr action", () => {
     expect(output.prNumber).toBe(42)
   })
 
-  it("reports unsupported issue field sources as errorCode config-error", async (resources) => {
-    installGit(resources, () => fail("git should not be called"))
+  it('reports unsupported issue field sources as errorCode config-error', async (resources) => {
+    installGit(resources, () => fail('git should not be called'))
     installGh(resources, (cmd, args) => {
-      const full = [cmd, ...args].join(" ")
+      const full = [cmd, ...args].join(' ')
       switch (full) {
-        case "gh --version":
-        case "gh auth status":
-          return ghOk("ok\n")
+        case 'gh --version':
+        case 'gh auth status':
+          return ghOk('ok\n')
         default:
           return ghFail(`unexpected gh call: ${full}`)
       }
     })
 
-    const result = await callAction(createGitHubPrAction, context({
-      titleFrom: "issue.summary",
-    }))
+    const result = await callAction(
+      createGitHubPrAction,
+      context({
+        titleFrom: 'issue.summary',
+      }),
+    )
     expect(result.error).toBeDefined()
-    expect(result.error).toMatchObject({ code: "config-error" })
+    expect(result.error).toMatchObject({ code: 'config-error' })
     expect(result.error?.message).toContain("Unsupported titleFrom source 'issue.summary'")
   })
 
-  it("does not invoke Git when GitHub creates the PR", async (resources) => {
-    installGit(resources, () => fail("create-github-pr must not invoke git"))
+  it('does not invoke Git when GitHub creates the PR', async (resources) => {
+    installGit(resources, () => fail('create-github-pr must not invoke git'))
     installGh(resources, (cmd, args) => {
-      const full = [cmd, ...args].join(" ")
-      if (full === "gh --version" || full === "gh auth status") return ghOk("ok\n")
-      if (full.startsWith("gh pr list ")) return ghOk("[]\n")
-      if (full.startsWith("gh pr create ")) return ghOk("https://github.com/example/repo/pull/42\n")
+      const full = [cmd, ...args].join(' ')
+      if (full === 'gh --version' || full === 'gh auth status') return ghOk('ok\n')
+      if (full.startsWith('gh pr list ')) return ghOk('[]\n')
+      if (full.startsWith('gh pr create ')) return ghOk('https://github.com/example/repo/pull/42\n')
       return ghFail(`unexpected gh call: ${full}`)
     })
 
-    const result = await callAction(createGitHubPrAction, context({
-      source: "mohist/run-wr-gh-pr-1",
-      target: "master",
-      remote: "origin",
-      title: "Issue title",
-      body: "Issue body",
-    }))
+    const result = await callAction(
+      createGitHubPrAction,
+      context({
+        source: 'mohist/run-wr-gh-pr-1',
+        target: 'master',
+        remote: 'origin',
+        title: 'Issue title',
+        body: 'Issue body',
+      }),
+    )
     const output = result.output as Record<string, unknown>
 
     expect(result.error).toBeUndefined()
     expect(resources.gitCalls).toEqual([])
-    expect(output.operation).toBe("created")
+    expect(output.operation).toBe('created')
   })
 
-  it("reports config-error when the gh CLI precheck fails", async (resources) => {
-    installGit(resources, () => fail("git should not be called"))
+  it('reports config-error when the gh CLI precheck fails', async (resources) => {
+    installGit(resources, () => fail('git should not be called'))
     installGh(resources, (cmd, args) => {
-      const full = [cmd, ...args].join(" ")
-      if (full === "gh --version") {
-        return ghFail("gh: command not found", "", 127)
+      const full = [cmd, ...args].join(' ')
+      if (full === 'gh --version') {
+        return ghFail('gh: command not found', '', 127)
       }
       return ghFail(`unexpected gh call: ${full}`)
     })
 
-    const result = await callAction(createGitHubPrAction, context({
-      title: "Issue title",
-      body: "Issue body",
-    }))
+    const result = await callAction(
+      createGitHubPrAction,
+      context({
+        title: 'Issue title',
+        body: 'Issue body',
+      }),
+    )
     expect(result.error).toBeDefined()
-    expect(result.error).toMatchObject({ code: "config-error" })
-    expect(result.error?.message).toContain("gh CLI is not installed")
+    expect(result.error).toMatchObject({ code: 'config-error' })
+    expect(result.error?.message).toContain('gh CLI is not installed')
   })
 
-  it("does not pass --draft when draft is explicitly false", async (resources) => {
+  it('does not pass --draft when draft is explicitly false', async (resources) => {
     const ghCalls: string[] = []
     installGit(resources, (_workDir, args) => {
-      switch (args.join(" ")) {
-        case "fetch origin master":
-          return ok("")
-        case "rev-parse origin/master":
-          return ok("base-sha-1\n")
-        case "push --force-with-lease origin mohist/run-wr-gh-pr-1":
-          return ok("")
+      switch (args.join(' ')) {
+        case 'fetch origin master':
+          return ok('')
+        case 'rev-parse origin/master':
+          return ok('base-sha-1\n')
+        case 'push --force-with-lease origin mohist/run-wr-gh-pr-1':
+          return ok('')
         default:
-          return fail(`unexpected git call: ${args.join(" ")}`)
+          return fail(`unexpected git call: ${args.join(' ')}`)
       }
     })
     installGh(resources, (cmd, args) => {
-      const full = [cmd, ...args].join(" ")
+      const full = [cmd, ...args].join(' ')
       ghCalls.push(full)
       switch (full) {
-        case "gh --version":
-        case "gh auth status":
-          return ghOk("ok\n")
-        case "gh pr list --head mohist/run-wr-gh-pr-1 --base master --state open --json number,url,isDraft":
-          return ghOk("[]\n")
-        case "gh pr create --head mohist/run-wr-gh-pr-1 --base master --title Use GitHub PR workflow --body Open, review, and merge a GitHub PR.":
-          return ghOk("https://github.com/example/repo/pull/42\n")
+        case 'gh --version':
+        case 'gh auth status':
+          return ghOk('ok\n')
+        case 'gh pr list --head mohist/run-wr-gh-pr-1 --base master --state open --json number,url,isDraft':
+          return ghOk('[]\n')
+        case 'gh pr create --head mohist/run-wr-gh-pr-1 --base master --title Use GitHub PR workflow --body Open, review, and merge a GitHub PR.':
+          return ghOk('https://github.com/example/repo/pull/42\n')
         default:
           return ghFail(`unexpected gh call: ${full}`)
       }
     })
 
-    const result = await callAction(createGitHubPrAction, context({
-      source: "mohist/run-wr-gh-pr-1",
-      target: "master",
-      remote: "origin",
-      title: "Use GitHub PR workflow",
-      body: "Open, review, and merge a GitHub PR.",
-      draft: false,
-    }))
+    const result = await callAction(
+      createGitHubPrAction,
+      context({
+        source: 'mohist/run-wr-gh-pr-1',
+        target: 'master',
+        remote: 'origin',
+        title: 'Use GitHub PR workflow',
+        body: 'Open, review, and merge a GitHub PR.',
+        draft: false,
+      }),
+    )
     const output = result.output as Record<string, unknown>
 
     expect(result.error).toBeUndefined()
-    expect(ghCalls.some((call) => call.startsWith("gh pr create ") && call.endsWith("--draft"))).toBe(false)
-    expect(ghCalls.some((call) => call.startsWith("gh pr create "))).toBe(true)
+    expect(ghCalls.some((call) => call.startsWith('gh pr create ') && call.endsWith('--draft'))).toBe(false)
+    expect(ghCalls.some((call) => call.startsWith('gh pr create '))).toBe(true)
     expect(output).toMatchObject({
       draft: false,
-      operation: "created",
+      operation: 'created',
     })
   })
 
-  it("NetworkGitHubCommands_AllReceiveTimeoutMs", async (resources) => {
+  it('NetworkGitHubCommands_AllReceiveTimeoutMs', async (resources) => {
     installMoIssueShow(resources)
     installGit(resources, (_workDir, args) => {
-      const cmd = args.join(" ")
+      const cmd = args.join(' ')
       switch (cmd) {
-        case "fetch origin master":
-          return ok("")
-        case "rev-parse origin/master":
-          return ok("base-sha-1\n")
-        case "push --force-with-lease origin mohist/run-wr-gh-pr-1":
-          return ok("")
+        case 'fetch origin master':
+          return ok('')
+        case 'rev-parse origin/master':
+          return ok('base-sha-1\n')
+        case 'push --force-with-lease origin mohist/run-wr-gh-pr-1':
+          return ok('')
         default:
           return fail(`unexpected git call: ${cmd}`)
       }
     })
     installGh(resources, (cmd, args) => {
-      const full = [cmd, ...args].join(" ")
+      const full = [cmd, ...args].join(' ')
       switch (full) {
-        case "gh --version":
-          return ghOk("gh version 2.0.0\n")
-        case "gh auth status":
-          return ghOk("Logged in\n")
-        case "gh pr list --head mohist/run-wr-gh-pr-1 --base master --state open --json number,url,isDraft":
-          return ghOk("[]\n")
-        case "gh pr create --head mohist/run-wr-gh-pr-1 --base master --title Use GitHub PR workflow --body Open, review, and merge a GitHub PR. --draft":
-          return ghOk("https://github.com/example/repo/pull/42\n")
+        case 'gh --version':
+          return ghOk('gh version 2.0.0\n')
+        case 'gh auth status':
+          return ghOk('Logged in\n')
+        case 'gh pr list --head mohist/run-wr-gh-pr-1 --base master --state open --json number,url,isDraft':
+          return ghOk('[]\n')
+        case 'gh pr create --head mohist/run-wr-gh-pr-1 --base master --title Use GitHub PR workflow --body Open, review, and merge a GitHub PR. --draft':
+          return ghOk('https://github.com/example/repo/pull/42\n')
         default:
           return ghFail(`unexpected gh call: ${full}`)
       }
     })
 
-    await callAction(createGitHubPrAction, context({
-      source: "mohist/run-wr-gh-pr-1",
-      target: "master",
-      remote: "origin",
-      titleFrom: "issue.title",
-      bodyFrom: "issue.body",
-    }))
+    await callAction(
+      createGitHubPrAction,
+      context({
+        source: 'mohist/run-wr-gh-pr-1',
+        target: 'master',
+        remote: 'origin',
+        titleFrom: 'issue.title',
+        bodyFrom: 'issue.body',
+      }),
+    )
 
     for (const command of [
-      "gh --version",
-      "gh auth status",
-      "gh pr list --head mohist/run-wr-gh-pr-1 --base master --state open --json number,url,isDraft",
-      "gh pr create --head mohist/run-wr-gh-pr-1 --base master --title Use GitHub PR workflow --body Open, review, and merge a GitHub PR. --draft",
+      'gh --version',
+      'gh auth status',
+      'gh pr list --head mohist/run-wr-gh-pr-1 --base master --state open --json number,url,isDraft',
+      'gh pr create --head mohist/run-wr-gh-pr-1 --base master --title Use GitHub PR workflow --body Open, review, and merge a GitHub PR. --draft',
     ]) {
       const call = resources.ghCalls.find((c) => c.command === command)
       expect(call?.timeoutMs, `gh call ${command} missing timeoutMs`).toBe(NETWORK_COMMAND_TIMEOUT_MS)
@@ -530,36 +681,36 @@ describe("mohist/create-github-pr action", () => {
     expect(resources.gitCalls).toEqual([])
   })
 
-  it("GhPrCreateTimeout_ClassifiesAsRetrySafeAndSurfacesDuration", async (resources) => {
+  it('GhPrCreateTimeout_ClassifiesAsRetrySafeAndSurfacesDuration', async (resources) => {
     installMoIssueShow(resources)
     installGit(resources, (_workDir, args) => {
-      const cmd = args.join(" ")
+      const cmd = args.join(' ')
       switch (cmd) {
-        case "fetch origin master":
-          return ok("")
-        case "rev-parse origin/master":
-          return ok("base-sha-1\n")
-        case "push --force-with-lease origin mohist/run-wr-gh-pr-1":
-          return ok("")
+        case 'fetch origin master':
+          return ok('')
+        case 'rev-parse origin/master':
+          return ok('base-sha-1\n')
+        case 'push --force-with-lease origin mohist/run-wr-gh-pr-1':
+          return ok('')
         default:
           return fail(`unexpected git call: ${cmd}`)
       }
     })
     installGh(resources, (cmd, args) => {
-      const full = [cmd, ...args].join(" ")
+      const full = [cmd, ...args].join(' ')
       switch (full) {
-        case "gh --version":
-          return ghOk("gh version 2.0.0\n")
-        case "gh auth status":
-          return ghOk("Logged in\n")
-        case "gh pr list --head mohist/run-wr-gh-pr-1 --base master --state open --json number,url,isDraft":
-          return ghOk("[]\n")
-        case "gh pr create --head mohist/run-wr-gh-pr-1 --base master --title Use GitHub PR workflow --body Open, review, and merge a GitHub PR. --draft":
+        case 'gh --version':
+          return ghOk('gh version 2.0.0\n')
+        case 'gh auth status':
+          return ghOk('Logged in\n')
+        case 'gh pr list --head mohist/run-wr-gh-pr-1 --base master --state open --json number,url,isDraft':
+          return ghOk('[]\n')
+        case 'gh pr create --head mohist/run-wr-gh-pr-1 --base master --title Use GitHub PR workflow --body Open, review, and merge a GitHub PR. --draft':
           return {
             exitCode: 124,
-            stdout: "",
+            stdout: '',
             stderr: `Command timed out after ${NETWORK_COMMAND_TIMEOUT_MS / 1000}s\n`,
-            status: "timeout" as const,
+            status: 'timeout' as const,
             timeoutMs: NETWORK_COMMAND_TIMEOUT_MS,
           }
         default:
@@ -567,16 +718,18 @@ describe("mohist/create-github-pr action", () => {
       }
     })
 
-    const result = await callAction(createGitHubPrAction, context({
-      source: "mohist/run-wr-gh-pr-1",
-      target: "master",
-      remote: "origin",
-      titleFrom: "issue.title",
-      bodyFrom: "issue.body",
-    }))
+    const result = await callAction(
+      createGitHubPrAction,
+      context({
+        source: 'mohist/run-wr-gh-pr-1',
+        target: 'master',
+        remote: 'origin',
+        titleFrom: 'issue.title',
+        bodyFrom: 'issue.body',
+      }),
+    )
     expect(result.error).toBeDefined()
-    expect(result.error).toMatchObject({ code: "timeout" })
-    expect(result.error?.message).toContain("timed out")
+    expect(result.error).toMatchObject({ code: 'timeout' })
+    expect(result.error?.message).toContain('timed out')
   })
-
 })

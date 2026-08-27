@@ -31,6 +31,25 @@ public sealed class GitHubIssueEventPayloadTests
         Assert.Equal("Fix the bug", payload.Title);
         Assert.Equal("Steps to reproduce", payload.Body);
         Assert.Equal(new[] { "mohist", "p1" }, payload.Labels);
+        Assert.Null(payload.StateReason);
+    }
+
+    [Theory]
+    [InlineData("completed")]
+    [InlineData("not_planned")]
+    public void Parse_ReadsGitHubStateReason(string reason)
+    {
+        var payload = GitHubIssueEventPayload.Parse(Payload($$"""
+            {
+              "issue": {
+                "number": 42,
+                "title": "Closed issue",
+                "state_reason": "{{reason}}"
+              }
+            }
+            """));
+
+        Assert.Equal(reason, payload!.StateReason);
     }
 
     [Fact]

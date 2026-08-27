@@ -22,4 +22,7 @@ public static class GitHubWriteBackComments
         string.IsNullOrWhiteSpace(reason)
             ? $"Mohist 已取消该需求（Mohist issue #{issueNumber}），GitHub issue 已关闭。"
             : $"Mohist 已取消该需求（Mohist issue #{issueNumber}），原因：{reason}，GitHub issue 已关闭。";
+
+    public static string ReopenedDoneFollowUp(int issueNumber) =>
+        $"Mohist 已完成该需求（Mohist issue #{issueNumber}）；重新打开不会恢复已交付的工作。如需继续，请创建一个 follow-up issue。";
 }

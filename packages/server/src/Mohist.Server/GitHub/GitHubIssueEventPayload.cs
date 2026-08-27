@@ -13,7 +13,8 @@ public sealed record GitHubIssueEventPayload(
     string Title,
     string? Body,
     IReadOnlyList<string> Labels,
-    string? EditorLogin = null)
+    string? EditorLogin = null,
+    string? StateReason = null)
 {
     public static GitHubIssueEventPayload? Parse(JsonElement? data)
     {
@@ -51,6 +52,10 @@ public sealed record GitHubIssueEventPayload(
             && login.ValueKind == JsonValueKind.String
             ? login.GetString()
             : null;
-        return new GitHubIssueEventPayload(issueNumber, title, body, labels, editorLogin);
+        var stateReason = issue.TryGetProperty("state_reason", out var stateReasonValue)
+            && stateReasonValue.ValueKind == JsonValueKind.String
+            ? stateReasonValue.GetString()
+            : null;
+        return new GitHubIssueEventPayload(issueNumber, title, body, labels, editorLogin, stateReason);
     }
 }

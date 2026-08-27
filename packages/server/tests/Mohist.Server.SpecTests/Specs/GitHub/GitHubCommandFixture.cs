@@ -5,7 +5,9 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Time.Testing;
 using Mohist.Server.GitHub.Domain;
+using Mohist.Server.GitHub.Infrastructure;
 using Mohist.Server.GitHub.Ports;
+using Mohist.Server.Infrastructure.Events;
 using Mohist.Server.SpecTests.Support;
 using Mohist.Server.TestSupport;
 using Xunit;
@@ -207,6 +209,15 @@ public sealed class GitHubCommandFixture : IAsyncLifetime
 
             builder.ConfigureTestServices(services =>
             {
+                // These specs advance a fake clock and invoke the delivery
+                // pass explicitly. Do not let the autonomous hosted loop
+                // consume a due row before the assertion does.
+                services.Configure<GitHubCommandReplyDeliveryOptions>(options =>
+                    options.HostedWorkerEnabled = false);
+                // The same fake-clock rule applies to event ingress: PumpAsync
+                // is the explicit dispatch boundary for these lifecycle specs.
+                services.Configure<EventDispatcherOptions>(options =>
+                    options.WorkerCount = 0);
                 services.RemoveAll<IGitHubCommentPort>();
                 services.RemoveAll<IGitHubIssuePort>();
                 services.AddSingleton<IGitHubCommentPort>(Comments);
