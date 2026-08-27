@@ -58,19 +58,7 @@ public class UpdateRunnerSpecs
         {
             var path = request.RequestUri!.AbsolutePath;
             if (request.Method == HttpMethod.Post && path == "/api/runner/runner-1/update-interrupt")
-            {
-                return Task.FromResult(RecordingHttpHandler.Json(new
-                {
-                    success = true,
-                    data = new
-                    {
-                        runnerId = "runner-1",
-                        status = "draining",
-                        activeWorkIds = Array.Empty<string>(),
-                        activeWorkCount = 0,
-                    },
-                }));
-            }
+                return Task.FromResult(InterruptResponse(request, "runner-1", []));
 
             if (request.Method == HttpMethod.Get && path == "/api/runner/identity"
                 && Interlocked.Increment(ref identityRequests) == 1)
@@ -110,25 +98,7 @@ public class UpdateRunnerSpecs
             }
 
             if (request.Method == HttpMethod.Post && path == "/api/runner/runner-1/update-interrupt")
-            {
-                return Task.FromResult(RecordingHttpHandler.Json(new
-                {
-                    success = true,
-                    data = new
-                    {
-                        runnerId = "runner-1",
-                        status = "draining",
-                        activeWorkIds = new[] { "job-1", "job-2" },
-                        activeWorkCount = 2,
-                        operationId = "runner-update:runner",
-                        affectedWorks = new[]
-                        {
-                            new { ownerKind = "agent-job", ownerId = "job-1", workId = "job-1", taskRunId = (string?)null, workType = "agent-job" },
-                            new { ownerKind = "agent-job", ownerId = "job-2", workId = "job-2", taskRunId = (string?)null, workType = "agent-job" },
-                        },
-                    },
-                }));
-            }
+                return Task.FromResult(InterruptResponse(request, "runner-1", ["job-1", "job-2"]));
 
             return Task.FromResult(new HttpResponseMessage(HttpStatusCode.NotFound));
         });
@@ -252,6 +222,69 @@ public class UpdateRunnerSpecs
         Assert.DoesNotContain(nameof(FakeServiceInstaller.RestartRunnerAsync), installer.Calls);
         Assert.Contains("status=unconfirmed", f.Stderr.ToString());
         Assert.Contains("runner service was not restarted", f.Stderr.ToString());
+    }
+
+    [Theory]
+    [InlineData("missing-id")]
+    [InlineData("null-id")]
+    [InlineData("empty-id")]
+    [InlineData("whitespace-id")]
+    [InlineData("mismatched-id")]
+    [InlineData("superseded")]
+    [InlineData("already-cancelled")]
+    public async Task UpdateRunner_WhenInterruptIdentityIsNotExact_DoesNotRestart(string responseCase)
+    {
+        var f = new UpdateTestFactory();
+        var installer = new FakeServiceInstaller { RunnerInstalled = true };
+        var hash = "abcdef1234567890abcdef1234567890abcdef12";
+        f.Commands.SetResultFor("git", args => args.SequenceEqual(["rev-parse", "HEAD"]), 0, hash + "\n", "");
+        var handler = new RecordingHttpHandler((request, _) =>
+        {
+            var path = request.RequestUri!.AbsolutePath;
+            if (request.Method == HttpMethod.Get && path == "/api/runner/identity")
+            {
+                return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
+                {
+                    Content = new StringContent(
+                        UpdateTestFactory.BuildRunnerIdentityResponse("runner-1", "test-host", hash, "online"),
+                        System.Text.Encoding.UTF8,
+                        "application/json"),
+                });
+            }
+
+            if (request.Method == HttpMethod.Post && path == "/api/runner/runner-1/update-interrupt")
+            {
+                var requestedId = ReadUpdateInterruptId(request);
+                var response = responseCase switch
+                {
+                    "missing-id" => "{\"success\":true,\"data\":{\"runnerId\":\"runner-1\",\"status\":\"draining\",\"activeWorkIds\":[],\"activeWorkCount\":0}}",
+                    "null-id" => "{\"success\":true,\"data\":{\"runnerId\":\"runner-1\",\"status\":\"draining\",\"updateInterruptId\":null,\"activeWorkIds\":[],\"activeWorkCount\":0}}",
+                    "empty-id" => "{\"success\":true,\"data\":{\"runnerId\":\"runner-1\",\"status\":\"draining\",\"updateInterruptId\":\"\",\"activeWorkIds\":[],\"activeWorkCount\":0}}",
+                    "whitespace-id" => "{\"success\":true,\"data\":{\"runnerId\":\"runner-1\",\"status\":\"draining\",\"updateInterruptId\":\" \",\"activeWorkIds\":[],\"activeWorkCount\":0}}",
+                    "mismatched-id" => $"{{\"success\":true,\"data\":{{\"runnerId\":\"runner-1\",\"status\":\"draining\",\"updateInterruptId\":\"{Guid.NewGuid():N}\",\"activeWorkIds\":[],\"activeWorkCount\":0}}}}",
+                    "superseded" => $"{{\"success\":true,\"data\":{{\"runnerId\":\"runner-1\",\"status\":\"superseded\",\"updateInterruptId\":\"{requestedId}\",\"activeWorkIds\":[],\"activeWorkCount\":0}}}}",
+                    "already-cancelled" => $"{{\"success\":true,\"data\":{{\"runnerId\":\"runner-1\",\"status\":\"already-cancelled\",\"updateInterruptId\":\"{requestedId}\",\"activeWorkIds\":[],\"activeWorkCount\":0}}}}",
+                    _ => throw new InvalidOperationException(responseCase),
+                };
+                return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
+                {
+                    Content = new StringContent(response, System.Text.Encoding.UTF8, "application/json"),
+                });
+            }
+
+            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.NotFound));
+        });
+        var updater = f.BuildUpdater(
+            handler,
+            unitDir: UpdateTestFactory.UnitDir,
+            getLocalHostname: () => "test-host",
+            serviceInstaller: installer);
+
+        var exitCode = await updater.UpdateRunnerAsync("/repo", dryRun: false);
+
+        Assert.Equal(1, exitCode);
+        Assert.DoesNotContain(nameof(FakeServiceInstaller.RestartRunnerAsync), installer.Calls);
+        Assert.Contains("status=unconfirmed", f.Stderr.ToString());
     }
 
     [Fact]

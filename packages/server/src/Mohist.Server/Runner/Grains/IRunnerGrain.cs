@@ -38,11 +38,10 @@ public interface IRunnerGrain : IGrainWithStringKey
     /// <summary>Atomically rejects new poll and work claims until cancelled.</summary>
     Task BeginDrainAsync();
     /// <summary>
-    /// Atomically closes update admission and captures the active work that
-    /// the caller must interrupt before restarting this runner. Returns null
-    /// when the runner is not currently registered and online.
+    /// Arbitrates update admission by identity and captures the current
+    /// runtime snapshot. Returns null when the runner is not registered and online.
     /// </summary>
-    Task<RunnerRuntimeState?> BeginUpdateInterruptAsync(string? updateInterruptId = null);
+    Task<RunnerUpdateInterruptBeginResult?> BeginUpdateInterruptAsync(string updateInterruptId);
     /// <summary>
     /// Reopens admission only when the caller owns the currently persisted
     /// update-interrupt fence. A stale caller cannot cancel a later update.
@@ -417,6 +416,20 @@ public record RunnerRuntimeState(
     bool Draining = false,
     string? UpdateInterruptId = null,
     string? ConnectionGeneration = null);
+
+[GenerateSerializer]
+public enum RunnerUpdateInterruptBeginStatus
+{
+    Draining,
+    Superseded,
+    AlreadyCancelled,
+}
+
+[GenerateSerializer]
+public sealed record RunnerUpdateInterruptBeginResult(
+    [property: Id(0)] string UpdateInterruptId,
+    [property: Id(1)] RunnerUpdateInterruptBeginStatus Status,
+    [property: Id(2)] RunnerRuntimeState Runtime);
 
 [GenerateSerializer]
 public enum RunnerUpdateInterruptCancelStatus

@@ -91,6 +91,29 @@ public sealed partial class ManagedRuntimeTransactionSpecs
             path.Contains("/releases/", StringComparison.Ordinal));
     }
 
+    [Theory]
+    [InlineData("missing-id")]
+    [InlineData("superseded")]
+    public async Task ManagedRunnerUpdate_WhenInterruptIdentityIsNotExact_DoesNotActivateCandidate(string responseCase)
+    {
+        var fixture = ManagedFixture.Create(activationCode: 0, useSystemd: true, unitDir: UpdateTestFactory.UnitDir);
+        SeedSourceRunner(fixture, "runner-pluto");
+        var sourceUnit = fixture.Files.Read(Path.Combine(UpdateTestFactory.UnitDir, "mohist-runner.service"));
+        var handler = BuildManagedRunnerHandler(fixture, interruptConfirmed: true, responseCase);
+        var updater = BuildManagedRunnerUpdater(fixture, handler);
+
+        var result = await updater.UpdateRunnerAsync("/repo", dryRun: false);
+
+        Assert.Equal(1, result);
+        Assert.Equal(sourceUnit, fixture.Files.Read(Path.Combine(UpdateTestFactory.UnitDir, "mohist-runner.service")));
+        Assert.False(fixture.Files.HasFile(fixture.ActivePath));
+        Assert.DoesNotContain(fixture.Commands.ExecutedCommands, command =>
+            command.FileName == "systemctl"
+            && command.Args.SequenceEqual(["--user", "restart", "mohist-runner.service"]));
+        Assert.DoesNotContain(fixture.Files.Files.Keys, path =>
+            path.Contains("/releases/", StringComparison.Ordinal));
+    }
+
     [Fact]
     public async Task PrepareManagedRunner_WhenInterruptPreconditionFails_RemovesUnactivatedRelease()
     {
@@ -157,7 +180,8 @@ public sealed partial class ManagedRuntimeTransactionSpecs
 
     private static RecordingHttpHandler BuildManagedRunnerHandler(
         ManagedFixture fixture,
-        bool interruptConfirmed)
+        bool interruptConfirmed,
+        string? responseCase = null)
     {
         var identityReads = 0;
         string? updateInterruptId = null;
@@ -190,34 +214,40 @@ public sealed partial class ManagedRuntimeTransactionSpecs
                     Path.Combine(UpdateTestFactory.UnitDir, "mohist-runner.service")));
                 updateInterruptId = ReadUpdateInterruptId(
                     request.Content?.ReadAsStringAsync().GetAwaiter().GetResult());
-                return Task.FromResult(interruptConfirmed
-                    ? RecordingHttpHandler.Json(new
+                if (!interruptConfirmed)
+                {
+                    return Task.FromResult(RecordingHttpHandler.JsonError(
+                        "runner interrupt unavailable",
+                        statusCode: HttpStatusCode.ServiceUnavailable));
+                }
+
+                if (responseCase == "missing-id")
+                {
+                    return Task.FromResult(RecordingHttpHandler.Json(new
                     {
                         success = true,
                         data = new
                         {
                             runnerId = "runner-pluto",
                             status = "draining",
-                            updateInterruptId,
-                            activeWorkIds = new[] { "agent-job-1" },
-                            activeWorkCount = 1,
-                            operationId = "runner-update:managed",
-                            affectedWorks = new[]
-                            {
-                                new
-                                {
-                                    ownerKind = "agent-job",
-                                    ownerId = "job-1",
-                                    workId = "agent-job-1",
-                                    taskRunId = (string?)null,
-                                    workType = "agent-job",
-                                },
-                            },
+                            activeWorkIds = Array.Empty<string>(),
+                            activeWorkCount = 0,
                         },
-                    })
-                    : RecordingHttpHandler.JsonError(
-                        "runner interrupt unavailable",
-                        statusCode: HttpStatusCode.ServiceUnavailable));
+                    }));
+                }
+
+                return Task.FromResult(RecordingHttpHandler.Json(new
+                {
+                    success = true,
+                    data = new
+                    {
+                        runnerId = "runner-pluto",
+                        status = responseCase == "superseded" ? "superseded" : "draining",
+                        updateInterruptId,
+                        activeWorkIds = new[] { "agent-job-1" },
+                        activeWorkCount = 1,
+                    },
+                }));
             }
 
             Assert.Equal(HttpMethod.Get, request.Method);

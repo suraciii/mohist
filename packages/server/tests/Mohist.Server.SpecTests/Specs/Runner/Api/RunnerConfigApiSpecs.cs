@@ -78,6 +78,71 @@ public class RunnerConfigApiSpecs : IAsyncLifetime
     }
 
     [Fact]
+    public async Task UpdateInterrupt_ArbitratesBeginAndCancelByExactIdentity()
+    {
+        var runnerId = await _fixture.RegisterRunnerAsync();
+        var runner = _fixture.Grains.GetGrain<IRunnerGrain>(runnerId);
+        var idA = Guid.NewGuid().ToString("N");
+        var idB = Guid.NewGuid().ToString("N");
+
+        async Task<JsonElement> BeginAsync(string id)
+        {
+            using var response = await _fixture.Client.PostAsJsonAsync(
+                $"/api/runner/{runnerId}/update-interrupt",
+                new { updateInterruptId = id });
+            Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+            return (await response.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("data");
+        }
+
+        async Task<JsonElement> CancelAsync(string id)
+        {
+            using var response = await _fixture.Client.PostAsync(
+                $"/api/runner/{runnerId}/update-interrupt/{id}/cancel",
+                content: null);
+            Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+            return (await response.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("data");
+        }
+
+        var first = await BeginAsync(idA);
+        Assert.Equal("draining", first.GetProperty("status").GetString());
+        Assert.Equal(idA, first.GetProperty("updateInterruptId").GetString());
+
+        var duplicate = await BeginAsync(idA);
+        Assert.Equal("draining", duplicate.GetProperty("status").GetString());
+        Assert.Equal(idA, duplicate.GetProperty("updateInterruptId").GetString());
+
+        var competing = await BeginAsync(idB);
+        Assert.Equal("superseded", competing.GetProperty("status").GetString());
+        Assert.Equal(idA, competing.GetProperty("updateInterruptId").GetString());
+        Assert.Equal(idA, (await runner.GetRuntimeStateAsync()).UpdateInterruptId);
+
+        var cancelled = await CancelAsync(idA);
+        Assert.Equal("cancelled", cancelled.GetProperty("status").GetString());
+        Assert.Equal(idA, cancelled.GetProperty("updateInterruptId").GetString());
+        Assert.False((await runner.GetRuntimeStateAsync()).Draining);
+
+        var duplicateCancel = await CancelAsync(idA);
+        Assert.Equal("already-cancelled", duplicateCancel.GetProperty("status").GetString());
+
+        var unrelatedCancel = await CancelAsync(idB);
+        Assert.Equal("superseded", unrelatedCancel.GetProperty("status").GetString());
+
+        var cancelledReplay = await BeginAsync(idA);
+        Assert.Equal("already-cancelled", cancelledReplay.GetProperty("status").GetString());
+        Assert.Equal(idA, cancelledReplay.GetProperty("updateInterruptId").GetString());
+        Assert.False((await runner.GetRuntimeStateAsync()).Draining);
+
+        var next = await BeginAsync(idB);
+        Assert.Equal("draining", next.GetProperty("status").GetString());
+        Assert.Equal(idB, next.GetProperty("updateInterruptId").GetString());
+
+        Assert.Equal("cancelled", (await CancelAsync(idB)).GetProperty("status").GetString());
+        var oldIdentityAfterTombstoneReplacement = await BeginAsync(idA);
+        Assert.Equal("draining", oldIdentityAfterTombstoneReplacement.GetProperty("status").GetString());
+        Assert.Equal(idA, oldIdentityAfterTombstoneReplacement.GetProperty("updateInterruptId").GetString());
+    }
+
+    [Fact]
     public async Task Config_ConfiguredPolicy_ProjectsAllFields()
     {
         _fixture.SetPolicy(new CleanupPolicyOptions
