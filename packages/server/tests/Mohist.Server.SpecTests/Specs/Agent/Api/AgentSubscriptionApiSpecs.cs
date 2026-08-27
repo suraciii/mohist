@@ -245,6 +245,35 @@ public sealed class AgentSubscriptionApiSpecs(MohistIntegrationFixture fixture)
         Assert.False((await ReadDataAsync(reset)).GetProperty("continue").GetBoolean());
     }
 
+    [Fact]
+    public async Task Patch_OnlyContinuePresent_AppliesContinueAndPreservesStoredRoutingFields()
+    {
+        var (projectId, agentId) = await CreateProjectAndAgentAsync("subscription-patch-presence");
+        var path = Path(projectId, agentId);
+        var created = await Client.PostAsJsonAsync(path, new
+        {
+            name = "presence",
+            match = "event.type == \"presence\"",
+            responsePrompt = "Inspect the event.",
+            @continue = false,
+        });
+        var id = (await ReadDataAsync(created)).GetProperty("id").GetString()!;
+
+        // The subscription PATCH and the routing PATCH share RoutingRuleStore
+        // and its presence vocabulary; only an explicitly present field may be
+        // applied while every omitted routing-rule field stays as stored.
+        using var patched = await PatchRawAsync($"{path}/{id}", "{\"continue\":true}");
+        var data = await ReadDataAsync(patched);
+
+        Assert.Equal(HttpStatusCode.OK, patched.StatusCode);
+        Assert.Multiple(
+            () => Assert.True(data.GetProperty("continue").GetBoolean()),
+            () => Assert.Equal("presence", data.GetProperty("name").GetString()),
+            () => Assert.Equal("event.type == \"presence\"", data.GetProperty("match").GetString()),
+            () => Assert.Equal(agentId, data.GetProperty("agentId").GetString()),
+            () => Assert.Equal("Inspect the event.", data.GetProperty("responsePrompt").GetString()));
+    }
+
     [Theory]
     [InlineData("\"true\"")]
     [InlineData("1")]
