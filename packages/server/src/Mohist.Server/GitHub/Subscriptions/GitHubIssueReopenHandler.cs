@@ -2,7 +2,6 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Mohist.Server.GitHub.Domain;
 using Mohist.Server.GitHub.Infrastructure;
-using Mohist.Server.GitHub.Ports;
 using Mohist.Server.Infrastructure.Data.Events;
 using Mohist.Server.Infrastructure.Data.Issue;
 using Mohist.Server.Infrastructure.Events;
@@ -98,22 +97,36 @@ public sealed class GitHubIssueReopenHandler : ICloudEventHandler
         GitHubIssueLink link,
         CancellationToken ct)
     {
-        var links = sp.GetRequiredService<GitHubIssueLinkStore>();
-        var reservation = await links.ReserveCommentAsync(
-            link.Id,
-            GitHubCommentKinds.ReopenedDoneFollowUp,
-            ct);
-        if (!reservation.ShouldDeliver)
-            return;
-
-        await sp.GetRequiredService<IGitHubCommentPort>().PostCommentAsync(
-            connection,
+        // Reopen events have no comment id. Use one stable source id for the
+        // one follow-up allowed by the terminal Issue contract, then route
+        // the delivery through the same durable marker/retry worker used by
+        // command replies.
+        const string sourceCommentId = "issue-reopened";
+        var operationKey = GitHubCommentKinds.CommandReplyOperationKey(
+            connection.Id,
             link.GithubIssueNumber,
+            sourceCommentId,
+            GitHubCommentKinds.ReopenedDoneFollowUp);
+        var marker = GitHubCommentKinds.CommandReplyMarker(
+            connection.Id,
+            link.GithubIssueNumber,
+            sourceCommentId,
+            GitHubCommentKinds.ReopenedDoneFollowUp);
+        var replies = sp.GetRequiredService<GitHubCommandReplyStore>();
+        var reply = await replies.GetOrCreateAsync(
+            link.ProjectId,
+            connection.Id,
+            link.RepositoryName,
+            link.GithubIssueNumber,
+            sourceCommentId,
+            operationKey,
+            marker,
             GitHubWriteBackComments.ReopenedDoneFollowUp(link.IssueNumber),
             ct);
-        await links.MarkCommentPostedAsync(
-            link.Id,
-            GitHubCommentKinds.ReopenedDoneFollowUp,
-            ct);
+        if (!reply.IsPosted && !reply.IsFailed)
+        {
+            await sp.GetRequiredService<GitHubCommandReplyDeliveryService>()
+                .DeliverAsync(reply, force: true, ct: ct);
+        }
     }
 }

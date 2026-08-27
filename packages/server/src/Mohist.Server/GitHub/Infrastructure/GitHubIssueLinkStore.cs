@@ -1,4 +1,3 @@
-using System.Data;
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using Mohist.Server.GitHub.Domain;
@@ -201,78 +200,21 @@ public sealed class GitHubIssueLinkStore : IScopedService
         }
     }
 
-    /// <summary>
-    /// Reserves a comment delivery before calling GitHub. The reservation is
-    /// durable and serialized with the link row, so a duplicate event cannot
-    /// issue a second POST while the first delivery is in flight or has an
-    /// unknown outcome. A reservation remains in progress until the caller
-    /// records delivery; fail-closed recovery belongs to reconciliation.
-    /// </summary>
-    public async Task<GitHubCommentDeliveryReservation> ReserveCommentAsync(
-        string id,
-        string commentKey,
-        CancellationToken ct = default)
-    {
-        ArgumentException.ThrowIfNullOrWhiteSpace(id);
-        ArgumentException.ThrowIfNullOrWhiteSpace(commentKey);
-        await using var db = await _dbFactory.CreateDbContextAsync(ct);
-        await using var transaction = await db.Database.BeginTransactionAsync(IsolationLevel.Serializable, ct);
-        var row = await db.GitHubIssueLinks.FirstOrDefaultAsync(r => r.Id == id, ct);
-        if (row is null)
-            throw new InvalidOperationException($"GitHub issue link '{id}' does not exist.");
-
-        var posted = DeserializePosted(row.PostedCommentsJson);
-        if (posted.Contains(commentKey))
-        {
-            await transaction.CommitAsync(ct);
-            return new GitHubCommentDeliveryReservation(
-                GitHubCommentDeliveryDisposition.Delivered,
-                commentKey);
-        }
-
-        var reservationKey = ReservedCommentKey(commentKey);
-        if (posted.Contains(reservationKey))
-        {
-            await transaction.CommitAsync(ct);
-            return new GitHubCommentDeliveryReservation(
-                GitHubCommentDeliveryDisposition.InProgress,
-                commentKey);
-        }
-
-        posted.Add(reservationKey);
-        row.PostedCommentsJson = SerializePosted(posted);
-        row.UpdatedAt = _timeProvider.GetUtcNow();
-        await db.SaveChangesAsync(ct);
-        await transaction.CommitAsync(ct);
-        return new GitHubCommentDeliveryReservation(
-            GitHubCommentDeliveryDisposition.Reserved,
-            commentKey);
-    }
-
     public async Task MarkCommentPostedAsync(string id, string commentKey, CancellationToken ct = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(id);
         ArgumentException.ThrowIfNullOrWhiteSpace(commentKey);
         await using var db = await _dbFactory.CreateDbContextAsync(ct);
-        await using var transaction = await db.Database.BeginTransactionAsync(IsolationLevel.Serializable, ct);
         var row = await db.GitHubIssueLinks.FirstOrDefaultAsync(r => r.Id == id, ct);
         if (row is null)
-        {
-            await transaction.CommitAsync(ct);
             return;
-        }
         var posted = DeserializePosted(row.PostedCommentsJson);
-        posted.Remove(ReservedCommentKey(commentKey));
         if (posted.Contains(commentKey))
-        {
-            await transaction.CommitAsync(ct);
             return;
-        }
         posted.Add(commentKey);
         row.PostedCommentsJson = SerializePosted(posted);
         row.UpdatedAt = _timeProvider.GetUtcNow();
         await db.SaveChangesAsync(ct);
-        await transaction.CommitAsync(ct);
     }
 
     /// <summary>
@@ -303,9 +245,7 @@ public sealed class GitHubIssueLinkStore : IScopedService
         MirrorMarker = row.MirrorMarker,
         MirrorCreateAttempted = row.MirrorCreateAttempted,
         CommandRequested = row.CommandRequested,
-        PostedComments = DeserializePosted(row.PostedCommentsJson)
-            .Where(key => !key.StartsWith(ReservedCommentPrefix, StringComparison.Ordinal))
-            .ToHashSet(StringComparer.Ordinal),
+        PostedComments = DeserializePosted(row.PostedCommentsJson),
         StateLabel = row.StateLabel,
         CreatedAt = row.CreatedAt,
         UpdatedAt = row.UpdatedAt,
@@ -326,11 +266,6 @@ public sealed class GitHubIssueLinkStore : IScopedService
             return new HashSet<string>(StringComparer.Ordinal);
         }
     }
-
-    private const string ReservedCommentPrefix = "pending-comment:";
-
-    private static string ReservedCommentKey(string commentKey) =>
-        ReservedCommentPrefix + commentKey;
 
     private static string SerializePosted(IReadOnlySet<string> posted) =>
         JsonSerializer.Serialize(posted.OrderBy(k => k, StringComparer.Ordinal), JSON.Options);

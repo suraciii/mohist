@@ -7,9 +7,8 @@ namespace Mohist.Server.Infrastructure.Data.GitHub;
 /// gate that makes mirror and command redelivery converge on one link, even
 /// across duplicate events and dispatcher redelivery.
 /// <c>PostedCommentsJson</c> holds the write-back bookkeeping (delivered
-/// comment kinds plus durable <c>pending-comment:</c> reservations) that the
-/// minimal comment port needs to stay idempotent across redeliveries and
-/// unknown provider outcomes.
+/// comment kinds) that the minimal comment port needs to stay idempotent
+/// across redeliveries.
 /// </summary>
 public sealed class GitHubIssueLinkRow
 {

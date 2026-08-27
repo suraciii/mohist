@@ -5,6 +5,7 @@ using System.Text;
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
+using Mohist.Server.GitHub.Domain;
 using Mohist.Server.GitHub.Infrastructure;
 using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Infrastructure.Data.Workflow;
@@ -37,6 +38,7 @@ public sealed class GitHubIssueCloseSpecs
         fixture.Comments.StateLabels.Clear();
         fixture.Comments.Closes.Clear();
         fixture.Comments.ConfirmationFailure = null;
+        fixture.Comments.PostThenThrow = false;
     }
 
     private HttpClient Client => _fixture.Client;
@@ -151,6 +153,7 @@ public sealed class GitHubIssueCloseSpecs
         {
             owner,
             repo = RepoName,
+            pat = "github-pat",
         });
         var connectionId = created.GetProperty("id").GetString()!;
         var secret = created.GetProperty("webhookSecret").GetString()!;
@@ -245,6 +248,30 @@ public sealed class GitHubIssueCloseSpecs
         await using var scope = _fixture.Services.CreateAsyncScope();
         var store = scope.ServiceProvider.GetRequiredService<IIssueStore>();
         return await store.LoadAsync(GrainKey.Issue(new IssueKey(projectId, number)));
+    }
+
+    private async Task<GitHubCommandReply?> LoadReplyAsync(string connectionId, string commentId)
+    {
+        await using var scope = _fixture.Services.CreateAsyncScope();
+        var dbFactory = scope.ServiceProvider.GetRequiredService<IDbContextFactory<MohistDbContext>>();
+        await using var db = await dbFactory.CreateDbContextAsync();
+        var row = await db.GitHubCommandReplies.AsNoTracking()
+            .SingleOrDefaultAsync(reply => reply.ConnectionId == connectionId
+                && reply.GithubCommentId == commentId);
+        return row is null
+            ? null
+            : new GitHubCommandReply
+            {
+                Id = row.Id,
+                PostedAt = row.PostedAt,
+                AttemptCount = row.AttemptCount,
+                NextAttemptAt = row.NextAttemptAt,
+                LeaseUntil = row.LeaseUntil,
+                FailedAt = row.FailedAt,
+                LastError = row.LastError,
+                Marker = row.Marker,
+                Body = row.Body,
+            };
     }
 
     [Fact]
@@ -363,6 +390,48 @@ public sealed class GitHubIssueCloseSpecs
         Assert.Equal(IssueStatus.Done, (await LoadIssueAsync(projectId, issueNumber))!.Status);
         var comment = Assert.Single(_fixture.Comments.Comments,
             c => c.ConnectionId == connectionId && c.Body.Contains("follow-up", StringComparison.Ordinal));
+        Assert.Contains(
+            GitHubCommentKinds.CommandReplyMarker(
+                connectionId,
+                GithubIssueNumber,
+                "issue-reopened",
+                GitHubCommentKinds.ReopenedDoneFollowUp),
+            comment.Body,
+            StringComparison.Ordinal);
+        var reply = await LoadReplyAsync(connectionId, "issue-reopened");
+        Assert.NotNull(reply);
+        Assert.NotNull(reply!.PostedAt);
+    }
+
+    [Fact]
+    public async Task ReopenedEvent_OnDoneFollowUpFailure_IsRetriedByHostedConsumer()
+    {
+        var (projectId, connectionId, secret) = await ConnectNewAsync();
+        var issueNumber = await CreateNoWorkflowIssueAsync(projectId);
+        var issueGrain = _fixture.Grains.GetGrain<IIssueGrain>(GrainKey.Issue(new IssueKey(projectId, issueNumber)));
+        await issueGrain.MarkDoneAsync();
+        await SeedLinkAsync(projectId, issueNumber);
+        _fixture.Comments.ConfirmationFailure = new TimeoutException("simulated follow-up failure");
+
+        await DeliverReopenedAsync(connectionId, secret, "reopen-delivery-follow-up-failure");
+        await PumpAsync();
+
+        var failed = await LoadReplyAsync(connectionId, "issue-reopened");
+        Assert.NotNull(failed);
+        Assert.Equal(1, failed!.AttemptCount);
+        Assert.NotNull(failed.NextAttemptAt);
+        Assert.Empty(_fixture.Comments.Comments);
+
+        _fixture.Comments.ConfirmationFailure = null;
+        _fixture.TimeProvider.Advance(TimeSpan.FromSeconds(5));
+        var worker = _fixture.Services.GetRequiredService<GitHubCommandReplyDeliveryWorker>();
+        Assert.Equal(1, await worker.ProcessPendingAsync());
+
+        var delivered = await LoadReplyAsync(connectionId, "issue-reopened");
+        Assert.NotNull(delivered);
+        Assert.NotNull(delivered!.PostedAt);
+        Assert.Single(_fixture.Comments.Comments,
+            c => c.Body.Contains(GitHubCommentKinds.ReopenedDoneFollowUp, StringComparison.Ordinal));
     }
 
     [Fact]

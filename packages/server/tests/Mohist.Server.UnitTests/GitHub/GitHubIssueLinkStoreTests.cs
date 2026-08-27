@@ -152,27 +152,6 @@ public sealed class GitHubIssueLinkStoreTests
     }
 
     [Fact]
-    public async Task ReserveComment_ClaimsOnceAndMarksDeliveryIdempotently()
-    {
-        var database = NewDatabase();
-        var store = NewStore(database);
-        var link = await store.CreateAsync("proj_1", "hello-world", 42, 7);
-
-        var first = await store.ReserveCommentAsync(link.Id, GitHubCommentKinds.ReopenedDoneFollowUp);
-        var duplicate = await store.ReserveCommentAsync(link.Id, GitHubCommentKinds.ReopenedDoneFollowUp);
-
-        Assert.Equal(GitHubCommentDeliveryDisposition.Reserved, first.Disposition);
-        Assert.Equal(GitHubCommentDeliveryDisposition.InProgress, duplicate.Disposition);
-        Assert.False((await store.GetAsync("proj_1", "hello-world", 42))!.HasPostedComment(GitHubCommentKinds.ReopenedDoneFollowUp));
-
-        await store.MarkCommentPostedAsync(link.Id, GitHubCommentKinds.ReopenedDoneFollowUp);
-        var replay = await store.ReserveCommentAsync(link.Id, GitHubCommentKinds.ReopenedDoneFollowUp);
-
-        Assert.Equal(GitHubCommentDeliveryDisposition.Delivered, replay.Disposition);
-        Assert.True((await store.GetAsync("proj_1", "hello-world", 42))!.HasPostedComment(GitHubCommentKinds.ReopenedDoneFollowUp));
-    }
-
-    [Fact]
     public async Task Delete_RemovesLink()
     {
         var database = NewDatabase();

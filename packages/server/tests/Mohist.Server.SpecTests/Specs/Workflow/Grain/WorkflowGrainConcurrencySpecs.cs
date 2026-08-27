@@ -123,7 +123,7 @@ public class WorkflowGrainConcurrencySpecs : WorkflowGrainSpecs
             new StageDefinition("integrate", [], [])
         ]));
         var dispatch = await PollWorkAnyAsync();
-        await ReportAsync(_runnerId!, dispatch.Work.WorkId, "pass");
+        await ReportAsync(_runnerId!, dispatch.Work.WorkId, "completed");
 
         var before = await LoadRunAsync(_workflowId!);
         Assert.Equal(WorkflowRunStatus.AwaitingApproval, before.Status);
