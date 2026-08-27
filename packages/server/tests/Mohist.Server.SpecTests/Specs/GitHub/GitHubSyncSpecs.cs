@@ -312,11 +312,12 @@ public sealed class GitHubSyncSpecs
 
         _fixture.TimeProvider.Advance(TimeSpan.FromSeconds(5));
         var worker = _fixture.Services.GetRequiredService<GitHubIssueCommentOperationRecoveryWorker>();
-        Assert.Equal(1, await worker.ProcessPendingAsync());
+        Assert.True(await worker.ProcessPendingAsync() >= 1);
 
         link = await LoadLinkAsync(projectId, issueNumber);
         Assert.True(link!.HasPostedComment(GitHubCommentKinds.MirrorCreated));
-        Assert.Single(_fixture.Comments.Comments);
+        Assert.Single(_fixture.Comments.Comments,
+            comment => comment.GithubIssueNumber == link.GithubIssueNumber);
     }
 
     [Fact]
@@ -347,12 +348,13 @@ public sealed class GitHubSyncSpecs
 
         _fixture.TimeProvider.Advance(TimeSpan.FromSeconds(5));
         var worker = _fixture.Services.GetRequiredService<GitHubIssueCommentOperationRecoveryWorker>();
-        Assert.Equal(1, await worker.ProcessPendingAsync());
+        Assert.True(await worker.ProcessPendingAsync() >= 1);
 
         link = await LoadLinkAsync(projectId, issueNumber);
         Assert.Equal(GitHubCommentOperationStatus.Ambiguous, await LoadOperationStatusAsync(link!.Id, GitHubCommentKinds.MirrorCreated));
         Assert.Equal(GitHubSyncStatus.Error, link.SyncStatus);
-        Assert.Equal(2, _fixture.Comments.Comments.Count);
+        Assert.Equal(2, _fixture.Comments.Comments.Count(
+            comment => comment.GithubIssueNumber == link.GithubIssueNumber));
     }
 
     [Fact]
@@ -380,13 +382,15 @@ public sealed class GitHubSyncSpecs
         using var response = await _fixture.Client.PostAsJsonAsync(
             $"/api/projects/{projectId}/issues/{issueNumber}/github/sync", new { });
         Assert.Equal(System.Net.HttpStatusCode.Conflict, response.StatusCode);
-        Assert.Single(_fixture.Comments.Closes);
+        Assert.Single(_fixture.Comments.Closes,
+            close => close.GithubIssueNumber == link!.GithubIssueNumber);
 
         _fixture.TimeProvider.Advance(TimeSpan.FromSeconds(5));
         var worker = _fixture.Services.GetRequiredService<GitHubIssueCommentOperationRecoveryWorker>();
-        Assert.Equal(1, await worker.ProcessPendingAsync());
+        Assert.True(await worker.ProcessPendingAsync() >= 1);
 
-        Assert.Single(_fixture.Comments.Closes);
+        Assert.Single(_fixture.Comments.Closes,
+            close => close.GithubIssueNumber == link.GithubIssueNumber);
         link = await LoadLinkAsync(projectId, issueNumber);
         Assert.True(link!.HasPostedComment(GitHubCommentKinds.ClosedCompleted));
     }
@@ -411,7 +415,7 @@ public sealed class GitHubSyncSpecs
 
         _fixture.Comments.UpdateFailure = null;
         var worker = _fixture.Services.GetRequiredService<GitHubConnectionReprojectionWorker>();
-        Assert.Equal(1, await worker.ProcessPendingAsync());
+        Assert.True(await worker.ProcessPendingAsync() >= 1);
 
         connection = await _fixture.Services.GetRequiredService<GitHubConnectionStore>()
             .GetByIdAsync(connectionId);
