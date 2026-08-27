@@ -107,13 +107,18 @@ Business error codes:
 - `retry-safe`: the operation can be retried safely.
 - `mark-ready-failed`: marking the Pull Request ready failed.
 
-## `mohist/merge-github-pr`
+## `mohist/enable-github-pr-auto-merge`
 
-Squash-merges the specified GitHub Pull Request.
+Enables auto-merge on the specified GitHub Pull Request, then waits until
+GitHub performs the merge. GitHub arbitrates merge timing and merge-time
+prerequisites, so the Workflow has no merge-moment races to recover from. The
+Action is idempotent when auto-merge is already enabled: it proceeds directly
+to the wait. Pair it with `mohist/github-pr-status` using `expect: merged` as
+post-hoc verification.
 
 ```yaml
-- id: merge-pr
-  uses: mohist/merge-github-pr
+- id: enable-auto-merge
+  uses: mohist/enable-github-pr-auto-merge
   with:
     repositoryUrl: ${{ repository.gitUrl }}
     prNumber: ${{ vars.github.pr.number }}
@@ -135,24 +140,26 @@ Inputs:
 Outputs:
 
 - `kind`: output type identifier.
-- `status`: merge status identifier.
+- `status`: operation status identifier.
 - `prNumber`: Pull Request number.
 - `prUrl`: Pull Request URL.
-- `mergeCommitSha`: SHA of the squash-merge commit.
-- `method`: merge method that was used.
+- `method`: merge method that was registered.
+- `enabled`: whether auto-merge was enabled by this call.
+- `mergeCommitSha`: SHA of the merge commit once merged.
 - `output`: aggregated `gh` output.
 - `steps`: `gh` command results for each step.
 
 Business error codes:
 
-- `base-moved`: the base branch moved and the Pull Request is stale.
-- `retry-safe`: the merge operation can be retried safely.
+- `auto-merge-unavailable`: the Repository does not allow auto-merge.
+- `pr-checks-failed`: a required Pull Request check failed after auto-merge
+  was enabled.
+- `merge-conflict`: the Pull Request has unresolved merge conflicts.
+- `retry-safe`: the operation can be retried safely.
 - `config-error`: GitHub configuration is missing or invalid.
-- `protection-conflict`: branch protection rejected the merge.
-- `pr-state-conflict`: an existing Pull Request is in a conflicting state.
-- `pr-checks-unavailable`: Pull Request check status is unavailable.
-- `pr-checks-failed`: required Pull Request checks did not pass.
-- `merge-failed`: merging the Pull Request failed.
+- `protection-conflict`: branch protection rejected the operation.
+- `pr-state-conflict`: the Pull Request is in a conflicting state.
+- `enable-failed`: enabling auto-merge failed.
 
 ## `mohist/github-pr-status`
 

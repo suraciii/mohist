@@ -77,7 +77,7 @@ This is a Profile binding, not a Run Variable. It has deliberately narrow syntax
 - The effective value is the Project override when present, otherwise the Profile source default. It must
   name a concrete Action whose manifest declares the `agent-turn` capability.
 - Profiles that declare `agentAction` use the binding for every inline Agent task, including Approval
-  feedback, recovery tasks, and the task default supplied to `mohist/openspec-tasks`. Literal non-Agent
+  feedback, recovery tasks, and the task default supplied to `mohist/task-list`. Literal non-Agent
   Actions remain unchanged. Mixing a bound Agent Action with a literal inline Agent Action is invalid.
 - Approval feedback tasks are optional. When present, Agent feedback tasks use the Profile binding like
   other Agent tasks. Workflow does not synthesize an implicit feedback task when the Profile omits them.
@@ -107,8 +107,8 @@ the projection from the validated Definition. Both paths use the built-in
 mapping: `mohist/opencode` maps to `opencode`, and `mohist/pi` maps to `pi`.
 
 The literal scan includes Stage tasks and checks, Approval feedback tasks,
-recovery tasks, and the static `task.uses` default of `mohist/openspec-tasks`.
-It follows nested recovery tasks recursively. `mohist/openspec-tasks` does not
+recovery tasks, and the static `task.uses` default of `mohist/task-list`.
+It follows nested recovery tasks recursively. `mohist/task-list` does not
 permit source tasks to override that default.
 
 The result is deliberately small:

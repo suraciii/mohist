@@ -65,7 +65,6 @@ Cross-domain read-only reports (activity feed, delivery cost, cross-aggregate bo
 ### Not subdomains
 
 - Artifact: belongs to Workflow. No independent problem class.
-- OpenSpec: external tool. Never a domain concept.
 - External Agent hosts, Skills, CLI, Web UI, Slack and the Slack adapter (`mohist-slack`) are interaction
   adapters, not business domains. Agent Connection belongs to Agent because its binding, access policy and
   lifecycle are persistent Agent-facing product behavior; Slack protocol state does not. The Server-side

@@ -150,7 +150,7 @@ and Variables resolution semantics.
 
 Runtime-inserted tasks do not pass through Definition validation again. Runner-built recovery
 tasks come from a subtree of an already validated and materialized Definition. The producer of a
-task built by a Server control command is responsible for its validity. `mohist/openspec-tasks`
+task built by a Server control command is responsible for its validity. `mohist/task-list`
 uses its materialized `task.uses` default for every inserted task and rejects a source task that
 tries to replace it.
 

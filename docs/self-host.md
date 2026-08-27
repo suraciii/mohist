@@ -391,9 +391,9 @@ invalid External Web URLs and must not appear in Slack messages.
   credentials, ingress progress, conversation ownership, and pending delivery.
   The default systemd location is `~/.mohist/`. Docker uses
   `/data/.mohist/` inside the mounted volume.
-- **Project Repositories:** These include Issue artifacts under
-  `openspec/changes/`. Commits pushed to a remote Repository are already
-  replicated there.
+- **Project Repositories:** Commits pushed to a remote Repository are already
+  replicated there. Issue plan artifacts are not stored in the Repository;
+  they are part of the artifacts under the data root.
 
 Do not back up only `mohist.db`. A Slack Connection creates no second backup
 boundary because `mohist-slack` is stateless. Back up and restore the complete
@@ -422,7 +422,7 @@ For off-host retention, use a backup tool such as restic or borg. Stop Server
 or use a storage-level atomic snapshot before reading its data root.
 
 ```bash
-restic -r /backup/mohist backup ~/.mohist <repo>/openspec
+restic -r /backup/mohist backup ~/.mohist
 ```
 
 ## Upgrade

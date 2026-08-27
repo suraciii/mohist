@@ -52,8 +52,8 @@ An Issue is one unit of work that can enter the production line.
 - A target repository in which the work executes; see
   [Repositories](repositories.md)
 - State such as stage, health, and `approvalState` after it enters a Workflow
-- A complete set of OpenSpec artifacts after completion: proposal, design,
-  specs, tasks, and review
+- Plan and review artifacts after completion, recorded as run
+  artifacts
 
 If one requirement crosses multiple repositories, split one Issue into
 **sub-issues**. The parent Issue tracks the complete requirement, and each

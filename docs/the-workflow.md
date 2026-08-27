@@ -35,15 +35,23 @@ mo issue start <number>          # Start the Workflow and enter Plan.
 
 The Inline Agent interprets the requirements and plans the implementation. This
 is the least expensive stage in which to find a wrong direction. During a
-manual approval, focus on `proposal.md` and `tasks.json`.
+manual approval, focus on the plan document and the task list.
 
-Plan produces five artifacts in order: `proposal.md` with the interpretation,
-scope, motivation, and proposed solution; `specs/` with specific
-capability-spec changes at the user-story level; `design.md` with the
-technical design decisions, including the selected option and its rationale
-when alternatives exist; `tasks.json` with the ordered Build steps and their
-acceptance conditions; and `self-review.md` with the Inline Agent's review of
-its plan, including considerations, tradeoffs, and concerns.
+Plan artifacts live in the Issue Workspace under `PLANS/`, outside the
+Repository checkout, so they never appear in the Pull Request or the
+Repository history. See [Workspace](workspaces.md#layout) for the layout.
+Plan produces:
+
+- `PLANS/PLAN.md`: the interpretation, scope, motivation, and
+  proposed approach. This is the primary approval document.
+- `PLANS/DESIGN.md`, when the change involves design choices:
+  the technical design, including the selected option and its rationale.
+- `PLANS/tasks.json`: the machine-readable task list,
+  an ordered list whose entries each carry a goal, acceptance criteria,
+  and references to plan material.
+
+The Agent organizes any additional planning material freely under `PLANS/` and
+`RESEARCH/`; the Workflow consumes only the task list.
 
 This stage usually takes 5-20 minutes. The duration depends on the clarity of
 the Issue body, repository complexity, and model speed.
@@ -65,9 +73,10 @@ The approver may be any authorized actor. See
 
 Build turns the approved plan into small, reviewable changes. Keeping Build
 after plan approval avoids spending execution time on a rejected direction.
-Following `tasks.json` one item at a time, checking each increment, and recording
-separate commits localizes failures and makes recovery understandable. Work
-remains isolated on the Issue branch until Integrate.
+The Workflow expands the approved task list into one Agent task per
+entry, executed in order; checking each increment and recording separate
+commits localizes failures and makes recovery understandable. Work remains
+isolated on the Issue branch until Integrate.
 
 ### After Build
 
@@ -79,8 +88,11 @@ work; built-in Profiles include this loop. See
 ## Check
 
 Check prevents Build's claim of completion from being its only evidence. It
-runs the complete test suite, reviews the diff, and records the conclusion and
-findings in `review.md`. A problem returns to Build before the shared base branch
+runs an independent verification pass: a separate Agent session reviews the
+diff and records the findings in `PLANS/REVIEW.md`, and external checks are
+confirmed where they exist. The review is
+evidence, not a verdict: the approve or reject decision belongs to the
+approver. A problem returns to Build before the shared base branch
 is involved.
 
 ### After Check
@@ -93,22 +105,22 @@ mo run approve --issue <number>   # Enter Integrate.
 mo run reject --issue <number> --message "Describe the required changes"  # Return to Build.
 ```
 
-For a manual decision, read `review.md`.
+For a manual decision, read the review report and the diff.
 
 ## Integrate
 
-Integrate isolates shared-branch risk from implementation work. Another person
-or Issue may have advanced the base branch while Build and Check ran, so this
-stage checks drift, rebases when needed, merges the Issue branch, and pushes
-when configured. Conflicts remain an Integrate concern instead of leaking into
-earlier stages.
+Integrate isolates shared-branch risk from implementation work. For a Pull
+Request Workflow, this stage enables auto-merge on the approved Pull Request
+and waits until GitHub reports it merged. Merge timing and merge-time
+prerequisites are arbitrated by GitHub, so there is no merge-moment race for
+the Workflow to recover from.
 
 ### Integrate Failure
 
 The most common causes are:
 
-- A merge conflict because the branches have diverged too far for the rebase.
-- A push failure caused by permissions or the network.
+- The Repository does not allow auto-merge, or the token lacks permission.
+- A required Pull Request check failed after approval.
 
 The Issue becomes blocked and waits for intervention. See
 [Troubleshooting](troubleshooting.md).
@@ -120,7 +132,8 @@ It preserves the evidence needed for later audit while removing the Issue from
 active execution. In this state:
 
 - The code is on the base branch.
-- All artifacts are archived as an audit record.
+- Plan and review artifacts are recorded as run artifacts and remain
+  inspectable from the Issue.
 - You may archive the Issue to remove it from the board.
 
 ```bash

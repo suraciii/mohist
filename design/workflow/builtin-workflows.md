@@ -16,7 +16,7 @@ and invariants without duplicating YAML.
 - `mohist/local`: Rebase with squash locally, then push directly to the base
   branch. This is the default.
 - `mohist/github-pr`: Deliver through a draft Pull Request, ready transition,
-  and squash merge.
+  and auto-merge.
 
 Select one with:
 
@@ -33,9 +33,13 @@ mo issue create "..." --workflow-profile mohist/github-pr
   Profiles differ; it does not restate their Task IDs or ordering.
 - Every side effect is an explicit Task. Explicit work can be retried, audited,
   and recovered with the same Action contract; an implicit Stage hook cannot.
-- A Workspace is rebuildable. When work must survive a Stage or Runner change,
-  the remote branch is the recovery boundary and publishing it must be visible
-  in the Definition.
+- A Workspace is rebuildable. The remote Workflow branch is the recovery point
+  for Repository work; plan material is Workspace-local, and its loss is an
+  accepted loss recovered by rerunning from Plan. Publishing the branch is
+  visible in the Definition.
+- OpenSpec is not the Workflow's protocol. The only machine-readable plan
+  artifact the Workflow consumes is the task list; all other planning material
+  is the Agent's free organization. See [`plan-artifacts.md`](plan-artifacts.md).
 
 ## Shared Structure
 
@@ -48,17 +52,20 @@ plan -> approval -> build -> check -> approval -> integrate
 
 - Every Stage prepares its Workspace explicitly, so no Task relies on a hidden
   directory or branch transition.
-- Plan separates proposal, specification, design, tasks, and self-review because
-  each artifact supports a different approval question. A failed self-review is
-  recoverable work, not a successful plan with a warning.
-- Build expands the approved task plan and verifies each increment. Check uses a
-  separate review pass so implementation is not its own only acceptance signal.
+- Plan produces the named artifacts, including the task list, in one Agent
+  session. There is no self-review Task: the approval point is the plan
+  review.
+- Build expands the approved task list and verifies each increment.
+  Check records an independent review as evidence; the verdict belongs to the
+  approver. See [`plan-artifacts.md`](plan-artifacts.md) for the review boundary.
 - Approval feedback is ordered work in the rejected Stage's Session. This keeps
   feedback and repair context together and makes the next approval inspect the
-  repaired result.
+  repaired result. The engine imposes no round limit: every feedback round is
+  initiated by a deciding actor, unlike unattended recovery loops, which keep
+  their budgets.
 - Recovery belongs beside the Task whose failure it understands. A rebase
-  conflict, CI failure, or review finding is handled explicitly; no hidden
-  recovery hook runs at a Stage boundary.
+  conflict or CI failure is handled explicitly; no hidden recovery hook runs
+  at a Stage boundary.
 
 See [`recovery.md`](recovery.md) for recovery and
 [`actions.md`](actions.md) for Action contracts.
@@ -67,10 +74,10 @@ See [`recovery.md`](recovery.md) for recovery and
 
 This is the shortest delivery path and has no GitHub dependency or Pull Request.
 Because no remote approval point proves mergeability, Check verifies that the Issue
-branch can merge before asking for Approval. Integrate then archives the change,
-rebases and squashes onto the current base, and pushes. Keeping the mergeability
-check before Approval prevents a stale branch from turning an approved result
-into a predictable Integrate failure.
+branch can merge before asking for Approval. Integrate then rebases and
+squashes onto the current base and pushes. Keeping the mergeability check
+before Approval prevents a stale branch from turning an approved result into a
+predictable Integrate failure.
 
 Repository health checks remain explicit Tasks. Their recovery is limited to
 the formatting or patch problem they detect and cannot become a general repair
@@ -79,8 +86,9 @@ hook.
 ## `mohist/github-pr`
 
 This Profile opens a draft Pull Request after Plan, marks it ready after Check
-Approval, and squash-merges during Integrate. Runner host must have an
-authenticated `gh` CLI for the target Repository.
+Approval, and enables auto-merge during Integrate. Runner host must have an
+authenticated `gh` CLI for the target Repository, and the Repository must allow
+auto-merge.
 
 The Profile declares `agentAction: mohist/opencode` and uses
 `${{ profile.agentAction }}` for every inline Agent task. A Project may bind the
@@ -88,12 +96,16 @@ Profile to another compatible concrete Action such as `mohist/pi`. Run creation
 fixes that Action for Plan, Build, Check, Integrate, Approval feedback, and
 recovery. The versioned Stage graph remains shared and immutable.
 
-Workspace is a rebuildable execution copy. The remote Workflow branch is the
-recovery point between Stages. The Pull Request is a review projection of that
-branch. Before passing output to another Stage, Approval, or Pull Request
-operation, every Repository-modifying Stage explicitly pushes current HEAD to
-the Workflow branch. The Profile orders these tasks. Runner only executes and
-reports facts. There is no implicit Stage hook.
+The Workflow Workspace has a fixed root layout: the Repository checkout lives
+under `REPOS/<repository-name>/` and is the only tree that enters Git; plan
+and review material lives under `PLANS/`. See
+[`workspace.md`](../workspace.md) and [Workspace](../../docs/workspaces.md).
+The remote Workflow branch is the recovery point for Repository work. The Pull
+Request is a review projection of that branch. Before passing output to another
+Stage, Approval, or Pull Request operation, every Repository-modifying Stage
+explicitly pushes current HEAD to the Workflow branch. Plan material is not
+pushed; it is uploaded as run artifacts. The Profile orders these tasks. Runner
+only executes and reports facts. There is no implicit Stage hook.
 
 ### Pull Request Boundary
 
@@ -103,10 +115,10 @@ the same external review object. Issue title and body remain the source for Pull
 Request metadata; copying them into Workflow metadata would create another
 authority.
 
-Build publishes verified output because a later Stage may rebuild its Workspace
-on another Runner. Check publishes the reviewed result, marks the Pull Request
-ready, and verifies external checks. Integrate publishes any final recovery work
-and squash-merges the same Pull Request.
+Build publishes verified output because the Workspace is rebuildable and a
+later Stage may start from a fresh one. Check publishes the reviewed result, marks the Pull Request
+ready, and verifies external checks. Integrate enables auto-merge on the same
+Pull Request; the registration Action waits until GitHub performs the merge.
 
 Approval feedback is ordered work: the Agent applies feedback, pushes current
 HEAD, and then reruns Stage Checks. The Pull Request and recoverable branch
@@ -114,16 +126,19 @@ contain feedback output before the next Approval.
 
 ### Recovery and Invariants
 
-The merge Action classifies base movement, failed checks, and protection races.
-The Profile declares the corresponding rebase, repair, publish, or retry work
-beside that Action. This keeps external failure handling visible and prevents a
-Stage hook from changing the branch without a Task record.
+Auto-merge moves merge arbitration to GitHub. The synchronous merge's
+base-movement and protection-race recovery branches no longer exist. The
+merge-time failures the Workflow still owns are classified by the registration
+Action's wait: a required check failing after Approval returns
+`pr-checks-failed` and takes the same declared fix-and-push recovery the Check
+Stage uses; a merge conflict returns `conflict` and follows the rebase
+recovery. Enabling auto-merge on a Repository that disallows it is an ordinary
+Task failure.
 
 - Pull Request checks appear at two explicit boundaries. The first runs after
   Check work so a failed external check becomes visible repair work before
-  delivery. The second runs immediately before merge so external state that
-  changed after Approval cannot bypass the delivery approval point; it is an internal
-  merge prerequisite, not a Stage Check.
+  delivery. The second is the Integrate merge wait: external state that changed
+  after Approval cannot silently bypass the delivery approval point.
 - Exact Task IDs, Action inputs, failure codes, ordering, and recovery behavior
   belong only to the authoritative Profile YAML linked above.
 - Every publish and Pull Request side effect is an explicit task. No implicit
@@ -135,3 +150,12 @@ Stage hook from changing the branch without a Task record.
 
 See [`actions.md`](actions.md) for the Action contract and
 [`recovery.md`](recovery.md) for recovery semantics.
+
+## Current Gap
+
+The YAML and Runner still implement the previous shape: OpenSpec change
+directories under `openspec/changes/`, the `mohist/openspec-*` and
+`mohist/archive-change` Actions, a gated plan self-review and Check review with
+auto-fix loops, and synchronous `mohist/merge-github-pr`. This document and
+[`plan-artifacts.md`](plan-artifacts.md) are the target; the implementation issue closes the
+gap. The gap does not affect already-initialized Runs.

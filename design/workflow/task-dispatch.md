@@ -33,20 +33,6 @@ does **not** happen during Server dispatch:
   the Action. The Action receives one rendered and validated input channel. It does **not** receive
   raw input, a Variables resource, or the complete dispatch context.
 
-### Engine-sourced Action inputs
-
-An Action manifest may declare an optional input with an engine source path into the immutable
-dispatch snapshot. Runner injects that value before template rendering and manifest validation. The
-input is not part of profile `with` and is omitted from the published Action catalog, so workflow
-authors cannot supply or override it. When the source path is absent, Runner omits the optional
-input; a profile does not need a default variable or an optional template expression.
-
-`mohist/archive-change` sources `archiveHint` from `vars.archive`. A first archive has no such
-variable and chooses a fresh destination. After its successful result writes that destination to
-Run Variables, a later retry or rerun receives the recorded path in its new snapshot. If that
-destination exists and the source is gone, the Action completes idempotently without moving or
-committing again.
-
 Once dispatched, an attempt's context snapshot remains unchanged throughout that attempt. Later
 changes to Variables, Prompts, Profile Definition, or a Stage overlay affect only tasks not yet
 dispatched and later attempts, including retry, recovery continuation, and rerun-from-stage. They
@@ -136,9 +122,9 @@ and evaluation timing remain distinct in the attempt snapshot. See
 
 Effective Variables appear only under `vars`; variable keys are not copied to bare top-level names.
 Runtime context is neither written back to nor merged into Variables. `work.approvalFeedback` exists
-only on a task produced by that feedback and is absent from ordinary tasks. An OpenSpec directory
-is not runtime context. A Profile and Prompt express it directly as
-`openspec/changes/issue-${{ issue.number }}`.
+only on a task produced by that feedback and is absent from ordinary tasks. Plan-artifact paths
+are not runtime context. A Profile and Prompt express them directly, for example
+`PLANS/PLAN.md`.
 
 ## Dispatch Snapshot Persistence
 

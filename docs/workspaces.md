@@ -87,9 +87,32 @@ and inspect it through `mo workspace view`.
 
 An interactive Workspace mounts repositories as needed. There, a mount grants
 access and provides a default checkout target, while the Agent controls the
-actual clone, branch, and worktree layout. Conventions such as placing checkouts
-under `repos/` and work products at the Workspace root belong in the Prompt and
-are not enforced by the platform.
+actual clone, branch, and worktree layout. Layout conventions in an interactive
+Workspace belong in the Prompt and are not enforced by the platform.
+
+## Layout
+
+A Workflow Workspace has a fixed root layout:
+
+```text literal
+issue-<number>/
+├── .mohist/                  # Platform marker and identity files
+├── REPOS/<repository-name>/  # Repository checkout; only this tree enters Git
+├── PLANS/                    # Plans, designs, review reports, and the task list
+├── RESEARCH/                 # Research notes and exploration material
+└── .scratch/                 # Temporary files
+```
+
+Only `REPOS/` participates in Git; everything else is Workspace-local work
+material and never appears in a commit, branch, or Pull Request. The Workflow
+branch is the recovery point for Repository work. Plan and review material
+under `PLANS/` is uploaded as run artifacts for evidence and audit; it has no
+per-file recovery point, and a lost Workspace directory is recovered by
+rerunning from the plan Stage, which regenerates it.
+
+Repository-modifying Tasks, such as Git Actions and verify scripts, run with
+`working-directory: REPOS/<repository-name>`; Agents anchor at the Workspace
+root and see `REPOS/` and `PLANS/` side by side.
 
 ## Lifecycle Endpoints
 

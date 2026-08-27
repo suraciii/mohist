@@ -75,7 +75,7 @@ Checks whether a file or directory exists at a relative workspace path.
 - id: check-proposal
   uses: core/artifact-exists
   with:
-    path: openspec/changes/issue-448/proposal.md
+    path: PLANS/PLAN.md
 ```
 
 Inputs:
@@ -100,7 +100,7 @@ Checks whether a workspace file contains specified marker text.
 - id: verify-completion
   uses: core/marker
   with:
-    path: openspec/changes/issue-448/progress.txt
+    path: REPOS/server/progress.txt
     expect: "## Codebase Patterns"
 ```
 
