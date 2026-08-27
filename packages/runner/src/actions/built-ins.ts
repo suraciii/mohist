@@ -393,7 +393,6 @@ export const builtInActions: ReadonlyArray<ActionDefinition> = [
         method: { types: ['string'], default: 'squash', description: 'Merge method' },
         prNumber: { types: ['number'], required: true, description: 'Pull request number' },
         subject: { types: ['string'], description: 'Literal squash commit subject' },
-        subjectFrom: { types: ['string'], default: 'issue.title', description: 'Issue field source for subject' },
       },
       outputs: ['kind', 'status', 'prNumber', 'prUrl', 'method', 'enabled', 'mergeCommitSha', 'output', 'steps'].map(
         (name) => ({ name, description: name }),
@@ -406,8 +405,8 @@ export const builtInActions: ReadonlyArray<ActionDefinition> = [
         { code: 'retry-safe', description: 'Operation is safe to retry' },
         { code: 'config-error', description: 'GitHub configuration is invalid' },
         { code: 'enable-failed', description: 'Failed to enable auto-merge' },
+        { code: 'aborted', description: 'Action was cancelled' },
       ],
-      capabilities: ['issue-fields'],
     },
     run: enableGitHubPrAutoMergeAction,
   }),
