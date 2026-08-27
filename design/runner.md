@@ -379,14 +379,18 @@ materialization indexes, as long as they are never authoritative and fail
 open: a corrupt or missing cache is rebuilt from the filesystem and from
 Server answers.
 
-Gap: current code persists eight files under
-`<runnerRoot>/.mohist/runner-state/` — a work-result journal with
-started-fence replay, a runtime-event outbox, a terminal task-log delivery
-store, three operation idempotency logs, and two workspace registries — plus
-binding convergence, recovery receipts, and cleanup-turn admission waits
-built on top of them. These mechanisms implement the rejected
-result-preservation alternative and are to be removed. Only the rebuildable
-workspace indexes survive.
+Runtime events and task-log batches are volatile evidence. The Runner retries
+them from bounded process memory in per-session emission order, but a crash may
+drop an undelivered suffix. When the runtime-event queue reaches its explicit
+ceiling, it drops the newest evidence rather than blocking execution; permanent
+Server refusal also drops the refused evidence. These gaps are accepted because
+evidence delivery never gates admission or work-result reporting, so the Server
+continues state arbitration from the facts it did receive.
+
+Gap: result preservation, operation idempotency journals, recovery receipts,
+and non-rebuildable workspace registries remain durable Runner state. Their
+removal is tracked separately; the runtime-event outbox, terminal task-log
+delivery store, and cleanup predecessor delivery waits have been removed.
 
 ### Stop Operations Stay Available and Settle by Identity
 

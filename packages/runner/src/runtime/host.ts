@@ -12,18 +12,18 @@ import { WorkspaceRegistry, NamedWorkspaceRegistry } from './workspace-registry.
 import { NamedWorkspaceManager } from './workspace-entity.js'
 import { createNamedWorkspaceCleanupLoop, NamedWorkspaceReclaimProbe } from './named-workspace-cleanup.js'
 import {
-  createAgentSessionRuntimeEventOutbox,
-  RUNTIME_EVENT_OUTBOX_FILE,
-  type AgentSessionRuntimeEventOutbox,
-} from '../server/runtime-event-outbox.js'
-import { createServerRuntimeEventDelivery } from '../server/runtime-event-delivery.js'
+  createAgentSessionRuntimeEventQueue,
+  type AgentSessionRuntimeEventQueue,
+} from '../server/runtime-event-queue.js'
+import { createServerRuntimeEventDelivery } from '../server/runtime-event-queue-delivery.js'
 import { ConvergenceBackstop, ServerConnectionConvergenceAdapter } from './cleanup-convergence.js'
 import { CleanupLoop, DefaultCleanupRunner } from './cleanup-loop.js'
 import { WorkExecutor } from './executor.js'
 import { AgentJobExecutor } from './agent-job-executor.js'
 import { TaskLogCollector } from './task-log.js'
 import { createHostCleanup } from './host-cleanup.js'
-import { executeWork, retryPendingTerminalTaskLogs } from './host-task-log.js'
+import { executeWork } from './host-task-log.js'
+import { createHostTaskLogDeliveryQueue, type TaskLogDeliveryQueue } from './task-log-delivery-queue.js'
 import {
   AWAITING_ACK_RETRY_INTERVAL_MS,
   POLL_TIMEOUT_MS,
@@ -39,7 +39,6 @@ import {
   positiveBudget,
   SHUTDOWN_HANDOFF_BUDGET_MS,
 } from './host-update-shutdown.js'
-import { TerminalTaskLogDeliveryStoreImpl, type TerminalTaskLogDeliveryStore } from './terminal-task-log-delivery.js'
 import { getOpenCodeRuntimeFactory, type OpenCodeRuntime } from './opencode/index.js'
 import { getPiRuntimeFactory, parseProviderErrorPolicy, type PiRuntime } from './pi/index.js'
 import { SessionCommandJournal } from './session-command-journal.js'
@@ -97,7 +96,6 @@ export interface ReportResult {
 }
 
 export interface RunnerHostDependencies {
-  terminalTaskLogDelivery?: TerminalTaskLogDeliveryStore
   waitForConnectionRetry?: (delayMs: number, signal: AbortSignal) => Promise<void>
   fetchPendingUpdateOperation?: (signal: AbortSignal) => Promise<PendingUpdateOperation | null>
   shutdownHandoffBudgetMs?: number
@@ -112,7 +110,8 @@ export class RunnerHost {
   private readonly namedWorkspaceRegistry: NamedWorkspaceRegistry
   private readonly namedWorkspaceManager: NamedWorkspaceManager
   private readonly namedWorkspaceReclaimProbe: NamedWorkspaceReclaimProbe
-  private readonly agentSessionRuntimeEventOutbox: AgentSessionRuntimeEventOutbox
+  private readonly agentSessionRuntimeEventQueue: AgentSessionRuntimeEventQueue
+  private readonly taskLogDeliveryQueue: TaskLogDeliveryQueue
   private readonly convergence: ConvergenceBackstop
   private readonly cleanupLoop: CleanupLoop
   private readonly namedCleanupLoop: ReturnType<typeof createNamedWorkspaceCleanupLoop>
@@ -146,7 +145,6 @@ export class RunnerHost {
   private readonly fetchPendingUpdateOperation: (signal: AbortSignal) => Promise<PendingUpdateOperation | null>
   private readonly shutdownHandoffBudgetMs: number
   private readonly shutdownStopBudgetMs: number
-  private readonly terminalTaskLogDelivery: TerminalTaskLogDeliveryStore
   private readonly hostShutdown: ReturnType<typeof createHostShutdown>
   private readonly waitForConnectionRetry: (delayMs: number, signal: AbortSignal) => Promise<void>
   private readonly skillResolver = new SkillResolver()
@@ -164,7 +162,6 @@ export class RunnerHost {
   private readonly managerExecutions = new Map<string, ManagerExecutionBoundary>()
   private readonly managerExecutionRegistry = new ManagerExecutionRegistry()
   private observedManagerDeploymentEpoch: string | null = null
-  private readonly terminalTaskLogDeliveryInFlight = new Set<string>()
 
   constructor(
     private readonly options: RunnerOptions,
@@ -188,12 +185,12 @@ export class RunnerHost {
       runnerId: options.runnerId,
     })
     this.namedWorkspaceRegistry = new NamedWorkspaceRegistry(options.runnerRoot)
-    this.agentSessionRuntimeEventOutbox = createAgentSessionRuntimeEventOutbox({
-      filePath: `${options.runnerRoot}/${RUNTIME_EVENT_OUTBOX_FILE}`,
+    this.agentSessionRuntimeEventQueue = createAgentSessionRuntimeEventQueue({
       deliver: createServerRuntimeEventDelivery({
         connection: this.connection,
       }),
     })
+    this.taskLogDeliveryQueue = createHostTaskLogDeliveryQueue(this.connection, options)
     this.convergence = new ConvergenceBackstop(
       this.workspaceRegistry,
       new ServerConnectionConvergenceAdapter(this.connection),
@@ -219,8 +216,6 @@ export class RunnerHost {
     this.sessionCommandJournal = new SessionCommandJournal(options.runnerRoot)
     this.followupOperationJournal = new FollowupOperationJournal(options.runnerRoot)
     this.cancelOperationJournal = new CancelOperationJournal(options.runnerRoot)
-    this.terminalTaskLogDelivery =
-      dependencies.terminalTaskLogDelivery ?? new TerminalTaskLogDeliveryStoreImpl(options.runnerRoot)
     this.waitForConnectionRetry = dependencies.waitForConnectionRetry ?? hostDelay
     this.shutdownHandoffBudgetMs = positiveBudget(dependencies.shutdownHandoffBudgetMs, SHUTDOWN_HANDOFF_BUDGET_MS)
     this.shutdownStopBudgetMs = positiveBudget(dependencies.shutdownStopBudgetMs, 2_000)
@@ -254,7 +249,7 @@ export class RunnerHost {
           },
           followup: {
             followupTargetResolver: (target) => resolveFollowupTarget(this.options, target),
-            agentSessionRuntimeEventOutbox: this.agentSessionRuntimeEventOutbox,
+            agentSessionRuntimeEventQueue: this.agentSessionRuntimeEventQueue,
             openCodeRuntime: () => this.openCodeRuntime,
             piRuntime: () => this.piRuntime,
             connection: this.connection,
@@ -270,7 +265,7 @@ export class RunnerHost {
             followupTargetResolver: (target) => resolveFollowupTarget(this.options, target),
             openCodeRuntime: () => this.openCodeRuntime,
             piRuntime: () => this.piRuntime,
-            agentSessionRuntimeEventOutbox: this.agentSessionRuntimeEventOutbox,
+            agentSessionRuntimeEventQueue: this.agentSessionRuntimeEventQueue,
             managerExecutionRegistry: this.managerExecutionRegistry,
             onManagerExecutionFinished: (executionId) => this.revokeManagerExecution(executionId),
             cancelOperationJournal: this.cancelOperationJournal,
@@ -281,7 +276,7 @@ export class RunnerHost {
                 openCode: () => this.openCodeRuntime,
                 pi: () => this.piRuntime,
               },
-              this.agentSessionRuntimeEventOutbox,
+              this.agentSessionRuntimeEventQueue,
             ),
             journal: this.sessionCommandJournal,
           },
@@ -290,7 +285,7 @@ export class RunnerHost {
             if (signal && !signal.aborted) await this.cleanup.runConvergenceOnce(signal)
           },
         }),
-        agentSessionRuntimeEventOutbox: this.agentSessionRuntimeEventOutbox,
+        agentSessionRuntimeEventQueue: this.agentSessionRuntimeEventQueue,
         sessionCommandJournal: this.sessionCommandJournal,
         followupOperationJournal: this.followupOperationJournal,
         cancelOperationJournal: this.cancelOperationJournal,
@@ -324,10 +319,8 @@ export class RunnerHost {
     return {
       options: this.options,
       connection: this.connection,
-      taskLogDeps: () => createHostTaskLogDeps(this.connection, this.terminalTaskLogDelivery, this.options),
+      taskLogDeps: () => createHostTaskLogDeps(this.connection, this.options, this.taskLogDeliveryQueue),
       workExecutorRef: () => this.workExecutor,
-      terminalTaskLogDelivery: this.terminalTaskLogDelivery,
-      terminalTaskLogDeliveryInFlight: this.terminalTaskLogDeliveryInFlight,
       syncOpenCodeWorkOwners: () => this.syncOpenCodeWorkOwners(),
       inFlight: this.inFlight,
       awaitingAck: this.awaitingAck,
@@ -366,27 +359,15 @@ export class RunnerHost {
           exception: error,
         })
       }
-      try {
-        await this.terminalTaskLogDelivery.load()
-      } catch (error) {
-        log.error('failed to load terminal task-log delivery store', {
-          exception: error,
-        })
-      }
-      if (!this.terminalTaskLogDelivery.ready()) {
-        log.warn('terminal task-log delivery store unavailable; runner admission gated')
-      }
-      // Load the AgentSession runtime-event outbox BEFORE accepting
-      // control WebSocket commands or claiming work. An unreadable snapshot is
-      // never replaced with empty state — the outbox loads itself once
-      // a successful read happens and stays unhealthy otherwise.
-      await this.loadAgentSessionRuntimeEventOutbox(signal)
+      // Initialize the process-memory runtime-event queue before accepting
+      // control commands or claiming work.
+      await this.loadAgentSessionRuntimeEventQueue(signal)
       await this.initializeSharedConnection(signal)
       await this.connectRunner(signal)
       // Kick a non-blocking drain: an unavailable server does not gate
-      // startup; records stay durable and re-drain on reconnect.
-      if (this.agentSessionRuntimeEventOutbox.ready()) {
-        void this.agentSessionRuntimeEventOutbox.kick().catch(() => undefined)
+      // startup; queued evidence retries while this process remains alive.
+      if (this.agentSessionRuntimeEventQueue.ready()) {
+        void this.agentSessionRuntimeEventQueue.kick().catch(() => undefined)
       }
       // Startup convergence: pick up any terminal events the runner
       // missed while it was offline (e.g. completed while the previous
@@ -411,6 +392,7 @@ export class RunnerHost {
         clearInterval(convergenceTimer)
         clearInterval(cleanupTimer)
         await this.shutdownSharedConnection()
+        await this.taskLogDeliveryQueue.stop()
         await this.shutdownConnection()
       }
     } finally {
@@ -421,12 +403,6 @@ export class RunnerHost {
   private onDispatchReconnected() {
     void this.sendImmediateHeartbeat()
     const signal = this.activeSignal
-    if (signal)
-      void retryPendingTerminalTaskLogs(
-        createHostTaskLogDeps(this.connection, this.terminalTaskLogDelivery, this.options),
-        this.terminalTaskLogDeliveryInFlight,
-        signal,
-      )
     if (signal) {
       void this.cleanup.runConvergenceOnce(signal)
       void this.cleanup.runCleanupOnce(signal)
@@ -519,7 +495,7 @@ export class RunnerHost {
           strictExecutionSourceValidation: this.options.strictExecutionSourceValidation === true,
         },
       ),
-      this.agentSessionRuntimeEventOutbox,
+      this.agentSessionRuntimeEventQueue,
       undefined,
       this.piRuntime,
       this.skillResolver,
@@ -527,23 +503,20 @@ export class RunnerHost {
     )
   }
 
-  private async loadAgentSessionRuntimeEventOutbox(signal: AbortSignal): Promise<void> {
-    const outbox = this.agentSessionRuntimeEventOutbox
+  private async loadAgentSessionRuntimeEventQueue(signal: AbortSignal): Promise<void> {
+    const queue = this.agentSessionRuntimeEventQueue
     try {
-      await outbox.load()
+      await queue.load()
     } catch (error) {
-      // Loading itself is best effort — `outbox.ready()` reflects the
-      // actual durable state and gates the follow-up handler and claim
-      // loop.
-      log.error('agent-session runtime event outbox failed to load', {
+      log.error('agent-session runtime event queue failed to initialize', {
         exception: error,
-        session: 'outbox',
+        session: 'runtime-event-queue',
       })
     }
     if (signal.aborted) return
-    if (!outbox.ready()) {
-      log.warn('agent-session runtime event outbox unhealthy at startup; runner admission gated until it recovers', {
-        session: 'outbox',
+    if (!queue.ready()) {
+      log.warn('agent-session runtime event queue unavailable; runner admission is gated', {
+        session: 'runtime-event-queue',
       })
     }
   }
@@ -571,11 +544,6 @@ export class RunnerHost {
 
   private async runWorkerPool(signal: AbortSignal) {
     while (!signal.aborted) {
-      void retryPendingTerminalTaskLogs(
-        createHostTaskLogDeps(this.connection, this.terminalTaskLogDelivery, this.options),
-        this.terminalTaskLogDeliveryInFlight,
-        signal,
-      )
       await retryDueReports(this.executionContext)
 
       // Runtime readiness is sent as a claim-time witness. Polling must stay
@@ -751,16 +719,13 @@ export class RunnerHost {
       awaitingAck: this.awaitingAck.keys(),
       runtimeReadiness: runtimeReadinessWitnesses(this.openCodeRuntime, this.piRuntime, this.piRuntimeGeneration),
       connectionId: this.control.getConnectionId(),
-      admissionReady:
-        this.providerPolicyDiagnostic === null &&
-        this.terminalTaskLogDelivery.ready() &&
-        this.agentSessionRuntimeEventOutbox.ready(),
+      admissionReady: this.providerPolicyDiagnostic === null,
       deploymentEpoch: this.connection.deploymentEpoch,
     })
   }
 
   private isOpenCodeReadyForClaim(): boolean {
-    return isOpenCodeReadyForClaimForRuntime(this.openCodeRuntime, this.agentSessionRuntimeEventOutbox)
+    return isOpenCodeReadyForClaimForRuntime(this.openCodeRuntime)
   }
 
   /**

@@ -12,7 +12,7 @@ import type { PiRuntime } from './pi/index.js'
 import type { FollowupTarget, FollowupTargetResolution, SessionTarget } from '../server/session-target.js'
 import type { ServerConnection } from '../server/connection.js'
 import type { HostTaskLogDeps } from './host-task-log.js'
-import type { TerminalTaskLogDeliveryStore } from './terminal-task-log-delivery.js'
+import type { TaskLogDeliveryQueue } from './task-log-delivery-queue.js'
 import type { AwaitingAckEntry, InFlightEntry } from './host-state.js'
 import { workKey } from './work-key.js'
 
@@ -86,11 +86,8 @@ export function syncOpenCodeWorkOwners(
   if (runtime) runtime.setWorkOwners(openCodeOwners(inFlight, awaitingAck))
 }
 
-export function isOpenCodeReadyForClaim(
-  runtime: OpenCodeRuntime | null,
-  runtimeEventOutbox: { ready(): boolean },
-): boolean {
-  return runtime !== null && runtime.ready() && runtimeEventOutbox.ready()
+export function isOpenCodeReadyForClaim(runtime: OpenCodeRuntime | null): boolean {
+  return runtime !== null && runtime.ready()
 }
 
 export function runtimeReadinessWitnesses(
@@ -174,10 +171,10 @@ export function currentCatalogRevision(
 
 export function createHostTaskLogDeps(
   connection: ServerConnection,
-  terminalTaskLogDelivery: TerminalTaskLogDeliveryStore,
   options: RunnerOptions,
+  taskLogDeliveryQueue: TaskLogDeliveryQueue,
 ): HostTaskLogDeps {
-  return { connection, terminalTaskLogDelivery, options }
+  return { connection, options, taskLogDeliveryQueue }
 }
 
 export function runtimeKindForWork(work: DispatchWorkItem): RuntimeKind | null {

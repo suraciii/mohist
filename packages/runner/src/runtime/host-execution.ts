@@ -7,7 +7,6 @@ import type { AwaitingAckEntry, InFlightEntry } from './host-state.js'
 import type { DispatchWorkItem, RunnerOptions, WorkItemResult } from '../core/types.js'
 import type { ServerConnection } from '../server/connection.js'
 import type { WorkExecutor } from './executor.js'
-import type { TerminalTaskLogDeliveryStore } from './terminal-task-log-delivery.js'
 import type { HostTaskLogDeps } from './host-task-log.js'
 import type { ManagerExecutionBoundary } from './manager-execution-boundary.js'
 
@@ -18,8 +17,6 @@ export interface HostExecutionContext {
   readonly connection: ServerConnection
   readonly taskLogDeps: () => HostTaskLogDeps
   readonly workExecutorRef: () => WorkExecutor | null
-  readonly terminalTaskLogDelivery: TerminalTaskLogDeliveryStore
-  readonly terminalTaskLogDeliveryInFlight: Set<string>
   readonly syncOpenCodeWorkOwners: () => void
   readonly inFlight: Map<string, InFlightEntry>
   readonly awaitingAck: Map<string, { work: DispatchWorkItem; entry: AwaitingAckEntry }>
@@ -152,7 +149,6 @@ async function executeAndTransitionCore(
       result = await executeWork(
         context.taskLogDeps(),
         context.workExecutorRef()!,
-        context.terminalTaskLogDeliveryInFlight,
         work,
         signal,
         context.managerExecutionFor(key),

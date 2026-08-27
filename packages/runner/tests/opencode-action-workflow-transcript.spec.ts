@@ -9,9 +9,9 @@ import type { ActionTestContext as ActionContext } from './support/action-test-c
 import { WorkflowAgentSessionReporter } from '../src/actions/workflow-agent-session-reporter.js'
 import {
   AlreadyConsumedRuntimeEventError,
-  type AgentSessionRuntimeEventOutbox,
+  type AgentSessionRuntimeEventQueue,
   type RuntimeEventRecord,
-} from '../src/server/runtime-event-outbox.js'
+} from '../src/server/runtime-event-queue.js'
 import { makeRecordingOutbox, type OutboxHandles } from './support/outbox-test-helpers.js'
 import { callAction } from './support/call-action.js'
 
@@ -187,7 +187,7 @@ async function emitStandardSequence(subscription: FakeSubscription, sessionId: s
   await new Promise((resolve) => setImmediate(resolve))
 }
 
-function makeFailureOutbox(): AgentSessionRuntimeEventOutbox {
+function makeFailureOutbox(): AgentSessionRuntimeEventQueue {
   return {
     ready: () => true,
     load: async () => {},
@@ -209,7 +209,7 @@ function makeFailureOutbox(): AgentSessionRuntimeEventOutbox {
   }
 }
 
-function makeProducedFactFailureOutbox(): AgentSessionRuntimeEventOutbox {
+function makeProducedFactFailureOutbox(): AgentSessionRuntimeEventQueue {
   return {
     ready: () => true,
     load: async () => {},
@@ -247,7 +247,7 @@ describe('opencodeAction — Workflow AgentSession transcript reporting', () => 
     const context = baseContext({
       openCodeRuntime: runtime,
       serverConnection: handles.connection,
-      agentSessionRuntimeEventOutbox: handles.outbox,
+      agentSessionRuntimeEventQueue: handles.outbox,
     })
 
     const result = await callAction(opencodeAction, context)
@@ -303,7 +303,7 @@ describe('opencodeAction — Workflow AgentSession transcript reporting', () => 
     const context = baseContext({
       openCodeRuntime: runtime,
       serverConnection: handles.connection,
-      agentSessionRuntimeEventOutbox: handles.outbox,
+      agentSessionRuntimeEventQueue: handles.outbox,
     })
     await callAction(opencodeAction, context)
 
@@ -350,7 +350,7 @@ describe('opencodeAction — Workflow AgentSession transcript reporting', () => 
     const context = baseContext({
       openCodeRuntime: runtime,
       serverConnection: handles.connection,
-      agentSessionRuntimeEventOutbox: handles.outbox,
+      agentSessionRuntimeEventQueue: handles.outbox,
     })
     await callAction(opencodeAction, context)
 
@@ -375,7 +375,7 @@ describe('opencodeAction — Workflow AgentSession transcript reporting', () => 
     const context = baseContext({
       openCodeRuntime: runtime,
       serverConnection: handles.connection,
-      agentSessionRuntimeEventOutbox: outbox,
+      agentSessionRuntimeEventQueue: outbox,
     })
 
     try {
@@ -396,7 +396,7 @@ describe('opencodeAction — Workflow AgentSession transcript reporting', () => 
     const context = baseContext({
       openCodeRuntime: runtime,
       serverConnection: handles.connection,
-      agentSessionRuntimeEventOutbox: handles.outbox,
+      agentSessionRuntimeEventQueue: handles.outbox,
     })
 
     try {
@@ -422,7 +422,7 @@ describe('opencodeAction — Workflow AgentSession transcript reporting', () => 
     })
     await ensureReady(runtime)
     let firstCall = true
-    const outbox: AgentSessionRuntimeEventOutbox = {
+    const outbox: AgentSessionRuntimeEventQueue = {
       ready: () => true,
       load: async () => {},
       recover: async () => {},
@@ -460,7 +460,7 @@ describe('opencodeAction — Workflow AgentSession transcript reporting', () => 
     const context = baseContext({
       openCodeRuntime: runtime,
       serverConnection: handles.connection,
-      agentSessionRuntimeEventOutbox: outbox,
+      agentSessionRuntimeEventQueue: outbox,
     })
     try {
       const result = await callAction(opencodeAction, context)
@@ -490,7 +490,7 @@ describe('opencodeAction — Workflow AgentSession transcript reporting', () => 
     const context = baseContext({
       openCodeRuntime: runtime,
       serverConnection: handles.connection,
-      agentSessionRuntimeEventOutbox: outbox,
+      agentSessionRuntimeEventQueue: outbox,
     })
     try {
       const result = await callAction(opencodeAction, context)
@@ -542,7 +542,7 @@ describe('WorkflowAgentSessionReporter — outbox-driven failure semantics', () 
     const producedFactCalls: RuntimeEventRecord[] = []
     const producedFactSingleCalls: RuntimeEventRecord[] = []
     const producedFactBatchCalls: RuntimeEventRecord[][] = []
-    const outbox: AgentSessionRuntimeEventOutbox = {
+    const outbox: AgentSessionRuntimeEventQueue = {
       ready: () => true,
       load: async () => {},
       recover: async () => {},

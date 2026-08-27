@@ -9,7 +9,7 @@ import { errorMessage } from '../core/errors.js'
 import { delayWithSignal } from '../actions/github-pr-checks-wait.js'
 import { renderWithSkippedFields } from '../core/template.js'
 import type { ServerConnection } from '../server/connection.js'
-import type { AgentSessionRuntimeEventOutbox } from '../server/runtime-event-outbox.js'
+import type { AgentSessionRuntimeEventQueue } from '../server/runtime-event-queue.js'
 import type { OpenCodeRuntime, RuntimeResult, RuntimeTurnResult } from './opencode/index.js'
 import type { PiRuntime } from './pi/index.js'
 import type { TaskLogger } from './task-log.js'
@@ -23,22 +23,15 @@ import { hasUnconfirmedCleanup, parseModelIdentifier } from './opencode/index.js
 import { resolveIssueFields, type IssueFields } from '../actions/issue-fields.js'
 import type { SkillResolver } from './skill-resolver.js'
 import { buildExecutionEnvelope } from './execution-envelope.js'
-import {
-  CLEANUP_TERMINAL_FACT_DELIVERY_TIMEOUT_CODE,
-  cleanupDeliveryWaitFailureMessage,
-  cleanupPredecessorTarget,
-  isCleanupDeliveryWaitTimeout,
-  waitForCleanupPredecessorDelivery,
-} from './cleanup-turn-admission.js'
+import { cleanupPredecessorTarget } from './cleanup-turn-admission.js'
 
 export interface ExecutorCapabilityDeps {
   readonly connection: ServerConnection
   readonly skillResolver: SkillResolver
   readonly piRuntime: PiRuntime | null
   readonly openCodeRuntime: OpenCodeRuntime | null
-  readonly agentSessionRuntimeEventOutbox: AgentSessionRuntimeEventOutbox | null
+  readonly agentSessionRuntimeEventQueue: AgentSessionRuntimeEventQueue | null
   readonly runtimeEventRecordId: () => string
-  readonly cleanupTerminalFactDeliveryBudgetMs?: number
   readonly workflowSessionSettleBudgetMs?: number
 }
 
@@ -130,34 +123,6 @@ function buildAgentTurnCapability(
           taskRunId: work.taskRunId,
           cleanupAttempt,
         }) !== null
-      if (self.connection && work.projectId) {
-        try {
-          await waitForCleanupPredecessorDelivery(
-            self.agentSessionRuntimeEventOutbox,
-            {
-              projectId: work.projectId,
-              workflowRunId: work.workflowRunId,
-              sessionName,
-              workId: work.workId,
-              taskRunId: work.taskRunId,
-              cleanupAttempt,
-            },
-            signal,
-            self.cleanupTerminalFactDeliveryBudgetMs,
-          )
-        } catch (error) {
-          if (isCleanupDeliveryWaitTimeout(error)) {
-            return runtimeActionFailure(
-              CLEANUP_TERMINAL_FACT_DELIVERY_TIMEOUT_CODE,
-              cleanupDeliveryWaitFailureMessage(error, work),
-            )
-          }
-          return runtimeActionFailure(
-            'session-binding-failed',
-            `Failed to wait for Workflow cleanup predecessor delivery: ${errorMessage(error)}`,
-          )
-        }
-      }
       let binding: {
         agentSessionId: string
         runtimeSessionId: string | null
@@ -201,7 +166,7 @@ function buildAgentTurnCapability(
               self.connection.runnerId,
               opened.sessionId,
               opened.runtimeSessionId ?? null,
-              self.agentSessionRuntimeEventOutbox,
+              self.agentSessionRuntimeEventQueue,
               self.runtimeEventRecordId,
               cleanupAttempt,
             )
@@ -267,7 +232,7 @@ function buildAgentTurnCapability(
         binding.runnerId,
         binding.agentSessionId,
         binding.runtimeSessionId,
-        self.agentSessionRuntimeEventOutbox,
+        self.agentSessionRuntimeEventQueue,
         self.runtimeEventRecordId,
         cleanupAttempt,
       )
@@ -346,7 +311,7 @@ function buildAgentTurnCapability(
             self.connection.runnerId,
             binding.agentSessionId,
             created.value.runtimeSessionId,
-            self.agentSessionRuntimeEventOutbox,
+            self.agentSessionRuntimeEventQueue,
             self.runtimeEventRecordId,
             cleanupAttempt,
           )
@@ -380,7 +345,7 @@ function buildAgentTurnCapability(
           binding.runnerId,
           binding.agentSessionId,
           binding.runtimeSessionId,
-          self.agentSessionRuntimeEventOutbox,
+          self.agentSessionRuntimeEventQueue,
           self.runtimeEventRecordId,
           cleanupAttempt,
         )
@@ -457,7 +422,7 @@ function buildAgentTurnCapability(
           binding.runnerId,
           binding.agentSessionId,
           binding.runtimeSessionId,
-          self.agentSessionRuntimeEventOutbox,
+          self.agentSessionRuntimeEventQueue,
           self.runtimeEventRecordId,
           cleanupAttempt,
         )
@@ -503,7 +468,7 @@ function buildAgentTurnCapability(
         selectedBinding.runnerId,
         selectedBinding.agentSessionId,
         selectedBinding.runtimeSessionId,
-        self.agentSessionRuntimeEventOutbox,
+        self.agentSessionRuntimeEventQueue,
         self.runtimeEventRecordId,
         cleanupAttempt,
       )
@@ -609,11 +574,10 @@ async function runPiAgentTurn(
     skillResolver: deps.skillResolver,
     agentDefinition: work.agentDefinition,
     serverConnection: deps.connection,
-    runtimeEventOutbox: deps.agentSessionRuntimeEventOutbox,
+    runtimeEventQueue: deps.agentSessionRuntimeEventQueue,
     runtimeEventRecordId: deps.runtimeEventRecordId,
     runnerId: deps.connection.runnerId,
     cleanupAttempt,
-    cleanupTerminalFactDeliveryBudgetMs: deps.cleanupTerminalFactDeliveryBudgetMs,
     with: request.session ? { session: request.session } : undefined,
     preparedPrompt: composePiPrompt(request.prompt, work.parentIssueContext),
     preparedOptions: request.options,
@@ -767,7 +731,7 @@ function createWorkflowReporter(
   runnerId: string,
   agentSessionId: string,
   runtimeSessionId: string | null,
-  outbox: AgentSessionRuntimeEventOutbox | null,
+  outbox: AgentSessionRuntimeEventQueue | null,
   runtimeEventRecordId: () => string,
   cleanupAttempt?: number,
 ): WorkflowAgentSessionReporter | null {

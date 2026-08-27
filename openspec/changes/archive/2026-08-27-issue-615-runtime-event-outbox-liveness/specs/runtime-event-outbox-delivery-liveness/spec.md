@@ -1,5 +1,7 @@
 # Runtime Event Outbox Delivery Liveness
 
+> Archived historical specification. Issue #763 superseded durable outbox and snapshot requirements with bounded volatile queues whose contents are dropped on restart. The no-overlap scheduling lease requirements remain applicable to the current process-local implementation.
+
 ## Requirement: An uncooperative delivery cannot hold every scheduling group
 
 The Runtime Event Outbox MUST release its shared drain after a configured
@@ -13,7 +15,7 @@ until that original promise settles.
   ignores cancellation
 - AND another scheduling group has a deliverable record
 - WHEN the first group's delivery deadline expires
-- THEN the first group's record MUST remain in the durable snapshot
+- THEN the first group's record MUST remain in the process-local queue
 - AND the first group MUST NOT be sent again while its original promise is
   unresolved
 - AND the second group MUST remain eligible for the normal outbox drain
@@ -37,5 +39,5 @@ acknowledgement policy and receipt matcher as an on-time completion.
 
 - GIVEN a timed-out record retains its original delivery lease
 - WHEN its original delivery promise later fails or returns no matching receipt
-- THEN the record MUST remain durable
+- THEN the record MUST remain queued for the lifetime of the process
 - AND a later retry MAY begin only after the original lease is released

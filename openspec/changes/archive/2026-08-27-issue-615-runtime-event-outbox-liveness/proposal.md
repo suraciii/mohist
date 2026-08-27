@@ -1,5 +1,7 @@
 # Issue 615: Runtime Event Outbox Delivery Liveness
 
+> Archived on 2026-08-27. Issue #763 superseded the durable-outbox recovery model with process-local volatile evidence delivery. The historical failure analysis and the no-concurrent-retry rule remain valid, but Runner restart now drops queued evidence as specified by `design/runner.md`.
+
 ## Problem
 
 `AgentSessionRuntimeEventOutbox` aborts a delivery after its configured
@@ -21,10 +23,10 @@ the shared drain, and exclude only that group from later drains. Other groups
 continue through the existing one-shot retry mechanism.
 
 When the original promise eventually resolves, process its receipts through
-the existing acknowledgement and atomic snapshot path. Only after that path
-releases the lease may the group be eligible again. A matching late receipt
-therefore settles the original records exactly once locally; a late failure or
-non-matching receipt retains them for the normal retry path.
+the existing acknowledgement path. Only after that path releases the lease
+may the group be eligible again. A matching late receipt therefore settles the
+original process-local records exactly once; a late failure or non-matching
+receipt retains them for the normal in-process retry path.
 
 ## Non-goals
 
